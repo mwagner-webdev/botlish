@@ -2,8 +2,9 @@
 //!
 //! Temporary memory-management strategy for the first native backend.
 //!
-//! Every heap object is an individually allocated Rust box registered in the
-//! heap. A collection runs when the bytes allocated since the last one exceed
+//! Every heap object is an individually allocated block registered in the
+//! heap (a Rust box, or for a String the single header-plus-UTF-8 block of
+//! strobj.rs, released with its own layout). A collection runs when the bytes allocated since the last one exceed
 //! a threshold (twice the live bytes after the last collection, at least
 //! `MIN_THRESHOLD`, 1 MB). It never runs except inside an allocation.
 //!
@@ -65,6 +66,14 @@ impl Heap {
             .and_then(|v| v.parse().ok())
             .unwrap_or(MIN_THRESHOLD);
         Heap { objects: Vec::new(), allocated: 0, threshold: min_threshold, min_threshold, collections: 0, stress }
+    }
+
+    /// Test hook: no allocation-triggered collection until the next explicit
+    /// one (so an allocation-counting test sees only the String's own block,
+    /// not the collector's scratch vectors).
+    #[cfg(test)]
+    pub fn defer_collection_for_test(&mut self) {
+        self.threshold = usize::MAX;
     }
 
     /// Whether the next allocation should collect first.
@@ -214,7 +223,7 @@ pub unsafe fn object_size(object: *mut Header) -> usize {
     unsafe {
         match (*object).kind {
             KIND_BIGINT => size_of::<BigIntObj>() + (as_ref::<BigIntObj>(v).n.bits() as usize / 8),
-            KIND_STR => size_of::<StrObj>() + str_of(v).text.len(),
+            KIND_STR => super::strobj::str_object_size(object),
             KIND_LIST => size_of::<ListObj>() + list_of(v).len * 8,
             KIND_STRUCT => size_of::<StructObj>() + struct_of(v).len * 8,
             KIND_SET => size_of::<SetObj>() + set_of(v).len * 8,
@@ -229,12 +238,15 @@ pub unsafe fn object_size(object: *mut Header) -> usize {
     }
 }
 
-/// Frees OBJECT (created by `Box::into_raw` of its type).
+/// Frees OBJECT (created by `Box::into_raw` of its type; a String by
+/// `StrInit`, strobj.rs).
 pub unsafe fn free_object(object: *mut Header) {
     unsafe {
         match (*object).kind {
             KIND_BIGINT => drop(Box::from_raw(object as *mut BigIntObj)),
-            KIND_STR => drop(Box::from_raw(object as *mut StrObj)),
+            // One block (header + text): one release with its own layout; no
+            // Rust destructor runs (strobj.rs).
+            KIND_STR => super::strobj::free_str(object),
             KIND_LIST => {
                 let l = Box::from_raw(object as *mut ListObj);
                 drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(l.ptr, l.len)));
@@ -280,10 +292,17 @@ mod tests {
     }
 
     fn str_val(heap: &mut Heap, metrics: &mut Metrics, text: &str) -> Value {
-        let obj =
-            StrObj { hdr: Header::new(KIND_STR, false), chars: text.chars().count(), ascii: text.is_ascii(), #[cfg(not(feature = "short-first-recovered"))] first: first_scalar(text, text.is_ascii()), text: text.into() };
-        let bytes = obj.text.len();
-        alloc(heap, metrics, obj, bytes)
+        // Vm::alloc_str's registration, replicated like `alloc` above.
+        let ascii = text.is_ascii();
+        let chars = if ascii { text.len() } else { text.chars().count() };
+        let mut init = super::super::strobj::StrInit::new(text.len(), chars, ascii, false);
+        init.push_str(text);
+        let v = init.finish();
+        heap.register(v as *mut Header, STR_HEADER_SIZE + text.len());
+        if metrics.enabled() {
+            metrics.record_alloc(KIND_STR, STR_HEADER_SIZE, text.len(), 0);
+        }
+        v
     }
 
     fn list_val(heap: &mut Heap, metrics: &mut Metrics, items: Vec<Value>) -> Value {
@@ -321,7 +340,7 @@ mod tests {
         heap.collect(std::iter::once(kept), &mut metrics, GcReason::Explicit);
 
         assert_eq!(metrics.current_live_objects, 1);
-        assert_eq!(metrics.current_live_bytes, "kept".len() as u64 + size_of::<StrObj>() as u64);
+        assert_eq!(metrics.current_live_bytes, "kept".len() as u64 + STR_HEADER_SIZE as u64);
         assert_eq!(metrics.by_kind[KIND_STR as usize].live_objects, 1);
         assert_eq!(metrics.by_kind[KIND_STR as usize].reclaimed_objects, 1);
         assert_eq!(metrics.gc_cycles.len(), 1);

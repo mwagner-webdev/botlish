@@ -113,32 +113,12 @@ pub struct BigIntObj {
     pub n: BigInt,
 }
 
-#[repr(C)]
-pub struct StrObj {
-    pub hdr: Header,
-    /// Number of characters (Unicode scalar values).
-    pub chars: usize,
-    pub ascii: bool,
-    /// The first character's Unicode scalar value, 0 for the empty String.
-    /// Set once at construction, in what was padding after `ascii` (the
-    /// struct does not grow): it lets generated code turn a String already
-    /// proven to have at most one character into its ShortString1 scalar
-    /// with two loads and no call (`StrToShort`, SHORT-STRING.md).
-    #[cfg(not(feature = "short-first-recovered"))]
-    pub first: u32,
-    pub text: Box<str>,
-}
-
-/// The scalar value of `text`'s first character (0 if empty); ASCII is
-/// the caller's already-computed `text.is_ascii()`.
-#[inline]
-pub fn first_scalar(text: &str, ascii: bool) -> u32 {
-    if ascii {
-        text.as_bytes().first().map_or(0, |b| *b as u32)
-    } else {
-        text.chars().next().map_or(0, |c| c as u32)
-    }
-}
+// The String object (one allocation: header, metadata and UTF-8 bytes) lives
+// in strobj.rs; re-exported so every `use value::*` still sees it.
+pub use super::strobj::{
+    STR_ALIGN, STR_ASCII_OFFSET, STR_BYTE_LEN_OFFSET, STR_CHARS_OFFSET, STR_HEADER_SIZE,
+    STR_MIN_ALLOC, STR_TEXT_OFFSET, StrObj, first_scalar,
+};
 
 // ---------------------------------------------------------------------------
 // Packed ASCII (SHORT-STRING.md, tier A): a String proved ASCII with at most
@@ -168,6 +148,19 @@ pub fn pack_ascii(bytes: &[u8]) -> u64 {
         w |= ((*b as u64) | 0x80) << (8 * i);
     }
     w
+}
+
+/// Packs the ASCII bytes at SRC (N <= 8, all below 0x80, read exactly: never
+/// past `SRC[..N]`) into a canonical word: the bytes with their presence bit
+/// set, absent bytes zero -- one or two loads, an OR and a mask, no loop.
+///
+/// # Safety
+/// SRC must be valid for N bytes of reads; the bytes must be ASCII.
+#[inline]
+pub unsafe fn pack_ascii_at(src: *const u8, n: usize) -> u64 {
+    debug_assert!(n <= 8);
+    let mask = if n >= 8 { u64::MAX } else { (1u64 << (8 * n)) - 1 };
+    (unsafe { super::strobj::read_low_bytes(src, n) } | 0x8080_8080_8080_8080) & mask
 }
 
 /// The String's bytes of packed word W (the first `ascii_word_len(w)` of the
@@ -302,25 +295,7 @@ pub struct NativeObj {
 
 pub const CLOSURE_CAPS_OFFSET: i32 = offset_of!(ClosureObj, caps) as i32;
 pub const LIST_LEN_OFFSET: i32 = offset_of!(ListObj, len) as i32;
-pub const STR_CHARS_OFFSET: i32 = offset_of!(StrObj, chars) as i32;
-#[cfg(not(feature = "short-first-recovered"))]
-pub const STR_FIRST_OFFSET: i32 = offset_of!(StrObj, first) as i32;
-pub const STR_ASCII_OFFSET: i32 = offset_of!(StrObj, ascii) as i32;
 
-/// Offset, within a `StrObj`, of the pointer to the String's UTF-8 bytes
-/// (the data half of the `Box<str>` fat pointer; its field order is not
-/// guaranteed by Rust, so it is measured once rather than assumed).
-pub fn str_text_ptr_offset() -> i32 {
-    use std::sync::OnceLock;
-    static OFFSET: OnceLock<i32> = OnceLock::new();
-    *OFFSET.get_or_init(|| {
-        let boxed: Box<str> = "ab".into();
-        let data = boxed.as_ptr() as usize;
-        let words = unsafe { std::mem::transmute_copy::<Box<str>, [usize; 2]>(&boxed) };
-        let at = words.iter().position(|w| *w == data).expect("Box<str> data pointer");
-        offset_of!(StrObj, text) as i32 + 8 * at as i32
-    })
-}
 pub const LIST_PTR_OFFSET: i32 = offset_of!(ListObj, ptr) as i32;
 pub const STRUCT_PTR_OFFSET: i32 = offset_of!(StructObj, ptr) as i32;
 
@@ -496,7 +471,9 @@ pub unsafe fn as_ref<'a, T>(v: Value) -> &'a T {
 
 pub fn str_of<'a>(v: Value) -> &'a StrObj {
     debug_assert_eq!(heap_kind(v), KIND_STR);
-    unsafe { as_ref(v) }
+    // SAFETY: V is a live, fully constructed String (a tagged heap pointer
+    // of kind KIND_STR); the wide reference covers header and text.
+    unsafe { StrObj::from_addr(v) }
 }
 
 pub fn list_of<'a>(v: Value) -> &'a ListObj {

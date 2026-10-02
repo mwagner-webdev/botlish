@@ -289,9 +289,12 @@ test region-bounds-start-gt-end-1 {start > end} -body {
 } -result {{CORE SEMANTIC RANGE} {substring: range 3..1 is outside 0..5}}
 
 test region-bounds-empty-1 {start == end: an empty region, not an error} -body {
+    # The materialized empty String is the runtime's one canonical static empty
+    # (STRING-ALLOCATION.md): no allocation (it used to allocate one empty
+    # object).
     set text {substring("hello", 2, 2)}
     list [assertParity $text] [strAllocs $text 1]
-} -result {{str {}} 1}
+} -result {{str {}} 0}
 
 test region-bounds-end-of-string-1 {end == the String's own length: the whole tail, not an error} -body {
     set text {substring("hello", 2, 5)}

@@ -14,5 +14,8 @@ pub mod native_stack;
 pub mod platform;
 pub mod ops;
 pub mod show;
+pub mod strobj;
+#[cfg(test)]
+mod string_alloc_tests;
 pub mod value;
 pub mod vm;

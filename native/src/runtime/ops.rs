@@ -132,7 +132,7 @@ fn vm<'a>(p: *mut Vm) -> &'a mut Vm {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_type_error(p: *mut Vm, v: Value, kind: u64, context: Value) -> Value {
-    let context = str_of(context).text.to_string();
+    let context = str_of(context).as_str().to_string();
     vm(p).fail(RtError::Type { context, expected: Kind::from_code(kind as u8), got: v })
 }
 
@@ -143,11 +143,11 @@ pub extern "C" fn rt_not_boolean(p: *mut Vm, v: Value) -> Value {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_raise(p: *mut Vm, kind: Value, message: Value) -> Value {
-    let kind_text = &str_of(kind).text;
-    let message = str_of(message).text.to_string();
+    let kind_text = str_of(kind).as_str();
+    let message = str_of(message).as_str().to_string();
     let error = match semantic_kind(kind_text) {
         Some(kind) => RtError::Semantic { kind, message },
-        None if &**kind_text == "BUG" => RtError::Bug(message),
+        None if kind_text == "BUG" => RtError::Bug(message),
         None => RtError::Bug(format!("unknown error kind {kind_text}: {message}")),
     };
     vm(p).fail(error)
@@ -173,7 +173,7 @@ pub extern "C" fn rt_stack_overflow(p: *mut Vm) -> Value {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_fail_declared(p: *mut Vm, id: u64, name: Value) -> Value {
-    let name_text = str_of(name).text.to_string();
+    let name_text = str_of(name).as_str().to_string();
     let vm = vm(p);
     vm.declared_error = id as u32;
     vm.fail(RtError::Semantic { kind: "UNCAUGHT-ERROR", message: format!("uncaught propagated error: <error {name_text}>") })
@@ -358,7 +358,7 @@ fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
     Ok(match ka {
         Kind::ImmutableSet => set_equal(p, a, b)?,
         Kind::Int => a == b || (!is_small(a) && !is_small(b) && int_compare(a, b) == Ordering::Equal),
-        Kind::Str => str_of(a).text == str_of(b).text,
+        Kind::Str => str_of(a).as_bytes() == str_of(b).as_bytes(),
         Kind::Bool => a == b,
         Kind::Unit => true,
         // Immediate, canonical (one codepoint, one word): word equality is
@@ -439,7 +439,7 @@ pub extern "C" fn rt_value_eq(p: *mut Vm, a: Value, b: Value) -> Value {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_str_eq(_p: *mut Vm, a: Value, b: Value) -> Value {
-    bool_value(str_of(a).text == str_of(b).text)
+    bool_value(str_of(a).as_bytes() == str_of(b).as_bytes())
 }
 
 // ---------------------------------------------------------------------------
@@ -508,7 +508,7 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
             fnv1a(h, text.as_bytes())
         }
         // Evidence is metadata, not part of the value (equal ignores it too).
-        Kind::Str => fnv1a(h, str_of(v).text.as_bytes()),
+        Kind::Str => fnv1a(h, str_of(v).as_bytes()),
         Kind::Bool => fnv1a(h, &[(v == TRUE) as u8]),
         Kind::Unit => h,
         // Canonical decimal codepoint text, matching how Int's own text is
@@ -597,11 +597,13 @@ pub extern "C" fn rt_substr(p: *mut Vm, s: Value, start: Value, end: Value) -> V
             return vm(p).fail(RtError::Semantic { kind: "RANGE", message });
         }
     };
+    // One allocation, one copy: the substring's bytes go straight from the
+    // base's text into the new String's text.
     if obj.ascii {
-        let text = obj.text[from..to].to_string();
-        let bytes = text.len();
-        let r = vm(p).new_str_known(text, to - from, true);
-        vm(p).metrics.record_string_copy(bytes);
+        // ASCII: character index == byte offset, so the slice is known
+        // without any scan.
+        let r = vm(p).new_str_known(&obj.as_str()[from..to], to - from, true);
+        vm(p).metrics.record_string_copy(to - from);
         return r;
     }
     // Non-ASCII: character index `from` is not a byte offset, so it must be
@@ -611,13 +613,19 @@ pub extern "C" fn rt_substr(p: *mut Vm, s: Value, start: Value, end: Value) -> V
     // monotonic scan. `utf8SeekBytes` counts exactly this: the UTF-8 source
     // bytes walked here to map a semantic character index to a physical
     // byte offset, not the copy that follows (record_string_copy, separate).
-    let mut indices = obj.text.char_indices();
-    let seek_start = indices.by_ref().nth(from).map_or(obj.text.len(), |(i, _)| i);
+    // Locating the end of the slice walks the `to - from` scalars once more
+    // (the byte length must be known before the one allocation); the result's
+    // character count is known (`to - from`) and its ASCII flag follows from
+    // byte length == character count, so there is no third pass.
+    let text = obj.as_str();
+    let mut indices = text.char_indices();
+    let seek_start = indices.by_ref().nth(from).map_or(text.len(), |(i, _)| i);
     vm(p).metrics.record_utf8_seek(seek_start);
-    let text: String = obj.text[seek_start..].chars().take(to - from).collect();
-    let bytes = text.len();
-    let r = vm(p).new_str(text);
-    vm(p).metrics.record_string_copy(bytes);
+    let rest = &text[seek_start..];
+    let width = rest.char_indices().nth(to - from).map_or(rest.len(), |(i, _)| i);
+    let slice = &rest[..width];
+    let r = vm(p).new_str_known(slice, to - from, width == to - from);
+    vm(p).metrics.record_string_copy(width);
     r
 }
 
@@ -661,14 +669,15 @@ pub extern "C" fn rt_str_region_eq(p: *mut Vm, base: Value, start: Value, end: V
         return bool_value(false);
     }
     if b.ascii {
-        bool_value(b.text.as_bytes()[from..to] == *o.text.as_bytes())
+        bool_value(b.as_bytes()[from..to] == *o.as_bytes())
     } else {
         // Same seek accounting as rt_substr's non-ASCII path: locating
         // character index `from` still means decoding forward from byte 0.
-        let mut indices = b.text.char_indices();
-        let seek_start = indices.by_ref().nth(from).map_or(b.text.len(), |(i, _)| i);
+        let text = b.as_str();
+        let mut indices = text.char_indices();
+        let seek_start = indices.by_ref().nth(from).map_or(text.len(), |(i, _)| i);
         vm(p).metrics.record_utf8_seek(seek_start);
-        bool_value(b.text[seek_start..].chars().take(to - from).eq(o.text.chars()))
+        bool_value(text[seek_start..].chars().take(to - from).eq(o.as_str().chars()))
     }
 }
 
@@ -695,19 +704,19 @@ pub extern "C" fn rt_str_region_eq(p: *mut Vm, base: Value, start: Value, end: V
 pub extern "C" fn rt_str_decode_char_at(p: *mut Vm, s: Value, byte_offset: Value) -> Value {
     let obj = str_of(s);
     let off = int_small(byte_offset).expect("decode_char_at: byte_offset must be a small Int") as usize;
-    let c = obj.text[off..]
+    let c = obj.as_str()[off..]
         .chars()
         .next()
         .expect("decode_char_at: byte_offset must be a valid, in-bounds UTF-8 boundary");
     let bytes = c.len_utf8();
-    let r = vm(p).new_str_known(c.to_string(), 1, c.is_ascii());
+    let r = vm(p).new_str_scalar(c);
     // Diagnostic-only (STRING-BYTES-CONSTRUCTION-AUDIT.md): every other
     // String-producing op (rt_substr, rt_str_cat, rt_str_lower) reports its
     // own copied bytes via record_string_copy; this one silently didn't,
     // undercounting "copies: stringBytes" by exactly this op's contribution
     // (confirmed by reconciling allocationReport's byKind.String.payloadBytes
     // against copies.stringBytes on bench/ai_text_clean.tcl). No semantic
-    // change: c.to_string()'s allocation and copy already happened above.
+    // change: the one allocation and the scalar's encoding happened above.
     vm(p).metrics.record_string_copy(bytes);
     r
 }
@@ -731,21 +740,7 @@ pub extern "C" fn rt_str_to_short(_p: *mut Vm, s: Value) -> u64 {
     if obj.chars == 0 {
         return SHORT_EMPTY as u64;
     }
-    first_scalar_of(obj) as u64
-}
-
-/// The first scalar of a non-empty String object: the cached field, or (the
-/// `short-first-recovered` counterfactual) decoded from its text.
-#[inline]
-fn first_scalar_of(obj: &StrObj) -> u32 {
-    #[cfg(not(feature = "short-first-recovered"))]
-    {
-        obj.first
-    }
-    #[cfg(feature = "short-first-recovered")]
-    {
-        first_scalar(&obj.text, obj.ascii)
-    }
+    obj.first_scalar() as u64
 }
 
 /// The String a ShortString1 scalar stands for: "" for Empty, else the
@@ -766,7 +761,10 @@ pub extern "C" fn rt_short_to_str(p: *mut Vm, short: u64) -> Value {
 pub extern "C" fn rt_str_to_ascii(_p: *mut Vm, s: Value) -> u64 {
     let obj = str_of(s);
     debug_assert!(obj.ascii && obj.chars <= 8, "packed ASCII of a String that is not ASCII of at most 8 characters");
-    pack_ascii(obj.text.as_bytes())
+    // SAFETY: the text is inline and exactly `len_bytes()` long (at most 8
+    // here: the compiler proved at most eight ASCII characters); the packed
+    // word is formed from loads that never leave it.
+    unsafe { pack_ascii_at(obj.text_ptr(), obj.len_bytes()) }
 }
 
 /// The String a packed-ASCII word stands for, freshly allocated: the word
@@ -793,42 +791,65 @@ pub extern "C" fn rt_str_slice_short(p: *mut Vm, base: Value, start: Value, end:
         return SHORT_EMPTY as u64;
     }
     if b.ascii {
-        return b.text.as_bytes()[from] as u64;
+        return b.as_bytes()[from] as u64;
     }
-    let mut indices = b.text.char_indices();
-    let seek_start = indices.by_ref().nth(from).map_or(b.text.len(), |(i, _)| i);
+    let text = b.as_str();
+    let mut indices = text.char_indices();
+    let seek_start = indices.by_ref().nth(from).map_or(text.len(), |(i, _)| i);
     vm(p).metrics.record_utf8_seek(seek_start);
-    b.text[seek_start..].chars().next().expect("slice start already validated") as u64
+    text[seek_start..].chars().next().expect("slice start already validated") as u64
 }
 
 /// The UTF-8 byte length of S's text -- distinct from `rt_str_len`, which
-/// counts Unicode scalars. A plain field read (StrObj::text.len()), never a
+/// counts Unicode scalars. A plain field read (StrObj::byte_len), never a
 /// scan: applied to `rt_str_decode_char_at`'s own result, this gives the
 /// encoded width of the scalar just decoded, letting a traversal advance its
 /// carried byte offset by exactly that many bytes.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_str_byte_len(p: *mut Vm, s: Value) -> Value {
-    vm(p).new_int(str_of(s).text.len() as i64)
+    vm(p).new_int(str_of(s).len_bytes() as i64)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_str_lower(p: *mut Vm, s: Value) -> Value {
     // Simple (one-to-one) case mapping, like Tcl's string tolower.
-    let text: String = str_of(s)
-        .text
-        .chars()
-        .map(|c| {
-            let mut lower = c.to_lowercase();
-            match (lower.next(), lower.next()) {
-                (Some(l), None) => l,
-                _ => c,
+    fn lower(c: char) -> char {
+        let mut lower = c.to_lowercase();
+        match (lower.next(), lower.next()) {
+            (Some(l), None) => l,
+            _ => c,
+        }
+    }
+    let obj = str_of(s);
+    // One allocation either way, no intermediate buffer. ASCII maps ASCII to
+    // ASCII, so the result has the operand's size and is written in one
+    // pass; otherwise a mapped scalar can change width (U+212A is 3 bytes,
+    // its lowercase 'k' one), so a first pass sizes the result and a second
+    // writes it (the character count never changes: the mapping is
+    // one-to-one).
+    let r = if obj.ascii {
+        let src = obj.as_bytes();
+        vm(p).new_str_with(src.len(), obj.chars, |out| {
+            for b in src {
+                out.push_ascii(b.to_ascii_lowercase());
             }
         })
-        .collect();
-    let bytes = text.len();
-    let r = vm(p).new_str(text);
-    vm(p).metrics.record_string_copy(bytes);
+    } else {
+        let text = obj.as_str();
+        let byte_len: usize = text.chars().map(|c| lower(c).len_utf8()).sum();
+        vm(p).new_str_with(byte_len, obj.chars, |out| {
+            for c in text.chars() {
+                out.push_scalar(lower(c));
+            }
+        })
+    };
+    vm(p).metrics.record_string_copy(str_bytes_of(r));
     r
+}
+
+/// The text byte length of String result R, or 0 for a failure (NO_VALUE).
+fn str_bytes_of(r: Value) -> usize {
+    if r == NO_VALUE { 0 } else { str_of(r).len_bytes() }
 }
 
 /// S's UTF-8 encoding as a List of Ints (one per byte, each 0..255), in
@@ -841,7 +862,7 @@ pub extern "C" fn rt_str_lower(p: *mut Vm, s: Value) -> Value {
 /// exactly like `rt_list_new`'s would, not a special case here.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_str_utf8_bytes(p: *mut Vm, s: Value) -> Value {
-    let items: Vec<Value> = str_of(s).text.bytes().map(|b| vm(p).new_int(b as i64)).collect();
+    let items: Vec<Value> = str_of(s).as_bytes().iter().map(|b| vm(p).new_int(*b as i64)).collect();
     let n = items.len();
     let r = vm(p).new_list(items);
     vm(p).metrics.record_list_copy(n);
@@ -851,14 +872,12 @@ pub extern "C" fn rt_str_utf8_bytes(p: *mut Vm, s: Value) -> Value {
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_str_cat(p: *mut Vm, a: Value, b: Value) -> Value {
     let (x, y) = (str_of(a), str_of(b));
-    let mut text = String::with_capacity(x.text.len() + y.text.len());
-    text.push_str(&x.text);
-    text.push_str(&y.text);
     // The character count and ASCII flag follow from the operands: no rescan.
+    // The final byte length is the sum of the operands': one allocation, each
+    // operand copied once, straight into place.
     let (chars, ascii) = (x.chars + y.chars, x.ascii && y.ascii);
-    let bytes = text.len();
-    let r = vm(p).new_str_known(text, chars, ascii);
-    vm(p).metrics.record_string_copy(bytes);
+    let r = vm(p).new_str_pieces(&[x.as_str(), y.as_str()], chars, ascii);
+    vm(p).metrics.record_string_copy(x.len_bytes() + y.len_bytes());
     r
 }
 
@@ -914,7 +933,7 @@ fn one_scalar(p: *mut Vm, s: Value, native: &str) -> Result<char, Value> {
         let message = format!("{native}: expects a single Unicode scalar, got a string of length {}", obj.chars);
         return Err(vm(p).fail(RtError::Semantic { kind: "RANGE", message }));
     }
-    Ok(obj.text.chars().next().expect("StrObj.chars == 1 but text has no scalar"))
+    Ok(obj.as_str().chars().next().expect("StrObj.chars == 1 but text has no scalar"))
 }
 
 #[unsafe(no_mangle)]
@@ -954,15 +973,16 @@ fn region_one_scalar(p: *mut Vm, base: Value, start: Value, end: Value, native: 
         return Err(vm(p).fail(RtError::Semantic { kind: "RANGE", message }));
     }
     if b.ascii {
-        Ok(b.text.as_bytes()[from] as char)
+        Ok(b.as_bytes()[from] as char)
     } else {
         // Same seek accounting as rt_substr's/rt_str_region_eq's non-ASCII
         // paths: locating character index `from` still means decoding
         // forward from byte 0.
-        let mut indices = b.text.char_indices();
-        let seek_start = indices.by_ref().nth(from).map_or(b.text.len(), |(i, _)| i);
+        let text = b.as_str();
+        let mut indices = text.char_indices();
+        let seek_start = indices.by_ref().nth(from).map_or(text.len(), |(i, _)| i);
         vm(p).metrics.record_utf8_seek(seek_start);
-        Ok(b.text[seek_start..].chars().next().expect("region already validated"))
+        Ok(text[seek_start..].chars().next().expect("region already validated"))
     }
 }
 
@@ -1612,12 +1632,12 @@ mod tests {
         assert_eq!(vm.metrics.by_kind[KIND_STRUCT as usize].live_objects, 2);
         assert_eq!(vm.metrics.by_kind[KIND_STRUCT as usize].reclaimed_objects, 1);
         assert_eq!(vm.metrics.by_kind[KIND_STR as usize].live_objects, 1);
-        assert_eq!(str_of(struct_of(struct_of(outer).fields()[0]).fields()[0]).text.as_ref(), "kept");
+        assert_eq!(str_of(struct_of(struct_of(outer).fields()[0]).fields()[0]).as_str(), "kept");
         vm.temp_roots.clear();
     }
 
     fn str_val(vm: &mut Vm, s: &str) -> Value {
-        vm.new_str(s.to_string())
+        vm.new_str(s)
     }
 
     fn small(n: i64) -> Value {
@@ -1632,7 +1652,7 @@ mod tests {
         let mut vm = vm();
         let s = str_val(&mut vm, "hello");
         let c = rt_str_decode_char_at(&mut *vm, s, small(1));
-        assert_eq!(str_of(c).text.as_ref(), "e");
+        assert_eq!(str_of(c).as_str(), "e");
         assert_eq!(rt_str_byte_len(&mut *vm, c), small(1));
     }
 
@@ -1642,7 +1662,7 @@ mod tests {
         // U+00E9 is 2 bytes in UTF-8.
         let s = str_val(&mut vm, "a\u{e9}b");
         let c = rt_str_decode_char_at(&mut *vm, s, small(1));
-        assert_eq!(str_of(c).text.as_ref(), "\u{e9}");
+        assert_eq!(str_of(c).as_str(), "\u{e9}");
         assert_eq!(rt_str_byte_len(&mut *vm, c), small(2));
     }
 
@@ -1652,7 +1672,7 @@ mod tests {
         // U+6771 is 3 bytes in UTF-8.
         let s = str_val(&mut vm, "a\u{6771}b");
         let c = rt_str_decode_char_at(&mut *vm, s, small(1));
-        assert_eq!(str_of(c).text.as_ref(), "\u{6771}");
+        assert_eq!(str_of(c).as_str(), "\u{6771}");
         assert_eq!(rt_str_byte_len(&mut *vm, c), small(3));
     }
 
@@ -1662,7 +1682,7 @@ mod tests {
         // U+1F600 (grinning face) is 4 bytes in UTF-8.
         let s = str_val(&mut vm, "a\u{1f600}b");
         let c = rt_str_decode_char_at(&mut *vm, s, small(1));
-        assert_eq!(str_of(c).text.as_ref(), "\u{1f600}");
+        assert_eq!(str_of(c).as_str(), "\u{1f600}");
         assert_eq!(rt_str_byte_len(&mut *vm, c), small(4));
     }
 
@@ -1678,12 +1698,12 @@ mod tests {
         let expected: Vec<char> = text.chars().collect();
         for want in expected {
             let c = rt_str_decode_char_at(&mut *vm, s, small(byte_offset));
-            let got: Vec<char> = str_of(c).text.chars().collect();
+            let got: Vec<char> = str_of(c).as_str().chars().collect();
             assert_eq!(got, vec![want]);
             let width = rt_str_byte_len(&mut *vm, c);
             byte_offset += small_of(width);
         }
-        assert_eq!(byte_offset as usize, str_of(s).text.len());
+        assert_eq!(byte_offset as usize, str_of(s).len_bytes());
     }
 
     // -----------------------------------------------------------------------
@@ -1697,7 +1717,7 @@ mod tests {
             let s = str_val(&mut vm, text);
             let short = rt_str_to_short(&mut *vm, s);
             let back = rt_short_to_str(&mut *vm, short);
-            assert_eq!(str_of(back).text.as_ref(), text, "{text:?}");
+            assert_eq!(str_of(back).as_str(), text, "{text:?}");
             assert_eq!(str_of(back).chars, text.chars().count());
             assert_eq!(str_of(back).ascii, text.is_ascii());
         }
@@ -1717,12 +1737,15 @@ mod tests {
         assert_eq!(enc(&mut vm, "\u{10ffff}"), 0x10ffff);
         // NUL materializes as a one-character String, -1 as the empty one.
         let nul = rt_short_to_str(&mut *vm, 0);
-        assert_eq!((str_of(nul).chars, str_of(nul).text.len()), (1, 1));
-        // No interned table: every materialization is a fresh String.
+        assert_eq!((str_of(nul).chars, str_of(nul).len_bytes()), (1, 1));
+        // No interned table: every materialization of a non-empty value is a
+        // fresh String. The empty String is the one canonical static object
+        // (STRING-ALLOCATION.md: not an interning table, one shared immutable
+        // empty), so every Empty materialization is that same object.
         assert_ne!(rt_short_to_str(&mut *vm, 97), rt_short_to_str(&mut *vm, 97));
-        assert_ne!(rt_short_to_str(&mut *vm, (-1i64) as u64), rt_short_to_str(&mut *vm, (-1i64) as u64));
+        assert_eq!(rt_short_to_str(&mut *vm, (-1i64) as u64), rt_short_to_str(&mut *vm, (-1i64) as u64));
         let empty = rt_short_to_str(&mut *vm, (-1i64) as u64);
-        assert_eq!((str_of(empty).chars, str_of(empty).text.len()), (0, 0));
+        assert_eq!((str_of(empty).chars, str_of(empty).len_bytes()), (0, 0));
     }
 
     // -----------------------------------------------------------------------
@@ -1757,7 +1780,7 @@ mod tests {
             let s = str_val(&mut vm, text);
             let w = rt_str_to_ascii(&mut *vm, s);
             let back = rt_ascii_to_str(&mut *vm, w);
-            assert_eq!(str_of(back).text.as_ref(), text, "{text:?}");
+            assert_eq!(str_of(back).as_str(), text, "{text:?}");
             assert_eq!(str_of(back).chars, text.chars().count());
             assert!(str_of(back).ascii);
         }
@@ -1774,7 +1797,7 @@ mod tests {
                     let short = rt_str_slice_short(&mut *vm, s, small(from as i64), small(to as i64));
                     let sub = rt_substr(&mut *vm, s, small(from as i64), small(to as i64));
                     let back = rt_short_to_str(&mut *vm, short);
-                    assert_eq!(str_of(back).text, str_of(sub).text, "{text:?}[{from}..{to}]");
+                    assert_eq!(str_of(back).as_str(), str_of(sub).as_str(), "{text:?}[{from}..{to}]");
                 }
             }
         }

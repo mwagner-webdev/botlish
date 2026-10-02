@@ -5,6 +5,14 @@
 > eight characters) was added: see `SHORT-STRING-TIERS.md`. The measurements
 > below are of the first milestone as shipped (the `m1` configuration there).
 
+> **Later runtime change.** The later `STRING-ALLOCATION.md` milestone replaced
+> the two-allocation canonical String representation (a `StrObj` plus a
+> separately allocated `Box<str>` text buffer) with one allocation holding the
+> header and the UTF-8 bytes. Frontier costs in this report (the ~312 / ~862
+> instruction materialization figures included) therefore describe the
+> historical runtime used for this experiment, and are preserved unchanged as
+> experimental history.
+
 ## Outcome
 
 A Botlish `String` value whose existing frontend facts prove a semantic

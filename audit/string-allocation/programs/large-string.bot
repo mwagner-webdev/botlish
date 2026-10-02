@@ -1,0 +1,30 @@
+# Large-String control (STRING-ALLOCATION.md): the one-allocation String must
+# stay sensible as Strings grow. Doubling builds Strings up to ~2.5 MB (each
+# step one allocation, one copy of the bytes written once into place);
+# slicing and re-concatenating a large String exercises substring and
+# concatenation on large bases; the churn loop builds and drops mid-size
+# Strings (about 100 bytes) so collections free them.
+#
+# expect: [1048576, "é…é…", 4092, 540000]
+
+fn dbl(n, s):
+    if n == 0:
+        return s
+
+    dbl(n - 1, concat(s, s))
+
+fn slice_cat(s, k):
+    n = length(s)
+    concat(substring(s, k, n), substring(s, 0, k))
+
+fn churn(n, acc, piece):
+    if n == 0:
+        return acc
+
+    t = concat(piece, piece)
+    churn(n - 1, acc + length(concat(t, t)), piece)
+
+big = dbl(19, "é…")
+rotated = slice_cat(big, 4096)
+mid = dbl(11, "ab")
+[length(big), substring(rotated, 0, 4), length(slice_cat(mid, 7)) - 4, churn(5000, 0, "hello hello hello hello 😀…é")]

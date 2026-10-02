@@ -22,7 +22,7 @@
 //! constructors compute and hand to `Heap::register`: the Rust struct size
 //! (`header_bytes`, including the `Header` and every fixed field) plus the
 //! caller-computed variable-length payload (`payload_bytes`) -- e.g. a
-//! `Vec`'s capacity in bytes, a `Box<str>`'s length, a BigInt's estimated
+//! `Vec`'s capacity in bytes, a String's UTF-8 length, a BigInt's estimated
 //! limb bytes. This is *not* the allocator's actual malloc chunk size: no
 //! padding or fragmentation accounting.
 //!
@@ -242,6 +242,9 @@ pub struct Metrics {
     /// and so never seek at all. See hir/traversal.tcl and native/lower.tcl's
     /// "String traversal" section for the optimization this measures.
     pub utf8_seek_bytes: u64,
+    /// Dynamic String constructions that returned the one canonical empty
+    /// String instead of allocating (strobj.rs, `Vm::empty_string`).
+    pub str_empty_reuses: u64,
     pub construction: ConstructionStats,
 }
 
@@ -265,6 +268,7 @@ impl Metrics {
             mutarray_reads: 0,
             mutarray_writes: 0,
             utf8_seek_bytes: 0,
+            str_empty_reuses: 0,
             construction: ConstructionStats::default(),
         }
     }
@@ -439,6 +443,22 @@ impl Metrics {
         ]);
         let mutations = dict(&[("reads", n(self.mutarray_reads)), ("writes", n(self.mutarray_writes))]);
         let traversal = dict(&[("utf8SeekBytes", n(self.utf8_seek_bytes))]);
+        // String storage census (STRING-ALLOCATION.md). A String is one heap
+        // block (header + UTF-8 text), so `heapAllocations`/`frees` are its
+        // object counts and the two text-buffer counters are structurally
+        // zero: there is no separate text buffer to count. `emptyReused`
+        // counts constructions answered by the canonical empty String
+        // (zero allocations).
+        let s = &self.by_kind[KIND_STR as usize];
+        let strings = dict(&[
+            ("objects", n(s.allocations)),
+            ("heapAllocations", n(s.allocations)),
+            ("textBufferAllocations", n(0)),
+            ("frees", n(s.reclaimed_objects)),
+            ("textBufferFrees", n(0)),
+            ("bytes", n(s.allocated_bytes())),
+            ("emptyReused", n(self.str_empty_reuses)),
+        ]);
         let c = &self.construction;
         let construction = dict(&[
             ("materializations", n(c.materializations)),
@@ -464,6 +484,7 @@ impl Metrics {
             ("copies", copies),
             ("mutableArray", mutations),
             ("traversal", traversal),
+            ("strings", strings),
             ("construction", construction),
             ("sites", sites_tcl.to_string()),
         ])

@@ -137,11 +137,13 @@ test alloc-live-1 {a second run's reclaim matches the first run's allocations ex
     # Vm::reset's cleanup collection, between run 1 and run 2, is this
     # report's first GC cycle: it must reclaim exactly what run 1 allocated
     # (an exact recompute at every collection, never "allocated - freed").
+    # "ab" is one dynamic String: 25 header bytes + 2 text bytes (the one-block
+    # String of STRING-ALLOCATION.md; the old header was 40 bytes: 42).
     set hir [sourceHir {concat("a", "b")}]
     set alloc [dict get [native::allocationReport $hir summary 1] total allocatedBytes]
     set report [native::allocationReport $hir summary 2]
     list [dict get $report gc cycles] [dict get $report gc reclaimedBytes] $alloc
-} -result {1 42 42}
+} -result {1 27 27}
 
 test alloc-off-1 {instrumentation off changes no semantics} -body {
     set hir [sourceHir {concat("hello ", "world")}]

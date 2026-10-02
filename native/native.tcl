@@ -108,8 +108,8 @@ proc native::binary {} {
     if {$::tcl_platform(platform) eq "windows"} {
         append path .exe
     }
-    # Audit override: measure a differently built driver (for example the
-    # `short-first-recovered` counterfactual) without replacing the shipped one.
+    # Audit override: measure a differently built driver (for example an
+    # audit-patched runtime) without replacing the shipped one.
     if {[info exists ::env(BOTLISH_NATIVE_BIN)]} {
         set path $::env(BOTLISH_NATIVE_BIN)
     }
