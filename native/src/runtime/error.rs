@@ -31,6 +31,14 @@ pub enum RtError {
     Bug(String),
 }
 
+/// The NIR id of builtin error number INDEX (core::native::declareError's
+/// declaration order, from 0): native/lower.tcl's `ErrorId` assigns exactly
+/// these to the errors the runtime itself declares, far above the dense
+/// 1-based ids of a program's own `error` declarations.
+pub const BUILTIN_ERROR_ID_BASE: u32 = 0x4000_0000;
+/// `InvalidArgumentEncoding`, the error of `argv()` (builtin error 0).
+pub const ERR_INVALID_ARGUMENT_ENCODING: u32 = BUILTIN_ERROR_ID_BASE;
+
 /// Semantic error kinds of core/errors.tcl that NIR may raise.
 pub const SEMANTIC_KINDS: &[&str] = &[
     "UNBOUND", "DUPLICATE", "NOT-CALLABLE", "ARITY", "NOT-BOOLEAN", "TYPE", "EQUALITY", "RANGE",

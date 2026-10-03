@@ -155,6 +155,16 @@ pub enum OpCode {
     /// builds on this plus List/Int operations instead of needing its own
     /// native.
     StrUtf8Bytes,
+    /// `argv()` (core/process.tcl, ARGV.md): the process argument snapshot
+    /// of this run as a List of Strings -- every argument validated as UTF-8
+    /// *by this operation* (never earlier), all or nothing. Takes no
+    /// operands. When any argument is not valid UTF-8 it fails with the
+    /// declared builtin error InvalidArgumentEncoding: it records the
+    /// builtin error's NIR id (runtime/error.rs's `BUILTIN_ERROR_ID_BASE`
+    /// plus the error's index) as the pending declared error, exactly as a
+    /// `faildeclared` of that id does, so an enclosing `handle` matches it
+    /// like any other declared error.
+    Argv,
     /// Tcl 9-compatible Unicode alpha/alnum character classification
     /// (core/tclcompat.tcl's `is_tcl_alpha`/`is_tcl_alnum`): the operand is
     /// a one-Unicode-scalar String (RANGE if not). TEMPORARY compatibility
@@ -330,6 +340,7 @@ impl OpCode {
             "decodecharat" => DecodeCharAt,
             "strbytelen" => StrByteLen,
             "strutf8bytes" => StrUtf8Bytes,
+            "argv" => Argv,
             "strtclalpha" => StrIsTclAlpha,
             "strtclalnum" => StrIsTclAlnum,
             "strregiontclalpha" => StrRegionIsTclAlpha,
@@ -366,6 +377,7 @@ impl OpCode {
         use OpCode::*;
         match self {
             ListNew => None,
+            Argv => Some(0),
             StrLen | StrLower | ListLen | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList | IsMutArray
             | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | RBox | RUnbox
             | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharCodepoint | SetFromList

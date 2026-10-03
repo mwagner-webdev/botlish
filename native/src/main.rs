@@ -20,6 +20,17 @@
 //!   botlish-native check FILE.nir        parse and validate only
 //! ```
 //!
+//! `run`/`bench`/`batch` accept `--argv ARGS` or `--argv-file PATH` (anywhere
+//! on the line; the file holds ARGS, for vectors too large for one command-line
+//! argument -- Linux caps a single argument at 128 KiB): the
+//! process argument snapshot `argv()` reads (core/process.tcl, ARGV.md), as
+//! raw bytes -- ARGS is the comma-separated list of arguments, each written
+//! `x` followed by the hexadecimal of its bytes (`x` alone is the empty
+//! argument; the empty ARGS is no arguments at all), so invalid UTF-8 and
+//! every other byte sequence is expressible. Without it the snapshot is the
+//! one synthetic argument `botlish-runner` (runtime/vm.rs's DEFAULT_ARGV),
+//! never this driver's own arguments.
+//!
 //! `run`/`bench` accept `--alloc off|summary|sites` (default `off`,
 //! byte-identical to no instrumentation): see runtime/metrics.rs. For
 //! `bench`, the report reflects the last of RUNS executions (Vm::reset
@@ -114,12 +125,58 @@ fn extract_alloc_mode(args: &[String]) -> Option<(Vec<String>, AllocMode)> {
     Some((out, mode))
 }
 
+/// Decodes `--argv`'s value (see the module doc): None if malformed.
+fn parse_argv(text: &str) -> Option<Vec<Vec<u8>>> {
+    if text.is_empty() {
+        return Some(Vec::new());
+    }
+    text.split(',')
+        .map(|word| {
+            let hex = word.strip_prefix('x')?;
+            if hex.len() % 2 != 0 {
+                return None;
+            }
+            (0..hex.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok())
+                .collect::<Option<Vec<u8>>>()
+        })
+        .collect()
+}
+
+/// Pulls "--argv ARGS" / "--argv-file PATH" out of ARGS (either may appear
+/// anywhere): the remaining arguments in order, and the decoded snapshot
+/// (None if absent). None if the option is given without a well-formed
+/// value.
+fn extract_argv(args: &[String]) -> Option<(Vec<String>, Option<Vec<Vec<u8>>>)> {
+    let mut snapshot = None;
+    let mut out = Vec::with_capacity(args.len());
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--argv" {
+            snapshot = Some(parse_argv(args.get(i + 1)?)?);
+            i += 2;
+            continue;
+        }
+        if args[i] == "--argv-file" {
+            let text = std::fs::read_to_string(args.get(i + 1)?).ok()?;
+            snapshot = Some(parse_argv(text.trim_end_matches('\n'))?);
+            i += 2;
+            continue;
+        }
+        out.push(args[i].clone());
+        i += 1;
+    }
+    Some((out, snapshot))
+}
+
 fn cli(args: &[String]) -> i32 {
     let usage = || {
-        eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check FILE.nir [--alloc off|summary|sites] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir");
+        eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check FILE.nir [--alloc off|summary|sites] [--argv ARGS|--argv-file PATH] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir");
         2
     };
-    let Some((args, alloc_mode)) = extract_alloc_mode(args) else { return usage() };
+    let Some((args, snapshot)) = extract_argv(args) else { return usage() };
+    let Some((args, alloc_mode)) = extract_alloc_mode(&args) else { return usage() };
     let args = &args[..];
     let (command, rest) = match args.split_first() {
         Some((c, rest)) => (c.as_str(), rest),
@@ -198,7 +255,7 @@ fn cli(args: &[String]) -> i32 {
                 }
             }
         }
-        _ => execute(command, &program, runs, alloc_mode),
+        _ => execute(command, &program, runs, alloc_mode, snapshot),
     }
 }
 
@@ -293,7 +350,7 @@ fn sites_tcl(sites: &[Site], stats: &std::collections::HashMap<u32, SiteStats>) 
     tcl_list(&entries)
 }
 
-fn execute(command: &str, program: &nir::Program, runs: usize, alloc_mode: AllocMode) -> i32 {
+fn execute(command: &str, program: &nir::Program, runs: usize, alloc_mode: AllocMode, snapshot: Option<Vec<Vec<u8>>>) -> i32 {
     let started = Instant::now();
     let mut backend = CraneliftJit;
     let options = CompileOptions { clif: command == "clif", vcode: command == "vcode", alloc_sites: alloc_mode.sites() };
@@ -321,6 +378,9 @@ fn execute(command: &str, program: &nir::Program, runs: usize, alloc_mode: Alloc
     }
 
     let mut vm = Vm::new(Rc::new(program_info(program)), alloc_mode);
+    if let Some(snapshot) = snapshot {
+        vm.set_argv(snapshot);
+    }
     compiled.install_constants(&mut vm);
     vm.set_framemap(compiled.framemap.clone());
     #[cfg(all(target_arch = "x86_64", target_os = "linux"))]

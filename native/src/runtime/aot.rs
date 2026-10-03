@@ -1,6 +1,18 @@
 //! Standalone executable startup. The initializer contains only constants,
 //! function metadata and relocated stack maps; program instructions are
 //! already machine code in the linked object.
+//!
+//! Process arguments (ARGV.md): the generated `main` collects the real
+//! Linux argument vector -- the `argc`/`argv` glibc hands the process,
+//! which Rust's runtime keeps and `std::env::args_os` returns as raw
+//! `OsString`s, i.e. the exact bytes, never decoded -- into one owned
+//! `Vec<Vec<u8>>` copy (it does not borrow the C startup array) and passes
+//! it to `run`, which installs it in the Vm as the run's argument snapshot
+//! before the program's entry function executes. Nothing is validated here:
+//! UTF-8 validation belongs to the `argv()` operation (`ops.rs`'s
+//! `rt_argv`), so malformed arguments cannot fail a program that never
+//! asks for them. `argc == 0` yields an empty snapshot, and `argv()` an
+//! empty List.
 use super::error::RtError;
 use super::metrics::AllocMode;
 use super::show::show;
@@ -10,7 +22,7 @@ use std::io::Write;
 
 pub type ProgramEntry = extern "C" fn(*mut Vm) -> Value;
 
-pub fn run(init: impl FnOnce() -> (Box<Vm>, ProgramEntry) + Send + 'static) -> i32 {
+pub fn run(argv: Vec<Vec<u8>>, init: impl FnOnce() -> (Box<Vm>, ProgramEntry) + Send + 'static) -> i32 {
     let stack_size = std::env::var("BOTLISH_NATIVE_STACK_BYTES")
         .ok()
         .and_then(|text| text.parse::<usize>().ok())
@@ -18,6 +30,7 @@ pub fn run(init: impl FnOnce() -> (Box<Vm>, ProgramEntry) + Send + 'static) -> i
         .unwrap_or(1 << 30);
     let worker = std::thread::Builder::new().stack_size(stack_size).spawn(move || {
         let (mut vm, entry) = init();
+        vm.set_argv(argv);
         debug_assert!(matches!(vm.metrics.mode, AllocMode::Off));
         #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
         let _guard = {

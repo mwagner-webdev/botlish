@@ -112,6 +112,12 @@ proc hir::callables::Bearing {hir type {mutable 1}} {
         }
         return [Bearing $hir [lindex $type 3] $mutable]
     }
+    if {[hir::types::IsExactNative $type]} {
+        # A root native with declared errors (`argv`) is exactly as much a
+        # caller-side obligation as an error-bearing block.
+        return [expr {![catch {core::native::metadata [lindex $type 1]} meta]
+            && [dict get $meta errors] ne {}}]
+    }
     if {[hir::types::IsFn $type]} {
         if {[hir::types::FnErrors $type] ne {}} {
             return 1

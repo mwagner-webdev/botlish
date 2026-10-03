@@ -390,6 +390,7 @@ A native that breaks its declared type contract (§8) raises
 | `list_length` | list → int | |
 | `list_get` | list, int → any (the element at `0 <= i < length`, else `RANGE`) | |
 | `list_append` | list, any → list (a new list; the argument is unchanged) | |
+| `argv` | → `List[String]`, errors `InvalidArgumentEncoding`: the process argument vector including argument zero, each argument validated as UTF-8 by the call (ARGV.md) | |
 | `Emailish?` | str → bool, type test of `Emailish` (library `web`) | true: arg 0 : `Emailish` |
 | `UriQueryValue?` | str → bool, type test of `UriQueryValue` (library `web`) | true: arg 0 : `UriQueryValue` |
 | `uriEscape` | str → `UriQueryValue` (library `web`) | |
@@ -406,8 +407,16 @@ core::registerNative even? -arity 1 -impl myEvenImpl -refines-true {0 Even}
 `-runtime {TAG…}` states what a native implementation of the operation
 needs from a runtime beyond bare machine operations: `bigint`,
 `string-alloc`, `list-alloc`, `result-alloc`, `char-index`, `range-check`,
-`structural-equality`, `evidence` (`core/native.tcl` defines each). It is
-metadata for static analysis (§19) and never changes what a call does.
+`structural-equality`, `evidence`, `process-argv` (`core/native.tcl` defines
+each). It is metadata for static analysis (§19) and never changes what a call
+does.
+
+`-errors {NAME…}` declares the builtin errors (`core::native::declareError`)
+a call of the native may complete with: the impl signals one with
+`core::native::failDeclared`, and `core::native::invoke` turns that into the
+same `propagate-error` completion a Botlish `fail NAME` produces, so
+`on NAME:` handlers, an `errors` clause, call analysis and every backend treat
+it like any declared error. Today only `argv` (`core/process.tcl`) has one.
 
 Natives may also declare a signature. `-param-types {int int}` lists the
 type each argument must have (`any` means no requirement), and
@@ -483,6 +492,7 @@ refinement unless its contract explicitly establishes one. So
 | `core::blockEnv BLOCK` | a block's captured environment |
 | `core::formatValue V` / `core::formatCompletion C` | display |
 | `core::registerNative NAME ?options?` | register a native callable |
+| `core::process::withArgv ARGV SCRIPT` | run SCRIPT with the raw byte-string list ARGV as the process argument snapshot `argv()` reads (all four in-process backends; ARGV.md) |
 | `core::readProgramFile PATH` | read a `.ir` file (a list of IR; `#` lines are comments) |
 | `core::loadProgramFile PATH` | load the libraries a `.ir` file names with `# requires: NAME…`, then read it |
 | `core::loadLibrary NAME` | load the optional library `lib/NAME.tcl` (once) |
@@ -505,6 +515,7 @@ refinement unless its contract explicitly establishes one. So
 | `core/type.tcl` | semantic types: named/refined types, subtyping, value membership |
 | `core/regex.tcl` | engine-independent regex IR, lowered to Tcl ARE |
 | `core/primitives.tcl`, `core/predicates.tcl`, `core/strings.tcl`, `core/lists.tcl` | builtin natives |
+| `core/process.tcl` | the process boundary: `argv()`, its builtin error, argv injection (ARGV.md) |
 | `lib/web.tcl` | optional demonstration library (`core::loadLibrary web`): `Emailish`, `UriQueryValue`, `uriEscape` |
 | `hir/hir.tcl` | HIR data model, ids, `hir::build`, queries |
 | `hir/syntax.tcl` | syntax nodes: HIR's input, and core IR → syntax |
@@ -1852,6 +1863,11 @@ The output is a native ELF executable beside the source, named by removing
 its extension. It prints the program's final value followed by a newline
 (for example, `42`, `"text"`, or `[1, 2]`). Compilation never executes the
 program. Runtime errors go to stderr and return a nonzero exit status.
+
+The executable's `argv()` is the real Linux argument vector of each run
+(`./program one two` gives `["./program", "one", "two"]`, argument zero as the
+launcher supplied it), validated as UTF-8 only if and when the program calls
+it; one executable serves any number of different runs. See ARGV.md.
 
 Every used specialized instance must be **closed**, as reported by
 `-aot-spec`; guarded and open workloads fail with `NATIVE AOT NOT-READY`

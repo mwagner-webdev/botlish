@@ -59,6 +59,9 @@ proc hir::errordecls::apply {decls} {
     set order {}
     foreach decl $decls {
         set name [dict get $decl name]
+        if {[core::native::isBuiltinError $name]} {
+            Fail [dict get $decl nameSpan] "error \"$name\" is already declared (a builtin error of the runtime)"
+        }
         if {[dict exists $seen $name]} {
             Fail [dict get $decl nameSpan] "error \"$name\" is already declared"
         }
@@ -70,8 +73,11 @@ proc hir::errordecls::apply {decls} {
 }
 
 # 1 if NAME is a declared error identity of the program currently being
-# built (the most recent non-empty `apply` call).
+# built (the most recent non-empty `apply` call), or a builtin error the
+# runtime declares (core::native::declareError: InvalidArgumentEncoding, the
+# error of `argv`) -- those are visible in every program, are never part of
+# its own `errorDecls`, and cannot be redeclared.
 proc hir::errordecls::isDeclared {name} {
     variable current
-    return [expr {$name in $current}]
+    return [expr {$name in $current || [core::native::isBuiltinError $name]}]
 }

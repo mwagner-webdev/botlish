@@ -29,6 +29,8 @@
 //! | rt_str_lower           | Str                 | Str                          | yes       |
 //! | rt_str_cat             | Str, Str            | Str                          | yes       |
 //! | rt_str_utf8_bytes      | Str                 | List of Int (0..255); RANGE  | yes       |
+//! | rt_argv                |                     | List of Str; declared        | yes       |
+//! |                        |                     | InvalidArgumentEncoding      |           |
 //! | rt_is_tcl_alpha        | Str (1 scalar)      | Bool; RANGE if not 1 scalar  | no        |
 //! | rt_is_tcl_alnum        | Str (1 scalar)      | Bool; RANGE if not 1 scalar  | no        |
 //! | rt_str_region_is_tcl_alpha | Str,Int,Int (region, 1 scalar) | Bool; RANGE | no    |
@@ -81,7 +83,7 @@ pub fn op_may_allocate(op: OpCode) -> bool {
     matches!(
         op,
         IAdd | ISub | IMul | IAnd | IOr | IXor | IShl | IShr | Substr | DecodeCharAt | ShortToStr | AsciiToStr | StrLower | StrCat
-            | StrUtf8Bytes | ListNew | ListAppend | MutArrayAllocate | MutArrayFreeze | MkOk | MkError
+            | StrUtf8Bytes | Argv | ListNew | ListAppend | MutArrayAllocate | MutArrayFreeze | MkOk | MkError
             | SetFromList
             // Same allocation behavior as SetFromList (same runtime helper,
             // same `new_set` construction) -- only its own `op_may_error`
@@ -96,7 +98,7 @@ pub fn op_may_allocate(op: OpCode) -> bool {
 /// Whether OP can report a Botlish semantic error by returning NO_VALUE.
 pub fn op_may_error(op: OpCode) -> bool {
     use OpCode::*;
-    matches!(op, IMod | IShl | IShr | VEq | Hash | Substr | StrCat | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum
+    matches!(op, IMod | IShl | IShr | VEq | Hash | Substr | StrCat | StrUtf8Bytes | Argv | StrIsTclAlpha | StrIsTclAlnum
         | ListNew | ListGet | ListAppend | MutArrayAllocate | MutArrayGet | MutArraySet | MutArrayCopy | MutArrayFreeze
         | ResultValue | ResultError | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum
         // Construction (dedup) and membership (a linear equal-scan) can
@@ -893,6 +895,48 @@ pub extern "C" fn rt_str_utf8_bytes(p: *mut Vm, s: Value) -> Value {
     r
 }
 
+/// `argv()` (core/process.tcl, ARGV.md): the run's argument snapshot as a
+/// List of Strings, each argument validated as UTF-8 only now, all or
+/// nothing. An invalid argument records the declared builtin error
+/// InvalidArgumentEncoding (its NIR id as the pending declared error, plus
+/// an UNCAUGHT-ERROR fallback for the program boundary, exactly like
+/// `rt_fail_declared`) and returns NO_VALUE: no partial List ever exists.
+/// Strings are built with the canonical one-allocation constructor straight
+/// from the validated bytes and kept in `temp_roots` while the rest of the
+/// vector (and finally the List) allocates, so a collection at any
+/// allocation sees every one of them.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_argv(p: *mut Vm) -> Value {
+    let vm = vm(p);
+    if let Some(index) = vm.argv_status() {
+        vm.declared_error = super::error::ERR_INVALID_ARGUMENT_ENCODING;
+        // Same text `rt_fail_declared` records, so an unhandled argv failure
+        // reads identically to every other backend's (the offending
+        // argument's index is deliberately not part of the error).
+        let _ = index;
+        let message = "uncaught propagated error: <error InvalidArgumentEncoding>".to_string();
+        return vm.fail(RtError::Semantic { kind: "UNCAUGHT-ERROR", message });
+    }
+    let roots = vm.temp_roots.len();
+    let count = vm.argv_raw().len();
+    for i in 0..count {
+        // The argument was validated above: from_utf8 cannot fail, and the
+        // Vec is borrowed only for this copy into the new String.
+        let text = std::str::from_utf8(&vm.argv_raw()[i]).expect("validated UTF-8").to_owned();
+        let s = vm.new_str(&text);
+        if s == NO_VALUE {
+            vm.temp_roots.truncate(roots);
+            return NO_VALUE;
+        }
+        vm.temp_roots.push(s);
+    }
+    let items = vm.temp_roots[roots..].to_vec();
+    let list = vm.new_list(items);
+    vm.temp_roots.truncate(roots);
+    vm.metrics.record_list_copy(count);
+    list
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_str_cat(p: *mut Vm, a: Value, b: Value) -> Value {
     let (x, y) = (str_of(a), str_of(b));
@@ -1409,6 +1453,7 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         StrLower => rt_str_lower(p, a[0]),
         StrCat => rt_str_cat(p, a[0], a[1]),
         StrUtf8Bytes => rt_str_utf8_bytes(p, a[0]),
+        Argv => rt_argv(p),
         StrIsTclAlpha => rt_is_tcl_alpha(p, a[0]),
         StrIsTclAlnum => rt_is_tcl_alnum(p, a[0]),
         ListLen => rt_list_len(p, a[0]),
@@ -1504,6 +1549,7 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_str_lower, 2),
         h!(rt_str_cat, 3),
         h!(rt_str_utf8_bytes, 2),
+        h!(rt_argv, 1),
         h!(rt_is_tcl_alpha, 2),
         h!(rt_is_tcl_alnum, 2),
         h!(rt_str_region_is_tcl_alpha, 4),
@@ -1990,6 +2036,124 @@ mod tests {
         let mut vm = vm();
         let s = str_val(&mut vm, "a\u{e9}\u{1f600}");
         assert_eq!(utf8_bytes_of(&mut vm, s), vec![97, 0xC3, 0xA9, 0xF0, 0x9F, 0x98, 0x80]);
+    }
+
+    // -----------------------------------------------------------------------
+    // argv() (core/process.tcl, ARGV.md): rt_argv validates the raw snapshot
+    // as UTF-8 only when called, all or nothing, with every String rooted
+    // while the vector materializes.
+
+    fn argv_strings(list: Value) -> Vec<String> {
+        list_of(list).items().iter().map(|&s| str_of(s).as_str().to_string()).collect()
+    }
+
+    fn raw(args: &[&[u8]]) -> Vec<Vec<u8>> {
+        args.iter().map(|a| a.to_vec()).collect()
+    }
+
+    #[test]
+    fn argv_default_is_the_synthetic_runner_not_the_process() {
+        let mut vm = vm();
+        let r = rt_argv(&mut *vm);
+        assert_eq!(argv_strings(r), vec!["botlish-runner".to_string()]);
+    }
+
+    #[test]
+    fn argv_valid_vector_round_trips_exactly() {
+        let mut vm = vm();
+        // NFC and NFD spellings of "e acute" stay distinct (no normalization);
+        // an empty argument and a 4-byte scalar survive.
+        vm.set_argv(raw(&["./prog".as_bytes(), "\u{e9}".as_bytes(), "e\u{301}".as_bytes(), b"", "\u{1f600}\u{20ac}".as_bytes()]));
+        let r = rt_argv(&mut *vm);
+        assert_eq!(argv_strings(r), vec!["./prog", "\u{e9}", "e\u{301}", "", "\u{1f600}\u{20ac}"]);
+        // Each element is an ordinary String: character counts are scalars.
+        assert_eq!(str_of(list_of(r).items()[4]).chars, 2);
+        assert!(vm.error.is_none());
+        assert_eq!(vm.declared_error, 0);
+    }
+
+    #[test]
+    fn argv_zero_arguments_is_the_empty_list() {
+        let mut vm = vm();
+        vm.set_argv(Vec::new());
+        let r = rt_argv(&mut *vm);
+        assert_eq!(list_of(r).items().len(), 0);
+    }
+
+    #[test]
+    fn argv_invalid_utf8_is_the_declared_error_and_never_partial() {
+        let mut vm = vm();
+        // Valid, valid, invalid (0xFF), valid: the whole call fails.
+        vm.set_argv(raw(&[b"./prog", b"ok", b"a\xffb", b"later"]));
+        let before = vm.metrics.by_kind[KIND_LIST as usize].live_objects;
+        let r = rt_argv(&mut *vm);
+        assert_eq!(r, NO_VALUE);
+        assert_eq!(vm.declared_error, crate::runtime::error::ERR_INVALID_ARGUMENT_ENCODING);
+        assert_eq!(
+            vm.error.as_ref().map(|e| (e.error_code(), e.message())),
+            Some((vec!["CORE", "SEMANTIC", "UNCAUGHT-ERROR"], "uncaught propagated error: <error InvalidArgumentEncoding>".to_string()))
+        );
+        // No List (and no String of the valid prefix) was ever built.
+        assert_eq!(vm.metrics.by_kind[KIND_LIST as usize].live_objects, before);
+        assert_eq!(vm.metrics.by_kind[KIND_STR as usize].live_objects, 0);
+        // A handled failure leaves the snapshot as it was: the next call
+        // fails the same way.
+        vm.error = None;
+        vm.declared_error = 0;
+        assert_eq!(rt_argv(&mut *vm), NO_VALUE);
+        assert_eq!(vm.declared_error, crate::runtime::error::ERR_INVALID_ARGUMENT_ENCODING);
+    }
+
+    #[test]
+    fn argv_rejects_exactly_what_utf8_rejects() {
+        // Overlong, surrogate, past U+10FFFF, truncated, stray continuation
+        // and lone lead bytes are invalid; the largest scalar is valid.
+        let invalid: &[&[u8]] = &[
+            b"\xc0\x80", b"\xe0\x80\x80", b"\xf0\x80\x80\x80", b"\xed\xa0\x80", b"\xed\xbf\xbf",
+            b"\xf4\x90\x80\x80", b"\xf5\x80\x80\x80", b"\xe2\x82", b"\xf0\x9f\x98", b"\x80", b"\xff", b"\xc1\xbf",
+        ];
+        for bad in invalid {
+            let mut vm = vm();
+            vm.set_argv(raw(&[b"p", bad]));
+            assert_eq!(rt_argv(&mut *vm), NO_VALUE, "{bad:?}");
+        }
+        let mut vm = vm();
+        vm.set_argv(raw(&[b"p", b"\xf4\x8f\xbf\xbf", b"\xef\xbf\xbf"]));
+        let r = rt_argv(&mut *vm);
+        assert_eq!(argv_strings(r), vec!["p", "\u{10ffff}", "\u{ffff}"]);
+    }
+
+    #[test]
+    fn argv_survives_a_collection_at_every_allocation() {
+        let mut vm = vm();
+        vm.heap.set_stress_for_test(true);
+        let args: Vec<Vec<u8>> = (0..64).map(|i| format!("argument-{i}-\u{e9}\u{1f600}").into_bytes()).collect();
+        vm.set_argv(args.clone());
+        let a = rt_argv(&mut *vm);
+        assert_ne!(a, NO_VALUE);
+        vm.temp_roots.push(a);
+        // Allocate a lot in between, then ask again: both Lists are intact.
+        for i in 0..200 {
+            let _ = vm.new_str(&format!("garbage-{i}"));
+        }
+        let b = rt_argv(&mut *vm);
+        assert_ne!(b, NO_VALUE);
+        assert_eq!(vm.temp_roots.len(), 1, "rt_argv must release its temporary roots");
+        let want: Vec<String> = args.iter().map(|a| String::from_utf8(a.clone()).unwrap()).collect();
+        assert_eq!(argv_strings(a), want);
+        assert_eq!(argv_strings(b), want);
+        vm.temp_roots.clear();
+    }
+
+    #[test]
+    fn argv_failure_under_stress_leaves_no_roots_or_objects() {
+        let mut vm = vm();
+        vm.heap.set_stress_for_test(true);
+        vm.set_argv(raw(&[b"a", b"b", b"\xfe"]));
+        assert_eq!(rt_argv(&mut *vm), NO_VALUE);
+        assert!(vm.temp_roots.is_empty());
+        vm.collect_for_test(crate::runtime::metrics::GcReason::Explicit);
+        assert_eq!(vm.metrics.by_kind[KIND_STR as usize].live_objects, 0);
     }
 
     /// rt_int_shl/rt_int_shr over every small/BigInt operand shape, checked

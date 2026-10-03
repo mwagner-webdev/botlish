@@ -1089,6 +1089,12 @@ proc core::compiler::CompileNativeCall {ctxVar e callee name argOps} {
     if {[N $e known] ne ""} {
         return [Op bool [N $e known] bool]
     }
+    if {[dict get $meta errors] ne ""} {
+        # A native with declared errors (`argv`) completes with
+        # propagate-error: only the generic call turns its completion into
+        # compiled code's Tcl completion code 5 (core::runtime::callValue).
+        return [GenericCall ctx $callee $argOps]
+    }
     if {[dict exists $intrinsics $name]} {
         set result [{*}[dict get $intrinsics $name] ctx $name $argOps]
         if {$result ne ""} {

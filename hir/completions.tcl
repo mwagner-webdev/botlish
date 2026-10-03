@@ -589,6 +589,15 @@ proc hir::completions::EvalCall {hirVar ctxVar diagnose enclosing guard e node} 
     lassign [dict get $node target] targetKind target
     if {$targetKind eq {native}} {
         set name [dict get [hir::symbol $hir $target] name]
+        # A native that declares errors (-errors, core/native.tcl: `argv`)
+        # is held to the same legality rule as any other fallible call.
+        set errors [dict get [core::native::metadata $name] errors]
+        if {$errors ne {}} {
+            if {$diagnose} {
+                CheckNativeCallLegality hir $e $name $errors {} $enclosing
+            }
+            MergeErrors ctx $errors
+        }
         set result [hir::range::ConstrainType $hir $e [NativeResultRange $hir $ctx $name $argExprs $argRanges]]
         dict set ctx exprs $e $result
         if {$diagnose} {
@@ -770,6 +779,22 @@ proc hir::completions::CheckStructuralCallLegality {hirVar e calleeType errors h
     }
 }
 
+# CheckCallLegality for a call of the root native NAME with declared ERRORS
+# (core/native.tcl -errors): every one may escape, so the one legality rule
+# is ERRORS - HANDLED subseteq ENCLOSING.
+proc hir::completions::CheckNativeCallLegality {hirVar e name errors handled enclosing} {
+    upvar 1 $hirVar hir
+    dict set hir exprs $e effectiveErrors [lsort -unique $errors]
+    dict set hir exprs $e mayReturnNormally 1
+    foreach error $errors {
+        if {$error ni $handled && $error ni $enclosing} {
+            hir::Diagnose hir UNHANDLED-ERROR [format \
+                {this call of "%s" may produce the declared error "%s", which is neither handled here nor admitted by the enclosing function's own "errors" declaration} \
+                $name $error] $e
+        }
+    }
+}
+
 proc hir::completions::ErrorsPhrase {names} {
     if {$names eq {}} {
         return {an error}
@@ -810,6 +835,16 @@ proc hir::completions::EvalHandle {hirVar ctxVar diagnose enclosing guard e node
             set callResult [hir::range::ConstrainType $hir $call [hir::range::unknown]]
             if {$diagnose} {
                 CheckStructuralCallLegality hir $e $calleeType $errors $handled $enclosing
+            }
+        } elseif {$targetKind eq {native}
+                && [dict get [core::native::metadata [dict get [hir::symbol $hir $target] name]] errors] ne {}} {
+            # A handled call of a native with declared errors (`argv`).
+            set name [dict get [hir::symbol $hir $target] name]
+            set normal 1
+            set errors [dict get [core::native::metadata $name] errors]
+            set callResult [hir::range::ConstrainType $hir $call [hir::range::unknown]]
+            if {$diagnose} {
+                CheckNativeCallLegality hir $e $name $errors $handled $enclosing
             }
         } else {
             set normal 1

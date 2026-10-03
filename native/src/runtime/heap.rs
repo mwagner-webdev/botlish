@@ -68,6 +68,14 @@ impl Heap {
         Heap { objects: Vec::new(), allocated: 0, threshold: min_threshold, min_threshold, collections: 0, stress }
     }
 
+    /// Test hook: collect before every allocation, exactly as
+    /// BOTLISH_NATIVE_GC_STRESS=1 does, for one test's Vm without touching
+    /// the process environment (other tests run concurrently).
+    #[cfg(test)]
+    pub fn set_stress_for_test(&mut self, on: bool) {
+        self.stress = on;
+    }
+
     /// Test hook: no allocation-triggered collection until the next explicit
     /// one (so an allocation-counting test sees only the String's own block,
     /// not the collector's scratch vectors).

@@ -77,6 +77,12 @@
 # test-only "cranelift" backends, which read a test's core IR text into HIR
 # with hir::build and then call native::evalHir.)
 #
+# Process arguments (ARGV.md): `argv()` reads the run's argument snapshot. A run
+# through the driver (evalHir, measure, ...) gets the snapshot of the enclosing
+# core::process::withArgv -- raw bytes, so invalid UTF-8 is expressible -- or the
+# synthetic default `botlish-runner`; it never sees this Tcl process's own argv.
+# A standalone executable reads the real Linux argument vector of every run.
+#
 # Errors: Botlish errors keep their {CORE SEMANTIC KIND} codes. The backend's
 # own failures are {NATIVE UNSUPPORTED ...} (a construct native lowering does
 # not support, with its source location and HIR node), {NATIVE INVALID-NIR},
@@ -150,6 +156,19 @@ proc native::Driver {command nirText args} {
     fconfigure $channel -encoding utf-8 -translation lf
     puts -nonewline $channel $nirText
     close $channel
+    # The run's process argument snapshot (core/process.tcl: the injected
+    # argv of the enclosing core::process::withArgv, else the synthetic
+    # default), as raw bytes -- never this Tcl process's own argv.
+    set argvPath ""
+    if {$command in {run bench batch}} {
+        # Through a file: one command-line argument is capped at 128 KiB,
+        # a large vector is not.
+        lassign [file tempfile argvPath botlish.argv] argvChannel
+        fconfigure $argvChannel -encoding ascii -translation lf
+        puts $argvChannel [core::process::driverArgv]
+        close $argvChannel
+        lappend args --argv-file $argvPath
+    }
     try {
         set pipe [open |[list $binary $command {*}$args $path 2>@1] r]
         fconfigure $pipe -encoding utf-8 -translation lf
@@ -161,6 +180,7 @@ proc native::Driver {command nirText args} {
         }
     } finally {
         file delete $path
+        if {$argvPath ne ""} { file delete $argvPath }
     }
     return [split [string trimright $output \n] \n]
 }

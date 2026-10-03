@@ -111,6 +111,7 @@ namespace eval native::lower {
         lowercase    {op strlower} \
         concat       {op strcat} \
         encode_utf8  {op strutf8bytes} \
+        argv         {op argv} \
         is_tcl_alpha {op strtclalpha} \
         is_tcl_alnum {op strtclalnum} \
         list_length  {op listlen} \
@@ -7756,6 +7757,13 @@ proc native::lower::Unsupported {e what detail} {
 # `errorIds`'s own doc.
 proc native::lower::ErrorId {name} {
     variable errorIds
+    if {[core::native::isBuiltinError $name]} {
+        # The runtime's own builtin errors (core::native::declareError) have
+        # fixed ids far above a program's dense 1-based ones: the runtime
+        # (native/src/runtime/error.rs's BUILTIN_ERROR_ID_BASE) raises them
+        # itself, without any per-program table.
+        return [expr {0x40000000 + [core::native::builtinErrorIndex $name]}]
+    }
     if {![dict exists $errorIds $name]} {
         throw {NATIVE BUG} "native lowering: undeclared error \"$name\" has no assigned id"
     }

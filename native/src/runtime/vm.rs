@@ -28,6 +28,10 @@ use std::cell::RefCell;
 use std::mem::offset_of;
 use std::rc::Rc;
 
+/// The argument vector of a run nobody gave one: a synthetic argument zero
+/// (core::process::defaultArgv), never the launching process's own.
+pub const DEFAULT_ARGV: &[&str] = &["botlish-runner"];
+
 /// Fallback shadow stack capacity in Value slots.
 const SHADOW_STACK_SLOTS: usize = 1 << 22;
 
@@ -138,6 +142,16 @@ pub struct Vm {
     /// Never itself a GC root: an id is a small compile-time constant, not
     /// a heap value.
     pub declared_error: u32,
+    /// The process argument snapshot of this run, as raw bytes exactly as
+    /// the launching process supplied them (ARGV.md): copied here once, at
+    /// startup or by the harness, and never decoded until `argv()` runs.
+    /// Owned by the Vm, so it outlives the C startup array it came from.
+    argv: Vec<Vec<u8>>,
+    /// The index of the first argument of `argv` that is not valid UTF-8
+    /// (`Some(i)`), or `None` when every argument is -- a cache of the
+    /// validation, computed on the first `argv()` call (`argv_status`);
+    /// never observable, and never a GC root (a plain index).
+    argv_invalid: std::cell::OnceCell<Option<usize>>,
     pub temp_roots: Vec<Value>,
     pub info: Rc<ProgramInfo>,
     pub metrics: Metrics,
@@ -195,6 +209,8 @@ impl Vm {
             heap: Heap::new(),
             error: None,
             declared_error: 0,
+            argv: DEFAULT_ARGV.iter().map(|a| a.as_bytes().to_vec()).collect(),
+            argv_invalid: std::cell::OnceCell::new(),
             temp_roots: Vec::new(),
             info,
             metrics: Metrics::new(alloc_mode),
@@ -209,6 +225,25 @@ impl Vm {
                 { None }
             },
         })
+    }
+
+    /// Replaces the argument snapshot with ARGV (raw bytes, one Vec per
+    /// argument, zero arguments allowed). Validation stays lazy: nothing is
+    /// decoded here.
+    pub fn set_argv(&mut self, argv: Vec<Vec<u8>>) {
+        self.argv = argv;
+        self.argv_invalid = std::cell::OnceCell::new();
+    }
+
+    /// The raw argument snapshot.
+    pub fn argv_raw(&self) -> &[Vec<u8>] {
+        &self.argv
+    }
+
+    /// `None` if every argument is valid UTF-8, else the index of the first
+    /// that is not (computed once, then cached).
+    pub fn argv_status(&self) -> Option<usize> {
+        *self.argv_invalid.get_or_init(|| self.argv.iter().position(|a| std::str::from_utf8(a).is_err()))
     }
 
     /// Installs the constant table (static objects owned by the VM).

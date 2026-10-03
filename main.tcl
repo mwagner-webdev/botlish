@@ -2,7 +2,8 @@
 #
 #   tclsh9.0 main.tcl [-backend interp|compile|cranelift|cranelift-generic] [-code] [-hir] [-ast]
 #                    [-aot] [-aot-data] [-aot-spec] [-emit-nir] [-emit-clif]
-#                    [-emit-native-executable] [FILE.bot|FILE.hir|FILE.ir ...]
+#                    [-emit-native-executable] [-argv TEXT]... [-argv-hex HEX]...
+#                    [-argv-none] [FILE.bot|FILE.hir|FILE.ir ...]
 #
 # Runs the given program files (default: every examples/*.ir) and prints
 # each program's value, with runtime evidence shown as "text"#{Type}. With
@@ -31,6 +32,16 @@
 # (DIRECT-HIR-NATIVE-PATH.md). A .ir file is core IR text: it runs on
 # interp and compile only, and is rejected by the native backends and by
 # -emit-native-executable (use the .hir fixtures of examples/hir/ instead).
+#
+# -argv TEXT / -argv-hex HEX / -argv-none give the process argument vector
+# `argv()` reads (core/process.tcl, ARGV.md): each -argv appends one argument
+# (its UTF-8 bytes, argument zero first), each -argv-hex one argument given as
+# the hex of its raw bytes (so invalid UTF-8 is expressible; the empty string
+# is the empty argument), and -argv-none selects the empty vector. Without any
+# of them the vector is the synthetic one-element default (`botlish-runner`),
+# never this runner's own arguments. The same vector reaches every backend.
+# A standalone executable ignores all three: it reads its own process
+# arguments each time it runs.
 #
 # For every Block in the result (directly or as a list element) the runner
 # also prints the refinements visible in the Block's captured environment, so
@@ -119,7 +130,7 @@ proc runFile {path showCode showHir showAst showAot showNative} {
         puts "   error: $message ([dict get $options -errorcode])"
         return 1
     }
-    if {[catch $run value options]} {
+    if {[catch {core::process::withArgv $::injectedArgv $run} value options]} {
         puts "   error: $value ([dict get $options -errorcode])"
         return 1
     }
@@ -168,6 +179,8 @@ set showHir 0
 set showAst 0
 set showAot ""
 set showNative ""
+set injectedArgv [core::process::defaultArgv]
+set injectedArgvGiven 0
 for {set i 0} {$i < [llength $argv]} {incr i} {
     set arg [lindex $argv $i]
     switch -- $arg {
@@ -192,6 +205,16 @@ for {set i 0} {$i < [llength $argv]} {incr i} {
         -emit-nir { set showNative nir }
         -emit-clif { set showNative clif }
         -emit-native-executable { set showNative executable }
+        -argv - -argv-hex {
+            if {!$injectedArgvGiven} { set injectedArgv {}; set injectedArgvGiven 1 }
+            set value [lindex $argv [incr i]]
+            if {$arg eq "-argv"} {
+                lappend injectedArgv [core::process::bytesOfText $value]
+            } else {
+                lappend injectedArgv [binary decode hex $value]
+            }
+        }
+        -argv-none { set injectedArgv {}; set injectedArgvGiven 1 }
         default  { lappend files $arg }
     }
 }

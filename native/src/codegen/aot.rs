@@ -32,7 +32,10 @@ fn startup(program: &Program, object: &ObjectProgram) -> String {
     s.push_str(
         "}\nextern \"C\" fn entry(vm: *mut Vm) -> Value {\n\
         let f: aot::ProgramEntry = unsafe { std::mem::transmute(botlish_fn_0 as *const ()) };\n\
-        f(vm)\n}\nfn main() { std::process::exit(aot::run(|| {\n\
+        f(vm)\n}\nfn main() {\n\
+        use std::os::unix::ffi::OsStringExt;\n\
+        let argv: Vec<Vec<u8>> = std::env::args_os().map(|a| a.into_vec()).collect();\n\
+        std::process::exit(aot::run(argv, || {\n\
         let info = ProgramInfo { functions: vec![\n",
     );
     for f in &program.functions {

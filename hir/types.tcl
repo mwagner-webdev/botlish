@@ -410,7 +410,8 @@ proc hir::types::FnGlb {a b} {
 # The canonical structural function type of callable type TYPE: TYPE itself
 # for a structural type; for an exact block, its contract and result type;
 # for an exact native, its registry signature: its fixed arity, its
-# -result-type, no errors (natives declare none) -- and every argument any.
+# -result-type, its -errors (none for every native but `argv`,
+# core/process.tcl) -- and every argument any.
 # A native's -param-types are *run-time-checked requirements* (the native
 # validates its own arguments on every call, raising TYPE: core/native.tcl's
 # "types the implementation requires"), never static proof obligations a
@@ -436,7 +437,7 @@ proc hir::types::structuralOf {type} {
         if {$arity eq "*"} {
             return ""
         }
-        return [MakeFn [lrepeat $arity any] [dict get $meta resultType] {}]
+        return [MakeFn [lrepeat $arity any] [dict get $meta resultType] [dict get $meta errors]]
     }
     if {[IsExactBlock $type]} {
         lassign $type _ e arity result contract
@@ -1365,6 +1366,13 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result} {
             }
             return $result
         }
+        element-type {
+            # {element-type TYPE}: this native's result is a List whose every
+            # element has type TYPE -- a fixed fact about the native itself
+            # (argv's Strings, core/process.tcl), like `typed` below but for
+            # a plain semantic type. MakeList takes the canonical type.
+            return [MakeList [core::type::normalize [lindex $shape 1]]]
+        }
         typed {
             # {typed NAME LO HI}: this native's result is a List whose
             # every element is an Int in LO..HI -- a fixed, argument-
@@ -2087,9 +2095,10 @@ proc hir::types::Call {hirVar ctxVar e} {
     dict set hir exprs $e known $known
     # The declared errors this call may propagate (EXPLICIT-ERROR-
     # COMPLETIONS.md), for hir/errorsets.tcl. Only an exact, directly-known
-    # callee (target {block ExprId}) or a structural one (its contract's
-    # declared errors) can ever be charged with a nonempty set here: a
-    # native never declares one, and any other callee (an unresolved
+    # callee (target {block ExprId}, or a root native whose registry entry
+    # declares -errors: `argv`) or a structural one (its contract's declared
+    # errors) can ever be charged with a nonempty set here, and any other
+    # callee (an unresolved
     # dynamic dispatch through any/a bare kind) is sound to treat as
     # producing none, because hir/callables.tcl's escape audit (widened to
     # cover an error-bearing block exactly like a typed-parameter-bearing
@@ -2100,6 +2109,10 @@ proc hir::types::Call {hirVar ctxVar e} {
     set calleeErrors {}
     if {[lindex $target 0] eq "block"} {
         set calleeErrors [dict get $hir exprs [lindex $target 1] declaredErrors]
+    } elseif {[lindex $target 0] eq "native"} {
+        # A root native declares errors only through its registry entry
+        # (-errors: `argv`'s InvalidArgumentEncoding).
+        set calleeErrors [dict get [core::native::metadata [dict get [hir::symbol $hir [lindex $target 1]] name]] errors]
     } elseif {[IsFn $calleeType]} {
         # A structural callee's declared error contract: every error it
         # permits may escape this call, since which implementation runs

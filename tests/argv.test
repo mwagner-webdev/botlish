@@ -1,0 +1,867 @@
+# argv.test -- `argv()`, the process argument vector (ARGV.md).
+#
+#   argv() -> List[String] errors InvalidArgumentEncoding
+#
+# An ordinary callable root native: the Linux argument vector *including
+# element zero*, every argument validated as strict UTF-8 only when argv() is
+# called, all or nothing, failing with the declared error
+# InvalidArgumentEncoding. In-process backends read an injected raw argv
+# (core::process::withArgv: a list of byte strings, so invalid UTF-8 is
+# expressible); a standalone executable reads the real Linux argument vector
+# of each run.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+set argvBackends {interp compile cranelift-generic cranelift}
+
+# ---------------------------------------------------------------------------
+# Helpers
+
+proc T {text} { return [core::process::bytesOfText $text] }
+proc H {hex} { return [binary decode hex $hex] }
+
+proc argvHir {text {strict 1}} {
+    return [surface::compile $text argv-test.bot -strict $strict]
+}
+
+# The outcome of HIR on every backend, with VEC injected: a list of
+# {value SHOWN LOG} / {error CODE MESSAGE LOG}.
+proc outcomesOf {hir vec} {
+    return [core::process::withArgv $vec {
+        lmap backend $::argvBackends {outcomeUnderHir $backend $hir}
+    }]
+}
+
+# The one value all four backends agree on for source TEXT run with argv VEC,
+# or a description of the disagreement.
+proc agree {text vec {strict 1}} {
+    set outcomes [outcomesOf [argvHir $text $strict] $vec]
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        return "DISAGREE: [join [lmap b $::argvBackends o $outcomes {list $b $o}] { / }]"
+    }
+    set outcome [lindex $outcomes 0]
+    if {[lindex $outcome 0] ne "value"} {
+        return "ERROR: $outcome"
+    }
+    return [lindex $outcome 1]
+}
+
+# The diagnostic kinds of source TEXT.
+proc diagKinds {text} {
+    return [lsort -unique [lmap d [hir::diagnostics [argvHir $text 0]] {dict get $d kind}]]
+}
+
+# Shown Botlish List[String] of the Tcl strings TEXTS.
+proc shownStrings {texts} {
+    return [core::value::show [core::value::listOf [lmap t $texts {core::value::str $t}]] 1]
+}
+
+set handled {args = argv():
+    on InvalidArgumentEncoding:
+        ["fallback"]
+args}
+
+# ---------------------------------------------------------------------------
+# Surface: an ordinary callable root native, its error declared like any other
+
+test argv-registered {argv is a root native: arity 0, one declared builtin error, not context-free} -body {
+    set meta [core::native::metadata argv]
+    list [dict get $meta arity] [dict get $meta errors] [dict get $meta contextFree] \
+        [dict get $meta paramTypes] [dict get $meta resultType] [dict get $meta resultShape] \
+        [core::native::isBuiltinError InvalidArgumentEncoding] \
+        [expr {"argv" in [core::native::names]}]
+} -result {0 InvalidArgumentEncoding 0 {} list {element-type str} 1 1}
+
+test argv-no-other-process-natives {the milestone adds argv only: no env, cwd, stdin, pid or main convention} -body {
+    set names [core::native::names]
+    set found {}
+    foreach name {env getenv cwd getcwd stdin stdout pid getpid exe executable_path args main} {
+        if {$name in $names} { lappend found $name }
+    }
+    set found
+} -result {}
+
+test argv-error-name-is-builtin {a program cannot redeclare the builtin error} -body {
+    catch {surface::compile "error InvalidArgumentEncoding\n1" argv-test.bot} message
+    set message
+} -match glob -result {*error "InvalidArgumentEncoding" is already declared (a builtin error of the runtime)*}
+
+test argv-builtin-error-visible-without-declaration {`on InvalidArgumentEncoding` needs no `error` declaration} -body {
+    diagKinds $::handled
+} -result {}
+
+test argv-unhandled-is-rejected-statically {an unhandled argv() is the ordinary UNHANDLED-ERROR diagnostic} -body {
+    list [diagKinds "args = argv()\nargs"] \
+        [catch {argvHir "args = argv()\nargs"} message] \
+        [string match {*this call of "argv" may produce the declared error "InvalidArgumentEncoding"*} $message]
+} -result {UNHANDLED-ERROR 1 1}
+
+test argv-fn-must-declare-the-error {a function calling argv() unhandled must declare errors InvalidArgumentEncoding} -body {
+    list [diagKinds "fn f() -> list:\n    argv()\nf()"] \
+        [diagKinds "fn f() -> list errors InvalidArgumentEncoding:\n    argv()\nr = f()\nr"]
+} -result {UNHANDLED-ERROR UNHANDLED-ERROR}
+
+test argv-forwarding-fn-handled-by-caller {a function that declares the error forwards it to a handler} -body {
+    set source "fn f() -> list errors InvalidArgumentEncoding:\n    argv()\nr = f():\n    on InvalidArgumentEncoding:\n        \[\"caller\"\]\nr"
+    list [diagKinds $source] \
+        [agree $source [list [T ./p] [T a]]] \
+        [agree $source [list [T ./p] [H ff]]]
+} -result {{} {["./p", "a"]} {["caller"]}}
+
+test argv-no-new-error-requirement-without-a-call {a program that never calls argv() acquires no error requirement} -body {
+    set hir [argvHir "fn inc(x: int) -> int:\n    x + 1\ninc(41)"]
+    set declared {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "block"} { lappend declared [dict get $node declaredErrors] }
+    }
+    list $declared [hir::diagnostics $hir]
+} -result {{{}} {}}
+
+test argv-only-a-call-introduces-the-error {referencing argv without calling it needs no handler} -body {
+    list [diagKinds "f = argv\n1"] [diagKinds "f = argv()\n1"]
+} -result {{} UNHANDLED-ERROR}
+
+test argv-shadowing-follows-lexical-rules {a program may bind the name argv: ordinary lexical scoping, nothing unshadowable} -body {
+    list [agree "argv = \[1, 2\]\nargv" [list [T ./p]]] \
+        [agree "fn argv() -> int:\n    7\nargv()" [list [T ./p]]]
+} -result {{[1, 2]} 7}
+
+test argv-not-a-magic-variable {the bare name denotes the callable, never a populated List} -body {
+    agree "\[argv\]" [list [T ./p] [T a] [T b]]
+} -result {[<native argv>]}
+
+test argv-first-class-value-keeps-its-contract {a bound argv is called through the same declared-error contract} -body {
+    set source "f = argv\nr = f():\n    on InvalidArgumentEncoding:\n        \[\"h\"\]\nr"
+    list [diagKinds $source] [agree $source [list [T ./p] [T a]]] [agree $source [list [T ./p] [H fe]]]
+} -result {{} {["./p", "a"]} {["h"]}}
+
+test argv-error-bearing-callable-escape-is-rejected {argv cannot be erased into an untyped higher-order parameter: its error obligation would be lost} -body {
+    diagKinds "fn apply0(g):\n    g()\nr = apply0(argv)\nr"
+} -result TYPE
+
+test argv-structural-function-type-carries-the-error {Fn{... errors: [InvalidArgumentEncoding]} accepts argv; one without the error does not} -body {
+    set good "fn apply0(g: Fn{args: \[\], return: list, errors: \[InvalidArgumentEncoding\]}) -> list errors InvalidArgumentEncoding:\n    g()\nr = apply0(argv):\n    on InvalidArgumentEncoding:\n        \[\"via-fn\"\]\nr"
+    set bad "fn apply0(g: Fn{args: \[\], return: list}) -> list:\n    g()\nr = apply0(argv)\nr"
+    list [diagKinds $good] [agree $good [list [T ./p] [T a]]] [agree $good [list [T ./p] [H ff]]] [diagKinds $bad]
+} -result {{} {["./p", "a"]} {["via-fn"]} TYPE}
+
+test argv-result-type-is-list-of-string {the call is statically a List[String]: a List[Int] consumer is rejected, a List[str] one accepted} -body {
+    set accepts "fn count(args: List\[str\]) -> int:\n    list_length(args)\na = argv():\n    on InvalidArgumentEncoding:\n        \[\]\ncount(a)"
+    set rejects "fn count(args: List\[int\]) -> int:\n    list_length(args)\na = argv():\n    on InvalidArgumentEncoding:\n        \[\]\ncount(a)"
+    set hir [argvHir $accepts]
+    set callTypes {}
+    foreach e [hirFind $hir call] {
+        lassign [hir::get $hir $e target] kind symbol
+        if {$kind eq "native" && [dict get [hir::symbol $hir $symbol] name] eq "argv"} {
+            lappend callTypes [hir::types::show [hir::typeOf $hir $e]]
+        }
+    }
+    list [diagKinds $accepts] [diagKinds $rejects] $callTypes
+} -result {{} TYPE {{List[str]}}}
+
+test argv-module-binding-initializer-is-rejected {argv is run-time input, never a module binding's value} -body {
+    set saved $::core::libraryDir
+    set dir [makeDirectory argv-scratch-lib]
+    set ::core::libraryDir $dir
+    try {
+        set channel [open [file join $dir pm.bot] w]
+        puts $channel "namespace pm\n\nvalue = argv():\n    on InvalidArgumentEncoding:\n        \[\]\nfn get() -> list:\n    value"
+        close $channel
+        set channel [open [file join $dir main.bot] w]
+        puts $channel "pm::get()"
+        close $channel
+        set hir [surface::readProgramFile [file join $dir main.bot] -strict 0]
+        lmap d [hir::diagnostics $hir] {dict get $d kind}
+    } finally {
+        set ::core::libraryDir $saved
+        removeDirectory argv-scratch-lib
+    }
+} -result {MODULE-CONTEXT}
+
+# ---------------------------------------------------------------------------
+# Semantics, on every in-process backend
+
+test argv-basic-including-argument-zero {argv() is ["./program", "alpha", "beta"] for ./program alpha beta: argument zero stays} -body {
+    agree $::handled [list [T ./program] [T alpha] [T beta]]
+} -result {["./program", "alpha", "beta"]}
+
+test argv-zero-is-the-supplied-invocation-argument {argument zero is returned verbatim: no realpath, no absolute path, no normalization} -body {
+    set program "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\nlist_get(args, 0)"
+    list [agree $program [list [T ../up/./x//y/..]]] \
+        [agree $program [list [T "  spaced name  "]]] \
+        [agree $program [list [T ""]]] \
+        [agree $program [list [T /proc/self/exe]]] \
+        [agree $program [list [T ä€]]]
+} -result {{"../up/./x//y/.."} {"  spaced name  "} {""} {"/proc/self/exe"} {"ä€"}}
+
+test argv-empty-vector-is-the-empty-list {argc == 0: argv() is [] (no synthetic argument zero)} -body {
+    list [agree $::handled {}] [agree "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\nlist_length(args)" {}]
+} -result {{[]} 0}
+
+test argv-empty-string-arguments-are-preserved {./program "" is ["./program", ""]} -body {
+    list [agree $::handled [list [T ./program] [T ""]]] \
+        [agree $::handled [list [T ""] [T ""] [T x] [T ""]]]
+} -result {{["./program", ""]} {["", "", "x", ""]}}
+
+test argv-valid-non-ascii-round-trips-exactly {accented, euro, ellipsis, emoji, CJK, ZWJ and combining sequences, no normalization} -body {
+    set args [list ä € … \U0001F600 中文漢字 "é" "é" \
+        "\U0001F468‍\U0001F469‍\U0001F467"]
+    set vec [list [T ./p]]
+    foreach a $args { lappend vec [T $a] }
+    set text "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\nargs"
+    set got [agree $text $vec]
+    # NFD "é" (index 6) and NFC "é" (index 7) stay different.
+    list [expr {$got eq [shownStrings [concat ./p $args]]}] \
+        [agree "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\nlist_get(args, 6) == list_get(args, 7)" $vec]
+} -result {1 false}
+
+test argv-no-unicode-normalization {NFC and NFD spellings are different Strings with their own scalar counts} -body {
+    set text "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\n\[length(list_get(args, 1)), length(list_get(args, 2)), list_get(args, 1) == list_get(args, 2)\]"
+    agree $text [list [T ./p] [T "é"] [T "é"]]
+} -result {[1, 2, false]}
+
+test argv-elements-are-ordinary-strings {an argv element works with every ordinary String operation} -body {
+    set text "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\ns = list_get(args, 1)\n\[length(s), substring(s, 1, 3), lowercase(s), concat(s, \"!\"), s == \"ÄÖü😀x\", eq(s, \"ÄÖü😀x\")\]"
+    agree $text [list [T ./p] [T "ÄÖü😀x"]]
+} -result {[5, "Öü", "äöü😀x", "ÄÖü😀x!", true, true]}
+
+test argv-invalid-utf8-is-the-declared-error {an invalid argument fails the call with InvalidArgumentEncoding and the handler runs} -body {
+    list [agree $::handled [list [T ./p] [H ff]]] \
+        [agree $::handled [list [T ./p] [T ok] [H 6162ff6364]]] \
+        [agree $::handled [list [H 80]]]
+} -result {{["fallback"]} {["fallback"]} {["fallback"]}}
+
+test argv-no-replacement-characters-or-lossy-decoding {no U+FFFD, Latin-1 or locale conversion: invalid bytes are a boundary failure} -body {
+    set program "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\nargs"
+    set results {}
+    foreach bytes {ff fe c0 c080 e0 e2 e282 f0 f09f f09f98 80 bf eda080 edbfbf f4908080 f5808080 c1bf e08080 f0808080} {
+        lappend results [agree $program [list [T ./p] [H $bytes]]]
+    }
+    lsort -unique $results
+} -result {{["fallback"]}}
+
+test argv-error-boundary-matches-utf8-exactly {the boundary accepts the extremes of UTF-8 and rejects the neighbouring invalid forms} -body {
+    set program "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\nlength(list_get(args, 1))"
+    list \
+        [agree $program [list [T ./p] [H f48fbfbf]]] \
+        [agree $program [list [T ./p] [H efbfbf]]] \
+        [agree $program [list [T ./p] [H c280]]] \
+        [agree $program [list [T ./p] [H ed9fbf]]] \
+        [agree $program [list [T ./p] [H ee8080]]] \
+        [agree $program [list [T ./p] [H f0908080]]]
+} -result {1 1 1 1 1 1}
+
+test argv-whole-call-fails-no-partial-list {valid prefix, invalid later argument: the call errors and no List escapes} -body {
+    set program "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\nargs"
+    list [agree $program [list [T ./p] [T one] [H ff] [T four]]] \
+        [agree $program [list [T ./p] [T one] [T two] [H c3]]]
+} -result {{["fallback"]} {["fallback"]}}
+
+test argv-program-ignoring-argv-runs-under-invalid-host-argv {no startup validation: a program that never calls argv() runs normally} -body {
+    list [agree "main_value = 42\nmain_value" [list [T ./p] [H ff] [H 80fe]]] \
+        [agree "fn f(x: int) -> int:\n    x * 2\nf(21)" [list [H ff]]]
+} -result {42 42}
+
+test argv-decoding-is-an-effect-of-the-call-not-startup {work before argv() runs first: its own failure wins over the later argv() failure} -body {
+    set common "error BelowRange\nfn do_something(n: int) -> int errors BelowRange:\n    if n < 0:\n        fail BelowRange\n    else:\n        n\nfn both(n: int) -> list errors BelowRange, InvalidArgumentEncoding:\n    x = do_something(n)\n    args = argv()\n    \[x, args\]\n"
+    set tail "    on BelowRange:\n        \[\"below\"\]\n    on InvalidArgumentEncoding:\n        \[\"enc\"\]\nr"
+    # n depends on the run: argv() falling back to [] gives -1 (do_something
+    # fails first, before both() ever reaches its own argv()); a two-element
+    # vector gives 1.
+    set dynamic "${common}args0 = argv():\n    on InvalidArgumentEncoding:\n        \[\]\nr = both(list_length(args0) - 1):\n$tail"
+    set constant "${common}r = both(5):\n$tail"
+    set bad [list [T ./p] [H ff]]
+    set good [list [T ./p] [T a]]
+    list [agree $dynamic $bad] [agree $dynamic $good] [agree $constant $bad] [agree $constant $good]
+} -result {{["below"]} {[1, ["./p", "a"]]} {["enc"]} {[5, ["./p", "a"]]}}
+
+test argv-stable-snapshot-within-one-run {repeated calls observe the same arguments} -body {
+    set text "a = argv():\n    on InvalidArgumentEncoding:\n        \[\"x\"\]\nb = argv():\n    on InvalidArgumentEncoding:\n        \[\"y\"\]\n\[a == b, a, b\]"
+    agree $text [list [T ./p] [T "α β"] [T ""]]
+} -result {[true, ["./p", "α β", ""], ["./p", "α β", ""]]}
+
+test argv-invalid-fails-on-every-call {a handled failure does not change the snapshot: the next call fails the same way} -body {
+    set text "a = argv():\n    on InvalidArgumentEncoding:\n        \[\"first\"\]\nb = argv():\n    on InvalidArgumentEncoding:\n        \[\"second\"\]\n\[a, b\]"
+    agree $text [list [T ./p] [H ff]]
+} -result {[["first"], ["second"]]}
+
+test argv-different-runs-different-snapshots {one compiled program, several injected vectors, each run sees its own} -body {
+    set hir [argvHir "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\nargs"]
+    set results {}
+    foreach vec [list [list [T a]] [list [T b] [T c]] [list [H ff]] {}] {
+        lappend results [lsort -unique [lmap o [outcomesOf $hir $vec] {lindex $o 1}]]
+    }
+    set results
+} -result {{{["a"]}} {{["b", "c"]}} {{["fallback"]}} {{[]}}}
+
+test argv-unhandled-at-runtime-is-the-ordinary-uncaught-error {a non-strict program with an unhandled failing argv() raises UNCAUGHT-ERROR on every backend} -body {
+    set hir [hir::build {{call {ref argv}}} -strict 0]
+    set results [outcomesOf $hir [list [T ./p] [H ff]]]
+    list [llength [lsort -unique $results]] [lindex $results 0 0] [lindex $results 0 1] [lindex $results 0 2]
+} -result {1 error {CORE SEMANTIC UNCAUGHT-ERROR} {uncaught propagated error: <error InvalidArgumentEncoding>}}
+
+test argv-wrong-arity-is-the-ordinary-arity-error {argv takes no arguments: argv(1) is the same ARITY error everywhere} -body {
+    set outcomes [outcomesOf [argvHir "r = argv(1):\n    on InvalidArgumentEncoding:\n        \[\]\nr" 0] [list [T ./p]]]
+    list [llength [lsort -unique $outcomes]] [lindex $outcomes 0 0] [lindex $outcomes 0 1] [lindex $outcomes 0 2]
+} -result {1 error {CORE SEMANTIC ARITY} {argv expects 0 argument(s), got 1}}
+
+test argv-core-ir-call {argv is an ordinary root name of core IR too} -body {
+    set exprs {{call {ref list_length} {call {ref argv}}}}
+    set hir [hir::build $exprs -strict 0]
+    list [lindex [lindex [outcomesOf $hir [list [T ./p] [T a] [T b]]] 0] 1]
+} -result {3}
+
+# ---------------------------------------------------------------------------
+# The injection layer
+
+test argv-default-argv-is-synthetic-not-the-runner's {with no injection the snapshot is the one synthetic argument zero, never tests/all.tcl's own argv} -body {
+    set hir [argvHir $::handled]
+    set results [lmap backend $::argvBackends {lindex [outcomeUnderHir $backend $hir] 1}]
+    list [lsort -unique $results] [core::process::defaultArgv] [expr {$::argv0 ne "botlish-runner"}]
+} -result {{{["botlish-runner"]}} botlish-runner 1}
+
+test argv-with-argv-restores-the-previous-snapshot {nesting, errors in the script and the default after} -body {
+    set seen {}
+    lappend seen [core::process::snapshot]
+    core::process::withArgv {outer} {
+        lappend seen [core::process::snapshot]
+        core::process::withArgv {inner1 inner2} {
+            lappend seen [core::process::snapshot]
+        }
+        catch {core::process::withArgv {boom} { error x }}
+        lappend seen [core::process::snapshot]
+    }
+    lappend seen [core::process::snapshot]
+    set seen
+} -result {botlish-runner outer {inner1 inner2} outer botlish-runner}
+
+test argv-injection-is-bytes-not-text {each element is a byte string: characters must be 1..255, so text must be encoded first} -body {
+    list [catch {core::process::withArgv [list "€"] {}} m1] [string match {*not a byte string*} $m1] \
+        [catch {core::process::withArgv [list "a\x00b"] {}} m2] \
+        [catch {core::process::withArgv [list [T "€"] [H ff00ff00][string range x 0 -1]] {}} m3]
+} -result {1 1 1 1}
+
+test argv-injection-expresses-invalid-utf8 {the injected representation distinguishes valid from invalid bytes exactly} -body {
+    core::process::withArgv [list [T ./p] [H ff]] {
+        catch {core::evalProgram [hir::lower [argvHir "args = argv()\nargs" 0]]} message options
+        dict get $options -errorcode
+    }
+} -result {CORE SEMANTIC UNCAUGHT-ERROR}
+
+test argv-injection-is-per-run-not-global {two programs with different vectors in one host process do not interfere} -body {
+    set hir [argvHir $::handled]
+    set a [core::process::withArgv [list [T first]] { lindex [outcomeUnderHir cranelift $hir] 1 }]
+    set b [core::process::withArgv [list [T second] [T x]] { lindex [outcomeUnderHir interp $hir] 1 }]
+    set c [core::process::withArgv [list [T first]] { lindex [outcomeUnderHir compile $hir] 1 }]
+    list $a $b $c
+} -result {{["first"]} {["second", "x"]} {["first"]}}
+
+test argv-driver-syntax-is-exact {the native driver's --argv text carries every byte, empty arguments and the empty vector} -body {
+    list [core::process::withArgv [list [T ab] [H ff01ff] [T ""]] { core::process::driverArgv }] \
+        [core::process::withArgv {} { core::process::driverArgv }]
+} -result {x6162,xff01ff,x {}}
+
+test argv-native-driver-rejects-malformed-argv {a malformed --argv is a usage error, never a panic} -body {
+    set nir [native::nir [argvHir "1"]]
+    lassign [file tempfile path botlish.nir] channel
+    puts -nonewline $channel $nir
+    close $channel
+    set results {}
+    foreach bad {x6 y61 x6g xff,zz} {
+        set rc [catch {exec [native::binary] run --argv $bad $path 2>@1} output]
+        lappend results [string match {*usage:*} $output]
+    }
+    file delete $path
+    set results
+} -result {1 1 1 1}
+
+# ---------------------------------------------------------------------------
+# No compile-time capture, no constant folding
+
+test argv-never-captured-at-compile-time {the compiled/lowered program never contains the argv it was compiled under} -body {
+    set marker "SECRET-ARGV-MARKER-7f3a9"
+    set hir [argvHir $::handled]
+    core::process::withArgv [list [T $marker] [T "${marker}2"]] {
+        set nir [native::nir $hir]
+        set generic [native::nir $hir -specialize 0]
+        set ir [hir::lower $hir]
+        set code [core::compiler::generatedCode $ir]
+        set hirText [hir::format $hir]
+    }
+    list [string first $marker $nir] [string first $marker $generic] [string first $marker $ir] \
+        [string first $marker $code] [string first $marker $hirText]
+} -result {-1 -1 -1 -1 -1}
+
+test argv-contents-and-length-are-not-static-facts {the compiler knows List[str] and the error, nothing about length or contents} -body {
+    set hir [argvHir "args = argv():\n    on InvalidArgumentEncoding:\n        \[\]\nn = list_length(args)\nfirst = list_get(args, 0)\n\[n, first\]" ]
+    # Neither argv() nor list_length/list_get of it is an exactly known
+    # value (hir/exactvalue.tcl): no length, no element, no argument zero.
+    set facts {}
+    foreach e [hirFind $hir call] {
+        lassign [hir::get $hir $e target] kind symbol
+        if {$kind eq "native" && [dict get [hir::symbol $hir $symbol] name] in {argv list_length list_get}} {
+            lappend facts [lindex [hir::exact::Of $hir $e] 0]
+        }
+    }
+    list [llength $facts] [lsort -unique $facts]
+} -result {3 {{}}}
+
+test argv-different-lengths-same-compiled-program {a program indexing argv: out-of-range depends on this run's vector only} -body {
+    set text "args = argv():\n    on InvalidArgumentEncoding:\n        \[\]\nlist_get(args, 1)"
+    set hir [argvHir $text]
+    set one [outcomesOf $hir [list [T ./p] [T here]]]
+    set zero [outcomesOf $hir [list [T ./p]]]
+    list [lsort -unique [lmap o $one {lindex $o 1}]] [lsort -unique [lmap o $zero {lrange $o 0 2}]]
+} -result {{{"here"}} {{error {CORE SEMANTIC RANGE} {list_get: index 1 is outside 0..0}}}}
+
+test argv-nir-uses-the-op-and-fixed-builtin-error-id {NIR: a plain `op argv` with the builtin error's fixed id, no program-specific table entry} -body {
+    set nir [native::nir [argvHir $::handled]]
+    list [regexp {= op argv @} $nir] [regexp {declarederroreq 1073741824} $nir]
+} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# A differential program over argv, and focused fuzzing
+
+set transformProgram {fn shout(s: str) -> str:
+    concat(lowercase(s), "!")
+args = argv():
+    on InvalidArgumentEncoding:
+        ["<invalid>"]
+lens = loop a in args:
+    length(a)
+shouted = loop a in args:
+    shout(a)
+[args, lens, shouted]}
+
+test argv-differential-transform-program {args = argv(); loop arg in args: transform(arg): all four backends agree and echo the injected vector} -body {
+    set texts [list ./Prog "ÄB" x "" "q\"uote\\back" "tab\there" \U0001F600中]
+    agree $::transformProgram [lmap t $texts {T $t}]
+} -result {[["./Prog", "ÄB", "x", "", "q\"uote\\back", "tab\there", "😀中"], [6, 2, 1, 0, 11, 8, 2], ["./prog!", "äb!", "x!", "!", "q\"uote\\back!", "tab\there!", "😀中!"]]}
+
+proc randomScalar {} {
+    switch [expr {int(rand() * 8)}] {
+        0 - 1 - 2 { return [format %c [expr {0x20 + int(rand() * 95)}]] }
+        3 { return [format %c [expr {0xa0 + int(rand() * 96)}]] }
+        4 { return [format %c [expr {0x100 + int(rand() * (0xd800 - 0x100))}]] }
+        5 { return [format %c [expr {0xe000 + int(rand() * (0xfffe - 0xe000))}]] }
+        6 { return [format %c [expr {0x10000 + int(rand() * (0x110000 - 0x10000))}]] }
+        7 { return [lindex [list "\"" "\\" "'" " " "\t" "\n" "\$" "\[" "\]" "{" "}" ";"] [expr {int(rand() * 12)}]] }
+    }
+}
+
+proc randomText {n} {
+    set s ""
+    for {set i 0} {$i < $n} {incr i} { append s [randomScalar] }
+    return $s
+}
+
+# A random valid argument vector (as Tcl texts): zero or few or many
+# arguments of every flavor.
+proc randomValidVector {} {
+    set r [expr {rand()}]
+    if {$r < 0.07} {
+        set count 0
+    } elseif {$r < 0.12} {
+        set count [expr {100 + int(rand() * 300)}]
+    } else {
+        set count [expr {1 + int(rand() * 7)}]
+    }
+    set args {}
+    for {set i 0} {$i < $count} {incr i} {
+        switch [expr {int(rand() * 9)}] {
+            0 { lappend args "" }
+            1 { lappend args [string map {{ } -} [randomText [expr {1 + int(rand() * 12)}]]] }
+            2 { lappend args "--flag=value[expr {int(rand() * 100)}]" }
+            3 { lappend args [randomText [expr {1 + int(rand() * 8)}]] }
+            4 { lappend args [randomText [expr {1500 + int(rand() * 3000)}]] }
+            5 { if {$args ne ""} { lappend args [lindex $args end] } else { lappend args repeat } }
+            6 { lappend args "a b\tc  d" }
+            7 { lappend args "\"q\" 'q' \\\\ \\n \$HOME %s %d" }
+            8 { lappend args "path/to/file.[expr {int(rand() * 1000)}]" }
+        }
+    }
+    return $args
+}
+
+test argv-focused-valid-fuzz {random valid vectors (zero args, empty, ASCII, multi-byte, long, many, repeated, whitespace, quotes/backslashes) agree across interp, compile, native generic and native specialized, and match the injected vector} -body {
+    expr {srand(20260604)}
+    set hir [argvHir $::transformProgram]
+    set failures {}
+    for {set iteration 0} {$iteration < 40} {incr iteration} {
+        set texts [randomValidVector]
+        set vec [lmap t $texts {T $t}]
+        set outcomes [outcomesOf $hir $vec]
+        if {[llength [lsort -unique $outcomes]] != 1 || [lindex [lindex $outcomes 0] 0] ne "value"} {
+            lappend failures "iteration $iteration: backends disagree or failed (count [llength $texts])"
+            continue
+        }
+        # The oracle for the program's own `args` and `lens`: the injected
+        # vector. (`shouted` is a differential result only.)
+        set shown [lindex [lindex $outcomes 0] 1]
+        set expectArgs [shownStrings $texts]
+        set expectLens [core::value::show [core::value::listOf [lmap t $texts {core::value::int [string length $t]}]] 1]
+        if {[string first "\[$expectArgs, $expectLens, " $shown] != 0} {
+            lappend failures "iteration $iteration: result does not echo the injected vector"
+        }
+    }
+    set failures
+} -result {}
+
+# RFC 3629 oracle, written from the specification (not from any
+# implementation): is BYTES (a list of byte values) well-formed UTF-8?
+proc utf8WellFormed {bytes} {
+    set n [llength $bytes]
+    set i 0
+    while {$i < $n} {
+        set b [lindex $bytes $i]
+        if {$b < 0x80} { incr i; continue }
+        if {$b >= 0xc2 && $b <= 0xdf} {
+            set need 1; set lo 0x80; set hi 0xbf
+        } elseif {$b == 0xe0} {
+            set need 2; set lo 0xa0; set hi 0xbf
+        } elseif {($b >= 0xe1 && $b <= 0xec) || $b == 0xee || $b == 0xef} {
+            set need 2; set lo 0x80; set hi 0xbf
+        } elseif {$b == 0xed} {
+            set need 2; set lo 0x80; set hi 0x9f
+        } elseif {$b == 0xf0} {
+            set need 3; set lo 0x90; set hi 0xbf
+        } elseif {$b >= 0xf1 && $b <= 0xf3} {
+            set need 3; set lo 0x80; set hi 0xbf
+        } elseif {$b == 0xf4} {
+            set need 3; set lo 0x80; set hi 0x8f
+        } else {
+            return 0
+        }
+        if {$i + $need > $n - 1} { return 0 }
+        set c [lindex $bytes [expr {$i + 1}]]
+        if {$c < $lo || $c > $hi} { return 0 }
+        for {set k 2} {$k <= $need} {incr k} {
+            set c [lindex $bytes [expr {$i + $k}]]
+            if {$c < 0x80 || $c > 0xbf} { return 0 }
+        }
+        incr i [expr {$need + 1}]
+    }
+    return 1
+}
+
+proc bytesOfString {s} {
+    set out {}
+    binary scan $s c* signed
+    foreach b $signed { lappend out [expr {$b & 0xff}] }
+    return $out
+}
+
+# A random byte string without NUL: structured pieces (so valid, truncated,
+# overlong, surrogate and out-of-range forms all occur) and raw noise.
+proc randomRawArgument {} {
+    set out ""
+    set pieces [expr {int(rand() * 5)}]
+    for {set i 0} {$i < $pieces} {incr i} {
+        switch [expr {int(rand() * 7)}] {
+            0 { append out [T [randomText [expr {1 + int(rand() * 4)}]]] }
+            1 { append out [H [lindex {c080 e08080 f0808080 eda080 edbfbf f4908080 f5808080 c1bf} [expr {int(rand() * 8)}]]] }
+            2 { append out [H [lindex {e2 e282 f0 f09f f09f98 80 bf} [expr {int(rand() * 7)}]]] }
+            3 { append out [binary format c [expr {1 + int(rand() * 255)}]] }
+            4 { append out [binary format c* [list [expr {1 + int(rand() * 255)}] [expr {1 + int(rand() * 255)}] [expr {1 + int(rand() * 255)}]]] }
+            5 { append out [H f48fbfbf] }
+            6 { append out [H efbfbf] }
+        }
+    }
+    return $out
+}
+
+test argv-focused-byte-fuzz {random raw byte vectors: every backend yields the declared error exactly when an independent RFC 3629 oracle calls an argument malformed, and no partial List} -body {
+    expr {srand(7777)}
+    set hir [argvHir "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"<invalid>\"\]\nargs"]
+    set failures {}
+    set sawValid 0
+    set sawInvalid 0
+    for {set iteration 0} {$iteration < 60} {incr iteration} {
+        set vec [list [T ./fuzz]]
+        set count [expr {int(rand() * 5)}]
+        for {set i 0} {$i < $count} {incr i} { lappend vec [randomRawArgument] }
+        set valid 1
+        foreach a $vec {
+            if {![utf8WellFormed [bytesOfString $a]]} { set valid 0 }
+        }
+        set outcomes [outcomesOf $hir $vec]
+        if {[llength [lsort -unique $outcomes]] != 1} {
+            lappend failures "iteration $iteration: backends disagree: $outcomes"
+            continue
+        }
+        set shown [lindex [lindex $outcomes 0] 1]
+        if {$valid} {
+            incr sawValid
+            set expected [shownStrings [lmap a $vec {encoding convertfrom utf-8 $a}]]
+        } else {
+            incr sawInvalid
+            set expected {["<invalid>"]}
+        }
+        if {$shown ne $expected} {
+            lappend failures "iteration $iteration: valid=$valid expected $expected got $shown"
+        }
+    }
+    list $failures [expr {$sawValid > 3}] [expr {$sawInvalid > 3}]
+} -result {{} 1 1}
+
+# ---------------------------------------------------------------------------
+# GC and ownership (native)
+
+proc underGcStress {body} {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        uplevel 1 $body
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+}
+
+test argv-gc-stress-materialization-and-repeated-calls {a = argv(); allocate; b = argv(): intact at every allocation} -body {
+    set text "fn churn(n: int) -> int:\n    if n < 1:\n        0\n    else:\n        s = concat(\"x\", \"y\")\n        length(s) + churn(n - 1)\na = argv():\n    on InvalidArgumentEncoding:\n        \[\"A\"\]\nc = churn(200)\nb = argv():\n    on InvalidArgumentEncoding:\n        \[\"B\"\]\n\[a == b, c, list_length(a), a\]"
+    set texts [list ./p]
+    for {set i 0} {$i < 40} {incr i} { lappend texts "argument-$i-é😀" }
+    set vec [lmap t $texts {T $t}]
+    set hir [argvHir $text]
+    set plain [outcomesOf $hir $vec]
+    underGcStress {set stressed [outcomesOf $hir $vec]}
+    list [llength [lsort -unique $plain]] [expr {$plain eq $stressed}] [string range [lindex [lindex $stressed 3] 1] 0 17]
+} -result {1 1 {[true, 400, 41, ["}}
+
+test argv-gc-stress-error-path {a failing argv() under GC stress: handled, nothing partial escapes} -body {
+    set text "a = argv():\n    on InvalidArgumentEncoding:\n        \[\"bad\"\]\nb = argv():\n    on InvalidArgumentEncoding:\n        \[\"bad2\"\]\n\[a, b\]"
+    set texts [list ./p]
+    set vec [lmap t $texts {T $t}]
+    for {set i 0} {$i < 30} {incr i} { lappend vec [T "ok-$i-é"] }
+    lappend vec [H f0289cbc]
+    lappend vec [T tail]
+    set hir [argvHir $text]
+    underGcStress {outcomesOf $hir $vec}
+} -result {{value {[["bad"], ["bad2"]]} {}} {value {[["bad"], ["bad2"]]} {}} {value {[["bad"], ["bad2"]]} {}} {value {[["bad"], ["bad2"]]} {}}}
+
+test argv-large-vector {thousands of arguments and hundreds of KB of text: all backends agree, with and without GC stress} -body {
+    set vec [list [T ./p]]
+    set total 0
+    for {set i 0} {$i < 2500} {incr i} {
+        set a "arg-$i-[string repeat ä [expr {$i % 40}]]😀"
+        lappend vec [T $a]
+        incr total [string length $a]
+    }
+    set text "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"x\"\]\nlens = loop a in args:\n    length(a)\n\[list_length(args), list_get(args, 2500), list_get(lens, 7)\]"
+    set hir [argvHir $text]
+    set plain [outcomesOf $hir $vec]
+    underGcStress {set stressed [outcomesOf $hir $vec]}
+    list [llength [lsort -unique $plain]] [expr {$plain eq $stressed}] [lindex [lindex $plain 0] 1]
+} -result [list 1 1 "\[2501, \"arg-2499-[string repeat ä [expr {2499 % 40}]]\U0001F600\", 13\]"]
+
+# ---------------------------------------------------------------------------
+# Standalone executables: the real Linux argument vector, one build, many runs
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+testConstraint bashLauncher [expr {[auto_execok bash] ne ""}]
+
+set aotDir [makeDirectory argv-aot]
+
+# A low-level launcher that execs PROGRAM with exactly the given raw bytes:
+#   launch.sh PROGRAM ARGV0 ARG...    each of ARGV0/ARG... is the hex of its
+#                                     bytes ("-" is the empty argument)
+# so invalid UTF-8 (which Tcl's own exec cannot pass) and a controlled
+# argument zero (bash's `exec -a`) are expressible.
+set launcher [file join $aotDir launch.sh]
+set channel [open $launcher w]
+puts $channel {#!/bin/bash
+export LC_ALL=C
+prog=$1; shift
+decode() {
+    local hex=$1 value
+    if [ "$hex" = - ]; then printf ''; return; fi
+    value=$(printf "$(printf '%s' "$hex" | sed 's/../\\x&/g')"; printf X)
+    printf '%s' "${value%X}"
+}
+args=()
+first=1
+for hex in "$@"; do
+    value=$(decode "$hex"; printf X)
+    value=${value%X}
+    if [ $first = 1 ]; then argv0=$value; first=0; else args+=("$value"); fi
+done
+exec -a "$argv0" "$prog" "${args[@]}"
+}
+close $channel
+file attributes $launcher -permissions 0755
+
+proc hexArgs {vec} {
+    return [lmap a $vec {expr {$a eq "" ? "-" : [binary encode hex $a]}}]
+}
+
+# Runs EXECUTABLE with the raw vector VEC (argument zero first; the empty
+# vector is not expressible through bash and is tested separately).
+proc launch {executable vec {environment {}}} {
+    return [exec env {*}$environment bash $::launcher $executable {*}[hexArgs $vec]]
+}
+
+# Builds source TEXT once into the shared directory (rustc links it).
+proc buildOnce {name text} {
+    set path [file join $::aotDir $name]
+    if {![file exists $path]} {
+        set hir [argvHir $text]
+        native::executable $hir $path
+    }
+    return $path
+}
+
+set aotHandled "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\nargs"
+
+test argv-standalone-reads-run-time-arguments {one executable built once prints this run's arguments: different argv, no recompilation} -constraints {executableAot bashLauncher} -body {
+    set exe [buildOnce argv-handled $::aotHandled]
+    set mtime [file mtime $exe]
+    set results [list \
+        [launch $exe [list [T ./program] [T alpha] [T beta]]] \
+        [launch $exe [list [T ./program] [T one]]] \
+        [launch $exe [list [T ./program] [T two] [T three] [T four]]] \
+        [launch $exe [list [T ./program] [T ""]]]]
+    list $results [expr {[file mtime $exe] == $mtime}]
+} -result {{{["./program", "alpha", "beta"]} {["./program", "one"]} {["./program", "two", "three", "four"]} {["./program", ""]}} 1}
+
+test argv-standalone-argument-zero-is-supplied-not-reconstructed {a custom argv[0] is returned verbatim, not the executable path} -constraints {executableAot bashLauncher} -body {
+    set exe [buildOnce argv-handled $::aotHandled]
+    list [launch $exe [list [T CUSTOM-ARGUMENT-ZERO] [T x]]] \
+        [launch $exe [list [T ../not/the/./real/path/..//program] [T y]]] \
+        [launch $exe [list [T ""] [T z]]]
+} -result {{["CUSTOM-ARGUMENT-ZERO", "x"]} {["../not/the/./real/path/..//program", "y"]} {["", "z"]}}
+
+test argv-standalone-invoked-by-path-spellings {argument zero is the spelling the launcher used (relative, absolute)} -constraints {executableAot bashLauncher} -body {
+    set exe [buildOnce argv-handled $::aotHandled]
+    set viaTcl [exec $exe a b]
+    set relative [exec sh -c {cd "$1" && ./"$2" r} sh [file dirname $exe] [file tail $exe]]
+    list [expr {$viaTcl eq "\[\"$exe\", \"a\", \"b\"\]"}] [expr {$relative eq "\[\"./[file tail $exe]\", \"r\"\]"}]
+} -result {1 1}
+
+test argv-standalone-valid-utf8-round-trips {non-ASCII arguments reach Botlish Strings exactly} -constraints {executableAot bashLauncher} -body {
+    set exe [buildOnce argv-handled $::aotHandled]
+    set texts [list ./p ä € … 😀 中文 "é" "é" "a b" "q\"uote\\b" ""]
+    expr {[launch $exe [lmap t $texts {T $t}]] eq [shownStrings $texts]}
+} -result 1
+
+test argv-standalone-invalid-utf8-is-handled {an invalid UTF-8 argument fails argv() with the declared error, handled by the program} -constraints {executableAot bashLauncher} -body {
+    set exe [buildOnce argv-handled $::aotHandled]
+    list [launch $exe [list [T ./p] [H ff]]] \
+        [launch $exe [list [T ./p] [T ok] [H 6162ff6364]]] \
+        [launch $exe [list [H c0] [T fine]]] \
+        [launch $exe [list [T ./p] [T one] [T two] [H f09f98]]]
+} -result {{["fallback"]} {["fallback"]} {["fallback"]} {["fallback"]}}
+
+test argv-standalone-ignoring-argv-runs-under-invalid-argv {a program that never calls argv() runs normally with malformed arguments} -constraints {executableAot bashLauncher} -body {
+    set exe [buildOnce argv-ignored "main_value = 42\nmain_value"]
+    list [launch $exe [list [T ./p] [H ff] [H 80fe]]] [launch $exe [list [T ./p]]]
+} -result {42 42}
+
+test argv-standalone-argv-after-other-work {work before argv() runs first under invalid host argv} -constraints {executableAot bashLauncher} -body {
+    set text "error BelowRange\nfn do_something(n: int) -> int errors BelowRange:\n    if n < 0:\n        fail BelowRange\n    else:\n        n\nfn both(n: int) -> list errors BelowRange, InvalidArgumentEncoding:\n    x = do_something(n)\n    args = argv()\n    \[x, args\]\nargs = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\nr = both(list_length(args)):\n    on BelowRange:\n        \[\"below\"\]\n    on InvalidArgumentEncoding:\n        \[\"enc\"\]\nr"
+    set exe [buildOnce argv-order $text]
+    # Valid argv: both() succeeds. Invalid argv: the first argv() already
+    # falls back (empty List -> length 1), then both() meets the failure.
+    list [launch $exe [list [T ./p] [T a]]] [launch $exe [list [T ./p] [H ff]]]
+} -result {{[2, ["./p", "a"]]} {["enc"]}}
+
+test argv-standalone-never-captures-the-compiler's-argv {the compiler's own process arguments never appear in the executable: not at build, not at run} -constraints {executableAot bashLauncher} -body {
+    set marker "COMPILER-HOST-ARGV-MARKER-c41d"
+    set source [file join $::aotDir host-source.bot]
+    set channel [open $source w]
+    puts $channel $::aotHandled
+    close $channel
+    set script [file join $::aotDir host-compile.tcl]
+    set channel [open $script w]
+    puts $channel [list source [file join $::projectRoot native native.tcl]]
+    puts $channel [list source [file join $::projectRoot surface surface.tcl]]
+    puts $channel {
+        set hir [surface::readProgramFile [lindex $argv 0]]
+        core::process::withArgv [list [core::process::bytesOfText INJECTED-DURING-COMPILE-91ab]] {
+            native::executable $hir [lindex $argv 1]
+        }
+    }
+    close $channel
+    set exe [file join $::aotDir host-built]
+    exec [info nameofexecutable] $script $source $exe $marker --another-flag
+    set channel [open $exe rb]
+    set binary [read $channel]
+    close $channel
+    list [string first $marker $binary] [string first INJECTED-DURING-COMPILE-91ab $binary] \
+        [launch $exe [list [T ./p] [T runtime]]]
+} -result {-1 -1 {["./p", "runtime"]}}
+
+test argv-standalone-large-vector {many arguments and many bytes through the real process vector, under GC stress too} -constraints {executableAot bashLauncher} -body {
+    set exe [buildOnce argv-handled $::aotHandled]
+    set texts [list ./p]
+    for {set i 0} {$i < 600} {incr i} { lappend texts "argument-$i-[string repeat é [expr {$i % 50}]]😀" }
+    set expected [shownStrings $texts]
+    set vec [lmap t $texts {T $t}]
+    list [expr {[launch $exe $vec] eq $expected}] \
+        [expr {[launch $exe $vec {BOTLISH_NATIVE_GC_STRESS=1}] eq $expected}]
+} -result {1 1}
+
+test argv-standalone-gc-stress-invalid {the error path under GC stress in a standalone executable} -constraints {executableAot bashLauncher} -body {
+    set exe [buildOnce argv-handled $::aotHandled]
+    set vec [list [T ./p]]
+    for {set i 0} {$i < 100} {incr i} { lappend vec [T "ok-$i"] }
+    lappend vec [H fe]
+    launch $exe $vec {BOTLISH_NATIVE_GC_STRESS=1}
+} -result {["fallback"]}
+
+testConstraint pythonLauncher [expr {[auto_execok python3] ne ""}]
+
+test argv-standalone-argc-zero {a process started with argc == 0 sees argv() == [] -- or [""] on a kernel that substitutes an empty argument zero} -constraints {executableAot pythonLauncher} -body {
+    # Linux >= 5.18 never starts a program with argc == 0: execve rewrites
+    # the empty vector to one empty argument (the pwnkit mitigation), so on
+    # such a kernel the runtime legitimately sees [""]; where the kernel
+    # still passes argc == 0 the runtime reports [] -- never a synthetic
+    # executable name.
+    set exe [buildOnce argv-handled $::aotHandled]
+    set result [exec python3 -c {
+import ctypes, sys
+libc = ctypes.CDLL(None, use_errno=True)
+argv = (ctypes.c_char_p * 1)(None)
+libc.execv(sys.argv[1].encode(), argv)
+sys.exit(127)
+} $exe]
+    expr {$result in {{[]} {[""]}}}
+} -result 1
+
+test argv-standalone-same-values-as-in-process {the same program and vector give identical text in-process and standalone} -constraints {executableAot bashLauncher} -body {
+    set exe [buildOnce argv-transform $::transformProgram]
+    set hir [argvHir $::transformProgram]
+    set texts [list ./Prog "ÄB" x "" "q\"uote" "tab\there" 😀中]
+    set vec [lmap t $texts {T $t}]
+    set inProcess [lindex [lindex [outcomesOf $hir $vec] 0] 1]
+    expr {[launch $exe $vec] eq $inProcess}
+} -result 1
+
+test argv-standalone-fuzz {random valid and invalid vectors: the standalone executable agrees with the in-process backends} -constraints {executableAot bashLauncher} -body {
+    expr {srand(424242)}
+    set exe [buildOnce argv-transform $::transformProgram]
+    set hir [argvHir $::transformProgram]
+    set failures {}
+    for {set iteration 0} {$iteration < 12} {incr iteration} {
+        if {$iteration % 3 == 2} {
+            set vec [list [T ./fuzz]]
+            for {set i 0} {$i < 3} {incr i} { lappend vec [randomRawArgument] }
+        } else {
+            set texts [randomValidVector]
+            if {[llength $texts] > 120} { set texts [lrange $texts 0 119] }
+            set vec [concat [list [T ./fuzz]] [lmap t $texts {T $t}]]
+        }
+        # A raw argument cannot be empty through the launcher's hex syntax
+        # unless it is "-", which hexArgs already maps.
+        set inProcess [lindex [lindex [outcomesOf $hir $vec] 0] 1]
+        if {[launch $exe $vec] ne $inProcess} {
+            lappend failures "iteration $iteration differs"
+        }
+    }
+    set failures
+} -result {}
+
+removeDirectory argv-aot
+cleanupTests

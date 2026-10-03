@@ -60,6 +60,12 @@
 #                   test refines its argument to T when it returns true.
 #                   Knowing this, a compiler may decide the call from static
 #                   types or replace it with an inline membership test.
+#   errors          the declared errors (core::native::declareError) a call
+#                   of this native may complete with -- {} for every native
+#                   but `argv` (core/process.tcl). The impl signals one with
+#                   core::native::failDeclared, and core::native::invoke turns
+#                   that into an ordinary propagate-error completion, exactly
+#                   like a Botlish `fail NAME` (EXPLICIT-ERROR-COMPLETIONS.md).
 #   runtime         what a native implementation of the operation needs from
 #                   a runtime, beyond bare machine operations on values of
 #                   known kinds (a sorted list of tags from runtimeTags
@@ -148,8 +154,16 @@ namespace eval core::native {
     #                        bootstrap native, candidate for stdlib
     #                        replacement: see core/hashing.tcl's header
     #   set-alloc            allocates a new ImmutableSet (core/immutableset.tcl)
+    #   process-argv         reads the process argument snapshot of the run
+    #                        (core/process.tcl; ARGV.md)
     variable runtimeTags {bigint string-alloc list-alloc result-alloc char-index
-        range-check structural-equality evidence mutarray-alloc mutarray-mutate hash set-alloc}
+        range-check structural-equality evidence mutarray-alloc mutarray-mutate hash set-alloc
+        process-argv}
+    # NAME -> 1: the errors the runtime itself declares, visible in every
+    # program like a root native and never part of a program's own `error`
+    # declarations (hir/errordecls.tcl). Only a native's -errors may name one;
+    # native/lower.tcl's ErrorId gives each a fixed NIR id from its index.
+    variable builtinErrors [dict create]
 }
 
 proc core::native::register {name args} {
@@ -165,7 +179,7 @@ proc core::native::register {name args} {
     }
     set options [dict create -impl "" -arity "" -refines-true {} -refines-false {} \
         -param-types "" -result-type any -tests-type "" -runtime {} -result-shape {} -result-range {} \
-        -native-body {} -module-fn {} -context-free 0]
+        -native-body {} -module-fn {} -context-free 0 -errors {}]
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "core::native::register: unknown option \"$option\""
@@ -252,6 +266,13 @@ proc core::native::register {name args} {
                 node with $arity parameter(s)"
         }
     }
+    variable builtinErrors
+    set errors [lsort -unique [dict get $options -errors]]
+    foreach error $errors {
+        if {![dict exists $builtinErrors $error]} {
+            error "core::native::register: -errors of \"$name\" names \"$error\", which is not a declared builtin error"
+        }
+    }
     set moduleFn [dict get $options -module-fn]
     if {$moduleFn ne "" && [llength $moduleFn] != 2} {
         error "core::native::register: -module-fn of \"$name\" must be a {NAMESPACE NAME} pair"
@@ -267,7 +288,7 @@ proc core::native::register {name args} {
         testsType $testsType \
         runtime [lsort -unique [dict get $options -runtime]] \
         resultShape $shape resultRange $range nativeBody $nativeBody moduleFn $moduleFn \
-        contextFree [dict get $options -context-free]]
+        contextFree [dict get $options -context-free] errors $errors]
     return [core::value::native $name]
 }
 
@@ -302,6 +323,12 @@ proc core::native::ValidShape {shape count} {
         lassign $shape _ name lo hi
         return [expr {[string is entier -strict $lo] && [string is entier -strict $hi] && $lo <= $hi}]
     }
+    if {[lindex $shape 0] eq {element-type}} {
+        # {element-type TYPE}: every element of the result List has type
+        # TYPE, a fixed fact about the native itself (argv's Strings), not
+        # argument indices.
+        return [expr {$length == 2 && ![catch {core::type::normalize [lindex $shape 1]}]}]
+    }
     set indices [lrange $shape 1 end]
     foreach index $indices {
         if {![string is digit -strict $index] || ($count ne "" && $index >= $count)} {
@@ -323,6 +350,43 @@ proc core::native::CanonicalType {name option type} {
         error "core::native::register: $option of \"$name\": $canonical"
     }
     return $canonical
+}
+
+# Declares NAME a builtin error (see builtinErrors); declaring one twice is an
+# error. Declaration order is the error's index (builtinErrorIndex).
+proc core::native::declareError {name} {
+    variable builtinErrors
+    if {![regexp {^[A-Z][A-Za-z0-9]*$} $name]} {
+        error "core::native::declareError: bad error name \"$name\""
+    }
+    if {[dict exists $builtinErrors $name]} {
+        error "core::native::declareError: builtin error \"$name\" is already declared"
+    }
+    dict set builtinErrors $name [dict size $builtinErrors]
+}
+
+proc core::native::isBuiltinError {name} {
+    variable builtinErrors
+    return [dict exists $builtinErrors $name]
+}
+
+# The builtin error names, in declaration order.
+proc core::native::builtinErrorNames {} {
+    variable builtinErrors
+    return [dict keys $builtinErrors]
+}
+
+# NAME's index among the builtin errors (declaration order, from 0): the one
+# number native/lower.tcl and native/src/runtime/ops.rs agree on.
+proc core::native::builtinErrorIndex {name} {
+    variable builtinErrors
+    return [dict get $builtinErrors $name]
+}
+
+# Called by a native's impl to complete with the declared builtin error NAME
+# (one of its own -errors). Never returns.
+proc core::native::failDeclared {name message} {
+    throw [list CORE DECLARED-ERROR $name] $message
 }
 
 proc core::native::names {} {
@@ -424,7 +488,24 @@ proc core::native::invoke {nativeValue argValues} {
             core::value::expect $param [lindex $argValues 0] $name
         }
     }
-    set result [{*}[dict get $meta impl] {*}$argValues]
+    set errors [dict get $meta errors]
+    if {$errors ne ""} {
+        # A native with declared errors completes with propagate-error when
+        # its impl signals one of them (failDeclared); any other signal is
+        # a contract violation of the native itself.
+        try {
+            set result [{*}[dict get $meta impl] {*}$argValues]
+        } trap {CORE DECLARED-ERROR} {message options} {
+            set error [lindex [dict get $options -errorcode] 2]
+            if {$error ni $errors} {
+                throw [list CORE CONTRACT TYPE] \
+                    "$name: contract violation: it signalled the undeclared error \"$error\" (declared: $errors)"
+            }
+            return [core::completion::propagatingError [core::value::errorId $error]]
+        }
+    } else {
+        set result [{*}[dict get $meta impl] {*}$argValues]
+    }
     core::value::check $result
     if {$testsType ne ""} {
         set expected [core::value::bool [core::type::acceptsCanonical $testsType [lindex $argValues 0]]]
