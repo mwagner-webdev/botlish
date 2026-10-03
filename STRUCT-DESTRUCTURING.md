@@ -72,7 +72,9 @@ silently different construct)
 ## The semantic theorem
 
 > `{field: local, ...} = value` is valid exactly where
-> `tmp = value; local = tmp.field; ...` would be, and means exactly that.
+> `tmp = value; local = tmp.field; ...; unit` would be, and means exactly that:
+> evaluate the source once, perform the same projections and bindings as the
+> explicit expansion, then produce `unit`.
 
 * `value` is evaluated **once**, into a hygienic temporary, before any field is
   read.
@@ -90,12 +92,18 @@ silently different construct)
   that does not name it. Omitted fields are not bound anywhere and nothing is
   built from them.
 * The source struct is only read; it is preserved.
-* The statement has no value of its own beyond ordinary bindings: where a
-  statement's value is observable (the last statement of a body) it is the
-  value of the last binding the explicit spelling would make, i.e. the last
-  field value read. It is not the source, a List of the bound values, or a
-  narrowed struct.
-
+* **The statement evaluates to `unit`.** This is a rule of the construct, not
+  a consequence of its lowering. Where the statement's value is observable
+  (the last statement of a function body, of a branch, of a collecting loop's
+  iteration, of the program) it is `unit`. The projection binds the lowering
+  generates are implementation details of one source statement, and the value
+  of the last of them (the last field read) does not determine the statement's
+  result. Consequently `{a, b} = v` and `{b, a} = v` read and bind in
+  different (documented) orders but have the same value, `unit`, and nothing
+  about the result depends on which field happened to be written last.
+* It is not the source, not a List of the bound values, not a narrowed struct
+  of the selected fields, not the omitted fields, and not the last field. See
+  "A destructuring statement introduces bindings" below.
 ### Named and anonymous structs
 
 Identical. Destructuring never asks whether the source type has a name; it asks
@@ -165,6 +173,82 @@ semantics. If Botlish later wants "a struct containing only fields X, Y, Z" it
 must be designed as its own operation; destructuring is not reserved as an
 implicit way to do it.
 
+### A destructuring statement introduces bindings: its value is unit
+
+```
+fn f(v):
+    {a, b} = v          # the body's value is unit
+fn g(v):
+    {b, a} = v          # unit too
+fn h(v):
+    {a, b} = v
+    a + b               # the bindings are used as usual
+loop x in xs:
+    {a} = x             # collects unit for each normal iteration
+```
+
+Destructuring is binding syntax: one struct value, selected fields read by
+name, those field values bound. It does not return a second data operation
+smuggled out of the bindings it makes. (Before this rule the statement
+accidentally had the value of the last generated binding, i.e. the last field
+read, which made `fn f(v): {a, b} = v` return `b` only because `b` was written
+last; that is not a meaningful property of destructuring, and it would be more
+confusing still once values can be mutable.)
+
+* **Successful statement: `unit`.** Evaluate `value` once, read and bind each
+  field in written order, then `unit`. On an error-capable source the success
+  path is unchanged (bindings, then `unit`); a failing source is the ordinary
+  error propagation or handling and no synthetic `unit` is observed. A handled
+  destructure (`{a, b} = f(): on Oops: ...`) is `unit` on the success path and
+  on the handled path.
+* **Branches and loops need no destructuring rule.** A branch that ends in a
+  destructure produces `unit` by the ordinary branch rules; `if c: {a} = v
+  else: unit` joins `unit` with `unit`, and `if c: {a} = v else: 7` joins as
+  `unit` with an Int exactly as any two branch values do. A collecting loop
+  whose body ends in a destructure collects `[unit, unit, ...]` for the
+  iterations that complete normally (lockstep and counted loops alike). A
+  `continue` after a destructure behaves normally: the synthetic `unit` is the
+  value of the destructure statement only, never an iteration's value before
+  the later statements have run.
+* **Ordinary bindings are unchanged.** `x = value` still evaluates to `value`
+  as the last statement of a body. Only the destructuring construct has the
+  `unit` result; the expansion is not "made uniform" by turning ordinary
+  bindings into `unit`.
+* **Still not an expression.** `f({a, b} = value)`, `x = {a} = v` and
+  `return {a} = v` remain syntax errors. If a future grammar allowed
+  destructuring in expression position its value would already be defined:
+  `unit`.
+* **No other result channel exists** and none was added: not the original
+  source, not a struct of the selected fields (struct narrowing is a separate
+  operation), not the omitted/remainder fields, not the last field, and not a
+  List of the extracted values; in particular nothing like Tcl `lassign`'s
+  "return the remainder", and no `...rest` (still rejected).
+* **Bindings are unchanged.** `a` and `b` remain ordinary value bindings, not
+  references to source field slots; a MutableArray field is bound as the same
+  array value under its ordinary semantics; evaluation is once-only, fields
+  are read and bound in written order, and every diagnostic
+  (`UNKNOWN-FIELD`, `NOT-A-STRUCT`, `UNPROVEN-FIELD`, `DUPLICATE`,
+  `DUPLICATE-FIELD`, `LIST-DESTRUCTURING`) and its location is as before.
+
+#### Why the result is not a selected or omitted struct
+
+Botlish may later gain explicit complementary structural operations, for
+example (illustrative only; neither exists, and their syntax and semantics are
+not specified here):
+
+```
+updated   = value with { field: replacement }
+remainder = value without { field }
+```
+
+A struct that is the original with some fields replaced, or without some fields,
+is a distinct structural transformation with its own materialization,
+representation, field-set, ownership, type and cost semantics. That is exactly
+why destructuring itself returns neither the selected nor the omitted fields:
+the separation of concerns keeps destructuring a pure binding construct, and
+keeps `with` / `without` from being reachable accidentally through it. Neither
+`with` nor `without` is implemented, nor `...rest`.
+
 ## Normalization: where destructuring disappears
 
 The surface AST keeps a `destructure` node (printing, spans, ids, diagnostics),
@@ -176,11 +260,19 @@ statement lowers to ordinary syntax nodes spliced into the enclosing sequence:
 {a, b: c} = e          tmp = e
                        a = tmp.a
                        c = tmp.b
+                       unit
 ```
 
 i.e. one `bind` of a hygienic temporary to the source, then one `bind` of an
-ordinary `project` of a `ref` of the temporary per field. A nested field is
-`tmp2 = tmp.field` and recursion on `tmp2`.
+ordinary `project` of a `ref` of the temporary per field, then the root `unit`
+(`hir::syntax::rootRef`, the same node the surface literal `unit` lowers to).
+A nested field is `tmp2 = tmp.field` and recursion on `tmp2`; the `unit` is
+added once per destructure statement, after everything, never per field or per
+nesting level. The final `unit` is not a source-visible statement or binding
+(its origin is the whole destructure statement, node id `.../unit`; it has no
+name and nothing can refer to it); it only defines the statement's value. In a
+sequence, `{a, b} = v` followed by `next` is the bindings, then a discarded
+`unit`, then `next`: the statement order is unchanged.
 
 * The temporary is named `destructure#N` (`N` the pattern's start offset in its
   file): it contains `#`, which source can never spell, so it cannot collide
@@ -190,13 +282,14 @@ ordinary `project` of a `ref` of the temporary per field. A nested field is
   `main.tcl -backend compile`'s program-level type listing); that is the
   compiled form, not a source name.
 * **HIR has no destructuring abstraction.** The HIR a destructure produces is
-  node-for-node the explicit spelling's (`tests/struct-destructuring.test`
-  compares the formatted HIR, modulo the temporary's name). The resolver, struct
-  analysis, typing, specialization, range, escape, construction, cardinality,
-  AOT and callable analyses never see anything but `bind`, `project`, `ref`.
+  node-for-node the explicit spelling's, with its final `unit`
+  (`tests/struct-destructuring.test` compares the formatted HIR, modulo the
+  temporary's name). The resolver, struct analysis, typing, specialization,
+  range, escape, construction, cardinality, AOT and callable analyses never see
+  anything but `bind`, `project`, `ref`.
 * **The interpreter, the Tcl compiler and `native/` are unchanged**: no
   destructuring evaluator, no runtime helper, no NIR operation. Core IR and NIR
-  are the explicit spelling's.
+  are the explicit spelling's (with its final `unit`).
 
 ### Evaluate once
 
@@ -277,12 +370,24 @@ unmodified (`git diff` of the milestone touches `surface/parser.tcl`,
 module-level message, tests, the fuzzer, README, and this report). Scalar
 replacement/virtualization see ordinary field reads of a constructed struct and
 apply as they do to the explicit spelling; no heuristic was added and no
-performance claim is made (explicit and destructured programs have byte-identical
-NIR, modulo the temporary's name, which NIR does not print).
+performance claim is made. The destructured program and the explicit spelling
+ending in `unit` have byte-identical NIR, modulo the temporary's name (which NIR
+does not print).
+
+Where the destructure's value is **observed** (the last statement of a body, a
+collecting loop's iteration), the function returns the `unit` register instead
+of the last field's, as the old expansion did. Where it is **discarded**
+(`{a, b} = v` followed by another statement), the existing discarded-result
+lowering does not drop a discarded `unit`: the NIR (and the Cranelift IR) is the
+old expansion's plus one dead `unit` instruction (an `iconst` in CLIF, which
+Cranelift's own dead-code elimination removes). That is the recorded actual
+behaviour; no destructuring-specific elision was added
+(`destructure-nir-result-discarded` pins "the old NIR plus exactly one dead
+`unit`", `destructure-nir-result-observable` pins the `ret` of the unit).
 
 ## Tests
 
-* `tests/struct-destructuring.test` (215 tests, table-generated cases included): AST shape and the
+* `tests/struct-destructuring.test` (table-generated cases included): AST shape and the
   field-versus-binding direction, syntax errors, the List policy (every shape
   including nested, multi-line, with `-recover`), lowering shape and origins;
   then, for named and anonymous sources, a table of destructured-versus-explicit
@@ -298,9 +403,17 @@ NIR, modulo the temporary's name, which NIR does not print).
   (handled, declared, propagating, unhandled); closure capture; method sugar and
   `elif` composition; nesting; modules; same-program checks (HIR, core IR, NIR
   specialized and generic, specialization, range, escape, cardinality, AOT
-  readiness and the explain reports are equal between spellings); a standalone
-  executable.
-* Pins in `tests/surface-parser.test` and `tests/surface-lowering.test`.
+  readiness and the explain reports are equal to the explicit `...; unit`
+  spelling's, with the destructure in the middle of a body, as the last
+  statement, in a branch and in a loop body); the statement-value tests (the
+  direct result, reordered and renamed patterns, nested patterns, both struct
+  kinds, collecting/counted/lockstep loops, `continue`, branch joins, error-
+  capable and handled sources, evaluate-once, MutableArray fields, static
+  errors and their locations, NIR with the result discarded and observed); a
+  standalone executable.
+* Pins in `tests/surface-parser.test` (the AST is unchanged) and
+  `tests/surface-lowering.test` (the lowering ends in an explicit `unit`, not in
+  the last projection bind).
 
 ## Fuzzing
 
@@ -309,10 +422,15 @@ fields; Int/String/List/nested struct fields; named and anonymous; shuffled
 construction order), a random pattern (random subset, order, renaming, nesting)
 over them, in random source forms (literal, call, bound) and contexts (body,
 branch, elif, collecting loop, capturing closure, helper), and two programs:
-destructuring syntax and the explicit `tmp = source; a = tmp.a; ...`. The
+destructuring syntax and the explicit `tmp = source; a = tmp.a; ...; unit`. The
 explicit spelling is the oracle (the feature's own theorem, not an independent
 destructuring implementation); outcomes (value, error, evaluation-order log)
-must be identical on every backend and between backends. One negative per
+must be identical on every backend and between backends. Each program also
+chooses a position: either the destructure is followed by a result expression
+(its own value discarded) or it is the **last** statement of its body (function
+body, branch, elif chain, collecting loop iteration, nested function, a branch
+inside a loop body), where its value, which must be `unit`, is returned beside
+the log. One negative per
 program, one defect at a time: missing field (any level), non-struct source,
 non-struct nested, unproven shape, duplicate source field, duplicate
 destination, List pattern (top and nested), rest binding, empty pattern. Each
@@ -320,8 +438,11 @@ must be rejected, with the explicit spelling's rejection where it has one and
 the named diagnostic otherwise.
 
 **Results.** `-n 300 -seed 1000` (all four backends: interp, compile,
-cranelift-generic, cranelift): `programs 300 values 300 errors 0 negatives 300
-equivalence-disagreements 0 negative-escapes 0 backend-disagreements 0`. A first
+cranelift-generic, cranelift), with the `...; unit` oracle and half the programs
+having the destructure as the last statement of its body: `programs 300 values 300
+errors 0 negatives 300 equivalence-disagreements 0 negative-escapes 0
+backend-disagreements 0`. (The negative cases and their diagnostics are
+unchanged by the statement-value rule.) A first
 run found one seed where *both* spellings failed with `UNPROVEN-FIELD`: four
 levels of nested anonymous structs exceed `aggregateDepth`, a pre-existing
 limit, so the generator was capped at three levels (see Known limitations). A
@@ -339,8 +460,8 @@ bounded run (`-n 12`) is part of the test suite
   temporary.
 * A struct field of a declared struct has to be spelled as a named struct type
   (there is no anonymous-struct type syntax); unrelated to destructuring.
-* Destructuring has no value of its own: as the last statement of a body it
-  yields the last field value read.
+* A destructure whose value is discarded still carries one dead `unit`
+  instruction in NIR/CLIF (see Backend impact); no elision was added.
 
 ## Required questions
 
@@ -409,3 +530,55 @@ bounded run (`-n 12`) is part of the test suite
 48. **Did equivalence fuzzing find any disagreement?** No (300 programs, four backends).
 49. **Did negative fuzzing find any escape?** No (300 negative programs, nine defect kinds).
 50. **Did the full regression pass?** Yes: `tests/all.tcl` passes 4541/4541 on interp and 4537 passed + 4 skipped (as before) on compile, 0 failures; GC stress and native coverage were not rerun locally (nothing in `native/` changed).
+
+## Statement value: required questions
+
+Milestone: a successful destructuring statement evaluates to `unit`.
+
+1. **What is the value of a successful destructuring statement now?** `unit`.
+2. **Does `{a, b} = value` still evaluate `value` once?** Yes.
+3. **Are `a` and `b` still ordinary bindings?** Yes.
+4. **Does the final binding determine the statement's value?** No.
+5. **Do `{a, b}` and `{b, a}` have the same statement result?** Yes, `unit`.
+6. **Does nested destructuring also return `unit`?** Yes.
+7. **Does destructuring return the original source?** No.
+8. **Does it return a narrowed struct of the selected fields?** No.
+9. **Does it return the omitted/remainder fields?** No.
+10. **Was `...rest` added?** No.
+11. **Was `with` implemented?** No.
+12. **Was `without` implemented?** No.
+13. **Did ordinary binding semantics change?** No (`x = v` as the last statement
+    still yields `v`).
+14. **Did field binding/reference semantics change?** No.
+15. **Are destructured bindings still values rather than source-field
+    references?** Yes.
+16. **Can destructuring now be used in arbitrary expression position?** No.
+17. **What does a destructuring statement contribute as the final value of a
+    collecting loop iteration?** `unit`.
+18. **Did existing struct/List diagnostics change?** No (same kinds, messages and
+    locations, checked against the previous tree on a set of rejected programs,
+    and by the unchanged negative fuzz cases).
+19. **Did interpreter/compiler/native gain a destructuring-specific operation?**
+    No. The only change is in `surface/lower.tcl` (one root `unit` appended to
+    the lowered statements); `hir/`, `core/`, `compiler/` and `native/` are
+    unmodified.
+20. **Was the existing destructuring equivalence fuzzer updated to use a final
+    `unit` in its oracle?** Yes, and extended with a "destructure is the last
+    statement" position.
+21. **Did the full regression pass?** Yes: `tests/all.tcl` on interp (4649 tests,
+    4646 passed, 3 failed) and compile (4649, 4642 passed + 4 skipped, 3
+    failed) when the two backends were run concurrently; the 3 failures on each
+    were all in `direct-hir-native.test`, which builds standalone executables in
+    a scratch directory shared by the two concurrent runs (a collision of the
+    runs, "could not write output ... No such file or directory" from the
+    linker). The same file run alone passes on both backends (33/33). The only
+    expectations that changed are those that depended on the old
+    last-binding result or on the HIR/NIR being identical to the explicit
+    expansion *without* a `unit`: `destructure-source-statement-value`, the
+    `destructure-same-program-*` table, `destructure-construction-analysis-*`,
+    and `lower-destructure-*`. GC stress and native coverage were not rerun
+    locally (nothing in `native/` changed).
+
+NIR note (recorded, not optimized): with the result discarded, the NIR/CLIF is
+the old expansion plus one dead `unit` instruction, because the existing
+discarded-result lowering does not drop a discarded `unit`.

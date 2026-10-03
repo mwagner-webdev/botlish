@@ -13,9 +13,12 @@
 #                                                b = t0.f
 #                                                t1 = t0.u
 #                                                c = t1.c
+#                                                unit
 #
 # The explicit spelling is the oracle (the feature's own definition: evaluate
-# the source once, then named projections, then ordinary bindings): on every
+# the source once, then named projections, then ordinary bindings, then the
+# statement's own value, `unit`: a destructuring statement evaluates to unit,
+# never to the last field read): on every
 # backend the two spellings must produce the identical outcome -- value (with
 # runtime evidence), error code (messages carry source locations, which are
 # removed) and the log the program kept of its own evaluation order. Within
@@ -36,6 +39,12 @@
 #   context      a function body, an if/else branch, an elif chain, a
 #                collecting loop, a nested function capturing the bindings,
 #                a helper function
+#   position     the destructure is followed by a result expression listing
+#                the bindings (its own value is discarded), or it is the LAST
+#                statement of its body -- the function body, the branch, the
+#                collecting loop's iteration, a nested function -- so that its
+#                value is observable and must be unit (the oracle's final
+#                `unit`); the body's value is then returned beside the log
 #   effects      field values are `probe(log, id, v)` calls, so the source's
 #                evaluation (once, in the written order) is part of the outcome
 #
@@ -261,6 +270,7 @@ proc blockLines {case style} {
         set temp [newName t_]
         lappend lines "$temp = $expr"
         lappend lines {*}[explicitLines $pattern $temp]
+        lappend lines unit
     }
     return $lines
 }
@@ -294,6 +304,52 @@ proc program {case style} {
     }
     set block [blockLines $case $style]
     set result [resultText $case]
+    if {$position eq "last"} {
+        # The destructure is the last statement of its body: the body's value
+        # (unit) is returned beside the log, which keeps the evaluation order
+        # observable.
+        set evidence "mutable_array_get(log, 0)"
+        switch -- $context {
+            plain {
+                lappend lines "fn body(log: MutableArray\[int\], n: int):"
+                lappend lines {*}[indent $block 1]
+                set run [list "log = mutarray::create(1, 0)" "r = body(log, n)" "\[r, $evidence\]"]
+            }
+            branch {
+                set run [list "log = mutarray::create(1, 0)" \
+                    "r = if n > 2:" {*}[indent $block 1] \
+                    "else:" "    unit" "\[r, $evidence\]"]
+            }
+            elif {
+                set run [list "log = mutarray::create(1, 0)" \
+                    "r = if n == 0:" "    unit" \
+                    "elif n > 2:" {*}[indent $block 1] \
+                    "else:" "    unit" "\[r, $evidence\]"]
+            }
+            loop {
+                set run [list "log = mutarray::create(1, 0)" \
+                    "xs = loop i from 0 to 2:" {*}[indent $block 1] \
+                    "\[xs, $evidence\]"]
+            }
+            closure {
+                set run [list "log = mutarray::create(1, 0)" \
+                    "fn inner():" {*}[indent $block 1] \
+                    "\[inner(), $evidence\]"]
+            }
+            helper {
+                # A destructure last in a branch last in a collecting loop.
+                set run [list "log = mutarray::create(1, 0)" \
+                    "xs = loop i from 0 to 3:" \
+                    "    if i > 0:" {*}[indent $block 2] \
+                    "    else:" "        unit" \
+                    "\[xs, $evidence\]"]
+            }
+        }
+        lappend lines "fn run(n: int):"
+        lappend lines {*}[indent $run 1]
+        lappend lines "\[run(3), run(0), run(7)\]"
+        return [join $lines \n]
+    }
     switch -- $context {
         plain {
             set run [list "log = mutarray::create(1, 0)" {*}$block $result]
@@ -337,8 +393,9 @@ proc genCase {} {
     lassign [genPattern $schema] pattern bound
     set form [pick {direct direct call bound}]
     set context [pick {plain plain branch elif loop closure helper}]
+    set position [pick {after after last last}]
     return [dict create schema $schema pattern $pattern bound $bound form $form context $context \
-        sourceText [valueText $schema]]
+        position $position sourceText [valueText $schema]]
 }
 
 # ---------------------------------------------------------------------------
@@ -610,7 +667,7 @@ for {set k 0} {$k < $n} {incr k} {
     set sourceA [program $case destructured]
     set sourceB [program $case explicit]
     if {$dump} {
-        puts "---- seed $seed ([dict get $case form], [dict get $case context])\n$sourceA\n-- explicit --\n$sourceB"
+        puts "---- seed $seed ([dict get $case form], [dict get $case context], [dict get $case position])\n$sourceA\n-- explicit --\n$sourceB"
     }
     incr programs
     set outcomesA [outcomesOf $sourceA]
