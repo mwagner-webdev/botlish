@@ -249,6 +249,56 @@ mod tests {
         assert!(matches!(&other.error, Some(RtError::Semantic { kind: "TYPE", message }) if message.contains("rsi")));
     }
 
+    /// ABI numeric values (lib/abi.bot) reach the kernel as their x86-64
+    /// register bit patterns (ABI-NUMERIC-DOMAINS.md). Each word is built
+    /// the way generated code builds it -- abi::x86_64::from_* passes a
+    /// signed or lower-half unsigned value through unchanged, and computes
+    /// an upper-half U64/Usize value's word with the runtime's ordinary Int
+    /// subtraction, `v - 2^64` (rt_int_sub, BigInt operands) -- and the
+    /// 64 bits register_word hands the boundary are checked against the
+    /// expected pattern directly, not through any signed reading.
+    #[test]
+    fn abi_numeric_words_are_their_register_bit_patterns() {
+        use crate::runtime::ops::rt_int_sub;
+        let mut vm = new_vm();
+        let p = &mut *vm as *mut Vm;
+        let two_64 = vm.new_big(num_bigint::BigInt::from(1u128 << 64));
+        // Signed values are sign-extended: the word is the value itself.
+        for (value, bits) in [
+            (-1i64, 0xffff_ffff_ffff_ffffu64), // I8/I16/I32/I64/Isize -1
+            (-128, 0xffff_ffff_ffff_ff80),     // I8 min
+            (127, 0x0000_0000_0000_007f),      // I8 max
+            (-32768, 0xffff_ffff_ffff_8000),   // I16 min
+            (-2147483648, 0xffff_ffff_8000_0000), // I32 min
+            (i64::MIN, 0x8000_0000_0000_0000), // I64/Isize min
+            (i64::MAX, 0x7fff_ffff_ffff_ffff), // I64/Isize max
+            // Unsigned values below 2^63 are zero-extended: also the value.
+            (255, 0x0000_0000_0000_00ff),        // U8 max
+            (65535, 0x0000_0000_0000_ffff),      // U16 max
+            (4294967295, 0x0000_0000_ffff_ffff), // U32 max
+        ] {
+            let word = vm.new_int(value);
+            assert_eq!(register_word(word).map(|w| w as u64), Some(bits), "{value}");
+        }
+        // The upper half of U64/Usize: word = v - 2^64, through the
+        // runtime's own BigInt subtraction, as from_u64 computes it.
+        for (value, bits) in [
+            (1u128 << 63, 0x8000_0000_0000_0000u64),       // 2^63
+            ((1u128 << 63) + 1, 0x8000_0000_0000_0001),    // 2^63 + 1
+            (3u128 << 62, 0xc000_0000_0000_0000),          // first small word
+            ((1u128 << 64) - 2, 0xffff_ffff_ffff_fffe),
+            ((1u128 << 64) - 1, 0xffff_ffff_ffff_ffff),    // U64/Usize max
+        ] {
+            let v = vm.new_big(num_bigint::BigInt::from(value));
+            let word = rt_int_sub(p, v, two_64);
+            assert_eq!(register_word(word).map(|w| w as u64), Some(bits), "{value}");
+            // A word outside the 63-bit small range stays a BigInt in
+            // transit (the documented representation cost), and is still
+            // read as exactly these 64 bits.
+            assert_eq!(is_small(word), fits_small(bits as i64), "{value}");
+        }
+    }
+
     #[test]
     fn rax_is_read_signed() {
         // getpid's result is always a small positive pid, so the reading of

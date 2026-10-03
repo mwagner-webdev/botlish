@@ -15,8 +15,9 @@
 # It is transport, not a machine-integer programming model: Register64 is a
 # struct, so it has no arithmetic, ordering, bitwise or pointer operations
 # (`r + 5` is the ordinary TYPE error any struct operand gets), no wrapping,
-# no promotion and no C integer semantics. The only ways in and out are the
-# two conversions below.
+# no promotion and no C integer semantics. The only ways in are the
+# conversions below (register64 from an Int, from_* from an ABI numeric
+# value); the only way out is to_int.
 #
 #   abi::x86_64::register64(value: int)   Int -> Register64, the checked
 #                         conversion: exactly -2^63 <= value <= 2^63 - 1 is
@@ -35,6 +36,14 @@
 #                         ordinary arbitrary-precision Int (statically known
 #                         to be a Register64Word). Representation only: no
 #                         errno or other meaning is read into it.
+#
+#   abi::x86_64::from_i8(value) ... from_usize(value)
+#                         ABI numeric value -> Register64 (ABI-NUMERIC-
+#                         DOMAINS.md): total, no error, no check. Signed
+#                         values (abi::I8 I16 I32 I64 Isize) are sign-
+#                         extended to 64 bits, unsigned ones (abi::U8 U16
+#                         U32 U64 Usize) zero-extended -- see "Encoding ABI
+#                         numeric values" below.
 #
 # Why the inverse lives here and not in a portable `abi` namespace: the
 # signed 64-bit reading is a property of this architecture's register word,
@@ -82,3 +91,83 @@ fn register64(value: int) -> Register64 errors Register64BelowRange, Register64A
 # register64(to_int(r)) needs no handler.
 fn to_int(register: Register64) -> Register64Word:
     register.word
+
+# ---------------------------------------------------------------------------
+# Encoding ABI numeric values (lib/abi.bot) as register words.
+#
+# Register64 is a 64-bit bit-pattern transport value; `word` holds that bit
+# pattern's signed (two's-complement) reading, which is one Int per pattern.
+# Each conversion below says which pattern an ABI value travels as, written
+# as ordinary Int arithmetic on the value -- the mathematical domain is
+# never weakened to fit the signed reading, and Register64 itself is
+# unchanged:
+#
+# * Signed values are sign-extended. The sign extension of a signed n-bit
+#   value v to 64 bits is the 64-bit pattern whose signed reading is v
+#   itself, so the word is v: I8 -1 -> 0xffffffffffffffff, I8 -128 ->
+#   0xffffffffffffff80, I32 -2^31 -> 0xffffffff80000000, I8 127 ->
+#   0x000000000000007f. A negative value is never reread as a positive
+#   number first.
+# * Unsigned values are zero-extended: the pattern whose *unsigned* reading
+#   is v. For v < 2^63 (all of U8, U16, U32, and the lower half of U64 and
+#   Usize) that pattern's signed reading is v again: U32 2^32 - 1 ->
+#   0x00000000ffffffff. For 2^63 <= v < 2^64 the top bit is set, and the
+#   signed reading of the same 64 bits is v - 2^64: U64 2^63 ->
+#   0x8000000000000000 (word -2^63), U64 2^64 - 1 -> 0xffffffffffffffff
+#   (word -1). The full U64/Usize domain therefore encodes, never through
+#   the signed register64(Int) creator (which would reject its upper half).
+#
+# The bit transport is not an interpretation: to_int reads every word back
+# signed, so to_int(from_u64(abi::u64(2^64 - 1))) is -1 -- the same bits
+# I64 -1 travels as. Reading a register as an unsigned ABI value is not
+# provided (raw Linux results are signed words).
+#
+# One function per ABI type, because Botlish has no overloading and this
+# milestone adds none: the ABI type a caller has selects the encoder by name
+# (from_i32, from_usize) exactly as the creator's name selects the domain
+# (abi::i32, abi::usize). Each is an ordinary, nominally typed function --
+# from_usize does not accept an abi::U64 -- and none needs a check: the
+# parameter's domain proves every construction below.
+#
+# Isize/Usize are encoded at the target's address width, 64 bits on
+# x86-64: this architecture layer is where that width meets the register.
+
+fn from_i8(value: abi::I8) -> Register64:
+    Register64 {word: value.value}
+
+fn from_i16(value: abi::I16) -> Register64:
+    Register64 {word: value.value}
+
+fn from_i32(value: abi::I32) -> Register64:
+    Register64 {word: value.value}
+
+fn from_i64(value: abi::I64) -> Register64:
+    Register64 {word: value.value}
+
+fn from_isize(value: abi::Isize) -> Register64:
+    Register64 {word: value.value}
+
+fn from_u8(value: abi::U8) -> Register64:
+    Register64 {word: value.value}
+
+fn from_u16(value: abi::U16) -> Register64:
+    Register64 {word: value.value}
+
+fn from_u32(value: abi::U32) -> Register64:
+    Register64 {word: value.value}
+
+# The upper half, 2^63 .. 2^64 - 1, travels as the negative word v - 2^64
+# (the same 64 bits, read signed).
+fn from_u64(value: abi::U64) -> Register64:
+    v = value.value
+    if v > 9223372036854775807:
+        Register64 {word: v - 18446744073709551616}
+    else:
+        Register64 {word: v}
+
+fn from_usize(value: abi::Usize) -> Register64:
+    v = value.value
+    if v > 9223372036854775807:
+        Register64 {word: v - 18446744073709551616}
+    else:
+        Register64 {word: v}

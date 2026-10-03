@@ -1,0 +1,268 @@
+# abi.bot -- the "abi" namespace: ABI numeric domains (ABI-NUMERIC-DOMAINS.md).
+#
+# These are ABI numeric DOMAINS, not fixed-width arithmetic types. An ABI
+# numeric value is an ordinary mathematical Botlish Int together with the
+# static proof that it lies in one declared foreign-interface domain:
+#
+#   x = abi::i32(n)     x represents exactly the Int n, and proves
+#                       -2^31 <= n <= 2^31 - 1
+#   x = abi::u32(n)     x represents exactly the Int n, and proves
+#                       0 <= n <= 2^32 - 1
+#
+# Nothing else. There is no 32-bit (or 8-, 16-, 64-bit) arithmetic, no
+# wrapping, saturation, truncation, C promotion, implicit narrowing or
+# widening, undefined overflow, bitwise operation or pointer meaning
+# anywhere here. Each type is a nominal struct, so `abi::u8(255) + 1` is the
+# ordinary TYPE error any struct operand gets -- it is never 0 and never
+# 256. Computation happens in Int, and a result re-enters a domain only
+# through a checked (or statically proven) conversion:
+#
+#   n = x.value             # back to the ordinary Int (exactly 255)
+#   y = abi::u8(n + 1)      # 256: the declared error AbiIntegerAboveRange
+#
+# so fixed-width representation concerns stay at foreign boundaries:
+#
+#   ordinary computation in Int
+#       --abi::u32(...)-->           abi::U32       checked/proven domain
+#       --abi::x86_64::from_u32-->   Register64     x86-64 transport
+#       --linux::abi::syscall-->     the kernel
+#
+# The family (exact inclusive domains):
+#
+#   I8     -128 .. 127
+#   I16    -32768 .. 32767
+#   I32    -2147483648 .. 2147483647
+#   I64    -9223372036854775808 .. 9223372036854775807
+#   U8     0 .. 255
+#   U16    0 .. 65535
+#   U32    0 .. 4294967295
+#   U64    0 .. 18446744073709551615
+#   Isize  signed ABI address/size-width integer
+#   Usize  unsigned ABI address/size-width integer
+#
+# U64 is the full unsigned 64-bit domain, 2^63 .. 2^64 - 1 included: Botlish
+# Int is arbitrary precision, so a value above the signed 64-bit range is an
+# ordinary Int (a BigInt natively, when it is not a constant), never
+# reduced to 0 .. 2^63 - 1 for the sake of a representation.
+#
+# Every type is ordinary Botlish, built from three ordinary declarations and
+# nothing compiler-defined:
+#
+#   type AbiI32Value = Int in -2147483648..2147483647
+#                               the domain (an Int subtype: range analysis,
+#                               completion proofs and native lowering read
+#                               its interval like any source domain's)
+#   struct I32: value: AbiI32Value
+#                               the nominal type
+#   fn i32(value: int) -> I32 errors ...
+#                               the checked creator
+#
+# * Creation. abi::i8(value) ... abi::usize(value) take an ordinary Int and
+#   either return the ABI value representing exactly that Int, or fail with
+#   AbiIntegerBelowRange (value < the domain's minimum) or
+#   AbiIntegerAboveRange (value > its maximum). Never truncation. The
+#   call-specific completion proof (STATIC-COMPLETION-PROOFS.md) makes a
+#   provably in-range argument (abi::u8(42)) need no handler and a provably
+#   out-of-range constant (abi::u8(256)) a compile-time KNOWN-ERROR; a
+#   dynamic Int keeps the ordinary obligation to handle or declare them.
+#   Direct construction (`abi::U8 {value: x}`) is equally sound with no
+#   privacy: a named construction must statically prove each field in its
+#   declared domain (STRUCTS.md), so no ABI value outside its domain exists.
+# * Back to Int. `x.value` is the mathematical Int x represents, exactly
+#   (U8 255 -> 255, I8 -1 -> -1, U64 2^64 - 1 -> 18446744073709551615): an
+#   ordinary field projection, uniform over the whole family, statically
+#   typed with the domain (so `byte::from_int(x.value)` needs no handler for
+#   `x: abi::U8`). It never sign-extends, truncates or reinterprets bits.
+#   There is no abi::to_int: Botlish has no overloading, and one function
+#   over ten nominal types would need it (or ten *_to_int functions that
+#   only repeat the projection).
+# * Nominal. abi::I32 and abi::U32 are distinct types even where their values
+#   overlap; so are abi::I64 and abi::Isize, and abi::U64 and abi::Usize,
+#   whose domains are identical on today's target. `fn f(x: abi::Usize)`
+#   does not accept an abi::U64. The explicit route is through Int:
+#   `abi::usize(u.value)`, which needs no handler (the projection proves the
+#   domain) and has no run-time check.
+# * Not a calling convention. `fn f(x: abi::I32)` says x is mathematically in
+#   the signed 32-bit range; it does not fix how a Botlish function
+#   physically receives it (natively: the one Int field, carried in a
+#   register by struct scalar replacement). Machine meaning starts only at
+#   an explicit architecture conversion (abi::x86_64::from_i32, ...).
+# * Not C. U32 is the unsigned 32-bit domain, not "C unsigned int"; Usize
+#   is the target's address/size-width unsigned domain, not size_t. A later
+#   C layer may map its target-dependent types onto these.
+# * Not collection lengths. list_length, string lengths and indexes are
+#   ordinary Int; Isize/Usize are for foreign ABI boundaries only.
+#
+# The domain types (AbiI8Value ... AbiUsizeValue) and the two errors are
+# global names, as every `type` and `error` declaration is (SOURCE-DEFINED-
+# INTEGER-DOMAINS.md, hir/errordecls.tcl), and every program that loads abi
+# -- directly, or through abi::x86_64 -- declares them; hence the Abi
+# prefix, which keeps them clear of a program's own names. The structs and
+# creators are abi::'s.
+namespace abi
+
+# The two declared errors of every checked creator: one coherent pair for
+# the whole family rather than twenty type-specific names. The creator a
+# call names already says which domain was meant; the error says which
+# bound the value violated (byte::from_int's and register64's two-error
+# granularity).
+error AbiIntegerBelowRange
+error AbiIntegerAboveRange
+
+# ---------------------------------------------------------------------------
+# Fixed-width domains: target-independent mathematical intervals.
+
+type AbiI8Value = Int in -128..127
+type AbiI16Value = Int in -32768..32767
+type AbiI32Value = Int in -2147483648..2147483647
+type AbiI64Value = Int in -9223372036854775808..9223372036854775807
+
+type AbiU8Value = Int in 0..255
+type AbiU16Value = Int in 0..65535
+type AbiU32Value = Int in 0..4294967295
+type AbiU64Value = Int in 0..18446744073709551615
+
+# ---------------------------------------------------------------------------
+# Address/size-width domains: TARGET-DEPENDENT.
+#
+# Isize is the signed, and Usize the unsigned, integer domain whose ABI
+# width equals the target's address size. The only supported target today
+# is Linux x86-64 (LINUX-X86-64-SYSCALL.md: the native backend refuses to
+# generate the syscall transport for any other), whose address size is 64
+# bits, so here and now
+#
+#   AbiIsizeValue == AbiI64Value's domain     -2^63 .. 2^63 - 1
+#   AbiUsizeValue == AbiU64Value's domain     0 .. 2^64 - 1
+#
+# This pair of declarations is the one place that width is chosen; a target
+# with another address size would change exactly these two domains (and its
+# own architecture layer's encoders), nothing else. Each is declared
+# directly as an Int domain -- not as a subtype of AbiI64Value/AbiU64Value,
+# and Isize/Usize are not aliases of I64/U64 -- because the equality is a fact
+# about the current target, not about the types: I64 is a specifically
+# 64-bit signed field, Isize a signed address-width quantity.
+type AbiIsizeValue = Int in -9223372036854775808..9223372036854775807
+type AbiUsizeValue = Int in 0..18446744073709551615
+
+# ---------------------------------------------------------------------------
+# The nominal types: one field, `value`, the mathematical Int.
+
+struct I8:
+    value: AbiI8Value
+
+struct I16:
+    value: AbiI16Value
+
+struct I32:
+    value: AbiI32Value
+
+struct I64:
+    value: AbiI64Value
+
+struct U8:
+    value: AbiU8Value
+
+struct U16:
+    value: AbiU16Value
+
+struct U32:
+    value: AbiU32Value
+
+struct U64:
+    value: AbiU64Value
+
+struct Isize:
+    value: AbiIsizeValue
+
+struct Usize:
+    value: AbiUsizeValue
+
+# ---------------------------------------------------------------------------
+# The checked creators: Int -> ABI value, or the declared error naming the
+# violated bound. Each is written with its two literal bounds directly so
+# hir/range.tcl's comparison narrowing proves `value` in the domain in the
+# final branch -- the proof the construction needs (abi::x86_64::register64's
+# shape). Botlish has no generics over nominal types and no macros, so the
+# family is spelled out once per member; every member is the same three
+# branches.
+
+fn i8(value: int) -> I8 errors AbiIntegerBelowRange, AbiIntegerAboveRange:
+    if value < -128:
+        fail AbiIntegerBelowRange
+    elif value > 127:
+        fail AbiIntegerAboveRange
+    else:
+        I8 {value: value}
+
+fn i16(value: int) -> I16 errors AbiIntegerBelowRange, AbiIntegerAboveRange:
+    if value < -32768:
+        fail AbiIntegerBelowRange
+    elif value > 32767:
+        fail AbiIntegerAboveRange
+    else:
+        I16 {value: value}
+
+fn i32(value: int) -> I32 errors AbiIntegerBelowRange, AbiIntegerAboveRange:
+    if value < -2147483648:
+        fail AbiIntegerBelowRange
+    elif value > 2147483647:
+        fail AbiIntegerAboveRange
+    else:
+        I32 {value: value}
+
+fn i64(value: int) -> I64 errors AbiIntegerBelowRange, AbiIntegerAboveRange:
+    if value < -9223372036854775808:
+        fail AbiIntegerBelowRange
+    elif value > 9223372036854775807:
+        fail AbiIntegerAboveRange
+    else:
+        I64 {value: value}
+
+fn u8(value: int) -> U8 errors AbiIntegerBelowRange, AbiIntegerAboveRange:
+    if value < 0:
+        fail AbiIntegerBelowRange
+    elif value > 255:
+        fail AbiIntegerAboveRange
+    else:
+        U8 {value: value}
+
+fn u16(value: int) -> U16 errors AbiIntegerBelowRange, AbiIntegerAboveRange:
+    if value < 0:
+        fail AbiIntegerBelowRange
+    elif value > 65535:
+        fail AbiIntegerAboveRange
+    else:
+        U16 {value: value}
+
+fn u32(value: int) -> U32 errors AbiIntegerBelowRange, AbiIntegerAboveRange:
+    if value < 0:
+        fail AbiIntegerBelowRange
+    elif value > 4294967295:
+        fail AbiIntegerAboveRange
+    else:
+        U32 {value: value}
+
+fn u64(value: int) -> U64 errors AbiIntegerBelowRange, AbiIntegerAboveRange:
+    if value < 0:
+        fail AbiIntegerBelowRange
+    elif value > 18446744073709551615:
+        fail AbiIntegerAboveRange
+    else:
+        U64 {value: value}
+
+# Target-dependent bounds: AbiIsizeValue's/AbiUsizeValue's (above).
+fn isize(value: int) -> Isize errors AbiIntegerBelowRange, AbiIntegerAboveRange:
+    if value < -9223372036854775808:
+        fail AbiIntegerBelowRange
+    elif value > 9223372036854775807:
+        fail AbiIntegerAboveRange
+    else:
+        Isize {value: value}
+
+fn usize(value: int) -> Usize errors AbiIntegerBelowRange, AbiIntegerAboveRange:
+    if value < 0:
+        fail AbiIntegerBelowRange
+    elif value > 18446744073709551615:
+        fail AbiIntegerAboveRange
+    else:
+        Usize {value: value}

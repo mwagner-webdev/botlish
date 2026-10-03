@@ -1,0 +1,37 @@
+# numeric-domains.bot -- ABI numeric domains (ABI-NUMERIC-DOMAINS.md):
+#
+#   ordinary computation in Int
+#       --abi::u8(...), abi::i32(...), abi::usize(...)-->   ABI numeric domain
+#       --abi::x86_64::from_u8(...), from_i32(...), ...-->   Register64 transport
+#
+# An ABI numeric value is an ordinary Int plus the static proof that it lies
+# in its domain. abi::u8(255) is not an 8-bit integer that wraps: its value
+# is the Int 255, `x.value + 1` is the Int 256, and the only way back into
+# U8 is the checked creator, which reports AbiIntegerAboveRange instead of
+# wrapping to 0. Pure Botlish: runs on every backend (nothing here makes a
+# syscall).
+#
+# expect: [255, "above", 256, [-1, -1], true, 18446744073709551615]
+
+# The next U8 after x, if there is one: computed in Int, re-checked into the
+# domain. BelowRange needs no handler: x.value + 1 >= 1 is proven from U8's
+# declared domain.
+fn next_u8(x: abi::U8):
+    r = abi::u8(x.value + 1):
+        on AbiIntegerAboveRange:
+            return "above"
+    r.value
+
+x = abi::u8(255)
+
+# Signed values are sign-extended into a register word: I32 -1 travels as
+# 0xffffffffffffffff, whose signed reading (to_int) is -1.
+fd = abi::i32(0 - 1)
+reg = abi::x86_64::from_i32(fd)
+
+# Usize is the full unsigned address-width domain (64 bits on x86-64):
+# 2^64 - 1 is a valid value, and it travels as the same 64 bits as I64 -1.
+len = abi::usize(18446744073709551615)
+same_bits = abi::x86_64::from_usize(len) == abi::x86_64::from_i64(abi::i64(0 - 1))
+
+[x.value, next_u8(x), x.value + 1, [fd.value, abi::x86_64::to_int(reg)], same_bits, len.value]

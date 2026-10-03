@@ -1,0 +1,606 @@
+# abi-numeric.test -- ABI numeric domains (ABI-NUMERIC-DOMAINS.md):
+#
+#   abi::I8 I16 I32 I64 U8 U16 U32 U64 Isize Usize     (lib/abi.bot)
+#   abi::i8(value: int) ... abi::usize(value: int)
+#       errors AbiIntegerBelowRange, AbiIntegerAboveRange
+#   x.value                                            back to Int
+#   abi::x86_64::from_i8(x) ... from_usize(x) -> abi::x86_64::Register64
+#
+# Every ABI numeric value is an ordinary mathematical Int plus the static
+# proof that it lies in its domain; nothing here is fixed-width arithmetic.
+# The types, creators and encoders are ordinary Botlish and run on every
+# backend; only linux::abi::syscall itself (getpid, the one live syscall any
+# test makes, as in linux-syscall.test) is native-only.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+set allBackends {interp compile cranelift-generic cranelift}
+set nativeBackends {cranelift-generic cranelift}
+
+testConstraint linuxX86_64 [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+
+set scratch [makeDirectory abi-numeric-scratch]
+set programCounter 0
+
+# The HIR of source TEXT, compiled as a program file (so lib modules load).
+proc abiHir {text {strict 1}} {
+    set path [file join $::scratch p[incr ::programCounter].bot]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8
+    puts -nonewline $channel $text
+    close $channel
+    return [surface::readProgramFile $path -strict $strict]
+}
+
+# The sorted diagnostic kinds of source TEXT.
+proc diagKinds {text} {
+    return [lsort -unique [lmap d [hir::diagnostics [abiHir $text 0]] {dict get $d kind}]]
+}
+
+# {KIND LINE:COLUMN MESSAGE} of the first diagnostic strict compilation of
+# TEXT raises.
+proc strictError {text} {
+    if {![catch {abiHir $text} message options]} {
+        return "no error"
+    }
+    regexp {^[^ ]*:([0-9]+:[0-9]+): (.*)$} $message -> location text
+    return [list [lindex [dict get $options -errorcode] end] $location $text]
+}
+
+# The outcome of source TEXT on every backend in BACKENDS.
+proc outcomesOf {text {backends ""}} {
+    if {$backends eq ""} {
+        set backends $::allBackends
+    }
+    set hir [abiHir $text]
+    return [lmap backend $backends {outcomeUnderHir $backend $hir}]
+}
+
+# The one shown value every backend in BACKENDS agrees on for TEXT, or a
+# description of the disagreement or error.
+proc agree {text {backends ""}} {
+    if {$backends eq ""} {
+        set backends $::allBackends
+    }
+    set outcomes [outcomesOf $text $backends]
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        return "DISAGREE: [join [lmap b $backends o $outcomes {list $b $o}] { / }]"
+    }
+    set outcome [lindex $outcomes 0]
+    if {[lindex $outcome 0] ne "value"} {
+        return "ERROR: $outcome"
+    }
+    return [lindex $outcome 1]
+}
+
+# Runs BODY with environment variable NAME set to VALUE, restoring it after.
+proc withEnv {name value body} {
+    set had [info exists ::env($name)]
+    if {$had} {
+        set saved $::env($name)
+    }
+    set ::env($name) $value
+    try {
+        uplevel 1 $body
+    } finally {
+        if {$had} {
+            set ::env($name) $saved
+        } else {
+            unset ::env($name)
+        }
+    }
+}
+
+proc underGcStress {body} {
+    uplevel 1 [list withEnv BOTLISH_NATIVE_GC_STRESS 1 $body]
+}
+
+# The NIR text of every instance of function NAME in NIR.
+proc nirFunction {nir name} {
+    set lines [split $nir \n]
+    set bodies {}
+    foreach start [lsearch -all -regexp $lines "^func \[0-9\]+ \"[string map {: \\:} $name]\""] {
+        set end [lsearch -start $start -exact $lines end]
+        lappend bodies [join [lrange $lines $start $end] \n]
+    }
+    return [join $bodies \n]
+}
+
+# A Botlish expression for Int V (a negative literal is "0 - N").
+proc intExpr {v} {
+    return [expr {$v < 0 ? "0 - [expr {-$v}]" : $v}]
+}
+
+# The 64-bit two's-complement bit pattern of register word W (an Int in
+# -2^63..2^63-1), as 16 hexadecimal digits.
+proc wordBits {w} {
+    if {$w < -2**63 || $w >= 2**63} {
+        return "NOT-A-WORD($w)"
+    }
+    return [format %016llx [expr {$w & (2**64 - 1)}]]
+}
+
+# The family: struct, creator, encoder, minimum, maximum, signed.
+set family {
+    I8    i8    from_i8    -128                  127                  1
+    I16   i16   from_i16   -32768                32767                1
+    I32   i32   from_i32   -2147483648           2147483647           1
+    I64   i64   from_i64   -9223372036854775808  9223372036854775807  1
+    U8    u8    from_u8    0                     255                  0
+    U16   u16   from_u16   0                     65535                0
+    U32   u32   from_u32   0                     4294967295           0
+    U64   u64   from_u64   0                     18446744073709551615 0
+    Isize isize from_isize -9223372036854775808  9223372036854775807  1
+    Usize usize from_usize 0                     18446744073709551615 0
+}
+
+# The oracle for creator CTOR's domain MIN..MAX on Int V, as the classify
+# programs below print it: "below", "above", or [V, WORD] -- V itself, and
+# the register word abi::x86_64 encodes it as (sign extension for a signed
+# domain is V; zero extension of an unsigned V is V below 2^63, else the
+# same 64 bits read signed, V - 2^64).
+proc abiOracle {min max signed v} {
+    if {$v < $min} { return "\"below\"" }
+    if {$v > $max} { return "\"above\"" }
+    set word [expr {!$signed && $v >= 2**63 ? $v - 2**64 : $v}]
+    return "\[$v, $word\]"
+}
+
+# A program classifying every Int of VALUES with creator CTOR (struct
+# encoder ENC): the value back through .value, and its register word.
+proc classifyProgram {ctor enc values} {
+    return "fn classify(n: int):
+    x = abi::${ctor}(n):
+        on AbiIntegerBelowRange:
+            return \"below\"
+        on AbiIntegerAboveRange:
+            return \"above\"
+    \[x.value, abi::x86_64::${enc}(x).word\]
+
+xs = \[[join [lmap v $values {intExpr $v}] {, }]\]
+loop x in xs:
+    classify(x)
+"
+}
+
+# ---------------------------------------------------------------------------
+# The library: ordinary Botlish, nothing compiler-defined
+
+test abi-numeric-module {abi is the module lib/abi.bot: ten nominal structs, each with one field `value` typed with its own source-defined domain, whose exact interval is the declared one} -body {
+    set hir [abiHir "abi::u8(1).value"]
+    set domains [dict create]
+    foreach t [hir::sourceTypes $hir] {
+        if {[dict exists $t domain]} {
+            dict set domains [dict get $t name] [dict get $t domain]
+        }
+    }
+    set rows {}
+    foreach {s ctor enc min max signed} $::family {
+        set id abi::$s
+        lappend rows [list $s [hir::structs::names $id] [hir::types::show [hir::structs::fieldType $id value]] \
+            [expr {[dict get $domains Abi${s}Value] eq [list interval $min $max]}]]
+    }
+    list [string map [list $::projectRoot ROOT] [surface::modules::ModulePath abi]] $rows
+} -result {ROOT/lib/abi.bot {{I8 value {int[AbiI8Value]} 1} {I16 value {int[AbiI16Value]} 1} {I32 value {int[AbiI32Value]} 1} {I64 value {int[AbiI64Value]} 1} {U8 value {int[AbiU8Value]} 1} {U16 value {int[AbiU16Value]} 1} {U32 value {int[AbiU32Value]} 1} {U64 value {int[AbiU64Value]} 1} {Isize value {int[AbiIsizeValue]} 1} {Usize value {int[AbiUsizeValue]} 1}}}
+
+test abi-numeric-exact-domains {the ten domains, exactly: U64 and Usize include 2^63..2^64-1 (never reduced to the signed range)} -body {
+    set hir [abiHir "abi::u8(1).value"]
+    set rows {}
+    foreach t [hir::sourceTypes $hir] {
+        if {[dict exists $t domain] && [regexp {^Abi(I|U)(8|16|32|64|size)Value$} [dict get $t name]]} {
+            lappend rows [list [dict get $t name] [dict get $t domain]]
+        }
+    }
+    lsort -index 0 $rows
+} -result {{AbiI16Value {interval -32768 32767}} {AbiI32Value {interval -2147483648 2147483647}} {AbiI64Value {interval -9223372036854775808 9223372036854775807}} {AbiI8Value {interval -128 127}} {AbiIsizeValue {interval -9223372036854775808 9223372036854775807}} {AbiU16Value {interval 0 65535}} {AbiU32Value {interval 0 4294967295}} {AbiU64Value {interval 0 18446744073709551615}} {AbiU8Value {interval 0 255}} {AbiUsizeValue {interval 0 18446744073709551615}}}
+
+test abi-numeric-size-width-is-the-target-s {Isize/Usize: on today's only target (x86-64) their domains equal I64's/U64's, but every one is its own declared type with no parent (not an alias, not a subtype)} -body {
+    set hir [abiHir "abi::u8(1).value"]
+    set byName [dict create]
+    foreach t [hir::sourceTypes $hir] {
+        if {[dict exists $t domain]} {
+            dict set byName [dict get $t name] $t
+        }
+    }
+    list [expr {[dict get $byName AbiIsizeValue domain] eq [dict get $byName AbiI64Value domain]}] \
+        [expr {[dict get $byName AbiUsizeValue domain] eq [dict get $byName AbiU64Value domain]}] \
+        [lmap n {AbiIsizeValue AbiUsizeValue AbiI64Value AbiU64Value} {dict get $byName $n parent}] \
+        [core::type::subtype AbiIsizeValue AbiI64Value] [core::type::subtype AbiUsizeValue AbiU64Value]
+} -result {1 1 {Int Int Int Int} 0 0}
+
+test abi-numeric-no-compiler-knowledge {the compiler knows no ABI numeric type: no native, no compiler or runtime code (comments aside) names a member of the family, its domains or its errors} -body {
+    set pattern {abi::(I|U)(8|16|32|64)\M|abi::(Isize|Usize)\M|Abi(I|U)(8|16|32|64|size)Value\M|AbiInteger(Below|Above)Range}
+    set hits {}
+    set files {}
+    foreach dir {core hir native surface compiler} {
+        lappend files {*}[glob -directory [file join $::projectRoot $dir] *.tcl]
+    }
+    # Every Rust source of the native backend, at any depth.
+    set pending [list [file join $::projectRoot native src]]
+    while {$pending ne {}} {
+        set pending [lassign $pending dir]
+        lappend files {*}[glob -nocomplain -directory $dir *.rs]
+        lappend pending {*}[glob -nocomplain -type d -directory $dir *]
+    }
+    foreach file $files {
+        set channel [open $file r]
+        set lineNumber 0
+        foreach line [split [read $channel] \n] {
+            incr lineNumber
+            if {[regexp {^\s*(#|//)} $line]} {
+                continue
+            }
+            if {[regexp $pattern $line]} {
+                lappend hits [file tail $file]:$lineNumber
+            }
+        }
+        close $channel
+    }
+    # Each source `type` declaration registers its own generic predicate
+    # native (AbiU8Value? ...: SOURCE-DEFINED-INTEGER-DOMAINS.md) while the
+    # program that declares it is loaded; nothing else may mention abi.
+    set natives [lsearch -all -inline -regexp [core::native::names] {(?i)abi}]
+    list [expr {[llength $files] > 60}] $hits \
+        [lsearch -all -inline -not -regexp $natives {^Abi(I|U)(8|16|32|64|size)Value\?$}] \
+        [llength [lsearch -all -regexp $natives {^Abi(I|U)(8|16|32|64|size)Value\?$}]]
+} -result {1 {} linux::abi::syscall 10}
+
+test abi-numeric-global-names {abi::x86_64 now loads lib/abi.bot, whose domain types and errors are global names: they carry an Abi prefix, so a program's own U8Value or I32Value (a plausible name of its own) still compiles beside the raw transport; a genuine collision names the module declaration it collides with} -body {
+    list [agree "type U8Value = Int in 0..255\ntype I32Value = Int in 0..9\nfn f(x: U8Value) -> int:\n    x\nabi::x86_64::to_int(abi::x86_64::register64(f(39)))"] \
+        [string map [list $::projectRoot ROOT] [lrange [strictError "type AbiU8Value = Int in 0..255\nabi::x86_64::to_int(abi::x86_64::register64(39))"] 0 2]] \
+        [string map [list $::projectRoot ROOT] [lrange [strictError "error AbiIntegerAboveRange\nabi::x86_64::to_int(abi::x86_64::register64(39))"] 0 2]] \
+        [lrange [strictError "type Small = Int in 0..3\ntype Small = Int in 0..4\n1"] 0 2]
+} -match glob -result {39 {TYPE 1:6 {type "AbiU8Value" is already declared at ROOT/lib/abi.bot:*:6 (type and error names are global: every module the program loads, including one it reaches only through another module, declares its names for the whole program)}} {UNDECLARED-ERROR 1:7 {error "AbiIntegerAboveRange" is already declared at ROOT/lib/abi.bot:*:7 (type and error names are global*)}} {TYPE 2:6 {type "Small" is already declared}}}
+
+# ---------------------------------------------------------------------------
+# Checked creation and the way back to Int: every boundary, every type,
+# every backend
+
+foreach {s ctor enc min max signed} $family {
+    set values [list [expr {$min - 1}] $min [expr {$min + 1}] -1 0 1 \
+        [expr {$min / 2}] [expr {$max / 2}] [expr {$max - 1}] $max [expr {$max + 1}] \
+        [expr {-2**128}] [expr {2**128}]]
+    if {$s in {U64 Usize}} {
+        # The transition from the signed 64-bit range into the upper half.
+        lappend values [expr {2**63 - 1}] [expr {2**63}] [expr {2**63 + 1}]
+    }
+    if {$s in {I64 Isize}} {
+        lappend values [expr {2**63}] [expr {-2**63 - 1}]
+    }
+    set expected "\[[join [lmap v $values {abiOracle $min $max $signed $v}] {, }]\]"
+    test abi-numeric-boundaries-$ctor "abi::$ctor accepts exactly $min..$max (min-1, min, min+1, -1, 0, 1, interior, max-1, max, max+1, far out): every accepted value returns through .value unchanged and encodes as its register word; every other is the declared error of the violated bound -- identically on every backend" \
+        -body [list agree [classifyProgram $ctor $enc $values]] -result $expected
+}
+
+test abi-numeric-round-trip-is-exact {Int -> creator -> Int is the identity on every domain, with no sign reinterpretation: U8 255 is 255, I8 -1 is -1, U64 0, 1, 2^63-1, 2^63 and 2^64-1 are themselves} -body {
+    agree {[abi::u8(255).value, abi::i8(0 - 1).value, abi::u64(0).value, abi::u64(1).value, abi::u64(9223372036854775807).value, abi::u64(9223372036854775808).value, abi::u64(18446744073709551615).value, abi::usize(18446744073709551615).value, abi::i64(0 - 9223372036854775808).value, abi::isize(9223372036854775807).value, abi::u32(4294967295).value, abi::i16(0 - 32768).value]
+}
+} -result {[255, -1, 0, 1, 9223372036854775807, 9223372036854775808, 18446744073709551615, 18446744073709551615, -9223372036854775808, 9223372036854775807, 4294967295, -32768]}
+
+test abi-numeric-no-wrapping {an ABI value is not fixed-width arithmetic: its Int is ordinary arbitrary-precision Int (u8 255 + 1 is 256, never 0; i8 -128 - 1 is -129; u64 max + 1 is 2^64), and a result re-enters a domain only through the checked creator} -body {
+    agree {fn back_to_u8(n: int):
+    r = abi::u8(n):
+        on AbiIntegerBelowRange:
+            return "below"
+        on AbiIntegerAboveRange:
+            return "above"
+    r.value
+
+x = abi::u8(255)
+y = abi::i8(0 - 128)
+z = abi::u64(18446744073709551615)
+[x.value + 1, y.value - 1, z.value + 1, x.value * 2, back_to_u8(x.value + 1), back_to_u8(y.value), back_to_u8(x.value - 1)]
+}
+} -result {[256, -129, 18446744073709551616, 510, "above", "below", 254]}
+
+# ---------------------------------------------------------------------------
+# Static proofs: constants, declared domains, explicit conversions
+
+test abi-numeric-constant-proofs {a provably in-range constant needs no handler (both extremes of every domain); a provably out-of-range one is a compile-time KNOWN-ERROR naming the violated bound; an unprovable Int must be handled or declared} -body {
+    set inRange {}
+    set below {}
+    set above {}
+    foreach {s ctor enc min max signed} $::family {
+        lappend inRange "abi::${ctor}([intExpr $min]).value\nabi::${ctor}([intExpr $max]).value"
+        lappend below [lindex [strictError "abi::${ctor}([intExpr [expr {$min - 1}]])"] 0]
+        lappend above [lindex [strictError "abi::${ctor}([intExpr [expr {$max + 1}]])"] 0]
+    }
+    # The complete error list each rejection names (up to the ";" that ends
+    # it), not merely its first name.
+    set named {}
+    foreach {s ctor enc min max signed} $::family {
+        foreach v [list [expr {$min - 1}] [expr {$max + 1}]] {
+            regexp {declared error\(s\) ([^;]*);} [lindex [strictError "abi::${ctor}([intExpr $v])"] 2] -> errors
+            dict lappend named $errors $ctor
+        }
+    }
+    list [diagKinds [join $inRange \n]] [lsort -unique $below] [lsort -unique $above] \
+        [dict map {errors ctors} $named {llength $ctors}] \
+        [diagKinds "fn f(n: int):\n    abi::u32(n)\nf(3)"] \
+        [diagKinds "fn f(n: int) -> abi::U32 errors AbiIntegerBelowRange, AbiIntegerAboveRange:\n    abi::u32(n)\n1"]
+} -result {{} KNOWN-ERROR KNOWN-ERROR {AbiIntegerBelowRange 10 AbiIntegerAboveRange 10} UNHANDLED-ERROR {}}
+
+test abi-numeric-known-error-below {the below-range compile-time rejection names AbiIntegerBelowRange} -body {
+    list [lindex [strictError "abi::u8(0 - 1)"] 2] [lindex [strictError "abi::i8(0 - 129)"] 2]
+} -match glob -result {{*always produces the declared error(s) AbiIntegerBelowRange*} {*always produces the declared error(s) AbiIntegerBelowRange*}}
+
+test abi-numeric-conversion-failure-points-at-the-call {a conversion that may fail is an obligation at the creator call itself (an unhandled one is reported there); a dynamic failure is the declared error of the violated bound, which a handler receives -- on every backend} -body {
+    list [strictError "fn f(n: int):\n    abi::u8(n)\nf(3)"] \
+        [agree "fn f(n: int) -> int errors AbiIntegerBelowRange, AbiIntegerAboveRange:\n    abi::u8(n).value\nloop n in \[1, 256, 0 - 1\]:\n    f(n):\n        on AbiIntegerBelowRange:\n            0 - 100\n        on AbiIntegerAboveRange:\n            100"]
+} -match glob -result {{UNHANDLED-ERROR 2:5 {this call may produce the declared error "AbiInteger*Range", which is neither handled here nor admitted by the enclosing function's own "errors" declaration}} {\[1, 100, -100\]}}
+
+test abi-numeric-field-domain-survives {inside fn f(x: abi::U8) the compiler knows 0 <= x.value <= 255 from the field's declared domain: byte::from_int(x.value) needs no handler (also as a direct argument), widening to U16 needs none, and narrowing to I8 can only fail above} -body {
+    list [diagKinds "fn f(x: abi::U8) -> int:\n    byte::from_int(x.value)\nf(abi::u8(3))"] \
+        [diagKinds "fn f(x: abi::U8) -> int:\n    v = x.value\n    byte::from_int(v)\nf(abi::u8(3))"] \
+        [diagKinds "fn f(x: abi::U8) -> abi::U16:\n    abi::u16(x.value)\nf(abi::u8(3)).value"] \
+        [diagKinds "fn f(x: abi::U8) -> abi::I8 errors AbiIntegerAboveRange:\n    abi::i8(x.value)\nr = f(abi::u8(3)):\n    on AbiIntegerAboveRange:\n        abi::i8(0)\nr.value"] \
+        [lindex [strictError "fn f(x: abi::U8) -> abi::I8:\n    abi::i8(x.value)\n1"] 2] \
+        [diagKinds "fn f(x: abi::I8) -> int:\n    byte::from_int(x.value + 128)\nf(abi::i8(3))"]
+} -match glob -result {{} {} {} {} {*may produce the declared error "AbiIntegerAboveRange"*} {}}
+
+test abi-numeric-explicit-conversion-through-int {the explicit route between domains is through Int: abi::usize(u.value) for u: abi::U64 needs no handler and keeps the value; I64 -> U64 can only fail below} -body {
+    list [diagKinds "fn f(u: abi::U64) -> abi::Usize:\n    abi::usize(u.value)\nf(abi::u64(7)).value"] \
+        [diagKinds "fn f(i: abi::I64) -> abi::U64 errors AbiIntegerBelowRange:\n    abi::u64(i.value)\nr = f(abi::i64(7)):\n    on AbiIntegerBelowRange:\n        abi::u64(0)\nr.value"] \
+        [agree "fn f(u: abi::U64) -> abi::Usize:\n    abi::usize(u.value)\nf(abi::u64(18446744073709551615)).value"]
+} -result {{} {} 18446744073709551615}
+
+test abi-numeric-construction-needs-proof {direct construction is sound without privacy: the field must be proven in the domain statically (no run-time guard exists)} -body {
+    list [diagKinds "abi::U8 {value: 256}"] \
+        [diagKinds "fn wrap(x: int):\n    abi::U8 {value: x}\n1"] \
+        [diagKinds "abi::U8 {value: 255}.value"] \
+        [diagKinds "abi::U64 {value: 18446744073709551615}.value"] \
+        [diagKinds "abi::I8 {value: 0 - 129}"]
+} -result {TYPE TYPE {} {} TYPE}
+
+# ---------------------------------------------------------------------------
+# Nominal: distinct types, never interchangeable
+
+test abi-numeric-nominal-parameters {a parameter of one ABI type accepts no other, even with equal or overlapping domains (U64 is not a Usize, I64 is not an Isize, I32 is not a U32); the diagnostic names the nominal mismatch, not field or Int-range details} -body {
+    list [strictError "fn f(x: abi::Usize):\n    x.value\nf(abi::u64(1))"] \
+        [lindex [strictError "fn f(x: abi::Isize):\n    x.value\nf(abi::i64(1))"] 0] \
+        [lindex [strictError "fn f(x: abi::U32):\n    x.value\nf(abi::i32(1))"] 0] \
+        [lindex [strictError "fn f(x: abi::U32):\n    x.value\nf(5)"] 0] \
+        [diagKinds "fn f(x: abi::Usize):\n    x.value\nf(abi::usize(1))"]
+} -result {{TYPE 3:3 {argument for parameter "x" cannot be proven to satisfy abi::Usize (argument type: abi::U64); abi::U64 and abi::Usize are distinct named struct types: a named struct type is nominal, and no value is ever converted from one to another implicitly}} TYPE TYPE TYPE {}}
+
+test abi-numeric-nominal-equality {the language's structural equality applies within a type (same value: equal) and never across ABI types, whatever their domains: I64 1 is not Isize 1, U64 1 not Usize 1, I32 1 not U32 1, and no ABI value equals the plain Int} -body {
+    agree {[abi::u8(1) == abi::u8(1), abi::u8(1) == abi::u8(2), abi::i64(1) == abi::isize(1), abi::u64(1) == abi::usize(1), abi::i32(1) == abi::u32(1), abi::u8(1) == 1, abi::u8(255)]
+}
+} -result {[true, false, false, false, false, false, abi::U8 {value: 255}]}
+
+test abi-numeric-not-arithmetic {an ABI value has no arithmetic or ordering: +, *, < on it are the ordinary TYPE error any struct operand gets (never an implicit .value), identically on every backend} -body {
+    list [lrange [lindex [outcomesOf "x = abi::u8(255)\nx + 1" {interp}] 0] 0 2] \
+        [lsort -unique [lmap o [outcomesOf "x = abi::u8(255)\nx + 1" $::allBackends] {lrange $o 0 1}]] \
+        [lsort -unique [lmap o [outcomesOf "x = abi::i32(2)\nx * 8" {interp compile cranelift}] {lrange $o 0 1}]] \
+        [lsort -unique [lmap o [outcomesOf "x = abi::u32(2)\nx < abi::u32(3)" {interp compile cranelift}] {lrange $o 0 1}]]
+} -result {{error {CORE SEMANTIC TYPE} {+: expected int, got abi::U8 {value: 255}}} {{error {CORE SEMANTIC TYPE}}} {{error {CORE SEMANTIC TYPE}}} {{error {CORE SEMANTIC TYPE}}}}
+
+test abi-numeric-collections-stay-int {collection lengths and indexes are ordinary Int, not Usize: list_length is an Int, and an ABI value is not an index} -body {
+    list [agree "n = list_length(\[1, 2, 3\])\n\[n + 0, abi::usize(n).value\]"] \
+        [lsort -unique [lmap o [outcomesOf "list_get(\[1, 2\], abi::usize(0))" {interp compile cranelift}] {lrange $o 0 1}]]
+} -result {{[3, 3]} {{error {CORE SEMANTIC TYPE}}}}
+
+# ---------------------------------------------------------------------------
+# Register encoding (abi::x86_64::from_*): the exact x86-64 bit patterns
+
+test abi-numeric-register-bit-patterns {every ABI value encodes as its x86-64 register bit pattern: signed values sign-extended, unsigned values zero-extended -- the 64 bits of the Register64 word, read on every backend (the native words then reach the kernel as exactly these bits: native/src/runtime/syscall.rs's abi_numeric_words_are_their_register_bit_patterns)} -body {
+    set cases {
+        {from_i8(abi::i8(0 - 1))}                        ffffffffffffffff
+        {from_i8(abi::i8(0 - 128))}                      ffffffffffffff80
+        {from_i8(abi::i8(127))}                          000000000000007f
+        {from_i16(abi::i16(0 - 1))}                      ffffffffffffffff
+        {from_i16(abi::i16(0 - 32768))}                  ffffffffffff8000
+        {from_i32(abi::i32(0 - 1))}                      ffffffffffffffff
+        {from_i32(abi::i32(0 - 2147483648))}             ffffffff80000000
+        {from_i32(abi::i32(2147483647))}                 000000007fffffff
+        {from_i64(abi::i64(0 - 1))}                      ffffffffffffffff
+        {from_i64(abi::i64(0 - 9223372036854775808))}    8000000000000000
+        {from_isize(abi::isize(0 - 1))}                  ffffffffffffffff
+        {from_u8(abi::u8(255))}                          00000000000000ff
+        {from_u16(abi::u16(65535))}                      000000000000ffff
+        {from_u32(abi::u32(4294967295))}                 00000000ffffffff
+        {from_u64(abi::u64(0))}                          0000000000000000
+        {from_u64(abi::u64(9223372036854775807))}        7fffffffffffffff
+        {from_u64(abi::u64(9223372036854775808))}        8000000000000000
+        {from_u64(abi::u64(9223372036854775809))}        8000000000000001
+        {from_u64(abi::u64(18446744073709551615))}       ffffffffffffffff
+        {from_usize(abi::usize(9223372036854775808))}    8000000000000000
+        {from_usize(abi::usize(18446744073709551615))}   ffffffffffffffff
+    }
+    set exprs [lmap {e bits} $cases {format {abi::x86_64::%s.word} $e}]
+    set shown [agree "\[[join $exprs {, }]\]"]
+    set words [split [string trim $shown {[]}] ,]
+    set mismatches {}
+    foreach {e bits} $cases w $words {
+        set got [wordBits [string trim $w]]
+        if {$got ne $bits} {
+            lappend mismatches [list $e expected $bits got $got]
+        }
+    }
+    list [llength $words] $mismatches
+} -result {21 {}}
+
+test abi-numeric-bits-are-transport-not-interpretation {to_int reads every word signed: U64 2^64-1 and I64 -1 travel as the same bits (equal Register64s) and both read back as -1; U64 2^63 reads back as -2^63 -- the ABI value's own .value is never touched} -body {
+    agree {u = abi::x86_64::from_u64(abi::u64(18446744073709551615))
+i = abi::x86_64::from_i64(abi::i64(0 - 1))
+h = abi::x86_64::from_u64(abi::u64(9223372036854775808))
+[u == i, abi::x86_64::to_int(u), abi::x86_64::to_int(i), abi::x86_64::to_int(h), abi::u64(18446744073709551615).value]
+}
+} -result {[true, -1, -1, -9223372036854775808, 18446744073709551615]}
+
+test abi-numeric-encoders-are-total-and-nominal {an encoder needs no handler (its parameter's domain proves the construction), and accepts only its own ABI type: from_usize takes no U64, from_i32 no U32, from_u32 no plain Int} -body {
+    list [diagKinds "fn enc(a: abi::U64, b: abi::Usize, c: abi::I8, d: abi::U32):\n    \[abi::x86_64::from_u64(a), abi::x86_64::from_usize(b), abi::x86_64::from_i8(c), abi::x86_64::from_u32(d)\]\nenc(abi::u64(1), abi::usize(2), abi::i8(3), abi::u32(4))"] \
+        [lindex [strictError "abi::x86_64::from_usize(abi::u64(1))"] 0] \
+        [lindex [strictError "abi::x86_64::from_i32(abi::u32(1))"] 0] \
+        [lindex [strictError "abi::x86_64::from_u32(5)"] 0]
+} -result {{} TYPE TYPE TYPE}
+
+test abi-numeric-register64-unchanged {the signed Int creator is still one route into Register64, unchanged: register64(39), its bounds, and register64(Int) still rejects the upper U64 half that from_u64 encodes} -body {
+    list [agree {[abi::x86_64::to_int(abi::x86_64::register64(39)), abi::x86_64::register64(0 - 1) == abi::x86_64::from_u64(abi::u64(18446744073709551615))]
+}] [lindex [strictError "abi::x86_64::register64(18446744073709551615)"] 0]
+} -result {{[39, true]} KNOWN-ERROR}
+
+# ---------------------------------------------------------------------------
+# Natively: wrappers disappear, proven checks disappear
+
+# The NIR of source TEXT and its allocation summary over its run.
+proc nativeEvidence {text} {
+    set hir [abiHir $text]
+    set report [native::allocationReport $hir summary]
+    return [list [native::nir $hir] [dict get $report total allocations] \
+        [dict get $report byKind Struct allocations] [dict get $report byKind BigInt allocations]]
+}
+
+test abi-numeric-constant-creators-are-free {natively, a proven-valid constant creation is no run-time work: each creator instance is one register move (no comparison, no fail path, no struct), and 1001 creations allocate nothing (i32 42, u32 42, i64 -1, u64 42)} -constraints linuxX86_64 -body {
+    set rows {}
+    foreach {ctor arg} {i32 42 u32 42 i64 {0 - 1} u64 42} {
+        lassign [nativeEvidence "fn probe(n: int) -> int:\n    abi::${ctor}($arg).value + n\nloop i from 0 to 1000:\n    probe(i)\nprobe(1)"] nir total structs bigints
+        set body [nirFunction $nir abi::$ctor]
+        lappend rows [list $ctor [regexp -all {\n} $body] [string match "*retmulti %0*" $body] \
+            [regexp -all {op [a-z]+} $body] [regexp -all {faildeclared|structnew} $nir] $total]
+    }
+    set rows
+} -result {{i32 2 1 0 0 0} {u32 2 1 0 0 0} {i64 2 1 0 0 0} {u64 2 1 0 0 0}}
+
+test abi-numeric-dynamic-creator-checks {a dynamic creation keeps exactly its two bound checks and two declared-error paths; U64's upper bound 2^64-1 is a static constant (no run-time arithmetic), and a valid U64 is passed on without allocating} -constraints linuxX86_64 -body {
+    lassign [nativeEvidence "fn conv(n: int) -> int errors AbiIntegerBelowRange, AbiIntegerAboveRange:\n    abi::u64(n).value\nxs = \[1, 2, 9223372036854775807\]\nloop x in xs:\n    conv(x):\n        on AbiIntegerBelowRange:\n            0\n        on AbiIntegerAboveRange:\n            0"] nir total structs bigints
+    set body [nirFunction $nir abi::u64]
+    list [regexp -all {op i(lt|gt)} $body] [regexp -all {faildeclared} $body] \
+        [regexp {int 18446744073709551615} $body] [regexp -all {op isub} $body] $structs $bigints
+} -result {2 2 1 0 0 0}
+
+test abi-numeric-typed-parameter-is-raw {a function taking an abi::U8 receives its one field in a register (no struct), and x.value + 1 is raw machine arithmetic because 0..255 survived into native lowering} -constraints linuxX86_64 -body {
+    lassign [nativeEvidence "fn bump(x: abi::U8) -> int:\n    x.value + 1\nfn conv(n: int) -> int errors AbiIntegerBelowRange, AbiIntegerAboveRange:\n    bump(abi::u8(n))\nloop i from 0 to 256:\n    conv(i):\n        on AbiIntegerBelowRange:\n            0\n        on AbiIntegerAboveRange:\n            0\nbump(abi::u8(255))"] nir total structs bigints
+    set body [nirFunction $nir bump]
+    list [regexp {pnames="x\.0"} $body] [regexp -all {op riadd} $body] [regexp -all {op iadd} $body] $structs
+} -result {1 1 0 0}
+
+test abi-numeric-constant-encodings-are-free {natively, from_i32(i32(42)) and from_u32(u32(2^32-1)) are register moves end to end: every creator and encoder instance is a single retmulti, no struct exists, and 1001 encodings allocate nothing} -constraints linuxX86_64 -body {
+    set rows {}
+    foreach {ctor enc arg} {i32 from_i32 42 u32 from_u32 4294967295 i8 from_i8 {0 - 128} isize from_isize {0 - 1}} {
+        lassign [nativeEvidence "fn probe(n: int) -> int:\n    abi::x86_64::to_int(abi::x86_64::${enc}(abi::${ctor}($arg))) + n\nloop i from 0 to 1000:\n    probe(i)\nprobe(1)"] nir total structs bigints
+        lappend rows [list $enc [string match "*retmulti %0\nend" [nirFunction $nir abi::$ctor]] \
+            [regexp -all {retmulti %0\nend} [nirFunction $nir abi::x86_64::$enc]] \
+            [regexp -all {structnew|faildeclared} $nir] $total]
+    }
+    set rows
+} -result {{from_i32 1 1 0 0} {from_u32 1 1 0 0} {from_i8 1 1 0 0} {from_isize 1 1 0 0}}
+
+test abi-numeric-upper-u64-frontier {the documented optimization frontier, pinned: a struct parameter's field facts do not reach a closed instance, so from_u64/from_usize keep one comparison (and, on the upper-half path, one BigInt subtraction) at run time even for a constant; U64 2^64-1 (word -1, a small Int) allocates nothing, U64 2^63 (word -2^63, outside the 63-bit small Ints) allocates one BigInt per encoding, a lower-half Usize nothing; the values are exact either way} -constraints linuxX86_64 -body {
+    set rows {}
+    foreach {ctor enc arg} {u64 from_u64 18446744073709551615 u64 from_u64 9223372036854775808 usize from_usize 7} {
+        lassign [nativeEvidence "fn probe(n: int) -> int:\n    w = abi::x86_64::to_int(abi::x86_64::${enc}(abi::${ctor}($arg)))\n    if w < 0:\n        n\n    else:\n        0\nloop i from 0 to 1000:\n    probe(i)\nprobe(1)"] nir total structs bigints
+        set body [nirFunction $nir abi::x86_64::$enc]
+        lappend rows [list [regexp -all {op igt} $body] [regexp -all {op isub} $body] \
+            [regexp -all {faildeclared|structnew} $nir] $structs $bigints]
+    }
+    set rows
+} -result {{1 1 0 0 0} {1 1 0 0 1001} {1 1 0 0 0}}
+
+test abi-numeric-syscall-operands-are-the-encoded-words {natively, an ABI value crosses into linux::abi::syscall as its encoder's result register, with nothing in between: each argument operand of the op is the from_* call's own result (getpid: the encoded arguments are ignored by the kernel, and the pid is the same); the canonical path allocates nothing} -constraints linuxX86_64 -body {
+    set text "fn raw_getpid():\n    abi::x86_64::to_int(linux::abi::syscall({rax: abi::x86_64::register64(39)}))\nfn with_args():\n    abi::x86_64::to_int(linux::abi::syscall({rax: abi::x86_64::register64(39), rdi: abi::x86_64::from_u64(abi::u64(18446744073709551615)), rsi: abi::x86_64::from_i8(abi::i8(0 - 1)), rdx: abi::x86_64::from_u32(abi::u32(4294967295)), r10: abi::x86_64::from_usize(abi::usize(3))}))\nloop i from 0 to 1000:\n    with_args()\n\[raw_getpid() == with_args(), with_args() > 0\]"
+    lassign [nativeEvidence $text] nir total structs bigints
+    set body [nirFunction $nir with_args]
+    regexp {= op syscall_linux_x86_64 ((?:%[0-9]+ ?){7})} $body -> operands
+    # register -> the encoder whose callmulti result it is
+    set producer [dict create]
+    foreach {- reg fn} [regexp -all -inline {(%[0-9]+) = callmulti ([0-9]+) } $body] {
+        regexp "func $fn \"(\[^\"\]+)\"" $nir -> name
+        dict set producer $reg $name
+    }
+    set shown [lmap reg $operands {expr {[dict exists $producer $reg] ? [dict get $producer $reg] : "other"}}]
+    list $shown [agree $text $::nativeBackends] $structs $bigints
+} -result {{abi::x86_64::register64 abi::x86_64::from_u64 abi::x86_64::from_i8 abi::x86_64::from_u32 abi::x86_64::from_usize other other} {[true, true]} 0 0}
+
+test abi-numeric-gc-stress {GC stress changes nothing: ABI values in Lists, upper-half U64 BigInt words, virtual and materialized values} -constraints linuxX86_64 -body {
+    set text "fn big(n: int) errors AbiIntegerBelowRange, AbiIntegerAboveRange:\n    abi::x86_64::from_u64(abi::u64(n + 9223372036854775808))\nfn top(i: int) -> abi::U64 errors AbiIntegerBelowRange, AbiIntegerAboveRange:\n    abi::u64(18446744073709551615 - i)\nxs = loop i from 0 to 50:\n    top(i):\n        on AbiIntegerBelowRange:\n            abi::u64(0)\n        on AbiIntegerAboveRange:\n            abi::u64(0)\nws = loop i from 0 to 50:\n    r = big(i):\n        on AbiIntegerBelowRange:\n            abi::x86_64::register64(0)\n        on AbiIntegerAboveRange:\n            abi::x86_64::register64(0)\n    abi::x86_64::to_int(r)\n\[list_get(xs, 49).value, list_get(ws, 49), abi::x86_64::to_int(abi::x86_64::from_usize(abi::usize(list_get(xs, 0).value)))\]"
+    set plain [agree $text]
+    underGcStress {set stressed [agree $text $::nativeBackends]}
+    list $plain [expr {$plain eq $stressed}]
+} -result {{[18446744073709551566, -9223372036854775759, -1]} 1}
+
+# ---------------------------------------------------------------------------
+# The example and the unchanged getpid demonstration
+
+test abi-numeric-example-file {examples/abi/numeric-domains.bot runs identically on every backend} -body {
+    set hir [surface::readProgramFile [file join $::projectRoot examples abi numeric-domains.bot]]
+    set outcomes [lmap b $::allBackends {lrange [outcomeUnderHir $b $hir] 0 1}]
+    list [llength [lsort -unique $outcomes]] [lindex $outcomes 0]
+} -result {1 {value {[255, "above", 256, [-1, -1], true, 18446744073709551615]}}}
+
+test abi-numeric-getpid-example-unchanged {examples/linux/getpid.bot still prints [true, true] natively (the raw path is unchanged by the ABI layer)} -constraints linuxX86_64 -body {
+    set hir [surface::readProgramFile [file join $::projectRoot examples linux getpid.bot]]
+    lsort -unique [lmap b $::nativeBackends {lrange [outcomeUnderHir $b $hir] 0 1}]
+} -result {{value {[true, true]}}}
+
+# ---------------------------------------------------------------------------
+# Fuzzing: Int -> creator -> Int and -> register word, against an
+# independent Tcl oracle, for all ten domains in one program per seed
+
+# SEED's COUNT Ints for domain MIN..MAX: heavily clustered on min-1, min,
+# min+1, -1, 0, 1, max-1, max, max+1 (and, for 64-bit unsigned domains, the
+# 2^63 transition), plus random values inside and arbitrary BigInts outside.
+proc domainValues {min max count} {
+    set anchors [list $min $max -1 0 1 [expr {2**63}] [expr {-2**63}]]
+    set values {}
+    for {set i 0} {$i < $count} {incr i} {
+        switch -- [expr {int(rand() * 4)}] {
+            0 - 1 {
+                set a [lindex $anchors [expr {int(rand() * [llength $anchors])}]]
+                set v [expr {$a + int(rand() * 3) - 1}]
+            }
+            2 {
+                # Uniform-ish inside the domain.
+                set span [expr {$max - $min + 1}]
+                set r [expr {(int(rand() * 2**32) * 2**32 + int(rand() * 2**32)) * 2**32 + int(rand() * 2**32)}]
+                set v [expr {$min + $r % $span}]
+            }
+            3 {
+                # An arbitrary Int up to 2^80 in magnitude, either sign.
+                set bits [expr {int(rand() * 81)}]
+                set v [expr {(int(rand() * 2**40) * 2**40 + int(rand() * 2**40)) % (2**$bits + 1)}]
+                if {rand() < 0.5} { set v [expr {-$v}] }
+            }
+        }
+        lappend values $v
+    }
+    return $values
+}
+
+test abi-numeric-fuzz {seeded fuzz of every creator and encoder: for all ten domains, boundary-clustered and arbitrary Ints round-trip through .value or fail with the right bound, and encode as the right register word -- every backend agrees with an independent oracle (one seed also under GC stress natively)} -body {
+    set failures {}
+    foreach seed {20261003 31337} {
+        expr {srand($seed)}
+        set functions {}
+        set bindings {}
+        set expected {}
+        set index 0
+        foreach {s ctor enc min max signed} $::family {
+            set values [domainValues $min $max 24]
+            append functions "fn c$index\(n: int):\n    x = abi::${ctor}(n):\n        on AbiIntegerBelowRange:\n            return \"below\"\n        on AbiIntegerAboveRange:\n            return \"above\"\n    \[x.value, abi::x86_64::${enc}(x).word\]\n\n"
+            append bindings "r$index = loop v in \[[join [lmap v $values {intExpr $v}] {, }]\]:\n    c$index\(v)\n"
+            lappend expected "\[[join [lmap v $values {abiOracle $min $max $signed $v}] {, }]\]"
+            incr index
+        }
+        set text "$functions$bindings\[[join [lmap i [lsearch -all $expected *] {format r%d $i}] {, }]\]\n"
+        set want "\[[join $expected {, }]\]"
+        set got [agree $text]
+        if {$got ne $want} {
+            lappend failures [list seed $seed got $got expected $want]
+        }
+        if {$seed == 31337 && [testConstraint linuxX86_64]} {
+            underGcStress {set stressed [agree $text $::nativeBackends]}
+            if {$stressed ne $want} {
+                lappend failures [list seed $seed gc-stress $stressed]
+            }
+        }
+    }
+    set failures
+} -result {}
+
+removeDirectory abi-numeric-scratch
+cleanupTests

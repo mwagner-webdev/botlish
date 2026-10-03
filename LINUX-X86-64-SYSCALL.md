@@ -653,7 +653,12 @@ each finding was checked by a separate skeptic. Fixed as a result:
 19. **Conversion boundary tests:** see Tests.
 20. **Fuzz results:** see Fuzz results.
 21. **Full regression:** see Regression.
-22. **Obstacles discovered for `I32`, `Usize`, borrowed memory:**
+22. **Obstacles discovered for `I32`, `Usize`, borrowed memory:** (the next
+    milestone, ABI-NUMERIC-DOMAINS.md, resolved the first three: one
+    nominally typed encoder per ABI type, `abi::x86_64::from_i32` ...
+    `from_usize`; upper-half unsigned values encoded as `v - 2^64` with
+    Register64 unchanged; `.value` instead of an `abi::to_int`; global
+    `AbiI32Value`-style domain names and one `AbiInteger*Range` error pair)
     * *No overloading.* `register64` takes an Int; `register64(abi::I32)`
       needs a decision (separate conversion functions, or type-directed
       behaviour) -- deliberately left open. The same holds for a portable

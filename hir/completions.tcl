@@ -294,8 +294,18 @@ proc hir::completions::Eval {hirVar ctxVar diagnose enclosing guard e} {
             return [hir::range::unknown]
         }
         project {
-            set r [Eval hir ctx $diagnose $enclosing $guard [dict get $node receiver]]
-            return [expr {$r eq {never} ? {never} : [hir::range::unknown]}]
+            # The projected field's Range is what its static type implies,
+            # exactly as hir::range::Expr's own project case computes it (a
+            # field declared with an integer domain holds values of that
+            # domain: every construction proved it), so `byte::from_int(
+            # x.value)` for `x: abi::U8` is as decided here as it is for a
+            # local bound to x.value (ABI-NUMERIC-DOMAINS.md).
+            if {[Eval hir ctx $diagnose $enclosing $guard [dict get $node receiver]] eq {never}} {
+                return never
+            }
+            set r [hir::range::ConstrainType $hir $e [hir::range::unknown]]
+            dict set ctx exprs $e $r
+            return $r
         }
         handle {
             return [EvalHandle hir ctx $diagnose $enclosing $guard $e $node]
