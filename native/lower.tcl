@@ -207,6 +207,12 @@ namespace eval native::lower {
     # Ranges fit the small-Int domain (RawCountDomain); 0 keeps every
     # counted loop's compare and advance tagged, as before.
     variable rawCountLoopOpt 1
+    # GENERIC-PREDICATE-PROOF-LOSS.md, loss point 5: test/audit knob, not a
+    # user-facing flag. 1 gives a de-closured function's internal variant
+    # (InternalFunction) the RawInt ABI plan's raw parameter and result
+    # positions, and its direct calls (FlattenedVirtualCall) pass and
+    # receive them raw; 0 keeps every internal variant tagged, as before.
+    variable rawInternalAbiOpt 1
     # Scalar replacement (see "Scalar replacement" below): the hir::escape
     # analysis of the program, and whether it is enabled at all.
     variable escape {}
@@ -1733,8 +1739,30 @@ proc native::lower::AbiResult {id} {
     return [native::rawabi::result $abiPlan $id]
 }
 
+# The raw Int ABI positions (1|0 for each of the first N parameters) of
+# instance ID's *internal* variant (InternalFunction; loss point 5 of
+# GENERIC-PREDICATE-PROOF-LOSS.md): the plan's, the same as its canonical
+# function's, with rawInternalAbiOpt on; all tagged with it off. Read by the
+# internal variant itself and by every call of it (FlattenedVirtualCall),
+# so the two agree by construction.
+proc native::lower::InternalAbiParams {id n} {
+    variable rawInternalAbiOpt
+    if {!$rawInternalAbiOpt} {
+        return [lrepeat $n 0]
+    }
+    return [AbiParams $id $n]
+}
+
+# 1 if instance ID's internal variant returns its successful Int result raw
+# (see InternalAbiParams).
+proc native::lower::InternalAbiResult {id} {
+    variable rawInternalAbiOpt
+    return [expr {$rawInternalAbiOpt && [AbiResult $id]}]
+}
+
 # 1 if the current function's own successful result is raw (only ever set,
-# by Function, for the canonical function of a raw-result instance).
+# by Function, for the canonical function of a raw-result instance, and by
+# InternalFunction for its internal variant).
 proc native::lower::ResultRaw {fnVar} {
     upvar 1 $fnVar fn
     return [expr {[dict exists $fn resultRaw] && [dict get $fn resultRaw]}]
@@ -2283,6 +2311,17 @@ proc native::lower::InternalFunction {id} {
     set scope [hir::get $hir $region bodyScope]
     set body [hir::get $hir $region body]
     set rawParams [RawParams $id $instance $params]
+    # Raw Int ABI (loss point 5): the plan's raw positions of the declared
+    # parameters arrive raw, and a raw-result plan returns raw, exactly as
+    # in the canonical function (Function); every caller of an internal
+    # variant is a FlattenedVirtualCall, which reads the same plan
+    # (InternalAbiParams/InternalAbiResult). The hidden trailing capture
+    # parameters stay tagged.
+    set abiParams [InternalAbiParams $id [llength $params]]
+    set rawParams [lmap a $abiParams r $rawParams {expr {$a || $r}}]
+    if {[InternalAbiResult $id]} {
+        dict set fn resultRaw 1
+    }
     set k 0
     foreach b $params raw $rawParams {
         set r [NewReg fn]
@@ -2299,7 +2338,11 @@ proc native::lower::InternalFunction {id} {
         dict set fn locals $b [list reg [NewReg fn]]
     }
     dict set fn planResult [hir::construction::resultFamily $construction $id]
-    set result [SequenceTo fn $body [PlanResultFamily fn]]
+    if {[ResultRaw fn]} {
+        set result [SequenceRaw fn $body]
+    } else {
+        set result [SequenceTo fn $body [PlanResultFamily fn]]
+    }
     if {$result ne "never"} {
         Emit fn "ret $result"
     }
@@ -2314,6 +2357,18 @@ proc native::lower::InternalFunction {id} {
     }
     append head [ShortRegsHeader fn]
     append head [PlanHeader fn]
+    set rawPositions {}
+    set k 0
+    foreach a $abiParams {
+        if {$a} { lappend rawPositions $k }
+        incr k
+    }
+    if {$rawPositions ne ""} {
+        append head " rawparams=[Quote [join $rawPositions { }]]"
+    }
+    if {[ResultRaw fn]} {
+        append head " rawresult=1"
+    }
     append head " @$region"
     set text "$head\n[join [dict get $fn lines] \n]\nend"
     set tails [llength [lmap line [dict get $fn lines] {
@@ -4213,6 +4268,12 @@ proc native::lower::FlattenedVirtualCall {fnVar e node target targetInstance cap
     set rawSlots {}
     if {$self} {
         set rawSlots [lmap p $params {SlotKind fn $p}]
+    } elseif {[llength $params] == [llength $argExprs]} {
+        # Raw Int ABI of the callee's internal variant (loss point 5): the
+        # plan's raw positions are passed raw (InternalAbiParams, the same
+        # list InternalFunction declares). A self tail call's slots above
+        # already follow the same declaration (its parameters' locals).
+        set rawSlots [InternalAbiParams $targetInstance [llength $argExprs]]
     }
     set argRegs [CallArgs fn $argExprs {} $rawSlots [PlanSlots $targetInstance [llength $argExprs]]]
     if {$argRegs eq "never"} {
@@ -4231,7 +4292,11 @@ proc native::lower::FlattenedVirtualCall {fnVar e node target targetInstance cap
     }
     set id [InternalRef $targetInstance]
     dict lappend fn calls [list direct $id 0]
-    set result [Assign fn [string trimright "call $id [join [concat $argRegs $captureRegs] { }]"] $e]
+    set text [string trimright "call $id [join [concat $argRegs $captureRegs] { }]"]
+    if {[InternalAbiResult $targetInstance]} {
+        return [RawCallResult fn $e [AssignRaw fn $text $e] $want]
+    }
+    set result [Assign fn $text $e]
     set resultFamily [hir::construction::resultFamily $construction $targetInstance]
     if {$resultFamily ne ""} {
         return [PlanCallResult fn $e $result $resultFamily $want]

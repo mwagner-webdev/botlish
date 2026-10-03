@@ -1,0 +1,232 @@
+# raw-internal-abi.test -- loss point 5 of GENERIC-PREDICATE-PROOF-LOSS.md:
+# a de-closured function's internal (capture-explicit) variant takes the
+# RawInt ABI plan's raw parameter and result positions
+# (native::lower::InternalFunction via InternalAbiParams/InternalAbiResult),
+# and every direct call of it (FlattenedVirtualCall) passes and receives
+# them raw, so caller and callee agree by construction (native/src/nir.rs
+# validates the signature at every call). The hidden trailing capture
+# parameters stay tagged; internal region companions keep the tagged ABI,
+# like the canonical region companions.
+#
+# Knob (test/audit-only namespace variable, native/lower.tcl):
+# native::lower::rawInternalAbiOpt 0 keeps every internal variant tagged, as
+# before loss point 5.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 1000000
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+
+proc dedent {text} {
+    set lines [split $text \n]
+    set indent 1000
+    foreach line $lines {
+        if {[string trim $line] eq ""} continue
+        set n [expr {[string length $line] - [string length [string trimleft $line " "]]}]
+        if {$n < $indent} { set indent $n }
+    }
+    return [join [lmap line $lines {string range $line $indent end}] \n]
+}
+
+proc withRawInternal {opt script} {
+    set native::lower::rawInternalAbiOpt $opt
+    try {
+        return [uplevel 1 $script]
+    } finally {
+        set native::lower::rawInternalAbiOpt 1
+    }
+}
+
+proc hirOfText {src} {
+    return [surface::compile [dedent $src] t.bot -strict 0]
+}
+
+# The physical signature of every function named NAME in NIR text: its
+# `rawparams=`/`rawresult=` attributes ("-" when it has none), one entry per
+# variant, in order.
+proc signatures {nir name} {
+    set out {}
+    foreach line [split $nir \n] {
+        if {![string match "func * \"$name\" *" $line]} continue
+        set sig {}
+        if {[regexp {rawparams="([^"]*)"} $line -> p]} { lappend sig rawparams=$p }
+        if {[regexp {rawresult=1} $line]} { lappend sig rawresult }
+        lappend out [expr {$sig eq "" ? "-" : [join $sig ,]}]
+    }
+    return $out
+}
+
+proc functionsNamed {nir name} {
+    set out {}
+    set on 0
+    foreach line [split $nir \n] {
+        if {[string match "func *" $line]} {
+            set on [string match "func * \"$name\" *" $line]
+        }
+        if {$on} {
+            lappend out $line
+        }
+    }
+    return [join $out \n]
+}
+
+# interp, compile and cranelift, with block escape on and off and with the
+# RawInt demand filter off: the one outcome, or every distinct one.
+proc parity {hir} {
+    set outcomes [lmap backend {interp compile cranelift} {outcomeUnderHir $backend $hir}]
+    foreach opts {{-block-escape-opt 0} {-raw-demand-opt 0}} {
+        resetEffects
+        lappend outcomes [list value [core::value::show [native::evalHir $hir {*}$opts] 1] {}]
+    }
+    set outcomes [lsort -unique $outcomes]
+    expr {[llength $outcomes] == 1 ? [lindex $outcomes 0 1] : $outcomes}
+}
+
+# ---------------------------------------------------------------------------
+# refined-checks
+
+proc refinedChecksNir {args} {
+    native::nir [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot]] {*}$args
+}
+
+test raw-internal-abi-refined-checks-signatures {the de-closured scanners take the plan's raw positions (knob on): both scan_while variants a raw start, the is_tcl_alpha one also a raw result, tld? a raw i, domain? a raw start; char_at's i stays tagged (substring is a tagged consumer); knob off: none} -body {
+    lmap knob {1 0} {
+        withRawInternal $knob {
+            set nir [refinedChecksNir]
+            lmap name {scan_while tld? domain? char_at} {signatures $nir $name}
+        }
+    }
+} -result {{{rawparams=0 rawparams=0,rawresult} rawparams=0 rawparams=0 {- -}} {{- -} - - {- -}}}
+
+test raw-internal-abi-refined-checks-callers {the calls agree: domain? hands tld? its raw j + 1 (no rbox), tld? reads scan_while's raw result (no runbox), web::emailish? passes a raw constant start} -body {
+    set nir [refinedChecksNir]
+    set domain [functionsNamed $nir domain?]
+    set tld [functionsNamed $nir tld?]
+    list [regexp {%(\d+) = op riadd [^\n]*\n\s+%\d+ = call \d+ %\1 } $domain] \
+        [regexp {op runbox %4\M} $tld] [regexp {op rieq %4 } $tld] \
+        [regexp {rawint 0 @e\d+\n\s+%\d+ = fnvalue \d+ @e\d+\n\s+%\d+ = call} [functionsNamed $nir web::emailish?]]
+} -result {1 0 1 1}
+
+test raw-internal-abi-refined-checks-demand-off {with the demand filter off (-raw-demand-opt 0) the internal variants take every eligible raw position (char_at's i; its region companion, listed first, stays tagged), and refined-checks still returns [400, 0]} -body {
+    set hir [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot]]
+    set nir [native::nir $hir -raw-demand-opt 0]
+    list [signatures $nir char_at] [core::value::show [native::evalHir $hir -raw-demand-opt 0] 1] \
+        [core::value::show [native::evalHir $hir] 1] [core::value::show [native::evalHir $hir -block-escape-opt 0] 1]
+} -result {{- rawparams=0} {[400, 0]} {[400, 0]} {[400, 0]}}
+
+test raw-internal-abi-refined-checks-region-companion-tagged {char_at's internal region companion keeps the tagged ABI even when its i is planned raw (demand filter off): its callers box the argument} -body {
+    set nir [refinedChecksNir -raw-demand-opt 0]
+    set lines [lmap l [split $nir \n] {expr {[string match {func * "char_at" *results=3*} $l] ? $l : [continue]}}]
+    list [llength $lines] [regexp {rawparams} [lindex $lines 0]]
+} -result {1 0}
+
+# ---------------------------------------------------------------------------
+# The ABI on its own: params, results, recursion, the small-Int boundary
+
+set ::recursionShape {
+    fn outer(s, base):
+        n = length(s)
+        fn depth(x):
+            if x <= 0:
+                base
+            else:
+                depth(x - 1) + n
+        fn walk(x, acc):
+            if x <= 0:
+                acc
+            else:
+                walk(x - 1, acc + x * n)
+        fn shift(x):
+            x - 4611686018427387900 + depth(3)
+        [depth(5) + 1, walk(4, 0) - 1, shift(4611686018427387903) * 2]
+    [outer("ab", 7), outer("", 0 - 5)]
+}
+
+test raw-internal-abi-recursion {a non-tail self-recursive internal variant calls itself through its raw signature; a self-tail one keeps its raw loop slots; a raw parameter at the small-Int edge (2^62-1)} -body {
+    set hir [hirOfText $::recursionShape]
+    set nir [native::nir [native::prepareHir $hir]]
+    list [signatures $nir depth] [signatures $nir shift] \
+        [regexp {call \d+ %\d+ %\d+ %\d+ @} [functionsNamed $nir depth]] [parity $hir]
+} -result {rawparams=0 rawparams=0 1 {[[18, 19, 32], [-4, -1, -4]]}}
+
+set ::resultShape {
+    fn scanner(s):
+        n = length(s)
+        fn at(i):
+            substring(s, i, i + 1)
+        fn skip(start):
+            loop i from start to n:
+                if at(i) != " ":
+                    return i
+            n
+        fn word(start):
+            e = skip(start)
+            if e == n:
+                0
+            else:
+                e - start + 1
+        [word(0), word(n), word(1)]
+    [scanner("   ab"), scanner(""), scanner("x")]
+}
+
+test raw-internal-abi-result {a raw-result internal variant: the caller compares and subtracts the raw result directly; parity with block escape on and off and the demand filter off} -body {
+    set hir [hirOfText $::resultShape]
+    set nir [native::nir [native::prepareHir $hir]]
+    list [signatures $nir skip] [withRawInternal 0 {signatures [native::nir [native::prepareHir $hir]] skip}] [parity $hir]
+} -result {rawparams=0,rawresult - {[[4, 0, 3], [0, 0, 0], [1, 0, 0]]}}
+
+# ---------------------------------------------------------------------------
+# Knob off = the previous lowering; GC stress
+
+test raw-internal-abi-knob-off {with the knob off no internal variant has a raw position, and every program above still agrees} -body {
+    withRawInternal 0 {
+        set out {}
+        foreach src [list $::recursionShape $::resultShape] {
+            set hir [hirOfText $src]
+            lappend out [regexp {rawparams|rawresult} [native::nir [native::prepareHir $hir]]] [parity $hir]
+        }
+        set out
+    }
+} -result {0 {[[18, 19, 32], [-4, -1, -4]]} 0 {[[4, 0, 3], [0, 0, 0], [1, 0, 0]]}}
+
+set ::gcShape {
+    fn mk(k):
+        [k, concat("a", "b")]
+    fn run(s, lim):
+        n = length(s)
+        fn step(x):
+            ys = mk(x)
+            zs = mk(x + n)
+            x * 2 + list_length(ys) + list_length(zs) - list_length(mk(n))
+        fn count(lo):
+            loop i from lo to n:
+                if step(i) > lim:
+                    return i
+            n
+        c = count(0)
+        count(1) * 100 + c
+    [run("abcdef", 6), run("abcdef", 100), run("", 0)]
+}
+
+test raw-internal-abi-gc-stress {a raw parameter and a raw loop variable live across allocating calls in an internal variant: correct under GC stress (an executable with BOTLISH_NATIVE_GC_STRESS=1), with block escape on and off} -constraints executableAot -body {
+    set hir [hirOfText $::gcShape]
+    set sig [signatures [native::nir [native::prepareHir $hir]] count]
+    set dir [makeDirectory {raw internal abi executable test}]
+    set path [file join $dir prog]
+    try {
+        native::executable $hir $path
+        set on [exec env PATH= $path]
+        set gc [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 $path]
+        file delete $path
+        native::executable $hir $path -block-escape-opt 0
+        set off [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 $path]
+        list $sig [parity $hir] $on $gc $off
+    } finally {
+        removeDirectory {raw internal abi executable test}
+    }
+} -result {rawparams=0 {[303, 606, 0]} {[303, 606, 0]} {[303, 606, 0]} {[303, 606, 0]}}
+
+cleanupTests

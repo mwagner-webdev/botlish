@@ -84,20 +84,27 @@ test closure-int-keys-refined-checks-knob-off {with the knob off the same functi
     }
 } -result {{{tld?<generic> 0 {{[2, 4611686018427387903]}}}} {{domain?<generic> 0 {{[1, 4611686018427387903]}}}} {{char_at<generic> 0 {{[0, 4611686018427387902]}}}}}
 
-test closure-int-keys-refined-checks-nir-unchanged {the payoff, pinned honestly: refined-checks' NIR is identical apart from instance labels, with the RawInt demand filter on and off (counted loops are raw with or without the keys since loss point 4, which reads Ranges, not keys; de-closured functions never take raw parameters, loss point 5)} -body {
+test closure-int-keys-refined-checks-nir-unchanged {the payoff of the keys alone, pinned honestly: with de-closured functions tagged (loss point 5's knob off) refined-checks' NIR is identical apart from instance labels, with the RawInt demand filter on and off (counted loops are raw with or without the keys since loss point 4, which reads Ranges, not keys); with loss point 5 the Int keys are what lets the internal variants take raw positions, so the NIR differs} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot]]
-    lmap opts {{} {-raw-demand-opt 0}} {
-        set texts [lmap k {0 1} {
-            withIntKeys $k {
-                set n [native::nir $hir {*}$opts]
-                regsub -all {instance="[^"]*"} $n {instance=X} n
-                regsub -all { @e\d+} $n {} n
-                set n
+    lmap internal {0 1} {
+        set native::lower::rawInternalAbiOpt $internal
+        try {
+            lmap opts {{} {-raw-demand-opt 0}} {
+                set texts [lmap k {0 1} {
+                    withIntKeys $k {
+                        set n [native::nir $hir {*}$opts]
+                        regsub -all {instance="[^"]*"} $n {instance=X} n
+                        regsub -all { @e\d+} $n {} n
+                        set n
+                    }
+                }]
+                expr {[lindex $texts 0] eq [lindex $texts 1]}
             }
-        }]
-        expr {[lindex $texts 0] eq [lindex $texts 1]}
+        } finally {
+            set native::lower::rawInternalAbiOpt 1
+        }
     }
-} -result {1 1}
+} -result {{1 1} {0 0}}
 
 test closure-int-keys-refined-checks-rawint-plan {the keyed positions are RawInt-eligible; with counted loops tagged (loss point 4's knob off) the demand rule suppresses them (a counted loop bound is a tagged consumer), with raw counted loops only char_at's i stays suppressed (substring is a tagged consumer)} -body {
     lassign [refinedChecks] hir spec analysis
