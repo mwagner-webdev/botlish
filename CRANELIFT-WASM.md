@@ -101,21 +101,24 @@ of `u64` fields, and thread-local switches instead of an explicit `Target`.
 * for `http_request`: a struct-result type for natives, and a deterministic
   fixture transport for parity testing.
 
-**Four existing limitations bear on the wasm work (§9).** None is new: the
-repository already scopes or bounds each of them, or they apply only to 32-bit
-targets. §9 documents each in detail.
+**Four existing items bear on the wasm work (§9).** None is new: two are known
+limitations that the repository already scopes or bounds, one matters only for
+32-bit targets, and one is documentation lag. §9 documents each in detail.
 * **Stack overflow on fallback hosts (known limitation).**
   * Overflow handling is built only for Linux x86-64.
-  * On every other host, a full shadow stack is reported in-band. Callers that
-    call-effect analysis settled as unable to fail do not check for it, so a
-    crash or a wrong value can follow.
+  * On every other host, a full shadow stack is reported in-band. Calls to
+    functions that call-effect analysis settled as unable to fail do not check
+    for it, so a crash or a wrong value can follow.
+  * An exhausted native stack crashes the process there, instead of printing
+    `NATIVE LIMIT STACK`.
   * Every wasm build would be such a host, so the plan makes overflow fatal (P2,
     P3).
 * **The frame-walk cap on x86-64 (known limitation).**
   * The frame walker stops after 4,194,304 frame-pointer links. That cap is
     documented as a defensive bound.
   * A collection that runs deeper than that, which the 1 GiB worker allows,
-    misses the outermost frames' roots.
+    misses the outermost frames' roots. Objects reachable only from them are
+    freed while live, so a wrong value or a crash can follow.
   * It does not carry over to wasm, which has no frame walk.
 * **Pointer width and alignment (wasm-only).**
   * Five index casts, the collection-length limit, heap-object alignment and
@@ -523,11 +526,13 @@ calling function reserves shadow-stack space even when it has nothing to root:
 * on non-x86-64 ISAs this is a `RuntimeStack` frame of at least one slot
   (`roots.rs:737`, `prologue_runtime_stack` at `clif.rs:699`). That is the path
   the prototypes were forced onto;
-* on x86-64 macOS and Windows it is a separate one-slot token
-  (`prologue_depth_token`, `clif.rs:670`).
+* on x86-64 off Linux (macOS, Windows and others) it is a separate one-slot
+  token (`prologue_depth_token`, `clif.rs:670`).
 
-This reservation bounds recursion, and this document calls it the **depth
-token**. It is the single largest cost found:
+This reservation bounds recursion, and this document calls either form the
+**depth token**. §9.1, which has to tell the two apart, names them the
+depth-token path (x86-64 off Linux) and the `RuntimeStack` path (other ISAs).
+The depth token is the single largest cost found:
 
 | fib(27) on V8, two-instance loader, `botlish_fn_0` timed, best of 200 | Time |
 |---|---|
@@ -570,7 +575,7 @@ Best of 200 calls, minimum over three rounds, in µs (relative to the JIT):
 
 * **Fib.** `ShadowOnly` takes 0.53× (Wasmtime) to 0.55× (V8) the time of
   today's fallback.
-* **Allocating programs.** `ShadowOnly` was 0.5–5% faster than the fallback on
+* **Allocating programs.** `ShadowOnly` was 0.4–5% faster than the fallback on
   all four programs on V8, and on three of them on Wasmtime. csv_parse on
   Wasmtime was 2% slower: it has no frames to drop, and 6 leaves move to the
   shadow array.
@@ -617,7 +622,7 @@ own stack limit bounds recursion, and the host maps that trap (§4.5).
 * Root stores at definitions already happen on x86-64. `ShadowOnly` adds only a
   bump/compare/store prologue and a restore epilogue, and only in frames that
   have slots.
-* On the CLIF path, `ShadowOnly` was 0.5–5% faster than today's fallback on the
+* On the CLIF path, `ShadowOnly` was 0.4–5% faster than today's fallback on the
   allocating programs, except csv_parse on Wasmtime at +2% (table above).
 * The 12–22% that today's fallback costs on x86-64 fib is all depth reservation,
   because fib has no root slots.
@@ -678,18 +683,22 @@ pending error. Two results:
   * Native returns a value there. It is correct at 4 and 6 million, but wrong at
     8 and 10 million: 27,417,100 and 34,680,725 instead of 24,000,000 and
     30,000,000 (§9.4).
-  * The backends differ only in which limit they reach first. Wasm stops
-    loudly at its shadow-array bound, while native goes past its frame-walk
-    cap, which is §9.4's known limitation.
+  * The backends reach different limits first. Wasm stops loudly at its
+    shadow-array bound, from n = 1,398,101. Native recurses deeper, and from
+    n = 6,768,241 it returns wrong values, because a collection runs past its
+    frame-walk cap: §9.4's known limitation.
 
 **In-band recovery** (return an error and keep the Vm) **is not an option on
-wasm.**
-* `nir::parse` settles each call's `may_error` from the callee's summary, and
-  drops the check when it is false.
+wasm while call effects stay as they are.**
+* With the default call effects, `nir::parse` settles each call's `may_error`
+  from the callee's summary, and drops the check when it is false. With
+  `call-effects=0` it still does this for scalar-result callees.
 * By design, that summary does not model resource limits
   (CLOSED-CALL-EFFECTS.md:19).
 * On native fallback hosts this is the known limitation in §9.1, and every wasm
-  program would run into it.
+  build would inherit it.
+* Counting the reservation as `may_error` would let every overflow reach a
+  check, at the costs listed under §9.1's alternative.
 
 **Out of memory.**
 * A large but in-range allocation can exhaust the 4 GiB wasm32 address space.
@@ -1100,8 +1109,8 @@ A new intrinsic is then only Tcl schema plus host code. Two constraints apply:
 * `wasm-object OUT FILE.nir` mirrors `object`.
 * Failures use the `{NATIVE AOT}` family, like `executable`.
 * `--host-fixture-file` for `run`/`bench`/`batch`.
-* A switch forces the fallback root path, and later `ShadowOnly`, on x86-64 for
-  the CI lane (P2/P3).
+* A switch forces either fallback root path (depth token or `RuntimeStack`),
+  and later `ShadowOnly`, on x86-64 for the CI lane (P2/P3).
 
 **`botlish-wasm`:**
 * `run`: standalone semantics, with argv per §4.7.
@@ -1202,12 +1211,12 @@ A new intrinsic is then only Tcl schema plus host code. Two constraints apply:
 
 | # | Milestone | Depends on | Exit criterion | pd | Lane |
 |---|---|---|---|---|---|
-| P1 | 32-bit correctness (§9.2): compare before casting at `ops.rs:1103/1214/1234/1251/1309`; `MAX_COLLECTION_LENGTH` as a fixed `u64` 2^62−1; `Header` `align(8)` | — | x86 output unchanged. §9.2's index-2^32 cases join the wasm parity set; they already pass on x86-64, so only W5's wasm runs test them. | 1–1.5 | B |
-| P2★ | Fatal shadow-stack overflow on every host without a guard handler, which lifts the in-band part of §9.1's limitation; plus a driver/test switch that forces the fallback root path on x86-64 Linux (CI has no fallback host) | — | With the fallback forced, `sum(10^8)` (tagged result) and a raw-result recursion print `NATIVE LIMIT STACK` under both `call-effects=1` and `=0` (today they give SIGSEGV and `value {int 2}`) | 1.5–2.5 | A |
+| P1 | 32-bit correctness (§9.2): compare before casting at `ops.rs:1103/1234/1251/1309`; at `:1214`, send a capacity that passes the range check but does not fit `usize` to the out-of-memory path (§4.5), not to RANGE; `MAX_COLLECTION_LENGTH` as a fixed `u64` 2^62−1; `Header` `align(8)` | — | x86 program output unchanged; `--alloc` reports show the static `NativeObj` at 16 bytes instead of 12. §9.2's 2^32 cases for `list_get` and `mutable_array_get`/`set`/`freeze` join the wasm parity set; they already pass on x86-64, so only W5's wasm runs test them. `mutable_array_allocate(2^32)` needs a wasm-only test, because on x86-64 it is a 32 GiB allocation. | 1–1.5 | B |
+| P2★ | Fatal shadow-stack overflow on every host without a guard handler, which lifts the in-band part of §9.1's limitation; plus a driver/test switch that forces either fallback root path (depth token or `RuntimeStack`) on x86-64 Linux (CI has no fallback host) | — | With either path forced, `sum(10^8)` (tagged result) and a raw-result recursion print `NATIVE LIMIT STACK` under both `call-effects=1` and `=0` (on §9.1's emulation builds today, `sum` gives SIGSEGV under `call-effects=1`, and the raw-result recursion gives `value {int 2}` under both) | 1.5–2.5 | A |
 | P3★ | Explicit `Target`; `ShadowOnly` root mode (no host `cfg!`); an x86 `ShadowOnly` lane under GC stress in CI | P2 | Default `clif`/`object` output byte-identical on the corpus; the lane green under GC stress, with the tests that pin the x86 stack-map shape constrained out of it | 2.5–4 | A |
 | P4★ | Split `define` into build and compile | — | Byte-identical objects | 1–1.5 | A |
-| P5 | 8-byte-slot layout (`u64` fields), offset asserts on both widths, String header | — | x86 objects identical; the wasm32 lib checks | 2–3 | B |
-| P6★ | Cargo target gating; `Heap::configure`; `Instant` gating; host-sized, uninitialized shadow array | — | CI builds the wasm32 lib | 1–2 | B |
+| P5 | 8-byte-slot layout (`u64` fields), offset asserts on both widths, String header | P6 | x86 objects identical; CI builds the wasm32 lib, which runs the offset asserts | 2–3 | B |
+| P6★ | Cargo target gating; `Heap::configure`; `Instant` gating; host-sized, uninitialized shadow array | — | x86 output unchanged; the wasm32 dependency tree no longer contains `region` | 1–2 | B |
 | P7★ | Typed helper descriptor with compile-time checks; ABI doc table fix | — | `clif` listings unchanged | 1.5–2.5 | B |
 | P8 | `Vm.generic_entries`; drop `func_addr` | — | Suite and GC stress green | 1 | B |
 | P9★ | `::parityBackends` (tests, corpus, bench); `native-coverage.tcl -backend` | — | No change in test behaviour | 1–2 | C |
@@ -1269,13 +1278,14 @@ and fuel +39% to +101%. Use epochs for timeouts. Neither should be on by default
 
 **Worth landing regardless of wasm:**
 * P2, which lifts the in-band part of §9.1's limitation on native fallback
-  hosts, and gives the fallback path its first CI coverage;
+  hosts, and gives both fallback paths their first CI coverage;
 * P3, which puts the `ShadowOnly` root path (the wasm root model) under CI on
   x86-64;
 * P4, P6, P7 and P9;
 * the documentation updates listed in §9.3.
 
-P1 matters only for 32-bit targets (§9.2). §9.4's options are outside this plan.
+P1 matters only for 32-bit targets, except its `align(8)` part, which also
+hardens `NativeObj` on x86-64 (§9.2). §9.4's options are outside this plan.
 
 ---
 
@@ -1338,29 +1348,35 @@ has to take a position on. None of them is new:
 * one is **documentation** that lags the code (§9.3).
 
 The repository's existing descriptions of the two limitations are short, so
-each subsection below covers:
-* scope;
+§9.1 and §9.4 each cover:
+* what it is, and which hosts;
 * where the repository already says so;
 * mechanism;
 * observed behaviour and thresholds;
 * test coverage;
-* what the wasm plan does about it;
+* the effect on the wasm work;
+* options, if it is ever lifted;
 * how it was reproduced.
 
 | § | Item | Class | Where it applies | Effect on the wasm work |
 |---|---|---|---|---|
-| 9.1 | Shadow-stack overflow is reported in-band | Known limitation | Every host except Linux x86-64; CI runs none of them | Any wasm build would inherit it, so the plan makes overflow fatal (P2, P3, §4.5) |
+| 9.1 | Shadow-stack overflow is reported in-band; native-stack overflow crashes | Known limitation | Every host except Linux x86-64; CI runs none of them | Any wasm build would inherit it, so the plan makes overflow fatal (P2, P3, §4.5) |
 | 9.2 | Pointer-width and alignment assumptions | Wasm-only | 32-bit targets; none builds today | Prerequisites P1 and P5 |
-| 9.3 | Documentation lag | Documentation | README §20, `native/lower.tcl`, `ops.rs` and some code comments | None, beyond not copying stale statements into the wasm docs |
+| 9.3 | Documentation lag | Documentation | README §20 and §22, `native/lower.tcl`, `ops.rs`, code comments and design notes | P7 fixes the `ops.rs` table (§4.3). The other fixes are worth landing anyway (§7), and the wasm docs must not copy the stale statements |
 | 9.4 | Frame-walk cap `MAX_FRAMES` | Known limitation | The x86-64 stack-map path, at a GC deeper than 4,194,304 frame-pointer links | None: wasm has no frame walk |
 
 ### 9.1 Stack overflow on fallback hosts (known limitation)
 
-**What it is.** On every host except Linux x86-64, a full shadow stack is
-reported in-band, as a pending error and a zero return value. A caller that
-call-effect analysis settled as unable to fail does not check that zero. What
-happens next depends on how the caller uses the zero: a correct
-`NATIVE LIMIT STACK`, a crash, or a silently wrong value.
+**What it is.** On every host except Linux x86-64 (the **fallback hosts**), the
+native backend installs no guard handler. Two things follow:
+* **A full shadow array** is reported in-band, as a pending error and a zero
+  return value. With the default call effects, a call checks that zero only
+  when the callee's `may_error` is true, and call-effect analysis does not count
+  overflow. What happens next
+  depends on how the caller uses the zero: a correct `NATIVE LIMIT STACK`, a
+  crash, or a silently wrong value.
+* **An exhausted native stack** crashes the process instead of printing
+  `NATIVE LIMIT STACK` (SIGABRT, or SIGSEGV, on the Linux emulation).
 
 **Where the repository already says so.**
 * **Overflow protection is built for one target.**
@@ -1368,7 +1384,7 @@ happens next depends on how the caller uses the zero: a correct
     guard and an alternate signal stack". `native_stack_overflow_supported()` is
     `cfg!(all(target_arch = "x86_64", target_os = "linux"))`.
   * NATIVE-STACK-OVERFLOW.md:52-53: "The old RuntimeStack storage and depth check
-    remain for unsupported targets". Its :36-38 enables stack probes only "on
+    remain for unsupported targets". Its :37-38 enables stack probes only "on
     the supported target".
   * `main.rs:51-52` scopes guard protection to x86-64/Linux.
 * **The fallback overflow return is unchecked by design.**
@@ -1377,23 +1393,18 @@ happens next depends on how the caller uses the zero: a correct
   * CLOSED-CALL-EFFECTS.md:19: `may_error` covers Botlish semantic errors only,
     and "OOM, signals, assertions, and divergence are not Botlish Error
     completions".
-* **The fallback path is untested.**
-  * NATIVE-STACK-MAPS.md:376-381 says the fallback root path "is exercised only
-    by the Rust unit tests that pass `false` explicitly".
-  * `tests/native-stack-overflow.test:4-5` constrains the guard tests to Linux
-    x86-64.
-  * Every CI job runs on `ubuntu-latest` (`tests.yml:15`, `:51`, `:97`;
-    `bench.yml:18`; `scalar-asm-audit.yml:45`).
-  * The shared build action runs only `cargo build --release`
-    (`.github/actions/build-native/action.yml:31`), so not even those Rust unit
-    tests run in CI.
-* **Some statements read as unconditional.** These are listed with the other
-  drift in §9.3:
-  * README.md:2023-2024: "Unbounded recursion ends in `NATIVE LIMIT STACK`, not
-    a crash";
-  * `roots.rs:87-88` ("safe depth");
-  * `roots.rs:733-735` ("recursion protection");
-  * NATIVE-STACK-MAPS.md:389-392.
+* **Windows-native runs take a different path.** AGENTS.md:167-169 says they
+  exercise "a different stack/guard implementation". That is the generic
+  fallback, not Windows-specific code: no guard handler (`main.rs:386-390`), a
+  depth token in every calling function (`roots.rs:722`), and no stack bound for
+  the frame walk (`vm.rs:221-226`).
+* **The fallback path is untested.** NATIVE-STACK-MAPS.md:376-381 says the
+  fallback root path "is exercised only by the Rust unit tests that pass
+  `false` explicitly". **Coverage** below has the CI facts.
+* **Some statements say the opposite:** README.md:2023-2024 ("Unbounded
+  recursion ends in `NATIVE LIMIT STACK`, not a crash"), two code comments
+  (`roots.rs:87-88`, `:733-735`) and NATIVE-STACK-MAPS.md:389-392. §9.3 lists
+  them.
 
 **Which hosts.**
 * **Every fallback host:** all targets where `native_stack_overflow_supported()`
@@ -1413,19 +1424,20 @@ happens next depends on how the caller uses the zero: a correct
   (for example under macOS's `MAP_JIT` rules on aarch64) is untested.
 * **No standalone executables there.** Executable emission refuses every host
   other than x86-64 Linux/glibc (`codegen/aot.rs:120-121`), so on fallback
-  hosts this affects only JIT runs (`run`, `bench`).
+  hosts this affects only JIT runs (`run`, `bench`, `batch`).
 
 **Mechanism.**
 * **Two host checks pick the root strategy.** Both read the compiling host:
   * stack-map roots in native frame slots on any x64 ISA (`clif.rs:527`);
   * a depth reservation wherever the guard is missing (`roots.rs:722`).
-* **That splits fallback hosts into two paths:**
-  * **x86-64 off Linux:** native-frame roots, plus a one-slot **depth token** in
-    every function that contains a Botlish call (`prologue_depth_token`,
-    `clif.rs:670-691`);
-  * **other ISAs:** a **`RuntimeStack`** frame of max(1, colored slots) slots in
-    every calling function (`prologue_runtime_stack`, `clif.rs:699-716`;
-    `roots.rs:737`).
+* **That splits fallback hosts into two paths.** §4.4 calls both reservations
+  the depth token; in this section the **depth-token path** means the first:
+  * **x86-64 off Linux:** stack-map roots in native frame slots, plus a
+    separate one-slot token in every function that contains a Botlish call
+    (`prologue_depth_token`, `clif.rs:670-688`);
+  * **other ISAs (the `RuntimeStack` path):** a `RuntimeStack` frame of
+    max(1, colored slots) slots in every calling function
+    (`prologue_runtime_stack`, `clif.rs:699-716`; `roots.rs:737`).
 
   Leaf functions reserve nothing on any host, and Linux x86-64 reserves nothing
   at all.
@@ -1435,8 +1447,9 @@ happens next depends on how the caller uses the zero: a correct
 * **On overflow,** both prologues call `rt_stack_overflow`, which records
   `RtError::StackOverflow` and returns 0 (`ops.rs:159-161`). They then return
   zero words (`return_zeros`, `clif.rs:969-978`).
-* **Who checks that zero.** A caller checks it only when the callee's
-  `may_error` is true.
+* **Who checks that zero.** A caller checks it only when the call site's
+  `may_error` is true. With the default `call-effects=1`, that is the callee's
+  settled `may_error`.
   * `summarize_call_effects` (`nir.rs:1030-1094`) derives `may_error` only from
     guards, `raise`/`fail`/`reraise`, fallible ops, `construct` and
     `callvalue`, propagated over direct calls.
@@ -1445,20 +1458,21 @@ happens next depends on how the caller uses the zero: a correct
     `may_error = false`, and its callers omit the check.
 * **`call-effects=0` helps only tagged results.**
   * Every call to a tagged-result callee is then checked.
-  * A callee with a scalar result (raw Int, one-character short string, or
-    ASCII: `scalar_result()`, `nir.rs:742-744`) still takes its call site's
+  * A callee with a scalar result (raw Int, ShortString1 of at most one
+    character, or packed ASCII of at most eight: `scalar_result()`,
+    `nir.rs:742-744`) still takes its call site's
     `may_error` from its own summary (`nir.rs:1085-1088`).
 
 **What the unchecked zero does.** Measured on both emulation builds (see
 "How it was reproduced" below) at n = 10^8:
 
-| How the caller uses the 0 | Outcome | Program |
+| What happens to the 0 | Outcome | Program |
 |---|---|---|
-| Returns it unchanged | Still the error sentinel: correct `NATIVE LIMIT STACK` | `native/tests/fixtures/stack_overflow.ir` |
-| Integer arithmetic | `rt_int_add` dereferences 0 as a BigInt: SIGSEGV, shown as `{NATIVE BUG}` through the Tcl harness (`native.tcl:172-180`) | `sum(n) = n + sum(n - 1)`, call-effects 1 |
-| Branch condition | `br` tests for `TRUE` (`clif.rs:1421-1425`), so the else branch runs: silently wrong | `p(n) = if n == 0: true else: (if p(n - 1): n > 0 else: n < 0)`: `value {bool false}` with call-effects 1 |
-| Scalar result | 0 is a valid raw Int or string word: silently wrong under both settings | `d(n) = if n == 0: 1 else: (if d(n - 1) == 1: 1 else: 2)`: `value {int 2}`; the ASCII-result twin `s(n)` (`"a"`/`"b"`): `value {str b}` |
-| A later instruction fails | `Vm::fail` keeps the first error (`vm.rs:274-279`), so the overflow is still what gets reported: correct line | `down` from `tests/native.test:243-245`, whose call is followed by `unreachable`; `x = d(10^8); list_get([x], 5)` |
+| Returned unchanged | Still the error sentinel: correct `NATIVE LIMIT STACK` | `native/tests/fixtures/stack_overflow.ir` |
+| Used in integer arithmetic | `rt_int_add` dereferences 0 as a BigInt: SIGSEGV, shown as `{NATIVE BUG}` through the Tcl harness (`native.tcl:172-180`) | `sum(n) = n + sum(n - 1)`, call-effects 1 |
+| Used as a branch condition | `br` tests for `TRUE` (`clif.rs:1421-1425`), so the else branch runs: silently wrong | `p(n) = if n == 0: true else: (if p(n - 1): n > 0 else: n < 0)`: `value {bool false}` with call-effects 1 |
+| Compared, in a scalar-result function | 0 is a valid raw Int or string word: silently wrong under both settings | `d(n) = if n == 0: 1 else: (if d(n - 1) == 1: 1 else: 2)`: `value {int 2}`; the ASCII-result twin `s(n)` (`"a"`/`"b"`): `value {str b}` |
+| Ignored; a later instruction fails | `Vm::fail` keeps the first error (`vm.rs:274-279`), so the overflow is still what gets reported: correct line | `down` from `tests/native.test:243-245`, whose call is followed by `unreachable`; `x = d(10^8); list_get([x], 5)` |
 
 With call-effects 0, `sum` and `p` print the correct line. The unmodified Linux
 x86-64 driver prints `NATIVE LIMIT STACK` for every row.
@@ -1472,10 +1486,11 @@ x86-64 driver prints `NATIVE LIMIT STACK` for every row.
 **Depth limits on the fallback paths.** Measured on the emulation builds with
 `sum` at call-effects 0:
 * **Depth-token path.** `sum(4,194,302)` returns a value; `sum(4,194,303)` gives
-  `LIMIT STACK`. That is 4,194,303 `sum` frames plus the program frame: exactly
-  `SHADOW_STACK_SLOTS` calling frames.
+  `LIMIT STACK`. The last call that succeeds has 4,194,303 `sum` frames plus the
+  program frame: exactly `SHADOW_STACK_SLOTS` calling frames.
 * **`RuntimeStack` path.** Each `sum` frame takes 2 slots, so `sum(2,097,150)`
-  returns a value and `sum(2,097,151)` gives `LIMIT STACK`.
+  returns a value and `sum(2,097,151)` gives `LIMIT STACK`. The last call that
+  succeeds uses 2 × 2,097,151 + 1 = 4,194,303 slots.
 
 **When the native stack runs out first.**
 * Fallback hosts install no guard handler: the platform module and the installs
@@ -1496,23 +1511,42 @@ x86-64 driver prints `NATIVE LIMIT STACK` for every row.
     per token-reserving frame average more than about 256 B. That average
     includes the non-reserving frames in between.
   * **`RuntimeStack` path:** the crossover is 256 B times the slots per frame.
-* **Measured.** `sum`'s frame is 64 B.
-  * With `BOTLISH_NATIVE_STACK_BYTES` at 256 MiB the native stack runs out
-    first. From 288 MiB the shadow array fills first.
-  * `native/tests/fixtures/large_frame_overflow.nir` has 4,800-byte frames. On
-    the depth-token path it aborts.
+* **Measured.**
+  * On the depth-token path, `sum`'s frame is 64 B. With
+    `BOTLISH_NATIVE_STACK_BYTES` at 256 MiB (64 B × 2^22) the native stack
+    runs out first. From 257 MiB the shadow array fills first.
+  * On the `RuntimeStack` path, `sum`'s frame is 48 B and takes 2 slots. At
+    96 MiB (48 B × 2^21) the native stack runs out first. From 97 MiB the
+    shadow array fills first.
+  * `native/tests/fixtures/large_frame_overflow.nir` has 600 root slots
+    (4,800 bytes) per frame. On the depth-token path its native frame is about
+    14 KiB, and it aborts.
   * On the `RuntimeStack` path, the same fixture's 600 slots per frame fill the
     array first. It ends with a correct in-band `LIMIT STACK`, because
     `wide_recurse` is `may_error=true`.
 
 **Coverage.**
 * No CI job runs a fallback host or a build forced onto the fallback path.
+  * Every job runs on `ubuntu-latest` (`tests.yml:15`, `:51`, `:97`;
+    `bench.yml:18`; `scalar-asm-audit.yml:45`).
+  * The shared build action runs only `cargo build --release`
+    (`.github/actions/build-native/action.yml:31`), so not even the Rust unit
+    tests that pass `false` run in CI.
+* The guard tests are constrained to Linux x86-64
+  (`tests/native-stack-overflow.test:4-5`).
+* Four tests expect the fallback reservation off Linux x86-64:
+  * `stack-map-fib-1`/`-2` (`tests/native-stack-map.test:123`, `:128`) and
+    `storage-call-crossing-2` (`tests/native-root-storage.test:176`);
+  * `native-aot-2` (`tests/native.test:746`) checks the same in an object file.
+
+  They check that the reservation and its `rt_stack_overflow` call exist, not
+  what overflow does.
 * The only `LIMIT STACK` test that is not platform-constrained is
   `native-error-5`. It passes on the emulation builds too (the last row of the
   table), so it would not detect this.
 
-**Effect on the wasm work.** A wasm build would inherit this limitation in one
-of two ways:
+**Effect on the wasm work.** With today's root-strategy checks, a wasm build
+would take one of two paths, and only the first inherits this limitation:
 * **Read from the target.** wasm32 is not x86-64. A runtime and Translator that
   read the target would put every wasm build on the `RuntimeStack` path: at
   least one slot per calling frame, the zero-filled 32 MiB array, and in-band
@@ -1526,9 +1560,14 @@ of two ways:
   (§4.4).
 
 The plan closes both:
-* **P2** makes shadow-stack overflow fatal with `OVERFLOW_LINE` on every host
-  without a guard handler. It also adds a switch that forces the fallback path
-  on x86-64 Linux, so CI covers it.
+* **P2** makes shadow-stack overflow fatal on every host without a guard
+  handler.
+  * It moves `OVERFLOW_LINE` out of the Linux-only `platform` module
+    (`runtime/mod.rs:13-14`, `x86_64_linux.rs:32`).
+  * It keeps that line's split between stdout/exit 0 and stderr/exit 1
+    (`x86_64_linux.rs:44-46`).
+  * It also adds a switch that forces either fallback path on x86-64 Linux, so
+    CI covers both.
 * **P3** adds an explicit `Target` and the `ShadowOnly` root mode: no minimum
   slot, and overflow is fatal.
 * **§4.5** maps engine-stack and Rust-stack exhaustion to the same line.
@@ -1538,7 +1577,8 @@ effect. It does not add a guard handler or probes there, so native-stack
 exhaustion still aborts as described above.
 
 **Alternative to fatal overflow: count the reservation as `may_error` on these
-hosts.** It is sound, and it keeps today's in-band recovery. But it:
+hosts.** It lets every overflow reach a check, and it keeps today's in-band
+recovery. But it:
 * adds a check after every call to a function that itself contains a Botlish
   call;
 * turns every scalar-result function that contains a call into a
@@ -1546,12 +1586,22 @@ hosts.** It is sound, and it keeps today's in-band recovery. But it:
 * makes call-effect settlement depend on the host.
 
 **How it was reproduced.** Two scratch builds on x86-64 Linux, both keeping
-Linux's glibc guard page and Rust's handler:
+Linux's glibc guard page, Rust's handler and the frame walker's stack bound
+(`vm.rs:221-226`):
 * **Depth-token path** (x86-64 off Linux): `native_stack_overflow_supported()`
-  returns `false`, and `main.rs:386`'s guard install is compiled out.
+  returns `false` (`native_stack.rs:32`), and `main.rs:386`'s guard install is
+  compiled out.
 * **`RuntimeStack` path** (other ISAs): the same changes, plus
-  `let stack_maps = false;` at `clif.rs:527` and
-  `native_frame_supported = false` at `roots.rs:779`.
+  `let stack_maps = false;` at `clif.rs:527`. The build also set
+  `native_frame_supported = false` at `roots.rs:779`, which changes only what
+  `botlish-native roots` reports.
+* **Running a program.**
+  * `BOTLISH_NATIVE_CALL_EFFECTS_OPT=0` gives call-effects 0
+    (`native/lower.tcl:1221-1222`).
+  * Run through the harness with
+    `BOTLISH_NATIVE_BIN=DRIVER tclsh9.0 main.tcl -backend cranelift FILE.bot`.
+  * Or save the output of `tclsh9.0 main.tcl -emit-nir FILE.bot` without its
+    first (`==`) line, and run `DRIVER run FILE.nir`.
 
 Real fallback hosts were not run.
 
@@ -1559,8 +1609,9 @@ Real fallback hosts were not run.
 
 **What it is.** The runtime assumes that `usize` is 64 bits, and that every heap
 object is 8-aligned without asking for it. Both hold on every target that
-builds today. They matter only for a 32-bit target, and wasm32 would be the
-first.
+builds today. The width assumption matters only for a 32-bit target, and wasm32
+would be the first. The alignment one rests on the allocator: on 64-bit targets
+only `NativeObj` relies on it, and on wasm32 most object types do (item 3).
 
 **No 32-bit target builds or is supported today:**
 * the runtime fails a `const` assert on any target with a 4-byte `usize`
@@ -1584,17 +1635,22 @@ first.
 * `vm.rs:105-108`: the convention that generated code touches `Vm` fields only
   with `I64` operations.
 
-None of the four items below is reachable in any build that exists today. Each
-becomes live once P5 and P6 make the runtime compile for wasm32, which is why
-P1 and P5 come before W2.
+None of the four items below is reachable in any build that exists today:
+* items 1 and 2 would become live as soon as P5 and P6 make the runtime compile
+  for wasm32;
+* item 3 would also need a global allocator that honours only `Layout::align`;
+* item 4 never becomes live in the plan: P5 itself removes it, and under
+  `ShadowOnly` (P3) nothing publishes `native_roots_ptr` anyway.
+
+P1 covers items 1–3, which is why W2 depends on P1 as well as on P5 and P6.
 
 **1. Index, capacity and count casts.** Five helpers test the sign in `i64`,
 then cast to `usize`, and only then check the upper bound:
 
-| Helper | Guard | On wasm32 (value + k means 2^32 + k) |
+| Helper | Guard | Measured on wasm32 |
 |---|---|---|
 | `rt_list_get` | `ops.rs:1103` | `list_get([10,20,30], 2^32)` returns `10`, and 2^32+1 returns `20`; 2^32+3 is still a RANGE error |
-| `rt_mutarray_allocate` | `ops.rs:1214` | `mutable_array_allocate(2^32)` returns a capacity-0 array, and 2^32+7 one of capacity 7; every value is accepted |
+| `rt_mutarray_allocate` | `ops.rs:1214` | `mutable_array_allocate(2^32)` returns a capacity-0 array, and 2^32+7 one of capacity 7, where x86-64 attempts the full allocation; as on x86-64, only negative and BigInt capacities are RANGE errors |
 | `rt_mutarray_get` | `ops.rs:1234` | index 2^32 reads slot 0 |
 | `rt_mutarray_set` | `ops.rs:1251` | index 2^32 silently overwrites slot 0 and returns unit |
 | `rt_mutarray_freeze` | `ops.rs:1309` | count 2^32 returns `[]`, and 2^32+2 the first two elements |
@@ -1628,8 +1684,8 @@ then cast to `usize`, and only then check the upper bound:
 **2. `MAX_COLLECTION_LENGTH = SMALL_MAX as usize`** (`value.rs:65`).
 * **Value:** 2^62−1 on 64-bit, and 4,294,967,295 on wasm32.
 * **Where it is used:**
-  * `Vm::reject_oversized_collection` (`vm.rs:586-593`, for lists, sets and
-    mutable arrays);
+  * `Vm::reject_oversized_collection` (`vm.rs:586-593`, for Strings, lists, sets
+    and mutable arrays);
   * `construct.rs:254`, `:370` and `:505`;
   * the `mutable_array_allocate` message (`ops.rs:1216-1218`).
 * **On 32-bit:** `len <= MAX_COLLECTION_LENGTH` is always true, so the check
@@ -1672,8 +1728,9 @@ then cast to `usize`, and only then check the upper bound:
   allocations was misaligned.
 * **What remains** is a reliance on the allocator's minimum alignment. A
   substitute global allocator that honours only `Layout::align` would break it.
-* **The fix.** `#[repr(C, align(8))]` on `Header` makes the invariant a property
-  of the types. `NativeObj` grows to 16 bytes, and `strobj.rs:111` still holds.
+* **What P1 does.** `#[repr(C, align(8))]` on `Header` makes the invariant a
+  property of the types. `NativeObj` grows to 16 bytes, and `strobj.rs:111`
+  still holds.
 
 **4. An `I64` store into the `u32` field `Vm::alloc_site`.**
 * **When it exists.** Only under JIT allocation-site instrumentation
@@ -1689,17 +1746,20 @@ then cast to `usize`, and only then check the upper bound:
   * so the store sets `native_roots_ptr` to null;
   * `collect_with` then treats that root block as empty (`vm.rs:335-339`);
   * a collection in the helper call that follows can then free live objects.
-* **The fix.** The 8-byte-slot layout (§4.3, P5) removes it, following the
+    That needs today's fallback root mode, where leaf functions publish their
+    root block there; `ShadowOnly` (§4.4) publishes none.
+* **What P5 does.** The 8-byte-slot layout (§4.3) removes it, following the
   precedent of `native_roots_len` (`vm.rs:105-108`).
 
 ### 9.3 Documentation lag
 
-None of these items is a code defect: in each case the code is correct, and the
-prose describing it is stale. No test or tool parses these comments. Some of
+None of these items is a code defect. In each case the prose is stale; the code
+it describes either works as intended or has a known limitation (§9.1, §9.4).
+No test or tool parses this prose. Some of
 these files are also where README sends readers: README.md:1843 for the NIR
 format, and :2014-2015 for the helper ABI.
 
-**README §20, "The native backend (Cranelift)":**
+**README (§20, "The native backend (Cranelift)", unless noted):**
 * **Overflow.** `:2023-2024` says "Unbounded recursion ends in
   `NATIVE LIMIT STACK`, not a crash" with no platform. The overflow
   documentation scopes that guarantee to x86-64/Linux (§9.1).
@@ -1721,7 +1781,10 @@ format, and :2014-2015 for the helper ABI.
   says the same.
 * **The "Values" table** (`:1901-1907`).
   * It still lists the removed unbound tag `1110` and the heap kind "cell".
-    `:1999-2002` still describes the runtime's cell object.
+  * `:1988` still lists cells among the inline operations, and §22's diagram
+    (`:2492`) still names a `cell` op.
+  * `:1999-2002` says the cell object and NIR ops are "left for the native
+    cleanup". That cleanup has removed them (DIRECT-HIR-NATIVE-PATH.md:418-429).
   * It lacks the UnicodeChar tag `100` and the MutableArray, ImmutableSet and
     struct heap kinds. The private plan kinds (StrPlan, ListPlan) are never
     program values.
@@ -1772,7 +1835,7 @@ format, and :2014-2015 for the helper ABI.
   the \"allocates\" column of the table above". But `ShortToStr` and
   `AsciiToStr` allocate (`:85`), and their helpers are not in the table.
 
-**Code comments:**
+**Code comments and design notes:**
 * **Shadow-stack descriptions:**
   * `ops.rs:10-12` says operands are rooted because "generated code keeps every
     register on the shadow stack".
@@ -1788,17 +1851,20 @@ format, and :2014-2015 for the helper ABI.
     frames of max(1, slots).
   * `RootPlan::num_slots`'s "At least 1 always" (`roots.rs:125-129`) does not
     hold for native-frame storage.
-  * NATIVE-STACK-OVERFLOW.md:52-53 calls the x86-64 macOS/Windows mechanism
-    `RuntimeStack`, though it is native-frame storage plus a depth token.
-* **Promises about fallback safety:** `roots.rs:87-88` ("safe depth"),
-  `roots.rs:733-735` ("recursion protection") and NATIVE-STACK-MAPS.md:389-392
-  (§9.1).
+  * NATIVE-STACK-OVERFLOW.md:52-53 says "The old RuntimeStack storage and depth
+    check remain for unsupported targets". On x86-64 off Linux only the depth
+    check remains; roots there use native-frame storage.
+* **Promises about overflow safety:**
+  * `roots.rs:87-88` ("safe depth") and `roots.rs:733-735` ("recursion
+    protection") overstate the fallback depth check (§9.1).
+  * NATIVE-STACK-MAPS.md:382-392 predates the overflow work. It says the depth
+    token is used "on *every* path" and that the shadow bound protects "every
+    calling function". On x86-64/Linux the token is gone and the pthread guard
+    handles overflow (NATIVE-STACK-OVERFLOW.md:19-23, :49-51). On fallback
+    hosts the bound is not reliable (§9.1).
 * **The `MAX_FRAMES` backstop.** `framewalk.rs:78-80` and `:120-124`, and
   NATIVE-STACK-MAPS.md:161-166, present it as a backstop that a well-formed
   chain never reaches (§9.4).
-* **Windows.** AGENTS.md:167-169 says Windows-native execution "exercises a
-  different stack/guard implementation". In fact `native/src` has no Windows
-  guard code: Windows has only the OS guard page and Rust's own handler.
 
 ### 9.4 The frame-walk cap in very deep recursion (known limitation)
 
@@ -1822,12 +1888,16 @@ format, and :2014-2015 for the helper ABI.
 None of these says what happens when a well-formed chain is longer than the cap.
 This subsection does.
 
-**History (inferred from the code; the repository history is shallow).**
+**History (partly inferred; the repository history is shallow).**
 * Before the overflow work (NATIVE-STACK-OVERFLOW.md:49-53), every calling frame
-  on Linux took a depth-token slot from the 2^22-slot shadow array. That is the
-  same number as `MAX_FRAMES`, so direct recursion could not get much deeper
-  than the cap.
-* With the token gone, the 1 GiB worker allows recursion about 3 times as deep.
+  took a depth-token slot from the shadow array (NATIVE-STACK-MAPS.md:382-392;
+  the old `fib<int>` check is at NATIVE-STACK-OVERFLOW.md:58-67).
+* Inferred: the array then had 2^22 slots, as it does today (`vm.rs:36`). That
+  is the same number as `MAX_FRAMES`, so direct recursion could not get much
+  deeper than the cap.
+* With the token gone, the 1 GiB worker bounds direct recursion by frame size
+  instead: about 3.2 times the old depth for the 80 B frames of the program
+  below, and about 5 times for `fib<int>`'s 48 B.
 
 **Which hosts.**
 * **Every x86-64 host.** The walker is compiled for every x86-64 target
@@ -1873,17 +1943,19 @@ This subsection does.
   chain was longer than the cap.
 * **Other root sources are unaffected** (`vm.rs:320-364`):
   * the shadow array (empty on Linux x86-64);
-  * the native-frame root block (fallback hosts only);
+  * the native-frame root block (published only on non-x86-64 ISAs, so always
+    empty on the hosts this subsection covers);
   * the pending error's values;
   * `temp_roots`;
   * `statics_table`.
 
   Static constants are never collected (`heap.rs:126`).
 * **When collections run.**
-  * Only from `Vm::alloc`, when the bytes allocated exceed the threshold or under
-    GC stress (`heap.rs:88-90`).
-  * Or from `Vm::reset`, with no Botlish frames active (`vm.rs:284-287`,
-    `:381-390`).
+  * Only before an allocation, in `Vm::alloc` or `Vm::alloc_str`
+    (`vm.rs:284-287`, `:417-423`), when the bytes allocated exceed the threshold
+    or under GC stress (`heap.rs:88-90`). During a run, this program's
+    collections all come through `Vm::alloc_str`, from `concat`.
+  * Or from `Vm::reset`, with no Botlish frames active (`vm.rs:381-390`).
   * The threshold is max(minimum, 2 × live bytes) (`heap.rs:184-185`). The
     minimum is 1 MiB, or `BOTLISH_NATIVE_GC_MIN`.
 * **So a live object is freed only when both hold:**
@@ -1898,11 +1970,11 @@ This subsection does.
 * **The smallest link** is 16 B, a generic entry. So with
   `BOTLISH_NATIVE_STACK_BYTES` at 64 MiB or less the cap is unreachable; the
   overflow tests use 4 MiB.
-* **No upper bound on the override.** At 2 GiB the §9.4 program still prints the
-  same wrong value.
-* **Frame sizes:**
-  * the program's `f`: 80 B (`sub rsp,0x40`);
-  * `fib<int>`: 48 B;
+* **No upper bound on the override.** At 2 GiB, `f(8,000,000)` (the program
+  below) still prints 27417100.
+* **Frame sizes,** all well under the 256 B crossover:
+  * `f` in the program below: 80 B (`sub rsp,0x40`);
+  * `fib<int>` (`bench/fib.bot`), a typical small recursion: 48 B;
   * a generic entry: 16 B;
   * the program frame: 32 B.
 
@@ -1920,17 +1992,17 @@ fn f(n, t):
 f(8000000, "x")
 ```
 
-`f(n)` is 3n. Results by n:
+The correct result is 3n. Results by n:
 
 | n | Result | Note |
 |---|---|---|
-| 4,000,000 to 6,000,000 | correct | Deeper than the cap, but no collection runs deeper than the cap |
+| 4,000,000 | correct | Shallower than the cap |
+| 4,200,000 to 6,000,000 | correct | Deeper than the cap, but no collection runs deeper than the cap |
 | 6,768,240 | `value {int 20304720}`, correct | The cap is hit, but the only root dropped is the program frame's, a static constant |
 | 6,768,241 | `value {int 20304725}`, expected 20304723 | The first wrong n, the same over 3 runs, and the same in executables |
 | 8,000,000 | `value {int 27417100}`, expected 24000000 | `value {int 24000000}` with GC disabled (`BOTLISH_NATIVE_GC_MIN=100000000000`) |
 | 10,000,000 | `value {int 34680725}`, expected 30000000 | |
-| 12,000,000 | a bogus `CORE SEMANTIC RANGE` error in 5 of 6 runs; glibc's "corrupted double-linked list" abort (exit 134) in 1 | Freed blocks are read and reused |
-| 13,000,000 | `error {CORE SEMANTIC RANGE} {a String/List cannot exceed 4611686018427387903 characters/elements, got 18330417295202386192}` | |
+| 12,000,000 and 13,000,000 | varies between runs: usually a bogus `CORE SEMANTIC RANGE` error ("a String/List cannot exceed 4611686018427387903 characters/elements, got …", with a different length each run); sometimes an abort (exit 134), from glibc ("corrupted double-linked list") or from Rust ("memory allocation of … bytes failed"); once a garbage value | Freed blocks are read and reused |
 | 13,421,660 | `NATIVE LIMIT STACK` with GC disabled (13,421,693 in an executable) | 13,421,659 is the last n that completes; about 3.2 times the cap |
 
 * **Why 4.2 to 6.77 million is still correct.**
@@ -1939,16 +2011,20 @@ f(8000000, "x")
     and 3,145,838.
   * The next one comes either during the descent, at about 9.44 million, or for
     shallower n on the way back up.
-  * Only from n = 6,768,241 does it run deeper than the cap.
+  * From n = 6,768,237 the collection on the way back up runs just past the cap.
+    Up to n = 6,768,240 the links it skips hold only driver frames and the
+    program frame's static root. From n = 6,768,241 they include `f` frames.
 * **Closure recursion** reaches the cap at about 2.1 million levels. A variant
   that recurses through `callvalue` is correct at 2,000,000, and prints
   `value {int 9762222}` instead of 9000000 at 3,000,000.
-* **Executables and bench mode behave the same.**
+* **Executables and bench mode are affected too.**
   * Standalone executables use the same walker, worker size and stack bound
-    (`codegen/aot.rs:115`, `runtime/aot.rs:31-39`), and their thresholds were
-    identical.
-  * `bench` takes the same path. It is wrong too, with a value that varies
-    between runs (27417060).
+    (`codegen/aot.rs:115`, `runtime/aot.rs:31-39`). Their first wrong n is the
+    same, 6,768,241, and their stack limit is 33 levels deeper (13,421,693).
+  * `bench` takes the same path, but its outcome varies. At n = 8,000,000,
+    `bench 2` and `bench 3` printed 27417060, 27417062 or 27417064 on different
+    invocations, and one `bench 3` printed a bogus `CORE SEMANTIC RANGE` error.
+    `run` and `bench 1` printed 27417100 every time.
 * **Coverage.** No test reaches the cap. The deepest stack-map test recurses 200
   levels (`tests/native-stack-map.test:183-186`).
 
@@ -1979,12 +2055,13 @@ roots per walk.
    there is no bound, so the cap would have to stay there.
 2. **Derive the cap from the stack size,** for example (high − low) / 16, which
    is 67,108,864 for 1 GiB. Off Linux the requested size would need plumbing. A
-   fixed larger constant fails again once `BOTLISH_NATIVE_STACK_BYTES` exceeds
-   1 GiB.
+   fixed larger constant only moves the limit: 2^26 fails again once
+   `BOTLISH_NATIVE_STACK_BYTES` exceeds 1 GiB, and the override has no upper
+   bound.
 3. **Make reaching the cap fatal** with a `NATIVE LIMIT` line. Silent corruption
-   becomes a deterministic failure. But runs that are correct today (up to
-   n = 6,768,240 here) would fail, and whether they fail would depend on GC
-   timing.
+   becomes a deterministic failure. But some runs that are correct today
+   would fail: here n = 6,768,237 to 6,768,240, where a walk reaches the cap but
+   skips no `f` frame. Whether a run fails would depend on GC timing.
 4. **Shrink the default stack to 64 MiB or less.** The cap becomes unreachable,
    but the maximum recursion depth drops 16-fold.
 
@@ -2262,8 +2339,11 @@ None of this is committed. It is described so that it can be redone.
       `false` (the non-x64 path).
 
     They ran `sum`, `p`, `d`, the ASCII-result `s`, `down` and
-    `stack_overflow.ir` at n = 10^8 under `call-effects=1` and `=0`, depth
-    bisections of `sum`, and `large_frame_overflow.nir` at several stack sizes.
+    `stack_overflow.ir` at n = 10^8 under `call-effects=1` and `=0`, and
+    `x = d(10^8); list_get([x], 5)` under `=1`. They ran `sum` and `d` in bench
+    mode, and `sum`, `d` and `p` through `main.tcl -backend cranelift` with
+    `BOTLISH_NATIVE_BIN` set to a scratch build. They also ran depth bisections
+    of `sum`, and `large_frame_overflow.nir` at several stack sizes.
     `cargo check --release` was run for the four fallback targets named there.
   * **§9.4.** The unmodified release driver and standalone executables ran the
     deep-recursion GC program, with and without GC, bisected over n. A scratch
