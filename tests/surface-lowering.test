@@ -475,9 +475,11 @@ test lower-method-call-visibility-is-lexical {the sugar sees what a reference to
 # ---------------------------------------------------------------------------
 # Struct destructuring (STRUCT-DESTRUCTURING.md): `{a, b: c} = e` lowers to a
 # hygienic temporary bound to `e`, then ordinary `project` binds in written
-# order. More in struct-destructuring.test.
+# order, then `unit`: the statement's own value (the generated bindings are
+# implementation details and none of them is its result). More in
+# struct-destructuring.test.
 
-test lower-destructure-is-bind-and-projections {the statements it lowers to: tmp = e, a = tmp.a, c = tmp.b} -body {
+test lower-destructure-is-bind-and-projections {the statements it lowers to: tmp = e, a = tmp.a, c = tmp.b, unit} -body {
     set h [surface::compile "r = \{a: 1, b: 2\}\n\{a, b: c\} = r" t.bot -strict 0]
     lmap e [hir::walk $h] {
         switch -- [hir::kind $h $e] {
@@ -487,13 +489,35 @@ test lower-destructure-is-bind-and-projections {the statements it lowers to: tmp
             default { continue }
         }
     }
-} -result {{bind r} {bind tmp} {ref r} {bind a} {project a} {ref tmp} {bind c} {project b} {ref tmp}}
+} -result {{bind r} {bind tmp} {ref r} {bind a} {project a} {ref tmp} {bind c} {project b} {ref tmp} {ref unit}}
 
-test lower-destructure-same-core-ir-as-explicit {the core IR is the explicit spelling's, modulo the temporary's name} -body {
+test lower-destructure-ends-in-explicit-unit {the last statement a destructure lowers to is the root unit, not the last projection bind} -body {
+    set h [surface::compile "r = \{a: 1, b: 2\}\n\{a, b: c\} = r" t.bot -strict 0]
+    set last [lindex [hir::walk $h] end]
+    list [hir::kind $h $last] [hir::get $h $last name] [string match *destructure/unit* [hir::get $h $last origin]]
+} -result {ref unit 1}
+
+test lower-destructure-unit-only-after-the-last-binding {the unit follows the last generated binding and is not repeated per field or per nested level} -body {
+    set h [surface::compile "\{u: \{x, y\}, v\} = \{u: \{x: 1, y: 2\}, v: 3\}" t.bot -strict 0]
+    set kinds [lmap e [hir::walk $h] {
+        if {[hir::kind $h $e] ne "ref" || [hir::get $h $e name] ne "unit"} continue
+        set e
+    }]
+    list [llength $kinds] [expr {[lindex $kinds 0] eq [lindex [hir::walk $h] end]}]
+} -result {1 1}
+
+test lower-destructure-same-core-ir-as-explicit {the core IR is the explicit spelling's (ending in the explicit unit), modulo the temporary's name} -body {
     set d [hir::lower [surface::compile "r = \{a: 1, b: 2\}\n\{a, b: c\} = r\n\[a, c\]" t.bot -strict 0]]
-    set e [hir::lower [surface::compile "r = \{a: 1, b: 2\}\nt = r\na = t.a\nc = t.b\n\[a, c\]" t.bot -strict 0]]
+    set e [hir::lower [surface::compile "r = \{a: 1, b: 2\}\nt = r\na = t.a\nc = t.b\nunit\n\[a, c\]" t.bot -strict 0]]
     expr {[regsub -all {destructure#[0-9]+} $d t] eq $e}
 } -result 1
+
+test lower-destructure-last-statement-core-ir {as the last statement the destructure's core IR ends in the unit, where the old expansion ended in the last projection} -body {
+    set d [hir::lower [surface::compile "r = \{a: 1, b: 2\}\n\{a, b: c\} = r" t.bot -strict 0]]
+    set e [hir::lower [surface::compile "r = \{a: 1, b: 2\}\nt = r\na = t.a\nc = t.b\nunit" t.bot -strict 0]]
+    set old [hir::lower [surface::compile "r = \{a: 1, b: 2\}\nt = r\na = t.a\nc = t.b" t.bot -strict 0]]
+    list [expr {[regsub -all {destructure#[0-9]+} $d t] eq $e}] [expr {[regsub -all {destructure#[0-9]+} $d t] ne $old}]
+} -result {1 1}
 
 test lower-destructure-origins {a projection originates at its pattern entry, reports the field name read, and its bind originates at the name bound} -body {
     set h [surface::compile "r = \{a: 1, b: 2\}\n\{a, b: c\} = r" t.bot -strict 0]

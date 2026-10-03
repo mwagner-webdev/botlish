@@ -44,12 +44,14 @@
 #   a or b                if a {^true} {if b {^true} {^false}}
 #   x = e                 bind x e
 #   {a, b: c} = e         bind tmp e; bind a (project tmp a); bind c (project
-#                         tmp b)        struct destructuring (STRUCT-
+#                         tmp b); ^unit    struct destructuring (STRUCT-
 #                         DESTRUCTURING.md): tmp is a hygienic temporary, the
-#                         source is evaluated once into it, and the rest is
-#                         ordinary projections and bindings (Sequence splices
-#                         the statements in; a nested pattern binds a further
-#                         temporary)
+#                         source is evaluated once into it, the rest is
+#                         ordinary projections and bindings, and the final
+#                         `^unit` is the statement's own value -- the generated
+#                         bindings are implementation details and none of them
+#                         is its result (Sequence splices the statements in; a
+#                         nested pattern binds a further temporary)
 #   fn f(a, b): body      bind f (block (a b) body...)
 #   if c: t else: e       if c {t...} {e...}    inline branches; a missing
 #                         else is an empty branch (value unit)
@@ -239,26 +241,35 @@ proc surface::lower::Sequence {nodes} {
 #     tmp = value           the source, evaluated here, once
 #     a = tmp.a             one ordinary static projection per requested
 #     c = tmp.b             field, bound under its local name
+#     unit                  the statement's value
 #
-# in written order. `tmp` is a hygienic temporary: its name contains "#", which
+# in written order. The final `unit` is the destructuring's own result by rule:
+# a destructuring statement introduces bindings and evaluates to unit, so where
+# its value is observable (the last statement of a body, a collecting loop's
+# iteration, a branch) it is unit, not the last generated binding's value (the
+# last field read), which is an implementation detail. Where the value is
+# discarded (a destructure followed by another statement) it is an ordinary
+# discarded `unit`, which costs nothing. `tmp` is a hygienic temporary: its name contains "#", which
 # source can never spell, so it cannot collide with or capture a user name, and
 # no user-visible binding denotes it. A nested pattern `{u: {x, y}}` binds a
 # further temporary to `tmp.u` and destructures that the same way. The result is
-# plain bind / project / ref syntax: HIR, its analyses, core IR and every backend
-# see exactly what the explicit spelling gives them (the field-access rules,
-# including every diagnostic, are the ordinary projection's), and none of them
-# knows destructuring exists.
+# plain bind / project / ref / unit syntax: HIR, its analyses, core IR and every
+# backend see exactly what the explicit spelling (with its final `unit`) gives
+# them (the field-access rules, including every diagnostic, are the ordinary
+# projection's), and none of them knows destructuring exists.
 #
 # Origins: each projection and each binding carries its own field of the
 # pattern -- the projection spans the entry and its name origin is the field
 # name read (where UNKNOWN-FIELD, NOT-A-STRUCT and UNPROVEN-FIELD point), the
-# bind's origin is the binding made (where DUPLICATE points).
+# bind's origin is the binding made (where DUPLICATE points). The final unit
+# originates at the whole statement.
 proc surface::lower::Destructure {node} {
     set pattern [dict get $node pattern]
     set temp [TempName $pattern]
     set source [hir::syntax::bindNode [Origin [dict get $pattern span] [dict get $node id]/pattern] \
         $temp [Node [dict get $node value]]]
-    return [concat [list $source] [Projections $pattern $temp]]
+    set result [hir::syntax::rootRef [OriginOf $node unit] unit]
+    return [concat [list $source] [Projections $pattern $temp] [list $result]]
 }
 
 # The hygienic temporary of the pattern PATTERN: unique per pattern in a file.

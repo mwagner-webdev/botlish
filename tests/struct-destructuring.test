@@ -3,10 +3,11 @@
 #     {user, expires: expiry} = result
 #
 # is the evaluation of `result` once, then the ordinary static projections
-# `user = tmp.user` and `expiry = tmp.expires`, bound as ordinary values. The
-# feature is parasitic on ordinary bindings and field projection, so most tests
-# run the destructured spelling and the explicit spelling of the same program
-# (`tmp = source`, `a = tmp.a`, ...) on every in-process backend (interpreter,
+# `user = tmp.user` and `expiry = tmp.expires`, bound as ordinary values, and
+# the statement's own value, `unit`. The feature is parasitic on ordinary
+# bindings and field projection, so most tests run the destructured spelling
+# and the explicit spelling of the same program (`tmp = source`, `a = tmp.a`,
+# ..., `unit`) on every in-process backend (interpreter,
 # Tcl compiler, native generic, native specialized) and require the same
 # outcome: value, error, and the log the program kept of its own evaluation
 # order. Static rejections are compared with the explicit spelling's. Parsing
@@ -650,13 +651,13 @@ test destructure-named-and-anonymous-agree {named and anonymous struct values de
     list [parity $::decls[string map [list @S $::named] $program]] [parity $::decls[string map [list @S $::anon] $program]]
 } -result {{value {[1, "x", 3]}} {value {[1, "x", 3]}}}
 
-test destructure-source-statement-value {the destructure statement's value, where one is observable (the last statement of a body), is the explicit spelling's: that of the last binding it makes} -body {
-    bothSpellings "fn f(r):\n    \{a, b\} = r\nf(\{a: 1, b: 2\})" "fn f(r):\n    tmp = r\n    a = tmp.a\n    b = tmp.b\nf(\{a: 1, b: 2\})"
-} -result {value 2}
+test destructure-source-statement-value {the destructure statement's value, where one is observable (the last statement of a body), is unit: not the value of the last binding it makes} -body {
+    bothSpellings "fn f(r):\n    \{a, b\} = r\nf(\{a: 1, b: 2\})" "fn f(r):\n    tmp = r\n    a = tmp.a\n    b = tmp.b\n    unit\nf(\{a: 1, b: 2\})"
+} -result {value unit}
 
-test destructure-statement-not-a-value-expression {a destructure is a statement: it cannot be an operand} -body {
-    list [parseError "x = \{a\} = r"] [parseError "f(\{a\} = r)"]
-} -match glob -result {{* *} {* *}}
+test destructure-statement-not-a-value-expression {a destructure is a statement: it cannot be an operand (its value, unit, did not make it an expression)} -body {
+    list [parseError "x = \{a\} = r"] [parseError "f(\{a\} = r)"] [parseError "fn f(r):\n    return \{a\} = r"]
+} -match glob -result {{* *} {* *} {* *}}
 
 # ---------------------------------------------------------------------------
 # Omitted fields: partial destructuring is the normal model; nothing is made
@@ -1624,35 +1625,272 @@ if true:
 } -result {SURFACE MODULE INVALID-TOPLEVEL}
 
 # ---------------------------------------------------------------------------
+# The statement's value is unit
+#
+# A destructuring statement introduces bindings and evaluates to unit. The
+# generated projection binds are implementation details; the last of them (the
+# last field read) is not the construct's result. Every case here runs on every
+# backend; "explicit" is the same program with the expansion ending in `unit`.
+
+proc unitDecls {} {
+    return "struct Rec:\n    a: int\n    b: str\n    c: int\n    d: int\n"
+}
+
+test destructure-value-direct {the last statement of a body is a destructure: the body's value is unit, not the last field's} -body {
+    bothSpellings "fn f():\n    \{a, b\} = \{a: 1, b: 2\}\nf()" "fn f():\n    tmp = \{a: 1, b: 2\}\n    a = tmp.a\n    b = tmp.b\n    unit\nf()"
+} -result {value unit}
+
+test destructure-value-is-not-the-last-field {the old accidental channel is closed: the old expansion without the unit answers 2, the destructure answers unit} -body {
+    list [parity "fn f():\n    \{a, b\} = \{a: 1, b: 2\}\nf()"] [parity "fn f():\n    tmp = \{a: 1, b: 2\}\n    a = tmp.a\n    b = tmp.b\nf()"]
+} -result {{value unit} {value 2}}
+
+test destructure-value-field-order-irrelevant {\{a, b\} and \{b, a\} read and bind in different order but have the same statement value} -body {
+    set v "\{a: 1, b: 2\}"
+    list [parity "fn f(v):\n    \{a, b\} = v\nf($v)"] [parity "fn g(v):\n    \{b, a\} = v\ng($v)"] \
+        [parity "fn f(v):\n    \{a, b\} = v\nfn g(v):\n    \{b, a\} = v\n\[f($v), g($v)\]"]
+} -result {{value unit} {value unit} {value {[unit, unit]}}}
+
+foreach {name pattern bound} {
+    shorthand      {{a, d}}          {[a, d]}
+    one-field      {{c}}             c
+    last-field     {{d}}             d
+    all-fields     {{a, b, c, d}}    {[a, b, c, d]}
+    renamed        {{a: x, b: y}}    {[x, y]}
+    renamed-swap   {{a: b, b: a}}    {[a, b]}
+    reordered      {{d, c, b, a}}    {[a, b, c, d]}
+    trailing-comma {{a, d: z,}}      {[a, z]}
+} {
+    foreach {kind source} [list named "Rec {a: 1, b: \"x\", c: 3, d: 4}" anonymous "{a: 1, b: \"x\", c: 3, d: 4}"] {
+        test destructure-value-$name-$kind "$kind $name: the statement is unit, and the bindings it made are still usable before it in the body" -body {
+            set decls [expr {$kind eq "named" ? [unitDecls] : ""}]
+            list [parity "${decls}fn f():\n    $pattern = $source\nf()"] \
+                [parity "${decls}fn f():\n    $pattern = $source\n    $bound\nf()"] \
+                [parity "${decls}fn f():\n    r = $source\n    $pattern = r\n    $bound\nf()"]
+        } -match glob -result [list {value unit} {value *} {value *}]
+    }
+}
+
+test destructure-value-rename {the renamed bindings are usable in a larger body; as the last statement the destructure is unit} -body {
+    set decls [unitDecls]
+    set src "Rec \{a: 1, b: \"x\", c: 3, d: 4\}"
+    list [parity "${decls}fn f():\n    \{a: x, b: y\} = $src\nf()"] \
+        [parity "${decls}fn f():\n    \{a: x, b: y\} = $src\n    \[x, y\]\nf()"] \
+        [parity "${decls}fn f():\n    \{a: x, b: y\} = $src\n    z = \[x, y\]\n    \{a: p\} = $src\nf()"]
+} -result {{value unit} {value {[1, "x"]}} {value unit}}
+
+test destructure-value-nested {nested destructuring is one statement: unit, not id, expires, user or the nested struct} -body {
+    set src "\{user: \{name: \"ada\", id: 7, admin: true\}, expires: 99\}"
+    list [bothSpellings "fn f(r):\n    \{user: \{name, id\}, expires\} = r\nf($src)" "fn f(r):\n    tmp = r\n    tmp2 = tmp.user\n    name = tmp2.name\n    id = tmp2.id\n    expires = tmp.expires\n    unit\nf($src)"] \
+        [parity "fn f(r):\n    \{user: \{name, id\}, expires\} = r\n    \[name, id, expires\]\nf($src)"] \
+        [parity "fn f(r):\n    \{expires, user: \{id, name\}\} = r\nf($src)"] \
+        [parity "fn f(r):\n    \{user: \{name\}\} = r\nf($src)"]
+} -result {{value unit} {value {["ada", 7, 99]}} {value unit} {value unit}}
+
+test destructure-value-bindings-still-work {a destructure followed by more statements: the synthetic unit does not disturb them} -body {
+    bothSpellings "fn f(v):\n    \{a, b\} = v\n    a + b\nf(\{a: 1, b: 2\})" "fn f(v):\n    tmp = v\n    a = tmp.a\n    b = tmp.b\n    unit\n    a + b\nf(\{a: 1, b: 2\})"
+} -result {value 3}
+
+test destructure-value-statement-order {the unit comes after the bindings and before the next statement: the statements around it keep their order} -body {
+    parity "fn bump(log: MutableArray\[int\], id: int, v: int) -> int:\n    n = mutable_array_get(log, 0)\n    mutable_array_set(log, 0, n * 10 + id)\n    v\nfn run():\n    log = mutarray::create(1, 0)\n    x = bump(log, 1, 5)\n    \{a, b\} = \{a: bump(log, 2, 1), b: bump(log, 3, 2)\}\n    y = bump(log, 4, 7)\n    \[x, a, b, y, mutable_array_get(log, 0)\]\nrun()"
+} -result {value {[5, 1, 2, 7, 1234]}}
+
+test destructure-value-ordinary-binding-unchanged {an ordinary binding is not changed to unit to match the destructure: as the last statement it still yields its value} -body {
+    list [parity "fn f():\n    x = 5\nf()"] [parity "fn f(v):\n    a = v.a\nf(\{a: 1, b: 2\})"] [parity "fn f(v):\n    t = v\n    b = t.b\nf(\{a: 1, b: 2\})"]
+} -result {{value 5} {value 1} {value 2}}
+
+test destructure-value-top-level {the last statement of the entry program is a destructure: the program's value is unit} -body {
+    list [parity "\{a, b\} = \{a: 1, b: 2\}"] [parity "r = \{a: 1, b: 2\}\n\{b\} = r"]
+} -result {{value unit} {value unit}}
+
+test destructure-value-not-source-narrowing-or-remainder {the result is not the source, a narrowed struct, the omitted fields or a List of the bound values} -body {
+    set src "\{a: 1, b: 2, c: 3\}"
+    set results [lmap pattern {{{a, b}} {{b, a}} {{a}} {{a, b, c}} {{c: z}}} {
+        parity "fn f(r):\n    $pattern = r\nf($src)"
+    }]
+    lsort -unique $results
+} -result {{value unit}}
+
+# Branches: no destructuring-specific rule; the normal join sees unit.
+
+test destructure-value-branch {a branch that ends in a destructure produces unit, and joins with other branches by the ordinary rules} -body {
+    list [parity "fn run(c, v):\n    if c:\n        \{a\} = v\n    else:\n        unit\n\[run(true, \{a: 1\}), run(false, \{a: 1\})\]"] \
+        [parity "fn run(c, v):\n    r = if c:\n        \{a\} = v\n    else:\n        \{b\} = v\n    r\n\[run(true, \{a: 1, b: 2\}), run(false, \{a: 1, b: 2\})\]"] \
+        [parity "fn run(c, v):\n    if c:\n        \{a\} = v\n    else:\n        7\n\[run(true, \{a: 1\}), run(false, \{a: 1\})\]"] \
+        [parity "fn run(k, v):\n    if k == 0:\n        \{a\} = v\n    elif k == 1:\n        \{b: a\} = v\n    else:\n        unit\n\[run(0, \{a: 1, b: 2\}), run(1, \{a: 1, b: 2\}), run(2, \{a: 1, b: 2\})\]"]
+} -result {{value {[unit, unit]}} {value {[unit, unit]}} {value {[unit, 7]}} {value {[unit, unit, unit]}}}
+
+test destructure-value-branch-type-join {a destructure in one branch and an Int in the other do not join to an Int (the ordinary join rules see unit)} -body {
+    list [bothSpellings "fn run(c, v):\n    r = if c:\n        \{a\} = v\n    else:\n        7\n    r\nrun(false, \{a: 1\})" "fn run(c, v):\n    r = if c:\n        t = v\n        a = t.a\n        unit\n    else:\n        7\n    r\nrun(false, \{a: 1\})"]
+} -result {{value 7}}
+
+# Loops: a destructure as the last statement of an iteration contributes unit.
+
+test destructure-value-collecting-loop {a collecting loop whose body ends in a destructure collects unit for each normal iteration} -body {
+    list [parity "fn run(xs):\n    loop x in xs:\n        \{a\} = x\nrun(\[\{a: 1\}, \{a: 2\}, \{a: 3\}\])"] \
+        [parity "fn run(xs):\n    loop x in xs:\n        \{a, b\} = x\nrun(\[\{a: 1, b: 5\}, \{a: 2, b: 6\}\])"] \
+        [parity "fn run():\n    loop i from 0 to 3:\n        \{s\} = \{s: i\}\nrun()"] \
+        [parity "fn run():\n    pts = \[\{x: 1\}, \{x: 2\}\]\n    loop p in pts and i from 0 to 2:\n        \{x\} = p\nrun()"] \
+        [parity "fn run(xs):\n    loop x in xs:\n        \{a\} = x\nrun(\[\])"]
+} -result {{value {[unit, unit, unit]}} {value {[unit, unit]}} {value {[unit, unit, unit]}} {value {[unit, unit]}} {value {[]}}}
+
+test destructure-value-loop-old-collection-gone {the old expansion collected the last field of each element; the destructure does not} -body {
+    list [parity "fn run(xs):\n    loop x in xs:\n        tmp = x\n        a = tmp.a\nrun(\[\{a: 1\}, \{a: 2\}\])"] [parity "fn run(xs):\n    loop x in xs:\n        \{a\} = x\nrun(\[\{a: 1\}, \{a: 2\}\])"]
+} -result {{value {[1, 2]}} {value {[unit, unit]}}}
+
+test destructure-value-continue {a continue after a destructure runs normally: the synthetic unit is never collected before the later statements} -body {
+    list [bothSpellings "fn run(xs):\n    loop x in xs:\n        \{a\} = x\n        if a == 2:\n            continue\n        a\nrun(\[\{a: 1\}, \{a: 2\}, \{a: 3\}\])" "fn run(xs):\n    loop x in xs:\n        t = x\n        a = t.a\n        unit\n        if a == 2:\n            continue\n        a\nrun(\[\{a: 1\}, \{a: 2\}, \{a: 3\}\])"] \
+        [parity "fn run(xs):\n    loop x in xs:\n        \{a\} = x\n        if a == 2:\n            continue\n        \{b\} = x\nrun(\[\{a: 1, b: 9\}, \{a: 2, b: 8\}, \{a: 3, b: 7\}\])"] \
+        [parity "fn run(xs):\n    loop x in xs:\n        \{a\} = x\n        if a == 2:\n            break\n        a\nrun(\[\{a: 1\}, \{a: 2\}, \{a: 3\}\])"]
+} -result {{value {[1, 3]}} {value {[unit, unit]}} {value {[1]}}}
+
+test destructure-value-loop-body-nested {a destructure as the last statement of a branch inside a loop body is the iteration's value when that branch is} -body {
+    parity "fn run(xs):\n    loop x in xs:\n        \{n\} = x\n        if n > 1:\n            \{m\} = x\n        else:\n            0\nrun(\[\{n: 1, m: 10\}, \{n: 2, m: 20\}\])"
+} -result {value {[0, unit]}}
+
+# Errors: only the successful statement's value changed.
+
+test destructure-value-error-capable {an error-capable source: success gives bindings and unit; failure is the ordinary error and no unit is observed} -body {
+    set decls $::errDecls
+    list [bothSpellings "${decls}fn run(n) errors Oops:\n    \{a\} = risky(n)\nrun(3)" "${decls}fn run(n) errors Oops:\n    t = risky(n)\n    a = t.a\n    unit\nrun(3)"] \
+        [bothSpellings "${decls}fn run(n) errors Oops:\n    \{a\} = risky(n)\nrun(-5)" "${decls}fn run(n) errors Oops:\n    t = risky(n)\n    a = t.a\n    unit\nrun(-5)"]
+} -match glob -result {{value unit} {error *}}
+
+test destructure-value-handled {a handled destructure is unit on both the success and the handled path} -body {
+    bothSpellings "${::errDecls}fn run(n):\n    \{a, b\} = risky(n):\n        on Oops:\n            \{a: -1, b: -2\}\n\[run(3), run(-1)\]" "${::errDecls}fn run(n):\n    t = risky(n):\n        on Oops:\n            \{a: -1, b: -2\}\n    a = t.a\n    b = t.b\n    unit\n\[run(3), run(-1)\]"
+} -result {value {[unit, unit]}}
+
+test destructure-value-handled-bindings-and-order {the handled destructure still binds on both paths and is still followed by the next statement} -body {
+    parity "${::errDecls}fn run(n):\n    \{a, b\} = risky(n):\n        on Oops:\n            \{a: -1, b: -2\}\n    \[a, b\]\n\[run(3), run(-1)\]"
+} -result {value {[[3, 6], [-1, -2]]}}
+
+# Evaluate once, mutable values, bindings: the same as before, with the last statement a destructure.
+
+test destructure-value-evaluate-once {the source of a destructure that is the last statement is still evaluated once} -body {
+    list [parity "${::countDecls}fn run():\n    log = mutarray::create(1, 0)\n    \{a, b, c\} = mk_named(log)\n    r = mutable_array_get(log, 0)\n    \{a: a2\} = mk_anon(log)\n    unit\n    r\nrun()"] \
+        [parity "${::countDecls}fn run():\n    log = mutarray::create(1, 0)\n    \{a, c\} = mk_named(log)\n    \[mutable_array_get(log, 0)\]\nrun()"]
+} -result {{value 12} {value {[12]}}}
+
+test destructure-value-mutable-field-still-same-value {a MutableArray field: the binding is the same array, and a destructure that ends the body is unit} -body {
+    set decls "struct Holder:\n    items: MutableArray\[int\]\n    n: int\n"
+    list [parity "${decls}fn run():\n    h = Holder \{items: mutarray::create(2, 0), n: 1\}\n    \{items\} = h\nrun()"] \
+        [parity "${decls}fn run():\n    h = Holder \{items: mutarray::create(2, 0), n: 1\}\n    \{items\} = h\n    mutable_array_set(items, 0, 5)\n    mutable_array_get(h.items, 0)\nrun()"]
+} -result {{value unit} {value 5}}
+
+test destructure-value-bindings-are-values {the result being unit does not turn the bindings into references: a binding keeps its value when a later struct is destructured} -body {
+    parity "fn run():\n    s = \{a: 1\}\n    \{a\} = s\n    t = \{a: 2\}\n    \{a: other\} = t\n    \[a, other, s.a, t.a\]\nrun()"
+} -result {value {[1, 2, 1, 2]}}
+
+# Static errors are untouched by the extra unit.
+
+test destructure-value-static-errors-unchanged {the same diagnostics with the destructure as the last statement as with a statement after it} -body {
+    set last {}
+    set inner {}
+    foreach pattern_source {
+        {{a, nope} = {a: 1}}
+        {{a} = 5}
+        {{a, a: b} = {a: 1}}
+        {{a: x, b: x} = {a: 1, b: 2}}
+        {[a, b] = [1, 2]}
+        {{a: {b}} = {a: 1}}
+    } {
+        lappend last [rejection "fn f():\n    $pattern_source\nf()"]
+        lappend inner [rejection "fn f():\n    $pattern_source\n    1\nf()"]
+    }
+    list [expr {$last eq $inner}] [lmap r $last {lindex [split $r :] 0}]
+} -result {1 {UNKNOWN-FIELD NOT-A-STRUCT {SYNTAX DUPLICATE-FIELD} DUPLICATE {SYNTAX LIST-DESTRUCTURING} NOT-A-STRUCT}}
+
+test destructure-value-unproven-shape-unchanged {an unproven struct shape is still the ordinary projection error, with the destructure last or not} -body {
+    set last [rejection "fn f(x):\n    \{a\} = x\nf(3)"]
+    set inner [rejection "fn f(x):\n    \{a\} = x\n    1\nf(3)"]
+    list [expr {$last eq $inner}] [expr {$last ne "accepted"}]
+} -result {1 1}
+
+test destructure-value-static-error-locations {the unit is not a source-visible statement: a rejection points at the same place as before} -body {
+    list [rejectionAt "fn f():\n    \{a, nope\} = \{a: 1\}\nf()"] [rejectionAt "fn f():\n    \{good,\n  mising\} = \{good: 1\}\nf()"] \
+        [rejectionAt "fn f():\n    \{a: x, b: x\} = \{a: 1, b: 2\}\nf()"] \
+        [rejectionAt "fn f():\n    \{a, nope\} = \{a: 1\}\n    1\nf()"]
+} -result {2:9 3:3 2:15 2:9}
+
+# ---------------------------------------------------------------------------
 # Same program: HIR, core IR, analyses and NIR of the two spellings
 
+# The explicit spelling is the oracle: the same projections and bindings, then
+# the statement's value, `unit`.
 foreach {name destructured explicit} {
     scalar
         "fn run(n: int) -> int:\n    \{a, b: c\} = \{a: n, b: n + 1\}\n    a * c\n\[run(1), run(2)\]"
-        "fn run(n: int) -> int:\n    tmp = \{a: n, b: n + 1\}\n    a = tmp.a\n    c = tmp.b\n    a * c\n\[run(1), run(2)\]"
+        "fn run(n: int) -> int:\n    tmp = \{a: n, b: n + 1\}\n    a = tmp.a\n    c = tmp.b\n    unit\n    a * c\n\[run(1), run(2)\]"
     named
         "struct P:\n    x: int\n    y: int\nfn run(n: int) -> int:\n    \{x, y\} = P \{x: n, y: n * 2\}\n    x + y\n\[run(1), run(5)\]"
-        "struct P:\n    x: int\n    y: int\nfn run(n: int) -> int:\n    tmp = P \{x: n, y: n * 2\}\n    x = tmp.x\n    y = tmp.y\n    x + y\n\[run(1), run(5)\]"
+        "struct P:\n    x: int\n    y: int\nfn run(n: int) -> int:\n    tmp = P \{x: n, y: n * 2\}\n    x = tmp.x\n    y = tmp.y\n    unit\n    x + y\n\[run(1), run(5)\]"
     call-source
         "struct P:\n    x: int\n    y: int\nfn make(n: int) -> P:\n    P \{x: n, y: n + 1\}\nfn run(n: int) -> int:\n    \{y, x\} = make(n)\n    x * 100 + y\n\[run(1), run(5)\]"
-        "struct P:\n    x: int\n    y: int\nfn make(n: int) -> P:\n    P \{x: n, y: n + 1\}\nfn run(n: int) -> int:\n    tmp = make(n)\n    y = tmp.y\n    x = tmp.x\n    x * 100 + y\n\[run(1), run(5)\]"
+        "struct P:\n    x: int\n    y: int\nfn make(n: int) -> P:\n    P \{x: n, y: n + 1\}\nfn run(n: int) -> int:\n    tmp = make(n)\n    y = tmp.y\n    x = tmp.x\n    unit\n    x * 100 + y\n\[run(1), run(5)\]"
     nested
         "fn run(n: int) -> int:\n    \{u: \{a, b\}, v\} = \{u: \{a: n, b: n + 1, c: 0\}, v: n * 3\}\n    a + b + v\n\[run(1), run(5)\]"
-        "fn run(n: int) -> int:\n    tmp = \{u: \{a: n, b: n + 1, c: 0\}, v: n * 3\}\n    tmp2 = tmp.u\n    a = tmp2.a\n    b = tmp2.b\n    v = tmp.v\n    a + b + v\n\[run(1), run(5)\]"
+        "fn run(n: int) -> int:\n    tmp = \{u: \{a: n, b: n + 1, c: 0\}, v: n * 3\}\n    tmp2 = tmp.u\n    a = tmp2.a\n    b = tmp2.b\n    v = tmp.v\n    unit\n    a + b + v\n\[run(1), run(5)\]"
     capture
         "fn make(n: int):\n    \{a, b: c\} = \{a: n, b: n + 1\}\n    fn f(k: int) -> int:\n        a * k + c\n    f\nmake(3)(4)"
-        "fn make(n: int):\n    tmp = \{a: n, b: n + 1\}\n    a = tmp.a\n    c = tmp.b\n    fn f(k: int) -> int:\n        a * k + c\n    f\nmake(3)(4)"
+        "fn make(n: int):\n    tmp = \{a: n, b: n + 1\}\n    a = tmp.a\n    c = tmp.b\n    unit\n    fn f(k: int) -> int:\n        a * k + c\n    f\nmake(3)(4)"
     in-loop
         "fn run(n: int):\n    loop i from 0 to n:\n        \{s, t\} = \{s: i, t: i * i\}\n        s + t\nrun(4)"
-        "fn run(n: int):\n    loop i from 0 to n:\n        tmp = \{s: i, t: i * i\}\n        s = tmp.s\n        t = tmp.t\n        s + t\nrun(4)"
+        "fn run(n: int):\n    loop i from 0 to n:\n        tmp = \{s: i, t: i * i\}\n        s = tmp.s\n        t = tmp.t\n        unit\n        s + t\nrun(4)"
     refined
         "type Small = Int in 0..10\nfn run(n: Small) -> int:\n    \{a, b\} = \{a: n + 1, b: n * 2\}\n    a + b\n\[run(1), run(9)\]"
-        "type Small = Int in 0..10\nfn run(n: Small) -> int:\n    tmp = \{a: n + 1, b: n * 2\}\n    a = tmp.a\n    b = tmp.b\n    a + b\n\[run(1), run(9)\]"
+        "type Small = Int in 0..10\nfn run(n: Small) -> int:\n    tmp = \{a: n + 1, b: n * 2\}\n    a = tmp.a\n    b = tmp.b\n    unit\n    a + b\n\[run(1), run(9)\]"
+    last-statement
+        "fn run(n: int):\n    \{a, b: c\} = \{a: n, b: n + 1\}\n\[run(1), run(2)\]"
+        "fn run(n: int):\n    tmp = \{a: n, b: n + 1\}\n    a = tmp.a\n    c = tmp.b\n    unit\n\[run(1), run(2)\]"
+    last-statement-nested
+        "fn run(n: int):\n    \{u: \{a, b\}, v\} = \{u: \{a: n, b: n + 1\}, v: n * 3\}\n\[run(1), run(5)\]"
+        "fn run(n: int):\n    tmp = \{u: \{a: n, b: n + 1\}, v: n * 3\}\n    tmp2 = tmp.u\n    a = tmp2.a\n    b = tmp2.b\n    v = tmp.v\n    unit\n\[run(1), run(5)\]"
+    last-in-branch
+        "fn run(n: int):\n    if n > 2:\n        \{a, b\} = \{a: n, b: n + 1\}\n    else:\n        unit\n\[run(1), run(5)\]"
+        "fn run(n: int):\n    if n > 2:\n        tmp = \{a: n, b: n + 1\}\n        a = tmp.a\n        b = tmp.b\n        unit\n    else:\n        unit\n\[run(1), run(5)\]"
+    last-in-loop
+        "fn run(n: int):\n    loop i from 0 to n:\n        \{s, t\} = \{s: i, t: i * i\}\nrun(4)"
+        "fn run(n: int):\n    loop i from 0 to n:\n        tmp = \{s: i, t: i * i\}\n        s = tmp.s\n        t = tmp.t\n        unit\nrun(4)"
+    last-capturing-unit-result
+        "fn make(n: int):\n    \{a, b\} = \{a: n, b: n + 1\}\n    fn f(k: int) -> int:\n        a * k + b\n    r = f(2)\n    \{p\} = \{p: r\}\nmake(3)"
+        "fn make(n: int):\n    tmp = \{a: n, b: n + 1\}\n    a = tmp.a\n    b = tmp.b\n    unit\n    fn f(k: int) -> int:\n        a * k + b\n    r = f(2)\n    tmp2 = \{p: r\}\n    p = tmp2.p\n    unit\nmake(3)"
 } {
-    test destructure-same-program-$name "$name: destructured and explicit spellings have the same HIR (modulo the temporary's name), core IR, analyses and NIR, and the same outcome on every backend" -body {
+    test destructure-same-program-$name "$name: destructured and explicit (...; unit) spellings have the same HIR (modulo the temporary's name), core IR, analyses and NIR, and the same outcome on every backend" -body {
         list [sameProgram $destructured $explicit] [bothSpellings $destructured $explicit]
     } -match glob -result {{} {value *}}
 }
+
+# NIR text with register numbers, expression ids and register counts removed,
+# so two programs that differ by an instruction can be compared structurally.
+proc nirShape {text} {
+    set text [regsub -all {%[0-9]+} $text %]
+    set text [regsub -all { @e[0-9]+} $text {}]
+    set text [regsub -all {regs=[0-9]+} $text regs=N]
+    return [regsub -all {rawregs="[0-9 ]*"} $text rawregs=R]
+}
+
+test destructure-nir-result-discarded {a destructure whose value is discarded: the NIR is the explicit (...; unit) spelling's; it differs from the old expansion by exactly the one dead `unit` instruction (the existing discarded-result lowering does not drop a discarded unit, and no destructuring-specific elision was added)} -body {
+    set d "fn run(n: int) -> int:\n    \{a, b: c\} = \{a: n, b: n + 1\}\n    a * c\nrun(3)"
+    set unit "fn run(n: int) -> int:\n    tmp = \{a: n, b: n + 1\}\n    a = tmp.a\n    c = tmp.b\n    unit\n    a * c\nrun(3)"
+    set old "fn run(n: int) -> int:\n    tmp = \{a: n, b: n + 1\}\n    a = tmp.a\n    c = tmp.b\n    a * c\nrun(3)"
+    set nd [nirOf [hirOf $d]]
+    set lines [split [nirShape [tempFree $nd]] \n]
+    set at [lsearch -exact $lines {    % = unit}]
+    set without [lreplace $lines $at $at]
+    list [expr {[tempFree $nd] eq [nirOf [hirOf $unit]]}] \
+        [expr {$at >= 0}] \
+        [expr {[join $without \n] eq [nirShape [nirOf [hirOf $old]]]}] \
+        [string match *structnew* $nd]
+} -result {1 1 1 0}
+
+test destructure-nir-result-observable {a destructure as the final body value: the function returns the unit, not the last field read} -body {
+    set d "fn run(n: int):\n    \{a, b\} = \{a: n, b: n + 1\}\nrun(3)"
+    set old "fn run(n: int):\n    tmp = \{a: n, b: n + 1\}\n    a = tmp.a\n    b = tmp.b\nrun(3)"
+    set nd [nirOf [hirOf $d]]
+    set no [nirOf [hirOf $old]]
+    set ends [regexp {(%[0-9]+) = unit @e[0-9]+\n    ret (%[0-9]+)\nend} $nd -> unitReg retReg]
+    set oldEnds [regexp {= unit @e[0-9]+\n    ret %[0-9]+\nend} $no]
+    list $ends [expr {$ends && $unitReg eq $retReg}] $oldEnds
+} -result {1 1 0}
 
 test destructure-no-destructuring-operation-in-nir {the NIR of a destructuring program has no trace of the syntax} -body {
     set text [dict get [native::lower::program [hirOf "fn run(n: int) -> int:\n    \{a, b: c\} = \{a: n, b: n + 1\}\n    a * c\nrun(3)"]] text]
@@ -1666,9 +1904,10 @@ test destructure-no-destructuring-operation-in-core-ir {nor in core IR} -body {
 
 test destructure-construction-analysis-sees-ordinary-uses {the construction analysis treats the destructured struct like the explicit one: with only field reads the struct is never allocated} -body {
     set d "fn run(n: int) -> int:\n    \{a, b\} = \{a: n, b: n + 1\}\n    a + b\nrun(3)"
-    set e "fn run(n: int) -> int:\n    tmp = \{a: n, b: n + 1\}\n    a = tmp.a\n    b = tmp.b\n    a + b\nrun(3)"
-    expr {[tempFree [nirOf [hirOf $d]]] eq [nirOf [hirOf $e]]}
-} -result 1
+    set e "fn run(n: int) -> int:\n    tmp = \{a: n, b: n + 1\}\n    a = tmp.a\n    b = tmp.b\n    unit\n    a + b\nrun(3)"
+    set nir [nirOf [hirOf $d]]
+    list [expr {[tempFree $nir] eq [nirOf [hirOf $e]]}] [string match *structnew* $nir]
+} -result {1 0}
 
 # ---------------------------------------------------------------------------
 # Standalone executables

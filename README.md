@@ -1359,8 +1359,9 @@ add10(32)          # 42 (add captures x)
 * **Struct destructuring.** `{user, expires: expiry} = result` binds fields
   of a struct value by name: it evaluates `result` once, then binds `user` to
   `result.user` and `expiry` to `result.expires`, exactly as the explicit
-  `tmp = result`, `user = tmp.user`, `expiry = tmp.expires` would. Struct
-  destructuring binds fields by name. It creates ordinary value bindings; it
+  `tmp = result`, `user = tmp.user`, `expiry = tmp.expires` would, and the
+  statement itself evaluates to `unit` (not to the last binding it makes: those
+  are implementation details). Struct destructuring binds fields by name. It creates ordinary value bindings; it
   does not create references into the source struct. Fields may be omitted or
   renamed (`{source_field: local_name}`: the left name is the field read, the
   right name the binding made; `{field}` is `{field: field}`), named and
@@ -1431,7 +1432,7 @@ program binds (§16, "Root references and hygiene").
 | `[a, b]` | `call ^list a b` |
 | `f(a)` | `call f a` |
 | `x = e` | `bind x e` |
-| `{a, b: c} = e` | `bind tmp e`, `bind a (project tmp a)`, `bind c (project tmp b)`: `tmp` is a hygienic temporary (its name contains `#`); no HIR or later pass knows destructuring |
+| `{a, b: c} = e` | `bind tmp e`, `bind a (project tmp a)`, `bind c (project tmp b)`, `^unit`: `tmp` is a hygienic temporary (its name contains `#`) and the final `unit` is the statement's own value; no HIR or later pass knows destructuring |
 | `fn f(a): body` | `bind f (block {a} body…)` |
 | `if c: t` / `else: e` | `if c {t…} {e…}`, inline branches; no `else` → empty branch (`unit`) |
 | `if c: t` / `elif c2: t2` / `else: e` | `if c {t…} {if c2 {t2…} {e…}}`: an `elif` is an `if` alone in the previous clause's else branch; no HIR or later pass knows `elif` |
