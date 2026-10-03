@@ -13,6 +13,12 @@ This is a feasibility study, written before any implementation.
   describes them.
 * The prototypes ran against `5199491`. Between that commit and `f6207f4` the
   only change under `native/src/` is one unit test (`string_alloc_tests.rs`).
+* Later commits on `main` are not covered. One of them bears on the plan: the
+  Linux x86-64-only `linux::abi::syscall` intrinsic (LINUX-X86-64-SYSCALL.md).
+  * `clif.rs` refuses its op on every other target through a sixth check of
+    the compiling host, `cfg!(all(target_arch = "x86_64", target_os = "linux"))`.
+  * The explicit `Target` (§4.2) has to replace that check too, so that a Linux
+    x86-64 driver emitting wasm refuses the op as well.
 
 ## Outcome
 
@@ -1364,7 +1370,7 @@ The repository's existing descriptions of the two limitations are short, so
 
 | § | Item | Class | Where it applies | Effect on the wasm work |
 |---|---|---|---|---|
-| 9.1 | Shadow-stack overflow is reported in-band; native-stack overflow crashes | Known limitation | Every host except Linux x86-64; CI runs none of them | A wasm build would inherit it, unless a Linux x86-64 driver picked its root strategy, which is GC-unsound instead (§4.4). The plan makes overflow fatal (P2, P3, §4.5) |
+| 9.1 | Shadow-stack overflow is reported in-band; native-stack overflow crashes | Known limitation | Every host except Linux x86-64; CI runs none of them | A wasm build would inherit it. One whose root strategy a Linux x86-64 driver read from its own host would inherit only the stack-exhaustion half, and would be GC-unsound besides (§4.4). The plan makes overflow fatal (P2, P3, §4.5) |
 | 9.2 | Pointer-width and alignment assumptions | Wasm-only | 32-bit targets; none builds today | Prerequisites P1 and P5 |
 | 9.3 | Documentation lag | Documentation | README §20 and §22, `native/lower.tcl`, `ops.rs`, code comments and design notes | P7 fixes the `ops.rs` table (§4.3). The other fixes are worth landing anyway (§7), and the wasm docs must not copy the stale statements |
 | 9.4 | Frame-walk cap `MAX_FRAMES` | Known limitation | The x86-64 stack-map path, at a GC deeper than 4,194,304 frame-pointer links | None: wasm has no frame walk |
@@ -1550,7 +1556,7 @@ x86-64 driver prints `NATIVE LIMIT STACK` for every row.
 
 **Effect on the wasm work.** With today's root-strategy checks, a wasm build
 would take one of two paths. From a Linux x86-64 driver, only the first
-inherits this limitation:
+inherits the in-band part of this limitation:
 * **Read from the target.** wasm32 is not x86-64. A runtime and Translator that
   read the target would put every wasm build on the `RuntimeStack` path: at
   least one slot per calling frame, the zero-filled 32 MiB array, and in-band
