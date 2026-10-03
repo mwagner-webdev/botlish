@@ -512,7 +512,9 @@ It needs a call through `list_get` of a known List and a nested closure
 capturing a *local*. Not fixed here. **Since fixed** by
 [Blockescape: a called generic instance](#blockescape-a-called-generic-instance)
 (`g<generic>`, selected by `f<generic>`'s call, is now a de-closure target
-of its own); regression tests in `tests/blockescape-called-generic.test`.
+of its own); regression tests in `tests/blockescape-called-generic.test`;
+see also its follow-up there, one verdict per binding across enclosing
+instances.
 
 ### Adversarial review
 
@@ -1005,6 +1007,25 @@ Reviewed together with loss point 1 (its section): no problem found; the
 review noted that the called generic instance now also goes through
 blockescape's self and sibling checks, so a call pruned there declines the
 binding (not observed).
+
+**Follow-up: one verdict per binding across enclosing instances.** The
+region holding a closure binding is analyzed once per used instance of the
+enclosing function (`f<int>`, `f<generic>` above), each with its own `calls`
+map, but `hir::blockescape::virtual` answers per binding. A binding was
+marked de-closured if *any* enclosing instance proved it eligible, even when
+another declined it, and lowering that other instance would then find a call
+(or a value use) with no internal variant. The crash above was one form of
+this. Now `Bindings` runs the per-instance analysis (`Round`) to a fixpoint
+across instances: a binding declined in one is declined in all, and every
+binding a declined one makes ineligible (a sibling capturer) is re-checked.
+No program is known to reach the gap once called generic instances are
+targets (it is closed by construction, not by a reproducer). Corpus NIR is
+unchanged. Regression tests: `tests/native-block-escape.test`'s
+`blockescape-enclosing-instances-*` (the program above, two exact `list_get`
+calls at different indexes, a captured local plus a captured parameter
+called through a sibling closure; interp, compile, cranelift-generic and
+cranelift agree, and `g<int>`/`g<generic>` are both wanted with no Block
+allocated).
 
 ## Loss point 1: Int key positions for capturing closures
 

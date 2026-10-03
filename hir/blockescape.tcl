@@ -295,12 +295,37 @@ proc hir::blockescape::NotAllIn {targets allowed} {
 # set (InstanceId -> 1) of the callee instances some such binding demands an
 # internal (capture-explicit) variant for. CAPTURES is InstanceId ->
 # flattened BindingId list (FlattenBinding), for every instance in WANTS.
+#
+# A binding is a structural HIR node, but its region is analyzed once per
+# used instance of the enclosing literal (each with its own `calls`), while
+# VIRTUAL is keyed by BindingId alone (lowering asks it in every instance).
+# So eligibility must hold in EVERY used instance of the region: a binding
+# declined in any one of them is declined everywhere, and the whole
+# analysis is repeated (Round) until no further binding is declined -- a
+# greatest fixpoint across instances, as Round's own is within one.
 proc hir::blockescape::Bindings {hir spec} {
+    set declined [dict create]
+    while 1 {
+        lassign [Round $hir $spec $declined] virtual wants flatCaptures newly
+        if {![dict size $newly]} {
+            return [list $virtual $wants $flatCaptures]
+        }
+        set declined [dict merge $declined $newly]
+    }
+}
+
+# One pass of Bindings over every used instance, with every binding in
+# DECLINED (BindingId -> 1) ineligible from the start. Returns {VIRTUAL
+# WANTS CAPTURES NEWLY}, NEWLY the candidates this pass declined that
+# DECLINED did not already hold; the first three are only meaningful when
+# NEWLY is empty.
+proc hir::blockescape::Round {hir spec declined} {
     set context [dict get $spec context]
     set envless [dict get $context envless]
     set virtual [dict create]
     set wants [dict create]
     set flatCaptures [dict create]
+    set newly [dict create]
     # BindingId -> every Block literal (in any region) whose captures name
     # it: structural, the same in every instance's view.
     set capturers [dict create]
@@ -402,7 +427,7 @@ proc hir::blockescape::Bindings {hir spec} {
                 dict set arityOf $b [llength [hir::get $view $l params]]
                 continue
             }
-            dict set eligible $b 1
+            dict set eligible $b [expr {![dict exists $declined $b]}]
             dict set instancesOf $b [RelevantInstances $spec $l]
             dict set arityOf $b [llength [hir::get $view $l params]]
         }
@@ -524,6 +549,9 @@ proc hir::blockescape::Bindings {hir spec} {
         set memo [dict create]
         foreach {b l} $candidates {
             if {![dict get $eligible $b]} {
+                if {![dict exists $declined $b]} {
+                    dict set newly $b 1
+                }
                 continue
             }
             set linsts [dict get $instancesOf $b]
@@ -541,7 +569,7 @@ proc hir::blockescape::Bindings {hir spec} {
             }
         }
     }
-    return [list $virtual $wants $flatCaptures]
+    return [list $virtual $wants $flatCaptures $newly]
 }
 
 # ---------------------------------------------------------------------------

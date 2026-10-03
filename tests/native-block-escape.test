@@ -719,4 +719,90 @@ test blockescape-region-companion-refined-checks-5 {refined-checks.ir: R2.a.3 dr
     list [regexp {tailenv} $nirText] [llength [regexp -all -inline -line {^\s+tail .*$} $nirText]]
 } -result {0 3}
 
+# ---------------------------------------------------------------------------
+# Enclosing-instance consistency: a de-closure-converted binding's region is
+# analyzed once per used instance of the enclosing function, and every one of
+# them must prove the binding's references are exact calls. An enclosing
+# function called through `list_get` of a known List is a materialized Block
+# value too, so its generic (Block-value entry) instance is used and calls
+# the nested closure's GENERIC instance, while the exact-callable instance
+# calls a specialized one: both must be wanted (or the binding declined),
+# never a call left with no internal variant (it used to throw "call ... of a
+# de-closure-converted binding has no wanted callee instance (NATIVE BUG)").
+
+# TEXT's value under interp, compile, cranelift-generic and cranelift, which
+# must all agree.
+proc backendParity {text} {
+    set hir [sourceHir $text]
+    set values {}
+    foreach backend {interp compile cranelift-generic cranelift} {
+        set outcome [outcomeUnderHir $backend $hir]
+        if {[lindex $outcome 0] ne "value"} {
+            error "$backend: $outcome"
+        }
+        lappend values [lindex $outcome 1]
+    }
+    if {[llength [lsort -unique $values]] != 1} {
+        error "backends disagree: $values"
+    }
+    return [lindex $values 0]
+}
+
+set blockescapeEnclosingRepro {
+fn f(a):
+    k = 5
+    fn g(x):
+        x + k
+    g(a)
+
+fs = [f]
+list_get(fs, 0)(3)
+}
+
+test blockescape-enclosing-instances-1 {a closure capturing a local, called inside a function that is itself called through list_get of a known List: every backend agrees} -body {
+    backendParity $blockescapeEnclosingRepro
+} -result 8
+
+test blockescape-enclosing-instances-2 {...and the closure is still de-closure-converted: both its specialized and its generic instance (called from the enclosing function's Block-value entry) get an internal variant, and no Block is allocated} -body {
+    set hir [native::prepareHir [sourceHir $blockescapeEnclosingRepro]]
+    set spec [hir::specialize::analyze $hir]
+    set be [hir::blockescape::analyze $hir $spec]
+    list [lmap pair [hir::blockescape::wantedInstances $hir $spec $be] {lindex $pair 1}] \
+        [blockAllocs $blockescapeEnclosingRepro 1]
+} -result {{g<int> g<generic>} 0}
+
+test blockescape-enclosing-instances-3 {two exact list_get calls at different indexes, each callee with a nested closure capturing a local} -body {
+    backendParity {
+fn f(a):
+    k = 5
+    fn g(x):
+        x + k
+    g(a)
+
+fn h(a):
+    m = 7
+    fn q(x):
+        x * m
+    q(a) + q(1)
+
+fs = [f, h]
+[list_get(fs, 0)(3), list_get(fs, 1)(3), list_get(fs, 0)(10)]
+    }
+} -result {[8, 28, 15]}
+
+test blockescape-enclosing-instances-4 {a nested closure capturing both a local and a parameter of a function called through list_get, plus a second closure calling the first} -body {
+    backendParity {
+fn f(a):
+    k = 5
+    fn g(x):
+        x + k + a
+    fn r(y):
+        g(y) * 2
+    r(a) + g(1)
+
+fs = [f]
+[list_get(fs, 0)(3), f(4)]
+    }
+} -result {[31, 36]}
+
 cleanupTests
