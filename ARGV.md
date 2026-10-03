@@ -421,8 +421,7 @@ Measured on the sandbox (Linux x86_64, Tcl 9.0.1, rustc 1.97):
     interp 4730/4730, compile 4727 passed + 4 skipped (the Core-IR-scoping
     tests, which run on the interpreter only), 0 failed; `tests/native-coverage.tcl`
     exits 0; the example runs (`main.tcl` on interp, compile and cranelift) have
-    no errors; `cargo test` passes except the pre-existing unrelated failure
-    listed below.
+    no errors; `cargo test` passes.
 
 ## Known limitations
 
@@ -441,7 +440,3 @@ Measured on the sandbox (Linux x86_64, Tcl 9.0.1, rustc 1.97):
   above); it is covered by unit and in-process tests.
 * `tests/argv.test`'s standalone tests need `bash` (for `exec -a`) and, for the
   `argc == 0` check, `python3`; they are constraint-guarded.
-* A pre-existing, unrelated Rust unit test
-  (`string_alloc_tests::constructors_agree_with_the_oracle_on_boundary_lengths`,
-  a random-Unicode `lowercase` oracle comparison) fails on the sandbox's
-  rustc 1.97, with or without this change (checked against a clean tree).

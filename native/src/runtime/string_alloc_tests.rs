@@ -315,6 +315,52 @@ fn check(v: Value, expect: &str) {
     }
 }
 
+/// Oracle for `rt_str_lower`: the Unicode 16 *simple* (one-to-one,
+/// UnicodeData.txt) lowercase mapping that core::strings::lowercase defines.
+/// Deliberately not `char::to_lowercase`'s output taken as-is: that is the
+/// full SpecialCasing mapping (U+0130 -> "i" + U+0307, whose simple mapping is
+/// plain U+0069) and, in rustc 1.97, Unicode 17 data (which adds lowercase
+/// mappings for U+A7CE, U+A7D2, U+A7D4 and U+16EA0..=U+16EB8 that Unicode 16
+/// lacks). The facts are spelled out here independently of ops.rs.
+fn unicode16_simple_lower(c: char) -> char {
+    match c {
+        '\u{130}' => 'i',
+        '\u{A7CE}' | '\u{A7D2}' | '\u{A7D4}' | '\u{16EA0}'..='\u{16EB8}' => c,
+        _ => {
+            let mut l = c.to_lowercase();
+            match (l.next(), l.next()) {
+                (Some(x), None) => x,
+                _ => panic!("{c:?} has a multi-scalar lowercase other than U+0130"),
+            }
+        }
+    }
+}
+
+#[test]
+fn lowercase_is_unicode_16_simple_on_known_facts() {
+    let mut vm = vm();
+    for (c, want) in [
+        ('A', 'a'),
+        ('\u{130}', 'i'),        // not the full mapping "i" + U+0307
+        ('\u{212A}', 'k'),       // KELVIN SIGN
+        ('\u{23A}', '\u{2C65}'), // Tcl 9.0.x leaves it unchanged; the standard maps it
+        ('\u{23E}', '\u{2C66}'),
+        ('\u{A7CE}', '\u{A7CE}'), // Unicode 17 additions stay unchanged
+        ('\u{A7D2}', '\u{A7D2}'),
+        ('\u{A7D4}', '\u{A7D4}'),
+        ('\u{16EA0}', '\u{16EA0}'),
+        ('\u{16EB8}', '\u{16EB8}'),
+        ('\u{1E9E}', '\u{DF}'),
+        ('\u{10400}', '\u{10428}'),
+    ] {
+        let v = vm.new_str(&c.to_string());
+        vm.temp_roots.push(v);
+        let l = rt_str_lower(&mut *vm, v);
+        assert_eq!(str_of(l).as_str(), want.to_string(), "lowercase of {c:?}");
+        vm.temp_roots.clear();
+    }
+}
+
 #[test]
 fn constructors_agree_with_the_oracle_on_boundary_lengths() {
     let mut vm = vm();
@@ -337,16 +383,7 @@ fn constructors_agree_with_the_oracle_on_boundary_lengths() {
                 let sub = rt_substr(&mut *vm, va, small(from as i64), small(to as i64));
                 check(sub, &chars[from..to].iter().collect::<String>());
                 let lower = rt_str_lower(&mut *vm, va);
-                let expect_lower: String = a
-                    .chars()
-                    .map(|c| {
-                        let mut l = c.to_lowercase();
-                        match (l.next(), l.next()) {
-                            (Some(x), None) => x,
-                            _ => c,
-                        }
-                    })
-                    .collect();
+                let expect_lower: String = a.chars().map(unicode16_simple_lower).collect();
                 check(lower, &expect_lower);
                 vm.temp_roots.clear();
             }
