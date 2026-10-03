@@ -125,6 +125,7 @@ proc hir::resolve::program {nodes mode origin {modules {}}} {
             RootBinding hir $root $name
         }
     }
+    hir::flags::CheckValues hir
     dict unset hir laterIndex
     return $hir
 }
@@ -406,10 +407,18 @@ proc hir::resolve::Expr {hirVar node ctx} {
             # established first, so its own body can call it.
             if {[dict get [dict get $node value] kind] eq "block"} {
                 Establish hir $e $scope $name $origin
+                if {![dict get $hir exprs $e duplicate]} {
+                    # The function's flag interface (FLAGS.md) is known
+                    # before its body is resolved, so the body can call it.
+                    hir::flags::DeclareFunction hir [dict get $hir exprs $e binding] [dict get $node value]
+                }
                 SetField hir $e value [Expr hir [dict get $node value] $ctx]
             } else {
                 SetField hir $e value [Expr hir [dict get $node value] $ctx]
                 Establish hir $e $scope $name $origin
+                if {![dict get $hir exprs $e duplicate] && [dict get $hir exprs [dict get $hir exprs $e value] kind] eq "ref"} {
+                    hir::flags::DeclareAlias hir [dict get $hir exprs $e binding] [dict get $hir exprs $e value]
+                }
             }
         }
         block {
@@ -449,6 +458,12 @@ proc hir::resolve::Expr {hirVar node ctx} {
                     lappend declaredParamTypes $normalized
                 }
             }
+            # The flag section (FLAGS.md): the last parameters, one bool
+            # binding per declared flag, after the ordinary ones.
+            lassign [hir::flags::Declare hir $e $node $bodyScope [CtxNamespace $ctx]] flagBindings flagTypes
+            lappend params {*}$flagBindings
+            lappend declaredParamTypes {*}$flagTypes
+            SetField hir $e flags [lmap flag [expr {[dict exists $node flags] ? [dict get $node flags] : {}}] {lindex $flag 0}]
             set body [dict get $node body]
             NoteBody hir $bodyScope $body
             AddClosure hir $scope $e
@@ -523,6 +538,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
                     SetField hir [dict get $hir exprs $e callee] methodCallee 1
                 }
             }
+            hir::flags::ResolveCall hir $e $node $ctx
             SetField hir $e target ""
             SetField hir $e known ""
         }
@@ -889,6 +905,7 @@ proc hir::resolve::ResolveQualifiedRef {hirVar e pair ctx} {
     set b [dict get $hir scopes $bodyScope names $name]
     SetField hir $e binding $b
     SetField hir $e init yes
+    hir::flags::NoteRef hir $e
     # The module section scope is never within any enclosing block's own
     # body scope (it is always a sibling of the program's top scope), so
     # this always captures through every enclosing block, exactly like an
@@ -933,6 +950,7 @@ proc hir::resolve::ResolveRef {hirVar e name root ctx} {
     # (sequential resolution), except an ambient one: whatever the host
     # environment holds when a closure eventually runs.
     SetField hir $e init [expr {[dict get $binding kind] eq "ambient" ? "deferred" : "yes"}]
+    hir::flags::NoteRef hir $e
 
     if {[dict get $binding kind] ne "root"} {
         Capture hir $ctx [dict get $binding scope] $b

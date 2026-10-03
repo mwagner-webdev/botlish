@@ -18,8 +18,12 @@
 #             (one raw type-name string per param, "" for an untyped
 #             parameter -- surface/parser.tcl's "x: T" annotation, unresolved
 #             until hir/resolve.tcl normalizes it into declaredParamTypes;
-#             see this file's blockNode)
-#   call      callee, args
+#             see this file's blockNode), flags (optional: {NAME ORIGIN}
+#             pairs, the function's declared flag section in declaration
+#             order -- FLAGS.md; absent or empty for a function without
+#             flags)
+#   call      callee, args, flags (optional: {NAME ORIGIN} pairs, the flags
+#             the call supplies, in written order -- FLAGS.md)
 #   if        condition, thenOrigin, thenBody, elseOrigin, elseBody
 #   loop      bodyOrigin, body
 #   listloop  iterable, elementName, elementOrigin, bodyOrigin, body -- the
@@ -124,7 +128,7 @@ proc hir::syntax::bindNode {origin name value} {
 # type-name string per param ("" for untyped); defaults to all-"" (every
 # param untyped) when omitted, so every existing caller (fromIR, and any
 # hand-built syntax that predates parameter typing) is unaffected.
-proc hir::syntax::blockNode {origin params body {declaredResult {}} {paramTypes {}} {declaredErrors {}}} {
+proc hir::syntax::blockNode {origin params body {declaredResult {}} {paramTypes {}} {declaredErrors {}} {flags {}}} {
     foreach param $params {
         if {[llength $param] != 2 || [lindex $param 0] eq ""} {
             core::malformed "block parameters must be {NAME ORIGIN} pairs" [list block $params]
@@ -135,8 +139,13 @@ proc hir::syntax::blockNode {origin params body {declaredResult {}} {paramTypes 
     } elseif {[llength $paramTypes] != [llength $params]} {
         core::malformed "block paramTypes must have one entry per parameter" [list block $params $paramTypes]
     }
+    foreach flag $flags {
+        if {[llength $flag] != 2 || [lindex $flag 0] eq ""} {
+            core::malformed "block flags must be {NAME ORIGIN} pairs" [list block $params $flags]
+        }
+    }
     return [Node block $origin params $params body $body declaredResult $declaredResult \
-        paramTypes $paramTypes declaredErrors $declaredErrors]
+        paramTypes $paramTypes declaredErrors $declaredErrors flags $flags]
 }
 
 # TYPE and FIELDS as this file's header describes `struct`.
@@ -156,6 +165,22 @@ proc hir::syntax::projectNode {origin receiver name nameOrigin} {
 
 proc hir::syntax::callNode {origin callee args} {
     return [Node call $origin callee $callee args $args]
+}
+
+# CALL (a `call` node) supplying the flags FLAGS, {NAME ORIGIN} pairs in
+# written order (FLAGS.md). Flags are names, not expressions: they are not
+# part of the call's `args`, and each call spelling states a statically
+# known set.
+proc hir::syntax::withFlags {call flags} {
+    foreach flag $flags {
+        if {[llength $flag] != 2 || [lindex $flag 0] eq ""} {
+            core::malformed "call flags must be {NAME ORIGIN} pairs" [list call $flags]
+        }
+    }
+    if {$flags ne {}} {
+        dict set call flags $flags
+    }
+    return $call
 }
 
 # `receiver.name(args...)` (METHOD-SUGAR.md): a call of the field projection

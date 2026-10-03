@@ -208,6 +208,14 @@ proc surface::modules::RemapOrigin {origin fileId} {
     return $origin
 }
 
+# FLAGS ({NAME ORIGIN} pairs, FLAGS.md) with every origin repointed at FILEID.
+proc surface::modules::RemapFlags {flags fileId} {
+    return [lmap flag $flags {
+        lassign $flag name origin
+        list $name [RemapOrigin $origin $fileId]
+    }]
+}
+
 # NODE (an hir/syntax.tcl node, as surface::lower::Sequence produces) with
 # every origin in its subtree repointed at FILEID.
 proc surface::modules::RemapFile {node fileId} {
@@ -223,11 +231,13 @@ proc surface::modules::RemapFile {node fileId} {
                 lappend params [list $name [RemapOrigin $origin $fileId]]
             }
             dict set node params $params
+            dict set node flags [RemapFlags [expr {[dict exists $node flags] ? [dict get $node flags] : {}}] $fileId]
             dict set node body [lmap child [dict get $node body] {RemapFile $child $fileId}]
             # paramTypes carries no origin of its own (plain type-name
             # strings, resolved later by hir/resolve.tcl): nothing to remap.
         }
         call {
+            dict set node flags [RemapFlags [expr {[dict exists $node flags] ? [dict get $node flags] : {}}] $fileId]
             dict set node callee [RemapFile [dict get $node callee] $fileId]
             dict set node args [lmap child [dict get $node args] {RemapFile $child $fileId}]
         }

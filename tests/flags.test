@@ -1,0 +1,994 @@
+# flags.test -- flag parameters (FLAGS.md):
+#
+#     fn open(path, flags :append, :cloexec)       a flag section
+#     open("f", :append)                           a call names the flags it sets
+#
+# A flag is an immutable Bool parameter, false unless its name is written at
+# the call. The tests run programs on every in-process backend (interpreter,
+# Tcl compiler, native generic, native specialized) and require one outcome;
+# parsing, the retained HIR facts, every diagnostic with its location, method
+# spelling, aliases, module functions and the all-subsets differential are
+# pinned separately below.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+interp recursionlimit {} 100000
+
+set ::allBackends {interp compile cranelift-generic cranelift}
+
+proc stripLocations {message} {
+    return [regsub -all {[^ ]*\.bot:[0-9]+:[0-9]+} $message {t.bot:L:C}]
+}
+
+# The outcomes of SOURCE on every backend, or the one static rejection.
+proc outcomesOf {source} {
+    set path [makeFile $source flags-case.bot]
+    try {
+        if {[catch {surface::readProgramFile $path} hir options]} {
+            set code [dict get $options -errorcode]
+            return [lmap backend $::allBackends {list error $code [stripLocations $hir]}]
+        }
+        return [lmap backend $::allBackends {
+            set outcome [outcomeUnderHir $backend $hir]
+            if {[lindex $outcome 0] eq "value"} {
+                list value [lindex $outcome 1]
+            } else {
+                list error [lindex $outcome 1] [stripLocations [lindex $outcome 2]]
+            }
+        }]
+    } finally {
+        removeFile flags-case.bot
+    }
+}
+
+# The one outcome SOURCE has on every backend ("disagree: ..." if they differ).
+proc parity {source} {
+    set outcomes [outcomesOf $source]
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        return "disagree: [lmap b $::allBackends o $outcomes {list $b $o}]"
+    }
+    return [lindex $outcomes 0]
+}
+
+# The value SOURCE has on every backend, or what differs / the error.
+proc valueOf {source} {
+    set outcome [parity $source]
+    if {[lindex $outcome 0] eq "value"} {
+        return [lindex $outcome 1]
+    }
+    return $outcome
+}
+
+# "KIND LINE:COLUMN MESSAGE" of the static rejection of SOURCE (compiled as
+# t.bot), "KIND: MESSAGE" never -- or "accepted".
+proc rejection {source} {
+    set path [makeFile $source flags-case.bot]
+    try {
+        if {[catch {surface::readProgramFile $path} message options]} {
+            set code [dict get $options -errorcode]
+            regexp {^[^ ]*\.bot:([0-9]+:[0-9]+): (.*)$} $message -> where text
+            return "[lindex $code end] $where [regsub { \([A-Z ]+\)$} $text {}]"
+        }
+        return accepted
+    } finally {
+        removeFile flags-case.bot
+    }
+}
+
+proc hirOf {source} {
+    set path [makeFile $source flags-case.bot]
+    try {
+        return [surface::readProgramFile $path -strict 0]
+    } finally {
+        removeFile flags-case.bot
+    }
+}
+
+proc ast {source args} {
+    return [surface::formatAst [surface::parse $source t.bot] {*}$args]
+}
+
+proc parseError {source} {
+    if {![catch {surface::parse $source t.bot} message options]} {
+        return "no error"
+    }
+    lassign [dict get $options -errorcode] a b diagnostic
+    if {"$a $b" ne "SURFACE SYNTAX"} {
+        return "unexpected error: $message"
+    }
+    set code [expr {[dict exists $diagnostic code] ? [dict get $diagnostic code] : "-"}]
+    return "[dict get $diagnostic line]:[dict get $diagnostic column] $code"
+}
+
+# ---------------------------------------------------------------------------
+# Parsing: declarations
+
+test flags-parse-decl-basic {a flag section after ordinary parameters} -body {
+    ast "fn f(x, y, flags :a, :b, :c):\n    a"
+} -result {fn f (x y flags :a :b :c)
+    (name a)}
+
+test flags-parse-decl-only-flags {zero ordinary parameters} -body {
+    ast "fn f(flags :a):\n    a"
+} -result {fn f (flags :a)
+    (name a)}
+
+test flags-parse-decl-order-kept {declaration order is canonical, never sorted} -body {
+    ast "fn f(flags :zeta, :alpha, :mid):\n    unit"
+} -result {fn f (flags :zeta :alpha :mid)
+    (unit)}
+
+test flags-parse-decl-typed-ordinary {ordinary parameters keep their annotations beside flags} -body {
+    ast "fn f(x: int, y, flags :a):\n    unit"
+} -result {fn f (x:int y flags :a)
+    (unit)}
+
+test flags-parse-decl-trailing-comma-and-lines {trailing comma; the list spans lines} -body {
+    ast "fn f(\n    x,\n    flags :a, :b,\n):\n    unit"
+} -result {fn f (x flags :a :b)
+    (unit)}
+
+test flags-parse-decl-no-flags-unchanged {a function without flags prints as it always did} -body {
+    ast "fn f(x, y):\n    unit"
+} -result {fn f (x y)
+    (unit)}
+
+test flags-parse-contextual-plain {`flags` is an ordinary parameter name everywhere else} -body {
+    ast "fn f(flags):\n    flags\nfn g(flags, x):\n    flags\nfn h(x, flags):\n    flags"
+} -result {fn f (flags)
+    (name flags)
+fn g (flags x)
+    (name flags)
+fn h (x flags)
+    (name flags)}
+
+test flags-parse-contextual-typed {a typed parameter named flags is not a flag section} -body {
+    list [ast "fn f(flags: int):\n    flags"] [ast "fn f(flags : int, x):\n    flags"] [ast "fn f(flags:int):\n    flags"]
+} -result {{fn f (flags:int)
+    (name flags)} {fn f (flags:int x)
+    (name flags)} {fn f (flags:int)
+    (name flags)}}
+
+test flags-parse-contextual-flag-named-flags {a flag may itself be called flags} -body {
+    ast "fn f(flags :flags):\n    flags"
+} -result {fn f (flags :flags)
+    (name flags)}
+
+test flags-parse-flags-as-other-uses {`flags` is an ordinary name in expressions, bindings and calls} -body {
+    ast "flags = 1\nf(flags)\nflags.x"
+} -result {(bind flags (int 1))
+(call (name f) (name flags))
+(project (name flags) x)}
+
+# ---------------------------------------------------------------------------
+# Parsing: calls
+
+test flags-parse-call {flags follow the ordinary arguments} -body {
+    ast "f()\nf(:a)\nf(x, :a)\nf(x, y, :a, :b)\nf(:b, :a)"
+} -result {(call (name f))
+(call (name f) :a)
+(call (name f) (name x) :a)
+(call (name f) (name x) (name y) :a :b)
+(call (name f) :b :a)}
+
+test flags-parse-method-call {method calls take flags like calls do} -body {
+    ast "x.f(:a)\nx.f(y, :a, :b)\nx.f(:a).g(:b)"
+} -result {(methodcall (name x) f :a)
+(methodcall (name x) f (name y) :a :b)
+(methodcall (methodcall (name x) f :a) g :b)}
+
+test flags-parse-call-forms {trailing comma, multiline, nested, handled call} -body {
+    ast "f(x, :a,)\nf(\n    x,\n    :a,\n    :b,\n)\nf(g(:a), :b)\nr = f(:a):\n    on E:\n        1"
+} -result {(call (name f) (name x) :a)
+(call (name f) (name x) :a :b)
+(call (name f) (call (name g) :a) :b)
+bind r = (call (name f) :a):
+    on E:
+        (int 1)}
+
+test flags-parse-flag-spans {a call's flag span covers ":name"} -body {
+    set call [lindex [dict get [surface::parse "f(x, :quiet)" t.bot] body] 0]
+    set flag [lindex [dict get $call flags] 0]
+    list [dict get $flag name] [dict get [dict get $flag span] column] [dict get [dict get $flag span] endColumn]
+} -result {quiet 6 12}
+
+# ---------------------------------------------------------------------------
+# Parsing: syntax errors (code at the offending spelling)
+
+foreach {name source expected} {
+    ordinary-after-flags      "fn f(flags :a, x):\n    a"               {1:16 MALFORMED-FLAG-SECTION}
+    flag-before-marker        "fn f(x, :a):\n    a"                    {1:9 MALFORMED-FLAG-SECTION}
+    flag-first               "fn f(:a):\n    a"                        {1:6 MALFORMED-FLAG-SECTION}
+    second-section            "fn f(flags :a, flags :b):\n    a"       {1:16 MALFORMED-FLAG-SECTION}
+    ordinary-flags-after      "fn f(flags :a, :b, y):\n    a"          {1:20 MALFORMED-FLAG-SECTION}
+    glued-marker-is-typed     "fn f(flags:a, :b):\n    a"              {1:15 MALFORMED-FLAG-SECTION}
+    keyword-flag-name         "fn f(flags :if):\n    a"                {1:12 MALFORMED-FLAG}
+    colon-without-name        "fn f(flags :):\n    a"                  {1:12 MALFORMED-FLAG}
+    call-space-after-colon    "f(x, : a)"                              {1:6 MALFORMED-FLAG}
+    ordinary-after-call-flag  "f(:a, x)"                               {1:7 ARGUMENT-AFTER-FLAG}
+    ordinary-after-two-flags  "f(1, :a, :b, 2 + 3)"                    {1:14 ARGUMENT-AFTER-FLAG}
+    method-ordinary-after     "x.f(:a, y)"                             {1:9 ARGUMENT-AFTER-FLAG}
+    flag-value-binding        "x = :foo"                               {1:5 FLAG-NOT-A-VALUE}
+    flag-value-return         "fn f():\n    return :foo"               {2:12 FLAG-NOT-A-VALUE}
+    flag-value-list           "x = \[:foo\]"                           {1:6 FLAG-NOT-A-VALUE}
+    flag-value-list-mixed     "x = \[1, :foo\]"                        {1:9 FLAG-NOT-A-VALUE}
+    flag-value-struct         "x = {flag: :foo}"                       {1:12 FLAG-NOT-A-VALUE}
+    flag-value-statement      ":foo"                                   {1:1 FLAG-NOT-A-VALUE}
+    flag-value-parenthesized  "x = (:foo)"                             {1:6 FLAG-NOT-A-VALUE}
+    flag-value-operand        "x = 1 + :foo"                           {1:9 FLAG-NOT-A-VALUE}
+    flag-value-conditional    "if c:\n    x = :a\nelse:\n    x = :b"   {2:9 FLAG-NOT-A-VALUE}
+    flag-value-argument-bare  "f(x, g, :a + 1)"                        {1:12 -}
+} {
+    test flags-syntax-$name "syntax error: $name" -body {
+        parseError $source
+    } -result $expected
+}
+
+test flags-syntax-no-spread {there is no flag rest, spread or dynamic forwarding} -body {
+    list [rejection "fn w(...flags):\n    1"] [rejection "fn w(flags :a):\n    1\nfn g(flags :a):\n    w(...flags)"] \
+        [rejection "fn w(**flags):\n    1"] [rejection "fn w(flags...):\n    1"]
+} -match glob -result {{* * *} {* * *} {* * *} {* * *}}
+
+# ---------------------------------------------------------------------------
+# Semantics: a flag is a Bool that is true exactly when supplied
+
+set ::observe {fn observe(x, flags :a, :b, :c):
+    [x, a, b, c]
+}
+
+foreach {name call expected} {
+    none          {observe(7)}                    {[7, false, false, false]}
+    a             {observe(7, :a)}                {[7, true, false, false]}
+    b             {observe(7, :b)}                {[7, false, true, false]}
+    c             {observe(7, :c)}                {[7, false, false, true]}
+    ab            {observe(7, :a, :b)}            {[7, true, true, false]}
+    ba            {observe(7, :b, :a)}            {[7, true, true, false]}
+    ca            {observe(7, :c, :a)}            {[7, true, false, true]}
+    all           {observe(7, :a, :b, :c)}        {[7, true, true, true]}
+    all-reversed  {observe(7, :c, :b, :a)}        {[7, true, true, true]}
+    all-rotated   {observe(7, :b, :c, :a)}        {[7, true, true, true]}
+    trailing-comma {observe(7, :b,)}              {[7, false, true, false]}
+} {
+    test flags-semantics-$name "observe: $name" -body {
+        valueOf $::observe$call
+    } -result $expected
+}
+
+test flags-semantics-only-flags {a function with zero ordinary parameters} -body {
+    valueOf "fn only(flags :a, :b):\n    \[a, b\]\n\[only(), only(:a), only(:b), only(:b, :a)\]"
+} -result {[[false, false], [true, false], [false, true], [true, true]]}
+
+test flags-semantics-many-ordinary {several ordinary parameters and several flags} -body {
+    valueOf "fn f(x, y, z, flags :p, :q):\n    \[x + y + z, p, q\]\nf(1, 2, 3, :q)"
+} -result {[6, false, true]}
+
+test flags-semantics-type-is-bool {the flag binding is a Bool: usable in if, and, or, not, ==} -body {
+    valueOf {fn f(flags :a, :b):
+    x = if a and not b:
+        1
+    else:
+        0
+    y = if a == b:
+        10
+    else:
+        20
+    z = if a or b:
+        100
+    else:
+        200
+    x + y + z
+[f(), f(:a), f(:b), f(:a, :b)]}
+} -result {[210, 121, 120, 110]}
+
+test flags-semantics-fresh-per-call {every call establishes its own flag values} -body {
+    valueOf "${::observe}\[observe(1, :a), observe(2), observe(3, :b), observe(4), observe(5, :a, :c)\]"
+} -result {[[1, true, false, false], [2, false, false, false], [3, false, true, false], [4, false, false, false], [5, true, false, true]]}
+
+test flags-semantics-bindings {a flag is an ordinary immutable Bool: assignable, passable, storable, returnable} -body {
+    valueOf {fn show(v):
+    v
+fn f(flags :trace):
+    t = trace
+    s = {lit: trace}
+    [t, show(trace), s.lit, trace]
+[f(), f(:trace)]}
+} -result {[[false, false, false, false], [true, true, true, true]]}
+
+test flags-semantics-struct-field {a flag stored in a struct value} -body {
+    valueOf {fn f(flags :a, :b):
+    {first: a, second: b}
+r = f(:b)
+[r.first, r.second]}
+} -result {[false, true]}
+
+test flags-semantics-return {a flag is returned like any Bool} -body {
+    valueOf "fn f(flags :t):\n    t\n\[f(), f(:t)\]"
+} -result {[false, true]}
+
+test flags-semantics-passed-on {a flag passed to another function is an ordinary Bool argument} -body {
+    valueOf {fn pick(flag, a, b):
+    if flag:
+        return a
+    return b
+fn f(flags :big):
+    pick(big, 100, 1)
+[f(), f(:big)]}
+} -result {[1, 100]}
+
+test flags-semantics-nested-calls {flags of nested calls are independent} -body {
+    valueOf "${::observe}\[observe(observe(1, :a).list_get(0) + 1, :b), observe(2, :c).list_get(3)\]"
+} -result {[[2, false, true, false], true]}
+
+test flags-semantics-wrapper-explicit {a wrapper forwards a flag only by naming it in its own signature} -body {
+    valueOf {fn inner(flags :v):
+    v
+fn forwarding(flags :v):
+    if v:
+        return inner(:v)
+    return inner()
+fn silent(flags :v):
+    inner()
+[forwarding(), forwarding(:v), silent(), silent(:v)]}
+} -result {[false, true, false, false]}
+
+test flags-semantics-recursion-different-sets {a recursive call may supply a different flag set} -body {
+    valueOf {fn walk(n, flags :trace, :twice):
+    if n == 0:
+        return [trace, twice]
+    if n == 1:
+        return walk(0, :trace)
+    if n == 2:
+        return walk(1)
+    return walk(n - 1, :twice)
+[walk(0), walk(0, :twice), walk(1, :twice), walk(2, :twice), walk(3)]}
+} -result {[[false, false], [false, true], [true, false], [true, false], [true, false]]}
+
+test flags-semantics-recursion-carry {a recursive call forwards the flag explicitly} -body {
+    valueOf {fn count(n, flags :down):
+    if n == 0:
+        return 0
+    if down:
+        return 1 + count(n - 1, :down)
+    return 10 + count(n - 1)
+[count(3), count(3, :down)]}
+} -result {[30, 3]}
+
+test flags-semantics-closure-captures {a nested function captures a flag like any binding} -body {
+    valueOf {fn outer(x, flags :boost):
+    fn inner(y):
+        if boost:
+            return x + y + 100
+        return x + y
+    inner(1)
+[outer(1), outer(1, :boost)]}
+} -result {[2, 102]}
+
+test flags-semantics-unused-flag {a declared flag that is never read is not an error or warning} -body {
+    valueOf "fn f(x, flags :unused):\n    x\n\[f(1), f(1, :unused)\]"
+} -result {[1, 1]}
+
+test flags-semantics-flag-named-like-function {a flag shadows nothing it should not: it is a local like any parameter} -body {
+    valueOf {fn size(x):
+    x
+fn f(flags :size):
+    if size:
+        return 1
+    return size(5)
+[f()]}
+} -match glob -result {error * NOT-CALLABLE*}
+
+test flags-semantics-same-spelling-different-functions {two functions may both declare :append, unrelated} -body {
+    valueOf {fn open(flags :append):
+    [1, append]
+fn log(flags :append, :other):
+    [2, append, other]
+[open(:append), log(:other), log(:append), open()]}
+} -result {[[1, true], [2, false, true], [2, true, false], [1, false]]}
+
+test flags-semantics-no-negated-spellings {:no_cache is just a flag whose name starts with no_} -body {
+    valueOf "fn f(flags :no_cache):\n    no_cache\n\[f(), f(:no_cache)\]"
+} -result {[false, true]}
+
+test flags-semantics-unrelated-colons {existing colon syntax is unchanged} -body {
+    valueOf {fn f(x: int):
+    x
+g = {a: 1, b: 2}
+if g.a == 1:
+    f(g.b)
+else:
+    0}
+} -result {2}
+
+test flags-semantics-handled-call {a call with flags can be a handled call} -body {
+    valueOf {error Bad
+fn f(x, flags :fail_it) errors Bad:
+    if fail_it:
+        fail Bad
+    x
+r = f(5, :fail_it):
+    on Bad:
+        -1
+s = f(5):
+    on Bad:
+        -1
+[r, s]}
+} -result {[-1, 5]}
+
+# ---------------------------------------------------------------------------
+# Static diagnostics, with the flag's own spelling as the location
+
+foreach {name source expected} {
+    unknown          "fn f(flags :quiet):\n    quiet\nf(:flush)"
+                     {UNKNOWN-FLAG 3:3 function f does not accept flag :flush (accepted flags: :quiet)}
+    unknown-none     "fn f(x):\n    x\nf(1, :flush)"
+                     {UNKNOWN-FLAG 3:6 function f does not accept flag :flush (it declares no flags)}
+    unknown-second   "fn f(flags :a, :b):\n    a\nf(:a, :c, :b)"
+                     {UNKNOWN-FLAG 3:7 function f does not accept flag :c (accepted flags: :a, :b)}
+    unknown-native   "list_get(\[1\], 0, :a)"
+                     {UNKNOWN-FLAG 1:18 function list_get does not accept flag :a (it declares no flags)}
+    duplicate-call   "fn f(flags :quiet):\n    quiet\nf(:quiet, :quiet)"
+                     {DUPLICATE-FLAG 3:11 flag :quiet was supplied more than once}
+    duplicate-three  "fn f(flags :a, :b):\n    a\nf(:a, :b, :a)"
+                     {DUPLICATE-FLAG 3:11 flag :a was supplied more than once}
+    duplicate-decl   "fn f(flags :a, :a):\n    a\nf()"
+                     {DUPLICATE-FLAG-DECLARATION 1:16 flag :a is declared more than once in the same flag section}
+    collision        "fn f(x, flags :x):\n    x\nf(1)"
+                     {FLAG-BINDING-COLLISION 1:15 flag :x binds the local name "x", which is already a parameter of this function: ordinary parameters and flags share one local namespace}
+    collision-mode   "fn f(mode, flags :mode):\n    mode\nf(1)"
+                     {FLAG-BINDING-COLLISION 1:18 flag :mode binds the local name "mode", which is already a parameter of this function: ordinary parameters and flags share one local namespace}
+    arity-too-many   "fn f(x, flags :a):\n    a\nf(1, 2)"
+                     {ARITY 3:1 function f takes 1 ordinary argument(s) and the flags :a, got 2 ordinary argument(s)}
+    arity-too-few    "fn f(x, y, flags :a):\n    a\nf(:a)"
+                     {ARITY 3:1 function f takes 2 ordinary argument(s) and the flags :a, got 0 ordinary argument(s)}
+    unknown-callee   "fn f(g):\n    g(1, :a)\nf(f)"
+                     {FLAG-CALLEE-UNKNOWN 2:10 cannot supply flag :a: the callee is not a function whose declaration is statically known (flags can only be supplied to a call of a declared function, or of a name bound to one)}
+    field-callee     "s = {cb: 1}\ns.cb(:a)"
+                     {FLAG-CALLEE-UNKNOWN 2:6 cannot supply flag :a: the callee is not a function whose declaration is statically known (flags can only be supplied to a call of a declared function, or of a name bound to one)}
+} {
+    test flags-diagnostic-$name "diagnostic: $name" -body {
+        rejection $source
+    } -result $expected
+}
+
+test flags-diagnostic-through-method-unknown {unknown flag through method spelling} -body {
+    rejection "fn f(x, flags :a):\n    a\n3.f(:z)"
+} -result {UNKNOWN-FLAG 3:5 function f does not accept flag :z (accepted flags: :a)}
+
+test flags-diagnostic-through-method-duplicate {duplicate flag through method spelling} -body {
+    rejection "fn f(x, flags :a):\n    a\n3.f(:a, :a)"
+} -result {DUPLICATE-FLAG 3:9 flag :a was supplied more than once}
+
+test flags-diagnostic-through-method-arity {wrong ordinary arity through method spelling counts the receiver} -body {
+    rejection "fn f(x, flags :a):\n    a\n3.f(4, :a)"
+} -result {ARITY 3:1 function f takes 1 ordinary argument(s) and the flags :a, got 2 ordinary argument(s)}
+
+test flags-diagnostic-method-without-function {a method name that is no visible function is still the field-call fallback} -body {
+    string match *FLAG-CALLEE-UNKNOWN* [rejection "x = 3\nx.nothere(:a)"]
+} -result 1
+
+test flags-diagnostic-one-namespace-ordinary-first {the ordinary spelling wins the binding; the flag is still diagnosed at its own spelling} -body {
+    set hir [hirOf "fn f(a, b, flags :b, :c):\n    a"]
+    lmap d [hir::diagnostics $hir] {dict get $d kind}
+} -result {FLAG-BINDING-COLLISION}
+
+# ---------------------------------------------------------------------------
+# Flag functions are not values
+
+foreach {name source} {
+    argument     "fn f(flags :a):\n    a\nfn apply(g):\n    g()\napply(f)"
+    returned     "fn f(flags :a):\n    a\nfn make():\n    f\nmake()"
+    in-list      "fn f(flags :a):\n    a\n\[f\]"
+    in-struct    "fn f(flags :a):\n    a\n{cb: f}"
+    in-if        "fn f(flags :a):\n    a\nfn g():\n    1\nh = if true:\n    f\nelse:\n    g\nh()"
+    bare-alias   "fn f(flags :a):\n    a\ng = f\n\[g\]"
+} {
+    test flags-value-$name "a function with flags used as a value: $name" -body {
+        lindex [split [rejection $source] { }] 0
+    } -result FLAG-FUNCTION-VALUE
+}
+
+test flags-value-diagnostic-text {the diagnostic names the function and its flags} -body {
+    rejection "fn f(flags :a, :b):\n    a\nx = \[f\]"
+} -result {FLAG-FUNCTION-VALUE 3:6 function f declares flags (:a, :b), so it can only be called directly or bound to another name (g = f): it cannot be passed, returned or stored as a value, which would lose its flag interface}
+
+test flags-value-plain-functions-unchanged {functions without flags remain ordinary values} -body {
+    valueOf {fn inc(x):
+    x + 1
+fn apply(g, v):
+    g(v)
+apply(inc, 1)}
+} -result {2}
+
+# ---------------------------------------------------------------------------
+# Aliases keep the flag interface
+
+test flags-alias-call {g = f; g(:a)} -body {
+    valueOf "${::observe}g = observe\n\[g(1), g(2, :a), g(3, :c, :b)\]"
+} -result {[[1, false, false, false], [2, true, false, false], [3, false, true, true]]}
+
+test flags-alias-chain {an alias of an alias} -body {
+    valueOf "${::observe}g = observe\nh = g\nh(4, :b)"
+} -result {[4, false, true, false]}
+
+test flags-alias-unknown-flag {an unknown flag through an alias names the called spelling} -body {
+    rejection "${::observe}g = observe\ng(1, :z)"
+} -match glob -result {UNKNOWN-FLAG 4:6 function g does not accept flag :z (accepted flags: :a, :b, :c)}
+
+test flags-alias-method {method sugar through an alias uses the alias's interface} -body {
+    valueOf "${::observe}g = observe\n\[5.g(:b), 6.g(:a, :c)\]"
+} -result {[[5, false, true, false], [6, true, false, true]]}
+
+test flags-alias-duplicate-and-arity {duplicate flags and arity are diagnosed through an alias too} -body {
+    list [rejection "${::observe}g = observe\ng(1, :a, :a)"] [rejection "${::observe}g = observe\ng(:a)"]
+} -match glob -result {{DUPLICATE-FLAG * flag :a was supplied more than once} {ARITY * function g takes 1 ordinary argument(s) and the flags :a, :b, :c, got 0 ordinary argument(s)}}
+
+test flags-alias-of-plain-function {an alias of a function without flags accepts none} -body {
+    rejection "fn f(x):\n    x\ng = f\ng(1, :a)"
+} -match glob -result {UNKNOWN-FLAG * function g does not accept flag :a (it declares no flags)}
+
+test flags-alias-unknown-target {a name bound to something not statically a function cannot take flags} -body {
+    rejection "fn f(x):\n    x\nfn h(x):\n    x\ng = if true:\n    f\nelse:\n    h\ng(1, :a)"
+} -match glob -result {FLAG-CALLEE-UNKNOWN *}
+
+# ---------------------------------------------------------------------------
+# Method syntax is the ordinary call after normalization
+
+test flags-method-equals-free {receiver.f(:a) is f(receiver, :a)} -body {
+    list [valueOf "${::observe}9.observe(:a)"] [valueOf "${::observe}observe(9, :a)"]
+} -result {{[9, true, false, false]} {[9, true, false, false]}}
+
+foreach {name method free} {
+    none      {1.observe()}                       {observe(1)}
+    one       {2.observe(:b)}                     {observe(2, :b)}
+    two       {3.observe(:c, :a)}                 {observe(3, :c, :a)}
+    expr      {(1 + 2).observe(:a, :b, :c)}       {observe(1 + 2, :a, :b, :c)}
+    chain     {1.add(2).observe(:b)}              {observe(add(1, 2), :b)}
+    chain2    {1.observe(:a).list_get(1)}         {list_get(observe(1, :a), 1)}
+    nested    {observe(1.add(1).observe(:c).list_get(0), :a)}  {observe(list_get(observe(add(1, 1), :c), 0), :a)}
+} {
+    test flags-method-parity-$name "method and free spellings agree: $name" -body {
+        set prelude "${::observe}fn add(a, b):\n    a + b\n"
+        set a [parity $prelude$method]
+        set b [parity $prelude$free]
+        expr {$a eq $b ? $a : "method: $a / free: $b"}
+    } -match glob -result {value *}
+}
+
+test flags-method-same-hir {a method call with flags and its free spelling resolve to one HIR} -body {
+    set prelude "${::observe}fn add(a, b):\n    a + b\n"
+    set m [hirOf "${prelude}1.add(2).observe(:c, :a)"]
+    set f [hirOf "${prelude}observe(add(1, 2), :c, :a)"]
+    list [expr {[hir::lower $m] eq [hir::lower $f]}] [expr {[hir::diagnostics $m] eq {} && [hir::diagnostics $f] eq {}}]
+} -result {1 1}
+
+set ::logFns {fn probe(log, id, result):
+    n = mutable_array_get(log, 0)
+    mutable_array_set(log, 0, n * 10 + id)
+    result
+fn fresh():
+    log = mutable_array_allocate(1)
+    mutable_array_set(log, 0, 0)
+    log
+fn f(a, b, flags :x, :y):
+    [a, b, x, y]
+}
+
+foreach {name method free expected} {
+    receiver-and-args {log = fresh()
+v = probe(log, 1, 10).f(probe(log, 2, 5), :y)
+[v, mutable_array_get(log, 0)]}  {log = fresh()
+v = f(probe(log, 1, 10), probe(log, 2, 5), :y)
+[v, mutable_array_get(log, 0)]}  {[[10, 5, false, true], 12]}
+    flags-add-no-events {log = fresh()
+v = f(probe(log, 3, 1), probe(log, 4, 2), :y, :x)
+[v, mutable_array_get(log, 0)]}  {log = fresh()
+v = f(probe(log, 3, 1), probe(log, 4, 2))
+w = [v, mutable_array_get(log, 0)]
+w}  {[[1, 2, false, false], 34]}
+    flag-order-irrelevant-to-events {log = fresh()
+v = probe(log, 1, 1).f(probe(log, 2, 2), :x, :y)
+[v, mutable_array_get(log, 0)]}  {log = fresh()
+v = probe(log, 1, 1).f(probe(log, 2, 2), :y, :x)
+[v, mutable_array_get(log, 0)]}  {[[1, 2, true, true], 12]}
+    receiver-chain {log = fresh()
+v = probe(log, 1, 1).f(2, :x).list_get(0)
+w = probe(log, 3, v).f(probe(log, 4, 4), :y)
+[w, mutable_array_get(log, 0)]}  {log = fresh()
+v = list_get(f(probe(log, 1, 1), 2, :x), 0)
+w = f(probe(log, 3, v), probe(log, 4, 4), :y)
+[w, mutable_array_get(log, 0)]}  {[[1, 4, false, true], 134]}
+} {
+    test flags-evaluation-$name "evaluation: $name" -body {
+        set a [valueOf $::logFns$method]
+        set b [valueOf $::logFns$free]
+        if {$expected eq {[[1, 2, false, false], 34]}} {
+            # the second spelling of this case omits the flags: only the log
+            # may be compared with the flagged call
+            return [list [regexp {34\]$} $a] [regexp {34\]$} $b]]
+        }
+        expr {$a eq $b ? $a : "method: $a / free: $b"}
+    } -result [expr {$expected eq {[[1, 2, false, false], 34]} ? {1 1} : $expected}]
+}
+
+# ---------------------------------------------------------------------------
+# Retained semantic facts in HIR
+
+set ::three {fn f(x, flags :c, :a, :b):
+    [x, c, a, b]
+r1 = f(1, :b, :c)
+r2 = f(2, :c, :b)
+r3 = f(3)
+}
+
+test flags-hir-block-keeps-declaration-order {the block's flag names are the declaration order, not sorted} -body {
+    set hir [hirOf $::three]
+    set block [lindex [hirFind $hir block] 0]
+    list [hir::get $hir $block flags] [llength [hir::get $hir $block params]]
+} -result {{c a b} 4}
+
+test flags-hir-flag-params-are-bool {each flag parameter is a Bool binding named without the colon} -body {
+    set hir [hirOf $::three]
+    set block [lindex [hirFind $hir block] 0]
+    set params [hir::get $hir $block params]
+    list [lmap b $params {dict get [hir::binding $hir $b] name}] \
+        [lmap t [hir::get $hir $block declaredParamTypes] {expr {$t eq "" ? "-" : [hir::types::show $t]}}]
+} -result {{x c a b} {- bool bool bool}}
+
+test flags-hir-call-vector {a call records the full flag vector in declaration order} -body {
+    set hir [hirOf $::three]
+    set vectors {}
+    foreach e [hirFind $hir call] {
+        if {[dict exists [hir::node $hir $e] flagVector]} {
+            lappend vectors [hir::get $hir $e flagVector]
+        }
+    }
+    set vectors
+} -result {{{c 1} {a 0} {b 1}} {{c 1} {a 0} {b 1}} {{c 0} {a 0} {b 0}}}
+
+test flags-hir-call-order-irrelevant {two call spellings with different flag order are the same HIR} -body {
+    set a [hirOf "${::observe}observe(1, :a, :c)"]
+    set b [hirOf "${::observe}observe(1, :c, :a)"]
+    list [expr {[hir::format $a] eq [hir::format $b]}] [expr {[hir::lower $a] eq [hir::lower $b]}]
+} -result {1 1}
+
+test flags-hir-binding-interface {the function binding records its flag interface} -body {
+    set hir [hirOf $::three]
+    set bind [lindex [hirFind $hir bind f] 0]
+    set b [hir::get $hir $bind binding]
+    dict get [hir::binding $hir $b] flagIface
+} -result {flags {c a b} ordinary 1}
+
+test flags-hir-alias-interface {an alias binding has the interface of its target} -body {
+    set hir [hirOf "${::three}g = f\n"]
+    set bind [lindex [hirFind $hir bind g] 0]
+    dict get [hir::binding $hir [hir::get $hir $bind binding]] flagIface
+} -result {flags {c a b} ordinary 1}
+
+test flags-hir-no-flags-no-trace {a program without flags has no flag facts at all} -body {
+    set hir [hirOf "fn f(x):\n    x\nf(1)"]
+    set seen 0
+    foreach e [hir::walk $hir] {
+        if {[dict exists [hir::node $hir $e] flagVector]} { incr seen }
+    }
+    foreach b [dict keys [dict get $hir bindings]] {
+        if {[dict exists [dict get $hir bindings $b] flagIface] && [dict get $hir bindings $b flagIface flags] ne {}} { incr seen }
+    }
+    set seen
+} -result 0
+
+test flags-hir-no-flag-expression-kind {there is no flag expression in HIR: only names and Bool constants} -body {
+    set hir [hirOf $::three]
+    lsort -unique [lmap e [hir::walk $hir] {hir::kind $hir $e}]
+} -result {bind block call const ref}
+
+test flags-hir-roundtrip {HIR text with flag parameters parses back to the same text} -body {
+    set hir [hirOf $::three]
+    set text [hir::format $hir]
+    expr {[hir::format [hir::parse $text]] eq $text}
+} -result 1
+
+test flags-hir-core-ir-has-no-flag-construct {core IR keeps no flag syntax: trailing Bool parameters and Bool arguments} -body {
+    set hir [hirOf "fn f(x, flags :a, :b):\n    a\nf(1, :b)"]
+    hir::lower $hir
+} -result {{bind f {block {x a b} {ref a}}} {call {ref f} {const 1} {ref false} {ref true}}}
+
+# ---------------------------------------------------------------------------
+# Flags are not first-class values, and not spelled anywhere else
+
+test flags-no-flag-type {no FlagSet or flag value exists to name as a type} -body {
+    list [rejection "fn f(x: FlagSet):\n    x\n1"] [rejection "fn f(x: Flag):\n    x\n1"]
+} -match glob -result {{TYPE * unknown or invalid type FlagSet*} {TYPE * unknown or invalid type Flag *}}
+
+test flags-no-defaults-or-negation {no default, required or negated flag syntax} -body {
+    list [parseError "fn f(flags :a = true):\n    a"] [parseError "fn f(flags :a = false):\n    a"] \
+        [parseError "fn f(flags required :a):\n    a"] [parseError "fn f(flags !:a):\n    a"] [parseError "f(!:a)"] \
+        [parseError "f(:a = true)"]
+} -match glob -result {{1:* -} {1:* -} {1:* -} {1:* -} {1:* -} {1:* -}}
+
+# ---------------------------------------------------------------------------
+# Library modules: flags across a module boundary
+
+proc withModule {source main script} {
+    set saved $::core::libraryDir
+    set dir [makeDirectory flags-scratch-lib]
+    set ::core::libraryDir $dir
+    try {
+        set channel [open [file join $dir fm.bot] w]
+        puts $channel $source
+        close $channel
+        set channel [open [file join $dir main.bot] w]
+        puts $channel $main
+        close $channel
+        uplevel 1 [list set path [file join $dir main.bot]]
+        uplevel 1 $script
+    } finally {
+        set ::core::libraryDir $saved
+        removeDirectory flags-scratch-lib
+    }
+}
+
+set ::fmSource "namespace fm\n\nfn open(path, flags :append, :cloexec):\n    \[path, append, cloexec\]\nfn wrap(path, flags :append):\n    open(path, :cloexec)\n"
+
+test flags-module-qualified-call {a module function with flags, called qualified} -body {
+    withModule $::fmSource "\[fm::open(\"a\"), fm::open(\"b\", :cloexec, :append), fm::wrap(\"c\", :append)\]" {
+        set hir [surface::readProgramFile $path]
+        lmap backend $::allBackends {lindex [outcomeUnderHir $backend $hir] 1}
+    }
+} -result [lrepeat 4 {[["a", false, false], ["b", true, true], ["c", false, true]]}]
+
+test flags-module-bound-name-and-method {a bound module function keeps its interface, as a name and as a method} -body {
+    withModule $::fmSource "open = fm::open\n\[open(\"a\", :append), \"b\".open(:cloexec)\]" {
+        set hir [surface::readProgramFile $path]
+        lmap backend $::allBackends {lindex [outcomeUnderHir $backend $hir] 1}
+    }
+} -result [lrepeat 4 {[["a", true, false], ["b", false, true]]}]
+
+test flags-module-unknown-flag {an unknown flag of a module function is diagnosed at the call} -body {
+    withModule $::fmSource "fm::open(\"a\", :nope)" {
+        catch {surface::readProgramFile $path} message options
+        list [lindex [dict get $options -errorcode] end] [regexp {function fm::open does not accept flag :nope \(accepted flags: :append, :cloexec\)} $message]
+    }
+} -result {UNKNOWN-FLAG 1}
+
+test flags-module-as-value {a module function with flags cannot escape as a value either} -body {
+    withModule $::fmSource "\[fm::open\]" {
+        catch {surface::readProgramFile $path} message options
+        lindex [dict get $options -errorcode] end
+    }
+} -result {FLAG-FUNCTION-VALUE}
+
+# ---------------------------------------------------------------------------
+# Differential: every subset of three flags, several function bodies, every
+# call-site order, on every backend.
+
+proc subsets {names} {
+    set result {}
+    for {set mask 0} {$mask < (1 << [llength $names])} {incr mask} {
+        set subset {}
+        set i 0
+        foreach n $names {
+            if {$mask & (1 << $i)} { lappend subset $n }
+            incr i
+        }
+        lappend result $subset
+    }
+    return $result
+}
+
+proc permutations {items} {
+    if {[llength $items] <= 1} {
+        return [list $items]
+    }
+    set result {}
+    for {set i 0} {$i < [llength $items]} {incr i} {
+        set rest [lreplace $items $i $i]
+        foreach p [permutations $rest] {
+            lappend result [linsert $p 0 [lindex $items $i]]
+        }
+    }
+    return $result
+}
+
+# Each body: Botlish source of `fn body(x, flags :a, :b, :c)` and the Tcl
+# expression of the expected result of body(10, ...) given a, b, c in {0,1}.
+set ::bodies {
+    observe {fn body(x, flags :a, :b, :c):
+    [x, a, b, c]
+} {format {[10, %s, %s, %s]} [expr {$a ? "true" : "false"}] [expr {$b ? "true" : "false"}] [expr {$c ? "true" : "false"}]}
+    branches {fn body(x, flags :a, :b, :c):
+    if a:
+        if b:
+            return x + 1
+        return x + 2
+    if c:
+        return x + 3
+    x
+} {expr {$a ? ($b ? 11 : 12) : ($c ? 13 : 10)}}
+    weights {fn body(x, flags :a, :b, :c):
+    wa = if a:
+        1
+    else:
+        0
+    wb = if b:
+        10
+    else:
+        0
+    wc = if c:
+        100
+    else:
+        0
+    x + wa + wb + wc
+} {expr {10 + $a + 10 * $b + 100 * $c}}
+    forwarded {fn weigh(p, q, r):
+    s = if p:
+        1
+    else:
+        0
+    t = if q:
+        2
+    else:
+        0
+    u = if r:
+        4
+    else:
+        0
+    s + t + u
+fn body(x, flags :a, :b, :c):
+    weigh(a, b, c) + x
+} {expr {10 + $a + 2 * $b + 4 * $c}}
+    structured {fn body(x, flags :a, :b, :c):
+    s = {u: a, v: b, w: c}
+    if s.u and s.w:
+        return x * 2
+    if s.v:
+        return x * 3
+    x
+} {expr {($a && $c) ? 20 : ($b ? 30 : 10)}}
+    recursive {fn body(x, flags :a, :b, :c):
+    if x == 0:
+        if a:
+            return 1
+        return 0
+    if b:
+        return body(x - 1, :a, :b)
+    if c:
+        return body(x - 1, :c)
+    body(x - 1)
+} {expr {$b ? 1 : 0}}
+}
+
+foreach {name source expectedExpr} $::bodies {
+    test flags-differential-$name-all-subsets "all 8 flag subsets, $name" -body {
+        set calls {}
+        set expected {}
+        foreach subset [subsets {a b c}] {
+            lassign [list [expr {"a" in $subset}] [expr {"b" in $subset}] [expr {"c" in $subset}]] a b c
+            lappend calls "body(10[join [lmap f $subset {string cat ", :" $f}] {}])"
+            lappend expected [eval $expectedExpr]
+        }
+        set got [valueOf "${source}\[[join $calls {, }]\]"]
+        expr {$got eq "\[[join $expected {, }]\]" ? "ok" : "got $got, expected \[[join $expected {, }]\]"}
+    } -result ok
+
+    test flags-differential-$name-call-order "every spelling order of all 3 flags agrees, $name" -body {
+        set calls {}
+        foreach p [permutations {a b c}] {
+            lappend calls "body(10[join [lmap f $p {string cat ", :" $f}] {}])"
+        }
+        set single [valueOf "${source}body(10, :a, :b, :c)"]
+        set got [valueOf "${source}\[[join $calls {, }]\]"]
+        expr {$got eq "\[[join [lrepeat 6 $single] {, }]\]" ? "same" : "different: $got vs $single"}
+    } -result same
+
+    test flags-differential-$name-method "method spelling agrees with the free spelling, $name" -body {
+        set free {}
+        foreach subset [subsets {a b c}] {
+            lappend free "body(10[join [lmap f $subset {string cat ", :" $f}] {}])"
+        }
+        set methodCalls {}
+        foreach subset [subsets {a b c}] {
+            lappend methodCalls "10.body([join [lmap f $subset {string cat : $f}] {, }])"
+        }
+        set a [valueOf "${source}\[[join $free {, }]\]"]
+        set b [valueOf "${source}\[[join $methodCalls {, }]\]"]
+        expr {$a eq $b ? "same" : "free $a / method $b"}
+    } -result same
+}
+
+# ---------------------------------------------------------------------------
+# Native: flags are ordinary Bool parameters of the natively compiled
+# function, and the native backends agree with the interpreter (the all-subset
+# tests above already compare all four backends). This pins that native
+# specialization accepts constant flags like any constant argument, and that a
+# flag function in the generic baseline also works.
+
+test flags-native-specialization-runs {a specialized native instance with constant flags} -body {
+    set source "${::observe}\[observe(1, :a), observe(2, :b), observe(3, :c), observe(4)\]"
+    set hir [hirOf $source]
+    list [lindex [outcomeUnderHir cranelift $hir] 1] [lindex [outcomeUnderHir cranelift-generic $hir] 1]
+} -result {{[[1, true, false, false], [2, false, true, false], [3, false, false, true], [4, false, false, false]]} {[[1, true, false, false], [2, false, true, false], [3, false, false, true], [4, false, false, false]]}}
+
+test flags-native-matches-interpreter-on-loops {flags inside a loop body and a function called from a loop} -body {
+    valueOf {fn mark(i, flags :odd, :big):
+    if odd and big:
+        return i * 100
+    if odd:
+        return i * 10
+    if big:
+        return i + 1000
+    i
+fn run(n):
+    out = loop i from 0 to n:
+        if i == 0:
+            mark(i)
+        elif i == 1:
+            mark(i, :odd)
+        elif i == 2:
+            mark(i, :big)
+        else:
+            mark(i, :big, :odd)
+    out
+run(5)}
+} -result {[0, 10, 1002, 300, 400]}
+
+# ---------------------------------------------------------------------------
+# One local namespace, warnings policy, standalone executable, fuzz smoke
+
+test flags-namespace-body-binding {a local binding in the body collides with a flag like with any parameter} -body {
+    rejection "fn f(flags :a):\n    a = 1\n    a\nf()"
+} -match glob -result {DUPLICATE * duplicate binding "a" in the same lexical scope}
+
+test flags-namespace-shadowing-in-nested-scope {a nested scope may shadow a flag, as it may shadow a parameter} -body {
+    valueOf {fn f(flags :a):
+    g = if a:
+        a = 5
+        a
+    else:
+        7
+    g
+[f(), f(:a)]}
+} -result {[7, 5]}
+
+test flags-namespace-outer-name-not-shared {a flag name never leaks to another function} -body {
+    rejection "fn f(flags :a):\n    a\nfn g():\n    a\ng()"
+} -match glob -result {UNBOUND * unbound name "a"}
+
+test flags-warnings-none {flags (used or not) produce no compiler warning under -warnings error} -body {
+    set path [makeFile "fn f(x, flags :used, :unused):\n    if used:\n        return x\n    x + 1\nfn g(flags :t):\n    t\n\[f(1), f(2, :used), g(), g(:t)\]" flags-warn.bot]
+    try {
+        set hir [surface::readProgramFile $path -warnings error]
+        outcomeUnderHir interp $hir
+    } finally {
+        removeFile flags-warn.bot
+    }
+} -result {value {[2, 2, false, true]} {}}
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+
+proc executableValue {text} {
+    set dir [makeDirectory {flags executable}]
+    set path [file join $dir program.bot]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts $channel $text
+    close $channel
+    try {
+        exec [info nameofexecutable] [file join $::projectRoot main.tcl] -emit-native-executable $path
+        return [exec env PATH= [file rootname $path]]
+    } finally {
+        removeDirectory {flags executable}
+    }
+}
+
+test flags-standalone-executable {the standalone native executable prints what every in-process backend computes} -constraints executableAot -body {
+    set program "${::observe}fn walk(n, flags :a):\n    if n == 0:\n        return \[a\]\n    walk(n - 1, :a)\n\[observe(1, :c), 3.observe(:a, :b), walk(2)\]"
+    list [executableValue $program] [parity $program]
+} -result {{[[1, false, false, true], [3, true, true, false], [true]]} {value {[[1, false, false, true], [3, true, true, false], [true]]}}}
+
+test flags-fuzz-smoke {randomly generated flag programs match the model oracle on every backend; defective ones are rejected with their own diagnostic} -body {
+    set output [exec [info nameofexecutable] [file join $::projectRoot audit flags tools fuzz.tcl] -n 12 -seed 7000 2>@1]
+    lindex [split [string trim $output] \n] end
+} -match glob -result {flags-fuzz programs 12 values 12 negatives * oracle-disagreements 0 negative-escapes 0 backend-disagreements 0}
+
+cleanupTests
