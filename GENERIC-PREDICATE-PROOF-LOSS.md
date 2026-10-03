@@ -509,7 +509,10 @@ list_get(fs, 0)(3)
 interp and compile give 8; cranelift throws `native lowering: call e11 of a
 de-closure-converted binding has no wanted callee instance (NATIVE BUG)`.
 It needs a call through `list_get` of a known List and a nested closure
-capturing a *local*. Not fixed here.
+capturing a *local*. Not fixed here. **Since fixed** by
+[Blockescape: a called generic instance](#blockescape-a-called-generic-instance)
+(`g<generic>`, selected by `f<generic>`'s call, is now a de-closure target
+of its own); regression tests in `tests/blockescape-called-generic.test`.
 
 ### Adversarial review
 
@@ -1239,6 +1242,24 @@ code. What still keeps their parameters tagged:
    positions (`native/rawabi.tcl:64-66` documents the restriction). With the
    demand filter off the plan is already `rawint` for these instances and
    the NIR still does not change.
+
+Smaller open items, outside the numbered points:
+
+* the captured `n` reaches a de-closured function as a hidden trailing
+  parameter that is always tagged (`native/rawabi.tcl:162`);
+* each `tld?` call materializes an `is_tcl_alpha` native value to pass to
+  `scan_while` (limitation 1 of EXACT-CALLABLE-CLOSED-CALLER.md);
+* point 1's precision cost: call sites that now share a callee's `<int>`
+  instance can widen its per-instance summary (146 of 5,000 fuzz programs,
+  none in the corpus; [Loss point 1](#loss-point-1-int-key-positions-for-capturing-closures),
+  limitation 2);
+* point 2's limitations: the RawInt/ShortString demand rules and virtual
+  construction still count call sites in dormant code, and a static block
+  materialized only in dormant code keeps its generic instance open
+  ([Loss point 2](#loss-point-2-dormant-instances), limitations 2-3);
+* unrelated, found by the point-2 review: `interp` accepts a forward
+  reference between sibling local closures and returns a value, where
+  `compile` and cranelift raise `CORE SEMANTIC UNBOUND`.
 
 The ceiling on `refined-checks` is modest: after point 2 most of its time
 is `char_at`'s `rt_substr`/`regioncheck` and `rt_set_contains`.
