@@ -35,6 +35,9 @@ pub enum RtError {
 pub const SEMANTIC_KINDS: &[&str] = &[
     "UNBOUND", "DUPLICATE", "NOT-CALLABLE", "ARITY", "NOT-BOOLEAN", "TYPE", "EQUALITY", "RANGE",
     "ARITHMETIC", "BREAK-OUTSIDE-LOOP", "CONTINUE-OUTSIDE-LOOP", "RETURN-OUTSIDE-CALLABLE", "UNCAUGHT-ERROR",
+    // A -strict 0 program's rejected lockstep loop, replayed at run time
+    // (native::lower::LockLoop, as hir::lower / core::forms::op-lockloop do).
+    "LOCKSTEP-UNPROVEN", "LOCKSTEP-UNEQUAL",
 ];
 
 pub fn semantic_kind(name: &str) -> Option<&'static str> {

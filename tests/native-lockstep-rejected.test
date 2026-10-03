@@ -1,0 +1,87 @@
+# native-lockstep-rejected.test -- a -strict 0 program whose lockstep loop
+# hir/lockstep.tcl rejected (LOCKSTEP-UNPROVEN / LOCKSTEP-UNEQUAL) raises
+# that diagnostic when the loop is reached, natively as on interp/compile
+# (hir::lower appends the REJECTED message, core::forms::op-lockloop replays
+# it before evaluating anything). Native lowering used to ignore the mark and
+# run the loop to the first domain's length: a wrong value, and, once loss
+# point 4 of GENERIC-PREDICATE-PROOF-LOSS.md runs a later numeric domain on a
+# raw register, wrapped integers past 2^62-1 (found by its adversarial
+# review). native::lower::LockLoop now emits the same `raise`.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 1000000
+
+proc dedent {text} {
+    set lines [split $text \n]
+    set indent 1000
+    foreach line $lines {
+        if {[string trim $line] eq ""} continue
+        set n [expr {[string length $line] - [string length [string trimleft $line " "]]}]
+        if {$n < $indent} { set indent $n }
+    }
+    return [join [lmap line $lines {string range $line $indent end}] \n]
+}
+
+# interp, compile, cranelift and cranelift-generic, plus native with block
+# escape off: the one outcome (kind and message), or every distinct one.
+proc parity {src} {
+    set hir [surface::compile [dedent $src] t.bot -strict 0]
+    set outcomes [lmap backend {interp compile cranelift cranelift-generic} {
+        set o [outcomeUnderHir $backend $hir]
+        lrange $o 0 [expr {[lindex $o 0] eq "value" ? 1 : 2}]
+    }]
+    if {[catch {native::evalHir $hir -block-escape-opt 0} r options]} {
+        lappend outcomes [list error [dict get $options -errorcode] $r]
+    } else {
+        lappend outcomes [list value [core::value::show $r 1]]
+    }
+    set outcomes [lsort -unique $outcomes]
+    expr {[llength $outcomes] == 1 ? [lindex $outcomes 0] : $outcomes}
+}
+
+test native-lockstep-rejected-unproven {an unproven lockstep loop raises LOCKSTEP-UNPROVEN on every backend (natively it used to run past the second domain's end, 2^62-1)} -body {
+    parity {
+        fn z(xs):
+            m = 4611686018427387903
+            loop x in xs and i from m - 1 to m:
+                i
+        z([1, 2, 3, 4])
+    }
+} -result {error {CORE SEMANTIC LOCKSTEP-UNPROVEN} {lockstep loop requires equal iteration counts; could not prove length(xs) == 1 (clause 1 vs clause 2)}}
+
+test native-lockstep-rejected-unequal {a lockstep loop proven unequal raises LOCKSTEP-UNEQUAL on every backend} -body {
+    parity {
+        fn w(k):
+            loop x in [1, 2] and i from k to k + 3:
+                x
+        w(1)
+    }
+} -result {error {CORE SEMANTIC LOCKSTEP-UNEQUAL} {lockstep loop requires equal iteration counts; clause 1 iterates 2 times but clause 2 iterates 3 times}}
+
+test native-lockstep-rejected-only-when-reached {the diagnostic is raised when the loop is reached, not before: an untaken branch holding a rejected loop runs normally (natively the program used to give the same value, which this pins)} -body {
+    parity {
+        fn u(xs, go):
+            if go:
+                loop x in xs and i from 0 to 3:
+                    x + i
+            else:
+                [list_length(xs)]
+        [u([1, 2, 3], false), u([4], false)]
+    }
+} -result {value {[[3], [1]]}}
+
+test native-lockstep-rejected-nothing-evaluated {the raise comes before any domain is evaluated (no listlen/listget, no loop)} -body {
+    set hir [surface::compile [dedent {
+        fn z(xs):
+            loop x in xs and i from 0 to 3:
+                x + i
+        z([1, 2])
+    }] t.bot -strict 0]
+    set nir [native::nir [native::prepareHir $hir]]
+    set z [lindex [regexp -inline {func \d+ "z"[^\n]*\n(?:[^\n]*\n)*?end} $nir] 0]
+    list [regexp {raise LOCKSTEP-UNPROVEN} $z] [regexp {listlen|listget|\mbr\M} $z]
+} -result {1 0}
+
+cleanupTests

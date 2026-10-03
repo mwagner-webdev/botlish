@@ -6933,6 +6933,18 @@ proc native::lower::CountLoop {fnVar e node} {
 proc native::lower::LockLoop {fnVar e node} {
     upvar 1 $fnVar fn
     variable context
+    if {[dict exists $node unproven]} {
+        # A -strict 0 program whose lockstep obligation hir/lockstep.tcl
+        # rejected: replay the diagnostic unconditionally, before anything
+        # is evaluated, exactly as the -strict 0 Core IR lowering's
+        # REJECTED operand makes the reference evaluator do
+        # (core::forms::op-lockloop). Running the
+        # loop instead would bind every domain after the first beyond its
+        # own interval, which nothing proves.
+        regexp {^(\S+): (.*)$} [dict get $node unproven] -> kind message
+        Emit fn "raise $kind [Quote $message]" $e
+        return never
+    }
     set domains [dict get $node domains]
     set exprs {}
     set regs {}
