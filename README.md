@@ -2321,9 +2321,11 @@ function is (`instance="str, int, str"` or `instance="generic"`).
 `native::report HIR` checks the accounting: for both modes, the kind
 guards lowering emitted equal the representation blockers of the emitted
 instances (and of each tiny leaf inlined into one, once per inlined call,
-since its guards are emitted there), and the NIR's `guard`/`guardbool`
-instructions equal those plus the checks that always fail (known errors).
-A mismatch raises `NATIVE BUG`.
+since its guards are emitted there; but not those of code the lowering does
+not emit at all: an `if` arm the instance's Ranges decide against, or what
+would only run after an expression whose lowering never completes), and the
+NIR's `guard`/`guardbool` instructions equal those plus the checks that
+always fail (known errors). A mismatch raises `NATIVE BUG`.
 
 ### The corpus
 

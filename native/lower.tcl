@@ -142,6 +142,8 @@ namespace eval native::lower {
     variable context {}
     variable guards {}
     variable knownErrors {}
+    # ExprId -> its parent ExprId in baseHir, built on first use (Parent).
+    variable parents {}
     variable selfTail {}
     variable envless {}
     variable captureLists {}
@@ -1114,9 +1116,10 @@ namespace eval native::lower {
 #               generic envless selfTailCalls calls blockers guards
 #               knownErrorGuards}: blockers counts the region's
 #               representation blockers (plus those of each tiny leaf
-#               inlined into it, once per inlined call: InlineLeafCall),
-#               guards the kind checks emitted for them, knownErrorGuards
-#               the checks that always fail
+#               inlined into it, once per inlined call: InlineLeafCall;
+#               minus those of code it does not emit: SkipAfter), guards
+#               the kind checks emitted for them, knownErrorGuards the
+#               checks that always fail
 #   statistics  {functions N generic N specialized N blockers N guards N
 #               perFunction {NAME {generic 0|1 specializations N} ...}}
 #   specialization  the hir::specialize analysis
@@ -1257,6 +1260,8 @@ proc native::lower::program {hirProgram args} {
     }
     set baseHir $hirProgram
     set hir $hirProgram
+    variable parents
+    set parents [dict create]
     set reprOpt [dict get $options -repr-opt]
     set callFactsOpt [dict get $options -call-facts-opt]
     set callEffectsOpt [dict get $options -call-effects-opt]
@@ -1527,6 +1532,132 @@ proc native::lower::CollectChecks {region} {
                 [dict get $fact error]
         }
     }
+}
+
+# Code the lowering does not emit (native::report's accounting). A blocker
+# is owed its kind guard where its operation runs; an operation the lowering
+# does not emit runs nowhere and is owed none. hir::aot counts the blockers
+# of everything HIR's types leave reachable, but the lowering emits less:
+#   * an `if` arm the instance's Ranges decide against (If,
+#     M6-RANGE-DECIDED-BRANCH-LOWERING.md): hir::aot knows no Range;
+#   * whatever would only run after an expression whose lowering ends in
+#     `never` (SkipAfter): the rest of its body, its later sibling operands
+#     and the checks of the operation it is an operand of. HIR's types
+#     leave that code reachable where they do not see the `never` (a
+#     decided `if` whose live arm returns, a `loop` whose only `break` is
+#     in a dead arm, an ARITY raise, a bridged native's known error), and an
+#     operation with an operand typed `never` (`n + stop()`) never runs.
+# Their blockers are counted in the function's skippedGuards, as a virtual
+# binding's list_get read already is (Call). The NIR does not change.
+
+# The parent of expression E in the program (baseHir), or "" for a root.
+proc native::lower::Parent {e} {
+    variable parents
+    variable baseHir
+    if {![dict size $parents]} {
+        foreach x [hir::walk $baseHir] {
+            foreach child [hir::children $baseHir $x] {
+                dict set parents $child $x
+            }
+        }
+    }
+    return [expr {[dict exists $parents $e] ? [dict get $parents $e] : ""}]
+}
+
+# How many of the current analysis's representation blockers (guards) are
+# of an operation that is one of EXPRS or nested in one.
+proc native::lower::SkippedBlockers {exprs} {
+    variable guards
+    if {$exprs eq "" || ![dict size $guards]} {
+        return 0
+    }
+    set skipped [dict create]
+    foreach e $exprs {
+        dict set skipped $e 1
+    }
+    set n 0
+    foreach key [dict keys $guards] {
+        for {set e [lindex $key 0]} {$e ne ""} {set e [Parent $e]} {
+            if {[dict exists $skipped $e]} {
+                incr n
+                break
+            }
+        }
+    }
+    return $n
+}
+
+# The lowering of E ended in `never`: what E's parent evaluates only after E
+# is not emitted. That is the rest of E's body, or, for an operand, the
+# later operands, the parent's bodies and the parent's own operand checks
+# (which follow all of its operands). Counts their blockers in FN's
+# skippedGuards. For an E whose type is `never`, HIR already left all but
+# those checks unreachable, and hir::aot counted no blocker there.
+proc native::lower::SkipAfter {fnVar e} {
+    upvar 1 $fnVar fn
+    variable hir
+    variable guards
+    if {![dict size $guards]} {
+        return
+    }
+    # The parent's OPERANDS, in evaluation order, run before its BODIES; a
+    # handle's call is neither (its handlers run when the call fails).
+    set parent [Parent $e]
+    set operands {}
+    set bodies {}
+    if {$parent eq ""} {
+        set bodies [list [hir::roots $hir]]
+    } else {
+        set node [hir::node $hir $parent]
+        switch -- [dict get $node kind] {
+            if {
+                set operands [list [dict get $node condition]]
+                set bodies [list [dict get $node thenBody] [dict get $node elseBody]]
+            }
+            listloop {
+                set operands [list [dict get $node iterable]]
+                set bodies [list [dict get $node body]]
+            }
+            countloop {
+                set operands [list [dict get $node start] [dict get $node end]]
+                set bodies [list [dict get $node body]]
+            }
+            lockloop {
+                set operands [hir::loopOperands $node]
+                set bodies [list [dict get $node body]]
+            }
+            block - loop { set bodies [list [dict get $node body]] }
+            handle       { set bodies [dict get $node handlerBodies] }
+            default      { set operands [hir::children $hir $parent] }
+        }
+    }
+    set k [lsearch -exact $operands $e]
+    if {$k >= 0} {
+        set rest [concat [lrange $operands [expr {$k + 1}] end] {*}$bodies]
+        foreach key [dict keys $guards] {
+            if {[lindex $key 0] eq $parent} {
+                dict incr fn skippedGuards
+            }
+        }
+    } else {
+        set rest {}
+        foreach body $bodies {
+            set k [lsearch -exact $body $e]
+            if {$k >= 0} {
+                set rest [lrange $body [expr {$k + 1}] end]
+            }
+        }
+    }
+    dict incr fn skippedGuards [SkippedBlockers $rest]
+}
+
+# "never", for expression E whose lowering just ended in `never` (SkipAfter).
+# Expr returns through it, and so does every other lowering of a whole
+# expression that does not end in Expr (VirtualValue, TryFields, PlanPieces).
+proc native::lower::Never {fnVar e} {
+    upvar 1 $fnVar fn
+    SkipAfter fn $e
+    return never
 }
 
 # The module-static slot index for binding B (hir::isModuleBinding),
@@ -3074,9 +3205,10 @@ proc native::lower::Expr {fnVar e {want tagged}} {
         ok - error {
             set value [Expr fn [dict get $node value]]
             if {$value eq "never"} {
-                return never
+                set result never
+            } else {
+                set result [Assign fn "op [expr {[dict get $node kind] eq "ok" ? "mkok" : "mkerror"}] $value" $e]
             }
-            set result [Assign fn "op [expr {[dict get $node kind] eq "ok" ? "mkok" : "mkerror"}] $value" $e]
         }
         fail {
             Emit fn "faildeclared [ErrorId [dict get $node name]] [Quote [dict get $node name]]" $e
@@ -3092,7 +3224,10 @@ proc native::lower::Expr {fnVar e {want tagged}} {
     if {$result ne "never" && [hir::typeOf $hir $e] eq "never"} {
         # HIR proved that no normal completion reaches past E.
         Emit fn unreachable $e
-        return never
+        set result never
+    }
+    if {$result eq "never"} {
+        return [Never fn $e]
     }
     if {$result ne "never" && $want eq "raw" && $repr eq "tagged"} {
         # WANT could not be produced directly (Ref/Call are the only kinds
@@ -3907,20 +4042,27 @@ proc native::lower::VirtualValue {fnVar e arity {cut ""}} {
         }
         if {$fields ne "never" && [hir::typeOf $hir $e] eq "never"} {
             Emit fn unreachable $e
-            return never
+            return [Never fn $e]
+        }
+        if {$fields eq "never"} {
+            return [Never fn $e]
         }
         return $fields
     }
     if {[dict get $node kind] eq "if"} {
         # Branch merging: the branches' fields join field-wise.
-        return [If fn $e $node "" $arity $cut]
+        set fields [If fn $e $node "" $arity $cut]
+        if {$fields eq "never"} {
+            return [Never fn $e]
+        }
+        return $fields
     }
     if {[dict get $node kind] ne "call"} {
         throw {NATIVE BUG} "native lowering: expected a recognized construction at $e"
     }
     lassign [Call fn $e $node tagged $arity] result repr
     if {$result eq "never"} {
-        return never
+        return [Never fn $e]
     }
     if {$repr ne "virtual"} {
         throw {NATIVE BUG} "native lowering: expected virtual fields at $e"
@@ -3929,7 +4071,7 @@ proc native::lower::VirtualValue {fnVar e arity {cut ""}} {
         # HIR proved that no normal completion reaches past E (Expr's own
         # tail does this same check for every other expression kind).
         Emit fn unreachable $e
-        return never
+        return [Never fn $e]
     }
     return $result
 }
@@ -4072,7 +4214,7 @@ proc native::lower::TryFields {fnVar e n {cut ""}} {
             set node [hir::node $hir $e]
             lassign [Call fn $e $node tagged $n] result repr
             if {$result eq "never"} {
-                return never
+                return [Never fn $e]
             }
             if {$repr ne "virtual"} {
                 return ""
@@ -6463,6 +6605,12 @@ proc native::lower::If {fnVar e node {family ""} {virtualN ""} {virtualCut ""} {
     set outcome [hir::range::ConditionOutcome $hir $ranges $currentInstance $condition]
     if {$outcome ne ""} {
         set role [expr {$outcome ? "then" : "else"}]
+        # The other arm is not lowered at all, so its blockers are skipped
+        # guards ("Code the lowering does not emit", above): HIR leaves it
+        # reachable unless the condition is decided syntactically
+        # (hir::types::KnownOutcome).
+        dict incr fn skippedGuards \
+            [SkippedBlockers [dict get $node [expr {$outcome ? "else" : "then"}]Body]]
         set saved [dict get $fn locals]
         set savedRaw [dict get $fn rawCache]
         if {$virtualN ne ""} {
@@ -7182,7 +7330,7 @@ proc native::lower::PlanPieces {fnVar e family} {
                 if {[ConstructNative $e $name $args] eq $family} {
                     set pieces [ConstructPieces fn $e $node $name $family]
                     if {$pieces eq "never" || [PlanNever fn $e]} {
-                        return never
+                        return [Never fn $e]
                     }
                     return $pieces
                 }
@@ -7193,7 +7341,7 @@ proc native::lower::PlanPieces {fnVar e family} {
                     # never copied into a String of its own.
                     lassign [Call fn $e $node tagged "" 1] fields repr
                     if {$fields eq "never" || [PlanNever fn $e]} {
-                        return never
+                        return [Never fn $e]
                     }
                     return [list [list region {*}$fields]]
                 }
@@ -7201,7 +7349,7 @@ proc native::lower::PlanPieces {fnVar e family} {
             if {$targetKind eq "block"} {
                 lassign [Call fn $e $node plan] r repr
                 if {$r eq "never" || [PlanNever fn $e]} {
-                    return never
+                    return [Never fn $e]
                 }
                 return [list [list span $r]]
             }
@@ -7220,7 +7368,7 @@ proc native::lower::PlanPieces {fnVar e family} {
             if {[hir::construction::Source $construction $currentInstance $e] eq $family} {
                 set r [If fn $e $node $family]
                 if {$r eq "never" || [PlanNever fn $e]} {
-                    return never
+                    return [Never fn $e]
                 }
                 return [list [list span $r]]
             }

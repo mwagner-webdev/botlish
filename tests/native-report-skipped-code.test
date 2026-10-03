@@ -1,0 +1,230 @@
+# native-report-skipped-code.test -- native::report's guard accounting
+# (a lowering's representation blockers == the kind guards it emits) holds
+# when the lowering does not emit code hir::aot analyzed.
+#
+# hir::aot counts the representation blockers of every expression HIR's types
+# leave reachable. Native lowering emits less: an `if` arm the per-instance
+# Range analysis proved dead is not lowered at all
+# (M6-RANGE-DECIDED-BRANCH-LOWERING.md), and nothing that would only run
+# after an expression whose lowering ends in `never` is lowered either. That
+# expression may be one HIR types as completing (a decided `if` whose live
+# arm returns, a `loop` whose only `break` is dead, an ARITY raise, a bridged
+# native's known error) or one typed `never` beside an operand with a blocker
+# (`n + stop()`: the `+` never runs). Those blockers had no guard, and
+# native::report threw, e.g. "generic lowering emitted 1 kind guard(s) for 2
+# blocker(s)" for the first program below. No guard is missing: the
+# operations they belong to are not in the NIR. They are now counted as the
+# function's skippedGuards (native/lower.tcl's SkipAfter), and the NIR is
+# unchanged.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+proc sourceHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+# {semantic-blockers generic-blockers generic-guards specialized-blockers
+# specialized-guards nirGuards} of native::report on the source program TEXT
+# (it throws on a mismatch itself).
+proc reportCounts {text} {
+    set r [native::report [sourceHir $text]]
+    return [list [dict get $r genericBlockers] \
+        [dict get $r generic blockers] [dict get $r generic guards] \
+        [dict get $r specialized blockers] [dict get $r specialized guards] \
+        [dict get $r nirGuards]]
+}
+
+# The body lines of function NAME in NIR text NIR that match PATTERN, without
+# their @E origins.
+proc nirLines {nir name pattern} {
+    set lines {}
+    set inside 0
+    foreach line [split $nir \n] {
+        if {[string match "func *" $line]} {
+            set inside [string match "func * \"$name\" *" $line]
+        } elseif {$inside && [regexp $pattern $line]} {
+            lappend lines [regsub { @e\d+$} [string trim $line] ""]
+        }
+    }
+    return $lines
+}
+
+# The {blockers guards} of the one function named NAME in LOWERED.
+proc functionCounts {lowered name} {
+    set found [lmap info [dict get $lowered functions] {
+        if {[dict get $info name] ne $name} continue
+        list [dict get $info blockers] [dict get $info guards]
+    }]
+    if {[llength $found] != 1} {
+        error "expected one function $name, found [llength $found]"
+    }
+    return [lindex $found 0]
+}
+
+# tests/raw-int-abi.test's demand-dead-branch program: f's only caller passes
+# c = 3, so c > 100 is false in its one generic instance.
+set deadThen {
+fn f(n, c):
+    if c > 100:
+        n + 1
+    else:
+        list_length([n])
+
+f(7, 3)
+}
+
+test native-report-skipped-code-1 {a range-decided if: the dead arm's blocker is counted by hir::aot, not by the lowering that drops the arm} -body {
+    list [reportCounts $deadThen] [reportCounts {
+fn f(n, c):
+    if c < 100:
+        list_length([n])
+    else:
+        n + 1
+
+f(7, 3)
+}]
+} -result {{2 1 1 0 0 0} {2 1 1 0 0 0}}
+
+test native-report-skipped-code-2 {the dead arm is not in the NIR: f's one guard is the condition's, and nothing adds to n} -body {
+    set lowered [native::lowered [sourceHir $deadThen] -specialize 0]
+    list [functionCounts $lowered f] \
+        [nirLines [dict get $lowered text] f {guard}] \
+        [nirLines [dict get $lowered text] f {iadd|riadd}]
+} -result {{1 1} {{guard int %1 ">"}} {}}
+
+test native-report-skipped-code-3 {the skip follows the Range: with a caller that makes the branch undecided, both arms and both guards are back} -body {
+    reportCounts {
+fn f(n, c):
+    if c > 100:
+        n + 1
+    else:
+        list_length([n])
+
+[f(7, 3), f(7, 300)]
+}
+} -result {2 2 2 0 0 0}
+
+test native-report-skipped-code-4 {code after a decided if whose live arm returns, and after a loop whose only break is in a dead arm} -body {
+    list [reportCounts {
+fn fill(l, i, n):
+    if i >= n:
+        return l
+    fill(list_append(l, [i, "v"]), i + 1, n)
+
+fill([], 0, 0)
+}] [reportCounts {
+fn f(n, c):
+    loop:
+        if c > 100:
+            break
+        return 0
+    n + 1
+
+f(7, 3)
+}]
+} -result {{3 2 2 0 0 0} {2 1 1 0 0 0}}
+
+test native-report-skipped-code-5 {an elif chain: an earlier clause narrows x, deciding a nested condition and dropping the if p and q under it} -body {
+    reportCounts {
+fn work(p, q, x):
+    if x < 3:
+        0
+    elif x > 4:
+        1
+    else:
+        if x > 4:
+            if p and q:
+                2
+            else:
+                3
+        else:
+            4
+
+[work(true, false, 1), work(false, true, 3), work(true, true, 7)]
+}
+} -result {3 1 1 0 0 0}
+
+test native-report-skipped-code-6 {specialized too: a merge of an Int and a Bool needs a guard, but not in a dead arm} -body {
+    set text {
+fn f(n, c, b):
+    t = if b:
+        n
+    else:
+        true
+    if c > 100:
+        t + 1
+    else:
+        0
+
+[f(7, 3, true), f(7, 3, false)]
+}
+    list [reportCounts $text] \
+        [functionCounts [native::lowered [sourceHir $text] -specialize 1] f]
+} -result {{3 2 2 0 0 0} {0 0}}
+
+test native-report-skipped-code-7 {an operand typed never: the operation it belongs to never runs, so neither do its checks of the other operands} -body {
+    lmap body {
+        "n + stop()"
+        "list_get(xs, stop())"
+        "s = \{x: n + 1, y: stop(), z: list_length(xs)\}\n    s.x"
+        "loop i from n to stop():\n        n + i\n    n"
+    } {
+        reportCounts "error Boom\nfn stop() errors Boom:\n    fail Boom\n\nfn f(n, xs) errors Boom:\n    $body\n\nv = f(1, \[2\]):\n    on Boom:\n        -1\nv\n"
+    }
+} -result {{1 0 0 0 0 0} {1 0 0 0 0 0} {1 1 1 0 0 0} {2 0 0 0 0 0}}
+
+test native-report-skipped-code-8 {a construction operand typed never (a String plan): concat's check of the other operand never runs} -body {
+    lmap body {"concat(stops(), x)" "concat(concat(x, stops()), \"a\")"} {
+        reportCounts "error Boom\nfn stops() errors Boom:\n    fail Boom\n\nfn f(x) errors Boom:\n    $body\n\nv = f(\"q\"):\n    on Boom:\n        \"e\"\nv\n"
+    }
+} -result {{1 0 0 0 0 0} {1 0 0 0 0 0}}
+
+test native-report-skipped-code-9 {a call the lowering ends although HIR types it as completing: a bridged native's known error, an ARITY raise} -body {
+    list [reportCounts {
+fn f(n):
+    emailish?(5)
+    n + 1
+
+f(7)
+}] [reportCounts {
+fn g(a):
+    a
+
+fn f(n):
+    g(n, n)
+    n + 1
+
+f(7)
+}]
+} -result {{1 0 0 0 0 1} {1 0 0 0 0 0}}
+
+test native-report-skipped-code-10 {nothing is skipped where both outcomes stay possible: a returning arm, a handled error} -body {
+    list [reportCounts {
+fn f(n, c):
+    if c > n:
+        return 0
+    n + 1
+
+[f(7, 3), f(1, 9)]
+}] [reportCounts {
+error Boom
+fn g(x) errors Boom:
+    if x > 0:
+        fail Boom
+    x
+
+fn f(n, m) errors Boom:
+    v = g(n):
+        on Boom:
+            m + 1
+    v + m
+
+w = f(1, 2):
+    on Boom:
+        -1
+w
+}]
+} -result {{2 2 2 0 0 0} {3 3 3 0 0 0}}
+
+cleanupTests

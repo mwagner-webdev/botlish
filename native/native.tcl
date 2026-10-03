@@ -742,7 +742,10 @@ proc native::object {hir path args} {
 # lowering blockers == guards, and nirGuards == specialized guards +
 # knownErrorGuards; a mismatch raises {NATIVE BUG}. A lowering's blockers
 # are its emitted functions' regions' blockers, plus an inlined tiny leaf's
-# in the function it is inlined into (native/lower.tcl's InlineLeafCall).
+# in the function it is inlined into (native/lower.tcl's InlineLeafCall),
+# minus those of code the lowering does not emit: an `if` arm the Range
+# analysis proved dead, and what only runs after an expression whose
+# lowering ends in `never` (native/lower.tcl's SkipAfter).
 proc native::report {hir} {
     set result [dict create]
     set generic 0

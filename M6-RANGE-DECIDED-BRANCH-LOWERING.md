@@ -187,6 +187,16 @@ outcome is decided. `guardbool`/`knownErrorGuards` bookkeeping (an
 unrelated dynamic-type check on `$test` itself) is untouched, and still
 runs before the outcome check, exactly as before.
 
+Guard accounting: hir::aot knows no Range, so it counts the representation
+blockers of the dead arm, and of whatever follows an `if` whose live arm
+never completes (`if i >= n: return l` with i = n = 0), since HIR's types
+leave that code reachable. The lowering emits neither and owes them no kind
+guard, so they are counted as the function's `skippedGuards`
+(native/lower.tcl's SkippedBlockers for the dead arm, SkipAfter for what
+follows a `never`) and `native::report` balances. Before that was added it
+threw ("generic lowering emitted 1 kind guard(s) for 2 blocker(s)"); the
+NIR is the same either way (tests/native-report-skipped-code.test).
+
 ## Soundness: condition evaluation vs. branch reachability (spec #40-42)
 
 These are two different facts and this milestone keeps them separate.
