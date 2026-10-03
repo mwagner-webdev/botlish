@@ -1,0 +1,343 @@
+Corpus census (GENERIC-PREDICATE-PROOF-LOSS.md)
+native::lower::rawInternalAbiOpt 0 vs 1 (default), same tree, same specialization,
+default native lowering options; facts are the ones native::nir's own lowering consumed.
+
+Corpus: 31 programs; compiled natively: 29; skipped: 2
+
+program                             inst  facts narrow  WIDER equal drp/add resultNarrow     nirFn abi    
+----------------------------------------------------------------------------------------------------------
+bench/fib                              2     21      0      0     0     0/0 1/1/1,1/1/1          0 same   
+bench/lex-strategy                    11    202      0      0     0     0/0 1/1/1                0 same   
+bench/loop-count                       3     38      0      0     0     0/0 1/1/1                0 same   
+bench/refined-checks                  33    506      0      0     0     0/0 1/1/2                5 same   
+bench/source-checks                    7    105      0      0     0     0/0 1/1/1                0 same   
+bench/sum-refined                      4     35      0      0     0     0/0 1/1/1                0 same   
+bench/test-selection                  12    179      0      0     0     0/0 1/1/1                0 same   
+bench/uri-steady                      20    306      0      0     0     0/0 1/1/1                2 same   
+examples/stdlib/ai_text_clean          6    176      0      0     0     0/0 1/1/1                0 same   
+examples/stdlib/csv                   10    244      0      0     0     0/0 1/1/1                0 same   
+examples/stdlib/csv_chunked           20    554      0      0     0     0/0 1/1/1                0 same   
+examples/stdlib/csv_geometric         19    375      0      0     0     0/0 1/1/1                0 same   
+examples/stdlib/csv_records           59   1223      0      0     0     0/0 1/1/1                0 same   
+examples/stdlib/hashtable             30    688      0      0     0     0/0 1/1/1                0 same   
+examples/stdlib/matmul                 7    196      0      0     0     0/0 1/1/1                0 same   
+examples/stdlib/string_replace         4    117      0      0     0     0/0 1/1/1                0 same   
+examples/stdlib/string_reverse         3     46      0      0     0     0/0 1/1/1                0 same   
+examples/surface/01-arithmetic         1      9      0      0     0     0/0 1/1/1                0 same   
+examples/surface/02-recursion          2     21      0      0     0     0/0 1/1/1,1/1/1          0 same   
+examples/surface/03-closure            4     23      0      0     0     0/0 1/1/1                0 same   
+examples/surface/04-branch-value       2     10      0      0     0     0/0 1/1/1                0 same   
+examples/surface/05-shadowing          1      7      0      0     0     0/0 1/1/1                0 same   
+examples/surface/06-list               1      9      0      0     0     0/0 1/1/1                0 same   
+examples/surface/07-loop-break         1      2      0      0     0     0/0 1/1/1                0 same   
+examples/surface/08-return             3     33      0      0     0     0/0 1/1/2                0 same   
+examples/surface/11-boolean-operators     3     46      0      0     0     0/0 1/1/1                0 same   
+examples/surface/12-if-value           2     24      0      0     0     0/0 1/1/1                0 same   
+examples/surface/13-hygiene            2     15      0      0     0     0/0 1/1/1                0 same   
+examples/surface/14-modules            2     13      0      0     0     0/0 1/1/1                0 same   
+----------------------------------------------------------------------------------------------------------
+TOTAL                                274   5223      0      0     0     0/0                      7
+
+Columns: inst = used instances; facts = Range facts compared (entry params, summaries, results,
+expression Ranges, capture facts); narrow = facts strictly narrower at knob 1; WIDER = facts wider or
+incomparable at knob 1 (must be 0); equal = same value set, different text; drp/add = ExprIds
+present at knob 0 only / knob 1 only; resultNarrow = attempted/converged/rounds of each Fixpoint call
+(analyze re-runs Fixpoint after pinning self-recursive summaries); nirFn = NIR functions changed;
+abi = raw-int-ABI plan text (native::rawabi::explainAll).
+
+Totals
+  facts compared:            5223
+  same:                      5223
+  equal set, different text: 0
+  narrower:                  0
+  wider:                     0
+  incomparable:              0
+  wider/incomparable in instances dormant at knob 1 (never entered): 0
+  ExprIds dropped / added:   0 / 0
+  exact call sites (call expressions) narrowed: 0
+  callee summaries (calleeResults) narrowed:   0
+  programs with any Range fact change: 0
+  programs with narrower facts: 0
+  programs with NIR changes:    2 (7 functions)
+  programs with raw-int-ABI plan changes: 0
+  final Fixpoint: result narrowing attempted 29, converged 29
+  max result-narrowing rounds (any Fixpoint call): 2
+  non-converged result narrowings (any Fixpoint call): 0
+
+By fact kind (kind class count):
+  capture same             326
+  entry same               474
+  expr same                3875
+  result same              274
+  summary same             274
+
+Aggregate NIR op-count deltas over all changed functions (knob 1 minus knob 0):
+  %15 1, %16 -1, int -2, rbox -1, runbox -5, %10 -1, %22 1, %23 -1, %37 1, %39 -1, %8 1
+
+Wider/incomparable facts and structural mismatches: 0
+
+Skipped programs (did not compile natively):
+  examples/surface/09-mutual-recursion.bot (both): CORE SEMANTIC UNBOUND -- examples/surface/09-mutual-recursion.bot:13:5: unbound name "is_odd": "is_odd" is declared later; forward references are not allowed (a binding is visible only after it is established)
+  examples/surface/10-duplicate-binding.bot (both): CORE SEMANTIC DUPLICATE -- examples/surface/10-duplicate-binding.bot:7:1: duplicate binding "x" in the same lexical scope
+
+Details per program (only programs where something changed)
+============================================================
+== bench/refined-checks (bench/refined-checks.bot)
+  calls knob0: analyze 1 fixpoint 1 plan 1 ms 809; knob1: analyze 1 fixpoint 1 plan 1 ms 845
+  resultNarrow per Fixpoint call (attempted/converged/rounds): knob1 1/1/2; knob0 1/1/2
+  NIR functions that changed:
+    func "web::emailish?" instance="str" @e223
+      header rawregs: "3 6 8 12 23 24" -> "2 5 7 11 22 23"
+      header regs: "28" -> "26"
+      tagged-int ops 0->0, raw ri* ops 3->3, runbox 2->2, rbox 1->0, br 3->3, label 9->9, lines 47->45
+      op deltas: %15 0->1, %16 1->0, int 3->2, rbox 1->0
+    func "scan_while" instance="int, block(e239)" @e267
+      header rawparams: "-" -> "0"
+      header rawregs: "4 5 6 14 15" -> "0 4 5 13 14"
+      header regs: "17" -> "16"
+      tagged-int ops 0->0, raw ri* ops 2->2, runbox 2->1, rbox 1->1, br 2->2, label 8->8, lines 31->30
+      op deltas: runbox 2->1
+    func "scan_while" instance="int, native(is_tcl_alpha)" @e267
+      header rawparams: "-" -> "0"
+      header rawregs: "4 5 6 16 17" -> "0 4 5 15 16"
+      header rawresult: "-" -> "1"
+      header regs: "19" -> "18"
+      tagged-int ops 0->0, raw ri* ops 2->2, runbox 2->1, rbox 1->1, br 2->2, label 8->8, lines 31->30
+      op deltas: %10 1->0, %9 0->1, runbox 2->1
+    func "tld?" instance="int" @e282
+      header rawparams: "-" -> "0"
+      header rawregs: "5 6 9 10 12" -> "0 4 6 9 11"
+      header regs: "15" -> "14"
+      tagged-int ops 0->0, raw ri* ops 3->3, runbox 3->1, rbox 0->1, br 1->1, label 3->3, lines 20->19
+      op deltas: rbox 0->1, runbox 3->1
+    func "domain?" instance="int" @e302
+      header rawparams: "-" -> "0"
+      header rawregs: "3 4 5 20 21 32 33 56 57" -> "0 3 4 19 20 31 32 54 55"
+      header regs: "60" -> "58"
+      tagged-int ops 0->0, raw ri* ops 5->5, runbox 2->1, rbox 3->2, br 9->9, label 29->29, lines 115->113
+      op deltas: %22 0->1, %23 1->0, %37 0->1, %39 1->0, %8 0->1, %9 1->0, rbox 3->2, runbox 2->1
+
+== bench/uri-steady (bench/uri-steady.bot)
+  calls knob0: analyze 1 fixpoint 1 plan 1 ms 567; knob1: analyze 1 fixpoint 1 plan 1 ms 631
+  resultNarrow per Fixpoint call (attempted/converged/rounds): knob1 1/1/1; knob0 1/1/1
+  NIR functions that changed:
+    func "<program>" instance="generic" 
+      header rawregs: "36 38 40" -> "36 37 39"
+      header regs: "42" -> "41"
+      tagged-int ops 0->0, raw ri* ops 0->0, runbox 0->0, rbox 0->0, br 0->0, label 0->0, lines 46->45
+      op deltas: int 3->2
+    func "repeat_uri" instance="int, int, int" @e501
+      header rawparams: "-" -> "1"
+      tagged-int ops 2->2, raw ri* ops 2->2, runbox 0->0, rbox 1->1, br 1->1, label 3->3, lines 20->20
+      op mix unchanged (operands/order differ)
+
+
+Knob-off equivalence (corpus above), base 140154f
+===================================================================
+Knob-off equivalence: parent tree (its own defaults) vs the changed tree with the knob 0
+programs compared: 29; skipped on both trees with identical errors: 2
+  examples/surface/09-mutual-recursion (identical error on both trees)
+  examples/surface/10-duplicate-binding (identical error on both trees)
+byte-identical comparisons (nir.txt, instances.txt, analysis.txt, fixpoints.txt, labels.txt, rawabi.txt, hir.txt, variants.txt, dormant.txt, calls.txt): 290, mismatches: 0
+
+
+OPTIONAL EXTRA CORPUS: Core-IR-text programs (bench/*.ir examples/*.ir examples/hir/*.ir)
+#########################################################################################
+
+Corpus census (GENERIC-PREDICATE-PROOF-LOSS.md)
+native::lower::rawInternalAbiOpt 0 vs 1 (default), same tree, same specialization,
+default native lowering options; facts are the ones native::nir's own lowering consumed.
+
+Corpus: 15 programs; compiled natively: 15; skipped: 0
+
+program                             inst  facts narrow  WIDER equal drp/add resultNarrow     nirFn abi    
+----------------------------------------------------------------------------------------------------------
+bench/fib                              2     21      0      0     0     0/0 1/1/1,1/1/1          0 same   
+bench/loop-count                       3     38      0      0     0     0/0 1/1/1                0 same   
+bench/refined-checks                  33    506      0      0     0     0/0 1/1/2                5 same   
+bench/sum-refined                      4     35      0      0     0     0/0 1/1/1                0 same   
+examples/01-adder                      4     25      0      0     0     0/0 1/1/1                0 same   
+examples/02-loop-break                 2     10      0      0     0     0/0 1/1/1                0 same   
+examples/03-lexical-closure            3     13      0      0     0     0/0 1/1/1                0 same   
+examples/04-refinement-scope           3     16      0      0     0     0/0 1/1/1                0 same   
+examples/05-refined-strings           34    488      0      0     0     0/0 1/1/2                5 same   
+examples/hir/01-scopes                 4     22      0      0     0     0/0 1/1/1                0 same   
+examples/hir/02-closures               5     32      0      0     0     0/0 1/1/1                0 same   
+examples/hir/03-recursion              2     18      0      0     0     0/0 1/1/1,1/1/1          0 same   
+examples/hir/04-refinement             4     38      0      0     0     0/0 1/1/1                0 same   
+examples/hir/05-control                2     17      0      0     0     0/0 1/1/1                0 same   
+examples/hir/06-refined-strings       33    478      0      0     0     0/0 1/1/2                5 same   
+----------------------------------------------------------------------------------------------------------
+TOTAL                                138   1757      0      0     0     0/0                     15
+
+Columns: inst = used instances; facts = Range facts compared (entry params, summaries, results,
+expression Ranges, capture facts); narrow = facts strictly narrower at knob 1; WIDER = facts wider or
+incomparable at knob 1 (must be 0); equal = same value set, different text; drp/add = ExprIds
+present at knob 0 only / knob 1 only; resultNarrow = attempted/converged/rounds of each Fixpoint call
+(analyze re-runs Fixpoint after pinning self-recursive summaries); nirFn = NIR functions changed;
+abi = raw-int-ABI plan text (native::rawabi::explainAll).
+
+Totals
+  facts compared:            1757
+  same:                      1757
+  equal set, different text: 0
+  narrower:                  0
+  wider:                     0
+  incomparable:              0
+  wider/incomparable in instances dormant at knob 1 (never entered): 0
+  ExprIds dropped / added:   0 / 0
+  exact call sites (call expressions) narrowed: 0
+  callee summaries (calleeResults) narrowed:   0
+  programs with any Range fact change: 0
+  programs with narrower facts: 0
+  programs with NIR changes:    3 (15 functions)
+  programs with raw-int-ABI plan changes: 0
+  final Fixpoint: result narrowing attempted 15, converged 15
+  max result-narrowing rounds (any Fixpoint call): 2
+  non-converged result narrowings (any Fixpoint call): 0
+
+By fact kind (kind class count):
+  capture same             62
+  entry same               144
+  expr same                1275
+  result same              138
+  summary same             138
+
+Aggregate NIR op-count deltas over all changed functions (knob 1 minus knob 0):
+  %15 2, %16 -1, int -3, rbox -3, runbox -15, %10 -3, %22 3, %23 -3, %37 3, %39 -3, %8 3, %17 -1
+
+Wider/incomparable facts and structural mismatches: 0
+
+Skipped programs (did not compile natively):
+  none
+
+Details per program (only programs where something changed)
+============================================================
+== bench/refined-checks (bench/refined-checks.ir)
+  calls knob0: analyze 1 fixpoint 1 plan 1 ms 884; knob1: analyze 1 fixpoint 1 plan 1 ms 898
+  resultNarrow per Fixpoint call (attempted/converged/rounds): knob1 1/1/2; knob0 1/1/2
+  NIR functions that changed:
+    func "web::emailish?" instance="str" @e222
+      header rawregs: "3 6 8 12 23 24" -> "2 5 7 11 22 23"
+      header regs: "28" -> "26"
+      tagged-int ops 0->0, raw ri* ops 3->3, runbox 2->2, rbox 1->0, br 3->3, label 9->9, lines 47->45
+      op deltas: %15 0->1, %16 1->0, int 3->2, rbox 1->0
+    func "scan_while" instance="int, block(e238)" @e266
+      header rawparams: "-" -> "0"
+      header rawregs: "4 5 6 14 15" -> "0 4 5 13 14"
+      header regs: "17" -> "16"
+      tagged-int ops 0->0, raw ri* ops 2->2, runbox 2->1, rbox 1->1, br 2->2, label 8->8, lines 31->30
+      op deltas: runbox 2->1
+    func "scan_while" instance="int, native(is_tcl_alpha)" @e266
+      header rawparams: "-" -> "0"
+      header rawregs: "4 5 6 16 17" -> "0 4 5 15 16"
+      header rawresult: "-" -> "1"
+      header regs: "19" -> "18"
+      tagged-int ops 0->0, raw ri* ops 2->2, runbox 2->1, rbox 1->1, br 2->2, label 8->8, lines 31->30
+      op deltas: %10 1->0, %9 0->1, runbox 2->1
+    func "tld?" instance="int" @e281
+      header rawparams: "-" -> "0"
+      header rawregs: "5 6 9 10 12" -> "0 4 6 9 11"
+      header regs: "15" -> "14"
+      tagged-int ops 0->0, raw ri* ops 3->3, runbox 3->1, rbox 0->1, br 1->1, label 3->3, lines 20->19
+      op deltas: rbox 0->1, runbox 3->1
+    func "domain?" instance="int" @e301
+      header rawparams: "-" -> "0"
+      header rawregs: "3 4 5 20 21 32 33 56 57" -> "0 3 4 19 20 31 32 54 55"
+      header regs: "60" -> "58"
+      tagged-int ops 0->0, raw ri* ops 5->5, runbox 2->1, rbox 3->2, br 9->9, label 29->29, lines 115->113
+      op deltas: %22 0->1, %23 1->0, %37 0->1, %39 1->0, %8 0->1, %9 1->0, rbox 3->2, runbox 2->1
+
+== examples/05-refined-strings (examples/05-refined-strings.ir)
+  calls knob0: analyze 1 fixpoint 1 plan 1 ms 656; knob1: analyze 1 fixpoint 1 plan 1 ms 856
+  resultNarrow per Fixpoint call (attempted/converged/rounds): knob1 1/1/2; knob0 1/1/2
+  NIR functions that changed:
+    func "web::emailish?" instance="str" @e197
+      header rawregs: "3 6 8 12 23 24" -> "2 5 7 11 22 23"
+      header regs: "28" -> "26"
+      tagged-int ops 0->0, raw ri* ops 3->3, runbox 2->2, rbox 1->0, br 3->3, label 9->9, lines 47->45
+      op deltas: %15 0->1, %16 1->0, int 3->2, rbox 1->0
+    func "scan_while" instance="int, block(e213)" @e241
+      header rawparams: "-" -> "0"
+      header rawregs: "4 5 6 14 15" -> "0 4 5 13 14"
+      header regs: "17" -> "16"
+      tagged-int ops 0->0, raw ri* ops 2->2, runbox 2->1, rbox 1->1, br 2->2, label 8->8, lines 31->30
+      op deltas: runbox 2->1
+    func "scan_while" instance="int, native(is_tcl_alpha)" @e241
+      header rawparams: "-" -> "0"
+      header rawregs: "4 5 6 16 17" -> "0 4 5 15 16"
+      header rawresult: "-" -> "1"
+      header regs: "19" -> "18"
+      tagged-int ops 0->0, raw ri* ops 2->2, runbox 2->1, rbox 1->1, br 2->2, label 8->8, lines 31->30
+      op deltas: %10 1->0, %9 0->1, runbox 2->1
+    func "tld?" instance="int" @e256
+      header rawparams: "-" -> "0"
+      header rawregs: "5 6 9 10 12" -> "0 4 6 9 11"
+      header regs: "15" -> "14"
+      tagged-int ops 0->0, raw ri* ops 3->3, runbox 3->1, rbox 0->1, br 1->1, label 3->3, lines 20->19
+      op deltas: rbox 0->1, runbox 3->1
+    func "domain?" instance="int" @e276
+      header rawparams: "-" -> "0"
+      header rawregs: "3 4 5 20 21 32 33 56 57" -> "0 3 4 19 20 31 32 54 55"
+      header regs: "60" -> "58"
+      tagged-int ops 0->0, raw ri* ops 5->5, runbox 2->1, rbox 3->2, br 9->9, label 29->29, lines 115->113
+      op deltas: %22 0->1, %23 1->0, %37 0->1, %39 1->0, %8 0->1, %9 1->0, rbox 3->2, runbox 2->1
+
+== examples/hir/06-refined-strings (examples/hir/06-refined-strings.ir)
+  calls knob0: analyze 1 fixpoint 1 plan 1 ms 889; knob1: analyze 1 fixpoint 1 plan 1 ms 571
+  resultNarrow per Fixpoint call (attempted/converged/rounds): knob1 1/1/2; knob0 1/1/2
+  NIR functions that changed:
+    func "web::emailish?" instance="str" @e187
+      header rawregs: "1 4 8 10 24 25" -> "1 3 7 9 23 24"
+      header regs: "29" -> "27"
+      tagged-int ops 0->0, raw ri* ops 3->3, runbox 1->1, rbox 2->1, br 3->3, label 9->9, lines 48->46
+      op deltas: %16 0->1, %17 1->0, int 3->2, rbox 2->1
+    func "scan_while" instance="int, block(e203)" @e231
+      header rawparams: "-" -> "0"
+      header rawregs: "4 5 6 14 15" -> "0 4 5 13 14"
+      header regs: "17" -> "16"
+      tagged-int ops 0->0, raw ri* ops 2->2, runbox 2->1, rbox 1->1, br 2->2, label 8->8, lines 31->30
+      op deltas: runbox 2->1
+    func "scan_while" instance="int, native(is_tcl_alpha)" @e231
+      header rawparams: "-" -> "0"
+      header rawregs: "4 5 6 16 17" -> "0 4 5 15 16"
+      header rawresult: "-" -> "1"
+      header regs: "19" -> "18"
+      tagged-int ops 0->0, raw ri* ops 2->2, runbox 2->1, rbox 1->1, br 2->2, label 8->8, lines 31->30
+      op deltas: %10 1->0, %9 0->1, runbox 2->1
+    func "tld?" instance="int" @e246
+      header rawparams: "-" -> "0"
+      header rawregs: "5 6 9 10 12" -> "0 4 6 9 11"
+      header regs: "15" -> "14"
+      tagged-int ops 0->0, raw ri* ops 3->3, runbox 3->1, rbox 0->1, br 1->1, label 3->3, lines 20->19
+      op deltas: rbox 0->1, runbox 3->1
+    func "domain?" instance="int" @e266
+      header rawparams: "-" -> "0"
+      header rawregs: "3 4 5 20 21 32 33 56 57" -> "0 3 4 19 20 31 32 54 55"
+      header regs: "60" -> "58"
+      tagged-int ops 0->0, raw ri* ops 5->5, runbox 2->1, rbox 3->2, br 9->9, label 29->29, lines 115->113
+      op deltas: %22 0->1, %23 1->0, %37 0->1, %39 1->0, %8 0->1, %9 1->0, rbox 3->2, runbox 2->1
+
+
+Knob-off equivalence (extra corpus), base 140154f
+===================================================================
+Knob-off equivalence: parent tree (its own defaults) vs the changed tree with the knob 0
+programs compared: 15; skipped on both trees with identical errors: 0
+byte-identical comparisons (nir.txt, instances.txt, analysis.txt, fixpoints.txt, labels.txt, rawabi.txt, hir.txt, variants.txt, dormant.txt, calls.txt): 150, mismatches: 0
+
+
+Dynamic check (callgrind, profile-nir.sh, 21 runs, 20 collected; programs whose NIR changed)
+=============================================================================================
+bench/refined-checks: total Ir/run 5,346,740 -> 5,345,940 (-800, -0.01%)
+  value knob0: value {list {{int 400} {int 0}}}
+  value knob1: value {list {{int 400} {int 0}}}  [same]
+  9 web::emailish?: invocations 800 -> 800; self Ir/run 46,800 -> 45,200 (58.5 -> 56.5 Ir/call); inclusive 5,308,061 -> 5,307,261
+  14 scan_while: invocations 800 -> 800; self Ir/run 164,400 -> 163,600 (205.5 -> 204.5 Ir/call); inclusive 4,046,461 -> 4,045,661
+  15 scan_while: invocations 400 -> 400; self Ir/run 39,600 -> 43,200 (99.0 -> 108.0 Ir/call); inclusive 406,800 -> 410,400
+  16 tld?: invocations 400 -> 400; self Ir/run 12,400 -> 11,600 (31.0 -> 29.0 Ir/call); inclusive 419,200 -> 422,000
+  17 domain?: invocations 400 -> 400; self Ir/run 72,800 -> 71,600 (182.0 -> 179.0 Ir/call); inclusive 1,116,000 -> 1,117,600
+bench/uri-steady: total Ir/run 38,896,564 -> 38,896,951 (+387, +0.00%)
+  value knob0: value {int 29500}
+  value knob1: value {int 29500}  [same]
+  0 <program>: invocations 1 -> 1; self Ir/run 218 -> 217 (218.0 -> 217.0 Ir/call); inclusive 38,896,558 -> 38,896,945
+  16 repeat_uri: invocations 1 -> 1; self Ir/run 108,028 -> 108,027 (108028.0 -> 108027.0 Ir/call); inclusive 38,891,088 -> 38,891,476

@@ -18,7 +18,7 @@ section below; the status table is the index.
 | – | prerequisite found while preparing point 1: `hir::blockescape` never counted a literal's generic instance as a de-closure target when an exact call selected it next to specialized ones (pre-existing NATIVE BUG; with point 1, closures called with an Int and another kind would lose de-closure) | `hir/blockescape.tcl:194` (`RelevantInstances`) | **fixed** ([Blockescape: a called generic instance](#blockescape-a-called-generic-instance)) |
 | – | prerequisite found while verifying point 4: native lowering ran a `-strict 0` program's rejected (unproven/unequal) lockstep loop instead of raising its diagnostic (wrong values on `main`; wrapped integers once point 4 runs its later domains raw) | `native/lower.tcl:7026` (`LockLoop`), `native/src/runtime/error.rs:40` | **fixed** ([Rejected lockstep loops](#rejected-lockstep-loops-soundness-fix)) |
 | 4 | counted loops always use tagged compare/advance; their bounds are tagged RawInt consumers | `native/lower.tcl:6830` (`RawCountDomain`), `:6910` (`CountLoop`), `:7021` (`LockLoop`); `native/rawabi.tcl:755` (`CountBounds`) | **fixed** ([Loss point 4](#loss-point-4-raw-counted-loops)): −2.96% Ir on `refined-checks` |
-| 5 | the RawInt ABI never reaches de-closured (internal-capture) functions | `native/lower.tcl:2246` (`InternalFunction`), `:4676` (`abiCall`), `native/rawabi.tcl:64-66` | open |
+| 5 | the RawInt ABI never reaches de-closured (internal-capture) functions | `native/lower.tcl:1881` (`InternalAbiParams`/`InternalAbiResult`), `:2419` (`InternalFunction`), `:4404` (`FlattenedVirtualCall`); `native/rawabi.tcl:64` | **fixed** ([Loss point 5](#loss-point-5-the-rawint-abi-for-de-closured-functions)): the plan is realized; no measurable payoff (−0.01%) |
 
 ## The investigation
 
@@ -1571,24 +1571,287 @@ weakened):
    that needs a kind guard is counted as a raw consumer (lowering does unbox
    it, after the guard).
 
-## Next steps (point 5)
+## Loss point 5: the RawInt ABI for de-closured functions
 
-Points 1, 2, 3 and 4 are done. On `refined-checks` they give `char_at`'s
-`i + 1` a raw add (point 2, −2.26% Ir/run), `tld?`'s comparisons raw
-operations (point 3, −0.19%) and the scanners' per-character loops raw
-induction registers (point 4, −2.96%); point 1 gives `tld?`, `domain?`,
-`char_at` and `scan_while` Int keys with the Ranges intact. What remains:
+### Outcome
 
-1. **Point 5:** let `InternalFunction` (`native/lower.tcl:2246`) and its
-   blockescape-virtual call sites (`FlattenedVirtualCall`) take the plan's
-   raw positions (`native/rawabi.tcl:64-66` documents the restriction). Since
-   point 4 the plan selects `scan_while.start`, `tld?.i` and
-   `domain?.start` (`RawInt`), and the NIR still does not change.
+A de-closured closure's internal (capture-explicit) variant now takes the
+RawInt plan's raw parameter and result positions, and its direct calls pass
+and receive them raw. The plan, which point 4 made select the scanners'
+positions, is now realized:
+
+* `refined-checks`: `scan_while` gets `rawparams="0"` (both instances; the
+  `is_tcl_alpha` one also `rawresult=1`), `tld?` and `domain?`
+  `rawparams="0"`. `domain?` hands `tld?` its raw `j + 1` (the `rbox` is
+  gone), `tld?` compares `scan_while`'s raw result without `runbox`,
+  `web::emailish?` passes a raw constant start, and the loops' starts are
+  no longer unboxed. `char_at`'s `i` stays tagged (`substring`).
+* **Payoff: none to speak of.** `refined-checks` 5,346,740 → 5,345,940
+  Ir/run (−800, −0.01%): the callers save 1-3 Ir/call (`tld?` 31 → 29,
+  `domain?` 182 → 179, `web::emailish?` 58.5 → 56.5), and
+  `scan_while<int, native(is_tcl_alpha)>` loses 9 (99 → 108 Ir/call). A raw
+  result of a function that may fail is returned as a value/success pair,
+  and Cranelift's register allocator now copies the raw loop bound `n`
+  every iteration (it is also the raw return value): a `mov` per
+  iteration, plus the success flag, outweigh the `sar`/`shl` the raw ABI
+  saves at the call. The untag/retag work that remained after point 4 was
+  already small: the ABI only moves it across the call boundary.
+* Corpus: NIR changes in 2 of 29 `.bot` programs (`refined-checks`, 5
+  functions; `uri-steady`'s de-closured self-tail `repeat_uri`, whose
+  `total` slot was already raw inside, now receives it raw: +387 Ir/run
+  in a 38.9M-Ir run, noise; the function's self Ir is 1 lower) and 3 of the 15 Core-IR-text programs (the same `refined-checks`
+  functions). No Range changes.
+* Knob off (`native::lower::rawInternalAbiOpt 0`) = the parent commit (point
+  4), byte for byte, on all 44 programs.
+* Point 5 alone (point 4's knob off) changes only
+  `scan_while<int, native(is_tcl_alpha)>`'s result, the one position the
+  plan selected before point 4: `refined-checks` 5,509,524 → 5,511,942
+  Ir/run (+0.04%), for the reason above.
+
+### The loss
+
+`InternalFunction` built its parameters with the self-tail rule only
+(`RawParams`) and never read the RawInt plan, and `FlattenedVirtualCall`, the
+only caller of an internal variant, evaluated every argument tagged and
+treated every result as tagged (the canonical call path's `abiCall` test never
+sees these calls). `native/rawabi.tcl` documented it: only the canonical
+function of an instance had a physical raw signature. Every scanner closure
+of `emailish?` is only ever emitted as an internal variant (its binding is
+de-closured), so no plan decision about them ever reached machine code: with
+the demand filter off the plan already said `rawint` and the NIR did not
+change (Loss point 1's evidence).
+
+### The change
+
+`native/lower.tcl`:
+
+* `InternalAbiParams {id n}` / `InternalAbiResult {id}`: the plan's raw
+  positions of the declared parameters / the raw result (exactly
+  `AbiParams`/`AbiResult`, the canonical function's), or none with the knob
+  off.
+* `InternalFunction` declares them like `Function` does: raw parameters are
+  `rawreg` locals and `rawparams=` in the header, a raw result makes the body
+  `SequenceRaw` (`rawjoin` for an `if` in tail position, `return` raw) and
+  adds `rawresult=1`. The hidden trailing capture parameters stay tagged.
+* `FlattenedVirtualCall`, for a call that is not a self tail call, passes the
+  same positions raw (`CallArgs`' raw slots; a small Int literal becomes a
+  `rawint` constant) and takes a raw result through `RawCallResult` (boxed
+  once where a tagged consumer needs it, or folded to the proven constant,
+  as for a canonical call). A self tail call already passed each argument in
+  the representation of the parameter's local, so it follows the new
+  declaration unchanged; a non-tail self call goes through the same rule as
+  any other call.
+* Knob `native::lower::rawInternalAbiOpt` (test/audit only; 0 = tagged
+  internal variants).
+
+Unchanged on purpose: the internal *region* companion
+(`InternalRegionCompanionFunction`, `results=3`, called by
+`FlattenedVirtualRegionCall`) keeps tagged parameters, as the canonical region
+companion does (a call site asking for a region boxes its argument); and the
+captures stay tagged (the plan has no capture positions; a capture's Range is
+known, so this would be a plan extension, not a lowering change).
+
+`native/rawabi.tcl`'s header, `RAW-INT-ABI.md` ("Canonical tagged ABI",
+"Codegen-instance representation") and the `InternalFunction`/`CallArgs`
+comments say so.
+
+### Soundness
+
+The plan is unchanged; only one more function variant follows it.
+
+1. **Agreement.** An internal variant is referenced only by
+   `FlattenedVirtualCall` (`InternalRef`); a self tail call passes the
+   parameters' own representations, every other call reads
+   `InternalAbiParams`/`InternalAbiResult` of the same instance, which is
+   what the variant declares. Arity mismatches raise before any call is
+   emitted. `native/src/nir.rs` checks every call's argument and result kinds
+   against the callee's declared signature, so a disagreement is a
+   validation failure, never a silent miscompile.
+2. **The plan's premise.** A raw position needs a closed instance whose entry
+   (or result) Range fits small. A de-closured instance's closedness *is*
+   blockescape's proof that every reference to the binding is an exact call;
+   those calls are exactly the `FlattenedVirtualCall`s, so the plan's Ranges
+   cover every value that reaches the raw parameter. Lowering decides
+   de-closure per binding, so such an instance never also gets a Block
+   value whose code would have to keep the tagged ABI (`native/rawabi.tcl`
+   already plans a closed generic closure instance tagged when block escape
+   is off, the one configuration where its code is a Block value's).
+3. **Dormant instances** are never emitted with block escape on (nothing live
+   references them), and with it off there are no internal variants.
+4. **GC.** A raw parameter or result register is a non-root scalar, as in a
+   canonical raw-ABI function; GC stress runs raw parameters across
+   allocating calls (tests below).
+
+### `refined-checks`: `tld?` before / after
+
+```
+before (point 4)                          after
+func "tld?" params=3 ...                  func "tld?" params=3 ... rawparams="0"
+%3 = native "is_tcl_alpha"                %3 = native "is_tcl_alpha"
+%4 = call 15 %0 %3 %1 %2                  %4 = call 15 %0 %3 %1 %2     (raw start, raw result)
+%5 = op runbox %4                         %5 = op rbox %4              (dead: e is only read raw)
+%6 = op runbox %1                         %6 = op runbox %1
+%7 = op rieq %5 %6                        %7 = op rieq %4 %6
+...                                       ...
+%9 = op runbox %0                         %9 = op risub %4 %0
+%10 = op risub %5 %9
+```
+
+and in `domain?` the call `tld?(j + 1)` loses its `rbox` (`riadd` feeds the
+call directly), and both loops' starts lose their `runbox`.
+
+### Evidence
+
+`tools/run-knob.sh … native::lower::rawInternalAbiOpt census-rawinternal.txt
+census` (`out/census-rawinternal.txt`, base = point 4): Range facts all
+identical; NIR changes as listed above; knob off = parent commit, byte for
+byte (290 + 150 dump comparisons, 0 mismatches). Instructions (same file):
+
+| function (`refined-checks`) | calls/run | Ir/call before | after |
+|---|---:|---:|---:|
+| `web::emailish?` | 800 | 58.5 | 56.5 |
+| `scan_while<int, block(e239)>` | 800 | 205.5 | 204.5 |
+| `scan_while<int, native(is_tcl_alpha)>` | 400 | 99.0 | 108.0 |
+| `tld?` | 400 | 31.0 | 29.0 |
+| `domain?` | 400 | 182.0 | 179.0 |
+| total Ir/run | | 5,346,740 | 5,345,940 (−0.01%) |
+
+The `scan_while<int, native(is_tcl_alpha)>` loss, from the executed
+instructions: its loop now carries a register copy of the raw bound `n`
+per iteration (Cranelift keeps `n` in a second register because it is also
+the raw return value on exhaustion) and the return sets the success flag of
+the value/flag pair a may-fail raw-result function returns; the `sar` of the
+start argument it saves is once per call.
+
+### Fuzzing
+
+`tools/fuzz.tcl -knob native::lower::rawInternalAbiOpt`
+(`out/fuzz-rawinternal.txt`), a lowering knob like point 4's. The generator
+gained self-recursive de-closured closures (`recclosure`: a bounded non-tail
+or tail recursion over a clamped Int that reads an Int capture), so internal
+variants call themselves through their raw signature; it already produced
+de-closured closures with Int parameters and results and the `emailish?`
+shape. `-mutate 5` (the oracle self-test) also makes raw the internal
+positions the plan rejected as `unbounded-or-not-small` (caller and callee
+still agree; the values do not fit).
+
+| run | programs | native | NIR changed by the knob | Range checks | violations | disagreements |
+|---|---:|---|---:|---:|---:|---:|
+| A | 5,000 | default | 1,750 | 26,905 top-level + 479,568 trace | 0 | 0 |
+| B | 2,000 | `-block-escape-opt 0` | 0 (no internal variants) | 10,780 + 199,098 | 0 | 0 |
+| C (self-test) | 200 | `-mutate 5` | 111 | | | 24, all attributed to the knob, and 1 time-limit kill (a mutated program looping on a garbage raw value) |
+
+What it cannot generate: mutually recursive closures (the language has no
+forward references between siblings), internal region companions with Int
+parameters, and de-closured closures nested more than one level.
+
+### Adversarial review
+
+An independent review (soundness and caller/callee agreement, integration,
+downstream consumers; about 15 probe programs over every backend and
+`-specialize 0`, `-block-escape-opt 0`, `-raw-demand-opt 0`,
+`-raw-mixed-policy raw`, `-raw-int-abi-opt 0`, `-repr-opt 0`,
+`-string-region-opt 0`, `-exact-callable-opt 0`, values at ±2^62, recursion
+10 million deep, AOT executables with and without GC stress; its own fuzz
+runs, 1,950 programs over five option sets, and the `-mutate 5` self-test)
+found **no correctness problem**: no miscompile, no signature mismatch, no
+NIR validation failure. Its findings, all acted on or recorded:
+
+* stale comments: the `InternalFunction` header (raw parameters are not
+  rooted) and `CallArgs`' (its raw slots are no longer self-tail only):
+  fixed; the `native/rawabi.tcl` header and this report: fixed;
+* the `recclosure` generator often produced a closure that captured nothing
+  (then it is an ordinary function, not an internal variant): its base case
+  now always reads the capture;
+* a test assertion depended on register numbering (`op runbox %4`): it now
+  finds the call's result register first;
+* `FlattenedVirtualCall` folds a proven-constant result only for a raw
+  result (through `RawCallResult`); a tagged internal call's result is not
+  folded, while the canonical call path folds both. Pre-existing for tagged
+  results (this change only adds the raw case), a missed optimization, not
+  a soundness issue; recorded, not changed (it would change NIR outside this
+  point's knob).
+
+### Verification
+
+On this commit (point 4 and the fix underneath, `main` at `0a60442`), each
+suite in its own worktree:
+
+| suite | result |
+|---|---|
+| `tests/all.tcl`, interp | 4,705 / 4,705 |
+| `tests/all.tcl`, compile | 4,701 passed, 4 skipped (`coreScoping`), 0 failed |
+| the same under `BOTLISH_NATIVE_GC_STRESS=1` | identical |
+| `tests/native-coverage.tcl` (cranelift) | 4,739 tests: native 2,001, independent 2,609, passed-partial 69, unsupported 60, failed 0 |
+| the same on point 4 | 4,731 tests: native 1,996, independent 2,606, passed-partial 69, unsupported 60, failed 0 |
+
+The coverage difference is exactly the 8 added tests (5 native, 3
+independent). The census and profile above are post-rebase; the fuzz runs
+are from before the rebase onto `0a60442`, plus a post-rebase smoke run (500
+programs, seed 12: 0 disagreements, 0 of 2,687 + 46,339 Range checks
+violated, NIR changed in 187) in `out/fuzz-rawinternal.txt`.
+
+Tests: `tests/raw-internal-abi.test` (new, 8): `refined-checks`' internal
+signatures with the knob on and off; the calls that agree with them
+(`domain?` → `tld?` raw argument, `tld?` reading the raw result, the raw
+constant start); the demand filter off (`char_at`'s `i` raw in the internal
+variant, its internal region companion tagged), with the program's value
+under the default options, the filter off and block escape off; non-tail and
+self-tail recursive internal variants and a raw parameter at 2^62−1; a
+raw-result internal variant; the knob-off NIR; and an executable under GC
+stress with raw parameters live across allocating calls, block escape on and
+off. Parity helpers run interp, compile, cranelift, block escape off and
+the demand filter off.
+
+Existing tests changed:
+
+| test | why | change |
+|---|---|---|
+| `closure-int-keys.test` `-refined-checks-nir-unchanged` | pinned "Int keys change no machine code" (point 1's honest payoff), which this point ends: with keys the internal variants take raw positions | pins the claim with this point's knob off (`{1 1}`, unchanged) and the difference with it on (`{0 0}`) |
+| `raw-count-loops.test` `-refined-checks-bounds-unboxed-once` | `domain?`'s start now arrives raw, so only the captured `n` is unboxed before the loop | pins both: 2 unboxes with this point's knob off, 1 with it on |
+
+### Known limitations
+
+1. **No measurable payoff on `refined-checks`** (−0.01%): after point 4 the
+   remaining untag/retag work at these call boundaries was a few
+   instructions, and a may-fail function's raw result costs a value/flag
+   pair (here also a register copy per iteration). The raw-result choice has
+   no cost model; it is the plan's, shared with canonical functions.
+2. **Captures stay tagged.** The captured `n` is a hidden trailing
+   parameter, always tagged; each scanner unboxes it once per call. A raw
+   capture would need capture positions in the plan (with the same
+   closed-caller argument, since every caller is a `FlattenedVirtualCall`).
+3. **Internal region companions stay tagged**, as canonical region companions
+   do; `char_at`'s region companion would need its `i` raw only once `i` is
+   raw-demanded at all (it is not: `substring` is a tagged consumer).
+4. **ShortString1 / packed-ASCII ABI** positions are still canonical-only:
+   an internal variant never takes the short-string plan's scalar parameters.
+5. **Tagged internal results are not constant-folded** at the call (the
+   review's note above).
+
+## Next steps
+
+All five loss points are fixed. On `refined-checks`: `char_at`'s `i + 1` is a
+raw add (point 2, −2.26% Ir/run), `tld?`'s comparisons raw (point 3,
+−0.19%), the scanners' per-character loops raw induction registers (point 4,
+−2.95%); point 1 gives the scanners Int keys with their Ranges intact, and
+point 5 lets their de-closured functions take the RawInt plan's positions
+(no measurable change). `refined-checks` is now 5,345,940 Ir/run, about 5%
+below the 5,648,265 measured before fix 3 (an older tree and runtime build,
+so approximate); most of what is left is `char_at`'s `rt_substr`/
+`regioncheck` and `rt_set_contains`, outside this line of work.
 
 Smaller open items, outside the numbered points:
 
 * the captured `n` reaches a de-closured function as a hidden trailing
-  parameter that is always tagged (`native/rawabi.tcl:162`);
+  parameter that is always tagged (`native/rawabi.tcl:167`; point 5, limitation 2);
+* the RawInt plan has no cost model for the raw result of a function that
+  may fail (a value/flag pair): on `refined-checks` it costs
+  `scan_while<int, native(is_tcl_alpha)>` 9 Ir/call
+  ([Loss point 5](#loss-point-5-the-rawint-abi-for-de-closured-functions),
+  limitation 1);
+* a de-closured call's tagged constant result is not folded, unlike a
+  canonical call's (point 5's review);
 * list loops' index (and a lockstep loop's List position) still compare and
   advance tagged ([Loss point 4](#loss-point-4-raw-counted-loops),
   limitation 2);
@@ -1605,6 +1868,3 @@ Smaller open items, outside the numbered points:
 * unrelated, found by the point-2 review: `interp` accepts a forward
   reference between sibling local closures and returns a value, where
   `compile` and cranelift raise `CORE SEMANTIC UNBOUND`.
-
-The ceiling on `refined-checks` is modest: after point 2 most of its time
-is `char_at`'s `rt_substr`/`regioncheck` and `rt_set_contains`.

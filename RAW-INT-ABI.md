@@ -430,8 +430,11 @@ parameter and a tagged result).
 
 Unchanged for: open instances, generic entries, dynamic (`callvalue`) calls,
 unproven or non-small Ranges, BigInt-capable paths, the program function,
-companion / region / internal-capture / fields variants (they are separate NIR
-functions with their own conventions), FFI/native boundaries, and every case the
+companion / region / internal region companion / fields variants (they are
+separate NIR functions with their own conventions; the internal-capture variant
+of a de-closured closure takes the plan's raw positions since loss point 5 of
+GENERIC-PREDICATE-PROOF-LOSS.md, its hidden capture parameters excepted),
+FFI/native boundaries, and every case the
 budget or an analysis declines. `-raw-int-abi-opt 0` (or
 `BOTLISH_NATIVE_RAW_INT_ABI_OPT=0`) restores it everywhere and reproduces the
 parent's NIR for fib exactly (`raw-fib-disabled-is-the-tagged-abi`).
@@ -1173,8 +1176,11 @@ Tcl 9.0.1, Linux x86-64, release native backend, final tree.
   is a raw register regardless). Pure forwarding *cycles* without that
   mechanism (non-tail recursion, mutual recursion if the language had forward
   references) collapse to tagged.
-* Raw ABI is for the **canonical** function only. Companion, region,
-  internal-capture and fields variants, `callmulti` field transport, closures'
+* Raw ABI is for the **canonical** function and (GENERIC-PREDICATE-PROOF-LOSS.md,
+  loss point 5) the **internal-capture** variant of a de-closured closure, whose
+  only callers are its direct calls (`FlattenedVirtualCall`), reading the same
+  plan; its hidden trailing capture parameters stay tagged. Companion, region,
+  internal region companion and fields variants, `callmulti` field transport, closures'
   captured storage, struct/List/MutableArray storage, FFI/native calls and the
   program function stay tagged.
 * Parameter type is read from the instance key (`int`); a closed *generic*

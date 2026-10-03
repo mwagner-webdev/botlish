@@ -61,9 +61,14 @@
 # validates it again on the NIR text). Raw selection removes boxing, never a
 # check the proof relied on, so it cannot feed back into the Range proof.
 #
-# Only the canonical function of an instance has a physical raw signature.
-# Companion, region, internal-capture and fields variants (see lower.tcl's
-# modes) keep the tagged ABI; the generic Block-value entry always does.
+# The canonical function of an instance and, since loss point 5 of
+# GENERIC-PREDICATE-PROOF-LOSS.md, its internal-capture variant (a
+# de-closured closure: native::lower::InternalFunction, called only by
+# FlattenedVirtualCall, both reading the same plan) have the plan's physical
+# raw signature; the internal variant's hidden trailing capture parameters
+# stay tagged. Companion, region, internal region companion and fields
+# variants (see lower.tcl's modes) keep the tagged ABI; the generic
+# Block-value entry always does.
 
 namespace eval native::rawabi {
 }

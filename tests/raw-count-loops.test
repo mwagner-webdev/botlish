@@ -110,13 +110,20 @@ test raw-count-loops-refined-checks-headers {domain?'s and both scan_while insta
     }
 } -result {{{riadd rilt} {riadd rilt}} {{iadd ilt} {iadd ilt}}}
 
-test raw-count-loops-refined-checks-bounds-unboxed-once {a raw loop unboxes its bounds once, before the header; the loop variable is boxed for its tagged consumer (char_at's argument) inside the body} -body {
-    set text [functionsNamed [refinedChecksNir] domain?]
-    set lines [split $text \n]
-    set head [lsearch -regexp $lines {^\s+label L0}]
-    list [llength [lmap l [lrange $lines 0 $head] {expr {[string match "*op runbox*" $l] ? $l : [continue]}}]] \
-        [regexp {op rbox} [join [lrange $lines $head end] \n]]
-} -result {2 1}
+test raw-count-loops-refined-checks-bounds-unboxed-once {a raw loop unboxes its tagged bounds once, before the header (both, with de-closured functions tagged; only the captured n once domain?'s start arrives raw, loss point 5); the loop variable is boxed for its tagged consumer (char_at's argument) inside the body} -body {
+    lmap internal {0 1} {
+        set native::lower::rawInternalAbiOpt $internal
+        try {
+            set text [functionsNamed [refinedChecksNir] domain?]
+        } finally {
+            set native::lower::rawInternalAbiOpt 1
+        }
+        set lines [split $text \n]
+        set head [lsearch -regexp $lines {^\s+label L0}]
+        list [llength [lmap l [lrange $lines 0 $head] {expr {[string match "*op runbox*" $l] ? $l : [continue]}}]] \
+            [regexp {op rbox} [join [lrange $lines $head end] \n]]
+    }
+} -result {{2 1} {1 1}}
 
 test raw-count-loops-refined-checks-plan {the RawInt demand rule: a raw loop's bounds are raw consumers, so scan_while.start, tld?.i and domain?.start are RawInt in the plan (knob on); with the knob off a count loop bound is a tagged consumer} -body {
     set hir [native::prepareHir [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot]]]

@@ -107,6 +107,16 @@
 # Ranges (every counted loop is raw), which must be reported. The generator
 # also builds numeric lockstep loops (`loop i from .. and j down from ..`,
 # equal constant trip counts) for this point.
+#
+# Loss point 5 (raw internal-variant ABI): -knob
+# native::lower::rawInternalAbiOpt, a lowering knob like point 4's.
+# -mutate 5 is its ORACLE SELF-TEST: an internal variant (and every call of
+# it) also takes raw the Int positions the plan rejected as
+# unbounded-or-not-small (caller and callee still agree; the values do not
+# fit), which must be reported. The generator also builds self-recursive
+# de-closured closures (kind `recclosure`: a bounded non-tail or tail
+# recursion over an Int with an Int capture), so internal variants call
+# themselves through their raw signature.
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
 set script [file normalize [info script]]
 set args $argv
@@ -158,7 +168,36 @@ set hir::range::resultNarrowRoundLimit $roundLimit
 # -mutate 1: ORACLE SELF-TEST ONLY. Deliberately unsound result narrowing:
 # every summary the pass commits gets its finite lower bound raised by one.
 # A run with it must report range violations; one without it must not.
-if {$mutate == 4} {
+if {$mutate == 5} {
+    # ORACLE SELF-TEST for loss point 5: raw internal positions the plan
+    # proved do not fit the small-Int domain.
+    proc native::lower::MutatedRaw {id kind} {
+        variable abiPlan
+        if {![dict exists $abiPlan $id]} {
+            return [expr {$kind eq "result" ? 0 : {}}]
+        }
+        set p [dict get $abiPlan $id]
+        if {$kind eq "result"} {
+            return [expr {[dict get $p result] eq "rawint" || [dict get $p resultReason] eq "unbounded-or-not-small"}]
+        }
+        return [lmap k [dict get $p params] r [dict get $p paramReasons] {
+            expr {$k eq "rawint" || $r eq "unbounded-or-not-small"}
+        }]
+    }
+    proc native::lower::InternalAbiParams {id n} {
+        variable rawInternalAbiOpt
+        set raw [MutatedRaw $id params]
+        set out {}
+        for {set i 0} {$i < $n} {incr i} {
+            lappend out [expr {$rawInternalAbiOpt && [lindex $raw $i] eq "1"}]
+        }
+        return $out
+    }
+    proc native::lower::InternalAbiResult {id} {
+        variable rawInternalAbiOpt
+        return [expr {$rawInternalAbiOpt && [MutatedRaw $id result]}]
+    }
+} elseif {$mutate == 4} {
     # ORACLE SELF-TEST for loss point 4: a raw induction register whatever
     # the bounds' Ranges say (unsound for a bound outside the small-Int
     # domain).
@@ -479,6 +518,33 @@ proc genClosure {} {
     return [list $h [concat [list "fn $f\([join $ps {, }]):"] [indent $body 1]]]
 }
 
+# A self-recursive de-closured closure: a bounded recursion over an Int
+# (clamped to [0, 6]) with an Int capture, non-tail (the result feeds an
+# addition) or tail (an accumulator).
+proc genRecclosure {} {
+    set h [newHelper recclosure {} {} int]
+    set f [dict get $h name]
+    set ps [intParams $f [rnd 1 2]]
+    dict set h params $ps
+    dict set h ptypes [lrepeat [llength $ps] int]
+    set r ${f}_r
+    set x ${r}_x
+    set kk ${f}_k
+    set c ${f}_c
+    set a [pick $ps]
+    set body [list "$kk = [intExpr $ps 2]" "$c = if $a < 0:" "    0" "else:" "    if $a > 6:" "        6"         "    else:" "        $a"]
+    if {[chance 0.5]} {
+        lappend body "fn $r\($x):" "    if $x <= 0:" "        [pick [list $kk "$kk + 1" "$kk - [lit [anyConst]]"]]"             "    else:" "        $r\($x - 1) [pick {+ -}] [pick [list $kk $x "$x * 2" [lit [smallConst]]]]"
+        set call "$r\($c)"
+    } else {
+        set acc ${r}_acc
+        lappend body "fn $r\($x, $acc):" "    if $x <= 0:" "        $acc + $kk" "    else:"             "        $r\($x - 1, $acc [pick {+ -}] [pick [list $kk $x [lit [anyConst]]]])"
+        set call "$r\($c, [pick [list 0 $kk [lit [anyConst]]]])"
+    }
+    lappend body [pick [list $call "$call + $c" "$call - [pick $ps]"]]
+    return [list $h [concat [list "fn $f\([join $ps {, }]):"] [indent $body 1]]]
+}
+
 # The emailish? shape: a String and its length captured by nested functions,
 # a counted scan with an early return and the length as exhaustion value.
 proc genScan {} {
@@ -614,7 +680,7 @@ proc genProgram {} {
     set lines {}
     set count [rnd 2 6]
     for {set j 0} {$j < $count} {incr j} {
-        set kinds {clamp clamp clamp loop loop loop arith arith branch branch closure closure scan bool}
+        set kinds {clamp clamp clamp loop loop loop arith arith branch branch closure closure recclosure scan bool}
         if {[llength [singleHelpers]] > 0} {
             lappend kinds apply apply
         }
