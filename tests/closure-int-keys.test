@@ -84,7 +84,7 @@ test closure-int-keys-refined-checks-knob-off {with the knob off the same functi
     }
 } -result {{{tld?<generic> 0 {{[2, 4611686018427387903]}}}} {{domain?<generic> 0 {{[1, 4611686018427387903]}}}} {{char_at<generic> 0 {{[0, 4611686018427387902]}}}}}
 
-test closure-int-keys-refined-checks-nir-unchanged {the payoff, pinned honestly: refined-checks' NIR is identical apart from instance labels, with the RawInt demand filter on and off (counted loops stay tagged, loss point 4; de-closured functions never take raw parameters, loss point 5)} -body {
+test closure-int-keys-refined-checks-nir-unchanged {the payoff, pinned honestly: refined-checks' NIR is identical apart from instance labels, with the RawInt demand filter on and off (counted loops are raw with or without the keys since loss point 4, which reads Ranges, not keys; de-closured functions never take raw parameters, loss point 5)} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot]]
     lmap opts {{} {-raw-demand-opt 0}} {
         set texts [lmap k {0 1} {
@@ -99,17 +99,24 @@ test closure-int-keys-refined-checks-nir-unchanged {the payoff, pinned honestly:
     }
 } -result {1 1}
 
-test closure-int-keys-refined-checks-rawint-plan {what still blocks raw parameters: the keyed positions are RawInt-eligible now, and the demand rule suppresses them (a counted loop bound is a tagged consumer, loss point 4)} -body {
+test closure-int-keys-refined-checks-rawint-plan {the keyed positions are RawInt-eligible; with counted loops tagged (loss point 4's knob off) the demand rule suppresses them (a counted loop bound is a tagged consumer), with raw counted loops only char_at's i stays suppressed (substring is a tagged consumer)} -body {
     lassign [refinedChecks] hir spec analysis
-    set plan [native::rawabi::plan $hir $spec $analysis 1]
-    set rows {}
-    foreach id [dict get $spec used] {
-        set label [hir::specialize::label $spec $id]
-        if {$label ni {tld?<int> domain?<int> char_at<int> {scan_while<int, native(is_tcl_alpha)>}}} continue
-        lappend rows [list $label [lindex [dict get $plan $id paramEligible] 0] [lindex [dict get $plan $id paramReasons] 0]]
+    lmap knob {0 1} {
+        set native::lower::rawCountLoopOpt $knob
+        try {
+            set plan [native::rawabi::plan $hir $spec $analysis 1]
+        } finally {
+            set native::lower::rawCountLoopOpt 1
+        }
+        set rows {}
+        foreach id [dict get $spec used] {
+            set label [hir::specialize::label $spec $id]
+            if {$label ni {tld?<int> domain?<int> char_at<int> {scan_while<int, native(is_tcl_alpha)>}}} continue
+            lappend rows [list $label [lindex [dict get $plan $id paramEligible] 0] [lindex [dict get $plan $id paramReasons] 0]]
+        }
+        lsort $rows
     }
-    lsort $rows
-} -result {{char_at<int> 1 suppressed-mixed-tagged-use} {domain?<int> 1 suppressed-mixed-tagged-use} {tld?<int> 1 suppressed-mixed-tagged-use} {{scan_while<int, native(is_tcl_alpha)>} 1 suppressed-no-raw-demand}}
+} -result {{{char_at<int> 1 suppressed-mixed-tagged-use} {domain?<int> 1 suppressed-mixed-tagged-use} {tld?<int> 1 suppressed-mixed-tagged-use} {{scan_while<int, native(is_tcl_alpha)>} 1 suppressed-no-raw-demand}} {{char_at<int> 1 suppressed-mixed-tagged-use} {domain?<int> 1 {}} {tld?<int> 1 {}} {{scan_while<int, native(is_tcl_alpha)>} 1 {}}}}
 
 # ---------------------------------------------------------------------------
 # The rule

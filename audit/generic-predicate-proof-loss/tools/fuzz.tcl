@@ -95,6 +95,18 @@
 # runs), which must be reported. -nativeopts OPT=V,... passes native::evalHir
 # options to the native run (e.g. -block-escape-opt=0, where lowering
 # materializes every closure and emits dormant entries).
+#
+# Loss point 4 (raw counted loops): -knob native::lower::rawCountLoopOpt. A
+# knob in native::lower is a LOWERING knob: the analysis does not depend on
+# it (the Range comparison above finds nothing), so EXERCISE instead
+# compares the program's NIR (native::nir with -nativeopts) knob 0 vs 1
+# ("NIR changed by the knob"); the DIFFERENTIAL oracle (native with the
+# knob on) is the soundness check, and a disagreement is attributed by
+# re-running native with the knob off. -mutate 4 is the matching ORACLE
+# SELF-TEST: native::lower::RawCountDomain stops looking at the bounds'
+# Ranges (every counted loop is raw), which must be reported. The generator
+# also builds numeric lockstep loops (`loop i from .. and j down from ..`,
+# equal constant trip counts) for this point.
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
 set script [file normalize [info script]]
 set args $argv
@@ -146,7 +158,16 @@ set hir::range::resultNarrowRoundLimit $roundLimit
 # -mutate 1: ORACLE SELF-TEST ONLY. Deliberately unsound result narrowing:
 # every summary the pass commits gets its finite lower bound raised by one.
 # A run with it must report range violations; one without it must not.
-if {$mutate == 2} {
+if {$mutate == 4} {
+    # ORACLE SELF-TEST for loss point 4: a raw induction register whatever
+    # the bounds' Ranges say (unsound for a bound outside the small-Int
+    # domain).
+    proc native::lower::RawCountDomain {ranges id startExpr endExpr} {
+        variable reprOpt
+        variable rawCountLoopOpt
+        return [expr {$reprOpt && $rawCountLoopOpt}]
+    }
+} elseif {$mutate == 2} {
     rename hir::specialize::DormantInstances hir::specialize::DormantInstancesOriginal
     proc hir::specialize::DormantInstances {snapshot blockescape} {
         set dormant [DormantInstancesOriginal $snapshot $blockescape]
@@ -334,7 +355,7 @@ proc genLoop {} {
     set i ${f}_i
     set k [rnd 0 6]
     set body [list "$s = [intExpr $ps 2]"]
-    switch [rnd 0 4] {
+    switch [rnd 0 5] {
         0 { set header "loop $i from $s to $s + $k:"; set natural "$s + $k" }
         1 { set header "loop $i from $s through $s + $k:"; set natural "$s + $k" }
         2 { set header "loop $i down from $s to $s - $k:"; set natural "$s - $k" }
@@ -344,9 +365,26 @@ proc genLoop {} {
             set header "loop $i from [lit $c0] to [lit [expr {$c0 + $k}]]:"
             set natural [lit [expr {$c0 + $k}]]
         }
+        5 {
+            # a numeric lockstep loop (equal constant trip counts); the
+            # second domain runs down from another expression
+            set j ${f}_j
+            set t ${f}_t
+            lappend body "$t = [intExpr $ps 1]"
+            if {[chance 0.5]} {
+                set second "$j down from $t to $t - $k"
+            } else {
+                set second "$j down from $t through $t - [lit [expr {$k - 1}]]"
+            }
+            set header "loop $i from $s to $s + $k and $second:"
+            set natural "$s + $k"
+        }
     }
     lappend body $header
     set vars [concat $ps $s $i]
+    if {[info exists j]} {
+        lappend vars $j
+    }
     if {[chance 0.3]} {
         lappend body "    if $i == $s + [rnd 0 3]:" "        continue"
     }
@@ -605,18 +643,21 @@ proc genProgram {} {
 # ---------------------------------------------------------------------------
 # Running
 
+# The -nativeopts options as a native::evalHir / native::nir option list.
+proc nativeOptions {} {
+    set opts {}
+    foreach pair [split $::nativeOpts ,] {
+        if {$pair ne ""} { lappend opts {*}[split $pair =] }
+    }
+    return $opts
+}
+
 proc outcome {kind hir} {
     if {[catch {
         switch $kind {
             interp  { core::useBackend interp;  set r [core::evalProgram [hir::lower $hir]] }
             compile { core::useBackend compile; set r [core::evalProgram [hir::lower $hir]] }
-            native  {
-                set opts {}
-                foreach pair [split $::nativeOpts ,] {
-                    if {$pair ne ""} { lappend opts {*}[split $pair =] }
-                }
-                set r [native::evalHir $hir {*}$opts]
-            }
+            native  { set r [native::evalHir $hir {*}[nativeOptions]] }
         }
     } msg opts]} {
         return [list error [dict get $opts -errorcode] $msg]
@@ -843,6 +884,20 @@ proc checkProgram {seed k} {
             if {![within $r1 $r0]} { lappend notRefinement "$id $e [showRange $r0] -> [showRange $r1]" }
         }
     }
+    if {[string match "native::lower::*" $::knob]} {
+        # A lowering knob: the analysis is the same either way; what it
+        # changes is the NIR.
+        set nirs {}
+        foreach opt {0 1} {
+            set ::$::knob $opt
+            try {
+                lappend nirs [native::nir $prepared {*}[nativeOptions]]
+            } finally {
+                set ::$::knob 1
+            }
+        }
+        dict set rec nirChanged [expr {[lindex $nirs 0] ne [lindex $nirs 1]}]
+    }
     dict set rec changed $changed
     dict set rec exprChanged $exprChanged
     dict set rec narrower $narrower
@@ -1062,7 +1117,7 @@ foreach seed $seeds {
     set s [dict create programs 0 ok 0 rejected 0 interpError 0 disagreements 0 unsupported 0 \
         analysisErrors 0 limits 0 harness 0 disagreementsIntroduced 0 topChecks 0 topViolations 0 topIntroduced 0 \
         traceChecks 0 traceViolations 0 changed 0 topChanged 0 exprChanged 0 notRefinement 0 \
-        attempted 0 converged 0 unconverged 0 messageMismatch 0 openInstance 0 dormant 0 narrower 0]
+        attempted 0 converged 0 unconverged 0 messageMismatch 0 openInstance 0 dormant 0 narrower 0 nirChanged 0]
     set rounds {}
     set rejectSamples {}
     foreach k [lsort -integer [dict keys $records]] {
@@ -1080,7 +1135,7 @@ foreach seed $seeds {
             limit { dict incr s limits }
             harness-error { dict incr s harness }
         }
-        foreach key {interpError changed topChanged exprChanged messageMismatch openInstance dormant narrower} {
+        foreach key {interpError changed topChanged exprChanged messageMismatch openInstance dormant narrower nirChanged} {
             if {[dict exists $rec $key] && [dict get $rec $key]} { dict incr s $key }
         }
         foreach key {topChecks traceChecks} {
@@ -1155,14 +1210,14 @@ foreach seed $seeds {
         %d programs (a checked top-level call Range in %d, any expression Range in %d); programs with an open\
         instance %d, with a dormant instance %d; result narrowing\
         attempted %d, converged %d (rounds %s), not converged %d; knob-on not within knob-off %d\
-        (strictly narrower somewhere: %d, specialization knobs only);\
-        error-message mismatches %d; %ds" \
+        (strictly narrower somewhere: %d, specialization knobs only); NIR changed by the knob %d (lowering knobs\
+        only); error-message mismatches %d; %ds" \
         $seed [dict get $s programs] [dict get $s ok] [dict get $s rejected] [dict get $s interpError] \
         [dict get $s disagreements] [dict get $s disagreementsIntroduced] [dict get $s unsupported] [dict get $s analysisErrors] [dict get $s limits] \
         [dict get $s harness] [dict get $s topViolations] [dict get $s topChecks] [dict get $s topIntroduced] \
         [dict get $s traceViolations] [dict get $s traceChecks] [dict get $s changed] [dict get $s topChanged] \
         [dict get $s exprChanged] [dict get $s openInstance] [dict get $s dormant] [dict get $s attempted] [dict get $s converged] $roundText \
-        [dict get $s unconverged] [dict get $s notRefinement] [dict get $s narrower] [dict get $s messageMismatch] \
+        [dict get $s unconverged] [dict get $s notRefinement] [dict get $s narrower] [dict get $s nirChanged] [dict get $s messageMismatch] \
         [expr {[clock seconds] - $t0}]]
     flush stdout
     dict for {key value} $s {
@@ -1171,9 +1226,11 @@ foreach seed $seeds {
 }
 if {[llength $seeds] > 1} {
     puts [format "total (seeds %s): programs %d, compiled %d, disagreements %d, range violations top %d / trace %d,\
-        changed-by-the-knob %d (top-level %d), with a dormant instance %d, not-converged %d, failures %d programs; %ds" \
+        changed-by-the-knob %d (top-level %d), NIR changed by the knob %d, with a dormant instance %d, not-converged %d,\
+        failures %d programs; %ds" \
         [join $seeds ,] [dict get $totals programs] [dict get $totals ok] [dict get $totals disagreements] \
         [dict get $totals topViolations] [dict get $totals traceViolations] [dict get $totals changed] \
-        [dict get $totals topChanged] [dict get $totals dormant] [dict get $totals unconverged] $totalFailures [expr {[clock seconds] - $started}]]
+        [dict get $totals topChanged] [dict get $totals nirChanged] [dict get $totals dormant] [dict get $totals unconverged] \
+        $totalFailures [expr {[clock seconds] - $started}]]
 }
 exit [expr {$totalFailures ? 1 : 0}]

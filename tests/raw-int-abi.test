@@ -843,7 +843,7 @@ test demand-forwarding-cycle-cannot-bootstrap-raw {a recursive position that onl
     list [abiDemandPlan $text {*}$noInline] [parityAbi $text]
 } -result {{{f<int, int>=supp,val>supp}} {value:[1]}}
 
-test demand-loops-and-handlers-agree {a counted loop's bound is a tagged consumer, so a parameter that is also compared raw is boxed (mixed); every backend and every plan (tagged, eligibility only, demand-filtered) agree, also behind an error handler} -body {
+test demand-loops-and-handlers-agree {a tagged counted loop's bound is a tagged consumer, so a parameter that is also compared raw is boxed (mixed: loss point 4's knob off); a raw counted loop's bound (proven small, GENERIC-PREDICATE-PROOF-LOSS.md loss point 4) is a raw consumer, so the parameter is raw; every backend and every plan (tagged, eligibility only, demand-filtered) agree, also behind an error handler} -body {
     set loop {
         fn find(n):
             loop i from 0 to n:
@@ -870,8 +870,14 @@ test demand-loops-and-handlers-agree {a counted loop's bound is a tagged consume
 
         [safe(3), safe(0 - 1)]
     }
-    list [abiDemandPlan $loop {*}$noInline] [parityAbi $loop] [parityAbi $handled]
-} -result {find<int>=supp>supp {value:[4, 11]} {value:[5, 1]}}
+    set native::lower::rawCountLoopOpt 0
+    try {
+        set tagged [list [abiDemandPlan $loop {*}$noInline] [parityAbi $loop]]
+    } finally {
+        set native::lower::rawCountLoopOpt 1
+    }
+    list $tagged [abiDemandPlan $loop {*}$noInline] [parityAbi $loop] [parityAbi $handled]
+} -result {{find<int>=supp>supp {value:[4, 11]}} find<int>=raw>supp {value:[4, 11]} {value:[5, 1]}}
 
 test demand-mixed-use-propagates-through-transport {a callee that boxes its parameter (raw and tagged use) makes the caller's forwarded parameter boxed too: the tagged consumer is in the closure} -body {
     set text {

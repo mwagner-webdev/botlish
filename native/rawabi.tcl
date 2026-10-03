@@ -693,8 +693,7 @@ proc native::rawabi::Walk {e sink why} {
             Seq [dict get $node body] "" "list loop result element"
         }
         countloop {
-            Walk [dict get $node start] "" "count loop bound"
-            Walk [dict get $node end] "" "count loop bound"
+            CountBounds $e [dict get $node start] [dict get $node end]
             dict set W(loops) $e ""
             # A collecting loop (COLLECTING-LOOPS.md): the body's value is a
             # result-List element, exactly like listloop's.
@@ -705,8 +704,7 @@ proc native::rawabi::Walk {e sink why} {
                 if {[dict get $domain kind] eq "list"} {
                     Walk [dict get $domain iterable] "" "list loop source"
                 } else {
-                    Walk [dict get $domain start] "" "count loop bound"
-                    Walk [dict get $domain end] "" "count loop bound"
+                    CountBounds $e [dict get $domain start] [dict get $domain end]
                 }
             }
             dict set W(loops) $e ""
@@ -741,6 +739,24 @@ proc native::rawabi::Walk {e sink why} {
             }
         }
     }
+}
+
+# The two bounds of a numeric loop domain of loop E (a countloop, or one
+# domain of a lockloop). Lowering runs the domain on a raw induction
+# register exactly when native::lower::RawCountDomain holds (loss point 4 of
+# GENERIC-PREDICATE-PROOF-LOSS.md): both bounds are then unboxed once and
+# compared raw, so each is a raw consumer. Otherwise the loop compares and
+# advances tagged, and a bound is a tagged consumer.
+proc native::rawabi::CountBounds {e startExpr endExpr} {
+    variable W
+    variable Ranges
+    if {[native::lower::RawCountDomain $Ranges $W(id) $startExpr $endExpr]} {
+        Walk $startExpr RAW "raw count loop bound @$e"
+        Walk $endExpr RAW "raw count loop bound @$e"
+        return
+    }
+    Walk $startExpr "" "count loop bound"
+    Walk $endExpr "" "count loop bound"
 }
 
 proc native::rawabi::If {e node sink why} {

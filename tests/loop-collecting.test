@@ -649,7 +649,9 @@ foreach {name header} {
     test loop-collecting-native-discarded-$name "a numeric loop whose value is unused ($name) builds no output List" -body {
         set nir [nirOf "fn f(n):\n    loop $header:\n        i * 2\n    n\nf(5)\n"]
         # still a real loop: a comparison, a conditional branch and a backedge
-        list [regexp {listnew|listappend} $nir] [regexp {op (ilt|ile|igt|ige) } $nir] [regexp {\n    br } $nir]
+        # (the comparison is raw -- rilt.. -- when both bounds are proven
+        # small, GENERIC-PREDICATE-PROOF-LOSS.md loss point 4; n is 5 here)
+        list [regexp {listnew|listappend} $nir] [regexp {op r?(ilt|ile|igt|ige) } $nir] [regexp {\n    br } $nir]
     } -result {0 1 1}
 
     test loop-collecting-native-retained-$name "a numeric loop whose value is used ($name) accumulates once per iteration" -body {
@@ -658,14 +660,23 @@ foreach {name header} {
     } -result {1 1}
 }
 
-test loop-collecting-native-compare-ops {the endpoint test is the matching comparison, never an adjusted bound} -body {
-    set ops {}
-    foreach header {{i from 0 to n} {i from 0 through n} {i down from n to 0} {i down from n through 0}} {
-        set nir [nirOf "fn f(n):\n    loop $header:\n        i\n    n\nf(5)\n"]
-        lappend ops [lindex [regexp -inline {op (ilt|ile|igt|ige) } $nir] 1]
+test loop-collecting-native-compare-ops {the endpoint test is the matching comparison, never an adjusted bound: raw when both bounds are proven small (loss point 4 of GENERIC-PREDICATE-PROOF-LOSS.md; n is 5 here), tagged with its knob off} -body {
+    set out {}
+    foreach knob {1 0} {
+        set native::lower::rawCountLoopOpt $knob
+        set ops {}
+        try {
+            foreach header {{i from 0 to n} {i from 0 through n} {i down from n to 0} {i down from n through 0}} {
+                set nir [nirOf "fn f(n):\n    loop $header:\n        i\n    n\nf(5)\n"]
+                lappend ops [lindex [regexp -inline {op (r?(?:ilt|ile|igt|ige)) } $nir] 1]
+            }
+        } finally {
+            set native::lower::rawCountLoopOpt 1
+        }
+        lappend out $ops
     }
-    set ops
-} -result {ilt ile igt ige}
+    set out
+} -result {{rilt rile rigt rige} {ilt ile igt ige}}
 
 test loop-collecting-native-lockstep-one-loop {a lockstep loop lowers to one CFG loop with one backedge head} -body {
     set nir [nirOf "fn f(xs):\n    loop x in xs and i from 0 to list_length(xs):\n        \[x, i\]\nf(\[1, 2\])\n"]

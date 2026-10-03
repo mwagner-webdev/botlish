@@ -201,6 +201,12 @@ namespace eval native::lower {
     # is always also within MAX_SHIFT, so raw eligibility never needs to
     # consult that separate, generic-path-only contract.
     variable rawShiftMax 64
+    # GENERIC-PREDICATE-PROOF-LOSS.md, loss point 4: test/audit knob, not a
+    # user-facing flag. 1 gives a counted loop (and each numeric domain of a
+    # lockstep loop) a raw induction register when both of its bounds'
+    # Ranges fit the small-Int domain (RawCountDomain); 0 keeps every
+    # counted loop's compare and advance tagged, as before.
+    variable rawCountLoopOpt 1
     # Scalar replacement (see "Scalar replacement" below): the hir::escape
     # analysis of the program, and whether it is enabled at all.
     variable escape {}
@@ -6564,6 +6570,63 @@ proc native::lower::ListLoop {fnVar e node} {
     return $resultReg
 }
 
+# 1 if the numeric loop domain START..END of instance ID gets a raw
+# induction register (GENERIC-PREDICATE-PROOF-LOSS.md, loss point 4): both
+# bound expressions' Ranges (RANGES, hir::range::analyze) fit the small-Int
+# domain. That is the whole proof obligation. The bounds are evaluated once,
+# before the loop, so they are unboxed once. The induction value I is only
+# ever observed (a reference of the binding, boxed on demand) while the body
+# runs, i.e. after the continuation test passed, so START <= I <= END (or
+# START >= I >= END going down): a small Int. The one value outside that
+# interval is the exhaustion value (one step past the last body value: at
+# most END + 1 up, END - 1 down; an empty domain never advances at all). It
+# exists only in the register between the advance and the failing test,
+# never boxed, bound or returned, and a raw i64 holds it exactly (|END| <=
+# 2^62, so END +- 1 is far inside i64), so the raw comparison decides
+# exactly what the tagged one did. The same predicate is
+# native/rawabi.tcl's demand rule for a count loop bound, so the RawInt plan
+# counts a raw loop's bounds as raw consumers exactly when lowering makes
+# them so.
+proc native::lower::RawCountDomain {ranges id startExpr endExpr} {
+    variable reprOpt
+    variable rawCountLoopOpt
+    if {!$reprOpt || !$rawCountLoopOpt} {
+        return 0
+    }
+    foreach x [list $startExpr $endExpr] {
+        set r [hir::range::of $ranges $id $x]
+        if {$r eq "never" || ![hir::range::fitsSmall $r]} {
+            return 0
+        }
+    }
+    return 1
+}
+
+# The bound registers of a numeric loop domain whose bound expressions
+# EXPRS were lowered to REGS (tagged, or raw where WANTS asked for it) and
+# guarded (EmitArgGuards: the guards run on the tagged registers, so a bound
+# that needs one was lowered tagged): RAW 1 converts every tagged one with
+# RawOf (its Range fits small: RawCountDomain), RAW 0 returns REGS.
+proc native::lower::CountBounds {fnVar regs wants raw} {
+    upvar 1 $fnVar fn
+    if {!$raw} {
+        return $regs
+    }
+    return [lmap r $regs w $wants {expr {$w eq "raw" ? $r : [RawOf fn $r]}}]
+}
+
+# The representation a numeric loop bound EXPR of loop E is first lowered
+# in: raw when the domain is raw (RAW) and the bound needs no runtime guard
+# (guards check tagged registers), else tagged.
+proc native::lower::CountBoundWant {e expr raw} {
+    variable guards
+    variable knownErrors
+    if {!$raw || [dict exists $guards [list $e $expr]] || [dict exists $knownErrors [list $e $expr]]} {
+        return tagged
+    }
+    return raw
+}
+
 # The NIR comparison op that keeps a numeric loop of DIRECTION (up|down) and
 # ENDKIND (exclusive|inclusive) going while its induction value is still
 # inside the domain, and the op that advances it by one. The inclusive forms
@@ -6604,20 +6667,32 @@ proc native::lower::CountOps {direction endKind} {
 proc native::lower::CountLoop {fnVar e node} {
     upvar 1 $fnVar fn
     variable context
+    variable ranges
+    variable currentInstance
     set startExpr [dict get $node start]
     set endExpr [dict get $node end]
-    set startReg [Expr fn $startExpr]
+    # Loss point 4 (GENERIC-PREDICATE-PROOF-LOSS.md): a domain whose bounds
+    # are proven small runs on a raw induction register (RawCountDomain).
+    set raw [RawCountDomain $ranges $currentInstance $startExpr $endExpr]
+    set wants [list [CountBoundWant $e $startExpr $raw] [CountBoundWant $e $endExpr $raw]]
+    set startReg [Expr fn $startExpr [lindex $wants 0]]
     if {$startReg eq "never"} {
         return never
     }
-    set endReg [Expr fn $endExpr]
+    set endReg [Expr fn $endExpr [lindex $wants 1]]
     if {$endReg eq "never"} {
         return never
     }
     EmitArgGuards fn $e [list $startExpr $endExpr] [list $startReg $endReg] {int int} "loop"
+    lassign [CountBounds fn [list $startReg $endReg] $wants $raw] startReg endReg
     lassign [CountOps [dict get $node direction] [dict get $node endKind]] compareOp advanceOp
     set idxReg [NewReg fn]
     set resultReg [NewReg fn]
+    if {$raw} {
+        MarkRaw fn $idxReg
+        set compareOp r$compareOp
+        set advanceOp r$advanceOp
+    }
     Emit fn "$idxReg = move $startReg" $e
     set retained [expr {![dict exists $context discarded $e]}]
     if {$retained} {
@@ -6638,13 +6713,16 @@ proc native::lower::CountLoop {fnVar e node} {
     Emit fn "jump $head" $e
     EmitLabel fn $head
     set cmp [Assign fn "op $compareOp $idxReg $endReg" $e]
+    if {$raw} {
+        dict incr fn rawCompare
+    }
     Emit fn "br $cmp $bodyLabel $normalExit" $e
     EmitLabel fn $bodyLabel
     set saved [dict get $fn locals]
     set savedRaw [dict get $fn rawCache]
     dict set fn loops $e [list $continueLabel $exit $resultReg \
         [expr {$retained ? $accReg : "discard"}]]
-    dict set fn locals [dict get $node countBinding] [list reg $idxReg]
+    dict set fn locals [dict get $node countBinding] [list [expr {$raw ? "rawreg" : "reg"}] $idxReg]
     set bodyValue [Sequence fn [dict get $node body]]
     set usedContinue [dict exists $fn continued $e]
     if {$bodyValue ne "never"} {
@@ -6660,7 +6738,12 @@ proc native::lower::CountLoop {fnVar e node} {
     dict unset fn loops $e
     if {$bodyValue ne "never" || $usedContinue} {
         EmitLabel fn $continueLabel
-        set idxNext [Assign fn "op $advanceOp $idxReg [IntConst fn 1 $e]" $e]
+        if {$raw} {
+            set idxNext [AssignRaw fn "op $advanceOp $idxReg [AssignRaw fn "rawint 1" $e]" $e]
+            dict incr fn rawArith
+        } else {
+            set idxNext [Assign fn "op $advanceOp $idxReg [IntConst fn 1 $e]" $e]
+        }
         Emit fn "$idxReg = move $idxNext" $e
         Emit fn "jump $head" $e
     }
@@ -6693,26 +6776,37 @@ proc native::lower::CountLoop {fnVar e node} {
 proc native::lower::LockLoop {fnVar e node} {
     upvar 1 $fnVar fn
     variable context
+    variable ranges
+    variable currentInstance
     set domains [dict get $node domains]
     set exprs {}
     set regs {}
     set kinds {}
+    set wants {}
+    # Per numeric domain: whether it runs on a raw induction register (loss
+    # point 4, RawCountDomain; decided per domain, from its own bounds).
+    set raws {}
     foreach domain $domains {
         if {[dict get $domain kind] eq "list"} {
             set operands [list [dict get $domain iterable]]
             set kindList {list}
+            set raw 0
         } else {
             set operands [list [dict get $domain start] [dict get $domain end]]
             set kindList {int int}
+            set raw [RawCountDomain $ranges $currentInstance {*}$operands]
         }
+        lappend raws $raw
         foreach operand $operands kind $kindList {
-            set reg [Expr fn $operand]
+            set want [expr {$kind eq "int" ? [CountBoundWant $e $operand $raw] : "tagged"}]
+            set reg [Expr fn $operand $want]
             if {$reg eq "never"} {
                 return never
             }
             lappend exprs $operand
             lappend regs $reg
             lappend kinds $kind
+            lappend wants $want
         }
     }
     EmitArgGuards fn $e $exprs $regs $kinds "loop"
@@ -6720,21 +6814,33 @@ proc native::lower::LockLoop {fnVar e node} {
     set states {}
     set needPosition 0
     set cursor 0
-    foreach domain $domains {
+    set anyRaw 0
+    foreach domain $domains raw $raws {
         if {[dict get $domain kind] eq "list"} {
             set needPosition 1
             lappend states [dict create kind list list [lindex $regs $cursor]]
             incr cursor
         } else {
             lassign [CountOps [dict get $domain direction] [dict get $domain endKind]] compareOp advanceOp
+            lassign [CountBounds fn [lrange $regs $cursor [expr {$cursor + 1}]] \
+                [lrange $wants $cursor [expr {$cursor + 1}]] $raw] startReg endReg
             set idxReg [NewReg fn]
-            Emit fn "$idxReg = move [lindex $regs $cursor]" $e
-            lappend states [dict create kind count idx $idxReg end [lindex $regs [expr {$cursor + 1}]] \
-                compare $compareOp advance $advanceOp]
+            if {$raw} {
+                MarkRaw fn $idxReg
+                set compareOp r$compareOp
+                set advanceOp r$advanceOp
+                set anyRaw 1
+            }
+            Emit fn "$idxReg = move $startReg" $e
+            lappend states [dict create kind count idx $idxReg end $endReg \
+                compare $compareOp advance $advanceOp raw $raw]
             incr cursor 2
         }
     }
     set one [IntConst fn 1 $e]
+    if {$anyRaw} {
+        set rawOne [RawOf fn $one]
+    }
     if {$needPosition} {
         set posReg [NewReg fn]
         Emit fn "$posReg = move [IntConst fn 0 $e]" $e
@@ -6763,6 +6869,9 @@ proc native::lower::LockLoop {fnVar e node} {
         set cmp [Assign fn "op ilt $posReg $firstLen" $e]
     } else {
         set cmp [Assign fn "op [dict get $first compare] [dict get $first idx] [dict get $first end]" $e]
+        if {[dict get $first raw]} {
+            dict incr fn rawCompare
+        }
     }
     Emit fn "br $cmp $bodyLabel $normalExit" $e
     EmitLabel fn $bodyLabel
@@ -6775,7 +6884,8 @@ proc native::lower::LockLoop {fnVar e node} {
             set elemReg [Assign fn "op listget [dict get $state list] $posReg" $e]
             dict set fn locals [dict get $domain binding] [list reg $elemReg]
         } else {
-            dict set fn locals [dict get $domain binding] [list reg [dict get $state idx]]
+            dict set fn locals [dict get $domain binding] \
+                [list [expr {[dict get $state raw] ? "rawreg" : "reg"}] [dict get $state idx]]
         }
     }
     set bodyValue [Sequence fn [dict get $node body]]
@@ -6796,7 +6906,12 @@ proc native::lower::LockLoop {fnVar e node} {
         foreach state $states {
             if {[dict get $state kind] eq "count"} {
                 set idxReg [dict get $state idx]
-                set next [Assign fn "op [dict get $state advance] $idxReg $one" $e]
+                if {[dict get $state raw]} {
+                    set next [AssignRaw fn "op [dict get $state advance] $idxReg $rawOne" $e]
+                    dict incr fn rawArith
+                } else {
+                    set next [Assign fn "op [dict get $state advance] $idxReg $one" $e]
+                }
                 Emit fn "$idxReg = move $next" $e
             }
         }
