@@ -14,6 +14,14 @@ A language/library cleanup milestone with four parts:
    an entry program) of the same namespace; the rest of that namespace stays
    open.
 
+A follow-up (§11) gave the writes and slices declared errors too
+(`mutable_array::set`: `IndexNotFound`; `str::substring`,
+`mutable_array::freeze`, `mutable_array::copy`: `LowerUnderrun` /
+`UpperOverrun`), made `char::scalar_value` the one name of the UnicodeChar
+to Int operation (`lib/char.bot` and `char::codepoint` are gone), and
+removed the test-only index-obligation waiver. Where the sections below
+describe the state before that follow-up, they say so.
+
 No compatibility aliases were added: every historical name is simply
 unbound now (`core::native::aliasPairs` is empty; `tests/stdlib-namespaces.test`
 `ns-historical-names-are-unknown` checks each one).
@@ -68,7 +76,7 @@ and `ns-qualified-inventory` pin the after-state in a fresh process):
 | `list_length list_get list_append` | standard type op (List) | `list::length`, `list::at`, `list::append` |
 | `mutable_array_allocate _capacity _get _set _copy _freeze` | standard type op (MutableArray) | `mutable_array::allocate/capacity/at/set/copy/freeze` |
 | `immutable_set_from_list immutable_set_contains` | standard type op (ImmutableSet) | `immutable_set::from_list/contains` |
-| `char_codepoint` | standard type op (UnicodeChar; the primitive behind `lib/char.bot`'s existing `char::codepoint`) | `char::scalar_value` (`char::codepoint` unchanged, now wrapping it) |
+| `char_codepoint` | standard type op (UnicodeChar; the primitive behind `lib/char.bot`'s existing `char::codepoint`) | `char::scalar_value` (the follow-up removed the `char::codepoint` wrapper, §11) |
 | `linux::abi::syscall` | platform-ABI, already qualified | unchanged |
 
 Source-declared types still register their constructor/predicate natives at
@@ -96,7 +104,7 @@ hierarchy (`ns-no-nested-stdlib`):
 | `list` | `length at append` | `get` (new), `find any? all? none?` ... (existing `lib/list.bot`) |
 | `mutable_array` | `allocate capacity at set copy freeze` | `from_list create` (moved from the old `mutarray` module), `get` (new) |
 | `immutable_set` | `from_list contains` | none |
-| `char` | `scalar_value` | `codepoint` |
+| `char` | `scalar_value` | none (no module file since §11) |
 | `linux::abi` | `syscall` | (unchanged) |
 
 `lib/mutarray.bot` was renamed to `lib/mutable_array.bot` (`namespace
@@ -128,7 +136,8 @@ mutarray::from_list      mutable_array::from_list
 mutarray::create         mutable_array::create
 immutable_set_from_list  immutable_set::from_list
 immutable_set_contains   immutable_set::contains
-char_codepoint           char::scalar_value  (source keeps calling the typed char::codepoint)
+char_codepoint           char::scalar_value
+char::codepoint          char::scalar_value  (§11; the lib/char.bot wrapper is gone)
 ```
 
 ### How a qualified intrinsic resolves
@@ -155,7 +164,7 @@ list names module definitions and intrinsics together
 (`ns-unknown-member-*`).
 
 Canonical printing and diagnostics use the qualified names everywhere:
-runtime messages (`str::substring: range 5..6 is outside 0..2`,
+runtime messages (`str::substring: slice start 5 is above the length 2`,
 `list::length: expected list, got "abc"`), contract inference (`argument 1
 of native str::length requires str`), completion diagnostics (`this call
 of "list::at" may produce the declared error "IndexNotFound"`), AOT
@@ -191,9 +200,9 @@ Not indexed `*_get`s, reported and left alone:
   `NotFound`, not an index;
 * `result-value`/`result-error` -- Result accessors (core IR only);
 * struct field projection `.f` -- static, checked at compile time;
-* `str::substring` -- a range slice, keeps its `RANGE` failure; there was
-  never a `string_get`, and no `str::at` was added (non-goal: new
-  collection semantics);
+* `str::substring` -- a range slice, not a lookup (its failures became
+  `LowerUnderrun`/`UpperOverrun` in §11); there was never a `string_get`,
+  and no `str::at` was added (non-goal: new collection semantics);
 * the corpus program's `ht_get`/`ht_find_get` (`examples/stdlib/hashtable.bot`,
   `csv_records.bot`) -- a user program's key lookup returning `unit` for
   absence, not a standard API.
@@ -214,10 +223,9 @@ still the ordinary `TYPE` error, never `IndexNotFound`
 (`ns-at-other-failures-are-not-index-not-found`). Unhandled at run time
 (only reachable in a `-strict 0` build) it is the ordinary uncaught
 declared error, `UNCAUGHT-ERROR: uncaught propagated error: <error
-IndexNotFound>`, identical on every backend. `mutable_array::set`,
-`::copy`, `::freeze`, `::allocate` and `str::substring` keep their `RANGE`
-failures (a write or a slice is not a lookup; §8 lists this as debt to
-revisit).
+IndexNotFound>`, identical on every backend. (`mutable_array::set` now
+fails with the same `IndexNotFound`, and the slices with `LowerUnderrun`/
+`UpperOverrun`: §11.)
 
 ### `get` is ordinary Botlish
 
@@ -344,7 +352,7 @@ applies to intrinsics as to any namespaced function: `x.f(a)` is `f(x, a)`
 when `f` is visible, and a namespaced function becomes visible by binding
 it (`at = list::at`). `ns-method-*` check that `xs.at(i)`, `xs.get(i, d)`,
 `xs.append(v)`, `xs.length()`, `s.concat(t)`, `s.length()`,
-`s.substring(i, j)`, `set.contains(v)`, `c.codepoint()` and their fully
+`s.substring(i, j)`, `set.contains(v)`, `c.scalar_value()` and their fully
 qualified free spellings give the same value on every backend and resolve
 to the same call target (`sameCallable`: the very native, or the very
 library block); `ns-method-mutable-array` does the same reads and writes
@@ -372,7 +380,7 @@ spelling is the usual "no function named ... is visible"
 ## 7. Migration
 
 * `lib/`: `list.bot` (+`get`), `mutable_array.bot` (renamed module, +`get`),
-  `char.bot` (header; `char::codepoint` now calls `char::scalar_value`), `byte.bot`, `web.bot` (renamed calls; `esc_bytes` guards
+  `char.bot` (removed in §11), `byte.bot`, `web.bot` (renamed calls; `esc_bytes` guards
   its index with `i < 0 or i >= list::length(bytes)`, which proves its
   read).
 * Corpus (`examples/stdlib`): renamed throughout. Programs whose functions
@@ -391,10 +399,8 @@ spelling is the usual "no function named ... is visible"
   for out-of-range reads updated. Programs that index incidentally were made
   legal the way real code would be (a proof-friendly guard, a handler, an
   `errors` clause, `get`); five test files whose subject is types/facts
-  rather than error legality compile through
-  `tests/helpers.tcl`'s `compileWaivingIndexObligations`, which falls back to
-  a `-strict 0` build only when the sole rejection is an `IndexNotFound`
-  obligation.
+  rather than error legality compiled through a test-only waiver
+  (`compileWaivingIndexObligations`), which §11 removed.
 * Fuzzers: `audit/{elif,flags,method-sugar,same-return-value,short-string,struct-destructuring}/tools/fuzz.tcl`
   generate the qualified names and no `eq`; historical audit instruments
   under `audit/*/tools` were renamed mechanically where they named a
@@ -471,21 +477,181 @@ String (its `TYPE` error propagates through `get` at run time). `tests/stdlib-na
 
 ## 10. Remaining debt
 
-* `mutable_array::set`/`copy`/`freeze`/`allocate` and `str::substring` still
-  fail with `RANGE`. A write is not a lookup, so `IndexNotFound` was not
-  extended to them; whether out-of-bounds writes should become a declared
-  error too is a separate decision.
-* `char::scalar_value` and `char::codepoint` are the same operation twice:
-  the native is needed because a native cannot carry a static
-  `UnicodeChar` parameter contract, and the wrapper is what source should
-  call. A typed native parameter would remove the wrapper.
+* `mutable_array::allocate` keeps its `RANGE` for a negative or impossible
+  capacity (it is neither a lookup, a write nor a slice), as do the other
+  remaining `RANGE` sources: `str::is_tcl_alpha`/`is_tcl_alnum`'s
+  one-scalar requirement, shift amounts, refined-type constructors and the
+  native backend's collection-size ceiling (§11).
 * `argv` and `hash` stay root primitives (process boundary; any-value
   hash). If a `process::`/`value::` family ever exists they could move.
-* Positional-record corpus programs (`csv_records`, `hashtable`,
-  `csv_chunked`, `matmul`) now declare `IndexNotFound` through their call
-  chains: their index proofs need interprocedural facts (a record's fixed
-  length across a call), which the completion walk does not do.
-* Five fact/type test files compile through the index-obligation waiver
-  rather than being rewritten (`tests/helpers.tcl`).
+* Positional-record and positional-slicing corpus programs (`csv_records`,
+  `hashtable`, `csv_chunked`, `matmul`; since §11 also `csv`,
+  `ai_text_clean`, `string_replace`, `string_reverse` and the CSV slicing
+  of `csv_geometric`/`csv_records`) declare the errors through their call
+  chains: their proofs need interprocedural facts (a record's fixed length
+  across a call, a scan index below a length established by the caller),
+  which the completion walk does not do.
+* The Tcl compiler (`compile` backend) routes every native with declared
+  errors through its generic call (`core::runtime::callValue`), so a slice
+  or a write the completion proof has made obligation-free still pays the
+  generic call there; the native backend is unaffected.
 * Historical audit instruments were renamed but not re-run; earlier
   milestone reports keep the old names.
+
+## 11. Follow-up: write and slice errors, `char::scalar_value`, no test waiver
+
+### Writes: `IndexNotFound`
+
+`mutable_array::set(a, i, v)` declares `IndexNotFound`, with exactly
+`at`'s rule: it stores at `0 <= i < capacity` and fails for every other Int
+(past the end, negative, BigInt). A write is not a lookup, but an index
+that designates no slot is the same fact for both, so they share the error
+and its proofs (`ns-mutable-array-set-is-index-not-found`, `mat-run-7`).
+
+### Slices: `LowerUnderrun` and `UpperOverrun`
+
+Two more builtin declared errors, after `IndexNotFound` in
+`core::native::declareError` order: `LowerUnderrun` (native id
+`0x40000002`) and `UpperOverrun` (`0x40000003`;
+`native/src/runtime/error.rs` `ERR_LOWER_UNDERRUN`/`ERR_UPPER_OVERRUN`).
+The slicing intrinsics declare exactly those two:
+
+```
+str::substring(s: Str, start: Int, end: Int) -> Str  errors LowerUnderrun, UpperOverrun
+mutable_array::freeze(a, count: Int) -> List[T]       errors LowerUnderrun, UpperOverrun
+mutable_array::copy(dst, ds: Int, src, ss: Int, count: Int) errors LowerUnderrun, UpperOverrun
+```
+
+The one slice rule (`core::native::checkSlice`; native `check_slice` in
+`runtime/ops.rs`): a slice `START..END` of a sequence of `N` elements is
+valid iff `0 <= START <= END <= N`. START is checked first, against
+`0..N`, then END against `START..N`; a bound below its interval is
+`LowerUnderrun`, above it `UpperOverrun`. Consequences, decided once for
+all three natives:
+
+* an inverted slice (`END < START`, START itself valid) is `LowerUnderrun`:
+  END is below its interval;
+* a START past the end is `UpperOverrun` whatever END is
+  (`substring("abc", 4, 1)`);
+* `freeze(a, n)` is the slice `0..n`; a negative count is `LowerUnderrun`;
+* `copy` checks its destination slice `DS..DS+COUNT`, then its source slice
+  `SS..SS+COUNT` (memmove semantics within one array are unchanged); a
+  negative COUNT is `LowerUnderrun`;
+* BigInt bounds follow the same comparisons (no truncation).
+
+`ns-slice-rule-substring` and `ns-slice-rule-freeze-and-copy` pin every
+case on every backend, BigInts included; `cargo test`'s
+`slices_fail_with_lower_underrun_or_upper_overrun` pins the runtime's own.
+The string-region fast path (`rt_str_region_check`) uses the same check, so
+a slice consumed as a region fails exactly like a materialized one
+(`region-bounds-*`, `blockescape-region-companion-bounds-error-*`).
+
+### Proofs
+
+The slices get the same three-way completion proof as `at`
+(`hir/completions.tcl` `SliceFacts`): each of a slice's two checks is ruled
+out on its own, so a call may need only one of its two errors handled; a
+check that provably fails is `KNOWN-ERROR`. Sizes come from
+`hir/cardinality.tcl`, which gained a String length atom (`slen`) and
+`StrLength`: an exact String, `str::concat` (the sum of its operands'
+lengths), `str::lowercase` (length-preserving) and a `substring` (`end -
+start`). Branch facts gained minimum sizes (`if str::length(s) > 0:`, `==
+0` false), which also apply to a plain Int binding (`if n > 0:` over an
+array created with capacity `n`). `ns-slice-proofs` covers literals, an
+index guard, a counted loop, a minimum length, lengths through `concat`,
+capacities and the unsound neighbours.
+
+The shape of each native's check is registered with the native, not keyed
+by name in the pass: `core::native::register`'s new `-bounds` option
+(`index FAMILY C I` for `list::at`, `mutable_array::at`,
+`mutable_array::set`; `slices {FAMILY C START END}...` for the three
+slicing natives, with `{const K}` and `{sum A B}` operands), validated
+against the native's `-errors`. `hir/completions.tcl` reads it from the
+registration, which keeps the PARAMETERIZED-MUTABLEARRAY.md fence
+(`mat-id-4`: no name-keyed rules in `hir/`) intact.
+
+### `char::scalar_value` is the one name
+
+`char::codepoint` (`lib/char.bot`, a typed wrapper) is removed and
+`lib/char.bot` with it; `char::scalar_value` is the operation's only name.
+A "code point" also names surrogates and, colloquially, the numbers of
+other encodings (Latin-1); a Unicode scalar value is exactly what a
+UnicodeChar holds. `char::codepoint` is now an unknown member of `char`
+(`ns-char-scalar-value-is-canonical`), `lib/byte.bot` calls
+`char::scalar_value`, and the method spelling is `c.scalar_value()`.
+Behavior change: the wrapper's parameter was statically typed, so
+`char::codepoint(65)` was a compile-time contract error; like every
+native's parameter types, `char::scalar_value`'s `UnicodeChar` is checked
+when the call runs, so `char::scalar_value(65)` is the run-time `TYPE`
+error (`str::length(5)` behaves the same way). An untyped Botlish
+parameter forwarded to it is still inferred `UnicodeChar` and checked
+statically at its own call sites.
+
+### No test waiver
+
+`tests/helpers.tcl`'s `compileWaivingIndexObligations` is gone. Every test
+program that can fail with a declared error now handles it (by name, with
+the handler's value asserted, which is what lets these tests become Botlish
+tests later), declares it on its function, proves it impossible with a
+guard real code would use, or -- where the test's subject is the failure
+itself -- asserts the declared error by name (`uncaught propagated error:
+<error UpperOverrun>`, identical on every backend). Tests that used a
+statically certain failure to reach a run-time error now take the failing
+input as data, because a certain failure is a compile-time `KNOWN-ERROR`
+(`vc-str-error-*`, `mat-run-7`); `native-executable-runtime-error` uses an
+impossible allocation, which is still a run-time `RANGE`.
+
+### Where `RANGE` remains
+
+`mutable_array::allocate` (negative or too large capacity),
+`str::is_tcl_alpha`/`is_tcl_alnum` (an argument that is not one scalar),
+`shift_left`/`shift_right` amounts, refined-type constructors
+(`core/type.tcl`), and the native backend's collection-size ceiling. None is
+a lookup, a write or a slice.
+
+### Migration
+
+* `lib/web.bot`: `char_at` guards its slice with `if i < 0 or i >= n:
+  return ""` and `esc_from` with `if i < 0 or i >= str::length(text):` --
+  the early-return form, which keeps the string-region companion (an
+  if/else form lost it and materialized every character as a String,
+  about 10K more String allocations in the allocation tests).
+* Corpus: `csv`, `csv_geometric`, `csv_records`, `csv_chunked`,
+  `ai_text_clean`, `string_replace`, `string_reverse` and `hashtable`
+  declare the slice/write errors their unproven positions need and handle
+  them once at the sample, like §7's `IndexNotFound` (expected values
+  unchanged). `examples/05-refined-strings.ir` guards its prefix with a
+  length test.
+* `bench/lex-strategy.bot` and the audit probes (`adv1`, `adv2`,
+  `emailish-local-copy`, `hof-capturing`, `hof-two-exact`) guard their
+  slices; `mutarray-typed` freezes by `mutable_array::capacity(a)` (same
+  value).
+* Tests: as above; expectations that named `RANGE` for a slice or a write
+  now name the declared error, and accounting tests record the measured
+  effect of the new guards at each test (`native-report-inlined-leaf`:
+  `esc_from` +1 blocker, each `char_at` instance -1; `hir-specialize`,
+  `hir-aot`: one more generic `sample` instance per program that gained
+  one).
+
+### Validation
+
+* Full suite, each test file run separately: `interp` 5110 tests, 0
+  failures; `compile` 5110 tests, 0 failures (4 skipped); `cranelift`
+  5110 tests, 60 failing -- the same 60 test names as on the pre-milestone
+  tree (§9). New tests: `ns-bounds-are-registered`,
+  `ns-proof-binding-minimum`, `opt-native-1b`,
+  `blockescape-region-companion-bounds-error-2`, `region-bounds-handled-1`,
+  besides the slice/write tests listed above.
+* `cargo test --release` (native/): 181 passed, including
+  `slices_fail_with_lower_underrun_or_upper_overrun`.
+* `BOTLISH_NATIVE_GC_STRESS=1` over `stdlib-namespaces`, `native-mutarray`,
+  `mutable-array-type`, `native-string-region`, `virtual-construction`,
+  `lists` and `argv` (interp): 387 tests, 0 failures.
+* Fuzzer `-n 200 -seed 1`: 200 programs, 200 values, 200 negatives, 0
+  oracle disagreements, 0 negative escapes, 0 backend disagreements. With
+  `checkSlice` broken to report an inverted slice as `UpperOverrun` it
+  reports 12 oracle disagreements in 60 programs.
+* CI's example steps (`main.tcl -backend interp`, `-backend compile`, the
+  cranelift example set) succeed. Compiler warnings on the 75 corpus,
+  surface, bench and audit-probe programs are identical to the
+  pre-milestone tree, and so are their diagnostics.

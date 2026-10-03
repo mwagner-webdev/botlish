@@ -15,7 +15,7 @@
 # expect: ["abc", "aXc", "bb", "", ""]
 
 # true if needle occurs in haystack starting at index.
-fn matches_at(haystack, needle, index):
+fn matches_at(haystack, needle, index) errors LowerUnderrun, UpperOverrun:
     end = index + str::length(needle)
     if end > str::length(haystack):
         return false
@@ -24,7 +24,7 @@ fn matches_at(haystack, needle, index):
 
 # haystack from index on with its matches replaced, appended to done;
 # unmatched text from run_start up to index has not been copied yet.
-fn replace_from(haystack, needle, replacement, index, run_start, done):
+fn replace_from(haystack, needle, replacement, index, run_start, done) errors LowerUnderrun, UpperOverrun:
     if index + str::length(needle) > str::length(haystack):
         return str::concat(done, str::substring(haystack, run_start, str::length(haystack)))
 
@@ -35,10 +35,20 @@ fn replace_from(haystack, needle, replacement, index, run_start, done):
 
     replace_from(haystack, needle, replacement, index + 1, run_start, done)
 
-fn replace(haystack, needle, replacement):
+fn replace(haystack, needle, replacement) errors LowerUnderrun, UpperOverrun:
     if str::length(needle) == 0:
         return haystack
 
     replace_from(haystack, needle, replacement, 0, 0, "")
 
-[replace("abc", "x", "y"), replace("abc", "b", "X"), replace("aaaa", "aa", "b"), replace("abcabc", "abc", ""), replace("", "x", "y")]
+# The sample's inputs never take a slice out of range; the handlers
+# state what one would mean.
+fn sample() errors LowerUnderrun, UpperOverrun:
+    [replace("abc", "x", "y"), replace("abc", "b", "X"), replace("aaaa", "aa", "b"), replace("abcabc", "abc", ""), replace("", "x", "y")]
+
+checks = sample():
+    on LowerUnderrun:
+        []
+    on UpperOverrun:
+        []
+checks

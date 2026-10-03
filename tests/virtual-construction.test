@@ -126,9 +126,9 @@ test vc-str-region-1 {a substring operand is a StringRegion piece: never allocat
         [dict get $on construction regionPieces] [regexp {construct str flat region %\d+ %\d+ %\d+ %\d+} [nirOf $text]]
 } -result {{value {"élx"}} 1 2 1 1}
 
-test vc-str-region-2 {a region piece's bounds error is the eager substring's own error, raised at the same point} -body {
-    parity "fn f(t):\n    str::concat(\"a\", str::substring(t, 2, 9))\n\nf(\"hello\")"
-} -result {error {CORE SEMANTIC RANGE}}
+test vc-str-region-2 {a region piece's bounds error is the eager substring's own declared error (UpperOverrun), raised at the same point and handled by the caller} -body {
+    parity "fn f(t) errors LowerUnderrun, UpperOverrun:\n    str::concat(\"a\", str::substring(t, 2, 9))\n\nfn run(t):\n    r = f(t):\n        on LowerUnderrun:\n            \"lower\"\n        on UpperOverrun:\n            \"upper\"\n    r\n\n\[run(\"hello\"), run(\"hellohello\")\]"
+} -result {value {["upper", "allohell"]}}
 
 test vc-str-region-bind-1 {a substring bound to a local and then concatenated stays a StringRegion piece (reverse_from's shape)} -body {
     set text "fn build(t, i, acc):\n    if i >= str::length(t):\n        return acc\n    c = str::substring(t, i, i + 1)\n    build(t, i + 1, str::concat(c, acc))\n\nbuild(\"héllo🙂\", 0, \"\")"
@@ -241,27 +241,42 @@ test vc-str-unicode-1 {String semantics are unchanged: scalar counts and indexin
 # ---------------------------------------------------------------------------
 # String: strict evaluation, errors and completion
 
+# Three pieces: piece 1 always succeeds, piece 2 (a slice) fails with
+# UpperOverrun for a 5-character t, piece 3 (list::at(xs, 5)) fails with
+# IndexNotFound for a short xs. Each error is handled by name, so the value
+# says which piece failed first.
+set ::vcErrorOrder {fn f(t, xs) errors IndexNotFound, LowerUnderrun, UpperOverrun:
+    str::concat(str::concat(str::substring(t, 0, 1), str::substring(t, 4, 9)), list::at(xs, 5))
+
+fn run(t, xs):
+    r = f(t, xs):
+        on IndexNotFound:
+            "index"
+        on LowerUnderrun:
+            "lower"
+        on UpperOverrun:
+            "upper"
+    r
+
+[run("hello", ["x"]), run("hellohello", ["a", "b", "c", "d", "e", "f"]), run("hellohello", ["x"])]
+}
+
 test vc-str-error-order-1 {piece 1 succeeds, piece 2 errors, piece 3 never runs: the error is piece 2's} -body {
-    # Piece 3 would raise a *different* RANGE error (list::at's) if it ran.
-    parity "fn f(t):\n    str::concat(str::concat(str::substring(t, 0, 1), str::substring(t, 4, 9)), list::at(\[\], 0))\n\nf(\"hello\")"
-} -result {error {CORE SEMANTIC RANGE}}
+    # Piece 3 would raise a *different* error (list::at's IndexNotFound) if it
+    # ran: the third run, whose slice is valid, shows it.
+    parity $::vcErrorOrder
+} -result {value {["upper", "hohellf", "index"]}}
 
 test vc-str-error-order-2 {the error of the first failing piece is reported, identically everywhere} -body {
-    set text "fn f(t):\n    str::concat(str::concat(str::substring(t, 0, 1), str::substring(t, 4, 9)), list::at(\[\], 0))\n\nf(\"hello\")"
-    set hir [sourceHir $text]
-    set messages {}
-    foreach opt {0 1} {
-        catch {native::evalHir $hir -virtual-construction-opt $opt} message
-        lappend messages $message
-    }
-    catch {core::evalProgram [hir::lower $hir]} reference
-    list [expr {[lindex $messages 0] eq [lindex $messages 1]}] [string match *substring* [lindex $messages 1]] \
-        [string match *substring* $reference]
-} -result {1 1 1}
+    set hir [sourceHir $::vcErrorOrder]
+    set values [lmap opt {0 1} {core::value::show [native::evalHir $hir -virtual-construction-opt $opt] 1}]
+    lappend values [core::value::show [core::evalProgram [hir::lower $hir]] 1]
+    lsort -unique $values
+} -result {{["upper", "hohellf", "index"]}}
 
-test vc-str-error-midway-1 {an error midway through a runtime recurrence never exposes the partial plan} -body {
-    parity "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    piece = if i == 5:\n        str::substring(\"ab\", 1, 7)\n    else:\n        \"ab\"\n    build(i + 1, n, str::concat(acc, piece))\n\nbuild(0, 9, \"\")"
-} -result {error {CORE SEMANTIC RANGE}}
+test vc-str-error-midway-1 {an error midway through a runtime recurrence never exposes the partial plan: the handler's value replaces it} -body {
+    parity "fn build(i, n, acc, end) errors LowerUnderrun, UpperOverrun:\n    if i >= n:\n        return acc\n    piece = if i == 5:\n        str::substring(\"ab\", 1, end)\n    else:\n        \"ab\"\n    build(i + 1, n, str::concat(acc, piece), end)\n\nfn run(end):\n    r = build(0, 9, \"\", end):\n        on LowerUnderrun:\n            \"lower\"\n        on UpperOverrun:\n            \"upper\"\n    r\n\n\[run(7), run(2), run(0)\]"
+} -result {value {["upper", "abababababbababab", "lower"]}}
 
 test vc-str-error-handled-1 {a handled failure after a plan argument was consumed recovers with the handler's own value} -body {
     parity "error Bad\nfn g(s, fail_now) -> str errors Bad:\n    if fail_now:\n        fail Bad\n    else:\n        str::concat(s, \"!\")\n\nfn f(x, now):\n    r = g(str::concat(x, \"-\"), now):\n        on Bad:\n            \"handled\"\n    str::concat(r, \".\")\n\n\[f(\"a\", true), f(\"b\", false)\]"

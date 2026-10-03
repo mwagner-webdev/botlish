@@ -47,7 +47,7 @@ fn choose_classifier(strict_mode):
         lenient_ident_char?
 
 fn chars_of(s, i, acc):
-    if i >= str::length(s):
+    if i < 0 or i >= str::length(s):
         return acc
     chars_of(s, i + 1, list::append(acc, str::substring(s, i, i + 1)))
 

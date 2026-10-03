@@ -66,6 +66,22 @@
 #                   core::native::failDeclared, and core::native::invoke turns
 #                   that into an ordinary propagate-error completion, exactly
 #                   like a Botlish `fail NAME` (EXPLICIT-ERROR-COMPLETIONS.md).
+#   bounds          "" or the bounds checks behind a native's argument-
+#                   dependent errors (STDLIB-NAMESPACES.md), stated once here
+#                   so static analyses (hir/completions.tcl) read them by
+#                   registration, never by name:
+#                     index FAMILY C I  IndexNotFound unless the Int
+#                                     argument I designates an element of
+#                                     sequence argument C (0 <= I < N)
+#                     slices SLICE...  each SLICE {FAMILY C START END},
+#                                     checked in order by checkSlice:
+#                                     LowerUnderrun/UpperOverrun unless 0 <=
+#                                     START <= END <= N
+#                   FAMILY is the kind of sequence argument C (list,
+#                   mutarray or str; N its length or capacity); START and
+#                   END are each an argument index, {const K} or {sum A B}
+#                   (the sum of arguments A and B). A native with bounds
+#                   declares exactly the errors they produce.
 #   runtime         what a native implementation of the operation needs from
 #                   a runtime, beyond bare machine operations on values of
 #                   known kinds (a sorted list of tags from runtimeTags
@@ -188,7 +204,7 @@ proc core::native::register {name args} {
     }
     set options [dict create -impl "" -arity "" -refines-true {} -refines-false {} \
         -param-types "" -result-type any -tests-type "" -runtime {} -result-shape {} -result-range {} \
-        -native-body {} -module-fn {} -context-free 0 -errors {}]
+        -native-body {} -module-fn {} -context-free 0 -errors {} -bounds {}]
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "core::native::register: unknown option \"$option\""
@@ -282,6 +298,10 @@ proc core::native::register {name args} {
             error "core::native::register: -errors of \"$name\" names \"$error\", which is not a declared builtin error"
         }
     }
+    set bounds [dict get $options -bounds]
+    if {$bounds ne "" && ![ValidBounds $bounds $arity $errors]} {
+        error "core::native::register: bad -bounds \"$bounds\" for \"$name\" (with -errors {$errors})"
+    }
     set moduleFn [dict get $options -module-fn]
     if {$moduleFn ne "" && [llength $moduleFn] != 2} {
         error "core::native::register: -module-fn of \"$name\" must be a {NAMESPACE NAME} pair"
@@ -297,8 +317,55 @@ proc core::native::register {name args} {
         testsType $testsType \
         runtime [lsort -unique [dict get $options -runtime]] \
         resultShape $shape resultRange $range nativeBody $nativeBody moduleFn $moduleFn \
-        contextFree [dict get $options -context-free] errors $errors]
+        contextFree [dict get $options -context-free] errors $errors bounds $bounds]
     return [core::value::native $name]
+}
+
+# 1 if BOUNDS is a valid -bounds for a native of ARITY declaring exactly
+# ERRORS (sorted).
+proc core::native::ValidBounds {bounds arity errors} {
+    if {[catch {llength $bounds}] || ![string is digit -strict $arity]} {
+        return 0
+    }
+    set arg [list {a} [list expr "\[string is digit -strict \$a\] && \$a < $arity"]]
+    switch -- [lindex $bounds 0] {
+        index {
+            if {[llength $bounds] != 4 || $errors ne {IndexNotFound}} {
+                return 0
+            }
+            lassign $bounds _ family c i
+            return [expr {$family in {list mutarray str} && [apply $arg $c] && [apply $arg $i]}]
+        }
+        slices {
+            if {[llength $bounds] < 2 || $errors ne {LowerUnderrun UpperOverrun}} {
+                return 0
+            }
+            foreach slice [lrange $bounds 1 end] {
+                if {[catch {llength $slice} n] || $n != 4} {
+                    return 0
+                }
+                lassign $slice family c start end
+                if {$family ni {list mutarray str} || ![apply $arg $c]} {
+                    return 0
+                }
+                foreach operand [list $start $end] {
+                    if {[catch {llength $operand} n]} {
+                        return 0
+                    }
+                    switch -- [lindex $operand 0]/$n {
+                        const/2 { set ok [string is entier -strict [lindex $operand 1]] }
+                        sum/3   { set ok [expr {[apply $arg [lindex $operand 1]] && [apply $arg [lindex $operand 2]]}] }
+                        default { set ok [expr {$n == 1 && [apply $arg $operand]}] }
+                    }
+                    if {!$ok} {
+                        return 0
+                    }
+                }
+            }
+            return 1
+        }
+    }
+    return 0
 }
 
 # 1 if SHAPE is a valid -result-shape for a native taking COUNT arguments
@@ -405,6 +472,32 @@ proc core::native::builtinErrorIndex {name} {
 # (one of its own -errors). Never returns.
 proc core::native::failDeclared {name message} {
     throw [list CORE DECLARED-ERROR $name] $message
+}
+
+# The one slice rule (STDLIB-NAMESPACES.md), shared by every slicing native
+# (str::substring, mutable_array::copy, mutable_array::freeze) and
+# mirrored exactly by native/src/runtime/ops.rs's check_slice: the slice
+# START..END (END exclusive) of a sequence of N elements is valid iff
+# 0 <= START <= END <= N. Its bounds are checked in order -- START against
+# 0..N, then END against START..N -- and the first bound outside its
+# interval fails with the declared builtin error LowerUnderrun (below it)
+# or UpperOverrun (above it). So a negative start, and an end before the
+# start (an inverted slice, or a negative count), are LowerUnderrun; a
+# start or an end past N is UpperOverrun. NATIVE names the operation in the
+# message. START and END are Tcl integers of any size.
+proc core::native::checkSlice {native start end n} {
+    if {$start < 0} {
+        failDeclared LowerUnderrun "$native: slice start $start is below 0"
+    }
+    if {$start > $n} {
+        failDeclared UpperOverrun "$native: slice start $start is above the length $n"
+    }
+    if {$end < $start} {
+        failDeclared LowerUnderrun "$native: slice end $end is below its start $start"
+    }
+    if {$end > $n} {
+        failDeclared UpperOverrun "$native: slice end $end is above the length $n"
+    }
 }
 
 proc core::native::names {} {
@@ -579,8 +672,13 @@ proc core::native::invoke {nativeValue argValues} {
 # error.rs's ERR_* constants are both keyed to these indices, so the order
 # is declared once, here, never by whichever file happens to load first.
 #   InvalidArgumentEncoding  argv() (core/process.tcl; ARGV.md)
-#   IndexNotFound            list::at, mutable_array::at: the index does not
-#                            designate an element (core/lists.tcl,
-#                            core/mutarray.tcl; STDLIB-NAMESPACES.md)
+#   IndexNotFound            list::at, mutable_array::at, mutable_array::set:
+#                            the index does not designate an element
+#                            (core/lists.tcl, core/mutarray.tcl;
+#                            STDLIB-NAMESPACES.md)
+#   LowerUnderrun            a slice bound below its interval (checkSlice)
+#   UpperOverrun             a slice bound above its interval (checkSlice)
 core::native::declareError InvalidArgumentEncoding
 core::native::declareError IndexNotFound
+core::native::declareError LowerUnderrun
+core::native::declareError UpperOverrun

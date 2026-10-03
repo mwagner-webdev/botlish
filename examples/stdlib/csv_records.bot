@@ -124,7 +124,7 @@ fn geo_new_capacity(capacity, length):
 # appended, initializes every slot of the fresh array (mutable_array::create
 # fills all of them); the slots at LENGTH and beyond are overwritten by later
 # appends before freeze(LENGTH) can ever expose them.
-fn geo_grow(storage, length, value):
+fn geo_grow(storage, length, value) errors UpperOverrun:
     capacity = mutable_array::capacity(storage)
     if length < capacity:
         return storage
@@ -137,14 +137,14 @@ fn geo_grow(storage, length, value):
 # STORAGE with VALUE appended at index LENGTH, grown first when full. The
 # storage is mutated (or replaced by a grown copy, which is returned); the
 # caller's new length is LENGTH + 1.
-fn geo_append(storage, length, value):
+fn geo_append(storage, length, value) errors IndexNotFound, UpperOverrun:
     grown = geo_grow(storage, length, value)
     mutable_array::set(grown, length, value)
     grown
 
 # STORAGE's first LENGTH elements as an ordinary immutable List
 # (finalization: a single exact-size copy, see mutable_array::freeze).
-fn geo_finish(storage, length):
+fn geo_finish(storage, length) errors LowerUnderrun, UpperOverrun:
     mutable_array::freeze(storage, length)
 
 # ---------------------------------------------------------------------------
@@ -163,20 +163,20 @@ fn geo_finish(storage, length):
 # level obstruction"); while the scanned values were `any`, the storage was
 # MutableArray[any] and needed none.
 
-fn peek(text, index):
+fn peek(text, index) errors LowerUnderrun:
     if index >= str::length(text):
         return ""
 
     str::substring(text, index, index + 1)
 
-fn scan_unquoted(text, start, index):
+fn scan_unquoted(text, start, index) errors LowerUnderrun, UpperOverrun:
     character = peek(text, index)
     if character == "" or character == "," or character == "\n":
         return {field: str::substring(text, start, index), index: index}
 
     scan_unquoted(text, start, index + 1)
 
-fn scan_quoted(text, index, field):
+fn scan_quoted(text, index, field) errors LowerUnderrun:
     character = peek(text, index)
     if character == "\"":
         if peek(text, index + 1) == "\"":
@@ -186,7 +186,7 @@ fn scan_quoted(text, index, field):
 
     scan_quoted(text, index + 1, str::concat(field, character))
 
-fn scan_field(text, index):
+fn scan_field(text, index) errors LowerUnderrun, UpperOverrun:
     if peek(text, index) == "\"":
         return scan_quoted(text, index + 1, "")
 
@@ -199,7 +199,7 @@ fn scan_field(text, index):
 # DETERMINISM.md. It used to compile, with generic, guarded copies of the
 # whole call chain -- TYPED-MUTARRAY-BUILDER-REFACTOR.md, "Definition-order
 # sensitivity".)
-fn scan_record_rest(text, stop, fields: MutableArray[str], count):
+fn scan_record_rest(text, stop, fields: MutableArray[str], count) errors IndexNotFound, LowerUnderrun, UpperOverrun:
     delimiter = peek(text, stop)
     if delimiter == ",":
         scanned = scan_field(text, stop + 1)
@@ -213,12 +213,12 @@ fn scan_record_rest(text, stop, fields: MutableArray[str], count):
 
 # The record starting at INDEX and the index where it stops: the first field
 # (a record always has one, possibly empty) starts the FIELDS builder.
-fn scan_record(text, index):
+fn scan_record(text, index) errors IndexNotFound, LowerUnderrun, UpperOverrun:
     scanned = scan_field(text, index)
     scan_record_rest(text, scanned.index, geo_new(scanned.field), 1)
 
 # The records from INDEX on, the first COUNT records already in RECORDS.
-fn scan_records(text, index, records: MutableArray[List[str]], count):
+fn scan_records(text, index, records: MutableArray[List[str]], count) errors IndexNotFound, LowerUnderrun, UpperOverrun:
     if index >= str::length(text):
         return geo_finish(records, count)
 
@@ -226,7 +226,7 @@ fn scan_records(text, index, records: MutableArray[List[str]], count):
     more = geo_append(records, count, scanned.fields)
     scan_records(text, scanned.stop, more, count + 1)
 
-fn csv_parse(text):
+fn csv_parse(text) errors IndexNotFound, LowerUnderrun, UpperOverrun:
     if str::length(text) == 0:
         return []
 
@@ -250,14 +250,14 @@ fn ht_occupied_state():
 fn ht_tombstone_state():
     2
 
-fn ht_fill_empty(controls, i, capacity):
+fn ht_fill_empty(controls, i, capacity) errors IndexNotFound:
     if i >= capacity:
         return unit
 
     mutable_array::set(controls, i, ht_empty_state())
     ht_fill_empty(controls, i + 1, capacity)
 
-fn ht_alloc(capacity):
+fn ht_alloc(capacity) errors IndexNotFound:
     controls = mutable_array::allocate(capacity)
     ht_fill_empty(controls, 0, capacity)
     keys = mutable_array::allocate(capacity)
@@ -270,7 +270,7 @@ fn ht_alloc(capacity):
     mutable_array::set(table, 4, 0)
     table
 
-fn ht_new():
+fn ht_new() errors IndexNotFound:
     ht_alloc(ht_min_capacity())
 
 fn ht_capacity_for(expected, capacity):
@@ -279,7 +279,7 @@ fn ht_capacity_for(expected, capacity):
 
     ht_capacity_for(expected, capacity * 2)
 
-fn ht_new_sized(expected):
+fn ht_new_sized(expected) errors IndexNotFound:
     ht_alloc(ht_capacity_for(expected, ht_min_capacity()))
 
 fn ht_controls(table) errors IndexNotFound:
@@ -426,7 +426,7 @@ fn ht_set(table, key, value) errors IndexNotFound:
 
 # TABLE, freshly built to hold up to HEADER_COUNT entries: presized
 # (ht_new_sized) if PRESIZE, otherwise the plain default-capacity ht_new().
-fn row_new(presize, header_count):
+fn row_new(presize, header_count) errors IndexNotFound:
     if presize:
         return ht_new_sized(header_count)
 
@@ -464,7 +464,7 @@ fn row_table(headers, header_count, fields, presize) errors IndexNotFound:
 # copy those unknown slots into a MutableArray[mutarray]. The geo_* functions
 # themselves stay untyped. (REFACTOR-FINDING: see
 # TYPED-MUTARRAY-BUILDER-REFACTOR.md, "Definition-level obstruction".)
-fn build_rows(records, i, headers, header_count, outer: MutableArray[mutarray], count, presize) errors IndexNotFound:
+fn build_rows(records, i, headers, header_count, outer: MutableArray[mutarray], count, presize) errors IndexNotFound, LowerUnderrun, UpperOverrun:
     if i >= list::length(records):
         return geo_finish(outer, count)
 
@@ -476,7 +476,7 @@ fn build_rows(records, i, headers, header_count, outer: MutableArray[mutarray], 
 # not reconstructed, across every row -- see the file header). Empty input
 # and header-only input both produce [] (req #9); otherwise the first row
 # table starts the outer builder.
-fn csv_records_generic(text, presize) errors IndexNotFound:
+fn csv_records_generic(text, presize) errors IndexNotFound, LowerUnderrun, UpperOverrun:
     records = csv_parse(text)
     if list::length(records) <= 1:
         return []
@@ -488,12 +488,12 @@ fn csv_records_generic(text, presize) errors IndexNotFound:
 
 # The general baseline: every row table starts at default capacity, not
 # knowing how many fields it will hold (req #46).
-fn csv_records(text) errors IndexNotFound:
+fn csv_records(text) errors IndexNotFound, LowerUnderrun, UpperOverrun:
     csv_records_generic(text, false)
 
 # The presized variant: every row table is built for exactly this row's
 # header count via ht_new_sized (req #47) -- str::length(headers), nothing else.
-fn csv_records_presized(text) errors IndexNotFound:
+fn csv_records_presized(text) errors IndexNotFound, LowerUnderrun, UpperOverrun:
     csv_records_generic(text, true)
 
 # ---------------------------------------------------------------------------
@@ -501,7 +501,7 @@ fn csv_records_presized(text) errors IndexNotFound:
 # (checked directly, alongside the differential/property tests in
 # tests/native-csv-records.test).
 
-fn sample_checks() errors IndexNotFound:
+fn sample_checks() errors IndexNotFound, LowerUnderrun, UpperOverrun:
     rows = csv_records("name,age,city\nAlice,31,Berlin\nBob,42,Hamburg\n")
     presized_rows = csv_records_presized("name,age,city\nAlice,31,Berlin\nBob,42,Hamburg\n")
     first = list::at(rows, 0)
@@ -511,11 +511,16 @@ fn sample_checks() errors IndexNotFound:
     [list::length(rows), ht_get(first, "name"), ht_get(first, "age"), ht_get(first, "city"), ht_get(second, "name"), ht_get(second, "city"), agree]
 
 # The sample's input is well formed, so IndexNotFound (a row with more fields
-# than headers, or a broken table invariant: hashtable.bot's sample) cannot
-# happen; the handler states what it would mean.
+# than headers, or a broken table invariant: hashtable.bot's sample) and
+# LowerUnderrun/UpperOverrun (a slice or builder range the scanners cannot
+# prove in range) cannot happen; the handlers state what they would mean.
 fn sample():
     checks = sample_checks():
         on IndexNotFound:
+            []
+        on LowerUnderrun:
+            []
+        on UpperOverrun:
             []
     checks
 

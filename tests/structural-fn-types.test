@@ -130,11 +130,11 @@ test fn-law-exact-refines-structural {an exact callable is a subtype of its own 
         [list [hir::types::show [hir::types::structuralOf {block e2 2 int {args {int any} errors {NotFound}}}]]]
 } -result {1 1 1 {Fn{args: [int, any], return: int, errors: [NotFound]}}}
 
-test fn-law-native-structural-signature {a native's structural contract comes from the registry: fixed arity, -result-type, no errors, and every argument any (its -param-types are run-time-checked requirements, not static obligations)} -body {
+test fn-law-native-structural-signature {a native's structural contract comes from the registry: fixed arity, -result-type, its declared -errors (str::substring's LowerUnderrun/UpperOverrun), and every argument any (its -param-types are run-time-checked requirements, not static obligations)} -body {
     list [hir::types::show [hir::types::structuralOf {native str::is_tcl_alnum}]] \
          [hir::types::show [hir::types::structuralOf {native str::substring}]] \
          [hir::types::structuralOf {native list}]
-} -result {{Fn{args: [any], return: bool, errors: []}} {Fn{args: [any, any, any], return: str, errors: []}} {}}
+} -result {{Fn{args: [any], return: bool, errors: []}} {Fn{args: [any, any, any], return: str, errors: [LowerUnderrun, UpperOverrun]}} {}}
 
 test fn-law-lub-idempotent {lub(T, T) == T, exactness kept for the same target} -body {
     set f [fnT {str} bool]

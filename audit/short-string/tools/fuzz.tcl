@@ -114,7 +114,7 @@ proc program {} {
     set extra {}
     # peek, once: the corpus idiom
     if {rand() < 0.5} {
-        lappend lines "fn peek(text, index):\n    if index >= str::length(text):\n        return \"\"\n\n    str::substring(text, index, index + 1)\n"
+        lappend lines "fn peek(text, index):\n    if index < 0 or index >= str::length(text):\n        return \"\"\n\n    str::substring(text, index, index + 1)\n"
         set peekable 1
     } else {
         set peekable 0
@@ -124,13 +124,13 @@ proc program {} {
         # an error-capable helper whose success value is a short String, and a
         # caller with a handler: Empty must stay a value, failure the status
         set lines [linsert $lines 0 "error Bad\n"]
-        lappend lines "fn guarded(n, s) -> str errors Bad:\n    if n > 3:\n        fail Bad\n    else:\n        [atom {s} {n} {}]\n"
-        lappend lines "fn run(n, s):\n    r = guarded(n, s):\n        on Bad:\n            [strLit]\n    r\n"
+        lappend lines "fn guarded(n, s) -> str errors Bad, LowerUnderrun, UpperOverrun:\n    if n > 3:\n        fail Bad\n    else:\n        [atom {s} {n} {}]\n"
+        lappend lines "fn run(n, s) errors LowerUnderrun, UpperOverrun:\n    r = guarded(n, s):\n        on Bad:\n            [strLit]\n    r\n"
         lappend callable "run:is"
     }
     if {rand() < 0.4} {
         # a closure capturing a short local (the environment is tagged)
-        lappend lines "fn cap(n, s):\n    v = [atom {s} {n} {}]\n    fn add(x):\n        str::concat(v, x)\n    add(\"!\")\n"
+        lappend lines "fn cap(n, s) errors LowerUnderrun, UpperOverrun:\n    v = [atom {s} {n} {}]\n    fn add(x):\n        str::concat(v, x)\n    add(\"!\")\n"
         lappend extra "cap:is"
     }
     set nfun [expr {2 + int(rand() * 4)}]
@@ -171,7 +171,7 @@ proc program {} {
                 lappend body {*}[finalExpr $allS $ivars $callable "    "]
             }
         }
-        lappend lines "fn f${i}([join $vars {, }]):\n[join $body \n]\n"
+        lappend lines "fn f${i}([join $vars {, }]) errors LowerUnderrun, UpperOverrun:\n[join $body \n]\n"
         lappend callable "f$i:$kind"
     }
     # consumers of String results
@@ -186,7 +186,11 @@ proc program {} {
     set picks {}
     set m [expr {3 + int(rand() * 6)}]
     for {set i 0} {$i < $m} {incr i} { lappend picks [pick $cons] }
-    return "[join $lines \n]\n\[[join $picks {, }]\]\n"
+    # Every generated function declares the slice errors its inline
+    # str::substring calls may raise (STDLIB-NAMESPACES.md); the program's
+    # value turns them into ["lower"]/["upper"], so an out-of-range slice is an
+    # outcome the backends must agree on, not a static rejection.
+    return "[join $lines \n]\nfn main() errors LowerUnderrun, UpperOverrun:\n    \[[join $picks {, }]\]\nr = main():\n    on LowerUnderrun:\n        \[\"lower\"\]\n    on UpperOverrun:\n        \[\"upper\"\]\nr\n"
 }
 
 proc outcome {kind hir args} {

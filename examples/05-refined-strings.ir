@@ -6,7 +6,9 @@
 #            block captured there reports address : str[Emailish].
 # query    - UriQueryValue is opaque: only uriEscape produces it, and the
 #            result carries runtime evidence ("..."#{UriQueryValue}).
-# prefix   - substring discards the refinement: a plain str.
+# prefix   - substring discards the refinement: a plain str. The length
+#            guard proves the slice 0..3 in bounds, so str::substring's
+#            LowerUnderrun/UpperOverrun need no handler.
 # Expected (compile backend also prints the inferred types):
 #   [<block ()>, "a%26b%3Dc"#{UriQueryValue}, "a%2", true]
 
@@ -18,7 +20,10 @@
         {block {} {block {} {const str invalid}}}}}
 
 {bind query {call {ref uriEscape} {const str {a&b=c}}}}
-{bind prefix {call {ref str::substring} {ref query} {const 0} {const 3}}}
+{bind prefix
+    {if {call {ref <} {call {ref str::length} {ref query}} {const 3}}
+        {block {} {const str {}}}
+        {block {} {call {ref str::substring} {ref query} {const 0} {const 3}}}}}
 
 {call {ref list}
     {ref probe}

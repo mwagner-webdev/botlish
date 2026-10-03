@@ -8,6 +8,8 @@
 fn run(v):
     n = str::length(v)
     fn char_at(i):
+        if i < 0 or i >= n:
+            return ""
         str::substring(v, i, i + 1)
     fn scan_while(start, predicate):
         loop i from start to n:

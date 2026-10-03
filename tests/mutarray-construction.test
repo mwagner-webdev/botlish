@@ -23,17 +23,10 @@ interp recursionlimit {} 100000
 
 set parityBackends {interp compile cranelift-generic cranelift}
 
-# (An IndexNotFound obligation alone does not reject: helpers.tcl's
-# compileWaivingIndexObligations -- indexing is incidental to this file.)
 proc mcCompile {src {strict 1}} {
     set path [makeFile $src mc-program.bot]
     try {
-        if {!$strict} {
-            return [surface::readProgramFile $path -strict 0]
-        }
-        compileWaivingIndexObligations \
-            {surface::readProgramFile $path -strict 1} \
-            {surface::readProgramFile $path -strict 0}
+        surface::readProgramFile $path -strict $strict
     } finally {
         removeFile mc-program.bot
     }
@@ -244,7 +237,7 @@ test mutarray-list-2 {list::at with a dynamic index is the element contract} -bo
 } -result {MutableArray[int]}
 
 test mutarray-list-3 {list::at through a function-returned List[mutarray] is mutarray} -body {
-    mcResult "fn mk():\n    mutable_array::allocate(3)\nfn rows():\n    \[mk(), mk(), mk()\]\nfn row(i) errors IndexNotFound:\n    list::at(rows(), i)\nrow(1)" row
+    mcResult "fn mk():\n    mutable_array::allocate(3)\nfn rows():\n    \[mk(), mk(), mk()\]\nfn row(i) errors IndexNotFound:\n    list::at(rows(), i)\nv = row(1):\n    on IndexNotFound:\n        mutable_array::allocate(0)\nv" row
 } -result mutarray
 
 test mutarray-list-4 {list::append preserves List[MutableArray[int]]} -body {
@@ -252,7 +245,7 @@ test mutarray-list-4 {list::append preserves List[MutableArray[int]]} -body {
 } -result {List[MutableArray[int]]}
 
 test mutarray-list-5 {a consumer reached through list::at is statically proven, not checked at run time} -body {
-    set src "fn rows():\n    \[mutable_array::from_list(\[1\]), mutable_array::from_list(\[2, 3\])\]\nfn cap(i) errors IndexNotFound:\n    mutable_array::capacity(list::at(rows(), i))\ncap(1)"
+    set src "fn rows():\n    \[mutable_array::from_list(\[1\]), mutable_array::from_list(\[2, 3\])\]\nfn cap(i) errors IndexNotFound:\n    mutable_array::capacity(list::at(rows(), i))\nv = cap(1):\n    on IndexNotFound:\n        -1\nv"
     set hir [mcCompile $src]
     set caps [hirFind $hir call mutable_array::capacity]
     list [mcLast $src] [mcParity $src] [mcValue $src]
@@ -343,16 +336,16 @@ test mutarray-pred-15 {a used specialization view keeps the bool result} -body {
 # Negative controls: what must NOT be inferred (spec items 41-42, 46-48, 78-80)
 
 test mutarray-neg-1 {a positional pair function result gains no slot typing} -body {
-    mcResult "fn mkpair():\n    \[mutable_array::allocate(1), 0\]\nfn first() errors IndexNotFound:\n    list::at(mkpair(), 0)\nfirst()" first
+    mcResult "fn mkpair():\n    \[mutable_array::allocate(1), 0\]\nfn first() errors IndexNotFound:\n    list::at(mkpair(), 0)\nv = first():\n    on IndexNotFound:\n        0\nv" first
 } -result any
 
 test mutarray-neg-2 {a List parameter gains no positional schema from a MutableArray slot} -body {
-    list [mcSig "fn first(p) errors IndexNotFound:\n    list::at(p, 0)\nfirst(\[mutable_array::allocate(1), 0\])" first] \
-        [mcLast "fn first(p) errors IndexNotFound:\n    list::at(p, 0)\nfirst(\[mutable_array::allocate(1), 0\])"]
+    set src "fn first(p) errors IndexNotFound:\n    list::at(p, 0)\nv = first(\[mutable_array::allocate(1), 0\]):\n    on IndexNotFound:\n        0\nv"
+    list [mcSig $src first] [mcLast $src]
 } -result "{{p: list (inferred checked)}} any"
 
 test mutarray-neg-3 {[storage, length]: the record consumer needs an independent proof} -body {
-    mcRejects "fn geo_new():\n    \[mutable_array::allocate(0), 0\]\nfn geo_capacity(builder) errors IndexNotFound:\n    mutable_array::capacity(list::at(builder, 0))\ngeo_capacity(geo_new())" *
+    mcRejects "fn geo_new():\n    \[mutable_array::allocate(0), 0\]\nfn geo_capacity(builder) errors IndexNotFound:\n    mutable_array::capacity(list::at(builder, 0))\nv = geo_capacity(geo_new()):\n    on IndexNotFound:\n        0\nv" *
 } -result accepted
 
 test mutarray-neg-4 {a heterogeneous pair literal is a plain list, not a product of mutarray and int} -body {
@@ -362,7 +355,7 @@ test mutarray-neg-4 {a heterogeneous pair literal is a plain list, not a product
 test mutarray-neg-5 {the only mutarray fact about a local pair is the pre-existing exact-value fact, not a type} -body {
     list [mcLast "p = \[mutable_array::allocate(1), 0\]\np"] \
         [mcLast "p = \[mutable_array::allocate(1), 0\]\nlist::at(p, 0)"] \
-        [mcResult "fn mk():\n    \[mutable_array::allocate(1), 0\]\nfn snd() errors IndexNotFound:\n    list::at(mk(), 1)\nsnd()" snd]
+        [mcResult "fn mk():\n    \[mutable_array::allocate(1), 0\]\nfn snd() errors IndexNotFound:\n    list::at(mk(), 1)\nv = snd():\n    on IndexNotFound:\n        0\nv" snd]
 } -result {list mutarray any}
 
 test mutarray-neg-6 {no exact fact describes a MutableArray's contents} -body {
@@ -419,11 +412,12 @@ test mutarray-sem-4 {an alias shares storage (existing MutableArray aliasing is 
     list [mcParity $src] [mcValue $src]
 } -result {same 5}
 
-test mutarray-sem-5 {the empty List: capacity 0, predicate true, any index is RANGE} -body {
-    set ok "fn f() errors IndexNotFound:\n    m = mutable_array::from_list(\[\])\n    \[mutable_array::capacity(m), mutarray?(m)\]\nf()"
+test mutarray-sem-5 {the empty List: capacity 0, predicate true, any index is IndexNotFound -- statically known here, so a compile-time KNOWN-ERROR, and (run anyway) the declared error} -body {
+    set ok "fn f():\n    m = mutable_array::from_list(\[\])\n    \[mutable_array::capacity(m), mutarray?(m)\]\nf()"
     set bad "fn f() errors IndexNotFound:\n    m = mutable_array::from_list(\[\])\n    mutable_array::set(m, 0, 1)\nf()"
-    list [mcParity $ok] [mcValue $ok] [mcParity $bad] [lindex [outcomeUnder interp [hir::lower [mcCompile $bad 0]]] 1]
-} -result {same {[0, true]} same {CORE SEMANTIC RANGE}}
+    list [mcParity $ok] [mcValue $ok] [lsort -unique [lmap d [hir::diagnostics [mcCompile $bad 0]] {dict get $d kind}]] \
+        [lindex [outcomeUnder interp [hir::lower [mcCompile $bad 0]]] 1]
+} -result {same {[0, true]} KNOWN-ERROR {CORE SEMANTIC UNCAUGHT-ERROR}}
 
 test mutarray-sem-6 {a heterogeneous source List is accepted and kept as is} -body {
     set src "fn f() errors IndexNotFound:\n    m = mutable_array::from_list(\[\"x\", 1, true\])\n    \[mutable_array::at(m, 0), mutable_array::at(m, 1), mutable_array::at(m, 2)\]\nf()"

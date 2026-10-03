@@ -38,9 +38,15 @@ pub enum RtError {
 pub const BUILTIN_ERROR_ID_BASE: u32 = 0x4000_0000;
 /// `InvalidArgumentEncoding`, the error of `argv()` (builtin error 0).
 pub const ERR_INVALID_ARGUMENT_ENCODING: u32 = BUILTIN_ERROR_ID_BASE;
-/// `IndexNotFound`, the error of `list::at` and `mutable_array::at`
-/// (builtin error 1): the index does not designate an element.
+/// `IndexNotFound`, the error of `list::at`, `mutable_array::at` and
+/// `mutable_array::set` (builtin error 1): the index does not designate an
+/// element.
 pub const ERR_INDEX_NOT_FOUND: u32 = BUILTIN_ERROR_ID_BASE + 1;
+/// `LowerUnderrun` (builtin error 2): a slice bound below its interval
+/// (runtime::ops's `check_slice`, core::native::checkSlice).
+pub const ERR_LOWER_UNDERRUN: u32 = BUILTIN_ERROR_ID_BASE + 2;
+/// `UpperOverrun` (builtin error 3): a slice bound above its interval.
+pub const ERR_UPPER_OVERRUN: u32 = BUILTIN_ERROR_ID_BASE + 3;
 
 /// Semantic error kinds of core/errors.tcl that NIR may raise.
 pub const SEMANTIC_KINDS: &[&str] = &[

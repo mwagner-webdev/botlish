@@ -433,14 +433,14 @@ fb(byte::from_int(7))
 # ---------------------------------------------------------------------------
 # Native metadata (spec #39)
 
-scenario S14-native-result-range {char::codepoint's -result-range nonneg reaches a shared from_int instance} \
+scenario S14-native-result-range {char::scalar_value's -result-range nonneg reaches a shared from_int instance} \
     {fn conv(c: UnicodeChar):
-    r = byte::from_int(char::codepoint(c)):
+    r = byte::from_int(char::scalar_value(c)):
         on AboveRange:
             0
     r
 conv('a')
-} {conv byte::from_int char::codepoint}
+} {conv byte::from_int char::scalar_value}
 
 # ---------------------------------------------------------------------------
 # Self-tail widening (specialize.tcl header)

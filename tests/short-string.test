@@ -587,10 +587,10 @@ test short-nir-env-disables {BOTLISH_NATIVE_SHORT_STRING_OPT=0 is the same switc
 
 test short-slice-is-an-infallible-extract-after-the-ordinary-check {str::substring(text, 0, 1) as a short value: the same regioncheck an ordinary call runs, then a total strsliceshort; no String allocated} -body {
     set text {
-        fn first(t):
+        fn first(t) errors UpperOverrun:
             str::substring(t, 0, 1)
 
-        fn show(t):
+        fn show(t) errors UpperOverrun:
             c = first(t)
             [c, str::length(c)]
 
@@ -604,7 +604,7 @@ test short-slice-is-an-infallible-extract-after-the-ordinary-check {str::substri
 test short-slice-peek-shape {peek(text, i): "" past the end, else str::substring(text, i, i + 1): a ShortString1 result (the index step is hir::induction's existing fact)} -body {
     set text {
         fn peek(text, index):
-            if index >= str::length(text):
+            if index < 0 or index >= str::length(text):
                 return ""
 
             str::substring(text, index, index + 1)
@@ -618,39 +618,41 @@ test short-slice-peek-shape {peek(text, i): "" past the end, else str::substring
     list [shortPlan $text {*}$noInline] [parityShort $text]
 } -result {{first_is_a<str>=val>val {peek<str, int>=val,val>short}} {value:[[1, true, false], [0, false, true]]}}
 
-test short-slice-empty-index-error-is-unchanged {substring on an empty String raises the same RANGE error with the ShortString1 producer: Empty (-1) is never a failure value} -body {
-    set text {
-        fn first(t):
+# A failure the compiler cannot prove statically (the String is computed),
+# observed through the program's own handler.
+set ::shortEmptySlice {
+        fn first(t) errors UpperOverrun:
             str::substring(t, 0, 1)
 
-        first("")
-    }
-    parityShort $text
-} -result {error:CORE SEMANTIC RANGE}
+        fn outcome():
+            r = first(str::concat("", "")):
+                on UpperOverrun:
+                    return "UpperOverrun"
+            r
 
-test short-slice-bounds-error-message {the RANGE message of a ShortString1 slice is byte-identical to an ordinary substring's} -body {
-    set text {
-        fn first(t):
-            str::substring(t, 0, 1)
-
-        first("")
+        outcome()
     }
-    set hir [srcHir $text]
-    set messages {}
+
+test short-slice-empty-index-error-is-unchanged {substring on an empty String fails with the same declared error (UpperOverrun) with the ShortString1 producer: Empty (-1) is never a failure value} -body {
+    parityShort $::shortEmptySlice
+} -result {value:"UpperOverrun"}
+
+test short-slice-bounds-error-message {the declared error of a ShortString1 slice is the ordinary substring's, with the optimization on and off and on the interpreter} -body {
+    set hir [srcHir $::shortEmptySlice]
+    set outcomes {}
     foreach opt {0 1} {
-        catch {native::evalHir $hir -short-string-opt $opt} msg
-        lappend messages $msg
+        lappend outcomes [core::value::show [native::evalHir $hir -short-string-opt $opt] 1]
     }
-    set interp [catch {core::evalProgram [hir::lower $hir]} imsg]
-    list [lindex $messages 0] [expr {[lindex $messages 0] eq [lindex $messages 1]}] [expr {$imsg eq [lindex $messages 0]}]
-} -result {{str::substring: range 0..1 is outside 0..0} 1 1}
+    lappend outcomes [core::value::show [core::evalProgram [hir::lower $hir]] 1]
+    lsort -unique $outcomes
+} -result {{"UpperOverrun"}}
 
 test short-slice-non-ascii {a non-ASCII slice: the scalar, not a byte} -body {
     parityShort {
-        fn first(t):
+        fn first(t) errors UpperOverrun:
             str::substring(t, 0, 1)
 
-        fn second(t):
+        fn second(t) errors UpperOverrun:
             str::substring(t, 1, 2)
 
         ["ä" == first("äx"), second("a€") == "€", str::length(second("a猫")), first("😀z") == "😀"]
@@ -685,17 +687,28 @@ test short-error-capable-result {an error-capable function with a ShortString1 s
     list [shortResult [fnText $nir guarded]] [parityShort $text]
 } -result {1 {value:["caught", "", "y", 0, true]}}
 
-test short-error-escapes-uncaught {a runtime RANGE failure inside a ShortString1-result function is the same error outcome with the optimization on and off, and Empty never stands for it} -body {
+test short-error-escapes-uncaught {a run-time slice failure inside a ShortString1-result function is the same declared error with the optimization on and off, and Empty never stands for it} -body {
     parityShort {
-        fn at(t, i):
+        fn at(t, i) errors LowerUnderrun, UpperOverrun:
             str::substring(t, i, i + 1)
 
-        fn drive(i):
+        fn drive(i) errors LowerUnderrun, UpperOverrun:
             [at("ab", i), str::length(at("ab", i))]
 
-        [drive(0), drive(1), drive(2)]
+        fn all() errors LowerUnderrun, UpperOverrun:
+            [drive(0), drive(1), drive(str::length(str::concat("a", "b")))]
+
+        fn outcome():
+            r = all():
+                on LowerUnderrun:
+                    return "LowerUnderrun"
+                on UpperOverrun:
+                    return "UpperOverrun"
+            r
+
+        outcome()
     }
-} -result {error:CORE SEMANTIC RANGE}
+} -result {value:"UpperOverrun"}
 
 test short-error-in-the-caller-handler {a handler around a short-result call: Empty passes through the success path} -body {
     parityShort {
@@ -1011,7 +1024,7 @@ test short-executable-everything {Empty, ASCII, non-ASCII, NUL, parameter/result
         fn probe(s):
             \[str::length(s), s == \"\", s == \"λ\", s == \"$nul\"\]
 
-        fn first(t):
+        fn first(t) errors UpperOverrun:
             str::substring(t, 0, 1)
 
         \[probe(fwd(pick(0))), probe(fwd(pick(1))), probe(fwd(pick(2))), probe(fwd(pick(3))), run(2), run(8), list::append(\[pick(2)\], pick(0)), first(\"ä€\") == \"ä\"\]

@@ -31,12 +31,9 @@ proc vtWrite {name content} {
     return [tcltest::makeFile $content $name]
 }
 set ::vtCounter 0
-# (Representation is this file's subject: an IndexNotFound obligation alone
-# does not reject -- helpers.tcl's compileWaivingIndexObligations.)
 proc vtHir {source} {
     set path [vtWrite vt-[incr ::vtCounter].bot $source]
-    return [compileWaivingIndexObligations \
-        {surface::readProgramFile $path} {surface::readProgramFile $path -strict 0}]
+    return [surface::readProgramFile $path]
 }
 # Probe programs run for a handful of iterations; tiny-leaf inlining is off so
 # every boundary under test stays a call.
@@ -289,14 +286,17 @@ test vt-positional-list-uses-the-same-model {a fixed-shape positional product Li
         set idx [lrange {0 1 2 3 4 5 6 7 8 9} 0 [expr {$w - 1}]]
         set uses [join [lmap i $idx {string cat "list::at(r, $i)"}] { + }]
         set lit "\[[join [lmap i $idx {string cat "i + $i"}] {, }]\]"
-        set chain "fn fwd0(r, k):\n    $uses + k\n"
-        for {set k 1} {$k < $e} {incr k} { append chain "fn fwd${k}(r, k):\n    fwd[expr {$k - 1}](r, k)\n" }
+        set chain "fn fwd0(r, k) errors IndexNotFound:\n    $uses + k\n"
+        for {set k 1} {$k < $e} {incr k} { append chain "fn fwd${k}(r, k) errors IndexNotFound:\n    fwd[expr {$k - 1}](r, k)\n" }
         return "$chain
-fn drive(i, n, acc):
+fn drive(i, n, acc) errors IndexNotFound:
     if i >= n:
         return acc
     drive(i + 1, n, acc + fwd[expr {$e - 1}]($lit, i))
-drive(0, 10, 0)
+total = drive(0, 10, 0):
+    on IndexNotFound:
+        -1
+total
 "
     }
     proc listNew {source args} {
@@ -608,7 +608,7 @@ set vtGc(nested-list-mutarray) {fn mk(i):
 fn run(i):
     r = mk(i)
     junk = str::concat(str::concat("j", "k"), "m")
-    [mutable_array::at(r.arr, 0), r.inner.items, r.inner.tag, junk]
+    [mutable_array::get(r.arr, 0, ""), r.inner.items, r.inner.tag, junk]
 run(1)
 }
 set vtGc(nested-materialized-later) {fn run(i):

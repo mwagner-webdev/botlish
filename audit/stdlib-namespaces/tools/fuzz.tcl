@@ -1,9 +1,10 @@
 #!/usr/bin/env tclsh9.0
 # fuzz.tcl -- bounded randomized check of the standard-namespace cleanup
 # (STDLIB-NAMESPACES.md): list::at / list::get, mutable_array::at /
-# mutable_array::get / mutable_array::set, str::* and list::* intrinsics in
-# free and method spelling, the eager default of get, and the programs the
-# cleanup made illegal.
+# mutable_array::get / mutable_array::set, the slices (str::substring,
+# mutable_array::freeze, mutable_array::copy) and their LowerUnderrun /
+# UpperOverrun, str::* and list::* intrinsics in free and method spelling,
+# the eager default of get, and the programs the cleanup made illegal.
 #
 #   tclsh9.0 audit/stdlib-namespaces/tools/fuzz.tcl ?-n N? ?-seed S? ?-dump 1? ?-backends LIST?
 #
@@ -26,17 +27,30 @@
 #              is evaluated exactly once per call, present index or not
 #   strings    str::concat/str::length/list::append/list::length, free and
 #              method spelling
+#   slice      str::substring(S, A, B), free and by method, over Strings with
+#              multi-byte scalars and bounds inside, just outside and BigInt:
+#              the characters, or the slice rule's error (core::native::
+#              checkSlice: START against 0..N first, then END against
+#              START..N; below is LowerUnderrun, above UpperOverrun)
+#   freeze     mutable_array::freeze(from_list(XS), C): the slice 0..C
+#   copy       mutable_array::copy within one array (overlapping ranges,
+#              memmove semantics), destination slice checked before source
+#   set        mutable_array::set at any index: the array afterwards, or
+#              IndexNotFound
 #
 # The oracle checks every backend's value, and the backends must agree.
 #
 # Each program also has one NEGATIVE program, rotating through the shapes
 # the cleanup must reject: `a eq b` (syntax), `eq(a, b)` and every
-# historical root name (unbound), a namespace-declaring program redefining a
+# historical root name (unbound), the removed `char::codepoint` wrapper (an
+# unknown member of namespace char), a namespace-declaring program redefining a
 # protected intrinsic member (DUPLICATE-NATIVE), a provably missing literal
 # index (KNOWN-ERROR), an unproven list::at in an undeclaring function
 # (UNHANDLED-ERROR), a method spelling of an intrinsic never bound to a name
-# (no function visible), and get applied to a non-List (the TYPE error
-# propagates on every backend: it is not swallowed into the default). A
+# (no function visible), get applied to a non-List (the TYPE error
+# propagates on every backend: it is not swallowed into the default), an
+# inverted literal substring and an out-of-range literal set (KNOWN-ERROR),
+# and an unproven substring in an undeclaring function (UNHANDLED-ERROR). A
 # negative program accepted, or rejected for another reason, is a "negative
 # escape".
 #
@@ -151,12 +165,74 @@ fn array_at(a, i):
     v
 fn set_then_read(xs, i, value):
     a = mutable_array::from_list(xs)
-    a.aset(i, value)
+    done = a.aset(i, value):
+        on IndexNotFound:
+            return "missing"
     v = a.aat(i):
         on IndexNotFound:
             "missing"
     v
+fn set_at(xs, i, value):
+    a = mutable_array::from_list(xs)
+    done = mutable_array::set(a, i, value):
+        on IndexNotFound:
+            return "missing"
+    mutable_array::freeze(a, mutable_array::capacity(a))
+substring = str::substring
+fn slice_of(s, a, b):
+    v = str::substring(s, a, b):
+        on LowerUnderrun:
+            return "lower"
+        on UpperOverrun:
+            return "upper"
+    v
+fn slice_method(s, a, b):
+    v = s.substring(a, b):
+        on LowerUnderrun:
+            return "lower"
+        on UpperOverrun:
+            return "upper"
+    v
+fn freeze_of(xs, n):
+    a = mutable_array::from_list(xs)
+    v = mutable_array::freeze(a, n):
+        on LowerUnderrun:
+            return "lower"
+        on UpperOverrun:
+            return "upper"
+    v
+fn copy_within(xs, ds, ss, n):
+    a = mutable_array::from_list(xs)
+    done = mutable_array::copy(a, ds, a, ss, n):
+        on LowerUnderrun:
+            return "lower"
+        on UpperOverrun:
+            return "upper"
+    mutable_array::freeze(a, mutable_array::capacity(a))
 }
+
+# The slice rule (core::native::checkSlice): "" for a valid slice
+# START..END of N elements, else the error it fails with, as the fuzz
+# helpers above report it.
+proc sliceOutcome {start end n} {
+    if {$start < 0} { return {"lower"} }
+    if {$start > $n} { return {"upper"} }
+    if {$end < $start} { return {"lower"} }
+    if {$end > $n} { return {"upper"} }
+    return ""
+}
+
+# A slice bound for a sequence of N elements: inside, just outside, or a
+# BigInt of either sign.
+proc genBound {n} {
+    set r [expr {rand()}]
+    if {$r < 0.6} { return [rnd 0 $n] }
+    if {$r < 0.75} { return [rnd -2 -1] }
+    if {$r < 0.9} { return [expr {$n + [rnd 1 2]}] }
+    return [pick {100000000000000000000 -100000000000000000000}]
+}
+
+proc showList {shownItems} { return "\[[join $shownItems {, }]\]" }
 
 # One check: {SOURCE EXPECTED-SHOWN MARKS} (MARKS: mark() evaluations).
 proc genCheck {} {
@@ -167,7 +243,8 @@ proc genCheck {} {
     set elem [elementAt $items $i]
     set got [expr {$elem eq "" ? $dShown : $elem}]
     set missing [expr {$elem eq "" ? {"missing"} : $elem}]
-    switch -- [pick {get get-method explicit at at-method array-get array-get-method array-explicit array-at array-set eager strings lists}] {
+    set check [pick {get get-method explicit at at-method array-get array-get-method array-explicit array-at array-set eager strings lists slice slice-method freeze copy set}]
+    switch -- $check {
         get { return [list "list::get($xs, $i, $d)" $got 0] }
         get-method { return [list "$xs.get($i, $d)" $got 0] }
         explicit { return [list "list::get($xs, $i, $d) == explicit($xs, $i, $d)" true 0] }
@@ -200,6 +277,49 @@ proc genCheck {} {
         lists {
             return [list "\[list::length(list::append($xs, $d)), $xs.append($d).llength(), list::get(list::append($xs, $d), $len, \"no\") == $d\]" \
                 "\[[expr {$len + 1}], [expr {$len + 1}], true\]" 0]
+        }
+        slice - slice-method {
+            set text [pick {"" a bc "héllo" "x y" "ä😀b"}]
+            set n [string length $text]
+            set a [genBound $n]
+            set b [genBound $n]
+            set want [sliceOutcome $a $b $n]
+            if {$want eq ""} {
+                set want "\"[string range $text $a [expr {$b - 1}]]\""
+            }
+            set call [expr {$check eq "slice" ? "slice_of(\"$text\", $a, $b)" : "slice_method(\"$text\", $a, $b)"}]
+            return [list $call $want 0]
+        }
+        freeze {
+            set c [genBound $len]
+            set want [sliceOutcome 0 $c $len]
+            if {$want eq ""} {
+                set want [showList [lmap item [lrange $items 0 [expr {$c - 1}]] {lindex $item 1}]]
+            }
+            return [list "freeze_of($xs, $c)" $want 0]
+        }
+        copy {
+            set ds [genBound $len]
+            set ss [genBound $len]
+            set c [expr {rand() < 0.15 ? [rnd -2 -1] : [rnd 0 [expr {$len + 1}]]}]
+            set want [expr {$ds < 0 || $ds > $len ? [sliceOutcome $ds $ds $len] : [sliceOutcome $ds [expr {$ds + $c}] $len]}]
+            if {$want eq ""} {
+                set want [expr {$ss < 0 || $ss > $len ? [sliceOutcome $ss $ss $len] : [sliceOutcome $ss [expr {$ss + $c}] $len]}]
+            }
+            if {$want eq ""} {
+                # memmove: every source element is read before any write.
+                set shown [lmap item $items {lindex $item 1}]
+                set moved [lrange $shown $ss [expr {$ss + $c - 1}]]
+                set want [showList [lreplace $shown $ds [expr {$ds + $c - 1}] {*}$moved]]
+            }
+            return [list "copy_within($xs, $ds, $ss, $c)" $want 0]
+        }
+        set {
+            if {$len == 0} { return [list "set_at($xs, 0, 1)" {"missing"} 0] }
+            set stored [lindex $items [rnd 0 [expr {$len - 1}]]]
+            set shown [lmap item $items {lindex $item 1}]
+            set want [expr {$i < 0 || $i >= $len ? {"missing"} : [showList [lreplace $shown $i $i [lindex $stored 1]]]}]
+            return [list "set_at($xs, $i, [lindex $stored 0])" $want 0]
         }
     }
 }
@@ -273,10 +393,15 @@ set ::historical {
 proc negative {k} {
     lassign [genList] xs _ items
     set len [llength $items]
-    switch -- [expr {$k % 8}] {
+    switch -- [expr {$k % 11}] {
         0 { return [list "x = \"a\" eq \"a\"\nx" 1 {expect-code {SURFACE SYNTAX}}] }
         1 { return [list "eq(\"a\", \"a\")" 1 {expect-message UNBOUND}] }
-        2 { return [list [pick $::historical] 1 {expect-message UNBOUND}] }
+        2 {
+            if {[rnd 0 15] == 0} {
+                return [list {char::codepoint('a')} 1 {expect-message UNKNOWN-SYMBOL}]
+            }
+            return [list [pick $::historical] 1 {expect-message UNBOUND}]
+        }
         3 {
             set full [pick $::protected]
             set i [string last :: $full]
@@ -288,6 +413,12 @@ proc negative {k} {
         5 { return [list "fn f(xs, i):\n    list::at(xs, i)\nf($xs, 0)" 1 {expect-message UNHANDLED-ERROR}] }
         6 { return [list "$xs.at(0)" 1 {expect-text {no function named "at" is visible}}] }
         7 { return [list "list::get(\"abc\", 0, 1)" 0 {expect-runtime {CORE SEMANTIC TYPE}}] }
+        8 {
+            set a [rnd 1 3]
+            return [list "str::substring(\"abc\", $a, [expr {$a - [rnd 1 2]}])" 1 {expect-message KNOWN-ERROR}]
+        }
+        9 { return [list "fn f(s, a):\n    str::substring(s, a, a + 1)\nf(\"abc\", 0)" 1 {expect-message UNHANDLED-ERROR}] }
+        10 { return [list "a = mutable_array::allocate(2)\nmutable_array::set(a, [rnd 2 5], 0)" 1 {expect-message KNOWN-ERROR}] }
     }
 }
 

@@ -205,7 +205,10 @@ test hir-specialize-17 {aggregate types are bounded} -body {
 # unused library function `get`, whose generic region has two blockers;
 # csv_records and hashtable 6 -> 7 generic instances -- their sample is now
 # `sample_checks` (declaring IndexNotFound) plus a `sample` that handles it,
-# and both run only once, generically.
+# and both run only once, generically. The declared slice errors
+# (LowerUnderrun/UpperOverrun) did the same for ai_text_clean,
+# string_replace and string_reverse: 0 -> 1 generic instances, a zero-
+# parameter `sample` that the top level calls once and handles.
 test hir-specialize-corpus-1 {every used corpus instance is closed; the generic analysis is unchanged} -body {
     lmap name [corpus::names] {
         set hir [surface::readProgramFile [corpus::path $name]]
@@ -215,7 +218,7 @@ test hir-specialize-corpus-1 {every used corpus instance is closed; the generic 
         list $name [dict get $summary generic] [dict get $summary specialized] $statuses \
             [dict get $summary genericInstances] [dict get $summary specializedInstances]
     }
-} -result {{ai_text_clean 5 0 closed 0 5} {csv 15 0 closed 0 9} {csv_chunked 26 1 {closed guarded} 2 17} {csv_geometric 27 2 {closed guarded} 0 18} {csv_records 91 23 {closed guarded} 7 52} {hashtable 67 25 {closed guarded} 7 23} {matmul 17 0 closed 0 6} {string_replace 12 0 closed 0 3} {string_reverse 4 0 closed 0 2}}
+} -result {{ai_text_clean 5 0 closed 1 5} {csv 15 0 closed 0 9} {csv_chunked 26 1 {closed guarded} 2 17} {csv_geometric 27 2 {closed guarded} 0 18} {csv_records 91 23 {closed guarded} 7 52} {hashtable 67 25 {closed guarded} 7 23} {matmul 17 0 closed 0 6} {string_replace 12 0 closed 1 3} {string_reverse 4 0 closed 1 2}}
 
 test hir-specialize-corpus-2 {specialized instances per corpus function} -body {
     set hir [surface::readProgramFile [corpus::path csv]]
@@ -257,7 +260,7 @@ test hir-specialize-explain {the explanation shows the semantic report and every
     set text [hir::specialize::explain [surface::readProgramFile [corpus::path string_reverse]]]
     list [string match "*reverse_from (semantic): guarded   \\\[UnknownParameterKind 4\\\]*" $text] \
          [string match "*reverse_from<str, int, str>: closed*params:   text : str, index : int, reversed : str*result:   str*calls:    reverse_from<str, int, str>*guards:   0*" $text] \
-         [string match "*guards: generic 4, specialized 0; instances: 0 generic, 2 specialized*" $text]
+         [string match "*guards: generic 4, specialized 0; instances: 1 generic, 2 specialized*" $text]
 } -result {1 1 1}
 
 # ---------------------------------------------------------------------------

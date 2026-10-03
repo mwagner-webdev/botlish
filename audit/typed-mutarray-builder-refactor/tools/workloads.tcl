@@ -51,7 +51,7 @@ set out {}
 foreach w $workloads {
     lassign $w label name driver
     lappend out "== $label"
-    set hir [corpus::program $name $driver]
+    set hir [corpus::driven $name $driver]
     lassign [native::measure $hir $runs] lower jit best - value
     set shown [core::value::show $value 1]
     lappend out [format "value: length %d crc %d" [string length $shown] [zlib crc32 [encoding convertto utf-8 $shown]]]

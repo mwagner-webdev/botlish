@@ -444,7 +444,7 @@ set differentialPrograms {
                 mutable_array::set(a, i, i * i)
             a
         a = fill(6)
-        [mutable_array::get(a, 5, -1), mutable_array::freeze(a, 6)]
+        [mutable_array::get(a, 5, -1), mutable_array::freeze(a, mutable_array::capacity(a))]
     }
     {semantic-instances} {
         fn identity(v):

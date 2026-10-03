@@ -224,7 +224,7 @@ test argv-no-unicode-normalization {NFC and NFD spellings are different Strings 
 } -result {[1, 2, false]}
 
 test argv-elements-are-ordinary-strings {an argv element works with every ordinary String operation} -body {
-    set text "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\ns = list::at(args, 1):\n    on IndexNotFound:\n        \"missing\"\n\[str::length(s), str::substring(s, 1, 3), str::lowercase(s), str::concat(s, \"!\"), s == \"ÄÖü😀x\", s == \"äöü😀x\"\]"
+    set text "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\ns = list::at(args, 1):\n    on IndexNotFound:\n        \"missing\"\npart = str::substring(s, 1, 3):\n    on LowerUnderrun:\n        \"lower\"\n    on UpperOverrun:\n        \"upper\"\n\[str::length(s), part, str::lowercase(s), str::concat(s, \"!\"), s == \"ÄÖü😀x\", s == \"äöü😀x\"\]"
     agree $text [list [T ./p] [T "ÄÖü😀x"]]
 } -result {[5, "Öü", "äöü😀x", "ÄÖü😀x!", true, false]}
 

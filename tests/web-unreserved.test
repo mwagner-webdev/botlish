@@ -86,8 +86,8 @@ test web-unreserved-rejects-unicode-char {web::is_unreserved('-') (UnicodeChar) 
     }
 } -result {CORE SEMANTIC TYPE}
 
-test web-unreserved-rejects-unproven-int {web::is_unreserved(char::codepoint('-')) is a static type error -- the value (45) is right, but carries no static Byte proof} -body {
-    set path [makeFile {web::is_unreserved(char::codepoint('-'))} web-unreserved-reject-int.bot]
+test web-unreserved-rejects-unproven-int {web::is_unreserved(char::scalar_value('-')) is a static type error -- the value (45) is right, but carries no static Byte proof} -body {
+    set path [makeFile {web::is_unreserved(char::scalar_value('-'))} web-unreserved-reject-int.bot]
     try {
         catch {surface::readProgramFile $path -strict 1} err options
         dict get $options -errorcode

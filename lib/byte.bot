@@ -44,14 +44,14 @@
 #                          STATIC-COMPLETION-PROOFS.md.
 #   byte::set(chars)       List[UnicodeChar] -> ImmutableSet[Byte], errors
 #                          AboveRange: each char's own Unicode scalar value
-#                          (char::codepoint), converted via from_int above
+#                          (char::scalar_value), converted via from_int above
 #                          -- never UTF-8 encoding, so 'é' (U+00E9) becomes
 #                          the one Byte 233, not the two UTF-8 bytes 0xC3
 #                          0xA9 -- see BYTE-SET.md. Propagates from_int's
 #                          own declared error for any char outside Byte's
 #                          domain (e.g. 'Ā', U+0100, or any astral
 #                          character): no partial set. BelowRange is not
-#                          declared: char::codepoint's own result is always
+#                          declared: char::scalar_value's own result is always
 #                          nonnegative, so from_int's BelowRange branch is
 #                          statically proven unreachable from here, generically
 #                          (STATIC-COMPLETION-PROOFS.md), not by a Byte-
@@ -133,7 +133,7 @@ fn position_high(n) -> HighNibble:
 # (STRICT-TYPED-PARAMETERS.md) -- sound here because every actual call
 # site in this codebase now has a statically provable Int (or Byte, itself
 # a subtype) in hand, thanks to this same milestone's own producer-side
-# fixes (str::encode_utf8's truthful List[Byte] result, char::codepoint's own
+# fixes (str::encode_utf8's truthful List[Byte] result, char::scalar_value's own
 # int result), rather than weakening this conversion back to an untyped
 # escape hatch to accommodate an under-typed caller.
 #
@@ -157,21 +157,21 @@ fn from_int(value: int) -> Byte errors BelowRange, AboveRange:
             value
 
 # List[UnicodeChar] -> ImmutableSet[Byte]: each char's own Unicode scalar
-# value (char::codepoint), converted via from_int above. Never UTF-8: a
+# value (char::scalar_value), converted via from_int above. Never UTF-8: a
 # scalar value outside 0..255 propagates from_int's own declared error (no
 # handler needed here -- it simply propagates, item 28), not truncation,
 # masking, or encoding into more than one Byte -- see BYTE-SET.md. No
 # partial set: the first invalid element's error ends the loop immediately.
 #
 # Declares only AboveRange, not BelowRange (STATIC-COMPLETION-PROOFS.md
-# item 23): char::codepoint's own result is a Unicode scalar value, always
+# item 23): char::scalar_value's own result is a Unicode scalar value, always
 # nonnegative, so from_int's BelowRange branch can never actually be
 # reached from here -- the call-specific completion proof
-# (hir/completions.tcl) verifies this generically from char::codepoint's
+# (hir/completions.tcl) verifies this generically from char::scalar_value's
 # own static facts and from_int's own body, not from any Byte-specific
 # rule, every time this function's own body is checked against its
 # declaration.
 fn set(chars: List[UnicodeChar]) -> ImmutableSet[Byte] errors AboveRange:
     bytes = loop c in chars:
-        from_int(char::codepoint(c))
+        from_int(char::scalar_value(c))
     immutable_set::from_list(bytes)

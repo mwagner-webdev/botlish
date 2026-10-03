@@ -51,7 +51,7 @@ proc withByte {expr} {
 # ---------------------------------------------------------------------------
 # Typing/contracts (spec items 10, 36): the Byte parameter is a caller
 # proof obligation. A plain Int -- even a literal that happens to be in
-# range, even one that came from char::codepoint -- is rejected statically,
+# range, even one that came from char::scalar_value -- is rejected statically,
 # never scanned at runtime; a UnicodeChar or str literal is rejected the
 # same way. Only a provably in-range literal or an explicitly established
 # Byte (byte::from_int, EXPLICIT-ERROR-COMPLETIONS.md) satisfies the
@@ -80,7 +80,7 @@ test ascii-rejects-out-of-range-int {ascii::is_digit(999) is a static type error
 # satisfied by proof, the same way a declared range/exact-set fact
 # satisfies it anywhere else in this compiler. See
 # ascii-rejects-codepoint-int below for the contrasting case this
-# discriminates from: char::codepoint('7') has the identical runtime value
+# discriminates from: char::scalar_value('7') has the identical runtime value
 # (55) but no such static fact (its declared result type is plain "int",
 # with no exact-value information), so it is rejected.
 test ascii-accepts-provably-in-range-literal {ascii::is_digit(48) -- a bare Int literal with its own exact-value fact -- is accepted with no explicit Byte(...) at all} -body {
@@ -92,8 +92,8 @@ test ascii-accepts-provably-in-range-literal {ascii::is_digit(48) -- a bare Int 
     }
 } -result 0
 
-test ascii-rejects-codepoint-int {ascii::is_digit(char::codepoint('7')) is a static type error -- 55 is an Int, not a Byte, regardless of its value} -body {
-    set path [makeFile [withByte {ascii::is_digit(char::codepoint('7'))}] ascii-reject-codepoint.bot]
+test ascii-rejects-codepoint-int {ascii::is_digit(char::scalar_value('7')) is a static type error -- 55 is an Int, not a Byte, regardless of its value} -body {
+    set path [makeFile [withByte {ascii::is_digit(char::scalar_value('7'))}] ascii-reject-codepoint.bot]
     try {
         catch {surface::readProgramFile $path -strict 1} err options
         dict get $options -errorcode

@@ -341,7 +341,7 @@ proc indexCall {call counterVar} {
 
 proc renderProgram {functions calls mutation} {
     set text "fn current(log):\n    if mutable_array::capacity(log) == 1:\n        return mutable_array::at(log, 0)\n    -1\n"
-    append text "fn probe(log, id, result):\n    n = current(log)\n    mutable_array::set(log, 0, n * 10 + id)\n    result\n"
+    append text "fn probe(log, id, result):\n    if mutable_array::capacity(log) == 1:\n        mutable_array::set(log, 0, current(log) * 10 + id)\n    result\n"
     append text "fn head(xs):\n    loop i from 0 to list::length(xs):\n        return list::at(xs, i)\n    0\n"
     append text "fn fresh():\n    log = mutable_array::allocate(1)\n    mutable_array::set(log, 0, 0)\n    log\n"
     for {set i 0} {$i <= 4} {incr i} {

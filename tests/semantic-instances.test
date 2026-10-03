@@ -20,17 +20,10 @@ source [file join $::projectRoot surface surface.tcl]
 
 interp recursionlimit {} 100000
 
-# (An IndexNotFound obligation alone does not reject: helpers.tcl's
-# compileWaivingIndexObligations -- indexing is incidental to this file.)
 proc siCompile {src {strict 1}} {
     set path [makeFile $src si-program.bot]
     try {
-        if {!$strict} {
-            return [surface::readProgramFile $path -strict 0]
-        }
-        compileWaivingIndexObligations \
-            {surface::readProgramFile $path -strict 1} \
-            {surface::readProgramFile $path -strict 0}
+        surface::readProgramFile $path -strict $strict
     } finally {
         removeFile si-program.bot
     }
@@ -97,8 +90,8 @@ test si-id-3 {one source function has several semantic instances at once} -body 
 
 test si-id-4 {the result is used by later analysis: a typed store through the returned alias is checked, a wrong one rejected} -body {
     set base "${idDef}m = mutable_array::create(2, \"x\")\nn = identity(m)\n"
-    list [siLast "${base}mutable_array::set(n, 0, \"y\")\nmutable_array::at(n, 0)"] \
-        [siRejects "${base}mutable_array::set(n, 0, 123)" "*not admissible to element type str*"]
+    list [siLast "${base}w = mutable_array::set(n, 0, \"y\"):\n    on IndexNotFound:\n        unit\nv = mutable_array::at(n, 0):\n    on IndexNotFound:\n        \"z\"\nv"] \
+        [siRejects "${base}w = mutable_array::set(n, 0, 123):\n    on IndexNotFound:\n        unit\nw" "*not admissible to element type str*"]
 } -result {str 1}
 
 test si-id-5 {an immutable alias inside the instance keeps the concrete type} -body {
@@ -129,16 +122,16 @@ test si-ro-1 {a read-only untyped wrapper accepts a typed array (no raw-mutarray
 } -result {int int}
 
 test si-ro-2 {a typed read through an untyped wrapper is the element type} -body {
-    list [siLast "fn first(x) errors IndexNotFound:\n    mutable_array::at(x, 0)\nfirst(mutable_array::create(2, \"x\"))"] \
-        [siLast "fn first(x) errors IndexNotFound:\n    mutable_array::at(x, 0)\nfirst(mutable_array::create(2, 1))"]
+    list [siLast "fn first(x) errors IndexNotFound:\n    mutable_array::at(x, 0)\nv = first(mutable_array::create(2, \"x\")):\n    on IndexNotFound:\n        \"z\"\nv"] \
+        [siLast "fn first(x) errors IndexNotFound:\n    mutable_array::at(x, 0)\nv = first(mutable_array::create(2, 1)):\n    on IndexNotFound:\n        0\nv"]
 } -result {str int}
 
 test si-ro-3 {both element types at once from one source function} -body {
-    siInstances "fn first(x) errors IndexNotFound:\n    mutable_array::at(x, 0)\na = first(mutable_array::create(2, \"x\"))\nb = first(mutable_array::create(2, 1))\nunit"
+    siInstances "fn first(x) errors IndexNotFound:\n    mutable_array::at(x, 0)\na = first(mutable_array::create(2, \"x\")):\n    on IndexNotFound:\n        \"z\"\nb = first(mutable_array::create(2, 1)):\n    on IndexNotFound:\n        0\nunit"
 } -result {{first<MutableArray[int]> -> int [valid]} {first<MutableArray[str]> -> str [valid]}}
 
 test si-ro-4 {freeze through a wrapper keeps List[T]} -body {
-    siLast "fn freeze(x):\n    mutable_array::freeze(x, 1)\nfreeze(mutable_array::create(2, 1))"
+    siLast "fn freeze(x):\n    if mutable_array::capacity(x) > 0:\n        return mutable_array::freeze(x, 1)\n    mutable_array::freeze(x, 0)\nfreeze(mutable_array::create(2, 1))"
 } -result {List[int]}
 
 # ---------------------------------------------------------------------------
@@ -151,8 +144,8 @@ test si-bad-1 {smash: an untyped writer of a wrong value into MutableArray[str] 
 } -result {1 1}
 
 test si-bad-2 {the same function with a raw array (or a fitting value) is fine: one bad call does not condemn the function} -body {
-    list [siLast "fn smash(x):\n    mutable_array::set(x, 0, 123)\nsmash(mutable_array::allocate(1))"] \
-        [siLast "fn writer(x, v):\n    mutable_array::set(x, 0, v)\nwriter(mutable_array::create(1, \"x\"), \"ok\")"]
+    list [siLast "fn smash(x):\n    if mutable_array::capacity(x) > 0:\n        mutable_array::set(x, 0, 123)\nsmash(mutable_array::allocate(1))"] \
+        [siLast "fn writer(x, v):\n    if mutable_array::capacity(x) > 0:\n        mutable_array::set(x, 0, v)\nwriter(mutable_array::create(1, \"x\"), \"ok\")"]
 } -result {unit unit}
 
 test si-bad-3 {f<int> valid, f<str> invalid: the incompatible call is the one rejected} -body {
@@ -161,7 +154,7 @@ test si-bad-3 {f<int> valid, f<str> invalid: the incompatible call is the one re
 } -result {int 1 1}
 
 test si-bad-4 {a valid instance does not make every call valid: writer with the wrong value is rejected} -body {
-    set def "fn writer(x, v):\n    mutable_array::set(x, 0, v)\n"
+    set def "fn writer(x, v):\n    if mutable_array::capacity(x) > 0:\n        mutable_array::set(x, 0, v)\n"
     list [siRejects "${def}writer(mutable_array::create(1, \"x\"), 5)" "*call to writer with x : MutableArray\\\[str\\\], v : int is invalid*"] \
         [siLast "${def}writer(mutable_array::create(1, \"x\"), \"ok\")\nwriter(mutable_array::create(1, 1), 5)"]
 } -result {1 unit}
@@ -253,8 +246,9 @@ test si-decl-3 {an exact callable narrower than a declared Fn parameter is used 
 
 test si-list-1 {first(List[str]) is str, first(List[int]) is int, first(List[MutableArray[str]]) is MutableArray[str]} -body {
     set def "fn first(xs) errors IndexNotFound:\n    list::at(xs, 0)\n"
-    list [siLast "${def}first(\[\"x\", \"y\"\])"] [siLast "${def}first(\[1, 2\])"] \
-        [siLast "${def}first(\[mutable_array::create(1, \"x\")\])"]
+    set read "v = first(%s):\n    on IndexNotFound:\n        %s\nv"
+    list [siLast "${def}[format $read {["x", "y"]} {"z"}]"] [siLast "${def}[format $read {[1, 2]} 0]"] \
+        [siLast "${def}[format $read {[mutable_array::create(1, "x")]} {mutable_array::create(1, "z")}]"]
 } -result {str int {MutableArray[str]}}
 
 test si-list-2 {one source function, several semantic instances, both used in one program} -body {
@@ -267,7 +261,8 @@ test si-list-3 {a returning loop over a typed list gives the typed list without 
 
 test si-list-4 {a recursive accumulator recovers its element type} -body {
     set def "fn collect(xs, i, acc) errors IndexNotFound:\n    if i == list::length(xs):\n        acc\n    else:\n        collect(xs, i + 1, list::append(acc, list::at(xs, i)))\n"
-    list [siLast "${def}collect(\[\"a\", \"b\"\], 0, \[\])"] [siLast "${def}collect(\[1\], 0, \[\])"]
+    set run "v = collect(%s, 0, \[\]):\n    on IndexNotFound:\n        %s\nv"
+    list [siLast "${def}[format $run {["a", "b"]} {["z"]}]"] [siLast "${def}[format $run {[1]} {[0]}]"]
 } -result {{List[str]} {List[int]}}
 
 # ---------------------------------------------------------------------------
@@ -400,8 +395,9 @@ test si-alias-1 {an exact alias of a function keeps its identity: the call throu
 
 test si-cap-1 {a closure created inside an instance sees that instance's types for what it captures; the same source closure is typed differently per enclosing instance} -body {
     set def "fn mk(m) errors IndexNotFound:\n    fn get(i) errors IndexNotFound:\n        mutable_array::at(m, i)\n    get(0)\n"
-    list [siLast "${def}mk(mutable_array::create(1, \"x\"))"] [siLast "${def}mk(mutable_array::create(1, 1))"] \
-        [siInstances "${def}a = mk(mutable_array::create(1, \"x\"))\nb = mk(mutable_array::create(1, 1))\nunit"]
+    set run "v = mk(mutable_array::create(1, %s)):\n    on IndexNotFound:\n        %s\nv"
+    list [siLast "${def}[format $run {"x"} {"z"}]"] [siLast "${def}[format $run 1 0]"] \
+        [siInstances "${def}a = mk(mutable_array::create(1, \"x\")):\n    on IndexNotFound:\n        \"z\"\nb = mk(mutable_array::create(1, 1)):\n    on IndexNotFound:\n        0\nunit"]
 } -result {str int {{get<int> -> any [valid]} {mk<MutableArray[int]> -> int [valid]} {mk<MutableArray[str]> -> str [valid]}}}
 
 test si-cap-2 {a bad write inside a nested closure of an instance is found by the instance (the closure is part of the region)} -body {
@@ -410,7 +406,7 @@ test si-cap-2 {a bad write inside a nested closure of an instance is found by th
 } -result 1
 
 test si-cap-3 {a closure returned out of an instance keeps the result type computed in place; called later, it is never less precise} -body {
-    siLast "fn mk(m) errors IndexNotFound:\n    fn get(i) errors IndexNotFound:\n        mutable_array::at(m, i)\n    get\ng = mk(mutable_array::create(1, \"x\"))\ng(0)"
+    siLast "fn mk(m):\n    fn get(i) errors IndexNotFound:\n        mutable_array::at(m, i)\n    get\ng = mk(mutable_array::create(1, \"x\"))\nv = g(0):\n    on IndexNotFound:\n        \"z\"\nv"
 } -result str
 
 test si-cap-4 {a captured typed value returned through a later-called closure stays typed} -body {
@@ -429,11 +425,11 @@ test si-cap-6 {a closure capturing a binding typed by an enclosing recursive fun
 # the dynamic boundary and forward calls
 
 test si-dyn-1 {a call through a structural Fn or an open value creates no instance} -body {
-    set src "fn apply(f: Fn{args: \[int\], return: int, errors: \[\]}, n: int):\n    f(n)\nfn inc(x: int):\n    x + 1\nfn pick(fs, i) errors IndexNotFound:\n    list::at(fs, i)\ng = pick(\[inc, inc\], 0)\napply(g, 1)"
+    set src "fn apply(f: Fn{args: \[int\], return: int, errors: \[\]}, n: int):\n    f(n)\nfn inc(x: int):\n    x + 1\nfn pick(fs, i) errors IndexNotFound:\n    list::at(fs, i)\ng = pick(\[inc, inc\], 0):\n    on IndexNotFound:\n        inc\napply(g, 1)"
     siLast $src
 } -result int
 
-set fnDefs "fn apply(f, x):\n    f(x)\nfn inc(n: int):\n    n + 1\nfn dec(n: int):\n    n - 1\nfn pick(fs, i) errors IndexNotFound:\n    list::at(fs, i)\ng = pick(\[inc, dec\], 1)\n"
+set fnDefs "fn apply(f, x):\n    f(x)\nfn inc(n: int):\n    n + 1\nfn dec(n: int):\n    n - 1\nfn pick(fs, i) errors IndexNotFound:\n    list::at(fs, i)\ng = pick(\[inc, dec\], 1):\n    on IndexNotFound:\n        inc\n"
 
 test si-fn-1 {a structural Fn argument seeds the untyped parameter with its contract: the callee's result and its argument check come from that contract, the instance is keyed by the full Fn type} -body {
     list [siLast "${fnDefs}apply(g, 5)"] [siInstances "${fnDefs}apply(g, 5)"]
@@ -458,7 +454,7 @@ test si-dyn-5 {a second whole-program walk is not about definition order: a recu
 } -result {2 int}
 
 test si-dyn-4 {captures: a closure's instance uses the environment its creation recorded} -body {
-    siLast "fn mk(x) errors IndexNotFound:\n    fn get(i) errors IndexNotFound:\n        list::at(x, i)\n    get(0)\nmk(\[\"a\"\])"
+    siLast "fn mk(x) errors IndexNotFound:\n    fn get(i) errors IndexNotFound:\n        list::at(x, i)\n    get(0)\nv = mk(\[\"a\"\]):\n    on IndexNotFound:\n        \"z\"\nv"
 } -result str
 
 # ---------------------------------------------------------------------------

@@ -406,7 +406,7 @@ test pa-nir-mixed-equality-uses-the-sentinel-op {a packed value against a ShortS
         fn same(a, b):
             a == b
 
-        fn slice(t, i):
+        fn slice(t, i) errors LowerUnderrun, UpperOverrun:
             str::substring(t, i, i + 1)
 
         [same("a", slice("äa", 1)), same("ab", slice("ab", 0)), same("", slice("ab", 0)), same("a", slice("äa", 0))]
@@ -716,7 +716,7 @@ test pa-unicode-model-is-untouched {the scalar tier still counts scalars, not by
         fn size(s):
             str::length(s)
 
-        fn first(t):
+        fn first(t) errors UpperOverrun:
             str::substring(t, 0, 1)
 
         [size("é"), size("€"), size("😀"), first("é!") == "é", first("😀!") == "😀", size(first("x😀"))]
@@ -726,7 +726,7 @@ test pa-unicode-model-is-untouched {the scalar tier still counts scalars, not by
 test pa-peek-traversal-keeps-its-shape {the String-traversal idiom over literal text: the text is a packed parameter, the character a ShortString1 slice of its materialization} -body {
     set text {
         fn peek(text, index):
-            if index >= str::length(text):
+            if index < 0 or index >= str::length(text):
                 return ""
 
             str::substring(text, index, index + 1)
@@ -920,7 +920,7 @@ test pa-executable-everything {every tier, transport, a tagged frontier and an e
             else:
                 \"\"
 
-        fn first(t):
+        fn first(t) errors UpperOverrun:
             str::substring(t, 0, 1)
 
         \[probe(fwd(pick(0))), probe(fwd(pick(1))), probe(fwd(pick(2))), probe(fwd(pick(3))), run(2), run(8), list::append(\[pick(2)\], pick(0)), str::length(glyph(true)), first(\"ä€\") == \"ä\"\]

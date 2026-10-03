@@ -22,18 +22,11 @@ interp recursionlimit {} 100000
 
 set parityBackends {interp compile cranelift-generic cranelift}
 
-# The HIR of SRC. MutableArray typing is this file's subject, not error
-# legality: an IndexNotFound obligation alone does not reject (helpers.tcl's
-# compileWaivingIndexObligations).
+# The HIR of SRC.
 proc maCompile {src {strict 1}} {
     set path [makeFile $src ma-program.bot]
     try {
-        if {!$strict} {
-            return [surface::readProgramFile $path -strict 0]
-        }
-        compileWaivingIndexObligations \
-            {surface::readProgramFile $path -strict 1} \
-            {surface::readProgramFile $path -strict 0}
+        surface::readProgramFile $path -strict $strict
     } finally {
         removeFile ma-program.bot
     }
@@ -306,8 +299,8 @@ test mat-fl-3 {from_list of List[MutableArray[int]] nests without erasure} -body
 test mat-fl-4 {get(i) : T and freeze(n) : List[T] for a dynamic index/count} -body {
     list \
         [maLast "fn f(i: int) errors IndexNotFound:\n    m = mutable_array::from_list(\[1, 2, 3\])\n    mutable_array::at(m, i)\nf(1)"] \
-        [maLast "fn f(n: int):\n    m = mutable_array::from_list(\[1, 2, 3\])\n    mutable_array::freeze(m, n)\nf(2)"] \
-        [maLast "fn f(n: int):\n    m = mutable_array::from_list(\[\"a\"\])\n    mutable_array::freeze(m, n)\nf(1)"]
+        [maLast "fn f(n: int) errors LowerUnderrun, UpperOverrun:\n    m = mutable_array::from_list(\[1, 2, 3\])\n    mutable_array::freeze(m, n)\nf(2)"] \
+        [maLast "fn f(n: int) errors LowerUnderrun, UpperOverrun:\n    m = mutable_array::from_list(\[\"a\"\])\n    mutable_array::freeze(m, n)\nf(1)"]
 } -result {int {List[int]} {List[str]}}
 
 test mat-fl-5 {from_list of an exact literal does not put exact-value facts into the type} -body {
@@ -382,8 +375,9 @@ test mat-set-4 {an unproven value (any) is rejected, not guarded at run time} -b
 
 test mat-set-5 {integer-domain stores use the ordinary range proof} -body {
     set prelude "type Byte = Int in 0..255\nfn mk(b: Byte):\n    mutable_array::create(2, b)\nm = mk(3)\n"
-    list [maRejects "${prelude}mutable_array::set(m, 0, 200)" *] [maRejects "${prelude}mutable_array::set(m, 0, 300)" *] \
-        [maRejects "${prelude}fn put(x: int):\n    mutable_array::set(m, 0, x)\nput(1)" *]
+    set store "w = mutable_array::set(m, 0, %s):\n    on IndexNotFound:\n        unit\nw"
+    list [maRejects "${prelude}[format $store 200]" *] [maRejects "${prelude}[format $store 300]" *] \
+        [maRejects "${prelude}fn put(x: int):\n    w = mutable_array::set(m, 0, x):\n        on IndexNotFound:\n            unit\n    w\nput(1)" *]
 } -result {accepted {{CORE SEMANTIC TYPE} 1} {{CORE SEMANTIC TYPE} 1}}
 
 test mat-set-6 {a store into MutableArray[any] and into a raw array accepts anything} -body {
@@ -400,10 +394,10 @@ test mat-set-7 {nested arrays: the inner value must be the inner contract, not a
         [maRejects "${prelude}mutable_array::set(outer, 1, mutable_array::allocate(1))" *]
 } -result {accepted {{CORE SEMANTIC TYPE} 1} {{CORE SEMANTIC TYPE} 1}}
 
-test mat-set-8 {a typed store is a compile-time error only: no runtime guard, bounds behavior unchanged} -body {
-    set src "fn f() errors IndexNotFound:\n    m = mutable_array::create(2, 0)\n    mutable_array::set(m, 5, 1)\nf()"
-    list [maRejects $src *] [maErrors $src]
-} -result {accepted {{CORE SEMANTIC RANGE} {CORE SEMANTIC RANGE} {CORE SEMANTIC RANGE} {CORE SEMANTIC RANGE}}}
+test mat-set-8 {a typed store is a compile-time error only: no runtime guard, bounds behavior unchanged (an index past the capacity is IndexNotFound; the program's handler sees it on every backend)} -body {
+    set src "fn f(i: int) errors IndexNotFound:\n    m = mutable_array::create(2, 0)\n    mutable_array::set(m, i, 1)\n    m\nfn outcome(i: int):\n    m = f(i):\n        on IndexNotFound:\n            return \"IndexNotFound\"\n    mutable_array::freeze(m, mutable_array::capacity(m))\noutcome(str::length(str::concat(\"hel\", \"lo\")))"
+    list [maRejects $src *] [maParity $src] [maValue $src]
+} -result {accepted same {"IndexNotFound"}}
 
 # ---------------------------------------------------------------------------
 # get / freeze / capacity (spec items 20, 23, 24, 62)
@@ -422,12 +416,12 @@ test mat-get-2 {the typed result feeds ordinary typing: a typed int read is an i
 } -result {int int}
 
 test mat-get-3 {get returns the element contract of a nested array (the inner contract survives)} -body {
-    maLast "outer = mutable_array::create(1, mutable_array::create(1, \"s\"))\nmutable_array::at(mutable_array::at(outer, 0), 0)"
+    maLast "outer = mutable_array::create(1, mutable_array::create(1, \"s\"))\nv = mutable_array::at(mutable_array::at(outer, 0), 0):\n    on IndexNotFound:\n        \"z\"\nv"
 } -result str
 
 test mat-frz-1 {freeze(MutableArray[T], n) is List[T] for a dynamic n; raw freeze stays list} -body {
     list \
-        [maLast "fn f(n: int):\n    mutable_array::freeze(mutable_array::create(3, \"s\"), n)\nf(2)"] \
+        [maLast "fn f(n: int) errors LowerUnderrun, UpperOverrun:\n    mutable_array::freeze(mutable_array::create(3, \"s\"), n)\nf(2)"] \
         [maLast "mutable_array::freeze(mutable_array::allocate(3), 3)"] \
         [maLast "mutable_array::freeze(mutable_array::from_list(\[1, \"a\"\]), 2)"]
 } -result {{List[str]} list list}
@@ -478,7 +472,8 @@ test mat-cp-5 {copying contract-bearing elements into untyped storage would eras
 
 test mat-cp-6 {a narrower source domain may be copied into a wider destination, never the reverse} -body {
     set prelude "type Byte = Int in 0..255\nfn mkb(b: Byte):\n    mutable_array::create(2, b)\nfn mki(i: int):\n    mutable_array::create(2, i)\nx = mkb(3)\ny = mki(3)\n"
-    list [maRejects "${prelude}mutable_array::copy(y, 0, x, 0, 2)" *] [maRejects "${prelude}mutable_array::copy(x, 0, y, 0, 2)" *]
+    set copy "w = mutable_array::copy(%s, 0, %s, 0, 2):\n    on LowerUnderrun:\n        unit\n    on UpperOverrun:\n        unit\nw"
+    list [maRejects "${prelude}[format $copy y x]" *] [maRejects "${prelude}[format $copy x y]" *]
 } -result {accepted {{CORE SEMANTIC TYPE} 1}}
 
 # ---------------------------------------------------------------------------
@@ -504,10 +499,10 @@ test mat-inv-3 {invariance is deep: List[MutableArray[str]] is not List[MutableA
 test mat-inv-4 {a typed parameter admits exactly its contract; the raw and the wrong array are rejected} -body {
     set decl "fn first(xs: MutableArray\[str\]) -> str errors IndexNotFound:\n    mutable_array::at(xs, 0)\n"
     list \
-        [maRejects "${decl}first(mutable_array::create(2, \"a\"))" *] \
-        [maRejects "${decl}first(mutable_array::create(2, 1))" *] \
-        [maRejects "${decl}first(mutable_array::allocate(2))" *] \
-        [maRejects "${decl}first(mutable_array::from_list(\[\"a\", 1\]))" *]
+        [maRejects "${decl}v = first(mutable_array::create(2, \"a\")):\n    on IndexNotFound:\n        \"z\"\nv" *] \
+        [maRejects "${decl}v = first(mutable_array::create(2, 1)):\n    on IndexNotFound:\n        \"z\"\nv" *] \
+        [maRejects "${decl}v = first(mutable_array::allocate(2)):\n    on IndexNotFound:\n        \"z\"\nv" *] \
+        [maRejects "${decl}v = first(mutable_array::from_list(\[\"a\", 1\])):\n    on IndexNotFound:\n        \"z\"\nv" *]
 } -result {accepted {{CORE SEMANTIC TYPE} 1} {{CORE SEMANTIC TYPE} 1} {{CORE SEMANTIC TYPE} 1}}
 
 test mat-inv-5 {structural Fn: parameter contravariance may not turn into covariance of the array contract} -body {
@@ -636,7 +631,7 @@ test mat-atk-15 {a raw array passed to a typed parameter is not scanned or conve
 
 test mat-atk-16 {freeze/get results are safe uses; the typed array is never lost by using its API} -body {
     list \
-        [maRejects "m = mutable_array::from_list(\[mutable_array::create(1, \"a\")\])\nxs = mutable_array::freeze(m, 1)\nmutable_array::at(list::at(xs, 0), 0)" *] \
+        [maRejects "fn first(xs) errors IndexNotFound:\n    mutable_array::at(list::at(xs, 0), 0)\nm = mutable_array::from_list(\[mutable_array::create(1, \"a\")\])\nxs = mutable_array::freeze(m, 1)\nv = first(xs):\n    on IndexNotFound:\n        \"z\"\nv" *] \
         [maRejects "xs = \[mutable_array::create(1, \"a\")\]\n\[list::length(xs), list?(xs), mutarray?(list::at(xs, 0))\]" *]
 } -result {accepted accepted}
 
@@ -652,7 +647,7 @@ test mat-atk-18 {a backward reference (binding first) and a typed parameter keep
     list \
         [maRejects "m = mutable_array::create(1, \"a\")\nfn poke():\n    mutable_array::set(m, 0, \"q\")\npoke()" *] \
         [maRejects "m = mutable_array::create(1, \"a\")\nfn poke():\n    mutable_array::set(m, 0, 5)\npoke()" *] \
-        [maRejects "fn poke(m: MutableArray\[str\]):\n    mutable_array::set(m, 0, \"q\")\nm = mutable_array::create(1, \"a\")\npoke(m)" *]
+        [maRejects "fn poke(m: MutableArray\[str\]):\n    if mutable_array::capacity(m) > 0:\n        mutable_array::set(m, 0, \"q\")\nm = mutable_array::create(1, \"a\")\npoke(m)" *]
 } -result {accepted {{CORE SEMANTIC TYPE} 1} accepted}
 
 test mat-atk-19 {a function returning a typed array cannot be reached through a forward reference at all; called after its definition it keeps its contract} -body {
@@ -703,7 +698,7 @@ test mat-ref-2 {mutarray? on a typed array keeps the element contract in the tru
 } -result {{MutableArray[str]} {MutableArray[str]} {{CORE SEMANTIC TYPE} 1}}
 
 test mat-ref-3 {a refined unknown value is a raw array that can be written with anything (it was never typed)} -body {
-    maRejects "fn f(x):\n    if mutarray?(x):\n        mutable_array::set(x, 0, 123)\n    else:\n        unit\nf(mutable_array::allocate(1))" *
+    maRejects "fn f(x):\n    if mutarray?(x):\n        if mutable_array::capacity(x) > 0:\n            mutable_array::set(x, 0, 123)\n    else:\n        unit\nf(mutable_array::allocate(1))" *
 } -result accepted
 
 test mat-ref-4 {mutarray? is true for a typed and a raw array at run time on every backend} -body {
@@ -738,10 +733,10 @@ test mat-id-2 {the rule follows the exact function through an alias} -body {
 
 test mat-id-3 {viewed through a structural Fn (target unknown) the relation is lost: the result is the raw kind, never a typed lie; where the target is known exactly the semantic instance keeps the relation, and a declared raw result then rejects the erasure} -body {
     set fnType "Fn{args: \[int, any\], return: mutarray, errors: \[\]}"
-    set pick "fn other(n: int, d) -> mutarray:\n    mutable_array::allocate(n)\nfn pick(fs, i) errors IndexNotFound:\n    list::at(fs, i)\ng = pick(\[mutable_array::create, other\], 1)\n"
+    set pick "fn other(n: int, d) -> mutarray:\n    mutable_array::allocate(n)\nfn pick(fs, i) errors IndexNotFound:\n    list::at(fs, i)\ng = pick(\[mutable_array::create, other\], 1):\n    on IndexNotFound:\n        other\n"
     list \
         [maLast "fn apply(f: $fnType) -> mutarray:\n    f(2, \"x\")\n${pick}apply(g)"] \
-        [maRejects "fn apply(f: $fnType) -> mutarray:\n    f(2, \"x\")\n${pick}m = apply(g)\nmutable_array::set(m, 0, 5)" *] \
+        [maRejects "fn apply(f: $fnType) -> mutarray:\n    f(2, \"x\")\n${pick}m = apply(g)\nw = mutable_array::set(m, 0, 5):\n    on IndexNotFound:\n        unit\nw" *] \
         [maLast "fn apply(f: $fnType):\n    f(2, \"x\")\napply(mutable_array::create)"] \
         [maRejects "fn apply(f: $fnType) -> mutarray:\n    f(2, \"x\")\napply(mutable_array::create)" "*the declared result type mutarray would erase*"]
 } -result {mutarray accepted {MutableArray[str]} {{CORE SEMANTIC TYPE} 1}}
@@ -772,16 +767,16 @@ test mat-sp-1 {a function returning create infers MutableArray[str] with no anno
     list \
         [maResult "fn make():\n    mutable_array::create(3, \"x\")\nmake()" make] \
         [maResult "fn make():\n    mutable_array::create(3, \"x\")\nfn forward():\n    make()\nforward()" forward] \
-        [maResult "fn make(n: int):\n    m = mutable_array::create(n, 0)\n    mutable_array::set(m, 0, 5)\n    m\nmake(3)" make]
+        [maResult "fn make(n: int):\n    m = mutable_array::create(n, 0)\n    if n > 0:\n        mutable_array::set(m, 0, 5)\n    m\nmake(3)" make]
 } -result {{MutableArray[str]} {MutableArray[str]} {MutableArray[int]}}
 
 test mat-sp-2 {a concrete forwarding function preserves the element contract} -body {
-    set src "fn fill(xs: MutableArray\[int\], n: int) -> MutableArray\[int\]:\n    loop i from 0 to n:\n        mutable_array::set(xs, i, i)\n    xs\nfn go():\n    fill(mutable_array::create(3, 0), 3)\ngo()"
+    set src "fn fill(xs: MutableArray\[int\], n: int) -> MutableArray\[int\]:\n    loop i from 0 to mutable_array::capacity(xs):\n        if i < n:\n            mutable_array::set(xs, i, i)\n    xs\nfn go():\n    fill(mutable_array::create(3, 0), 3)\ngo()"
     list [maResult $src fill] [maResult $src go]
 } -result {{MutableArray[int]} {MutableArray[int]}}
 
 test mat-sp-3 {the specialized instances keep the declared contract inside a typed function} -body {
-    set src "fn first(xs: MutableArray\[str\]) -> str errors IndexNotFound:\n    mutable_array::at(xs, 0)\nfirst(mutable_array::create(2, \"a\"))"
+    set src "fn first(xs: MutableArray\[str\]) -> str errors IndexNotFound:\n    mutable_array::at(xs, 0)\nv = first(mutable_array::create(2, \"a\")):\n    on IndexNotFound:\n        \"z\"\nv"
     set hir [maCompile $src]
     set spec [hir::specialize::analyze $hir]
     lsort [lmap id [dict get $spec used] {hir::types::show [dict get $spec instances $id result]}]
@@ -884,19 +879,20 @@ test mat-run-6 {typed get / set / freeze / copy / aliases behave as the raw oper
     list [maParity $src] [maValue $src]
 } -result {same {[[7, 8, 20, 0], true, 3]}}
 
-test mat-run-7 {bounds behavior: a negative or out-of-range at is IndexNotFound (STDLIB-NAMESPACES.md); set/freeze/copy keep raising RANGE} -body {
-    lmap body {
-        "mutable_array::at(m, 3)"
-        "mutable_array::at(m, 0 - 1)"
-        "mutable_array::set(m, 3, 1)"
-        "mutable_array::freeze(m, 4)"
-        "mutable_array::freeze(m, 0 - 1)"
-        "mutable_array::copy(m, 2, m, 0, 2)"
+test mat-run-7 {bounds behavior: a negative or out-of-range at or set is IndexNotFound; a freeze or copy past either end of the array is LowerUnderrun or UpperOverrun (STDLIB-NAMESPACES.md), handled by name on every backend} -body {
+    lmap {body errors} {
+        "mutable_array::at(m, i + 3)" IndexNotFound
+        "mutable_array::at(m, i - 1)" IndexNotFound
+        "mutable_array::set(m, i + 3, 1)" IndexNotFound
+        "mutable_array::freeze(m, i + 4)" {LowerUnderrun UpperOverrun}
+        "mutable_array::freeze(m, i - 1)" {LowerUnderrun UpperOverrun}
+        "mutable_array::copy(m, i + 2, m, 0, 2)" {LowerUnderrun UpperOverrun}
     } {
-        set src "fn f() errors IndexNotFound:\n    m = mutable_array::create(3, 0)\n    ${body}\nf()"
-        lsort -unique [maErrors $src]
+        set handlers [join [lmap e $errors {format "        on %s:\n            return \"%s\"" $e $e}] \n]
+        set src "fn f(i: int) -> str:\n    m = mutable_array::create(3, 0)\n    r = ${body}:\n${handlers}\n    \"completed\"\nf(0)"
+        list [maParity $src] [maValue $src]
     }
-} -result {{{CORE SEMANTIC UNCAUGHT-ERROR}} {{CORE SEMANTIC UNCAUGHT-ERROR}} {{CORE SEMANTIC RANGE}} {{CORE SEMANTIC RANGE}} {{CORE SEMANTIC RANGE}} {{CORE SEMANTIC RANGE}}}
+} -result {{same {"IndexNotFound"}} {same {"IndexNotFound"}} {same {"IndexNotFound"}} {same {"UpperOverrun"}} {same {"LowerUnderrun"}} {same {"UpperOverrun"}}}
 
 test mat-run-8 {from_list of nested typed arrays keeps identities; the inner array stays writable through its own type} -body {
     set src "fn f() errors IndexNotFound:\n    inner = mutable_array::from_list(\[\"a\"\])\n    outer = mutable_array::from_list(\[inner\])\n    mutable_array::set(inner, 0, \"z\")\n    \[mutable_array::at(mutable_array::at(outer, 0), 0), list::length(mutable_array::freeze(outer, 1))\]\nf()"
@@ -945,7 +941,7 @@ proc maAotParity {text} {
 }
 
 test mat-gc-1 {managed defaults, nested typed arrays, List[MutableArray[T]], aliases, freeze and copy: standalone AOT under GC stress agrees with every backend} -constraints executableAot -body {
-    maAotParity "fn f() errors IndexNotFound:\n    shared = mutable_array::create(3, \[\"managed\", \"list\"\])\n    inner = mutable_array::from_list(\[\"a\", \"b\"\])\n    outer = mutable_array::create(2, inner)\n    alias = outer\n    rows = \[mutable_array::create(2, \"r\"), mutable_array::create(1, \"s\")\]\n    mutable_array::set(inner, 1, \"z\")\n    dst = mutable_array::create(2, \"d\")\n    mutable_array::copy(dst, 0, list::at(rows, 0), 0, 2)\n    mutable_array::set(mutable_array::at(alias, 1), 0, \"y\")\n    \[mutable_array::freeze(shared, 3), mutable_array::freeze(mutable_array::at(outer, 0), 2), mutable_array::freeze(dst, 2), mutable_array::capacity(list::at(rows, 1)), mutable_array::capacity(mutable_array::create(0, inner))\]\nf()"
+    maAotParity "fn f() errors IndexNotFound, LowerUnderrun, UpperOverrun:\n    shared = mutable_array::create(3, \[\"managed\", \"list\"\])\n    inner = mutable_array::from_list(\[\"a\", \"b\"\])\n    outer = mutable_array::create(2, inner)\n    alias = outer\n    rows = \[mutable_array::create(2, \"r\"), mutable_array::create(1, \"s\")\]\n    mutable_array::set(inner, 1, \"z\")\n    dst = mutable_array::create(2, \"d\")\n    mutable_array::copy(dst, 0, list::at(rows, 0), 0, 2)\n    mutable_array::set(mutable_array::at(alias, 1), 0, \"y\")\n    \[mutable_array::freeze(shared, 3), mutable_array::freeze(mutable_array::at(outer, 0), 2), mutable_array::freeze(dst, 2), mutable_array::capacity(list::at(rows, 1)), mutable_array::capacity(mutable_array::create(0, inner))\]\nr = f():\n    on IndexNotFound:\n        \[\]\n    on LowerUnderrun:\n        \[\]\n    on UpperOverrun:\n        \[\]\nr"
 } -result {[[["managed", "list"], ["managed", "list"], ["managed", "list"]], ["y", "z"], ["r", "r"], 1, 0]}
 
 # ---------------------------------------------------------------------------
@@ -983,16 +979,17 @@ test mat-fence-1 {no canonical program or stdlib module other than lib/mutarray.
 
 test mat-bd-1 {an untyped forwarder to a typed function infers the typed contract: a sound closed instance keeps it} -body {
     set defs "fn first(xs: MutableArray\[str\]) -> str errors IndexNotFound:\n    mutable_array::at(xs, 0)\nfn fwd(xs) errors IndexNotFound:\n    first(xs)\n"
-    list [maLast "${defs}fwd(mutable_array::create(1, \"a\"))"] \
-        [maRejects "${defs}fwd(mutable_array::create(1, 5))" *] \
-        [maRejects "${defs}fwd(mutable_array::allocate(1))" *]
+    set handled ":\n    on IndexNotFound:\n        \"\"\nr"
+    list [maLast "${defs}r = fwd(mutable_array::create(1, \"a\"))$handled"] \
+        [maRejects "${defs}r = fwd(mutable_array::create(1, 5))$handled" *] \
+        [maRejects "${defs}r = fwd(mutable_array::allocate(1))$handled" *]
 } -result {str {{CORE SEMANTIC TYPE} 1} {{CORE SEMANTIC TYPE} 1}}
 
 test mat-bd-2 {struct boundary: a typed array cannot ride in a positional pair; typed storage plus a separate length works} -body {
-    set defs "fn push(storage: MutableArray\[int\], length: int, v: int) -> MutableArray\[int\]:\n    mutable_array::set(storage, length, v)\n    storage\n"
+    set defs "fn push(storage: MutableArray\[int\], length: int, v: int) -> MutableArray\[int\]:\n    if length >= 0 and length < mutable_array::capacity(storage):\n        mutable_array::set(storage, length, v)\n    storage\n"
     list \
         [lindex [maRejects "${defs}pair = \[push(mutable_array::create(2, 0), 0, 7), 1\]\npair" *] 0] \
-        [maLast "${defs}s = push(mutable_array::create(2, 0), 0, 7)\nmutable_array::freeze(s, 1)"]
+        [maLast "${defs}s = push(mutable_array::create(2, 0), 0, 7)\nmutable_array::freeze(s, mutable_array::capacity(s))"]
 } -result {{CORE SEMANTIC TYPE} {List[int]}}
 
 test mat-bd-3 {nesting is bounded by the aggregate depth (3): deeper stacks are rejected as erasures, never widened} -body {
@@ -1009,8 +1006,8 @@ test mat-bd-5 {an inferred raw-mutarray contract (untyped wrapper that writes or
     list \
         [maRejects "fn cap(m):\n    mutable_array::capacity(m)\ncap(mutable_array::create(1, \"a\"))" *] \
         [maRejects "fn cap(m):\n    mutable_array::capacity(m)\ncap(mutable_array::allocate(1))" *] \
-        [maRejects "fn put(m):\n    mutable_array::set(m, 0, 1)\nput(mutable_array::create(1, \"a\"))" *] \
-        [maRejects "fn put(m):\n    mutable_array::set(m, 0, \"b\")\nput(mutable_array::create(1, \"a\"))" *]
+        [maRejects "fn put(m):\n    if mutable_array::capacity(m) > 0:\n        mutable_array::set(m, 0, 1)\nput(mutable_array::create(1, \"a\"))" *] \
+        [maRejects "fn put(m):\n    if mutable_array::capacity(m) > 0:\n        mutable_array::set(m, 0, \"b\")\nput(mutable_array::create(1, \"a\"))" *]
 } -result {accepted accepted {{CORE SEMANTIC TYPE} 1} accepted}
 
 cleanupTests

@@ -37,10 +37,10 @@ proc aiText {family n} {
 }
 switch -- $name {
     uri-steady { set hir [surface::readProgramFile [file join $root bench uri-steady.bot]] }
-    ai_text_clean-ascii-10K { set hir [corpus::program ai_text_clean "clean_ai_text([corpus::literal [aiText ascii 10000]])"] }
-    ai_text_clean-emoji-10K { set hir [corpus::program ai_text_clean "clean_ai_text([corpus::literal [aiText emoji 10000]])"] }
-    csv-1000 { set hir [corpus::program csv "csv_parse([corpus::literal [csv 1000]])"] }
-    string_reverse-10K { set hir [corpus::program string_reverse "reverse_chars([corpus::literal [text 10000]])"] }
+    ai_text_clean-ascii-10K { set hir [corpus::driven ai_text_clean "clean_ai_text([corpus::literal [aiText ascii 10000]])"] }
+    ai_text_clean-emoji-10K { set hir [corpus::driven ai_text_clean "clean_ai_text([corpus::literal [aiText emoji 10000]])"] }
+    csv-1000 { set hir [corpus::driven csv "csv_parse([corpus::literal [csv 1000]])"] }
+    string_reverse-10K { set hir [corpus::driven string_reverse "reverse_chars([corpus::literal [text 10000]])"] }
     default { error "unknown supplemental workload $name" }
 }
 set f [open $out w]

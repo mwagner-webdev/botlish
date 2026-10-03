@@ -7,10 +7,11 @@
 #   corpus::program NAME DRIVER             HIR of the program followed by the
 #                                           source statement(s) DRIVER, whose
 #                                           value is the program's value
-#   corpus::handled DRIVER                  DRIVER with its IndexNotFound handled
-#                                           (the String "IndexNotFound")
+#   corpus::handled DRIVER ?ERRORS?         DRIVER with its builtin declared
+#                                           errors handled (each the String
+#                                           naming it)
 #   corpus::driven NAME DRIVER              corpus::program, handling DRIVER's
-#                                           IndexNotFound only if it needs it
+#                                           builtin errors only if it needs it
 #   corpus::run BACKEND HIR                 runs HIR; returns the runtime value
 #   corpus::outcome BACKEND HIR             {value SHOWN} or {error ERRORCODE}
 #   corpus::literal TEXT                    TEXT as a Botlish string literal
@@ -94,30 +95,39 @@ proc corpus::compile {source filename args} {
 }
 
 # DRIVER (top-level Botlish statements) as the body of a function whose
-# IndexNotFound -- list::at/mutable_array::at's declared error, which matmul,
-# csv_chunked, csv_records and hashtable declare, since positional records
-# and dimension checks are what they index (STDLIB-NAMESPACES.md) -- is
-# handled at top level by becoming the String "IndexNotFound": the one place
-# a test's driver states what a malformed input means, instead of every case
-# repeating a handler. The function's declared `-> any` result is what makes
-# that String admissible beside whatever the driver computes. Any other
-# outcome is the driver's own.
-proc corpus::handled {driver} {
+# builtin declared errors ERRORS -- list::at/mutable_array::at/set's
+# IndexNotFound and the slices' LowerUnderrun/UpperOverrun, which the corpus
+# functions declare where they index positional records or slice text they
+# cannot prove in range (STDLIB-NAMESPACES.md) -- are handled at top level by
+# becoming the String naming the error: the one place a test's driver
+# states what a malformed input means, instead of every case repeating a
+# handler. The function's declared `-> any` result is what makes that
+# String admissible beside whatever the driver computes. Any other outcome
+# is the driver's own.
+proc corpus::handled {driver {errors IndexNotFound}} {
     set body [join [lmap line [split $driver \n] {string cat "    " $line}] \n]
-    return "fn corpus_case() -> any errors IndexNotFound:\n$body\ncorpus_outcome = corpus_case():\n    on IndexNotFound:\n        \"IndexNotFound\"\ncorpus_outcome"
+    set handlers [join [lmap e $errors {string cat "    on $e:\n        \"$e\""}] \n]
+    return "fn corpus_case() -> any errors [join $errors {, }]:\n$body\ncorpus_outcome = corpus_case():\n$handlers\ncorpus_outcome"
 }
 
-# corpus::program NAME DRIVER, or -- when DRIVER leaves an IndexNotFound
-# unhandled at top level (and only then) -- of corpus::handled DRIVER.
+# corpus::program NAME DRIVER, or -- when DRIVER leaves builtin declared
+# errors unhandled at top level (and only then) -- of corpus::handled DRIVER
+# for exactly those errors (the compiler names one per rejection, so the
+# set grows until the driver compiles).
 proc corpus::driven {name driver args} {
-    if {[catch {program $name $driver {*}$args} hir options]} {
+    set errors {}
+    while 1 {
+        set text [expr {$errors eq {} ? $driver : [handled $driver $errors]}]
+        if {![catch {program $name $text {*}$args} hir options]} {
+            return $hir
+        }
         if {[dict get $options -errorcode] ne {CORE SEMANTIC UNHANDLED-ERROR}
-                || ![string match {*"IndexNotFound"*} $hir]} {
+                || ![regexp {declared error "(IndexNotFound|LowerUnderrun|UpperOverrun)"} $hir -> error]
+                || $error in $errors} {
             return -options $options $hir
         }
-        return [program $name [handled $driver] {*}$args]
+        lappend errors $error
     }
-    return $hir
 }
 
 proc corpus::program {name driver args} {

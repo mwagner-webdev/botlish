@@ -31,7 +31,7 @@
 # expect: ["hello", "hello  world", "AI-generated", "\"hello\"", "'hello'", "wait... what?"]
 
 # The character at index, or "" past the end (examples/stdlib/csv.bot's peek).
-fn peek(text, index):
+fn peek(text, index) errors LowerUnderrun:
     if index >= str::length(text):
         return ""
 
@@ -67,13 +67,21 @@ fn clean_char(character):
     character
 
 # text's characters from index on, cleaned and appended to done.
-fn clean_from(text, index, done):
+fn clean_from(text, index, done) errors LowerUnderrun:
     if index >= str::length(text):
         return done
 
     clean_from(text, index + 1, str::concat(done, clean_char(peek(text, index))))
 
-fn clean_ai_text(text):
+fn clean_ai_text(text) errors LowerUnderrun:
     clean_from(text, 0, "")
 
-[clean_ai_text("hello"), clean_ai_text("hello 🙂 world"), clean_ai_text("AI—generated"), clean_ai_text("“hello”"), clean_ai_text("‘hello’"), clean_ai_text("wait… what?")]
+# The sample's inputs never take a slice out of range; the handler
+# states what one would mean.
+fn sample() errors LowerUnderrun:
+    [clean_ai_text("hello"), clean_ai_text("hello 🙂 world"), clean_ai_text("AI—generated"), clean_ai_text("“hello”"), clean_ai_text("‘hello’"), clean_ai_text("wait… what?")]
+
+checks = sample():
+    on LowerUnderrun:
+        []
+checks

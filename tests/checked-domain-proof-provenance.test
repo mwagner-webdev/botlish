@@ -12,12 +12,12 @@
 # the module-init call's own `effectiveErrors = {}` correctly (a genuine,
 # already-shipped static-legality result), entirely through a private,
 # non-materializing recursive re-walk (`analyzeBlock`) that never touches
-# the HIR node fields of the inner `from_int`/`char::codepoint` calls
+# the HIR node fields of the inner `from_int`/`char::scalar_value` calls
 # inside `byte::set`'s own single, generically-checked function body.
 # Those inner nodes -- and every downstream pass that could act on them
 # for *code generation* (`hir/range.tcl`, `hir/specialize.tcl`,
 # `native/lower.tcl`) -- only ever see the generic, unseeded fact
-# (`char::codepoint(c)` in `[0, 0x10FFFF]`, `from_int`'s own
+# (`char::scalar_value(c)` in `[0, 0x10FFFF]`, `from_int`'s own
 # `effectiveErrors = {AboveRange}`), because `hir/completions.tcl` is a
 # separate, deliberately siloed lattice (STATIC-COMPLETION-PROOFS.md's own
 # "Path-sensitive range facts" section) that no backend or lowering pass
@@ -276,22 +276,27 @@ test checked-domain-q3-module-init-effective-errors-empty {the real production s
     }
 } -result {}
 
-test checked-domain-q3-inner-call-keeps-only-the-generic-fact {byte::set's own inner from_int(char::codepoint(c)) call -- inside the SAME program above -- still carries only the generic, unseeded facts (from_int's own effectiveErrors=AboveRange; char::codepoint's own result range the full Unicode scalar domain [0, 0x10FFFF]), never the module-init call's own narrower literal-derived proof: the exact first-loss location. Both calls share lib/byte.bot:176 (from_int(char::codepoint(c)) -- one nested inside the other), so both facts are read together and matched by their own distinct resultRangeFact shape} -body {
+test checked-domain-q3-inner-call-keeps-only-the-generic-fact {byte::set's own inner from_int(char::scalar_value(c)) call -- inside the SAME program above -- still carries only the generic, unseeded facts (from_int's own effectiveErrors=AboveRange; char::scalar_value's own result range the full Unicode scalar domain [0, 0x10FFFF]), never the module-init call's own narrower literal-derived proof: the exact first-loss location. Both calls share lib/byte.bot:176 (from_int(char::scalar_value(c)) -- one nested inside the other), so both facts are read together and matched by their own distinct resultRangeFact shape} -body {
     set path [makeFile {additional_unreserved_chars = byte::set(['-', '.', '_', '~'])} q3-inner-call.bot]
     try {
         set hir [surface::readProgramFile $path -strict 0]
-        # lib/byte.bot:176 is `from_int(char::codepoint(c))` inside `set`'s
+        # lib/byte.bot:176 is `from_int(char::scalar_value(c))` inside `set`'s
         # own body: from_int's own resultRangeFact is [0,255] (a
-        # successful Byte value); char::codepoint's is the full Unicode
+        # successful Byte value); char::scalar_value's is the full Unicode
         # scalar domain [0, 0x10FFFF] -- distinct calls, same source line.
+        # char::scalar_value is a direct native call (no completion facts
+        # are recorded on an infallible native call), so its range is read
+        # from the completion pass's own native rule for the argument
+        # from_int receives.
         set fromIntErrs {}
         set codepointRange {}
         foreach entry [callFactsAtLine $hir 176] {
             lassign $entry id effErrs resultRange
             if {$resultRange eq {[0, 255]}} {
                 set fromIntErrs $effErrs
-            } else {
-                set codepointRange $resultRange
+                set inner [lindex [hir::get $hir $id args] 0]
+                set codepointRange [hir::range::show [hir::completions::NativeResultRange $hir \
+                    [hir::completions::NewCtx] char::scalar_value [hir::get $hir $inner args] [list [hir::range::unknown]]]]
             }
         }
         list $fromIntErrs $codepointRange
@@ -300,7 +305,7 @@ test checked-domain-q3-inner-call-keeps-only-the-generic-fact {byte::set's own i
     }
 } -result {AboveRange {[0, 1114111]}}
 
-test checked-domain-q3-real-nir-retains-above-range-check {UPDATED BY M6, then LINUX-X86-64-SYSCALL (the decided `value < 0` comparison is no longer computed either: native/lower.tcl's PureDecidedCondition): byte::set's real generated NIR for its inner byte::from_int<int> instance loses its BelowRange check -- generically, because char::codepoint's own declared result range floor (core/native.tcl's "-result-range nonneg" metadata for a Unicode scalar value, [0, 1114111]) already proves value>=0 for EVERY caller of this shared instance, independent of the punctuation literal's own four values and independent of hir/completions.tcl's call-specific silo entirely -- but AboveRange remains: char::codepoint's upper bound (1114111) is nowhere near 255, so value>255 stays genuinely Unknown for this shared instance. This is the real production improvement M6 actually delivers here; it is not M5's own Q3 question (whether the outer call's *literal* facts reach the inner construction) -- that remains Outcome B, confirmed unchanged: no container-content propagation, no completions-proof import, was added} -body {
+test checked-domain-q3-real-nir-retains-above-range-check {UPDATED BY M6, then LINUX-X86-64-SYSCALL (the decided `value < 0` comparison is no longer computed either: native/lower.tcl's PureDecidedCondition): byte::set's real generated NIR for its inner byte::from_int<int> instance loses its BelowRange check -- generically, because char::scalar_value's own declared result range floor (core/native.tcl's "-result-range nonneg" metadata for a Unicode scalar value, [0, 1114111]) already proves value>=0 for EVERY caller of this shared instance, independent of the punctuation literal's own four values and independent of hir/completions.tcl's call-specific silo entirely -- but AboveRange remains: char::scalar_value's upper bound (1114111) is nowhere near 255, so value>255 stays genuinely Unknown for this shared instance. This is the real production improvement M6 actually delivers here; it is not M5's own Q3 question (whether the outer call's *literal* facts reach the inner construction) -- that remains Outcome B, confirmed unchanged: no container-content propagation, no completions-proof import, was added} -body {
     set path [makeFile {additional_unreserved_chars = byte::set(['-', '.', '_', '~'])} q3-nir.bot]
     try {
         set body [nirFuncBody [nirOfFile $path] "byte::from_int"]

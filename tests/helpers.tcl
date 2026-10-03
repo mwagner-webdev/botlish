@@ -103,25 +103,6 @@ if {[info exists ::env(NATIVE_COVERAGE)] && [info commands ::CoverageTest] eq ""
     interp alias {} ::test {} ::CoverageTest
 }
 
-# The result of STRICT (a script compiling a program with -strict 1) -- or,
-# when the program's only rejection is an IndexNotFound obligation of
-# list::at/mutable_array::at (STDLIB-NAMESPACES.md: an index nothing proves
-# is UNHANDLED-ERROR, a provably missing one KNOWN-ERROR), the result of LAX
-# (the same compile with -strict 0). For the compile helpers of test files
-# whose subject is not error legality (types, facts, representation) and
-# whose programs index incidentally; every other rejection stays one, and
-# what the programs compute is unchanged.
-proc compileWaivingIndexObligations {strict lax} {
-    if {[catch {uplevel 1 $strict} result options]} {
-        set code [dict get $options -errorcode]
-        if {[lindex $code end] in {UNHANDLED-ERROR KNOWN-ERROR} && [string match *IndexNotFound* $result]} {
-            return [uplevel 1 $lax]
-        }
-        return -options $options $result
-    }
-    return $result
-}
-
 # Evaluates a program given as expressions; returns the formatted value.
 proc run {args} {
     return [core::formatValue [core::evalProgram $args]]

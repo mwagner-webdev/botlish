@@ -64,6 +64,16 @@ set uriEscapeCall {{call {ref uriEscape} {const str {a b}}}}
 # read, so no IndexNotFound reaches uriEscape), and the new `i < 0` is one
 # more Int comparison on the untyped parameter i -- one representation
 # blocker, one kind guard. Guards still equal blockers.
+#
+# The declared slice errors (LowerUnderrun/UpperOverrun) moved them again,
+# measured per function against the tree before that change: esc_from now
+# guards its str::substring with `i < 0 or i >= str::length(text)`, one more
+# Int comparison on its untyped i (3 -> 4 blockers: every uriEscape program
+# +1); emailish?'s char_at guards its slice with `i < 0 or i >= n`, whose
+# comparison is now the one kind check of i (the slice's i and i + 1 below
+# it see a proven Int), so each of its two generic instances goes 2 -> 1
+# (05-refined-strings.ir and 06-refined-strings.hir, which call both
+# Emailish? and uriEscape: -2 + 1).
 
 test native-report-inlined-leaf-1 {native::report accepts an ordinary uriEscape call, directly and through an untyped wrapper, and Emailish?(5)} -body {
     lmap prog [list \
@@ -72,7 +82,7 @@ test native-report-inlined-leaf-1 {native::report accepts an ordinary uriEscape 
         {{call {ref Emailish?} {const 5}}}] {
         reportCounts [hir::build $prog -strict 0]
     }
-} -result {{11 11 0 0 0} {12 12 0 0 0} {0 0 0 0 1}}
+} -result {{12 12 0 0 0} {13 13 0 0 0} {0 0 0 0 1}}
 
 test native-report-inlined-leaf-2 {web.bot's high_nibble owns the two inlined bit_and guards and their two blockers} -body {
     set lowered [native::lowered [hir::build $uriEscapeCall -strict 0] -specialize 0]
@@ -91,7 +101,7 @@ test native-report-inlined-leaf-3 {inlining moves guards and blockers together: 
                 set info
             }]]
     }
-} -result {{11 11 0} {11 11 2}}
+} -result {{12 12 0} {12 12 2}}
 
 test native-report-inlined-leaf-4 {a leaf of an unproven argument inlined into the program, into a generic instance under specialization, and twice on one register} -body {
     lmap text {
@@ -118,6 +128,6 @@ test native-report-inlined-leaf-5 {the example and benchmark programs that call 
         }
         list [file tail $path] {*}[reportCounts $hir]
     }
-} -result {{05-refined-strings.ir 21 21 1 1 1} {06-refined-strings.hir 22 22 1 1 1} {14-modules.bot 2 2 0 0 0} {uri-steady.bot 14 14 0 0 0}}
+} -result {{05-refined-strings.ir 20 20 1 1 1} {06-refined-strings.hir 21 21 1 1 1} {14-modules.bot 2 2 0 0 0} {uri-steady.bot 15 15 0 0 0}}
 
 cleanupTests

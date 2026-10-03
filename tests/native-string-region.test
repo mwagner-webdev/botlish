@@ -329,17 +329,20 @@ run(\"a\U0001F600b\")
 # Bounds errors (#31): optimized and unoptimized modes -- and the
 # interpreter -- agree exactly, including error kind and message.
 
+# An out-of-range slice is the declared LowerUnderrun/UpperOverrun
+# (core::native::checkSlice): these programs handle nothing, so each run ends
+# with that uncaught declared error, identically in every mode.
 test region-bounds-negative-1 {start < 0} -body {
     assertErrorParity {str::substring("hello", -1, 3)}
-} -result {{CORE SEMANTIC RANGE} {str::substring: range -1..3 is outside 0..5}}
+} -result {{CORE SEMANTIC UNCAUGHT-ERROR} {uncaught propagated error: <error LowerUnderrun>}}
 
 test region-bounds-too-long-1 {end beyond the String's length} -body {
     assertErrorParity {str::substring("hello", 0, 10)}
-} -result {{CORE SEMANTIC RANGE} {str::substring: range 0..10 is outside 0..5}}
+} -result {{CORE SEMANTIC UNCAUGHT-ERROR} {uncaught propagated error: <error UpperOverrun>}}
 
-test region-bounds-start-gt-end-1 {start > end} -body {
+test region-bounds-start-gt-end-1 {start > end: the end is below its interval start..length} -body {
     assertErrorParity {str::substring("hello", 3, 1)}
-} -result {{CORE SEMANTIC RANGE} {str::substring: range 3..1 is outside 0..5}}
+} -result {{CORE SEMANTIC UNCAUGHT-ERROR} {uncaught propagated error: <error LowerUnderrun>}}
 
 test region-bounds-empty-1 {start == end: an empty region, not an error} -body {
     # The materialized empty String is the runtime's one canonical static empty
@@ -361,7 +364,24 @@ fn f(text, index):
 f(\"hello\", -1)
 "
     assertErrorParity $text
-} -result {{CORE SEMANTIC RANGE} {str::substring: range -1..0 is outside 0..5}}
+} -result {{CORE SEMANTIC UNCAUGHT-ERROR} {uncaught propagated error: <error LowerUnderrun>}}
+
+test region-bounds-handled-1 {each slice error, handled by name at a region-eligible use (the slice compared, never bound), gives its handler's value in every mode} -body {
+    set text {
+fn first_is_z(text, a, b):
+    v = str::substring(text, a, b):
+        on LowerUnderrun:
+            return "lower"
+        on UpperOverrun:
+            return "upper"
+    if v == "z":
+        "z"
+    else:
+        "other"
+[first_is_z("hello", -1, 3), first_is_z("hello", 0, 10), first_is_z("hello", 3, 1), first_is_z("hello", 6, 6), first_is_z("zebra", 0, 1), first_is_z("hello", 5, 5)]
+}
+    core::value::show [assertParity $text]
+} -result {["lower", "upper", "lower", "upper", "z", "other"]}
 
 # ---------------------------------------------------------------------------
 # Unicode boundaries (#32): ASCII, BMP non-ASCII, astral, and mixed text --
@@ -430,7 +450,7 @@ test region-csv-corpus-1 {csv.bot's own peek() sites: string-region-opt material
     source [file join $::projectRoot examples stdlib corpus.tcl]
     set text [corpus::literal "id,name\n1,Alice\n2,Bob\n3,Carol\n"]
     set text "csv_parse($text)"
-    set hir [corpus::program csv $text]
+    set hir [corpus::driven csv $text]
     set on [dict get [native::allocationReport $hir summary 1 -string-region-opt 1 -short-string-opt 0] byKind String allocations]
     set off [dict get [native::allocationReport $hir summary 1 -string-region-opt 0 -short-string-opt 0] byKind String allocations]
     set onValue [native::evalHir $hir -string-region-opt 1 -short-string-opt 0]

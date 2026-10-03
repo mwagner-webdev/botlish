@@ -118,6 +118,9 @@ proc hir::cardinality::of_loop {hir e} {
 #   {cap KEY}   the capacity of one MutableArray value (KEY as for len),
 #               always >= 0 and fixed at allocation (STDLIB-NAMESPACES.md's
 #               indexed-access proof is its one consumer besides lockstep)
+#   {slen KEY}  the length (Unicode scalar values) of one String value (KEY
+#               as for len), always >= 0 (the slice proof of
+#               STDLIB-NAMESPACES.md)
 #   {max FORM}  max(FORM, 0), always >= 0
 #   {v B}       the Int bound to binding B (a parameter, loop variable ...)
 #   {e E}       the Int value of the single expression E that no rule above
@@ -187,7 +190,7 @@ proc hir::cardinality::NonNeg {a} {
         return 0
     }
     foreach {atom coeff} $terms {
-        if {[lindex $atom 0] ni {len cap max} || $coeff < 0} {
+        if {[lindex $atom 0] ni {len cap slen max} || $coeff < 0} {
             return 0
         }
     }
@@ -286,7 +289,45 @@ proc hir::cardinality::IntForm {hir e stepsVar} {
     if {$name eq "mutable_array::capacity" && [llength $args] == 1} {
         return [Capacity $hir [lindex $args 0] steps]
     }
+    if {$name eq "str::length" && [llength $args] == 1} {
+        return [StrLength $hir [lindex $args 0] steps]
+    }
     return [FormAtom [list e $id]]
+}
+
+# The length, in Unicode scalar values, of the String value of expression
+# E, as a (nonnegative) form: the exact length of an exactly known String
+# (hir/exactvalue.tcl: a literal, followed through immutable bindings); the
+# sum of the operands' lengths for `str::concat`; the operand's length for
+# `str::lowercase` (a simple, one-to-one case mapping); END - START for a
+# `str::substring(s, START, END)` that returned; else the atom {slen KEY},
+# keyed like `len` -- a String is immutable, so equal keys are equal
+# lengths.
+proc hir::cardinality::StrLength {hir e stepsVar} {
+    upvar 1 $stepsVar steps
+    set fact [hir::exact::Of $hir $e]
+    if {[lindex $fact 0] eq "val" && [core::value::kind [lindex $fact 1]] eq "str"} {
+        return [FormConst [string length [core::value::strOf [lindex $fact 1]]]]
+    }
+    lassign [Chase $hir $e steps] kind id
+    if {$kind eq "binding"} {
+        return [FormAtom [list slen [list b $id]]]
+    }
+    set node [dict get $hir exprs $id]
+    set name [NativeName $hir $node]
+    set args [expr {$name eq "" ? {} : [dict get $node args]}]
+    switch -- $name/[llength $args] {
+        str::concat/2 {
+            return [FormAdd [StrLength $hir [lindex $args 0] steps] [StrLength $hir [lindex $args 1] steps]]
+        }
+        str::lowercase/1 {
+            return [StrLength $hir [lindex $args 0] steps]
+        }
+        str::substring/3 {
+            return [FormAdd [IntForm $hir [lindex $args 2] steps] [IntForm $hir [lindex $args 1] steps] -1]
+        }
+    }
+    return [FormAtom [list slen [list e $id]]]
 }
 
 # The capacity of the MutableArray value of expression E, as a (nonnegative)
@@ -465,6 +506,13 @@ proc hir::cardinality::ShowAtom {hir atom} {
                 return "capacity([dict get $hir bindings $id name])"
             }
             return "capacity([ShowExpr $hir $id])"
+        }
+        slen {
+            lassign $what how id
+            if {$how eq "b"} {
+                return "str::length([dict get $hir bindings $id name])"
+            }
+            return "str::length([ShowExpr $hir $id])"
         }
         e { return [ShowExpr $hir $what] }
     }

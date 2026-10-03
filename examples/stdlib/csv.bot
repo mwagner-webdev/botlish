@@ -24,7 +24,7 @@
 # expect: [["name", "age"], ["Alice", "30"], ["Bob", "40"]]
 
 # The character at index, or "" past the end.
-fn peek(text, index):
+fn peek(text, index) errors LowerUnderrun:
     if index >= str::length(text):
         return ""
 
@@ -32,7 +32,7 @@ fn peek(text, index):
 
 # An unquoted field that started at start, scanned up to index:
 # {field, index of the "," or "\n" that ends it, or the end}.
-fn scan_unquoted(text, start, index):
+fn scan_unquoted(text, start, index) errors LowerUnderrun, UpperOverrun:
     character = peek(text, index)
     if character == "" or character == "," or character == "\n":
         return {field: str::substring(text, start, index), index: index}
@@ -41,7 +41,7 @@ fn scan_unquoted(text, start, index):
 
 # A quoted field whose decoded content so far is field, scanned from index
 # (inside the quotes): {field, index just after the closing quote}.
-fn scan_quoted(text, index, field):
+fn scan_quoted(text, index, field) errors LowerUnderrun:
     character = peek(text, index)
     if character == "\"":
         if peek(text, index + 1) == "\"":
@@ -52,7 +52,7 @@ fn scan_quoted(text, index, field):
     scan_quoted(text, index + 1, str::concat(field, character))
 
 # The field starting at index: {field, index just after it}.
-fn scan_field(text, index):
+fn scan_field(text, index) errors LowerUnderrun, UpperOverrun:
     if peek(text, index) == "\"":
         return scan_quoted(text, index + 1, "")
 
@@ -60,7 +60,7 @@ fn scan_field(text, index):
 
 # The rest of the record whose fields so far are fields, from index:
 # {fields, stop: index just after the record's "\n", or the end}.
-fn scan_record(text, index, fields):
+fn scan_record(text, index, fields) errors LowerUnderrun, UpperOverrun:
     scanned = scan_field(text, index)
     more = list::append(fields, scanned.field)
     stop = scanned.index
@@ -74,14 +74,21 @@ fn scan_record(text, index, fields):
     {fields: more, stop: stop}
 
 # The records from index on, appended to records.
-fn scan_records(text, index, records):
+fn scan_records(text, index, records) errors LowerUnderrun, UpperOverrun:
     if index >= str::length(text):
         return records
 
     scanned = scan_record(text, index, [])
     scan_records(text, scanned.stop, list::append(records, scanned.fields))
 
-fn csv_parse(text):
+fn csv_parse(text) errors LowerUnderrun, UpperOverrun:
     scan_records(text, 0, [])
 
-csv_parse("name,age\nAlice,30\nBob,40\n")
+# The sample's input is well formed, so none of its slices is ever out of
+# range; the handlers state what a malformed scan would mean.
+parsed = csv_parse("name,age\nAlice,30\nBob,40\n"):
+    on LowerUnderrun:
+        []
+    on UpperOverrun:
+        []
+parsed

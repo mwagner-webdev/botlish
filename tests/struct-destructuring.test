@@ -706,8 +706,9 @@ set ::countDecls {struct Rec:
     b: str
     c: int
 fn bump(log: MutableArray[int], id: int, v: int) -> int:
-    n = mutable_array::get(log, 0, 0)
-    mutable_array::set(log, 0, n * 10 + id)
+    if mutable_array::capacity(log) > 0:
+        n = mutable_array::at(log, 0)
+        mutable_array::set(log, 0, n * 10 + id)
     v
 fn mk_named(log: MutableArray[int]) -> Rec:
     Rec {a: bump(log, 1, 1), b: "x", c: bump(log, 2, 3)}
@@ -831,7 +832,7 @@ test destructure-once-not-per-field {destructuring is not a.f; b.f with the sour
 # Bindings are values, not references into the source struct
 
 test destructure-bound-mutable-value-is-the-same-value {a field holding a MutableArray: the binding denotes that array (its ordinary semantics), so writes through either name are seen through the other} -body {
-    set program "struct Holder:\n    items: MutableArray\[int\]\n    n: int\nfn run():\n    h = Holder \{items: mutable_array::create(2, 0), n: 1\}\n    \{items\} = h\n    mutable_array::set(items, 0, 5)\n    mutable_array::set(h.items, 1, 6)\n    \[mutable_array::get(h.items, 0, -1), mutable_array::get(items, 1, -1)\]\nrun()"
+    set program "struct Holder:\n    items: MutableArray\[int\]\n    n: int\nfn run():\n    h = Holder \{items: mutable_array::create(2, 0), n: 1\}\n    \{items\} = h\n    a = mutable_array::set(items, 0, 5):\n        on IndexNotFound:\n            unit\n    b = mutable_array::set(h.items, 1, 6):\n        on IndexNotFound:\n            unit\n    \[mutable_array::get(h.items, 0, -1), mutable_array::get(items, 1, -1)\]\nrun()"
     parity $program
 } -result {value {[5, 6]}}
 
@@ -1691,7 +1692,7 @@ test destructure-value-bindings-still-work {a destructure followed by more state
 } -result {value 3}
 
 test destructure-value-statement-order {the unit comes after the bindings and before the next statement: the statements around it keep their order} -body {
-    parity "fn bump(log: MutableArray\[int\], id: int, v: int) -> int:\n    n = mutable_array::get(log, 0, 0)\n    mutable_array::set(log, 0, n * 10 + id)\n    v\nfn run():\n    log = mutable_array::create(1, 0)\n    x = bump(log, 1, 5)\n    \{a, b\} = \{a: bump(log, 2, 1), b: bump(log, 3, 2)\}\n    y = bump(log, 4, 7)\n    \[x, a, b, y, mutable_array::get(log, 0, 0)\]\nrun()"
+    parity "fn bump(log: MutableArray\[int\], id: int, v: int) -> int:\n    if mutable_array::capacity(log) > 0:\n        n = mutable_array::at(log, 0)\n        mutable_array::set(log, 0, n * 10 + id)\n    v\nfn run():\n    log = mutable_array::create(1, 0)\n    x = bump(log, 1, 5)\n    \{a, b\} = \{a: bump(log, 2, 1), b: bump(log, 3, 2)\}\n    y = bump(log, 4, 7)\n    \[x, a, b, y, mutable_array::get(log, 0, 0)\]\nrun()"
 } -result {value {[5, 1, 2, 7, 1234]}}
 
 test destructure-value-ordinary-binding-unchanged {an ordinary binding is not changed to unit to match the destructure: as the last statement it still yields its value} -body {
@@ -1773,7 +1774,7 @@ test destructure-value-evaluate-once {the source of a destructure that is the la
 test destructure-value-mutable-field-still-same-value {a MutableArray field: the binding is the same array, and a destructure that ends the body is unit} -body {
     set decls "struct Holder:\n    items: MutableArray\[int\]\n    n: int\n"
     list [parity "${decls}fn run():\n    h = Holder \{items: mutable_array::create(2, 0), n: 1\}\n    \{items\} = h\nrun()"] \
-        [parity "${decls}fn run():\n    h = Holder \{items: mutable_array::create(2, 0), n: 1\}\n    \{items\} = h\n    mutable_array::set(items, 0, 5)\n    mutable_array::get(h.items, 0, -1)\nrun()"]
+        [parity "${decls}fn run():\n    h = Holder \{items: mutable_array::create(2, 0), n: 1\}\n    \{items\} = h\n    a = mutable_array::set(items, 0, 5):\n        on IndexNotFound:\n            unit\n    mutable_array::get(h.items, 0, -1)\nrun()"]
 } -result {{value unit} {value 5}}
 
 test destructure-value-bindings-are-values {the result being unit does not turn the bindings into references: a binding keeps its value when a later struct is destructured} -body {
@@ -1932,8 +1933,9 @@ set ::typedDestructured {struct Acc:
     count: int
     last: int
 fn probe(log: MutableArray[int], id: int, result: int) -> int:
-    n = mutable_array::get(log, 0, 0)
-    mutable_array::set(log, 0, n * 10 + id)
+    if mutable_array::capacity(log) > 0:
+        n = mutable_array::at(log, 0)
+        mutable_array::set(log, 0, n * 10 + id)
     result
 fn step(log: MutableArray[int], n: int) -> Acc:
     Acc {total: probe(log, 1, n * 2), count: probe(log, 2, n), last: n}
@@ -1947,8 +1949,9 @@ set ::typedExplicit {struct Acc:
     count: int
     last: int
 fn probe(log: MutableArray[int], id: int, result: int) -> int:
-    n = mutable_array::get(log, 0, 0)
-    mutable_array::set(log, 0, n * 10 + id)
+    if mutable_array::capacity(log) > 0:
+        n = mutable_array::at(log, 0)
+        mutable_array::set(log, 0, n * 10 + id)
     result
 fn step(log: MutableArray[int], n: int) -> Acc:
     Acc {total: probe(log, 1, n * 2), count: probe(log, 2, n), last: n}

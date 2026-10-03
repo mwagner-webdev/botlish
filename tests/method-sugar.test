@@ -223,9 +223,9 @@ append([1, 2], 3)}  {value {[1, 2, 3]}}
 str::concat("ab", "cd")}  {value {"abcd"}}
     chained     {lowercase = str::lowercase
 substring = str::substring
-"HeLLo World".lowercase().substring(6, 11)}  {lowercase = str::lowercase
+"HeLLo World".substring(6, 11).lowercase()}  {lowercase = str::lowercase
 substring = str::substring
-str::substring(str::lowercase("HeLLo World"), 6, 11)}  {value {"world"}}
+str::lowercase(str::substring("HeLLo World", 6, 11))}  {value {"world"}}
     variadic    {5.list(6, 7)}                   {list(5, 6, 7)}                   {value {[5, 6, 7]}}
     variadic-0  {5.list()}                       {list(5)}                         {value {[5]}}
     chained-natives {length = list::length
@@ -614,8 +614,9 @@ test method-no-bound-method-values {x.f is a field projection, never a bound fun
 # Evaluation: the receiver is the first argument, evaluated once
 
 set ::logFns {fn probe(log, id, result):
-    n = mutable_array::get(log, 0, 0)
-    mutable_array::set(log, 0, n * 10 + id)
+    if mutable_array::capacity(log) > 0:
+        n = mutable_array::at(log, 0)
+        mutable_array::set(log, 0, n * 10 + id)
     result
 fn fresh():
     log = mutable_array::allocate(1)
@@ -678,7 +679,10 @@ fn to_list(a):
 fn size(xs):
     list::length(xs)
 fn text(n):
-    str::substring("abcdefghij", 0, n)
+    s = "abcdefghij"
+    if n < 0 or n > str::length(s):
+        return s
+    str::substring(s, 0, n)
 fn shout(s):
     str::lowercase(s)
 length = str::length
@@ -702,7 +706,7 @@ test method-chain-is-nested-calls {the HIR of a chain is the HIR of the nested f
     set m [hirOf "${::chainFns}3.to_list().size().inc()"]
     set f [hirOf "${::chainFns}inc(size(to_list(3)))"]
     list [expr {[hir::format $m] eq [hir::format $f]}] [llength [hirFind $m call]] [llength [hirFind $f call]]
-} -result {1 9 9}
+} -result {1 12 12}
 
 # ---------------------------------------------------------------------------
 # Errors and completions: unchanged
@@ -854,8 +858,8 @@ foreach {name method free} {
         "fn add(a, b):\n    a + b\nfn run(n):\n    n.add(3).add(n.add(1))\n\[run(1), run(20)\]"
         "fn add(a, b):\n    a + b\nfn run(n):\n    add(add(n, 3), add(n, 1))\n\[run(1), run(20)\]"
     lists-and-strings
-        "lowercase = str::lowercase\nfn total(xs):\n    list::length(xs)\nfn name(n):\n    str::substring(\"abcdef\", 0, n)\n\[\[1, 2, 3\].total(), 4.name().lowercase()\]"
-        "lowercase = str::lowercase\nfn total(xs):\n    list::length(xs)\nfn name(n):\n    str::substring(\"abcdef\", 0, n)\n\[total(\[1, 2, 3\]), lowercase(name(4))\]"
+        "lowercase = str::lowercase\nfn total(xs):\n    list::length(xs)\nfn name(n):\n    s = \"abcdef\"\n    if n < 0 or n > str::length(s):\n        return s\n    str::substring(s, 0, n)\n\[\[1, 2, 3\].total(), 4.name().lowercase()\]"
+        "lowercase = str::lowercase\nfn total(xs):\n    list::length(xs)\nfn name(n):\n    s = \"abcdef\"\n    if n < 0 or n > str::length(s):\n        return s\n    str::substring(s, 0, n)\n\[total(\[1, 2, 3\]), lowercase(name(4))\]"
     construction
         "fn pair(a, b):\n    \[a, b\]\nfn first(p):\n    v = list::at(p, 0):\n        on IndexNotFound:\n            0\n    v\nfn run(n):\n    n.pair(n + 1).first()\n\[run(1), run(5)\]"
         "fn pair(a, b):\n    \[a, b\]\nfn first(p):\n    v = list::at(p, 0):\n        on IndexNotFound:\n            0\n    v\nfn run(n):\n    first(pair(n, n + 1))\n\[run(1), run(5)\]"
@@ -901,8 +905,9 @@ proc executableValue {text} {
 }
 
 set ::typedMethod {fn probe(log: MutableArray[int], id: int, result: int) -> int:
-    n = mutable_array::get(log, 0, 0)
-    mutable_array::set(log, 0, n * 10 + id)
+    if mutable_array::capacity(log) > 0:
+        n = mutable_array::at(log, 0)
+        mutable_array::set(log, 0, n * 10 + id)
     result
 fn add(a: int, b: int) -> int:
     a + b
@@ -914,8 +919,9 @@ fn run(n: int) -> int:
     v * 1000 + mutable_array::get(log, 0, 0)
 [run(1), run(20)]}
 set ::typedFree {fn probe(log: MutableArray[int], id: int, result: int) -> int:
-    n = mutable_array::get(log, 0, 0)
-    mutable_array::set(log, 0, n * 10 + id)
+    if mutable_array::capacity(log) > 0:
+        n = mutable_array::at(log, 0)
+        mutable_array::set(log, 0, n * 10 + id)
     result
 fn add(a: int, b: int) -> int:
     a + b

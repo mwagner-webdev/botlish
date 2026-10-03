@@ -7,7 +7,7 @@ fn outer(p, s):
     fn inner(x):
         p(x)
     fn count(i):
-        if i >= str::length(s):
+        if i < 0 or i >= str::length(s):
             return i
         if inner(str::substring(s, i, i + 1)):
             return count(i + 1)

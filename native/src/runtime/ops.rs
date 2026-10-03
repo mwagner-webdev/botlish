@@ -23,7 +23,8 @@
 //! | rt_str_eq              | Str, Str            | Bool                         | no        |
 //! | rt_hash                | any                 | Int (61-bit); EQUALITY       | no        |
 //! | rt_str_len             | Str                 | Int                          | no        |
-//! | rt_substr              | Str, Int, Int       | Str; RANGE                   | yes       |
+//! | rt_substr              | Str, Int, Int       | Str; declared LowerUnderrun/ | yes       |
+//! |                        |                     | UpperOverrun (check_slice)   |           |
 //! | rt_str_decode_char_at  | Str, Int(byte off.) | one-char Str                 | yes       |
 //! | rt_str_byte_len        | Str                 | Int (UTF-8 byte length)      | no        |
 //! | rt_str_lower           | Str                 | Str                          | yes       |
@@ -49,9 +50,11 @@
 //! | rt_mutarray_capacity   | MutableArray         | Int                          | no        |
 //! | rt_mutarray_get        | MutableArray, Int    | element; declared            | no        |
 //! |                        |                      | IndexNotFound (mutable_array::at) |      |
-//! | rt_mutarray_set        | MutableArray,Int,any | Unit; RANGE                  | no        |
-//! | rt_mutarray_copy       | dst,i,src,i,count    | Unit; RANGE                  | no        |
-//! | rt_mutarray_freeze     | MutableArray, Int    | List (copy); RANGE           | yes       |
+//! | rt_mutarray_set        | MutableArray,Int,any | Unit; declared IndexNotFound | no        |
+//! | rt_mutarray_copy       | dst,i,src,i,count    | Unit; declared LowerUnderrun/| no        |
+//! |                        |                      | UpperOverrun (check_slice)   |           |
+//! | rt_mutarray_freeze     | MutableArray, Int    | List (copy); declared        | yes       |
+//! |                        |                      | LowerUnderrun/UpperOverrun   |           |
 //! | rt_is_kind             | any, kind code      | Bool                         | no        |
 //! | rt_is_result           | any, 1 ok / 0 error | Bool                         | no        |
 //! | rt_result_payload      | Result, 1/0         | payload; TYPE if wrong tag   | no        |
@@ -613,15 +616,9 @@ pub extern "C" fn rt_str_len(p: *mut Vm, s: Value) -> Value {
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_substr(p: *mut Vm, s: Value, start: Value, end: Value) -> Value {
     let obj = str_of(s);
-    let len = obj.chars as i64;
-    let (from, to) = match (int_small(start), int_small(end)) {
-        (Some(from), Some(to)) if from >= 0 && from <= to && to <= len => (from as usize, to as usize),
-        _ => {
-            // Outside the range (big Ints always are): the reference message.
-            let (from, to) = (int_to_big(start), int_to_big(end));
-            let message = format!("str::substring: range {from}..{to} is outside 0..{len}");
-            return vm(p).fail(RtError::Semantic { kind: "RANGE", message });
-        }
+    let (from, to) = match check_slice(p, bound_of(start), SliceEnd::End(bound_of(end)), obj.chars) {
+        Ok(slice) => slice,
+        Err(failed) => return failed,
     };
     // One allocation, one copy: the substring's bytes go straight from the
     // base's text into the new String's text.
@@ -664,21 +661,15 @@ pub extern "C" fn rt_substr(p: *mut Vm, s: Value, start: Value, end: Value) -> V
 // hir/stringregion.tcl's header.
 
 /// Validates a region's bounds exactly as `rt_substr` does, without
-/// allocating: UNIT on success, RANGE (matching `rt_substr`'s own message)
-/// on failure. Strings are immutable, so a region proven valid here stays
-/// valid for as long as its registers are live -- no re-check is ever needed
-/// at a consumer.
+/// allocating: UNIT on success, `rt_substr`'s own LowerUnderrun/UpperOverrun
+/// (`check_slice`) on failure. Strings are immutable, so a region proven
+/// valid here stays valid for as long as its registers are live -- no
+/// re-check is ever needed at a consumer.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_str_region_check(p: *mut Vm, s: Value, start: Value, end: Value) -> Value {
-    let obj = str_of(s);
-    let len = obj.chars as i64;
-    match (int_small(start), int_small(end)) {
-        (Some(from), Some(to)) if from >= 0 && from <= to && to <= len => UNIT,
-        _ => {
-            let (from, to) = (int_to_big(start), int_to_big(end));
-            let message = format!("str::substring: range {from}..{to} is outside 0..{len}");
-            vm(p).fail(RtError::Semantic { kind: "RANGE", message })
-        }
+    match check_slice(p, bound_of(start), SliceEnd::End(bound_of(end)), str_of(s).chars) {
+        Ok(_) => UNIT,
+        Err(failed) => failed,
     }
 }
 
@@ -1005,7 +996,7 @@ fn tcl_alnum_char(c: char) -> bool {
 
 /// S's one Unicode scalar, or a RANGE failure (core/tclcompat.tcl's own
 /// contract: these primitives are defined only for a one-scalar String,
-/// matching `rt_substr`'s RANGE convention for an out-of-domain argument
+/// the RANGE convention for an out-of-domain argument
 /// rather than silently classifying just the first character of a longer
 /// string, or of the empty string).
 fn one_scalar(p: *mut Vm, s: Value, native: &str) -> Result<char, Value> {
@@ -1118,10 +1109,73 @@ pub extern "C" fn rt_list_len(p: *mut Vm, l: Value) -> Value {
 /// operations (a wrong-kind argument) is an ordinary semantic error raised
 /// before the call by the caller's kind guards.
 fn index_not_found(p: *mut Vm) -> Value {
+    fail_builtin(p, super::error::ERR_INDEX_NOT_FOUND, "IndexNotFound")
+}
+
+/// Records the builtin declared error ID (named NAME) as pending and fails:
+/// what a handler's `declarederroreq` reads, with an UNCAUGHT-ERROR fallback
+/// for the program boundary. Returns NO_VALUE.
+fn fail_builtin(p: *mut Vm, id: u32, name: &str) -> Value {
     let vm = vm(p);
-    vm.declared_error = super::error::ERR_INDEX_NOT_FOUND;
-    let message = "uncaught propagated error: <error IndexNotFound>".to_string();
+    vm.declared_error = id;
+    let message = format!("uncaught propagated error: <error {name}>");
     vm.fail(RtError::Semantic { kind: "UNCAUGHT-ERROR", message })
+}
+
+/// An Int slice bound as `check_slice` compares it: its value, or the side
+/// of the small-Int range a BigInt lies on. Every BigInt is outside every
+/// valid slice (no sequence is that long), and the derived order
+/// (`Below < At(_) < Above`) is the numeric one wherever `check_slice`
+/// compares a BigInt with a small value.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+enum Bound {
+    Below,
+    At(i128),
+    Above,
+}
+
+fn bound_of(v: Value) -> Bound {
+    match int_small(v) {
+        Some(n) => Bound::At(n as i128),
+        None if int_to_big(v).sign() == num_bigint::Sign::Minus => Bound::Below,
+        None => Bound::Above,
+    }
+}
+
+/// The end of a slice: given directly, or as a count from its start.
+enum SliceEnd {
+    End(Bound),
+    Count(Bound),
+}
+
+/// The one slice rule (core::native::checkSlice, STDLIB-NAMESPACES.md): the
+/// slice START..END of a sequence of N elements is valid iff 0 <= START <=
+/// END <= N. START is checked against 0..N first, then END against
+/// START..N; the first bound below its interval fails with the declared
+/// builtin error LowerUnderrun, the first above it with UpperOverrun.
+/// Ok((start, end)) for a valid slice; otherwise the failure (NO_VALUE),
+/// already recorded.
+fn check_slice(p: *mut Vm, start: Bound, end: SliceEnd, n: usize) -> Result<(usize, usize), Value> {
+    let n = n as i128;
+    let lower = |p| Err(fail_builtin(p, super::error::ERR_LOWER_UNDERRUN, "LowerUnderrun"));
+    let upper = |p| Err(fail_builtin(p, super::error::ERR_UPPER_OVERRUN, "UpperOverrun"));
+    let s = match start {
+        Bound::At(s) if (0..=n).contains(&s) => s,
+        Bound::At(s) if s > n => return upper(p),
+        Bound::Above => return upper(p),
+        _ => return lower(p),
+    };
+    let e = match end {
+        SliceEnd::End(e) => e,
+        SliceEnd::Count(Bound::At(c)) => Bound::At(s + c),
+        SliceEnd::Count(beyond) => beyond,
+    };
+    match e {
+        Bound::At(e) if e >= s && e <= n => Ok((s as usize, e as usize)),
+        Bound::At(e) if e > n => upper(p),
+        Bound::Above => upper(p),
+        _ => lower(p),
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -1273,45 +1327,34 @@ pub extern "C" fn rt_mutarray_set(p: *mut Vm, arr: Value, index: Value, value: V
             vm(p).metrics.record_mutarray_write();
             UNIT
         }
-        _ => {
-            let len = obj.slots.len();
-            let message = format!("mutable_array::set: index {} is outside 0..{}", int_to_big(index), len as i64 - 1);
-            vm(p).fail(RtError::Semantic { kind: "RANGE", message })
-        }
+        _ => index_not_found(p),
     }
-}
-
-fn invalid_copy_range(p: *mut Vm, dst: Value, dst_start: Value, src: Value, src_start: Value, count: Value) -> Value {
-    let dst_len = mutarray_of(dst).slots.len();
-    let src_len = mutarray_of(src).slots.len();
-    let message = format!(
-        "mutable_array::copy: range dstStart={}, srcStart={}, count={} is invalid for dst capacity {dst_len}, src capacity {src_len}",
-        int_to_big(dst_start), int_to_big(src_start), int_to_big(count)
-    );
-    vm(p).fail(RtError::Semantic { kind: "RANGE", message })
 }
 
 /// Bulk copy: COUNT elements of SRC starting at SRC_START into DST starting
 /// at DST_START. Uses `ptr::copy` (memmove semantics), so DST and SRC may be
 /// the same MutableArray with overlapping ranges: the result is always as if
-/// SRC's elements were read before any of DST's were written.
+/// SRC's elements were read before any of DST's were written. Both ranges
+/// are slices (`check_slice`), the destination's checked first; an invalid
+/// one fails with LowerUnderrun/UpperOverrun and copies nothing.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_mutarray_copy(p: *mut Vm, dst: Value, dst_start: Value, src: Value, src_start: Value, count: Value) -> Value {
-    let (ds, ss, n) = match (int_small(dst_start), int_small(src_start), int_small(count)) {
-        (Some(ds), Some(ss), Some(n)) if ds >= 0 && ss >= 0 && n >= 0 => (ds, ss, n),
-        _ => return invalid_copy_range(p, dst, dst_start, src, src_start, count),
+    let dst_len = mutarray_of(dst).slots.len();
+    let src_len = mutarray_of(src).slots.len();
+    let (ds, end) = match check_slice(p, bound_of(dst_start), SliceEnd::Count(bound_of(count)), dst_len) {
+        Ok(slice) => slice,
+        Err(failed) => return failed,
     };
-    let dst_len = mutarray_of(dst).slots.len() as i64;
-    let src_len = mutarray_of(src).slots.len() as i64;
-    let in_range = |start: i64, len: i64| start.checked_add(n).is_some_and(|end| end <= len);
-    if !in_range(ds, dst_len) || !in_range(ss, src_len) {
-        return invalid_copy_range(p, dst, dst_start, src, src_start, count);
-    }
+    let ss = match check_slice(p, bound_of(src_start), SliceEnd::Count(bound_of(count)), src_len) {
+        Ok((ss, _)) => ss,
+        Err(failed) => return failed,
+    };
+    let n = end - ds;
     if n > 0 {
         let dst_ptr = mutarray_of_mut(dst).slots.as_mut_ptr();
         let src_ptr = mutarray_of(src).slots.as_ptr();
-        unsafe { std::ptr::copy(src_ptr.add(ss as usize), dst_ptr.add(ds as usize), n as usize) };
-        vm(p).metrics.record_mutarray_copy(n as usize);
+        unsafe { std::ptr::copy(src_ptr.add(ss), dst_ptr.add(ds), n) };
+        vm(p).metrics.record_mutarray_copy(n);
     }
     UNIT
 }
@@ -1325,24 +1368,20 @@ pub extern "C" fn rt_mutarray_copy(p: *mut Vm, dst: Value, dst_start: Value, src
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_mutarray_freeze(p: *mut Vm, arr: Value, count: Value) -> Value {
     let slots = &mutarray_of(arr).slots;
-    match int_small(count) {
-        Some(n) if n >= 0 && (n as usize) <= slots.len() => {
-            let items = slots[..n as usize].to_vec();
+    match check_slice(p, Bound::At(0), SliceEnd::End(bound_of(count)), slots.len()) {
+        Ok((_, n)) => {
+            let items = slots[..n].to_vec();
             let elements = items.len();
             let r = vm(p).new_list(items);
             vm(p).metrics.record_mutarray_copy(elements);
             r
         }
-        _ => {
-            let message =
-                format!("mutable_array::freeze: count {} is outside 0..{}", int_to_big(count), slots.len());
-            vm(p).fail(RtError::Semantic { kind: "RANGE", message })
-        }
+        Err(failed) => failed,
     }
 }
 
 // ---------------------------------------------------------------------------
-// UnicodeChar (char::scalar_value, wrapped by char::codepoint, core/unicodechar.tcl): total,
+// UnicodeChar (char::scalar_value, core/unicodechar.tcl): total,
 // never fails. A Unicode scalar value is always <= 0x10FFFF, well inside the
 // small-Int range, so the result is always an immediate small Int -- no
 // allocation, matching the operand it reads from (see runtime/value.rs's
@@ -2157,6 +2196,66 @@ mod tests {
                 vm.declared_error = 0;
             }
         }
+    }
+
+    // The slice rule (check_slice, core::native::checkSlice): START against
+    // 0..N first, then END against START..N; below is LowerUnderrun, above
+    // is UpperOverrun. Writes through an index are IndexNotFound.
+
+    fn pending(vm: &mut Vm) -> u32 {
+        let id = vm.declared_error;
+        vm.error = None;
+        vm.declared_error = 0;
+        id
+    }
+
+    #[test]
+    fn slices_fail_with_lower_underrun_or_upper_overrun() {
+        use crate::runtime::error::{ERR_LOWER_UNDERRUN as LO, ERR_UPPER_OVERRUN as UP};
+        let mut vm = vm();
+        let s = str_val(&mut vm, "abc");
+        let neg_big = vm.new_big(-(num_bigint::BigInt::from(1u8) << 80usize));
+        let pos_big = vm.new_big(num_bigint::BigInt::from(1u8) << 80usize);
+        let cases = [
+            (small(-1), small(2), LO),  // start below 0
+            (small(4), small(4), UP),   // start above the length
+            (small(2), small(1), LO),   // end below its start (inverted)
+            (small(1), small(4), UP),   // end above the length
+            (small(-1), small(9), LO),  // the start is checked first
+            (small(4), small(1), UP),   // ... and decides alone
+            (neg_big, small(1), LO),
+            (small(0), pos_big, UP),
+            (small(1), neg_big, LO),
+        ];
+        for (start, end, id) in cases {
+            assert_eq!(rt_substr(&mut *vm, s, start, end), NO_VALUE);
+            assert_eq!(pending(&mut vm), id);
+            assert_eq!(rt_str_region_check(&mut *vm, s, start, end), NO_VALUE);
+            assert_eq!(pending(&mut vm), id);
+        }
+        assert_eq!(str_of(rt_substr(&mut *vm, s, small(3), small(3))).as_str(), "");
+        assert_eq!(rt_str_region_check(&mut *vm, s, small(0), small(3)), UNIT);
+
+        let arr = rt_mutarray_allocate(&mut *vm, small(2));
+        let big = rt_mutarray_allocate(&mut *vm, small(5));
+        assert_eq!(rt_mutarray_set(&mut *vm, arr, small(2), small(1)), NO_VALUE);
+        assert_eq!(pending(&mut vm), crate::runtime::error::ERR_INDEX_NOT_FOUND);
+        for (count, id) in [(small(-1), LO), (small(3), UP)] {
+            assert_eq!(rt_mutarray_freeze(&mut *vm, arr, count), NO_VALUE);
+            assert_eq!(pending(&mut vm), id);
+        }
+        // copy: the destination slice first, then the source slice.
+        for (ds, ss, count, id) in [
+            (small(-1), small(9), small(1), LO), // destination start, before the source's overrun
+            (small(0), small(9), small(1), UP),  // source start above its length
+            (small(0), small(0), small(-1), LO), // a negative count: end below start
+            (small(1), small(0), small(2), UP),  // destination end above 2
+            (small(0), small(4), small(2), UP),  // source end above 5
+        ] {
+            assert_eq!(rt_mutarray_copy(&mut *vm, arr, ds, big, ss, count), NO_VALUE);
+            assert_eq!(pending(&mut vm), id);
+        }
+        assert_eq!(rt_mutarray_copy(&mut *vm, arr, small(0), big, small(3), small(2)), UNIT);
     }
 
     #[test]

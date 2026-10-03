@@ -24,22 +24,17 @@ source [file join $::projectRoot surface surface.tcl]
 
 set ::evDecls "type Byte = Int in 0..255\n"
 
-# The HIR of SRC. Facts are this file's subject, not error legality: an
-# IndexNotFound obligation alone does not reject (helpers.tcl's
-# compileWaivingIndexObligations).
+# The HIR of SRC.
 proc evCompile {src {strict 1}} {
-    if {!$strict} {
-        return [surface::compile "$::evDecls$src" t.bot -strict 0]
-    }
-    compileWaivingIndexObligations \
-        {surface::compile "$::evDecls$src" t.bot -strict 1} \
-        {surface::compile "$::evDecls$src" t.bot -strict 0}
+    surface::compile "$::evDecls$src" t.bot -strict $strict
 }
 
 # {SEMANTIC-TYPE PROGRAM-INSTANCE-TYPE PROGRAM-INSTANCE-RANGE} of the last
 # top-level expression of SRC.
-proc evLast {src} {
-    set hir [evCompile $src]
+# STRICT 0 inspects a program whose rejection (a statically known
+# failure) the calling test asserts itself.
+proc evLast {src {strict 1}} {
+    set hir [evCompile $src $strict]
     set spec [hir::specialize::analyze $hir]
     set an [hir::range::analyze $hir $spec]
     set e [lindex [hir::roots $hir] end]
@@ -48,13 +43,13 @@ proc evLast {src} {
         [hir::range::show [hir::range::of $an i0 $e]]
 }
 
-proc evSem {src} { lindex [evLast $src] 0 }
-proc evInst {src} { lindex [evLast $src] 1 }
-proc evRange {src} { lindex [evLast $src] 2 }
+proc evSem {src {strict 1}} { lindex [evLast $src $strict] 0 }
+proc evInst {src {strict 1}} { lindex [evLast $src $strict] 1 }
+proc evRange {src {strict 1}} { lindex [evLast $src $strict] 2 }
 
 # The exact fact (rendered as a fact) of the last top-level expression.
-proc evFact {src} {
-    set hir [evCompile $src]
+proc evFact {src {strict 1}} {
+    set hir [evCompile $src $strict]
     set f [hir::exact::Of $hir [lindex [hir::roots $hir] end]]
     expr {$f eq "" ? "none" : [hir::exact::describe $hir $f]}
 }
@@ -293,7 +288,7 @@ test ev-nested-via-alias {a projection bound to a name is itself a known List} -
 
 test ev-nested-depth-bound {facts nest at most aggregateDepth deep: a fourth level is forgotten, the third kept} -body {
     set three "x = \[\[\[7\]\]\]\nlist::at(list::at(list::at(x, 0), 0), 0)"
-    set four "x = \[\[\[\[7\]\]\]\]\nlist::at(list::at(list::at(list::at(x, 0), 0), 0), 0)"
+    set four "x = \[\[\[\[7\]\]\]\]\nv = list::at(list::at(list::at(list::at(x, 0), 0), 0), 0):\n    on IndexNotFound:\n        0\nv"
     list [evFact $three] [evFact $four] [evSem $four]
 } -result {int(7) none int}
 
@@ -303,16 +298,19 @@ test ev-nested-depth-bound {facts nest at most aggregateDepth deep: a fourth lev
 test ev-oob-keeps-runtime-error {a provably out-of-bounds read is a compile-time KNOWN-ERROR (STDLIB-NAMESPACES.md), and run anyway (-strict 0) list::at's declared IndexNotFound; no fact is claimed, the type is the ordinary element type} -body {
     set src "x = \[\"a\"\]\nlist::at(x, 3)"
     catch {core::evalProgram [hir::lower [surface::compile $src t.bot -strict 0]]} message options
-    list [evSem $src] [evFact $src] [dict get $options -errorcode] \
+    list [evSem $src 0] [evFact $src 0] [dict get $options -errorcode] \
         [lsort -unique [lmap d [hir::diagnostics [surface::compile $src t.bot -strict 0]] {dict get $d kind}]]
 } -result {str none {CORE SEMANTIC UNCAUGHT-ERROR} KNOWN-ERROR}
 
-test ev-oob-negative {a negative exact index makes no claim either} -body {
-    evSem "x = \[\"a\", 7\]\nlist::at(x, 0 - 1)"
-} -result any
+test ev-oob-negative {a negative exact index makes no claim either (and is a compile-time KNOWN-ERROR)} -body {
+    set src "x = \[\"a\", 7\]\nlist::at(x, 0 - 1)"
+    list [evSem $src 0] [lsort -unique [lmap d [hir::diagnostics [evCompile $src 0]] {dict get $d kind}]]
+} -result {any KNOWN-ERROR}
 
 test ev-bounds-classification {known length + exact/ranged index classify as in/out/unknown} -body {
-    set hir [evCompile "x = \[1, 2, 3\]\nlist::at(x, 1)\nlist::at(x, 5)\nlist::at(x, 0 - 1)"]
+    # The two out-of-range reads are compile-time KNOWN-ERRORs, inspected
+    # in a -strict 0 build (the classification is this test's subject).
+    set hir [evCompile "x = \[1, 2, 3\]\nlist::at(x, 1)\nlist::at(x, 5)\nlist::at(x, 0 - 1)" 0]
     set out {}
     foreach e [lrange [hir::roots $hir] 1 end] {
         set args [hir::get $hir $e args]
@@ -330,12 +328,13 @@ test ev-bounds-classification {known length + exact/ranged index classify as in/
 test ev-join-unknown-loses-fact {a join with an unknown List forgets the exact vector; no stale element fact survives} -body {
     set defs "fn flag():\n    true\nfn other():\n    \[\"b\"\]\n"
     set join "x = if flag():\n    \[\"a\", 1\]\nelse:\n    other()\n"
-    list [evFact "$defs${join}x"] [evSem "$defs${join}list::at(x, 0)"] [evFact "$defs${join}list::at(x, 0)"] \
-        [evRange "$defs${join}list::at(x, 1)"]
+    set read "v = list::at(x, %d):\n    on IndexNotFound:\n        0\nv"
+    list [evFact "$defs${join}x"] [evSem "$defs$join[format $read 0]"] [evFact "$defs$join[format $read 0]"] \
+        [evRange "$defs$join[format $read 1]"]
 } -result {none any none {[-∞, +∞]}}
 
 test ev-join-different-lists-no-fact {two different exact Lists do not join into a per-position product} -body {
-    set src "fn f(c) errors IndexNotFound:\n    x = if c:\n        \[\"a\", 1\]\n    else:\n        \[\"b\", 2\]\n    list::at(x, 0)\nf(true)"
+    set src "fn f(c) errors IndexNotFound:\n    x = if c:\n        \[\"a\", 1\]\n    else:\n        \[\"b\", 2\]\n    list::at(x, 0)\nr = f(true):\n    on IndexNotFound:\n        \"none\"\nr"
     evResult $src f
 } -result any
 
@@ -350,12 +349,12 @@ test ev-decided-if-keeps-branch-fact {an if with a statically decided condition 
 } -result {str str(\"a\")}
 
 test ev-opaque-call-loses-fact {a List returned by a user function is not exactly known at the source level} -body {
-    set src "fn pair():\n    \[\"x\", 3\]\np = pair()\nlist::at(p, 0)"
+    set src "fn pair():\n    \[\"x\", 3\]\np = pair()\nv = list::at(p, 0):\n    on IndexNotFound:\n        \"none\"\nv"
     list [evSem $src] [evFact "fn pair():\n    \[\"x\", 3\]\npair()"]
 } -result {any none}
 
 test ev-opaque-call-instance-value-fact {the pre-existing instance-level result shape (a specialization value fact) still reaches the instance analysis} -body {
-    set src "fn pair():\n    \[\"x\", 3\]\np = pair()\nlist::at(p, 0)"
+    set src "fn pair():\n    \[\"x\", 3\]\np = pair()\nv = list::at(p, 0):\n    on IndexNotFound:\n        \"none\"\nv"
     evInst $src
 } -result str
 
@@ -397,7 +396,7 @@ test ev-test-name-contract-is-list-only {its intrinsic parameter contract is lis
 } -result {{{test: list (inferred)}} 0 0}
 
 test ev-test-deps-legal {test_deps(test): list::at(test, 1) likewise} -body {
-    set src "fn test_deps(test) errors IndexNotFound:\n    list::at(test, 1)\ntest_deps(\[\"a\", \[\"b\"\]\])"
+    set src "fn test_deps(test) errors IndexNotFound:\n    list::at(test, 1)\nr = test_deps(\[\"a\", \[\"b\"\]\]):\n    on IndexNotFound:\n        \[\]\nr"
     list [evResult $src test_deps] [evSig $src test_deps]
 } -result {any {{test: list (inferred)}}}
 

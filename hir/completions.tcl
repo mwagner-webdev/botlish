@@ -89,10 +89,6 @@ namespace eval hir::completions {
     # never even offered to the cache (EffectiveFacts checks that first),
     # so a genuine cycle is never short-circuited by a stale hit either.
     variable cache [dict create]
-    # The indexed-access natives (STDLIB-NAMESPACES.md) whose one declared
-    # error, IndexNotFound, this pass can rule out -- or prove certain -- per
-    # call (IndexBounds): native name -> its container family.
-    variable indexNatives [dict create list::at list mutable_array::at mutarray]
 }
 
 proc hir::completions::resetCache {} {
@@ -188,7 +184,7 @@ proc hir::completions::SeedParam {} {
 
 proc hir::completions::NewCtx {} {
     return [dict create bindings [dict create] exact [dict create] exactList [dict create] \
-        indexBounds [dict create] upperBounds [dict create] sizes [dict create] \
+        indexBounds [dict create] upperBounds [dict create] sizes [dict create] minSizes [dict create] \
         exprs [dict create] errors [dict create] analyses 0 returned 0 \
         record 0 visited [dict create]]
 }
@@ -419,17 +415,17 @@ proc hir::completions::BranchRelation {hir ctxVar condition outcome} {
     }
     lassign $args x y
     if {$op eq {==}} {
-        if {!$outcome} {
-            return
-        }
         foreach {a b} [list $x $y $y $x] {
             set n [hir::exact::IntOf $hir $b]
-            set steps 0
-            set form [hir::cardinality::IntForm $hir $a steps]
-            lassign $form c terms
-            if {$n ne {} && $c == 0 && [llength $terms] == 2 && [lindex $terms 1] == 1
-                    && [lindex $terms 0 0] in {len cap}} {
+            set form [SizeForm $hir $a]
+            if {$n eq {} || $form eq {}} {
+                continue
+            }
+            if {$outcome} {
                 dict set ctx sizes $form $n
+            } elseif {$n == 0} {
+                # A size is never negative, so one that is not 0 is >= 1.
+                NoteMinSize ctx $form 1
             }
         }
         return
@@ -446,7 +442,23 @@ proc hir::completions::BranchRelation {hir ctxVar condition outcome} {
         >=/0 { set rel [list $x $y 0] }
     }
     lassign $rel low high k
+    # A constant below a size (`list::length(xs) > 0`, `str::length(s) >= 1`
+    # true, `str::length(s) < 1` false): LOW < SIZE + K, so SIZE >= LOW - K + 1.
+    # An Int binding takes the same minimum (`if n > 0:`), which a size form
+    # equal to that binding then reads (an array allocated or created with
+    # capacity n).
+    set lowInt [hir::exact::IntOf $hir $low]
     set steps 0
+    set sizeForm [SizeForm $hir $high]
+    if {$sizeForm eq {}} {
+        lassign [hir::cardinality::Chase $hir $high steps] highKind highBinding
+        if {$highKind eq {binding}} {
+            set sizeForm [hir::cardinality::FormAtom [list v $highBinding]]
+        }
+    }
+    if {$lowInt ne {} && $sizeForm ne {}} {
+        NoteMinSize ctx $sizeForm [expr {$lowInt - $k + 1}]
+    }
     lassign [hir::cardinality::Chase $hir $low steps] kind binding
     if {$kind ne {binding}} {
         return
@@ -456,6 +468,30 @@ proc hir::completions::BranchRelation {hir ctxVar condition outcome} {
     set bounds [dict get $ctx upperBounds]
     dict lappend bounds $binding $form
     dict set ctx upperBounds $bounds
+}
+
+# The form of E when it is exactly one container size -- a List length, a
+# MutableArray capacity or a String length (`list::length(xs)`, a binding
+# of it, ...) -- else "".
+proc hir::completions::SizeForm {hir e} {
+    set steps 0
+    set form [hir::cardinality::IntForm $hir $e steps]
+    lassign $form c terms
+    if {$c == 0 && [llength $terms] == 2 && [lindex $terms 1] == 1
+            && [lindex [lindex $terms 0] 0] in {len cap slen}} {
+        return $form
+    }
+    return ""
+}
+
+# Records in ctx.minSizes that the size FORM is at least MIN on the current
+# branch (keeping the larger of two such facts).
+proc hir::completions::NoteMinSize {ctxVar form min} {
+    upvar 1 $ctxVar ctx
+    if {[dict exists $ctx minSizes $form] && [dict get $ctx minSizes $form] >= $min} {
+        return
+    }
+    dict set ctx minSizes $form $min
 }
 
 proc hir::completions::EvalIf {hirVar ctxVar diagnose enclosing guard e node} {
@@ -477,13 +513,11 @@ proc hir::completions::EvalIf {hirVar ctxVar diagnose enclosing guard e node} {
         foreach {b r} $facts {
             dict set ctx bindings $b $r
         }
-        set savedUpper [dict get $ctx upperBounds]
-        set savedSizes [dict get $ctx sizes]
+        set savedRelations [Relations $ctx]
         BranchRelations $hir ctx $condition $outcome
-        dict set relations $outcome [list [dict get $ctx upperBounds] [dict get $ctx sizes]]
+        dict set relations $outcome [Relations $ctx]
         dict set branches $outcome [Seq hir ctx $diagnose $enclosing $guard [dict get $node ${role}Body]]
-        dict set ctx upperBounds $savedUpper
-        dict set ctx sizes $savedSizes
+        RestoreRelations ctx $savedRelations
         dict set after $outcome [dict get $ctx bindings]
     }
     # When only one branch can complete normally (`if i >= list::length(xs):
@@ -494,9 +528,7 @@ proc hir::completions::EvalIf {hirVar ctxVar diagnose enclosing guard e node} {
     foreach {outcome other} {1 0 0 1} {
         if {[dict get $branches $other] eq {never} && [dict get $branches $outcome] ne {never}
                 && [dict exists $relations $outcome]} {
-            lassign [dict get $relations $outcome] upper sizes
-            dict set ctx upperBounds $upper
-            dict set ctx sizes $sizes
+            RestoreRelations ctx [dict get $relations $outcome]
         }
     }
     dict set ctx bindings [hir::range::JoinBindings $saved [dict get $after 1] [dict get $after 0] $branches]
@@ -540,14 +572,15 @@ proc hir::completions::EvalLoop {hirVar ctxVar diagnose enclosing guard e node} 
 # early `return`/`break` guard: `if j >= list::length(ys): break`) never
 # outlives it.
 proc hir::completions::Relations {ctx} {
-    return [list [dict get $ctx upperBounds] [dict get $ctx sizes]]
+    return [list [dict get $ctx upperBounds] [dict get $ctx sizes] [dict get $ctx minSizes]]
 }
 
 proc hir::completions::RestoreRelations {ctxVar relations} {
     upvar 1 $ctxVar ctx
-    lassign $relations upper sizes
+    lassign $relations upper sizes minSizes
     dict set ctx upperBounds $upper
     dict set ctx sizes $sizes
+    dict set ctx minSizes $minSizes
 }
 
 # A countloop's start/end are evaluated once, in the enclosing scope,
@@ -734,8 +767,8 @@ proc hir::completions::LiteralListOf {hir ctx expr} {
 # registered on the native itself, so it can never influence native
 # lowering/codegen -- item 60-61): `mod` with a divisor of bounded
 # magnitude is below it, and `char::scalar_value` (the root native
-# core/unicodechar.tcl registers under that qualified name; lib/char.bot's
-# char::codepoint wraps it) is a Unicode scalar value, therefore always in
+# core/unicodechar.tcl registers under that qualified name) is a Unicode
+# scalar value, therefore always in
 # [0, 0x10FFFF] (item 22), and when its own argument is provably an exact
 # UnicodeChar constant (a literal, or ctx.exact propagation through an
 # immutable binding -- e.g. a small-literal-list element, EvalListloop
@@ -757,7 +790,7 @@ proc hir::completions::NativeResultRange {hir ctx name argExprs argRanges} {
         # Euclidean modulo (core/primitives.tcl): every result r of
         # mod(a, b) has 0 <= r < abs(b), so a divisor of bounded magnitude
         # bounds the result (`mod(b, 16)` is 0..15) -- the general fact,
-        # local to this pass like char::codepoint's below.
+        # local to this pass like char::scalar_value's below.
         set d [lindex $argRanges 1]
         if {$d ne {never} && [dict get $d min] ne "-inf" && [dict get $d max] ne "+inf"} {
             set m [expr {max(abs([dict get $d min]), abs([dict get $d max]))}]
@@ -766,6 +799,24 @@ proc hir::completions::NativeResultRange {hir ctx name argExprs argRanges} {
             }
         }
         return [hir::range::nonneg]
+    }
+    if {$name in {str::length list::length} && [llength $argExprs] == 1} {
+        # The length of a String or List this walk knows exactly (a literal,
+        # an exact binding, an exact argument of this call-specific walk) is
+        # that exact number -- what a slice or index proof inside a callee
+        # needs from `n = str::length(s)` once s is a known argument.
+        set arg [lindex $argExprs 0]
+        if {$name eq {str::length}} {
+            set v [ExactValueOf $hir $ctx $arg]
+            if {$v ne {} && [core::value::kind $v] eq {str}} {
+                return [hir::range::point [string length [core::value::strOf $v]]]
+            }
+        } else {
+            set literal [LiteralListOf $hir $ctx $arg]
+            if {$literal ne {}} {
+                return [hir::range::point [llength $literal]]
+            }
+        }
     }
     if {$name eq {char::scalar_value} && [llength $argExprs] == 1} {
         set arg [lindex $argExprs 0]
@@ -1040,24 +1091,322 @@ proc hir::completions::CheckNativeCallLegality {hirVar e name normal errors hand
 # {normal 0|1 errors NAMES}: the call-specific completion facts of a call
 # of the root native NAME (argument expressions ARGEXPRS, their Ranges
 # ARGRANGES here). A native's declared -errors are all effective, except
-# for the indexed-access natives (indexNatives: list::at, mutable_array::at),
-# whose IndexNotFound depends only on the arguments: IndexBounds proves it
-# impossible (the index always designates an element: no obligation) or
-# certain (it never does: the call cannot complete normally, KNOWN-ERROR) --
-# the three-way rule STATIC-COMPLETION-PROOFS.md established for exact
-# calls, applied to the one native error that is a function of its
-# arguments. Anything unproven keeps the whole declared set.
+# for the natives whose errors depend only on their arguments, as their
+# registered -bounds (core/native.tcl) state: an indexed access (`index`:
+# list::at, mutable_array::at, mutable_array::set), whose IndexNotFound
+# IndexBounds proves impossible (the index always designates an element: no
+# obligation) or certain (it never does: the call cannot complete normally,
+# KNOWN-ERROR), and a slicing native (`slices`), whose LowerUnderrun/
+# UpperOverrun SliceFacts rules out one by one or proves certain -- the
+# three-way rule STATIC-COMPLETION-PROOFS.md established for exact calls,
+# applied to native errors that are functions of their arguments. Anything
+# unproven keeps the declared error.
 proc hir::completions::NativeEffectiveFacts {hir ctx name argExprs argRanges} {
-    variable indexNatives
-    set errors [dict get [core::native::metadata $name] errors]
-    if {[dict exists $indexNatives $name] && [llength $argExprs] == 2} {
-        lassign $argExprs container index
-        switch -- [IndexBounds $hir $ctx [dict get $indexNatives $name] $container $index [lindex $argRanges 1]] {
-            in  { return [list 1 [lsearch -all -inline -not -exact $errors IndexNotFound]] }
-            out { return [list 0 [list IndexNotFound]] }
+    set meta [core::native::metadata $name]
+    set errors [dict get $meta errors]
+    set bounds [dict get $meta bounds]
+    switch -- [lindex $bounds 0] {
+        index {
+            lassign $bounds _ family c i
+            if {[llength $argExprs] > max($c, $i)} {
+                switch -- [IndexBounds $hir $ctx $family [lindex $argExprs $c] [lindex $argExprs $i] [lindex $argRanges $i]] {
+                    in  { return [list 1 [lsearch -all -inline -not -exact $errors IndexNotFound]] }
+                    out { return [list 0 [list IndexNotFound]] }
+                }
+            }
+        }
+        slices {
+            set slices [Slices $hir $ctx [lrange $bounds 1 end] $argExprs $argRanges]
+            if {$slices ne {}} {
+                return [SliceFacts $hir $ctx $slices]
+            }
         }
     }
     return [list 1 $errors]
+}
+
+# ---------------------------------------------------------------------------
+# Slices (core::native::checkSlice, STDLIB-NAMESPACES.md)
+#
+# A slice START..END of a sequence of N elements is valid iff 0 <= START <=
+# END <= N; checked START first (against 0..N), then END (against
+# START..N), below its interval is LowerUnderrun, above it UpperOverrun.
+# Operands are {form F range R}: a hir/cardinality.tcl linear form and this
+# walk's Range for the same Int.
+
+# The slices SPECS (a native's registered `slices` bounds, core/native.tcl)
+# a call checks, in the order it checks them, as {sizes SIZES start OPERAND
+# end OPERAND} (SIZES: SizesOf), or "" for a call of an unexpected shape.
+proc hir::completions::Slices {hir ctx specs argExprs argRanges} {
+    set slices {}
+    foreach spec $specs {
+        lassign $spec family c start end
+        set operands {}
+        foreach operand [list $start $end] {
+            switch -- [lindex $operand 0] {
+                const {
+                    set k [lindex $operand 1]
+                    lappend operands [dict create form [hir::cardinality::FormConst $k] range [hir::range::point $k]]
+                }
+                sum {
+                    lassign $operand _ a b
+                    if {[llength $argExprs] <= max($a, $b)} {
+                        return ""
+                    }
+                    lappend operands [OperandSum \
+                        [Operand $hir [lindex $argExprs $a] [lindex $argRanges $a]] \
+                        [Operand $hir [lindex $argExprs $b] [lindex $argRanges $b]]]
+                }
+                default {
+                    if {[llength $argExprs] <= $operand} {
+                        return ""
+                    }
+                    lappend operands [Operand $hir [lindex $argExprs $operand] [lindex $argRanges $operand]]
+                }
+            }
+        }
+        if {[llength $argExprs] <= $c} {
+            return ""
+        }
+        lappend slices [dict create sizes [SizesOf $hir $ctx $family [lindex $argExprs $c]] \
+            start [lindex $operands 0] end [lindex $operands 1]]
+    }
+    return $slices
+}
+
+proc hir::completions::Operand {hir e range} {
+    set steps 0
+    return [dict create form [hir::cardinality::IntForm $hir $e steps] range $range]
+}
+
+proc hir::completions::OperandSum {a b} {
+    set ra [dict get $a range]
+    set rb [dict get $b range]
+    if {$ra eq {never} || $rb eq {never}} {
+        set range never
+    } else {
+        set range [dict create min [hir::range::AddBound [dict get $ra min] [dict get $rb min]] \
+            max [hir::range::AddBound [dict get $ra max] [dict get $rb max]]]
+    }
+    return [dict create form [hir::cardinality::FormAdd [dict get $a form] [dict get $b form]] range $range]
+}
+
+# The size of the sequence CONTAINER (FAMILY list, mutarray or str) as
+# {forms FORMS known N}: FORMS its size forms (the structural one
+# hir/cardinality.tcl derives, plus the constant of an exactly known size),
+# N the exactly known size or "" -- known from a literal or exact value, an
+# exact argument of this call-specific walk, or an enclosing branch's
+# `list::length(xs) == N`-shaped equality (ctx.sizes). Two known sizes that
+# disagree mean the facts contradict each other: N is then "contradiction".
+proc hir::completions::SizesOf {hir ctx family container} {
+    set steps 0
+    switch -- $family {
+        list     { set size [hir::cardinality::ListLength $hir $container steps] }
+        mutarray { set size [hir::cardinality::Capacity $hir $container steps] }
+        str      { set size [hir::cardinality::StrLength $hir $container steps] }
+    }
+    set forms [list $size]
+    if {$family eq "list"} {
+        set literal [LiteralListOf $hir $ctx $container]
+        if {$literal ne {}} {
+            lappend forms [hir::cardinality::FormConst [llength $literal]]
+        }
+    } elseif {$family eq "str"} {
+        set v [ExactValueOf $hir $ctx $container]
+        if {$v ne {} && [core::value::kind $v] eq "str"} {
+            lappend forms [hir::cardinality::FormConst [string length [core::value::strOf $v]]]
+        }
+    }
+    set known {}
+    foreach form $forms {
+        if {[hir::cardinality::IsConst $form]} {
+            lappend known [lindex $form 0]
+        } elseif {[dict exists $ctx sizes $form]} {
+            lappend known [dict get $ctx sizes $form]
+        }
+    }
+    set known [lsort -unique -integer $known]
+    if {[llength $known] > 1} {
+        return [dict create forms $forms known contradiction]
+    }
+    if {[llength $known] == 1} {
+        lappend forms [hir::cardinality::FormConst [lindex $known 0]]
+    }
+    return [dict create forms [lsort -unique $forms] known [lindex $known 0]]
+}
+
+# 1 if operand A is provably >= 0: by its Range, by its form, or as a
+# counted-loop variable (ctx.indexBounds: 0 <= i) plus nonnegative terms.
+proc hir::completions::ProveNonNeg {ctx a} {
+    set r [dict get $a range]
+    if {$r ne {never} && [dict get $r min] ne "-inf" && [dict get $r min] >= 0} {
+        return 1
+    }
+    set fa [dict get $a form]
+    if {[hir::cardinality::NonNeg $fa]} {
+        return 1
+    }
+    foreach {atom coeff} [lindex $fa 1] {
+        if {[lindex $atom 0] eq "v" && $coeff == 1 && [dict exists $ctx indexBounds [lindex $atom 1]]
+                && [hir::cardinality::NonNeg [hir::cardinality::FormAdd $fa [hir::cardinality::FormAtom $atom] -1]]} {
+            return 1
+        }
+    }
+    return 0
+}
+
+# 1 if operand A is provably <= the Int of form B (with Range BRANGE, or ""
+# for none): by Ranges, by the forms' difference being nonnegative, or
+# relationally -- A is a binding (plus a constant offset or other terms)
+# that an enclosing counted loop (ctx.indexBounds) or `if` (ctx.upperBounds)
+# proved below some form U, so A <= U - 1 + the rest.
+proc hir::completions::ProveLe {ctx a b {brange ""}} {
+    set ra [dict get $a range]
+    if {$brange ne "" && $brange ne {never} && $ra ne {never}
+            && [dict get $ra max] ne "+inf" && [dict get $brange min] ne "-inf"
+            && [dict get $ra max] <= [dict get $brange min]} {
+        return 1
+    }
+    set fa [dict get $a form]
+    if {[hir::cardinality::NonNeg [hir::cardinality::FormAdd $b $fa -1]]} {
+        return 1
+    }
+    lassign $fa c terms
+    foreach {atom coeff} $terms {
+        if {[lindex $atom 0] ne "v" || $coeff != 1} {
+            continue
+        }
+        set binding [lindex $atom 1]
+        set rest [hir::cardinality::FormAdd $fa [hir::cardinality::FormAtom $atom] -1]
+        set uppers {}
+        if {[dict exists $ctx indexBounds $binding]} {
+            lappend uppers [dict get $ctx indexBounds $binding]
+        }
+        if {[dict exists $ctx upperBounds $binding]} {
+            lappend uppers {*}[dict get $ctx upperBounds $binding]
+        }
+        foreach u $uppers {
+            set bound [hir::cardinality::FormAdd [hir::cardinality::FormAdd $u $rest] [hir::cardinality::FormConst -1]]
+            if {[hir::cardinality::NonNeg [hir::cardinality::FormAdd $b $bound -1]]} {
+                return 1
+            }
+        }
+    }
+    return 0
+}
+
+# 1 if operand A is provably <= operand B.
+proc hir::completions::ProveLeOperand {ctx a b} {
+    return [ProveLe $ctx $a [dict get $b form] [dict get $b range]]
+}
+
+# 1 if operand A is provably <= the sequence size SIZES (SizesOf). A size
+# form's Range is its constant, or at least an enclosing branch's minimum
+# (ctx.minSizes: `if str::length(s) > 0:`).
+proc hir::completions::ProveLeSize {ctx a sizes} {
+    foreach form [dict get $sizes forms] {
+        if {[hir::cardinality::IsConst $form]} {
+            set range [hir::range::point [lindex $form 0]]
+        } elseif {[dict exists $ctx minSizes $form]} {
+            set range [dict create min [dict get $ctx minSizes $form] max +inf]
+        } else {
+            set range ""
+        }
+        if {[ProveLe $ctx $a $form $range]} {
+            return 1
+        }
+    }
+    return 0
+}
+
+# The largest minimum an enclosing branch proved for one of the size forms
+# FORMS (ctx.minSizes), or "".
+proc hir::completions::MinSizeOf {ctx forms} {
+    set min ""
+    foreach form $forms {
+        if {[dict exists $ctx minSizes $form]} {
+            set m [dict get $ctx minSizes $form]
+            if {$min eq "" || $m > $min} {
+                set min $m
+            }
+        }
+    }
+    return $min
+}
+
+# The errors one slice may fail with ({} when valid on every path), and the
+# one it always fails with ("" when not provably certain): {possible
+# certain}.
+proc hir::completions::SliceVerdict {ctx slice} {
+    set sizes [dict get $slice sizes]
+    if {[dict get $sizes known] eq "contradiction"} {
+        # Two proven sizes disagree: this path is unreachable.
+        return [list {} {}]
+    }
+    set start [dict get $slice start]
+    set end [dict get $slice end]
+    set possible {}
+    if {!([ProveNonNeg $ctx $start] && [ProveLeOperand $ctx $start $end])} {
+        lappend possible LowerUnderrun
+    }
+    if {!([ProveLeSize $ctx $end $sizes]
+            && ([ProveLeOperand $ctx $start $end] || [ProveLeSize $ctx $start $sizes]))} {
+        lappend possible UpperOverrun
+    }
+    if {$possible eq {}} {
+        return [list {} {}]
+    }
+    # Certain failure, from Ranges alone: the rule replayed on intervals.
+    set n [dict get $sizes known]
+    set rs [dict get $start range]
+    set re [dict get $end range]
+    if {$rs eq {never} || $re eq {never}} {
+        return [list $possible {}]
+    }
+    lassign [list [dict get $rs min] [dict get $rs max] [dict get $re min] [dict get $re max]] smin smax emin emax
+    if {$smax ne "+inf" && $smax < 0} {
+        return [list $possible LowerUnderrun]
+    }
+    if {$n eq "" || $smin eq "-inf" || $smax eq "+inf"} {
+        return [list $possible {}]
+    }
+    if {$smin > $n} {
+        return [list $possible UpperOverrun]
+    }
+    if {$smin >= 0 && $smax <= $n} {
+        # START always passes its check; END is then compared with START.
+        if {$emax ne "+inf" && $emax < $smin} {
+            return [list $possible LowerUnderrun]
+        }
+        if {$emin ne "-inf" && $emin >= $smax && $emin > $n} {
+            return [list $possible UpperOverrun]
+        }
+    }
+    return [list $possible {}]
+}
+
+# {normal errors} (NativeEffectiveFacts) of a call checking SLICES in
+# order: the union of what each may fail with; a certain failure of the
+# first slice that is not provably valid makes the call certain to fail
+# with it.
+proc hir::completions::SliceFacts {hir ctx slices} {
+    set possible {}
+    set certain {}
+    set settled 0
+    foreach slice $slices {
+        lassign [SliceVerdict $ctx $slice] p c
+        lappend possible {*}$p
+        if {!$settled && $c ne ""} {
+            set certain $c
+        }
+        if {$p ne {}} {
+            set settled 1
+        }
+    }
+    if {$certain ne ""} {
+        return [list 0 [list $certain]]
+    }
+    return [list 1 [lsort -unique $possible]]
 }
 
 # Whether the Int index INDEX (Range INDEXRANGE) of an indexed access to
@@ -1143,6 +1492,16 @@ proc hir::completions::IndexBounds {hir ctx family container index indexRange} {
                     return in
                 }
             }
+        }
+    }
+    # A size an enclosing branch proved at least M (`if list::length(xs) >
+    # 0:`) holds every index in 0..M-1.
+    set min [MinSizeOf $ctx $sizes]
+    if {$min ne "" && $indexRange ne {never}} {
+        set lo [dict get $indexRange min]
+        set hi [dict get $indexRange max]
+        if {$lo ne "-inf" && $hi ne "+inf" && $lo >= 0 && $hi < $min} {
+            return in
         }
     }
     set n [lindex $known 0]
@@ -1377,7 +1736,7 @@ proc hir::completions::mayReturnNormallyOf {hir e} {
 }
 
 # The Range fact this pass computed for a checked call expression E (item
-# 69's own char::codepoint pins), or hir::range::unknown if E was never
+# 69's own char::scalar_value pins), or hir::range::unknown if E was never
 # reached by a top-level checkBlock walk.
 proc hir::completions::resultRangeOf {hir e} {
     set node [hir::node $hir $e]

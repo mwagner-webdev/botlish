@@ -511,7 +511,7 @@ proc assertErrorParity {text} {
     return $outcomes(on)
 }
 
-test blockescape-region-companion-bounds-error-1 {a locally-bound char accessor's out-of-range region access raises the same RANGE error, optimized and baseline} -body {
+test blockescape-region-companion-bounds-error-1 {a locally-bound char accessor's out-of-range region access raises the same declared slice error (UpperOverrun, uncaught: the program handles nothing), optimized and baseline} -body {
     set text {
 fn outer(s, i):
     fn at(j):
@@ -523,7 +523,29 @@ fn outer(s, i):
 outer("ab", 5)
 }
     assertErrorParity $text
-} -result {{CORE SEMANTIC RANGE} {str::substring: range 5..6 is outside 0..2}}
+} -result {{CORE SEMANTIC UNCAUGHT-ERROR} {uncaught propagated error: <error UpperOverrun>}}
+
+test blockescape-region-companion-bounds-error-2 {the same accessor with its slice errors declared and handled by name: each bound case gives its handler's value, optimized and baseline} -body {
+    set text {
+fn outer(s, i):
+    fn at(j) errors LowerUnderrun, UpperOverrun:
+        str::substring(s, j, j + 1)
+    fn scan(k):
+        c = at(k):
+            on LowerUnderrun:
+                return "lower"
+            on UpperOverrun:
+                return "upper"
+        if c == "z":
+            "z"
+        else:
+            "other"
+    scan(i)
+
+[outer("ab", 5), outer("az", 1), outer("ab", -1), outer("ab", 0)]
+}
+    core::value::show [assertParity $text]
+} -result {["upper", "z", "lower", "other"]}
 
 test blockescape-region-companion-unicode-1 {a locally-bound char accessor over an astral-plane String classifies correctly, in region form, with zero Block allocation} -body {
     set emoji [encoding convertfrom utf-8 "\xf0\x9f\x98\x80"]
@@ -651,13 +673,14 @@ test blockescape-region-companion-refined-checks-1 {refined-checks.ir: local_ext
 } -result {{list {{int 400} {int 0}}} 6820 0 6804 12 2}
 
 # (GENERIC-PREDICATE-PROOF-LOSS.md, loss point 1: char_at is only called with an Int,
-# so its one emitted instance is keyed instance="int" rather than "generic".)
+# so its one emitted instance is keyed instance="int" rather than "generic".
+# Its slice guard, `if i < 0 or i >= n`, makes n a third explicit parameter.)
 test blockescape-region-companion-refined-checks-2 {refined-checks.ir: char_at's NIR has no closure/callenvmulti, and env=0/results=3 -- R2 (R2-ORDINARY-EMAILISH-PREDICATE.md) collapses this to one shared instance, not two per-call-site copies} -body {
     core::loadLibrary web
     set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set nirText [dict get [native::lower::program $hir] text]
     list [regexp {"char_at" params=1} $nirText] \
-        [llength [regexp -all -inline {"char_at" params=2 env=0 regs=\d+ pnames="i v" captures=0 instance="int" results=3} $nirText]] \
+        [llength [regexp -all -inline {"char_at" params=3 env=0 regs=\d+ pnames="i n v" captures=0 instance="int" results=3} $nirText]] \
         [regexp {callenvmulti} $nirText]
 } -result {0 1 0}
 

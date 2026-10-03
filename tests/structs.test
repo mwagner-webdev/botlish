@@ -206,7 +206,8 @@ test struct-eval-source-order {field expressions run in SOURCE order, not canoni
     set path [tcltest::makeFile "counter = mutable_array::create(1, 0)
 fn ticket(m):
     n = mutable_array::get(m, 0, 0)
-    mutable_array::set(m, 0, n + 1)
+    if mutable_array::capacity(m) > 0:
+        mutable_array::set(m, 0, n + 1)
     n
 r = \{z: ticket(counter), a: ticket(counter), m: ticket(counter)\}
 \[r, mutable_array::at(counter, 0)\]

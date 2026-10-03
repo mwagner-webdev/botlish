@@ -157,9 +157,11 @@ test refined-signature-narrow-1 {type-seeded sparse facts compose with inequalit
 test refined-signature-cross-module-1 {a qualified byte call retains type and facts across the real module boundary} -setup {
     # The pinned block(eN) id below is an ordinary expr-id offset within
     # lib/byte.bot's own resolved HIR -- it shifts whenever byte.bot itself
-    # gains or loses content earlier in the file (most recently: adding
-    # byte::set, BYTE-SET.md), with no effect on the actual type/range
-    # facts asserted here (both unchanged across that addition).
+    # gains or loses content earlier in the file (adding byte::set,
+    # BYTE-SET.md), or loads fewer modules before it (most recently: byte.bot
+    # calls the intrinsic char::scalar_value, so lib/char.bot -- removed --
+    # is no longer resolved first), with no effect on the actual type/range
+    # facts asserted here (both unchanged across those changes).
 } -body {
     set path [makeFile {byte::high_nibble(171)
 } refined-signature-main.bot]
@@ -180,7 +182,7 @@ test refined-signature-cross-module-1 {a qualified byte call retains type and fa
     } finally {
         removeFile refined-signature-main.bot
     }
-} -result {{int[HighNibble]} {[0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240}} block(e7)}
+} -result {{int[HighNibble]} {[0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240}} block(e2)}
 
 test refined-signature-web-1 {web high_nibble infers Nibble transitively without a declaration} -body {
     set path [makeFile {web::uri_escape_text

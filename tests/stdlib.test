@@ -190,7 +190,7 @@ reverse_chars(first_of([12, "a"]))} \
 ]
 
 test stdlib-string_reverse-not-a-string-static {string_reverse: an argument statically known not to be a String is rejected at compile time -- reverse_chars' own body infers text : str (INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md); this used to be the run-time TYPE error above} -body {
-    catch {corpus::program string_reverse reverse_chars(12)} message options
+    catch {corpus::driven string_reverse reverse_chars(12)} message options
     list [dict get $options -errorcode] \
         [string match {*argument for parameter "text" is statically incompatible with str, the parameter type inferred from the function body*} $message]
 } -result {{CORE SEMANTIC TYPE} 1}

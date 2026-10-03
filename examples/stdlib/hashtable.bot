@@ -93,14 +93,14 @@ fn ht_tombstone_state():
 # ---------------------------------------------------------------------------
 # Construction
 
-fn ht_fill_empty(controls, i, capacity):
+fn ht_fill_empty(controls, i, capacity) errors IndexNotFound:
     if i >= capacity:
         return unit
 
     mutable_array::set(controls, i, ht_empty_state())
     ht_fill_empty(controls, i + 1, capacity)
 
-fn ht_alloc(capacity):
+fn ht_alloc(capacity) errors IndexNotFound:
     controls = mutable_array::allocate(capacity)
     ht_fill_empty(controls, 0, capacity)
     keys = mutable_array::allocate(capacity)
@@ -113,7 +113,7 @@ fn ht_alloc(capacity):
     mutable_array::set(table, 4, 0)
     table
 
-fn ht_new():
+fn ht_new() errors IndexNotFound:
     ht_alloc(ht_min_capacity())
 
 # The smallest capacity, doubling from ht_min_capacity(), that keeps EXPECTED
@@ -126,7 +126,7 @@ fn ht_capacity_for(expected, capacity):
 
     ht_capacity_for(expected, capacity * 2)
 
-fn ht_new_sized(expected):
+fn ht_new_sized(expected) errors IndexNotFound:
     ht_alloc(ht_capacity_for(expected, ht_min_capacity()))
 
 # ---------------------------------------------------------------------------

@@ -82,7 +82,7 @@ foreach w [concat $workloads $hashtableWorkloads] {
         set name hashtable
     } else {
         lassign $w label name driver
-        set hir [corpus::program $name $driver]
+        set hir [corpus::driven $name $driver]
     }
     lappend out "== $label"
     lassign [native::measure $hir $runs] lower jit best - value

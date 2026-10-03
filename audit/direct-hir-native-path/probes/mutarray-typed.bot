@@ -11,4 +11,4 @@ mutable_array::set(c, 1, "y")
 mutable_array::set(c, 2, "z")
 d = mutable_array::allocate(3)
 mutable_array::copy(d, 0, c, 0, 3)
-[mutable_array::get(a, 5, -1), mutable_array::freeze(a, 6), mutable_array::freeze(d, 3)]
+[mutable_array::get(a, 5, -1), mutable_array::freeze(a, mutable_array::capacity(a)), mutable_array::freeze(d, 3)]

@@ -2,7 +2,7 @@ set root [pwd]
 source [file join $root examples stdlib corpus.tcl]
 interp recursionlimit {} 100000
 proc typeOfDriver {name driver} {
-    if {[catch {corpus::program $name $driver} hir]} { return "REJECT [string range $hir 0 400]" }
+    if {[catch {corpus::driven $name $driver} hir]} { return "REJECT [string range $hir 0 400]" }
     hir::types::show [hir::typeOf $hir [lindex [hir::roots $hir] end]]
 }
 foreach {label d} {

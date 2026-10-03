@@ -329,7 +329,7 @@ test sd-round-trip-parameter-stays-tagged {a one-character parameter used only b
         fn classify(c):
             str::is_tcl_alpha(c)
 
-        fn drive(t, i):
+        fn drive(t, i) errors LowerUnderrun, UpperOverrun:
             classify(str::substring(t, i, i + 1))
 
         [drive("a1", 0), drive("a1", 1)]
@@ -355,7 +355,7 @@ test sd-non-ascii-scalar-parameter-with-consumers-stays-short {a ShortString1 pa
 test sd-region-companion-call-is-not-a-flow {text handed to a region-producing helper (a tagged companion call) does not count as a free use: the literal-fed parameter stays tagged, so no asciitostr runs inside the loop} -body {
     set text {
         fn peek(text, index):
-            if index >= str::length(text):
+            if index < 0 or index >= str::length(text):
                 return ""
 
             str::substring(text, index, index + 1)

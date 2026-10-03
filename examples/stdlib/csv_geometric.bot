@@ -45,7 +45,7 @@ fn geo_new_capacity(capacity, length):
 # appended, initializes every slot of the fresh array (mutable_array::create
 # fills all of them); the slots at LENGTH and beyond are overwritten by later
 # appends before freeze(LENGTH) can ever expose them.
-fn geo_grow(storage, length, value):
+fn geo_grow(storage, length, value) errors UpperOverrun:
     capacity = mutable_array::capacity(storage)
     if length < capacity:
         return storage
@@ -58,14 +58,14 @@ fn geo_grow(storage, length, value):
 # STORAGE with VALUE appended at index LENGTH, grown first when full. The
 # storage is mutated (or replaced by a grown copy, which is returned); the
 # caller's new length is LENGTH + 1.
-fn geo_append(storage, length, value):
+fn geo_append(storage, length, value) errors IndexNotFound, UpperOverrun:
     grown = geo_grow(storage, length, value)
     mutable_array::set(grown, length, value)
     grown
 
 # STORAGE's first LENGTH elements as an ordinary immutable List
 # (finalization: a single exact-size copy, see mutable_array::freeze).
-fn geo_finish(storage, length):
+fn geo_finish(storage, length) errors LowerUnderrun, UpperOverrun:
     mutable_array::freeze(storage, length)
 
 # ---------------------------------------------------------------------------
@@ -88,20 +88,20 @@ fn geo_finish(storage, length):
 # level obstruction"); while the scanned values were `any`, the storage was
 # MutableArray[any] and needed none.
 
-fn peek(text, index):
+fn peek(text, index) errors LowerUnderrun:
     if index >= str::length(text):
         return ""
 
     str::substring(text, index, index + 1)
 
-fn scan_unquoted(text, start, index):
+fn scan_unquoted(text, start, index) errors LowerUnderrun, UpperOverrun:
     character = peek(text, index)
     if character == "" or character == "," or character == "\n":
         return {field: str::substring(text, start, index), index: index}
 
     scan_unquoted(text, start, index + 1)
 
-fn scan_quoted(text, index, field):
+fn scan_quoted(text, index, field) errors LowerUnderrun:
     character = peek(text, index)
     if character == "\"":
         if peek(text, index + 1) == "\"":
@@ -111,7 +111,7 @@ fn scan_quoted(text, index, field):
 
     scan_quoted(text, index + 1, str::concat(field, character))
 
-fn scan_field(text, index):
+fn scan_field(text, index) errors LowerUnderrun, UpperOverrun:
     if peek(text, index) == "\"":
         return scan_quoted(text, index + 1, "")
 
@@ -124,7 +124,7 @@ fn scan_field(text, index):
 # DETERMINISM.md. It used to compile, with generic, guarded copies of the
 # whole call chain -- TYPED-MUTARRAY-BUILDER-REFACTOR.md, "Definition-order
 # sensitivity".)
-fn scan_record_rest(text, stop, fields: MutableArray[str], count):
+fn scan_record_rest(text, stop, fields: MutableArray[str], count) errors IndexNotFound, LowerUnderrun, UpperOverrun:
     delimiter = peek(text, stop)
     if delimiter == ",":
         scanned = scan_field(text, stop + 1)
@@ -138,12 +138,12 @@ fn scan_record_rest(text, stop, fields: MutableArray[str], count):
 
 # The record starting at INDEX and the index where it stops: the first field
 # (a record always has one, possibly empty) starts the FIELDS builder.
-fn scan_record(text, index):
+fn scan_record(text, index) errors IndexNotFound, LowerUnderrun, UpperOverrun:
     scanned = scan_field(text, index)
     scan_record_rest(text, scanned.index, geo_new(scanned.field), 1)
 
 # The records from INDEX on, the first COUNT records already in RECORDS.
-fn scan_records(text, index, records: MutableArray[List[str]], count):
+fn scan_records(text, index, records: MutableArray[List[str]], count) errors IndexNotFound, LowerUnderrun, UpperOverrun:
     if index >= str::length(text):
         return geo_finish(records, count)
 
@@ -151,11 +151,20 @@ fn scan_records(text, index, records: MutableArray[List[str]], count):
     more = geo_append(records, count, scanned.fields)
     scan_records(text, scanned.stop, more, count + 1)
 
-fn csv_parse(text):
+fn csv_parse(text) errors IndexNotFound, LowerUnderrun, UpperOverrun:
     if str::length(text) == 0:
         return []
 
     scanned = scan_record(text, 0)
     scan_records(text, scanned.stop, geo_new(scanned.fields), 1)
 
-csv_parse("name,age\nAlice,30\nBob,40\n")
+# The sample's input is well formed, so none of its slices or builder slots is
+# ever out of range; the handlers state what a malformed scan would mean.
+parsed = csv_parse("name,age\nAlice,30\nBob,40\n"):
+    on IndexNotFound:
+        []
+    on LowerUnderrun:
+        []
+    on UpperOverrun:
+        []
+parsed

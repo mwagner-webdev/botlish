@@ -140,10 +140,15 @@ test strings-constants-allocate-nothing-at-run-time {literals (empty, one char, 
 
 test strings-empty-results-reuse-the-canonical-empty {a dynamic empty String (empty substring) is the canonical static empty: zero allocations, counted as a reuse} -body {
     set s [stringsOf {
-        fn cut(s, i):
+        fn cut(s, i) errors LowerUnderrun, UpperOverrun:
             str::substring(s, i, i)
 
-        cut(str::concat("a", "bc"), 2)
+        r = cut(str::concat("a", "bc"), 2):
+            on LowerUnderrun:
+                "none"
+            on UpperOverrun:
+                "none"
+        r
     }]
     list [dict get $s objects] [dict get $s emptyReused]
 } -result {1 1}
@@ -152,16 +157,22 @@ test strings-concat-is-one-object-whatever-the-width {a nested concat is one fla
     list \
         [dict get [stringsOf {str::concat(str::concat("é", "x"), "…")}] objects] \
         [dict get [stringsOf {
-            fn cut(s):
+            fn cut(s) errors UpperOverrun:
                 str::substring(s, 1, 4)
 
-            cut(str::concat("hello", "world"))
+            r = cut(str::concat("hello", "world")):
+                on UpperOverrun:
+                    "none"
+            r
         }] objects] \
         [dict get [stringsOf {
-            fn cut(s):
+            fn cut(s) errors UpperOverrun:
                 str::substring(s, 1, 4)
 
-            cut(str::concat("a😀…", "éz"))
+            r = cut(str::concat("a😀…", "éz")):
+                on UpperOverrun:
+                    "none"
+            r
         }] objects]
 } -result {1 2 2}
 
@@ -257,7 +268,7 @@ test strings-parity-nul-is-one-character {NUL is a one-character String of one z
 
 test strings-parity-substring-boundaries {substring at 0, at the end, empty and full, over ASCII and non-ASCII bases, including multi-byte slices} -body {
     parity {
-        fn cuts(s):
+        fn cuts(s) errors LowerUnderrun, UpperOverrun:
             n = str::length(s)
             [str::substring(s, 0, 0), str::substring(s, 0, n), str::substring(s, n, n), str::substring(s, 1, n), str::substring(s, 0, n - 1)]
 
@@ -273,24 +284,34 @@ test strings-parity-concat-shapes {concat chains of every width, accumulating a 
             else:
                 build(n - 1, str::concat(str::concat("😀", acc), str::concat("é", "…")))
 
-        s = build(20, "")
-        [str::length(s), str::substring(s, 0, 4), str::substring(s, 56, 60), s == build(20, "")]
+        fn shapes(s) errors LowerUnderrun, UpperOverrun:
+            [str::length(s), str::substring(s, 0, 4), str::substring(s, 56, 60), s == build(20, "")]
+
+        r = shapes(build(20, "")):
+            on LowerUnderrun:
+                []
+            on UpperOverrun:
+                []
+        r
     }
 } -result {value:[60, "😀😀😀😀", "é…é…", true]}
 
-test strings-parity-errors-keep-their-messages {an out-of-range substring and a failing guarded call report the same error on every backend} -body {
+test strings-parity-errors-keep-their-messages {an out-of-range substring fails with the same declared error on every backend, and its handler sees it} -body {
     set hir [srcHir {
-        fn cut(s):
+        fn cut(s) errors UpperOverrun:
             str::substring(str::concat(s, "é"), 0, 9)
 
-        cut("😀")
+        r = cut("😀"):
+            on UpperOverrun:
+                "UpperOverrun"
+        r
     }]
     set outcomes {}
     foreach backend {interp compile cranelift-generic cranelift} {
-        lappend outcomes [lrange [outcomeUnderHir $backend $hir] 0 2]
+        lappend outcomes [lrange [outcomeUnderHir $backend $hir] 0 1]
     }
     list [llength [lsort -unique $outcomes]] [lindex $outcomes 0]
-} -result {1 {error {CORE SEMANTIC RANGE} {str::substring: range 0..9 is outside 0..2}}}
+} -result {1 {value {"UpperOverrun"}}}
 
 test strings-parity-large {a String over a megabyte, built by doubling, has the right length, ends and equality} -body {
     parity {
@@ -300,8 +321,15 @@ test strings-parity-large {a String over a megabyte, built by doubling, has the 
             else:
                 dbl(n - 1, str::concat(s, s))
 
-        s = dbl(20, "é…")
-        [str::length(s), str::substring(s, 0, 3), str::substring(s, str::length(s) - 2, str::length(s))]
+        fn ends(s) errors LowerUnderrun, UpperOverrun:
+            [str::length(s), str::substring(s, 0, 3), str::substring(s, str::length(s) - 2, str::length(s))]
+
+        r = ends(dbl(20, "é…")):
+            on LowerUnderrun:
+                []
+            on UpperOverrun:
+                []
+        r
     }
 } -result {value:[2097152, "é…é", "é…"]}
 
@@ -326,7 +354,7 @@ test strings-gc-live-across-allocation-and-storage {Strings held in a List, a st
 
             get
 
-        fn work(a, b):
+        fn work(a, b) errors UpperOverrun:
             xs = [a, b, str::concat(a, b)]
             p = Pair {left: str::concat(b, a), right: "k"}
             m = mutable_array::allocate(2)
@@ -336,14 +364,20 @@ test strings-gc-live-across-allocation-and-storage {Strings held in a List, a st
             c = churn(30)
             [xs, p.left, p.right, mutable_array::at(m, 0), mutable_array::at(m, 1), g(0), c]
 
-        [work("é", "…"), work("😀", "a"), work("", "bc")]
+        fn all() errors UpperOverrun:
+            [work("é", "…"), work("😀", "a"), work("", "bc")]
+
+        r = all():
+            on UpperOverrun:
+                []
+        r
     }
     underStress {parity $text}
 } -result {value:[[["é", "…", "é…"], "…é", "k", "é!", "é", "……", 90], [["😀", "a", "😀a"], "a😀", "k", "😀!", "😀", "aa", 90], [["", "bc", "bc"], "bc", "k", "!", "b", "bcbc", 90]]}
 
 test strings-gc-recursive-allocating-frames {a String parameter and result across 150 recursive allocating frames under GC stress} -body {
     set text {
-        fn rec(n, s):
+        fn rec(n, s) errors LowerUnderrun, UpperOverrun:
             if n == 0:
                 s
             else:
@@ -351,7 +385,15 @@ test strings-gc-recursive-allocating-frames {a String parameter and result acros
                 u = rec(n - 1, t)
                 str::concat(str::substring(u, 0, 1), str::substring(u, str::length(u) - 1, str::length(u)))
 
-        [rec(150, "😀"), str::length(rec(150, "ab"))]
+        fn both() errors LowerUnderrun, UpperOverrun:
+            [rec(150, "😀"), str::length(rec(150, "ab"))]
+
+        r = both():
+            on LowerUnderrun:
+                []
+            on UpperOverrun:
+                []
+        r
     }
     underStress {parity $text}
 } -result {value:["😀…", 2]}
@@ -370,22 +412,31 @@ test strings-gc-large-string-survives-collections {a large String stays intact a
             else:
                 str::length(str::concat("a", "b")) + churn(n - 1)
 
-        big = dbl(16, "é…")
-        c = churn(2000)
-        [str::length(big), str::substring(big, 0, 4), str::substring(big, str::length(big) - 2, str::length(big)), c]
+        fn ends(big, c) errors LowerUnderrun, UpperOverrun:
+            [str::length(big), str::substring(big, 0, 4), str::substring(big, str::length(big) - 2, str::length(big)), c]
+
+        r = ends(dbl(16, "é…"), churn(2000)):
+            on LowerUnderrun:
+                []
+            on UpperOverrun:
+                []
+        r
     }
     parity $text
 } -result {value:[131072, "é…é…", "é…", 4000]}
 
 test strings-gc-reclaims-and-reuses {a loop that builds and drops many Strings reaches a steady live set: collections reclaim the dropped Strings, one block each} -body {
     set report [native::allocationReport [srcHir {
-        fn churn(n, acc):
+        fn churn(n, acc) errors UpperOverrun:
             if n == 0:
                 str::length(acc)
             else:
                 churn(n - 1, str::concat(str::substring(str::concat(acc, "é"), 0, 3), "…"))
 
-        churn(20000, "ab")
+        r = churn(20000, "ab"):
+            on UpperOverrun:
+                -1
+        r
     }] summary 1]
     set s [dict get $report byKind String]
     # One String per iteration (the substring is a region piece of the fused
@@ -485,7 +536,10 @@ test strings-executable-short-optimization-off {the same kind of executable with
         fn fwd(s):
             s
 
-        [str::length(fwd(pick(true))), str::length(fwd(pick(false))), str::concat(fwd(pick(false)), "…"), str::substring(str::concat("a", fwd(pick(false))), 1, 2)]
+        tail = str::substring(str::concat("a", fwd(pick(false))), 1, 2):
+            on UpperOverrun:
+                "none"
+        [str::length(fwd(pick(true))), str::length(fwd(pick(false))), str::concat(fwd(pick(false)), "…"), tail]
     } {-short-string-opt 0}
 } -result {[0, 1, "😀…", "😀"]}
 

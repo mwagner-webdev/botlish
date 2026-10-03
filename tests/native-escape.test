@@ -176,11 +176,12 @@ test escape-off-2 {BOTLISH_NATIVE_ESCAPE_OPT=0 has the same effect as -escape-op
 # scan_record's [fields, next_index] disappear on the optimized path,
 # without any change to csv.bot itself.
 
-set ::csvSource [regsub {\ncsv_parse\("name,age\\nAlice,30\\nBob,40\\n"\)\n$} \
-    [corpus::text csv] "\n"]
+# csv.bot without its handled sample (the trailing `parsed = csv_parse(...):`
+# block); csvHir appends TEXT, a csv_parse call, handled the same way.
+set ::csvSource [regsub {\n# The sample's input is well formed.*$} [corpus::text csv] "\n"]
 
 proc csvHir {text} {
-    return [sourceHir "$::csvSource\n$text\n"]
+    return [sourceHir "$::csvSource\nparsed = $text:\n    on LowerUnderrun:\n        \[\]\n    on UpperOverrun:\n        \[\]\nparsed\n"]
 }
 
 test escape-csv-1 {csv_parse's value is unaffected by scalar replacement} -body {

@@ -197,10 +197,13 @@ test native-executable-no-evaluation {compilation terminates even when running t
     }
 } -result 1
 
+# (A slice past the end is no longer a run-time RANGE: it is the declared
+# UpperOverrun, which a program must handle and a literal one is a
+# compile-time KNOWN-ERROR. An impossible allocation is still RANGE.)
 test native-executable-runtime-error {runtime errors exit unsuccessfully and go to stderr} -constraints executableAot -body {
     set dir [makeDirectory {aot error test}]
     try {
-        set hir [surface::compile {str::substring("abc", 0, 5)} error.bot]
+        set hir [surface::compile {mutable_array::allocate(0 - 1)} error.bot]
         set binary [native::executable $hir [file join $dir program]]
         set failed [catch {exec $binary 2> [file join $dir stderr]} stdout options]
         set ch [open [file join $dir stderr] r]; set stderr [read $ch]; close $ch

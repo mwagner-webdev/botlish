@@ -294,7 +294,7 @@ test setfromlist-uri-byte-set-local-op-total {byte::set's own body: the immutabl
     list [regexp {op setfromlisttotal} $body] [regexp {op setfromlist } $body]
 } -result {1 0}
 
-test setfromlist-uri-byte-set-stays-erroring-via-from-int {byte::set as a whole remains may_error=true -- not because of SetFromList (now proven non-erroring) but because of its own checked Byte(char::codepoint(c)) construction (from_int, genuinely fallible with AboveRange): confirms M4 does not erase that error and does not assume the function-level effect outcome (spec items 14-16, 29-31)} -body {
+test setfromlist-uri-byte-set-stays-erroring-via-from-int {byte::set as a whole remains may_error=true -- not because of SetFromList (now proven non-erroring) but because of its own checked Byte(char::scalar_value(c)) construction (from_int, genuinely fallible with AboveRange): confirms M4 does not erase that error and does not assume the function-level effect outcome (spec items 14-16, 29-31)} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
     set nirText [dict get [native::lower::program $hir -tiny-leaf-inline-opt 0] text]
     set effects [native::Driver calls $nirText]

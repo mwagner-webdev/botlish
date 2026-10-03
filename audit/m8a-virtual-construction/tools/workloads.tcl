@@ -69,14 +69,14 @@ proc wl::aiText {family n} {
 set wl::workloads [dict create \
     uri-steady {surface::readProgramFile [file join $::root bench uri-steady.bot]} \
     refined-checks {core::loadLibrary web; native::prepareHir [hir::build [core::loadProgramFile [file join $::root bench refined-checks.ir]] -strict 0]} \
-    ai_text_clean/ascii-100K {corpus::program ai_text_clean "clean_ai_text([corpus::literal [wl::aiText ascii 100000]])"} \
-    ai_text_clean/emoji-100K {corpus::program ai_text_clean "clean_ai_text([corpus::literal [wl::aiText emoji 100000]])"} \
-    ai_text_clean/ascii-10K {corpus::program ai_text_clean "clean_ai_text([corpus::literal [wl::aiText ascii 10000]])"} \
-    string_reverse/10K {corpus::program string_reverse "reverse_chars([corpus::literal [wl::text 10000]])"} \
-    string_replace/100KB {corpus::program string_replace "replace([corpus::literal [wl::prose 100000]], \"fox\", \"red panda\")"} \
-    csv/10000 {corpus::program csv "csv_parse([corpus::literal [wl::csv 10000]])"} \
-    csv_geometric/10000 {corpus::program csv_geometric "csv_parse([corpus::literal [wl::csv 10000]])"} \
-    csv_chunked/10000 {corpus::program csv_chunked "csv_parse([corpus::literal [wl::csv 10000]])"} \
+    ai_text_clean/ascii-100K {corpus::driven ai_text_clean "clean_ai_text([corpus::literal [wl::aiText ascii 100000]])"} \
+    ai_text_clean/emoji-100K {corpus::driven ai_text_clean "clean_ai_text([corpus::literal [wl::aiText emoji 100000]])"} \
+    ai_text_clean/ascii-10K {corpus::driven ai_text_clean "clean_ai_text([corpus::literal [wl::aiText ascii 10000]])"} \
+    string_reverse/10K {corpus::driven string_reverse "reverse_chars([corpus::literal [wl::text 10000]])"} \
+    string_replace/100KB {corpus::driven string_replace "replace([corpus::literal [wl::prose 100000]], \"fox\", \"red panda\")"} \
+    csv/10000 {corpus::driven csv "csv_parse([corpus::literal [wl::csv 10000]])"} \
+    csv_geometric/10000 {corpus::driven csv_geometric "csv_parse([corpus::literal [wl::csv 10000]])"} \
+    csv_chunked/10000 {corpus::driven csv_chunked "csv_parse([corpus::literal [wl::csv 10000]])"} \
     matmul/32x32 {corpus::driven matmul "matmul([wl::matrix 32 3], [wl::matrix 32 5])"} \
     fib {native::prepareHir [hir::build [core::loadProgramFile [file join $::root bench fib.ir]] -strict 0]} \
     loop-count {native::prepareHir [hir::build [core::loadProgramFile [file join $::root bench loop-count.ir]] -strict 0]} \

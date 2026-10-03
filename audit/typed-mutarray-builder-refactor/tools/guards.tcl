@@ -1,7 +1,7 @@
 set root [pwd]
 source [file join $root examples stdlib corpus.tcl]
 interp recursionlimit {} 100000
-set hir [corpus::program [lindex $argv 0] "list::length(sample())"]
+set hir [corpus::driven [lindex $argv 0] "list::length(sample())"]
 set text [dict get [native::lower::program $hir] text]
 set fn ""
 foreach line [split $text \n] {

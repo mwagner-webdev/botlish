@@ -971,7 +971,7 @@ proc hir::range::Expr {hirVar ctxVar e} {
         listloop {
             # The listloop's own value is a List, never rangeable (always
             # `unknown`); this still visits the iterable and body so any
-            # Int sub-expressions inside them (e.g. char::codepoint(c),
+            # Int sub-expressions inside them (e.g. char::scalar_value(c),
             # Byte(...)) get their own range facts recorded, exactly as a
             # bare loop's body already does. The element binding needs no
             # seed of its own: an unseeded binding's `ref` case already

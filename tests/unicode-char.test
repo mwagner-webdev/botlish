@@ -4,7 +4,7 @@
 # UnicodeChar is a distinct builtin semantic scalar: exactly one Unicode
 # scalar value, never an Int, never a String, never implicitly convertible
 # to or from either. Its scalar value is observed only through the explicit,
-# total char::codepoint/char::scalar_value operation. This file pins that
+# total char::scalar_value/char::scalar_value operation. This file pins that
 # distinction end to end: lexing, parsing, type inference/admissibility,
 # List[UnicodeChar] inference and projection, HIR round-trip, cross-module
 # behavior, dynamic/untyped soundness, and interp/compile/cranelift parity.
@@ -199,15 +199,14 @@ take_int(char::scalar_value('A'))} ok2.bot
     set ok 1
 } -result 1
 
-# A bare call of the root native char::scalar_value is not itself a typed
-# callable invocation (that compile-time check applies to a declared
-# function parameter -- see char-module-codepoint-rejects-int below for the
-# char::codepoint spelling, which does go through such a wrapper); the
-# native's own declared -param-types UnicodeChar is still enforced
+# A bare call of the native char::scalar_value is not itself a typed
+# callable invocation (that compile-time check applies to a declared or
+# inferred function parameter -- see char-scalar-value-static-contract
+# below); the native's own declared -param-types UnicodeChar is enforced
 # dynamically, exactly like any other native's declared parameter type
 # (e.g. bit_and's -param-types {int int}), never as numeric value-set
 # admissibility.
-test char-codepoint-rejects-int {char::scalar_value(65): 65 is not dynamically of kind UnicodeChar, so char::codepoint's total contract still rejects it at run time, never silently treating it as a codepoint} -body {
+test char-codepoint-rejects-int {char::scalar_value(65): 65 is not dynamically of kind UnicodeChar, so char::scalar_value's total contract still rejects it at run time, never silently treating it as a codepoint} -body {
     outcomeUnder interp [sourceIR {char::scalar_value(65)}]
 } -result {error {CORE SEMANTIC TYPE} {char::scalar_value: expected UnicodeChar, got 65} {}}
 
@@ -237,21 +236,21 @@ test char-kind-distinct {kind('A') is neither kind(65) nor kind("A")} -body {
 } -result {UnicodeChar int str}
 
 # ---------------------------------------------------------------------------
-# char::codepoint semantics (spec items 4, 26-29, 65-66)
+# char::scalar_value semantics (spec items 4, 26-29, 65-66)
 
-test char-codepoint-ascii {char::codepoint('A') = 65} -body {
+test char-codepoint-ascii {char::scalar_value('A') = 65} -body {
     outcomeUnder interp [sourceIR {char::scalar_value('A')}]
 } -result {value 65 {}}
 
-test char-codepoint-bmp {char::codepoint('é') = 233 (the scalar value, not its two UTF-8 bytes 195/169)} -body {
+test char-codepoint-bmp {char::scalar_value('é') = 233 (the scalar value, not its two UTF-8 bytes 195/169)} -body {
     outcomeUnder interp [sourceIR "char::scalar_value('é')"]
 } -result {value 233 {}}
 
-test char-codepoint-supplementary {char::codepoint('😀') = 128512} -body {
+test char-codepoint-supplementary {char::scalar_value('😀') = 128512} -body {
     outcomeUnder interp [sourceIR "char::scalar_value('\U0001F600')"]
 } -result {value 128512 {}}
 
-test char-codepoint-total {char::codepoint has no Error completion: it is a plain Int-returning call, never a Result} -body {
+test char-codepoint-total {char::scalar_value has no Error completion: it is a plain Int-returning call, never a Result} -body {
     hir::types::show [hir::typeOf [sourceHir {char::scalar_value('A')}] \
         [lindex [hirFind [sourceHir {char::scalar_value('A')}] call] 0]]
 } -result int
@@ -476,23 +475,37 @@ test char-repeated-compilation-isolated {compiling several UnicodeChar programs 
 } -result 1
 
 # ---------------------------------------------------------------------------
-# Cross-module: char::codepoint via lib/char.bot (spec items 21, 59, 76-77)
+# The `char` namespace has no module file: char::scalar_value is its one
+# member, the intrinsic (STDLIB-NAMESPACES.md; spec items 21, 59, 76-77)
 
-test char-module-codepoint {char::codepoint(c), the module-qualified spelling, resolves and type-checks exactly like the root native} -body {
+test char-module-codepoint {char::scalar_value(c) in a program read with module loading resolves to the intrinsic, with no module file to load} -body {
     set mainPath [makeFile {fn f(c: UnicodeChar) -> int:
-    char::codepoint(c)
+    char::scalar_value(c)
 
 f('A')
 } char-module-main.bot]
     outcomeUnder interp [hir::lower [surface::readProgramFile $mainPath]]
 } -result {value 65 {}}
 
-test char-module-codepoint-rejects-int {char::codepoint(65), across the module boundary, is still a compile-time error} -body {
-    set mainPath [makeFile {char::codepoint(65)
-} char-module-reject.bot]
-    catch {surface::readProgramFile $mainPath} message options
-    list [dict get $options -errorcode] [string match {*cannot be proven to satisfy*} $message]
-} -result {{CORE SEMANTIC TYPE} 1}
+test char-scalar-value-static-contract {an Int reaching char::scalar_value through a typed or an untyped parameter is a compile-time error; the direct call char::scalar_value(65) is the native's run-time TYPE error, like any intrinsic's} -body {
+    set typed [makeFile {fn f(c: UnicodeChar) -> int:
+    char::scalar_value(c)
+
+f(65)
+} char-typed-reject.bot]
+    set untyped [makeFile {fn f(c):
+    char::scalar_value(c)
+
+f(65)
+} char-untyped-reject.bot]
+    set direct [makeFile {char::scalar_value(65)
+} char-direct.bot]
+    catch {surface::readProgramFile $typed} m1 o1
+    catch {surface::readProgramFile $untyped} m2 o2
+    list [dict get $o1 -errorcode] [string match {*cannot be proven to satisfy UnicodeChar*} $m1] \
+        [dict get $o2 -errorcode] [string match {*statically incompatible with UnicodeChar*native char::scalar_value requires UnicodeChar*} $m2] \
+        [outcomeUnder interp [hir::lower [surface::readProgramFile $direct]]]
+} -result {{CORE SEMANTIC TYPE} 1 {CORE SEMANTIC TYPE} 1 {error {CORE SEMANTIC TYPE} {char::scalar_value: expected UnicodeChar, got 65} {}}}
 
 # ---------------------------------------------------------------------------
 # Backend parity: interp / compile / cranelift-generic / cranelift (spec item 84)
@@ -520,9 +533,9 @@ add_one('A')}
 
 # ---------------------------------------------------------------------------
 # Allocation (spec items 15-20, 52): an immediate representation allocates
-# nothing on the native backend for a character literal or char::codepoint.
+# nothing on the native backend for a character literal or char::scalar_value.
 
-test char-native-no-allocation {char::codepoint('A') allocates nothing on the native backend: UnicodeChar is an immediate, not a heap object} -body {
+test char-native-no-allocation {char::scalar_value('A') allocates nothing on the native backend: UnicodeChar is an immediate, not a heap object} -body {
     set h [sourceHir {fn cp() -> int:
     char::scalar_value('A')
 

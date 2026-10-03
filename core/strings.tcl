@@ -26,15 +26,14 @@ proc core::strings::length {s} {
     return [core::value::int [string length [Text $s str::length]]]
 }
 
-# (str::substring S START END): the characters at START <= i < END.
+# (str::substring S START END): the characters at START <= i < END, a slice
+# of S's characters: an invalid one fails with LowerUnderrun or UpperOverrun
+# (core::native::checkSlice).
 proc core::strings::substring {s start end} {
     set text [Text $s str::substring]
     set from [core::value::intOf [core::value::expect int $start str::substring]]
     set to [core::value::intOf [core::value::expect int $end str::substring]]
-    if {$from < 0 || $from > $to || $to > [string length $text]} {
-        core::semanticError RANGE \
-            "str::substring: range $from..$to is outside 0..[string length $text]"
-    }
+    core::native::checkSlice str::substring $from $to [string length $text]
     return [core::value::str [string range $text $from [expr {$to - 1}]]]
 }
 
@@ -80,7 +79,8 @@ core::native::register str::length    -arity 1 -impl core::strings::length \
     -param-types {str} -result-type int -runtime char-index -result-range collection-length -context-free 1
 core::native::register str::substring -arity 3 -impl core::strings::substring \
     -param-types {str int int} -result-type str \
-    -runtime {string-alloc char-index range-check} -context-free 1
+    -runtime {string-alloc char-index range-check} -context-free 1 \
+    -errors {LowerUnderrun UpperOverrun} -bounds {slices {str 0 1 2}}
 core::native::register str::lowercase -arity 1 -impl core::strings::lowercase \
     -param-types {str} -result-type str -runtime string-alloc -context-free 1
 core::native::register str::concat    -arity 2 -impl core::strings::concat \

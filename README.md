@@ -418,18 +418,18 @@ Standard intrinsics (qualified root natives):
 | `list::at` | list, int → any, errors `IndexNotFound`: the element at `0 <= i < length`; any other Int index fails with `IndexNotFound` |
 | `list::append` | list, any → list (a new list; the argument is unchanged) |
 | `str::length` | str → int (Unicode scalar values) |
-| `str::substring` | str, int, int → str (characters `start <= i < end`; else `RANGE`) |
+| `str::substring` | str, int, int → str, errors `LowerUnderrun` `UpperOverrun`: the characters `start <= i < end` of a valid slice (below) |
 | `str::lowercase` | str → str (Unicode 16 simple one-to-one case mapping; see §"Strings") |
 | `str::concat` | str, str → str |
 | `str::encode_utf8` | str → `List[Byte]` (the UTF-8 bytes) |
 | `str::is_tcl_alpha` `str::is_tcl_alnum` | one-scalar str → bool (temporary Tcl-compatibility classes, core/tclcompat.tcl) |
-| `char::scalar_value` | UnicodeChar → int (the Unicode scalar value; `char::codepoint` is its typed wrapper) |
+| `char::scalar_value` | UnicodeChar → int (the Unicode scalar value: `0..0x10FFFF` without the surrogates, never a byte or a code unit of an encoding) |
 | `mutable_array::allocate` | int → mutarray (every slot `unit`) |
 | `mutable_array::capacity` | mutarray → int |
 | `mutable_array::at` | mutarray, int → any, errors `IndexNotFound` (as `list::at`) |
-| `mutable_array::set` | mutarray, int, any → unit (in place; `RANGE` outside the capacity) |
-| `mutable_array::copy` | mutarray, int, mutarray, int, int → unit (memmove semantics; `RANGE`) |
-| `mutable_array::freeze` | mutarray, int → list (a copy of the first N slots; `RANGE`) |
+| `mutable_array::set` | mutarray, int, any → unit, errors `IndexNotFound`: stores in place at `0 <= i < capacity`; any other Int index fails with `IndexNotFound` |
+| `mutable_array::copy` | mutarray (DST), int (DS), mutarray (SRC), int (SS), int (COUNT) → unit, errors `LowerUnderrun` `UpperOverrun`: memmove semantics; checks the slice `DS..DS+COUNT` of DST, then `SS..SS+COUNT` of SRC |
+| `mutable_array::freeze` | mutarray, int → list, errors `LowerUnderrun` `UpperOverrun`: a copy of the first N slots (the slice `0..N`) |
 | `immutable_set::from_list` | `List[T]` → `ImmutableSet[T]` |
 | `immutable_set::contains` | `ImmutableSet`, any → bool |
 | `linux::abi::syscall` | `{rax: R, rdi: R, …, r9: R}` → `abi::x86_64::Register64` (R a Register64): the raw Linux x86-64 kernel transition, raw rax back; omitted argument registers are zero; native backend only (Tcl backends: `NATIVE-ONLY`); callable only directly (LINUX-X86-64-SYSCALL.md) |
@@ -437,10 +437,12 @@ Standard intrinsics (qualified root natives):
 Ordinary Botlish members of the same namespaces (library modules, not
 natives): `list::get`, `list::any?`, `list::all?`, `list::none?`,
 `list::find` (`lib/list.bot`); `mutable_array::from_list`,
-`mutable_array::create`, `mutable_array::get` (`lib/mutable_array.bot`);
-`char::codepoint` (`lib/char.bot`: `char::scalar_value` with a compile-time
-`c: UnicodeChar` contract -- a native's parameter types are run-time
-requirements only).
+`mutable_array::create`, `mutable_array::get` (`lib/mutable_array.bot`).
+`char` has no library module: `char::scalar_value` is its one member (a
+"code point" also names surrogates and, colloquially, Latin-1 or other
+encodings' numbers; a scalar value is exactly what a UnicodeChar holds).
+Like every native's parameter types, its `UnicodeChar` requirement is
+checked at run time (`char::scalar_value(65)` is the `TYPE` error).
 
 **Indexed access: `at` and `get`.** `at(container, index)` is required
 indexed lookup: it returns the element or fails with the builtin declared
@@ -467,6 +469,21 @@ It handles `IndexNotFound` and nothing else (a non-List or non-Int argument
 is still the `TYPE` error), `default` is an ordinary eagerly evaluated
 argument, and neither operation returns an optional or null value. There is
 no negative indexing: `-1` is a missing index like any other.
+`mutable_array::set` is the write counterpart of `at`: it stores at a
+designated slot or fails with the same `IndexNotFound`, proven the same way.
+
+**Slices.** `str::substring(s, start, end)`, `mutable_array::freeze(a, n)`
+(the slice `0..n`) and `mutable_array::copy` (its destination slice, then
+its source slice) take a half-open slice `START..END` of a sequence of `N`
+elements, valid iff `0 <= START <= END <= N`. START is checked first,
+against `0..N`, then END against `START..N`: a bound below its interval
+fails with the builtin declared error `LowerUnderrun`, one above it with
+`UpperOverrun` (so an inverted slice, `END < START`, is `LowerUnderrun`, and
+`substring("abc", 4, 1)` is `UpperOverrun` for its start). Like
+`IndexNotFound` they must be handled, admitted by an `errors` clause or
+proven impossible: the completion proof also reads String lengths (a
+literal, `str::concat`'s sum, a guard such as `if str::length(s) > 0:` or
+`if i < 0 or i >= str::length(s): return ...`) and array capacities.
 
 Optional library `web` (`# requires: web`, lib/web.tcl):
 
@@ -497,9 +514,15 @@ a call of the native may complete with: the impl signals one with
 `core::native::failDeclared`, and `core::native::invoke` turns that into the
 same `propagate-error` completion a Botlish `fail NAME` produces, so
 `on NAME:` handlers, an `errors` clause, call analysis and every backend treat
-it like any declared error. `argv` (`InvalidArgumentEncoding`) and the two
-`at` intrinsics (`IndexNotFound`) have one; core/native.tcl declares the
-builtin errors in their fixed index order.
+it like any declared error. `argv` (`InvalidArgumentEncoding`), the indexed
+intrinsics `list::at`, `mutable_array::at` and `mutable_array::set`
+(`IndexNotFound`) and the slicing intrinsics `str::substring`,
+`mutable_array::freeze` and `mutable_array::copy` (`LowerUnderrun`,
+`UpperOverrun`) declare them; core/native.tcl declares the builtin errors in
+their fixed index order. `-bounds` states the check behind such
+argument-dependent errors (`index FAMILY CONTAINER INDEX`, or `slices
+{FAMILY CONTAINER START END}...`), which the completion proof reads from
+the registration rather than from the native's name.
 
 Natives may also declare a signature. `-param-types {int int}` lists the
 type each argument must have (`any` means no requirement), and

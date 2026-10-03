@@ -563,8 +563,9 @@ test flags-method-same-hir {a method call with flags and its free spelling resol
 
 set ::logFns {get = list::get
 fn probe(log, id, result):
-    n = mutable_array::get(log, 0, 0)
-    mutable_array::set(log, 0, n * 10 + id)
+    if mutable_array::capacity(log) > 0:
+        n = mutable_array::at(log, 0)
+        mutable_array::set(log, 0, n * 10 + id)
     result
 fn fresh():
     log = mutable_array::allocate(1)

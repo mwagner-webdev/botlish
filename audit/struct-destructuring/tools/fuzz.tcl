@@ -294,8 +294,9 @@ proc program {case style} {
     dict with case {}
     set lines [declarations $schema]
     lappend lines "fn probe(log: MutableArray\[int\], id: int, v: int) -> int:"
-    lappend lines "    k = mutable_array::get(log, 0, 0)"
-    lappend lines "    mutable_array::set(log, 0, k * 10 + id)"
+    lappend lines "    if mutable_array::capacity(log) > 0:"
+    lappend lines "        k = mutable_array::at(log, 0)"
+    lappend lines "        mutable_array::set(log, 0, k * 10 + id)"
     lappend lines "    v"
     set rootType [expr {[schemaNamed $schema] ? " -> [schemaName $schema]" : ""}]
     if {$form eq "call"} {
@@ -465,8 +466,9 @@ set backendDisagreements 0
 proc defective {case patternText explicitLines sourceText} {
     set lines [declarations [dict get $case schema]]
     lappend lines "fn probe(log: MutableArray\[int\], id: int, v: int) -> int:"
-    lappend lines "    k = mutable_array::get(log, 0, 0)"
-    lappend lines "    mutable_array::set(log, 0, k * 10 + id)"
+    lappend lines "    if mutable_array::capacity(log) > 0:"
+    lappend lines "        k = mutable_array::at(log, 0)"
+    lappend lines "        mutable_array::set(log, 0, k * 10 + id)"
     lappend lines "    v"
     set d [lines $lines "$patternText = $sourceText" $case]
     set e ""

@@ -5,13 +5,13 @@
 
 fn run(v):
     fn walk(i, p):
-        if i >= str::length(v):
+        if i < 0 or i >= str::length(v):
             return i
         if p(str::substring(v, i, i + 1)):
             return walk(i + 1, p)
         i
     fn depth(i, p):
-        if i >= str::length(v):
+        if i < 0 or i >= str::length(v):
             return 0
         if p(str::substring(v, i, i + 1)):
             return 1 + depth(i + 1, p)

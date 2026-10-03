@@ -293,17 +293,20 @@ test hir-aot-corpus-1 {every corpus function has closed dispatch, except hashtab
     }
 } -result {{ai_text_clean {}} {csv {}} {csv_chunked {}} {csv_geometric {}} {csv_records {}} {hashtable ht_fold} {matmul {}} {string_replace {}} {string_reverse {}}}
 
+# string_reverse and string_replace slice positionally without a proof, so
+# their functions declare LowerUnderrun/UpperOverrun and a closed `sample`
+# function (handled once at the top level) produces the expected value.
 test hir-aot-corpus-2 {string_reverse: guarded only by parameter kinds} -body {
     set a [corpusAot string_reverse]
     list [corpusStatuses $a] [lsort -unique [aotBlockerKinds $a reverse_from]] \
          [dict get [aotRegion $a reverse_from] requirements]
-} -result {{<program> {closed closed guarded} reverse_from {guarded closed guarded} reverse_chars {closed closed guarded}} UnknownParameterKind {bigint char-index range-check string-alloc structural-equality tagged-values}}
+} -result {{<program> {closed closed guarded} reverse_from {guarded closed guarded} reverse_chars {closed closed guarded} sample {closed closed guarded}} UnknownParameterKind {bigint char-index range-check string-alloc structural-equality tagged-values}}
 
 test hir-aot-corpus-3 {string_replace: guarded only by parameter kinds} -body {
     set a [corpusAot string_replace]
     list [corpusStatuses $a] \
          [lsort -unique [concat {*}[lmap n {matches_at replace_from replace} {aotBlockerKinds $a $n}]]]
-} -result {{<program> {closed closed guarded} matches_at {guarded closed guarded} replace_from {guarded closed guarded} replace {guarded closed guarded}} UnknownParameterKind}
+} -result {{<program> {closed closed guarded} matches_at {guarded closed guarded} replace_from {guarded closed guarded} replace {guarded closed guarded} sample {closed closed guarded}} UnknownParameterKind}
 
 # STRUCTS.md: scan_field/scan_record hand back anonymous structs, so the
 # pair's list elements (UnknownAggregateElementType) and the constant-index

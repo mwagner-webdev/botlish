@@ -44,7 +44,7 @@ proc row {args} { join $args " | " }
 # The semantic type of the last top-level expression of DRIVER appended to
 # corpus program NAME, or "REJECT: <diagnostic>".
 proc driverType {name driver} {
-    if {[catch {corpus::program $name $driver} hir]} {
+    if {[catch {corpus::driven $name $driver} hir]} {
         return "REJECT: $hir"
     }
     hir::types::show [hir::typeOf $hir [lindex [hir::roots $hir] end]]
@@ -100,20 +100,43 @@ foreach {name} {csv_geometric csv_records} {
 # One untyped source function, several element types (driven directly on the
 # real corpus source)
 
+# The builder functions declare the builder's own range errors
+# (STDLIB-NAMESPACES.md); these drivers handle them explicitly, so the
+# value whose type is read is the call's own.
 test tmb-types-1 {the string case: MutableArray[str] storage, List[str] result} -body {
     row [driverType csv_geometric {geo_new("a")}] \
-        [driverType csv_geometric {geo_append(geo_new("a"), 1, "b")}] \
-        [driverType csv_geometric {geo_finish(geo_append(geo_new("a"), 1, "b"), 2)}]
+        [driverType csv_geometric {s = geo_append(geo_new("a"), 1, "b"):
+    on IndexNotFound:
+        geo_new("z")
+    on UpperOverrun:
+        geo_new("z")
+s}] \
+        [driverType csv_geometric {l = geo_finish(geo_new("a"), 1):
+    on LowerUnderrun:
+        ["z"]
+    on UpperOverrun:
+        ["z"]
+l}]
 } -result {MutableArray[str] | MutableArray[str] | List[str]}
 
 test tmb-types-2 {the record case: MutableArray[List[str]] storage, List[List[str]] result} -body {
     row [driverType csv_geometric {geo_new(["x"])}] \
-        [driverType csv_geometric {geo_finish(geo_append(geo_new(["x"]), 1, ["y"]), 2)}]
+        [driverType csv_geometric {l = geo_finish(geo_new(["x"]), 1):
+    on LowerUnderrun:
+        [["z"]]
+    on UpperOverrun:
+        [["z"]]
+l}]
 } -result {MutableArray[List[str]] | List[List[str]]}
 
 test tmb-types-3 {the row-table case: MutableArray[mutarray] storage, List[mutarray] result} -body {
     row [driverType csv_geometric {geo_new(mutable_array::allocate(1))}] \
-        [driverType csv_geometric {geo_finish(geo_append(geo_new(mutable_array::allocate(1)), 1, mutable_array::allocate(1)), 2)}]
+        [driverType csv_geometric {l = geo_finish(geo_new(mutable_array::allocate(1)), 1):
+    on LowerUnderrun:
+        []
+    on UpperOverrun:
+        []
+l}]
 } -result {MutableArray[mutarray] | List[mutarray]}
 
 test tmb-types-4 {a value of the wrong element type is rejected at compile time, whatever the builder's own source} -body {
@@ -122,7 +145,7 @@ test tmb-types-4 {a value of the wrong element type is rejected at compile time,
 } -result 1
 
 test tmb-types-5 {one source function geo_append serves every element type: it has several valid semantic instances and no invalid one} -body {
-    set hir [corpus::program csv_geometric {geo_finish(geo_append(geo_new("a"), 1, "b"), 2)
+    set hir [corpus::driven csv_geometric {geo_finish(geo_append(geo_new("a"), 1, "b"), 2)
 geo_finish(geo_append(geo_new(["x"]), 1, ["y"]), 2)
 geo_finish(geo_append(geo_new(mutable_array::allocate(1)), 1, mutable_array::allocate(1)), 2)}]
     set defs [lmap {b binding} [dict get $hir bindings] {
@@ -203,24 +226,54 @@ forward_precise(geo_new(\"a\"), 1)"]
 
 test tmb-obstruction-2 {declaring the storage parameter's concrete type (no generics) makes the same forwarder valid} -body {
     driverType csv_geometric {
-fn forward_precise(storage: MutableArray[str], length):
+fn forward_precise(storage: MutableArray[str], length) errors IndexNotFound, UpperOverrun:
     geo_append(storage, length, "x")
 
-geo_finish(forward_precise(geo_new("a"), 1), 2)
+s = forward_precise(geo_new("a"), 1):
+    on IndexNotFound:
+        geo_new("z")
+    on UpperOverrun:
+        geo_new("z")
+l = geo_finish(s, 2):
+    on LowerUnderrun:
+        ["z"]
+    on UpperOverrun:
+        ["z"]
+l
 }
 } -result {List[str]}
 
 test tmb-obstruction-3 {a forwarder whose value is a parameter (statically any inside) is valid untyped: instances supply the element type at each call} -body {
     row [driverType csv_geometric {
-fn forward_value(storage, length, value):
+fn forward_value(storage, length, value) errors IndexNotFound, UpperOverrun:
     geo_append(storage, length, value)
 
-geo_finish(forward_value(geo_new("a"), 1, "b"), 2)
+s = forward_value(geo_new("a"), 1, "b"):
+    on IndexNotFound:
+        geo_new("z")
+    on UpperOverrun:
+        geo_new("z")
+l = geo_finish(s, 2):
+    on LowerUnderrun:
+        ["z"]
+    on UpperOverrun:
+        ["z"]
+l
 }] [driverType csv_geometric {
-fn forward_value(storage, length, value):
+fn forward_value(storage, length, value) errors IndexNotFound, UpperOverrun:
     geo_append(storage, length, value)
 
-geo_finish(forward_value(geo_new(["a"]), 1, ["b"]), 2)
+s = forward_value(geo_new(["a"]), 1, ["b"]):
+    on IndexNotFound:
+        geo_new(["z"])
+    on UpperOverrun:
+        geo_new(["z"])
+l = geo_finish(s, 2):
+    on LowerUnderrun:
+        [["z"]]
+    on UpperOverrun:
+        [["z"]]
+l
 }]
 } -result {List[str] | List[List[str]]}
 
@@ -392,7 +445,7 @@ later = geo_finish(s3, 4)
 
 test tmb-copy-1 {growth copies exactly [0, length) and leaves the elements in place, over several growths from an empty start (1 -> 2 -> 4 -> 8 -> 16)} -body {
     parityCase csv_geometric {
-fn fill(storage: MutableArray[int], length, n):
+fn fill(storage: MutableArray[int], length, n) errors IndexNotFound, LowerUnderrun, UpperOverrun:
     if length >= n:
         return geo_finish(storage, length)
 
@@ -448,7 +501,7 @@ proc gcStress {body} {
 
 test tmb-gc-1 {csv_geometric under GC stress: a many-record parse with growth returns the exact value} -body {
     gcStress {
-        native::evalHir [corpus::program csv_geometric "csv_parse([$lit [grownCsv 20 5]]) == [grownValue 20 5]"] -specialize 1
+        native::evalHir [corpus::driven csv_geometric "csv_parse([$lit [grownCsv 20 5]]) == [grownValue 20 5]"] -specialize 1
     }
 } -result {bool true}
 
@@ -470,19 +523,19 @@ rows = csv_records([$lit $text])
 test tmb-gc-3 {typed create/copy/freeze under GC stress: managed element values (Strings, Lists, MutableArrays) held only by the builder survive growth} -body {
     gcStress {
         native::evalHir [corpus::driven csv_geometric {
-fn fill_str(storage: MutableArray[str], length, n):
+fn fill_str(storage: MutableArray[str], length, n) errors IndexNotFound, LowerUnderrun, UpperOverrun:
     if length >= n:
         return geo_finish(storage, length)
 
     fill_str(geo_append(storage, length, str::concat("s", str::concat("-", "x"))), length + 1, n)
 
-fn fill_list(storage: MutableArray[List[str]], length, n):
+fn fill_list(storage: MutableArray[List[str]], length, n) errors IndexNotFound, LowerUnderrun, UpperOverrun:
     if length >= n:
         return geo_finish(storage, length)
 
     fill_list(geo_append(storage, length, ["a", "b"]), length + 1, n)
 
-fn fill_mut(storage: MutableArray[mutarray], length, n):
+fn fill_mut(storage: MutableArray[mutarray], length, n) errors IndexNotFound, LowerUnderrun, UpperOverrun:
     if length >= n:
         return geo_finish(storage, length)
 

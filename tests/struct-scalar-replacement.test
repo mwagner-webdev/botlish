@@ -157,7 +157,7 @@ test sr-local-four-fields {a four-field struct of mixed field types} -body {
 } -result {{[1, "s", [1], 4]} {structnew 0 structget 0 callmulti 0 retmulti 0}}
 
 test sr-local-discarded {a struct literal in statement position builds nothing but still evaluates its fields} -body {
-    set source "counter = mutable_array::create(1, 0)\nfn tick(m):\n    n = mutable_array::get(m, 0, 0)\n    mutable_array::set(m, 0, n + 1)\n    n\nfn f(m):\n    \{a: tick(m), b: tick(m)\}\n    \{\}\n    mutable_array::get(m, 0, 0)\nf(counter)\n"
+    set source "counter = mutable_array::create(1, 0)\nfn tick(m):\n    n = mutable_array::get(m, 0, 0)\n    if mutable_array::capacity(m) > 0:\n        mutable_array::set(m, 0, n + 1)\n    n\nfn f(m):\n    \{a: tick(m), b: tick(m)\}\n    \{\}\n    mutable_array::get(m, 0, 0)\nf(counter)\n"
     list [srValue $source] [srOps $source]
 } -result {2 {structnew 0 structget 0 callmulti 0 retmulti 0}}
 
@@ -165,7 +165,8 @@ test sr-local-evaluation-order {fields run in written order, not slot order, exa
     set source "counter = mutable_array::create(1, 0)
 fn ticket(m):
     n = mutable_array::get(m, 0, 0)
-    mutable_array::set(m, 0, n + 1)
+    if mutable_array::capacity(m) > 0:
+        mutable_array::set(m, 0, n + 1)
     n
 fn build(m):
     x = \{z: ticket(m), a: ticket(m), m: ticket(m)\}

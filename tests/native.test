@@ -722,7 +722,7 @@ test native-gc-1 {collecting before every allocation changes nothing} -body {
 } -result {1 1 {[["a", "b\"c", "d"], ["e", "f"]]}}
 
 test native-gc-2 {repeated runs reclaim garbage} -body {
-    set hir [corpus::program string_reverse "reverse_chars(\"[string repeat abcdefghij 300]\")"]
+    set hir [corpus::driven string_reverse "reverse_chars(\"[string repeat abcdefghij 300]\")"]
     lassign [native::measure $hir 5] - - - collections value
     list [string length [core::value::strOf $value]] [expr {$collections >= 4}]
 } -setup {

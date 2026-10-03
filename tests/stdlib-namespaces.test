@@ -153,10 +153,11 @@ test ns-historical-names-are-unknown {every historical root spelling is now an o
     }
 } -result [lrepeat 19 UNBOUND]
 
-test ns-char-codepoint-keeps-its-static-contract {char::scalar_value is the intrinsic (a run-time UnicodeChar requirement, like every native's); char::codepoint stays its typed lib/char.bot wrapper, so char::codepoint(65) is still a compile-time error} -body {
-    list [lindex [rejection {char::codepoint(65)}] 0] [agree {char::scalar_value(65)} 0] \
-        [agree {[char::codepoint('A'), char::scalar_value('é')]}] [core::native::isQualifiedNative char::codepoint]
-} -result {TYPE {error {CORE SEMANTIC TYPE}} {[65, 233]} 0}
+test ns-char-scalar-value-is-canonical {char::scalar_value is the one spelling: the intrinsic itself (no char module, no codepoint wrapper); a direct call with an Int is its run-time TYPE error, like any intrinsic's} -body {
+    list [rejection {char::codepoint('A')}] [rejection {char::scalar_value(65)}] [agree {char::scalar_value(65)}] \
+        [agree {[char::scalar_value('A'), char::scalar_value('é'), char::scalar_value('😀')]}] \
+        [core::native::isQualifiedNative char::scalar_value] [file exists [file join $::projectRoot lib char.bot]]
+} -match glob -result {{UNKNOWN-SYMBOL {*: namespace "char" has no definition "codepoint" (its members are the intrinsics: scalar_value)}} accepted {error {CORE SEMANTIC TYPE}} {\[65, 233, 128512\]} 1 0}
 
 test ns-historical-module-is-gone {the mutarray module became mutable_array (one namespace per family)} -body {
     list [lindex [rejection {mutarray::create(1, 0)}] 0] [agree {mutable_array::freeze(mutable_array::create(2, 7), 2)}]
@@ -279,15 +280,118 @@ test ns-mutable-array-at {mutable_array::at has the same contract over a Mutable
     agree "fn pick(a, i) errors IndexNotFound:\n    mutable_array::at(a, i)\nfn safe(a, i):\n    r = pick(a, i):\n        on IndexNotFound:\n            -1\n    r\na = mutable_array::from_list(\[5, 6\])\n\[safe(a, 0), safe(a, 1), safe(a, 2), safe(a, -1), safe(mutable_array::allocate(0), 0)\]"
 } -result {[5, 6, -1, -1, -1]}
 
-test ns-mutable-array-set-keeps-range {mutable_array::set keeps its RANGE error: only the at/get split changed indexed reads} -body {
-    agree "a = mutable_array::allocate(1)\nmutable_array::set(a, 1, 0)" 0
-} -result {error {CORE SEMANTIC RANGE}}
+test ns-mutable-array-set-is-index-not-found {mutable_array::set at an index that designates no slot fails with IndexNotFound and writes nothing, on every backend} -body {
+    agree "fn put(a, i, v) errors IndexNotFound:\n    mutable_array::set(a, i, v)\nfn safe(a, i, v):\n    r = put(a, i, v):\n        on IndexNotFound:\n            return \"missing\"\n    mutable_array::freeze(a, mutable_array::capacity(a))\na = mutable_array::from_list(\[5, 6\])\n\[safe(a, 1, 9), safe(a, 2, 9), safe(a, -1, 9), safe(a, 100000000000000000000, 9), safe(mutable_array::allocate(0), 0, 1), mutable_array::freeze(a, 2)\]"
+} -result {[[5, 9], "missing", "missing", "missing", "missing", [5, 9]]}
 
-test ns-at-signature {list::at and mutable_array::at declare exactly IndexNotFound, a builtin error every program sees} -body {
-    list [dict get [core::native::metadata list::at] errors] [dict get [core::native::metadata mutable_array::at] errors] \
-        [core::native::isBuiltinError IndexNotFound] [core::native::builtinErrorNames] \
-        [native::lower::ErrorId IndexNotFound]
-} -result {IndexNotFound IndexNotFound 1 {InvalidArgumentEncoding IndexNotFound} 1073741825}
+test ns-error-signatures {the indexed natives declare exactly IndexNotFound, the slicing natives exactly LowerUnderrun and UpperOverrun: builtin errors every program sees, with fixed native ids} -body {
+    list [lmap n {list::at mutable_array::at mutable_array::set str::substring mutable_array::freeze mutable_array::copy} {
+            list $n [dict get [core::native::metadata $n] errors]
+        }] \
+        [core::native::builtinErrorNames] \
+        [lmap e {IndexNotFound LowerUnderrun UpperOverrun} {native::lower::ErrorId $e}]
+} -result {{{list::at IndexNotFound} {mutable_array::at IndexNotFound} {mutable_array::set IndexNotFound} {str::substring {LowerUnderrun UpperOverrun}} {mutable_array::freeze {LowerUnderrun UpperOverrun}} {mutable_array::copy {LowerUnderrun UpperOverrun}}} {InvalidArgumentEncoding IndexNotFound LowerUnderrun UpperOverrun} {1073741825 1073741826 1073741827}}
+
+test ns-bounds-are-registered {the bounds checks behind the argument-dependent errors are registered with each native (-bounds), validated against its -errors and arity} -body {
+    set bad {}
+    foreach {bounds errors arity} {
+        {index list 0 1}                  {}                            2
+        {index list 0 2}                  IndexNotFound                 2
+        {index tree 0 1}                  IndexNotFound                 2
+        {slices {str 0 1 2}}              IndexNotFound                 3
+        {slices {str 0 1 {sum 1 3}}}      {LowerUnderrun UpperOverrun}  3
+        {slices {str 0 {const x} 2}}      {LowerUnderrun UpperOverrun}  3
+        {slices}                          {LowerUnderrun UpperOverrun}  3
+        {window 0 1}                      IndexNotFound                 2
+    } {
+        lappend bad [catch {core::native::register test-ns-bounds -arity $arity -impl list \
+            -errors $errors -bounds $bounds} message]
+        catch {core::native::unregister test-ns-bounds}
+    }
+    list [lmap n {list::at mutable_array::at mutable_array::set str::substring mutable_array::freeze mutable_array::copy list::length} {
+            list $n [dict get [core::native::metadata $n] bounds]
+        }] $bad
+} -result {{{list::at {index list 0 1}} {mutable_array::at {index mutarray 0 1}} {mutable_array::set {index mutarray 0 1}} {str::substring {slices {str 0 1 2}}} {mutable_array::freeze {slices {mutarray 0 {const 0} 1}}} {mutable_array::copy {slices {mutarray 0 1 {sum 1 4}} {mutarray 2 3 {sum 3 4}}}} {list::length {}}} {1 1 1 1 1 1 1 1}}
+
+test ns-proof-binding-minimum {an enclosing `n > K` on an Int binding bounds a capacity equal to that binding (an array created with capacity n); exactly, never more} -body {
+    lmap body {
+        "    if n > 0:\n        mutable_array::set(m, 0, 5)"
+        "    if n > 1:\n        mutable_array::set(m, 1, 5)"
+        "    if n >= 1:\n        mutable_array::set(m, 0, 5)"
+        "    if n > 0:\n        mutable_array::set(m, 1, 5)"
+        "    if n >= 0:\n        mutable_array::set(m, 0, 5)"
+        "    if n > 0:\n        return m\n    mutable_array::set(m, 0, 5)"
+    } {
+        diagKinds "fn f(n):\n    m = mutable_array::create(n, 0)\n$body\n    m\nf(3)"
+    }
+} -result {{} {} {} UNHANDLED-ERROR UNHANDLED-ERROR UNHANDLED-ERROR}
+
+# ---------------------------------------------------------------------------
+# Slices: str::substring, mutable_array::freeze, mutable_array::copy
+# (core::native::checkSlice): START against 0..N first, then END against
+# START..N; below its interval is LowerUnderrun, above it UpperOverrun.
+
+set ::sliceFns {fn slice_of(s, a, b):
+    v = str::substring(s, a, b):
+        on LowerUnderrun:
+            return "lower"
+        on UpperOverrun:
+            return "upper"
+    v
+fn freeze_of(xs, n):
+    a = mutable_array::from_list(xs)
+    v = mutable_array::freeze(a, n):
+        on LowerUnderrun:
+            return "lower"
+        on UpperOverrun:
+            return "upper"
+    v
+fn copy_within(xs, ds, ss, n):
+    a = mutable_array::from_list(xs)
+    done = mutable_array::copy(a, ds, a, ss, n):
+        on LowerUnderrun:
+            return "lower"
+        on UpperOverrun:
+            return "upper"
+    mutable_array::freeze(a, mutable_array::capacity(a))
+}
+
+test ns-slice-rule-substring {every bound case of a substring of "abc", including BigInts and the check order, on every backend} -body {
+    agree "$::sliceFns\[slice_of(\"abc\", -1, 2), slice_of(\"abc\", 4, 4), slice_of(\"abc\", 2, 1), slice_of(\"abc\", 1, 4), slice_of(\"abc\", -1, 9), slice_of(\"abc\", 4, 1), slice_of(\"abc\", 3, 3), slice_of(\"abc\", 0, 3), slice_of(\"abc\", 1, 100000000000000000000), slice_of(\"abc\", -100000000000000000000, 1), slice_of(\"ä😀b\", 1, 2)\]"
+} -result {["lower", "upper", "lower", "upper", "lower", "upper", "", "abc", "upper", "lower", "😀"]}
+
+test ns-slice-rule-freeze-and-copy {freeze is the slice 0..COUNT; copy checks its destination slice, then its source slice (memmove within one array)} -body {
+    agree "$::sliceFns\[freeze_of(\[1, 2\], -1), freeze_of(\[1, 2\], 3), freeze_of(\[1, 2\], 1), copy_within(\[1, 2, 3\], -1, 9, 1), copy_within(\[1, 2, 3\], 0, 9, 1), copy_within(\[1, 2, 3\], 0, 0, -1), copy_within(\[1, 2, 3\], 1, 0, 3), copy_within(\[1, 2, 3\], 0, 2, 2), copy_within(\[1, 2, 3\], 1, 0, 2)\]"
+} -result {["lower", "upper", [1], "lower", "upper", "lower", "upper", "upper", [1, 1, 2]]}
+
+test ns-slice-unhandled-is-the-declared-error {a slice error nobody handles is the ordinary uncaught declared error on every backend (a -strict 0 program)} -body {
+    list [agree "fn f(s, a, b):\n    str::substring(s, a, b)\nf(\"abc\", 2, 1)" 0] [agree "fn f(s, a, b):\n    str::substring(s, a, b)\nf(\"abc\", 0, 9)" 0]
+} -result {{error {CORE SEMANTIC UNCAUGHT-ERROR}} {error {CORE SEMANTIC UNCAUGHT-ERROR}}}
+
+test ns-slice-proofs {the slice proof: literals, an index guard, a counted loop, a minimum length, String lengths through concat, capacities; the unsound neighbours keep their obligation} -body {
+    lmap src [list \
+        {str::substring("hello", 1, 3)} \
+        {str::substring("hello", 3, 1)} \
+        "fn f(t, i):\n    if i < 0 or i >= str::length(t):\n        return \"\"\n    str::substring(t, i, i + 1)\nf(\"ab\", 1)" \
+        "fn f(t, i):\n    if i >= str::length(t):\n        return \"\"\n    str::substring(t, i, i + 1)\nf(\"ab\", 1)" \
+        "fn f(t):\n    loop i from 0 to str::length(t):\n        str::substring(t, i, i + 1)\nf(\"ab\")" \
+        "fn f(t):\n    if str::length(t) > 0:\n        return str::substring(t, 0, 1)\n    \"\"\nf(\"ab\")" \
+        "fn f(t):\n    str::substring(str::concat(t, \"x\"), 0, 1)\nf(\"ab\")" \
+        "fn f(t):\n    str::substring(str::concat(t, \"x\"), 0, 2)\nf(\"ab\")" \
+        "fn f(n):\n    a = mutable_array::allocate(n)\n    loop i from 0 to n:\n        mutable_array::set(a, i, i)\n    mutable_array::freeze(a, mutable_array::capacity(a))\nf(3)" \
+        "fn f(a, n):\n    mutable_array::freeze(a, n)\nf(mutable_array::allocate(2), 1)" \
+        {a = mutable_array::allocate(3)
+b = mutable_array::allocate(5)
+mutable_array::copy(a, 0, b, 2, 3)} \
+        {a = mutable_array::allocate(3)
+mutable_array::set(a, 3, 0)}] {diagKinds $src}
+} -result {{} KNOWN-ERROR {} UNHANDLED-ERROR {} {} {} UNHANDLED-ERROR {} UNHANDLED-ERROR {} KNOWN-ERROR}
+
+test ns-index-proof-minimum-size {an enclosing `list::length(xs) > 0` (or `== 0` false) proves the reads below the minimum it states} -body {
+    list [diagKinds "fn f(xs):\n    if list::length(xs) > 0:\n        return list::at(xs, 0)\n    0\nf(\[1\])"] \
+        [diagKinds "fn f(xs):\n    if list::length(xs) == 0:\n        return 0\n    list::at(xs, 0)\nf(\[1\])"] \
+        [diagKinds "fn f(xs):\n    if list::length(xs) > 0:\n        return list::at(xs, 1)\n    0\nf(\[1\])"]
+} -result {{} {} UNHANDLED-ERROR}
 
 test ns-at-element-type {list::at keeps the element type: List[int] gives int, no optional/null type} -body {
     set hir [nsHir "fn f(xs: List\[int\]) errors IndexNotFound:\n    list::at(xs, 0)\nr = f(\[1, 2\]):\n    on IndexNotFound:\n        0\nr"]
@@ -477,7 +581,7 @@ foreach {name qualified binding method free expected} {
     str-length    str::length    {length = str::length}      {"abc".length()}             {str::length("abc")}                 {3}
     str-substring str::substring {substring = str::substring} {"hello".substring(1, 3)}   {str::substring("hello", 1, 3)}      {"el"}
     set-contains  immutable_set::contains {contains = immutable_set::contains} {immutable_set::from_list([1]).contains(1)} {immutable_set::contains(immutable_set::from_list([1]), 1)} {true}
-    char-codepoint char::codepoint {codepoint = char::codepoint} {'A'.codepoint()}         {char::codepoint('A')}               {65}
+    char-scalar-value char::scalar_value {scalar_value = char::scalar_value} {'A'.scalar_value()} {char::scalar_value('A')}          {65}
 } {
     test ns-method-$name "$name: the method spelling and the qualified free spelling agree, through the same callable" -body {
         set m "$binding\n$method"

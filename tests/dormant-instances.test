@@ -103,7 +103,12 @@ set scanShape {
     fn outer(v, start0):
         n = str::length(v)
         fn get(i):
-            str::substring(v, i, i + 1)
+            c = str::substring(v, i, i + 1):
+                on LowerUnderrun:
+                    ""
+                on UpperOverrun:
+                    ""
+            c
         fn scan(start, pred):
             loop i from start to n:
                 if pred(get(i)):
@@ -129,7 +134,12 @@ set transitiveShape {
     fn outer(v, start0):
         n = str::length(v)
         fn get(i):
-            str::substring(v, i, i + 1)
+            c = str::substring(v, i, i + 1):
+                on LowerUnderrun:
+                    ""
+                on UpperOverrun:
+                    ""
+            c
         fn scan(start, pred):
             loop i from start to n:
                 if apply(pred, get(i), i) >= 0:
@@ -147,7 +157,12 @@ set theoremShape {
     fn outer(v, start0):
         n = str::length(v)
         fn get(i):
-            str::substring(v, i, i + 1)
+            c = str::substring(v, i, i + 1):
+                on LowerUnderrun:
+                    ""
+                on UpperOverrun:
+                    ""
+            c
         fn ok(t):
             str::length(t) + str::length(v)
         fn scan(start, pred, tag):
@@ -252,11 +267,14 @@ test dormant-refined-checks-char-at-entry {refined-checks: char_at.i loses the -
     list $off [entryOf $analysis $spec char_at<int>]
 } -result {{{[-∞, 4611686018427387902]}} {{[0, 4611686018427387902]}}}
 
+# char_at (lib/web.bot) guards its slice (`if i < 0 or i >= n: return ""`,
+# which proves the substring's bounds): with dormant instances on, i's entry
+# Range [0, ...] also decides the `i < 0` test statically (no ilt).
 test dormant-refined-checks-char-at-nir {refined-checks: char_at's i + 1 is a raw riadd (no tag test, no overflow check) in both of its emitted variants, instead of a tagged iadd} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot]]
     set off [withDormant 0 {nirOpsOf [native::nir $hir] char_at}]
     list $off [nirOpsOf [native::nir $hir] char_at]
-} -result {{{iadd regioncheck} {iadd substr}} {{runbox riadd rbox regioncheck} {runbox riadd rbox substr}}}
+} -result {{{ilt runbox runbox rige iadd regioncheck} {ilt runbox runbox rige iadd substr}} {{runbox runbox rige runbox riadd rbox regioncheck} {runbox runbox rige runbox riadd rbox substr}}}
 
 test dormant-scan-shape-entry {the emailish? scanner shape: get.i is [0, …] once scan<generic>'s unbounded loop counter no longer reaches it} -body {
     set off [withDormant 0 {

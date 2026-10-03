@@ -102,7 +102,7 @@ pub enum OpCode {
     ResultValue,
     ResultError,
     /// The Unicode scalar value of a UnicodeChar operand, as an Int
-    /// (char::scalar_value, wrapped by char::codepoint, core/unicodechar.tcl): total, never
+    /// (char::scalar_value, core/unicodechar.tcl): total, never
     /// fails. A scalar value always fits the small-Int range, so the result
     /// is always an immediate small Int, never a BigInt.
     CharCodepoint,

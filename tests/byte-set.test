@@ -1,5 +1,5 @@
 # byte-set.test -- byte::set(List[UnicodeChar]) -> ImmutableSet[Byte]
-# (lib/byte.bot): UnicodeChar -> char::codepoint -> checked Byte
+# (lib/byte.bot): UnicodeChar -> char::scalar_value -> checked Byte
 # construction -> ImmutableSet, expressed as ordinary Botlish library code
 # using the new "loop x in EXPR:" traversal (core/ir.tcl's `listloop`; see
 # tests/loop-in.test for the construct's own dedicated coverage). See
