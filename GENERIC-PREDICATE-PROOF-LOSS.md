@@ -1849,7 +1849,10 @@ Smaller open items, outside the numbered points:
   may fail (a value/flag pair): on `refined-checks` it costs
   `scan_while<int, native(is_tcl_alpha)>` 9 Ir/call
   ([Loss point 5](#loss-point-5-the-rawint-abi-for-de-closured-functions),
-  limitation 1);
+  limitation 1). RAW-RESULT-REGISTER-COST.md splits it: the status word is
+  1 of the 9, the other 8 are Cranelift's register allocation around the
+  loop (future work for an experimental register allocator, not for this
+  stack);
 * a de-closured call's tagged constant result is not folded, unlike a
   canonical call's (point 5's review);
 * list loops' index (and a lockstep loop's List position) still compare and
