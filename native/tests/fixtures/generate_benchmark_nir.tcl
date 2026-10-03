@@ -14,7 +14,7 @@ set buildSource {fn build(n):
     concat(prefix, build(n - 1))
 
 build(400)}
-set hir [surface::compile $buildSource bench-build.bot -strict 0]
+set hir [surface::compile $buildSource bench-build.bot -strict 0 -warnings off]
 set out [open "native/tests/fixtures/build400.nir" w]
 puts $out [string trimright [native::nir $hir] "\n"]
 close $out

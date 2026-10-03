@@ -1,6 +1,7 @@
 # lower.tcl -- surface AST to HIR.
 #
-#   surface::lowerToHir AST ?-strict 1|0?     => HIR program
+#   surface::lowerToHir AST ?-strict 1|0? ?-warnings default|off|error?
+#                       ?-warning-channel CHAN?       => HIR program
 #
 # The frontend says what was written and where; HIR says what it means.
 # Lowering restates the AST as HIR syntax nodes (hir/syntax.tcl) and hands
@@ -85,7 +86,7 @@
 namespace eval surface::lower {}
 
 proc surface::lowerToHir {ast args} {
-    set options [dict create -strict 1]
+    set options [dict create -strict 1 -warnings [hir::warnings::defaultMode] -warning-channel stderr]
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "surface::lowerToHir: unknown option \"$option\""
@@ -107,7 +108,8 @@ proc surface::lowerToHir {ast args} {
         -origin [surface::lower::Origin [dict get $ast span] ""] \
         -files [dict create f1 [dict get $ast span file]] \
         -type-decls $decls -error-decls $errorDecls -struct-decls $structDecls]
-    return [surface::lower::Finish $hir [dict get $options -strict]]
+    return [surface::lower::Finish $hir [dict get $options -strict] \
+        [dict get $options -warnings] [dict get $options -warning-channel]]
 }
 
 # STATEMENTS split into {EXECUTABLE DECLS ERRORDECLS STRUCTDECLS}: EXECUTABLE keeps
@@ -156,8 +158,12 @@ proc surface::lower::ErrorDeclOf {node} {
 # The tail both surface::lowerToHir and surface::modules::compileProgramFile
 # (surface/modules.tcl) share: with STRICT 1, raise the first HIR diagnostic
 # as a semantic error (with its source location); otherwise return HIR as
-# built, diagnostics and all.
-proc surface::lower::Finish {hir strict} {
+# built, diagnostics and all. A program with no diagnostics then gets the
+# compilation's warning policy applied (hir::warnings::run: WARNINGS is
+# default, off or error, or "" for the environment's default mode; CHANNEL
+# receives emitted warnings): the last thing
+# the frontend does, before any backend sees the HIR.
+proc surface::lower::Finish {hir strict {warnings ""} {channel stderr}} {
     if {$strict} {
         foreach diagnostic [hir::diagnostics $hir] {
             set origin [expr {[dict exists $diagnostic origin] ? [dict get $diagnostic origin]
@@ -166,17 +172,12 @@ proc surface::lower::Finish {hir strict} {
                 "[surface::originLocation $hir $origin]: [dict get $diagnostic message]"
         }
     }
-    return $hir
+    return [hir::warnings::run $hir $warnings $channel]
 }
 
 # "FILE:LINE:COLUMN" of a source ORIGIN in HIR, or the origin itself.
 proc surface::originLocation {hir origin} {
-    if {[lindex $origin 0] ne "file"} {
-        return $origin
-    }
-    set path [dict get [hir::sourceFile $hir [lindex $origin 1]] path]
-    set fields [lrange $origin 2 end]
-    return "$path:[dict get $fields line]:[dict get $fields column]"
+    return [hir::originLocation $hir $origin]
 }
 
 # ExprIds of HIR whose origin is the AST node ID, in pre-order.

@@ -577,4 +577,57 @@ test surface-modules-c2-existing-corpus-unaffected {the C2 fix changed web::is_u
     }
 } -result {{} 1}
 
+test surface-modules-origins-in-every-loop-and-handler {a module's expressions inside every loop form and an on-handler keep the module's own file origin (RemapFile used to leave them pointing at the entry file)} -body {
+    withScratchLibrary {
+        writeModule $dir wmod2 {namespace wmod2
+
+error Bad
+
+fn each(xs):
+    loop x in xs:
+        if x == 1:
+            return 0
+    1
+
+fn count(n):
+    loop i from 0 to n:
+        continue
+    1
+
+fn pair():
+    loop x in [1, 2] and i from 0 to 2:
+        x
+
+fn risky(n) -> int errors Bad:
+    if n < 0:
+        fail Bad
+    n
+
+fn handled(n):
+    r = risky(n):
+        on Bad:
+            return -1
+    r
+}
+        set main [writeModule $dir main {wmod2::each([1])
+wmod2::count(3)
+wmod2::pair()
+wmod2::handled(3)
+}]
+        set hir [surface::readProgramFile $main -warnings off]
+        # The entry file has four lines: an origin in it past line 4 belongs
+        # to the module and is mislocated.
+        set misplaced {}
+        foreach e [hir::walk $hir] {
+            set origin [hir::get $hir $e origin]
+            if {[lindex $origin 0] eq "file"
+                    && [file tail [dict get [hir::sourceFile $hir [lindex $origin 1]] path]] eq "main.bot"
+                    && [dict get [lrange $origin 2 end] line] > 4} {
+                lappend misplaced [hir::kind $hir $e]
+            }
+        }
+        set misplaced
+    }
+} -result {}
+
 cleanupTests

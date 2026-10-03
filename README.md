@@ -94,6 +94,7 @@ tclsh9.0 main.tcl examples/surface/03-closure.bot            # run source (inter
 tclsh9.0 main.tcl -backend compile -hir -ast FILE.bot   # show AST and HIR, compile, run
 tclsh9.0 bench/bench.tcl                       # compare backends on bench/*.bot
 tclsh9.0 bench/corpus.tcl                      # baseline timings of the algorithm corpus (§18)
+tclsh9.0 main.tcl -warnings off FILE.bot       # compiler warnings: default | off | error (§23)
 tclsh9.0 main.tcl -aot examples/stdlib/matmul.bot   # closed-AOT readiness report (§19)
 tclsh9.0 main.tcl -aot-spec examples/stdlib/matmul.bot   # the same per specialized instance (§21)
 ```
@@ -528,6 +529,8 @@ refinement unless its contract explicitly establishes one. So
 | `hir/read.tcl` | HIR text → HIR |
 | `hir/aot.tcl` | closed-AOT readiness analysis (§19) |
 | `hir/specialize.tcl` | call-site specialization: instances, result fixpoint, views for `hir::aot` (§21) |
+| `hir/exactvalue.tcl` | exact-value facts and value identity (`hir::exact::Of`, `Identity`, `SameValue`) |
+| `hir/warnings.tcl` | compiler warnings: record, static registry, global policy, rendering, error promotion, and `SAME-RETURN-VALUE` (§23) |
 | `compiler/compiler.tcl` | HIR → Tcl compiler backend |
 | `native/lower.tcl` | HIR → NIR native lowering (§20) |
 | `native/native.tcl` | the native entry points, all taking HIR: `native::lowered` (the one HIR → NIR entry), `evalHir` (JIT), NIR, CLIF, object, executable, code size and guard report; runs the native driver |
@@ -2630,3 +2633,58 @@ instrumentation-off semantic parity) plus 7 Rust unit tests
 (`native/src/runtime/heap.rs`) against `Heap`/`Metrics` directly. Neither
 GC policy nor codegen semantics changed: `tests/all.tcl` (891 tests, both
 Tcl backends) and `tests/native-coverage.tcl` are unaffected.
+
+## 23. Compiler warnings
+
+Botlish compiler warnings are **enabled by default**. They preferentially
+report *semantic facts the compiler can prove* rather than enforce source-style
+fashions: a warning says what is true of a legal program and stops. It never
+says what to do about it, and a program that keeps the fact on purpose is
+correct.
+
+There is one global policy per compilation, and nothing finer:
+
+| mode | meaning |
+|------|---------|
+| `default` | warnings are discovered, attached to the HIR (`hir::warnings::of`) and printed on stderr |
+| `off` | no warning pass runs at all (generated source, benchmarks, embedding) |
+| `error` | the first warning is a compilation error carrying the warning's own code, raised before any backend runs |
+
+```sh
+tclsh9.0 main.tcl -warnings error FILE.bot      # default | off | error
+BOTLISH_WARNINGS=off tclsh9.0 bench/bench.tcl   # the default for a compilation given no option
+```
+```tcl
+set hir [surface::compile $source file.bot -warnings default -warning-channel ""]
+hir::warnings::of $hir      ;# {code message primary secondary data} records
+```
+
+**Botlish does not currently provide GCC/Clang-style `-Wfoo` controls** (no
+`-Wno-foo`, `-Werror=foo`, `-Wall`, warning groups or levels), and no source
+annotation or comment suppresses a warning. This is intentional, not forgotten
+CLI work: every warning is on for everyone, so a warning must be trustworthy
+enough to be, and uncertainty means no warning. Codes (`SAME-RETURN-VALUE`) are
+stable for tests, tooling and documentation, but they are not switches.
+
+`SAME-RETURN-VALUE`: several distinct, reachable exits of one function are
+proven to return the same value.
+
+```
+fn classify(x):
+    if x < 0:
+        return invalid
+    if x > 100:
+        return invalid
+    valid
+```
+```
+f.bot:3:9: warning: value `-1` (`invalid`) is returned from 2 distinct exits (SAME-RETURN-VALUE)
+f.bot:5:9: note: also returned here
+```
+
+The proof is the compiler's own exact-value facts (`hir::exact`): equal exact
+values through immutable aliases, or the very same immutable binding. A call, an
+unproven expression or a separately constructed mutable value is never assumed
+equal, and `unit` is never reported. See WARNINGS-SAME-RETURN.md for the
+semantics, architecture, the corpus audit and known limitations; the tests are
+`tests/warnings.test` and `audit/same-return-value/tools/fuzz.tcl`.

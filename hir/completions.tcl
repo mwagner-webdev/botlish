@@ -170,7 +170,8 @@ proc hir::completions::SeedParam {} {
 
 proc hir::completions::NewCtx {} {
     return [dict create bindings [dict create] exact [dict create] exactList [dict create] \
-        exprs [dict create] errors [dict create] analyses 0 returned 0]
+        exprs [dict create] errors [dict create] analyses 0 returned 0 \
+        record 0 visited [dict create]]
 }
 
 # Walks EXPRS (a block body / branch body) in order; a "never" expression
@@ -189,6 +190,9 @@ proc hir::completions::Seq {hirVar ctxVar diagnose enclosing guard e} {
 
 proc hir::completions::Eval {hirVar ctxVar diagnose enclosing guard e} {
     upvar 1 $hirVar hir $ctxVar ctx
+    if {[dict get $ctx record]} {
+        dict set ctx visited $e 1
+    }
     set node [hir::node $hir $e]
     switch -- [dict get $node kind] {
         const {
@@ -962,6 +966,27 @@ proc hir::completions::checkBlock {hirVar block enclosingErrors} {
         set guard [dict create $block 1]
     }
     Seq hir ctx 1 $enclosingErrors $guard $body
+}
+
+# The expressions of BLOCK's own body this pass's walk reaches (ExprId -> 1):
+# exactly the walk checkBlock makes -- parameters unconstrained, a branch the
+# facts prove infeasible (an empty narrowed range, a decided condition) never
+# entered, nothing after an expression that cannot complete -- but pure
+# fact computation (it diagnoses nothing and stashes nothing in HIR), with the
+# walk recording what it visited. A consumer that needs "can this expression
+# execute at all, by everything the completion proof knows" asks this; an
+# expression absent from the answer is proven unreachable, one present is
+# merely not proven unreachable. Used by hir/warnings.tcl (SAME-RETURN-VALUE)
+# on demand, never by a compilation that has warnings off.
+proc hir::completions::reachedExprs {hir block} {
+    resetCache
+    set ctx [NewCtx]
+    dict set ctx record 1
+    foreach b [hir::get $hir $block params] {
+        dict set ctx bindings $b [SeedParam]
+    }
+    Seq hir ctx 0 {} [dict create $block 1] [hir::get $hir $block body]
+    return [dict get $ctx visited]
 }
 
 # ---------------------------------------------------------------------------

@@ -144,7 +144,7 @@ proc vcbench::field {dict args} {
 
 # {VALUE BEST-US REPORT}: one probe at size N.
 proc vcbench::measure {probe n opt runs} {
-    set hir [surface::compile [source $probe $n] <$probe>]
+    set hir [surface::compile [source $probe $n] <$probe> -warnings off]
     set args [optArgs $opt]
     lassign [native::measure $hir $runs {*}$args] lower compile best collections value
     set report [native::allocationReport $hir summary 1 {*}$args]

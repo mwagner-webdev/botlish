@@ -25,7 +25,7 @@ set moduleDir [file join $root audit post-native-stack module-cases]
 set savedLibraryDir $::core::libraryDir
 set ::core::libraryDir $moduleDir
 try {
-    set hir [surface::readProgramFile [file join $moduleDir main.bot]]
+    set hir [surface::readProgramFile [file join $moduleDir main.bot] -warnings off]
     writeText [file join $moduleDir main.hir] [hir::format $hir]
     writeText [file join $moduleDir main.nir] [native::nir $hir]
     writeText [file join $moduleDir main.clif] [native::clif $hir]
@@ -45,7 +45,7 @@ source [file join $root examples stdlib corpus.tcl]
 set stdlibOut [file join $root audit post-native-stack examples-stdlib]
 foreach name [corpus::names] {
     set path [corpus::path $name]
-    set hir [surface::readProgramFile $path]
+    set hir [surface::readProgramFile $path -warnings off]
     writeText [file join $stdlibOut "$name.nir"] [native::nir $hir]
     puts "$name: NIR written"
 }

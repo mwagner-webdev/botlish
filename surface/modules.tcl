@@ -229,6 +229,44 @@ proc surface::modules::RemapFile {node fileId} {
             dict set node bodyOrigin [RemapOrigin [dict get $node bodyOrigin] $fileId]
             dict set node body [lmap child [dict get $node body] {RemapFile $child $fileId}]
         }
+        listloop {
+            dict set node iterable [RemapFile [dict get $node iterable] $fileId]
+            dict set node elementOrigin [RemapOrigin [dict get $node elementOrigin] $fileId]
+            dict set node bodyOrigin [RemapOrigin [dict get $node bodyOrigin] $fileId]
+            dict set node body [lmap child [dict get $node body] {RemapFile $child $fileId}]
+        }
+        countloop {
+            dict set node start [RemapFile [dict get $node start] $fileId]
+            dict set node end [RemapFile [dict get $node end] $fileId]
+            dict set node countOrigin [RemapOrigin [dict get $node countOrigin] $fileId]
+            dict set node bodyOrigin [RemapOrigin [dict get $node bodyOrigin] $fileId]
+            dict set node body [lmap child [dict get $node body] {RemapFile $child $fileId}]
+        }
+        lockloop {
+            set domains {}
+            foreach domain [dict get $node domains] {
+                dict set domain origin [RemapOrigin [dict get $domain origin] $fileId]
+                foreach operand {iterable start end} {
+                    if {[dict exists $domain $operand]} {
+                        dict set domain $operand [RemapFile [dict get $domain $operand] $fileId]
+                    }
+                }
+                lappend domains $domain
+            }
+            dict set node domains $domains
+            dict set node bodyOrigin [RemapOrigin [dict get $node bodyOrigin] $fileId]
+            dict set node body [lmap child [dict get $node body] {RemapFile $child $fileId}]
+        }
+        handle {
+            dict set node call [RemapFile [dict get $node call] $fileId]
+            set handlers {}
+            foreach handler [dict get $node handlers] {
+                dict set handler origin [RemapOrigin [dict get $handler origin] $fileId]
+                dict set handler body [lmap child [dict get $handler body] {RemapFile $child $fileId}]
+                lappend handlers $handler
+            }
+            dict set node handlers $handlers
+        }
         struct {
             set fields {}
             foreach field [dict get $node fields] {
@@ -395,7 +433,7 @@ proc surface::modules::LoadNamespaces {namespaces args} {
 # alongside it) every module its qualified references need, transitively.
 # -strict as surface::lowerToHir's.
 proc surface::modules::compileProgramFile {path args} {
-    set options [dict create -strict 1]
+    set options [dict create -strict 1 -warnings [hir::warnings::defaultMode] -warning-channel stderr]
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "surface::modules::compileProgramFile: unknown option \"$option\""
@@ -414,5 +452,6 @@ proc surface::modules::compileProgramFile {path args} {
         -origin [surface::lower::Origin [dict get $ast span] ""] \
         -files [dict get $state files] -modules [dict get $state sections] \
         -type-decls $decls -error-decls $errorDecls -struct-decls $structDecls]
-    return [surface::lower::Finish $hir [dict get $options -strict]]
+    return [surface::lower::Finish $hir [dict get $options -strict] \
+        [dict get $options -warnings] [dict get $options -warning-channel]]
 }

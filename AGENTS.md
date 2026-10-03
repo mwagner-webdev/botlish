@@ -171,3 +171,15 @@ different stack/guard implementation):
 ```powershell
 wsl.exe -d Ubuntu-24.04 -- bash -lc 'cd /mnt/c/Users/MarkusWagner/dev/botlish && export LANG=C.utf8 LC_ALL=C.utf8 BOTLISH_NATIVE_GC_STRESS=1 && cargo build --release --manifest-path native/Cargo.toml && tclsh9.0 tests/all.tcl'
 ```
+
+## Compiler warnings
+
+Warnings (`hir/warnings.tcl`, WARNINGS-SAME-RETURN.md) are on by default and
+have exactly one global policy per compilation: `-warnings default|off|error`
+(`surface::compile`/`readProgramFile`, `main.tcl`). There are deliberately no
+`-Wfoo` switches, groups, levels or source suppression: don't add them, and
+don't add a warning that is not backed by a compiler proof. The test harness
+(`tests/helpers.tcl`) sets `BOTLISH_WARNINGS=off` as the process default,
+because tcltest counts stderr output as a test-file error; `tests/warnings.test`
+passes its policy explicitly on every compile. Benchmark and analysis scripts
+that compile corpus sources pass `-warnings off` themselves.

@@ -29,7 +29,7 @@ set programPath [file join $root bench uri-steady.bot]
 
 proc hirOf {} {
     global programPath
-    return [surface::readProgramFile $programPath]
+    return [surface::readProgramFile $programPath -warnings off]
 }
 
 # ---------------------------------------------------------------------------

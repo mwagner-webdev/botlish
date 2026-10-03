@@ -1,0 +1,955 @@
+# warnings.test -- compiler warnings (WARNINGS-SAME-RETURN.md): the reusable
+# warning framework (hir/warnings.tcl: record, registry, global policy,
+# rendering, error promotion) and its first warning, SAME-RETURN-VALUE.
+#
+# Harness convention: the suite's other tests compile with the frontend's
+# default policy, but their programs trigger no warning, and a warning that
+# does fire only writes to stderr (never to a result), so nothing is
+# silenced globally. THIS file is where warnings are the subject: every
+# compile here passes its policy and channel explicitly -- `-warnings MODE`
+# per compilation, `-warning-channel ""` to collect without printing -- and
+# no test mutates process-global state to do so.
+#
+# A warning is a proven fact, so most cases pin where it must NOT fire:
+# an unproven equality (parameters, expressions, calls, separately
+# constructed mutable values) never warns; an unreachable exit and a nested
+# function's exit never join a group; `unit` is never reported.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+
+set ::allBackends {interp compile cranelift-generic cranelift}
+
+# The HIR of SOURCE under policy MODE (default off error), collecting
+# warnings without printing them.
+proc compileWith {source {mode default}} {
+    return [surface::compile $source t.bot -warnings $mode -warning-channel ""]
+}
+
+proc warningsOf {source} {
+    return [hir::warnings::of [compileWith $source]]
+}
+
+# "MESSAGE @ LINE:COL LINE:COL ..." for each warning of SOURCE: the message,
+# then the primary location followed by the related ones.
+proc shown {source} {
+    set hir [compileWith $source]
+    return [lmap w [hir::warnings::of $hir] {
+        set locations [lmap o [list [dict get $w primary] {*}[dict get $w secondary]] {
+            regsub {^t\.bot:} [hir::originLocation $hir $o] {}
+        }]
+        string cat [dict get $w message] " @ " [join $locations { }]
+    }]
+}
+
+proc codes {source} {
+    return [lmap w [warningsOf $source] {dict get $w code}]
+}
+
+# The compile-time rejection of SOURCE under MODE: {errorcode message}, or
+# "compiled".
+proc rejection {source mode} {
+    if {[catch {compileWith $source $mode} message options]} {
+        return [list [dict get $options -errorcode] $message]
+    }
+    return compiled
+}
+
+# ---------------------------------------------------------------------------
+# Literal duplicates (Int, Bool, String, other exact scalars)
+
+test warn-int-literal {two exits returning Int 0 warn once, anchored at the first} -body {
+    shown {fn classify(x):
+    if x < 0:
+        return 0
+    if x > 100:
+        return 0
+    return 1}
+} -result {{value `0` is returned from 2 distinct exits @ 3:9 5:9}}
+
+test warn-bool-literal {repeated false is a warning: Bool is not special-cased away} -body {
+    shown {fn f(x):
+    if x:
+        return false
+    if x == 3:
+        return false
+    true}
+} -result {{value `false` is returned from 2 distinct exits @ 3:9 5:9}}
+
+test warn-string-literal {repeated String literals warn} -body {
+    shown {fn f(x):
+    if x < 0:
+        return "invalid"
+    if x > 100:
+        return "invalid"
+    "valid"}
+} -result {{value `"invalid"` is returned from 2 distinct exits @ 3:9 5:9}}
+
+test warn-char-literal {repeated UnicodeChar literals warn} -body {
+    shown {fn f(x):
+    if x < 0:
+        return 'a'
+    if x > 100:
+        return 'a'
+    'b'}
+} -result {{value `'a'` is returned from 2 distinct exits @ 3:9 5:9}}
+
+test warn-different-kinds-not-same {the Int 1, the String "1" and true are different values} -body {
+    codes {fn f(x):
+    if x < 0:
+        return 1
+    if x > 100:
+        return "1"
+    if x == 5:
+        return true
+    7}
+} -result {}
+
+test warn-different-values-not-same {two distinct literals never group} -body {
+    codes {fn f(x):
+    if x < 0:
+        return 1
+    if x > 100:
+        return 2
+    3}
+} -result {}
+
+test warn-exact-list {an exactly known List returned twice warns (existing exact-value facts)} -body {
+    shown {fn f(x):
+    if x:
+        return [1, 2]
+    return [1, 2]}
+} -result {{value `[1, 2]` is returned from 2 distinct exits @ 3:9 4:5}}
+
+test warn-lists-with-unknown-elements-not-same {Lists built from unproven elements are not proven equal} -body {
+    codes {fn f(x, y):
+    if x:
+        return [y, 1]
+    return [y, 1]}
+} -result {}
+
+# ---------------------------------------------------------------------------
+# Semantic, not textual, equality: immutable aliases
+
+test warn-alias-vs-literal {an immutable alias of a literal and the literal are the same value} -body {
+    shown {fn f(x):
+    zero = 0
+    if x < 0:
+        return zero
+    if x > 100:
+        return 0
+    return 1}
+} -result {{value `0` (`zero`) is returned from 2 distinct exits @ 4:9 6:9}}
+
+test warn-alias-chain {a chain of aliases resolves to one value} -body {
+    shown {fn f(x):
+    a = 5
+    b = a
+    c = b
+    if x:
+        return a
+    if x == 2:
+        return c
+    0}
+} -result {{value `5` (`a`, `c`) is returned from 2 distinct exits @ 6:9 8:9}}
+
+test warn-module-alias {a module-level sentinel named in two exits warns with its value and name} -body {
+    shown {invalid = -1
+fn f(a, b):
+    if a:
+        return invalid
+    if b:
+        return invalid
+    7}
+} -result {{value `-1` (`invalid`) is returned from 2 distinct exits @ 4:9 6:9}}
+
+test warn-branch-local-aliases {aliases made inside different branches resolve to the same value} -body {
+    shown {fn f(x):
+    if x:
+        y = 9
+        return y
+    if x == 2:
+        z = 9
+        return z
+    0}
+} -result {{value `9` (`y`, `z`) is returned from 2 distinct exits @ 4:9 7:9}}
+
+test warn-alias-in-later-branch-alias-of-alias {alias of an immutable alias} -body {
+    shown {invalid = -1
+same = invalid
+fn f(a, b):
+    if a:
+        return invalid
+    if b:
+        return same
+    7}
+} -result {{value `-1` (`invalid`, `same`) is returned from 2 distinct exits @ 5:9 7:9}}
+
+# ---------------------------------------------------------------------------
+# The same binding
+
+test warn-same-binding {the same immutable binding returned from two exits warns without any literal} -body {
+    shown {fn compute(a):
+    [a, a + 1]
+fn f(x, y):
+    result = compute(y)
+    if x:
+        return result
+    if x == 3:
+        return result
+    [0]}
+} -result {{the value of `result` is returned from 2 distinct exits @ 6:9 8:9}}
+
+test warn-same-parameter {a parameter is an immutable binding too} -body {
+    shown {fn f(x, d):
+    if x < 0:
+        return d
+    if x > 9:
+        return d
+    x}
+} -result {{the value of `d` is returned from 2 distinct exits @ 3:9 5:9}}
+
+test warn-alias-of-binding {an alias of a non-exact binding is the same binding value} -body {
+    shown {fn compute(a):
+    [a, a + 1]
+fn f(x, y):
+    result = compute(y)
+    again = result
+    if x:
+        return result
+    if x == 3:
+        return again
+    [0]}
+} -result {{the value of `result` is returned from 2 distinct exits @ 7:9 9:9}}
+
+test warn-different-bindings-not-same {two bindings of equal-looking but unproven values are not the same} -body {
+    codes {fn compute(a):
+    [a, a + 1]
+fn f(x, y):
+    p = compute(y)
+    q = compute(y)
+    if x:
+        return p
+    if x == 3:
+        return q
+    [0]}
+} -result {}
+
+# ---------------------------------------------------------------------------
+# No speculative equality
+
+test warn-unknown-parameters {two different parameters, or a parameter and a call, are not proven equal} -body {
+    codes {fn f(x, y, z):
+    if x:
+        return y
+    if z:
+        return z
+    y + 1}
+} -result {}
+
+test warn-repeated-calls {the same call written twice is not assumed to return the same value} -body {
+    codes {fn compute(a):
+    a
+fn f(x, y):
+    if x:
+        return compute(y)
+    if y:
+        return compute(y)
+    3}
+} -result {}
+
+test warn-repeated-arithmetic-on-unknown {x + 1 returned twice is not an exact value} -body {
+    codes {fn f(x, y):
+    if y:
+        return x + 1
+    if y == 3:
+        return x + 1
+    0}
+} -result {}
+
+test warn-separate-mutable-construction {two separately allocated mutable values are two values} -body {
+    codes {fn f(x):
+    if x:
+        return mutable_array_allocate(1)
+    if x == 3:
+        return mutable_array_allocate(1)
+    mutable_array_allocate(2)}
+} -result {}
+
+test warn-same-mutable-binding {the exact same mutable binding returned twice IS one value identity} -body {
+    shown {fn f(x):
+    m = mutable_array_allocate(1)
+    if x:
+        return m
+    if x == 3:
+        return m
+    mutable_array_allocate(2)}
+} -result {{the value of `m` is returned from 2 distinct exits @ 4:9 6:9}}
+
+test warn-alias-of-mutable-binding {an alias of a mutable binding is the same mutable value} -body {
+    shown {fn f(x):
+    m = mutable_array_allocate(1)
+    n = m
+    if x:
+        return m
+    if x == 3:
+        return n
+    mutable_array_allocate(2)}
+} -result {{the value of `m` is returned from 2 distinct exits @ 5:9 7:9}}
+
+# ---------------------------------------------------------------------------
+# Exits: final value, elif, loops, handlers, nesting, reachability
+
+test warn-final-expression-is-an-exit {POLICY: the final-expression value is a function exit, like a return at the end} -body {
+    shown {fn f(x):
+    if x:
+        return 0
+    0}
+} -result {{value `0` is returned from 2 distinct exits @ 3:9 4:5}}
+
+test warn-early-return-and-final-value {repeated early returns plus a different final value} -body {
+    shown {fn f(x):
+    if x < 0:
+        return 8
+    if x > 100:
+        return 8
+    9}
+} -result {{value `8` is returned from 2 distinct exits @ 3:9 5:9}}
+
+test warn-final-branches {the leaves of a final if/else are exits} -body {
+    shown {fn f(x):
+    if x == 1:
+        0
+    else:
+        0}
+} -result {{value `0` is returned from 2 distinct exits @ 3:9 5:9}}
+
+test warn-final-elif-chain {a final elif chain: each branch's value is an exit} -body {
+    shown {fn f(a, b, c):
+    if a:
+        4
+    elif b:
+        4
+    elif c:
+        4
+    else:
+        5}
+} -result {{value `4` is returned from 3 distinct exits @ 3:9 5:9 7:9}}
+
+test warn-not-an-exit-for-a-boolean-operator {a and b / a or b / not a are one expression, not branches the programmer wrote} -body {
+    list [codes {fn f(a, b):
+    a or b}] [codes {fn f(a, b):
+    a and b}] [codes {fn f(a):
+    not a}] [codes {fn f(a, b):
+    if a and b:
+        return true
+    not a}]
+} -result {{} {} {} {}}
+
+test warn-else-less-final-if {a final if with no else contributes only its written branch (the empty branch is unit)} -body {
+    codes {fn f(x):
+    if x:
+        0}
+} -result {}
+
+test warn-single-return-no-warning {one exit is never a warning} -body {
+    codes {fn f(x):
+    return 0}
+} -result {}
+
+test warn-elif-returns {elif participates through the normalized HIR; three returns, one group} -body {
+    shown {fn f(a, b, c):
+    if a:
+        return 4
+    elif b:
+        return 4
+    elif c:
+        return 4
+    else:
+        return 5}
+} -result {{value `4` is returned from 3 distinct exits @ 3:9 5:9 7:9}}
+
+test warn-return-in-loop {a function-level return inside a loop is a terminal exit} -body {
+    shown {fn f(xs):
+    loop x in xs:
+        if x == 1:
+            return 0
+    if xs == 3:
+        return 0
+    1}
+} -result {{value `0` is returned from 2 distinct exits @ 4:13 6:9}}
+
+test warn-return-in-counted-loop {the same through a counted loop} -body {
+    shown {fn f(n):
+    loop i from 0 to n:
+        if i == 3:
+            return 0
+    if n == 3:
+        return 0
+    1}
+} -result {{value `0` is returned from 2 distinct exits @ 4:13 6:9}}
+
+test warn-return-in-handler {a return inside an on-handler is a normal return of the enclosing function} -body {
+    shown {error Bad
+fn risky(n) -> int errors Bad:
+    if n < 0:
+        fail Bad
+    n
+fn f(n):
+    r = risky(n):
+        on Bad:
+            return -1
+    if r > 10:
+        return -1
+    r}
+} -result {{value `-1` is returned from 2 distinct exits @ 9:13 11:9}}
+
+test warn-failures-are-not-returns {fail and return are different completion kinds: never grouped} -body {
+    codes {error Bad
+fn f(x) -> int errors Bad:
+    if x < 0:
+        fail Bad
+    if x > 9:
+        fail Bad
+    if x == 5:
+        return 0
+    1}
+} -result {}
+
+test warn-nested-function-separation {an inner function's returns are the inner function's, never the outer's} -body {
+    shown {fn f(x):
+    fn g(y):
+        if y:
+            return 5
+        return 5
+    if x:
+        return g(true)
+    return 6}
+} -result {{value `5` is returned from 2 distinct exits @ 4:13 5:9}}
+
+test warn-nested-and-outer-groups-independent {outer and inner each get their own group} -body {
+    shown {fn f(x):
+    fn g(y):
+        if y:
+            return 5
+        return 5
+    if x:
+        return 5
+    return 5}
+} -result {{value `5` is returned from 2 distinct exits @ 4:13 5:9} {value `5` is returned from 2 distinct exits @ 7:9 8:5}}
+
+test warn-closure-groups {each closure gets its own group} -body {
+    shown {fn make(k):
+    fn pick(y):
+        if y:
+            return k
+        return k
+    pick
+fn other(k):
+    fn pick(y):
+        if y:
+            return k
+        return k
+    pick}
+} -result {{the value of `k` is returned from 2 distinct exits @ 4:13 5:9} {the value of `k` is returned from 2 distinct exits @ 10:13 11:9}}
+
+test warn-unreachable-duplicate {an exit proven unreachable is not part of any group} -body {
+    codes {fn f(a):
+    if a:
+        return 1
+    return 2
+    return 1}
+} -result {}
+
+test warn-unreachable-branch {an exit under a statically false condition is not part of a group} -body {
+    codes {fn f(x):
+    if 1 == 2:
+        return 7
+    if x:
+        return 7
+    8}
+} -result {}
+
+test warn-range-infeasible-exit {an exit under a branch the range facts prove infeasible is not an exit (completion proof's own pruning)} -body {
+    codes {fn f(x):
+    if x < 0:
+        if x > 5:
+            return 1
+        return 2
+    if x == 7:
+        return 1
+    3}
+} -result {}
+
+test warn-range-feasible-control {the same shape with a feasible inner branch is a warning} -body {
+    shown {fn f(x):
+    if x < 0:
+        if x < 5:
+            return 1
+        return 2
+    if x == 7:
+        return 1
+    3}
+} -result {{value `1` is returned from 2 distinct exits @ 4:13 7:9}}
+
+test warn-range-narrowed-by-earlier-exit {after `if x < 3: return`, a later `x < 2` can never hold: its return is not an exit} -body {
+    codes {fn f(x):
+    if x < 3:
+        return 1
+    if x < 2:
+        return 1
+    3}
+} -result {}
+
+test warn-recursive-function {a recursive function terminates; a tail call is not a direct value return} -body {
+    list [codes {fn f(n):
+    if n == 0:
+        return 1
+    return f(n - 1)}] [codes {fn f(n):
+    if n == 0:
+        return 1
+    if n == 1:
+        return 1
+    return f(n - 1)}]
+} -result {{} SAME-RETURN-VALUE}
+
+test warn-destructuring-and-unit {repeated unit exits are not reported (policy): explicit, bare, final and destructuring} -body {
+    list [codes {fn f(x):
+    if x:
+        return unit
+    if x == 3:
+        return unit
+    unit}] [codes {fn f(x):
+    if x:
+        return
+    if x == 3:
+        return
+    unit}] [codes {fn f(x):
+    if x == 1:
+        return 0
+    {a, b} = {a: 1, b: 2}}] [codes {fn f(x):
+    u = unit
+    if x:
+        return u
+    if x == 3:
+        return u
+    unit}]
+} -result {{} {} {} {}}
+
+test warn-method-sugar-is-an-ordinary-call {a method-call exit is a call: no identity} -body {
+    codes {fn get(x, k):
+    k
+fn f(x):
+    if x == 1:
+        return x.get(1)
+    if x == 2:
+        return x.get(1)
+    3}
+} -result {}
+
+# ---------------------------------------------------------------------------
+# Grouping
+
+test warn-three-exits-one-group {three matching exits are one diagnostic with two related locations} -body {
+    set warnings [warningsOf {invalid = 0
+fn f(a, b, c):
+    if a:
+        return invalid
+    elif b:
+        return invalid
+    elif c:
+        return invalid
+    else:
+        return 1}]
+    list [llength $warnings] [dict get [lindex $warnings 0] message] \
+        [llength [dict get [lindex $warnings 0] secondary]] \
+        [dict get [lindex $warnings 0] data exits]
+} -result {1 {value `0` (`invalid`) is returned from 3 distinct exits} 2 3}
+
+test warn-multiple-groups {A twice, B three times, C once: two warnings, none for C, ordered by first exit} -body {
+    shown {fn f(x):
+    if x == 1:
+        return 10
+    if x == 2:
+        return 20
+    if x == 3:
+        return 10
+    if x == 4:
+        return 20
+    if x == 5:
+        return 30
+    if x == 6:
+        return 20
+    40}
+} -result {{value `10` is returned from 2 distinct exits @ 3:9 7:9} {value `20` is returned from 3 distinct exits @ 5:9 9:9 13:9}}
+
+test warn-group-interleaved-with-final {groups count the final value too, in source order} -body {
+    shown {fn f(x):
+    if x == 1:
+        return 3
+    if x == 2:
+        return 4
+    if x == 3:
+        return 3
+    4}
+} -result {{value `3` is returned from 2 distinct exits @ 3:9 7:9} {value `4` is returned from 2 distinct exits @ 5:9 8:5}}
+
+# ---------------------------------------------------------------------------
+# Diagnostic representation, rendering and ordering
+
+test warn-record-shape {a warning record: stable code, neutral message, primary, secondary, data} -body {
+    set w [lindex [warningsOf {fn f(x):
+    if x:
+        return 0
+    return 0}] 0]
+    list [lsort [dict keys $w]] [dict get $w code] [dict get $w data function] \
+        [dict get $w data functionName] [dict get $w data identity]
+} -result {{code data message primary secondary} SAME-RETURN-VALUE e* f value} -match glob
+
+test warn-render {rendering: location, warning, neutral message, trailing code; one note per related location} -body {
+    set hir [surface::compile {fn f(x):
+    if x:
+        return 0
+    if x == 3:
+        return 0
+    return 0} t.bot -warnings default -warning-channel ""]
+    hir::warnings::render $hir [lindex [hir::warnings::of $hir] 0]
+} -result {t.bot:3:9: warning: value `0` is returned from 3 distinct exits (SAME-RETURN-VALUE)
+t.bot:5:9: note: also returned here
+t.bot:6:5: note: also returned here}
+
+test warn-message-is-neutral {the message states the fact and prescribes no rewrite} -body {
+    set text [join [lmap w [warningsOf {fn f(x):
+    if x:
+        return 0
+    return 0}] {dict get $w message}] \n]
+    set prescriptive 0
+    foreach word {combine remove else "early return" fail replace sentinel should consider instead} {
+        if {[string match -nocase *$word* $text]} {
+            incr prescriptive
+        }
+    }
+    list $text $prescriptive
+} -result {{value `0` is returned from 2 distinct exits} 0}
+
+test warn-ordering-by-location {warnings are ordered by source location, never by function or hash order} -body {
+    shown {fn late(x):
+    if x:
+        return 1
+    return 1
+fn early(x):
+    if x:
+        return 2
+    return 2}
+} -result {{value `1` is returned from 2 distinct exits @ 3:9 4:5} {value `2` is returned from 2 distinct exits @ 7:9 8:5}}
+
+test warn-deterministic {compiling the same source twice yields identical warnings} -body {
+    set source {fn b(x):
+    if x:
+        return 2
+    return 2
+fn a(x):
+    if x:
+        return 1
+    return 1
+fn c(x, y):
+    if x:
+        return y
+    return y}
+    expr {[warningsOf $source] eq [warningsOf $source]}
+} -result 1
+
+test warn-emission-channel {default mode emits rendered warnings on the given channel, in order} -body {
+    set path [makeFile {} warn-emission.txt]
+    set channel [open $path w]
+    set hir [surface::compile {fn f(x):
+    if x:
+        return 0
+    return 0} t.bot -warnings default -warning-channel $channel]
+    close $channel
+    set text [viewFile warn-emission.txt]
+    removeFile warn-emission.txt
+    list $text [expr {$text eq [hir::warnings::render $hir [lindex [hir::warnings::of $hir] 0]]}]
+} -result {{t.bot:3:9: warning: value `0` is returned from 2 distinct exits (SAME-RETURN-VALUE)
+t.bot:4:5: note: also returned here} 1}
+
+# ---------------------------------------------------------------------------
+# Global policy: default / off / error
+
+set ::policySource {fn f(x):
+    if x:
+        return 0
+    return 0
+f(true)}
+
+test warn-mode-default {default: compiles, and the program carries the SAME-RETURN-VALUE warning} -body {
+    set hir [compileWith $::policySource default]
+    list [lmap w [hir::warnings::of $hir] {dict get $w code}] [rejection $::policySource default]
+} -result {SAME-RETURN-VALUE compiled}
+
+test warn-mode-off {off: compiles, and nothing is reported} -body {
+    set hir [compileWith $::policySource off]
+    list [hir::warnings::of $hir] [dict exists $hir warnings]
+} -result {{} 0}
+
+test warn-mode-error {error: compilation is rejected with the warning's own stable code} -body {
+    lassign [rejection $::policySource error] code message
+    list $code [regexp {^t\.bot:3:9: value `0` is returned from 2 distinct exits \(also at t\.bot:4:5\)$} $message]
+} -result {{CORE SEMANTIC SAME-RETURN-VALUE} 1}
+
+test warn-mode-error-clean-program {error mode accepts a program with no warning} -body {
+    rejection {fn f(x):
+    if x:
+        return 0
+    return 1
+f(true)} error
+} -result compiled
+
+test warn-mode-default-is-the-default {no option and no environment setting means warnings on, as warnings (never as errors)} -body {
+    set saved $::env(BOTLISH_WARNINGS)
+    unset ::env(BOTLISH_WARNINGS)
+    try {
+        set hir [surface::compile $::policySource t.bot -warning-channel ""]
+        llength [hir::warnings::of $hir]
+    } finally {
+        set ::env(BOTLISH_WARNINGS) $saved
+    }
+} -result 1
+
+test warn-environment-default {BOTLISH_WARNINGS is only the default for a compilation given no -warnings; an option wins} -body {
+    set saved $::env(BOTLISH_WARNINGS)
+    try {
+        set results {}
+        foreach mode {default off error} {
+            set ::env(BOTLISH_WARNINGS) $mode
+            lappend results [catch {surface::compile $::policySource t.bot -warning-channel ""} message] \
+                [catch {surface::compile $::policySource t.bot -warnings off -warning-channel ""}]
+        }
+        set results
+    } finally {
+        set ::env(BOTLISH_WARNINGS) $saved
+    }
+} -result {0 0 0 0 1 0}
+
+test warn-unknown-mode {a mode outside default/off/error is a plain usage error} -body {
+    surface::compile $::policySource t.bot -warnings -Wall -warning-channel ""
+} -returnCodes error -match glob -result {unknown warnings mode "-Wall" (known: default, off, error)}
+
+test warn-no-fine-grained-options {there are no per-warning options: -Wsame-return-value is not an option} -body {
+    surface::compile $::policySource t.bot -Wno-same-return-value 1
+} -returnCodes error -match glob -result {*unknown option "-Wno-same-return-value"*}
+
+test warn-error-promotion-identity {the promoted error keeps the code and the message the warning has} -body {
+    set hir [compileWith $::policySource default]
+    set w [lindex [hir::warnings::of $hir] 0]
+    lassign [rejection $::policySource error] code message
+    list [lindex $code end] [dict get $w code] \
+        [string match "*[dict get $w message]*" $message]
+} -result {SAME-RETURN-VALUE SAME-RETURN-VALUE 1}
+
+test warn-off-runs-no-warning-pass {warnings off does not execute the warning pass at all (default does)} -body {
+    hir::warnings::resetStats
+    compileWith $::policySource off
+    set afterOff [hir::warnings::stats]
+    compileWith $::policySource default
+    set afterDefault [hir::warnings::stats]
+    catch {compileWith $::policySource error}
+    set afterError [hir::warnings::stats]
+    list $afterOff $afterDefault $afterError
+} -result {{} {SAME-RETURN-VALUE 1} {SAME-RETURN-VALUE 2}}
+
+test warn-off-runs-no-warning-pass-via-trace {an execution trace on the pass proves it is not invoked when off} -body {
+    set ::passCalls 0
+    trace add execution hir::warnings::SameReturnValue enter {apply {{args} {incr ::passCalls}}}
+    try {
+        compileWith $::policySource off
+        set off $::passCalls
+        compileWith $::policySource default
+        set on $::passCalls
+    } finally {
+        trace remove execution hir::warnings::SameReturnValue enter {apply {{args} {incr ::passCalls}}}
+    }
+    list $off $on
+} -result {0 1}
+
+test warn-compilation-with-errors-has-no-warnings {a program the compiler rejects is never warned about} -body {
+    set hir [surface::compile {fn f(x):
+    if x:
+        return 0
+    return 0
+nothing} t.bot -strict 0 -warnings default -warning-channel ""]
+    list [llength [hir::diagnostics $hir]] [hir::warnings::of $hir]
+} -result {1 {}}
+
+# ---------------------------------------------------------------------------
+# Warnings never change what compiles
+
+test warn-hir-identical-across-modes {the HIR is the same under every mode (warnings are a side table nothing reads)} -body {
+    set off [compileWith $::policySource off]
+    set on [compileWith $::policySource default]
+    list [expr {$off eq [dict remove $on warnings]}] \
+        [expr {[hir::format $off] eq [hir::format $on]}] \
+        [expr {[hir::lower $off] eq [hir::lower $on]}]
+} -result {1 1 1}
+
+test warn-nir-identical-across-modes {native IR is identical with warnings off and on} -body {
+    set off [compileWith $::policySource off]
+    set on [compileWith $::policySource default]
+    expr {[native::nir $off] eq [native::nir $on]}
+} -result 1
+
+test warn-report-independent {native::report, a machine-readable analysis of HIR, neither reads nor changes with the warnings side table} -body {
+    set off [compileWith $::policySource off]
+    set on [compileWith $::policySource default]
+    expr {[native::report $off] eq [native::report $on]}
+} -result 1
+
+test warn-error-mode-accepts-same-program-otherwise {a program with no warning compiles identically under error mode} -body {
+    set clean {fn f(x):
+    if x:
+        return 0
+    return 1
+f(true)}
+    set off [compileWith $clean off]
+    expr {$off eq [dict remove [compileWith $clean error] warnings]
+        && $off eq [dict remove [compileWith $clean default] warnings]
+        && [dict get [compileWith $clean default] warnings] eq {}}
+} -result 1
+
+test warn-policy-is-per-compilation {interleaved compilations under different modes never leak a mode} -body {
+    set a [compileWith $::policySource off]
+    set b [compileWith $::policySource default]
+    set c [catch {compileWith $::policySource error}]
+    set d [compileWith $::policySource off]
+    set e [compileWith $::policySource default]
+    list [llength [hir::warnings::of $a]] [llength [hir::warnings::of $b]] $c \
+        [llength [hir::warnings::of $d]] [llength [hir::warnings::of $e]]
+} -result {0 1 1 0 1}
+
+# ---------------------------------------------------------------------------
+# Backend independence: warnings are discovered before a backend is chosen
+
+test warn-backend-independent {every backend runs the program, and sees the one warning set} -body {
+    set hir [compileWith $::policySource default]
+    set outcomes [lmap backend $::allBackends {outcomeUnderHir $backend $hir}]
+    list [llength [lsort -unique [lmap o $outcomes {lindex $o 1}]]] [lindex $outcomes 0 1] \
+        [llength [hir::warnings::of $hir]]
+} -result {1 0 1}
+
+test warn-backend-independent-off {the same program runs identically on every backend with warnings off} -body {
+    set hir [compileWith $::policySource off]
+    lsort -unique [lmap backend $::allBackends {lindex [outcomeUnderHir $backend $hir] 1}]
+} -result 0
+
+test warn-error-stops-before-backend {error mode rejects before any backend lowers anything} -body {
+    set calls 0
+    foreach command {native::evalHir native::prepareHir hir::lower core::compiler::evalHir} {
+        trace add execution $command enter {apply {{args} {incr ::lowerCalls}}}
+    }
+    set ::lowerCalls 0
+    try {
+        catch {compileWith $::policySource error}
+    } finally {
+        foreach command {native::evalHir native::prepareHir hir::lower core::compiler::evalHir} {
+            trace remove execution $command enter {apply {{args} {incr ::lowerCalls}}}
+        }
+    }
+    set ::lowerCalls
+} -result 0
+
+test warn-cli-modes {main.tcl: default prints the warning on stderr and runs; off is silent; error rejects before running} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::policySource warn-cli.bot]
+    set results {}
+    foreach mode {default off error} {
+        set status [catch {exec [info nameofexecutable] $main -warnings $mode $path 2>@1} out]
+        lappend results [list $mode $status \
+            [regexp {warning: value `0` is returned from 2 distinct exits \(SAME-RETURN-VALUE\)} $out] \
+            [regexp {value: true|value: 0} $out] \
+            [regexp {CORE SEMANTIC SAME-RETURN-VALUE} $out]]
+    }
+    removeFile warn-cli.bot
+    set results
+} -result {{default 0 1 1 0} {off 0 0 1 0} {error 1 0 0 1}}
+
+test warn-cli-stdout-clean {the warning goes to stderr: program stdout carries no warning text} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::policySource warn-cli-stdout.bot]
+    set stderrPath [makeFile {} warn-cli-stderr.txt]
+    set out [exec [info nameofexecutable] $main -warnings default $path 2> $stderrPath]
+    set err [viewFile warn-cli-stderr.txt]
+    removeFile warn-cli-stdout.bot
+    removeFile warn-cli-stderr.txt
+    list [string match *warning* $out] [string match *SAME-RETURN-VALUE* $err]
+} -result {0 1}
+
+test warn-cli-backend-independent {main.tcl prints the same warning text whichever backend then runs the program} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::policySource warn-cli-backends.bot]
+    set seen {}
+    foreach backend $::allBackends {
+        catch {exec [info nameofexecutable] $main -backend $backend -warnings default $path 2>@1} out
+        lappend seen [lsearch -all -inline -glob [split $out \n] *SAME-RETURN-VALUE*]
+        lappend seen [expr {[string first "value: " $out] >= 0}]
+    }
+    removeFile warn-cli-backends.bot
+    list [llength [lsort -unique [lmap {w ran} $seen {set w}]]] [lsort -unique [lmap {w ran} $seen {set ran}]]
+} -result {1 1}
+
+test warn-error-cli-stops-before-backend {main.tcl -warnings error on a native backend rejects without lowering or running anything} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::policySource warn-cli-error.bot]
+    catch {exec [info nameofexecutable] $main -backend cranelift -warnings error $path 2>@1} out
+    removeFile warn-cli-error.bot
+    list [string match "*value:*" $out] [regexp {\(CORE SEMANTIC SAME-RETURN-VALUE\)} $out]
+} -result {0 1}
+
+# A short run of the generated-program fuzzer (audit/same-return-value/tools/
+# fuzz.tcl: constructed exits with an independent oracle, all three modes);
+# the audit directory carries the long runs.
+test warn-fuzz-smoke {60 generated functions: predicted groups warn, off is silent, error rejects iff warned} -constraints executableAot -body {
+    set fuzz [file join $::projectRoot audit same-return-value tools fuzz.tcl]
+    exec [info nameofexecutable] $fuzz 60 1
+} -result {seeds 60 (from 1): * with warnings, * without; failures 0; extra groups 0} -match glob
+
+# ---------------------------------------------------------------------------
+# Modules: locations point into the module's own file
+
+test warn-module-location {a warning in a module function located inside a loop points at the module file} -body {
+    set saved $::core::libraryDir
+    set dir [makeDirectory warn-scratch-[pid]]
+    set ::core::libraryDir $dir
+    try {
+        set channel [open [file join $dir wmod.bot] w]
+        puts -nonewline $channel {namespace wmod
+
+fn scan(n):
+    loop i from 0 to n:
+        if i == 3:
+            return false
+        if i == 4:
+            return false
+    false
+}
+        close $channel
+        set main [file join $dir main.bot]
+        set channel [open $main w]
+        puts -nonewline $channel {wmod::scan(10)
+}
+        close $channel
+        set hir [surface::readProgramFile $main -warnings default -warning-channel ""]
+        lmap w [hir::warnings::of $hir] {
+            lmap o [list [dict get $w primary] {*}[dict get $w secondary]] {
+                string map [list $dir/ {}] [hir::originLocation $hir $o]
+            }
+        }
+    } finally {
+        set ::core::libraryDir $saved
+        removeDirectory warn-scratch-[pid]
+    }
+} -result {{wmod.bot:6:13 wmod.bot:8:13 wmod.bot:9:5}}
+
+cleanupTests

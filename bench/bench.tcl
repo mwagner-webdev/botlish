@@ -207,7 +207,7 @@ set disagreements 0
 foreach path $files {
     # One HIR, two consumers: the Tcl backends run the core IR it lowers to;
     # native compiles the HIR itself (DIRECT-HIR-NATIVE-PATH.md).
-    set hir [surface::readProgramFile $path]
+    set hir [surface::readProgramFile $path -warnings off]
     set program [hir::lower $hir]
     set base [string map {- _} [file rootname [file tail $path]]]
 

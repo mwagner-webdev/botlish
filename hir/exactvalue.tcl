@@ -388,6 +388,109 @@ proc hir::exact::Equal {hir a b} {
     return [core::value::equal $va $vb]
 }
 
+# ---------------------------------------------------------------------------
+# Value identity: "provably the same value" (WARNINGS-SAME-RETURN.md)
+#
+# The one question two consumers keep asking -- do expressions A and B denote
+# the same value? -- answered only from facts this file already derives:
+#
+#   IDENTITY of E is one of
+#     {value V}     E is exactly the immutable core value V (Of, then Value:
+#                   a scalar, or a List every element of which is exact)
+#     {binding B}   E reads the value of the immutable binding B, after
+#                   following aliases (`y = x` makes y and x one identity):
+#                   whatever B holds, an alias of it holds the same one --
+#                   mutable values included, since the *binding* is the
+#                   identity, never what the construction looks like
+#     ""            nothing is proven
+#
+# Two expressions are the SAME value when their identities are both proven
+# and equal: structurally equal exact values, or the same alias root. This is
+# deliberately weaker than semantic equality -- it never reads a runtime `==`,
+# never compares two calls (even textually identical ones: a call may have
+# effects or yield distinct values), never compares two constructions of a
+# mutable value -- and exactly as strong as the facts above already are.
+proc hir::exact::Identity {hir e} {
+    set fact [Of $hir $e]
+    if {$fact ne ""} {
+        set v [Value $hir $fact]
+        if {$v ne ""} {
+            return [list value $v]
+        }
+    }
+    set root [AliasRoot $hir $e]
+    return [expr {$root eq "" ? "" : [list binding $root]}]
+}
+
+# The BindingId E's value is the value of, following immutable aliases, or "".
+# A parameter or loop element is its own root; a local is its own root unless
+# its one `bind` is itself a read of another binding. Root and ambient
+# bindings (host-held, or constants Of already answers) have no identity here.
+proc hir::exact::AliasRoot {hir e} {
+    variable maxSteps
+    for {set steps 0} {$steps < $maxSteps} {incr steps} {
+        set node [dict get $hir exprs $e]
+        switch -- [dict get $node kind] {
+            bind {
+                if {[dict get $node duplicate]} {
+                    return ""
+                }
+                set e [dict get $node value]
+            }
+            ref {
+                set b [dict get $node binding]
+                if {$b eq ""} {
+                    return ""
+                }
+                set binding [dict get $hir bindings $b]
+                switch -- [dict get $binding kind] {
+                    param {
+                        return $b
+                    }
+                    local {
+                        set declaration [dict get $binding declaredBy]
+                        if {$declaration eq ""} {
+                            return ""
+                        }
+                        set bind [dict get $hir exprs $declaration]
+                        if {[dict get $bind kind] ne "bind" || [dict get $bind duplicate]} {
+                            return ""
+                        }
+                        set value [dict get $hir exprs [dict get $bind value]]
+                        if {[dict get $value kind] ne "ref"} {
+                            return $b
+                        }
+                        set e [dict get $bind value]
+                    }
+                    default {
+                        return ""
+                    }
+                }
+            }
+            default {
+                return ""
+            }
+        }
+    }
+    return ""
+}
+
+# 1 if identities A and B (Identity's results) are both proven and equal.
+proc hir::exact::SameIdentity {a b} {
+    if {$a eq "" || $b eq "" || [lindex $a 0] ne [lindex $b 0]} {
+        return 0
+    }
+    if {[lindex $a 0] eq "value"} {
+        return [core::value::equal [lindex $a 1] [lindex $b 1]]
+    }
+    return [expr {[lindex $a 1] eq [lindex $b 1]}]
+}
+
+# 1 if expressions A and B are provably the same value.
+proc hir::exact::SameValue {hir a b} {
+    return [SameIdentity [Identity $hir $a] [Identity $hir $b]]
+}
+
 # FACT as text, rendered as a *fact*, never as a type:
 #   exact-list[str("x"), int(7)]   int(7)   str("x")
 proc hir::exact::describe {hir fact} {

@@ -53,6 +53,13 @@
 #                section scope (surface/modules.tcl, hir/resolve.tcl's
 #                ResolveQualifiedRef); absent for a program with no modules
 #   diagnostics  list of {kind KIND message TEXT expr ExprId}
+#   warnings     compiler-internal side table of compiler warnings
+#                (hir/warnings.tcl, WARNINGS-SAME-RETURN.md): a list of
+#                {code message primary secondary data} records, attached by the
+#                source frontend after every analysis ran and before any backend
+#                does, only when warnings are on. Diagnostics over facts: no
+#                analysis, lowering or backend reads it, hir::format does not
+#                print it, and a program compiles to the same HIR without it.
 #   semantic     compiler-internal side table of opportunistic semantic
 #                function instances (semantic.tcl, OPPORTUNISTIC-SEMANTIC-
 #                INSTANCES.md): instances, keys, calls (a call ExprId, in the
@@ -544,6 +551,17 @@ proc hir::binding {hir b} { return [dict get $hir bindings $b] }
 proc hir::symbol {hir y}  { return [dict get $hir symbols $y] }
 proc hir::sourceFile {hir f} { return [dict get $hir files $f] }
 
+# "FILE:LINE:COLUMN" of a source ORIGIN in HIR, or the origin itself (an
+# origin that is not a source span, e.g. {ir PATH}).
+proc hir::originLocation {hir origin} {
+    if {[lindex $origin 0] ne "file"} {
+        return $origin
+    }
+    set path [dict get [sourceFile $hir [lindex $origin 1]] path]
+    set fields [lrange $origin 2 end]
+    return "$path:[dict get $fields line]:[dict get $fields column]"
+}
+
 # The type form of TypeId T.
 proc hir::type {hir t} {
     return [dict get $hir types $t]
@@ -779,7 +797,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {syntax resolve refcheck hygiene sourcetypes structs errordecls types exactvalue signatures modulebinding refine lower format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep} {
+    foreach file {syntax resolve refcheck hygiene sourcetypes structs errordecls types exactvalue signatures modulebinding refine lower format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep warnings} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

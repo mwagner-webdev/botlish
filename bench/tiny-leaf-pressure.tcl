@@ -118,7 +118,7 @@ proc tinyLeafPressure::source {ops n dynamic {style chain}} {
 }
 
 proc tinyLeafPressure::hirOf {ops n dynamic {style chain}} {
-    return [surface::compile [source $ops $n $dynamic $style] t.bot -strict 0]
+    return [surface::compile [source $ops $n $dynamic $style] t.bot -strict 0 -warnings off]
 }
 
 # {VALUE-ON VALUE-OFF CALLS-ON CALLS-OFF FUNCS-ON FUNCS-OFF BYTES-ON

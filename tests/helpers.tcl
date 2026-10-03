@@ -56,6 +56,19 @@ proc ::testNativeSequence {exprs env} {
 core::registerBackend cranelift ::testNativeSequence {::testNativeProgram {}}
 core::registerBackend cranelift-generic ::testNativeSequence {::testNativeProgram 0}
 
+# Compiler warnings (hir/warnings.tcl, WARNINGS-SAME-RETURN.md): a test that is
+# not about warnings must not write them to stderr (tcltest counts that as a
+# test-file error, and `exec main.tcl` fails on it), so the harness's process
+# default is `off`. It is only the *default* for a compilation given no
+# -warnings option -- and, through the environment, for the main.tcl children
+# the executable tests spawn. tests/warnings.test passes its policy explicitly
+# on every compile, so it exercises default, off and error regardless; the
+# user-facing default mode is also exercised by its main.tcl cases (which pass
+# -warnings explicitly) and by CI's plain `main.tcl` corpus runs.
+if {![info exists ::env(BOTLISH_WARNINGS)]} {
+    set ::env(BOTLISH_WARNINGS) off
+}
+
 # The backend under test: CORE_BACKEND=interp (default), compile or cranelift.
 if {[info exists ::env(CORE_BACKEND)]} {
     core::useBackend $::env(CORE_BACKEND)

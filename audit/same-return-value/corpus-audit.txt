@@ -1,0 +1,19 @@
+1. examples/stdlib/csv_records.bot:325:9: SAME-RETURN-VALUE: the value of `index` is returned from 2 distinct exits   (first seen compiling csv_records.bot)
+     examples/stdlib/csv_records.bot:325:9: return index
+     examples/stdlib/csv_records.bot:328:9: return index
+2. examples/stdlib/hashtable.bot:187:9: SAME-RETURN-VALUE: the value of `index` is returned from 2 distinct exits   (first seen compiling hashtable.bot)
+     examples/stdlib/hashtable.bot:187:9: return index
+     examples/stdlib/hashtable.bot:190:9: return index
+3. lib/web.bot:163:21: SAME-RETURN-VALUE: value `false` is returned from 4 distinct exits   (first seen compiling uri-steady.bot)
+     lib/web.bot:163:21: return false
+     lib/web.bot:165:21: return false
+     lib/web.bot:170:21: return false
+     lib/web.bot:171:9: false
+4. lib/web.bot:175:9: SAME-RETURN-VALUE: value `false` is returned from 3 distinct exits   (first seen compiling uri-steady.bot)
+     lib/web.bot:175:9: false
+     lib/web.bot:178:13: false
+     lib/web.bot:183:17: false
+programs compiled: 36 of 38
+did not compile standalone: 09-mutual-recursion.bot (CORE SEMANTIC UNBOUND)
+did not compile standalone: 10-duplicate-binding.bot (CORE SEMANTIC DUPLICATE)
+distinct SAME-RETURN-VALUE warnings: 4

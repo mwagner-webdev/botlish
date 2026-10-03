@@ -268,7 +268,7 @@ foreach name $benchFiles {
     set summaryPath [file join $outdir bench "$base.summary.txt"]
     set status [dict create source "bench/$name" kind unknown]
     if {[catch {
-        set hir [surface::readProgramFile $path]
+        set hir [surface::readProgramFile $path -warnings off]
     } err]} {
         dict set status kind failed
         dict set status detail "could not load/build HIR: $err"
@@ -295,7 +295,7 @@ foreach name [corpus::names] {
     set summaryPath [file join $outdir examples-stdlib "$name.summary.txt"]
     set status [dict create source "examples/stdlib/$name.bot" kind unknown]
     if {[catch {
-        set hir [surface::readProgramFile $path]
+        set hir [surface::readProgramFile $path -warnings off]
     } err]} {
         dict set status kind failed
         dict set status detail "could not load/build HIR: $err"

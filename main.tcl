@@ -3,7 +3,15 @@
 #   tclsh9.0 main.tcl [-backend interp|compile|cranelift|cranelift-generic] [-code] [-hir] [-ast]
 #                    [-aot] [-aot-data] [-aot-spec] [-emit-nir] [-emit-clif]
 #                    [-emit-native-executable] [-argv TEXT]... [-argv-hex HEX]...
-#                    [-argv-none] [FILE.bot|FILE.hir|FILE.ir ...]
+#                    [-argv-none] [-warnings default|off|error]
+#                    [FILE.bot|FILE.hir|FILE.ir ...]
+#
+# -warnings sets the one global compiler-warning policy of a .bot compilation
+# (WARNINGS-SAME-RETURN.md): default prints warnings on stderr and runs the
+# program; off runs no warning pass (generated source, benchmarking); error
+# rejects a program that has a warning, with the warning's own code
+# (SAME-RETURN-VALUE), before any backend runs. There are no per-warning
+# switches (no -Wfoo): that is intentional.
 #
 # Runs the given program files (default: every examples/*.ir) and prints
 # each program's value, with runtime evidence shown as "text"#{Type}. With
@@ -61,7 +69,7 @@ proc probeValues {value} {
 }
 
 proc runFile {path showCode showHir showAst showAot showNative} {
-    global backend nativeBackends
+    global backend nativeBackends warnings
     puts "== [file tail $path] ($backend)"
     set hir ""
     set extension [file extension $path]
@@ -81,7 +89,7 @@ proc runFile {path showCode showHir showAst showAot showNative} {
     if {$extension in {.hir .bot}} {
         if {$extension eq ".hir"} {
             set hir [hir::readFile $path]
-        } elseif {[catch {surface::readProgramFile $path} hir options]} {
+        } elseif {[catch {surface::readProgramFile $path -warnings $warnings} hir options]} {
             puts "   error: $hir ([dict get $options -errorcode])"
             return 1
         }
@@ -156,9 +164,10 @@ proc runFile {path showCode showHir showAst showAot showNative} {
 }
 
 proc emitExecutable {path} {
+    global warnings
     if {[catch {
         switch -- [file extension $path] {
-            .bot { set hir [surface::readProgramFile $path] }
+            .bot { set hir [surface::readProgramFile $path -warnings $warnings] }
             .hir { set hir [hir::readFile $path] }
             default { throw {NATIVE AOT INPUT} "expected a .bot or .hir input file (native executables are built from HIR, never from core IR text): $path" }
         }
@@ -174,6 +183,7 @@ proc emitExecutable {path} {
 set nativeBackends {cranelift cranelift-generic}
 set backend [core::useBackend]
 set files {}
+set warnings [hir::warnings::defaultMode]
 set showCode 0
 set showHir 0
 set showAst 0
@@ -196,6 +206,13 @@ for {set i 0} {$i < [llength $argv]} {incr i} {
                 exit 2
             }
         }
+        -warnings {
+            set warnings [lindex $argv [incr i]]
+            if {$warnings ni {default off error}} {
+                puts stderr "unknown warnings mode \"$warnings\" (known: default off error)"
+                exit 2
+            }
+        }
         -code    { set showCode 1 }
         -hir     { set showHir 1 }
         -ast     { set showAst 1 }
@@ -215,7 +232,13 @@ for {set i 0} {$i < [llength $argv]} {incr i} {
             }
         }
         -argv-none { set injectedArgv {}; set injectedArgvGiven 1 }
-        default  { lappend files $arg }
+        default  {
+            if {[string match -* $arg]} {
+                puts stderr "unknown option \"$arg\""
+                exit 2
+            }
+            lappend files $arg
+        }
     }
 }
 if {$files eq ""} {

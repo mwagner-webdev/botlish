@@ -204,9 +204,9 @@ if {$programs eq ""} {
 
 foreach name $programs {
     if {$name in [corpus::names]} {
-        reportProgram $name [surface::readProgramFile [corpus::path $name]]
+        reportProgram $name [surface::readProgramFile [corpus::path $name] -warnings off]
     } elseif {[file exists [file join $root examples stdlib $name.bot]]} {
-        reportProgram $name [surface::readProgramFile [file join $root examples stdlib $name.bot]]
+        reportProgram $name [surface::readProgramFile [file join $root examples stdlib $name.bot] -warnings off]
     } else {
         puts "unknown program: $name"
     }

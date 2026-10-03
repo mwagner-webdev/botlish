@@ -60,7 +60,7 @@ lassign $argv path outdir
 file mkdir $outdir
 
 if {[file extension $path] eq ".bot"} {
-    set hir [surface::readProgramFile $path]
+    set hir [surface::readProgramFile $path -warnings off]
 } else {
     # core IR text is read into HIR like any other input notation; native
     # compilation starts from that HIR (DIRECT-HIR-NATIVE-PATH.md).
