@@ -33,10 +33,13 @@ Botlish Int
   carries what) and no syscall. Natively it is a helper call whose body is a
   seven-register inline-asm `syscall`; the Tcl backends refuse it with an
   intentional `NATIVE-ONLY` error.
-* The canonical form is **zero-allocation**: `register64(39)` is one register
-  move, the register struct is never built, the result `Register64` is never
-  built, and 1001 calls of `raw_getpid()` plus 1001 conversions allocate
-  nothing (`native::allocationReport`: 0 objects).
+* The canonical form is **zero-allocation and check-free**: the compiled
+  `register64` instance for a proven constant is a single `retmulti` of its
+  argument (no comparison, no fail path, no BigInt -- the call to it remains,
+  since tiny-leaf inlining does not take functions with `if`/`fail`), the
+  register struct is never built, the result `Register64` is never built,
+  and 1001 calls of `raw_getpid()` plus 1001 conversions allocate nothing
+  (`native::allocationReport`: 0 objects).
 * **Evidence of a real syscall**: the pid a standalone executable prints is
   exactly the pid its launching Tcl process sees for it; an in-process JIT
   run returns exactly the pid of its driver process; the executable's machine
@@ -528,12 +531,63 @@ typed parameter and `register64(to_int(r))`
 (`audit/linux-x86-64-syscall/fuzz-result.txt`):
 
 ```
-<<FUZZ>>
+$ tclsh9.0 audit/linux-x86-64-syscall/tools/fuzz.tcl -n 200 -seed 1
+register64-fuzz programs 200 values 40000 out-of-range 9975 constant-checks 2000 failures 0
+    (interp, compile, cranelift-generic, cranelift)
+
+$ tclsh9.0 audit/linux-x86-64-syscall/tools/fuzz.tcl -n 30 -seed 5001 -gc-stress 1 \
+      -backends "cranelift-generic cranelift"
+register64-fuzz programs 30 values 6000 out-of-range 1499 constant-checks 300 failures 0
 ```
+
+Plus the in-suite seeded fuzz (3 x 120 values on four backends, one seed
+again under GC stress): 0 failures.
 
 ## Regression
 
-<<REGRESSION>>
+All on the final tree (this milestone merged with the then-current `main`,
+which had gained flag parameters), Linux x86-64, Tcl 9.0.1, rustc 1.97:
+
+| run | result |
+|---|---|
+| `CORE_BACKEND=interp tclsh9.0 tests/all.tcl` | 5047 tests: 5047 passed, 0 failed (18m35s) |
+| `CORE_BACKEND=compile tclsh9.0 tests/all.tcl` | 5047 tests: 5043 passed, 4 skipped (the existing `coreScoping` constraint), 0 failed |
+| `BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/all.tcl` (interp) | 5047 tests: 5047 passed, 0 failed |
+| `tclsh9.0 tests/native-coverage.tcl` | 5081 tests on cranelift: 2131 native, 2821 independent, 69 passed-partial, 60 unsupported (all pre-existing test-only natives and constructs), **0 failed** |
+| `cargo test --release` | 151 + 28 passed, 0 failed |
+| `tclsh9.0 main.tcl -backend interp` / `compile`, and CI's cranelift example list | all values as before (interp output byte-identical to the baseline) |
+
+Before the merge, the same branch also passed every suite; the only failures
+ever seen were the expected pins listed above (nested namespaces, the dead
+comparisons), updated with the change.
+
+## Review
+
+The change was adversarially reviewed by four independent reviewers
+(lowering and escape-analysis soundness; the Rust boundary, codegen and GC;
+the front end and the static contract; requirements and test quality), and
+each finding was checked by a separate skeptic. Fixed as a result:
+
+* A register literal with a field that cannot complete (type `never`)
+  skipped the contract check entirely, and native lowering then read
+  registers from unproven values (a crash); the contract is now checked
+  field by field.
+* A `-strict 0` program that broke the contract was compiled anyway (a
+  syscall with a defaulted rax, or an unproven read); it now replays the
+  diagnostic at run time. The helper's non-word path is a TYPE error rather
+  than an internal bug for the same reason.
+* Tests made sharper: the module-binding test now also pins the native's own
+  classification; the machine-code test simulates the boundary's register
+  routing instead of checking set membership; a new test resolves the
+  helper's calls through the GOT to prove it reaches the inline-asm
+  boundary and never libc's `syscall(3)`; the syscall path's zero allocation
+  and the bound-register-struct frontier are pinned; the example file runs;
+  environment variables a test sets are restored (a suite-wide GC-stress run
+  keeps its stress). A big-constant fold that was broader than intended
+  (it folded range-derived points, changing two unrelated pinned tests) was
+  narrowed to source constant expressions.
+* Kept deliberately: two legacy test names (`...-still-emits-both-checks`)
+  that the M5/M6 reports cite, with their descriptions updated, as M6 did.
 
 ## Milestone report
 
