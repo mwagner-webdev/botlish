@@ -1,6 +1,6 @@
 # setcontains-equality-total.test -- M3
 # (M3-EQUALITY-TOTAL-SETCONTAINS-EFFECT.md): SetContains's generic form
-# (immutable_set_contains -> op setcontains -> rt_set_contains) is
+# (immutable_set::contains -> op setcontains -> rt_set_contains) is
 # unconditionally may_error, because ordinary Botlish equality is undefined
 # for Block/Native/MutableArray operands (MINIMAL-IMMUTABLE-SET.md's own
 # "Membership semantics"). At a particular call site, though, the set's own
@@ -98,9 +98,9 @@ set ::byteDecl "type Byte = Int in 0..255\n\nfn byteA() -> Byte:\n    97\n\nfn b
 
 test setcontains-total-byte {ImmutableSet[Byte] x Byte: the principal M3 acceptance case -- setcontainstotal, contains_byte becomes may_error=false} -body {
     set text [format {%sfn contains_byte(s: ImmutableSet[Byte], b: Byte) -> Bool:
-    immutable_set_contains(s, b)
+    immutable_set::contains(s, b)
 
-contains_byte(immutable_set_from_list([byteA(), byteB()]), byteA())} $::byteDecl]
+contains_byte(immutable_set::from_list([byteA(), byteB()]), byteA())} $::byteDecl]
     set nirText [nirOf $text]
     list [regexp {op setcontainstotal} $nirText] [regexp {op setcontains } $nirText] \
         [string match {*may_error=false*} [calleeEffectLine $text contains_byte]]
@@ -108,9 +108,9 @@ contains_byte(immutable_set_from_list([byteA(), byteB()]), byteA())} $::byteDecl
 
 test setcontains-total-int {ImmutableSet[Int] x Int: Byte is not name-special-cased -- plain Int qualifies the identical way, through hir::types::IsEqualityTotal alone} -body {
     set text {fn contains_int(s: ImmutableSet[int], x: int) -> Bool:
-    immutable_set_contains(s, x)
+    immutable_set::contains(s, x)
 
-contains_int(immutable_set_from_list([1, 2, 3]), 2)}
+contains_int(immutable_set::from_list([1, 2, 3]), 2)}
     set nirText [nirOf $text]
     list [regexp {op setcontainstotal} $nirText] \
         [string match {*may_error=false*} [calleeEffectLine $text contains_int]]
@@ -118,9 +118,9 @@ contains_int(immutable_set_from_list([1, 2, 3]), 2)}
 
 test setcontains-total-source-defined-domain {a source-defined bounded Int domain other than Byte (Small = Int in 0..10) qualifies too -- the proof derives from kindOf collapsing any refined int domain to plain int, never a hard-coded "Byte" name (spec items 8, 22, 59)} -body {
     set text [format {%sfn contains_small(s: ImmutableSet[Small], x: Small) -> Bool:
-    immutable_set_contains(s, x)
+    immutable_set::contains(s, x)
 
-contains_small(immutable_set_from_list([one()]), one())} $::smallDecl]
+contains_small(immutable_set::from_list([one()]), one())} $::smallDecl]
     set nirText [nirOf $text]
     list [regexp {op setcontainstotal} $nirText] \
         [string match {*may_error=false*} [calleeEffectLine $text contains_small]]
@@ -128,33 +128,33 @@ contains_small(immutable_set_from_list([one()]), one())} $::smallDecl]
 
 test setcontains-total-bool {ImmutableSet[Bool] x Bool qualifies (spec item 10)} -body {
     set text {fn contains_bool(s: ImmutableSet[bool], x: bool) -> Bool:
-    immutable_set_contains(s, x)
+    immutable_set::contains(s, x)
 
-contains_bool(immutable_set_from_list([true, false]), true)}
+contains_bool(immutable_set::from_list([true, false]), true)}
     regexp {op setcontainstotal} [nirOf $text]
 } -result 1
 
 test setcontains-total-string {ImmutableSet[String] x String qualifies (spec item 10)} -body {
     set text {fn contains_str(s: ImmutableSet[str], x: str) -> Bool:
-    immutable_set_contains(s, x)
+    immutable_set::contains(s, x)
 
-contains_str(immutable_set_from_list(["a", "b"]), "a")}
+contains_str(immutable_set::from_list(["a", "b"]), "a")}
     regexp {op setcontainstotal} [nirOf $text]
 } -result 1
 
 test setcontains-total-unicodechar {ImmutableSet[UnicodeChar] x UnicodeChar qualifies (spec item 10) -- the real web::is_unreserved shape, in miniature, without Byte} -body {
     set text {fn contains_char(s: ImmutableSet[UnicodeChar], x: UnicodeChar) -> Bool:
-    immutable_set_contains(s, x)
+    immutable_set::contains(s, x)
 
-contains_char(immutable_set_from_list(['-', '.', '_', '~']), '-')}
+contains_char(immutable_set::from_list(['-', '.', '_', '~']), '-')}
     regexp {op setcontainstotal} [nirOf $text]
 } -result 1
 
 test setcontains-total-runtime-present-and-absent {both membership outcomes (present and absent) are equally non-erroring -- the proof is "cannot raise EQUALITY", not "membership succeeds" (spec item 38)} -body {
     set text [format {%sfn contains_byte(s: ImmutableSet[Byte], b: Byte) -> Bool:
-    immutable_set_contains(s, b)
+    immutable_set::contains(s, b)
 
-s = immutable_set_from_list([byteA()])
+s = immutable_set::from_list([byteA()])
 [contains_byte(s, byteA()), contains_byte(s, byteB())]} $::byteDecl]
     set exprs [sourceIR $text]
     lmap backend {interp compile cranelift-generic cranelift} {
@@ -164,10 +164,10 @@ s = immutable_set_from_list([byteA()])
 
 test setcontains-total-empty-set {an empty ImmutableSet[Byte] is non-erroring through the identical static proof -- no dedicated empty-set effect rule, no inference from dynamic emptiness (spec items 39-40)} -body {
     set text [format {%sfn mk(xs: List[Byte]) -> ImmutableSet[Byte]:
-    immutable_set_from_list(xs)
+    immutable_set::from_list(xs)
 
 fn contains_byte(s: ImmutableSet[Byte], b: Byte) -> Bool:
-    immutable_set_contains(s, b)
+    immutable_set::contains(s, b)
 
 contains_byte(mk([]), byteA())} $::byteDecl]
     set nirText [nirOf $text]
@@ -197,11 +197,11 @@ test setcontains-broad-needle-stays-erroring {ImmutableSet[Byte] x any (a genuin
     set hir::specialize::limit 1
     try {
         set text [format {%sfn contains_unknown(s: ImmutableSet[Byte], x):
-    immutable_set_contains(s, x)
+    immutable_set::contains(s, x)
 
-[contains_unknown(immutable_set_from_list([byteA()]), byteA()),
- contains_unknown(immutable_set_from_list([byteA()]), "z"),
- contains_unknown(immutable_set_from_list([byteA()]), true)]} $::byteDecl]
+[contains_unknown(immutable_set::from_list([byteA()]), byteA()),
+ contains_unknown(immutable_set::from_list([byteA()]), "z"),
+ contains_unknown(immutable_set::from_list([byteA()]), true)]} $::byteDecl]
         set nirText [nirOf $text]
         # limit=1 gives the *first* call's own key its own precise instance
         # (instance="immutableSet, int", setcontainstotal -- correctly, its
@@ -232,9 +232,9 @@ test setcontains-broad-set-stays-erroring {an ImmutableSet erased to the broad k
     x
 
 fn contains_erased(s, x) -> Bool:
-    immutable_set_contains(passthrough(s), x)
+    immutable_set::contains(passthrough(s), x)
 
-contains_erased(immutable_set_from_list([byteA()]), byteA())} $::byteDecl]
+contains_erased(immutable_set::from_list([byteA()]), byteA())} $::byteDecl]
     set nirText [nirOf $text]
     list [regexp {op setcontains } $nirText] [regexp {op setcontainstotal} $nirText]
 } -result {1 0}
@@ -247,9 +247,9 @@ fn h(x):
     x + 1
 
 fn contains_block(s, needle):
-    immutable_set_contains(s, needle)
+    immutable_set::contains(s, needle)
 
-contains_block(immutable_set_from_list([g]), h)}
+contains_block(immutable_set::from_list([g]), h)}
     set nirText [nirOf $text]
     list [regexp {op setcontains } $nirText] [regexp {op setcontainstotal} $nirText] \
         [errorCodeOf {*}[sourceIR $text]]
@@ -265,14 +265,14 @@ test setcontains-error-propagation-control {a caller of a genuinely equality-fal
         # would give M7.c's own closed-caller theorem exactly one (sound)
         # fact to resolve x from.
         set text [format {%sfn contains_unknown(s: ImmutableSet[Byte], x):
-    immutable_set_contains(s, x)
+    immutable_set::contains(s, x)
 
 fn caller(s, x):
     contains_unknown(s, x)
 
-[caller(immutable_set_from_list([byteA()]), byteA()),
- caller(immutable_set_from_list([byteA()]), "z"),
- caller(immutable_set_from_list([byteA()]), true)]} $::byteDecl]
+[caller(immutable_set::from_list([byteA()]), byteA()),
+ caller(immutable_set::from_list([byteA()]), "z"),
+ caller(immutable_set::from_list([byteA()]), true)]} $::byteDecl]
         set nirText [nirOf $text]
         string match {*may_error=true*} [effectLineForInstance $text contains_unknown generic]
     } finally {
@@ -286,7 +286,7 @@ fn caller(s, x):
 # completion retest), through the frozen bench/uri-steady.bot itself, not a
 # synthetic stand-in (spec items 32-33, 65-66, 81).
 
-test setcontains-uri-web-is-unreserved-local-op-total {web::is_unreserved's own body: the immutable_set_contains(additional_unreserved_chars, b) call lowers to setcontainstotal, not setcontains -- additional_unreserved_chars : ImmutableSet[Byte], b : Byte, both statically proven equality-total} -body {
+test setcontains-uri-web-is-unreserved-local-op-total {web::is_unreserved's own body: the immutable_set::contains(additional_unreserved_chars, b) call lowers to setcontainstotal, not setcontains -- additional_unreserved_chars : ImmutableSet[Byte], b : Byte, both statically proven equality-total} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
     set nirText [dict get [native::lower::program $hir -tiny-leaf-inline-opt 0] text]
     regexp {func \d+ "web::is_unreserved[^\n]*\n(?:.*\n)*?end} $nirText body

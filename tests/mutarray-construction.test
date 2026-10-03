@@ -1,12 +1,12 @@
 # mutarray-construction.test -- MutableArray construction and refinement
-# (MUTABLEARRAY-CONSTRUCTION-REFINEMENT.md): mutarray::from_list
+# (MUTABLEARRAY-CONSTRUCTION-REFINEMENT.md): mutable_array::from_list
 # (lib/mutarray.bot) and the mutarray? type test (core/predicates.tcl).
 #
 # `mutarray` is Botlish's one static/runtime kind for a MutableArray. This
 # milestone makes it an ordinary first-class construction/refinement fact:
 # a constructor call is statically `mutarray`, `mutarray?` refines like
 # integer?/string?/list?, and ordinary homogeneous List typing carries it
-# (List[mutarray], list_get -> mutarray). What must NOT happen is pinned just
+# (List[mutarray], list::at -> mutarray). What must NOT happen is pinned just
 # as hard: no MutableArray[T], no per-slot typing, no positional record
 # schema, no cast, no exact facts about a MutableArray's contents.
 #
@@ -23,10 +23,17 @@ interp recursionlimit {} 100000
 
 set parityBackends {interp compile cranelift-generic cranelift}
 
+# (An IndexNotFound obligation alone does not reject: helpers.tcl's
+# compileWaivingIndexObligations -- indexing is incidental to this file.)
 proc mcCompile {src {strict 1}} {
     set path [makeFile $src mc-program.bot]
     try {
-        return [surface::readProgramFile $path -strict $strict]
+        if {!$strict} {
+            return [surface::readProgramFile $path -strict 0]
+        }
+        compileWaivingIndexObligations \
+            {surface::readProgramFile $path -strict 1} \
+            {surface::readProgramFile $path -strict 0}
     } finally {
         removeFile mc-program.bot
     }
@@ -103,24 +110,24 @@ proc mcMeta {name} {
     list [dict get $m paramTypes] [dict get $m resultType]
 }
 
-test mutarray-meta-1 {mutable_array_allocate is the constructor: result type mutarray} -body {
-    mcMeta mutable_array_allocate
+test mutarray-meta-1 {mutable_array::allocate is the constructor: result type mutarray} -body {
+    mcMeta mutable_array::allocate
 } -result {int mutarray}
 
 test mutarray-meta-2 {every operation that needs a MutableArray says so in its parameter metadata} -body {
-    lmap n {mutable_array_capacity mutable_array_get mutable_array_set mutable_array_copy mutable_array_freeze} {
+    lmap n {mutable_array::capacity mutable_array::at mutable_array::set mutable_array::copy mutable_array::freeze} {
         list $n [mcMeta $n]
     }
-} -result {{mutable_array_capacity {mutarray int}} {mutable_array_get {{mutarray int} any}} {mutable_array_set {{mutarray int any} unit}} {mutable_array_copy {{mutarray int mutarray int int} unit}} {mutable_array_freeze {{mutarray int} list}}}
+} -result {{mutable_array::capacity {mutarray int}} {mutable_array::at {{mutarray int} any}} {mutable_array::set {{mutarray int any} unit}} {mutable_array::copy {{mutarray int mutarray int int} unit}} {mutable_array::freeze {{mutarray int} list}}}
 
 test mutarray-meta-3 {no operation other than allocate returns mutarray unconditionally} -body {
     lmap n [lsort [core::native::names]] {
         if {[dict get [core::native::metadata $n] resultType] eq "mutarray"} {set n} else continue
     }
-} -result mutable_array_allocate
+} -result mutable_array::allocate
 
-test mutarray-meta-4 {mutable_array_set returns unit and get returns any: results unchanged} -body {
-    list [lindex [mcMeta mutable_array_set] 1] [lindex [mcMeta mutable_array_get] 1]
+test mutarray-meta-4 {mutable_array::set returns unit and get returns any: results unchanged} -body {
+    list [lindex [mcMeta mutable_array::set] 1] [lindex [mcMeta mutable_array::at] 1]
 } -result {unit any}
 
 test mutarray-meta-5 {mutarray? is a registered type test: any -> bool, refines argument 0 to mutarray} -body {
@@ -139,34 +146,34 @@ test mutarray-meta-6 {mutarray? has exactly the shape of its sibling kind predic
 
 # PARAMETERIZED-MUTABLEARRAY.md: from_list is now the typed constructor
 # (List[T] -> MutableArray[T]); the raw kind is `mutarray`, which
-# mutable_array_allocate still returns.
-test mutarray-type-1 {m = mutarray::from_list(xs) is MutableArray[int] for xs : List[int]} -body {
-    mcLast "xs = \[1, 2, 3\]\nm = mutarray::from_list(xs)\nm"
+# mutable_array::allocate still returns.
+test mutarray-type-1 {m = mutable_array::from_list(xs) is MutableArray[int] for xs : List[int]} -body {
+    mcLast "xs = \[1, 2, 3\]\nm = mutable_array::from_list(xs)\nm"
 } -result {MutableArray[int]}
 
 test mutarray-type-2 {an immutable alias keeps the type} -body {
-    mcLast "m = mutarray::from_list(\[1, 2, 3\])\nn = m\nn"
+    mcLast "m = mutable_array::from_list(\[1, 2, 3\])\nn = m\nn"
 } -result {MutableArray[int]}
 
 test mutarray-type-3 {the source List stays an ordinary List[int]} -body {
-    mcLast "xs = \[1, 2, 3\]\nm = mutarray::from_list(xs)\nxs"
+    mcLast "xs = \[1, 2, 3\]\nm = mutable_array::from_list(xs)\nxs"
 } -result {List[int]}
 
 test mutarray-type-4 {the low-level constructor is mutarray as before} -body {
-    mcLast "mutable_array_allocate(3)"
+    mcLast "mutable_array::allocate(3)"
 } -result mutarray
 
 test mutarray-type-5 {a heterogeneous source List gives MutableArray[any]} -body {
-    mcLast "mutarray::from_list(\[\"x\", 1, true\])"
+    mcLast "mutable_array::from_list(\[\"x\", 1, true\])"
 } -result {MutableArray[any]}
 
 test mutarray-type-6 {the empty List gives MutableArray[any]} -body {
-    mcLast "mutarray::from_list(\[\])"
+    mcLast "mutable_array::from_list(\[\])"
 } -result {MutableArray[any]}
 
 test mutarray-type-7 {slot reads of a typed array take the element type; raw arrays stay any} -body {
-    list [mcLast "m = mutarray::from_list(\[1, 2, 3\])\nmutable_array_get(m, 0)"] \
-        [mcLast "m = mutable_array_allocate(3)\nmutable_array_get(m, 0)"]
+    list [mcLast "m = mutable_array::from_list(\[1, 2, 3\])\nmutable_array::at(m, 0)"] \
+        [mcLast "m = mutable_array::allocate(3)\nmutable_array::at(m, 0)"]
 } -result {int any}
 
 test mutarray-type-8 {only the applied spelling exists: bare MutableArray and hyphenated spellings are rejected} -body {
@@ -178,85 +185,85 @@ test mutarray-type-8 {only the applied spelling exists: bare MutableArray and hy
 } -result {rejected rejected rejected}
 
 test mutarray-type-9 {a mutarray parameter annotation accepts the raw constructor result, not a typed array} -body {
-    list [mcLast "fn cap(m: mutarray) -> int:\n    mutable_array_capacity(m)\ncap(mutable_array_allocate(2))"] \
-        [lindex [mcRejects "fn cap(m: mutarray) -> int:\n    mutable_array_capacity(m)\ncap(mutarray::from_list(\[1, 2\]))" *] 0]
+    list [mcLast "fn cap(m: mutarray) -> int:\n    mutable_array::capacity(m)\ncap(mutable_array::allocate(2))"] \
+        [lindex [mcRejects "fn cap(m: mutarray) -> int:\n    mutable_array::capacity(m)\ncap(mutable_array::from_list(\[1, 2\]))" *] 0]
 } -result {int {CORE SEMANTIC TYPE}}
 
-test mutarray-type-10 {mutarray::from_list declares a list parameter and the raw mutarray substrate result (call sites are typed by its intrinsic rule)} -body {
-    set hir [mcCompile "mutarray::from_list(\[1\])"]
-    set block [mcBlock $hir mutarray::from_list]
-    list [mcSig "mutarray::from_list(\[1\])" mutarray::from_list] \
+test mutarray-type-10 {mutable_array::from_list declares a list parameter and the raw mutarray substrate result (call sites are typed by its intrinsic rule)} -body {
+    set hir [mcCompile "mutable_array::from_list(\[1\])"]
+    set block [mcBlock $hir mutable_array::from_list]
+    list [mcSig "mutable_array::from_list(\[1\])" mutable_array::from_list] \
         [regsub {block\(e[0-9]+\)} [hir::types::show [hir::typeOf $hir $block]] block(E)]
 } -result {{{xs: list (declared)}} {block(E)/1 -> mutarray}}
 
 # ---------------------------------------------------------------------------
 # Function result propagation, forwarding, joins (spec items 55-58)
 
-test mutarray-fn-1 {fn make(): mutarray::from_list(...) infers MutableArray[int] with no annotation} -body {
-    mcResult "fn make():\n    mutarray::from_list(\[1, 2, 3\])\nmake()" make
+test mutarray-fn-1 {fn make(): mutable_array::from_list(...) infers MutableArray[int] with no annotation} -body {
+    mcResult "fn make():\n    mutable_array::from_list(\[1, 2, 3\])\nmake()" make
 } -result {MutableArray[int]}
 
 test mutarray-fn-2 {forwarding keeps MutableArray[int]} -body {
-    mcResult "fn make():\n    mutarray::from_list(\[1, 2, 3\])\nfn forward():\n    make()\nforward()" forward
+    mcResult "fn make():\n    mutable_array::from_list(\[1, 2, 3\])\nfn forward():\n    make()\nforward()" forward
 } -result {MutableArray[int]}
 
 test mutarray-fn-3 {a function returning a bound constructor result infers MutableArray[int]} -body {
-    mcResult "fn make():\n    m = mutarray::from_list(\[1\])\n    mutable_array_set(m, 0, 2)\n    m\nmake()" make
+    mcResult "fn make():\n    m = mutable_array::from_list(\[1\])\n    mutable_array::set(m, 0, 2)\n    m\nmake()" make
 } -result {MutableArray[int]}
 
 test mutarray-fn-4 {a function returning the low-level constructor infers mutarray} -body {
-    mcResult "fn make(n):\n    mutable_array_allocate(n)\nmake(3)" make
+    mcResult "fn make(n):\n    mutable_array::allocate(n)\nmake(3)" make
 } -result mutarray
 
 test mutarray-join-1 {same-contract branches join to that MutableArray through ordinary lub; raw branches to mutarray} -body {
-    list [mcResult "fn a():\n    mutarray::from_list(\[1\])\nfn b():\n    mutarray::from_list(\[2\])\nfn pick(c):\n    if c:\n        a()\n    else:\n        b()\npick(true)" pick] \
-        [mcResult "fn a():\n    mutable_array_allocate(1)\nfn b():\n    mutable_array_allocate(2)\nfn pick(c):\n    if c:\n        a()\n    else:\n        b()\npick(true)" pick]
+    list [mcResult "fn a():\n    mutable_array::from_list(\[1\])\nfn b():\n    mutable_array::from_list(\[2\])\nfn pick(c):\n    if c:\n        a()\n    else:\n        b()\npick(true)" pick] \
+        [mcResult "fn a():\n    mutable_array::allocate(1)\nfn b():\n    mutable_array::allocate(2)\nfn pick(c):\n    if c:\n        a()\n    else:\n        b()\npick(true)" pick]
 } -result {{MutableArray[int]} mutarray}
 
 test mutarray-join-2 {a mixed join uses the existing fallback (no union type)} -body {
-    mcResult "fn a():\n    mutable_array_allocate(1)\nfn pick(c):\n    if c:\n        a()\n    else:\n        \[\]\npick(true)" pick
+    mcResult "fn a():\n    mutable_array::allocate(1)\nfn pick(c):\n    if c:\n        a()\n    else:\n        \[\]\npick(true)" pick
 } -result any
 
 test mutarray-join-3 {a join with an unknown value is not mutarray} -body {
-    mcResult "fn pick(c, other):\n    if c:\n        mutable_array_allocate(1)\n    else:\n        other\npick(true, 1)" pick
+    mcResult "fn pick(c, other):\n    if c:\n        mutable_array::allocate(1)\n    else:\n        other\npick(true, 1)" pick
 } -result any
 
 # ---------------------------------------------------------------------------
 # List[mutarray] propagation (spec items 20-25, 43-45)
 
 test mutarray-list-1 {a literal of constructor results is List[mutarray]} -body {
-    mcLast "rows = \[mutarray::from_list(\[1\]), mutarray::from_list(\[2\]), mutarray::from_list(\[3\])\]\nrows"
+    mcLast "rows = \[mutable_array::from_list(\[1\]), mutable_array::from_list(\[2\]), mutable_array::from_list(\[3\])\]\nrows"
 } -result {List[MutableArray[int]]}
 
 test mutarray-list-1b {a literal of raw constructor results is List[mutarray]} -body {
-    mcLast "rows = \[mutable_array_allocate(1), mutable_array_allocate(2)\]\nrows"
+    mcLast "rows = \[mutable_array::allocate(1), mutable_array::allocate(2)\]\nrows"
 } -result {List[mutarray]}
 
-test mutarray-list-2 {list_get with a dynamic index is the element contract} -body {
-    mcResult "rows = \[mutarray::from_list(\[1\]), mutarray::from_list(\[2\])\]\nfn row(i):\n    list_get(rows, i)\nrow(1)" row
+test mutarray-list-2 {list::at with a dynamic index is the element contract} -body {
+    mcResult "rows = \[mutable_array::from_list(\[1\]), mutable_array::from_list(\[2\])\]\nfn row(i) errors IndexNotFound:\n    list::at(rows, i)\nrow(1)" row
 } -result {MutableArray[int]}
 
-test mutarray-list-3 {list_get through a function-returned List[mutarray] is mutarray} -body {
-    mcResult "fn mk():\n    mutable_array_allocate(3)\nfn rows():\n    \[mk(), mk(), mk()\]\nfn row(i):\n    list_get(rows(), i)\nrow(1)" row
+test mutarray-list-3 {list::at through a function-returned List[mutarray] is mutarray} -body {
+    mcResult "fn mk():\n    mutable_array::allocate(3)\nfn rows():\n    \[mk(), mk(), mk()\]\nfn row(i) errors IndexNotFound:\n    list::at(rows(), i)\nrow(1)" row
 } -result mutarray
 
-test mutarray-list-4 {list_append preserves List[MutableArray[int]]} -body {
-    mcLast "rows = list_append(\[mutarray::from_list(\[1\])\], mutarray::from_list(\[2\]))\nrows"
+test mutarray-list-4 {list::append preserves List[MutableArray[int]]} -body {
+    mcLast "rows = list::append(\[mutable_array::from_list(\[1\])\], mutable_array::from_list(\[2\]))\nrows"
 } -result {List[MutableArray[int]]}
 
-test mutarray-list-5 {a consumer reached through list_get is statically proven, not checked at run time} -body {
-    set src "fn rows():\n    \[mutarray::from_list(\[1\]), mutarray::from_list(\[2, 3\])\]\nfn cap(i):\n    mutable_array_capacity(list_get(rows(), i))\ncap(1)"
+test mutarray-list-5 {a consumer reached through list::at is statically proven, not checked at run time} -body {
+    set src "fn rows():\n    \[mutable_array::from_list(\[1\]), mutable_array::from_list(\[2, 3\])\]\nfn cap(i) errors IndexNotFound:\n    mutable_array::capacity(list::at(rows(), i))\ncap(1)"
     set hir [mcCompile $src]
-    set caps [hirFind $hir call mutable_array_capacity]
+    set caps [hirFind $hir call mutable_array::capacity]
     list [mcLast $src] [mcParity $src] [mcValue $src]
 } -result {int same 2}
 
 test mutarray-list-6 {the element type is homogeneous only: adding a non-mutarray element widens} -body {
-    mcLast "rows = \[mutable_array_allocate(1), 5\]\nrows"
+    mcLast "rows = \[mutable_array::allocate(1), 5\]\nrows"
 } -result list
 
 test mutarray-list-7 {an empty-List accumulator's element type is recovered by the recursive accumulator's semantic instance (no accumulator generics, no annotation)} -body {
-    mcResult "fn collect(acc, n):\n    if n == 0:\n        return acc\n    collect(list_append(acc, mutable_array_allocate(n)), n - 1)\nfn go():\n    collect(\[\], 3)\ngo()" go
+    mcResult "fn collect(acc, n):\n    if n == 0:\n        return acc\n    collect(list::append(acc, mutable_array::allocate(n)), n - 1)\nfn go():\n    collect(\[\], 3)\ngo()" go
 } -result {List[mutarray]}
 
 # ---------------------------------------------------------------------------
@@ -265,7 +272,7 @@ test mutarray-list-7 {an empty-List accumulator's element type is recovered by t
 test mutarray-pred-1 {mutarray? is bool with an any argument, accepting anything} -body {
     lmap src {
         "mutarray?(1)" "mutarray?(\"s\")" "mutarray?(\[1\])" "mutarray?(true)"
-        "mutarray?(mutarray::from_list(\[\]))"
+        "mutarray?(mutable_array::from_list(\[\]))"
         "fn p(x):\n    mutarray?(x)\np(1)"
     } {mcLast $src}
 } -result {bool bool bool bool bool bool}
@@ -275,50 +282,50 @@ test mutarray-pred-2 {a wrapper's parameter stays unconstrained: mutarray? impos
 } -result {{x: any (none)}}
 
 test mutarray-pred-3 {the true branch refines x to mutarray; the function accepts arbitrary x} -body {
-    set src "fn f(x):\n    if mutarray?(x):\n        mutable_array_capacity(x)\n    else:\n        0\nf(1)"
+    set src "fn f(x) errors IndexNotFound:\n    if mutarray?(x):\n        mutable_array::capacity(x)\n    else:\n        0\nf(1)"
     set hir [mcCompile $src]
     set refined [lmap e [hirFind $hir ref x] {hir::types::show [hir::typeOf $hir $e]}]
     list [mcSig $src f] $refined [mcResult $src f]
 } -result {{{x: any (none)}} {any mutarray} int}
 
 test mutarray-pred-4 {inside the true branch the capacity call raises no static TYPE complaint} -body {
-    mcRejects "fn f(x):\n    if mutarray?(x):\n        mutable_array_capacity(x)\n    else:\n        0\n\[f(1), f(\"s\"), f(\[1\]), f(mutable_array_allocate(2))\]" *
+    mcRejects "fn f(x) errors IndexNotFound:\n    if mutarray?(x):\n        mutable_array::capacity(x)\n    else:\n        0\n\[f(1), f(\"s\"), f(\[1\]), f(mutable_array::allocate(2))\]" *
 } -result accepted
 
 test mutarray-pred-5 {intrinsic inference: a guarded use does not impose mutarray on the parameter} -body {
-    mcSig "fn maybe_capacity(x):\n    if mutarray?(x):\n        mutable_array_capacity(x)\n    else:\n        0\nmaybe_capacity(1)" maybe_capacity
+    mcSig "fn maybe_capacity(x):\n    if mutarray?(x):\n        mutable_array::capacity(x)\n    else:\n        0\nmaybe_capacity(1)" maybe_capacity
 } -result {{x: any (none)}}
 
 test mutarray-pred-6 {intrinsic inference: an unconditional use still infers a checked mutarray requirement} -body {
-    mcSig "fn capacity(x):\n    mutable_array_capacity(x)\ncapacity(mutable_array_allocate(1))" capacity
+    mcSig "fn capacity(x):\n    mutable_array::capacity(x)\ncapacity(mutable_array::allocate(1))" capacity
 } -result {{x: mutarray (inferred checked)}}
 
 test mutarray-pred-7 {an immutable alias inside the branch keeps the refined kind} -body {
-    mcResult "fn f(x):\n    if mutarray?(x):\n        y = x\n        mutable_array_capacity(y)\n    else:\n        0\nf(1)" f
+    mcResult "fn f(x) errors IndexNotFound:\n    if mutarray?(x):\n        y = x\n        mutable_array::capacity(y)\n    else:\n        0\nf(1)" f
 } -result int
 
 test mutarray-pred-8 {nested alias: a second alias inside the branch is still proven} -body {
-    mcRejects "fn f(x):\n    if mutarray?(x):\n        y = x\n        z = y\n        mutable_array_capacity(z)\n    else:\n        0\nf(1)" *
+    mcRejects "fn f(x) errors IndexNotFound:\n    if mutarray?(x):\n        y = x\n        z = y\n        mutable_array::capacity(z)\n    else:\n        0\nf(1)" *
 } -result accepted
 
 test mutarray-pred-9 {the refined value flows out of the true branch typed mutarray} -body {
-    mcResult "fn f(x):\n    if mutarray?(x):\n        x\n    else:\n        mutable_array_allocate(0)\nf(1)" f
+    mcResult "fn f(x) errors IndexNotFound:\n    if mutarray?(x):\n        x\n    else:\n        mutable_array::allocate(0)\nf(1)" f
 } -result mutarray
 
 test mutarray-pred-10 {the refinement does not escape the branch: the join is any} -body {
-    mcResult "fn f(x):\n    if mutarray?(x):\n        0\n    x\nf(1)" f
+    mcResult "fn f(x) errors IndexNotFound:\n    if mutarray?(x):\n        0\n    x\nf(1)" f
 } -result any
 
 test mutarray-pred-11 {after the branch the parameter is still required to be a MutableArray} -body {
-    mcSig "fn f(x):\n    if mutarray?(x):\n        0\n    mutable_array_capacity(x)\nf(mutable_array_allocate(1))" f
+    mcSig "fn f(x) errors IndexNotFound:\n    if mutarray?(x):\n        0\n    mutable_array::capacity(x)\nf(mutable_array::allocate(1))" f
 } -result {{x: mutarray (inferred checked)}}
 
 test mutarray-pred-12 {a branch-local test does not narrow the value after the branch} -body {
-    mcRejects "fn f(x):\n    if mutarray?(x):\n        0\n    mutable_array_capacity(x)\nf(1)" *
+    mcRejects "fn f(x) errors IndexNotFound:\n    if mutarray?(x):\n        0\n    mutable_array::capacity(x)\nf(1)" *
 } -result {{CORE SEMANTIC TYPE} 1}
 
 test mutarray-pred-13 {the else branch gains no positive kind (no complement types)} -body {
-    mcResult "fn f(x):\n    if mutarray?(x):\n        0\n    else:\n        x\nf(1)" f
+    mcResult "fn f(x) errors IndexNotFound:\n    if mutarray?(x):\n        0\n    else:\n        x\nf(1)" f
 } -result any
 
 test mutarray-pred-14 {mutarray? as a value has the same structural callable type as its sibling predicates} -body {
@@ -336,37 +343,37 @@ test mutarray-pred-15 {a used specialization view keeps the bool result} -body {
 # Negative controls: what must NOT be inferred (spec items 41-42, 46-48, 78-80)
 
 test mutarray-neg-1 {a positional pair function result gains no slot typing} -body {
-    mcResult "fn mkpair():\n    \[mutable_array_allocate(1), 0\]\nfn first():\n    list_get(mkpair(), 0)\nfirst()" first
+    mcResult "fn mkpair():\n    \[mutable_array::allocate(1), 0\]\nfn first() errors IndexNotFound:\n    list::at(mkpair(), 0)\nfirst()" first
 } -result any
 
 test mutarray-neg-2 {a List parameter gains no positional schema from a MutableArray slot} -body {
-    list [mcSig "fn first(p):\n    list_get(p, 0)\nfirst(\[mutable_array_allocate(1), 0\])" first] \
-        [mcLast "fn first(p):\n    list_get(p, 0)\nfirst(\[mutable_array_allocate(1), 0\])"]
+    list [mcSig "fn first(p) errors IndexNotFound:\n    list::at(p, 0)\nfirst(\[mutable_array::allocate(1), 0\])" first] \
+        [mcLast "fn first(p) errors IndexNotFound:\n    list::at(p, 0)\nfirst(\[mutable_array::allocate(1), 0\])"]
 } -result "{{p: list (inferred checked)}} any"
 
 test mutarray-neg-3 {[storage, length]: the record consumer needs an independent proof} -body {
-    mcRejects "fn geo_new():\n    \[mutable_array_allocate(0), 0\]\nfn geo_capacity(builder):\n    mutable_array_capacity(list_get(builder, 0))\ngeo_capacity(geo_new())" *
+    mcRejects "fn geo_new():\n    \[mutable_array::allocate(0), 0\]\nfn geo_capacity(builder) errors IndexNotFound:\n    mutable_array::capacity(list::at(builder, 0))\ngeo_capacity(geo_new())" *
 } -result accepted
 
 test mutarray-neg-4 {a heterogeneous pair literal is a plain list, not a product of mutarray and int} -body {
-    mcLast "\[mutable_array_allocate(1), 0\]"
+    mcLast "\[mutable_array::allocate(1), 0\]"
 } -result list
 
 test mutarray-neg-5 {the only mutarray fact about a local pair is the pre-existing exact-value fact, not a type} -body {
-    list [mcLast "p = \[mutable_array_allocate(1), 0\]\np"] \
-        [mcLast "p = \[mutable_array_allocate(1), 0\]\nlist_get(p, 0)"] \
-        [mcResult "fn mk():\n    \[mutable_array_allocate(1), 0\]\nfn snd():\n    list_get(mk(), 1)\nsnd()" snd]
+    list [mcLast "p = \[mutable_array::allocate(1), 0\]\np"] \
+        [mcLast "p = \[mutable_array::allocate(1), 0\]\nlist::at(p, 0)"] \
+        [mcResult "fn mk():\n    \[mutable_array::allocate(1), 0\]\nfn snd() errors IndexNotFound:\n    list::at(mk(), 1)\nsnd()" snd]
 } -result {list mutarray any}
 
 test mutarray-neg-6 {no exact fact describes a MutableArray's contents} -body {
-    set hir [mcCompile "m = mutarray::from_list(\[1, 2, 3\])\nm"]
+    set hir [mcCompile "m = mutable_array::from_list(\[1, 2, 3\])\nm"]
     set f [hir::exact::Of $hir [lindex [hir::roots $hir] end]]
     expr {$f eq "" ? "none" : [hir::exact::describe $hir $f]}
 } -result none
 
 test mutarray-neg-7 {an unknown value is never silently a mutarray (no cast exists)} -body {
     lmap name {as_mutarray as_list cast} {
-        lindex [mcRejects "fn f(x):\n    ${name}(x)\nf(1)" *] 0
+        lindex [mcRejects "fn f(x) errors IndexNotFound:\n    ${name}(x)\nf(1)" *] 0
     }
 } -result {{CORE SEMANTIC UNBOUND} {CORE SEMANTIC UNBOUND} {CORE SEMANTIC UNBOUND}}
 
@@ -374,72 +381,72 @@ test mutarray-neg-7 {an unknown value is never silently a mutarray (no cast exis
 # Constructor argument contract (spec items 65-66)
 
 test mutarray-arg-1 {a statically non-List argument is rejected at compile time} -body {
-    mcRejects "mutarray::from_list(123)" "*cannot be proven to satisfy list*"
+    mcRejects "mutable_array::from_list(123)" "*cannot be proven to satisfy list*"
 } -result {{CORE SEMANTIC TYPE} 1}
 
 test mutarray-arg-2 {a string argument is rejected at compile time} -body {
-    lindex [mcRejects "mutarray::from_list(\"abc\")" *] 0
+    lindex [mcRejects "mutable_array::from_list(\"abc\")" *] 0
 } -result {CORE SEMANTIC TYPE}
 
 test mutarray-arg-3 {an untyped parameter reaching from_list infers a checked list requirement} -body {
-    mcSig "fn f(x):\n    mutarray::from_list(x)\nf(\[1\])" f
+    mcSig "fn f(x) errors IndexNotFound:\n    mutable_array::from_list(x)\nf(\[1\])" f
 } -match glob -result {{x: list (inferred *)}}
 
 test mutarray-arg-4 {an argument that cannot be proven a list is rejected, not coerced} -body {
-    lindex [mcRejects "fn f(x):\n    mutarray::from_list(x)\nf(5)" *] 0
+    lindex [mcRejects "fn f(x) errors IndexNotFound:\n    mutable_array::from_list(x)\nf(5)" *] 0
 } -result {CORE SEMANTIC TYPE}
 
 # ---------------------------------------------------------------------------
 # from_list semantics: differential across every backend (spec items 10, 62-64)
 
 test mutarray-sem-1 {order and values preserved} -body {
-    set src "fn f():\n    m = mutarray::from_list(\[10, 20, 30\])\n    \[mutable_array_capacity(m), mutable_array_get(m, 0), mutable_array_get(m, 1), mutable_array_get(m, 2)\]\nf()"
+    set src "fn f() errors IndexNotFound:\n    m = mutable_array::from_list(\[10, 20, 30\])\n    \[mutable_array::capacity(m), mutable_array::at(m, 0), mutable_array::at(m, 1), mutable_array::at(m, 2)\]\nf()"
     list [mcParity $src] [mcValue $src]
 } -result {same {[3, 10, 20, 30]}}
 
 test mutarray-sem-2 {the result is mutable and mutation never reaches the source List} -body {
-    set src "fn f():\n    xs = \[1, 2, 3\]\n    m = mutarray::from_list(xs)\n    mutable_array_set(m, 0, 99)\n    mutable_array_set(m, 2, \"z\")\n    \[xs, mutable_array_get(m, 0), mutable_array_get(m, 1), mutable_array_get(m, 2)\]\nf()"
+    set src "fn f() errors IndexNotFound:\n    xs = \[1, 2, 3\]\n    m = mutable_array::from_list(xs)\n    mutable_array::set(m, 0, 99)\n    mutable_array::set(m, 2, \"z\")\n    \[xs, mutable_array::at(m, 0), mutable_array::at(m, 1), mutable_array::at(m, 2)\]\nf()"
     list [mcParity $src] [mcValue $src]
 } -result {same {[[1, 2, 3], 99, 2, "z"]}}
 
 test mutarray-sem-3 {two constructions from one List are independent arrays} -body {
-    set src "fn f():\n    xs = \[1, 2\]\n    a = mutarray::from_list(xs)\n    b = mutarray::from_list(xs)\n    mutable_array_set(a, 0, 7)\n    \[mutable_array_get(a, 0), mutable_array_get(b, 0)\]\nf()"
+    set src "fn f() errors IndexNotFound:\n    xs = \[1, 2\]\n    a = mutable_array::from_list(xs)\n    b = mutable_array::from_list(xs)\n    mutable_array::set(a, 0, 7)\n    \[mutable_array::at(a, 0), mutable_array::at(b, 0)\]\nf()"
     list [mcParity $src] [mcValue $src]
 } -result {same {[7, 1]}}
 
 test mutarray-sem-4 {an alias shares storage (existing MutableArray aliasing is unchanged)} -body {
-    set src "fn f():\n    m = mutarray::from_list(\[1, 2\])\n    n = m\n    mutable_array_set(m, 1, 5)\n    mutable_array_get(n, 1)\nf()"
+    set src "fn f() errors IndexNotFound:\n    m = mutable_array::from_list(\[1, 2\])\n    n = m\n    mutable_array::set(m, 1, 5)\n    mutable_array::at(n, 1)\nf()"
     list [mcParity $src] [mcValue $src]
 } -result {same 5}
 
 test mutarray-sem-5 {the empty List: capacity 0, predicate true, any index is RANGE} -body {
-    set ok "fn f():\n    m = mutarray::from_list(\[\])\n    \[mutable_array_capacity(m), mutarray?(m)\]\nf()"
-    set bad "fn f():\n    m = mutarray::from_list(\[\])\n    mutable_array_set(m, 0, 1)\nf()"
+    set ok "fn f() errors IndexNotFound:\n    m = mutable_array::from_list(\[\])\n    \[mutable_array::capacity(m), mutarray?(m)\]\nf()"
+    set bad "fn f() errors IndexNotFound:\n    m = mutable_array::from_list(\[\])\n    mutable_array::set(m, 0, 1)\nf()"
     list [mcParity $ok] [mcValue $ok] [mcParity $bad] [lindex [outcomeUnder interp [hir::lower [mcCompile $bad 0]]] 1]
 } -result {same {[0, true]} same {CORE SEMANTIC RANGE}}
 
 test mutarray-sem-6 {a heterogeneous source List is accepted and kept as is} -body {
-    set src "fn f():\n    m = mutarray::from_list(\[\"x\", 1, true\])\n    \[mutable_array_get(m, 0), mutable_array_get(m, 1), mutable_array_get(m, 2)\]\nf()"
+    set src "fn f() errors IndexNotFound:\n    m = mutable_array::from_list(\[\"x\", 1, true\])\n    \[mutable_array::at(m, 0), mutable_array::at(m, 1), mutable_array::at(m, 2)\]\nf()"
     list [mcParity $src] [mcValue $src]
 } -result {same {["x", 1, true]}}
 
 test mutarray-sem-7 {a nested MutableArray element keeps its identity (shallow, no deep copy)} -body {
-    set src "fn f():\n    inner = mutarray::from_list(\[1\])\n    outer = mutarray::from_list(\[inner\])\n    mutable_array_set(inner, 0, 42)\n    mutable_array_get(mutable_array_get(outer, 0), 0)\nf()"
+    set src "fn f() errors IndexNotFound:\n    inner = mutable_array::from_list(\[1\])\n    outer = mutable_array::from_list(\[inner\])\n    mutable_array::set(inner, 0, 42)\n    mutable_array::at(mutable_array::at(outer, 0), 0)\nf()"
     list [mcParity $src] [mcValue $src]
 } -result {same 42}
 
 test mutarray-sem-8 {freezing a from_list array gives back an equal immutable List} -body {
-    set src "fn f():\n    xs = \[3, 1, 2\]\n    mutable_array_freeze(mutarray::from_list(xs), 3) == xs\nf()"
+    set src "fn f() errors IndexNotFound:\n    xs = \[3, 1, 2\]\n    mutable_array::freeze(mutable_array::from_list(xs), 3) == xs\nf()"
     list [mcParity $src] [mcValue $src]
 } -result {same true}
 
 test mutarray-sem-9 {a larger List round-trips} -body {
-    set src "fn build(i, n, acc):\n    if i == n:\n        return acc\n    build(i + 1, n, list_append(acc, i * 2))\nfn f():\n    m = mutarray::from_list(build(0, 1000, \[\]))\n    \[mutable_array_capacity(m), mutable_array_get(m, 0), mutable_array_get(m, 999)\]\nf()"
+    set src "fn build(i, n, acc):\n    if i == n:\n        return acc\n    build(i + 1, n, list::append(acc, i * 2))\nfn f() errors IndexNotFound:\n    m = mutable_array::from_list(build(0, 1000, \[\]))\n    \[mutable_array::capacity(m), mutable_array::at(m, 0), mutable_array::at(m, 999)\]\nf()"
     list [mcParity $src] [mcValue $src]
 } -result {same {[1000, 0, 1998]}}
 
 test mutarray-sem-10 {a dynamic non-List value reaching from_list is a TYPE error on every backend} -body {
-    set src "fn mixed(c):\n    if c:\n        1\n    else:\n        \[\]\nfn f():\n    mutable_array_capacity(mutarray::from_list(mixed(true)))\nf()"
+    set src "fn mixed(c):\n    if c:\n        1\n    else:\n        \[\]\nfn f() errors IndexNotFound:\n    mutable_array::capacity(mutable_array::from_list(mixed(true)))\nf()"
     set exprs [hir::lower [mcCompile $src 0]]
     list [lindex [mcRejects $src *] 0] [mcParity $src] \
         [lmap backend $::parityBackends {lindex [outcomeUnder $backend $exprs] 1}]
@@ -449,33 +456,33 @@ test mutarray-sem-10 {a dynamic non-List value reaching from_list is a TYPE erro
 # mutarray? on every backend (spec items 13, 19, 20, 32, 33, 59)
 
 test mutarray-run-1 {the predicate is true only for a MutableArray, never raises} -body {
-    set src "\[mutarray?(mutable_array_allocate(1)), mutarray?(mutarray::from_list(\[1\])), mutarray?(\[1\]), mutarray?(1), mutarray?(\"s\"), mutarray?(true), mutarray?(unit), mutarray?(\[\]), mutarray?(mutarray?), mutarray?(immutable_set_from_list(\[1\]))\]"
+    set src "\[mutarray?(mutable_array::allocate(1)), mutarray?(mutable_array::from_list(\[1\])), mutarray?(\[1\]), mutarray?(1), mutarray?(\"s\"), mutarray?(true), mutarray?(unit), mutarray?(\[\]), mutarray?(mutarray?), mutarray?(immutable_set::from_list(\[1\]))\]"
     list [mcParity $src] [mcValue $src]
 } -result {same {[true, true, false, false, false, false, false, false, false, false]}}
 
 test mutarray-run-2 {a guarded capacity is correct on a MutableArray and on everything else} -body {
-    set src "fn f(x):\n    if mutarray?(x):\n        mutable_array_capacity(x)\n    else:\n        0\nfn g():\n    \[f(mutarray::from_list(\[1, 2, 3\])), f(\[1, 2, 3\]), f(5), f(\"abc\"), f(true)\]\ng()"
+    set src "fn f(x) errors IndexNotFound:\n    if mutarray?(x):\n        mutable_array::capacity(x)\n    else:\n        0\nfn g() errors IndexNotFound:\n    \[f(mutable_array::from_list(\[1, 2, 3\])), f(\[1, 2, 3\]), f(5), f(\"abc\"), f(true)\]\ng()"
     list [mcParity $src] [mcValue $src]
 } -result {same {[3, 0, 0, 0, 0]}}
 
 test mutarray-run-3 {the refined value is usable through an alias} -body {
-    set src "fn f(x):\n    if mutarray?(x):\n        y = x\n        mutable_array_set(y, 0, 8)\n        mutable_array_get(y, 0)\n    else:\n        -1\nfn g():\n    \[f(mutarray::from_list(\[1\])), f(1)\]\ng()"
+    set src "fn f(x) errors IndexNotFound:\n    if mutarray?(x):\n        y = x\n        mutable_array::set(y, 0, 8)\n        mutable_array::at(y, 0)\n    else:\n        -1\nfn g() errors IndexNotFound:\n    \[f(mutable_array::from_list(\[1\])), f(1)\]\ng()"
     list [mcParity $src] [mcValue $src]
 } -result {same {[8, -1]}}
 
 test mutarray-run-4 {an unguarded use after a branch-local test keeps its runtime TYPE behavior} -body {
-    set src "fn f(x):\n    if mutarray?(x):\n        0\n    mutable_array_capacity(x)\nf(1)"
+    set src "fn f(x) errors IndexNotFound:\n    if mutarray?(x):\n        0\n    mutable_array::capacity(x)\nf(1)"
     set exprs [hir::lower [mcCompile $src 0]]
     lmap backend $::parityBackends {lindex [outcomeUnder $backend $exprs] 1}
 } -result {{CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE}}
 
-test mutarray-run-5 {rows built from from_list are read back through list_get on every backend} -body {
-    set src "fn rows():\n    \[mutarray::from_list(\[1, 2\]), mutarray::from_list(\[3\]), mutarray::from_list(\[\])\]\nfn cap(i):\n    mutable_array_capacity(list_get(rows(), i))\n\[cap(0), cap(1), cap(2)\]"
+test mutarray-run-5 {rows built from from_list are read back through list::at on every backend} -body {
+    set src "fn rows():\n    \[mutable_array::from_list(\[1, 2\]), mutable_array::from_list(\[3\]), mutable_array::from_list(\[\])\]\nfn cap(i) errors IndexNotFound:\n    mutable_array::capacity(list::at(rows(), i))\n\[cap(0), cap(1), cap(2)\]"
     list [mcParity $src] [mcValue $src]
 } -result {same {[2, 1, 0]}}
 
 test mutarray-run-7 {a statically proven mutarray argument needs no kind guard; an any argument keeps it} -body {
-    set src "fn cap(x):\n    mutable_array_capacity(x)\nfn mixed(c):\n    if c:\n        mutable_array_allocate(2)\n    else:\n        \[\]\nfn rows():\n    \[mutarray::from_list(\[1\]), mutarray::from_list(\[2, 3\])\]\nfn via_rows(i):\n    cap(list_get(rows(), i))\nvia_rows(1) + cap(mixed(true))"
+    set src "fn cap(x):\n    mutable_array::capacity(x)\nfn mixed(c):\n    if c:\n        mutable_array::allocate(2)\n    else:\n        \[\]\nfn rows():\n    \[mutable_array::from_list(\[1\]), mutable_array::from_list(\[2, 3\])\]\nfn via_rows(i) errors IndexNotFound:\n    cap(list::at(rows(), i))\nvia_rows(1) + cap(mixed(true))"
     set path [makeFile $src mc-nir.bot]
     try {
         set hir [native::prepareHir [surface::readProgramFile $path -strict 0]]
@@ -491,7 +498,7 @@ test mutarray-run-7 {a statically proven mutarray argument needs no kind guard; 
 } -result {generic 1 mutarray 0}
 
 test mutarray-run-8 {mutarray? as a first-class callable value agrees on every backend} -body {
-    set src "fn apply(p, v):\n    p(v)\nfn f():\n    \[apply(mutarray?, mutarray::from_list(\[1\])), apply(mutarray?, \[1\]), apply(mutarray?, 7)\]\nf()"
+    set src "fn apply(p, v):\n    p(v)\nfn f() errors IndexNotFound:\n    \[apply(mutarray?, mutable_array::from_list(\[1\])), apply(mutarray?, \[1\]), apply(mutarray?, 7)\]\nf()"
     list [mcParity $src] [mcValue $src]
 } -result {same {[true, false, false]}}
 
@@ -526,7 +533,7 @@ proc mcAotParity {text} {
 }
 
 test mutarray-run-6 {from_list and mutarray? in a standalone AOT executable agree with every backend, also under GC stress} -constraints executableAot -body {
-    mcAotParity "fn mixed(c):\n    if c:\n        mutable_array_allocate(3)\n    else:\n        \[1, 2, 3\]\nfn size(x):\n    if mutarray?(x):\n        mutable_array_capacity(x)\n    else:\n        -1\nfn f():\n    a = mutarray::from_list(\[\"a\", \"b\"\])\n    e = mutarray::from_list(\[\])\n    rows = \[a, mutarray::create(1, \"z\")\]\n    \[size(mixed(true)), size(mixed(false)), mutable_array_capacity(list_get(rows, 0)), mutable_array_capacity(e), mutarray?(a)\]\nf()"
+    mcAotParity "fn mixed(c):\n    if c:\n        mutable_array::allocate(3)\n    else:\n        \[1, 2, 3\]\nfn size(x):\n    if mutarray?(x):\n        mutable_array::capacity(x)\n    else:\n        -1\nfn f() errors IndexNotFound:\n    a = mutable_array::from_list(\[\"a\", \"b\"\])\n    e = mutable_array::from_list(\[\])\n    rows = \[a, mutable_array::create(1, \"z\")\]\n    \[size(mixed(true)), size(mixed(false)), mutable_array::capacity(list::at(rows, 0)), mutable_array::capacity(e), mutarray?(a)\]\nf()"
 } -result {[3, -1, 2, 0, true]}
 
 # ---------------------------------------------------------------------------
@@ -540,7 +547,7 @@ test mutarray-arch-1 {no compiler pass names mutarray?; from_list is named only 
             fconfigure $c -encoding utf-8
             set text [read $c]
             close $c
-            if {[string first mutarray? $text] >= 0 || [string first mutarray::from_list $text] >= 0} {
+            if {[string first mutarray? $text] >= 0 || [string first mutable_array::from_list $text] >= 0} {
                 lappend hits [file join $dir [file tail $file]]
             }
         }

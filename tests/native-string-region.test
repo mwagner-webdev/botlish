@@ -1,5 +1,5 @@
 # native-string-region.test -- StringRegion representation of a temporary
-# substring consumed only by `==`/`length` (hir/stringregion.tcl,
+# substring consumed only by `==`/`str::length` (hir/stringregion.tcl,
 # native/lower.tcl's "String regions" section): one-character access,
 # temporary-substring comparison, escaping substrings, mixed use, bounds
 # errors, Unicode boundaries (ASCII/BMP/astral), and GC stress.
@@ -68,10 +68,10 @@ proc assertErrorParity {text} {
 # milestone targets (examples/stdlib/csv.bot's own `peek`).
 set ::peekSrc {
 fn peek(text, index):
-    if index >= length(text):
+    if index >= str::length(text):
         return ""
 
-    substring(text, index, index + 1)
+    str::substring(text, index, index + 1)
 }
 
 # ---------------------------------------------------------------------------
@@ -85,7 +85,7 @@ proc scanCountSrc {literals} {
     set checks [join [lmap l $literals {string cat "c == " $l}] " or "]
     return "$::peekSrc
 fn scan(text, index, count):
-    if index >= length(text):
+    if index >= str::length(text):
         return count
     c = peek(text, index)
     if $checks:
@@ -117,7 +117,7 @@ test region-char-astral-1 {peek()'d supplementary-plane characters compared to l
     set emoji [encoding convertfrom utf-8 "\xf0\x9f\x98\x80"]
     set text "$::peekSrc
 fn f(text):
-    \[peek(text, 0) == [corpus::literal a], peek(text, 1) == [corpus::literal $emoji], peek(text, 2) == [corpus::literal b], length(text)\]
+    \[peek(text, 0) == [corpus::literal a], peek(text, 1) == [corpus::literal $emoji], peek(text, 2) == [corpus::literal b], str::length(text)\]
 f([corpus::literal "a${emoji}b"])
 "
     list [assertParity $text] [strAllocs $text 1] [strAllocs $text 0]
@@ -146,7 +146,7 @@ test region-char-nir-2 {without -string-region-opt, peek's body is an ordinary s
 test region-compare-equal-1 {a multi-character temporary substring equal to a literal: no String allocation} -body {
     set text {
 fn f(text):
-    substring(text, 0, 5) == "hello"
+    str::substring(text, 0, 5) == "hello"
 
 f("hello world")
 }
@@ -156,7 +156,7 @@ f("hello world")
 test region-compare-unequal-1 {a multi-character temporary substring unequal to a literal: no String allocation} -body {
     set text {
 fn f(text):
-    substring(text, 0, 5) == "howdy"
+    str::substring(text, 0, 5) == "howdy"
 
 f("hello world")
 }
@@ -166,7 +166,7 @@ f("hello world")
 test region-compare-unequal-length-1 {a temporary substring compared to a literal of different length: no String allocation} -body {
     set text {
 fn f(text):
-    substring(text, 0, 5) == "hi"
+    str::substring(text, 0, 5) == "hi"
 
 f("hello world")
 }
@@ -176,7 +176,7 @@ f("hello world")
 test region-compare-nir-1 {NIR: a discarded temporary substring compared with == lowers to regioneq, not substr+streq} -body {
     set text {
 fn f(text):
-    substring(text, 0, 5) == "hello"
+    str::substring(text, 0, 5) == "hello"
 
 f("hello world")
 }
@@ -185,34 +185,34 @@ f("hello world")
 } -result {1 0 0}
 
 # ---------------------------------------------------------------------------
-# length() of a region (#12 of the milestone): exact by construction
+# str::length() of a region (#12 of the milestone): exact by construction
 # (Botlish substring bounds are already character indices).
 
-test region-length-1 {length(substring(...)) of a discarded temporary: no String allocation, exact value} -body {
+test region-length-1 {str::length(str::substring(...)) of a discarded temporary: no String allocation, exact value} -body {
     set text {
 fn f(text):
-    length(substring(text, 2, 9))
+    str::length(str::substring(text, 2, 9))
 
 f("hello wonderful world")
 }
     list [assertParity $text] [strAllocs $text 1] [strAllocs $text 0]
 } -result {{int 7} 0 1}
 
-test region-length-astral-1 {length() of a region spanning an astral character: exact (one scalar value, not code units)} -body {
+test region-length-astral-1 {str::length() of a region spanning an astral character: exact (one scalar value, not code units)} -body {
     set emoji [encoding convertfrom utf-8 "\xf0\x9f\x98\x80"]
     set text "
 fn f(text):
-    length(substring(text, 1, 3))
+    str::length(str::substring(text, 1, 3))
 
 f(\"a${emoji}b\")
 "
     list [assertParity $text] [strAllocs $text 1] [strAllocs $text 0]
 } -result {{int 2} 0 1}
 
-test region-length-nir-1 {NIR: length() of a discarded region lowers to a plain isub, not strlen+substr} -body {
+test region-length-nir-1 {NIR: str::length() of a discarded region lowers to a plain isub, not strlen+substr} -body {
     set text {
 fn f(text):
-    length(substring(text, 2, 9))
+    str::length(str::substring(text, 2, 9))
 
 f("hello wonderful world")
 }
@@ -227,7 +227,7 @@ f("hello wonderful world")
 test region-escape-1 {a substring stored/returned still materializes as an ordinary String} -body {
     set text {
 fn f(text):
-    substring(text, 6, 11)
+    str::substring(text, 6, 11)
 
 f("hello world")
 }
@@ -237,7 +237,7 @@ f("hello world")
 test region-escape-2 {a substring stored into a List escapes and materializes exactly once} -body {
     set text {
 fn f(text):
-    [substring(text, 0, 5), substring(text, 6, 11)]
+    [str::substring(text, 0, 5), str::substring(text, 6, 11)]
 
 f("hello world")
 }
@@ -246,7 +246,7 @@ f("hello world")
 
 test region-escape-large-source-1 {a small escaping substring of a large source materializes independently -- runtime String allocation is proportional to the substring, not the (statically constant) source} -body {
     set big [string repeat "x" 100000]
-    set text "fn f(text):\n    substring(text, 0, 3)\n\nf([corpus::literal $big])"
+    set text "fn f(text):\n    str::substring(text, 0, 3)\n\nf([corpus::literal $big])"
     set hir [sourceHir $text]
     set value [native::evalHir $hir -string-region-opt 1 -short-string-opt 0]
     list [core::value::show $value 1] [dict get [native::allocationReport $hir summary 1] byKind String payloadBytes]
@@ -262,7 +262,7 @@ test region-mixed-1 {compare then concat: one materialization, evaluated once, c
     set text "$::peekSrc
 fn f(text):
     c = peek(text, 0)
-    r = concat(c, \"!\")
+    r = str::concat(c, \"!\")
     if c == \"h\":
         r
     else:
@@ -275,12 +275,12 @@ f(\"hello\")
 # ---------------------------------------------------------------------------
 # `==` takes exactly one operand as a region: a region-eligible operand on
 # BOTH sides (the same binding twice, two bindings, a binding and a
-# `substring` call) must still lower and compare contents correctly.
+# `str::substring` call) must still lower and compare contents correctly.
 
 test region-eq-same-binding-1 {`v == v` on one substring binding (both operands the same region binding)} -body {
     assertParity "
 fn run(s):
-    v = substring(s, 0, 1)
+    v = str::substring(s, 0, 1)
     \[v == v\]
 
 run(\"éa\")
@@ -290,15 +290,15 @@ run(\"éa\")
 test region-eq-two-bindings-1 {`v == w` over two substring bindings: equal and unequal contents} -body {
     list [assertParity "
 fn run(s):
-    v = substring(s, 0, 1)
-    w = substring(s, 3, 4)
-    \[v == w, v == v, length(v) == length(w)\]
+    v = str::substring(s, 0, 1)
+    w = str::substring(s, 3, 4)
+    \[v == w, v == v, str::length(v) == str::length(w)\]
 
 run(\"éa é\")
 "] [assertParity "
 fn run(s):
-    v = substring(s, 0, 1)
-    w = substring(s, 1, 2)
+    v = str::substring(s, 0, 1)
+    w = str::substring(s, 1, 2)
     \[v == w, w == v\]
 
 run(\"éa\")
@@ -308,18 +308,18 @@ run(\"éa\")
 test region-eq-binding-vs-call-1 {a substring call on one side, a virtual binding on the other, in either order} -body {
     assertParity "
 fn run(s):
-    v = substring(s, 0, 1)
-    \[substring(s, 0, 1) == v, v == substring(s, 0, 1), substring(s, 1, 2) == v\]
+    v = str::substring(s, 0, 1)
+    \[str::substring(s, 0, 1) == v, v == str::substring(s, 0, 1), str::substring(s, 1, 2) == v\]
 
 run(\"éa\")
 "
 } -result {list {{bool true} {bool true} {bool false}}}
 
-test region-eq-same-binding-length-1 {a binding that is also length()-ed still compares with itself} -body {
+test region-eq-same-binding-length-1 {a binding that is also str::length()-ed still compares with itself} -body {
     assertParity "
 fn run(s):
-    v = substring(s, 0, 2)
-    \[v == v, length(v)\]
+    v = str::substring(s, 0, 2)
+    \[v == v, str::length(v)\]
 
 run(\"a\U0001F600b\")
 "
@@ -330,27 +330,27 @@ run(\"a\U0001F600b\")
 # interpreter -- agree exactly, including error kind and message.
 
 test region-bounds-negative-1 {start < 0} -body {
-    assertErrorParity {substring("hello", -1, 3)}
-} -result {{CORE SEMANTIC RANGE} {substring: range -1..3 is outside 0..5}}
+    assertErrorParity {str::substring("hello", -1, 3)}
+} -result {{CORE SEMANTIC RANGE} {str::substring: range -1..3 is outside 0..5}}
 
 test region-bounds-too-long-1 {end beyond the String's length} -body {
-    assertErrorParity {substring("hello", 0, 10)}
-} -result {{CORE SEMANTIC RANGE} {substring: range 0..10 is outside 0..5}}
+    assertErrorParity {str::substring("hello", 0, 10)}
+} -result {{CORE SEMANTIC RANGE} {str::substring: range 0..10 is outside 0..5}}
 
 test region-bounds-start-gt-end-1 {start > end} -body {
-    assertErrorParity {substring("hello", 3, 1)}
-} -result {{CORE SEMANTIC RANGE} {substring: range 3..1 is outside 0..5}}
+    assertErrorParity {str::substring("hello", 3, 1)}
+} -result {{CORE SEMANTIC RANGE} {str::substring: range 3..1 is outside 0..5}}
 
 test region-bounds-empty-1 {start == end: an empty region, not an error} -body {
     # The materialized empty String is the runtime's one canonical static empty
     # (STRING-ALLOCATION.md): no allocation (it used to allocate one empty
     # object).
-    set text {substring("hello", 2, 2)}
+    set text {str::substring("hello", 2, 2)}
     list [assertParity $text] [strAllocs $text 1]
 } -result {{str {}} 0}
 
 test region-bounds-end-of-string-1 {end == the String's own length: the whole tail, not an error} -body {
-    set text {substring("hello", 2, 5)}
+    set text {str::substring("hello", 2, 5)}
     assertParity $text
 } -result {str llo}
 
@@ -361,7 +361,7 @@ fn f(text, index):
 f(\"hello\", -1)
 "
     assertErrorParity $text
-} -result {{CORE SEMANTIC RANGE} {substring: range -1..0 is outside 0..5}}
+} -result {{CORE SEMANTIC RANGE} {str::substring: range -1..0 is outside 0..5}}
 
 # ---------------------------------------------------------------------------
 # Unicode boundaries (#32): ASCII, BMP non-ASCII, astral, and mixed text --
@@ -375,7 +375,7 @@ test region-unicode-mixed-1 {a region spanning ASCII, BMP and astral characters:
     set full "$cafe$tail"
     set text "
 fn f(text):
-    \[substring(text, 0, 4) == [corpus::literal $cafe], length(substring(text, 4, 6)), substring(text, 4, 6) == [corpus::literal $tail]\]
+    \[str::substring(text, 0, 4) == [corpus::literal $cafe], str::length(str::substring(text, 4, 6)), str::substring(text, 4, 6) == [corpus::literal $tail]\]
 f([corpus::literal $full])
 "
     list [assertParity $text] [strAllocs $text 1] [strAllocs $text 0]
@@ -409,9 +409,9 @@ test region-gc-stress-2 {a temporary substring comparison over many rows survive
     set text [join $rows \n]\n
     native::evalHir [sourceHir "
 fn count(text, index, hits):
-    if index + 2 > length(text):
+    if index + 2 > str::length(text):
         return hits
-    if substring(text, index, index + 2) == \"ok\":
+    if str::substring(text, index, index + 2) == \"ok\":
         return count(text, index + 1, hits + 1)
     count(text, index + 1, hits)
 

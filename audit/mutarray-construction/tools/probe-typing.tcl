@@ -49,25 +49,25 @@ proc outcomeUnder {backend exprs} {
     } finally { core::useBackend $saved }
 }
 foreach {label src} {
- A "xs = \[1,2,3\]\nm = mutarray::from_list(xs)\nn = m\nn"
- B "fn make():\n    mutarray::from_list(\[1,2,3\])\nfn forward():\n    make()\nforward()"
- C "fn a():\n    mutarray::from_list(\[1\])\nfn b():\n    mutarray::from_list(\[2\])\nfn j(c):\n    if c:\n        a()\n    else:\n        b()\nj(true)"
- D "fn a():\n    mutarray::from_list(\[1\])\nfn j(c):\n    if c:\n        a()\n    else:\n        \[\]\nj(true)"
- E "rows = \[mutarray::from_list(\[1\]), mutarray::from_list(\[2\])\]\nfn g(i):\n    list_get(rows, i)\ng(1)"
- F "mutarray::from_list(\[\"x\", 1, true\])"
- G "mutarray::from_list(123)"
- H "fn f(x):\n    mutarray::from_list(x)\nf(1)"
+ A "xs = \[1,2,3\]\nm = mutable_array::from_list(xs)\nn = m\nn"
+ B "fn make():\n    mutable_array::from_list(\[1,2,3\])\nfn forward():\n    make()\nforward()"
+ C "fn a():\n    mutable_array::from_list(\[1\])\nfn b():\n    mutable_array::from_list(\[2\])\nfn j(c):\n    if c:\n        a()\n    else:\n        b()\nj(true)"
+ D "fn a():\n    mutable_array::from_list(\[1\])\nfn j(c):\n    if c:\n        a()\n    else:\n        \[\]\nj(true)"
+ E "rows = \[mutable_array::from_list(\[1\]), mutable_array::from_list(\[2\])\]\nfn g(i):\n    list::at(rows, i)\ng(1)"
+ F "mutable_array::from_list(\[\"x\", 1, true\])"
+ G "mutable_array::from_list(123)"
+ H "fn f(x):\n    mutable_array::from_list(x)\nf(1)"
 } {
   puts "== $label"
   if {[catch {puts [last $src]} e]} { puts "REJECT: [string range $e 0 300]" }
 }
 puts "=========== runtime"
 foreach {label src} {
- order "xs = \[10, 20, 30\]\nm = mutarray::from_list(xs)\n\[mutable_array_capacity(m), mutable_array_get(m, 0), mutable_array_get(m, 1), mutable_array_get(m, 2)\]"
- mutate "fn f():\n    xs = \[1, 2, 3\]\n    m = mutarray::from_list(xs)\n    mutable_array_set(m, 0, 99)\n    \[xs, mutable_array_get(m, 0)\]\nf()"
- empty "fn f():\n    m = mutarray::from_list(\[\])\n    \[mutable_array_capacity(m), mutarray?(m)\]\nf()"
- hetero "fn f():\n    m = mutarray::from_list(\[\"x\", 1, true\])\n    \[mutable_array_get(m, 0), mutable_array_get(m, 1), mutable_array_get(m, 2)\]\nf()"
- pred "\[mutarray?(mutable_array_allocate(1)), mutarray?(\[1\]), mutarray?(1), mutarray?(\"s\"), mutarray?(true), mutarray?(mutarray::from_list(\[\]))\]"
+ order "xs = \[10, 20, 30\]\nm = mutable_array::from_list(xs)\n\[mutable_array::capacity(m), mutable_array::at(m, 0), mutable_array::at(m, 1), mutable_array::at(m, 2)\]"
+ mutate "fn f():\n    xs = \[1, 2, 3\]\n    m = mutable_array::from_list(xs)\n    mutable_array::set(m, 0, 99)\n    \[xs, mutable_array::at(m, 0)\]\nf()"
+ empty "fn f():\n    m = mutable_array::from_list(\[\])\n    \[mutable_array::capacity(m), mutarray?(m)\]\nf()"
+ hetero "fn f():\n    m = mutable_array::from_list(\[\"x\", 1, true\])\n    \[mutable_array::at(m, 0), mutable_array::at(m, 1), mutable_array::at(m, 2)\]\nf()"
+ pred "\[mutarray?(mutable_array::allocate(1)), mutarray?(\[1\]), mutarray?(1), mutarray?(\"s\"), mutarray?(true), mutarray?(mutable_array::from_list(\[\]))\]"
 } {
   puts "== $label"
   foreach b {interp compile cranelift-generic cranelift} {
@@ -76,15 +76,15 @@ foreach {label src} {
 }
 puts "=========== typing/inference"
 proc show {label script} { puts "== $label"; if {[catch {uplevel #0 $script} r]} {puts "ERR: [string range $r 0 250]"} else {puts $r} }
-show "maybe_capacity sig" {sig [compile "fn maybe_capacity(x):\n    if mutarray?(x):\n        mutable_array_capacity(x)\n    else:\n        0\nmaybe_capacity(1)"] maybe_capacity}
-show "capacity sig" {sig [compile "fn capacity(x):\n    mutable_array_capacity(x)\ncapacity(mutable_array_allocate(1))"] capacity}
-show "after-branch" {sig [compile "fn f(x):\n    if mutarray?(x):\n        0\n    mutable_array_capacity(x)\nf(mutable_array_allocate(1))"] f}
-show "nested alias" {last "fn f(x):\n    if mutarray?(x):\n        y = x\n        mutable_array_capacity(y)\n    else:\n        0\nf(1)"}
+show "maybe_capacity sig" {sig [compile "fn maybe_capacity(x):\n    if mutarray?(x):\n        mutable_array::capacity(x)\n    else:\n        0\nmaybe_capacity(1)"] maybe_capacity}
+show "capacity sig" {sig [compile "fn capacity(x):\n    mutable_array::capacity(x)\ncapacity(mutable_array::allocate(1))"] capacity}
+show "after-branch" {sig [compile "fn f(x):\n    if mutarray?(x):\n        0\n    mutable_array::capacity(x)\nf(mutable_array::allocate(1))"] f}
+show "nested alias" {last "fn f(x):\n    if mutarray?(x):\n        y = x\n        mutable_array::capacity(y)\n    else:\n        0\nf(1)"}
 show "mixed fnType" {fnType "fn f(x):\n    if mutarray?(x):\n        x\n    else:\n        0\nf(1)" f}
-show "record ctrl" {fnType "fn mkpair():\n    \[mutarray::from_list(\[1\]), 0\]\nfn first():\n    list_get(mkpair(), 0)\nfirst()" first}
-show "record ctrl2" {last "fn mkpair():\n    \[mutarray::from_list(\[1\]), 0\]\nfn first(p):\n    list_get(p, 0)\nfirst(mkpair())"}
-show "local record" {last "p = \[mutarray::from_list(\[1\]), 0\]\nlist_get(p, 0)"}
-show "append" {last "rows = list_append(\[mutarray::from_list(\[1\])\], mutarray::from_list(\[2\]))\nrows"}
+show "record ctrl" {fnType "fn mkpair():\n    \[mutable_array::from_list(\[1\]), 0\]\nfn first():\n    list::at(mkpair(), 0)\nfirst()" first}
+show "record ctrl2" {last "fn mkpair():\n    \[mutable_array::from_list(\[1\]), 0\]\nfn first(p):\n    list::at(p, 0)\nfirst(mkpair())"}
+show "local record" {last "p = \[mutable_array::from_list(\[1\]), 0\]\nlist::at(p, 0)"}
+show "append" {last "rows = list::append(\[mutable_array::from_list(\[1\])\], mutable_array::from_list(\[2\]))\nrows"}
 show "pred type" {last "mutarray?"}
 show "int pred type" {last "integer?"}
 show "pred call" {fnType "fn p(x):\n    mutarray?(x)\np(1)" p}

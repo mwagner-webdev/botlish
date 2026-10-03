@@ -115,18 +115,18 @@ proc genRealisticCsv {rows} {
 }
 
 # ---------------------------------------------------------------------------
-# Program text generators. Every program ends in a scalar (list_length, or a
+# Program text generators. Every program ends in a scalar (list::length, or a
 # small list of Ints/Strings) -- the native backend cannot return a
 # MutableArray-backed value straight to the host (see csv_records.bot's own
 # tables), so a bare csv_records(...) is never the program's final value.
 
 proc csvOnlyProgram {text} {
-    return "list_length(csv_parse([literal $text]))"
+    return "list::length(csv_parse([literal $text]))"
 }
 
 proc recordsProgram {text presized} {
     set ctor [expr {$presized ? "csv_records_presized" : "csv_records"}]
-    return "list_length(${ctor}([literal $text]))"
+    return "list::length(${ctor}([literal $text]))"
 }
 
 # Builds ROWS row tables (presized or not), then performs one lookup per row
@@ -140,7 +140,7 @@ proc lookupProgram {text cols presized} {
 fn lookupRow(rows, i, n):
     if i >= n:
         return unit
-    r = list_get(rows, i)
+    r = list::at(rows, i)
     ht_get(r, \"column0\")
     ht_get(r, \"column$mid\")
     ht_get(r, \"column$last\")
@@ -149,8 +149,8 @@ fn lookupRow(rows, i, n):
 
 fn f():
     rows = ${ctor}([literal $text])
-    lookupRow(rows, 0, list_length(rows))
-    list_length(rows)
+    lookupRow(rows, 0, list::length(rows))
+    list::length(rows)
 f()
 "
 }

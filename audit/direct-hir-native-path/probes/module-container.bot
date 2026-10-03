@@ -1,5 +1,5 @@
 # Container intrinsics reached through their module identity.
-a = mutarray::create(3, 0)
-mutable_array_set(a, 1, 7)
-b = mutarray::from_list([4, 5, 6])
-[mutable_array_get(a, 1), mutable_array_get(b, 2), mutable_array_capacity(a)]
+a = mutable_array::create(3, 0)
+mutable_array::set(a, 1, 7)
+b = mutable_array::from_list([4, 5, 6])
+[mutable_array::at(a, 1), mutable_array::at(b, 2), mutable_array::capacity(a)]

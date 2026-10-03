@@ -31,8 +31,12 @@ proc vtWrite {name content} {
     return [tcltest::makeFile $content $name]
 }
 set ::vtCounter 0
+# (Representation is this file's subject: an IndexNotFound obligation alone
+# does not reject -- helpers.tcl's compileWaivingIndexObligations.)
 proc vtHir {source} {
-    return [surface::readProgramFile [vtWrite vt-[incr ::vtCounter].bot $source]]
+    set path [vtWrite vt-[incr ::vtCounter].bot $source]
+    return [compileWaivingIndexObligations \
+        {surface::readProgramFile $path} {surface::readProgramFile $path -strict 0}]
 }
 # Probe programs run for a handful of iterations; tiny-leaf inlining is off so
 # every boundary under test stays a call.
@@ -283,7 +287,7 @@ test vt-branch-frontier-values {the branch probe agrees on every execution} -bod
 test vt-positional-list-uses-the-same-model {a fixed-shape positional product List is one more descriptor of the same transport model; arbitrary Lists never participate} -body {
     proc listChain {w e} {
         set idx [lrange {0 1 2 3 4 5 6 7 8 9} 0 [expr {$w - 1}]]
-        set uses [join [lmap i $idx {string cat "list_get(r, $i)"}] { + }]
+        set uses [join [lmap i $idx {string cat "list::at(r, $i)"}] { + }]
         set lit "\[[join [lmap i $idx {string cat "i + $i"}] {, }]\]"
         set chain "fn fwd0(r, k):\n    $uses + k\n"
         for {set k 1} {$k < $e} {incr k} { append chain "fn fwd${k}(r, k):\n    fwd[expr {$k - 1}](r, k)\n" }
@@ -430,8 +434,8 @@ test vt-nested-stored-inner {an inner value stored in a List keeps its own objec
     if i >= n:
         return acc
     r = {a: i, inner: {c: i + 2, d: i + 3}}
-    xs = list_append([], r.inner)
-    drive(i + 1, n, acc + r.a + list_length(xs))
+    xs = list::append([], r.inner)
+    drive(i + 1, n, acc + r.a + list::length(xs))
 drive(0, 10, 0)
 }
     list [vtValue $source] [vtOps $source]
@@ -454,8 +458,8 @@ test vt-nested-materialization-rebuilds {materializing an outer with an opened i
     if i >= n:
         return acc
     r = {a: i, inner: {c: i + 2, d: i + 3}}
-    xs = list_append([], r)
-    drive(i + 1, n, acc + r.a + r.inner.c + list_length(xs))
+    xs = list::append([], r)
+    drive(i + 1, n, acc + r.a + r.inner.c + list::length(xs))
 drive(0, 10, 0)
 }
     list [vtValue $source] [vtOps $source] [vtOps $source -struct-opt 0]
@@ -470,8 +474,8 @@ struct Seg:
     q: Pt
 fn run(i: int):
     s = Seg {p: Pt {x: i, y: 1}, q: Pt {x: 2, y: i}}
-    t = list_append([], s)
-    [s.p.x, s.q.y, list_get(t, 0), list_get(t, 0) == Seg {p: Pt {x: i, y: 1}, q: Pt {x: 2, y: i}}]
+    t = list::append([], s)
+    [s.p.x, s.q.y, list::at(t, 0), list::at(t, 0) == Seg {p: Pt {x: i, y: 1}, q: Pt {x: 2, y: i}}]
 run(7)
 }
     list [vtValue $source] [vtNew $source]
@@ -563,14 +567,14 @@ test vt-deterministic-planning {the plan is a pure function of the program: lowe
 # allocation site
 
 set vtGc(frontier-strings) {fn f0(r, k):
-    concat(r.a, r.b) + k
+    str::concat(r.a, r.b) + k
 fn f1(r, k):
     f0(r, k)
 fn f2(r, k):
     f1(r, k)
 fn run(i):
-    r = {a: concat("a", "b"), b: concat("c", "d"), c: i, d: [1, 2], e: concat("e", "f"), f: i + 1}
-    junk = [concat("j", "k"), concat("m", "n")]
+    r = {a: str::concat("a", "b"), b: str::concat("c", "d"), c: i, d: [1, 2], e: str::concat("e", "f"), f: i + 1}
+    junk = [str::concat("j", "k"), str::concat("m", "n")]
     local = r.c + r.f
     [local, r.d, r.e, junk, r.a]
 run(2)
@@ -584,34 +588,34 @@ fn f2(r, k):
 fn f3(r, k):
     f2(r, k)
 fn run(i):
-    r = {a: concat("a", "b"), b: i, c: [concat("x", "y")], d: i, e: i, f: concat("t", "u")}
-    junk = [concat("j", "k"), concat("m", "n"), concat("o", "p")]
+    r = {a: str::concat("a", "b"), b: i, c: [str::concat("x", "y")], d: i, e: i, f: str::concat("t", "u")}
+    junk = [str::concat("j", "k"), str::concat("m", "n"), str::concat("o", "p")]
     [f3(r, i), junk, r.c]
 run(2)
 }
 set vtGc(nested-strings) {fn mk(i):
-    {s: concat("a", "b"), inner: {t: concat("c", "d"), u: [concat("e", "f")]}, n: i}
+    {s: str::concat("a", "b"), inner: {t: str::concat("c", "d"), u: [str::concat("e", "f")]}, n: i}
 fn run(i):
     r = mk(i)
-    junk = [concat("j", "k"), concat("m", "n")]
+    junk = [str::concat("j", "k"), str::concat("m", "n")]
     [r.s, r.inner.t, r.inner.u, r.n, junk]
 run(4)
 }
 set vtGc(nested-list-mutarray) {fn mk(i):
-    m = mutarray::create(2, "z")
-    mutable_array_set(m, 0, concat("q", "r"))
-    {arr: m, inner: {items: [concat("a", "b"), concat("c", "d")], tag: concat("t", "g")}}
+    m = mutable_array::create(2, "z")
+    mutable_array::set(m, 0, str::concat("q", "r"))
+    {arr: m, inner: {items: [str::concat("a", "b"), str::concat("c", "d")], tag: str::concat("t", "g")}}
 fn run(i):
     r = mk(i)
-    junk = concat(concat("j", "k"), "m")
-    [mutable_array_get(r.arr, 0), r.inner.items, r.inner.tag, junk]
+    junk = str::concat(str::concat("j", "k"), "m")
+    [mutable_array::at(r.arr, 0), r.inner.items, r.inner.tag, junk]
 run(1)
 }
 set vtGc(nested-materialized-later) {fn run(i):
-    r = {s: concat("a", "b"), inner: {t: concat("c", "d"), u: [concat("e", "f")]}}
-    junk = [concat("j", "k"), concat("m", "n"), concat("o", "p")]
-    xs = list_append([], r)
-    [r.s, r.inner.t, list_get(xs, 0).inner.u, junk]
+    r = {s: str::concat("a", "b"), inner: {t: str::concat("c", "d"), u: [str::concat("e", "f")]}}
+    junk = [str::concat("j", "k"), str::concat("m", "n"), str::concat("o", "p")]
+    xs = list::append([], r)
+    [r.s, r.inner.t, list::at(xs, 0).inner.u, junk]
 run(1)
 }
 set vtGc(branch-specific) {fn f0(r, k):
@@ -623,8 +627,8 @@ fn f2(r, k):
 fn f3(r, k):
     f2(r, k)
 fn run(i):
-    r = {a: concat("a", "b"), b: i, c: i, d: i, e: i, f: concat("t", "u")}
-    junk = [concat("j", "k"), concat("m", "n")]
+    r = {a: str::concat("a", "b"), b: i, c: i, d: i, e: i, f: str::concat("t", "u")}
+    junk = [str::concat("j", "k"), str::concat("m", "n")]
     v = if i >= 2:
         f3(r, i)
     else:
@@ -635,8 +639,8 @@ run(3)
 set vtGc(cyclic) {fn spin(s, i, n):
     if i >= n:
         return [s.a, s.b, s.c]
-    spin({a: concat(s.a, "x"), b: s.b, c: [i]}, i + 1, n)
-spin({a: "a", b: concat("b", "c"), c: [0]}, 0, 3)
+    spin({a: str::concat(s.a, "x"), b: s.b, c: [i]}, i + 1, n)
+spin({a: "a", b: str::concat("b", "c"), c: [0]}, 0, 3)
 }
 foreach name [lsort [array names vtGc]] {
     test vt-gc-$name {pointer-bearing fields survive collection at every allocation site} -body {

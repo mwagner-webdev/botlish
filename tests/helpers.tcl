@@ -103,6 +103,25 @@ if {[info exists ::env(NATIVE_COVERAGE)] && [info commands ::CoverageTest] eq ""
     interp alias {} ::test {} ::CoverageTest
 }
 
+# The result of STRICT (a script compiling a program with -strict 1) -- or,
+# when the program's only rejection is an IndexNotFound obligation of
+# list::at/mutable_array::at (STDLIB-NAMESPACES.md: an index nothing proves
+# is UNHANDLED-ERROR, a provably missing one KNOWN-ERROR), the result of LAX
+# (the same compile with -strict 0). For the compile helpers of test files
+# whose subject is not error legality (types, facts, representation) and
+# whose programs index incidentally; every other rejection stays one, and
+# what the programs compute is unchanged.
+proc compileWaivingIndexObligations {strict lax} {
+    if {[catch {uplevel 1 $strict} result options]} {
+        set code [dict get $options -errorcode]
+        if {[lindex $code end] in {UNHANDLED-ERROR KNOWN-ERROR} && [string match *IndexNotFound* $result]} {
+            return [uplevel 1 $lax]
+        }
+        return -options $options $result
+    }
+    return $result
+}
+
 # Evaluates a program given as expressions; returns the formatted value.
 proc run {args} {
     return [core::formatValue [core::evalProgram $args]]
@@ -283,7 +302,7 @@ if {"test-log" ni [core::native::names]} {
     core::registerNative test-tick -arity 0 -impl testTickImpl
 
     # A second validator type on str, to combine evidence with Emailish.
-    # Its predicate also carries a -native-body (length(v) > 0, exactly the
+    # Its predicate also carries a -native-body (str::length(v) > 0, exactly the
     # Tcl validator above): an independent, generic proof that a
     # validator-backed named-type predicate can run on the native (Cranelift)
     # backend today, through the same mechanism NAME-agnostic native/lower.tcl
@@ -291,7 +310,7 @@ if {"test-log" ni [core::native::names]} {
     core::type::register NonEmpty -base str \
         -validator {apply {{v} {expr {[string length [core::value::strOf $v]] > 0}}}}
     core::type::definePredicate NonEmpty "" \
-        {block {v} {call {ref >} {call {ref length} {ref v}} {const 0}}}
+        {block {v} {call {ref >} {call {ref str::length} {ref v}} {const 0}}}
 
     # A native that breaks its declared contract: it claims to return a
     # UriQueryValue but returns a plain string.

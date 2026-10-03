@@ -25,17 +25,17 @@
 
 # The character at index, or "" past the end.
 fn peek(text, index):
-    if index >= length(text):
+    if index >= str::length(text):
         return ""
 
-    substring(text, index, index + 1)
+    str::substring(text, index, index + 1)
 
 # An unquoted field that started at start, scanned up to index:
 # {field, index of the "," or "\n" that ends it, or the end}.
 fn scan_unquoted(text, start, index):
     character = peek(text, index)
     if character == "" or character == "," or character == "\n":
-        return {field: substring(text, start, index), index: index}
+        return {field: str::substring(text, start, index), index: index}
 
     scan_unquoted(text, start, index + 1)
 
@@ -45,11 +45,11 @@ fn scan_quoted(text, index, field):
     character = peek(text, index)
     if character == "\"":
         if peek(text, index + 1) == "\"":
-            return scan_quoted(text, index + 2, concat(field, "\""))
+            return scan_quoted(text, index + 2, str::concat(field, "\""))
 
         return {field: field, index: index + 1}
 
-    scan_quoted(text, index + 1, concat(field, character))
+    scan_quoted(text, index + 1, str::concat(field, character))
 
 # The field starting at index: {field, index just after it}.
 fn scan_field(text, index):
@@ -62,7 +62,7 @@ fn scan_field(text, index):
 # {fields, stop: index just after the record's "\n", or the end}.
 fn scan_record(text, index, fields):
     scanned = scan_field(text, index)
-    more = list_append(fields, scanned.field)
+    more = list::append(fields, scanned.field)
     stop = scanned.index
     delimiter = peek(text, stop)
     if delimiter == ",":
@@ -75,11 +75,11 @@ fn scan_record(text, index, fields):
 
 # The records from index on, appended to records.
 fn scan_records(text, index, records):
-    if index >= length(text):
+    if index >= str::length(text):
         return records
 
     scanned = scan_record(text, index, [])
-    scan_records(text, scanned.stop, list_append(records, scanned.fields))
+    scan_records(text, scanned.stop, list::append(records, scanned.fields))
 
 fn csv_parse(text):
     scan_records(text, 0, [])

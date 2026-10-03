@@ -234,7 +234,7 @@ test checked-domain-q2-still-emits-both-checks {UPDATED BY M6: with that narrowe
 fn g(m) -> int errors TooLarge:
     checkedSmall(nonneg(m))
 fn h(s) -> int errors TooLarge:
-    g(length(s))
+    g(str::length(s))
 h(\"a long enough string\")"] "checkedSmall"]
     list [regexp -all {faildeclared 1 "TooSmall"} $body] \
             [regexp -all {faildeclared 2 "TooLarge"} $body]
@@ -442,7 +442,7 @@ test checked-domain-corpus-census-single-real-call-site {byte::from_int is calle
 # makes no production change, so both labels remain exactly as M4 left
 # them, and byte::set's own SetFromList call remains proven equality-total.
 
-test checked-domain-m4-control-byte-set-still-setfromlisttotal {byte::set's own immutable_set_from_list(bytes) call still lowers to the equality-total opcode -- M4 unaffected by this milestone} -body {
+test checked-domain-m4-control-byte-set-still-setfromlisttotal {byte::set's own immutable_set::from_list(bytes) call still lowers to the equality-total opcode -- M4 unaffected by this milestone} -body {
     set path [makeFile {additional_unreserved_chars = byte::set(['-', '.', '_', '~'])} q-m4-control.bot]
     try {
         set nirText [nirOfFile $path]

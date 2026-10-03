@@ -8,4 +8,4 @@ fn make():
         n * 2
     dbl
 d = make()
-[apply(inc, 1), apply(d, 4), apply(length, "abcd"), d(5)]
+[apply(inc, 1), apply(d, 4), apply(str::length, "abcd"), d(5)]

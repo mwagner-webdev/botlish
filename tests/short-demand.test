@@ -2,7 +2,7 @@
 #
 # A short-String position (a String parameter or result, a local) that has a
 # tier stays virtual only if it has at least one free use: a scalar consumer
-# (`length`, `==` on operands that could both be scalars) or a flow into another
+# (`str::length`, `==` on operands that could both be scalars) or a flow into another
 # position that is itself virtual and useful. A position every use of which
 # materializes it keeps the tagged String (reason `no-scalar-use`): a runtime
 # materialization costs an allocation and saves nothing -- the rule the struct
@@ -162,7 +162,7 @@ proc parity {text} {
 test sd-materialize-only-parameter-stays-tagged {a packed-eligible parameter whose only use is a List append keeps the tagged String: no asciitostr anywhere} -body {
     set text {
         fn keep(xs, s):
-            list_append(xs, s)
+            list::append(xs, s)
 
         [keep([], "ab"), keep([], "cd")]
     }
@@ -174,7 +174,7 @@ test sd-materialize-only-parameter-stays-tagged {a packed-eligible parameter who
 test sd-demand-off-keeps-it-virtual {-short-demand-opt 0 is the previous categorical behavior: the same parameter is packed and materialized at its use} -body {
     set text {
         fn keep(xs, s):
-            list_append(xs, s)
+            list::append(xs, s)
 
         [keep([], "ab"), keep([], "cd")]
     }
@@ -184,7 +184,7 @@ test sd-demand-off-keeps-it-virtual {-short-demand-opt 0 is the previous categor
 test sd-scalar-use-keeps-it-packed {one scalar consumer among tagged uses is enough: the parameter stays packed and materializes once} -body {
     set text {
         fn mixed(s, xs):
-            [length(s), list_append(xs, s), list_append(xs, s)]
+            [str::length(s), list::append(xs, s), list::append(xs, s)]
 
         mixed("xyz", [])
     }
@@ -195,7 +195,7 @@ test sd-scalar-use-keeps-it-packed {one scalar consumer among tagged uses is eno
 test sd-equality-is-a-scalar-use {== against a literal counts, so a parameter compared and then stored stays packed} -body {
     set text {
         fn tag(s, xs):
-            [s == "yes", list_append(xs, s)]
+            [s == "yes", list::append(xs, s)]
 
         [tag("yes", []), tag("no", [])]
     }
@@ -208,7 +208,7 @@ test sd-equality-with-an-unrestricted-string-is-not-a-scalar-use {s == t where t
         fn same(s, t):
             s == t
 
-        [same("ab", concat("a", "b")), same("", concat("", ""))]
+        [same("ab", str::concat("a", "b")), same("", str::concat("", ""))]
     }
     list [kindPlan $text] [parity $text]
 } -result {{{same<str, str>=val,val>val}} {value:[true, true]}}
@@ -219,7 +219,7 @@ test sd-equality-with-an-unrestricted-string-is-not-a-scalar-use {s == t where t
 test sd-forward-chain-with-a-consumer-is-virtual {f -> g -> h where h takes the length: every parameter on the chain stays packed} -body {
     set text {
         fn h(s):
-            length(s)
+            str::length(s)
 
         fn g(s):
             h(s)
@@ -235,7 +235,7 @@ test sd-forward-chain-with-a-consumer-is-virtual {f -> g -> h where h takes the 
 test sd-forward-chain-without-a-consumer-is-tagged {the same chain ending in a List append has no free use anywhere: all tagged} -body {
     set text {
         fn h(s):
-            list_append([], s)
+            list::append([], s)
 
         fn g(s):
             h(s)
@@ -272,7 +272,7 @@ test sd-result-with-a-scalar-caller-is-virtual {a result whose caller takes the 
             else:
                 "word"
 
-        [length(pick(true)), list_append([], pick(false))]
+        [str::length(pick(true)), list::append([], pick(false))]
     }
     set nir [nirOf $text]
     list [kindPlan $text] [countIn {asciitostr} $nir]
@@ -286,7 +286,7 @@ test sd-result-only-stored-is-tagged {a result every caller only stores stays a 
             else:
                 "word"
 
-        [list_append([], pick(true)), list_append([], pick(false))]
+        [list::append([], pick(true)), list::append([], pick(false))]
     }
     list [kindPlan $text] [countIn {asciitostr} [nirOf $text]]
 } -result {pick<bool>=val>val 0}
@@ -295,7 +295,7 @@ test sd-local-without-a-scalar-use-is-not-a-register {a local literal that is on
     set text {
         fn keep(xs):
             s = "hello"
-            list_append(xs, s)
+            list::append(xs, s)
 
         keep([])
     }
@@ -313,7 +313,7 @@ test sd-local-with-a-scalar-use-is-a-register {a local bound to a call result th
 
         fn probe(flag, t, xs):
             s = word(flag)
-            [s == t, list_append(xs, s)]
+            [s == t, list::append(xs, s)]
 
         [probe(true, "yes", []), probe(false, "yes", [])]
     }
@@ -327,10 +327,10 @@ test sd-local-with-a-scalar-use-is-a-register {a local bound to a call result th
 test sd-round-trip-parameter-stays-tagged {a one-character parameter used only by tagged operations (the refined-checks shape) keeps the tagged String: no strtoshort/shorttostr pair} -body {
     set text {
         fn classify(c):
-            is_tcl_alpha(c)
+            str::is_tcl_alpha(c)
 
         fn drive(t, i):
-            classify(substring(t, i, i + 1))
+            classify(str::substring(t, i, i + 1))
 
         [drive("a1", 0), drive("a1", 1)]
     }
@@ -341,7 +341,7 @@ test sd-round-trip-parameter-stays-tagged {a one-character parameter used only b
 test sd-non-ascii-scalar-parameter-with-consumers-stays-short {a ShortString1 parameter that is compared and measured keeps the scalar: shorteq and shortlen, no conversion} -body {
     set text {
         fn probe(c):
-            [c == "λ", length(c)]
+            [c == "λ", str::length(c)]
 
         [probe("λ"), probe("é")]
     }
@@ -355,10 +355,10 @@ test sd-non-ascii-scalar-parameter-with-consumers-stays-short {a ShortString1 pa
 test sd-region-companion-call-is-not-a-flow {text handed to a region-producing helper (a tagged companion call) does not count as a free use: the literal-fed parameter stays tagged, so no asciitostr runs inside the loop} -body {
     set text {
         fn peek(text, index):
-            if index >= length(text):
+            if index >= str::length(text):
                 return ""
 
-            substring(text, index, index + 1)
+            str::substring(text, index, index + 1)
 
         fn count_a(text, index, acc):
             c = peek(text, index)
@@ -380,7 +380,7 @@ test sd-region-companion-call-is-not-a-flow {text handed to a region-producing h
 test sd-env-switch {BOTLISH_NATIVE_SHORT_DEMAND_OPT=0 is the same switch} -body {
     set text {
         fn keep(xs, s):
-            list_append(xs, s)
+            list::append(xs, s)
 
         keep([], "ab")
     }
@@ -395,10 +395,10 @@ test sd-env-switch {BOTLISH_NATIVE_SHORT_DEMAND_OPT=0 is the same switch} -body 
 test sd-deterministic {the rule is a fixed function of the program: identical NIR twice} -body {
     set text {
         fn h(s):
-            [length(s), s == "ab"]
+            [str::length(s), s == "ab"]
 
         fn k(xs, s):
-            list_append(xs, s)
+            list::append(xs, s)
 
         [h("ab"), k([], "cd"), k([], "ef")]
     }

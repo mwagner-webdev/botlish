@@ -16,27 +16,27 @@
 
 # true if needle occurs in haystack starting at index.
 fn matches_at(haystack, needle, index):
-    end = index + length(needle)
-    if end > length(haystack):
+    end = index + str::length(needle)
+    if end > str::length(haystack):
         return false
 
-    substring(haystack, index, end) == needle
+    str::substring(haystack, index, end) == needle
 
 # haystack from index on with its matches replaced, appended to done;
 # unmatched text from run_start up to index has not been copied yet.
 fn replace_from(haystack, needle, replacement, index, run_start, done):
-    if index + length(needle) > length(haystack):
-        return concat(done, substring(haystack, run_start, length(haystack)))
+    if index + str::length(needle) > str::length(haystack):
+        return str::concat(done, str::substring(haystack, run_start, str::length(haystack)))
 
     if matches_at(haystack, needle, index):
-        copied = concat(done, substring(haystack, run_start, index))
-        after = index + length(needle)
-        return replace_from(haystack, needle, replacement, after, after, concat(copied, replacement))
+        copied = str::concat(done, str::substring(haystack, run_start, index))
+        after = index + str::length(needle)
+        return replace_from(haystack, needle, replacement, after, after, str::concat(copied, replacement))
 
     replace_from(haystack, needle, replacement, index + 1, run_start, done)
 
 fn replace(haystack, needle, replacement):
-    if length(needle) == 0:
+    if str::length(needle) == 0:
         return haystack
 
     replace_from(haystack, needle, replacement, 0, 0, "")

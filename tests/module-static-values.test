@@ -144,7 +144,7 @@ test module-static-refined-checks-block-allocations {bench/refined-checks.ir's o
 # milestone)". That work is exactly what the exact-callable milestone did
 # (the key keeps the predicate's identity), so the callvalue is gone; the
 # opt-off flag still reproduces the old indirect call.
-test module-static-check-callvalue-gone {scan_while's predicate parameter is no longer a dynamic call: both predicates (local_char? and is_tcl_alpha) are exact targets of their call sites} -body {
+test module-static-check-callvalue-gone {scan_while's predicate parameter is no longer a dynamic call: both predicates (local_char? and str::is_tcl_alpha) are exact targets of their call sites} -body {
     core::loadLibrary web
     set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set nir [native::nir $hir]
@@ -175,7 +175,7 @@ test module-static-emailish-parity {web::emailish? agrees on every backend, modu
 
 test module-static-captures-empty-for-static-only {a function that references only a module static has an empty capture set (hir::captures), the reference itself recorded as staticRefs instead} -body {
     withScratchLibrary {
-        writeModule $dir m "namespace m\n\nv = \[1, 2, 3\]\n\nfn f(x):\n    x + list_length(v)\n"
+        writeModule $dir m "namespace m\n\nv = \[1, 2, 3\]\n\nfn f(x):\n    x + list::length(v)\n"
         set main [writeMain $dir "m::f(1)\n"]
         set hir [surface::readProgramFile $main -strict 0]
         set fExpr [moduleBlockOf $hir m f]
@@ -207,7 +207,7 @@ test module-static-real-capture-plus-static-coexist {a nested function referenci
 
 test module-static-two-functions-share-slot {two functions each referencing the same module value never duplicate its storage: one List allocation total (v's own), shared by both} -body {
     withScratchLibrary {
-        writeModule $dir m "namespace m\n\nv = \[1, 2, 3\]\n\nfn f():\n    list_length(v)\n\nfn g():\n    list_length(v)\n"
+        writeModule $dir m "namespace m\n\nv = \[1, 2, 3\]\n\nfn f():\n    list::length(v)\n\nfn g():\n    list::length(v)\n"
         set main [writeMain $dir "m::f() + m::g()\n"]
         set hir [surface::readProgramFile $main -strict 0]
         set report [native::allocationReport $hir summary 1]
@@ -223,7 +223,7 @@ test module-static-two-functions-share-slot {two functions each referencing the 
 test module-static-cross-module-reference {module B's function reaches module A's own retained value as a direct static reference, on every backend} -body {
     withScratchLibrary {
         writeModule $dir a "namespace a\n\nshared = \[10, 20, 30\]\n"
-        writeModule $dir b "namespace b\n\nfn total():\n    list_length(a::shared)\n"
+        writeModule $dir b "namespace b\n\nfn total():\n    list::length(a::shared)\n"
         set main [writeMain $dir "b::total()\n"]
         set hir [surface::readProgramFile $main -strict 0]
         set exprs [hir::lower $hir]
@@ -294,7 +294,7 @@ test module-static-negative-control-real-closure {a genuine activation-dependent
 } -result {{int 0} 1 1}
 
 test module-static-entry-toplevel-binding-still-captures {an ordinary (non-module) entry-program top-level binding is out of this milestone's scope: it still becomes a genuine lexical capture, exactly as before} -body {
-    set text "v = \[1, 2, 3\]\n\nfn f():\n    list_length(v)\n\nf()"
+    set text "v = \[1, 2, 3\]\n\nfn f():\n    list::length(v)\n\nf()"
     set hir [sourceHir $text]
     set fExpr ""
     foreach e [hirFind $hir block] {
@@ -314,7 +314,7 @@ test module-static-entry-toplevel-binding-still-captures {an ordinary (non-modul
 
 test module-static-gc-stress-envless-reader {a module-static managed value (List) is read correctly, many times, from an envless function, under GC stress (many intervening allocations)} -body {
     withScratchLibrary {
-        writeModule $dir m "namespace m\n\nv = \[1, 2, 3, 4, 5\]\n\nfn touch(x):\n    x + list_length(v)\n"
+        writeModule $dir m "namespace m\n\nv = \[1, 2, 3, 4, 5\]\n\nfn touch(x):\n    x + list::length(v)\n"
         set main [writeMain $dir "fn drive(i, total, acc):\n    if i >= total:\n        return acc\n    drive(i + 1, total, acc + m::touch(i))\n\ndrive(0, 500, 0)\n"]
         set hir [surface::readProgramFile $main -strict 0]
         underGcStress {native::evalHir $hir}
@@ -324,7 +324,7 @@ test module-static-gc-stress-envless-reader {a module-static managed value (List
 test module-static-gc-stress-mixed-closure {a static reference and a real activation-local capture coexisting inside one closure both stay correct under GC stress} -body {
     withScratchLibrary {
         writeModule $dir m "namespace m\n\nv = \[1, 2, 3\]\n\nfn combine(a, b):\n    a + b\n"
-        set main [writeMain $dir "fn outer(x):\n    fn inner():\n        m::combine(list_length(\[1,2,3,4,5,6,7,8\]), x)\n    inner()\n\nfn drive(i, total, acc):\n    if i >= total:\n        return acc\n    drive(i + 1, total, acc + outer(i))\n\ndrive(0, 300, 0)\n"]
+        set main [writeMain $dir "fn outer(x):\n    fn inner():\n        m::combine(list::length(\[1,2,3,4,5,6,7,8\]), x)\n    inner()\n\nfn drive(i, total, acc):\n    if i >= total:\n        return acc\n    drive(i + 1, total, acc + outer(i))\n\ndrive(0, 300, 0)\n"]
         set hir [surface::readProgramFile $main -strict 0]
         underGcStress {native::evalHir $hir}
     }

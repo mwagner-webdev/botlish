@@ -71,29 +71,29 @@ test exact-callable-executable-botlish {an exact Botlish block called through a 
 test exact-callable-executable-native {an exact native called through a helper's parameter over a StringRegion} -constraints executableAot -body {
     aotParity {
         fn count_while(p, s):
-            loop i from 0 to length(s):
-                if p(substring(s, i, i + 1)):
+            loop i from 0 to str::length(s):
+                if p(str::substring(s, i, i + 1)):
                     continue
                 return i
-            length(s)
+            str::length(s)
 
-        [count_while(is_tcl_alpha, "abc1"), count_while(is_tcl_alnum, "ab1_")]
+        [count_while(str::is_tcl_alpha, "abc1"), count_while(str::is_tcl_alnum, "ab1_")]
     }
 } -result {[3, 3]}
 
 test exact-callable-executable-mixed {one helper, an exact Botlish block and an exact native: two exact instances} -constraints executableAot -body {
     aotParity {
         fn bot_alpha(c: str):
-            is_tcl_alpha(c) or c == "_"
+            str::is_tcl_alpha(c) or c == "_"
 
         fn count_while(p, s):
-            loop i from 0 to length(s):
-                if p(substring(s, i, i + 1)):
+            loop i from 0 to str::length(s):
+                if p(str::substring(s, i, i + 1)):
                     continue
                 return i
-            length(s)
+            str::length(s)
 
-        [count_while(bot_alpha, "ab_c1"), count_while(is_tcl_alpha, "abc1")]
+        [count_while(bot_alpha, "ab_c1"), count_while(str::is_tcl_alpha, "abc1")]
     }
 } -result {[4, 3]}
 
@@ -101,10 +101,13 @@ test exact-callable-executable-capturing {an exact value-capturing closure (Stri
     aotParity {
         fn run(tag: str, words: List[str], n: int):
             fn heavy(x: str):
-                length(concat(tag, x)) > length(list_get(words, 0)) + n
+                w = list::at(words, 0):
+                    on IndexNotFound:
+                        ""
+                str::length(str::concat(tag, x)) > str::length(w) + n
             fn first(p, xs: List[str]):
                 loop x in xs:
-                    if p(concat(x, tag)):
+                    if p(str::concat(x, tag)):
                         return x
                 ""
             first(heavy, ["a", "bbbb", "ccccccc"])
@@ -115,16 +118,16 @@ test exact-callable-executable-capturing {an exact value-capturing closure (Stri
 
 test exact-callable-executable-refined-checks-scan {refined-checks' scan_while shape (a de-closured closure with two exact predicates, one a capturing Botlish block, one a native) as an executable} -constraints executableAot -body {
     aotParity {
-        local_extra_chars = immutable_set_from_list([".", "_", "%", "+", "-"])
+        local_extra_chars = immutable_set::from_list([".", "_", "%", "+", "-"])
 
         fn my_emailish?(v: str):
-            n = length(v)
+            n = str::length(v)
             fn char_at(i):
-                substring(v, i, i + 1)
+                str::substring(v, i, i + 1)
             fn local_char?(c: str):
-                is_tcl_alnum(c) or immutable_set_contains(local_extra_chars, c)
+                str::is_tcl_alnum(c) or immutable_set::contains(local_extra_chars, c)
             fn label_char?(c):
-                is_tcl_alnum(c) or c == "-"
+                str::is_tcl_alnum(c) or c == "-"
             fn scan_while(start: int, predicate):
                 loop i from start to n:
                     if predicate(char_at(i)):
@@ -132,7 +135,7 @@ test exact-callable-executable-refined-checks-scan {refined-checks' scan_while s
                     return i
                 n
             fn tld?(i):
-                e = scan_while(i, is_tcl_alpha)
+                e = scan_while(i, str::is_tcl_alpha)
                 if e == n:
                     e - i >= 2
                 else:

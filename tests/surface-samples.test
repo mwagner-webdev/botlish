@@ -142,7 +142,7 @@ test surface-run-evaluation-order {arguments evaluate left to right} -body {
 } -result {3 {1 2 3}}
 
 test surface-run-strings {string escapes reach the runtime} -body {
-    runSource "\[length(\"a\\tb\"), length(\"q\\\"\"), length(\"\\\\\"), length(\"\")\]"
+    runSource "\[str::length(\"a\\tb\"), str::length(\"q\\\"\"), str::length(\"\\\\\"), str::length(\"\")\]"
 } -result {[3, 2, 1, 0]}
 
 test surface-run-duplicate-in-branch {same-scope rebinding in a branch is invalid} -body {

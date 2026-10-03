@@ -151,9 +151,9 @@ namespace eval core::native {
     #   structural-equality  compares values of any kinds structurally
     #   evidence             reads or attaches refinement evidence
     #   mutarray-alloc       allocates a new MutableArray, or a List by
-    #                        finalizing one (mutable_array_freeze)
+    #                        finalizing one (mutable_array::freeze)
     #   mutarray-mutate      mutates a MutableArray's slots in place
-    #                        (mutable_array_set, mutable_array_copy)
+    #                        (mutable_array::set, mutable_array::copy)
     #   hash                 computes a semantic hash of a value, recursing
     #                        into any List/Result payload the way
     #                        structural-equality does (core/hashing.tcl) --
@@ -325,7 +325,7 @@ proc core::native::ValidShape {shape count} {
         # type whose own domain admits every value in LO..HI, the result is
         # additionally NAME-typed. NAME is resolved lazily by hir::types::
         # ShapeResult at type-inference time (never here at registration
-        # time, since a native like encode_utf8 is registered once at core
+        # time, since a native like str::encode_utf8 is registered once at core
         # bootstrap, long before a compiling program's own `type NAME = ...`
         # declaration -- e.g. lib/byte.bot's Byte -- has been parsed; NAME
         # is just a symbolic reference until then). Resolving the name is
@@ -419,6 +419,25 @@ proc core::native::names {} {
 proc core::native::isQualifiedNative {name} {
     variable registry
     return [expr {[string first :: $name] > 0 && [dict exists $registry $name]}]
+}
+
+# The member names of the qualified root natives that live directly in
+# namespace NS (`list` -> at append length; `linux::abi` -> syscall), sorted:
+# the intrinsic members of NS, which no module source may define
+# (surface/modules.tcl's DUPLICATE-NATIVE) and which a reference
+# NS::MEMBER always denotes. Empty for a namespace with none.
+proc core::native::qualifiedMembers {ns} {
+    variable registry
+    set members {}
+    foreach name [dict keys $registry] {
+        if {[string first ${ns}:: $name] == 0} {
+            set member [string range $name [string length ${ns}::] end]
+            if {$member ne "" && [string first :: $member] < 0} {
+                lappend members $member
+            }
+        }
+    }
+    return [lsort $members]
 }
 
 # Declares ALIASNAME a second, purely compile-time spelling of the already-
@@ -554,3 +573,14 @@ proc core::native::invoke {nativeValue argValues} {
     }
     return [core::completion::normal $result]
 }
+
+# The runtime's builtin errors, in their fixed index order
+# (builtinErrorIndex): native/lower.tcl's ErrorId and native/src/runtime/
+# error.rs's ERR_* constants are both keyed to these indices, so the order
+# is declared once, here, never by whichever file happens to load first.
+#   InvalidArgumentEncoding  argv() (core/process.tcl; ARGV.md)
+#   IndexNotFound            list::at, mutable_array::at: the index does not
+#                            designate an element (core/lists.tcl,
+#                            core/mutarray.tcl; STDLIB-NAMESPACES.md)
+core::native::declareError InvalidArgumentEncoding
+core::native::declareError IndexNotFound

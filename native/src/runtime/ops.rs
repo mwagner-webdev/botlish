@@ -40,13 +40,15 @@
 //! | rt_str_region_is_tcl_alnum | Str,Int,Int (region, 1 scalar) | Bool; RANGE | no    |
 //! | rt_list_new            | count, *Value       | List                         | yes       |
 //! | rt_list_len            | List                | Int                          | no        |
-//! | rt_list_get            | List, Int           | element; RANGE               | no        |
+//! | rt_list_get            | List, Int           | element; declared            | no        |
+//! |                        |                     | IndexNotFound (list::at)     |           |
 //! | rt_list_append         | List, any           | new List (copy)              | yes       |
 //! | rt_set_from_list       | List                | ImmutableSet; EQUALITY       | yes       |
 //! | rt_set_contains        | ImmutableSet, any   | Bool; EQUALITY               | no        |
 //! | rt_mutarray_allocate   | count                | MutableArray (slots = UNIT)  | yes       |
 //! | rt_mutarray_capacity   | MutableArray         | Int                          | no        |
-//! | rt_mutarray_get        | MutableArray, Int    | element; RANGE               | no        |
+//! | rt_mutarray_get        | MutableArray, Int    | element; declared            | no        |
+//! |                        |                      | IndexNotFound (mutable_array::at) |      |
 //! | rt_mutarray_set        | MutableArray,Int,any | Unit; RANGE                  | no        |
 //! | rt_mutarray_copy       | dst,i,src,i,count    | Unit; RANGE                  | no        |
 //! | rt_mutarray_freeze     | MutableArray, Int    | List (copy); RANGE           | yes       |
@@ -617,7 +619,7 @@ pub extern "C" fn rt_substr(p: *mut Vm, s: Value, start: Value, end: Value) -> V
         _ => {
             // Outside the range (big Ints always are): the reference message.
             let (from, to) = (int_to_big(start), int_to_big(end));
-            let message = format!("substring: range {from}..{to} is outside 0..{len}");
+            let message = format!("str::substring: range {from}..{to} is outside 0..{len}");
             return vm(p).fail(RtError::Semantic { kind: "RANGE", message });
         }
     };
@@ -674,7 +676,7 @@ pub extern "C" fn rt_str_region_check(p: *mut Vm, s: Value, start: Value, end: V
         (Some(from), Some(to)) if from >= 0 && from <= to && to <= len => UNIT,
         _ => {
             let (from, to) = (int_to_big(start), int_to_big(end));
-            let message = format!("substring: range {from}..{to} is outside 0..{len}");
+            let message = format!("str::substring: range {from}..{to} is outside 0..{len}");
             vm(p).fail(RtError::Semantic { kind: "RANGE", message })
         }
     }
@@ -1017,7 +1019,7 @@ fn one_scalar(p: *mut Vm, s: Value, native: &str) -> Result<char, Value> {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_is_tcl_alpha(p: *mut Vm, s: Value) -> Value {
-    match one_scalar(p, s, "is_tcl_alpha") {
+    match one_scalar(p, s, "str::is_tcl_alpha") {
         Ok(c) => bool_value(tcl_alpha_char(c)),
         Err(no_value) => no_value,
     }
@@ -1025,7 +1027,7 @@ pub extern "C" fn rt_is_tcl_alpha(p: *mut Vm, s: Value) -> Value {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_is_tcl_alnum(p: *mut Vm, s: Value) -> Value {
-    match one_scalar(p, s, "is_tcl_alnum") {
+    match one_scalar(p, s, "str::is_tcl_alnum") {
         Ok(c) => bool_value(tcl_alnum_char(c)),
         Err(no_value) => no_value,
     }
@@ -1067,7 +1069,7 @@ fn region_one_scalar(p: *mut Vm, base: Value, start: Value, end: Value, native: 
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_str_region_is_tcl_alpha(p: *mut Vm, base: Value, start: Value, end: Value) -> Value {
-    match region_one_scalar(p, base, start, end, "is_tcl_alpha") {
+    match region_one_scalar(p, base, start, end, "str::is_tcl_alpha") {
         Ok(c) => bool_value(tcl_alpha_char(c)),
         Err(no_value) => no_value,
     }
@@ -1075,7 +1077,7 @@ pub extern "C" fn rt_str_region_is_tcl_alpha(p: *mut Vm, base: Value, start: Val
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_str_region_is_tcl_alnum(p: *mut Vm, base: Value, start: Value, end: Value) -> Value {
-    match region_one_scalar(p, base, start, end, "is_tcl_alnum") {
+    match region_one_scalar(p, base, start, end, "str::is_tcl_alnum") {
         Ok(c) => bool_value(tcl_alnum_char(c)),
         Err(no_value) => no_value,
     }
@@ -1107,16 +1109,27 @@ pub extern "C" fn rt_list_len(p: *mut Vm, l: Value) -> Value {
     vm(p).new_int(list_of(l).len as i64)
 }
 
+/// `list::at` / `mutable_array::at` with an Int index that designates no
+/// element: records the declared builtin error IndexNotFound (its NIR id as
+/// the pending declared error, plus an UNCAUGHT-ERROR fallback for the
+/// program boundary, exactly like `rt_fail_declared` and `rt_argv`) and
+/// returns NO_VALUE. A `handle` with `on IndexNotFound:` catches it like any
+/// declared error (STDLIB-NAMESPACES.md); every other failure of these
+/// operations (a wrong-kind argument) is an ordinary semantic error raised
+/// before the call by the caller's kind guards.
+fn index_not_found(p: *mut Vm) -> Value {
+    let vm = vm(p);
+    vm.declared_error = super::error::ERR_INDEX_NOT_FOUND;
+    let message = "uncaught propagated error: <error IndexNotFound>".to_string();
+    vm.fail(RtError::Semantic { kind: "UNCAUGHT-ERROR", message })
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_list_get(p: *mut Vm, l: Value, index: Value) -> Value {
     let items = list_of(l).items();
     match int_small(index) {
         Some(i) if i >= 0 && (i as usize) < items.len() => items[i as usize],
-        _ => {
-            let message =
-                format!("list_get: index {} is outside 0..{}", int_to_big(index), items.len() as i64 - 1);
-            vm(p).fail(RtError::Semantic { kind: "RANGE", message })
-        }
+        _ => index_not_found(p),
     }
 }
 
@@ -1225,7 +1238,7 @@ pub extern "C" fn rt_mutarray_allocate(p: *mut Vm, capacity: Value) -> Value {
         Some(n) if n >= 0 => vm(p).new_mutarray(n as usize),
         _ => {
             let message = format!(
-                "mutable_array_allocate: capacity must be 0..{MAX_COLLECTION_LENGTH}, got {}",
+                "mutable_array::allocate: capacity must be 0..{MAX_COLLECTION_LENGTH}, got {}",
                 int_to_big(capacity)
             );
             vm(p).fail(RtError::Semantic { kind: "RANGE", message })
@@ -1247,11 +1260,7 @@ pub extern "C" fn rt_mutarray_get(p: *mut Vm, arr: Value, index: Value) -> Value
             vm(p).metrics.record_mutarray_read();
             v
         }
-        _ => {
-            let message =
-                format!("mutable_array_get: index {} is outside 0..{}", int_to_big(index), slots.len() as i64 - 1);
-            vm(p).fail(RtError::Semantic { kind: "RANGE", message })
-        }
+        _ => index_not_found(p),
     }
 }
 
@@ -1266,7 +1275,7 @@ pub extern "C" fn rt_mutarray_set(p: *mut Vm, arr: Value, index: Value, value: V
         }
         _ => {
             let len = obj.slots.len();
-            let message = format!("mutable_array_set: index {} is outside 0..{}", int_to_big(index), len as i64 - 1);
+            let message = format!("mutable_array::set: index {} is outside 0..{}", int_to_big(index), len as i64 - 1);
             vm(p).fail(RtError::Semantic { kind: "RANGE", message })
         }
     }
@@ -1276,7 +1285,7 @@ fn invalid_copy_range(p: *mut Vm, dst: Value, dst_start: Value, src: Value, src_
     let dst_len = mutarray_of(dst).slots.len();
     let src_len = mutarray_of(src).slots.len();
     let message = format!(
-        "mutable_array_copy: range dstStart={}, srcStart={}, count={} is invalid for dst capacity {dst_len}, src capacity {src_len}",
+        "mutable_array::copy: range dstStart={}, srcStart={}, count={} is invalid for dst capacity {dst_len}, src capacity {src_len}",
         int_to_big(dst_start), int_to_big(src_start), int_to_big(count)
     );
     vm(p).fail(RtError::Semantic { kind: "RANGE", message })
@@ -1326,14 +1335,14 @@ pub extern "C" fn rt_mutarray_freeze(p: *mut Vm, arr: Value, count: Value) -> Va
         }
         _ => {
             let message =
-                format!("mutable_array_freeze: count {} is outside 0..{}", int_to_big(count), slots.len());
+                format!("mutable_array::freeze: count {} is outside 0..{}", int_to_big(count), slots.len());
             vm(p).fail(RtError::Semantic { kind: "RANGE", message })
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// UnicodeChar (char::codepoint/char_codepoint, core/unicodechar.tcl): total,
+// UnicodeChar (char::scalar_value, wrapped by char::codepoint, core/unicodechar.tcl): total,
 // never fails. A Unicode scalar value is always <= 0x10FFFF, well inside the
 // small-Int range, so the result is always an immediate small Int -- no
 // allocation, matching the operand it reads from (see runtime/value.rs's
@@ -2117,6 +2126,37 @@ mod tests {
         vm.declared_error = 0;
         assert_eq!(rt_argv(&mut *vm), NO_VALUE);
         assert_eq!(vm.declared_error, crate::runtime::error::ERR_INVALID_ARGUMENT_ENCODING);
+    }
+
+    // -----------------------------------------------------------------------
+    // list::at / mutable_array::at (STDLIB-NAMESPACES.md): an index that
+    // designates no element -- past the end, negative, a BigInt -- is the
+    // builtin declared error IndexNotFound, never RANGE.
+
+    #[test]
+    fn indexed_reads_fail_with_index_not_found() {
+        let mut vm = vm();
+        let list = vm.new_list(vec![small(10), small(20)]);
+        assert_eq!(small_of(rt_list_get(&mut *vm, list, small(1))), 20);
+        assert_eq!(vm.declared_error, 0);
+        let arr = rt_mutarray_allocate(&mut *vm, small(2));
+        rt_mutarray_set(&mut *vm, arr, small(0), small(7));
+        assert_eq!(small_of(rt_mutarray_get(&mut *vm, arr, small(0))), 7);
+        let big = vm.new_big(num_bigint::BigInt::from(1u8) << 80);
+        for index in [small(2), small(-1), big] {
+            let reads: [(extern "C" fn(*mut Vm, Value, Value) -> Value, Value); 2] =
+                [(rt_list_get, list), (rt_mutarray_get, arr)];
+            for (read, container) in reads {
+                assert_eq!(read(&mut *vm, container, index), NO_VALUE);
+                assert_eq!(vm.declared_error, crate::runtime::error::ERR_INDEX_NOT_FOUND);
+                assert_eq!(
+                    vm.error.as_ref().map(|e| (e.error_code(), e.message())),
+                    Some((vec!["CORE", "SEMANTIC", "UNCAUGHT-ERROR"], "uncaught propagated error: <error IndexNotFound>".to_string()))
+                );
+                vm.error = None;
+                vm.declared_error = 0;
+            }
+        }
     }
 
     #[test]

@@ -301,7 +301,7 @@ test emailish-predicate-no-anonymous-callee-instance {no anonymous (unnamed) cal
 
 # EXACT-CALLABLE-CLOSED-CALLER.md: still one instance per scanner helper
 # except where the milestone intends more -- scan_while has one codegen
-# instance per exact predicate target (local_char?, is_tcl_alpha), plus the
+# instance per exact predicate target (local_char?, str::is_tcl_alpha), plus the
 # generic entry its Block value would need (it is de-closure-converted, so
 # that one is never emitted), and local_char? keeps its generic instance for
 # the Block value passed as an argument next to its exact-call instance. The
@@ -311,7 +311,7 @@ test emailish-predicate-no-anonymous-callee-instance {no anonymous (unnamed) cal
 # scan_while are called with Ints, so their calls select <int> instances and
 # each keeps its never-entered generic Block-value entry (dormant, not
 # emitted); scan_while also keeps the instance only tld?<generic> calls
-# (scan_while<any, native(is_tcl_alpha)>, dormant too).
+# (scan_while<any, native(str::is_tcl_alpha)>, dormant too).
 test emailish-predicate-check-scanner-instance-count {every scanner helper (and web::emailish? itself) is one emitted instance plus, for the Int-keyed closures, the never-entered generic entry; scan_while has one per exact predicate target, the generic entry and the instance only the dormant tld?<generic> reaches; local_char? its exact-call instance plus the generic Block-value entry} -body {
     set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set spec [hir::specialize::analyze $hir]

@@ -5,21 +5,21 @@
 
 fn run(v):
     fn walk(i, p):
-        if i >= length(v):
+        if i >= str::length(v):
             return i
-        if p(substring(v, i, i + 1)):
+        if p(str::substring(v, i, i + 1)):
             return walk(i + 1, p)
         i
     fn depth(i, p):
-        if i >= length(v):
+        if i >= str::length(v):
             return 0
-        if p(substring(v, i, i + 1)):
+        if p(str::substring(v, i, i + 1)):
             return 1 + depth(i + 1, p)
         0
     fn a():
-        walk(0, is_tcl_alpha)
+        walk(0, str::is_tcl_alpha)
     fn b():
-        walk(0, is_tcl_alnum)
-    [a(), b(), depth(0, is_tcl_alpha), depth(0, is_tcl_alnum), walk(1, is_tcl_alnum)]
+        walk(0, str::is_tcl_alnum)
+    [a(), b(), depth(0, str::is_tcl_alpha), depth(0, str::is_tcl_alnum), walk(1, str::is_tcl_alnum)]
 
 run("ab1_")

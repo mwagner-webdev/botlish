@@ -11,7 +11,7 @@
 # Sections (semantic types of the source HIR, before specialization):
 #   literals   every list literal of two or more elements, with the static
 #              type of each element and whether the element types agree
-#   reads      every list_get whose index is an integer literal, with the
+#   reads      every list::at whose index is an integer literal, with the
 #              receiver's static type and the result type; "lost" when the
 #              receiver is List[any] (the positional slot type is gone)
 #   structs    every struct literal / projection (after the refactor)
@@ -63,12 +63,12 @@ foreach path $programs {
             set same [expr {[llength [lsort -unique $ts]] == 1 ? "homogeneous" : "HETEROGENEOUS"}]
             dict set literals $key "[llength $args] elements $same : [join $ts { | }]"
         }
-        if {$name eq "list_get"} {
+        if {$name eq "list::at"} {
             set idx [lindex $args 1]
             if {[hir::kind $hir $idx] ne "const"} continue
             set recv [T $hir [lindex $args 0]]
             set lost [expr {$recv in {List[any] list any} ? "lost" : "kept"}]
-            dict set reads $key "list_get(receiver $recv, index [hir::get $hir $idx value]) -> [T $hir $e] ($lost)"
+            dict set reads $key "list::at(receiver $recv, index [hir::get $hir $idx value]) -> [T $hir $e] ($lost)"
         }
     }
 }
@@ -85,7 +85,7 @@ set het 0
 dict for {k v} $literals { if {[string match *HETEROGENEOUS* $v]} { incr het } }
 puts $out "# heterogeneous literals: $het of [dict size $literals]"
 puts $out ""
-emit $out "list_get with a literal index" $reads
+emit $out "list::at with a literal index" $reads
 set lost 0
 dict for {k v} $reads { if {[string match *(lost) $v]} { incr lost } }
 puts $out "# literal-index reads whose receiver type lost its element types: $lost of [dict size $reads]"

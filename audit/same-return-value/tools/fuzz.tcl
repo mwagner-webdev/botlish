@@ -13,7 +13,7 @@
 #   binding            r = mk(p0) ... return r      key bind:r (the same binding)
 #   alias of binding   s = r ... return s           key bind:r
 #   call               return mk(p0)                no key: each one is unique
-#   mutable            return mutable_array_allocate(1)   no key: unique
+#   mutable            return mutable_array::allocate(1)   no key: unique
 #   unreachable        if 1 == 2: return 2          contributes nothing
 #   range-unreachable  if p0 < 0: if p0 > 5: return 2   contributes nothing
 #
@@ -94,7 +94,7 @@ fn mk(a):
             bind    { set expr [list r bind:r] }
             alias   { set expr [list s bind:r] }
             call    { set expr [list "mk(p0)" unique:$i] }
-            mutable { set expr [list "mutable_array_allocate(1)" unique:$i] }
+            mutable { set expr [list "mutable_array::allocate(1)" unique:$i] }
         }
         lassign $expr text key
         if {$last && rand() < 0.5} {

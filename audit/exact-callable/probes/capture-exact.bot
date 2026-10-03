@@ -5,7 +5,7 @@
 
 fn run(s, items, n):
     fn longer(x):
-        length(x) > length(s) + n
+        str::length(x) > str::length(s) + n
     fn first_match(p, xs):
         loop x in xs:
             if p(x):

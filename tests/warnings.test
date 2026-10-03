@@ -273,31 +273,31 @@ test warn-repeated-arithmetic-on-unknown {x + 1 returned twice is not an exact v
 test warn-separate-mutable-construction {two separately allocated mutable values are two values} -body {
     codes {fn f(x):
     if x:
-        return mutable_array_allocate(1)
+        return mutable_array::allocate(1)
     if x == 3:
-        return mutable_array_allocate(1)
-    mutable_array_allocate(2)}
+        return mutable_array::allocate(1)
+    mutable_array::allocate(2)}
 } -result {}
 
 test warn-same-mutable-binding {the exact same mutable binding returned twice IS one value identity} -body {
     shown {fn f(x):
-    m = mutable_array_allocate(1)
+    m = mutable_array::allocate(1)
     if x:
         return m
     if x == 3:
         return m
-    mutable_array_allocate(2)}
+    mutable_array::allocate(2)}
 } -result {{the value of `m` is returned from 2 distinct exits @ 4:9 6:9}}
 
 test warn-alias-of-mutable-binding {an alias of a mutable binding is the same mutable value} -body {
     shown {fn f(x):
-    m = mutable_array_allocate(1)
+    m = mutable_array::allocate(1)
     n = m
     if x:
         return m
     if x == 3:
         return n
-    mutable_array_allocate(2)}
+    mutable_array::allocate(2)}
 } -result {{the value of `m` is returned from 2 distinct exits @ 5:9 7:9}}
 
 # ---------------------------------------------------------------------------

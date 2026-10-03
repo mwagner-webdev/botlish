@@ -8,7 +8,7 @@ proc typeOfDriver {name driver} {
 foreach {label d} {
   str   {geo_finish(geo_append(geo_new("a"), 1, "b"), 2)}
   list  {geo_finish(geo_append(geo_new(["x"]), 1, ["y"]), 2)}
-  mut   {geo_finish(geo_append(geo_new(mutable_array_allocate(1)), 1, mutable_array_allocate(1)), 2)}
+  mut   {geo_finish(geo_append(geo_new(mutable_array::allocate(1)), 1, mutable_array::allocate(1)), 2)}
   wrong {geo_append(geo_new("a"), 1, 5)}
   storage {geo_append(geo_new("a"), 1, "b")}
   new-str {geo_new("a")}

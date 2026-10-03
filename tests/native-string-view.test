@@ -1,9 +1,9 @@
-# native-string-view.test -- StringRegion consumers beyond `==`/`length`:
-# a native classification call (is_tcl_alpha/is_tcl_alnum, core/tclcompat.
+# native-string-view.test -- StringRegion consumers beyond `==`/`str::length`:
+# a native classification call (str::is_tcl_alpha/str::is_tcl_alnum, core/tclcompat.
 # tcl) or a user-defined one-parameter predicate built only from those same
 # supported shapes (hir/stringregion.tcl's ConsumingNative/ConsumingParams,
 # native/lower.tcl's "String regions" section) consuming a region-eligible
-# argument -- e.g. `is_tcl_alpha(peek(text, i))` or `is_local_char(char_at
+# argument -- e.g. `str::is_tcl_alpha(peek(text, i))` or `is_local_char(char_at
 # (i))` (lib/web.tcl's Emailish? shape) -- with zero one-character String
 # allocation, the same value/error as the unoptimized baseline either way.
 #
@@ -66,17 +66,17 @@ proc assertErrorParity {text} {
 # native-string-region.test's own ::peekSrc uses.
 set ::peekSrc {
 fn peek(text, index):
-    if index >= length(text):
+    if index >= str::length(text):
         return ""
 
-    substring(text, index, index + 1)
+    str::substring(text, index, index + 1)
 }
 
 # is_local_char/is_label_char-shaped predicate (lib/web.tcl's Emailish?):
 # alnum, or one of a fixed set of literal characters.
 set ::isLocalCharSrc {
 fn is_local_char(c):
-    if is_tcl_alnum(c):
+    if str::is_tcl_alnum(c):
         true
     else:
         if c == ".":
@@ -89,15 +89,15 @@ fn is_local_char(c):
 }
 
 # ---------------------------------------------------------------------------
-# Native classification (is_tcl_alpha/is_tcl_alnum) consuming a
+# Native classification (str::is_tcl_alpha/str::is_tcl_alnum) consuming a
 # region-eligible argument directly: zero String allocation.
 
-test view-classify-alnum-1 {is_tcl_alnum(peek(...)) over ASCII text: zero String allocations, correct count} -body {
+test view-classify-alnum-1 {str::is_tcl_alnum(peek(...)) over ASCII text: zero String allocations, correct count} -body {
     set text "$::peekSrc
 fn scan(text, index, count):
-    if index >= length(text):
+    if index >= str::length(text):
         return count
-    if is_tcl_alnum(peek(text, index)):
+    if str::is_tcl_alnum(peek(text, index)):
         return scan(text, index + 1, count + 1)
     scan(text, index + 1, count)
 fn f():
@@ -107,43 +107,43 @@ f()
     list [assertParity $text] [strAllocs $text 1] [strAllocs $text 0]
 } -result {{int 5} 0 8}
 
-test view-classify-alpha-non-ascii-1 {is_tcl_alpha(peek(...)) over BMP non-ASCII text: zero String allocations, correct classification} -body {
+test view-classify-alpha-non-ascii-1 {str::is_tcl_alpha(peek(...)) over BMP non-ASCII text: zero String allocations, correct classification} -body {
     set cafe "café"
     set text "$::peekSrc
 fn f(text):
-    \[is_tcl_alpha(peek(text, 0)), is_tcl_alpha(peek(text, 3)), is_tcl_alpha(peek(text, 4))\]
+    \[str::is_tcl_alpha(peek(text, 0)), str::is_tcl_alpha(peek(text, 3)), str::is_tcl_alpha(peek(text, 4))\]
 f([corpus::literal "${cafe}1"])
 "
     list [assertParity $text] [strAllocs $text 1] [strAllocs $text 0]
 } -result {{list {{bool true} {bool true} {bool false}}} 0 3}
 
-test view-classify-astral-1 {is_tcl_alpha(peek(...)) over a supplementary-plane character: zero String allocations, correct classification} -body {
+test view-classify-astral-1 {str::is_tcl_alpha(peek(...)) over a supplementary-plane character: zero String allocations, correct classification} -body {
     set emoji [encoding convertfrom utf-8 "\xf0\x9f\x98\x80"]
     set text "$::peekSrc
 fn f(text):
-    \[is_tcl_alpha(peek(text, 0)), is_tcl_alpha(peek(text, 1))\]
+    \[str::is_tcl_alpha(peek(text, 0)), str::is_tcl_alpha(peek(text, 1))\]
 f([corpus::literal "a${emoji}"])
 "
     list [assertParity $text] [strAllocs $text 1] [strAllocs $text 0]
 } -result {{list {{bool true} {bool false}}} 0 2}
 
-test view-classify-range-1 {is_tcl_alpha of a region wider than one scalar: the same RANGE error as the materializing form} -body {
-    set text {is_tcl_alpha(substring("hello", 0, 3))}
+test view-classify-range-1 {str::is_tcl_alpha of a region wider than one scalar: the same RANGE error as the materializing form} -body {
+    set text {str::is_tcl_alpha(str::substring("hello", 0, 3))}
     assertErrorParity $text
-} -result {{CORE SEMANTIC RANGE} {is_tcl_alpha: expects a single Unicode scalar, got a string of length 3}}
+} -result {{CORE SEMANTIC RANGE} {str::is_tcl_alpha: expects a single Unicode scalar, got a string of length 3}}
 
-test view-classify-nir-1 {NIR: is_tcl_alnum(peek(...)) lowers to strregiontclalnum, no substr/streq/strtclalnum} -body {
+test view-classify-nir-1 {NIR: str::is_tcl_alnum(peek(...)) lowers to strregiontclalnum, no substr/streq/strtclalnum} -body {
     set text "$::peekSrc
 fn f(text, index):
-    is_tcl_alnum(peek(text, index))
+    str::is_tcl_alnum(peek(text, index))
 "
     set nirText [dict get [native::lower::program [sourceHir $text] -string-region-opt 1 -short-string-opt 0] text]
     list [regexp {op strregiontclalnum } $nirText] [regexp {op substr } $nirText] [regexp {op strtclalnum } $nirText]
 } -result {1 0 0}
 
 # ---------------------------------------------------------------------------
-# A user-defined one-parameter predicate built only from `==`/`is_tcl_alpha`/
-# `is_tcl_alnum` (hir/stringregion.tcl's ConsumingParams): calling it with a
+# A user-defined one-parameter predicate built only from `==`/`str::is_tcl_alpha`/
+# `str::is_tcl_alnum` (hir/stringregion.tcl's ConsumingParams): calling it with a
 # region-eligible argument inlines its body against the region -- no call to
 # its own compiled function, no materialized one-character String -- exactly
 # lib/web.tcl's Emailish? `is_local_char`/`is_label_char` shape, but
@@ -152,7 +152,7 @@ fn f(text, index):
 test view-predicate-1 {a user predicate over alnum/literal characters, called on peek()'d text: zero String allocations, correct count} -body {
     set text "$::peekSrc$::isLocalCharSrc
 fn scan(text, index, count):
-    if index >= length(text):
+    if index >= str::length(text):
         return count
     if is_local_char(peek(text, index)):
         return scan(text, index + 1, count + 1)
@@ -176,7 +176,7 @@ f([corpus::literal "é_@"])
 test view-predicate-inline-1 {a user predicate called directly on an inline substring, with no peek() binding: zero String allocations} -body {
     set text "$::isLocalCharSrc
 fn f(text, i):
-    is_local_char(substring(text, i, i + 1))
+    is_local_char(str::substring(text, i, i + 1))
 f(\"a.b\", 1)
 "
     list [assertParity $text] [strAllocs $text 1] [strAllocs $text 0]
@@ -192,14 +192,14 @@ fn f(text, index):
         [regexp {op substr } $nirText] [regexp {call \d+ } $nirText]
 } -result {1 1 0 0}
 
-test view-predicate-range-1 {a user predicate over a region wider than one scalar: the same RANGE error the materializing form's is_tcl_alnum call would raise} -body {
+test view-predicate-range-1 {a user predicate over a region wider than one scalar: the same RANGE error the materializing form's str::is_tcl_alnum call would raise} -body {
     set text "$::isLocalCharSrc
 fn f(x):
-    is_local_char(substring(x, 0, 3))
+    is_local_char(str::substring(x, 0, 3))
 f(\"abc\")
 "
     assertErrorParity $text
-} -result {{CORE SEMANTIC RANGE} {is_tcl_alnum: expects a single Unicode scalar, got a string of length 3}}
+} -result {{CORE SEMANTIC RANGE} {str::is_tcl_alnum: expects a single Unicode scalar, got a string of length 3}}
 
 # ---------------------------------------------------------------------------
 # Escape/materialization: a one-character result that also escapes (stored,
@@ -236,7 +236,7 @@ f(\"a\")
 test view-unsupported-shape-1 {a predicate that concatenates its parameter: not recognized, still allocates, still correct} -body {
     set text "$::peekSrc
 fn noisy(c):
-    length(concat(c, \"!\")) == 2
+    str::length(str::concat(c, \"!\")) == 2
 fn f(text):
     noisy(peek(text, 0))
 f(\"a\")
@@ -259,7 +259,7 @@ f(\"aa\")
 # GC stress (repeated inlined predicate calls survive a collection forced
 # before every allocation; the base String's root outlives every inlined
 # use, exactly as native-string-region.test's own region-gc-stress-* tests
-# already establish for `==`/`length`).
+# already establish for `==`/`str::length`).
 
 test view-gc-stress-1 {repeated classification/predicate calls over many peek() calls survive GC stress} -setup {
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
@@ -268,7 +268,7 @@ test view-gc-stress-1 {repeated classification/predicate calls over many peek() 
 } -body {
     set text "$::peekSrc$::isLocalCharSrc
 fn scan(text, index, count):
-    if index >= length(text):
+    if index >= str::length(text):
         return count
     if is_local_char(peek(text, index)):
         return scan(text, index + 1, count + 1)
@@ -339,11 +339,11 @@ proc assertEmailishParity {text} {
 }
 
 # EXACT-CALLABLE-CLOSED-CALLER.md: 8 -> 5. The TLD scan's predicate is the
-# exact native is_tcl_alpha, a StringRegion consumer, so the 3 characters of
+# exact native str::is_tcl_alpha, a StringRegion consumer, so the 3 characters of
 # the TLD "テスト" are no longer materialized; the local part's characters
 # still are (their predicate also tests set membership, which is not a region
 # consumer yet).
-test view-emailish-corpus-1 {lib/web.tcl's Emailish? validator: string-region-opt eliminates emailish?'s own direct char_at allocations (15 raw down to 5 surviving: the TLD scan's exact is_tcl_alpha predicate is a region consumer, so its 3 characters are no longer built; the local part's set-membership characters still are), same value either way} -body {
+test view-emailish-corpus-1 {lib/web.tcl's Emailish? validator: string-region-opt eliminates emailish?'s own direct char_at allocations (15 raw down to 5 surviving: the TLD scan's exact str::is_tcl_alpha predicate is a region consumer, so its 3 characters are no longer built; the local part's set-membership characters still are), same value either way} -body {
     assertEmailishParity "café@例え.テスト"
 } -result {5 1 1 {bool true}}
 

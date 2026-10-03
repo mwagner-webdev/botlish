@@ -1,10 +1,10 @@
 # A simple mutable open-addressed HashTable, built entirely from the
-# MutableArray substrate (mutable_array_allocate/_capacity/_get/_set) plus
+# MutableArray substrate (mutable_array::allocate/::capacity/::at/::set) plus
 # the two general-purpose primitives this milestone added alongside it --
 # hash(value) -> Int and mod(a, b) -> Int (core/hashing.tcl, core/
 # primitives.tcl) -- ordinary Botlish, not a compiler or runtime primitive.
 # The runtime/compiler has no notion of "hash table": every operation below
-# is mutable_array_get/_set, hash, mod, ==, and ordinary recursion.
+# is mutable_array::at/::set, hash, mod, ==, and ordinary recursion.
 #
 # Representation
 # --------------
@@ -27,7 +27,7 @@
 # MutableArray of them; the rehash's temporary {controls, keys, values}
 # grouping is a struct because nothing about it is mutated). set/delete/replace
 # genuinely mutate this handle and return unit, exactly like
-# mutable_array_set itself, rather than threading a new table value the way
+# mutable_array::set itself, rather than threading a new table value the way
 # the builders thread [storage, length] -- a table's set/delete are mutators,
 # not "grow a persistent value" operations, so this is a closer match to
 # their own MutableArray substrate than the builders' style is.
@@ -72,7 +72,7 @@
 # them instead of growing (ht_rehash) -- the "tombstone cleanup" case;
 # otherwise capacity doubles. Either way every OCCUPIED entry is rehashed
 # (see hir/lower.tcl's "no bulk-copy expectation": rt_mutarray_copy is never
-# used here, only individual mutable_array_get/_set per live entry).
+# used here, only individual mutable_array::at/::set per live entry).
 # Linear probing (ht_probe_next: index -> mod(index + 1, capacity)) always
 # terminates because capacity never lets occupancy reach 100%.
 #
@@ -97,20 +97,20 @@ fn ht_fill_empty(controls, i, capacity):
     if i >= capacity:
         return unit
 
-    mutable_array_set(controls, i, ht_empty_state())
+    mutable_array::set(controls, i, ht_empty_state())
     ht_fill_empty(controls, i + 1, capacity)
 
 fn ht_alloc(capacity):
-    controls = mutable_array_allocate(capacity)
+    controls = mutable_array::allocate(capacity)
     ht_fill_empty(controls, 0, capacity)
-    keys = mutable_array_allocate(capacity)
-    values = mutable_array_allocate(capacity)
-    table = mutable_array_allocate(5)
-    mutable_array_set(table, 0, controls)
-    mutable_array_set(table, 1, keys)
-    mutable_array_set(table, 2, values)
-    mutable_array_set(table, 3, 0)
-    mutable_array_set(table, 4, 0)
+    keys = mutable_array::allocate(capacity)
+    values = mutable_array::allocate(capacity)
+    table = mutable_array::allocate(5)
+    mutable_array::set(table, 0, controls)
+    mutable_array::set(table, 1, keys)
+    mutable_array::set(table, 2, values)
+    mutable_array::set(table, 3, 0)
+    mutable_array::set(table, 4, 0)
     table
 
 fn ht_new():
@@ -132,43 +132,43 @@ fn ht_new_sized(expected):
 # ---------------------------------------------------------------------------
 # Fields (the outer MutableArray-as-record: see the file header)
 
-fn ht_controls(table):
-    mutable_array_get(table, 0)
+fn ht_controls(table) errors IndexNotFound:
+    mutable_array::at(table, 0)
 
-fn ht_keys(table):
-    mutable_array_get(table, 1)
+fn ht_keys(table) errors IndexNotFound:
+    mutable_array::at(table, 1)
 
-fn ht_values(table):
-    mutable_array_get(table, 2)
+fn ht_values(table) errors IndexNotFound:
+    mutable_array::at(table, 2)
 
-fn ht_size(table):
-    mutable_array_get(table, 3)
+fn ht_size(table) errors IndexNotFound:
+    mutable_array::at(table, 3)
 
-fn ht_tombstones(table):
-    mutable_array_get(table, 4)
+fn ht_tombstones(table) errors IndexNotFound:
+    mutable_array::at(table, 4)
 
-fn ht_capacity(table):
-    mutable_array_capacity(ht_controls(table))
+fn ht_capacity(table) errors IndexNotFound:
+    mutable_array::capacity(ht_controls(table))
 
 # ---------------------------------------------------------------------------
 # Probing (ordinary linear probing: see the file header)
 
-fn ht_probe_start(table, key):
+fn ht_probe_start(table, key) errors IndexNotFound:
     mod(hash(key), ht_capacity(table))
 
-fn ht_probe_next(table, index):
+fn ht_probe_next(table, index) errors IndexNotFound:
     mod(index + 1, ht_capacity(table))
 
 # The index of KEY from INDEX on, or -1 if probing reaches an EMPTY slot
-# first. Zero managed allocations: only mutable_array_get, ==, and mod/hash
+# first. Zero managed allocations: only mutable_array::at, ==, and mod/hash
 # on values already in hand (req #10, #19).
-fn ht_find_get(table, key, index):
+fn ht_find_get(table, key, index) errors IndexNotFound:
     controls = ht_controls(table)
-    state = mutable_array_get(controls, index)
+    state = mutable_array::at(controls, index)
     if state == ht_empty_state():
         return -1
 
-    if state == ht_occupied_state() and mutable_array_get(ht_keys(table), index) == key:
+    if state == ht_occupied_state() and mutable_array::at(ht_keys(table), index) == key:
         return index
 
     ht_find_get(table, key, ht_probe_next(table, index))
@@ -177,16 +177,16 @@ fn ht_find_get(table, key, index):
 # equal key's own slot (replace), the first EMPTY slot (confirming the key
 # is not later in the chain first), or an earlier TOMBSTONE reused once
 # that confirmation is done (FIRST-TOMBSTONE is -1 until one is seen).
-fn ht_find_insert(table, key, index, first_tombstone):
+fn ht_find_insert(table, key, index, first_tombstone) errors IndexNotFound:
     controls = ht_controls(table)
-    state = mutable_array_get(controls, index)
+    state = mutable_array::at(controls, index)
     if state == ht_empty_state():
         if first_tombstone >= 0:
             return first_tombstone
 
         return index
 
-    if state == ht_occupied_state() and mutable_array_get(ht_keys(table), index) == key:
+    if state == ht_occupied_state() and mutable_array::at(ht_keys(table), index) == key:
         return index
 
     if state == ht_tombstone_state() and first_tombstone < 0:
@@ -198,14 +198,14 @@ fn ht_find_insert(table, key, index, first_tombstone):
 # Lookup
 
 # KEY's value, or unit if absent (see the file header's absence convention).
-fn ht_get(table, key):
+fn ht_get(table, key) errors IndexNotFound:
     index = ht_find_get(table, key, ht_probe_start(table, key))
     if index < 0:
         return unit
 
-    mutable_array_get(ht_values(table), index)
+    mutable_array::at(ht_values(table), index)
 
-fn ht_contains(table, key):
+fn ht_contains(table, key) errors IndexNotFound:
     ht_find_get(table, key, ht_probe_start(table, key)) >= 0
 
 # ---------------------------------------------------------------------------
@@ -213,8 +213,8 @@ fn ht_contains(table, key):
 # never has to consider tombstones or existing keys (req #16) -- distinct
 # from, and simpler than, ht_find_insert above.
 
-fn ht_rehash_probe(newControls, index, capacity):
-    state = mutable_array_get(newControls, index)
+fn ht_rehash_probe(newControls, index, capacity) errors IndexNotFound:
+    state = mutable_array::at(newControls, index)
     if state == ht_empty_state():
         return index
 
@@ -223,25 +223,25 @@ fn ht_rehash_probe(newControls, index, capacity):
 # DEST is {controls, keys, values}, the new storage: destination storage for a
 # resize, grouped only to keep this and ht_rehash_scan below to a readable
 # parameter count (an ordinary temporary aggregate, left visible: req #49).
-fn ht_rehash_insert(dest, capacity, key, value):
+fn ht_rehash_insert(dest, capacity, key, value) errors IndexNotFound:
     newControls = dest.controls
     index = ht_rehash_probe(newControls, mod(hash(key), capacity), capacity)
-    mutable_array_set(newControls, index, ht_occupied_state())
-    mutable_array_set(dest.keys, index, key)
-    mutable_array_set(dest.values, index, value)
+    mutable_array::set(newControls, index, ht_occupied_state())
+    mutable_array::set(dest.keys, index, key)
+    mutable_array::set(dest.values, index, value)
     unit
 
 # Every OCCUPIED slot of SRC ({controls, keys, values}, the old storage) from I on,
-# rehashed into DEST at NEWCAPACITY. Only individual mutable_array_get/_set
-# ever move an entry here -- no mutable_array_copy (req #23).
-fn ht_rehash_scan(src, i, oldCapacity, dest, newCapacity):
+# rehashed into DEST at NEWCAPACITY. Only individual mutable_array::at/::set
+# ever move an entry here -- no mutable_array::copy (req #23).
+fn ht_rehash_scan(src, i, oldCapacity, dest, newCapacity) errors IndexNotFound:
     if i >= oldCapacity:
         return unit
 
     oldControls = src.controls
-    if mutable_array_get(oldControls, i) == ht_occupied_state():
-        key = mutable_array_get(src.keys, i)
-        value = mutable_array_get(src.values, i)
+    if mutable_array::at(oldControls, i) == ht_occupied_state():
+        key = mutable_array::at(src.keys, i)
+        value = mutable_array::at(src.values, i)
         ht_rehash_insert(dest, newCapacity, key, value)
 
     ht_rehash_scan(src, i + 1, oldCapacity, dest, newCapacity)
@@ -249,26 +249,26 @@ fn ht_rehash_scan(src, i, oldCapacity, dest, newCapacity):
 # Replaces TABLE's storage with a fresh NEWCAPACITY table holding every
 # currently OCCUPIED entry and no tombstones. The 3 replacement
 # MutableArrays are this call's only allocations (req #20, #41).
-fn ht_rehash(table, newCapacity):
+fn ht_rehash(table, newCapacity) errors IndexNotFound:
     src = {controls: ht_controls(table), keys: ht_keys(table), values: ht_values(table)}
     oldCapacity = ht_capacity(table)
-    newControls = mutable_array_allocate(newCapacity)
+    newControls = mutable_array::allocate(newCapacity)
     ht_fill_empty(newControls, 0, newCapacity)
-    dest = {controls: newControls, keys: mutable_array_allocate(newCapacity), values: mutable_array_allocate(newCapacity)}
+    dest = {controls: newControls, keys: mutable_array::allocate(newCapacity), values: mutable_array::allocate(newCapacity)}
     ht_rehash_scan(src, 0, oldCapacity, dest, newCapacity)
-    mutable_array_set(table, 0, dest.controls)
-    mutable_array_set(table, 1, dest.keys)
-    mutable_array_set(table, 2, dest.values)
-    mutable_array_set(table, 4, 0)
+    mutable_array::set(table, 0, dest.controls)
+    mutable_array::set(table, 1, dest.keys)
+    mutable_array::set(table, 2, dest.values)
+    mutable_array::set(table, 4, 0)
     unit
 
 # Whether the *next* insert (one more occupied slot) would push occupancy
 # past 2/3 of capacity -- checked before insert ever writes anything.
-fn ht_should_grow(table):
+fn ht_should_grow(table) errors IndexNotFound:
     occupied = ht_size(table) + ht_tombstones(table)
     (occupied + 1) * 3 > ht_capacity(table) * 2
 
-fn ht_grow_or_clean(table):
+fn ht_grow_or_clean(table) errors IndexNotFound:
     if ht_tombstones(table) > ht_size(table):
         ht_rehash(table, ht_capacity(table))
     else:
@@ -298,24 +298,24 @@ fn ht_grow_or_clean(table):
 # sidesteps that entirely, matching this whole corpus's if-then-return
 # idiom (e.g. csv.bot's peek) instead of trying to "flow" a rebound local
 # out of a conditional the way a mutable-variable language would.
-fn ht_place(table, index, key, value):
+fn ht_place(table, index, key, value) errors IndexNotFound:
     controls = ht_controls(table)
-    prior = mutable_array_get(controls, index)
-    mutable_array_set(controls, index, ht_occupied_state())
-    mutable_array_set(ht_keys(table), index, key)
-    mutable_array_set(ht_values(table), index, value)
-    mutable_array_set(table, 3, ht_size(table) + 1)
+    prior = mutable_array::at(controls, index)
+    mutable_array::set(controls, index, ht_occupied_state())
+    mutable_array::set(ht_keys(table), index, key)
+    mutable_array::set(ht_values(table), index, value)
+    mutable_array::set(table, 3, ht_size(table) + 1)
     if prior == ht_tombstone_state():
-        mutable_array_set(table, 4, ht_tombstones(table) - 1)
+        mutable_array::set(table, 4, ht_tombstones(table) - 1)
 
     unit
 
-fn ht_set(table, key, value):
+fn ht_set(table, key, value) errors IndexNotFound:
     index = ht_find_insert(table, key, ht_probe_start(table, key), -1)
     controls = ht_controls(table)
-    prior = mutable_array_get(controls, index)
+    prior = mutable_array::at(controls, index)
     if prior == ht_occupied_state():
-        mutable_array_set(ht_values(table), index, value)
+        mutable_array::set(ht_values(table), index, value)
         return unit
 
     if ht_should_grow(table):
@@ -330,43 +330,43 @@ fn ht_set(table, key, value):
 # (req #13, #45) -- the control array alone stays authoritative for
 # presence; clearing is purely for GC liveness.
 
-fn ht_delete(table, key):
+fn ht_delete(table, key) errors IndexNotFound:
     index = ht_find_get(table, key, ht_probe_start(table, key))
     if index < 0:
         return unit
 
-    mutable_array_set(ht_controls(table), index, ht_tombstone_state())
-    mutable_array_set(ht_keys(table), index, unit)
-    mutable_array_set(ht_values(table), index, unit)
-    mutable_array_set(table, 3, ht_size(table) - 1)
-    mutable_array_set(table, 4, ht_tombstones(table) + 1)
+    mutable_array::set(ht_controls(table), index, ht_tombstone_state())
+    mutable_array::set(ht_keys(table), index, unit)
+    mutable_array::set(ht_values(table), index, unit)
+    mutable_array::set(table, 3, ht_size(table) - 1)
+    mutable_array::set(table, 4, ht_tombstones(table) + 1)
     unit
 
 # ---------------------------------------------------------------------------
 # Iteration (req #46: only what correctness testing needs, not an iterator
 # framework). COMBINE is an ordinary named fn(acc, key, value) -> acc.
 
-fn ht_fold(table, index, capacity, acc, combine):
+fn ht_fold(table, index, capacity, acc, combine) errors IndexNotFound:
     if index >= capacity:
         return acc
 
-    if mutable_array_get(ht_controls(table), index) == ht_occupied_state():
-        next = combine(acc, mutable_array_get(ht_keys(table), index), mutable_array_get(ht_values(table), index))
+    if mutable_array::at(ht_controls(table), index) == ht_occupied_state():
+        next = combine(acc, mutable_array::at(ht_keys(table), index), mutable_array::at(ht_values(table), index))
         return ht_fold(table, index + 1, capacity, next, combine)
 
     ht_fold(table, index + 1, capacity, acc, combine)
 
 fn ht_collect_pair(acc, key, value):
-    list_append(acc, [key, value])
+    list::append(acc, [key, value])
 
 # Every live [key, value] pair, in slot order (not insertion order).
-fn ht_to_list(table):
+fn ht_to_list(table) errors IndexNotFound:
     ht_fold(table, 0, ht_capacity(table), [], ht_collect_pair)
 
 # ---------------------------------------------------------------------------
 # Sample: insert, replace, delete, and look up past a tombstone.
 
-fn sample():
+fn sample_checks() errors IndexNotFound:
     t = ht_new()
     ht_set(t, "name", "Ada")
     ht_set(t, "age", "36")
@@ -374,5 +374,16 @@ fn sample():
     had_age = ht_contains(t, "age")
     ht_delete(t, "age")
     [ht_get(t, "name") == "Grace", had_age, ht_contains(t, "age"), ht_contains(t, "missing"), ht_get(t, "missing") == unit, ht_size(t)]
+
+# The table's record fields and slots are read with mutable_array::at, whose
+# IndexNotFound every function above declares: no index here can miss (the
+# record has its 5 fields, every slot index is reduced mod the capacity of
+# the arrays it reads), but that is the table's own invariant, not something
+# the compiler proves, so the caller states what a broken one means.
+fn sample():
+    checks = sample_checks():
+        on IndexNotFound:
+            []
+    checks
 
 sample()

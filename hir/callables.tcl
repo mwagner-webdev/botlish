@@ -57,7 +57,7 @@
 # transitively through every containing type (List[MutableArray[T]],
 # MutableArray[MutableArray[T]], Fn results), and is preserved only into a
 # position that keeps the equivalent element contract. The natives that
-# merely *use* an array through its typed API (mutable_array_get/set/
+# merely *use* an array through its typed API (mutable_array::at/set/
 # freeze/capacity/copy, type tests, scalar-returning natives) keep it
 # (hir/containers.tcl's NativeContexts); anything else that would retain it
 # in an untyped position is rejected.
@@ -512,7 +512,7 @@ proc hir::callables::WalkExpr {hirVar e} {
 # VerifyCall proves the argument admissible for it), a structural callee's
 # contract argument type (VerifyStructuralCall), or -- for a List-building
 # native (-result-shape elements/append, core/native.tcl), a List read
-# (element) or immutable_set_from_list (immutable-set) -- the position the
+# (element) or immutable_set::from_list (immutable-set) -- the position the
 # value provably lands in inside the call's own result type.
 proc hir::callables::ArgContexts {hir e} {
     set node [dict get $hir exprs $e]
@@ -576,7 +576,7 @@ proc hir::callables::ArgContexts {hir e} {
             }
         }
         element {
-            # list_get(L, I): L's elements leave the call only as its result,
+            # list::at(L, I): L's elements leave the call only as its result,
             # typed as L's own element type (ShapeResult) -- so L is
             # preserved exactly when that element is by the result's type.
             lassign $shape _ l

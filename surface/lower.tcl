@@ -107,6 +107,7 @@ proc surface::lowerToHir {ast args} {
             surface::raise $diagnostic
         }
     }
+    surface::modules::CheckEntryProgram $ast
     lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable decls errorDecls structDecls
     set nodes [surface::lower::Sequence $executable]
     set hir [hir::buildSyntax $nodes -strict 0 \

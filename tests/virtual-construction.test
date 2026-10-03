@@ -107,12 +107,12 @@ set digits {digits = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]}
 # String: correctness and where materialization happens
 
 test vc-str-two-flat-1 {two flat strings: value parity, and exactly the eager strcat op (nothing virtual)} -body {
-    set text "fn f(a, b):\n    concat(a, b)\n\nf(\"ab\", \"cd\")"
+    set text "fn f(a, b):\n    str::concat(a, b)\n\nf(\"ab\", \"cd\")"
     list [parity $text] [constructs [nirOf $text] .*] [regexp -all {op strcat} [nirOf $text]]
 } -result {{value {"abcd"}} 0 1}
 
 test vc-str-tree-1 {a nested concat tree is one n-ary flat construction: one String instead of three} -body {
-    set text "fn f(a, b, c, d):\n    concat(concat(concat(a, b), c), d)\n\nf(\"a\", \"bc\", \"\", \"déf\")"
+    set text "fn f(a, b, c, d):\n    str::concat(str::concat(str::concat(a, b), c), d)\n\nf(\"a\", \"bc\", \"\", \"déf\")"
     set on [vcReport $text 1]
     set off [vcReport $text 0]
     list [parity $text] [allocs $on String] [allocs $off String] [allocs $on StringPlan] \
@@ -120,44 +120,44 @@ test vc-str-tree-1 {a nested concat tree is one n-ary flat construction: one Str
 } -result {{value {"abcdéf"}} 1 3 0 1}
 
 test vc-str-region-1 {a substring operand is a StringRegion piece: never allocated as its own String} -body {
-    set text "fn f(t):\n    concat(substring(t, 1, 3), \"x\")\n\nf(\"héllo\")"
+    set text "fn f(t):\n    str::concat(str::substring(t, 1, 3), \"x\")\n\nf(\"héllo\")"
     set on [vcReport $text 1]
     list [parity $text] [allocs $on String] [allocs [vcReport $text 0] String] \
         [dict get $on construction regionPieces] [regexp {construct str flat region %\d+ %\d+ %\d+ %\d+} [nirOf $text]]
 } -result {{value {"élx"}} 1 2 1 1}
 
 test vc-str-region-2 {a region piece's bounds error is the eager substring's own error, raised at the same point} -body {
-    parity "fn f(t):\n    concat(\"a\", substring(t, 2, 9))\n\nf(\"hello\")"
+    parity "fn f(t):\n    str::concat(\"a\", str::substring(t, 2, 9))\n\nf(\"hello\")"
 } -result {error {CORE SEMANTIC RANGE}}
 
 test vc-str-region-bind-1 {a substring bound to a local and then concatenated stays a StringRegion piece (reverse_from's shape)} -body {
-    set text "fn build(t, i, acc):\n    if i >= length(t):\n        return acc\n    c = substring(t, i, i + 1)\n    build(t, i + 1, concat(c, acc))\n\nbuild(\"héllo🙂\", 0, \"\")"
+    set text "fn build(t, i, acc):\n    if i >= str::length(t):\n        return acc\n    c = str::substring(t, i, i + 1)\n    build(t, i + 1, str::concat(c, acc))\n\nbuild(\"héllo🙂\", 0, \"\")"
     set on [vcReport $text 1]
     list [parity $text] [allocs $on String] [allocs [vcReport $text 0] String] [allocs $on StringPlan] \
         [dict get $on construction regionPieces]
 } -result {{value {"🙂olléh"}} 1 12 1 6}
 
 test vc-str-bind-1 {a binding across concat stays virtual: x is a plan local, one final String} -body {
-    set text "fn f(a, b, c):\n    x = concat(a, b)\n    y = concat(x, c)\n    length(y)\n\nf(\"a\", \"b\", \"c\")"
+    set text "fn f(a, b, c):\n    x = str::concat(a, b)\n    y = str::concat(x, c)\n    str::length(y)\n\nf(\"a\", \"b\", \"c\")"
     set on [vcReport $text 1]
     list [parity $text] [allocs $on String] [allocs [vcReport $text 0] String] [allocs $on StringPlan]
 } -result {{value 3} 1 2 0}
 
 test vc-str-fork-1 {a fork (two live uses) materializes: x is not a plan local, and the reason is recorded} -body {
-    set text "fn f(a, b):\n    x = concat(a, b)\n    \[concat(x, \"c\"), concat(x, \"d\")\]\n\nf(\"a\", \"b\")"
+    set text "fn f(a, b):\n    x = str::concat(a, b)\n    \[str::concat(x, \"c\"), str::concat(x, \"d\")\]\n\nf(\"a\", \"b\")"
     lassign [analysisOf $text] spec analysis
     set why [lsort -unique [concat {*}[lmap {id reasons} [dict get $analysis localWhy] {dict values $reasons}]]]
     list [parity $text] [dict get $analysis locals] $why
 } -result {{value {["abc", "abd"]}} {} {{fork: referenced more than once on some path}}}
 
 test vc-str-branch-1 {a branch join stays virtual: both arms extend the same recurrence plan} -body {
-    set text "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    next = if mod(i, 2) == 0:\n        concat(acc, \"ab\")\n    else:\n        concat(concat(acc, \"c\"), \"d\")\n    build(i + 1, n, next)\n\nbuild(0, 7, \"\")"
+    set text "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    next = if mod(i, 2) == 0:\n        str::concat(acc, \"ab\")\n    else:\n        str::concat(str::concat(acc, \"c\"), \"d\")\n    build(i + 1, n, next)\n\nbuild(0, 7, \"\")"
     set on [vcReport $text 1]
     list [parity $text] [allocs $on String] [allocs $on StringPlan] [dict get $on construction materializations]
 } -result {{value {"abcdabcdabcdab"}} 1 1 1}
 
 test vc-str-loop-1 {a runtime-variable recurrence copies linearly, not quadratically (N and 4N)} -body {
-    set template "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    build(i + 1, n, concat(acc, \"ab\"))\n\nlength(build(0, %N%, \"\"))"
+    set template "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    build(i + 1, n, str::concat(acc, \"ab\"))\n\nstr::length(build(0, %N%, \"\"))"
     set rows {}
     foreach n {500 2000} {
         set text [string map [list %N% $n] $template]
@@ -174,7 +174,7 @@ test vc-str-loop-1 {a runtime-variable recurrence copies linearly, not quadratic
 } -result {{value 1000} {value 4000} 1 1 {1 1 2000}}
 
 test vc-str-prepend-1 {a prepending recurrence (reverse_from's shape) is linear too} -body {
-    set text "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    build(i + 1, n, concat(substring(\"xyz\", mod(i, 3), mod(i, 3) + 1), acc))\n\nbuild(0, 7, \"!\")"
+    set text "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    build(i + 1, n, str::concat(str::substring(\"xyz\", mod(i, 3), mod(i, 3) + 1), acc))\n\nbuild(0, 7, \"!\")"
     set on [vcReport $text 1]
     list [parity $text] [allocs $on String] [allocs $on StringPlan] [dict get $on construction regionPieces]
 } -result {{value {"xzyxzyx!"}} 1 1 7}
@@ -185,13 +185,13 @@ test vc-str-prepend-1 {a prepending recurrence (reverse_from's shape) is linear 
 # Block-value entries, which the construction plan still lists (it reads
 # closedness, not dormancy). Values and allocation counts are unchanged.
 test vc-str-helper-1 {an exact helper's result is a construction summary: its plan crosses the call, its caller extends it} -body {
-    set text "$digits\nfn piece(i):\n    concat(\"<\", concat(list_get(digits, mod(i, 10)), \">\"))\n\nfn build(i, n, acc):\n    if i >= n:\n        return acc\n    build(i + 1, n, concat(acc, piece(i)))\n\nbuild(0, 12, \"\")"
+    set text "$digits\nfn piece(i):\n    str::concat(\"<\", str::concat(list::at(digits, mod(i, 10)), \">\"))\n\nfn build(i, n, acc):\n    if i >= n:\n        return acc\n    build(i + 1, n, str::concat(acc, piece(i)))\n\nbuild(0, 12, \"\")"
     set on [vcReport $text 1]
     list [parity $text] [planResults $text] [planParams $text] [allocs $on String] [allocs [vcReport $text 0] String]
 } -result {{value {"<0><1><2><3><4><5><6><7><8><9><0><1>"}} {{piece<int> str}} {{{build<int, int, any>} 2 str}} 1 36}
 
 test vc-str-chain-1 {a three-level helper chain materializes once, not once per level} -body {
-    set text "$digits\nfn a(i):\n    concat(\"a\", list_get(digits, mod(i, 10)))\n\nfn b(i):\n    concat(a(i), \"b\")\n\nfn c(i):\n    concat(b(i), \"c\")\n\nc(7)"
+    set text "$digits\nfn a(i):\n    str::concat(\"a\", list::at(digits, mod(i, 10)))\n\nfn b(i):\n    str::concat(a(i), \"b\")\n\nfn c(i):\n    str::concat(b(i), \"c\")\n\nc(7)"
     set on [vcReport $text 1]
     set off [vcReport $text 0]
     list [parity $text] [planResults $text] [allocs $on String] [allocs $on StringPlan] \
@@ -206,7 +206,7 @@ test vc-str-open-1 {an exact call through a parameter is an ordinary exact call:
     # wrap<str> as well, so x is a plan parameter after all (apply has a
     # plan register): the open-call barrier this test pinned is gone for an
     # exact callable. The genuinely dynamic variant is vc-str-open-2.
-    set text "fn wrap(s):\n    concat(s, \"!\")\n\nfn apply(g, x):\n    g(x)\n\n\[apply(wrap, concat(\"a\", \"b\")), concat(wrap(\"c\"), \"?\")\]"
+    set text "fn wrap(s):\n    str::concat(s, \"!\")\n\nfn apply(g, x):\n    g(x)\n\n\[apply(wrap, str::concat(\"a\", \"b\")), str::concat(wrap(\"c\"), \"?\")\]"
     set nir [nirOf $text]
     lassign [analysisOf $text] spec analysis
     set why [lsort -unique [concat {*}[lmap {id reasons} [dict get $analysis paramWhy] {dict values $reasons}]]]
@@ -216,7 +216,7 @@ test vc-str-open-1 {an exact call through a parameter is an ordinary exact call:
 } -result {{value {["ab!", "c!?"]}} {{wrap<str> str}} {} 1 1}
 
 test vc-str-open-2 {an open/dynamic call is a barrier: with the callable chosen at run time (two Blocks), the argument is materialized before the dynamic call and apply's body has no plan register at all} -body {
-    set text "fn wrap(s):\n    concat(s, \"!\")\n\nfn shout(s):\n    concat(s, \"?\")\n\nfn pick(flag):\n    if flag:\n        wrap\n    else:\n        shout\n\nfn apply(g, x):\n    g(x)\n\n\[apply(pick(true), concat(\"a\", \"b\")), apply(pick(false), concat(\"c\", \"d\"))\]"
+    set text "fn wrap(s):\n    str::concat(s, \"!\")\n\nfn shout(s):\n    str::concat(s, \"?\")\n\nfn pick(flag):\n    if flag:\n        wrap\n    else:\n        shout\n\nfn apply(g, x):\n    g(x)\n\n\[apply(pick(true), str::concat(\"a\", \"b\")), apply(pick(false), str::concat(\"c\", \"d\"))\]"
     set nir [nirOf $text]
     list [parity $text] \
         [regexp {planregs} [lindex [regexp -inline {func \d+ "apply"[^\n]*} $nir] 0]] \
@@ -224,17 +224,17 @@ test vc-str-open-2 {an open/dynamic call is a barrier: with the callable chosen 
 } -result {{value {["ab!", "cd?"]}} 0 1}
 
 test vc-str-empty-1 {empty pieces, empty accumulators and an empty result} -body {
-    set text "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    build(i + 1, n, concat(concat(acc, \"\"), \"\"))\n\n\[build(0, 5, \"\"), concat(\"\", \"\"), length(build(0, 0, \"\"))\]"
+    set text "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    build(i + 1, n, str::concat(str::concat(acc, \"\"), \"\"))\n\n\[build(0, 5, \"\"), str::concat(\"\", \"\"), str::length(build(0, 0, \"\"))\]"
     parity $text
 } -result {value {["", "", 0]}}
 
 test vc-str-large-1 {large strings: a 1 MB result built from 64 KB pieces} -body {
-    set text "fn big(i, n, acc):\n    if i >= n:\n        return acc\n    big(i + 1, n, concat(acc, acc))\n\nfn build(i, n, acc, piece):\n    if i >= n:\n        return acc\n    build(i + 1, n, concat(acc, piece), piece)\n\ns = build(0, 16, \"\", big(0, 16, \"a\"))\n\[length(s), substring(s, 1048570, 1048576)\]"
+    set text "fn big(i, n, acc):\n    if i >= n:\n        return acc\n    big(i + 1, n, str::concat(acc, acc))\n\nfn build(i, n, acc, piece):\n    if i >= n:\n        return acc\n    build(i + 1, n, str::concat(acc, piece), piece)\n\ns = build(0, 16, \"\", big(0, 16, \"a\"))\n\[str::length(s), str::substring(s, 1048570, 1048576)\]"
     parity $text
 } -result {value {[1048576, "aaaaaa"]}}
 
 test vc-str-unicode-1 {String semantics are unchanged: scalar counts and indexing across ASCII, BMP and astral pieces} -body {
-    set text "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    build(i + 1, n, concat(concat(acc, \"é\"), concat(\"🙂\", \"x\")))\n\ns = build(0, 3, \"\")\n\[s, length(s), substring(s, 4, 6)\]"
+    set text "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    build(i + 1, n, str::concat(str::concat(acc, \"é\"), str::concat(\"🙂\", \"x\")))\n\ns = build(0, 3, \"\")\n\[s, str::length(s), str::substring(s, 4, 6)\]"
     parity $text
 } -result {value {["é🙂xé🙂xé🙂x", 9, "🙂x"]}}
 
@@ -242,12 +242,12 @@ test vc-str-unicode-1 {String semantics are unchanged: scalar counts and indexin
 # String: strict evaluation, errors and completion
 
 test vc-str-error-order-1 {piece 1 succeeds, piece 2 errors, piece 3 never runs: the error is piece 2's} -body {
-    # Piece 3 would raise a *different* RANGE error (list_get's) if it ran.
-    parity "fn f(t):\n    concat(concat(substring(t, 0, 1), substring(t, 4, 9)), list_get(\[\], 0))\n\nf(\"hello\")"
+    # Piece 3 would raise a *different* RANGE error (list::at's) if it ran.
+    parity "fn f(t):\n    str::concat(str::concat(str::substring(t, 0, 1), str::substring(t, 4, 9)), list::at(\[\], 0))\n\nf(\"hello\")"
 } -result {error {CORE SEMANTIC RANGE}}
 
 test vc-str-error-order-2 {the error of the first failing piece is reported, identically everywhere} -body {
-    set text "fn f(t):\n    concat(concat(substring(t, 0, 1), substring(t, 4, 9)), list_get(\[\], 0))\n\nf(\"hello\")"
+    set text "fn f(t):\n    str::concat(str::concat(str::substring(t, 0, 1), str::substring(t, 4, 9)), list::at(\[\], 0))\n\nf(\"hello\")"
     set hir [sourceHir $text]
     set messages {}
     foreach opt {0 1} {
@@ -260,39 +260,39 @@ test vc-str-error-order-2 {the error of the first failing piece is reported, ide
 } -result {1 1 1}
 
 test vc-str-error-midway-1 {an error midway through a runtime recurrence never exposes the partial plan} -body {
-    parity "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    piece = if i == 5:\n        substring(\"ab\", 1, 7)\n    else:\n        \"ab\"\n    build(i + 1, n, concat(acc, piece))\n\nbuild(0, 9, \"\")"
+    parity "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    piece = if i == 5:\n        str::substring(\"ab\", 1, 7)\n    else:\n        \"ab\"\n    build(i + 1, n, str::concat(acc, piece))\n\nbuild(0, 9, \"\")"
 } -result {error {CORE SEMANTIC RANGE}}
 
 test vc-str-error-handled-1 {a handled failure after a plan argument was consumed recovers with the handler's own value} -body {
-    parity "error Bad\nfn g(s, fail_now) -> str errors Bad:\n    if fail_now:\n        fail Bad\n    else:\n        concat(s, \"!\")\n\nfn f(x, now):\n    r = g(concat(x, \"-\"), now):\n        on Bad:\n            \"handled\"\n    concat(r, \".\")\n\n\[f(\"a\", true), f(\"b\", false)\]"
+    parity "error Bad\nfn g(s, fail_now) -> str errors Bad:\n    if fail_now:\n        fail Bad\n    else:\n        str::concat(s, \"!\")\n\nfn f(x, now):\n    r = g(str::concat(x, \"-\"), now):\n        on Bad:\n            \"handled\"\n    str::concat(r, \".\")\n\n\[f(\"a\", true), f(\"b\", false)\]"
 } -result {value {["handled.", "b-!."]}}
 
 # ---------------------------------------------------------------------------
 # Lists
 
 test vc-list-append-1 {List + element: value parity; a lone append is exactly the eager listappend op} -body {
-    set text "fn f(l, x):\n    list_append(l, x)\n\nf(\[1, 2\], 3)"
+    set text "fn f(l, x):\n    list::append(l, x)\n\nf(\[1, 2\], 3)"
     list [parity $text] [constructs [nirOf $text] .*] [regexp -all {op listappend} [nirOf $text]]
 } -result {{value {[1, 2, 3]}} 0 1}
 
-test vc-list-nested-1 {nested list_append is one flat construction: one List instead of three} -body {
-    set text "fn f(l):\n    list_append(list_append(list_append(l, 1), 2), 3)\n\nf(\[0\])"
+test vc-list-nested-1 {nested list::append is one flat construction: one List instead of three} -body {
+    set text "fn f(l):\n    list::append(list::append(list::append(l, 1), 2), 3)\n\nf(\[0\])"
     set on [vcReport $text 1]
     list [parity $text] [allocs $on List] [allocs [vcReport $text 0] List] [constructs [nirOf $text] {list flat}]
 } -result {{value {[0, 1, 2, 3]}} 2 4 1}
 
-test vc-list-bind-1 {a List binding across list_append stays virtual} -body {
-    set text "fn f(l):\n    a = list_append(l, \"x\")\n    b = list_append(a, \"y\")\n    list_length(b)\n\nf(\[\"w\"\])"
+test vc-list-bind-1 {a List binding across list::append stays virtual} -body {
+    set text "fn f(l):\n    a = list::append(l, \"x\")\n    b = list::append(a, \"y\")\n    list::length(b)\n\nf(\[\"w\"\])"
     set on [vcReport $text 1]
     list [parity $text] [allocs $on List] [allocs [vcReport $text 0] List]
 } -result {{value 3} 2 3}
 
 test vc-list-fork-1 {a List fork materializes and both continuations see the same prefix} -body {
-    parity "fn f(l):\n    a = list_append(l, 1)\n    \[list_append(a, 2), list_append(a, 3)\]\n\nf(\[\])"
+    parity "fn f(l):\n    a = list::append(l, 1)\n    \[list::append(a, 2), list::append(a, 3)\]\n\nf(\[\])"
 } -result {value {[[1, 2], [1, 3]]}}
 
 test vc-list-loop-1 {a runtime List recurrence copies linearly (N and 4N)} -body {
-    set template "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    build(i + 1, n, list_append(acc, i))\n\nlist_length(build(0, %N%, \[\]))"
+    set template "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    build(i + 1, n, list::append(acc, i))\n\nlist::length(build(0, %N%, \[\]))"
     set rows {}
     foreach n {500 2000} {
         set text [string map [list %N% $n] $template]
@@ -307,18 +307,18 @@ test vc-list-loop-1 {a runtime List recurrence copies linearly (N and 4N)} -body
 } -result {{value 500} {value 2000} 1 1 1}
 
 test vc-list-helper-1 {an exact List helper returns a plan its recursive caller extends (non-tail recursion)} -body {
-    set text "fn build(n):\n    if n == 0:\n        return \[\]\n    list_append(build(n - 1), n)\n\nbuild(6)"
+    set text "fn build(n):\n    if n == 0:\n        return \[\]\n    list::append(build(n - 1), n)\n\nbuild(6)"
     list [parity $text] [planResults $text]
 } -result {{value {[1, 2, 3, 4, 5, 6]}} {{build<int> list}}}
 
 test vc-list-empty-1 {List[never] (an empty literal) as a plan's starting piece: value and emptiness unchanged} -body {
-    parity "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    build(i + 1, n, list_append(acc, i * 2))\n\n\[build(0, 0, \[\]), build(0, 3, \[\]), list_length(build(0, 0, \[\]))\]"
+    parity "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    build(i + 1, n, list::append(acc, i * 2))\n\n\[build(0, 0, \[\]), build(0, 3, \[\]), list::length(build(0, 0, \[\]))\]"
 } -result {value {[[], [0, 2, 4], 0]}}
 
 test vc-list-gc-elements-1 {GC-bearing elements survive in a List plan under GC stress} -body {
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
     try {
-        parity "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    build(i + 1, n, list_append(acc, concat(\"s\", substring(\"0123456789\", mod(i, 10), mod(i, 10) + 1))))\n\nl = build(0, 25, \[\])\n\[list_length(l), list_get(l, 0), list_get(l, 24)\]"
+        parity "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    build(i + 1, n, list::append(acc, str::concat(\"s\", str::substring(\"0123456789\", mod(i, 10), mod(i, 10) + 1))))\n\nl = build(0, 25, \[\])\n\[list::length(l), list::at(l, 0), list::at(l, 24)\]"
     } finally {
         unset ::env(BOTLISH_NATIVE_GC_STRESS)
     }
@@ -346,12 +346,12 @@ proc typeCensus {text opt} {
 
 test vc-types-1 {[Int, Int] keeps an ordinary List[Int] theorem; [Int, String] stays broad; M8.a adds no arity/positional type} -body {
     # Instance result theorems (hir::specialize's own, unchanged by M8.a):
-    # pair's list_append of [x, x + 1] is List[int]; mixed's [x, "foo"] is
+    # pair's list::append of [x, x + 1] is List[int]; mixed's [x, "foo"] is
     # the broad `list` -- no tuple, no per-index element theorem. (The
     # specialization-only positional aggregate fact {list ELEM {P0 ...}}
     # that hir/types.tcl already had before M8.a, visible here on the
     # program's own two-element result, is untouched: identical on and off.)
-    set text "fn pair(x):\n    list_append(\[x, x + 1\], x + 2)\n\nfn mixed(x):\n    list_append(\[x, \"foo\"\], x)\n\n\[pair(1), mixed(2)\]"
+    set text "fn pair(x):\n    list::append(\[x, x + 1\], x + 2)\n\nfn mixed(x):\n    list::append(\[x, \"foo\"\], x)\n\n\[pair(1), mixed(2)\]"
     set results {}
     foreach opt {1 0} {
         set spec [dict get [native::lower::program [sourceHir $text] -virtual-construction-opt $opt] specialization]
@@ -364,7 +364,7 @@ test vc-types-1 {[Int, Int] keeps an ordinary List[Int] theorem; [Int, String] s
 } -result {{value {[[1, 2, 3], [2, "foo", 2]]}} {{<program> {list[List[int], list]}} {mixed<int> list} {pair<int> {List[int]}}} 1 1}
 
 test vc-types-2 {types, instance keys and function counts are identical with virtual construction on and off} -body {
-    set text "$digits\nfn piece(i):\n    concat(\"<\", list_get(digits, mod(i, 10)))\n\nfn build(i, n, acc, l):\n    if i >= n:\n        return \[acc, l\]\n    build(i + 1, n, concat(acc, piece(i)), list_append(l, i))\n\nbuild(0, 4, \"\", \[\])"
+    set text "$digits\nfn piece(i):\n    str::concat(\"<\", list::at(digits, mod(i, 10)))\n\nfn build(i, n, acc, l):\n    if i >= n:\n        return \[acc, l\]\n    build(i + 1, n, str::concat(acc, piece(i)), list::append(l, i))\n\nbuild(0, 4, \"\", \[\])"
     list [parity $text] [expr {[typeCensus $text 1] eq [typeCensus $text 0]}]
 } -result {{value {["<0<1<2<3", [0, 1, 2, 3]]}} 1}
 
@@ -445,17 +445,17 @@ test vc-nir-7 {a plan-result function reached through its generic entry (a Block
 } -result {str abab}
 
 test vc-str-guarded-1 {an untyped concat operand keeps the eager call's own kind guard, at the same point} -body {
-    set text "fn f(x):\n    concat(concat(x, \"a\"), \"b\")\n\n\[f(\"s\"), f(1)\]"
+    set text "fn f(x):\n    str::concat(str::concat(x, \"a\"), \"b\")\n\n\[f(\"s\"), f(1)\]"
     list [parity $text] [regexp {guard str} [nirOf $text]]
 } -result {{error {CORE SEMANTIC TYPE}} 1}
 
 test vc-str-many-pieces-1 {a construction of more than eight pieces (the runtime's spill path) is exact} -body {
-    set text "fn f(a):\n    concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(a, \"1\"), \"2\"), \"3\"), \"4\"), \"5\"), \"6\"), \"7\"), \"8\"), \"9\"), a)\n\nf(\"é\")"
+    set text "fn f(a):\n    str::concat(str::concat(str::concat(str::concat(str::concat(str::concat(str::concat(str::concat(str::concat(str::concat(a, \"1\"), \"2\"), \"3\"), \"4\"), \"5\"), \"6\"), \"7\"), \"8\"), \"9\"), a)\n\nf(\"é\")"
     list [parity $text] [constructs [nirOf $text] {str flat( %\d+){11}}]
 } -result {{value {"é123456789é"}} 1}
 
 test vc-str-toplevel-1 {plan locals at program top level} -body {
-    set text "x = concat(\"a\", \"b\")\ny = concat(x, \"c\")\nz = concat(y, y)\nz"
+    set text "x = str::concat(\"a\", \"b\")\ny = str::concat(x, \"c\")\nz = str::concat(y, y)\nz"
     parity $text
 } -result {value {"abcabc"}}
 
@@ -465,7 +465,7 @@ test vc-str-toplevel-1 {plan locals at program top level} -body {
 test vc-gc-str-1 {String plans (append, prepend, regions, merges, plan results) under GC stress} -body {
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
     try {
-        set text "$digits\nfn piece(i):\n    concat(\"<\", concat(list_get(digits, mod(i, 10)), \">\"))\n\nfn build(i, n, acc, back):\n    if i >= n:\n        return concat(acc, back)\n    build(i + 1, n, concat(acc, piece(i)), concat(substring(\"xyz\", mod(i, 3), mod(i, 3) + 1), back))\n\ns = build(0, 30, \"\", \"!\")\n\[length(s), substring(s, 0, 9), substring(s, 115, 121)\]"
+        set text "$digits\nfn piece(i):\n    str::concat(\"<\", str::concat(list::at(digits, mod(i, 10)), \">\"))\n\nfn build(i, n, acc, back):\n    if i >= n:\n        return str::concat(acc, back)\n    build(i + 1, n, str::concat(acc, piece(i)), str::concat(str::substring(\"xyz\", mod(i, 3), mod(i, 3) + 1), back))\n\ns = build(0, 30, \"\", \"!\")\n\[str::length(s), str::substring(s, 0, 9), str::substring(s, 115, 121)\]"
         parity $text
     } finally {
         unset ::env(BOTLISH_NATIVE_GC_STRESS)
@@ -475,7 +475,7 @@ test vc-gc-str-1 {String plans (append, prepend, regions, merges, plan results) 
 test vc-gc-uri-1 {the URI escape chain under GC stress, virtual construction on} -body {
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
     try {
-        set text "corpus = \[\"a b\", \"café 世\", \"~ok-\"\]\nfn go(i, acc):\n    if i >= 3:\n        return acc\n    go(i + 1, concat(acc, web::uri_escape_text(list_get(corpus, i))))\n\ngo(0, \"\")"
+        set text "corpus = \[\"a b\", \"café 世\", \"~ok-\"\]\nfn go(i, acc):\n    if i < 0 or i >= 3:\n        return acc\n    go(i + 1, str::concat(acc, web::uri_escape_text(list::at(corpus, i))))\n\ngo(0, \"\")"
         set path [makeFile $text vc-gc-uri.bot]
         set hir [surface::readProgramFile $path]
         list [core::value::show [native::evalHir $hir -virtual-construction-opt 1] 1] \

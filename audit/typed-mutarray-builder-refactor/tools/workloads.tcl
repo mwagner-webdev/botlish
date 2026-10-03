@@ -41,10 +41,10 @@ set workloads [list \
     [list csv_geometric_100   csv_geometric "csv_parse([corpus::literal [csvText 100]])"] \
     [list csv_geometric_1000  csv_geometric "csv_parse([corpus::literal [csvText 1000]])"] \
     [list csv_geometric_10000 csv_geometric "csv_parse([corpus::literal [csvText 10000]])"] \
-    [list csv_records_1000x5  csv_records "list_length(csv_records([corpus::literal [genCsv 1000 5]]))"] \
-    [list csv_records_1000x20 csv_records "list_length(csv_records([corpus::literal [genCsv 1000 20]]))"] \
-    [list csv_records_presized_1000x20 csv_records "list_length(csv_records_presized([corpus::literal [genCsv 1000 20]]))"] \
-    [list csv_records_10000x5 csv_records "list_length(csv_records([corpus::literal [genCsv 10000 5]]))"] \
+    [list csv_records_1000x5  csv_records "list::length(csv_records([corpus::literal [genCsv 1000 5]]))"] \
+    [list csv_records_1000x20 csv_records "list::length(csv_records([corpus::literal [genCsv 1000 20]]))"] \
+    [list csv_records_presized_1000x20 csv_records "list::length(csv_records_presized([corpus::literal [genCsv 1000 20]]))"] \
+    [list csv_records_10000x5 csv_records "list::length(csv_records([corpus::literal [genCsv 10000 5]]))"] \
     [list csv_records_sample csv_records "sample()"]]
 
 set out {}

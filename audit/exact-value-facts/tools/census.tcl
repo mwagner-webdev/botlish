@@ -8,7 +8,7 @@
 #
 # Programs: bench/*.bot, examples/stdlib/*.bot, examples/surface/*.bot and
 # every lib/*.bot module they load (a source location is counted once).
-# One line per `list_get` / `list_length` call site, in source order:
+# One line per `list::at` / `list::length` call site, in source order:
 #
 #   SITE | native | sem=SEMANTIC-TYPE | inst=VIEW TYPES{RANGE FACTS} | idx=.. list=..
 #
@@ -57,7 +57,7 @@ foreach path $programs {
     # semantic pass
     dict for {e node} [dict get $hir exprs] {
         set n [natName $hir $e]
-        if {$n ni {list_get list_length}} continue
+        if {$n ni {list::at list::length}} continue
         set key [siteKey $hir $e]
         if {$key eq ""} continue
         if {![dict exists $sites $key]} {
@@ -66,7 +66,7 @@ foreach path $programs {
                 set args [hir::get $hir $e args]
                 set lf [hir::exact::ListOf $hir [lindex $args 0]]
                 dict set rec list [expr {$lf eq "" ? "-" : "n=[hir::exact::Length $lf]"}]
-                if {$n eq "list_get"} {
+                if {$n eq "list::at"} {
                     set iv [hir::exact::IntOf $hir [lindex $args 1]]
                     set how [expr {[hir::kind $hir [lindex $args 1]] eq "const" ? "lit" : "derived"}]
                     dict set rec idx [expr {$iv eq "" ? "-" : "${iv}($how)"}]
@@ -92,7 +92,7 @@ foreach path $programs {
         set view [hir::specialize::view $hir $spec $id]
         dict for {e r0} [dict get $an instances $id exprs] {
             set n [natName $view $e]
-            if {$n ni {list_get list_length}} continue
+            if {$n ni {list::at list::length}} continue
             set key [siteKey $hir $e]
             if {$key eq "" || ![dict exists $sites $key]} continue
             set t [hir::types::show [hir::typeOf $view $e]]

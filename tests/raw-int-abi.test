@@ -281,7 +281,7 @@ test raw-mixed-parameters {fn f(a, b, s): a small, b unbounded, s a String: raw,
             if a > 100:
                 0
             else:
-                length(s) + b
+                str::length(s) + b
 
         f(3, count(500, 0), "abc")
     }
@@ -295,7 +295,7 @@ test raw-mixed-physical-signature-in-nir {only position 0 is in rawparams; a hid
             if a > 100:
                 0
             else:
-                length(s)
+                str::length(s)
 
         f(3, "abc") + f(4, "de")
     }
@@ -382,7 +382,7 @@ test raw-open-instance-stays-tagged {a function whose Block value escapes keeps 
             [open_one]
 
         a = open_one(5) + 1
-        [a, list_length(stash())]
+        [a, list::length(stash())]
     }
     set plan [abiPlan $text {*}$noInline]
     list $plan [abiReasons $text open_one<generic> {*}$noInline] [parityAbi $text]
@@ -399,7 +399,7 @@ test raw-dynamic-call-uses-generic-entry {a function invoked through a Block val
         fn stash():
             [add1]
 
-        [twice(add1, 3), list_length(stash())]
+        [twice(add1, 3), list::length(stash())]
     }
     parityAbi $text
 } -result {value:[5, 1]}
@@ -415,7 +415,7 @@ test raw-exact-callable-target-is-raw {an exact callable specialization calls a 
         fn stash():
             [open_one]
 
-        [apply_dyn(open_one, 6) + 1, list_length(stash())]
+        [apply_dyn(open_one, 6) + 1, list::length(stash())]
     }
     set nir [nirOf $text {*}$noInline]
     list [abiPlan $text {*}$noInline] [countIn {callvalue} $nir] [parityAbi $text]
@@ -444,8 +444,8 @@ test raw-non-tail-recursion-with-allocation {raw n and raw result stay valid acr
             if n < 1:
                 0
             else:
-                s = concat("ab", "cd")
-                if length(s) > 3:
+                s = str::concat("ab", "cd")
+                if str::length(s) > 3:
                     build(n - 1) + n
                 else:
                     0
@@ -649,7 +649,7 @@ test demand-tagged-only-parameter {a small closed Int parameter that only reache
         fn wrap(n):
             [n]
 
-        list_length(wrap(3))
+        list::length(wrap(3))
     }
     set nir [nirOf $text {*}$noInline]
     list [abiDemandPlan $text {*}$noInline] [abiReasons $text wrap<int> {*}$noInline] \
@@ -661,7 +661,7 @@ test demand-eligibility-only-mode-is-the-preliminary-plan {-raw-demand-opt 0 sel
         fn wrap(n):
             [n]
 
-        list_length(wrap(3))
+        list::length(wrap(3))
     }
     set nir [nirOf $text {*}$noInline -raw-demand-opt 0]
     list [abiDemandPlan $text {*}$noInline -raw-demand-opt 0] [physical [fnText $nir wrap]] \
@@ -688,7 +688,7 @@ test demand-raw-parameter {a parameter used by raw arithmetic is selected raw wh
         fn inc(n):
             n + 1
 
-        list_length([inc(2)])
+        list::length([inc(2)])
     }
     set nir [nirOf $text {*}$noInline]
     list [abiDemandPlan $text {*}$noInline] [physical [fnText $nir inc]] [conversionsIn $nir inc] [parityAbi $text]
@@ -697,9 +697,9 @@ test demand-raw-parameter {a parameter used by raw arithmetic is selected raw wh
 test demand-raw-result {a bounded closed result consumed by raw arithmetic at a caller is selected raw} -body {
     set text {
         fn six(s):
-            length(s)
+            str::length(s)
 
-        if six(concat("a", "b")) < 5:
+        if six(str::concat("a", "b")) < 5:
             1
         else:
             2
@@ -714,7 +714,7 @@ test demand-mixed-use-is-boxed {raw arithmetic and a tagged storage use of the s
             x = n + 1
             [n, x]
 
-        list_length(both(4))
+        list::length(both(4))
     }
     set nir [nirOf $text {*}$noInline]
     set raw [nirOf $text {*}$noInline -raw-mixed-policy raw]
@@ -729,7 +729,7 @@ test demand-propagates-through-aliases {the only raw consumer is behind an alias
             z = y
             z + 1
 
-        list_length([f(1)])
+        list::length([f(1)])
     }
     list [abiDemandPlan $text {*}$noInline] [parityAbi $text]
 } -result {f<int>=raw>supp value:1}
@@ -738,15 +738,15 @@ test demand-branches-raw-only-raw-mixed-boxed-tagged-only-tagged {every reachabl
     set text {
         fn some(n, c):
             if c:
-                list_length([n])
+                list::length([n])
             else:
                 n + 1
 
         fn none(n, c):
             if c:
-                list_length([n])
+                list::length([n])
             else:
-                list_length([n, n])
+                list::length([n, n])
 
         fn only(n, c):
             if c:
@@ -767,7 +767,7 @@ test demand-dead-branch-raw-use-does-not-count {a raw use in a branch HIR/Range 
             if c > 100:
                 n + 1
             else:
-                list_length([n])
+                list::length([n])
 
         f(7, 3)
     }
@@ -824,7 +824,7 @@ test demand-tagged-chain-is-all-tagged {f result -> g parameter -> h parameter -
         fn g(y):
             h(y)
 
-        list_length(g(f(1)))
+        list::length(g(f(1)))
     }
     set nir [nirOf $text {*}$noInline]
     list [abiDemandPlan $text {*}$noInline] [conversionsIn $nir g] [conversionsIn $nir h] [parityAbi $text]
@@ -836,7 +836,7 @@ test demand-forwarding-cycle-cannot-bootstrap-raw {a recursive position that onl
             if c == 0:
                 n
             else:
-                list_length([f(n, c - 1)])
+                list::length([f(n, c - 1)])
 
         [f(3, 5)]
     }
@@ -888,7 +888,7 @@ test demand-mixed-use-propagates-through-transport {a callee that boxes its para
         fn g(y):
             h(y)
 
-        list_length(g(3))
+        list::length(g(3))
     }
     list [abiDemandPlan $text {*}$noInline] [abiDemandPlan $text {*}$noInline -raw-mixed-policy raw] [parityAbi $text]
 } -result {{g<int>=supp>val h<int>=supp>val} {g<int>=raw>val h<int>=raw>val} value:2}
@@ -959,7 +959,7 @@ test demand-suppressed-signature-is-consistent {a suppressed position is tagged 
             [n]
 
         fn twice(n):
-            list_length(wrap(n)) + list_length(wrap(n + 1))
+            list::length(wrap(n)) + list::length(wrap(n + 1))
 
         twice(4) + twice(5)
     }
@@ -1084,10 +1084,10 @@ test raw-error-escapes-uncaught-as-an-error {an undeclared runtime failure insid
 test raw-gc-raw-live-across-allocation {a raw parameter, a String and a List live across unrelated allocations under GC stress} -body {
     set text {
         fn work(n, s, xs):
-            t = concat(s, "x")
-            u = list_append(xs, 7)
-            v = concat(t, t)
-            flag = if length(v) > list_length(u):
+            t = str::concat(s, "x")
+            u = list::append(xs, 7)
+            v = str::concat(t, t)
+            flag = if str::length(v) > list::length(u):
                 1
             else:
                 0
@@ -1107,9 +1107,9 @@ test raw-gc-recursive-allocating-frames {raw n and a raw result across 200 recur
     set text {
         fn depth(n, s):
             if n == 0:
-                length(s)
+                str::length(s)
             else:
-                t = concat(s, "z")
+                t = str::concat(s, "z")
                 depth(n - 1, t) + n
 
         depth(200, "")
@@ -1125,8 +1125,8 @@ test raw-gc-recursive-allocating-frames {raw n and a raw result across 200 recur
 test raw-gc-stack-map-has-no-raw-roots {the root report of a raw-parameter function lists the raw registers as non-roots} -body {
     set text {
         fn work(n, s):
-            t = concat(s, "x")
-            n + length(t)
+            t = str::concat(s, "x")
+            n + str::length(t)
 
         work(3, "a") + work(4, "b")
     }
@@ -1188,9 +1188,9 @@ test raw-executable-mixed {raw, tagged and error-capable instances in one standa
                 drive(i + 1, acc + check(3 - i))
 
         fn work(n: int, s: str, xs: List[int]):
-            t = concat(s, "x")
-            u = list_append(xs, n)
-            n + length(t) + list_length(u)
+            t = str::concat(s, "x")
+            u = list::append(xs, n)
+            n + str::length(t) + list::length(u)
 
         r = drive(0, 0):
             on Negative:
@@ -1226,12 +1226,12 @@ set demandSource {
         if c == 0:
             n
         else:
-            list_length([f(n, c - 1)])
+            list::length([f(n, c - 1)])
 
     fn chain(x):
         g(x * 2) - 1
 
-    [list_length(wrap(3)), pick(1), pick(2), list_length(both(4)), g(pick(2)), f(3, 5), chain(3)]
+    [list::length(wrap(3)), pick(1), pick(2), list::length(both(4)), g(pick(2)), f(3, 5), chain(3)]
 }
 
 test raw-executable-demand {suppressed, mixed, transported and raw instances in one standalone executable, with demand suppression on and off, also under GC stress} -constraints executableAot -body {

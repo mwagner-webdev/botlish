@@ -123,8 +123,8 @@ test blockescape-escaping-return-1 {a returned closure still allocates and behav
 test blockescape-stored-1 {a closure also stored in a List is never virtualized, even where it is called directly} -body {
     # A bare Block value cannot cross the native/host boundary (there is no
     # Tcl representation for it), so the escaping use is observed here
-    # through list_length rather than by returning the List itself.
-    set text "fn f(n):\n    fn step(x):\n        x + n\n    box = \[step, 0\]\n    step(1) + list_length(box)\n\nf(10)"
+    # through list::length rather than by returning the List itself.
+    set text "fn f(n):\n    fn step(x):\n        x + n\n    box = \[step, 0\]\n    step(1) + list::length(box)\n\nf(10)"
     set on [blockAllocs $text 1]
     set off [blockAllocs $text 0]
     list [assertParity $text] $on [expr {$on == $off}]
@@ -218,7 +218,7 @@ test blockescape-sibling-escaping-1 {a closure captured by an escaping sibling s
 
 test blockescape-gc-stress-1 {a captured String stays live under BOTLISH_NATIVE_GC_STRESS=1} -body {
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
-    set text "fn f(n, s):\n    fn step(x):\n        concat(x, s)\n    if n == 0:\n        return step(\"go\")\n    f(n - 1, s)\n\nf(2000, \"!\")"
+    set text "fn f(n, s):\n    fn step(x):\n        str::concat(x, s)\n    if n == 0:\n        return step(\"go\")\n    f(n - 1, s)\n\nf(2000, \"!\")"
     set result [catch {native::evalHir [sourceHir $text]} value]
     unset ::env(BOTLISH_NATIVE_GC_STRESS)
     list $result $value
@@ -233,7 +233,7 @@ test blockescape-gc-stress-1 {a captured String stays live under BOTLISH_NATIVE_
 
 test blockescape-gc-stress-2 {a managed capture threaded through a de-closure-converted sibling+self-tail chain survives GC stress} -body {
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
-    set text "fn f(n, s):\n    fn build(x):\n        concat(s, x)\n    fn scan(i):\n        if i >= n:\n            build(\"done\")\n        else:\n            concat(build(\"x\"), scan(i + 1))\n    scan(0)\n\nf(3, \"go-\")"
+    set text "fn f(n, s):\n    fn build(x):\n        str::concat(s, x)\n    fn scan(i):\n        if i >= n:\n            build(\"done\")\n        else:\n            str::concat(build(\"x\"), scan(i + 1))\n    scan(0)\n\nf(3, \"go-\")"
     set on [blockAllocs $text 1]
     set result [catch {native::evalHir [sourceHir $text]} value]
     unset ::env(BOTLISH_NATIVE_GC_STRESS)
@@ -241,7 +241,7 @@ test blockescape-gc-stress-2 {a managed capture threaded through a de-closure-co
 } -result {0 {str go-xgo-xgo-xgo-done} 0}
 
 test blockescape-multi-managed-capture-1 {a virtualized closure with three captures (String, Int, Bool) passes all three correctly} -body {
-    set text "fn f(s, n, flag):\n    fn combine(x):\n        if flag:\n            concat(concat(s, x), n)\n        else:\n            concat(x, s)\n    concat(combine(\"-\"), combine(\"+\"))\n\nf(\"hi\", \"7\", true)"
+    set text "fn f(s, n, flag):\n    fn combine(x):\n        if flag:\n            str::concat(str::concat(s, x), n)\n        else:\n            str::concat(x, s)\n    str::concat(combine(\"-\"), combine(\"+\"))\n\nf(\"hi\", \"7\", true)"
     list [assertParity $text] [blockAllocs $text 1] [blockAllocs $text 0]
 } -result {{str hi-7hi+7} 0 1}
 
@@ -259,7 +259,7 @@ test blockescape-loop-creation-1 {a de-closure-converted closure created repeate
 # expressions).
 
 test blockescape-effects-1 {a captured value's producing expression runs exactly once, not once per call} -body {
-    set text "fn side(n):\n    concat(\"x\", n)\n\nfn f():\n    v = side(\"1\")\n    fn step(x):\n        concat(x, v)\n    concat(step(\"a\"), step(\"b\"))\n\nf()"
+    set text "fn side(n):\n    str::concat(\"x\", n)\n\nfn f():\n    v = side(\"1\")\n    fn step(x):\n        str::concat(x, v)\n    str::concat(step(\"a\"), step(\"b\"))\n\nf()"
     list [assertParity $text] [blockAllocs $text 1]
 } -result {{str ax1bx1} 0}
 
@@ -329,7 +329,7 @@ proc blockAllocsOpt {text blockEscapeOpt stringRegionOpt} {
 set ::atScanSrc {
 fn outer(s):
     fn at(i):
-        substring(s, i, i + 1)
+        str::substring(s, i, i + 1)
     fn scan(i):
         if at(i) == "x":
             true
@@ -372,13 +372,13 @@ test blockescape-region-companion-minimal-4 {the region call is a direct callmul
 set ::atMixedSrc {
 fn outer(s):
     fn at(i):
-        substring(s, i, i + 1)
+        str::substring(s, i, i + 1)
     fn use(i, j):
         x = at(i)
         if at(j) == ":":
-            concat(x, "!")
+            str::concat(x, "!")
         else:
-            concat(x, "?")
+            str::concat(x, "?")
     use(0, 1)
 
 outer("a:b")
@@ -415,12 +415,12 @@ test blockescape-region-companion-mixed-2 {at gets both an ordinary internal var
 set ::mixedProgramSrc {
 fn makeAccessor(s):
     fn at(i):
-        substring(s, i, i + 1)
+        str::substring(s, i, i + 1)
     at
 
 fn scanner(s2):
     fn at2(i):
-        substring(s2, i, i + 1)
+        str::substring(s2, i, i + 1)
     fn scan(i):
         at2(i) == "z"
     scan(2)
@@ -458,13 +458,13 @@ test blockescape-region-companion-gc-stress-1 {a captured base String survives a
     set text {
 fn f(n, s):
     fn at(i):
-        substring(s, i, i + 1)
+        str::substring(s, i, i + 1)
     fn scan(i, acc):
         if i >= n:
             acc
         else:
             if at(i) == "x":
-                scan(i + 1, concat(acc, at(i)))
+                scan(i + 1, str::concat(acc, at(i)))
             else:
                 scan(i + 1, acc)
     scan(0, "")
@@ -515,7 +515,7 @@ test blockescape-region-companion-bounds-error-1 {a locally-bound char accessor'
     set text {
 fn outer(s, i):
     fn at(j):
-        substring(s, j, j + 1)
+        str::substring(s, j, j + 1)
     fn scan(k):
         at(k) == "z"
     scan(i)
@@ -523,16 +523,16 @@ fn outer(s, i):
 outer("ab", 5)
 }
     assertErrorParity $text
-} -result {{CORE SEMANTIC RANGE} {substring: range 5..6 is outside 0..2}}
+} -result {{CORE SEMANTIC RANGE} {str::substring: range 5..6 is outside 0..2}}
 
 test blockescape-region-companion-unicode-1 {a locally-bound char accessor over an astral-plane String classifies correctly, in region form, with zero Block allocation} -body {
     set emoji [encoding convertfrom utf-8 "\xf0\x9f\x98\x80"]
     set text "
 fn outer(s):
     fn at(i):
-        substring(s, i, i + 1)
+        str::substring(s, i, i + 1)
     fn scan(i):
-        is_tcl_alpha(at(i))
+        str::is_tcl_alpha(at(i))
     \[scan(0), scan(1)\]
 
 outer([corpus::literal "a$emoji"])
@@ -633,13 +633,13 @@ test blockescape-region-companion-flags-both-off {both off: the fully unoptimize
 # milestone corrects storage/reachability representation only, never
 # value construction, per spec items 28-29).
 # EXACT-CALLABLE-CLOSED-CALLER.md: scan_while's TLD call site now has the
-# exact predicate is_tcl_alpha in its key, so the TLD scan consumes
+# exact predicate str::is_tcl_alpha in its key, so the TLD scan consumes
 # char_at(i) as a StringRegion (no one-character String per TLD character):
 # String 8004 -> 6804 (the 1,200 TLD characters of the 800 real emailish?
 # calls' accepted inputs), total allocations 8020 -> 6820. The local-part
 # scan's 6,800 one-character Strings remain (set membership is not a region
 # consumer).
-test blockescape-region-companion-refined-checks-1 {refined-checks.ir: local_extra_chars' List/ImmutableSet are module-init only (R2.a.1); Block drops from 803 (R2.a.1's own per-call local_char? closure, capturing the module set) to 0 -- local_char? is envless now, a module-static reference is never a capture (MODULE-STATIC-RETAINED-VALUES.md); the exact predicate is_tcl_alpha makes the TLD scan a StringRegion consumer, so String falls 8004 -> 6804 (the local part's set-membership characters remain)} -body {
+test blockescape-region-companion-refined-checks-1 {refined-checks.ir: local_extra_chars' List/ImmutableSet are module-init only (R2.a.1); Block drops from 803 (R2.a.1's own per-call local_char? closure, capturing the module set) to 0 -- local_char? is envless now, a module-static reference is never a capture (MODULE-STATIC-RETAINED-VALUES.md); the exact predicate str::is_tcl_alpha makes the TLD scan a StringRegion consumer, so String falls 8004 -> 6804 (the local part's set-membership characters remain)} -body {
     core::loadLibrary web
     set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     # -short-string-opt 0: the pinned String count is the region analysis's
@@ -673,7 +673,7 @@ test blockescape-region-companion-refined-checks-2 {refined-checks.ir: char_at's
 # still exactly one used generic instance each, still capturing n/v
 # directly (never char_at) as ordinary flattened parameters, not a
 # per-call-site copy.
-test blockescape-region-companion-refined-checks-3 {refined-checks.ir: scan_while/tld?/domain? flatten captures to [n, v] (domain_loop is gone; scan_while's own induction param is renamed i -> start) -- tld? and domain? remain one shared instance each; scan_while has one instance per exact predicate target (local_char?, is_tcl_alpha), each flattened (EXACT-CALLABLE-CLOSED-CALLER.md: blockescape de-closes a literal with several instances), and no closure is built} -body {
+test blockescape-region-companion-refined-checks-3 {refined-checks.ir: scan_while/tld?/domain? flatten captures to [n, v] (domain_loop is gone; scan_while's own induction param is renamed i -> start) -- tld? and domain? remain one shared instance each; scan_while has one instance per exact predicate target (local_char?, str::is_tcl_alpha), each flattened (EXACT-CALLABLE-CLOSED-CALLER.md: blockescape de-closes a literal with several instances), and no closure is built} -body {
     core::loadLibrary web
     set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set nirText [dict get [native::lower::program $hir] text]
@@ -723,7 +723,7 @@ test blockescape-region-companion-refined-checks-5 {refined-checks.ir: R2.a.3 dr
 # Enclosing-instance consistency: a de-closure-converted binding's region is
 # analyzed once per used instance of the enclosing function, and every one of
 # them must prove the binding's references are exact calls. An enclosing
-# function called through `list_get` of a known List is a materialized Block
+# function called through `list::at` of a known List is a materialized Block
 # value too, so its generic (Block-value entry) instance is used and calls
 # the nested closure's GENERIC instance, while the exact-callable instance
 # calls a specialized one: both must be wanted (or the binding declined),
@@ -756,10 +756,10 @@ fn f(a):
     g(a)
 
 fs = [f]
-list_get(fs, 0)(3)
+list::at(fs, 0)(3)
 }
 
-test blockescape-enclosing-instances-1 {a closure capturing a local, called inside a function that is itself called through list_get of a known List: every backend agrees} -body {
+test blockescape-enclosing-instances-1 {a closure capturing a local, called inside a function that is itself called through list::at of a known List: every backend agrees} -body {
     backendParity $blockescapeEnclosingRepro
 } -result 8
 
@@ -771,7 +771,7 @@ test blockescape-enclosing-instances-2 {...and the closure is still de-closure-c
         [blockAllocs $blockescapeEnclosingRepro 1]
 } -result {{g<int> g<generic>} 0}
 
-test blockescape-enclosing-instances-3 {two exact list_get calls at different indexes, each callee with a nested closure capturing a local} -body {
+test blockescape-enclosing-instances-3 {two exact list::at calls at different indexes, each callee with a nested closure capturing a local} -body {
     backendParity {
 fn f(a):
     k = 5
@@ -786,11 +786,11 @@ fn h(a):
     q(a) + q(1)
 
 fs = [f, h]
-[list_get(fs, 0)(3), list_get(fs, 1)(3), list_get(fs, 0)(10)]
+[list::at(fs, 0)(3), list::at(fs, 1)(3), list::at(fs, 0)(10)]
     }
 } -result {[8, 28, 15]}
 
-test blockescape-enclosing-instances-4 {a nested closure capturing both a local and a parameter of a function called through list_get, plus a second closure calling the first} -body {
+test blockescape-enclosing-instances-4 {a nested closure capturing both a local and a parameter of a function called through list::at, plus a second closure calling the first} -body {
     backendParity {
 fn f(a):
     k = 5
@@ -801,7 +801,7 @@ fn f(a):
     r(a) + g(1)
 
 fs = [f]
-[list_get(fs, 0)(3), f(4)]
+[list::at(fs, 0)(3), f(4)]
     }
 } -result {[31, 36]}
 

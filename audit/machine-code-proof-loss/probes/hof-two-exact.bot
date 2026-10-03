@@ -14,10 +14,10 @@ fn first_hit(f, i, n):
     n
 
 fn alpha_run(p, s, i):
-    loop j from i to length(s):
-        if p(substring(s, j, j + 1)):
+    loop j from i to str::length(s):
+        if p(str::substring(s, j, j + 1)):
             continue
         return j
-    length(s)
+    str::length(s)
 
-[first_hit(inc, 0, 100), alpha_run(is_tcl_alpha, "abc1", 0)]
+[first_hit(inc, 0, 100), alpha_run(str::is_tcl_alpha, "abc1", 0)]

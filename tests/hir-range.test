@@ -151,7 +151,7 @@ test range-analyze-3 {an exact call's Ref argument seeds the callee from the cal
 } -result {{{[3, 3] {3}}} {{[3, 3] {3}}}}
 
 test range-analyze-3b {a parameter with no evidence anywhere -- not even indirectly -- stays unknown: the callee only ever sees a genuinely unbounded expression's Range, never a syntactic "not a literal" restriction} -body {
-    lassign [rangeOf "fn add1(x):\n    x + 1\n\nfn go(xs):\n    add1(list_get(xs, 0))\n\ngo(\[1, 2\])"] hir spec analysis
+    lassign [rangeOf "fn add1(x):\n    x + 1\n\nfn go(xs):\n    add1(list::at(xs, 0))\n\ngo(\[1, 2\])"] hir spec analysis
     paramRanges $analysis [rangeInstance $spec add1]
 } -result {{[-∞, +∞]}}
 
@@ -166,8 +166,8 @@ test range-analyze-5 {a parameter passed unchanged through recursion, seeded by 
     paramRanges $analysis [rangeInstance $spec walk]
 } -result {{[7, 7] {7}} {[0, 3]}}
 
-test range-analyze-6 {a native's -result-range collection-length metadata (length, list_length) proves a String/List length is both non-negative and machine-representable, so length(s) is provably small with no relational reasoning} -body {
-    lassign [rangeOf "fn f(s):\n    length(s)\n\nf(\"abc\")"] hir spec analysis
+test range-analyze-6 {a native's -result-range collection-length metadata (length, list::length) proves a String/List length is both non-negative and machine-representable, so str::length(s) is provably small with no relational reasoning} -body {
+    lassign [rangeOf "fn f(s):\n    str::length(s)\n\nf(\"abc\")"] hir spec analysis
     set id [rangeInstance $spec f]
     set r [lindex [dict values [dict get [dict get $analysis instances $id] exprs]] end]
     list [hir::range::show $r] [hir::range::fitsSmall $r]
@@ -181,7 +181,7 @@ test range-analyze-7 {if branches join conservatively: two exact branches bound,
 } -result {[1, 2]}
 
 test range-analyze-8 {only + - * and proven-nonneg natives establish a fact; everything else is unknown} -body {
-    lassign [rangeOf "fn f(xs):\n    list_get(xs, 0)\n\nf(\[1, 2\])"] hir spec analysis
+    lassign [rangeOf "fn f(xs):\n    list::at(xs, 0)\n\nf(\[1, 2\])"] hir spec analysis
     set id [rangeInstance $spec f]
     set r [lindex [dict values [dict get [dict get $analysis instances $id] exprs]] end]
     hir::range::isUnknown $r
@@ -193,14 +193,14 @@ test range-analyze-8 {only + - * and proven-nonneg natives establish a fact; eve
 # the milestone that added them)
 
 test range-induction-1 {an == guard against a stable, immutable-collection-length bound with a +1 step (string_reverse's shape) proves the counter stays within [0, length]} -body {
-    lassign [rangeOf "fn reverse_from(text, index, reversed):\n    if index == length(text):\n        return reversed\n    reverse_from(text, index + 1, reversed)\n\nreverse_from(\"hello\", 0, \"\")"] hir spec analysis
+    lassign [rangeOf "fn reverse_from(text, index, reversed):\n    if index == str::length(text):\n        return reversed\n    reverse_from(text, index + 1, reversed)\n\nreverse_from(\"hello\", 0, \"\")"] hir spec analysis
     set id [rangeInstance $spec reverse_from]
     lassign [paramRanges $analysis $id] textRange indexRange
     list $indexRange [hir::range::fitsSmall [lindex [dict get [dict get $analysis instances $id] params] 1]]
 } -result [list "\[0, $hir::range::smallMax\]" 1]
 
-test range-induction-2 {a parameter seeded, at every external call, only by a length/list_length-shaped argument (matmul's "count") is itself proven small (interprocedural, from hir::range::SeedRange, no relational reasoning needed for the bound itself), so the == guard against it proves the counter small too} -body {
-    lassign [rangeOf "fn dot(a_row, b, column, k, count, total):\n    if k == count:\n        return total\n    dot(a_row, b, column, k + 1, count, total + 1)\n\ndot(\[1, 2\], \[\[1, 2\], \[3, 4\]\], 0, 0, list_length(\[1, 2\]), 0)"] hir spec analysis
+test range-induction-2 {a parameter seeded, at every external call, only by a length/list::length-shaped argument (matmul's "count") is itself proven small (interprocedural, from hir::range::SeedRange, no relational reasoning needed for the bound itself), so the == guard against it proves the counter small too} -body {
+    lassign [rangeOf "fn dot(a_row, b, column, k, count, total):\n    if k == count:\n        return total\n    dot(a_row, b, column, k + 1, count, total + 1)\n\ndot(\[1, 2\], \[\[1, 2\], \[3, 4\]\], 0, 0, list::length(\[1, 2\]), 0)"] hir spec analysis
     set id [rangeInstance $spec dot]
     set params [dict get [dict get $analysis instances $id] params]
     # k (index 3) is proven small; total (index 5), an unbounded accumulator
@@ -214,8 +214,8 @@ test range-induction-3 {a step of +-2 against an == guard is not proven (it coul
     paramRanges $analysis [rangeInstance $spec count2]
 } -result {{[-∞, 100000]} {[0, +∞]}}
 
-test range-induction-4 {an opaque, call-derived next value (csv's scan_records shape: no i + c pattern at all) is not a step candidate, so hir/induction.tcl itself proves nothing here -- but M9's post-widen narrowing (M9-INSTANCE-ENTRY-INT-FACTS.md), an entirely different, general mechanism, now legitimately recovers a (very loose) upper bound: the branch guard "index >= length(text)" already proved next_index's own incoming argument <= smallMax-1 (length()'s own collection-length fact), so next_index's body (i + 1) is itself provably <= smallMax, and scan's self-recursive feedback (index <- next_index(index)) carries that back to scan's own entry once narrowing folds self-edges in with external ones -- sound (every reachable index is, trivially, some String's length or less), just far looser than a real trip-count bound; still not fitsSmall (the lower side stays unbounded), so this changes no codegen decision} -body {
-    lassign [rangeOf "fn next_index(i):\n    i + 1\n\nfn scan(text, index, count):\n    if index >= length(text):\n        return count\n    scan(text, next_index(index), count + 1)\n\nscan(\"abcde\", 0, 0)"] hir spec analysis
+test range-induction-4 {an opaque, call-derived next value (csv's scan_records shape: no i + c pattern at all) is not a step candidate, so hir/induction.tcl itself proves nothing here -- but M9's post-widen narrowing (M9-INSTANCE-ENTRY-INT-FACTS.md), an entirely different, general mechanism, now legitimately recovers a (very loose) upper bound: the branch guard "index >= str::length(text)" already proved next_index's own incoming argument <= smallMax-1 (str::length()'s own collection-length fact), so next_index's body (i + 1) is itself provably <= smallMax, and scan's self-recursive feedback (index <- next_index(index)) carries that back to scan's own entry once narrowing folds self-edges in with external ones -- sound (every reachable index is, trivially, some String's length or less), just far looser than a real trip-count bound; still not fitsSmall (the lower side stays unbounded), so this changes no codegen decision} -body {
+    lassign [rangeOf "fn next_index(i):\n    i + 1\n\nfn scan(text, index, count):\n    if index >= str::length(text):\n        return count\n    scan(text, next_index(index), count + 1)\n\nscan(\"abcde\", 0, 0)"] hir spec analysis
     set id [rangeInstance $spec scan]
     lassign [paramRanges $analysis $id] textR indexR countR
     list $indexR [hir::range::fitsSmall [lindex [dict get [dict get $analysis instances $id] params] 1]]
@@ -297,28 +297,28 @@ test range-induction-ambiguous-guards {spec #31: two structurally independent co
 # bindings, extended to immutable function parameters.
 
 test range-narrow-param-1 {a `<`/`>=` guard narrows a parameter reference in each branch exactly as it already narrows a local, on both sides (spec #6, #34); the caller's own argument (an unbounded list element) is not itself informative, isolating this from Part B's own propagation} -body {
-    lassign [rangeOf "fn f(n):\n    if n < 2:\n        n\n    else:\n        n\n\nfn use(xs):\n    f(list_get(xs, 0))\n\nuse(\[1, 2\])"] hir spec analysis
+    lassign [rangeOf "fn f(n):\n    if n < 2:\n        n\n    else:\n        n\n\nfn use(xs):\n    f(list::at(xs, 0))\n\nuse(\[1, 2\])"] hir spec analysis
     set id [rangeInstance $spec f]
     set b [paramBinding $hir $spec $id n]
     refRanges $hir $analysis $id $b
 } -result {{[-∞, +∞]} {[-∞, 1]} {[2, +∞]}}
 
 test range-narrow-param-2 {branch narrowing on a parameter is not limited to a function's top-level body: it applies wherever it already applies to a local (spec #7)} -body {
-    lassign [rangeOf "fn f(outer, n):\n    if outer:\n        if n >= 0:\n            n\n\nfn use(xs):\n    f(true, list_get(xs, 0))\n\nuse(\[1, 2\])"] hir spec analysis
+    lassign [rangeOf "fn f(outer, n):\n    if outer:\n        if n >= 0:\n            n\n\nfn use(xs):\n    f(true, list::at(xs, 0))\n\nuse(\[1, 2\])"] hir spec analysis
     set id [rangeInstance $spec f]
     set b [paramBinding $hir $spec $id n]
     refRanges $hir $analysis $id $b
 } -result {{[-∞, +∞]} {[0, +∞]}}
 
 test range-narrow-param-3 {two nested comparisons on a parameter narrow it exactly as they would a local (spec #33)} -body {
-    lassign [rangeOf "fn f(n):\n    if n >= 0:\n        if n < 10:\n            n\n\nfn use(xs):\n    f(list_get(xs, 0))\n\nuse(\[1, 2\])"] hir spec analysis
+    lassign [rangeOf "fn f(n):\n    if n >= 0:\n        if n < 10:\n            n\n\nfn use(xs):\n    f(list::at(xs, 0))\n\nuse(\[1, 2\])"] hir spec analysis
     set id [rangeInstance $spec f]
     set b [paramBinding $hir $spec $id n]
     refRanges $hir $analysis $id $b
 } -result {{[-∞, +∞]} {[0, +∞]} {[0, 9]}}
 
 test range-narrow-param-4 {a local binding narrows exactly as it did before this milestone (no regression: spec #38)} -body {
-    lassign [rangeOf "fn f(n):\n    b = n\n    if b >= 0:\n        b\n\nfn use(xs):\n    f(list_get(xs, 0))\n\nuse(\[1, 2\])"] hir spec analysis
+    lassign [rangeOf "fn f(n):\n    b = n\n    if b >= 0:\n        b\n\nfn use(xs):\n    f(list::at(xs, 0))\n\nuse(\[1, 2\])"] hir spec analysis
     set id [rangeInstance $spec f]
     # b is a *local* duplicate-free bind of n, not n's own BindingId.
     set localB ""
@@ -667,7 +667,7 @@ test range-callee-position-call-reaches-entry {sel is called once as an ordinary
     paramRanges $analysis [rangeInstance $spec sel int]
 } -result {{[1, 10] {1,10}}}
 
-test range-callee-position-call-in-index-reaches-entry {a call inside the index of a list_get in callee position (list_get(fs, pick(10))(0)) is a call site of pick too} -body {
+test range-callee-position-call-in-index-reaches-entry {a call inside the index of a list::at in callee position (list::at(fs, pick(10))(0)) is a call site of pick too} -body {
     lassign [rangeOf {fn pick(k):
     if k > 5:
         1
@@ -682,7 +682,7 @@ fn two(y):
 
 fs = [one, two]
 
-[pick(1), list_get(fs, pick(10))(0)]}] hir spec analysis
+[pick(1), list::at(fs, pick(10))(0)]}] hir spec analysis
     paramRanges $analysis [rangeInstance $spec pick int]
 } -result {{[1, 10] {1,10}}}
 
@@ -725,7 +725,7 @@ fn two(y):
 
 fs = [one, two]
 
-[pick(1), list_get(fs, pick(10))(0)]} {[0, 2]}] {
+[pick(1), list::at(fs, pick(10))(0)]} {[0, 2]}] {
     test range-callee-position-parity-$name "callee-position call program $name: interp, compile and cranelift agree" -body {
         set hir [surface::compile $src t.bot -strict 0]
         set outcomes [lsort -unique [lmap backend {interp compile cranelift} {

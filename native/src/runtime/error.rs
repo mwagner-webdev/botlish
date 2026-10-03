@@ -38,6 +38,9 @@ pub enum RtError {
 pub const BUILTIN_ERROR_ID_BASE: u32 = 0x4000_0000;
 /// `InvalidArgumentEncoding`, the error of `argv()` (builtin error 0).
 pub const ERR_INVALID_ARGUMENT_ENCODING: u32 = BUILTIN_ERROR_ID_BASE;
+/// `IndexNotFound`, the error of `list::at` and `mutable_array::at`
+/// (builtin error 1): the index does not designate an element.
+pub const ERR_INDEX_NOT_FOUND: u32 = BUILTIN_ERROR_ID_BASE + 1;
 
 /// Semantic error kinds of core/errors.tcl that NIR may raise.
 pub const SEMANTIC_KINDS: &[&str] = &[

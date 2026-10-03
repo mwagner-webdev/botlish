@@ -398,7 +398,7 @@ foreach {name method free} {
     chain       "fn f(a, b):\n    b\nx = 1\nx.f(2).f(3).f(4)"                 "fn f(a, b):\n    b\nx = 1\nf(f(f(x, 2), 3), 4)"
     nested      "fn f(a, b):\n    b\nx = 1\nx.f(x.f(2))"                     "fn f(a, b):\n    b\nx = 1\nf(x, f(x, 2))"
     receiver-call "fn f(a, b):\n    b\nf(1, 2).f(3)"                         "fn f(a, b):\n    b\nf(f(1, 2), 3)"
-    native      "\[1, 2\].list_length()"                                      "list_length(\[1, 2\])"
+    native      "length = list::length\n\[1, 2\].length()"                    "length = list::length\nlength(\[1, 2\])"
     alias       "fn f(a):\n    a\ng = f\n1.g()"                              "fn f(a):\n    a\ng = f\ng(1)"
     in-function "fn f(a, b):\n    b\nfn h(x):\n    x.f(1)\nh(2)"             "fn f(a, b):\n    b\nfn h(x):\n    f(x, 1)\nh(2)"
     in-branch   "fn f(a):\n    a\nif true:\n    1.f()\nelse:\n    2.f()"     "fn f(a):\n    a\nif true:\n    f(1)\nelse:\n    f(2)"

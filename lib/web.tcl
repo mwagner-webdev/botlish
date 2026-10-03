@@ -44,7 +44,7 @@ core::type::register Emailish \
 # through -module-fn -- exactly emailRegex's grammar (local: 1+ of
 # [alnum . _ % + -]; "@"; domain: 1+ of (1+ of [alnum -] then "."); tld: 2+
 # alpha; end), the same left-to-right scan over core/tclcompat.tcl's
-# is_tcl_alpha/is_tcl_alnum this predicate always used (see
+# str::is_tcl_alpha/str::is_tcl_alnum this predicate always used (see
 # NATIVE-TCL-UNICODE.md's §6-equivalence argument for why that scan is a
 # faithful, not approximated, encoding of the regex), but now compiled once
 # as a real, shared, top-level function instead of pasted into every call

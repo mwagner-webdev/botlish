@@ -417,11 +417,11 @@ test destructure-list-struct-syntax-on-list-source-is-not-list-policy {`{a} = so
 
 test destructure-list-ordinary-list-uses {a List literal followed by `=` anywhere else keeps its meaning} -body {
     list [parity "xs = \[1, 2\]\nys = \[3\]\n\[xs, ys\]"] [parity "\[1, 2\] == \[1, 2\]"] \
-        [parity "x = \[1\] == \[1\]\nx"] [parity "xs = \[\{a: 1\}\]\n\{a\} = list_get(xs, 0)\na"]
+        [parity "x = \[1\] == \[1\]\nx"] [parity "xs = \[\{a: 1\}\]\n\{a\} = list::at(xs, 0)\na"]
 } -result {{value {[[1, 2], [3]]}} {value true} {value true} {value 1}}
 
 test destructure-list-indexing-unchanged {List indexing is still an ordinary call, in both spellings} -body {
-    bothSpellings "xs = \[10, 20, 30\]\nxs.list_get(1)" "xs = \[10, 20, 30\]\nlist_get(xs, 1)"
+    bothSpellings "at = list::at\nxs = \[10, 20, 30\]\nxs.at(1)" "xs = \[10, 20, 30\]\nlist::at(xs, 1)"
 } -result {value 20}
 
 test destructure-list-bad-assignment-targets-unchanged {other things before `=` keep their old error} -body {
@@ -695,7 +695,7 @@ test destructure-field-order-is-not-layout {the pattern's order and the declarat
 } -result {{value {[1, 2, 3]}} {value {[1, 2, 3]}} {value {[1, 2, 3]}} {value {[1, 3]}}}
 
 test destructure-fields-of-different-types {heterogeneous results are the point: fields of different types come out as ordinary typed values} -body {
-    parity "\{n, s, xs, p\} = \{n: 3, s: \"text\", xs: \[1, 2\], p: \{q: true\}\}\n\[n + 1, length(s), list_length(xs), p.q\]"
+    parity "\{n, s, xs, p\} = \{n: 3, s: \"text\", xs: \[1, 2\], p: \{q: true\}\}\n\[n + 1, str::length(s), list::length(xs), p.q\]"
 } -result {value {[4, 4, 2, true]}}
 
 # ---------------------------------------------------------------------------
@@ -706,8 +706,8 @@ set ::countDecls {struct Rec:
     b: str
     c: int
 fn bump(log: MutableArray[int], id: int, v: int) -> int:
-    n = mutable_array_get(log, 0)
-    mutable_array_set(log, 0, n * 10 + id)
+    n = mutable_array::get(log, 0, 0)
+    mutable_array::set(log, 0, n * 10 + id)
     v
 fn mk_named(log: MutableArray[int]) -> Rec:
     Rec {a: bump(log, 1, 1), b: "x", c: bump(log, 2, 3)}
@@ -717,103 +717,103 @@ fn mk_anon(log: MutableArray[int]):
 
 foreach {name destructured explicit expected} {
     named-once   {fn run():
-    log = mutarray::create(1, 0)
+    log = mutable_array::create(1, 0)
     {a, c} = mk_named(log)
-    [a, c, mutable_array_get(log, 0)]
+    [a, c, mutable_array::get(log, 0, 0)]
 run()}
                  {fn run():
-    log = mutarray::create(1, 0)
+    log = mutable_array::create(1, 0)
     tmp = mk_named(log)
     a = tmp.a
     c = tmp.c
-    [a, c, mutable_array_get(log, 0)]
+    [a, c, mutable_array::get(log, 0, 0)]
 run()}
                  {value {[1, 3, 12]}}
     anon-once    {fn run():
-    log = mutarray::create(1, 0)
+    log = mutable_array::create(1, 0)
     {a, c} = mk_anon(log)
-    [a, c, mutable_array_get(log, 0)]
+    [a, c, mutable_array::get(log, 0, 0)]
 run()}
                  {fn run():
-    log = mutarray::create(1, 0)
+    log = mutable_array::create(1, 0)
     tmp = mk_anon(log)
     a = tmp.a
     c = tmp.c
-    [a, c, mutable_array_get(log, 0)]
+    [a, c, mutable_array::get(log, 0, 0)]
 run()}
                  {value {[1, 3, 12]}}
     one-field-once {fn run():
-    log = mutarray::create(1, 0)
+    log = mutable_array::create(1, 0)
     {c} = mk_named(log)
-    [c, mutable_array_get(log, 0)]
+    [c, mutable_array::get(log, 0, 0)]
 run()}
                  {fn run():
-    log = mutarray::create(1, 0)
+    log = mutable_array::create(1, 0)
     tmp = mk_named(log)
     c = tmp.c
-    [c, mutable_array_get(log, 0)]
+    [c, mutable_array::get(log, 0, 0)]
 run()}
                  {value {[3, 12]}}
     repeated-field-name-in-source-fields {fn run():
-    log = mutarray::create(1, 0)
+    log = mutable_array::create(1, 0)
     {a: x, c: y} = mk_named(log)
-    [x, y, mutable_array_get(log, 0)]
+    [x, y, mutable_array::get(log, 0, 0)]
 run()}
                  {fn run():
-    log = mutarray::create(1, 0)
+    log = mutable_array::create(1, 0)
     tmp = mk_named(log)
     x = tmp.a
     y = tmp.c
-    [x, y, mutable_array_get(log, 0)]
+    [x, y, mutable_array::get(log, 0, 0)]
 run()}
                  {value {[1, 3, 12]}}
     nested-once  {fn nested(log: MutableArray[int]):
     {u: mk_named(log), w: bump(log, 3, 7)}
 fn run():
-    log = mutarray::create(1, 0)
+    log = mutable_array::create(1, 0)
     {u: {a, c}, w} = nested(log)
-    [a, c, w, mutable_array_get(log, 0)]
+    [a, c, w, mutable_array::get(log, 0, 0)]
 run()}
                  {fn nested(log: MutableArray[int]):
     {u: mk_named(log), w: bump(log, 3, 7)}
 fn run():
-    log = mutarray::create(1, 0)
+    log = mutable_array::create(1, 0)
     tmp = nested(log)
     tmp2 = tmp.u
     a = tmp2.a
     c = tmp2.c
     w = tmp.w
-    [a, c, w, mutable_array_get(log, 0)]
+    [a, c, w, mutable_array::get(log, 0, 0)]
 run()}
                  {value {[1, 3, 7, 123]}}
     direct-source-struct-literal {fn run():
-    log = mutarray::create(1, 0)
+    log = mutable_array::create(1, 0)
     {a, c} = {a: bump(log, 1, 1), b: bump(log, 4, 0), c: bump(log, 2, 3)}
-    [a, c, mutable_array_get(log, 0)]
+    [a, c, mutable_array::get(log, 0, 0)]
 run()}
                  {fn run():
-    log = mutarray::create(1, 0)
+    log = mutable_array::create(1, 0)
     tmp = {a: bump(log, 1, 1), b: bump(log, 4, 0), c: bump(log, 2, 3)}
     a = tmp.a
     c = tmp.c
-    [a, c, mutable_array_get(log, 0)]
+    [a, c, mutable_array::get(log, 0, 0)]
 run()}
                  {value {[1, 3, 142]}}
     in-loop-body {fn run():
-    log = mutarray::create(1, 0)
+    log = mutable_array::create(1, 0)
     xs = loop i from 0 to 3:
         {a, c} = mk_named(log)
         a + c + i
-    [xs, mutable_array_get(log, 0)]
+    [xs, mutable_array::get(log, 0, 0)]
 run()}
                  {fn run():
-    log = mutarray::create(1, 0)
+    log = mutable_array::create(1, 0)
     xs = loop i from 0 to 3:
         tmp = mk_named(log)
         a = tmp.a
         c = tmp.c
         a + c + i
-    [xs, mutable_array_get(log, 0)]
+    [xs, mutable_array::get(log, 0, 0)]
 run()}
                  {value {[[4, 5, 6], 121212]}}
 } {
@@ -823,7 +823,7 @@ run()}
 }
 
 test destructure-once-not-per-field {destructuring is not a.f; b.f with the source repeated: a source that counts its calls shows one call, never one per field} -body {
-    set program "${::countDecls}fn run():\n    log = mutarray::create(1, 0)\n    \{a, b, c\} = mk_named(log)\n    mutable_array_get(log, 0)\nrun()"
+    set program "${::countDecls}fn run():\n    log = mutable_array::create(1, 0)\n    \{a, b, c\} = mk_named(log)\n    mutable_array::get(log, 0, 0)\nrun()"
     parity $program
 } -result {value 12}
 
@@ -831,7 +831,7 @@ test destructure-once-not-per-field {destructuring is not a.f; b.f with the sour
 # Bindings are values, not references into the source struct
 
 test destructure-bound-mutable-value-is-the-same-value {a field holding a MutableArray: the binding denotes that array (its ordinary semantics), so writes through either name are seen through the other} -body {
-    set program "struct Holder:\n    items: MutableArray\[int\]\n    n: int\nfn run():\n    h = Holder \{items: mutarray::create(2, 0), n: 1\}\n    \{items\} = h\n    mutable_array_set(items, 0, 5)\n    mutable_array_set(h.items, 1, 6)\n    \[mutable_array_get(h.items, 0), mutable_array_get(items, 1)\]\nrun()"
+    set program "struct Holder:\n    items: MutableArray\[int\]\n    n: int\nfn run():\n    h = Holder \{items: mutable_array::create(2, 0), n: 1\}\n    \{items\} = h\n    mutable_array::set(items, 0, 5)\n    mutable_array::set(h.items, 1, 6)\n    \[mutable_array::get(h.items, 0, -1), mutable_array::get(items, 1, -1)\]\nrun()"
     parity $program
 } -result {value {[5, 6]}}
 
@@ -888,11 +888,11 @@ a = tmp.a}
     x
 tmp = f
 a = tmp.a}
-    native-source   {{a} = list_length}
-                    {tmp = list_length
+    native-source   {{a} = list::length}
+                    {tmp = list::length
 a = tmp.a}
-    mutarray-source {{a} = mutarray::create(1, 0)}
-                    {tmp = mutarray::create(1, 0)
+    mutarray-source {{a} = mutable_array::create(1, 0)}
+                    {tmp = mutable_array::create(1, 0)
 a = tmp.a}
     unknown-shape   {fn first(x):
     {a} = x
@@ -1416,7 +1416,7 @@ run({n: 4})}
         n + k
     [get, bump]
 fs = make({n: 7})
-[list_get(fs, 0)(), list_get(fs, 1)(1)]}
+[list::at(fs, 0)(), list::at(fs, 1)(1)]}
                  {fn make(r):
     t = r
     n = t.n
@@ -1426,7 +1426,7 @@ fs = make({n: 7})
         n + k
     [get, bump]
 fs = make({n: 7})
-[list_get(fs, 0)(), list_get(fs, 1)(1)]}
+[list::at(fs, 0)(), list::at(fs, 1)(1)]}
                  {value {[7, 8]}}
     capture-nested {fn make(r):
     {u: {a, b}} = r
@@ -1479,9 +1479,9 @@ set ::sugarFns {fn list_sum(xs):
     total = 0
     loop x in xs:
         total
-    list_length(xs)
+    list::length(xs)
 fn visible(items, n):
-    list_length(items) + n
+    list::length(items) + n
 }
 
 test destructure-method-sugar {a destructured binding is an ordinary receiver} -body {
@@ -1493,7 +1493,7 @@ test destructure-method-sugar-source {a method-call source destructures like any
 } -result {value {[5, 6]}}
 
 test destructure-method-sugar-library {a library call through a destructured List binding} -body {
-    bothSpellings "\{xs\} = \{xs: \[3, 1, 2\]\}\nxs.list_length()" "t = \{xs: \[3, 1, 2\]\}\nxs = t.xs\nlist_length(xs)"
+    bothSpellings "length = list::length\n\{xs\} = \{xs: \[3, 1, 2\]\}\nxs.length()" "t = \{xs: \[3, 1, 2\]\}\nxs = t.xs\nlist::length(xs)"
 } -result {value 3}
 
 test destructure-method-sugar-field-callable {a field holding a function is still called as a field value (no sugar, no ambiguity)} -body {
@@ -1691,7 +1691,7 @@ test destructure-value-bindings-still-work {a destructure followed by more state
 } -result {value 3}
 
 test destructure-value-statement-order {the unit comes after the bindings and before the next statement: the statements around it keep their order} -body {
-    parity "fn bump(log: MutableArray\[int\], id: int, v: int) -> int:\n    n = mutable_array_get(log, 0)\n    mutable_array_set(log, 0, n * 10 + id)\n    v\nfn run():\n    log = mutarray::create(1, 0)\n    x = bump(log, 1, 5)\n    \{a, b\} = \{a: bump(log, 2, 1), b: bump(log, 3, 2)\}\n    y = bump(log, 4, 7)\n    \[x, a, b, y, mutable_array_get(log, 0)\]\nrun()"
+    parity "fn bump(log: MutableArray\[int\], id: int, v: int) -> int:\n    n = mutable_array::get(log, 0, 0)\n    mutable_array::set(log, 0, n * 10 + id)\n    v\nfn run():\n    log = mutable_array::create(1, 0)\n    x = bump(log, 1, 5)\n    \{a, b\} = \{a: bump(log, 2, 1), b: bump(log, 3, 2)\}\n    y = bump(log, 4, 7)\n    \[x, a, b, y, mutable_array::get(log, 0, 0)\]\nrun()"
 } -result {value {[5, 1, 2, 7, 1234]}}
 
 test destructure-value-ordinary-binding-unchanged {an ordinary binding is not changed to unit to match the destructure: as the last statement it still yields its value} -body {
@@ -1766,14 +1766,14 @@ test destructure-value-handled-bindings-and-order {the handled destructure still
 # Evaluate once, mutable values, bindings: the same as before, with the last statement a destructure.
 
 test destructure-value-evaluate-once {the source of a destructure that is the last statement is still evaluated once} -body {
-    list [parity "${::countDecls}fn run():\n    log = mutarray::create(1, 0)\n    \{a, b, c\} = mk_named(log)\n    r = mutable_array_get(log, 0)\n    \{a: a2\} = mk_anon(log)\n    unit\n    r\nrun()"] \
-        [parity "${::countDecls}fn run():\n    log = mutarray::create(1, 0)\n    \{a, c\} = mk_named(log)\n    \[mutable_array_get(log, 0)\]\nrun()"]
+    list [parity "${::countDecls}fn run():\n    log = mutable_array::create(1, 0)\n    \{a, b, c\} = mk_named(log)\n    r = mutable_array::get(log, 0, 0)\n    \{a: a2\} = mk_anon(log)\n    unit\n    r\nrun()"] \
+        [parity "${::countDecls}fn run():\n    log = mutable_array::create(1, 0)\n    \{a, c\} = mk_named(log)\n    \[mutable_array::get(log, 0, 0)\]\nrun()"]
 } -result {{value 12} {value {[12]}}}
 
 test destructure-value-mutable-field-still-same-value {a MutableArray field: the binding is the same array, and a destructure that ends the body is unit} -body {
     set decls "struct Holder:\n    items: MutableArray\[int\]\n    n: int\n"
-    list [parity "${decls}fn run():\n    h = Holder \{items: mutarray::create(2, 0), n: 1\}\n    \{items\} = h\nrun()"] \
-        [parity "${decls}fn run():\n    h = Holder \{items: mutarray::create(2, 0), n: 1\}\n    \{items\} = h\n    mutable_array_set(items, 0, 5)\n    mutable_array_get(h.items, 0)\nrun()"]
+    list [parity "${decls}fn run():\n    h = Holder \{items: mutable_array::create(2, 0), n: 1\}\n    \{items\} = h\nrun()"] \
+        [parity "${decls}fn run():\n    h = Holder \{items: mutable_array::create(2, 0), n: 1\}\n    \{items\} = h\n    mutable_array::set(items, 0, 5)\n    mutable_array::get(h.items, 0, -1)\nrun()"]
 } -result {{value unit} {value 5}}
 
 test destructure-value-bindings-are-values {the result being unit does not turn the bindings into references: a binding keeps its value when a later struct is destructured} -body {
@@ -1932,32 +1932,32 @@ set ::typedDestructured {struct Acc:
     count: int
     last: int
 fn probe(log: MutableArray[int], id: int, result: int) -> int:
-    n = mutable_array_get(log, 0)
-    mutable_array_set(log, 0, n * 10 + id)
+    n = mutable_array::get(log, 0, 0)
+    mutable_array::set(log, 0, n * 10 + id)
     result
 fn step(log: MutableArray[int], n: int) -> Acc:
     Acc {total: probe(log, 1, n * 2), count: probe(log, 2, n), last: n}
 fn run(n: int) -> int:
-    log = mutarray::create(1, 0)
+    log = mutable_array::create(1, 0)
     {total, last: l} = step(log, n)
-    total * 1000 + l * 100 + mutable_array_get(log, 0)
+    total * 1000 + l * 100 + mutable_array::get(log, 0, 0)
 [run(1), run(20)]}
 set ::typedExplicit {struct Acc:
     total: int
     count: int
     last: int
 fn probe(log: MutableArray[int], id: int, result: int) -> int:
-    n = mutable_array_get(log, 0)
-    mutable_array_set(log, 0, n * 10 + id)
+    n = mutable_array::get(log, 0, 0)
+    mutable_array::set(log, 0, n * 10 + id)
     result
 fn step(log: MutableArray[int], n: int) -> Acc:
     Acc {total: probe(log, 1, n * 2), count: probe(log, 2, n), last: n}
 fn run(n: int) -> int:
-    log = mutarray::create(1, 0)
+    log = mutable_array::create(1, 0)
     tmp = step(log, n)
     total = tmp.total
     l = tmp.last
-    total * 1000 + l * 100 + mutable_array_get(log, 0)
+    total * 1000 + l * 100 + mutable_array::get(log, 0, 0)
 [run(1), run(20)]}
 
 test destructure-standalone-executable {the standalone executables of both spellings print the value every in-process backend computes} -constraints executableAot -body {

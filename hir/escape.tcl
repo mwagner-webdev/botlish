@@ -71,7 +71,7 @@
 # instance (hir/specialize.tcl), that certain `[e0, ..., en-1]` List values
 # are semantically ordinary Lists whose object identity is never observed --
 # so native/lower.tcl may keep them as a handful of scalar registers
-# (n0..nn-1) instead of ever calling `listnew`, and every `list_get` reading
+# (n0..nn-1) instead of ever calling `listnew`, and every `list::at` reading
 # one of them at a compile-time-constant position may read that register
 # directly instead of calling `listget` -- and, separately, which used
 # instances a caller's scalar use *demands* a scalar-replacement companion
@@ -102,7 +102,7 @@
 #   * a local binding, bound (once, non-duplicate, kind local, never
 #     captured by a nested closure) to a recognized construction, is
 #     "virtual" only if *every* reference to it in the same region is the
-#     first argument of a `list_get` call whose second argument is a
+#     first argument of a `list::at` call whose second argument is a
 #     compile-time Int constant within the construction's arity. Any other
 #     use at all (a dynamic index, a store, an argument to any other call, a
 #     return, anything this module does not specifically recognize) means
@@ -575,9 +575,9 @@ proc hir::escape::TrailingPositions {hir topBody exprs} {
 }
 
 # 1 if reference R (to a virtual binding of arity N) is used only as the
-# first argument of a `list_get` call whose second argument is a
+# first argument of a `list::at` call whose second argument is a
 # compile-time Int constant within 0..N-1 (LISTGETBYARG: first-arg ExprId ->
-# the list_get call ExprId, from Bindings above).
+# the list::at call ExprId, from Bindings above).
 proc hir::escape::ScalarUse {hir listGetByArg r n} {
     if {![dict exists $listGetByArg $r]} {
         return 0
@@ -629,7 +629,7 @@ proc hir::escape::Propagate {wants forward} {
 # discipline across an exact closed call's *parameter* boundary too: a
 # fixed-shape List value that a proven exact caller hands to a callee whose
 # own uses of that parameter are themselves all structural (Classify/
-# ScalarUse's same "list_get at a constant position" rule, plus a new
+# ScalarUse's same "list::at at a constant position" rule, plus a new
 # supported use -- forwarding the same value, unchanged, as an argument to
 # another exact closed call) need not be materialized at that boundary
 # either: its fields cross as ordinary internal-call arguments instead (see
@@ -664,7 +664,7 @@ proc hir::escape::Propagate {wants forward} {
 #   Eligible
 #       Of the slots RawLocalArities/RawParamArities found a shape for,
 #       *which* are safe to actually virtualize: every reference to the
-#       slot, within its own instance's region, is either a `list_get`
+#       slot, within its own instance's region, is either a `list::at`
 #       at a compile-time-constant in-range index, or the unchanged
 #       forwarding of the same value (same position, no re-wrapping) as
 #       an argument to another exact call whose own corresponding
@@ -679,7 +679,7 @@ proc hir::escape::Propagate {wants forward} {
 #       a late-materializing branch). An out-of-range constant index
 #       (#10) simply fails this check like any other unsupported use,
 #       which correctly declines virtualization and so preserves the
-#       real `list_get`'s ordinary runtime INDEX error.
+#       real `list::at`'s ordinary runtime INDEX error.
 #
 # Multiple callers of the same parameter position (#42) are handled by
 # RawParamArities requiring *every* exact call site's argument to classify
@@ -784,7 +784,7 @@ proc hir::escape::RegionInfo {hir spec id} {
                 set node [hir::node $view $e]
                 lassign [dict get $node target] targetKind target
                 set args [dict get $node args]
-                if {$targetKind eq "native" && [dict get [hir::symbol $view $target] name] eq "list_get"
+                if {$targetKind eq "native" && [dict get [hir::symbol $view $target] name] eq "list::at"
                         && [llength $args] == 2} {
                     dict set listGetByArg [lindex $args 0] $e
                 }
@@ -1167,7 +1167,7 @@ proc hir::escape::UseTag {info r {regions {}} {deny {}}} {
 # the physical object (struct locals only).
 #
 # A *List* candidate keeps the original rule exactly: every reference must
-# be a `list_get` at a constant in-range index, or an unchanged forwarding
+# be a `list::at` at a constant in-range index, or an unchanged forwarding
 # into another candidate of the same descriptor.
 #
 # A *struct* local may also be materialized, lazily, at any reference that

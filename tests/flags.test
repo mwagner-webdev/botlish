@@ -316,7 +316,7 @@ fn f(flags :big):
 } -result {[1, 100]}
 
 test flags-semantics-nested-calls {flags of nested calls are independent} -body {
-    valueOf "${::observe}\[observe(observe(1, :a).list_get(0) + 1, :b), observe(2, :c).list_get(3)\]"
+    valueOf "${::observe}get = list::get\n\[observe(observe(1, :a).get(0, -1) + 1, :b), observe(2, :c).get(3, -1)\]"
 } -result {[[2, false, true, false], true]}
 
 test flags-semantics-wrapper-explicit {a wrapper forwards a flag only by naming it in its own signature} -body {
@@ -424,8 +424,8 @@ foreach {name source expected} {
                      {UNKNOWN-FLAG 3:6 function f does not accept flag :flush (it declares no flags)}
     unknown-second   "fn f(flags :a, :b):\n    a\nf(:a, :c, :b)"
                      {UNKNOWN-FLAG 3:7 function f does not accept flag :c (accepted flags: :a, :b)}
-    unknown-native   "list_get(\[1\], 0, :a)"
-                     {UNKNOWN-FLAG 1:18 function list_get does not accept flag :a (it declares no flags)}
+    unknown-native   "list::at(\[1\], 0, :a)"
+                     {UNKNOWN-FLAG 1:18 function list::at does not accept flag :a (it declares no flags)}
     duplicate-call   "fn f(flags :quiet):\n    quiet\nf(:quiet, :quiet)"
                      {DUPLICATE-FLAG 3:11 flag :quiet was supplied more than once}
     duplicate-three  "fn f(flags :a, :b):\n    a\nf(:a, :b, :a)"
@@ -543,11 +543,11 @@ foreach {name method free} {
     two       {3.observe(:c, :a)}                 {observe(3, :c, :a)}
     expr      {(1 + 2).observe(:a, :b, :c)}       {observe(1 + 2, :a, :b, :c)}
     chain     {1.add(2).observe(:b)}              {observe(add(1, 2), :b)}
-    chain2    {1.observe(:a).list_get(1)}         {list_get(observe(1, :a), 1)}
-    nested    {observe(1.add(1).observe(:c).list_get(0), :a)}  {observe(list_get(observe(add(1, 1), :c), 0), :a)}
+    chain2    {1.observe(:a).get(1, -1)}         {get(observe(1, :a), 1, -1)}
+    nested    {observe(1.add(1).observe(:c).get(0, -1), :a)}  {observe(get(observe(add(1, 1), :c), 0, -1), :a)}
 } {
     test flags-method-parity-$name "method and free spellings agree: $name" -body {
-        set prelude "${::observe}fn add(a, b):\n    a + b\n"
+        set prelude "${::observe}fn add(a, b):\n    a + b\nget = list::get\n"
         set a [parity $prelude$method]
         set b [parity $prelude$free]
         expr {$a eq $b ? $a : "method: $a / free: $b"}
@@ -561,13 +561,14 @@ test flags-method-same-hir {a method call with flags and its free spelling resol
     list [expr {[hir::lower $m] eq [hir::lower $f]}] [expr {[hir::diagnostics $m] eq {} && [hir::diagnostics $f] eq {}}]
 } -result {1 1}
 
-set ::logFns {fn probe(log, id, result):
-    n = mutable_array_get(log, 0)
-    mutable_array_set(log, 0, n * 10 + id)
+set ::logFns {get = list::get
+fn probe(log, id, result):
+    n = mutable_array::get(log, 0, 0)
+    mutable_array::set(log, 0, n * 10 + id)
     result
 fn fresh():
-    log = mutable_array_allocate(1)
-    mutable_array_set(log, 0, 0)
+    log = mutable_array::allocate(1)
+    mutable_array::set(log, 0, 0)
     log
 fn f(a, b, flags :x, :y):
     [a, b, x, y]
@@ -576,27 +577,27 @@ fn f(a, b, flags :x, :y):
 foreach {name method free expected} {
     receiver-and-args {log = fresh()
 v = probe(log, 1, 10).f(probe(log, 2, 5), :y)
-[v, mutable_array_get(log, 0)]}  {log = fresh()
+[v, mutable_array::get(log, 0, 0)]}  {log = fresh()
 v = f(probe(log, 1, 10), probe(log, 2, 5), :y)
-[v, mutable_array_get(log, 0)]}  {[[10, 5, false, true], 12]}
+[v, mutable_array::get(log, 0, 0)]}  {[[10, 5, false, true], 12]}
     flags-add-no-events {log = fresh()
 v = f(probe(log, 3, 1), probe(log, 4, 2), :y, :x)
-[v, mutable_array_get(log, 0)]}  {log = fresh()
+[v, mutable_array::get(log, 0, 0)]}  {log = fresh()
 v = f(probe(log, 3, 1), probe(log, 4, 2))
-w = [v, mutable_array_get(log, 0)]
+w = [v, mutable_array::get(log, 0, 0)]
 w}  {[[1, 2, false, false], 34]}
     flag-order-irrelevant-to-events {log = fresh()
 v = probe(log, 1, 1).f(probe(log, 2, 2), :x, :y)
-[v, mutable_array_get(log, 0)]}  {log = fresh()
+[v, mutable_array::get(log, 0, 0)]}  {log = fresh()
 v = probe(log, 1, 1).f(probe(log, 2, 2), :y, :x)
-[v, mutable_array_get(log, 0)]}  {[[1, 2, true, true], 12]}
+[v, mutable_array::get(log, 0, 0)]}  {[[1, 2, true, true], 12]}
     receiver-chain {log = fresh()
-v = probe(log, 1, 1).f(2, :x).list_get(0)
+v = probe(log, 1, 1).f(2, :x).get(0, -1)
 w = probe(log, 3, v).f(probe(log, 4, 4), :y)
-[w, mutable_array_get(log, 0)]}  {log = fresh()
-v = list_get(f(probe(log, 1, 1), 2, :x), 0)
+[w, mutable_array::get(log, 0, 0)]}  {log = fresh()
+v = get(f(probe(log, 1, 1), 2, :x), 0, -1)
 w = f(probe(log, 3, v), probe(log, 4, 4), :y)
-[w, mutable_array_get(log, 0)]}  {[[1, 4, false, true], 134]}
+[w, mutable_array::get(log, 0, 0)]}  {[[1, 4, false, true], 134]}
 } {
     test flags-evaluation-$name "evaluation: $name" -body {
         set a [valueOf $::logFns$method]

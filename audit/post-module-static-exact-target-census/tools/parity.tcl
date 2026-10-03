@@ -63,9 +63,9 @@ writeFile $bot "# requires: web
 corpus = \[[join [lmap s $corpus {botString $s}] {, }]\]
 
 fn go(i, acc):
-    if i >= list_length(corpus):
+    if i >= list::length(corpus):
         return acc
-    go(i + 1, list_append(acc, web::emailish?(list_get(corpus, i))))
+    go(i + 1, list::append(acc, web::emailish?(list::at(corpus, i))))
 
 go(0, \[\])
 "
@@ -73,10 +73,10 @@ set ir [file join $dir parity-root.ir]
 writeFile $ir "# requires: web
 [list [list bind corpus [list call {ref list} {*}[lmap s $corpus {list const str $s}]]]]
 {bind go {block {i acc}
-  {if {call {ref >=} {ref i} {call {ref list_length} {ref corpus}}}
+  {if {call {ref >=} {ref i} {call {ref list::length} {ref corpus}}}
     {block {} {ref acc}}
     {block {} {call {ref go} {call {ref +} {ref i} {const 1}}
-                 {call {ref list_append} {ref acc} {call {ref emailish?} {call {ref list_get} {ref corpus} {ref i}}}}}}}}}
+                 {call {ref list::append} {ref acc} {call {ref emailish?} {call {ref list::at} {ref corpus} {ref i}}}}}}}}}
 {call {ref go} {const 0} {call {ref list}}}
 "
 

@@ -1,6 +1,6 @@
 # setfromlist-equality-total.test -- M4
 # (M4-EQUALITY-TOTAL-SETFROMLIST-EFFECT.md): SetFromList's generic form
-# (immutable_set_from_list -> op setfromlist -> rt_set_from_list) is
+# (immutable_set::from_list -> op setfromlist -> rt_set_from_list) is
 # unconditionally may_error, because its O(n^2) dedup pass compares
 # candidate elements with ordinary Botlish equality, which is undefined for
 # Block/Native/MutableArray operands (MINIMAL-IMMUTABLE-SET.md's own
@@ -98,7 +98,7 @@ proc calleeEffectLineIn {nirText calleeName} {
 
 test setfromlist-total-int {List[int] -> ImmutableSet[int]: the simplest non-Byte control -- setfromlisttotal, mk_int becomes may_error=false} -body {
     set text {fn mk_int(xs: List[int]) -> ImmutableSet[int]:
-    immutable_set_from_list(xs)
+    immutable_set::from_list(xs)
 
 mk_int([1, 2, 3])}
     set nirText [nirOf $text]
@@ -109,7 +109,7 @@ mk_int([1, 2, 3])}
 
 test setfromlist-total-source-defined-domain {a source-defined bounded Int domain (Small = Int in 0..10) qualifies too -- the proof derives from kindOf collapsing any refined int domain to plain int, never a hard-coded "Byte" name, proving Byte is not special-cased (spec items 15, 22-23)} -body {
     set text [format {%sfn mk_small(xs: List[Small]) -> ImmutableSet[Small]:
-    immutable_set_from_list(xs)
+    immutable_set::from_list(xs)
 
 mk_small([one()])} $::smallDecl]
     set nirText [nirOf $text]
@@ -119,7 +119,7 @@ mk_small([one()])} $::smallDecl]
 
 test setfromlist-total-bool {List[Bool] -> ImmutableSet[Bool] qualifies (spec item 16, another audited-total scalar kind)} -body {
     set text {fn mk_bool(xs: List[bool]) -> ImmutableSet[bool]:
-    immutable_set_from_list(xs)
+    immutable_set::from_list(xs)
 
 mk_bool([true, false])}
     regexp {op setfromlisttotal} [nirOf $text]
@@ -127,7 +127,7 @@ mk_bool([true, false])}
 
 test setfromlist-total-byte {List[Byte] -> ImmutableSet[Byte]: the real byte::set shape, in miniature -- setfromlisttotal (spec item 14/positive fixture 6)} -body {
     set text [format {%sfn mk_byte(xs: List[Byte]) -> ImmutableSet[Byte]:
-    immutable_set_from_list(xs)
+    immutable_set::from_list(xs)
 
 mk_byte([byteA(), byteB()])} $::byteDecl]
     regexp {op setfromlisttotal} [nirOf $text]
@@ -135,9 +135,9 @@ mk_byte([byteA(), byteB()])} $::byteDecl]
 
 test setfromlist-total-runtime-parity {a real setfromlisttotal construction agrees with the generic construction and with plain membership, across all four backends -- confirming this milestone changes no runtime semantics (spec item 25)} -body {
     set text {fn mk_int(xs: List[int]) -> ImmutableSet[int]:
-    immutable_set_from_list(xs)
+    immutable_set::from_list(xs)
 
-[immutable_set_contains(mk_int([1, 1, 2, 3]), 2), immutable_set_contains(mk_int([1, 1, 2, 3]), 4)]}
+[immutable_set::contains(mk_int([1, 1, 2, 3]), 2), immutable_set::contains(mk_int([1, 1, 2, 3]), 4)]}
     set exprs [sourceIR $text]
     lmap backend {interp compile cranelift-generic cranelift} {
         outcomeUnder $backend $exprs
@@ -167,7 +167,7 @@ test setfromlist-total-runtime-parity {a real setfromlisttotal construction agre
 # never actually executes over any element in it.
 test setfromlist-empty-list-strict-legal-conservative-instance {mk_int([]) is now a LEGAL strict program (M7A.A); its own specific instance still conservatively lowers to plain setfromlist/may_error=true rather than setfromlisttotal, because specialization identity/seeding is deliberately unchanged (Model A)} -body {
     set text {fn mk_int(xs: List[int]) -> ImmutableSet[int]:
-    immutable_set_from_list(xs)
+    immutable_set::from_list(xs)
 
 mk_int([])}
     set hir [surface::compile $text t.bot]
@@ -180,9 +180,9 @@ mk_int([])}
 
 test setfromlist-empty-list-runtime-empty-result {mk_int([]) actually runs, on every backend, producing the empty set -- the instance's own conservative may_error=true classification never observably fires} -body {
     set text {fn mk_int(xs: List[int]) -> ImmutableSet[int]:
-    immutable_set_from_list(xs)
+    immutable_set::from_list(xs)
 
-immutable_set_contains(mk_int([]), 1)}
+immutable_set::contains(mk_int([]), 1)}
     set exprs [sourceIR $text]
     lmap backend {interp compile cranelift-generic cranelift} {
         outcomeUnder $backend $exprs
@@ -215,7 +215,7 @@ test setfromlist-broad-element-stays-erroring {a genuinely broad/statically-unre
         # the fallback's own caller set genuinely disagreeing, so xs stays
         # the true "any" this test's own name requires.
         set text {fn mk_unknown(xs):
-    immutable_set_from_list(xs)
+    immutable_set::from_list(xs)
 
 [mk_unknown([1, 2, 3]), mk_unknown(["a", "b"]), mk_unknown([true, false])]}
         set nirText [nirOf $text]
@@ -236,7 +236,7 @@ fn h(x):
     x + 1
 
 fn mk_block(xs):
-    immutable_set_from_list(xs)
+    immutable_set::from_list(xs)
 
 mk_block([g, h])}
     set nirText [nirOf $text]
@@ -264,7 +264,7 @@ test setfromlist-error-propagation-control {a caller of a genuinely equality-fal
         # therefore mk_unknown<generic>'s own forwarded xs -- stays the
         # true "any" this test's own name requires, regardless of M7.c.
         set text {fn mk_unknown(xs):
-    immutable_set_from_list(xs)
+    immutable_set::from_list(xs)
 
 fn caller(xs):
     mk_unknown(xs)
@@ -278,7 +278,7 @@ fn caller(xs):
 } -result 1
 
 test setfromlist-list-of-never {List[never] -> ImmutableSet[never]: an empty list literal with no other use narrows its element type to never; lowering must not crash or misclassify this as equality-total -- documented current behavior only, no dedicated optimization (spec item 21)} -body {
-    set text {immutable_set_from_list([])}
+    set text {immutable_set::from_list([])}
     set nirText [nirOf $text]
     list [regexp {op setfromlisttotal} $nirText] [regexp {op setfromlist } $nirText]
 } -result {0 1}
@@ -287,7 +287,7 @@ test setfromlist-list-of-never {List[never] -> ImmutableSet[never]: an empty lis
 # The real byte::set path, through the frozen bench/uri-steady.bot itself,
 # not a synthetic stand-in (spec items 6, 29-33).
 
-test setfromlist-uri-byte-set-local-op-total {byte::set's own body: the immutable_set_from_list(bytes) call lowers to setfromlisttotal, not setfromlist -- bytes : List[Byte], statically proven equality-total (spec items 1-3)} -body {
+test setfromlist-uri-byte-set-local-op-total {byte::set's own body: the immutable_set::from_list(bytes) call lowers to setfromlisttotal, not setfromlist -- bytes : List[Byte], statically proven equality-total (spec items 1-3)} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
     set nirText [dict get [native::lower::program $hir -tiny-leaf-inline-opt 0] text]
     regexp {func \d+ "byte::set[^\n]*\n(?:.*\n)*?end} $nirText body

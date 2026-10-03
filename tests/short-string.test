@@ -205,7 +205,7 @@ set chooseSource {
         else:
             "x"
 
-    [length(choose(true)), length(choose(false)), choose(true) == "", choose(false) == "x"]
+    [str::length(choose(true)), str::length(choose(false)), choose(true) == "", choose(false) == "x"]
 }
 
 set lamSource {
@@ -215,7 +215,7 @@ set lamSource {
         else:
             ""
 
-    [length(lam(true)), lam(true) == "λ", lam(false) == ""]
+    [str::length(lam(true)), lam(true) == "λ", lam(false) == ""]
 }
 
 set chainSource {
@@ -226,7 +226,7 @@ set chainSource {
             "λ"
 
     fn h(s):
-        [length(s), s == "λ", s == ""]
+        [str::length(s), s == "λ", s == ""]
 
     fn g(s):
         h(s)
@@ -242,13 +242,13 @@ set chainSource {
 
 test short-unicode-model-is-the-scalar-value {a non-ASCII character is one semantic character: length counts scalars, never bytes} -body {
     parityShort {
-        [length("ä"), length("€"), length("λ"), length("猫"), length("😀"), length("e")]
+        [str::length("ä"), str::length("€"), str::length("λ"), str::length("猫"), str::length("😀"), str::length("e")]
     }
 } -result {value:[1, 1, 1, 1, 1, 1]}
 
 test short-unicode-model-astral-is-one-character {a supplementary-plane character is one scalar (one character), though 4 UTF-8 bytes and two UTF-16 units} -body {
     parityShort {
-        [length("😀"), length(substring("a😀b", 1, 2)), substring("a😀b", 1, 2) == "😀"]
+        [str::length("😀"), str::length(str::substring("a😀b", 1, 2)), str::substring("a😀b", 1, 2) == "😀"]
     }
 } -result {value:[1, 1, true]}
 
@@ -287,7 +287,7 @@ test short-plan-chain-parameters {f -> g -> h forwards a ShortString1 parameter 
 test short-plan-parameter-control {a closed helper whose String parameter is proven length <= 1 gets a ShortString1 parameter} -body {
     set text {
         fn describe(c):
-            [length(c), c == "", c == "q"]
+            [str::length(c), c == "", c == "q"]
 
         [describe(""), describe("q"), describe("é")]
     }
@@ -302,7 +302,7 @@ test short-plan-result-control {a closed helper returning a String proven length
             else:
                 "+"
 
-        [length(mark(3)), mark(3) == "+", mark(-1) == ""]
+        [str::length(mark(3)), mark(3) == "+", mark(-1) == ""]
     }
     shortPlan $text {*}$noInline
 } -result {mark<int>=val>short}
@@ -312,7 +312,7 @@ test short-plan-result-control {a closed helper returning a String proven length
 test short-plan-long-literal-stays-tagged {"ab" has two characters: never ShortString1} -body {
     set text {
         fn two(c):
-            length(c)
+            str::length(c)
 
         two("ab")
     }
@@ -322,9 +322,9 @@ test short-plan-long-literal-stays-tagged {"ab" has two characters: never ShortS
 test short-plan-unknown-length-stays-tagged {a String of unknown length (a caller passes concat's result) stays tagged: no speculation from the other callers} -body {
     set text {
         fn size(c):
-            length(c)
+            str::length(c)
 
-        [size("a"), size(concat("a", "b"))]
+        [size("a"), size(str::concat("a", "b"))]
     }
     list [shortPlan $text {*}$noInline] [shortReasons $text size<str> {*}$noInline]
 } -result {size<str>=val>val {unknown-length not-string}}
@@ -337,7 +337,7 @@ test short-plan-one-long-branch-poisons-the-join {a join with a two-character br
             else:
                 "bc"
 
-        length(pick(true))
+        str::length(pick(true))
     }
     list [shortPlan $text {*}$noInline] [shortReasons $text pick<bool> {*}$noInline]
 } -result {pick<bool>=val>val {not-string length-gt-1}}
@@ -345,9 +345,9 @@ test short-plan-one-long-branch-poisons-the-join {a join with a two-character br
 test short-plan-concatenation-is-not-assumed-short {"" + "" is empty and one + one is two characters: concat is not a short producer, only an independently proven bound counts} -body {
     set text {
         fn cat(a, b):
-            concat(a, b)
+            str::concat(a, b)
 
-        length(cat("x", "y"))
+        str::length(cat("x", "y"))
     }
     list [shortPlan $text {*}$noInline] [shortReasons $text {cat<str, str>} {*}$noInline]
 } -result {{{cat<str, str>=short,short>val}} {{{} {}} unknown-length}}
@@ -376,7 +376,7 @@ test short-plan-open-instance-stays-tagged {a function whose value escapes (a ge
         fn apply(f, x):
             f(x)
 
-        [apply(pick, true), length(pick(false))]
+        [apply(pick, true), str::length(pick(false))]
     }
     list [shortReasons $text pick<generic> {*}$noInline] [shortFacts $text pick<generic> {*}$noInline]
 } -result {{not-string open-instance} {over:not-string {0 1 1 {}}}}
@@ -402,7 +402,7 @@ test short-nul-is-not-empty {U+0000 is a one-character String (0), distinct from
             else:
                 \"\"
 
-        \[length(pick(true)), length(pick(false)), pick(true) == \"\", pick(false) == \"\", pick(true) == \"$nul\", pick(true) == pick(false)\]
+        \[str::length(pick(true)), str::length(pick(false)), pick(true) == \"\", pick(false) == \"\", pick(true) == \"$nul\", pick(true) == pick(false)\]
     "
 } -result {value:[1, 0, false, true, true, false]}
 
@@ -416,7 +416,7 @@ test short-highest-scalar-round-trips {U+10FFFF, the highest scalar value, survi
                 \"\"
 
         s = pick(true)
-        \[length(s), s == \"$top\", s == \"\"\]
+        \[str::length(s), s == \"$top\", s == \"\"\]
     "
 } -result {value:[1, true, false]}
 
@@ -442,7 +442,7 @@ test short-nir-length-and-equality-are-scalar {length of a ShortString1 is `shor
 test short-nir-parameter-is-short-in-the-callee {the helper's parameter is a short register: no strtoshort, scalar length/eq inside} -body {
     set text {
         fn describe(c):
-            [length(c), c == "", c == "q"]
+            [str::length(c), c == "", c == "q"]
 
         [describe(""), describe("q")]
     }
@@ -462,7 +462,7 @@ test short-nir-alias-stays-virtual {x = s; y = x; z = y: aliases are the same sh
             x = pick(flag)
             y = x
             z = y
-            [length(z), z == "x", z == ""]
+            [str::length(z), z == "x", z == ""]
 
         alias(true)
     }
@@ -484,7 +484,7 @@ test short-nir-return-stays-virtual {a local virtual short returned through a sh
                 "λ"
             s
 
-        length(pick(true))
+        str::length(pick(true))
     }
     set nir [nirOf $text {*}$noInline]
     list [shortResult [fnText $nir pick]] [conversionsIn $nir pick] [conversionsIn $nir <program>]
@@ -505,7 +505,7 @@ test short-nir-tagged-frontier-materializes-once {one ShortString1 forwarded thr
             g(s)
 
         fn store(s):
-            list_append([], f(s))
+            list::append([], f(s))
 
         store(pick(false))
     }
@@ -517,10 +517,10 @@ test short-nir-tagged-frontier-materializes-once {one ShortString1 forwarded thr
     list $total [conversionsIn $nir store] [shortResult [fnText $nir g]] [shortResult [fnText $nir f]] [parityShort $text]
 } -result "1 {0 1} 1 1 {value:\[\"\u03bb\"\]}"
 
-test short-nir-mixed-use-boxes-at-the-tagged-use {length(s) is scalar; list_append(xs, s) materializes: no suppression heuristic, one recorded conversion} -body {
+test short-nir-mixed-use-boxes-at-the-tagged-use {str::length(s) is scalar; list::append(xs, s) materializes: no suppression heuristic, one recorded conversion} -body {
     set text {
         fn mixed(s, xs):
-            [length(s), list_append(xs, s)]
+            [str::length(s), list::append(xs, s)]
 
         mixed("x", [])
     }
@@ -585,14 +585,14 @@ test short-nir-env-disables {BOTLISH_NATIVE_SHORT_STRING_OPT=0 is the same switc
 # ---------------------------------------------------------------------------
 # Producers: the substring slice, and the empty-index error behavior
 
-test short-slice-is-an-infallible-extract-after-the-ordinary-check {substring(text, 0, 1) as a short value: the same regioncheck an ordinary call runs, then a total strsliceshort; no String allocated} -body {
+test short-slice-is-an-infallible-extract-after-the-ordinary-check {str::substring(text, 0, 1) as a short value: the same regioncheck an ordinary call runs, then a total strsliceshort; no String allocated} -body {
     set text {
         fn first(t):
-            substring(t, 0, 1)
+            str::substring(t, 0, 1)
 
         fn show(t):
             c = first(t)
-            [c, length(c)]
+            [c, str::length(c)]
 
         show("abc")
     }
@@ -601,17 +601,17 @@ test short-slice-is-an-infallible-extract-after-the-ordinary-check {substring(te
     list [shortResult $first] [countIn {op regioncheck} $first] [countIn {op strsliceshort} $first] [countIn {op substr } $first] [parityShort $text]
 } -result {1 1 1 0 {value:["a", 1]}}
 
-test short-slice-peek-shape {peek(text, i): "" past the end, else substring(text, i, i + 1): a ShortString1 result (the index step is hir::induction's existing fact)} -body {
+test short-slice-peek-shape {peek(text, i): "" past the end, else str::substring(text, i, i + 1): a ShortString1 result (the index step is hir::induction's existing fact)} -body {
     set text {
         fn peek(text, index):
-            if index >= length(text):
+            if index >= str::length(text):
                 return ""
 
-            substring(text, index, index + 1)
+            str::substring(text, index, index + 1)
 
         fn first_is_a(text):
             c = peek(text, 0)
-            [length(c), c == "a", c == ""]
+            [str::length(c), c == "a", c == ""]
 
         [first_is_a("abc"), first_is_a("")]
     }
@@ -621,7 +621,7 @@ test short-slice-peek-shape {peek(text, i): "" past the end, else substring(text
 test short-slice-empty-index-error-is-unchanged {substring on an empty String raises the same RANGE error with the ShortString1 producer: Empty (-1) is never a failure value} -body {
     set text {
         fn first(t):
-            substring(t, 0, 1)
+            str::substring(t, 0, 1)
 
         first("")
     }
@@ -631,7 +631,7 @@ test short-slice-empty-index-error-is-unchanged {substring on an empty String ra
 test short-slice-bounds-error-message {the RANGE message of a ShortString1 slice is byte-identical to an ordinary substring's} -body {
     set text {
         fn first(t):
-            substring(t, 0, 1)
+            str::substring(t, 0, 1)
 
         first("")
     }
@@ -643,17 +643,17 @@ test short-slice-bounds-error-message {the RANGE message of a ShortString1 slice
     }
     set interp [catch {core::evalProgram [hir::lower $hir]} imsg]
     list [lindex $messages 0] [expr {[lindex $messages 0] eq [lindex $messages 1]}] [expr {$imsg eq [lindex $messages 0]}]
-} -result {{substring: range 0..1 is outside 0..0} 1 1}
+} -result {{str::substring: range 0..1 is outside 0..0} 1 1}
 
 test short-slice-non-ascii {a non-ASCII slice: the scalar, not a byte} -body {
     parityShort {
         fn first(t):
-            substring(t, 0, 1)
+            str::substring(t, 0, 1)
 
         fn second(t):
-            substring(t, 1, 2)
+            str::substring(t, 1, 2)
 
-        ["ä" == first("äx"), second("a€") == "€", length(second("a猫")), first("😀z") == "😀"]
+        ["ä" == first("äx"), second("a€") == "€", str::length(second("a猫")), first("😀z") == "😀"]
     }
 } -result {value:[true, true, 1, true]}
 
@@ -679,7 +679,7 @@ test short-error-capable-result {an error-capable function with a ShortString1 s
                     "caught"
             r
 
-        [run(-1), run(0), run(3), length(run(0)), run(0) == ""]
+        [run(-1), run(0), run(3), str::length(run(0)), run(0) == ""]
     }
     set nir [nirOf $text {*}$noInline]
     list [shortResult [fnText $nir guarded]] [parityShort $text]
@@ -688,10 +688,10 @@ test short-error-capable-result {an error-capable function with a ShortString1 s
 test short-error-escapes-uncaught {a runtime RANGE failure inside a ShortString1-result function is the same error outcome with the optimization on and off, and Empty never stands for it} -body {
     parityShort {
         fn at(t, i):
-            substring(t, i, i + 1)
+            str::substring(t, i, i + 1)
 
         fn drive(i):
-            [at("ab", i), length(at("ab", i))]
+            [at("ab", i), str::length(at("ab", i))]
 
         [drive(0), drive(1), drive(2)]
     }
@@ -711,7 +711,7 @@ test short-error-in-the-caller-handler {a handler around a short-result call: Em
             r = guarded(n):
                 on Bad:
                     "handled"
-            [r, length(r)]
+            [r, str::length(r)]
 
         [run(0), run(-1)]
     }
@@ -729,7 +729,7 @@ test short-storage-list-materializes {a short String stored in a List is materia
                 "λ"
 
         xs = [pick(true), pick(false)]
-        [xs, list_length(xs), list_get(xs, 1) == "λ"]
+        [xs, list::length(xs), list::at(xs, 1) == "λ"]
     }
 } -result {value:[["", "λ"], 2, true]}
 
@@ -741,7 +741,7 @@ test short-general-string-operations-materialize {concat, lowercase and hashing 
             else:
                 "Λ"
 
-        [concat(pick(true), "!"), lowercase(pick(false)), concat(pick(false), pick(false)), hash(pick(false)) == hash("Λ")]
+        [str::concat(pick(true), "!"), str::lowercase(pick(false)), str::concat(pick(false), pick(false)), hash(pick(false)) == hash("Λ")]
     }
 } -result {value:["!", "λ", "ΛΛ", true]}
 
@@ -756,7 +756,7 @@ test short-equality-with-an-unrestricted-string-materializes {a ShortString1 com
             else:
                 "x"
 
-        [same(pick(true), concat("", "")), same(pick(false), concat("x", "")), same(pick(false), concat("x", "y"))]
+        [same(pick(true), str::concat("", "")), same(pick(false), str::concat("x", "")), same(pick(false), str::concat("x", "y"))]
     }
     set nir [nirOf $text {*}$noInline]
     set same [fnText $nir same]
@@ -789,7 +789,7 @@ test short-capture-materializes {a short local captured by a closure is stored i
         fn captured(flag):
             s = pick(flag)
             fn add(x):
-                concat(s, x)
+                str::concat(s, x)
             add("!")
 
         [captured(true), captured(false)]
@@ -825,7 +825,7 @@ test short-parity-corpus-mix {ASCII, non-ASCII, NUL, Empty; branches, aliases, c
             if n < 0:
                 acc
             else:
-                count(n - 1, acc + length(fwd(pick(n))))
+                count(n - 1, acc + str::length(fwd(pick(n))))
 
         fn guarded(n) -> str errors Bad:
             if n > 3:
@@ -839,7 +839,7 @@ test short-parity-corpus-mix {ASCII, non-ASCII, NUL, Empty; branches, aliases, c
                     \"bad\"
             r
 
-        \[count(3, 0), pick(2) == \"λ\", pick(3) == \"$nul\", pick(0) == \"\", run(1), run(9), list_append(\[pick(0)\], pick(2))\]
+        \[count(3, 0), pick(2) == \"λ\", pick(3) == \"$nul\", pick(0) == \"\", run(1), run(9), list::append(\[pick(0)\], pick(2))\]
     "
 } -result "value:\[3, true, true, true, \"a\", \"bad\", \[\"\", \"λ\"\]\]"
 
@@ -860,10 +860,10 @@ test short-gc-live-across-allocation {a ShortString1 live across unrelated alloc
 
         fn work(s, xs):
             p = Pair {left: "keep", right: 7}
-            t = concat("a", "b")
-            u = list_append(xs, 1)
-            v = concat(t, t)
-            [length(s), s == "λ", length(v), list_length(u), p.left, p.right, s]
+            t = str::concat("a", "b")
+            u = list::append(xs, 1)
+            v = str::concat(t, t)
+            [str::length(s), s == "λ", str::length(v), list::length(u), p.left, p.right, s]
 
         [work(pick(false), [1, 2]), work(pick(true), [9])]
     }
@@ -884,11 +884,11 @@ test short-gc-materialize-before-and-after-allocation {a short value materialize
                 "猫"
 
         fn work(s):
-            first = list_append([], s)
-            filler = concat("x", "y")
-            second = list_append(first, s)
-            more = concat(filler, filler)
-            [first, second, length(more), s]
+            first = list::append([], s)
+            filler = str::concat("x", "y")
+            second = list::append(first, s)
+            more = str::concat(filler, filler)
+            [first, second, str::length(more), s]
 
         [work(pick(false)), work(pick(true))]
     }
@@ -910,10 +910,10 @@ test short-gc-recursive-exact-call-transport {a ShortString1 parameter and resul
 
         fn depth(n, s, acc):
             if n == 0:
-                length(acc)
+                str::length(acc)
             else:
-                t = concat(acc, "z")
-                depth(n - 1, step(n - 1), t) + length(s)
+                t = str::concat(acc, "z")
+                depth(n - 1, step(n - 1), t) + str::length(s)
 
         depth(200, step(1), "")
     }
@@ -934,8 +934,8 @@ test short-gc-stack-map-has-no-short-roots {the root report lists the short regi
                 "q"
 
         fn work(s):
-            t = concat("a", "b")
-            [length(s), t]
+            t = str::concat("a", "b")
+            [str::length(s), t]
 
         work(pick(false))
     }
@@ -1009,12 +1009,12 @@ test short-executable-everything {Empty, ASCII, non-ASCII, NUL, parameter/result
             s
 
         fn probe(s):
-            \[length(s), s == \"\", s == \"λ\", s == \"$nul\"\]
+            \[str::length(s), s == \"\", s == \"λ\", s == \"$nul\"\]
 
         fn first(t):
-            substring(t, 0, 1)
+            str::substring(t, 0, 1)
 
-        \[probe(fwd(pick(0))), probe(fwd(pick(1))), probe(fwd(pick(2))), probe(fwd(pick(3))), run(2), run(8), list_append(\[pick(2)\], pick(0)), first(\"ä€\") == \"ä\"\]
+        \[probe(fwd(pick(0))), probe(fwd(pick(1))), probe(fwd(pick(2))), probe(fwd(pick(3))), run(2), run(8), list::append(\[pick(2)\], pick(0)), first(\"ä€\") == \"ä\"\]
     "
 } -result "\[\[0, true, false, false\], \[1, false, false, false\], \[1, false, true, false\], \[1, false, false, true\], \"λ\", \"bad\", \[\"λ\", \"\"\], true\]"
 
@@ -1029,7 +1029,7 @@ test short-executable-optimization-off {the same executable with -short-string-o
         fn fwd(s):
             s
 
-        [length(fwd(pick(true))), length(fwd(pick(false))), fwd(pick(false)) == "y"]
+        [str::length(fwd(pick(true))), str::length(fwd(pick(false))), fwd(pick(false)) == "y"]
     } {-short-string-opt 0}
 } -result {[0, 1, true]}
 
@@ -1065,7 +1065,7 @@ set auditSource {
     fn probe(flag, xs):
         s = choose(flag)
         t = "ab"
-        [length(s), s == "x", list_append(xs, s), t]
+        [str::length(s), s == "x", list::append(xs, s), t]
 
     probe(true, [])
 }
@@ -1080,7 +1080,7 @@ test short-audit-explains-a-virtual-value {the audit says what was proven, what 
         "production: result of choose<bool>"
         "length -> scalar"
         "equality -> scalar"
-        "list_append -> materialize"
+        "list::append -> materialize"
     } {
         if {[string first $needle $text] < 0} { error "missing \"$needle\" in:\n$text" }
     }
@@ -1122,7 +1122,7 @@ test short-literal-materializes-to-a-constant-not-an-allocation {a short local b
     set text {
         fn keep(xs):
             s = "x"
-            [length(s), list_append(xs, s)]
+            [str::length(s), list::append(xs, s)]
 
         keep([])
     }
@@ -1140,8 +1140,8 @@ test short-mixed-parameter-converts-once {a short parameter used by a tagged con
                 "y"
 
         fn probe(s):
-            t = list_append([], s)
-            [t, length(s), s == "y"]
+            t = list::append([], s)
+            [t, str::length(s), s == "y"]
 
         probe(pick(true))
     }
@@ -1163,10 +1163,10 @@ test short-struct-field-and-mutable-array-materialize {a short String stored in 
 
         fn store(flag):
             p = Pair {left: pick(flag), right: 1}
-            a = mutable_array_allocate(2)
-            mutable_array_set(a, 0, pick(flag))
-            mutable_array_set(a, 1, "z")
-            [p.left, length(p.left), mutable_array_get(a, 0), mutable_array_get(a, 1) == "z"]
+            a = mutable_array::allocate(2)
+            mutable_array::set(a, 0, pick(flag))
+            mutable_array::set(a, 1, "z")
+            [p.left, str::length(p.left), mutable_array::at(a, 0), mutable_array::at(a, 1) == "z"]
 
         [store(true), store(false)]
     }

@@ -92,7 +92,7 @@ proc refinedChecksNir {args} {
     native::nir [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot]] {*}$args
 }
 
-test raw-internal-abi-refined-checks-signatures {the de-closured scanners take the plan's raw positions (knob on): both scan_while variants a raw start, the is_tcl_alpha one also a raw result, tld? a raw i, domain? a raw start; char_at's i stays tagged (substring is a tagged consumer); knob off: none} -body {
+test raw-internal-abi-refined-checks-signatures {the de-closured scanners take the plan's raw positions (knob on): both scan_while variants a raw start, the str::is_tcl_alpha one also a raw result, tld? a raw i, domain? a raw start; char_at's i stays tagged (substring is a tagged consumer); knob off: none} -body {
     lmap knob {1 0} {
         withRawInternal $knob {
             set nir [refinedChecksNir]
@@ -129,7 +129,7 @@ test raw-internal-abi-refined-checks-region-companion-tagged {char_at's internal
 
 set ::recursionShape {
     fn outer(s, base):
-        n = length(s)
+        n = str::length(s)
         fn depth(x):
             if x <= 0:
                 base
@@ -155,9 +155,9 @@ test raw-internal-abi-recursion {a non-tail self-recursive internal variant call
 
 set ::resultShape {
     fn scanner(s):
-        n = length(s)
+        n = str::length(s)
         fn at(i):
-            substring(s, i, i + 1)
+            str::substring(s, i, i + 1)
         fn skip(start):
             loop i from start to n:
                 if at(i) != " ":
@@ -195,13 +195,13 @@ test raw-internal-abi-knob-off {with the knob off no internal variant has a raw 
 
 set ::gcShape {
     fn mk(k):
-        [k, concat("a", "b")]
+        [k, str::concat("a", "b")]
     fn run(s, lim):
-        n = length(s)
+        n = str::length(s)
         fn step(x):
             ys = mk(x)
             zs = mk(x + n)
-            x * 2 + list_length(ys) + list_length(zs) - list_length(mk(n))
+            x * 2 + list::length(ys) + list::length(zs) - list::length(mk(n))
         fn count(lo):
             loop i from lo to n:
                 if step(i) > lim:

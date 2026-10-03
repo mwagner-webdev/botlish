@@ -107,19 +107,19 @@ takes_bytes([256])} $::byteDecl]
 test empty-set-satisfies-byte {an empty-constructed set satisfies a declared ImmutableSet[Byte] parameter (spec item 37)} -body {
     accepts [format {%sfn consume(s: ImmutableSet[Byte]) -> int:
     1
-consume(immutable_set_from_list([]))} $::byteDecl]
+consume(immutable_set::from_list([]))} $::byteDecl]
 } -result ok
 
 test empty-set-satisfies-string {an empty-constructed set satisfies a declared ImmutableSet[str] parameter -- non-integer element kind (spec item 37)} -body {
     accepts {fn consume(s: ImmutableSet[str]) -> int:
     1
-consume(immutable_set_from_list([]))}
+consume(immutable_set::from_list([]))}
 } -result ok
 
 test nonempty-set-still-invariant {a non-empty ImmutableSet[Byte] does not satisfy ImmutableSet[int] -- the set-side non-empty invariance control (spec item 37)} -body {
     rejects [format {%sfn consume(s: ImmutableSet[int]) -> int:
     1
-consume(immutable_set_from_list([byteA()]))} $::byteDecl]
+consume(immutable_set::from_list([byteA()]))} $::byteDecl]
 } -result {{CORE SEMANTIC TYPE} 1}
 
 # ---------------------------------------------------------------------------
@@ -134,7 +134,7 @@ test empty-list-satisfies-declared-result {a function declaring -> List[int] and
 
 test empty-set-satisfies-declared-result {a function declaring -> ImmutableSet[Small] and returning an empty-constructed set is accepted (spec items 11, 38)} -body {
     accepts [format {%sfn emptySet() -> ImmutableSet[Small]:
-    immutable_set_from_list([])
+    immutable_set::from_list([])
 1} $::smallDecl]
 } -result ok
 
@@ -200,7 +200,7 @@ test empty-listloop-runtime-zero-iterations {count(xs: List[int]), which listloo
     set text {fn count(xs: List[int]) -> int:
     mapped = loop x in xs:
         x
-    list_length(mapped)
+    list::length(mapped)
 count([])}
     set exprs [sourceIR $text]
     lmap backend {interp compile cranelift-generic cranelift} {
@@ -212,7 +212,7 @@ test empty-listloop-nonempty-caller-still-correct {the same count(List[int]) fun
     set text {fn count(xs: List[int]) -> int:
     mapped = loop x in xs:
         x
-    list_length(mapped)
+    list::length(mapped)
 [count([]), count([1, 2, 3])]}
     set exprs [sourceIR $text]
     lmap backend {interp compile cranelift-generic cranelift} {
@@ -246,7 +246,7 @@ test empty-caller-instance-loop-body-statically-dead {the empty-caller instance'
     set text {fn count(xs: List[int]) -> int:
     mapped = loop x in xs:
         x
-    list_length(mapped)
+    list::length(mapped)
 [count([]), count([1, 2, 3])]}
     set nirText [nirOf $text]
     set emptyStart [string first {instance="List[never]"} $nirText]

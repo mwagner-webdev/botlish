@@ -249,10 +249,10 @@ proc m8a::CallerAccess {hir spec caller callExpr fixedVar} {
         foreach p $exprs {
             if {[hir::kind $view $p] eq "call" && [lindex [hir::get $view $p args] 0] eq $e} {
                 lassign [hir::get $view $p target] tk t
-                if {$tk eq "native" && [dict get [hir::symbol $view $t] name] eq "list_get"} {
+                if {$tk eq "native" && [dict get [hir::symbol $view $t] name] eq "list::at"} {
                     set idx [lindex [hir::get $view $p args] 1]
                     if {[hir::kind $view $idx] eq "const"} {
-                        set use "list_get(_, [core::value::show [hir::get $view $idx value]])"
+                        set use "list::at(_, [core::value::show [hir::get $view $idx value]])"
                     }
                 }
             }

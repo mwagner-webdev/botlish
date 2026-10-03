@@ -111,14 +111,14 @@ proc icRun {src} {
 
 test ic-native-requirement {an untyped wrapper of a str-requiring native (length) infers x : str, a checked requirement, from the native's own registry metadata} -body {
     set h [icCompile {fn takes_str(x):
-    length(x)
+    str::length(x)
 takes_str("abc")}]
     list [icSig $h takes_str] [icWhy $h takes_str x]
-} -result {{{x: str (inferred checked)}} {{checked argument 1 of native length -> str}}}
+} -result {{{x: str (inferred checked)}} {{checked argument 1 of native str::length -> str}}}
 
 test ic-forwarding {forwarding to an inferred wrapper infers the same contract} -body {
     set h [icCompile {fn takes_str(x):
-    length(x)
+    str::length(x)
 fn forwards(x):
     takes_str(x)
 forwards("abc")}]
@@ -131,13 +131,13 @@ test ic-callable-parameter {calling an untyped parameter with a str and consumin
         1
     else:
         0
-pred_use(is_tcl_alpha)}]
+pred_use(str::is_tcl_alpha)}]
     icSig $h pred_use
 } -result {{p: Fn{args: [str], return: bool, errors: []} (inferred trusted)}}
 
 test ic-alias {a requirement on an immutable alias constrains the parameter it aliases} -body {
     set h [icCompile {fn takes_str(x):
-    length(x)
+    str::length(x)
 fn alias(x):
     y = x
     takes_str(y)
@@ -156,7 +156,7 @@ chain(1)}]
 
 test ic-operators {ordinary operators participate through their own native metadata: arithmetic and comparison (int), string concatenation (str), a loop iterable (list), counted-loop bounds (int), an if condition (bool)} -body {
     set h [icCompile {fn ops(a, b, s, xs, flag, lo):
-    t = concat(s, "!")
+    t = str::concat(s, "!")
     u = a * 2
     v = b < 3
     loop x in xs:
@@ -175,7 +175,7 @@ test ic-unconstrained-stays-any {a parameter with no concrete requirement stays 
     set h [icCompile {fn eq_x?(c):
     c == "x"
 fn member?(set, c):
-    immutable_set_contains(set, c)
+    immutable_set::contains(set, c)
 eq_x?(1)}]
     list [icSig $h eq_x?] [icSig $h member?]
 } -result {{{c: any (none)}} {{set: immutableSet (inferred checked)} {c: any (none)}}}
@@ -199,7 +199,7 @@ both(7)}]
 # source is written in. (The caller-first order is not a program:
 # STRICT-REFERENCE-DETERMINISM.md.)
 set ::icChain {fn h(z):
-    length(z)
+    str::length(z)
 fn g(y):
     h(y)
 fn f(x):
@@ -208,14 +208,14 @@ f("abc")}
 set ::icChainReordered {fn k(w):
     w + 1
 fn h(z):
-    length(z)
+    str::length(z)
 fn g(y):
     h(y)
 fn f(x):
     g(x)
 f("abc")}
 set ::icChainAlso {fn h(z):
-    length(z)
+    str::length(z)
 fn g(y):
     h(y)
 fn k(w):
@@ -228,7 +228,7 @@ set ::icChainForward {fn f(x):
 fn g(y):
     h(y)
 fn h(z):
-    length(z)
+    str::length(z)
 f("abc")}
 
 test ic-multi-hop {requirements propagate through several ordinary calls without annotations: h(z), g(y), f(x) all str} -body {
@@ -301,7 +301,7 @@ test ic-recursion-callable {a callable contract propagates through recursion (tr
             walk(p, n - 1)
         else:
             0
-walk(is_tcl_alpha, 3)}]
+walk(str::is_tcl_alpha, 3)}]
     icSig $h walk
 } -result {{p: Fn{args: [str], return: bool, errors: []} (inferred trusted)} {n: int (inferred checked)}}
 
@@ -322,7 +322,7 @@ test ic-explicit-declared-kept {a declared parameter keeps its declared type in 
 fn narrow(x: Byte):
     take_byte(x)
 fn wide(s: str):
-    length(s)
+    str::length(s)
 narrow(7)}]
     list [icSig $h narrow] [icSig $h wide]
 } -result {{{x: int[Byte] (declared)}} {{s: str (declared)}}}
@@ -344,9 +344,9 @@ safe(300)}
 
 test ic-conflict {an untyped parameter used as a str and as an Int has no sound contract: a compile-time error naming both uses -- never any} -body {
     icRejects {fn both(x):
-    n = length(x)
+    n = str::length(x)
     x + n
-both("a")} {*cannot infer a sound type for parameter "x" of both: argument 1 of native length requires str (at *), but argument 1 of native + requires int (at *), and no type satisfies both*}
+both("a")} {*cannot infer a sound type for parameter "x" of both: argument 1 of native str::length requires str (at *), but argument 1 of native + requires int (at *), and no type satisfies both*}
 } -result {{CORE SEMANTIC TYPE} 1}
 
 test ic-conflict-path-dependent {uses separated by a type refinement of the parameter itself are path-dependent: neither constrains the parameter, which keeps any} -body {
@@ -354,39 +354,39 @@ test ic-conflict-path-dependent {uses separated by a type refinement of the para
     if integer?(x):
         x + 1
     else:
-        length(x)
+        str::length(x)
 either(1) + either("ab")}]
     list [icSig $h either] [icRun {fn either(x):
     if integer?(x):
         x + 1
     else:
-        length(x)
+        str::length(x)
 either(1) + either("ab")}]
 } -result {{{x: any (none)}} 4}
 
 test ic-conflict-callable-result {a callable parameter whose result is used as a bool and as a str has no sound return contract} -body {
     icRejects {fn twice(p):
     if p(1):
-        length(p(2))
+        str::length(p(2))
     else:
         0
-twice(is_tcl_alpha)} {*cannot infer a sound type for parameter "p" of twice:*bool*str*}
+twice(str::is_tcl_alpha)} {*cannot infer a sound type for parameter "p" of twice:*bool*str*}
 } -result {{CORE SEMANTIC TYPE} 1}
 
 # ---------------------------------------------------------------------------
 # Native wrappers: the deliberate semantic strengthening (spec items 7, 70,
 # 71) and the trusted/checked boundary
 
-set ::icWrapper "fn wrapper(x):\n    length(x)\n"
+set ::icWrapper "fn wrapper(x):\n    str::length(x)\n"
 
 test ic-native-direct-unchanged {a direct native call with a statically wrong argument keeps its run-time TYPE error (direct native-call semantics unchanged): the native's own message, on every backend} -body {
-    set exprs [hir::lower [icCompile "length(123)"]]
+    set exprs [hir::lower [icCompile "str::length(123)"]]
     lsort -unique [lmap backend {interp compile cranelift-generic cranelift} {lrange [outcomeUnder $backend $exprs] 1 2}]
-} -result {{{CORE SEMANTIC TYPE} {length: expected str, got 123}}}
+} -result {{{CORE SEMANTIC TYPE} {str::length: expected str, got 123}}}
 
 test ic-native-wrapper-static {wrapper(123) was a run-time TYPE error inside the native; it is now a compile-time error at the call, naming the inferred contract and where it came from} -body {
     icRejects "${::icWrapper}wrapper(123)" \
-        {*:6:9: argument for parameter "x" is statically incompatible with str, the parameter type inferred from the function body (argument type: int*inferred from the function body: argument 1 of native length requires str (at 5:12)*}
+        {*:6:9: argument for parameter "x" is statically incompatible with str, the parameter type inferred from the function body (argument type: int*inferred from the function body: argument 1 of native str::length requires str (at 5:17)*}
 } -result {{CORE SEMANTIC TYPE} 1}
 
 test ic-native-wrapper-before {what that call used to do, and still does where no strict HIR build runs (core IR on interp; the compile backend keeps -strict 0 diagnostics as AOT blockers): enter the wrapper and raise the native's own run-time TYPE error} -body {
@@ -394,29 +394,29 @@ test ic-native-wrapper-before {what that call used to do, and still does where n
     set exprs [lreplace $exprs end end {call {ref wrapper} {const 123}}]
     list [differential $exprs] [lrange [outcomeUnder interp $exprs] 1 2] \
         [llength [hir::diagnostics [hir::build $exprs -strict 0]]]
-} -result {same {{CORE SEMANTIC TYPE} {length: expected str, got 123}} 1}
+} -result {same {{CORE SEMANTIC TYPE} {str::length: expected str, got 123}} 1}
 
 test ic-native-wrapper-valid {a proven str argument is accepted and runs on every backend} -body {
     icRun "${::icWrapper}wrapper(\"abcd\")"
 } -result 4
 
 test ic-native-wrapper-known-kind {any argument of known kind other than str is rejected: a bool, a List, a callable} -body {
-    lmap arg {true {[1]} is_tcl_alpha} {
+    lmap arg {true {[1]} str::is_tcl_alpha} {
         lindex [icRejects "${::icWrapper}wrapper($arg)" {*statically incompatible with str*}] 1
     }
 } -result {1 1 1}
 
 test ic-native-wrapper-any-argument {checked boundary: an argument whose static type is any (here an element of a heterogeneous List) still reaches the native's own run-time check -- no guard is inserted, and none is needed, because the wrapper body is never compiled assuming str} -body {
-    set h [icCompile "${::icWrapper}xs = \[1, \"ab\"\]\nwrapper(list_get(xs, 1))"]
+    set h [icCompile "${::icWrapper}xs = \[1, \"ab\"\]\nwrapper(list::at(xs, 1))"]
     list [icSig $h wrapper] [llength [hir::diagnostics $h]] \
-        [icRun "${::icWrapper}xs = \[1, \"ab\"\]\nwrapper(list_get(xs, 1))"]
+        [icRun "${::icWrapper}xs = \[1, \"ab\"\]\nwrapper(list::at(xs, 1))"]
 } -result {{{x: str (inferred checked)}} 0 2}
 
 test ic-trusted-any-argument-rejected {trusted boundary: forwarding to a declared-typed callee makes the requirement trusted (the body is typed with it), so an argument not proven to satisfy it -- including one of static type any -- is a compile-time error, exactly as for a declared parameter (spec item 71)} -body {
     set src "fn take_byte(b: Byte) -> int:\n    b\nfn fwd(x):\n    take_byte(x)\n"
     # The argument comes out of a helper: statically any. (Read straight out of
     # the literal it is exactly the Byte 1: EXACT-VALUE-FACTS.md, next test.)
-    list [icRejects "${src}fn first_of(xs):\n    list_get(xs, 0)\nfwd(first_of(\[1, \"ab\"\]))" \
+    list [icRejects "${src}fn first_of(xs):\n    list::at(xs, 0)\nfwd(first_of(\[1, \"ab\"\]))" \
             {*argument for parameter "x" cannot be proven to satisfy int\[Byte\], the parameter type inferred from the function body (argument type: any*}] \
          [icRejects "${src}fwd(9999)" {*cannot be proven to satisfy int\[Byte\], the parameter type inferred*}] \
          [icRun "${src}fwd(7)"]
@@ -424,8 +424,8 @@ test ic-trusted-any-argument-rejected {trusted boundary: forwarding to a declare
 
 test ic-trusted-exact-element-proves-contract {an argument read out of a known literal List at an exact index is exactly known (EXACT-VALUE-FACTS.md), so it proves a trusted contract its value satisfies -- and is still rejected when the exact value violates it} -body {
     set src "fn take_byte(b: Byte) -> int:\n    b\nfn fwd(x):\n    take_byte(x)\n"
-    list [icRejects "${src}xs = \[1, \"ab\"\]\nfwd(list_get(xs, 0))" {*}] \
-         [icRejects "${src}xs = \[1000, \"ab\"\]\nfwd(list_get(xs, 0))" {*cannot be proven to satisfy int\[Byte\]*}]
+    list [icRejects "${src}xs = \[1, \"ab\"\]\nfwd(list::at(xs, 0))" {*}] \
+         [icRejects "${src}xs = \[1000, \"ab\"\]\nfwd(list::at(xs, 0))" {*cannot be proven to satisfy int\[Byte\]*}]
 } -result {accepted {{CORE SEMANTIC TYPE} 1}}
 
 test ic-trusted-forwarder-now-valid {fn fwd(x): take_byte(x) used to be a static error in fwd's own body (x : any); its body now proves the contract instead, and callers are held to it} -body {
@@ -439,7 +439,7 @@ test ic-strict0-recovery {a core-IR program (-strict 0) that violates a trusted 
         1
     else:
         0
-pred_use(is_tcl_alpha)}]]
+pred_use(str::is_tcl_alpha)}]]
     set exprs [lreplace $exprs end end {call {ref pred_use} {block {c} {const 5}}}]
     set h [hir::build $exprs -strict 0]
     set e [icBlock $h pred_use]
@@ -453,7 +453,7 @@ pred_use(is_tcl_alpha)}]]
 set ::icPredUse "fn pred_use(p):\n    if p(\"x\"):\n        1\n    else:\n        0\n"
 
 test ic-callable-accepts {a native, an untyped Block, a str-declared Block and a capturing closure all satisfy Fn{args: [str], return: bool, errors: []}} -body {
-    icRun "${::icPredUse}fn eq_x?(c):\n    c == \"x\"\nfn typed(c: str) -> bool:\n    length(c) == 1\nfn make(v):\n    fn eq?(c):\n        c == v\n    eq?\n\[pred_use(is_tcl_alpha), pred_use(eq_x?), pred_use(typed), pred_use(make(\"y\"))\]"
+    icRun "${::icPredUse}fn eq_x?(c):\n    c == \"x\"\nfn typed(c: str) -> bool:\n    str::length(c) == 1\nfn make(v):\n    fn eq?(c):\n        c == v\n    eq?\n\[pred_use(str::is_tcl_alpha), pred_use(eq_x?), pred_use(typed), pred_use(make(\"y\"))\]"
 } -result {[1, 1, 1, 0]}
 
 test ic-callable-variance {argument variance is contravariant: a callable whose parameter requires int cannot accept the str this body passes} -body {
@@ -462,17 +462,17 @@ test ic-callable-variance {argument variance is contravariant: a callable whose 
 } -result {{CORE SEMANTIC TYPE} 1}
 
 test ic-callable-return {the result consumed as an if condition requires return bool: a callable returning an Int is rejected statically} -body {
-    icRejects "${::icPredUse}fn len(c):\n    length(c)\npred_use(len)" \
+    icRejects "${::icPredUse}fn len(c):\n    str::length(c)\npred_use(len)" \
         {*return incompatible: the callable returns int, not usable as bool*}
 } -result {{CORE SEMANTIC TYPE} 1}
 
 test ic-callable-unknown-rejected {a trusted callable contract is a static obligation: an argument of type any is rejected (never checked at run time)} -body {
-    icRejects "${::icPredUse}fn first_of(xs):\n    list_get(xs, 0)\npred_use(first_of(\[is_tcl_alpha, 1\]))" \
+    icRejects "${::icPredUse}fn first_of(xs):\n    list::at(xs, 0)\npred_use(first_of(\[str::is_tcl_alpha, 1\]))" \
         {*argument for parameter "p" cannot be proven to satisfy Fn\{args: \[str\], return: bool, errors: \[\]\}, the parameter type inferred from the function body*}
 } -result {{CORE SEMANTIC TYPE} 1}
 
 test ic-callable-return-unconstrained {a result that is only returned leaves the contract's return any} -body {
-    set h [icCompile "fn apply1(f):\n    f(1)\napply1(is_tcl_alpha)"]
+    set h [icCompile "fn apply1(f):\n    f(1)\napply1(str::is_tcl_alpha)"]
     icSig $h apply1
 } -result {{f: Fn{args: [int], return: any, errors: []} (inferred trusted)}}
 
@@ -488,12 +488,12 @@ test ic-callable-errors-empty {a call in an error-free context infers errors: []
 
 test ic-callable-errors-declared {inside a function admitting NotFound the inferred contract permits NotFound: a NotFound-declaring callable is accepted, and its error propagates to the caller's handler on every backend} -body {
     set src "fn use(p) -> int errors NotFound:\n    if p(\"x\"):\n        1\n    else:\n        0\nfn missing(c) -> bool errors NotFound:\n    fail NotFound\n"
-    set h [icCompile "${src}r = use(is_tcl_alpha):\n    on NotFound:\n        7\nr"]
+    set h [icCompile "${src}r = use(str::is_tcl_alpha):\n    on NotFound:\n        7\nr"]
     list [icSig $h use] [icRun "${src}r = use(missing):\n    on NotFound:\n        7\nr"]
 } -result {{{p: Fn{args: [str], return: bool, errors: [NotFound]} (inferred trusted)}} 7}
 
 test ic-callable-errors-handled {a call handled for NotFound admits NotFound} -body {
-    set h [icCompile "fn guarded(p):\n    ok = p(\"x\"):\n        on NotFound:\n            false\n    ok\nguarded(is_tcl_alpha)"]
+    set h [icCompile "fn guarded(p):\n    ok = p(\"x\"):\n        on NotFound:\n            false\n    ok\nguarded(str::is_tcl_alpha)"]
     icSig $h guarded
 } -result {{p: Fn{args: [str], return: any, errors: [NotFound]} (inferred trusted)}}
 
@@ -503,23 +503,23 @@ test ic-callable-errors-extra-rejected {a callable declaring an extra undeclared
 } -result {{CORE SEMANTIC TYPE} 1}
 
 test ic-callable-errors-meet {errors are intersected over call sites: one site admits NotFound, the other nothing} -body {
-    set h [icCompile "fn two(p):\n    a = p(\"x\"):\n        on NotFound:\n            false\n    p(\"y\")\ntwo(is_tcl_alpha)"]
+    set h [icCompile "fn two(p):\n    a = p(\"x\"):\n        on NotFound:\n            false\n    p(\"y\")\ntwo(str::is_tcl_alpha)"]
     icSig $h two
 } -result {{p: Fn{args: [str], return: any, errors: []} (inferred trusted)}}
 
 test ic-relational-stop {loop x in xs: predicate(x) needs "the element type of xs" (a type variable): no Fn{args: [any]} is invented; predicate keeps any and a str-only predicate still works through it} -body {
-    set src "fn all_of(xs, predicate):\n    loop x in xs:\n        if not predicate(x):\n            return false\n    true\nfn one?(c):\n    length(c) == 1\n"
+    set src "fn all_of(xs, predicate):\n    loop x in xs:\n        if not predicate(x):\n            return false\n    true\nfn one?(c):\n    str::length(c) == 1\n"
     set h [icCompile "${src}all_of(\[\"a\"\], one?)"]
     list [icSig $h all_of] [lindex [icNote $h all_of predicate] 0] [icRun "${src}all_of(\[\"a\", \"b\"\], one?)"]
 } -result {{{xs: list (inferred checked)} {predicate: any (none)}} relational true}
 
 test ic-callable-escape {a callable parameter that escapes (here into an untyped List) gets no contract: an unknown party may call it with unknown arguments} -body {
-    set h [icCompile "fn keep(p):\n    if p(\"x\"):\n        \[p\]\n    else:\n        \[\]\nkeep(is_tcl_alpha)"]
+    set h [icCompile "fn keep(p):\n    if p(\"x\"):\n        \[p\]\n    else:\n        \[\]\nkeep(str::is_tcl_alpha)"]
     list [icSig $h keep] [lindex [icNote $h keep p] 0]
 } -result {{{p: any (none)}} escapes}
 
 test ic-callable-through-hof {a callable passed on to another function whose own parameter has an inferred Fn contract does not escape: the contracts meet} -body {
-    set h [icCompile "${::icPredUse}fn outer(q):\n    pred_use(q)\nouter(is_tcl_alpha)"]
+    set h [icCompile "${::icPredUse}fn outer(q):\n    pred_use(q)\nouter(str::is_tcl_alpha)"]
     icSig $h outer
 } -result {{q: Fn{args: [str], return: bool, errors: []} (inferred trusted)}}
 
@@ -530,7 +530,7 @@ test ic-callable-through-hof {a callable passed on to another function whose own
 # genuinely dynamic (chosen at run time, so the value has just its contract)
 # stays an indirect callvalue.
 test ic-callable-no-target {a call through an inferred-callable parameter is a direct native operation when the argument is an exact native: the contract was never the target, the exact argument is} -body {
-    set h [icCompile "${::icPredUse}pred_use(is_tcl_alpha)"]
+    set h [icCompile "${::icPredUse}pred_use(str::is_tcl_alpha)"]
     set nir [dict get [native::lower::program [native::prepareHir $h]] text]
     regexp {= callvalue } $nir
 } -result 0
@@ -539,7 +539,7 @@ test ic-callable-no-target {a call through an inferred-callable parameter is a d
 # Reachability (spec items 59-60)
 
 test ic-unreachable-ignored {a use after an unconditional return is unreachable and imposes nothing} -body {
-    set h [icCompile "fn early(x):\n    return 1\n    length(x)\nearly(5)"]
+    set h [icCompile "fn early(x):\n    return 1\n    str::length(x)\nearly(5)"]
     icSig $h early
 } -result {{x: any (none)}}
 
@@ -583,7 +583,7 @@ test ic-result-bool-preserved {a created Block's body-inferred bool result survi
 } -result {{block(e2)/1 -> bool} {Fn{args: [any], return: bool, errors: []}} {Fn{args: [any], return: bool, errors: []}} bool}
 
 test ic-exact-block-trusted-contract {a trusted inferred contract is part of the exact Block's structural supertype (like a declaration); a checked-only one is not (like a native's own -param-types)} -body {
-    set h [icCompile "${::icPredUse}fn wrapper(x):\n    length(x)\nfn take_byte(b: Byte) -> int:\n    b\nfn fwd(x):\n    take_byte(x)\npred_use(is_tcl_alpha)"]
+    set h [icCompile "${::icPredUse}fn wrapper(x):\n    str::length(x)\nfn take_byte(b: Byte) -> int:\n    b\nfn fwd(x):\n    take_byte(x)\npred_use(str::is_tcl_alpha)"]
     lmap name {pred_use wrapper fwd} {
         set b [lindex [dict keys [dict filter [dict get $h bindings] script {b v} {expr {[dict get $v name] eq $name && [dict get $v kind] eq "local"}}]] 0]
         hir::types::show [hir::types::structuralOf [hir::bindingType $h $b]]
@@ -591,8 +591,8 @@ test ic-exact-block-trusted-contract {a trusted inferred contract is part of the
 } -result {{Fn{args: [Fn{args: [str], return: bool, errors: []}], return: int, errors: []}} {Fn{args: [any], return: int, errors: []}} {Fn{args: [int[Byte]], return: int, errors: []}}}
 
 test ic-trusted-bearing {a function with a trusted inferred contract is precondition-bearing like a declared one: passed to an untyped parameter, its contract is checked by that helper's semantic instance -- a fitting callable is accepted, an unfitting one rejected at the call} -body {
-    list [catch {icCompile "${::icPredUse}fn app(f, v):\n    f(v)\napp(pred_use, is_tcl_alpha)"}] \
-        [icRejects "${::icPredUse}fn len(c):\n    length(c)\nfn app(f, v):\n    f(v)\napp(pred_use, len)" \
+    list [catch {icCompile "${::icPredUse}fn app(f, v):\n    f(v)\napp(pred_use, str::is_tcl_alpha)"}] \
+        [icRejects "${::icPredUse}fn len(c):\n    str::length(c)\nfn app(f, v):\n    f(v)\napp(pred_use, len)" \
             {*call to app* is invalid: argument*return incompatible: the callable returns int, not usable as bool*}]
 } -result {0 {{CORE SEMANTIC TYPE} 1}}
 
@@ -600,7 +600,7 @@ test ic-checked-not-bearing {a checked-only contract is not precondition-bearing
     set ::icDeclsSaved $::icDecls
     set ::icDecls ""
     try {
-        icRun "fn one?(c):\n    length(c) == 1\nlist::all?(\[\"a\", \"b\"\], one?)"
+        icRun "fn one?(c):\n    str::length(c) == 1\nlist::all?(\[\"a\", \"b\"\], one?)"
     } finally {
         set ::icDecls $::icDeclsSaved
     }
@@ -616,7 +616,7 @@ test ic-callable-contract-only-stays-callvalue {a callable known only by its con
 # Specialization keys (spec items 62-63)
 
 test ic-keys-unchanged {inferred contracts never enter specialization keys as a dimension of their own: the scanner's instances are keyed by the exact callable's identity (a function of the target alone -- the label shows the target, never a Fn contract), and every call through the parameter is now a direct call} -body {
-    set src "fn scan(p, n):\n    loop i from 0 to n:\n        if p(\"a\"):\n            continue\n        return i\n    n\nfn loc?(c):\n    is_tcl_alnum(c)\n\[scan(is_tcl_alpha, 3), scan(loc?, 2)\]"
+    set src "fn scan(p, n):\n    loop i from 0 to n:\n        if p(\"a\"):\n            continue\n        return i\n    n\nfn loc?(c):\n    str::is_tcl_alnum(c)\n\[scan(str::is_tcl_alpha, 3), scan(loc?, 2)\]"
     set hir [native::prepareHir [icCompile $src]]
     set spec [hir::specialize::analyze $hir]
     set labels [lmap id [dict get $spec used] {hir::specialize::label $spec $id}]
@@ -630,13 +630,13 @@ test ic-keys-unchanged {inferred contracts never enter specialization keys as a 
         }
     }
     list [lmap l $scan {regsub {e\d+} $l eN}] [regexp {Fn\{} $scan] $unresolved [icRun $src]
-} -result {{{scan<native(is_tcl_alpha), int>} {scan<block(eN), int>}} 0 0 {[3, 2]}}
+} -result {{{scan<native(str::is_tcl_alpha), int>} {scan<block(eN), int>}} 0 0 {[3, 2]}}
 
 # ---------------------------------------------------------------------------
 # Module signatures (spec items 44-45)
 
 test ic-module-signature {an unannotated module export reports its body-inferred contract (source inferred); a declared parameter stays the API boundary (source declared)} -body {
-    set h [icCompile "list::all?(\[\"a\"\], is_tcl_alpha)" 1 ""]
+    set h [icCompile "list::all?(\[\"a\"\], str::is_tcl_alpha)" 1 ""]
     set sigs [hir::moduleSignatures $h]
     list [lmap t [dict get [dict get $sigs list::all?] params] {hir::types::show $t}] \
         [dict get [dict get $sigs list::all?] sources]
@@ -672,23 +672,23 @@ test ic-scan-while-call {predicate(char_at(i)) is typed from the contract: bool,
     set out
 } -result {bool {} {}}
 
-test ic-local-char {local_char?(c): is_tcl_alnum requires str (checked), set membership requires nothing (immutable_set_contains accepts any element); their meet is str; the result is bool} -body {
+test ic-local-char {local_char?(c): str::is_tcl_alnum requires str (checked), set membership requires nothing (immutable_set::contains accepts any element); their meet is str; the result is bool} -body {
     set h [icWebHir]
     list [icSig $h local_char?] [icWhy $h local_char? c] \
         [hir::types::show [dict get [hir::signatures::of $h [icBlock $h local_char?]] result]]
-} -result {{{c: str (inferred checked)}} {{checked argument 1 of native is_tcl_alnum -> str}} bool}
+} -result {{{c: str (inferred checked)}} {{checked argument 1 of native str::is_tcl_alnum -> str}} bool}
 
-test ic-label-char {label_char?(c): is_tcl_alnum requires str, == requires nothing: str} -body {
+test ic-label-char {label_char?(c): str::is_tcl_alnum requires str, == requires nothing: str} -body {
     set h [icWebHir]
     list [icSig $h label_char?] [icWhy $h label_char? c]
-} -result {{{c: str (inferred checked)}} {{checked argument 1 of native is_tcl_alnum -> str}}}
+} -result {{{c: str (inferred checked)}} {{checked argument 1 of native str::is_tcl_alnum -> str}}}
 
 test ic-emailish-callers-valid {every existing caller of the web helpers proves (or cannot contradict) the inferred contracts: no diagnostic} -body {
     llength [hir::diagnostics [icCompile "web::emailish?(\"a@b.cd\")" 0 ""]]
 } -result 0
 
 test ic-list-helpers {list::any?/all?/none?/find: xs is a list (the loop iterable, checked); predicate stays untyped -- the argument is the element type of xs, a relational constraint -- even though its result's use (bool) is known} -body {
-    set h [icCompile "list::all?(\[\"a\"\], is_tcl_alpha)" 1 ""]
+    set h [icCompile "list::all?(\[\"a\"\], str::is_tcl_alpha)" 1 ""]
     lmap name {list::any? list::all? list::none? list::find} {
         list [icSig $h $name] [lindex [icNote $h $name predicate] 0]
     }

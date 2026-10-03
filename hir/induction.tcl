@@ -137,8 +137,8 @@ proc hir::induction::IsRefTo {hir ref b} {
 # How self-tail call argument ARGEXPR treats candidate parameter binding P:
 # "identity" (P unchanged), {step C} (P + C, C a literal, possibly
 # negative), or "other" (anything else -- including a non-literal step, e.g.
-# replace's `index + length(needle)`, or an opaque one, e.g. csv's
-# `list_get(scanned, 1)`: both correctly fall back here).
+# replace's `index + str::length(needle)`, or an opaque one, e.g. csv's
+# `list::at(scanned, 1)`: both correctly fall back here).
 proc hir::induction::ClassifyArg {hir argExpr p} {
     if {[IsRefTo $hir $argExpr $p]} {
         return identity
@@ -201,7 +201,7 @@ proc hir::induction::ClassifyParam {hir calls index p} {
 
 # The Range of expression E when used as a stable upper/lower bound: a
 # context-free native-metadata fact (hir::range::SeedRange: a literal, or a
-# direct length(...)/list_length(...)-shaped call) or, if E refers to one of
+# direct str::length(...)/list::length(...)-shaped call) or, if E refers to one of
 # this instance's own parameters, that parameter's *external* seed (spec
 # #20-21's stability requirement: PARAMS/CLASSIFICATIONS must show it is
 # passed unchanged -- "identity" -- on every self-tail call, so its value

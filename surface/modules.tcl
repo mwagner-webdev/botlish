@@ -359,17 +359,8 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan} {
             Error INVALID-TOPLEVEL [dict get $statement span] \
                 "module \"$name\" ($path): only function definitions, immutable bindings, type declarations, struct declarations and error declarations are allowed at module top level, found a \"[dict get $statement kind]\" statement"
         }
-        if {[dict get $statement kind] in {function bind}
-                && [core::native::isQualifiedNative "${name}::[dict get $statement name]"]} {
-            # NAME::member is a root native's own qualified name
-            # (linux::abi::syscall, core/linuxabi.tcl): references to it
-            # always mean the native, so a module definition of it could
-            # never be named -- and would collide with the native in
-            # hygiene-qualified core IR.
-            Error DUPLICATE-NATIVE [dict get $statement span] \
-                "module \"$name\" ($path) cannot define \"[dict get $statement name]\": ${name}::[dict get $statement name] is a root native, which every reference of that spelling denotes"
-        }
     }
+    CheckNativeMembers $ast "module \"$name\" ($path)"
     dict set state stack [concat [dict get $state stack] [list $name]]
     set fileId f[dict get $state nextFile]
     dict set state files $fileId $path
@@ -397,6 +388,39 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan} {
     dict set state stack [lrange [dict get $state stack] 0 end-1]
 }
 
+# Raises DUPLICATE-NATIVE if program AST, which declares `namespace NS`,
+# defines (a function or an immutable binding) a member NS::MEMBER that is a
+# compiler/runtime-provided intrinsic: a root native registered under that
+# qualified name (core::native::isQualifiedNative -- list::at, str::concat,
+# mutable_array::set, linux::abi::syscall, ...). Every reference spelled
+# NS::MEMBER denotes the native (surface/lower.tcl), so such a definition
+# could never be named, would silently not replace the intrinsic, and
+# Botlish has no overloading for it to coexist as. The protection is per
+# member, not per namespace: NS's module may define any other member
+# (lib/list.bot's list::get beside the intrinsic list::at).
+# WHO describes the program for the message. Called for every module file
+# (LoadNamespace) and for an entry program that declares a namespace
+# (CheckEntryProgram).
+proc surface::modules::CheckNativeMembers {ast who} {
+    set name [dict get $ast namespace]
+    if {$name eq ""} {
+        return
+    }
+    foreach statement [dict get $ast body] {
+        if {[dict get $statement kind] in {function bind}
+                && [core::native::isQualifiedNative "${name}::[dict get $statement name]"]} {
+            set member [dict get $statement name]
+            Error DUPLICATE-NATIVE [dict get $statement span] \
+                "$who cannot define \"$member\": ${name}::$member is a compiler-provided intrinsic (a root native registered under that qualified name), which every reference of that spelling denotes; it cannot be redefined or overloaded (other members of namespace \"$name\" are unaffected)"
+        }
+    }
+}
+
+# CheckNativeMembers for an entry (non-module) program AST.
+proc surface::modules::CheckEntryProgram {ast} {
+    CheckNativeMembers $ast "a program declaring \"namespace [dict get $ast namespace]\""
+}
+
 # Loads every namespace AST's own qualified references name (recursively),
 # and validates each reference names a definition that namespace actually
 # has (Error UNKNOWN-SYMBOL otherwise) -- distinct from an unknown
@@ -411,6 +435,14 @@ proc surface::modules::CollectAndLoad {stateVar ast} {
             # is loaded (surface/lower.tcl lowers it to a root reference).
             continue
         }
+        set natives [core::native::qualifiedMembers $namespaceName]
+        if {$natives ne "" && ![file exists [ModulePath $namespaceName]]} {
+            # A namespace whose only members are intrinsics (str): there is
+            # no module file to load, so an unknown member is reported
+            # against the intrinsics, not as a missing file.
+            Error UNKNOWN-SYMBOL $span \
+                "namespace \"$namespaceName\" has no [expr {$refKind eq "struct" ? "struct" : "definition"}] \"$symbolName\" (its members are the intrinsics: [join $natives {, }])"
+        }
         LoadNamespace state $namespaceName $span
         if {$refKind eq "struct"} {
             set structNames [dict get $state loadedStructs $namespaceName]
@@ -423,7 +455,7 @@ proc surface::modules::CollectAndLoad {stateVar ast} {
         set functionNames [dict get $state loaded $namespaceName]
         if {$symbolName ni $functionNames} {
             Error UNKNOWN-SYMBOL $span \
-                "namespace \"$namespaceName\" has no definition \"$symbolName\" (it defines: [join [lsort $functionNames] {, }])"
+                "namespace \"$namespaceName\" has no definition \"$symbolName\" (it defines: [join [lsort [concat $functionNames $natives]] {, }])"
         }
     }
 }
@@ -480,6 +512,7 @@ proc surface::modules::compileProgramFile {path args} {
         dict set options $option $value
     }
     set ast [surface::parse [core::ReadFile $path] $path]
+    CheckEntryProgram $ast
     set state [NewState [dict create f1 [dict get $ast span file]] 2]
     CollectAndLoad state $ast
     lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable ownDecls ownErrorDecls ownStructDecls

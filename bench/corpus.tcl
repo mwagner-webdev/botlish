@@ -135,7 +135,7 @@ proc bench::measure {algorithm size backend runs} {
     set driver [apply [list {} $script]]
     if {$backend in {cranelift cranelift-generic}} {
         set specialize [expr {$backend eq "cranelift"}]
-        set hir [corpus::program $algorithm $driver]
+        set hir [corpus::driven $algorithm $driver]
         lassign [native::measure $hir $runs -specialize $specialize] lower jit best - value
         set shown [core::value::show $value 1]
         set lowered [native::lower::program $hir -specialize $specialize]
@@ -162,7 +162,7 @@ proc bench::measure {algorithm size backend runs} {
         return [list $best [string length $shown] [zlib crc32 [encoding convertto utf-8 $shown]] \
             [list $lower $jit] $code $alloc]
     }
-    set program [hir::lower [corpus::program $algorithm $driver]]
+    set program [hir::lower [corpus::driven $algorithm $driver]]
     core::useBackend $backend
     # The program runs as its lowered IR, whose HIR is the corpus program's
     # HIR (tests/surface-samples.test checks this for source programs).

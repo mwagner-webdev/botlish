@@ -57,7 +57,7 @@ test loop-counted-ascending {loop i from a to b: visits a, a+1, ..., b-1, never 
     loopInterpValue {fn f():
     fn go(i, acc):
         loop j from i to 5:
-            return go(j + 1, list_append(acc, j))
+            return go(j + 1, list::append(acc, j))
         acc
     go(2, [])
 f()}
@@ -67,7 +67,7 @@ test loop-counted-ascending-parity {ascending visitation agrees on every backend
     loopParity {fn f():
     fn go(i, acc):
         loop j from i to 5:
-            return go(j + 1, list_append(acc, j))
+            return go(j + 1, list::append(acc, j))
         acc
     go(2, [])
 f()}
@@ -97,7 +97,7 @@ test loop-counted-one-iteration {start, start+1 == end runs the body exactly onc
     loopInterpValue {fn f():
     fn go(i, acc):
         loop j from i to 8:
-            return go(j + 1, list_append(acc, j))
+            return go(j + 1, list::append(acc, j))
         acc
     go(7, [])
 f()}
@@ -107,7 +107,7 @@ test loop-counted-negative-start {a negative start is an ordinary Int} -body {
     loopInterpValue {fn f():
     fn go(i, acc):
         loop j from i to 0:
-            return go(j + 1, list_append(acc, j))
+            return go(j + 1, list::append(acc, j))
         acc
     go(-3, [])
 f()}
@@ -117,7 +117,7 @@ test loop-counted-negative-to-positive {a range spanning zero visits every integ
     loopInterpValue {fn f():
     fn go(i, acc):
         loop j from i to 3:
-            return go(j + 1, list_append(acc, j))
+            return go(j + 1, list::append(acc, j))
         acc
     go(-2, [])
 f()}
@@ -127,7 +127,7 @@ test loop-counted-dynamic-start {a non-literal start is ordinary Int arithmetic}
     loopInterpValue {fn f(n):
     fn go(i, acc):
         loop j from i to 4:
-            return go(j + 1, list_append(acc, j))
+            return go(j + 1, list::append(acc, j))
         acc
     go(n + 1, [])
 f(0)}
@@ -137,7 +137,7 @@ test loop-counted-dynamic-end {a non-literal end is ordinary Int arithmetic} -bo
     loopInterpValue {fn f(n):
     fn go(i, acc):
         loop j from i to n:
-            return go(j + 1, list_append(acc, j))
+            return go(j + 1, list::append(acc, j))
         acc
     go(0, [])
 f(3)}
@@ -147,7 +147,7 @@ test loop-counted-dynamic-parity {dynamic bounds agree on every backend} -body {
     loopParity {fn f(n):
     fn go(i, acc):
         loop j from i to n:
-            return go(j + 1, list_append(acc, j))
+            return go(j + 1, list::append(acc, j))
         acc
     go(0, [])
 f(3)}
@@ -253,7 +253,7 @@ test loop-counted-closure-captures-per-iteration {a closure capturing i captures
         loop j from i to 3:
             fn grab():
                 j
-            return go(j + 1, list_append(acc, grab()))
+            return go(j + 1, list::append(acc, grab()))
         acc
     go(0, [])
 f()}
@@ -265,7 +265,7 @@ test loop-counted-closure-captures-parity {per-iteration closure capture agrees 
         loop j from i to 3:
             fn grab():
                 j
-            return go(j + 1, list_append(acc, grab()))
+            return go(j + 1, list::append(acc, grab()))
         acc
     go(0, [])
 f()}
@@ -300,8 +300,8 @@ test loop-counted-continue-sequence {continue advances to i+1: the induction seq
     fn go(i, acc):
         loop j from i to 4:
             if j == 1:
-                return go(j + 1, list_append(acc, -1))
-            return go(j + 1, list_append(acc, j))
+                return go(j + 1, list::append(acc, -1))
+            return go(j + 1, list::append(acc, j))
         acc
     go(0, [])
 f()}
@@ -331,8 +331,8 @@ test loop-counted-continue-parity {continue agrees on every backend} -body {
     fn go(i, acc):
         loop j from i to 4:
             if j == 1:
-                return go(j + 1, list_append(acc, -1))
-            return go(j + 1, list_append(acc, j))
+                return go(j + 1, list::append(acc, -1))
+            return go(j + 1, list::append(acc, j))
         acc
     go(0, [])
 f()}
@@ -394,7 +394,7 @@ test loop-counted-end-exclusive-observed {the body never observes i == end, even
     loopInterpValue {fn f():
     fn go(i, acc):
         loop j from i to 3:
-            return go(j + 1, list_append(acc, j == 3))
+            return go(j + 1, list::append(acc, j == 3))
         acc
     go(0, [])
 f()}
@@ -477,7 +477,7 @@ test loop-counted-listloop-in-counted {a listloop inside a counted loop: outer c
         loop j from i to 3:
             v = loop x in [1, 2]:
                 x
-            return go(j + 1, acc + list_length(v))
+            return go(j + 1, acc + list::length(v))
         acc
     go(0, 0)
 f()}
@@ -505,7 +505,7 @@ test loop-counted-large-int-boundary {a two-iteration loop crossing the small-In
     loopInterpValue {fn f():
     fn go(i, n, acc):
         loop j from i to n:
-            return go(j + 1, n, list_append(acc, j))
+            return go(j + 1, n, list::append(acc, j))
         acc
     go(4611686018427387903, 4611686018427387905, [])
 f()}
@@ -515,7 +515,7 @@ test loop-counted-large-int-boundary-parity {the boundary-crossing case agrees o
     loopParity {fn f():
     fn go(i, n, acc):
         loop j from i to n:
-            return go(j + 1, n, list_append(acc, j))
+            return go(j + 1, n, list::append(acc, j))
         acc
     go(4611686018427387903, 4611686018427387905, [])
 f()}

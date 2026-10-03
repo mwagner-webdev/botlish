@@ -70,7 +70,7 @@ offset = 10
 scale = 3
 greeting = "hello"
 weights = [1, 2, 3]
-marks = immutable_set_from_list([1, 2, 3])
+marks = immutable_set::from_list([1, 2, 3])
 
 fn plain(v):
     v + 1
@@ -86,13 +86,13 @@ fn two_deps(v):
     v * scale + offset
 
 fn string_dep(v):
-    v + length(greeting)
+    v + str::length(greeting)
 
 fn list_dep(v):
-    v + list_length(weights)
+    v + list::length(weights)
 
 fn is_marked(x):
-    immutable_set_contains(marks, x)
+    immutable_set::contains(marks, x)
 
 fn transitive(v):
     is_marked(v)

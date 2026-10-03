@@ -3,7 +3,7 @@
 # lower.tcl may keep as a *construction plan* -- "if this immutable value
 # becomes observable as a flat value, here are the already-evaluated pieces
 # it is made of" -- instead of materializing a flat String/List at every
-# `concat`/`list_append`:
+# `str::concat`/`list::append`:
 #
 #   set analysis [hir::construction::analyze $hir $spec $escape $stringregion $blockescape]
 #   hir::construction::paramFamily  $analysis $id $k   -> "" | str | list
@@ -25,7 +25,7 @@
 #
 # There is no loop or accumulator recognizer here. The analysis only answers
 # three general, per-binding/per-instance questions, and a runtime-variable
-# recurrence (a self-tail call carrying `concat(acc, piece)`) benefits purely
+# recurrence (a self-tail call carrying `str::concat(acc, piece)`) benefits purely
 # because its parameter happens to satisfy the same rule as any other
 # binding:
 #
@@ -59,13 +59,13 @@
 #                  companion are excluded (those variants have their own
 #                  exit contracts).
 #
-# Plan-producing expressions (PlanSource): a native `concat` call (String) or
-# `list_append` call (List), a `substring` call (a one-piece String
+# Plan-producing expressions (PlanSource): a native `str::concat` call (String) or
+# `list::append` call (List), a `str::substring` call (a one-piece String
 # construction: its StringRegion), a reference to a plan local/param, a direct call
 # to a plan-result instance, or a value-producing `if` one of whose branch
 # values is plan-producing. Plan positions (PlanContext) -- where such a
-# value may stay virtual instead of being materialized: a `concat` operand, a
-# `list_append` first operand, a plan local's value, the argument at a plan
+# value may stay virtual instead of being materialized: a `str::concat` operand, a
+# `list::append` first operand, a plan local's value, the argument at a plan
 # parameter, an exit of a plan-result instance, and a branch value of an
 # `if` that is itself in a plan position. Every other consumer is a
 # materialization barrier (Barrier names why: flat-only native, storage
@@ -345,16 +345,16 @@ proc hir::construction::Source {s id e} {
         call {
             set name [NativeName $view $e]
             set args [hir::get $view $e args]
-            if {$name eq "concat" && [llength $args] == 2} {
+            if {$name eq "str::concat" && [llength $args] == 2} {
                 return str
             }
             # A substring is a one-piece construction: its StringRegion
             # (native/lower.tcl's region piece), never copied into a String
             # of its own while it only flows on into a construction.
-            if {$name eq "substring" && [llength $args] == 3} {
+            if {$name eq "str::substring" && [llength $args] == 3} {
                 return str
             }
-            if {$name eq "list_append" && [llength $args] == 2
+            if {$name eq "list::append" && [llength $args] == 2
                     && [Family [hir::typeOf $view [lindex $args 0]]] eq "list"} {
                 return list
             }
@@ -425,10 +425,10 @@ proc hir::construction::Context {s id e} {
                 return {0 "called as a callee"}
             }
             set name [NativeName $view $p]
-            if {$name eq "concat"} {
+            if {$name eq "str::concat"} {
                 return {1 ""}
             }
-            if {$name eq "list_append"} {
+            if {$name eq "list::append"} {
                 if {$k == 0} {
                     return {1 ""}
                 }
@@ -787,7 +787,7 @@ proc hir::construction::planParams {analysis id} {
 # ---------------------------------------------------------------------------
 # Provenance (spec items 37, 73-74): never consulted by lowering.
 
-# One record per construction site (a native concat/list_append call) and
+# One record per construction site (a native concat/list::append call) and
 # per plan-producing reference/call, in every used instance of SPEC: a dict
 # with instance (label), expr, location, family, operation, disposition
 # ("virtual" when consumed in a plan position, else "materialized") and

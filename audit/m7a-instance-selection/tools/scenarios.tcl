@@ -77,7 +77,7 @@ scenario S02a-single-narrow-caller {one narrow caller} "$F\nf(5)\n" {f}
 scenario S02b-two-compatible-callers {two narrow compatible callers} "$F\nf(5)\nf(9)\n" {f}
 scenario S02c-two-disjoint-callers {two disjoint narrow callers spanning the threshold} "$F\nf(5)\nf(500)\n" {f}
 scenario S02d-narrow-plus-broad {narrow + broad (collection-length) caller} \
-    "$F\nfn g(y):\n    f(y)\nf(5)\ng(length(\"abc\"))\n" {f g}
+    "$F\nfn g(y):\n    f(y)\nf(5)\ng(str::length(\"abc\"))\n" {f g}
 scenario S02e-narrow-plus-open {narrow + a caller reached through dynamic dispatch (legal: untyped, handled)} \
     "$F\nfn g(y):\n    f(y + 0)\nfn apply(k, v):\n    k(v)\nf(5)\napply(g, 3)\n" {f g apply}
 scenario S02f-alias-materializes-callee {an exact alias call (h = g; h(3)) stays exact, but materializing g creates an open g<generic> that calls f<generic>} \
@@ -162,12 +162,12 @@ f(byte::complement(byte::from_int(8)))
 
 scenario S05a-declared-list-empty {declared List[int] parameter, argument []} \
     {fn g(xs: List[int]) -> int:
-    list_length(xs)
+    list::length(xs)
 g([])
 } {g}
 scenario S05b-declared-list-nonempty {declared List[int] parameter, argument [1, 2, 3]} \
     {fn g(xs: List[int]) -> int:
-    list_length(xs)
+    list::length(xs)
 g([1, 2, 3])
 } {g}
 scenario S05c-undeclared-list-empty-and-nonempty {undeclared list parameter: [] and [1, 2]} \
@@ -179,7 +179,7 @@ g([1, 2])
 } {g}
 scenario S05d-declared-list-byte-specialized {declared List[Byte] reached by an exact caller: does the specialized instance keep the element domain?} \
     {fn f(xs: List[Byte]) -> int:
-    b = list_get(xs, 0)
+    b = list::at(xs, 0)
     if b > 255:
         1
     else:
@@ -188,7 +188,7 @@ f([byte::from_int(1), byte::from_int(2)])
 } {f}
 scenario S05e-declared-list-byte-generic-and-specialized {same function, also materialized (alias) so its generic instance is used: compare the two instances} \
     {fn f(xs: List[Byte]) -> int:
-    b = list_get(xs, 0)
+    b = list::at(xs, 0)
     if b > 255:
         1
     else:
@@ -196,16 +196,16 @@ scenario S05e-declared-list-byte-generic-and-specialized {same function, also ma
 g = f
 g([byte::from_int(1), byte::from_int(2)])
 } {f}
-scenario S05f-encode-utf8-to-list-byte {encode_utf8's result passed to a declared List[Byte] parameter} \
+scenario S05f-encode-utf8-to-list-byte {str::encode_utf8's result passed to a declared List[Byte] parameter} \
     {fn f(xs: List[Byte]) -> int:
-    list_length(xs)
+    list::length(xs)
 byte::from_int(1)
-f(encode_utf8("a"))
+f(str::encode_utf8("a"))
 } {f} {
     foreach e [dict keys [dict get $hir exprs]] {
         if {[hir::kind $hir $e] eq "call" && [lindex [hir::get $hir $e target] 0] eq "native"
-                && [dict get [hir::symbol $hir [lindex [hir::get $hir $e target] 1]] name] eq "encode_utf8"} {
-            puts "    raw static type of encode_utf8(...): [list [hir::typeOf $hir $e]]"
+                && [dict get [hir::symbol $hir [lindex [hir::get $hir $e target] 1]] name] eq "str::encode_utf8"} {
+            puts "    raw static type of str::encode_utf8(...): [list [hir::typeOf $hir $e]]"
         }
         if {[hir::kind $hir $e] eq "block" && [lindex [hir::get $hir $e declaredParamTypes] 0] ne ""} {
             puts "    raw declared parameter type: [list [lindex [hir::get $hir $e declaredParamTypes] 0]]"
@@ -218,19 +218,19 @@ f(encode_utf8("a"))
 
 scenario S06a-declared-set {declared ImmutableSet[Byte] parameter} \
     {fn f(s: ImmutableSet[Byte], b: Byte) -> bool:
-    immutable_set_contains(s, b)
+    immutable_set::contains(s, b)
 f(byte::set(['a']), byte::from_int(3))
 } {f}
 scenario S06b-undeclared-set-and-empty-set {undeclared set parameter; a Byte set and an empty set share one instance} \
     {fn f(s, b):
-    immutable_set_contains(s, b)
+    immutable_set::contains(s, b)
 f(byte::set(['a']), byte::from_int(3))
-f(immutable_set_from_list([]), byte::from_int(4))
+f(immutable_set::from_list([]), byte::from_int(4))
 } {f}
 scenario S06c-module-retained-set {module-retained ImmutableSet[Byte] captured by a module function (web::is_unreserved shape)} \
     {s = byte::set(['-', '.'])
 fn member(b: Byte) -> bool:
-    immutable_set_contains(s, b)
+    immutable_set::contains(s, b)
 member(byte::from_int(45))
 } {member}
 
@@ -290,7 +290,7 @@ mk(2)
 scenario S08b-closure-str-capture {same shape with a Str capture} \
     {fn mk(s):
     fn add(x):
-        concat(s, x)
+        str::concat(s, x)
     add("a")
 mk("p")
 mk("q")

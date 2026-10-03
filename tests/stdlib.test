@@ -21,7 +21,7 @@ source [file join $::projectRoot examples stdlib corpus.tcl]
 # The outcome of DRIVER after program NAME, on both backends:
 # "expected" if both produce EXPECTED, otherwise both outcomes.
 proc corpusCase {name driver expected} {
-    set hir [corpus::program $name $driver]
+    set hir [corpus::driven $name $driver]
     set outcomes [lmap backend $corpus::backends {corpus::outcome $backend $hir}]
     foreach outcome $outcomes {
         if {$outcome ne $expected} {
@@ -125,7 +125,7 @@ corpusTests ai_text_clean [list \
         "clean_ai_text([$lit "${robot} ${ldquo}AI${emDash}generated text${ellipsis}${rdquo} ${rocket}"])" \
         [value {" \"AI-generated text...\" "}] \
     large-fixture      {a ~1.5 KB deterministic fixture: length and hash() of the cleaned result agree} \
-        "\[length(clean_ai_text([$lit $aiCleanFixture])), hash(clean_ai_text([$lit $aiCleanFixture]))\]" \
+        "\[str::length(clean_ai_text([$lit $aiCleanFixture])), hash(clean_ai_text([$lit $aiCleanFixture]))\]" \
         [value {[1480, 1538372827348255129]}] \
 ]
 
@@ -144,7 +144,7 @@ foreach name [corpus::names] {
 
     # bench/corpus.tcl times the lowered IR on every backend; this is what
     # makes that the same program the compiler compiles from HIR. A program
-    # that uses a module (mod::name, e.g. mutarray::create) genuinely does not
+    # that uses a module (mod::name, e.g. mutable_array::create) genuinely does not
     # round-trip this way -- see tests/surface-samples.test's identical
     # exemption: its module sections are not recoverable from the flat core IR
     # (its other checks, the differential backend runs above and below, hold
@@ -170,21 +170,21 @@ corpusTests string_reverse [list \
     escapes      {quotes, newlines and backslashes are characters} \
         "reverse_chars([$lit "a\nb\"\\"])" [value {"\\\"b\na"}] \
     non-ascii    {non-ASCII characters are single units} \
-        "\[reverse_chars([$lit \u00e4\u00f6\u00fc]) == [$lit \u00fc\u00f6\u00e4], length(reverse_chars([$lit a\u00e9\u20acb]))\]" \
+        "\[reverse_chars([$lit \u00e4\u00f6\u00fc]) == [$lit \u00fc\u00f6\u00e4], str::length(reverse_chars([$lit a\u00e9\u20acb]))\]" \
         [value {[true, 4]}] \
     astral       {a supplementary-plane character is one unit, not a surrogate pair} \
-        "\[reverse_chars([$lit \U0001F642\U0001F643]) == [$lit \U0001F643\U0001F642], length([$lit \U0001F642]), length(reverse_chars([$lit a\U0001F642b]))\]" \
+        "\[reverse_chars([$lit \U0001F642\U0001F643]) == [$lit \U0001F643\U0001F642], str::length([$lit \U0001F642]), str::length(reverse_chars([$lit a\U0001F642b]))\]" \
         [value {[true, 1, 3]}] \
     non-ascii-2  {mixed ASCII and non-ASCII} \
         "reverse_chars([$lit a\u00e9\u20acb]) == [$lit b\u20ac\u00e9a]" [value true] \
     combining    {a combining mark is its own unit: not grapheme clusters} \
         "reverse_chars([$lit e\u0301x]) == [$lit x\u0301e]" [value true] \
     involution   {reversing twice gives the original, 500 characters} \
-        "text = [$lit [string repeat abcdefghij 50]]\n\[reverse_chars(reverse_chars(text)) == text, length(reverse_chars(text))\]" \
+        "text = [$lit [string repeat abcdefghij 50]]\n\[reverse_chars(reverse_chars(text)) == text, str::length(reverse_chars(text))\]" \
         [value {[true, 500]}] \
-    not-a-string {a non-string argument of unknown static type reaches the native's own run-time TYPE error (the element comes out of a helper, so no exact value fact reaches it: list_get of a *literal* List is statically known since EXACT-VALUE-FACTS.md)} \
-        {fn first_of(xs):
-    list_get(xs, 0)
+    not-a-string {a non-string argument of unknown static type reaches the native's own run-time TYPE error (the element comes out of a helper, so no exact value fact reaches it: list::at of a *literal* List is statically known since EXACT-VALUE-FACTS.md)} \
+        {fn first_of(xs) errors IndexNotFound:
+    list::at(xs, 0)
 reverse_chars(first_of([12, "a"]))} \
         {error {CORE SEMANTIC TYPE}} \
 ]
@@ -223,7 +223,7 @@ corpusTests string_replace [list \
     newline       {newlines are ordinary characters} \
         "replace([$lit a\nb\nc], [$lit \n], \" \")" [value {"a b c"}] \
     larger        {1000 characters, 100 replacements} \
-        "length(replace([$lit [string repeat abcdefghij 100]], \"cde\", \"12345\"))" [value 1200] \
+        "str::length(replace([$lit [string repeat abcdefghij 100]], \"cde\", \"12345\"))" [value 1200] \
 ]
 
 # ---------------------------------------------------------------------------
@@ -231,7 +231,7 @@ corpusTests string_replace [list \
 #
 # csv_geometric and csv_chunked (examples/stdlib) are the same algorithm as
 # csv, except that field/record construction uses a GeometricBuilder or
-# ChunkedBuilder over MutableArray instead of repeated list_append. Running
+# ChunkedBuilder over MutableArray instead of repeated list::append. Running
 # every csv case against all three corpus programs is this milestone's
 # "strategy equivalence" differential test (req #41): the three must produce
 # identical semantic results for every input, not merely the one sample in
@@ -279,10 +279,10 @@ set csvCases [list \
         "csv_parse([$lit "\u00e4,\"\u00f6,\u00fc\""]) == \[\[[$lit \u00e4], [$lit \u00f6,\u00fc]\]\]" \
         [value true] \
     astral        {a supplementary-plane character in a header and a value is preserved as one scalar value} \
-        "rows = csv_parse([$lit "\U0001F642,x\ny,\U0001F643"])\n\[rows == \[\[[$lit \U0001F642], [$lit x]\], \[[$lit y], [$lit \U0001F643]\]\], length(list_get(list_get(rows, 0), 0)), length(list_get(list_get(rows, 1), 1))\]" \
+        "rows = csv_parse([$lit "\U0001F642,x\ny,\U0001F643"])\n\[rows == \[\[[$lit \U0001F642], [$lit x]\], \[[$lit y], [$lit \U0001F643]\]\], str::length(list::at(list::at(rows, 0), 0)), str::length(list::at(list::at(rows, 1), 1))\]" \
         [value {[true, 1, 1]}] \
     many-rows     {100 generated rows} \
-        "rows = csv_parse([$lit $generatedCsv])\n\[list_length(rows), list_get(rows, 41)\]" \
+        "rows = csv_parse([$lit $generatedCsv])\n\[list::length(rows), list::at(rows, 41)\]" \
         [value {[100, ["42", "name 42", "x"]]}] \
 ]
 foreach corpusName {csv csv_geometric csv_chunked} {
@@ -299,47 +299,47 @@ foreach corpusName {csv csv_geometric csv_chunked} {
 
 set csvRecordsCases [list \
     empty          {empty input has no rows, either variant} \
-        {[list_length(csv_records("")), list_length(csv_records_presized(""))]} \
+        {[list::length(csv_records("")), list::length(csv_records_presized(""))]} \
         [value {[0, 0]}] \
     header-only    {a header row with no data rows has no rows} \
-        {list_length(csv_records("name,age\n"))} [value 0] \
+        {list::length(csv_records("name,age\n"))} [value 0] \
     one-row        {a row with exactly the header count of fields} \
-        "rows = csv_records([$lit "name,age,city\nAlice,31,Berlin\n"])\nr = list_get(rows, 0)\n\[list_length(rows), ht_get(r, \"name\"), ht_get(r, \"age\"), ht_get(r, \"city\"), ht_size(r)\]" \
+        "rows = csv_records([$lit "name,age,city\nAlice,31,Berlin\n"])\nr = list::at(rows, 0)\n\[list::length(rows), ht_get(r, \"name\"), ht_get(r, \"age\"), ht_get(r, \"city\"), ht_size(r)\]" \
         [value {[1, "Alice", "31", "Berlin", 3]}] \
     short-row      {fewer fields than headers omits the missing trailing keys} \
-        "rows = csv_records([$lit "a,b,c\nx,y\n"])\nr = list_get(rows, 0)\n\[ht_get(r, \"a\"), ht_get(r, \"b\"), ht_contains(r, \"c\"), ht_size(r)\]" \
+        "rows = csv_records([$lit "a,b,c\nx,y\n"])\nr = list::at(rows, 0)\n\[ht_get(r, \"a\"), ht_get(r, \"b\"), ht_contains(r, \"c\"), ht_size(r)\]" \
         [value {["x", "y", false, 2]}] \
-    long-row       {more fields than headers is a RANGE error} \
-        "csv_records([$lit "a,b\nx,y,z\n"])" {error {CORE SEMANTIC RANGE}} \
+    long-row       {more fields than headers is list::at's IndexNotFound, which csv_records declares} \
+        "csv_records([$lit "a,b\nx,y,z\n"])" [value {"IndexNotFound"}] \
     duplicate-header {a duplicate header replaces: one key, the later field's value} \
-        "rows = csv_records([$lit "name,name\nAlice,Bob\n"])\nr = list_get(rows, 0)\n\[ht_get(r, \"name\"), ht_size(r)\]" \
+        "rows = csv_records([$lit "name,name\nAlice,Bob\n"])\nr = list::at(rows, 0)\n\[ht_get(r, \"name\"), ht_size(r)\]" \
         [value {["Bob", 1]}] \
     duplicate-header-3 {a header repeated three times still replaces down to one key} \
-        "rows = csv_records([$lit "x,x,x\n1,2,3\n"])\nr = list_get(rows, 0)\n\[ht_get(r, \"x\"), ht_size(r)\]" \
+        "rows = csv_records([$lit "x,x,x\n1,2,3\n"])\nr = list::at(rows, 0)\n\[ht_get(r, \"x\"), ht_size(r)\]" \
         [value {["3", 1]}] \
     empty-header   {an empty header name is a valid key} \
-        "rows = csv_records([$lit ",b\nx,y\n"])\nr = list_get(rows, 0)\n\[ht_get(r, \"\"), ht_get(r, \"b\")\]" \
+        "rows = csv_records([$lit ",b\nx,y\n"])\nr = list::at(rows, 0)\n\[ht_get(r, \"\"), ht_get(r, \"b\")\]" \
         [value {["x", "y"]}] \
     empty-field    {an empty field value is a valid value, distinct from absent} \
-        "rows = csv_records([$lit "a,b\n,y\n"])\nr = list_get(rows, 0)\n\[ht_contains(r, \"a\"), ht_get(r, \"a\"), ht_get(r, \"b\")\]" \
+        "rows = csv_records([$lit "a,b\n,y\n"])\nr = list::at(rows, 0)\n\[ht_contains(r, \"a\"), ht_get(r, \"a\"), ht_get(r, \"b\")\]" \
         [value {[true, "", "y"]}] \
     quoted         {a quoted field with an embedded comma and an escaped quote} \
-        "rows = csv_records([$lit "name,note\nAlice,\"hello, world\"\nBob,\"said \"\"hi\"\"\"\n"])\n\[ht_get(list_get(rows, 0), \"note\"), ht_get(list_get(rows, 1), \"note\")\]" \
+        "rows = csv_records([$lit "name,note\nAlice,\"hello, world\"\nBob,\"said \"\"hi\"\"\"\n"])\n\[ht_get(list::at(rows, 0), \"note\"), ht_get(list::at(rows, 1), \"note\")\]" \
         [value {["hello, world", "said \"hi\""]}] \
     non-ascii-header {a non-ASCII header (é)} \
-        "rows = csv_records([$lit "é,city\nvalue1,München\n"])\nr = list_get(rows, 0)\n\[ht_get(r, [$lit é]), ht_get(r, \"city\")\]" \
+        "rows = csv_records([$lit "é,city\nvalue1,München\n"])\nr = list::at(rows, 0)\n\[ht_get(r, [$lit é]), ht_get(r, \"city\")\]" \
         [value {["value1", "München"]}] \
     non-ascii-header-2 {a multi-byte non-ASCII header (名前, Japanese for \"name\")} \
-        "rows = csv_records([$lit "名前,age\nアリス,31\n"])\nr = list_get(rows, 0)\n\[ht_get(r, [$lit 名前]), ht_get(r, \"age\")\]" \
+        "rows = csv_records([$lit "名前,age\nアリス,31\n"])\nr = list::at(rows, 0)\n\[ht_get(r, [$lit 名前]), ht_get(r, \"age\")\]" \
         [value {["アリス", "31"]}] \
     presize-parity {presized and default tables agree on content, including a duplicate header} \
-        "rows = csv_records([$lit "a,a,b\n1,2,3\n"])\nprows = csv_records_presized([$lit "a,a,b\n1,2,3\n"])\nr = list_get(rows, 0)\np = list_get(prows, 0)\n\[ht_get(r, \"a\"), ht_get(r, \"b\"), ht_size(r), ht_get(p, \"a\"), ht_get(p, \"b\"), ht_size(p)\]" \
+        "rows = csv_records([$lit "a,a,b\n1,2,3\n"])\nprows = csv_records_presized([$lit "a,a,b\n1,2,3\n"])\nr = list::at(rows, 0)\np = list::at(prows, 0)\n\[ht_get(r, \"a\"), ht_get(r, \"b\"), ht_size(r), ht_get(p, \"a\"), ht_get(p, \"b\"), ht_size(p)\]" \
         [value {["2", "3", 2, "2", "3", 2]}] \
     many-rows      {100 generated rows: row count and one row's content} \
-        "rows = csv_records([$lit "id,name,mark\n$generatedCsv"])\nr = list_get(rows, 41)\n\[list_length(rows), ht_get(r, \"id\"), ht_get(r, \"name\"), ht_get(r, \"mark\")\]" \
+        "rows = csv_records([$lit "id,name,mark\n$generatedCsv"])\nr = list::at(rows, 41)\n\[list::length(rows), ht_get(r, \"id\"), ht_get(r, \"name\"), ht_get(r, \"mark\")\]" \
         [value {[100, "42", "name 42", "x"]}] \
     many-rows-presized {100 generated rows, presized: same content as the default variant} \
-        "rows = csv_records_presized([$lit "id,name,mark\n$generatedCsv"])\nr = list_get(rows, 41)\n\[list_length(rows), ht_get(r, \"id\"), ht_get(r, \"name\"), ht_get(r, \"mark\")\]" \
+        "rows = csv_records_presized([$lit "id,name,mark\n$generatedCsv"])\nr = list::at(rows, 41)\n\[list::length(rows), ht_get(r, \"id\"), ht_get(r, \"name\"), ht_get(r, \"mark\")\]" \
         [value {[100, "42", "name 42", "x"]}] \
 ]
 corpusTests csv_records $csvRecordsCases
@@ -374,8 +374,8 @@ corpusTests matmul [list \
         {a = [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12], [13, 14, 15, 16]]
 matmul(a, a)} \
         [value {[[90, 100, 110, 120], [202, 228, 254, 280], [314, 356, 398, 440], [426, 484, 542, 600]]}] \
-    incompatible  {incompatible dimensions are a RANGE error, never a guess} \
-        {matmul([[1, 2], [3, 4]], [[1, 2]])} {error {CORE SEMANTIC RANGE}} \
+    incompatible  {incompatible dimensions are list::at's IndexNotFound, which matmul declares -- never a guess} \
+        {matmul([[1, 2], [3, 4]], [[1, 2]])} [value {"IndexNotFound"}] \
     non-int       {a non-integer entry is a TYPE error} \
         {matmul([[1, "2"]], [[1], [2]])} {error {CORE SEMANTIC TYPE}} \
 ]

@@ -135,14 +135,14 @@ test raw-count-loops-refined-checks-plan {the RawInt demand rule: a raw loop's b
             set rows {}
             foreach id [dict get $spec used] {
                 set label [hir::specialize::label $spec $id]
-                if {$label ni {tld?<int> domain?<int> {scan_while<int, native(is_tcl_alpha)>} {scan_while<int, block(e239)>}}} continue
+                if {$label ni {tld?<int> domain?<int> {scan_while<int, native(str::is_tcl_alpha)>} {scan_while<int, block(e239)>}}} continue
                 lappend rows [list $label [lindex [dict get $plan $id params] 0] \
                     [lindex [dict get $plan $id paramReasons] 0]]
             }
             lsort $rows
         }
     }
-} -result {{{domain?<int> rawint {}} {tld?<int> rawint {}} {{scan_while<int, block(e239)>} rawint {}} {{scan_while<int, native(is_tcl_alpha)>} rawint {}}} {{domain?<int> value suppressed-mixed-tagged-use} {tld?<int> value suppressed-mixed-tagged-use} {{scan_while<int, block(e239)>} value suppressed-no-raw-demand} {{scan_while<int, native(is_tcl_alpha)>} value suppressed-no-raw-demand}}}
+} -result {{{domain?<int> rawint {}} {tld?<int> rawint {}} {{scan_while<int, block(e239)>} rawint {}} {{scan_while<int, native(str::is_tcl_alpha)>} rawint {}}} {{domain?<int> value suppressed-mixed-tagged-use} {tld?<int> value suppressed-mixed-tagged-use} {{scan_while<int, block(e239)>} value suppressed-no-raw-demand} {{scan_while<int, native(str::is_tcl_alpha)>} value suppressed-no-raw-demand}}}
 
 test raw-count-loops-refined-checks-parity {refined-checks still returns [400, 0] natively, with block escape on and off} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot]]
@@ -225,9 +225,9 @@ set ::exitsShape {
             loop j down from i through 0:
                 if j == 1:
                     continue
-                add(j) * 10 + list_length([i, j])
+                add(j) * 10 + list::length([i, j])
     fn pairs(xs):
-        loop x in xs and i from 0 to list_length(xs) and k down from 10 to 10 - list_length(xs):
+        loop x in xs and i from 0 to list::length(xs) and k down from 10 to 10 - list::length(xs):
             x * i + k
     [find(0, 10, 4), find(0, 10, 20), find(5, 9, 6), find(3, 3, 3), down(10, 0, 4), down(10, 6, 2), nest(4), pairs([7, 8, 9]), pairs([])]
 }
@@ -266,9 +266,9 @@ test raw-count-loops-rejected-lockstep {the adversarial review's program: a -str
 
 set ::scannerShape {
     fn first_space(s):
-        n = length(s)
+        n = str::length(s)
         fn at(i):
-            substring(s, i, i + 1)
+            str::substring(s, i, i + 1)
         fn scan(start):
             loop i from start to n:
                 if at(i) == " ":
@@ -288,16 +288,25 @@ test raw-count-loops-scanner-parity {the de-closured scanner shape: interp, comp
 
 set ::gcShape {
     fn mk(k):
-        [k, k + 1, concat("x", "y")]
+        [k, k + 1, str::concat("x", "y")]
     fn work(n):
         loop i from 0 to n:
             ys = mk(i)
             zs = mk(i * 2)
             fn g(x):
                 [x, i]
-            list_get(ys, 1) + list_get(zs, 0) + list_get(g(i), 1) + i
+            y = list::at(ys, 1):
+                on IndexNotFound:
+                    0
+            z = list::at(zs, 0):
+                on IndexNotFound:
+                    0
+            w = list::at(g(i), 1):
+                on IndexNotFound:
+                    0
+            y + z + w + i
     fn total(xs):
-        loop x in xs and k down from list_length(xs) to 0:
+        loop x in xs and k down from list::length(xs) to 0:
             x * k
     total(work(10))
 }

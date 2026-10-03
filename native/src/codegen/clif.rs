@@ -485,7 +485,7 @@ struct Translator<'a, 'b, M: Module> {
     /// translation begins. Replaces the old "one slot per register" policy
     /// (see this file's header and `def`/`def_raw`).
     plan: RootPlan,
-    /// Whether `op listget` inlines its check-and-load fast path (`list_get`
+    /// Whether `op listget` inlines its check-and-load fast path (`list::at`
     /// below) instead of always calling `rt_list_get`. On by default;
     /// BOTLISH_NATIVE_LISTGET_FAST_OPT=0 disables it, for differential
     /// testing and benchmark comparison (mirrors heap.rs's
@@ -2005,7 +2005,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         result
     }
 
-    /// `list_get(LIST, INDEX)`'s inline fast path: LIST and INDEX already
+    /// `list::at(LIST, INDEX)`'s inline fast path: LIST and INDEX already
     /// have semantic kinds List and Int respectively -- guaranteed, not
     /// merely likely, exactly like every other operand this file's `op`
     /// dispatches on (see ops.rs's module doc: "operands already have the
@@ -2058,8 +2058,9 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         self.b.ins().jump(done, &[BlockArg::Value(elem)]);
 
         // Cold fallback: a BigInt index, or a bounds failure -- rt_list_get
-        // re-derives the exact same RANGE error `list_get`'s Tcl semantics
-        // (core/lists.tcl) define, never duplicated here.
+        // re-derives the exact same declared IndexNotFound completion
+        // `list::at`'s Tcl semantics (core/lists.tcl) define, never
+        // duplicated here.
         self.b.switch_to_block(slow);
         let r = self.call_helper("rt_list_get", &[self.vm, list, index]);
         self.check(r);

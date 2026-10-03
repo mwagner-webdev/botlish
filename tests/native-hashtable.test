@@ -92,8 +92,8 @@ test ht-equal-key-1 {two separately allocated but equal String keys are the same
     native {
 fn f():
     t = ht_new()
-    ht_set(t, concat("a", "b"), 1)
-    ht_set(t, concat("a", "b"), 2)
+    ht_set(t, str::concat("a", "b"), 1)
+    ht_set(t, str::concat("a", "b"), 2)
     [ht_get(t, "ab"), ht_size(t)]
 f()
     }
@@ -101,14 +101,14 @@ f()
 
 # A supplementary-plane character (outside the Basic Multilingual Plane) is
 # one Unicode scalar value, so hash(), ==, ht_get and ht_contains agree on a
-# key built from one across every backend, and length() sees one character,
+# key built from one across every backend, and str::length() sees one character,
 # never a surrogate pair (core/core.tcl requires Tcl 9 for exactly this).
-test ht-astral-key-1 {a supplementary-plane character key: hash/==/get/contains agree, and length() is one scalar value} -body {
-    parity "fn f():\n    t = ht_new()\n    ht_set(t, concat(\"x\", \"\U0001F642\"), 1)\n    \[ht_get(t, \"x\U0001F642\"), ht_contains(t, \"x\U0001F642\"), ht_contains(t, \"x\U0001F643\"), length(\"\U0001F642\")\]\nf()\n"
+test ht-astral-key-1 {a supplementary-plane character key: hash/==/get/contains agree, and str::length() is one scalar value} -body {
+    parity "fn f():\n    t = ht_new()\n    ht_set(t, str::concat(\"x\", \"\U0001F642\"), 1)\n    \[ht_get(t, \"x\U0001F642\"), ht_contains(t, \"x\U0001F642\"), ht_contains(t, \"x\U0001F643\"), str::length(\"\U0001F642\")\]\nf()\n"
 } -result same
 
 test ht-astral-key-2 {a supplementary-plane character key: the exact value on the native backend} -body {
-    native "fn f():\n    t = ht_new()\n    ht_set(t, concat(\"x\", \"\U0001F642\"), 1)\n    \[ht_get(t, \"x\U0001F642\"), ht_contains(t, \"x\U0001F642\"), ht_contains(t, \"x\U0001F643\"), length(\"\U0001F642\")\]\nf()\n"
+    native "fn f():\n    t = ht_new()\n    ht_set(t, str::concat(\"x\", \"\U0001F642\"), 1)\n    \[ht_get(t, \"x\U0001F642\"), ht_contains(t, \"x\U0001F642\"), ht_contains(t, \"x\U0001F643\"), str::length(\"\U0001F642\")\]\nf()\n"
 } -result {value {[1, true, false, 1]}}
 
 test ht-int-keys-1 {Int keys work, distinct from String keys of the same text} -body {
@@ -439,7 +439,7 @@ f()
     dict get $report byKind MutableArray allocations
 } -result 4
 
-test ht-alloc-resize-2 {a resize causes no mutable_array_copy: every entry is rehashed, not bulk-copied (req #23)} -body {
+test ht-alloc-resize-2 {a resize causes no mutable_array::copy: every entry is rehashed, not bulk-copied (req #23)} -body {
     set text {
 fn build(t, i, n):
     if i >= n:
@@ -512,7 +512,7 @@ test ht-gc-stress-1 {heap String keys and values survive GC while live in the ta
 fn label(prefix, i):
     if i == 0:
         return prefix
-    concat(label(prefix, i - 1), "x")
+    str::concat(label(prefix, i - 1), "x")
 
 fn build(t, i, n):
     if i >= n:
@@ -535,7 +535,7 @@ test ht-gc-stress-2 {a deleted entry's value is not kept artificially live, and 
 fn build(t, i, n):
     if i >= n:
         return unit
-    ht_set(t, i, concat("val", "ue"))
+    ht_set(t, i, str::concat("val", "ue"))
     build(t, i + 1, n)
 
 fn deleteEvens(t, i, n):

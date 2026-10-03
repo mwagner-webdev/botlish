@@ -7,8 +7,8 @@
 #
 # Canonical surface-Botlish source (CANONICAL-SURFACE-BENCHMARKS.md,
 # HIGHER-ORDER-DOGFOODING.md). checks mixes callable kinds because a real
-# lint pass's own classifiers naturally do: is_tcl_alpha/is_tcl_alnum are
-# ordinary root natives (core/tclcompat.tcl), used directly, not wrapped;
+# lint pass's own classifiers naturally do: str::is_tcl_alpha/str::is_tcl_alnum
+# are ordinary intrinsics (core/tclcompat.tcl), used directly, not wrapped;
 # is_underscore?/is_hyphen? are ordinary envless Botlish functions. This is
 # not a List built merely to provoke "callvalue" -- a batch of independent
 # per-character classifiers applied uniformly to one subject is exactly how
@@ -26,6 +26,10 @@
 # even though this file's own valid_start? consults only two of the four --
 # an honest diagnostic vector, the same shape a real lint report would
 # produce for a caller that wants more than one downstream policy's answer.
+# The vector is read with list::get and a `false` default: its length is the
+# checks List's own, which a function boundary hides from the compiler, so a
+# required list::at would oblige every caller (including list::find's
+# predicate) to handle an IndexNotFound that cannot happen.
 #
 # invalid_names is the returning-loop + continue selection idiom (no
 # list::filter exists or is introduced); first_invalid genuinely needs "the
@@ -33,7 +37,7 @@
 #
 # candidates deliberately covers ordinary valid identifiers (including this
 # codebase's own trailing-"?" convention and non-ASCII letters, both
-# already structurally alpha under is_tcl_alpha's Unicode categories),
+# already structurally alpha under str::is_tcl_alpha's Unicode categories),
 # leading-underscore names (valid under this policy), and every invalid
 # leading-character kind (digit, hyphen, and the empty string) -- both
 # branches of valid_start? are genuinely exercised, not just one.
@@ -46,18 +50,18 @@ fn is_underscore?(c):
 fn is_hyphen?(c):
     c == "-"
 
-checks = [is_tcl_alpha, is_tcl_alnum, is_underscore?, is_hyphen?]
+checks = [str::is_tcl_alpha, str::is_tcl_alnum, is_underscore?, is_hyphen?]
 
 fn classify_leading(name):
-    if length(name) == 0:
+    if str::length(name) == 0:
         return [false, false, false, false]
-    c = substring(name, 0, 1)
+    c = str::substring(name, 0, 1)
     loop check in checks:
         check(c)
 
 fn valid_start?(name):
     flags = classify_leading(name)
-    list_get(flags, 0) or list_get(flags, 2)
+    list::get(flags, 0, false) or list::get(flags, 2, false)
 
 fn invalid_name?(name):
     not valid_start?(name)
@@ -90,4 +94,4 @@ first_invalid = list::find(candidates, invalid_name?):
     on NotFound:
         "<none>"
 
-[list_length(candidates), list_length(invalid_names), first_invalid, list_length(candidates) - list_length(invalid_names)]
+[list::length(candidates), list::length(invalid_names), first_invalid, list::length(candidates) - list::length(invalid_names)]

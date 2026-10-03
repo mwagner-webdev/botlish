@@ -58,18 +58,18 @@ fn pass(s):
     s
 
 fn twice(s):
-    concat(s, s)
+    str::concat(s, s)
 
 fn first_half(s):
-    n = length(s)
+    n = str::length(s)
     h = clip(3, n)
-    substring(s, 0, h)
+    str::substring(s, 0, h)
 
 fn grow(n, acc, piece):
     if n < 1:
         acc
     else:
-        grow(n - 1, concat(acc, piece), piece)
+        grow(n - 1, str::concat(acc, piece), piece)
 }
 
 proc program {} {
@@ -86,18 +86,18 @@ proc program {} {
         set a [pick $vars]
         set b [pick $vars]
         switch [pick {concat concat sub sub sub lower pass twice half grow lit cap}] {
-            concat { lappend stmts "    $v = concat($a, $b)" }
+            concat { lappend stmts "    $v = str::concat($a, $b)" }
             sub {
-                lappend stmts "    n${k} = length($a)" "    a${k} = clip([intLit], n${k})" "    $v = substring($a, a${k}, a${k} + clip([intLit], n${k} - a${k}))"
+                lappend stmts "    n${k} = str::length($a)" "    a${k} = clip([intLit], n${k})" "    $v = str::substring($a, a${k}, a${k} + clip([intLit], n${k} - a${k}))"
             }
-            lower { lappend stmts "    $v = lowercase($a)" }
+            lower { lappend stmts "    $v = str::lowercase($a)" }
             pass { lappend stmts "    $v = pass($a)" }
             twice { lappend stmts "    $v = twice($a)" }
             half { lappend stmts "    $v = first_half($a)" }
             grow { lappend stmts "    $v = grow([pick {0 1 2 3 7}], $a, $b)" }
             lit { lappend stmts "    $v = [lit]" }
             cap {
-                lappend stmts "    fn add${k}(x):\n        concat($a, x)" "    $v = add${k}($b)"
+                lappend stmts "    fn add${k}(x):\n        str::concat($a, x)" "    $v = add${k}($b)"
             }
         }
         lappend vars $v
@@ -105,19 +105,19 @@ proc program {} {
     # an out-of-range substring now and then: the error must agree exactly
     if {rand() < 0.1} {
         set a [pick $vars]
-        lappend stmts "    bad = substring($a, length($a) + 1, length($a) + 2)"
+        lappend stmts "    bad = str::substring($a, str::length($a) + 1, str::length($a) + 2)"
     }
     set last [lindex $vars end]
     set shown [lrange $vars [expr {[llength $vars] > 6 ? [llength $vars] - 6 : 0}] end]
-    set lens [lmap v $shown {string cat "length($v)"}]
+    set lens [lmap v $shown {string cat "str::length($v)"}]
     set e1 [pick $vars]
     set e2 [pick $vars]
     set eqs [list "$e1 == $e2" "hash([pick $vars]) == hash([pick $vars])"]
-    lappend stmts "    xs = list_append(list_append(\[\], [pick $vars]), [pick $vars])"
-    lappend stmts "    m = mutable_array_allocate(2)" "    mutable_array_set(m, 0, [pick $vars])" "    mutable_array_set(m, 1, [pick $vars])"
+    lappend stmts "    xs = list::append(list::append(\[\], [pick $vars]), [pick $vars])"
+    lappend stmts "    m = mutable_array::allocate(2)" "    mutable_array::set(m, 0, [pick $vars])" "    mutable_array::set(m, 1, [pick $vars])"
     lappend stmts "    p = Pair {left: [pick $vars], right: [pick $vars]}"
     lappend lines "struct Pair:\n    left: str\n    right: str\n"
-    lappend lines "fn run(unused):\n[join $stmts \n]\n    \[\[[join $shown {, }]\], \[[join $lens {, }]\], \[[join $eqs {, }]\], xs, mutable_array_get(m, 0), mutable_array_get(m, 1), p.left, p.right\]\n"
+    lappend lines "fn run(unused):\n[join $stmts \n]\n    \[\[[join $shown {, }]\], \[[join $lens {, }]\], \[[join $eqs {, }]\], xs, mutable_array::at(m, 0), mutable_array::at(m, 1), p.left, p.right\]\n"
     lappend lines "run(0)\n"
     return [join $lines \n]
 }

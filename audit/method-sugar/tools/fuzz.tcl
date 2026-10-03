@@ -89,8 +89,8 @@ error TooBig
 type Small = Int in 0..10
 
 fn probe(log, id, result):
-    n = mutable_array_get(log, 0)
-    mutable_array_set(log, 0, n * 10 + id)
+    if mutable_array::capacity(log) == 1:
+        mutable_array::set(log, 0, mutable_array::at(log, 0) * 10 + id)
     result
 fn inc(a):
     a + 1
@@ -107,23 +107,25 @@ fn mix4(a, b, c, d):
 fn tadd(a: int, b: int) -> int:
     a + b
 fn label(n) -> str:
-    substring("abcdefghijklmnop", 0, mod(n * n, 9) + 1)
+    str::substring("abcdefghijklmnop", 0, mod(n * n, 9) + 1)
 fn shout(s):
-    lowercase(s)
+    str::lowercase(s)
 fn cat(s, t):
-    concat(s, t)
+    str::concat(s, t)
 fn size(s):
-    length(s)
+    str::length(s)
 fn dup(a):
     [a, a]
 fn trio(a, b, c):
     [a, b, c]
 fn grow(xs, x):
-    list_append(xs, x)
+    list::append(xs, x)
 fn count(xs):
-    list_length(xs)
+    list::length(xs)
 fn second(xs):
-    list_get(xs, 1)
+    loop i from 1 to list::length(xs):
+        return list::at(xs, i)
+    0
 fn rect(w, h):
     {w: w, h: h}
 fn area(r, k):
@@ -272,9 +274,9 @@ proc program {expr style} {
     set ::tempId 0
     set text [emit $expr $style]
     set lines [list $::prelude "fn run(a, b, s):" \
-        "    log = mutable_array_allocate(1)" "    mutable_array_set(log, 0, 0)"]
+        "    log = mutable_array::allocate(1)" "    mutable_array::set(log, 0, 0)"]
     lappend lines {*}$::hoisted
-    lappend lines "    r = $text" "    \[r, mutable_array_get(log, 0)\]"
+    lappend lines "    r = $text" "    \[r, mutable_array::at(log, 0)\]"
     lappend lines {[run(3, 5, "xy"), run(0, 2, "abc"), run(7, 1, "q"), run(12, 4, "Hello")]}
     return [join [lflatten $lines] \n]
 }
@@ -341,10 +343,10 @@ set backendDisagreements 0
 # Negative programs: a valid base with one defective method call.
 
 set ::negativeBase {fn run(a, b, s):
-    log = mutable_array_allocate(1)
-    mutable_array_set(log, 0, 0)
+    log = mutable_array::allocate(1)
+    mutable_array::set(log, 0, 0)
     r = %s
-    [r, mutable_array_get(log, 0)]
+    [r, mutable_array::at(log, 0)]
 [run(3, 5, "xy"), run(0, 2, "abc")]}
 
 proc negative {kind} {

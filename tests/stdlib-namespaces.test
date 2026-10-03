@@ -1,0 +1,515 @@
+# stdlib-namespaces.test -- the language/library cleanup of
+# STDLIB-NAMESPACES.md:
+#
+#   * the historical `eq` String-equality native is gone (== is the one
+#     equality, Strings included);
+#   * standard operations live in their value family's flat namespace as
+#     qualified root natives (list::at, str::concat, mutable_array::set,
+#     ...), protected per member from redefinition;
+#   * indexed access is `at` (fails with the builtin declared error
+#     IndexNotFound) and `get` (ordinary Botlish over `at`, with an explicit,
+#     eagerly evaluated default);
+#   * method spelling and qualified free spelling resolve to one callable.
+#
+# Value checks run on every backend (interp, compile, cranelift-generic,
+# cranelift) and require them to agree.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+set nsBackends {interp compile cranelift-generic cranelift}
+
+# HIR of SOURCE, read as a program file through the module loader, so
+# qualified references to library modules (list::get) resolve too.
+proc nsHir {source {strict 1}} {
+    set path [makeFile $source stdlib-ns-case.bot]
+    try {
+        return [surface::readProgramFile $path -strict $strict]
+    } finally {
+        removeFile stdlib-ns-case.bot
+    }
+}
+
+# Every backend's outcome of the HIR of SOURCE, without the test log.
+proc nsOutcomes {source {strict 1}} {
+    set hir [nsHir $source $strict]
+    return [lmap backend $::nsBackends {lrange [outcomeUnderHir $backend $hir] 0 end-1}]
+}
+
+# The value every backend agrees on, "error CODE" if they agree on an error,
+# or the disagreement.
+proc agree {source {strict 1}} {
+    set outcomes [nsOutcomes $source $strict]
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        return "DISAGREE: [join [lmap b $::nsBackends o $outcomes {list $b $o}] { / }]"
+    }
+    set outcome [lindex $outcomes 0]
+    if {[lindex $outcome 0] eq "value"} {
+        return [lindex $outcome 1]
+    }
+    return [list error [lindex $outcome 1]]
+}
+
+# "accepted", or the error code's last word and message of the static
+# rejection of SOURCE (compiled strictly).
+proc rejection {source} {
+    if {[catch {nsHir $source} message options]} {
+        return [list [lindex [dict get $options -errorcode] end] $message]
+    }
+    return accepted
+}
+
+# The sorted diagnostic kinds of SOURCE (compiled with -strict 0).
+proc diagKinds {source} {
+    return [lsort -unique [lmap d [hir::diagnostics [nsHir $source 0]] {dict get $d kind}]]
+}
+
+# The first call node of HIR whose callee is spelled NAME (a ref), or "".
+proc callNamed {hir name} {
+    foreach e [hir::walk $hir] {
+        if {[hir::kind $hir $e] eq "call"} {
+            set callee [hir::get $hir $e callee]
+            if {[hir::kind $hir $callee] eq "ref" && [hir::get $hir $callee name] eq $name} {
+                return $e
+            }
+        }
+    }
+    return ""
+}
+
+# The resolved target of call E as {KIND NAME}: the native's registered name,
+# or the binding name of a block's function.
+proc targetOf {hir e} {
+    lassign [hir::get $hir $e target] kind target
+    if {$kind eq "native"} {
+        return [list native [dict get [hir::symbol $hir $target] name]]
+    }
+    return [list $kind $target]
+}
+
+# ---------------------------------------------------------------------------
+# `eq` is not Botlish any more
+
+test ns-eq-is-gone {no native, root name or intrinsic of any spelling is named eq} -body {
+    list [expr {"eq" in [core::native::names]}] [expr {"eq" in [hir::resolve::RootNames]}] \
+        [dict exists $native::lower::natives eq] [dict exists $core::compiler::intrinsics eq]
+} -result {0 0 0 0}
+
+test ns-eq-call-is-an-unknown-name {eq(a, b) is an ordinary call of an unbound name} -body {
+    lindex [rejection {eq("a", "a")}] 0
+} -result UNBOUND
+
+test ns-eq-infix-is-a-syntax-error {`a eq b` is not an expression: eq is not an operator (no token, no precedence level)} -body {
+    catch {nsHir {"a" eq "a"}} message options
+    list [lrange [dict get $options -errorcode] 0 1] [string match {*found name "eq"*} $message]
+} -result {{SURFACE SYNTAX} 1}
+
+test ns-string-equality-is-double-equals {String equality is ==: exact characters, never a coercion across kinds} -body {
+    agree {["abc" == "abc", "abc" == "abd", "" == "", "10" == 10, "é" == "é"]}
+} -result {[true, false, true, false, true]}
+
+# ---------------------------------------------------------------------------
+# The root namespace and the qualified intrinsics
+
+# The inventory of a freshly loaded runtime (this process also has the test
+# harness's own natives and, once a test loads it, the optional web library).
+proc freshNatives {} {
+    set script "source [list [file join $::projectRoot core core.tcl]]\nputs \[core::native::names\]"
+    return [exec [info nameofexecutable] << $script]
+}
+
+test ns-root-inventory {the unqualified root natives are exactly the language primitives} -body {
+    lsort [lmap name [freshNatives] {if {[string first :: $name] >= 0} continue; set name}]
+} -result {* + - < <= == > >= argv bit_and bit_or bit_xor error? hash integer? list list? mod mutarray? ok? result-error result-value shift_left shift_right string?}
+
+test ns-qualified-inventory {every standard intrinsic lives in its value family's flat namespace} -body {
+    lmap ns {list str char mutable_array immutable_set linux::abi} {
+        list $ns [core::native::qualifiedMembers $ns]
+    }
+} -result {{list {append at length}} {str {concat encode_utf8 is_tcl_alnum is_tcl_alpha length lowercase substring}} {char scalar_value} {mutable_array {allocate at capacity copy freeze set}} {immutable_set {contains from_list}} {linux::abi syscall}}
+
+test ns-no-nested-stdlib {no std::/stdlib::/core:: hierarchy: every qualified intrinsic but the platform's is NAMESPACE::MEMBER, one level} -body {
+    lsort [lmap name [core::native::names] {
+        if {[string first :: $name] < 0 || [string match linux::abi::* $name]} continue
+        if {[llength [split [string map {:: \x00} $name] \x00]] == 2} continue
+        set name
+    }]
+} -result {}
+
+test ns-historical-names-are-unknown {every historical root spelling is now an ordinary unbound name} -body {
+    lmap call {
+        {list_get([1], 0)} {list_append([1], 2)} {list_length([1])} {concat("a", "b")}
+        {length("a")} {substring("ab", 0, 1)} {lowercase("A")} {encode_utf8("a")}
+        {is_tcl_alpha("a")} {is_tcl_alnum("a")} {char_codepoint('a')}
+        {mutable_array_allocate(1)} {mutable_array_capacity(mutable_array::allocate(1))}
+        {mutable_array_get(mutable_array::allocate(1), 0)} {mutable_array_set(mutable_array::allocate(1), 0, 1)}
+        {mutable_array_copy(mutable_array::allocate(1), 0, mutable_array::allocate(1), 0, 1)}
+        {mutable_array_freeze(mutable_array::allocate(1), 1)}
+        {immutable_set_from_list([1])} {immutable_set_contains(immutable_set::from_list([1]), 1)}
+    } {
+        diagKinds $call
+    }
+} -result [lrepeat 19 UNBOUND]
+
+test ns-char-codepoint-keeps-its-static-contract {char::scalar_value is the intrinsic (a run-time UnicodeChar requirement, like every native's); char::codepoint stays its typed lib/char.bot wrapper, so char::codepoint(65) is still a compile-time error} -body {
+    list [lindex [rejection {char::codepoint(65)}] 0] [agree {char::scalar_value(65)} 0] \
+        [agree {[char::codepoint('A'), char::scalar_value('é')]}] [core::native::isQualifiedNative char::codepoint]
+} -result {TYPE {error {CORE SEMANTIC TYPE}} {[65, 233]} 0}
+
+test ns-historical-module-is-gone {the mutarray module became mutable_array (one namespace per family)} -body {
+    list [lindex [rejection {mutarray::create(1, 0)}] 0] [agree {mutable_array::freeze(mutable_array::create(2, 7), 2)}]
+} -result {UNKNOWN-NAMESPACE {[7, 7]}}
+
+test ns-intrinsics-are-root-natives {a qualified intrinsic is a root reference: no module is loaded for it and no local can shadow it} -body {
+    set hir [nsHir "fn f(list, str):\n    \[list::at(\[1, 2\], 1), str::concat(\"a\", \"b\")\]\nf(0, 0)"]
+    list [targetOf $hir [callNamed $hir list::at]] [targetOf $hir [callNamed $hir str::concat]] \
+        [agree "fn f(list, str):\n    \[list::at(\[1, 2\], 1), str::concat(\"a\", \"b\")\]\nf(0, 0)"]
+} -result {{native list::at} {native str::concat} {[2, "ab"]}}
+
+test ns-diagnostics-name-the-qualified-callable {run-time and static diagnostics spell the intrinsic's qualified name} -body {
+    list [lindex [agree {list::length("abc")} 0] 1] \
+        [string match {*this call of "list::at" may produce the declared error "IndexNotFound"*} \
+            [lindex [rejection "fn f(xs, i):\n    list::at(xs, i)\nf(\[1\], 0)"] 1]] \
+        [lindex [outcomeUnderHir interp [nsHir {list::length("abc")} 0]] 2]
+} -result {{CORE SEMANTIC TYPE} 1 {list::length: expected list, got "abc"}}
+
+# ---------------------------------------------------------------------------
+# Protection: an intrinsic member cannot be redefined or overloaded; other
+# members of its namespace stay ordinary
+
+proc withLibrary {files script} {
+    set dir [makeDirectory stdlib-ns-lib]
+    set saved $::core::libraryDir
+    try {
+        foreach {name text} $files {
+            set path [file join $dir $name]
+            file mkdir [file dirname $path]
+            set channel [open $path w]
+            puts -nonewline $channel $text
+            close $channel
+        }
+        # The real library's modules stay reachable (list.bot, ...).
+        foreach file [glob -nocomplain -directory $saved *.bot] {
+            if {![file exists [file join $dir [file tail $file]]]} {
+                file copy $file [file join $dir [file tail $file]]
+            }
+        }
+        set ::core::libraryDir $dir
+        uplevel 1 $script
+    } finally {
+        set ::core::libraryDir $saved
+        removeDirectory stdlib-ns-lib
+    }
+}
+
+test ns-protect-module-member {a module of the intrinsic's namespace may not define a member of the intrinsic's name} -body {
+    withLibrary {str.bot "namespace str\n\nfn shout(s):\n    str::concat(s, \"!\")\n\nfn concat(a, b):\n    a\n"} {
+        lassign [rejection {str::shout("hi")}] kind message
+        list $kind [string match {*module "str" (*str.bot) cannot define "concat": str::concat is a compiler-provided intrinsic*cannot be redefined or overloaded (other members of namespace "str" are unaffected)*} $message]
+    }
+} -result {DUPLICATE-NATIVE 1}
+
+test ns-protect-module-binding {an immutable module binding of the intrinsic's name is rejected the same way} -body {
+    withLibrary {mutable_array.bot "namespace mutable_array\n\nset = 1\n\nfn create(n, d):\n    mutable_array::allocate(n)\n"} {
+        lindex [rejection {mutable_array::create(1, 0)}] 0
+    }
+} -result DUPLICATE-NATIVE
+
+test ns-unrelated-member-is-legal {an unrelated member of the same namespace is ordinary: str::shout beside the intrinsic str::concat, which still means the intrinsic} -body {
+    withLibrary {str.bot "namespace str\n\nfn shout(s):\n    str::concat(s, \"!\")\n"} {
+        agree {[str::shout("hi"), str::concat("a", "b"), str::length(str::shout("x"))]}
+    }
+} -result {["hi!", "ab", 2]}
+
+test ns-list-module-beside-intrinsics {lib/list.bot's own members (get, find, any?) sit beside the intrinsics list::at/append/length} -body {
+    list [core::native::isQualifiedNative list::get] [core::native::isQualifiedNative list::at] \
+        [agree "fn odd(x):\n    mod(x, 2) == 1\nf = list::find(\[2, 3\], odd):\n    on NotFound:\n        0\n\[list::get(\[1\], 0, 9), f, list::any?(\[2\], odd), list::length(list::append(\[\], 1))\]"]
+} -result {0 1 {[1, 3, false, 1]}}
+
+test ns-protect-entry-program {an entry program that declares an intrinsic's namespace cannot define the intrinsic either} -body {
+    list [rejection "namespace list\n\nfn at(xs, i):\n    0\n"] \
+        [lindex [rejection "namespace mutable_array\n\nset = 3\n"] 0] \
+        [rejection "namespace list\n\nfn second(xs):\n    list::get(xs, 1, 0)\nsecond(\[4, 5\])"]
+} -match glob -result {{DUPLICATE-NATIVE {*a program declaring "namespace list" cannot define "at": list::at is a compiler-provided intrinsic*}} DUPLICATE-NATIVE accepted}
+
+test ns-protect-is-not-overloading {a definition of an intrinsic's name with another arity is no overload: it is rejected like any other} -body {
+    list [lindex [rejection "namespace str\n\nfn length(s, extra):\n    0\n"] 0] \
+        [lindex [rejection "namespace list\n\nfn at(xs):\n    0\n"] 0]
+} -result {DUPLICATE-NATIVE DUPLICATE-NATIVE}
+
+test ns-local-names-are-unrelated {a local function named at is an ordinary binding: it neither replaces nor overloads list::at} -body {
+    agree "fn at(xs, i):\n    \"mine\"\n\[at(\[1\], 0), list::at(\[7\], 0)\]"
+} -result {["mine", 7]}
+
+test ns-unknown-member-of-intrinsic-namespace {a namespace with only intrinsics reports an unknown member against them, not as a missing module file} -body {
+    rejection {str::nope("a")}
+} -match glob -result {UNKNOWN-SYMBOL {*namespace "str" has no definition "nope" (its members are the intrinsics: concat, encode_utf8, is_tcl_alnum, is_tcl_alpha, length, lowercase, substring)}}
+
+test ns-unknown-member-lists-intrinsics-too {a namespace with a module lists the module's definitions and the intrinsics} -body {
+    rejection {list::nope([1])}
+} -match glob -result {UNKNOWN-SYMBOL {*namespace "list" has no definition "nope" (it defines: all?, any?, append, at, find, get, length, none?)}}
+
+# ---------------------------------------------------------------------------
+# at: required indexed lookup, IndexNotFound otherwise
+
+set ::pick {fn pick(xs, i) errors IndexNotFound:
+    list::at(xs, i)
+fn safe(xs, i):
+    r = pick(xs, i):
+        on IndexNotFound:
+            "missing"
+    r
+}
+
+test ns-at-present-and-missing {list::at returns the element for 0 <= i < length and fails with IndexNotFound for every other Int: past the end, negative (no negative indexing), a BigInt, an empty List} -body {
+    agree "$::pick\[safe(\[10, 20, 30\], 0), safe(\[10, 20, 30\], 2), safe(\[10, 20, 30\], 3), safe(\[10, 20, 30\], -1), safe(\[10\], 100000000000000000000), safe(\[\], 0)\]"
+} -result {[10, 30, "missing", "missing", "missing", "missing"]}
+
+test ns-at-unhandled-is-the-declared-error {an IndexNotFound nobody handles is the ordinary uncaught declared error on every backend (a -strict 0 program)} -body {
+    agree "$::pick\npick(\[1\], 5)" 0
+} -result {error {CORE SEMANTIC UNCAUGHT-ERROR}}
+
+test ns-at-other-failures-are-not-index-not-found {a non-List container or a non-Int index is the TYPE error, which an IndexNotFound handler does not catch} -body {
+    list [agree "$::pick\nsafe(\"abc\", 0)" 0] [agree "$::pick\nsafe(\[1\], \"0\")" 0]
+} -result {{error {CORE SEMANTIC TYPE}} {error {CORE SEMANTIC TYPE}}}
+
+test ns-mutable-array-at {mutable_array::at has the same contract over a MutableArray's capacity} -body {
+    agree "fn pick(a, i) errors IndexNotFound:\n    mutable_array::at(a, i)\nfn safe(a, i):\n    r = pick(a, i):\n        on IndexNotFound:\n            -1\n    r\na = mutable_array::from_list(\[5, 6\])\n\[safe(a, 0), safe(a, 1), safe(a, 2), safe(a, -1), safe(mutable_array::allocate(0), 0)\]"
+} -result {[5, 6, -1, -1, -1]}
+
+test ns-mutable-array-set-keeps-range {mutable_array::set keeps its RANGE error: only the at/get split changed indexed reads} -body {
+    agree "a = mutable_array::allocate(1)\nmutable_array::set(a, 1, 0)" 0
+} -result {error {CORE SEMANTIC RANGE}}
+
+test ns-at-signature {list::at and mutable_array::at declare exactly IndexNotFound, a builtin error every program sees} -body {
+    list [dict get [core::native::metadata list::at] errors] [dict get [core::native::metadata mutable_array::at] errors] \
+        [core::native::isBuiltinError IndexNotFound] [core::native::builtinErrorNames] \
+        [native::lower::ErrorId IndexNotFound]
+} -result {IndexNotFound IndexNotFound 1 {InvalidArgumentEncoding IndexNotFound} 1073741825}
+
+test ns-at-element-type {list::at keeps the element type: List[int] gives int, no optional/null type} -body {
+    set hir [nsHir "fn f(xs: List\[int\]) errors IndexNotFound:\n    list::at(xs, 0)\nr = f(\[1, 2\]):\n    on IndexNotFound:\n        0\nr"]
+    hir::types::show [hir::typeOf $hir [callNamed $hir list::at]]
+} -result int
+
+test ns-get-element-type {list::get and mutable_array::get keep the element type: the result of a get call is the element type joined with the default's, no optional/null type} -body {
+    set hir [nsHir {a = list::get([1, 2], 5, 0)
+b = list::get(["x"], 0, "y")
+c = mutable_array::get(mutable_array::create(2, "s"), 1, "t")
+d = list::get([[1], [2, 3]], 1, [])
+[a, b, c, d]}]
+    lmap name {a b c d} {
+        set bind [lindex [lmap e [hir::walk $hir] {
+            if {[hir::kind $hir $e] ne "bind" || [dict get [hir::binding $hir [hir::get $hir $e binding]] name] ne $name} continue
+            set e
+        }] 0]
+        hir::types::show [hir::typeOf $hir [hir::get $hir $bind value]]
+    }
+} -result {int str str {List[int]}}
+
+# ---------------------------------------------------------------------------
+# Static completion proofs for at (hir/completions.tcl)
+
+test ns-proof-literal-in-range {a List of statically known length read at a provably valid index needs no handler} -body {
+    list [diagKinds {list::at([1, 2, 3], 2)}] [agree {xs = [1, 2, 3]
+i = 1
+[list::at(xs, i), list::at(xs, 0 + 2)]}]
+} -result {{} {[2, 3]}}
+
+test ns-proof-literal-out-of-range {a provably missing index is a compile-time KNOWN-ERROR, handler or not} -body {
+    list [diagKinds {list::at([1, 2, 3], 3)}] [diagKinds {list::at([], 0)}] \
+        [diagKinds "r = list::at(\[1\], -1):\n    on IndexNotFound:\n        0\nr"]
+} -result {KNOWN-ERROR KNOWN-ERROR KNOWN-ERROR}
+
+test ns-proof-counted-loop {loop i from 0 to list::length(xs) (or through length - 1) reads list::at(xs, i) with no obligation} -body {
+    list [diagKinds "fn f(xs):\n    loop i from 0 to list::length(xs):\n        list::at(xs, i)\nf(\[1\])"] \
+        [diagKinds "fn f(xs):\n    n = list::length(xs)\n    loop i from 0 through n - 1:\n        list::at(xs, i)\nf(\[1\])"] \
+        [diagKinds "fn f(xs):\n    loop x in xs and i from 0 to list::length(xs):\n        list::at(xs, i) == x\nf(\[1\])"] \
+        [agree "fn f(xs):\n    loop i from 0 to list::length(xs):\n        list::at(xs, i) * 2\nf(\[1, 2, 3\])"]
+} -result {{} {} {} {[2, 4, 6]}}
+
+test ns-proof-counted-loop-negatives {the loop proof is exact: a start below 0, an end past the length, or another List's length proves nothing} -body {
+    list [diagKinds "fn f(xs):\n    loop i from -1 to list::length(xs):\n        list::at(xs, i)\nf(\[1\])"] \
+        [diagKinds "fn f(xs):\n    loop i from 0 to list::length(xs) + 1:\n        list::at(xs, i)\nf(\[1\])"] \
+        [diagKinds "fn f(xs, ys):\n    loop i from 0 to list::length(ys):\n        list::at(xs, i)\nf(\[1\], \[2\])"] \
+        [diagKinds "fn f(xs):\n    loop i down from list::length(xs) to 0:\n        list::at(xs, i)\nf(\[1\])"]
+} -result {UNHANDLED-ERROR UNHANDLED-ERROR UNHANDLED-ERROR UNHANDLED-ERROR}
+
+test ns-proof-capacity {a MutableArray's capacity is fixed at allocation: loops to it, or to the allocation's own size, read mutable_array::at freely} -body {
+    list [diagKinds "fn f(n):\n    a = mutable_array::allocate(n)\n    loop i from 0 to n:\n        mutable_array::at(a, i)\nf(2)"] \
+        [diagKinds "fn f(a):\n    loop i from 0 to mutable_array::capacity(a):\n        mutable_array::at(a, i)\nf(mutable_array::allocate(1))"] \
+        [diagKinds "a = mutable_array::allocate(3)\nmutable_array::at(a, 2)"] \
+        [diagKinds "a = mutable_array::allocate(3)\nmutable_array::at(a, 3)"]
+} -result {{} {} {} KNOWN-ERROR}
+
+test ns-proof-branch-relations {an enclosing comparison with the length (and a nonnegative index) or an equality of the length with a constant proves the read} -body {
+    list [diagKinds "fn f(xs, i):\n    if i < 0:\n        return 0\n    if i >= list::length(xs):\n        return 1\n    list::at(xs, i)\nf(\[1\], 0)"] \
+        [diagKinds "fn f(b):\n    if list::length(b) == 2:\n        list::at(b, 1)\n    else:\n        0\nf(\[1\])"] \
+        [diagKinds "fn f(xs, i):\n    if i >= list::length(xs):\n        return 1\n    list::at(xs, i)\nf(\[1\], 0)"]
+} -result {{} {} UNHANDLED-ERROR}
+
+test ns-proof-and-or-conditions {`i < 0 or i >= list::length(xs)` false, and `i >= 0 and i < list::length(xs)` true, prove the read; the unsound mixes do not} -body {
+    list [diagKinds "fn f(xs, i):\n    if i < 0 or i >= list::length(xs):\n        0\n    else:\n        list::at(xs, i)\nf(\[1\], 0)"] \
+        [diagKinds "fn f(xs, i):\n    if i >= 0 and i < list::length(xs):\n        list::at(xs, i)\n    else:\n        0\nf(\[1\], 0)"] \
+        [diagKinds "fn f(xs, i):\n    if i >= 0 or i < list::length(xs):\n        list::at(xs, i)\n    else:\n        0\nf(\[1\], 0)"] \
+        [diagKinds "fn f(xs, i):\n    if i < 0 and i >= list::length(xs):\n        0\n    else:\n        list::at(xs, i)\nf(\[1\], 0)"]
+} -result {{} {} UNHANDLED-ERROR UNHANDLED-ERROR}
+
+test ns-proof-relations-do-not-outlive-their-scope {a guard established inside a loop body or a handler (which may not run) proves nothing after it; an early return at the function's own level does} -body {
+    set small "type Small = Int in 0..100\n"
+    list [diagKinds "${small}fn f(xs, ys, j: Small):\n    loop x in xs:\n        if j >= list::length(ys):\n            return 0\n    list::at(ys, j)\nf(\[\], \[1\], 5)"] \
+        [diagKinds "${small}fn f(xs, ys, j: Small):\n    v = list::at(xs, 0):\n        on IndexNotFound:\n            if j >= list::length(ys):\n                return 0\n            1\n    v + list::at(ys, j)\nf(\[1\], \[1\], 5)"] \
+        [diagKinds "${small}fn f(ys, j: Small):\n    if j >= list::length(ys):\n        return 0\n    list::at(ys, j)\nf(\[1\], 5)"]
+} -result {UNHANDLED-ERROR UNHANDLED-ERROR {}}
+
+test ns-proof-relations-before-call-ranges {a read the branch relations prove stays proven in a call whose exact arguments put the index out of range: that call never reaches the read} -body {
+    set source "fn at_or(xs: List\[int\], i: int, d: int) -> int:\n    if i >= 0 and i < list::length(xs):\n        list::at(xs, i)\n    else:\n        d\n\[at_or(\[1, 2, 3\], 2, 0), at_or(\[1\], 5, 9), at_or(\[\], 0, 7)\]"
+    list [diagKinds $source] [agree $source]
+} -result {{} {[3, 9, 7]}}
+
+test ns-proof-lib-mutable-array-from-list {mutable_array::from_list's own list::at needs no handler: its loop counts to list::length(xs)} -body {
+    diagKinds {mutable_array::freeze(mutable_array::from_list([1, 2]), 2)}
+} -result {}
+
+# ---------------------------------------------------------------------------
+# get: ordinary Botlish over at, with an explicit, eager default
+
+test ns-get-values {list::get and mutable_array::get: the element when present, the default for every missing index} -body {
+    agree {a = mutable_array::from_list(["x", "y"])
+[list::get([10, 20, 30], 1, 0), list::get([10, 20, 30], 3, 0), list::get([10, 20, 30], -1, 0), list::get([], 0, "none"), list::get([1], 100000000000000000000, 7), mutable_array::get(a, 1, ""), mutable_array::get(a, 2, "?")]}
+} -result {[20, 0, 0, "none", 7, "y", "?"]}
+
+test ns-get-is-ordinary-botlish {list::get and mutable_array::get are library functions (no native, no special op): their bodies are an at call handled by an `on IndexNotFound` clause} -body {
+    set hir [nsHir {[list::get([1], 0, 2), mutable_array::get(mutable_array::allocate(1), 0, 3)]}]
+    set handles [lmap e [hir::walk $hir] {
+        if {[hir::kind $hir $e] ne "handle"} continue
+        list [targetOf $hir [hir::get $hir $e call]] [hir::get $hir $e handlerNames]
+    }]
+    list [core::native::isQualifiedNative list::get] [core::native::isQualifiedNative mutable_array::get] \
+        [lindex [targetOf $hir [callNamed $hir list::get]] 0] [lsort $handles]
+} -result {0 0 block {{{native list::at} IndexNotFound} {{native mutable_array::at} IndexNotFound}}}
+
+test ns-get-has-no-obligation {a get call never needs a handler: get handles IndexNotFound itself} -body {
+    diagKinds "fn f(xs, i):\n    list::get(xs, i, 0)\nf(\[1\], 9)"
+} -result {}
+
+test ns-get-nir-is-an-ordinary-call {natively, list::get is an ordinary module function whose body reads with the same listget op list::at uses: no get-specific operation exists} -body {
+    set nir [dict get [native::lower::program [nsHir "fn f(xs, i):\n    list::get(xs, i, 0)\nf(\[1, 2\], 1)"]] text]
+    list [regexp {func [0-9]+ "list::get"} $nir] [regexp {op listget} $nir] [regexp -nocase {get[a-z]*default|listgetor} $nir]
+} -result {1 1 0}
+
+test ns-get-handles-only-index-not-found {a TYPE failure inside get propagates: a non-List container or a non-Int index never yields the default} -body {
+    list [agree {list::get("abc", 0, "d")} 0] [agree {list::get([1], "0", "d")} 0] \
+        [agree {mutable_array::get([1], 0, "d")} 0]
+} -result {{error {CORE SEMANTIC TYPE}} {error {CORE SEMANTIC TYPE}} {error {CORE SEMANTIC TYPE}}}
+
+test ns-get-default-is-eager {the default is an ordinary argument: evaluated before the call, present index or not} -body {
+    agree {log = mutable_array::allocate(1)
+mutable_array::set(log, 0, 0)
+fn mark(v):
+    mutable_array::set(log, 0, mutable_array::at(log, 0) + 1)
+    v
+a = list::get([10, 20], 0, mark(-1))
+b = list::get([10, 20], 5, mark(-2))
+c = mutable_array::get(log, 0, mark(-3))
+[a, b, c, mutable_array::at(log, 0)]}
+} -result {[10, -2, 3, 3]}
+
+# get against the explicit handling it is defined as: same value on every
+# backend for every container/index pair, including missing indices.
+set ::explicitGet {fn explicit(xs, i, d):
+    v = list::at(xs, i):
+        on IndexNotFound:
+            d
+    v
+fn explicit_array(a, i, d):
+    v = mutable_array::at(a, i):
+        on IndexNotFound:
+            d
+    v
+}
+
+test ns-get-differential {list::get(xs, i, d) == explicit at-with-handler, and mutable_array::get likewise, for every pair (every backend)} -body {
+    set cases {}
+    foreach xs {{[]} {[7]} {[1, 2, 3]} {["a", "b"]} {[[1], [2, 3]]}} {
+        foreach i {-2 -1 0 1 2 3 100000000000000000000} {
+            lappend cases "\[list::get($xs, $i, \"d\") == explicit($xs, $i, \"d\"), list::get($xs, $i, \"d\"), mutable_array::get(mutable_array::from_list($xs), $i, \"d\") == explicit_array(mutable_array::from_list($xs), $i, \"d\")\]"
+        }
+    }
+    set program "$::explicitGet\[[join $cases ",\n"]\]"
+    set result [agree $program]
+    list [regexp {DISAGREE|false} $result] [regexp -all {\[true, } $result]
+} -result {0 35}
+
+test ns-handle-type-in-an-instance {a handled call's type includes a handler the semantic instance cannot admit as the call's own type (an int call, a str handler): no Int equality is ever applied to the String (natively this crashed before STDLIB-NAMESPACES.md; list::get is the everyday case)} -body {
+    list [agree "error E\nfn f(x, n) errors E:\n    if n < 0:\n        fail E\n    x\nfn explicit(x, n, d):\n    v = f(x, n):\n        on E:\n            d\n    v\nb = explicit(1, 0 - 2, \"dd\")\nc = explicit(1, 0 - 3, \"dd\")\n\[b == c, b, explicit(1, 5, \"dd\")\]"] \
+        [agree "a = list::get(\[7\], -2, \"dd\")\nb = list::get(\[7\], -3, \"dd\")\n\[a == b, list::get(\[7\], 0, \"dd\") == 7\]"]
+} -result {{[true, "dd", 1]} {[true, true]}}
+
+# ---------------------------------------------------------------------------
+# Method spelling: once bound to a name, an intrinsic or library member is
+# the same callable as its qualified free spelling
+
+# The resolved target of the method call (the call carrying a `method`
+# marker) of HIR, and of its first call spelled QUALIFIED: one callable.
+proc sameCallable {mh fh qualified} {
+    set mcall [lindex [lmap e [hir::walk $mh] {
+        if {[hir::kind $mh $e] eq "call" && [dict exists [hir::node $mh $e] method]} {set e} else continue
+    }] 0]
+    set fcall [callNamed $fh $qualified]
+    set mt [targetOf $mh $mcall]
+    set ft [targetOf $fh $fcall]
+    if {[lindex $mt 0] eq "block"} {
+        # A library member: the same module function block.
+        return [expr {$mt eq $ft}]
+    }
+    return [expr {$mt eq $ft && $mt eq [list native $qualified]}]
+}
+
+foreach {name qualified binding method free expected} {
+    list-at       list::at       {at = list::at}             {[10, 20, 30].at(1)}         {list::at([10, 20, 30], 1)}          {20}
+    list-get      list::get      {get = list::get}           {[10, 20].get(5, 0)}         {list::get([10, 20], 5, 0)}          {0}
+    list-append   list::append   {append = list::append}     {[1].append(2)}              {list::append([1], 2)}               {[1, 2]}
+    list-length   list::length   {length = list::length}     {[1, 2].length()}            {list::length([1, 2])}               {2}
+    str-concat    str::concat    {concat = str::concat}      {"ab".concat("cd")}          {str::concat("ab", "cd")}            {"abcd"}
+    str-length    str::length    {length = str::length}      {"abc".length()}             {str::length("abc")}                 {3}
+    str-substring str::substring {substring = str::substring} {"hello".substring(1, 3)}   {str::substring("hello", 1, 3)}      {"el"}
+    set-contains  immutable_set::contains {contains = immutable_set::contains} {immutable_set::from_list([1]).contains(1)} {immutable_set::contains(immutable_set::from_list([1]), 1)} {true}
+    char-codepoint char::codepoint {codepoint = char::codepoint} {'A'.codepoint()}         {char::codepoint('A')}               {65}
+} {
+    test ns-method-$name "$name: the method spelling and the qualified free spelling agree, through the same callable" -body {
+        set m "$binding\n$method"
+        set f "$binding\n$free"
+        list [agree $m] [agree $f] [sameCallable [nsHir $m] [nsHir $f] $qualified]
+    } -result [list $expected $expected 1]
+}
+
+test ns-method-mutable-array {mutable_array::at/set/get by method spelling: the same reads and writes as the free calls} -body {
+    set prelude "at = mutable_array::at\nset = mutable_array::set\nget = mutable_array::get\na = mutable_array::allocate(2)\n"
+    list [agree "${prelude}a.set(0, 5)\na.set(1, 6)\n\[a.at(0), a.at(1), a.get(2, -1)\]"] \
+        [agree "${prelude}mutable_array::set(a, 0, 5)\nmutable_array::set(a, 1, 6)\n\[mutable_array::at(a, 0), mutable_array::at(a, 1), mutable_array::get(a, 2, -1)\]"]
+} -result {{[5, 6, -1]} {[5, 6, -1]}}
+
+test ns-method-nir-identical {the method spelling and the free spelling of the bound name lower to identical NIR} -body {
+    set tail "r = f(\[4\]):\n    on IndexNotFound:\n        \[\]\nr"
+    set m [dict get [native::lower::program [nsHir "at = list::at\nget = list::get\nfn f(xs) errors IndexNotFound:\n    \[xs.at(0), xs.get(9, 1)\]\n$tail"]] text]
+    set f [dict get [native::lower::program [nsHir "at = list::at\nget = list::get\nfn f(xs) errors IndexNotFound:\n    \[at(xs, 0), get(xs, 9, 1)\]\n$tail"]] text]
+    expr {$m eq $f}
+} -result 1
+
+test ns-method-requires-a-binding {a qualified intrinsic is not visible to method syntax by its member name alone (the ordinary importless rule)} -body {
+    lindex [rejection {[1, 2].at(0)}] 0
+} -result NOT-A-STRUCT
+
+# ---------------------------------------------------------------------------
+# Randomized checking (audit/stdlib-namespaces/tools/fuzz.tcl): a bounded run;
+# a longer one is `tclsh9.0 audit/stdlib-namespaces/tools/fuzz.tcl -n 200 -seed 1`.
+
+test ns-fuzz-smoke {random at/get/set/str programs agree with the Tcl oracle on every backend, get equals the explicit handler, the default is evaluated once, and the rotating illegal programs are rejected} -body {
+    set output [exec [info nameofexecutable] [file join $::projectRoot audit stdlib-namespaces tools fuzz.tcl] -n 6 -seed 4100 2>@1]
+    lindex [split [string trim $output] \n] end
+} -match glob -result {stdlib-ns-fuzz programs 6 values * negatives * oracle-disagreements 0 negative-escapes 0 backend-disagreements 0}
+
+cleanupTests

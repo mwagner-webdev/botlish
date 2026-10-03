@@ -43,7 +43,7 @@
 //!                no Value at all: a piece's bytes are copied in when it
 //!                joins, so the piece object itself may die immediately --
 //!                nothing for the collector to trace.
-//!   ListPlanObj  a growable Vec of element Values (append-only: list_append
+//!   ListPlanObj  a growable Vec of element Values (append-only: list::append
 //!                is the only List construction API). Traced by the
 //!                collector (heap.rs) like a List's own items.
 //!
@@ -339,8 +339,8 @@ fn decode_list_pieces(words: &[u64]) -> Small<ListPiece<'_>> {
 /// `%d = construct KIND MODE PIECE...` (see this module's doc). WORDS is N
 /// 64-bit words: each piece's tag followed by its operand Values. Returns
 /// the result, or NO_VALUE with a pending RANGE error when the result would
-/// exceed MAX_COLLECTION_LENGTH (the one failure mode eager concat and
-/// list_append also have).
+/// exceed MAX_COLLECTION_LENGTH (the one failure mode eager str::concat and
+/// list::append also have).
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_construct(p: *mut Vm, mode: u64, n: u64, words: *const u64) -> Value {
     let words = unsafe { std::slice::from_raw_parts(words, n as usize) };

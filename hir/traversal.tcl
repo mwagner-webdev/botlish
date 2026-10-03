@@ -63,7 +63,7 @@
 #     per iteration wherever it sits in a straight-line body, exactly as
 #     safe to recognize as an access inlined directly into the tail call's
 #     own arguments (ai_text_clean.bot's own
-#     `clean_from(text, index + 1, concat(done, clean_char(peek(text, index))))`).
+#     `clean_from(text, index + 1, str::concat(done, clean_char(peek(text, index))))`).
 #     An access is structurally a direct call to another instance
 #     CharAccessorShape recognizes as a "character accessor" -- see that
 #     proc's own header -- which is what lets a `peek`-shaped helper
@@ -71,18 +71,18 @@
 #     #18's option A: lower the access directly in the caller, never adding
 #     an interprocedural ABI or a companion call for this).
 #
-# Deliberately *not* recognized: a direct `substring(text, i, i+1)` call
+# Deliberately *not* recognized: a direct `str::substring(text, i, i+1)` call
 # (not behind an accessor). Not because it is any harder to locate -- it
 # would need the exact same width-1 shape check CharAccessorShape already
 # has -- but because its out-of-bounds *failure* contract differs from
-# peek's own: `substring` raises RANGE when i is past the end, where
+# peek's own: `str::substring` raises RANGE when i is past the end, where
 # peek's own out-of-bounds branch returns "". Reproducing a byte-exact
 # RANGE message needs the real `rt_substr`, which needs the seek this
 # module exists to avoid; a fixed-width-1 accessor sidesteps the whole
 # question because *its own body* already decided what past-the-end means
-# (peek's own `if index >= length(text): return ""`), and this module
-# reproduces exactly that decision, not `substring`'s. A future milestone
-# that wants the bare-`substring` shape too would need to keep the
+# (peek's own `if index >= str::length(text): return ""`), and this module
+# reproduces exactly that decision, not `str::substring`'s. A future milestone
+# that wants the bare-`str::substring` shape too would need to keep the
 # allocating, checking `substr` call on that one cold path instead of ever
 # synthesizing its error itself.
 #
@@ -138,9 +138,9 @@ namespace eval hir::traversal {
 # Character accessors: a used instance whose own body is *exactly* peek's
 # shape (structurally, never by name: #8/#50 of the milestone) --
 #
-#   if index >= length(text):    ; or "length(text) <= index"
+#   if index >= str::length(text):    ; or "str::length(text) <= index"
 #       return ""
-#   substring(text, index, index + 1)
+#   str::substring(text, index, index + 1)
 #
 # with no other statement, no else, and index/text exactly its own two
 # parameters. This is deliberately a precise structural match of the whole
@@ -151,7 +151,7 @@ namespace eval hir::traversal {
 # would pass that looser test while meaning something else entirely).
 # Reproducing peek's own *decision* between its two exits, not merely its
 # two possible results, is exactly what TraversalAccess's own emitted
-# `index >= length(text)` check must be proven equivalent to, so this
+# `index >= str::length(text)` check must be proven equivalent to, so this
 # module checks the guard condition itself rather than assuming it.
 
 proc hir::traversal::IsLengthOf {hir e b} {
@@ -161,7 +161,7 @@ proc hir::traversal::IsLengthOf {hir e b} {
     set node [hir::node $hir $e]
     lassign [dict get $node target] targetKind target
     set args [dict get $node args]
-    return [expr {$targetKind eq "native" && [dict get [hir::symbol $hir $target] name] eq "length"
+    return [expr {$targetKind eq "native" && [dict get [hir::symbol $hir $target] name] eq "str::length"
         && [llength $args] == 1 && [IsRefToBinding $hir [lindex $args 0] $b]}]
 }
 
@@ -208,7 +208,7 @@ proc hir::traversal::CharAccessorShape {hir spec id} {
     }
     set callNode [hir::node $view $tailExpr]
     lassign [dict get $callNode target] callKind callTarget
-    if {$callKind ne "native" || [dict get [hir::symbol $view $callTarget] name] ne "substring"} {
+    if {$callKind ne "native" || [dict get [hir::symbol $view $callTarget] name] ne "str::substring"} {
         return ""
     }
     set sargs [dict get $callNode args]
@@ -289,7 +289,7 @@ proc hir::traversal::ZeroStart {hir spec id indexIdx} {
 # as a forwarding call to a recognized character accessor (ACCESSORROLE:
 # InstanceId -> {textArgIndex indexArgIndex}, from CharAccessorShape) over
 # exactly TEXTPARAM/INDEXPARAM (binding ids) -- see the file header for why
-# a *direct* `substring(text, index, index+1)` call is deliberately not
+# a *direct* `str::substring(text, index, index+1)` call is deliberately not
 # recognized here. CALLS is instance ID's own `calls` map (ExprId -> target
 # InstanceId: hir::specialize.tcl), needed to resolve which instance a
 # forwarding call site targets. Returns a dict ExprId -> {textArgIndex

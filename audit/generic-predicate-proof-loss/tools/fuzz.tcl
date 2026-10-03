@@ -22,7 +22,7 @@
 # helpers and into branches; closures capturing an Int, and the emailish?
 # shape (a String parameter and its length captured by nested scan/char_at
 # functions, a predicate passed as a first-class value); and helpers stored
-# in a module-level List and called through `list_get(...)(...)`, so open
+# in a module-level List and called through `list::at(...)(...)`, so open
 # (generic) instances exist next to closed ones. Every parameter, local and
 # nested function has a program-unique name, which is how the runtime trace
 # below maps a Block invocation back to its HIR block. The top level is a
@@ -559,7 +559,7 @@ proc genScan {} {
     set scan ${f}_scan
     set si ${scan}_i
     set ss ${scan}_start
-    set body [list "$n = length($v)" "fn $at\(${at}_i):" "    substring($v, ${at}_i, ${at}_i + 1)"]
+    set body [list "$n = str::length($v)" "fn $at\(${at}_i):" "    str::substring($v, ${at}_i, ${at}_i + 1)"]
     set predArg ""
     if {[chance 0.6]} {
         # predicate passed as a first-class value
@@ -567,10 +567,10 @@ proc genScan {} {
         if {[chance 0.5]} {
             set pc ${f}_p_c
             lappend body "fn ${f}_p($pc):" \
-                "    [pick [list "$pc == \"a\" or $pc == \"b\"" "is_tcl_alnum($pc) or $pc == \"-\"" "$pc != \" \""]]"
+                "    [pick [list "$pc == \"a\" or $pc == \"b\"" "str::is_tcl_alnum($pc) or $pc == \"-\"" "$pc != \" \""]]"
             set predArg ${f}_p
         } else {
-            set predArg [pick {is_tcl_alpha is_tcl_alnum}]
+            set predArg [pick {str::is_tcl_alpha str::is_tcl_alnum}]
         }
         lappend body "fn $scan\($ss, $sp):" "    loop $si from $ss to $n:" \
             "        if $sp\($at\($si)):" "            continue" "        return $si" "    $n"
@@ -637,9 +637,9 @@ proc genApply {} {
     dict set h ptypes {int int}
     set lines [list "${f}_tbl = \[[join $members {, }]\]" "fn $f\(${f}_i, ${f}_v):"]
     if {[chance 0.5]} {
-        lappend lines "    list_get(${f}_tbl, ${f}_i)(${f}_v)"
+        lappend lines "    list::at(${f}_tbl, ${f}_i)(${f}_v)"
     } else {
-        lappend lines "    ${f}_h = list_get(${f}_tbl, ${f}_i)" \
+        lappend lines "    ${f}_h = list::at(${f}_tbl, ${f}_i)" \
             "    ${f}_h(${f}_v) [pick {+ -}] ${f}_h(${f}_v + [lit [smallConst]])"
     }
     return [list $h $lines]

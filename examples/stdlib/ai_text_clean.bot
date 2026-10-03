@@ -32,10 +32,10 @@
 
 # The character at index, or "" past the end (examples/stdlib/csv.bot's peek).
 fn peek(text, index):
-    if index >= length(text):
+    if index >= str::length(text):
         return ""
 
-    substring(text, index, index + 1)
+    str::substring(text, index, index + 1)
 
 # 1 if character (one peek()'d character) is in this benchmark's explicit
 # emoji set -- see the file header for why this is not general Unicode
@@ -68,10 +68,10 @@ fn clean_char(character):
 
 # text's characters from index on, cleaned and appended to done.
 fn clean_from(text, index, done):
-    if index >= length(text):
+    if index >= str::length(text):
         return done
 
-    clean_from(text, index + 1, concat(done, clean_char(peek(text, index))))
+    clean_from(text, index + 1, str::concat(done, clean_char(peek(text, index))))
 
 fn clean_ai_text(text):
     clean_from(text, 0, "")

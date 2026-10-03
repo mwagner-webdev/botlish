@@ -230,8 +230,8 @@ proc program {kind chain position style} {
     set head {
         error Boom
         fn probe(log, id, result):
-            n = mutable_array_get(log, 0)
-            mutable_array_set(log, 0, n * 10 + id)
+            if mutable_array::capacity(log) == 1:
+                mutable_array::set(log, 0, mutable_array::at(log, 0) * 10 + id)
             result
     }
     set lines {}
@@ -255,12 +255,12 @@ proc program {kind chain position style} {
         }
     }
     lappend lines {fn driver(p, q, r, x):}
-    lappend lines {    log = mutable_array_allocate(1)}
-    lappend lines {    mutable_array_set(log, 0, 0)}
+    lappend lines {    log = mutable_array::allocate(1)}
+    lappend lines {    mutable_array::set(log, 0, 0)}
     lappend lines {    v = work(log, p, q, r, x):}
     lappend lines {        on Boom:}
     lappend lines {            -7}
-    lappend lines {    [v, mutable_array_get(log, 0)]}
+    lappend lines {    [v, mutable_array::at(log, 0)]}
     lappend lines {[driver(true, false, true, 3), driver(false, true, false, 7), driver(false, false, true, 5),}
     lappend lines { driver(false, false, false, 1), driver(true, true, true, 9), driver(false, true, true, 4)]}
     return [join $lines \n]

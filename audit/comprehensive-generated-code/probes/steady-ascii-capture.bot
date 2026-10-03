@@ -16,11 +16,11 @@ bs = loop n in ns:
     b
 fn count(xs: List[Byte], i: int, acc: int) -> int:
     fn cls(b: Byte) -> bool:
-        ascii::is_alphanumeric(b) and list_length(xs) > 0
-    if i >= list_length(xs):
+        ascii::is_alphanumeric(b) and list::length(xs) > 0
+    if i < 0 or i >= list::length(xs):
         acc
     else:
-        if cls(list_get(xs, i)):
+        if cls(list::at(xs, i)):
             count(xs, i + 1, acc + 1)
         else:
             count(xs, i + 1, acc)

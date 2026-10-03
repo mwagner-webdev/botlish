@@ -11,20 +11,20 @@ fn dbl(n, s):
     if n == 0:
         return s
 
-    dbl(n - 1, concat(s, s))
+    dbl(n - 1, str::concat(s, s))
 
 fn slice_cat(s, k):
-    n = length(s)
-    concat(substring(s, k, n), substring(s, 0, k))
+    n = str::length(s)
+    str::concat(str::substring(s, k, n), str::substring(s, 0, k))
 
 fn churn(n, acc, piece):
     if n == 0:
         return acc
 
-    t = concat(piece, piece)
-    churn(n - 1, acc + length(concat(t, t)), piece)
+    t = str::concat(piece, piece)
+    churn(n - 1, acc + str::length(str::concat(t, t)), piece)
 
 big = dbl(19, "é…")
 rotated = slice_cat(big, 4096)
 mid = dbl(11, "ab")
-[length(big), substring(rotated, 0, 4), length(slice_cat(mid, 7)) - 4, churn(5000, 0, "hello hello hello hello 😀…é")]
+[str::length(big), str::substring(rotated, 0, 4), str::length(slice_cat(mid, 7)) - 4, churn(5000, 0, "hello hello hello hello 😀…é")]

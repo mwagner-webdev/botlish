@@ -3,20 +3,29 @@
 # UnicodeChar itself is a builtin type, available wherever an ordinary
 # builtin scalar type name is (no "char::..." reference needed to make a
 # parameter/result annotation of it resolve -- see UNICODE-CHAR-LITERALS.md
-# item 21). This module only supplies char::codepoint, the one explicit,
-# total operation that observes a UnicodeChar's Unicode scalar value as an
-# ordinary Int -- exactly the byte::high_nibble/lib/byte.bot pattern:
-# codepoint is an otherwise-plain Botlish function, its one primitive
-# operation (char_codepoint) a root native (core/unicodechar.tcl) the
-# language cannot express any other way, since nothing in ordinary Botlish
-# can extract a UnicodeChar's payload.
+# item 21). This module supplies char::codepoint, the one explicit, total
+# operation that observes a UnicodeChar's Unicode scalar value as an
+# ordinary Int, as a typed function over the namespace's intrinsic
+# char::scalar_value (core/unicodechar.tcl):
 #
-#   char::codepoint(c)   the Unicode scalar value of c, as an Int
-#                         (char::codepoint('A') = 65, char::codepoint('😀')
-#                         = 128512) -- total, never fails.
+#   char::codepoint(c)       the Unicode scalar value of c, as an Int
+#                             (char::codepoint('A') = 65, char::codepoint('😀')
+#                             = 128512) -- total, never fails. Its declared
+#                             `c: UnicodeChar` is a compile-time contract
+#                             (char::codepoint(65) is rejected statically).
+#   char::scalar_value(c)    the same operation as the intrinsic itself: a
+#                             root native registered under its qualified
+#                             name, whose UnicodeChar parameter is -- like
+#                             every native's -- a run-time requirement only.
+#                             This module may never define a member of that
+#                             name (STDLIB-NAMESPACES.md).
+#
+# The wrapper exists for the compile-time contract alone: a native's
+# declared parameter types are run-time checks, a typed Botlish parameter's
+# a static obligation (STRICT-TYPED-PARAMETERS.md).
 #
 # No Int -> UnicodeChar conversion is provided (deliberately: see item 5).
 namespace char
 
 fn codepoint(c: UnicodeChar) -> int:
-    char_codepoint(c)
+    char::scalar_value(c)

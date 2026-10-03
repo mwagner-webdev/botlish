@@ -139,42 +139,42 @@ apply_loop(inc, 0, 100)
 
 set ::nativeHof {
 fn count_while(p, s):
-    loop i from 0 to length(s):
-        if p(substring(s, i, i + 1)):
+    loop i from 0 to str::length(s):
+        if p(str::substring(s, i, i + 1)):
             continue
         return i
-    length(s)
+    str::length(s)
 
-count_while(is_tcl_alpha, "abc1")
+count_while(str::is_tcl_alpha, "abc1")
 }
 
 set ::mixedHof {
 fn bot_alpha(c):
-    is_tcl_alpha(c) or c == "_"
+    str::is_tcl_alpha(c) or c == "_"
 
 fn count_while(p, s):
-    loop i from 0 to length(s):
-        if p(substring(s, i, i + 1)):
+    loop i from 0 to str::length(s):
+        if p(str::substring(s, i, i + 1)):
             continue
         return i
-    length(s)
+    str::length(s)
 
-[count_while(bot_alpha, "ab_c1"), count_while(is_tcl_alpha, "abc1")]
+[count_while(bot_alpha, "ab_c1"), count_while(str::is_tcl_alpha, "abc1")]
 }
 
 set ::dynamicHof {
 fn a_alpha(c):
-    is_tcl_alpha(c)
+    str::is_tcl_alpha(c)
 
 fn b_alnum(c):
-    is_tcl_alnum(c)
+    str::is_tcl_alnum(c)
 
 fn count_while(p, s):
-    loop i from 0 to length(s):
-        if p(substring(s, i, i + 1)):
+    loop i from 0 to str::length(s):
+        if p(str::substring(s, i, i + 1)):
             continue
         return i
-    length(s)
+    str::length(s)
 
 fn pick(flag):
     if flag:
@@ -208,7 +208,7 @@ test exact-callable-botlish-single-value {and still computes the same answer on 
 test exact-callable-native-single-key {one site, one exact native: the key names the native by its registry name} -body {
     lassign [analysisOf $::nativeHof] hir analysis
     labelsOf $analysis count_while
-} -result {{count_while<native(is_tcl_alpha), str>}}
+} -result {{count_while<native(str::is_tcl_alpha), str>}}
 
 test exact-callable-native-single-direct {the call through p lowers through the native operation directly (a StringRegion consumer of the substring: no String is built), no callvalue} -body {
     set nir [nirOf $::nativeHof]
@@ -226,7 +226,7 @@ test exact-callable-native-single-value {native HOF agrees on every backend} -bo
 test exact-callable-mixed-two-instances {one helper, a Botlish block and a native: two target-specific instances} -body {
     lassign [analysisOf $::mixedHof] hir analysis
     lmap l [labelsOf $analysis count_while] {regsub {e\d+} $l eN}
-} -result {{count_while<block(eN), str>} {count_while<native(is_tcl_alpha), str>}}
+} -result {{count_while<block(eN), str>} {count_while<native(str::is_tcl_alpha), str>}}
 
 test exact-callable-mixed-no-callvalue {neither instance of the mixed helper contains a callvalue} -body {
     callvalues [nirOf $::mixedHof]
@@ -251,13 +251,13 @@ fn run(f, n):
     n
 
 fn alpha_run(p, s):
-    loop j from 0 to length(s):
-        if p(substring(s, j, j + 1)):
+    loop j from 0 to str::length(s):
+        if p(str::substring(s, j, j + 1)):
             continue
         return j
-    length(s)
+    str::length(s)
 
-[run(lt5, 100), run(lt9, 100), alpha_run(is_tcl_alpha, "ab1"), alpha_run(is_tcl_alnum, "ab1_")]
+[run(lt5, 100), run(lt9, 100), alpha_run(str::is_tcl_alpha, "ab1"), alpha_run(str::is_tcl_alnum, "ab1_")]
 }
     set nir [nirOf $text]
     list [llength [instancesNamed $nir run]] [llength [instancesNamed $nir alpha_run]] [callvalues $nir] [parity $text]
@@ -275,20 +275,20 @@ test exact-callable-dynamic-if-chosen {a predicate chosen by if (two different t
 test exact-callable-dynamic-list-held {a callable read from a List at a non-constant index is dynamic: callvalue stays} -body {
     set text {
 fn a_alpha(c):
-    is_tcl_alpha(c)
+    str::is_tcl_alpha(c)
 
 fn b_alnum(c):
-    is_tcl_alnum(c)
+    str::is_tcl_alnum(c)
 
 fn count_while(p, s):
-    loop i from 0 to length(s):
-        if p(substring(s, i, i + 1)):
+    loop i from 0 to str::length(s):
+        if p(str::substring(s, i, i + 1)):
             continue
         return i
-    length(s)
+    str::length(s)
 
 fn nth(preds, k):
-    list_get(preds, k)
+    list::at(preds, k)
 
 preds = [a_alpha, b_alnum]
 [count_while(nth(preds, 0), "ab1"), count_while(nth(preds, 1), "12a_")]
@@ -308,7 +308,7 @@ fn apply_loop(f, i, n):
     n
 
 fs = [is_small]
-[apply_loop(is_small, 0, 100), list_get(fs, 0)(3)]
+[apply_loop(is_small, 0, 100), list::at(fs, 0)(3)]
 }
     list [parity $text] [exactOnOff $text]
 } -result {{value {[10, true]} {}} {list {{int 10} {bool true}}}}
@@ -325,7 +325,7 @@ fn apply_loop(f, i, n):
     n
 
 fs = [is_small]
-[apply_loop(is_small, 0, 100), list_get(fs, 0)(3)]
+[apply_loop(is_small, 0, 100), list::at(fs, 0)(3)]
 }] hir analysis
     set generic {}
     foreach id [dict get $analysis used] {
@@ -479,17 +479,17 @@ test exact-callable-same-name-different-modules {the same local name in two modu
 test exact-callable-natives-same-signature {two natives with the identical structural type (str -> bool) are different exact targets} -body {
     set text {
 fn alpha_run(p, s):
-    loop j from 0 to length(s):
-        if p(substring(s, j, j + 1)):
+    loop j from 0 to str::length(s):
+        if p(str::substring(s, j, j + 1)):
             continue
         return j
-    length(s)
+    str::length(s)
 
-[alpha_run(is_tcl_alpha, "ab1"), alpha_run(is_tcl_alnum, "ab1_")]
+[alpha_run(str::is_tcl_alpha, "ab1"), alpha_run(str::is_tcl_alnum, "ab1_")]
 }
     lassign [analysisOf $text] hir analysis
     list [labelsOf $analysis alpha_run] [parity $text]
-} -result {{{alpha_run<native(is_tcl_alpha), str>} {alpha_run<native(is_tcl_alnum), str>}} {value {[2, 3]} {}}}
+} -result {{{alpha_run<native(str::is_tcl_alpha), str>} {alpha_run<native(str::is_tcl_alnum), str>}} {value {[2, 3]} {}}}
 
 test exact-callable-blocks-same-signature {two Botlish blocks with identical structural types stay distinct for the analyses that consume exactness} -body {
     set text {
@@ -600,7 +600,7 @@ test exact-callable-opt-off-restores-kind-keys {-exact-callable-opt 0 restores t
 set ::capturingHof {
 fn run(s, items, n):
     fn longer(x):
-        length(x) > length(s) + n
+        str::length(x) > str::length(s) + n
     fn first_match(p, xs):
         loop x in xs:
             if p(x):
@@ -628,36 +628,36 @@ test exact-callable-capturing-closure-aggregate-capture-keys {the closure rule i
     lassign [analysisOf {
 fn run(v, k):
     fn char_at(i):
-        substring(v, i, i + 1)
+        str::substring(v, i, i + 1)
     fn scan(start, predicate, tag):
-        loop i from start to length(v):
+        loop i from start to str::length(v):
             if predicate(char_at(i)):
                 continue
-            return i + length(tag)
-        length(v)
-    scan(k, is_tcl_alpha, "t")
+            return i + str::length(tag)
+        str::length(v)
+    scan(k, str::is_tcl_alpha, "t")
 
 run("abc1", 0)
 }] hir analysis
     set id [instanceNamed $analysis scan]
     list [hir::specialize::label $analysis $id] [hir::specialize::closedCallerTheorem $hir $analysis $id] \
         [hir::specialize::closed $hir $analysis $id]
-} -result {{scan<int, native(is_tcl_alpha), any>} {int {native is_tcl_alpha} str} 1}
+} -result {{scan<int, native(str::is_tcl_alpha), any>} {int {native str::is_tcl_alpha} str} 1}
 
 test exact-callable-capturing-closure-no-closure-allocated {blockescape de-closes a closure literal that has SEVERAL exact instances: both are internal variants, no closure is allocated} -body {
     set text {
 fn run(s):
     fn char_at(i):
-        substring(s, i, i + 1)
+        str::substring(s, i, i + 1)
     fn bot_alpha(c):
-        is_tcl_alpha(c)
+        str::is_tcl_alpha(c)
     fn scan(start, predicate):
-        loop i from start to length(s):
+        loop i from start to str::length(s):
             if predicate(char_at(i)):
                 continue
             return i
-        length(s)
-    [scan(0, bot_alpha), scan(0, is_tcl_alnum), scan(1, is_tcl_alpha)]
+        str::length(s)
+    [scan(0, bot_alpha), scan(0, str::is_tcl_alnum), scan(1, str::is_tcl_alpha)]
 
 run("ab1_")
 }
@@ -674,22 +674,22 @@ test exact-callable-closure-recursion-several-instances {a de-closured closure t
     set text {
 fn run(v):
     fn walk(i, p):
-        if i >= length(v):
+        if i >= str::length(v):
             return i
-        if p(substring(v, i, i + 1)):
+        if p(str::substring(v, i, i + 1)):
             return walk(i + 1, p)
         i
     fn depth(i, p):
-        if i >= length(v):
+        if i >= str::length(v):
             return 0
-        if p(substring(v, i, i + 1)):
+        if p(str::substring(v, i, i + 1)):
             return 1 + depth(i + 1, p)
         0
     fn a():
-        walk(0, is_tcl_alpha)
+        walk(0, str::is_tcl_alpha)
     fn b():
-        walk(0, is_tcl_alnum)
-    [a(), b(), depth(0, is_tcl_alpha), depth(0, is_tcl_alnum), walk(1, is_tcl_alnum)]
+        walk(0, str::is_tcl_alnum)
+    [a(), b(), depth(0, str::is_tcl_alpha), depth(0, str::is_tcl_alnum), walk(1, str::is_tcl_alnum)]
 
 run("ab1_")
 }
@@ -776,14 +776,14 @@ fn outer(p, s):
     fn inner(x):
         p(x)
     fn count(i):
-        if i >= length(s):
+        if i >= str::length(s):
             return i
-        if inner(substring(s, i, i + 1)):
+        if inner(str::substring(s, i, i + 1)):
             return count(i + 1)
         i
     count(0)
 
-[outer(is_tcl_alpha, "ab1"), outer(is_tcl_alnum, "ab1_")]
+[outer(str::is_tcl_alpha, "ab1"), outer(str::is_tcl_alnum, "ab1_")]
 }
     set nir [nirOf $text]
     list [llength [instancesNamed $nir outer]] [callvalues $nir] [parity $text]
@@ -793,9 +793,9 @@ test exact-callable-dead-self-call-keeps-closure {the boundary, documented (repo
     set text {
 fn run(v):
     fn walk(i, p):
-        if i >= length(v):
+        if i >= str::length(v):
             return i
-        if p(substring(v, i, i + 1)):
+        if p(str::substring(v, i, i + 1)):
             return walk(i + 1, p)
         i
     [walk(0, integer?), walk(0, string?)]
@@ -822,10 +822,10 @@ test exact-callable-gc-capture-string-list {an exact closure capturing a String 
     set text {
 fn run(tag, words):
     fn heavy(x):
-        length(concat(tag, x)) > length(list_get(words, 0)) + 3
+        str::length(str::concat(tag, x)) > str::length(list::at(words, 0)) + 3
     fn first(p, xs):
         loop x in xs:
-            if p(concat(x, tag)):
+            if p(str::concat(x, tag)):
                 return x
         ""
     first(heavy, ["a", "bbbb", "ccccccc"])
@@ -840,11 +840,11 @@ run("xy", ["pqr", "st"])
 test exact-callable-gc-capture-mutarray-struct {an exact closure capturing a MutableArray and a struct, called through a helper under GC stress} -body {
     set text {
 fn run(n):
-    arr = mutable_array_allocate(4)
-    mutable_array_set(arr, 1, 7)
+    arr = mutable_array::allocate(4)
+    mutable_array::set(arr, 1, 7)
     rec = {a: 5, b: "zz"}
     fn probe(x):
-        x + mutable_array_get(arr, 1) + rec.a > n
+        x + mutable_array::at(arr, 1) + rec.a > n
     fn find_first(p, lo, hi):
         loop i from lo to hi:
             if p(i):
@@ -871,7 +871,7 @@ test exact-callable-gc-exact-native-region {an exact native consumer over a Stri
 test exact-callable-error-propagates-botlish {an exact Botlish target that raises propagates the same error through the helper, with and without exact keys} -body {
     set text {
 fn boom(x):
-    length(x) > 0
+    str::length(x) > 0
 
 fn apply(f, v):
     f(v)
@@ -881,14 +881,14 @@ apply(boom, 3)
     set hir [sourceHir $text]
     list [outcomeUnderHir cranelift $hir] [outcomeUnderHir interp $hir] \
         [expr {[catch {native::evalHir $hir -exact-callable-opt 0} off]}]
-} -result {{error {CORE SEMANTIC TYPE} {length: expected str, got 3} {}} {error {CORE SEMANTIC TYPE} {length: expected str, got 3} {}} 1}
+} -result {{error {CORE SEMANTIC TYPE} {str::length: expected str, got 3} {}} {error {CORE SEMANTIC TYPE} {str::length: expected str, got 3} {}} 1}
 
 test exact-callable-error-propagates-native {an exact native target that raises (wrong argument kind) propagates TYPE from the direct native operation} -body {
     set text {
 fn apply(f, v):
     f(v)
 
-apply(length, 3)
+apply(str::length, 3)
 }
     set hir [sourceHir $text]
     list [lindex [outcomeUnderHir cranelift $hir] 0] [lindex [outcomeUnderHir cranelift $hir] 1] \
@@ -912,7 +912,7 @@ apply(one)
 # ---------------------------------------------------------------------------
 # Downstream analyses see the exactness (no benchmark special case)
 
-test exact-callable-stringregion-consumer {the exact native predicate over substring(...) exposes a StringRegion consumer to the existing analysis: char reads stay regions, no one-character String is built} -body {
+test exact-callable-stringregion-consumer {the exact native predicate over str::substring(...) exposes a StringRegion consumer to the existing analysis: char reads stay regions, no one-character String is built} -body {
     set nir [nirOf $::nativeHof]
     list [regexp {strregiontclalpha} $nir] [regexp {op substr} $nir]
 } -result {1 0}
@@ -926,14 +926,14 @@ test exact-callable-stringregion-reanalysis {StringRegion analysis runs on the e
     set text {
 fn run(v):
     fn char_at(i):
-        substring(v, i, i + 1)
+        str::substring(v, i, i + 1)
     fn scan(start, predicate):
-        loop i from start to length(v):
+        loop i from start to str::length(v):
             if predicate(char_at(i)):
                 continue
             return i
-        length(v)
-    scan(0, is_tcl_alpha)
+        str::length(v)
+    scan(0, str::is_tcl_alpha)
 
 run("abc1")
 }
@@ -986,7 +986,7 @@ test exact-callable-closed-stable-across-closecallers {the closedness result is 
 
 # Loss point 2 (GENERIC-PREDICATE-PROOF-LOSS.md) made a dormant instance
 # range-open whatever its closedness; with loss point 1, refined-checks has a
-# closed dormant instance (scan_while<any, native(is_tcl_alpha)>, reached only
+# closed dormant instance (scan_while<any, native(str::is_tcl_alpha)>, reached only
 # through the dormant tld?<generic>).
 test exact-callable-range-open-is-not-closed {hir::range's openness is exactly "not InstanceClosed, or dormant" for every used instance of the benchmark corpus programs} -body {
     set bad {}
@@ -1012,14 +1012,14 @@ test exact-callable-range-generic-closure-not-open {a generic closure instance b
     set text {
 fn run(v):
     fn char_at(i):
-        substring(v, i, i + 1)
+        str::substring(v, i, i + 1)
     fn scan(start, predicate):
-        loop i from start to length(v):
+        loop i from start to str::length(v):
             if predicate(char_at(i)):
                 continue
             return i
-        length(v)
-    scan(0, is_tcl_alpha)
+        str::length(v)
+    scan(0, str::is_tcl_alpha)
 
 run("abc1")
 }
@@ -1040,14 +1040,14 @@ test exact-callable-range-scanner-entry {with exact keys the scanner's start par
     lassign [analysisOf {
 fn run(v):
     fn char_at(i):
-        substring(v, i, i + 1)
+        str::substring(v, i, i + 1)
     fn scan(start, predicate):
-        loop i from start to length(v):
+        loop i from start to str::length(v):
             if predicate(char_at(i)):
                 continue
             return i
-        length(v)
-    scan(0, is_tcl_alpha)
+        str::length(v)
+    scan(0, str::is_tcl_alpha)
 
 run("abc1")
 }] hir analysis

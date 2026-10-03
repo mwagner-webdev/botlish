@@ -1,4 +1,4 @@
-# substr_classify.tcl -- baseline classification of `substring` call sites
+# substr_classify.tcl -- baseline classification of `str::substring` call sites
 # (the milestone "Optimize String access and temporary substrings"), driven
 # by the existing allocation-site instrumentation (native/src/runtime/
 # metrics.rs, native::allocationReport's sites mode) and the same
@@ -8,12 +8,12 @@
 #   tclsh9.0 bench/substr_classify.tcl [PROGRAM ...]
 #
 # With no arguments, classifies every algorithm in the corpus
-# (examples/stdlib/corpus.tcl) that calls `substring` at all (csv,
+# (examples/stdlib/corpus.tcl) that calls `str::substring` at all (csv,
 # csv_chunked, csv_geometric, string_replace) plus the composed csv_records
 # workload (examples/stdlib/csv_records.bot). PROGRAM names either a corpus
 # algorithm (corpus::names) or a .bot file under examples/stdlib.
 #
-# For each `substring` call site (grouped by source location -- one line can
+# For each `str::substring` call site (grouped by source location -- one line can
 # be reached from several specialized instances, counted once), reports:
 #
 #   shape     one-char   the end operand is syntactically "start + 1" (or
@@ -23,12 +23,12 @@
 #   category  A  one-character access, recognized as a StringRegion by
 #                hir::stringregion.tcl (native/lower.tcl's "String regions"
 #                section): every reference is a supported consumer
-#                (`==`/`length`), so no temporary String is ever allocated
+#                (`==`/`str::length`), so no temporary String is ever allocated
 #             B  a longer (non-one-character) temporary region, also fully
 #                recognized: same zero-allocation treatment
 #             C  escapes as a real, independent output String (stored,
 #                returned, or otherwise not recognized as consumed only by
-#                `==`/`length`): allocates exactly as before -- this
+#                `==`/`str::length`): allocates exactly as before -- this
 #                milestone does not and should not change that
 #             D  ambiguous/unsupported: neither clearly a discardable
 #                temporary nor clearly an escaping result (a mixed-use
@@ -52,13 +52,13 @@ source [file join $root native native.tcl]
 source [file join $root examples stdlib corpus.tcl]
 
 # ---------------------------------------------------------------------------
-# Finding `substring` call sites in a program's generic (unspecialized)
+# Finding `str::substring` call sites in a program's generic (unspecialized)
 # lowering: one pass over every used instance's own region is enough to see
 # every *source* call site once (specialization changes typing, not shape).
 
 # 1 if E and OTHER (view HIR) are both `ref` expressions naming the same
 # binding: expression-id equality is never right here, since the source
-# idiom `substring(text, index, index + 1)` mentions `index` twice, as two
+# idiom `str::substring(text, index, index + 1)` mentions `index` twice, as two
 # distinct `ref` expressions of the one binding.
 proc sameBinding {hir e other} {
     return [expr {[hir::kind $hir $e] eq "ref" && [hir::kind $hir $other] eq "ref"
@@ -97,7 +97,7 @@ proc substrShape {hir node} {
     return [expr {[oneMore $hir $endExpr $startExpr] ? "one-char" : "multi-char"}]
 }
 
-# A (locationText -> {shape count exprIds}) dict of every `substring` call
+# A (locationText -> {shape count exprIds}) dict of every `str::substring` call
 # site reachable from any used instance of HIR/SPEC.
 proc findSubstrSites {hir spec} {
     set context [dict get $spec context]
@@ -113,7 +113,7 @@ proc findSubstrSites {hir spec} {
             }
             set node [hir::node $view $e]
             lassign [dict get $node target] targetKind target
-            if {$targetKind ne "native" || [dict get [hir::symbol $view $target] name] ne "substring"
+            if {$targetKind ne "native" || [dict get [hir::symbol $view $target] name] ne "str::substring"
                     || [llength [dict get $node args]] != 3} {
                 continue
             }

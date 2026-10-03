@@ -104,27 +104,26 @@ namespace eval native::lower {
         >            {op igt} \
         >=           {op ige} \
         ==           {equality} \
-        eq           {op streq} \
         list         {op listnew} \
-        length       {op strlen} \
-        substring    {op substr} \
-        lowercase    {op strlower} \
-        concat       {op strcat} \
-        encode_utf8  {op strutf8bytes} \
+        str::length       {op strlen} \
+        str::substring    {op substr} \
+        str::lowercase    {op strlower} \
+        str::concat       {op strcat} \
+        str::encode_utf8  {op strutf8bytes} \
+        str::is_tcl_alpha {op strtclalpha} \
+        str::is_tcl_alnum {op strtclalnum} \
         argv         {op argv} \
-        is_tcl_alpha {op strtclalpha} \
-        is_tcl_alnum {op strtclalnum} \
-        list_length  {op listlen} \
-        list_get     {op listget} \
-        list_append  {op listappend} \
-        immutable_set_from_list {equality-list} \
-        immutable_set_contains  {equality-set} \
-        mutable_array_allocate {op mutarrayallocate} \
-        mutable_array_capacity {op mutarraycapacity} \
-        mutable_array_get      {op mutarrayget} \
-        mutable_array_set      {op mutarrayset} \
-        mutable_array_copy     {op mutarraycopy} \
-        mutable_array_freeze   {op mutarrayfreeze} \
+        list::length {op listlen} \
+        list::at     {op listget} \
+        list::append {op listappend} \
+        immutable_set::from_list {equality-list} \
+        immutable_set::contains  {equality-set} \
+        mutable_array::allocate {op mutarrayallocate} \
+        mutable_array::capacity {op mutarraycapacity} \
+        mutable_array::at       {op mutarrayget} \
+        mutable_array::set      {op mutarrayset} \
+        mutable_array::copy     {op mutarraycopy} \
+        mutable_array::freeze   {op mutarrayfreeze} \
         integer?     {op isint} \
         string?      {op isstr} \
         list?        {op islist} \
@@ -134,7 +133,7 @@ namespace eval native::lower {
         result-value {op resultvalue} \
         result-error {op resulterror} \
         hash         {op hash} \
-        char_codepoint {op charcodepoint}]
+        char::scalar_value {op charcodepoint}]
     # State of the program being lowered. hir is the view of the instance
     # being lowered, baseHir the program's semantic HIR.
     variable hir {}
@@ -354,12 +353,12 @@ namespace eval native::lower {
 # A fixed-shape immutable List value (`[e0, ..., en-1]`) whose object
 # identity hir/escape.tcl proves is never observed may stay a handful of
 # scalar registers instead of ever calling `listnew`, with every
-# `list_get(..., k)` reading it at a compile-time-constant position reading
+# `list::at(..., k)` reading it at a compile-time-constant position reading
 # the corresponding register directly instead of calling `listget`. This
 # holds for two shapes (hir/escape.tcl's Classify):
 #
 #   local    a plain `[e0, ..., en-1]` construction, bound to a local
-#            binding every one of whose references is such a `list_get`:
+#            binding every one of whose references is such a `list::at`:
 #            purely intraprocedural, needs no ABI change at all -- Bind
 #            below just evaluates e0..en-1 into fresh registers instead of
 #            building a List from them, exactly as constant folding would.
@@ -575,7 +574,7 @@ namespace eval native::lower {
 #                      field registers instead of one List register
 #                      (SetupFieldParams) -- stored in `fn locals` exactly
 #                      like a virtualized *local* binding already is
-#                      (`{virtual fields}`), so the existing `list_get(ref,
+#                      (`{virtual fields}`), so the existing `list::at(ref,
 #                      constant)` interception in Call (the "Scalar
 #                      replacement" section's own mechanism) needs no
 #                      change at all to also serve a virtualized parameter:
@@ -728,9 +727,9 @@ namespace eval native::lower {
 # ---------------------------------------------------------------------------
 # String regions
 #
-# A temporary substring (`substring(text, a, b)`) hir/stringregion.tcl proves
+# A temporary substring (`str::substring(text, a, b)`) hir/stringregion.tcl proves
 # is consumed only by `==` (resolving to `streq`: both operands statically
-# str-typed) or `length` may be represented, instead of an allocated String,
+# str-typed) or `str::length` may be represented, instead of an allocated String,
 # as a "StringRegion": the three registers (base text, start, end) an
 # ordinary `substr` call would have validated and copied from -- kept as-is,
 # never materialized. This is the String analogue of the "Representation"
@@ -746,7 +745,7 @@ namespace eval native::lower {
 #
 # Two shapes (hir/stringregion.tcl's Classify):
 #
-#   local    a plain `substring(text, a, b)` call, or a String literal,
+#   local    a plain `str::substring(text, a, b)` call, or a String literal,
 #            bound to a local binding every reference to which is a
 #            supported consumer (Bind evaluates it once, as a region, via
 #            `Expr fn ... region`; Ref hands its fields straight to the one
@@ -769,7 +768,7 @@ namespace eval native::lower {
 #            unaffected).
 #
 # A region is also produced *inline*, with no binding at all, when a
-# region-producing call is a direct operand of `==`/`length`
+# region-producing call is a direct operand of `==`/`str::length`
 # (`peek(text, i) == "\""`): Call's `wantRegion` asks the operand expression
 # for region form directly, exactly as NativeCall's raw-eligible operands
 # ask Expr for `raw` -- there is no separate "materialize, then compare"
@@ -780,7 +779,7 @@ namespace eval native::lower {
 # targets, CSV scanning, actually exercises): `==` between two statically
 # str-typed operands lowers to `regioneq` (a region's three registers plus
 # the other, ordinary String register) instead of `streq` when one operand
-# is region-eligible; `length` of a region-eligible operand lowers to a
+# is region-eligible; `str::length` of a region-eligible operand lowers to a
 # plain `isub end start` (exact by construction: Botlish substring bounds
 # are already Unicode-scalar/character indices, not bytes, so a region's
 # character count is always end-start, with no ASCII/byte-length caveat
@@ -806,13 +805,13 @@ namespace eval native::lower {
 # lowering time -- so hir::blockescape.tcl's own header, not this section,
 # is where that composition is documented in full.
 #
-# Bounds checking (#18 of this milestone): a `substring`-shaped region still
+# Bounds checking (#18 of this milestone): a `str::substring`-shaped region still
 # validates its bounds -- RegionCheck (`op regioncheck`), emitted at exactly
 # the point in program order the ordinary `substr` call would have run --
 # exactly as `rt_substr` does, just without allocating or copying. Once
 # validated, the region's registers stay valid for as long as they are live:
 # Strings are immutable, so nothing can invalidate a bound already proven.
-# `length`/`regioneq`, downstream of a `regioncheck` (or of a String
+# `str::length`/`regioneq`, downstream of a `regioncheck` (or of a String
 # literal's always-valid trivial region), never re-check.
 #
 # GC rooting needs no new mechanism: a region's three fields are ordinary
@@ -827,7 +826,7 @@ namespace eval native::lower {
 #
 # Large-source retention (#15/#42 of this milestone): a virtual region never
 # escapes as a semantic String -- hir::stringregion.tcl only recognizes a
-# binding virtual when *every* reference is `==`/`length`, so a region is
+# binding virtual when *every* reference is `==`/`str::length`, so a region is
 # never itself the thing a caller stores or returns. A binding that *is*
 # stored or returned is, by that same rule, never virtualized: it
 # materializes (an ordinary, independent String, unrelated in size to its
@@ -887,7 +886,7 @@ namespace eval native::lower {
 # hir/traversal.tcl's `accesses` names the exact call expressions -- each a
 # call forwarding to a recognized character-accessor instance (`peek`-shaped:
 # hir/traversal.tcl's CharAccessorShape; see that module's header for why a
-# *direct* `substring(text, i, i+1)` call is deliberately not recognized,
+# *direct* `str::substring(text, i, i+1)` call is deliberately not recognized,
 # even though it is structurally simpler) -- that read the scanned String at
 # the loop's own induction index. Call (below) checks this *before* any of
 # its other dispatch (a native call, a block call, wantRegion/wantVirtual): when the
@@ -928,7 +927,7 @@ namespace eval native::lower {
 # if `want` is anything else -- #23's conservative fallback; the corpus
 # this milestone targets never asks for one at a recognized access site,
 # since hir/traversal.tcl only looks inside a self-tail call's own
-# argument subtree, never a `==`/`length` operand position).
+# argument subtree, never a `==`/`str::length` operand position).
 #
 # Threading the hidden parameter across calls: AppendTraversalArg
 # ------------------------------------------------------------------
@@ -979,7 +978,7 @@ namespace eval native::lower {
 # Virtual construction
 #
 # M8A-VIRTUAL-IMMUTABLE-CONSTRUCTION.md. An immutable String/List built by
-# ordinary `concat`/`list_append` need not be materialized as a flat object
+# ordinary `str::concat`/`list::append` need not be materialized as a flat object
 # at every construction step: until some consumer actually observes it as a
 # flat value, it may stay a *construction plan* -- the ordered pieces it is
 # made of, every one of them an already-evaluated value. hir/
@@ -988,7 +987,7 @@ namespace eval native::lower {
 #
 #   pieces   compile-time: a list of {span REG} (a flat value or a plan
 #            register), {region BASE START END} (a validated StringRegion --
-#            a `substring` operand of a concat is never copied into a String
+#            a `str::substring` operand of a concat is never copied into a String
 #            of its own) and {elem REG} (one List element). A plan local's
 #            `fn locals` entry is `{pieces PIECES FAMILY}`; a nested concat
 #            tree, a plan local and a plan parameter all just contribute
@@ -1006,7 +1005,7 @@ namespace eval native::lower {
 # (nir.rs's Inst::Construct). `plan` builds or extends (in place: the first
 # plan piece is its "anchor") a plan object; `flat` is the one
 # materialization -- one allocation, each piece copied once, byte-for-byte
-# the object eager concat/list_append would have built. Where nothing is
+# the object eager concat/list::append would have built. Where nothing is
 # virtual, PiecesToFlat still emits exactly the eager `op strcat`/`op
 # listappend` the baseline does, and `-virtual-construction-opt 0` (or
 # BOTLISH_NATIVE_VIRTUAL_CONSTRUCTION_OPT=0) emits no `construct` at all:
@@ -1016,7 +1015,7 @@ namespace eval native::lower {
 # exactly where, and in the order, the eager lowering evaluates it (operands
 # left to right, the eager call's own argument guards after both operands --
 # ConstructPieces); only copying moves, to the consumer that materializes.
-# The one failure mode eager concat/list_append have -- the collection-
+# The one failure mode eager concat/list::append have -- the collection-
 # length ceiling (MAX_COLLECTION_LENGTH, 2^62-1 characters/elements, far
 # beyond any allocatable object) -- is checked by `construct` itself.
 #
@@ -1032,7 +1031,7 @@ namespace eval native::lower {
 # mistake is a loud INVALID-NIR, never a plan misread as a String/List.
 #
 # Nothing here is a loop rewrite: a self-tail recurrence carrying
-# `concat(acc, piece)` stays virtual only because its `acc` parameter is a
+# `str::concat(acc, piece)` stays virtual only because its `acc` parameter is a
 # plan parameter by the same general rule as any other binding.
 
 # ---------------------------------------------------------------------------
@@ -1055,7 +1054,7 @@ namespace eval native::lower {
 #                      separately controls local/remote scalar replacement)
 #   -string-region-opt 1|0
 #                      represent a temporary substring hir/stringregion.tcl
-#                      proves is consumed only by `==`/`length` as a
+#                      proves is consumed only by `==`/`str::length` as a
 #                      StringRegion instead of an allocated String (default
 #                      1, unless the environment variable
 #                      BOTLISH_NATIVE_STRING_REGION_OPT is 0; see the
@@ -1355,7 +1354,7 @@ proc native::lower::program {hirProgram args} {
     # closedness, Range and virtual-construction analyses it composes with,
     # and before any lowering. It reads facts and decides a representation;
     # it never feeds back into them. A position the construction analysis
-    # already carries as a plan (concat/list_append pieces) keeps that
+    # already carries as a plan (concat/list::append pieces) keeps that
     # existing representation: ShortString1 does not compete with another
     # virtualization of the same position. -short-string-opt 0 plans every
     # position tagged and makes every fact `over`, reproducing the previous
@@ -1561,7 +1560,7 @@ proc native::lower::CollectChecks {region} {
 #     in a dead arm, an ARITY raise, a bridged native's known error), and an
 #     operation with an operand typed `never` (`n + stop()`) never runs.
 # Their blockers are counted in the function's skippedGuards, as a virtual
-# binding's list_get read already is (Call). The NIR does not change.
+# binding's list::at read already is (Call). The NIR does not change.
 
 # The parent of expression E in the program (baseHir), or "" for a root.
 proc native::lower::Parent {e} {
@@ -1918,7 +1917,7 @@ proc native::lower::ResultRaw {fnVar} {
 #     (short -> tagged, allocating) are the only transitions, cached in the
 #     same fn rawCache the raw Int conversions use (register numbers are
 #     unique), so one value converts once per region;
-#   * `length` and `==` on proven-short operands are scalar ops; every other
+#   * `str::length` and `==` on proven-short operands are scalar ops; every other
 #     consumer (storage, general String operations, hashing, FFI, a dynamic
 #     call) materializes the real String at that frontier.
 
@@ -2642,7 +2641,7 @@ proc native::lower::InternalRegionCompanionFunction {id} {
 # section above): a parameter B hir::escape::paramVirtualArity recognizes
 # is received as that many ordinary field registers, stored in `fn locals`
 # exactly like a virtualized *local* binding already is (`{virtual
-# fields}`) -- so the existing `list_get(ref, constant)` interception in
+# fields}`) -- so the existing `list::at(ref, constant)` interception in
 # Call needs no change at all to also serve it. Every other parameter is
 # registered exactly as Function's own loop does, including RawParams
 # raw-eligibility. Returns the flattened NIR parameter names (one per
@@ -3808,7 +3807,7 @@ proc native::lower::Const {fnVar e node} {
 # {RESULT REPR}: like Const, but when WANT is "region" and the constant is a
 # String, produces its trivial region directly -- a String literal is always
 # a region over itself (base = the literal, 0..its own character count),
-# needing no runtime bounds check at all (unlike a `substring` call's
+# needing no runtime bounds check at all (unlike a `str::substring` call's
 # region, whose bounds native/lower.tcl still validates: see RegionCheck in
 # the "String regions" section above). Every other constant is unaffected
 # (WANT=region is only ever asked by a caller that already confirmed, via
@@ -4061,7 +4060,7 @@ proc native::lower::Bind {fnVar e node} {
             # (hir/escape.tcl): its fields, not a materialized List (see
             # the "Scalar replacement" section above). Every reference to B
             # is already known (hir::escape::Bindings) to be a scalar
-            # `list_get` at a constant position, intercepted directly in
+            # `list::at` at a constant position, intercepted directly in
             # NativeCall below -- nothing ever reads this local's "value"
             # as a single register.
             set shape [hir::escape::virtualShape $escape $currentInstance $b]
@@ -4102,7 +4101,7 @@ proc native::lower::Bind {fnVar e node} {
         if {[hir::stringregion::virtual $stringregion $currentInstance $b]} {
             # A region-producing value (hir/stringregion.tcl) every
             # reference to which is already known to be a supported
-            # consumer (`==`/`length`): its fields, not a materialized
+            # consumer (`==`/`str::length`): its fields, not a materialized
             # String. Every reference to B is intercepted directly in Ref
             # below -- nothing ever reads this local's "value" as a single
             # tagged register.
@@ -4396,7 +4395,7 @@ proc native::lower::CanSupplyFields {fnVar argExprs fieldWidths {fieldCuts {}}} 
 # to a binding this same caller's own `fn locals` already holds virtual
 # (a virtualized local binding, or one of *this* function's own
 # virtualized parameters, forwarded unchanged -- already evaluated, read
-# here for free, exactly like the existing list_get(ref, constant)
+# here for free, exactly like the existing list::at(ref, constant)
 # interception reads one field), or a `call` node itself recognized this
 # same way (a `[e0..en-1]` literal, or a forwarding call to another
 # companion-eligible instance) -- reusing Call's own existing WANTVIRTUAL
@@ -4802,7 +4801,7 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
 
     if {$constructionOpt && $wantVirtual eq "" && !$wantRegion && $targetKind eq "native"
             && [dict get $node known] eq "" && [PlainNativeCallee $calleeExpr]} {
-        # A `concat`/`list_append` (virtual construction; see that section
+        # A `str::concat`/`list::append` (virtual construction; see that section
         # below) whose own value is wanted flat here: its operands' pieces
         # (a nested construction, a plan local/parameter/result) are
         # gathered first and copied once, by the eager op itself when
@@ -4883,12 +4882,12 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
     }
 
     if {$wantRegion && $targetKind eq "native"
-            && [dict get [hir::symbol $hir $target] name] eq "substring" && [llength $argExprs] == 3} {
-        # `substring(text, a, b)` asked for directly in region form (Bind, a
-        # region companion's exit, or an inline `==`/`length` operand):
+            && [dict get [hir::symbol $hir $target] name] eq "str::substring" && [llength $argExprs] == 3} {
+        # `str::substring(text, a, b)` asked for directly in region form (Bind, a
+        # region companion's exit, or an inline `==`/`str::length` operand):
         # RegionEligible already confirmed E has exactly this shape. The
         # three operands *are* the region -- text/a/b, evaluated exactly as
-        # an ordinary `substring` call would, with the same argument guards
+        # an ordinary `str::substring` call would, with the same argument guards
         # (EmitArgGuards) -- but bounds are validated with RegionCheck
         # instead of the allocating, copying `substr`.
         lassign $argExprs tExpr sExpr eExpr
@@ -4904,17 +4903,17 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
         if {$end eq "never"} {
             return {never tagged}
         }
-        set meta [core::native::metadata substring]
-        EmitArgGuards fn $e $argExprs [list $base $start $end] [dict get $meta paramTypes] substring
-        dict lappend fn calls [list native substring]
+        set meta [core::native::metadata str::substring]
+        EmitArgGuards fn $e $argExprs [list $base $start $end] [dict get $meta paramTypes] str::substring
+        dict lappend fn calls [list native str::substring]
         Assign fn "op regioncheck $base $start $end" $e
         return [list [list $base $start $end] region]
     }
 
     if {$wantVirtual eq "" && $targetKind eq "native" && [llength $argExprs] == 2
-            && [dict get [hir::symbol $hir $target] name] eq "list_get"
+            && [dict get [hir::symbol $hir $target] name] eq "list::at"
             && [hir::kind $hir [lindex $argExprs 0]] eq "ref"} {
-        # A `list_get(ref, constant)` read of a binding *currently* lowered
+        # A `list::at(ref, constant)` read of a binding *currently* lowered
         # as virtual fields (`fn locals`'s own `{virtual fields}` tag,
         # consulted directly rather than re-derived from hir::escape.tcl:
         # the same binding is `{virtual ...}` in one lowering of its
@@ -5005,7 +5004,7 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
 
     if {$wantVirtual eq "" && !$wantRegion && $targetKind eq "native" && [dict get $node known] eq ""} {
         # ShortString1 (SHORT-STRING.md): the String natives a proven-short
-        # operand can feed directly -- `length`, `==` -- and `substring`
+        # operand can feed directly -- `str::length`, `==` -- and `str::substring`
         # when its result is asked for as a short value. Only through a root
         # native reference (no callee code to run), like the String-region
         # forms just above.
@@ -5302,7 +5301,7 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
 # node NODE), or "" when this call is not one of them (the ordinary lowering
 # then runs unchanged):
 #
-#   length(s)      s ascii  =>  `asciilen` ((71 - clz) >> 3), s short =>
+#   str::length(s)      s ascii  =>  `asciilen` ((71 - clz) >> 3), s short =>
 #                  `shortlen` (Empty 0, One 1): a raw Int
 #   s == t         both ascii  =>  `asciieq` (word equality; the packed form
 #                  is canonical); both short  =>  `shorteq` (scalar equality;
@@ -5316,7 +5315,7 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
 #                  scalar operand against an unrestricted String simply
 #                  materializes (a recorded frontier, not a redesign of
 #                  String equality).
-#   substring(t, a, b)  asked short, with the planner's width proof
+#   str::substring(t, a, b)  asked short, with the planner's width proof
 #                  (b - a <= 1)  =>  the same `regioncheck` an ordinary call
 #                  would run (so the RANGE error is byte-identical), then an
 #                  infallible `strsliceshort`: no String allocated, and the
@@ -5335,7 +5334,7 @@ proc native::lower::TryShortStringOp {fnVar e node want} {
     }
     lassign [NativeCallOp $e $node] name op
     set argExprs [dict get $node args]
-    if {$name eq "length" && $op eq "strlen" && [llength $argExprs] == 1} {
+    if {$name eq "str::length" && $op eq "strlen" && [llength $argExprs] == 1} {
         set a [lindex $argExprs 0]
         if {![ShortNatural fn $a]} {
             return ""
@@ -5388,7 +5387,7 @@ proc native::lower::TryShortStringOp {fnVar e node want} {
         Tally fn asciiShortEq
         return [list [Assign fn "op asciishorteq $raw $rs" $e] tagged]
     }
-    if {$want eq "short" && $name eq "substring" && [llength $argExprs] == 3 && [ShortOk $e]} {
+    if {$want eq "short" && $name eq "str::substring" && [llength $argExprs] == 3 && [ShortOk $e]} {
         lassign $argExprs tExpr sExpr eExpr
         set base [Expr fn $tExpr]
         if {$base eq "never"} {
@@ -5402,9 +5401,9 @@ proc native::lower::TryShortStringOp {fnVar e node want} {
         if {$end eq "never"} {
             return {never tagged}
         }
-        set meta [core::native::metadata substring]
-        EmitArgGuards fn $e $argExprs [list $base $start $end] [dict get $meta paramTypes] substring
-        dict lappend fn calls [list native substring]
+        set meta [core::native::metadata str::substring]
+        EmitArgGuards fn $e $argExprs [list $base $start $end] [dict get $meta paramTypes] str::substring
+        dict lappend fn calls [list native str::substring]
         Assign fn "op regioncheck $base $start $end" $e
         Tally fn shortSlices
         return [list [AssignShort fn "op strsliceshort $base $start $end" $e] short]
@@ -5417,7 +5416,7 @@ proc native::lower::TryShortStringOp {fnVar e node want} {
 # literal, a reference (a scalar register, or an already materialized String
 # whose ShortString1 scalar is one cached load away -- a materialized String
 # is *not* natural for packed ASCII, whose extraction is a helper call), a
-# `substring` the producer above turns into a slice, or an exact call whose
+# `str::substring` the producer above turns into a slice, or an exact call whose
 # canonical function returns a scalar. A call of a tagged-result function is
 # not natural: its String is allocated either way, and the ordinary paths
 # (String regions, plain `streq`) already handle it.
@@ -5447,7 +5446,7 @@ proc native::lower::ShortNatural {fnVar e} {
         }
         call {
             # A call the String-region analysis already keeps allocation-free
-            # (a direct `substring`, a region-producing instance): that
+            # (a direct `str::substring`, a region-producing instance): that
             # existing virtualization wins, the scalar tiers do not compete
             # with it.
             if {$stringRegionOpt && [RegionEligible $e]} {
@@ -5456,7 +5455,7 @@ proc native::lower::ShortNatural {fnVar e} {
             set node [hir::node $hir $e]
             lassign [dict get $node target] kind target
             if {$kind eq "native"} {
-                return [expr {$tier eq "short" && [dict get [hir::symbol $hir $target] name] eq "substring"
+                return [expr {$tier eq "short" && [dict get [hir::symbol $hir $target] name] eq "str::substring"
                     && [llength [dict get $node args]] == 3}]
             }
             if {$kind eq "block" && [dict exists $fn targets $e]} {
@@ -5476,7 +5475,7 @@ proc native::lower::ShortNatural {fnVar e} {
 # existing TaggedOf machinery, exactly as any other tagged consumer already
 # is), then decodes directly at the function's current carried byte
 # position instead of calling E's own callee. Matches the access's own
-# (peek-shaped) semantics exactly: `if index >= length(text): ""` else the
+# (peek-shaped) semantics exactly: `if index >= str::length(text): ""` else the
 # one-character String at that index -- never seeking to find it, since
 # PLAN's own soundness proof (hir/traversal.tcl's ZeroStart plus the
 # self-tail +1 step) is exactly what guarantees the carried byte position
@@ -5524,9 +5523,9 @@ proc native::lower::TraversalAccess {fnVar e node plan} {
     return [list $resultReg tagged]
 }
 
-# 1 if expression E (an operand of a native `==`/`length` call TryStringRegionOp
+# 1 if expression E (an operand of a native `==`/`str::length` call TryStringRegionOp
 # is deciding) can produce a StringRegion directly (`Expr fn E region`),
-# with no runtime kind guard needed first: a direct `substring` call, a
+# with no runtime kind guard needed first: a direct `str::substring` call, a
 # String literal, a `ref` to a binding hir::stringregion.tcl proved virtual,
 # or a direct call to another instance hir::stringregion.tcl recognizes as
 # region-producing (Classify's "remote" case). See the "String regions"
@@ -5546,7 +5545,7 @@ proc native::lower::RegionEligible {e} {
 # Tries to lower call E (native NAME, resolving to OP: NativeCallOp) as a
 # StringRegion-consuming operation instead of an ordinary `streq`/`strlen`:
 # "" if not applicable (the caller falls back to NativeCall's ordinary
-# path), else {RESULT REPR} (always "tagged": the *result* of `==`/`length`
+# path), else {RESULT REPR} (always "tagged": the *result* of `==`/`str::length`
 # is an ordinary Bool/Int -- only one *operand* is ever a region).
 #
 #   ==      both operands already statically str-typed (OP resolved to
@@ -5560,7 +5559,7 @@ proc native::lower::RegionEligible {e} {
 #           region-vs-region, so this is a deliberate, documented
 #           narrowing, not a soundness requirement).
 #   length  its one argument is RegionEligible and -- like any other
-#           `length` call -- needs no guard already proven unnecessary: a
+#           `str::length` call -- needs no guard already proven unnecessary: a
 #           plain `isub end start`, exact by construction (Botlish
 #           substring bounds are character indices already, so a region's
 #           character count is always end-start).
@@ -5585,7 +5584,7 @@ proc native::lower::TryStringRegionOp {fnVar e name op argExprs} {
         # Exactly one operand supplies the region. A `ref` operand is a
         # virtual binding that *cannot* be evaluated any other way (Ref
         # refuses a non-region request), so it takes the region role; any
-        # other region-eligible operand (a `substring` call, a literal, a
+        # other region-eligible operand (a `str::substring` call, a literal, a
         # forwarding call) can equally be evaluated as an ordinary String.
         # hir::stringregion::Bindings never leaves both operands virtual
         # refs. Otherwise prefer the left one. Evaluation order is
@@ -5615,7 +5614,7 @@ proc native::lower::TryStringRegionOp {fnVar e name op argExprs} {
         dict lappend fn calls [list native $name]
         return [list [Assign fn "op regioneq $base $start $end $other" $e] tagged]
     }
-    if {$name eq "length" && [llength $argExprs] == 1} {
+    if {$name eq "str::length" && [llength $argExprs] == 1} {
         set arg [lindex $argExprs 0]
         set key [list $e $arg]
         if {[dict exists $guards $key] || [dict exists $knownErrors $key] || ![RegionEligible $arg]} {
@@ -5629,15 +5628,15 @@ proc native::lower::TryStringRegionOp {fnVar e name op argExprs} {
         dict lappend fn calls [list native $name]
         return [list [Assign fn "op isub $end $start" $e] tagged]
     }
-    if {$name in {is_tcl_alpha is_tcl_alnum} && [llength $argExprs] == 1} {
+    if {$name in {str::is_tcl_alpha str::is_tcl_alnum} && [llength $argExprs] == 1} {
         # core/tclcompat.tcl's one-scalar classification: a region-eligible
         # sole argument classifies directly from the region's own text (see
         # ops.rs's rt_str_region_is_tcl_alpha/alnum), never materializing the
         # one-character String `char_at`-shaped source code (hir/
         # stringregion.tcl's ConsumingNative) usually builds just to classify
         # it once and discard it. Same RANGE contract as the materializing
-        # op (both guard/knownError-free by construction: is_tcl_alpha/
-        # is_tcl_alnum accept any str, never needing a kind guard).
+        # op (both guard/knownError-free by construction: str::is_tcl_alpha/
+        # str::is_tcl_alnum accept any str, never needing a kind guard).
         set arg [lindex $argExprs 0]
         if {![RegionEligible $arg]} {
             return ""
@@ -5647,7 +5646,7 @@ proc native::lower::TryStringRegionOp {fnVar e name op argExprs} {
             return {never tagged}
         }
         lassign $region base start end
-        set rop [expr {$name eq "is_tcl_alpha" ? "strregiontclalpha" : "strregiontclalnum"}]
+        set rop [expr {$name eq "str::is_tcl_alpha" ? "strregiontclalpha" : "strregiontclalnum"}]
         dict lappend fn calls [list native $name]
         return [list [Assign fn "op $rop $base $start $end" $e] tagged]
     }
@@ -5669,7 +5668,7 @@ proc native::lower::IsRefToBinding {view e b} {
 # "String traversal" section's identical TraversalAccess precedent). Trusts
 # ConsumingShape's own structural proof rather than re-deriving it: any
 # expression shape besides `if`, a `ref` (to B or to a root true/false/
-# native value), or a call to `==`/`length`/a ConsumingNative is a
+# native value), or a call to `==`/`str::length`/a ConsumingNative is a
 # hir::stringregion.tcl bug, not a case this lowering falls back from.
 proc native::lower::EmitRegionConsumerBody {fnVar calleeView e b region} {
     upvar 1 $fnVar fn
@@ -5720,12 +5719,12 @@ proc native::lower::EmitRegionConsumerBody {fnVar calleeView e b region} {
                 set litReg [Assign fn "str [Quote [core::value::strOf $litValue]]" $litExpr]
                 return [Assign fn "op regioneq $base $start $end $litReg" $e]
             }
-            if {$name eq "length" && [llength $args] == 1} {
+            if {$name eq "str::length" && [llength $args] == 1} {
                 return [Assign fn "op isub $end $start" $e]
             }
-            # is_tcl_alpha/is_tcl_alnum: ConsumingShape's own structural
+            # str::is_tcl_alpha/str::is_tcl_alnum: ConsumingShape's own structural
             # check allows no other native call to appear here.
-            set rop [expr {$name eq "is_tcl_alpha" ? "strregiontclalpha" : "strregiontclalnum"}]
+            set rop [expr {$name eq "str::is_tcl_alpha" ? "strregiontclalpha" : "strregiontclalnum"}]
             return [Assign fn "op $rop $base $start $end" $e]
         }
     }
@@ -6156,12 +6155,12 @@ proc native::lower::InlineLeafCall {fnVar e node calleeId callerArgRegs} {
 # {NAME OP}: the native NODE's target's name, and the NIR op its call
 # resolves to (an "equality" implementation picks veq/ieq/streq from the two
 # argument expressions' static types, exactly as NativeCall always has;
-# an "equality-set" implementation -- immutable_set_contains -- picks
+# an "equality-set" implementation -- immutable_set::contains -- picks
 # setcontainstotal over the generic setcontains the identical way, from the
 # set's own element type and the needle's own type, both already available
 # as ordinary HIR types at this call node, no different from =='s own two
 # argument expressions: see M3-EQUALITY-TOTAL-SETCONTAINS-EFFECT.md; an
-# "equality-list" implementation -- immutable_set_from_list -- picks
+# "equality-list" implementation -- immutable_set::from_list -- picks
 # setfromlisttotal over the generic setfromlist the same way, from the
 # source list's own static element type: see
 # M4-EQUALITY-TOTAL-SETFROMLIST-EFFECT.md) --
@@ -6265,9 +6264,9 @@ proc native::lower::NativeCallOp {e node} {
 # decided each of ARGEXPRS (call E's arguments, now lowered as ARGREGS) needs
 # for a call whose native's declared parameter types are PARAMTYPES -- shared
 # by NativeCall's ordinary path and the "String regions" section's own
-# `substring`-as-region lowering (Call's `wantRegion` case), which bypasses
+# `str::substring`-as-region lowering (Call's `wantRegion` case), which bypasses
 # NativeCall entirely but still owes its three operands the exact same
-# checks an ordinary `substring` call would have run.
+# checks an ordinary `str::substring` call would have run.
 proc native::lower::EmitArgGuards {fnVar e argExprs argRegs paramTypes name} {
     upvar 1 $fnVar fn
     variable hir
@@ -7728,15 +7727,15 @@ proc native::lower::ParamLocal {fnVar id k b r} {
 }
 
 # The construction family of native NAME called with ARGS at E, when it is a
-# construction this lowering may keep virtual: `concat` (String) or a
-# `list_append` whose List operand is statically List-typed ("" otherwise:
+# construction this lowering may keep virtual: `str::concat` (String) or a
+# `list::append` whose List operand is statically List-typed ("" otherwise:
 # an untyped List operand keeps its eager, guarded `listappend`).
 proc native::lower::ConstructNative {e name argExprs} {
     variable hir
-    if {$name eq "concat" && [llength $argExprs] == 2} {
+    if {$name eq "str::concat" && [llength $argExprs] == 2} {
         return str
     }
-    if {$name eq "list_append" && [llength $argExprs] == 2
+    if {$name eq "list::append" && [llength $argExprs] == 2
             && [hir::construction::Family [hir::typeOf $hir [lindex $argExprs 0]]] eq "list"} {
         return list
     }
@@ -7849,7 +7848,7 @@ proc native::lower::PlanPieces {fnVar e family} {
                     }
                     return $pieces
                 }
-                if {$family eq "str" && $name eq "substring" && [llength $args] == 3} {
+                if {$family eq "str" && $name eq "str::substring" && [llength $args] == 3} {
                     # A StringRegion piece: the substring's three operands,
                     # evaluated and bounds-checked exactly where the eager
                     # `substr` would run (Call's own wantRegion path), but
@@ -7896,7 +7895,7 @@ proc native::lower::PlanPieces {fnVar e family} {
     return [list [list span $r]]
 }
 
-# The pieces of construction call E (native NAME: `concat` or `list_append`,
+# The pieces of construction call E (native NAME: `str::concat` or `list::append`,
 # FAMILY): its operands' own pieces, in order -- a nested construction, a
 # plan local, a plan parameter or a plan result contributes its pieces or
 # plan instead of a materialized value. The operands' kind checks are

@@ -32,7 +32,7 @@
 # assumed): a Unicode scalar value. A String is a Rust `str` natively
 # (StrObj::chars counts scalars) and a Tcl 9 string in the reference
 # interpreter (`string length` counts code points, astral ones included);
-# `length` and `substring` index by it. Surrogates (U+D800..U+DFFF) cannot be
+# `str::length` and `str::substring` index by it. Surrogates (U+D800..U+DFFF) cannot be
 # part of a String, so they are not in the representation's domain; a lone
 # surrogate literal is simply not eligible. Not a byte, not a grapheme
 # cluster. One non-ASCII character ("ä", "€", "λ", "猫", an emoji scalar) is
@@ -53,9 +53,9 @@
 #          nothing (so a dead long-String branch never forces a conversion);
 #        * hir::induction::ClassifyArg -- the existing `index + K` step
 #          classifier traversal.tcl already uses to recognize `peek`'s
-#          `substring(text, index, index + 1)`: a `substring(t, i, i + K)`
+#          `str::substring(text, index, index + 1)`: a `str::substring(t, i, i + K)`
 #          with K 0 or 1 has exactly K characters on success;
-#        * hir::exact::IntOf for a `substring(t, 0, 1)`-shaped constant slice;
+#        * hir::exact::IntOf for a `str::substring(t, 0, 1)`-shaped constant slice;
 #        * the specialization's call-target map and closedness
 #          (InstanceClosed): a closed instance's parameter is bounded by the
 #          join of its callers' arguments, a result by the join of its exits.
@@ -507,7 +507,7 @@ proc native::shortstr::uses {plan id} {
 #
 # A candidate position -- a String parameter or result that has a tier, a local
 # `bind` that has a tier and that lowering would keep in a register -- stays
-# virtual only if it has at least one *free* use: a scalar consumer (`length`,
+# virtual only if it has at least one *free* use: a scalar consumer (`str::length`,
 # `==` whose operands could both be scalars), or a flow into another position
 # that is itself virtual and useful (an argument of a virtual parameter, the
 # value of a virtual result, the value of a virtual local, directly or through
@@ -647,7 +647,7 @@ proc native::shortstr::PotNatural {id e} {
             lassign [dict get $node target] kind target
             if {$kind eq "native"} {
                 return [expr {[Tier [fact $id $e]] eq "short"
-                    && [dict get [hir::symbol $h $target] name] eq "substring"}]
+                    && [dict get [hir::symbol $h $target] name] eq "str::substring"}]
             }
             set calls [dict get $Spec instances $id calls]
             return [expr {[dict exists $calls $e] && [info exists SlotCand(R:[dict get $calls $e])]}]
@@ -713,7 +713,7 @@ proc native::shortstr::DemandWalk {id e ctx} {
             if {$kind eq "native"} {
                 set name [dict get [hir::symbol $h $target] name]
                 set scalar 0
-                if {$name eq "length" && [llength $args] == 1} {
+                if {$name eq "str::length" && [llength $args] == 1} {
                     set scalar [PotNatural $id [lindex $args 0]]
                 } elseif {$name eq "==" && [llength $args] == 2} {
                     set scalar [expr {[PotNatural $id [lindex $args 0]] && [PotNatural $id [lindex $args 1]]}]
@@ -1068,7 +1068,7 @@ proc native::shortstr::CallFact {id h e node} {
     lassign [dict get $node target] kind target
     if {$kind eq "native"} {
         set name [dict get [hir::symbol $h $target] name]
-        if {$name eq "substring" && [llength [dict get $node args]] == 3} {
+        if {$name eq "str::substring" && [llength [dict get $node args]] == 3} {
             return [SubstringFact $h [dict get $node args]]
         }
         return over:unknown
@@ -1086,7 +1086,7 @@ proc native::shortstr::CallFact {id h e node} {
     return over:unknown
 }
 
-# `substring(text, start, end)` on success has exactly end - start
+# `str::substring(text, start, end)` on success has exactly end - start
 # characters. The existing facts that bound that difference: both operands
 # exact Ints (hir::exact), or `end` a step of the very binding `start`
 # refers to (hir::induction::ClassifyArg: identity, or `start + K`).
@@ -1271,13 +1271,13 @@ proc native::shortstr::UseWalk {id e ctx usesVar} {
                     if {![Ok [fact $id $a]]} { set allOk 0 }
                 }
                 foreach a $args {
-                    if {$name eq "length" && [llength $args] == 1 && $allOk} {
+                    if {$name eq "str::length" && [llength $args] == 1 && $allOk} {
                         UseWalk $id $a "length -> scalar" uses
                     } elseif {$name eq "==" && [llength $args] == 2 && $allOk} {
                         UseWalk $id $a "equality -> scalar" uses
                     } elseif {$name eq "==" && [llength $args] == 2} {
                         UseWalk $id $a "equality with an unrestricted String -> materialize" uses
-                    } elseif {$name eq "substring"} {
+                    } elseif {$name eq "str::substring"} {
                         UseWalk $id $a "substring -> materialize" uses
                     } else {
                         UseWalk $id $a "$name -> materialize" uses

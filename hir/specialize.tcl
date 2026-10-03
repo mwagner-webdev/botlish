@@ -483,7 +483,7 @@ proc hir::specialize::IsCallableKey {key} {
 }
 
 # The label text of key type KEY: an exact callable as block(e239) /
-# native(is_tcl_alpha), everything else as hir::types::show. (The block's
+# native(str::is_tcl_alpha), everything else as hir::types::show. (The block's
 # ExprId is a diagnostic handle for audits, never a language feature.)
 proc hir::specialize::ShowKey {key} {
     if {[hir::types::IsExactBlock $key]} {
@@ -641,7 +641,7 @@ proc hir::specialize::Intersect {a b} {
 # very parameter it feeds contributes its own semantic type's evidence
 # (hir/types.tcl's Call already computed this on the first, generic pass --
 # including, through a call's nativeResultOverride, a trusted native's
-# declared result). A transformed value (e.g. concat(q, "")) has no
+# declared result). A transformed value (e.g. str::concat(q, "")) has no
 # evidence in its own semantic type unless the operation is itself known to
 # preserve it, so it correctly contributes {} -- dropping the fact for that
 # parameter unless some other call proves it independently.

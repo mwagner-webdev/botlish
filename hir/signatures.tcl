@@ -48,7 +48,7 @@
 # the use-site type, excluding the parameter's own seed, admits it), when
 # it is statically unreachable (hir::types' own reachability), or when it
 # lies in a branch of an `if` whose condition refines the parameter
-# (control-flow-dependent: `if integer?(x): x + 1 else: length(x)` accepts
+# (control-flow-dependent: `if integer?(x): x + 1 else: str::length(x)` accepts
 # both kinds; no union type exists to say so, so neither branch constrains
 # the parameter).
 #

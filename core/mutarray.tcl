@@ -7,8 +7,12 @@
 # the one runtime value kind value.tcl documents as *not* immutable.
 #
 # This is deliberately the whole substrate: allocate, capacity, indexed
-# get/set (bounds checked), bulk copy and finalization to an ordinary
-# immutable List. There is no push/grow/reserve here (and no such native):
+# at/set (bounds checked), bulk copy and finalization to an ordinary
+# immutable List -- the `mutable_array` namespace's intrinsics, each a root
+# native registered under its qualified name (mutable_array::allocate,
+# ::capacity, ::at, ::set, ::copy, ::freeze); lib/mutable_array.bot adds the
+# ordinary Botlish members (from_list, create, get) and may never redefine
+# these (surface/modules.tcl, DUPLICATE-NATIVE; STDLIB-NAMESPACES.md). There is no push/grow/reserve here (and no such native):
 # growth policy, chunking policy and finalization strategy are ordinary
 # Botlish, built on these primitives (see examples/stdlib's builders). A
 # MutableArray's capacity never changes after allocate; "growing" means
@@ -39,10 +43,10 @@ proc core::mutarray::allocate {capacity} {
     variable store
     variable nextId
     variable MaxCollectionLength
-    set n [core::value::intOf [core::value::expect int $capacity mutable_array_allocate]]
+    set n [core::value::intOf [core::value::expect int $capacity mutable_array::allocate]]
     if {$n < 0 || $n > $MaxCollectionLength} {
         core::semanticError RANGE \
-            "mutable_array_allocate: capacity must be 0..$MaxCollectionLength, got $n"
+            "mutable_array::allocate: capacity must be 0..$MaxCollectionLength, got $n"
     }
     set id [incr nextId]
     dict set store $id [lrepeat $n {unit}]
@@ -60,58 +64,60 @@ proc core::mutarray::Slots {v name} {
 
 proc core::mutarray::capacity {v} {
     variable store
-    set id [Slots $v mutable_array_capacity]
+    set id [Slots $v mutable_array::capacity]
     return [core::value::int [llength [dict get $store $id]]]
 }
 
-# (mutable_array_get ARRAY INDEX): the element at INDEX, 0 <= INDEX < capacity.
-proc core::mutarray::get {v index} {
+# (mutable_array::at ARRAY INDEX): the element at INDEX, 0 <= INDEX <
+# capacity; any other Int fails with the declared builtin error
+# IndexNotFound (core/native.tcl), exactly like list::at (core/lists.tcl).
+proc core::mutarray::at {v index} {
     variable store
-    set id [Slots $v mutable_array_get]
+    set id [Slots $v mutable_array::at]
     set slots [dict get $store $id]
-    set i [core::value::intOf [core::value::expect int $index mutable_array_get]]
+    set i [core::value::intOf [core::value::expect int $index mutable_array::at]]
     if {$i < 0 || $i >= [llength $slots]} {
-        core::semanticError RANGE \
-            "mutable_array_get: index $i is outside 0..[expr {[llength $slots] - 1}]"
+        core::native::failDeclared IndexNotFound \
+            "mutable_array::at: index $i is outside 0..[expr {[llength $slots] - 1}]"
     }
     return [lindex $slots $i]
 }
 
-# (mutable_array_set ARRAY INDEX VALUE): mutates ARRAY in place; returns unit.
+# (mutable_array::set ARRAY INDEX VALUE): mutates ARRAY in place; returns unit.
 proc core::mutarray::set_ {v index value} {
     variable store
-    set id [Slots $v mutable_array_set]
+    set id [Slots $v mutable_array::set]
     set slots [dict get $store $id]
-    set i [core::value::intOf [core::value::expect int $index mutable_array_set]]
+    set i [core::value::intOf [core::value::expect int $index mutable_array::set]]
     if {$i < 0 || $i >= [llength $slots]} {
         core::semanticError RANGE \
-            "mutable_array_set: index $i is outside 0..[expr {[llength $slots] - 1}]"
+            "mutable_array::set: index $i is outside 0..[expr {[llength $slots] - 1}]"
     }
     dict set store $id [lset slots $i [core::value::check $value]]
     return [core::value::unit]
 }
 
-# (mutable_array_copy DST DSTSTART SRC SRCSTART COUNT): copies COUNT elements
+# (mutable_array::copy DST DSTSTART SRC SRCSTART COUNT): copies COUNT elements
 # of SRC starting at SRCSTART into DST starting at DSTSTART; returns unit.
 # DST and SRC may be the same MutableArray, with overlapping ranges: the
 # result is as if every source element were read before any destination
 # write (memmove semantics), matching the native runtime's pointer copy.
 proc core::mutarray::copy {dst dstStart src srcStart count} {
     variable store
-    set dstId [Slots $dst mutable_array_copy]
-    set srcId [Slots $src mutable_array_copy]
+    set dstId [Slots $dst mutable_array::copy]
+    set srcId [Slots $src mutable_array::copy]
     set dstSlots [dict get $store $dstId]
     set srcSlots [dict get $store $srcId]
-    set ds [core::value::intOf [core::value::expect int $dstStart mutable_array_copy]]
-    set ss [core::value::intOf [core::value::expect int $srcStart mutable_array_copy]]
-    set n  [core::value::intOf [core::value::expect int $count mutable_array_copy]]
+    set ds [core::value::intOf [core::value::expect int $dstStart mutable_array::copy]]
+    set ss [core::value::intOf [core::value::expect int $srcStart mutable_array::copy]]
+    set n  [core::value::intOf [core::value::expect int $count mutable_array::copy]]
     set invalid [expr {
         $ds < 0 || $ss < 0 || $n < 0
         || $ds + $n > [llength $dstSlots] || $ss + $n > [llength $srcSlots]
     }]
     if {$invalid} {
         core::semanticError RANGE \
-            "mutable_array_copy: range dstStart=$ds, srcStart=$ss, count=$n is invalid for dst capacity [llength $dstSlots], src capacity [llength $srcSlots]"
+            "mutable_array::copy: range dstStart=$ds, srcStart=$ss, count=$n is invalid for dst capacity [llength $dstSlots], src capacity [llength $srcSlots]"
     }
     if {$n > 0} {
         # Read the source range before writing (memmove semantics), so an
@@ -128,33 +134,33 @@ proc core::mutarray::copy {dst dstStart src srcStart count} {
     return [core::value::unit]
 }
 
-# (mutable_array_freeze ARRAY COUNT): a new immutable List of ARRAY's first
+# (mutable_array::freeze ARRAY COUNT): a new immutable List of ARRAY's first
 # COUNT elements (0 <= COUNT <= capacity). Always copies: this is the
 # runtime's "final immutable storage creation" primitive, not a growth
 # policy, and a future zero-copy freeze is left open, not implemented here.
 proc core::mutarray::freeze {v count} {
     variable store
-    set id [Slots $v mutable_array_freeze]
+    set id [Slots $v mutable_array::freeze]
     set slots [dict get $store $id]
-    set n [core::value::intOf [core::value::expect int $count mutable_array_freeze]]
+    set n [core::value::intOf [core::value::expect int $count mutable_array::freeze]]
     if {$n < 0 || $n > [llength $slots]} {
         core::semanticError RANGE \
-            "mutable_array_freeze: count $n is outside 0..[llength $slots]"
+            "mutable_array::freeze: count $n is outside 0..[llength $slots]"
     }
     return [core::value::listOf [lrange $slots 0 [expr {$n - 1}]]]
 }
 
-core::native::register mutable_array_allocate -arity 1 -impl core::mutarray::allocate \
+core::native::register mutable_array::allocate -arity 1 -impl core::mutarray::allocate \
     -param-types {int} -result-type mutarray -runtime mutarray-alloc -context-free 1
-core::native::register mutable_array_capacity -arity 1 -impl core::mutarray::capacity \
+core::native::register mutable_array::capacity -arity 1 -impl core::mutarray::capacity \
     -param-types {mutarray} -result-type int -result-range collection-length
-core::native::register mutable_array_get -arity 2 -impl core::mutarray::get \
+core::native::register mutable_array::at -arity 2 -impl core::mutarray::at \
     -param-types {mutarray int} -result-type any -runtime range-check \
-    -result-shape {mutarray-element 0}
-core::native::register mutable_array_set -arity 3 -impl core::mutarray::set_ \
+    -result-shape {mutarray-element 0} -errors IndexNotFound
+core::native::register mutable_array::set -arity 3 -impl core::mutarray::set_ \
     -param-types {mutarray int any} -result-type unit -runtime {range-check mutarray-mutate}
-core::native::register mutable_array_copy -arity 5 -impl core::mutarray::copy \
+core::native::register mutable_array::copy -arity 5 -impl core::mutarray::copy \
     -param-types {mutarray int mutarray int int} -result-type unit -runtime {range-check mutarray-mutate}
-core::native::register mutable_array_freeze -arity 2 -impl core::mutarray::freeze \
+core::native::register mutable_array::freeze -arity 2 -impl core::mutarray::freeze \
     -param-types {mutarray int} -result-type list -runtime {range-check mutarray-alloc} \
     -result-shape {mutarray-freeze 0}

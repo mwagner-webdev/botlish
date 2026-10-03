@@ -4,17 +4,17 @@
 # expect: [2, 3]
 
 fn a_alpha(c):
-    is_tcl_alpha(c)
+    str::is_tcl_alpha(c)
 
 fn b_alnum(c):
-    is_tcl_alnum(c)
+    str::is_tcl_alnum(c)
 
 fn count_while(p, s):
-    loop i from 0 to length(s):
-        if p(substring(s, i, i + 1)):
+    loop i from 0 to str::length(s):
+        if p(str::substring(s, i, i + 1)):
             continue
         return i
-    length(s)
+    str::length(s)
 
 preds = [a_alpha, b_alnum]
-[count_while(list_get(preds, 0), "ab1"), count_while(list_get(preds, 1), "12a_")]
+[count_while(list::at(preds, 0), "ab1"), count_while(list::at(preds, 1), "12a_")]

@@ -4,7 +4,7 @@
 #
 # Botlish has no general type variables (`fn f[T](...)` does not exist and
 # this file adds none). Some operations are nevertheless *intrinsically*
-# relational -- `list_get(List[T], i)` is a `T`, `from_list(List[T])` is a
+# relational -- `list::at(List[T], i)` is a `T`, `from_list(List[T])` is a
 # `MutableArray[T]` -- and the compiler has always known such relations
 # through per-operation rules rather than through function types:
 # core/lists.tcl's -result-shape (element/append/elements), consumed by
@@ -12,14 +12,14 @@
 # is the one central place for the rest:
 #
 #   * result rules for ordinary Botlish *module functions* whose result
-#     type depends on their argument types: mutarray::from_list and
-#     mutarray::create. They are keyed by the function's resolved identity
-#     (the module binding "mutarray::from_list" -- lib/mutarray.bot; a user
+#     type depends on their argument types: mutable_array::from_list and
+#     mutable_array::create. They are keyed by the function's resolved identity
+#     (the module binding "mutable_array::from_list" -- lib/mutable_array.bot; a user
 #     function that happens to be called from_list, or a local alias of the
 #     library function, cannot acquire or lose the rule), never by the
 #     spelling of a call;
 #   * static element-contract checks for the natives that write into a
-#     MutableArray[T] (mutable_array_set, mutable_array_copy): a store must
+#     MutableArray[T] (mutable_array::set, mutable_array::copy): a store must
 #     be *proven* admissible for T, and a copy must not move values into a
 #     typed destination without the same proof. There is no implicit guard
 #     and no widening -- an unproven store is a compile-time TYPE error;
@@ -31,19 +31,19 @@
 # element type (core/mutarray.tcl, native MutArrayObj): `MutableArray[T]` is
 # a compile-time contract, so no backend needs to know any of this.
 #
-# Result rules for natives that project the element type (`mutable_array_get`
-# -> T, `mutable_array_freeze` -> List[T]) are ordinary -result-shape entries
-# (core/mutarray.tcl, hir::types::ShapeResult), exactly like list_get.
+# Result rules for natives that project the element type (`mutable_array::at`
+# -> T, `mutable_array::freeze` -> List[T]) are ordinary -result-shape entries
+# (core/mutarray.tcl, hir::types::ShapeResult), exactly like list::at.
 
 namespace eval hir::containers {
     # Qualified module function name -> rule.
     variable moduleRules [dict create \
-        mutarray::from_list from-list \
-        mutarray::create    create]
+        mutable_array::from_list from-list \
+        mutable_array::create    create]
     # Native name -> rule for the natives that write a MutableArray's slots.
     variable nativeRules [dict create \
-        mutable_array_set  set \
-        mutable_array_copy copy]
+        mutable_array::set  set \
+        mutable_array::copy copy]
 }
 
 # Records, as HIR's `intrinsicBlocks` field (block ExprId -> rule), which
@@ -151,8 +151,8 @@ proc hir::containers::BlockContexts {hir e rule} {
 
 # 1 if native NAME cannot retain any of its arguments where a later reader
 # could find them: it returns a plain scalar and does not mutate a
-# MutableArray. Such a call merely *uses* its arguments (list_length,
-# type tests, mutable_array_capacity, ...), so it cannot erase a contract.
+# MutableArray. Such a call merely *uses* its arguments (list::length,
+# type tests, mutable_array::capacity, ...), so it cannot erase a contract.
 proc hir::containers::NonRetaining {name} {
     set meta [core::native::metadata $name]
     if {"mutarray-mutate" in [dict get $meta runtime]} {
@@ -225,7 +225,7 @@ proc hir::containers::VerifyNative {hirVar ranges e node name} {
     }
 }
 
-# mutable_array_set(ARRAY, i, VALUE): when ARRAY is a MutableArray[T], VALUE
+# mutable_array::set(ARRAY, i, VALUE): when ARRAY is a MutableArray[T], VALUE
 # must be proven admissible for T. The element contract belongs to the
 # object; a store never widens it.
 proc hir::containers::VerifyStore {hirVar ranges array value} {
@@ -249,7 +249,7 @@ proc hir::containers::VerifyStore {hirVar ranges array value} {
         [hir::range::show $range]] $value
 }
 
-# mutable_array_copy(DST, dstStart, SRC, srcStart, count): every copied
+# mutable_array::copy(DST, dstStart, SRC, srcStart, count): every copied
 # element must be valid in the destination's element contract.
 #
 #   typed destination MutableArray[T] (T other than any):

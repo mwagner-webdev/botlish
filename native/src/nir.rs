@@ -44,7 +44,7 @@ pub enum OpCode {
     ListGet,
     ListAppend,
     /// List -> ImmutableSet, deduplicating by VEq's own rule (MINIMAL-
-    /// IMMUTABLE-SET.md's `immutable_set_from_list`): O(n^2), the
+    /// IMMUTABLE-SET.md's `immutable_set::from_list`): O(n^2), the
     /// deliberately simple first representation -- no inline fast path
     /// (item 64), always a helper call (ops.rs's `rt_set_from_list`).
     SetFromList,
@@ -63,10 +63,10 @@ pub enum OpCode {
     /// (M4-EQUALITY-TOTAL-SETFROMLIST-EFFECT.md). Generic `SetFromList`
     /// itself remains unconditionally `may_error` -- this sibling opcode is
     /// only ever emitted for one particular, statically-proven call site,
-    /// never for `immutable_set_from_list`'s own generic/dynamically-
+    /// never for `immutable_set::from_list`'s own generic/dynamically-
     /// dispatched entry (native/lower.tcl's `NativeImpl`).
     SetFromListTotal,
-    /// Total membership on an ImmutableSet operand (`immutable_set_contains`):
+    /// Total membership on an ImmutableSet operand (`immutable_set::contains`):
     /// false for an absent value, never an Error completion. Always a
     /// helper call (`rt_set_contains`), like SetFromList.
     SetContains,
@@ -84,7 +84,7 @@ pub enum OpCode {
     /// (M3-EQUALITY-TOTAL-SETCONTAINS-EFFECT.md). Generic `SetContains`
     /// itself remains unconditionally `may_error` -- this sibling opcode is
     /// only ever emitted for one particular, statically-proven call site,
-    /// never for `immutable_set_contains`'s own generic/dynamically-
+    /// never for `immutable_set::contains`'s own generic/dynamically-
     /// dispatched entry (native/lower.tcl's `NativeImpl`).
     SetContainsTotal,
     MutArrayAllocate,
@@ -102,7 +102,7 @@ pub enum OpCode {
     ResultValue,
     ResultError,
     /// The Unicode scalar value of a UnicodeChar operand, as an Int
-    /// (char::codepoint/char_codepoint, core/unicodechar.tcl): total, never
+    /// (char::scalar_value, wrapped by char::codepoint, core/unicodechar.tcl): total, never
     /// fails. A scalar value always fits the small-Int range, so the result
     /// is always an immediate small Int, never a BigInt.
     CharCodepoint,
@@ -560,7 +560,7 @@ pub enum Inst {
     /// or extends a private plan object held by a plan register (see
     /// Function::plan_regs and `validate_plans`). Always a possible
     /// allocation (GC safepoint) and possible failure (the collection-length
-    /// ceiling eager concat/list_append also enforce).
+    /// ceiling eager str::concat/list::append also enforce).
     Construct { dst: Reg, list: bool, plan: bool, pieces: Vec<Piece> },
     /// `%d = structnew SHAPE %f0 %f1 ...` (STRUCTS.md): a struct value of the
     /// program's shape number SHAPE (a `shape` declaration) whose fields are

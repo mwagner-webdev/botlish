@@ -68,15 +68,15 @@ test opt-tail-6 {closures calling themselves in tail position keep their own env
 
 test opt-tail-7 {errors inside a looped call are unchanged} -body {
     # concat's run-time TYPE error, reached through an Int that is not the
-    # parameter itself: `concat(acc, n)` directly would now be a compile-time
+    # parameter itself: `str::concat(acc, n)` directly would now be a compile-time
     # conflict (opt-tail-7-static, INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md).
-    differential [sourceIR "fn f(n, acc):\n    if n == 0:\n        return acc\n    f(n - 1, concat(acc, list_get(\[n\], 0)))\n\nf(3, \"x\")"]
+    differential [sourceIR "fn f(n, acc):\n    if n == 0:\n        return acc\n    f(n - 1, str::concat(acc, list::at(\[n\], 0)))\n\nf(3, \"x\")"]
 } -result same
 
 test opt-tail-7-static {a parameter used both as an Int and as a String by its own body has no sound contract: a compile-time error naming both uses, before any backend runs (INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md)} -body {
-    catch {sourceIR "fn f(n, acc):\n    if n == 0:\n        return acc\n    f(n - 1, concat(acc, n))\n\nf(3, \"x\")"} message options
+    catch {sourceIR "fn f(n, acc):\n    if n == 0:\n        return acc\n    f(n - 1, str::concat(acc, n))\n\nf(3, \"x\")"} message options
     list [dict get $options -errorcode] \
-        [string match {*cannot infer a sound type for parameter "n" of f: argument 1 of native - requires int*argument 2 of native concat requires str*} $message]
+        [string match {*cannot infer a sound type for parameter "n" of f: argument 1 of native - requires int*argument 2 of native str::concat requires str*} $message]
 } -result {{CORE SEMANTIC TYPE} 1}
 
 # ---------------------------------------------------------------------------
@@ -135,13 +135,13 @@ test opt-env-6 {a Block value still carries its environment} -body {
 # Natives
 
 test opt-native-1 {known natives call their implementation directly} -body {
-    set code [codeOf "fn f(s):\n    concat(substring(s, 0, 1), s)\n\nf(\"ab\")"]
+    set code [codeOf "fn f(s):\n    str::concat(str::substring(s, 0, 1), s)\n\nf(\"ab\")"]
     list [regexp {callValue} $code] [regexp {core::strings::substring} $code] \
          [regexp {core::strings::concat} $code]
 } -result {0 1 1}
 
 test opt-native-2 {checks static types prove are not emitted} -body {
-    set code [codeOf "fn f(s):\n    n = length(s)\n    length(s) + n\n\nf(\"ab\")"]
+    set code [codeOf "fn f(s):\n    n = str::length(s)\n    str::length(s) + n\n\nf(\"ab\")"]
     regexp -all {AssertCanonical str} $code
 } -result 1
 
@@ -152,8 +152,8 @@ test opt-native-3 {contract violations are still caught} -body {
 } -result {same same {CORE CONTRACT TYPE}}
 
 test opt-native-4 {argument errors are unchanged} -body {
-    list [differential {{call {ref substring} {const 1} {const 0} {const 0}}}] \
-         [differential {{call {ref list_get} {call {ref list}} {const 0}}}] \
+    list [differential {{call {ref str::substring} {const 1} {const 0} {const 0}}}] \
+         [differential {{call {ref list::at} {call {ref list}} {const 0}}}] \
          [differential {{call {ref result-value} {error-value {const 1}}}}]
 } -result {same same same}
 

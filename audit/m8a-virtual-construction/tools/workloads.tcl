@@ -77,7 +77,7 @@ set wl::workloads [dict create \
     csv/10000 {corpus::program csv "csv_parse([corpus::literal [wl::csv 10000]])"} \
     csv_geometric/10000 {corpus::program csv_geometric "csv_parse([corpus::literal [wl::csv 10000]])"} \
     csv_chunked/10000 {corpus::program csv_chunked "csv_parse([corpus::literal [wl::csv 10000]])"} \
-    matmul/32x32 {corpus::program matmul "matmul([wl::matrix 32 3], [wl::matrix 32 5])"} \
+    matmul/32x32 {corpus::driven matmul "matmul([wl::matrix 32 3], [wl::matrix 32 5])"} \
     fib {native::prepareHir [hir::build [core::loadProgramFile [file join $::root bench fib.ir]] -strict 0]} \
     loop-count {native::prepareHir [hir::build [core::loadProgramFile [file join $::root bench loop-count.ir]] -strict 0]} \
     sum-refined {native::prepareHir [hir::build [core::loadProgramFile [file join $::root bench sum-refined.ir]] -strict 0]}]

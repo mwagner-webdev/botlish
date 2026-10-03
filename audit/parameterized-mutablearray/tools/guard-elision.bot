@@ -1,13 +1,13 @@
 fn typed_next(m: MutableArray[int], i: int) -> int:
-    mutable_array_get(m, i) + 1
+    mutable_array::at(m, i) + 1
 
 fn raw_next(m: mutarray, i: int) -> int:
-    mutable_array_get(m, i) + 1
+    mutable_array::at(m, i) + 1
 
 fn go():
-    a = mutarray::create(4, 10)
-    b = mutable_array_allocate(4)
-    mutable_array_set(b, 1, 20)
+    a = mutable_array::create(4, 10)
+    b = mutable_array::allocate(4)
+    mutable_array::set(b, 1, 20)
     [typed_next(a, 1), raw_next(b, 1)]
 
 go()

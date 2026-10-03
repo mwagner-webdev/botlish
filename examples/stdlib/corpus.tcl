@@ -7,6 +7,10 @@
 #   corpus::program NAME DRIVER             HIR of the program followed by the
 #                                           source statement(s) DRIVER, whose
 #                                           value is the program's value
+#   corpus::handled DRIVER                  DRIVER with its IndexNotFound handled
+#                                           (the String "IndexNotFound")
+#   corpus::driven NAME DRIVER              corpus::program, handling DRIVER's
+#                                           IndexNotFound only if it needs it
 #   corpus::run BACKEND HIR                 runs HIR; returns the runtime value
 #   corpus::outcome BACKEND HIR             {value SHOWN} or {error ERRORCODE}
 #   corpus::literal TEXT                    TEXT as a Botlish string literal
@@ -62,7 +66,7 @@ proc corpus::text {name} {
 }
 
 # The HIR of the program TEXT (named FILENAME in every origin), with each
-# module its qualified references (mod::name, e.g. mutarray::create) name
+# module its qualified references (mod::name, e.g. mutable_array::create) name
 # loaded and compiled alongside it. surface::compile does not do that -- only
 # surface::readProgramFile does, and only from a file -- but a corpus program
 # is compiled from TEXT (a definitions-only prefix plus a driver), so this is
@@ -87,6 +91,33 @@ proc corpus::compile {source filename args} {
         -error-decls [concat [dict get $state errorDecls] $ownErrorDecls] \
         -struct-decls [concat [dict get $state structDecls] $ownStructDecls]]
     return [surface::lower::Finish $hir $strict]
+}
+
+# DRIVER (top-level Botlish statements) as the body of a function whose
+# IndexNotFound -- list::at/mutable_array::at's declared error, which matmul,
+# csv_chunked, csv_records and hashtable declare, since positional records
+# and dimension checks are what they index (STDLIB-NAMESPACES.md) -- is
+# handled at top level by becoming the String "IndexNotFound": the one place
+# a test's driver states what a malformed input means, instead of every case
+# repeating a handler. The function's declared `-> any` result is what makes
+# that String admissible beside whatever the driver computes. Any other
+# outcome is the driver's own.
+proc corpus::handled {driver} {
+    set body [join [lmap line [split $driver \n] {string cat "    " $line}] \n]
+    return "fn corpus_case() -> any errors IndexNotFound:\n$body\ncorpus_outcome = corpus_case():\n    on IndexNotFound:\n        \"IndexNotFound\"\ncorpus_outcome"
+}
+
+# corpus::program NAME DRIVER, or -- when DRIVER leaves an IndexNotFound
+# unhandled at top level (and only then) -- of corpus::handled DRIVER.
+proc corpus::driven {name driver args} {
+    if {[catch {program $name $driver {*}$args} hir options]} {
+        if {[dict get $options -errorcode] ne {CORE SEMANTIC UNHANDLED-ERROR}
+                || ![string match {*"IndexNotFound"*} $hir]} {
+            return -options $options $hir
+        }
+        return [program $name [handled $driver] {*}$args]
+    }
+    return $hir
 }
 
 proc corpus::program {name driver args} {

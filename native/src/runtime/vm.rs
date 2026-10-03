@@ -581,7 +581,7 @@ impl Vm {
     /// Enforces MAX_COLLECTION_LENGTH (see its doc comment): Some(NO_VALUE)
     /// with a pending RANGE error if LEN exceeds it, else None (construct as
     /// normal). Every String/List constructor routes through this, so
-    /// `length`/`list_length`'s `-result-range collection-length` metadata
+    /// `str::length`/`list::length`'s `-result-range collection-length` metadata
     /// (core/native.tcl) is an actual checked invariant, not an assumption.
     fn reject_oversized_collection(&mut self, len: usize) -> Option<Value> {
         if len <= MAX_COLLECTION_LENGTH {

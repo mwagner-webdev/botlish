@@ -115,14 +115,18 @@ proc hir::cardinality::of_loop {hir e} {
 #   {len KEY}   the length of one List value (KEY identifies the value: the
 #               defining expression an alias chain ends at, or a parameter /
 #               loop binding), always >= 0
+#   {cap KEY}   the capacity of one MutableArray value (KEY as for len),
+#               always >= 0 and fixed at allocation (STDLIB-NAMESPACES.md's
+#               indexed-access proof is its one consumer besides lockstep)
 #   {max FORM}  max(FORM, 0), always >= 0
 #   {v B}       the Int bound to binding B (a parameter, loop variable ...)
 #   {e E}       the Int value of the single expression E that no rule above
 #               folds; only ever equal to itself
 #
 # Facts reused rather than reinvented: hir/exactvalue.tcl (exact Ints and
-# exact List literals, followed through immutable bindings), the `+ - *`
-# and `list_length` natives, and this file's own exact/max output-length
+# exact List literals, followed through immutable bindings), the `+ - *`,
+# `list::length` and `mutable_array::capacity` natives (and
+# `mutable_array::allocate`'s capacity operand), and this file's own exact/max output-length
 # fact for collecting loops (a `ys = loop x in xs: ...` without
 # break/continue has exactly length(xs) elements). No relational List-length
 # inference is added.
@@ -183,7 +187,7 @@ proc hir::cardinality::NonNeg {a} {
         return 0
     }
     foreach {atom coeff} $terms {
-        if {[lindex $atom 0] ni {len max} || $coeff < 0} {
+        if {[lindex $atom 0] ni {len cap max} || $coeff < 0} {
             return 0
         }
     }
@@ -276,10 +280,56 @@ proc hir::cardinality::IntForm {hir e stepsVar} {
             return [FormScale $x [lindex $y 0]]
         }
     }
-    if {$name eq "list_length" && [llength $args] == 1} {
+    if {$name eq "list::length" && [llength $args] == 1} {
         return [ListLength $hir [lindex $args 0] steps]
     }
+    if {$name eq "mutable_array::capacity" && [llength $args] == 1} {
+        return [Capacity $hir [lindex $args 0] steps]
+    }
     return [FormAtom [list e $id]]
+}
+
+# The capacity of the MutableArray value of expression E, as a (nonnegative)
+# form: the allocation's own capacity operand when E is (an alias of) a
+# `mutable_array::allocate` call -- an allocation that returns has exactly
+# that capacity -- or of one of the library's intrinsic container
+# operations hir/containers.tcl registers (its `create` rule: the capacity
+# operand; its `from-list` rule: the List's length), else the atom
+# {cap KEY}, keyed like `len`. A MutableArray's
+# capacity is fixed at allocation and never changes (core/mutarray.tcl), and
+# an immutable binding holds one array for its whole lifetime, so equal
+# atoms are the same capacity even though the array's *contents* mutate.
+proc hir::cardinality::Capacity {hir e stepsVar} {
+    upvar 1 $stepsVar steps
+    lassign [Chase $hir $e steps] kind id
+    if {$kind eq "binding"} {
+        return [FormAtom [list cap [list b $id]]]
+    }
+    set node [dict get $hir exprs $id]
+    if {[NativeName $hir $node] eq "mutable_array::allocate" && [llength [dict get $node args]] == 1} {
+        return [IntForm $hir [lindex [dict get $node args] 0] steps]
+    }
+    if {[dict get $node kind] eq "call" && [lindex [dict get $node target] 0] eq "block"} {
+        # lib/mutable_array.bot's intrinsic container operations, recognized
+        # by resolved identity exactly as hir/containers.tcl types them
+        # (RuleOf, never by spelling): the `create` rule's function
+        # allocates its CAPACITY argument's slots, the `from-list` rule's
+        # function the length of its List argument.
+        set args [dict get $node args]
+        switch -- [hir::containers::RuleOf $hir [lindex [dict get $node target] 1]] {
+            create {
+                if {[llength $args] == 2} {
+                    return [IntForm $hir [lindex $args 0] steps]
+                }
+            }
+            from-list {
+                if {[llength $args] == 1} {
+                    return [ListLength $hir [lindex $args 0] steps]
+                }
+            }
+        }
+    }
+    return [FormAtom [list cap [list e $id]]]
 }
 
 # The length of the List value of expression E, as a (nonnegative) form.
@@ -408,6 +458,13 @@ proc hir::cardinality::ShowAtom {hir atom} {
                 return "length([dict get $hir bindings $id name])"
             }
             return "length([ShowExpr $hir $id])"
+        }
+        cap {
+            lassign $what how id
+            if {$how eq "b"} {
+                return "capacity([dict get $hir bindings $id name])"
+            }
+            return "capacity([ShowExpr $hir $id])"
         }
         e { return [ShowExpr $hir $what] }
     }

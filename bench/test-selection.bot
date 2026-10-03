@@ -9,7 +9,7 @@
 # field contracts, not a positional [name, dependencies] pair that every
 # reader has to remember the layout of. A "path" is an ordinary String; the
 # changed-file set is a genuine ImmutableSet[str]
-# (immutable_set_from_list/immutable_set_contains, MINIMAL-IMMUTABLE-SET.md),
+# (immutable_set::from_list/immutable_set::contains, MINIMAL-IMMUTABLE-SET.md),
 # not a List scanned linearly by hand.
 #
 # Two declared contracts, is_affected?'s test: Test and first_affected's
@@ -53,9 +53,9 @@ struct Test:
     dependencies: List[str]
 
 fn make_changed?(changed):
-    changed_set = immutable_set_from_list(changed)
+    changed_set = immutable_set::from_list(changed)
     fn changed?(path):
-        immutable_set_contains(changed_set, path)
+        immutable_set::contains(changed_set, path)
     changed?
 
 fn test_name(test):
@@ -112,4 +112,4 @@ selected_b = select_affected(tests, changed_b?)
 docs_deps = ["README.md", "AGENTS.md"]
 untouched_by_a? = list::none?(docs_deps, changed_a?)
 
-[list_length(selected_a), list_length(selected_b), first_affected(tests, changed_a?), probe, untouched_by_a?]
+[list::length(selected_a), list::length(selected_b), first_affected(tests, changed_a?), probe, untouched_by_a?]

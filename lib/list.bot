@@ -1,6 +1,25 @@
-# list.bot -- the "list" namespace: search/reduction idioms built directly
-# on the returning iterable loop (`loop x in xs:`, RETURNING-ITERABLE-
-# LOOPS.md), Botlish's fundamental collection-transformation primitive.
+# list.bot -- the "list" namespace's ordinary Botlish members.
+#
+# The namespace's intrinsics are root natives registered under their
+# qualified names -- list::length, list::at, list::append (core/lists.tcl)
+# -- and this module may never define a member of the same name
+# (surface/modules.tcl, DUPLICATE-NATIVE; STDLIB-NAMESPACES.md). Everything
+# below is ordinary Botlish over them:
+#
+#   list::get(xs, i, default)   the element at i, or DEFAULT when i does
+#                                not designate an element: exactly
+#                                list::at(xs, i) with its IndexNotFound --
+#                                and nothing else -- handled by returning
+#                                DEFAULT. DEFAULT is an ordinary argument,
+#                                evaluated before the call like any other
+#                                (no lazy default); the result is never an
+#                                optional/null value. Every other failure of
+#                                list::at (a non-List or non-Int argument)
+#                                propagates unchanged.
+#
+# and the search/reduction idioms built directly on the returning iterable
+# loop (`loop x in xs:`, RETURNING-ITERABLE-LOOPS.md), Botlish's fundamental
+# collection-transformation primitive.
 # Deliberately no map/filter/filter_map: the returning loop already
 # subsumes them (`loop x in xs: if not predicate(x): continue \n x` is the
 # filtering idiom; the search/reduction helpers below are exactly the case
@@ -55,6 +74,12 @@
 namespace list
 
 error NotFound
+
+fn get(xs, index, default):
+    value = list::at(xs, index):
+        on IndexNotFound:
+            default
+    value
 
 fn any?(xs, predicate) -> bool:
     loop x in xs:

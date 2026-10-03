@@ -1,5 +1,7 @@
 # tclcompat.tcl -- native Tcl-compatibility character classification:
-#   is_tcl_alpha(c), is_tcl_alnum(c) : one-scalar str -> bool
+#   str::is_tcl_alpha(c), str::is_tcl_alnum(c) : one-scalar str -> bool
+#   (root natives registered under their qualified `str` names, beside
+#   core/strings.tcl's)
 #
 # STATUS: temporary compatibility primitives -- NOT Botlish's eventual
 # public Unicode character-classification API.
@@ -44,9 +46,9 @@
 # NATIVE-TCL-UNICODE.md for the full edge-case corpus and Unicode-version
 # notes):
 #
-#   is_tcl_alpha(c)  Unicode General_Category(c) in {Lu, Ll, Lt, Lm, Lo}
+#   str::is_tcl_alpha(c)  Unicode General_Category(c) in {Lu, Ll, Lt, Lm, Lo}
 #                     ("Letter"), exactly Tcl 9's [:alpha:] bracket class.
-#   is_tcl_alnum(c)  is_tcl_alpha(c) or General_Category(c) == Nd
+#   str::is_tcl_alnum(c)  str::is_tcl_alpha(c) or General_Category(c) == Nd
 #                     ("Letter or Decimal_Number"), exactly Tcl 9's
 #                     [:alnum:] bracket class.
 #
@@ -98,16 +100,16 @@ proc core::tclcompat::CheckOneScalar {v native} {
 }
 
 proc core::tclcompat::isTclAlpha {c} {
-    set text [CheckOneScalar $c is_tcl_alpha]
+    set text [CheckOneScalar $c str::is_tcl_alpha]
     return [core::value::bool [string is alpha -strict $text]]
 }
 
 proc core::tclcompat::isTclAlnum {c} {
-    set text [CheckOneScalar $c is_tcl_alnum]
+    set text [CheckOneScalar $c str::is_tcl_alnum]
     return [core::value::bool [string is alnum -strict $text]]
 }
 
-core::native::register is_tcl_alpha -arity 1 -impl core::tclcompat::isTclAlpha \
+core::native::register str::is_tcl_alpha -arity 1 -impl core::tclcompat::isTclAlpha \
     -param-types {str} -result-type bool -runtime {char-index range-check}
-core::native::register is_tcl_alnum -arity 1 -impl core::tclcompat::isTclAlnum \
+core::native::register str::is_tcl_alnum -arity 1 -impl core::tclcompat::isTclAlnum \
     -param-types {str} -result-type bool -runtime {char-index range-check}

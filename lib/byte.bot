@@ -133,7 +133,7 @@ fn position_high(n) -> HighNibble:
 # (STRICT-TYPED-PARAMETERS.md) -- sound here because every actual call
 # site in this codebase now has a statically provable Int (or Byte, itself
 # a subtype) in hand, thanks to this same milestone's own producer-side
-# fixes (encode_utf8's truthful List[Byte] result, char::codepoint's own
+# fixes (str::encode_utf8's truthful List[Byte] result, char::codepoint's own
 # int result), rather than weakening this conversion back to an untyped
 # escape hatch to accommodate an under-typed caller.
 #
@@ -174,4 +174,4 @@ fn from_int(value: int) -> Byte errors BelowRange, AboveRange:
 fn set(chars: List[UnicodeChar]) -> ImmutableSet[Byte] errors AboveRange:
     bytes = loop c in chars:
         from_int(char::codepoint(c))
-    immutable_set_from_list(bytes)
+    immutable_set::from_list(bytes)

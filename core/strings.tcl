@@ -1,4 +1,10 @@
-# strings.tcl -- native string operations.
+# strings.tcl -- native string operations: the `str` namespace's
+# intrinsics (str::length, str::substring, str::lowercase, str::concat,
+# str::encode_utf8; core/tclcompat.tcl adds str::is_tcl_alpha/alnum).
+# Each is a root native registered under its qualified name
+# (core::native::isQualifiedNative): there is no lib/str.bot module, and a
+# future one could add other members but never redefine these
+# (surface/modules.tcl, DUPLICATE-NATIVE; STDLIB-NAMESPACES.md).
 #
 # One conservative rule governs refined strings:
 #
@@ -17,17 +23,17 @@ proc core::strings::Text {v name} {
 }
 
 proc core::strings::length {s} {
-    return [core::value::int [string length [Text $s length]]]
+    return [core::value::int [string length [Text $s str::length]]]
 }
 
-# (substring S START END): the characters at START <= i < END.
+# (str::substring S START END): the characters at START <= i < END.
 proc core::strings::substring {s start end} {
-    set text [Text $s substring]
-    set from [core::value::intOf [core::value::expect int $start substring]]
-    set to [core::value::intOf [core::value::expect int $end substring]]
+    set text [Text $s str::substring]
+    set from [core::value::intOf [core::value::expect int $start str::substring]]
+    set to [core::value::intOf [core::value::expect int $end str::substring]]
     if {$from < 0 || $from > $to || $to > [string length $text]} {
         core::semanticError RANGE \
-            "substring: range $from..$to is outside 0..[string length $text]"
+            "str::substring: range $from..$to is outside 0..[string length $text]"
     }
     return [core::value::str [string range $text $from [expr {$to - 1}]]]
 }
@@ -43,12 +49,12 @@ proc core::strings::substring {s start end} {
 # ("Strings") and tests/native-tcl-unicode.test, which compares every scalar.
 # Not performance-critical: this is the reference implementation.
 proc core::strings::lowercase {s} {
-    set text [string tolower [Text $s lowercase]]
+    set text [string tolower [Text $s str::lowercase]]
     return [core::value::str [string map "Ⱥ ⱥ Ⱦ ⱦ" $text]]
 }
 
 proc core::strings::concat {a b} {
-    return [core::value::str "[Text $a concat][Text $b concat]"]
+    return [core::value::str "[Text $a str::concat][Text $b str::concat]"]
 }
 
 # S's UTF-8 encoding as a List of Ints, one per byte (each 0..255), in
@@ -61,7 +67,7 @@ proc core::strings::concat {a b} {
 # (Tcl's `encoding convertto utf-8` here, Rust's already-UTF-8 `String`
 # there): both walk the same byte sequence in the same order.
 proc core::strings::encodeUtf8 {s} {
-    set text [Text $s encode_utf8]
+    set text [Text $s str::encode_utf8]
     set bytes {}
     foreach byte [split [encoding convertto utf-8 $text] ""] {
         scan $byte %c code
@@ -70,15 +76,15 @@ proc core::strings::encodeUtf8 {s} {
     return [core::value::listOf $bytes]
 }
 
-core::native::register length    -arity 1 -impl core::strings::length \
+core::native::register str::length    -arity 1 -impl core::strings::length \
     -param-types {str} -result-type int -runtime char-index -result-range collection-length -context-free 1
-core::native::register substring -arity 3 -impl core::strings::substring \
+core::native::register str::substring -arity 3 -impl core::strings::substring \
     -param-types {str int int} -result-type str \
     -runtime {string-alloc char-index range-check} -context-free 1
-core::native::register lowercase -arity 1 -impl core::strings::lowercase \
+core::native::register str::lowercase -arity 1 -impl core::strings::lowercase \
     -param-types {str} -result-type str -runtime string-alloc -context-free 1
-core::native::register concat    -arity 2 -impl core::strings::concat \
+core::native::register str::concat    -arity 2 -impl core::strings::concat \
     -param-types {str str} -result-type str -runtime string-alloc -context-free 1
-core::native::register encode_utf8 -arity 1 -impl core::strings::encodeUtf8 \
+core::native::register str::encode_utf8 -arity 1 -impl core::strings::encodeUtf8 \
     -param-types {str} -result-type list -runtime list-alloc -context-free 1 \
     -result-shape {typed Byte 0 255}

@@ -360,22 +360,22 @@ take_smalls(make_tinys())} $::smallDecl]
 # Element read: the canonical List access primitive statically returns T
 # (spec 29-32, 71) and composes with existing scalar range facts (90-93)
 
-test applied-type-element-read-type {reading a List[Small] element through list_get statically returns Small} -body {
-    set h [surface::compile [format {%sfn read_small(xs: List[Small]) -> Small:
-    list_get(xs, 0)} $::smallDecl] readtype.bot -strict 0]
+test applied-type-element-read-type {reading a List[Small] element through list::at statically returns Small} -body {
+    set h [surface::compile [format {%sfn read_small(xs: List[Small]) -> Small errors IndexNotFound:
+    list::at(xs, 0)} $::smallDecl] readtype.bot -strict 0]
     set call [lindex [hirFind $h call] end]
     hir::types::show [hir::typeOf $h $call]
 } -result {int[Small]}
 
 test applied-type-element-read-result-verifies {the read_small result contract verifies with no caller-derived rescue} -body {
-    surface::compile [format {%sfn read_small(xs: List[Small]) -> Small:
-    list_get(xs, 0)} $::smallDecl] readverify.bot
+    surface::compile [format {%sfn read_small(xs: List[Small]) -> Small errors IndexNotFound:
+    list::at(xs, 0)} $::smallDecl] readverify.bot
     set ok 1
 } -result 1
 
 test applied-type-element-read-range-fact {the vertical proof: List[Small] -> element read -> Small -> the existing [0,10] range fact, composing container typing with the bounded-integer machinery} -body {
-    set h [surface::compile [format {%sfn read_small(xs: List[Small]) -> Small:
-    list_get(xs, 0)} $::smallDecl] readrange.bot -strict 0]
+    set h [surface::compile [format {%sfn read_small(xs: List[Small]) -> Small errors IndexNotFound:
+    list::at(xs, 0)} $::smallDecl] readrange.bot -strict 0]
     set block [lindex [hirFind $h block] end]
     set params [hir::get $h $block params]
     set outcome [hir::range::AnalyzeInstance $h verify {} $block $params \
@@ -383,18 +383,18 @@ test applied-type-element-read-range-fact {the vertical proof: List[Small] -> el
     hir::range::show [dict get $outcome result]
 } -result {[0, 10]}
 
-test applied-type-element-read-preserves-bounds-error {list_get's own bounds RANGE error is unchanged -- only the successful value's type improved} -body {
+test applied-type-element-read-preserves-bounds-error {list::at's own out-of-bounds failure (the declared error IndexNotFound, uncaught here) is unchanged -- only the successful value's type improved} -body {
     errorCodeOf {bind small {const int 1}} \
-        {call {ref list_get} {call {ref list} {const int 1}} {const int 5}}
-} -result {CORE SEMANTIC RANGE}
+        {call {ref list::at} {call {ref list} {const int 1}} {const int 5}}
+} -result {CORE SEMANTIC UNCAUGHT-ERROR}
 
 # ---------------------------------------------------------------------------
 # Alias and return propagation (spec 34-37, 72-73, 76)
 
 test applied-type-alias-preserved {ys = xs preserves List[Small] through ordinary immutable binding} -body {
-    surface::compile [format {%sfn consume(xs: List[Small]) -> Small:
+    surface::compile [format {%sfn consume(xs: List[Small]) -> Small errors IndexNotFound:
     ys = xs
-    list_get(ys, 0)} $::smallDecl] alias.bot
+    list::at(ys, 0)} $::smallDecl] alias.bot
     set ok 1
 } -result 1
 
@@ -429,7 +429,7 @@ test applied-type-erasure-passthrough-alone-is-legal {passthrough(xs) by itself 
     x
 fn make_smalls() -> List[Small]:
     [one(), two()]
-1 + list_length(passthrough(make_smalls()))} $::smallDecl] passthroughok.bot
+1 + list::length(passthrough(make_smalls()))} $::smallDecl] passthroughok.bot
     set ok 1
 } -result 1
 
@@ -515,7 +515,7 @@ f([one()])} $::smallDecl] alias2.bot
 
 test applied-type-repeated-compilation {compiling the same List[T]-over-a-source-type program twice in one process succeeds both times} -body {
     set src [format {%sfn consume(xs: List[Small]) -> int:
-    list_length(xs)
+    list::length(xs)
 consume([one(), two()])} $::smallDecl]
     set h1 [surface::compile $src rep1.bot]
     set h2 [surface::compile $src rep2.bot]
@@ -530,7 +530,7 @@ fn mk() -> Small:
     10
 
 fn consume(xs: List[Small]) -> int:
-    list_length(xs)
+    list::length(xs)
 
 consume([mk()])
 } seq1.bot]
@@ -541,7 +541,7 @@ fn mk() -> Small:
     10
 
 fn consume(xs: List[Small]) -> int:
-    list_length(xs)
+    list::length(xs)
 
 consume([mk()])
 } seq2.bot -strict 0]
@@ -552,7 +552,7 @@ fn mk() -> Small:
     105
 
 fn consume(xs: List[Small]) -> int:
-    list_length(xs)
+    list::length(xs)
 
 consume([mk()])
 } seq3.bot]

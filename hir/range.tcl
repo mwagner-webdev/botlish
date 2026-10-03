@@ -44,12 +44,12 @@
 # precision). Every other expression's range is unknown: nothing here infers
 # a bound from an exact call until its successful-result summary is known,
 # from an open call, a list/aggregate read, or from a branch condition (e.g. `i <
-# length(xs)` proves nothing about i's range: that needs relational
+# list::length(xs)` proves nothing about i's range: that needs relational
 # reasoning intervals cannot express, so it is not attempted; see #19 of the
 # milestone this module was written for).
 #
-# Exact List facts: `list_length` of a List the compiler knows exactly, and
-# `list_get` of one at an exact/ranged index, get the exact length / the join
+# Exact List facts: `list::length` of a List the compiler knows exactly, and
+# `list::at` of one at an exact/ranged index, get the exact length / the join
 # of the selected elements' Ranges from hir/exactvalue.tcl (a value fact
 # derived from the HIR, not a Range key: a Range describes an integer).
 #
@@ -299,10 +299,10 @@ proc hir::range::nonneg {} {
 # (core/native.tcl): a String/List length. Unlike nonneg this bound is
 # *finite* -- native/src/runtime/vm.rs's MAX_COLLECTION_LENGTH is an actual
 # enforced construction-time limit, not an assumption (see its doc comment),
-# so this alone makes a direct length(...)/list_length(...) call small
+# so this alone makes a direct str::length(...)/list::length(...) call small
 # (fitsSmall below) with no relational reasoning: it is the whole proof for
 # every corpus loop whose bound is a length call appearing in the loop body
-# itself (e.g. reverse's `index == length(text)`).
+# itself (e.g. reverse's `index == str::length(text)`).
 proc hir::range::collectionLength {} {
     variable smallMax
     return [dict create min 0 max $smallMax]
@@ -753,7 +753,7 @@ proc hir::range::AndMaskExact {r mask} {
 # cases are purely syntactic facts that need no analysis of any callee or
 # binding, so external call sites can be seeded from them without an
 # ordering dependency between instances. The native-call case is what lets a
-# parameter seeded only by e.g. `list_length(row)`-shaped arguments (never a
+# parameter seeded only by e.g. `list::length(row)`-shaped arguments (never a
 # literal) still get a genuine finite range (matmul's `count`/`columns`):
 # the same metadata Call (below) reads for an expression already inside the
 # instance being analyzed, read here for an expression outside it.
@@ -1157,7 +1157,7 @@ proc hir::range::Call {hirVar ctxVar e node} {
     upvar 1 $hirVar hir $ctxVar ctx
     # The callee is evaluated like any other subexpression (and first, as at
     # run time): an exact call in callee position (`sel(k)(0)`,
-    # `list_get(fs, pick(k))(y)`) or a closure created there is a real call
+    # `list::at(fs, pick(k))(y)`) or a closure created there is a real call
     # or creation site, and its argument and capture Ranges must reach the
     # entry facts of what it calls/creates like any other -- skipping it left
     # those entries missing a caller, which is unsound
@@ -1323,7 +1323,7 @@ proc hir::range::ProvesType {range type} {
 # violate a declared element contract, so there is nothing for invariance
 # to protect there. "Provably empty" means exactly hir::types::MakeList/
 # MakeSet's own `never`-element fold result (the type a `[]`/an
-# `immutable_set_from_list([])` literal, and nothing else, ever produces --
+# `immutable_set::from_list([])` literal, and nothing else, ever produces --
 # see the M7A.A report's producer census): AggregateAdmits below recurses
 # structurally so a *nested* empty aggregate (e.g. the sole element of
 # `[[]]`, statically `List[List[never]]`) is checked the same way one level
@@ -1760,7 +1760,7 @@ proc hir::range::If {hirVar ctxVar e node} {
     }
     # What code textually after this "if" sees (spec #14's whole point: an
     # early-return/break guard -- the corpus's actual shape, e.g. reverse's
-    # `if index == length(text): return ...` with no else, the recursive
+    # `if index == str::length(text): return ...` with no else, the recursive
     # call a later sibling statement, not nested in an else branch -- must
     # let a narrowed bound reach that sibling code, not just the branch body
     # itself). If one outcome never completes normally, only the other's
@@ -2867,7 +2867,7 @@ proc hir::range::Fixpoint {hir spec callFactsOpt narrowOpt captureOpt pinned} {
     # while the callee's entries were still unknown can leave it an
     # infinite side that no later round removes, so a call expression keeps
     # that side even where the callee's own result under its narrowed
-    # entries is bounded (refined-checks' `e = scan_while(i, is_tcl_alpha)`
+    # entries is bounded (refined-checks' `e = scan_while(i, str::is_tcl_alpha)`
     # in tld? read [-∞, 2^62-1] for a callee whose result is [0, 2^62-1],
     # so tld?'s `e - i` could not be lowered raw; `fn clamp(x): if x > 100:
     # 100 else: x`, called only as clamp(5), read [-∞, 100]). This second

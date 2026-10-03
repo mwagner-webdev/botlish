@@ -1,4 +1,4 @@
-# native-tcl-unicode.test -- core/tclcompat.tcl's is_tcl_alpha/is_tcl_alnum
+# native-tcl-unicode.test -- core/tclcompat.tcl's str::is_tcl_alpha/str::is_tcl_alnum
 # (the temporary Tcl-compatibility Unicode character-class primitives) and
 # lib/web.tcl's emailish?/Emailish?, which use them through the ordinary
 # Botlish module function web::emailish? (lib/web.bot) expressing
@@ -57,7 +57,7 @@ proc fourWay {exprs} {
 }
 
 # ---------------------------------------------------------------------------
-# is_tcl_alpha / is_tcl_alnum: direct, four-way parity, edge-case corpus.
+# str::is_tcl_alpha / str::is_tcl_alnum: direct, four-way parity, edge-case corpus.
 #
 # label                          char        General_Category   alpha alnum
 foreach {label char alpha alnum} {
@@ -75,11 +75,11 @@ foreach {label char alpha alnum} {
     underscore-Pc                   _           false false
     full-stop-Po                    .           false false
 } {
-    test native-tcl-unicode-alpha-$label "is_tcl_alpha($label) agrees across interp/compile/cranelift-generic/cranelift" -body {
-        fourWay [classifyProgram is_tcl_alpha $char]
+    test native-tcl-unicode-alpha-$label "str::is_tcl_alpha($label) agrees across interp/compile/cranelift-generic/cranelift" -body {
+        fourWay [classifyProgram str::is_tcl_alpha $char]
     } -result $alpha
-    test native-tcl-unicode-alnum-$label "is_tcl_alnum($label) agrees across interp/compile/cranelift-generic/cranelift" -body {
-        fourWay [classifyProgram is_tcl_alnum $char]
+    test native-tcl-unicode-alnum-$label "str::is_tcl_alnum($label) agrees across interp/compile/cranelift-generic/cranelift" -body {
+        fourWay [classifyProgram str::is_tcl_alnum $char]
     } -result $alnum
 }
 
@@ -88,7 +88,7 @@ foreach {label char alpha alnum} {
 # multi-scalar string are both out of domain, on every backend, with the
 # same error text (spec: "reject malformed primitive inputs consistently").
 
-foreach native {is_tcl_alpha is_tcl_alnum} {
+foreach native {str::is_tcl_alpha str::is_tcl_alnum} {
     test native-tcl-unicode-$native-range-empty "${native}('') is a RANGE error on every backend, with the same message" -body {
         set msgs [lmap b $::parityBackends {lindex [outcomeUnder $b [classifyProgram $native {}]] 2}]
         if {[llength [lsort -unique $msgs]] != 1} {
@@ -110,7 +110,7 @@ foreach native {is_tcl_alpha is_tcl_alnum} {
 # op_may_allocate (spec: "should not have allocation/safepoint metadata
 # they do not need").
 
-foreach native {is_tcl_alpha is_tcl_alnum} {
+foreach native {str::is_tcl_alpha str::is_tcl_alnum} {
     test native-tcl-unicode-$native-metadata-nonallocating "$native declares no allocation -runtime tag" -body {
         set tags [dict get [core::native::metadata $native] runtime]
         lsearch -inline $tags {string-alloc list-alloc result-alloc mutarray-alloc mutarray-mutate}
@@ -236,8 +236,8 @@ foreach {label s expect} {
     unicode17-A7D4       ꟔         ꟔
     unicode17-beria-erfe \U00016ea0     \U00016ea0
 } {
-    test native-tcl-unicode-lowercase-$label "lowercase($label) is the Unicode 16 simple mapping on interp/compile/cranelift-generic/cranelift" -body {
-        fourWay [list [list call {ref lowercase} [list const str $s]]]
+    test native-tcl-unicode-lowercase-$label "str::lowercase($label) is the Unicode 16 simple mapping on interp/compile/cranelift-generic/cranelift" -body {
+        fourWay [list [list call {ref str::lowercase} [list const str $s]]]
     } -result \"$expect\"
 }
 
@@ -257,7 +257,7 @@ test native-tcl-unicode-lowercase-all-scalars "every scalar's lowercase agrees w
         }
         set expected [core::value::strOf [core::strings::lowercase [core::value::str $text]]]
         set prog [list [list call {ref ==} \
-            [list call {ref lowercase} [list const str $text]] \
+            [list call {ref str::lowercase} [list const str $text]] \
             [list const str $expected]]]
         foreach b $::parityBackends {
             set outcome [outcomeUnder $b $prog]

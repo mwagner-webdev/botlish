@@ -178,9 +178,9 @@ test byte-set-not-utf8 {byte::set(['é']) contains the one Byte 233 (its Unicode
 
 test byte-set-membership {every canonical-payload byte is a member, and an unrelated byte is not} -body {
     set path [makeFile {s = byte::set(['-', '.', '_', '~'])
-[immutable_set_contains(s, 45), immutable_set_contains(s, 46),
- immutable_set_contains(s, 95), immutable_set_contains(s, 126),
- immutable_set_contains(s, 65)]} byte-set-membership.bot]
+[immutable_set::contains(s, 45), immutable_set::contains(s, 46),
+ immutable_set::contains(s, 95), immutable_set::contains(s, 126),
+ immutable_set::contains(s, 65)]} byte-set-membership.bot]
     try {
         list [moduleParity $path] [moduleValue $path]
     } finally {
@@ -260,7 +260,7 @@ test byte-set-module-retained-value {additional_unreserved_chars = byte::set([..
 additional_unreserved_chars = byte::set(['-', '.', '_', '~'])
 
 fn has_dash() -> bool:
-    immutable_set_contains(additional_unreserved_chars, 45)
+    immutable_set::contains(additional_unreserved_chars, 45)
 }
     close $ch
     set mainPath [makeFile {[bytesetretentionlib::has_dash(), bytesetretentionlib::has_dash()]} byte-set-retention-main.bot]

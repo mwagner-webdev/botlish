@@ -68,8 +68,8 @@
 #
 # Type-directed code
 # ------------------
-# * Calls of known natives with an intrinsic (+ - * < <= > >= == eq list
-#   ok? error?) compile to inline Tcl. Arguments not statically of the
+# * Calls of known natives with an intrinsic (+ - * < <= > >= == list ok?
+#   error?) compile to inline Tcl. Arguments not statically of the
 #   required kind are first checked with core::value::expect, which raises
 #   exactly the error the native would.
 # * Type tests decided by HIR fold to constants; other type tests compile to
@@ -120,7 +120,6 @@ namespace eval core::compiler {
         >        {IntrinsicCompare >} \
         >=       {IntrinsicCompare >=} \
         ==       IntrinsicValueEqual \
-        eq       IntrinsicStringEqual \
         list     IntrinsicList \
         ok?      {IntrinsicResultIs ok} \
         error?   {IntrinsicResultIs error}]
@@ -1234,17 +1233,6 @@ proc core::compiler::IntrinsicValueEqual {ctxVar name argOps} {
             return ""
         }
     }
-    return [Op bool "\$$t" bool]
-}
-
-proc core::compiler::IntrinsicStringEqual {ctxVar name argOps} {
-    upvar 1 $ctxVar ctx
-    set words [RequireKind ctx $name str $argOps]
-    if {$words eq ""} {
-        return ""
-    }
-    set t [NewTemp]
-    Emit ctx "set $t \[string equal \[lindex [lindex $words 0] 1\] \[lindex [lindex $words 1] 1\]\]"
     return [Op bool "\$$t" bool]
 }
 

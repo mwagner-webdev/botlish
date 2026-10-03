@@ -220,12 +220,12 @@ pub struct Metrics {
     pub string_bytes_copied: u64,
     pub list_elements_copied: u64,
     /// Existing-value movement into a MutableArray: bulk copy
-    /// (mutable_array_copy) and finalization (mutable_array_freeze), never
+    /// (mutable_array::copy) and finalization (mutable_array::freeze), never
     /// an ordinary append write of one fresh value into unused capacity
     /// (see the "No misleading copy accounting" note on
     /// rt_mutarray_set/rt_mutarray_freeze in ops.rs).
     pub mutarray_elements_copied: u64,
-    /// Optional mutation counters (req #12): every mutable_array_get/_set
+    /// Optional mutation counters (req #12): every mutable_array::at/::set
     /// call, regardless of whether it is part of a copy.
     pub mutarray_reads: u64,
     pub mutarray_writes: u64,

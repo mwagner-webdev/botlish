@@ -149,8 +149,8 @@ test argv-structural-function-type-carries-the-error {Fn{... errors: [InvalidArg
 } -result {{} {["./p", "a"]} {["via-fn"]} TYPE}
 
 test argv-result-type-is-list-of-string {the call is statically a List[String]: a List[Int] consumer is rejected, a List[str] one accepted} -body {
-    set accepts "fn count(args: List\[str\]) -> int:\n    list_length(args)\na = argv():\n    on InvalidArgumentEncoding:\n        \[\]\ncount(a)"
-    set rejects "fn count(args: List\[int\]) -> int:\n    list_length(args)\na = argv():\n    on InvalidArgumentEncoding:\n        \[\]\ncount(a)"
+    set accepts "fn count(args: List\[str\]) -> int:\n    list::length(args)\na = argv():\n    on InvalidArgumentEncoding:\n        \[\]\ncount(a)"
+    set rejects "fn count(args: List\[int\]) -> int:\n    list::length(args)\na = argv():\n    on InvalidArgumentEncoding:\n        \[\]\ncount(a)"
     set hir [argvHir $accepts]
     set callTypes {}
     foreach e [hirFind $hir call] {
@@ -189,7 +189,7 @@ test argv-basic-including-argument-zero {argv() is ["./program", "alpha", "beta"
 } -result {["./program", "alpha", "beta"]}
 
 test argv-zero-is-the-supplied-invocation-argument {argument zero is returned verbatim: no realpath, no absolute path, no normalization} -body {
-    set program "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\nlist_get(args, 0)"
+    set program "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\nfirst = list::at(args, 0):\n    on IndexNotFound:\n        \"missing\"\nfirst"
     list [agree $program [list [T ../up/./x//y/..]]] \
         [agree $program [list [T "  spaced name  "]]] \
         [agree $program [list [T ""]]] \
@@ -198,7 +198,7 @@ test argv-zero-is-the-supplied-invocation-argument {argument zero is returned ve
 } -result {{"../up/./x//y/.."} {"  spaced name  "} {""} {"/proc/self/exe"} {"ä€"}}
 
 test argv-empty-vector-is-the-empty-list {argc == 0: argv() is [] (no synthetic argument zero)} -body {
-    list [agree $::handled {}] [agree "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\nlist_length(args)" {}]
+    list [agree $::handled {}] [agree "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\nlist::length(args)" {}]
 } -result {{[]} 0}
 
 test argv-empty-string-arguments-are-preserved {./program "" is ["./program", ""]} -body {
@@ -215,18 +215,18 @@ test argv-valid-non-ascii-round-trips-exactly {accented, euro, ellipsis, emoji, 
     set got [agree $text $vec]
     # NFD "é" (index 6) and NFC "é" (index 7) stay different.
     list [expr {$got eq [shownStrings [concat ./p $args]]}] \
-        [agree "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\nlist_get(args, 6) == list_get(args, 7)" $vec]
+        [agree "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\nnfd = list::at(args, 6):\n    on IndexNotFound:\n        \"missing\"\nnfc = list::at(args, 7):\n    on IndexNotFound:\n        \"missing\"\nnfd == nfc" $vec]
 } -result {1 false}
 
 test argv-no-unicode-normalization {NFC and NFD spellings are different Strings with their own scalar counts} -body {
-    set text "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\n\[length(list_get(args, 1)), length(list_get(args, 2)), list_get(args, 1) == list_get(args, 2)\]"
+    set text "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\nnfc = list::at(args, 1):\n    on IndexNotFound:\n        \"missing\"\nnfd = list::at(args, 2):\n    on IndexNotFound:\n        \"missing\"\n\[str::length(nfc), str::length(nfd), nfc == nfd\]"
     agree $text [list [T ./p] [T "é"] [T "é"]]
 } -result {[1, 2, false]}
 
 test argv-elements-are-ordinary-strings {an argv element works with every ordinary String operation} -body {
-    set text "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\ns = list_get(args, 1)\n\[length(s), substring(s, 1, 3), lowercase(s), concat(s, \"!\"), s == \"ÄÖü😀x\", eq(s, \"ÄÖü😀x\")\]"
+    set text "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\ns = list::at(args, 1):\n    on IndexNotFound:\n        \"missing\"\n\[str::length(s), str::substring(s, 1, 3), str::lowercase(s), str::concat(s, \"!\"), s == \"ÄÖü😀x\", s == \"äöü😀x\"\]"
     agree $text [list [T ./p] [T "ÄÖü😀x"]]
-} -result {[5, "Öü", "äöü😀x", "ÄÖü😀x!", true, true]}
+} -result {[5, "Öü", "äöü😀x", "ÄÖü😀x!", true, false]}
 
 test argv-invalid-utf8-is-the-declared-error {an invalid argument fails the call with InvalidArgumentEncoding and the handler runs} -body {
     list [agree $::handled [list [T ./p] [H ff]]] \
@@ -244,7 +244,7 @@ test argv-no-replacement-characters-or-lossy-decoding {no U+FFFD, Latin-1 or loc
 } -result {{["fallback"]}}
 
 test argv-error-boundary-matches-utf8-exactly {the boundary accepts the extremes of UTF-8 and rejects the neighbouring invalid forms} -body {
-    set program "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\nlength(list_get(args, 1))"
+    set program "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\narg = list::at(args, 1):\n    on IndexNotFound:\n        \"missing\"\nstr::length(arg)"
     list \
         [agree $program [list [T ./p] [H f48fbfbf]]] \
         [agree $program [list [T ./p] [H efbfbf]]] \
@@ -271,7 +271,7 @@ test argv-decoding-is-an-effect-of-the-call-not-startup {work before argv() runs
     # n depends on the run: argv() falling back to [] gives -1 (do_something
     # fails first, before both() ever reaches its own argv()); a two-element
     # vector gives 1.
-    set dynamic "${common}args0 = argv():\n    on InvalidArgumentEncoding:\n        \[\]\nr = both(list_length(args0) - 1):\n$tail"
+    set dynamic "${common}args0 = argv():\n    on InvalidArgumentEncoding:\n        \[\]\nr = both(list::length(args0) - 1):\n$tail"
     set constant "${common}r = both(5):\n$tail"
     set bad [list [T ./p] [H ff]]
     set good [list [T ./p] [T a]]
@@ -309,7 +309,7 @@ test argv-wrong-arity-is-the-ordinary-arity-error {argv takes no arguments: argv
 } -result {1 error {CORE SEMANTIC ARITY} {argv expects 0 argument(s), got 1}}
 
 test argv-core-ir-call {argv is an ordinary root name of core IR too} -body {
-    set exprs {{call {ref list_length} {call {ref argv}}}}
+    set exprs {{call {ref list::length} {call {ref argv}}}}
     set hir [hir::build $exprs -strict 0]
     list [lindex [lindex [outcomesOf $hir [list [T ./p] [T a] [T b]]] 0] 1]
 } -result {3}
@@ -396,26 +396,26 @@ test argv-never-captured-at-compile-time {the compiled/lowered program never con
 } -result {-1 -1 -1 -1 -1}
 
 test argv-contents-and-length-are-not-static-facts {the compiler knows List[str] and the error, nothing about length or contents} -body {
-    set hir [argvHir "args = argv():\n    on InvalidArgumentEncoding:\n        \[\]\nn = list_length(args)\nfirst = list_get(args, 0)\n\[n, first\]" ]
-    # Neither argv() nor list_length/list_get of it is an exactly known
+    set hir [argvHir "args = argv():\n    on InvalidArgumentEncoding:\n        \[\]\nn = list::length(args)\nfirst = list::at(args, 0):\n    on IndexNotFound:\n        \"none\"\n\[n, first\]" ]
+    # Neither argv() nor list::length/list::at of it is an exactly known
     # value (hir/exactvalue.tcl): no length, no element, no argument zero.
     set facts {}
     foreach e [hirFind $hir call] {
         lassign [hir::get $hir $e target] kind symbol
-        if {$kind eq "native" && [dict get [hir::symbol $hir $symbol] name] in {argv list_length list_get}} {
+        if {$kind eq "native" && [dict get [hir::symbol $hir $symbol] name] in {argv list::length list::at}} {
             lappend facts [lindex [hir::exact::Of $hir $e] 0]
         }
     }
     list [llength $facts] [lsort -unique $facts]
 } -result {3 {{}}}
 
-test argv-different-lengths-same-compiled-program {a program indexing argv: out-of-range depends on this run's vector only} -body {
-    set text "args = argv():\n    on InvalidArgumentEncoding:\n        \[\]\nlist_get(args, 1)"
+test argv-different-lengths-same-compiled-program {a program indexing argv: IndexNotFound depends on this run's vector only} -body {
+    set text "args = argv():\n    on InvalidArgumentEncoding:\n        \[\]\nsecond = list::at(args, 1):\n    on IndexNotFound:\n        \"absent\"\nsecond"
     set hir [argvHir $text]
     set one [outcomesOf $hir [list [T ./p] [T here]]]
     set zero [outcomesOf $hir [list [T ./p]]]
     list [lsort -unique [lmap o $one {lindex $o 1}]] [lsort -unique [lmap o $zero {lrange $o 0 2}]]
-} -result {{{"here"}} {{error {CORE SEMANTIC RANGE} {list_get: index 1 is outside 0..0}}}}
+} -result {{{"here"}} {{value {"absent"} {}}}}
 
 test argv-nir-uses-the-op-and-fixed-builtin-error-id {NIR: a plain `op argv` with the builtin error's fixed id, no program-specific table entry} -body {
     set nir [native::nir [argvHir $::handled]]
@@ -426,12 +426,12 @@ test argv-nir-uses-the-op-and-fixed-builtin-error-id {NIR: a plain `op argv` wit
 # A differential program over argv, and focused fuzzing
 
 set transformProgram {fn shout(s: str) -> str:
-    concat(lowercase(s), "!")
+    str::concat(str::lowercase(s), "!")
 args = argv():
     on InvalidArgumentEncoding:
         ["<invalid>"]
 lens = loop a in args:
-    length(a)
+    str::length(a)
 shouted = loop a in args:
     shout(a)
 [args, lens, shouted]}
@@ -620,7 +620,7 @@ proc underGcStress {body} {
 }
 
 test argv-gc-stress-materialization-and-repeated-calls {a = argv(); allocate; b = argv(): intact at every allocation} -body {
-    set text "fn churn(n: int) -> int:\n    if n < 1:\n        0\n    else:\n        s = concat(\"x\", \"y\")\n        length(s) + churn(n - 1)\na = argv():\n    on InvalidArgumentEncoding:\n        \[\"A\"\]\nc = churn(200)\nb = argv():\n    on InvalidArgumentEncoding:\n        \[\"B\"\]\n\[a == b, c, list_length(a), a\]"
+    set text "fn churn(n: int) -> int:\n    if n < 1:\n        0\n    else:\n        s = str::concat(\"x\", \"y\")\n        str::length(s) + churn(n - 1)\na = argv():\n    on InvalidArgumentEncoding:\n        \[\"A\"\]\nc = churn(200)\nb = argv():\n    on InvalidArgumentEncoding:\n        \[\"B\"\]\n\[a == b, c, list::length(a), a\]"
     set texts [list ./p]
     for {set i 0} {$i < 40} {incr i} { lappend texts "argument-$i-é😀" }
     set vec [lmap t $texts {T $t}]
@@ -649,7 +649,7 @@ test argv-large-vector {thousands of arguments and hundreds of KB of text: all b
         lappend vec [T $a]
         incr total [string length $a]
     }
-    set text "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"x\"\]\nlens = loop a in args:\n    length(a)\n\[list_length(args), list_get(args, 2500), list_get(lens, 7)\]"
+    set text "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"x\"\]\nlens = loop a in args:\n    str::length(a)\nlast = list::at(args, 2500):\n    on IndexNotFound:\n        \"none\"\nlen7 = list::at(lens, 7):\n    on IndexNotFound:\n        -1\n\[list::length(args), last, len7\]"
     set hir [argvHir $text]
     set plain [outcomesOf $hir $vec]
     underGcStress {set stressed [outcomesOf $hir $vec]}
@@ -760,7 +760,7 @@ test argv-standalone-ignoring-argv-runs-under-invalid-argv {a program that never
 } -result {42 42}
 
 test argv-standalone-argv-after-other-work {work before argv() runs first under invalid host argv} -constraints {executableAot bashLauncher} -body {
-    set text "error BelowRange\nfn do_something(n: int) -> int errors BelowRange:\n    if n < 0:\n        fail BelowRange\n    else:\n        n\nfn both(n: int) -> list errors BelowRange, InvalidArgumentEncoding:\n    x = do_something(n)\n    args = argv()\n    \[x, args\]\nargs = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\nr = both(list_length(args)):\n    on BelowRange:\n        \[\"below\"\]\n    on InvalidArgumentEncoding:\n        \[\"enc\"\]\nr"
+    set text "error BelowRange\nfn do_something(n: int) -> int errors BelowRange:\n    if n < 0:\n        fail BelowRange\n    else:\n        n\nfn both(n: int) -> list errors BelowRange, InvalidArgumentEncoding:\n    x = do_something(n)\n    args = argv()\n    \[x, args\]\nargs = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\nr = both(list::length(args)):\n    on BelowRange:\n        \[\"below\"\]\n    on InvalidArgumentEncoding:\n        \[\"enc\"\]\nr"
     set exe [buildOnce argv-order $text]
     # Valid argv: both() succeeds. Invalid argv: the first argv() already
     # falls back (empty List -> length 1), then both() meets the failure.

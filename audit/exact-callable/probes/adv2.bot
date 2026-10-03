@@ -7,9 +7,9 @@ fn outer(p, s):
     fn inner(x):
         p(x)
     fn count(i):
-        if i >= length(s):
+        if i >= str::length(s):
             return i
-        if inner(substring(s, i, i + 1)):
+        if inner(str::substring(s, i, i + 1)):
             return count(i + 1)
         i
     count(0)
@@ -31,4 +31,4 @@ fn first_idx(p, lo, hi):
             return i
     hi
 
-[outer(is_tcl_alpha, "ab1"), outer(is_tcl_alnum, "ab1_"), first_idx(pos?, -5, 5), first_idx(big?, 0, 200), first_idx(mk(7), 0, 50), first_idx(mk(20), 0, 50)]
+[outer(str::is_tcl_alpha, "ab1"), outer(str::is_tcl_alnum, "ab1_"), first_idx(pos?, -5, 5), first_idx(big?, 0, 200), first_idx(mk(7), 0, 50), first_idx(mk(20), 0, 50)]

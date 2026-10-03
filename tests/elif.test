@@ -24,13 +24,20 @@ set ::allBackends {interp compile cranelift-generic cranelift}
 
 # The preamble of the evaluation-order programs: probe(log, id, result) appends
 # the digit ID to the number in log[0] and returns RESULT.
-set ::probePreamble {fn probe(log, id, result):
-    n = mutable_array_get(log, 0)
-    mutable_array_set(log, 0, n * 10 + id)
+# The log is a one-slot MutableArray; the capacity guard is what proves
+# mutable_array::at's index (STDLIB-NAMESPACES.md), so neither helper needs
+# an IndexNotFound handler.
+set ::probePreamble {fn current(log):
+    if mutable_array::capacity(log) == 1:
+        return mutable_array::at(log, 0)
+    -1
+fn probe(log, id, result):
+    n = current(log)
+    mutable_array::set(log, 0, n * 10 + id)
     result
 fn fresh():
-    log = mutable_array_allocate(1)
-    mutable_array_set(log, 0, 0)
+    log = mutable_array::allocate(1)
+    mutable_array::set(log, 0, 0)
     log
 }
 
@@ -236,7 +243,7 @@ set ::orderElif {fn pick(log, a, b, c):
 fn run(a, b, c):
     log = fresh()
     v = pick(log, a, b, c)
-    [v, mutable_array_get(log, 0)]
+    [v, current(log)]
 }
 set ::orderNested {fn pick(log, a, b, c):
     return if probe(log, 1, a):
@@ -256,7 +263,7 @@ set ::orderNested {fn pick(log, a, b, c):
 fn run(a, b, c):
     log = fresh()
     v = pick(log, a, b, c)
-    [v, mutable_array_get(log, 0)]
+    [v, current(log)]
 }
 
 foreach {name call expected} {
@@ -279,7 +286,7 @@ test elif-order-without-else {with no final else and every condition false, all 
         probe(log, 5, true)
     elif probe(log, 3, false):
         probe(log, 6, true)
-    [v, mutable_array_get(log, 0)]
+    [v, current(log)]
 run()}
     set nested {fn run():
     log = fresh()
@@ -291,7 +298,7 @@ run()}
         else:
             if probe(log, 3, false):
                 probe(log, 6, true)
-    [v, mutable_array_get(log, 0)]
+    [v, current(log)]
 run()}
     bothSpellings $::probePreamble$elif $::probePreamble$nested
 } -result {value {[unit, 123]}}
@@ -591,25 +598,25 @@ test elif-fail-unhandled {an elif branch's declared error that nobody handles is
 } -match glob -result {error {CORE SEMANTIC UNHANDLED-ERROR} {t.bot:L:C: this call may produce the declared error "Boom"*}}
 
 set ::loopPrelude {fn run():
-    acc = mutable_array_allocate(1)
-    mutable_array_set(acc, 0, 0)
+    acc = mutable_array::allocate(1)
+    mutable_array::set(acc, 0, 0)
     loop i from 0 to 9:
 }
 set ::loopTail {
-    mutable_array_get(acc, 0)
+    mutable_array::at(acc, 0)
 run()}
 
 test elif-continue-and-break {continue and break in elif branches inside a loop behave as in the nested spelling} -body {
     set elif {        if i == 1:
-            mutable_array_set(acc, 0, mutable_array_get(acc, 0) + 100)
+            mutable_array::set(acc, 0, mutable_array::at(acc, 0) + 100)
         elif i == 3:
             continue
         elif i == 6:
             break
         else:
-            mutable_array_set(acc, 0, mutable_array_get(acc, 0) + i)}
+            mutable_array::set(acc, 0, mutable_array::at(acc, 0) + i)}
     set nested {        if i == 1:
-            mutable_array_set(acc, 0, mutable_array_get(acc, 0) + 100)
+            mutable_array::set(acc, 0, mutable_array::at(acc, 0) + 100)
         else:
             if i == 3:
                 continue
@@ -617,7 +624,7 @@ test elif-continue-and-break {continue and break in elif branches inside a loop 
                 if i == 6:
                     break
                 else:
-                    mutable_array_set(acc, 0, mutable_array_get(acc, 0) + i)}
+                    mutable_array::set(acc, 0, mutable_array::at(acc, 0) + i)}
     bothSpellings $::loopPrelude$elif$::loopTail $::loopPrelude$nested$::loopTail
 } -result {value 111}
 
@@ -851,7 +858,7 @@ f(5)" \
         \[3, 4\]
     else:
         \[5, 6\]
-list_length(f(true, false)) + list_length(f(false, true)) + list_length(f(false, false))" \
+list::length(f(true, false)) + list::length(f(false, true)) + list::length(f(false, false))" \
     "fn f(a, b):
     if a:
         \[1, 2\]
@@ -860,7 +867,7 @@ list_length(f(true, false)) + list_length(f(false, true)) + list_length(f(false,
             \[3, 4\]
         else:
             \[5, 6\]
-list_length(f(true, false)) + list_length(f(false, true)) + list_length(f(false, false))" \
+list::length(f(true, false)) + list::length(f(false, true)) + list::length(f(false, false))" \
     {value 6} \
 ] {
     test elif-same-nir-$name "$name: elif and nested programs lower to the same NIR and have the same HIR facts" -body {
@@ -893,10 +900,14 @@ proc executableValue {text} {
 }
 
 # Closed AOT needs typed code: a typed MutableArray[int] log (the untyped
-# mutable_array_get above has no static kind).
-set ::typedPreamble {fn probe(log: MutableArray[int], id: int, result: bool) -> bool:
-    n = mutable_array_get(log, 0)
-    mutable_array_set(log, 0, n * 10 + id)
+# mutable_array::at above has no static kind).
+set ::typedPreamble {fn current(log: MutableArray[int]) -> int:
+    if mutable_array::capacity(log) == 1:
+        return mutable_array::at(log, 0)
+    -1
+fn probe(log: MutableArray[int], id: int, result: bool) -> bool:
+    n = current(log)
+    mutable_array::set(log, 0, n * 10 + id)
     result
 }
 set ::typedElif {fn pick(log: MutableArray[int], a: bool, b: bool, c: bool) -> int:
@@ -913,9 +924,9 @@ set ::typedElif {fn pick(log: MutableArray[int], a: bool, b: bool, c: bool) -> i
         probe(log, 8, true)
         40
 fn run(a: bool, b: bool, c: bool):
-    log = mutarray::create(1, 0)
+    log = mutable_array::create(1, 0)
     v = pick(log, a, b, c)
-    [v, mutable_array_get(log, 0)]
+    [v, current(log)]
 }
 set ::typedNested {fn pick(log: MutableArray[int], a: bool, b: bool, c: bool) -> int:
     return if probe(log, 1, a):
@@ -933,9 +944,9 @@ set ::typedNested {fn pick(log: MutableArray[int], a: bool, b: bool, c: bool) ->
                 probe(log, 8, true)
                 40
 fn run(a: bool, b: bool, c: bool):
-    log = mutarray::create(1, 0)
+    log = mutable_array::create(1, 0)
     v = pick(log, a, b, c)
-    [v, mutable_array_get(log, 0)]
+    [v, current(log)]
 }
 
 # The one value TEXT has on every in-process backend, for programs that use

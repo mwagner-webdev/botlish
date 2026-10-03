@@ -69,7 +69,7 @@ fn f(n, c):
     if c > 100:
         n + 1
     else:
-        list_length([n])
+        list::length([n])
 
 f(7, 3)
 }
@@ -78,7 +78,7 @@ test native-report-skipped-code-1 {a range-decided if: the dead arm's blocker is
     list [reportCounts $deadThen] [reportCounts {
 fn f(n, c):
     if c < 100:
-        list_length([n])
+        list::length([n])
     else:
         n + 1
 
@@ -99,7 +99,7 @@ fn f(n, c):
     if c > 100:
         n + 1
     else:
-        list_length([n])
+        list::length([n])
 
 [f(7, 3), f(7, 300)]
 }
@@ -110,7 +110,7 @@ test native-report-skipped-code-4 {code after a decided if whose live arm return
 fn fill(l, i, n):
     if i >= n:
         return l
-    fill(list_append(l, [i, "v"]), i + 1, n)
+    fill(list::append(l, [i, "v"]), i + 1, n)
 
 fill([], 0, 0)
 }] [reportCounts {
@@ -166,8 +166,8 @@ fn f(n, c, b):
 test native-report-skipped-code-7 {an operand typed never: the operation it belongs to never runs, so neither do its checks of the other operands} -body {
     lmap body {
         "n + stop()"
-        "list_get(xs, stop())"
-        "s = \{x: n + 1, y: stop(), z: list_length(xs)\}\n    s.x"
+        "list::at(xs, stop())"
+        "s = \{x: n + 1, y: stop(), z: list::length(xs)\}\n    s.x"
         "loop i from n to stop():\n        n + i\n    n"
     } {
         reportCounts "error Boom\nfn stop() errors Boom:\n    fail Boom\n\nfn f(n, xs) errors Boom:\n    $body\n\nv = f(1, \[2\]):\n    on Boom:\n        -1\nv\n"
@@ -175,7 +175,7 @@ test native-report-skipped-code-7 {an operand typed never: the operation it belo
 } -result {{1 0 0 0 0 0} {1 0 0 0 0 0} {1 1 1 0 0 0} {2 0 0 0 0 0}}
 
 test native-report-skipped-code-8 {a construction operand typed never (a String plan): concat's check of the other operand never runs} -body {
-    lmap body {"concat(stops(), x)" "concat(concat(x, stops()), \"a\")"} {
+    lmap body {"str::concat(stops(), x)" "str::concat(str::concat(x, stops()), \"a\")"} {
         reportCounts "error Boom\nfn stops() errors Boom:\n    fail Boom\n\nfn f(x) errors Boom:\n    $body\n\nv = f(\"q\"):\n    on Boom:\n        \"e\"\nv\n"
     }
 } -result {{1 0 0 0 0 0} {1 0 0 0 0 0}}

@@ -1,7 +1,7 @@
 fn g(storage, length, value):
-    fresh = mutarray::create(length * 2 + 1, value)
-    mutable_array_copy(fresh, 0, storage, 0, length)
+    fresh = mutable_array::create(length * 2 + 1, value)
+    mutable_array::copy(fresh, 0, storage, 0, length)
     fresh
 
-s = mutarray::create(1, "a")
-list_length(mutable_array_freeze(g(s, 1, "b"), 1))
+s = mutable_array::create(1, "a")
+list::length(mutable_array::freeze(g(s, 1, "b"), 1))

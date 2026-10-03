@@ -168,8 +168,12 @@ twice(y)}                                                                       
     unary-minus    {-5.inc()}                      {-inc(5)}                    {value -6}
     not-operand    {not 3.add(1) == 4}             {not add(3, 1) == 4}         {value false}
     parenthesized  {(2 + 3).inc()}                 {inc(2 + 3)}                 {value 6}
-    list-receiver  {[1, 2, 3].list_length()}       {list_length([1, 2, 3])}     {value 3}
-    string-receiver {"abc".length()}               {length("abc")}              {value 3}
+    list-receiver  {length = list::length
+[1, 2, 3].length()}       {length = list::length
+length([1, 2, 3])}     {value 3}
+    string-receiver {length = str::length
+"abc".length()}               {length = str::length
+str::length("abc")}              {value 3}
     call-receiver  {inc(1).add(2)}                 {add(inc(1), 2)}             {value 4}
     trailing-comma {1.add(2,)}                     {add(1, 2,)}                 {value 3}
 } {
@@ -187,24 +191,49 @@ test method-multiline-chain {a chain written across lines inside brackets} -body
 } -result {value {[7, 2]}}
 
 # ---------------------------------------------------------------------------
-# Natives and library functions by their real names
+# Natives and intrinsics by their real names
+#
+# A root native (`list`) is visible everywhere by its name. A standard
+# intrinsic lives under its family's namespace (list::at, str::substring,
+# ...: STDLIB-NAMESPACES.md) and, like any namespaced function, is visible
+# to the sugar once bound to a name -- the binding's name is the method
+# name, and the call resolves to the very intrinsic the qualified spelling
+# denotes.
 
 foreach {name method free expected} {
-    list_get    {xs = [10, 20, 30]
-xs.list_get(1)}  {xs = [10, 20, 30]
-list_get(xs, 1)}  {value 20}
-    list_get-expr  {[10, 20, 30].list_get(1 + 1)}  {list_get([10, 20, 30], 1 + 1)}  {value 30}
-    substring   {"HeLLo World".substring(0, 5)}  {substring("HeLLo World", 0, 5)}  {value {"HeLLo"}}
-    lowercase   {"HeLLo".lowercase()}            {lowercase("HeLLo")}              {value {"hello"}}
-    list_append {[1, 2].list_append(3)}          {list_append([1, 2], 3)}          {value {[1, 2, 3]}}
-    concat      {"ab".concat("cd")}              {concat("ab", "cd")}              {value {"abcd"}}
-    chained     {"HeLLo World".lowercase().substring(6, 11)}  {substring(lowercase("HeLLo World"), 6, 11)}  {value {"world"}}
+    list-at     {at = list::at
+xs = [10, 20, 30]
+xs.at(1)}  {at = list::at
+xs = [10, 20, 30]
+at(xs, 1)}  {value 20}
+    list-at-expr  {at = list::at
+[10, 20, 30].at(1 + 1)}  {at = list::at
+at([10, 20, 30], 1 + 1)}  {value 30}
+    substring   {substring = str::substring
+"HeLLo World".substring(0, 5)}  {substring = str::substring
+str::substring("HeLLo World", 0, 5)}  {value {"HeLLo"}}
+    lowercase   {lowercase = str::lowercase
+"HeLLo".lowercase()}  {lowercase = str::lowercase
+str::lowercase("HeLLo")}  {value {"hello"}}
+    list-append {append = list::append
+[1, 2].append(3)}  {append = list::append
+append([1, 2], 3)}  {value {[1, 2, 3]}}
+    concat      {concat = str::concat
+"ab".concat("cd")}  {concat = str::concat
+str::concat("ab", "cd")}  {value {"abcd"}}
+    chained     {lowercase = str::lowercase
+substring = str::substring
+"HeLLo World".lowercase().substring(6, 11)}  {lowercase = str::lowercase
+substring = str::substring
+str::substring(str::lowercase("HeLLo World"), 6, 11)}  {value {"world"}}
     variadic    {5.list(6, 7)}                   {list(5, 6, 7)}                   {value {[5, 6, 7]}}
     variadic-0  {5.list()}                       {list(5)}                         {value {[5]}}
-    chained-natives {[3, 1, 2].list_length().twice()}  {twice(list_length([3, 1, 2]))}  {value 6}
+    chained-natives {length = list::length
+[3, 1, 2].length().twice()}  {length = list::length
+twice(length([3, 1, 2]))}  {value 6}
 } {
     set prelude $::fns
-    test method-natives-$name "$name: a root native is a function visible by its name" -body {
+    test method-natives-$name "$name: a root native, or an intrinsic bound to a name, is a function visible by that name" -body {
         bothSpellings $prelude$method $prelude$free
     } -result $expected
 }
@@ -585,12 +614,12 @@ test method-no-bound-method-values {x.f is a field projection, never a bound fun
 # Evaluation: the receiver is the first argument, evaluated once
 
 set ::logFns {fn probe(log, id, result):
-    n = mutable_array_get(log, 0)
-    mutable_array_set(log, 0, n * 10 + id)
+    n = mutable_array::get(log, 0, 0)
+    mutable_array::set(log, 0, n * 10 + id)
     result
 fn fresh():
-    log = mutable_array_allocate(1)
-    mutable_array_set(log, 0, 0)
+    log = mutable_array::allocate(1)
+    mutable_array::set(log, 0, 0)
     log
 fn add(a, b):
     a + b
@@ -603,34 +632,34 @@ fn first(a, b):
 foreach {name method free expected} {
     receiver-once {log = fresh()
 v = probe(log, 1, 10).add(probe(log, 2, 5))
-[v, mutable_array_get(log, 0)]}  {log = fresh()
+[v, mutable_array::get(log, 0, 0)]}  {log = fresh()
 v = add(probe(log, 1, 10), probe(log, 2, 5))
-[v, mutable_array_get(log, 0)]}  {value {[15, 12]}}
+[v, mutable_array::get(log, 0, 0)]}  {value {[15, 12]}}
     receiver-before-arguments {log = fresh()
 v = probe(log, 1, 1).add3(probe(log, 2, 2), probe(log, 3, 3))
-[v, mutable_array_get(log, 0)]}  {log = fresh()
+[v, mutable_array::get(log, 0, 0)]}  {log = fresh()
 v = add3(probe(log, 1, 1), probe(log, 2, 2), probe(log, 3, 3))
-[v, mutable_array_get(log, 0)]}  {value {[6, 123]}}
+[v, mutable_array::get(log, 0, 0)]}  {value {[6, 123]}}
     receiver-is-a-method-call {log = fresh()
 v = probe(log, 1, 1).add(probe(log, 2, 2)).add(probe(log, 3, 3))
-[v, mutable_array_get(log, 0)]}  {log = fresh()
+[v, mutable_array::get(log, 0, 0)]}  {log = fresh()
 v = add(add(probe(log, 1, 1), probe(log, 2, 2)), probe(log, 3, 3))
-[v, mutable_array_get(log, 0)]}  {value {[6, 123]}}
+[v, mutable_array::get(log, 0, 0)]}  {value {[6, 123]}}
     argument-is-a-method-call {log = fresh()
 v = probe(log, 1, 1).add(probe(log, 2, 2).add(probe(log, 3, 3)))
-[v, mutable_array_get(log, 0)]}  {log = fresh()
+[v, mutable_array::get(log, 0, 0)]}  {log = fresh()
 v = add(probe(log, 1, 1), add(probe(log, 2, 2), probe(log, 3, 3)))
-[v, mutable_array_get(log, 0)]}  {value {[6, 123]}}
+[v, mutable_array::get(log, 0, 0)]}  {value {[6, 123]}}
     receiver-effect-not-duplicated {log = fresh()
 v = probe(log, 4, 7).first(0)
-[v, mutable_array_get(log, 0)]}  {log = fresh()
+[v, mutable_array::get(log, 0, 0)]}  {log = fresh()
 v = first(probe(log, 4, 7), 0)
-[v, mutable_array_get(log, 0)]}  {value {[7, 4]}}
+[v, mutable_array::get(log, 0, 0)]}  {value {[7, 4]}}
     result-ignored {log = fresh()
 probe(log, 1, 1).first(probe(log, 2, 2))
-mutable_array_get(log, 0)}  {log = fresh()
+mutable_array::get(log, 0, 0)}  {log = fresh()
 first(probe(log, 1, 1), probe(log, 2, 2))
-mutable_array_get(log, 0)}  {value 12}
+mutable_array::get(log, 0, 0)}  {value 12}
 } {
     test method-evaluation-$name "$name: receiver and argument evaluation order and counts equal the free call's" -body {
         bothSpellings $::logFns$method $::logFns$free
@@ -647,11 +676,13 @@ fn add(a, b):
 fn to_list(a):
     [a, a]
 fn size(xs):
-    list_length(xs)
+    list::length(xs)
 fn text(n):
-    substring("abcdefghij", 0, n)
+    str::substring("abcdefghij", 0, n)
 fn shout(s):
-    lowercase(s)
+    str::lowercase(s)
+length = str::length
+count = list::length
 }
 
 foreach {name method free expected} {
@@ -659,7 +690,7 @@ foreach {name method free expected} {
     with-arguments  {1.inc().add(5).add(6)}                 {add(add(inc(1), 5), 6)}              {value 13}
     type-changes    {3.to_list().size().inc()}              {inc(size(to_list(3)))}               {value 3}
     int-to-string   {4.text().shout().length()}             {length(shout(text(4)))}              {value 4}
-    string-to-list  {"ab".to_list().list_length().text()}   {text(list_length(to_list("ab")))}     {value {"ab"}}
+    string-to-list  {"ab".to_list().count().text()}         {text(count(to_list("ab")))}          {value {"ab"}}
     long            {0.inc().inc().inc().inc().inc().inc().inc().inc()}  {inc(inc(inc(inc(inc(inc(inc(inc(0))))))))}  {value 8}
 } {
     test method-chain-$name "$name: a chain is the nested ordinary calls" -body {
@@ -787,7 +818,7 @@ test method-errors-handled-method-call-parses-as-handled-call {a method call is 
 # Types of the result, uses, call graph
 
 test method-result-type-is-the-functions {the type of a method call is the selected function's result type: no receiver-related transformation} -body {
-    set prelude "fn to_text(n) -> str:\n    substring(\"abcdef\", 0, n)\nfn size(s):\n    length(s)\n"
+    set prelude "fn to_text(n) -> str:\n    str::substring(\"abcdef\", 0, n)\nfn size(s):\n    str::length(s)\n"
     set m [hirOf "${prelude}a = 3.to_text()\nb = a.size()\n\[a, b\]"]
     set f [hirOf "${prelude}a = to_text(3)\nb = size(a)\n\[a, b\]"]
     list [lmap e [hirFind $m bind] {hir::types::show [hir::typeOf $m $e]}] [lmap e [hirFind $f bind] {hir::types::show [hir::typeOf $f $e]}] \
@@ -823,11 +854,11 @@ foreach {name method free} {
         "fn add(a, b):\n    a + b\nfn run(n):\n    n.add(3).add(n.add(1))\n\[run(1), run(20)\]"
         "fn add(a, b):\n    a + b\nfn run(n):\n    add(add(n, 3), add(n, 1))\n\[run(1), run(20)\]"
     lists-and-strings
-        "fn total(xs):\n    list_length(xs)\nfn name(n):\n    substring(\"abcdef\", 0, n)\n\[\[1, 2, 3\].total(), 4.name().lowercase()\]"
-        "fn total(xs):\n    list_length(xs)\nfn name(n):\n    substring(\"abcdef\", 0, n)\n\[total(\[1, 2, 3\]), lowercase(name(4))\]"
+        "lowercase = str::lowercase\nfn total(xs):\n    list::length(xs)\nfn name(n):\n    str::substring(\"abcdef\", 0, n)\n\[\[1, 2, 3\].total(), 4.name().lowercase()\]"
+        "lowercase = str::lowercase\nfn total(xs):\n    list::length(xs)\nfn name(n):\n    str::substring(\"abcdef\", 0, n)\n\[total(\[1, 2, 3\]), lowercase(name(4))\]"
     construction
-        "fn pair(a, b):\n    \[a, b\]\nfn first(p):\n    list_get(p, 0)\nfn run(n):\n    n.pair(n + 1).first()\n\[run(1), run(5)\]"
-        "fn pair(a, b):\n    \[a, b\]\nfn first(p):\n    list_get(p, 0)\nfn run(n):\n    first(pair(n, n + 1))\n\[run(1), run(5)\]"
+        "fn pair(a, b):\n    \[a, b\]\nfn first(p):\n    v = list::at(p, 0):\n        on IndexNotFound:\n            0\n    v\nfn run(n):\n    n.pair(n + 1).first()\n\[run(1), run(5)\]"
+        "fn pair(a, b):\n    \[a, b\]\nfn first(p):\n    v = list::at(p, 0):\n        on IndexNotFound:\n            0\n    v\nfn run(n):\n    first(pair(n, n + 1))\n\[run(1), run(5)\]"
     struct-receiver
         "fn area(r, scale):\n    r.w * r.h * scale\nfn run(n):\n    {w: n, h: 3}.area(2)\n\[run(1), run(4)\]"
         "fn area(r, scale):\n    r.w * r.h * scale\nfn run(n):\n    area({w: n, h: 3}, 2)\n\[run(1), run(4)\]"
@@ -870,30 +901,30 @@ proc executableValue {text} {
 }
 
 set ::typedMethod {fn probe(log: MutableArray[int], id: int, result: int) -> int:
-    n = mutable_array_get(log, 0)
-    mutable_array_set(log, 0, n * 10 + id)
+    n = mutable_array::get(log, 0, 0)
+    mutable_array::set(log, 0, n * 10 + id)
     result
 fn add(a: int, b: int) -> int:
     a + b
 fn twice(a: int) -> int:
     a * 2
 fn run(n: int) -> int:
-    log = mutarray::create(1, 0)
+    log = mutable_array::create(1, 0)
     v = probe(log, 1, n).add(probe(log, 2, 5)).twice()
-    v * 1000 + mutable_array_get(log, 0)
+    v * 1000 + mutable_array::get(log, 0, 0)
 [run(1), run(20)]}
 set ::typedFree {fn probe(log: MutableArray[int], id: int, result: int) -> int:
-    n = mutable_array_get(log, 0)
-    mutable_array_set(log, 0, n * 10 + id)
+    n = mutable_array::get(log, 0, 0)
+    mutable_array::set(log, 0, n * 10 + id)
     result
 fn add(a: int, b: int) -> int:
     a + b
 fn twice(a: int) -> int:
     a * 2
 fn run(n: int) -> int:
-    log = mutarray::create(1, 0)
+    log = mutable_array::create(1, 0)
     v = twice(add(probe(log, 1, n), probe(log, 2, 5)))
-    v * 1000 + mutable_array_get(log, 0)
+    v * 1000 + mutable_array::get(log, 0, 0)
 [run(1), run(20)]}
 
 test method-standalone-executable {the standalone executables of the method and free spellings print the value (and evaluation log) every in-process backend computes} -constraints executableAot -body {

@@ -126,7 +126,7 @@ proc instanceDump {analysis} {
 set ::primaryFixture {
 fn outer(tag):
     fn inner(x):
-        x + length(tag)
+        x + str::length(tag)
     inner(1) + inner(2)
 outer("v")
 }
@@ -146,7 +146,7 @@ outer("v")
 set ::cascadeFixture {
 fn outer(tag):
     fn inner(x):
-        x + length(tag)
+        x + str::length(tag)
     fn middle(y):
         inner(y)
     middle(1) + middle(2)
@@ -166,9 +166,9 @@ set ::recursiveResultFixture {
 fn outer(tag):
     fn inner(x, n):
         if n <= 0:
-            [x, length(tag)]
+            [x, str::length(tag)]
         else:
-            concat([x], inner(x, n - 1))
+            str::concat([x], inner(x, n - 1))
     inner(1, 3)
 outer("v")
 }
@@ -185,7 +185,7 @@ set ::noOptimizableClosureFixture {
 fn outer(tag):
     fn inner(x):
         x + 1
-    inner(1) + length(tag)
+    inner(1) + str::length(tag)
 outer("v")
 }
 

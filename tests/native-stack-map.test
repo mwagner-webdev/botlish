@@ -147,7 +147,7 @@ test stack-map-fib-4 {fib<int> under forced GC stress: every recursive call is a
 # collectible if the walker ever failed to find it) must survive across its
 # own recursive call, while every ancestor frame's *own* copy of that same
 # local root is simultaneously live and must independently survive too.
-# Under BOTLISH_NATIVE_GC_STRESS=1, every one of the many `concat`
+# Under BOTLISH_NATIVE_GC_STRESS=1, every one of the many `str::concat`
 # allocations this makes (one per recursion level, both going down and
 # coming back up) forces a real collection while some number of Botlish
 # frames are genuinely suspended on the native call stack -- this is a
@@ -167,7 +167,7 @@ test stack-map-fib-4 {fib<int> under forced GC stress: every recursive call is a
 # any change to this walk.
 
 proc buildSource {n} {
-    return "fn build(n):\n    if n < 1:\n        return \"\"\n    prefix = concat(\"x\", \"y\")\n    concat(prefix, build(n - 1))\n\nbuild($n)"
+    return "fn build(n):\n    if n < 1:\n        return \"\"\n    prefix = str::concat(\"x\", \"y\")\n    str::concat(prefix, build(n - 1))\n\nbuild($n)"
 }
 
 test stack-map-deep-1 {a non-tail recursive, allocating function computes the right answer at moderate depth} -body {
@@ -202,7 +202,7 @@ test stack-map-deep-3 {a much deeper chain of simultaneously-live caller-frame r
 # and nests no foreign frame at all, which would silently stop covering the
 # boundary this test exists for. `pick` chooses between two Blocks at run
 # time, so the call through `f` stays an rt_call_value dispatch.
-set ::callvalueBoundaryProgram "fn build(n):\n    if n < 1:\n        return \"\"\n    prefix = concat(\"x\", \"y\")\n    concat(prefix, build(n - 1))\n\nfn other(n):\n    \"z\"\n\nfn pick(flag):\n    if flag:\n        build\n    else:\n        other\n\nfn apply(f, x):\n    f(x)\n\napply(pick(true), 40)"
+set ::callvalueBoundaryProgram "fn build(n):\n    if n < 1:\n        return \"\"\n    prefix = str::concat(\"x\", \"y\")\n    str::concat(prefix, build(n - 1))\n\nfn other(n):\n    \"z\"\n\nfn pick(flag):\n    if flag:\n        build\n    else:\n        other\n\nfn apply(f, x):\n    f(x)\n\napply(pick(true), 40)"
 
 test stack-map-callvalue-boundary-1 {a CallValue dispatch nests a foreign frame; the walk still finds every Botlish root beneath it, under GC stress} -body {
     underGcStress {
@@ -216,7 +216,7 @@ test stack-map-callvalue-boundary-2 {confirms the program above really does disp
 } -result 1
 
 test stack-map-callvalue-boundary-3 {and with the target statically exact the same helper is a direct call: no foreign frame, same value under GC stress} -body {
-    set text "fn build(n):\n    if n < 1:\n        return \"\"\n    prefix = concat(\"x\", \"y\")\n    concat(prefix, build(n - 1))\n\nfn apply(f, x):\n    f(x)\n\napply(build, 40)"
+    set text "fn build(n):\n    if n < 1:\n        return \"\"\n    prefix = str::concat(\"x\", \"y\")\n    str::concat(prefix, build(n - 1))\n\nfn apply(f, x):\n    f(x)\n\napply(build, 40)"
     list [regexp {callvalue} [nirFunction [nirOf $text] apply]] [underGcStress {native $text}]
 } -result [list 0 [list value "\"[string repeat xy 40]\""]]
 
@@ -269,7 +269,7 @@ proc nirFunction {nir name} {
 
 test stack-map-slot-reuse-1 {two non-overlapping cross-call roots that share a native slot both compute correctly under GC stress} -body {
     underGcStress {
-        native "fn id(x):\n    x\n\nfn f(n):\n    a = concat(\"phase-one-\", \"value\")\n    b = id(a)\n    c = concat(\"phase-two-\", \"value\")\n    d = id(c)\n    concat(b, d)\n\nf(0)"
+        native "fn id(x):\n    x\n\nfn f(n):\n    a = str::concat(\"phase-one-\", \"value\")\n    b = id(a)\n    c = str::concat(\"phase-two-\", \"value\")\n    d = id(c)\n    str::concat(b, d)\n\nf(0)"
     }
 } -result {value {"phase-one-valuephase-two-value"}}
 

@@ -4,7 +4,9 @@ A small syntax milestone: `value.f(a, b)` as an alternate spelling of the
 ordinary call `f(value, a, b)`.
 
 ```
-xs.list_get(i)             ==   list_get(xs, i)
+at = list::at                              # bind the intrinsic to a name
+xs.at(i)                   ==   at(xs, i)  ==   list::at(xs, i)
+substring = str::substring
 text.substring(0, 5)       ==   substring(text, 0, 5)
 n.inc().twice().add(3)     ==   add(twice(inc(n)), 3)
 ```
@@ -28,13 +30,18 @@ lexical resolution* (`hir/resolve.tcl`), which finds:
 * a function or binding of the file established before the call (a function
   may reach itself; nothing is hoisted),
 * a parameter or local binding of an enclosing scope,
-* a **root native** (`list_get`, `substring`, `lowercase`, `length`, `list`,
-  `concat`, ...), which is visible everywhere unless shadowed,
-* a module function **only if it has been bound to a name**:
-  `find = list::find`. That binding is this language's "function import", and
-  the name it introduces (`find`) is the method name. The original name
+* a **root native** (`list`, `argv`, `hash`, the operators, ...: the language
+  primitives, STDLIB-NAMESPACES.md), which is visible everywhere unless
+  shadowed,
+* a namespaced function -- a module function (`list::find`) or a standard
+  intrinsic (`list::at`, `str::substring`, `mutable_array::set`, ...) --
+  **only if it has been bound to a name**: `find = list::find`, `at =
+  list::at`. That binding is this language's "function import", and the name
+  it introduces (`find`, `at`) is the method name. The original name
   (`list::find`, or the module's own `find`) is not made visible by the
-  binding.
+  binding. A bound intrinsic is the very intrinsic: `xs.at(i)` resolves to
+  the same native target as `list::at(xs, i)` (`tests/stdlib-namespaces.test`
+  checks the HIR call targets and the NIR are identical).
 
 `mod::f` alone does **not** make `f` visible: the qualified spelling is the
 only spelling of an unbound module function, and the sugar adds no
@@ -271,8 +278,9 @@ unused-import lint to change.
 * `tests/method-sugar.test` (114 tests; each program runs on interpreter, Tcl
   compiler, native generic and native specialized, and the standalone
   executable is run as well): basic arities 1..3, receivers of every kind,
-  precedence; real library names (`list_get`, `substring`, `lowercase`,
-  `list_append`, `concat`, variadic `list`); module functions bound to names
+  precedence; real library names (`list::at`, `str::substring`,
+  `str::lowercase`, `list::append`, `str::concat` bound to names, variadic
+  `list`); module functions bound to names
   (`byte::complement`, `byte::from_int` with handlers, `list::find` with a
   predicate); visibility (unbound module function, receiver-type
   non-search, forward reference, struct receiver, nested scopes, recursion);

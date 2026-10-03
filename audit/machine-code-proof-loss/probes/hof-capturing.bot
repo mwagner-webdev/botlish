@@ -6,15 +6,15 @@
 # expect: 3
 
 fn run(v):
-    n = length(v)
+    n = str::length(v)
     fn char_at(i):
-        substring(v, i, i + 1)
+        str::substring(v, i, i + 1)
     fn scan_while(start, predicate):
         loop i from start to n:
             if predicate(char_at(i)):
                 continue
             return i
         n
-    scan_while(0, is_tcl_alpha)
+    scan_while(0, str::is_tcl_alpha)
 
 run("abc1")

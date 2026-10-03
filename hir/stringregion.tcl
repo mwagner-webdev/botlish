@@ -25,7 +25,7 @@
 # ordinary lowering -- an actual `substr` allocation -- is exactly as sound
 # and unchanged as it always was):
 #
-#   * a *region-producing* expression is a direct `substring(text, a, b)`
+#   * a *region-producing* expression is a direct `str::substring(text, a, b)`
 #     call (the region is (text, a, b): the same three operands the ordinary
 #     call would validate and copy from), a String literal (trivially a
 #     region over itself, (self, 0, its own character count)), or a direct
@@ -45,7 +45,7 @@
 #     only if *every* reference to it is an operand of a native `==` call
 #     whose two operands are both statically str-typed (so it lowers to
 #     `streq`, never a runtime-guarded `eq`/`==` -- see native/lower.tcl's
-#     NativeCallOp), or the sole argument of a native `length` call. Any
+#     NativeCallOp), or the sole argument of a native `str::length` call. Any
 #     other use at all (concat, storage, return, an argument to any other
 #     call, a generic/indirect use) means the binding is not virtual:
 #     ordinary lowering (materializing the substring exactly once, as
@@ -54,7 +54,7 @@
 #     bounds-error moment (mirrors hir::escape.tcl's #11-13 rationale
 #     exactly).
 #   * a region-producing call embedded directly as an operand of such a `==`
-#     or `length` call, with no binding at all (e.g. `peek(text, i) ==
+#     or `str::length` call, with no binding at all (e.g. `peek(text, i) ==
 #     "\""`), is recognized the same way: native/lower.tcl evaluates it in
 #     region form right at that one use (see Call's `wantRegion`), so it
 #     needs no "every reference" check at all (there is exactly one, by
@@ -78,17 +78,17 @@
 #
 # Consuming parameters (the "char/string-view allocations" milestone): a
 # region-producing value passed as an *argument*, not just as a `==`/
-# `length` operand -- e.g. Botlish source shaped like
+# `str::length` operand -- e.g. Botlish source shaped like
 # `is_local_char(char_at(i))`, where `char_at`'s one-character result is
-# immediately classified rather than compared. `is_tcl_alpha`/`is_tcl_alnum`
-# (core/tclcompat.tcl) join `==`/`length` directly as supported native
+# immediately classified rather than compared. `str::is_tcl_alpha`/`str::is_tcl_alnum`
+# (core/tclcompat.tcl) join `==`/`str::length` directly as supported native
 # consumers (ConsumingNative, below): a region-eligible sole argument of
 # either lowers to a StringRegion classification (native/lower.tcl's "String
 # regions" section), never a materialized one-character String.
 #
 # A *user-defined* one-parameter predicate wholly built from those same three
 # native shapes -- `is_local_char`/`is_label_char` in lib/web.tcl's Emailish?
-# native-body are exactly this: `fn is_local_char(c): is_tcl_alnum(c) or c ==
+# native-body are exactly this: `fn is_local_char(c): str::is_tcl_alnum(c) or c ==
 # "." or ...` -- is itself then just as safely region-consuming at that
 # parameter: every one of its own reachable uses of the parameter is already
 # one of the three supported shapes, so calling it with a region argument
@@ -101,8 +101,8 @@
 # never the fixed generic-entry ABI" reason -- see that module's own
 # rationale), non-self-tail-calling instance whose *entire* region consists
 # only of `if`, a literal/root (`true`/`false`) reference, and a native call
-# to `==` (one operand a String literal), `length`, `is_tcl_alpha`, or
-# `is_tcl_alnum` -- exactly the node kinds native/lower.tcl's
+# to `==` (one operand a String literal), `str::length`, `str::is_tcl_alpha`, or
+# `str::is_tcl_alnum` -- exactly the node kinds native/lower.tcl's
 # EmitRegionConsumerBody (native/lower.tcl's "String regions" section) knows
 # how to re-lower directly against a caller's region, in place of an actual
 # call to the instance's own compiled function (the same "lower directly in
@@ -125,10 +125,10 @@ namespace eval hir::stringregion {
 # "" | {const TEXT} | {remote target}: how expression E (a `const` or `call`,
 # in INSTANCE's region) produces a recognized String region, given REGIONOF
 # (InstanceId -> 1, the instances so far proven region-producing). A direct
-# `substring(text, a, b)` call is recognized structurally by native/lower.tcl
+# `str::substring(text, a, b)` call is recognized structurally by native/lower.tcl
 # itself (Call's `wantRegion` case): it needs no entry here, since its three
 # operands -- not some derived fact -- *are* the region, and evaluating them
-# is exactly evaluating an ordinary `substring` call's arguments. Classify
+# is exactly evaluating an ordinary `str::substring` call's arguments. Classify
 # only needs to name the *other* two shapes, since those are the ones a
 # caller cannot tell apart from an ordinary String-typed expression by
 # looking at E's kind alone.
@@ -145,7 +145,7 @@ proc hir::stringregion::Classify {hir instance regionOf e} {
             set node [hir::node $hir $e]
             lassign [dict get $node target] targetKind target
             if {$targetKind eq "native"} {
-                if {[dict get [hir::symbol $hir $target] name] eq "substring"
+                if {[dict get [hir::symbol $hir $target] name] eq "str::substring"
                         && [llength [dict get $node args]] == 3} {
                     return [list substr {*}[dict get $node args]]
                 }
@@ -239,21 +239,21 @@ proc hir::stringregion::Regions {hir spec} {
 # materialized String.
 
 # 1 if NAME (a native call's resolved symbol name) is a supported
-# region-consuming classification native: `is_tcl_alpha`/`is_tcl_alnum`
-# (core/tclcompat.tcl) join `==`/`length` (handled directly by Bindings/
+# region-consuming classification native: `str::is_tcl_alpha`/`str::is_tcl_alnum`
+# (core/tclcompat.tcl) join `==`/`str::length` (handled directly by Bindings/
 # ConsumingParams themselves, not through this list, since they need their
 # *other* operand inspected too) as natives whose sole region-eligible
 # argument native/lower.tcl's "String regions" section can classify directly
 # from the region, never materializing it first.
 proc hir::stringregion::ConsumingNative {name} {
-    return [expr {$name in {is_tcl_alpha is_tcl_alnum}}]
+    return [expr {$name in {str::is_tcl_alpha str::is_tcl_alnum}}]
 }
 
 # A used, non-program, non-generic instance ID (view VIEW, own INSTANCE) is
 # a candidate for ConsumingParams only if its *entire* region is built from
 # nothing but `if`, a `ref` (to a parameter or to a root true/false/native
 # value -- hir::binding's own `kind`), a `const`, and a native call to `==`,
-# `length`, `is_tcl_alpha`, or `is_tcl_alnum` -- exactly the shapes
+# `str::length`, `str::is_tcl_alpha`, or `str::is_tcl_alnum` -- exactly the shapes
 # native/lower.tcl's EmitRegionConsumerBody knows how to re-lower against a
 # caller's region (see the file header) -- and it makes no call to another
 # Block at all (so, in particular, it is never itself self-tail-recursive:
@@ -312,7 +312,7 @@ proc hir::stringregion::ConsumingShape {view instance exprs} {
                     } else {
                         return ""
                     }
-                } elseif {$name eq "length" && [llength $args] == 1} {
+                } elseif {$name eq "str::length" && [llength $args] == 1} {
                     dict set lenArgs [lindex $args 0] 1
                 } elseif {[ConsumingNative $name] && [llength $args] == 1} {
                     dict set classifyArgs [lindex $args 0] 1
@@ -371,7 +371,7 @@ proc hir::stringregion::ConsumingParams {hir spec} {
 # ---------------------------------------------------------------------------
 # Local bindings and inline operands: which region-producing values are
 # consumed only by a supported operation (`==` resolving to `streq`, or
-# `length`), and the companion demand that creates.
+# `str::length`), and the companion demand that creates.
 
 # {VIRTUAL WANTS}: VIRTUAL is InstanceId -> BindingId -> 1, for every local
 # binding of every used instance recognized virtual (see the file header).
@@ -398,9 +398,9 @@ proc hir::stringregion::Bindings {hir spec regionOf consumingParams} {
         # two operands are both statically str-typed (so NativeCallOp would
         # lower it to `streq`) -> the call's *other* operand ExprId.
         # lenArgs: the set of ExprIds that are the sole argument of a native
-        # `length` call. classifyArgs: the set of ExprIds that are the sole
+        # `str::length` call. classifyArgs: the set of ExprIds that are the sole
         # argument of a supported native classification call (ConsumingNative
-        # -- is_tcl_alpha/is_tcl_alnum). consumingCallArgs: the set of
+        # -- str::is_tcl_alpha/str::is_tcl_alnum). consumingCallArgs: the set of
         # ExprIds that are the argument, at a consuming parameter position
         # (hir::stringregion::ConsumingParams), of a direct call to another
         # used instance. Built once per region, like hir::escape::
@@ -459,7 +459,7 @@ proc hir::stringregion::Bindings {hir spec regionOf consumingParams} {
                             dict set eqOther $a $b
                             dict set eqOther $b $a
                         }
-                    } elseif {$name eq "length" && [llength $args] == 1} {
+                    } elseif {$name eq "str::length" && [llength $args] == 1} {
                         dict set lenArgs [lindex $args 0] 1
                     } elseif {[ConsumingNative $name] && [llength $args] == 1} {
                         dict set classifyArgs [lindex $args 0] 1
@@ -505,7 +505,7 @@ proc hir::stringregion::Bindings {hir spec regionOf consumingParams} {
         }
 
         # Inline region-consuming operands with no binding at all (e.g.
-        # `peek(text, i) == "\""`, `length(peek(text, i))`): native/lower.tcl
+        # `peek(text, i) == "\""`, `str::length(peek(text, i))`): native/lower.tcl
         # evaluates each in region form right at its one use, so the only
         # fact this analysis still owes it is companion demand for a
         # forwarding ("remote") shape. A `ref` operand is already covered by

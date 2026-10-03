@@ -190,17 +190,17 @@ proc concatProgram {} {
     return {
         {bind inspect {block {q} {call {ref UriQueryValue?} {ref q}}}}
         {bind trusted {call {ref uriEscape} {const str {a b}}}}
-        {bind q2 {call {ref concat} {ref trusted} {const str {}}}}
+        {bind q2 {call {ref str::concat} {ref trusted} {const str {}}}}
         {call {ref inspect} {ref q2}}
     }
 }
 
-test native-refinement-propagation-transformation-invalidates-dynamically {concat(q, "") does not carry UriQueryValue evidence at the value level either (interp/compile): confirms the static non-propagation below is not over-conservative, it is correct} -body {
+test native-refinement-propagation-transformation-invalidates-dynamically {str::concat(q, "") does not carry UriQueryValue evidence at the value level either (interp/compile): confirms the static non-propagation below is not over-conservative, it is correct} -body {
     list [lindex [outcomeUnder interp [concatProgram]] 1] \
         [lindex [outcomeUnder compile [concatProgram]] 1]
 } -result {false false}
 
-test native-refinement-propagation-transformation-invalidates-statically {concat(q, "") is not statically known to carry UriQueryValue: the call stays genuinely dynamic on cranelift (never wrongly folded to false either -- absence of proof is not proof of absence for an opaque type, spec's own §25)} -body {
+test native-refinement-propagation-transformation-invalidates-statically {str::concat(q, "") is not statically known to carry UriQueryValue: the call stays genuinely dynamic on cranelift (never wrongly folded to false either -- absence of proof is not proof of absence for an opaque type, spec's own §25)} -body {
     errorCodeOfUnder cranelift [concatProgram]
 } -result {NATIVE UNSUPPORTED {native UriQueryValue?}}
 

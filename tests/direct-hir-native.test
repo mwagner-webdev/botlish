@@ -129,8 +129,8 @@ test direct-hir-native-entry-points-never-call-core-ir {native::nir, evalHir, ob
         fn check(s: str) -> bool:
             emailish?(s)
         q = uriEscape("a b")
-        a = mutarray::create(2, 0)
-        [check("a@b.co"), UriQueryValue?(q), mutable_array_capacity(a)]
+        a = mutable_array::create(2, 0)
+        [check("a@b.co"), UriQueryValue?(q), mutable_array::capacity(a)]
     }]
     set ::trips {}
     proc ::Trip {command args} { lappend ::trips [lindex $command 0] }
@@ -285,8 +285,8 @@ test direct-hir-shadowed-native-name {a local binding named like a native is not
     core::loadLibrary web
     set hir [srcHir {
         fn uriEscape(s):
-            length(s)
-        [uriEscape("abc"), length("xy")]
+            str::length(s)
+        [uriEscape("abc"), str::length("xy")]
     }]
     list [referenceValue $hir] [nativeValue $hir] [executableValue $hir]
 } -result {{[3, 2]} {[3, 2]} {[3, 2]}}
@@ -307,7 +307,7 @@ proc lenientHir {text} {
 }
 
 test direct-hir-unproven-declared-contract-checked-at-run-time {a declared parameter type the program cannot prove is checked by the native callee: a violating argument raises the reference TYPE error, a valid one runs} -body {
-    set body "fn take(xs: List\[int\]):\n    list_length(xs)\nfn mixed(c):\n    if c:\n        1\n    else:\n        \[\]\n"
+    set body "fn take(xs: List\[int\]):\n    list::length(xs)\nfn mixed(c):\n    if c:\n        1\n    else:\n        \[\]\n"
     set results {}
     foreach call {take(mixed(true)) take(mixed(false))} {
         set hir [lenientHir "${body}${call}"]
@@ -334,9 +334,9 @@ test direct-hir-lowering-state-per-compilation {native lowering starts each comp
 
 test direct-hir-module-identity-in-native-hir {a module-qualified call and the container intrinsics keep their module identity in the HIR native lowers} -body {
     set hir [srcHir {
-        a = mutarray::create(3, 0)
-        mutable_array_set(a, 1, 7)
-        [mathish::inc(41), mutable_array_get(a, 1)]
+        a = mutable_array::create(3, 0)
+        mutable_array::set(a, 1, 7)
+        [mathish::inc(41), mutable_array::at(a, 1)]
     }]
     set prepared [native::prepareHir $hir]
     set moduleBindings 0
@@ -347,9 +347,9 @@ test direct-hir-module-identity-in-native-hir {a module-qualified call and the c
         [nativeValue $hir]
 } -result {1 1 {[42, 7]}}
 
-test direct-hir-container-call-result-is-semantic-type {the typed result of mutarray::create comes from HIR's semantic analysis: MutableArray[int], not a rediscovered spelling} -body {
+test direct-hir-container-call-result-is-semantic-type {the typed result of mutable_array::create comes from HIR's semantic analysis: MutableArray[int], not a rediscovered spelling} -body {
     set hir [srcHir {
-        a = mutarray::create(3, 0)
+        a = mutable_array::create(3, 0)
         a
     }]
     hir::types::show [hir::typeOf $hir [lindex [hir::roots $hir] end]]
@@ -439,12 +439,12 @@ set differentialPrograms {
     }
     {mutable-array} {
         fn fill(n):
-            a = mutarray::create(n, 0)
+            a = mutable_array::create(n, 0)
             loop i from 0 to n:
-                mutable_array_set(a, i, i * i)
+                mutable_array::set(a, i, i * i)
             a
         a = fill(6)
-        [mutable_array_get(a, 5), mutable_array_freeze(a, 6)]
+        [mutable_array::get(a, 5, -1), mutable_array::freeze(a, 6)]
     }
     {semantic-instances} {
         fn identity(v):
@@ -463,7 +463,7 @@ set differentialPrograms {
             f(v)
         fn inc(n):
             n + 1
-        [apply(inc, 1), apply(length, "abcd")]
+        [apply(inc, 1), apply(str::length, "abcd")]
     }
     {argument-cycle} {
         fn ping(next, n):
@@ -524,10 +524,10 @@ test direct-hir-executable-parity-closure-module-mutarray {closure, module call 
 add10 = make_adder(10)
 [add10(32), add10(1)]}
         {[mathish::inc(41), mathish::inc(1)]}
-        {a = mutarray::create(3, 0)
-mutable_array_set(a, 1, 7)
-b = mutarray::from_list([4, 5, 6])
-[mutable_array_get(a, 1), mutable_array_get(b, 2), mutable_array_freeze(a, 3)]}
+        {a = mutable_array::create(3, 0)
+mutable_array::set(a, 1, 7)
+b = mutable_array::from_list([4, 5, 6])
+[mutable_array::at(a, 1), mutable_array::at(b, 2), mutable_array::freeze(a, 3)]}
     } {
         set hir [srcHir $text]
         set values [list [referenceValue $hir] [nativeValue $hir] [executableValue $hir]]

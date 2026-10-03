@@ -8,7 +8,7 @@
 #
 # tests/helpers.tcl gives the synthetic NonEmpty type (already used by
 # refined.test to test evidence-combination) a -native-body reproducing its
-# Tcl validator (length(v) > 0) in ordinary Botlish, independently of
+# Tcl validator (str::length(v) > 0) in ordinary Botlish, independently of
 # Emailish: this file's job is to prove the *mechanism* is generic, not
 # specific to any one type. UriQueryValue (opaque) never gets one, by
 # construction: this file pins it still being rejected, so the
@@ -17,7 +17,7 @@
 # Emailish itself was originally left without a -native-body too (its
 # validator needed Unicode-aware character classification, not yet
 # expressible in ordinary core IR): the NATIVE-TCL-UNICODE.md milestone
-# closed that gap (core/tclcompat.tcl's is_tcl_alpha/is_tcl_alnum), and
+# closed that gap (core/tclcompat.tcl's str::is_tcl_alpha/str::is_tcl_alnum), and
 # Emailish? now has a -native-body -- see tests/native-tcl-unicode.test for
 # that milestone's own full regression coverage; only the assertions this
 # file already made about Emailish are updated below, to their new answers.
@@ -73,7 +73,7 @@ foreach {name s expect} {
 
 test native-validator-predicate-known-result-static-type {a param-kind error is not folded away (still requires the runtime check); the native-body's own inlined guard (length's, not NonEmpty?'s) reports it} -body {
     outcomeUnder cranelift {{call {ref NonEmpty?} {const 5}}}
-} -result {error {CORE SEMANTIC TYPE} {length: expected str, got 5} {}}
+} -result {error {CORE SEMANTIC TYPE} {str::length: expected str, got 5} {}}
 
 test native-validator-predicate-known-result-branch-fact {a redundant NonEmpty? check, proven by an enclosing refinement, still evaluates correctly natively} -body {
     set p {

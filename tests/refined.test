@@ -27,7 +27,7 @@ set emailProgram {
 set escapeProgram {
     {bind raw {const str {a&b=c}}}
     {bind escaped {call {ref uriEscape} {ref raw}}}
-    {bind part {call {ref substring} {ref escaped} {const 0} {const 3}}}
+    {bind part {call {ref str::substring} {ref escaped} {const 0} {const 3}}}
     {call {ref list} {ref escaped} {ref part}}
 }
 
@@ -87,11 +87,10 @@ test refined-9 {escaped equals the plain string with the same characters} -body 
     set p [concat [lrange $escapeProgram 0 1] {
         {call {ref list}
             {call {ref ==} {ref escaped} {const str a%26b%3Dc}}
-            {call {ref eq} {ref escaped} {const str a%26b%3Dc}}
             {call {ref string?} {ref escaped}}}
     }]
     list [run {*}$p] [differential $p]
-} -result {{[true, true, true]} same}
+} -result {{[true, true]} same}
 
 test refined-10 {substring of escaped is a plain str, with no evidence} -body {
     set saved [core::useBackend]
@@ -111,9 +110,9 @@ test refined-10 {substring of escaped is a plain str, with no evidence} -body {
 test refined-11 {string transformations discard refinements} -body {
     set p {
         {bind escaped {call {ref uriEscape} {const str {x y}}}}
-        {bind lower {call {ref lowercase} {ref escaped}}}
-        {bind joined {call {ref concat} {ref escaped} {const str !}}}
-        {bind n {call {ref length} {ref escaped}}}
+        {bind lower {call {ref str::lowercase} {ref escaped}}}
+        {bind joined {call {ref str::concat} {ref escaped} {const str !}}}
+        {bind n {call {ref str::length} {ref escaped}}}
         {call {ref list}
             {call {ref UriQueryValue?} {ref escaped}}
             {call {ref UriQueryValue?} {ref lower}}
@@ -284,7 +283,7 @@ test refined-type-test-contract {the reference runtime verifies a type test's an
 } -result {{error {CORE CONTRACT TYPE} {test-lying-int?: contract violation: as a test of int it must return false for "a", returned true} {}} {value false {}}}
 
 test refined-16 {substring range errors} -body {
-    differential {{call {ref substring} {const str abc} {const 2} {const 5}}}
+    differential {{call {ref str::substring} {const str abc} {const 2} {const 5}}}
 } -result same
 
 cleanupTests

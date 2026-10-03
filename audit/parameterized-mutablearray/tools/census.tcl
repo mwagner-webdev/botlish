@@ -10,12 +10,12 @@
 # every lib/*.bot module they load (a source location is counted once).
 #
 # Sections (semantic types of the source HIR, i.e. before specialization):
-#   constructors   every call of mutable_array_allocate / mutarray::from_list /
-#                  mutarray::create and its static result type
+#   constructors   every call of mutable_array::allocate / mutable_array::from_list /
+#                  mutable_array::create and its static result type
 #   functions      every named function whose result type is a MutableArray
 #                  (the raw kind or an applied MutableArray[T])
 #   lists          every expression typed List[<MutableArray>], and every
-#                  list_get call with the type of its result
+#                  list::at call with the type of its result
 #   requirements   every argument position that requires a MutableArray (a
 #                  native's registered parameter type, or a user function's
 #                  trusted/checked parameter type) with the argument's static
@@ -85,8 +85,8 @@ foreach path $programs {
         lassign $callee ck cn
         set args [hir::get $hir $e args]
         if {$ck eq "native"} {
-            if {$cn eq "mutable_array_allocate"} { dict set ctors $key "native mutable_array_allocate -> $t" }
-            if {$cn eq "list_get"} { dict set gets $key "list_get(list: [T $hir [lindex $args 0]]) -> $t" }
+            if {$cn eq "mutable_array::allocate"} { dict set ctors $key "native mutable_array::allocate -> $t" }
+            if {$cn eq "list::at"} { dict set gets $key "list::at(list: [T $hir [lindex $args 0]]) -> $t" }
             set meta [core::native::metadata $cn]
             set ptypes [dict get $meta paramTypes]
             foreach a $args p $ptypes i [lseq [llength $args]] {
@@ -100,7 +100,7 @@ foreach path $programs {
             dict for {b binding} [dict get $hir bindings] {
                 if {[dict get $binding declaredBy] ne "" && [hir::get $hir [dict get $binding declaredBy] value] eq $cn} { set label [dict get $binding name] }
             }
-            if {$label in {mutarray::from_list mutarray::create}} { dict set ctors $key "$label -> $t" }
+            if {$label in {mutable_array::from_list mutable_array::create}} { dict set ctors $key "$label -> $t" }
             foreach a $args p [dict get $sig params] i [lseq [llength $args]] {
                 if {$p eq ""} continue
                 if {[hir::types::show [hir::signatures::paramType $p]] ne "mutarray"} continue
@@ -121,7 +121,7 @@ proc emit {out title d} {
 emit $out "constructors (MutableArray constructor call sites and their static result type)" $ctors
 emit $out "functions returning a MutableArray (semantic result type)" $funcs
 emit $out "expressions typed List of MutableArray" $lists
-emit $out "list_get call sites (list argument type -> result type)" $gets
+emit $out "list::at call sites (list argument type -> result type)" $gets
 set proven 0; set boundary 0
 dict for {k v} $reqs { if {[string match *proven $v]} {incr proven} else {incr boundary} }
 emit $out "MutableArray requirement sites (argument type vs required mutarray)" $reqs
@@ -129,5 +129,5 @@ puts $out "# requirement sites proven statically: $proven"
 puts $out "# requirement sites still a checked boundary: $boundary"
 set narrowed 0
 dict for {k v} $gets { if {[regexp {\-> (mutarray|MutableArray\[.*\])$} $v]} { incr narrowed } }
-puts $out "# list_get sites whose result is a MutableArray: $narrowed of [dict size $gets]"
+puts $out "# list::at sites whose result is a MutableArray: $narrowed of [dict size $gets]"
 close $out

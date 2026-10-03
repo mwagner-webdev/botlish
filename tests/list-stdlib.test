@@ -4,7 +4,7 @@
 # (including empty-List edge cases and the checked NotFound convention),
 # left-to-right short-circuiting (proved by a "poison" trailing element
 # whose predicate application would itself error if ever reached), a
-# native predicate (is_tcl_alpha) alongside an ordinary Botlish one, and
+# native predicate (str::is_tcl_alpha) alongside an ordinary Botlish one, and
 # four-way backend parity.
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
@@ -156,27 +156,27 @@ test list-find-parity {find agrees on every backend, both the successful and the
 } -result {same same}
 
 # ---------------------------------------------------------------------------
-# A native predicate (is_tcl_alpha, core/tclcompat.tcl), alongside the
+# A native predicate (str::is_tcl_alpha, core/tclcompat.tcl), alongside the
 # ordinary-Botlish-function predicate every test above already exercises --
 # the milestone's own minimal predicate matrix (item 49).
 
-test list-any-native-predicate {any? with a native predicate (is_tcl_alpha)} -body {
-    set path [makeFile {list::any?(["1", "a", "2"], is_tcl_alpha)} list-any-native.bot]
+test list-any-native-predicate {any? with a native predicate (str::is_tcl_alpha)} -body {
+    set path [makeFile {list::any?(["1", "a", "2"], str::is_tcl_alpha)} list-any-native.bot]
     try { listlibValue $path } finally { removeFile list-any-native.bot }
 } -result true
 
-test list-all-native-predicate {all? with a native predicate (is_tcl_alpha)} -body {
-    set path [makeFile {list::all?(["a", "b", "c"], is_tcl_alpha)} list-all-native.bot]
+test list-all-native-predicate {all? with a native predicate (str::is_tcl_alpha)} -body {
+    set path [makeFile {list::all?(["a", "b", "c"], str::is_tcl_alpha)} list-all-native.bot]
     try { listlibValue $path } finally { removeFile list-all-native.bot }
 } -result true
 
-test list-find-native-predicate {find with a native predicate (is_tcl_alpha)} -body {
-    set path [makeFile {list::find(["1", "2", "a"], is_tcl_alpha)} list-find-native.bot]
+test list-find-native-predicate {find with a native predicate (str::is_tcl_alpha)} -body {
+    set path [makeFile {list::find(["1", "2", "a"], str::is_tcl_alpha)} list-find-native.bot]
     try { listlibValue $path } finally { removeFile list-find-native.bot }
 } -result {"a"}
 
-test list-none-native-predicate {none? with a native predicate (is_tcl_alpha)} -body {
-    set path [makeFile {list::none?(["1", "2", "3"], is_tcl_alpha)} list-none-native.bot]
+test list-none-native-predicate {none? with a native predicate (str::is_tcl_alpha)} -body {
+    set path [makeFile {list::none?(["1", "2", "3"], str::is_tcl_alpha)} list-none-native.bot]
     try { listlibValue $path } finally { removeFile list-none-native.bot }
 } -result true
 

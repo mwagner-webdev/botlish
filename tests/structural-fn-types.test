@@ -119,42 +119,42 @@ proc fnBindingType {hir name} {
 test fn-law-reflexive {T <: T for structural, exact native and exact block types} -body {
     set f [fnT {str} bool {NotFound}]
     list [hir::types::subtype $f $f] \
-         [hir::types::subtype {native is_tcl_alpha} {native is_tcl_alpha}] \
+         [hir::types::subtype {native str::is_tcl_alpha} {native str::is_tcl_alpha}] \
          [hir::types::subtype {block e1 1 bool} {block e1 1 bool}]
 } -result {1 1 1}
 
 test fn-law-exact-refines-structural {an exact callable is a subtype of its own structural contract (structuralOf)} -body {
     set blocks {{block e1 1 bool} {block e2 2 int {args {int any} errors {NotFound}}}}
     concat [lmap t $blocks {hir::types::subtype $t [hir::types::structuralOf $t]}] \
-        [hir::types::subtype {native is_tcl_alnum} [hir::types::structuralOf {native is_tcl_alnum}]] \
+        [hir::types::subtype {native str::is_tcl_alnum} [hir::types::structuralOf {native str::is_tcl_alnum}]] \
         [list [hir::types::show [hir::types::structuralOf {block e2 2 int {args {int any} errors {NotFound}}}]]]
 } -result {1 1 1 {Fn{args: [int, any], return: int, errors: [NotFound]}}}
 
 test fn-law-native-structural-signature {a native's structural contract comes from the registry: fixed arity, -result-type, no errors, and every argument any (its -param-types are run-time-checked requirements, not static obligations)} -body {
-    list [hir::types::show [hir::types::structuralOf {native is_tcl_alnum}]] \
-         [hir::types::show [hir::types::structuralOf {native substring}]] \
+    list [hir::types::show [hir::types::structuralOf {native str::is_tcl_alnum}]] \
+         [hir::types::show [hir::types::structuralOf {native str::substring}]] \
          [hir::types::structuralOf {native list}]
 } -result {{Fn{args: [any], return: bool, errors: []}} {Fn{args: [any, any, any], return: str, errors: []}} {}}
 
 test fn-law-lub-idempotent {lub(T, T) == T, exactness kept for the same target} -body {
     set f [fnT {str} bool]
     list [expr {[hir::types::lub $f $f] eq $f}] \
-         [hir::types::lub {native is_tcl_alpha} {native is_tcl_alpha}] \
+         [hir::types::lub {native str::is_tcl_alpha} {native str::is_tcl_alpha}] \
          [hir::types::lub {block e1 1 bool} {block e1 1 bool}] \
          [hir::types::lub {block e1 1 bool} {block e1 1 int}]
-} -result {1 {native is_tcl_alpha} {block e1 1 bool} {block e1 1 any}}
+} -result {1 {native str::is_tcl_alpha} {block e1 1 bool} {block e1 1 any}}
 
 test fn-law-lub-different-exact {lub of two different compatible exact callables is their common structural Fn -- native/native, block/block and native/block alike -- never any, and never a set of targets} -body {
     lmap pair {
-        {{native is_tcl_alpha} {native is_tcl_alnum}}
+        {{native str::is_tcl_alpha} {native str::is_tcl_alnum}}
         {{block e1 1 bool} {block e2 1 bool}}
-        {{native is_tcl_alnum} {block e2 1 bool}}
+        {{native str::is_tcl_alnum} {block e2 1 bool}}
     } {hir::types::show [hir::types::lub {*}$pair]}
 } -result {{Fn{args: [any], return: bool, errors: []}} {Fn{args: [any], return: bool, errors: []}} {Fn{args: [any], return: bool, errors: []}}}
 
 test fn-law-lub-with-supertype {lub(Exact, FnSuper) == FnSuper when the exact callable already satisfies it} -body {
     set super [fnT {str} bool {NotFound}]
-    list [expr {[hir::types::lub {native is_tcl_alnum} $super] eq $super}] \
+    list [expr {[hir::types::lub {native str::is_tcl_alnum} $super] eq $super}] \
          [expr {[hir::types::lub $super {block e2 1 bool}] eq $super}] \
          [expr {[hir::types::lub {block e3 1 bool {args {str} errors {NotFound}}} $super] eq $super}]
 } -result {1 1 1}
@@ -192,7 +192,7 @@ test fn-law-return-covariance {a callable returning a narrower type satisfies a 
 test fn-law-arity {different fixed arities are incompatible: no subtype, and the join falls back instead of inventing an Fn} -body {
     list [hir::types::subtype [fnT {any} bool] [fnT {any any} bool]] \
          [hir::types::lub {block e1 1 bool} {block e2 2 bool}] \
-         [hir::types::lub {native is_tcl_alpha} {block e2 2 bool}]
+         [hir::types::lub {native str::is_tcl_alpha} {block e2 2 bool}]
 } -result {0 block any}
 
 test fn-law-lub-meet-of-arguments {the join's argument types are the meet (glb) of both contracts' -- never a covariant lub -- its return the lub, its errors the union} -body {
@@ -212,7 +212,7 @@ test fn-law-lub-is-upper-bound {both operands are subtypes of their join} -body 
     fnDeclare
     set byte [core::type::normalize Byte]
     set pairs [list \
-        [list {native is_tcl_alnum} {block e2 1 bool}] \
+        [list {native str::is_tcl_alnum} {block e2 1 bool}] \
         [list [fnT [list $byte] int {NotFound}] [fnT {int} $byte {PermissionDenied}]] \
         [list {block e1 1 bool {args {str} errors {NotFound}}} [fnT {any} bool]]]
     lmap pair $pairs {
@@ -226,7 +226,7 @@ test fn-law-symmetry {lub(A, B) == lub(B, A), whatever order the error sets were
     fnDeclare
     set byte [core::type::normalize Byte]
     set pairs [list \
-        [list {native is_tcl_alnum} {block e2 1 bool}] \
+        [list {native str::is_tcl_alnum} {block e2 1 bool}] \
         [list [fnT {str} int {PermissionDenied NotFound}] [fnT {any} int {NotFound}]] \
         [list [fnT [list $byte] int] [fnT {int} $byte]] \
         [list {block e1 1 bool} {block e2 2 bool}]]
@@ -241,7 +241,7 @@ test fn-law-associativity {representative compatible triples join the same way i
     set byte [core::type::normalize Byte]
     set nibble [core::type::normalize Nibble]
     set triples [list \
-        [list {native is_tcl_alpha} {block e2 1 bool} {native is_tcl_alnum}] \
+        [list {native str::is_tcl_alpha} {block e2 1 bool} {native str::is_tcl_alnum}] \
         [list [fnT [list $byte] int {NotFound}] [fnT [list $nibble] int] [fnT {int} int {PermissionDenied}]] \
         [list {block e1 1 bool} {block e2 1 bool} [fnT {str} bool]]]
     lmap triple $triples {
@@ -274,11 +274,11 @@ test fn-law-nested-return-bounded {a closure factory's contract names a function
 # and the result slot normalized to any); a structural function type still
 # projects to any, and a callable *inside* an aggregate stays the kind.
 test fn-keytype-projection {specialization keys keep an exact callable's identity (a code target: block ExprId and arity, a native by name), project a structural function type to any, and keep only the kind for a callable inside an aggregate} -body {
-    list [hir::specialize::KeyType {native is_tcl_alpha}] [hir::specialize::KeyType {block e1 1 bool}] \
+    list [hir::specialize::KeyType {native str::is_tcl_alpha}] [hir::specialize::KeyType {block e1 1 bool}] \
          [hir::specialize::KeyType {block e1 1 bool {args {str} errors {}}}] \
          [hir::specialize::KeyType [fnT {str} bool]] \
          [hir::specialize::KeyType [hir::types::MakeList {block e1 1 bool}]]
-} -result {{native is_tcl_alpha} {block e1 1 any} {block e1 1 any {args {str} errors {}}} any {list block}}
+} -result {{native str::is_tcl_alpha} {block e1 1 any} {block e1 1 any {args {str} errors {}}} any {list block}}
 
 # ---------------------------------------------------------------------------
 # Surface syntax (spec items 2, 9, 37-39, 59, 97)
@@ -305,7 +305,7 @@ test fn-syntax-multiline-any-order-omitted-errors {fields may span lines and com
 
 test fn-syntax-return-annotation {Fn is usable as a function's declared result type} -body {
     set hir [fnCompile {fn pick() -> Fn{args: [str], return: bool}:
-    is_tcl_alpha
+    str::is_tcl_alpha
 pick()}]
     hir::types::show [hir::typeOf $hir [lindex [dict get $hir roots] end]]
 } -result {Fn{args: [str], return: bool, errors: []}}
@@ -374,7 +374,7 @@ fn is_x?(c):
 
 test fn-accept-exact-native {an exact native passes the same structural Fn parameter: real ExactNative <: Fn compatibility, not a join trick} -body {
     fnRun "$::applyStr
-\[apply(is_tcl_alpha, \"a\"), apply(is_tcl_alnum, \"-\")\]"
+\[apply(str::is_tcl_alpha, \"a\"), apply(str::is_tcl_alnum, \"-\")\]"
 } -result {[true, false]}
 
 test fn-accept-exact-capturing-block {a capturing closure passes too: compatibility is its call contract, not whether it needs an environment} -body {
@@ -397,10 +397,10 @@ test fn-accept-call-typed-from-contract {inside the HOF the call through the Fn 
 test fn-accept-returned-fn {a function may return a structural Fn (declared result), joining a native and a nested Block} -body {
     fnRun {fn pick(strict) -> Fn{args: [str], return: bool}:
     if strict:
-        is_tcl_alnum
+        str::is_tcl_alnum
     else:
         fn lenient?(c):
-            is_tcl_alnum(c) or c == "_"
+            str::is_tcl_alnum(c) or c == "_"
         lenient?
 [pick(true)("_"), pick(false)("_")]}
 } -result {[false, true]}
@@ -410,7 +410,7 @@ test fn-accept-list-inference {a List of mixed compatible callables (natives and
     c == "_"
 fn dash?(c):
     c == "-"
-checks = [is_tcl_alpha, is_tcl_alnum, under?, dash?]
+checks = [str::is_tcl_alpha, str::is_tcl_alnum, under?, dash?]
 loop check in checks:
     check("_")}
     set hir [fnCompile $src]
@@ -422,10 +422,10 @@ loop check in checks:
 
 test fn-accept-if-join {an if choosing between a native and a Block has their common Fn type -- not any -- and the binding keeps it} -body {
     set src {fn lenient?(c):
-    is_tcl_alnum(c) or c == "_"
+    str::is_tcl_alnum(c) or c == "_"
 fn choose(strict):
     if strict:
-        is_tcl_alnum
+        str::is_tcl_alnum
     else:
         lenient?
 classifier = choose(false)
@@ -478,10 +478,10 @@ apply(count)}
 
 test fn-accept-untyped-hof-unaffected {a structural value with no obligation (args any, no errors) still passes an untyped higher-order parameter, exactly as the any it used to be did} -body {
     fnRun {fn lenient?(c):
-    is_tcl_alnum(c) or c == "_"
+    str::is_tcl_alnum(c) or c == "_"
 fn choose(strict):
     if strict:
-        is_tcl_alnum
+        str::is_tcl_alnum
     else:
         lenient?
 [list::all?(["a", "_"], choose(true)), list::all?(["a", "_"], choose(false))]} "# lib/list.bot declares its own NotFound\n"
@@ -498,13 +498,13 @@ fn count_where(xs: List[str], keep: Fn{args: [str], return: bool}) -> int:
         if not keep(x):
             continue
         x
-    list_length(kept)
+    list::length(kept)
 }
     close $ch
     try {
         fnRun {fn vowel?(c):
     c == "a" or c == "e"
-[fntypeslib::count_where(["a", "b", "e"], vowel?), fntypeslib::count_where(["a", "1", "-"], is_tcl_alnum)]} "\n"
+[fntypeslib::count_where(["a", "b", "e"], vowel?), fntypeslib::count_where(["a", "1", "-"], str::is_tcl_alnum)]} "\n"
     } finally {
         file delete $libPath
     }
@@ -557,15 +557,15 @@ test fn-reject-any-is-not-fn {an unknown (any) value is not a known callable: pa
     # own body could infer a contract (fn-accept-untyped-forwarder).
     fnRejects "$::applyStr
 fn pass(gs):
-    apply(list_get(gs, 0), \"a\")
-pass(\[is_tcl_alpha, 1\])" {*a value of type any is not known to be callable*}
+    apply(list::at(gs, 0), \"a\")
+pass(\[str::is_tcl_alpha, 1\])" {*a value of type any is not known to be callable*}
 } -result {{CORE SEMANTIC TYPE} 1}
 
 test fn-accept-untyped-forwarder {an untyped parameter passed where an Fn is declared infers that Fn as its own trusted contract (INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md): the forwarder is valid, and its callers are held to the contract -- it used to be rejected as "any is not known to be callable"} -body {
     list [fnRun "$::applyStr
 fn pass(g):
     apply(g, \"a\")
-pass(is_tcl_alpha)"] [fnRejects "$::applyStr
+pass(str::is_tcl_alpha)"] [fnRejects "$::applyStr
 fn pass(g):
     apply(g, \"a\")
 pass(1)" {*argument for parameter "g" cannot be proven to satisfy Fn\{args: \[str\], return: bool, errors: \[\]\}, the parameter type inferred from the function body*}]
@@ -779,7 +779,7 @@ loop f in ys:
 nested = [[[tb]]]
 ys = loop x in [1]:
     nested
-list_get(list_get(list_get(list_get(ys, 0), 0), 0), 0)(9999)} {*cannot be preserved as a returning loop's collected element*}]
+list::at(list::at(list::at(list::at(ys, 0), 0), 0), 0)(9999)} {*cannot be preserved as a returning loop's collected element*}]
 } -result {{[7, 7]} {{CORE SEMANTIC TYPE} 1}}
 
 test fn-escape-returned-typed-callable {a callable that returns a typed callable is itself precondition-bearing: erasing it would let the returned callable be called unchecked (previously accepted, then ran take_byte(9999))} -body {

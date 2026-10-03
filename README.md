@@ -14,7 +14,7 @@ clearly under Tcl 8.x rather than running with subtly wrong semantics).
 Botlish's String semantics count Unicode scalar values, matching the other
 backends (Rust/Cranelift); Tcl 9 represents strings the same way. Tcl 8.x
 represents a character outside the Basic Multilingual Plane as a surrogate
-pair, so `length` would disagree with every other backend by counting such
+pair, so `str::length` would disagree with every other backend by counting such
 characters twice -- a host limitation, not a Botlish semantics change, so
 it is not worked around here.
 
@@ -133,8 +133,9 @@ field set, or one declaration) and then field by field, and Results compare tag 
 callables is not defined, because it would need identity semantics, which are
 out of scope. Comparing callables makes the program invalid.
 
-**String equality (`eq`)** applies only to strings. It never converts other
-values to strings.
+There is no separate string-equality operator: two Strings are compared
+with `==`, which never converts a value of another kind to a String (the
+historical `eq` native is gone; STDLIB-NAMESPACES.md).
 
 ## 2. Environments
 
@@ -369,33 +370,111 @@ A native that breaks its declared type contract (§8) raises
 
 ## 8. Native callables in the root environment
 
+Natives are of two kinds (STDLIB-NAMESPACES.md has the full inventory and
+the rule):
+
+* **Language primitives** live at the root, under plain names: the
+  operators and their named Int siblings, the list constructor, the kind
+  and tag tests, the generic structural `hash`, the process's `argv`.
+* **Standard intrinsics** -- operations that belong to one value family --
+  live in that family's flat namespace, registered under their qualified
+  name (`list::at`, `str::concat`, `mutable_array::set`, ...): a *qualified
+  root native*. Source spells them like module members; no module file
+  defines them, no local binding can spell `::` (so they cannot be
+  shadowed), and a module of the same namespace may define any *other*
+  member (`lib/list.bot`'s `list::get`) but never one of the intrinsic's own
+  name (`SURFACE MODULE DUPLICATE-NATIVE`; an entry program that declares
+  `namespace list` is held to the same rule). Botlish has no overloading,
+  so there is nothing for such a definition to coexist as. Like any
+  namespaced function, an intrinsic takes part in method syntax once bound
+  to a name (`at = list::at` then `xs.at(1)`: METHOD-SUGAR.md).
+
+Language primitives (root):
+
 | Name | Signature | Refinement |
 |------|-----------|------------|
 | `+` `-` `*` | int, int → int | |
 | `<` `<=` `>` `>=` | int, int → bool | |
-| `==` | any, any → bool (value equality) | |
-| `eq` | str, str → bool | |
-| `list` | any... → list | |
+| `mod` | int, int → int (Euclidean: `0 <= r < abs(b)`; `ARITHMETIC` for 0) | |
+| `bit_and` `bit_or` `bit_xor` `shift_left` `shift_right` | int, int → int (BYTE-NIBBLE-BIT-ARITHMETIC.md) | |
+| `==` | any, any → bool (value equality; the one equality operator, Strings included) | |
+| `list` | any... → list (what a `[a, b]` literal calls) | |
 | `integer?` | any → bool, type test of `int` | true: arg 0 : `int` |
 | `string?` | any → bool, type test of `str` | true: arg 0 : `str` |
 | `list?` | any → bool, type test of `list` | true: arg 0 : `list` |
 | `mutarray?` | any → bool, type test of `mutarray` (MUTABLEARRAY-CONSTRUCTION-REFINEMENT.md); an argument already typed `MutableArray[T]` keeps that type (PARAMETERIZED-MUTABLEARRAY.md) | true: arg 0 : `mutarray` |
 | `ok?` | any → bool, type test of `Result.ok` | true: arg 0 : `Result.ok` |
 | `error?` | any → bool, type test of `Result.error` | true: arg 0 : `Result.error` |
-| `result-value` | ok Result → its value | |
-| `result-error` | error Result → its payload | |
-| `length` | str → int | |
-| `substring` | str, int, int → str (characters `start <= i < end`) | |
-| `lowercase` | str → str (Unicode 16 simple one-to-one case mapping; see §"Strings") | |
-| `concat` | str, str → str | |
-| `list_length` | list → int | |
-| `list_get` | list, int → any (the element at `0 <= i < length`, else `RANGE`) | |
-| `list_append` | list, any → list (a new list; the argument is unchanged) | |
+| `result-value` | ok Result → its value (core IR only: `-` cannot be spelled in source) | |
+| `result-error` | error Result → its payload (core IR only) | |
+| `hash` | any → int, the structural hash `==` agrees with (core/hashing.tcl) | |
 | `argv` | → `List[String]`, errors `InvalidArgumentEncoding`: the process argument vector including argument zero, each argument validated as UTF-8 by the call (ARGV.md) | |
-| `linux::abi::syscall` | `{rax: R, rdi: R, …, r9: R}` → `abi::x86_64::Register64` (R a Register64): the raw Linux x86-64 kernel transition, raw rax back; omitted argument registers are zero; native backend only (Tcl backends: `NATIVE-ONLY`); a qualified root native, callable only directly (LINUX-X86-64-SYSCALL.md) | |
-| `Emailish?` | str → bool, type test of `Emailish` (library `web`) | true: arg 0 : `Emailish` |
-| `UriQueryValue?` | str → bool, type test of `UriQueryValue` (library `web`) | true: arg 0 : `UriQueryValue` |
-| `uriEscape` | str → `UriQueryValue` (library `web`) | |
+
+Standard intrinsics (qualified root natives):
+
+| Name | Signature |
+|------|-----------|
+| `list::length` | list → int |
+| `list::at` | list, int → any, errors `IndexNotFound`: the element at `0 <= i < length`; any other Int index fails with `IndexNotFound` |
+| `list::append` | list, any → list (a new list; the argument is unchanged) |
+| `str::length` | str → int (Unicode scalar values) |
+| `str::substring` | str, int, int → str (characters `start <= i < end`; else `RANGE`) |
+| `str::lowercase` | str → str (Unicode 16 simple one-to-one case mapping; see §"Strings") |
+| `str::concat` | str, str → str |
+| `str::encode_utf8` | str → `List[Byte]` (the UTF-8 bytes) |
+| `str::is_tcl_alpha` `str::is_tcl_alnum` | one-scalar str → bool (temporary Tcl-compatibility classes, core/tclcompat.tcl) |
+| `char::scalar_value` | UnicodeChar → int (the Unicode scalar value; `char::codepoint` is its typed wrapper) |
+| `mutable_array::allocate` | int → mutarray (every slot `unit`) |
+| `mutable_array::capacity` | mutarray → int |
+| `mutable_array::at` | mutarray, int → any, errors `IndexNotFound` (as `list::at`) |
+| `mutable_array::set` | mutarray, int, any → unit (in place; `RANGE` outside the capacity) |
+| `mutable_array::copy` | mutarray, int, mutarray, int, int → unit (memmove semantics; `RANGE`) |
+| `mutable_array::freeze` | mutarray, int → list (a copy of the first N slots; `RANGE`) |
+| `immutable_set::from_list` | `List[T]` → `ImmutableSet[T]` |
+| `immutable_set::contains` | `ImmutableSet`, any → bool |
+| `linux::abi::syscall` | `{rax: R, rdi: R, …, r9: R}` → `abi::x86_64::Register64` (R a Register64): the raw Linux x86-64 kernel transition, raw rax back; omitted argument registers are zero; native backend only (Tcl backends: `NATIVE-ONLY`); callable only directly (LINUX-X86-64-SYSCALL.md) |
+
+Ordinary Botlish members of the same namespaces (library modules, not
+natives): `list::get`, `list::any?`, `list::all?`, `list::none?`,
+`list::find` (`lib/list.bot`); `mutable_array::from_list`,
+`mutable_array::create`, `mutable_array::get` (`lib/mutable_array.bot`);
+`char::codepoint` (`lib/char.bot`: `char::scalar_value` with a compile-time
+`c: UnicodeChar` contract -- a native's parameter types are run-time
+requirements only).
+
+**Indexed access: `at` and `get`.** `at(container, index)` is required
+indexed lookup: it returns the element or fails with the builtin declared
+error `IndexNotFound` -- an ordinary, handleable error completion
+(`on IndexNotFound:`), so a call must handle it, admit it in the enclosing
+function's `errors` clause, or be proven not to need to: the call-specific
+completion proof (hir/completions.tcl) rules it out when the index provably
+designates an element (a List of statically known length with an index in
+range; `loop i from 0 to list::length(xs): list::at(xs, i)` and its
+MutableArray capacity counterpart; a read guarded by `if i < 0 or i >=
+list::length(xs):` or its `and` form; STDLIB-NAMESPACES.md lists the
+rules), and makes a provably-missing index a compile-time `KNOWN-ERROR`. `get(container, index, default)` is lookup with
+an explicit fallback, written in ordinary Botlish over `at`:
+
+```
+fn get(xs, index, default):
+    value = list::at(xs, index):
+        on IndexNotFound:
+            default
+    value
+```
+
+It handles `IndexNotFound` and nothing else (a non-List or non-Int argument
+is still the `TYPE` error), `default` is an ordinary eagerly evaluated
+argument, and neither operation returns an optional or null value. There is
+no negative indexing: `-1` is a missing index like any other.
+
+Optional library `web` (`# requires: web`, lib/web.tcl):
+
+| Name | Signature | Refinement |
+|------|-----------|------------|
+| `Emailish?` | str → bool, type test of `Emailish` | true: arg 0 : `Emailish` |
+| `UriQueryValue?` | str → bool, type test of `UriQueryValue` | true: arg 0 : `UriQueryValue` |
+| `uriEscape` | str → `UriQueryValue` | |
 
 New natives are registered through the registry, not by changing the
 evaluator:
@@ -418,7 +497,9 @@ a call of the native may complete with: the impl signals one with
 `core::native::failDeclared`, and `core::native::invoke` turns that into the
 same `propagate-error` completion a Botlish `fail NAME` produces, so
 `on NAME:` handlers, an `errors` clause, call analysis and every backend treat
-it like any declared error. Today only `argv` (`core/process.tcl`) has one.
+it like any declared error. `argv` (`InvalidArgumentEncoding`) and the two
+`at` intrinsics (`IndexNotFound`) have one; core/native.tcl declares the
+builtin errors in their fixed index order.
 
 Natives may also declare a signature. `-param-types {int int}` lists the
 type each argument must have (`any` means no requirement), and
@@ -452,7 +533,7 @@ builtin kind and tag predicates.
 
 **Strings discard refinements.** A string transformation's result carries no
 refinement unless its contract explicitly establishes one. So
-`substring(UriQueryValue)` is a plain `str`, while `uriEscape(str)` is a
+`str::substring(UriQueryValue)` is a plain `str`, while `uriEscape(str)` is a
 `UriQueryValue`.
 
 ## 9. Public API
@@ -747,7 +828,7 @@ representation: the compiler maps a block's `EXPR` to the proc it generates.
 * **Representations:** an operand is `box` (a runtime value), `int` (a bare
   integer) or `bool` (1/0). Unboxed values are boxed only when they escape
   into a frame, a call, a `return` or a `break`.
-* **Intrinsics:** calls of `+ - * < <= > >= == eq list ok? error?` compile
+* **Intrinsics:** calls of `+ - * < <= > >= == list ok? error?` compile
   to inline Tcl. An argument whose kind isn't known is first checked with
   `core::value::expect`. That check raises exactly the error the native
   would, in the same order; the flow fact above then covers the argument.
@@ -873,7 +954,7 @@ second property never erases the first.
 
 `core::value::evidence`, `withEvidence` and `hasEvidence` work with it.
 `strOf` still returns the text. **Evidence is knowledge about a value, not
-part of it:** `==`, `eq` and ordinary display ignore it, so `"foo"` proven to
+part of it:** `==` and ordinary display ignore it, so `"foo"` proven to
 be a `UriQueryValue` still equals `"foo"`. `core::value::show V 1` shows
 evidence as `"foo"#{UriQueryValue}`; the differential tests use this form, so
 both backends must agree on evidence too. Only string values carry evidence
@@ -1331,7 +1412,7 @@ add10(32)          # 42 (add captures x)
   endpoints is ever formed. Clauses compose in **lockstep** with `and`:
 
   ```
-  loop value in values and index from 0 to list_length(values):
+  loop value in values and index from 0 to list::length(values):
       [value, index]
   ```
 
@@ -1604,7 +1685,7 @@ compile them. None of them has a native shortcut.
 
 | File | Function | What it does |
 |------|----------|--------------|
-| `string_reverse.bot` | `reverse_chars(text)` | reverses the units `length`/`substring` count |
+| `string_reverse.bot` | `reverse_chars(text)` | reverses the units `str::length`/`str::substring` count |
 | `string_replace.bot` | `replace(haystack, needle, replacement)` | exact, left-to-right, non-overlapping replacement |
 | `csv.bot` | `csv_parse(text)` | valid-input CSV → list of records of field strings |
 | `matmul.bot` | `matmul(a, b)` | Int matrix product over nested lists |
@@ -1630,8 +1711,9 @@ compiler compiles from HIR, the same way as `examples/surface/`.
   field. `\r\n`, whitespace trimming and invalid-input diagnostics aren't
   supported.
 * `matmul` needs rectangular matrices with compatible, non-zero dimensions
-  (an empty `a` gives `[]`). An incompatible shape surfaces as `list_get`'s
-  `RANGE` error. Entries are arbitrary-precision Ints.
+  (an empty `a` gives `[]`). An incompatible shape surfaces as `list::at`'s
+  `IndexNotFound`, which `matmul` declares (`errors IndexNotFound`) and its
+  caller handles. Entries are arbitrary-precision Ints.
 
 **How the language shapes them.** Bindings are immutable and a loop
 iteration can't carry state, so every loop is a self-recursive tail call
@@ -1680,7 +1762,7 @@ Both backends produced the same value in every measured case.
 **Observations** (evidence for runtime and backend work, not defects to fix
 here):
 
-* **reverse**: each step copies the whole accumulator (`concat(character,
+* **reverse**: each step copies the whole accumulator (`str::concat(character,
   reversed)`), so the algorithm is O(n²) in characters copied. Up to 10,000
   characters the call overhead still dominates: times grow linearly.
   Before frames were reclaimed, the interpreter kept every intermediate
@@ -1688,13 +1770,13 @@ here):
 * **replace**: testing for a match allocates a needle-sized substring at
   every position, and every match copies the result so far. Times are
   linear here because matches are sparse.
-* **CSV**: `list_append` copies the list, so building n records costs O(n²).
+* **CSV**: `list::append` copies the list, so building n records costs O(n²).
   Going from 1,000 to 10,000 rows takes about 42× as long compiled: with
   call overhead reduced, the copying dominates.
   Quoted fields grow one character at a time. Every field scan allocates a
   two-element list just to return two values.
 * **matmul**: n³ work as expected, but every entry read goes through
-  `list_get` with a range check, and its result has no static kind. Every
+  `list::at` with a range check, and its result has no static kind. Every
   `*` and `+` is on arbitrary-precision Ints.
 * All four: every loop is a self tail call (`hir::aot` reports `tail`), so
   loop conversion or tail calls in a native backend matter more than any
@@ -1764,7 +1846,7 @@ target is a known native or a known Botlish function. None is closed:
 | `reverse_chars` | closed | guarded (4 blockers) | parameter kinds (`text`, `index`, `reversed`) | bigint, char-index, string-alloc, range-check, structural-equality, tagged-values |
 | `replace` | closed | guarded (12) | parameter kinds | bigint, char-index, string-alloc, range-check, tagged-values |
 | `csv_parse` | closed | guarded (17) | parameter kinds (15); list elements of the `[field, index]` pairs (2) | bigint, char-index, string-alloc, list-alloc, range-check, tagged-values |
-| `matmul` | closed | guarded (17) | parameter kinds (13); list elements feeding `*` and `list_get` (4) | bigint, list-alloc, range-check, structural-equality, tagged-values |
+| `matmul` | closed | guarded (17) | parameter kinds (13); list elements feeding `*` and `list::at` (4) | bigint, list-alloc, range-check, structural-equality, tagged-values |
 
 (Requirements are unions over each program's functions and exclude the
 sample expression's list literal.)
@@ -1777,7 +1859,7 @@ The blockers come from two sources, neither of them dynamic dispatch:
    parameter through (`reverse_from`'s accumulator, `dot`'s `total`) are
    `any`. Flow facts from native signatures already remove every later
    check on the same path.
-2. **Lists carry no element type.** `list_get` returns `any`. That affects
+2. **Lists carry no element type.** `list::at` returns `any`. That affects
    `matmul`'s entries and the pairs `csv` returns.
 
 This table is the *semantic* analysis, and it stays so: a function's HIR
@@ -1813,7 +1895,7 @@ and the element-type half of 5):
 4. Give HIR call targets for forward references to functions (done at the
    time; forward references were later removed from the language).
 5. Plan list element types and a growable or persistent list
-   representation. `list_append` copying is what makes CSV quadratic.
+   representation. `list::append` copying is what makes CSV quadratic.
 
 ## 20. The native backend (Cranelift)
 
@@ -1943,12 +2025,12 @@ Ints and use `rt_int_cmp` otherwise. `num-bigint` is an implementation
 detail: nothing about it is visible to programs.
 
 **Strings** are UTF-8 with a cached character count and an ASCII flag.
-`length` and `substring` count Unicode scalar values, including
+`str::length` and `str::substring` count Unicode scalar values, including
 supplementary-plane characters as one unit each: ASCII strings are indexed
 in O(1), others by walking the characters. This matches Tcl 9, the Tcl
 reference implementation's required host (see this README's introduction),
 so the corpus tests (§18) exercise supplementary-plane characters like any
-other. `lowercase` is the Unicode 16 *simple* case mapping: each scalar maps
+other. `str::lowercase` is the Unicode 16 *simple* case mapping: each scalar maps
 to exactly one scalar through `UnicodeData.txt`'s simple lowercase column, so
 the character count never changes and the mapping ignores context and
 language. Consequences: `İ` (U+0130) lowercases to `i` (not the full mapping's
@@ -1965,7 +2047,7 @@ is planned for a `grapheme::` namespace, and Unicode 17 and later. The
 all-scalars comparison in `tests/native-tcl-unicode.test` fails if a Tcl or
 Rust upgrade changes any mapping.
 
-**Lists** are immutable vectors of values. `list_append` copies, as the
+**Lists** are immutable vectors of values. `list::append` copies, as the
 reference runtime does, so CSV's quadratic behavior is kept deliberately
 (§18).
 
@@ -2073,9 +2155,7 @@ panic is `NATIVE BUG`.
 `bind`, `block`, `call`, `if`, `loop`, `return`, `break`, `continue`, `ok`,
 `error`), closures with captured values, self recursion, run-time
 `UNBOUND` and `DUPLICATE`, calls chosen at run time, natives as values, and
-the builtin natives `+ - * < <= > >= == eq list length substring lowercase
-concat list_length list_get list_append integer? string? list? ok? error?
-result-value result-error`.
+the builtin natives of §8 (root primitives and standard intrinsics).
 
 **Not supported** (each reported as `NATIVE UNSUPPORTED`):
 
@@ -2149,17 +2229,17 @@ is string copying and collection, not checks.
 Where the time goes:
 
 * **reverse** and **replace** at large sizes are dominated by copying the
-  accumulator string on every `concat`: O(n²) bytes, most of them garbage
+  accumulator string on every `str::concat`: O(n²) bytes, most of them garbage
   at once. Collection frequency matters more than the copying itself: with
   a 32 MB minimum collection threshold, `string_replace` at 100 KB took
   146 ms, because new copies kept landing in cold memory; with 1 MB it takes
   about 80 ms (see `native/src/runtime/heap.rs`). A nursery or reference counting would do
   better. The helpers derive a result's character count and ASCII flag from
   the operands instead of rescanning.
-* **CSV** spends its time in `list_append` copies (quadratic in records)
+* **CSV** spends its time in `list::append` copies (quadratic in records)
   and in allocating the two-element `[field, index]` lists.
 * **matmul** runs mostly inline: small-Int fast paths for `*` and `+`, and
-  a `list_get` helper call with a range check per entry. Without guards it
+  a `list::at` helper call with a range check per entry. Without guards it
   is 1.2–1.3× faster.
 * Compile time is dominated by native lowering in Tcl for programs with
   large literals (the benchmark's matrices are source literals), and by
@@ -2314,10 +2394,10 @@ unchanged):
   `[[1, 2], [3, 4]]` is `list<list<int>>`, `[1, "a"]` is `list[int, str]`
   (a shape is kept only when it says more than the element type), and `[]`
   is `list<never>`.
-* `list_get(xs, i)` has the element type, or position i's type when `xs`
+* `list::at(xs, i)` has the element type, or position i's type when `xs`
   has a shape and `i` is an Int constant in range. An empty list's element
-  is not invented: `list_get([], 0)` is `any` (and raises `RANGE`).
-* `list_append(xs, x)` is `list<lub(ELEM, type of x)>`: `list<int>` stays
+  is not invented: `list::at([], 0)` is `any` (and fails with `IndexNotFound`).
+* `list::append(xs, x)` is `list<lub(ELEM, type of x)>`: `list<int>` stays
   `list<int>` with an Int, and becomes plain `list` with a String. Appending
   drops a shape.
 * lub joins element types and, for equal lengths, positions; plain `list`
@@ -2330,7 +2410,7 @@ The rules are not specific to the corpus's natives: a native declares how
 its result is built with `-result-shape` (`elements`, `element L I`,
 `append L V`; `core/native.tcl`), like `-runtime`, and nothing in the
 analysis knows a native by name. A list fact proves a kind, never an index:
-`list_get` still range-checks, and Int arithmetic keeps its overflow path.
+`list::at` still range-checks, and Int arithmetic keeps its overflow path.
 
 ### Guards and lowering
 
@@ -2341,11 +2421,11 @@ an instance's view), with the structural facts computed once
 representation blockers:
 
 * a parameter whose key type is a kind needs no guard;
-* a flow fact (`length(s)` proves `s : str`) or a refinement (`if
+* a flow fact (`str::length(s)` proves `s : str`) or a refinement (`if
   integer?(x)`) already removes later guards on the same path, in both
   modes, because the view is typed by the same inference;
 * a call result of a specialized callee has the callee's result type, and
-  `list_get` on `list<int>` gives an `int` that `*` doesn't check.
+  `list::at` on `list<int>` gives an `int` that `*` doesn't check.
 
 Native lowering (`native/lower.tcl`) emits one NIR function per instance it
 refers to, starting from the program: a direct call calls the instance the
@@ -2380,7 +2460,7 @@ always fail (known errors). A mismatch raises `NATIVE BUG`.
 Every used instance of every corpus program is closed, transitively. The 44
 parameter-kind guards go because every corpus function is called with known
 kinds; `csv`'s two element guards go because `[field, index]` is
-`list[str, int]` and `list_get(scanned, 1)` is an `int`; `matmul`'s four
+`list[str, int]` and `list::at(scanned, 1)` is an `int`; `matmul`'s four
 because the literal matrices are `list<list<int>>`. The generic functions
 stay guarded, and a caller passing, say, a matrix of Strings gets a different
 instance (or the generic one) with the checks.
@@ -2425,7 +2505,7 @@ func 1 "dot" ... instance="list<int>, list<list<int>>, int, int, int, int"
 end
 ```
 
-In `csv`, the specialized `scan_records` passes `list_get(scanned, 1)`, an
+In `csv`, the specialized `scan_records` passes `list::at(scanned, 1)`, an
 `int` from `list[list<str>, int]`, straight to its loop, and calls the
 specialized `scan_record` (`call 5`):
 
@@ -2475,7 +2555,7 @@ starting empty) add code. Machine code of the corpus files as written
 ### Known limitations
 
 * Closures over values are never specialized.
-* Positional shapes come only from literals; `list_get` uses a position only
+* Positional shapes come only from literals; `list::at` uses a position only
   for a constant index. There are no Result payload facts.
 * The limit counts instances in use at the moment a call is analyzed, so
   which calls get the generic instance at the limit depends on discovery
@@ -2491,7 +2571,7 @@ evidence:
 
 1. **Unboxing** of Ints proven small (range analysis for indices and
    counters): matmul's inner loop and every index in the string functions.
-2. **Transient builders** for `list_append` and string accumulation where
+2. **Transient builders** for `list::append` and string accumulation where
    the old value is provably dead (escape analysis), and **scalar
    replacement** of `[field, index]` pairs, whose shapes are now known.
 3. A nursery or reference counting for the string-copying cases, which
@@ -2550,7 +2630,7 @@ was already emitting `@ExprId` on nearly every instruction
 discarding it (`if c == '@' { break; }`). Capturing it into
 `Function::origins` and interning one `Site` per *compiled* allocating
 instruction (never per dynamic execution, so a hot loop's one static
-`concat` is one site regardless of iteration count) makes every allocation
+`str::concat` is one site regardless of iteration count) makes every allocation
 traceable to `{file line column}` (via `hir::aot::Location`, so the Rust
 backend itself never has to understand HIR) and to the runtime operation
 that caused it (`strcat` vs. `substr` vs. `listappend`, not just "a
@@ -2590,12 +2670,12 @@ cranelift`, summary mode, last of 3 runs):
 | matmul | 32×32 | 1,171 | 194.0 KB | 194.0 KB | 1 | 0 | 18,500 |
 
 This confirms §20's prose quantitatively and sharpens it: **reverse** and
-**replace** are almost entirely `concat`/`substr` String traffic (peak live
+**replace** are almost entirely `str::concat`/`substr` String traffic (peak live
 stays at 1.1–1.4 MB at their largest sizes tested -- 10,000 chars / 100 KB
 -- while *copied* bytes grow into the hundreds of megabytes: the
 accumulator is O(n) live at any instant but O(n²) copied over the run's
 lifetime, all through one or two sites). **CSV**'s allocation count is
-dominated by `list_append` (the 50 million list-element copies at 10,000
+dominated by `list::append` (the 50 million list-element copies at 10,000
 rows are almost all memmoving existing rows/fields forward one element at a
 time) rather than by the `[field, index]` pair lists §20 also names as a
 cost -- both are visible
@@ -2605,8 +2685,8 @@ of `native/lower.tcl`), so the only sites are the output rows' `listnew`
 calls, and no BigInt ever appears with these operands. The one surprise
 worth a follow-up look: from 1,000 to 10,000 rows (10×), object *count*
 scales near-linearly (79,571 → 834,585, 10.5×, as expected -- one
-`list_append` per field/row) but elements *copied* scales quadratically
-(516,540 → 50,165,040, 97×): `list_append`'s O(n) memmove on every call is
+`list::append` per field/row) but elements *copied* scales quadratically
+(516,540 → 50,165,040, 97×): `list::append`'s O(n) memmove on every call is
 the entire explanation, and a transient builder (§21's item 2) should turn
 it into O(n) total, not just fewer guards.
 

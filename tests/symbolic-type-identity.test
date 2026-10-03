@@ -5,7 +5,7 @@
 # currently resolves to -- never merely because the spelling matches. See
 # SYMBOLIC-TYPE-IDENTITY.md.
 #
-# encode_utf8 (core/strings.tcl) is this milestone's only current use of
+# str::encode_utf8 (core/strings.tcl) is this milestone's only current use of
 # {typed NAME LO HI} (STATIC-COMPLETION-PROOFS.md's own "UTF-8 result
 # type" section): its every element is definitionally an Int in 0..255;
 # whether that also makes the result List[Byte] depends on what "Byte"
@@ -16,7 +16,7 @@ source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
 
 # The static type (hir::types::show) of the last `call` expression HIR
-# finds walking SRC's HIR, in pre-order (encode_utf8/list_get are both root
+# finds walking SRC's HIR, in pre-order (str::encode_utf8/list::at are both root
 # natives, so a program calling them needs no module import).
 proc lastCallType {src} {
     set h [surface::compile $src t.bot]
@@ -35,27 +35,27 @@ proc lastCallType {src} {
 # ---------------------------------------------------------------------------
 # Acceptance matrix (spec item 35)
 
-test symbolic-type-identity-canonical-byte {canonical Byte = Int in 0..255: encode_utf8's guaranteed 0..255 domain is admissible, so the result narrows to List[Byte]} -body {
+test symbolic-type-identity-canonical-byte {canonical Byte = Int in 0..255: str::encode_utf8's guaranteed 0..255 domain is admissible, so the result narrows to List[Byte]} -body {
     lastCallType {type Byte = Int in 0..255
-encode_utf8("A")
+str::encode_utf8("A")
 }
 } -result {List[int[Byte]]}
 
-test symbolic-type-identity-narrow-byte-rejected {a same-spelled but narrower Byte = Int in 0..15 cannot prove membership (UTF-8 may emit values above 15): encode_utf8 must not be typed List[Byte]} -body {
+test symbolic-type-identity-narrow-byte-rejected {a same-spelled but narrower Byte = Int in 0..15 cannot prove membership (UTF-8 may emit values above 15): str::encode_utf8 must not be typed List[Byte]} -body {
     lastCallType {type Byte = Int in 0..15
-encode_utf8("A")
+str::encode_utf8("A")
 }
 } -result list
 
 test symbolic-type-identity-wide-superset-byte {a same-spelled compatible superset Byte = Int in 0..1000 admits the native's 0..255 guarantee: this is a sound narrowing (semantic admissibility, not canonical-name identity)} -body {
     lastCallType {type Byte = Int in 0..1000
-encode_utf8("A")
+str::encode_utf8("A")
 }
 } -result {List[int[Byte]]}
 
-test symbolic-type-identity-no-byte-declared {no source-defined Byte at all: falls back to encode_utf8's own plain declared -result-type, never a false claim -- the "Unrelated" decl exists only to force hir::sourcetypes::apply's own Reset (compilation isolation), clearing any Byte a prior test in this process may have left registered} -body {
+test symbolic-type-identity-no-byte-declared {no source-defined Byte at all: falls back to str::encode_utf8's own plain declared -result-type, never a false claim -- the "Unrelated" decl exists only to force hir::sourcetypes::apply's own Reset (compilation isolation), clearing any Byte a prior test in this process may have left registered} -body {
     lastCallType {type Unrelated = Int in 0..1
-encode_utf8("A")
+str::encode_utf8("A")
 }
 } -result list
 
@@ -88,7 +88,7 @@ test symbolic-type-identity-incompatible-kind {a same-named but non-int-based By
 # Canonical standard-library case, static-only (spec item 23): representative
 # ASCII, multi-byte, and astral inputs. Runtime byte values already have
 # full coverage (tests/native-uri-escape.test); this pins only the static
-# type list_get(encode_utf8(...), 0) infers, which is what actually gates
+# type list::at(str::encode_utf8(...), 0) infers, which is what actually gates
 # web::is_unreserved(b: Byte) accepting b with no conversion (item 24).
 
 foreach {name text} {
@@ -96,17 +96,20 @@ foreach {name text} {
     two-byte  é
     astral    😀
 } {
-    test symbolic-type-identity-list-get-$name "list_get(encode_utf8(\"$name\"), 0) : Byte, with the real standard-library Byte = Int in 0..255" -body {
+    test symbolic-type-identity-list-get-$name "list::at(str::encode_utf8(\"$name\"), 0) : Byte, with the real standard-library Byte = Int in 0..255" -body {
         lastCallType [format {type Byte = Int in 0..255
-bytes = encode_utf8("%s")
-list_get(bytes, 0)
+bytes = str::encode_utf8("%s")
+b = list::at(bytes, 0):
+    on IndexNotFound:
+        0
+b
 } $text]
     } -result {int[Byte]}
 }
 
 # ---------------------------------------------------------------------------
 # Web regression (spec items 24-26): lib/web.bot is unmodified source; its
-# clean path (list_get(encode_utf8(c), 0) flowing directly into
+# clean path (list::at(str::encode_utf8(c), 0) flowing directly into
 # is_unreserved(b: Byte), no conversion/handler) must still compile with no
 # diagnostics and produce the exact same escaped text it always has.
 # tests/native-uri-escape.test's own uriEscape-native text-parity table
@@ -114,7 +117,7 @@ list_get(bytes, 0)
 # check of this same pipeline; this test pins the static-diagnostics-free
 # property directly.
 
-test symbolic-type-identity-web-regression-clean-compile {a program that loads lib/web.bot and calls uri_escape_text over ASCII, multi-byte, and astral text produces zero diagnostics and the expected percent-encoded text -- list_get(encode_utf8(c), 0) still statically satisfies is_unreserved's declared Byte parameter} -body {
+test symbolic-type-identity-web-regression-clean-compile {a program that loads lib/web.bot and calls uri_escape_text over ASCII, multi-byte, and astral text produces zero diagnostics and the expected percent-encoded text -- list::at(str::encode_utf8(c), 0) still statically satisfies is_unreserved's declared Byte parameter} -body {
     set path [makeFile {web::uri_escape_text("aA1 é😀")} symbolic-type-identity-web.bot]
     try {
         set h [surface::readProgramFile $path -strict 0]
@@ -132,27 +135,27 @@ test symbolic-type-identity-web-regression-clean-compile {a program that loads l
 # List[Byte] annotation resolves to, even though hir::types::show's own
 # normalizing display printed both identically as "List[int[Byte]]". List
 # admissibility compares stored values, never display text, so passing
-# encode_utf8's result to a declared List[Byte] parameter was rejected with
+# str::encode_utf8's result to a declared List[Byte] parameter was rejected with
 # a self-contradictory "cannot be proven to satisfy List[int[Byte]]
 # (argument type: List[int[Byte]])" diagnostic (M7A-INSTANCE-SELECTION-
 # THEOREM-AUDIT.md's own audit finding). These tests exercise the aggregate/
 # parameter-boundary case this file's own earlier tests (element-read via
-# list_get, a scalar type) never reached.
+# list::at, a scalar type) never reached.
 
-test symbolic-type-identity-satisfies-declared-list-byte-parameter {encode_utf8's result now satisfies a declared List[Byte] parameter directly, with the canonical standard-library Byte -- the actual admissibility defect this milestone fixes (spec item 44)} -body {
+test symbolic-type-identity-satisfies-declared-list-byte-parameter {str::encode_utf8's result now satisfies a declared List[Byte] parameter directly, with the canonical standard-library Byte -- the actual admissibility defect this milestone fixes (spec item 44)} -body {
     surface::compile {type Byte = Int in 0..255
 
 fn consume(bytes: List[Byte]) -> int:
     1
 
-consume(encode_utf8("A"))
+consume(str::encode_utf8("A"))
 } consumeutf8.bot
     list ok
 } -result ok
 
-test symbolic-type-identity-structural-equality-not-display-text {encode_utf8's inferred type is structurally (Tcl-value) identical to a declared List[Byte] annotation's own resolved type, not merely identical hir::types::show text -- the stronger proof that the fix is a real representation fix, not a display-formatting coincidence (spec items 19-20)} -body {
+test symbolic-type-identity-structural-equality-not-display-text {str::encode_utf8's inferred type is structurally (Tcl-value) identical to a declared List[Byte] annotation's own resolved type, not merely identical hir::types::show text -- the stronger proof that the fix is a real representation fix, not a display-formatting coincidence (spec items 19-20)} -body {
     set h1 [surface::compile {type Byte = Int in 0..255
-encode_utf8("A")
+str::encode_utf8("A")
 } enc1.bot]
     set encType [hir::typeOf $h1 [lindex [hir::roots $h1] end]]
     set h2 [surface::compile {type Byte = Int in 0..255
@@ -165,24 +168,24 @@ fn f(xs: List[Byte]) -> int:
     list [expr {$encType eq $declType}] [hir::types::show $encType]
 } -result {1 {List[int[Byte]]}}
 
-test symbolic-type-identity-negative-control-list-int-still-rejected {encode_utf8's List[Byte] result does NOT satisfy a declared List[int] parameter -- named-domain evidence still matters; canonicalization narrows to the resolved *named* type, never collapses distinct named/unnamed domains merely because both have runtime int kind (spec item 46)} -body {
+test symbolic-type-identity-negative-control-list-int-still-rejected {str::encode_utf8's List[Byte] result does NOT satisfy a declared List[int] parameter -- named-domain evidence still matters; canonicalization narrows to the resolved *named* type, never collapses distinct named/unnamed domains merely because both have runtime int kind (spec item 46)} -body {
     catch {surface::compile {type Byte = Int in 0..255
 
 fn consume(xs: List[int]) -> int:
     1
 
-consume(encode_utf8("A"))
+consume(str::encode_utf8("A"))
 } rejectlistint.bot} message options
     list [dict get $options -errorcode] [string match {*cannot be proven to satisfy*} $message]
 } -result {{CORE SEMANTIC TYPE} 1}
 
-test symbolic-type-identity-narrow-byte-param-still-rejected {with a same-spelled but narrower local Byte (0..15), encode_utf8 still falls back to the broad list kind (symbolic-type-identity-narrow-byte-rejected above), so it still does NOT satisfy a declared List[Byte] parameter -- the aggregate/parameter-boundary case inherits the identical domain-admissibility proof, not a Byte-name shortcut} -body {
+test symbolic-type-identity-narrow-byte-param-still-rejected {with a same-spelled but narrower local Byte (0..15), str::encode_utf8 still falls back to the broad list kind (symbolic-type-identity-narrow-byte-rejected above), so it still does NOT satisfy a declared List[Byte] parameter -- the aggregate/parameter-boundary case inherits the identical domain-admissibility proof, not a Byte-name shortcut} -body {
     catch {surface::compile {type Byte = Int in 0..15
 
 fn consume(xs: List[Byte]) -> int:
     1
 
-consume(encode_utf8("A"))
+consume(str::encode_utf8("A"))
 } rejectnarrowbyte.bot} message options
     list [dict get $options -errorcode] [string match {*cannot be proven to satisfy*} $message]
 } -result {{CORE SEMANTIC TYPE} 1}

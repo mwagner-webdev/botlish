@@ -6,16 +6,16 @@
 #
 # expect: [true, false]
 
-local_extra_chars = immutable_set_from_list([".", "_", "%", "+", "-"])
+local_extra_chars = immutable_set::from_list([".", "_", "%", "+", "-"])
 
 fn my_emailish?(v):
-    n = length(v)
+    n = str::length(v)
     fn char_at(i):
-        substring(v, i, i + 1)
+        str::substring(v, i, i + 1)
     fn local_char?(c):
-        is_tcl_alnum(c) or immutable_set_contains(local_extra_chars, c)
+        str::is_tcl_alnum(c) or immutable_set::contains(local_extra_chars, c)
     fn label_char?(c):
-        is_tcl_alnum(c) or c == "-"
+        str::is_tcl_alnum(c) or c == "-"
     fn scan_while(start, predicate):
         loop i from start to n:
             if predicate(char_at(i)):
@@ -23,7 +23,7 @@ fn my_emailish?(v):
             return i
         n
     fn tld?(i):
-        e = scan_while(i, is_tcl_alpha)
+        e = scan_while(i, str::is_tcl_alpha)
         if e == n:
             e - i >= 2
         else:

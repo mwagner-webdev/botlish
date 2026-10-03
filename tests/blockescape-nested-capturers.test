@@ -35,7 +35,7 @@ set selfShape {
         fn rec(n, p):
             fn bounce(m):
                 fs = [other, rec]
-                g = list_get(fs, k)
+                g = list::at(fs, k)
                 g(m * 10000000000000000000000, p)
             if n > 100:
                 h(n)
@@ -50,7 +50,7 @@ set selfShape {
                             h(n) + rec(n - 1, p)
                         else:
                             0
-        rec(10, is_tcl_alpha)
+        rec(10, str::is_tcl_alpha)
     outer(1)
 }
 
@@ -69,10 +69,10 @@ set siblingShape {
         fn c(m, p):
             fn d(z):
                 fs = [other, f]
-                g = list_get(fs, k)
+                g = list::at(fs, k)
                 g(z * 10000000000000000000000, p)
             f(m, p) + d(m)
-        c(7, is_tcl_alpha)
+        c(7, str::is_tcl_alpha)
     outer(1)
 }
 

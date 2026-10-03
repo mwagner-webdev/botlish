@@ -71,7 +71,7 @@ proc genCsv {headers rows rowFn} {
 # ---------------------------------------------------------------------------
 # Header sharing (req #3, #16, #45): row-table construction over an already
 # -parsed CSV adds no new String allocations. csv_records(TEXT) internally
-# calls csv_parse(TEXT) and then only mutable_array_get/_set (never a String
+# calls csv_parse(TEXT) and then only mutable_array::at/::set (never a String
 # op) to place existing String objects into tables, so its String allocation
 # count must equal csv_parse(TEXT)'s alone -- if headers (or fields) were
 # being reconstructed per row instead of reused, this would grow with the
@@ -85,9 +85,9 @@ proc csvFixture {} {
 
 test csv-records-string-sharing-1 {row-table construction over parsed CSV allocates no new Strings: header and field Strings are reused, not reconstructed} -body {
     set text [csvFixture]
-    set base "fn f():\n    r = csv_parse([corpus::literal $text])\n    list_length(r)\nf()"
-    set withTables "fn f():\n    r = csv_records([corpus::literal $text])\n    list_length(r)\nf()"
-    set withPresized "fn f():\n    r = csv_records_presized([corpus::literal $text])\n    list_length(r)\nf()"
+    set base "fn f():\n    r = csv_parse([corpus::literal $text])\n    list::length(r)\nf()"
+    set withTables "fn f():\n    r = csv_records([corpus::literal $text])\n    list::length(r)\nf()"
+    set withPresized "fn f():\n    r = csv_records_presized([corpus::literal $text])\n    list::length(r)\nf()"
     set baseStrings [dict get [allocationsOf $base] byKind String allocations]
     set tableStrings [dict get [allocationsOf $withTables] byKind String allocations]
     set presizedStrings [dict get [allocationsOf $withPresized] byKind String allocations]
@@ -103,13 +103,13 @@ test csv-records-string-sharing-1 {row-table construction over parsed CSV alloca
 #
 # 880 before the String-region milestone (native/lower.tcl's "String
 # regions" section, hir/stringregion.tcl): peek(text, index)'s one-character
-# `substring(text, index, index+1)`, called from scan_unquoted and
+# `str::substring(text, index, index+1)`, called from scan_unquoted and
 # scan_field purely to compare against a literal ("", ",", "\n", "\""),
 # allocated a temporary String on every character scanned. Neither call site
 # does anything else with that character, so hir::stringregion.tcl
 # recognizes both as consuming a StringRegion directly (`regioneq`) instead
 # -- scan_quoted's own peek() call still materializes, unchanged, since it
-# also feeds `concat` (a real, escaping use this milestone does not
+# also feeds `str::concat` (a real, escaping use this milestone does not
 # optimize: see native/lower.tcl's "String regions" section). 105 is what
 # remains: exactly the real, escaping field/header Strings this fixture's
 # CSV actually contains, still allocated exactly as before.
@@ -133,8 +133,8 @@ proc wideHeaders {} { return {h0 h1 h2 h3 h4 h5 h6 h7 h8 h9} }
 
 test csv-records-presize-1 {a 10-column row forces the default table to resize at least once; the presized table never resizes} -body {
     set text [genCsv [wideHeaders] 1 {i {list a b c d e f g h i j}}]
-    set default "list_length(csv_records([corpus::literal $text]))"
-    set presized "list_length(csv_records_presized([corpus::literal $text]))"
+    set default "list::length(csv_records([corpus::literal $text]))"
+    set presized "list::length(csv_records_presized([corpus::literal $text]))"
     set defaultMutarrays [dict get [allocationsOf $default] byKind MutableArray allocations]
     set presizedMutarrays [dict get [allocationsOf $presized] byKind MutableArray allocations]
     # Both build the same outer GeometricBuilder (1 row: geo_new's initial 0
@@ -148,8 +148,8 @@ test csv-records-presize-2 {presized and default row tables agree on content eve
     native {
 fn f():
     text = "h0,h1,h2,h3,h4,h5,h6,h7,h8,h9\na,b,c,d,e,f,g,h,i,j\n"
-    d = list_get(csv_records(text), 0)
-    p = list_get(csv_records_presized(text), 0)
+    d = list::at(csv_records(text), 0)
+    p = list::at(csv_records_presized(text), 0)
     [ht_get(d, "h0"), ht_get(d, "h9"), ht_size(d), ht_capacity(d) > 8, ht_get(p, "h0"), ht_get(p, "h9"), ht_size(p), ht_capacity(p) == 16]
 f()
     }
@@ -180,12 +180,12 @@ fn setup():
 set ::csvRecordsBase "$::csvRecordsSetup\nfn f():\n    rows = setup()\n    unit\nf()\n"
 
 test csv-records-alloc-readback-1 {repeated ht_get/ht_contains over the constructed rows allocate zero managed objects beyond construction} -body {
-    assertNoExtraAllocation readback $::csvRecordsBase "$::csvRecordsSetup\nfn f():\n    rows = setup()\n    r0 = list_get(rows, 0)\n    r1 = list_get(rows, 1)\n    r2 = list_get(rows, 2)\n    ht_get(r0, \"h0\")\n    ht_get(r1, \"h1\")\n    ht_get(r2, \"h2\")\n    ht_get(r0, \"missing\")\n    ht_contains(r1, \"h0\")\n    unit\nf()"
+    assertNoExtraAllocation readback $::csvRecordsBase "$::csvRecordsSetup\nfn f():\n    rows = setup()\n    r0 = list::at(rows, 0)\n    r1 = list::at(rows, 1)\n    r2 = list::at(rows, 2)\n    ht_get(r0, \"h0\")\n    ht_get(r1, \"h1\")\n    ht_get(r2, \"h2\")\n    ht_get(r0, \"missing\")\n    ht_contains(r1, \"h0\")\n    unit\nf()"
 } -result {}
 
 test csv-records-alloc-readback-2 {a repeated-lookup loop over many rows also allocates zero managed objects beyond construction} -body {
     set base "$::csvRecordsSetup\nfn lookupAll(rows, i, n):\n    if i >= n:\n        return unit\n    lookupAll(rows, i + 1, n)\n\nfn f():\n    rows = setup()\n    unit\nf()\n"
-    set withLookups "$::csvRecordsSetup\nfn lookupAll(rows, i, n):\n    if i >= n:\n        return unit\n    r = list_get(rows, i)\n    ht_get(r, \"h0\")\n    ht_get(r, \"h1\")\n    ht_get(r, \"h2\")\n    lookupAll(rows, i + 1, n)\n\nfn f():\n    rows = setup()\n    lookupAll(rows, 0, 3)\nf()\n"
+    set withLookups "$::csvRecordsSetup\nfn lookupAll(rows, i, n):\n    if i >= n:\n        return unit\n    r = list::at(rows, i)\n    ht_get(r, \"h0\")\n    ht_get(r, \"h1\")\n    ht_get(r, \"h2\")\n    lookupAll(rows, i + 1, n)\n\nfn f():\n    rows = setup()\n    lookupAll(rows, 0, 3)\nf()\n"
     assertNoExtraAllocation readback-loop $base $withLookups
 } -result {}
 
@@ -204,12 +204,12 @@ test csv-records-gc-stress-shared-headers-1 {header Strings reachable only throu
 fn checkRow(rows, i, n, ok):
     if i >= n:
         return ok
-    r = list_get(rows, i)
+    r = list::at(rows, i)
     checkRow(rows, i + 1, n, ok and ht_contains(r, \"name\") and ht_contains(r, \"age\") and ht_contains(r, \"city\"))
 
 fn f():
     rows = csv_records([corpus::literal $text])
-    \[list_length(rows), checkRow(rows, 0, list_length(rows), true), ht_get(list_get(rows, 0), \"name\"), ht_get(list_get(rows, 29), \"city\")\]
+    \[list::length(rows), checkRow(rows, 0, list::length(rows), true), ht_get(list::at(rows, 0), \"name\"), ht_get(list::at(rows, 29), \"city\")\]
 f()
     "] -specialize 1
 } -result {list {{int 30} {bool true} {str person0} {str city29}}}
@@ -223,8 +223,8 @@ test csv-records-gc-stress-nonascii-1 {non-ASCII headers/values survive GC while
     native::evalHir [sourceHir "
 fn f():
     rows = csv_records([corpus::literal $text])
-    r0 = list_get(rows, 0)
-    r1 = list_get(rows, 1)
+    r0 = list::at(rows, 0)
+    r1 = list::at(rows, 1)
     \[ht_get(r0, [corpus::literal \u540d\u524d]), ht_get(r0, [corpus::literal \u90fd\u5e02]), ht_get(r1, [corpus::literal \u540d\u524d])\]
 f()
     "] -specialize 1
@@ -239,9 +239,9 @@ test csv-records-gc-stress-duplicate-ragged-1 {duplicate headers and ragged rows
     native::evalHir [sourceHir "
 fn f():
     rows = csv_records([corpus::literal $text])
-    r0 = list_get(rows, 0)
-    r1 = list_get(rows, 1)
-    r2 = list_get(rows, 2)
+    r0 = list::at(rows, 0)
+    r1 = list::at(rows, 1)
+    r2 = list::at(rows, 2)
     \[ht_get(r0, \"a\"), ht_size(r0), ht_get(r1, \"a\"), ht_contains(r1, \"b\"), ht_size(r1), ht_get(r2, \"a\"), ht_get(r2, \"b\"), ht_contains(r2, \"c\"), ht_size(r2)\]
 f()
     "] -specialize 1
@@ -257,12 +257,12 @@ test csv-records-gc-stress-presized-1 {presized construction survives GC identic
 fn checkAll(rows, i, n, ok):
     if i >= n:
         return ok
-    r = list_get(rows, i)
+    r = list::at(rows, i)
     checkAll(rows, i + 1, n, ok and ht_size(r) == 8 and ht_capacity(r) >= 8)
 
 fn f():
     rows = csv_records_presized([corpus::literal $text])
-    \[list_length(rows), checkAll(rows, 0, list_length(rows), true)\]
+    \[list::length(rows), checkAll(rows, 0, list::length(rows), true)\]
 f()
     "] -specialize 1
 } -result {list {{int 25} {bool true}}}
@@ -270,7 +270,7 @@ f()
 test csv-records-gc-stress-allocation-consistency-1 {allocation report stays internally consistent (peak live >= current live, at least one GC cycle) under stress} -body {
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
     set text [genCsv {name age city} 60 {i {list "p$i" $i "c$i"}}]
-    set report [allocationsOf "list_length(csv_records([corpus::literal $text]))"]
+    set report [allocationsOf "list::length(csv_records([corpus::literal $text]))"]
     unset ::env(BOTLISH_NATIVE_GC_STRESS)
     set total [dict get $report total]
     list [expr {[dict get $total peakLiveObjects] >= [dict get $total currentLiveObjects]}] \
@@ -283,27 +283,27 @@ test csv-records-gc-stress-allocation-consistency-1 {allocation report stays int
 # supplementary-plane codepoint is one Tcl character, i.e. one Unicode
 # scalar value, exactly like Rust's str::chars(). hash()/== operate on
 # UTF-8-encoded bytes either way (core/hashing.tcl's Utf8Bytes), and
-# length() now agrees too: every backend counts the emoji as 1, not the
+# str::length() now agrees too: every backend counts the emoji as 1, not the
 # surrogate-pair-derived 2 that an older Tcl build (no full-Unicode support)
 # used to give the Tcl-hosted backends. Verified below to parity-agree on
-# all four backends for ht_get/ht_contains and length(), keyed and valued
+# all four backends for ht_get/ht_contains and str::length(), keyed and valued
 # by the emoji itself.
 
 set ::astralEmoji [encoding convertfrom utf-8 "\xf0\x9f\x99\x82"]
 
 test csv-records-astral-1 {an astral-plane emoji as both a header name and a field value: round-trips correctly and agrees on every backend} -body {
     set csvText "label,$::astralEmoji\nok,$::astralEmoji\n"
-    parity "fn f():\n    rows = csv_records([corpus::literal $csvText])\n    r = list_get(rows, 0)\n    \[ht_get(r, \"label\"), ht_contains(r, [corpus::literal $::astralEmoji]), ht_get(r, [corpus::literal $::astralEmoji]) == [corpus::literal $::astralEmoji]\]\nf()"
+    parity "fn f():\n    rows = csv_records([corpus::literal $csvText])\n    r = list::at(rows, 0)\n    \[ht_get(r, \"label\"), ht_contains(r, [corpus::literal $::astralEmoji]), ht_get(r, [corpus::literal $::astralEmoji]) == [corpus::literal $::astralEmoji]\]\nf()"
 } -result same
 
 test csv-records-astral-2 {the emoji round-trips to its correct 4-byte UTF-8 encoding on the native backend} -body {
     set csvText "mood,note\n$::astralEmoji,cheerful\n"
-    native "fn f():\n    rows = csv_records([corpus::literal $csvText])\n    ht_get(list_get(rows, 0), \"mood\")\nf()"
+    native "fn f():\n    rows = csv_records([corpus::literal $csvText])\n    ht_get(list::at(rows, 0), \"mood\")\nf()"
 } -result [list value "\"$::astralEmoji\""]
 
-test csv-records-astral-length-1 {length() of the astral-plane emoji is one Unicode scalar value, agreeing on every backend} -body {
-    list [parity "length([corpus::literal $::astralEmoji])"] \
-         [native "length([corpus::literal $::astralEmoji])"]
+test csv-records-astral-length-1 {str::length() of the astral-plane emoji is one Unicode scalar value, agreeing on every backend} -body {
+    list [parity "str::length([corpus::literal $::astralEmoji])"] \
+         [native "str::length([corpus::literal $::astralEmoji])"]
 } -result {same {value 1}}
 
 # ---------------------------------------------------------------------------
@@ -315,7 +315,7 @@ test csv-records-astral-length-1 {length() of the astral-plane emoji is one Unic
 
 test csv-records-sites-1 {sites mode reports CSV scanning and MutableArray-allocation operations for a small representative row-table build} -body {
     set text [genCsv {a b c} 5 {i {list x$i y$i z$i}}]
-    set report [native::allocationReport [sourceHir "list_length(csv_records([corpus::literal $text]))"] sites]
+    set report [native::allocationReport [sourceHir "list::length(csv_records([corpus::literal $text]))"] sites]
     set ops [lsort -unique [lmap s [dict get $report sites] {dict get $s operation}]]
     list [expr {"strcat" in $ops || "substr" in $ops}] [expr {"mutarrayallocate" in $ops}]
 } -result {1 1}
@@ -330,8 +330,8 @@ test csv-records-specialize-off-1 {-specialize 0 is unsupported: the embedded re
     set text {
 fn f():
     rows = csv_records("h0,h1\na,b\nc,d\n")
-    r1 = list_get(rows, 1)
-    [list_length(rows), ht_get(r1, "h0"), ht_get(r1, "h1")]
+    r1 = list::at(rows, 1)
+    [list::length(rows), ht_get(r1, "h0"), ht_get(r1, "h1")]
 f()
     }
     set hir [sourceHir $text]
@@ -343,7 +343,7 @@ test csv-records-repr-opt-off-1 {-repr-opt 0 gives the same result as the defaul
     set text {
 fn f():
     rows = csv_records_presized("h0,h1,h2,h3,h4,h5,h6,h7,h8,h9,h10,h11\na,b,c,d,e,f,g,h,i,j,k,l\n")
-    r = list_get(rows, 0)
+    r = list::at(rows, 0)
     [ht_size(r), ht_capacity(r), ht_get(r, "h11")]
 f()
     }
@@ -407,7 +407,7 @@ proc genPropertyDataset {seed rows} {
 }
 
 # For every reference row, checks every header's expected presence/value
-# (by ht_contains/ht_get) against Botlish row R (an already-list_get'd
+# (by ht_contains/ht_get) against Botlish row R (an already-list::at'd
 # table), returning a Tcl boolean list-of-checks flattened to 1/0 so a
 # single Botlish driver call can verify a whole dataset in one native run
 # (far cheaper than one test per row/header pair).
@@ -423,12 +423,12 @@ proc propertyDriver {presized text headers refRows} {
         set rowChecks {}
         foreach h $headers {
             if {[dict exists $ref $h]} {
-                lappend rowChecks "ht_get(list_get(rows, $rowIndex), [corpus::literal $h]) == [corpus::literal [dict get $ref $h]]"
+                lappend rowChecks "ht_get(list::at(rows, $rowIndex), [corpus::literal $h]) == [corpus::literal [dict get $ref $h]]"
             } else {
-                lappend rowChecks "ht_contains(list_get(rows, $rowIndex), [corpus::literal $h]) == false"
+                lappend rowChecks "ht_contains(list::at(rows, $rowIndex), [corpus::literal $h]) == false"
             }
         }
-        lappend rowChecks "ht_size(list_get(rows, $rowIndex)) == [dict size $ref]"
+        lappend rowChecks "ht_size(list::at(rows, $rowIndex)) == [dict size $ref]"
         lappend rowExprs "([join $rowChecks { and }])"
         incr rowIndex
     }

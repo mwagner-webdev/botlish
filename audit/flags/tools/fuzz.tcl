@@ -27,7 +27,8 @@
 #   free        f(a, b, :x, :y)
 #   method      a.f(b, :x, :y)  (receiver = first ordinary argument)
 #   alias       g(...) / a.g(...) for a name bound to a function (`g = f`)
-#   nested      an argument is `list_get(CALL, 0)` or `CALL.list_get(0)`
+#   nested      an argument is `head(CALL)` or `CALL.head()` (head: the
+#               first element via a proven list::at, STDLIB-NAMESPACES.md)
 #   probed      an argument is `probe(log, ID, ARG)`, so evaluation order is
 #               part of the outcome; flags contribute no event
 #
@@ -259,9 +260,9 @@ proc renderArg {arg mutation} {
         call {
             set text [renderCall [lindex $arg 1] $mutation]
             if {[lindex $arg 2] eq "method"} {
-                return "$text.list_get(0)"
+                return "$text.head()"
             }
-            return "list_get($text, 0)"
+            return "head($text)"
         }
     }
 }
@@ -339,8 +340,10 @@ proc indexCall {call counterVar} {
 }
 
 proc renderProgram {functions calls mutation} {
-    set text "fn probe(log, id, result):\n    n = mutable_array_get(log, 0)\n    mutable_array_set(log, 0, n * 10 + id)\n    result\n"
-    append text "fn fresh():\n    log = mutable_array_allocate(1)\n    mutable_array_set(log, 0, 0)\n    log\n"
+    set text "fn current(log):\n    if mutable_array::capacity(log) == 1:\n        return mutable_array::at(log, 0)\n    -1\n"
+    append text "fn probe(log, id, result):\n    n = current(log)\n    mutable_array::set(log, 0, n * 10 + id)\n    result\n"
+    append text "fn head(xs):\n    loop i from 0 to list::length(xs):\n        return list::at(xs, i)\n    0\n"
+    append text "fn fresh():\n    log = mutable_array::allocate(1)\n    mutable_array::set(log, 0, 0)\n    log\n"
     for {set i 0} {$i <= 4} {incr i} {
         set ps [lmap j [lseq $i] {string cat a $j}]
         append text "fn fwd${i}([join [concat s $ps] {, }]):\n    \[[join [concat s $ps] {, }]\]\n"
@@ -362,7 +365,7 @@ proc renderProgram {functions calls mutation} {
     if {[dict exists $mutation extra]} {
         append text "[dict get $mutation extra]\n"
     }
-    append text "\[[join [concat $results [list "mutable_array_get(log, 0)"]] {, }]\]"
+    append text "\[[join [concat $results [list "current(log)"]] {, }]\]"
     return $text
 }
 

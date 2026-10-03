@@ -191,7 +191,7 @@ test struct-eq-named-vs-anonymous {a named struct never equals an anonymous one 
 } -result {same: [false, false]}
 
 test struct-eq-mutarray-field {equality keeps the existing rule: a MutableArray has no structural equality} -body {
-    set hir [surface::readProgramFile [tcltest::makeFile "m = mutarray::create(1, 0)\n\{a: m\} == \{a: m\}\n" eq-mutarray.bot]]
+    set hir [surface::readProgramFile [tcltest::makeFile "m = mutable_array::create(1, 0)\n\{a: m\} == \{a: m\}\n" eq-mutarray.bot]]
     lmap backend $::structBackends {lindex [outcomeUnderHir $backend $hir] 1}
 } -result {{CORE SEMANTIC EQUALITY} {CORE SEMANTIC EQUALITY} {CORE SEMANTIC EQUALITY} {CORE SEMANTIC EQUALITY}}
 
@@ -203,13 +203,13 @@ test struct-eq-hash-consistent {hash agrees with struct equality across source o
 # Evaluation order, completions, closures
 
 test struct-eval-source-order {field expressions run in SOURCE order, not canonical layout order} -body {
-    set path [tcltest::makeFile "counter = mutarray::create(1, 0)
+    set path [tcltest::makeFile "counter = mutable_array::create(1, 0)
 fn ticket(m):
-    n = mutable_array_get(m, 0)
-    mutable_array_set(m, 0, n + 1)
+    n = mutable_array::get(m, 0, 0)
+    mutable_array::set(m, 0, n + 1)
     n
 r = \{z: ticket(counter), a: ticket(counter), m: ticket(counter)\}
-\[r, mutable_array_get(counter, 0)\]
+\[r, mutable_array::at(counter, 0)\]
 " eval-order.bot]
     structRunFile $path
 } -result {same: [{a: 1, m: 2, z: 0}, 3]}
@@ -297,7 +297,7 @@ test struct-named-field-authoritative {a named struct field has its declared typ
 } -result {x:X | v:int}
 
 test struct-named-in-containers {named structs are ordinary element types} -body {
-    structTypes "${person}ps = \[Person \{name: \"a\", age: 1\}\]\np0 = list_get(ps, 0)\nn = p0.name"
+    structTypes "${person}ps = \[Person \{name: \"a\", age: 1\}\]\np0 = list::at(ps, 0)\nn = p0.name"
 } -result {ps:List[Person] | p0:Person | n:str}
 
 test struct-named-recursive-declaration {a struct may name itself: the type exists though no finite value constructs it} -body {
@@ -450,15 +450,15 @@ test struct-type-nominal-lub {named structs join only with themselves; shape coi
 # Containers and composition
 
 test struct-list-of-anonymous {anonymous structs of one field set infer List[struct]} -body {
-    structTypes "xs = \[\{name: \"a\", age: 1\}, \{age: 2, name: \"b\"\}\]\nsecond = list_get(xs, 1)\nn = second.name"
+    structTypes "xs = \[\{name: \"a\", age: 1\}, \{age: 2, name: \"b\"\}\]\nsecond = list::at(xs, 1)\nn = second.name"
 } -result {xs:List[struct{age: int, name: str}] | second:struct{age: int, name: str} | n:str}
 
-test struct-list-of-anonymous-run {list_get of List[struct] keeps the struct type for a dynamic index} -body {
-    structRun "xs = \[\{name: \"a\", age: 1\}, \{age: 2, name: \"b\"\}\]\nfn at(i):\n    list_get(xs, i).name\n\[at(0), at(1)\]"
+test struct-list-of-anonymous-run {list::at of List[struct] keeps the struct type for a dynamic index} -body {
+    structRun "xs = \[\{name: \"a\", age: 1\}, \{age: 2, name: \"b\"\}\]\nfn at(i) errors IndexNotFound:\n    list::at(xs, i).name\n\[at(0), at(1)\]"
 } -result {same: ["a", "b"]}
 
 test struct-mutarray-of-structs {MutableArray of structs is inferred and its reads are typed} -body {
-    set path [tcltest::makeFile "m = mutarray::from_list(\[\{x: 1\}, \{x: 2\}\])\ne = mutable_array_get(m, 1).x\n" mutarray-structs.bot]
+    set path [tcltest::makeFile "m = mutable_array::from_list(\[\{x: 1\}, \{x: 2\}\])\ne = mutable_array::at(m, 1).x\n" mutarray-structs.bot]
     set hir [surface::readProgramFile $path]
     set types {}
     foreach e [hir::roots $hir] {
@@ -470,13 +470,13 @@ test struct-mutarray-of-structs {MutableArray of structs is inferred and its rea
 } -result {{{MutableArray[struct{x: int}]} int} {same: 2}}
 
 test struct-immutable-set-of-structs {ImmutableSet of structs deduplicates by struct equality} -body {
-    structRun "s = immutable_set_from_list(\[\{a: 1\}, \{a: 1\}, \{a: 2\}\])\nlist_length(\[1\])"
+    structRun "s = immutable_set::from_list(\[\{a: 1\}, \{a: 1\}, \{a: 2\}\])\nlist::length(\[1\])"
 } -result {same: 1}
 
 test struct-field-mutarray-typed {a MutableArray field keeps its element contract through the struct} -body {
-    set path [tcltest::makeFile "s = \{storage: mutarray::create(4, \"x\"), length: 0\}\nst = s.storage\n" field-mutarray.bot]
+    set path [tcltest::makeFile "s = \{storage: mutable_array::create(4, \"x\"), length: 0\}\nst = s.storage\n" field-mutarray.bot]
     set hir [surface::readProgramFile $path]
-    lmap e [lrange [hir::roots $hir] 2 end] {hir::types::show [hir::typeOf $hir $e]}
+    lmap e [lrange [hir::roots $hir] end-1 end] {hir::types::show [hir::typeOf $hir $e]}
 } -result {{struct{length: int, storage: MutableArray[str]}} {MutableArray[str]}}
 
 # ---------------------------------------------------------------------------
@@ -493,7 +493,7 @@ test struct-bearing-recursive {a struct is bearing iff a field is, recursively} 
 } -result {1 1 0 1}
 
 test struct-bearing-attacks {a typed array cannot be erased through an untyped struct boundary} -body {
-    set m "m = mutarray::create(2, \"x\")\n"
+    set m "m = mutable_array::create(2, \"x\")\n"
     set attacks [list \
         "${m}s = \{storage: m\}\nxs = \[s, 5\]\nxs" \
         "struct Box:\n    value: any\n${m}b = Box \{value: m\}\nb" \
@@ -511,7 +511,7 @@ test struct-bearing-attacks {a typed array cannot be erased through an untyped s
 } -result {{TYPE 1} {TYPE 1} {TYPE 1} {TYPE 1}}
 
 test struct-bearing-instance-keeps-contract {an instance keeps the typed array contract across an untyped function} -body {
-    set m "m = mutarray::create(2, \"x\")\n"
+    set m "m = mutable_array::create(2, \"x\")\n"
     set hir [surface::readProgramFile [tcltest::makeFile "${m}s = \{storage: m\}\nfn leak(v):\n    v\nt = leak(s)\nu = t.storage\n" instance-bearing.bot]]
     set types {}
     foreach e [hir::roots $hir] {
@@ -628,12 +628,18 @@ test struct-keytype-named {a named struct's key is its declaration} -body {
 test struct-specialization-census {five semantic instances lower to four codegen instances: differing MutableArray element contracts share one} -body {
     set hir [surface::readProgramFile [tcltest::makeFile "fn get(p):
     p.x
-a = \{x: mutarray::create(2, 0)\}
-b = \{x: mutarray::create(2, \"s\")\}
+a = \{x: mutable_array::create(2, 0)\}
+b = \{x: mutable_array::create(2, \"s\")\}
 c = \{x: 7\}
 d = \{x: \"s\"\}
 e = \{x: 1, y: 2\}
-\[mutable_array_get(get(a), 0), mutable_array_get(get(b), 0), get(c), get(d), get(e)\]
+a0 = mutable_array::at(get(a), 0):
+    on IndexNotFound:
+        0
+b0 = mutable_array::at(get(b), 0):
+    on IndexNotFound:
+        \"\"
+\[a0, b0, get(c), get(d), get(e)\]
 " census.bot]]
     set nir [dict get [native::lowered $hir] text]
     set semantic [llength [lsearch -all -inline -exact [lmap row [hir::semantic::census $hir] {dict get $row name}] get]]
@@ -677,12 +683,15 @@ test struct-native-gc-stress {struct values survive collection at every allocati
 fn build(n):
     if n < 1:
         return \[\]
-    p = Person \{name: concat(\"n\", \"x\"), age: n\}
-    q = \{who: p, tags: \[concat(\"a\", \"b\"), concat(\"c\", \"d\")\], n: \{depth: n\}\}
+    p = Person \{name: str::concat(\"n\", \"x\"), age: n\}
+    q = \{who: p, tags: \[str::concat(\"a\", \"b\"), str::concat(\"c\", \"d\")\], n: \{depth: n\}\}
     rest = build(n - 1)
-    list_append(rest, q)
+    list::append(rest, q)
 xs = build(40)
-\[list_length(xs), list_get(xs, 0).who.age, list_get(xs, 39).n.depth, list_get(xs, 5).tags\]
+if list::length(xs) == 40:
+    \[list::length(xs), list::at(xs, 0).who.age, list::at(xs, 39).n.depth, list::at(xs, 5).tags\]
+else:
+    \[\]
 "
     set hir [surface::readProgramFile $path]
     set plain [outcomeUnderHir cranelift $hir]

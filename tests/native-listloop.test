@@ -51,7 +51,7 @@ f()}]]
 # Allocation census: a discarded listloop causes zero List allocations from
 # the loop's own returning-loop semantics -- only the already-existing
 # `rt_list_append` runtime's own copy-on-append behavior (native-alloc.
-# test's own "list_append copies the existing elements" pin, unrelated to
+# test's own "list::append copies the existing elements" pin, unrelated to
 # and unchanged by this milestone) makes a *retained* listloop's own List
 # construction cost O(n) allocations, not the "one logical output List"
 # item 14 describes as a semantic goal: an empty accumulator (`listnew`,

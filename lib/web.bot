@@ -7,7 +7,7 @@
 # Botlish module definition, so it is resolved and compiled once, like any
 # other function, instead of copied. It is the same algorithm as
 # core::web::uriEscape's Tcl implementation, over the general
-# core/strings.tcl native encode_utf8 (str -> List[Byte], one UTF-8 byte per
+# core/strings.tcl native str::encode_utf8 (str -> List[Byte], one UTF-8 byte per
 # element, STATIC-COMPLETION-PROOFS.md item 25): percent-encode every UTF-8
 # byte of s except the RFC 3986 unreserved characters (A-Za-z0-9._~-), as
 # uppercase %XX.
@@ -36,12 +36,12 @@
 # exact call -- no handler, no placeholder fallback set, no `on` clause.
 #
 # esc_char, is_unreserved's one call site, now receives each UTF-8 byte of a
-# single-byte-encoded char directly as a Byte from encode_utf8's own
-# truthful List[Byte] result type (item 25-27, 74-76) -- list_get's already-
-# generic List[T] element typing gives `list_get(bytes, 0) : Byte` with no
+# single-byte-encoded char directly as a Byte from str::encode_utf8's own
+# truthful List[Byte] result type (item 25-27, 74-76) -- list::at's already-
+# generic List[T] element typing gives `list::at(bytes, 0) : Byte` with no
 # web-specific code here at all, so the old per-byte byte::from_int(...)
 # conversion (and its always-unreachable-in-practice handler fallback) is
-# gone: it was working around an under-typed encode_utf8, not a genuine
+# gone: it was working around an under-typed str::encode_utf8, not a genuine
 # runtime possibility, and item 26/54 says not to keep a redundant
 # conversion once the producer's own static contract is honest.
 #
@@ -64,7 +64,7 @@ namespace web
 # Botlish implementation (R2-ORDINARY-EMAILISH-PREDICATE.md): the same
 # left-to-right scan emailRegex's grammar always described -- local part: 1+
 # of [alnum . _ % + -]; "@"; domain: 1+ of (1+ of [alnum -] then "."); TLD:
-# 2+ alpha -- over is_tcl_alnum/is_tcl_alpha (core/tclcompat.tcl). R2.a
+# 2+ alpha -- over str::is_tcl_alnum/str::is_tcl_alpha (core/tclcompat.tcl). R2.a
 # (R2A-IDIOMATIC-EMAILISH-SOURCE.md) normalized this from R2's own almost-
 # structural port of the old hand-written core-IR validator into the
 # idiomatic Botlish shape; R2.a.2 (R2A2-TRAILING-QUESTION-IDENTIFIERS.md)
@@ -87,17 +87,17 @@ namespace web
 # additional_unreserved_chars: constructed once at module initialization,
 # never per emailish? call (R2A1-MODULE-FN-BRIDGE-REACHABILITY.md fixed the
 # bridge-reachability defect that once forced building this per call).
-local_extra_chars = immutable_set_from_list([".", "_", "%", "+", "-"])
+local_extra_chars = immutable_set::from_list([".", "_", "%", "+", "-"])
 
 fn emailish?(v):
 
-    n = length(v)
+    n = str::length(v)
 
     fn char_at(i):
-        substring(v, i, i + 1)
+        str::substring(v, i, i + 1)
 
     fn local_char?(c):
-        is_tcl_alnum(c) or immutable_set_contains(local_extra_chars, c)
+        str::is_tcl_alnum(c) or immutable_set::contains(local_extra_chars, c)
 
     # label_char?'s own extra character is a single "-": a one-element set
     # would be less idiomatic than the direct equality already used
@@ -105,7 +105,7 @@ fn emailish?(v):
     # own char-count check), so it stays a plain "==" rather than a second
     # membership set.
     fn label_char?(c):
-        is_tcl_alnum(c) or c == "-"
+        str::is_tcl_alnum(c) or c == "-"
 
     # scan_while(start, predicate) is the one reusable operation the old
     # scan_local/scan_label/scan_alpha triplet was really three copies of:
@@ -119,7 +119,7 @@ fn emailish?(v):
     # value is N itself, exactly the old recursion's own "i >= n" base
     # case. PREDICATE is passed as an ordinary first-class value (an
     # untyped-parameter callable, TYPED-CALLABLE-ESCAPE-SOUNDNESS.md item
-    # 10 -- local_char? and is_tcl_alpha, the two predicates passed here,
+    # 10 -- local_char? and str::is_tcl_alpha, the two predicates passed here,
     # are an untyped-parameter Botlish function and a native, neither of
     # which is a "typed callable" that rule would block from flowing
     # through an ordinary parameter).
@@ -131,7 +131,7 @@ fn emailish?(v):
         n
 
     fn tld?(i):
-        e = scan_while(i, is_tcl_alpha)
+        e = scan_while(i, str::is_tcl_alpha)
         if e == n:
             e - i >= 2
         else:
@@ -187,7 +187,7 @@ hex_digits = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "
 additional_unreserved_chars = byte::set(['-', '.', '_', '~'])
 
 fn is_unreserved(b: Byte) -> bool:
-    ascii::is_alphanumeric(b) or immutable_set_contains(additional_unreserved_chars, b)
+    ascii::is_alphanumeric(b) or immutable_set::contains(additional_unreserved_chars, b)
 
 fn uri_escape_text(s):
 
@@ -195,18 +195,18 @@ fn uri_escape_text(s):
         byte::nibble(byte::high_nibble(b))
 
     fn hex_pair(b):
-        concat(list_get(hex_digits, high_nibble(b)), list_get(hex_digits, mod(b, 16)))
+        str::concat(list::at(hex_digits, high_nibble(b)), list::at(hex_digits, mod(b, 16)))
 
     fn esc_bytes(bytes, i, acc):
-        if i >= list_length(bytes):
+        if i < 0 or i >= list::length(bytes):
             acc
         else:
-            esc_bytes(bytes, i + 1, concat(acc, concat("%", hex_pair(list_get(bytes, i)))))
+            esc_bytes(bytes, i + 1, str::concat(acc, str::concat("%", hex_pair(list::at(bytes, i)))))
 
     fn esc_char(c):
-        bytes = encode_utf8(c)
-        if list_length(bytes) == 1:
-            b = list_get(bytes, 0)
+        bytes = str::encode_utf8(c)
+        if list::length(bytes) == 1:
+            b = list::at(bytes, 0)
             if is_unreserved(b):
                 c
             else:
@@ -215,9 +215,9 @@ fn uri_escape_text(s):
             esc_bytes(bytes, 0, "")
 
     fn esc_from(text, i, acc):
-        if i >= length(text):
+        if i >= str::length(text):
             acc
         else:
-            esc_from(text, i + 1, concat(acc, esc_char(substring(text, i, i + 1))))
+            esc_from(text, i + 1, str::concat(acc, esc_char(str::substring(text, i, i + 1))))
 
     esc_from(s, 0, "")

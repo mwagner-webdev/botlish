@@ -67,7 +67,7 @@ test native-lockstep-rejected-only-when-reached {the diagnostic is raised when t
                 loop x in xs and i from 0 to 3:
                     x + i
             else:
-                [list_length(xs)]
+                [list::length(xs)]
         [u([1, 2, 3], false), u([4], false)]
     }
 } -result {value {[[3], [1]]}}

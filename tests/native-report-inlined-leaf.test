@@ -58,6 +58,13 @@ proc guardLines {nir name} {
 
 set uriEscapeCall {{call {ref uriEscape} {const str {a b}}}}
 
+# The generic blocker/guard counts of every uriEscape program below grew by
+# one with STDLIB-NAMESPACES.md: web.bot's esc_bytes now guards its
+# list::at read with `i < 0 or i >= list::length(bytes)` (which proves the
+# read, so no IndexNotFound reaches uriEscape), and the new `i < 0` is one
+# more Int comparison on the untyped parameter i -- one representation
+# blocker, one kind guard. Guards still equal blockers.
+
 test native-report-inlined-leaf-1 {native::report accepts an ordinary uriEscape call, directly and through an untyped wrapper, and Emailish?(5)} -body {
     lmap prog [list \
         $uriEscapeCall \
@@ -65,7 +72,7 @@ test native-report-inlined-leaf-1 {native::report accepts an ordinary uriEscape 
         {{call {ref Emailish?} {const 5}}}] {
         reportCounts [hir::build $prog -strict 0]
     }
-} -result {{10 10 0 0 0} {11 11 0 0 0} {0 0 0 0 1}}
+} -result {{11 11 0 0 0} {12 12 0 0 0} {0 0 0 0 1}}
 
 test native-report-inlined-leaf-2 {web.bot's high_nibble owns the two inlined bit_and guards and their two blockers} -body {
     set lowered [native::lowered [hir::build $uriEscapeCall -strict 0] -specialize 0]
@@ -84,13 +91,13 @@ test native-report-inlined-leaf-3 {inlining moves guards and blockers together: 
                 set info
             }]]
     }
-} -result {{10 10 0} {10 10 2}}
+} -result {{11 11 0} {11 11 2}}
 
 test native-report-inlined-leaf-4 {a leaf of an unproven argument inlined into the program, into a generic instance under specialization, and twice on one register} -body {
     lmap text {
         "fn inc(x):\n    x + 1\n\ninc(41)"
-        "fn inc(x):\n    x + 1\n\nfn twice(y):\n    inc(inc(y))\n\nfs = \[twice\]\nlist_get(fs, 0)(4)"
-        "fn mix(a, b):\n    bit_and(bit_or(a, b), 255)\n\nfn h(p):\n    mix(p, p)\n\nfs = \[h\]\nlist_get(fs, 0)(7)"
+        "fn inc(x):\n    x + 1\n\nfn twice(y):\n    inc(inc(y))\n\nfs = \[twice\]\nlist::at(fs, 0)(4)"
+        "fn mix(a, b):\n    bit_and(bit_or(a, b), 255)\n\nfn h(p):\n    mix(p, p)\n\nfs = \[h\]\nlist::at(fs, 0)(7)"
     } {
         reportCounts [sourceHir $text]
     }
@@ -111,6 +118,6 @@ test native-report-inlined-leaf-5 {the example and benchmark programs that call 
         }
         list [file tail $path] {*}[reportCounts $hir]
     }
-} -result {{05-refined-strings.ir 20 20 1 1 1} {06-refined-strings.hir 21 21 1 1 1} {14-modules.bot 2 2 0 0 0} {uri-steady.bot 13 13 0 0 0}}
+} -result {{05-refined-strings.ir 21 21 1 1 1} {06-refined-strings.hir 22 22 1 1 1} {14-modules.bot 2 2 0 0 0} {uri-steady.bot 14 14 0 0 0}}
 
 cleanupTests

@@ -53,11 +53,11 @@ pub const SURROGATE_HI: u32 = 0xDFFF;
 /// element count (`Vm::new_str`/`new_str_known`/`new_list`): a String/List
 /// longer than this is rejected with a RANGE error at construction, rather
 /// than merely relying on the allocator to fail first. This is what makes
-/// `length`/`list_length`'s `-result-range collection-length` metadata
+/// `str::length`/`list::length`'s `-result-range collection-length` metadata
 /// (core/native.tcl, consumed by hir/range.tcl) an actual checked runtime
 /// contract instead of an assumption: every reachable String/List length is
 /// guaranteed to fit the small-Int representation (SMALL_MAX above), so
-/// `length(xs)`/`list_length(xs)` can never itself need a BigInt result.
+/// `str::length(s)`/`list::length(xs)` can never itself need a BigInt result.
 /// Set equal to SMALL_MAX (not some smaller, more "obviously safe" value):
 /// the guarantee this milestone needs is exactly "fits a small Int", and
 /// picking anything smaller would reject collections the small-Int range
@@ -178,7 +178,7 @@ pub fn is_canonical_ascii_word(w: u64) -> bool {
 /// (`Vec`'s fields are private and its layout unspecified). `len`/`ptr` have
 /// known, `#[repr(C)]` offsets (`LIST_LEN_OFFSET`/`LIST_PTR_OFFSET`) so
 /// Cranelift-generated code can load a List's length and index its elements
-/// directly, without a runtime call (codegen::clif's `list_get`). Backed by
+/// directly, without a runtime call (codegen::clif's `list::at`). Backed by
 /// a `Box<[Value]>` (`Box::into_raw`/`Box::from_raw`, freed in
 /// `heap::free_object`), sound because a List is never mutated after
 /// construction (this module's header) -- `len`/`ptr` are set once, at
@@ -244,7 +244,7 @@ impl SetObj {
 /// A MutableArray: fixed-capacity, explicitly mutable indexed storage. Every
 /// slot is a program value (initialized to UNIT at allocation: see
 /// Vm::new_mutarray), never uninitialized memory. Unlike ListObj, SLOTS is
-/// mutated in place by mutable_array_set/mutable_array_copy; its length
+/// mutated in place by mutable_array::set/mutable_array::copy; its length
 /// (`slots.len()`) is its fixed capacity and never changes after allocation
 /// (see the module-level "no hidden resizing" invariant in ops.rs).
 #[repr(C)]

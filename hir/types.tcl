@@ -71,8 +71,8 @@
 # bounded (see MakeList/MakeSet), so analyses over them terminate.
 #
 # Exact value facts (EXACT-VALUE-FACTS.md, hir/exactvalue.tcl) are a
-# separate, ephemeral channel and never a type: `list_get` of a List the
-# compiler knows exactly (a literal, an immutable alias of one, list_append
+# separate, ephemeral channel and never a type: `list::at` of a List the
+# compiler knows exactly (a literal, an immutable alias of one, list::append
 # of one, bounded by shapeLength/aggregateDepth) at an exactly known index
 # gets the selected element's own type in *ordinary* inference too, and a
 # comparison of two exactly known operands is decided (`known`). The List's
@@ -1337,7 +1337,7 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result} {
         }
         immutable-set {
             # List[T] -> ImmutableSet[T] (MINIMAL-IMMUTABLE-SET.md item 24):
-            # immutable_set_from_list's own -result-shape. Generic over T
+            # immutable_set::from_list's own -result-shape. Generic over T
             # exactly the way `element`/`append` above are generic over a
             # List's own element type -- no ImmutableSet-specific inference
             # code beyond this one shape case, reusing the same elementOf
@@ -1388,7 +1388,7 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result} {
             # {typed NAME LO HI}: this native's result is a List whose
             # every element is an Int in LO..HI -- a fixed, argument-
             # independent semantic fact about the native itself (e.g.
-            # encode_utf8's every UTF-8 code unit is definitionally in
+            # str::encode_utf8's every UTF-8 code unit is definitionally in
             # 0..255, STATIC-COMPLETION-PROOFS.md), not something derived
             # from this call's own arguments the way `element`/`append`/
             # `immutable-set` above are. NAME is resolved here, lazily,
@@ -1404,7 +1404,7 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result} {
             # denote an unrelated or narrower domain in a different
             # compiling program (SYMBOLIC-TYPE-IDENTITY.md's own
             # motivating example: a program-local `type Byte = Int in
-            # 0..15` must not make encode_utf8's result List[Byte] just
+            # 0..15` must not make str::encode_utf8's result List[Byte] just
             # because "Byte" happens to resolve). So NAME's resolved type
             # is validated against the native's own LO..HI guarantee with
             # hir::range::ProvesType -- the same admissibility check a
@@ -1438,7 +1438,7 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result} {
             # values directly (never display text), so the mismatch
             # silently rejected every call passing this native's result to a
             # declared List[NAME] parameter (M7A-INSTANCE-SELECTION-THEOREM-
-            # AUDIT.md's encode_utf8/List[Byte] finding).
+            # AUDIT.md's str::encode_utf8/List[Byte] finding).
             return [MakeList $resolved]
         }
     }
@@ -1806,7 +1806,29 @@ proc hir::types::Handle {hirVar ctxVar e} {
     # binding, so CALLTYPE alone is T, never a lub of the handlers' types.
     dict set hir exprs $e handlerTypes $handlerTypes
     if {$callType ne "never"} {
-        return $callType
+        # hir/completions.tcl's admissibility check holds every live
+        # handler to CALLTYPE in the generic analysis, which is what makes
+        # CALLTYPE alone the construct's type there. A semantic instance can
+        # type the call more precisely than its handlers, though: in
+        # `fn explicit(xs, i, d): v = list::at(xs, i): on IndexNotFound: d`
+        # (lib/list.bot's list::get), the generic call is `any` and `d` is
+        # admissible, but the instance for (List[int], int, str) types the
+        # call int while `d` is a str. Claiming int there is unsound (native
+        # code compared two such results with an Int equality and crashed),
+        # so a handler type that is not a subtype of CALLTYPE widens the
+        # result to their join -- except between two Int-domain types,
+        # whose difference is a value-range admissibility question the
+        # range proofs answer, never a representation one. No program the
+        # generic check accepts changes type in the generic analysis.
+        set result $callType
+        foreach t $handlerTypes {
+            if {$t eq "never" || [subtype $t $callType]
+                    || ([kindOf $t] eq "int" && [kindOf $callType] eq "int")} {
+                continue
+            }
+            set result [lub $result $t]
+        }
+        return $result
     }
     set result never
     foreach t $handlerTypes {
@@ -2005,7 +2027,7 @@ proc hir::types::Call {hirVar ctxVar e} {
                 # inference; it now also runs here, in ordinary whole-
                 # program semantic inference, which is exactly what lets an
                 # ordinary List construction/element-read
-                # (list/list_get/list_append, core/lists.tcl,
+                # (list/list::at/list::append, core/lists.tcl,
                 # core/primitives.tcl) carry or recover a concrete List[T]
                 # applied type with no List-specific inference code of its
                 # own (MINIMAL-APPLIED-LIST-TYPES.md).

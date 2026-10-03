@@ -130,12 +130,12 @@ set rawGetpid {fn raw_getpid():
 # ---------------------------------------------------------------------------
 # Namespaces and registration
 
-test linux-syscall-native-registered {linux::abi::syscall is one root native under its qualified name: arity 1, a struct argument, a Register64 result shape, no declared errors, never context-free} -body {
+test linux-syscall-native-registered {linux::abi::syscall is one root native under its qualified name: arity 1, a struct argument, a Register64 result shape, no declared errors, never context-free; the only qualified native outside the standard value-family namespaces (STDLIB-NAMESPACES.md)} -body {
     set meta [core::native::metadata linux::abi::syscall]
     list [dict get $meta arity] [dict get $meta paramTypes] [dict get $meta resultType] \
         [dict get $meta resultShape] [dict get $meta errors] [dict get $meta contextFree] \
         [dict get $meta runtime] [core::native::isQualifiedNative linux::abi::syscall] \
-        [lsearch -all -inline [core::native::names] *::*]
+        [lsearch -all -inline -not -regexp [lsearch -all -inline [core::native::names] *::*] {^(list|str|char|mutable_array|immutable_set)::}]
 } -result {1 struct struct {named-struct abi::x86_64::Register64} {} 0 raw-syscall 1 linux::abi::syscall}
 
 test linux-syscall-no-syscall-specific-intrinsics {the compiler knows the transport, not syscalls: no getpid/write/read/open native, no other linux or abi native} -body {
@@ -316,7 +316,7 @@ test linux-syscall-module-cannot-shadow-the-native {a linux::abi module may not 
         close $channel
         set ::core::libraryDir $dir
         catch {syscallHir "linux::abi::helper()"} message options
-        list [dict get $options -errorcode] [string match {*cannot define "syscall": linux::abi::syscall is a root native*} $message]
+        list [dict get $options -errorcode] [string match {*cannot define "syscall": linux::abi::syscall is a compiler-provided intrinsic (a root native registered under that qualified name)*} $message]
     } finally {
         set ::core::libraryDir $saved
         removeDirectory linux-syscall-shadow
@@ -412,7 +412,7 @@ test linux-syscall-standalone-getpid-is-its-pid {a standalone executable prints 
 } -result {1 1 1}
 
 test linux-syscall-gc-stress {every allocation site collecting (GC stress) changes nothing: syscall results transported virtually, materialized in a List, or BigInt register words} -constraints linuxX86_64 -body {
-    set text "${::rawGetpid}fn stored():\n    \[linux::abi::syscall({rax: abi::x86_64::register64(39), rdi: abi::x86_64::register64(0 - 9223372036854775807 - 1), r9: abi::x86_64::register64(9223372036854775807)})\]\na = raw_getpid()\nxs = stored()\nb = abi::x86_64::to_int(list_get(xs, 0))\nbig = abi::x86_64::to_int(abi::x86_64::register64(9223372036854775807))\n\[a == b, a > 0, big\]"
+    set text "${::rawGetpid}fn stored():\n    \[linux::abi::syscall({rax: abi::x86_64::register64(39), rdi: abi::x86_64::register64(0 - 9223372036854775807 - 1), r9: abi::x86_64::register64(9223372036854775807)})\]\na = raw_getpid()\nxs = stored()\nr = list::at(xs, 0):\n    on IndexNotFound:\n        abi::x86_64::register64(0)\nb = abi::x86_64::to_int(r)\nbig = abi::x86_64::to_int(abi::x86_64::register64(9223372036854775807))\n\[a == b, a > 0, big\]"
     set plain [agree $text $::nativeBackends]
     underGcStress {set stressed [agree $text $::nativeBackends]}
     list $plain [expr {$plain eq $stressed}]
@@ -439,7 +439,7 @@ fn discarded():
     7
 
 a = raw_getpid()
-s = list_get(\[linux::abi::syscall({rax: abi::x86_64::register64(39)})\], 0)
+s = list::at(\[linux::abi::syscall({rax: abi::x86_64::register64(39)})\], 0)
 \[a == abi::x86_64::to_int(sys1(abi::x86_64::register64(39))), a == via_local(), a == via_struct_var(), twice_used(), a == abi::x86_64::to_int(s), discarded()\]" $::nativeBackends
 } -result {[true, true, true, 0, true, 7]}
 

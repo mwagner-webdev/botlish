@@ -82,7 +82,7 @@ set aibench::families {
 }
 
 # SENTENCE repeated and truncated to exactly N Unicode characters (Tcl 9's
-# [string length] counts scalar values, matching Botlish's length() --
+# [string length] counts scalar values, matching Botlish's str::length() --
 # README's introduction).
 proc aibench::fixture {sentence n} {
     set repeated [string repeat $sentence [expr {$n / [string length $sentence] + 1}]]

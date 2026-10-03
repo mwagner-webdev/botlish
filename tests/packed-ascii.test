@@ -173,7 +173,7 @@ test pa-plan-literal-join-is-packed {fn mix(flag): "ab" or "cdefgh": two ASCII l
             else:
                 "cdefgh"
 
-        [length(mix(true)), mix(false) == "cdefgh"]
+        [str::length(mix(true)), mix(false) == "cdefgh"]
     }
     list [kindPlan $text {*}$noInline] [planFacts $text mix<bool> {*}$noInline]
 } -result {mix<bool>=val>ascii {over:not-string {2 6 1 {}} not-string {}}}
@@ -183,13 +183,13 @@ test pa-plan-eight-characters-are-the-limit {exactly 8 ASCII characters are pack
         fn id(s):
             s
 
-        [id("12345678"), length(id("12345678"))]
+        [id("12345678"), str::length(id("12345678"))]
     }
     set nine {
         fn id(s):
             s
 
-        [id("123456789"), length(id("123456789"))]
+        [id("123456789"), str::length(id("123456789"))]
     }
     list [kindPlan $eight {*}$noInline] [kindPlan $nine {*}$noInline] [lindex [planFacts $nine id<str> {*}$noInline] 2]
 } -result {id<str>=ascii>ascii id<str>=val>val length-gt-8}
@@ -197,7 +197,7 @@ test pa-plan-eight-characters-are-the-limit {exactly 8 ASCII characters are pack
 test pa-plan-parameter-transport {a closed helper whose String parameter is fed only ASCII literals of at most 8 characters has a packed parameter} -body {
     set text {
         fn probe(s):
-            [length(s), s == "ab", s == ""]
+            [str::length(s), s == "ab", s == ""]
 
         [probe("ab"), probe(""), probe("abcdefgh")]
     }
@@ -212,7 +212,7 @@ test pa-plan-unicode-multi-character-stays-tagged {"ab" or "λμ": a multi-chara
             else:
                 "λμ"
 
-        length(mix(true))
+        str::length(mix(true))
     }
     list [kindPlan $text {*}$noInline] [planFacts $text mix<bool> {*}$noInline]
 } -result {mix<bool>=val>val {over:not-string over:unicode not-string not-ascii-multi}}
@@ -225,7 +225,7 @@ test pa-plan-ascii-and-unicode-one-character-is-the-scalar-tier {"a" or "λ": th
             else:
                 "λ"
 
-        [length(pick(true)), pick(false) == "λ"]
+        [str::length(pick(true)), pick(false) == "λ"]
     }
     kindPlan $text {*}$noInline
 } -result {pick<bool>=val>short}
@@ -275,7 +275,7 @@ test pa-plan-ascii-pack-switch {-ascii-pack-opt 0 turns the packed tier off: one
             else:
                 ""
 
-        [length(mix(true)), length(one(true))]
+        [str::length(mix(true)), str::length(one(true))]
     }
     list [kindPlan $text {*}$noInline] [kindPlan $text {*}$noInline -ascii-pack-opt 0] [kindPlan $text {*}$noInline -short-string-opt 0]
 } -result {{mix<bool>=val>ascii one<bool>=val>ascii} {mix<bool>=val>val one<bool>=val>short} {mix<bool>=val>val one<bool>=val>val}}
@@ -283,9 +283,9 @@ test pa-plan-ascii-pack-switch {-ascii-pack-opt 0 turns the packed tier off: one
 test pa-plan-concatenation-is-not-a-packed-producer {concat of packed parameters is a tagged String: no length inference is invented for it} -body {
     set text {
         fn cat(a, b):
-            concat(a, b)
+            str::concat(a, b)
 
-        length(cat("ab", "cd"))
+        str::length(cat("ab", "cd"))
     }
     kindPlan $text {*}$noInline
 } -result {{cat<str, str>=ascii,ascii>val}}
@@ -301,7 +301,7 @@ test pa-plan-open-instance-stays-tagged {a function whose value escapes keeps th
         fn apply(f, x):
             f(x)
 
-        [apply(pick, true), length(pick(false))]
+        [apply(pick, true), str::length(pick(false))]
     }
     lrange [planFacts $text pick<generic> {*}$noInline] 2 3
 } -result {not-string open-instance}
@@ -324,7 +324,7 @@ test pa-plan-dead-long-branch-does-not-poison {a branch the existing range analy
 
 test pa-nir-packed-constants {the packed words of "", "a", "ab", NUL and a full 8-character String are asciilit constants: byte i = 0x80 | c} -body {
     set nul [format %c 0]
-    set text "fn id(s):\n    s\n\n\[length(id(\"\")), length(id(\"a\")), length(id(\"ab\")), length(id(\"$nul\")), length(id(\"abcdefgh\"))\]"
+    set text "fn id(s):\n    s\n\n\[str::length(id(\"\")), str::length(id(\"a\")), str::length(id(\"ab\")), str::length(id(\"$nul\")), str::length(id(\"abcdefgh\"))\]"
     set program [fnText [nirOf $text {*}$noInline] <program>]
     lsort -unique [regexp -all -inline {asciilit -?\d+} $program]
 } -result {{asciilit -1664107662228069663} {asciilit 0} {asciilit 128} {asciilit 225} {asciilit 58081}}
@@ -332,7 +332,7 @@ test pa-nir-packed-constants {the packed words of "", "a", "ab", NUL and a full 
 test pa-nir-packed-physical-kind-is-not-rawint-or-short {asciiregs, never rawregs or shortregs: three distinct kinds even though all are an i64} -body {
     set text {
         fn probe(s):
-            [length(s), s == "ab"]
+            [str::length(s), s == "ab"]
 
         [probe("ab"), probe("")]
     }
@@ -344,7 +344,7 @@ test pa-nir-packed-physical-kind-is-not-rawint-or-short {asciiregs, never rawreg
 test pa-nir-length-and-equality-are-scalar {length of a packed value is asciilen, equality asciieq: no strlen / streq} -body {
     set text {
         fn probe(s):
-            [length(s), s == "ab", s == ""]
+            [str::length(s), s == "ab", s == ""]
 
         [probe("ab"), probe("")]
     }
@@ -356,7 +356,7 @@ test pa-nir-literal-materializes-to-a-constant {a packed local bound to a litera
     set text {
         fn keep(xs):
             s = "hello"
-            [length(s), list_append(xs, s)]
+            [str::length(s), list::append(xs, s)]
 
         keep([])
     }
@@ -367,7 +367,7 @@ test pa-nir-literal-materializes-to-a-constant {a packed local bound to a litera
 test pa-nir-runtime-value-materializes-by-unpacking {a packed value that is only known at run time materializes with one asciitostr at the tagged use} -body {
     set text {
         fn keep(xs, s):
-            list_append(xs, s)
+            list::append(xs, s)
 
         [keep([], "ab"), keep([], "cd")]
     }
@@ -375,10 +375,10 @@ test pa-nir-runtime-value-materializes-by-unpacking {a packed value that is only
     list [asciiParams $keep] [countIn {op asciitostr} $keep] [parity $text]
 } -result {1 1 {value:[["ab"], ["cd"]]}}
 
-test pa-nir-mixed-use-materializes-once {length(s) is scalar; two tagged uses of the same packed parameter share one materialization} -body {
+test pa-nir-mixed-use-materializes-once {str::length(s) is scalar; two tagged uses of the same packed parameter share one materialization} -body {
     set text {
         fn mixed(s, xs):
-            [length(s), list_append(xs, s), list_append(xs, s)]
+            [str::length(s), list::append(xs, s), list::append(xs, s)]
 
         mixed("xyz", [])
     }
@@ -394,7 +394,7 @@ test pa-nir-tier-widening-is-one-conversion {a packed value joining a ShortStrin
             else:
                 "λ"
 
-        [widen("a", true), widen("b", false), length(widen("b", true))]
+        [widen("a", true), widen("b", false), str::length(widen("b", true))]
     }
     set nir [nirOf $text {*}$noInline]
     set widen [fnText $nir widen]
@@ -407,7 +407,7 @@ test pa-nir-mixed-equality-uses-the-sentinel-op {a packed value against a ShortS
             a == b
 
         fn slice(t, i):
-            substring(t, i, i + 1)
+            str::substring(t, i, i + 1)
 
         [same("a", slice("äa", 1)), same("ab", slice("ab", 0)), same("", slice("ab", 0)), same("a", slice("äa", 0))]
     }
@@ -424,7 +424,7 @@ test pa-nir-disabled-reproduces-the-tagged-strings {-short-string-opt 0 emits no
                 "λ"
 
         fn probe(s):
-            [length(s), s == "ab"]
+            [str::length(s), s == "ab"]
 
         [probe(mix(true)), probe("zz")]
     }
@@ -435,7 +435,7 @@ test pa-nir-disabled-reproduces-the-tagged-strings {-short-string-opt 0 emits no
 test pa-nir-env-switches {BOTLISH_NATIVE_SHORT_STRING_OPT=0 and BOTLISH_NATIVE_ASCII_PACK_OPT=0 are the same switches} -body {
     set text {
         fn probe(s):
-            [length(s), s == "ab"]
+            [str::length(s), s == "ab"]
 
         [probe("ab"), probe("")]
     }
@@ -461,7 +461,7 @@ test pa-nir-env-switches {BOTLISH_NATIVE_SHORT_STRING_OPT=0 and BOTLISH_NATIVE_A
 test pa-length-of-every-size {the length of an ASCII String of 0..8 characters (and 9, 12) through a closed helper: (71 - clz) >> 3} -body {
     parity {
         fn size(s):
-            length(s)
+            str::length(s)
 
         [size(""), size("a"), size("ab"), size("abc"), size("abcd"), size("abcde"), size("abcdef"), size("abcdefg"), size("abcdefgh"), size("abcdefghi"), size("abcdefghijkl")]
     }
@@ -473,7 +473,7 @@ test pa-nul-del-and-high-ascii {NUL is a present byte (never "absent"), DEL (0x7
     set c1 [format %c 0x80]
     parity "
         fn size(s):
-            length(s)
+            str::length(s)
 
         fn same(a, b):
             a == b
@@ -505,7 +505,7 @@ test pa-join-and-alias-stay-packed {a packed value through a branch join and ali
             x = pick(flag)
             y = x
             z = y
-            [length(z), z == "yes", z == "no"]
+            [str::length(z), z == "yes", z == "no"]
 
         [alias(true), alias(false)]
     }
@@ -522,7 +522,7 @@ test pa-chain-is-one-continuous-region {pick -> f -> g -> h forwards a packed va
                 "word"
 
         fn h(s):
-            [length(s), s == "word", s == ""]
+            [str::length(s), s == "word", s == ""]
 
         fn g(s):
             h(s)
@@ -590,7 +590,7 @@ test pa-error-capable-result {an error-capable function with a packed success re
                     "caught"
             r
 
-        [run(-1), run(0), run(3), length(run(0)), run(0) == ""]
+        [run(-1), run(0), run(3), str::length(run(0)), run(0) == ""]
     }
     set nir [nirOf $text {*}$noInline]
     list [asciiResult [fnText $nir guarded]] [parity $text]
@@ -610,7 +610,7 @@ test pa-error-capable-with-handler-in-the-caller {a handler around a packed-resu
             r = guarded(n):
                 on Bad:
                     "handled"
-            [r, length(r)]
+            [r, str::length(r)]
 
         [run(0), run(-1)]
     }
@@ -625,7 +625,7 @@ test pa-storage-and-general-operations-materialize {storage (List), concat, lowe
                 "ABC"
 
         xs = [pick(true), pick(false)]
-        [xs, list_length(xs), concat(pick(false), "!"), lowercase(pick(false)), hash(pick(false)) == hash("ABC")]
+        [xs, list::length(xs), str::concat(pick(false), "!"), str::lowercase(pick(false)), hash(pick(false)) == hash("ABC")]
     }
 } -result {value:[["", "ABC"], 2, "ABC!", "abc", true]}
 
@@ -634,7 +634,7 @@ test pa-equality-with-an-unrestricted-string-materializes {a packed String compa
         fn same(s, t):
             s == t
 
-        [same("ab", concat("a", "b")), same("", concat("", "")), same("ab", concat("a", "bc"))]
+        [same("ab", str::concat("a", "b")), same("", str::concat("", "")), same("ab", str::concat("a", "bc"))]
     }
     set same [fnText [nirOf $text {*}$noInline] same]
     list [parity $text] [countIn {op asciitostr} $same] [countIn {op streq} $same]
@@ -666,7 +666,7 @@ test pa-capture-materializes {a packed local captured by a closure is stored in 
         fn captured(flag):
             s = pick(flag)
             fn add(x):
-                concat(s, x)
+                str::concat(s, x)
             add("!")
 
         [captured(true), captured(false)]
@@ -687,10 +687,10 @@ test pa-struct-field-and-mutable-array-materialize {a packed String stored in a 
 
         fn store(flag):
             p = Pair {left: pick(flag), right: 1}
-            a = mutable_array_allocate(2)
-            mutable_array_set(a, 0, pick(flag))
-            mutable_array_set(a, 1, "z")
-            [p.left, length(p.left), mutable_array_get(a, 0), mutable_array_get(a, 1) == "z"]
+            a = mutable_array::allocate(2)
+            mutable_array::set(a, 0, pick(flag))
+            mutable_array::set(a, 1, "z")
+            [p.left, str::length(p.left), mutable_array::at(a, 0), mutable_array::at(a, 1) == "z"]
 
         [store(true), store(false)]
     }
@@ -703,7 +703,7 @@ test pa-toplevel-literal-is-passed-as-the-constant {a top-level literal binding 
         greeting = "hello"
 
         fn use():
-            [length(greeting), greeting == "hello"]
+            [str::length(greeting), greeting == "hello"]
 
         use()
     }
@@ -714,10 +714,10 @@ test pa-toplevel-literal-is-passed-as-the-constant {a top-level literal binding 
 test pa-unicode-model-is-untouched {the scalar tier still counts scalars, not bytes: U+00E9, U+20AC, an astral character} -body {
     parity {
         fn size(s):
-            length(s)
+            str::length(s)
 
         fn first(t):
-            substring(t, 0, 1)
+            str::substring(t, 0, 1)
 
         [size("é"), size("€"), size("😀"), first("é!") == "é", first("😀!") == "😀", size(first("x😀"))]
     }
@@ -726,10 +726,10 @@ test pa-unicode-model-is-untouched {the scalar tier still counts scalars, not by
 test pa-peek-traversal-keeps-its-shape {the String-traversal idiom over literal text: the text is a packed parameter, the character a ShortString1 slice of its materialization} -body {
     set text {
         fn peek(text, index):
-            if index >= length(text):
+            if index >= str::length(text):
                 return ""
 
-            substring(text, index, index + 1)
+            str::substring(text, index, index + 1)
 
         fn count_a(text, index, acc):
             c = peek(text, index)
@@ -764,10 +764,10 @@ test pa-gc-live-across-allocation {a packed value live across unrelated allocati
 
         fn work(s, xs):
             p = Pair {left: "keep", right: 7}
-            t = concat("a", "b")
-            u = list_append(xs, 1)
-            v = concat(t, t)
-            [length(s), s == "packed", length(v), list_length(u), p.left, p.right, s]
+            t = str::concat("a", "b")
+            u = list::append(xs, 1)
+            v = str::concat(t, t)
+            [str::length(s), s == "packed", str::length(v), list::length(u), p.left, p.right, s]
 
         [work(pick(false), [1, 2]), work(pick(true), [9])]
     }
@@ -788,11 +788,11 @@ test pa-gc-materialize-allocates-under-stress {materializing runtime packed valu
                 "cat"
 
         fn work(s):
-            first = list_append([], s)
-            filler = concat("x", "y")
-            second = list_append(first, s)
-            more = concat(filler, filler)
-            [first, second, length(more), s]
+            first = list::append([], s)
+            filler = str::concat("x", "y")
+            second = list::append(first, s)
+            more = str::concat(filler, filler)
+            [first, second, str::length(more), s]
 
         [work(pick(false)), work(pick(true))]
     }
@@ -814,10 +814,10 @@ test pa-gc-recursive-exact-call-transport {a packed parameter and result across 
 
         fn depth(n, s, acc):
             if n == 0:
-                length(acc)
+                str::length(acc)
             else:
-                t = concat(acc, "z")
-                depth(n - 1, step(n - 1), t) + length(s)
+                t = str::concat(acc, "z")
+                depth(n - 1, step(n - 1), t) + str::length(s)
 
         depth(200, step(1), "")
     }
@@ -838,8 +838,8 @@ test pa-gc-stack-map-has-no-packed-roots {the root report lists the packed regis
                 "word"
 
         fn work(s):
-            t = concat("a", "b")
-            [length(s), t]
+            t = str::concat("a", "b")
+            [str::length(s), t]
 
         work(pick(false))
     }
@@ -912,7 +912,7 @@ test pa-executable-everything {every tier, transport, a tagged frontier and an e
             s
 
         fn probe(s):
-            \[length(s), s == \"\", s == \"abcdefgh\", s == \"a${nul}b\"\]
+            \[str::length(s), s == \"\", s == \"abcdefgh\", s == \"a${nul}b\"\]
 
         fn glyph(flag):
             if flag:
@@ -921,9 +921,9 @@ test pa-executable-everything {every tier, transport, a tagged frontier and an e
                 \"\"
 
         fn first(t):
-            substring(t, 0, 1)
+            str::substring(t, 0, 1)
 
-        \[probe(fwd(pick(0))), probe(fwd(pick(1))), probe(fwd(pick(2))), probe(fwd(pick(3))), run(2), run(8), list_append(\[pick(2)\], pick(0)), length(glyph(true)), first(\"ä€\") == \"ä\"\]
+        \[probe(fwd(pick(0))), probe(fwd(pick(1))), probe(fwd(pick(2))), probe(fwd(pick(3))), run(2), run(8), list::append(\[pick(2)\], pick(0)), str::length(glyph(true)), first(\"ä€\") == \"ä\"\]
     "
 } -result "\[\[0, true, false, false\], \[1, false, false, false\], \[8, false, true, false\], \[3, false, false, true\], \"abcdefgh\", \"bad\", \[\"abcdefgh\", \"\"\], 1, true\]"
 
@@ -938,7 +938,7 @@ test pa-executable-options-off {the same executable with -short-string-opt 0 and
         fn fwd(s):
             s
 
-        [length(fwd(pick(true))), length(fwd(pick(false))), fwd(pick(false)) == "yes"]
+        [str::length(fwd(pick(true))), str::length(fwd(pick(false))), fwd(pick(false)) == "yes"]
     }
     list [aotParity $text {-short-string-opt 0}] [aotParity $text {-ascii-pack-opt 0}]
 } -result {{[0, 3, true]} {[0, 3, true]}}
@@ -955,7 +955,7 @@ test pa-deterministic-plan-and-nir {fixed source and configuration give byte-ide
                 "word"
 
         fn h(s):
-            [length(s), s == "word"]
+            [str::length(s), s == "word"]
 
         [h(pick(true)), h(pick(false))]
     }
@@ -983,7 +983,7 @@ set auditSource {
         s = choose(flag)
         t = "this is a long string"
         u = "λ"
-        [length(s), s == "word", list_append(xs, s), t, u]
+        [str::length(s), s == "word", list::append(xs, s), t, u]
 
     probe(true, [])
 }
@@ -1000,7 +1000,7 @@ test pa-audit-explains-the-tiers {the audit names the tier, the proven length an
         "production: result of choose<bool>"
         "length -> scalar"
         "equality -> scalar"
-        "list_append -> materialize"
+        "list::append -> materialize"
         "proven character length: unproven (more than 8 characters)"
         "physical representation: tagged String (length-gt-8)"
         "physical representation: ShortString1 (local)"

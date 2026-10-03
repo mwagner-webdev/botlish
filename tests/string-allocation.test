@@ -105,21 +105,21 @@ proc stringsOf {text args} { return [dict get [lindex [census $text {*}$args] 0]
 # (1) Structural allocation facts
 
 test strings-one-object-no-text-buffer {a dynamic String is one allocation: one object, header plus text, and no text buffer exists to count} -body {
-    set c [census {concat("a", "b")}]
+    set c [census {str::concat("a", "b")}]
     set s [lindex $c 0]
     list [dict get $s objects] [dict get $s heapAllocations] [dict get $s textBufferAllocations] \
         [dict get $s textBufferFrees] [dict get $s bytes]
 } -result {1 1 0 0 27}
 
 test strings-header-is-32-bytes {the fixed header is 25 bytes (it was 40: header plus Box<str> fat pointer); allocatedBytes = 25 + UTF-8 bytes} -body {
-    set k [lindex [census {concat("ab", "…")}] 1]
+    set k [lindex [census {str::concat("ab", "…")}] 1]
     list [dict get $k allocations] [dict get $k headerBytes] [dict get $k payloadBytes] [dict get $k allocatedBytes]
 } -result {1 25 5 30}
 
 test strings-bytes-are-header-plus-utf8 {every dynamic String is 25 header bytes plus its UTF-8 length, for 1-, 2-, 3- and 4-byte scalars} -body {
     set out {}
     foreach {a b} {a b é é … … 😀 😀} {
-        set k [lindex [census "concat(\"$a\", \"$b\")"] 1]
+        set k [lindex [census "str::concat(\"$a\", \"$b\")"] 1]
         lappend out [dict get $k allocations] [dict get $k allocatedBytes]
     }
     set out
@@ -127,7 +127,7 @@ test strings-bytes-are-header-plus-utf8 {every dynamic String is 25 header bytes
 
 test strings-hundred-byte-string-is-one-block {a 100-byte String is one allocation of 125 bytes} -body {
     set half [string repeat x 50]
-    set k [lindex [census "concat(\"$half\", \"$half\")"] 1]
+    set k [lindex [census "str::concat(\"$half\", \"$half\")"] 1]
     list [dict get $k allocations] [dict get $k allocatedBytes]
 } -result {1 125}
 
@@ -141,27 +141,27 @@ test strings-constants-allocate-nothing-at-run-time {literals (empty, one char, 
 test strings-empty-results-reuse-the-canonical-empty {a dynamic empty String (empty substring) is the canonical static empty: zero allocations, counted as a reuse} -body {
     set s [stringsOf {
         fn cut(s, i):
-            substring(s, i, i)
+            str::substring(s, i, i)
 
-        cut(concat("a", "bc"), 2)
+        cut(str::concat("a", "bc"), 2)
     }]
     list [dict get $s objects] [dict get $s emptyReused]
 } -result {1 1}
 
 test strings-concat-is-one-object-whatever-the-width {a nested concat is one flat construct (virtual construction: one String, no intermediate); ASCII and non-ASCII substrings each allocate one String} -body {
     list \
-        [dict get [stringsOf {concat(concat("é", "x"), "…")}] objects] \
+        [dict get [stringsOf {str::concat(str::concat("é", "x"), "…")}] objects] \
         [dict get [stringsOf {
             fn cut(s):
-                substring(s, 1, 4)
+                str::substring(s, 1, 4)
 
-            cut(concat("hello", "world"))
+            cut(str::concat("hello", "world"))
         }] objects] \
         [dict get [stringsOf {
             fn cut(s):
-                substring(s, 1, 4)
+                str::substring(s, 1, 4)
 
-            cut(concat("a😀…", "éz"))
+            cut(str::concat("a😀…", "éz"))
         }] objects]
 } -result {1 2 2}
 
@@ -171,9 +171,9 @@ test strings-frees-match-objects {after the run, the cleanup collection frees ex
             if n == 0:
                 acc
             else:
-                grow(n - 1, concat(acc, "é"))
+                grow(n - 1, str::concat(acc, "é"))
 
-        length(grow(50, concat("a", "b")))
+        str::length(grow(50, str::concat("a", "b")))
     }] summary 2]
     set s [dict get $report byKind String]
     list [dict get $report strings textBufferFrees] [expr {[dict get $s reclaimedObjects] == [dict get $s allocations]}]
@@ -185,9 +185,9 @@ test strings-large-string-is-one-block {a megabyte-scale String is still one all
             if n == 0:
                 s
             else:
-                dbl(n - 1, concat(s, s))
+                dbl(n - 1, str::concat(s, s))
 
-        length(dbl(20, "x"))
+        str::length(dbl(20, "x"))
     }]
     dict get $s objects
 } -result 20
@@ -198,11 +198,11 @@ test strings-large-string-bytes {the bytes of the doubling chain are exactly the
             if n == 0:
                 s
             else:
-                dbl(n - 1, concat(s, s))
+                dbl(n - 1, str::concat(s, s))
 
-        length(dbl(10, concat("x", "x")))
+        str::length(dbl(10, str::concat("x", "x")))
     }]
-    # concat("x","x") is 2 bytes; ten doublings: 4, 8, ..., 2048.
+    # str::concat("x","x") is 2 bytes; ten doublings: 4, 8, ..., 2048.
     set bytes 27
     for {set i 2} {$i <= 11} {incr i} { incr bytes [expr {25 + (1 << $i)}] }
     list [dict get $s objects] [expr {[dict get $s bytes] == $bytes}]
@@ -238,10 +238,10 @@ test strings-parity-unicode-classes {ASCII, Latin-1, ellipsis, BMP, astral, comb
     set nul [format %c 0]
     parity "
         fn probe(s):
-            \[length(s), s == \"\", concat(s, \"!\"), substring(concat(s, \"x\"), 0, 1)\]
+            \[str::length(s), s == \"\", str::concat(s, \"!\"), str::substring(str::concat(s, \"x\"), 0, 1)\]
 
         \[probe(\"a\"), probe(\"é\"), probe(\"…\"), probe(\"猫\"), probe(\"😀\"), probe(\"é\"), probe(\"$nul\"), probe(\"\"),
-         probe(concat(\"😀\", \"…\"))\]
+         probe(str::concat(\"😀\", \"…\"))\]
     "
 } -result "value:\[\[1, false, \"a!\", \"a\"\], \[1, false, \"é!\", \"é\"\], \[1, false, \"…!\", \"…\"\], \[1, false, \"猫!\", \"猫\"\], \[1, false, \"😀!\", \"😀\"\], \[2, false, \"e\u0301!\", \"e\"\], \[1, false, \"\u0000!\", \"\u0000\"\], \[0, true, \"!\", \"x\"\], \[2, false, \"😀…!\", \"😀\"\]\]"
 
@@ -249,17 +249,17 @@ test strings-parity-nul-is-one-character {NUL is a one-character String of one z
     set nul [format %c 0]
     parity "
         fn n(s):
-            \[length(s), s == \"\", s == \"$nul\", length(concat(s, s))\]
+            \[str::length(s), s == \"\", s == \"$nul\", str::length(str::concat(s, s))\]
 
-        \[n(\"$nul\"), n(concat(\"$nul\", \"\")), n(substring(concat(\"a$nul\", \"b\"), 1, 2))\]
+        \[n(\"$nul\"), n(str::concat(\"$nul\", \"\")), n(str::substring(str::concat(\"a$nul\", \"b\"), 1, 2))\]
     "
 } -result {value:[[1, false, true, 2], [1, false, true, 2], [1, false, true, 2]]}
 
 test strings-parity-substring-boundaries {substring at 0, at the end, empty and full, over ASCII and non-ASCII bases, including multi-byte slices} -body {
     parity {
         fn cuts(s):
-            n = length(s)
-            [substring(s, 0, 0), substring(s, 0, n), substring(s, n, n), substring(s, 1, n), substring(s, 0, n - 1)]
+            n = str::length(s)
+            [str::substring(s, 0, 0), str::substring(s, 0, n), str::substring(s, n, n), str::substring(s, 1, n), str::substring(s, 0, n - 1)]
 
         [cuts("hello"), cuts("a😀…é"), cuts("é")]
     }
@@ -271,17 +271,17 @@ test strings-parity-concat-shapes {concat chains of every width, accumulating a 
             if n == 0:
                 acc
             else:
-                build(n - 1, concat(concat("😀", acc), concat("é", "…")))
+                build(n - 1, str::concat(str::concat("😀", acc), str::concat("é", "…")))
 
         s = build(20, "")
-        [length(s), substring(s, 0, 4), substring(s, 56, 60), s == build(20, "")]
+        [str::length(s), str::substring(s, 0, 4), str::substring(s, 56, 60), s == build(20, "")]
     }
 } -result {value:[60, "😀😀😀😀", "é…é…", true]}
 
 test strings-parity-errors-keep-their-messages {an out-of-range substring and a failing guarded call report the same error on every backend} -body {
     set hir [srcHir {
         fn cut(s):
-            substring(concat(s, "é"), 0, 9)
+            str::substring(str::concat(s, "é"), 0, 9)
 
         cut("😀")
     }]
@@ -290,7 +290,7 @@ test strings-parity-errors-keep-their-messages {an out-of-range substring and a 
         lappend outcomes [lrange [outcomeUnderHir $backend $hir] 0 2]
     }
     list [llength [lsort -unique $outcomes]] [lindex $outcomes 0]
-} -result {1 {error {CORE SEMANTIC RANGE} {substring: range 0..9 is outside 0..2}}}
+} -result {1 {error {CORE SEMANTIC RANGE} {str::substring: range 0..9 is outside 0..2}}}
 
 test strings-parity-large {a String over a megabyte, built by doubling, has the right length, ends and equality} -body {
     parity {
@@ -298,10 +298,10 @@ test strings-parity-large {a String over a megabyte, built by doubling, has the 
             if n == 0:
                 s
             else:
-                dbl(n - 1, concat(s, s))
+                dbl(n - 1, str::concat(s, s))
 
         s = dbl(20, "é…")
-        [length(s), substring(s, 0, 3), substring(s, length(s) - 2, length(s))]
+        [str::length(s), str::substring(s, 0, 3), str::substring(s, str::length(s) - 2, str::length(s))]
     }
 } -result {value:[2097152, "é…é", "é…"]}
 
@@ -318,7 +318,7 @@ test strings-gc-live-across-allocation-and-storage {Strings held in a List, a st
             if n == 0:
                 0
             else:
-                length(concat(concat("x", "y"), "z")) + churn(n - 1)
+                str::length(str::concat(str::concat("x", "y"), "z")) + churn(n - 1)
 
         fn make_getter(s):
             fn get(unused):
@@ -327,14 +327,14 @@ test strings-gc-live-across-allocation-and-storage {Strings held in a List, a st
             get
 
         fn work(a, b):
-            xs = [a, b, concat(a, b)]
-            p = Pair {left: concat(b, a), right: "k"}
-            m = mutable_array_allocate(2)
-            mutable_array_set(m, 0, concat(a, "!"))
-            mutable_array_set(m, 1, substring(concat(a, b), 0, 1))
-            g = make_getter(concat(b, b))
+            xs = [a, b, str::concat(a, b)]
+            p = Pair {left: str::concat(b, a), right: "k"}
+            m = mutable_array::allocate(2)
+            mutable_array::set(m, 0, str::concat(a, "!"))
+            mutable_array::set(m, 1, str::substring(str::concat(a, b), 0, 1))
+            g = make_getter(str::concat(b, b))
             c = churn(30)
-            [xs, p.left, p.right, mutable_array_get(m, 0), mutable_array_get(m, 1), g(0), c]
+            [xs, p.left, p.right, mutable_array::at(m, 0), mutable_array::at(m, 1), g(0), c]
 
         [work("é", "…"), work("😀", "a"), work("", "bc")]
     }
@@ -347,11 +347,11 @@ test strings-gc-recursive-allocating-frames {a String parameter and result acros
             if n == 0:
                 s
             else:
-                t = concat(s, "…")
+                t = str::concat(s, "…")
                 u = rec(n - 1, t)
-                concat(substring(u, 0, 1), substring(u, length(u) - 1, length(u)))
+                str::concat(str::substring(u, 0, 1), str::substring(u, str::length(u) - 1, str::length(u)))
 
-        [rec(150, "😀"), length(rec(150, "ab"))]
+        [rec(150, "😀"), str::length(rec(150, "ab"))]
     }
     underStress {parity $text}
 } -result {value:["😀…", 2]}
@@ -362,17 +362,17 @@ test strings-gc-large-string-survives-collections {a large String stays intact a
             if n == 0:
                 s
             else:
-                dbl(n - 1, concat(s, s))
+                dbl(n - 1, str::concat(s, s))
 
         fn churn(n):
             if n == 0:
                 0
             else:
-                length(concat("a", "b")) + churn(n - 1)
+                str::length(str::concat("a", "b")) + churn(n - 1)
 
         big = dbl(16, "é…")
         c = churn(2000)
-        [length(big), substring(big, 0, 4), substring(big, length(big) - 2, length(big)), c]
+        [str::length(big), str::substring(big, 0, 4), str::substring(big, str::length(big) - 2, str::length(big)), c]
     }
     parity $text
 } -result {value:[131072, "é…é…", "é…", 4000]}
@@ -381,9 +381,9 @@ test strings-gc-reclaims-and-reuses {a loop that builds and drops many Strings r
     set report [native::allocationReport [srcHir {
         fn churn(n, acc):
             if n == 0:
-                length(acc)
+                str::length(acc)
             else:
-                churn(n - 1, concat(substring(concat(acc, "é"), 0, 3), "…"))
+                churn(n - 1, str::concat(str::substring(str::concat(acc, "é"), 0, 3), "…"))
 
         churn(20000, "ab")
     }] summary 1]
@@ -464,13 +464,13 @@ test strings-executable-everything {every width, NUL, empty, concat, substring, 
             if n == 0:
                 s
             else:
-                dbl(n - 1, concat(s, s))
+                dbl(n - 1, str::concat(s, s))
 
         fn both(n):
             s = pick(n)
-            \[length(s), concat(s, \"é\"), substring(concat(\"x\", s), 1, length(concat(\"x\", s)))\]
+            \[str::length(s), str::concat(s, \"é\"), str::substring(str::concat(\"x\", s), 1, str::length(str::concat(\"x\", s)))\]
 
-        \[both(0), both(1), both(2), both(3), both(4), run(2), run(9), length(dbl(16, \"é…\")), list_append(\[pick(3)\], pick(0))\]
+        \[both(0), both(1), both(2), both(3), both(4), run(2), run(9), str::length(dbl(16, \"é…\")), list::append(\[pick(3)\], pick(0))\]
     "
 } -result "\[\[0, \"é\", \"\"\], \[1, \"aé\", \"a\"\], \[1, \"…é\", \"…\"\], \[1, \"😀é\", \"😀\"\], \[1, \"\u0000é\", \"\u0000\"\], \"…\", \"bad\", 131072, \[\"😀\", \"\"\]\]"
 
@@ -485,12 +485,12 @@ test strings-executable-short-optimization-off {the same kind of executable with
         fn fwd(s):
             s
 
-        [length(fwd(pick(true))), length(fwd(pick(false))), concat(fwd(pick(false)), "…"), substring(concat("a", fwd(pick(false))), 1, 2)]
+        [str::length(fwd(pick(true))), str::length(fwd(pick(false))), str::concat(fwd(pick(false)), "…"), str::substring(str::concat("a", fwd(pick(false))), 1, 2)]
     } {-short-string-opt 0}
 } -result {[0, 1, "😀…", "😀"]}
 
 test strings-executable-census-has-no-text-buffer {a standalone executable's allocation report shows no text buffer allocations} -constraints executableAot -body {
-    set report [native::allocationReport [srcHir {concat(concat("a", "b"), "…")}] summary]
+    set report [native::allocationReport [srcHir {str::concat(str::concat("a", "b"), "…")}] summary]
     list [dict get $report strings textBufferAllocations] [dict get $report strings textBufferFrees]
 } -result {0 0}
 

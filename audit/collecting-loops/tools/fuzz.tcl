@@ -19,7 +19,7 @@
 #              generic.
 #
 #   lockstep   LEGAL lockstep loops built so that every clause provably has
-#              the same cardinality (the same N spelled through list_length,
+#              the same cardinality (the same N spelled through list::length,
 #              a parameter, a constant or a collecting loop, in different
 #              numeric forms and offsets); the compiler must accept them, and
 #              the result must match the zip model on every backend.
@@ -316,7 +316,7 @@ proc nText {nspec} {
     switch [lindex $nspec 0] {
         const { return [lindex $nspec 1] }
         param { return [lindex $nspec 1] }
-        len { return "list_length([lindex $nspec 1])" }
+        len { return "list::length([lindex $nspec 1])" }
     }
 }
 
@@ -421,7 +421,7 @@ proc genLockstep {shift} {
                 lappend elements [numericElements $clause $nval]
             }
             list {
-                # a list clause over xs has exactly length(xs) elements; a
+                # a list clause over xs has exactly list::length(xs) elements; a
                 # shift is expressed by dropping/adding an element via a
                 # numeric clause instead (a list cannot be shifted in place)
                 if {$delta != 0} {

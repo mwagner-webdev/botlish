@@ -117,11 +117,11 @@ test hir-aot-8b {shared call facts: self tail calls} -body {
 # Kinds
 
 test hir-aot-9 {operands of unknown kind are reported with their cause, not guessed} -body {
-    set a [aotSource "fn first_plus(xs, n):\n    list_get(xs, 0) + n\n\nfirst_plus(\[1\], 2)"]
+    set a [aotSource "fn first_plus(xs, n) errors IndexNotFound:\n    list::at(xs, 0) + n\n\nr = first_plus(\[1\], 2):\n    on IndexNotFound:\n        0\nr"]
     lmap b [dict get [aotRegion $a first_plus] blockers] {
         list [dict get $b kind] [dict get $b class] [dict get $b requires] [dict get $b cause cause] [dict get $b cause native]
     }
-} -result {{UnknownAggregateElementType representation int aggregate-element list_get} {UnknownParameterKind representation int parameter {}} {UnknownParameterKind representation list parameter {}}}
+} -result {{UnknownAggregateElementType representation int aggregate-element list::at} {UnknownParameterKind representation int parameter {}} {UnknownParameterKind representation list parameter {}}}
 
 test hir-aot-10 {a guarded region is still semantically closed} -body {
     set a [aotSource "fn inc(x):\n    x + 1\n\ninc(1)"]
@@ -149,7 +149,7 @@ test hir-aot-13 {an if condition of unknown kind needs a Boolean check} -body {
 # Facts remove blockers
 
 test hir-aot-14 {a flow fact already in HIR removes the later blocker} -body {
-    set a [aotSource "fn f(s):\n    n = length(s)\n    concat(s, s)\n\nf(\"a\")"]
+    set a [aotSource "fn f(s):\n    n = str::length(s)\n    str::concat(s, s)\n\nf(\"a\")"]
     lmap b [dict get [aotRegion $a f] blockers] {list [dict get $b requires] [dict get $b location line]}
 } -result {{str 2}}
 
@@ -214,8 +214,10 @@ test hir-aot-22 {top-level functions that only call functions need no environmen
 # ---------------------------------------------------------------------------
 # Analysis is observation only
 
+# matmul's functions declare IndexNotFound, so the driver runs inside
+# corpus::handled's own function: one region more than matmul's five.
 test hir-aot-23 {analysis changes neither the HIR nor what the program does} -body {
-    set hir [corpus::program matmul "matmul(\[\[1, 2\]\], \[\[3\], \[4\]\])"]
+    set hir [corpus::driven matmul "matmul(\[\[1, 2\]\], \[\[3\], \[4\]\])"]
     set before [hir::format $hir -origins 1]
     set outcomeBefore [corpus::outcome compile $hir]
     set analysis [hir::aot::analyze $hir]
@@ -223,7 +225,7 @@ test hir-aot-23 {analysis changes neither the HIR nor what the program does} -bo
     list [expr {[hir::format $hir -origins 1] eq $before}] \
          [expr {[corpus::outcome compile $hir] eq $outcomeBefore}] \
          [corpus::outcome interp $hir] [dict size [dict get $analysis regions]]
-} -result {1 1 {value {[[11]]}} 5}
+} -result {1 1 {value {[[11]]}} 6}
 
 test hir-aot-all-programs {every example and benchmark program can be analyzed and explained} -body {
     set failures {}
@@ -305,7 +307,7 @@ test hir-aot-corpus-3 {string_replace: guarded only by parameter kinds} -body {
 
 # STRUCTS.md: scan_field/scan_record hand back anonymous structs, so the
 # pair's list elements (UnknownAggregateElementType) and the constant-index
-# list_get range checks are gone from scan_record; only its parameter kinds
+# list::at range checks are gone from scan_record; only its parameter kinds
 # remain.
 test hir-aot-corpus-4 {csv: parameter kinds only (the scan structs have no list elements)} -body {
     set a [corpusAot csv]
@@ -320,13 +322,13 @@ test hir-aot-corpus-5 {matmul: the operands of * are list elements of unknown ki
         list [dict get $b location line] [dict get $b cause native]
     }]
     list [corpusStatuses $a] $times [dict get [aotRegion $a dot] requirements]
-} -result {{<program> {closed closed guarded} dot {guarded closed guarded} product_row {guarded closed guarded} product_rows {guarded closed guarded} matmul {guarded closed guarded}} {{22 list_get} {22 list_get}} {bigint range-check structural-equality tagged-values}}
+} -result {{<program> {closed closed guarded} dot {guarded closed guarded} product_row {guarded closed guarded} product_rows {guarded closed guarded} matmul {guarded closed guarded}} {{25 list::at} {25 list::at}} {bigint range-check structural-equality tagged-values}}
 
 test hir-aot-explain {the explanation names status, blockers with lines, and runtime needs} -body {
     set text [hir::aot::explain [surface::readProgramFile [corpus::path matmul]]]
     list [string match "*dot: guarded*" $text] \
-         [string match "*line 22:12  e13  UnknownAggregateElementType: * needs int; the element read by list_get at line 22:12*" $text] \
-         [string match "*dispatch: closed -- natives: ==, *, list_get x3, + x2; functions: dot (self, tail)*" $text] \
+         [string match "*line 25:12  e13  UnknownAggregateElementType: * needs int; the element read by list::at at line 25:12*" $text] \
+         [string match "*dispatch: closed -- natives: ==, *, list::at x3, + x2; functions: dot (self, tail)*" $text] \
          [string match "*runtime:  bigint, range-check, structural-equality, tagged-values*" $text]
 } -result {1 1 1 1}
 

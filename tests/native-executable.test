@@ -49,7 +49,7 @@ test native-executable-values {constants, Unicode, native values, nested aggrega
     aotParity {
         big = 9223372036854775808
         [big * big, "a@NUL@é🙂\n\t\\\"", '🙂', true, unit, [1, [2, 3]],
-         immutable_set_from_list([3, 2, 3]), length]
+         immutable_set::from_list([3, 2, 3]), str::length]
     }
 } -match glob -result {\[85070591730234615865843651857942052864, *\]}
 
@@ -58,8 +58,8 @@ test native-executable-roots {relocated stack maps keep allocating ancestor fram
         fn build(n):
             if n < 1:
                 return ""
-            prefix = concat("x", "y")
-            concat(prefix, build(n - 1))
+            prefix = str::concat("x", "y")
+            str::concat(prefix, build(n - 1))
         build(100)
     }
 } -result "\"[string repeat xy 100]\""
@@ -89,16 +89,16 @@ test native-executable-modules {module statics, sets, strings and specialized co
 test native-executable-generic-entry {known callable kinds can call through generic trampolines under GC} -constraints executableAot -body {
     aotParity {
         fn build():
-            concat("x", "y")
+            str::concat("x", "y")
         fn other():
-            concat("z", "w")
+            str::concat("z", "w")
         fn pick(flag: bool):
             if flag:
                 build
             else:
                 other
         fn apply(f):
-            prefix = concat("a", "b")
+            prefix = str::concat("a", "b")
             [prefix, f()]
         [apply(pick(true)), apply(pick(false))]
     } {-block-escape-opt 0 -tiny-leaf-inline-opt 0}
@@ -110,7 +110,7 @@ test native-executable-native-bridge {source native implementations share existi
         q = uriEscape("a b")
         fn check(s: str) -> bool:
             emailish?(s)
-        [UriQueryValue?(q), length(q), check("a@b.co"), byte::high_nibble(171)]
+        [UriQueryValue?(q), str::length(q), check("a@b.co"), byte::high_nibble(171)]
     }
 } -result {[true, 5, true, 160]}
 
@@ -118,7 +118,7 @@ test native-executable-native-shadow {native preparation respects local binding 
     set dir [makeDirectory {aot shadow test}]
     try {
         core::loadLibrary web
-        set hir [surface::compile "fn uriEscape(s):\n    length(s)\nuriEscape(\"abc\")" shadow.bot]
+        set hir [surface::compile "fn uriEscape(s):\n    str::length(s)\nuriEscape(\"abc\")" shadow.bot]
         set prepared [native::prepareHir $hir]
         set binary [native::executable $hir [file join $dir program]]
         list [expr {$hir eq $prepared}] [exec $binary]
@@ -143,7 +143,7 @@ test native-executable-output-kinds {standalone rendering supports blocks, mutab
     try {
         set hir [hir::build {
             {call {ref list} {ok {const 5}} {error-value {const str bad}}
-                {block {x} {ref x}} {call {ref mutable_array_allocate} {const 2}}}
+                {block {x} {ref x}} {call {ref mutable_array::allocate} {const 2}}}
         }]
         set binary [native::executable $hir [file join $dir program]]
         exec env BOTLISH_NATIVE_GC_STRESS=1 $binary
@@ -200,7 +200,7 @@ test native-executable-no-evaluation {compilation terminates even when running t
 test native-executable-runtime-error {runtime errors exit unsuccessfully and go to stderr} -constraints executableAot -body {
     set dir [makeDirectory {aot error test}]
     try {
-        set hir [surface::compile {list_get([1], 5)} error.bot]
+        set hir [surface::compile {str::substring("abc", 0, 5)} error.bot]
         set binary [native::executable $hir [file join $dir program]]
         set failed [catch {exec $binary 2> [file join $dir stderr]} stdout options]
         set ch [open [file join $dir stderr] r]; set stderr [read $ch]; close $ch

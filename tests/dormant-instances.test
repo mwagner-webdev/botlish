@@ -101,23 +101,23 @@ proc nirOpsOf {nir name} {
 # entry of a closure blockescape de-closures through scan<any, native(...)>.
 set scanShape {
     fn outer(v, start0):
-        n = length(v)
+        n = str::length(v)
         fn get(i):
-            substring(v, i, i + 1)
+            str::substring(v, i, i + 1)
         fn scan(start, pred):
             loop i from start to n:
                 if pred(get(i)):
                     continue
                 return i
             n
-        scan(start0, is_tcl_alpha)
+        scan(start0, str::is_tcl_alpha)
     [outer("abc1", 0), outer("x", 0), outer("", 0)]
 }
 
 # The same, with an instance reachable ONLY through the dormant entry:
 # scan<generic> calls apply<any, str, int> (its `pred` is any there), which
 # alone reaches idx<int> with an unbounded argument; the live
-# apply<native(is_tcl_alpha), str, int> reaches idx<int> too.
+# apply<native(str::is_tcl_alpha), str, int> reaches idx<int> too.
 set transitiveShape {
     fn idx(x):
         x * 2
@@ -127,16 +127,16 @@ set transitiveShape {
         else:
             0 - 1
     fn outer(v, start0):
-        n = length(v)
+        n = str::length(v)
         fn get(i):
-            substring(v, i, i + 1)
+            str::substring(v, i, i + 1)
         fn scan(start, pred):
             loop i from start to n:
                 if apply(pred, get(i), i) >= 0:
                     continue
                 return i
             n
-        scan(start0, is_tcl_alpha)
+        scan(start0, str::is_tcl_alpha)
     [outer("abc1", 0), outer("x", 1), outer("ab", 2)]
 }
 
@@ -145,11 +145,11 @@ set transitiveShape {
 # live scan instance and `any` in the dormant scan<generic>.
 set theoremShape {
     fn outer(v, start0):
-        n = length(v)
+        n = str::length(v)
         fn get(i):
-            substring(v, i, i + 1)
+            str::substring(v, i, i + 1)
         fn ok(t):
-            length(t) + length(v)
+            str::length(t) + str::length(v)
         fn scan(start, pred, tag):
             first = ok(tag)
             loop i from start to n:
@@ -157,7 +157,7 @@ set theoremShape {
                     continue
                 return i
             n
-        scan(start0, is_tcl_alpha, "t")
+        scan(start0, str::is_tcl_alpha, "t")
     [outer("abc1", 0), outer("x", 0)]
 }
 
@@ -195,7 +195,7 @@ set escapeShape {
 test dormant-refined-checks-set {refined-checks: the dormant instances are the generic Block-value entries of the four de-closured closures whose calls are Int-keyed (char_at, scan_while, tld?, domain?) and the scan_while instance only tld?<generic> calls} -body {
     lassign [refinedChecks] hir spec analysis
     dormantLabels $spec
-} -result {char_at<generic> domain?<generic> {scan_while<any, native(is_tcl_alpha)>} scan_while<generic> tld?<generic>}
+} -result {char_at<generic> domain?<generic> {scan_while<any, native(str::is_tcl_alpha)>} scan_while<generic> tld?<generic>}
 
 test dormant-transitive {an instance reachable only through a dormant entry is dormant too (apply<any, str, int>); the live, exact apply instance is not; get's generic entry is dormant (its calls are Int-keyed)} -body {
     lassign [dormantOf $transitiveShape] hir spec analysis
@@ -307,7 +307,7 @@ test dormant-closed-caller-theorem-skips-dormant-callers {the closed-caller theo
         list [lsort $callers] [hir::specialize::closedCallerTheorem $hir $spec $id] [dict get $region status]
     }
     list [withDormant 0 {theoremRow}] [theoremRow]
-} -result {{{{scan<generic> 0} {{scan<int, native(is_tcl_alpha), any>} 0}} any guarded} {{{scan<generic> 1} {{scan<int, native(is_tcl_alpha), any>} 0}} str closed}}
+} -result {{{{scan<generic> 0} {{scan<int, native(str::is_tcl_alpha), any>} 0}} any guarded} {{{scan<generic> 1} {{scan<int, native(str::is_tcl_alpha), any>} 0}} str closed}}
 
 # ---------------------------------------------------------------------------
 # Every backend agrees, with and without block escape (where lowering
@@ -374,10 +374,10 @@ set nestedValueShape {
         fn c(m, p):
             fn d(z):
                 fs = [other, f]
-                g = list_get(fs, k)
+                g = list::at(fs, k)
                 g(z * 10000000000000000000000, p)
             f(m, p) + d(m)
-        c(7, is_tcl_alpha)
+        c(7, str::is_tcl_alpha)
     outer(1)
 }
 

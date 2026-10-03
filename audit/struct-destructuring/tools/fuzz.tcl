@@ -281,7 +281,7 @@ proc resultText {case} {
     if {$form eq "bound"} {
         lappend items "s.[lindex [lindex [schemaFields $schema] 0] 0]"
     }
-    lappend items "mutable_array_get(log, 0)"
+    lappend items "mutable_array::get(log, 0, 0)"
     return "\[[join $items {, }]\]"
 }
 
@@ -294,8 +294,8 @@ proc program {case style} {
     dict with case {}
     set lines [declarations $schema]
     lappend lines "fn probe(log: MutableArray\[int\], id: int, v: int) -> int:"
-    lappend lines "    k = mutable_array_get(log, 0)"
-    lappend lines "    mutable_array_set(log, 0, k * 10 + id)"
+    lappend lines "    k = mutable_array::get(log, 0, 0)"
+    lappend lines "    mutable_array::set(log, 0, k * 10 + id)"
     lappend lines "    v"
     set rootType [expr {[schemaNamed $schema] ? " -> [schemaName $schema]" : ""}]
     if {$form eq "call"} {
@@ -308,37 +308,37 @@ proc program {case style} {
         # The destructure is the last statement of its body: the body's value
         # (unit) is returned beside the log, which keeps the evaluation order
         # observable.
-        set evidence "mutable_array_get(log, 0)"
+        set evidence "mutable_array::get(log, 0, 0)"
         switch -- $context {
             plain {
                 lappend lines "fn body(log: MutableArray\[int\], n: int):"
                 lappend lines {*}[indent $block 1]
-                set run [list "log = mutarray::create(1, 0)" "r = body(log, n)" "\[r, $evidence\]"]
+                set run [list "log = mutable_array::create(1, 0)" "r = body(log, n)" "\[r, $evidence\]"]
             }
             branch {
-                set run [list "log = mutarray::create(1, 0)" \
+                set run [list "log = mutable_array::create(1, 0)" \
                     "r = if n > 2:" {*}[indent $block 1] \
                     "else:" "    unit" "\[r, $evidence\]"]
             }
             elif {
-                set run [list "log = mutarray::create(1, 0)" \
+                set run [list "log = mutable_array::create(1, 0)" \
                     "r = if n == 0:" "    unit" \
                     "elif n > 2:" {*}[indent $block 1] \
                     "else:" "    unit" "\[r, $evidence\]"]
             }
             loop {
-                set run [list "log = mutarray::create(1, 0)" \
+                set run [list "log = mutable_array::create(1, 0)" \
                     "xs = loop i from 0 to 2:" {*}[indent $block 1] \
                     "\[xs, $evidence\]"]
             }
             closure {
-                set run [list "log = mutarray::create(1, 0)" \
+                set run [list "log = mutable_array::create(1, 0)" \
                     "fn inner():" {*}[indent $block 1] \
                     "\[inner(), $evidence\]"]
             }
             helper {
                 # A destructure last in a branch last in a collecting loop.
-                set run [list "log = mutarray::create(1, 0)" \
+                set run [list "log = mutable_array::create(1, 0)" \
                     "xs = loop i from 0 to 3:" \
                     "    if i > 0:" {*}[indent $block 2] \
                     "    else:" "        unit" \
@@ -352,32 +352,32 @@ proc program {case style} {
     }
     switch -- $context {
         plain {
-            set run [list "log = mutarray::create(1, 0)" {*}$block $result]
+            set run [list "log = mutable_array::create(1, 0)" {*}$block $result]
         }
         branch {
-            set run [list "log = mutarray::create(1, 0)" \
+            set run [list "log = mutable_array::create(1, 0)" \
                 "r = if n > 2:" {*}[indent [concat $block [list $result]] 1] \
                 "else:" "    \[0\]" "r"]
         }
         elif {
-            set run [list "log = mutarray::create(1, 0)" \
+            set run [list "log = mutable_array::create(1, 0)" \
                 "r = if n == 0:" "    \[100\]" \
                 "elif n > 2:" {*}[indent [concat $block [list $result]] 1] \
                 "else:" "    \[0\]" "r"]
         }
         loop {
-            set run [list "log = mutarray::create(1, 0)" \
+            set run [list "log = mutable_array::create(1, 0)" \
                 "xs = loop i from 0 to 2:" {*}[indent [concat $block [list "\[i, [string range $result 1 end-1]\]"]] 1] \
                 "xs"]
         }
         closure {
-            set run [list "log = mutarray::create(1, 0)" {*}$block \
+            set run [list "log = mutable_array::create(1, 0)" {*}$block \
                 "fn grab():" "    $result" "grab()"]
         }
         helper {
             lappend lines "fn helper(log: MutableArray\[int\], n: int):"
             lappend lines {*}[indent [concat $block [list $result]] 1]
-            set run [list "log = mutarray::create(1, 0)" "helper(log, n)"]
+            set run [list "log = mutable_array::create(1, 0)" "helper(log, n)"]
         }
     }
     lappend lines "fn run(n: int):"
@@ -410,7 +410,7 @@ proc stripLocations {message} {
 # {ok HIR}, or {error CODE MESSAGE} for a compile-time rejection (the CODE of a
 # syntax error includes the diagnostic's stable `code`, when it has one).
 proc compileOrError {source} {
-    # Through a file: the programs call library modules (mutarray::create).
+    # Through a file: the programs call library modules (mutable_array::create).
     set file destructuring-fuzz-[pid].bot
     set path [makeFile $source $file]
     set failed [catch {surface::readProgramFile $path} hir options]
@@ -465,8 +465,8 @@ set backendDisagreements 0
 proc defective {case patternText explicitLines sourceText} {
     set lines [declarations [dict get $case schema]]
     lappend lines "fn probe(log: MutableArray\[int\], id: int, v: int) -> int:"
-    lappend lines "    k = mutable_array_get(log, 0)"
-    lappend lines "    mutable_array_set(log, 0, k * 10 + id)"
+    lappend lines "    k = mutable_array::get(log, 0, 0)"
+    lappend lines "    mutable_array::set(log, 0, k * 10 + id)"
     lappend lines "    v"
     set d [lines $lines "$patternText = $sourceText" $case]
     set e ""
@@ -477,7 +477,7 @@ proc defective {case patternText explicitLines sourceText} {
 }
 
 proc lines {declLines statements case} {
-    set run [list "log = mutarray::create(1, 0)" {*}[split $statements \n] "mutable_array_get(log, 0)"]
+    set run [list "log = mutable_array::create(1, 0)" {*}[split $statements \n] "mutable_array::get(log, 0, 0)"]
     set all $declLines
     lappend all "fn run(n: int):"
     lappend all {*}[indent $run 1]
@@ -541,7 +541,7 @@ proc negative {kind case} {
             return [concat [defective $case [patternText $bad] $e $source] {{}}]
         }
         non-struct-source {
-            set bad [pick {n {"text"} {[n, 1]} unit {mutarray::create(1, 0)}}]
+            set bad [pick {n {"text"} {[n, 1]} unit {mutable_array::create(1, 0)}}]
             set ::counter(t_) 1
             return [concat [defective $case [patternText $pattern] [explicitLines $pattern t_1] $bad] {{}}]
         }

@@ -75,7 +75,7 @@ proc paramGuards {hir analysis id} {
 test closure-int-keys-refined-checks {tld?, domain?, char_at and scan_while's start are Int-keyed; each generic instance is a dormant Block-value entry; the keyed instances keep every entry Range the generic ones had} -body {
     lassign [refinedChecks] hir spec analysis
     lmap name {tld? domain? char_at scan_while} {rowsOf $spec $analysis $name}
-} -result {{{tld?<generic> 1 {{[-∞, +∞]}}} {tld?<int> 0 {{[2, 4611686018427387903]}}}} {{domain?<generic> 1 {{[-∞, +∞]}}} {domain?<int> 0 {{[1, 4611686018427387903]}}}} {{char_at<generic> 1 {{[-∞, +∞]}}} {char_at<int> 0 {{[0, 4611686018427387902]}}}} {{scan_while<generic> 1 {{[-∞, +∞]} {[-∞, +∞]}}} {{scan_while<any, native(is_tcl_alpha)>} 1 {{[-∞, +∞]} {[-∞, +∞]}}} {{scan_while<int, block(e239)>} 0 {{[0, 0]} {[-∞, +∞]}}} {{scan_while<int, native(is_tcl_alpha)>} 0 {{[2, 4611686018427387903]} {[-∞, +∞]}}}}}
+} -result {{{tld?<generic> 1 {{[-∞, +∞]}}} {tld?<int> 0 {{[2, 4611686018427387903]}}}} {{domain?<generic> 1 {{[-∞, +∞]}}} {domain?<int> 0 {{[1, 4611686018427387903]}}}} {{char_at<generic> 1 {{[-∞, +∞]}}} {char_at<int> 0 {{[0, 4611686018427387902]}}}} {{scan_while<generic> 1 {{[-∞, +∞]} {[-∞, +∞]}}} {{scan_while<any, native(str::is_tcl_alpha)>} 1 {{[-∞, +∞]} {[-∞, +∞]}}} {{scan_while<int, block(e239)>} 0 {{[0, 0]} {[-∞, +∞]}}} {{scan_while<int, native(str::is_tcl_alpha)>} 0 {{[2, 4611686018427387903]} {[-∞, +∞]}}}}}
 
 test closure-int-keys-refined-checks-knob-off {with the knob off the same functions are <generic> (or <any, …>) with the same entry Ranges} -body {
     withIntKeys 0 {
@@ -118,12 +118,12 @@ test closure-int-keys-refined-checks-rawint-plan {the keyed positions are RawInt
         set rows {}
         foreach id [dict get $spec used] {
             set label [hir::specialize::label $spec $id]
-            if {$label ni {tld?<int> domain?<int> char_at<int> {scan_while<int, native(is_tcl_alpha)>}}} continue
+            if {$label ni {tld?<int> domain?<int> char_at<int> {scan_while<int, native(str::is_tcl_alpha)>}}} continue
             lappend rows [list $label [lindex [dict get $plan $id paramEligible] 0] [lindex [dict get $plan $id paramReasons] 0]]
         }
         lsort $rows
     }
-} -result {{{char_at<int> 1 suppressed-mixed-tagged-use} {domain?<int> 1 suppressed-mixed-tagged-use} {tld?<int> 1 suppressed-mixed-tagged-use} {{scan_while<int, native(is_tcl_alpha)>} 1 suppressed-no-raw-demand}} {{char_at<int> 1 suppressed-mixed-tagged-use} {domain?<int> 1 {}} {tld?<int> 1 {}} {{scan_while<int, native(is_tcl_alpha)>} 1 {}}}}
+} -result {{{char_at<int> 1 suppressed-mixed-tagged-use} {domain?<int> 1 suppressed-mixed-tagged-use} {tld?<int> 1 suppressed-mixed-tagged-use} {{scan_while<int, native(str::is_tcl_alpha)>} 1 suppressed-no-raw-demand}} {{char_at<int> 1 suppressed-mixed-tagged-use} {domain?<int> 1 {}} {tld?<int> 1 {}} {{scan_while<int, native(str::is_tcl_alpha)>} 1 {}}}}
 
 # ---------------------------------------------------------------------------
 # The rule
@@ -131,7 +131,7 @@ test closure-int-keys-refined-checks-rawint-plan {the keyed positions are RawInt
 set ::intFixture {
     fn outer(tag):
         fn inner(x):
-            x + length(tag)
+            x + str::length(tag)
         inner(1) + inner(2)
     outer("v")
 }
@@ -158,11 +158,11 @@ test closure-int-keys-other-kinds-stay-generic {a String or Bool argument still 
     lassign [specOf {
         fn outer(tag):
             fn inner(x):
-                concat(tag, "")
+                str::concat(tag, "")
                 x
             a = inner(tag)
             b = inner(true)
-            length(tag)
+            str::length(tag)
         outer("v")
     }] hir analysis
     lmap id [dict get $analysis used] {
@@ -174,7 +174,7 @@ test closure-int-keys-other-kinds-stay-generic {a String or Bool argument still 
 set ::mixedKinds {
     fn outer(tag):
         fn inner(x):
-            concat(tag, "")
+            str::concat(tag, "")
             x
         [inner(tag), inner(1), inner(2)]
     outer("v")
@@ -194,9 +194,9 @@ foreach {name src expected} [list \
     mixed $::mixedKinds {["v", 1, 2]} \
     scanner {
         fn first_space(s):
-            n = length(s)
+            n = str::length(s)
             fn at(i):
-                substring(s, i, i + 1)
+                str::substring(s, i, i + 1)
             fn scan(start):
                 loop i from start to n:
                     if at(i) == " ":

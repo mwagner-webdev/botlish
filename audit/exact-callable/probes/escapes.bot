@@ -13,4 +13,4 @@ fn apply_loop(f, i, n):
     n
 
 fs = [is_small]
-[apply_loop(is_small, 0, 100), list_get(fs, 0)(3)]
+[apply_loop(is_small, 0, 100), list::at(fs, 0)(3)]

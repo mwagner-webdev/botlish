@@ -1,4 +1,7 @@
 namespace managed
 digits = [10, 20]
 fn get(i):
-    list_get(digits, i)
+    if i < 0 or i >= list::length(digits):
+        0
+    else:
+        list::at(digits, i)

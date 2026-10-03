@@ -80,15 +80,17 @@ test equal-5 {== on callables is undefined} -body {
     core::eval {call {ref ==} {ref +} {ref +}}
 } -returnCodes error -errorCode {CORE SEMANTIC EQUALITY} -match glob -result *
 
-test eq-1 {eq is string equality} -body {
-    list [run {call {ref eq} {const abc} {const abc}}] \
-         [run {call {ref eq} {const abc} {const abd}}] \
-         [run {call {ref eq} {const str 10} {const str 10}}]
-} -result {true false true}
+test eq-removed-1 {there is no eq native: String equality is ordinary ==, which never coerces across kinds} -body {
+    list [expr {"eq" in [core::native::names]}] \
+         [run {call {ref ==} {const abc} {const abc}}] \
+         [run {call {ref ==} {const abc} {const abd}}] \
+         [run {call {ref ==} {const str 10} {const str 10}}] \
+         [run {call {ref ==} {const 10} {const str 10}}]
+} -result {0 true false true false}
 
-test eq-2 {eq does not coerce integers to strings} -body {
-    core::eval {call {ref eq} {const 10} {const str 10}}
-} -returnCodes error -errorCode {CORE SEMANTIC TYPE} -match glob -result *
+test eq-removed-2 {a core IR reference to eq is an ordinary unbound name, not string equality} -body {
+    core::eval {call {ref eq} {const abc} {const abc}}
+} -returnCodes error -errorCode {CORE SEMANTIC UNBOUND} -match glob -result *
 
 test integerp-1 {integer? runtime behavior} -body {
     list [run {call {ref integer?} {const 41}}] \

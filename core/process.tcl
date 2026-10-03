@@ -112,8 +112,6 @@ proc core::process::argvImpl {} {
     return [core::value::listOf $items]
 }
 
-core::native::declareError InvalidArgumentEncoding
-
 core::native::register argv -arity 0 -impl core::process::argvImpl \
     -param-types {} -result-type list -runtime {process-argv string-alloc list-alloc} \
     -result-shape {element-type str} -errors InvalidArgumentEncoding

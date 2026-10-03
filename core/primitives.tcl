@@ -69,12 +69,6 @@ proc core::primitives::valueEqual {a b} {
     return [core::value::bool [core::value::equal $a $b]]
 }
 
-proc core::primitives::stringEqual {a b} {
-    set x [core::value::strOf [core::value::expect str $a eq]]
-    set y [core::value::strOf [core::value::expect str $b eq]]
-    return [core::value::bool [string equal $x $y]]
-}
-
 proc core::primitives::makeList {args} {
     return [core::value::listOf $args]
 }
@@ -102,7 +96,5 @@ core::native::register mod  -arity 2 -impl core::primitives::modulo \
 
 core::native::register ==   -arity 2 -impl core::primitives::valueEqual \
     -param-types {any any} -result-type bool -runtime structural-equality -context-free 1
-core::native::register eq   -arity 2 -impl core::primitives::stringEqual \
-    -param-types {str str} -result-type bool -context-free 1
 core::native::register list -arity * -impl core::primitives::makeList \
     -result-type list -runtime list-alloc -result-shape elements -context-free 1

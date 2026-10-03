@@ -89,6 +89,10 @@ namespace eval hir::completions {
     # never even offered to the cache (EffectiveFacts checks that first),
     # so a genuine cycle is never short-circuited by a stale hit either.
     variable cache [dict create]
+    # The indexed-access natives (STDLIB-NAMESPACES.md) whose one declared
+    # error, IndexNotFound, this pass can rule out -- or prove certain -- per
+    # call (IndexBounds): native name -> its container family.
+    variable indexNatives [dict create list::at list mutable_array::at mutarray]
 }
 
 proc hir::completions::resetCache {} {
@@ -155,6 +159,20 @@ proc hir::completions::SeedParam {} {
 #                                        literal-list proof see through the
 #                                        call into `set`'s own `chars`
 #                                        parameter, items 36-40)
+#   indexBounds bindingId -> FORM       (a counted-loop variable proven to
+#                                        satisfy 0 <= i < FORM in its loop's
+#                                        body, FORM a hir/cardinality.tcl
+#                                        linear form -- e.g. the length of
+#                                        the List the loop counts over:
+#                                        IndexBounds' relational case)
+#   upperBounds bindingId -> {FORM ...} (an Int binding proven < each FORM
+#                                        in the current branch, from an
+#                                        enclosing `if` condition comparing
+#                                        it with a size: BranchRelations)
+#   sizes     FORM -> N                 (a List length / MutableArray
+#                                        capacity form proven equal to the
+#                                        Int N in the current branch, from
+#                                        an enclosing `list::length(xs) == N`)
 #   exprs     exprId -> Range           (a per-walk cache so
 #                                        ComparisonNarrowing can read a
 #                                        condition's own already-evaluated
@@ -170,6 +188,7 @@ proc hir::completions::SeedParam {} {
 
 proc hir::completions::NewCtx {} {
     return [dict create bindings [dict create] exact [dict create] exactList [dict create] \
+        indexBounds [dict create] upperBounds [dict create] sizes [dict create] \
         exprs [dict create] errors [dict create] analyses 0 returned 0 \
         record 0 visited [dict create]]
 }
@@ -327,11 +346,116 @@ proc hir::completions::BranchOutcome {hir ctx condition outcome} {
     # `==` purely from concrete exact-value facts, never a step-direction
     # proof.
     set shim [dict create exprs [dict get $ctx exprs] monotone {}]
-    set facts [hir::range::ComparisonNarrowing $hir $shim $condition $outcome]
-    if {[FactsContradictory $facts]} {
-        return [list 0 {}]
+    set facts [dict create]
+    foreach conjunct [Conjuncts $hir $condition $outcome] {
+        set narrowed [hir::range::ComparisonNarrowing $hir $shim {*}$conjunct]
+        if {[FactsContradictory $narrowed]} {
+            return [list 0 {}]
+        }
+        dict for {b r} $narrowed {
+            if {[dict exists $facts $b]} {
+                set r [hir::range::intersect [dict get $facts $b] $r]
+            }
+            dict set facts $b $r
+        }
     }
     return [list 1 $facts]
+}
+
+# The {condition outcome} pairs that all hold when CONDITION has OUTCOME:
+# `A or B` (lowered to `if A: true else: B`) being false means A and B are
+# both false, `A and B` (`if A: B else: false`) being true means both are
+# true -- recursively, so a chain of `or`s (`i < 0 or i >= n`) narrows its
+# false branch by every operand. Anything else is the one pair itself.
+proc hir::completions::Conjuncts {hir condition outcome} {
+    set node [hir::node $hir $condition]
+    if {[dict get $node kind] eq {if}} {
+        set then [dict get $node thenBody]
+        set else [dict get $node elseBody]
+        if {[llength $then] == 1 && [llength $else] == 1} {
+            set test [dict get $node condition]
+            if {!$outcome && [hir::types::KnownOutcome $hir [lindex $then 0]] eq {1}} {
+                return [concat [Conjuncts $hir $test 0] [Conjuncts $hir [lindex $else 0] 0]]
+            }
+            if {$outcome && [hir::types::KnownOutcome $hir [lindex $else 0]] eq {0}} {
+                return [concat [Conjuncts $hir $test 1] [Conjuncts $hir [lindex $then 0] 1]]
+            }
+        }
+    }
+    return [list [list $condition $outcome]]
+}
+
+# The relational facts the `if` condition CONDITION establishes on its
+# OUTCOME branch, for IndexBounds alone, added to ctx: a comparison of an
+# Int binding with a size (`i < list::length(xs)` true, `i >= list::length
+# (xs)` false, ... in either operand order) records the binding's
+# exclusive upper bound as a hir/cardinality.tcl form (ctx.upperBounds); an
+# equality of a List length or MutableArray capacity with an exact Int
+# (`list::length(bytes) == 1`) records that size (ctx.sizes). Only an Int
+# comparison native (`< <= > >= ==`) is read; anything else adds nothing.
+# Every form names immutable values, so a fact stays true for the whole
+# branch. Each of the condition's Conjuncts contributes its own facts.
+proc hir::completions::BranchRelations {hir ctxVar condition outcome} {
+    upvar 1 $ctxVar ctx
+    foreach conjunct [Conjuncts $hir $condition $outcome] {
+        BranchRelation $hir ctx {*}$conjunct
+    }
+}
+
+proc hir::completions::BranchRelation {hir ctxVar condition outcome} {
+    upvar 1 $ctxVar ctx
+    set node [hir::node $hir $condition]
+    if {[dict get $node kind] ne {call}} {
+        return
+    }
+    lassign [dict get $node target] targetKind target
+    if {$targetKind ne {native}} {
+        return
+    }
+    set op [dict get [hir::symbol $hir $target] name]
+    set args [dict get $node args]
+    if {$op ni {< <= > >= ==} || [llength $args] != 2} {
+        return
+    }
+    lassign $args x y
+    if {$op eq {==}} {
+        if {!$outcome} {
+            return
+        }
+        foreach {a b} [list $x $y $y $x] {
+            set n [hir::exact::IntOf $hir $b]
+            set steps 0
+            set form [hir::cardinality::IntForm $hir $a steps]
+            lassign $form c terms
+            if {$n ne {} && $c == 0 && [llength $terms] == 2 && [lindex $terms 1] == 1
+                    && [lindex $terms 0 0] in {len cap}} {
+                dict set ctx sizes $form $n
+            }
+        }
+        return
+    }
+    # Normalize to LOW < HIGH + K (exclusive): the binding side is LOW.
+    switch -- $op/$outcome {
+        </1  { set rel [list $x $y 0] }
+        </0  { set rel [list $y $x 1] }
+        <=/1 { set rel [list $x $y 1] }
+        <=/0 { set rel [list $y $x 0] }
+        >/1  { set rel [list $y $x 0] }
+        >/0  { set rel [list $x $y 1] }
+        >=/1 { set rel [list $y $x 1] }
+        >=/0 { set rel [list $x $y 0] }
+    }
+    lassign $rel low high k
+    set steps 0
+    lassign [hir::cardinality::Chase $hir $low steps] kind binding
+    if {$kind ne {binding}} {
+        return
+    }
+    set form [hir::cardinality::FormAdd [hir::cardinality::IntForm $hir $high steps] \
+        [hir::cardinality::FormConst $k]]
+    set bounds [dict get $ctx upperBounds]
+    dict lappend bounds $binding $form
+    dict set ctx upperBounds $bounds
 }
 
 proc hir::completions::EvalIf {hirVar ctxVar diagnose enclosing guard e node} {
@@ -341,6 +465,7 @@ proc hir::completions::EvalIf {hirVar ctxVar diagnose enclosing guard e node} {
     set saved [dict get $ctx bindings]
     set branches [dict create]
     set after [dict create]
+    set relations [dict create]
     foreach {outcome role} {1 then 0 else} {
         lassign [BranchOutcome $hir $ctx $condition $outcome] feasible facts
         if {!$feasible} {
@@ -352,8 +477,27 @@ proc hir::completions::EvalIf {hirVar ctxVar diagnose enclosing guard e node} {
         foreach {b r} $facts {
             dict set ctx bindings $b $r
         }
+        set savedUpper [dict get $ctx upperBounds]
+        set savedSizes [dict get $ctx sizes]
+        BranchRelations $hir ctx $condition $outcome
+        dict set relations $outcome [list [dict get $ctx upperBounds] [dict get $ctx sizes]]
         dict set branches $outcome [Seq hir ctx $diagnose $enclosing $guard [dict get $node ${role}Body]]
+        dict set ctx upperBounds $savedUpper
+        dict set ctx sizes $savedSizes
         dict set after $outcome [dict get $ctx bindings]
+    }
+    # When only one branch can complete normally (`if i >= list::length(xs):
+    # return acc` followed by the rest of the body), whatever follows the
+    # `if` runs only on that branch's outcome: its condition relations
+    # hold there too, exactly as JoinBindings keeps the live branch's range
+    # facts.
+    foreach {outcome other} {1 0 0 1} {
+        if {[dict get $branches $other] eq {never} && [dict get $branches $outcome] ne {never}
+                && [dict exists $relations $outcome]} {
+            lassign [dict get $relations $outcome] upper sizes
+            dict set ctx upperBounds $upper
+            dict set ctx sizes $sizes
+        }
     }
     dict set ctx bindings [hir::range::JoinBindings $saved [dict get $after 1] [dict get $after 0] $branches]
     set t [dict get $branches 1]
@@ -383,9 +527,27 @@ proc hir::completions::EvalIf {hirVar ctxVar diagnose enclosing guard e node} {
 proc hir::completions::EvalLoop {hirVar ctxVar diagnose enclosing guard e node} {
     upvar 1 $hirVar hir $ctxVar ctx
     set saved [dict get $ctx bindings]
+    set relations [Relations $ctx]
     Seq hir ctx $diagnose $enclosing $guard [dict get $node body]
     dict set ctx bindings $saved
+    RestoreRelations ctx $relations
     return [hir::range::unknown]
+}
+
+# The relational facts (ctx.upperBounds, ctx.sizes) in effect: what a scope
+# whose body may run zero times, or only on some other path -- a loop body,
+# a handler -- restores when it ends, so a fact established inside it (an
+# early `return`/`break` guard: `if j >= list::length(ys): break`) never
+# outlives it.
+proc hir::completions::Relations {ctx} {
+    return [list [dict get $ctx upperBounds] [dict get $ctx sizes]]
+}
+
+proc hir::completions::RestoreRelations {ctxVar relations} {
+    upvar 1 $ctxVar ctx
+    lassign $relations upper sizes
+    dict set ctx upperBounds $upper
+    dict set ctx sizes $sizes
 }
 
 # A countloop's start/end are evaluated once, in the enclosing scope,
@@ -406,12 +568,44 @@ proc hir::completions::EvalLoop {hirVar ctxVar diagnose enclosing guard e node} 
 # EvalLoop's own case.
 proc hir::completions::EvalCountloop {hirVar ctxVar diagnose enclosing guard e node} {
     upvar 1 $hirVar hir $ctxVar ctx
-    Eval hir ctx $diagnose $enclosing $guard [dict get $node start]
+    set start [Eval hir ctx $diagnose $enclosing $guard [dict get $node start]]
     Eval hir ctx $diagnose $enclosing $guard [dict get $node end]
     set saved [dict get $ctx bindings]
+    set savedBounds [dict get $ctx indexBounds]
+    set relations [Relations $ctx]
+    NoteIndexBound hir ctx [dict get $node countBinding] $start [dict get $node end] \
+        [dict get $node direction] [dict get $node endKind]
     Seq hir ctx $diagnose $enclosing $guard [dict get $node body]
     dict set ctx bindings $saved
+    dict set ctx indexBounds $savedBounds
+    RestoreRelations ctx $relations
     return [hir::range::unknown]
+}
+
+# Records in ctx.indexBounds that the counted-loop variable BINDING
+# satisfies 0 <= BINDING < FORM throughout its loop's body, when that is
+# provable from the loop's own domain: an ascending loop whose START (Range
+# STARTRANGE) is provably >= 0 visits START, START+1, ... up to END
+# exclusive (`to`) or inclusive (`through`), so every value is below END's
+# form (END + 1 for `through`). END is evaluated once, before the first
+# iteration, and its form names only immutable values (hir/cardinality.tcl),
+# so the bound holds for the whole body. A descending loop, or a start not
+# proven nonnegative, records nothing. Read only by IndexBounds.
+proc hir::completions::NoteIndexBound {hirVar ctxVar binding startRange end direction endKind} {
+    upvar 1 $hirVar hir $ctxVar ctx
+    if {$direction ne "up" || $startRange eq {never}} {
+        return
+    }
+    set min [dict get $startRange min]
+    if {$min eq "-inf" || $min < 0} {
+        return
+    }
+    set steps 0
+    set form [hir::cardinality::IntForm $hir $end steps]
+    if {$endKind eq "inclusive"} {
+        set form [hir::cardinality::FormAdd $form [hir::cardinality::FormConst 1]]
+    }
+    dict set ctx indexBounds $binding $form
 }
 
 # A lockloop's domain operands are evaluated once, in written order, in the
@@ -420,12 +614,23 @@ proc hir::completions::EvalCountloop {hirVar ctxVar diagnose enclosing guard e n
 # conservative treatment, every domain binding left unseeded.
 proc hir::completions::EvalLockloop {hirVar ctxVar diagnose enclosing guard e node} {
     upvar 1 $hirVar hir $ctxVar ctx
+    set ranges [dict create]
     foreach operand [hir::loopOperands $node] {
-        Eval hir ctx $diagnose $enclosing $guard $operand
+        dict set ranges $operand [Eval hir ctx $diagnose $enclosing $guard $operand]
     }
     set saved [dict get $ctx bindings]
+    set savedBounds [dict get $ctx indexBounds]
+    set relations [Relations $ctx]
+    foreach domain [dict get $node domains] {
+        if {[dict get $domain kind] eq "count"} {
+            NoteIndexBound hir ctx [dict get $domain binding] [dict get $ranges [dict get $domain start]] \
+                [dict get $domain end] [dict get $domain direction] [dict get $domain endKind]
+        }
+    }
     Seq hir ctx $diagnose $enclosing $guard [dict get $node body]
     dict set ctx bindings $saved
+    dict set ctx indexBounds $savedBounds
+    RestoreRelations ctx $relations
     return [hir::range::unknown]
 }
 
@@ -457,10 +662,12 @@ proc hir::completions::EvalListloop {hirVar ctxVar diagnose enclosing guard e no
     set elementBinding [dict get $node elementBinding]
     set saved [dict get $ctx bindings]
     set savedExact [dict get $ctx exact]
+    set relations [Relations $ctx]
     set result [hir::range::unknown]
     foreach v $elements {
         dict set ctx bindings $saved
         dict set ctx exact $savedExact
+        RestoreRelations ctx $relations
         if {[core::value::kind $v] eq {int}} {
             dict set ctx bindings $elementBinding [hir::range::point [core::value::intOf $v]]
         } else {
@@ -473,6 +680,7 @@ proc hir::completions::EvalListloop {hirVar ctxVar diagnose enclosing guard e no
     }
     dict set ctx bindings $saved
     dict set ctx exact $savedExact
+    RestoreRelations ctx $relations
     return [expr {$result eq {never} ? {never} : [hir::range::unknown]}]
 }
 
@@ -524,8 +732,10 @@ proc hir::completions::LiteralListOf {hir ctx expr} {
 # core/native.tcl) the same generic way hir::range.tcl's SeedRange/Call
 # already do, PLUS one further, local fact this pass alone needs (never
 # registered on the native itself, so it can never influence native
-# lowering/codegen -- item 60-61): `char_codepoint` (lib/char.bot's
-# char::codepoint) is a Unicode scalar value, therefore always in
+# lowering/codegen -- item 60-61): `mod` with a divisor of bounded
+# magnitude is below it, and `char::scalar_value` (the root native
+# core/unicodechar.tcl registers under that qualified name; lib/char.bot's
+# char::codepoint wraps it) is a Unicode scalar value, therefore always in
 # [0, 0x10FFFF] (item 22), and when its own argument is provably an exact
 # UnicodeChar constant (a literal, or ctx.exact propagation through an
 # immutable binding -- e.g. a small-literal-list element, EvalListloop
@@ -543,7 +753,21 @@ proc hir::completions::NativeResultRange {hir ctx name argExprs argRanges} {
         lassign $argRanges x y
         return [hir::range::BitOp $name $x $y]
     }
-    if {$name eq {char_codepoint} && [llength $argExprs] == 1} {
+    if {$name eq {mod} && [llength $argRanges] == 2} {
+        # Euclidean modulo (core/primitives.tcl): every result r of
+        # mod(a, b) has 0 <= r < abs(b), so a divisor of bounded magnitude
+        # bounds the result (`mod(b, 16)` is 0..15) -- the general fact,
+        # local to this pass like char::codepoint's below.
+        set d [lindex $argRanges 1]
+        if {$d ne {never} && [dict get $d min] ne "-inf" && [dict get $d max] ne "+inf"} {
+            set m [expr {max(abs([dict get $d min]), abs([dict get $d max]))}]
+            if {$m > 0} {
+                return [dict create min 0 max [expr {$m - 1}]]
+            }
+        }
+        return [hir::range::nonneg]
+    }
+    if {$name eq {char::scalar_value} && [llength $argExprs] == 1} {
         set arg [lindex $argExprs 0]
         set v [ExactValueOf $hir $ctx $arg]
         if {$v ne {} && [core::value::kind $v] eq {UnicodeChar}} {
@@ -593,14 +817,19 @@ proc hir::completions::EvalCall {hirVar ctxVar diagnose enclosing guard e node} 
     lassign [dict get $node target] targetKind target
     if {$targetKind eq {native}} {
         set name [dict get [hir::symbol $hir $target] name]
-        # A native that declares errors (-errors, core/native.tcl: `argv`)
-        # is held to the same legality rule as any other fallible call.
-        set errors [dict get [core::native::metadata $name] errors]
-        if {$errors ne {}} {
+        # A native that declares errors (-errors, core/native.tcl: `argv`,
+        # `list::at`) is held to the same legality rule as any other
+        # fallible call, under its own call-specific facts
+        # (NativeEffectiveFacts).
+        if {[dict get [core::native::metadata $name] errors] ne {}} {
+            lassign [NativeEffectiveFacts $hir $ctx $name $argExprs $argRanges] normal errors
             if {$diagnose} {
-                CheckNativeCallLegality hir $e $name $errors {} $enclosing
+                CheckNativeCallLegality hir $e $name $normal $errors {} $enclosing
             }
             MergeErrors ctx $errors
+            if {!$normal} {
+                return never
+            }
         }
         set result [hir::range::ConstrainType $hir $e [NativeResultRange $hir $ctx $name $argExprs $argRanges]]
         dict set ctx exprs $e $result
@@ -783,13 +1012,22 @@ proc hir::completions::CheckStructuralCallLegality {hirVar e calleeType errors h
     }
 }
 
-# CheckCallLegality for a call of the root native NAME with declared ERRORS
-# (core/native.tcl -errors): every one may escape, so the one legality rule
-# is ERRORS - HANDLED subseteq ENCLOSING.
-proc hir::completions::CheckNativeCallLegality {hirVar e name errors handled enclosing} {
+# CheckCallLegality for a call of the root native NAME whose effective
+# errors under this call's facts are ERRORS (NativeEffectiveFacts: the
+# native's declared -errors, minus what the call's arguments rule out), and
+# which may complete normally iff NORMAL: a call that never can is
+# KNOWN-ERROR whatever handles it (CheckCallLegality's rule), else
+# ERRORS - HANDLED subseteq ENCLOSING.
+proc hir::completions::CheckNativeCallLegality {hirVar e name normal errors handled enclosing} {
     upvar 1 $hirVar hir
     dict set hir exprs $e effectiveErrors [lsort -unique $errors]
-    dict set hir exprs $e mayReturnNormally 1
+    dict set hir exprs $e mayReturnNormally $normal
+    if {!$normal} {
+        hir::Diagnose hir KNOWN-ERROR [format \
+            {this call of "%s" can never complete normally under the facts proven for its arguments here -- it always produces %s; a handler does not make a statically known failure legal} \
+            $name [ErrorsPhrase $errors]] $e
+        return
+    }
     foreach error $errors {
         if {$error ni $handled && $error ni $enclosing} {
             hir::Diagnose hir UNHANDLED-ERROR [format \
@@ -797,6 +1035,138 @@ proc hir::completions::CheckNativeCallLegality {hirVar e name errors handled enc
                 $name $error] $e
         }
     }
+}
+
+# {normal 0|1 errors NAMES}: the call-specific completion facts of a call
+# of the root native NAME (argument expressions ARGEXPRS, their Ranges
+# ARGRANGES here). A native's declared -errors are all effective, except
+# for the indexed-access natives (indexNatives: list::at, mutable_array::at),
+# whose IndexNotFound depends only on the arguments: IndexBounds proves it
+# impossible (the index always designates an element: no obligation) or
+# certain (it never does: the call cannot complete normally, KNOWN-ERROR) --
+# the three-way rule STATIC-COMPLETION-PROOFS.md established for exact
+# calls, applied to the one native error that is a function of its
+# arguments. Anything unproven keeps the whole declared set.
+proc hir::completions::NativeEffectiveFacts {hir ctx name argExprs argRanges} {
+    variable indexNatives
+    set errors [dict get [core::native::metadata $name] errors]
+    if {[dict exists $indexNatives $name] && [llength $argExprs] == 2} {
+        lassign $argExprs container index
+        switch -- [IndexBounds $hir $ctx [dict get $indexNatives $name] $container $index [lindex $argRanges 1]] {
+            in  { return [list 1 [lsearch -all -inline -not -exact $errors IndexNotFound]] }
+            out { return [list 0 [list IndexNotFound]] }
+        }
+    }
+    return [list 1 $errors]
+}
+
+# Whether the Int index INDEX (Range INDEXRANGE) of an indexed access to
+# CONTAINER (FAMILY list or mutarray) always designates an element (`in`),
+# never does (`out`), or neither is proven (""). Two sources of proof, both
+# from facts this program already establishes, never from a guess:
+#
+#   * a container of statically known size N -- a List whose elements are
+#     exactly known (a literal, an exact fact through immutable bindings,
+#     hir/exactvalue.tcl, or an exact list argument of this call-specific
+#     walk), or a MutableArray allocated with an exactly known capacity --
+#     against INDEXRANGE: in when it lies within 0..N-1, out when it lies
+#     entirely outside (hir::exact::BoundsOf's own rule);
+#   * relational: INDEX reads a counted-loop variable proven to satisfy
+#     0 <= i < FORM (ctx.indexBounds, NoteIndexBound) and FORM is exactly
+#     the container's own size form (hir/cardinality.tcl: list::length of
+#     the same immutable List, or the capacity of the same MutableArray --
+#     `loop i from 0 to list::length(xs): list::at(xs, i)`).
+#
+#   * branch relations (BranchRelations): INDEX reads a binding an
+#     enclosing `if` proved below the container's size form, and INDEX's
+#     own Range is provably >= 0 (`if i < 0 or i >= list::length(xs): ...
+#     else: list::at(xs, i)`, or the `and` form's then branch); or the
+#     container's size form was proven equal to an exact N (`if
+#     list::length(bytes) == 1: list::at(bytes, 0)`), which the range check
+#     above then uses.
+#
+# The relational proofs are tried first: an index they place in range is in
+# range on every path that reaches the read, so if this walk's exact ranges
+# also put it out of range, the two cannot both hold and the read is
+# unreachable here (vacuously in).
+#
+# Nothing else is attempted: no arithmetic on a bounded variable, no
+# interprocedural parameter facts.
+proc hir::completions::IndexBounds {hir ctx family container index indexRange} {
+    set steps 0
+    # The container's size as a form (structural: what hir/cardinality.tcl
+    # derives from the expression itself), plus, in a call-specific walk,
+    # the exact length of a List argument whose elements this walk knows
+    # (ctx.exactList): either one may be what a loop bound was proven
+    # against, and either one may be the constant the range check needs.
+    if {$family eq "list"} {
+        set size [hir::cardinality::ListLength $hir $container steps]
+    } else {
+        set size [hir::cardinality::Capacity $hir $container steps]
+    }
+    set sizes [list $size]
+    if {$family eq "list"} {
+        set literal [LiteralListOf $hir $ctx $container]
+        if {$literal ne {}} {
+            lappend sizes [hir::cardinality::FormConst [llength $literal]]
+        }
+    }
+    set known {}
+    foreach form $sizes {
+        if {[hir::cardinality::IsConst $form]} {
+            lappend known [lindex $form 0]
+        } elseif {[dict exists $ctx sizes $form]} {
+            lappend known [dict get $ctx sizes $form]
+        }
+    }
+    set known [lsort -unique -integer $known]
+    if {[llength $known] > 1} {
+        # Two proven sizes disagree (a branch's `list::length(xs) == 2`
+        # under this call's exact one-element xs): the facts cannot hold
+        # together, so this code is unreachable on this path and the read
+        # vacuously designates an element.
+        return in
+    }
+    # Relational facts first: when they place the index below a size this
+    # path also knows, the read designates an element -- and should the
+    # range facts below say otherwise, the facts contradict each other, so
+    # the path is unreachable and the read is vacuously in range.
+    lassign [hir::cardinality::Chase $hir $index steps] kind binding
+    if {$kind eq "binding"} {
+        if {[dict exists $ctx indexBounds $binding] && [dict get $ctx indexBounds $binding] in $sizes} {
+            return in
+        }
+        if {$indexRange ne {never} && [dict exists $ctx upperBounds $binding]
+                && [dict get $indexRange min] ne "-inf" && [dict get $indexRange min] >= 0} {
+            foreach form [dict get $ctx upperBounds $binding] {
+                if {$form in $sizes} {
+                    return in
+                }
+            }
+        }
+    }
+    set n [lindex $known 0]
+    if {$indexRange ne {never} && $n ne ""} {
+        set lo [dict get $indexRange min]
+        set hi [dict get $indexRange max]
+        if {$lo ne "-inf" && $hi ne "+inf" && $lo >= 0 && $hi < $n} {
+            return in
+        }
+        if {($hi ne "+inf" && $hi < 0) || ($lo ne "-inf" && $lo >= $n)} {
+            return out
+        }
+        set exact [hir::range::ExactOf $indexRange]
+        if {$exact ne ""} {
+            set inside [lmap i $exact {expr {$i >= 0 && $i < $n ? $i : [continue]}}]
+            if {[llength $inside] == [llength $exact]} {
+                return in
+            }
+            if {$inside eq ""} {
+                return out
+            }
+        }
+    }
+    return ""
 }
 
 proc hir::completions::ErrorsPhrase {names} {
@@ -842,13 +1212,14 @@ proc hir::completions::EvalHandle {hirVar ctxVar diagnose enclosing guard e node
             }
         } elseif {$targetKind eq {native}
                 && [dict get [core::native::metadata [dict get [hir::symbol $hir $target] name]] errors] ne {}} {
-            # A handled call of a native with declared errors (`argv`).
+            # A handled call of a native with declared errors (`argv`,
+            # `list::at`).
             set name [dict get [hir::symbol $hir $target] name]
-            set normal 1
-            set errors [dict get [core::native::metadata $name] errors]
-            set callResult [hir::range::ConstrainType $hir $call [hir::range::unknown]]
+            lassign [NativeEffectiveFacts $hir $ctx $name $argExprs $argRanges] normal errors
+            set callResult [hir::range::ConstrainType $hir $call \
+                [NativeResultRange $hir $ctx $name $argExprs $argRanges]]
             if {$diagnose} {
-                CheckNativeCallLegality hir $e $name $errors $handled $enclosing
+                CheckNativeCallLegality hir $e $name $normal $errors $handled $enclosing
             }
         } else {
             set normal 1
@@ -893,8 +1264,10 @@ proc hir::completions::EvalHandle {hirVar ctxVar diagnose enclosing guard e node
             }
         }
         set saved [dict get $ctx bindings]
+        set relations [Relations $ctx]
         set r [Seq hir ctx $diagnose $enclosing $guard $body]
         dict set ctx bindings $saved
+        RestoreRelations ctx $relations
         if {$r ne {never}} {
             lappend liveResults $r
         }
