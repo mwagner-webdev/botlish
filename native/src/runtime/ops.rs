@@ -31,6 +31,9 @@
 //! | rt_str_utf8_bytes      | Str                 | List of Int (0..255); RANGE  | yes       |
 //! | rt_argv                |                     | List of Str; declared        | yes       |
 //! |                        |                     | InvalidArgumentEncoding      |           |
+//! | rt_linux_x86_64_syscall| 7 Ints (i64 words)  | Int: raw rax, signed (see    | big Ints  |
+//! |                        | rax rdi rsi rdx r10 | runtime/syscall.rs); TYPE if |           |
+//! |                        | r8 r9               | an operand is no i64 word    |           |
 //! | rt_is_tcl_alpha        | Str (1 scalar)      | Bool; RANGE if not 1 scalar  | no        |
 //! | rt_is_tcl_alnum        | Str (1 scalar)      | Bool; RANGE if not 1 scalar  | no        |
 //! | rt_str_region_is_tcl_alpha | Str,Int,Int (region, 1 scalar) | Bool; RANGE | no    |
@@ -61,6 +64,7 @@
 
 use super::construct::{rt_construct, rt_plan_materialize};
 use super::error::{semantic_kind, RtError};
+use super::syscall::rt_linux_x86_64_syscall;
 use super::value::*;
 use super::vm::{current_program, Vm, NativeInfo};
 use crate::nir::OpCode;
@@ -85,6 +89,9 @@ pub fn op_may_allocate(op: OpCode) -> bool {
         IAdd | ISub | IMul | IAnd | IOr | IXor | IShl | IShr | Substr | DecodeCharAt | ShortToStr | AsciiToStr | StrLower | StrCat
             | StrUtf8Bytes | Argv | ListNew | ListAppend | MutArrayAllocate | MutArrayFreeze | MkOk | MkError
             | SetFromList
+            // The raw rax result is boxed as a BigInt when it is outside the
+            // small-Int range (runtime/syscall.rs).
+            | SyscallLinuxX86_64
             // Same allocation behavior as SetFromList (same runtime helper,
             // same `new_set` construction) -- only its own `op_may_error`
             // classification differs. See SetFromListTotal's own doc
@@ -99,6 +106,10 @@ pub fn op_may_allocate(op: OpCode) -> bool {
 pub fn op_may_error(op: OpCode) -> bool {
     use OpCode::*;
     matches!(op, IMod | IShl | IShr | VEq | Hash | Substr | StrCat | StrUtf8Bytes | Argv | StrIsTclAlpha | StrIsTclAlnum
+        // Only on an operand that is not a 64-bit register word (TYPE, never
+        // a truncation: runtime/syscall.rs), which a checked program cannot
+        // produce. The kernel's own result is never an error here.
+        | SyscallLinuxX86_64
         | ListNew | ListGet | ListAppend | MutArrayAllocate | MutArrayGet | MutArraySet | MutArrayCopy | MutArrayFreeze
         | ResultValue | ResultError | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum
         // Construction (dedup) and membership (a linear equal-scan) can
@@ -1496,7 +1507,10 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         RegionCheck | RegionEq | RBox | RUnbox | RIAdd | RISub | RIMul | RILt | RILe | RIGt | RIGe | RIEq
         | RIShr | RIShl | StrToShort | ShortToStr | ShortLen | ShortEq | StrSliceShort | StrToAscii | AsciiToStr
         | AsciiLen | AsciiEq | AsciiToShort | AsciiShortEq
-        | DecodeCharAt | StrByteLen | StrRegionIsTclAlpha | StrRegionIsTclAlnum => {
+        | DecodeCharAt | StrByteLen | StrRegionIsTclAlpha | StrRegionIsTclAlnum
+        // linux::abi::syscall is never a value (hir/syscall.tcl rejects any
+        // use but a direct call), so no Native value ever dispatches to it.
+        | SyscallLinuxX86_64 => {
             // Raw (untagged) representation ops, StringRegion ops and String
             // traversal ops never implement a dynamic native: native/lower.tcl
             // emits them only directly, as `op` instructions inline in a
@@ -1550,6 +1564,7 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_str_cat, 3),
         h!(rt_str_utf8_bytes, 2),
         h!(rt_argv, 1),
+        h!(rt_linux_x86_64_syscall, 8),
         h!(rt_is_tcl_alpha, 2),
         h!(rt_is_tcl_alnum, 2),
         h!(rt_str_region_is_tcl_alpha, 4),

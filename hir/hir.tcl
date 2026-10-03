@@ -394,6 +394,7 @@ proc hir::CheckOnce {hirVar demote} {
     hir::callables::verify hir
     hir::lockstep::verify hir
     hir::structs::verify hir
+    hir::syscall::verify hir
     hir::semantic::verify hir
     hir::errorsets::verify hir
     hir::modulebinding::validate hir
@@ -797,7 +798,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {syntax resolve refcheck hygiene sourcetypes structs errordecls types exactvalue signatures modulebinding refine lower format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep warnings} {
+    foreach file {syntax resolve refcheck hygiene sourcetypes structs syscall errordecls types exactvalue signatures modulebinding refine lower format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep warnings} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

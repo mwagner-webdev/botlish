@@ -1358,6 +1358,15 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 self.def(*dst, v);
             }
             Inst::Op { dst, op, args } => {
+                if *op == OpCode::SyscallLinuxX86_64 && !cfg!(all(target_arch = "x86_64", target_os = "linux")) {
+                    // The x86-64 Linux syscall transport is the only one
+                    // Botlish has: never compiled for another target, where
+                    // its register convention would mean something else.
+                    return Err(BackendError::Codegen(
+                        "linux::abi::syscall is the Linux x86-64 syscall transport: this target is not Linux x86-64"
+                            .to_string(),
+                    ));
+                }
                 let v = self.op(*op, args);
                 if op.result_kind() != nir::RegKind::Tagged {
                     self.def_raw(*dst, v);
@@ -1727,6 +1736,20 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         // sets the pending declared id before returning
                         // NO_VALUE, so `check` routes it like a `fail`).
                         Argv => ("rt_argv", None, true, Some(("argv", KIND_LIST))),
+                        // linux::abi::syscall: seven Int operands (rax, then
+                        // arguments 1-6), the raw rax back as an Int. Always
+                        // a real helper call (never inline CLIF): Cranelift
+                        // treats a call as reading and writing all memory,
+                        // clobbering every caller-saved register, and never
+                        // merges, hoists or deletes it. The helper itself
+                        // executes the `syscall` instruction
+                        // (runtime/syscall.rs). It allocates only a BigInt
+                        // result outside the small-Int range; fallible only
+                        // on an operand that is no 64-bit word (TYPE: an
+                        // unchecked program's unproven Register64).
+                        SyscallLinuxX86_64 => {
+                            ("rt_linux_x86_64_syscall", None, true, Some(("syscall", KIND_BIGINT)))
+                        }
                         // Never allocate (a Bool result, like StrEq); fallible
                         // (RANGE) on an operand that is not one Unicode scalar,
                         // like RegionCheck -- see ops.rs's rt_is_tcl_alpha/alnum.

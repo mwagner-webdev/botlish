@@ -342,7 +342,17 @@ proc surface::lower::Node {node} {
             # purely for display (hir::format, diagnostics): no local
             # binding can ever spell "::", so it is never ambiguous with an
             # ordinary reference even where shown together.
-            set ref [hir::syntax::refNode $origin "[dict get $node namespace]::[dict get $node name]"]
+            set qualifiedName "[dict get $node namespace]::[dict get $node name]"
+            if {[core::native::isQualifiedNative $qualifiedName]} {
+                # A root native whose registered name is itself qualified
+                # (linux::abi::syscall, core/linuxabi.tcl): a root
+                # reference, exactly like a bare `argv` -- there is no
+                # module file behind it (surface/modules.tcl's
+                # CollectAndLoad skips it the same way), and since no local
+                # binding can spell "::" it can never be shadowed.
+                return [hir::syntax::rootRef $origin $qualifiedName]
+            }
+            set ref [hir::syntax::refNode $origin $qualifiedName]
             dict set ref qualified [list [dict get $node namespace] [dict get $node name]]
             return $ref
         }

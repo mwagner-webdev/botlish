@@ -28,6 +28,10 @@
 #                            declaration's (a named (struct ...) whose field
 #                            names differ from the declared ones; HIR rules
 #                            this out for a checked program)
+#   NATIVE-ONLY              an operation only the native backend performs
+#                            (linux::abi::syscall's raw kernel transition,
+#                            core/linuxabi.tcl) was called on a Tcl backend,
+#                            which deliberately does not imitate it
 #
 # A checked program's struct diagnostics are HIR diagnostics (hir/structs.tcl,
 # hir/resolve.tcl), reported with these kinds: UNKNOWN-STRUCT, DUPLICATE-FIELD,

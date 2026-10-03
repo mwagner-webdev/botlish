@@ -668,7 +668,7 @@ test demand-eligibility-only-mode-is-the-preliminary-plan {-raw-demand-opt 0 sel
         [conversionsIn $nir wrap]
 } -result {wrap<int>=raw>val {0 0} {1 0}}
 
-test demand-tagged-only-result {a bounded closed result whose every caller hands it to a tagged consumer is eligible but returned tagged, with no result conversion at the caller; its parameter, also returned, is boxed (a mixed use)} -body {
+test demand-tagged-only-result {a bounded closed result whose every caller hands it to a tagged consumer is eligible but returned tagged, with no result conversion at the caller; its parameter, also returned, is boxed (a mixed use). UPDATED BY LINUX-X86-64-SYSCALL: the instance's `n < 3` is decided (n in 1..2) and is a pure comparison of a parameter register and a constant, so it is no longer evaluated at all (native/lower.tcl's PureDecidedCondition) -- the one `runbox` its dead raw comparison used to need is gone} -body {
     set text {
         fn pick(n):
             if n < 3:
@@ -681,7 +681,7 @@ test demand-tagged-only-result {a bounded closed result whose every caller hands
     set nir [nirOf $text {*}$noInline]
     list [abiDemandPlan $text {*}$noInline] [abiReasons $text pick<int> {*}$noInline] \
         [physical [fnText $nir pick]] [conversionsIn $nir pick] [conversionsIn $nir <program>] [parityAbi $text]
-} -result {pick<int>=supp>supp {suppressed-mixed-tagged-use suppressed-no-raw-demand} {{} 0} {0 1} {0 0} {value:[1, 2]}}
+} -result {pick<int>=supp>supp {suppressed-mixed-tagged-use suppressed-no-raw-demand} {{} 0} {0 0} {0 0} {value:[1, 2]}}
 
 test demand-raw-parameter {a parameter used by raw arithmetic is selected raw whatever its result does} -body {
     set text {

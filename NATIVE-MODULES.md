@@ -75,8 +75,10 @@ fn uri_escape_text(s):
 is a syntax error). A file without one is an ordinary/entry program,
 exactly as before this milestone -- every existing `examples/surface/*.bot`
 file is unaffected. Reference syntax is `mod::name`, a primary expression
-(`IDENT "::" IDENT`; only one level -- `a::b::c` is a syntax error, no
-syntax resolves it as nested namespaces or anything else).
+(`IDENT "::" IDENT`). (Originally only one level; LINUX-X86-64-SYSCALL.md
+added nested namespaces: `a::b::c` is member `c` of namespace `a::b`, which
+lives in `lib/a/b.bot` -- one directory per leading segment -- and is a
+module unrelated to `a`.)
 
 No import statement of any kind exists. §5 of the milestone asked whether
 the existing structure could discover dependencies from qualified

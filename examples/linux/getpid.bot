@@ -1,0 +1,28 @@
+# getpid.bot -- the canonical demonstration of Botlish's raw Linux x86-64
+# syscall path (LINUX-X86-64-SYSCALL.md):
+#
+#   Botlish Int --abi::x86_64::register64--> Register64 (one register word)
+#     --linux::abi::syscall--> the x86-64 `syscall` instruction
+#     --> raw rax as a Register64 --abi::x86_64::to_int--> Botlish Int
+#
+# raw_getpid is ordinary Botlish except for its one call of the generic
+# syscall intrinsic: 39 is the Linux x86-64 syscall number of getpid, and it
+# is ordinary data here -- the compiler knows nothing about getpid. Omitted
+# argument registers (rdi ... r9) are zero.
+#
+# Native backend only (cranelift, or a standalone executable from
+# `tclsh9.0 main.tcl -emit-native-executable examples/linux/getpid.bot`);
+# the Tcl backends refuse the call with the semantic error NATIVE-ONLY.
+#
+# expect (native): [PID > 0, the same PID twice] -> [true, true]
+
+fn raw_getpid():
+    abi::x86_64::to_int(
+        linux::abi::syscall({
+            rax: abi::x86_64::register64(39),
+        })
+    )
+
+a = raw_getpid()
+b = raw_getpid()
+[a > 0, a == b]

@@ -1,0 +1,10 @@
+# audit/linux-x86-64-syscall/tools/fuzz.tcl -- the pure Int -> Register64 -> Int
+# conversions only (no syscall is executed by the fuzzer). Recorded 2026-10-03.
+
+$ tclsh9.0 audit/linux-x86-64-syscall/tools/fuzz.tcl -n 200 -seed 1
+register64-fuzz programs 200 values 40000 out-of-range 9975 constant-checks 2000 failures 0
+(backends: interp compile cranelift-generic cranelift; wall time 2m34.756s)
+
+$ tclsh9.0 audit/linux-x86-64-syscall/tools/fuzz.tcl -n 30 -seed 5001 -gc-stress 1 -backends "cranelift-generic cranelift"
+register64-fuzz programs 30 values 6000 out-of-range 1499 constant-checks 300 failures 0
+(native backends under BOTLISH_NATIVE_GC_STRESS=1, which -gc-stress 1 sets; wall time 0m13.640s)

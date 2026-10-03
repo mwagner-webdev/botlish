@@ -165,6 +165,16 @@ pub enum OpCode {
     /// `faildeclared` of that id does, so an enclosing `handle` matches it
     /// like any other declared error.
     Argv,
+    /// `linux::abi::syscall` (core/linuxabi.tcl, LINUX-X86-64-SYSCALL.md):
+    /// the raw Linux x86-64 kernel transition. Seven operands, the Ints
+    /// (each proven in -2^63..2^63-1: an abi::x86_64::Register64's word)
+    /// for RAX (the syscall number) and RDI, RSI, RDX, R10, R8, R9
+    /// (arguments 1-6; native/lower.tcl passes the Int 0 for an argument
+    /// the source omitted). The result is the raw RAX afterwards, read as a
+    /// signed 64-bit Int -- no errno or other interpretation. Executes the
+    /// `syscall` instruction itself (runtime/syscall.rs); never removed,
+    /// merged or reordered (a helper call); Linux x86-64 targets only.
+    SyscallLinuxX86_64,
     /// Tcl 9-compatible Unicode alpha/alnum character classification
     /// (core/tclcompat.tcl's `is_tcl_alpha`/`is_tcl_alnum`): the operand is
     /// a one-Unicode-scalar String (RANGE if not). TEMPORARY compatibility
@@ -341,6 +351,7 @@ impl OpCode {
             "strbytelen" => StrByteLen,
             "strutf8bytes" => StrUtf8Bytes,
             "argv" => Argv,
+            "syscall_linux_x86_64" => SyscallLinuxX86_64,
             "strtclalpha" => StrIsTclAlpha,
             "strtclalnum" => StrIsTclAlnum,
             "strregiontclalpha" => StrRegionIsTclAlpha,
@@ -378,6 +389,7 @@ impl OpCode {
         match self {
             ListNew => None,
             Argv => Some(0),
+            SyscallLinuxX86_64 => Some(7),
             StrLen | StrLower | ListLen | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList | IsMutArray
             | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | RBox | RUnbox
             | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharCodepoint | SetFromList

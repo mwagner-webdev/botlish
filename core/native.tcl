@@ -91,6 +91,12 @@
 #                                     the result is a List[T]; a raw
 #                                     `mutarray` argument keeps the declared
 #                                     result
+#                     named-struct ID   the result is a struct of the
+#                                     named declaration ID ("abi::x86_64::
+#                                     Register64"), resolved lazily in the
+#                                     compiling program's struct registry
+#                                     (hir/structs.tcl); the declared
+#                                     result type when ID is not declared
 #                     typed NAME LO HI  every element is an Int in LO..HI (a
 #                                     fixed fact about the native itself, not
 #                                     derived from this call's own arguments);
@@ -156,9 +162,12 @@ namespace eval core::native {
     #   set-alloc            allocates a new ImmutableSet (core/immutableset.tcl)
     #   process-argv         reads the process argument snapshot of the run
     #                        (core/process.tcl; ARGV.md)
+    #   raw-syscall          executes a raw Linux x86-64 kernel transition
+    #                        (the `syscall` instruction) with unknown effects
+    #                        (core/linuxabi.tcl; LINUX-X86-64-SYSCALL.md)
     variable runtimeTags {bigint string-alloc list-alloc result-alloc char-index
         range-check structural-equality evidence mutarray-alloc mutarray-mutate hash set-alloc
-        process-argv}
+        process-argv raw-syscall}
     # NAME -> 1: the errors the runtime itself declares, visible in every
     # program like a root native and never part of a program's own `error`
     # declarations (hir/errordecls.tcl). Only a native's -errors may name one;
@@ -298,6 +307,15 @@ proc core::native::ValidShape {shape count} {
     if {[catch {llength $shape} length]} {
         return 0
     }
+    if {[lindex $shape 0] eq {named-struct}} {
+        # {named-struct ID}: the result is a struct of the named declaration
+        # ID (linux::abi::syscall's abi::x86_64::Register64), a fixed fact
+        # about the native itself. ID is a symbolic declaration identity,
+        # resolved lazily by hir::types::ShapeResult against the compiling
+        # program's own struct registry (a library struct is declared by a
+        # .bot module long after core bootstrap registers the native).
+        return [expr {$length == 2 && [regexp {^[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*$} [lindex $shape 1]]}]
+    }
     if {[lindex $shape 0] eq {typed}} {
         # {typed NAME LO HI}: every element of the result List is an Int
         # in LO..HI -- a semantic fact this native's own implementation
@@ -392,6 +410,15 @@ proc core::native::failDeclared {name message} {
 proc core::native::names {} {
     variable registry
     return [dict keys $registry]
+}
+
+# 1 if NAME is a registered native whose name is itself namespace-qualified
+# ("linux::abi::syscall", core/linuxabi.tcl): source spells it exactly like
+# a module function, but it is a root native, and no module file defines it
+# (surface/modules.tcl, surface/lower.tcl).
+proc core::native::isQualifiedNative {name} {
+    variable registry
+    return [expr {[string first :: $name] > 0 && [dict exists $registry $name]}]
 }
 
 # Declares ALIASNAME a second, purely compile-time spelling of the already-

@@ -6,7 +6,8 @@
 # already turned into NEWLINE / INDENT / DEDENT tokens:
 #
 #   program      = [ namespaceDecl ] { NEWLINE | topStatement } EOF
-#   namespaceDecl = "namespace" IDENT NEWLINE
+#   namespaceDecl = "namespace" path NEWLINE
+#   path         = IDENT { "::" IDENT }  -- a namespace: one or more segments
 #   topStatement = typeDecl | structDecl | errorDecl | statement
 #   statement    = simple NEWLINE | valued | function | if | loop
 #   simple       = binding | destructure | return | break | continue | fail
@@ -99,7 +100,9 @@
 #   postfix      = primary { "(" [ arguments ] ")" | "." IDENT [ "(" [ arguments ] ")" ] }
 #   arguments    = expression { "," expression } [ "," ]
 #   primary      = INT | STRING | CHAR | "true" | "false" | "unit"
-#                | IDENT [ "::" IDENT ] [ fieldInits ]
+#                | IDENT { "::" IDENT } [ fieldInits ]
+#                  -- "a::b::c": member c of namespace a::b (every segment
+#                     but the last is the namespace path)
 #                | fieldInits
 #                | "[" [ arguments ] "]" | "(" expression ")"
 #   fieldInits   = "{" [ fieldInit { "," fieldInit } [ "," ] ] "}"
@@ -263,19 +266,28 @@ proc surface::parser::Program {pVar} {
         namespace $namespaceName namespaceSpan $namespaceSpan]
 }
 
-# "namespace" IDENT NEWLINE, as the very first statement of a file (a
+# "namespace" PATH NEWLINE, as the very first statement of a file (a
 # declaration, not an ordinary statement: it introduces no HIR node -- see
-# surface/modules.tcl). Returns {NAME SPAN}.
+# surface/modules.tcl). PATH is one or more IDENT segments joined by "::"
+# (`namespace abi::x86_64`: a nested namespace, lib/abi/x86_64.bot). Returns
+# {NAME SPAN}, NAME the whole path.
 proc surface::parser::NamespaceDecl {pVar} {
     upvar 1 $pVar p
     Advance p
-    set name [Expect p IDENT "a namespace name after \"namespace\""]
+    set first [Expect p IDENT "a namespace name after \"namespace\""]
+    set segments [list [dict get $first value]]
+    set last $first
+    while {[Kind p] eq "::"} {
+        Advance p
+        set last [Expect p IDENT "a namespace name after \"::\""]
+        lappend segments [dict get $last value]
+    }
     set token [Peek p]
     if {[dict get $token kind] ne "NEWLINE"} {
         Fail $token "expected end of line, found [Describe $token]"
     }
     Advance p
-    return [list [dict get $name value] [dict get $name span]]
+    return [list [join $segments ::] [surface::ast::cover [dict get $first span] [dict get $last span]]]
 }
 
 # Statements up to a token of a kind in STOP (not consumed).
@@ -569,10 +581,11 @@ proc surface::parser::TypeExpr {pVar what} {
     if {$name eq "Fn"} {
         return [FnType p $token]
     }
-    if {[Kind p] eq "::"} {
+    while {[Kind p] eq "::"} {
         # A module-qualified type name (STRUCTS.md): "geo::Point" names the
-        # struct Point declared by module geo. Kept as the one bare-name
-        # string "geo::Point", so every bare-name consumer keeps working.
+        # struct Point declared by module geo, "abi::x86_64::Register64" the
+        # struct Register64 of the nested namespace abi::x86_64. Kept as the
+        # one bare-name string, so every bare-name consumer keeps working.
         Advance p
         set member [Expect p IDENT "a type name after \"::\""]
         set name "${name}::[dict get $member value]"
@@ -1301,19 +1314,31 @@ proc surface::parser::Primary {pVar} {
         IDENT {
             Advance p
             if {[Kind p] eq "::"} {
+                # NAMESPACE::member, NAMESPACE possibly nested: every segment
+                # but the last is the namespace path ("abi::x86_64::register64"
+                # is member register64 of namespace abi::x86_64).
+                set segments [list [dict get $token value]]
+                set namespaceSpan $span
                 Advance p
                 set member [Expect p IDENT "a name after \"::\""]
+                while {[Kind p] eq "::"} {
+                    lappend segments [dict get $member value]
+                    set namespaceSpan [surface::ast::cover $span [dict get $member span]]
+                    Advance p
+                    set member [Expect p IDENT "a name after \"::\""]
+                }
+                set namespaceName [join $segments ::]
                 if {[Kind p] eq "\{"} {
                     # NAMESPACE::Struct { ... }: a named struct construction
                     # (STRUCTS.md) through module qualification.
                     set nameSpan [SpanFrom p $span]
                     set init [FieldInits p]
                     return [surface::ast::node namedstruct [SpanFrom p $span] \
-                        namespace [dict get $token value] \
+                        namespace $namespaceName \
                         name [dict get $member value] nameSpan $nameSpan init $init]
                 }
                 return [surface::ast::node qualname [SpanFrom p $span] \
-                    namespace [dict get $token value] namespaceSpan $span \
+                    namespace $namespaceName namespaceSpan $namespaceSpan \
                     name [dict get $member value] nameSpan [dict get $member span]]
             }
             if {[Kind p] eq "\{"} {

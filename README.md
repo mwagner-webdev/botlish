@@ -392,6 +392,7 @@ A native that breaks its declared type contract (§8) raises
 | `list_get` | list, int → any (the element at `0 <= i < length`, else `RANGE`) | |
 | `list_append` | list, any → list (a new list; the argument is unchanged) | |
 | `argv` | → `List[String]`, errors `InvalidArgumentEncoding`: the process argument vector including argument zero, each argument validated as UTF-8 by the call (ARGV.md) | |
+| `linux::abi::syscall` | `{rax: R, rdi: R, …, r9: R}` → `abi::x86_64::Register64` (R a Register64): the raw Linux x86-64 kernel transition, raw rax back; omitted argument registers are zero; native backend only (Tcl backends: `NATIVE-ONLY`); a qualified root native, callable only directly (LINUX-X86-64-SYSCALL.md) | |
 | `Emailish?` | str → bool, type test of `Emailish` (library `web`) | true: arg 0 : `Emailish` |
 | `UriQueryValue?` | str → bool, type test of `UriQueryValue` (library `web`) | true: arg 0 : `UriQueryValue` |
 | `uriEscape` | str → `UriQueryValue` (library `web`) | |
@@ -408,8 +409,8 @@ core::registerNative even? -arity 1 -impl myEvenImpl -refines-true {0 Even}
 `-runtime {TAG…}` states what a native implementation of the operation
 needs from a runtime beyond bare machine operations: `bigint`,
 `string-alloc`, `list-alloc`, `result-alloc`, `char-index`, `range-check`,
-`structural-equality`, `evidence`, `process-argv` (`core/native.tcl` defines
-each). It is metadata for static analysis (§19) and never changes what a call
+`structural-equality`, `evidence`, `process-argv`, `raw-syscall`
+(`core/native.tcl` defines each). It is metadata for static analysis (§19) and never changes what a call
 does.
 
 `-errors {NAME…}` declares the builtin errors (`core::native::declareError`)
@@ -517,6 +518,7 @@ refinement unless its contract explicitly establishes one. So
 | `core/regex.tcl` | engine-independent regex IR, lowered to Tcl ARE |
 | `core/primitives.tcl`, `core/predicates.tcl`, `core/strings.tcl`, `core/lists.tcl` | builtin natives |
 | `core/process.tcl` | the process boundary: `argv()`, its builtin error, argv injection (ARGV.md) |
+| `core/linuxabi.tcl` | `linux::abi::syscall`, the raw Linux x86-64 kernel transition (native only; LINUX-X86-64-SYSCALL.md) |
 | `lib/web.tcl` | optional demonstration library (`core::loadLibrary web`): `Emailish`, `UriQueryValue`, `uriEscape` |
 | `hir/hir.tcl` | HIR data model, ids, `hir::build`, queries |
 | `hir/syntax.tcl` | syntax nodes: HIR's input, and core IR → syntax |
@@ -531,12 +533,14 @@ refinement unless its contract explicitly establishes one. So
 | `hir/specialize.tcl` | call-site specialization: instances, result fixpoint, views for `hir::aot` (§21) |
 | `hir/exactvalue.tcl` | exact-value facts and value identity (`hir::exact::Of`, `Identity`, `SameValue`) |
 | `hir/warnings.tcl` | compiler warnings: record, static registry, global policy, rendering, error promotion, and `SAME-RETURN-VALUE` (§23) |
+| `hir/syscall.tcl` | the static contract of `linux::abi::syscall`'s register-struct argument (LINUX-X86-64-SYSCALL.md) |
 | `compiler/compiler.tcl` | HIR → Tcl compiler backend |
 | `native/lower.tcl` | HIR → NIR native lowering (§20) |
 | `native/native.tcl` | the native entry points, all taking HIR: `native::lowered` (the one HIR → NIR entry), `evalHir` (JIT), NIR, CLIF, object, executable, code size and guard report; runs the native driver |
 | `native/prepare.tcl` | `native::prepareHir`: attaches the native implementations a program calls (module functions, validator bodies) to its HIR |
 | `native/src/nir.rs` | NIR parsing and validation |
-| `native/src/runtime/` | native `Value` representation, heap and collector, errors, runtime helper ABI |
+| `native/src/runtime/` | native `Value` representation, heap and collector, errors, runtime helper ABI; `syscall.rs` holds the one inline-asm `syscall` boundary (LINUX-X86-64-SYSCALL.md) |
+| `lib/abi/x86_64.bot` | `abi::x86_64::Register64`, the x86-64 register word as a transport value, and its two conversions (LINUX-X86-64-SYSCALL.md) |
 | `native/src/codegen/` | the `Backend` interface; NIR → Cranelift IR for JIT and object files |
 | `surface/lexer.tcl` | source → tokens, indentation → `INDENT`/`DEDENT` |
 | `surface/parser.tcl` | tokens → surface AST (recursive descent) |
@@ -1418,7 +1422,12 @@ must be context-free and must retain a transitively immutable result; there
 are no mutable module bindings or top-level expression statements. `NAME`
 maps to exactly one file, `lib/NAME.bot` (`core::libraryDir`, the same
 directory as the existing `lib/NAME.tcl` native-library convention) -- no
-search path, so there is never more than one candidate file for a name.
+search path, so there is never more than one candidate file for a name. A
+nested namespace `a::b` (`namespace a::b`, used as `a::b::symbol`) is the file
+`lib/a/b.bot`, one directory per leading segment; `a` and `a::b` are unrelated
+modules (LINUX-X86-64-SYSCALL.md). A root native may itself carry a qualified
+name (`linux::abi::syscall`): it is spelled like a module definition but
+resolves to the root native, and no module may define that member.
 Another file uses a module definition as `NAME::symbol`: an ordinary,
 non-aliasable qualified reference (no `import`; dependencies are discovered
 from qualified references transitively and loaded at most once). `::` is

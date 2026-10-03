@@ -12,6 +12,7 @@
 #   hir::escape::paramVirtualShape $analysis $instanceId $bindingId  -> {ID LAYOUT} | ""
 #   hir::escape::paramWants $analysis $instanceId     -> 0 | 1
 #   hir::escape::directProjection $analysis $instanceId $e  -> {N SHAPE} | ""
+#   hir::escape::registerWord $analysis $instanceId $e      -> {N SHAPE} | ""
 #   hir::escape::census $analysis                     -> one record per struct construction
 #   hir::escape::classify $hir $spec $analysis $instanceId $e   -> "" | {local DESC {}} | {remote DESC TARGETS}
 #
@@ -189,7 +190,16 @@ proc hir::escape::Classify {hir instance arity e {structOpts {}}} {
     set node [hir::node $hir $e]
     lassign [dict get $node target] targetKind target
     if {$targetKind eq "native"} {
-        if {[dict get [hir::symbol $hir $target] name] ne "list"} {
+        set name [dict get [hir::symbol $hir $target] name]
+        if {$name eq "linux::abi::syscall"} {
+            # The raw kernel transition builds its result, an abi::x86_64::
+            # Register64, from one word (the rax it returns): a local
+            # construction of that one-field shape, exactly as a struct
+            # literal is (native/lower.tcl's SyscallCall hands back the op's
+            # result register as the field; LINUX-X86-64-SYSCALL.md).
+            return [SyscallResult $hir $e $structOpts]
+        }
+        if {$name ne "list"} {
             return ""
         }
         set n [llength [dict get $node args]]
@@ -258,6 +268,45 @@ proc hir::escape::ClassifyIf {hir instance arity e structOpts} {
         return ""
     }
     return [list [expr {$targets eq "" ? "local" : "remote"}] $desc [lsort -unique $targets]]
+}
+
+# linux::abi::syscall's result (call E) as a recognized construction: {local
+# {1 {ID LAYOUT}} {}} when its static type is the declared abi::x86_64::
+# Register64 (hir::types::ShapeResult's named-struct result), "" otherwise.
+proc hir::escape::SyscallResult {hir e structOpts} {
+    if {![StructEnabled $structOpts]} {
+        return ""
+    }
+    set type [hir::typeOf $hir $e]
+    set id [core::linuxabi::registerType]
+    if {$type ne [list nstruct $id] || ![hir::structs::declared $id]} {
+        return ""
+    }
+    set layout [hir::structs::names $id]
+    if {[llength $layout] != 1} {
+        return ""
+    }
+    return [list local [list 1 [list $id $layout]] {}]
+}
+
+# The register field expressions of linux::abi::syscall call E (VIEW) whose
+# argument is an inline struct literal: each is consumed only by reading its
+# Register64's one word (native/lower.tcl's SyscallCall), never as an object
+# -- the literal itself is never built. "" for any other expression.
+proc hir::escape::SyscallFields {view e} {
+    if {[hir::kind $view $e] ne "call"} {
+        return ""
+    }
+    set node [hir::node $view $e]
+    lassign [dict get $node target] targetKind target
+    if {$targetKind ne "native" || [dict get [hir::symbol $view $target] name] ne "linux::abi::syscall"} {
+        return ""
+    }
+    set args [dict get $node args]
+    if {[llength $args] != 1 || [hir::kind $view [lindex $args 0]] ne "struct"} {
+        return ""
+    }
+    return [hir::get $view [lindex $args 0] fields]
 }
 
 # 0 1 ... N-1, as a list (for checking a struct node's slot permutation).
@@ -706,6 +755,9 @@ proc hir::escape::RegionInfo {hir spec id} {
     set argPos [dict create]
     set projByRecv [dict create]
     set bindValue [dict create]
+    # A register field of an inline linux::abi::syscall literal (SyscallFields)
+    # -> 1: read for its one word, like a projection of that word.
+    set wordUse [dict create]
     foreach e $exprs {
         switch -- [hir::kind $view $e] {
             block {
@@ -736,6 +788,9 @@ proc hir::escape::RegionInfo {hir spec id} {
                         && [llength $args] == 2} {
                     dict set listGetByArg [lindex $args 0] $e
                 }
+                foreach f [SyscallFields $view $e] {
+                    dict set wordUse $f 1
+                }
                 set callee ""
                 if {$targetKind eq "block" && [dict exists [dict get $instance calls] $e]} {
                     set callee [dict get [dict get $instance calls] $e]
@@ -754,7 +809,7 @@ proc hir::escape::RegionInfo {hir spec id} {
     return [dict create view $view instance $instance region $region exprs $exprs \
         trailing $trailing captured $captured refsByBinding $refsByBinding \
         listGetByArg $listGetByArg argPos $argPos projByRecv $projByRecv \
-        bindValue $bindValue parent $parent loopOf $loopOf]
+        bindValue $bindValue wordUse $wordUse parent $parent loopOf $loopOf]
 }
 
 # {PARENT LOOPOF} of the region whose top-level body is TOPBODY (VIEW): PARENT
@@ -1155,12 +1210,18 @@ proc hir::escape::UseVerdict {candidates regions aliasOf id b desc isParam bindE
     set bindValue [dict get $info bindValue]
     set loopOf [dict get $info loopOf]
     set bindLoop [expr {$bindExpr eq "" || ![dict exists $loopOf $bindExpr] ? "?" : [dict get $loopOf $bindExpr]}]
+    set wordUse [dict get $info wordUse]
     foreach r $refs {
         if {[dict exists $projByRecv $r]} {
             set slot [lsearch -exact $layout [hir::get $view [dict get $projByRecv $r] name]]
             if {$slot < 0} {
                 return [list projection 0 0 {}]
             }
+            incr structural
+            continue
+        }
+        if {[dict exists $wordUse $r] && [llength $layout] == 1} {
+            # A syscall register: reads the one field, like a projection.
             incr structural
             continue
         }
@@ -1973,6 +2034,17 @@ proc hir::escape::analyze {hir spec {paramOpt 1} {structOpts {}}} {
     }
     set direct [DirectProjections $regions $arity $structOpts]
     set directRoot [DirectRoots $regions $arity $structOpts]
+    set registerWord [RegisterWords $regions $arity $structOpts]
+    dict for {id byExpr} $registerWord {
+        dict for {e desc} $byExpr {
+            set c [Classify [dict get $regions $id view] [dict get $regions $id instance] $arity $e $structOpts]
+            if {[lindex $c 0] eq "remote"} {
+                foreach t [lindex $c 2] {
+                    dict set wants $t 1
+                }
+            }
+        }
+    }
     dict for {id byExpr} $direct {
         dict for {e desc} $byExpr {
             set view [dict get $regions $id view]
@@ -1998,7 +2070,8 @@ proc hir::escape::analyze {hir spec {paramOpt 1} {structOpts {}}} {
     }
     set wants [Propagate $wants $forward]
     set analysis [dict create arity $arity wants $wants virtual $virtual paramVirtual $paramVirtual \
-        structOpts $structOpts direct $direct directRoot $directRoot transport $transport deny $deny \
+        structOpts $structOpts direct $direct directRoot $directRoot registerWord $registerWord \
+        transport $transport deny $deny \
         retDepth $retDepth retTop $retTop nested $nested]
     if {[StructEnabled $structOpts]} {
         dict set analysis census [Census $spec $regions $arity $resultWhy $wants $virtual $paramVirtual \
@@ -2076,6 +2149,39 @@ proc hir::escape::DirectRoots {regions arity structOpts} {
         }
     }
     return $direct
+}
+
+# InstanceId -> ExprId -> DESC: every register field FE of an inline
+# linux::abi::syscall literal (SyscallFields) that is itself a recognized
+# construction of the one-field abi::x86_64::Register64 shape -- a
+# register64(...) call returning fields, a Register64 literal, a nested
+# syscall, an `if` of those: lowering reads its word straight from its
+# fields, so no Register64 object is built for it (a register held in a
+# virtual local is read from the local instead: UseVerdict's word use).
+proc hir::escape::RegisterWords {regions arity structOpts} {
+    set words [dict create]
+    if {![StructEnabled $structOpts]} {
+        return $words
+    }
+    set id64 [core::linuxabi::registerType]
+    dict for {id info} $regions {
+        set view [dict get $info view]
+        foreach e [dict get $info exprs] {
+            foreach f [SyscallFields $view $e] {
+                set c [Classify $view [dict get $info instance] $arity $f $structOpts]
+                if {$c eq ""} {
+                    continue
+                }
+                set desc [lindex $c 1]
+                lassign $desc n shape
+                if {$n != 1 || [lindex $shape 0] ne $id64 || [llength [lindex $shape 1]] != 1} {
+                    continue
+                }
+                dict set words $id $f $desc
+            }
+        }
+    }
+    return $words
 }
 
 # ---------------------------------------------------------------------------
@@ -2563,6 +2669,17 @@ proc hir::escape::paramVirtualCut {analysis id b} {
 proc hir::escape::directRoot {analysis id e} {
     if {[dict exists $analysis directRoot $id $e]} {
         return [dict get $analysis directRoot $id $e]
+    }
+    return ""
+}
+
+# The descriptor ({N SHAPE ?CUT?}) of register field E of an inline
+# linux::abi::syscall literal in instance ID when E is a recognized one-field
+# Register64 construction read straight from its fields (RegisterWords), ""
+# otherwise.
+proc hir::escape::registerWord {analysis id e} {
+    if {[dict exists $analysis registerWord $id $e]} {
+        return [dict get $analysis registerWord $id $e]
     }
     return ""
 }
