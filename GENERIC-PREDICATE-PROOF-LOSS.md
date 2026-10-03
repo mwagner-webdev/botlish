@@ -16,7 +16,8 @@ section below; the status table is the index.
 | – | prerequisite found while verifying fix 3: the `bit_and` identity fold trusted interval Ranges (unsound; native miscompiles on `main`) | `native/lower.tcl` `FoldPureBitwise` | **fixed** ([`bit_and` identity fold](#bit_and-identity-fold-soundness-fix)) |
 | – | prerequisite found while verifying point 2: `hir::blockescape` never examined a closure nested in a candidate's own literal or in a sibling capturer (unsound; native crashes on `main`, wrong results with `-block-escape-opt 0` once point 2 trusts it) | `hir/blockescape.tcl` `Bindings` | **fixed** ([Blockescape: nested capturers](#blockescape-nested-capturers-soundness-fix)) |
 | – | prerequisite found while preparing point 1: `hir::blockescape` never counted a literal's generic instance as a de-closure target when an exact call selected it next to specialized ones (pre-existing NATIVE BUG; with point 1, closures called with an Int and another kind would lose de-closure) | `hir/blockescape.tcl:194` (`RelevantInstances`) | **fixed** ([Blockescape: a called generic instance](#blockescape-a-called-generic-instance)) |
-| 4 | counted loops always use tagged compare/advance; their bounds are tagged RawInt consumers | `native/lower.tcl` `CountLoop`, `native/rawabi.tcl:696-709` | open |
+| – | prerequisite found while verifying point 4: native lowering ran a `-strict 0` program's rejected (unproven/unequal) lockstep loop instead of raising its diagnostic (wrong values on `main`; wrapped integers once point 4 runs its later domains raw) | `native/lower.tcl:7026` (`LockLoop`), `native/src/runtime/error.rs:40` | **fixed** ([Rejected lockstep loops](#rejected-lockstep-loops-soundness-fix)) |
+| 4 | counted loops always use tagged compare/advance; their bounds are tagged RawInt consumers | `native/lower.tcl:6830` (`RawCountDomain`), `:6910` (`CountLoop`), `:7021` (`LockLoop`); `native/rawabi.tcl:755` (`CountBounds`) | **fixed** ([Loss point 4](#loss-point-4-raw-counted-loops)): −2.96% Ir on `refined-checks` |
 | 5 | the RawInt ABI never reaches de-closured (internal-capture) functions | `native/lower.tcl:2246` (`InternalFunction`), `:4676` (`abiCall`), `native/rawabi.tcl:64-66` | open |
 
 ## The investigation
@@ -1242,32 +1243,355 @@ with block escape on and off on three programs.
    on), and Int keys count against the per-block `limit`, so a closure
    called with many kinds reaches the all-`any` fallback sooner.
 
-## Next steps (points 4, 5)
+## Rejected lockstep loops (soundness fix)
 
-Points 1, 2 and 3 are done. On `refined-checks` they give `char_at`'s
-`i + 1` a raw add (point 2, −2.26% Ir/run) and `tld?`'s comparisons raw
-operations (point 3, −0.19%); point 1 gives `tld?`, `domain?`, `char_at`
-and `scan_while` Int keys with the Ranges intact, and changes no machine
-code. What still keeps their parameters tagged:
+Found by the adversarial review of loss point 4, fixed first (its own
+commit), because point 4 relies on the property it breaks.
 
-1. **Point 4:** raw induction variables for `CountLoop` (and lockstep
-   loops) when the domain's Ranges fit small, and the matching demand-rule
-   change (`native/rawabi.tcl:696-709`, "count loop bound"). It makes
-   `tld?<int>.i`, `domain?<int>.start` and `scan_while.start`
-   `suppressed-mixed-tagged-use` / `suppressed-no-raw-demand` today, and it
-   is the only remaining point with a per-character cost in these
-   functions (`domain?`'s and `scan_while`'s loop headers). `char_at<int>.i`
-   additionally feeds `substring`, a tagged native consumer.
-2. **Point 5:** let `InternalFunction` (`native/lower.tcl:2246`) and its
-   blockescape-virtual call sites (`abiCall`, `:4676`) take the plan's raw
-   positions (`native/rawabi.tcl:64-66` documents the restriction). With the
-   demand filter off the plan is already `rawint` for these instances and
-   the NIR still does not change.
+`hir/lockstep.tcl` rejects a lockstep loop whose domains it cannot prove
+equally long (LOCKSTEP-UNPROVEN, or LOCKSTEP-UNEQUAL when it proves them
+different) and marks the HIR node. A strict build stops there; a
+`-strict 0` build lowers the mark to Core IR and the reference evaluator
+raises the diagnostic when the loop is reached, before evaluating anything.
+`native::lower::LockLoop` never looked at the mark: it ran the loop to the
+first domain's length, so every later domain ran past its own interval.
+
+```
+fn z(xs):
+    m = 4611686018427387903
+    loop x in xs and i from m - 1 to m:
+        i
+z([1, 2, 3, 4])      # interp/compile: CORE SEMANTIC LOCKSTEP-UNPROVEN
+                     # cranelift on main: [m - 1, m, m + 1, m + 2]
+                     # with point 4 (i raw): [m - 1, m, -2^62, -2^62 + 1]
+```
+
+**The change.** `LockLoop` emits `raise KIND MESSAGE` for a marked loop and
+nothing else (no domain is evaluated), exactly what `core::forms::op-lockloop`
+does; `native/src/runtime/error.rs` accepts LOCKSTEP-UNPROVEN and
+LOCKSTEP-UNEQUAL as semantic error kinds (the runtime reported any other kind
+as a NATIVE BUG). Only reachable through HIR built with `-strict 0` (the
+CLI compiles strictly, and `native::executable` refuses such a program).
+
+**Evidence.** Corpus NIR byte-identical on all 44 programs (no corpus program
+has a rejected lockstep loop). Tests (`tests/native-lockstep-rejected.test`,
+4): parity on interp, compile, cranelift, cranelift-generic and block escape
+off for an unproven and an unequal loop, a rejected loop in an untaken
+branch (the program still runs), and the NIR (a `raise`, no domain
+evaluated). Reviewed as part of point 4's review.
+
+## Loss point 4: raw counted loops
+
+### Outcome
+
+A counted loop (and each numeric domain of a lockstep loop) whose bounds'
+Ranges fit the small-Int domain now runs on a raw induction register: the
+bounds are unboxed once, before the loop, the continuation test and the
+advance are `rilt`/`rile`/`rigt`/`rige` and `riadd`/`risub`, and the loop
+variable is boxed (a non-allocating `rbox`) only where a tagged consumer
+reads it. The RawInt demand rule counts such a loop's bounds as raw
+consumers.
+
+* `refined-checks`: the per-character loops of `scan_while` (both
+  instances) and `domain?` are raw. `scan_while` 347.5 → **205.5** and
+  162.0 → **99.0 Ir/call**, `domain?` 237.0 → **182.0 Ir/call**;
+  `refined-checks` 5,509,798 → **5,346,724 Ir/run (−2.96%)**: more than
+  point 3 and about as much as point 2, as the investigation expected.
+* The RawInt plan now selects `scan_while.start` (both instances),
+  `tld?<int>.i` and `domain?<int>.start` (before: `suppressed-no-raw-demand`
+  / `suppressed-mixed-tagged-use`). The NIR does not realize that yet: the
+  four instances are only emitted as de-closured internal variants (loss
+  point 5, next section). `char_at<int>.i` stays
+  `suppressed-mixed-tagged-use` (`substring` is a tagged consumer).
+* Corpus: no Range changes (a lowering change); NIR changes in exactly one of
+  the 29 `.bot` programs (`refined-checks`: those 3 functions) and three of
+  the 15 Core-IR-text programs (the same 3 functions in `refined-checks.ir`,
+  `05-refined-strings.ir`, `hir/06-refined-strings.ir`). The only other
+  counted loop the corpus reaches, `lib/mutarray.bot`'s `create` (from
+  `csv_records`/`csv_geometric`), runs to a geometrically grown capacity
+  whose Range is not proven small, so it stays tagged.
+* Knob off (`native::lower::rawCountLoopOpt 0`) = the parent commit, byte for
+  byte, on all 44 programs.
+
+### Order: point 4 before point 5
+
+Point 5 alone changes almost nothing on `refined-checks`, and measurably
+nothing for the better: with counted loops tagged, the demand rule
+suppresses every scanner parameter (a count loop bound was a tagged
+consumer), so the only raw position an internal variant could take is
+`scan_while<int, native(is_tcl_alpha)>`'s result (already `RawInt` in the
+plan). Measured on the point-5 tree with this point's knob off: that one
+function's signature changes and `refined-checks` goes 5,509,524 →
+5,511,942 Ir/run (+0.04%; see point 5 for why a raw result costs here).
+Point 4 alone is the −2.96% above and is what unblocks the parameters
+point 5 can then carry. So point 4 comes first, each in its own commit.
+
+### The loss
+
+`CountLoop`'s compare and advance were always the tagged `ilt`/`ile`/`igt`/
+`ige` and `iadd`/`isub` (`CountOps`), whatever the Ranges proved, and the loop
+variable was a tagged register: every iteration tested both tags and checked
+the add for overflow. The RawInt demand walk mirrored this
+(`native/rawabi.tcl`, "count loop bound": a tagged consumer), which made
+every parameter that bounds a loop `suppressed-no-raw-demand` or, when also
+used raw, `suppressed-mixed-tagged-use`.
+
+### The change
+
+`native/lower.tcl`:
+
+* `RawCountDomain {ranges id startExpr endExpr}`: 1 when both bound
+  expressions' Ranges (`hir::range::of`) fit the small-Int domain (and
+  `-repr-opt` and the knob are on). The whole decision; no other fact.
+* `CountLoop`: a bound that needs no runtime guard is lowered raw directly
+  (`CountBoundWant`); one that does is lowered tagged, guarded, then
+  unboxed (`CountBounds`, `RawOf`), so guards still see tagged registers.
+  The induction register is declared raw (`MarkRaw`), the ops get the `r`
+  prefix, the advance adds a `rawint 1`, and the loop binding is a `rawreg`
+  local (the same local kind a raw parameter has), so `Ref`,
+  `CaptureRegsOf` and the alias rule box it through `TaggedOf` where a
+  tagged consumer needs it (cached for the rest of the body; `fn rawCache`
+  is saved and restored around the body as before).
+* `LockLoop`: the same per numeric domain, each decided from its own bounds;
+  the first domain's compare drives the loop; a List domain's position
+  register stays tagged.
+* Knob `native::lower::rawCountLoopOpt` (test/audit only; 0 = tagged loops).
+
+`native/rawabi.tcl`: `CountBounds` (the demand walk of a countloop and of
+each numeric lockloop domain) asks the same `native::lower::RawCountDomain`;
+when it holds, both bounds flow to `RAW` ("raw count loop bound @eN"), else
+they stay tagged consumers. The header's list of raw consumers says so.
+
+### Soundness
+
+1. **Bounds.** Each bound is evaluated once, before the loop, and its Range
+   covers every value it takes (the ordinary per-expression soundness that
+   `RawIntOp` already relies on). A bound that needs a kind guard is guarded
+   on its tagged register first, then unboxed; a guard that always fails
+   (`knownErrors`) raises before the unboxing runs.
+2. **The loop variable while the body runs.** The body runs only after the
+   continuation test passed, so `START <= I < END` (`<= END` for
+   `through`; mirrored going down). Both bounds are small Ints, so I is a
+   small Int: every `rbox` of it is exact and non-allocating, and the raw
+   operations of the body see the value the tagged code would. This is the
+   interval `hir::range`'s `InductionSeed` gives the binding, so every Range
+   consumer of the body already assumed it.
+3. **The exhaustion value.** The only value outside that interval is the one
+   the last advance produces (at most `END + 1` up, `END - 1` down; an empty
+   domain never advances). It lives only in the induction register between
+   the advance and the failing test: the binding is scoped to the body, the
+   loop's own value is the collected List, and `break`/`return`/`continue`
+   leave or re-test before any read. `|END| <= 2^62`, so it is far inside
+   i64 and the raw comparison decides exactly what the tagged one did.
+4. **Lockstep.** A non-first numeric domain is never tested; its values stay
+   inside its own interval because `hir::lockstep` proved its trip count
+   equal to the first domain's. That proof is what its Range seed already
+   relies on (and what the tagged code relied on for the List indexes).
+5. **GC.** A raw register is a non-root scalar (`scalar_regs` in
+   `codegen/roots.rs`); boxing yields a small Int, never a heap pointer. GC
+   stress runs the raw variable across allocating calls and closure
+   creation (tests below).
+6. **ABI.** The demand rule's change only adds `RAW` edges where lowering
+   really unboxes; eligibility (closedness, entry Ranges) is untouched, so a
+   newly selected position is one the plan already proved safe, and caller
+   and callee keep reading the same plan.
+
+### `refined-checks`: `domain?` before / after
+
+```
+before                                    after
+%3 = move %0                              %3 = op runbox %0
+jump L0                                   %4 = op runbox %1
+                                          %5 = move %3
+                                          jump L0
+label L0                                  label L0
+%5 = op ilt %3 %1                         %7 = op rilt %5 %4
+br %5 L1 L3                               br %7 L1 L3
+label L1                                  label L1
+%6 %7 %8 = callmulti 10 %3 %2             %8 = op rbox %5
+                                          %9 %10 %11 = callmulti 10 %8 %2
+...                                       ...
+%12 = op runbox %3                        %15 = op rieq %5 %3       (j == start)
+%13 = op runbox %0
+%14 = op rieq %12 %13
+...                                       ...
+%55 = int 1                               %56 = rawint 1
+%56 = rawint 1                            %57 = op riadd %5 %56
+%57 = op iadd %3 %55                      %5 = move %57
+%3 = move %57
+```
+
+Both `scan_while` variants change the same way (their header and advance;
+`return i` returns the boxed register the `char_at` call already made).
+
+### Evidence
+
+`tools/run-knob.sh … native::lower::rawCountLoopOpt census-rawloops.txt
+census` (`out/census-rawloops.txt`, base = the rejected-lockstep fix): 5,223
+Range facts, all identical (a lowering knob); NIR changes in the programs
+listed above; the RawInt plan text changes in `refined-checks` (and the three
+Core-IR-text programs) only, exactly the four positions above, each annotated
+"canonical function not emitted: the plan's raw signature is not realized in
+NIR"; knob off = parent commit, byte for byte (290 + 150 dump comparisons,
+0 mismatches).
+
+Instructions (same file; `profile-nir.sh`, 21 runs, run 0 excluded):
+
+| function (`refined-checks`) | calls/run | Ir/call before | after |
+|---|---:|---:|---:|
+| `scan_while<int, block(e239)>` | 800 | 347.5 | 205.5 |
+| `scan_while<int, native(is_tcl_alpha)>` | 400 | 162.0 | 99.0 |
+| `domain?` | 400 | 237.0 | 182.0 |
+| `tld?` | 400 | 35.0 | 31.0 |
+| total Ir/run | | 5,509,798 | 5,346,724 (−2.96%) |
+
+(`tld?` and `web::emailish?` lose a few Ir/call from the shorter calls; every
+other function is unchanged.)
+
+### Fuzzing
+
+`tools/fuzz.tcl -knob native::lower::rawCountLoopOpt` (`out/fuzz-rawloops.txt`).
+A knob in `native::lower` is a lowering knob: the Range oracles find no
+change by construction, so the tool now also reports, per program, whether
+the knob changes its NIR; the differential oracle (interp = compile =
+cranelift, knob on) is the soundness check, and a disagreement is attributed
+by re-running native with the knob off. The generator gained numeric
+lockstep loops (`loop i from s to s + k and j down from t to t - k`, both
+domains observed by the body); it already produced counted loops in every
+direction with early `return`/`break`/`continue` and bounds at the
+small-Int boundary. `-mutate 4` (the oracle self-test) makes
+`RawCountDomain` ignore the Ranges.
+
+| run | programs | native | NIR changed by the knob | Range checks | violations | disagreements |
+|---|---:|---|---:|---:|---:|---:|
+| A | 5,000 | default | 2,277 | 26,816 top-level + 402,736 trace | 0 | 0 |
+| B | 2,000 | `-block-escape-opt 0` | 901 | 10,826 + 164,292 | 0 | 0 |
+| C (self-test) | 200 | `-mutate 4` | 157 | | | 24, all attributed to the knob |
+
+What it cannot generate: a lockstep loop the compiler rejects (such a
+program does not compile strictly, and the fuzzer skips rejected programs;
+the review found the [bug](#rejected-lockstep-loops-soundness-fix) that way
+instead), a bound that needs a runtime kind guard (every generated bound is
+statically Int), and loops whose bounds come from a String length beyond the
+scanner shape.
+
+### Adversarial review
+
+An independent review (soundness, integration, downstream consumers; about
+15 probe programs over interp, compile, cranelift and every relevant option,
+`-specialize 0`, `-block-escape-opt 0`, `-raw-int-abi-opt 0`,
+`-raw-demand-opt 0`, `-repr-opt 0`, JIT and executable GC stress; its own
+fuzz runs, 1,610 programs, and the `-mutate 4` self-test), every finding
+reproduced before acting:
+
+* **A real, pre-existing wrong-result bug that this change made worse.**
+  Native lowering ignored hir/lockstep.tcl's rejection mark, so a `-strict 0`
+  program's unproven lockstep loop ran to the first domain's length instead
+  of raising LOCKSTEP-UNPROVEN; with point 4 the overrun second domain was
+  raw and its values wrapped at 2^62. Fixed first, in its own commit:
+  [Rejected lockstep loops](#rejected-lockstep-loops-soundness-fix); the
+  review's program is a regression test here too.
+* The fuzzer's lockstep loops never observed the second domain's binding:
+  now they return it (done above).
+* A bound that needs a kind guard is lowered tagged and unboxed after the
+  guard while the demand rule counts it raw: not a mismatch (lowering does
+  unbox it, one `runbox` after the guard), and a RawInt-ABI parameter is
+  statically Int, so it never needs the guard.
+* Everything else held: the exhaustion value, every exit and direction,
+  empty domains, guarded and non-Int bounds, dominance of the cached boxes
+  across `if`/handler/inner-loop joins, a loop variable captured by closures
+  that outlive the loop, module-level and program-function loops, every
+  reader of `fn locals`, tiny-leaf inlining, and the test changes (none
+  weakened).
+
+### Verification
+
+On this commit (the rejected-lockstep fix underneath, rebased onto `main` at
+`0a60442`), each suite in its own worktree:
+
+| suite | result |
+|---|---|
+| `tests/all.tcl`, interp | 4,697 / 4,697 |
+| `tests/all.tcl`, compile | 4,693 passed, 4 skipped (`coreScoping`), 0 failed |
+| the same under `BOTLISH_NATIVE_GC_STRESS=1` | identical |
+| `tests/native-coverage.tcl` (cranelift) | 4,731 tests: native 1,996, independent 2,606, passed-partial 69, unsupported 60, failed 0 |
+| the same on `main` (`0a60442`) | 4,714 tests: native 1,986, independent 2,599, passed-partial 69, unsupported 60, failed 0 |
+
+The fix commit alone on the same base: interp 4,684 / 4,684, compile 4,680
++ 4 skipped, the same under GC stress, corpus NIR byte-identical to `main`.
+The coverage difference is exactly the 17 added tests (the fix's 4: 3
+native, 1 independent, as measured before the rebase; this commit's 13: 7
+native, 6 independent). (`main` fixed the long-standing `refined-5` while
+this work was in progress; before the rebase, on `c37a980`, the same runs
+gave the same picture with `refined-5` the one failure everywhere.)
+
+After the rebase the census and the profile were rerun (the figures above);
+the fuzz runs are from before it, plus a post-rebase smoke run (500
+programs, seed 11: 0 disagreements, 0 of 2,763 + 47,279 Range checks
+violated, NIR changed in 202) recorded in `out/fuzz-rawloops.txt`.
+
+Tests: `tests/raw-count-loops.test` (new, 13): `refined-checks`' loop headers
+raw (knob on) and tagged (off); the bounds unboxed once before the header
+and the loop variable boxed for its tagged consumer; the RawInt plan with
+the knob on and off; `refined-checks`' value with block escape on and off;
+all four directions at the small-Int edge (raw, exhaustion value 2^62 /
+−2^62−1) and their parity; bounds beyond the edge staying tagged (BigInt
+values); early `return`/`break`/`continue`, a closure capturing the loop
+variable, a List holding it, nested loops and lockstep loops (raw) with
+parity knob on and off; the knob-off NIR; the review's rejected lockstep
+program; the scanner shape; and an executable under GC stress with the raw
+variable live across allocating calls and a closure creation, block escape
+on and off.
+
+Existing tests changed (each pinned the loss or the old op names; none
+weakened):
+
+| test | why | change |
+|---|---|---|
+| `loop-collecting.test` `-native-discarded-*` (4) | matched `op (ilt\|ile\|igt\|ige)`; with `n` = 5 the loops are raw | the pattern accepts the `r` prefix (still: a comparison, a branch, a backedge) |
+| `loop-collecting.test` `-native-compare-ops` | the endpoint ops are now `rilt rile rigt rige` | pins both: raw with the knob on, tagged `ilt ile igt ige` with it off |
+| `raw-int-abi.test` `demand-loops-and-handlers-agree` | pinned "a count loop bound is a tagged consumer" (`find<int>=supp`) | pins it with the knob off, and `find<int>=raw` with it on; parity unchanged |
+| `closure-int-keys.test` `-refined-checks-rawint-plan` | pinned the suppression this point removes | pins both: the old reasons with the knob off, `rawint` (and `char_at` still mixed) with it on |
+| `closure-int-keys.test` `-refined-checks-nir-unchanged` | description only ("counted loops stay tagged") | description |
+
+### Known limitations
+
+1. **Only proven-small bounds.** A loop whose bound's Range is not small
+   stays tagged in full (no loop versioning): `lib/mutarray.bot`'s `create`
+   (geometric capacity) is the corpus example.
+2. **List indexes stay tagged.** `ListLoop`'s index and a lockstep loop's List
+   position still use `ilt`/`iadd` against `listlen`, although a List's
+   length is always small. The same change would apply; it would touch many
+   more programs and was kept out of this point.
+3. **A tagged reader boxes per iteration.** The loop variable is boxed once
+   per iteration where a tagged consumer reads it (`char_at(i)` in the
+   scanners, since `char_at`'s `i` stays tagged because of `substring`): a
+   non-allocating shift-and-or, cached for the rest of the body.
+4. **The demand rule follows lowering's predicate, not its guards**: a bound
+   that needs a kind guard is counted as a raw consumer (lowering does unbox
+   it, after the guard).
+
+## Next steps (point 5)
+
+Points 1, 2, 3 and 4 are done. On `refined-checks` they give `char_at`'s
+`i + 1` a raw add (point 2, −2.26% Ir/run), `tld?`'s comparisons raw
+operations (point 3, −0.19%) and the scanners' per-character loops raw
+induction registers (point 4, −2.96%); point 1 gives `tld?`, `domain?`,
+`char_at` and `scan_while` Int keys with the Ranges intact. What remains:
+
+1. **Point 5:** let `InternalFunction` (`native/lower.tcl:2246`) and its
+   blockescape-virtual call sites (`FlattenedVirtualCall`) take the plan's
+   raw positions (`native/rawabi.tcl:64-66` documents the restriction). Since
+   point 4 the plan selects `scan_while.start`, `tld?.i` and
+   `domain?.start` (`RawInt`), and the NIR still does not change.
 
 Smaller open items, outside the numbered points:
 
 * the captured `n` reaches a de-closured function as a hidden trailing
   parameter that is always tagged (`native/rawabi.tcl:162`);
+* list loops' index (and a lockstep loop's List position) still compare and
+  advance tagged ([Loss point 4](#loss-point-4-raw-counted-loops),
+  limitation 2);
 * each `tld?` call materializes an `is_tcl_alpha` native value to pass to
   `scan_while` (limitation 1 of EXACT-CALLABLE-CLOSED-CALLER.md);
 * point 1's precision cost: call sites that now share a callee's `<int>`

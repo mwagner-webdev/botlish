@@ -1,0 +1,316 @@
+# raw-count-loops.test -- loss point 4 of GENERIC-PREDICATE-PROOF-LOSS.md:
+# a counted loop (and each numeric domain of a lockstep loop) whose bounds'
+# Ranges fit the small-Int domain runs on a raw induction register: the
+# bounds are unboxed once, the continuation test and the advance are raw
+# (rilt/rile/rigt/rige, riadd/risub), and the loop variable is boxed only
+# where a tagged consumer reads it (native::lower::RawCountDomain). The
+# RawInt demand rule counts such a loop's bounds as raw consumers
+# (native::rawabi::CountBounds), so lib/web.bot's scan_while.start,
+# tld?.i and domain?.start are planned RawInt.
+#
+# Knob (test/audit-only namespace variable, native/lower.tcl):
+# native::lower::rawCountLoopOpt 0 keeps every counted loop tagged, as
+# before loss point 4.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 1000000
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+
+proc dedent {text} {
+    set lines [split $text \n]
+    set indent 1000
+    foreach line $lines {
+        if {[string trim $line] eq ""} continue
+        set n [expr {[string length $line] - [string length [string trimleft $line " "]]}]
+        if {$n < $indent} { set indent $n }
+    }
+    return [join [lmap line $lines {string range $line $indent end}] \n]
+}
+
+proc withRawLoops {opt script} {
+    set native::lower::rawCountLoopOpt $opt
+    try {
+        return [uplevel 1 $script]
+    } finally {
+        set native::lower::rawCountLoopOpt 1
+    }
+}
+
+proc hirOfText {src} {
+    return [surface::compile [dedent $src] t.bot -strict 0]
+}
+
+# The NIR text of every function named NAME (concatenated).
+proc functionsNamed {nir name} {
+    set out {}
+    set on 0
+    foreach line [split $nir \n] {
+        if {[string match "func *" $line]} {
+            set on [string match "func * \"$name\" *" $line]
+        }
+        if {$on} {
+            lappend out $line
+        }
+    }
+    return [join $out \n]
+}
+
+# The loop-control ops of NIR text, in order: the compare/add/sub ops a
+# loop node itself emits (its continuation test, its advance, a lockstep
+# loop's List position), recognized by the loop's ExprId -- the one carried
+# by the `jump LX @eN` that enters the loop header `label LX`. Body
+# arithmetic carries its own expressions' ids.
+proc loopOps {text} {
+    set lines [split $text \n]
+    set loops {}
+    foreach line $lines next [lrange $lines 1 end] {
+        if {[regexp {^\s+jump (L\d+) @(e\d+)$} $line -> label id] && [string trim $next] eq "label $label"} {
+            lappend loops $id
+        }
+    }
+    set ops {}
+    foreach line $lines {
+        if {[regexp {= op (r?i(?:lt|le|gt|ge|add|sub)) .* @(e\d+)$} $line -> op id] && $id in $loops} {
+            lappend ops $op
+        }
+    }
+    return $ops
+}
+
+# interp, compile and cranelift with block escape on and off: the one
+# outcome, or every distinct one.
+proc parity {hir} {
+    set outcomes [lmap backend {interp compile cranelift} {outcomeUnderHir $backend $hir}]
+    resetEffects
+    lappend outcomes [list value [core::value::show [native::evalHir $hir -block-escape-opt 0] 1] {}]
+    set outcomes [lsort -unique $outcomes]
+    expr {[llength $outcomes] == 1 ? [lindex $outcomes 0 1] : $outcomes}
+}
+
+# ---------------------------------------------------------------------------
+# refined-checks: the scanner loops
+
+proc refinedChecksNir {} {
+    native::nir [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot]]
+}
+
+test raw-count-loops-refined-checks-headers {domain?'s and both scan_while instances' per-character loops compare and advance raw (knob on) instead of tagged (knob off)} -body {
+    lmap knob {1 0} {
+        withRawLoops $knob {
+            set nir [refinedChecksNir]
+            lmap name {scan_while domain?} {
+                # the header's compare and the backedge's advance only
+                lsort -unique [loopOps [functionsNamed $nir $name]]
+            }
+        }
+    }
+} -result {{{riadd rilt} {riadd rilt}} {{iadd ilt} {iadd ilt}}}
+
+test raw-count-loops-refined-checks-bounds-unboxed-once {a raw loop unboxes its bounds once, before the header; the loop variable is boxed for its tagged consumer (char_at's argument) inside the body} -body {
+    set text [functionsNamed [refinedChecksNir] domain?]
+    set lines [split $text \n]
+    set head [lsearch -regexp $lines {^\s+label L0}]
+    list [llength [lmap l [lrange $lines 0 $head] {expr {[string match "*op runbox*" $l] ? $l : [continue]}}]] \
+        [regexp {op rbox} [join [lrange $lines $head end] \n]]
+} -result {2 1}
+
+test raw-count-loops-refined-checks-plan {the RawInt demand rule: a raw loop's bounds are raw consumers, so scan_while.start, tld?.i and domain?.start are RawInt in the plan (knob on); with the knob off a count loop bound is a tagged consumer} -body {
+    set hir [native::prepareHir [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot]]]
+    set spec [hir::specialize::analyze $hir]
+    set analysis [hir::range::analyze $hir $spec]
+    lmap knob {1 0} {
+        withRawLoops $knob {
+            set plan [native::rawabi::plan $hir $spec $analysis 1]
+            set rows {}
+            foreach id [dict get $spec used] {
+                set label [hir::specialize::label $spec $id]
+                if {$label ni {tld?<int> domain?<int> {scan_while<int, native(is_tcl_alpha)>} {scan_while<int, block(e239)>}}} continue
+                lappend rows [list $label [lindex [dict get $plan $id params] 0] \
+                    [lindex [dict get $plan $id paramReasons] 0]]
+            }
+            lsort $rows
+        }
+    }
+} -result {{{domain?<int> rawint {}} {tld?<int> rawint {}} {{scan_while<int, block(e239)>} rawint {}} {{scan_while<int, native(is_tcl_alpha)>} rawint {}}} {{domain?<int> value suppressed-mixed-tagged-use} {tld?<int> value suppressed-mixed-tagged-use} {{scan_while<int, block(e239)>} value suppressed-no-raw-demand} {{scan_while<int, native(is_tcl_alpha)>} value suppressed-no-raw-demand}}}
+
+test raw-count-loops-refined-checks-parity {refined-checks still returns [400, 0] natively, with block escape on and off} -body {
+    set hir [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot]]
+    list [core::value::show [native::evalHir $hir] 1] [core::value::show [native::evalHir $hir -block-escape-opt 0] 1]
+} -result {{[400, 0]} {[400, 0]}}
+
+# ---------------------------------------------------------------------------
+# The small-Int boundary
+
+set ::boundaryShape {
+    fn up_to(a, b):
+        loop i from a to b:
+            i
+    fn up_through(a, b):
+        loop i from a through b:
+            i
+    fn down_to(a, b):
+        loop i down from a to b:
+            i
+    fn down_through(a, b):
+        loop i down from a through b:
+            i
+    m = 4611686018427387903
+    lo = 0 - 4611686018427387904
+    [up_through(m - 2, m), up_to(m - 2, m), down_through(lo + 2, lo), down_to(lo + 2, lo), up_through(m, m), down_through(lo, lo), up_to(m, m - 3), down_to(lo, lo + 1)]
+}
+
+test raw-count-loops-boundary-raw {all four directions with a bound at the small-Int edge (2^62-1, -2^62) are raw: the exhaustion value 2^62 / -2^62-1 lives only in the raw register} -body {
+    set nir [native::nir [native::prepareHir [hirOfText $::boundaryShape]]]
+    lmap name {up_to up_through down_to down_through} {
+        loopOps [functionsNamed $nir $name]
+    }
+} -result {{rilt riadd} {rile riadd} {rigt risub} {rige risub}}
+
+test raw-count-loops-boundary-parity {the small-Int edge: interp, compile and cranelift (block escape on and off) agree} -body {
+    parity [hirOfText $::boundaryShape]
+} -result {[[4611686018427387901, 4611686018427387902, 4611686018427387903], [4611686018427387901, 4611686018427387902], [-4611686018427387902, -4611686018427387903, -4611686018427387904], [-4611686018427387902, -4611686018427387903], [4611686018427387903], [-4611686018427387904], [], []]}
+
+set ::acrossShape {
+    fn across(a):
+        loop i from a through a + 2:
+            i
+    fn below(a):
+        loop i down from a through a - 2:
+            i
+    m = 4611686018427387903
+    lo = 0 - 4611686018427387904
+    [across(m - 1), below(lo + 1), across(5)]
+}
+
+test raw-count-loops-unproven-stays-tagged {a bound beyond the small-Int domain keeps the loop tagged (the values cross into BigInt)} -body {
+    set nir [native::nir [native::prepareHir [hirOfText $::acrossShape]]]
+    list [loopOps [functionsNamed $nir across]] [loopOps [functionsNamed $nir below]] [parity [hirOfText $::acrossShape]]
+} -result {{ile iadd} {ige isub} {[[4611686018427387902, 4611686018427387903, 4611686018427387904], [-4611686018427387903, -4611686018427387904, -4611686018427387905], [5, 6, 7]]}}
+
+# ---------------------------------------------------------------------------
+# Early exits, tagged readers of the loop variable, lockstep loops
+
+set ::exitsShape {
+    fn find(a, b, t):
+        loop i from a to b:
+            if i == t:
+                return i * 2
+            if i == t + 3:
+                break
+            if i == t - 1:
+                continue
+            i
+    fn down(a, b, t):
+        loop i down from a through b:
+            if i == t:
+                return [i]
+            if i < t - 2:
+                break
+            i - t
+    fn nest(n):
+        loop i from 0 to n:
+            fn add(x):
+                x + i
+            loop j down from i through 0:
+                if j == 1:
+                    continue
+                add(j) * 10 + list_length([i, j])
+    fn pairs(xs):
+        loop x in xs and i from 0 to list_length(xs) and k down from 10 to 10 - list_length(xs):
+            x * i + k
+    [find(0, 10, 4), find(0, 10, 20), find(5, 9, 6), find(3, 3, 3), down(10, 0, 4), down(10, 6, 2), nest(4), pairs([7, 8, 9]), pairs([])]
+}
+
+test raw-count-loops-exits-raw {early return, break and continue, a closure capturing the loop variable, a List holding it, nested loops (the inner bound is the outer variable) and the numeric domains of a lockstep loop all run raw (a lockstep loop's List position stays tagged; pairs([]) is a second instance whose body is dead: only its header compare is emitted)} -body {
+    set nir [native::nir [native::prepareHir [hirOfText $::exitsShape]]]
+    list [loopOps [functionsNamed $nir find]] [loopOps [functionsNamed $nir down]] \
+        [lsort -unique [loopOps [functionsNamed $nir nest]]] [loopOps [functionsNamed $nir pairs]]
+} -result {{rilt riadd} {rige risub} {riadd rige rilt risub} {ilt riadd risub iadd ilt}}
+
+test raw-count-loops-exits-parity {early exits and tagged readers: interp, compile and cranelift (block escape on and off) agree, knob on and off} -body {
+    set hir [hirOfText $::exitsShape]
+    list [parity $hir] [withRawLoops 0 {parity $hir}]
+} -result {{[8, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], 12, [], [4], [8, 7, 6, 5, 4], [[2], [12], [42, 22], [62, 52, 32]], [10, 17, 26], []]} {[8, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], 12, [], [4], [8, 7, 6, 5, 4], [[2], [12], [42, 22], [62, 52, 32]], [10, 17, 26], []]}}
+
+test raw-count-loops-knob-off {with the knob off no counted loop is raw: the same loops compare and advance tagged} -body {
+    withRawLoops 0 {
+        set nir [native::nir [native::prepareHir [hirOfText $::exitsShape]]]
+        list [loopOps [functionsNamed $nir find]] [loopOps [functionsNamed $nir pairs]]
+    }
+} -result {{ilt iadd} {ilt iadd isub iadd ilt}}
+
+test raw-count-loops-rejected-lockstep {the adversarial review's program: a -strict 0 lockstep loop hir/lockstep.tcl could not prove (its raw second domain would run past 2^62-1) raises LOCKSTEP-UNPROVEN natively too (the preceding fix, native-lockstep-rejected.test)} -body {
+    set hir [hirOfText {
+        fn z(xs):
+            m = 4611686018427387903
+            loop x in xs and i from m - 1 to m:
+                i
+        z([1, 2, 3, 4])
+    }]
+    lsort -unique [lmap backend {interp compile cranelift} {lrange [outcomeUnderHir $backend $hir] 0 1}]
+} -result {{error {CORE SEMANTIC LOCKSTEP-UNPROVEN}}}
+
+# ---------------------------------------------------------------------------
+# A scanner closure (the emailish? shape), and GC stress
+
+set ::scannerShape {
+    fn first_space(s):
+        n = length(s)
+        fn at(i):
+            substring(s, i, i + 1)
+        fn scan(start):
+            loop i from start to n:
+                if at(i) == " ":
+                    return i
+            n
+        fn tail(i):
+            e = scan(i)
+            e - i
+        [scan(0), tail(1), tail(n)]
+    [first_space("abc def"), first_space("abcdef"), first_space("")]
+}
+
+test raw-count-loops-scanner-parity {the de-closured scanner shape: interp, compile and cranelift (block escape on and off) agree, and its loop is raw} -body {
+    set hir [hirOfText $::scannerShape]
+    list [parity $hir] [loopOps [functionsNamed [native::nir [native::prepareHir $hir]] scan]]
+} -result {{[[3, 2, 0], [6, 5, 0], [0, -1, 0]]} {rilt riadd}}
+
+set ::gcShape {
+    fn mk(k):
+        [k, k + 1, concat("x", "y")]
+    fn work(n):
+        loop i from 0 to n:
+            ys = mk(i)
+            zs = mk(i * 2)
+            fn g(x):
+                [x, i]
+            list_get(ys, 1) + list_get(zs, 0) + list_get(g(i), 1) + i
+    fn total(xs):
+        loop x in xs and k down from list_length(xs) to 0:
+            x * k
+    total(work(10))
+}
+
+test raw-count-loops-gc-stress {a raw loop variable live across allocating calls and a closure creation: correct under GC stress (an executable with BOTLISH_NATIVE_GC_STRESS=1, which collects at every allocation site), with block escape on and off} -constraints executableAot -body {
+    set hir [hirOfText $::gcShape]
+    set raw [loopOps [functionsNamed [native::nir [native::prepareHir $hir]] work]]
+    set dir [makeDirectory {raw count loops executable test}]
+    set path [file join $dir prog]
+    try {
+        native::executable $hir $path
+        set on [exec env PATH= $path]
+        set gc [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 $path]
+        file delete $path
+        native::executable $hir $path -block-escape-opt 0
+        set off [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 $path]
+        list $raw [parity $hir] $on $gc $off
+    } finally {
+        removeDirectory {raw count loops executable test}
+    }
+} -result {{rilt riadd} {[10, 54, 88, 112, 126, 130, 124, 108, 82, 46]} {[10, 54, 88, 112, 126, 130, 124, 108, 82, 46]} {[10, 54, 88, 112, 126, 130, 124, 108, 82, 46]} {[10, 54, 88, 112, 126, 130, 124, 108, 82, 46]}}
+
+cleanupTests

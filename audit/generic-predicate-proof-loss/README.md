@@ -21,11 +21,22 @@ points 2 and 1 the knob is named by `AUDIT_KNOB` / `-knob`
 | `tools/census-blocks.tcl DUMP0 DUMP1 OUT PROGRAM...` | function-level census for a change of instance keys (loss point 1): per function, the join over its live (non-dormant) instances of entry, result and expression Ranges; NIR compared modulo instance labels |
 | `tools/equivalence-off.tcl DUMPBASE DUMP0 OUT PROGRAM...` | the parent commit vs this tree with a knob off: every dump file byte-identical (loss points 1 and 2) |
 | `tools/compiletime.tcl` | analysis / lowering wall time, rounds and `AnalyzeInstance` calls, knob 0 vs 1 |
-| `tools/fuzz.tcl ?-n N? ?-seed "S..."? ?-roundlimit L? ?-mutate 1\|2? ?-knob VAR?` | randomized soundness check: interp = compile = cranelift, top-level call Ranges and a runtime trace against every entry, result, summary and capture Range (joined over a block's non-dormant instances); `-mutate 1` / `-mutate 2` are oracle self-tests (a deliberately unsound result narrowing / dormant set that must be caught); `-knob` names the knob the "off" side turns off (default `hir::range::resultNarrowOpt`) |
+| `tools/fuzz.tcl ?-n N? ?-seed "S..."? ?-roundlimit L? ?-mutate 1\|2\|4? ?-knob VAR? ?-nativeopts OPT=V,...?` | randomized soundness check: interp = compile = cranelift, top-level call Ranges and a runtime trace against every entry, result, summary and capture Range (joined over a block's non-dormant instances); `-mutate 1` / `-mutate 2` are oracle self-tests (a deliberately unsound result narrowing / dormant set that must be caught); `-knob` names the knob the "off" side turns off (default `hir::range::resultNarrowOpt`) |
 
 Loss points 2 and 1: `out/census-dormant.txt`, `out/fuzz-dormant.txt`,
 `out/ir-dormant.txt` (point 2) and `out/census-intkeys.txt`,
 `out/fuzz-intkeys.txt` (point 1).
+
+Loss point 4 (raw counted loops): the knob is the lowering knob
+`native::lower::rawCountLoopOpt`; `run-knob.sh … native::lower::rawCountLoopOpt
+census-rawloops.txt census` with `AUDIT_BIN` set gives `out/census-rawloops.txt`
+(the Range census finds nothing by construction; the NIR changes, the RawInt
+plan diff, knob-off equivalence and the callgrind comparison are the
+evidence), and `fuzz.tcl -knob native::lower::rawCountLoopOpt` gives
+`out/fuzz-rawloops.txt`. For a knob in `native::lower` the fuzzer counts the
+programs whose NIR the knob changes; `-mutate 4` is the oracle self-test (a
+raw induction register whatever the bounds' Ranges), and the generator also
+builds numeric lockstep loops.
 
 `out/` holds the committed results of fix 3: `census.txt` (base `584de41`, fix 3's
 parent on `main` at `07b373c`),
