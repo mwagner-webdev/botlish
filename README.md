@@ -1370,6 +1370,19 @@ add10(32)          # 42 (add captures x)
   call whose name is both a visible function and a possibly-callable field of
   the receiver's struct type is rejected as ambiguous
   (`AMBIGUOUS-METHOD-CALL`). See METHOD-SUGAR.md.
+* **Flag parameters.** `fn open(path, flags :append, :cloexec):` declares a
+  *flag section* after the ordinary parameters; `open("f", :append)` supplies
+  a flag by naming it. A flag is an immutable `Bool` parameter with a fixed
+  default of `false`, `true` exactly when its name is written at the call:
+  there are no defaults, required, negated or computed flags, and `:name` is
+  not a value (it only exists as a trailing call argument and in a flag
+  declaration). Flags are a callable-interface category of their own, checked
+  against the called function's declaration (`UNKNOWN-FLAG`,
+  `DUPLICATE-FLAG`, ...), share the local namespace of the ordinary
+  parameters, and work through method sugar (`path.open(:append)`) and
+  aliases (`g = open`). A function with flags can only be called or aliased,
+  not passed around as a value. `flags` is a contextual marker, not a reserved
+  word. See FLAGS.md.
 * **Struct destructuring.** `{user, expires: expiry} = result` binds fields
   of a struct value by name: it evaluates `result` once, then binds `user` to
   `result.user` and `expiry` to `result.expires`, exactly as the explicit

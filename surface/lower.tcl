@@ -54,6 +54,12 @@
 #                         is its result (Sequence splices the statements in; a
 #                         nested pattern binds a further temporary)
 #   fn f(a, b): body      bind f (block (a b) body...)
+#   fn f(a, flags :x, :y): body   the same block carrying `flags` ({x ORIGIN}
+#                         {y ORIGIN}) beside its ordinary params; flags are a
+#                         separate parameter category (FLAGS.md), made
+#                         Bool bindings by hir::resolve
+#   f(a, :x)              call f a, carrying `flags` ({x ORIGIN}): names, not
+#                         expressions (FLAGS.md); a method call likewise
 #   if c: t else: e       if c {t...} {e...}    inline branches; a missing
 #                         else is an empty branch (value unit)
 #   if c: t elif c2: t2 else: e   if c {t...} {if c2 {t2...} {e...}}
@@ -299,6 +305,17 @@ proc surface::lower::Projections {pattern temp} {
     return $nodes
 }
 
+# The {NAME ORIGIN} flag pairs of the function declaration or call AST node
+# NODE (FLAGS.md), in written order, each originating at its ":name" spelling.
+# A function's flags are its declared flag section; a call's are the flags it
+# supplies. Flags have no expression of their own: nothing is evaluated.
+proc surface::lower::Flags {node} {
+    return [lmap flag [dict get $node flags] {
+        set name [dict get $flag name]
+        list $name [Origin [dict get $flag span] "[dict get $node id]/flag($name)"]
+    }]
+}
+
 # if CONDITION {THEN...} {ELSE...}, with branches originating at ORIGIN.
 proc surface::lower::Branch {origin condition then else} {
     return [hir::syntax::ifNode $origin $condition $origin $then $origin $else]
@@ -352,13 +369,13 @@ proc surface::lower::Node {node} {
                 {*}[Sequence [dict get $node items]]]
         }
         call {
-            return [hir::syntax::callNode $origin [Node [dict get $node callee]] \
-                {*}[Sequence [dict get $node args]]]
+            return [hir::syntax::withFlags [hir::syntax::callNode $origin [Node [dict get $node callee]] \
+                {*}[Sequence [dict get $node args]]] [Flags $node]]
         }
         methodcall {
-            return [hir::syntax::methodCallNode $origin [Node [dict get $node receiver]] \
+            return [hir::syntax::withFlags [hir::syntax::methodCallNode $origin [Node [dict get $node receiver]] \
                 [dict get $node name] [Origin [dict get $node nameSpan] [dict get $node id]/method] \
-                {*}[Sequence [dict get $node args]]]
+                {*}[Sequence [dict get $node args]]] [Flags $node]]
         }
         anonstruct {
             return [hir::syntax::structNode $origin "" [FieldInits $node]]
@@ -423,7 +440,8 @@ proc surface::lower::Node {node} {
             }]
             set block [hir::syntax::blockNode \
                 [Origin [dict get $node paramsSpan] [dict get $node id]/block] \
-                $params [Sequence [dict get $node body body]] [dict get $node resultType] $paramTypes $errors]
+                $params [Sequence [dict get $node body body]] [dict get $node resultType] $paramTypes $errors \
+                [Flags $node]]
             return [hir::syntax::bindNode $origin [dict get $node name] $block]
         }
         if {

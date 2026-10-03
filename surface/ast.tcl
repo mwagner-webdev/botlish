@@ -39,8 +39,10 @@
 #              one shared field-initializer payload of anonstruct and
 #              namedstruct
 #   project    receiver, name, nameSpan   receiver.name: a field projection
-#   call       callee, args
-#   methodcall receiver, name, nameSpan, args   receiver.name(args): method-call
+#   call       callee, args, flags ({name NAME span SPAN} dicts, the call's
+#              supplied flags in written order -- `f(x, :quiet)`; SPAN covers
+#              ":quiet"; empty if none -- FLAGS.md)
+#   methodcall receiver, name, nameSpan, args, flags   receiver.name(args): method-call
 #              sugar (METHOD-SUGAR.md), the surface spelling of the ordinary
 #              call name(receiver, args). Only the parser and the printer
 #              know it by this name: lowering turns it into an ordinary call
@@ -60,6 +62,9 @@
 #              a hygienic temporary bind and ordinary projection binds.
 #   function   name, nameSpan, params ({NAME SPAN TYPE TYPESPAN} tuples --
 #              TYPE is "" and TYPESPAN is "" for an untyped parameter),
+#              flags ({name NAME span SPAN} dicts: the declared flags in
+#              written, canonical order -- `fn f(x, flags :a, :b)`; empty if
+#              none; they follow the ordinary params -- FLAGS.md),
 #              paramsSpan (from "(" to the end of the body: the function
 #              literal), errors ({NAME SPAN} pairs, from the function's own
 #              "errors E1, E2" clause, empty if none), body (suite)
@@ -132,7 +137,8 @@
 # Inner nodes add their role: then, else, cond, value, callee, receiver, argN, itemN,
 # left, right, operand; a destructure's value is "value" and its field N is
 # "fieldN" (the field name read "fieldN/name", the binding it makes
-# "fieldN/binding", a nested pattern's field M "fieldN/fieldM"); a parameter is NAME()/(PARAM). A top-level function
+# "fieldN/binding", a nested pattern's field M "fieldN/fieldM"); a parameter is NAME()/(PARAM)
+# and a flag declaration NAME()/flag(FLAG); a call's supplied flag is ID/flag(FLAG). A top-level function
 # fib is "fib()"; the x + y in make_adder's inner add is
 # "make_adder()/add()/binary". Editing one function body changes no id outside
 # it; adding a statement changes only the ids of later siblings with its key.
@@ -508,12 +514,18 @@ proc surface::ast::Expr {node show} {
             foreach arg [dict get $node args] {
                 lappend parts [Expr $arg $show]
             }
+            foreach flag [dict get $node flags] {
+                lappend parts :[dict get $flag name]
+            }
             return "([::join $parts { }])$at"
         }
         methodcall {
             set parts [list methodcall [Expr [dict get $node receiver] $show] [dict get $node name]]
             foreach arg [dict get $node args] {
                 lappend parts [Expr $arg $show]
+            }
+            foreach flag [dict get $node flags] {
+                lappend parts :[dict get $flag name]
             }
             return "([::join $parts { }])$at"
         }
@@ -660,6 +672,9 @@ proc surface::ast::Statement {node indent show linesVar} {
             # would brace-quote such an element for eval-safety, which
             # "(x:List[Small] y)" does not need (join, unlike bare
             # interpolation of a list value, never adds that quoting).
+            if {[dict get $node flags] ne {}} {
+                lappend params flags {*}[lmap flag [dict get $node flags] {string cat : [dict get $flag name]}]
+            }
             set line "${pad}fn [dict get $node name] ([join $params { }])"
             if {[dict get $node errors] ne {}} {
                 append line " errors [join [lmap pair [dict get $node errors] {lindex $pair 0}] {, }]"

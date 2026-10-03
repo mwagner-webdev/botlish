@@ -102,9 +102,12 @@ Consequences, all by construction rather than by separate rules:
 * **Function values.** If the visible name denotes a function value (an
   alias, a parameter, a closure), the call is whatever the ordinary call of
   that value is, with the same exact-callable provenance when known.
-* **No flags or named arguments** exist in Botlish calls, so there is nothing
-  to inherit for them; variadics (`list`) work (`5.list(6, 7)` is
-  `list(5, 6, 7)`).
+* **Flags** (FLAGS.md) are part of the ordinary call: `x.f(a, :quiet)` is
+  `f(x, a, :quiet)`, the receiver is the first ordinary argument, and the
+  supplied flags are validated against `f`'s flag interface after
+  normalization (`UNKNOWN-FLAG`, `DUPLICATE-FLAG`, ... point at the flag's
+  own spelling). There are no named arguments; variadics (`list`) work
+  (`5.list(6, 7)` is `list(5, 6, 7)`).
 
 ### Why there is no ranking, and what ambiguity means
 
