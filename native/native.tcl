@@ -740,7 +740,9 @@ proc native::object {hir path args} {
 #
 # Kind guards are emitted exactly for representation blockers, so for each
 # lowering blockers == guards, and nirGuards == specialized guards +
-# knownErrorGuards; a mismatch raises {NATIVE BUG}.
+# knownErrorGuards; a mismatch raises {NATIVE BUG}. A lowering's blockers
+# are its emitted functions' regions' blockers, plus an inlined tiny leaf's
+# in the function it is inlined into (native/lower.tcl's InlineLeafCall).
 proc native::report {hir} {
     set result [dict create]
     set generic 0

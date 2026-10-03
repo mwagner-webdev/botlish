@@ -796,6 +796,14 @@ unmodified, territory, not this milestone's).
     introduced by inlining itself (§ 5.4, § 6.1-6.2).
 24. No new spills; `native::report`'s guard/blocker accounting and the
     full test/GC-stress suite (§ 15) show no regression.
+    *Correction (later):* the accounting did regress, unnoticed because
+    `native::report` ran only on the stdlib corpus, which inlines no leaf
+    with an unproven parameter. An inlined leaf's guards (§ 4) were counted
+    in its caller but its representation blockers nowhere, so
+    `native::report` threw for any uriEscape call ("generic lowering
+    emitted 10 kind guard(s) for 8 blocker(s)"). `InlineLeafCall` now
+    counts them in the caller, once per inlined call; the NIR is unchanged
+    (`tests/native-report-inlined-leaf.test`).
 25. Not materially: the caller (`high_nibble`) now has 15 registers
     instead of 3 (mostly dead constant-materialization leftovers, § 6.1's
     own note), a bounded, one-function-local increase, not a program-wide

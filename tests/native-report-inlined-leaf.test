@@ -1,0 +1,116 @@
+# native-report-inlined-leaf.test -- native::report's guard accounting
+# (a lowering's representation blockers == the kind guards it emits) holds
+# across tiny exact-leaf inlining (native/lower.tcl's InlineLeafCall).
+#
+# Inlining lowers a leaf's body into its caller, so the leaf's kind guards
+# are emitted there and counted in the caller's `guards`; the leaf's
+# representation blockers were counted nowhere (its own function is not even
+# emitted once every call to it inlines). native::report then threw for an
+# ordinary uriEscape call, "generic lowering emitted 10 kind guard(s) for 8
+# blocker(s)": web.bot's high_nibble inlines byte::high_nibble and
+# byte::nibble, each of whose generic instance needs one `bit_and` guard.
+# Those guards are the leaves' own checks, the same ones their functions make
+# when the calls are not inlined, so the NIR is unchanged; a function's
+# blockers now include each inlined leaf's, once per inlined call.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+proc sourceHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+# {generic-blockers generic-guards specialized-blockers specialized-guards
+# nirGuards} of native::report on HIR (it throws on a mismatch itself).
+proc reportCounts {hir} {
+    set r [native::report $hir]
+    return [list [dict get $r generic blockers] [dict get $r generic guards] \
+        [dict get $r specialized blockers] [dict get $r specialized guards] \
+        [dict get $r nirGuards]]
+}
+
+# The info dict of the one function named NAME in LOWERED (native::lowered).
+proc loweredFunction {lowered name} {
+    set found [lmap info [dict get $lowered functions] {
+        if {[dict get $info name] ne $name} continue
+        set info
+    }]
+    if {[llength $found] != 1} {
+        error "expected one function $name, found [llength $found]"
+    }
+    return [lindex $found 0]
+}
+
+# The guard lines of function NAME's body in NIR text NIR, without their
+# @E origins.
+proc guardLines {nir name} {
+    set lines {}
+    set inside 0
+    foreach line [split $nir \n] {
+        if {[string match "func *" $line]} {
+            set inside [string match "func * \"$name\" *" $line]
+        } elseif {$inside && [regexp {^\s+guard(bool)? } $line]} {
+            lappend lines [regsub { @e\d+$} [string trim $line] ""]
+        }
+    }
+    return $lines
+}
+
+set uriEscapeCall {{call {ref uriEscape} {const str {a b}}}}
+
+test native-report-inlined-leaf-1 {native::report accepts an ordinary uriEscape call, directly and through an untyped wrapper, and Emailish?(5)} -body {
+    lmap prog [list \
+        $uriEscapeCall \
+        {{bind h {block {x} {call {ref uriEscape} {ref x}}}} {call {ref h} {const str {a b}}}} \
+        {{call {ref Emailish?} {const 5}}}] {
+        reportCounts [hir::build $prog -strict 0]
+    }
+} -result {{10 10 0 0 0} {11 11 0 0 0} {0 0 0 0 1}}
+
+test native-report-inlined-leaf-2 {web.bot's high_nibble owns the two inlined bit_and guards and their two blockers} -body {
+    set lowered [native::lowered [hir::build $uriEscapeCall -strict 0] -specialize 0]
+    set info [loweredFunction $lowered high_nibble]
+    list [dict get $info blockers] [dict get $info guards] \
+        [guardLines [dict get $lowered text] high_nibble]
+} -result {2 2 {{guard int %0 "bit_and"} {guard int %3 "bit_and"}}}
+
+test native-report-inlined-leaf-3 {inlining moves guards and blockers together: the totals do not depend on it} -body {
+    set hir [hir::build $uriEscapeCall -strict 0]
+    lmap opt {1 0} {
+        set lowered [native::lowered $hir -specialize 0 -tiny-leaf-inline-opt $opt]
+        list [dict get $lowered statistics blockers] [dict get $lowered statistics guards] \
+            [llength [lmap info [dict get $lowered functions] {
+                if {[dict get $info name] ni {byte::high_nibble byte::nibble}} continue
+                set info
+            }]]
+    }
+} -result {{10 10 0} {10 10 2}}
+
+test native-report-inlined-leaf-4 {a leaf of an unproven argument inlined into the program, into a generic instance under specialization, and twice on one register} -body {
+    lmap text {
+        "fn inc(x):\n    x + 1\n\ninc(41)"
+        "fn inc(x):\n    x + 1\n\nfn twice(y):\n    inc(inc(y))\n\nfs = \[twice\]\nlist_get(fs, 0)(4)"
+        "fn mix(a, b):\n    bit_and(bit_or(a, b), 255)\n\nfn h(p):\n    mix(p, p)\n\nfs = \[h\]\nlist_get(fs, 0)(7)"
+    } {
+        reportCounts [sourceHir $text]
+    }
+} -result {{1 1 0 0 0} {2 2 1 1 1} {2 2 2 2 2}}
+
+test native-report-inlined-leaf-5 {the example and benchmark programs that call uriEscape or inline a module leaf} -body {
+    lmap {path loader} {
+        {examples 05-refined-strings.ir}       ir
+        {examples hir 06-refined-strings.hir}  hir
+        {examples surface 14-modules.bot}      bot
+        {bench uri-steady.bot}                 bot
+    } {
+        set path [file join $::projectRoot {*}$path]
+        switch -- $loader {
+            ir  { set hir [hir::build [core::loadProgramFile $path] -strict 0] }
+            hir { set hir [hir::readFile $path] }
+            bot { set hir [surface::readProgramFile $path] }
+        }
+        list [file tail $path] {*}[reportCounts $hir]
+    }
+} -result {{05-refined-strings.ir 20 20 1 1 1} {06-refined-strings.hir 21 21 1 1 1} {14-modules.bot 2 2 0 0 0} {uri-steady.bot 13 13 0 0 0}}
+
+cleanupTests

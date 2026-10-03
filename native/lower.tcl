@@ -1113,8 +1113,10 @@ namespace eval native::lower {
 #   functions   list of dicts, in id order: {id name block instance label
 #               generic envless selfTailCalls calls blockers guards
 #               knownErrorGuards}: blockers counts the region's
-#               representation blockers, guards the kind checks emitted for
-#               them, knownErrorGuards the checks that always fail
+#               representation blockers (plus those of each tiny leaf
+#               inlined into it, once per inlined call: InlineLeafCall),
+#               guards the kind checks emitted for them, knownErrorGuards
+#               the checks that always fail
 #   statistics  {functions N generic N specialized N blockers N guards N
 #               perFunction {NAME {generic 0|1 specializations N} ...}}
 #   specialization  the hir::specialize analysis
@@ -1903,7 +1905,7 @@ proc native::lower::Function {id} {
         set b
     }]]
     set fn [dict create region $region instance $id targets [dict get $instance calls] \
-        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 \
+        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 inlinedBlockers 0 \
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
         locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion "" regionCompanion 0 \
         traversal "" traversalByteReg ""]
@@ -2025,7 +2027,7 @@ proc native::lower::Function {id} {
     set info [dict create id [Placeholder $id] name $name block $region instance $id \
         label [hir::specialize::label $spec $id] generic [dict get $instance generic] \
         envless [expr {!$env}] selfTailCalls $tails calls [dict get $fn calls] \
-        blockers [expr {$blockers - [dict get $fn skippedGuards]}] \
+        blockers [expr {$blockers + [dict get $fn inlinedBlockers] - [dict get $fn skippedGuards]}] \
         guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
         rawUnboxes [dict get $fn rawUnboxes] rawBoxes [dict get $fn rawBoxes] \
         rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare] \
@@ -2063,7 +2065,7 @@ proc native::lower::CompanionFunction {id} {
         set b
     }]]
     set fn [dict create region $region instance $id targets [dict get $instance calls] \
-        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 \
+        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 inlinedBlockers 0 \
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
         locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion $arity regionCompanion 0 \
         traversal "" traversalByteReg ""]
@@ -2123,7 +2125,7 @@ proc native::lower::CompanionFunction {id} {
     set info [dict create id [Placeholder $id companion] name $name block $region instance $id \
         label "[hir::specialize::label $spec $id] (scalar)" generic [dict get $instance generic] \
         envless [expr {!$env}] selfTailCalls $tails calls [dict get $fn calls] \
-        blockers [expr {$blockers - [dict get $fn skippedGuards]}] \
+        blockers [expr {$blockers + [dict get $fn inlinedBlockers] - [dict get $fn skippedGuards]}] \
         guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
         rawUnboxes [dict get $fn rawUnboxes] rawBoxes [dict get $fn rawBoxes] \
         rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare] \
@@ -2160,7 +2162,7 @@ proc native::lower::RegionCompanionFunction {id} {
         set b
     }]]
     set fn [dict create region $region instance $id targets [dict get $instance calls] \
-        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 \
+        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 inlinedBlockers 0 \
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
         locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion "" regionCompanion 1 \
         traversal "" traversalByteReg ""]
@@ -2220,7 +2222,7 @@ proc native::lower::RegionCompanionFunction {id} {
     set info [dict create id [Placeholder $id region] name $name block $region instance $id \
         label "[hir::specialize::label $spec $id] (region)" generic [dict get $instance generic] \
         envless [expr {!$env}] selfTailCalls $tails calls [dict get $fn calls] \
-        blockers [expr {$blockers - [dict get $fn skippedGuards]}] \
+        blockers [expr {$blockers + [dict get $fn inlinedBlockers] - [dict get $fn skippedGuards]}] \
         guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
         rawUnboxes [dict get $fn rawUnboxes] rawBoxes [dict get $fn rawBoxes] \
         rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare] \
@@ -2268,7 +2270,7 @@ proc native::lower::InternalFunction {id} {
         set b
     }]]
     set fn [dict create region $region instance $id targets [dict get $instance calls] \
-        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 \
+        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 inlinedBlockers 0 \
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
         locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion "" regionCompanion 0 \
         traversal "" traversalByteReg ""]
@@ -2317,7 +2319,7 @@ proc native::lower::InternalFunction {id} {
     set info [dict create id [Placeholder $id internal] name $name block $region instance $id \
         label "[hir::specialize::label $spec $id] (internal)" generic [dict get $instance generic] \
         envless 1 selfTailCalls $tails calls [dict get $fn calls] \
-        blockers [expr {$blockers - [dict get $fn skippedGuards]}] \
+        blockers [expr {$blockers + [dict get $fn inlinedBlockers] - [dict get $fn skippedGuards]}] \
         guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
         rawUnboxes [dict get $fn rawUnboxes] rawBoxes [dict get $fn rawBoxes] \
         rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare] \
@@ -2367,7 +2369,7 @@ proc native::lower::InternalRegionCompanionFunction {id} {
         set b
     }]]
     set fn [dict create region $region instance $id targets [dict get $instance calls] \
-        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 \
+        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 inlinedBlockers 0 \
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
         locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion "" regionCompanion 1 \
         traversal "" traversalByteReg ""]
@@ -2427,7 +2429,7 @@ proc native::lower::InternalRegionCompanionFunction {id} {
     set info [dict create id [Placeholder $id internalregion] name $name block $region instance $id \
         label "[hir::specialize::label $spec $id] (internal region)" generic [dict get $instance generic] \
         envless 1 selfTailCalls $tails calls [dict get $fn calls] \
-        blockers [expr {$blockers - [dict get $fn skippedGuards]}] \
+        blockers [expr {$blockers + [dict get $fn inlinedBlockers] - [dict get $fn skippedGuards]}] \
         guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
         rawUnboxes [dict get $fn rawUnboxes] rawBoxes [dict get $fn rawBoxes] \
         rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare] \
@@ -2506,7 +2508,7 @@ proc native::lower::FieldsFunction {id} {
         set b
     }]]
     set fn [dict create region $region instance $id targets [dict get $instance calls] \
-        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 \
+        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 inlinedBlockers 0 \
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
         locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion "" regionCompanion 0 \
         traversal "" traversalByteReg ""]
@@ -2542,7 +2544,7 @@ proc native::lower::FieldsFunction {id} {
     set info [dict create id [Placeholder $id fields] name $name block $region instance $id \
         label "[hir::specialize::label $spec $id] (fields)" generic [dict get $instance generic] \
         envless [expr {!$env}] selfTailCalls $tails calls [dict get $fn calls] \
-        blockers [expr {$blockers - [dict get $fn skippedGuards]}] \
+        blockers [expr {$blockers + [dict get $fn inlinedBlockers] - [dict get $fn skippedGuards]}] \
         guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
         rawUnboxes [dict get $fn rawUnboxes] rawBoxes [dict get $fn rawBoxes] \
         rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare] \
@@ -2581,7 +2583,7 @@ proc native::lower::FieldsCompanionFunction {id} {
         set b
     }]]
     set fn [dict create region $region instance $id targets [dict get $instance calls] \
-        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 \
+        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 inlinedBlockers 0 \
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
         locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion $arity regionCompanion 0 \
         traversal "" traversalByteReg ""]
@@ -2629,7 +2631,7 @@ proc native::lower::FieldsCompanionFunction {id} {
     set info [dict create id [Placeholder $id fieldscompanion] name $name block $region instance $id \
         label "[hir::specialize::label $spec $id] (fields, scalar)" generic [dict get $instance generic] \
         envless [expr {!$env}] selfTailCalls $tails calls [dict get $fn calls] \
-        blockers [expr {$blockers - [dict get $fn skippedGuards]}] \
+        blockers [expr {$blockers + [dict get $fn inlinedBlockers] - [dict get $fn skippedGuards]}] \
         guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
         rawUnboxes [dict get $fn rawUnboxes] rawBoxes [dict get $fn rawBoxes] \
         rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare] \
@@ -5737,7 +5739,19 @@ proc native::lower::InlineLeafCall {fnVar e node calleeId callerArgRegs} {
 
     set hir $calleeView
     set currentInstance $calleeId
-    CollectChecks [hir::aot::analyzeRegion $hir $block $context]
+    set analysis [hir::aot::analyzeRegion $hir $block $context]
+    CollectChecks $analysis
+    # The callee's kind guards are emitted here, into FN, and EmitArgGuards
+    # counts them in FN's own `guards`; so its representation blockers are
+    # FN's too, once per inlined copy -- just as a companion counts its
+    # region's once per NIR function. Without this the guards of a leaf
+    # inlined at an unproven argument (byte::high_nibble(b) in web.bot's
+    # high_nibble, any leaf of a generic instance) had no blocker anywhere:
+    # the callee's own function is not even emitted once every call inlines.
+    dict incr fn inlinedBlockers [llength [lmap b [dict get $analysis blockers] {
+        if {[dict get $b class] ne "representation"} continue
+        set b
+    }]]
     foreach b $params r $callerArgRegs {
         dict set fn locals $b [list reg $r]
     }
