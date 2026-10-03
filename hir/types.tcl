@@ -1281,6 +1281,17 @@ proc hir::types::AggregateOfValue {v} {
 # RESULT.
 proc hir::types::ShapeResult {hir shape argExprs argTypes result} {
     switch -- [lindex $shape 0] {
+        named-struct {
+            # A struct of one named declaration (core/native.tcl's
+            # {named-struct ID}: linux::abi::syscall's abi::x86_64::
+            # Register64), when the compiling program declares it; the
+            # native's declared result (the bare `struct` kind) otherwise.
+            set id [lindex $shape 1]
+            if {[hir::structs::declared $id]} {
+                return [list nstruct $id]
+            }
+            return $result
+        }
         elements {
             return [MakeList never $argTypes 1]
         }

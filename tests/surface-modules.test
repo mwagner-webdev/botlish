@@ -364,10 +364,44 @@ test surface-modules-no-import-alias-syntax {an "import ... as" line is rejected
     lrange [dict get $options -errorcode] 0 1
 } -result {SURFACE SYNTAX}
 
-test surface-modules-double-colon-single-level-only {a::b::c (two levels) is rejected} -body {
-    catch {surface::parse "a::b::c\n" t.bot} message options
-    lrange [dict get $options -errorcode] 0 1
-} -result {SURFACE SYNTAX}
+test surface-modules-double-colon-nested-path {a::b::c is member c of the nested namespace a::b (every segment but the last is the namespace path; this used to be a syntax error)} -body {
+    set program [surface::parse "a::b::c\n" t.bot]
+    set node [lindex [dict get $program body] 0]
+    list [dict get $node kind] [dict get $node namespace] [dict get $node name]
+} -result {qualname a::b c}
+
+test surface-modules-nested-namespace-declaration {"namespace a::b" declares the nested namespace a::b; a dangling "::" is still a syntax error} -body {
+    set program [surface::parse "namespace outer::inner\nfn f():\n    1\n" t.bot]
+    catch {surface::parse "namespace outer::\n" t.bot} message options
+    list [dict get $program namespace] [lrange [dict get $options -errorcode] 0 1] $message
+} -result {outer::inner {SURFACE SYNTAX} {t.bot:1:18: expected a namespace name after "::", found end of line}}
+
+test surface-modules-nested-namespace-file {a nested namespace outer::inner is the file outer/inner.bot: one directory per leading segment, never a "::" in a file name; outer and outer::inner are unrelated modules, each used qualified, identical on every backend} -body {
+    withScratchLibrary {
+        file mkdir [file join $dir outer]
+        writeModule $dir outer "namespace outer\nfn f(x):\n    x + 1\n"
+        writeModule $dir outer/inner "namespace outer::inner\nstruct P:\n    v: int\nfn make(x) -> P:\n    P {v: x * 10}\nfn get(p: P) -> int:\n    p.v\n"
+        set main [writeMain $dir "fn twice(p: outer::inner::P):\n    p.v * 2\nq = outer::inner::P {v: 3}\n\[outer::f(1), outer::inner::get(outer::inner::make(4)), twice(q), q\]\n"]
+        list [moduleValue $main] [moduleParity $main] \
+            [file tail [file dirname [surface::modules::ModulePath outer::inner]]]
+    }
+} -result {{[2, 40, 6, outer::inner::P {v: 3}]} same outer}
+
+test surface-modules-nested-namespace-errors {nested-namespace diagnostics name the path: a missing file, a mismatched declaration, an unknown member} -body {
+    withScratchLibrary {
+        file mkdir [file join $dir outer]
+        writeModule $dir outer/inner "namespace inner\nfn f():\n    1\n"
+        writeModule $dir outer/ok "namespace outer::ok\nfn f():\n    1\n"
+        set results {}
+        foreach source {"outer::missing::f()" "outer::inner::f()" "outer::ok::g()"} {
+            set main [writeMain $dir "$source\n"]
+            catch {surface::readProgramFile $main} message options
+            regsub -all {/[^ ]*/} $message {/.../} message
+            lappend results [lindex [dict get $options -errorcode] 2] $message
+        }
+        set results
+    }
+} -match glob -result {UNKNOWN-NAMESPACE {*unknown namespace "outer::missing"*/.../missing.bot*} NAMESPACE-MISMATCH {*} UNKNOWN-SYMBOL {*namespace "outer::ok" has no definition "g"*}}
 
 # ---------------------------------------------------------------------------
 # uriEscape: the module-native bridge (native/native.tcl), lib/web.bot.

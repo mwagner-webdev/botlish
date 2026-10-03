@@ -160,7 +160,7 @@ test checked-domain-q1-real-byte-from-int-45-effective-errors-empty {byte::from_
     }
 } -result {{} {[45, 45] {45}}}
 
-test checked-domain-q1-real-byte-from-int-still-emits-both-checks {UPDATED BY M6: byte::from_int<int>'s own generated NIR, with this its ONLY (single, all-safe-literal) caller, now emits neither fail path -- both comparisons are still computed (condition-evaluation soundness, M6 spec #40-42: no purity theorem was added, so the two now-dead `rilt`/`rigt` registers remain, unused) but the runtime branch and both `faildeclared` blocks are gone, because the instance's own joined entry range for `value` (point 45, this call being its only caller) now reaches `native::lower::If` as a consumed theorem. Q1 = yes, under M6, for a safe-only-caller instance -- see the report's byte::from_int reassessment} -body {
+test checked-domain-q1-real-byte-from-int-still-emits-both-checks {UPDATED BY M6, then LINUX-X86-64-SYSCALL: (name kept for the M5/M6 reports' cross-references: nothing is emitted any more) byte::from_int<int>'s own generated NIR, with this its ONLY (single, all-safe-literal) caller, emits neither fail path, because the instance's own joined entry range for `value` (point 45, this call being its only caller) reaches `native::lower::If` as a consumed theorem -- and, since LINUX-X86-64-SYSCALL.md added M6's missing "condition-expression purity" theorem in its narrowest form (a decided comparison of a parameter register and a constant is not evaluated: native/lower.tcl's PureDecidedCondition), neither dead comparison (`rilt`/`rigt`) is computed any more either. Q1 = yes, for a safe-only-caller instance -- see the report's byte::from_int reassessment} -body {
     set path [makeFile {byte::from_int(45)} q1-byte-from-int-45-nir.bot]
     try {
         set body [nirFuncBody [nirOfFile $path] "byte::from_int"]
@@ -170,7 +170,7 @@ test checked-domain-q1-real-byte-from-int-still-emits-both-checks {UPDATED BY M6
     } finally {
         removeFile q1-byte-from-int-45-nir.bot
     }
-} -result {1 1 0 0}
+} -result {0 0 0 0}
 
 test checked-domain-q1-out-of-range-literal-still-known-error {byte::from_int(999) remains a compile-time KNOWN-ERROR, not silently accepted -- the other half of the three-way rule is unaffected} -body {
     set path [makeFile {byte::from_int(999)} q1-byte-from-int-999.bot]
@@ -197,12 +197,12 @@ fn checkedSmall(value: int) -> Small errors TooSmall, TooLarge:
             value
 }
 
-test checked-domain-q1-generic-domain-literal-still-emits-both-checks {UPDATED BY M6: a second, non-Byte bounded domain's own checked constructor, called with a statically safe literal as its only caller, now loses both fail paths exactly like byte::from_int(45) does -- confirming the M6 mechanism is generic (hir::range::ConditionOutcome has no Byte- or type-specific code), not a Byte special case} -body {
+test checked-domain-q1-generic-domain-literal-still-emits-both-checks {UPDATED BY M6, then LINUX-X86-64-SYSCALL: (name kept for the M5/M6 reports' cross-references: nothing is emitted any more) a second, non-Byte bounded domain's own checked constructor, called with a statically safe literal as its only caller, loses both fail paths -- and both dead comparisons (PureDecidedCondition) -- exactly like byte::from_int(45) does, confirming the mechanism is generic (hir::range::ConditionOutcome has no Byte- or type-specific code), not a Byte special case} -body {
     set body [nirFuncBody [nirOf "${::smallCheckedSrc}checkedSmall(15)"] "checkedSmall"]
     list [regexp -all {op rilt} $body] [regexp -all {op rigt} $body] \
             [regexp -all {faildeclared 1 "TooSmall"} $body] \
             [regexp -all {faildeclared 2 "TooLarge"} $body]
-} -result {1 1 0 0}
+} -result {0 0 0 0}
 
 # ---------------------------------------------------------------------------
 # Q2 (decision-tree item 46): a nonliteral value with an existing, weaker
@@ -300,7 +300,7 @@ test checked-domain-q3-inner-call-keeps-only-the-generic-fact {byte::set's own i
     }
 } -result {AboveRange {[0, 1114111]}}
 
-test checked-domain-q3-real-nir-retains-above-range-check {UPDATED BY M6: byte::set's real generated NIR for its inner byte::from_int<int> instance loses its BelowRange check -- generically, because char::codepoint's own declared result range floor (core/native.tcl's "-result-range nonneg" metadata for a Unicode scalar value, [0, 1114111]) already proves value>=0 for EVERY caller of this shared instance, independent of the punctuation literal's own four values and independent of hir/completions.tcl's call-specific silo entirely -- but AboveRange remains: char::codepoint's upper bound (1114111) is nowhere near 255, so value>255 stays genuinely Unknown for this shared instance. This is the real production improvement M6 actually delivers here; it is not M5's own Q3 question (whether the outer call's *literal* facts reach the inner construction) -- that remains Outcome B, confirmed unchanged: no container-content propagation, no completions-proof import, was added} -body {
+test checked-domain-q3-real-nir-retains-above-range-check {UPDATED BY M6, then LINUX-X86-64-SYSCALL (the decided `value < 0` comparison is no longer computed either: native/lower.tcl's PureDecidedCondition): byte::set's real generated NIR for its inner byte::from_int<int> instance loses its BelowRange check -- generically, because char::codepoint's own declared result range floor (core/native.tcl's "-result-range nonneg" metadata for a Unicode scalar value, [0, 1114111]) already proves value>=0 for EVERY caller of this shared instance, independent of the punctuation literal's own four values and independent of hir/completions.tcl's call-specific silo entirely -- but AboveRange remains: char::codepoint's upper bound (1114111) is nowhere near 255, so value>255 stays genuinely Unknown for this shared instance. This is the real production improvement M6 actually delivers here; it is not M5's own Q3 question (whether the outer call's *literal* facts reach the inner construction) -- that remains Outcome B, confirmed unchanged: no container-content propagation, no completions-proof import, was added} -body {
     set path [makeFile {additional_unreserved_chars = byte::set(['-', '.', '_', '~'])} q3-nir.bot]
     try {
         set body [nirFuncBody [nirOfFile $path] "byte::from_int"]
@@ -310,7 +310,7 @@ test checked-domain-q3-real-nir-retains-above-range-check {UPDATED BY M6: byte::
     } finally {
         removeFile q3-nir.bot
     }
-} -result {1 1 0 1}
+} -result {0 1 0 1}
 
 # ---------------------------------------------------------------------------
 # Shared-instance adversarial control (spec items 8-9, 21-22): the same

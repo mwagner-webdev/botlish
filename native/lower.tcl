@@ -3556,6 +3556,156 @@ proc native::lower::Project {fnVar e node} {
     return [Assign fn "structget $slot $r" $e]
 }
 
+# ---------------------------------------------------------------------------
+# linux::abi::syscall (core/linuxabi.tcl, LINUX-X86-64-SYSCALL.md)
+#
+# `linux::abi::syscall(REGS)`, REGS an anonymous struct of abi::x86_64::
+# Register64 fields named after the Linux x86-64 syscall registers (hir/
+# syscall.tcl proved that statically), lowers to
+#
+#   %w = op syscall_linux_x86_64 RAX RDI RSI RDX R10 R8 R9
+#
+# the seven operands being the registers' words (Ints, each a proven
+# -2^63..2^63-1 Register64Word) in the syscall convention's order, the Int 0
+# for an argument register REGS omits, and %w the raw rax afterwards (an
+# Int). The op is a helper call the backend never removes, merges or moves.
+#
+# Representation (the transport is zero-allocation in its canonical form):
+#   * an inline REGS literal is never built: its fields are evaluated in
+#     written order, each register's word read straight from it -- from the
+#     fields of a recognized Register64 construction (hir::escape::
+#     registerWord: a register64(...) call returning fields, a literal, a
+#     nested syscall), from a virtual Register64 local, or else from the
+#     object with `structget` (a Register64 that already exists);
+#   * any other REGS (a struct value from elsewhere) is read with `structget`;
+#   * the result Register64 is the one-field construction {word: %w}: handed
+#     back as that field when the caller wants it virtual (hir/escape.tcl's
+#     Classify recognizes the call like a literal), built with `structnew`
+#     only when an object is needed.
+proc native::lower::SyscallCall {fnVar e node wantVirtual} {
+    upvar 1 $fnVar fn
+    variable hir
+    variable context
+    variable structOpt
+    set problems [hir::syscall::Problems $hir $e $node]
+    if {$problems ne ""} {
+        # A -strict 0 program whose call hir/syscall.tcl rejected: replay the
+        # problem unconditionally, before anything is evaluated (LockLoop's
+        # precedent). Compiling the call instead would read registers from
+        # values nothing proved to be Register64s, or run a syscall whose
+        # registers are not the ones written.
+        lassign [lindex $problems 0] kind message
+        dict incr fn skippedGuards [SkippedBlockers [dict get $node args]]
+        Emit fn "raise $kind [Quote "linux::abi::syscall: $message"]" $e
+        return {never tagged}
+    }
+    set registerType [core::linuxabi::registerType]
+    if {![hir::structs::declared $registerType]} {
+        throw {NATIVE BUG} "native lowering: linux::abi::syscall without a declared $registerType ($e)"
+    }
+    set layout [hir::structs::names $registerType]
+    set words [SyscallWords fn $e [lindex [dict get $node args] 0]]
+    if {$words eq "never"} {
+        return {never tagged}
+    }
+    set operands {}
+    set zero ""
+    foreach register [core::linuxabi::registers] {
+        if {[dict exists $words $register]} {
+            lappend operands [dict get $words $register]
+        } else {
+            # An omitted argument register is zero (one constant for all).
+            if {$zero eq ""} {
+                set zero [Assign fn "int 0" $e]
+            }
+            lappend operands $zero
+        }
+    }
+    dict lappend fn calls [list native linux::abi::syscall]
+    set rax [Assign fn "op syscall_linux_x86_64 [join $operands { }]" $e]
+    if {$wantVirtual ne ""} {
+        if {$wantVirtual != 1} {
+            throw {NATIVE BUG} "native lowering: expected a 1-field Register64 construction at $e"
+        }
+        return [list [list $rax] virtual]
+    }
+    if {$structOpt && [dict exists $context discarded $e]} {
+        # Nothing reads the result (statement position): the transition ran,
+        # no Register64 object is needed.
+        return [list [Assign fn unit] tagged]
+    }
+    return [list [Assign fn "structnew [ShapeIndex $registerType $layout] $rax" $e] tagged]
+}
+
+# Register name -> the register's word (an Int register), for the registers
+# REGS (linux::abi::syscall's argument expression) names, every field
+# evaluated once in written order; "never" if one cannot complete normally.
+proc native::lower::SyscallWords {fnVar e regs} {
+    upvar 1 $fnVar fn
+    variable hir
+    variable escape
+    variable currentInstance
+    set words [dict create]
+    if {[hir::kind $hir $regs] eq "struct"} {
+        # An inline literal: never built.
+        set node [hir::node $hir $regs]
+        foreach name [dict get $node names] field [dict get $node fields] {
+            set w [RegisterWordOf fn $field]
+            if {$w eq "never"} {
+                return never
+            }
+            dict set words $name $w
+        }
+        return $words
+    }
+    set type [hir::typeOf $hir $regs]
+    set object [Expr fn $regs]
+    if {$object eq "never"} {
+        return never
+    }
+    set layout [hir::types::StructLayout $type]
+    foreach name $layout {
+        set register [Assign fn "structget [lsearch -exact $layout $name] $object" $e]
+        dict set words $name [Assign fn "structget 0 $register" $e]
+    }
+    return $words
+}
+
+# The word (an Int register) of Register64 expression FIELD, evaluated here,
+# or "never".
+proc native::lower::RegisterWordOf {fnVar field} {
+    upvar 1 $fnVar fn
+    variable hir
+    variable escape
+    variable currentInstance
+    set desc [hir::escape::registerWord $escape $currentInstance $field]
+    if {$desc ne ""} {
+        # A recognized construction: its one field, never an object.
+        lassign $desc n shape cut
+        set fields [VirtualValue fn $field $n $cut]
+        if {$fields eq "never"} {
+            return never
+        }
+        return [lindex $fields 0]
+    }
+    if {[hir::kind $hir $field] eq "ref"} {
+        # A Register64 held as a virtual local (or a virtual parameter of
+        # this `fields` variant): its word register, nothing evaluated.
+        set b [hir::get $hir $field binding]
+        if {$b ne "" && [dict exists $fn locals $b]} {
+            set local [dict get $fn locals $b]
+            if {[lindex $local 0] eq "virtual" && [lindex $local 2] ne ""} {
+                return [lindex [lindex $local 1] 0]
+            }
+        }
+    }
+    set object [Expr fn $field]
+    if {$object eq "never"} {
+        return never
+    }
+    return [Assign fn "structget 0 $object" $field]
+}
+
 # The register of the projection chain ending at project node E when its root
 # is held as virtual fields (or is a recognized call result: hir::escape's
 # DirectRoots) and the chain crosses at least one opened inner value; "" when
@@ -4643,6 +4793,12 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
     lassign [dict get $node target] targetKind target
     set calleeExpr [dict get $node callee]
     set argExprs [dict get $node args]
+
+    if {$targetKind eq "native" && [dict get [hir::symbol $hir $target] name] eq "linux::abi::syscall"} {
+        # The raw Linux x86-64 kernel transition (core/linuxabi.tcl): its own
+        # form, never NativeCall's one-operand-per-argument shape.
+        return [SyscallCall fn $e $node $wantVirtual]
+    }
 
     if {$constructionOpt && $wantVirtual eq "" && !$wantRegion && $targetKind eq "native"
             && [dict get $node known] eq "" && [PlainNativeCallee $calleeExpr]} {
@@ -6227,6 +6383,17 @@ proc native::lower::NativeCall {fnVar e node name argRegs rawEligible op want} {
     # it always has.
     set argExprs [dict get $node args]
     EmitArgGuards fn $e $argExprs $argRegs [dict get $meta paramTypes] $name
+    set big [BigConstantResult $e $argExprs $op]
+    if {$big ne ""} {
+        # An Int `+ - *` of integer constant expressions whose value BIG is
+        # outside the small-Int range (a literal below -2^62 is `0 - N`:
+        # lib/abi/x86_64.bot's -9223372036854775808): that value as a static
+        # BigInt constant, never computed -- and allocated -- at run time on
+        # every evaluation. The operands were already evaluated (Call
+        # evaluates every argument first); only the pure, total operation
+        # itself is dropped.
+        return [list [IntConst fn $big $e] tagged]
+    }
     if {[PureBitwiseEligible $e $argExprs $op]} {
         set folded [FoldPureBitwise fn $e $argExprs $argRegs $op $want]
         if {$folded ne ""} {
@@ -6279,6 +6446,65 @@ proc native::lower::NativeCall {fnVar e node name argRegs rawEligible op want} {
 # to emit iand/ior/ixor here never skips an evaluation that may have had a
 # side effect -- it only ever discards the (already pure, allocation-free,
 # total) operation itself.
+
+# The value of E, a call of the Int arithmetic op OP (iadd, isub, imul) on
+# ARGEXPRS, when E is an integer constant expression (ConstantIntValue)
+# whose value is outside the small-Int range and neither operand needs a
+# runtime check; "" otherwise. Only source constants are folded (a
+# parameter's proven point Range is not: its arithmetic stays the ordinary
+# representation decision), and a small value is left alone: raw
+# arithmetic already computes it without allocating.
+proc native::lower::BigConstantResult {e argExprs op} {
+    variable reprOpt
+    variable guards
+    variable knownErrors
+    if {!$reprOpt || $op ni {iadd isub imul} || [llength $argExprs] != 2} {
+        return ""
+    }
+    foreach a $argExprs {
+        set key [list $e $a]
+        if {[dict exists $guards $key] || [dict exists $knownErrors $key]} {
+            return ""
+        }
+    }
+    set value [ConstantIntValue $e]
+    if {$value eq "" || [hir::range::fitsSmall [hir::range::point $value]]} {
+        return ""
+    }
+    return $value
+}
+
+# The exact value of E when it is an integer constant expression: an Int
+# literal, or `+ - *` (the root natives) of two of them -- a negative literal
+# is `0 - N` -- else "". Tcl's own arbitrary-precision arithmetic computes it.
+proc native::lower::ConstantIntValue {e} {
+    variable hir
+    switch -- [hir::kind $hir $e] {
+        const {
+            set v [hir::get $hir $e value]
+            return [expr {[core::value::kind $v] eq "int" ? [core::value::intOf $v] : ""}]
+        }
+        call {
+            set node [hir::node $hir $e]
+            lassign [dict get $node target] targetKind target
+            if {$targetKind ne "native" || ![PlainNativeCallee [dict get $node callee]]} {
+                return ""
+            }
+            set name [dict get [hir::symbol $hir $target] name]
+            set args [dict get $node args]
+            if {$name ni {+ - *} || [llength $args] != 2} {
+                return ""
+            }
+            set a [ConstantIntValue [lindex $args 0]]
+            set b [ConstantIntValue [lindex $args 1]]
+            if {$a eq "" || $b eq ""} {
+                return ""
+            }
+            return [expr "\$a $name \$b"]
+        }
+    }
+    return ""
+}
 
 # Whether E (a call to the pure, total, two-operand bitwise native OP: iand,
 # ior, or ixor) is eligible for FoldPureBitwise below.
@@ -6656,6 +6882,80 @@ proc native::lower::NativeImpl {name} {
 # ---------------------------------------------------------------------------
 # Control flow
 
+# 1 if evaluating CONDITION (an `if` condition whose outcome is decided) has
+# no effect, cannot fail and would produce only that Bool: a native
+# comparison (< <= > >= ==) of two PureIntOperands. Such a condition's
+# evaluation is dead code under a decided outcome (If, above).
+proc native::lower::PureDecidedCondition {fnVar condition} {
+    upvar 1 $fnVar fn
+    variable hir
+    if {[hir::kind $hir $condition] ne "call"} {
+        return 0
+    }
+    set node [hir::node $hir $condition]
+    lassign [dict get $node target] targetKind target
+    if {$targetKind ne "native" || ![PlainNativeCallee [dict get $node callee]]
+            || [dict get [hir::symbol $hir $target] name] ni {< <= > >= ==}} {
+        return 0
+    }
+    set args [dict get $node args]
+    if {[llength $args] != 2} {
+        return 0
+    }
+    foreach a $args {
+        if {![PureIntOperand fn $condition $a]} {
+            return 0
+        }
+    }
+    return 1
+}
+
+# 1 if E, an operand of call PARENT, is statically an Int whose evaluation
+# has no effect and cannot fail, and needs no runtime kind check: an integer
+# constant, a binding this function already holds in a register (a parameter
+# or an evaluated local -- reading it is a register read), or `+ - *` of two
+# such operands (a negative literal is `0 - N`).
+proc native::lower::PureIntOperand {fnVar parent e} {
+    upvar 1 $fnVar fn
+    variable hir
+    variable guards
+    variable knownErrors
+    set key [list $parent $e]
+    if {[dict exists $guards $key] || [dict exists $knownErrors $key]
+            || [hir::types::kindOf [hir::typeOf $hir $e]] ne "int"} {
+        return 0
+    }
+    switch -- [hir::kind $hir $e] {
+        const {
+            return [expr {[core::value::kind [hir::get $hir $e value]] eq "int"}]
+        }
+        ref {
+            set b [hir::get $hir $e binding]
+            return [expr {$b ne "" && [dict exists $fn locals $b]
+                && [lindex [dict get $fn locals $b] 0] in {reg rawreg}}]
+        }
+        call {
+            set node [hir::node $hir $e]
+            lassign [dict get $node target] targetKind target
+            if {$targetKind ne "native" || ![PlainNativeCallee [dict get $node callee]]
+                    || [dict get [hir::symbol $hir $target] name] ni {+ - *}} {
+                return 0
+            }
+            set args [dict get $node args]
+            if {[llength $args] != 2} {
+                return 0
+            }
+            foreach a $args {
+                if {![PureIntOperand fn $e $a]} {
+                    return 0
+                }
+            }
+            return 1
+        }
+    }
+    return 0
+}
+
 proc native::lower::If {fnVar e node {family ""} {virtualN ""} {virtualCut ""} {rawJoin 0} {shortJoin ""}} {
     upvar 1 $fnVar fn
     variable hir
@@ -6664,25 +6964,34 @@ proc native::lower::If {fnVar e node {family ""} {virtualN ""} {virtualCut ""} {
     variable ranges
     variable currentInstance
     set condition [dict get $node condition]
-    set test [Expr fn $condition]
-    if {$test eq "never"} {
-        return never
-    }
     set key [list $e $condition]
-    if {[dict exists $guards $key] || [dict exists $knownErrors $key]} {
-        Emit fn "guardbool $test" $e
-        dict incr fn [expr {[dict exists $guards $key] ? "guards" : "knownErrorGuards"}]
-    } elseif {[hir::types::kindOf [hir::typeOf $hir $condition]] ne "bool"} {
-        throw {NATIVE BUG} "native lowering: hir::aot reports no Boolean check for $condition ($e)"
-    }
     # M6-RANGE-DECIDED-BRANCH-LOWERING.md: the canonical branch-outcome
     # theorem (hir::types::KnownOutcome's own syntactic proof, composed
     # with hir::range's already-settled per-instance operand facts -- never
-    # reproved here). $test above is still evaluated unconditionally for
-    # its own effects (M6 spec #40-41: a known Bool *result* is not the
-    # same fact as a removable condition *expression*); only the runtime
-    # branch this decided outcome would make redundant is skipped.
+    # reproved here). A known Bool *result* is not the same fact as a
+    # removable condition *expression* (M6 spec #40-41), so the condition is
+    # still evaluated for its own effects -- unless it provably has none: a
+    # comparison of operands that are constants or already-evaluated Int
+    # registers (PureDecidedCondition, M6's "condition-expression purity"
+    # theorem in its narrowest form, LINUX-X86-64-SYSCALL.md), which a
+    # decided outcome makes dead code. Only the runtime branch this decided
+    # outcome would make redundant is skipped otherwise.
     set outcome [hir::range::ConditionOutcome $hir $ranges $currentInstance $condition]
+    if {$outcome ne "" && ![dict exists $guards $key] && ![dict exists $knownErrors $key]
+            && [PureDecidedCondition fn $condition]} {
+        dict incr fn skippedGuards [SkippedBlockers [list $condition]]
+    } else {
+        set test [Expr fn $condition]
+        if {$test eq "never"} {
+            return never
+        }
+        if {[dict exists $guards $key] || [dict exists $knownErrors $key]} {
+            Emit fn "guardbool $test" $e
+            dict incr fn [expr {[dict exists $guards $key] ? "guards" : "knownErrorGuards"}]
+        } elseif {[hir::types::kindOf [hir::typeOf $hir $condition]] ne "bool"} {
+            throw {NATIVE BUG} "native lowering: hir::aot reports no Boolean check for $condition ($e)"
+        }
+    }
     if {$outcome ne ""} {
         set role [expr {$outcome ? "then" : "else"}]
         # The other arm is not lowered at all, so its blockers are skipped

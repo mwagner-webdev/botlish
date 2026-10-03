@@ -1,0 +1,84 @@
+# abi/x86_64.bot -- the "abi::x86_64" namespace: the x86-64 machine
+# register word as an opaque transport value (LINUX-X86-64-SYSCALL.md).
+#
+# Register64 is one 64-bit x86-64 register's contents, and nothing else: a
+# bit pattern carried across an architecture boundary (today, only
+# linux::abi::syscall's register inputs and its rax result). It is ordinary
+# Botlish: a nominal struct whose one field holds the register's contents
+# under the signed (two's-complement) reading, typed with the source-defined
+# domain Register64Word below. That field type is what keeps the value sound
+# with no privileged code at all: a construction `Register64 {word: x}`
+# anywhere must statically prove x in the domain (STRUCTS.md, "Named struct
+# construction": no implicit runtime cast, no guard), so no Register64 can
+# hold anything but exactly one of the 2^64 register bit patterns.
+#
+# It is transport, not a machine-integer programming model: Register64 is a
+# struct, so it has no arithmetic, ordering, bitwise or pointer operations
+# (`r + 5` is the ordinary TYPE error any struct operand gets), no wrapping,
+# no promotion and no C integer semantics. The only ways in and out are the
+# two conversions below.
+#
+#   abi::x86_64::register64(value: int)   Int -> Register64, the checked
+#                         conversion: exactly -2^63 <= value <= 2^63 - 1 is
+#                         accepted, and its register contents are that
+#                         value's 64-bit two's-complement bit pattern (so
+#                         -1 is 0xffffffffffffffff). Anything else is the
+#                         declared error Register64BelowRange /
+#                         Register64AboveRange -- never truncation. The
+#                         call-specific completion proof (STATIC-COMPLETION-
+#                         PROOFS.md) makes a provably in-range argument
+#                         (register64(39)) need no handler, and a provably
+#                         out-of-range literal a compile-time KNOWN-ERROR.
+#   abi::x86_64::to_int(register)         Register64 -> Int: the register
+#                         contents read as a signed 64-bit two's-complement
+#                         integer (0x27 -> 39, 0xffffffffffffffff -> -1), an
+#                         ordinary arbitrary-precision Int (statically known
+#                         to be a Register64Word). Representation only: no
+#                         errno or other meaning is read into it.
+#
+# Why the inverse lives here and not in a portable `abi` namespace: the
+# signed 64-bit reading is a property of this architecture's register word,
+# and Botlish has no overloading, so a portable abi::to_int(Register64)
+# would tie `abi` to x86-64 (another architecture's register type could not
+# be accepted without redefining it). Each architecture's transport layer
+# owns its own register type and its conversions.
+#
+# The x86-64-specific *semantics* (that a register is 64 bits, read signed)
+# are all here, in source. The only privileged operation is the kernel
+# transition itself, linux::abi::syscall (core/linuxabi.tcl, the native
+# backend's helper in native/src/runtime/syscall.rs), which takes and
+# returns Register64 values and nothing else.
+namespace abi::x86_64
+
+# The two declared errors of the Int -> Register64 conversion, named after
+# their domain (error names are global, and byte.bot's BelowRange/AboveRange
+# are already the Byte conversion's): the same two-error granularity as
+# byte::from_int.
+error Register64BelowRange
+error Register64AboveRange
+
+# The Ints one 64-bit register word holds under the signed reading:
+# -2^63..2^63-1, exactly the i64 range, one Int per bit pattern.
+type Register64Word = Int in -9223372036854775808..9223372036854775807
+
+struct Register64:
+    word: Register64Word
+
+# Int -> Register64. Written with the two literal bounds directly (not via a
+# named constant) so hir/range.tcl's comparison narrowing proves `value` is
+# a Register64Word in the final branch -- the proof the construction needs.
+fn register64(value: int) -> Register64 errors Register64BelowRange, Register64AboveRange:
+    if value < -9223372036854775808:
+        fail Register64BelowRange
+    elif value > 9223372036854775807:
+        fail Register64AboveRange
+    else:
+        Register64 {word: value}
+
+# Register64 -> Int: the signed reading, which is what `word` already holds.
+# The result is an ordinary Int (Register64Word is a subtype of Int: its
+# arithmetic is Int arithmetic, never fixed-width); declaring the domain only
+# tells callers the static fact that it fits a register again, so
+# register64(to_int(r)) needs no handler.
+fn to_int(register: Register64) -> Register64Word:
+    register.word

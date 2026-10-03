@@ -6,7 +6,8 @@
 # already turned into NEWLINE / INDENT / DEDENT tokens:
 #
 #   program      = [ namespaceDecl ] { NEWLINE | topStatement } EOF
-#   namespaceDecl = "namespace" IDENT NEWLINE
+#   namespaceDecl = "namespace" path NEWLINE
+#   path         = IDENT { "::" IDENT }  -- a namespace: one or more segments
 #   topStatement = typeDecl | structDecl | errorDecl | statement
 #   statement    = simple NEWLINE | valued | function | if | loop
 #   simple       = binding | destructure | return | break | continue | fail
@@ -16,9 +17,15 @@
 #   handledExpr  = expression [ handlers ]     -- handlers only after a bare
 #                                                  call expression (item 9)
 #   handlers     = ":" NEWLINE INDENT { "on" IDENT ":" suite } DEDENT
-#   function     = "fn" IDENT "(" [ param { "," param } [ "," ] ] ")"
+#   function     = "fn" IDENT "(" [ paramList ] ")"
 #                  [ "->" IDENT ] [ "errors" IDENT { "," IDENT } ] ":" suite
+#   paramList    = [ param { "," param } ] [ "," flagSection ] [ "," ]
+#                  -- sections in canonical order: ordinary parameters, then
+#                  flags (ParamSections)
 #   param        = IDENT [ ":" IDENT ]
+#   flagSection  = "flags" flagDecl { "," flagDecl }   -- FLAGS.md; "flags" is
+#                  contextual: `flags :name` only (an ordinary name otherwise)
+#   flagDecl     = ":" IDENT                          -- the name glued to ":"
 #   if           = "if" expression ":" suite
 #                  { "elif" expression ":" suite } [ "else" ":" suite ]
 #   loop         = "loop" [ clause { "and" clause } ] ":" suite
@@ -96,10 +103,15 @@
 #   additive     = multiplicative { ( "+" | "-" ) multiplicative }
 #   multiplicative = unary { "*" unary }
 #   unary        = "-" unary | postfix
-#   postfix      = primary { "(" [ arguments ] ")" | "." IDENT [ "(" [ arguments ] ")" ] }
-#   arguments    = expression { "," expression } [ "," ]
+#   postfix      = primary { "(" [ callArgs ] ")" | "." IDENT [ "(" [ callArgs ] ")" ] }
+#   callArgs     = [ expression { "," expression } ] [ "," flag { "," flag } ] [ "," ]
+#                  -- a flag (":" IDENT, glued) is only valid in this position
+#                  and only after every ordinary argument (FLAGS.md)
+#   arguments    = expression { "," expression } [ "," ]       -- list literals
 #   primary      = INT | STRING | CHAR | "true" | "false" | "unit"
-#                | IDENT [ "::" IDENT ] [ fieldInits ]
+#                | IDENT { "::" IDENT } [ fieldInits ]
+#                  -- "a::b::c": member c of namespace a::b (every segment
+#                     but the last is the namespace path)
 #                | fieldInits
 #                | "[" [ arguments ] "]" | "(" expression ")"
 #   fieldInits   = "{" [ fieldInit { "," fieldInit } [ "," ] ] "}"
@@ -263,19 +275,28 @@ proc surface::parser::Program {pVar} {
         namespace $namespaceName namespaceSpan $namespaceSpan]
 }
 
-# "namespace" IDENT NEWLINE, as the very first statement of a file (a
+# "namespace" PATH NEWLINE, as the very first statement of a file (a
 # declaration, not an ordinary statement: it introduces no HIR node -- see
-# surface/modules.tcl). Returns {NAME SPAN}.
+# surface/modules.tcl). PATH is one or more IDENT segments joined by "::"
+# (`namespace abi::x86_64`: a nested namespace, lib/abi/x86_64.bot). Returns
+# {NAME SPAN}, NAME the whole path.
 proc surface::parser::NamespaceDecl {pVar} {
     upvar 1 $pVar p
     Advance p
-    set name [Expect p IDENT "a namespace name after \"namespace\""]
+    set first [Expect p IDENT "a namespace name after \"namespace\""]
+    set segments [list [dict get $first value]]
+    set last $first
+    while {[Kind p] eq "::"} {
+        Advance p
+        set last [Expect p IDENT "a namespace name after \"::\""]
+        lappend segments [dict get $last value]
+    }
     set token [Peek p]
     if {[dict get $token kind] ne "NEWLINE"} {
         Fail $token "expected end of line, found [Describe $token]"
     }
     Advance p
-    return [list [dict get $name value] [dict get $name span]]
+    return [list [join $segments ::] [surface::ast::cover [dict get $first span] [dict get $last span]]]
 }
 
 # Statements up to a token of a kind in STOP (not consumed).
@@ -569,10 +590,11 @@ proc surface::parser::TypeExpr {pVar what} {
     if {$name eq "Fn"} {
         return [FnType p $token]
     }
-    if {[Kind p] eq "::"} {
+    while {[Kind p] eq "::"} {
         # A module-qualified type name (STRUCTS.md): "geo::Point" names the
-        # struct Point declared by module geo. Kept as the one bare-name
-        # string "geo::Point", so every bare-name consumer keeps working.
+        # struct Point declared by module geo, "abi::x86_64::Register64" the
+        # struct Register64 of the nested namespace abi::x86_64. Kept as the
+        # one bare-name string, so every bare-name consumer keeps working.
         Advance p
         set member [Expect p IDENT "a type name after \"::\""]
         set name "${name}::[dict get $member value]"
@@ -717,18 +739,75 @@ proc surface::parser::Function {pVar} {
     set start [dict get [Advance p] span]
     set name [Expect p IDENT "a function name after \"fn\""]
     set open [Expect p ( "\"(\" after the function name"]
+    lassign [ParamSections p] params flags
+    set body [Suite p "the parameter list"]
+    return [surface::ast::node function [SpanFrom p $start] \
+        name [dict get $name value] nameSpan [dict get $name span] \
+        params $params flags $flags paramsSpan [SpanFrom p [dict get $open span]] \
+        resultType [dict get $body resultType] resultTypeSpan [dict get $body resultTypeSpan] \
+        errors [dict get $body errors] body $body]
+}
+
+# The parameter list of a function declaration, after "(", through ")":
+#
+#   params       = [ ordinary ] [ flagSection ]       (see paramSectionOrder)
+#   ordinary     = param { "," param }
+#   param        = IDENT [ ":" typeExpr ]
+#   flagSection  = "flags" flagDecl { "," flagDecl }
+#   flagDecl     = ":" IDENT                          -- no space after ":"
+#
+# optionally followed by a trailing ",". Returns {PARAMS FLAGS}: PARAMS the
+# ordinary parameters {NAME SPAN TYPE TYPESPAN}, FLAGS the declared flags
+# {NAME SPAN} in written order (SPAN covers ":name").
+#
+# The parameter list is a sequence of *sections* in one canonical order,
+# paramSectionOrder: ordinary parameters, then flags. A new section is
+# introduced by its marker word and runs until the next section marker or the
+# closing ")"; it never swallows "the rest of the signature" -- the list is
+# parsed one entry at a time and each entry knows which section it belongs
+# to, so a later section (the planned `context`, `variadic`) is one more
+# marker and one more rank in the order, with the same ordering diagnostic.
+#
+# "flags" is a contextual marker, not a keyword: it opens the flag section
+# only where an entry is spelled `flags :NAME` -- the name, then a colon that
+# is separated from it by space and glued to the NAME after it (FlagsMarker).
+# `flags` anywhere else is an ordinary parameter name, typed or not
+# (`fn f(flags)`, `fn f(flags: Int)`, `fn f(flags : Int)`).
+proc surface::parser::ParamSections {pVar} {
+    upvar 1 $pVar p
+    variable paramSectionOrder
     set params {}
+    set flags {}
+    set section ordinary
     while {[Kind p] ne ")"} {
-        set param [Expect p IDENT "a parameter name"]
-        set type ""
-        set typeSpan ""
-        if {[Kind p] eq ":"} {
-            Advance p
-            set typeStart [dict get [Peek p] span]
-            set type [TypeExpr p "a parameter type after \":\""]
-            set typeSpan [SpanFrom p $typeStart]
+        set token [Peek p]
+        if {[Kind p] eq ":" || [FlagsMarker p]} {
+            if {[Kind p] ne ":"} {
+                Advance p
+                set markerSpan [dict get $token span]
+                EnterSection p section flags $markerSpan
+            } elseif {$section ne "flags"} {
+                set flag [FlagEntry p]
+                FailCode [dict get $flag span] MALFORMED-FLAG-SECTION \
+                    "flag :[dict get $flag name] is outside a flag section: declare flags after the ordinary parameters as \"flags :[dict get $flag name]\""
+            }
+            lappend flags [FlagEntry p]
+        } else {
+            set param [Expect p IDENT "a parameter name"]
+            if {$section ne "ordinary"} {
+                FailCode [dict get $param span] MALFORMED-FLAG-SECTION \
+                    "parameter \"[dict get $param value]\" cannot follow the $section section: a parameter list is ordinary parameters, then flags"
+            }
+            set type ""
+            set typeSpan ""
+            if {[Kind p] eq ":"} {
+                Advance p
+                set typeStart [dict get [Peek p] span]
+                set type [TypeExpr p "a parameter type after \":\""]
+                set typeSpan [SpanFrom p $typeStart]
+            }
+            lappend params [list [dict get $param value] [dict get $param span] $type $typeSpan]
         }
-        lappend params [list [dict get $param value] [dict get $param span] $type $typeSpan]
         if {[Kind p] eq ","} {
             Advance p
         } elseif {[Kind p] ne ")"} {
@@ -736,12 +815,63 @@ proc surface::parser::Function {pVar} {
         }
     }
     Advance p
-    set body [Suite p "the parameter list"]
-    return [surface::ast::node function [SpanFrom p $start] \
-        name [dict get $name value] nameSpan [dict get $name span] \
-        params $params paramsSpan [SpanFrom p [dict get $open span]] \
-        resultType [dict get $body resultType] resultTypeSpan [dict get $body resultTypeSpan] \
-        errors [dict get $body errors] body $body]
+    return [list $params $flags]
+}
+
+# The canonical order of a declaration's parameter sections. Only `ordinary`
+# and `flags` exist; `context` and `variadic` (terminal) are planned.
+namespace eval surface::parser {
+    variable paramSectionOrder {ordinary flags}
+}
+
+# Moves SECTIONVAR to section NEW (marker at SPAN), or fails when NEW is not
+# after the current section in paramSectionOrder (a repeated section included).
+proc surface::parser::EnterSection {pVar sectionVar new span} {
+    upvar 1 $pVar p $sectionVar section
+    variable paramSectionOrder
+    if {[lsearch -exact $paramSectionOrder $new] <= [lsearch -exact $paramSectionOrder $section]} {
+        FailCode $span MALFORMED-FLAG-SECTION \
+            "a \"$new\" section cannot follow the $section section: a parameter list has at most one $new section, after the ordinary parameters"
+    }
+    set section $new
+}
+
+# 1 if the next tokens are the flag-section marker: the name `flags` and a
+# ":" that is separated from it by space and glued to the token after it --
+# `flags :quiet`. (`flags: T` and `flags : T` are a typed parameter named
+# flags.) What follows the glued colon is FlagEntry's to judge, so a malformed
+# flag (`flags :if`, `flags :`) is a flag diagnostic, not a type error.
+proc surface::parser::FlagsMarker {pVar} {
+    upvar 1 $pVar p
+    set name [Peek p]
+    if {[dict get $name kind] ne "IDENT" || [dict get $name value] ne "flags"} {
+        return 0
+    }
+    set colon [Peek p 1]
+    set next [Peek p 2]
+    return [expr {[dict get $colon kind] eq ":"
+        && [dict get $colon span start] > [dict get $name span end]
+        && [dict get $next span start] == [dict get $colon span end]}]
+}
+
+# One flag spelling ":" IDENT, the name glued to the colon, at ":". Returns
+# {name NAME span SPAN} with SPAN covering both tokens. Shared by flag
+# declarations and call-site flags.
+proc surface::parser::FlagEntry {pVar} {
+    upvar 1 $pVar p
+    set colon [Expect p : "\":\""]
+    set token [Peek p]
+    if {[dict get $token kind] ne "IDENT"} {
+        FailCode [dict get $colon span] MALFORMED-FLAG \
+            "expected a flag name after \":\", found [Describe $token]: a flag is written :name"
+    }
+    if {[dict get $token span start] != [dict get $colon span end]} {
+        FailCode [surface::ast::cover [dict get $colon span] [dict get $token span]] MALFORMED-FLAG \
+            "a flag is written :[dict get $token value] with no space after \":\""
+    }
+    Advance p
+    return [dict create name [dict get $token value] \
+        span [surface::ast::cover [dict get $colon span] [dict get $token span]]]
 }
 
 # "error" IDENT NEWLINE -- a top-level named-error declaration (see this
@@ -1223,9 +1353,9 @@ proc surface::parser::Postfix {pVar} {
         switch -- [Kind p] {
             ( {
                 Advance p
-                set args [Arguments p ) "argument list"]
+                lassign [CallArguments p] args flags
                 set expr [surface::ast::node call [SpanFrom p [dict get $expr span]] \
-                    callee $expr args $args]
+                    callee $expr args $args flags $flags]
             }
             . {
                 # Field projection (STRUCTS.md): "receiver.name", the name
@@ -1240,10 +1370,10 @@ proc surface::parser::Postfix {pVar} {
                     # Method call (METHOD-SUGAR.md): same argument grammar
                     # as an ordinary call.
                     Advance p
-                    set args [Arguments p ) "argument list"]
+                    lassign [CallArguments p] args flags
                     set expr [surface::ast::node methodcall [SpanFrom p [dict get $expr span]] \
                         receiver $expr name [dict get $token value] nameSpan [dict get $token span] \
-                        args $args]
+                        args $args flags $flags]
                     continue
                 }
                 set expr [surface::ast::node project [SpanFrom p [dict get $expr span]] \
@@ -1271,6 +1401,43 @@ proc surface::parser::Arguments {pVar close what} {
     }
     Advance p
     return $items
+}
+
+# The argument list of a call, after "(", through ")" (a trailing comma is
+# allowed):
+#
+#   arguments    = { expression "," } { flag "," }
+#   flag         = ":" IDENT                -- no space after ":"
+#
+# Returns {ARGS FLAGS}: the ordinary value arguments, and the supplied flags
+# {name NAME span SPAN} in written order. Flags are not expressions: they
+# only exist here, after every ordinary argument (an ordinary argument after
+# a flag is an error, so the flag section stays distinguishable from a future
+# variadic argument list), and which flags a call supplies is statically
+# known from its spelling.
+proc surface::parser::CallArguments {pVar} {
+    upvar 1 $pVar p
+    set args {}
+    set flags {}
+    while {[Kind p] ne ")"} {
+        if {[Kind p] eq ":"} {
+            lappend flags [FlagEntry p]
+        } else {
+            set arg [Expression p]
+            if {$flags ne ""} {
+                FailCode [dict get $arg span] ARGUMENT-AFTER-FLAG \
+                    "an ordinary argument cannot follow the flag :[dict get [lindex $flags end] name]: flags come last in a call"
+            }
+            lappend args $arg
+        }
+        if {[Kind p] eq ","} {
+            Advance p
+        } elseif {[Kind p] ne ")"} {
+            Fail [Peek p] "expected \",\" or \")\" in the argument list, found [Describe [Peek p]]"
+        }
+    }
+    Advance p
+    return [list $args $flags]
 }
 
 proc surface::parser::Primary {pVar} {
@@ -1301,19 +1468,31 @@ proc surface::parser::Primary {pVar} {
         IDENT {
             Advance p
             if {[Kind p] eq "::"} {
+                # NAMESPACE::member, NAMESPACE possibly nested: every segment
+                # but the last is the namespace path ("abi::x86_64::register64"
+                # is member register64 of namespace abi::x86_64).
+                set segments [list [dict get $token value]]
+                set namespaceSpan $span
                 Advance p
                 set member [Expect p IDENT "a name after \"::\""]
+                while {[Kind p] eq "::"} {
+                    lappend segments [dict get $member value]
+                    set namespaceSpan [surface::ast::cover $span [dict get $member span]]
+                    Advance p
+                    set member [Expect p IDENT "a name after \"::\""]
+                }
+                set namespaceName [join $segments ::]
                 if {[Kind p] eq "\{"} {
                     # NAMESPACE::Struct { ... }: a named struct construction
                     # (STRUCTS.md) through module qualification.
                     set nameSpan [SpanFrom p $span]
                     set init [FieldInits p]
                     return [surface::ast::node namedstruct [SpanFrom p $span] \
-                        namespace [dict get $token value] \
+                        namespace $namespaceName \
                         name [dict get $member value] nameSpan $nameSpan init $init]
                 }
                 return [surface::ast::node qualname [SpanFrom p $span] \
-                    namespace [dict get $token value] namespaceSpan $span \
+                    namespace $namespaceName namespaceSpan $namespaceSpan \
                     name [dict get $member value] nameSpan [dict get $member span]]
             }
             if {[Kind p] eq "\{"} {
@@ -1342,6 +1521,13 @@ proc surface::parser::Primary {pVar} {
         }
         if {
             Fail $token "an \"if\" value must be the whole right side of \"=\" or \"return\""
+        }
+        : {
+            set name [Peek p 1]
+            if {[dict get $name kind] eq "IDENT" && [dict get $name span start] == [dict get $token span end]} {
+                FailCode [surface::ast::cover $span [dict get $name span]] FLAG-NOT-A-VALUE \
+                    ":[dict get $name value] is a call flag, not a value: flags can only be written as the last arguments of a call, e.g. f(x, :[dict get $name value])"
+            }
         }
     }
     Fail $token "expected an expression, found [Describe $token]"

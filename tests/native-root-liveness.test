@@ -134,11 +134,11 @@ test root-structural-1 {fib<int>: far fewer shadow slots than its 14 NIR registe
 # to an unbounded accumulator (a tagged operation), so raw-demand suppression
 # keeps it tagged (RAW-INT-ABI.md): one more register than the eligibility-only
 # plan (14), one fewer than the tagged ABI (16).
-test root-structural-2 {loop-count: work (no safepoint, no calls) needs zero slots; drive needs far fewer than 13} -body {
+test root-structural-2 {loop-count: work (no safepoint, no calls) needs zero slots; drive needs far fewer than 13. UPDATED BY LINUX-X86-64-SYSCALL: work's decided `if b >= 0` (b is proven >= 10) compares a register and a constant, so it is no longer evaluated (native/lower.tcl's PureDecidedCondition): 3 fewer registers (the dead `int 0`, `rawint 0` and `rige`)} -body {
     set report [native::roots [sourceBotHir [file join $::projectRoot bench loop-count.bot]]]
     list [regsOf $report work] [safepointsOf $report work] [slotsOf $report work] \
         [regsOf $report drive] [expr {[slotsOf $report drive] < 13}]
-} -result {15 0 0 14 1}
+} -result {12 0 0 14 1}
 
 test root-structural-3 {sum-refined: refined_sum and step both need far fewer slots than their register counts} -body {
     set report [native::roots [sourceBotHir [file join $::projectRoot bench sum-refined.bot]]]

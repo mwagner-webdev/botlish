@@ -15,6 +15,7 @@ pub mod platform;
 pub mod ops;
 pub mod show;
 pub mod strobj;
+pub mod syscall;
 #[cfg(test)]
 mod string_alloc_tests;
 pub mod value;

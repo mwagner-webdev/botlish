@@ -390,7 +390,11 @@ sharing in the abstract.
    expression evaluation is never skipped (spec #40-42's own deliberate
    restraint), so every eliminated branch still leaves its comparison's
    operands computed as dead code (e.g. `op rilt`/`op rigt` with an unused
-   result register). Canonical owner: a new, small purity fact over HIR
+   result register). *(Since implemented in its narrowest form by
+   LINUX-X86-64-SYSCALL.md: a decided comparison whose operands are Int
+   constants, Int registers already held, or `+ - *` of those -- with no
+   runtime check anywhere -- is not evaluated at all: native/lower.tcl's
+   PureDecidedCondition. Every other decided condition is still evaluated.)* Canonical owner: a new, small purity fact over HIR
    expressions (candidate scope: expression-local, "this expression's
    evaluation has no observable effect and cannot fail", true for a bare
    comparison of two already-evaluated pure values). Consumers beyond

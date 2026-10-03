@@ -24,12 +24,18 @@
 # Namespace <-> file: deterministic and search-free. Namespace NAME maps to
 # exactly one path, $::core::libraryDir/NAME.bot (the same directory as the
 # existing Tcl library convention, lib/NAME.tcl -- see core/core.tcl), and
-# that file must itself declare `namespace NAME`. There is no search path,
+# that file must itself declare `namespace NAME`. A nested namespace (NAME
+# of several "::"-separated segments, `abi::x86_64`) maps one directory per
+# leading segment: $::core::libraryDir/abi/x86_64.bot. Nesting is a naming
+# path only: `abi::x86_64` and `abi` are two unrelated modules (neither
+# loads, contains or sees the other implicitly), each its own file. There is no search path,
 # so "two files define namespace NAME" cannot arise: NAME has only ever one
 # candidate file. A mismatched declaration, or a missing file, is a clear
 # diagnostic (Error, below), never silently ignored or guessed at.
 #
-# Reference syntax: mod::name (surface/parser.tcl's qualname primary).
+# Reference syntax: mod::name, or a::b::name for a nested namespace a::b
+# (surface/parser.tcl's qualname primary: every segment but the last is the
+# namespace path).
 # surface/lower.tcl lowers it to a `ref` node spelled "mod::name" (for
 # display only) carrying an extra `qualified {mod name}` field. No syntax
 # resolves or aliases a namespace to another name (no `import X as Y`, no
@@ -102,12 +108,17 @@
 namespace eval surface::modules {}
 
 # The one deterministic path namespace NAME maps to. No search path: this
-# is the only file that can ever define NAME.
+# is the only file that can ever define NAME. A nested NAME (`abi::x86_64`)
+# is one directory per leading segment (lib/abi/x86_64.bot): never a "::" in
+# a file name.
 proc surface::modules::ModulePath {name} {
-    if {![regexp {^[A-Za-z_][A-Za-z0-9_]*$} $name]} {
-        error "surface::modules: invalid namespace name \"$name\""
+    set segments [split [string map {:: \x00} $name] \x00]
+    foreach segment $segments {
+        if {![regexp {^[A-Za-z_][A-Za-z0-9_]*$} $segment]} {
+            error "surface::modules: invalid namespace name \"$name\""
+        }
     }
-    return [file join $::core::libraryDir $name.bot]
+    return [file join $::core::libraryDir {*}[lrange $segments 0 end-1] [lindex $segments end].bot]
 }
 
 # Raises {SURFACE MODULE KIND} "LOCATION: MESSAGE" (or just MESSAGE if SPAN
@@ -170,7 +181,9 @@ proc surface::modules::TypeRefs {type span foundVar} {
         return
     }
     if {[llength $type] == 1} {
-        if {[regexp {^([A-Za-z_][A-Za-z0-9_]*)::([A-Za-z_][A-Za-z0-9_]*)$} $type -> namespaceName name]} {
+        # Split at the last "::": the namespace may itself be nested
+        # ("abi::x86_64::Register64" is Register64 of abi::x86_64).
+        if {[regexp {^((?:[A-Za-z_][A-Za-z0-9_]*::)*[A-Za-z_][A-Za-z0-9_]*)::([A-Za-z_][A-Za-z0-9_]*)$} $type -> namespaceName name]} {
             lappend found [list $namespaceName $name $span struct]
         }
         return
@@ -195,6 +208,14 @@ proc surface::modules::RemapOrigin {origin fileId} {
     return $origin
 }
 
+# FLAGS ({NAME ORIGIN} pairs, FLAGS.md) with every origin repointed at FILEID.
+proc surface::modules::RemapFlags {flags fileId} {
+    return [lmap flag $flags {
+        lassign $flag name origin
+        list $name [RemapOrigin $origin $fileId]
+    }]
+}
+
 # NODE (an hir/syntax.tcl node, as surface::lower::Sequence produces) with
 # every origin in its subtree repointed at FILEID.
 proc surface::modules::RemapFile {node fileId} {
@@ -210,11 +231,13 @@ proc surface::modules::RemapFile {node fileId} {
                 lappend params [list $name [RemapOrigin $origin $fileId]]
             }
             dict set node params $params
+            dict set node flags [RemapFlags [expr {[dict exists $node flags] ? [dict get $node flags] : {}}] $fileId]
             dict set node body [lmap child [dict get $node body] {RemapFile $child $fileId}]
             # paramTypes carries no origin of its own (plain type-name
             # strings, resolved later by hir/resolve.tcl): nothing to remap.
         }
         call {
+            dict set node flags [RemapFlags [expr {[dict exists $node flags] ? [dict get $node flags] : {}}] $fileId]
             dict set node callee [RemapFile [dict get $node callee] $fileId]
             dict set node args [lmap child [dict get $node args] {RemapFile $child $fileId}]
         }
@@ -336,6 +359,16 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan} {
             Error INVALID-TOPLEVEL [dict get $statement span] \
                 "module \"$name\" ($path): only function definitions, immutable bindings, type declarations, struct declarations and error declarations are allowed at module top level, found a \"[dict get $statement kind]\" statement"
         }
+        if {[dict get $statement kind] in {function bind}
+                && [core::native::isQualifiedNative "${name}::[dict get $statement name]"]} {
+            # NAME::member is a root native's own qualified name
+            # (linux::abi::syscall, core/linuxabi.tcl): references to it
+            # always mean the native, so a module definition of it could
+            # never be named -- and would collide with the native in
+            # hygiene-qualified core IR.
+            Error DUPLICATE-NATIVE [dict get $statement span] \
+                "module \"$name\" ($path) cannot define \"[dict get $statement name]\": ${name}::[dict get $statement name] is a root native, which every reference of that spelling denotes"
+        }
     }
     dict set state stack [concat [dict get $state stack] [list $name]]
     set fileId f[dict get $state nextFile]
@@ -372,6 +405,12 @@ proc surface::modules::CollectAndLoad {stateVar ast} {
     upvar 1 $stateVar state
     foreach ref [QualifiedRefs $ast] {
         lassign $ref namespaceName symbolName span refKind
+        if {$refKind eq "value" && [core::native::isQualifiedNative "${namespaceName}::$symbolName"]} {
+            # A root native registered under a qualified name
+            # (linux::abi::syscall): no module file defines it, so nothing
+            # is loaded (surface/lower.tcl lowers it to a root reference).
+            continue
+        }
         LoadNamespace state $namespaceName $span
         if {$refKind eq "struct"} {
             set structNames [dict get $state loadedStructs $namespaceName]
