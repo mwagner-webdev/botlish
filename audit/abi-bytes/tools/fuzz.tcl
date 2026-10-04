@@ -222,9 +222,12 @@ proc mutantSpecs {spec} {
     lassign $spec - kind n t a b c k d
     set out {}
     if {$n > 0} {
-        set idx [expr {int(rand() * $n)}]
-        # a change that really changes the byte: +1 on a full/zeros/ffs byte
-        # of a different value is checked by the oracle itself
+        # Deterministic in the spec: the program and the oracle each ask for
+        # the mutants and must see the same ones (a random index drawn per
+        # call made them compare different bytes). Whether the changed byte
+        # really differs is checked by the oracle itself: for the zeros and
+        # ffs kinds a +1 can land on the byte the pattern already had.
+        set idx [expr {($a * 7 + $b * 13 + $c * 31 + $n * 3) % $n}]
         lappend out [list gen $kind $n $t $a $b $c $idx 1]
         lappend out [list gen $kind [expr {$n - 1}] 0 $a $b $c -1 0]
     }
@@ -429,6 +432,7 @@ try {
             foreach backend $backends {
                 set outcome [outcomeUnderHir $backend $hir]
                 set ok 0
+                set detail [string range $outcome 0 300]
                 if {[lindex $outcome 0] eq "value"} {
                     set got [lindex $outcome 1]
                     # split the shown list "[a, b, ...]" at top-level ", " (the
@@ -436,10 +440,18 @@ try {
                     # inside braces)
                     set parts [splitShown $got]
                     set ok [expr {[llength $parts] == [llength $expected]}]
+                    if {!$ok} {
+                        set detail "slot count [llength $parts], want [llength $expected]"
+                    }
                     if {$ok} {
+                        set slot 0
                         foreach part $parts want $expected {
-                            if {$want eq "?"} { continue }
-                            if {$part ne $want} { set ok 0; break }
+                            if {$want ne "?" && $part ne $want} {
+                                set ok 0
+                                set detail "slot $slot differs: got [string range $part 0 120] / want [string range $want 0 120]"
+                                break
+                            }
+                            incr slot
                         }
                     }
                     # a "?" slot (hash of unequal values) must still be a Bool
@@ -451,7 +463,7 @@ try {
                 }
                 if {!$ok} {
                     incr failures
-                    puts "FAIL seed $seed pure $backend: [string range $outcome 0 500]"
+                    puts "FAIL seed $seed pure $backend: $detail"
                 }
             }
         }
