@@ -295,6 +295,8 @@ test linux-syscall-cannot-initialize-a-module-binding {a syscall never initializ
     try {
         file mkdir [file join $dir abi]
         file copy -force [file join $::projectRoot lib abi x86_64.bot] [file join $dir abi x86_64.bot]
+        # abi::x86_64's ABI-value encoders use lib/abi.bot's types.
+        file copy -force [file join $::projectRoot lib abi.bot] [file join $dir abi.bot]
         set channel [open [file join $dir pidmod.bot] w]
         puts $channel "namespace pidmod\npid = abi::x86_64::to_int(linux::abi::syscall({rax: abi::x86_64::register64(39)}))"
         close $channel

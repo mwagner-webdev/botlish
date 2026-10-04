@@ -63,9 +63,9 @@ proc hir::errordecls::apply {decls} {
             Fail [dict get $decl nameSpan] "error \"$name\" is already declared (a builtin error of the runtime)"
         }
         if {[dict exists $seen $name]} {
-            Fail [dict get $decl nameSpan] "error \"$name\" is already declared"
+            Fail [dict get $decl nameSpan] "error \"$name\" is already declared[hir::sourcetypes::ElsewhereClause [dict get $seen $name] [dict get $decl nameSpan]]"
         }
-        dict set seen $name 1
+        dict set seen $name [dict get $decl nameSpan]
         lappend order $name
     }
     set current $order

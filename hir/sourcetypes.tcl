@@ -87,6 +87,19 @@ proc hir::sourcetypes::Fail {span message} {
     core::semanticError TYPE "[dict get $span file]:[dict get $span line]:[dict get $span column]: $message"
 }
 
+# "" when the earlier declaration (span FIRST) of a name redeclared at SPAN
+# is in the same file; otherwise where it is, and why it counts: type and
+# error names are one flat, program-wide namespace, so a module the program
+# loads -- possibly only through another module (abi, through abi::x86_64)
+# -- takes its names for the whole program. Shared by hir/errordecls.tcl.
+proc hir::sourcetypes::ElsewhereClause {first span} {
+    if {$first eq "" || $span eq "" || [dict get $first file] eq [dict get $span file]} {
+        return ""
+    }
+    return [format { at %s:%s:%s (type and error names are global: every module the program loads, including one it reaches only through another module, declares its names for the whole program)} \
+        [dict get $first file] [dict get $first line] [dict get $first column]]
+}
+
 # Validates and registers DECLS (surface/lower.tcl's TypeDeclOf dicts, from
 # every module section a program loads plus the program's own top level --
 # see surface/modules.tcl), returning the ordered list hir::buildSyntax
@@ -120,7 +133,7 @@ proc hir::sourcetypes::apply {decls {structDecls {}}} {
         foreach decl $decls {
             set name [dict get $decl name]
             if {[dict exists $byName $name]} {
-                Fail [dict get $decl nameSpan] "type \"$name\" is already declared"
+                Fail [dict get $decl nameSpan] "type \"$name\" is already declared[ElsewhereClause [dict get $byName $name nameSpan] [dict get $decl nameSpan]]"
             }
             dict set byName $name $decl
         }

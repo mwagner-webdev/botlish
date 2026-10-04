@@ -647,7 +647,8 @@ refinement unless its contract explicitly establishes one. So
 | `native/prepare.tcl` | `native::prepareHir`: attaches the native implementations a program calls (module functions, validator bodies) to its HIR |
 | `native/src/nir.rs` | NIR parsing and validation |
 | `native/src/runtime/` | native `Value` representation, heap and collector, errors, runtime helper ABI; `syscall.rs` holds the one inline-asm `syscall` boundary (LINUX-X86-64-SYSCALL.md) |
-| `lib/abi/x86_64.bot` | `abi::x86_64::Register64`, the x86-64 register word as a transport value, and its two conversions (LINUX-X86-64-SYSCALL.md) |
+| `lib/abi.bot` | the ABI numeric domains `abi::I8` ... `abi::Usize` (ordinary Int values with a proven foreign-interface domain, not fixed-width arithmetic), their checked creators `abi::i8` ... `abi::usize` and errors `AbiIntegerBelowRange`/`AbiIntegerAboveRange` (ABI-NUMERIC-DOMAINS.md) |
+| `lib/abi/x86_64.bot` | `abi::x86_64::Register64`, the x86-64 register word as a transport value, and its two Int conversions (LINUX-X86-64-SYSCALL.md); `from_i8` ... `from_usize` encode ABI numeric values as register words, sign- or zero-extended (ABI-NUMERIC-DOMAINS.md) |
 | `native/src/codegen/` | the `Backend` interface; NIR → Cranelift IR for JIT and object files |
 | `surface/lexer.tcl` | source → tokens, indentation → `INDENT`/`DEDENT` |
 | `surface/parser.tcl` | tokens → surface AST (recursive descent) |

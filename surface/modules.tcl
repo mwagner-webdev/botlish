@@ -105,7 +105,31 @@
 # resolved completely before any section or program that names it, so a
 # qualified reference always names an established binding of another unit.
 
-namespace eval surface::modules {}
+namespace eval surface::modules {
+    # Module ASTs by {PATH SOURCE}: surface::parse is a pure function of a
+    # file's text and path, so a module whose file still has exactly the
+    # text it had is not lexed and parsed again by the next compilation in
+    # the same process (a test file, a batch driver). Keyed by the text
+    # itself, never by a timestamp, so it cannot go stale; a file that does
+    # not parse raises and is never stored. Cleared whole past 64 entries.
+    variable parsed [dict create]
+}
+
+# The AST of the module file PATH (see `parsed` above).
+proc surface::modules::ParseModule {path} {
+    variable parsed
+    set source [core::ReadFile $path]
+    set key [list $path $source]
+    if {[dict exists $parsed $key]} {
+        return [dict get $parsed $key]
+    }
+    set ast [surface::parse $source $path]
+    if {[dict size $parsed] >= 64} {
+        set parsed [dict create]
+    }
+    dict set parsed $key $ast
+    return $ast
+}
 
 # The one deterministic path namespace NAME maps to. No search path: this
 # is the only file that can ever define NAME. A nested NAME (`abi::x86_64`)
@@ -337,7 +361,7 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan} {
     if {![file exists $path]} {
         Error UNKNOWN-NAMESPACE $usedAtSpan "unknown namespace \"$name\": no such module file $path"
     }
-    set ast [surface::parse [core::ReadFile $path] $path]
+    set ast [ParseModule $path]
     if {[dict get $ast namespace] ne $name} {
         if {[dict get $ast namespace] eq ""} {
             Error NAMESPACE-MISMATCH [dict get $ast span] \

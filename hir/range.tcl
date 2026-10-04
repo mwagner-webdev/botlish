@@ -1467,8 +1467,10 @@ proc hir::range::verifyDeclaredResults {hirVar} {
         set declared [dict get $node declaredResult]
         set inferred [hir::type $hir [dict get $node inferredResultType]]
         if {![ProvesValueAcceptedBy $inferred $result $declared]} {
-            hir::Diagnose hir TYPE [format {function result does not prove declared type %s (facts: %s)%s} \
-                [hir::types::show $declared] [show $result] [MismatchClause $inferred $declared]] $e
+            hir::Diagnose hir TYPE [format {function result does not prove declared type %s%s%s} \
+                [hir::types::show $declared] \
+                [expr {[FactsRelevant $inferred $declared] ? " (facts: [show $result])" : ""}] \
+                [MismatchClause $inferred $declared]] $e
         }
     }
 }
@@ -1603,10 +1605,10 @@ proc hir::range::VerifyCall {hirVar ranges e node} {
                 dict set hir violatedDeclared $paramBinding $arg
             }
             hir::Diagnose hir TYPE [format \
-                {argument for parameter "%s" cannot be proven to satisfy %s%s (argument type: %s, facts: %s)%s%s} \
+                {argument for parameter "%s" cannot be proven to satisfy %s%s (argument type: %s%s)%s%s} \
                 [dict get $hir bindings $paramBinding name] [hir::types::show $declaredType] \
                 [expr {$inferred ? ", the parameter type inferred from the function body" : ""}] \
-                [hir::types::show $argType] [show $argRange] [MismatchClause $argType $declaredType] \
+                [hir::types::show $argType] [FactsClause $argType $declaredType $argRange] [MismatchClause $argType $declaredType] \
                 [expr {$inferred ? [hir::signatures::because $hir $targetBlock $i] : ""}]] $arg
             continue
         }
@@ -1631,9 +1633,9 @@ proc hir::range::VerifyCall {hirVar ranges e node} {
             continue
         }
         hir::Diagnose hir TYPE [format \
-            {argument for parameter "%s" is statically incompatible with %s, the parameter type inferred from the function body (argument type: %s, facts: %s)%s} \
+            {argument for parameter "%s" is statically incompatible with %s, the parameter type inferred from the function body (argument type: %s%s)%s} \
             [dict get $hir bindings $paramBinding name] [hir::types::show $checkedType] \
-            [hir::types::show $argType] [show $argRange] \
+            [hir::types::show $argType] [FactsClause $argType $checkedType $argRange] \
             [hir::signatures::because $hir $targetBlock $i]] $arg
     }
 }
@@ -1666,15 +1668,43 @@ proc hir::range::VerifyStruct {hirVar ranges e node} {
             continue
         }
         hir::DiagnoseAt hir TYPE [format \
-            {field "%s" of struct %s cannot be proven to satisfy its declared type %s (value type: %s, facts: %s)%s} \
+            {field "%s" of struct %s cannot be proven to satisfy its declared type %s (value type: %s%s)%s} \
             $name [hir::structs::display $id] [hir::types::show $declared] \
-            [hir::types::show $valueType] [show $valueRange] [MismatchClause $valueType $declared]] $field $origin
+            [hir::types::show $valueType] [FactsClause $valueType $declared $valueRange] [MismatchClause $valueType $declared]] $field $origin
     }
+}
+
+# 1 if the Int facts proven for a value of static type TYPE can bear on its
+# admissibility for DECLARED: both may be Ints (Int-kinded, or of no fixed
+# kind). A value that is statically a struct, a List, a String, a function
+# or `never` has only the vacuous [-∞, +∞], and Int facts say nothing about
+# a declared struct, List or String type: printing them would only distract
+# from the type mismatch itself.
+proc hir::range::FactsRelevant {type declared} {
+    foreach t [list $type $declared] {
+        if {$t eq "never" || [hir::types::IsFn $t] || [hir::types::kindOf $t] ni {int ""}} {
+            return 0
+        }
+    }
+    return 1
+}
+
+# ", facts: RANGE" when FactsRelevant, else "".
+proc hir::range::FactsClause {type declared r} {
+    return [expr {[FactsRelevant $type $declared] ? ", facts: [show $r]" : ""}]
 }
 
 # "": DECLARED is not a structural function type; else "; WHY" naming the
 # part of its contract a value of ARGTYPE fails (hir::types::explainMismatch).
+# Two different named structs get the nominal reason instead: a named struct
+# is a nominal type, so equal field layouts (abi::I64 and abi::Isize, both
+# one Int field over the same domain) never make one the other.
 proc hir::range::MismatchClause {argType declared} {
+    if {[hir::types::IsNamedStruct $argType] && [hir::types::IsNamedStruct $declared]
+            && $argType ne $declared} {
+        return [format {; %s and %s are distinct named struct types: a named struct type is nominal, and no value is ever converted from one to another implicitly} \
+            [hir::types::show $argType] [hir::types::show $declared]]
+    }
     if {[hir::types::IsMutArray $argType]
             && ([hir::types::IsMutArray $declared] || $declared eq {mutarray})} {
         if {$declared eq {mutarray}} {
@@ -1723,9 +1753,9 @@ proc hir::range::VerifyStructuralCall {hirVar ranges e node calleeType} {
             continue
         }
         hir::Diagnose hir TYPE [format \
-            {argument %d cannot be proven to satisfy %s, the parameter type the callee's function type %s requires (argument type: %s, facts: %s)%s} \
+            {argument %d cannot be proven to satisfy %s, the parameter type the callee's function type %s requires (argument type: %s%s)%s} \
             $index [hir::types::show $declaredType] [hir::types::show $calleeType] \
-            [hir::types::show $argType] [show $argRange] [MismatchClause $argType $declaredType]] $arg
+            [hir::types::show $argType] [FactsClause $argType $declaredType $argRange] [MismatchClause $argType $declaredType]] $arg
     }
 }
 

@@ -330,11 +330,11 @@ test struct-error-duplicate-field-anon {an anonymous initializer gives a field t
 
 test struct-error-wrong-field-type {a value not proven admissible for the declared field type is a compile-time TYPE error} -body {
     structError "${person}p = Person \{name: 5, age: 1\}"
-} -match glob -result {TYPE: struct.bot:4:13: field "name" of struct Person cannot be proven to satisfy its declared type str (value type: int, *}
+} -result {TYPE: struct.bot:4:13: field "name" of struct Person cannot be proven to satisfy its declared type str (value type: int)}
 
 test struct-error-no-implicit-guard {an untyped value is not proven, and no runtime guard is inserted for it} -body {
     structError "${person}fn make(x):\n    Person \{name: x, age: 36\}\nmake(\"a\")"
-} -match glob -result {TYPE: struct.bot:5:13: field "name" of struct Person cannot be proven to satisfy its declared type str (value type: any, *}
+} -result {TYPE: struct.bot:5:13: field "name" of struct Person cannot be proven to satisfy its declared type str (value type: any)}
 
 test struct-error-unknown-struct {a construction of an undeclared struct} -body {
     list [structError "q = Nope \{a: 1\}"] [structError "q = int \{a: 1\}"]
@@ -352,7 +352,7 @@ test struct-error-projection-from-non-struct {projection from a value of another
 test struct-error-nominal-mismatch {a struct of another declaration, or an anonymous one, is never a Person} -body {
     list [structError "${accounts}fn birthday(p: Person) -> int:\n    p.age + 1\nbirthday(Account \{name: \"a\", age: 1\})"] \
         [structError "${person}fn birthday(p: Person) -> int:\n    p.age + 1\nbirthday(\{name: \"a\", age: 1\})"]
-} -match glob -result {{TYPE: struct.bot:9:10: argument for parameter "p" cannot be proven to satisfy Person (argument type: Account, *} {TYPE: struct.bot:6:10: argument for parameter "p" cannot be proven to satisfy Person (argument type: struct{age: int, name: str}, *}}
+} -result {{TYPE: struct.bot:9:10: argument for parameter "p" cannot be proven to satisfy Person (argument type: Account); Account and Person are distinct named struct types: a named struct type is nominal, and no value is ever converted from one to another implicitly} {TYPE: struct.bot:6:10: argument for parameter "p" cannot be proven to satisfy Person (argument type: struct{age: int, name: str})}}
 
 test struct-error-declaration {declaration errors point at the declaration} -body {
     list [structError "struct P:\n    a: int\n    a: str\n"] \

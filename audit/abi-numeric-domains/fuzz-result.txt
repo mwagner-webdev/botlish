@@ -1,0 +1,21 @@
+# audit/abi-numeric-domains/tools/fuzz.tcl -- the pure ABI numeric conversions
+# (creators, .value, abi::x86_64::from_* encodings) for all ten domains; no
+# syscall is executed by the fuzzer. Recorded 2026-10-03 on the final tree
+# (the error-name check matches the complete list of errors a KNOWN-ERROR
+# names, up to its ";").
+
+$ tclsh9.0 audit/abi-numeric-domains/tools/fuzz.tcl -n 200 -seed 1
+abi-numeric-fuzz programs 200 values 50600 out-of-range 20978 constant-checks 2000 failures 0
+(backends: interp compile cranelift-generic cranelift; wall time 9m5.579s, run
+alongside three full test suites)
+
+$ tclsh9.0 audit/abi-numeric-domains/tools/fuzz.tcl -n 30 -seed 5001 -gc-stress 1 -backends "cranelift-generic cranelift"
+abi-numeric-fuzz programs 30 values 7590 out-of-range 3098 constant-checks 300 failures 0
+(native backends under BOTLISH_NATIVE_GC_STRESS=1, which -gc-stress 1 sets;
+wall time 0m54.228s)
+
+Mutation check of the fuzzer (scratch library copies, never committed), each
+run with -n 3 -seed 1 -backends "interp cranelift":
+  from_u64 upper half encoded as v - 2^64 + 1            detected (6 failures)
+  abi::u16 upper bound 65534 instead of 65535            detected (3 failures)
+  abi::i8 lower bound -127 instead of -128               detected (3 failures)
