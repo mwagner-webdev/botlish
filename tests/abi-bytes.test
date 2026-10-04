@@ -589,8 +589,12 @@ sizes = loop x in xs:
 # than a register word that allocates a same-sized Bytes: without the
 # keepalive the first storage would be collected (and its block reused) while
 # its address is held in a register. The raw layer is used directly so the
-# lowering, not the wrapper, is what is tested.
-set livenessProgram {import abi
+# lowering, not the wrapper, is what is tested -- in every way the address can
+# reach the syscall within one function (native/lower.tcl's KeepAddrFlow):
+# written inline in the register literal, bound to a local, held in a register
+# struct bound to a local, returned by a helper function, merged across an
+# `if`, or passed to a callee that makes the syscall.
+set livenessHeader {import abi
 import abi::x86_64
 import byte
 import linux::abi
@@ -602,29 +606,66 @@ fn doubled(s: str, k: int) -> str:
     else:
         doubled(str::concat(s, s), k - 1)
 
-fn w(fd: abi::I32, a: str, b: str) -> int:
-    abi::x86_64::to_int(
-        linux::abi::syscall({
-            rax: abi::x86_64::register64(1),
-            rdi: abi::x86_64::from_i32(fd),
-            rsi: abi::x86_64::from_bytes(abi::bytes(str::encode_utf8(a))),
-            rdx: abi::x86_64::from_usize(abi::bytes_length(abi::bytes(str::encode_utf8(b)))),
-        })
-    )
+fn addr_of(d: abi::Bytes) -> abi::x86_64::Register64:
+    abi::x86_64::from_bytes(d)
 
+fn raw_write(fd: abi::x86_64::Register64, addr: abi::x86_64::Register64, n: abi::x86_64::Register64) -> int:
+    abi::x86_64::to_int(linux::abi::syscall({rax: abi::x86_64::register64(1), rdi: fd, rsi: addr, rdx: n}))
+
+}
+set livenessFooter {
 sa = doubled("A", 11)
 sb = doubled("B", 11)
 rs = loop i from 0 to 30:
     w(abi::i32(3), sa, sb)
-rs}
+rs
+}
+set livenessShapes [dict create \
+    inline {fn w(fd: abi::I32, a: str, b: str) -> int:
+    abi::x86_64::to_int(linux::abi::syscall({rax: abi::x86_64::register64(1), rdi: abi::x86_64::from_i32(fd), rsi: abi::x86_64::from_bytes(abi::bytes(str::encode_utf8(a))), rdx: abi::x86_64::from_usize(abi::bytes_length(abi::bytes(str::encode_utf8(b))))}))
+} \
+    locals {fn w(fd: abi::I32, a: str, b: str) -> int:
+    addr = abi::x86_64::from_bytes(abi::bytes(str::encode_utf8(a)))
+    n = abi::x86_64::from_usize(abi::bytes_length(abi::bytes(str::encode_utf8(b))))
+    abi::x86_64::to_int(linux::abi::syscall({rax: abi::x86_64::register64(1), rdi: abi::x86_64::from_i32(fd), rsi: addr, rdx: n}))
+} \
+    struct {fn w(fd: abi::I32, a: str, b: str) -> int:
+    regs = {rax: abi::x86_64::register64(1), rdi: abi::x86_64::from_i32(fd), rsi: abi::x86_64::from_bytes(abi::bytes(str::encode_utf8(a))), rdx: abi::x86_64::from_usize(abi::bytes_length(abi::bytes(str::encode_utf8(b))))}
+    abi::x86_64::to_int(linux::abi::syscall(regs))
+} \
+    helper {fn w(fd: abi::I32, a: str, b: str) -> int:
+    abi::x86_64::to_int(linux::abi::syscall({rax: abi::x86_64::register64(1), rdi: abi::x86_64::from_i32(fd), rsi: addr_of(abi::bytes(str::encode_utf8(a))), rdx: abi::x86_64::from_usize(abi::bytes_length(abi::bytes(str::encode_utf8(b))))}))
+} \
+    join {fn w(fd: abi::I32, a: str, b: str) -> int:
+    addr = if str::length(a) > 0:
+        abi::x86_64::from_bytes(abi::bytes(str::encode_utf8(a)))
+    else:
+        abi::x86_64::register64(0)
+    abi::x86_64::to_int(linux::abi::syscall({rax: abi::x86_64::register64(1), rdi: abi::x86_64::from_i32(fd), rsi: addr, rdx: abi::x86_64::from_usize(abi::bytes_length(abi::bytes(str::encode_utf8(b))))}))
+} \
+    callee {fn w(fd: abi::I32, a: str, b: str) -> int:
+    raw_write(abi::x86_64::from_i32(fd), abi::x86_64::from_bytes(abi::bytes(str::encode_utf8(a))), abi::x86_64::from_usize(abi::bytes_length(abi::bytes(str::encode_utf8(b)))))
+}]
+set livenessProgram "$livenessHeader[dict get $livenessShapes inline]$livenessFooter"
 
-test abi-bytes-liveness-address-of-an-unreferenced-bytes {a Bytes only the raw address refers to survives until the syscall returns, even when a register word evaluated after the address allocates (a collection at every allocation: GC stress). The bytes the kernel receives are the first storage's (2048 A bytes), 30 times} -constraints {linuxX86_64 posixShell} -body {
-    set exe [buildExecutable liveness $::livenessProgram]
+dict for {shape body} $livenessShapes {
+    test abi-bytes-liveness-$shape "a Bytes only the raw address refers to survives until the syscall returns, address reaching the syscall by the \"$shape\" route, even though a register word evaluated after the address allocates a same-sized Bytes (a collection at every allocation): the kernel receives the first storage's 2048 A bytes, 30 times, and the NIR keeps the storage alive after the syscall" -constraints {linuxX86_64 posixShell} -body [string map [list @SHAPE@ $shape] {
+        set text "$::livenessHeader[dict get $::livenessShapes @SHAPE@]$::livenessFooter"
+        set exe [buildExecutable liveness-@SHAPE@ $text]
+        lassign [runExecutable $exe 1] stdout f3 f4
+        set nir [native::nir [bytesHir $text]]
+        list [expr {$f3 eq [string repeat A 61440]}] [string length $f3] [expr {[regexp -all {op keepalive} [nirFunction $nir w]] >= 1}]
+    }] -result {1 61440 1}
+}
+
+test abi-bytes-liveness-join-else-branch {the `if` route's other branch (no Bytes: a null address register word) still runs correctly -- the storage register is defined on only one path, and the keepalive after the join is then a use of the zero a conditionally defined register has -- and the kernel reports EFAULT for a null buffer with a nonzero count} -constraints {linuxX86_64 posixShell} -body {
+    set text "$::livenessHeader[dict get $::livenessShapes join]\nrs = \[w(abi::i32(3), \"\", \"B\"), w(abi::i32(3), \"A\", \"B\")\]\nrs"
+    set exe [buildExecutable liveness-join-else $text]
     lassign [runExecutable $exe 1] stdout f3 f4
-    list [expr {$f3 eq [string repeat A 61440]}] [string length $f3]
-} -result {1 61440}
+    list $stdout $f3
+} -result {{[-14, 1]} A}
 
-test abi-bytes-liveness-mutant-without-keepalive-is-detected {the same program with the keepalive deleted from its NIR reads a reclaimed (and reused) buffer under GC stress: this test fails the mutant, so the liveness theorem is actually exercised} -constraints {linuxX86_64 posixShell} -body {
+test abi-bytes-liveness-mutant-without-keepalive-is-detected {the inline program with the keepalive deleted from its NIR reads a reclaimed (and reused) buffer under GC stress: this test fails the mutant, so the liveness theorem is actually exercised} -constraints {linuxX86_64 posixShell} -body {
     set nir [native::nir [bytesHir $::livenessProgram]]
     set mutant [join [lmap line [split $nir \n] {
         if {[regexp {= op keepalive } $line]} continue

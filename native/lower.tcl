@@ -2905,7 +2905,51 @@ proc native::lower::Assign {fnVar rhs {e ""}} {
     upvar 1 $fnVar fn
     set r [NewReg fn]
     Emit fn "$r = $rhs" $e
+    if {[dict exists $fn keepAddr]} {
+        KeepAddrFlow fn $r $rhs
+    }
     return $r
+}
+
+# Raw-address provenance (BytesAddrCall, SyscallCall; ABI-BYTES.md): `fn
+# keepAddr` maps a register to the byte storages (registers) whose payload
+# address it may hold or contain. It is created by `bytesaddr` and flows, within
+# one function, through the instructions that build or take apart a value
+# holding an address -- a Register64 object (`structnew`), a register struct
+# bound to a local, a field read back out of it (`structget`), a List holding
+# one -- so a syscall that takes such a register as an operand keeps every
+# storage it may point into alive until the kernel returns. Registers are
+# single-assignment and a storage register is defined before any value derived
+# from it, so a recorded storage always dominates the registers that carry it.
+# (Not tracked, by design: an address returned from another function or merged
+# across a branch join -- the raw layer's one sharp edge, documented in
+# ABI-BYTES.md: take the address and make the syscall in the same function.)
+proc native::lower::KeepAddrFlow {fnVar reg rhs} {
+    upvar 1 $fnVar fn
+    set words [split $rhs " "]
+    set operands {}
+    switch -- [lindex $words 0] {
+        structnew { set operands [lrange $words 2 end] }
+        structget { set operands [lrange $words 2 end] }
+        op {
+            if {[lindex $words 1] in {listnew listget}} {
+                set operands [lrange $words 2 end]
+            }
+        }
+    }
+    set storages {}
+    foreach operand $operands {
+        if {[dict exists $fn keepAddr $operand]} {
+            foreach storage [dict get $fn keepAddr $operand] {
+                if {$storage ni $storages} {
+                    lappend storages $storage
+                }
+            }
+        }
+    }
+    if {$storages ne ""} {
+        dict set fn keepAddr $reg $storages
+    }
 }
 
 # Like Assign, for an instruction whose result is a raw (untagged) machine
@@ -3658,9 +3702,10 @@ proc native::lower::SyscallCall {fnVar e node wantVirtual} {
     set kept {}
     foreach operand $operands {
         if {[dict exists $fn keepAddr $operand]} {
-            set storage [dict get $fn keepAddr $operand]
-            if {$storage ni $kept} {
-                lappend kept $storage
+            foreach storage [dict get $fn keepAddr $operand] {
+                if {$storage ni $kept} {
+                    lappend kept $storage
+                }
             }
         }
     }
@@ -3935,7 +3980,7 @@ proc native::lower::BytesAddrCall {fnVar e node wantVirtual} {
     }
     dict lappend fn calls [list native $native]
     set address [Assign fn "op bytesaddr $storage" $e]
-    dict set fn keepAddr $address $storage
+    dict set fn keepAddr $address [list $storage]
     if {$wantVirtual ne ""} {
         if {$wantVirtual != 1} {
             throw {NATIVE BUG} "native lowering: expected a 1-field Register64 construction at $e"
@@ -3946,7 +3991,6 @@ proc native::lower::BytesAddrCall {fnVar e node wantVirtual} {
         return [list [Assign fn unit] tagged]
     }
     set object [Assign fn "structnew [ShapeIndex $registerType $layout] $address" $e]
-    dict set fn keepAddr $object $storage
     return [list $object tagged]
 }
 
@@ -5046,7 +5090,126 @@ proc native::lower::ClosedResult {fnVar e result} {
     return [list $result tagged]
 }
 
+# Every call lowering goes through here, so the raw-address provenance of
+# ABI-BYTES.md is tracked across calls to ordinary Botlish functions in the
+# calling function (see KeepAddrFlow): CallInner lowers the call, then
+#   * a call that returns an abi::x86_64::Register64 and takes an abi::Bytes (or
+#     an address-carrying register) may be returning an address into it: its
+#     result registers carry the provenance of the call's operands -- the Bytes
+#     (or its storage) itself, whichever register passes it;
+#   * a call that takes an address-carrying operand may use it for a syscall
+#     inside the callee: the storages stay live until the call has returned (a
+#     keepalive after it).
+# Calls with neither (every call of a program that never takes an address) pay
+# one dict-exists test.
 proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
+    upvar 1 $fnVar fn
+    set result [CallInner fn $e $node $want $wantVirtual $wantRegion]
+    if {[lindex $node 0] eq "" || [dict get $node target] eq ""} {
+        return $result
+    }
+    if {[lindex [dict get $node target] 0] eq "block" && [BytesFlowCandidate fn $e $node]} {
+        AddressFlowAcrossCall fn $e $node $result
+    }
+    return $result
+}
+
+# 1 if call E (NODE) may carry an address: the program declares abi::Bytes and
+# either the call takes an abi::Bytes or its operands carry a raw address.
+proc native::lower::BytesFlowCandidate {fnVar e node} {
+    upvar 1 $fnVar fn
+    variable hir
+    if {![hir::structs::declared [core::bytestore::bytesType]]} {
+        return 0
+    }
+    if {[dict exists $fn keepAddr]} {
+        return 1
+    }
+    set bytesType [list nstruct [core::bytestore::bytesType]]
+    foreach arg [dict get $node args] {
+        if {[hir::typeOf $hir $arg] eq $bytesType} {
+            return 1
+        }
+    }
+    return 0
+}
+
+proc native::lower::AddressFlowAcrossCall {fnVar e node result} {
+    upvar 1 $fnVar fn
+    variable hir
+    if {[lindex $result 0] eq "never"} {
+        return
+    }
+    set lines [dict get $fn lines]
+    set callLine ""
+    set count [llength $lines]
+    for {set i [expr {$count - 1}]} {$i >= 0 && $i >= $count - 16} {incr i -1} {
+        set line [lindex $lines $i]
+        if {[string match "* @$e" $line] && [regexp {= (?:call|callenv|callmulti|callenvmulti) \S+ } $line]} {
+            set callLine $line
+            break
+        }
+    }
+    if {$callLine eq ""} {
+        return
+    }
+    regexp {= (call|callenv|callmulti|callenvmulti) \S+ ?(.*) @[^ ]+$} $callLine -> kind rest
+    set operands [split [string trim $rest] " "]
+    if {$kind in {callenv callenvmulti}} {
+        set operands [lrange $operands 1 end]
+    }
+    set tagged {}
+    set carried {}
+    foreach operand $operands {
+        if {$operand eq "" || [dict exists $fn rawRegs $operand]} continue
+        if {[dict exists $fn keepAddr $operand]} {
+            foreach storage [dict get $fn keepAddr $operand] {
+                if {$storage ni $carried} {
+                    lappend carried $storage
+                }
+            }
+        }
+    }
+    # The values this call may return an address into: every non-raw operand
+    # of a Register64-returning call (a Bytes, its storage, or an address
+    # that already carries provenance), plus what the operands carry.
+    set source $carried
+    if {[hir::typeOf $hir $e] eq [list nstruct [core::linuxabi::registerType]]} {
+        # Which operands are the Bytes: by position when every argument is one
+        # operand (each Bytes argument, as its storage or its object), else (a
+        # parameter passed as several field registers) every non-raw operand.
+        set bytesType [list nstruct [core::bytestore::bytesType]]
+        set argExprs [dict get $node args]
+        set picked {}
+        if {[llength $argExprs] == [llength $operands]} {
+            foreach arg $argExprs operand $operands {
+                if {[hir::typeOf $hir $arg] eq $bytesType} {
+                    lappend picked $operand
+                }
+            }
+        } else {
+            set picked $operands
+        }
+        foreach operand $picked {
+            if {$operand ne "" && ![dict exists $fn rawRegs $operand] && $operand ni $source} {
+                lappend source $operand
+            }
+        }
+        set registers [expr {[lindex $result 1] eq "virtual" ? [lindex $result 0] : [list [lindex $result 0]]}]
+        foreach register $registers {
+            if {$register ne "" && $source ne ""} {
+                dict set fn keepAddr $register $source
+            }
+        }
+    }
+    # A callee may consume a carried address (a syscall inside it): keep what
+    # the operands carry alive until it has returned.
+    foreach storage $carried {
+        Assign fn "op keepalive $storage" $e
+    }
+}
+
+proc native::lower::CallInner {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
     upvar 1 $fnVar fn
     variable hir
     variable selfTail
@@ -7382,9 +7545,11 @@ proc native::lower::If {fnVar e node {family ""} {virtualN ""} {virtualCut ""} {
             if {$virtualN ne ""} {
                 foreach r $result v $value {
                     Emit fn "$r = move $v"
+                    JoinKeepAddr fn $r $v
                 }
             } else {
                 Emit fn "$result = move $value"
+                JoinKeepAddr fn $result $value
             }
             Emit fn "jump $join"
             set joined 1
@@ -7395,6 +7560,27 @@ proc native::lower::If {fnVar e node {family ""} {virtualN ""} {virtualCut ""} {
     }
     EmitLabel fn $join
     return $result
+}
+
+# The raw-address provenance (KeepAddrFlow) of a branch's value V moved into
+# the join register R: R may hold an address into V's storages whichever branch
+# ran, so it carries the union over the branches. A storage register defined
+# in only one branch is read after the join as the zero a conditionally defined
+# register has on the other path (the same convention a root register that is
+# conditionally defined already relies on, codegen/roots.rs): the keepalive of
+# it is then a use of nothing, and of the storage on the path that has one.
+proc native::lower::JoinKeepAddr {fnVar r v} {
+    upvar 1 $fnVar fn
+    if {![dict exists $fn keepAddr $v]} {
+        return
+    }
+    set storages [expr {[dict exists $fn keepAddr $r] ? [dict get $fn keepAddr $r] : {}}]
+    foreach storage [dict get $fn keepAddr $v] {
+        if {$storage ni $storages} {
+            lappend storages $storage
+        }
+    }
+    dict set fn keepAddr $r $storages
 }
 
 # (listloop LIST-EXPR (block (ELEM) BODY...)): the returning iterable loop
