@@ -433,6 +433,9 @@ Standard intrinsics (qualified root natives):
 | `mutable_array::freeze` | mutarray, int → list, errors `LowerUnderrun` `UpperOverrun`: a copy of the first N slots (the slice `0..N`) |
 | `immutable_set::from_list` | `List[T]` → `ImmutableSet[T]` |
 | `immutable_set::contains` | `ImmutableSet`, any → bool |
+| `byte_store::from_list` | `List[Byte]` → byte storage: the eagerly copied, owned storage behind `abi::Bytes` (no source type spells it; ABI-BYTES.md) |
+| `byte_store::byte_count` | byte storage → int: its exact length |
+| `abi::x86_64::from_bytes` | `abi::Bytes` → `abi::x86_64::Register64`: the machine address of the payload, for the raw layer; native backend only (Tcl backends: `NATIVE-ONLY`); callable only directly (ABI-BYTES.md) |
 | `linux::abi::syscall` | `{rax: R, rdi: R, …, r9: R}` → `abi::x86_64::Register64` (R a Register64): the raw Linux x86-64 kernel transition, raw rax back; omitted argument registers are zero; native backend only (Tcl backends: `NATIVE-ONLY`); callable only directly (LINUX-X86-64-SYSCALL.md) |
 
 Ordinary Botlish members of the same namespaces (library modules, not
@@ -627,6 +630,7 @@ refinement unless its contract explicitly establishes one. So
 | `core/primitives.tcl`, `core/predicates.tcl`, `core/strings.tcl`, `core/lists.tcl` | builtin natives |
 | `core/process.tcl` | the process boundary: `argv()`, its builtin error, argv injection (ARGV.md) |
 | `core/linuxabi.tcl` | `linux::abi::syscall`, the raw Linux x86-64 kernel transition (native only; LINUX-X86-64-SYSCALL.md) |
+| `core/bytestore.tcl` | the byte-storage value kind's natives and the raw address bridge `abi::x86_64::from_bytes` (ABI-BYTES.md) |
 | `lib/web.tcl` | optional demonstration library (`core::loadLibrary web`): `Emailish`, `UriQueryValue`, `uriEscape` |
 | `hir/hir.tcl` | HIR data model, ids, `hir::build`, queries |
 | `hir/syntax.tcl` | syntax nodes: HIR's input, and core IR → syntax |
@@ -641,15 +645,16 @@ refinement unless its contract explicitly establishes one. So
 | `hir/specialize.tcl` | call-site specialization: instances, result fixpoint, views for `hir::aot` (§21) |
 | `hir/exactvalue.tcl` | exact-value facts and value identity (`hir::exact::Of`, `Identity`, `SameValue`) |
 | `hir/warnings.tcl` | compiler warnings: record, static registry, global policy, rendering, error promotion, and `SAME-RETURN-VALUE` (§23) |
-| `hir/syscall.tcl` | the static contract of `linux::abi::syscall`'s register-struct argument (LINUX-X86-64-SYSCALL.md) |
+| `hir/syscall.tcl` | the static contract of `linux::abi::syscall`'s register-struct argument (LINUX-X86-64-SYSCALL.md) and of `abi::x86_64::from_bytes`'s `abi::Bytes` argument (ABI-BYTES.md) |
 | `compiler/compiler.tcl` | HIR → Tcl compiler backend |
 | `native/lower.tcl` | HIR → NIR native lowering (§20) |
 | `native/native.tcl` | the native entry points, all taking HIR: `native::lowered` (the one HIR → NIR entry), `evalHir` (JIT), NIR, CLIF, object, executable, code size and guard report; runs the native driver |
 | `native/prepare.tcl` | `native::prepareHir`: attaches the native implementations a program calls (module functions, validator bodies) to its HIR |
 | `native/src/nir.rs` | NIR parsing and validation |
-| `native/src/runtime/` | native `Value` representation, heap and collector, errors, runtime helper ABI; `syscall.rs` holds the one inline-asm `syscall` boundary (LINUX-X86-64-SYSCALL.md) |
-| `lib/abi.bot` | the ABI numeric domains `abi::I8` ... `abi::Usize` (ordinary Int values with a proven foreign-interface domain `abi::I8Value` ... `abi::UsizeValue`, not fixed-width arithmetic), their checked creators `abi::i8` ... `abi::usize` and errors `AbiIntegerBelowRange`/`AbiIntegerAboveRange` (ABI-NUMERIC-DOMAINS.md) |
+| `native/src/runtime/` | native `Value` representation, heap and collector, errors, runtime helper ABI; `syscall.rs` holds the one inline-asm `syscall` boundary (LINUX-X86-64-SYSCALL.md); `bytesobj.rs` the owned byte-storage object (ABI-BYTES.md) |
+| `lib/abi.bot` | the ABI numeric domains `abi::I8` ... `abi::Usize` (ordinary Int values with a proven foreign-interface domain `abi::I8Value` ... `abi::UsizeValue`, not fixed-width arithmetic), their checked creators `abi::i8` ... `abi::usize` and errors `AbiIntegerBelowRange`/`AbiIntegerAboveRange` (ABI-NUMERIC-DOMAINS.md); and `abi::Bytes`, the first owned ABI memory value, an opaque struct over contiguous byte storage with its creator `abi::bytes` and length `abi::bytes_length` (ABI-BYTES.md) |
 | `hir/imports.tcl` | the import environments of a compilation: which namespaces and short type names each file's header imported (IMPORTS.md) |
+| `lib/linux.bot` | `linux::write(fd, data)`: one `write(2)` syscall over an `abi::Bytes`, the kernel's raw signed result as an Int (ABI-BYTES.md) |
 | `lib/abi/x86_64.bot` | `abi::x86_64::Register64`, the x86-64 register word as a transport value, and its two Int conversions (LINUX-X86-64-SYSCALL.md); `from_i8` ... `from_usize` encode ABI numeric values as register words, sign- or zero-extended (ABI-NUMERIC-DOMAINS.md) |
 | `native/src/codegen/` | the `Backend` interface; NIR → Cranelift IR for JIT and object files |
 | `surface/lexer.tcl` | source → tokens, indentation → `INDENT`/`DEDENT` |

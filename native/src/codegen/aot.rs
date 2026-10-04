@@ -87,7 +87,12 @@ fn startup(program: &Program, object: &ObjectProgram) -> String {
     for c in &object.pool.entries {
         match c {
             Const::Str(text) => writeln!(s, "Const::Str({text:?}.into()),"),
-            Const::Bytes(bytes) => writeln!(s, "Const::Bytes(vec!{bytes:?}),"),
+            Const::Bytes(bytes) => {
+                // A byte-string literal of \xNN escapes: compact however large
+                // the static storage is, and exact for every byte (NUL, 0xff).
+                let literal: String = bytes.iter().map(|b| format!("\\x{b:02x}")).collect();
+                writeln!(s, "Const::Bytes(b\"{literal}\".to_vec()),")
+            }
             Const::BigInt(text) => writeln!(s, "Const::BigInt({text:?}.into()),"),
             Const::Native(id) => writeln!(s, "Const::Native({id}),"),
             Const::FnValue(id) => writeln!(s, "Const::FnValue({id}),"),

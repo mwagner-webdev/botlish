@@ -209,6 +209,11 @@ test abi-bytes-hash-agrees-with-equality {hash is by the bytes and consistent wi
     agree "${::pure}fn mk(s: str):\n    abi::bytes(str::encode_utf8(s))\n\[hash(mk(\"AB\")) == hash(abi::bytes([byteList 65 66])), hash(mk(\"AB\")) == hash(mk(\"AC\")), hash(abi::bytes(\[\])) == hash(abi::bytes([byteList 0])), hash(abi::bytes([byteList 0])) == hash(abi::bytes([byteList 0 0])), hash(abi::bytes([byteList 1 2 3])) >= 0\]"
 } -result {[true, false, false, false, true]}
 
+test abi-bytes-hash-values-agree-across-backends {the hash VALUES (not just their consistency with ==) are identical on the interpreter, the compiler and both native modes: the Tcl hash of a byte storage and the runtime's hash of the same bytes are the same function (the byte count, then the bytes)} -body {
+    set shown [agree "${::pure}fn mk(s: str):\n    abi::bytes(str::encode_utf8(s))\n\[hash(abi::bytes(\[\])), hash(abi::bytes([byteList 0])), hash(abi::bytes([byteList 255 0 1])), hash(mk(\"h\u00e9llo \u2603\")), hash(abi::bytes(\[\])) == hash(abi::bytes(\[\]))\]"]
+    list [string match DISAGREE* $shown] [string match ERROR* $shown] [regexp {^\[[0-9]+, [0-9]+, [0-9]+, [0-9]+, true\]$} $shown]
+} -result {0 0 1}
+
 test abi-bytes-byte-sequences-never-collide-with-lists {a Bytes and a List of the same numbers are different kinds: never equal, and a Bytes is not a pointer, a String or an Int} -body {
     agree "${::pure}b = abi::bytes([byteList 65])\n\[b == \[65\], b == \"A\", b == 65, \[b\] == \[abi::bytes([byteList 65])\]\]"
 } -result {[false, false, false, true]}
@@ -719,11 +724,68 @@ test abi-bytes-nir-register-order-and-keepalive-operand {the syscall's operands 
         [expr {$rsi ne $rdx && $rsi ne $rdi && $rsi ne $rax}]
 } -result {abi::x86_64::register64 abi::x86_64::from_i32 1 abi::x86_64::from_usize 1 1 1}
 
-test abi-bytes-nir-static-constant {NIR of a small constant: abi::bytes(str::encode_utf8("hello\n")) is one static byte-storage constant (`bytes "HEX"`): no abi::bytes call, no op bytesfromlist, no List, no String} -constraints linuxX86_64 -body {
+test abi-bytes-nir-dynamic-payload-precedes-the-syscall {a payload built dynamically immediately before the syscall is fully initialized first: in a function that builds the Bytes from its argument and writes it, the conversion (strutf8bytes, then abi::bytes' bytesfromlist instance) is emitted and completed before the call that takes the address and executes the one syscall -- the data dependency (the storage register) forces the order, and nothing is hoisted past the syscall's all-memory barrier} -constraints linuxX86_64 -body {
+    set text "${::linuxPrelude}\nfn emit(s: str) -> int:\n    out(3, mk(s))\nemit(\"x\")"
+    set nir [native::nir [bytesHir $text]]
+    set names [dict create]
+    foreach {- id name} [regexp -all -inline -line {^func ([0-9]+) "([^"]+)"} $nir] { dict set names $id $name }
+    proc orderOf {names body} {
+        set seq {}
+        foreach line [split $body \n] {
+            if {[regexp {= op (strutf8bytes) } $line -> op]} {
+                lappend seq $op
+            } elseif {[regexp {= call(?:multi)? ([0-9]+) } $line -> id]} {
+                lappend seq [dict get $names $id]
+            }
+        }
+        return $seq
+    }
+    list [orderOf $names [nirFunction $nir emit]] [orderOf $names [nirFunction $nir mk]] \
+        [orderOf $names [nirFunction $nir out]] [regexp -all {op bytesfromlist} [nirFunction $nir abi::bytes]]
+} -result {{mk out} {strutf8bytes abi::bytes} {abi::i32 linux::write} 1}
+
+test abi-bytes-clif-keepalive-and-stack-map {CLIF of linux::write: rt_bytes_addr, then the syscall helper, then rt_keepalive, in that order, with the keepalive's operand the very value rt_bytes_addr took (the storage), and the syscall call's stack map names the stack slot that holds that storage -- so the collector sees it as a root at the syscall's own safepoint} -constraints linuxX86_64 -body {
+    set clif [native::clif [bytesHir "${::linuxPrelude}\nout(3, mk(\"hi\"))"]]
+    set helperOf [dict create]
+    foreach {- ref name} [regexp -all -inline -line {^; (u0:[0-9]+) = (rt_[a-z0-9_]+)} $clif] { dict set helperOf $ref $name }
+    regexp {; function [0-9]+ "linux::write": botlish_fn_[0-9]+} $clif header
+    set start [string first $header $clif]
+    set block [string range $clif $start [string first "\n\}" $clif $start]]
+    # fnK -> helper name
+    set fnName [dict create]
+    foreach {whole fn ref} [regexp -all -inline -line {^\s+(fn[0-9]+) = (?:colocated )?(u0:[0-9]+) } $block] {
+        if {[dict exists $helperOf $ref]} { dict set fnName $fn [dict get $helperOf $ref] }
+    }
+    # value aliases (vA -> vB) and stores into the stack slot
+    set alias [dict create]
+    foreach {- a b} [regexp -all -inline -line {^\s+(v[0-9]+) -> (v[0-9]+)$} $block] { dict set alias $a $b }
+    proc root {alias v} { while {[dict exists $alias $v]} { set v [dict get $alias $v] }; return $v }
+    set calls {}
+    foreach line [split $block \n] {
+        if {[regexp {= call (fn[0-9]+)\((v[0-9]+), (v[0-9]+)} $line -> fn vm arg]} {
+            if {[dict exists $fnName $fn]} { lappend calls [list [dict get $fnName $fn] [root $alias $arg] $line] }
+        }
+    }
+    set names [lmap c $calls {lindex $c 0}]
+    set addr [lsearch -inline -index 0 $calls rt_bytes_addr]
+    set keep [lsearch -inline -index 0 $calls rt_keepalive]
+    set syscall [lsearch -inline -index 0 $calls rt_linux_x86_64_syscall]
+    # the stack slot the storage value is stored to
+    set root [lindex $addr 1]
+    set offset 0
+    regexp "store \[a-z.0-9 \]*$root, v3(?:\\+(\[0-9\]+))?\n" "$block\n" -> offset
+    if {$offset eq ""} { set offset 0 }
+    list $names [expr {[lindex $addr 1] eq [lindex $keep 1]}] \
+        [regexp "ss0\\+$offset\[,\\]\]" [lindex $syscall 2]]
+} -result {{rt_bytes_addr rt_linux_x86_64_syscall rt_keepalive} 1 1}
+
+test abi-bytes-nir-static-constant {NIR of a small constant: abi::bytes(str::encode_utf8("hello\n")) is one static byte-storage constant (`bytes "HEX"`): no abi::bytes call, no op bytesfromlist, no List, no String -- and it goes through the very same linux::write (one bytesaddr, one syscall, one keepalive), so there are not two source semantics for the two physical forms} -constraints linuxX86_64 -body {
     set nir [native::nir [bytesHir "${::linuxPrelude}\nout(3, abi::bytes(str::encode_utf8(\"hello\\n\")))"]]
+    set write [nirFunction $nir linux::write]
     list [regexp -all {= bytes "([0-9a-f]*)"} $nir] [lindex [regexp -inline {= bytes "([0-9a-f]*)"} $nir] 1] \
-        [regexp -all {op bytesfromlist|op strutf8bytes|op listnew} [nirFunction $nir <program>]]
-} -result {1 68656c6c6f0a 0}
+        [regexp -all {op bytesfromlist|op strutf8bytes|op listnew} [nirFunction $nir <program>]] \
+        [regexp -all {op bytesaddr} $write] [regexp -all {op syscall_linux_x86_64} $write] [regexp -all {op keepalive} $write]
+} -result {1 68656c6c6f0a 0 1 1 1}
 
 test abi-bytes-nir-static-forms {every statically known byte sequence is a constant: an exactly known literal List of bytes, the empty List, an encode_utf8 of a known (even empty or non-ASCII) String -- and a dynamic argument is never one} -constraints linuxX86_64 -body {
     set forms [list \

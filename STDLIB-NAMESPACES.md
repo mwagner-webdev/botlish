@@ -78,6 +78,8 @@ and `ns-qualified-inventory` pin the after-state in a fresh process):
 | `immutable_set_from_list immutable_set_contains` | standard type op (ImmutableSet) | `immutable_set::from_list/contains` |
 | `char_codepoint` | standard type op (UnicodeChar; the primitive behind `lib/char.bot`'s existing `char::codepoint`) | `char::scalar_value` (the follow-up removed the `char::codepoint` wrapper, §11) |
 | `linux::abi::syscall` | platform-ABI, already qualified | unchanged |
+| (added later, ABI-BYTES.md) `byte_store::from_list`, `byte_store::byte_count` | standard type ops of the byte-storage value kind behind `abi::Bytes` (like `immutable_set::*` for `ImmutableSet`) | `byte_store::*` |
+| (added later, ABI-BYTES.md) `abi::x86_64::from_bytes` | platform-ABI raw address bridge, already qualified | `abi::x86_64::from_bytes` |
 
 Source-declared types still register their constructor/predicate natives at
 the root for the duration of one compilation (`hir/sourcetypes.tcl`); those

@@ -697,3 +697,13 @@ each finding was checked by a separate skeptic. Fixed as a result:
       passed by name materializes (an inline literal does not; Register64
       locals and parameters do not); a future wrapper library should write
       the register literal inline, or the frontier should be removed first.
+
+## Follow-up: owned memory and `write`
+
+The obstacles above that concern memory were resolved by ABI-BYTES.md:
+`abi::Bytes` is an `opaque struct` (a construction only module `abi` can perform)
+over an owned, contiguous byte storage; the raw address bridge
+`abi::x86_64::from_bytes` makes the address of its payload a `Register64`; the
+syscall lowering keeps the backing storage alive until the kernel returns
+(`keepalive`); and `linux::write(fd, data)` is the first syscall wrapper that moves
+memory. `linux::abi::syscall` itself is unchanged: still generic, still native-only.

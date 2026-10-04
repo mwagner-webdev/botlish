@@ -5105,9 +5105,6 @@ proc native::lower::ClosedResult {fnVar e result} {
 proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
     upvar 1 $fnVar fn
     set result [CallInner fn $e $node $want $wantVirtual $wantRegion]
-    if {[lindex $node 0] eq "" || [dict get $node target] eq ""} {
-        return $result
-    }
     if {[lindex [dict get $node target] 0] eq "block" && [BytesFlowCandidate fn $e $node]} {
         AddressFlowAcrossCall fn $e $node $result
     }
