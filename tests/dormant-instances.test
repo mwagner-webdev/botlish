@@ -270,11 +270,14 @@ test dormant-refined-checks-char-at-entry {refined-checks: char_at.i loses the -
 # char_at (lib/web.bot) guards its slice (`if i < 0 or i >= n: return ""`,
 # which proves the substring's bounds): with dormant instances on, i's entry
 # Range [0, ...] also decides the `i < 0` test statically (no ilt).
+# The guard also makes the slice's bounds a completion proof, so its checks are
+# gone from the NIR: no `regioncheck` before the region, `substrproven` (no
+# check, no error exit) where the String is materialized (PROOF-FACT-REPAIRS.md).
 test dormant-refined-checks-char-at-nir {refined-checks: char_at's i + 1 is a raw riadd (no tag test, no overflow check) in both of its emitted variants, instead of a tagged iadd} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot]]
     set off [withDormant 0 {nirOpsOf [native::nir $hir] char_at}]
     list $off [nirOpsOf [native::nir $hir] char_at]
-} -result {{{ilt runbox runbox rige iadd regioncheck} {ilt runbox runbox rige iadd substr}} {{runbox runbox rige runbox riadd rbox regioncheck} {runbox runbox rige runbox riadd rbox substr}}}
+} -result {{{ilt runbox runbox rige iadd} {ilt runbox runbox rige iadd substrproven}} {{runbox runbox rige runbox riadd rbox} {runbox runbox rige runbox riadd rbox substrproven}}}
 
 test dormant-scan-shape-entry {the emailish? scanner shape: get.i is [0, …] once scan<generic>'s unbounded loop counter no longer reaches it} -body {
     set off [withDormant 0 {

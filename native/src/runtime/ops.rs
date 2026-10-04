@@ -43,6 +43,8 @@
 //! | rt_list_len            | List                | Int                          | no        |
 //! | rt_list_get            | List, Int           | element; declared            | no        |
 //! |                        |                     | IndexNotFound (list::at)     |           |
+//! | rt_list_get_proven     | List, Int           | element (index proven valid  | no        |
+//! |                        |                     | by hir/completions.tcl)      |           |
 //! | rt_list_append         | List, any           | new List (copy)              | yes       |
 //! | rt_set_from_list       | List                | ImmutableSet; EQUALITY       | yes       |
 //! | rt_set_contains        | ImmutableSet, any   | Bool; EQUALITY               | no        |
@@ -92,7 +94,10 @@ pub fn op_may_allocate(op: OpCode) -> bool {
     matches!(
         op,
         IAdd | ISub | IMul | IAnd | IOr | IXor | IShl | IShr | Substr | DecodeCharAt | ShortToStr | AsciiToStr | StrLower | StrCat
-            | StrUtf8Bytes | Argv | ListNew | ListAppend | MutArrayAllocate | MutArrayFreeze | MkOk | MkError
+            | StrUtf8Bytes | Argv | ListNew | ListAppend | MutArrayAllocate | MutArrayFreeze | MkOk
+            // The proven siblings allocate exactly like their checked forms; only
+            // their op_may_error classification differs.
+            | SubstrProven | MutArrayFreezeProven | MkError
             | SetFromList
             // The raw rax result is boxed as a BigInt when it is outside the
             // small-Int range (runtime/syscall.rs).
@@ -620,6 +625,22 @@ pub extern "C" fn rt_substr(p: *mut Vm, s: Value, start: Value, end: Value) -> V
         Ok(slice) => slice,
         Err(failed) => return failed,
     };
+    substr_range(p, s, from, to)
+}
+
+/// `rt_substr` at a call site whose slice hir/completions.tcl proved valid
+/// (`substrproven`): START and END are small Ints with 0 <= START <= END <=
+/// the length, so nothing is checked and nothing can fail.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_substr_proven(p: *mut Vm, s: Value, start: Value, end: Value) -> Value {
+    let (from, to) = proven_slice(start, end, str_of(s).chars);
+    substr_range(p, s, from, to)
+}
+
+/// The slice `start..end` (character indices, already known valid for the
+/// String S) as a new String.
+fn substr_range(p: *mut Vm, s: Value, from: usize, to: usize) -> Value {
+    let obj = str_of(s);
     // One allocation, one copy: the substring's bytes go straight from the
     // base's text into the new String's text.
     if obj.ascii {
@@ -1178,6 +1199,25 @@ fn check_slice(p: *mut Vm, start: Bound, end: SliceEnd, n: usize) -> Result<(usi
     }
 }
 
+/// A slice's bounds at a call site proven valid by hir/completions.tcl: both
+/// are small Ints, 0 <= START <= END <= N. The proof is what makes them so;
+/// a violation is a compiler bug, caught here by a debug assertion (and, in
+/// every build, by the slice indexing that follows panicking rather than
+/// reading out of bounds).
+fn proven_slice(start: Value, end: Value, n: usize) -> (usize, usize) {
+    let from = int_small(start).expect("proven slice start is a small Int") as usize;
+    let to = int_small(end).expect("proven slice end is a small Int") as usize;
+    debug_assert!(from <= to && to <= n, "proven slice {from}..{to} of {n}");
+    (from, to)
+}
+
+/// `rt_list_get` at an index proven to designate an element (`listgetproven`).
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_list_get_proven(_p: *mut Vm, l: Value, index: Value) -> Value {
+    let i = int_small(index).expect("proven index is a small Int") as usize;
+    list_of(l).items()[i]
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_list_get(p: *mut Vm, l: Value, index: Value) -> Value {
     let items = list_of(l).items();
@@ -1318,6 +1358,24 @@ pub extern "C" fn rt_mutarray_get(p: *mut Vm, arr: Value, index: Value) -> Value
     }
 }
 
+/// `rt_mutarray_get` at an index proven to designate a slot (`mutarraygetproven`).
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_mutarray_get_proven(p: *mut Vm, arr: Value, index: Value) -> Value {
+    let i = int_small(index).expect("proven index is a small Int") as usize;
+    let v = mutarray_of(arr).slots[i];
+    vm(p).metrics.record_mutarray_read();
+    v
+}
+
+/// `rt_mutarray_set` at an index proven to designate a slot (`mutarraysetproven`).
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_mutarray_set_proven(p: *mut Vm, arr: Value, index: Value, value: Value) -> Value {
+    let i = int_small(index).expect("proven index is a small Int") as usize;
+    mutarray_of_mut(arr).slots[i] = value;
+    vm(p).metrics.record_mutarray_write();
+    UNIT
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_mutarray_set(p: *mut Vm, arr: Value, index: Value, value: Value) -> Value {
     let obj = mutarray_of_mut(arr);
@@ -1349,7 +1407,28 @@ pub extern "C" fn rt_mutarray_copy(p: *mut Vm, dst: Value, dst_start: Value, src
         Ok((ss, _)) => ss,
         Err(failed) => return failed,
     };
-    let n = end - ds;
+    mutarray_copy_range(p, dst, ds, src, ss, end - ds)
+}
+
+/// `rt_mutarray_copy` at a call site whose destination and source slices are
+/// both proven valid (`mutarraycopyproven`).
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_mutarray_copy_proven(p: *mut Vm, dst: Value, dst_start: Value, src: Value, src_start: Value, count: Value) -> Value {
+    let n = int_small(count).expect("proven count is a small Int") as usize;
+    let ds = int_small(dst_start).expect("proven start is a small Int") as usize;
+    let ss = int_small(src_start).expect("proven start is a small Int") as usize;
+    // The one proven helper that would otherwise be a raw memmove: an internal
+    // invariant check (an abort, never a Botlish error), so a proof bug
+    // cannot become memory corruption. One comparison beside a bulk copy.
+    assert!(
+        ds + n <= mutarray_of(dst).slots.len() && ss + n <= mutarray_of(src).slots.len(),
+        "proven mutable_array::copy out of bounds"
+    );
+    mutarray_copy_range(p, dst, ds, src, ss, n)
+}
+
+/// Copies N slots of SRC from SS into DST at DS (both ranges already valid).
+fn mutarray_copy_range(p: *mut Vm, dst: Value, ds: usize, src: Value, ss: usize, n: usize) -> Value {
     if n > 0 {
         let dst_ptr = mutarray_of_mut(dst).slots.as_mut_ptr();
         let src_ptr = mutarray_of(src).slots.as_ptr();
@@ -1369,15 +1448,27 @@ pub extern "C" fn rt_mutarray_copy(p: *mut Vm, dst: Value, dst_start: Value, src
 pub extern "C" fn rt_mutarray_freeze(p: *mut Vm, arr: Value, count: Value) -> Value {
     let slots = &mutarray_of(arr).slots;
     match check_slice(p, Bound::At(0), SliceEnd::End(bound_of(count)), slots.len()) {
-        Ok((_, n)) => {
-            let items = slots[..n].to_vec();
-            let elements = items.len();
-            let r = vm(p).new_list(items);
-            vm(p).metrics.record_mutarray_copy(elements);
-            r
-        }
+        Ok((_, n)) => freeze_prefix(p, arr, n),
         Err(failed) => failed,
     }
+}
+
+/// `rt_mutarray_freeze` at a call site whose slice is proven valid
+/// (`mutarrayfreezeproven`).
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_mutarray_freeze_proven(p: *mut Vm, arr: Value, count: Value) -> Value {
+    let n = int_small(count).expect("proven count is a small Int") as usize;
+    debug_assert!(n <= mutarray_of(arr).slots.len());
+    freeze_prefix(p, arr, n)
+}
+
+/// A new List of ARR's first N slots (N already known valid).
+fn freeze_prefix(p: *mut Vm, arr: Value, n: usize) -> Value {
+    let items = mutarray_of(arr).slots[..n].to_vec();
+    let elements = items.len();
+    let r = vm(p).new_list(items);
+    vm(p).metrics.record_mutarray_copy(elements);
+    r
 }
 
 // ---------------------------------------------------------------------------
@@ -1534,6 +1625,12 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         // native declaration's `impl=`), kept here only for apply_op's own
         // match exhaustiveness.
         SetContainsTotal => rt_set_contains(p, a[0], a[1]),
+        ListGetProven => rt_list_get_proven(p, a[0], a[1]),
+        MutArrayGetProven => rt_mutarray_get_proven(p, a[0], a[1]),
+        MutArraySetProven => rt_mutarray_set_proven(p, a[0], a[1], a[2]),
+        SubstrProven => rt_substr_proven(p, a[0], a[1], a[2]),
+        MutArrayCopyProven => rt_mutarray_copy_proven(p, a[0], a[1], a[2], a[3], a[4]),
+        MutArrayFreezeProven => rt_mutarray_freeze_proven(p, a[0], a[1]),
         MutArrayAllocate => rt_mutarray_allocate(p, a[0]),
         MutArrayCapacity => rt_mutarray_capacity(p, a[0]),
         MutArrayGet => rt_mutarray_get(p, a[0], a[1]),
@@ -1599,6 +1696,7 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_hash, 2),
         h!(rt_str_len, 2),
         h!(rt_substr, 4),
+        h!(rt_substr_proven, 4),
         h!(rt_str_region_check, 4),
         h!(rt_str_region_eq, 5),
         h!(rt_str_decode_char_at, 3),
@@ -1621,6 +1719,7 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_struct_new, 4),
         h!(rt_list_len, 2),
         h!(rt_list_get, 3),
+        h!(rt_list_get_proven, 3),
         h!(rt_list_append, 3),
         h!(rt_construct, 4),
         h!(rt_plan_materialize, 2),
@@ -1629,9 +1728,13 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_mutarray_allocate, 2),
         h!(rt_mutarray_capacity, 2),
         h!(rt_mutarray_get, 3),
+        h!(rt_mutarray_get_proven, 3),
         h!(rt_mutarray_set, 4),
+        h!(rt_mutarray_set_proven, 4),
         h!(rt_mutarray_copy, 6),
+        h!(rt_mutarray_copy_proven, 6),
         h!(rt_mutarray_freeze, 3),
+        h!(rt_mutarray_freeze_proven, 3),
         h!(rt_is_kind, 3),
         h!(rt_is_result, 3),
         h!(rt_result_payload, 3),
@@ -2196,6 +2299,62 @@ mod tests {
                 vm.declared_error = 0;
             }
         }
+    }
+
+    // The *proven helpers (hir/completions.tcl's bounds proof, PROOF-FACT-
+    // CENSUS.md G1) are the checked helpers minus the checks: on every valid
+    // index or slice they must produce exactly what the checked one does.
+
+    #[test]
+    fn proven_helpers_agree_with_checked_ones_on_valid_bounds() {
+        let mut vm = vm();
+        let list = vm.new_list(vec![small(10), small(20), small(30)]);
+        for i in 0..3 {
+            assert_eq!(rt_list_get_proven(&mut *vm, list, small(i)), rt_list_get(&mut *vm, list, small(i)));
+        }
+        let arr = rt_mutarray_allocate(&mut *vm, small(4));
+        for i in 0..4 {
+            assert_eq!(rt_mutarray_set_proven(&mut *vm, arr, small(i), small(i * 5)), UNIT);
+            assert_eq!(small_of(rt_mutarray_get_proven(&mut *vm, arr, small(i))), i * 5);
+            assert_eq!(rt_mutarray_get_proven(&mut *vm, arr, small(i)), rt_mutarray_get(&mut *vm, arr, small(i)));
+        }
+        for text in ["hello", "\u{e9}t\u{e9}", "a\u{3bb}\u{1f600}\u{732b}z", ""] {
+            let s = str_val(&mut vm, text);
+            let n = text.chars().count() as i64;
+            for from in 0..=n {
+                for to in from..=n {
+                    let checked = rt_substr(&mut *vm, s, small(from), small(to));
+                    let proven = rt_substr_proven(&mut *vm, s, small(from), small(to));
+                    assert_eq!(str_of(proven).as_str(), str_of(checked).as_str(), "{text:?}[{from}..{to}]");
+                    assert_eq!(str_of(proven).chars, str_of(checked).chars);
+                }
+            }
+        }
+        // copy: every valid (dst start, src start, count) on overlapping
+        // and distinct arrays, compared against the checked helper.
+        for dst_start in 0..=4 {
+            for src_start in 0..=4 {
+                for count in 0..=(4 - dst_start.max(src_start)) {
+                    let a = rt_mutarray_allocate(&mut *vm, small(4));
+                    let b = rt_mutarray_allocate(&mut *vm, small(4));
+                    for i in 0..4 {
+                        rt_mutarray_set(&mut *vm, a, small(i), small(i));
+                        rt_mutarray_set(&mut *vm, b, small(i), small(i));
+                    }
+                    assert_eq!(rt_mutarray_copy(&mut *vm, a, small(dst_start), a, small(src_start), small(count)), UNIT);
+                    assert_eq!(rt_mutarray_copy_proven(&mut *vm, b, small(dst_start), b, small(src_start), small(count)), UNIT);
+                    for i in 0..4 {
+                        assert_eq!(rt_mutarray_get(&mut *vm, a, small(i)), rt_mutarray_get(&mut *vm, b, small(i)));
+                    }
+                }
+            }
+        }
+        for count in 0..=4 {
+            let checked = rt_mutarray_freeze(&mut *vm, arr, small(count));
+            let proven = rt_mutarray_freeze_proven(&mut *vm, arr, small(count));
+            assert_eq!(list_of(proven).items(), list_of(checked).items());
+        }
+        assert_eq!(vm.declared_error, 0);
     }
 
     // The slice rule (check_slice, core::native::checkSlice): START against

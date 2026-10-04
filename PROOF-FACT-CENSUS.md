@@ -802,6 +802,9 @@ Compile-time notes are estimates.
 **G1: proven bounds checks still emitted** (`at`, `set`, slices, `copy`,
 `freeze`, `regioncheck`).
 
+* **Status: repaired** in PROOF-FACT-REPAIRS.md §2 (per-check verdicts consumed
+  by native lowering and the Tcl compiler; `regioncheck` dropped when proven).
+
 * **Producer:** completions `effectiveErrors {}`.
 * **Expected boundary:** HIR → NIR.
 * **Where it stops:** lowering never reads it. The Tcl compiler always
@@ -838,6 +841,9 @@ Compile-time notes are estimates.
 * **Compile-time:** none.
 
 **G3: completions gives the counted/lockstep loop variable no interval.**
+
+* **Status: repaired** in PROOF-FACT-REPAIRS.md §1 (one shared
+  `hir::range::InductionBinding`, used by both analyses).
 
 * **Producer:** range `InductionSeed`.
 * **Expected boundary:** the completions loop body.
@@ -1343,6 +1349,8 @@ here.
 
 S1–S3 are fixed (this milestone).
 
+* **Done:** the cross-check harness is `tests/range-completions-crosscheck.test`
+  (PROOF-FACT-REPAIRS.md §3).
 * **Follow-up worth doing first:** a **range ↔ completions cross-check
   harness**. Run both analyses' intraprocedural transfer on the same
   fragments (const/ref/bind/project/return/branch/loop/handle) and flag

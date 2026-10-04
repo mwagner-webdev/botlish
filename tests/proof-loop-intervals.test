@@ -1,0 +1,203 @@
+# proof-loop-intervals.test -- PROOF-FACT-CENSUS.md gap G3: the completion
+# proof (hir/completions.tcl) gives a counted loop's induction variable the
+# same interval hir/range.tcl does (hir::range::InductionBinding, one shared
+# theorem), so conversions and accesses the loop itself proves safe need no
+# handler. Every positive case has a nearby unsafe neighbour that must stay
+# rejected (off by one at each endpoint, each direction, each end kind): the
+# interval must not merely suppress obligations for any counted-loop index.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+set loopBackends {interp compile cranelift-generic cranelift}
+
+proc loopHir {source} {
+    set path [makeFile $source loop-interval-case.bot]
+    try {
+        return [surface::readProgramFile $path -strict 0]
+    } finally {
+        removeFile loop-interval-case.bot
+    }
+}
+
+# The distinct diagnostic kinds of SOURCE ({} = accepted).
+proc kinds {source} {
+    return [lsort -unique [lmap d [hir::diagnostics [loopHir $source]] {dict get $d kind}]]
+}
+
+# The value every backend agrees on, or the disagreement.
+proc agreed {source} {
+    set hir [loopHir $source]
+    set outcomes [lmap b $::loopBackends {lrange [outcomeUnderHir $b $hir] 0 end-1}]
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        return "DISAGREE: [join [lmap b $::loopBackends o $outcomes {list $b $o}] { / }]"
+    }
+    return [lindex [lindex $outcomes 0] 1]
+}
+
+# `kinds` of every source in SOURCES.
+proc kindsOf {sources} {
+    return [lmap s $sources {kinds $s}]
+}
+
+set ok {}
+set bad UNHANDLED-ERROR
+
+test loop-interval-abi-conversion {abi::u8(i) over a counted loop needs no handler exactly when the loop keeps i in 0..255: both end kinds, both directions} -body {
+    kindsOf {
+        "loop i from 0 to 256:\n    abi::u8(i)"
+        "loop i from 0 to 257:\n    abi::u8(i)"
+        "loop i from 0 through 255:\n    abi::u8(i)"
+        "loop i from 0 through 256:\n    abi::u8(i)"
+        "loop i from -1 to 256:\n    abi::u8(i)"
+        "loop i down from 255 through 0:\n    abi::u8(i)"
+        "loop i down from 256 through 0:\n    abi::u8(i)"
+        "loop i down from 255 to -1:\n    abi::u8(i)"
+        "loop i down from 255 to -2:\n    abi::u8(i)"
+        "loop i down from 256 to 0:\n    abi::u8(i)"
+        "loop i down from 255 through -1:\n    abi::u8(i)"
+    }
+} -result [list $ok $bad $ok $bad $bad $ok $bad $ok $bad $bad $bad]
+
+test loop-interval-list-at-offset {the interval of a loop over 1..4 proves list::at(xs, i - 1) on a 3-element List; one more iteration, or one fewer on the low side, does not} -body {
+    set xs "xs = \[10, 20, 30\]\n"
+    kindsOf [list \
+        "${xs}loop i from 1 to 4:\n    list::at(xs, i - 1)" \
+        "${xs}loop i from 1 to 5:\n    list::at(xs, i - 1)" \
+        "${xs}loop i from 0 to 4:\n    list::at(xs, i - 1)" \
+        "${xs}loop i from 1 through 3:\n    list::at(xs, i - 1)" \
+        "${xs}loop i from 1 through 4:\n    list::at(xs, i - 1)" \
+        "${xs}loop i from 0 to 3:\n    list::at(xs, i)" \
+        "${xs}loop i from 0 to 4:\n    list::at(xs, i)" \
+        "${xs}loop i from 0 through 2:\n    list::at(xs, i)" \
+        "${xs}loop i from 0 through 3:\n    list::at(xs, i)"]
+} -result [list $ok $bad $bad $ok $bad $ok $bad $ok $bad]
+
+test loop-interval-list-at-descending {descending loops: the exclusive end is skipped, the inclusive end is visited; each boundary is its own negative} -body {
+    set xs "xs = \[10, 20, 30\]\n"
+    kindsOf [list \
+        "${xs}loop i down from 2 through 0:\n    list::at(xs, i)" \
+        "${xs}loop i down from 3 through 0:\n    list::at(xs, i)" \
+        "${xs}loop i down from 2 through -1:\n    list::at(xs, i)" \
+        "${xs}loop i down from 2 to -1:\n    list::at(xs, i)" \
+        "${xs}loop i down from 2 to -2:\n    list::at(xs, i)" \
+        "${xs}loop i down from 3 to 0:\n    list::at(xs, i)" \
+        "${xs}loop i down from 3 to 0:\n    list::at(xs, i - 1)" \
+        "${xs}loop i down from 4 to 0:\n    list::at(xs, i - 1)"]
+} -result [list $ok $bad $bad $ok $bad $bad $ok $bad]
+
+test loop-interval-bound-by-bindings {the bounds may be immutable bindings and the arithmetic the Range machinery already supports: their Ranges are what the interval is made of} -body {
+    set xs "xs = \[1, 2, 3\]\n"
+    kindsOf [list \
+        "${xs}lo = 1\nhi = 3\nloop i from lo to hi + 1:\n    list::at(xs, i - 1)" \
+        "${xs}lo = 1\nhi = 4\nloop i from lo to hi + 1:\n    list::at(xs, i - 1)" \
+        "${xs}lo = 0\nloop i from lo + 1 to 4:\n    list::at(xs, i - 1)" \
+        "${xs}lo = 0\nloop i from lo to 4:\n    list::at(xs, i - 1)" \
+        "${xs}top = 2\nloop i down from top through 0:\n    list::at(xs, i)" \
+        "${xs}top = 3\nloop i down from top through 0:\n    list::at(xs, i)"]
+} -result [list $ok $bad $ok $bad $ok $bad]
+
+test loop-interval-mutable-array {mutable_array::at and ::set: an offset index and a descending loop are proven against the allocation's capacity; the off-by-one neighbours are not} -body {
+    set a "a = mutable_array::allocate(3)\n"
+    kindsOf [list \
+        "${a}loop i from 1 to 4:\n    mutable_array::set(a, i - 1, i)" \
+        "${a}loop i from 1 to 5:\n    mutable_array::set(a, i - 1, i)" \
+        "${a}loop i down from 2 through 0:\n    mutable_array::at(a, i)" \
+        "${a}loop i down from 3 through 0:\n    mutable_array::at(a, i)" \
+        "${a}loop i down from 3 to 0:\n    mutable_array::at(a, i - 1)" \
+        "${a}loop i from 0 to 3:\n    mutable_array::set(a, i, i)\n    mutable_array::at(a, i)" \
+        "${a}loop i from 0 to 4:\n    mutable_array::set(a, i, i)"]
+} -result [list $ok $bad $ok $bad $ok $ok $bad]
+
+test loop-interval-slice-bounds {a slice whose bounds are the loop variable (plus or minus a constant) is proven when the loop keeps them inside the String} -body {
+    set s "s = \"abcd\"\n"
+    kindsOf [list \
+        "${s}loop i from 1 to 5:\n    str::substring(s, i - 1, i)" \
+        "${s}loop i from 1 to 6:\n    str::substring(s, i - 1, i)" \
+        "${s}loop i from 0 to 4:\n    str::substring(s, i, i + 1)" \
+        "${s}loop i from 0 to 5:\n    str::substring(s, i, i + 1)" \
+        "${s}loop i down from 3 through 0:\n    str::substring(s, i, i + 1)" \
+        "${s}loop i down from 4 through 0:\n    str::substring(s, i, i + 1)" \
+        "${s}loop i from 0 to 5:\n    str::substring(s, i, i)" \
+        "${s}loop i from 0 to 6:\n    str::substring(s, i, i)"]
+} -result [list $ok $bad $ok $bad $ok $bad $ok $bad]
+
+test loop-interval-lockstep {a lockstep numeric domain gets the interval range gives it; the cardinality solver is untouched (an unequal pair is still LOCKSTEP-UNEQUAL)} -body {
+    set xs "xs = \[1, 2, 3\]\n"
+    kindsOf [list \
+        "${xs}loop x in xs and i from 0 to 3:\n    abi::u8(i) + x" \
+        "${xs}loop x in xs and i from 253 to 256:\n    abi::u8(i) + x" \
+        "${xs}loop x in xs and i from 254 to 257:\n    abi::u8(i) + x" \
+        "${xs}loop x in xs and i from 0 to 3:\n    list::at(xs, i) + x" \
+        "${xs}loop x in xs and i from 0 to 4:\n    list::at(xs, i) + x" \
+        "${xs}loop x in xs and i from 1 to 4:\n    list::at(xs, i - 1) + x"]
+} -result [list $ok $ok $bad $ok [list LOCKSTEP-UNEQUAL UNHANDLED-ERROR] $ok]
+
+test loop-interval-not-after-the-loop {the induction binding exists only in the loop body: the interval is restored at the loop's end, and an unproven read after (or beside) the loop stays obligated} -body {
+    set xs "xs = \[1, 2, 3\]\n"
+    kindsOf [list \
+        "${xs}loop i from 0 to 3:\n    list::at(xs, i)\nlist::at(xs, 9)" \
+        "${xs}n = 0\nloop i from 0 to 3:\n    list::at(xs, i)\nlist::at(xs, n)" \
+        "fn f(k):\n    loop i from 0 to 3:\n        i\n    abi::u8(k)\nf(1)" \
+        "${xs}loop i from 0 to 3:\n    list::at(xs, i)\nloop j from 0 to 4:\n    list::at(xs, j)"]
+} -result [list KNOWN-ERROR $ok $bad $bad]
+
+test loop-interval-nested-loops {an inner loop's interval is its own: the outer variable's interval is intact after the inner loop ends, and neither leaks into the other's body} -body {
+    set xs "xs = \[1, 2, 3\]\n"
+    kindsOf [list \
+        "${xs}loop i from 0 to 3:\n    loop j from 0 to 3:\n        list::at(xs, i) + list::at(xs, j)" \
+        "${xs}loop i from 0 to 3:\n    loop j from 0 to 4:\n        list::at(xs, i)\n    list::at(xs, i)" \
+        "${xs}loop i from 0 to 3:\n    loop j from 0 to 4:\n        list::at(xs, j)\n    list::at(xs, i)"]
+} -result [list $ok $ok $bad]
+
+test loop-interval-empty-loops {a statically empty loop gets no contradictory interval (range drops it too, leaving the plain Int type): the body is judged as under no loop fact, so an unproven access in it stays obligated; the empty loops themselves run and agree} -body {
+    set xs "xs = \[1, 2, 3\]\n"
+    list \
+        [kindsOf [list \
+            "${xs}loop i from 5 to 5:\n    list::at(xs, i)" \
+            "${xs}loop i from 10 to 0:\n    list::at(xs, i)" \
+            "${xs}loop i down from 0 to 10:\n    list::at(xs, i)" \
+            "${xs}loop i from 5 to 5:\n    list::at(xs, 0)"]] \
+        [agreed "${xs}loop i from 5 to 5:\n    list::at(xs, 0)"] \
+        [agreed "loop i from 10 to 0:\n    abi::u8(i)"] \
+        [agreed "loop i down from 0 to 10:\n    i"]
+} -result [list [list $bad $bad $bad $ok] {[]} {[]} {[]}]
+
+test loop-interval-runs-agree {the accepted programs compute the same values on every backend} -body {
+    list \
+        [agreed "xs = \[10, 20, 30\]\nloop i from 1 to 4:\n    list::at(xs, i - 1)"] \
+        [agreed "xs = \[10, 20, 30\]\nloop i down from 2 through 0:\n    list::at(xs, i)"] \
+        [agreed "loop i from 250 to 256:\n    abi::u8(i)"] \
+        [agreed "a = mutable_array::allocate(3)\nloop i down from 2 through 0:\n    mutable_array::set(a, i, i * 3)\nloop i from 1 to 4:\n    mutable_array::at(a, i - 1)"] \
+        [agreed "s = \"abcd\"\nloop i from 1 to 5:\n    str::substring(s, i - 1, i)"]
+} -result [list {[10, 20, 30]} {[30, 20, 10]} {[abi::U8 {value: 250}, abi::U8 {value: 251}, abi::U8 {value: 252}, abi::U8 {value: 253}, abi::U8 {value: 254}, abi::U8 {value: 255}]} {[0, 3, 6]} {["a", "b", "c", "d"]}]
+
+test loop-interval-shared-theorem {range and completions agree on the induction interval for every loop form: the one shared helper, evaluated on the same START/END Ranges} -body {
+    set r {}
+    foreach {start end dir kind} {
+        {0 0} {256 256} up exclusive
+        {0 0} {255 255} up inclusive
+        {255 255} {0 0} down inclusive
+        {255 255} {0 0} down exclusive
+        {-3 4} {10 12} up exclusive
+        {-3 4} {10 12} up inclusive
+        {5 9} {-2 3} down exclusive
+        {5 9} {-2 3} down inclusive
+    } {
+        set sr [dict create min [lindex $start 0] max [lindex $start 1]]
+        set er [dict create min [lindex $end 0] max [lindex $end 1]]
+        set seed [hir::range::InductionBinding $sr $er $dir $kind]
+        lappend r [list [dict get $seed min] [dict get $seed max]]
+    }
+    set r
+} -result {{0 255} {0 255} {0 255} {1 255} {-3 11} {-3 12} {-1 9} {-2 9}}
+
+test loop-interval-empty-seed-dropped {a contradictory seed (an empty loop) is dropped, leaving the plain Int type fact -- never an impossible Range} -body {
+    set five [hir::range::point 5]
+    set seed [hir::range::InductionBinding $five $five up exclusive]
+    list [dict get $seed min] [dict get $seed max]
+} -result {-inf +inf}
+
+cleanupTests

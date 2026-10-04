@@ -864,6 +864,17 @@ proc hir::range::InductionSeed {startR endR direction endKind} {
     return [dict create min $min max $max]
 }
 
+# The Range a numeric loop domain's induction binding holds throughout the
+# loop body: InductionSeed's interval intersected with the binding's static
+# Int type fact. This is the one counted-loop theorem, shared by this
+# analysis and hir/completions.tcl's own walk (PROOF-FACT-CENSUS.md G3):
+# both read the same START/END Ranges, so they must agree on the interval.
+# A contradictory interval (an empty loop: `from 5 to 5`) is dropped by
+# `intersect`, leaving the plain Int type fact, never an impossible Range.
+proc hir::range::InductionBinding {startR endR direction endKind} {
+    return [intersect [TypeFact int] [InductionSeed $startR $endR $direction $endKind]]
+}
+
 proc hir::range::Expr {hirVar ctxVar e} {
     upvar 1 $hirVar hir $ctxVar ctx
     if {![hir::get $hir $e reachable]} {
@@ -1002,9 +1013,9 @@ proc hir::range::Expr {hirVar ctxVar e} {
             set saved [dict get $ctx bindings]
             set startR [Expr hir ctx [dict get $node start]]
             set endR [Expr hir ctx [dict get $node end]]
-            set seed [InductionSeed $startR $endR [dict get $node direction] [dict get $node endKind]]
+            set seed [InductionBinding $startR $endR [dict get $node direction] [dict get $node endKind]]
             set bindings [dict get $ctx bindings]
-            dict set bindings [dict get $node countBinding] [intersect [TypeFact int] $seed]
+            dict set bindings [dict get $node countBinding] $seed
             dict set ctx bindings $bindings
             foreach child [dict get $node body] {
                 Expr hir ctx $child
@@ -1024,13 +1035,13 @@ proc hir::range::Expr {hirVar ctxVar e} {
                 } else {
                     set startR [Expr hir ctx [dict get $domain start]]
                     set endR [Expr hir ctx [dict get $domain end]]
-                    lappend seeds [dict get $domain binding] [InductionSeed $startR $endR \
+                    lappend seeds [dict get $domain binding] [InductionBinding $startR $endR \
                         [dict get $domain direction] [dict get $domain endKind]]
                 }
             }
             set bindings [dict get $ctx bindings]
             foreach {binding seed} $seeds {
-                dict set bindings $binding [intersect [TypeFact int] $seed]
+                dict set bindings $binding $seed
             }
             dict set ctx bindings $bindings
             foreach child [dict get $node body] {

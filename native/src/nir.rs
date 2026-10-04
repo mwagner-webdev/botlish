@@ -93,6 +93,23 @@ pub enum OpCode {
     MutArraySet,
     MutArrayCopy,
     MutArrayFreeze,
+    /// The *Proven siblings (PROOF-FACT-CENSUS.md G1): the same operation as
+    /// `ListGet`, `MutArrayGet`, `MutArraySet`, `Substr`, `MutArrayCopy` and
+    /// `MutArrayFreeze` at a call site whose every bounds check
+    /// hir/completions.tcl proved can never fail (BoundsProven): the indices
+    /// are valid by proof, so there is no comparison, no declared-error
+    /// completion and (not in `op_may_error`) no error exit. native/lower.tcl
+    /// emits one only where that proof holds -- never for a call that merely
+    /// handles or declares the error -- and every other (type/kind) check of
+    /// the operation is still its own guard, emitted before. Same precedent as
+    /// `SetContainsTotal`: the distinction is per opcode, because `op_may_error`
+    /// is keyed by opcode.
+    ListGetProven,
+    MutArrayGetProven,
+    MutArraySetProven,
+    SubstrProven,
+    MutArrayCopyProven,
+    MutArrayFreezeProven,
     IsInt,
     IsStr,
     IsList,
@@ -333,6 +350,12 @@ impl OpCode {
             "mutarrayset" => MutArraySet,
             "mutarraycopy" => MutArrayCopy,
             "mutarrayfreeze" => MutArrayFreeze,
+            "listgetproven" => ListGetProven,
+            "mutarraygetproven" => MutArrayGetProven,
+            "mutarraysetproven" => MutArraySetProven,
+            "substrproven" => SubstrProven,
+            "mutarraycopyproven" => MutArrayCopyProven,
+            "mutarrayfreezeproven" => MutArrayFreezeProven,
             "isint" => IsInt,
             "isstr" => IsStr,
             "islist" => IsList,
@@ -395,9 +418,9 @@ impl OpCode {
             | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharCodepoint | SetFromList
             | SetFromListTotal | StrToShort | ShortToStr | ShortLen | StrToAscii | AsciiToStr | AsciiLen
             | AsciiToShort => Some(1),
-            Substr | MutArraySet | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum | StrSliceShort => Some(3),
+            Substr | SubstrProven | MutArraySet | MutArraySetProven | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum | StrSliceShort => Some(3),
             RegionEq => Some(4),
-            MutArrayCopy => Some(5),
+            MutArrayCopy | MutArrayCopyProven => Some(5),
             _ => Some(2),
         }
     }

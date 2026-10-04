@@ -1530,6 +1530,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             IAnd | IOr | IXor => self.int_bitop(op, a[0], a[1]),
             ILt | ILe | IGt | IGe | IEq => self.int_compare(op, a[0], a[1]),
             ListGet if self.listget_fast => self.list_get(a[0], a[1]),
+            ListGetProven if self.listget_fast => self.list_get_proven(a[0], a[1]),
             VEq => {
                 // Two small Ints compare as words; everything else structurally.
                 let (fast, slow, done, result) = self.both_small_split(a[0], a[1]);
@@ -1722,6 +1723,25 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                             );
                         }
                         Substr => ("rt_substr", None, true, Some(("substr", KIND_STR))),
+                        // The proven siblings (nir.rs): the same helpers
+                        // minus the bounds checks, so `fallible` is false
+                        // (matching their absence from `op_may_error`) --
+                        // the slice is valid by hir/completions.tcl's proof.
+                        // A substring is never longer than its base, so
+                        // nothing here can be rejected as oversized.
+                        SubstrProven => ("rt_substr_proven", None, false, Some(("substr", KIND_STR))),
+                        ListGetProven => ("rt_list_get_proven", None, false, None),
+                        MutArrayGetProven => ("rt_mutarray_get_proven", None, false, None),
+                        MutArraySetProven => ("rt_mutarray_set_proven", None, false, None),
+                        MutArrayCopyProven => ("rt_mutarray_copy_proven", None, false, None),
+                        MutArrayFreezeProven => {
+                            return self.call_allocating(
+                                "rt_mutarray_freeze_proven",
+                                &[self.vm, a[0], a[1]],
+                                "mutarrayfreeze",
+                                KIND_LIST,
+                            );
+                        }
                         // Fallible: each may construct a new String/List,
                         // which the runtime rejects past
                         // MAX_COLLECTION_LENGTH (Vm::reject_oversized_collection).
@@ -2003,6 +2023,18 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         self.b.ins().jump(done, &[BlockArg::Value(r)]);
         self.b.switch_to_block(done);
         result
+    }
+
+    /// `list::at(LIST, INDEX)` at an index hir/completions.tcl proved valid
+    /// (`listgetproven`): the bare element read -- INDEX is a small tagged Int
+    /// (a valid index is below the List's small length), decoded and loaded
+    /// with no tag test, no bounds comparison and no slow path.
+    fn list_get_proven(&mut self, list: ir::Value, index: ir::Value) -> ir::Value {
+        let idx = self.b.ins().sshr_imm_s(index, 1);
+        let ptr = self.b.ins().load(I64, MemFlagsData::trusted(), list, LIST_PTR_OFFSET);
+        let byte_offset = self.b.ins().ishl_imm_s(idx, 3);
+        let addr = self.b.ins().iadd(ptr, byte_offset);
+        self.b.ins().load(I64, MemFlagsData::trusted(), addr, 0)
     }
 
     /// `list::at(LIST, INDEX)`'s inline fast path: LIST and INDEX already

@@ -1,0 +1,315 @@
+# range-completions-crosscheck.test -- drift prevention between the two
+# analyses that share one Range lattice (PROOF-FACT-CENSUS.md §D2, §K).
+#
+# hir/range.tcl (closed-world, per specialization instance, feeds code
+# generation) and hir/completions.tcl (open-world body legality plus exact
+# call-site re-walks, feeds error obligations) answer different questions and
+# are deliberately NOT merged: their whole-program results are not meant to
+# match. But each walks the HIR with its own copy of the node-local transfer
+# rules (literal, bind/ref, arithmetic, branch narrowing, domains, loop
+# induction, return), and those copies have drifted three times (return values,
+# projected domains, counted-loop intervals). This file runs both analyses on
+# the same function body under the same seed Ranges and compares only what
+# both are supposed to compute with the same theorem:
+#
+#   * at a designated node, both must equal the theorem (stated here, once,
+#     independently of either implementation);
+#   * at every node both analyses assign a Range, the two must be compatible:
+#     both are sound over-approximations of the same values, so they must
+#     intersect. Beyond that, any difference must be one of the documented,
+#     intentional ones (completions' independent reasoning, which only ever
+#     makes it narrower), never "range knows more": that is exactly the shape
+#     of every drift found so far.
+#
+# The corpus sweep applies the compatibility rule to every function of the
+# example/benchmark programs, with parameters unconstrained (the open-world
+# contract completions proves under, and range's verification mode).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+proc xHir {source} {
+    set path [makeFile $source crosscheck-case.bot]
+    try {
+        return [surface::readProgramFile $path -strict 0]
+    } finally {
+        removeFile crosscheck-case.bot
+    }
+}
+
+# {min max} of a Range, "never" for an unreachable one.
+proc ends {r} {
+    if {$r eq "never"} {
+        return never
+    }
+    return [list [dict get $r min] [dict get $r max]]
+}
+
+proc show {r} {
+    if {$r eq "never"} {
+        return never
+    }
+    return "[dict get $r min]..[dict get $r max]"
+}
+
+proc iv {lo hi} {
+    return [dict create min $lo max $hi]
+}
+
+# The Ranges' relation: equal, within (A inside B), contains (A around B),
+# disjoint, or crossing. `never` is inside everything.
+proc relation {a b} {
+    if {$a eq "never" || $b eq "never"} {
+        return [expr {$a eq $b ? "equal" : "never"}]
+    }
+    lassign [ends $a] amin amax
+    lassign [ends $b] bmin bmax
+    if {$amax ne "+inf" && $bmin ne "-inf" && $amax < $bmin} { return disjoint }
+    if {$bmax ne "+inf" && $amin ne "-inf" && $bmax < $amin} { return disjoint }
+    if {$amin eq $bmin && $amax eq $bmax} { return equal }
+    set aInB [expr {($bmin eq "-inf" || ($amin ne "-inf" && $amin >= $bmin)) && ($bmax eq "+inf" || ($amax ne "+inf" && $amax <= $bmax))}]
+    set bInA [expr {($amin eq "-inf" || ($bmin ne "-inf" && $bmin >= $amin)) && ($amax eq "+inf" || ($bmax ne "+inf" && $bmax <= $amax))}]
+    if {$aInB} { return within }
+    if {$bInA} { return contains }
+    return crossing
+}
+
+# The function block named NAME (`fn NAME(...)`).
+proc blockNamed {hir name} {
+    foreach e [hir::walk $hir] {
+        if {[hir::kind $hir $e] eq "bind" && [dict get [hir::binding $hir [hir::get $hir $e binding]] name] eq $name
+                && [hir::kind $hir [hir::get $hir $e value]] eq "block"} {
+            return [hir::get $hir $e value]
+        }
+    }
+    error "no function $name"
+}
+
+# The value expression of the first `bind` of local NAME.
+proc bindValue {hir name} {
+    foreach e [hir::walk $hir] {
+        if {[hir::kind $hir $e] eq "bind" && [dict get [hir::binding $hir [hir::get $hir $e binding]] name] eq $name} {
+            return [hir::get $hir $e value]
+        }
+    }
+    error "no binding $name"
+}
+
+# Both analyses of function PROBE of SOURCE under parameter Ranges SEEDS:
+# {rangeExprs completionsExprs rangeResult completionsResult}.
+proc bothOf {hir seeds {probe probe}} {
+    set block [blockNamed $hir $probe]
+    set params [hir::get $hir $block params]
+    set outcome [hir::range::AnalyzeInstance $hir verify {} $block $params $seeds {} {}]
+    hir::completions::resetCache
+    set sub [hir::completions::analyzeBlock $hir $block $seeds {} {} [dict create $block 1]]
+    return [list [dict get $outcome exprs] [hir::completions::exprRangesOf $hir $block $seeds] \
+        [dict get $outcome result] [dict get $sub result]]
+}
+
+# For each binding NAME of TARGETS: "NAME INTERVAL" when range and
+# completions both compute exactly INTERVAL (as lo..hi) for the value it
+# binds, else "NAME range=.. completions=..". Pass TARGETS as names.
+proc theorem {source seeds targets {probe probe}} {
+    set hir [xHir $source]
+    lassign [bothOf $hir $seeds $probe] rx cx
+    lmap name $targets {
+        set e [bindValue $hir $name]
+        set r [expr {[dict exists $rx $e] ? [show [dict get $rx $e]] : "absent"}]
+        set c [expr {[dict exists $cx $e] ? [show [dict get $cx $e]] : "absent"}]
+        if {$r eq $c} {
+            list $name $r
+        } else {
+            list $name "range=$r completions=$c"
+        }
+    }
+}
+
+# The compatibility verdicts over every node both analyses assign a Range in
+# function PROBE: a dict relation -> count, plus `detail` lines for any
+# disjoint/crossing node.
+proc compat {hir seeds {probe probe}} {
+    lassign [bothOf $hir $seeds $probe] rx cx
+    set counts [dict create]
+    set bad {}
+    dict for {e c} $cx {
+        if {![dict exists $rx $e]} continue
+        set rel [relation [dict get $rx $e] $c]
+        dict incr counts $rel
+        if {$rel in {disjoint crossing}} {
+            lappend bad "$e range=[show [dict get $rx $e]] completions=[show $c]"
+        }
+    }
+    return [list $counts $bad]
+}
+
+# ---------------------------------------------------------------------------
+# The comparator itself
+
+test xcheck-relation-selftest {the comparator classifies equal / within / contains / disjoint / crossing, so a drifted rule cannot hide behind it} -body {
+    list [relation [iv 0 9] [iv 0 9]] [relation [iv 0 9] [iv -inf +inf]] [relation [iv -inf +inf] [iv 0 9]] \
+        [relation [iv 0 9] [iv 10 20]] [relation [iv 0 15] [iv 10 20]] [relation [iv 0 9] never] \
+        [relation [iv -inf 5] [iv 6 +inf]] [relation [iv -inf 5] [iv 5 +inf]] [relation [iv 3 +inf] [iv -inf +inf]]
+} -result {equal within contains disjoint crossing never disjoint crossing within}
+
+test xcheck-detects-a-dropped-fact {a node where one analysis lost a fact the other has is visible as within/contains, never equal: the G3 shape (range knew the induction interval, completions left it unconstrained) is caught} -body {
+    set hir [xHir "fn probe(a):\n    loop i from 0 to 256:\n        t = i\n        t\n    a"]
+    lassign [bothOf $hir [list [iv -inf +inf]]] rx cx
+    set e [bindValue $hir t]
+    list [show [dict get $rx $e]] [show [dict get $cx $e]] \
+        [relation [dict get $rx $e] [iv -inf +inf]] [relation [dict get $rx $e] [dict get $cx $e]]
+} -result {0..255 0..255 within equal}
+
+# ---------------------------------------------------------------------------
+# Shared local rules: both must compute the stated theorem
+
+test xcheck-literal-bind-ref {literal Int, immutable bind, ref} -body {
+    theorem "fn probe(a):\n    k = 7\n    x = a\n    y = x\n    z = k\n    z" [list [iv 3 9]] {k x y z}
+} -result {{k 7..7} {x 3..9} {y 3..9} {z 7..7}}
+
+test xcheck-arithmetic {+ - * and the bit operations, on Range operands} -body {
+    theorem "fn probe(a, b):\n    s = a + b\n    d = a - b\n    p = a * b\n    m = bit_and(a, 3)\n    r = shift_right(b, 1)\n    l = shift_left(a, 2)\n    s" \
+        [list [iv 1 5] [iv 10 20]] {s d p m r l}
+} -result {{s 11..25} {d -19..-5} {p 10..100} {m 0..3} {r 5..10} {l 4..20}}
+
+test xcheck-comparison-narrowing {each ordering comparison narrows a branch's reads of the compared binding} -body {
+    set src "fn probe(a):\n    if a < 10:\n        lt = a\n        lt\n    else:\n        ge = a\n        ge\n    if a <= 10:\n        le = a\n        le\n    else:\n        gt = a\n        gt\n    if a > 20:\n        gt2 = a\n        gt2\n    else:\n        le2 = a\n        le2\n    if a >= 20:\n        ge2 = a\n        ge2\n    else:\n        lt2 = a\n        lt2\n    a"
+    theorem $src [list [iv 0 100]] {lt ge le gt gt2 le2 ge2 lt2}
+} -result {{lt 0..9} {ge 10..100} {le 0..10} {gt 11..100} {gt2 21..100} {le2 0..20} {ge2 20..100} {lt2 0..19}}
+
+test xcheck-narrowing-two-bindings {a comparison of two bindings narrows both sides} -body {
+    set src "fn probe(a, b):\n    if a < b:\n        x = a\n        y = b\n        x\n    else:\n        u = a\n        v = b\n        u\n    a"
+    theorem $src [list [iv 0 100] [iv 10 50]] {x y u v}
+} -result {{x 0..49} {y 10..50} {u 10..100} {v 10..50}}
+
+test xcheck-branch-join-and-result {an `if` expression's value is the join of its branches, and the function's result Range is the fall-through value joined with every return} -body {
+    set hir [xHir "fn probe(a):\n    if a < 5:\n        1\n    else:\n        8"]
+    lassign [bothOf $hir [list [iv 0 100]]] - - r c
+    set hir2 [xHir "fn probe(a):\n    if a > 3:\n        return 7\n    2"]
+    lassign [bothOf $hir2 [list [iv 0 100]]] - - r2 c2
+    set hir3 [xHir "fn probe(a):\n    if a > 3:\n        return 7\n    else:\n        return a - 10\n    0"]
+    lassign [bothOf $hir3 [list [iv 0 100]]] - - r3 c3
+    list [show $r] [show $c] [show $r2] [show $c2] [show $r3] [show $c3]
+} -result {1..8 1..8 2..7 2..7 -10..7 -10..7}
+
+test xcheck-source-domain {a source-defined integer domain constrains every read of a parameter declared with it} -body {
+    set src "type Small = Int in 0..99\n\nfn probe(x: Small):\n    r = x + 1\n    q = x\n    r"
+    theorem $src [list [iv -inf +inf]] {r q}
+} -result {{r 1..100} {q 0..99}}
+
+test xcheck-struct-projection-domain {projecting a field declared with an integer domain gives its domain} -body {
+    set src "fn probe(x: abi::U8):\n    v = x.value\n    w = v + 1\n    w"
+    theorem $src [list [hir::range::unknown]] {v w}
+} -result {{v 0..255} {w 1..256}}
+
+test xcheck-native-result-metadata {a native's registered result facts (a collection's length is nonnegative and below the collection limit)} -body {
+    set src "fn probe(xs, s):\n    n = list::length(xs)\n    m = str::length(s)\n    n"
+    theorem $src [list [hir::range::unknown] [hir::range::unknown]] {n m}
+} -result [list [list n 0..4611686018427387903] [list m 0..4611686018427387903]]
+
+# ---------------------------------------------------------------------------
+# The counted-loop induction interval (G3): every form, both analyses
+
+test xcheck-counted-loop-forms {ascending/descending, exclusive/inclusive: both analyses give the loop variable the interval the loop theorem states} -body {
+    set forms {
+        {from 0 to 256}
+        {from 0 through 255}
+        {from 3 to 10}
+        {from -4 through 4}
+        {down from 255 through 0}
+        {down from 255 to 0}
+        {down from 9 to -3}
+        {down from 9 through -3}
+    }
+    lmap form $forms {
+        theorem "fn probe(a):\n    loop i $form:\n        t = i\n        t\n    a" [list [hir::range::unknown]] {t}
+    }
+} -result {{{t 0..255}} {{t 0..255}} {{t 3..9}} {{t -4..4}} {{t 0..255}} {{t 1..255}} {{t -2..9}} {{t -3..9}}}
+
+test xcheck-counted-loop-bounds-from-facts {the interval is made of the START/END Ranges: immutable bindings, parameters with Ranges, arithmetic} -body {
+    list \
+        [theorem "fn probe(a):\n    lo = 2\n    hi = a + 1\n    loop i from lo to hi:\n        t = i\n        t\n    a" [list [iv 3 9]] {t}] \
+        [theorem "fn probe(a, b):\n    loop i from a to b:\n        t = i\n        t\n    a" [list [iv 1 4] [iv 6 8]] {t}] \
+        [theorem "fn probe(a, b):\n    loop i down from b through a:\n        t = i\n        t\n    a" [list [iv 1 4] [iv 6 8]] {t}] \
+        [theorem "fn probe(a):\n    loop i from 0 to a:\n        t = i\n        t\n    a" [list [iv -inf +inf]] {t}]
+} -result {{{t 2..9}} {{t 1..7}} {{t 1..8}} {{t 0..+inf}}}
+
+test xcheck-lockstep-numeric-domain {a lockstep loop's numeric domain gets the same interval as a counted loop's} -body {
+    list \
+        [theorem "fn probe(xs):\n    loop x in xs and i from 0 to 5:\n        t = i\n        t\n    xs" [list [hir::range::unknown]] {t}] \
+        [theorem "fn probe(xs):\n    loop x in xs and i down from 7 through 3:\n        t = i\n        t\n    xs" [list [hir::range::unknown]] {t}]
+} -result {{{t 0..4}} {{t 3..7}}}
+
+test xcheck-loop-interval-is-body-scoped {the interval exists only in the body: after the loop both analyses read the binding as they did before it} -body {
+    set hir [xHir "fn probe(a):\n    loop i from 0 to 10:\n        i\n    b = a\n    b"]
+    lassign [compat $hir [list [iv 3 9]]] counts bad
+    list $bad [show [dict get [lindex [bothOf $hir [list [iv 3 9]]] 1] [bindValue $hir b]]]
+} -result {{} 3..9}
+
+# ---------------------------------------------------------------------------
+# Intentional independent reasoning: completions may only be narrower
+
+test xcheck-intentional-completions-rules {mod's bounded divisor and char::scalar_value are completions-only facts (kept out of code generation on purpose): completions is inside range's interval, never different from it in any other way} -body {
+    set hir [xHir "fn probe(a, c):\n    m = mod(a, 16)\n    s = char::scalar_value(c)\n    m"]
+    lassign [bothOf $hir [list [iv -inf +inf] [hir::range::unknown]]] rx cx
+    lmap name {m s} {
+        set e [bindValue $hir $name]
+        list $name [relation [dict get $cx $e] [dict get $rx $e]]
+    }
+} -result {{m within} {s within}}
+
+test xcheck-and-or-conjunct-narrowing {completions decomposes `and`/`or` conditions (range does not, census G11): completions only ever narrower, never crossing} -body {
+    set src "fn probe(i, n):\n    if i < 0 or i >= n:\n        0\n    else:\n        t = i\n        t\n    i"
+    set hir [xHir $src]
+    lassign [bothOf $hir [list [iv -5 50] [iv 10 10]]] rx cx
+    set e [bindValue $hir t]
+    list [show [dict get $rx $e]] [show [dict get $cx $e]] [relation [dict get $cx $e] [dict get $rx $e]]
+} -result {-5..50 0..9 within}
+
+# ---------------------------------------------------------------------------
+# Corpus sweep
+
+set sweepFiles {}
+foreach pattern {examples/surface/*.bot examples/stdlib/*.bot examples/abi/*.bot bench/*.bot} {
+    lappend sweepFiles {*}[lsort [glob -nocomplain -directory $::projectRoot $pattern]]
+}
+
+# Nodes where range knows strictly more than completions and that is
+# understood and out of scope: `b - a` where `b = a + K` (range's
+# DifferenceOffset rule, census §D2: precision only). A NEW entry here is a
+# new drift and needs its own explanation.
+set knownRangeNarrower [list \
+    [list loop-count.bot {work()/loop/if/then/return/value}]]
+
+test xcheck-sweep-corpus {over every function of the example and benchmark programs, params unconstrained: no node where the two analyses' Ranges are disjoint or cross, and range is strictly narrower only at the known, documented node} -body {
+    set disjoint {}
+    set crossing {}
+    set rangeNarrower {}
+    set common 0
+    foreach file $::sweepFiles {
+        set hir [surface::readProgramFile $file -strict 0]
+        foreach block [lmap e [hir::walk $hir] {expr {[hir::kind $hir $e] eq "block" ? $e : [continue]}}] {
+            set params [hir::get $hir $block params]
+            set seeds [lrepeat [llength $params] [hir::range::unknown]]
+            set outcome [hir::range::AnalyzeInstance $hir verify {} $block $params $seeds {} {}]
+            set rx [dict get $outcome exprs]
+            hir::completions::resetCache
+            dict for {e c} [hir::completions::exprRangesOf $hir $block $seeds] {
+                if {![dict exists $rx $e]} continue
+                incr common
+                set r [dict get $rx $e]
+                set tag [list [file tail $file] [dict get [hir::node $hir $e] origin node]]
+                switch -- [relation $r $c] {
+                    disjoint { lappend disjoint [list $tag [show $r] [show $c]] }
+                    crossing { lappend crossing [list $tag [show $r] [show $c]] }
+                    within   { lappend rangeNarrower $tag }
+                }
+            }
+        }
+    }
+    list [expr {$common > 2000}] $disjoint $crossing [lsort -unique $rangeNarrower]
+} -result [list 1 {} {} $knownRangeNarrower]
+
+cleanupTests

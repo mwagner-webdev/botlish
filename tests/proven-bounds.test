@@ -1,0 +1,277 @@
+# proven-bounds.test -- PROOF-FACT-CENSUS.md gap G1: the bounds proofs
+# hir/completions.tcl already makes are consumed by code generation.
+#
+#   PROVEN SAFE   -> check-free operation (NIR `*proven`, no `regioncheck`,
+#                    the Tcl compiler's direct call instead of callValue)
+#   UNKNOWN       -> the checked operation, declared error and all
+#   PROVEN FAILURE-> compile-time KNOWN-ERROR (unchanged)
+#
+# Pinned here: the per-check verdict structure (one element per registered
+# bounds check, so two checks raising the same error name are never
+# conflated), what lowering does with it on every operation, that a handler
+# or an `errors` clause is never mistaken for a proof, region lowering,
+# Tcl-compiler parity, and that every backend computes the same values.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+set boundsBackends {interp compile cranelift-generic cranelift}
+
+proc boundsHir {source} {
+    set path [makeFile $source proven-bounds-case.bot]
+    try {
+        return [surface::readProgramFile $path -strict 0]
+    } finally {
+        removeFile proven-bounds-case.bot
+    }
+}
+
+proc boundsNir {source args} {
+    return [native::nir [boundsHir $source] {*}$args]
+}
+
+# How many times NIR TEXT has `op NAME` (the whole opcode word).
+proc opCount {text name} {
+    return [llength [regexp -all -inline "op $name\[ \n\]" $text]]
+}
+
+# {checked proven} counts of the opcode pair NAME / NAMEproven.
+proc pairCounts {text name} {
+    return [list [opCount $text $name] [opCount $text ${name}proven]]
+}
+
+# The first call node whose callee is spelled NAME.
+proc nativeCall {hir name} {
+    foreach e [hir::walk $hir] {
+        if {[hir::kind $hir $e] eq "call"} {
+            set callee [hir::get $hir $e callee]
+            if {[hir::kind $hir $callee] eq "ref" && [hir::get $hir $callee name] eq $name} {
+                return $e
+            }
+        }
+    }
+    error "no call of $name"
+}
+
+# The per-check verdicts and BoundsProven of the first call of NAME.
+proc verdictOf {source name} {
+    set hir [boundsHir $source]
+    set e [nativeCall $hir $name]
+    return [list [hir::completions::BoundsVerdictsOf $hir $e] [hir::completions::BoundsProven $hir $e]]
+}
+
+proc agreedValue {source} {
+    set hir [boundsHir $source]
+    set outcomes [lmap b $::boundsBackends {lrange [outcomeUnderHir $b $hir] 0 end-1}]
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        return "DISAGREE: [join [lmap b $::boundsBackends o $outcomes {list $b $o}] { / }]"
+    }
+    return [lindex [lindex $outcomes 0] 1]
+}
+
+set unknownList "fn f(xs, i) errors IndexNotFound:\n    list::at(xs, i)\nf(\[1, 2\], 1)"
+
+# ---------------------------------------------------------------------------
+# The verdict structure
+
+test bounds-verdict-index {an indexed access has one check: proven when the index provably designates an element, else it keeps IndexNotFound} -body {
+    list \
+        [verdictOf "xs = \[1, 2, 3\]\nloop i from 0 to 3:\n    list::at(xs, i)" list::at] \
+        [verdictOf $unknownList list::at] \
+        [verdictOf "a = mutable_array::allocate(3)\nmutable_array::set(a, 2, 0)" mutable_array::set] \
+        [verdictOf "fn f(a, i) errors IndexNotFound:\n    mutable_array::at(a, i)\nf(mutable_array::allocate(1), 0)" mutable_array::at]
+} -result [list {{{}} 1} {IndexNotFound 0} {{{}} 1} {IndexNotFound 0}]
+
+test bounds-verdict-slice {a slice has two bound checks, each ruled out on its own: the verdict names what each may still raise (the second case proves LowerUnderrun away with `n >= 0` and keeps UpperOverrun)} -body {
+    list \
+        [verdictOf "s = \"abcd\"\nstr::substring(s, 1, 3)" str::substring] \
+        [verdictOf "fn f(s, n) errors LowerUnderrun, UpperOverrun:\n    if n >= 0:\n        str::substring(s, 0, n)\n    else:\n        \"\"\nf(\"ab\", 1)" str::substring] \
+        [verdictOf "fn f(s, i) errors LowerUnderrun, UpperOverrun:\n    if i >= 0 and i < str::length(s):\n        str::substring(s, i, i + 1)\n    else:\n        \"\"\nf(\"ab\", 1)" str::substring] \
+        [verdictOf "fn f(s, i, j) errors LowerUnderrun, UpperOverrun:\n    if i >= 0:\n        str::substring(s, i, j)\n    else:\n        \"\"\nf(\"ab\", 1, 2)" str::substring]
+} -result [list {{{}} 1} {UpperOverrun 0} {{{}} 1} {{{LowerUnderrun UpperOverrun}} 0}]
+
+test bounds-verdict-two-slices-not-conflated {mutable_array::copy checks a destination and a source slice that raise the same declared errors: the verdict keeps them apart, and only a call with both proven is proven} -body {
+    set decl "fn f(%s) errors LowerUnderrun, UpperOverrun:\n    %s\n    mutable_array::copy(dst, 0, src, 0, 2)\nf(%s)"
+    set dstOk "dst = mutable_array::allocate(4)"
+    set srcOk "src = mutable_array::allocate(4)"
+    list \
+        [verdictOf [format $decl src $dstOk {mutable_array::allocate(1)}] mutable_array::copy] \
+        [verdictOf [format $decl dst $srcOk {mutable_array::allocate(1)}] mutable_array::copy] \
+        [verdictOf [format $decl k "$dstOk\n    $srcOk" 0] mutable_array::copy] \
+        [verdictOf [format $decl "dst, src" "" {mutable_array::allocate(1), mutable_array::allocate(1)}] mutable_array::copy]
+} -result [list {{{} UpperOverrun} 0} {{UpperOverrun {}} 0} {{{} {}} 1} {{UpperOverrun UpperOverrun} 0}]
+
+test bounds-verdict-per-element-union {a literal-List loop walks its body once per element: a check is proven only if every walk proved it, in either order (a later element never overwrites an earlier unproven one)} -body {
+    set ctx [hir::completions::NewCtx]
+    hir::completions::NoteBounds ctx e1 {{}}
+    hir::completions::NoteBounds ctx e1 {IndexNotFound}
+    hir::completions::NoteBounds ctx e1 {{}}
+    hir::completions::NoteBounds ctx e2 {IndexNotFound}
+    hir::completions::NoteBounds ctx e2 {{}}
+    hir::completions::NoteBounds ctx e3 {{} {UpperOverrun}}
+    hir::completions::NoteBounds ctx e3 {{LowerUnderrun} {}}
+    hir::completions::NoteBounds ctx e4 {{}}
+    hir::completions::NoteBounds ctx e4 {{}}
+    dict get $ctx bounds
+} -result {e1 IndexNotFound e2 IndexNotFound e3 {LowerUnderrun UpperOverrun} e4 {{}}}
+
+test bounds-verdict-literal-loop-walks {a call inside a literal-List loop is proven only if it is for every element; a body that fails for one element is checked} -body {
+    set body "    list::at(\[10, 20\], x)"
+    list \
+        [verdictOf "loop x in \[0, 1\]:\n$body" list::at] \
+        [verdictOf "loop x in \[1, 0\]:\n$body" list::at] \
+        [verdictOf "loop x in \[0, 1, 2\]:\n    r = list::at(\[10, 20\], x):\n        on IndexNotFound:\n            0\n    r" list::at] \
+        [verdictOf "loop x in \[2, 1\]:\n    r = list::at(\[10, 20\], x):\n        on IndexNotFound:\n            0\n    r" list::at]
+} -result [list {{{}} 1} {{{}} 1} {IndexNotFound 0} {IndexNotFound 0}]
+
+test bounds-verdict-stamped-on-native-call-not-handle {the verdict is on the native call node, whatever handles it: a handler's presence is not the proof (a handled unknown call is unproven, a handled proven call proven)} -body {
+    list \
+        [verdictOf "fn f(xs, i):\n    list::at(xs, i):\n        on IndexNotFound:\n            0\nf(\[1\], 0)" list::at] \
+        [verdictOf "xs = \[1, 2, 3\]\nloop i from 0 to 3:\n    list::at(xs, i):\n        on IndexNotFound:\n            0" list::at]
+} -result [list {IndexNotFound 0} {{{}} 1}]
+
+test bounds-verdict-unreached-call-unproven {a call the proof never reaches carries no verdict: no verdict is never read as proven} -body {
+    set hir [boundsHir "fn f(xs):\n    if 1 > 2:\n        list::at(xs, 0)\n    else:\n        0\nf(\[1\])"]
+    set e [nativeCall $hir list::at]
+    list [hir::completions::BoundsVerdictsOf $hir $e] [hir::completions::BoundsProven $hir $e]
+} -result {{} 0}
+
+test bounds-declared-signature-unchanged {proving a check never changes the native's declared signature: list::at is still errors IndexNotFound, and the call's effective errors are the proof's} -body {
+    set hir [boundsHir "xs = \[1, 2, 3\]\nlist::at(xs, 1)"]
+    set e [nativeCall $hir list::at]
+    list [dict get [core::native::metadata list::at] errors] [dict get [core::native::metadata list::at] bounds] \
+        [hir::completions::effectiveErrorsOf $hir $e]
+} -result {IndexNotFound {index list 0 1} {}}
+
+# ---------------------------------------------------------------------------
+# Native lowering
+
+test bounds-nir-index-ops {proven list::at / mutable_array::at / ::set lower to the check-free opcodes, unproven ones keep the checked opcode} -body {
+    set text [boundsNir "xs = \[1, 2, 3\]\na = mutable_array::allocate(3)\nloop i from 0 to 3:\n    mutable_array::set(a, i, list::at(xs, i))\nloop j from 0 to 3:\n    mutable_array::at(a, j)"]
+    set unknown [boundsNir "fn f(xs, a, i) errors IndexNotFound:\n    mutable_array::set(a, i, list::at(xs, i))\n    mutable_array::at(a, i)\nf(\[1\], mutable_array::allocate(1), 0)"]
+    list [pairCounts $text listget] [pairCounts $text mutarrayget] [pairCounts $text mutarrayset] \
+        [pairCounts $unknown listget] [pairCounts $unknown mutarrayget] [pairCounts $unknown mutarrayset]
+} -result {{0 1} {0 1} {0 1} {1 0} {1 0} {1 0}}
+
+test bounds-nir-slice-ops {proven substring / freeze / copy lower to the check-free opcodes, unproven ones keep the checked opcode} -body {
+    set text [boundsNir "s = \"abcd\"\na = mutable_array::allocate(3)\nb = mutable_array::allocate(5)\nmutable_array::copy(a, 0, b, 2, 3)\n\[str::substring(s, 1, 3), mutable_array::freeze(a, 3)\]"]
+    set unknown [boundsNir "fn f(s, a, b, n) errors LowerUnderrun, UpperOverrun:\n    mutable_array::copy(a, 0, b, 0, n)\n    \[str::substring(s, 0, n), mutable_array::freeze(a, n)\]\nf(\"abc\", mutable_array::allocate(3), mutable_array::allocate(3), 2)"]
+    list [pairCounts $text substr] [pairCounts $text mutarrayfreeze] [pairCounts $text mutarraycopy] \
+        [pairCounts $unknown substr] [pairCounts $unknown mutarrayfreeze] [pairCounts $unknown mutarraycopy]
+} -result {{0 1} {0 1} {0 1} {1 0} {1 0} {1 0}}
+
+test bounds-nir-substring-one-check-proven-stays-checked {a substring with LowerUnderrun ruled out (n >= 0) but UpperOverrun unproven keeps the checked operation} -body {
+    set text [boundsNir "fn f(s, n) errors UpperOverrun:\n    if n >= 0:\n        str::substring(s, 0, n)\n    else:\n        \"\"\nf(\"abc\", 2)"]
+    pairCounts $text substr
+} -result {1 0}
+
+test bounds-nir-copy-one-slice-proven-stays-checked {a copy with the destination slice proven and the source unknown (or the reverse) keeps the whole checked operation: per-check proof state is never turned into an error-name guess} -body {
+    set decl "fn f(%s) errors LowerUnderrun, UpperOverrun:\n    %s\n    mutable_array::copy(dst, 0, src, 0, 2)\nf(%s)"
+    list \
+        [pairCounts [boundsNir [format $decl src "dst = mutable_array::allocate(4)" {mutable_array::allocate(1)}]] mutarraycopy] \
+        [pairCounts [boundsNir [format $decl dst "src = mutable_array::allocate(4)" {mutable_array::allocate(1)}]] mutarraycopy] \
+        [pairCounts [boundsNir [format $decl k "dst = mutable_array::allocate(4)\n    src = mutable_array::allocate(4)" 0]] mutarraycopy]
+} -result {{1 0} {1 0} {0 1}}
+
+test bounds-nir-handler-is-not-the-proof {a handler (or an errors clause) never makes a check unnecessary: an unknown handled call stays checked; a proven call with a handler is proven}  -body {
+    set handledUnknown [boundsNir "fn f(xs, i):\n    list::at(xs, i):\n        on IndexNotFound:\n            -1\nf(\[1, 2\], 5)"]
+    set handledProven [boundsNir "xs = \[1, 2, 3\]\nloop i from 0 to 3:\n    list::at(xs, i):\n        on IndexNotFound:\n            -1"]
+    set declared [boundsNir "fn f(xs, i) errors IndexNotFound:\n    list::at(xs, i)\nf(\[1, 2\], 5):\n    on IndexNotFound:\n        -1"]
+    list [pairCounts $handledUnknown listget] [pairCounts $handledProven listget] [pairCounts $declared listget]
+} -result {{1 0} {0 1} {1 0}}
+
+test bounds-nir-opt-off {-proven-bounds-opt 0 lowers every call checked, exactly as before the optimization} -body {
+    set source "xs = \[1, 2, 3\]\nloop i from 0 to 3:\n    list::at(xs, i)"
+    list [pairCounts [boundsNir $source -proven-bounds-opt 0] listget] [pairCounts [boundsNir $source] listget]
+} -result {{1 0} {0 1}}
+
+test bounds-nir-region-check-omitted {a String region (a substring consumed only by ==) validated by a proof needs no regioncheck; the unproven region keeps it} -body {
+    set proven "fn is_a(s, i):\n    if i >= 0 and i < str::length(s):\n        str::substring(s, i, i + 1) == \"a\"\n    else:\n        false\nis_a(\"abc\", 0)"
+    set unknown "fn is_a(s, i) errors LowerUnderrun, UpperOverrun:\n    str::substring(s, i, i + 1) == \"a\"\nis_a(\"abc\", 0)"
+    list [opCount [boundsNir $proven] regioncheck] [opCount [boundsNir $unknown] regioncheck] \
+        [opCount [boundsNir $proven -proven-bounds-opt 0] regioncheck] \
+        [pairCounts [boundsNir $proven] substr]
+} -result {0 1 1 {0 0}}
+
+test bounds-nir-short-slice-region-check-omitted {the same for the ShortString slice form: the proven one has no regioncheck in front of strsliceshort} -body {
+    set proven "fn first(s, i):\n    if i >= 0 and i < str::length(s):\n        c = str::substring(s, i, i + 1)\n        if c == \"a\":\n            1\n        else:\n            0\n    else:\n        0\nfirst(\"abc\", 0)"
+    set text [boundsNir $proven]
+    set off [boundsNir $proven -proven-bounds-opt 0]
+    list [opCount $text regioncheck] [expr {[opCount $off regioncheck] >= 1}]
+} -result {0 1}
+
+test bounds-nir-refined-checks-benchmark {bench/refined-checks.bot (lib/web.bot's char_at): the census's redundant regioncheck and the proven substrings/reads are gone, at least the hot path's checks are check-free} -body {
+    set hir [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot] -strict 0]
+    set text [native::nir $hir]
+    list [opCount $text regioncheck] [opCount $text substr] [expr {[opCount $text listgetproven] > 0}] \
+        [expr {[opCount [native::nir $hir -proven-bounds-opt 0] regioncheck] > 0}]
+} -result {0 0 1 1}
+
+test bounds-nir-get-is-ordinary-botlish {list::get is not special: it is Botlish over `at` with its own handler, its inner `at` is unproven (the index parameter is unconstrained in its own body), so it keeps the checked read -- a recorded frontier, not a special case} -body {
+    set text [boundsNir "xs = \[1, 2, 3\]\nloop i from 0 to 3:\n    list::get(xs, i, 0)"]
+    list [expr {[opCount $text listget] >= 1}] [opCount $text listgetproven]
+} -result {1 0}
+
+test bounds-nir-function-stops-being-fallible {a function whose only fallible operation is a proven read no longer may error, so its callers drop their completion checks (the check-free opcode is outside op_may_error); with the optimization off it still may} -body {
+    set source "fn pick(xs, k):\n    if k >= 0 and k < list::length(xs):\n        list::at(xs, k) + 1\n    else:\n        0\npick(\[10, 20, 30\], 1) + pick(\[1\], 5)"
+    proc mayError {source args} {
+        set nir [native::nir [boundsHir $source] {*}$args -tiny-leaf-inline-opt 0]
+        lmap line [native::Driver calls $nir] {
+            if {![regexp {callee_name="pick" may_error=(\w+)} $line -> v]} continue
+            set v
+        }
+    }
+    list [mayError $source] [mayError $source -proven-bounds-opt 0]
+} -result {{false false} {true true}}
+
+test bounds-clif-no-bounds-path {the proven read is the bare element load: its CLIF has no bounds comparison and fewer branches, the checked read has both} -body {
+    set source "xs = \[1, 2, 3\]\nloop i from 0 to 3:\n    list::at(xs, i)"
+    set proven [native::clif [boundsHir $source]]
+    set off [native::clif [boundsHir $source] -proven-bounds-opt 0]
+    list [regexp -all {icmp ult} $proven] [expr {[regexp -all {icmp ult} $off] > 0}] \
+        [expr {[regexp -all {brif} $proven] < [regexp -all {brif} $off]}]
+} -result {0 1 1}
+
+# ---------------------------------------------------------------------------
+# The Tcl compiler
+
+test bounds-compiler-direct-call {a proven bounds-bearing native is a direct call in the Tcl compiler's code, not core::runtime::callValue; a handled or declared unknown one still goes through callValue} -body {
+    proc codeOf {source} {
+        return [core::compiler::generatedCode [hir::lower [boundsHir $source]]]
+    }
+    set proven [codeOf "xs = \[1, 2, 3\]\nloop i from 0 to 3:\n    list::at(xs, i)"]
+    set handled [codeOf "fn f(xs, i):\n    list::at(xs, i):\n        on IndexNotFound:\n            -1\nf(\[1, 2\], 5)"]
+    set declared [codeOf $unknownList]
+    list [regexp -all {callValue} $proven] [expr {[regexp -all {callValue} $handled] > 0}] [expr {[regexp -all {callValue} $declared] > 0}]
+} -result {0 1 1}
+
+# ---------------------------------------------------------------------------
+# Runtime outcomes are identical on every backend
+
+test bounds-values-agree-proven {programs whose every bounds check is proven compute the same values on every backend} -body {
+    list \
+        [agreedValue "xs = \[10, 20, 30\]\nloop i from 0 to 3:\n    list::at(xs, i) + 1"] \
+        [agreedValue "a = mutable_array::allocate(4)\nloop i from 0 to 4:\n    mutable_array::set(a, i, i * i)\nloop j down from 3 through 0:\n    mutable_array::at(a, j)"] \
+        [agreedValue "s = \"héllo\"\nloop i from 0 to 5:\n    str::substring(s, i, i + 1)"] \
+        [agreedValue "a = mutable_array::from_list(\[1, 2, 3\])\nb = mutable_array::allocate(5)\nmutable_array::copy(b, 1, a, 0, 3)\nmutable_array::freeze(b, 5)"] \
+        [agreedValue "fn is_a(s, i):\n    if i >= 0 and i < str::length(s):\n        str::substring(s, i, i + 1) == \"a\"\n    else:\n        false\n\[is_a(\"abc\", 0), is_a(\"abc\", 1), is_a(\"abc\", 9), is_a(\"\", 0)\]"]
+} -result [list {[11, 21, 31]} {[9, 4, 1, 0]} {["h", "é", "l", "l", "o"]} {[unit, 1, 2, 3, unit]} {[true, false, false, false]}]
+
+test bounds-values-agree-unknown {an unknown site still fails when its check fails, handled or not, on every backend} -body {
+    list \
+        [agreedValue "fn g(xs, i):\n    list::at(xs, i):\n        on IndexNotFound:\n            -1\n\[g(\[1, 2\], 1), g(\[1, 2\], 2), g(\[1, 2\], -1), g(\[\], 0)\]"] \
+        [agreedValue "fn s(t, a, b):\n    str::substring(t, a, b):\n        on LowerUnderrun:\n            \"lo\"\n        on UpperOverrun:\n            \"hi\"\n\[s(\"abc\", 0, 2), s(\"abc\", -1, 2), s(\"abc\", 2, 1), s(\"abc\", 1, 9)\]"] \
+        [agreedValue "fn st(a, i):\n    mutable_array::set(a, i, 1):\n        on IndexNotFound:\n            2\nb = mutable_array::allocate(2)\n\[st(b, 0), st(b, 2), st(b, -1)\]"] \
+        [agreedValue "fn c(a, b, i, n):\n    mutable_array::copy(a, i, b, 0, n):\n        on LowerUnderrun:\n            \"lo\"\n        on UpperOverrun:\n            \"hi\"\nx = mutable_array::allocate(3)\ny = mutable_array::allocate(2)\n\[c(x, y, 0, 2), c(x, y, 0, 3), c(x, y, 2, 2), c(x, y, -1, 1)\]"]
+} -result [list {[2, -1, -1, -1]} {["ab", "lo", "lo", "hi"]} {[unit, 2, 2]} {[unit, "hi", "hi", "lo"]}]
+
+test bounds-values-agree-known-error-checked {a certain failure (KNOWN-ERROR, accepted only without -strict) is never proven: it stays a checked operation and still fails identically everywhere} -body {
+    list \
+        [verdictOf "loop x in \[0, 5\]:\n    list::at(\[1, 2\], x):\n        on IndexNotFound:\n            7" list::at] \
+        [agreedValue "loop x in \[0, 5\]:\n    list::at(\[1, 2\], x):\n        on IndexNotFound:\n            7"] \
+        [agreedValue "list::at(\[1, 2\], 5):\n    on IndexNotFound:\n        7"]
+} -result {{IndexNotFound 0} {[1, 7]} 7}
+
+cleanupTests

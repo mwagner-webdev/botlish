@@ -29,6 +29,12 @@
 # KnownOutcome); and (b) tracking *which* declared error names are reachable
 # through a `fail`, not just that the branch never completes normally.
 #
+# The one thing code generation does take from this pass is a native call's
+# per-check bounds verdict (BoundsVerdictsOf/BoundsProven, PROOF-FACT-
+# REPAIRS.md): a check proven never to fail needs no runtime check. It is a
+# retained *result* of the legality proof, never a second proof engine in
+# lowering, and legality itself still never reads closed-world facts.
+#
 # Two entry points:
 #   hir::completions::checkBlock hirVar block enclosingErrors
 #       -- the once-per-function-body legality driver (hir/errorsets.tcl's
@@ -186,7 +192,7 @@ proc hir::completions::NewCtx {} {
     return [dict create bindings [dict create] exact [dict create] exactList [dict create] \
         indexBounds [dict create] upperBounds [dict create] sizes [dict create] minSizes [dict create] \
         exprs [dict create] errors [dict create] analyses 0 returned 0 returnRange never \
-        record 0 visited [dict create]]
+        record 0 visited [dict create] bounds [dict create]]
 }
 
 # Walks EXPRS (a block body / branch body) in order; a "never" expression
@@ -598,28 +604,29 @@ proc hir::completions::RestoreRelations {ctxVar relations} {
 }
 
 # A countloop's start/end are evaluated once, in the enclosing scope,
-# exactly like EvalListloop's own iterable -- walked here purely to record
-# whatever errors/diagnostics/facts they themselves contribute (they are
-# ordinary expressions, not loop-body ones). The body is then walked once,
-# EvalLoop's own conservative treatment: no per-iteration concrete facts
-# (item 91's "no general loop theorem proving" applies to a countloop
-# exactly as it already does to loop/listloop -- hir/range.tcl's own
-# induction-variable seed is a different, representation-only analysis,
-# not this file's error-completion proof), under the induction binding
-# left unseeded (hir::range::unknown, the same fallback an ordinary
-# untracked ref already gets). A countloop's own completion is
-# conservatively "may complete normally": unlike a bare loop, natural
-# exhaustion (the collected List) is always a *genuinely* reachable
-# completion here, not
-# merely a conservative assumption, so this is at least as sound as
-# EvalLoop's own case.
+# exactly like EvalListloop's own iterable -- walked here to record whatever
+# errors/diagnostics/facts they themselves contribute, and for their Ranges.
+# The body is then walked once, EvalLoop's own conservative treatment (item
+# 91's "no general loop theorem proving": no per-iteration concrete facts),
+# but under the induction binding's interval -- the very counted-loop theorem
+# hir/range.tcl seeds the binding with (hir::range::InductionBinding, shared,
+# not re-derived: START <= i < END, ... per direction and endKind) over the
+# START/END Ranges this walk computed (PROOF-FACT-CENSUS.md G3). Like every
+# binding fact it lives only in the body (restored below), so it never
+# outlives the loop. A countloop's own completion is conservatively "may
+# complete normally": unlike a bare loop, natural exhaustion (the collected
+# List) is always a *genuinely* reachable completion here, not merely a
+# conservative assumption, so this is at least as sound as EvalLoop's own
+# case.
 proc hir::completions::EvalCountloop {hirVar ctxVar diagnose enclosing guard e node} {
     upvar 1 $hirVar hir $ctxVar ctx
     set start [Eval hir ctx $diagnose $enclosing $guard [dict get $node start]]
-    Eval hir ctx $diagnose $enclosing $guard [dict get $node end]
+    set end [Eval hir ctx $diagnose $enclosing $guard [dict get $node end]]
     set saved [dict get $ctx bindings]
     set savedBounds [dict get $ctx indexBounds]
     set relations [Relations $ctx]
+    dict set ctx bindings [dict get $node countBinding] \
+        [hir::range::InductionBinding $start $end [dict get $node direction] [dict get $node endKind]]
     NoteIndexBound hir ctx [dict get $node countBinding] $start [dict get $node end] \
         [dict get $node direction] [dict get $node endKind]
     Seq hir ctx $diagnose $enclosing $guard [dict get $node body]
@@ -658,7 +665,9 @@ proc hir::completions::NoteIndexBound {hirVar ctxVar binding startRange end dire
 # A lockloop's domain operands are evaluated once, in written order, in the
 # enclosing scope (walked here for whatever errors/diagnostics/facts they
 # contribute); the body is then walked once, EvalCountloop's own
-# conservative treatment, every domain binding left unseeded.
+# conservative treatment: each numeric domain's binding gets the same
+# interval hir/range.tcl gives it, each list domain's element binding stays
+# unseeded.
 proc hir::completions::EvalLockloop {hirVar ctxVar diagnose enclosing guard e node} {
     upvar 1 $hirVar hir $ctxVar ctx
     set ranges [dict create]
@@ -670,6 +679,9 @@ proc hir::completions::EvalLockloop {hirVar ctxVar diagnose enclosing guard e no
     set relations [Relations $ctx]
     foreach domain [dict get $node domains] {
         if {[dict get $domain kind] eq "count"} {
+            dict set ctx bindings [dict get $domain binding] [hir::range::InductionBinding \
+                [dict get $ranges [dict get $domain start]] [dict get $ranges [dict get $domain end]] \
+                [dict get $domain direction] [dict get $domain endKind]]
             NoteIndexBound hir ctx [dict get $domain binding] [dict get $ranges [dict get $domain start]] \
                 [dict get $domain end] [dict get $domain direction] [dict get $domain endKind]
         }
@@ -911,9 +923,10 @@ proc hir::completions::EvalCall {hirVar ctxVar diagnose enclosing guard e node} 
         # fallible call, under its own call-specific facts
         # (NativeEffectiveFacts).
         if {[dict get [core::native::metadata $name] errors] ne {}} {
-            lassign [NativeEffectiveFacts $hir $ctx $name $argExprs $argRanges] normal errors
+            lassign [NativeEffectiveFacts $hir $ctx $name $argExprs $argRanges] normal errors verdicts
             if {$diagnose} {
                 CheckNativeCallLegality hir $e $name $normal $errors {} $enclosing
+                NoteBounds ctx $e $verdicts
             }
             MergeErrors ctx $errors
             if {!$normal} {
@@ -1064,7 +1077,9 @@ proc hir::completions::CheckCallLegality {hirVar e target normal errors handled 
     # Retained for later inspection (item 62/89 of STATIC-COMPLETION-
     # PROOFS.md: HIR/proof inspection tests, and useful input to the
     # later comprehensive generated-code audit) -- never read back by this
-    # pass itself, and never consulted by any backend/codegen.
+    # pass itself, and never consulted by any backend/codegen. (What code
+    # generation does consume is the per-check bounds verdict of a native
+    # call, NativeEffectiveFacts/BoundsProven, never these flat sets.)
     dict set hir exprs $e effectiveErrors [lsort -unique $errors]
     dict set hir exprs $e mayReturnNormally $normal
     if {!$normal} {
@@ -1126,8 +1141,8 @@ proc hir::completions::CheckNativeCallLegality {hirVar e name normal errors hand
     }
 }
 
-# {normal 0|1 errors NAMES}: the call-specific completion facts of a call
-# of the root native NAME (argument expressions ARGEXPRS, their Ranges
+# {normal 0|1 errors NAMES verdicts}: the call-specific completion facts of
+# a call of the root native NAME (argument expressions ARGEXPRS, their Ranges
 # ARGRANGES here). A native's declared -errors are all effective, except
 # for the natives whose errors depend only on their arguments, as their
 # registered -bounds (core/native.tcl) state: an indexed access (`index`:
@@ -1139,28 +1154,39 @@ proc hir::completions::CheckNativeCallLegality {hirVar e name normal errors hand
 # three-way rule STATIC-COMPLETION-PROOFS.md established for exact calls,
 # applied to native errors that are functions of their arguments. Anything
 # unproven keeps the declared error.
+#
+# VERDICTS has one element per registered bounds check, in registration
+# order (one for `index`, one per SLICE for `slices`): the declared errors
+# that check may still produce here ({} = proven never to fail). It is
+# what a code generator may rely on (BoundsVerdictsOf), kept per check
+# because two checks of one call can raise the same declared error name
+# (a native with two slices): the call's flat `errors` cannot say which
+# check an error comes from. {} for a native without bounds.
 proc hir::completions::NativeEffectiveFacts {hir ctx name argExprs argRanges} {
     set meta [core::native::metadata $name]
     set errors [dict get $meta errors]
     set bounds [dict get $meta bounds]
+    set verdicts {}
     switch -- [lindex $bounds 0] {
         index {
             lassign $bounds _ family c i
+            set verdicts [list $errors]
             if {[llength $argExprs] > max($c, $i)} {
                 switch -- [IndexBounds $hir $ctx $family [lindex $argExprs $c] [lindex $argExprs $i] [lindex $argRanges $i]] {
-                    in  { return [list 1 [lsearch -all -inline -not -exact $errors IndexNotFound]] }
-                    out { return [list 0 [list IndexNotFound]] }
+                    in  { return [list 1 [lsearch -all -inline -not -exact $errors IndexNotFound] {{}}] }
+                    out { return [list 0 [list IndexNotFound] $verdicts] }
                 }
             }
         }
         slices {
+            set verdicts [lrepeat [llength [lrange $bounds 1 end]] $errors]
             set slices [Slices $hir $ctx [lrange $bounds 1 end] $argExprs $argRanges]
             if {$slices ne {}} {
                 return [SliceFacts $hir $ctx $slices]
             }
         }
     }
-    return [list 1 $errors]
+    return [list 1 $errors $verdicts]
 }
 
 # ---------------------------------------------------------------------------
@@ -1423,16 +1449,19 @@ proc hir::completions::SliceVerdict {ctx slice} {
     return [list $possible {}]
 }
 
-# {normal errors} (NativeEffectiveFacts) of a call checking SLICES in
-# order: the union of what each may fail with; a certain failure of the
+# {normal errors verdicts} (NativeEffectiveFacts) of a call checking SLICES
+# in order: the union of what each may fail with; a certain failure of the
 # first slice that is not provably valid makes the call certain to fail
-# with it.
+# with it. The verdicts are each slice's own possible errors (SliceVerdict),
+# unaffected by what another slice proves.
 proc hir::completions::SliceFacts {hir ctx slices} {
     set possible {}
     set certain {}
     set settled 0
+    set verdicts {}
     foreach slice $slices {
         lassign [SliceVerdict $ctx $slice] p c
+        lappend verdicts $p
         lappend possible {*}$p
         if {!$settled && $c ne ""} {
             set certain $c
@@ -1442,9 +1471,9 @@ proc hir::completions::SliceFacts {hir ctx slices} {
         }
     }
     if {$certain ne ""} {
-        return [list 0 [list $certain]]
+        return [list 0 [list $certain] $verdicts]
     }
-    return [list 1 [lsort -unique $possible]]
+    return [list 1 [lsort -unique $possible] $verdicts]
 }
 
 # Whether the Int index INDEX (Range INDEXRANGE) of an indexed access to
@@ -1612,11 +1641,15 @@ proc hir::completions::EvalHandle {hirVar ctxVar diagnose enclosing guard e node
             # A handled call of a native with declared errors (`argv`,
             # `list::at`).
             set name [dict get [hir::symbol $hir $target] name]
-            lassign [NativeEffectiveFacts $hir $ctx $name $argExprs $argRanges] normal errors
+            lassign [NativeEffectiveFacts $hir $ctx $name $argExprs $argRanges] normal errors verdicts
             set callResult [hir::range::ConstrainType $hir $call \
                 [NativeResultRange $hir $ctx $name $argExprs $argRanges]]
             if {$diagnose} {
                 CheckNativeCallLegality hir $e $name $normal $errors $handled $enclosing
+                # The verdicts belong to the native call itself (what a
+                # code generator lowers), not to this `handle` node: a
+                # handler's presence is never the proof.
+                NoteBounds ctx $call $verdicts
             }
         } else {
             set normal 1
@@ -1688,6 +1721,23 @@ proc hir::completions::EvalHandle {hirVar ctxVar diagnose enclosing guard e node
 # exact-element facts ARGEXACTLISTS (never diagnoses): {normal 0|1 errors
 # NAME-LIST result Range}.
 proc hir::completions::analyzeBlock {hir block argRanges argExact argExactLists guard} {
+    lassign [WalkBlock $hir $block $argRanges $argExact $argExactLists $guard] ctx result
+    # Normal completion is possible either by falling off the end of the
+    # body (RESULT ne never) or through any reachable `return` (ctx.returned
+    # -- see Eval's own `return` case): both are ordinary successful
+    # completions of this function, never a failure.
+    set normal [expr {$result ne {never} || [dict get $ctx returned]}]
+    # The successful result is the fall-through value joined with every
+    # returned one (`never` when there is neither).
+    set result [hir::range::join $result [dict get $ctx returnRange]]
+    return [dict create normal $normal \
+        errors [lsort -unique [dict keys [dict get $ctx errors]]] \
+        result [expr {$result eq {never} ? [hir::range::unknown] : $result}]]
+}
+
+# analyzeBlock's walk: {CTX FALLTHROUGH-RESULT}, the final walk context
+# (never diagnosing) and the body's fall-through value.
+proc hir::completions::WalkBlock {hir block argRanges argExact argExactLists guard} {
     set ctx [NewCtx]
     set params [hir::get $hir $block params]
     foreach b $params r $argRanges {
@@ -1704,17 +1754,18 @@ proc hir::completions::analyzeBlock {hir block argRanges argExact argExactLists 
         }
     }
     set result [Seq hir ctx 0 {} $guard [hir::get $hir $block body]]
-    # Normal completion is possible either by falling off the end of the
-    # body (RESULT ne never) or through any reachable `return` (ctx.returned
-    # -- see Eval's own `return` case): both are ordinary successful
-    # completions of this function, never a failure.
-    set normal [expr {$result ne {never} || [dict get $ctx returned]}]
-    # The successful result is the fall-through value joined with every
-    # returned one (`never` when there is neither).
-    set result [hir::range::join $result [dict get $ctx returnRange]]
-    return [dict create normal $normal \
-        errors [lsort -unique [dict keys [dict get $ctx errors]]] \
-        result [expr {$result eq {never} ? [hir::range::unknown] : $result}]]
+    return [list $ctx $result]
+}
+
+# Inspection accessor (tests/range-completions-crosscheck.test): the Range
+# this walk computed for every expression of BLOCK's own body under the
+# parameter Ranges ARGRANGES (ExprId -> Range), the very per-node facts
+# analyzeBlock's callers read -- for comparing the local transfer rules
+# with hir::range's (AnalyzeInstance's `exprs`), which are meant to agree.
+proc hir::completions::exprRangesOf {hir block argRanges} {
+    resetCache
+    lassign [WalkBlock $hir $block $argRanges {} {} [dict create $block 1]] ctx result
+    return [dict get $ctx exprs]
 }
 
 # The once-per-function-body legality driver (hir/errorsets.tcl's own
@@ -1738,7 +1789,32 @@ proc hir::completions::checkBlock {hirVar block enclosingErrors} {
         set body [hir::get $hir $block body]
         set guard [dict create $block 1]
     }
-    Seq hir ctx 1 $enclosingErrors $guard $body
+    set result [Seq hir ctx 1 $enclosingErrors $guard $body]
+    # Replace, never merge, whatever an earlier check of this HIR left.
+    dict for {e verdicts} [dict get $ctx bounds] {
+        dict set hir exprs $e boundsVerdicts $verdicts
+    }
+    return $result
+}
+
+# Records VERDICTS (NativeEffectiveFacts) for native call E in ctx.bounds,
+# joined with every verdict an earlier walk of E in this checkBlock made: a
+# literal-List loop walks its body once per element, each under that
+# element's own facts, and the call runs under all of them, so a check is
+# proven only if every walk proved it (a later element must never
+# overwrite an earlier element's unproven check). Per check, the union of
+# the errors that walk left possible.
+proc hir::completions::NoteBounds {ctxVar e verdicts} {
+    upvar 1 $ctxVar ctx
+    if {$verdicts eq {}} {
+        return
+    }
+    if {[dict exists $ctx bounds $e]} {
+        set verdicts [lmap old [dict get $ctx bounds $e] new $verdicts {
+            lsort -unique [concat $old $new]
+        }]
+    }
+    dict set ctx bounds $e $verdicts
 }
 
 # The expressions of BLOCK's own body this pass's walk reaches (ExprId -> 1):
@@ -1769,6 +1845,34 @@ proc hir::completions::reachedExprs {hir block} {
 proc hir::completions::effectiveErrorsOf {hir e} {
     set node [hir::node $hir $e]
     return [expr {[dict exists $node effectiveErrors] ? [dict get $node effectiveErrors] : {}}]
+}
+
+# The per-check bounds verdicts checkBlock stamped on native call E
+# (NativeEffectiveFacts): one element per registered bounds check, each the
+# declared errors that check may still produce on every path reaching E. ""
+# when E was never reached by a top-level walk or is not a bounds-bearing
+# native call -- "no proof", never "proven".
+proc hir::completions::BoundsVerdictsOf {hir e} {
+    set node [hir::node $hir $e]
+    return [expr {[dict exists $node boundsVerdicts] ? [dict get $node boundsVerdicts] : {}}]
+}
+
+# 1 iff every bounds check of native call E is proven never to fail (every
+# verdict {}): the only fact code generation consumes, and only ever for a
+# whole call -- a call with any unproven check keeps all of them. The
+# stamp is open-world (parameters unconstrained, no caller facts), so it
+# holds in every specialization instance of E's block.
+proc hir::completions::BoundsProven {hir e} {
+    set verdicts [BoundsVerdictsOf $hir $e]
+    if {$verdicts eq {}} {
+        return 0
+    }
+    foreach v $verdicts {
+        if {$v ne {}} {
+            return 0
+        }
+    }
+    return 1
 }
 
 proc hir::completions::mayReturnNormallyOf {hir e} {
