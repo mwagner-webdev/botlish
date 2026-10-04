@@ -76,6 +76,13 @@ The premises, as given:
    instructions per NIR instruction, or 0.68 once compare-and-branch is fused.
    The test suite needs 0.67 and 0.64. All of these rules are local; none is
    register allocation (section 11).
+8. **Expected run time: close to PHP 8, well ahead of CPython.** A prototype of
+   the v1 dispatch loop runs recursive `fib(30)` in 43–45 ms and a
+   10M-iteration integer loop in 142–145 ms. On the same machine PHP 8.3
+   without JIT takes 39 and 74 ms, node `--jitless` 76 and 169, CPython 3.11
+   103 and 484, Tcl 9 522 and 743, and native Botlish 6.6 and 14. Library-heavy
+   code is to be covered by precompiling the stdlib as native code
+   (section 12).
 
 ---
 
@@ -223,7 +230,8 @@ register stacks must stay relocatable.
     frames are never scanned.
   * Every `v` slot of every frame is scanned. That over-retains dead values
     compared with native code's precise root slots, but is sound. Per-pc maps
-    from `codegen::roots` could tighten it later.
+    from `codegen::roots` could tighten it later. The cost of scanning a deep
+    recursion is a GC question, recorded in section 12.
 * **A raw parameter at a tagged ABI position.** NIR can declare a parameter
   register raw while its ABI position stays tagged (in `rawregs=` but not
   `rawparams=`; `clif.rs` unboxes it in the prologue). The VM makes this part
@@ -687,7 +695,7 @@ says they must be real instructions, not helpers) belong in the basic block.
 | `op closure` / `op structnew`: destination, id16 + n | 32 + 8n | for n ≤ 4 |
 | `op construct`: destination, mode/count, kind mask + n | 32 + 8n | for n ≤ 4 registers |
 
-Measured with these limits (section 12 has the method):
+Measured with these limits (section 13 has the method):
 
 | | corpus | test suite |
 |---|---:|---:|
@@ -898,8 +906,8 @@ immediate and a 24-bit offset. That is another reason the 128-bit format is unne
 
 ## 11. Interpreter efficiency notes
 
-These are static counts. No interpreter exists, so nothing dynamic was
-measured.
+These are static counts over the selected VM code. Section 12 measures run
+time with a prototype of the dispatch loop.
 
 | | NIR | VM |
 |---|---:|---:|
@@ -943,7 +951,128 @@ Per-instruction cost:
 
 ---
 
-## 12. Method
+## 12. Expected performance, measured with a prototype
+
+Run time only. Startup is excluded everywhere: today everything down to NIR is
+a compiler written in Tcl.
+
+**What was measured.** `audit/vm-opcode-viability/` holds:
+
+* `prototype/`: a dependency-free Rust crate implementing the v1 dispatch loop
+  for the 17 opcodes two micro-benchmarks need. It runs the VM code of
+  section 2 with this document's design:
+  * 64-bit words and a `match` dispatch;
+  * a register stack plus frame records;
+  * argument copies with unbox-on-entry, and tagged slots zeroed per call;
+  * flags in loop locals;
+  * the tagged-Int fast paths.
+* `interpreters/`: the same two programs for six other interpreters.
+* `botlish/`: the Botlish sources and the native timing script.
+
+The two programs are recursive `fib(30)` (2.7M calls) and a 10M-iteration
+integer loop. In Botlish the loop is `count(n, acc)`, a self tail call; in the
+other languages it is a `while` loop.
+
+| ms, best of 3–5 | `fib(30)` | 10M loop |
+|---|---:|---:|
+| native Botlish (Cranelift) | 6.6 | 14 |
+| **VM v1 prototype** | **43–45** (raw-Int ABI); 51 (tagged Ints) | **142–145** |
+| … with `cmp` + jcc fused (and, in the loop, the dead join `mov` dropped) | 38–39 | 102–105 |
+| PHP 8.3, no JIT | 39 | 74 |
+| node 22 `--jitless` | 76 | 169 |
+| Ruby 3.3, no YJIT | 77 | 291 |
+| CPython 3.11 | 103 | 484 |
+| Perl 5.38 | 319 | 364 |
+| Tcl 9.0 | 522 | 743 |
+| node 22 with its JIT, for scale | 9 | 7 |
+
+**Reading:**
+
+* **Per-instruction cost.** One VM instruction costs about 1.8 ns: the loop runs
+  8 instructions per iteration, 80M in all, in 143 ms.
+* **Against the other interpreters.** On scalar and call-heavy code v1 lands
+  close to PHP 8, the fastest of the non-JIT interpreters measured. It is a
+  little behind PHP on calls and about half its speed on the loop. It is
+  ahead of node `--jitless` and Ruby (1.2–2×), 2.3–3.4× faster than CPython
+  3.11, and 5–12× faster than Tcl 9. It is 7–10× slower than native Botlish.
+* **Why faster than CPython, Ruby and Tcl.** Types are fixed at compile time:
+  * no per-operation type dispatch beyond the small-Int check;
+  * small Ints live in words, with no allocation or reference counting, and
+    raw Ints are used where proven;
+  * no lookups by name, and a register VM.
+* **Why not faster than PHP on the loop.** The loop costs 8 instructions per
+  iteration where PHP needs about 5. Three of them come from the NIR: the dead
+  `if`-join `mov`, and a `box` plus a tagged `add`, because range analysis
+  keeps `n` raw but `acc` tagged. Rust's `match` dispatch also competes with
+  PHP's hand-tuned VM. Fusing compare-and-jump and dropping the dead `mov` cut
+  the loop by 29% and `fib` by 13%.
+* **Frame size doesn't affect speed.** Zeroing 13 tagged slots per call
+  against 4 made no measurable difference (51 ms either way). Compaction is
+  for memory (section 8).
+
+**How far the prototype is from v1:**
+
+* **Optimistic:**
+  * it has 17 opcodes rather than about 120, and large `match` loops often
+    lose 10–30% to worse register allocation across handlers;
+  * register access is unchecked;
+  * these programs never allocate, collect or call a helper.
+* **Pessimistic:** no superinstructions, and the plainest dispatch Rust offers.
+* **Fragile:** the code shape of a handler matters a lot. Writing the `tail`
+  handler with iterators instead of indexed loops made the loop 1.7× slower
+  (241 vs 143 ms), and rebuilding equivalent source moved results by up to
+  about 10%. The real interpreter needs a benchmark harness from its first
+  commit.
+* **Expected range for v1:** 40–60 ms for `fib(30)`, 130–180 ms for the loop.
+
+**Library-heavy code and a natively precompiled stdlib.** Rich operations call
+the same runtime helpers as native code, so on string-, list- and
+allocation-heavy code the VM stays closer to native. Library functionality
+written in Botlish is a different matter: `examples/stdlib/hashtable.bot`,
+string algorithms, and every builtin that moves into Botlish code would be
+interpreted, while Python runs `dict` or `str.replace` in C. The plan is to
+precompile the stdlib as native code and interpret only user code. That
+boundary needs:
+
+* **Native function-table entries.** A `call` to one marshals arguments by the
+  callee's physical ABI (the raw, short and ascii positions `nir.rs` already
+  validates). It then treats `NO_VALUE`, or the status word of a fallible
+  scalar-result function, as a failure of the call instruction (3.4). The
+  status word, unnecessary inside the VM, reappears exactly at this boundary.
+* **Both root sources.** `Vm::collect_with` already combines several; the VM's
+  register stacks join the native stack maps.
+* **Callbacks.** A higher-order stdlib function such as `list::any?` or
+  `list::find` that calls a Botlish closure would re-enter the interpreter on
+  the host stack. COROUTINE-PREREQUISITES.md section 7 ("Mixed execution with
+  the JIT") already notes that a coroutine cannot suspend across such a frame
+  without native coroutine stacks. So higher-order stdlib functions either
+  stay interpreted, or suspension inside their callbacks needs that
+  document's section 4.3 machinery.
+* **Open, out of scope here:** whether the stdlib is compiled once (separate
+  compilation) or per program, as native lowering does today with its
+  per-call-site instances.
+
+**GC cost under deep recursion (future GC work, orthogonal to the encoding).**
+Every collection scans every tagged slot of every live frame (3.2). Botlish
+programs recurse once per element, so a collection deep inside such a
+recursion scans the whole stack: its cost per collection grows with stack
+depth.
+
+* **The comparison.** CPython's reference counting has no such scan. Native
+  Botlish has the same scan, but stack maps bound it to the slots live at each
+  call site.
+* **Not measured:** the two benchmarks above never allocate.
+* **Remedies belong to the collector, not the instruction set:**
+  * precise per-pc root maps, so fewer slots are scanned per frame;
+  * a generational collector, where frames below a stack watermark that have
+    not been re-entered since the last collection need not be rescanned.
+* **Effect on the design:** none of these changes an opcode or the frame
+  layout beyond the static per-function root bitmap that section 3.2 already
+  fixes.
+
+---
+
+## 13. Method
 
 **NIR sources**, all from the current tree through the production entry point
 `native::nir`:
@@ -974,11 +1103,13 @@ Per-instruction cost:
 over instructions, of live-in ∪ defs ∪ live-out. Coloring is greedy in register
 order, tagged and scalar kinds separately, parameters fixed.
 
-The scripts were throwaway Python over the NIR text and are not committed.
+The NIR-analysis scripts were throwaway Python over the NIR text and are not
+committed. The run-time prototype and the comparison programs of section 12 are
+in `audit/vm-opcode-viability/`.
 
 ---
 
-## 13. Decisions
+## 14. Decisions
 
 Settled after review of the first version of this document:
 

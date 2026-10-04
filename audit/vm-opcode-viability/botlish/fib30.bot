@@ -1,0 +1,12 @@
+# fib30.bot -- recursive fib(30), the Botlish side of VM-OPCODE-VIABILITY.md
+# section 12 (native timing: measure.tcl; VM timing: ../prototype).
+#
+# expect: 832040
+
+fn fib(n):
+    if n < 2:
+        n
+    else:
+        fib(n - 1) + fib(n - 2)
+
+fib(30)
