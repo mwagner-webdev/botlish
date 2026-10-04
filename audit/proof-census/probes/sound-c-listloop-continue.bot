@@ -1,0 +1,17 @@
+# SOUNDNESS-ADJACENT (false rejection): sound-c-listloop-break.bot's cause
+# with `continue`. f(0) completes normally with 7 on every backend, but the
+# completion walk treats the loop as never completing, so the code after it
+# is unreachable to the proof and f(0) is a false KNOWN-ERROR ("can never
+# complete normally ... Boom", with an empty effective set).
+error Boom
+
+fn f(k) errors Boom:
+    loop x in [1, 2]:
+        if x > 0:
+            continue
+        x
+    if k > 0:
+        fail Boom
+    7
+
+f(0)

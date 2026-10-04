@@ -1,0 +1,11 @@
+# A returning iterable loop reads each element with the checked listget
+# although the index is in bounds by construction; ListGet is op_may_error,
+# so the function is summarized fallible and its caller checks the call.
+fn inc(xs):
+    loop x in xs:
+        x + 1
+
+fn twice(xs):
+    [inc(xs), inc(xs)]
+
+twice([1, 2, 3])

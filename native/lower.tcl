@@ -237,6 +237,11 @@ namespace eval native::lower {
     # analysis of the program, and whether it is enabled at all.
     variable stringregion {}
     variable stringRegionOpt 1
+    # Proven bounds (PROOF-FACT-CENSUS.md G1): whether a bounds-bearing native
+    # call whose every check hir/completions.tcl proved can never fail lowers
+    # to its check-free sibling opcode (or, for a region, omits `regioncheck`)
+    # instead of the checked form.
+    variable provenBoundsOpt 1
     # String traversal (see "String traversal" below): the hir::traversal
     # analysis of the program, and whether it is enabled at all.
     variable traversal {}
@@ -1059,6 +1064,14 @@ namespace eval native::lower {
 #                      1, unless the environment variable
 #                      BOTLISH_NATIVE_STRING_REGION_OPT is 0; see the
 #                      "String regions" section above)
+#   -proven-bounds-opt 1|0
+#                      lower a bounds-bearing native call whose every bounds
+#                      check hir/completions.tcl proved cannot fail to the
+#                      check-free `*proven` opcode (and drop a String
+#                      region's `regioncheck`) instead of the checked form
+#                      (default 1, unless the environment variable
+#                      BOTLISH_NATIVE_PROVEN_BOUNDS_OPT is 0; see
+#                      "Proven bounds" at BoundsProven)
 #   -call-facts-opt 1|0
 #                      propagate value facts through exact closed calls
 #                      (default 1; BOTLISH_NATIVE_CALL_FACTS_OPT=0 disables
@@ -1163,6 +1176,7 @@ proc native::lower::program {hirProgram args} {
     variable blockEscapeOpt
     variable stringregion
     variable stringRegionOpt
+    variable provenBoundsOpt
     variable traversal
     variable traversalOpt
     variable tinyLeafInlineOpt
@@ -1193,6 +1207,8 @@ proc native::lower::program {hirProgram args} {
         && $::env(BOTLISH_NATIVE_BLOCK_ESCAPE_OPT) eq "0" ? 0 : 1}]
     set stringRegionDefault [expr {[info exists ::env(BOTLISH_NATIVE_STRING_REGION_OPT)]
         && $::env(BOTLISH_NATIVE_STRING_REGION_OPT) eq "0" ? 0 : 1}]
+    set provenBoundsDefault [expr {[info exists ::env(BOTLISH_NATIVE_PROVEN_BOUNDS_OPT)]
+        && $::env(BOTLISH_NATIVE_PROVEN_BOUNDS_OPT) eq "0" ? 0 : 1}]
     set rawIntAbiDefault [expr {[info exists ::env(BOTLISH_NATIVE_RAW_INT_ABI_OPT)]
         && $::env(BOTLISH_NATIVE_RAW_INT_ABI_OPT) eq "0" ? 0 : 1}]
     set rawDemandDefault [expr {[info exists ::env(BOTLISH_NATIVE_RAW_DEMAND_OPT)]
@@ -1251,6 +1267,7 @@ proc native::lower::program {hirProgram args} {
             -struct-arg-factor "" -struct-return-factor "" -struct-cycle-factor "" -struct-nesting "" \
             -block-escape-opt $blockEscapeDefault \
             -string-region-opt $stringRegionDefault -string-traversal-opt $traversalDefault \
+            -proven-bounds-opt $provenBoundsDefault \
             -call-facts-opt $callFactsDefault -call-effects-opt $callEffectsDefault \
             -closed-caller-facts-opt $closedCallerFactsDefault \
             -exact-callable-opt $exactCallableDefault -exact-callable-limit $exactLimitDefault \
@@ -1307,6 +1324,7 @@ proc native::lower::program {hirProgram args} {
     }
     set blockEscapeOpt [dict get $options -block-escape-opt]
     set stringRegionOpt [dict get $options -string-region-opt]
+    set provenBoundsOpt [dict get $options -proven-bounds-opt]
     set traversalOpt [dict get $options -string-traversal-opt]
     set tinyLeafInlineOpt [dict get $options -tiny-leaf-inline-opt]
     set constructionOpt [dict get $options -virtual-construction-opt]
@@ -4906,7 +4924,9 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
         set meta [core::native::metadata str::substring]
         EmitArgGuards fn $e $argExprs [list $base $start $end] [dict get $meta paramTypes] str::substring
         dict lappend fn calls [list native str::substring]
-        Assign fn "op regioncheck $base $start $end" $e
+        if {![BoundsProven $e]} {
+            Assign fn "op regioncheck $base $start $end" $e
+        }
         return [list [list $base $start $end] region]
     }
 
@@ -5404,7 +5424,9 @@ proc native::lower::TryShortStringOp {fnVar e node want} {
         set meta [core::native::metadata str::substring]
         EmitArgGuards fn $e $argExprs [list $base $start $end] [dict get $meta paramTypes] str::substring
         dict lappend fn calls [list native str::substring]
-        Assign fn "op regioncheck $base $start $end" $e
+        if {![BoundsProven $e]} {
+            Assign fn "op regioncheck $base $start $end" $e
+        }
         Tally fn shortSlices
         return [list [AssignShort fn "op strsliceshort $base $start $end" $e] short]
     }
@@ -6255,9 +6277,39 @@ proc native::lower::NativeCallOp {e node} {
             return [list $name $op]
         }
         default {
-            return [list $name [lindex $impl 1]]
+            set op [lindex $impl 1]
+            variable provenOps
+            if {[dict exists $provenOps $op] && [BoundsProven $e]} {
+                set op [dict get $provenOps $op]
+            }
+            return [list $name $op]
         }
     }
+}
+
+# Proven bounds (PROOF-FACT-CENSUS.md G1). hir/completions.tcl proves, per
+# bounds-bearing native call (core/native.tcl's `-bounds`), which of its
+# checks can never fail on any path reaching it, and stamps that verdict on
+# the call node (BoundsProven). The proof is open-world (every parameter
+# unconstrained), so it holds in every specialization instance and every
+# lowering of the node -- this never re-derives it, and never reads source
+# syntax (a handler, an `errors` clause) as proof. A call whose every check
+# is proven lowers to the sibling opcode that has no check and no error
+# exit; one with any unproven check keeps the whole checked operation. (Only
+# whole calls are consumed: these operations are single helper calls with one
+# error exit, so a partly checked variant would change neither the code nor
+# the function's fallibility.)
+namespace eval native::lower {
+    variable provenOps [dict create \
+        listget listgetproven  mutarrayget mutarraygetproven  mutarrayset mutarraysetproven \
+        substr substrproven  mutarraycopy mutarraycopyproven  mutarrayfreeze mutarrayfreezeproven]
+}
+
+# 1 if native call E has every bounds check proven (and the optimization is on).
+proc native::lower::BoundsProven {e} {
+    variable hir
+    variable provenBoundsOpt
+    return [expr {$provenBoundsOpt && [hir::completions::BoundsProven $hir $e]}]
 }
 
 # Emits the runtime kind guard (or known-error guard) hir::aot already

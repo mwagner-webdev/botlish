@@ -1,0 +1,14 @@
+# A successful mutable_array::allocate(n) implies 0 <= n, but the capacity
+# form for n is {v n}, not known nonnegative. freeze(a, n) is the slice
+# 0..n of a capacity-n array; both of its checks (START 0 <= N, END n >= 0)
+# hinge on n >= 0, so both LowerUnderrun and UpperOverrun stay effective.
+fn f(n) errors LowerUnderrun, UpperOverrun:
+    a = mutable_array::allocate(n)
+    mutable_array::freeze(a, n)
+
+r = f(2):
+    on LowerUnderrun:
+        []
+    on UpperOverrun:
+        []
+r

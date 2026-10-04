@@ -1080,6 +1080,7 @@ proc core::compiler::GenericCall {ctxVar callee argOps} {
 proc core::compiler::CompileNativeCall {ctxVar e callee name argOps} {
     upvar 1 $ctxVar ctx
     variable intrinsics
+    variable hir
     set meta [core::native::metadata $name]
     set arity [dict get $meta arity]
     if {$arity ne "*" && $arity != [llength $argOps]} {
@@ -1088,10 +1089,14 @@ proc core::compiler::CompileNativeCall {ctxVar e callee name argOps} {
     if {[N $e known] ne ""} {
         return [Op bool [N $e known] bool]
     }
-    if {[dict get $meta errors] ne ""} {
-        # A native with declared errors (`argv`) completes with
+    if {[dict get $meta errors] ne "" && ![hir::completions::BoundsProven $hir $e]} {
+        # A native with declared errors (`argv`, `list::at`) completes with
         # propagate-error: only the generic call turns its completion into
         # compiled code's Tcl completion code 5 (core::runtime::callValue).
+        # Not when every one of this call's bounds checks was proven never to
+        # fail (hir/completions.tcl, PROOF-FACT-CENSUS.md G1): the error
+        # cannot occur here, so it is an ordinary direct call. Only a proof
+        # counts, never a handler or an `errors` clause.
         return [GenericCall ctx $callee $argOps]
     }
     if {[dict exists $intrinsics $name]} {

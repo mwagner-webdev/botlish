@@ -291,6 +291,20 @@ test range-induction-ambiguous-guards {spec #31: two structurally independent co
     inductionOf $analysis $id 0
 } -result {}
 
+test range-induction-open-instance {an open instance (the function also escapes as a value, so not every caller is known) gets no induction fact: the known callers' literal seeds say nothing about where an unknown caller starts (PROOF-FACT-CENSUS.md). It was locked to [0, 5] from count_up(5, 0), and native code deleted the n > 10 branch g(20, 0) takes} -body {
+    set source "fn count_up(n, acc):\n    if n == 0:\n        return acc\n    if n > 10:\n        return 999\n    count_up(n - 1, acc + 1)\n\nfn other(n, acc):\n    acc\n\nfn choose(c, a, b):\n    if c:\n        a\n    else:\n        b\n\nfn flag(x):\n    x > 0\n\ng = choose(flag(1), count_up, other)\n\[count_up(5, 0), g(20, 0)\]"
+    lassign [rangeOfGeneric $source] hir spec analysis
+    set id [rangeInstance $spec count_up]
+    set hir [surface::compile $source t.bot]
+    list [inductionOf $analysis $id 0] [hir::induction::reason [dict get $analysis induction] $id 0] \
+        [lmap backend {interp compile cranelift cranelift-generic} {lindex [outcomeUnderHir $backend $hir] 1}]
+} -result {{} {open instance} {{[5, 999]} {[5, 999]} {[5, 999]} {[5, 999]}}}
+
+test range-induction-closed-instance-unchanged {the same function without the escaping use is closed: the induction fact is still proven, from its one literal caller} -body {
+    lassign [rangeOfGeneric "fn count_up(n, acc):\n    if n == 0:\n        return acc\n    count_up(n - 1, acc + 1)\n\ncount_up(5, 0)"] hir spec analysis
+    inductionOf $analysis [rangeInstance $spec count_up] 0
+} -result {[0, 5]}
+
 # ---------------------------------------------------------------------------
 # Parameter branch narrowing (this milestone's Part A): the same
 # ComparisonNarrowing machinery hir/range.tcl already had for `local`

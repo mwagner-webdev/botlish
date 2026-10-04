@@ -1,0 +1,44 @@
+# Return-fact transport (census §10): what does a caller's completion
+# proof learn from a call result? Each consumer is a list::at whose
+# legality depends on the returned fact; all at the top level (which
+# declares no errors), so an unproven read is UNHANDLED-ERROR.
+xs = [10, 20, 30]
+
+fn exact():
+    42
+
+fn ranged(c):
+    if c:
+        0
+    else:
+        2
+
+type Two = Int in 0..2
+
+fn domain(n) -> Two:
+    if n < 0:
+        0
+    elif n > 2:
+        2
+    else:
+        n
+
+struct Holder:
+    index: int
+
+fn holder():
+    Holder {index: 1}
+
+fn three():
+    [1, 2, 3]
+
+fn text():
+    "abc"
+
+r_exact = list::at(xs, exact() - 40)
+r_ranged = list::at(xs, ranged(true))
+r_domain = list::at(xs, domain(5))
+r_field = list::at(xs, holder().index)
+r_list = list::at(three(), 2)
+r_str = str::substring(text(), 0, 3)
+[r_exact, r_ranged, r_domain, r_field, r_list, r_str]

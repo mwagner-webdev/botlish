@@ -1,0 +1,84 @@
+# Soundness neighbours (census §24-25). Every read below must stay
+# UNHANDLED-ERROR: each is a minimal variation of a proven shape in which
+# the guarding fact no longer holds at the read. Compiled with -strict 0
+# by tools/census.tcl so all diagnostics are listed at once.
+
+# (Same-scope rebinding is DUPLICATE in Botlish; a branch is a nested
+# scope, so shadowing happens inside `if true:`.)
+
+# 1. shadowing the List after the guard: the relation is about the old xs
+fn shadow_list(xs, ys, i):
+    if i < 0 or i >= list::length(xs):
+        return 0
+    if true:
+        xs = ys
+        list::at(xs, i)
+    else:
+        0
+
+# 2. shadowing the index after the guard
+fn shadow_index(xs, i):
+    if i < 0 or i >= list::length(xs):
+        return 0
+    if true:
+        i = i + 1
+        list::at(xs, i)
+    else:
+        0
+
+# 3. a guard inside a branch that joins: the early return is not at the
+#    read's own level
+fn nested_return(xs, i, c):
+    if c:
+        if i < 0 or i >= list::length(xs):
+            return 0
+        1
+    list::at(xs, i)
+
+# 4. a handler that falls through: after it, the failed read may have
+#    happened
+fn handler_fallthrough(xs, i):
+    v = list::at(xs, i):
+        on IndexNotFound:
+            0
+    v + list::at(xs, i)
+
+# 5. a guard proven only in one arm of a join
+fn join_leak(xs, i):
+    k = if i >= 0 and i < list::length(xs):
+        1
+    else:
+        2
+    k + list::at(xs, i)
+
+# 6. MutableArray: the capacity's size binding is shadowed (n + 1)
+fn shadow_capacity(n):
+    a = mutable_array::allocate(n)
+    if true:
+        n = n + 1
+        loop i from 0 to n:
+            mutable_array::at(a, i)
+    else:
+        []
+
+# 7. a continue guard in a loop body proves the rest of that iteration,
+#    not the code after the loop
+fn continue_scope(xs, ys, i):
+    loop y in ys:
+        if i < 0 or i >= list::length(xs):
+            continue
+        y
+    list::at(xs, i)
+
+# 8. the loop variable of one loop read after a second, longer loop
+fn wrong_list_after_relation(xs, ys):
+    loop i from 0 to list::length(ys):
+        list::at(xs, i)
+
+fn sample(xs, ys, i, c, n) errors IndexNotFound:
+    [shadow_list(xs, ys, i), shadow_index(xs, i), nested_return(xs, i, c), handler_fallthrough(xs, i), join_leak(xs, i), shadow_capacity(n), continue_scope(xs, ys, i), wrong_list_after_relation(xs, ys)]
+
+r = sample([1], [1], 0, true, 1):
+    on IndexNotFound:
+        []
+r

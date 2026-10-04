@@ -1,0 +1,31 @@
+# SOUNDNESS (P0, miscompile) on the DEFAULT (specialized) backend:
+# sound-a-open-induction.bot's cause, reached through specialization.
+# count_up escapes as a value (g) and has ten direct count_up(5, ...) calls
+# of different argument types -- more than the 8 live specializations a
+# block may have, so one literal call falls back to the generic instance,
+# which is also the instance g reaches. That instance is open, yet its n
+# was locked to [0, 5] from the literal seed, and native lowering decided
+# `n > 10` false. Expected (interp, compile): [10, 999].
+fn count_up(n, acc):
+    if n == 0:
+        return acc
+    if n > 10:
+        return 999
+    count_up(n - 1, acc)
+
+fn other(n, acc):
+    acc
+
+fn choose(c, a, b):
+    if c:
+        a
+    else:
+        b
+
+fn flag(x):
+    x > 0
+
+g = choose(flag(1), count_up, other)
+a = [count_up(5, 0), count_up(5, "a"), count_up(5, true), count_up(5, [1]), count_up(5, ["a"])]
+b = [count_up(5, [true]), count_up(5, [[1]]), count_up(5, other), count_up(5, flag), count_up(5, [[true]])]
+[list::length(a) + list::length(b), g(20, 0)]

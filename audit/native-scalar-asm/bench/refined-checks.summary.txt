@@ -2,7 +2,7 @@ source:  bench/refined-checks.bot
 backend: Cranelift (specialize=1)
 asm:     refined-checks.asm
 vcode:   refined-checks.vcode
-machine-code bytes: 8704 (per function: 1415 217 609 74 74 74 128 128 351 258 175 176 238 304 352 183 797 140 127 103 474 714 426 823 344)
+machine-code bytes: 8187 (per function: 1415 217 609 74 74 74 128 128 342 115 154 176 238 295 344 183 770 140 127 103 313 642 367 815 344)
 
 functions:
   0 <program entry>: nir-regs=43
@@ -14,7 +14,7 @@ functions:
   6 ascii::is_alphabetic<int>: nir-regs=8
   7 ascii::is_alphanumeric<int>: nir-regs=8
   8 web::emailish?<str>: nir-regs=26
-  9 char_at<int>: nir-regs=22
+  9 char_at<int>: nir-regs=21
   10 char_at<int>: nir-regs=18
   11 local_char?<str>: nir-regs=9
   12 local_char?<generic>: nir-regs=9
@@ -150,10 +150,10 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 9 "char_at"
-    NIR regs: 22
+    NIR regs: 21
     raw regs: 7
-    managed-capable regs: 15
-    effects: may_error=true may_gc=false
+    managed-capable regs: 14
+    effects: may_error=false may_gc=false
     safepoints: 0
     root candidates: 0
     max live roots: 0
@@ -166,7 +166,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     NIR regs: 18
     raw regs: 5
     managed-capable regs: 13
-    effects: may_error=true may_gc=true
+    effects: may_error=false may_gc=true
     safepoints: 1
     root candidates: 3
     max live roots: 3
@@ -360,5 +360,5 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
 mechanical pattern counts (triage only; see report for interpretation):
   5 x calls to rt_int_add
   4 x calls to rt_int_cmp
-  47 x calls to other rt_* helpers
+  42 x calls to other rt_* helpers
   1 x guard/guardbool instructions

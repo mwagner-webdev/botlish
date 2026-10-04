@@ -1,0 +1,44 @@
+# Struct fact transport (census §11): the declared field domain vs the
+# caller-specific fact about this particular field value.
+xs = [10, 20, 30]
+
+type Idx = Int in 0..2
+
+struct Plain:
+    index: int
+
+struct Dom:
+    index: Idx
+
+struct Outer:
+    inner: Plain
+
+# construction -> bind -> projection, field declared int, exact constant
+p = Plain {index: 1}
+s_local_exact = list::at(xs, p.index)
+
+# field declared with a domain: projection carries the declared domain
+d = Dom {index: 2}
+s_local_domain = list::at(xs, d.index)
+
+# nested struct, exact constant two levels down
+o = Outer {inner: Plain {index: 0}}
+s_nested_exact = list::at(xs, o.inner.index)
+
+# function argument: declared domain survives, exact field value?
+fn via_param_domain(v: Dom):
+    list::at([10, 20, 30], v.index)
+
+fn via_param_plain(v: Plain) errors IndexNotFound:
+    list::at([10, 20, 30], v.index)
+
+s_param_domain = via_param_domain(Dom {index: 1})
+
+# call-specific completion walk of a callee whose body is legal only under
+# the caller's field value
+fn needs_exact_field(v: Plain) errors IndexNotFound:
+    list::at([10, 20, 30], v.index)
+
+s_call_specific = needs_exact_field(Plain {index: 1})
+
+[s_local_exact, s_local_domain, s_nested_exact, s_param_domain, s_call_specific]

@@ -26,6 +26,16 @@ namespace eval hir::errorsets {}
 proc hir::errorsets::verify {hirVar} {
     upvar 1 $hirVar hir
     hir::completions::resetCache
+    # The bounds verdicts (hir::completions::BoundsProven) code generation
+    # reads are rebuilt from scratch by every verification: HIR is checked
+    # again after it gains code (native/prepare.tcl), and a verdict a
+    # previous run stamped on a node this run does not reach must not
+    # survive as if proven.
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict exists $node boundsVerdicts]} {
+            dict unset hir exprs $e boundsVerdicts
+        }
+    }
     set blocks [list program]
     dict for {e node} [dict get $hir exprs] {
         if {[dict get $node kind] eq {block}} {

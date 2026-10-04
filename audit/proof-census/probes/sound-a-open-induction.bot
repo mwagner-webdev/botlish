@@ -1,0 +1,29 @@
+# SOUNDNESS (P0, miscompile): hir/induction.tcl's equality-termination
+# proof seeds n from the syntactic literal arguments of direct calls only
+# (count_up(5, ...)) and hir/range.tcl locks the result onto the instance
+# even when that instance is OPEN -- here count_up also escapes as a value
+# (g) and is called with 20. Native lowering then decides `n > 10` false
+# from the locked [0, 5] and deletes the `return 999` branch.
+# Expected (interp, compile): [5, 999]. Run with -backend cranelift-generic
+# (every call shares the one generic instance) to see [5, 20].
+fn count_up(n, acc):
+    if n == 0:
+        return acc
+    if n > 10:
+        return 999
+    count_up(n - 1, acc + 1)
+
+fn other(n, acc):
+    acc
+
+fn choose(c, a, b):
+    if c:
+        a
+    else:
+        b
+
+fn flag(x):
+    x > 0
+
+g = choose(flag(1), count_up, other)
+[count_up(5, 0), g(20, 0)]

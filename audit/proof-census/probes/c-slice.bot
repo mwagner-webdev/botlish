@@ -1,0 +1,16 @@
+# Journey C: slice proof. LowerUnderrun and UpperOverrun are ruled out
+# independently by the conjuncts of the guard.
+fn cut(text, start, end):
+    if start >= 0 and end >= start and end <= str::length(text):
+        str::substring(text, start, end)
+    else:
+        ""
+
+# Only the lower half proven: UpperOverrun stays effective.
+fn cut_lower(text, start, end) errors UpperOverrun:
+    if start >= 0 and end >= start:
+        str::substring(text, start, end)
+    else:
+        ""
+
+[cut("hello", 1, 3), cut("hello", 3, 9), cut_lower("hello", 0, 2)]

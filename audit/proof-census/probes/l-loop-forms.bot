@@ -1,0 +1,42 @@
+# Loop facts (census §12): each numeric loop form and lockstep, consumed
+# by list::at (legality: completion proof) -- the range fact of the same
+# index is printed beside it (codegen: hir::range).
+fn up_to(xs):
+    loop i from 0 to list::length(xs):
+        list::at(xs, i)
+
+fn up_through(xs):
+    loop i from 0 through list::length(xs) - 1:
+        list::at(xs, i)
+
+fn down_through(xs):
+    loop i down from list::length(xs) - 1 through 0:
+        list::at(xs, i)
+
+fn down_to(xs):
+    loop i down from list::length(xs) - 1 to -1:
+        list::at(xs, i)
+
+fn lockstep(xs):
+    loop x in xs and i from 0 to list::length(xs):
+        list::at(xs, i) + x
+
+fn lockstep_other(xs, ys):
+    loop x in xs and y in ys:
+        x + y
+
+fn offset(xs):
+    loop i from 1 to list::length(xs):
+        list::at(xs, i - 1)
+
+fn bound_alias(xs):
+    n = list::length(xs)
+    loop i from 0 to n:
+        list::at(xs, i)
+
+fn post_loop(xs) errors IndexNotFound:
+    loop i from 0 to list::length(xs):
+        i
+    list::at(xs, 0)
+
+[up_to([1, 2]), up_through([1, 2]), down_through([1, 2]), down_to([1, 2]), lockstep([1, 2]), lockstep_other([1, 2], [3, 4]), offset([1, 2]), bound_alias([1, 2]), post_loop([1, 2])]

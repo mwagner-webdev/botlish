@@ -1,0 +1,23 @@
+# Isolates the method-spelling difference: the module-level binding
+# (at = list::at), spelled free, vs the qualified intrinsic.
+length = list::length
+at = list::at
+
+fn qualified(xs):
+    loop i from 0 to list::length(xs):
+        list::at(xs, i)
+
+fn bound(xs):
+    loop i from 0 to length(xs):
+        at(xs, i)
+
+fn method(xs):
+    loop i from 0 to xs.length():
+        xs.at(i)
+
+fn local_bound(xs):
+    at2 = list::at
+    loop i from 0 to list::length(xs):
+        at2(xs, i)
+
+[qualified([1, 2]), bound([1, 2]), method([1, 2]), local_bound([1, 2])]

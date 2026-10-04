@@ -1,0 +1,9 @@
+# Median of 3, ms; measured while two test suites ran on the same 4 vCPUs (relative, not absolute).
+program                        frontend  errorsets specialize      range
+fib.bot                             9.8        0.5        1.2       31.5
+refined-checks.bot                 32.5        1.6       65.9       90.5
+sum-refined.bot                    18.3        1.1        6.4        6.8
+matmul.bot                         58.9        4.4       11.2       20.4
+ai_text_clean.bot                  65.8       32.5       12.2       15.7
+hashtable.bot                     279.9       33.7      100.3      121.8
+csv_records.bot                   546.5       57.7      178.7      219.8

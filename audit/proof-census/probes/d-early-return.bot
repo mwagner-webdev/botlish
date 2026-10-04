@@ -1,0 +1,7 @@
+# Journey D: an early return carries the negation of its guard forward.
+fn pick(xs, i, fallback):
+    if i < 0 or i >= list::length(xs):
+        return fallback
+    list::at(xs, i)
+
+[pick([10, 20], 1, 0), pick([10, 20], 5, 0), pick([10, 20], -1, 0)]

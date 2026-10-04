@@ -1,0 +1,23 @@
+# Handler body / handler exit (census §5 matrix): the value of a handled
+# call is the join of the call's result (here {1}) and each handler's
+# value (here {0}); is that Range available after the handler?
+error Boom
+
+fn g(k) errors Boom:
+    if k > 0:
+        fail Boom
+    1
+
+fn f(k):
+    v = g(k):
+        on Boom:
+            0
+    list::at([10, 20], v)
+
+fn f_body(k):
+    v = g(k):
+        on Boom:
+            list::at([10, 20], 1)
+    v
+
+[f(0), f(1), f_body(1)]

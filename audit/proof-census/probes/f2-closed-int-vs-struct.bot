@@ -1,0 +1,25 @@
+# Journey F pair: the same decision on an Int parameter (instance entry
+# facts carry the caller's exact Int) and on a struct field (they do not).
+struct Box:
+    value: int
+
+fn enc_int(v: int) -> int:
+    if v > 100:
+        v - 1000
+    else:
+        v
+
+fn enc_box(b: Box) -> int:
+    v = b.value
+    if v > 100:
+        v - 1000
+    else:
+        v
+
+fn probe_int() -> int:
+    enc_int(7)
+
+fn probe_box() -> int:
+    enc_box(Box {value: 7})
+
+[probe_int(), probe_box()]

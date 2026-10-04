@@ -1,0 +1,12 @@
+# loop.bot -- a 10M-iteration integer loop (a self tail call), the Botlish
+# side of VM-OPCODE-VIABILITY.md section 12 (native timing: measure.tcl; VM
+# timing: ../prototype).
+#
+# expect: 50000005000000
+
+fn count(n, acc):
+    if n <= 0:
+        return acc
+    count(n - 1, acc + n)
+
+count(10000000, 0)
