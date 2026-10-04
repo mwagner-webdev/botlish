@@ -143,14 +143,18 @@ process_finding() {  # process_finding TARGET KIND RAWFILE   (kind: crash|hang)
     echo "triage: $id $kind $target $verdict -> $dir (class guess: $class)"
 }
 
-for target in $(ls "$OUT" 2>/dev/null); do
-    [[ -d "$OUT/$target" ]] || continue
-    for kindDir in crashes hangs; do
-        for fuzzer in "$OUT/$target"/*/; do
-            [[ -d "$fuzzer$kindDir" ]] || continue
-            for raw in "$fuzzer$kindDir"/id:*; do
-                [[ -f "$raw" ]] || continue
-                process_finding "$target" "${kindDir%s}" "$raw"
+for tree in out out-asan; do
+    OUTTREE="$ROOT/fuzz/$tree"
+    [[ -d "$OUTTREE" ]] || continue
+    for target in $(ls "$OUTTREE" 2>/dev/null); do
+        [[ -d "$OUTTREE/$target" ]] || continue
+        for kindDir in crashes hangs; do
+            for fuzzer in "$OUTTREE/$target"/*/; do
+                [[ -d "$fuzzer$kindDir" ]] || continue
+                for raw in "$fuzzer$kindDir"/id:*; do
+                    [[ -f "$raw" ]] || continue
+                    process_finding "$target" "${kindDir%s}" "$raw"
+                done
             done
         done
     done

@@ -140,9 +140,9 @@ log "smoke test: afl-showmap -Q over /bin/true via the harness"
 printf 'hello' > "$WORK/smoke-input"
 export AFL_PATH="$AFL_PREFIX/lib/afl" \
        AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 AFL_SKIP_CPUFREQ=1
-"$AFL_PREFIX/bin/afl-showmap" -Q -m none -t 5000 -- \
+"$AFL_PREFIX/bin/afl-showmap" -Q -m none -t 5000 -o "$WORK/smoke-map" -- \
     "$ROOT/fuzz/harness/argv-file" /bin/true "$WORK/smoke-input" \
-    -o "$WORK/smoke-map" >/dev/null 2>&1 || { log "ERROR: QEMU smoke test failed"; exit 1; }
+    >/dev/null 2>&1 || { log "ERROR: QEMU smoke test failed"; exit 1; }
 log "smoke test ok: $(wc -l < "$WORK/smoke-map") tuples"
 
 log "host ready. Toolchain: $AFL_PREFIX/bin (AFL++ ${AFL_VERSION}, qemuafl ${QEMUAFL_COMMIT:0:9})"

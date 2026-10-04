@@ -49,6 +49,12 @@ bash fuzz/scripts/run-all.sh            # full pipeline, 1200 s/target
 bash fuzz/scripts/campaign.sh 600       # just the AFL part, 600 s/target
 ```
 
+The sanitizer second pass (after `build-asan.sh`):
+
+```sh
+bash fuzz/scripts/campaign-asan.sh 600  # ASan binaries, QEMU mode
+```
+
 ## Triage
 
 `bash fuzz/scripts/triage.sh` collects raw crashes/hangs from `fuzz/out`,

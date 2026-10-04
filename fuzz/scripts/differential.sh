@@ -38,6 +38,17 @@ compare_one() {  # compare_one TARGET SEEDNAME SEEDPATH VERTICAL...
             printf '%s\t%s\t%s\t%s\tknown-limitation\n' "$target" "$seedname" "$vertical" "$normalized" >> "$REPORT"
             continue
         fi
+        # Documented display difference, not a semantic divergence: main.tcl
+        # shows values "with runtime evidence shown as text\"#{Type}\"" on the
+        # Tcl-side verticals (interp, compile); native verticals print the
+        # same value without the refinement annotation (the Rust runtime
+        # does not carry Tcl-side refinement metadata). If stripping the
+        # #{...} annotations makes the runs equal, record it as such.
+        if [[ -n "$reference" && "$normalized" != "$reference" \
+              && "$(sed 's/#{[^}]*}//g' <<<"$normalized")" == "$(sed 's/#{[^}]*}//g' <<<"$reference")" ]]; then
+            printf '%s\t%s\t%s\t%s\tdisplay-divergence\n' "$target" "$seedname" "$vertical" "$normalized" >> "$REPORT"
+            continue
+        fi
         printf '%s\t%s\t%s\t%s\n' "$target" "$seedname" "$vertical" "$normalized" >> "$REPORT"
         rows=$((rows + 1))
         if [[ -z "$reference" ]]; then

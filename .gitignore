@@ -18,5 +18,6 @@ __pycache__/
 /fuzz/tools/
 /fuzz/build/
 /fuzz/out/
+/fuzz/out-asan/
 /fuzz/seeds-src/
 /fuzz/harness/argv-file
