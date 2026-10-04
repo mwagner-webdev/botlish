@@ -810,6 +810,48 @@ semantics change and no NIR change.
 | R9 | Cross-actor heap pointers | future | marking writes `header.marked` into any non-static object it reaches, and only the owning heap's sweep clears it (`heap.rs:121-129, 161-165`). A foreign pointer would leave another heap's object permanently marked. A walk over a stack shared by two actors cannot tell their frames apart | every actor's activations, including its root, run on actor-owned stacks (§6). Sendability forbids sharing mutable or handle values |
 | R10 | Moving a suspended coroutine to another actor or thread | future | suspended native frames hold the `Vm` pointer in callee-saved registers and spill slots no stack map describes. A Rust helper frame holds `p`. Stack maps describe only `Value` roots | §6. Interpreter frames do not have this problem (§7) |
 
+**R3 in plain terms.** Windows and wasm fall short for different reasons.
+
+* **Windows can switch stacks natively**, arguably more easily than Linux.
+  Fibers are stackful coroutines built into the OS. `CreateFiberEx` and
+  `SwitchToFiber` also do the Windows-specific bookkeeping: they update the
+  thread's recorded stack bounds, give each fiber its own guard page, and keep
+  stack probes and exception handling working. The alternative is the same
+  short assembly switch as on Linux, saving the larger Win64 set of preserved
+  registers.
+* **Windows's real gap is the existing GC frame walk**, and it needs fixing
+  even without coroutines.
+  * Windows x64 uses the same stack-map plus frame-pointer walk as Linux,
+    because the check selects it by ISA only (`clif.rs:527`).
+  * The walk follows the frame-pointer chain through the runtime's Rust helper
+    frames. Frame pointers are forced only for the Linux and macOS targets
+    (`.cargo/config.toml:42-46`). Rust on Windows omits them by default, so
+    the walk can read garbage partway up. That fits the recorded Windows
+    GC-stress crashes (CLOSED-CALL-EFFECTS.md:81).
+  * Overflow detection (guard page plus SIGSEGV handler) is Linux-only, so
+    Windows falls back to the slower in-band depth counter.
+  * The fix is to force frame pointers for the Windows target too, and to add
+    a guard per fiber through a vectored exception handler in place of
+    SIGSEGV.
+* **Wasm is different in kind.** WebAssembly is a sandboxed bytecode whose
+  call stack belongs to the engine (the browser or Wasmtime). The program has
+  no stack-pointer register it can swap, and cannot read its own frames or
+  return addresses. That blocks both mechanisms:
+  * **The GC cannot walk frames.** Roots must live in a separate shadow stack
+    in ordinary memory, which CRANELIFT-WASM.md §4.4 already plans.
+  * **The program cannot switch stacks itself.** It needs engine support, and
+    every option costs something:
+    * a stack-switching proposal that is not part of Wasm 3.0;
+    * JSPI, which only suspends out to JavaScript;
+    * a compile-time rewrite such as Asyncify. It turns functions that may
+      suspend into state machines that unwind and later rebuild their frames,
+      at a cost in code size.
+* **The bytecode interpreter (§7) sidesteps all of this.** It keeps each
+  coroutine's frames in its own memory, so it needs neither a frame walk nor
+  stack switching.
+
+Both platforms are later on the roadmap; R3 records what they will need.
+
 ---
 
 ## 6. Actors and threads: what coroutine work should leave ready
@@ -1121,6 +1163,49 @@ running `coroutine cz deep 150` there fails with `too many nested evaluations
 ---
 
 ## Appendix B: what produced executables take from Rust `std` and glibc
+
+**Summary.**
+
+* **`std` is not monolithic over glibc, but on the current target it is
+  glibc-bound.** `core` needs no operating system, `alloc` needs only an
+  allocator, and `std` adds an OS layer that the `-gnu` target implements on
+  glibc (B.1). Almost all of the runtime uses only the first two layers. Linking
+  `std` still brings in its own startup code, its own stack-overflow handler
+  and its panic machinery, whether the runtime uses them or not.
+* **A produced executable imports 81 symbols** from `libc.so.6`, `libm.so.6`
+  and `libgcc_s.so.1`. Every one is attributed to the code that calls it, and
+  a script checked that B.2's table covers all 81.
+* **Allocation is the big one.** Every `Box`, `Vec` and `String`, and every GC
+  heap object, goes through glibc's `malloc`. Replacing it means writing the
+  runtime's own allocator.
+* **The root coroutine (§4.5) already removes** the worker thread
+  (`pthread_create`/`join`) and the stack-bounds discovery calls.
+* **The rest are small, separable items, each with a clear replacement:**
+  * **`libm` comes only from `num-bigint`.** With its default `std` feature it
+    calls `f64::log2`; without it, it uses integer math. Setting
+    `default-features = false` drops `libm.so.6` with no code change.
+  * **`getrandom` only seeds the `HashMap` in the allocation-site metrics.** A
+    fixed hasher removes it.
+  * **The thread-local `PROGRAM`.** Moving it into the `Vm` is already a
+    prerequisite for actors (§4.3 item 10).
+  * **Environment and argument reading, the result and error printing, timing
+    for GC metrics, and exit.**
+  * **`libgcc_s` comes only from panic unwinding and backtraces.**
+    `panic = "abort"` plus a panic handler removes it. That handler must print
+    the existing `NATIVE BUG` line itself, because today a panic is caught when
+    the worker thread is joined.
+  * **The memory intrinsics** (`memcpy` and friends) are emitted by the
+    compiler and need the runtime's own implementations without libc.
+* **The `botlish-native` driver** (JIT, `rustc` invocation) is a host tool and
+  can stay on `std`.
+* **Routes off glibc** (B.4):
+  * musl, with `std` unchanged but still a libc;
+  * `#![no_std]` on the current target, linked with `-nostdlib -static`, which
+    works on stable Rust;
+  * `x86_64-unknown-linux-none`, which this `rustc` knows but `rustup` ships no
+    prebuilt standard library for, so it needs nightly `-Zbuild-std`.
+
+  B.4 ends with a seven-step removal order, cheapest first.
 
 **Method.** At `f7bb13c`, `examples/stdlib/csv.bot` was compiled with
 `tclsh9.0 main.tcl -emit-native-executable`. The executable's dynamic imports
