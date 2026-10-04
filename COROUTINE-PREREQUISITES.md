@@ -66,6 +66,11 @@ Missing:
 * making "may suspend" imply "is a GC safepoint" (`may_gc`);
 * removing process- and thread-global runtime state.
 
+The program body should run as the actor's root coroutine (§6). The runtime
+then allocates every stack Botlish code runs on. That removes glibc's stack
+discovery and the 1 GiB worker thread, a step toward not depending on glibc,
+and it can land first, on its own (§4.5).
+
 **HIR needs much less than one might expect.**
 
 * Every HIR fact describes an immutable value bound once. No analysis keeps
@@ -544,14 +549,14 @@ handles and MutableArrays are never sendable.
 **Stacks and switching.**
 
 1. **Coroutine stacks.**
-   * Each coroutine gets an `mmap`ed region with a `PROT_NONE` guard page
-     below it, described by a `NativeStack` (state `Suspended` while not
-     running, `saved_sp` set).
+   * Each coroutine gets an `mmap`ed region with a `PROT_NONE` guard region
+     below it (larger than one page, §4.5), described by a `NativeStack`
+     (state `Suspended` while not running, `saved_sp` set).
    * Stacks cannot be copied or grown in place. Codegen keeps callee-to-caller
      interior pointers in registers (argument arrays, the multi-result buffer
      held for the callee's whole lifetime: `clif.rs:1049-1056, 1460-1476`), and
      Rust frames are opaque. So each stack has a fixed reserved size, and a
-     pool of stacks avoids an `mmap`/`munmap` per coroutine.
+     pool of stacks avoids an `mmap`/`munmap` per coroutine (§4.5).
 2. **The switch routine.** It needs a few instructions of `asm` per target.
    * x86-64 SysV: save `rbx`, `rbp`, `r12`-`r15`, plus MXCSR and the x87
      control word, store `rsp` in the from-context, load the to-context, and
@@ -673,6 +678,115 @@ handles and MutableArrays are never sendable.
   format grew (`nir.rs:996-1007`). Adding instructions follows the usual
   practice: the format is internal between Tcl and Rust (`native/native.tcl:149-185`).
 
+### 4.5 Runtime-owned stacks, the root coroutine, and glibc
+
+The root coroutine (§6) means the runtime allocates every stack Botlish code
+runs on, the root's included. Not depending on glibc is a long-term goal of
+the project, and this design moves the stack side of that goal most of the way
+for little extra work.
+
+**What glibc does for stacks today.**
+
+| Use | Where | Through |
+|---|---|---|
+| Discovering the stack and guard bounds | `runtime/platform/x86_64_linux.rs:6-25`, called from `Vm::new` (`vm.rs:221-226`) and when the guard is installed | `pthread_self`, `pthread_getattr_np`, `pthread_attr_getstack`, `pthread_attr_getguardsize`, `pthread_attr_destroy` |
+| A 1 GiB worker thread, spawned only to get a large stack | `main.rs:68-72`, `runtime/aot.rs:26-31` | `std::thread::Builder::stack_size`, which is glibc's `pthread_create` |
+| Overflow signal handling | `x86_64_linux.rs:34-118` | `sigaction`, `sigaltstack`, `sigemptyset`, `signal`, `raise` |
+| Trivial system calls | the same handler | `syscall(SYS_gettid)`, `write`, `_exit` |
+
+**What a runtime-allocated root stack removes.**
+
+* **Discovery.** The runtime chose the bounds, so it knows them. There are no
+  `_np` calls. The quirk that "the discovered usable size may be slightly
+  smaller than the requested builder size" (NATIVE-STACK-OVERFLOW.md:8-17)
+  disappears.
+* **The worker thread.** The root coroutine's 1 GiB reservation replaces the
+  thread's stack. The JIT driver and the AOT executable's `aot::run` can run
+  the program from the main thread.
+* **A second kind of stack.** Root and pooled stacks share one allocator, one
+  guard layout and one `NativeStack` description. The GC walk ends at the root
+  stack's base, at the trampoline's zeroed saved `rbp`, instead of climbing
+  through the driver's frames and `std`'s thread-start frames.
+* Windows later uses the same design, with `VirtualAlloc` in place of `mmap`.
+
+**What it does not remove, and how each would go.**
+
+* **The OS thread's own stack.** The main thread's stack comes from the
+  kernel. The plan, a future decision, is to create later threads with raw
+  `clone` and allocate their stacks with the same allocator, so every stack in
+  the process belongs to the runtime.
+  * The reasoning: once the runtime allocates, guards and walks its own
+    stacks, a libc thread library adds only a second, differently discovered
+    kind of stack. Botlish needs nothing else from it.
+  * With the root coroutine, a thread's own stack runs only the scheduler and
+    the runtime entry, so it can stay small.
+* **Signal handling.** `sigaction` and `sigaltstack` are libc wrappers around
+  the `rt_sigaction` and `sigaltstack` system calls, and can be replaced by raw
+  calls.
+  * The one trap: on x86-64, `rt_sigaction` needs `SA_RESTORER` and a restorer
+    trampoline that the caller supplies, a few instructions that issue
+    `rt_sigreturn`. glibc supplies it today.
+  * The handler body is already async-signal-safe: atomic loads, `gettid`,
+    `write` and `_exit` (`x86_64_linux.rs:34-55`).
+* **Rust `std`.** It links libc on the `-gnu` target and installs its own
+  SIGSEGV handler for the main thread's guard. Leaving glibc ultimately means
+  a `no_std` runtime or the project's own system-call layer, which
+  `linux::abi::syscall` (LINUX-X86-64-SYSCALL.md) already points toward.
+
+**Guard regions larger than one page.**
+
+* Use 64 KiB to 1 MiB of `PROT_NONE` below every runtime-owned stack, root and
+  pooled alike.
+* A single 4 KiB page is enough only because every large frame probes:
+  * Cranelift's inline probes for frames over 4 KiB (`codegen/mod.rs:155-160`);
+  * Rust's stack probes.
+* Unprobed code, such as a future C or hand-written helper with a large frame,
+  could step over one page.
+* A `PROT_NONE` region costs address space only, never memory. The kernel's
+  own gap below the main thread's stack is 1 MiB (`stack_guard_gap`).
+* `NativeStack`'s `guard_low..low_bound` already describes a guard of any size.
+
+**The stack pool: its value is reuse, not pre-allocation.**
+
+* Reserving a stack is one `mmap` with `MAP_NORESERVE`, and its pages get
+  memory only when touched. Pre-reserving N stacks at start-up saves N cheap
+  system calls. Starting empty and growing on demand (for example by doubling)
+  is just as good.
+* What matters is a free list. With it, short-lived coroutines do not pay
+  `mmap`/`munmap` plus page-fault churn each time. Touched pages of free stacks
+  above a high-water mark go back with `madvise(MADV_DONTNEED)`.
+* Pooled stacks share one size class. The root stack is the exception, with
+  its large reservation.
+* **Whether a program needs the pool at all is already answerable.**
+  * Give the creation intrinsic a `-runtime` tag, for example
+    `coroutine-stack`.
+  * `hir::aot` already collects `-runtime` tags into each closed program's
+    requirement list (README §19; `core/native.tcl:157-186`).
+  * The root stack is always allocated; only the pool depends on the tag.
+
+**First milestone: the root coroutine alone.** This is a standalone runtime
+refactor that can land before any coroutine syntax exists. It has no
+semantics change and no NIR change.
+
+* Allocate the root stack and its guard, switch into it once from the main
+  thread, run the program function (`botlish_fn_0`, module initialization
+  included), and switch back.
+* Remove the worker thread (`main.rs:68-72`, `runtime/aot.rs:26-31`) and the
+  pthread discovery (`x86_64_linux.rs:6-25`). `Vm::new` takes the root stack's
+  `NativeStack` instead of `NativeStack::current()`, and the overflow handler
+  checks the runtime-owned guard.
+* It exercises §4.3's switch routine (item 2), the walk's termination at a
+  stack base (item 3) and the per-stack overflow record (item 8), with exactly
+  one stack. The multi-stack GC (item 4) arrives with real coroutines.
+* Validation:
+  * the existing suite, plain and under `BOTLISH_NATIVE_GC_STRESS=1`;
+  * the overflow tests NATIVE-STACK-OVERFLOW.md lists (two overflowing
+    processes, a large-frame overflow, 400 live recursive frames under GC
+    stress).
+
+  `BOTLISH_NATIVE_STACK_BYTES` keeps working; it now sizes the root
+  reservation.
+
 ---
 
 ## 5. Roadblocks and risks
@@ -680,7 +794,7 @@ handles and MutableArrays are never sendable.
 | # | Roadblock | Severity | Why | Mitigation |
 |---|---|---|---|---|
 | R1 | Root discovery over many stacks | high | `framewalk::walk` starts only at the current `rbp`, is bounded by one `NativeStack`, and relies on monotonic ascent (`framewalk.rs:126-157`). `Vm.native_stack` is a single `Option` (`vm.rs:177`) | §4.3 items 4-5. The per-frame model is already correct; only the enumeration of stacks is new |
-| R2 | Stack memory per coroutine | high | Stacks cannot be copied or segmented (interior callee-to-caller pointers; opaque Rust frames). A fixed reservation trades recursion depth against address space and RSS. Today's 1 GiB worker (`main.rs:68-72`, `runtime/aot.rs:26-31`) is the program's whole recursion budget. Rust helpers also recurse proportionally to value nesting (`equal` `ops.rs:376+`, `hash_mix` `:506`, `show`) | a stack pool; `madvise(MADV_DONTNEED)` on return to the pool; a configurable default size in the style of `BOTLISH_NATIVE_STACK_BYTES`; the actor's root coroutine keeps the large reservation. Depth limits are resource limits, not semantics (README §20), so `interp`, `compile` and native may differ |
+| R2 | Stack memory per coroutine | high | Stacks cannot be copied or segmented (interior callee-to-caller pointers; opaque Rust frames). A fixed reservation trades recursion depth against address space and RSS. Today's 1 GiB worker (`main.rs:68-72`, `runtime/aot.rs:26-31`) is the program's whole recursion budget. Rust helpers also recurse proportionally to value nesting (`equal` `ops.rs:376+`, `hash_mix` `:506`, `show`) | a stack pool whose value is reuse (§4.5); `madvise(MADV_DONTNEED)` above a high-water mark; a configurable default size in the style of `BOTLISH_NATIVE_STACK_BYTES`; the actor's root coroutine keeps the large reservation. Depth limits are resource limits, not semantics (README §20), so `interp`, `compile` and native may differ |
 | R3 | Hosts other than Linux x86-64 | high (portability) | **Windows can switch stacks** (Fibers: `CreateFiberEx`/`SwitchToFiber`, which also maintain the TIB stack bounds and per-fiber guard page; or a hand-written switch saving the larger Win64 callee-saved set, `rdi`/`rsi` and `xmm6`-`xmm15` included). Its gap is the existing frame walk: Windows x64 takes the stack-map path (`clif.rs:527` tests only the ISA), but frame pointers are forced only for the Linux and macOS targets (`.cargo/config.toml:42-46`), so the rbp walk through Rust helper frames is unreliable. GC-stress crashes on Windows are recorded (CLOSED-CALL-EFFECTS.md:81). Overflow uses the in-band shadow-stack depth token, because the guard handler is Linux-only (`native_stack.rs:31-33`, `roots.rs:722`). **Wasm** exposes no stack to the program: no frame walk (CRANELIFT-WASM.md:257), and no stack switching in Wasm 3.0 (JSPI only suspends to JavaScript) | Windows: force frame pointers for the MSVC target too, which the walker needs without coroutines as well; then Fibers or an `asm` switch, and an overflow guard per fiber (a vectored exception handler in place of SIGSEGV). Wasm: per-coroutine shadow segments plus a per-coroutine Rust `__stack_pointer`; then the wasm stack-switching proposal, or an Asyncify-like transform of exactly the `may_suspend` functions (§4.4). The bytecode interpreter (§7) is the portable engine that needs neither |
 | R4 | Typing of transported values | medium | `any` at yield and resume sites makes code guarded (AOT-unready until refined); the erasure rules reject typed callables and `MutableArray[T]` as transport values | untyped transport first (§4.1 item 2), then typed protocol fields on the handle type |
 | R5 | Global per-thread runtime state | medium (blocks actors, not coroutines) | `thread_local PROGRAM`, process-global guard atomics, `Rc`; in Tcl, `ModuleBase`, argv, frame/mutarray stores per interp, and non-re-entrant compile state (`hir/sourcetypes.tcl:24-66`) | §4.2 item 5; §4.3 item 10 |
@@ -710,11 +824,13 @@ handles and MutableArrays are never sendable.
 * **Run every activation on actor-owned stacks, including the program entry.**
   Make the program's own body the actor's *root coroutine* on an actor-owned
   stack, and keep the thread's own stack for the scheduler only. This gives
-  three things at once:
+  four things at once:
   * GC walks never leave the actor's stacks (R9);
   * overflow handling is uniform;
   * "suspend the root" can be given a meaning later (§8) without moving the
-    program.
+    program;
+  * every stack Botlish code runs on belongs to the runtime, which removes
+    glibc's stack discovery and the worker thread (§4.5).
 * **Keep locality structural.** C4 holds because a handle cannot leave its
   actor's heap: sendability rejects handles, and actors share nothing mutable.
   No runtime ownership check is needed while that holds.
@@ -891,20 +1007,23 @@ foreclose them:
      * an overflow-guard record per active stack;
      * the `may_suspend` bit in `summarize_call_effects` (always false until
        something sets it).
-2. **Coroutines on `interp` and `compile`:**
+2. **The root coroutine alone** (§4.5): a runtime-owned root stack with a large
+   guard region, one switch in and out, no worker thread, and no pthread
+   discovery. No language or NIR change.
+3. **Coroutines on `interp` and `compile`:**
    * the kind, store, intrinsics, placement error and declared errors;
    * a differential test corpus like `tests/backends.test` (generators, nested
      resumes, errors escaping a body, abandoned coroutines, handles in program
      results).
-3. **Native coroutines on Linux x86-64:**
+4. **Native coroutines on Linux x86-64:**
    * stacks, switching, the coroutine heap kind with finalizer, multi-stack GC
      and safepoints;
-   * run the step-2 corpus under `BOTLISH_NATIVE_GC_STRESS=1`, with collections
+   * run the step-3 corpus under `BOTLISH_NATIVE_GC_STRESS=1`, with collections
      triggered while several coroutines are suspended at different depths and
      inside `rt_call_value` callbacks.
-4. **Typing:** error-bearing handle types, then typed transport protocols (R4).
+5. **Typing:** error-bearing handle types, then typed transport protocols (R4).
    AOT readiness follows from refinement.
-5. **Fallback hosts and wasm** (R3), and the bytecode interpreter (§7) as the
+6. **Fallback hosts and wasm** (R3), and the bytecode interpreter (§7) as the
    portable engine.
 
 ---
