@@ -586,11 +586,68 @@ twelve mutants of exactly the failures this boundary is prone to -- see
 
 ## Fuzz results
 
-(filled in below from the final run)
+`audit/abi-bytes/tools/fuzz.tcl`, recorded in `audit/abi-bytes/fuzz-result.txt`.
+Each program is seeded individually (a failure replays with `-seed S -n 1`) and
+draws random byte sequences biased toward the shapes that matter: empty, one
+byte, the sizes around 7/8/9, 15/16/17 and 31/32/33 (where a small inline
+representation would end and a heap buffer begin), embedded zeros, `0xff` and
+the high half, ASCII, arbitrary 8-bit data, UTF-8 text, and buffers up to a few
+thousand bytes.  The oracle is an independent Tcl byte-sequence model; it never
+reads what the program computes.
+
+| run | what | result |
+|---|---|---|
+| `-mode both -n 40 -seed 1 -items 8` | pure on interp, compile, cranelift-generic and cranelift (length, every byte in order, equality/hash consistency, up to four mutants per sequence against the oracle's own verdict, aliasing; the shown result identical on all four) **and** one standalone write program per seed run normally and under GC stress, file and pipe contents byte-exact and every returned count exact | 40 programs, 320 payloads, **0 failures** |
+| `-mode pure -n 30 -seed 9001 -items 8` | the same pure checks, a second seed range | 30 programs, 240 payloads, **0 failures** |
+| `-mode write -n 20 -seed 5001 -gc-stress 1` | writes under GC stress for the whole process | 20 programs, 160 payloads, **0 failures** |
+| `-mode write -n 80 -seed 9001 -items 10 -gc-stress 1` | the same, a larger run | 80 programs, 800 payloads, **0 failures** |
+
+Totals: 190 programs, 1520 payloads, 0 failures.  The only syscall is `write(2)`
+to a temporary file and to a pipe the harness reads; no syscall number is ever
+generated.
+
+Failures met while building the fuzzer were all in the fuzzer, none in the
+product (a differential test is only as good as its oracle): a literal writer
+using an escape Botlish strings do not have; a mutant index drawn with `rand()`
+for the program and again for the oracle, so the two compared different bytes
+(seed 9023 failed identically on all four backends, which is what pointed at the
+oracle); and a first generator that hit the compiler's existing proof budget at
+about 1500-2000 constant `byte::from_int` calls, so the generators are
+closed-form (one call per sequence).
 
 ## Mutation results
 
-(filled in below from the final run)
+`audit/abi-bytes/tools/mutate.tcl`, recorded in
+`audit/abi-bytes/mutate-result.txt`.  Twelve mutants, each breaking one thing a
+memory-moving syscall wrapper is prone to get wrong, run in a scratch copy of
+the tree (Rust mutants rebuild the native backend there) against
+`tests/abi-bytes.test` and the write fuzzer: **12 killed, 0 survivors**.
+
+| mutant | killed by |
+|---|---|
+| `length-off-by-one` (length accessor + 1) | 31 tests, fuzzer |
+| `nul-as-terminator` (creation stops at the first zero) | 7 tests, fuzzer |
+| `payload-offset-by-one` (bridge returns address + 1) | 22 tests, fuzzer |
+| `byte-masked-to-7-bits` (creation stores `b & 0x7f`) | 8 tests, fuzzer |
+| `count-truncated` (count register carries `length mod 2^16`) | 4 tests (large heap write, short write, pipe, NIR) |
+| `no-keepalive` (no keepalive after the syscall) | 11 tests (all liveness shapes, CLIF stack map, the mutant detector) |
+| `address-in-rdx` (address and count registers swapped) | 17 tests, fuzzer |
+| `libc-write` (boundary calls libc `write` for `rax = 1`) | 6 tests: the raw-negative-result tests (libc returns `-1`) and the strace stack test |
+| `write-twice` (wrapper makes the syscall twice) | 18 tests, fuzzer |
+| `equality-by-identity` (native equality compares objects) | 7 tests |
+| `hash-ignores-length` (native hash omits the count) | 1 test (the one comparing the hash *value* with the documented one) |
+| `static-constant-ascii` (static constants encoded as ASCII) | 3 tests (length is bytes, NIR static forms, UTF-8 write) |
+
+Two honest caveats.  `count-truncated` is a 2^16 truncation, because the
+real bug it stands for (a `Usize` count squeezed through `U32`) is only
+observable at 4 GiB, which no test writes.  And `hash-ignores-length` is caught
+by one test only: equal values still hash equal without the length, so only a
+test pinning the hash value can see it.
+
+The tool is itself guarded: it refuses a Tcl-side mutant whose example does not
+compile (an earlier `count-truncated` was such a vacuous kill and was rewritten)
+and runs each mutant from inside its own copy of the tree, because tcltest
+keeps its scratch directories in the working directory.
 
 ## Regression
 
