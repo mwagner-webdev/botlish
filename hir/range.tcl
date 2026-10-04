@@ -2533,9 +2533,11 @@ proc hir::range::NarrowRounds {ctx narrowed captures results narrowResults round
 # An instance flagged open (OpenInstances) never receives caller-propagated
 # facts for any parameter: its set of known callers is not the full set of
 # actual callers (spec #28-29), so joining only the known ones would be
-# unsound over-narrowing; it keeps whatever hir/induction.tcl proved and is
-# otherwise unknown, exactly as an instance with no known callers at all
-# already was before this milestone.
+# unsound over-narrowing; it is unknown, exactly as an instance with no
+# known callers at all already was before this milestone. hir/induction.tcl
+# proves nothing for it either: that proof's "starts on the correct side of
+# the terminator" check reads the known callers' literal arguments, which
+# are not all of an open instance's callers (PROOF-FACT-CENSUS.md).
 # NARROWOPT/CAPTUREOPT (M9, both default 1: production behavior unchanged
 # for every existing caller): test/audit-only isolation knobs (spec #35,
 # #60), never a user-facing flag -- they let a test or the audit tooling
@@ -2561,8 +2563,10 @@ proc hir::range::Fixpoint {hir spec callFactsOpt narrowOpt captureOpt pinned} {
     # never touch it, or the very growth its equality-termination argument
     # already accounts for would immediately widen it back to infinity (see
     # hir/induction.tcl's header).
-    set induction [hir::induction::analyze $hir $spec $literalSeeds]
+    # Never for an open instance: the proof's initial-value check reads
+    # literalSeeds, which only know the known callers (PROOF-FACT-CENSUS.md).
     set open [OpenInstances $spec $hir]
+    set induction [hir::induction::analyze $hir $spec $literalSeeds $open]
     # A dormant instance (never entered at run time) is open (above) and
     # makes no call and creates no closure that counts: its outcome is
     # computed like any other's (lowering may still emit its code), but

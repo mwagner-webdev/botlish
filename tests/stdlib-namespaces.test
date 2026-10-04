@@ -473,6 +473,19 @@ test ns-proof-relations-before-call-ranges {a read the branch relations prove st
     list [diagKinds $source] [agree $source]
 } -result {{} {[3, 9, 7]}}
 
+test ns-proof-early-return-result {a callee's early `return` value is part of the result Range the call-specific walk proves: a read indexed by a function that may return 5 stays obligated (it compiled with no handler and raised an undeclared IndexNotFound at run time; PROOF-FACT-CENSUS.md); one whose every return is in range is still proven} -body {
+    set out "fn idx(k):\n    if k > 0:\n        return 5\n    0\n\nfn get(k):\n    list::at(\[10, 20\], idx(k))\n\nloop i from 0 to 3:\n    get(i)"
+    set in "fn idx(k):\n    if k > 0:\n        return 1\n    0\n\nfn get(k):\n    list::at(\[10, 20\], idx(k))\n\nloop i from 0 to 3:\n    get(i)"
+    list [diagKinds $out] [diagKinds $in] [agree $in]
+} -result {UNHANDLED-ERROR {} {[10, 20, 20]}}
+
+test ns-proof-literal-loop-exits {a loop over a small literal List whose body can break or continue is not cut short by the per-element walk: the code after it is still checked (an unhandled read after it compiled and raised IndexNotFound at run time), and a function whose loop continues still completes normally (it was a false KNOWN-ERROR; PROOF-FACT-CENSUS.md); a body that returns still stops the walk} -body {
+    set after "loop x in \[1, 2\]:\n    if x > 1:\n        break\n    x\n\nfn f(xs, i):\n    list::at(xs, i)\n\nf(\[1\], 0)"
+    set cont "error Boom\n\nfn f(k) errors Boom:\n    loop x in \[1, 2\]:\n        if x > 0:\n            continue\n        x\n    if k > 0:\n        fail Boom\n    7\n\nf(0)"
+    set ret "fn f():\n    loop x in \[1, 2\]:\n        if x > 0:\n            return x\n        x\n    list::at(\[\], 0)\n\nf()"
+    list [diagKinds $after] [diagKinds $cont] [agree $cont] [diagKinds $ret] [agree $ret]
+} -result {UNHANDLED-ERROR {} 7 {} 1}
+
 test ns-proof-lib-mutable-array-from-list {mutable_array::from_list's own list::at needs no handler: its loop counts to list::length(xs)} -body {
     diagKinds {mutable_array::freeze(mutable_array::from_list([1, 2]), 2)}
 } -result {}

@@ -185,7 +185,7 @@ proc hir::completions::SeedParam {} {
 proc hir::completions::NewCtx {} {
     return [dict create bindings [dict create] exact [dict create] exactList [dict create] \
         indexBounds [dict create] upperBounds [dict create] sizes [dict create] minSizes [dict create] \
-        exprs [dict create] errors [dict create] analyses 0 returned 0 \
+        exprs [dict create] errors [dict create] analyses 0 returned 0 returnRange never \
         record 0 visited [dict create]]
 }
 
@@ -271,11 +271,15 @@ proc hir::completions::Eval {hirVar ctxVar diagnose enclosing guard e} {
             # THIS expression's own contribution to its own sequence (later
             # sibling statements are correctly unreachable), and the
             # returned value is still walked for whatever errors/facts it
-            # itself contributes.
+            # itself contributes. Its Range joins ctx.returnRange
+            # (hir::range::Expr's own rule): analyzeBlock's result is the
+            # join of every way the function returns, never the fall-through
+            # alone (PROOF-FACT-CENSUS.md).
             set value [dict get $node value]
             set r [expr {$value eq {} ? [hir::range::unknown] : [Eval hir ctx $diagnose $enclosing $guard $value]}]
             if {$r ne {never} && [dict get $node target] ne {}} {
                 dict set ctx returned 1
+                dict set ctx returnRange [hir::range::join [dict get $ctx returnRange] $r]
             }
             return never
         }
@@ -695,11 +699,16 @@ proc hir::completions::EvalLockloop {hirVar ctxVar diagnose enclosing guard e no
 # hir::range.tcl's own "exact set is a strict addition to the interval"
 # discipline for the identical reason (never less sound than the general
 # case, only sometimes more precise).
+#
+# A body that can `break` or `continue` this loop falls back to EvalLoop too:
+# such a body also walks as `never` (it does not complete normally), yet the
+# loop then goes on or ends normally, so stopping there and calling the loop
+# `never` would hide everything after it from the proof (PROOF-FACT-CENSUS.md).
 proc hir::completions::EvalListloop {hirVar ctxVar diagnose enclosing guard e node} {
     upvar 1 $hirVar hir $ctxVar ctx
     set iterable [dict get $node iterable]
     set elements [LiteralListOf $hir $ctx $iterable]
-    if {$elements eq {}} {
+    if {$elements eq {} || [ExitsLoop $hir $e [dict get $node body]]} {
         return [EvalLoop hir ctx $diagnose $enclosing $guard $e $node]
     }
     set elementBinding [dict get $node elementBinding]
@@ -725,6 +734,25 @@ proc hir::completions::EvalListloop {hirVar ctxVar diagnose enclosing guard e no
     dict set ctx exact $savedExact
     RestoreRelations ctx $relations
     return [expr {$result eq {never} ? {never} : [hir::range::unknown]}]
+}
+
+# 1 if a `break` or `continue` targeting loop LOOP occurs in EXPRS (never
+# looking inside a nested function body, which cannot target it).
+proc hir::completions::ExitsLoop {hir loop exprs} {
+    foreach e $exprs {
+        switch -- [hir::kind $hir $e] {
+            block { continue }
+            break - continue {
+                if {[hir::get $hir $e target] eq $loop} {
+                    return 1
+                }
+            }
+        }
+        if {[ExitsLoop $hir $loop [hir::children $hir $e]]} {
+            return 1
+        }
+    }
+    return 0
 }
 
 # The literal core values of EXPR (a List-typed expression), if it is either
@@ -1681,6 +1709,9 @@ proc hir::completions::analyzeBlock {hir block argRanges argExact argExactLists 
     # -- see Eval's own `return` case): both are ordinary successful
     # completions of this function, never a failure.
     set normal [expr {$result ne {never} || [dict get $ctx returned]}]
+    # The successful result is the fall-through value joined with every
+    # returned one (`never` when there is neither).
+    set result [hir::range::join $result [dict get $ctx returnRange]]
     return [dict create normal $normal \
         errors [lsort -unique [dict keys [dict get $ctx errors]]] \
         result [expr {$result eq {never} ? [hir::range::unknown] : $result}]]

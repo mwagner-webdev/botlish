@@ -451,7 +451,15 @@ proc hir::induction::Guard {hir body p selfCallExprs {depth 0}} {
 #              proven parameter (spec #40-#41): guard/explain, below, read
 #              this purely for diagnostics -- nothing else in this module
 #              consults it (the actual proof is `instances`/`monotone`)
-proc hir::induction::analyze {hir spec seeds} {
+#
+# OPEN (InstanceId -> 1, hir::range::OpenInstances) names the instances whose
+# callers are not all known. No proof is attempted for one: the "starts on
+# the correct side of B" check reads SEEDS, which only join the *known*
+# direct callers' arguments, so an unknown caller (the instance escaping as a
+# value, or a call that fell back to it) could start i past B and never meet
+# the terminator. Its step-classified parameters get the reason "open
+# instance".
+proc hir::induction::analyze {hir spec seeds {open {}}} {
     set context [dict get $spec context]
     set selfTails [dict get $context selfTails]
     set instances [dict create]
@@ -477,6 +485,15 @@ proc hir::induction::analyze {hir spec seeds} {
         set n [llength $params]
         set calls [lmap c $selfCallExprs {hir::get $hir $c args}]
         set classifications [lmap p $params {ClassifyParam $hir $calls [lsearch -exact $params $p] $p}]
+        if {[dict exists $open $id]} {
+            for {set index 0} {$index < $n} {incr index} {
+                set class [lindex $classifications $index]
+                if {$class ne "" && [lindex $class 0] eq "step"} {
+                    dict set reasons $id $index "open instance"
+                }
+            }
+            continue
+        }
         set paramSeeds [expr {[dict exists $seeds $id] ? [dict get $seeds $id] : [lrepeat $n [hir::range::unknown]]}]
         set body [hir::get $hir $block body]
         set overrides [dict create]
