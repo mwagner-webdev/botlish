@@ -9,3 +9,15 @@
 /bench/equivalents/go/*
 !/bench/equivalents/go/*.go
 __pycache__/
+
+# The fuzzing campaign tree (FUZZING-EXAMPLES-AOT.md). Everything the
+# campaign can regenerate is ignored: the AFL++ toolchain it builds from a
+# pinned source, the AOT executables and copied sources it emits, and AFL's
+# own session state. Seeds, dictionaries, baselines, scripts, triage
+# packages and campaign stats snapshots are committed.
+/fuzz/tools/
+/fuzz/build/
+/fuzz/out/
+/fuzz/out-asan/
+/fuzz/seeds-src/
+/fuzz/harness/argv-file

@@ -1,0 +1,9 @@
+seed	exit	wall_ms	stdout	stderr-first-line
+plain	0	2	[42, 2]	
+invalid-utf8	0	3	[42, 2]	
+many-args	0	2	[42, 2]	
+max-arg	0	3	[42, 2]	
+module-sample-1	0	2	[42, 2]	
+nul-inside-arg	0	2	[42, 2]	
+one-empty-arg	0	2	[42, 2]	
+three-args	0	2	[42, 2]	

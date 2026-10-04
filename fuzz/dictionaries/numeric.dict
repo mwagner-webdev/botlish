@@ -1,0 +1,15 @@
+# numeric.dict -- integer edge strings at and beyond the i64 boundary
+# (SOURCE-DEFINED-INTEGER-DOMAINS.md; Botlish Int is arbitrary-precision,
+# so both boundary values are ordinary values). Attached to the
+# arithmetic-flavored targets.
+zero="0"
+one="1"
+minusone="-1"
+i64max="9223372036854775807"
+i64min="-9223372036854775808"
+i64maxplus="9223372036854775808"
+big="170141183460469231731687303715884105727"
+decimal="3.14"
+exponent="1e9"
+leadingzeros="007"
+hexish="0x10"

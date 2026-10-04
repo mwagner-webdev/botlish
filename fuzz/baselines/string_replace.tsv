@@ -1,0 +1,10 @@
+seed	exit	wall_ms	stdout	stderr-first-line
+plain	0	2	["abc", "aXc", "bb", "", ""]	
+invalid-utf8	0	2	["abc", "aXc", "bb", "", ""]	
+many-args	0	3	["abc", "aXc", "bb", "", ""]	
+max-arg	0	3	["abc", "aXc", "bb", "", ""]	
+nul-inside-arg	0	2	["abc", "aXc", "bb", "", ""]	
+one-empty-arg	0	3	["abc", "aXc", "bb", "", ""]	
+replace-sample-2	0	2	["abc", "aXc", "bb", "", ""]	
+replace-sample-3	0	2	["abc", "aXc", "bb", "", ""]	
+three-args	0	2	["abc", "aXc", "bb", "", ""]	
