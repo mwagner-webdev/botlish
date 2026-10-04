@@ -555,6 +555,14 @@ r3 = out(3, b)
     set exe [buildExecutable shortwrite $program]
     set resultFile [file join $::outputDir shortwrite.result]
     set channel [open |[list sh -c {exec "$0" 3>&1 1>"$1"} $exe $resultFile] rb]
+    # Nothing may read the pipe until the program has finished (its last act is
+    # printing the result list to descriptor 1): a reader draining it while the
+    # program writes would leave room for the whole second payload and the
+    # premise -- a pipe the kernel can only partly fill -- would be a race.
+    for {set waited 0} {$waited < 3000} {incr waited} {
+        if {[file exists $resultFile] && [regexp {\]\s*$} [readBinary $resultFile]]} break
+        after 10
+    }
     set data [read $channel]
     close $channel
     set result [string trim [readBinary $resultFile]]
@@ -565,7 +573,7 @@ r3 = out(3, b)
         [expr {[string length $data] == 40960 + $short}]
 } -result {1 -11 1 1}
 
-test abi-bytes-write-is-exactly-one-syscall {the wrapper performs ONE write(2) and returns exactly the kernel's result: a short write (a pipe, a signal) is reported as the short count and never completed or retried by the wrapper. Verified structurally -- linux::write's NIR has exactly one syscall op and no branch, jump, label or tail call, so there is no loop or retry to complete a partial write -- since a short write cannot be provoked deterministically from a test} -constraints {linuxX86_64} -body {
+test abi-bytes-write-is-exactly-one-syscall {the wrapper performs ONE write(2) and returns exactly the kernel's result: a short write (a pipe, a signal) is reported as the short count and never completed or retried by the wrapper. Verified structurally here -- linux::write's NIR has exactly one syscall op and no branch, jump, label or tail call, so there is no loop or retry to complete a partial write -- and observed in the preceding test, which provokes a real short write on a non-blocking pipe} -constraints {linuxX86_64} -body {
     set nir [native::nir [bytesHir "${::linuxPrelude}\nout(3, mk(\"x\"))"]]
     set body [nirFunction $nir linux::write]
     list [regexp -all {op syscall_linux_x86_64} $body] [regexp -all {\mjump\M|\mbr\M|\mtail\M|\mlabel\M} $body]
