@@ -3,7 +3,7 @@
 ; object:  ELF64 x86-64, unlinked (Botlish-generated code only; runtime
 ;          helpers are unresolved imports, so their bodies are not present)
 ; format:  objdump -dr --no-show-raw-insn -M intel
-; total machine code bytes: 12732  (per function: 45 388 524 70 61 61 61 61 61 167 179 245 804 1248 429 253 380 439 977 766 817 665 1168 836 1189 838)
+; total machine code bytes: 12879  (per function: 45 388 524 70 61 61 61 61 61 167 179 245 804 1248 429 253 380 439 977 766 817 665 1168 836 1189 838 147)
 ;
 ; function symbol -> Botlish label:
 ;   botlish_fn_0 / botlish_entry_0 -> <program entry>
@@ -31,7 +31,8 @@
 ;   botlish_fn_22 / botlish_entry_22 -> ht_place<mutarray, int, str, str>
 ;   botlish_fn_23 / botlish_entry_23 -> ht_set<mutarray, str, str>
 ;   botlish_fn_24 / botlish_entry_24 -> ht_delete<mutarray, str>
-;   botlish_fn_25 / botlish_entry_25 -> sample<generic>
+;   botlish_fn_25 / botlish_entry_25 -> sample_checks<generic>
+;   botlish_fn_26 / botlish_entry_26 -> sample<generic>
 
 
 hashtable.asm.o:     file format elf64-x86-64
@@ -43,7 +44,7 @@ Disassembly of section .text:
        0:	push   rbp
        1:	mov    rbp,rsp
        4:	call   9 <botlish_fn_0+0x9>
-			5: R_X86_64_PLT32	botlish_fn_25-0x4 ; sample<generic>
+			5: R_X86_64_PLT32	botlish_fn_26-0x4 ; sample<generic>
        9:	test   rax,rax
        c:	jne    1a <botlish_fn_0+0x1a>
       12:	xor    rax,rax
@@ -3115,7 +3116,7 @@ Disassembly of section .text:
     2b8d:	add    BYTE PTR [rax],al
 	...
 
-0000000000002b90 <botlish_fn_25: sample<generic>>:
+0000000000002b90 <botlish_fn_25: sample_checks<generic>>:
     2b90:	push   rbp
     2b91:	mov    rbp,rsp
     2b94:	sub    rsp,0xa0
@@ -3312,11 +3313,58 @@ Disassembly of section .text:
     2ead:	add    BYTE PTR [rax],al
 	...
 
-0000000000002eb0 <botlish_entry_25: sample<generic>>:
+0000000000002eb0 <botlish_entry_25: sample_checks<generic>>:
     2eb0:	push   rbp
     2eb1:	mov    rbp,rsp
     2eb4:	call   2eb9 <botlish_entry_25+0x9>
-			2eb5: R_X86_64_PLT32	botlish_fn_25-0x4 ; sample<generic>
+			2eb5: R_X86_64_PLT32	botlish_fn_25-0x4 ; sample_checks<generic>
     2eb9:	mov    rsp,rbp
     2ebc:	pop    rbp
     2ebd:	ret
+
+0000000000002ebe <botlish_fn_26: sample<generic>>:
+    2ebe:	push   rbp
+    2ebf:	mov    rbp,rsp
+    2ec2:	sub    rsp,0x10
+    2ec6:	mov    QWORD PTR [rsp],r12
+    2eca:	mov    r12,rdi
+    2ecd:	mov    rdi,r12
+    2ed0:	call   2ed5 <botlish_fn_26+0x17>
+			2ed1: R_X86_64_PLT32	botlish_fn_25-0x4 ; sample_checks<generic>
+    2ed5:	test   rax,rax
+    2ed8:	jne    2f21 <botlish_fn_26+0x63>
+    2ede:	mov    rdi,r12
+    2ee1:	call   2ee6 <botlish_fn_26+0x28>
+			2ee2: R_X86_64_PLT32	rt_declared_error-0x4
+    2ee6:	cmp    rax,0x40000001
+    2eec:	jne    2f11 <botlish_fn_26+0x53>
+    2ef2:	mov    rdi,r12
+    2ef5:	call   2efa <botlish_fn_26+0x3c>
+			2ef6: R_X86_64_PLT32	rt_clear_declared_error-0x4
+    2efa:	xor    rdx,rdx
+    2efd:	mov    rdi,r12
+    2f00:	mov    rsi,rdx
+    2f03:	call   2f08 <botlish_fn_26+0x4a>
+			2f04: R_X86_64_PLT32	rt_list_new-0x4
+    2f08:	test   rax,rax
+    2f0b:	jne    2f21 <botlish_fn_26+0x63>
+    2f11:	xor    rax,rax
+    2f14:	mov    r12,QWORD PTR [rsp]
+    2f18:	add    rsp,0x10
+    2f1c:	mov    rsp,rbp
+    2f1f:	pop    rbp
+    2f20:	ret
+    2f21:	mov    r12,QWORD PTR [rsp]
+    2f25:	add    rsp,0x10
+    2f29:	mov    rsp,rbp
+    2f2c:	pop    rbp
+    2f2d:	ret
+
+0000000000002f2e <botlish_entry_26: sample<generic>>:
+    2f2e:	push   rbp
+    2f2f:	mov    rbp,rsp
+    2f32:	call   2f37 <botlish_entry_26+0x9>
+			2f33: R_X86_64_PLT32	botlish_fn_26-0x4 ; sample<generic>
+    2f37:	mov    rsp,rbp
+    2f3a:	pop    rbp
+    2f3b:	ret

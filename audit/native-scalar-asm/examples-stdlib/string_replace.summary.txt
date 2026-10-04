@@ -2,25 +2,26 @@ source:  examples/stdlib/string_replace.bot
 backend: Cranelift (specialize=1)
 asm:     string_replace.asm
 vcode:   string_replace.vcode
-machine-code bytes: 2787 (per function: 471 625 1404 287)
+machine-code bytes: 3011 (per function: 224 625 1404 286 472)
 
 functions:
-  0 <program entry>: nir-regs=21
+  0 <program entry>: nir-regs=6
   1 matches_at<str, str, int>: nir-regs=16
   2 replace_from<str, str, str, int, int, str>: nir-regs=31
   3 replace<str, str, str>: nir-regs=16
+  4 sample<generic>: nir-regs=21
 
 GC roots (string_replace.asm's NIR ids match roots.txt's "function N"):
   function 0 "<program>"
-    NIR regs: 21
-    raw regs: 10
-    managed-capable regs: 11
+    NIR regs: 6
+    raw regs: 0
+    managed-capable regs: 6
     effects: may_error=true may_gc=true
-    safepoints: 6
-    root candidates: 10
-    max live roots: 5
-    shadow slots: 5
-    entry zero slots: 4
+    safepoints: 3
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
+    entry zero slots: 0
     depth reservation: no
     storage: native frame
   
@@ -62,8 +63,21 @@ GC roots (string_replace.asm's NIR ids match roots.txt's "function N"):
     entry zero slots: 3
     depth reservation: no
     storage: native frame
+  
+  function 4 "sample"
+    NIR regs: 21
+    raw regs: 10
+    managed-capable regs: 11
+    effects: may_error=true may_gc=true
+    safepoints: 6
+    root candidates: 10
+    max live roots: 5
+    shadow slots: 5
+    entry zero slots: 4
+    depth reservation: no
+    storage: native frame
 
 mechanical pattern counts (triage only; see report for interpretation):
   4 x calls to rt_int_add
   2 x calls to rt_int_cmp
-  18 x calls to other rt_* helpers
+  24 x calls to other rt_* helpers

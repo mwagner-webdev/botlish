@@ -2,10 +2,10 @@ source:  examples/stdlib/matmul.bot
 backend: Cranelift (specialize=1)
 asm:     matmul.asm
 vcode:   matmul.vcode
-machine-code bytes: 4683 (per function: 750 703 545 772 613 892 408)
+machine-code bytes: 4755 (per function: 822 703 545 772 613 892 408)
 
 functions:
-  0 <program entry>: nir-regs=32
+  0 <program entry>: nir-regs=35
   1 dot<List[int], List[List[int]], int, int, int, int>: nir-regs=18
   2 product_row<List[int], List[List[int]], int, int, List[never]>: nir-regs=23
   3 product_row<List[int], List[List[int]], int, int, List[int]>: nir-regs=21
@@ -15,11 +15,11 @@ functions:
 
 GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
   function 0 "<program>"
-    NIR regs: 32
+    NIR regs: 35
     raw regs: 12
-    managed-capable regs: 20
+    managed-capable regs: 23
     effects: may_error=true may_gc=true
-    safepoints: 8
+    safepoints: 9
     root candidates: 19
     max live roots: 5
     shadow slots: 5
@@ -109,4 +109,4 @@ mechanical pattern counts (triage only; see report for interpretation):
   3 x calls to rt_int_add
   1 x calls to rt_int_mul
   2 x calls to rt_int_cmp
-  29 x calls to other rt_* helpers
+  32 x calls to other rt_* helpers

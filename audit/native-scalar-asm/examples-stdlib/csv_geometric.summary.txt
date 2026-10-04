@@ -2,12 +2,12 @@ source:  examples/stdlib/csv_geometric.bot
 backend: Cranelift (specialize=1)
 asm:     csv_geometric.asm
 vcode:   csv_geometric.vcode
-machine-code bytes: 7656 (per function: 68 461 461 81 81 357 412 412 279 279 81 365 430 585 1141 352 783 215 488 325)
+machine-code bytes: 7900 (per function: 312 461 461 81 81 357 412 412 279 279 81 365 430 585 1141 352 783 215 488 325)
 
 functions:
-  0 <program entry>: nir-regs=2
-  1 mutarray::create<int, str>: nir-regs=13
-  2 mutarray::create<int, List[str]>: nir-regs=13
+  0 <program entry>: nir-regs=9
+  1 mutable_array::create<int, str>: nir-regs=13
+  2 mutable_array::create<int, List[str]>: nir-regs=13
   3 geo_new<str>: nir-regs=4
   4 geo_new<List[str]>: nir-regs=4
   5 geo_new_capacity<int, int>: nir-regs=11
@@ -28,11 +28,11 @@ functions:
 
 GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
   function 0 "<program>"
-    NIR regs: 2
+    NIR regs: 9
     raw regs: 0
-    managed-capable regs: 2
+    managed-capable regs: 9
     effects: may_error=true may_gc=true
-    safepoints: 1
+    safepoints: 4
     root candidates: 1
     max live roots: 1
     shadow slots: 1
@@ -40,7 +40,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 1 "mutarray::create"
+  function 1 "mutable_array::create"
     NIR regs: 13
     raw regs: 2
     managed-capable regs: 11
@@ -53,7 +53,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 2 "mutarray::create"
+  function 2 "mutable_array::create"
     NIR regs: 13
     raw regs: 2
     managed-capable regs: 11
@@ -291,5 +291,5 @@ mechanical pattern counts (triage only; see report for interpretation):
   15 x calls to rt_int_add
   1 x calls to rt_int_mul
   8 x calls to rt_int_cmp
-  32 x calls to other rt_* helpers
+  41 x calls to other rt_* helpers
   2 x guard/guardbool instructions

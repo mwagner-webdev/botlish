@@ -3,13 +3,13 @@
 ; object:  ELF64 x86-64, unlinked (Botlish-generated code only; runtime
 ;          helpers are unresolved imports, so their bodies are not present)
 ; format:  objdump -dr --no-show-raw-insn -M intel
-; total machine code bytes: 23312  (per function: 45 461 461 461 81 81 81 357 412 412 412 278 278 278 81 365 430 585 1141 352 783 215 488 325 388 524 70 493 114 61 61 61 61 61 168 179 245 804 1248 429 380 439 977 766 817 665 1168 836 107 427 259 629 634 78 78 1222)
+; total machine code bytes: 23613  (per function: 45 461 461 461 81 81 81 357 412 412 412 278 278 278 81 365 430 585 1141 352 783 215 488 325 388 524 70 493 114 61 61 61 61 61 168 179 245 804 1248 429 380 439 977 766 817 665 1168 836 107 427 259 629 634 78 78 1222 301)
 ;
 ; function symbol -> Botlish label:
 ;   botlish_fn_0 / botlish_entry_0 -> <program entry>
-;   botlish_fn_1 / botlish_entry_1 -> mutarray::create<int, str>
-;   botlish_fn_2 / botlish_entry_2 -> mutarray::create<int, List[str]>
-;   botlish_fn_3 / botlish_entry_3 -> mutarray::create<int, mutarray>
+;   botlish_fn_1 / botlish_entry_1 -> mutable_array::create<int, str>
+;   botlish_fn_2 / botlish_entry_2 -> mutable_array::create<int, List[str]>
+;   botlish_fn_3 / botlish_entry_3 -> mutable_array::create<int, mutarray>
 ;   botlish_fn_4 / botlish_entry_4 -> geo_new<str>
 ;   botlish_fn_5 / botlish_entry_5 -> geo_new<List[str]>
 ;   botlish_fn_6 / botlish_entry_6 -> geo_new<mutarray>
@@ -61,7 +61,8 @@
 ;   botlish_fn_52 / botlish_entry_52 -> csv_records_generic<str, bool>
 ;   botlish_fn_53 / botlish_entry_53 -> csv_records<str>
 ;   botlish_fn_54 / botlish_entry_54 -> csv_records_presized<str>
-;   botlish_fn_55 / botlish_entry_55 -> sample<generic>
+;   botlish_fn_55 / botlish_entry_55 -> sample_checks<generic>
+;   botlish_fn_56 / botlish_entry_56 -> sample<generic>
 
 
 csv_records.asm.o:     file format elf64-x86-64
@@ -73,7 +74,7 @@ Disassembly of section .text:
        0:	push   rbp
        1:	mov    rbp,rsp
        4:	call   9 <botlish_fn_0+0x9>
-			5: R_X86_64_PLT32	botlish_fn_55-0x4 ; sample<generic>
+			5: R_X86_64_PLT32	botlish_fn_56-0x4 ; sample<generic>
        9:	test   rax,rax
        c:	jne    1a <botlish_fn_0+0x1a>
       12:	xor    rax,rax
@@ -95,7 +96,7 @@ Disassembly of section .text:
       2d:	add    BYTE PTR [rax],al
 	...
 
-0000000000000030 <botlish_fn_1: mutarray::create<int, str>>:
+0000000000000030 <botlish_fn_1: mutable_array::create<int, str>>:
       30:	push   rbp
       31:	mov    rbp,rsp
       34:	sub    rsp,0x60
@@ -200,20 +201,20 @@ Disassembly of section .text:
      1c5:	add    BYTE PTR [rax],al
 	...
 
-00000000000001c8 <botlish_entry_1: mutarray::create<int, str>>:
+00000000000001c8 <botlish_entry_1: mutable_array::create<int, str>>:
      1c8:	push   rbp
      1c9:	mov    rbp,rsp
      1cc:	mov    rsi,QWORD PTR [rdx]
      1cf:	mov    rdx,QWORD PTR [rdx+0x8]
      1d3:	call   1d8 <botlish_entry_1+0x10>
-			1d4: R_X86_64_PLT32	botlish_fn_1-0x4 ; mutarray::create<int, str>
+			1d4: R_X86_64_PLT32	botlish_fn_1-0x4 ; mutable_array::create<int, str>
      1d8:	mov    rsp,rbp
      1db:	pop    rbp
      1dc:	ret
      1dd:	add    BYTE PTR [rax],al
 	...
 
-00000000000001e0 <botlish_fn_2: mutarray::create<int, List[str]>>:
+00000000000001e0 <botlish_fn_2: mutable_array::create<int, List[str]>>:
      1e0:	push   rbp
      1e1:	mov    rbp,rsp
      1e4:	sub    rsp,0x60
@@ -318,20 +319,20 @@ Disassembly of section .text:
      375:	add    BYTE PTR [rax],al
 	...
 
-0000000000000378 <botlish_entry_2: mutarray::create<int, List[str]>>:
+0000000000000378 <botlish_entry_2: mutable_array::create<int, List[str]>>:
      378:	push   rbp
      379:	mov    rbp,rsp
      37c:	mov    rsi,QWORD PTR [rdx]
      37f:	mov    rdx,QWORD PTR [rdx+0x8]
      383:	call   388 <botlish_entry_2+0x10>
-			384: R_X86_64_PLT32	botlish_fn_2-0x4 ; mutarray::create<int, List[str]>
+			384: R_X86_64_PLT32	botlish_fn_2-0x4 ; mutable_array::create<int, List[str]>
      388:	mov    rsp,rbp
      38b:	pop    rbp
      38c:	ret
      38d:	add    BYTE PTR [rax],al
 	...
 
-0000000000000390 <botlish_fn_3: mutarray::create<int, mutarray>>:
+0000000000000390 <botlish_fn_3: mutable_array::create<int, mutarray>>:
      390:	push   rbp
      391:	mov    rbp,rsp
      394:	sub    rsp,0x60
@@ -436,13 +437,13 @@ Disassembly of section .text:
      525:	add    BYTE PTR [rax],al
 	...
 
-0000000000000528 <botlish_entry_3: mutarray::create<int, mutarray>>:
+0000000000000528 <botlish_entry_3: mutable_array::create<int, mutarray>>:
      528:	push   rbp
      529:	mov    rbp,rsp
      52c:	mov    rsi,QWORD PTR [rdx]
      52f:	mov    rdx,QWORD PTR [rdx+0x8]
      533:	call   538 <botlish_entry_3+0x10>
-			534: R_X86_64_PLT32	botlish_fn_3-0x4 ; mutarray::create<int, mutarray>
+			534: R_X86_64_PLT32	botlish_fn_3-0x4 ; mutable_array::create<int, mutarray>
      538:	mov    rsp,rbp
      53b:	pop    rbp
      53c:	ret
@@ -456,7 +457,7 @@ Disassembly of section .text:
      54c:	mov    esi,0x3
      551:	mov    QWORD PTR [rsp+0x8],0x3
      55a:	call   55f <botlish_fn_4+0x22>
-			55b: R_X86_64_PLT32	botlish_fn_1-0x4 ; mutarray::create<int, str>
+			55b: R_X86_64_PLT32	botlish_fn_1-0x4 ; mutable_array::create<int, str>
      55f:	test   rax,rax
      562:	jne    574 <botlish_fn_4+0x37>
      568:	xor    rax,rax
@@ -488,7 +489,7 @@ Disassembly of section .text:
      59d:	mov    esi,0x3
      5a2:	mov    QWORD PTR [rsp+0x8],0x3
      5ab:	call   5b0 <botlish_fn_5+0x22>
-			5ac: R_X86_64_PLT32	botlish_fn_2-0x4 ; mutarray::create<int, List[str]>
+			5ac: R_X86_64_PLT32	botlish_fn_2-0x4 ; mutable_array::create<int, List[str]>
      5b0:	test   rax,rax
      5b3:	jne    5c5 <botlish_fn_5+0x37>
      5b9:	xor    rax,rax
@@ -520,7 +521,7 @@ Disassembly of section .text:
      5ee:	mov    esi,0x3
      5f3:	mov    QWORD PTR [rsp+0x8],0x3
      5fc:	call   601 <botlish_fn_6+0x22>
-			5fd: R_X86_64_PLT32	botlish_fn_3-0x4 ; mutarray::create<int, mutarray>
+			5fd: R_X86_64_PLT32	botlish_fn_3-0x4 ; mutable_array::create<int, mutarray>
      601:	test   rax,rax
      604:	jne    616 <botlish_fn_6+0x37>
      60a:	xor    rax,rax
@@ -692,7 +693,7 @@ Disassembly of section .text:
      83a:	mov    rsi,rax
      83d:	mov    rdi,r13
      840:	call   845 <botlish_fn_8+0xc5>
-			841: R_X86_64_PLT32	botlish_fn_1-0x4 ; mutarray::create<int, str>
+			841: R_X86_64_PLT32	botlish_fn_1-0x4 ; mutable_array::create<int, str>
      845:	test   rax,rax
      848:	mov    r14,rax
      84b:	je     874 <botlish_fn_8+0xf4>
@@ -811,7 +812,7 @@ Disassembly of section .text:
      9ca:	mov    rsi,rax
      9cd:	mov    rdi,r13
      9d0:	call   9d5 <botlish_fn_9+0xc5>
-			9d1: R_X86_64_PLT32	botlish_fn_2-0x4 ; mutarray::create<int, List[str]>
+			9d1: R_X86_64_PLT32	botlish_fn_2-0x4 ; mutable_array::create<int, List[str]>
      9d5:	test   rax,rax
      9d8:	mov    r14,rax
      9db:	je     a04 <botlish_fn_9+0xf4>
@@ -930,7 +931,7 @@ Disassembly of section .text:
      b5a:	mov    rsi,rax
      b5d:	mov    rdi,r13
      b60:	call   b65 <botlish_fn_10+0xc5>
-			b61: R_X86_64_PLT32	botlish_fn_3-0x4 ; mutarray::create<int, mutarray>
+			b61: R_X86_64_PLT32	botlish_fn_3-0x4 ; mutable_array::create<int, mutarray>
      b65:	test   rax,rax
      b68:	mov    r14,rax
      b6b:	je     b94 <botlish_fn_10+0xf4>
@@ -5859,7 +5860,7 @@ Disassembly of section .text:
     51ec:	add    BYTE PTR [rax],al
 	...
 
-00000000000051f0 <botlish_fn_55: sample<generic>>:
+00000000000051f0 <botlish_fn_55: sample_checks<generic>>:
     51f0:	push   rbp
     51f1:	mov    rbp,rsp
     51f4:	sub    rsp,0xc0
@@ -6129,11 +6130,90 @@ Disassembly of section .text:
     5675:	add    BYTE PTR [rax],al
 	...
 
-0000000000005678 <botlish_entry_55: sample<generic>>:
+0000000000005678 <botlish_entry_55: sample_checks<generic>>:
     5678:	push   rbp
     5679:	mov    rbp,rsp
     567c:	call   5681 <botlish_entry_55+0x9>
-			567d: R_X86_64_PLT32	botlish_fn_55-0x4 ; sample<generic>
+			567d: R_X86_64_PLT32	botlish_fn_55-0x4 ; sample_checks<generic>
     5681:	mov    rsp,rbp
     5684:	pop    rbp
     5685:	ret
+
+0000000000005686 <botlish_fn_56: sample<generic>>:
+    5686:	push   rbp
+    5687:	mov    rbp,rsp
+    568a:	sub    rsp,0x10
+    568e:	mov    QWORD PTR [rsp],rbx
+    5692:	mov    rbx,rdi
+    5695:	mov    rdi,rbx
+    5698:	call   569d <botlish_fn_56+0x17>
+			5699: R_X86_64_PLT32	botlish_fn_55-0x4 ; sample_checks<generic>
+    569d:	test   rax,rax
+    56a0:	jne    5759 <botlish_fn_56+0xd3>
+    56a6:	mov    rdi,rbx
+    56a9:	call   56ae <botlish_fn_56+0x28>
+			56aa: R_X86_64_PLT32	rt_declared_error-0x4
+    56ae:	cmp    rax,0x40000001
+    56b4:	je     572a <botlish_fn_56+0xa4>
+    56ba:	mov    rdi,rbx
+    56bd:	call   56c2 <botlish_fn_56+0x3c>
+			56be: R_X86_64_PLT32	rt_declared_error-0x4
+    56c2:	cmp    rax,0x40000002
+    56c8:	je     5706 <botlish_fn_56+0x80>
+    56ce:	mov    rdi,rbx
+    56d1:	call   56d6 <botlish_fn_56+0x50>
+			56d2: R_X86_64_PLT32	rt_declared_error-0x4
+    56d6:	cmp    rax,0x40000003
+    56dc:	jne    5749 <botlish_fn_56+0xc3>
+    56e2:	mov    rdi,rbx
+    56e5:	call   56ea <botlish_fn_56+0x64>
+			56e6: R_X86_64_PLT32	rt_clear_declared_error-0x4
+    56ea:	xor    rdx,rdx
+    56ed:	mov    rdi,rbx
+    56f0:	mov    rsi,rdx
+    56f3:	call   56f8 <botlish_fn_56+0x72>
+			56f4: R_X86_64_PLT32	rt_list_new-0x4
+    56f8:	test   rax,rax
+    56fb:	je     5749 <botlish_fn_56+0xc3>
+    5701:	jmp    5759 <botlish_fn_56+0xd3>
+    5706:	mov    rdi,rbx
+    5709:	call   570e <botlish_fn_56+0x88>
+			570a: R_X86_64_PLT32	rt_clear_declared_error-0x4
+    570e:	xor    rdx,rdx
+    5711:	mov    rdi,rbx
+    5714:	mov    rsi,rdx
+    5717:	call   571c <botlish_fn_56+0x96>
+			5718: R_X86_64_PLT32	rt_list_new-0x4
+    571c:	test   rax,rax
+    571f:	je     5749 <botlish_fn_56+0xc3>
+    5725:	jmp    5759 <botlish_fn_56+0xd3>
+    572a:	mov    rdi,rbx
+    572d:	call   5732 <botlish_fn_56+0xac>
+			572e: R_X86_64_PLT32	rt_clear_declared_error-0x4
+    5732:	xor    rdx,rdx
+    5735:	mov    rdi,rbx
+    5738:	mov    rsi,rdx
+    573b:	call   5740 <botlish_fn_56+0xba>
+			573c: R_X86_64_PLT32	rt_list_new-0x4
+    5740:	test   rax,rax
+    5743:	jne    5759 <botlish_fn_56+0xd3>
+    5749:	xor    rax,rax
+    574c:	mov    rbx,QWORD PTR [rsp]
+    5750:	add    rsp,0x10
+    5754:	mov    rsp,rbp
+    5757:	pop    rbp
+    5758:	ret
+    5759:	mov    rbx,QWORD PTR [rsp]
+    575d:	add    rsp,0x10
+    5761:	mov    rsp,rbp
+    5764:	pop    rbp
+    5765:	ret
+
+0000000000005766 <botlish_entry_56: sample<generic>>:
+    5766:	push   rbp
+    5767:	mov    rbp,rsp
+    576a:	call   576f <botlish_entry_56+0x9>
+			576b: R_X86_64_PLT32	botlish_fn_56-0x4 ; sample<generic>
+    576f:	mov    rsp,rbp
+    5772:	pop    rbp
+    5773:	ret

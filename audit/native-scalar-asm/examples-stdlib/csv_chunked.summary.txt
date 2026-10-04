@@ -2,10 +2,10 @@ source:  examples/stdlib/csv_chunked.bot
 backend: Cranelift (specialize=1)
 asm:     csv_chunked.asm
 vcode:   csv_chunked.vcode
-machine-code bytes: 10246 (per function: 68 195 534 534 534 534 498 418 540 540 365 430 585 1141 352 799 833 537 612 197)
+machine-code bytes: 10490 (per function: 312 195 534 534 534 534 498 418 540 540 365 430 585 1141 352 799 833 537 612 197)
 
 functions:
-  0 <program entry>: nir-regs=2
+  0 <program entry>: nir-regs=9
   1 chunked_new<generic>: nir-regs=6
   2 chunked_append<list[List[never], mutarray, int], str>: nir-regs=22
   3 chunked_append<list[List[mutarray], mutarray, int], str>: nir-regs=22
@@ -28,11 +28,11 @@ functions:
 
 GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
   function 0 "<program>"
-    NIR regs: 2
+    NIR regs: 9
     raw regs: 0
-    managed-capable regs: 2
+    managed-capable regs: 9
     effects: may_error=true may_gc=true
-    safepoints: 1
+    safepoints: 4
     root candidates: 1
     max live roots: 1
     shadow slots: 1
@@ -291,5 +291,5 @@ mechanical pattern counts (triage only; see report for interpretation):
   20 x calls to rt_int_add
   2 x calls to rt_int_mul
   7 x calls to rt_int_cmp
-  53 x calls to other rt_* helpers
+  62 x calls to other rt_* helpers
   1 x guard/guardbool instructions
