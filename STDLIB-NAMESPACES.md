@@ -657,6 +657,13 @@ a lookup, a write or a slice.
   cranelift example set) succeed. Compiler warnings on the 75 corpus,
   surface, bench and audit-probe programs are identical to the
   pre-milestone tree, and so are their diagnostics.
+* After merging `main`'s ABI numeric domains (ABI-NUMERIC-DOMAINS.md; its
+  `tests/abi-numeric.test` migrated to `list::length`/`list::at`, the
+  latter with `IndexNotFound` handled so the run-time `TYPE` error it
+  asserts is still what is reached): `interp` 5151 tests, 0 failures;
+  `compile` 5151, 0 failures (4 skipped); `cranelift` the same 60 failing
+  test names; `cargo test --release` 182 passed; CI's example steps
+  succeed.
 
 ## 12. Review: the intended static range model, what is built, what is not
 

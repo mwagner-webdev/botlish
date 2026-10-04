@@ -90,7 +90,7 @@
 # * Not C. U32 is the unsigned 32-bit domain, not "C unsigned int"; Usize
 #   is the target's address/size-width unsigned domain, not size_t. A later
 #   C layer may map its target-dependent types onto these.
-# * Not collection lengths. list_length, string lengths and indexes are
+# * Not collection lengths. list::length, string lengths and indexes are
 #   ordinary Int; Isize/Usize are for foreign ABI boundaries only.
 #
 # The domain types (AbiI8Value ... AbiUsizeValue) and the two errors are

@@ -379,9 +379,9 @@ test abi-numeric-not-arithmetic {an ABI value has no arithmetic or ordering: +, 
         [lsort -unique [lmap o [outcomesOf "x = abi::u32(2)\nx < abi::u32(3)" {interp compile cranelift}] {lrange $o 0 1}]]
 } -result {{error {CORE SEMANTIC TYPE} {+: expected int, got abi::U8 {value: 255}}} {{error {CORE SEMANTIC TYPE}}} {{error {CORE SEMANTIC TYPE}}} {{error {CORE SEMANTIC TYPE}}}}
 
-test abi-numeric-collections-stay-int {collection lengths and indexes are ordinary Int, not Usize: list_length is an Int, and an ABI value is not an index} -body {
-    list [agree "n = list_length(\[1, 2, 3\])\n\[n + 0, abi::usize(n).value\]"] \
-        [lsort -unique [lmap o [outcomesOf "list_get(\[1, 2\], abi::usize(0))" {interp compile cranelift}] {lrange $o 0 1}]]
+test abi-numeric-collections-stay-int {collection lengths and indexes are ordinary Int, not Usize: list::length is an Int, and an ABI value is not an index} -body {
+    list [agree "n = list::length(\[1, 2, 3\])\n\[n + 0, abi::usize(n).value\]"] \
+        [lsort -unique [lmap o [outcomesOf "r = list::at(\[1, 2\], abi::usize(0)):\n    on IndexNotFound:\n        0\nr" {interp compile cranelift}] {lrange $o 0 1}]]
 } -result {{[3, 3]} {{error {CORE SEMANTIC TYPE}}}}
 
 # ---------------------------------------------------------------------------
@@ -517,7 +517,7 @@ test abi-numeric-syscall-operands-are-the-encoded-words {natively, an ABI value 
 } -result {{abi::x86_64::register64 abi::x86_64::from_u64 abi::x86_64::from_i8 abi::x86_64::from_u32 abi::x86_64::from_usize other other} {[true, true]} 0 0}
 
 test abi-numeric-gc-stress {GC stress changes nothing: ABI values in Lists, upper-half U64 BigInt words, virtual and materialized values} -constraints linuxX86_64 -body {
-    set text "fn big(n: int) errors AbiIntegerBelowRange, AbiIntegerAboveRange:\n    abi::x86_64::from_u64(abi::u64(n + 9223372036854775808))\nfn top(i: int) -> abi::U64 errors AbiIntegerBelowRange, AbiIntegerAboveRange:\n    abi::u64(18446744073709551615 - i)\nxs = loop i from 0 to 50:\n    top(i):\n        on AbiIntegerBelowRange:\n            abi::u64(0)\n        on AbiIntegerAboveRange:\n            abi::u64(0)\nws = loop i from 0 to 50:\n    r = big(i):\n        on AbiIntegerBelowRange:\n            abi::x86_64::register64(0)\n        on AbiIntegerAboveRange:\n            abi::x86_64::register64(0)\n    abi::x86_64::to_int(r)\n\[list_get(xs, 49).value, list_get(ws, 49), abi::x86_64::to_int(abi::x86_64::from_usize(abi::usize(list_get(xs, 0).value)))\]"
+    set text "fn big(n: int) errors AbiIntegerBelowRange, AbiIntegerAboveRange:\n    abi::x86_64::from_u64(abi::u64(n + 9223372036854775808))\nfn top(i: int) -> abi::U64 errors AbiIntegerBelowRange, AbiIntegerAboveRange:\n    abi::u64(18446744073709551615 - i)\nxs = loop i from 0 to 50:\n    top(i):\n        on AbiIntegerBelowRange:\n            abi::u64(0)\n        on AbiIntegerAboveRange:\n            abi::u64(0)\nws = loop i from 0 to 50:\n    r = big(i):\n        on AbiIntegerBelowRange:\n            abi::x86_64::register64(0)\n        on AbiIntegerAboveRange:\n            abi::x86_64::register64(0)\n    abi::x86_64::to_int(r)\n\[list::at(xs, 49).value, list::at(ws, 49), abi::x86_64::to_int(abi::x86_64::from_usize(abi::usize(list::at(xs, 0).value)))\]"
     set plain [agree $text]
     underGcStress {set stressed [agree $text $::nativeBackends]}
     list $plain [expr {$plain eq $stressed}]
