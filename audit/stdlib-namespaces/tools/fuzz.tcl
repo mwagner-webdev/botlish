@@ -380,8 +380,8 @@ foreach name [core::native::names] {
 set ::historical {
     {list_get([1], 0)} {list_append([1], 2)} {list_length([1])} {concat("a", "b")} {length("a")}
     {substring("ab", 0, 1)} {lowercase("A")} {encode_utf8("a")} {is_tcl_alpha("a")} {is_tcl_alnum("a")}
-    {char_codepoint('a')} {mutable_array_allocate(1)} {import mutable_array\nmutable_array_get(mutable_array::allocate(1), 0)}
-    {import mutable_array\nmutable_array_set(mutable_array::allocate(1), 0, 1)} {immutable_set_from_list([1])}
+    {char_codepoint('a')} {mutable_array_allocate(1)} {mutable_array_get(mutable_array::allocate(1), 0)}
+    {mutable_array_set(mutable_array::allocate(1), 0, 1)} {immutable_set_from_list([1])}
 }
 
 # {SOURCE STRICT CHECK} of a negative program: CHECK is a script that, given

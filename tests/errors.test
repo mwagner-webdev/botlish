@@ -634,7 +634,7 @@ byte::from_int(5)} errors-byte-from-int-known-safe.bot]
     }
 } -result {}
 
-test errors-byte-from-int-known-failure-literal {import byte\nbyte::from_int(999) at top level, a statically provable out-of-range literal, is a compile-time KNOWN-ERROR, not an UNHANDLED-ERROR} -body {
+test errors-byte-from-int-known-failure-literal {byte::from_int(999) at top level, a statically provable out-of-range literal, is a compile-time KNOWN-ERROR, not an UNHANDLED-ERROR} -body {
     set path [makeFile {import byte
 byte::high_nibble(0)
 byte::from_int(999)} errors-byte-from-int-known-failure.bot]

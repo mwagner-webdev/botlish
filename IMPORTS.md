@@ -306,3 +306,22 @@ one flat, program-wide namespace (`hir::errordecls`, `UNDECLARED-ERROR`,
 `AbiIntegerBelowRange`); a later milestone can give them the same
 `NAMESPACE::Name` identity and an `import error` form on the same mechanism
 (the loader already records `loadedErrors` per module).
+
+## Tests and fuzzing
+
+* `tests/imports.test` (102 tests): grammar and AST, exact authorization
+  (parent / child / transitive / intrinsic-only / nested / `linux::abi`),
+  unknown member vs missing import vs unknown namespace, duplicate and self
+  imports, no injected names, no import in HIR/core IR/NIR, method
+  candidates (imports, typed winners, ambiguity in either import order, nested
+  exactness, lexical candidates, aliases), types (identity, `import type`,
+  collisions, non-types, nested namespaces, ABI), cache non-leakage,
+  dependency graph, cycles, protected intrinsics.
+* `audit/imports/tools/fuzz.tcl`: random valid programs over `list::`,
+  `str::`, `mutable_array::`, `abi::`, `abi::x86_64::` and `linux::abi::` with
+  exactly the imports they need, method and type-import spellings checked
+  against the qualified spelling, the four backends and a Tcl oracle; and
+  thirteen rotating negative shapes (see the file's header).
+* The other fuzzers and benchmark drivers that assemble programs from
+  fragments declare their dependencies with
+  `surface::modules::ImportHeader TEXT` (exactly the namespaces TEXT names).
