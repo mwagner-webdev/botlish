@@ -1,0 +1,5 @@
+import abi
+import byte
+fn f(x: abi::I8) -> int:
+    byte::from_int(x.value + 128)
+f(abi::i8(3))

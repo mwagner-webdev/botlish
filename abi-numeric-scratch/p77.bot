@@ -1,0 +1,2 @@
+import abi
+abi::U8 {value: 256}

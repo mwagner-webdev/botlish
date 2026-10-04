@@ -14,7 +14,7 @@ interp recursionlimit {} 100000
 set loopBackends {interp compile cranelift-generic cranelift}
 
 proc loopHir {source} {
-    set path [makeFile $source loop-interval-case.bot]
+    set path [makeFile [withImports $source] loop-interval-case.bot]
     try {
         return [surface::readProgramFile $path -strict 0]
     } finally {

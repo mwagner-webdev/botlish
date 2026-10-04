@@ -1,0 +1,13 @@
+import abi
+fn back_to_u8(n: int):
+    r = abi::u8(n):
+        on AbiIntegerBelowRange:
+            return "below"
+        on AbiIntegerAboveRange:
+            return "above"
+    r.value
+
+x = abi::u8(255)
+y = abi::i8(0 - 128)
+z = abi::u64(18446744073709551615)
+[x.value + 1, y.value - 1, z.value + 1, x.value * 2, back_to_u8(x.value + 1), back_to_u8(y.value), back_to_u8(x.value - 1)]

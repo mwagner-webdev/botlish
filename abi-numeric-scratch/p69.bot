@@ -1,0 +1,6 @@
+import abi
+import byte
+fn f(x: abi::U8) -> int:
+    v = x.value
+    byte::from_int(v)
+f(abi::u8(3))

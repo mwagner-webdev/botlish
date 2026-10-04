@@ -1,0 +1,2 @@
+import abi
+abi::usize(18446744073709551616)

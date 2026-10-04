@@ -304,3 +304,18 @@ if {"test-log" ni [core::native::names]} {
         -impl {apply {{v} {core::value::int 1}}} \
         -param-types {Emailish} -result-type int
 }
+
+# SOURCE with an `import NS` header line for every standard namespace it
+# qualifies a name with (and does not already import). For tests about proofs
+# and code generation, which build many small programs from fragments and care
+# about the program's behavior, not its header (tests/imports.test covers the
+# header itself).
+proc withImports {source} {
+    set header ""
+    foreach ns {abi::x86_64 abi ascii byte char immutable_set list mutable_array str web} {
+        if {[regexp -- "(^|\[^A-Za-z0-9_:\])${ns}::" $source] && ![regexp -- "(^|\n)import ${ns}(\n|\$)" $source]} {
+            append header "import $ns\n"
+        }
+    }
+    return $header$source
+}

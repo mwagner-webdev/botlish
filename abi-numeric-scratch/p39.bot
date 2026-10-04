@@ -1,0 +1,2 @@
+import abi
+abi::usize(0 - 1)

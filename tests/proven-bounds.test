@@ -20,7 +20,7 @@ interp recursionlimit {} 100000
 set boundsBackends {interp compile cranelift-generic cranelift}
 
 proc boundsHir {source} {
-    set path [makeFile $source proven-bounds-case.bot]
+    set path [makeFile [withImports $source] proven-bounds-case.bot]
     try {
         return [surface::readProgramFile $path -strict 0]
     } finally {
@@ -42,9 +42,16 @@ proc pairCounts {text name} {
     return [list [opCount $text $name] [opCount $text ${name}proven]]
 }
 
-# The first call node whose callee is spelled NAME.
+# The first call node of the PROGRAM (not of a library module it imports: an
+# import loads the module, whose own calls would otherwise come first) whose
+# callee is spelled NAME.
 proc nativeCall {hir name} {
+    set files [dict get $hir files]
     foreach e [hir::walk $hir] {
+        set origin [dict get [hir::node $hir $e] origin]
+        if {[dict exists $origin file] && [string match "[file normalize $::core::libraryDir]/*" [file normalize [dict get $files [dict get $origin file] path]]]} {
+            continue
+        }
         if {[hir::kind $hir $e] eq "call"} {
             set callee [hir::get $hir $e callee]
             if {[hir::kind $hir $callee] eq "ref" && [hir::get $hir $callee name] eq $name} {
@@ -244,7 +251,10 @@ test bounds-compiler-direct-call {a proven bounds-bearing native is a direct cal
     set proven [codeOf "xs = \[1, 2, 3\]\nloop i from 0 to 3:\n    list::at(xs, i)"]
     set handled [codeOf "fn f(xs, i):\n    list::at(xs, i):\n        on IndexNotFound:\n            -1\nf(\[1, 2\], 5)"]
     set declared [codeOf $unknownList]
-    list [regexp -all {callValue} $proven] [expr {[regexp -all {callValue} $handled] > 0}] [expr {[regexp -all {callValue} $declared] > 0}]
+    # `import list` loads lib/list.bot, whose own handled `at` is a callValue
+    # in every program that imports it: the baseline the proven call must not add to.
+    set baseline [regexp -all {callValue} [codeOf "import list\n1"]]
+    list [expr {[regexp -all {callValue} $proven] - $baseline}] [expr {[regexp -all {callValue} $handled] > $baseline}] [expr {[regexp -all {callValue} $declared] > $baseline}]
 } -result {0 1 1}
 
 # ---------------------------------------------------------------------------

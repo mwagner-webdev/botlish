@@ -1,0 +1,4 @@
+import abi
+fn f(x: abi::U8) -> abi::I8:
+    abi::i8(x.value)
+1

@@ -1,0 +1,3 @@
+import abi::x86_64
+error AbiIntegerAboveRange
+abi::x86_64::to_int(abi::x86_64::register64(39))

@@ -1,0 +1,2 @@
+import abi
+abi::u8(1).value

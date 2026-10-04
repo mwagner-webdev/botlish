@@ -1,0 +1,13 @@
+import abi
+import abi::x86_64
+fn classify(n: int):
+    x = abi::u16(n):
+        on AbiIntegerBelowRange:
+            return "below"
+        on AbiIntegerAboveRange:
+            return "above"
+    [x.value, abi::x86_64::from_u16(x).word]
+
+xs = [0 - 1, 0, 1, 0 - 1, 0, 1, 0, 32767, 65534, 65535, 65536, 340282366920938463463374607431768211456, 340282366920938463463374607431768211456]
+loop x in xs:
+    classify(x)

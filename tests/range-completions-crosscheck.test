@@ -31,7 +31,7 @@ source [file join $::projectRoot surface surface.tcl]
 interp recursionlimit {} 100000
 
 proc xHir {source} {
-    set path [makeFile $source crosscheck-case.bot]
+    set path [makeFile [withImports $source] crosscheck-case.bot]
     try {
         return [surface::readProgramFile $path -strict 0]
     } finally {

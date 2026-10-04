@@ -1,0 +1,2 @@
+import abi
+abi::u16(65536)

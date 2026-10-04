@@ -1,0 +1,4 @@
+import abi
+fn f(n: int) -> abi::U32 errors AbiIntegerBelowRange, AbiIntegerAboveRange:
+    abi::u32(n)
+1

@@ -1,0 +1,9 @@
+import abi
+fn f(n: int) -> int errors AbiIntegerBelowRange, AbiIntegerAboveRange:
+    abi::u8(n).value
+loop n in [1, 256, 0 - 1]:
+    f(n):
+        on AbiIntegerBelowRange:
+            0 - 100
+        on AbiIntegerAboveRange:
+            100

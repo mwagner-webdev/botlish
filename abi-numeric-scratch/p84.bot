@@ -1,0 +1,4 @@
+import abi
+fn f(x: abi::U32):
+    x.value
+f(abi::i32(1))

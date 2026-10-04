@@ -1,0 +1,3 @@
+import abi
+x = abi::u8(255)
+x + 1

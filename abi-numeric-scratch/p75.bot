@@ -1,0 +1,7 @@
+import abi
+fn f(i: abi::I64) -> abi::U64 errors AbiIntegerBelowRange:
+    abi::u64(i.value)
+r = f(abi::i64(7)):
+    on AbiIntegerBelowRange:
+        abi::u64(0)
+r.value

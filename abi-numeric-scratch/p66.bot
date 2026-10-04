@@ -1,0 +1,4 @@
+import abi
+fn f(n: int):
+    abi::u8(n)
+f(3)

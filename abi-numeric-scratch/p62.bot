@@ -1,0 +1,4 @@
+import abi
+fn f(n: int):
+    abi::u32(n)
+f(3)
