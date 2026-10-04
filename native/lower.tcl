@@ -3765,6 +3765,132 @@ proc native::lower::KeepAddrThrough {fnVar from to} {
     }
 }
 
+# `abi::bytes(BYTES)` (lib/abi.bot) whose argument is a compile-time constant
+# byte sequence: the owned storage is a *static constant*,
+#
+#   %b = bytes "HEX"
+#
+# installed once at program start (never collected, never allocated at run
+# time), and the Bytes it belongs to is the one virtual field %b -- so
+# `abi::bytes(str::encode_utf8("hello\n"))` costs no heap buffer, no List and
+# no run-time conversion. Source semantics are unchanged: a Bytes is a value
+# (equal by its bytes, no identity), so a shared static storage cannot be told
+# from a fresh copy. What is recognized, deliberately narrow (no new analysis;
+# hir::exact's existing facts): `str::encode_utf8` of a statically known
+# String (any length), and a List of at most hir::exact's own element bound
+# whose every element is statically a byte. Anything else (a dynamic List) is
+# the ordinary call and conversion. Returns "" for a call that is not such a
+# construction, else the result Call returns: the Bytes as virtual fields when
+# WANTVIRTUAL, else built with `structnew` (a module binding, a List element,
+# an argument of an unspecialized call).
+proc native::lower::StaticBytesCall {fnVar e node wantVirtual} {
+    upvar 1 $fnVar fn
+    variable hir
+    variable context
+    variable structOpt
+    set calleeExpr [dict get $node callee]
+    if {[hir::kind $hir $calleeExpr] ne "ref" || [llength [dict get $node args]] != 1} {
+        return ""
+    }
+    set b [hir::get $hir $calleeExpr binding]
+    if {$b eq "" || [dict get [hir::binding $hir $b] name] ne "abi::bytes"} {
+        return ""
+    }
+    set known [ConstantBytesOf [lindex [dict get $node args] 0]]
+    if {$known eq ""} {
+        return ""
+    }
+    set hex [lindex $known 0]
+    set bytesType [core::bytestore::bytesType]
+    if {![hir::structs::declared $bytesType] || [llength [hir::structs::names $bytesType]] != 1} {
+        return ""
+    }
+    set layout [hir::structs::names $bytesType]
+    # The argument is a pure constant expression: nothing to evaluate.
+    set storage [Assign fn "bytes [Quote $hex]" $e]
+    if {$wantVirtual ne ""} {
+        if {$wantVirtual != 1} {
+            return ""
+        }
+        return [list [list $storage] virtual]
+    }
+    if {$structOpt && [dict exists $context discarded $e]} {
+        return [list [Assign fn unit] tagged]
+    }
+    return [list [Assign fn "structnew [ShapeIndex $bytesType $layout] $storage" $e] tagged]
+}
+
+# {HEX} -- the lowercase hexadecimal text of the bytes (core/bytestore.tcl's
+# {bytestore HEX} text, empty for no bytes) -- when the byte-List expression E
+# is statically known, "" when it is not: `str::encode_utf8` of an exactly known
+# String, or an exactly known List each of whose elements is a constant Int in
+# 0..255 or a `byte::from_int` call of one (a pure, total conversion of a
+# constant: its evaluation has no effect, so skipping it is unobservable).
+proc native::lower::ConstantBytesOf {e} {
+    variable hir
+    if {[hir::kind $hir $e] eq "call"} {
+        set node [hir::node $hir $e]
+        lassign [dict get $node target] targetKind target
+        if {$targetKind eq "native" && [PlainNativeCallee [dict get $node callee]]
+                && [dict get [hir::symbol $hir $target] name] eq "str::encode_utf8"
+                && [llength [dict get $node args]] == 1} {
+            set fact [hir::exact::Of $hir [lindex [dict get $node args] 0]]
+            if {[lindex $fact 0] eq "val" && [core::value::kind [lindex $fact 1]] eq "str"} {
+                return [list [binary encode hex [encoding convertto utf-8 [core::value::strOf [lindex $fact 1]]]]]
+            }
+            return ""
+        }
+    }
+    set fact [hir::exact::ListOf $hir $e]
+    if {$fact eq ""} {
+        return ""
+    }
+    set codes {}
+    foreach src [lrange $fact 2 end] {
+        set n ""
+        switch -- [lindex $src 0] {
+            e { set n [ConstantByteElement [lindex $src 1]] }
+            v {
+                set v [lindex $src 1]
+                set n [expr {[core::value::kind $v] eq "int" ? [core::value::intOf $v] : ""}]
+            }
+        }
+        if {$n eq "" || $n < 0 || $n > 255} {
+            return ""
+        }
+        lappend codes $n
+    }
+    if {$codes eq ""} {
+        return [list ""]
+    }
+    return [list [binary encode hex [binary format c* $codes]]]
+}
+
+# The byte value of List element expression E when it is a constant Int, or a
+# call of the library conversion `byte::from_int` of a constant Int (both pure
+# and total for a value in 0..255); "" otherwise.
+proc native::lower::ConstantByteElement {e} {
+    variable hir
+    set n [hir::exact::IntOf $hir $e]
+    if {$n ne ""} {
+        return $n
+    }
+    if {[hir::kind $hir $e] ne "call"} {
+        return ""
+    }
+    set node [hir::node $hir $e]
+    set callee [dict get $node callee]
+    if {[hir::kind $hir $callee] ne "ref" || [llength [dict get $node args]] != 1} {
+        return ""
+    }
+    set b [hir::get $hir $callee binding]
+    if {$b eq "" || [dict get [hir::binding $hir $b] name] ne "byte::from_int"} {
+        return ""
+    }
+    set n [hir::exact::IntOf $hir [lindex [dict get $node args] 0]]
+    return [expr {$n ne "" && $n >= 0 && $n <= 255 ? $n : ""}]
+}
+
 # abi::x86_64::from_bytes (core/bytestore.tcl, ABI-BYTES.md): the raw address
 # bridge. `from_bytes(DATA)`, DATA an abi::Bytes (hir/syscall.tcl's
 # BytesProblems proved that statically), lowers to
@@ -4943,6 +5069,14 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
         # The raw Linux x86-64 kernel transition (core/linuxabi.tcl): its own
         # form, never NativeCall's one-operand-per-argument shape.
         return [SyscallCall fn $e $node $wantVirtual]
+    }
+    if {$targetKind eq "block" && ($wantVirtual ne "" || !$wantRegion)} {
+        # `abi::bytes(BYTES)` whose every byte is known now (StaticBytesCall):
+        # a static byte storage instead of a call and a run-time conversion.
+        set static [StaticBytesCall fn $e $node $wantVirtual]
+        if {$static ne ""} {
+            return $static
+        }
     }
     if {$targetKind eq "native" && [dict get [hir::symbol $hir $target] name] eq [core::bytestore::addressNative]} {
         # The raw address bridge (core/bytestore.tcl, ABI-BYTES.md): reads the

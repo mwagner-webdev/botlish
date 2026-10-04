@@ -2661,4 +2661,172 @@ mod tests {
         assert_eq!(shl_i64_exact(1, 64), None);
         assert_eq!(shl_i64_exact(-1, 64), None);
     }
+
+    // -----------------------------------------------------------------------
+    // Owned byte storage (ABI-BYTES.md)
+
+    fn bytes_list(vm: &mut Vm, values: &[i64]) -> Value {
+        let items: Vec<Value> = values.iter().map(|n| vm.new_int(*n)).collect();
+        vm.new_list(items)
+    }
+
+    #[test]
+    fn bytes_from_list_copies_every_byte_exactly_including_nul_and_high_bytes() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let l = bytes_list(&mut vm, &[0x41, 0, 0x42, 0xff, 0x80, 0, 0]);
+        let b = rt_bytes_from_list(p, l);
+        assert_eq!(heap_kind(b), KIND_BYTES);
+        assert_eq!(bytes_of(b), &[0x41, 0, 0x42, 0xff, 0x80, 0, 0]);
+        assert_eq!(rt_bytes_len(p, b), make_small(7));
+        // Eager copy: the storage is its own allocation, not the List.
+        assert_ne!(b, l);
+    }
+
+    #[test]
+    fn the_empty_storage_is_the_shared_static_one_and_allocates_nothing() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let empty = bytes_list(&mut vm, &[]);
+        let before = vm.metrics.total_allocations();
+        let a = rt_bytes_from_list(p, empty);
+        let b = vm.new_bytes(&[]);
+        assert_eq!(vm.metrics.total_allocations(), before);
+        assert_eq!(a, b);
+        assert_eq!(unsafe { (*(a as *const Header)).is_static }, 1);
+        assert_eq!(rt_bytes_len(p, a), make_small(0));
+        assert!(bytes_of(a).is_empty());
+    }
+
+    #[test]
+    fn a_non_byte_element_is_a_type_error_never_a_truncation() {
+        for bad in [256i64, -1, 1 << 40] {
+            let mut vm = vm();
+            let p: *mut Vm = &mut *vm;
+            let l = bytes_list(&mut vm, &[1, bad, 3]);
+            assert_eq!(rt_bytes_from_list(p, l), NO_VALUE);
+            let message = vm.error.take().unwrap().message();
+            assert!(message.contains("element 1 must be a byte"), "{message}");
+            assert!(message.contains(&bad.to_string()), "{message}");
+        }
+        let mut strings = vm();
+        let p: *mut Vm = &mut *strings;
+        let text = strings.new_str("a");
+        let l = strings.new_list(vec![text]);
+        assert_eq!(rt_bytes_from_list(p, l), NO_VALUE);
+        assert!(strings.error.take().unwrap().message().contains("got \"a\""));
+        // A BigInt (above the small range) is no byte either.
+        let mut bigs = vm();
+        let p: *mut Vm = &mut *bigs;
+        let big = bigs.new_big(num_bigint::BigInt::from(1u64 << 63) * 4);
+        let l = bigs.new_list(vec![big]);
+        assert_eq!(rt_bytes_from_list(p, l), NO_VALUE);
+    }
+
+    #[test]
+    fn length_and_address_refuse_a_value_that_is_not_a_storage() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let l = bytes_list(&mut vm, &[1, 2]);
+        for helper in [rt_bytes_len as extern "C" fn(*mut Vm, Value) -> Value, rt_bytes_addr] {
+            assert_eq!(helper(p, l), NO_VALUE);
+            assert!(vm.error.take().unwrap().message().contains("expected bytestore"));
+            assert_eq!(helper(p, make_small(5)), NO_VALUE);
+            assert!(vm.error.take().is_some());
+        }
+    }
+
+    #[test]
+    fn the_payload_address_is_the_object_address_plus_sixteen_and_reads_back() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let l = bytes_list(&mut vm, &[7, 0, 9]);
+        let b = rt_bytes_from_list(p, l);
+        let address = rt_bytes_addr(p, b);
+        assert!(is_small(address));
+        let address = small_of(address) as u64;
+        assert_eq!(address, b + 16);
+        assert_eq!(address % 16, 0);
+        let read = unsafe { std::slice::from_raw_parts(address as *const u8, 3) };
+        assert_eq!(read, &[7, 0, 9]);
+        // The empty storage's address is legal for a zero count (one past its header).
+        let e = vm.new_bytes(&[]);
+        assert_eq!(small_of(rt_bytes_addr(p, e)) as u64, e + 16);
+    }
+
+    #[test]
+    fn storage_equality_is_by_bytes_never_identity() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let a = vm.new_bytes(&[1, 2, 3]);
+        let b = vm.new_bytes(&[1, 2, 3]);
+        let c = vm.new_bytes(&[1, 2, 4]);
+        let d = vm.new_bytes(&[1, 2]);
+        let static_copy = BytesObj::new_static(&[1, 2, 3]) as Value;
+        assert_ne!(a, b);
+        assert_eq!(rt_value_eq(p, a, b), TRUE);
+        assert_eq!(rt_value_eq(p, a, static_copy), TRUE);
+        assert_eq!(rt_value_eq(p, a, c), FALSE);
+        assert_eq!(rt_value_eq(p, a, d), FALSE);
+        assert_eq!(rt_value_eq(p, vm.new_bytes(&[]), vm.new_bytes(&[0])), FALSE);
+        // Never equal to a List or String of the same numbers/characters.
+        let l = bytes_list(&mut vm, &[1, 2, 3]);
+        assert_eq!(rt_value_eq(p, a, l), FALSE);
+        unsafe { super::super::heap::free_object(static_copy as *mut Header) };
+    }
+
+    #[test]
+    fn storage_hash_agrees_with_equality_and_with_the_documented_encoding() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let a = vm.new_bytes(&[1, 2, 3]);
+        let b = vm.new_bytes(&[1, 2, 3]);
+        let c = vm.new_bytes(&[1, 2, 4]);
+        let zero = vm.new_bytes(&[0]);
+        let two_zeros = vm.new_bytes(&[0, 0]);
+        assert_eq!(rt_hash(p, a), rt_hash(p, b));
+        assert_ne!(rt_hash(p, a), rt_hash(p, c));
+        assert_ne!(rt_hash(p, zero), rt_hash(p, two_zeros));
+        // kind tag 9, the byte count as 8 little-endian bytes, then the bytes
+        // (core/hashing.tcl's bytestore case).
+        let mut h = fnv1a(FNV_OFFSET, &[9]);
+        h = fnv1a(h, &3u64.to_le_bytes());
+        h = fnv1a(h, &[1, 2, 3]);
+        assert_eq!(rt_hash(p, a), make_small((h & HASH_MASK) as i64));
+    }
+
+    #[test]
+    fn storage_renders_and_crosses_to_the_host_as_core_value_does() {
+        use crate::runtime::show::{show, tcl_value};
+        let mut vm = vm();
+        let b = vm.new_bytes(&[0x41, 0, 0xff]);
+        assert_eq!(show(b), "<bytes 3: 4100ff>");
+        assert_eq!(tcl_value(b).unwrap(), "bytestore 4100ff");
+        let e = vm.new_bytes(&[]);
+        assert_eq!(show(e), "<bytes 0: >");
+        assert_eq!(tcl_value(e).unwrap(), "bytestore {}");
+    }
+
+    #[test]
+    fn an_unreferenced_storage_is_collected_and_a_rooted_one_survives() {
+        use crate::runtime::metrics::GcReason;
+        let mut vm = vm();
+        let kept = vm.new_bytes(&[1; 100]);
+        let _garbage = vm.new_bytes(&[2; 100]);
+        vm.heap.collect(std::iter::once(kept), &mut vm.metrics, GcReason::Explicit);
+        assert_eq!(vm.metrics.by_kind[KIND_BYTES as usize].live_objects, 1);
+        assert_eq!(vm.metrics.by_kind[KIND_BYTES as usize].reclaimed_objects, 1);
+        // The payload holds no program value: the survivor is intact.
+        assert_eq!(bytes_of(kept), &[1u8; 100][..]);
+    }
+
+    #[test]
+    fn an_oversized_storage_is_a_range_error_before_any_allocation() {
+        let mut vm = vm();
+        let before = vm.metrics.total_allocations();
+        let v = vm.new_bytes_with(MAX_COLLECTION_LENGTH + 1, |_| unreachable!("no payload is written"));
+        assert_eq!(v, NO_VALUE);
+        assert!(vm.error.take().unwrap().message().contains("cannot exceed"));
+        assert_eq!(vm.metrics.total_allocations(), before);
+    }
 }
