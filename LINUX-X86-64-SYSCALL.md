@@ -478,9 +478,13 @@ non-Int or 2^64 is TYPE); rax words are read signed (`-1`, `-38`, `-4095`,
 `i64::MIN`, ... -- kernel error returns stay negative Ints), pinned without
 making any other syscall.
 
-**Only getpid runs in the suite.** As instructed, getpid (harmless,
-argument-free) is the one live syscall any test executes, and nothing is
-fuzzed against the kernel. getpid cannot observe argument routing, so that is
+**Only getpid runs in this boundary's own suite.** As instructed, getpid
+(harmless, argument-free) is the one live syscall `tests/linux-syscall.test`
+executes, and nothing is fuzzed against the kernel. (ABI-BYTES.md later added
+the first memory-moving wrapper, `linux::write`; its tests and fuzzer do make
+real `write(2)` calls -- to temporary files, pipes and captured standard
+output the tests own, plus descriptors known to be closed for the error
+cases. The syscall number is never generated.) getpid cannot observe argument routing, so that is
 pinned statically (the machine-code simulation above). As a manual
 development check only -- not part of the suite -- two calls without side
 effects show the routing and the raw signed result end to end through

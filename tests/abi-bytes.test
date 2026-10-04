@@ -541,7 +541,31 @@ test abi-bytes-write-error-is-the-raw-negative-result {a write the kernel refuse
     lindex [runExecutable $exe] 0
 } -result {[-9, -9, -9, -9, true]}
 
-test abi-bytes-write-is-exactly-one-syscall {the wrapper performs ONE write(2) and returns exactly the kernel's result: a write the kernel only partly accepts is reported as the short count, never completed or retried by the wrapper. A write to a descriptor that accepts at most 4 bytes at a time (a datagram socket buffer is not needed: /dev/full style limits do not exist here) is covered at the NIR level: exactly one syscall op, no loop} -constraints {linuxX86_64} -body {
+test abi-bytes-short-write-is-reported-not-completed {a REAL short write: descriptor 3 is a pipe set non-blocking (by the test program's own raw fcntl), filled with a 40960-byte write, then a 81920-byte write that the kernel can only partly accept. linux::write returns exactly the kernel's short count (0 < n < 81920) and writes nothing more (no loop, no retry); the next write finds the pipe full and returns the raw -EAGAIN (-11); and the pipe holds exactly the first payload followed by the first n bytes of the second} -constraints {linuxX86_64 posixShell} -body {
+    set program "${::linuxPrelude}
+fn nonblock(fd: abi::I32) -> int:
+    abi::x86_64::to_int(linux::abi::syscall({rax: abi::x86_64::register64(72), rdi: abi::x86_64::from_i32(fd), rsi: abi::x86_64::register64(4), rdx: abi::x86_64::register64(2048)}))
+a = abi::bytes(str::encode_utf8(doubled(\"0123456789\", 12)))
+b = abi::bytes(str::encode_utf8(doubled(\"abcdefghij\", 13)))
+r0 = nonblock(abi::i32(3))
+r1 = out(3, a)
+r2 = out(3, b)
+r3 = out(3, b)
+\[r0, r1, r2, r3\]"
+    set exe [buildExecutable shortwrite $program]
+    set resultFile [file join $::outputDir shortwrite.result]
+    set channel [open |[list sh -c {exec "$0" 3>&1 1>"$1"} $exe $resultFile] rb]
+    set data [read $channel]
+    close $channel
+    set result [string trim [readBinary $resultFile]]
+    regexp {^\[0, 40960, ([0-9]+), (-?[0-9]+)\]$} $result -> short again
+    set first [string repeat 0123456789 4096]
+    set second [string repeat abcdefghij 8192]
+    list [expr {$short > 0 && $short < 81920}] $again [expr {$data eq "$first[string range $second 0 [expr {$short - 1}]]"}] \
+        [expr {[string length $data] == 40960 + $short}]
+} -result {1 -11 1 1}
+
+test abi-bytes-write-is-exactly-one-syscall {the wrapper performs ONE write(2) and returns exactly the kernel's result: a short write (a pipe, a signal) is reported as the short count and never completed or retried by the wrapper. Verified structurally -- linux::write's NIR has exactly one syscall op and no branch, jump, label or tail call, so there is no loop or retry to complete a partial write -- since a short write cannot be provoked deterministically from a test} -constraints {linuxX86_64} -body {
     set nir [native::nir [bytesHir "${::linuxPrelude}\nout(3, mk(\"x\"))"]]
     set body [nirFunction $nir linux::write]
     list [regexp -all {op syscall_linux_x86_64} $body] [regexp -all {\mjump\M|\mbr\M|\mtail\M|\mlabel\M} $body]

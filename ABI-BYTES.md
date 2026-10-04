@@ -161,7 +161,11 @@ fn write(fd: abi::I32, data: abi::Bytes) -> int:
   holds (a pipe, a signal, a full disk). The wrapper makes exactly one syscall
   and returns exactly the kernel's result; it never loops or retries. Completion
   is a policy for a higher I/O abstraction. (NIR: exactly one
-  `syscall_linux_x86_64` op, no branch, no loop.)
+  `syscall_linux_x86_64` op, no branch, no loop; and a test provokes a **real**
+  short write -- a non-blocking pipe filled to the point where the kernel accepts
+  only part of an 81920-byte payload: `linux::write` returns exactly that short
+  count, the pipe holds exactly the bytes the kernel took, and the next write
+  returns the raw `-11` (EAGAIN).)
 * **No retained pointer.** The address is taken and consumed synchronously by
   the syscall in the same function; the wrapper does not return, store or retain
   it. A kernel or library API that keeps the pointer after returning, a callback
@@ -433,7 +437,7 @@ All of it is run, not asserted from source.
 
 ## Tests and fuzzing
 
-`tests/abi-bytes.test` (70 tests, all green in a normal run, under
+`tests/abi-bytes.test` (73 tests, all green in a normal run, under
 `BOTLISH_NATIVE_GC_STRESS=1` and under `CORE_BACKEND=compile`):
 
 * registration (three natives, no write/keepalive/pointer native), the declaration;
@@ -451,11 +455,12 @@ All of it is run, not asserted from source.
   heap payload; every byte value; a write to a real pipe (163840 bytes, exceeding
   the pipe buffer); repeated and aliased writes; the raw negative result (-9);
   exactly one syscall;
+* a real short write (above) and the raw -EAGAIN;
 * **GC stress**: 40 rounds of mixed writes exact; in-process runs identical with and
   without stress; the six liveness routes; the keepalive mutant is detected;
 * NIR/allocation/object-layout/machine-code/`strace` evidence as above.
 
-Rust unit tests (`cargo test --release`: 171 + 28): the object layout and
+Rust unit tests (`cargo test --release`: 174 + 28): the object layout and
 alignment, payload round trip with NUL and high bytes, the empty storage, partial
 publication refused, `rt_bytes_from_list` exactness and its TYPE errors (a
 256, -1, 2^40, a String, a BigInt), length/address refusing a non-storage, the

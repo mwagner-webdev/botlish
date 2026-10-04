@@ -72,8 +72,31 @@ set mutations {
         {Some(n) if (0..=255).contains(&n) => n as u8,}
         {Some(n) if (0..=255).contains(&n) => (n as u8) & 0x7f,}}
     {count-truncated tcl lib/linux.bot
-        {rdx: abi::x86_64::from_usize(abi::bytes_length(data)),}
-        {rdx: abi::x86_64::from_usize(abi::Usize {value: mod(abi::bytes_length(data).value, 65536)}),}}
+        {fn write(fd: abi::I32, data: abi::Bytes) -> int:
+    abi::x86_64::to_int(
+        linux::abi::syscall({
+            rax: abi::x86_64::register64(1),
+            rdi: abi::x86_64::from_i32(fd),
+            rsi: abi::x86_64::from_bytes(data),
+            rdx: abi::x86_64::from_usize(abi::bytes_length(data)),
+        })
+    )}
+        {fn trunc16(n: abi::Usize) -> abi::Usize:
+    v = mod(n.value, 65536)
+    if v > 65535:
+        abi::Usize {value: 0}
+    else:
+        abi::Usize {value: v}
+
+fn write(fd: abi::I32, data: abi::Bytes) -> int:
+    abi::x86_64::to_int(
+        linux::abi::syscall({
+            rax: abi::x86_64::register64(1),
+            rdi: abi::x86_64::from_i32(fd),
+            rsi: abi::x86_64::from_bytes(data),
+            rdx: abi::x86_64::from_usize(trunc16(abi::bytes_length(data))),
+        })
+    )}}
     {no-keepalive tcl native/lower.tcl
         {    foreach storage $kept {
         Assign fn "op keepalive $storage" $e
@@ -185,6 +208,17 @@ foreach m $mutations {
             lappend survivors "$name (build failed)"
             continue
         }
+    }
+    # A mutant that does not even compile would be "killed" by every test
+    # without proving anything: run the example once first and refuse such a
+    # mutant (the example's compile-time errors print as "error:").
+    set probe ""
+    catch {exec [info nameofexecutable] [file join $dir main.tcl] -backend cranelift [file join $dir examples linux write.bot] 2>@1} probe
+    if {[string match "*   error:*" $probe]} {
+        puts "   INVALID MUTANT (does not compile): $name: [string range [lindex [split $probe \n] end] 0 200]"
+        lappend survivors "$name (invalid: does not compile)"
+        file delete -force $dir
+        continue
     }
     set failing {}
     set output ""
