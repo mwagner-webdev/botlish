@@ -1,0 +1,53 @@
+abi-bytes fuzz results (audit/abi-bytes/tools/fuzz.tcl)
+=========================================================
+
+Host: Linux x86-64, Tcl 9.0.1, rustc 1.97 (release native backend), LANG=C.utf8.
+Each program is seeded individually (seed = base seed + program index); a
+failure replays with `-seed S -n 1`.  Final runs, all against the final tool:
+
+1. Differential, both modes, normal and GC stress
+     tclsh9.0 audit/abi-bytes/tools/fuzz.tcl -mode both -n 40 -seed 1 -items 8
+   pure   interp, compile, cranelift-generic, cranelift: length, contents
+          (every byte, in order), construction/equality/hash consistency,
+          up to four mutants per sequence (changed byte, dropped last byte,
+          appended byte, appended zero) compared against the oracle's own
+          verdict, aliasing -- against the Tcl oracle,
+          and the shown result identical on all four backends
+   write  one standalone executable per program, run once normally and once
+          with BOTLISH_NATIVE_GC_STRESS=1: file (fd 3) and pipe (fd 4) contents
+          byte-exact against the oracle, every returned count exact
+   abi-bytes-fuzz programs 40 payloads 320 failures 0
+
+2. Pure, a second seed range (includes seed 9023, see below)
+     tclsh9.0 audit/abi-bytes/tools/fuzz.tcl -mode pure -n 30 -seed 9001 -items 8
+   abi-bytes-fuzz programs 30 payloads 240 failures 0
+
+3. write(2), under GC stress for the whole process, native backends only
+     tclsh9.0 audit/abi-bytes/tools/fuzz.tcl -mode write -n 20 -seed 5001 \
+         -gc-stress 1 -backends "cranelift-generic cranelift"
+   abi-bytes-fuzz programs 20 payloads 160 failures 0
+     tclsh9.0 audit/abi-bytes/tools/fuzz.tcl -mode write -n 80 -seed 9001 \
+         -items 10 -gc-stress 1 -backends "cranelift-generic cranelift"
+   abi-bytes-fuzz programs 80 payloads 800 failures 0
+
+Total in the final runs: 190 generated programs, 1520 generated payloads
+(empty, one byte, the sizes around 7/8/9, 15/16/17, 31/32/33, embedded zeros,
+0xff and the high half, ASCII, 8-bit data, UTF-8 text, buffers up to a few
+thousand bytes), 0 failures.  The syscall number is never generated: the only
+syscall is write(2), to a temp file and to a pipe the harness reads.
+
+Failures found while building the fuzzer -- all in the fuzzer, none in the
+product, recorded because a differential test is only as good as its oracle:
+
+* a larger seed range produced a generated UTF-8 text containing `"` or `\`;
+  the fuzzer's literal writer used an escape (`\u{..}`) Botlish strings do not
+  have (they have \\ \" \n \r \t), so the program did not parse.  Fixed.
+* seed 9023 failed identically on all four backends: the changed-byte index of
+  a mutant was drawn with rand() and the program and the oracle each asked for
+  the mutants, so they compared different bytes; only the zeros/ffs kinds
+  (where +1 can land on the byte the pattern already had) could disagree.
+  Fixed: the index is a function of the spec; a failure now reports the first
+  mismatching slot.
+* the first generator emitted one `byte::from_int` call per byte and reached
+  the compiler's existing proof budget at about 1500-2000 constant calls; the
+  generators are now closed-form (one call per sequence).

@@ -224,15 +224,24 @@ foreach m $mutations {
             continue
         }
     }
-    # A mutant that does not even compile would be "killed" by every test
-    # without proving anything: run the example once first and refuse such a
-    # mutant (the example's compile-time errors print as "error:").
+    # A Tcl-side mutant that does not even compile would be "killed" by every
+    # test without proving anything: run the example once first and refuse such
+    # a mutant (the example's compile-time errors print as "error:"). A Rust
+    # mutant cannot cause a compile error once the crate builds, and it may
+    # legitimately break the example's run (a write one byte too long corrupts
+    # the in-process runner's own output), so it is not probed.
     set probe ""
-    inDir $dir {
-        catch {exec [info nameofexecutable] [file join $dir main.tcl] -backend cranelift [file join $dir examples linux write.bot] 2>@1} probe
+    if {$kind eq "tcl"} {
+        inDir $dir {
+            catch {exec [info nameofexecutable] [file join $dir main.tcl] -backend cranelift [file join $dir examples linux write.bot] 2>@1} probe
+        }
     }
     if {[string match "*   error:*" $probe]} {
-        puts "   INVALID MUTANT (does not compile): $name: [string range [lindex [split $probe \n] end] 0 200]"
+        set shown {}
+        foreach line [split $probe \n] {
+            if {[string match "*   error:*" $line]} { lappend shown [string trim $line] }
+        }
+        puts "   INVALID MUTANT (does not compile): $name: [string range [join $shown { | }] 0 400]"
         lappend survivors "$name (invalid: does not compile)"
         file delete -force $dir
         continue
