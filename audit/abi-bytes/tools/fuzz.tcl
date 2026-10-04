@@ -139,13 +139,17 @@ proc specSource {spec} {
 }
 
 proc textLiteral {text} {
+    # Botlish string literals have exactly the escapes \\ \" \n \r \t (the
+    # lexer reports any other); every other character stands for itself.
     set out "\""
     foreach ch [split $text ""] {
-        scan $ch %c code
-        if {$code == 34 || $code == 92 || $code < 32 || $code == 127} {
-            append out [format {\u{%x}} $code]
-        } else {
-            append out $ch
+        switch -- $ch {
+            "\"" { append out {\"} }
+            "\\" { append out {\\} }
+            "\n" { append out {\n} }
+            "\r" { append out {\r} }
+            "\t" { append out {\t} }
+            default { append out $ch }
         }
     }
     return "$out\""
