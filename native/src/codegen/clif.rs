@@ -1145,6 +1145,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             Kind::MutArray => KIND_MUTARRAY,
             Kind::ImmutableSet => KIND_SET,
             Kind::Struct => KIND_STRUCT,
+            Kind::ByteStore => KIND_BYTES,
             Kind::Bool | Kind::Unit | Kind::UnicodeChar => unreachable!(),
         };
         let low3 = self.b.ins().band_imm_s(v, 7);
@@ -1205,6 +1206,13 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             }
             Inst::Str { dst, text } => {
                 let v = self.string(text);
+                self.def(*dst, v);
+            }
+            Inst::Bytes { dst, bytes } => {
+                // A static byte storage (constants.rs installs it at
+                // startup): loaded from the constant table like a String
+                // constant, never allocated at run time.
+                let v = self.constant(Const::Bytes(bytes.clone()));
                 self.def(*dst, v);
             }
             Inst::Char { dst, digits } => {
@@ -1364,6 +1372,16 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                     // its register convention would mean something else.
                     return Err(BackendError::Codegen(
                         "linux::abi::syscall is the Linux x86-64 syscall transport: this target is not Linux x86-64"
+                            .to_string(),
+                    ));
+                }
+                if *op == OpCode::BytesAddr && !cfg!(all(target_arch = "x86_64", target_os = "linux")) {
+                    // The payload address is only ever consumed by the Linux
+                    // x86-64 syscall transport, and the small-Int
+                    // representation of an address is argued for its 47-bit
+                    // user space: never compiled for another target.
+                    return Err(BackendError::Codegen(
+                        "abi::x86_64::from_bytes is the Linux x86-64 address bridge: this target is not Linux x86-64"
                             .to_string(),
                     ));
                 }
@@ -1709,6 +1727,17 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         StrEq => ("rt_str_eq", None, false, None),
                         StrLen => ("rt_str_len", None, false, None),
                         StrByteLen => ("rt_str_byte_len", None, false, None),
+                        // The owned byte storage (ABI-BYTES.md). from_list
+                        // allocates one object (or returns the static empty
+                        // one) and is fallible (a non-byte element is TYPE);
+                        // length/address read the header of a value that must
+                        // be a storage (TYPE otherwise) and never allocate;
+                        // keepalive is a real call so it is never removed
+                        // and its operand is live across everything before it.
+                        BytesFromList => ("rt_bytes_from_list", None, true, Some(("bytesfromlist", KIND_BYTES))),
+                        BytesLen => ("rt_bytes_len", None, true, None),
+                        BytesAddr => ("rt_bytes_addr", None, true, None),
+                        KeepAlive => ("rt_keepalive", None, false, None),
                         // Never fallible (see ops.rs's rt_str_decode_char_at):
                         // a one-character String can never exceed
                         // MAX_COLLECTION_LENGTH. Still routed through

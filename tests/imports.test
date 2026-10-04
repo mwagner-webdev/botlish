@@ -223,11 +223,11 @@ test imports-nested-namespace-import {import abi::x86_64 authorizes abi::x86_64:
         [rejection "import abi::x86_64\nx = abi::u8(1)\n"]
 } -result {1 {MISSING-IMPORT: namespace "abi" is not imported; add `import abi` to use `abi::u8` (imports are exact: `import abi::x86_64` does not import "abi")}}
 
-test imports-linux-abi-intrinsic-namespace {import linux::abi authorizes the intrinsic linux::abi::syscall; `linux` alone is not a namespace} -body {
+test imports-linux-abi-intrinsic-namespace {import linux::abi authorizes the intrinsic linux::abi::syscall; `linux` is its own namespace (the module lib/linux.bot, ABI-BYTES.md) and importing it does not import `linux::abi`} -body {
     list [rejectionKind "import linux::abi\nimport abi::x86_64\nx = linux::abi::syscall({rax: abi::x86_64::register64(39)})\n"] \
         [rejectionKind "import linux\n"] \
         [rejection "import linux\nx = linux::abi::syscall({})\n"]
-} -match glob -result {accepted UNKNOWN-NAMESPACE {UNKNOWN-NAMESPACE: unknown namespace "linux"*}}
+} -match glob -result {accepted accepted {MISSING-IMPORT: namespace "linux::abi" is not imported; add `import linux::abi` to use `linux::abi::syscall` (imports are exact: `import linux` does not import "linux::abi")}}
 
 test imports-intrinsic-only-namespace {import str works with no lib/str.bot} -body {
     list [file exists [file join $::core::libraryDir str.bot]] \

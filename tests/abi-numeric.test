@@ -252,7 +252,7 @@ test abi-numeric-no-compiler-knowledge {the compiler knows no ABI numeric type: 
     list [expr {[llength $files] > 60}] $hits \
         [lsearch -all -inline -not -regexp $natives {^abi::(I|U)(8|16|32|64|size)Value\?$}] \
         [llength [lsearch -all -regexp $natives {^abi::(I|U)(8|16|32|64|size)Value\?$}]]
-} -result {1 {} linux::abi::syscall 10}
+} -result {1 {} {linux::abi::syscall abi::x86_64::from_bytes} 10}
 
 test abi-numeric-namespaced-types {abi::x86_64 loads lib/abi.bot, whose domain types are members of namespace abi (abi::U8Value): a program's own U8Value or I32Value beside the raw transport -- and beside abi::U8Value -- compiles, and a program may even declare a type named like the module's (AbiU8Value); only the two errors are still global names, so a real collision names the module declaration} -body {
     list [agree "import abi::x86_64\ntype U8Value = Int in 0..255\ntype I32Value = Int in 0..9\nfn f(x: U8Value) -> int:\n    x\nabi::x86_64::to_int(abi::x86_64::register64(f(39)))"] \

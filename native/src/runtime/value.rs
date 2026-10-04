@@ -90,6 +90,10 @@ pub const KIND_LISTPLAN: u8 = 11;
 /// A struct value (STRUCTS.md, StructObj): distinct from KIND_LIST, so a
 /// struct and a List are never the same runtime kind, whatever they hold.
 pub const KIND_STRUCT: u8 = 12;
+/// The owned byte storage behind `abi::Bytes` (ABI-BYTES.md, bytesobj.rs): an
+/// immutable, finite, contiguous sequence of bytes, header + length + payload
+/// in one allocation. Its payload holds no program value.
+pub const KIND_BYTES: u8 = 13;
 
 #[repr(C)]
 pub struct Header {
@@ -115,6 +119,7 @@ pub struct BigIntObj {
 
 // The String object (one allocation: header, metadata and UTF-8 bytes) lives
 // in strobj.rs; re-exported so every `use value::*` still sees it.
+pub use super::bytesobj::{BYTES_LEN_OFFSET, BYTES_PAYLOAD_OFFSET, BytesObj};
 pub use super::strobj::{
     STR_ALIGN, STR_ASCII_OFFSET, STR_BYTE_LEN_OFFSET, STR_CHARS_OFFSET, STR_HEADER_SIZE,
     STR_MIN_ALLOC, STR_TEXT_OFFSET, StrObj, first_scalar,
@@ -375,6 +380,9 @@ pub enum Kind {
     ImmutableSet,
     /// A struct value (STRUCTS.md): distinct from List and every other kind.
     Struct,
+    /// The owned byte storage behind `abi::Bytes` (ABI-BYTES.md): distinct
+    /// from List and String. Named as core/value.tcl's `bytestore` kind.
+    ByteStore,
 }
 
 impl Kind {
@@ -392,6 +400,7 @@ impl Kind {
             "UnicodeChar" => Kind::UnicodeChar,
             "immutableSet" => Kind::ImmutableSet,
             "struct" => Kind::Struct,
+            "bytestore" => Kind::ByteStore,
             _ => return None,
         })
     }
@@ -410,6 +419,7 @@ impl Kind {
             Kind::UnicodeChar => "UnicodeChar",
             Kind::ImmutableSet => "immutableSet",
             Kind::Struct => "struct",
+            Kind::ByteStore => "bytestore",
         }
     }
 
@@ -420,7 +430,7 @@ impl Kind {
     pub fn from_code(code: u8) -> Kind {
         [
             Kind::Int, Kind::Str, Kind::Bool, Kind::Unit, Kind::List, Kind::Result, Kind::Block, Kind::Native,
-            Kind::MutArray, Kind::UnicodeChar, Kind::ImmutableSet, Kind::Struct,
+            Kind::MutArray, Kind::UnicodeChar, Kind::ImmutableSet, Kind::Struct, Kind::ByteStore,
         ][code as usize]
     }
 }
@@ -448,6 +458,7 @@ pub fn kind_of(v: Value) -> Kind {
         KIND_MUTARRAY => Kind::MutArray,
         KIND_SET => Kind::ImmutableSet,
         KIND_STRUCT => Kind::Struct,
+        KIND_BYTES => Kind::ByteStore,
         _ => panic!("not a program value: {v:#x}"),
     }
 }
@@ -471,6 +482,14 @@ pub fn list_of<'a>(v: Value) -> &'a ListObj {
 pub fn struct_of<'a>(v: Value) -> &'a StructObj {
     debug_assert_eq!(heap_kind(v), KIND_STRUCT);
     unsafe { as_ref(v) }
+}
+
+/// The payload of the byte storage V (a slice of its inline bytes).
+pub fn bytes_of<'a>(v: Value) -> &'a [u8] {
+    debug_assert_eq!(heap_kind(v), KIND_BYTES);
+    // SAFETY: V is a live, fully constructed storage (a tagged heap pointer of
+    // kind KIND_BYTES); the payload is immutable for the object's life.
+    unsafe { BytesObj::payload(v) }
 }
 
 pub fn set_of<'a>(v: Value) -> &'a SetObj {

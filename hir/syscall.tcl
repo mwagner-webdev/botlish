@@ -37,12 +37,15 @@ namespace eval hir::syscall {
 proc hir::syscall::verify {hirVar} {
     upvar 1 $hirVar hir
     variable native
+    set bridge [core::bytestore::addressNative]
     set callees [dict create]
     dict for {e node} [dict get $hir exprs] {
         if {[dict get $node kind] ne "call"} continue
         dict set callees [dict get $node callee] 1
         lassign [dict get $node target] targetKind target
-        if {$targetKind ne "native" || [dict get [hir::symbol $hir $target] name] ne $native} continue
+        if {$targetKind ne "native"} continue
+        set name [dict get [hir::symbol $hir $target] name]
+        if {$name ne $native && $name ne $bridge} continue
         if {![dict get $node reachable]} continue
         VerifyCall hir $e $node
     }
@@ -51,16 +54,27 @@ proc hir::syscall::verify {hirVar} {
         set b [dict get $node binding]
         if {$b eq ""} continue
         set binding [hir::binding $hir $b]
-        if {[dict get $binding kind] ne "root" || [dict get $binding name] ne $native} continue
-        hir::Diagnose hir TYPE \
-            "$native can only be called directly: it is the raw kernel transition, not a function value (its register-struct parameter has no Fn{...} spelling, and a register is never looked up by name at run time)" $e
+        if {[dict get $binding kind] ne "root"} continue
+        if {[dict get $binding name] eq $native} {
+            hir::Diagnose hir TYPE \
+                "$native can only be called directly: it is the raw kernel transition, not a function value (its register-struct parameter has no Fn{...} spelling, and a register is never looked up by name at run time)" $e
+        } elseif {[dict get $binding name] eq $bridge} {
+            hir::Diagnose hir TYPE \
+                "$bridge can only be called directly: it is the raw address bridge, not a function value (an address is taken from one abi::Bytes at one call and consumed by the syscall that call feeds)" $e
+        }
     }
 }
 
-# The problems of one call E (NODE) of the native.
+# The problems of one call E (NODE) of either native of this file.
 proc hir::syscall::VerifyCall {hirVar e node} {
     upvar 1 $hirVar hir
-    foreach problem [Problems $hir $e $node] {
+    set name [dict get [hir::symbol $hir [lindex [dict get $node target] 1]] name]
+    if {$name eq [core::bytestore::addressNative]} {
+        set problems [BytesProblems $hir $e $node]
+    } else {
+        set problems [Problems $hir $e $node]
+    }
+    foreach problem $problems {
         lassign $problem kind message expr origin
         if {$origin eq ""} {
             hir::Diagnose hir $kind $message $expr
@@ -136,4 +150,32 @@ proc hir::syscall::Problems {hir e node} {
             "$native's argument has no field \"rax\": rax carries the syscall number and is required (only the argument registers [join [lrange $registers 1 end] {, }] may be omitted, as zero)" $arg ""]
     }
     return $problems
+}
+
+# Every way call E (NODE) of abi::x86_64::from_bytes (core/bytestore.tcl) breaks
+# its contract: a list of {KIND MESSAGE EXPR ORIGIN}, as Problems. The bridge
+# takes exactly one argument, and it must statically be an abi::Bytes -- no
+# run-time check is ever inserted, and native lowering relies on it: it reads
+# the struct's one storage field without looking at the value's kind. (An
+# opaque struct cannot be forged: only module abi can construct one,
+# OPAQUE-STRUCTS.md, so a static abi::Bytes always holds a byte storage.)
+proc hir::syscall::BytesProblems {hir e node} {
+    set native [core::bytestore::addressNative]
+    set bytesType [core::bytestore::bytesType]
+    set args [dict get $node args]
+    if {[llength $args] != 1} {
+        return [list [list ARITY \
+            "$native takes exactly one argument, an abi::Bytes ([llength $args] given)" $e ""]]
+    }
+    set arg [lindex $args 0]
+    set type [hir::typeOf $hir $arg]
+    if {$type eq "never"} {
+        return {}
+    }
+    if {![hir::structs::declared $bytesType] || ![hir::types::subtype $type [list nstruct $bytesType]]} {
+        return [list [list TYPE \
+            "the argument of $native must be an $bytesType (abi::bytes(...), lib/abi.bot): the address of an arbitrary value has no meaning, and no run-time check is inserted; its type here is [hir::types::show $type]" \
+            $arg ""]]
+    }
+    return {}
 }

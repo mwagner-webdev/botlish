@@ -1,0 +1,60 @@
+# linux.bot -- the "linux" namespace: thin, ordinary-Botlish wrappers over
+# the raw Linux x86-64 syscall transport (LINUX-X86-64-SYSCALL.md,
+# ABI-BYTES.md).
+#
+# `linux::abi::syscall` (a different namespace, the one privileged
+# operation) is the generic kernel transition: seven register words in, the
+# raw rax out, no syscall known to the compiler. This module is policy above
+# it, written in Botlish: which syscall number, which register carries which
+# argument, and how a Botlish value becomes register contents.
+#
+#   linux::write(fd, data)    write(2): ONE syscall, the kernel's raw
+#                             signed result as an ordinary Int.
+#
+# write is the first syscall that moves memory, so it is also the first that
+# needs the memory boundary this milestone adds (ABI-BYTES.md): its buffer is
+# an abi::Bytes -- an immutable, owned, contiguous byte value -- and both the
+# address and the byte count are derived from that ONE value. The wrapper
+# deliberately has no `count` parameter: a separate count could disagree with
+# the buffer, and `write(fd, bytes, count)` is exactly the pointer/length
+# mismatch the safe wrapper exists to rule out. The raw syscall still
+# receives the address (rsi) and the count (rdx) in separate registers,
+# because that is machine reality; the Botlish function keeps the two facts
+# coupled.
+#
+# The machine address is taken by `abi::x86_64::from_bytes(data)`, a raw
+# architecture bridge, and consumed synchronously by the syscall in the same
+# function: the address is never returned, stored or retained, and the
+# compiler keeps `data`'s storage alive until the kernel has returned
+# (native/lower.tcl's `keepalive`). Nothing here can retain a pointer after
+# the call -- that belongs to a future resource/context design.
+#
+# Syscall-level semantics, deliberately thin (no errno layer yet):
+#
+# * The result is the raw signed rax as an Int, by abi::x86_64::to_int: n >=
+#   0 is the number of bytes written; a negative n is the kernel's -errno
+#   (-9 for a bad file descriptor on Linux), preserved exactly -- never
+#   reread as an unsigned number, never turned into -1/errno. A later,
+#   higher-level wrapper can translate negative results into Botlish errors.
+# * ONE write call. A successful write may write fewer bytes than the Bytes
+#   holds (a pipe, a signal, a full disk): the wrapper does not loop, retry
+#   or complete the write; the result says how much happened. Completion is
+#   a policy for a higher I/O abstraction.
+# * Native only (Linux x86-64): the Tcl backends refuse the syscall
+#   (NATIVE-ONLY) exactly as they refuse getpid; nothing imitates a write
+#   with puts or a Tcl channel.
+import abi
+import abi::x86_64
+import linux::abi
+
+# write(2): SYS_write = 1, rdi = fd, rsi = the address of data's payload,
+# rdx = data's byte count.
+fn write(fd: abi::I32, data: abi::Bytes) -> int:
+    abi::x86_64::to_int(
+        linux::abi::syscall({
+            rax: abi::x86_64::register64(1),
+            rdi: abi::x86_64::from_i32(fd),
+            rsi: abi::x86_64::from_bytes(data),
+            rdx: abi::x86_64::from_usize(abi::bytes_length(data)),
+        })
+    )

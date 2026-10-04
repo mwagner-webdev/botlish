@@ -95,6 +95,9 @@ pub fn op_may_allocate(op: OpCode) -> bool {
         op,
         IAdd | ISub | IMul | IAnd | IOr | IXor | IShl | IShr | Substr | DecodeCharAt | ShortToStr | AsciiToStr | StrLower | StrCat
             | StrUtf8Bytes | Argv | ListNew | ListAppend | MutArrayAllocate | MutArrayFreeze | MkOk
+            // The owned byte storage is one allocation (a collection may run
+            // first); the empty storage is a shared static (no allocation).
+            | BytesFromList
             // The proven siblings allocate exactly like their checked forms; only
             // their op_may_error classification differs.
             | SubstrProven | MutArrayFreezeProven | MkError
@@ -116,6 +119,11 @@ pub fn op_may_allocate(op: OpCode) -> bool {
 pub fn op_may_error(op: OpCode) -> bool {
     use OpCode::*;
     matches!(op, IMod | IShl | IShr | VEq | Hash | Substr | StrCat | StrUtf8Bytes | Argv | StrIsTclAlpha | StrIsTclAlnum
+        // A non-byte element (TYPE, never a truncation), an operand that is
+        // not a byte storage (TYPE), an oversized storage (RANGE). A checked
+        // program cannot produce any of them: lib/abi.bot's creator takes
+        // a List[Byte] and its storage field only ever holds a storage.
+        | BytesFromList | BytesLen | BytesAddr
         // Only on an operand that is not a 64-bit register word (TYPE, never
         // a truncation: runtime/syscall.rs), which a checked program cannot
         // produce. The kernel's own result is never an error here.
@@ -398,6 +406,11 @@ fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
         // Immediate, canonical (one codepoint, one word): word equality is
         // exactly value equality, like Bool.
         Kind::UnicodeChar => a == b,
+        // Exact byte-sequence equality (core::value::equal's bytestore
+        // case): length and every byte, never the storage's identity or
+        // address -- a static constant, a heap buffer and a copy of either
+        // are equal iff their bytes are.
+        Kind::ByteStore => bytes_of(a) == bytes_of(b),
         Kind::List => {
             let (xs, ys) = (list_of(a).items(), list_of(b).items());
             if xs.len() != ys.len() {
@@ -528,6 +541,7 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
         Kind::UnicodeChar => 6,
         Kind::ImmutableSet => 7,
         Kind::Struct => 8,
+        Kind::ByteStore => 9,
         Kind::Block | Kind::Native | Kind::MutArray => unreachable!(),
     };
     let h = fnv1a(h, &[tag]);
@@ -545,6 +559,14 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
         Kind::Str => fnv1a(h, str_of(v).as_bytes()),
         Kind::Bool => fnv1a(h, &[(v == TRUE) as u8]),
         Kind::Unit => h,
+        // The byte count (8 bytes, little-endian), then every byte in order:
+        // core/hashing.tcl's bytestore case, byte for byte, and consistent
+        // with the byte-sequence equality above.
+        Kind::ByteStore => {
+            let bytes = bytes_of(v);
+            let h = fnv1a(h, &(bytes.len() as u64).to_le_bytes());
+            fnv1a(h, bytes)
+        }
         // Canonical decimal codepoint text, matching how Int's own text is
         // hashed above (core/hashing.tcl's identical choice).
         Kind::UnicodeChar => fnv1a(h, char_of(v).to_string().as_bytes()),
@@ -608,6 +630,97 @@ pub extern "C" fn rt_hash(p: *mut Vm, v: Value) -> Value {
         Ok(h) => vm(p).new_int((h & HASH_MASK) as i64),
         Err(()) => NO_VALUE,
     }
+}
+
+// ---------------------------------------------------------------------------
+// Owned byte storage (ABI-BYTES.md, bytesobj.rs)
+
+/// `byte_store::from_list` (core/bytestore.tcl): L's elements, each an Int
+/// in 0..255 stored exactly (no `mod 256`, no sign reinterpretation, no
+/// character coercion; a 0 is an ordinary byte), eagerly copied into a new
+/// storage that owns them -- the result is not a view of L and does not
+/// retain it. The empty List gives the shared static empty storage (no
+/// allocation). A non-byte element is a TYPE error with the same text the
+/// Tcl implementation raises, naming the element's position.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_bytes_from_list(p: *mut Vm, l: Value) -> Value {
+    let items = list_of(l).items();
+    // Validate and narrow first: the new storage's payload is then written
+    // from this buffer with no failure possible while it is half built.
+    let mut bytes: Vec<u8> = Vec::with_capacity(items.len());
+    for (position, &item) in items.iter().enumerate() {
+        let byte = match int_small(item) {
+            Some(n) if (0..=255).contains(&n) => n as u8,
+            _ => {
+                let got = if is_small(item) || heap_kind(item) == KIND_BIGINT {
+                    super::show::int_text(item)
+                } else {
+                    super::show::show(item)
+                };
+                let message = format!(
+                    "byte_store::from_list: element {position} must be a byte (an Int in 0..255), got {got}"
+                );
+                return vm(p).fail(RtError::Semantic { kind: "TYPE", message });
+            }
+        };
+        bytes.push(byte);
+    }
+    let r = vm(p).new_bytes(&bytes);
+    vm(p).metrics.record_list_copy(bytes.len());
+    r
+}
+
+/// The storage V, or a TYPE error naming CONTEXT (the same text as
+/// core::value::expect's, `CONTEXT: expected bytestore, got VALUE`).
+fn bytes_operand(p: *mut Vm, v: Value, context: &str) -> Result<(), Value> {
+    if heap_kind(v) == KIND_BYTES {
+        Ok(())
+    } else {
+        Err(vm(p).fail(RtError::Type { context: context.to_string(), expected: Kind::ByteStore, got: v }))
+    }
+}
+
+/// `byte_store::byte_count`: the exact byte count, as a small Int (the
+/// collection-length ceiling `Vm::alloc_bytes` enforces keeps it in range,
+/// which is what `-result-range collection-length` promises).
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_bytes_len(p: *mut Vm, v: Value) -> Value {
+    if let Err(failed) = bytes_operand(p, v, "byte_store::byte_count") {
+        return failed;
+    }
+    make_small(bytes_of(v).len() as i64)
+}
+
+/// `abi::x86_64::from_bytes`, the raw address bridge (ABI-BYTES.md): the
+/// machine address of the first payload byte of storage V, as a small Int
+/// (the object's address plus the constant payload offset; no read of the
+/// payload, no allocation). Valid only while V is live and unmoved -- the
+/// collector never moves objects, and native lowering keeps V live through the
+/// syscall that consumes the address (`op keepalive`). The address of a
+/// 47-bit Linux x86-64 user-space object is far below the small-Int
+/// ceiling; anything else is refused rather than truncated.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_bytes_addr(p: *mut Vm, v: Value) -> Value {
+    if let Err(failed) = bytes_operand(p, v, "abi::x86_64::from_bytes") {
+        return failed;
+    }
+    let address = BytesObj::payload_address(v) as i64;
+    if !fits_small(address) {
+        let message = format!("abi::x86_64::from_bytes: the payload address {address:#x} is outside the small-Int range");
+        return vm(p).fail(RtError::Semantic { kind: "RANGE", message });
+    }
+    make_small(address)
+}
+
+/// `op keepalive %b`: a use of V that the optimizer cannot remove and that
+/// does nothing. native/lower.tcl emits it *after* every syscall whose
+/// address operands came from `bytesaddr %b`, so V is live (a GC root at
+/// every safepoint, including the syscall's own) from its definition until the
+/// kernel has returned. `black_box` keeps the value observed.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_keepalive(_p: *mut Vm, v: Value) -> Value {
+    std::hint::black_box(v);
+    UNIT
 }
 
 // ---------------------------------------------------------------------------
@@ -1649,13 +1762,16 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         MkOk => rt_result_new(p, 1, a[0]),
         MkError => rt_result_new(p, 0, a[0]),
         Hash => rt_hash(p, a[0]),
+        BytesFromList => rt_bytes_from_list(p, a[0]),
+        BytesLen => rt_bytes_len(p, a[0]),
         RegionCheck | RegionEq | RBox | RUnbox | RIAdd | RISub | RIMul | RILt | RILe | RIGt | RIGe | RIEq
         | RIShr | RIShl | StrToShort | ShortToStr | ShortLen | ShortEq | StrSliceShort | StrToAscii | AsciiToStr
         | AsciiLen | AsciiEq | AsciiToShort | AsciiShortEq
         | DecodeCharAt | StrByteLen | StrRegionIsTclAlpha | StrRegionIsTclAlnum
-        // linux::abi::syscall is never a value (hir/syscall.tcl rejects any
-        // use but a direct call), so no Native value ever dispatches to it.
-        | SyscallLinuxX86_64 => {
+        // linux::abi::syscall and the raw address bridge are never values
+        // (hir/syscall.tcl rejects any use but a direct call), so no Native
+        // value ever dispatches to them; keepalive is a lowering-internal op.
+        | SyscallLinuxX86_64 | BytesAddr | KeepAlive => {
             // Raw (untagged) representation ops, StringRegion ops and String
             // traversal ops never implement a dynamic native: native/lower.tcl
             // emits them only directly, as `op` instructions inline in a
@@ -1711,6 +1827,10 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_str_utf8_bytes, 2),
         h!(rt_argv, 1),
         h!(rt_linux_x86_64_syscall, 8),
+        h!(rt_bytes_from_list, 2),
+        h!(rt_bytes_len, 2),
+        h!(rt_bytes_addr, 2),
+        h!(rt_keepalive, 2),
         h!(rt_is_tcl_alpha, 2),
         h!(rt_is_tcl_alnum, 2),
         h!(rt_str_region_is_tcl_alpha, 4),

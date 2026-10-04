@@ -192,6 +192,23 @@ pub enum OpCode {
     /// `syscall` instruction itself (runtime/syscall.rs); never removed,
     /// merged or reordered (a helper call); Linux x86-64 targets only.
     SyscallLinuxX86_64,
+    /// `byte_store::from_list` (core/bytestore.tcl, ABI-BYTES.md): the owned
+    /// byte storage holding the bytes of a List of Ints in 0..255, eagerly
+    /// copied (one allocation, or the shared static empty storage; a
+    /// non-byte element is TYPE). One operand, the List.
+    BytesFromList,
+    /// `byte_store::byte_count`: the exact byte count of a storage, a small Int.
+    /// One operand; TYPE if it is not a byte storage.
+    BytesLen,
+    /// `abi::x86_64::from_bytes`, the raw address bridge: the machine
+    /// address of the first payload byte of a storage, as a small Int. One
+    /// operand; never allocates. The address is meaningful only while the
+    /// storage is live: native/lower.tcl pairs every use of it in a syscall
+    /// with a `keepalive` of the storage after that syscall.
+    BytesAddr,
+    /// `%u = op keepalive %b`: a use of %b that is never removed and does
+    /// nothing, so %b stays a GC root until here. Result unit.
+    KeepAlive,
     /// Tcl 9-compatible Unicode alpha/alnum character classification
     /// (core/tclcompat.tcl's `is_tcl_alpha`/`is_tcl_alnum`): the operand is
     /// a one-Unicode-scalar String (RANGE if not). TEMPORARY compatibility
@@ -375,6 +392,10 @@ impl OpCode {
             "strutf8bytes" => StrUtf8Bytes,
             "argv" => Argv,
             "syscall_linux_x86_64" => SyscallLinuxX86_64,
+            "bytesfromlist" => BytesFromList,
+            "byteslen" => BytesLen,
+            "bytesaddr" => BytesAddr,
+            "keepalive" => KeepAlive,
             "strtclalpha" => StrIsTclAlpha,
             "strtclalnum" => StrIsTclAlnum,
             "strregiontclalpha" => StrRegionIsTclAlpha,
@@ -417,7 +438,7 @@ impl OpCode {
             | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | RBox | RUnbox
             | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharCodepoint | SetFromList
             | SetFromListTotal | StrToShort | ShortToStr | ShortLen | StrToAscii | AsciiToStr | AsciiLen
-            | AsciiToShort => Some(1),
+            | AsciiToShort | BytesFromList | BytesLen | BytesAddr | KeepAlive => Some(1),
             Substr | SubstrProven | MutArraySet | MutArraySetProven | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum | StrSliceShort => Some(3),
             RegionEq => Some(4),
             MutArrayCopy | MutArrayCopyProven => Some(5),
@@ -485,6 +506,12 @@ pub enum Inst {
     /// `OpCode::StrToAscii`), printed as a signed i64.
     AsciiLit { dst: Reg, value: i64 },
     Str { dst: Reg, text: String },
+    /// A static byte-storage constant (`bytes "HEX"`): the bytes of lowercase
+    /// hexadecimal text HEX (two digits per byte), a program-lifetime object
+    /// installed at startup (never collected, never allocated at run time).
+    /// native/lower.tcl emits it for an `abi::bytes` call whose every byte is
+    /// known at compile time (ABI-BYTES.md).
+    Bytes { dst: Reg, bytes: Vec<u8> },
     /// A UnicodeChar constant: DIGITS is the canonical decimal codepoint
     /// (must be a valid Unicode scalar value, never a surrogate -- see
     /// UNICODE-CHAR-LITERALS.md); codegen packs it as the immediate
@@ -1391,6 +1418,16 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
                 Inst::AsciiLit { dst, value }
             }
             "str" => Inst::Str { dst, text: quoted(3)? },
+            "bytes" => {
+                let text = quoted(3)?;
+                if text.len() % 2 != 0 || !text.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+                    return p.err("bytes must be lowercase hexadecimal text of whole bytes");
+                }
+                let bytes = (0..text.len() / 2)
+                    .map(|i| u8::from_str_radix(&text[2 * i..2 * i + 2], 16).expect("validated hexadecimal"))
+                    .collect();
+                Inst::Bytes { dst, bytes }
+            }
             "char" => {
                 let digits = tokens.get(3).and_then(word).unwrap_or("").to_string();
                 let Ok(codepoint) = digits.parse::<u32>() else { return p.err("bad char literal") };
@@ -1647,6 +1684,7 @@ fn validate(program: &Program) -> Result<(), NirError> {
                 | Inst::ShortLit { dst, .. }
                 | Inst::AsciiLit { dst, .. }
                 | Inst::Str { dst, .. }
+                | Inst::Bytes { dst, .. }
                 | Inst::Char { dst, .. }
                 | Inst::Bool { dst, .. }
                 | Inst::Unit { dst }
@@ -2037,7 +2075,7 @@ fn validate_plans(program: &Program) -> Result<(), NirError> {
                 | Inst::ClearDeclaredError | Inst::PushErrorExit(_) | Inst::PopErrorExit | Inst::Reraise
                 | Inst::Jump(_) | Inst::DeclaredErrorEq { .. } | Inst::Int { .. } | Inst::RawInt { .. } | Inst::ShortLit { .. }
                 | Inst::AsciiLit { .. }
-                | Inst::Str { .. } | Inst::Char { .. } | Inst::Bool { .. } | Inst::Unit { .. }
+                | Inst::Str { .. } | Inst::Bytes { .. } | Inst::Char { .. } | Inst::Bool { .. } | Inst::Unit { .. }
                 | Inst::Native { .. } | Inst::FnValue { .. } | Inst::SelfClosure { .. } | Inst::Capture { .. }
                 | Inst::StaticGet { .. } => {}
                 Inst::StaticSet { value, .. } => used.push(*value),
@@ -2209,7 +2247,7 @@ fn check_plan_linearity(f: &Function, consumes: &[Vec<Reg>]) -> Result<(), Strin
 /// caller).
 fn def_of(inst: &Inst) -> Option<Reg> {
     match inst {
-        Inst::Int { dst, .. } | Inst::RawInt { dst, .. } | Inst::ShortLit { dst, .. } | Inst::AsciiLit { dst, .. } | Inst::Str { dst, .. } | Inst::Char { dst, .. }
+        Inst::Int { dst, .. } | Inst::RawInt { dst, .. } | Inst::ShortLit { dst, .. } | Inst::AsciiLit { dst, .. } | Inst::Str { dst, .. } | Inst::Bytes { dst, .. } | Inst::Char { dst, .. }
         | Inst::Bool { dst, .. } | Inst::Unit { dst } | Inst::Native { dst, .. } | Inst::FnValue { dst, .. }
         | Inst::SelfClosure { dst } | Inst::Capture { dst, .. } | Inst::Move { dst, .. }
         | Inst::Closure { dst, .. }

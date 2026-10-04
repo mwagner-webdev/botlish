@@ -181,12 +181,17 @@ namespace eval core::native {
     #   set-alloc            allocates a new ImmutableSet (core/immutableset.tcl)
     #   process-argv         reads the process argument snapshot of the run
     #                        (core/process.tcl; ARGV.md)
+    #   bytestore-alloc      allocates a new owned byte storage (core/bytestore.tcl;
+    #                        ABI-BYTES.md)
+    #   raw-address          produces the machine address of an owned byte
+    #                        storage's payload (abi::x86_64::from_bytes; native
+    #                        only, ABI-BYTES.md)
     #   raw-syscall          executes a raw Linux x86-64 kernel transition
     #                        (the `syscall` instruction) with unknown effects
     #                        (core/linuxabi.tcl; LINUX-X86-64-SYSCALL.md)
     variable runtimeTags {bigint string-alloc list-alloc result-alloc char-index
         range-check structural-equality evidence mutarray-alloc mutarray-mutate hash set-alloc
-        process-argv raw-syscall}
+        process-argv raw-syscall bytestore-alloc raw-address}
     # NAME -> 1: the errors the runtime itself declares, visible in every
     # program like a root native and never part of a program's own `error`
     # declarations (hir/errordecls.tcl). Only a native's -errors may name one;

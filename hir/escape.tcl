@@ -191,7 +191,9 @@ proc hir::escape::Classify {hir instance arity e {structOpts {}}} {
     lassign [dict get $node target] targetKind target
     if {$targetKind eq "native"} {
         set name [dict get [hir::symbol $hir $target] name]
-        if {$name eq "linux::abi::syscall"} {
+        if {$name eq "linux::abi::syscall" || $name eq [core::bytestore::addressNative]} {
+            # (The raw address bridge builds its Register64 result from the one
+            # address word `bytesaddr` produces, exactly the same way.)
             # The raw kernel transition builds its result, an abi::x86_64::
             # Register64, from one word (the rax it returns): a local
             # construction of that one-field shape, exactly as a struct
@@ -270,9 +272,10 @@ proc hir::escape::ClassifyIf {hir instance arity e structOpts} {
     return [list [expr {$targets eq "" ? "local" : "remote"}] $desc [lsort -unique $targets]]
 }
 
-# linux::abi::syscall's result (call E) as a recognized construction: {local
-# {1 {ID LAYOUT}} {}} when its static type is the declared abi::x86_64::
-# Register64 (hir::types::ShapeResult's named-struct result), "" otherwise.
+# linux::abi::syscall's (or abi::x86_64::from_bytes's) result (call E) as a
+# recognized construction: {local {1 {ID LAYOUT}} {}} when its static type is
+# the declared abi::x86_64::Register64 (hir::types::ShapeResult's named-struct
+# result), "" otherwise.
 proc hir::escape::SyscallResult {hir e structOpts} {
     if {![StructEnabled $structOpts]} {
         return ""
@@ -790,6 +793,14 @@ proc hir::escape::RegionInfo {hir spec id} {
                 }
                 foreach f [SyscallFields $view $e] {
                     dict set wordUse $f 1
+                }
+                if {$targetKind eq "native" && [dict get [hir::symbol $view $target] name] eq [core::bytestore::addressNative]
+                        && [llength $args] == 1} {
+                    # The address bridge's abi::Bytes argument is read only for
+                    # its one storage field (native/lower.tcl's StorageOf),
+                    # like a projection of it: a Bytes held as virtual fields
+                    # need not be built for it.
+                    dict set wordUse [lindex $args 0] 1
                 }
                 set callee ""
                 if {$targetKind eq "block" && [dict exists [dict get $instance calls] $e]} {

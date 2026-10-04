@@ -21,6 +21,7 @@ use super::framemap::ProgramMap;
 use super::heap::Heap;
 use super::metrics::{AllocMode, GcReason, Metrics};
 use super::native_stack::NativeStack;
+use super::bytesobj::BytesInit;
 use super::strobj::StrInit;
 use super::value::*;
 use crate::nir::OpCode;
@@ -168,6 +169,10 @@ pub struct Vm {
     /// constructor returns it instead of allocating a zero-byte object;
     /// Strings are immutable, so sharing it is unobservable.
     empty_str: *mut Header,
+    /// The one canonical empty byte storage (static, like `empty_str`):
+    /// `abi::bytes([])` allocates nothing. Storages are immutable, so sharing
+    /// it is unobservable (a Bytes' identity is not part of its value).
+    empty_bytes: *mut Header,
     /// This program's PC-indexed stack-map table (runtime::framemap), set
     /// once by `set_framemap` right after compiling (codegen::CompiledProgram
     /// owns the original; this is an `Rc` clone). `collect_with` walks the
@@ -223,6 +228,7 @@ impl Vm {
             const_table: Vec::new(),
             statics: Vec::new(),
             empty_str: StrObj::new_static(""),
+            empty_bytes: BytesObj::new_static(&[]),
             framemap: Rc::new(ProgramMap::new()),
             native_stack: {
                 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
@@ -544,6 +550,54 @@ impl Vm {
         }
     }
 
+    /// Allocates the one block of a dynamic byte storage of LEN payload bytes
+    /// (bytesobj.rs: header + length + payload, one allocation): enforces
+    /// MAX_COLLECTION_LENGTH (RANGE, no allocation), collects first if one is
+    /// due (before the object exists), allocates, registers it with the heap
+    /// and returns the writer for the still-uninitialized payload. No
+    /// allocation happens between here and `BytesInit::finish`, so no
+    /// collection can observe the half-built object.
+    fn alloc_bytes(&mut self, len: usize) -> Result<BytesInit, Value> {
+        if len > MAX_COLLECTION_LENGTH {
+            let message = format!("a Bytes cannot exceed {MAX_COLLECTION_LENGTH} bytes, got {len}");
+            return Err(self.fail(RtError::Semantic { kind: "RANGE", message }));
+        }
+        if self.heap.wants_collection() {
+            self.collect();
+        }
+        let init = BytesInit::new(len, false);
+        self.heap.register(init.addr() as *mut Header, BYTES_PAYLOAD_OFFSET + len);
+        if self.metrics.enabled() {
+            let site = self.alloc_site;
+            self.alloc_site = 0;
+            self.metrics.record_alloc(KIND_BYTES, BYTES_PAYLOAD_OFFSET, len, site);
+        }
+        Ok(init)
+    }
+
+    /// A byte storage holding exactly BYTES: one allocation, copied straight
+    /// into place; the empty storage is the shared static one (no allocation).
+    pub fn new_bytes(&mut self, bytes: &[u8]) -> Value {
+        self.new_bytes_with(bytes.len(), |init| init.push_slice(bytes))
+    }
+
+    /// A byte storage of LEN bytes that FILL writes in place (every byte must
+    /// be written: bytesobj.rs's `finish` asserts it). Allocation may collect
+    /// first, so a caller's operands must be rooted (they are operands of an
+    /// allocating instruction).
+    pub fn new_bytes_with(&mut self, len: usize, fill: impl FnOnce(&mut BytesInit)) -> Value {
+        if len == 0 {
+            return self.empty_bytes as Value;
+        }
+        match self.alloc_bytes(len) {
+            Err(v) => v,
+            Ok(mut init) => {
+                fill(&mut init);
+                init.finish() as Value
+            }
+        }
+    }
+
     pub fn new_list(&mut self, items: Vec<Value>) -> Value {
         if let Some(v) = self.reject_oversized_collection(items.len()) {
             return v;
@@ -623,5 +677,6 @@ impl Drop for Vm {
             unsafe { super::heap::free_object(object) };
         }
         unsafe { super::heap::free_object(self.empty_str) };
+        unsafe { super::heap::free_object(self.empty_bytes) };
     }
 }

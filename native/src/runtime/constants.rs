@@ -8,6 +8,8 @@ use crate::nir::FuncId;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Const {
     Str(String),
+    /// A static byte storage (ABI-BYTES.md): the bytes themselves.
+    Bytes(Vec<u8>),
     BigInt(String),
     Native(u32),
     /// The closure of an environment-free function.
@@ -20,6 +22,7 @@ pub fn install(vm: &mut Vm, entries: &[Const], generic_entries: &[usize], static
     for c in entries {
         let raw: *mut Header = match c {
             Const::Str(text) => StrObj::new_static(text),
+            Const::Bytes(bytes) => BytesObj::new_static(bytes),
             Const::BigInt(digits) => Box::into_raw(Box::new(BigIntObj {
                 hdr: Header::new(KIND_BIGINT, true),
                 n: digits.parse().expect("validated big Int literal"),

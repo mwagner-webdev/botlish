@@ -232,6 +232,7 @@ pub unsafe fn object_size(object: *mut Header) -> usize {
         match (*object).kind {
             KIND_BIGINT => size_of::<BigIntObj>() + (as_ref::<BigIntObj>(v).n.bits() as usize / 8),
             KIND_STR => super::strobj::str_object_size(object),
+            KIND_BYTES => super::bytesobj::bytes_object_size(object),
             KIND_LIST => size_of::<ListObj>() + list_of(v).len * 8,
             KIND_STRUCT => size_of::<StructObj>() + struct_of(v).len * 8,
             KIND_SET => size_of::<SetObj>() + set_of(v).len * 8,
@@ -255,6 +256,9 @@ pub unsafe fn free_object(object: *mut Header) {
             // One block (header + text): one release with its own layout; no
             // Rust destructor runs (strobj.rs).
             KIND_STR => super::strobj::free_str(object),
+            // One block (header + length + payload), no Rust destructor
+            // (bytesobj.rs).
+            KIND_BYTES => super::bytesobj::free_bytes(object),
             KIND_LIST => {
                 let l = Box::from_raw(object as *mut ListObj);
                 drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(l.ptr, l.len)));

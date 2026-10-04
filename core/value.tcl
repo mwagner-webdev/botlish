@@ -62,6 +62,19 @@
 #                             struct's kind is never `list`. The field names
 #                             live in the shape, never in the individual
 #                             value's own payload.
+#   {bytestore HEX}           the owned byte storage behind abi::Bytes (ABI-
+#                             BYTES.md): an immutable, finite sequence of
+#                             bytes, HEX its lowercase hexadecimal text (two
+#                             digits per byte, so the byte count is
+#                             [string length HEX] / 2 and the empty
+#                             sequence is {bytestore {}}). A distinct runtime
+#                             kind from List and String: a byte is a plain
+#                             0..255 value, never a character, and nothing
+#                             terminates the sequence (a NUL byte is
+#                             "00"). Equality is exact byte-sequence
+#                             equality. It exists only inside the owning
+#                             module's opaque struct (lib/abi.bot's Bytes);
+#                             no source type spells it.
 #   {mutarray ID}             MutableArray handle; ID indexes
 #                             core::mutarray's mutable store (mutarray.tcl).
 #                             The only value kind that is NOT treated as
@@ -73,7 +86,7 @@
 # file should construct and inspect values only through these procedures.
 
 namespace eval core::value {
-    variable kinds {int str bool unit list result block native mutarray UnicodeChar immutableSet errorId struct}
+    variable kinds {int str bool unit list result block native mutarray UnicodeChar immutableSet errorId struct bytestore}
 }
 
 proc core::value::isCanonicalInt {text} {
@@ -184,6 +197,16 @@ proc core::value::immutableSet {items} {
     return [list immutableSet $items]
 }
 
+# The byte storage holding the bytes of HEX (lowercase hexadecimal text, two
+# digits per byte; "" is the empty storage). Trusted natives only: the one
+# constructor of a bytestore value (core/bytestore.tcl).
+proc core::value::bytestore {hex} {
+    if {![regexp {^(?:[0-9a-f][0-9a-f])*$} $hex]} {
+        error "core::value::bytestore: not lowercase hexadecimal byte text: \"$hex\""
+    }
+    return [list bytestore $hex]
+}
+
 # The struct value with SHAPE ({ID FIELD...}, see this file's header) and
 # VALUES (one per FIELD, in slot order).
 proc core::value::structOf {shape values} {
@@ -261,6 +284,8 @@ proc core::value::strOf {v}  { Require str $v;  return [lindex $v 1] }
 proc core::value::items {v}  { Require list $v; return [lindex $v 1] }
 proc core::value::charOf {v} { Require UnicodeChar $v; return [lindex $v 1] }
 proc core::value::immutableSetItems {v} { Require immutableSet $v; return [lindex $v 1] }
+proc core::value::bytestoreHex {v} { Require bytestore $v; return [lindex $v 1] }
+proc core::value::bytestoreLength {v} { Require bytestore $v; return [expr {[string length [lindex $v 1]] / 2}] }
 
 # Returns host 1/0 for a language Boolean.
 proc core::value::isTrue {v} {
@@ -342,6 +367,11 @@ proc core::value::equal {a b} {
         return 0
     }
     switch -- $ka {
+        bytestore {
+            # Exact byte-sequence equality: the hex text is canonical
+            # (lowercase, two digits per byte), so it is the bytes.
+            return [string equal [lindex $a 1] [lindex $b 1]]
+        }
         int - str - bool - UnicodeChar {
             # Integers and codepoints are canonical, so textual identity is
             # numeric equality. UnicodeChar never compares equal to Int or
@@ -498,6 +528,11 @@ proc core::value::show {v {withEvidence 0} {reveal 0}} {
                 lappend parts [show $item $withEvidence $reveal]
             }
             return "{[join $parts {, }]}"
+        }
+        bytestore {
+            # Internal tooling only (reveal of an opaque abi::Bytes): the
+            # byte count and the bytes. Normal rendering never reaches it.
+            return "<bytes [expr {[string length [lindex $v 1]] / 2}]: [lindex $v 1]>"
         }
         block  { return "<block ([join [lindex $v 1] { }])>" }
         native { return "<native [lindex $v 1]>" }

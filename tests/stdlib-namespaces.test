@@ -125,14 +125,14 @@ test ns-root-inventory {the unqualified root natives are exactly the language pr
 } -result {* + - < <= == > >= argv bit_and bit_or bit_xor error? hash integer? list list? mod mutarray? ok? result-error result-value shift_left shift_right string?}
 
 test ns-qualified-inventory {every standard intrinsic lives in its value family's flat namespace} -body {
-    lmap ns {list str char mutable_array immutable_set linux::abi} {
+    lmap ns {list str char mutable_array immutable_set byte_store linux::abi abi::x86_64} {
         list $ns [core::native::qualifiedMembers $ns]
     }
-} -result {{list {append at length}} {str {concat encode_utf8 is_tcl_alnum is_tcl_alpha length lowercase substring}} {char scalar_value} {mutable_array {allocate at capacity copy freeze set}} {immutable_set {contains from_list}} {linux::abi syscall}}
+} -result {{list {append at length}} {str {concat encode_utf8 is_tcl_alnum is_tcl_alpha length lowercase substring}} {char scalar_value} {mutable_array {allocate at capacity copy freeze set}} {immutable_set {contains from_list}} {byte_store {byte_count from_list}} {linux::abi syscall} {abi::x86_64 from_bytes}}
 
-test ns-no-nested-stdlib {no std::/stdlib::/core:: hierarchy: every qualified intrinsic but the platform's is NAMESPACE::MEMBER, one level} -body {
+test ns-no-nested-stdlib {no std::/stdlib::/core:: hierarchy: every qualified intrinsic but the platform's (linux::abi::syscall, abi::x86_64::from_bytes) is NAMESPACE::MEMBER, one level} -body {
     lsort [lmap name [core::native::names] {
-        if {[string first :: $name] < 0 || [string match linux::abi::* $name]} continue
+        if {[string first :: $name] < 0 || [string match linux::abi::* $name] || [string match abi::x86_64::* $name]} continue
         if {[llength [split [string map {:: \x00} $name] \x00]] == 2} continue
         set name
     }]

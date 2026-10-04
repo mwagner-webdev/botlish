@@ -122,7 +122,26 @@ fn show_into(v: Value, out: &mut String) {
         Kind::MutArray => {
             out.push_str(&format!("<mutable-array capacity={}>", mutarray_of(v).slots.len()));
         }
+        Kind::ByteStore => {
+            // Matches core::value::show's bytestore rendering exactly: the
+            // byte count and the bytes in lowercase hex. Reached only for a
+            // storage shown on its own (internal tooling): an opaque
+            // abi::Bytes renders as `<opaque abi::Bytes>` above and never
+            // prints its storage.
+            let bytes = bytes_of(v);
+            out.push_str(&format!("<bytes {}: {}>", bytes.len(), hex_of(bytes)));
+        }
     }
+}
+
+/// Lowercase hexadecimal text of BYTES, two digits per byte (core/value.tcl's
+/// `{bytestore HEX}` text).
+pub fn hex_of(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push_str(&format!("{b:02x}"));
+    }
+    out
 }
 
 pub fn int_text(v: Value) -> String {
@@ -167,6 +186,9 @@ pub fn tcl_value(v: Value) -> Result<String, RtError> {
             let items = set_of(v).items().iter().map(|item| tcl_value(*item)).collect::<Result<Vec<_>, _>>()?;
             tcl_list(&["immutableSet".to_string(), tcl_list(&items)])
         }
+        // Matches core::value::bytestore's own representation exactly
+        // ({bytestore HEX}, core/value.tcl).
+        Kind::ByteStore => tcl_list(&["bytestore".to_string(), hex_of(bytes_of(v))]),
         Kind::Result => {
             let r = result_of(v);
             tcl_list(&[

@@ -1,0 +1,34 @@
+# write.bot -- the first real I/O program: Botlish writes to standard output
+# through its own raw Linux x86-64 syscall path (ABI-BYTES.md):
+#
+#   String
+#     --str::encode_utf8--------> List of bytes
+#     --abi::bytes--------------> abi::Bytes      (owned, contiguous, opaque)
+#     --linux::write------------> address + abi::Usize length
+#     --abi::x86_64::from_*-----> Register64 words (rsi, rdx)
+#     --linux::abi::syscall-----> the x86-64 `syscall` instruction (rax = 1)
+#     --> the kernel's write(2) --> file descriptor 1
+#
+# No libc `write`, no special runtime implementation of Linux write: the
+# external effect is the generic syscall primitive with
+#
+#   rax = 1 (SYS_write)   rdi = fd   rsi = address of the payload
+#   rdx = the payload's byte count
+#
+# `data` is an ordinary immutable value: it can be written again, aliased,
+# stored, compared. The result of linux::write is the raw signed result of the
+# kernel's write (the number of bytes written, or a negative -errno).
+#
+# Native backend only (cranelift, or a standalone executable from
+# `tclsh9.0 main.tcl -emit-native-executable examples/linux/write.bot`); the
+# Tcl backends refuse the syscall with the semantic error NATIVE-ONLY.
+#
+# stdout (native): Hello from Botlish!
+# value  (native): 20, the 20 bytes written
+
+import abi
+import linux
+import str
+
+data = abi::bytes(str::encode_utf8("Hello from Botlish!\n"))
+linux::write(abi::i32(1), data)

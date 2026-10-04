@@ -52,7 +52,8 @@
 #     never a value to persist or compare across program versions
 #
 # Supported key domain: int, str, bool, unit, list (of hashable values),
-# result (of a hashable payload), UnicodeChar, immutableSet (of hashable
+# result (of a hashable payload), UnicodeChar, bytestore (ABI-BYTES.md: the
+# byte count, then the bytes), immutableSet (of hashable
 # members, combined order-independently to match core::value::equal's own
 # order-independent set equality) -- exactly core::value::equal's domain.
 # Like ==, hash is undefined for block/native/mutarray (EQUALITY error):
@@ -75,7 +76,7 @@ namespace eval core::hashing {
     variable Mask61    0x1FFFFFFFFFFFFFFF
     # Kind tags mixed in before each value's payload, so e.g. int 1 and str
     # "1" never hash the same by coincidence of byte content.
-    variable KindTag [dict create int 0 str 1 bool 2 unit 3 list 4 result 5 UnicodeChar 6 immutableSet 7 struct 8]
+    variable KindTag [dict create int 0 str 1 bool 2 unit 3 list 4 result 5 UnicodeChar 6 immutableSet 7 struct 8 bytestore 9]
 }
 
 # H folded over one more byte (0..255), wrapped to 64 bits.
@@ -178,6 +179,19 @@ proc core::hashing::Mix {h v} {
                 set h [Bytes $h [LeBytes [Mix $FnvOffset $item]]]
             }
             return $h
+        }
+        bytestore {
+            # The byte count (8 bytes, little-endian), then every byte in
+            # order: consistent with core::value::equal's exact byte-sequence
+            # equality, and with native/src/runtime/ops.rs's rt_hash.
+            set hex [core::value::bytestoreHex $v]
+            set count [expr {[string length $hex] / 2}]
+            set h [Bytes $h [LeBytes $count]]
+            if {$count == 0} {
+                return $h
+            }
+            binary scan [binary decode hex $hex] cu* codes
+            return [Bytes $h $codes]
         }
         immutableSet {
             # Order-independent (XOR-combined member sub-hashes), matching

@@ -93,12 +93,18 @@
 # * Not collection lengths. list::length, string lengths and indexes are
 #   ordinary Int; Isize/Usize are for foreign ABI boundaries only.
 #
+# abi::Bytes (below, ABI-BYTES.md) is the first ABI value that is memory
+# rather than a number: an immutable, owned, contiguous sequence of bytes.
+#
 # The domain types (I8Value ... UsizeValue) are members of namespace abi,
 # like the structs and creators: abi::U8Value (IMPORTS.md). A consumer
 # either spells one qualified after `import abi` (`x: abi::U8Value`) or
 # binds the short name with `import type abi::U8Value`; the two errors
 # stay program-global names, as every `error` declaration is
 # (hir/errordecls.tcl), hence their Abi prefix.
+import type byte::Byte
+import byte_store
+
 # The two declared errors of every checked creator: one coherent pair for
 # the whole family rather than twenty type-specific names. The creator a
 # call names already says which domain was meant; the error says which
@@ -264,3 +270,54 @@ fn usize(value: int) -> Usize errors AbiIntegerBelowRange, AbiIntegerAboveRange:
         fail AbiIntegerAboveRange
     else:
         Usize {value: value}
+
+# ---------------------------------------------------------------------------
+# abi::Bytes: the first owned ABI memory value (ABI-BYTES.md).
+#
+# A Bytes is an immutable, finite sequence of bytes with an exact length,
+# whose contiguous ABI representation exists whenever a foreign boundary
+# needs it. It is an ordinary Botlish value -- copy it, alias it, store it in
+# a List, compare it, hash it -- with an opaque representation. It is NOT a
+# String (no characters, no encoding), a C string (nothing terminates it: a
+# 0 byte is an ordinary byte and the length is explicit and authoritative), a
+# pointer, a borrow, a resource, a mutable buffer or an iterator.
+#
+#   data = abi::bytes(str::encode_utf8("h\u00e9llo\n"))     # 7 bytes
+#   n = abi::bytes_length(data)                             # an abi::Usize
+#
+# * Creation is EAGER. abi::bytes(values) converts the List into storage the
+#   resulting Bytes owns; afterwards the List (or the String it was encoded
+#   from) is irrelevant -- the Bytes is not a view of it and does not retain
+#   it. Every element must be a byte::Byte and is stored exactly: there is
+#   no `mod 256`, no signed reinterpretation and no character coercion, so a
+#   List that is statically not a List of bytes is rejected by the ordinary
+#   typing of the parameter below.
+# * Equality and hashing are by the bytes: abi::bytes([a, b]) ==
+#   abi::bytes([a, b]); two Bytes with different contents are unequal. No
+#   address, buffer identity, allocation identity or sharing is observable,
+#   and none of the physical choices (a static constant, a heap buffer, one
+#   buffer shared by every alias or a copy per alias) can be told apart.
+# * The one hidden field, `storage`, is the owned byte storage (a runtime
+#   value of its own kind, core/bytestore.tcl, natively one allocation of
+#   header + length + payload). Only this module may name it: a projection or
+#   construction anywhere else is OPAQUE-REPRESENTATION / OPAQUE-
+#   CONSTRUCTION, and the machine address of the payload is available only
+#   through the raw architecture bridge abi::x86_64::from_bytes, never from
+#   the Bytes itself.
+#
+# Not here, deliberately: slicing, indexing, concatenation, capacity,
+# mutation (MutableBytes), NUL-terminated strings (CString), and any
+# retained-pointer or lifetime story.
+opaque struct Bytes:
+    storage: any
+
+# The Bytes holding exactly the given bytes, in order. The empty List gives
+# the empty Bytes (length 0).
+fn bytes(values: List[Byte]) -> Bytes:
+    Bytes {storage: byte_store::from_list(values)}
+
+# The exact byte count of DATA, as the ABI size domain. The runtime's
+# collection-length ceiling (below 2^62) already guarantees the count is a
+# valid native buffer extent, so no caller re-proves 0 <= n <= 2^64 - 1.
+fn bytes_length(data: Bytes) -> Usize:
+    Usize {value: byte_store::byte_count(data.storage)}

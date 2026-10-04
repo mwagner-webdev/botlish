@@ -87,6 +87,7 @@ fn startup(program: &Program, object: &ObjectProgram) -> String {
     for c in &object.pool.entries {
         match c {
             Const::Str(text) => writeln!(s, "Const::Str({text:?}.into()),"),
+            Const::Bytes(bytes) => writeln!(s, "Const::Bytes(vec!{bytes:?}),"),
             Const::BigInt(text) => writeln!(s, "Const::BigInt({text:?}.into()),"),
             Const::Native(id) => writeln!(s, "Const::Native({id}),"),
             Const::FnValue(id) => writeln!(s, "Const::FnValue({id}),"),

@@ -133,7 +133,9 @@ namespace eval native::lower {
         result-value {op resultvalue} \
         result-error {op resulterror} \
         hash         {op hash} \
-        char::scalar_value {op charcodepoint}]
+        char::scalar_value {op charcodepoint} \
+        byte_store::from_list {op bytesfromlist} \
+        byte_store::byte_count    {op byteslen}]
     # State of the program being lowered. hir is the view of the instance
     # being lowered, baseHir the program's semantic HIR.
     variable hir {}
@@ -3645,6 +3647,26 @@ proc native::lower::SyscallCall {fnVar e node wantVirtual} {
     }
     dict lappend fn calls [list native linux::abi::syscall]
     set rax [Assign fn "op syscall_linux_x86_64 [join $operands { }]" $e]
+    # The kernel may read memory the address operands point into. Every byte
+    # storage whose address (`bytesaddr`, BytesAddrCall) reached an operand
+    # register stays a GC root until the syscall has returned: a `keepalive`
+    # of it AFTER the transition makes the storage live from its definition
+    # through every safepoint up to and including this syscall, whatever
+    # else the function does with it (or does not). This is the one place
+    # that guarantees it, explicit in the NIR, never an accident of
+    # register allocation or lexical variable lifetime (ABI-BYTES.md).
+    set kept {}
+    foreach operand $operands {
+        if {[dict exists $fn keepAddr $operand]} {
+            set storage [dict get $fn keepAddr $operand]
+            if {$storage ni $kept} {
+                lappend kept $storage
+            }
+        }
+    }
+    foreach storage $kept {
+        Assign fn "op keepalive $storage" $e
+    }
     if {$wantVirtual ne ""} {
         if {$wantVirtual != 1} {
             throw {NATIVE BUG} "native lowering: expected a 1-field Register64 construction at $e"
@@ -3688,7 +3710,9 @@ proc native::lower::SyscallWords {fnVar e regs} {
     set layout [hir::types::StructLayout $type]
     foreach name $layout {
         set register [Assign fn "structget [lsearch -exact $layout $name] $object" $e]
-        dict set words $name [Assign fn "structget 0 $register" $e]
+        set word [Assign fn "structget 0 $register" $e]
+        KeepAddrThrough fn $register $word
+        dict set words $name $word
     }
     return $words
 }
@@ -3725,7 +3749,106 @@ proc native::lower::RegisterWordOf {fnVar field} {
     if {$object eq "never"} {
         return never
     }
-    return [Assign fn "structget 0 $object" $field]
+    set word [Assign fn "structget 0 $object" $field]
+    KeepAddrThrough fn $object $word
+    return $word
+}
+
+# Carries a raw address's byte-storage provenance (`keepAddr`, BytesAddrCall)
+# from register FROM to register TO when TO is read out of (or built from)
+# FROM -- a Register64 object holding an address, and the word read back out
+# of it -- so the syscall that consumes TO still keeps the storage alive.
+proc native::lower::KeepAddrThrough {fnVar from to} {
+    upvar 1 $fnVar fn
+    if {[dict exists $fn keepAddr $from]} {
+        dict set fn keepAddr $to [dict get $fn keepAddr $from]
+    }
+}
+
+# abi::x86_64::from_bytes (core/bytestore.tcl, ABI-BYTES.md): the raw address
+# bridge. `from_bytes(DATA)`, DATA an abi::Bytes (hir/syscall.tcl's
+# BytesProblems proved that statically), lowers to
+#
+#   %b = <the byte storage of DATA>        a virtual field, or structget
+#   %a = op bytesaddr %b                   the machine address of its payload
+#
+# and %a is the one word of the abi::x86_64::Register64 result: handed back
+# as that field when the caller wants it virtual (hir/escape.tcl's Classify
+# recognizes the call like a syscall's result), built with `structnew` only
+# when an object is needed. The lowering records that %a points into %b
+# (`fn keepAddr`): SyscallCall then emits `op keepalive %b` after every
+# syscall that takes %a (or a register read from it) as an operand, so the
+# storage cannot be collected before the kernel has returned. The bridge
+# itself knows nothing about write(2) or any other syscall: it produces an
+# address, and the syscall lowering owns the lifetime.
+proc native::lower::BytesAddrCall {fnVar e node wantVirtual} {
+    upvar 1 $fnVar fn
+    variable hir
+    variable context
+    variable structOpt
+    set native [core::bytestore::addressNative]
+    set problems [hir::syscall::BytesProblems $hir $e $node]
+    if {$problems ne ""} {
+        # A -strict 0 program whose call hir/syscall.tcl rejected: replay the
+        # problem unconditionally, before anything is evaluated, exactly as
+        # SyscallCall does -- no address is taken from a value nothing proved
+        # to be an abi::Bytes.
+        lassign [lindex $problems 0] kind message
+        dict incr fn skippedGuards [SkippedBlockers [dict get $node args]]
+        Emit fn "raise $kind [Quote "$native: $message"]" $e
+        return {never tagged}
+    }
+    set registerType [core::linuxabi::registerType]
+    if {![hir::structs::declared $registerType]} {
+        throw {NATIVE BUG} "native lowering: $native without a declared $registerType ($e)"
+    }
+    set layout [hir::structs::names $registerType]
+    set storage [StorageOf fn [lindex [dict get $node args] 0]]
+    if {$storage eq "never"} {
+        return {never tagged}
+    }
+    dict lappend fn calls [list native $native]
+    set address [Assign fn "op bytesaddr $storage" $e]
+    dict set fn keepAddr $address $storage
+    if {$wantVirtual ne ""} {
+        if {$wantVirtual != 1} {
+            throw {NATIVE BUG} "native lowering: expected a 1-field Register64 construction at $e"
+        }
+        return [list [list $address] virtual]
+    }
+    if {$structOpt && [dict exists $context discarded $e]} {
+        return [list [Assign fn unit] tagged]
+    }
+    set object [Assign fn "structnew [ShapeIndex $registerType $layout] $address" $e]
+    dict set fn keepAddr $object $storage
+    return [list $object tagged]
+}
+
+# The byte storage (a register) of abi::Bytes expression ARG, evaluated here,
+# or "never": the one field of a Bytes held as virtual fields (a virtual local,
+# or a virtual parameter of a `fields` variant), else read out of the object
+# with `structget`.
+proc native::lower::StorageOf {fnVar arg} {
+    upvar 1 $fnVar fn
+    variable hir
+    set slot [lsearch -exact [hir::structs::names [core::bytestore::bytesType]] [core::bytestore::storageField]]
+    if {$slot < 0} {
+        throw {NATIVE BUG} "native lowering: [core::bytestore::bytesType] has no [core::bytestore::storageField] field"
+    }
+    if {[hir::kind $hir $arg] eq "ref"} {
+        set b [hir::get $hir $arg binding]
+        if {$b ne "" && [dict exists $fn locals $b]} {
+            set local [dict get $fn locals $b]
+            if {[lindex $local 0] eq "virtual" && [lindex $local 2] ne ""} {
+                return [lindex [lindex $local 1] $slot]
+            }
+        }
+    }
+    set object [Expr fn $arg]
+    if {$object eq "never"} {
+        return never
+    }
+    return [Assign fn "structget $slot $object" $arg]
 }
 
 # The register of the projection chain ending at project node E when its root
@@ -4820,6 +4943,12 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
         # The raw Linux x86-64 kernel transition (core/linuxabi.tcl): its own
         # form, never NativeCall's one-operand-per-argument shape.
         return [SyscallCall fn $e $node $wantVirtual]
+    }
+    if {$targetKind eq "native" && [dict get [hir::symbol $hir $target] name] eq [core::bytestore::addressNative]} {
+        # The raw address bridge (core/bytestore.tcl, ABI-BYTES.md): reads the
+        # storage out of an abi::Bytes and yields a Register64, so its own
+        # form too.
+        return [BytesAddrCall fn $e $node $wantVirtual]
     }
 
     if {$constructionOpt && $wantVirtual eq "" && !$wantRegion && $targetKind eq "native"
