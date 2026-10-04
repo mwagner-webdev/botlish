@@ -11,8 +11,9 @@ The premises, as given:
   second consumer of `native::lowered`'s output (DIRECT-HIR-NATIVE-PATH.md,
   "Readiness for NIR -> bytecode"; COROUTINE-PREREQUISITES.md section 7).
 * **Every NIR function gets its own register set**, addressed as an offset from
-  the frame pointer, with at most 256 registers. A first version may keep NIR's
-  register numbers.
+  the frame pointer, with at most 256 registers. The premise allowed a first
+  version to keep NIR's register numbers; section 8 shows why v1 compacts them
+  instead.
 * **Each instruction is 64 bits.** A 128-bit format is explored in section 9.
 * **The mnemonics are x86-flavoured** (`mov`, `call`, `ret`, `add`, `shl`,
   `shr`, `mul`, `jmp`, `test`, `jge`, ...), but without implicit registers and
@@ -39,15 +40,16 @@ The premises, as given:
    plus operand words of 8 registers each. That applies to 1.0% of corpus
    instructions and 0.50% of test-suite instructions.
 3. **256 registers per function are enough, but NIR's register numbers are
-   not.** The canonical corpus never needs more than 86 registers, so v1 can keep
-   NIR numbering there. The test suite, however, lowers 116 functions with more
+   not.** The canonical corpus never needs more than 86 registers, so NIR's
+   numbering would fit there. The test suite, however, lowers 116 functions with more
    than 256 NIR registers (up to 10,797), from generated stress functions and
    one 256-element literal. Apart from that literal, at most 124 registers are
    ever live at once. So a liveness-based renumbering fits every other function
    into 256 slots: the greedy coloring `codegen::roots` already runs for root
    slots. The literal's `op listnew` alone reads 256 registers, so it has to be
-   split into chunks. v1 therefore needs a compaction step and a chunking rule,
-   not a wide-register encoding (section 8).
+   split into chunks. v1 therefore compacts every function's registers and
+   chunks oversized lists, rather than adding a wide-register encoding
+   (section 8).
 4. **The opcode space is ample.** The design needs 65 basic opcodes and 54 rich
    (`op`) opcodes, 119 of 256. That leaves 64 for superinstructions and about 70
    for growth, such as the coroutine suspension instructions
@@ -107,7 +109,8 @@ func 1 "fib" params=1 env=0 regs=14 ... rawregs="0 2 4 6 7 8 10 11 12 13" rawpar
 end
 ```
 
-VM, with NIR register numbers kept. The `r` prefix marks a raw-Int register:
+VM. The examples keep NIR's register numbers so they can be read against the
+NIR; v1 compacts them (section 8). The `r` prefix marks a raw-Int register:
 
 ```
 f1 fib:                       ; params=1, frame=14, raw parameter 0, raw result
@@ -204,7 +207,10 @@ register stacks must stay relocatable.
   | `a` | packed ASCII word | `asciiregs=` | no |
 
   The prefix is display only. The encoding carries just the number; the
-  function's kind map says what it is. In the assembler the prefix chooses the
+  function's kind map says what it is. All four prefixes share one number
+  space, the frame slot index, so `v3` and `r3` never both exist in one
+  function. The disassembler separates prefix and number from the mnemonic by
+  a space, as in `add v5, v3, v4`. In the assembler the prefix chooses the
   encoding of a shared mnemonic: `add v5, v3, v4` (Botlish Int) and
   `add r5, r3, r4` (machine word) are different opcodes. x86 does the same,
   where the register name picks the operand size (`add eax, ebx` against
@@ -466,7 +472,7 @@ operations (5.7).
 | `shl`, `sar` | `v, v, v` | `ishl`, `ishr` | exact; RANGE on an invalid shift amount; may allocate |
 | `add`, `sub`, `mul` | `r, r, r` | `riadd`, `risub`, `rimul` | two's-complement i64. NIR's range proofs rule out overflow; on overflow the result is unspecified, and a debug build may trap. |
 | `add` | `r, r, imm` | `riadd` or `risub` with a constant | |
-| `shl`, `sar`, `shr` | `r, r, r` and `r, r, imm` | `rishl`; `rishr` → `sar` | x86 semantics. `shr` is the logical shift. NIR emits `rishr` only for a proven non-negative operand, where `shr` and `sar` agree, so `shr` has no NIR source today. It is kept because it is the natural partner. |
+| `shl`, `sar`, `shr` | `r, r, r` and `r, r, imm` | `rishl`; `rishr` → `sar` | x86 semantics. `shr` is the logical shift. NIR emits `rishr` only for a proven non-negative operand, where `shr` and `sar` agree, so `shr` has no NIR source today. It is kept for future intrinsics (bit manipulation on raw words). |
 
 Two encoding notes:
 
@@ -716,9 +722,17 @@ With NIR numbering a window adds one `mov` per argument. The corpus's 374 calls
 pass 784 arguments (mean 2.1), so that is 784 extra instructions on top of
 3,459, or +23%. Operand words add one load per 8 arguments inside a dispatch
 that happens anyway, and only for the 0.5–1% of instructions that need them.
-Windows become attractive once an allocator places values directly into the
-window. A `call.w d, fN, base` form could then be added beside `call` without
-changing anything else.
+Copying also fits coroutines, which will exist by the time the VM is built.
+Each coroutine has its own register stack (COROUTINE-PREREQUISITES.md
+section 7), so starting or resuming one passes values into a *different*
+stack. A window requires the callee frame to sit directly above the caller's
+in the same stack, which cannot hold across that boundary. Copying works the
+same within one stack and across two, so calls and coroutine transfers share
+one argument protocol.
+
+Windows would only become attractive once an allocator places values directly
+into the window. A `call.w d, fN, base` form could then be added beside `call`
+for same-stack calls without changing anything else.
 
 ---
 
@@ -748,21 +762,30 @@ Apart from the literal, the live set stays small. The 10,797-register function
 never has more than 5 values live, because each value dies right after its one
 use.
 
-**Recommendation for v1:**
+**Decision for v1: compact every function.** NIR numbers would fit 256 slots
+for every corpus function and 99.5% of test-suite functions, but compaction is
+applied universally, not only above 256:
 
-* Keep NIR numbers whenever `regs ≤ 256`. That is every corpus function, and
-  99.5% of test-suite functions.
-* Otherwise renumber by liveness. This is the interference coloring that
-  `codegen::roots` already performs for shadow slots: Cranelift-free, already
-  tested, but kept in the binary's `codegen` module rather than the library
-  (COROUTINE-PREREQUISITES.md section 7 notes the same).
+* **What it is.** Registers are renumbered by liveness. This is the
+  interference coloring that `codegen::roots` already performs for shadow
+  slots: Cranelift-free, already tested, but kept in the binary's `codegen`
+  module rather than the library (COROUTINE-PREREQUISITES.md section 7 notes
+  the same).
   * It keeps each slot's kind fixed by coloring tagged and scalar registers
     separately, so root bitmaps stay static.
   * Parameters stay at `0..params-1`.
   * It is renumbering, not register allocation: no spilling, no splitting, no
     coalescing.
-  * The same coloring would also shrink every frame, which matters for speed
-    (section 11): the per-call zeroing is proportional to the frame size.
+* **Why everywhere.** It saves memory: the mean frame shrinks from 16.1 to 5.8
+  slots in the corpus (11.0 to 4.0 median in the test suite). Every coroutine
+  keeps a register stack, so smaller frames make coroutines cheaper to create
+  and to keep suspended. It also means a single register-numbering path, and
+  fewer stale values for the collector to retain and scan.
+* **Speed.** The effect on speed is probably small. Calls zero fewer slots,
+  but that is a few stores per call against the call's other costs (11).
+* **Debugging.** The disassembler cannot show NIR's numbers any more. A
+  per-function slot → NIR register map in the debug side tables (beside the
+  pc → origin table, 5.8) restores them.
 
 **The one case compaction cannot fix** is an instruction that by itself reads
 more live registers than fit. The test suite has one such program: the literal
@@ -911,10 +934,10 @@ Per-instruction cost:
 * **Errors** cost nothing on the success path: the handler table is consulted
   only on failure.
 * **Calls** cost the argument copies plus zeroing the callee's `v` slots.
-  Zeroing is proportional to the frame size, so NIR numbering makes calls
-  slower, not just frames larger. In the corpus the mean frame is 16.1 NIR
-  registers against 5.8 slots after coloring. Per-pc root maps could avoid
-  the zeroing; for v1 it is cheaper to compact.
+  Zeroing is proportional to the frame size: 16.1 slots on average with NIR
+  numbering, 5.8 after compaction (8). That is a few stores per call, so its
+  speed effect is probably small; compaction is chosen mainly for memory.
+  Per-pc root maps could remove the zeroing altogether.
 * **Bytecode size** is 34 KB for the whole corpus, far inside L2, and its hot
   loops fit L1.
 
@@ -955,23 +978,28 @@ The scripts were throwaway Python over the NIR text and are not committed.
 
 ---
 
-## 13. Decisions for you
+## 13. Decisions
 
-1. **Register prefixes** `v`/`r`/`s`/`a` in the syntax, with shared mnemonics
-   whose encoding is picked by operand kind (`add v...` vs `add r...`). The
-   alternative is suffixed mnemonics (`addq`).
-2. **The CF spelling.** The proposal is `jl`/`jge`/`jle`/`jg`, with CF meaning
-   "below in the compare's own order". The alternative is x86-literal
-   `jb`/`jae`, with an explicit unsigned/signed split in `cmp`.
-3. **Predicates write ZF, not a Bool register.** This saves a register write and
-   a `test` for 95% of uses, at the cost of `set<cc>` for the rest.
-4. **Operand words over argument windows** for v1 (section 7). This revises
-   COROUTINE-PREREQUISITES.md section 7's suggestion while there is no
-   allocator.
-5. **Liveness compaction in v1**, for functions above 256 NIR registers. The
-   test suite needs it, even though register allocation is otherwise out of
-   scope.
-6. **`shr`** stays in the set although NIR has no source for it today (`rishr`
-   maps to `sar`).
-7. **Opcode block numbering** (5.9), so that retiring builtins never renumbers
-   the basic ISA.
+Settled after review of the first version of this document:
+
+1. **Register prefixes stay.** `v`/`r`/`s`/`a` share one slot-number space and
+   pick the encoding of a shared mnemonic (`add v5, v3, v4` vs
+   `add r5, r3, r4`). No suffixed mnemonics (3.2).
+2. **CF means "below in the compare's own order"**, and the jumps that read it
+   are `jl`/`jge`/`jle`/`jg`. Signedness belongs to the compare, not to the
+   condition code; an unsigned `cmpu` is the extension point if one is ever
+   needed (3.5).
+3. **Predicates write ZF, not a Bool register.** This is the canonical design
+   throughout (3.5, 5.4, 5.7). `set<cc>` materializes a Bool for the roughly 5%
+   of predicate results that are used as values.
+4. **Operand words, not argument windows**, from v1 on (7). Coroutines will
+   exist when the VM is built, and copying is the one argument protocol that
+   works both within a register stack and across two. This revises
+   COROUTINE-PREREQUISITES.md section 7's suggestion.
+5. **Liveness compaction for every function** in v1, mainly to save memory
+   (8). It also handles the functions above 256 NIR registers; oversized
+   `listnew`/`construct` operand lists are chunked.
+6. **`shr` stays** for future intrinsics, although NIR has no source for it
+   today (`rishr` maps to `sar`) (5.3).
+7. **Opcode blocks** `0x00–0x5F` basic, `0x60–0xBF` rich, `0xC0–0xFF` super,
+   so retiring builtins never renumbers the basic ISA (5.9).
