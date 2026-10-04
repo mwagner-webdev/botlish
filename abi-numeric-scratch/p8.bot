@@ -1,3 +1,0 @@
-type Small = Int in 0..3
-type Small = Int in 0..4
-1

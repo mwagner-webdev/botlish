@@ -1,4 +1,0 @@
-import abi
-fn f(u: abi::U64) -> abi::Usize:
-    abi::usize(u.value)
-f(abi::u64(7)).value

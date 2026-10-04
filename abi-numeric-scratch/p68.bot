@@ -1,5 +1,0 @@
-import abi
-import byte
-fn f(x: abi::U8) -> int:
-    byte::from_int(x.value)
-f(abi::u8(3))

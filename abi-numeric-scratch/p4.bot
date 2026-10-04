@@ -1,6 +1,0 @@
-import abi::x86_64
-type U8Value = Int in 0..255
-type I32Value = Int in 0..9
-fn f(x: U8Value) -> int:
-    x
-abi::x86_64::to_int(abi::x86_64::register64(f(39)))

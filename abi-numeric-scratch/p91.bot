@@ -1,3 +1,0 @@
-import abi
-x = abi::u32(2)
-x < abi::u32(3)

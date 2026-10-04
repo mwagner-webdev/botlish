@@ -1,7 +1,0 @@
-import abi
-fn f(x: abi::U8) -> abi::I8 errors AbiIntegerAboveRange:
-    abi::i8(x.value)
-r = f(abi::u8(3)):
-    on AbiIntegerAboveRange:
-        abi::i8(0)
-r.value

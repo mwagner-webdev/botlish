@@ -1,2 +1,0 @@
-import abi
-abi::u64(0 - 1)

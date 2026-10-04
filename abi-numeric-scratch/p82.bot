@@ -1,4 +1,0 @@
-import abi
-fn f(x: abi::Usize):
-    x.value
-f(abi::u64(1))

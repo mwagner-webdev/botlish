@@ -1,4 +1,0 @@
-import abi
-fn wrap(x: int):
-    abi::U8 {value: x}
-1

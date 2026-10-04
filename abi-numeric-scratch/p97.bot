@@ -1,3 +1,0 @@
-import abi
-import abi::x86_64
-abi::x86_64::from_usize(abi::u64(1))

@@ -1,5 +1,0 @@
-import abi
-type U8Value = Int in 0..5
-fn f(x: U8Value, y: abi::U8Value) -> int:
-    x + y
-f(3, 200)

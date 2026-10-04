@@ -1,5 +1,0 @@
-import abi
-import abi::x86_64
-fn enc(a: abi::U64, b: abi::Usize, c: abi::I8, d: abi::U32):
-    [abi::x86_64::from_u64(a), abi::x86_64::from_usize(b), abi::x86_64::from_i8(c), abi::x86_64::from_u32(d)]
-enc(abi::u64(1), abi::usize(2), abi::i8(3), abi::u32(4))

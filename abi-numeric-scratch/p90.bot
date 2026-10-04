@@ -1,3 +1,0 @@
-import abi
-x = abi::i32(2)
-x * 8

@@ -1,6 +1,0 @@
-import abi
-import list
-r = list::at([1, 2], abi::usize(0)):
-    on IndexNotFound:
-        0
-r

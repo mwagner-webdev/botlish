@@ -1,2 +1,0 @@
-import abi
-[abi::u8(255).value, abi::i8(0 - 1).value, abi::u64(0).value, abi::u64(1).value, abi::u64(9223372036854775807).value, abi::u64(9223372036854775808).value, abi::u64(18446744073709551615).value, abi::usize(18446744073709551615).value, abi::i64(0 - 9223372036854775808).value, abi::isize(9223372036854775807).value, abi::u32(4294967295).value, abi::i16(0 - 32768).value]

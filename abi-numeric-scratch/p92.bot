@@ -1,4 +1,0 @@
-import abi
-import list
-n = list::length([1, 2, 3])
-[n + 0, abi::usize(n).value]
