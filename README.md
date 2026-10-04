@@ -454,7 +454,10 @@ designates an element (a List of statically known length with an index in
 range; `loop i from 0 to list::length(xs): list::at(xs, i)` and its
 MutableArray capacity counterpart; a read guarded by `if i < 0 or i >=
 list::length(xs):` or its `and` form; STDLIB-NAMESPACES.md lists the
-rules), and makes a provably-missing index a compile-time `KNOWN-ERROR`. `get(container, index, default)` is lookup with
+rules), and makes a provably-missing index a compile-time `KNOWN-ERROR`.
+The proof removes the obligation only: a proven call still runs its bounds
+check, and `get` does not benefit yet (STDLIB-NAMESPACES.md §12 records the
+intended static model and the plan). `get(container, index, default)` is lookup with
 an explicit fallback, written in ordinary Botlish over `at`:
 
 ```

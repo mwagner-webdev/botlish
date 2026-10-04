@@ -491,10 +491,12 @@ String (its `TYPE` error propagates through `get` at run time). `tests/stdlib-na
   chains: their proofs need interprocedural facts (a record's fixed length
   across a call, a scan index below a length established by the caller),
   which the completion walk does not do.
-* The Tcl compiler (`compile` backend) routes every native with declared
-  errors through its generic call (`core::runtime::callValue`), so a slice
-  or a write the completion proof has made obligation-free still pays the
-  generic call there; the native backend is unaffected.
+* The completion proof removes a call's *obligation* only, never its
+  run-time check: a proven `at`/`set`/slice still runs its bounds check on
+  every backend, and `get` does not benefit at all. §12 records this gap,
+  the intended model and the plan to close it. (The Tcl compiler, in
+  particular, routes every native with declared errors through its generic
+  call, `core::runtime::callValue`, proven or not.)
 * Historical audit instruments were renamed but not re-run; earlier
   milestone reports keep the old names.
 
@@ -655,3 +657,130 @@ a lookup, a write or a slice.
   cranelift example set) succeed. Compiler warnings on the 75 corpus,
   surface, bench and audit-probe programs are identical to the
   pre-milestone tree, and so are their diagnostics.
+
+## 12. Review: the intended static range model, what is built, what is not
+
+Recorded from the review of §11; nothing below is implemented yet unless it
+says so.
+
+### The intended model
+
+An out-of-bounds access is a *static* notion, decided by the compiler:
+
+* **proven in range** -- no run-time check and no error handling at all;
+* **proven out of range** -- a compile error;
+* **unknown** (e.g. a List whose length the compiler does not know) -- an
+  explicit dynamic check that raises a declared error (`IndexNotFound`,
+  `LowerUnderrun`, `UpperOverrun`).
+
+The same proof must benefit `get`: `get` is `at` plus a handler, so a
+proven index makes both the check and the handler unnecessary.
+
+### What `RANGE` was, and how §11 was read
+
+`CORE SEMANTIC RANGE` was never a static fact in this codebase: it was
+raised at run time by the bounds checks of the interpreter and the native
+runtime. README §7 files it under invalid programs, but nothing proved it
+statically and a program could not handle it. The only compile-time range
+notion is `hir/range.tcl`'s Range facts (value intervals).
+
+§11 read "remove the raw RANGE" as "replace the run-time `RANGE` abort of
+writes and slices with declared, handleable errors", with the completion
+proof deciding only whether the program has to handle the error.
+
+### What is built
+
+* Semantics (§3, §11): `at`/`set` raise `IndexNotFound`, the slices
+  `LowerUnderrun`/`UpperOverrun`, as declared errors raised by the run-time
+  check.
+* The completion proof (`hir/completions.tcl`) decides the *obligation*:
+  proven in range, no handler or `errors` clause is required; proven out of
+  range, `KNOWN-ERROR`; otherwise the error must be handled or declared.
+
+### What is not built
+
+Nothing after the obligation check reads the proof (its result,
+`effectiveErrors`, is recorded on the HIR and consumed only by the
+completion diagnostics). So:
+
+* a proven `at` still compiles to the checked op. For `loop i from 0 to
+  list::length(xs): list::at(xs, i)` the NIR is `op listget`, whose
+  Cranelift lowering (`native/src/codegen/clif.rs` `list_get`) is an inline
+  unsigned bounds compare with a slow path into `rt_list_get`, which can
+  raise `IndexNotFound`. The same holds for `set` and the slices;
+* the Tcl compiler sends every native with declared errors through its
+  generic call (`core::runtime::callValue`), proven or not;
+* `get` gets nothing: `list::get(xs, i, 0)` in the same loop is a `call` to
+  the `list::get` instance, which pushes an error exit, runs the checked
+  `listget`, and keeps its handler path (`declarederroreq` / `reraise`).
+
+This gap dates from the first commit of this milestone: the proof for `at`
+never removed the check either.
+
+### Plan to close the gap
+
+1. Native lowering consumes the proof per call site (per specialized
+   instance, since the proof is call-specific): a proven `at`, `set` or
+   slice lowers to an unchecked op -- no bounds compare, no error exit; an
+   unknown one keeps today's checked op and declared error; a proven
+   failure stays `KNOWN-ERROR`.
+2. `get` is decided at the caller, where the facts are, by treating it as
+   `at` plus its handler at the call site (inlined), so the `at` sees the
+   caller's facts: a proven index becomes a bare read with no call and no
+   handler; an unknown one keeps today's behavior.
+3. Tests pin it: a proven site has no bounds compare and no error path in
+   its NIR; a proven `get` compiles to the same NIR as the bare read;
+   differential tests on every backend.
+
+### Open decisions
+
+* **`get` with a provably missing index.** Recommended: fold it to the
+  default (still evaluated eagerly), not a compile error -- `get` is the
+  total lookup, so a static miss is a legitimate use.
+* **The remaining `RANGE` sources** (`mutable_array::allocate`'s capacity,
+  shift amounts, `str::is_tcl_*`'s one-scalar requirement, refined-type
+  constructors, the native collection-size ceiling; §11): the same
+  treatment now (static where provable, a declared error otherwise), or
+  indexing and slicing only.
+
+### Programs the proof cannot prove no longer compile unchanged
+
+Every `at`, `set` or slice the compiler cannot prove must be handled or
+declared, or the program is rejected (`UNHANDLED-ERROR`, the default
+strict mode); `-strict 0` still compiles it, and then the declared error is
+raised at run time only if the access is actually out of range. This holds
+for any program, not only the corpus. Compiled with the §11 compiler, the
+corpus programs as committed before §11 (8bb8b47) are rejected:
+
+| Program | Rejection |
+|---------|-----------|
+| `ai_text_clean` | `str::substring` may produce `LowerUnderrun` |
+| `csv`, `csv_chunked`, `csv_records` | `LowerUnderrun` |
+| `csv_geometric` | `IndexNotFound` |
+| `hashtable` | `mutable_array::set` may produce `IndexNotFound` |
+| `string_replace` | `str::substring` may produce `LowerUnderrun` |
+| `string_reverse` | `UpperOverrun` |
+| `matmul` | compiles: it already carried the first commit's edits for `at` |
+
+The committed corpus compiles because it was edited (accepted for this
+milestone): `errors` clauses along each call chain and a `sample` function,
+called once at the top level, whose handlers return a placeholder `[]`.
+The expected values are unchanged; the code is noisier.
+
+The proof fails for two different reasons:
+
+* **The fact lives in the caller.** `string_reverse`'s index starts at 0 and
+  only grows, but that is known only from the call chain (`reverse_chars`
+  passes 0, the recursion adds 1), and the proof does not follow facts
+  across calls, so it cannot see `index >= 0`. The CSV programs' record
+  lengths are established by one function and read in another.
+* **The guard genuinely does not cover every case.** `string_reverse` stops
+  on `if index == str::length(text):`; called with an index past the end it
+  would slice out of range, so the program as written can fail for some
+  inputs. Only `>=` would make it provable.
+
+What this means for the model: under "unknown -> dynamic check with a
+declared error", such programs still need handlers; only proven sites lose
+the check. Code like this compiles untouched only if an unproven access may
+fail without the program handling it, as the old run-time `RANGE` did. That
+is the design lever left open.
