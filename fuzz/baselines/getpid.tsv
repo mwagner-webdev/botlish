@@ -1,9 +1,9 @@
 seed	exit	wall_ms	stdout	stderr-first-line
 plain	0	2	[true, true]	
-invalid-utf8	0	3	[true, true]	
-many-args	0	2	[true, true]	
-max-arg	0	3	[true, true]	
+invalid-utf8	0	2	[true, true]	
+many-args	0	3	[true, true]	
+max-arg	0	4	[true, true]	
 nul-inside-arg	0	2	[true, true]	
-one-empty-arg	0	2	[true, true]	
+one-empty-arg	0	3	[true, true]	
 syscall-sample-2	0	2	[true, true]	
 three-args	0	2	[true, true]	

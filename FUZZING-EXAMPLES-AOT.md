@@ -342,11 +342,12 @@ non-emitting examples fail only through designed gates (§1).
 ## 10. Verification: the repository is unchanged where it must be
 
 * Full regression (`tclsh9.0 tests/all.tcl`) passes unchanged with the
-  fuzz tree present: **5330 total, 5326 passed, 4 skipped
+  fuzz tree present: **5472 total, 5468 passed, 4 skipped
   (pre-existing `coreScoping` constraint), 0 failed** -- the suite and
-  the fuzz tree on current `main` (the upstream explicit-imports refactor
-  grew the suite from 4852 to 5330 tests; both with and without the fuzz
-  additions, 0 failures).
+  the fuzz tree on the exact base this report ships against (upstream
+  grew the suite from 4852 to 5330 to 5472 over the campaign's lifetime
+  via the explicit-imports and opaque-struct changes; with the fuzz
+  additions present throughout, 0 failures).
 * Every example still compiles AOT (`build-aot.sh`: 21 ok / 13 by-design
   failures, identical to the pre-campaign state) and matches its recorded
   baseline on seeds (baseline stdout columns identical before/after).
@@ -420,8 +421,8 @@ Findings:
 
 Verification:
 
-17. Full regression passes: **yes** (5330 total, 0 failed, on current
-    main with the fuzz tree; §10).
+17. Full regression passes: **yes** (5472 total, 0 failed, on the exact
+    base this report ships against, with the fuzz tree; §10).
 18. All examples compile AOT and match recorded baselines: **yes** (§10).
 19. Every step reproducible from committed scripts: **yes**
     (`run-all.sh`; the toolchain build is scripted and idempotent).

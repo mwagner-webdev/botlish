@@ -1,6 +1,6 @@
 seed	exit	wall_ms	stdout	stderr-first-line
 plain	0	2	[42, "hi", "other", "yes"]	
-many-args	0	2	[42, "hi", "other", "yes"]	
+many-args	0	3	[42, "hi", "other", "yes"]	
 numeric-sample-2	0	2	[42, "hi", "other", "yes"]	
 numeric-sample-4	0	2	[42, "hi", "other", "yes"]	
 numeric-sample-7	0	2	[42, "hi", "other", "yes"]	
