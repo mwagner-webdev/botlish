@@ -1,0 +1,11 @@
+# csv.dict -- the CSV subset csv*.bot documents (examples/stdlib/csv.bot):
+# record/field delimiters and the quoted-field machinery. Attached to the
+# csv* targets. (AFL dictionaries take \xNN escapes, not \n.)
+comma=","
+newline="\x0a"
+quote="\""
+escaped_quote="\"\""
+quoted_comma="\","
+crlf="\x0d\x0a"
+field="name"
+field2="age"

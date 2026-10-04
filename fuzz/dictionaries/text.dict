@@ -1,0 +1,23 @@
+# text.dict -- the exact code points ai_text_clean.bot documents as its
+# cleaning set (smart punctuation + the benchmark emoji). Attached to the
+# ai_text_clean target; the emoji are UTF-8 tokens, matching how the
+# program consumes them (character-indexed String access).
+endash="–"
+emdash="—"
+leftsinglequote="‘"
+rightsinglequote="’"
+leftdoublequote="“"
+rightdoublequote="”"
+ellipsis="…"
+rocket="🚀"
+check="✅"
+cross="❌"
+robot="🤖"
+thumbsup="👍"
+bulb="💡"
+party="🎉"
+fire="🔥"
+heart="😍"
+smile="🙂"
+tears="😂"
+grin="😀"

@@ -1,0 +1,10 @@
+seed	exit	wall_ms	stdout	stderr-first-line
+plain	0	8	["negative", "zero", "positive"]	
+many-args	0	12	["negative", "zero", "positive"]	
+numeric-sample-2	0	13	["negative", "zero", "positive"]	
+numeric-sample-4	0	13	["negative", "zero", "positive"]	
+numeric-sample-7	0	12	["negative", "zero", "positive"]	
+numeric-sample-8	0	13	["negative", "zero", "positive"]	
+numeric-sample-9	0	12	["negative", "zero", "positive"]	
+one-empty-arg	0	13	["negative", "zero", "positive"]	
+three-args	0	16	["negative", "zero", "positive"]	
