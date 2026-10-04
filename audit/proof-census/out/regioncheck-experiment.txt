@@ -1,0 +1,5 @@
+317:    %21 = op regioncheck %2 %0 %20 @e241
+base: value {list {{int 400} {int 0}}} median_us=611.6 best_us=575.9
+noregion: value {list {{int 400} {int 0}}} median_us=558.8 best_us=527.7
+base: value {list {{int 400} {int 0}}} median_us=618.1 best_us=587.5
+noregion: value {list {{int 400} {int 0}}} median_us=558.0 best_us=528.6

@@ -1,0 +1,22 @@
+# Parameter contract inference vs branch narrowing: n is returned only
+# where n is proven in 0..2, yet the inferred parameter contract is the
+# whole domain, so a caller passing 5 is rejected.
+type Two = Int in 0..2
+
+fn clamp_inferred(n) -> Two:
+    if n < 0:
+        0
+    elif n > 2:
+        2
+    else:
+        n
+
+fn clamp_declared(n: int) -> Two:
+    if n < 0:
+        0
+    elif n > 2:
+        2
+    else:
+        n
+
+[clamp_declared(5), clamp_inferred(5)]

@@ -1,0 +1,34 @@
+# Two relational provers inside hir/completions.tcl, and alias keying.
+# (1) the same counted loop + the same guard: the slice prover
+#     (ProveNonNeg) accepts the loop's start as i >= 0, the index prover
+#     (IndexBounds' upperBounds rule) wants i's Range min >= 0, which the
+#     unseeded loop variable never has.
+fn slice_in_loop(s, n):
+    loop i from 0 to n:
+        if i < str::length(s):
+            str::substring(s, i, i + 1)
+        else:
+            ""
+
+fn index_in_loop(xs, n):
+    loop i from 0 to n:
+        if i < list::length(xs):
+            list::at(xs, i)
+        else:
+            0
+
+# (2) alias keying: the guard and the read name the same value through an
+#     immutable alias j = i.
+fn guard_i_read_j(xs, i):
+    j = i
+    if i < 0 or i >= list::length(xs):
+        return 0
+    list::at(xs, j)
+
+fn guard_j_read_j(xs, i):
+    j = i
+    if j < 0 or j >= list::length(xs):
+        return 0
+    list::at(xs, j)
+
+[slice_in_loop("ab", 3), index_in_loop([1, 2], 3), guard_i_read_j([1], 0), guard_j_read_j([1], 0)]

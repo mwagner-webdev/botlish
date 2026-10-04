@@ -1,0 +1,29 @@
+# Call-specific fact transport (census §9) into the completion proof's
+# call-specific walk of an error-declaring callee. Each callee body is
+# legal only with its errors clause; the question is whether the CALL's
+# effective set drops IndexNotFound / UpperOverrun under the caller's facts.
+fn third(xs) errors IndexNotFound:
+    list::at(xs, 2)
+
+fn cut3(s) errors LowerUnderrun, UpperOverrun:
+    str::substring(s, 0, 3)
+
+fn last_of_cap(a) errors IndexNotFound:
+    mutable_array::at(a, 2)
+
+fn pair(xs, i) errors IndexNotFound:
+    list::at(xs, i)
+
+xs = [1, 2, 3]
+s = "abc"
+literal_list = third([1, 2, 3])
+local_list = third(xs)
+literal_str = cut3("abc")
+local_str = cut3(s)
+cap = last_of_cap(mutable_array::allocate(3))
+# a relation between two arguments: i < length(ys) holds at the call site
+fn related(ys, i):
+    if i < 0 or i >= list::length(ys):
+        return 0
+    pair(ys, i)
+[literal_list, local_list, literal_str, local_str, cap, related([1], 0)]

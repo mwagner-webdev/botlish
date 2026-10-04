@@ -1,0 +1,408 @@
+=== a-counted-loop-at.bot
+diagnostics: none
+call e10 native list::at: declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i1 (doubled<List[int]>) arg ranges: [-∞, +∞] | [0, 4611686018427387902]
+nir doubled<List[int]>: %11 = op listget %0 %10 @e10
+=== b-mutarray-capacity.bot
+diagnostics: none
+call e14 native mutable_array::set: declared {IndexNotFound} effective {} mayReturnNormally 1
+call e18 native list::at: declared {IndexNotFound} effective {} mayReturnNormally 1
+call e32 native mutable_array::set: declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i2 (mutable_array::create<int, int>) arg ranges: [-∞, +∞] | [0, 2] | [7, 7] {7}
+call e42 native mutable_array::at: declared {IndexNotFound} effective (not reached) mayReturnNormally -
+call e59 native mutable_array::set: declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i1 (fill<int>) arg ranges: [-∞, +∞] | [0, 4611686018427387902] | [0, 13835058055282163706]
+call e70 native mutable_array::at: declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i1 (fill<int>) arg ranges: [-∞, +∞] | [0, 3]
+call e81 native mutable_array::at: declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i3 (read_param<mutarray>) arg ranges: [-∞, +∞] | [0, 4611686018427387902]
+nir mutable_array::create<int, int>: %10 = op mutarrayset %2 %9 %1 @e32
+nir fill<int>: %13 = op mutarrayset %1 %9 %12 @e59
+nir fill<int>: %26 = op mutarrayget %1 %25 @e70
+nir read_param<mutarray>: %11 = op mutarrayget %0 %10 @e81
+=== c-slice.bot
+diagnostics: none
+call e28 native str::substring: declared {LowerUnderrun UpperOverrun} effective {} mayReturnNormally 1
+    instance i1 (cut<str, int, int>) arg ranges: [-∞, +∞] | [1, 3] | [3, 9]
+call e50 native str::substring: declared {LowerUnderrun UpperOverrun} effective {UpperOverrun} mayReturnNormally 1
+    instance i2 (cut_lower<str, int, int>) arg ranges: [-∞, +∞] | [0, 0] {0} | [2, 2] {2}
+call e68 block e35 (cut_lower): declared {UpperOverrun} effective {} mayReturnNormally 1
+    instance i0 (<program>) arg ranges: [-∞, +∞] | [0, 0] {0} | [2, 2] {2}
+nir <program><generic>: %17 = call 2 %12 %13 %15 @e68
+nir cut<str, int, int>: %14 = op substr %13 %1 %2 @e28
+nir cut_lower<str, int, int>: %5 = op substr %0 %1 %2 @e50
+=== d-early-return.bot
+diagnostics: none
+call e21 native list::at: declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i1 (pick<List[int], int, int>) arg ranges: [-∞, +∞] | [-1, 5] {-1,1,5}
+nir pick<List[int], int, int>: %17 = op listget %0 %1 @e21
+=== e-struct-domain-projection.bot
+diagnostics: none
+call e247 block e228 (byte::from_int): declared {AboveRange BelowRange} effective {AboveRange} mayReturnNormally 1
+call e260 block e228 (byte::from_int): declared {AboveRange BelowRange} effective {} mayReturnNormally 1
+    instance i2 (via_local<abi::U8>) arg ranges: [0, 255]
+call e265 block e228 (byte::from_int): declared {AboveRange BelowRange} effective {} mayReturnNormally 1
+    instance i4 (direct<abi::U8>) arg ranges: [0, 255]
+call e280 block e78 (abi::u8): declared {AbiIntegerAboveRange AbiIntegerBelowRange} effective (not reached) mayReturnNormally -
+    instance i6 (dynamic<int>) arg ranges: [200, 200] {200}
+call e283 block e78 (abi::u8): declared {AbiIntegerAboveRange AbiIntegerBelowRange} effective {} mayReturnNormally 1
+    instance i6 (dynamic<int>) arg ranges: [0, 0] {0}
+call e286 block e78 (abi::u8): declared {AbiIntegerAboveRange AbiIntegerBelowRange} effective {} mayReturnNormally 1
+    instance i6 (dynamic<int>) arg ranges: [255, 255] {255}
+call e296 block e78 (abi::u8): declared {AbiIntegerAboveRange AbiIntegerBelowRange} effective {} mayReturnNormally 1
+    instance i0 (<program>) arg ranges: [7, 7] {7}
+call e301 block e78 (abi::u8): declared {AbiIntegerAboveRange AbiIntegerBelowRange} effective {} mayReturnNormally 1
+    instance i0 (<program>) arg ranges: [9, 9] {9}
+call e306 block e78 (abi::u8): declared {AbiIntegerAboveRange AbiIntegerBelowRange} effective {} mayReturnNormally 1
+    instance i0 (<program>) arg ranges: [255, 255] {255}
+nir <program><generic>: %2 = callmulti 2 %0 @e296
+nir <program><generic>: %6 = call 1 %4 @e301
+nir <program><generic>: %10 = callmulti 2 %8 @e306
+nir via_local<abi::U8>: %1 = call 3 %0 @e260
+nir direct<abi::U8>: %2 = call 3 %1 @e265
+nir dynamic<int>: %2 = call 1 %0 @e280
+nir dynamic<int>: %6 = call 1 %4 @e283
+nir dynamic<int>: %10 = call 1 %8 @e286
+=== f-closed-abi-u64.bot
+diagnostics: none
+call e279 block e126 (abi::u64): declared {AbiIntegerAboveRange AbiIntegerBelowRange} effective {} mayReturnNormally 1
+    instance i1 (probe<generic>) arg ranges: [18446744073709551615, 18446744073709551615] {18446744073709551615}
+nir probe<generic>: %1 = callmulti 1 %0 @e279
+=== f2-closed-int-vs-struct.bot
+diagnostics: none
+=== g-induction-declared-param.bot
+diagnostic TYPE at e15: argument for parameter "i" cannot be proven to satisfy int[Small] (argument type: int, facts: [1, 1001])
+=== h-recursive-slice.bot
+diagnostics: none
+call e13 native str::substring: declared {LowerUnderrun UpperOverrun} effective {LowerUnderrun UpperOverrun} mayReturnNormally 1
+    instance i2 (reverse_from<str, int, str>) arg ranges: [-∞, +∞] | [0, 4611686018427387902] | [1, 4611686018427387903]
+call e21 block e2 (reverse_from): declared {LowerUnderrun UpperOverrun} effective {LowerUnderrun UpperOverrun} mayReturnNormally 1
+    instance i2 (reverse_from<str, int, str>) arg ranges: [-∞, +∞] | [1, 4611686018427387903] | [-∞, +∞]
+call e44 native str::substring: declared {LowerUnderrun UpperOverrun} effective {LowerUnderrun} mayReturnNormally 1
+    instance i3 (reverse_ge<str, int, str>) arg ranges: [-∞, +∞] | [0, 4611686018427387902] | [1, 4611686018427387903]
+call e52 block e33 (reverse_ge): declared {LowerUnderrun} effective {LowerUnderrun} mayReturnNormally 1
+    instance i3 (reverse_ge<str, int, str>) arg ranges: [-∞, +∞] | [1, 4611686018427387903] | [-∞, +∞]
+call e75 native str::substring: declared {LowerUnderrun UpperOverrun} effective {} mayReturnNormally 1
+    instance i4 (reverse_nat<str, int, str>) arg ranges: [-∞, +∞] | [0, 4611686018427387902] | [1, 4611686018427387903]
+call e98 block e2 (reverse_from): declared {LowerUnderrun UpperOverrun} effective {LowerUnderrun UpperOverrun} mayReturnNormally 1
+    instance i1 (sample<generic>) arg ranges: [-∞, +∞] | [0, 0] {0} | [-∞, +∞]
+call e103 block e33 (reverse_ge): declared {LowerUnderrun} effective {LowerUnderrun} mayReturnNormally 1
+    instance i1 (sample<generic>) arg ranges: [-∞, +∞] | [0, 0] {0} | [-∞, +∞]
+call e115 block e95 (sample): declared {LowerUnderrun UpperOverrun} effective (not reached) mayReturnNormally -
+    instance i0 (<program>) arg ranges: 
+nir <program><generic>: %1 = call 4 @e115
+nir reverse_from<str, int, str>: %14 = op regioncheck %8 %9 %13 @e13
+nir reverse_from<str, int, str>: tail %0 %17 %18 @e21
+nir reverse_ge<str, int, str>: %14 = op regioncheck %8 %9 %13 @e44
+nir reverse_ge<str, int, str>: tail %0 %17 %18 @e52
+nir reverse_nat<str, int, str>: %14 = op regioncheck %8 %9 %13 @e75
+nir sample<generic>: %4 = call 1 %0 %1 %3 @e98
+nir sample<generic>: %9 = call 2 %5 %6 %8 @e103
+=== i-get-in-counted-loop.bot
+diagnostics: none
+call e5 native list::at: declared {IndexNotFound} effective (not reached) mayReturnNormally -
+    instance i2 (list::get<List[int], int, int>) arg ranges: [-∞, +∞] | [0, 4611686018427387902]
+nir list::get<List[int], int, int>: %4 = op listget %0 %1 @e5
+=== k-method-spelling.bot
+diagnostics: none
+call e5 native list::at: declared {IndexNotFound} effective (not reached) mayReturnNormally -
+    instance i4 (list::get<List[int], int, int>) arg ranges: [-∞, +∞] | [0, 4611686018427387902]
+    instance i6 (list::get<list, int, int>) arg ranges: [-∞, +∞] | [0, 4611686018427387902]
+    instance i10 (list::get<generic>) arg ranges: [-∞, +∞] | [-∞, +∞]
+call e71 native list::at: declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i1 (free<List[int]>) arg ranges: [-∞, +∞] | [0, 4611686018427387902]
+call e82 native list::at: declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i2 (method<generic>) arg ranges: [-∞, +∞] | [0, 4611686018427387902]
+call e130 native list::at: declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i7 (free_guard<List[int], int>) arg ranges: [-∞, +∞] | [1, 1] {1}
+call e154 native list::at: declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i8 (method_guard<any, int>) arg ranges: [-∞, +∞] | [1, 1] {1}
+    instance i9 (method_guard<generic>) arg ranges: [-∞, +∞] | [-∞, +∞]
+nir list::get<List[int], int, int>: %4 = op listget %0 %1 @e5
+nir list::get<list, int, int>: %4 = op listget %0 %1 @e5
+nir list::get<generic>: guard list %0 "list::at" @e5
+nir list::get<generic>: guard int %1 "list::at" @e5
+nir list::get<generic>: %4 = op listget %0 %1 @e5
+nir free<List[int]>: %11 = op listget %0 %10 @e71
+nir method<generic>: %13 = op listget %0 %12 @e82
+nir free_guard<List[int], int>: %13 = op listget %0 %1 @e130
+nir method_guard<any, int>: %15 = op listget %0 %1 @e154
+=== k2-bound-name-spelling.bot
+diagnostics: none
+call e12 native list::at: declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i1 (qualified<List[int]>) arg ranges: [-∞, +∞] | [0, 4611686018427387902]
+call e23 native list::at: declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i2 (bound<generic>) arg ranges: [-∞, +∞] | [0, 4611686018427387902]
+call e34 native list::at: declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i3 (method<generic>) arg ranges: [-∞, +∞] | [0, 4611686018427387902]
+call e47 native list::at: declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i4 (local_bound<List[int]>) arg ranges: [-∞, +∞] | [0, 4611686018427387902]
+nir qualified<List[int]>: %11 = op listget %0 %10 @e12
+nir bound<generic>: %13 = op listget %0 %12 @e23
+nir method<generic>: %13 = op listget %0 %12 @e34
+nir local_bound<List[int]>: %12 = op listget %0 %11 @e47
+=== l-loop-forms.bot
+diagnostic LOCKSTEP-UNPROVEN at e74: lockstep loop requires equal iteration counts; could not prove length(xs) == length(ys) (clause 1 vs clause 2)
+diagnostic UNHANDLED-ERROR at e134: this call may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "errors" declarat...
+diagnostic UNHANDLED-ERROR at e140: this call may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "errors" declarat...
+diagnostic UNHANDLED-ERROR at e162: this call may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "errors" declarat...
+diagnostic UNHANDLED-ERROR at e36: this call of "list::at" may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "er...
+diagnostic UNHANDLED-ERROR at e53: this call of "list::at" may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "er...
+diagnostic UNHANDLED-ERROR at e88: this call of "list::at" may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "er...
+call e8 native list::at: declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i1 (up_to<List[int]>) arg ranges: [-∞, +∞] | [0, 4611686018427387902]
+call e22 native list::at: declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i2 (up_through<List[int]>) arg ranges: [-∞, +∞] | [0, 4611686018427387902]
+call e36 native list::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i3 (down_through<List[int]>) arg ranges: [-∞, +∞] | [0, 4611686018427387902]
+call e53 native list::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i4 (down_to<List[int]>) arg ranges: [-∞, +∞] | [0, 4611686018427387902]
+call e67 native list::at: declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i5 (lockstep<List[int]>) arg ranges: [-∞, +∞] | [0, 4611686018427387902]
+call e88 native list::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i7 (offset<List[int]>) arg ranges: [-∞, +∞] | [0, 4611686018427387901]
+call e104 native list::at: declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i8 (bound_alias<List[int]>) arg ranges: [-∞, +∞] | [0, 4611686018427387902]
+call e116 native list::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i9 (post_loop<List[int]>) arg ranges: [-∞, +∞] | [0, 0] {0}
+call e174 block e109 (post_loop): declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i0 (<program>) arg ranges: [-∞, +∞]
+nir <program><generic>: %58 = call 9 %57 @e174
+nir up_to<List[int]>: %11 = op listget %0 %10 @e8
+nir up_through<List[int]>: %14 = op listget %0 %13 @e22
+nir down_through<List[int]>: %14 = op listget %0 %13 @e36
+nir down_to<List[int]>: %17 = op listget %0 %16 @e53
+nir lockstep<List[int]>: %18 = op listget %0 %17 @e67
+nir offset<List[int]>: %14 = op listget %0 %13 @e88
+nir bound_alias<List[int]>: %11 = op listget %0 %10 @e104
+nir post_loop<List[int]>: %14 = op listget %0 %12 @e116
+=== m-listloop-checked.bot
+diagnostics: none
+=== n-call-specific-transport.bot
+diagnostic UNHANDLED-ERROR at e43: this call may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "errors" declarat...
+diagnostic UNHANDLED-ERROR at e51: this call may produce the declared error "UpperOverrun", which is neither handled here nor admitted by the enclosing function's own "errors" declarati...
+diagnostic UNHANDLED-ERROR at e55: this call may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "errors" declarat...
+diagnostic UNHANDLED-ERROR at e80: this call may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "errors" declarat...
+call e3 native list::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i1 (third<List[int]>) arg ranges: [-∞, +∞] | [2, 2] {2}
+call e9 native str::substring: declared {LowerUnderrun UpperOverrun} effective {UpperOverrun} mayReturnNormally 1
+    instance i2 (cut3<str>) arg ranges: [-∞, +∞] | [0, 0] {0} | [3, 3] {3}
+call e16 native mutable_array::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i3 (last_of_cap<mutarray>) arg ranges: [-∞, +∞] | [2, 2] {2}
+call e22 native list::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i5 (pair<List[int], int>) arg ranges: [-∞, +∞] | [0, 0] {0}
+call e35 block e2 (third): declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i0 (<program>) arg ranges: [-∞, +∞]
+call e43 block e2 (third): declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i0 (<program>) arg ranges: [-∞, +∞]
+call e47 block e8 (cut3): declared {LowerUnderrun UpperOverrun} effective {} mayReturnNormally 1
+    instance i0 (<program>) arg ranges: [-∞, +∞]
+call e51 block e8 (cut3): declared {LowerUnderrun UpperOverrun} effective {UpperOverrun} mayReturnNormally 1
+    instance i0 (<program>) arg ranges: [-∞, +∞]
+call e55 block e15 (last_of_cap): declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i0 (<program>) arg ranges: [-∞, +∞]
+call e80 block e21 (pair): declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i4 (related<List[int], int>) arg ranges: [-∞, +∞] | [0, 0] {0}
+nir <program><generic>: %13 = call 1 %7 %9 %11 @e35
+nir <program><generic>: %14 = call 1 %0 %2 %4 @e43
+nir <program><generic>: %16 = call 2 %15 @e47
+nir <program><generic>: %17 = call 2 %6 @e51
+nir <program><generic>: %21 = call 3 %20 @e55
+nir cut3<str>: %5 = op substr %0 %1 %3 @e9
+nir last_of_cap<mutarray>: %3 = op mutarrayget %0 %1 @e16
+nir pair<List[int], int>: %2 = op listget %0 %1 @e22
+nir related<List[int], int>: %13 = call 4 %0 %1 @e80
+=== o-lowercase-length.bot
+diagnostics: none
+call e14 native str::substring: declared {LowerUnderrun UpperOverrun} effective {} mayReturnNormally 1
+    instance i0 (<program>) arg ranges: [-∞, +∞] | [0, 0] {0} | [1, 1] {1}
+call e22 native str::substring: declared {LowerUnderrun UpperOverrun} effective {} mayReturnNormally 1
+    instance i0 (<program>) arg ranges: [-∞, +∞] | [0, 0] {0} | [1, 1] {1}
+nir <program><generic>: %9 = op substr %1 %5 %7 @e14
+nir <program><generic>: %15 = op substr %3 %11 %13 @e22
+=== p-param-inference-narrowing.bot
+diagnostic TYPE at e38: argument for parameter "n" cannot be proven to satisfy int[Two], the parameter type inferred from the function body (argument type: int, facts: [5, 5]...
+=== q-countloop-interval.bot
+diagnostic UNHANDLED-ERROR at e302: this call may produce the declared error "AboveRange", which is neither handled here nor admitted by the enclosing function's own "errors" declaration
+diagnostic UNHANDLED-ERROR at e302: this call may produce the declared error "BelowRange", which is neither handled here nor admitted by the enclosing function's own "errors" declaration
+diagnostic UNHANDLED-ERROR at e306: this call may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "errors" declarat...
+diagnostic UNHANDLED-ERROR at e308: this call may produce the declared error "AbiIntegerAboveRange", which is neither handled here nor admitted by the enclosing function's own "errors" d...
+diagnostic UNHANDLED-ERROR at e308: this call may produce the declared error "AbiIntegerBelowRange", which is neither handled here nor admitted by the enclosing function's own "errors" d...
+diagnostic UNHANDLED-ERROR at e260: this call may produce the declared error "AboveRange", which is neither handled here nor admitted by the enclosing function's own "errors" declaration
+diagnostic UNHANDLED-ERROR at e260: this call may produce the declared error "BelowRange", which is neither handled here nor admitted by the enclosing function's own "errors" declaration
+diagnostic UNHANDLED-ERROR at e281: this call of "list::at" may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "er...
+diagnostic UNHANDLED-ERROR at e297: this call may produce the declared error "AbiIntegerAboveRange", which is neither handled here nor admitted by the enclosing function's own "errors" d...
+diagnostic UNHANDLED-ERROR at e297: this call may produce the declared error "AbiIntegerBelowRange", which is neither handled here nor admitted by the enclosing function's own "errors" d...
+call e72 block e53 (byte::from_int): declared {AboveRange BelowRange} effective {AboveRange} mayReturnNormally 1
+call e260 block e53 (byte::from_int): declared {AboveRange BelowRange} effective {AboveRange BelowRange} mayReturnNormally 1
+    instance i1 (bytes<generic>) arg ranges: [0, 255]
+call e268 native list::at: declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i3 (small_index<generic>) arg ranges: [-∞, +∞] | [0, 2]
+call e281 native list::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i4 (shifted_index<generic>) arg ranges: [-∞, +∞] | [0, 2]
+call e297 block e157 (abi::u8): declared {AbiIntegerAboveRange AbiIntegerBelowRange} effective {AbiIntegerAboveRange AbiIntegerBelowRange} mayReturnNormally 1
+    instance i5 (abi_values<generic>) arg ranges: [0, 255]
+nir bytes<generic>: %10 = call 1 %9 @e260
+nir small_index<generic>: %17 = op listget %15 %16 @e268
+nir shifted_index<generic>: %20 = op listget %15 %19 @e281
+nir abi_values<generic>: %10 = call 2 %9 @e297
+=== r-return-facts.bot
+diagnostic TYPE at e67: argument for parameter "n" cannot be proven to satisfy int[Two], the parameter type inferred from the function body (argument type: int, facts: [5, 5]...
+diagnostic UNHANDLED-ERROR at e69: this call of "list::at" may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "er...
+diagnostic UNHANDLED-ERROR at e76: this call of "list::at" may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "er...
+diagnostic UNHANDLED-ERROR at e82: this call of "str::substring" may produce the declared error "UpperOverrun", which is neither handled here nor admitted by the enclosing function's ow...
+call e46 native list::at: declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i0 (<program>) arg ranges: [-∞, +∞] | [2, 2] {2}
+call e55 native list::at: declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i0 (<program>) arg ranges: [-∞, +∞] | [0, 2] {0,2}
+call e62 native list::at: declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i0 (<program>) arg ranges: [-∞, +∞] | [0, 2]
+call e69 native list::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i0 (<program>) arg ranges: [-∞, +∞] | [-∞, +∞]
+call e76 native list::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i0 (<program>) arg ranges: [-∞, +∞] | [2, 2] {2}
+call e82 native str::substring: declared {LowerUnderrun UpperOverrun} effective {UpperOverrun} mayReturnNormally 1
+    instance i0 (<program>) arg ranges: [-∞, +∞] | [0, 0] {0} | [3, 3] {3}
+nir <program><generic>: %13 = op listget %6 %12 @e46
+nir <program><generic>: %16 = op listget %6 %15 @e55
+nir <program><generic>: %19 = op listget %6 %18 @e62
+nir <program><generic>: %22 = op listget %6 %21 @e69
+nir <program><generic>: %26 = op listget %23 %24 @e76
+nir <program><generic>: %32 = op regioncheck %27 %28 %30 @e82
+=== s-struct-facts.bot
+diagnostic UNHANDLED-ERROR at e11: this call of "list::at" may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "er...
+diagnostic UNHANDLED-ERROR at e30: this call of "list::at" may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "er...
+diagnostic UNHANDLED-ERROR at e75: this call may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "errors" declarat...
+call e11 native list::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i0 (<program>) arg ranges: [-∞, +∞] | [-∞, +∞]
+call e20 native list::at: declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i0 (<program>) arg ranges: [-∞, +∞] | [0, 2]
+call e30 native list::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i0 (<program>) arg ranges: [-∞, +∞] | [-∞, +∞]
+call e38 native list::at: declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i1 (via_param_domain<Dom>) arg ranges: [-∞, +∞] | [0, 2]
+call e49 native list::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+call e65 native list::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i2 (needs_exact_field<Plain>) arg ranges: [-∞, +∞] | [-∞, +∞]
+call e75 block e64 (needs_exact_field): declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i0 (<program>) arg ranges: [-∞, +∞]
+nir <program><generic>: %9 = op listget %6 %7 @e11
+nir <program><generic>: %12 = op listget %6 %10 @e20
+nir <program><generic>: %15 = op listget %6 %13 @e30
+nir <program><generic>: %21 = call 2 %19 @e75
+nir via_param_domain<Dom>: %8 = op listget %7 %0 @e38
+nir needs_exact_field<Plain>: %8 = op listget %7 %0 @e65
+=== sound-a-open-induction-specialized.bot
+diagnostics: none
+=== sound-a-open-induction.bot
+diagnostics: none
+=== sound-b-control.bot
+diagnostic UNHANDLED-ERROR at e29: this call may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "errors" declarat...
+diagnostic UNHANDLED-ERROR at e17: this call of "list::at" may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "er...
+call e17 native list::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i1 (get<int>) arg ranges: [-∞, +∞] | [0, 5] {0,5}
+call e25 native argv: declared {InvalidArgumentEncoding} effective (not reached) mayReturnNormally -
+    instance i0 (<program>) arg ranges: 
+nir <program><generic>: %1 = op argv @e25
+nir get<int>: %7 = op listget %5 %6 @e17
+=== sound-b-return-range.bot
+diagnostic UNHANDLED-ERROR at e30: this call may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "errors" declarat...
+diagnostic UNHANDLED-ERROR at e18: this call of "list::at" may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "er...
+call e18 native list::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i1 (get<int>) arg ranges: [-∞, +∞] | [0, 5] {0,5}
+call e26 native argv: declared {InvalidArgumentEncoding} effective (not reached) mayReturnNormally -
+    instance i0 (<program>) arg ranges: 
+nir <program><generic>: %1 = op argv @e26
+nir get<int>: %7 = op listget %5 %6 @e18
+=== sound-c-listloop-break.bot
+diagnostic KNOWN-ERROR at e13: this call of "list::at" can never complete normally under the facts proven for its arguments here -- it always produces the declared error(s) IndexNot...
+call e13 native list::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 0
+    instance i0 (<program>) arg ranges: [-∞, +∞] | [5, 5] {5}
+nir <program><generic>: %27 = op listget %24 %25 @e13
+=== sound-c-listloop-continue.bot
+diagnostics: none
+call e22 block e2 (f): declared {Boom} effective {} mayReturnNormally 1
+    instance i0 (<program>) arg ranges: [0, 0] {0}
+nir <program><generic>: %1 = call 1 %0 @e22
+nir <program><generic>: %2 = int 7 @e22
+=== t-relational-prover-pairs.bot
+diagnostic UNHANDLED-ERROR at e97: this call may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "errors" declarat...
+diagnostic UNHANDLED-ERROR at e34: this call of "list::at" may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "er...
+diagnostic UNHANDLED-ERROR at e61: this call of "list::at" may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "er...
+call e13 native str::substring: declared {LowerUnderrun UpperOverrun} effective {} mayReturnNormally 1
+    instance i1 (slice_in_loop<str, int>) arg ranges: [-∞, +∞] | [0, 2] | [1, 3]
+call e34 native list::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i2 (index_in_loop<List[int], int>) arg ranges: [-∞, +∞] | [0, 2]
+call e61 native list::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i3 (guard_i_read_j<List[int], int>) arg ranges: [-∞, +∞] | [0, 0] {0}
+call e87 native list::at: declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i4 (guard_j_read_j<List[int], int>) arg ranges: [-∞, +∞] | [0, 0] {0}
+nir slice_in_loop<str, int>: %18 = op substr %12 %13 %17 @e13
+nir index_in_loop<List[int], int>: %14 = op listget %0 %13 @e34
+nir guard_i_read_j<List[int], int>: %13 = op listget %0 %1 @e61
+nir guard_j_read_j<List[int], int>: %13 = op listget %0 %1 @e87
+=== u-handler-exit.bot
+diagnostic UNHANDLED-ERROR at e42: this call may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "errors" declarat...
+diagnostic UNHANDLED-ERROR at e45: this call may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "errors" declarat...
+diagnostic UNHANDLED-ERROR at e18: this call of "list::at" may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "er...
+call e14 block e2 (g): declared {Boom} effective (not reached) mayReturnNormally -
+    instance i1 (f<int>) arg ranges: [0, 1]
+call e18 native list::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i1 (f<int>) arg ranges: [-∞, +∞] | [-∞, +∞]
+call e29 block e2 (g): declared {Boom} effective (not reached) mayReturnNormally -
+    instance i3 (f_body<int>) arg ranges: [1, 1] {1}
+call e32 native list::at: declared {IndexNotFound} effective {} mayReturnNormally 1
+    instance i3 (f_body<int>) arg ranges: [-∞, +∞] | [1, 1] {1}
+nir f<int>: %2 = call 1 %0 @e14
+nir f<int>: %3 = int 1 @e14
+nir f<int>: %13 = op listget %12 %1 @e18
+nir f_body<int>: %2 = call 1 %0 @e29
+nir f_body<int>: %3 = int 1 @e29
+nir f_body<int>: %13 = op listget %10 %11 @e32
+=== v-allocate-size.bot
+diagnostics: none
+call e7 native mutable_array::freeze: declared {LowerUnderrun UpperOverrun} effective {LowerUnderrun UpperOverrun} mayReturnNormally 1
+    instance i1 (f<int>) arg ranges: [-∞, +∞] | [2, 2] {2}
+call e13 block e2 (f): declared {LowerUnderrun UpperOverrun} effective (not reached) mayReturnNormally -
+    instance i0 (<program>) arg ranges: [2, 2] {2}
+nir <program><generic>: %3 = call 1 %1 @e13
+nir f<int>: %2 = op mutarrayfreeze %1 %0 @e7
+=== z-soundness-neighbours.bot
+diagnostic UNHANDLED-ERROR at e25: this call of "list::at" may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "er...
+diagnostic UNHANDLED-ERROR at e57: this call of "list::at" may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "er...
+diagnostic UNHANDLED-ERROR at e85: this call of "list::at" may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "er...
+diagnostic UNHANDLED-ERROR at e101: this call of "list::at" may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "er...
+diagnostic UNHANDLED-ERROR at e129: this call of "list::at" may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "er...
+diagnostic UNHANDLED-ERROR at e149: this call of "mutable_array::at" may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function'...
+diagnostic UNHANDLED-ERROR at e177: this call of "list::at" may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "er...
+diagnostic UNHANDLED-ERROR at e188: this call of "list::at" may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "er...
+call e25 native list::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i2 (shadow_list<List[int], List[int], int>) arg ranges: [-∞, +∞] | [0, 0] {0}
+call e57 native list::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i3 (shadow_index<List[int], int>) arg ranges: [-∞, +∞] | [1, 1] {1}
+call e85 native list::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i4 (nested_return<List[int], int, bool>) arg ranges: [-∞, +∞] | [0, 0] {0}
+call e93 native list::at: declared {IndexNotFound} effective (not reached) mayReturnNormally -
+    instance i5 (handler_fallthrough<List[int], int>) arg ranges: [-∞, +∞] | [0, 0] {0}
+call e101 native list::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i5 (handler_fallthrough<List[int], int>) arg ranges: [-∞, +∞] | [0, 0] {0}
+call e129 native list::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i6 (join_leak<List[int], int>) arg ranges: [-∞, +∞] | [0, 0] {0}
+call e149 native mutable_array::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i7 (shadow_capacity<int>) arg ranges: [-∞, +∞] | [0, 1]
+call e177 native list::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i8 (continue_scope<List[int], List[int], int>) arg ranges: [-∞, +∞] | [0, 0] {0}
+call e188 native list::at: declared {IndexNotFound} effective {IndexNotFound} mayReturnNormally 1
+    instance i9 (wrong_list_after_relation<List[int], List[int]>) arg ranges: [-∞, +∞] | [0, 4611686018427387902]
+call e232 block e193 (sample): declared {IndexNotFound} effective (not reached) mayReturnNormally -
+    instance i0 (<program>) arg ranges: [-∞, +∞] | [-∞, +∞] | [0, 0] {0} | [-∞, +∞] | [1, 1] {1}
+nir <program><generic>: %12 = call 9 %3 %6 %7 %9 %10 @e232
+nir shadow_list<List[int], List[int], int>: %15 = op listget %1 %2 @e25
+nir shadow_index<List[int], int>: %17 = op listget %0 %16 @e57
+nir nested_return<List[int], int, bool>: %18 = op listget %0 %1 @e85
+nir handler_fallthrough<List[int], int>: %3 = op listget %0 %1 @e93
+nir handler_fallthrough<List[int], int>: %7 = op listget %0 %1 @e101
+nir join_leak<List[int], int>: %14 = op listget %0 %1 @e129
+nir shadow_capacity<int>: %16 = op mutarrayget %1 %15 @e149
+nir continue_scope<List[int], List[int], int>: %23 = op listget %0 %2 @e177
+nir wrong_list_after_relation<List[int], List[int]>: %12 = op listget %0 %11 @e188

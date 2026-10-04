@@ -1,0 +1,21 @@
+# SOUNDNESS (P0): the completion proof's call-specific walk reports a
+# callee's result Range from its fall-through value only; a `return`
+# value is dropped. idx(k) may return 5, but the walk of get's body sees
+# only the trailing 0 and proves list::at(xs, idx(k)) in range, so the
+# program compiles with no handler and no errors clause -- then raises an
+# undeclared IndexNotFound at run time (the default argv has one element,
+# so k = 1). An exact argument (get(1)) is re-walked call-specifically and
+# happens to be rejected; a value the proof cannot refine is not.
+fn idx(k):
+    if k > 0:
+        return 5
+    0
+
+fn get(k):
+    xs = [10, 20]
+    list::at(xs, idx(k))
+
+args = argv():
+    on InvalidArgumentEncoding:
+        []
+get(list::length(args))

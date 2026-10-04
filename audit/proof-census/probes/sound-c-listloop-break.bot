@@ -1,0 +1,13 @@
+# SOUNDNESS (P0): the completion proof walks a loop over a small literal
+# List once per element (EvalListloop) and stops at the first element whose
+# body cannot complete normally, declaring the whole loop `never` -- but a
+# body that ends in `break` or `continue` also "cannot complete normally"
+# while the loop itself then does. Everything after the loop is treated as
+# dead and never checked: the list::at below compiles with no handler and
+# no errors clause, then raises an undeclared IndexNotFound at run time.
+loop x in [1, 2]:
+    if x > 1:
+        break
+    x
+
+list::at([1], 5)

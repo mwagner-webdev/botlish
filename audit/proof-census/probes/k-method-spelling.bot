@@ -1,0 +1,34 @@
+# Method spelling vs qualified free spelling: the proof and the NIR should
+# be identical after normalization (METHOD-SUGAR.md: a namespaced function
+# becomes visible for method syntax by binding it).
+length = list::length
+at = list::at
+get = list::get
+
+fn free(xs):
+    loop i from 0 to list::length(xs):
+        list::at(xs, i)
+
+fn method(xs):
+    loop i from 0 to xs.length():
+        xs.at(i)
+
+fn free_get(xs):
+    loop i from 0 to list::length(xs):
+        list::get(xs, i, 0)
+
+fn method_get(xs):
+    loop i from 0 to xs.length():
+        xs.get(i, 0)
+
+fn free_guard(xs, i):
+    if i < 0 or i >= list::length(xs):
+        return 0
+    list::at(xs, i)
+
+fn method_guard(xs, i):
+    if i < 0 or i >= xs.length():
+        return 0
+    xs.at(i)
+
+[free([1, 2]), method([1, 2]), free_get([1, 2]), method_get([1, 2]), free_guard([1, 2], 1), method_guard([1, 2], 1)]

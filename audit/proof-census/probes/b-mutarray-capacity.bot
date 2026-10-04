@@ -1,0 +1,14 @@
+# Journey B: MutableArray capacity. Reads and writes in a counted loop to
+# mutable_array::capacity(a), and to the allocation's own size n.
+fn fill(n):
+    a = mutable_array::allocate(n)
+    loop i from 0 to mutable_array::capacity(a):
+        mutable_array::set(a, i, i * 3)
+    loop i from 0 to n:
+        mutable_array::at(a, i)
+
+fn read_param(a):
+    loop i from 0 to mutable_array::capacity(a):
+        mutable_array::at(a, i)
+
+[fill(4), read_param(mutable_array::create(3, 7))]

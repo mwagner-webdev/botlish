@@ -1,0 +1,51 @@
+# Soundness probes: parent commit 66b52cd (before the fixes)
+=== sound-a-open-induction-specialized.bot
+  strict 1: interp: [10, 999]
+  strict 1: compile: [10, 999]
+  strict 1: cranelift: [10, 0]
+  strict 1: cranelift-generic: [10, 0]
+  strict 0: interp: [10, 999]
+  strict 0: compile: [10, 999]
+  strict 0: cranelift: [10, 0]
+  strict 0: cranelift-generic: [10, 0]
+=== sound-a-open-induction.bot
+  strict 1: interp: [5, 999]
+  strict 1: compile: [5, 999]
+  strict 1: cranelift: [5, 999]
+  strict 1: cranelift-generic: [5, 20]
+  strict 0: interp: [5, 999]
+  strict 0: compile: [5, 999]
+  strict 0: cranelift: [5, 999]
+  strict 0: cranelift-generic: [5, 20]
+=== sound-b-control.bot
+  strict 1: rejected UNHANDLED-ERROR
+  strict 0: all backends: error UNCAUGHT-ERROR: uncaught propagated error: <error IndexNotFound>
+=== sound-b-return-range.bot
+  strict 1: all backends: error UNCAUGHT-ERROR: uncaught propagated error: <error IndexNotFound>
+  strict 0: all backends: error UNCAUGHT-ERROR: uncaught propagated error: <error IndexNotFound>
+=== sound-c-listloop-break.bot
+  strict 1: all backends: error UNCAUGHT-ERROR: uncaught propagated error: <error IndexNotFound>
+  strict 0: all backends: error UNCAUGHT-ERROR: uncaught propagated error: <error IndexNotFound>
+=== sound-c-listloop-continue.bot
+  strict 1: rejected KNOWN-ERROR
+  strict 0: all backends: 7
+
+# Soundness probes: with the fixes (6c19c6c)
+=== sound-a-open-induction-specialized.bot
+  strict 1: all backends: [10, 999]
+  strict 0: all backends: [10, 999]
+=== sound-a-open-induction.bot
+  strict 1: all backends: [5, 999]
+  strict 0: all backends: [5, 999]
+=== sound-b-control.bot
+  strict 1: rejected UNHANDLED-ERROR
+  strict 0: all backends: error UNCAUGHT-ERROR: uncaught propagated error: <error IndexNotFound>
+=== sound-b-return-range.bot
+  strict 1: rejected UNHANDLED-ERROR
+  strict 0: all backends: error UNCAUGHT-ERROR: uncaught propagated error: <error IndexNotFound>
+=== sound-c-listloop-break.bot
+  strict 1: rejected KNOWN-ERROR
+  strict 0: all backends: error UNCAUGHT-ERROR: uncaught propagated error: <error IndexNotFound>
+=== sound-c-listloop-continue.bot
+  strict 1: all backends: 7
+  strict 0: all backends: 7

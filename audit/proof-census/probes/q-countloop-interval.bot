@@ -1,0 +1,19 @@
+# Counted-loop induction INTERVAL (not relation): range seeds the loop
+# variable with [start, end - 1]; does the completion proof?
+fn bytes():
+    loop i from 0 to 256:
+        byte::from_int(i)
+
+fn small_index():
+    loop i from 0 to 3:
+        list::at([10, 20, 30], i)
+
+fn shifted_index():
+    loop i from 1 to 4:
+        list::at([10, 20, 30], i - 1)
+
+fn abi_values():
+    loop i from 0 to 256:
+        abi::u8(i)
+
+[bytes(), small_index(), shifted_index(), abi_values()]

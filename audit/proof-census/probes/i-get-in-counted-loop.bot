@@ -1,0 +1,8 @@
+# Journey I: list::get in a counted loop. The caller's loop proves the
+# index in range; get is ordinary Botlish (list::at plus an IndexNotFound
+# handler) called as an ordinary function.
+fn doubled(xs):
+    loop i from 0 to list::length(xs):
+        list::get(xs, i, 0) * 2
+
+doubled([1, 2, 3])

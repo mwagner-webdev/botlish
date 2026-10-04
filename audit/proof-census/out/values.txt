@@ -1,0 +1,72 @@
+=== a-counted-loop-at.bot
+  strict 1: all backends: [2, 4, 6]
+  strict 0: all backends: [2, 4, 6]
+=== b-mutarray-capacity.bot
+  strict 1: all backends: [[0, 3, 6, 9], [7, 7, 7]]
+  strict 0: all backends: [[0, 3, 6, 9], [7, 7, 7]]
+=== c-slice.bot
+  strict 1: all backends: ["el", "", "he"]
+  strict 0: all backends: ["el", "", "he"]
+=== d-early-return.bot
+  strict 1: all backends: [20, 0, 0]
+  strict 0: all backends: [20, 0, 0]
+=== e-struct-domain-projection.bot
+  strict 1: all backends: [7, 9, 256, 200]
+  strict 0: all backends: [7, 9, 256, 200]
+=== f-closed-abi-u64.bot
+  strict 1: all backends: [-1, -1]
+  strict 0: all backends: [-1, -1]
+=== f2-closed-int-vs-struct.bot
+  strict 1: all backends: [7, 7]
+  strict 0: all backends: [7, 7]
+=== g-induction-declared-param.bot
+  strict 1: rejected TYPE
+  strict 0: all backends: [10, 10]
+=== h-recursive-slice.bot
+  strict 1: all backends: ["cba", "cba", "cba"]
+  strict 0: all backends: ["cba", "cba", "cba"]
+=== i-get-in-counted-loop.bot
+  strict 1: all backends: [2, 4, 6]
+  strict 0: all backends: [2, 4, 6]
+=== k-method-spelling.bot
+  strict 1: all backends: [[1, 2], [1, 2], [1, 2], [1, 2], 2, 2]
+  strict 0: all backends: [[1, 2], [1, 2], [1, 2], [1, 2], 2, 2]
+=== k2-bound-name-spelling.bot
+  strict 1: all backends: [[1, 2], [1, 2], [1, 2], [1, 2]]
+  strict 0: all backends: [[1, 2], [1, 2], [1, 2], [1, 2]]
+=== l-loop-forms.bot
+  strict 1: rejected LOCKSTEP-UNPROVEN
+  strict 0: all backends: error LOCKSTEP-UNPROVEN: lockstep loop requires equal iteration counts; could not prove length(xs) == leng
+=== m-listloop-checked.bot
+  strict 1: all backends: [[2, 3, 4], [2, 3, 4]]
+  strict 0: all backends: [[2, 3, 4], [2, 3, 4]]
+=== n-call-specific-transport.bot
+  strict 1: rejected UNHANDLED-ERROR
+  strict 0: all backends: [3, 3, "abc", "abc", unit, 1]
+=== o-lowercase-length.bot
+  strict 1: all backends: [1, "i", 1, "ß"]
+  strict 0: all backends: [1, "i", 1, "ß"]
+=== p-param-inference-narrowing.bot
+  strict 1: rejected TYPE
+  strict 0: all backends: [2, 2]
+=== q-countloop-interval.bot
+  strict 1: rejected UNHANDLED-ERROR
+  strict 0: all backends: [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, ... (6724 chars)
+=== r-return-facts.bot
+  strict 1: rejected TYPE
+  strict 0: all backends: [30, 10, 30, 20, 3, "abc"]
+=== s-struct-facts.bot
+  strict 1: rejected UNHANDLED-ERROR
+  strict 0: all backends: [20, 30, 10, 20, 20]
+=== t-relational-prover-pairs.bot
+  strict 1: rejected UNHANDLED-ERROR
+  strict 0: all backends: [["a", "b", ""], [1, 2, 0], 1, 1]
+=== u-handler-exit.bot
+  strict 1: rejected UNHANDLED-ERROR
+  strict 0: all backends: [20, 10, 20]
+=== v-allocate-size.bot
+  strict 1: all backends: [unit, unit]
+  strict 0: all backends: [unit, unit]
+=== z-soundness-neighbours.bot
+  strict 1: rejected UNHANDLED-ERROR
+  strict 0: all backends: []

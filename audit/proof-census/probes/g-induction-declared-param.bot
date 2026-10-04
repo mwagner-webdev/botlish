@@ -1,0 +1,16 @@
+# Journey G: does the equality-termination induction proof make a program
+# legal? A declared domain on a self-tail-recursive parameter whose only
+# guard is ==.
+type Small = Int in 0..1000
+
+fn count_eq(i: Small, n: Small) -> int:
+    if i == n:
+        return 0
+    1 + count_eq(i + 1, n)
+
+fn count_ge(i: Small, n: Small) -> int:
+    if i >= n:
+        return 0
+    1 + count_ge(i + 1, n)
+
+[count_eq(0, 10), count_ge(0, 10)]

@@ -1,0 +1,7 @@
+# Soundness check of a cardinality transfer: hir/cardinality.tcl treats
+# str::lowercase as length-preserving (a simple, one-to-one case mapping).
+# U+0130 (LATIN CAPITAL LETTER I WITH DOT ABOVE) lowercases to two scalars
+# under the FULL mapping (i + U+0307) but to one under the simple mapping.
+s = str::lowercase("İ")
+t = str::lowercase("ẞ")
+[str::length(s), str::substring(s, 0, 1), str::length(t), str::substring(t, 0, 1)]

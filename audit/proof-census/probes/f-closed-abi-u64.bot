@@ -1,0 +1,11 @@
+# Journey F: closed call with a struct whose field is an exact constant.
+fn probe() -> int:
+    abi::x86_64::to_int(abi::x86_64::from_u64(abi::u64(18446744073709551615)))
+
+# Same encoder over a plain Int constant passed through a local struct
+# construction instead of the checked creator.
+fn probe_direct() -> int:
+    u = abi::U64 {value: 18446744073709551615}
+    abi::x86_64::to_int(abi::x86_64::from_u64(u))
+
+[probe(), probe_direct()]

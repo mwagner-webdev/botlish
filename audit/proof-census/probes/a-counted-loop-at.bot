@@ -1,0 +1,7 @@
+# Journey A: counted-loop indexed read. The completion proof removes the
+# IndexNotFound obligation (no handler, no errors clause); what reaches NIR?
+fn doubled(xs):
+    loop i from 0 to list::length(xs):
+        list::at(xs, i) * 2
+
+doubled([1, 2, 3])

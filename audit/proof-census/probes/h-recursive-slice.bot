@@ -1,0 +1,37 @@
+# Journey G/H: string_reverse's recursion. hir/induction.tcl proves
+# index in [0, smallMax] for the codegen-facing range fixpoint; the
+# completion proof checks reverse_from's body open-world (index
+# unconstrained), so both slice errors stay effective in the body.
+fn reverse_from(text, index, reversed) errors LowerUnderrun, UpperOverrun:
+    if index == str::length(text):
+        return reversed
+    character = str::substring(text, index, index + 1)
+    reverse_from(text, index + 1, str::concat(character, reversed))
+
+# Same recursion with >= termination (the guard now covers every index
+# past the end) -- still open-world: index may be negative.
+fn reverse_ge(text, index, reversed) errors LowerUnderrun:
+    if index >= str::length(text):
+        return reversed
+    character = str::substring(text, index, index + 1)
+    reverse_ge(text, index + 1, str::concat(character, reversed))
+
+# The source-level contract: a non-negative domain on the parameter. The
+# recursive call must prove index + 1 in the domain (verifyDeclaredParams).
+type Nat = Int in 0..4611686018427387903
+
+fn reverse_nat(text, index: Nat, reversed):
+    if index >= str::length(text):
+        return reversed
+    character = str::substring(text, index, index + 1)
+    reverse_nat(text, index + 1, str::concat(character, reversed))
+
+fn sample() errors LowerUnderrun, UpperOverrun:
+    [reverse_from("abc", 0, ""), reverse_ge("abc", 0, ""), reverse_nat("abc", 0, "")]
+
+r = sample():
+    on LowerUnderrun:
+        []
+    on UpperOverrun:
+        []
+r
