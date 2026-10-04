@@ -19,7 +19,7 @@
 ;   botlish_fn_10 / botlish_entry_10 -> char_at<int>
 ;   botlish_fn_11 / botlish_entry_11 -> local_char?<str>
 ;   botlish_fn_12 / botlish_entry_12 -> local_char?<generic>
-;   botlish_fn_13 / botlish_entry_13 -> scan_while<int, block(e250)>
+;   botlish_fn_13 / botlish_entry_13 -> scan_while<int, block(e307)>
 ;   botlish_fn_14 / botlish_entry_14 -> scan_while<int, native(str::is_tcl_alpha)>
 ;   botlish_fn_15 / botlish_entry_15 -> tld?<int>
 ;   botlish_fn_16 / botlish_entry_16 -> domain?<int>
@@ -706,7 +706,7 @@ Disassembly of section .text:
      aa6:	mov    rcx,r14
      aa9:	mov    r8,r12
      aac:	call   ab1 <botlish_fn_8+0x5a>
-			aad: R_X86_64_PLT32	botlish_fn_13-0x4 ; scan_while<int, block(e250)>
+			aad: R_X86_64_PLT32	botlish_fn_13-0x4 ; scan_while<int, block(e307)>
      ab1:	test   rax,rax
      ab4:	je     b3d <botlish_fn_8+0xe6>
      aba:	mov    rbx,rax
@@ -978,7 +978,7 @@ Disassembly of section .text:
      e1e:	pop    rbp
      e1f:	ret
 
-0000000000000e20 <botlish_fn_13: scan_while<int, block(e250)>>:
+0000000000000e20 <botlish_fn_13: scan_while<int, block(e307)>>:
      e20:	push   rbp
      e21:	mov    rbp,rsp
      e24:	sub    rsp,0x50
@@ -1048,7 +1048,7 @@ Disassembly of section .text:
      f18:	add    rbx,0x1
      f1f:	jmp    e5e <botlish_fn_13+0x3e>
 
-0000000000000f24 <botlish_entry_13: scan_while<int, block(e250)>>:
+0000000000000f24 <botlish_entry_13: scan_while<int, block(e307)>>:
      f24:	push   rbp
      f25:	mov    rbp,rsp
      f28:	mov    rsi,QWORD PTR [rdx]
@@ -1058,7 +1058,7 @@ Disassembly of section .text:
      f37:	sar    rsi,1
      f3a:	mov    rdx,r9
      f3d:	call   f42 <botlish_entry_13+0x1e>
-			f3e: R_X86_64_PLT32	botlish_fn_13-0x4 ; scan_while<int, block(e250)>
+			f3e: R_X86_64_PLT32	botlish_fn_13-0x4 ; scan_while<int, block(e307)>
      f42:	mov    rsp,rbp
      f45:	pop    rbp
      f46:	ret

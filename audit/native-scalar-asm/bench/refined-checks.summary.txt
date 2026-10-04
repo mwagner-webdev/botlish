@@ -18,7 +18,7 @@ functions:
   10 char_at<int>: nir-regs=18
   11 local_char?<str>: nir-regs=9
   12 local_char?<generic>: nir-regs=9
-  13 scan_while<int, block(e250)>: nir-regs=16
+  13 scan_while<int, block(e307)>: nir-regs=16
   14 scan_while<int, native(str::is_tcl_alpha)>: nir-regs=18
   15 tld?<int>: nir-regs=14
   16 domain?<int>: nir-regs=58
