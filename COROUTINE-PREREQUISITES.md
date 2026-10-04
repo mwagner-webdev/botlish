@@ -96,8 +96,13 @@ violation today.
 1. Multi-stack root discovery and per-stack overflow detection on native.
 2. Per-coroutine stack memory. Stacks have a fixed size and cannot be copied,
    so creating one costs a mapping.
-3. Fallback hosts, Windows and wasm. These have no frame walk, or no stack
-   switching at all.
+3. Hosts other than Linux x86-64, for different reasons.
+   * Windows can switch stacks natively (Fibers, or the same short `asm`
+     switch adapted to the Win64 ABI). Its gap is this repository's GC frame
+     walk and overflow handling, which are not reliable there even without
+     coroutines.
+   * Wasm hides its call stack from the program. It can neither walk frames
+     nor switch stacks without engine support.
 4. The typing of values that cross yield and resume.
 5. Global per-thread runtime state that actors will not tolerate.
 6. *Future* transfer of a suspended coroutine between actors. Suspended native
@@ -676,7 +681,7 @@ handles and MutableArrays are never sendable.
 |---|---|---|---|---|
 | R1 | Root discovery over many stacks | high | `framewalk::walk` starts only at the current `rbp`, is bounded by one `NativeStack`, and relies on monotonic ascent (`framewalk.rs:126-157`). `Vm.native_stack` is a single `Option` (`vm.rs:177`) | §4.3 items 4-5. The per-frame model is already correct; only the enumeration of stacks is new |
 | R2 | Stack memory per coroutine | high | Stacks cannot be copied or segmented (interior callee-to-caller pointers; opaque Rust frames). A fixed reservation trades recursion depth against address space and RSS. Today's 1 GiB worker (`main.rs:68-72`, `runtime/aot.rs:26-31`) is the program's whole recursion budget. Rust helpers also recurse proportionally to value nesting (`equal` `ops.rs:376+`, `hash_mix` `:506`, `show`) | a stack pool; `madvise(MADV_DONTNEED)` on return to the pool; a configurable default size in the style of `BOTLISH_NATIVE_STACK_BYTES`; the actor's root coroutine keeps the large reservation. Depth limits are resource limits, not semantics (README §20), so `interp`, `compile` and native may differ |
-| R3 | Hosts without a frame walk or stack switching | high (portability) | Windows: frame pointers are not forced (`.cargo/config.toml:42-46`) and GC-stress crashes are recorded (CLOSED-CALL-EFFECTS.md:81). Wasm: no stack walk at all (CRANELIFT-WASM.md:257), no stack switching in Wasm 3.0, and JSPI only suspends to JS | per-coroutine shadow segments plus a per-coroutine Rust `__stack_pointer` on wasm; then the wasm stack-switching proposal, or an Asyncify-like transform of exactly the `may_suspend` functions (§4.4). The bytecode interpreter (§7) is the portable engine that needs neither |
+| R3 | Hosts other than Linux x86-64 | high (portability) | **Windows can switch stacks** (Fibers: `CreateFiberEx`/`SwitchToFiber`, which also maintain the TIB stack bounds and per-fiber guard page; or a hand-written switch saving the larger Win64 callee-saved set, `rdi`/`rsi` and `xmm6`-`xmm15` included). Its gap is the existing frame walk: Windows x64 takes the stack-map path (`clif.rs:527` tests only the ISA), but frame pointers are forced only for the Linux and macOS targets (`.cargo/config.toml:42-46`), so the rbp walk through Rust helper frames is unreliable. GC-stress crashes on Windows are recorded (CLOSED-CALL-EFFECTS.md:81). Overflow uses the in-band shadow-stack depth token, because the guard handler is Linux-only (`native_stack.rs:31-33`, `roots.rs:722`). **Wasm** exposes no stack to the program: no frame walk (CRANELIFT-WASM.md:257), and no stack switching in Wasm 3.0 (JSPI only suspends to JavaScript) | Windows: force frame pointers for the MSVC target too, which the walker needs without coroutines as well; then Fibers or an `asm` switch, and an overflow guard per fiber (a vectored exception handler in place of SIGSEGV). Wasm: per-coroutine shadow segments plus a per-coroutine Rust `__stack_pointer`; then the wasm stack-switching proposal, or an Asyncify-like transform of exactly the `may_suspend` functions (§4.4). The bytecode interpreter (§7) is the portable engine that needs neither |
 | R4 | Typing of transported values | medium | `any` at yield and resume sites makes code guarded (AOT-unready until refined); the erasure rules reject typed callables and `MutableArray[T]` as transport values | untyped transport first (§4.1 item 2), then typed protocol fields on the handle type |
 | R5 | Global per-thread runtime state | medium (blocks actors, not coroutines) | `thread_local PROGRAM`, process-global guard atomics, `Rc`; in Tcl, `ModuleBase`, argv, frame/mutarray stores per interp, and non-re-entrant compile state (`hir/sourcetypes.tcl:24-66`) | §4.2 item 5; §4.3 item 10 |
 | R6 | Frame-store lifetime in the Tcl backends | medium (correctness bug once interleaving exists) | the watermark `releaseSince` (A.2b); `containsBlock` blind to handles; abandonment skips `finally` (A.3) | §4.2 items 3-4 |
