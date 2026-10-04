@@ -5,14 +5,15 @@
 # Recursive descent over the tokens of lexer.tcl. The grammar, with layout
 # already turned into NEWLINE / INDENT / DEDENT tokens:
 #
-#   program      = [ namespaceDecl ] { importDecl } { NEWLINE | topStatement } EOF
-#   namespaceDecl = "namespace" path NEWLINE
+#   program      = { importDecl } { NEWLINE | topStatement } EOF
+#                  -- a file declares no namespace: its namespace is its path
+#                     (lib/abi/x86_64.bot is `abi::x86_64`, surface/modules.tcl)
 #   path         = IDENT { "::" IDENT }  -- a namespace: one or more segments
 #   importDecl   = "import" path NEWLINE            -- a namespace import
 #                | "import" "type" path NEWLINE     -- a type import: the path's
 #                                                      last segment is a type name,
 #                                                      so it has at least two
-#                  -- the file header: after the namespace declaration, before
+#                  -- the file header: at the top of the file, before
 #                     anything else (IMPORTS.md). "import" is contextual, not a
 #                     keyword: it starts an import only when immediately
 #                     followed by a name or by "type", which no other
@@ -270,19 +271,13 @@ proc surface::parser::SpanFrom {pVar start} {
 proc surface::parser::Program {pVar} {
     upvar 1 $pVar p
     set start [dict get [Peek p] span]
-    set namespaceName ""
-    set namespaceSpan ""
     while {[Kind p] eq "NEWLINE"} {
         Advance p
-    }
-    if {[Kind p] eq "namespace"} {
-        lassign [NamespaceDecl p] namespaceName namespaceSpan
     }
     set imports [Imports p]
     set body [Statements p {EOF}]
     set end [dict get [Peek p] span]
-    return [surface::ast::node program [surface::ast::cover $start $end] body $body \
-        namespace $namespaceName namespaceSpan $namespaceSpan imports $imports]
+    return [surface::ast::node program [surface::ast::cover $start $end] body $body imports $imports]
 }
 
 # 1 if the next tokens start an import declaration: the contextual word
@@ -377,28 +372,14 @@ proc surface::parser::Import {pVar} {
         namespaceSpan [surface::ast::cover [lindex $spans 0] [lindex $spans end]]]
 }
 
-# "namespace" PATH NEWLINE, as the very first statement of a file (a
-# declaration, not an ordinary statement: it introduces no HIR node -- see
-# surface/modules.tcl). PATH is one or more IDENT segments joined by "::"
-# (`namespace abi::x86_64`: a nested namespace, lib/abi/x86_64.bot). Returns
-# {NAME SPAN}, NAME the whole path.
-proc surface::parser::NamespaceDecl {pVar} {
+# 1 if the next tokens are a (removed) namespace declaration: the contextual
+# word "namespace" followed by a name. A file's namespace is its path, never
+# declared (surface/modules.tcl); `namespace` is an ordinary name otherwise.
+proc surface::parser::AtNamespaceDecl {pVar} {
     upvar 1 $pVar p
-    Advance p
-    set first [Expect p IDENT "a namespace name after \"namespace\""]
-    set segments [list [dict get $first value]]
-    set last $first
-    while {[Kind p] eq "::"} {
-        Advance p
-        set last [Expect p IDENT "a namespace name after \"::\""]
-        lappend segments [dict get $last value]
-    }
     set token [Peek p]
-    if {[dict get $token kind] ne "NEWLINE"} {
-        Fail $token "expected end of line, found [Describe $token]"
-    }
-    Advance p
-    return [list [join $segments ::] [surface::ast::cover [dict get $first span] [dict get $last span]]]
+    return [expr {[dict get $token kind] eq "IDENT" && [dict get $token text] eq "namespace"
+        && [Kind p 1] eq "IDENT"}]
 }
 
 # Statements up to a token of a kind in STOP (not consumed).
@@ -502,7 +483,9 @@ proc surface::parser::Statement {pVar} {
         INDENT { Fail $token "unexpected indentation" }
         else   { Fail $token "\"else\" without a matching \"if\"" }
         elif   { Fail $token "\"elif\" without a matching \"if\"" }
-        namespace { Fail $token "a \"namespace\" declaration must be the first statement in the file" }
+    }
+    if {[AtNamespaceDecl p]} {
+        Fail $token "namespace declarations do not exist: a file's namespace is its path (lib/abi/x86_64.bot is abi::x86_64), so the file needs no \"namespace\" line"
     }
     if {[AtImport p]} {
         Fail $token "an import must be in the file header: after the \"namespace\" declaration, before any other declaration or statement, and never inside a function, loop or branch"

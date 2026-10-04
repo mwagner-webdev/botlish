@@ -9,29 +9,29 @@
 #   one source file  =  one module  =  one namespace  =  one compilation/
 #                                                         dependency unit
 #
-# A file that starts with a `namespace NAME` declaration (parser.tcl's
-# NamespaceDecl; surface::ast's `program` node carries it as its own
-# `namespace`/`namespaceSpan` fields, never a body statement) is a module: a
-# namespace containing ordinary function definitions, immutable value
-# bindings, and type declarations (surface/parser.tcl's `typedecl` --
-# hir/sourcetypes.tcl; SOURCE-DEFINED-INTEGER-DOMAINS.md). It has no
-# executable top-level statements or mutable bindings. Every other .bot
-# file (no `namespace`
-# declaration) is an ordinary/entry program, exactly as before this
-# milestone; loading one that makes no qualified reference costs nothing
-# extra.
+# A file's namespace is its path; nothing in the file declares it. A file
+# that is *loaded* (imported, or named by the native module bridge) is a
+# module: a namespace containing ordinary function definitions, immutable
+# value bindings, type, struct and error declarations (surface/parser.tcl's
+# `typedecl` -- hir/sourcetypes.tcl; SOURCE-DEFINED-INTEGER-DOMAINS.md). It
+# has no executable top-level statements or mutable bindings. The file given
+# to compileProgramFile is the entry program, an ordinary program in no
+# namespace: its own definitions are plain names and its types keep their
+# bare names.
 #
 # Namespace <-> file: deterministic and search-free. Namespace NAME maps to
 # exactly one path, $::core::libraryDir/NAME.bot (the same directory as the
-# existing Tcl library convention, lib/NAME.tcl -- see core/core.tcl), and
-# that file must itself declare `namespace NAME`. A nested namespace (NAME
-# of several "::"-separated segments, `abi::x86_64`) maps one directory per
-# leading segment: $::core::libraryDir/abi/x86_64.bot. Nesting is a naming
-# path only: `abi::x86_64` and `abi` are two unrelated modules (neither
-# loads, contains or sees the other implicitly), each its own file. There is no search path,
+# existing Tcl library convention, lib/NAME.tcl -- see core/core.tcl): the
+# file's path *is* its namespace, so there is nothing to disagree with, and
+# there is no `namespace` declaration (the parser rejects one with a
+# message saying so). A nested namespace (NAME of several "::"-separated
+# segments, `abi::x86_64`) maps one directory per leading segment:
+# $::core::libraryDir/abi/x86_64.bot. Nesting is a naming path only:
+# `abi::x86_64` and `abi` are two unrelated modules (neither loads, contains
+# or sees the other implicitly), each its own file. There is no search path,
 # so "two files define namespace NAME" cannot arise: NAME has only ever one
-# candidate file. A mismatched declaration, or a missing file, is a clear
-# diagnostic (Error, below), never silently ignored or guessed at.
+# candidate file. A missing file is a clear diagnostic (Error, below), never
+# silently ignored or guessed at.
 #
 # Reference syntax (needs the file's `import mod`, or `import a::b`): mod::name, or a::b::name for a nested namespace a::b
 # (surface/parser.tcl's qualname primary: every segment but the last is the
@@ -222,7 +222,7 @@ proc surface::modules::ImportHeader {source} {
         # Not a program: nothing to declare (the compile reports the syntax error).
         return ""
     }
-    set own [dict get $ast namespace]
+    set own ""
     set have [lmap import [dict get $ast imports] {
         if {[dict get $import kind] ne "import"} continue
         dict get $import namespace
@@ -402,14 +402,6 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan} {
         Error UNKNOWN-NAMESPACE $usedAtSpan "unknown namespace \"$name\": no such module file $path"
     }
     set ast [ParseModule $path]
-    if {[dict get $ast namespace] ne $name} {
-        if {[dict get $ast namespace] eq ""} {
-            Error NAMESPACE-MISMATCH [dict get $ast span] \
-                "$path must start with \"namespace $name\" to be loaded as namespace \"$name\" (found no namespace declaration)"
-        }
-        Error NAMESPACE-MISMATCH [dict get $ast namespaceSpan] \
-            "$path declares \"namespace [dict get $ast namespace]\", but only namespace \"$name\" can load from this path"
-    }
     foreach statement [dict get $ast body] {
         if {[dict get $statement kind] eq "destructure"} {
             # Not a missing feature of destructuring: a module binding is a
@@ -424,7 +416,7 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan} {
                 "module \"$name\" ($path): only function definitions, immutable bindings, type declarations, struct declarations and error declarations are allowed at module top level, found a \"[dict get $statement kind]\" statement"
         }
     }
-    CheckNativeMembers $ast "module \"$name\" ($path)"
+    CheckNativeMembers $ast $name "module \"$name\" ($path)"
     dict set state stack [concat [dict get $state stack] [list $name]]
     set fileId f[dict get $state nextFile]
     dict set state files $fileId $path
@@ -464,21 +456,19 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan} {
     dict set state stack [lrange [dict get $state stack] 0 end-1]
 }
 
-# Raises DUPLICATE-NATIVE if program AST, which declares `namespace NS`,
-# defines (a function or an immutable binding) a member NS::MEMBER that is a
+# Raises DUPLICATE-NATIVE if the module AST (the file of namespace NAME) defines
+# (a function or an immutable binding) a member NAME::MEMBER that is a
 # compiler/runtime-provided intrinsic: a root native registered under that
 # qualified name (core::native::isQualifiedNative -- list::at, str::concat,
 # mutable_array::set, linux::abi::syscall, ...). Every reference spelled
-# NS::MEMBER denotes the native (surface/lower.tcl), so such a definition
+# NAME::MEMBER denotes the native (surface/lower.tcl), so such a definition
 # could never be named, would silently not replace the intrinsic, and
 # Botlish has no overloading for it to coexist as. The protection is per
-# member, not per namespace: NS's module may define any other member
-# (lib/list.bot's list::get beside the intrinsic list::at).
-# WHO describes the program for the message. Called for every module file
-# (LoadNamespace) and for an entry program that declares a namespace
-# (CheckEntryProgram).
-proc surface::modules::CheckNativeMembers {ast who} {
-    set name [dict get $ast namespace]
+# member, not per namespace: NAME's module may define any other member
+# (lib/list.bot's list::get beside the intrinsic list::at). WHO describes the
+# module for the message. An entry program is no namespace (NAME ""): its
+# definitions are plain names, which can never be spelled with "::".
+proc surface::modules::CheckNativeMembers {ast name who} {
     if {$name eq ""} {
         return
     }
@@ -490,11 +480,6 @@ proc surface::modules::CheckNativeMembers {ast who} {
                 "$who cannot define \"$member\": ${name}::$member is a compiler-provided intrinsic (a root native registered under that qualified name), which every reference of that spelling denotes; it cannot be redefined or overloaded (other members of namespace \"$name\" are unaffected)"
         }
     }
-}
-
-# CheckNativeMembers for an entry (non-module) program AST.
-proc surface::modules::CheckEntryProgram {ast} {
-    CheckNativeMembers $ast "a program declaring \"namespace [dict get $ast namespace]\""
 }
 
 # The intrinsic members of namespace NS: the compiler-provided qualified
@@ -555,7 +540,7 @@ proc surface::modules::RelatedImport {ns imported} {
 #   NOT-A-TYPE           `import type NS::T`: T exists but is not a source type
 #   TYPE-IMPORT-COLLISION  a type import's short name is another type import's
 #                        short name, a type this file declares, or a built-in
-# and CYCLE/NAMESPACE-MISMATCH from loading the imported module.
+# and CYCLE from loading the imported module.
 proc surface::modules::CheckImports {stateVar ast own} {
     upvar 1 $stateVar state
     set namespaces {}
@@ -652,7 +637,7 @@ proc surface::modules::CheckImports {stateVar ast own} {
 # under KEY, for hir::buildSyntax's -imports and the module's own section.
 proc surface::modules::CollectAndLoad {stateVar ast {key ""}} {
     upvar 1 $stateVar state
-    set own [dict get $ast namespace]
+    set own $key
     set env [CheckImports state $ast $own]
     dict set state imports $key $env
     set imported [dict get $env namespaces]
@@ -768,7 +753,6 @@ proc surface::modules::LoadNamespaces {namespaces args} {
 # corpus.tcl). Returns HIR before the frontend's finishing steps
 # (surface::lower::Finish).
 proc surface::modules::BuildProgram {ast strict} {
-    CheckEntryProgram $ast
     set state [NewState [dict create f1 [dict get $ast span file]] 2]
     CollectAndLoad state $ast ""
     lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable ownDecls ownErrorDecls ownStructDecls

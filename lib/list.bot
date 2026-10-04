@@ -71,8 +71,6 @@
 # does not add finite callable-target provenance, devirtualization, or any
 # other optimization of that call -- see the report's higher-order
 # callvalue census, and RETURNING-ITERABLE-LOOPS.md items 47/81.
-namespace list
-
 error NotFound
 
 fn get(xs, index, default):

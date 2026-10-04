@@ -19,7 +19,7 @@
 #             scalar's canonical decimal codepoint (like an INT token's
 #             digits) -- see UNICODE-CHAR-LITERALS.md
 #   keywords  fn if elif else loop return break continue true false unit and or not
-#             namespace type struct error errors fail on (kind is the word
+#             type struct error errors fail on (kind is the word
 #             itself)
 #   operators ( ) [ ] { } , : :: = == != < <= > >= + - * -> .. .
 #             (kind is the text itself; "." is field projection, STRUCTS.md,
@@ -63,7 +63,7 @@
 #                              statement (see UnclosedBefore)
 
 namespace eval surface::lexer {
-    variable keywords {fn if elif else loop return break continue true false unit and or not namespace type \
+    variable keywords {fn if elif else loop return break continue true false unit and or not type \
         struct error errors fail on}
     # Longest operators first ("::" before ":", so a module-qualified name
     # like web::uri_escape does not lex as ":" ":"). "{" and "}" are not

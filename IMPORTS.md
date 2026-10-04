@@ -9,8 +9,13 @@ import abi::x86_64             # ... on the nested namespace `abi::x86_64`
 import type abi::U8Value       # ... and binds one short type name
 ```
 
+A file's namespace is its path: `lib/abi/x86_64.bot` is `abi::x86_64`, and
+nothing inside the file states it (there is no `namespace` declaration; the
+word is an ordinary name and a `namespace NAME` line is a syntax error). The
+entry program is in no namespace.
+
 ```
-namespace foo                  # a module declares its namespace first
+# lib/foo.bot: namespace foo, by its path
 
 import abi
 import list
@@ -47,7 +52,7 @@ imports C, A still writes `import C` to use `C::...`, a method candidate of
 ## Grammar
 
 ```
-program       = [ namespaceDecl ] { importDecl } { statement-or-declaration }
+program       = { importDecl } { statement-or-declaration }
 importDecl    = "import" path NEWLINE
               | "import" "type" path NEWLINE
 path          = IDENT { "::" IDENT }
@@ -57,7 +62,7 @@ path          = IDENT { "::" IDENT }
   `linux::abi`, a depth-three path would parse the same way): the grammar
   names an arbitrary *existing* namespace. This milestone adds no way to
   *create* nested namespaces; it only imports what exists
-  (`namespace abi::x86_64` and `lib/abi/x86_64.bot` are as they were).
+  (`lib/abi/x86_64.bot` is `abi::x86_64` by its path, as it was).
 * A type import's path ends in the type's name and has at least two
   components: `import type foo::bar::Baz` is type `Baz` of namespace
   `foo::bar`.
@@ -72,7 +77,6 @@ path          = IDENT { "::" IDENT }
 ### Canonical header order
 
 ```
-namespace declaration, if any
 imports (namespace imports and type imports, any order among themselves)
 everything else
 ```
@@ -146,8 +150,8 @@ A qualified reference `ns::member` (an expression, a struct construction
 `ns::Name { ... }`, a type annotation `x: ns::Type`) is checked in this
 order:
 
-1. Is `ns` the file's own namespace, or imported **exactly**? A module is
-   inside its namespace and needs no import to name its own members. Anything
+1. Is `ns` the file's own namespace (its path), or imported **exactly**? A
+   module is inside its namespace and needs no import to name its own members. Anything
    else (parent, child, transitive) is not authorized:
    `MISSING-IMPORT: namespace "abi::x86_64" is not imported; add `import
    abi::x86_64` to use `abi::x86_64::register64` (imports are exact: `import
@@ -228,7 +232,7 @@ exact names; imports authorize them, they do not merge them.
 A source-declared `type` is a member of its namespace:
 
 ```
-namespace abi
+# lib/abi.bot
 type U8Value = Int in 0..255       # declares abi::U8Value
 struct U8:
     value: U8Value                 # the defining module names it bare
@@ -252,7 +256,7 @@ fn a(x: abi::U8Value): ...           # qualified: needs `import abi`
 import type abi::U8Value
 fn b(x: U8Value): ...                # short: needs `import type`, nothing else
 
-namespace abi
+# inside lib/abi.bot
 fn c(x: U8Value): ...                # the defining namespace
 ```
 

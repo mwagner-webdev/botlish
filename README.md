@@ -383,8 +383,8 @@ the rule):
   defines them, no local binding can spell `::` (so they cannot be
   shadowed), and a module of the same namespace may define any *other*
   member (`lib/list.bot`'s `list::get`) but never one of the intrinsic's own
-  name (`SURFACE MODULE DUPLICATE-NATIVE`; an entry program that declares
-  `namespace list` is held to the same rule). Botlish has no overloading,
+  name (`SURFACE MODULE DUPLICATE-NATIVE`; the entry program is in no
+  namespace, so it is not held to this rule). Botlish has no overloading,
   so there is nothing for such a definition to coexist as. A source file
   names them only after `import list` (IMPORTS.md), and the import also makes
   the intrinsic a method candidate: `xs.at(1)` is `list::at(xs, 1)`
@@ -682,7 +682,7 @@ inheritance), assignment, mutable
 variables, exceptions, `?` propagation, pattern matching, a type checker
 beyond refinement tracking (struct destructuring, STRUCT-DESTRUCTURING.md, is
 irrefutable named projection, not pattern matching), async, coroutines, threads, or FFI. A small
-one-file/one-namespace module system *is* implemented (§17's `namespace`/
+one-file/one-namespace module system *is* implemented (§17's
 `mod::name` syntax, `surface/modules.tcl`, NATIVE-MODULES.md, and
 MODULE-BINDINGS.md), and a source file's cross-namespace dependencies are
 declared by exact `import`s (IMPORTS.md). Modules may retain ordinary
@@ -1541,8 +1541,9 @@ The full grammar is at the top of `surface/parser.tcl`.
 ### Modules
 
 One source file is one namespace is one compilation/dependency unit. A
-file that starts with `namespace NAME` (its only legal position) is a
-*module*: a namespace of ordinary function definitions and immutable value
+file loaded through `import NAME` is a *module*; its namespace is its
+path (there is no `namespace` declaration, and the entry program is in no
+namespace): a namespace of ordinary function definitions and immutable value
 bindings. A value initializer executes once before the entry program, after
 its dependency modules and after earlier values in the same source file. It
 must be context-free and must retain a transitively immutable result; there
@@ -1550,7 +1551,7 @@ are no mutable module bindings or top-level expression statements. `NAME`
 maps to exactly one file, `lib/NAME.bot` (`core::libraryDir`, the same
 directory as the existing `lib/NAME.tcl` native-library convention) -- no
 search path, so there is never more than one candidate file for a name. A
-nested namespace `a::b` (`namespace a::b`, used as `a::b::symbol`) is the file
+nested namespace `a::b` (used as `a::b::symbol`) is the file
 `lib/a/b.bot`, one directory per leading segment; `a` and `a::b` are unrelated
 modules (LINUX-X86-64-SYSCALL.md). A root native may itself carry a qualified
 name (`linux::abi::syscall`): it is spelled like a module definition but

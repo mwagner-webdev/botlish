@@ -64,9 +64,7 @@ set ::savedLibraryDir $::core::libraryDir
 set ::core::libraryDir $::bridgeLibrary
 set channel [open [file join $::bridgeLibrary bridgefix.bot] w]
 fconfigure $channel -encoding utf-8
-puts -nonewline $channel {namespace bridgefix
-
-import immutable_set
+puts -nonewline $channel {import immutable_set
 import list
 import str
 

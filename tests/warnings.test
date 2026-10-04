@@ -927,9 +927,7 @@ test warn-module-location {a warning in a module function located inside a loop 
     set ::core::libraryDir $dir
     try {
         set channel [open [file join $dir wmod.bot] w]
-        puts -nonewline $channel {namespace wmod
-
-fn scan(n):
+        puts -nonewline $channel {fn scan(n):
     loop i from 0 to n:
         if i == 3:
             return false
@@ -954,6 +952,6 @@ wmod::scan(10)
         set ::core::libraryDir $saved
         removeDirectory warn-scratch-[pid]
     }
-} -result {{wmod.bot:6:13 wmod.bot:8:13 wmod.bot:9:5}}
+} -result {{wmod.bot:4:13 wmod.bot:6:13 wmod.bot:7:5}}
 
 cleanupTests

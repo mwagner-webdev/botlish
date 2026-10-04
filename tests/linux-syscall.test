@@ -328,7 +328,7 @@ test linux-syscall-cannot-initialize-a-module-binding {a syscall never initializ
         # abi::x86_64's ABI-value encoders use lib/abi.bot's types.
         file copy -force [file join $::projectRoot lib abi.bot] [file join $dir abi.bot]
         set channel [open [file join $dir pidmod.bot] w]
-        puts $channel "namespace pidmod\n\nimport abi::x86_64\nimport linux::abi\npid = abi::x86_64::to_int(linux::abi::syscall({rax: abi::x86_64::register64(39)}))"
+        puts $channel "import abi::x86_64\nimport linux::abi\npid = abi::x86_64::to_int(linux::abi::syscall({rax: abi::x86_64::register64(39)}))"
         close $channel
         set ::core::libraryDir $dir
         list [diagKinds "import pidmod
@@ -345,7 +345,7 @@ test linux-syscall-module-cannot-shadow-the-native {a linux::abi module may not 
     try {
         file mkdir [file join $dir linux]
         set channel [open [file join $dir linux abi.bot] w]
-        puts $channel "namespace linux::abi\nfn helper():\n    1\nfn syscall(x):\n    x"
+        puts $channel "fn helper():\n    1\nfn syscall(x):\n    x"
         close $channel
         set ::core::libraryDir $dir
         catch {syscallHir "import linux::abi

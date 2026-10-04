@@ -57,8 +57,6 @@
 # transition itself, linux::abi::syscall (core/linuxabi.tcl, the native
 # backend's helper in native/src/runtime/syscall.rs), which takes and
 # returns Register64 values and nothing else.
-namespace abi::x86_64
-
 import abi
 
 # The two declared errors of the Int -> Register64 conversion, named after

@@ -1571,7 +1571,7 @@ test destructure-module-top-level-rejected {a module-level destructure is reject
     withScratchLibrary {
         set results {}
         foreach body [list "\{lo, hi: top\} = \{lo: 3, hi: 9, mid: 6\}\n" "t = \{lo: 3, hi: 9, mid: 6\}\nlo = t.lo\ntop = t.hi\n"] {
-            writeModule $dir pair "namespace pair\n$body"
+            writeModule $dir pair "$body"
             set main [writeMain $dir "import pair\npair::lo\n"]
             catch {surface::readProgramFile $main} message options
             lappend results [lrange [dict get $options -errorcode] 0 2]
@@ -1582,7 +1582,7 @@ test destructure-module-top-level-rejected {a module-level destructure is reject
 
 test destructure-module-top-level-message {the module-level rejection names the reason and the way out} -body {
     withScratchLibrary {
-        writeModule $dir pair "namespace pair\n\{lo\} = \{lo: 3\}\n"
+        writeModule $dir pair "\{lo\} = \{lo: 3\}\n"
         set main [writeMain $dir "import pair\npair::lo\n"]
         catch {surface::readProgramFile $main} message
         list [string match "*a struct destructuring is not allowed at module top level*" $message] \
@@ -1592,8 +1592,7 @@ test destructure-module-top-level-message {the module-level rejection names the 
 
 test destructure-module-destructure-in-function {a destructure inside a module's function} -body {
     withScratchLibrary {
-        writeModule $dir geo {namespace geo
-fn area(r):
+        writeModule $dir geo {fn area(r):
     {w, h} = r
     w * h
 }
@@ -1607,8 +1606,7 @@ geo::area({w: 6, h: 7, tag: "x"})
 
 test destructure-module-struct-source {a struct declared in a module is destructurable by its fields} -body {
     withScratchLibrary {
-        writeModule $dir geo {namespace geo
-struct Point:
+        writeModule $dir geo {struct Point:
     x: int
     y: int
 }
@@ -1623,8 +1621,7 @@ struct Point:
 
 test destructure-module-statements-still-restricted {other statements stay forbidden at module top level} -body {
     withScratchLibrary {
-        writeModule $dir bad {namespace bad
-x = 1
+        writeModule $dir bad {x = 1
 if true:
     y = 2
 }

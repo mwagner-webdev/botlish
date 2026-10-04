@@ -99,8 +99,6 @@
 # binds the short name with `import type abi::U8Value`; the two errors
 # stay program-global names, as every `error` declaration is
 # (hir/errordecls.tcl), hence their Abi prefix.
-namespace abi
-
 # The two declared errors of every checked creator: one coherent pair for
 # the whole family rather than twenty type-specific names. The creator a
 # call names already says which domain was meant; the error says which

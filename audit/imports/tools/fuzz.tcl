@@ -88,10 +88,10 @@ proc writeModule {name content} {
     puts -nonewline $channel $content
     close $channel
 }
-writeModule fz_a "namespace fz_a\n\ntype Count = Int in 0..9\n\nfn f(x):\n    x + 1\n"
-writeModule fz_b "namespace fz_b\n\ntype Count = Int in 0..99\n\nfn f(x):\n    x + 100\n"
-writeModule fz_leaf "namespace fz_leaf\n\ntype Wide = Int in 0..999\n\nfn deep(x):\n    x + 7\n"
-writeModule fz_mid "namespace fz_mid\n\nimport fz_leaf\nimport type fz_leaf::Wide\n\nfn via(x: Wide):\n    fz_leaf::deep(x)\n"
+writeModule fz_a "type Count = Int in 0..9\n\nfn f(x):\n    x + 1\n"
+writeModule fz_b "type Count = Int in 0..99\n\nfn f(x):\n    x + 100\n"
+writeModule fz_leaf "type Wide = Int in 0..999\n\nfn deep(x):\n    x + 7\n"
+writeModule fz_mid "import fz_leaf\nimport type fz_leaf::Wide\n\nfn via(x: Wide):\n    fz_leaf::deep(x)\n"
 
 set programDir [file join $scratch programs]
 file mkdir $programDir

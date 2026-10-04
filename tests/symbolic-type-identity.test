@@ -28,7 +28,7 @@ proc withByteDomain {domain script} {
     set dir [tcltest::makeDirectory symbolic-type-lib-[pid]-[incr ::libCounter]]
     file copy -force [file join $::projectRoot lib] [file join $dir lib]
     set channel [open [file join $dir lib byte.bot] w]
-    puts -nonewline $channel "namespace byte\n\ntype Byte = Int in $domain\n"
+    puts -nonewline $channel "type Byte = Int in $domain\n"
     close $channel
     set ::core::libraryDir [file join $dir lib]
     try {

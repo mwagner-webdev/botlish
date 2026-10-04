@@ -141,27 +141,26 @@ proc callNamed {hir name} {
 # Fixtures: two namespaces with an `f`, one with a typed `f`, a leaf and a
 # dependent, and a types module.
 proc writeFixtures {dir} {
-    writeModule $dir alpha "namespace alpha\n\nfn f(x):\n    x + 1\n\nfn only_alpha(x):\n    x + 10\n"
-    writeModule $dir beta "namespace beta\n\nfn f(x):\n    x + 100\n"
-    writeModule $dir talpha "namespace talpha\n\nfn g(x: int):\n    x + 1\n"
-    writeModule $dir tbeta "namespace tbeta\n\nimport str\n\nfn g(x: str):\n    str::concat(x, \"!\")\n"
-    writeModule $dir leafc "namespace leafc\n\nfn deep(x):\n    x + 7\n"
-    writeModule $dir midb "namespace midb\n\nimport leafc\n\nfn via(x):\n    leafc::deep(x)\n"
-    writeModule $dir example_types "namespace example_types\n\ntype Count = Int in 0..100\ntype Index = Int in 0..1000\n"
+    writeModule $dir alpha "fn f(x):\n    x + 1\n\nfn only_alpha(x):\n    x + 10\n"
+    writeModule $dir beta "fn f(x):\n    x + 100\n"
+    writeModule $dir talpha "fn g(x: int):\n    x + 1\n"
+    writeModule $dir tbeta "import str\n\nfn g(x: str):\n    str::concat(x, \"!\")\n"
+    writeModule $dir leafc "fn deep(x):\n    x + 7\n"
+    writeModule $dir midb "import leafc\n\nfn via(x):\n    leafc::deep(x)\n"
+    writeModule $dir example_types "type Count = Int in 0..100\ntype Index = Int in 0..1000\n"
 }
 
 # ---------------------------------------------------------------------------
 # Grammar and AST
 
 test imports-ast-header {the header's imports are program fields, in written order, never body statements} -body {
-    set ast [surface::parse "namespace foo\n\nimport abi\nimport list\nimport type abi::U8Value\nimport abi::x86_64\n\nfn f(x):\n    x\n"]
-    list [dict get $ast namespace] \
-        [lmap i [dict get $ast imports] {
+    set ast [surface::parse "import abi\nimport list\nimport type abi::U8Value\nimport abi::x86_64\n\nfn f(x):\n    x\n"]
+    list [lmap i [dict get $ast imports] {
             if {[dict get $i kind] eq "import"} {list import [dict get $i namespace]} \
             else {list typeimport [dict get $i namespace] [dict get $i name]}
         }] \
         [lmap s [dict get $ast body] {dict get $s kind}]
-} -result {foo {{import abi} {import list} {typeimport abi U8Value} {import abi::x86_64}} function}
+} -result {{{import abi} {import list} {typeimport abi U8Value} {import abi::x86_64}} function}
 
 test imports-ast-printer {the AST printer shows imports first, with ids} -body {
     surface::formatAst [surface::parse "import list\nimport type abi::U8Value\nx = 1\n"] -ids 1
@@ -271,8 +270,8 @@ test imports-import-order-is-irrelevant {import order changes neither meaning no
 
 test imports-self-import {a module needs no import of its own namespace, and may not make one} -body {
     withScratchLibrary {
-        writeModule $dir selfish "namespace selfish\n\nimport selfish\n\nfn f(x):\n    x\n"
-        writeModule $dir selfok "namespace selfok\n\nfn first(x):\n    x + 1\n\nfn second(x):\n    selfok::first(x) + 1\n"
+        writeModule $dir selfish "import selfish\n\nfn f(x):\n    x\n"
+        writeModule $dir selfok "fn first(x):\n    x + 1\n\nfn second(x):\n    selfok::first(x) + 1\n"
         list [rejectionKind "import selfish\n1\n"] [agree "import selfok\nselfok::second(1)\n"]
     }
 } -result {SELF-IMPORT 3}
@@ -283,7 +282,7 @@ test imports-own-intrinsic-needs-no-import {lib/list.bot names its own intrinsic
 
 test imports-own-forward-reference {a module's own qualified reference is still not a forward reference} -body {
     withScratchLibrary {
-        writeModule $dir fwd "namespace fwd\n\nfn first(x):\n    fwd::second(x)\n\nfn second(x):\n    x\n"
+        writeModule $dir fwd "fn first(x):\n    fwd::second(x)\n\nfn second(x):\n    x\n"
         rejectionKind "import fwd\nfwd::first(1)\n"
     }
 } -result UNBOUND
@@ -350,8 +349,8 @@ test imports-non-transitive-methods {C's functions are not method candidates in 
 
 test imports-module-declares-its-own-dependencies {a module's imports are its own: importing it grants its importer nothing} -body {
     withScratchLibrary {
-        writeModule $dir needsleaf "namespace needsleaf\n\nfn f(x):\n    leafc::deep(x)\n"
-        writeModule $dir leafc "namespace leafc\n\nfn deep(x):\n    x + 7\n"
+        writeModule $dir needsleaf "fn f(x):\n    leafc::deep(x)\n"
+        writeModule $dir leafc "fn deep(x):\n    x + 7\n"
         list [rejectionKind "import needsleaf\nneedsleaf::f(1)\n"]
     }
 } -result MISSING-IMPORT
@@ -542,7 +541,7 @@ test imports-type-import-and-namespace-import {the two imports express two capab
 test imports-type-one-identity {the qualified spelling, the imported short spelling and the declaring namespace denote one canonical type} -body {
     withScratchLibrary {
         writeFixtures $dir
-        writeModule $dir user "namespace user\n\nimport type example_types::Count\n\nfn id(x: Count) -> Count:\n    x\n"
+        writeModule $dir user "import type example_types::Count\n\nfn id(x: Count) -> Count:\n    x\n"
         set hir [hirOfSource "import example_types\nimport type example_types::Count\nimport user\nfn a(x: example_types::Count):\n    x\nfn b(x: Count):\n    x\na(5)\nb(6)\nuser::id(7)\n"]
         set types {}
         foreach e [hir::walk $hir] {
@@ -567,7 +566,7 @@ test imports-type-no-value-binding {a type import creates no value or function b
 test imports-type-predicate {a module type's membership predicate is its member: qualified outside, bare inside (the Tcl backends: native code has no type-test predicates of named types)} -body {
     withScratchLibrary {
         writeFixtures $dir
-        writeModule $dir inside "namespace inside\n\ntype Small = Int in 0..9\n\nfn small?(x):\n    Small?(x)\n"
+        writeModule $dir inside "type Small = Int in 0..9\n\nfn small?(x):\n    Small?(x)\n"
         set results {}
         foreach source {
             "import example_types\nexample_types::Count?(5) and not example_types::Count?(500)\n"
@@ -582,15 +581,15 @@ test imports-type-predicate {a module type's membership predicate is its member:
 
 test imports-type-own-names-in-own-namespace {a module's types stay usable by short name inside it, with no import} -body {
     withScratchLibrary {
-        writeModule $dir own "namespace own\n\ntype Small = Int in 0..9\n\nstruct Box:\n    value: Small\n\nfn make(v: Small) -> Box:\n    Box {value: v}\n"
+        writeModule $dir own "type Small = Int in 0..9\n\nstruct Box:\n    value: Small\n\nfn make(v: Small) -> Box:\n    Box {value: v}\n"
         agree "import own\nown::make(4).value\n"
     }
 } -result 4
 
 test imports-type-global-collision-gone {two modules declare the same short type name, and the entry program a third} -body {
     withScratchLibrary {
-        writeModule $dir ma "namespace ma\n\ntype T = Int in 0..9\n\nfn mk(v: T) -> T:\n    v\n"
-        writeModule $dir mb "namespace mb\n\ntype T = Int in 0..99\n\nfn mk(v: T) -> T:\n    v\n"
+        writeModule $dir ma "type T = Int in 0..9\n\nfn mk(v: T) -> T:\n    v\n"
+        writeModule $dir mb "type T = Int in 0..99\n\nfn mk(v: T) -> T:\n    v\n"
         agree "import ma\nimport mb\ntype T = Int in 0..999\nfn own(v: T) -> T:\n    v\n\[ma::mk(5), mb::mk(50), own(500)\]\n"
     }
 } -result {[5, 50, 500]}
@@ -598,8 +597,8 @@ test imports-type-global-collision-gone {two modules declare the same short type
 test imports-type-modules-do-not-see-entry-types {a module cannot name the entry program's types, nor the types of a module it merely loads} -body {
     withScratchLibrary {
         writeFixtures $dir
-        writeModule $dir peek "namespace peek\n\nfn f(x: Small):\n    x\n"
-        writeModule $dir peek2 "namespace peek2\n\nfn f(x: Count):\n    x\n"
+        writeModule $dir peek "fn f(x: Small):\n    x\n"
+        writeModule $dir peek2 "fn f(x: Count):\n    x\n"
         list [rejectionKind "import peek\ntype Small = Int in 0..9\npeek::f(1)\n"] \
             [rejectionKind "import example_types\nimport peek2\npeek2::f(1)\n"]
     }
@@ -608,7 +607,7 @@ test imports-type-modules-do-not-see-entry-types {a module cannot name the entry
 test imports-type-non-transitive {a type import is not transitive: importing user does not give its Count} -body {
     withScratchLibrary {
         writeFixtures $dir
-        writeModule $dir user2 "namespace user2\n\nimport type example_types::Count\n\nfn id(x: Count):\n    x\n"
+        writeModule $dir user2 "import type example_types::Count\n\nfn id(x: Count):\n    x\n"
         list [agree "import user2\nuser2::id(3)\n"] \
             [rejectionKind "import user2\nfn f(x: Count):\n    x\n1\n"]
     }
@@ -618,16 +617,16 @@ test imports-type-non-transitive {a type import is not transitive: importing use
 
 test imports-type-collision-two-imports {two type imports with one short name are rejected, naming both} -body {
     withScratchLibrary {
-        writeModule $dir ta "namespace ta\n\ntype Count = Int in 0..9\n"
-        writeModule $dir tb "namespace tb\n\ntype Count = Int in 0..99\n"
+        writeModule $dir ta "type Count = Int in 0..9\n"
+        writeModule $dir tb "type Count = Int in 0..99\n"
         rejection "import type ta::Count\nimport type tb::Count\n1\n"
     }
 } -match glob -result {TYPE-IMPORT-COLLISION: `import type tb::Count` and `import type ta::Count` (at *) both bind the type name "Count"*}
 
 test imports-type-collision-in-either-order {the collision is reported whichever import comes first} -body {
     withScratchLibrary {
-        writeModule $dir ta "namespace ta\n\ntype Count = Int in 0..9\n"
-        writeModule $dir tb "namespace tb\n\ntype Count = Int in 0..99\n"
+        writeModule $dir ta "type Count = Int in 0..9\n"
+        writeModule $dir tb "type Count = Int in 0..99\n"
         list [rejectionKind "import type tb::Count\nimport type ta::Count\n1\n"] \
             [rejectionKind "import type ta::Count\nimport type tb::Count\n1\n"]
     }
@@ -656,8 +655,8 @@ test imports-type-declaration-before-import-is-rejected {a declaration cannot pr
 
 test imports-type-collision-builtin {a type import may not bind a built-in type name (Emailish is registered by the compiler)} -body {
     withScratchLibrary {
-        writeModule $dir shadowy "namespace shadowy\n\ntype Int2 = Int in 0..9\n"
-        writeModule $dir shadowy2 "namespace shadowy2\n\ntype Emailish = Int in 0..9\n"
+        writeModule $dir shadowy "type Int2 = Int in 0..9\n"
+        writeModule $dir shadowy2 "type Emailish = Int in 0..9\n"
         list [rejectionKind "import type shadowy::Int2\n1\n"] [rejectionKind "import type shadowy2::Emailish\n1\n"]
     }
 } -result {accepted TYPE-IMPORT-COLLISION}
@@ -710,7 +709,7 @@ test imports-type-import-loads-the-module {import type depends on the namespace'
 
 test imports-nested-type-import {a type of an existing nested namespace is importable} -body {
     withScratchLibrary {
-        writeModule $dir foo/bar "namespace foo::bar\n\ntype Baz = Int in 0..5\n\nfn mk(v: Baz) -> Baz:\n    v\n"
+        writeModule $dir foo/bar "type Baz = Int in 0..5\n\nfn mk(v: Baz) -> Baz:\n    v\n"
         list [agree "import type foo::bar::Baz\nfn f(x: Baz):\n    x\nf(3)\n"] \
             [agree "import foo::bar\nfoo::bar::mk(4)\n"] \
             [agree "import foo::bar\nfn f(x: foo::bar::Baz):\n    x\nf(2)\n"] \
@@ -720,8 +719,8 @@ test imports-nested-type-import {a type of an existing nested namespace is impor
 
 test imports-nested-import-is-exact {importing a parent namespace does not import the nested one, in either direction} -body {
     withScratchLibrary {
-        writeModule $dir foo "namespace foo\n\nfn up(x):\n    x + 1\n"
-        writeModule $dir foo/bar "namespace foo::bar\n\nfn down(x):\n    x + 2\n"
+        writeModule $dir foo "fn up(x):\n    x + 1\n"
+        writeModule $dir foo/bar "fn down(x):\n    x + 2\n"
         list [rejectionKind "import foo\nfoo::bar::down(1)\n"] \
             [rejectionKind "import foo::bar\nfoo::up(1)\n"] \
             [agree "import foo\nimport foo::bar\n\[foo::up(1), foo::bar::down(1)\]\n"]
@@ -752,7 +751,7 @@ test imports-raw-getpid-example {examples/linux/getpid.bot declares its dependen
 test imports-cache-does-not-leak-importer-state {one cached module AST serves two importers with different type imports and method visibility} -body {
     withScratchLibrary {
         writeFixtures $dir
-        writeModule $dir shared "namespace shared\n\nimport type example_types::Count\nimport leafc\n\nfn id(x: Count):\n    x.deep()\n"
+        writeModule $dir shared "import type example_types::Count\nimport leafc\n\nfn id(x: Count):\n    x.deep()\n"
         set a [rejectionKind "import shared\nshared::id(1)\n"]
         # A second importer, with other imports of its own: nothing of the
         # first compilation (its short types, its methods) is visible.
@@ -772,22 +771,23 @@ test imports-dependency-graph {the loader records each file's direct imports} -b
 
 test imports-cycle {a cycle through imports is the existing CYCLE diagnostic} -body {
     withScratchLibrary {
-        writeModule $dir cyca "namespace cyca\n\nimport cycb\n\nfn f(x):\n    cycb::g(x)\n"
-        writeModule $dir cycb "namespace cycb\n\nimport cyca\n\nfn g(x):\n    cyca::f(x)\n"
+        writeModule $dir cyca "import cycb\n\nfn f(x):\n    cycb::g(x)\n"
+        writeModule $dir cycb "import cyca\n\nfn g(x):\n    cyca::f(x)\n"
         rejection "import cyca\n1\n"
     }
 } -match glob -result {CYCLE: FILE: module dependency cycle: cyca -> cycb -> cyca}
 
 test imports-protected-intrinsic-needs-no-import-and-grants-no-authority {importing list does not let a module define list::at} -body {
     withScratchLibrary {
-        writeModule $dir list "namespace list\n\nfn at(xs, i):\n    0\n"
+        writeModule $dir list "fn at(xs, i):\n    0\n"
         rejectionKind "import list\n1\n"
     }
 } -result DUPLICATE-NATIVE
 
-test imports-entry-program-namespace-declaration-keeps-protection {an entry program declaring namespace list still cannot define at} -body {
-    rejectionKind "namespace list\n\nimport str\n\nfn at(xs, i):\n    0\n1\n"
-} -result DUPLICATE-NATIVE
+test imports-entry-program-defines-what-a-module-could-not {an entry program is in no namespace: it may define at (a module list.bot may not), and `namespace` declarations do not exist} -body {
+    list [agree "import str\n\nfn at(xs, i):\n    0\n\[at(\[1\], 0)\]\n"] \
+        [rejectionKind "namespace list\n\nfn at(xs, i):\n    0\n"]
+} -result {{[0]} SYNTAX}
 
 # ---------------------------------------------------------------------------
 # Programs

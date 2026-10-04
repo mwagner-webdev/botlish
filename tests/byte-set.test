@@ -275,9 +275,7 @@ test byte-set-module-retained-value {additional_unreserved_chars = byte::set([..
     set libPath [file join $::core::libraryDir bytesetretentionlib.bot]
     set ch [open $libPath w]
     fconfigure $ch -encoding utf-8
-    puts -nonewline $ch {namespace bytesetretentionlib
-
-import byte
+    puts -nonewline $ch {import byte
 import immutable_set
 
 additional_unreserved_chars = byte::set(['-', '.', '_', '~'])

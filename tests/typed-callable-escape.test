@@ -479,9 +479,7 @@ f(5)} sparse-bad.bot} message options
 test callable-escape-cross-module-alias-valid {a cross-module typed function's value survives an exact local alias, same as a local one} -body {
     set libPath [file join $::core::libraryDir typedcallablelib.bot]
     set ch [open $libPath w]
-    puts $ch {namespace typedcallablelib
-
-type Small = Int in 0..10
+    puts $ch {type Small = Int in 0..10
 
 fn take_small(x: Small) -> Small:
     x
@@ -503,9 +501,7 @@ f(7)
 test callable-escape-cross-module-escape-rejected {...and the cross-module callable is protected against the same untyped-parameter escape} -body {
     set libPath [file join $::core::libraryDir typedcallablelib2.bot]
     set ch [open $libPath w]
-    puts $ch {namespace typedcallablelib2
-
-type Small = Int in 0..10
+    puts $ch {type Small = Int in 0..10
 
 fn take_small(x: Small) -> Small:
     x

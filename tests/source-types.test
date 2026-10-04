@@ -506,9 +506,7 @@ type Nibble = Byte in 0..15
 test source-type-cross-module {a type declared in a namespace module is a member of its namespace (canonical name srctypeslib::Widget) and is usable, as a result type, by code that imports that module (surface/modules.tcl maps a namespace to exactly one file under core::libraryDir -- the byte:: vertical is exactly this, tests/native-byte.test; here with a throwaway synthetic module)} -body {
     set libPath [file join $::core::libraryDir srctypeslib.bot]
     set ch [open $libPath w]
-    puts $ch {namespace srctypeslib
-
-type Widget = Int in 0..100
+    puts $ch {type Widget = Int in 0..100
 
 fn make() -> Widget:
     50

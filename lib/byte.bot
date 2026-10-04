@@ -61,8 +61,6 @@
 # deliberately absent: `byte::` holds only operations intrinsic to byte/bit
 # representation (core/scalarbits.tcl's header, and the milestone's own
 # namespace discipline -- see BYTE-NIBBLE-BIT-ARITHMETIC.md).
-namespace byte
-
 import char
 import immutable_set
 

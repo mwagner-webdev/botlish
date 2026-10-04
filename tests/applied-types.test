@@ -194,9 +194,7 @@ test applied-type-hir-roundtrip-nested {a nested List[List[T]] parameter round-t
 test applied-type-module-signature {hir::moduleSignatures reports an exported function's real List[T] parameter/result type, not a placeholder} -body {
     set libPath [file join $::core::libraryDir appliedtypeslib.bot]
     set ch [open $libPath w]
-    puts $ch [format {namespace appliedtypeslib
-
-%sfn make_smalls() -> List[Small]:
+    puts $ch [format {%sfn make_smalls() -> List[Small]:
     [one(), two()]
 
 fn consume(xs: List[Small]) -> int:
@@ -443,9 +441,7 @@ fn make_smalls() -> List[Small]:
 test applied-type-cross-module-valid {a cross-module direct call enforces and satisfies a declared List[Small] parameter} -body {
     set libPath [file join $::core::libraryDir appliedtypeslib2.bot]
     set ch [open $libPath w]
-    puts $ch [format {namespace appliedtypeslib2
-
-%sfn make_smalls() -> List[Small]:
+    puts $ch [format {%sfn make_smalls() -> List[Small]:
     [one(), two()]
 
 fn consume(xs: List[Small]) -> int:
@@ -467,9 +463,7 @@ appliedtypeslib2::consume(appliedtypeslib2::make_smalls())
 test applied-type-cross-module-invalid {a cross-module direct call rejects a broad-List argument against a declared List[Small] parameter} -body {
     set libPath [file join $::core::libraryDir appliedtypeslib3.bot]
     set ch [open $libPath w]
-    puts $ch [format {namespace appliedtypeslib3
-
-%sfn consume(xs: List[Small]) -> int:
+    puts $ch [format {%sfn consume(xs: List[Small]) -> int:
     1
 } $::smallDecl]
     close $ch

@@ -168,7 +168,7 @@ test argv-module-binding-initializer-is-rejected {argv is run-time input, never 
     set ::core::libraryDir $dir
     try {
         set channel [open [file join $dir pm.bot] w]
-        puts $channel "namespace pm\n\nvalue = argv():\n    on InvalidArgumentEncoding:\n        \[\]\nfn get() -> list:\n    value"
+        puts $channel "value = argv():\n    on InvalidArgumentEncoding:\n        \[\]\nfn get() -> list:\n    value"
         close $channel
         set channel [open [file join $dir main.bot] w]
         puts $channel "import pm\npm::get()"

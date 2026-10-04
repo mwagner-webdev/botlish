@@ -481,16 +481,16 @@ proc writeFile {dir name content} {
 
 test sr-module-forward-reference {inside a module, a function may not call a later function of its own module} -body {
     withScratchLibrary {
-        writeFile $dir m "namespace m\n\nfn caller():\n    helper()\n\nfn helper():\n    1\n"
+        writeFile $dir m "fn caller():\n    helper()\n\nfn helper():\n    1\n"
         set main [writeFile $dir main "import m\nm::caller()\n"]
         catch {surface::readProgramFile $main} message options
-        list [dict get $options -errorcode] [string match "*m.bot:4:5: unbound name \"helper\"*declared later*" $message]
+        list [dict get $options -errorcode] [string match "*m.bot:2:5: unbound name \"helper\"*declared later*" $message]
     }
 } -result {{CORE SEMANTIC UNBOUND} 1}
 
 test sr-module-callee-first {a module written callee-first resolves, and is used through its qualified name} -body {
     withScratchLibrary {
-        writeFile $dir m "namespace m\n\nfn helper():\n    41\n\nfn caller():\n    helper() + 1\n"
+        writeFile $dir m "fn helper():\n    41\n\nfn caller():\n    helper() + 1\n"
         set main [writeFile $dir main "import m\nm::caller()\n"]
         core::formatValue [core::evalProgram [hir::lower [surface::readProgramFile $main]]]
     }
@@ -498,16 +498,16 @@ test sr-module-callee-first {a module written callee-first resolves, and is used
 
 test sr-module-own-qualified-name-is-no-escape {`m::helper` inside module m is not a way to reach a later binding} -body {
     withScratchLibrary {
-        writeFile $dir m "namespace m\n\nfn caller():\n    m::helper()\n\nfn helper():\n    1\n"
+        writeFile $dir m "fn caller():\n    m::helper()\n\nfn helper():\n    1\n"
         set main [writeFile $dir main "import m\nm::caller()\n"]
         catch {surface::readProgramFile $main} message options
-        list [dict get $options -errorcode] [string match "*m.bot:4:5: unbound name \"m::helper\"*not established before this point in its own namespace*" $message]
+        list [dict get $options -errorcode] [string match "*m.bot:2:5: unbound name \"m::helper\"*not established before this point in its own namespace*" $message]
     }
 } -result {{CORE SEMANTIC UNBOUND} 1}
 
 test sr-module-value-forward {module-level values are sequential too} -body {
     withScratchLibrary {
-        writeFile $dir m "namespace m\n\na = b\nb = 3\n\nfn get():\n    a\n"
+        writeFile $dir m "a = b\nb = 3\n\nfn get():\n    a\n"
         set main [writeFile $dir main "import m\nm::get()\n"]
         catch {surface::readProgramFile $main} message options
         dict get $options -errorcode
@@ -516,7 +516,7 @@ test sr-module-value-forward {module-level values are sequential too} -body {
 
 test sr-module-order-independent-of-user-order {an entry program may call any established module symbol, whatever order the module's own definitions have} -body {
     withScratchLibrary {
-        writeFile $dir m "namespace m\n\nfn one():\n    1\n\nfn two():\n    one() + 1\n"
+        writeFile $dir m "fn one():\n    1\n\nfn two():\n    one() + 1\n"
         set main [writeFile $dir main "import m\n\[m::two(), m::one()\]\n"]
         core::formatValue [core::evalProgram [hir::lower [surface::readProgramFile $main]]]
     }
@@ -524,7 +524,7 @@ test sr-module-order-independent-of-user-order {an entry program may call any es
 
 test sr-module-local-shadow-of-namespace-name {a local named like the namespace does not hide the qualified reference} -body {
     withScratchLibrary {
-        writeFile $dir m "namespace m\n\nfn one():\n    1\n"
+        writeFile $dir m "fn one():\n    1\n"
         set main [writeFile $dir main "import m\nm = 5\n\[m, m::one()\]\n"]
         core::formatValue [core::evalProgram [hir::lower [surface::readProgramFile $main]]]
     }

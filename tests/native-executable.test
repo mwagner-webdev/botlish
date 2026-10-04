@@ -182,7 +182,7 @@ test native-executable-reject {guarded and open workloads fail before writing an
     set ch [open $output w]; puts -nonewline $ch previous; close $ch
     try {
         set results {}
-        foreach input {examples/surface/03-closure.bot lib/list.bot} {
+        foreach input {examples/surface/03-closure.bot lib/mathish.bot} {
             set hir [surface::readProgramFile [file join $::projectRoot $input]]
             lappend results [catch {native::executable $hir $output} message options]
             lappend results [dict get $options -errorcode]

@@ -220,7 +220,7 @@ proc withLibrary {files script} {
 }
 
 test ns-protect-module-member {a module of the intrinsic's namespace may not define a member of the intrinsic's name} -body {
-    withLibrary {str.bot "namespace str\n\nfn shout(s):\n    str::concat(s, \"!\")\n\nfn concat(a, b):\n    a\n"} {
+    withLibrary {str.bot "fn shout(s):\n    str::concat(s, \"!\")\n\nfn concat(a, b):\n    a\n"} {
         lassign [rejection {import str
 str::shout("hi")}] kind message
         list $kind [string match {*module "str" (*str.bot) cannot define "concat": str::concat is a compiler-provided intrinsic*cannot be redefined or overloaded (other members of namespace "str" are unaffected)*} $message]
@@ -228,14 +228,14 @@ str::shout("hi")}] kind message
 } -result {DUPLICATE-NATIVE 1}
 
 test ns-protect-module-binding {an immutable module binding of the intrinsic's name is rejected the same way} -body {
-    withLibrary {mutable_array.bot "namespace mutable_array\n\nset = 1\n\nfn create(n, d):\n    mutable_array::allocate(n)\n"} {
+    withLibrary {mutable_array.bot "set = 1\n\nfn create(n, d):\n    mutable_array::allocate(n)\n"} {
         lindex [rejection {import mutable_array
 mutable_array::create(1, 0)}] 0
     }
 } -result DUPLICATE-NATIVE
 
 test ns-unrelated-member-is-legal {an unrelated member of the same namespace is ordinary: str::shout beside the intrinsic str::concat, which still means the intrinsic} -body {
-    withLibrary {str.bot "namespace str\n\nfn shout(s):\n    str::concat(s, \"!\")\n"} {
+    withLibrary {str.bot "fn shout(s):\n    str::concat(s, \"!\")\n"} {
         agree {import str
 [str::shout("hi"), str::concat("a", "b"), str::length(str::shout("x"))]}
     }
@@ -246,15 +246,15 @@ test ns-list-module-beside-intrinsics {lib/list.bot's own members (get, find, an
         [agree "import list\nfn odd(x):\n    mod(x, 2) == 1\nf = list::find(\[2, 3\], odd):\n    on NotFound:\n        0\n\[list::get(\[1\], 0, 9), f, list::any?(\[2\], odd), list::length(list::append(\[\], 1))\]"]
 } -result {0 1 {[1, 3, false, 1]}}
 
-test ns-protect-entry-program {an entry program that declares an intrinsic's namespace cannot define the intrinsic either} -body {
-    list [rejection "namespace list\n\nfn at(xs, i):\n    0\n"] \
-        [lindex [rejection "namespace mutable_array\n\nset = 3\n"] 0] \
-        [rejection "namespace list\n\nfn second(xs):\n    list::length(xs)\nsecond(\[4, 5\])"]
-} -match glob -result {{DUPLICATE-NATIVE {*a program declaring "namespace list" cannot define "at": list::at is a compiler-provided intrinsic*}} DUPLICATE-NATIVE accepted}
+test ns-entry-program-is-in-no-namespace {an entry program belongs to no namespace, so it may define a function whose name an intrinsic uses in some namespace: only a module file of that namespace is protected} -body {
+    list [agree "fn at(xs, i):\n    \"mine\"\n\[at(\[4, 5\], 0)\]"] \
+        [agree "set = 3\n\[set\]"] \
+        [agree "import list\nfn second(xs):\n    list::length(xs)\n\[second(\[4, 5\])\]"]
+} -result {{["mine"]} {[3]} {[2]}}
 
-test ns-protect-is-not-overloading {a definition of an intrinsic's name with another arity is no overload: it is rejected like any other} -body {
-    list [lindex [rejection "namespace str\n\nfn length(s, extra):\n    0\n"] 0] \
-        [lindex [rejection "namespace list\n\nfn at(xs):\n    0\n"] 0]
+test ns-protect-is-not-overloading {a module's definition of an intrinsic's name with another arity is no overload: it is rejected like any other} -body {
+    list [withLibrary {str.bot "fn length(s, extra):\n    0\n"} {lindex [rejection "import str\n1\n"] 0}] \
+        [withLibrary {list.bot "fn at(xs):\n    0\n"} {lindex [rejection "import list\n1\n"] 0}]
 } -result {DUPLICATE-NATIVE DUPLICATE-NATIVE}
 
 test ns-local-names-are-unrelated {a local function named at is an ordinary binding: it neither replaces nor overloads list::at} -body {

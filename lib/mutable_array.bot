@@ -66,8 +66,6 @@
 # so this relation cannot be written as a function type; a callable *value*
 # of either function (viewed through a structural Fn) exposes only the raw
 # `mutarray` result.
-namespace mutable_array
-
 import list
 
 fn from_list(xs: list) -> mutarray:

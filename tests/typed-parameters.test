@@ -202,9 +202,7 @@ id_str("hi")} valid10.bot
 test typed-param-valid-cross-module {a cross-module direct call enforces and satisfies the declared parameter} -body {
     set libPath [file join $::core::libraryDir typedparamlib.bot]
     set ch [open $libPath w]
-    puts $ch {namespace typedparamlib
-
-type Small = Int in 0..10
+    puts $ch {type Small = Int in 0..10
 
 fn take_small(x: Small) -> Small:
     x
@@ -225,9 +223,7 @@ typedparamlib::take_small(7)
 test typed-param-invalid-cross-module {a cross-module direct call rejects an argument that cannot satisfy the declared parameter} -body {
     set libPath [file join $::core::libraryDir typedparamlib2.bot]
     set ch [open $libPath w]
-    puts $ch {namespace typedparamlib2
-
-type Small = Int in 0..10
+    puts $ch {type Small = Int in 0..10
 
 fn take_small(x: Small) -> Small:
     x

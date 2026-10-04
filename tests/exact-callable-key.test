@@ -475,8 +475,8 @@ fn right():
 
 test exact-callable-same-name-different-modules {the same local name in two modules is two targets (binding identity, not source name)} -body {
     withScratchLibrary {
-        writeModule $dir ma "namespace ma\n\nfn pred(x):\n    x < 5\n"
-        writeModule $dir mb "namespace mb\n\nfn pred(x):\n    x < 7\n"
+        writeModule $dir ma "fn pred(x):\n    x < 5\n"
+        writeModule $dir mb "fn pred(x):\n    x < 7\n"
         set main [writeMain $dir "import ma\nimport mb\nfn apply_loop(f, i, n):\n    loop j from i to n:\n        if f(j) == false:\n            return j\n    n\n\n\[apply_loop(ma::pred, 0, 100), apply_loop(mb::pred, 0, 100)\]\n"]
         set hir [surface::readProgramFile $main]
         set nir [native::nir $hir -tiny-leaf-inline-opt 0]

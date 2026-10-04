@@ -731,7 +731,7 @@ proc withModule {source main script} {
     }
 }
 
-set ::fmSource "namespace fm\n\nfn open(path, flags :append, :cloexec):\n    \[path, append, cloexec\]\nfn wrap(path, flags :append):\n    open(path, :cloexec)\n"
+set ::fmSource "fn open(path, flags :append, :cloexec):\n    \[path, append, cloexec\]\nfn wrap(path, flags :append):\n    open(path, :cloexec)\n"
 
 test flags-module-qualified-call {a module function with flags, called qualified} -body {
     withModule $::fmSource "import fm\n\[fm::open(\"a\"), fm::open(\"b\", :cloexec, :append), fm::wrap(\"c\", :append)\]" {

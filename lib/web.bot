@@ -58,8 +58,6 @@
 # (native/native.tcl's module-native bridge), so the value this function
 # computes is still treated, everywhere the type system looks at it, as a
 # UriQueryValue -- this module never has to forge that itself.
-namespace web
-
 import ascii
 import byte
 import immutable_set

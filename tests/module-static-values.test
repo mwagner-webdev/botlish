@@ -176,7 +176,7 @@ web::emailish?("a@b.co")} module-static-emailish-parity.bot]
 
 test module-static-captures-empty-for-static-only {a function that references only a module static has an empty capture set (hir::captures), the reference itself recorded as staticRefs instead} -body {
     withScratchLibrary {
-        writeModule $dir m "namespace m\n\nimport list\n\nv = \[1, 2, 3\]\n\nfn f(x):\n    x + list::length(v)\n"
+        writeModule $dir m "import list\n\nv = \[1, 2, 3\]\n\nfn f(x):\n    x + list::length(v)\n"
         set main [writeMain $dir "import m\nm::f(1)\n"]
         set hir [surface::readProgramFile $main -strict 0]
         set fExpr [moduleBlockOf $hir m f]
@@ -188,7 +188,7 @@ test module-static-captures-empty-for-static-only {a function that references on
 
 test module-static-real-capture-plus-static-coexist {a nested function referencing both an activation-local value and a module static: captures = {the local}, staticRefs = {the module value}, never merged} -body {
     withScratchLibrary {
-        writeModule $dir m "namespace m\n\nv = 10\n\nfn combine(a, b):\n    a + b\n"
+        writeModule $dir m "v = 10\n\nfn combine(a, b):\n    a + b\n"
         set main [writeMain $dir "import m\nfn outer(x):\n    fn inner():\n        m::combine(m::v, x)\n    inner()\n\nouter(5)\n"]
         set hir [surface::readProgramFile $main -strict 0]
         set innerExpr ""
@@ -208,7 +208,7 @@ test module-static-real-capture-plus-static-coexist {a nested function referenci
 
 test module-static-two-functions-share-slot {two functions each referencing the same module value never duplicate its storage: one List allocation total (v's own), shared by both} -body {
     withScratchLibrary {
-        writeModule $dir m "namespace m\n\nimport list\n\nv = \[1, 2, 3\]\n\nfn f():\n    list::length(v)\n\nfn g():\n    list::length(v)\n"
+        writeModule $dir m "import list\n\nv = \[1, 2, 3\]\n\nfn f():\n    list::length(v)\n\nfn g():\n    list::length(v)\n"
         set main [writeMain $dir "import m\nm::f() + m::g()\n"]
         set hir [surface::readProgramFile $main -strict 0]
         set report [native::allocationReport $hir summary 1]
@@ -223,8 +223,8 @@ test module-static-two-functions-share-slot {two functions each referencing the 
 
 test module-static-cross-module-reference {module B's function reaches module A's own retained value as a direct static reference, on every backend} -body {
     withScratchLibrary {
-        writeModule $dir a "namespace a\n\nshared = \[10, 20, 30\]\n"
-        writeModule $dir b "namespace b\n\nimport a\nimport list\n\nfn total():\n    list::length(a::shared)\n"
+        writeModule $dir a "shared = \[10, 20, 30\]\n"
+        writeModule $dir b "import a\nimport list\n\nfn total():\n    list::length(a::shared)\n"
         set main [writeMain $dir "import b\nb::total()\n"]
         set hir [surface::readProgramFile $main -strict 0]
         set exprs [hir::lower $hir]
@@ -246,7 +246,7 @@ test module-static-cross-module-reference {module B's function reaches module A'
 
 test module-static-scalar-int {an Int module static, on every backend} -body {
     withScratchLibrary {
-        writeModule $dir m "namespace m\n\nlimit = 400\n\nfn over(n):\n    n > limit\n"
+        writeModule $dir m "limit = 400\n\nfn over(n):\n    n > limit\n"
         set main [writeMain $dir "import m\n\[m::over(399), m::over(401)\]\n"]
         set exprs [hir::lower [surface::readProgramFile $main -strict 0]]
         set outcomes [lmap backend $::parityBackends {outcomeUnder $backend $exprs}]
@@ -256,7 +256,7 @@ test module-static-scalar-int {an Int module static, on every backend} -body {
 
 test module-static-scalar-bool {a Bool module static, on every backend} -body {
     withScratchLibrary {
-        writeModule $dir m "namespace m\n\nenabled = true\n\nfn check():\n    enabled\n"
+        writeModule $dir m "enabled = true\n\nfn check():\n    enabled\n"
         set main [writeMain $dir "import m\nm::check()\n"]
         set exprs [hir::lower [surface::readProgramFile $main -strict 0]]
         set outcomes [lmap backend $::parityBackends {outcomeUnder $backend $exprs}]
@@ -272,7 +272,7 @@ test module-static-scalar-bool {a Bool module static, on every backend} -body {
 
 test module-static-function-valued-binding {an ordinary module function definition is itself a module binding whose value is a Block -- envless, reached as a constant fnvalue, never a static-slot data read} -body {
     withScratchLibrary {
-        writeModule $dir m "namespace m\n\nfn inc(x):\n    x + 1\n"
+        writeModule $dir m "fn inc(x):\n    x + 1\n"
         set main [writeMain $dir "import m\nm::inc(41)\n"]
         set hir [surface::readProgramFile $main -strict 0]
         set nir [native::nir $hir -tiny-leaf-inline-opt 0]
@@ -315,7 +315,7 @@ test module-static-entry-toplevel-binding-still-captures {an ordinary (non-modul
 
 test module-static-gc-stress-envless-reader {a module-static managed value (List) is read correctly, many times, from an envless function, under GC stress (many intervening allocations)} -body {
     withScratchLibrary {
-        writeModule $dir m "namespace m\n\nimport list\n\nv = \[1, 2, 3, 4, 5\]\n\nfn touch(x):\n    x + list::length(v)\n"
+        writeModule $dir m "import list\n\nv = \[1, 2, 3, 4, 5\]\n\nfn touch(x):\n    x + list::length(v)\n"
         set main [writeMain $dir "import m\nfn drive(i, total, acc):\n    if i >= total:\n        return acc\n    drive(i + 1, total, acc + m::touch(i))\n\ndrive(0, 500, 0)\n"]
         set hir [surface::readProgramFile $main -strict 0]
         underGcStress {native::evalHir $hir}
@@ -324,7 +324,7 @@ test module-static-gc-stress-envless-reader {a module-static managed value (List
 
 test module-static-gc-stress-mixed-closure {a static reference and a real activation-local capture coexisting inside one closure both stay correct under GC stress} -body {
     withScratchLibrary {
-        writeModule $dir m "namespace m\n\nv = \[1, 2, 3\]\n\nfn combine(a, b):\n    a + b\n"
+        writeModule $dir m "v = \[1, 2, 3\]\n\nfn combine(a, b):\n    a + b\n"
         set main [writeMain $dir "import list\nimport m\nfn outer(x):\n    fn inner():\n        m::combine(list::length(\[1,2,3,4,5,6,7,8\]), x)\n    inner()\n\nfn drive(i, total, acc):\n    if i >= total:\n        return acc\n    drive(i + 1, total, acc + outer(i))\n\ndrive(0, 300, 0)\n"]
         set hir [surface::readProgramFile $main -strict 0]
         underGcStress {native::evalHir $hir}

@@ -485,9 +485,7 @@ test method-in-a-module {a module function uses the sugar on its own earlier fun
     set libPath [file join $::core::libraryDir methodsugarlib.bot]
     set ch [open $libPath w]
     fconfigure $ch -encoding utf-8
-    puts -nonewline $ch {namespace methodsugarlib
-
-fn inc(a):
+    puts -nonewline $ch {fn inc(a):
     a + 1
 
 fn inc_twice(a):

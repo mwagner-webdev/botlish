@@ -10,8 +10,8 @@ A language/library cleanup milestone with four parts:
    error `IndexNotFound`) and `get` (an ordinary Botlish library function:
    `at` with that one error handled by returning an explicit, eagerly
    evaluated default);
-4. a namespaced intrinsic cannot be redefined or overloaded by a module (or
-   an entry program) of the same namespace; the rest of that namespace stays
+4. a namespaced intrinsic cannot be redefined or overloaded by a module of the
+   same namespace (the entry program is in no namespace); the rest of that namespace stays
    open.
 
 A follow-up (§11) gave the writes and slices declared errors too
@@ -107,8 +107,8 @@ hierarchy (`ns-no-nested-stdlib`):
 | `char` | `scalar_value` | none (no module file since §11) |
 | `linux::abi` | `syscall` | (unchanged) |
 
-`lib/mutarray.bot` was renamed to `lib/mutable_array.bot` (`namespace
-mutable_array`): one family, one namespace. `mutarray::create`/`from_list`
+`lib/mutarray.bot` was renamed to `lib/mutable_array.bot` (its namespace
+`mutable_array` is its path): one family, one namespace. `mutarray::create`/`from_list`
 are now `mutable_array::create`/`from_list`; `mutarray::` names nothing
 (`ns-historical-module-is-gone`).
 
@@ -322,9 +322,8 @@ Representation: none new. A namespaced intrinsic is a registered qualified
 root native; protection is the membership test
 `core::native::isQualifiedNative NS::MEMBER`. `surface/modules.tcl`'s
 `CheckNativeMembers` rejects a function or immutable binding named MEMBER in
-any module file of namespace NS (`LoadNamespace`) and in an entry program
-that itself declares `namespace NS` (`CheckEntryProgram`, called from
-`compileProgramFile` and `surface::lowerToHir`). This generalizes the check
+any module file of namespace NS (`LoadNamespace`); the entry program is in no
+namespace and is not checked. This generalizes the check
 that already protected `linux::abi::syscall`. The diagnostic:
 
 ```

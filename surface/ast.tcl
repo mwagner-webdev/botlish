@@ -17,9 +17,7 @@
 # Every node is a dict with `kind`, `span` and `id` plus per-kind fields:
 #
 #   program    body (statements), diagnostics (syntax errors, see below),
-#              namespace (the declared module namespace name, or "" for an
-#              ordinary/entry program -- see surface/modules.tcl), imports
-#              (the file header's import and typeimport nodes in written
+#              imports (the file header's import and typeimport nodes in written
 #              order; never statements of `body`, never walked by Children)
 #   import     namespace (the imported namespace's whole path, "abi::x86_64"),
 #              namespaceSpan -- `import NAMESPACE` (IMPORTS.md): a direct

@@ -535,9 +535,7 @@ test set-hir-roundtrip-preserves-type {the read-back HIR's declaredParamTypes is
 test set-module-signature {hir::moduleSignatures reports an exported function's real ImmutableSet[T] parameter/result type} -body {
     set libPath [file join $::core::libraryDir immutablesetlib.bot]
     set ch [open $libPath w]
-    puts $ch [format {namespace immutablesetlib
-
-%sfn make() -> ImmutableSet[Small]:
+    puts $ch [format {%sfn make() -> ImmutableSet[Small]:
     immutable_set::from_list([one()])
 
 fn consume(s: ImmutableSet[Small]) -> int:
@@ -565,9 +563,7 @@ immutablesetlib::consume(immutablesetlib::make())
 test set-cross-module-valid {a cross-module direct call enforces and satisfies a declared ImmutableSet[Small] parameter} -body {
     set libPath [file join $::core::libraryDir immutablesetlib2.bot]
     set ch [open $libPath w]
-    puts $ch [format {namespace immutablesetlib2
-
-%sfn make() -> ImmutableSet[Small]:
+    puts $ch [format {%sfn make() -> ImmutableSet[Small]:
     immutable_set::from_list([one()])
 
 fn consume(s: ImmutableSet[Small]) -> int:
@@ -589,9 +585,7 @@ immutablesetlib2::consume(immutablesetlib2::make())
 test set-cross-module-invalid {a cross-module direct call rejects a broad-ImmutableSet argument against a declared ImmutableSet[Small] parameter} -body {
     set libPath [file join $::core::libraryDir immutablesetlib3.bot]
     set ch [open $libPath w]
-    puts $ch {namespace immutablesetlib3
-
-type Small = Int in 0..10
+    puts $ch {type Small = Int in 0..10
 
 fn consume(s: ImmutableSet[Small]) -> int:
     1
@@ -627,8 +621,7 @@ test set-module-retained-value {a module-scope immutable_set::from_list([...]) b
         set mpath [file join $dir constants.bot]
         set ch [open $mpath w]
         fconfigure $ch -encoding utf-8
-        puts -nonewline $ch [format {namespace constants
-%sdigits = immutable_set::from_list([one(), one()])
+        puts -nonewline $ch [format {%sdigits = immutable_set::from_list([one(), one()])
 fn contains_one():
     immutable_set::contains(digits, one())
 } $::smallDecl]
@@ -679,8 +672,7 @@ test set-module-retained-value-unicodechar-direct {a module-scope UnicodeChar li
         set mpath [file join $dir constants.bot]
         set ch [open $mpath w]
         fconfigure $ch -encoding utf-8
-        puts -nonewline $ch {namespace constants
-dash = '-'
+        puts -nonewline $ch {dash = '-'
 fn get_dash() -> UnicodeChar:
     dash
 }
@@ -709,9 +701,7 @@ test set-module-retained-value-unicodechar-list {a module-scope List[UnicodeChar
         set mpath [file join $dir constants.bot]
         set ch [open $mpath w]
         fconfigure $ch -encoding utf-8
-        puts -nonewline $ch {namespace constants
-
-import list
+        puts -nonewline $ch {import list
 chars = ['-', '.', '_', '~']
 fn first() -> UnicodeChar:
     list::at(chars, 0)
@@ -750,9 +740,7 @@ test set-module-retained-value-unicodechar {a module-scope ImmutableSet[UnicodeC
         set mpath [file join $dir constants.bot]
         set ch [open $mpath w]
         fconfigure $ch -encoding utf-8
-        puts -nonewline $ch {namespace constants
-
-import immutable_set
+        puts -nonewline $ch {import immutable_set
 chars = immutable_set::from_list(['-', '.', '_', '~'])
 fn has_dash() -> bool:
     immutable_set::contains(chars, '-')

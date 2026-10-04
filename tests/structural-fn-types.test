@@ -498,9 +498,7 @@ test fn-accept-cross-module {a module function may declare an Fn parameter; anot
     set libPath [file join $::core::libraryDir fntypeslib.bot]
     set ch [open $libPath w]
     fconfigure $ch -encoding utf-8
-    puts $ch {namespace fntypeslib
-
-import list
+    puts $ch {import list
 
 fn count_where(xs: List[str], keep: Fn{args: [str], return: bool}) -> int:
     kept = loop x in xs:

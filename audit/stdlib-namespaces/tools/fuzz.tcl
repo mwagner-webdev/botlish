@@ -45,8 +45,8 @@
 # Each program also has one NEGATIVE program, rotating through the shapes
 # the cleanup must reject: `a eq b` (syntax), `eq(a, b)` and every
 # historical root name (unbound), the removed `char::codepoint` wrapper (an
-# unknown member of namespace char), a namespace-declaring program redefining a
-# protected intrinsic member (DUPLICATE-NATIVE), a provably missing literal
+# unknown member of namespace char), a scratch library module of an
+# intrinsic's namespace redefining that member (DUPLICATE-NATIVE), a provably missing literal
 # index (KNOWN-ERROR), an unproven list::at in an undeclaring function
 # (UNHANDLED-ERROR), a method spelling of an intrinsic whose namespace the
 # program does not import (no function visible), get applied to a non-List (the TYPE error
@@ -404,7 +404,10 @@ proc negative {k} {
             set i [string last :: $full]
             set ns [string range $full 0 [expr {$i - 1}]]
             set member [string range $full [expr {$i + 2}] end]
-            return [list "namespace $ns\n\nfn ${member}(x):\n    x\n" 1 {expect-code {SURFACE MODULE DUPLICATE-NATIVE}}]
+            # a module file is where a namespace's members are defined: a scratch
+            # library holds NS.bot (path = namespace) defining the intrinsic's name
+            set ::negativeModule [list [string map {:: /} $ns].bot "fn ${member}(x):\n    x\n"]
+            return [list "import $ns\n1\n" 1 {expect-code {SURFACE MODULE DUPLICATE-NATIVE}}]
         }
         4 { return [list "import list\nlist::at($xs, [expr {$len + [rnd 0 3]}])" 1 {expect-message KNOWN-ERROR}] }
         5 { return [list "import list\nfn f(xs, i):\n    list::at(xs, i)\nf($xs, 0)" 1 {expect-message UNHANDLED-ERROR}] }
@@ -482,7 +485,27 @@ try {
             puts "-- negative ($check)\n$negSource"
         }
         incr negatives
-        set why [checkNegative [outcomesOf $negSource $strict] $check]
+        if {[info exists ::negativeModule]} {
+            set savedLibrary $::core::libraryDir
+            set ::core::libraryDir [file join $scratch lib]
+            file delete -force $::core::libraryDir
+            file copy $savedLibrary $::core::libraryDir
+            lassign $::negativeModule modulePath moduleText
+            set modulePath [file join $::core::libraryDir $modulePath]
+            file mkdir [file dirname $modulePath]
+            set channel [open $modulePath w]
+            fconfigure $channel -encoding utf-8
+            puts -nonewline $channel $moduleText
+            close $channel
+            unset ::negativeModule
+            try {
+                set why [checkNegative [outcomesOf $negSource $strict] $check]
+            } finally {
+                set ::core::libraryDir $savedLibrary
+            }
+        } else {
+            set why [checkNegative [outcomesOf $negSource $strict] $check]
+        }
         if {$why ne ""} {
             incr negativeEscapes
             puts "NEGATIVE ESCAPE seed $seed ($check): $why\n$negSource"

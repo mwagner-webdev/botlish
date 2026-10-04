@@ -382,8 +382,7 @@ test errors-cross-module-signature {a library's own error decl + errors-bearing 
     set libPath [file join $::core::libraryDir errorscrossmodulelib.bot]
     set ch [open $libPath w]
     fconfigure $ch -encoding utf-8
-    puts -nonewline $ch {namespace errorscrossmodulelib
-error OutOfRange
+    puts -nonewline $ch {error OutOfRange
 
 fn clamp(n) -> int errors OutOfRange:
     if n < 0:
@@ -412,8 +411,7 @@ test errors-cross-module-unhandled-rejected {an unhandled cross-module fallible 
     set libPath [file join $::core::libraryDir errorscrossmodulelib2.bot]
     set ch [open $libPath w]
     fconfigure $ch -encoding utf-8
-    puts -nonewline $ch {namespace errorscrossmodulelib2
-error OutOfRange
+    puts -nonewline $ch {error OutOfRange
 
 fn clamp(n) -> int errors OutOfRange:
     if n < 0:

@@ -36,8 +36,6 @@
 # binds the short type name Byte in this file, and no other name of
 # namespace byte (IMPORTS.md). Every consumer of `ascii::` that needs to
 # *construct* a Byte already names the byte namespace itself.
-namespace ascii
-
 import type byte::Byte
 
 fn is_digit(b: Byte) -> bool:

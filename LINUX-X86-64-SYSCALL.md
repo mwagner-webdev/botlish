@@ -65,7 +65,7 @@ Botlish Int
 ### `abi::x86_64` (lib/abi/x86_64.bot)
 
 ```botlish
-namespace abi::x86_64
+# lib/abi/x86_64.bot: namespace abi::x86_64, by its path
 
 error Register64BelowRange
 error Register64AboveRange
@@ -170,7 +170,7 @@ linux::abi::syscall({rax: R, rdi: R, rsi: R, rdx: R, r10: R, r8: R, r9: R})
 
 ### Nested namespaces
 
-`namespace a::b` declares the nested namespace `a::b`, which lives in
+The nested namespace `a::b` lives in
 `lib/a/b.bot` (one directory per leading segment, never `::` in a file name,
 so the Windows checkout works); `a::b::c` is member `c` of `a::b` in
 expressions, types (`fn f(r: abi::x86_64::Register64)`) and named

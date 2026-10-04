@@ -1,3 +1,2 @@
-namespace plain
 fn inc(x):
     x + 1

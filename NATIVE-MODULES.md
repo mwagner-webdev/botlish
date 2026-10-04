@@ -64,16 +64,20 @@ Changed:
 ## 2. Module syntax
 
 ```
-namespace web
+# lib/web.bot -- the file's path is its namespace: `web`
 
 fn uri_escape_text(s):
     ...
 ```
 
-`namespace NAME`, if present, must be the file's first statement
-(`surface/parser.tcl`'s `NamespaceDecl`; a `namespace` line anywhere else
-is a syntax error). A file without one is an ordinary/entry program,
-exactly as before this milestone -- every existing `examples/surface/*.bot`
+(This milestone originally began a module with a `namespace web` line that had
+to restate the file name. That line was redundant and has been removed: see
+IMPORTS.md; `namespace NAME` is now a syntax error.)
+
+A file's namespace is its path (originally a `namespace NAME` first line
+restated it; the parser's `NamespaceDecl` is gone and the line is a syntax
+error). The entry program is in no namespace, exactly as before this
+milestone -- every existing `examples/surface/*.bot`
 file is unaffected. Reference syntax is `mod::name`, a primary expression
 (`IDENT "::" IDENT`). (Originally only one level; LINUX-X86-64-SYSCALL.md
 added nested namespaces: `a::b::c` is member `c` of namespace `a::b`, which
@@ -94,15 +98,11 @@ actually references.
 `$::core::libraryDir/NAME.bot` (the same directory the existing Tcl
 library convention, `lib/NAME.tcl`, already uses -- `core/core.tcl`).
 There is no search path, so "two files define namespace `NAME`" cannot
-arise -- `NAME` names one candidate file, period. That file must itself
-declare `namespace NAME`; a missing file, a missing declaration, or a
-declaration naming a different namespace are each a distinct, clear
-diagnostic (`Error` in `surface/modules.tcl`; `{SURFACE MODULE KIND}`
+arise -- `NAME` names one candidate file, period. A missing
+file is a distinct, clear diagnostic (`Error` in `surface/modules.tcl`; `{SURFACE MODULE KIND}`
 error codes):
 
 - `UNKNOWN-NAMESPACE` -- no such file.
-- `NAMESPACE-MISMATCH` -- the file exists but declares no namespace, or a
-  different one.
 - `UNKNOWN-SYMBOL` -- the namespace loaded fine but has no such
   definition (distinct from `UNKNOWN-NAMESPACE` -- spec §31/45).
 - `INVALID-TOPLEVEL` -- a module's top level has something other than a

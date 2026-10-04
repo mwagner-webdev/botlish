@@ -534,9 +534,7 @@ test struct-bearing-instance-keeps-contract {an instance keeps the typed array c
 
 test struct-module-nominal {a module's struct is construct/projected/annotated through `module::Name` and never equals a local struct of the same name} -body {
     withScratchLibrary {
-        writeFile [file join $dir geo.bot] "namespace geo
-
-struct Point:
+        writeFile [file join $dir geo.bot] "struct Point:
     x: int
     y: int
 
@@ -565,8 +563,8 @@ local = Point \{x: 1, y: 2\}
 
 test struct-module-distinct-modules {two modules' structs with the same name and fields are distinct types} -body {
     withScratchLibrary {
-        writeFile [file join $dir geo.bot] "namespace geo\n\nstruct Point:\n    x: int\n    y: int\n"
-        writeFile [file join $dir shapes.bot] "namespace shapes\n\nstruct Point:\n    x: int\n    y: int\n"
+        writeFile [file join $dir geo.bot] "struct Point:\n    x: int\n    y: int\n"
+        writeFile [file join $dir shapes.bot] "struct Point:\n    x: int\n    y: int\n"
         writeFile [file join $dir main.bot] "import geo\nimport shapes\na = geo::Point \{x: 1, y: 2\}\nb = shapes::Point \{x: 1, y: 2\}\n\[a == b, a == geo::Point \{x: 1, y: 2\}\]\n"
         set same [structRunFile [file join $dir main.bot]]
         writeFile [file join $dir bad.bot] "import geo\nimport shapes\nfn f(p: geo::Point) -> int:\n    p.x\nf(shapes::Point \{x: 1, y: 2\})\n"
@@ -578,7 +576,7 @@ test struct-module-distinct-modules {two modules' structs with the same name and
 
 test struct-module-unknown-struct {a qualified struct the module does not declare is a module error} -body {
     withScratchLibrary {
-        writeFile [file join $dir geo.bot] "namespace geo\n\nstruct Point:\n    x: int\n"
+        writeFile [file join $dir geo.bot] "struct Point:\n    x: int\n"
         writeFile [file join $dir main.bot] "import geo\np = geo::Nope \{x: 1\}\n"
         catch {surface::readProgramFile [file join $dir main.bot]} message
         set message
@@ -744,7 +742,7 @@ q = \{team: t, names: \[\"a\", \"b\"\], anon: \{z: 1, a: 2\}\}
 
 test struct-executable-module {a module-declared struct works in a standalone executable} -constraints executableAot -body {
     withScratchLibrary {
-        writeFile [file join $dir geo.bot] "namespace geo\n\nstruct Point:\n    x: int\n    y: int\n\nfn origin() -> Point:\n    Point \{x: 0, y: 0\}\n"
+        writeFile [file join $dir geo.bot] "struct Point:\n    x: int\n    y: int\n\nfn origin() -> Point:\n    Point \{x: 0, y: 0\}\n"
         writeFile [file join $dir main.bot] "import geo\np = geo::Point \{x: 3, y: 4\}\n\[p, geo::origin(), p.x + p.y\]\n"
         set hir [surface::readProgramFile [file join $dir main.bot]]
         native::executable $hir [file join $dir main]
