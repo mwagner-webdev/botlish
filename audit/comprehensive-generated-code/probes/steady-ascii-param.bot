@@ -1,3 +1,8 @@
+import ascii
+import byte
+import list
+import type byte::Byte
+
 # Timing harness pair (with steady-ascii-capture.bot), not a benchmark
 # source: identical work, but the classifier receives the List as a
 # parameter instead of capturing it, so it is a static block and its

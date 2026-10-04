@@ -77,8 +77,8 @@ proc effectLineForInstance {text calleeName instanceAttr} {
     return ""
 }
 
-set ::smallDecl "type Small = Int in 0..10\n\nfn one() -> Small:\n    1\n\n"
-set ::byteDecl "type Byte = Int in 0..255\n\nfn byteA() -> Byte:\n    97\n\nfn byteB() -> Byte:\n    122\n\n"
+set ::smallDecl "import immutable_set\ntype Small = Int in 0..10\n\nfn one() -> Small:\n    1\n\n"
+set ::byteDecl "import immutable_set\ntype Byte = Int in 0..255\n\nfn byteA() -> Byte:\n    97\n\nfn byteB() -> Byte:\n    122\n\n"
 
 # The call-effects report line for a call whose callee is CALLEENAME, given
 # NIRTEXT directly (for fixtures already loaded from a frozen .bot file,
@@ -97,7 +97,8 @@ proc calleeEffectLineIn {nirText calleeName} {
 # setfromlisttotal, non-erroring (spec items 14-16, 24).
 
 test setfromlist-total-int {List[int] -> ImmutableSet[int]: the simplest non-Byte control -- setfromlisttotal, mk_int becomes may_error=false} -body {
-    set text {fn mk_int(xs: List[int]) -> ImmutableSet[int]:
+    set text {import immutable_set
+fn mk_int(xs: List[int]) -> ImmutableSet[int]:
     immutable_set::from_list(xs)
 
 mk_int([1, 2, 3])}
@@ -118,7 +119,8 @@ mk_small([one()])} $::smallDecl]
 } -result {1 1}
 
 test setfromlist-total-bool {List[Bool] -> ImmutableSet[Bool] qualifies (spec item 16, another audited-total scalar kind)} -body {
-    set text {fn mk_bool(xs: List[bool]) -> ImmutableSet[bool]:
+    set text {import immutable_set
+fn mk_bool(xs: List[bool]) -> ImmutableSet[bool]:
     immutable_set::from_list(xs)
 
 mk_bool([true, false])}
@@ -134,7 +136,8 @@ mk_byte([byteA(), byteB()])} $::byteDecl]
 } -result 1
 
 test setfromlist-total-runtime-parity {a real setfromlisttotal construction agrees with the generic construction and with plain membership, across all four backends -- confirming this milestone changes no runtime semantics (spec item 25)} -body {
-    set text {fn mk_int(xs: List[int]) -> ImmutableSet[int]:
+    set text {import immutable_set
+fn mk_int(xs: List[int]) -> ImmutableSet[int]:
     immutable_set::from_list(xs)
 
 [immutable_set::contains(mk_int([1, 1, 2, 3]), 2), immutable_set::contains(mk_int([1, 1, 2, 3]), 4)]}
@@ -166,7 +169,8 @@ test setfromlist-total-runtime-parity {a real setfromlisttotal construction agre
 # reached only by empty-list callers, so SetFromList's own O(n^2) dedup body
 # never actually executes over any element in it.
 test setfromlist-empty-list-strict-legal-conservative-instance {mk_int([]) is now a LEGAL strict program (M7A.A); its own specific instance still conservatively lowers to plain setfromlist/may_error=true rather than setfromlisttotal, because specialization identity/seeding is deliberately unchanged (Model A)} -body {
-    set text {fn mk_int(xs: List[int]) -> ImmutableSet[int]:
+    set text {import immutable_set
+fn mk_int(xs: List[int]) -> ImmutableSet[int]:
     immutable_set::from_list(xs)
 
 mk_int([])}
@@ -179,7 +183,8 @@ mk_int([])}
 } -result {0 1 0 1}
 
 test setfromlist-empty-list-runtime-empty-result {mk_int([]) actually runs, on every backend, producing the empty set -- the instance's own conservative may_error=true classification never observably fires} -body {
-    set text {fn mk_int(xs: List[int]) -> ImmutableSet[int]:
+    set text {import immutable_set
+fn mk_int(xs: List[int]) -> ImmutableSet[int]:
     immutable_set::from_list(xs)
 
 immutable_set::contains(mk_int([]), 1)}
@@ -214,7 +219,8 @@ test setfromlist-broad-element-stays-erroring {a genuinely broad/statically-unre
         # from that one caller alone. A third, differently-kinded call keeps
         # the fallback's own caller set genuinely disagreeing, so xs stays
         # the true "any" this test's own name requires.
-        set text {fn mk_unknown(xs):
+        set text {import immutable_set
+fn mk_unknown(xs):
     immutable_set::from_list(xs)
 
 [mk_unknown([1, 2, 3]), mk_unknown(["a", "b"]), mk_unknown([true, false])]}
@@ -229,7 +235,8 @@ test setfromlist-broad-element-stays-erroring {a genuinely broad/statically-unre
 } -result {1 0 1 1}
 
 test setfromlist-unsupported-kind-runtime-equality {a List of two distinct untyped-closure (Block-kind) members: stays plain setfromlist/may_error=true, and genuinely raises the pre-existing EQUALITY error at runtime when the second element is actually compared against the first -- confirming this milestone never weakens the real failure mode it is refining around (spec items 18-19, 26)} -body {
-    set text {fn g(x):
+    set text {import immutable_set
+fn g(x):
     x
 
 fn h(x):
@@ -263,7 +270,8 @@ test setfromlist-error-propagation-control {a caller of a genuinely equality-fal
         # specific slot List[int] already took), so its own xs -- and
         # therefore mk_unknown<generic>'s own forwarded xs -- stays the
         # true "any" this test's own name requires, regardless of M7.c.
-        set text {fn mk_unknown(xs):
+        set text {import immutable_set
+fn mk_unknown(xs):
     immutable_set::from_list(xs)
 
 fn caller(xs):
@@ -278,7 +286,8 @@ fn caller(xs):
 } -result 1
 
 test setfromlist-list-of-never {List[never] -> ImmutableSet[never]: an empty list literal with no other use narrows its element type to never; lowering must not crash or misclassify this as equality-total -- documented current behavior only, no dedicated optimization (spec item 21)} -body {
-    set text {immutable_set::from_list([])}
+    set text {import immutable_set
+immutable_set::from_list([])}
     set nirText [nirOf $text]
     list [regexp {op setfromlisttotal} $nirText] [regexp {op setfromlist } $nirText]
 } -result {0 1}
@@ -310,7 +319,8 @@ test setfromlist-uri-byte-set-stays-erroring-via-from-int {byte::set as a whole 
 } -result {1 1}
 
 test setfromlist-byte-set-real-range-error-preserved {byte::set(['Ā']) (U+0100, scalar 256) still fails the checked Byte construction just past the boundary -- M4 must not erase checked UnicodeChar -> Byte construction failures, even though SetFromList itself becomes non-erroring (spec item 16, 30)} -body {
-    set path [makeFile {byte::set(['Ā'])} setfromlist-m4-byte-set-256.bot]
+    set path [makeFile {import byte
+byte::set(['Ā'])} setfromlist-m4-byte-set-256.bot]
     try {
         set hir [surface::readProgramFile $path -strict 0]
         set exprs [hir::lower $hir]

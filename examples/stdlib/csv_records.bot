@@ -104,6 +104,10 @@
 # no change to the strategy itself, and with one untyped source
 # implementation serving all three element types.
 
+import list
+import mutable_array
+import str
+
 fn geo_new(first):
     mutable_array::create(1, first)
 

@@ -157,12 +157,13 @@ test sr-local-four-fields {a four-field struct of mixed field types} -body {
 } -result {{[1, "s", [1], 4]} {structnew 0 structget 0 callmulti 0 retmulti 0}}
 
 test sr-local-discarded {a struct literal in statement position builds nothing but still evaluates its fields} -body {
-    set source "counter = mutable_array::create(1, 0)\nfn tick(m):\n    n = mutable_array::get(m, 0, 0)\n    if mutable_array::capacity(m) > 0:\n        mutable_array::set(m, 0, n + 1)\n    n\nfn f(m):\n    \{a: tick(m), b: tick(m)\}\n    \{\}\n    mutable_array::get(m, 0, 0)\nf(counter)\n"
+    set source "import mutable_array\ncounter = mutable_array::create(1, 0)\nfn tick(m):\n    n = mutable_array::get(m, 0, 0)\n    if mutable_array::capacity(m) > 0:\n        mutable_array::set(m, 0, n + 1)\n    n\nfn f(m):\n    \{a: tick(m), b: tick(m)\}\n    \{\}\n    mutable_array::get(m, 0, 0)\nf(counter)\n"
     list [srValue $source] [srOps $source]
 } -result {2 {structnew 0 structget 0 callmulti 0 retmulti 0}}
 
 test sr-local-evaluation-order {fields run in written order, not slot order, exactly as before} -body {
-    set source "counter = mutable_array::create(1, 0)
+    set source "import mutable_array
+counter = mutable_array::create(1, 0)
 fn ticket(m):
     n = mutable_array::get(m, 0, 0)
     if mutable_array::capacity(m) > 0:
@@ -241,12 +242,12 @@ test sr-branch-join-nested-ifs {nested ifs of one shape join through both levels
 } -result {{[[5, 1], [6, 2], [0, 3]]} {structnew 0 structget 0 callmulti 0 retmulti 0}}
 
 test sr-branch-join-materialized-once {a joined struct that is also stored is built once, after the join} -body {
-    set source "fn f(c):\n    v = if c:\n        \{a: 1, b: 2\}\n    else:\n        \{a: 3, b: 4\}\n    xs = list::append(\[\], v)\n    \[v.a, list::length(xs)\]\n\[f(true), f(false)\]\n"
+    set source "import list\nfn f(c):\n    v = if c:\n        \{a: 1, b: 2\}\n    else:\n        \{a: 3, b: 4\}\n    xs = list::append(\[\], v)\n    \[v.a, list::length(xs)\]\n\[f(true), f(false)\]\n"
     list [srValue $source] [srOps $source] [srOps $source -struct-opt 0]
 } -result {{[[1, 1], [3, 1]]} {structnew 1 structget 0 callmulti 0 retmulti 0} {structnew 2 structget 1 callmulti 0 retmulti 0}}
 
 test sr-branch-join-mixed-shapes {branches of different field sets cannot join: each branch builds its struct} -body {
-    set source "fn f(c):\n    v = if c:\n        \{value: \"a\", n: 1\}\n    else:\n        \{other: 1, n: 2\}\n    v == v\n\[f(true), f(false)\]\n"
+    set source "import list\nfn f(c):\n    v = if c:\n        \{value: \"a\", n: 1\}\n    else:\n        \{other: 1, n: 2\}\n    v == v\n\[f(true), f(false)\]\n"
     list [srValue $source] [srOps $source] [srCensus $source]
 } -result {{[true, true]} {structnew 2 structget 0 callmulti 0 retmulti 0} {materialized:control materialized:control}}
 
@@ -272,7 +273,7 @@ test sr-nested-literal-field {under the legacy width-only policy a literal neste
 # One-hop return: the fields cross the boundary through retmulti/callmulti
 
 test sr-return-anonymous {a two-field anonymous result returns as two values and is projected directly} -body {
-    set source "fn scan(i):\n    \{field: str::concat(\"f\", \"x\"), index: i + 1\}\nr = scan(3)\n\[r.field, r.index\]\n"
+    set source "import str\nfn scan(i):\n    \{field: str::concat(\"f\", \"x\"), index: i + 1\}\nr = scan(3)\n\[r.field, r.index\]\n"
     set text [dict get [srLowered [srHir $source]] text]
     list [srValue $source] [srOps $source] [srCensus $source] \
         [srCount [srFunc $text scan] {^\s+retmulti }] [regexp {results=2} [srFunc $text scan]]
@@ -289,12 +290,12 @@ test sr-return-alias {a returned struct stays virtual through aliases} -body {
 } -result {{["f", 3, 3]} {structnew 0 structget 0 callmulti 1 retmulti 1}}
 
 test sr-return-one-projected-field {only one of the two returned fields is read} -body {
-    set source "fn scan(i):\n    \{field: str::concat(\"f\", \"x\"), index: i + 1\}\nr = scan(3)\nr.index\n"
+    set source "import str\nfn scan(i):\n    \{field: str::concat(\"f\", \"x\"), index: i + 1\}\nr = scan(3)\nr.index\n"
     list [srValue $source] [srOps $source]
 } -result {4 {structnew 0 structget 0 callmulti 1 retmulti 1}}
 
 test sr-return-direct-projection {projecting a call result directly reads the returned field} -body {
-    set source "fn scan(i):\n    \{field: str::concat(\"f\", \"x\"), index: i + 1\}\nscan(3).index\n"
+    set source "import str\nfn scan(i):\n    \{field: str::concat(\"f\", \"x\"), index: i + 1\}\nscan(3).index\n"
     list [srValue $source] [srOps $source]
 } -result {4 {structnew 0 structget 0 callmulti 1 retmulti 1}}
 
@@ -314,7 +315,7 @@ test sr-return-recursive {a result forwarded through non-tail recursion is virtu
 } -result {{[5, 5]} {structnew 0 structget 0 callmulti 2 retmulti 2}}
 
 test sr-return-open-caller {a callee that also has an open caller keeps its canonical struct-returning function} -body {
-    set source "fn one(i):\n    \{a: i, b: i + 1\}\nfn two(i):\n    \{a: i * 2, b: i * 3\}\nfn pick(n) errors IndexNotFound:\n    list::at(\[one, two\], n)\nfn run(n) errors IndexNotFound:\n    f = pick(n)\n    r = f(5)\n    g = one(7)\n    \[r, g.a, g.b\]\n\[run(0), run(1)\]\n"
+    set source "import list\nfn one(i):\n    \{a: i, b: i + 1\}\nfn two(i):\n    \{a: i * 2, b: i * 3\}\nfn pick(n) errors IndexNotFound:\n    list::at(\[one, two\], n)\nfn run(n) errors IndexNotFound:\n    f = pick(n)\n    r = f(5)\n    g = one(7)\n    \[r, g.a, g.b\]\n\[run(0), run(1)\]\n"
     list [srValue $source] [srOps $source]
 } -result {{[[{a: 5, b: 6}, 7, 8], [{a: 10, b: 15}, 7, 8]]} {structnew 2 structget 0 callmulti 1 retmulti 1}}
 
@@ -349,7 +350,7 @@ test sr-argument-chain {a forwarding chain of exact callees keeps the fields} -b
 } -result {1 {structnew 0 structget 0 callmulti 0 retmulti 0}}
 
 test sr-argument-callee-materializes {a callee that needs the object itself keeps receiving it} -body {
-    set source "fn store(x):\n    list::length(list::append(\[\], x))\nstore(\{a: 1, b: 2\})\n"
+    set source "import list\nfn store(x):\n    list::length(list::append(\[\], x))\nstore(\{a: 1, b: 2\})\n"
     list [srValue $source] [srOps $source] [srCensus $source]
 } -result {1 {structnew 1 structget 0 callmulti 0 retmulti 0} materialized:call_param}
 
@@ -372,7 +373,7 @@ test sr-recursion-higher-order-cycle {an argument-passing cycle through function
 } -result {6 {structnew 2 structget 6 callmulti 0 retmulti 0} {structnew 6 structget 12 callmulti 0 retmulti 0}}
 
 test sr-argument-open-call-materializes {a virtual struct handed to an unknown callable is built first} -body {
-    set source "fn one(x):\n    1\nfn two(x):\n    2\nfn pick(n) errors IndexNotFound:\n    list::at(\[one, two\], n)\nfn run(n) errors IndexNotFound:\n    f = pick(n)\n    x = \{k: 1, v: 2\}\n    \[x.k, f(x)\]\n\[run(0), run(1)\]\n"
+    set source "import list\nfn one(x):\n    1\nfn two(x):\n    2\nfn pick(n) errors IndexNotFound:\n    list::at(\[one, two\], n)\nfn run(n) errors IndexNotFound:\n    f = pick(n)\n    x = \{k: 1, v: 2\}\n    \[x.k, f(x)\]\n\[run(0), run(1)\]\n"
     list [srValue $source] [srOps $source] [srCensus $source]
 } -result {{[[1, 1], [1, 2]]} {structnew 1 structget 0 callmulti 0 retmulti 0} local+(open_call)}
 
@@ -380,12 +381,12 @@ test sr-argument-open-call-materializes {a virtual struct handed to an unknown c
 # Materialization: lazily, at the first use that needs an object, once
 
 test sr-materialize-list-storage {storing a struct in a List needs the object} -body {
-    set source "x = \{a: str::concat(\"p\", \"q\"), b: 2\}\nxs = list::append(\[\], x)\n\[x.a, x.b, list::at(xs, 0).b\]\n"
+    set source "import list\nimport str\nx = \{a: str::concat(\"p\", \"q\"), b: 2\}\nxs = list::append(\[\], x)\n\[x.a, x.b, list::at(xs, 0).b\]\n"
     list [srValue $source] [srOps $source] [srCensus $source]
 } -result {{["pq", 2, 2]} {structnew 1 structget 1 callmulti 0 retmulti 0} local+(storage)}
 
 test sr-materialize-mutable-array {storing a struct in a MutableArray needs the object} -body {
-    set source "a = mutable_array::create(2, \{k: 0, v: 0\})\nx = \{k: 1, v: 2\}\nmutable_array::set(a, 0, x)\n\[x.k, mutable_array::at(a, 0).v\]\n"
+    set source "import mutable_array\na = mutable_array::create(2, \{k: 0, v: 0\})\nx = \{k: 1, v: 2\}\nmutable_array::set(a, 0, x)\n\[x.k, mutable_array::at(a, 0).v\]\n"
     list [srValue $source]
 } -result {{[1, 2]}}
 
@@ -415,12 +416,13 @@ test sr-materialize-wide-return {under the legacy policy a result wider than the
 } -result {{[1, 9]} {structnew 1 structget 2 callmulti 0 retmulti 0} materialized:width}
 
 test sr-materialize-loop-use {a struct built once and needed as an object per iteration is not re-allocated per iteration} -body {
-    set source "fn go(xs):\n    p = \{a: 1, b: 2\}\n    loop x in xs:\n        list::length(list::append(\[\], p)) + p.a\ngo(\[1, 2, 3\])\n"
+    set source "import list\nfn go(xs):\n    p = \{a: 1, b: 2\}\n    loop x in xs:\n        list::length(list::append(\[\], p)) + p.a\ngo(\[1, 2, 3\])\n"
     list [srValue $source] [srOps $source] [srCensus $source]
 } -result {{[2, 2, 2]} {structnew 1 structget 1 callmulti 0 retmulti 0} materialized:loop}
 
 test sr-materialize-protected-call {an object built inside a protected call is not reused on the handler path} -body {
-    set source "error Boom
+    set source "import list
+error Boom
 fn mayfail(n, p) errors Boom:
     if n > 1:
         fail Boom
@@ -441,7 +443,9 @@ fn run(n) errors IndexNotFound:
 # physical use
 
 test sr-mixed-use {projections before and after the one materialization are direct, later physical uses share it} -body {
-    set source "x = \{a: str::concat(\"p\", \"q\"), b: 2\}
+    set source "import list
+import str
+x = \{a: str::concat(\"p\", \"q\"), b: 2\}
 first = x.a
 xs = list::append(\[\], x)
 second = x.b
@@ -454,7 +458,8 @@ ys = list::append(xs, x)
 } -result {{["pq", 2, 2, "pq"]} {structnew 1 structget 1 callmulti 0 retmulti 0} local+(storage,storage) 1}
 
 test sr-mixed-use-branches {a materialization inside one branch does not serve the other branch or the join} -body {
-    set source "fn f(c):
+    set source "import list
+fn f(c):
     x = \{a: 1, b: 2\}
     n = if c:
         list::length(list::append(\[\], x))
@@ -467,12 +472,12 @@ test sr-mixed-use-branches {a materialization inside one branch does not serve t
 } -result {{[4, 4]} {structnew 2 structget 0 callmulti 0 retmulti 0}}
 
 test sr-mixed-use-alias {an alias and its source share one materialization} -body {
-    set source "x = \{a: 1, b: 2\}\ny = x\nxs = list::append(list::append(\[\], x), y)\n\[x.a, y.b, list::length(xs)\]\n"
+    set source "import list\nx = \{a: 1, b: 2\}\ny = x\nxs = list::append(list::append(\[\], x), y)\n\[x.a, y.b, list::length(xs)\]\n"
     list [srValue $source] [srOps $source]
 } -result {{[1, 2, 2]} {structnew 1 structget 0 callmulti 0 retmulti 0}}
 
 test sr-mixed-use-returned {a returned struct that is both projected and stored is built once, by the caller} -body {
-    set source "fn scan(i):\n    \{a: i, b: 2\}\nr = scan(3)\nxs = list::append(\[\], r)\n\[r.a, list::length(xs)\]\n"
+    set source "import list\nfn scan(i):\n    \{a: i, b: 2\}\nr = scan(3)\nxs = list::append(\[\], r)\n\[r.a, list::length(xs)\]\n"
     list [srValue $source] [srOps $source]
 } -result {{[3, 1]} {structnew 1 structget 0 callmulti 1 retmulti 1}}
 
@@ -593,19 +598,19 @@ test sr-control-test-selection {genuine stored Test values stay physical: the op
 # ---------------------------------------------------------------------------
 # GC: a virtual struct is not a root, its fields are
 
-set gcSource(strings) "fn build(i):
+set gcSource(strings) "import mutable_array\nimport str\nfn build(i):
     \{s: str::concat(\"a\", \"b\"), t: str::concat(\"c\", \"d\"), n: i\}
 r = build(3)
 x = str::concat(\"x\", \"y\")
 \[r.s, r.t, r.n, x\]
 "
-set gcSource(list-string) "fn build(i):
+set gcSource(list-string) "import mutable_array\nimport str\nfn build(i):
     \{items: \[str::concat(\"a\", \"b\"), str::concat(\"c\", \"d\")\], label: str::concat(\"l\", \"x\")\}
 r = build(1)
 junk = \[str::concat(\"j\", \"k\"), str::concat(\"m\", \"n\")\]
 \[r.items, r.label, junk\]
 "
-set gcSource(mutarray-string) "fn build(i):
+set gcSource(mutarray-string) "import mutable_array\nimport str\nfn build(i):
     m = mutable_array::create(2, \"z\")
     mutable_array::set(m, 0, str::concat(\"q\", \"r\"))
     \{arr: m, label: str::concat(\"l\", \"x\")\}
@@ -613,19 +618,21 @@ r = build(1)
 junk = str::concat(str::concat(\"j\", \"k\"), \"m\")
 \[mutable_array::get(r.arr, 0, \"\"), mutable_array::get(r.arr, 1, \"\"), r.label, junk\]
 "
-set gcSource(nested) "fn mk(i):
+set gcSource(nested) "import str
+fn mk(i):
     inner = \{p: str::concat(\"p\", \"q\"), q: \[1, 2\]\}
     \{inner: inner, tag: str::concat(\"t\", \"g\")\}
 o = mk(1)
 junk = \[str::concat(\"a\", \"b\"), str::concat(\"c\", \"d\")\]
 \[o.inner.p, o.inner.q, o.tag, junk\]
 "
-set gcSource(across-call) "fn consume(x, y):
+set gcSource(across-call) "import str\nfn consume(x, y):
     junk = \[str::concat(\"j\", \"k\"), str::concat(\"m\", \"n\")\]
     \[x.s, x.l, y, junk\]
 consume(\{s: str::concat(\"a\", \"b\"), l: \[str::concat(\"c\", \"d\")\]\}, str::concat(\"e\", \"f\"))
 "
-set gcSource(across-return) "fn mk(i):
+set gcSource(across-return) "import str
+fn mk(i):
     a = str::concat(\"a\", \"b\")
     \{s: a, l: \[str::concat(\"c\", \"d\"), a\]\}
 fn run(i):
@@ -634,7 +641,7 @@ fn run(i):
     \[r.s, r.l, junk\]
 run(1)
 "
-set gcSource(materialize-after-safepoint) "fn run(i):
+set gcSource(materialize-after-safepoint) "import list\nimport str\nfn run(i):
     x = \{s: str::concat(\"a\", \"b\"), l: \[str::concat(\"c\", \"d\")\], n: i\}
     junk = \[str::concat(\"j\", \"k\"), str::concat(\"m\", \"n\"), str::concat(\"o\", \"p\")\]
     junk2 = \[str::concat(\"q\", \"r\"), str::concat(\"s\", \"t\")\]

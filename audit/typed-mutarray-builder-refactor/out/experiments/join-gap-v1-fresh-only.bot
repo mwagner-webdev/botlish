@@ -1,3 +1,6 @@
+import list
+import mutable_array
+
 fn g(storage, length, value):
     fresh = mutable_array::create(length * 2 + 1, value)
     mutable_array::copy(fresh, 0, storage, 0, length)

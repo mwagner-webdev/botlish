@@ -503,7 +503,7 @@ type Nibble = Byte in 0..15
     list [core::type::subtype Nibble Byte] [hir::sourceTypes $h]
 } -result {1 {{name Byte parent Int domain {interval 0 255}} {name Nibble parent Byte domain {interval 0 15}}}}
 
-test source-type-cross-module {a type declared in a namespace module is usable, as a result type, by code that loads that module (surface/modules.tcl maps a namespace to exactly one file under core::libraryDir -- the byte:: vertical is exactly this, tests/native-byte.test; here with a throwaway synthetic module)} -body {
+test source-type-cross-module {a type declared in a namespace module is a member of its namespace (canonical name srctypeslib::Widget) and is usable, as a result type, by code that imports that module (surface/modules.tcl maps a namespace to exactly one file under core::libraryDir -- the byte:: vertical is exactly this, tests/native-byte.test; here with a throwaway synthetic module)} -body {
     set libPath [file join $::core::libraryDir srctypeslib.bot]
     set ch [open $libPath w]
     puts $ch {namespace srctypeslib
@@ -514,7 +514,8 @@ fn make() -> Widget:
     50
 }
     close $ch
-    set mainPath [makeFile {srctypeslib::make()
+    set mainPath [makeFile {import srctypeslib
+srctypeslib::make()
 } srctypeslib-main.bot]
     try {
         set h [surface::readProgramFile $mainPath -strict 0]
@@ -523,7 +524,7 @@ fn make() -> Widget:
         file delete $libPath
         removeFile srctypeslib-main.bot
     }
-} -result {0 {int[Widget]}}
+} -result {0 {int[srctypeslib::Widget]}}
 
 test source-type-unused-declaration-no-runtime-code {an unused type declaration adds no NIR/runtime value} -body {
     set h [surface::compile {type Small = Int in 0..10

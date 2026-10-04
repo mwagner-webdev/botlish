@@ -37,6 +37,9 @@
 #
 # expect: [58, 65, 1, "café"]
 
+import list
+import str
+
 fn lenient_ident_char?(c):
     str::is_tcl_alnum(c) or c == "_" or c == "-"
 

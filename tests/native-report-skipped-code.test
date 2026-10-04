@@ -27,9 +27,24 @@ proc sourceHir {text} {
 # {semantic-blockers generic-blockers generic-guards specialized-blockers
 # specialized-guards nirGuards} of native::report on the source program TEXT
 # (it throws on a mismatch itself).
+#
+# `import list` loads lib/list.bot, whose own functions carry representation
+# blockers of their own (they are semantic blockers of the loaded program but
+# are not reachable from the test programs); the first count is the
+# program's own: the loaded modules' blockers (those of the program's import
+# header alone) are subtracted.
+proc importHeader {text} {
+    return [join [regexp -all -inline -line {^import [a-z_:]+$} $text] \n]
+}
+
 proc reportCounts {text} {
     set r [native::report [sourceHir $text]]
-    return [list [dict get $r genericBlockers] \
+    set header [importHeader $text]
+    set libraryBlockers 0
+    if {$header ne ""} {
+        set libraryBlockers [dict get [native::report [sourceHir $header]] genericBlockers]
+    }
+    return [list [expr {[dict get $r genericBlockers] - $libraryBlockers}] \
         [dict get $r generic blockers] [dict get $r generic guards] \
         [dict get $r specialized blockers] [dict get $r specialized guards] \
         [dict get $r nirGuards]]
@@ -65,6 +80,7 @@ proc functionCounts {lowered name} {
 # tests/raw-int-abi.test's demand-dead-branch program: f's only caller passes
 # c = 3, so c > 100 is false in its one generic instance.
 set deadThen {
+import list
 fn f(n, c):
     if c > 100:
         n + 1
@@ -76,6 +92,7 @@ f(7, 3)
 
 test native-report-skipped-code-1 {a range-decided if: the dead arm's blocker is counted by hir::aot, not by the lowering that drops the arm} -body {
     list [reportCounts $deadThen] [reportCounts {
+import list
 fn f(n, c):
     if c < 100:
         list::length([n])
@@ -95,6 +112,7 @@ test native-report-skipped-code-2 {the dead arm is not in the NIR: f's one guard
 
 test native-report-skipped-code-3 {the skip follows the Range: with a caller that makes the branch undecided, both arms and both guards are back} -body {
     reportCounts {
+import list
 fn f(n, c):
     if c > 100:
         n + 1
@@ -107,6 +125,7 @@ fn f(n, c):
 
 test native-report-skipped-code-4 {code after a decided if whose live arm returns, and after a loop whose only break is in a dead arm} -body {
     list [reportCounts {
+import list
 fn fill(l, i, n):
     if i >= n:
         return l
@@ -170,13 +189,13 @@ test native-report-skipped-code-7 {an operand typed never: the operation it belo
         "s = \{x: n + 1, y: stop(), z: list::length(xs)\}\n    s.x"
         "loop i from n to stop():\n        n + i\n    n"
     } {
-        reportCounts "error Boom\nfn stop() errors Boom:\n    fail Boom\n\nfn f(n, xs) errors Boom:\n    $body\n\nv = f(1, \[2\]):\n    on Boom:\n        -1\nv\n"
+        reportCounts "import list\nerror Boom\nfn stop() errors Boom:\n    fail Boom\n\nfn f(n, xs) errors Boom:\n    $body\n\nv = f(1, \[2\]):\n    on Boom:\n        -1\nv\n"
     }
 } -result {{1 0 0 0 0 0} {1 0 0 0 0 0} {1 1 1 0 0 0} {2 0 0 0 0 0}}
 
 test native-report-skipped-code-8 {a construction operand typed never (a String plan): concat's check of the other operand never runs} -body {
     lmap body {"str::concat(stops(), x)" "str::concat(str::concat(x, stops()), \"a\")"} {
-        reportCounts "error Boom\nfn stops() errors Boom:\n    fail Boom\n\nfn f(x) errors Boom:\n    $body\n\nv = f(\"q\"):\n    on Boom:\n        \"e\"\nv\n"
+        reportCounts "import str\nerror Boom\nfn stops() errors Boom:\n    fail Boom\n\nfn f(x) errors Boom:\n    $body\n\nv = f(\"q\"):\n    on Boom:\n        \"e\"\nv\n"
     }
 } -result {{1 0 0 0 0 0} {1 0 0 0 0 0}}
 

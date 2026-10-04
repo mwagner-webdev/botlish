@@ -68,6 +68,8 @@
 # `mutarray` result.
 namespace mutable_array
 
+import list
+
 fn from_list(xs: list) -> mutarray:
     count = list::length(xs)
     storage = mutable_array::allocate(count)

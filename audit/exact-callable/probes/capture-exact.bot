@@ -3,6 +3,8 @@
 #
 # expect: "abcdef"
 
+import str
+
 fn run(s, items, n):
     fn longer(x):
         str::length(x) > str::length(s) + n

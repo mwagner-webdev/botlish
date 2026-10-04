@@ -16,6 +16,20 @@ proc lcHir {text} {
     return [surface::compile $text t.bot -strict 0]
 }
 
+# The nodes of KIND the program text itself wrote (origin file t.bot): an
+# `import list` also loads lib/list.bot, whose own loops are in the HIR too.
+proc entryFind {hir kind} {
+    lmap e [hirFind $hir $kind] {
+        set origin [hir::get $hir $e origin]
+        if {[lindex $origin 0] eq "file" &&
+                [file tail [dict get [hir::sourceFile $hir [lindex $origin 1]] path]] eq "t.bot"} {
+            set e
+        } else {
+            continue
+        }
+    }
+}
+
 # The value of TEXT on every backend, or a description of the disagreement.
 proc lc {text} {
     set hir [lcHir $text]
@@ -313,15 +327,15 @@ test loop-collecting-lockstep-enumerate-shaped {the enumerate-shaped case} -body
 } -result {[["a", 0], ["b", 1], ["c", 2]]}
 
 test loop-collecting-lockstep-length-proof {x in xs and i from 0 to list::length(xs)} -body {
-    lc "fn f(xs):\n    loop x in xs and i from 0 to list::length(xs):\n        \[x, i\]\nf(\[10, 20\])\n"
+    lc "import list\nfn f(xs):\n    loop x in xs and i from 0 to list::length(xs):\n        \[x, i\]\nf(\[10, 20\])\n"
 } -result {[[10, 0], [20, 1]]}
 
 test loop-collecting-lockstep-alias-proof {n = list::length(xs) is an alias the proof sees through} -body {
-    lc "fn f(xs):\n    n = list::length(xs)\n    loop x in xs and i from 0 to n:\n        \[x, i\]\nf(\[10, 20\])\n"
+    lc "import list\nfn f(xs):\n    n = list::length(xs)\n    loop x in xs and i from 0 to n:\n        \[x, i\]\nf(\[10, 20\])\n"
 } -result {[[10, 0], [20, 1]]}
 
 test loop-collecting-lockstep-numeric-first {the numeric clause may come first} -body {
-    lc "fn f(xs):\n    loop i from 0 to list::length(xs) and x in xs:\n        \[i, x\]\nf(\[10, 20\])\n"
+    lc "import list\nfn f(xs):\n    loop i from 0 to list::length(xs) and x in xs:\n        \[i, x\]\nf(\[10, 20\])\n"
 } -result {[[0, 10], [1, 20]]}
 
 test loop-collecting-lockstep-through-clauses {inclusive/descending clauses with equal cardinality} -body {
@@ -345,7 +359,7 @@ test loop-collecting-lockstep-down-to-vs-up {down from n to 0 and from 0 to n} -
 } -result {[[0, 3], [1, 2], [2, 1]]}
 
 test loop-collecting-lockstep-three-way {three clauses with one common proven cardinality} -body {
-    lc "fn f(xs):\n    loop x in xs and i from 0 to list::length(xs) and j down from list::length(xs) through 1:\n        \[x, i, j\]\nf(\[7, 8, 9\])\n"
+    lc "import list\nfn f(xs):\n    loop x in xs and i from 0 to list::length(xs) and j down from list::length(xs) through 1:\n        \[x, i, j\]\nf(\[7, 8, 9\])\n"
 } -result {[[7, 0, 3], [8, 1, 2], [9, 2, 1]]}
 
 test loop-collecting-lockstep-two-lists-by-construction {a list built by a collecting loop has its source's length} -body {
@@ -369,7 +383,7 @@ test loop-collecting-lockstep-alias-list {an aliased list is the same list} -bod
 } -result {[[1, 1], [2, 2]]}
 
 test loop-collecting-lockstep-empty {an empty lockstep loop collects the empty list and never runs the body} -body {
-    lc "fn f(xs):\n    loop x in xs and i from 0 to list::length(xs):\n        x\nf(\[\])\n"
+    lc "import list\nfn f(xs):\n    loop x in xs and i from 0 to list::length(xs):\n        x\nf(\[\])\n"
 } -result {[]}
 
 test loop-collecting-lockstep-empty-body-never-runs {the body of an empty lockstep loop is never executed (raw IR, test-log)} -setup resetEffects -body {
@@ -388,11 +402,11 @@ test loop-collecting-lockstep-large-int-domain {lockstep over arbitrary-precisio
 # 26-28, 60. continue / break across domains: one body run per position
 
 test loop-collecting-lockstep-continue {continue advances every domain together} -body {
-    lc "fn f(xs):\n    loop x in xs and i from 0 to list::length(xs):\n        if i == 1:\n            continue\n        \[x, i\]\nf(\[\"a\", \"b\", \"c\"\])\n"
+    lc "import list\nfn f(xs):\n    loop x in xs and i from 0 to list::length(xs):\n        if i == 1:\n            continue\n        \[x, i\]\nf(\[\"a\", \"b\", \"c\"\])\n"
 } -result {[["a", 0], ["c", 2]]}
 
 test loop-collecting-lockstep-break {break ends the whole loop with the prefix} -body {
-    lc "fn f(xs):\n    loop x in xs and i from 0 to list::length(xs):\n        if i == 2:\n            break\n        \[x, i\]\nf(\[\"a\", \"b\", \"c\", \"d\"\])\n"
+    lc "import list\nfn f(xs):\n    loop x in xs and i from 0 to list::length(xs):\n        if i == 2:\n            break\n        \[x, i\]\nf(\[\"a\", \"b\", \"c\", \"d\"\])\n"
 } -result {[["a", 0], ["b", 1]]}
 
 test loop-collecting-lockstep-one-body-run-per-position {exactly one body execution per common position, in order (raw IR, test-log)} -setup resetEffects -body {
@@ -406,7 +420,7 @@ test loop-collecting-lockstep-continue-one-run {continue still advances every do
 } -result {4 2 1}
 
 test loop-collecting-lockstep-return {return leaves the function from inside} -body {
-    lc "fn f(xs):\n    loop x in xs and i from 0 to list::length(xs):\n        if i == 1:\n            return x\n    \"none\"\nf(\[\"a\", \"b\"\])\n"
+    lc "import list\nfn f(xs):\n    loop x in xs and i from 0 to list::length(xs):\n        if i == 1:\n            return x\n    \"none\"\nf(\[\"a\", \"b\"\])\n"
 } -result {"b"}
 
 test loop-collecting-lockstep-body-error {an error in the body propagates} -body {
@@ -415,7 +429,7 @@ test loop-collecting-lockstep-body-error {an error in the body propagates} -body
 } -result {{error {CORE SEMANTIC UNCAUGHT-ERROR}} {error {CORE SEMANTIC UNCAUGHT-ERROR}} {error {CORE SEMANTIC UNCAUGHT-ERROR}} {error {CORE SEMANTIC UNCAUGHT-ERROR}}}
 
 test loop-collecting-lockstep-non-list {a non-list domain operand is the ordinary dynamic TYPE error} -body {
-    set hir [lcHir "fn f(xs):\n    loop x in xs and i from 0 to list::length(xs):\n        x\nf(5)\n"]
+    set hir [lcHir "import list\nfn f(xs):\n    loop x in xs and i from 0 to list::length(xs):\n        x\nf(5)\n"]
     lmap backend $::parityBackends {lrange [outcomeUnderHir $backend $hir] 0 1}
 } -result {{error {CORE SEMANTIC TYPE}} {error {CORE SEMANTIC TYPE}} {error {CORE SEMANTIC TYPE}} {error {CORE SEMANTIC TYPE}}}
 
@@ -440,12 +454,12 @@ test loop-collecting-lockstep-in-lockstep {lockstep nested in lockstep} -body {
 # Scope: a clause's variable is not visible in any clause operand
 
 test loop-collecting-lockstep-scope-operands {a clause variable is not in scope in another clause's operand} -body {
-    set hir [lcHir "fn f(xs):\n    loop i from 0 to list::length(xs) and j from i to 3:\n        j\nf(\[1, 2, 3\])\n"]
+    set hir [lcHir "import list\nfn f(xs):\n    loop i from 0 to list::length(xs) and j from i to 3:\n        j\nf(\[1, 2, 3\])\n"]
     lmap d [hir::diagnostics $hir] {dict get $d kind}
 } -match glob -result {*UNBOUND*}
 
 test loop-collecting-lockstep-duplicate-variable {two clauses may not bind the same name} -body {
-    lcRejects "fn f(xs):\n    loop x in xs and x from 0 to list::length(xs):\n        x\nf(\[1\])\n"
+    lcRejects "import list\nfn f(xs):\n    loop x in xs and x from 0 to list::length(xs):\n        x\nf(\[1\])\n"
 } -match glob -result {DUPLICATE-LOOP-VARIABLE *}
 
 # ---------------------------------------------------------------------------
@@ -460,7 +474,7 @@ test loop-collecting-reject-unequal-constants {provably different constant cardi
 } -result {LOCKSTEP-UNEQUAL {lockstep loop requires equal iteration counts; clause 1 iterates 3 times but clause 2 iterates 4 times}}
 
 test loop-collecting-reject-unequal-by-one {through vs to differ by exactly one} -body {
-    lcRejects "fn f(xs):\n    loop x in xs and i from 0 through list::length(xs):\n        i\nf(\[1\])\n"
+    lcRejects "import list\nfn f(xs):\n    loop x in xs and i from 0 through list::length(xs):\n        i\nf(\[1\])\n"
 } -result {LOCKSTEP-UNEQUAL {lockstep loop requires equal iteration counts; clause 1 iterates length(xs) times but clause 2 iterates length(xs) + 1 times}}
 
 test loop-collecting-reject-literal-vs-literal {literal lists of different length} -body {
@@ -480,7 +494,7 @@ test loop-collecting-reject-call-results {two separate calls are never assumed e
 } -match glob -result {LOCKSTEP-UNPROVEN *}
 
 test loop-collecting-reject-third-clause {every clause is checked against the first} -body {
-    lcRejects "fn f(xs):\n    loop x in xs and i from 0 to list::length(xs) and j from 0 to 2:\n        x\nf(\[1\])\n"
+    lcRejects "import list\nfn f(xs):\n    loop x in xs and i from 0 to list::length(xs) and j from 0 to 2:\n        x\nf(\[1\])\n"
 } -match glob -result {LOCKSTEP-UNPROVEN *clause 1 vs clause 3*}
 
 test loop-collecting-reject-no-runtime-check {a -strict 0 lowering of a rejected loop fails unconditionally, never by comparing lengths} -body {
@@ -516,9 +530,9 @@ test loop-collecting-hir-no-endpoint-arithmetic {no `+`/`-` call is introduced b
 } -result 1
 
 test loop-collecting-hir-lockloop-one-node {lockstep is one loop node with several domains, not nested loops} -body {
-    set hir [lcHir "fn f(xs):\n    loop x in xs and i from 0 to list::length(xs):\n        i\nf(\[1\])\n"]
-    set loops [concat [hirFind $hir lockloop] [hirFind $hir listloop] [hirFind $hir countloop]]
-    set e [lindex [hirFind $hir lockloop] 0]
+    set hir [lcHir "import list\nfn f(xs):\n    loop x in xs and i from 0 to list::length(xs):\n        i\nf(\[1\])\n"]
+    set loops [concat [entryFind $hir lockloop] [entryFind $hir listloop] [entryFind $hir countloop]]
+    set e [lindex [entryFind $hir lockloop] 0]
     list [llength $loops] [lmap d [hir::get $hir $e domains] {dict get $d kind}]
 } -result {1 {list count}}
 
@@ -538,8 +552,8 @@ test loop-collecting-cardinality-formulas {the exact cardinality of each numeric
 } -result {5 6 5 6 0 0 0 0 1 0}
 
 test loop-collecting-cardinality-symbolic {cardinality is symbolic and normalized} -body {
-    set hir [lcHir "fn f(n, xs):\n    a = loop i from 0 to n:\n        i\n    b = loop i from 10 to 10 + n:\n        i\n    c = loop i from 0 through n:\n        i\n    d = loop i down from n through 0:\n        i\n    e = loop x in xs:\n        x\n    g = loop i from 0 to list::length(xs):\n        i\n    \[a, b, c, d, e, g\]\nf(1, \[2\])\n"]
-    set cards [lmap e [concat [hirFind $hir countloop] [hirFind $hir listloop]] {
+    set hir [lcHir "import list\nfn f(n, xs):\n    a = loop i from 0 to n:\n        i\n    b = loop i from 10 to 10 + n:\n        i\n    c = loop i from 0 through n:\n        i\n    d = loop i down from n through 0:\n        i\n    e = loop x in xs:\n        x\n    g = loop i from 0 to list::length(xs):\n        i\n    \[a, b, c, d, e, g\]\nf(1, \[2\])\n"]
+    set cards [lmap e [concat [entryFind $hir countloop] [entryFind $hir listloop]] {
         hir::cardinality::of_domain $hir [lindex [hir::cardinality::domains $hir $e] 0]
     }]
     # a == b (max(n,0)); c == d (max(n+1,0)); e == g (length(xs))
@@ -565,8 +579,8 @@ test loop-collecting-hir-roundtrip-countloop {HIR text of a descending inclusive
     expr {[hir::format $again] eq $text && [string match "*countloop*down inclusive*" $text]}
 } -result 1
 
-test loop-collecting-hir-roundtrip-lockloop {HIR text of a lockstep loop reads back} -body {
-    set hir [lcHir "fn f(xs):\n    loop x in xs and i from 0 to list::length(xs):\n        i\nf(\[1\])\n"]
+test loop-collecting-hir-roundtrip-lockloop {HIR text of a lockstep loop reads back (the count bound is a parameter: hir::parse does not read the text of programs that bind imported source-module functions)} -body {
+    set hir [lcHir "fn f(xs, n):\n    loop x in xs and i from 0 to n:\n        i\nf(\[1\], 1)\n"]
     set text [hir::format $hir]
     set again [hir::parse $text]
     expr {[hir::format $again] eq $text && [string match "*lockloop*list*count up exclusive*" $text]}
@@ -626,7 +640,8 @@ f(9223372036854775806)
 } -result {[[9223372036854775806, 9223372036854775807], [9223372036854775806, 9223372036854775807, 9223372036854775808], [9223372036854775808, 9223372036854775807], [9223372036854775808, 9223372036854775807, 9223372036854775806]]}
 
 test loop-collecting-executable-lockstep {lockstep (list + numeric, three clauses) in a standalone executable under GC stress} -constraints executableAot -body {
-    aotParity "fn f(xs):
+    aotParity "import list
+fn f(xs):
     loop x in xs and i from 0 to list::length(xs) and j down from list::length(xs) through 1:
         \[x, i, j\]
 f(\[\"a\", \"b\", \"c\"\])
@@ -679,7 +694,7 @@ test loop-collecting-native-compare-ops {the endpoint test is the matching compa
 } -result {{rilt rile rigt rige} {ilt ile igt ige}}
 
 test loop-collecting-native-lockstep-one-loop {a lockstep loop lowers to one CFG loop with one backedge head} -body {
-    set nir [nirOf "fn f(xs):\n    loop x in xs and i from 0 to list::length(xs):\n        \[x, i\]\nf(\[1, 2\])\n"]
+    set nir [nirOf "import list\nfn f(xs):\n    loop x in xs and i from 0 to list::length(xs):\n        \[x, i\]\nf(\[1, 2\])\n"]
     # one conditional branch (one loop head) and one element read at the
     # shared position -- not a second, nested loop
     list [regexp -all {\n    br } $nir] [regexp -all {op listget} $nir]

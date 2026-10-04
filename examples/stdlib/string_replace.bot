@@ -14,6 +14,8 @@
 #
 # expect: ["abc", "aXc", "bb", "", ""]
 
+import str
+
 # true if needle occurs in haystack starting at index.
 fn matches_at(haystack, needle, index) errors LowerUnderrun, UpperOverrun:
     end = index + str::length(needle)

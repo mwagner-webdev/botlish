@@ -385,9 +385,10 @@ the rule):
   member (`lib/list.bot`'s `list::get`) but never one of the intrinsic's own
   name (`SURFACE MODULE DUPLICATE-NATIVE`; an entry program that declares
   `namespace list` is held to the same rule). Botlish has no overloading,
-  so there is nothing for such a definition to coexist as. Like any
-  namespaced function, an intrinsic takes part in method syntax once bound
-  to a name (`at = list::at` then `xs.at(1)`: METHOD-SUGAR.md).
+  so there is nothing for such a definition to coexist as. A source file
+  names them only after `import list` (IMPORTS.md), and the import also makes
+  the intrinsic a method candidate: `xs.at(1)` is `list::at(xs, 1)`
+  (METHOD-SUGAR.md); the import injects no unqualified `at`.
 
 Language primitives (root):
 
@@ -647,7 +648,8 @@ refinement unless its contract explicitly establishes one. So
 | `native/prepare.tcl` | `native::prepareHir`: attaches the native implementations a program calls (module functions, validator bodies) to its HIR |
 | `native/src/nir.rs` | NIR parsing and validation |
 | `native/src/runtime/` | native `Value` representation, heap and collector, errors, runtime helper ABI; `syscall.rs` holds the one inline-asm `syscall` boundary (LINUX-X86-64-SYSCALL.md) |
-| `lib/abi.bot` | the ABI numeric domains `abi::I8` ... `abi::Usize` (ordinary Int values with a proven foreign-interface domain, not fixed-width arithmetic), their checked creators `abi::i8` ... `abi::usize` and errors `AbiIntegerBelowRange`/`AbiIntegerAboveRange` (ABI-NUMERIC-DOMAINS.md) |
+| `lib/abi.bot` | the ABI numeric domains `abi::I8` ... `abi::Usize` (ordinary Int values with a proven foreign-interface domain `abi::I8Value` ... `abi::UsizeValue`, not fixed-width arithmetic), their checked creators `abi::i8` ... `abi::usize` and errors `AbiIntegerBelowRange`/`AbiIntegerAboveRange` (ABI-NUMERIC-DOMAINS.md) |
+| `hir/imports.tcl` | the import environments of a compilation: which namespaces and short type names each file's header imported (IMPORTS.md) |
 | `lib/abi/x86_64.bot` | `abi::x86_64::Register64`, the x86-64 register word as a transport value, and its two Int conversions (LINUX-X86-64-SYSCALL.md); `from_i8` ... `from_usize` encode ABI numeric values as register words, sign- or zero-extended (ABI-NUMERIC-DOMAINS.md) |
 | `native/src/codegen/` | the `Backend` interface; NIR → Cranelift IR for JIT and object files |
 | `surface/lexer.tcl` | source → tokens, indentation → `INDENT`/`DEDENT` |
@@ -682,9 +684,11 @@ beyond refinement tracking (struct destructuring, STRUCT-DESTRUCTURING.md, is
 irrefutable named projection, not pattern matching), async, coroutines, threads, or FFI. A small
 one-file/one-namespace module system *is* implemented (§17's `namespace`/
 `mod::name` syntax, `surface/modules.tcl`, NATIVE-MODULES.md, and
-MODULE-BINDINGS.md). Modules may retain ordinary immutable bindings whose
-initializers are context-free; there are no mutable module bindings,
-aliasing/imports/re-exports, search paths, or package management.
+MODULE-BINDINGS.md), and a source file's cross-namespace dependencies are
+declared by exact `import`s (IMPORTS.md). Modules may retain ordinary
+immutable bindings whose initializers are context-free; there are no mutable
+module bindings, import aliases/wildcards/re-exports, search paths, or
+package management.
 
 ## 12. The compiler backend
 
@@ -1471,9 +1475,11 @@ add10(32)          # 42 (add captures x)
 * **Method-call sugar.** `value.f(a, b)` is another spelling of the ordinary
   call `f(value, a, b)`, allowed exactly when `f` is a function visible by
   that name at the call (under ordinary lexical resolution: a function or
-  binding of the file, a root native, or a module function bound to a name,
-  `f = mod::f` -- there is no `import`, and `mod::f` alone does not make `f`
-  visible) and the ordinary call is valid. It adds no declaration, receiver
+  binding of the file, a root native; or a member `f` of a namespace the file
+  directly imports, `import list` -- IMPORTS.md; `mod::f` alone, without the
+  import, never makes `f` visible) and the ordinary call is valid. When several
+  distinct visible functions are candidates, each is tried as the ordinary call
+  and exactly one must fit (`AMBIGUOUS-METHOD-CALL` otherwise; no precedence). It adds no declaration, receiver
   type, method table, overload rule or lookup by receiver type: the receiver
   is parameter 1 of the ordinary call, evaluated once in the first-argument
   position; every type, arity, error and handler rule is the free call's; and
@@ -1550,14 +1556,16 @@ modules (LINUX-X86-64-SYSCALL.md). A root native may itself carry a qualified
 name (`linux::abi::syscall`): it is spelled like a module definition but
 resolves to the root native, and no module may define that member.
 Another file uses a module definition as `NAME::symbol`: an ordinary,
-non-aliasable qualified reference (no `import`; dependencies are discovered
-from qualified references transitively and loaded at most once). `::` is
+non-aliasable qualified reference, allowed only after an exact `import NAME`
+in the file's header (IMPORTS.md: `import list`, `import abi::x86_64`,
+`import type abi::U8Value` for one type's short name; imports are exact and
+not transitive, and are the only thing that loads a module, at most once). `::` is
 definition/provenance qualification, never confused with `.`'s (future)
 value-access syntax. Resolution fixes a stable binding identity before
 lowering; a module value does not use a runtime namespace lookup. See
 NATIVE-MODULES.md, MODULE-BINDINGS.md, and `surface/modules.tcl` for the
-implementation. Deliberately not built: namespace aliasing, re-exports, a
-search path, or anything package-manager-shaped.
+implementation. Deliberately not built: namespace aliasing, import aliases
+or wildcards, re-exports, a search path, or anything package-manager-shaped.
 
 ### Lowering
 

@@ -60,6 +60,13 @@
 # UriQueryValue -- this module never has to forge that itself.
 namespace web
 
+import ascii
+import byte
+import immutable_set
+import list
+import str
+import type byte::Byte
+
 # emailish?(v) is the root predicate emailish?'s (lib/web.tcl) ordinary
 # Botlish implementation (R2-ORDINARY-EMAILISH-PREDICATE.md): the same
 # left-to-right scan emailRegex's grammar always described -- local part: 1+

@@ -48,6 +48,9 @@
 #
 # expect: [3, 1, "resolve-tests", true, true]
 
+import immutable_set
+import list
+
 struct Test:
     name: str
     dependencies: List[str]

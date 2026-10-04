@@ -70,6 +70,7 @@ test exact-callable-executable-botlish {an exact Botlish block called through a 
 
 test exact-callable-executable-native {an exact native called through a helper's parameter over a StringRegion} -constraints executableAot -body {
     aotParity {
+        import str
         fn count_while(p, s):
             loop i from 0 to str::length(s):
                 if p(str::substring(s, i, i + 1)):
@@ -83,6 +84,7 @@ test exact-callable-executable-native {an exact native called through a helper's
 
 test exact-callable-executable-mixed {one helper, an exact Botlish block and an exact native: two exact instances} -constraints executableAot -body {
     aotParity {
+        import str
         fn bot_alpha(c: str):
             str::is_tcl_alpha(c) or c == "_"
 
@@ -99,6 +101,8 @@ test exact-callable-executable-mixed {one helper, an exact Botlish block and an 
 
 test exact-callable-executable-capturing {an exact value-capturing closure (String, List, Int captures) passed to a helper: callenv with a live environment under GC stress} -constraints executableAot -body {
     aotParity {
+        import list
+        import str
         fn run(tag: str, words: List[str], n: int):
             fn heavy(x: str):
                 w = list::at(words, 0):
@@ -118,6 +122,8 @@ test exact-callable-executable-capturing {an exact value-capturing closure (Stri
 
 test exact-callable-executable-refined-checks-scan {refined-checks' scan_while shape (a de-closured closure with two exact predicates, one a capturing Botlish block, one a native) as an executable} -constraints executableAot -body {
     aotParity {
+        import immutable_set
+        import str
         local_extra_chars = immutable_set::from_list([".", "_", "%", "+", "-"])
 
         fn my_emailish?(v: str):

@@ -318,7 +318,9 @@ test sr-legal-program-is-typed {control: the same probe sees inference on a lega
     trace add execution hir::check enter {apply {{args} {lappend ::sr_reached check}}}
     surface::compile "fn helper():\n    1\n\nfn caller():\n    helper()\n" t.bot
     trace remove execution hir::check enter {apply {{args} {lappend ::sr_reached check}}}
-    set ::sr_reached
+    # (the frontend builds the HIR twice -- once to decide method-call
+    # candidates, once for real -- so check may run more than once)
+    lsort -unique $::sr_reached
 } -result check
 
 test sr-many-forward-references {a file full of forward references fails in ordinary resolution time} -body {
@@ -480,7 +482,7 @@ proc writeFile {dir name content} {
 test sr-module-forward-reference {inside a module, a function may not call a later function of its own module} -body {
     withScratchLibrary {
         writeFile $dir m "namespace m\n\nfn caller():\n    helper()\n\nfn helper():\n    1\n"
-        set main [writeFile $dir main "m::caller()\n"]
+        set main [writeFile $dir main "import m\nm::caller()\n"]
         catch {surface::readProgramFile $main} message options
         list [dict get $options -errorcode] [string match "*m.bot:4:5: unbound name \"helper\"*declared later*" $message]
     }
@@ -489,7 +491,7 @@ test sr-module-forward-reference {inside a module, a function may not call a lat
 test sr-module-callee-first {a module written callee-first resolves, and is used through its qualified name} -body {
     withScratchLibrary {
         writeFile $dir m "namespace m\n\nfn helper():\n    41\n\nfn caller():\n    helper() + 1\n"
-        set main [writeFile $dir main "m::caller()\n"]
+        set main [writeFile $dir main "import m\nm::caller()\n"]
         core::formatValue [core::evalProgram [hir::lower [surface::readProgramFile $main]]]
     }
 } -result 42
@@ -497,16 +499,16 @@ test sr-module-callee-first {a module written callee-first resolves, and is used
 test sr-module-own-qualified-name-is-no-escape {`m::helper` inside module m is not a way to reach a later binding} -body {
     withScratchLibrary {
         writeFile $dir m "namespace m\n\nfn caller():\n    m::helper()\n\nfn helper():\n    1\n"
-        set main [writeFile $dir main "m::caller()\n"]
+        set main [writeFile $dir main "import m\nm::caller()\n"]
         catch {surface::readProgramFile $main} message options
-        dict get $options -errorcode
+        list [dict get $options -errorcode] [string match "*m.bot:4:5: unbound name \"m::helper\"*not established before this point in its own namespace*" $message]
     }
-} -result {SURFACE MODULE CYCLE}
+} -result {{CORE SEMANTIC UNBOUND} 1}
 
 test sr-module-value-forward {module-level values are sequential too} -body {
     withScratchLibrary {
         writeFile $dir m "namespace m\n\na = b\nb = 3\n\nfn get():\n    a\n"
-        set main [writeFile $dir main "m::get()\n"]
+        set main [writeFile $dir main "import m\nm::get()\n"]
         catch {surface::readProgramFile $main} message options
         dict get $options -errorcode
     }
@@ -515,7 +517,7 @@ test sr-module-value-forward {module-level values are sequential too} -body {
 test sr-module-order-independent-of-user-order {an entry program may call any established module symbol, whatever order the module's own definitions have} -body {
     withScratchLibrary {
         writeFile $dir m "namespace m\n\nfn one():\n    1\n\nfn two():\n    one() + 1\n"
-        set main [writeFile $dir main "\[m::two(), m::one()\]\n"]
+        set main [writeFile $dir main "import m\n\[m::two(), m::one()\]\n"]
         core::formatValue [core::evalProgram [hir::lower [surface::readProgramFile $main]]]
     }
 } -result {[2, 1]}
@@ -523,7 +525,7 @@ test sr-module-order-independent-of-user-order {an entry program may call any es
 test sr-module-local-shadow-of-namespace-name {a local named like the namespace does not hide the qualified reference} -body {
     withScratchLibrary {
         writeFile $dir m "namespace m\n\nfn one():\n    1\n"
-        set main [writeFile $dir main "m = 5\n\[m, m::one()\]\n"]
+        set main [writeFile $dir main "import m\nm = 5\n\[m, m::one()\]\n"]
         core::formatValue [core::evalProgram [hir::lower [surface::readProgramFile $main]]]
     }
 } -result {[5, 1]}

@@ -13,7 +13,7 @@
 # end, negative, a BigInt) and random defaults, as a List of checks whose
 # expected value an independent Tcl oracle computes:
 #
-#   get        list::get(XS, I, D) / XS.get(I, D) (bound `get = list::get`)
+#   get        list::get(XS, I, D) / XS.get(I, D) (after `import list`)
 #   explicit   list::get(XS, I, D) == the explicit at-with-handler program
 #              (`v = list::at(xs, i): on IndexNotFound: d`) -- the theorem
 #              that get has no semantics of its own
@@ -21,7 +21,9 @@
 #              the element, or the handler's "missing" for IndexNotFound
 #   array      the same three for mutable_array::from_list(XS) with
 #              mutable_array::at/get, plus mutable_array::set followed by a
-#              read, by method spelling (bound names)
+#              read, by method spelling (with `import list` and `import
+#              mutable_array` both present, a receiver's kind picks the
+#              namespace: IMPORTS.md)
 #   eager      list::get(XS, I, mark(D)): mark counts its own evaluations in
 #              a one-slot MutableArray, read back at the end -- the default
 #              is evaluated exactly once per call, present index or not
@@ -46,8 +48,8 @@
 # unknown member of namespace char), a namespace-declaring program redefining a
 # protected intrinsic member (DUPLICATE-NATIVE), a provably missing literal
 # index (KNOWN-ERROR), an unproven list::at in an undeclaring function
-# (UNHANDLED-ERROR), a method spelling of an intrinsic never bound to a name
-# (no function visible), get applied to a non-List (the TYPE error
+# (UNHANDLED-ERROR), a method spelling of an intrinsic whose namespace the
+# program does not import (no function visible), get applied to a non-List (the TYPE error
 # propagates on every backend: it is not swallowed into the default), an
 # inverted literal substring and an out-of-range literal set (KNOWN-ERROR),
 # and an unproven substring in an undeclaring function (UNHANDLED-ERROR). A
@@ -124,7 +126,11 @@ proc literalString {} { return [pick {"" a bc "héllo" "x y"}] }
 # ---------------------------------------------------------------------------
 # Program text
 
-set ::prelude {log = mutable_array::allocate(1)
+set ::prelude {import list
+import str
+import mutable_array
+
+log = mutable_array::allocate(1)
 mutable_array::set(log, 0, 0)
 fn mark(v):
     mutable_array::set(log, 0, mutable_array::at(log, 0) + 1)
@@ -139,36 +145,28 @@ fn explicit_array(a, i, d):
         on IndexNotFound:
             d
     v
-at = list::at
-get = list::get
-aat = mutable_array::at
-aget = mutable_array::get
-aset = mutable_array::set
-concat = str::concat
-slength = str::length
-append = list::append
-llength = list::length
 fn at_free(xs, i):
     v = list::at(xs, i):
         on IndexNotFound:
             "missing"
     v
-fn at_method(xs, i):
+fn at_method(xs: list, i):
     v = xs.at(i):
         on IndexNotFound:
             "missing"
     v
-fn array_at(a, i):
-    v = a.aat(i):
+fn array_at(xs, i):
+    a = mutable_array::from_list(xs)
+    v = a.at(i):
         on IndexNotFound:
             "missing"
     v
 fn set_then_read(xs, i, value):
     a = mutable_array::from_list(xs)
-    done = a.aset(i, value):
+    done = a.set(i, value):
         on IndexNotFound:
             return "missing"
-    v = a.aat(i):
+    v = a.at(i):
         on IndexNotFound:
             "missing"
     v
@@ -178,7 +176,6 @@ fn set_at(xs, i, value):
         on IndexNotFound:
             return "missing"
     mutable_array::freeze(a, mutable_array::capacity(a))
-substring = str::substring
 fn slice_of(s, a, b):
     v = str::substring(s, a, b):
         on LowerUnderrun:
@@ -251,13 +248,13 @@ proc genCheck {} {
         at { return [list "at_free($xs, $i)" $missing 0] }
         at-method { return [list "at_method($xs, $i)" $missing 0] }
         array-get { return [list "mutable_array::get(mutable_array::from_list($xs), $i, $d)" $got 0] }
-        array-get-method { return [list "mutable_array::from_list($xs).aget($i, $d)" $got 0] }
+        array-get-method { return [list "mutable_array::from_list($xs).get($i, $d)" $got 0] }
         array-explicit {
             return [list "mutable_array::get(mutable_array::from_list($xs), $i, $d) == explicit_array(mutable_array::from_list($xs), $i, $d)" true 0]
         }
-        array-at { return [list "array_at(mutable_array::from_list($xs), $i)" $missing 0] }
+        array-at { return [list "array_at($xs, $i)" $missing 0] }
         array-set {
-            if {$len == 0} { return [list "array_at(mutable_array::from_list($xs), 0)" {"missing"} 0] }
+            if {$len == 0} { return [list "array_at($xs, 0)" {"missing"} 0] }
             # The stored value is one of the List's own elements: the array
             # from_list builds is MutableArray[T] for the List's element type
             # T, which a store never widens (PARAMETERIZED-MUTABLEARRAY.md),
@@ -271,11 +268,11 @@ proc genCheck {} {
             set a [literalString]
             set b [literalString]
             set joined "$a$b"
-            return [list "\[str::concat(\"$a\", \"$b\") == \"$a\".concat(\"$b\"), \"$a\".concat(\"$b\").slength(), str::length(\"$joined\")\]" \
+            return [list "\[str::concat(\"$a\", \"$b\") == \"$a\".concat(\"$b\"), \"$a\".concat(\"$b\").length(), str::length(\"$joined\")\]" \
                 "\[true, [string length $joined], [string length $joined]\]" 0]
         }
         lists {
-            return [list "\[list::length(list::append($xs, $d)), $xs.append($d).llength(), list::get(list::append($xs, $d), $len, \"no\") == $d\]" \
+            return [list "\[list::length(list::append($xs, $d)), $xs.append($d).length(), list::get(list::append($xs, $d), $len, \"no\") == $d\]" \
                 "\[[expr {$len + 1}], [expr {$len + 1}], true\]" 0]
         }
         slice - slice-method {
@@ -383,8 +380,8 @@ foreach name [core::native::names] {
 set ::historical {
     {list_get([1], 0)} {list_append([1], 2)} {list_length([1])} {concat("a", "b")} {length("a")}
     {substring("ab", 0, 1)} {lowercase("A")} {encode_utf8("a")} {is_tcl_alpha("a")} {is_tcl_alnum("a")}
-    {char_codepoint('a')} {mutable_array_allocate(1)} {mutable_array_get(mutable_array::allocate(1), 0)}
-    {mutable_array_set(mutable_array::allocate(1), 0, 1)} {immutable_set_from_list([1])}
+    {char_codepoint('a')} {mutable_array_allocate(1)} {import mutable_array\nmutable_array_get(mutable_array::allocate(1), 0)}
+    {import mutable_array\nmutable_array_set(mutable_array::allocate(1), 0, 1)} {immutable_set_from_list([1])}
 }
 
 # {SOURCE STRICT CHECK} of a negative program: CHECK is a script that, given
@@ -400,7 +397,7 @@ proc negative {k} {
             if {[rnd 0 15] == 0} {
                 return [list {char::codepoint('a')} 1 {expect-message UNKNOWN-SYMBOL}]
             }
-            return [list [pick $::historical] 1 {expect-message UNBOUND}]
+            return [list "import mutable_array\nimport immutable_set\n[pick $::historical]" 1 {expect-message UNBOUND}]
         }
         3 {
             set full [pick $::protected]
@@ -409,16 +406,16 @@ proc negative {k} {
             set member [string range $full [expr {$i + 2}] end]
             return [list "namespace $ns\n\nfn ${member}(x):\n    x\n" 1 {expect-code {SURFACE MODULE DUPLICATE-NATIVE}}]
         }
-        4 { return [list "list::at($xs, [expr {$len + [rnd 0 3]}])" 1 {expect-message KNOWN-ERROR}] }
-        5 { return [list "fn f(xs, i):\n    list::at(xs, i)\nf($xs, 0)" 1 {expect-message UNHANDLED-ERROR}] }
+        4 { return [list "import list\nlist::at($xs, [expr {$len + [rnd 0 3]}])" 1 {expect-message KNOWN-ERROR}] }
+        5 { return [list "import list\nfn f(xs, i):\n    list::at(xs, i)\nf($xs, 0)" 1 {expect-message UNHANDLED-ERROR}] }
         6 { return [list "$xs.at(0)" 1 {expect-text {no function named "at" is visible}}] }
-        7 { return [list "list::get(\"abc\", 0, 1)" 0 {expect-runtime {CORE SEMANTIC TYPE}}] }
+        7 { return [list "import list\nlist::get(\"abc\", 0, 1)" 0 {expect-runtime {CORE SEMANTIC TYPE}}] }
         8 {
             set a [rnd 1 3]
-            return [list "str::substring(\"abc\", $a, [expr {$a - [rnd 1 2]}])" 1 {expect-message KNOWN-ERROR}]
+            return [list "import str\nstr::substring(\"abc\", $a, [expr {$a - [rnd 1 2]}])" 1 {expect-message KNOWN-ERROR}]
         }
-        9 { return [list "fn f(s, a):\n    str::substring(s, a, a + 1)\nf(\"abc\", 0)" 1 {expect-message UNHANDLED-ERROR}] }
-        10 { return [list "a = mutable_array::allocate(2)\nmutable_array::set(a, [rnd 2 5], 0)" 1 {expect-message KNOWN-ERROR}] }
+        9 { return [list "import str\nfn f(s, a):\n    str::substring(s, a, a + 1)\nf(\"abc\", 0)" 1 {expect-message UNHANDLED-ERROR}] }
+        10 { return [list "import mutable_array\na = mutable_array::allocate(2)\nmutable_array::set(a, [rnd 2 5], 0)" 1 {expect-message KNOWN-ERROR}] }
     }
 }
 

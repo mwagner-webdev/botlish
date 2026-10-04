@@ -138,6 +138,7 @@ apply_loop(inc, 0, 100)
 }
 
 set ::nativeHof {
+import str
 fn count_while(p, s):
     loop i from 0 to str::length(s):
         if p(str::substring(s, i, i + 1)):
@@ -149,6 +150,7 @@ count_while(str::is_tcl_alpha, "abc1")
 }
 
 set ::mixedHof {
+import str
 fn bot_alpha(c):
     str::is_tcl_alpha(c) or c == "_"
 
@@ -163,6 +165,7 @@ fn count_while(p, s):
 }
 
 set ::dynamicHof {
+import str
 fn a_alpha(c):
     str::is_tcl_alpha(c)
 
@@ -238,6 +241,7 @@ test exact-callable-mixed-parity {and the answers agree on every backend and wit
 
 test exact-callable-two-botlish-two-natives {two Botlish targets and two natives: four instances, no callvalue} -body {
     set text {
+import str
 fn lt5(x):
     x < 5
 
@@ -274,6 +278,8 @@ test exact-callable-dynamic-if-chosen {a predicate chosen by if (two different t
 
 test exact-callable-dynamic-list-held {a callable read from a List at a non-constant index is dynamic: callvalue stays} -body {
     set text {
+import list
+import str
 fn a_alpha(c):
     str::is_tcl_alpha(c)
 
@@ -298,6 +304,7 @@ preds = [a_alpha, b_alnum]
 
 test exact-callable-escaping-exact-stays-sound {an exact callable that also escapes (stored in a List, called through a read) is still called directly where its identity is known, and the escaped copy still works} -body {
     set text {
+import list
 fn is_small(x):
     x < 10
 
@@ -315,6 +322,7 @@ fs = [is_small]
 
 test exact-callable-escaping-not-closed {identity known is not all invocations closed: an exact callable that is also stored keeps its generic instance open, so no caller-derived fact is invented for it} -body {
     lassign [analysisOf {
+import list
 fn is_small(x):
     x < 10
 
@@ -469,7 +477,7 @@ test exact-callable-same-name-different-modules {the same local name in two modu
     withScratchLibrary {
         writeModule $dir ma "namespace ma\n\nfn pred(x):\n    x < 5\n"
         writeModule $dir mb "namespace mb\n\nfn pred(x):\n    x < 7\n"
-        set main [writeMain $dir "fn apply_loop(f, i, n):\n    loop j from i to n:\n        if f(j) == false:\n            return j\n    n\n\n\[apply_loop(ma::pred, 0, 100), apply_loop(mb::pred, 0, 100)\]\n"]
+        set main [writeMain $dir "import ma\nimport mb\nfn apply_loop(f, i, n):\n    loop j from i to n:\n        if f(j) == false:\n            return j\n    n\n\n\[apply_loop(ma::pred, 0, 100), apply_loop(mb::pred, 0, 100)\]\n"]
         set hir [surface::readProgramFile $main]
         set nir [native::nir $hir -tiny-leaf-inline-opt 0]
         list [lsort -unique [instancesNamed $nir apply_loop]] [callvalues $nir] [native::evalHir $hir]
@@ -478,6 +486,7 @@ test exact-callable-same-name-different-modules {the same local name in two modu
 
 test exact-callable-natives-same-signature {two natives with the identical structural type (str -> bool) are different exact targets} -body {
     set text {
+import str
 fn alpha_run(p, s):
     loop j from 0 to str::length(s):
         if p(str::substring(s, j, j + 1)):
@@ -598,6 +607,7 @@ test exact-callable-opt-off-restores-kind-keys {-exact-callable-opt 0 restores t
 # Value-capturing closures: exact callable targets despite captured values
 
 set ::capturingHof {
+import str
 fn run(s, items, n):
     fn longer(x):
         str::length(x) > str::length(s) + n
@@ -626,6 +636,7 @@ test exact-callable-capturing-closure-direct {the call through p is a direct cal
 # still stays generic and is refined by the theorem.
 test exact-callable-capturing-closure-aggregate-capture-keys {the closure rule is relaxed only for the exact callable and Int positions: a closure with aggregate captures keeps its other parameters generic (refined by the closed-caller theorem), its Int parameter Int and its callable parameter exact} -body {
     lassign [analysisOf {
+import str
 fn run(v, k):
     fn char_at(i):
         str::substring(v, i, i + 1)
@@ -646,6 +657,7 @@ run("abc1", 0)
 
 test exact-callable-capturing-closure-no-closure-allocated {blockescape de-closes a closure literal that has SEVERAL exact instances: both are internal variants, no closure is allocated} -body {
     set text {
+import str
 fn run(s):
     fn char_at(i):
         str::substring(s, i, i + 1)
@@ -672,6 +684,7 @@ run("ab1_")
 
 test exact-callable-closure-recursion-several-instances {a de-closured closure that recurses (tail and non-tail) and is called with two exact predicates: one internal instance per target, no closure, no callvalue, right values} -body {
     set text {
+import str
 fn run(v):
     fn walk(i, p):
         if i >= str::length(v):
@@ -772,6 +785,7 @@ r2 = find_first(big?, [1, 3, 4]):
 
 test exact-callable-captured-callable-boundary {the boundary, documented: a callable CAPTURED by a nested closure is keyed by the closure's own (generic) instance, whose capture seed is the join of every creation's callable, so with two different callables the inner call stays a callvalue (identity of captures is not part of any key); the exact parameter call into the helper is still direct} -body {
     set text {
+import str
 fn outer(p, s):
     fn inner(x):
         p(x)
@@ -791,6 +805,7 @@ fn outer(p, s):
 
 test exact-callable-dead-self-call-keeps-closure {the boundary, documented (report: limitation 8): an exact instance that proves a self-call DEAD (a type-test predicate with a statically known outcome) has no recorded call there, so blockescape declines the closure and it is allocated, exactly as every multi-instance literal was before this milestone generalized blockescape; the value is right on every backend} -body {
     set text {
+import str
 fn run(v):
     fn walk(i, p):
         if i >= str::length(v):
@@ -820,6 +835,8 @@ proc gcStress {script} {
 
 test exact-callable-gc-capture-string-list {an exact closure capturing a String and a List survives GC at every allocation site} -body {
     set text {
+import list
+import str
 fn run(tag, words):
     fn heavy(x):
         str::length(str::concat(tag, x)) > str::length(list::at(words, 0)) + 3
@@ -839,6 +856,7 @@ run("xy", ["pqr", "st"])
 
 test exact-callable-gc-capture-mutarray-struct {an exact closure capturing a MutableArray and a struct, called through a helper under GC stress} -body {
     set text {
+import mutable_array
 fn run(n):
     arr = mutable_array::allocate(4)
     mutable_array::set(arr, 1, 7)
@@ -870,6 +888,7 @@ test exact-callable-gc-exact-native-region {an exact native consumer over a Stri
 
 test exact-callable-error-propagates-botlish {an exact Botlish target that raises propagates the same error through the helper, with and without exact keys} -body {
     set text {
+import str
 fn boom(x):
     str::length(x) > 0
 
@@ -885,6 +904,7 @@ apply(boom, 3)
 
 test exact-callable-error-propagates-native {an exact native target that raises (wrong argument kind) propagates TYPE from the direct native operation} -body {
     set text {
+import str
 fn apply(f, v):
     f(v)
 
@@ -924,6 +944,7 @@ test exact-callable-stringregion-off-without-exact {without exact keys the same 
 
 test exact-callable-stringregion-reanalysis {StringRegion analysis runs on the exact-call graph: the region companion of char_at is used by the exact native instance of a capturing closure} -body {
     set text {
+import str
 fn run(v):
     fn char_at(i):
         str::substring(v, i, i + 1)
@@ -1010,6 +1031,7 @@ test exact-callable-range-open-is-not-closed {hir::range's openness is exactly "
 # scan<int, native>.
 test exact-callable-range-generic-closure-not-open {a generic closure instance blockescape proves closed is no longer range-open: its entry Ranges flow from its callers (with exact keys off so the instance stays generic; before this milestone OpenInstances read the coarser materialization test and called it open)} -body {
     set text {
+import str
 fn run(v):
     fn char_at(i):
         str::substring(v, i, i + 1)
@@ -1038,6 +1060,7 @@ run("abc1")
 
 test exact-callable-range-scanner-entry {with exact keys the scanner's start parameter gets its caller-derived entry Range} -body {
     lassign [analysisOf {
+import str
 fn run(v):
     fn char_at(i):
         str::substring(v, i, i + 1)

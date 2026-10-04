@@ -88,7 +88,8 @@ f([1, 2])}]
 } -result 0
 
 test loop-in-broad-element-type {a broad/unknown-element List gives the binding a broad (any) type, not a validation error} -body {
-    set hir [loopSourceHir {fn passthrough(x):
+    set hir [loopSourceHir {import immutable_set
+fn passthrough(x):
     x
 
 loop x in passthrough([1, 2, 3]):

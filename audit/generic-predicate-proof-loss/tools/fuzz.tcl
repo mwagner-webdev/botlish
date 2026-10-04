@@ -835,7 +835,7 @@ proc checkProgram {seed k} {
     if {$::dump} {
         puts "--- seed $seed program $k\n$text"
     }
-    if {[catch {surface::compile $text fuzz.bot -strict 0} hir]} {
+    if {[catch {surface::compile [surface::modules::ImportHeader $text]$text fuzz.bot -strict 0} hir]} {
         return [dict merge $rec [dict create status rejected detail $hir]]
     }
     if {[hir::diagnostics $hir] ne ""} {

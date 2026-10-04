@@ -18,7 +18,15 @@
 #
 #   program    body (statements), diagnostics (syntax errors, see below),
 #              namespace (the declared module namespace name, or "" for an
-#              ordinary/entry program -- see surface/modules.tcl)
+#              ordinary/entry program -- see surface/modules.tcl), imports
+#              (the file header's import and typeimport nodes in written
+#              order; never statements of `body`, never walked by Children)
+#   import     namespace (the imported namespace's whole path, "abi::x86_64"),
+#              namespaceSpan -- `import NAMESPACE` (IMPORTS.md): a direct
+#              dependency on exactly that namespace
+#   typeimport namespace (the type's namespace path), namespaceSpan, name (the
+#              type's own name), nameSpan -- `import type NAMESPACE::Name`:
+#              exactly one short type name
 #   suite      body (statements)                 an indented block
 #   int        text (canonical decimal digits)
 #   string     value (the decoded text)
@@ -201,6 +209,16 @@ proc surface::syntaxError {span message} {
 # PROGRAM with an id on every node.
 proc surface::ast::assignIds {program} {
     dict set program id ""
+    if {[dict exists $program imports]} {
+        dict set program imports [lmap import [dict get $program imports] {
+            if {[dict get $import kind] eq "import"} {
+                dict set import id "import([dict get $import namespace])"
+            } else {
+                dict set import id "import-type([dict get $import namespace]::[dict get $import name])"
+            }
+            set import
+        }]
+    }
     dict set program body [Statements [dict get $program body] ""]
     return $program
 }
@@ -463,6 +481,15 @@ proc surface::formatAst {ast args} {
     }
     set show [list [dict get $options -spans] [dict get $options -ids]]
     set lines {}
+    if {[dict get $ast kind] eq "program" && [dict exists $ast imports]} {
+        foreach import [dict get $ast imports] {
+            if {[dict get $import kind] eq "import"} {
+                lappend lines "(import [dict get $import namespace])[surface::ast::At $import $show]"
+            } else {
+                lappend lines "(import-type [dict get $import namespace]::[dict get $import name])[surface::ast::At $import $show]"
+            }
+        }
+    }
     if {[dict get $ast kind] in {program suite}} {
         foreach statement [dict get $ast body] {
             surface::ast::Statement $statement 0 $show lines

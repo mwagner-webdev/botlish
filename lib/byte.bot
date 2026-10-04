@@ -63,6 +63,9 @@
 # namespace discipline -- see BYTE-NIBBLE-BIT-ARITHMETIC.md).
 namespace byte
 
+import char
+import immutable_set
+
 # The two declared errors byte::from_int's Int -> Byte conversion may
 # produce (EXPLICIT-ERROR-COMPLETIONS.md item 23): application code
 # meaningfully benefits from distinguishing "too small" from "too large"

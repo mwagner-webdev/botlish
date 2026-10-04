@@ -119,7 +119,10 @@ proc nirFunction {nir name} {
     return [join [lrange $lines $start $end] \n]
 }
 
-set rawGetpid {fn raw_getpid():
+set rawGetpid {import abi::x86_64
+import linux::abi
+import list
+fn raw_getpid():
     abi::x86_64::to_int(
         linux::abi::syscall({
             rax: abi::x86_64::register64(39),
@@ -143,18 +146,20 @@ test linux-syscall-no-syscall-specific-intrinsics {the compiler knows the transp
 } -result {linux::abi::syscall}
 
 test linux-syscall-abi-module-is-nested {abi::x86_64 is the nested-namespace file lib/abi/x86_64.bot: Register64 (one field, a source-defined -2^63..2^63-1 domain), register64, to_int} -body {
-    set hir [syscallHir "abi::x86_64::to_int(abi::x86_64::register64(1))"]
+    set hir [syscallHir "import abi::x86_64
+abi::x86_64::to_int(abi::x86_64::register64(1))"]
     list [string map [list $::projectRoot ROOT] [surface::modules::ModulePath abi::x86_64]] \
         [hir::structs::names abi::x86_64::Register64] \
         [hir::types::show [hir::structs::fieldType abi::x86_64::Register64 word]] \
-        [dict get [lsearch -inline -index 1 [hir::sourceTypes $hir] Register64Word] domain]
-} -result {ROOT/lib/abi/x86_64.bot word {int[Register64Word]} {interval -9223372036854775808 9223372036854775807}}
+        [dict get [lsearch -inline -index 1 [hir::sourceTypes $hir] abi::x86_64::Register64Word] domain]
+} -result {ROOT/lib/abi/x86_64.bot word {int[abi::x86_64::Register64Word]} {interval -9223372036854775808 9223372036854775807}}
 
 # ---------------------------------------------------------------------------
 # Register64: the checked conversion and its inverse (pure; every backend)
 
 test linux-syscall-register64-boundaries {register64 accepts exactly -2^63..2^63-1 and to_int reads the word back signed: 0, 1, 39, -1, the i64 extremes and both small-Int boundaries round-trip identically on every backend} -body {
-    agree {fn classify(n: int):
+    agree {import abi::x86_64
+fn classify(n: int):
     r = abi::x86_64::register64(n):
         on Register64BelowRange:
             return "below"
@@ -169,7 +174,8 @@ loop x in xs:
 } -result {[0, 1, 39, -1, 9223372036854775807, -9223372036854775808, 4611686018427387903, 4611686018427387904, -4611686018427387904, -4611686018427387905]}
 
 test linux-syscall-register64-rejects-out-of-range {a value outside the register domain is the declared error, never truncated: 2^63 is Register64AboveRange, -2^63-1 Register64BelowRange, and so is anything further out} -body {
-    agree {fn classify(n: int):
+    agree {import abi::x86_64
+fn classify(n: int):
     r = abi::x86_64::register64(n):
         on Register64BelowRange:
             return "below"
@@ -183,46 +189,53 @@ loop x in [9223372036854775808, 0 - 9223372036854775809, 18446744073709551615, 1
 } -result {["above", "below", "above", "above", "below", "above"]}
 
 test linux-syscall-register64-constant-proofs {a provably in-range constant needs no handler (extremes included); a provably out-of-range one is a compile-time KNOWN-ERROR, handler or not; an unprovable Int must be handled or declared} -body {
-    list [diagKinds "abi::x86_64::register64(39)\nabi::x86_64::register64(9223372036854775807)\nabi::x86_64::register64(0 - 9223372036854775807 - 1)\nabi::x86_64::register64(-1)"] \
-        [diagKinds "abi::x86_64::register64(9223372036854775808)"] \
-        [diagKinds "abi::x86_64::register64(-9223372036854775809)"] \
-        [diagKinds "r = abi::x86_64::register64(9223372036854775808):\n    on Register64AboveRange:\n        abi::x86_64::register64(0)\nr"] \
-        [diagKinds "fn f(n: int):\n    abi::x86_64::register64(n)\nf(3)"] \
-        [diagKinds "fn f(n: int) -> abi::x86_64::Register64 errors Register64BelowRange, Register64AboveRange:\n    abi::x86_64::register64(n)\n1"]
+    list [diagKinds "import abi::x86_64\nabi::x86_64::register64(39)\nabi::x86_64::register64(9223372036854775807)\nabi::x86_64::register64(0 - 9223372036854775807 - 1)\nabi::x86_64::register64(-1)"] \
+        [diagKinds "import abi::x86_64
+abi::x86_64::register64(9223372036854775808)"] \
+        [diagKinds "import abi::x86_64
+abi::x86_64::register64(-9223372036854775809)"] \
+        [diagKinds "import abi::x86_64\nr = abi::x86_64::register64(9223372036854775808):\n    on Register64AboveRange:\n        abi::x86_64::register64(0)\nr"] \
+        [diagKinds "import abi::x86_64\nfn f(n: int):\n    abi::x86_64::register64(n)\nf(3)"] \
+        [diagKinds "import abi::x86_64\nfn f(n: int) -> abi::x86_64::Register64 errors Register64BelowRange, Register64AboveRange:\n    abi::x86_64::register64(n)\n1"]
 } -result {{} KNOWN-ERROR KNOWN-ERROR KNOWN-ERROR UNHANDLED-ERROR {}}
 
 test linux-syscall-register64-known-error-names-the-bound {the compile-time rejection names the error of the violated bound} -body {
-    list [lindex [strictError "abi::x86_64::register64(9223372036854775808)"] 2] \
-        [lindex [strictError "abi::x86_64::register64(-9223372036854775809)"] 2]
+    list [lindex [strictError "import abi::x86_64
+abi::x86_64::register64(9223372036854775808)"] 2] \
+        [lindex [strictError "import abi::x86_64
+abi::x86_64::register64(-9223372036854775809)"] 2]
 } -match glob -result {{*always produces the declared error(s) Register64AboveRange*} {*always produces the declared error(s) Register64BelowRange*}}
 
 test linux-syscall-round-trip-needs-no-handler {to_int's result is statically a Register64Word, so register64(to_int(r)) needs no handler} -body {
-    list [diagKinds "fn again(r: abi::x86_64::Register64) -> abi::x86_64::Register64:\n    abi::x86_64::register64(abi::x86_64::to_int(r))\nabi::x86_64::to_int(again(abi::x86_64::register64(-5)))"] \
-        [agree "fn again(r: abi::x86_64::Register64) -> abi::x86_64::Register64:\n    abi::x86_64::register64(abi::x86_64::to_int(r))\nabi::x86_64::to_int(again(abi::x86_64::register64(-5)))"]
+    list [diagKinds "import abi::x86_64\nfn again(r: abi::x86_64::Register64) -> abi::x86_64::Register64:\n    abi::x86_64::register64(abi::x86_64::to_int(r))\nabi::x86_64::to_int(again(abi::x86_64::register64(-5)))"] \
+        [agree "import abi::x86_64\nfn again(r: abi::x86_64::Register64) -> abi::x86_64::Register64:\n    abi::x86_64::register64(abi::x86_64::to_int(r))\nabi::x86_64::to_int(again(abi::x86_64::register64(-5)))"]
 } -result {{} -5}
 
 test linux-syscall-to-int-is-ordinary-int {to_int's result is an ordinary arbitrary-precision Int: arithmetic past the register range does not wrap} -body {
-    agree {m = abi::x86_64::to_int(abi::x86_64::register64(9223372036854775807))
+    agree {import abi::x86_64
+m = abi::x86_64::to_int(abi::x86_64::register64(9223372036854775807))
 n = abi::x86_64::to_int(abi::x86_64::register64(0 - 9223372036854775807 - 1))
 [m + 1, n - 1, m * 2]
 }
 } -result {[9223372036854775808, -9223372036854775809, 18446744073709551614]}
 
 test linux-syscall-register64-is-transport-not-arithmetic {a Register64 has no arithmetic or ordering (the ordinary TYPE error any struct gets), only the language's structural equality; it prints as the nominal struct it is} -body {
-    list [lrange [lindex [outcomesOf "r = abi::x86_64::register64(20)\nr + 5" {interp}] 0] 0 2] \
-        [lsort -unique [lmap o [outcomesOf "r = abi::x86_64::register64(20)\nr * 8" {interp compile cranelift}] {lrange $o 0 1}]] \
-        [lsort -unique [lmap o [outcomesOf "r = abi::x86_64::register64(20)\nr < r" {interp compile cranelift}] {lrange $o 0 1}]] \
-        [agree "r = abi::x86_64::register64(20)\n\[r == abi::x86_64::register64(20), r == abi::x86_64::register64(21), r == 20, r\]"]
+    list [lrange [lindex [outcomesOf "import abi::x86_64\nr = abi::x86_64::register64(20)\nr + 5" {interp}] 0] 0 2] \
+        [lsort -unique [lmap o [outcomesOf "import abi::x86_64\nr = abi::x86_64::register64(20)\nr * 8" {interp compile cranelift}] {lrange $o 0 1}]] \
+        [lsort -unique [lmap o [outcomesOf "import abi::x86_64\nr = abi::x86_64::register64(20)\nr < r" {interp compile cranelift}] {lrange $o 0 1}]] \
+        [agree "import abi::x86_64\nr = abi::x86_64::register64(20)\n\[r == abi::x86_64::register64(20), r == abi::x86_64::register64(21), r == 20, r\]"]
 } -result {{error {CORE SEMANTIC TYPE} {+: expected int, got abi::x86_64::Register64 {word: 20}}} {{error {CORE SEMANTIC TYPE}}} {{error {CORE SEMANTIC TYPE}}} {[true, false, false, abi::x86_64::Register64 {word: 20}]}}
 
 test linux-syscall-register64-construction-needs-proof {constructing a Register64 directly is sound without privacy: its word must be proven in the domain statically (no runtime guard exists to forget)} -body {
-    list [diagKinds "abi::x86_64::Register64 {word: 9223372036854775808}"] \
-        [diagKinds "fn wrap(x: int):\n    abi::x86_64::Register64 {word: x}\n1"] \
-        [diagKinds "abi::x86_64::Register64 {word: 0 - 9223372036854775807 - 1}"]
+    list [diagKinds "import abi::x86_64
+abi::x86_64::Register64 {word: 9223372036854775808}"] \
+        [diagKinds "import abi::x86_64\nfn wrap(x: int):\n    abi::x86_64::Register64 {word: x}\n1"] \
+        [diagKinds "import abi::x86_64
+abi::x86_64::Register64 {word: 0 - 9223372036854775807 - 1}"]
 } -result {TYPE TYPE {}}
 
 test linux-syscall-conversions-allocate-nothing {natively, the conversions are no runtime work at all for a proven constant: register64(39)'s instance is one register move (no comparison, no fail path, no BigInt), and nothing is allocated} -constraints linuxX86_64 -body {
-    set text "fn conv(n: int) -> int:\n    abi::x86_64::to_int(abi::x86_64::register64(39)) + n\nloop i from 0 to 1000:\n    conv(i)\nconv(1)"
+    set text "import abi::x86_64\nfn conv(n: int) -> int:\n    abi::x86_64::to_int(abi::x86_64::register64(39)) + n\nloop i from 0 to 1000:\n    conv(i)\nconv(1)"
     set hir [syscallHir $text]
     set nir [native::nir $hir]
     set body [nirFunction $nir abi::x86_64::register64]
@@ -232,7 +245,7 @@ test linux-syscall-conversions-allocate-nothing {natively, the conversions are n
 } -result {0 0 2 0}
 
 test linux-syscall-dynamic-bounds-are-static-constants {for a dynamic Int, the -2^63 bound is a static BigInt constant, not a run-time negation that allocates on every call} -constraints linuxX86_64 -body {
-    set hir [syscallHir "fn conv(n: int) -> int errors Register64BelowRange, Register64AboveRange:\n    abi::x86_64::to_int(abi::x86_64::register64(n))\nxs = \[1, 2, 3\]\nloop x in xs:\n    conv(x):\n        on Register64BelowRange:\n            0\n        on Register64AboveRange:\n            0"]
+    set hir [syscallHir "import abi::x86_64\nfn conv(n: int) -> int errors Register64BelowRange, Register64AboveRange:\n    abi::x86_64::to_int(abi::x86_64::register64(n))\nxs = \[1, 2, 3\]\nloop x in xs:\n    conv(x):\n        on Register64BelowRange:\n            0\n        on Register64AboveRange:\n            0"]
     set body [nirFunction [native::nir $hir] abi::x86_64::register64]
     list [regexp {int -9223372036854775808} $body] [regexp -all {op isub} $body] \
         [regexp -all {faildeclared} $body]
@@ -242,42 +255,59 @@ test linux-syscall-dynamic-bounds-are-static-constants {for a dynamic Int, the -
 # linux::abi::syscall: the static contract of the register struct
 
 test linux-syscall-unknown-register-rejected {a field that is not a syscall-input register is UNKNOWN-FIELD at that field, never ignored} -body {
-    list [strictError "linux::abi::syscall({rax: abi::x86_64::register64(39), rbp: abi::x86_64::register64(1)})"] \
-        [diagKinds "linux::abi::syscall({rax: abi::x86_64::register64(39), rcx: abi::x86_64::register64(1)})"] \
-        [diagKinds "linux::abi::syscall({rax: abi::x86_64::register64(39), r11: abi::x86_64::register64(1)})"] \
-        [diagKinds "linux::abi::syscall({rax: abi::x86_64::register64(39), rsp: abi::x86_64::register64(1)})"]
-} -match glob -result {{UNKNOWN-FIELD 1:56 {"rbp" is not a syscall register: linux::abi::syscall's argument may name only rax, rdi, rsi, rdx, r10, r8, r9*}} UNKNOWN-FIELD UNKNOWN-FIELD UNKNOWN-FIELD}
+    list [strictError "import abi::x86_64
+import linux::abi
+linux::abi::syscall({rax: abi::x86_64::register64(39), rbp: abi::x86_64::register64(1)})"] \
+        [diagKinds "import abi::x86_64
+import linux::abi
+linux::abi::syscall({rax: abi::x86_64::register64(39), rcx: abi::x86_64::register64(1)})"] \
+        [diagKinds "import abi::x86_64
+import linux::abi
+linux::abi::syscall({rax: abi::x86_64::register64(39), r11: abi::x86_64::register64(1)})"] \
+        [diagKinds "import abi::x86_64
+import linux::abi
+linux::abi::syscall({rax: abi::x86_64::register64(39), rsp: abi::x86_64::register64(1)})"]
+} -match glob -result {{UNKNOWN-FIELD 3:56 {"rbp" is not a syscall register: linux::abi::syscall's argument may name only rax, rdi, rsi, rdx, r10, r8, r9*}} UNKNOWN-FIELD UNKNOWN-FIELD UNKNOWN-FIELD}
 
 test linux-syscall-rax-required {rax, the syscall number, is required; only the six argument registers may be omitted} -body {
-    strictError "linux::abi::syscall({rdi: abi::x86_64::register64(39)})"
-} -match glob -result {MISSING-FIELD 1:21 {linux::abi::syscall's argument has no field "rax"*}}
+    strictError "import abi::x86_64
+import linux::abi
+linux::abi::syscall({rdi: abi::x86_64::register64(39)})"
+} -match glob -result {MISSING-FIELD 3:21 {linux::abi::syscall's argument has no field "rax"*}}
 
 test linux-syscall-registers-must-be-register64 {every register field must statically be an abi::x86_64::Register64: a plain Int, a List or an untyped value is TYPE (no run-time check is inserted)} -body {
-    list [strictError "linux::abi::syscall({rax: 39})"] \
-        [diagKinds "linux::abi::syscall({rax: abi::x86_64::register64(39), rdi: \[1\]})"] \
-        [diagKinds "fn sys(nr):\n    linux::abi::syscall({rax: nr})\n1"] \
-        [diagKinds "fn sys(nr: abi::x86_64::Register64):\n    linux::abi::syscall({rax: nr})\n1"]
-} -match glob -result {{TYPE 1:22 {syscall register "rax" must be an abi::x86_64::Register64*its type here is int}} TYPE TYPE {}}
+    list [strictError "import linux::abi
+linux::abi::syscall({rax: 39})"] \
+        [diagKinds "import abi::x86_64\nimport linux::abi\nlinux::abi::syscall({rax: abi::x86_64::register64(39), rdi: \[1\]})"] \
+        [diagKinds "import linux::abi\nfn sys(nr):\n    linux::abi::syscall({rax: nr})\n1"] \
+        [diagKinds "import abi::x86_64\nimport linux::abi\nfn sys(nr: abi::x86_64::Register64):\n    linux::abi::syscall({rax: nr})\n1"]
+} -match glob -result {{TYPE 2:22 {syscall register "rax" must be an abi::x86_64::Register64*its type here is int}} TYPE TYPE {}}
 
 test linux-syscall-argument-must-be-register-struct {the argument is an anonymous register struct: a Register64 itself, an Int or a named struct is TYPE; arity is exactly one} -body {
-    list [diagKinds "linux::abi::syscall(abi::x86_64::register64(39))"] \
-        [diagKinds "linux::abi::syscall(39)"] \
-        [diagKinds "struct Regs:\n    rax: abi::x86_64::Register64\nlinux::abi::syscall(Regs {rax: abi::x86_64::register64(39)})"] \
-        [diagKinds "linux::abi::syscall()"] \
-        [diagKinds "linux::abi::syscall({rax: abi::x86_64::register64(39)}, {rax: abi::x86_64::register64(39)})"]
+    list [diagKinds "import abi::x86_64
+import linux::abi
+linux::abi::syscall(abi::x86_64::register64(39))"] \
+        [diagKinds "import linux::abi
+linux::abi::syscall(39)"] \
+        [diagKinds "import abi::x86_64\nimport linux::abi\nstruct Regs:\n    rax: abi::x86_64::Register64\nlinux::abi::syscall(Regs {rax: abi::x86_64::register64(39)})"] \
+        [diagKinds "import linux::abi
+linux::abi::syscall()"] \
+        [diagKinds "import abi::x86_64
+import linux::abi
+linux::abi::syscall({rax: abi::x86_64::register64(39)}, {rax: abi::x86_64::register64(39)})"]
 } -result {TYPE TYPE TYPE ARITY ARITY}
 
 test linux-syscall-diverging-field-hides-nothing {a literal field that cannot complete (its value is never, so the literal's whole type is never) does not hide the other fields' problems: each field is checked by its own name and value type} -body {
-    set text "error Nope\nfn boom(c: bool) errors Nope:\n    if c:\n        fail Nope\n    loop:\n        unit\nfn sc(c: bool) -> int errors Nope:\n    abi::x86_64::to_int(linux::abi::syscall({rax: abi::x86_64::register64(39), rcx: 5, rbp: \"x\", rdi: boom(c)}))\nv = sc(true):\n    on Nope:\n        0 - 1\nv"
+    set text "import abi::x86_64\nimport linux::abi\nerror Nope\nfn boom(c: bool) errors Nope:\n    if c:\n        fail Nope\n    loop:\n        unit\nfn sc(c: bool) -> int errors Nope:\n    abi::x86_64::to_int(linux::abi::syscall({rax: abi::x86_64::register64(39), rcx: 5, rbp: \"x\", rdi: boom(c)}))\nv = sc(true):\n    on Nope:\n        0 - 1\nv"
     list [lmap d [hir::diagnostics [syscallHir $text 0]] {dict get $d kind}] [lrange [strictError $text] 0 1]
-} -result {{UNKNOWN-FIELD UNKNOWN-FIELD} {UNKNOWN-FIELD 8:80}}
+} -result {{UNKNOWN-FIELD UNKNOWN-FIELD} {UNKNOWN-FIELD 10:80}}
 
 test linux-syscall-unchecked-program-replays-the-contract {a -strict 0 program (diagnostics kept, not raised) still never runs a call that broke the contract natively: the problem is replayed as a run-time error before anything is evaluated -- no syscall with a defaulted rax, no register read from an unproven value} -constraints linuxX86_64 -body {
     set results {}
     foreach text [list \
-            "fn f() -> int:\n    abi::x86_64::to_int(linux::abi::syscall({rdi: abi::x86_64::register64(140), rbp: abi::x86_64::register64(7)}))\nf()" \
-            "fn f() -> int:\n    abi::x86_64::to_int(linux::abi::syscall({rax: abi::x86_64::register64(39), rdi: 5}))\nf()" \
-            "fn f() -> int:\n    abi::x86_64::to_int(linux::abi::syscall({rdi: abi::x86_64::register64(140)}))\nf()"] {
+            "import abi::x86_64\nimport linux::abi\nfn f() -> int:\n    abi::x86_64::to_int(linux::abi::syscall({rdi: abi::x86_64::register64(140), rbp: abi::x86_64::register64(7)}))\nf()" \
+            "import abi::x86_64\nimport linux::abi\nfn f() -> int:\n    abi::x86_64::to_int(linux::abi::syscall({rax: abi::x86_64::register64(39), rdi: 5}))\nf()" \
+            "import abi::x86_64\nimport linux::abi\nfn f() -> int:\n    abi::x86_64::to_int(linux::abi::syscall({rdi: abi::x86_64::register64(140)}))\nf()"] {
         set hir [syscallHir $text 0]
         lappend results [lsort -unique [lmap b $::nativeBackends {lrange [outcomeUnderHir $b $hir] 0 1}]]
     }
@@ -285,9 +315,9 @@ test linux-syscall-unchecked-program-replays-the-contract {a -strict 0 program (
 } -result {{{error {CORE SEMANTIC UNKNOWN-FIELD}}} {{error {CORE SEMANTIC TYPE}}} {{error {CORE SEMANTIC MISSING-FIELD}}}}
 
 test linux-syscall-not-a-value {linux::abi::syscall can only be called directly: it has no function value} -body {
-    list [strictError "f = linux::abi::syscall\nf"] \
-        [diagKinds "fn apply(g, x):\n    g(x)\napply(linux::abi::syscall, 1)"]
-} -match glob -result {{TYPE 1:5 {linux::abi::syscall can only be called directly*}} TYPE}
+    list [strictError "import linux::abi\nf = linux::abi::syscall\nf"] \
+        [diagKinds "import linux::abi\nfn apply(g, x):\n    g(x)\napply(linux::abi::syscall, 1)"]
+} -match glob -result {{TYPE 2:5 {linux::abi::syscall can only be called directly*}} TYPE}
 
 test linux-syscall-cannot-initialize-a-module-binding {a syscall never initializes a module binding (MODULE-CONTEXT). Today the register-struct literal every call needs is already rejected first (a struct is not a context-free initializer); independently, the native itself is classified not context-free, so the call stays rejected even if struct initializers are ever accepted} -body {
     set dir [makeDirectory linux-syscall-modules]
@@ -298,10 +328,11 @@ test linux-syscall-cannot-initialize-a-module-binding {a syscall never initializ
         # abi::x86_64's ABI-value encoders use lib/abi.bot's types.
         file copy -force [file join $::projectRoot lib abi.bot] [file join $dir abi.bot]
         set channel [open [file join $dir pidmod.bot] w]
-        puts $channel "namespace pidmod\npid = abi::x86_64::to_int(linux::abi::syscall({rax: abi::x86_64::register64(39)}))"
+        puts $channel "namespace pidmod\n\nimport abi::x86_64\nimport linux::abi\npid = abi::x86_64::to_int(linux::abi::syscall({rax: abi::x86_64::register64(39)}))"
         close $channel
         set ::core::libraryDir $dir
-        list [diagKinds "pidmod::pid"] [dict get [core::native::metadata linux::abi::syscall] contextFree]
+        list [diagKinds "import pidmod
+pidmod::pid"] [dict get [core::native::metadata linux::abi::syscall] contextFree]
     } finally {
         set ::core::libraryDir $saved
         removeDirectory linux-syscall-modules
@@ -317,7 +348,8 @@ test linux-syscall-module-cannot-shadow-the-native {a linux::abi module may not 
         puts $channel "namespace linux::abi\nfn helper():\n    1\nfn syscall(x):\n    x"
         close $channel
         set ::core::libraryDir $dir
-        catch {syscallHir "linux::abi::helper()"} message options
+        catch {syscallHir "import linux::abi
+linux::abi::helper()"} message options
         list [dict get $options -errorcode] [string match {*cannot define "syscall": linux::abi::syscall is a compiler-provided intrinsic (a root native registered under that qualified name)*} $message]
     } finally {
         set ::core::libraryDir $saved
@@ -335,7 +367,7 @@ test linux-syscall-tcl-backends-refuse {interp and compile refuse the call itsel
 
 test linux-syscall-tcl-backends-refuse-only-the-call {a program that defines raw_getpid but never calls it runs on every backend; a discarded call is still refused (never optimized away)} -body {
     list [agree "${::rawGetpid}abi::x86_64::to_int(abi::x86_64::register64(7))"] \
-        [lsort -unique [lmap o [outcomesOf "linux::abi::syscall({rax: abi::x86_64::register64(39)})\n1" {interp compile}] {lindex $o 1}]]
+        [lsort -unique [lmap o [outcomesOf "import abi::x86_64\nimport linux::abi\nlinux::abi::syscall({rax: abi::x86_64::register64(39)})\n1" {interp compile}] {lindex $o 1}]]
 } -result {7 {{CORE SEMANTIC NATIVE-ONLY}}}
 
 # ---------------------------------------------------------------------------
@@ -360,8 +392,8 @@ test linux-syscall-transport-allocates-nothing {the canonical syscall path is ze
 } -result {0 0}
 
 test linux-syscall-bound-register-struct-is-an-object {a known representation frontier, pinned: a register struct bound to a local and then passed by name is built as an object -- the struct, plus one Register64 per register (register64(...) results nested in a bound literal are opaque call results to scalar replacement) -- where the same registers written inline allocate nothing; the values are the same} -constraints linuxX86_64 -body {
-    set bound [syscallHir "fn f():\n    regs = {rdi: abi::x86_64::register64(1), rax: abi::x86_64::register64(39)}\n    abi::x86_64::to_int(linux::abi::syscall(regs))\nf() > 0"]
-    set inline [syscallHir "fn f():\n    abi::x86_64::to_int(linux::abi::syscall({rdi: abi::x86_64::register64(1), rax: abi::x86_64::register64(39)}))\nf() > 0"]
+    set bound [syscallHir "import abi::x86_64\nimport linux::abi\nfn f():\n    regs = {rdi: abi::x86_64::register64(1), rax: abi::x86_64::register64(39)}\n    abi::x86_64::to_int(linux::abi::syscall(regs))\nf() > 0"]
+    set inline [syscallHir "import abi::x86_64\nimport linux::abi\nfn f():\n    abi::x86_64::to_int(linux::abi::syscall({rdi: abi::x86_64::register64(1), rax: abi::x86_64::register64(39)}))\nf() > 0"]
     list [dict get [native::allocationReport $bound summary] byKind Struct allocations] \
         [dict get [native::allocationReport $inline summary] byKind Struct allocations] \
         [lindex [outcomeUnderHir cranelift $bound] 1] [lindex [outcomeUnderHir cranelift $inline] 1]
@@ -449,7 +481,7 @@ s = list::at(\[linux::abi::syscall({rax: abi::x86_64::register64(39)})\], 0)
 # Backend evidence: a raw syscall, not libc's getpid
 
 test linux-syscall-nir-generic-op {NIR: one generic op over seven register words in the syscall convention's order (rax rdi rsi rdx r10 r8 r9), an omitted register the Int 0; 39 is only the source literal's own constant; no getpid anywhere} -constraints linuxX86_64 -body {
-    set nir [native::nir [syscallHir "fn f():\n    abi::x86_64::to_int(linux::abi::syscall({r8: abi::x86_64::register64(8), rdi: abi::x86_64::register64(1), rax: abi::x86_64::register64(39)}))\nf()"]]
+    set nir [native::nir [syscallHir "import abi::x86_64\nimport linux::abi\nfn f():\n    abi::x86_64::to_int(linux::abi::syscall({r8: abi::x86_64::register64(8), rdi: abi::x86_64::register64(1), rax: abi::x86_64::register64(39)}))\nf()"]]
     set body [nirFunction $nir f]
     regexp {(%[0-9]+) = op syscall_linux_x86_64 ((?:%[0-9]+ ?){7})} $body -> result operands
     # Each written field's register64(...) call, in written order.
@@ -467,7 +499,7 @@ test linux-syscall-nir-generic-op {NIR: one generic op over seven register words
 } -result {{w39 w1 0 0 0 w8 0} {8 1 39} 0 1}
 
 test linux-syscall-clif-is-a-helper-call {CLIF: the op is a real call of the runtime helper rt_linux_x86_64_syscall (a GC safepoint with its result checked) -- never inline code Cranelift could merge, hoist or delete; two calls stay two calls, a discarded one stays} -constraints linuxX86_64 -body {
-    set clif [native::clif [syscallHir "fn f():\n    linux::abi::syscall({rax: abi::x86_64::register64(39)})\n    linux::abi::syscall({rax: abi::x86_64::register64(39)})\n    1\nf()"]]
+    set clif [native::clif [syscallHir "import abi::x86_64\nimport linux::abi\nfn f():\n    linux::abi::syscall({rax: abi::x86_64::register64(39)})\n    linux::abi::syscall({rax: abi::x86_64::register64(39)})\n    1\nf()"]]
     regexp {; (u0:[0-9]+) = rt_linux_x86_64_syscall} $clif -> helper
     regexp {; function [0-9]+ "f": botlish_fn_[0-9]+} $clif header
     set start [string first $header $clif]
@@ -626,7 +658,7 @@ test linux-syscall-conversion-fuzz {seeded fuzz of the pure round trip to_int(re
     set failures {}
     foreach seed {20261003 424242 7777} {
         set values [fuzzValues $seed 120]
-        set text "fn classify(n: int):\n    r = abi::x86_64::register64(n):\n        on Register64BelowRange:\n            return \"below\"\n        on Register64AboveRange:\n            return \"above\"\n    abi::x86_64::to_int(r)\n\nxs = \[[join [lmap v $values {intExpr $v}] {, }]\]\nloop x in xs:\n    classify(x)\n"
+        set text "import abi::x86_64\nfn classify(n: int):\n    r = abi::x86_64::register64(n):\n        on Register64BelowRange:\n            return \"below\"\n        on Register64AboveRange:\n            return \"above\"\n    abi::x86_64::to_int(r)\n\nxs = \[[join [lmap v $values {intExpr $v}] {, }]\]\nloop x in xs:\n    classify(x)\n"
         set expected "\[[join [lmap v $values {registerOracle $v}] {, }]\]"
         set got [agree $text]
         if {$got ne $expected} {

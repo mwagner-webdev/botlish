@@ -124,6 +124,7 @@ proc instanceDump {analysis} {
 # with no separate construction needed.
 
 set ::primaryFixture {
+import str
 fn outer(tag):
     fn inner(x):
         x + str::length(tag)
@@ -144,6 +145,7 @@ outer("v")
 # asks for, not merely the round-1-reset artifact primaryFixture exercises.
 
 set ::cascadeFixture {
+import str
 fn outer(tag):
     fn inner(x):
         x + str::length(tag)
@@ -163,6 +165,7 @@ outer("v")
 # any narrower-than-baseline result.
 
 set ::recursiveResultFixture {
+import str
 fn outer(tag):
     fn inner(x, n):
         if n <= 0:
@@ -182,6 +185,7 @@ outer("v")
 # budget of 0 must not roll back anything -- there is nothing to roll back.
 
 set ::noOptimizableClosureFixture {
+import str
 fn outer(tag):
     fn inner(x):
         x + 1

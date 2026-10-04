@@ -73,7 +73,10 @@ proc core::type::register {name args} {
     variable primitives
     variable evidenceKinds
     variable registry
-    if {![regexp {^[A-Za-z_][A-Za-z0-9_.]*$} $name]
+    # A source-declared type of a module is named `NAMESPACE::Name` (its
+    # qualified identity, hir/sourcetypes.tcl); a nested namespace has more
+    # segments.
+    if {![regexp {^[A-Za-z_][A-Za-z0-9_.]*(?:::[A-Za-z_][A-Za-z0-9_.]*)*$} $name]
             || $name in $primitives || $name in {any refined never}} {
         error "core::type::register: invalid type name \"$name\""
     }
@@ -299,6 +302,25 @@ proc core::type::declareIntConstructor {name} {
 proc core::type::names {} {
     variable registry
     return [dict keys $registry]
+}
+
+# 1 if NAME is a type the compiler itself knows: a primitive, `any`, or a
+# compiler-registered named type (never a source-declared one, which exists
+# only for the compilation that declared it).
+proc core::type::isBuiltinName {name} {
+    variable primitives
+    variable registry
+    if {$name in $primitives || $name eq "any"} {
+        return 1
+    }
+    return [expr {[dict exists $registry $name] && ![dict get $registry $name source]}]
+}
+
+# 1 if NAME is a type declared by Botlish source (registered for the current
+# compilation only).
+proc core::type::isSource {name} {
+    variable registry
+    return [expr {[dict exists $registry $name] && [dict get $registry $name source]}]
 }
 
 proc core::type::isNamed {name} {

@@ -1,3 +1,5 @@
+import mathish
+
 # An ordinary module function, a module-qualified call inside a closure, and a
 # module value used through a local of the same spelling.
 fn twice(v):

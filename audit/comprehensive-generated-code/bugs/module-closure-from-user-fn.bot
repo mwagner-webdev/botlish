@@ -1,3 +1,6 @@
+import web
+import type byte::Byte
+
 # Native crash repro (not fixed): a user function referencing a module function that is
 # itself a closure over a retained module value. interp: true; cranelift: NATIVE BUG
 # "binding ... is not reachable".

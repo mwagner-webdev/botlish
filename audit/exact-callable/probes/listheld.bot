@@ -3,6 +3,9 @@
 #
 # expect: [2, 3]
 
+import list
+import str
+
 fn a_alpha(c):
     str::is_tcl_alpha(c)
 

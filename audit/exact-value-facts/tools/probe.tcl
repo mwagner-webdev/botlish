@@ -8,7 +8,7 @@ source [file join $root surface surface.tcl]
 set strict 1
 set args $argv
 if {[lindex $args 0] eq "-strict"} { set strict [lindex $args 1]; set args [lrange $args 2 end] }
-set hir [surface::compile [lindex $args 0] t.bot -strict $strict]
+set hir [surface::compile [surface::modules::ImportHeader [lindex $args 0]][lindex $args 0] t.bot -strict $strict]
 set havExact [expr {[info commands hir::exact::Of] ne ""}]
 puts "--- semantic"
 puts [hir::format $hir]

@@ -271,6 +271,7 @@ test raw-result-tagged-param {an unproven (unbounded) entry with a constant succ
 
 test raw-mixed-parameters {fn f(a, b, s): a small, b unbounded, s a String: raw, tagged, tagged} -body {
     set text {
+        import str
         fn count(n, acc):
             if n == 0:
                 acc
@@ -291,6 +292,7 @@ test raw-mixed-parameters {fn f(a, b, s): a small, b unbounded, s a String: raw,
 
 test raw-mixed-physical-signature-in-nir {only position 0 is in rawparams; a hidden or tagged position is not} -body {
     set text {
+        import str
         fn f(a, s):
             if a > 100:
                 0
@@ -375,6 +377,7 @@ test raw-finite-large-fib {fib(100): the successful result is finite but exceeds
 
 test raw-open-instance-stays-tagged {a function whose Block value escapes keeps the tagged generic ABI; the exact direct-call instance may still be raw} -body {
     set text {
+        import list
         fn open_one(n):
             n * 2
 
@@ -390,6 +393,7 @@ test raw-open-instance-stays-tagged {a function whose Block value escapes keeps 
 
 test raw-dynamic-call-uses-generic-entry {a function invoked through a Block value runs its tagged generic entry, and agrees} -body {
     set text {
+        import list
         fn add1(n):
             n + 1
 
@@ -406,6 +410,7 @@ test raw-dynamic-call-uses-generic-entry {a function invoked through a Block val
 
 test raw-exact-callable-target-is-raw {an exact callable specialization calls a raw instance directly, not through callvalue} -body {
     set text {
+        import list
         fn open_one(n):
             n * 2
 
@@ -418,8 +423,11 @@ test raw-exact-callable-target-is-raw {an exact callable specialization calls a 
         [apply_dyn(open_one, 6) + 1, list::length(stash())]
     }
     set nir [nirOf $text {*}$noInline]
-    list [abiPlan $text {*}$noInline] [countIn {callvalue} $nir] [parityAbi $text]
-} -result {{open_one<int>=raw>raw open_one<generic>=val>val {apply_dyn<block(e2), int>=val,raw>raw} stash<generic>=>val} 0 {value:[13, 1]}}
+    # The block's expression id depends on how much code `import list` loads
+    # before this program; only the shape of the plan is pinned.
+    set plan [regsub -all {block\(e\d+\)} [abiPlan $text {*}$noInline] {block(eN)}]
+    list $plan [countIn {callvalue} $nir] [parityAbi $text]
+} -result {{open_one<int>=raw>raw open_one<generic>=val>val {apply_dyn<block(eN), int>=val,raw>raw} stash<generic>=>val} 0 {value:[13, 1]}}
 
 # ---------------------------------------------------------------------------
 # Recursion
@@ -440,6 +448,7 @@ test raw-mixed-recursion {a recursive function with a raw parameter and a tagged
 
 test raw-non-tail-recursion-with-allocation {raw n and raw result stay valid across a recursive call that also allocates} -body {
     set text {
+        import str
         fn build(n):
             if n < 1:
                 0
@@ -646,6 +655,7 @@ test raw-comparison-consumes-raw-directly {a raw parameter feeds every raw compa
 
 test demand-tagged-only-parameter {a small closed Int parameter that only reaches a tagged consumer (List construction) is eligible but stays tagged: no rawparams, no conversion at the boundary} -body {
     set text {
+        import list
         fn wrap(n):
             [n]
 
@@ -658,6 +668,7 @@ test demand-tagged-only-parameter {a small closed Int parameter that only reache
 
 test demand-eligibility-only-mode-is-the-preliminary-plan {-raw-demand-opt 0 selects every eligible position: the same program is raw, with the conversions the demand rule removes} -body {
     set text {
+        import list
         fn wrap(n):
             [n]
 
@@ -685,6 +696,7 @@ test demand-tagged-only-result {a bounded closed result whose every caller hands
 
 test demand-raw-parameter {a parameter used by raw arithmetic is selected raw whatever its result does} -body {
     set text {
+        import list
         fn inc(n):
             n + 1
 
@@ -696,6 +708,7 @@ test demand-raw-parameter {a parameter used by raw arithmetic is selected raw wh
 
 test demand-raw-result {a bounded closed result consumed by raw arithmetic at a caller is selected raw} -body {
     set text {
+        import str
         fn six(s):
             str::length(s)
 
@@ -710,6 +723,7 @@ test demand-raw-result {a bounded closed result consumed by raw arithmetic at a 
 
 test demand-mixed-use-is-boxed {raw arithmetic and a tagged storage use of the same parameter: a mixed use, so the position is boxed by default (reason suppressed-mixed-tagged-use); -raw-mixed-policy raw is the audit-only earlier behaviour} -body {
     set text {
+        import list
         fn both(n):
             x = n + 1
             [n, x]
@@ -724,6 +738,7 @@ test demand-mixed-use-is-boxed {raw arithmetic and a tagged storage use of the s
 
 test demand-propagates-through-aliases {the only raw consumer is behind an alias chain} -body {
     set text {
+        import list
         fn f(n):
             y = n
             z = y
@@ -736,6 +751,7 @@ test demand-propagates-through-aliases {the only raw consumer is behind an alias
 
 test demand-branches-raw-only-raw-mixed-boxed-tagged-only-tagged {every reachable branch raw: RawInt; one raw and one tagged branch: boxed (mixed); every branch tagged: tagged} -body {
     set text {
+        import list
         fn some(n, c):
             if c:
                 list::length([n])
@@ -763,6 +779,7 @@ test demand-branches-raw-only-raw-mixed-boxed-tagged-only-tagged {every reachabl
 
 test demand-dead-branch-raw-use-does-not-count {a raw use in a branch HIR/Range proved dead keeps nothing alive} -body {
     set text {
+        import list
         fn f(n, c):
             if c > 100:
                 n + 1
@@ -812,6 +829,7 @@ test demand-transport-chain-stays-raw {f result -> g parameter -> h parameter ->
 
 test demand-tagged-chain-is-all-tagged {f result -> g parameter -> h parameter -> tagged storage with no raw operation on the transported value: the whole chain is tagged (raw transport alone never creates demand)} -body {
     set text {
+        import list
         fn f(k):
             if k > 0:
                 4
@@ -832,6 +850,7 @@ test demand-tagged-chain-is-all-tagged {f result -> g parameter -> h parameter -
 
 test demand-forwarding-cycle-cannot-bootstrap-raw {a recursive position that only forwards the value to itself and returns it, whose caller stores it: no raw operation on the value anywhere, so neither the parameter nor the result is selected} -body {
     set text {
+        import list
         fn f(n, c):
             if c == 0:
                 n
@@ -881,6 +900,7 @@ test demand-loops-and-handlers-agree {a tagged counted loop's bound is a tagged 
 
 test demand-mixed-use-propagates-through-transport {a callee that boxes its parameter (raw and tagged use) makes the caller's forwarded parameter boxed too: the tagged consumer is in the closure} -body {
     set text {
+        import list
         fn h(z):
             x = z + 1
             [z, x]
@@ -955,6 +975,7 @@ test demand-fib-keeps-the-recursive-raw-cycle {the recursive parameter/result cy
 
 test demand-suppressed-signature-is-consistent {a suppressed position is tagged for the callee and every caller: the physical signature is the one plan, validated by the NIR checker when the program is compiled} -body {
     set text {
+        import list
         fn wrap(n):
             [n]
 
@@ -1083,6 +1104,8 @@ test raw-error-escapes-uncaught-as-an-error {an undeclared runtime failure insid
 
 test raw-gc-raw-live-across-allocation {a raw parameter, a String and a List live across unrelated allocations under GC stress} -body {
     set text {
+        import list
+        import str
         fn work(n, s, xs):
             t = str::concat(s, "x")
             u = list::append(xs, 7)
@@ -1105,6 +1128,7 @@ test raw-gc-raw-live-across-allocation {a raw parameter, a String and a List liv
 
 test raw-gc-recursive-allocating-frames {raw n and a raw result across 200 recursive, allocating frames under GC stress} -body {
     set text {
+        import str
         fn depth(n, s):
             if n == 0:
                 str::length(s)
@@ -1124,6 +1148,7 @@ test raw-gc-recursive-allocating-frames {raw n and a raw result across 200 recur
 
 test raw-gc-stack-map-has-no-raw-roots {the root report of a raw-parameter function lists the raw registers as non-roots} -body {
     set text {
+        import str
         fn work(n, s):
             t = str::concat(s, "x")
             n + str::length(t)
@@ -1173,6 +1198,8 @@ test raw-executable-fib {the standalone executable of fib agrees with every back
 
 test raw-executable-mixed {raw, tagged and error-capable instances in one standalone executable} -constraints executableAot -body {
     aotParity {
+        import list
+        import str
         error Negative
 
         fn check(n) -> int errors Negative:
@@ -1203,6 +1230,7 @@ test raw-executable-mixed {raw, tagged and error-capable instances in one standa
 } -result {[-77, -1, 8]}
 
 set demandSource {
+    import list
     fn wrap(n):
         [n]
 

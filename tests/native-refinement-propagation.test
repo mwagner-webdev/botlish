@@ -82,7 +82,8 @@ test native-refinement-propagation-native-body-without-override-loses-it {contro
             [hir::syntax::callNode {ir {}} $qref [hir::syntax::constNode {ir {}} str {a b}]]] \
         [hir::syntax::refNode {ir {}} q]]
     hirRefTypes [hir::buildSyntax $nodes -strict 0 -files [dict get $loaded files] \
-        -modules [dict get $loaded sections]] q
+        -modules [dict get $loaded sections] \
+        -imports [dict get $loaded imports]] q
 } -result {str}
 
 # ---------------------------------------------------------------------------

@@ -60,6 +60,8 @@ set scratch [file tempdir register64-fuzz]
 set counter 0
 
 proc hirOfText {text {strict 1}} {
+    # The program's own dependencies, declared exactly (IMPORTS.md).
+    set text [surface::modules::ImportHeader $text]$text
     set path [file join $::scratch p[incr ::counter].bot]
     set channel [open $path w]
     fconfigure $channel -encoding utf-8

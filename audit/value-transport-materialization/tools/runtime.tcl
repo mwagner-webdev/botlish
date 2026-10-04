@@ -40,7 +40,7 @@ set probes [list \
 proc median {v} { lindex [lsort -real $v] [expr {[llength $v] / 2}] }
 set out {}
 foreach {label source} $probes {
-    set hir [surface::compile $source probe.bot -strict 0]
+    set hir [surface::compile [surface::modules::ImportHeader $source]$source probe.bot -strict 0]
     set samples [dict create]
     for {set r 0} {$r < $rounds} {incr r} {
         foreach {mode opts} $modes {

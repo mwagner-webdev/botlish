@@ -23,6 +23,9 @@
 #
 # expect: [["name", "age"], ["Alice", "30"], ["Bob", "40"]]
 
+import list
+import str
+
 # The character at index, or "" past the end.
 fn peek(text, index) errors LowerUnderrun:
     if index >= str::length(text):

@@ -107,14 +107,11 @@ proc surface::lowerToHir {ast args} {
             surface::raise $diagnostic
         }
     }
-    surface::modules::CheckEntryProgram $ast
-    lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable decls errorDecls structDecls
-    set nodes [surface::lower::Sequence $executable]
-    set hir [hir::buildSyntax $nodes -strict 0 \
-        -halt-on-resolution-errors [dict get $options -strict] \
-        -origin [surface::lower::Origin [dict get $ast span] ""] \
-        -files [dict create f1 [dict get $ast span file]] \
-        -type-decls $decls -error-decls $errorDecls -struct-decls $structDecls]
+    # The same path a program file takes (surface/modules.tcl): the file's
+    # imports are validated, the modules they name are loaded and compiled
+    # alongside it, and a qualified reference with no import is rejected --
+    # for program text exactly as for a file.
+    set hir [surface::modules::BuildProgram $ast [dict get $options -strict]]
     return [surface::lower::Finish $hir [dict get $options -strict] \
         [dict get $options -warnings] [dict get $options -warning-channel]]
 }
@@ -126,8 +123,9 @@ proc surface::lowerToHir {ast args} {
 # -type-decls option takes (see hir/sourcetypes.tcl); ERRORDECLS likewise
 # for named-error declarations (`errordecl` nodes, hir/errordecls.tcl's
 # -error-decls); STRUCTDECLS likewise for struct declarations (`structdecl`
-# nodes, hir/structs.tcl's -struct-decls; STRUCTS.md), tagged with NAMESPACE
-# (the declaring module's, "" for the entry program). No kind of declaration
+# nodes, hir/structs.tcl's -struct-decls; STRUCTS.md); structs and types are
+# tagged with NAMESPACE (the declaring module's, "" for the entry program):
+# it makes their identity `NAMESPACE::Name` (IMPORTS.md). No kind of declaration
 # is lowered to an hir/syntax.tcl node: compile-time-only metadata (spec
 # items 21-22/109: no bind, no runtime value, no NIR).
 proc surface::lower::SplitTypeDecls {statements {namespace ""}} {
@@ -137,7 +135,7 @@ proc surface::lower::SplitTypeDecls {statements {namespace ""}} {
     set structDecls {}
     foreach statement $statements {
         switch -- [dict get $statement kind] {
-            typedecl   { lappend decls [TypeDeclOf $statement] }
+            typedecl   { lappend decls [TypeDeclOf $statement $namespace] }
             errordecl  { lappend errorDecls [ErrorDeclOf $statement] }
             structdecl { lappend structDecls [StructDeclOf $statement $namespace] }
             default    { lappend executable $statement }
@@ -151,9 +149,9 @@ proc surface::lower::StructDeclOf {node namespace} {
         namespace $namespace fields [dict get $node fields] span [dict get $node span]]
 }
 
-proc surface::lower::TypeDeclOf {node} {
+proc surface::lower::TypeDeclOf {node {namespace ""}} {
     return [dict create \
-        name [dict get $node name] nameSpan [dict get $node nameSpan] \
+        name [dict get $node name] nameSpan [dict get $node nameSpan] namespace $namespace \
         parent [dict get $node parent] parentSpan [dict get $node parentSpan] \
         domain [dict get $node domain] domainSpan [dict get $node domain span]]
 }

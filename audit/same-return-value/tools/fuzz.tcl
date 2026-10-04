@@ -48,7 +48,8 @@ proc pick {list} {
 # groups, each a list of exit line numbers.
 proc generate {seed} {
     expr {srand($seed)}
-    set header {a1 = 1
+    set header {import mutable_array
+a1 = 1
 a2 = 2
 a3 = 3
 b1 = a1
@@ -135,7 +136,7 @@ proc subset {small big} {
 }
 
 proc compileMode {source mode} {
-    return [surface::compile $source fuzz.bot -warnings $mode -warning-channel ""]
+    return [surface::compile [surface::modules::ImportHeader $source]$source fuzz.bot -warnings $mode -warning-channel ""]
 }
 
 proc linesOf {hir w} {

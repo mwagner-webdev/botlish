@@ -4,4 +4,6 @@
 #
 # expect: [42, 2]
 
+import mathish
+
 [mathish::inc(41), mathish::inc(1)]

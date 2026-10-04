@@ -524,3 +524,27 @@ documented in "Compilation isolation" above rather than attempted; it would
 require threading a compilation identity through every `core::type`/
 `core::native` lookup site, which is a different, larger piece of work than
 adding the language feature itself.
+
+## Types are namespace members (IMPORTS.md)
+
+Everything above describes one flat type namespace. A `type` declared in a
+module is now a member of that module's namespace and has the qualified
+identity `NAMESPACE::Name` (`abi::U8Value`): the identity registered in
+`core::type`, kept in HIR's `sourceTypes`, shown in diagnostics
+(`int[abi::U8Value]`) and used by its membership predicate (`abi::U8Value?`).
+The entry program's own types keep their bare identity. The declaration
+rules above (domain checks, parents, DFS, cycles, isolation by generation)
+are unchanged; what changed is what a *name* denotes:
+
+* inside its declaring module `Count` is `ns::Count`;
+* elsewhere the qualified spelling `ns::Count` (after `import ns`), or the
+  short `Count` bound by `import type ns::Count`, is that one identity --
+  no alias, wrapper or second type;
+* a module sees only its own types, the types it imports and the built-in
+  types: not the entry program's, and not the types of a module that merely
+  happens to be loaded.
+
+Two modules (or a module and the program) may declare the same short name
+without colliding. `error` and `struct` declarations are not part of this
+change: structs already carried a `ns::Name` identity (STRUCTS.md); error
+names remain global.

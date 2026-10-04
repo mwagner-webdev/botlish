@@ -27,6 +27,8 @@ proc dedent {text} {
 # rec calls itself directly, and a closure nested in it puts rec in a List
 # and calls it dynamically with a bignum.
 set selfShape {
+    import list
+    import str
     fn h(x):
         x + 1
     fn other(a, p):
@@ -56,6 +58,8 @@ set selfShape {
 
 # c calls its sibling f directly, and a closure nested in c puts f in a List.
 set siblingShape {
+    import list
+    import str
     fn h(x):
         x + 1
     fn other(a, p):

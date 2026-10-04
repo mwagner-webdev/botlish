@@ -4,6 +4,8 @@
 #
 # expect: [42, 3]
 
+import str
+
 fn inc(x):
     x + 1
 

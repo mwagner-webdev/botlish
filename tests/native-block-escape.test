@@ -124,7 +124,7 @@ test blockescape-stored-1 {a closure also stored in a List is never virtualized,
     # A bare Block value cannot cross the native/host boundary (there is no
     # Tcl representation for it), so the escaping use is observed here
     # through list::length rather than by returning the List itself.
-    set text "fn f(n):\n    fn step(x):\n        x + n\n    box = \[step, 0\]\n    step(1) + list::length(box)\n\nf(10)"
+    set text "import list\nfn f(n):\n    fn step(x):\n        x + n\n    box = \[step, 0\]\n    step(1) + list::length(box)\n\nf(10)"
     set on [blockAllocs $text 1]
     set off [blockAllocs $text 0]
     list [assertParity $text] $on [expr {$on == $off}]
@@ -218,7 +218,7 @@ test blockescape-sibling-escaping-1 {a closure captured by an escaping sibling s
 
 test blockescape-gc-stress-1 {a captured String stays live under BOTLISH_NATIVE_GC_STRESS=1} -body {
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
-    set text "fn f(n, s):\n    fn step(x):\n        str::concat(x, s)\n    if n == 0:\n        return step(\"go\")\n    f(n - 1, s)\n\nf(2000, \"!\")"
+    set text "import str\nfn f(n, s):\n    fn step(x):\n        str::concat(x, s)\n    if n == 0:\n        return step(\"go\")\n    f(n - 1, s)\n\nf(2000, \"!\")"
     set result [catch {native::evalHir [sourceHir $text]} value]
     unset ::env(BOTLISH_NATIVE_GC_STRESS)
     list $result $value
@@ -233,7 +233,7 @@ test blockescape-gc-stress-1 {a captured String stays live under BOTLISH_NATIVE_
 
 test blockescape-gc-stress-2 {a managed capture threaded through a de-closure-converted sibling+self-tail chain survives GC stress} -body {
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
-    set text "fn f(n, s):\n    fn build(x):\n        str::concat(s, x)\n    fn scan(i):\n        if i >= n:\n            build(\"done\")\n        else:\n            str::concat(build(\"x\"), scan(i + 1))\n    scan(0)\n\nf(3, \"go-\")"
+    set text "import str\nfn f(n, s):\n    fn build(x):\n        str::concat(s, x)\n    fn scan(i):\n        if i >= n:\n            build(\"done\")\n        else:\n            str::concat(build(\"x\"), scan(i + 1))\n    scan(0)\n\nf(3, \"go-\")"
     set on [blockAllocs $text 1]
     set result [catch {native::evalHir [sourceHir $text]} value]
     unset ::env(BOTLISH_NATIVE_GC_STRESS)
@@ -241,7 +241,7 @@ test blockescape-gc-stress-2 {a managed capture threaded through a de-closure-co
 } -result {0 {str go-xgo-xgo-xgo-done} 0}
 
 test blockescape-multi-managed-capture-1 {a virtualized closure with three captures (String, Int, Bool) passes all three correctly} -body {
-    set text "fn f(s, n, flag):\n    fn combine(x):\n        if flag:\n            str::concat(str::concat(s, x), n)\n        else:\n            str::concat(x, s)\n    str::concat(combine(\"-\"), combine(\"+\"))\n\nf(\"hi\", \"7\", true)"
+    set text "import str\nfn f(s, n, flag):\n    fn combine(x):\n        if flag:\n            str::concat(str::concat(s, x), n)\n        else:\n            str::concat(x, s)\n    str::concat(combine(\"-\"), combine(\"+\"))\n\nf(\"hi\", \"7\", true)"
     list [assertParity $text] [blockAllocs $text 1] [blockAllocs $text 0]
 } -result {{str hi-7hi+7} 0 1}
 
@@ -259,7 +259,7 @@ test blockescape-loop-creation-1 {a de-closure-converted closure created repeate
 # expressions).
 
 test blockescape-effects-1 {a captured value's producing expression runs exactly once, not once per call} -body {
-    set text "fn side(n):\n    str::concat(\"x\", n)\n\nfn f():\n    v = side(\"1\")\n    fn step(x):\n        str::concat(x, v)\n    str::concat(step(\"a\"), step(\"b\"))\n\nf()"
+    set text "import str\nfn side(n):\n    str::concat(\"x\", n)\n\nfn f():\n    v = side(\"1\")\n    fn step(x):\n        str::concat(x, v)\n    str::concat(step(\"a\"), step(\"b\"))\n\nf()"
     list [assertParity $text] [blockAllocs $text 1]
 } -result {{str ax1bx1} 0}
 
@@ -327,6 +327,7 @@ proc blockAllocsOpt {text blockEscapeOpt stringRegionOpt} {
 # allocation, no source-specific recognition of any kind.
 
 set ::atScanSrc {
+import str
 fn outer(s):
     fn at(i):
         str::substring(s, i, i + 1)
@@ -370,6 +371,7 @@ test blockescape-region-companion-minimal-4 {the region call is a direct callmul
 # neither forcing the other's representation.
 
 set ::atMixedSrc {
+import str
 fn outer(s):
     fn at(i):
         str::substring(s, i, i + 1)
@@ -413,6 +415,7 @@ test blockescape-region-companion-mixed-2 {at gets both an ordinary internal var
 # callers" actually require of lowering.)
 
 set ::mixedProgramSrc {
+import str
 fn makeAccessor(s):
     fn at(i):
         str::substring(s, i, i + 1)
@@ -456,6 +459,7 @@ test blockescape-region-companion-escaping-coexist-2 {the escaping at still buil
 
 test blockescape-region-companion-gc-stress-1 {a captured base String survives a self-tail loop mixing region and ordinary char_at-shaped calls, under GC stress} -body {
     set text {
+import str
 fn f(n, s):
     fn at(i):
         str::substring(s, i, i + 1)
@@ -513,6 +517,7 @@ proc assertErrorParity {text} {
 
 test blockescape-region-companion-bounds-error-1 {a locally-bound char accessor's out-of-range region access raises the same declared slice error (UpperOverrun, uncaught: the program handles nothing), optimized and baseline} -body {
     set text {
+import str
 fn outer(s, i):
     fn at(j):
         str::substring(s, j, j + 1)
@@ -527,6 +532,7 @@ outer("ab", 5)
 
 test blockescape-region-companion-bounds-error-2 {the same accessor with its slice errors declared and handled by name: each bound case gives its handler's value, optimized and baseline} -body {
     set text {
+import str
 fn outer(s, i):
     fn at(j) errors LowerUnderrun, UpperOverrun:
         str::substring(s, j, j + 1)
@@ -550,6 +556,7 @@ fn outer(s, i):
 test blockescape-region-companion-unicode-1 {a locally-bound char accessor over an astral-plane String classifies correctly, in region form, with zero Block allocation} -body {
     set emoji [encoding convertfrom utf-8 "\xf0\x9f\x98\x80"]
     set text "
+import str
 fn outer(s):
     fn at(i):
         str::substring(s, i, i + 1)
@@ -772,6 +779,7 @@ proc backendParity {text} {
 }
 
 set blockescapeEnclosingRepro {
+import list
 fn f(a):
     k = 5
     fn g(x):
@@ -796,6 +804,7 @@ test blockescape-enclosing-instances-2 {...and the closure is still de-closure-c
 
 test blockescape-enclosing-instances-3 {two exact list::at calls at different indexes, each callee with a nested closure capturing a local} -body {
     backendParity {
+import list
 fn f(a):
     k = 5
     fn g(x):
@@ -815,6 +824,7 @@ fs = [f, h]
 
 test blockescape-enclosing-instances-4 {a nested closure capturing both a local and a parameter of a function called through list::at, plus a second closure calling the first} -body {
     backendParity {
+import list
 fn f(a):
     k = 5
     fn g(x):

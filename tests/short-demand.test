@@ -161,6 +161,7 @@ proc parity {text} {
 
 test sd-materialize-only-parameter-stays-tagged {a packed-eligible parameter whose only use is a List append keeps the tagged String: no asciitostr anywhere} -body {
     set text {
+        import list
         fn keep(xs, s):
             list::append(xs, s)
 
@@ -173,6 +174,7 @@ test sd-materialize-only-parameter-stays-tagged {a packed-eligible parameter who
 
 test sd-demand-off-keeps-it-virtual {-short-demand-opt 0 is the previous categorical behavior: the same parameter is packed and materialized at its use} -body {
     set text {
+        import list
         fn keep(xs, s):
             list::append(xs, s)
 
@@ -183,6 +185,8 @@ test sd-demand-off-keeps-it-virtual {-short-demand-opt 0 is the previous categor
 
 test sd-scalar-use-keeps-it-packed {one scalar consumer among tagged uses is enough: the parameter stays packed and materializes once} -body {
     set text {
+        import list
+        import str
         fn mixed(s, xs):
             [str::length(s), list::append(xs, s), list::append(xs, s)]
 
@@ -194,6 +198,7 @@ test sd-scalar-use-keeps-it-packed {one scalar consumer among tagged uses is eno
 
 test sd-equality-is-a-scalar-use {== against a literal counts, so a parameter compared and then stored stays packed} -body {
     set text {
+        import list
         fn tag(s, xs):
             [s == "yes", list::append(xs, s)]
 
@@ -205,6 +210,7 @@ test sd-equality-is-a-scalar-use {== against a literal counts, so a parameter co
 
 test sd-equality-with-an-unrestricted-string-is-not-a-scalar-use {s == t where t is a concat result cannot be scalar: the parameter has no free use and stays tagged} -body {
     set text {
+        import str
         fn same(s, t):
             s == t
 
@@ -218,6 +224,7 @@ test sd-equality-with-an-unrestricted-string-is-not-a-scalar-use {s == t where t
 
 test sd-forward-chain-with-a-consumer-is-virtual {f -> g -> h where h takes the length: every parameter on the chain stays packed} -body {
     set text {
+        import str
         fn h(s):
             str::length(s)
 
@@ -234,6 +241,7 @@ test sd-forward-chain-with-a-consumer-is-virtual {f -> g -> h where h takes the 
 
 test sd-forward-chain-without-a-consumer-is-tagged {the same chain ending in a List append has no free use anywhere: all tagged} -body {
     set text {
+        import list
         fn h(s):
             list::append([], s)
 
@@ -266,6 +274,8 @@ test sd-forwarding-recursion-is-not-self-justifying {a function that only passes
 
 test sd-result-with-a-scalar-caller-is-virtual {a result whose caller takes the length stays packed even though another caller stores it} -body {
     set text {
+        import list
+        import str
         fn pick(flag):
             if flag:
                 ""
@@ -280,6 +290,7 @@ test sd-result-with-a-scalar-caller-is-virtual {a result whose caller takes the 
 
 test sd-result-only-stored-is-tagged {a result every caller only stores stays a tagged String} -body {
     set text {
+        import list
         fn pick(flag):
             if flag:
                 ""
@@ -293,6 +304,7 @@ test sd-result-only-stored-is-tagged {a result every caller only stores stays a 
 
 test sd-local-without-a-scalar-use-is-not-a-register {a local literal that is only stored never becomes a packed register (and so emits no dead asciilit)} -body {
     set text {
+        import list
         fn keep(xs):
             s = "hello"
             list::append(xs, s)
@@ -305,6 +317,7 @@ test sd-local-without-a-scalar-use-is-not-a-register {a local literal that is on
 
 test sd-local-with-a-scalar-use-is-a-register {a local bound to a call result that is compared with a parameter stays packed} -body {
     set text {
+        import list
         fn word(flag):
             if flag:
                 "yes"
@@ -326,6 +339,7 @@ test sd-local-with-a-scalar-use-is-a-register {a local bound to a call result th
 
 test sd-round-trip-parameter-stays-tagged {a one-character parameter used only by tagged operations (the refined-checks shape) keeps the tagged String: no strtoshort/shorttostr pair} -body {
     set text {
+        import str
         fn classify(c):
             str::is_tcl_alpha(c)
 
@@ -340,6 +354,7 @@ test sd-round-trip-parameter-stays-tagged {a one-character parameter used only b
 
 test sd-non-ascii-scalar-parameter-with-consumers-stays-short {a ShortString1 parameter that is compared and measured keeps the scalar: shorteq and shortlen, no conversion} -body {
     set text {
+        import str
         fn probe(c):
             [c == "λ", str::length(c)]
 
@@ -354,6 +369,7 @@ test sd-non-ascii-scalar-parameter-with-consumers-stays-short {a ShortString1 pa
 
 test sd-region-companion-call-is-not-a-flow {text handed to a region-producing helper (a tagged companion call) does not count as a free use: the literal-fed parameter stays tagged, so no asciitostr runs inside the loop} -body {
     set text {
+        import str
         fn peek(text, index):
             if index < 0 or index >= str::length(text):
                 return ""
@@ -379,6 +395,7 @@ test sd-region-companion-call-is-not-a-flow {text handed to a region-producing h
 
 test sd-env-switch {BOTLISH_NATIVE_SHORT_DEMAND_OPT=0 is the same switch} -body {
     set text {
+        import list
         fn keep(xs, s):
             list::append(xs, s)
 
@@ -394,6 +411,8 @@ test sd-env-switch {BOTLISH_NATIVE_SHORT_DEMAND_OPT=0 is the same switch} -body 
 
 test sd-deterministic {the rule is a fixed function of the program: identical NIR twice} -body {
     set text {
+        import list
+        import str
         fn h(s):
             [str::length(s), s == "ab"]
 

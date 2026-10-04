@@ -49,7 +49,8 @@ proc rowsOf {spec analysis name} {
     set rows {}
     foreach id [dict get $spec used] {
         if {[dict get $spec instances $id name] ne $name} continue
-        lappend rows [list [hir::specialize::label $spec $id] [dict exists $spec dormant $id] \
+        # (a block's expression id depends on the library code the program imports)
+        lappend rows [list [regsub {block\(e\d+\)} [hir::specialize::label $spec $id] {block(eN)}] [dict exists $spec dormant $id] \
             [lmap r [dict get [dict get $analysis instances $id] params] {bounds $r}]]
     }
     lsort $rows
@@ -75,7 +76,7 @@ proc paramGuards {hir analysis id} {
 test closure-int-keys-refined-checks {tld?, domain?, char_at and scan_while's start are Int-keyed; each generic instance is a dormant Block-value entry; the keyed instances keep every entry Range the generic ones had} -body {
     lassign [refinedChecks] hir spec analysis
     lmap name {tld? domain? char_at scan_while} {rowsOf $spec $analysis $name}
-} -result {{{tld?<generic> 1 {{[-∞, +∞]}}} {tld?<int> 0 {{[2, 4611686018427387903]}}}} {{domain?<generic> 1 {{[-∞, +∞]}}} {domain?<int> 0 {{[1, 4611686018427387903]}}}} {{char_at<generic> 1 {{[-∞, +∞]}}} {char_at<int> 0 {{[0, 4611686018427387902]}}}} {{scan_while<generic> 1 {{[-∞, +∞]} {[-∞, +∞]}}} {{scan_while<any, native(str::is_tcl_alpha)>} 1 {{[-∞, +∞]} {[-∞, +∞]}}} {{scan_while<int, block(e250)>} 0 {{[0, 0]} {[-∞, +∞]}}} {{scan_while<int, native(str::is_tcl_alpha)>} 0 {{[2, 4611686018427387903]} {[-∞, +∞]}}}}}
+} -result {{{tld?<generic> 1 {{[-∞, +∞]}}} {tld?<int> 0 {{[2, 4611686018427387903]}}}} {{domain?<generic> 1 {{[-∞, +∞]}}} {domain?<int> 0 {{[1, 4611686018427387903]}}}} {{char_at<generic> 1 {{[-∞, +∞]}}} {char_at<int> 0 {{[0, 4611686018427387902]}}}} {{scan_while<generic> 1 {{[-∞, +∞]} {[-∞, +∞]}}} {{scan_while<any, native(str::is_tcl_alpha)>} 1 {{[-∞, +∞]} {[-∞, +∞]}}} {{scan_while<int, block(eN)>} 0 {{[0, 0]} {[-∞, +∞]}}} {{scan_while<int, native(str::is_tcl_alpha)>} 0 {{[2, 4611686018427387903]} {[-∞, +∞]}}}}}
 
 test closure-int-keys-refined-checks-knob-off {with the knob off the same functions are <generic> (or <any, …>) with the same entry Ranges} -body {
     withIntKeys 0 {
@@ -129,6 +130,7 @@ test closure-int-keys-refined-checks-rawint-plan {the keyed positions are RawInt
 # The rule
 
 set ::intFixture {
+    import str
     fn outer(tag):
         fn inner(x):
             x + str::length(tag)
@@ -156,6 +158,7 @@ test closure-int-keys-no-guard-without-theorem {the key alone removes the kind g
 
 test closure-int-keys-other-kinds-stay-generic {a String or Bool argument still gives the generic key} -body {
     lassign [specOf {
+        import str
         fn outer(tag):
             fn inner(x):
                 str::concat(tag, "")
@@ -172,6 +175,7 @@ test closure-int-keys-other-kinds-stay-generic {a String or Bool argument still 
 } -result {inner<generic>}
 
 set ::mixedKinds {
+    import str
     fn outer(tag):
         fn inner(x):
             str::concat(tag, "")
@@ -193,6 +197,7 @@ foreach {name src expected} [list \
     int $::intFixture 5 \
     mixed $::mixedKinds {["v", 1, 2]} \
     scanner {
+        import str
         fn first_space(s):
             n = str::length(s)
             fn at(i):

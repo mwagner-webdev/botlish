@@ -1,1 +1,5 @@
+import managed
+import plain
+import scalar
+
 [plain::inc(1), scalar::add(1), managed::get(1)]

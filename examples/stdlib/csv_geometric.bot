@@ -19,6 +19,9 @@
 #
 # expect: [["name", "age"], ["Alice", "30"], ["Bob", "40"]]
 
+import mutable_array
+import str
+
 # A builder holding exactly FIRST: a capacity-1 array (every slot holds
 # FIRST, so slot 0 is already the first element) and, for the caller to keep,
 # length 1. Starting from a real element is what gives the storage its

@@ -103,7 +103,7 @@ test hir-specialize-7 {self recursion uses one instance} -body {
 } -result {{{count<int, int>}} i1 i1 int}
 
 test hir-specialize-8 {a self tail call with other kinds widens to the lub of both keys} -body {
-    lassign [specOf "fn swap(a, b, n):\n    if n == 0:\n        return a\n    swap(b, a, n - 1)\n\nfn grow(acc, n):\n    if n == 0:\n        return acc\n    grow(list::append(acc, n), n - 1)\n\n\[swap(1, \"x\", 3), grow(\[\], 3)\]"] hir analysis
+    lassign [specOf "import list\nfn swap(a, b, n):\n    if n == 0:\n        return a\n    swap(b, a, n - 1)\n\nfn grow(acc, n):\n    if n == 0:\n        return acc\n    grow(list::append(acc, n), n - 1)\n\n\[swap(1, \"x\", 3), grow(\[\], 3)\]"] hir analysis
     list [specLabels $analysis swap] [specLabels $analysis grow] [specResult $analysis {grow<List[never], int>}]
 } -result {{{swap<int, str, int>} {swap<any, any, int>}} {{grow<List[never], int>} {grow<List[int], int>}} {List[int]}}
 
@@ -120,13 +120,13 @@ test hir-specialize-9b {lexical mutual recursion is rejected before specializati
 } -result {CORE SEMANTIC UNBOUND}
 
 test hir-specialize-10 {results propagate up a callee-first chain that ends in a recursive function} -body {
-    lassign [specOf "fn c(n):\n    if n == 0:\n        return \"done\"\n    c(n - 1)\n\nfn b(n):\n    c(n)\n\nfn a(n):\n    b(n)\n\nfn use(n):\n    str::length(a(n)) + 1\n\nuse(3)"] hir analysis
+    lassign [specOf "import str\nfn c(n):\n    if n == 0:\n        return \"done\"\n    c(n - 1)\n\nfn b(n):\n    c(n)\n\nfn a(n):\n    b(n)\n\nfn use(n):\n    str::length(a(n)) + 1\n\nuse(3)"] hir analysis
     list [specResult $analysis a<int>] [specResult $analysis b<int>] [specResult $analysis c<int>] \
          [specStatus $hir $analysis use<int>]
 } -result {str str str {closed 0}}
 
 test hir-specialize-11 {a path that always raises does not join the result} -body {
-    lassign [specOf "fn f(s):\n    if str::length(s) > 3:\n        return 1 + \"x\"\n    s\n\nf(\"ab\")"] hir analysis
+    lassign [specOf "import str\nfn f(s):\n    if str::length(s) > 3:\n        return 1 + \"x\"\n    s\n\nf(\"ab\")"] hir analysis
     set block [hir::get $hir [lindex [hir::roots $hir] 0] value]
     list [specResult $analysis f<str>] [hir::types::show [hir::type $hir [hir::get $hir $block resultType]]]
 } -result {str any}
@@ -159,17 +159,17 @@ test hir-specialize-14 {list literals} -body {
 } -result {{List[int]} {List[str]} {List[List[int]]} {list[List[int], List[str]]} {list[int, str]} {List[never]}}
 
 test hir-specialize-15 {list::at: element kinds, positions of fixed shapes, and nothing for an empty list} -body {
-    list [aggregateType "xs = \[1, 2\]\nlist::at(xs, 1)"] \
-         [aggregateType "m = \[\[1, 2\], \[3\]\]\nlist::at(list::at(m, 1), 0)"] \
-         [aggregateType "p = \[\"a\", 1\]\nlist::at(p, 1)"] \
-         [aggregateType "p = \[\"a\", 1\]\nfn i():\n    1\nlist::at(p, i())"] \
-         [aggregateType "list::at(\[\], 0)"]
+    list [aggregateType "import list\nxs = \[1, 2\]\nlist::at(xs, 1)"] \
+         [aggregateType "import list\nm = \[\[1, 2\], \[3\]\]\nlist::at(list::at(m, 1), 0)"] \
+         [aggregateType "import list\np = \[\"a\", 1\]\nlist::at(p, 1)"] \
+         [aggregateType "import list\np = \[\"a\", 1\]\nfn i():\n    1\nlist::at(p, i())"] \
+         [aggregateType "import list\nlist::at(\[\], 0)"]
 } -result {int int int any any}
 
 test hir-specialize-16 {list::append keeps a homogeneous element kind and joins others} -body {
-    list [aggregateType "list::append(\[1\], 2)"] [aggregateType "list::append(\[1\], \"a\")"] \
-         [aggregateType "list::append(\[\], \"a\")"] [aggregateType "list::append(\[\"a\", 1\], 2)"] \
-         [aggregateType "list::append(\[\[1\]\], \[2\])"]
+    list [aggregateType "import list\nlist::append(\[1\], 2)"] [aggregateType "import list\nlist::append(\[1\], \"a\")"] \
+         [aggregateType "import list\nlist::append(\[\], \"a\")"] [aggregateType "import list\nlist::append(\[\"a\", 1\], 2)"] \
+         [aggregateType "import list\nlist::append(\[\[1\]\], \[2\])"]
 } -result {{List[int]} list {List[str]} list {List[List[int]]}}
 
 test hir-specialize-17 {aggregate types are bounded} -body {
@@ -218,7 +218,7 @@ test hir-specialize-corpus-1 {every used corpus instance is closed; the generic 
         list $name [dict get $summary generic] [dict get $summary specialized] $statuses \
             [dict get $summary genericInstances] [dict get $summary specializedInstances]
     }
-} -result {{ai_text_clean 5 0 closed 1 5} {csv 15 0 closed 0 9} {csv_chunked 26 1 {closed guarded} 2 17} {csv_geometric 27 2 {closed guarded} 0 18} {csv_records 91 23 {closed guarded} 7 52} {hashtable 67 25 {closed guarded} 7 23} {matmul 17 0 closed 0 6} {string_replace 12 0 closed 1 3} {string_reverse 4 0 closed 1 2}}
+} -result {{ai_text_clean 5 0 closed 1 5} {csv 25 0 closed 0 9} {csv_chunked 38 1 {closed guarded} 2 17} {csv_geometric 37 2 {closed guarded} 0 18} {csv_records 101 23 {closed guarded} 7 52} {hashtable 79 25 {closed guarded} 7 23} {matmul 27 0 closed 0 6} {string_replace 12 0 closed 1 3} {string_reverse 4 0 closed 1 2}}
 
 test hir-specialize-corpus-2 {specialized instances per corpus function} -body {
     set hir [surface::readProgramFile [corpus::path csv]]
@@ -293,7 +293,7 @@ proc paramViewType {hir analysis label i} {
 # cls<int>; cls<generic> remains as the Block-value entry (dormant), and both
 # keep the declared parameter type.
 test hir-specialize-m1-closure-capture {a typed function forced into a generic instance by a non-Int capture still retains its declared parameter type (M1 closure fixture, spec items 35-36)} -body {
-    lassign [specOf "type Small = Int in 0..10\n\nfn outer(xs):\n    fn cls(b: Small) -> bool:\n        b >= 0 and list::length(xs) > 0\n    cls(1)\n\nouter(\[1, 2, 3\])"] hir analysis
+    lassign [specOf "import list\ntype Small = Int in 0..10\n\nfn outer(xs):\n    fn cls(b: Small) -> bool:\n        b >= 0 and list::length(xs) > 0\n    cls(1)\n\nouter(\[1, 2, 3\])"] hir analysis
     list [specLabels $analysis cls] [paramViewType $hir $analysis cls<generic> 0] [paramViewType $hir $analysis cls<int> 0]
 } -result {{cls<int> cls<generic>} {int[Small]} {int[Small]}}
 
@@ -324,7 +324,7 @@ test hir-specialize-m1-container {a declared List[T] parameter forced generic by
     set saved $hir::specialize::limit
     set hir::specialize::limit 1
     try {
-        lassign [specOf "type Small = Int in 0..10\n\nfn outer(xs):\n    fn cls(ys: List\[Small\]) -> bool:\n        list::length(ys) > 0 and list::length(xs) > 0\n    cls(\[1, 2\])\n\nouter(\[1, 2, 3\])"] hir analysis
+        lassign [specOf "import list\ntype Small = Int in 0..10\n\nfn outer(xs):\n    fn cls(ys: List\[Small\]) -> bool:\n        list::length(ys) > 0 and list::length(xs) > 0\n    cls(\[1, 2\])\n\nouter(\[1, 2, 3\])"] hir analysis
         list [specLabels $analysis cls] [paramViewType $hir $analysis cls<generic> 0]
     } finally {
         set hir::specialize::limit $saved
@@ -336,7 +336,7 @@ test hir-specialize-m1-module-closure {web::is_unreserved retains its declared B
     set analysis [hir::specialize::analyze $hir]
     list [specLabels $analysis web::is_unreserved] \
          [paramViewType $hir $analysis {web::is_unreserved<int>} 0]
-} -result {web::is_unreserved<int> {int[Byte]}}
+} -result {web::is_unreserved<int> {int[byte::Byte]}}
 
 test hir-specialize-m1-exact-call-propagation {a generic caller's own restored declared-parameter fact transports through its exact calls, letting a callee specialize instead of also falling back to generic (M1, spec item 21 "A" -- the generic caller no longer forgets its own declared type, so KeyType, unmodified, sees a real kind instead of any)} -body {
     set hir [surface::readProgramFile \

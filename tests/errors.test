@@ -395,7 +395,8 @@ fn clamp(n) -> int errors OutOfRange:
             n
 }
     close $ch
-    set mainPath [makeFile {r = errorscrossmodulelib::clamp(500):
+    set mainPath [makeFile {import errorscrossmodulelib
+r = errorscrossmodulelib::clamp(500):
     on OutOfRange:
         -1
 r} errors-cross-module-main.bot]
@@ -421,7 +422,8 @@ fn clamp(n) -> int errors OutOfRange:
         n
 }
     close $ch
-    set mainPath [makeFile {fn g(m):
+    set mainPath [makeFile {import errorscrossmodulelib2
+fn g(m):
     errorscrossmodulelib2::clamp(m)} errors-cross-module-main2.bot]
     try {
         diagKinds [surface::readProgramFile $mainPath -strict 0]
@@ -562,7 +564,8 @@ fn convert(n) -> int:
 # tests/byte-set.test and tests/web-unreserved.test).
 
 test errors-byte-from-int-in-range {byte::from_int succeeds for an in-range value, no handler branch taken} -body {
-    set path [makeFile {byte::high_nibble(0)
+    set path [makeFile {import byte
+byte::high_nibble(0)
 r = byte::from_int(200):
     on BelowRange:
         -1
@@ -577,7 +580,8 @@ r} errors-byte-from-int-ok.bot]
 } -result {same 200}
 
 test errors-byte-from-int-below-range {byte::from_int reaches its BelowRange handler for a negative value} -body {
-    set path [makeFile {byte::high_nibble(0)
+    set path [makeFile {import byte
+byte::high_nibble(0)
 r = byte::from_int(0 - 1):
     on BelowRange:
         -1
@@ -592,7 +596,8 @@ r} errors-byte-from-int-below.bot]
 } -result {same -1}
 
 test errors-byte-from-int-above-range {byte::from_int reaches its AboveRange handler for a value past 255} -body {
-    set path [makeFile {byte::high_nibble(0)
+    set path [makeFile {import byte
+byte::high_nibble(0)
 r = byte::from_int(256):
     on BelowRange:
         -1
@@ -607,7 +612,8 @@ r} errors-byte-from-int-above.bot]
 } -result {same -2}
 
 test errors-byte-from-int-unhandled-rejected {an unhandled byte::from_int call of a genuinely dynamic (unconstrained) value at top level is a static UNHANDLED-ERROR for both of its declared errors} -body {
-    set path [makeFile {byte::high_nibble(0)
+    set path [makeFile {import byte
+byte::high_nibble(0)
 fn g(m: int):
     byte::from_int(m)} errors-byte-from-int-unhandled.bot]
     try {
@@ -618,7 +624,8 @@ fn g(m: int):
 } -result {UNHANDLED-ERROR UNHANDLED-ERROR}
 
 test errors-byte-from-int-known-safe-literal-no-handler {byte::from_int(5) at top level, a statically provable in-range literal, needs no handler at all -- STATIC-COMPLETION-PROOFS.md item 20} -body {
-    set path [makeFile {byte::high_nibble(0)
+    set path [makeFile {import byte
+byte::high_nibble(0)
 byte::from_int(5)} errors-byte-from-int-known-safe.bot]
     try {
         diagKinds [surface::readProgramFile $path -strict 0]
@@ -627,8 +634,9 @@ byte::from_int(5)} errors-byte-from-int-known-safe.bot]
     }
 } -result {}
 
-test errors-byte-from-int-known-failure-literal {byte::from_int(999) at top level, a statically provable out-of-range literal, is a compile-time KNOWN-ERROR, not an UNHANDLED-ERROR} -body {
-    set path [makeFile {byte::high_nibble(0)
+test errors-byte-from-int-known-failure-literal {import byte\nbyte::from_int(999) at top level, a statically provable out-of-range literal, is a compile-time KNOWN-ERROR, not an UNHANDLED-ERROR} -body {
+    set path [makeFile {import byte
+byte::high_nibble(0)
 byte::from_int(999)} errors-byte-from-int-known-failure.bot]
     try {
         diagKinds [surface::readProgramFile $path -strict 0]
@@ -638,7 +646,8 @@ byte::from_int(999)} errors-byte-from-int-known-failure.bot]
 } -result {KNOWN-ERROR}
 
 test errors-byte-from-int-known-failure-with-handler-still-rejected {a handler does not make a statically known failure legal -- STATIC-COMPLETION-PROOFS.md item 50} -body {
-    set path [makeFile {byte::high_nibble(0)
+    set path [makeFile {import byte
+byte::high_nibble(0)
 x = byte::from_int(999):
     on AboveRange:
         255
@@ -651,7 +660,8 @@ x} errors-byte-from-int-known-failure-handled.bot]
 } -result {KNOWN-ERROR}
 
 test errors-byte-from-int-partial-range-elimination {a value statically known nonnegative but not upper-bounded needs only an AboveRange handler/declaration -- STATIC-COMPLETION-PROOFS.md item 21} -body {
-    set path [makeFile {byte::high_nibble(0)
+    set path [makeFile {import byte
+byte::high_nibble(0)
 fn nonneg(m) -> int:
     if m < 0:
         0 - m
@@ -738,7 +748,8 @@ fn h(x: int) -> int:
 } -result {same {[4611686018427387904, 6]}}
 
 test errors-handled-byte-from-int-bigint {byte::from_int(45) alone does not narrow from_int's shared instance: a BigInt reaching it through a handled call is still range-checked as a BigInt} -body {
-    set path [makeFile {a = byte::from_int(45)
+    set path [makeFile {import byte
+a = byte::from_int(45)
 ns = [0 - 100000000000000000000000, 100000000000000000000000]
 bs = loop n in ns:
     b = byte::from_int(n):

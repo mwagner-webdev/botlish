@@ -62,7 +62,11 @@ proc structSyntax {source} {
 proc structTypes {source} {
     set hir [surface::compile $source struct.bot]
     set result {}
-    foreach e [hir::roots $hir] {
+    set roots [hir::roots $hir]
+    # `import list` loads lib/list.bot: its module functions are roots too.
+    set file [dict get $hir exprs [lindex $roots end] origin file]
+    foreach e $roots {
+        if {[dict get $hir exprs $e origin file] ne $file} continue
         if {[hir::kind $hir $e] eq "bind"} {
             lappend result "[hir::get $hir $e name]:[hir::types::show [hir::typeOf $hir $e]]"
         }
@@ -191,7 +195,7 @@ test struct-eq-named-vs-anonymous {a named struct never equals an anonymous one 
 } -result {same: [false, false]}
 
 test struct-eq-mutarray-field {equality keeps the existing rule: a MutableArray has no structural equality} -body {
-    set hir [surface::readProgramFile [tcltest::makeFile "m = mutable_array::create(1, 0)\n\{a: m\} == \{a: m\}\n" eq-mutarray.bot]]
+    set hir [surface::readProgramFile [tcltest::makeFile "import mutable_array\nm = mutable_array::create(1, 0)\n\{a: m\} == \{a: m\}\n" eq-mutarray.bot]]
     lmap backend $::structBackends {lindex [outcomeUnderHir $backend $hir] 1}
 } -result {{CORE SEMANTIC EQUALITY} {CORE SEMANTIC EQUALITY} {CORE SEMANTIC EQUALITY} {CORE SEMANTIC EQUALITY}}
 
@@ -203,7 +207,8 @@ test struct-eq-hash-consistent {hash agrees with struct equality across source o
 # Evaluation order, completions, closures
 
 test struct-eval-source-order {field expressions run in SOURCE order, not canonical layout order} -body {
-    set path [tcltest::makeFile "counter = mutable_array::create(1, 0)
+    set path [tcltest::makeFile "import mutable_array
+counter = mutable_array::create(1, 0)
 fn ticket(m):
     n = mutable_array::get(m, 0, 0)
     if mutable_array::capacity(m) > 0:
@@ -298,7 +303,7 @@ test struct-named-field-authoritative {a named struct field has its declared typ
 } -result {x:X | v:int}
 
 test struct-named-in-containers {named structs are ordinary element types} -body {
-    structTypes "${person}ps = \[Person \{name: \"a\", age: 1\}\]\np0 = list::at(ps, 0)\nn = p0.name"
+    structTypes "import list\n${person}ps = \[Person \{name: \"a\", age: 1\}\]\np0 = list::at(ps, 0)\nn = p0.name"
 } -result {ps:List[Person] | p0:Person | n:str}
 
 test struct-named-recursive-declaration {a struct may name itself: the type exists though no finite value constructs it} -body {
@@ -451,15 +456,15 @@ test struct-type-nominal-lub {named structs join only with themselves; shape coi
 # Containers and composition
 
 test struct-list-of-anonymous {anonymous structs of one field set infer List[struct]} -body {
-    structTypes "xs = \[\{name: \"a\", age: 1\}, \{age: 2, name: \"b\"\}\]\nsecond = list::at(xs, 1)\nn = second.name"
+    structTypes "import list\nxs = \[\{name: \"a\", age: 1\}, \{age: 2, name: \"b\"\}\]\nsecond = list::at(xs, 1)\nn = second.name"
 } -result {xs:List[struct{age: int, name: str}] | second:struct{age: int, name: str} | n:str}
 
 test struct-list-of-anonymous-run {list::at of List[struct] keeps the struct type for a dynamic index} -body {
-    structRun "xs = \[\{name: \"a\", age: 1\}, \{age: 2, name: \"b\"\}\]\nfn at(i) errors IndexNotFound:\n    list::at(xs, i).name\n\[at(0), at(1)\]"
+    structRun "import list\nxs = \[\{name: \"a\", age: 1\}, \{age: 2, name: \"b\"\}\]\nfn at(i) errors IndexNotFound:\n    list::at(xs, i).name\n\[at(0), at(1)\]"
 } -result {same: ["a", "b"]}
 
 test struct-mutarray-of-structs {MutableArray of structs is inferred and its reads are typed} -body {
-    set path [tcltest::makeFile "m = mutable_array::from_list(\[\{x: 1\}, \{x: 2\}\])\ne = mutable_array::at(m, 1).x\n" mutarray-structs.bot]
+    set path [tcltest::makeFile "import mutable_array\nm = mutable_array::from_list(\[\{x: 1\}, \{x: 2\}\])\ne = mutable_array::at(m, 1).x\n" mutarray-structs.bot]
     set hir [surface::readProgramFile $path]
     set types {}
     foreach e [hir::roots $hir] {
@@ -471,11 +476,11 @@ test struct-mutarray-of-structs {MutableArray of structs is inferred and its rea
 } -result {{{MutableArray[struct{x: int}]} int} {same: 2}}
 
 test struct-immutable-set-of-structs {ImmutableSet of structs deduplicates by struct equality} -body {
-    structRun "s = immutable_set::from_list(\[\{a: 1\}, \{a: 1\}, \{a: 2\}\])\nlist::length(\[1\])"
+    structRun "import immutable_set\nimport list\ns = immutable_set::from_list(\[\{a: 1\}, \{a: 1\}, \{a: 2\}\])\nlist::length(\[1\])"
 } -result {same: 1}
 
 test struct-field-mutarray-typed {a MutableArray field keeps its element contract through the struct} -body {
-    set path [tcltest::makeFile "s = \{storage: mutable_array::create(4, \"x\"), length: 0\}\nst = s.storage\n" field-mutarray.bot]
+    set path [tcltest::makeFile "import mutable_array\ns = \{storage: mutable_array::create(4, \"x\"), length: 0\}\nst = s.storage\n" field-mutarray.bot]
     set hir [surface::readProgramFile $path]
     lmap e [lrange [hir::roots $hir] end-1 end] {hir::types::show [hir::typeOf $hir $e]}
 } -result {{struct{length: int, storage: MutableArray[str]}} {MutableArray[str]}}
@@ -496,10 +501,10 @@ test struct-bearing-recursive {a struct is bearing iff a field is, recursively} 
 test struct-bearing-attacks {a typed array cannot be erased through an untyped struct boundary} -body {
     set m "m = mutable_array::create(2, \"x\")\n"
     set attacks [list \
-        "${m}s = \{storage: m\}\nxs = \[s, 5\]\nxs" \
-        "struct Box:\n    value: any\n${m}b = Box \{value: m\}\nb" \
-        "${m}s = \{storage: m\}\nfn f(v: any):\n    v\nf(s)" \
-        "struct Holder:\n    arr: MutableArray\[int\]\n${m}h = Holder \{arr: m\}\nh.arr"]
+        "import mutable_array\n${m}s = \{storage: m\}\nxs = \[s, 5\]\nxs" \
+        "import mutable_array\nstruct Box:\n    value: any\n${m}b = Box \{value: m\}\nb" \
+        "import mutable_array\n${m}s = \{storage: m\}\nfn f(v: any):\n    v\nf(s)" \
+        "import mutable_array\nstruct Holder:\n    arr: MutableArray\[int\]\n${m}h = Holder \{arr: m\}\nh.arr"]
     set needles [list \
         "cannot erase element contract struct{storage: MutableArray\[str\]} passed as an ordinary call argument" \
         "cannot erase element contract MutableArray\[str\] stored in field \"value\" of a struct" \
@@ -513,7 +518,7 @@ test struct-bearing-attacks {a typed array cannot be erased through an untyped s
 
 test struct-bearing-instance-keeps-contract {an instance keeps the typed array contract across an untyped function} -body {
     set m "m = mutable_array::create(2, \"x\")\n"
-    set hir [surface::readProgramFile [tcltest::makeFile "${m}s = \{storage: m\}\nfn leak(v):\n    v\nt = leak(s)\nu = t.storage\n" instance-bearing.bot]]
+    set hir [surface::readProgramFile [tcltest::makeFile "import mutable_array\n${m}s = \{storage: m\}\nfn leak(v):\n    v\nt = leak(s)\nu = t.storage\n" instance-bearing.bot]]
     set types {}
     foreach e [hir::roots $hir] {
         if {[hir::kind $hir $e] eq "bind" && [hir::get $hir $e name] in {s t u}} {
@@ -541,7 +546,8 @@ fn origin() -> Point:
 fn shift(p: Point, dx: int) -> Point:
     Point \{x: p.x + dx, y: p.y\}
 "
-        writeFile [file join $dir main.bot] "struct Point:
+        writeFile [file join $dir main.bot] "import geo
+struct Point:
     x: int
     y: int
 
@@ -561,9 +567,9 @@ test struct-module-distinct-modules {two modules' structs with the same name and
     withScratchLibrary {
         writeFile [file join $dir geo.bot] "namespace geo\n\nstruct Point:\n    x: int\n    y: int\n"
         writeFile [file join $dir shapes.bot] "namespace shapes\n\nstruct Point:\n    x: int\n    y: int\n"
-        writeFile [file join $dir main.bot] "a = geo::Point \{x: 1, y: 2\}\nb = shapes::Point \{x: 1, y: 2\}\n\[a == b, a == geo::Point \{x: 1, y: 2\}\]\n"
+        writeFile [file join $dir main.bot] "import geo\nimport shapes\na = geo::Point \{x: 1, y: 2\}\nb = shapes::Point \{x: 1, y: 2\}\n\[a == b, a == geo::Point \{x: 1, y: 2\}\]\n"
         set same [structRunFile [file join $dir main.bot]]
-        writeFile [file join $dir bad.bot] "fn f(p: geo::Point) -> int:\n    p.x\nf(shapes::Point \{x: 1, y: 2\})\n"
+        writeFile [file join $dir bad.bot] "import geo\nimport shapes\nfn f(p: geo::Point) -> int:\n    p.x\nf(shapes::Point \{x: 1, y: 2\})\n"
         set bad ok
         if {[catch {surface::readProgramFile [file join $dir bad.bot]} message]} { set bad $message }
         list $same [string match "*cannot be proven to satisfy geo::Point (argument type: shapes::Point*" $bad]
@@ -573,7 +579,7 @@ test struct-module-distinct-modules {two modules' structs with the same name and
 test struct-module-unknown-struct {a qualified struct the module does not declare is a module error} -body {
     withScratchLibrary {
         writeFile [file join $dir geo.bot] "namespace geo\n\nstruct Point:\n    x: int\n"
-        writeFile [file join $dir main.bot] "p = geo::Nope \{x: 1\}\n"
+        writeFile [file join $dir main.bot] "import geo\np = geo::Nope \{x: 1\}\n"
         catch {surface::readProgramFile [file join $dir main.bot]} message
         set message
     }
@@ -627,7 +633,8 @@ test struct-keytype-named {a named struct's key is its declaration} -body {
 } -result {nstruct Person}
 
 test struct-specialization-census {five semantic instances lower to four codegen instances: differing MutableArray element contracts share one} -body {
-    set hir [surface::readProgramFile [tcltest::makeFile "fn get(p):
+    set hir [surface::readProgramFile [tcltest::makeFile "import mutable_array
+fn get(p):
     p.x
 a = \{x: mutable_array::create(2, 0)\}
 b = \{x: mutable_array::create(2, \"s\")\}
@@ -678,7 +685,9 @@ test struct-native-unknown-shape-unsupported {native code never looks a field up
 test struct-native-gc-stress {struct values survive collection at every allocation} -body {
     set dir [makeDirectory struct-gc]
     set path [file join $dir gc.bot]
-    writeFile $path "struct Person:
+    writeFile $path "import list
+import str
+struct Person:
     name: str
     age: int
 fn build(n):
@@ -736,7 +745,7 @@ q = \{team: t, names: \[\"a\", \"b\"\], anon: \{z: 1, a: 2\}\}
 test struct-executable-module {a module-declared struct works in a standalone executable} -constraints executableAot -body {
     withScratchLibrary {
         writeFile [file join $dir geo.bot] "namespace geo\n\nstruct Point:\n    x: int\n    y: int\n\nfn origin() -> Point:\n    Point \{x: 0, y: 0\}\n"
-        writeFile [file join $dir main.bot] "p = geo::Point \{x: 3, y: 4\}\n\[p, geo::origin(), p.x + p.y\]\n"
+        writeFile [file join $dir main.bot] "import geo\np = geo::Point \{x: 3, y: 4\}\n\[p, geo::origin(), p.x + p.y\]\n"
         set hir [surface::readProgramFile [file join $dir main.bot]]
         native::executable $hir [file join $dir main]
         list [exec env PATH= [file join $dir main]] [lindex [outcomeUnderHir interp $hir] 1]

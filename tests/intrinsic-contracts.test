@@ -19,7 +19,18 @@
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
 
-set ::icDecls "type Byte = Int in 0..255\nerror NotFound\nerror PermissionDenied\n"
+# `import list` loads lib/list.bot, which declares the (global) error NotFound.
+set ::icDecls "import immutable_set\nimport list\nimport str\ntype Byte = Int in 0..255\nerror PermissionDenied\n"
+
+# For tests that rebuild the lowered program from core IR (-strict 0): they
+# must not load lib/list.bot, whose `find ... errors NotFound` is itself
+# re-diagnosed by a core-IR rebuild (core IR carries no `errors` clause),
+# which would add a second, unrelated diagnostic to the count asserted.
+set ::icDeclsStr "import str\ntype Byte = Int in 0..255\nerror NotFound\nerror PermissionDenied\n"
+
+# No imports at all: for the test below that pins a block's expression id,
+# which would shift with every module a program loads.
+set ::icDeclsPlain "type Byte = Int in 0..255\nerror NotFound\nerror PermissionDenied\n"
 
 proc icCompile {src {strict 1} {decls default}} {
     if {$decls eq "default"} { set decls $::icDecls }
@@ -386,11 +397,11 @@ test ic-native-direct-unchanged {a direct native call with a statically wrong ar
 
 test ic-native-wrapper-static {wrapper(123) was a run-time TYPE error inside the native; it is now a compile-time error at the call, naming the inferred contract and where it came from} -body {
     icRejects "${::icWrapper}wrapper(123)" \
-        {*:6:9: argument for parameter "x" is statically incompatible with str, the parameter type inferred from the function body (argument type: int*inferred from the function body: argument 1 of native str::length requires str (at 5:17)*}
+        {*:8:9: argument for parameter "x" is statically incompatible with str, the parameter type inferred from the function body (argument type: int*inferred from the function body: argument 1 of native str::length requires str (at 7:17)*}
 } -result {{CORE SEMANTIC TYPE} 1}
 
 test ic-native-wrapper-before {what that call used to do, and still does where no strict HIR build runs (core IR on interp; the compile backend keeps -strict 0 diagnostics as AOT blockers): enter the wrapper and raise the native's own run-time TYPE error} -body {
-    set exprs [hir::lower [icCompile "${::icWrapper}wrapper(\"abc\")"]]
+    set exprs [hir::lower [icCompile "${::icWrapper}wrapper(\"abc\")" 1 $::icDeclsStr]]
     set exprs [lreplace $exprs end end {call {ref wrapper} {const 123}}]
     list [differential $exprs] [lrange [outcomeUnder interp $exprs] 1 2] \
         [llength [hir::diagnostics [hir::build $exprs -strict 0]]]
@@ -439,7 +450,7 @@ test ic-strict0-recovery {a core-IR program (-strict 0) that violates a trusted 
         1
     else:
         0
-pred_use(str::is_tcl_alpha)}]]
+pred_use(str::is_tcl_alpha)} 1 $::icDeclsStr]]
     set exprs [lreplace $exprs end end {call {ref pred_use} {block {c} {const 5}}}]
     set h [hir::build $exprs -strict 0]
     set e [icBlock $h pred_use]
@@ -555,7 +566,7 @@ test ic-unreachable-call-ignored {a call of a parameter in a statically dead bra
 set ::icPick "fn is_x?(c):\n    c == \"x\"\nfn is_y?(c):\n    c == \"y\"\nfn pick(flag):\n    if flag:\n        is_x?\n    else:\n        is_y?\nfn classify(flag, c):\n    f = pick(flag)\n    f(c)\n"
 
 test ic-result-bool-preserved {a created Block's body-inferred bool result survives: exact Block type, its structural contract, the join in the used specialization instance, and the call result there (was return: any in instance views)} -body {
-    set h [icCompile "${::icPick}classify(true, \"x\")"]
+    set h [icCompile "${::icPick}classify(true, \"x\")" 1 $::icDeclsPlain]
     set x [icBlock $h is_x?]
     set exact [hir::bindingType $h [lindex [dict keys [dict filter [dict get $h bindings] script {b v} {expr {[dict get $v name] eq "is_x?"}}]] 0]]
     set hir [native::prepareHir $h]
@@ -600,7 +611,7 @@ test ic-checked-not-bearing {a checked-only contract is not precondition-bearing
     set ::icDeclsSaved $::icDecls
     set ::icDecls ""
     try {
-        icRun "fn one?(c):\n    str::length(c) == 1\nlist::all?(\[\"a\", \"b\"\], one?)"
+        icRun "import list\nimport str\nfn one?(c):\n    str::length(c) == 1\nlist::all?(\[\"a\", \"b\"\], one?)"
     } finally {
         set ::icDecls $::icDeclsSaved
     }
@@ -636,7 +647,7 @@ test ic-keys-unchanged {inferred contracts never enter specialization keys as a 
 # Module signatures (spec items 44-45)
 
 test ic-module-signature {an unannotated module export reports its body-inferred contract (source inferred); a declared parameter stays the API boundary (source declared)} -body {
-    set h [icCompile "list::all?(\[\"a\"\], str::is_tcl_alpha)" 1 ""]
+    set h [icCompile "import list\nimport str\nlist::all?(\[\"a\"\], str::is_tcl_alpha)" 1 ""]
     set sigs [hir::moduleSignatures $h]
     list [lmap t [dict get [dict get $sigs list::all?] params] {hir::types::show $t}] \
         [dict get [dict get $sigs list::all?] sources]
@@ -649,7 +660,7 @@ test ic-module-signature {an unannotated module export reports its body-inferred
 # Programs loading library modules (web, byte, list) take no local
 # type/error declarations: the modules declare their own Byte/NotFound.
 proc icWebHir {} {
-    return [icCompile "web::emailish?(\"a@b.cd\")" 1 ""]
+    return [icCompile "import web\nweb::emailish?(\"a@b.cd\")" 1 ""]
 }
 
 test ic-scan-while {scan_while's own body infers start : int (the counted loop's bound, checked) and predicate : Fn{args: [str], return: bool, errors: []} (trusted) from predicate(char_at(i)) used as an if condition, in an error-free function -- no caller consulted} -body {
@@ -684,11 +695,11 @@ test ic-label-char {label_char?(c): str::is_tcl_alnum requires str, == requires 
 } -result {{{c: str (inferred checked)}} {{checked argument 1 of native str::is_tcl_alnum -> str}}}
 
 test ic-emailish-callers-valid {every existing caller of the web helpers proves (or cannot contradict) the inferred contracts: no diagnostic} -body {
-    llength [hir::diagnostics [icCompile "web::emailish?(\"a@b.cd\")" 0 ""]]
+    llength [hir::diagnostics [icCompile "import web\nweb::emailish?(\"a@b.cd\")" 0 ""]]
 } -result 0
 
 test ic-list-helpers {list::any?/all?/none?/find: xs is a list (the loop iterable, checked); predicate stays untyped -- the argument is the element type of xs, a relational constraint -- even though its result's use (bool) is known} -body {
-    set h [icCompile "list::all?(\[\"a\"\], str::is_tcl_alpha)" 1 ""]
+    set h [icCompile "import list\nimport str\nlist::all?(\[\"a\"\], str::is_tcl_alpha)" 1 ""]
     lmap name {list::any? list::all? list::none? list::find} {
         list [icSig $h $name] [lindex [icNote $h $name predicate] 0]
     }

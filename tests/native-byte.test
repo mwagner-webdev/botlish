@@ -49,7 +49,8 @@ proc moduleValue {path} {
 # byte::position_low/byte::position_high: cross-backend parity and values.
 
 test native-byte-basic-parity {byte:: operations agree on every backend} -body {
-    set path [makeFile {[byte::high_nibble(171), byte::low_nibble(171), byte::nibble(byte::high_nibble(171)),
+    set path [makeFile {import byte
+[byte::high_nibble(171), byte::low_nibble(171), byte::nibble(byte::high_nibble(171)),
  byte::nibble(byte::low_nibble(171)), byte::complement(0), byte::complement(240),
  byte::position_low(10), byte::position_high(10)]} native-byte-basic.bot]
     try {
@@ -66,6 +67,7 @@ test native-byte-basic-parity {byte:: operations agree on every backend} -body {
 
 test native-byte-reconstruction-exhaustive {byte::high_nibble(b) | byte::low_nibble(b) == b for every b in 0..255 (spec #66)} -body {
     set body {
+import byte
 fn check_all(i, acc):
     if i > 255:
         acc
@@ -89,6 +91,7 @@ check_all(0, true)
 
 test native-byte-normalization-exhaustive {byte::nibble(byte::high_nibble(b)) == b div 16, byte::nibble(byte::low_nibble(b)) == b mod 16, for every b in 0..255 (spec #67)} -body {
     set body {
+import byte
 fn check_all(i, acc):
     if i > 255:
         acc
@@ -117,6 +120,7 @@ check_all(0, true)
 
 test native-byte-complement-exhaustive {byte::complement is its own inverse for every b in 0..255} -body {
     set body {
+import byte
 fn check_all(i, acc):
     if i > 255:
         acc
@@ -140,6 +144,7 @@ check_all(0, true)
 
 test native-byte-position-exhaustive {position_low/position_high round-trip through nibble, for every n in 0..15} -body {
     set body {
+import byte
 fn check_all(i, acc):
     if i > 15:
         acc
@@ -197,7 +202,8 @@ check_all(0, true)
 # lives in tests/source-types.test with its own synthetic types; this is
 # the Byte-vertical-specific instance of it.
 test native-byte-nibble-lownibble-distinct {Nibble and LowNibble each show their own name in HIR, for the identical [0,15] domain} -body {
-    set path [makeFile {n = byte::nibble(byte::high_nibble(160))
+    set path [makeFile {import byte
+n = byte::nibble(byte::high_nibble(160))
 l = byte::position_low(10)
 0} native-byte-nominal.bot]
     try {
@@ -206,8 +212,8 @@ l = byte::position_low(10)
     } finally {
         removeFile native-byte-nominal.bot
     }
-    list [expr {[string first {int[Nibble]} $text] >= 0}] \
-         [expr {[string first {int[LowNibble]} $text] >= 0}]
+    list [expr {[string first {int[byte::Nibble]} $text] >= 0}] \
+         [expr {[string first {int[byte::LowNibble]} $text] >= 0}]
 } -result {1 1}
 
 # ---------------------------------------------------------------------------
@@ -254,7 +260,7 @@ test native-byte-high-nibble-nir-is-mask-not-branch {byte::high_nibble's own NIR
     # caller (e.g. extract(200)) would now trigger instead, since this
     # milestone's own generic exact-set transfer (hir/range.tcl's BitOp) can
     # prove *that* case a single value and fold the `iand` away entirely.
-    set path [makeFile "fn extract(b):\n    byte::high_nibble(b)\n\nextract(mod(200, 1000000))\n" native-byte-nir.bot]
+    set path [makeFile "import byte\nfn extract(b):\n    byte::high_nibble(b)\n\nextract(mod(200, 1000000))\n" native-byte-nir.bot]
     try {
         set hir [surface::readProgramFile $path -strict 0]
         set nir [native::nir $hir]

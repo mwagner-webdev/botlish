@@ -1,5 +1,19 @@
 # Symbolic native result-type identity: hardening `{typed NAME}`
 
+> **Update (IMPORTS.md).** Source-declared `type`s are now members of their
+> namespace: the standard library's Byte is `byte::Byte`, and
+> `str::encode_utf8`'s shape is `{typed byte::Byte 0 255}`. A program's own
+> `type Byte = Int in 0..15` is the type `Byte`, a different identity that
+> the native's name never matches, so the *same-spelled narrower type*
+> hazard this milestone guards against can no longer arise from an entry
+> program's declaration; only a different `byte` module (the tests use a
+> scratch library whose `byte.bot` declares `Byte` narrower, wider, or not at
+> all) can make `byte::Byte` mean something else, and the admissibility
+> proof described below still decides whether the result narrows. The
+> text below keeps the milestone's original wording (`Byte`) where it
+> describes the mechanism; read it as `byte::Byte` for the standard
+> library's type.
+
 ## Outcome
 
 `encode_utf8`'s native result-shape metadata (`core/strings.tcl`,

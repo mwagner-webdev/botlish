@@ -1,3 +1,8 @@
+import ascii
+import byte
+import list
+import type byte::Byte
+
 # Steady-state measurement probe (not a benchmark source): 1024 passes over
 # all 256 Byte values, counting ascii::is_alphanumeric hits. The Bytes are
 # built once, then reused; the counting loop's own call to

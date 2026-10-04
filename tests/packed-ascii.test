@@ -167,6 +167,7 @@ proc parity {text} {
 
 test pa-plan-literal-join-is-packed {fn mix(flag): "ab" or "cdefgh": two ASCII literals of at most 8 characters join to a packed result} -body {
     set text {
+        import str
         fn mix(flag):
             if flag:
                 "ab"
@@ -180,12 +181,14 @@ test pa-plan-literal-join-is-packed {fn mix(flag): "ab" or "cdefgh": two ASCII l
 
 test pa-plan-eight-characters-are-the-limit {exactly 8 ASCII characters are packed, 9 stay tagged with the reason length-gt-8} -body {
     set eight {
+        import str
         fn id(s):
             s
 
         [id("12345678"), str::length(id("12345678"))]
     }
     set nine {
+        import str
         fn id(s):
             s
 
@@ -196,6 +199,7 @@ test pa-plan-eight-characters-are-the-limit {exactly 8 ASCII characters are pack
 
 test pa-plan-parameter-transport {a closed helper whose String parameter is fed only ASCII literals of at most 8 characters has a packed parameter} -body {
     set text {
+        import str
         fn probe(s):
             [str::length(s), s == "ab", s == ""]
 
@@ -206,6 +210,7 @@ test pa-plan-parameter-transport {a closed helper whose String parameter is fed 
 
 test pa-plan-unicode-multi-character-stays-tagged {"ab" or "λμ": a multi-character String that is not proven ASCII is not representable} -body {
     set text {
+        import str
         fn mix(flag):
             if flag:
                 "ab"
@@ -219,6 +224,7 @@ test pa-plan-unicode-multi-character-stays-tagged {"ab" or "λμ": a multi-chara
 
 test pa-plan-ascii-and-unicode-one-character-is-the-scalar-tier {"a" or "λ": the join is not ASCII but has one character: ShortString1} -body {
     set text {
+        import str
         fn pick(flag):
             if flag:
                 "a"
@@ -263,6 +269,7 @@ test pa-plan-one-ascii-character-is-packed-not-scalar {a one-character ASCII lit
 
 test pa-plan-ascii-pack-switch {-ascii-pack-opt 0 turns the packed tier off: one character is a ShortString1 and nothing longer is virtual} -body {
     set text {
+        import str
         fn mix(flag):
             if flag:
                 "ab"
@@ -282,6 +289,7 @@ test pa-plan-ascii-pack-switch {-ascii-pack-opt 0 turns the packed tier off: one
 
 test pa-plan-concatenation-is-not-a-packed-producer {concat of packed parameters is a tagged String: no length inference is invented for it} -body {
     set text {
+        import str
         fn cat(a, b):
             str::concat(a, b)
 
@@ -292,6 +300,7 @@ test pa-plan-concatenation-is-not-a-packed-producer {concat of packed parameters
 
 test pa-plan-open-instance-stays-tagged {a function whose value escapes keeps the tagged ABI even though its result is bounded ASCII} -body {
     set text {
+        import str
         fn pick(flag):
             if flag:
                 "yes"
@@ -324,13 +333,14 @@ test pa-plan-dead-long-branch-does-not-poison {a branch the existing range analy
 
 test pa-nir-packed-constants {the packed words of "", "a", "ab", NUL and a full 8-character String are asciilit constants: byte i = 0x80 | c} -body {
     set nul [format %c 0]
-    set text "fn id(s):\n    s\n\n\[str::length(id(\"\")), str::length(id(\"a\")), str::length(id(\"ab\")), str::length(id(\"$nul\")), str::length(id(\"abcdefgh\"))\]"
+    set text "import str\nfn id(s):\n    s\n\n\[str::length(id(\"\")), str::length(id(\"a\")), str::length(id(\"ab\")), str::length(id(\"$nul\")), str::length(id(\"abcdefgh\"))\]"
     set program [fnText [nirOf $text {*}$noInline] <program>]
     lsort -unique [regexp -all -inline {asciilit -?\d+} $program]
 } -result {{asciilit -1664107662228069663} {asciilit 0} {asciilit 128} {asciilit 225} {asciilit 58081}}
 
 test pa-nir-packed-physical-kind-is-not-rawint-or-short {asciiregs, never rawregs or shortregs: three distinct kinds even though all are an i64} -body {
     set text {
+        import str
         fn probe(s):
             [str::length(s), s == "ab"]
 
@@ -343,6 +353,7 @@ test pa-nir-packed-physical-kind-is-not-rawint-or-short {asciiregs, never rawreg
 
 test pa-nir-length-and-equality-are-scalar {length of a packed value is asciilen, equality asciieq: no strlen / streq} -body {
     set text {
+        import str
         fn probe(s):
             [str::length(s), s == "ab", s == ""]
 
@@ -354,6 +365,8 @@ test pa-nir-length-and-equality-are-scalar {length of a packed value is asciilen
 
 test pa-nir-literal-materializes-to-a-constant {a packed local bound to a literal and stored in a List is the static `str` constant, never asciitostr} -body {
     set text {
+        import list
+        import str
         fn keep(xs):
             s = "hello"
             [str::length(s), list::append(xs, s)]
@@ -366,6 +379,7 @@ test pa-nir-literal-materializes-to-a-constant {a packed local bound to a litera
 
 test pa-nir-runtime-value-materializes-by-unpacking {a packed value that is only known at run time materializes with one asciitostr at the tagged use} -body {
     set text {
+        import list
         fn keep(xs, s):
             list::append(xs, s)
 
@@ -377,6 +391,8 @@ test pa-nir-runtime-value-materializes-by-unpacking {a packed value that is only
 
 test pa-nir-mixed-use-materializes-once {str::length(s) is scalar; two tagged uses of the same packed parameter share one materialization} -body {
     set text {
+        import list
+        import str
         fn mixed(s, xs):
             [str::length(s), list::append(xs, s), list::append(xs, s)]
 
@@ -388,6 +404,7 @@ test pa-nir-mixed-use-materializes-once {str::length(s) is scalar; two tagged us
 
 test pa-nir-tier-widening-is-one-conversion {a packed value joining a ShortString1 position is widened with asciitoshort (a literal just becomes a shortlit)} -body {
     set text {
+        import str
         fn widen(c, flag):
             if flag:
                 c
@@ -403,6 +420,7 @@ test pa-nir-tier-widening-is-one-conversion {a packed value joining a ShortStrin
 
 test pa-nir-mixed-equality-uses-the-sentinel-op {a packed value against a ShortString1: asciishorteq (a scalar above 0x7F or a longer packed value is simply unequal)} -body {
     set text {
+        import str
         fn same(a, b):
             a == b
 
@@ -417,6 +435,7 @@ test pa-nir-mixed-equality-uses-the-sentinel-op {a packed value against a ShortS
 
 test pa-nir-disabled-reproduces-the-tagged-strings {-short-string-opt 0 emits no short String (either tier) anywhere} -body {
     set text {
+        import str
         fn mix(flag):
             if flag:
                 "ab"
@@ -434,6 +453,7 @@ test pa-nir-disabled-reproduces-the-tagged-strings {-short-string-opt 0 emits no
 
 test pa-nir-env-switches {BOTLISH_NATIVE_SHORT_STRING_OPT=0 and BOTLISH_NATIVE_ASCII_PACK_OPT=0 are the same switches} -body {
     set text {
+        import str
         fn probe(s):
             [str::length(s), s == "ab"]
 
@@ -460,6 +480,7 @@ test pa-nir-env-switches {BOTLISH_NATIVE_SHORT_STRING_OPT=0 and BOTLISH_NATIVE_A
 
 test pa-length-of-every-size {the length of an ASCII String of 0..8 characters (and 9, 12) through a closed helper: (71 - clz) >> 3} -body {
     parity {
+        import str
         fn size(s):
             str::length(s)
 
@@ -472,6 +493,7 @@ test pa-nul-del-and-high-ascii {NUL is a present byte (never "absent"), DEL (0x7
     set del [format %c 0x7f]
     set c1 [format %c 0x80]
     parity "
+        import str
         fn size(s):
             str::length(s)
 
@@ -495,6 +517,7 @@ test pa-equality-is-word-equality {equal Strings have equal words; prefixes, dif
 
 test pa-join-and-alias-stay-packed {a packed value through a branch join and aliases is one packed register: no String until the tagged use} -body {
     set text {
+        import str
         fn pick(flag):
             if flag:
                 "yes"
@@ -515,6 +538,7 @@ test pa-join-and-alias-stay-packed {a packed value through a branch join and ali
 
 test pa-chain-is-one-continuous-region {pick -> f -> g -> h forwards a packed value through every exact call with no conversion in any function} -body {
     set text {
+        import str
         fn pick(flag):
             if flag:
                 ""
@@ -573,6 +597,7 @@ test pa-program-frontier {the program's externally visible result is a String: a
 
 test pa-error-capable-result {an error-capable function with a packed success result: Empty (0) is a successful value, failure uses the status word} -body {
     set text {
+        import str
         error Bad
 
         fn guarded(n) -> str errors Bad:
@@ -598,6 +623,7 @@ test pa-error-capable-result {an error-capable function with a packed success re
 
 test pa-error-capable-with-handler-in-the-caller {a handler around a packed-result call: the empty word passes through the success path} -body {
     parity {
+        import str
         error Bad
 
         fn guarded(n) -> str errors Bad:
@@ -618,6 +644,8 @@ test pa-error-capable-with-handler-in-the-caller {a handler around a packed-resu
 
 test pa-storage-and-general-operations-materialize {storage (List), concat, lowercase and hashing consume the real String} -body {
     parity {
+        import list
+        import str
         fn pick(flag):
             if flag:
                 ""
@@ -631,6 +659,7 @@ test pa-storage-and-general-operations-materialize {storage (List), concat, lowe
 
 test pa-equality-with-an-unrestricted-string-materializes {a packed String compared with a String of unknown length materializes the packed operand and uses the existing equality} -body {
     set text {
+        import str
         fn same(s, t):
             s == t
 
@@ -657,6 +686,7 @@ test pa-dynamic-callable-stays-tagged {a function passed as a value is called th
 
 test pa-capture-materializes {a packed local captured by a closure is stored in the (tagged) environment} -body {
     parity {
+        import str
         fn pick(flag):
             if flag:
                 ""
@@ -675,6 +705,8 @@ test pa-capture-materializes {a packed local captured by a closure is stored in 
 
 test pa-struct-field-and-mutable-array-materialize {a packed String stored in a struct field or a MutableArray slot is materialized there} -body {
     set text {
+        import mutable_array
+        import str
         struct Pair:
             left: str
             right: int
@@ -700,6 +732,7 @@ test pa-struct-field-and-mutable-array-materialize {a packed String stored in a 
 
 test pa-toplevel-literal-is-passed-as-the-constant {a top-level literal binding handed to a function that takes it tagged (a captured module value) is the static `str` constant: no asciitostr} -body {
     set text {
+        import str
         greeting = "hello"
 
         fn use():
@@ -713,6 +746,7 @@ test pa-toplevel-literal-is-passed-as-the-constant {a top-level literal binding 
 
 test pa-unicode-model-is-untouched {the scalar tier still counts scalars, not bytes: U+00E9, U+20AC, an astral character} -body {
     parity {
+        import str
         fn size(s):
             str::length(s)
 
@@ -725,6 +759,7 @@ test pa-unicode-model-is-untouched {the scalar tier still counts scalars, not by
 
 test pa-peek-traversal-keeps-its-shape {the String-traversal idiom over literal text: the text is a packed parameter, the character a ShortString1 slice of its materialization} -body {
     set text {
+        import str
         fn peek(text, index):
             if index < 0 or index >= str::length(text):
                 return ""
@@ -752,6 +787,8 @@ test pa-peek-traversal-keeps-its-shape {the String-traversal idiom over literal 
 
 test pa-gc-live-across-allocation {a packed value live across unrelated allocations, with ordinary Strings, a List and a struct as live roots, under GC stress} -body {
     set text {
+        import list
+        import str
         struct Pair:
             left: str
             right: int
@@ -781,6 +818,8 @@ test pa-gc-live-across-allocation {a packed value live across unrelated allocati
 
 test pa-gc-materialize-allocates-under-stress {materializing runtime packed values allocates fresh Strings; with a collection at every allocation the Strings (roots) stay valid} -body {
     set text {
+        import list
+        import str
         fn pick(flag):
             if flag:
                 ""
@@ -806,6 +845,7 @@ test pa-gc-materialize-allocates-under-stress {materializing runtime packed valu
 
 test pa-gc-recursive-exact-call-transport {a packed parameter and result across 200 recursive, allocating frames under GC stress} -body {
     set text {
+        import str
         fn step(n):
             if n == 0:
                 ""
@@ -831,6 +871,7 @@ test pa-gc-recursive-exact-call-transport {a packed parameter and result across 
 
 test pa-gc-stack-map-has-no-packed-roots {the root report lists the packed registers as non-roots} -body {
     set text {
+        import str
         fn pick(flag):
             if flag:
                 ""
@@ -882,6 +923,8 @@ proc aotParity {text {extra {}}} {
 test pa-executable-everything {every tier, transport, a tagged frontier and an error-capable path in one standalone executable, also under GC stress} -constraints executableAot -body {
     set nul [format %c 0]
     aotParity "
+        import list
+        import str
         error Bad
 
         fn pick(n):
@@ -929,6 +972,7 @@ test pa-executable-everything {every tier, transport, a tagged frontier and an e
 
 test pa-executable-options-off {the same executable with -short-string-opt 0 and with -ascii-pack-opt 0 agrees} -constraints executableAot -body {
     set text {
+        import str
         fn pick(flag):
             if flag:
                 ""
@@ -948,6 +992,7 @@ test pa-executable-options-off {the same executable with -short-string-opt 0 and
 
 test pa-deterministic-plan-and-nir {fixed source and configuration give byte-identical NIR twice} -body {
     set text {
+        import str
         fn pick(flag):
             if flag:
                 ""
@@ -973,6 +1018,8 @@ proc censusOf {text args} {
 }
 
 set auditSource {
+    import list
+    import str
     fn choose(flag):
         if flag:
             ""

@@ -67,12 +67,10 @@ proc corpus::text {name} {
 }
 
 # The HIR of the program TEXT (named FILENAME in every origin), with each
-# module its qualified references (mod::name, e.g. mutable_array::create) name
-# loaded and compiled alongside it. surface::compile does not do that -- only
-# surface::readProgramFile does, and only from a file -- but a corpus program
-# is compiled from TEXT (a definitions-only prefix plus a driver), so this is
-# surface::modules::compileProgramFile's own steps over text instead of a
-# file. -strict as surface::compile's.
+# module its imports (`import mutable_array`) name loaded and compiled
+# alongside it: surface::modules::compileProgramFile's own steps over text
+# instead of a file (a corpus program is a definitions-only prefix plus a
+# driver). -strict as surface::compile's.
 proc corpus::compile {source filename args} {
     set strict 1
     foreach {option value} $args {
@@ -81,16 +79,12 @@ proc corpus::compile {source filename args} {
         }
         set strict $value
     }
+    # A corpus program is a program file plus a driver assembled here: the
+    # driver's own dependencies (a `list::length(...)` in it) are declared
+    # exactly, like the file's own header (IMPORTS.md).
+    set source [surface::modules::ImportHeader $source]$source
     set ast [surface::parse $source $filename]
-    set state [surface::modules::NewState [dict create f1 [dict get $ast span file]] 2]
-    surface::modules::CollectAndLoad state $ast
-    lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable ownDecls ownErrorDecls ownStructDecls
-    set hir [hir::buildSyntax [surface::lower::Sequence $executable] -strict 0 \
-        -origin [surface::lower::Origin [dict get $ast span] ""] \
-        -files [dict get $state files] -modules [dict get $state sections] \
-        -type-decls [concat [dict get $state typeDecls] $ownDecls] \
-        -error-decls [concat [dict get $state errorDecls] $ownErrorDecls] \
-        -struct-decls [concat [dict get $state structDecls] $ownStructDecls]]
+    set hir [surface::modules::BuildProgram $ast 0]
     return [surface::lower::Finish $hir $strict]
 }
 

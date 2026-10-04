@@ -59,6 +59,8 @@
 # returns Register64 values and nothing else.
 namespace abi::x86_64
 
+import abi
+
 # The two declared errors of the Int -> Register64 conversion, named after
 # their domain (error names are global, and byte.bot's BelowRange/AboveRange
 # are already the Byte conversion's): the same two-error granularity as

@@ -1,3 +1,6 @@
+import ascii
+import byte
+
 # ASCII leaf/composition probe: the program of tests/ascii.test
 # ascii-backend-parity-256 (all five predicates over 0..255).
 byte::high_nibble(0)

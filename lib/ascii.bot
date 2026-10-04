@@ -31,24 +31,14 @@
 # composes ascii::is_alphanumeric with its own retained punctuation set --
 # never duplicated or folded into an ASCII class here.
 #
-# This file has no qualified reference into "byte" (or any other
-# namespace): it is a leaf module, and Byte's own declaration (lib/byte.
-# bot's `type Byte = Int in 0..255`) is registered globally the moment
-# *any* qualified `byte::...` reference anywhere in a compiled program's
-# dependency graph loads that file (surface/modules.tcl's
-# QualifiedRefs-driven dependency discovery: a bare type-annotation name
-# like this file's own "b: Byte" is never itself such a reference). In
-# practice this is never a gap for real programs: every actual consumer of
-# `ascii::` here (`web::is_unreserved`, lib/web.bot) already depends on
-# `byte::` directly (for `byte::set`), so `Byte` is always registered by
-# the time this file's own signatures need it. A standalone caller that
-# uses only `ascii::` and needs to construct a `Byte` itself already needs
-# some `byte::...` reference to do that (there is no other way to name the
-# `Byte` constructor), which is what pulls `byte.bot` in -- see this
-# repository's existing `byte::high_nibble(0)`-as-dependency-anchor idiom
-# (tests/byte-set.test, tests/native-byte.test) for the same situation
-# pre-dating this file.
+# The one dependency of this leaf module is the type of its parameters:
+# `import type byte::Byte` (lib/byte.bot's `type Byte = Int in 0..255`)
+# binds the short type name Byte in this file, and no other name of
+# namespace byte (IMPORTS.md). Every consumer of `ascii::` that needs to
+# *construct* a Byte already names the byte namespace itself.
 namespace ascii
+
+import type byte::Byte
 
 fn is_digit(b: Byte) -> bool:
     b >= 48 and b <= 57

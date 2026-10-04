@@ -17,6 +17,8 @@
 #
 # expect: [[58, 64], [139, 154]]
 
+import list
+
 # The sum of a_row[k] * b[k][column] for k from k to count - 1, plus total.
 fn dot(a_row, b, column, k, count, total) errors IndexNotFound:
     if k == count:

@@ -20,7 +20,14 @@
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
 
-set ::fnDecls "type Byte = Int in 0..255\ntype Nibble = Int in 0..15\nerror NotFound\nerror PermissionDenied\n"
+# `import list` loads lib/list.bot, which declares the (global) error
+# NotFound, so it is not declared here. Tests that inspect "the first call /
+# loop in the program", or round-trip the HIR text (hir::parse cannot read a
+# loaded module's namespaced bindings), use a prelude that loads no module.
+set ::fnDecls "import list\nimport str\ntype Byte = Int in 0..255\ntype Nibble = Int in 0..15\nerror PermissionDenied\n"
+
+set ::fnDeclsNoList "import str\ntype Byte = Int in 0..255\ntype Nibble = Int in 0..15\nerror NotFound\nerror PermissionDenied\n"
+set ::fnDeclsPlain "type Byte = Int in 0..255\ntype Nibble = Int in 0..15\nerror NotFound\nerror PermissionDenied\n"
 
 proc fnT {argTypes result {errors {}}} {
     return [hir::types::MakeFn $argTypes $result $errors]
@@ -389,7 +396,7 @@ r? = make(\"r\")
 } -result {[true, false, true]}
 
 test fn-accept-call-typed-from-contract {inside the HOF the call through the Fn parameter is typed from the contract (bool), has no exact target (it stays an indirect call), and nothing about the argument's own identity leaks in} -body {
-    set hir [fnCompile "$::applyStr\n1"]
+    set hir [fnCompile "$::applyStr\n1" $::fnDeclsNoList]
     set call [lindex [hirFind $hir call] 0]
     list [hir::types::show [hir::typeOf $hir $call]] [hir::get $hir $call target]
 } -result {bool {}}
@@ -413,7 +420,7 @@ fn dash?(c):
 checks = [str::is_tcl_alpha, str::is_tcl_alnum, under?, dash?]
 loop check in checks:
     check("_")}
-    set hir [fnCompile $src]
+    set hir [fnCompile $src $::fnDeclsNoList]
     set loop [lindex [hirFind $hir listloop] 0]
     set checkRef [lindex [hirFind $hir ref check] 0]
     list [fnBindingType $hir checks] [hir::types::show [hir::typeOf $hir $checkRef]] \
@@ -484,7 +491,7 @@ fn choose(strict):
         str::is_tcl_alnum
     else:
         lenient?
-[list::all?(["a", "_"], choose(true)), list::all?(["a", "_"], choose(false))]} "# lib/list.bot declares its own NotFound\n"
+[list::all?(["a", "_"], choose(true)), list::all?(["a", "_"], choose(false))]} "import list\nimport str\n# lib/list.bot declares its own NotFound\n"
 } -result {[false, true]}
 
 test fn-accept-cross-module {a module function may declare an Fn parameter; another file passes it a local Block and a native, and the module's own call through it is checked and runs on every backend} -body {
@@ -492,6 +499,8 @@ test fn-accept-cross-module {a module function may declare an Fn parameter; anot
     set ch [open $libPath w]
     fconfigure $ch -encoding utf-8
     puts $ch {namespace fntypeslib
+
+import list
 
 fn count_where(xs: List[str], keep: Fn{args: [str], return: bool}) -> int:
     kept = loop x in xs:
@@ -504,7 +513,7 @@ fn count_where(xs: List[str], keep: Fn{args: [str], return: bool}) -> int:
     try {
         fnRun {fn vowel?(c):
     c == "a" or c == "e"
-[fntypeslib::count_where(["a", "b", "e"], vowel?), fntypeslib::count_where(["a", "1", "-"], str::is_tcl_alnum)]} "\n"
+[fntypeslib::count_where(["a", "b", "e"], vowel?), fntypeslib::count_where(["a", "1", "-"], str::is_tcl_alnum)]} "import fntypeslib\nimport str\n\n"
     } finally {
         file delete $libPath
     }
@@ -844,7 +853,7 @@ fn pick(c) -> Fn{args: [Byte, str], return: int, errors: [NotFound]}:
     g
 apply(g, 3):
     on NotFound:
-        0}]
+        0} $::fnDeclsPlain]
     set text [hir::format $hir]
     set back [hir::parse $text]
     set same 1

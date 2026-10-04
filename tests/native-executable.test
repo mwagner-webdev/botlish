@@ -47,6 +47,8 @@ proc aotParity {text {options {}}} {
 
 test native-executable-values {constants, Unicode, native values, nested aggregates and big integers match every mode} -constraints executableAot -body {
     aotParity {
+        import immutable_set
+        import str
         big = 9223372036854775808
         [big * big, "a@NUL@é🙂\n\t\\\"", '🙂', true, unit, [1, [2, 3]],
          immutable_set::from_list([3, 2, 3]), str::length]
@@ -55,6 +57,7 @@ test native-executable-values {constants, Unicode, native values, nested aggrega
 
 test native-executable-roots {relocated stack maps keep allocating ancestor frames alive under GC stress} -constraints executableAot -body {
     aotParity {
+        import str
         fn build(n):
             if n < 1:
                 return ""
@@ -77,6 +80,8 @@ test native-executable-closure {escaping closures initialize generic function ad
 
 test native-executable-modules {module statics, sets, strings and specialized companion entries survive GC} -constraints executableAot -body {
     aotParity {
+        import web
+        import type byte::Byte
         fn check(b: Byte) -> bool:
             web::is_unreserved(b)
         [check(45), check(32), web::uri_escape_text("a b/é🙂")]
@@ -88,6 +93,7 @@ test native-executable-modules {module statics, sets, strings and specialized co
 # enters a generic trampoline, which is what this test exists to cover.
 test native-executable-generic-entry {known callable kinds can call through generic trampolines under GC} -constraints executableAot -body {
     aotParity {
+        import str
         fn build():
             str::concat("x", "y")
         fn other():
@@ -106,6 +112,8 @@ test native-executable-generic-entry {known callable kinds can call through gene
 
 test native-executable-native-bridge {source native implementations share existing modules and preserve declared contracts} -constraints executableAot -body {
     aotParity {
+        import byte
+        import str
         # requires: web
         q = uriEscape("a b")
         fn check(s: str) -> bool:
@@ -118,7 +126,7 @@ test native-executable-native-shadow {native preparation respects local binding 
     set dir [makeDirectory {aot shadow test}]
     try {
         core::loadLibrary web
-        set hir [surface::compile "fn uriEscape(s):\n    str::length(s)\nuriEscape(\"abc\")" shadow.bot]
+        set hir [surface::compile "import str\nfn uriEscape(s):\n    str::length(s)\nuriEscape(\"abc\")" shadow.bot]
         set prepared [native::prepareHir $hir]
         set binary [native::executable $hir [file join $dir program]]
         list [expr {$hir eq $prepared}] [exec $binary]
@@ -203,7 +211,8 @@ test native-executable-no-evaluation {compilation terminates even when running t
 test native-executable-runtime-error {runtime errors exit unsuccessfully and go to stderr} -constraints executableAot -body {
     set dir [makeDirectory {aot error test}]
     try {
-        set hir [surface::compile {mutable_array::allocate(0 - 1)} error.bot]
+        set hir [surface::compile {import mutable_array
+mutable_array::allocate(0 - 1)} error.bot]
         set binary [native::executable $hir [file join $dir program]]
         set failed [catch {exec $binary 2> [file join $dir stderr]} stdout options]
         set ch [open [file join $dir stderr] r]; set stderr [read $ch]; close $ch

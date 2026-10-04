@@ -30,6 +30,8 @@
 #
 # expect: ["hello", "hello  world", "AI-generated", "\"hello\"", "'hello'", "wait... what?"]
 
+import str
+
 # The character at index, or "" past the end (examples/stdlib/csv.bot's peek).
 fn peek(text, index) errors LowerUnderrun:
     if index >= str::length(text):

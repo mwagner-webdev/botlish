@@ -89,7 +89,7 @@ proc funcBytes {hir opts names} {
 
 proc run {label source names} {
     global modes runs ITERS out
-    if {[catch {set hir [surface::compile $source probe.bot -strict 0]} msg]} {
+    if {[catch {set hir [surface::compile [surface::modules::ImportHeader $source]$source probe.bot -strict 0]} msg]} {
         lappend out "$label: COMPILE ERROR $msg"
         return
     }

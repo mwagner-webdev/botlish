@@ -11,7 +11,7 @@ source $root/native/native.tcl
 interp recursionlimit {} 20000
 proc compile {src} {
     set f [file join [file tempdir] probe-typing.bot]
-    set c [open $f w]; puts $c $src; close $c
+    set c [open $f w]; puts $c "[surface::modules::ImportHeader $src]$src"; close $c
     try { return [surface::readProgramFile $f -strict 1] } finally { file delete $f }
 }
 proc last {src} {
@@ -54,8 +54,8 @@ foreach {label src} {
  C "fn a():\n    mutable_array::from_list(\[1\])\nfn b():\n    mutable_array::from_list(\[2\])\nfn j(c):\n    if c:\n        a()\n    else:\n        b()\nj(true)"
  D "fn a():\n    mutable_array::from_list(\[1\])\nfn j(c):\n    if c:\n        a()\n    else:\n        \[\]\nj(true)"
  E "rows = \[mutable_array::from_list(\[1\]), mutable_array::from_list(\[2\])\]\nfn g(i):\n    list::at(rows, i)\ng(1)"
- F "mutable_array::from_list(\[\"x\", 1, true\])"
- G "mutable_array::from_list(123)"
+ F "import mutable_array\nmutable_array::from_list(\[\"x\", 1, true\])"
+ G "import mutable_array\nmutable_array::from_list(123)"
  H "fn f(x):\n    mutable_array::from_list(x)\nf(1)"
 } {
   puts "== $label"
@@ -65,7 +65,7 @@ puts "=========== runtime"
 foreach {label src} {
  order "xs = \[10, 20, 30\]\nm = mutable_array::from_list(xs)\n\[mutable_array::capacity(m), mutable_array::at(m, 0), mutable_array::at(m, 1), mutable_array::at(m, 2)\]"
  mutate "fn f():\n    xs = \[1, 2, 3\]\n    m = mutable_array::from_list(xs)\n    mutable_array::set(m, 0, 99)\n    \[xs, mutable_array::at(m, 0)\]\nf()"
- empty "fn f():\n    m = mutable_array::from_list(\[\])\n    \[mutable_array::capacity(m), mutarray?(m)\]\nf()"
+ empty "import mutable_array\nfn f():\n    m = mutable_array::from_list(\[\])\n    \[mutable_array::capacity(m), mutarray?(m)\]\nf()"
  hetero "fn f():\n    m = mutable_array::from_list(\[\"x\", 1, true\])\n    \[mutable_array::at(m, 0), mutable_array::at(m, 1), mutable_array::at(m, 2)\]\nf()"
  pred "\[mutarray?(mutable_array::allocate(1)), mutarray?(\[1\]), mutarray?(1), mutarray?(\"s\"), mutarray?(true), mutarray?(mutable_array::from_list(\[\]))\]"
 } {
@@ -76,15 +76,15 @@ foreach {label src} {
 }
 puts "=========== typing/inference"
 proc show {label script} { puts "== $label"; if {[catch {uplevel #0 $script} r]} {puts "ERR: [string range $r 0 250]"} else {puts $r} }
-show "maybe_capacity sig" {sig [compile "fn maybe_capacity(x):\n    if mutarray?(x):\n        mutable_array::capacity(x)\n    else:\n        0\nmaybe_capacity(1)"] maybe_capacity}
-show "capacity sig" {sig [compile "fn capacity(x):\n    mutable_array::capacity(x)\ncapacity(mutable_array::allocate(1))"] capacity}
+show "maybe_capacity sig" {sig [compile "import mutable_array\nfn maybe_capacity(x):\n    if mutarray?(x):\n        mutable_array::capacity(x)\n    else:\n        0\nmaybe_capacity(1)"] maybe_capacity}
+show "capacity sig" {sig [compile "import mutable_array\nfn capacity(x):\n    mutable_array::capacity(x)\ncapacity(mutable_array::allocate(1))"] capacity}
 show "after-branch" {sig [compile "fn f(x):\n    if mutarray?(x):\n        0\n    mutable_array::capacity(x)\nf(mutable_array::allocate(1))"] f}
 show "nested alias" {last "fn f(x):\n    if mutarray?(x):\n        y = x\n        mutable_array::capacity(y)\n    else:\n        0\nf(1)"}
 show "mixed fnType" {fnType "fn f(x):\n    if mutarray?(x):\n        x\n    else:\n        0\nf(1)" f}
 show "record ctrl" {fnType "fn mkpair():\n    \[mutable_array::from_list(\[1\]), 0\]\nfn first():\n    list::at(mkpair(), 0)\nfirst()" first}
 show "record ctrl2" {last "fn mkpair():\n    \[mutable_array::from_list(\[1\]), 0\]\nfn first(p):\n    list::at(p, 0)\nfirst(mkpair())"}
 show "local record" {last "p = \[mutable_array::from_list(\[1\]), 0\]\nlist::at(p, 0)"}
-show "append" {last "rows = list::append(\[mutable_array::from_list(\[1\])\], mutable_array::from_list(\[2\]))\nrows"}
+show "append" {last "import list\nimport mutable_array\nrows = list::append(\[mutable_array::from_list(\[1\])\], mutable_array::from_list(\[2\]))\nrows"}
 show "pred type" {last "mutarray?"}
 show "int pred type" {last "integer?"}
 show "pred call" {fnType "fn p(x):\n    mutarray?(x)\np(1)" p}

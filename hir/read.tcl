@@ -161,7 +161,9 @@ proc hir::read::TypeDeclLine {content number} {
     } else {
         return ""
     }
-    return [dict create name $name nameSpan $span parent $parent parentSpan $span \
+    # NAME is the type's identity as printed (`abi::U8Value` for a module's
+    # type), so the declaration reads back with no namespace of its own.
+    return [dict create name $name namespace "" nameSpan $span parent $parent parentSpan $span \
         domain $domain domainSpan $span]
 }
 

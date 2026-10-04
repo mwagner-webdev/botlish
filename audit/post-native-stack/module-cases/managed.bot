@@ -1,4 +1,6 @@
 namespace managed
+
+import list
 digits = [10, 20]
 fn get(i):
     if i < 0 or i >= list::length(digits):

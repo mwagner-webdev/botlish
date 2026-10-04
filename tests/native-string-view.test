@@ -93,7 +93,8 @@ fn is_local_char(c):
 # region-eligible argument directly: zero String allocation.
 
 test view-classify-alnum-1 {str::is_tcl_alnum(peek(...)) over ASCII text: zero String allocations, correct count} -body {
-    set text "$::peekSrc
+    set text "import str
+$::peekSrc
 fn scan(text, index, count):
     if index >= str::length(text):
         return count
@@ -109,7 +110,8 @@ f()
 
 test view-classify-alpha-non-ascii-1 {str::is_tcl_alpha(peek(...)) over BMP non-ASCII text: zero String allocations, correct classification} -body {
     set cafe "café"
-    set text "$::peekSrc
+    set text "import str
+$::peekSrc
 fn f(text):
     \[str::is_tcl_alpha(peek(text, 0)), str::is_tcl_alpha(peek(text, 3)), str::is_tcl_alpha(peek(text, 4))\]
 f([corpus::literal "${cafe}1"])
@@ -119,7 +121,8 @@ f([corpus::literal "${cafe}1"])
 
 test view-classify-astral-1 {str::is_tcl_alpha(peek(...)) over a supplementary-plane character: zero String allocations, correct classification} -body {
     set emoji [encoding convertfrom utf-8 "\xf0\x9f\x98\x80"]
-    set text "$::peekSrc
+    set text "import str
+$::peekSrc
 fn f(text):
     \[str::is_tcl_alpha(peek(text, 0)), str::is_tcl_alpha(peek(text, 1))\]
 f([corpus::literal "a${emoji}"])
@@ -128,12 +131,14 @@ f([corpus::literal "a${emoji}"])
 } -result {{list {{bool true} {bool false}}} 0 2}
 
 test view-classify-range-1 {str::is_tcl_alpha of a region wider than one scalar: the same RANGE error as the materializing form} -body {
-    set text {str::is_tcl_alpha(str::substring("hello", 0, 3))}
+    set text {import str
+str::is_tcl_alpha(str::substring("hello", 0, 3))}
     assertErrorParity $text
 } -result {{CORE SEMANTIC RANGE} {str::is_tcl_alpha: expects a single Unicode scalar, got a string of length 3}}
 
 test view-classify-nir-1 {NIR: str::is_tcl_alnum(peek(...)) lowers to strregiontclalnum, no substr/streq/strtclalnum} -body {
-    set text "$::peekSrc
+    set text "import str
+$::peekSrc
 fn f(text, index):
     str::is_tcl_alnum(peek(text, index))
 "
@@ -150,7 +155,8 @@ fn f(text, index):
 # recognized structurally (#29 of the milestone), never by name.
 
 test view-predicate-1 {a user predicate over alnum/literal characters, called on peek()'d text: zero String allocations, correct count} -body {
-    set text "$::peekSrc$::isLocalCharSrc
+    set text "import str
+$::peekSrc$::isLocalCharSrc
 fn scan(text, index, count):
     if index >= str::length(text):
         return count
@@ -165,7 +171,8 @@ f()
 } -result {{int 9} 0 10}
 
 test view-predicate-non-ascii-1 {a user predicate over non-ASCII alnum characters: zero String allocations, correct classification} -body {
-    set text "$::peekSrc$::isLocalCharSrc
+    set text "import str
+$::peekSrc$::isLocalCharSrc
 fn f(text):
     \[is_local_char(peek(text, 0)), is_local_char(peek(text, 1)), is_local_char(peek(text, 2))\]
 f([corpus::literal "é_@"])
@@ -174,7 +181,8 @@ f([corpus::literal "é_@"])
 } -result {{list {{bool true} {bool true} {bool false}}} 0 3}
 
 test view-predicate-inline-1 {a user predicate called directly on an inline substring, with no peek() binding: zero String allocations} -body {
-    set text "$::isLocalCharSrc
+    set text "import str
+$::isLocalCharSrc
 fn f(text, i):
     is_local_char(str::substring(text, i, i + 1))
 f(\"a.b\", 1)
@@ -183,7 +191,8 @@ f(\"a.b\", 1)
 } -result {{bool true} 0 1}
 
 test view-predicate-nir-1 {NIR: a user predicate's body is inlined against the region -- no call to its own function, no substr} -body {
-    set text "$::peekSrc$::isLocalCharSrc
+    set text "import str
+$::peekSrc$::isLocalCharSrc
 fn f(text, index):
     is_local_char(peek(text, index))
 "
@@ -193,7 +202,8 @@ fn f(text, index):
 } -result {1 1 0 0}
 
 test view-predicate-range-1 {a user predicate over a region wider than one scalar: the same RANGE error the materializing form's str::is_tcl_alnum call would raise} -body {
-    set text "$::isLocalCharSrc
+    set text "import str
+$::isLocalCharSrc
 fn f(x):
     is_local_char(str::substring(x, 0, 3))
 f(\"abc\")
@@ -208,7 +218,8 @@ f(\"abc\")
 # milestone's #52).
 
 test view-escape-1 {a peek()'d character also returned directly: still materializes, correct value} -body {
-    set text "$::peekSrc$::isLocalCharSrc
+    set text "import str
+$::peekSrc$::isLocalCharSrc
 fn f(text):
     c = peek(text, 0)
     ok = is_local_char(c)
@@ -219,7 +230,8 @@ f(\"a\")
 } -result {{str a} 1}
 
 test view-escape-container-1 {a peek()'d character also stored in a List: still materializes, correct value} -body {
-    set text "$::peekSrc$::isLocalCharSrc
+    set text "import str
+$::peekSrc$::isLocalCharSrc
 fn f(text):
     c = peek(text, 0)
     \[is_local_char(c), c\]
@@ -234,7 +246,8 @@ f(\"a\")
 # materializing lowering runs unchanged, still correct.
 
 test view-unsupported-shape-1 {a predicate that concatenates its parameter: not recognized, still allocates, still correct} -body {
-    set text "$::peekSrc
+    set text "import str
+$::peekSrc
 fn noisy(c):
     str::length(str::concat(c, \"!\")) == 2
 fn f(text):
@@ -245,7 +258,8 @@ f(\"a\")
 } -result {{bool true} 1}
 
 test view-unsupported-shape-2 {a predicate with two parameters (not the recognized one-parameter shape): not recognized, still correct} -body {
-    set text "$::peekSrc
+    set text "import str
+$::peekSrc
 fn eq2(a, b):
     a == b
 fn f(text):
@@ -266,7 +280,8 @@ test view-gc-stress-1 {repeated classification/predicate calls over many peek() 
 } -cleanup {
     unset ::env(BOTLISH_NATIVE_GC_STRESS)
 } -body {
-    set text "$::peekSrc$::isLocalCharSrc
+    set text "import str
+$::peekSrc$::isLocalCharSrc
 fn scan(text, index, count):
     if index >= str::length(text):
         return count

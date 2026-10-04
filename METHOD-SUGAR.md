@@ -4,10 +4,10 @@ A small syntax milestone: `value.f(a, b)` as an alternate spelling of the
 ordinary call `f(value, a, b)`.
 
 ```
-at = list::at                              # bind the intrinsic to a name
-xs.at(i)                   ==   at(xs, i)  ==   list::at(xs, i)
-substring = str::substring
-text.substring(0, 5)       ==   substring(text, 0, 5)
+import list                                # the namespace's functions become candidates
+xs.at(i)                   ==   list::at(xs, i)
+import str
+text.substring(0, 5)       ==   str::substring(text, 0, 5)
 n.inc().twice().add(3)     ==   add(twice(inc(n)), 3)
 ```
 
@@ -20,35 +20,63 @@ declaration, no extension-method syntax, no receiver annotation, no method
 table, no search by receiver type, no overload rule of its own, and no
 bound-method value.
 
-## Botlish has no `import` -- what "imported function" means here
+## What "visible" means: lexical names and imported namespaces
 
-The specification speaks of functions "imported" into a scope. Botlish has no
-`import` statement (README.md section 12; `surface/modules.tcl`: "no
-`import` statement of any kind"). A name is visible at a call by *ordinary
-lexical resolution* (`hir/resolve.tcl`), which finds:
+A function is a candidate for `x.f(...)` if it is visible at the call:
 
 * a function or binding of the file established before the call (a function
   may reach itself; nothing is hoisted),
 * a parameter or local binding of an enclosing scope,
 * a **root native** (`list`, `argv`, `hash`, the operators, ...: the language
   primitives, STDLIB-NAMESPACES.md), which is visible everywhere unless
-  shadowed,
-* a namespaced function -- a module function (`list::find`) or a standard
-  intrinsic (`list::at`, `str::substring`, `mutable_array::set`, ...) --
-  **only if it has been bound to a name**: `find = list::find`, `at =
-  list::at`. That binding is this language's "function import", and the name
-  it introduces (`find`, `at`) is the method name. The original name
-  (`list::find`, or the module's own `find`) is not made visible by the
-  binding. A bound intrinsic is the very intrinsic: `xs.at(i)` resolves to
-  the same native target as `list::at(xs, i)` (`tests/stdlib-namespaces.test`
-  checks the HIR call targets and the NIR are identical).
+  shadowed -- all by ordinary lexical resolution (`hir/resolve.tcl`); or
+* a **member `f` of a namespace the file directly imports** (IMPORTS.md):
+  `import list` makes the module functions (`list::find`) and intrinsics
+  (`list::at`, `list::append`, ...) of exactly `list` candidates; `import
+  str` those of `str`; `import abi::x86_64` those of `abi::x86_64` -- and
+  `import abi` does not make them candidates, nor does an import of a
+  module that imports `abi::x86_64`: imports are exact and not transitive.
 
-`mod::f` alone does **not** make `f` visible: the qualified spelling is the
-only spelling of an unbound module function, and the sugar adds no
-qualification mechanism of its own. This is the rule the spec asks for ("follow
-the actual module/import rules of Botlish"), and it means no new language
-feature (an import statement) was invented for this milestone. Everything
-below that says "imported" means "visible by ordinary resolution".
+An import injects no unqualified name: `list::at(xs, 0)` is valid after
+`import list`, `at(xs, 0)` is not, and no alias `at = list::at` is needed (or
+created) for `xs.at(0)`. Without the import, `xs.at(0)` finds nothing even
+though the compiler knows the standard namespace exists: visibility comes
+from the file's own header. A bound intrinsic is the very intrinsic: `xs.at(i)`
+resolves to the same native target as `list::at(xs, i)`
+(`tests/stdlib-namespaces.test` checks the HIR call targets and the NIR are
+identical). An old-style binding (`at = list::at`) still works and, being the
+same function as the imported one, is one candidate, not two.
+
+### Several candidates
+
+Botlish still has no overloading: every qualified spelling is one exact
+function, and a name denotes one binding. But a method name is now looked up in
+several places at once -- the lexical scope and each directly imported
+namespace -- so two *distinct* functions can both be visible as `f`
+(`import alpha`, `import beta`, both with an `f`; or an imported `at` beside a
+local `at`). The sugar then applies its one rule to each: **the call is
+accepted with the candidate whose ordinary call `f(x, a, b)` is valid**:
+
+* exactly one valid candidate: the call is that one (so with `import list`
+  and `import mutable_array`, `xs.at(i)` on a `List` is `list::at` and
+  `a.at(i)` on a `MutableArray` is `mutable_array::at`: each rejects the
+  other's receiver kind, the same way a declared parameter type or an
+  inferred contract rejects it);
+* more than one valid: `AMBIGUOUS-METHOD-CALL`, naming the candidates -- no
+  precedence of any kind (not import order, not shortest namespace, not
+  "local wins", not "standard library wins"); spell the one you mean
+  qualified, `alpha::f(x, ...)`;
+* none valid: `NO-APPLICABLE-METHOD`, listing why each candidate fails.
+
+"Valid" is checked, not guessed: `hir::buildSyntax` builds the program with
+each candidate chosen (`hir::DecideMethodCalls`) and calls a candidate valid
+if its call carries no diagnostic of its own -- a declared parameter or
+inferred contract the receiver cannot prove, an invalid flag, a native whose
+first parameter has a different known kind, ... A declared error nobody
+handled is not evidence against a candidate (it is the obligation of a call
+that fits). Calls with a single candidate -- almost all -- cost nothing extra.
+A candidate that is statically a function of another arity is not a candidate
+(unless none is left, which keeps the ordinary arity error).
 
 ## Syntax
 
@@ -172,14 +200,18 @@ parser guesses nothing.
 2. **Surface lowering** (`surface/lower.tcl`) writes it as what it has always
    been, a call of the projection `receiver.name`, plus a `method 1` marker
    (`hir::syntax::methodCallNode`). It looks nothing up.
-3. **HIR resolution** (`hir/resolve.tcl`, `call` case): if `name` is visible
-   from the call (`MethodTargetVisible`, the same scope walk
-   `Lookup` makes, without creating anything), the node becomes the ordinary
-   call `name(receiver, args...)`: the callee is a real `ref` of that name
-   (so lexical shadowing is exactly the free call's, the reference is a real
-   use -- capture, call target, call graph -- and it resolves to the very
-   binding `f(x)` would), and the receiver is resolved and later evaluated
-   once, as argument 1. If `name` is not visible, the written callee (the
+3. **HIR resolution** (`hir/resolve.tcl`, `call` case): the candidates for
+   `name` are gathered (`MethodCandidates`): what the same scope walk
+   `Lookup` makes finds (without creating anything), and the member `name`
+   of every namespace the file directly imports (`hir/imports.tcl`). If
+   there is a candidate, the node becomes the ordinary call
+   `name(receiver, args...)`: the callee is a real `ref` -- of that name for
+   a lexical candidate (so lexical shadowing is exactly the free call's), the
+   qualified `ns::name` for an imported one -- a real use (capture, call
+   target, call graph) that resolves to the very binding the free spelling
+   would, and the receiver is resolved and later evaluated once, as
+   argument 1. With several distinct candidates `hir::buildSyntax` decides
+   which one (above). If `name` is not visible, the written callee (the
    projection) is kept and the call is the field-value call. Everything
    after this point is the existing call machinery.
 
@@ -216,9 +248,11 @@ receiver rejected by parameter 1 (`5.takes_text()`) at the receiver
 
 | Situation | Diagnostic |
 |---|---|
-| no function of that name visible (`x.nothere(1)`, a module function not bound to a name, a function defined later) | the existing field diagnostic of the call it falls back to (`NOT-A-STRUCT`, `UNKNOWN-FIELD`, `UNPROVEN-FIELD`) plus: `as a method-style call, no function named "f" is visible here either: method syntax only applies a function that is already visible by that name (define it here, or bind it, e.g. `f = module::f`)` |
+| no function of that name visible (`x.nothere(1)`, a function of a namespace the file does not import, a function defined later) | the existing field diagnostic of the call it falls back to (`NOT-A-STRUCT`, `UNKNOWN-FIELD`, `UNPROVEN-FIELD`) plus: `as a method-style call, no function named "f" is visible here either: method syntax only applies a function that is already visible by that name (define it here, or import the namespace that defines it with `import NAMESPACE`)` |
 | receiver rejected by parameter 1, a bad later argument, wrong arity, errors not handled | exactly the free call's diagnostic (same kind and message; locations point at the receiver/argument) |
 | a field and a function both candidates | `AMBIGUOUS-METHOD-CALL` (above), at the method name |
+| several distinct visible functions, more than one fits the receiver | `AMBIGUOUS-METHOD-CALL` ("more than one visible function accepts the receiver"), at the method name |
+| several distinct visible functions, none fits | `NO-APPLICABLE-METHOD`, at the method name, with each candidate's reason |
 | shadowing local that is not callable | `NOT-CALLABLE`, as `f(x)` |
 
 The "no function visible" diagnostic does not claim `f` is a declared member of
@@ -234,18 +268,18 @@ reason appended.
   decided by the function name and the ordinary call; the receiver's
   already-resolved static type is all that matters. Test: a `Byte`
   (`byte::complement(200)`, a module type never named in source) receives
-  `complement`, `high_nibble` -- bound as `complement = byte::complement` --
-  and the chain works with only the function names visible.
+  `complement` and `high_nibble` after `import byte`, and the chain works.
 * **No function declaration opts in.** `fn replace(text, old, new)` is the
   same declaration whether called as `replace(t, a, b)` or `t.replace(a, b)`.
-* **No registry, no search.** Resolution starts from the visible name after
-  the period. The compiler never searches the program or the libraries for a
-  function "whose first parameter has the receiver's type". Test: a
-  `list::any?` accepting the receiver exactly (`[1, 2].any?(p)`) is not found
-  when only `list::any?` exists; `byte::complement` is not found for
-  `200.complement()` without a binding.
-* **No `import` through the type.** Having type `T` does not lead to `T`'s
-  module; the function binding is the capability.
+* **No registry, no search.** Resolution starts from the name after the
+  period, over the lexical scope and the namespaces the file imported. The
+  compiler never searches the program or the libraries for a function "whose
+  first parameter has the receiver's type". Test: a `list::any?` accepting
+  the receiver exactly (`[1, 2].any?(p)`) is not found without `import list`;
+  `byte::complement` is not found for `200.complement()` without `import
+  byte`.
+* **No import through the type.** Having type `T` does not lead to `T`'s
+  module; the file's own `import` is the capability.
 
 ## Backend impact
 
@@ -369,11 +403,12 @@ planned -- the semantic rule is structural.
 1. **What syntax was added?** `receiver "." IDENT "(" [arguments] ")"` as a
    postfix (parser: `methodcall` AST node).
 2. **What is `x.f(a, b)` equivalent to?** `f(x, a, b)`.
-3. **Must `f` be imported?** Yes -- visible by ordinary resolution (Botlish
-   has no `import`: a file's function, a root native, or a module function
-   bound to a name).
+3. **Must `f` be imported?** It must be visible: by ordinary resolution (a
+   file's function or binding, a root native) or as a member of a namespace
+   the file directly imports (`import list`; IMPORTS.md).
 4. **Does the compiler search modules/types for an unimported matching `f`?**
-   No.
+   No: only the namespaces the file itself imports, exactly, never their
+   parents, children or dependencies.
 5. **Must the receiver's type itself be imported?** No.
 6. **Must `f` have a special method/receiver declaration?** No.
 7. **Must the receiver be accepted as parameter 1 under ordinary type
@@ -382,19 +417,22 @@ planned -- the semantic rule is structural.
    alias-like types are source-defined refinement types; they behave as in
    the free call, tested both directions).
 9. **Are generic/specialized calls resolved by the ordinary machinery?** Yes.
-10. **Does method syntax have its own overload ranking?** No (Botlish has no
-    overloading to rank).
-11. **What exactly counts as ambiguous?** The only multi-candidate situation
-    Botlish has: a visible function `f` and a struct receiver whose field `f`
-    may be callable (`x.f(a)` has always meant the field call).
+10. **Does method syntax have its own overload ranking?** No: no ranking and no
+    precedence between imported namespaces or against local functions.
+11. **What exactly counts as ambiguous?** Two situations: a visible function
+    `f` and a struct receiver whose field `f` may be callable (`x.f(a)` has
+    always meant the field call); and several distinct visible functions `f`
+    (lexical, or members of different imported namespaces) for which the
+    ordinary call with the receiver is valid.
 12. **What happens when no imported callable is valid?** If no function `f`
     is visible: the call is the field-value call, whose ordinary diagnostic
     (`NOT-A-STRUCT`/`UNKNOWN-FIELD`/`UNPROVEN-FIELD`) is reported with the
-    visibility hint. If a function is visible but `f(x, ...)` is invalid:
-    exactly the free call's diagnostic.
+    visibility hint. If exactly one function is visible but `f(x, ...)` is
+    invalid: exactly the free call's diagnostic. If several are visible and
+    none fits: `NO-APPLICABLE-METHOD`.
 13. **What happens when more than one ordinary callable remains valid?**
-    `AMBIGUOUS-METHOD-CALL`, naming both disambiguating spellings. (There is
-    no other way for two to exist.)
+    `AMBIGUOUS-METHOD-CALL`, naming the candidates (or, for a field and a
+    function, both disambiguating spellings).
 14. **Can unary functions use method syntax?** Yes, if otherwise eligible
     (`n.inc()`).
 15. **Can binary functions use method syntax?** Yes, if otherwise eligible.

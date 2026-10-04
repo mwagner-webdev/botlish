@@ -1,3 +1,5 @@
+import byte
+
 # Probe B: byte::from_int on a statically nonnegative Int. nonneg/g are
 # verbatim tests/errors.test errors-byte-from-int-partial-range-elimination;
 # the driver loop supplies unconstrained inputs.

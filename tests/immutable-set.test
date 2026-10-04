@@ -46,7 +46,11 @@ proc setTypeRejects {source} {
             || [string match {*does not prove declared type*} $message]}]
 }
 
-set ::smallDecl "type Small = Int in 0..10\n\nfn one() -> Small:\n    1\n\nfn two() -> Small:\n    2\n\n"
+# The same declarations without the imports: hir::parse does not read the
+# text of a program that binds imported source-module functions, so the HIR
+# round-trip tests use a program that imports nothing.
+set ::smallDeclNoImports "type Small = Int in 0..10\n\nfn one() -> Small:\n    1\n\nfn two() -> Small:\n    2\n\n"
+set ::smallDecl "import immutable_set\nimport list\ntype Small = Int in 0..10\n\nfn one() -> Small:\n    1\n\nfn two() -> Small:\n    2\n\n"
 
 # ---------------------------------------------------------------------------
 # Applied-type resolution: syntax reuse, no parser change (spec 1-3, 6, 86)
@@ -173,7 +177,8 @@ take_small(t())} $::smallDecl] scalarok.bot
 # case that remains legal, exactly as List[T]'s own sibling test does.
 
 test set-type-sibling-rejected {ImmutableSet[B] is not admissible as ImmutableSet[A] merely because A and B are same-domain siblings} -body {
-    setTypeRejects {type A = Int in 0..3
+    setTypeRejects {import immutable_set
+type A = Int in 0..3
 type B = Int in 0..3
 
 fn make_b() -> B:
@@ -215,7 +220,8 @@ s = immutable_set::from_list(xs)
 } -result {{List[int[Small]]} {ImmutableSet[int[Small]]}}
 
 test set-construct-unicodechar {immutable_set::from_list(['-', '.', '_', '~']) infers ImmutableSet[UnicodeChar] -- no char-specific set typing} -body {
-    set h [surface::compile {chars = ['-', '.', '_', '~']
+    set h [surface::compile {import immutable_set
+chars = ['-', '.', '_', '~']
 s = immutable_set::from_list(chars)
 1} charset.bot -strict 0]
     set sExpr [lindex [hirFind $h bind s] 0]
@@ -223,7 +229,8 @@ s = immutable_set::from_list(chars)
 } -result {ImmutableSet[UnicodeChar]}
 
 test set-construct-heterogeneous {a heterogeneous source List gives a broad ImmutableSet, never a false precise one} -body {
-    set h [surface::compile {xs = [1, "x"]
+    set h [surface::compile {import immutable_set
+xs = [1, "x"]
 s = immutable_set::from_list(xs)
 1} heterog.bot -strict 0]
     set sExpr [lindex [hirFind $h bind s] 0]
@@ -232,7 +239,7 @@ s = immutable_set::from_list(xs)
 
 test set-construct-broad-source-also-broad {a List whose element type was lost to erasure (a declared broad result) also gives a broad ImmutableSet, not a false precise one; an untyped passthrough alone keeps List[int], so its set is ImmutableSet[int] (semantic instance)} -body {
     set kinds {}
-    foreach def {"fn passthrough(x) -> list:\n    x" "fn passthrough(x):\n    x"} {
+    foreach def {"import immutable_set\nfn passthrough(x) -> list:\n    x" "import immutable_set\nfn passthrough(x):\n    x"} {
         set h [surface::compile "$def\ns = immutable_set::from_list(passthrough(\[1, 2\]))\n1" broadsrc.bot -strict 0]
         set sExpr [lindex [hirFind $h bind s] 0]
         lappend kinds [hir::types::show [hir::typeOf $h $sExpr]]
@@ -241,7 +248,8 @@ test set-construct-broad-source-also-broad {a List whose element type was lost t
 } -result {immutableSet {ImmutableSet[int]}}
 
 test set-construct-empty {immutable_set::from_list([]) infers ImmutableSet[never], satisfying no ImmutableSet[T] parameter under initial invariance} -body {
-    set h [surface::compile {s = immutable_set::from_list([])
+    set h [surface::compile {import immutable_set
+s = immutable_set::from_list([])
 1} empty.bot -strict 0]
     set sExpr [lindex [hirFind $h bind s] 0]
     hir::types::show [hir::typeOf $h $sExpr]
@@ -264,23 +272,28 @@ consume(immutable_set::from_list([]))} $::smallDecl] emptysetok.bot
 # Membership (spec 19-21, 52, 61-63)
 
 test set-membership-present {contains({1,2,3}, 2) is true} -body {
-    core::value::show [core::evalProgram [sourceIR {immutable_set::contains(immutable_set::from_list([1, 2, 3]), 2)}]]
+    core::value::show [core::evalProgram [sourceIR {import immutable_set
+immutable_set::contains(immutable_set::from_list([1, 2, 3]), 2)}]]
 } -result true
 
 test set-membership-absent {contains({1,2,3}, 4) is false -- ordinary Bool, no Error} -body {
-    core::value::show [core::evalProgram [sourceIR {immutable_set::contains(immutable_set::from_list([1, 2, 3]), 4)}]]
+    core::value::show [core::evalProgram [sourceIR {import immutable_set
+immutable_set::contains(immutable_set::from_list([1, 2, 3]), 4)}]]
 } -result false
 
 test set-membership-char-present {contains({'A','B'}, 'A') is true} -body {
-    core::value::show [core::evalProgram [sourceIR {immutable_set::contains(immutable_set::from_list(['A', 'B']), 'A')}]]
+    core::value::show [core::evalProgram [sourceIR {import immutable_set
+immutable_set::contains(immutable_set::from_list(['A', 'B']), 'A')}]]
 } -result true
 
 test set-membership-char-absent {contains({'A','B'}, 'C') is false} -body {
-    core::value::show [core::evalProgram [sourceIR {immutable_set::contains(immutable_set::from_list(['A', 'B']), 'C')}]]
+    core::value::show [core::evalProgram [sourceIR {import immutable_set
+immutable_set::contains(immutable_set::from_list(['A', 'B']), 'C')}]]
 } -result false
 
 test set-membership-cross-kind-false {contains({'A','B'}, 65) is false, not a TYPE error: a query value of another runtime kind simply never matches} -body {
-    core::value::show [core::evalProgram [sourceIR {immutable_set::contains(immutable_set::from_list(['A', 'B']), 65)}]]
+    core::value::show [core::evalProgram [sourceIR {import immutable_set
+immutable_set::contains(immutable_set::from_list(['A', 'B']), 65)}]]
 } -result false
 
 test set-membership-wrong-first-argument-is-type-error {immutable_set::contains(123, x) raises the ordinary dynamic TYPE error -- the first operand is not a set at all (distinct from an absent-member query)} -body {
@@ -295,12 +308,15 @@ test set-from-list-wrong-argument-is-type-error {immutable_set::from_list(123) r
 # Deduplication (spec 15, 53)
 
 test set-dedup-collapses-duplicates {immutable_set::from_list([1,1,1]) behaves exactly as the singleton set {1}} -body {
-    list [core::value::show [core::evalProgram [sourceIR {immutable_set::from_list([1, 1, 1]) == immutable_set::from_list([1])}]]] \
-         [core::value::show [core::evalProgram [sourceIR {immutable_set::contains(immutable_set::from_list([1, 1, 1]), 1)}]]]
+    list [core::value::show [core::evalProgram [sourceIR {import immutable_set
+immutable_set::from_list([1, 1, 1]) == immutable_set::from_list([1])}]]] \
+         [core::value::show [core::evalProgram [sourceIR {import immutable_set
+immutable_set::contains(immutable_set::from_list([1, 1, 1]), 1)}]]]
 } -result {true true}
 
 test set-dedup-char {duplicates of UnicodeChar members collapse identically} -body {
-    core::value::show [core::evalProgram [sourceIR {immutable_set::from_list(['A', 'A', 'B']) == immutable_set::from_list(['A', 'B'])}]]
+    core::value::show [core::evalProgram [sourceIR {import immutable_set
+immutable_set::from_list(['A', 'A', 'B']) == immutable_set::from_list(['A', 'B'])}]]
 } -result true
 
 test set-dedup-required-payload {the exact required payload: one() called twice in the source List is semantically deduplicated in the resulting set} -body {
@@ -321,18 +337,24 @@ accepts(make())} $::smallDecl]]]
 
 test set-equality-examples {the mandatory equality acceptance table} -body {
     lmap text {
-        {immutable_set::from_list([1, 2]) == immutable_set::from_list([1, 2])}
-        {immutable_set::from_list([1, 2]) == immutable_set::from_list([2, 1])}
-        {immutable_set::from_list([1, 1, 2]) == immutable_set::from_list([2, 1])}
-        {immutable_set::from_list([1, 2]) == immutable_set::from_list([1, 3])}
-        {immutable_set::from_list([]) == immutable_set::from_list([])}
+        {import immutable_set
+immutable_set::from_list([1, 2]) == immutable_set::from_list([1, 2])}
+        {import immutable_set
+immutable_set::from_list([1, 2]) == immutable_set::from_list([2, 1])}
+        {import immutable_set
+immutable_set::from_list([1, 1, 2]) == immutable_set::from_list([2, 1])}
+        {import immutable_set
+immutable_set::from_list([1, 2]) == immutable_set::from_list([1, 3])}
+        {import immutable_set
+immutable_set::from_list([]) == immutable_set::from_list([])}
     } {
         core::value::show [core::evalProgram [sourceIR $text]]
     }
 } -result {true true true false true}
 
 test set-equality-char-vs-int {set(['A']) == set([65]) is false: UnicodeChar 'A' and Int 65 are distinct runtime values, never coercively equal} -body {
-    core::value::show [core::evalProgram [sourceIR {immutable_set::from_list(['A']) == immutable_set::from_list([65])}]]
+    core::value::show [core::evalProgram [sourceIR {import immutable_set
+immutable_set::from_list(['A']) == immutable_set::from_list([65])}]]
 } -result false
 
 test set-equality-not-list-equality {an ImmutableSet is never == a List, even with the identical sequence of members} -body {
@@ -353,11 +375,13 @@ test set-equality-runtime-values-not-display-text {equality is checked with core
 # invented as a new failure mode.
 
 test set-equality-nested-list-members {a set of Lists compares its List members structurally} -body {
-    core::value::show [core::evalProgram [sourceIR {immutable_set::from_list([[1, 2], [3, 4]]) == immutable_set::from_list([[3, 4], [1, 2]])}]]
+    core::value::show [core::evalProgram [sourceIR {import immutable_set
+immutable_set::from_list([[1, 2], [3, 4]]) == immutable_set::from_list([[3, 4], [1, 2]])}]]
 } -result true
 
 test set-equality-nested-set-members {a set whose members are themselves ImmutableSets compares them by set equality, recursively} -body {
-    core::value::show [core::evalProgram [sourceIR {immutable_set::from_list([immutable_set::from_list([1, 2])]) == immutable_set::from_list([immutable_set::from_list([2, 1])])}]]
+    core::value::show [core::evalProgram [sourceIR {import immutable_set
+immutable_set::from_list([immutable_set::from_list([1, 2])]) == immutable_set::from_list([immutable_set::from_list([2, 1])])}]]
 } -result true
 
 test set-construction-block-member-single-ok {a set with exactly one Block member constructs fine -- dedup never needs to compare it against anything} -body {
@@ -451,7 +475,8 @@ accepts(make())} $::smallDecl]
 } -result {{List[int[Small]]} {ImmutableSet[int[Small]]} {ImmutableSet[int[Small]]} true}
 
 test set-required-unicodechar-payload {chars() -> ImmutableSet[UnicodeChar], the direct precursor to byte::set} -body {
-    set src {fn chars() -> ImmutableSet[UnicodeChar]:
+    set src {import immutable_set
+fn chars() -> ImmutableSet[UnicodeChar]:
     immutable_set::from_list(['-', '.', '_', '~'])
 [immutable_set::contains(chars(), '-'), immutable_set::contains(chars(), 'A'), immutable_set::contains(chars(), 45)]}
     surface::compile $src charspayload.bot
@@ -472,7 +497,8 @@ test set-param-body-fact {inside f(s: ImmutableSet[Small]), s's declared type is
 # Result contracts (spec 41)
 
 test set-result-rejected-broad {a result whose static type is merely broad ImmutableSet does not satisfy a declared ImmutableSet[Small] result} -body {
-    setTypeRejects {fn make() -> ImmutableSet[Small]:
+    setTypeRejects {import immutable_set
+fn make() -> ImmutableSet[Small]:
     immutable_set::from_list([1, "x"])}
 } -result {{CORE SEMANTIC TYPE} 1}
 
@@ -489,7 +515,7 @@ test set-hir-roundtrip {format -> parse -> format is byte-identical for a functi
     a: ImmutableSet[Small],
     b: List[ImmutableSet[Small]]
 ) -> ImmutableSet[Small]:
-    a} $::smallDecl] roundtrip.bot]
+    a} $::smallDeclNoImports] roundtrip.bot]
     set text1 [hir::format $h]
     set text2 [hir::format [hir::parse $text1]]
     expr {$text1 eq $text2}
@@ -497,7 +523,7 @@ test set-hir-roundtrip {format -> parse -> format is byte-identical for a functi
 
 test set-hir-roundtrip-preserves-type {the read-back HIR's declaredParamTypes is semantically live, not just round-tripped text} -body {
     set h [surface::compile [format {%sfn consume(s: ImmutableSet[Small]) -> int:
-    1} $::smallDecl] roundtrip2.bot]
+    1} $::smallDeclNoImports] roundtrip2.bot]
     set h2 [hir::parse [hir::format $h]]
     set block [lindex [hirFind $h2 block] end]
     hir::types::show [lindex [hir::get $h2 $block declaredParamTypes] 0]
@@ -518,7 +544,8 @@ fn consume(s: ImmutableSet[Small]) -> int:
     1
 } $::smallDecl]
     close $ch
-    set mainPath [makeFile {immutablesetlib::consume(immutablesetlib::make())
+    set mainPath [makeFile {import immutablesetlib
+immutablesetlib::consume(immutablesetlib::make())
 } set-module-main.bot]
     try {
         set h [surface::readProgramFile $mainPath -strict 0]
@@ -530,7 +557,7 @@ fn consume(s: ImmutableSet[Small]) -> int:
         file delete $libPath
         removeFile set-module-main.bot
     }
-} -result {{ImmutableSet[int[Small]]} {ImmutableSet[int[Small]]} 0}
+} -result {{ImmutableSet[int[immutablesetlib::Small]]} {ImmutableSet[int[immutablesetlib::Small]]} 0}
 
 # ---------------------------------------------------------------------------
 # Cross-module direct-call enforcement (spec 80)
@@ -547,7 +574,8 @@ fn consume(s: ImmutableSet[Small]) -> int:
     1
 } $::smallDecl]
     close $ch
-    set mainPath [makeFile {immutablesetlib2::consume(immutablesetlib2::make())
+    set mainPath [makeFile {import immutablesetlib2
+immutablesetlib2::consume(immutablesetlib2::make())
 } set-cross-module-ok.bot]
     try {
         set h [surface::readProgramFile $mainPath -strict 0]
@@ -563,11 +591,15 @@ test set-cross-module-invalid {a cross-module direct call rejects a broad-Immuta
     set ch [open $libPath w]
     puts $ch {namespace immutablesetlib3
 
+type Small = Int in 0..10
+
 fn consume(s: ImmutableSet[Small]) -> int:
     1
 }
     close $ch
-    set mainPath [makeFile {fn make_ints():
+    set mainPath [makeFile {import immutable_set
+import immutablesetlib3
+fn make_ints():
     immutable_set::from_list([1, "x"])
 immutablesetlib3::consume(make_ints())
 } set-cross-module-bad.bot]
@@ -604,7 +636,8 @@ fn contains_one():
         set mainpath [file join $dir main.bot]
         set ch [open $mainpath w]
         fconfigure $ch -encoding utf-8
-        puts -nonewline $ch {[constants::contains_one(), constants::contains_one()]
+        puts -nonewline $ch {import constants
+[constants::contains_one(), constants::contains_one()]
 }
         close $ch
         set hir [surface::readProgramFile $mainpath]
@@ -655,7 +688,8 @@ fn get_dash() -> UnicodeChar:
         set mainpath [file join $dir main.bot]
         set ch [open $mainpath w]
         fconfigure $ch -encoding utf-8
-        puts -nonewline $ch {constants::get_dash()
+        puts -nonewline $ch {import constants
+constants::get_dash()
 }
         close $ch
         set hir [surface::readProgramFile $mainpath]
@@ -676,6 +710,8 @@ test set-module-retained-value-unicodechar-list {a module-scope List[UnicodeChar
         set ch [open $mpath w]
         fconfigure $ch -encoding utf-8
         puts -nonewline $ch {namespace constants
+
+import list
 chars = ['-', '.', '_', '~']
 fn first() -> UnicodeChar:
     list::at(chars, 0)
@@ -684,7 +720,8 @@ fn first() -> UnicodeChar:
         set mainpath [file join $dir main.bot]
         set ch [open $mainpath w]
         fconfigure $ch -encoding utf-8
-        puts -nonewline $ch {constants::first()
+        puts -nonewline $ch {import constants
+constants::first()
 }
         close $ch
         set hir [surface::readProgramFile $mainpath]
@@ -714,6 +751,8 @@ test set-module-retained-value-unicodechar {a module-scope ImmutableSet[UnicodeC
         set ch [open $mpath w]
         fconfigure $ch -encoding utf-8
         puts -nonewline $ch {namespace constants
+
+import immutable_set
 chars = immutable_set::from_list(['-', '.', '_', '~'])
 fn has_dash() -> bool:
     immutable_set::contains(chars, '-')
@@ -722,7 +761,8 @@ fn has_dash() -> bool:
         set mainpath [file join $dir main.bot]
         set ch [open $mainpath w]
         fconfigure $ch -encoding utf-8
-        puts -nonewline $ch {[constants::has_dash(), constants::has_dash()]
+        puts -nonewline $ch {import constants
+[constants::has_dash(), constants::has_dash()]
 }
         close $ch
         set hir [surface::readProgramFile $mainpath]
@@ -764,31 +804,36 @@ consume(immutable_set::from_list([one(), two()]))} $::smallDecl]
 # Backend parity (spec 66)
 
 test set-parity-construction-and-membership {construction, dedup and membership agree across interp/compile/cranelift-generic/cranelift} -body {
-    parity {[immutable_set::contains(immutable_set::from_list([1, 1, 2, 3]), 2),
+    parity {import immutable_set
+[immutable_set::contains(immutable_set::from_list([1, 1, 2, 3]), 2),
              immutable_set::contains(immutable_set::from_list([1, 1, 2, 3]), 4),
              immutable_set::from_list([1, 2]) == immutable_set::from_list([2, 1])]}
 } -result same
 
 test set-parity-unicodechar {UnicodeChar-element sets agree across every backend} -body {
-    parity {chars = ['-', '.', '_', '~']
+    parity {import immutable_set
+chars = ['-', '.', '_', '~']
 [immutable_set::contains(immutable_set::from_list(chars), '-'),
  immutable_set::contains(immutable_set::from_list(chars), 'A'),
  immutable_set::contains(immutable_set::from_list(chars), 45)]}
 } -result same
 
 test set-parity-wrong-first-argument {the dynamic TYPE error on a non-set first argument agrees across every backend} -body {
-    parity {immutable_set::contains(123, 1)}
+    parity {import immutable_set
+immutable_set::contains(123, 1)}
 } -result same
 
 test set-parity-show {display text agrees across interp/compile (first-occurrence order is a deterministic implementation detail of both)} -body {
-    core::value::show [core::evalProgram [sourceIR {immutable_set::from_list([3, 1, 2, 1])}]]
+    core::value::show [core::evalProgram [sourceIR {import immutable_set
+immutable_set::from_list([3, 1, 2, 1])}]]
 } -result {{3, 1, 2}}
 
 # ---------------------------------------------------------------------------
 # Allocation baseline (spec 67-69)
 
 test set-allocation-baseline {construction allocates one ImmutableSet object in addition to the source List; no construction fusion, no constant folding} -body {
-    set report [native::allocationReport [sourceHir {chars = ['-', '.', '_', '~']
+    set report [native::allocationReport [sourceHir {import immutable_set
+chars = ['-', '.', '_', '~']
 immutable_set::from_list(chars)}] summary]
     list [dict get $report byKind ImmutableSet allocations] \
         [expr {[dict get $report byKind List allocations] >= 1}]
@@ -798,14 +843,18 @@ immutable_set::from_list(chars)}] summary]
 # GC: native (Cranelift) pointer-member tracing and stress (spec 32-33, 82-83)
 
 test set-native-pointer-members-basic {a native ImmutableSet of String members constructs, and membership observes them correctly} -body {
-    set text {s = immutable_set::from_list([str::concat("a", "b"), str::concat("c", "d"), str::concat("a", "b")])
+    set text {import immutable_set
+import str
+s = immutable_set::from_list([str::concat("a", "b"), str::concat("c", "d"), str::concat("a", "b")])
 [immutable_set::contains(s, str::concat("a", "b")), immutable_set::contains(s, "zz")]}
     native::evalHir [sourceHir $text]
 } -result {list {{bool true} {bool false}}}
 
 test set-native-gc-stress-pointer-members {construction and membership of a set of heap-valued (String/List) members survive under BOTLISH_NATIVE_GC_STRESS=1, repeated many times} -body {
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
-    set text {fn build(n):
+    set text {import immutable_set
+import str
+fn build(n):
     if n == 0:
         immutable_set::from_list(["a", "b", "c", "a"])
     else:
@@ -822,7 +871,9 @@ probe()}
 
 test set-native-pointer-member-liveness {a set retains heap-valued members correctly even after the originating bindings that built them are no longer referenced, across an intervening allocation (GC stress)} -body {
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
-    set text {fn make():
+    set text {import immutable_set
+import str
+fn make():
     a = str::concat("live-", "member")
     immutable_set::from_list([a])
 fn probe():

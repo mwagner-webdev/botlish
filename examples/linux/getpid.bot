@@ -16,6 +16,9 @@
 #
 # expect (native): [PID > 0, the same PID twice] -> [true, true]
 
+import abi::x86_64
+import linux::abi
+
 fn raw_getpid():
     abi::x86_64::to_int(
         linux::abi::syscall({

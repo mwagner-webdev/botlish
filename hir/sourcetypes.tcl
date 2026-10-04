@@ -88,15 +88,16 @@ proc hir::sourcetypes::Fail {span message} {
 }
 
 # "" when the earlier declaration (span FIRST) of a name redeclared at SPAN
-# is in the same file; otherwise where it is, and why it counts: type and
-# error names are one flat, program-wide namespace, so a module the program
-# loads -- possibly only through another module (abi, through abi::x86_64)
-# -- takes its names for the whole program. Shared by hir/errordecls.tcl.
+# is in the same file; otherwise where it is, and why it counts: error names
+# are one flat, program-wide namespace, so a module the program loads --
+# possibly only through another module (abi, through abi::x86_64) -- takes
+# its error names for the whole program. (Types are namespace members,
+# IMPORTS.md.) Used by hir/errordecls.tcl.
 proc hir::sourcetypes::ElsewhereClause {first span} {
     if {$first eq "" || $span eq "" || [dict get $first file] eq [dict get $span file]} {
         return ""
     }
-    return [format { at %s:%s:%s (type and error names are global: every module the program loads, including one it reaches only through another module, declares its names for the whole program)} \
+    return [format { at %s:%s:%s (error names are global: every module the program loads, including one it reaches only through another module, declares its error names for the whole program)} \
         [dict get $first file] [dict get $first line] [dict get $first column]]
 }
 
@@ -131,16 +132,16 @@ proc hir::sourcetypes::apply {decls {structDecls {}}} {
         Reset
         set byName [dict create]
         foreach decl $decls {
-            set name [dict get $decl name]
-            if {[dict exists $byName $name]} {
-                Fail [dict get $decl nameSpan] "type \"$name\" is already declared[ElsewhereClause [dict get $byName $name nameSpan] [dict get $decl nameSpan]]"
+            set id [Identity $decl]
+            if {[dict exists $byName $id]} {
+                Fail [dict get $decl nameSpan] "type \"$id\" is already declared[ElsewhereClause [dict get $byName $id nameSpan] [dict get $decl nameSpan]]"
             }
-            dict set byName $name $decl
+            dict set byName $id $decl
         }
         set registered [dict create]
         set visiting [dict create]
         foreach decl $decls {
-            Resolve [dict get $decl name] $byName registered visiting order
+            Resolve [Identity $decl] $byName registered visiting order
         }
     }
     if {$structDecls ne ""} {
@@ -153,68 +154,113 @@ proc hir::sourcetypes::apply {decls {structDecls {}}} {
     return $order
 }
 
-# Registers NAME (a key of BYNAME), first resolving its parent if the
-# parent is itself one of BYNAME's own not-yet-registered declarations
-# (same-module/same-batch forward visibility, item 25-26) -- a DFS with
-# cycle detection (item 27). A NAME outside BYNAME is left alone here: it
-# must already be a builtin or an earlier-resolved-in-this-batch type,
-# checked (with a proper diagnostic) when RegisterOne actually looks it up
-# as a parent.
-proc hir::sourcetypes::Resolve {name byName registeredVar visitingVar orderVar} {
-    upvar 1 $registeredVar registered $visitingVar visiting $orderVar order
-    if {[dict exists $registered $name] || ![dict exists $byName $name]} {
-        return
-    }
-    if {[dict exists $visiting $name]} {
-        Fail [dict get [dict get $byName $name] nameSpan] \
-            "type declaration cycle: \"$name\" depends on its own declaration through its chain of parents"
-    }
-    dict set visiting $name 1
-    set decl [dict get $byName $name]
-    set parentName [dict get $decl parent]
-    if {$parentName ne "Int"} {
-        Resolve $parentName $byName registered visiting order
-    }
-    dict set registered $name [RegisterOne $decl]
-    lappend order [dict get $registered $name]
-    dict unset visiting $name
+# The identity of the type DECL (surface/lower.tcl's TypeDeclOf dict) declares:
+# `NAMESPACE::Name` for a type of a module, the bare name for the entry
+# program's own (a type is a member of its namespace, IMPORTS.md).
+proc hir::sourcetypes::Identity {decl} {
+    set ns [dict get $decl namespace]
+    set name [dict get $decl name]
+    return [expr {$ns eq "" ? $name : "${ns}::$name"}]
 }
 
-# Validates DECL's parent and domain, registers it (core::type::register,
-# plus its checked constructor and predicate, core::type::declareIntConstructor),
-# and returns its own {name .. parent .. domain ..} summary.
-proc hir::sourcetypes::RegisterOne {decl} {
+# The identity the parent type spelled PARENT in DECL's declaration denotes,
+# or "" if no type of that spelling is visible there. `Int` is the root of
+# every domain. Otherwise the same visibility a type annotation has
+# (hir::types::CanonicalTypeName): a type the file's own namespace declares
+# (a key of BYNAME), a type it imports with `import type`, or a built-in
+# type; a module never sees the entry program's types.
+proc hir::sourcetypes::ParentIdentity {decl byName} {
+    set parent [dict get $decl parent]
+    set ns [dict get $decl namespace]
+    if {$parent eq "Int"} {
+        return Int
+    }
+    set own [expr {$ns eq "" ? $parent : "${ns}::$parent"}]
+    if {[dict exists $byName $own]} {
+        return $own
+    }
+    set imported [hir::imports::typeNamed $ns $parent]
+    if {$imported ne ""} {
+        return $imported
+    }
+    if {[core::type::isBuiltinName $parent]} {
+        return $parent
+    }
+    return ""
+}
+
+# Registers the type of identity ID (a key of BYNAME), first resolving its
+# parent if the parent is itself one of BYNAME's own not-yet-registered
+# declarations (same-module/same-batch forward visibility, item 25-26) -- a
+# DFS with cycle detection (item 27). A parent outside BYNAME is left alone
+# here: it must already be a builtin or an earlier-resolved-in-this-batch
+# type, checked (with a proper diagnostic) when RegisterOne actually looks it
+# up as a parent.
+proc hir::sourcetypes::Resolve {id byName registeredVar visitingVar orderVar} {
+    upvar 1 $registeredVar registered $visitingVar visiting $orderVar order
+    if {[dict exists $registered $id] || ![dict exists $byName $id]} {
+        return
+    }
+    if {[dict exists $visiting $id]} {
+        Fail [dict get [dict get $byName $id] nameSpan] \
+            "type declaration cycle: \"$id\" depends on its own declaration through its chain of parents"
+    }
+    dict set visiting $id 1
+    set decl [dict get $byName $id]
+    set parentId [ParentIdentity $decl $byName]
+    if {$parentId ne "Int" && $parentId ne ""} {
+        Resolve $parentId $byName registered visiting order
+    }
+    dict set registered $id [RegisterOne $decl $parentId]
+    lappend order [dict get $registered $id]
+    dict unset visiting $id
+}
+
+# Validates DECL's parent (PARENTID, its resolved identity, "" if none is
+# visible) and domain, registers it (core::type::register, plus its
+# membership predicate, core::type::declareIntConstructor), and returns its
+# own {name .. parent .. domain ..} summary: `name` and `parent` are
+# identities.
+proc hir::sourcetypes::RegisterOne {decl parentId} {
     variable generation
     set name [dict get $decl name]
+    set id [Identity $decl]
     if {$name eq "Int"} {
         Fail [dict get $decl nameSpan] \
             "\"Int\" is the compiler's own built-in integer type and cannot be redeclared"
+    }
+    if {[dict get $decl namespace] ne "" && ([core::type::isBuiltinName $name]
+            || [dict exists $::hir::types::constructors $name] || $name in {any never Fn})} {
+        Fail [dict get $decl nameSpan] \
+            "type \"$name\" cannot be declared in namespace \"[dict get $decl namespace]\": the name is already a built-in type"
     }
     set parentName [dict get $decl parent]
     set domain [CanonicalDomain [dict get $decl domain]]
     set parents {}
     set parentDomain {}
     if {$parentName ne "Int"} {
-        if {![core::type::isNamed $parentName]} {
+        if {$parentId eq "" || ![core::type::isNamed $parentId]} {
             Fail [dict get $decl parentSpan] "unknown parent type \"$parentName\""
         }
-        set parentMeta [core::type::metadata $parentName]
+        set parentMeta [core::type::metadata $parentId]
         if {[dict get $parentMeta base] ne "int" || [dict get $parentMeta integerDomain] eq ""} {
             Fail [dict get $decl parentSpan] \
                 "\"$parentName\" is not an integer-domain type: \"type $name = $parentName in ...\" can only refine Int or another integer-domain type"
         }
-        set parents [list $parentName]
+        set parents [list $parentId]
         set parentDomain [dict get $parentMeta integerDomain]
     }
     if {$parentDomain ne {} && ![core::type::integerDomainSubset $domain $parentDomain]} {
         Fail [dict get $decl domainSpan] \
-            "the domain of \"$name\" is not a subset of its parent \"$parentName\"'s domain [core::type::showIntegerDomain $parentDomain]"
+            "the domain of \"$id\" is not a subset of its parent \"$parentId\"'s domain [core::type::showIntegerDomain $parentDomain]"
     }
-    core::type::register $name -base int -parents $parents -integer-domain $domain -source 1
-    lappend generation [list type $name]
-    core::type::declareIntConstructor $name
-    lappend generation [list native $name] [list native $name?]
-    return [dict create name $name parent $parentName domain [dict get [core::type::metadata $name] integerDomain]]
+    core::type::register $id -base int -parents $parents -integer-domain $domain -source 1
+    lappend generation [list type $id]
+    core::type::declareIntConstructor $id
+    core::native::markSource $id?
+    lappend generation [list native $id] [list native $id?]
+    return [dict create name $id parent [expr {$parentName eq "Int" ? "Int" : $parentId}] \
+        domain [dict get [core::type::metadata $id] integerDomain]]
 }
 
 # A multi-line, human-auditable rendering of HIR's own source-defined types

@@ -109,6 +109,9 @@ proc native::AttachNatives {hir} {
         if {[regexp {^f([0-9]+)$} $f -> n]} { set nextFile [expr {max($nextFile, $n + 1)}] }
     }
     set loaded [surface::modules::LoadNamespaces [lsort -unique $namespaces] -start-file $nextFile]
+    # The newly loaded modules' own import environments join the program's
+    # (hir/imports.tcl), for their method calls and type names.
+    hir::imports::apply [dict merge [hir::imports::current] [dict get $loaded imports]]
     set types [hir::sourcetypes::apply [dict get $loaded typeDecls]]
     set errors [hir::errordecls::apply [dict get $loaded errorDecls]]
     set sourceTypes [hir::sourceTypes $hir]

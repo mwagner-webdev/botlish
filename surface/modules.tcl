@@ -33,7 +33,7 @@
 # candidate file. A mismatched declaration, or a missing file, is a clear
 # diagnostic (Error, below), never silently ignored or guessed at.
 #
-# Reference syntax: mod::name, or a::b::name for a nested namespace a::b
+# Reference syntax (needs the file's `import mod`, or `import a::b`): mod::name, or a::b::name for a nested namespace a::b
 # (surface/parser.tcl's qualname primary: every segment but the last is the
 # namespace path).
 # surface/lower.tcl lowers it to a `ref` node spelled "mod::name" (for
@@ -44,15 +44,26 @@
 # property README.md wants of `::` (definition/provenance qualification, as
 # opposed to `.`'s value access).
 #
-# Dependency discovery is implicit: nothing declares "this file needs
-# module X" (no `import` statement of any kind -- see AGENTS.md's "imports
-# may be boring": here they need not exist at all). The set of namespaces a
-# file needs is exactly the set its own mod::name references name,
-# discovered by walking its AST (QualifiedRefs); loading a namespace loads
-# its own dependencies the same way, recursively. A namespace already being
-# loaded when it is asked for again is a dependency cycle (Error CYCLE); one
-# already fully loaded is simply reused (each module is parsed and resolved
-# at most once per program, regardless of how many files reference it).
+# Dependencies are declared, never discovered (IMPORTS.md): a file's header
+# (after its `namespace` declaration) lists `import NAMESPACE` -- a direct,
+# exact dependency on that namespace, authorizing its qualified `NAMESPACE::
+# name` references and making its functions candidates for method-call
+# sugar -- and `import type NAMESPACE::Type`, one type's short name. The
+# imports are the only thing that loads a module: CollectAndLoad (below)
+# validates the header (existence, duplicates, type-name collisions),
+# loads each imported module (recursively, through that module's own header),
+# and rejects every qualified reference whose namespace the file itself does
+# not import exactly (MISSING-IMPORT: an imported parent, child or
+# dependency of the namespace never counts), before any body is resolved.
+# A namespace that is being loaded when it is imported again is a dependency
+# cycle (Error CYCLE); one already fully loaded is simply reused (each module
+# is parsed and resolved at most once per program, regardless of how many
+# files import it). A namespace exists if it has a module file or compiler
+# intrinsics (`str`, `linux::abi`), so an intrinsics-only namespace is
+# importable with no file. The result of the header, per file, is its
+# import environment (NewState's `imports`: the dependency graph), handed to
+# hir::buildSyntax as -imports; the AST (cached, importer-neutral) keeps the
+# header only as `program.imports`.
 #
 # Compiling once, without leaking unqualified names across files: every
 # module's own statements are lowered to ordinary hir/syntax.tcl nodes (the
@@ -96,9 +107,9 @@
 #
 # What this deliberately leaves out (see AGENTS.md's milestone notes for
 # the full rationale): namespace aliasing/renaming, wildcard or selective
-# imports, re-exports, mutable module bindings, lazy initialization,
-# separate/incremental compilation, a search path, package versioning. A
-# namespace's dependency graph must be acyclic (Error CYCLE);
+# imports, subtree imports, re-exports, mutable module bindings, lazy
+# initialization, separate/incremental compilation, a search path, package
+# versioning. A namespace's dependency graph must be acyclic (Error CYCLE);
 # a function's own recursion inside its module is unaffected -- it was never a
 # *module* dependency to begin with. Within one module, definitions are
 # established in source order (hir/resolve.tcl): the module's own section is
@@ -155,9 +166,11 @@ proc surface::modules::Error {kind span message} {
     throw [list SURFACE MODULE $kind] "[surface::ast::location $span]: $message"
 }
 
-# {NAMESPACE NAME SPAN} of every mod::name reference in AST (a program node,
-# or any node -- used both for a whole file and, recursively, isn't needed
-# below this), in source order.
+# {NAMESPACE NAME SPAN KIND} of every mod::name reference in AST (a program
+# node, or any node -- used both for a whole file and, recursively, isn't
+# needed below this), in source order. KIND is value (an expression
+# `ns::name`), struct (a construction `ns::Name {...}`) or type (a qualified
+# type annotation `ns::Name`: a struct or a source-defined `type`).
 proc surface::modules::QualifiedRefs {ast} {
     set found {}
     QualifiedRefsWalk $ast found
@@ -197,7 +210,34 @@ proc surface::modules::QualifiedRefsWalk {node foundVar} {
     }
 }
 
-# Appends the qualified struct type names ("ns::Name") TYPE (a surface::
+# The import header (`import NS` lines, one per line, sorted) a program whose
+# text is SOURCE needs for the qualified references it makes itself and does
+# not already import -- exactly the namespaces it names, never an ancestor or
+# a dependency of them. For source *generators* (fuzzers, benchmark drivers
+# that assemble a program from fragments): `[ImportHeader $text]$text` is
+# the program with its dependencies declared, and the same text a person
+# would write. "" if nothing is missing. "" too if SOURCE does not parse.
+proc surface::modules::ImportHeader {source} {
+    if {[catch {surface::parse $source} ast]} {
+        # Not a program: nothing to declare (the compile reports the syntax error).
+        return ""
+    }
+    set own [dict get $ast namespace]
+    set have [lmap import [dict get $ast imports] {
+        if {[dict get $import kind] ne "import"} continue
+        dict get $import namespace
+    }]
+    set needed {}
+    foreach ref [QualifiedRefs $ast] {
+        set ns [lindex $ref 0]
+        if {$ns ne $own && $ns ni $have && $ns ni $needed} {
+            lappend needed $ns
+        }
+    }
+    return [join [lmap ns [lsort $needed] {string cat "import " $ns "\n"}] ""]
+}
+
+# Appends the qualified type names ("ns::Name") TYPE (a surface::
 # parser::TypeExpr result) mentions, each located at SPAN.
 proc surface::modules::TypeRefs {type span foundVar} {
     upvar 1 $foundVar found
@@ -208,7 +248,7 @@ proc surface::modules::TypeRefs {type span foundVar} {
         # Split at the last "::": the namespace may itself be nested
         # ("abi::x86_64::Register64" is Register64 of abi::x86_64).
         if {[regexp {^((?:[A-Za-z_][A-Za-z0-9_]*::)*[A-Za-z_][A-Za-z0-9_]*)::([A-Za-z_][A-Za-z0-9_]*)$} $type -> namespaceName name]} {
-            lappend found [list $namespaceName $name $span struct]
+            lappend found [list $namespaceName $name $span type]
         }
         return
     }
@@ -389,7 +429,7 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan} {
     set fileId f[dict get $state nextFile]
     dict set state files $fileId $path
     dict incr state nextFile
-    CollectAndLoad state $ast
+    CollectAndLoad state $ast $name
     set functionNames [lmap statement [dict get $ast body] {
         if {[dict get $statement kind] in {typedecl errordecl structdecl}} continue
         dict get $statement name
@@ -401,13 +441,25 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan} {
         if {[dict get $statement kind] ne "structdecl"} continue
         dict get $statement name
     }]
+    # The source-defined types (`type`) and errors it declares: a type is a
+    # member of the namespace, `NAME::Type` (hir/sourcetypes.tcl), what
+    # `import type NAME::Type` names; errors stay program-global names.
+    dict set state loadedTypes $name [lmap statement [dict get $ast body] {
+        if {[dict get $statement kind] ne "typedecl"} continue
+        dict get $statement name
+    }]
+    dict set state loadedErrors $name [lmap statement [dict get $ast body] {
+        if {[dict get $statement kind] ne "errordecl"} continue
+        dict get $statement name
+    }]
     lassign [surface::lower::SplitTypeDecls [dict get $ast body] $name] executable decls errorDecls structDecls
     dict set state typeDecls [concat [dict get $state typeDecls] $decls]
     dict set state errorDecls [concat [dict get $state errorDecls] $errorDecls]
     dict set state structDecls [concat [dict get $state structDecls] $structDecls]
     set statements [lmap node [surface::lower::Sequence $executable] {RemapFile $node $fileId}]
     set origin [RemapOrigin [surface::lower::Origin [dict get $ast span] "namespace"] $fileId]
-    set section [dict create namespace $name nodes $statements origin $origin]
+    set section [dict create namespace $name nodes $statements origin $origin \
+        imports [dict get $state imports $name]]
     dict set state sections [concat [dict get $state sections] [list $section]]
     dict set state stack [lrange [dict get $state stack] 0 end-1]
 }
@@ -445,39 +497,219 @@ proc surface::modules::CheckEntryProgram {ast} {
     CheckNativeMembers $ast "a program declaring \"namespace [dict get $ast namespace]\""
 }
 
-# Loads every namespace AST's own qualified references name (recursively),
-# and validates each reference names a definition that namespace actually
-# has (Error UNKNOWN-SYMBOL otherwise) -- distinct from an unknown
-# namespace entirely (Error UNKNOWN-NAMESPACE, raised by LoadNamespace).
-proc surface::modules::CollectAndLoad {stateVar ast} {
+# The intrinsic members of namespace NS: the compiler-provided qualified
+# root natives that live directly in it (core::native::qualifiedMembers),
+# which no source module can define and which exist without any module file.
+proc surface::modules::IntrinsicMembers {ns} {
+    return [core::native::qualifiedMembers $ns]
+}
+
+# 1 if NS names a real namespace: a source module file ($libraryDir/NS.bot)
+# or a namespace of compiler-provided intrinsics (`str`, `linux::abi`). A
+# bare prefix of either (`linux` of `linux::abi`) is not one: namespaces are
+# exact, never trees.
+proc surface::modules::NamespaceExists {ns} {
+    return [expr {[file exists [ModulePath $ns]] || [IntrinsicMembers $ns] ne ""}]
+}
+
+# 1 if SHORT cannot be bound by a type import because it already names a
+# built-in type (a primitive, `Int`, `any`, a type constructor like `List`,
+# or a type the compiler registers itself): a file's own type names and
+# its type imports must never silently shadow, or be shadowed by, one.
+proc surface::modules::IsBuiltinTypeName {short} {
+    return [expr {$short in {Int any never Fn} || [dict exists $::hir::types::constructors $short]
+        || [core::type::isBuiltinName $short]}]
+}
+
+# The namespaces a file imports, spelled for the "not imported" hint: a
+# parent or child of NS among IMPORTED explains that imports are exact.
+proc surface::modules::RelatedImport {ns imported} {
+    foreach other $imported {
+        if {[string first ${other}:: $ns] == 0 || [string first ${ns}:: $other] == 0} {
+            return $other
+        }
+    }
+    return ""
+}
+
+# Validates the file header of AST (its `import` and `typeimport` nodes,
+# IMPORTS.md), loading what each import depends on into STATE, and returns
+# the file's import environment, a dict
+#
+#   namespaces  {NS ...}       the directly imported namespaces, in written order
+#   types       {SHORT CANONICAL ...}   the type imports: SHORT is the one local
+#                              type name, CANONICAL the qualified identity
+#                              `NS::Name` of the type it denotes
+#
+# which is everything later stages know about the header: the AST itself
+# stays importer-neutral (it is cached by surface::modules::ParseModule and
+# shared). KEY is the namespace this file is the module of ("" for an entry
+# program); OWN the namespace it declares ("" if none). Every failure is a
+# located diagnostic raised from here, before any body is resolved:
+#
+#   UNKNOWN-NAMESPACE    the imported namespace names no module file and no
+#                        intrinsics (nothing is looked up later)
+#   DUPLICATE-IMPORT     the same namespace, or the same type, imported twice
+#   SELF-IMPORT          a file imports the namespace it itself belongs to
+#   UNKNOWN-SYMBOL       `import type NS::T`: NS has no type T
+#   NOT-A-TYPE           `import type NS::T`: T exists but is not a source type
+#   TYPE-IMPORT-COLLISION  a type import's short name is another type import's
+#                        short name, a type this file declares, or a built-in
+# and CYCLE/NAMESPACE-MISMATCH from loading the imported module.
+proc surface::modules::CheckImports {stateVar ast own} {
     upvar 1 $stateVar state
-    foreach ref [QualifiedRefs $ast] {
-        lassign $ref namespaceName symbolName span refKind
-        if {$refKind eq "value" && [core::native::isQualifiedNative "${namespaceName}::$symbolName"]} {
-            # A root native registered under a qualified name
-            # (linux::abi::syscall): no module file defines it, so nothing
-            # is loaded (surface/lower.tcl lowers it to a root reference).
+    set namespaces {}
+    set nsSpans [dict create]
+    set types [dict create]
+    set typeSpans [dict create]
+    set local [dict create]
+    foreach statement [dict get $ast body] {
+        if {[dict get $statement kind] in {typedecl structdecl} && ![dict exists $local [dict get $statement name]]} {
+            dict set local [dict get $statement name] [dict get $statement nameSpan]
+        }
+    }
+    foreach import [dict get $ast imports] {
+        set ns [dict get $import namespace]
+        set span [dict get $import namespaceSpan]
+        if {[dict get $import kind] eq "import"} {
+            if {[dict exists $nsSpans $ns]} {
+                Error DUPLICATE-IMPORT $span "namespace \"$ns\" is already imported (first imported at [surface::ast::location [dict get $nsSpans $ns]])"
+            }
+            if {$ns eq $own} {
+                Error SELF-IMPORT $span "a file of namespace \"$ns\" cannot import its own namespace: a module is inside its namespace and needs no import to name its own members"
+            }
+            if {![NamespaceExists $ns]} {
+                Error UNKNOWN-NAMESPACE $span "unknown namespace \"$ns\": no such module file [ModulePath $ns] and no intrinsics of that namespace"
+            }
+            if {[file exists [ModulePath $ns]]} {
+                LoadNamespace state $ns $span
+            }
+            dict set nsSpans $ns $span
+            lappend namespaces $ns
             continue
         }
-        set natives [core::native::qualifiedMembers $namespaceName]
-        if {$natives ne "" && ![file exists [ModulePath $namespaceName]]} {
-            # A namespace whose only members are intrinsics (str): there is
-            # no module file to load, so an unknown member is reported
-            # against the intrinsics, not as a missing file.
-            Error UNKNOWN-SYMBOL $span \
-                "namespace \"$namespaceName\" has no [expr {$refKind eq "struct" ? "struct" : "definition"}] \"$symbolName\" (its members are the intrinsics: [join $natives {, }])"
+        # import type NS::Name
+        set name [dict get $import name]
+        set nameSpan [dict get $import nameSpan]
+        set canonical "${ns}::$name"
+        if {[dict exists $typeSpans $canonical]} {
+            Error DUPLICATE-IMPORT [dict get $import span] "type \"$canonical\" is already imported (first imported at [surface::ast::location [dict get $typeSpans $canonical]])"
         }
-        LoadNamespace state $namespaceName $span
-        if {$refKind eq "struct"} {
+        if {$ns eq $own} {
+            Error SELF-IMPORT [dict get $import span] "a file of namespace \"$ns\" cannot import a type of its own namespace: its own type \"$name\" is already usable by that name"
+        }
+        if {![NamespaceExists $ns]} {
+            Error UNKNOWN-NAMESPACE $span "unknown namespace \"$ns\": no such module file [ModulePath $ns] and no intrinsics of that namespace (in \"import type $canonical\")"
+        }
+        set hasFile [file exists [ModulePath $ns]]
+        if {$hasFile} {
+            LoadNamespace state $ns $span
+        }
+        set typeNames [expr {$hasFile ? [dict get $state loadedTypes $ns] : {}}]
+        if {$name ni $typeNames} {
+            set functions [expr {$hasFile ? [dict get $state loaded $ns] : {}}]
+            set structs [expr {$hasFile ? [dict get $state loadedStructs $ns] : {}}]
+            set errors [expr {$hasFile ? [dict get $state loadedErrors $ns] : {}}]
+            if {$name in $functions || $name in [IntrinsicMembers $ns]} {
+                Error NOT-A-TYPE $nameSpan "\"$canonical\" exists, but is not a type (it is a function or value of namespace \"$ns\"): `import type` imports source-defined types only; use it as $canonical after `import $ns`"
+            }
+            if {$name in $structs} {
+                Error NOT-A-TYPE $nameSpan "\"$canonical\" is a struct, not a source-defined `type`: `import type` imports `type` declarations only; spell the struct $canonical after `import $ns`"
+            }
+            if {$name in $errors} {
+                Error NOT-A-TYPE $nameSpan "\"$canonical\" is an error declaration, not a type"
+            }
+            Error UNKNOWN-SYMBOL $nameSpan "namespace \"$ns\" has no type \"$name\" (its types: [expr {$typeNames eq "" ? "none" : [join [lsort $typeNames] {, }]}])"
+        }
+        if {[dict exists $local $name]} {
+            Error TYPE-IMPORT-COLLISION $nameSpan "`import type $canonical` binds the type name \"$name\", which this file also declares itself (at [surface::ast::location [dict get $local $name]]); an imported type never shadows or is shadowed by a local one: drop the import and spell the imported type $canonical (after `import $ns`)"
+        }
+        if {[IsBuiltinTypeName $name]} {
+            Error TYPE-IMPORT-COLLISION $nameSpan "`import type $canonical` binds the type name \"$name\", which is a built-in type; spell the imported type $canonical (after `import $ns`) instead"
+        }
+        if {[dict exists $types $name]} {
+            Error TYPE-IMPORT-COLLISION $nameSpan "`import type $canonical` and `import type [dict get $types $name]` (at [surface::ast::location [dict get $typeSpans [dict get $types $name]]]) both bind the type name \"$name\"; there is no precedence and no renaming: import at most one and spell the other fully qualified (after `import $ns`)"
+        }
+        dict set types $name $canonical
+        dict set typeSpans $canonical [dict get $import span]
+    }
+    return [dict create namespaces $namespaces types $types]
+}
+
+# Validates the imports of AST (CheckImports), and that every qualified
+# reference AST makes is authorized and names a real member. The sequence per
+# reference is the one the language specifies: is the reference's namespace
+# the file's own, or imported *exactly* (an imported parent or child never
+# counts)? If so, does that namespace have the member? A reference into a
+# namespace that is not imported is MISSING-IMPORT even when the member
+# exists (`str::concat` without `import str`); one into a namespace that does
+# not exist at all is UNKNOWN-NAMESPACE (no import could repair it); an
+# authorized reference to a member the namespace lacks is UNKNOWN-SYMBOL.
+#
+# Imports are the only thing that loads a module: a qualified reference never
+# loads anything. KEY is the module namespace of AST ("" for an entry
+# program); the file's import environment is recorded in STATE's `imports`
+# under KEY, for hir::buildSyntax's -imports and the module's own section.
+proc surface::modules::CollectAndLoad {stateVar ast {key ""}} {
+    upvar 1 $stateVar state
+    set own [dict get $ast namespace]
+    set env [CheckImports state $ast $own]
+    dict set state imports $key $env
+    set imported [dict get $env namespaces]
+    foreach ref [QualifiedRefs $ast] {
+        lassign $ref namespaceName symbolName span refKind
+        if {$namespaceName eq $own && $own ne ""
+                && $refKind in {value} && [core::native::isQualifiedNative "${namespaceName}::$symbolName"]} {
+            # A reference to an intrinsic of the file's own namespace
+            # (lib/list.bot's own list::at): no import, nothing to load.
+            continue
+        }
+        if {$namespaceName eq $own && $own ne "" && $key ne ""} {
+            # Own namespace: members of the module being compiled need no
+            # import (the HIR resolver checks the member is established).
+            continue
+        }
+        if {$namespaceName ni $imported} {
+            if {![NamespaceExists $namespaceName]} {
+                Error UNKNOWN-NAMESPACE $span "unknown namespace \"$namespaceName\": no such module file [ModulePath $namespaceName] and no intrinsics of that namespace"
+            }
+            set note ""
+            set related [RelatedImport $namespaceName $imported]
+            if {$related ne ""} {
+                set note " (imports are exact: `import $related` does not import \"$namespaceName\")"
+            }
+            Error MISSING-IMPORT $span "namespace \"$namespaceName\" is not imported; add `import $namespaceName` to use `${namespaceName}::$symbolName`$note"
+        }
+        set natives [IntrinsicMembers $namespaceName]
+        if {$refKind eq "value" && [core::native::isQualifiedNative "${namespaceName}::$symbolName"]} {
+            # A root native registered under a qualified name
+            # (linux::abi::syscall, str::concat): no module file defines it,
+            # so nothing more is loaded (surface/lower.tcl lowers it to a
+            # root reference).
+            continue
+        }
+        if {![file exists [ModulePath $namespaceName]]} {
+            # A namespace whose only members are intrinsics (str): there is
+            # no module file, so an unknown member is reported against the
+            # intrinsics, not as a missing file.
+            Error UNKNOWN-SYMBOL $span \
+                "namespace \"$namespaceName\" has no [expr {$refKind eq "value" ? "definition" : "type"}] \"$symbolName\" (its members are the intrinsics: [join $natives {, }])"
+        }
+        # The import loaded the module.
+        if {$refKind in {struct type}} {
             set structNames [dict get $state loadedStructs $namespaceName]
-            if {$symbolName ni $structNames} {
+            set typeNames [expr {$refKind eq "type" ? [dict get $state loadedTypes $namespaceName] : {}}]
+            if {$symbolName ni $structNames && $symbolName ni $typeNames} {
+                set declared [lsort [concat $structNames $typeNames]]
                 Error UNKNOWN-SYMBOL $span \
-                    "namespace \"$namespaceName\" has no struct \"$symbolName\" (it declares: [expr {$structNames eq "" ? "no structs" : [join [lsort $structNames] {, }]}])"
+                    "namespace \"$namespaceName\" has no [expr {$refKind eq "type" ? "type" : "struct"}] \"$symbolName\" (it declares: [expr {$declared eq "" ? "no types" : [join $declared {, }]}])"
             }
             continue
         }
         set functionNames [dict get $state loaded $namespaceName]
-        if {$symbolName ni $functionNames} {
+        if {$symbolName ni $functionNames
+                && !([string index $symbolName end] eq "?"
+                    && [string range $symbolName 0 end-1] in [dict get $state loadedTypes $namespaceName])} {
             Error UNKNOWN-SYMBOL $span \
                 "namespace \"$namespaceName\" has no definition \"$symbolName\" (it defines: [join [lsort [concat $functionNames $natives]] {, }])"
         }
@@ -491,22 +723,26 @@ proc surface::modules::CollectAndLoad {stateVar ast} {
 # own entry points, examples/stdlib/corpus.tcl's text-based compile) carries
 # every table -- loaded definitions, loaded struct types, sections and the
 # three kinds of declaration -- without a copy of the list to keep in sync.
+# `imports` is the dependency graph: NAMESPACE (or "" for the entry program)
+# -> that file's import environment (CheckImports).
 proc surface::modules::NewState {files nextFile} {
     return [dict create files $files nextFile $nextFile \
-        loaded [dict create] loadedStructs [dict create] stack {} sections {} \
+        loaded [dict create] loadedStructs [dict create] loadedTypes [dict create] \
+        loadedErrors [dict create] imports [dict create] stack {} sections {} \
         typeDecls {} errorDecls {} structDecls {}]
 }
 
-# {sections SECTIONS files FILES functions NAMESPACE->{FUNCTION-NAME ...}}
-# for NAMESPACES and everything they transitively depend on -- the general
-# module loader's entry point for a caller with no source AST of its own
-# (native/native.tcl's module-native bridge: it names the namespaces a
-# native's registered -module-fn needs directly, not via source syntax).
-# SECTIONS is ready for hir::buildSyntax's -modules; FILES is ready to
-# merge into its -files. FileIds start at f(START), so a caller that
-# reserves f1 for its own root file can pass -start-file 2 (as
-# surface::modules::compileProgramFile does); the default, 1, suits a
-# caller with no file of its own.
+# {sections SECTIONS files FILES functions NAMESPACE->{FUNCTION-NAME ...}
+# imports NAMESPACE->ENV ...} for NAMESPACES and everything they
+# transitively import -- the general module loader's entry point for a
+# caller with no source AST of its own (native/native.tcl's module-native
+# bridge: it names the namespaces a native's registered -module-fn needs
+# directly, not via source syntax). SECTIONS is ready for hir::buildSyntax's
+# -modules; FILES is ready to merge into its -files; imports (the import
+# environments of every loaded module) into its -imports. FileIds start at
+# f(START), so a caller that reserves f1 for its own root file can pass
+# -start-file 2 (as surface::modules::compileProgramFile does); the default,
+# 1, suits a caller with no file of its own.
 proc surface::modules::LoadNamespaces {namespaces args} {
     set options [dict create -start-file 1]
     foreach {option value} $args {
@@ -521,11 +757,34 @@ proc surface::modules::LoadNamespaces {namespaces args} {
     }
     return [dict create sections [dict get $state sections] files [dict get $state files] \
         functions [dict get $state loaded] typeDecls [dict get $state typeDecls] \
-        errorDecls [dict get $state errorDecls] structDecls [dict get $state structDecls]]
+        errorDecls [dict get $state errorDecls] structDecls [dict get $state structDecls] \
+        imports [dict get $state imports]]
+}
+
+# The HIR of the entry program AST (a `program` node whose file is FILE ... in
+# every origin), after loading -- and compiling once, alongside it -- every
+# module its imports name, transitively. Shared by compileProgramFile and by
+# callers that compile source text instead of a file (examples/stdlib/
+# corpus.tcl). Returns HIR before the frontend's finishing steps
+# (surface::lower::Finish).
+proc surface::modules::BuildProgram {ast strict} {
+    CheckEntryProgram $ast
+    set state [NewState [dict create f1 [dict get $ast span file]] 2]
+    CollectAndLoad state $ast ""
+    lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable ownDecls ownErrorDecls ownStructDecls
+    set decls [concat [dict get $state typeDecls] $ownDecls]
+    set errorDecls [concat [dict get $state errorDecls] $ownErrorDecls]
+    set structDecls [concat [dict get $state structDecls] $ownStructDecls]
+    return [hir::buildSyntax [surface::lower::Sequence $executable] -strict 0 \
+        -halt-on-resolution-errors $strict \
+        -origin [surface::lower::Origin [dict get $ast span] ""] \
+        -files [dict get $state files] -modules [dict get $state sections] \
+        -imports [dict get $state imports] \
+        -type-decls $decls -error-decls $errorDecls -struct-decls $structDecls]
 }
 
 # The HIR of the .bot program file PATH, after loading (and compiling once,
-# alongside it) every module its qualified references need, transitively.
+# alongside it) every module its imports name, transitively.
 # -strict as surface::lowerToHir's.
 proc surface::modules::compileProgramFile {path args} {
     set options [dict create -strict 1 -warnings [hir::warnings::defaultMode] -warning-channel stderr]
@@ -536,18 +795,7 @@ proc surface::modules::compileProgramFile {path args} {
         dict set options $option $value
     }
     set ast [surface::parse [core::ReadFile $path] $path]
-    CheckEntryProgram $ast
-    set state [NewState [dict create f1 [dict get $ast span file]] 2]
-    CollectAndLoad state $ast
-    lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable ownDecls ownErrorDecls ownStructDecls
-    set decls [concat [dict get $state typeDecls] $ownDecls]
-    set errorDecls [concat [dict get $state errorDecls] $ownErrorDecls]
-    set structDecls [concat [dict get $state structDecls] $ownStructDecls]
-    set hir [hir::buildSyntax [surface::lower::Sequence $executable] -strict 0 \
-        -halt-on-resolution-errors [dict get $options -strict] \
-        -origin [surface::lower::Origin [dict get $ast span] ""] \
-        -files [dict get $state files] -modules [dict get $state sections] \
-        -type-decls $decls -error-decls $errorDecls -struct-decls $structDecls]
+    set hir [BuildProgram $ast [dict get $options -strict]]
     return [surface::lower::Finish $hir [dict get $options -strict] \
         [dict get $options -warnings] [dict get $options -warning-channel]]
 }

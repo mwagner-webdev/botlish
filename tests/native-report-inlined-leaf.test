@@ -106,8 +106,8 @@ test native-report-inlined-leaf-3 {inlining moves guards and blockers together: 
 test native-report-inlined-leaf-4 {a leaf of an unproven argument inlined into the program, into a generic instance under specialization, and twice on one register} -body {
     lmap text {
         "fn inc(x):\n    x + 1\n\ninc(41)"
-        "fn inc(x):\n    x + 1\n\nfn twice(y):\n    inc(inc(y))\n\nfs = \[twice\]\nlist::at(fs, 0)(4)"
-        "fn mix(a, b):\n    bit_and(bit_or(a, b), 255)\n\nfn h(p):\n    mix(p, p)\n\nfs = \[h\]\nlist::at(fs, 0)(7)"
+        "import list\nfn inc(x):\n    x + 1\n\nfn twice(y):\n    inc(inc(y))\n\nfs = \[twice\]\nlist::at(fs, 0)(4)"
+        "import list\nfn mix(a, b):\n    bit_and(bit_or(a, b), 255)\n\nfn h(p):\n    mix(p, p)\n\nfs = \[h\]\nlist::at(fs, 0)(7)"
     } {
         reportCounts [sourceHir $text]
     }

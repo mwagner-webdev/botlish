@@ -3,6 +3,8 @@
 #
 # expect: [10, true]
 
+import list
+
 fn is_small(x):
     x < 10
 

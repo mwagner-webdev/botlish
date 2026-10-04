@@ -143,7 +143,8 @@ proc hir::structs::apply {decls} {
         set name [dict get $decl name]
         set ns [dict get $decl namespace]
         set id [identity $name $ns]
-        if {$name in {Int any never Fn} || [core::type::valid $name] || [dict exists $::hir::types::constructors $name]} {
+        if {$name in {Int any never Fn} || [core::type::isBuiltinName $name] || [core::type::valid $id]
+                || [dict exists $::hir::types::constructors $name]} {
             Fail [dict get $decl nameSpan] "\"$name\" cannot be declared as a struct: the name is already a built-in or declared type"
         }
         if {[dict exists $byId $id]} {
@@ -281,12 +282,29 @@ proc hir::structs::ProjectionProblem {hir e} {
 # method-style call `receiver.NAME(args)` that found no function NAME to
 # apply (METHOD-SUGAR.md): the call is then a call of the field NAME, and the
 # programmer may have meant the function spelling, which needs a function
-# visible under that name here -- the only way a function enables method
-# syntax (there is no search by receiver type, and no import statement:
-# `NAME = module::NAME` makes a module function visible).
+# visible under that name here: one defined or bound in this file, or a member
+# of a namespace this file directly imports (`import list` makes `list::at`
+# a candidate for `xs.at(i)`; there is no search by receiver type).
 proc hir::structs::MethodHint {name} {
-    return [format {; as a method-style call, no function named "%s" is visible here either: method syntax only applies a function that is already visible by that name (define it here, or bind it, e.g. `%s = module::%s`)} \
-        $name $name $name]
+    set hint [::format {; as a method-style call, no function named "%s" is visible here either: method syntax only applies a function that is already visible by that name (define it here, or import the namespace that defines it with `import NAMESPACE`)} \
+        $name]
+    # Cheap and deterministic: the intrinsics of that name (never a search of
+    # modules, which are only known once imported).
+    set owners {}
+    foreach native [core::native::names] {
+        if {![core::native::isQualifiedNative $native]} continue
+        set i [string last :: $native]
+        if {[string range $native [expr {$i + 2}] end] eq $name} {
+            lappend owners [string range $native 0 [expr {$i - 1}]]
+        }
+    }
+    if {$owners ne ""} {
+        append hint [::format { -- `%s` exist%s: add %s} \
+            [join [lmap o [lsort $owners] {string cat $o :: $name}] {`, `}] \
+            [expr {[llength $owners] == 1 ? "s" : ""}] \
+            [join [lmap o [lsort $owners] {string cat "`import " $o "`"}] { or }]]
+    }
+    return $hint
 }
 
 # Diagnoses the projection problems among the expressions EXPRS (an instance's

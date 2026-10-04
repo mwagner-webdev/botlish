@@ -18,6 +18,10 @@
 #
 # expect: [["name", "age"], ["Alice", "30"], ["Bob", "40"]]
 
+import list
+import mutable_array
+import str
+
 fn chunk_size():
     64
 

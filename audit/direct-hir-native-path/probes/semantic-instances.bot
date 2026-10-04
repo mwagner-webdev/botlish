@@ -1,3 +1,5 @@
+import list
+
 # Semantic instances: identity at several types, list::find with a handled
 # NotFound.
 fn identity(v):

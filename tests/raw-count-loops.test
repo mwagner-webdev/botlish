@@ -134,15 +134,16 @@ test raw-count-loops-refined-checks-plan {the RawInt demand rule: a raw loop's b
             set plan [native::rawabi::plan $hir $spec $analysis 1]
             set rows {}
             foreach id [dict get $spec used] {
-                set label [hir::specialize::label $spec $id]
-                if {$label ni {tld?<int> domain?<int> {scan_while<int, native(str::is_tcl_alpha)>} {scan_while<int, block(e250)>}}} continue
+                # the block's expression id depends on the imported library code
+                set label [regsub {block\(e\d+\)} [hir::specialize::label $spec $id] {block(eN)}]
+                if {$label ni {tld?<int> domain?<int> {scan_while<int, native(str::is_tcl_alpha)>} {scan_while<int, block(eN)>}}} continue
                 lappend rows [list $label [lindex [dict get $plan $id params] 0] \
                     [lindex [dict get $plan $id paramReasons] 0]]
             }
             lsort $rows
         }
     }
-} -result {{{domain?<int> rawint {}} {tld?<int> rawint {}} {{scan_while<int, block(e250)>} rawint {}} {{scan_while<int, native(str::is_tcl_alpha)>} rawint {}}} {{domain?<int> value suppressed-mixed-tagged-use} {tld?<int> value suppressed-mixed-tagged-use} {{scan_while<int, block(e250)>} value suppressed-no-raw-demand} {{scan_while<int, native(str::is_tcl_alpha)>} value suppressed-no-raw-demand}}}
+} -result {{{domain?<int> rawint {}} {tld?<int> rawint {}} {{scan_while<int, block(eN)>} rawint {}} {{scan_while<int, native(str::is_tcl_alpha)>} rawint {}}} {{domain?<int> value suppressed-mixed-tagged-use} {tld?<int> value suppressed-mixed-tagged-use} {{scan_while<int, block(eN)>} value suppressed-no-raw-demand} {{scan_while<int, native(str::is_tcl_alpha)>} value suppressed-no-raw-demand}}}
 
 test raw-count-loops-refined-checks-parity {refined-checks still returns [400, 0] natively, with block escape on and off} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot]]
@@ -202,6 +203,7 @@ test raw-count-loops-unproven-stays-tagged {a bound beyond the small-Int domain 
 # Early exits, tagged readers of the loop variable, lockstep loops
 
 set ::exitsShape {
+    import list
     fn find(a, b, t):
         loop i from a to b:
             if i == t:
@@ -265,6 +267,7 @@ test raw-count-loops-rejected-lockstep {the adversarial review's program: a -str
 # A scanner closure (the emailish? shape), and GC stress
 
 set ::scannerShape {
+    import str
     fn first_space(s):
         n = str::length(s)
         fn at(i):
@@ -287,6 +290,8 @@ test raw-count-loops-scanner-parity {the de-closured scanner shape: interp, comp
 } -result {{[[3, 2, 0], [6, 5, 0], [0, -1, 0]]} {rilt riadd}}
 
 set ::gcShape {
+    import list
+    import str
     fn mk(k):
         [k, k + 1, str::concat("x", "y")]
     fn work(n):

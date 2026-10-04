@@ -54,7 +54,8 @@ proc parseErrorOf {src} {
 # Basic shape, ascending/exclusive-end, zero iterations
 
 test loop-counted-ascending {loop i from a to b: visits a, a+1, ..., b-1, never b} -body {
-    loopInterpValue {fn f():
+    loopInterpValue {import list
+fn f():
     fn go(i, acc):
         loop j from i to 5:
             return go(j + 1, list::append(acc, j))
@@ -64,7 +65,8 @@ f()}
 } -result {[2, 3, 4]}
 
 test loop-counted-ascending-parity {ascending visitation agrees on every backend} -body {
-    loopParity {fn f():
+    loopParity {import list
+fn f():
     fn go(i, acc):
         loop j from i to 5:
             return go(j + 1, list::append(acc, j))
@@ -94,7 +96,8 @@ test loop-counted-zero-iterations-parity {both zero-iteration shapes agree on ev
 } -result {same same}
 
 test loop-counted-one-iteration {start, start+1 == end runs the body exactly once} -body {
-    loopInterpValue {fn f():
+    loopInterpValue {import list
+fn f():
     fn go(i, acc):
         loop j from i to 8:
             return go(j + 1, list::append(acc, j))
@@ -104,7 +107,8 @@ f()}
 } -result {[7]}
 
 test loop-counted-negative-start {a negative start is an ordinary Int} -body {
-    loopInterpValue {fn f():
+    loopInterpValue {import list
+fn f():
     fn go(i, acc):
         loop j from i to 0:
             return go(j + 1, list::append(acc, j))
@@ -114,7 +118,8 @@ f()}
 } -result {[-3, -2, -1]}
 
 test loop-counted-negative-to-positive {a range spanning zero visits every integer in between} -body {
-    loopInterpValue {fn f():
+    loopInterpValue {import list
+fn f():
     fn go(i, acc):
         loop j from i to 3:
             return go(j + 1, list::append(acc, j))
@@ -124,7 +129,8 @@ f()}
 } -result {[-2, -1, 0, 1, 2]}
 
 test loop-counted-dynamic-start {a non-literal start is ordinary Int arithmetic} -body {
-    loopInterpValue {fn f(n):
+    loopInterpValue {import list
+fn f(n):
     fn go(i, acc):
         loop j from i to 4:
             return go(j + 1, list::append(acc, j))
@@ -134,7 +140,8 @@ f(0)}
 } -result {[1, 2, 3]}
 
 test loop-counted-dynamic-end {a non-literal end is ordinary Int arithmetic} -body {
-    loopInterpValue {fn f(n):
+    loopInterpValue {import list
+fn f(n):
     fn go(i, acc):
         loop j from i to n:
             return go(j + 1, list::append(acc, j))
@@ -144,7 +151,8 @@ f(3)}
 } -result {[0, 1, 2]}
 
 test loop-counted-dynamic-parity {dynamic bounds agree on every backend} -body {
-    loopParity {fn f(n):
+    loopParity {import list
+fn f(n):
     fn go(i, acc):
         loop j from i to n:
             return go(j + 1, list::append(acc, j))
@@ -248,7 +256,8 @@ f()}
 } -result {"shadow-ok"}
 
 test loop-counted-closure-captures-per-iteration {a closure capturing i captures that iteration's own immutable value} -body {
-    loopInterpValue {fn f():
+    loopInterpValue {import list
+fn f():
     fn go(i, acc):
         loop j from i to 3:
             fn grab():
@@ -260,7 +269,8 @@ f()}
 } -result {[0, 1, 2]}
 
 test loop-counted-closure-captures-parity {per-iteration closure capture agrees on every backend} -body {
-    loopParity {fn f():
+    loopParity {import list
+fn f():
     fn go(i, acc):
         loop j from i to 3:
             fn grab():
@@ -296,7 +306,8 @@ test loop-counted-break-bare {a plain break (no value) ends the loop with the co
 } -result {[unit, unit]}
 
 test loop-counted-continue-sequence {continue advances to i+1: the induction sequence stays 0 1 2 3, no skip/duplicate} -body {
-    loopInterpValue {fn f():
+    loopInterpValue {import list
+fn f():
     fn go(i, acc):
         loop j from i to 4:
             if j == 1:
@@ -327,7 +338,8 @@ test loop-counted-continue-count {continue runs every iteration's own body (side
 } -result {0 2 3}
 
 test loop-counted-continue-parity {continue agrees on every backend} -body {
-    loopParity {fn f():
+    loopParity {import list
+fn f():
     fn go(i, acc):
         loop j from i to 4:
             if j == 1:
@@ -391,7 +403,8 @@ loop i from 0 to 3:
 # must never observe i == end.
 
 test loop-counted-end-exclusive-observed {the body never observes i == end, even at the last iteration} -body {
-    loopInterpValue {fn f():
+    loopInterpValue {import list
+fn f():
     fn go(i, acc):
         loop j from i to 3:
             return go(j + 1, list::append(acc, j == 3))
@@ -472,7 +485,8 @@ loop x in [2, 3, 4]:
 } -result {[2, 3, 4]}
 
 test loop-counted-listloop-in-counted {a listloop inside a counted loop: outer counted loop discards listloop's own List value} -body {
-    loopInterpValue {fn f():
+    loopInterpValue {import list
+fn f():
     fn go(i, acc):
         loop j from i to 3:
             v = loop x in [1, 2]:
@@ -502,7 +516,8 @@ f()}
 # item 7; native/src/runtime/value.rs SMALL_MAX = 2^62 - 1)
 
 test loop-counted-large-int-boundary {a two-iteration loop crossing the small-Int tag boundary executes both iterations correctly} -body {
-    loopInterpValue {fn f():
+    loopInterpValue {import list
+fn f():
     fn go(i, n, acc):
         loop j from i to n:
             return go(j + 1, n, list::append(acc, j))
@@ -512,7 +527,8 @@ f()}
 } -result {[4611686018427387903, 4611686018427387904]}
 
 test loop-counted-large-int-boundary-parity {the boundary-crossing case agrees on every backend (native included: no raw-i64 overflow)} -body {
-    loopParity {fn f():
+    loopParity {import list
+fn f():
     fn go(i, n, acc):
         loop j from i to n:
             return go(j + 1, n, list::append(acc, j))

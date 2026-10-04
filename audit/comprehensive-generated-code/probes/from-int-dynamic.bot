@@ -1,3 +1,5 @@
+import byte
+
 # Probe A: byte::from_int on an unconstrained Int (a listloop element: no
 # range fact reaches it), both errors handled. Shape of tests/ascii.test's
 # loop-over-ns programs.

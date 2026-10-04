@@ -347,19 +347,25 @@ definition with a different arity is rejected the same way
 
 ## 5. Method spelling
 
-Nothing method-specific was added. The existing rule (METHOD-SUGAR.md)
-applies to intrinsics as to any namespaced function: `x.f(a)` is `f(x, a)`
-when `f` is visible, and a namespaced function becomes visible by binding
-it (`at = list::at`). `ns-method-*` check that `xs.at(i)`, `xs.get(i, d)`,
-`xs.append(v)`, `xs.length()`, `s.concat(t)`, `s.length()`,
-`s.substring(i, j)`, `set.contains(v)`, `c.scalar_value()` and their fully
-qualified free spellings give the same value on every backend and resolve
-to the same call target (`sameCallable`: the very native, or the very
-library block); `ns-method-mutable-array` does the same reads and writes
-through `a.set`/`a.at`/`a.get`; `ns-method-nir-identical` checks the method
-and free spellings lower to identical NIR. Without a binding the method
-spelling is the usual "no function named ... is visible"
-(`ns-method-requires-a-binding`). No backend changes were made for methods.
+Nothing method-specific was added to the intrinsics. The rule
+(METHOD-SUGAR.md) applies to them as to any namespaced function: `x.f(a)` is
+`f(x, a)` when `f` is visible, and a namespaced function is visible as a
+method when its namespace is **imported** (IMPORTS.md): after `import list`,
+`xs.at(i)` is `list::at(xs, i)`; after `import str`, `s.concat(t)` is
+`str::concat(s, t)`; `import mutable_array` for `a.set(i, v)`. (Before
+IMPORTS.md the way to make an intrinsic a method candidate was to bind it to
+a name, `at = list::at`; that still works, and is the same candidate.)
+`ns-method-*` check that `xs.at(i)`, `xs.get(i, d)`, `xs.append(v)`,
+`xs.length()`, `s.concat(t)`, `s.length()`, `s.substring(i, j)`,
+`set.contains(v)`, `c.scalar_value()` and their fully qualified free
+spellings give the same value on every backend and resolve to the same call
+target (`sameCallable`: the very native, or the very library block);
+`ns-method-mutable-array` does the same reads and writes through
+`a.set`/`a.at`/`a.get`; `ns-method-nir-identical` checks the method and free
+spellings lower to identical NIR. Without the import the method spelling is
+the usual "no function named ... is visible" (`ns-method-requires-an-import`);
+the import injects no unqualified name (`ns-import-injects-no-short-names`).
+No backend changes were made for methods.
 
 ## 6. Interpreter and native resolution
 

@@ -69,7 +69,7 @@ test lists-10 {a call that returned proves its list argument is a list} -body {
 } -result {any list}
 
 test lists-11 {the primitives can be named from source} -body {
-    set h [surface::compile "xs = \[1, 2\]\n\[list::length(xs), list::at(xs, 1), list::append(xs, 3)\]" t.bot]
+    set h [surface::compile "import list\nxs = \[1, 2\]\n\[list::length(xs), list::at(xs, 1), list::append(xs, 3)\]" t.bot]
     core::value::show [core::compiler::evalHir $h]
 } -result {[2, 2, [1, 2, 3]]}
 

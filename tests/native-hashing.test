@@ -96,6 +96,7 @@ f()
 
 test hash-consistent-with-eq-1 {distinct String objects with equal content hash equal} -body {
     native {
+import str
 fn f():
     a = str::concat("hel", "lo")
     b = str::concat("hel", "lo")
@@ -143,7 +144,8 @@ hash(f)
 } -result same
 
 test hash-mutarray-1 {hash is undefined for MutableArray, every backend} -body {
-    parity {hash(mutable_array::allocate(1))}
+    parity {import mutable_array
+hash(mutable_array::allocate(1))}
 } -result same
 
 test hash-range-1 {hash never needs a bit beyond 61: nonneg and below 2^61} -body {
@@ -167,7 +169,7 @@ test hash-parity-astral-1 {hash of a String with a supplementary-plane character
 } -result same
 
 test hash-consistent-with-eq-astral-1 {distinct String objects with equal supplementary-plane content hash equal} -body {
-    native "fn f():\n    a = str::concat(\"x\", \"\U0001F642\")\n    b = str::concat(\"x\", \"\U0001F642\")\n    hash(a) == hash(b)\nf()\n"
+    native "import str\nfn f():\n    a = str::concat(\"x\", \"\U0001F642\")\n    b = str::concat(\"x\", \"\U0001F642\")\n    hash(a) == hash(b)\nf()\n"
 } -result {value true}
 
 test hash-parity-int-1 {hash of an Int matches across every backend (bit-identical)} -body {

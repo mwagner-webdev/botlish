@@ -16,6 +16,9 @@ source [file join $::projectRoot surface surface.tcl]
 
 set ::smallDecl "type Small = Int in 0..10\n\nfn one() -> Small:\n    1\n\n"
 set ::byteDecl "type Byte = Int in 0..255\n\nfn byteA() -> Byte:\n    97\n\n"
+# the same declarations for programs that use immutable_set::...
+set ::byteSetDecl "import immutable_set\n$::byteDecl"
+set ::smallSetDecl "import immutable_set\n$::smallDecl"
 
 proc sourceHir {text} {
     return [surface::compile $text t.bot -strict 0]
@@ -107,11 +110,12 @@ takes_bytes([256])} $::byteDecl]
 test empty-set-satisfies-byte {an empty-constructed set satisfies a declared ImmutableSet[Byte] parameter (spec item 37)} -body {
     accepts [format {%sfn consume(s: ImmutableSet[Byte]) -> int:
     1
-consume(immutable_set::from_list([]))} $::byteDecl]
+consume(immutable_set::from_list([]))} $::byteSetDecl]
 } -result ok
 
 test empty-set-satisfies-string {an empty-constructed set satisfies a declared ImmutableSet[str] parameter -- non-integer element kind (spec item 37)} -body {
-    accepts {fn consume(s: ImmutableSet[str]) -> int:
+    accepts {import immutable_set
+fn consume(s: ImmutableSet[str]) -> int:
     1
 consume(immutable_set::from_list([]))}
 } -result ok
@@ -119,7 +123,7 @@ consume(immutable_set::from_list([]))}
 test nonempty-set-still-invariant {a non-empty ImmutableSet[Byte] does not satisfy ImmutableSet[int] -- the set-side non-empty invariance control (spec item 37)} -body {
     rejects [format {%sfn consume(s: ImmutableSet[int]) -> int:
     1
-consume(immutable_set::from_list([byteA()]))} $::byteDecl]
+consume(immutable_set::from_list([byteA()]))} $::byteSetDecl]
 } -result {{CORE SEMANTIC TYPE} 1}
 
 # ---------------------------------------------------------------------------
@@ -135,7 +139,7 @@ test empty-list-satisfies-declared-result {a function declaring -> List[int] and
 test empty-set-satisfies-declared-result {a function declaring -> ImmutableSet[Small] and returning an empty-constructed set is accepted (spec items 11, 38)} -body {
     accepts [format {%sfn emptySet() -> ImmutableSet[Small]:
     immutable_set::from_list([])
-1} $::smallDecl]
+1} $::smallSetDecl]
 } -result ok
 
 test nonempty-list-result-still-invariant {a function declaring -> List[Byte] whose body actually returns List[int] is still rejected at the result boundary (spec item 38 negative control)} -body {
@@ -197,7 +201,8 @@ fn consume(xs: List[int]) -> int:
 # specialization gives the empty caller its own instance.
 
 test empty-listloop-runtime-zero-iterations {count(xs: List[int]), which listloop-maps over xs and takes the result's length, called with [] returns 0 on every backend -- bindings are immutable, so listloop maps each element to a value rather than accumulating through reassignment (spec item 40)} -body {
-    set text {fn count(xs: List[int]) -> int:
+    set text {import list
+fn count(xs: List[int]) -> int:
     mapped = loop x in xs:
         x
     list::length(mapped)
@@ -209,7 +214,8 @@ count([])}
 } -result {{value 0 {}} {value 0 {}} {value 0 {}} {value 0 {}}}
 
 test empty-listloop-nonempty-caller-still-correct {the same count(List[int]) function still counts correctly for a real, non-empty caller in the same program -- mixed callers do not corrupt each other's runtime behavior (spec items 40-42)} -body {
-    set text {fn count(xs: List[int]) -> int:
+    set text {import list
+fn count(xs: List[int]) -> int:
     mapped = loop x in xs:
         x
     list::length(mapped)
@@ -243,7 +249,8 @@ test mixed-callers-adding-third-caller-stays-sound {adding a third, non-empty ca
 } -result {{consume<List[int]>} {consume<List[never]>}}
 
 test empty-caller-instance-loop-body-statically-dead {the empty-caller instance's own listloop body is proven statically unreachable in its generated code (an "unreachable" NIR marker), while the non-empty caller's instance keeps a live loop body -- consistent with the pre-existing undeclared-empty-caller behavior (S05c), now also true for a declared List[T] parameter (spec items 10, 40)} -body {
-    set text {fn count(xs: List[int]) -> int:
+    set text {import list
+fn count(xs: List[int]) -> int:
     mapped = loop x in xs:
         x
     list::length(mapped)

@@ -413,7 +413,7 @@ proc stripLocations {message} {
 proc compileOrError {source} {
     # Through a file: the programs call library modules (mutable_array::create).
     set file destructuring-fuzz-[pid].bot
-    set path [makeFile $source $file]
+    set path [makeFile [surface::modules::ImportHeader $source]$source $file]
     set failed [catch {surface::readProgramFile $path} hir options]
     removeFile $file
     if {$failed} {

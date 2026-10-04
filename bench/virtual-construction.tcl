@@ -36,7 +36,9 @@ interp recursionlimit {} 2000000
 
 namespace eval vcbench {}
 
-set vcbench::digits {digits = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]}
+set vcbench::digits {import list
+import str
+digits = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]}
 
 # PROBE -> {kind description source-template}; %N% is replaced by N.
 set vcbench::probes [dict create \
@@ -144,7 +146,7 @@ proc vcbench::field {dict args} {
 
 # {VALUE BEST-US REPORT}: one probe at size N.
 proc vcbench::measure {probe n opt runs} {
-    set hir [surface::compile [source $probe $n] <$probe> -warnings off]
+    set hir [surface::compile [surface::modules::ImportHeader [source $probe $n]][source $probe $n] <$probe> -warnings off]
     set args [optArgs $opt]
     lassign [native::measure $hir $runs {*}$args] lower compile best collections value
     set report [native::allocationReport $hir summary 1 {*}$args]

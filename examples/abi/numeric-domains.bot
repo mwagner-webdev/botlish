@@ -13,6 +13,9 @@
 #
 # expect: [255, "above", 256, [-1, -1], true, 18446744073709551615]
 
+import abi
+import abi::x86_64
+
 # The next U8 after x, if there is one: computed in Int, re-checked into the
 # domain. BelowRange needs no handler: x.value + 1 >= 1 is proven from U8's
 # declared domain.

@@ -100,6 +100,7 @@ proc nirOpsOf {nir name} {
 # The emailish? scanner shape: scan's generic instance is the Block-value
 # entry of a closure blockescape de-closures through scan<any, native(...)>.
 set scanShape {
+    import str
     fn outer(v, start0):
         n = str::length(v)
         fn get(i):
@@ -124,6 +125,7 @@ set scanShape {
 # alone reaches idx<int> with an unbounded argument; the live
 # apply<native(str::is_tcl_alpha), str, int> reaches idx<int> too.
 set transitiveShape {
+    import str
     fn idx(x):
         x * 2
     fn apply(p, c, i):
@@ -154,6 +156,7 @@ set transitiveShape {
 # whose String position stays generic (ok captures v): `tag` is Str in the
 # live scan instance and `any` in the dormant scan<generic>.
 set theoremShape {
+    import str
     fn outer(v, start0):
         n = str::length(v)
         fn get(i):
@@ -379,6 +382,8 @@ test dormant-aot-readiness {AOT readiness ignores a dormant instance's guards: t
 # garbage with -block-escape-opt 0.
 
 set nestedValueShape {
+    import list
+    import str
     fn h(x):
         x + 1
     fn other(a, p):

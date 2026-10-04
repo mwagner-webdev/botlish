@@ -93,9 +93,11 @@ namespace eval hir::resolve {}
 # binding a namespace's own section scope declares to its qualified
 # spelling afterward, so no two modules' definitions ever share a lowered
 # core IR name either.
-proc hir::resolve::program {nodes mode origin {modules {}}} {
+proc hir::resolve::program {nodes mode origin {modules {}} {choices {}}} {
     set hir [hir::Empty $mode]
     dict set hir laterIndex [dict create]
+    dict set hir methodChoices $choices
+    dict set hir methodCalls [dict create]
     set roots {}
     if {$mode eq "program"} {
         set root [NewScope hir root "" "" "" {builtin root}]
@@ -279,26 +281,194 @@ proc hir::resolve::Lookup {hirVar s name} {
     return ""
 }
 
-# 1 if NAME denotes a binding from scope S -- the walk Lookup makes, without
-# creating anything: the visibility test method-call sugar uses
-# (METHOD-SUGAR.md). An ambient scope (sequence mode) denotes whatever the
-# host environment holds, so everything is visible there.
-proc hir::resolve::MethodTargetVisible {hirVar s name} {
+# The binding identity binding B denotes for the purpose of telling method
+# candidates apart: an alias (`at = list::at`) is the function it aliases, a
+# root native is the native, anything else is itself. Two candidates with one
+# identity are one function, however many names reach it.
+proc hir::resolve::CandidateIdentity {hirVar b} {
+    upvar 1 $hirVar hir
+    for {set depth 0} {$depth < 32} {incr depth} {
+        set binding [dict get $hir bindings $b]
+        if {[dict get $binding kind] eq "root"} {
+            return native:[dict get $binding name]
+        }
+        set d [dict get $binding declaredBy]
+        if {$d eq "" || ![dict exists $hir exprs $d] || [dict get $hir exprs $d kind] ne "bind"
+                || ![dict exists $hir exprs $d value]} {
+            break
+        }
+        set value [dict get $hir exprs $d value]
+        if {$value eq "" || ![dict exists $hir exprs $value]
+                || [dict get $hir exprs $value kind] ne "ref"
+                || ![dict exists $hir exprs $value binding] || [dict get $hir exprs $value binding] eq ""} {
+            break
+        }
+        set b [dict get $hir exprs $value binding]
+    }
+    return binding:$b
+}
+
+# The accepted count of arguments of the function candidate identity IDENTITY
+# stands for, `*` for any, or "" if it is not statically a function of known
+# arity (a parameter, a value).
+proc hir::resolve::CandidateArity {hirVar b} {
+    upvar 1 $hirVar hir
+    set binding [dict get $hir bindings $b]
+    if {[dict get $binding kind] eq "root"} {
+        if {[dict get $binding symbol] ne "" && [dict get $hir symbols [dict get $binding symbol] kind] eq "native"} {
+            return [dict get [core::native::metadata [dict get $binding name]] arity]
+        }
+        return ""
+    }
+    if {[dict exists $binding flagIface]} {
+        return [dict get $binding flagIface ordinary]
+    }
+    return ""
+}
+
+# The binding the unqualified NAME denotes from scope S under ordinary
+# lexical resolution (what a reference would see), or "" -- the walk Lookup
+# makes, without creating anything (a root binding that does not exist yet is
+# reported as the pair {root NAME}).
+proc hir::resolve::LexicalTarget {hirVar s name} {
     upvar 1 $hirVar hir
     for {} {$s ne ""} {set s [dict get $hir scopes $s parent]} {
         if {[dict exists $hir scopes $s names $name]} {
-            return 1
+            return [dict get $hir scopes $s names $name]
         }
         switch -- [dict get $hir scopes $s kind] {
             ambient {
-                return 1
+                return ambient
             }
             root {
-                return [expr {$name in [RootNames]}]
+                return [expr {$name in [RootNames] ? [list root $name] : ""}]
             }
         }
     }
-    return 0
+    return ""
+}
+
+# The functions the method-style call `receiver.NAME(args)` (ARGCOUNT: the
+# receiver plus the written arguments) may denote from scope S of CTX: the
+# distinct functions among
+#
+#   * the function ordinary lexical resolution finds for NAME (a function or
+#     binding of the file, a parameter, a root native), and
+#   * for every namespace the file directly imports (hir/imports.tcl), the
+#     member NAME of that exact namespace: a module function or an
+#     intrinsic (`list::at`). Imports are not transitive and not
+#     hierarchical: only the namespaces the file itself names.
+#
+# A list of {display D kind lexical|module|native ns NS identity I} dicts
+# sorted by display (the unqualified name for the lexical one, `NS::NAME`
+# otherwise): there is no order of precedence, ever. Candidates with one
+# identity are one (an alias of an imported function adds nothing). A
+# candidate that is statically a function of a different arity is dropped,
+# unless that would leave none (the ordinary call then keeps its arity
+# error). Empty: no function of that name is visible.
+proc hir::resolve::MethodCandidates {hirVar s name ctx argCount} {
+    upvar 1 $hirVar hir
+    set found [dict create]
+    set arities [dict create]
+    foreach ns [hir::imports::namespaces [CtxNamespace $ctx]] {
+        set qualified "${ns}::$name"
+        if {[core::native::isQualifiedNative $qualified]} {
+            set identity native:$qualified
+            if {![dict exists $found $identity]} {
+                dict set found $identity [dict create display $qualified kind native ns $ns identity $identity]
+                dict set arities $identity [dict get [core::native::metadata $qualified] arity]
+            }
+        } elseif {[dict exists $hir modules $ns]} {
+            set scope [dict get $hir modules $ns]
+            if {[dict exists $hir scopes $scope names $name]} {
+                set b [dict get $hir scopes $scope names $name]
+                set identity [CandidateIdentity hir $b]
+                if {![dict exists $found $identity]} {
+                    dict set found $identity [dict create display $qualified kind module ns $ns identity $identity]
+                    dict set arities $identity [CandidateArity hir $b]
+                }
+            }
+        }
+    }
+    set target [LexicalTarget hir $s $name]
+    if {$target ne ""} {
+        if {$target eq "ambient"} {
+            set identity ambient:$name
+            set arity ""
+        } elseif {[llength $target] == 2} {
+            set identity native:$name
+            set arity [expr {[core::native::exists $name] ? [dict get [core::native::metadata $name] arity] : ""}]
+        } else {
+            set identity [CandidateIdentity hir $target]
+            set arity [CandidateArity hir [expr {[string match binding:* $identity] ? [string range $identity 8 end] : $target}]]
+        }
+        if {![dict exists $found $identity]} {
+            dict set found $identity [dict create display $name kind lexical ns "" identity $identity]
+            dict set arities $identity $arity
+        }
+    }
+    set all [lsort -command {apply {{a b} {string compare [dict get $a display] [dict get $b display]}}} [dict values $found]]
+    set fitting [lmap c $all {
+        set arity [dict get $arities [dict get $c identity]]
+        if {$arity ne "" && $arity ne "*" && $arity != $argCount} continue
+        set c
+    }]
+    return [expr {$fitting ne "" ? $fitting : $all}]
+}
+
+# The key naming the method-style call NODE (a call syntax node) across
+# rebuilds of the same program: its source file and its structural node id.
+# "" for a node with no source identity (one that did not come from source).
+proc hir::resolve::MethodKey {node} {
+    set origin [dict get $node origin]
+    if {![dict exists $origin node] || ![dict exists $origin file]} {
+        return ""
+    }
+    return "[dict get $origin file]:[dict get $origin node]"
+}
+
+# The candidate (one of CANDIDATES, at least one) method-style call E
+# resolves to. With one candidate it is that one. With several the build was
+# told which is valid (HIR's `methodChoices`, key -> candidate display; set
+# by hir::buildSyntax's disambiguation), else the first by display name
+# stands in provisionally. Every call with several candidates is recorded in
+# `methodCalls` (key -> {expr E name NAME candidates DISPLAYS chosen D}) for
+# that disambiguation, whatever the build chose.
+proc hir::resolve::MethodChoice {hirVar e node candidates} {
+    upvar 1 $hirVar hir
+    if {[llength $candidates] == 1} {
+        return [lindex $candidates 0]
+    }
+    set key [MethodKey $node]
+    set chosen [lindex $candidates 0]
+    if {$key ne "" && [dict exists $hir methodChoices $key]} {
+        foreach candidate $candidates {
+            if {[dict get $candidate display] eq [dict get $hir methodChoices $key]} {
+                set chosen $candidate
+            }
+        }
+    }
+    dict set hir methodCalls [expr {$key ne "" ? $key : $e}] [dict create expr $e \
+        name [dict get [dict get $node callee] name] \
+        candidates [lmap c $candidates {dict get $c display}] chosen [dict get $chosen display]]
+    return $chosen
+}
+
+# The syntax node of the callee CHOSEN (a MethodCandidates dict) denotes.
+proc hir::resolve::MethodCalleeSyntax {chosen name nameOrigin} {
+    switch -- [dict get $chosen kind] {
+        native {
+            return [hir::syntax::rootRef $nameOrigin [dict get $chosen display]]
+        }
+        module {
+            set ref [hir::syntax::refNode $nameOrigin [dict get $chosen display]]
+            dict set ref qualified [list [dict get $chosen ns] $name]
+            return $ref
+        }
+        default {
+            return [hir::syntax::refNode $nameOrigin $name]
+        }
+    }
 }
 
 # Records that block expression E is created in scope S's region.
@@ -510,21 +680,32 @@ proc hir::resolve::Expr {hirVar node ctx} {
         }
         call {
             set written [dict get $node callee]
-            if {[dict exists $node method] && [MethodTargetVisible hir $scope [dict get $written name]]} {
+            set candidates {}
+            if {[dict exists $node method]} {
+                set candidates [MethodCandidates hir $scope [dict get $written name] $ctx \
+                    [expr {[llength [dict get $node args]] + 1}]]
+            }
+            if {$candidates ne ""} {
                 # Method-call sugar (METHOD-SUGAR.md): `receiver.name(args)`
-                # is the ordinary call `name(receiver, args)` when `name` is
-                # visible from here under ordinary lexical resolution -- the
-                # same walk a reference to `name` makes, so a shadowing local
-                # is what the sugar sees, and the ref is a real use (capture,
-                # call target, call graph). The receiver is the first
-                # argument and is resolved (and later evaluated) once, in
-                # that position. Nothing below this point knows the spelling:
-                # the node is an ordinary `call`, and `method` records only
-                # that the callee was written after a ".", for the
-                # field/function ambiguity check (hir::structs::verify).
+                # is the ordinary call of the function `name` denotes when
+                # one is visible from here -- under ordinary lexical
+                # resolution (the same walk a reference to `name` makes, so a
+                # shadowing local is what the sugar sees) or as a member of a
+                # directly imported namespace (`import list` makes
+                # `list::at` a candidate for `xs.at(i)`, IMPORTS.md). The ref
+                # is a real use (capture, call target, call graph). The
+                # receiver is the first argument and is resolved (and later
+                # evaluated) once, in that position. Nothing below this
+                # point knows the spelling: the node is an ordinary `call`,
+                # and `method` records only that the callee was written after
+                # a ".", for the field/function ambiguity check (hir::
+                # structs::verify). When several distinct functions are
+                # candidates, MethodChoice picks the one the (re)build was
+                # told is valid; hir::buildSyntax decides which that is.
                 set name [dict get $written name]
                 set nameOrigin [dict get $written nameOrigin]
-                SetField hir $e callee [Expr hir [hir::syntax::refNode $nameOrigin $name] $ctx]
+                set chosen [MethodChoice hir $e $node $candidates]
+                SetField hir $e callee [Expr hir [MethodCalleeSyntax $chosen $name $nameOrigin] $ctx]
                 SetField hir $e args [Sequence hir \
                     [concat [list [dict get $written receiver]] [dict get $node args]] $ctx]
                 SetField hir $e method [dict create name $name nameOrigin $nameOrigin]
@@ -894,7 +1075,27 @@ proc hir::resolve::Sequence {hirVar nodes ctx} {
 proc hir::resolve::ResolveQualifiedRef {hirVar e pair ctx} {
     upvar 1 $hirVar hir
     lassign $pair ns name
-    SetField hir $e name "${ns}::${name}"
+    set qualified "${ns}::${name}"
+    SetField hir $e name $qualified
+    if {![dict exists $hir modules $ns] || ![dict exists $hir scopes [dict get $hir modules $ns] names $name]} {
+        if {[NativeNamed $qualified]} {
+            # The membership predicate of a source-declared type of that
+            # namespace (`abi::U8Value?`): a native registered for this
+            # compilation under its qualified name, reached like any root
+            # native -- no module binding stands behind it.
+            ResolveRef hir $e $qualified 1 $ctx
+            return
+        }
+        if {$ns eq [CtxNamespace $ctx] && [dict exists $hir modules $ns]} {
+            # A member of the module's own namespace that is not established
+            # yet: the ordinary forward-reference rule (nothing is hoisted).
+            SetField hir $e binding ""
+            SetField hir $e init yes
+            hir::Diagnose hir UNBOUND \
+                "unbound name \"$qualified\": \"$name\" is not established before this point in its own namespace; forward references are not allowed (a binding is visible only after it is established)" $e
+            return
+        }
+    }
     if {![dict exists $hir modules $ns]} {
         core::malformed "unresolved module reference ${ns}::${name}: module \"$ns\" was not loaded into this program" [list ref "${ns}::${name}"]
     }
@@ -919,6 +1120,11 @@ proc hir::resolve::ResolveQualifiedRef {hirVar e pair ctx} {
     Capture hir $ctx [dict get $hir bindings $b scope] $b
 }
 
+# 1 if NAME is a registered native (a root native of this compilation).
+proc hir::resolve::NativeNamed {name} {
+    return [core::native::exists $name]
+}
+
 # Resolves reference E to NAME; ROOT 1: to the root binding NAME, whatever
 # local bindings are called (hygiene.tcl keeps lowering faithful).
 proc hir::resolve::ResolveRef {hirVar e name root ctx} {
@@ -934,6 +1140,14 @@ proc hir::resolve::ResolveRef {hirVar e name root ctx} {
         dict lappend hir rootRefs $e
     } else {
         set b [Lookup hir $scope $name]
+        if {$b eq "" && [set ns [CtxNamespace $ctx]] ne "" && [NativeNamed ${ns}::$name]} {
+            # The membership predicate of a type the module itself declares
+            # (`Small?` inside namespace m is the native `m::Small?`).
+            set name ${ns}::$name
+            SetField hir $e name $name
+            set b [RootBinding hir [dict get $hir scopes [dict get $hir top] parent] $name]
+            dict lappend hir rootRefs $e
+        }
     }
     SetField hir $e binding $b
     if {$b eq ""} {

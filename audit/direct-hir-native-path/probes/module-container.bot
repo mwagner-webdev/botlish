@@ -1,3 +1,5 @@
+import mutable_array
+
 # Container intrinsics reached through their module identity.
 a = mutable_array::create(3, 0)
 mutable_array::set(a, 1, 7)

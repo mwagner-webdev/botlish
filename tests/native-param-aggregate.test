@@ -82,13 +82,13 @@ proc funcNir {text name} {
 # nothing.
 
 test paramagg-bump-1 {no input list::at, no output list_new, on the fully virtual closed path} -body {
-    set text "fn bump(state):\n    x = list::at(state, 0)\n    y = list::at(state, 1)\n    \[x, y + 1\]\n\nfn f():\n    r = bump(\[10, 20\])\n    list::at(r, 0) + list::at(r, 1)\n\nf()"
+    set text "import list\nfn bump(state):\n    x = list::at(state, 0)\n    y = list::at(state, 1)\n    \[x, y + 1\]\n\nfn f():\n    r = bump(\[10, 20\])\n    list::at(r, 0) + list::at(r, 1)\n\nf()"
     set text [funcNir [nirOf $text] bump]
     list [regexp {listget|listnew} $text]
 } -result 0
 
 test paramagg-bump-2 {the same program's value and allocation count -- f()'s own trailing value is a plain Int, so the whole program allocates no List at all} -body {
-    set text "fn bump(state):\n    x = list::at(state, 0)\n    y = list::at(state, 1)\n    \[x, y + 1\]\n\nfn f():\n    r = bump(\[10, 20\])\n    list::at(r, 0) + list::at(r, 1)\n\nf()"
+    set text "import list\nfn bump(state):\n    x = list::at(state, 0)\n    y = list::at(state, 1)\n    \[x, y + 1\]\n\nfn f():\n    r = bump(\[10, 20\])\n    list::at(r, 0) + list::at(r, 1)\n\nf()"
     list [assertParity $text] [listAllocs $text 1] [listAllocs $text 0]
 } -result {{int 31} 0 1}
 
@@ -97,22 +97,22 @@ test paramagg-bump-2 {the same program's value and allocation count -- f()'s own
 # hardcoded to the builder's own shape)
 
 test paramagg-arity-1 {arity 1} -body {
-    set text "fn first(one):\n    list::at(one, 0)\n\nfn f():\n    first(\[42\])\n\nf()"
+    set text "import list\nfn first(one):\n    list::at(one, 0)\n\nfn f():\n    first(\[42\])\n\nf()"
     list [assertParity $text] [listAllocs $text 1]
 } -result {{int 42} 0}
 
 test paramagg-arity-2 {arity 2} -body {
-    set text "fn sum2(p):\n    list::at(p, 0) + list::at(p, 1)\n\nfn f():\n    sum2(\[1, 2\])\n\nf()"
+    set text "import list\nfn sum2(p):\n    list::at(p, 0) + list::at(p, 1)\n\nfn f():\n    sum2(\[1, 2\])\n\nf()"
     list [assertParity $text] [listAllocs $text 1]
 } -result {{int 3} 0}
 
 test paramagg-arity-3 {arity 3} -body {
-    set text "fn sum3(p):\n    list::at(p, 0) + list::at(p, 1) + list::at(p, 2)\n\nfn f():\n    sum3(\[1, 2, 3\])\n\nf()"
+    set text "import list\nfn sum3(p):\n    list::at(p, 0) + list::at(p, 1) + list::at(p, 2)\n\nfn f():\n    sum3(\[1, 2, 3\])\n\nf()"
     list [assertParity $text] [listAllocs $text 1]
 } -result {{int 6} 0}
 
 test paramagg-arity-5 {arity 5} -body {
-    set text "fn sum5(p):\n    list::at(p, 0) + list::at(p, 1) + list::at(p, 2) + list::at(p, 3) + list::at(p, 4)\n\nfn f():\n    sum5(\[1, 2, 3, 4, 5\])\n\nf()"
+    set text "import list\nfn sum5(p):\n    list::at(p, 0) + list::at(p, 1) + list::at(p, 2) + list::at(p, 3) + list::at(p, 4)\n\nfn f():\n    sum5(\[1, 2, 3, 4, 5\])\n\nf()"
     list [assertParity $text] [listAllocs $text 1]
 } -result {{int 15} 0}
 
@@ -120,12 +120,12 @@ test paramagg-arity-5 {arity 5} -body {
 # Mixed virtual + ordinary parameters, stable ordering (#15)
 
 test paramagg-mixed-1 {a virtual aggregate parameter alongside an ordinary scalar one} -body {
-    set text "fn append(state, value):\n    storage = list::at(state, 0)\n    length = list::at(state, 1)\n    \[storage + value, length + 1\]\n\nfn f():\n    r = append(\[100, 0\], 5)\n    list::at(r, 0) + list::at(r, 1)\n\nf()"
+    set text "import list\nfn append(state, value):\n    storage = list::at(state, 0)\n    length = list::at(state, 1)\n    \[storage + value, length + 1\]\n\nfn f():\n    r = append(\[100, 0\], 5)\n    list::at(r, 0) + list::at(r, 1)\n\nf()"
     list [assertParity $text] [listAllocs $text 1]
 } -result {{int 106} 0}
 
 test paramagg-mixed-2 {the fields variant's NIR parameter names preserve declared order} -body {
-    set text "fn append(state, value):\n    storage = list::at(state, 0)\n    length = list::at(state, 1)\n    \[storage + value, length + 1\]\n\nfn f():\n    r = append(\[100, 0\], 5)\n    list::at(r, 0)\n\nf()"
+    set text "import list\nfn append(state, value):\n    storage = list::at(state, 0)\n    length = list::at(state, 1)\n    \[storage + value, length + 1\]\n\nfn f():\n    r = append(\[100, 0\], 5)\n    list::at(r, 0)\n\nf()"
     set text [nirOf $text]
     regexp {pnames="state\.0 state\.1 value"} $text
 } -result 1
@@ -134,12 +134,12 @@ test paramagg-mixed-2 {the fields variant's NIR parameter names preserve declare
 # Multiple virtual parameters (#14): not hardcoded to "exactly one"
 
 test paramagg-multi-param-1 {two separate virtual aggregate parameters} -body {
-    set text "fn merge(a, b):\n    list::at(a, 0) + list::at(a, 1) + list::at(b, 0) + list::at(b, 1)\n\nfn f():\n    merge(\[1, 2\], \[10, 20\])\n\nf()"
+    set text "import list\nfn merge(a, b):\n    list::at(a, 0) + list::at(a, 1) + list::at(b, 0) + list::at(b, 1)\n\nfn f():\n    merge(\[1, 2\], \[10, 20\])\n\nf()"
     list [assertParity $text] [listAllocs $text 1]
 } -result {{int 33} 0}
 
 test paramagg-multi-param-2 {both fields expand in the NIR params list, in order} -body {
-    set text "fn merge(a, b):\n    list::at(a, 0) + list::at(a, 1) + list::at(b, 0) + list::at(b, 1)\n\nfn f():\n    merge(\[1, 2\], \[10, 20\])\n\nf()"
+    set text "import list\nfn merge(a, b):\n    list::at(a, 0) + list::at(a, 1) + list::at(b, 0) + list::at(b, 1)\n\nfn f():\n    merge(\[1, 2\], \[10, 20\])\n\nf()"
     set text [nirOf $text]
     regexp {pnames="a\.0 a\.1 b\.0 b\.1"} $text
 } -result 1
@@ -148,7 +148,7 @@ test paramagg-multi-param-2 {both fields expand in the NIR params list, in order
 # Multiple direct calls of the same parameter (#53): not "single use"
 
 test paramagg-multi-use-1 {two separate field reads of the same parameter} -body {
-    set text "fn get_x(state):\n    list::at(state, 0)\n\nfn get_y(state):\n    list::at(state, 1)\n\nfn f():\n    s = \[7, 9\]\n    get_x(s) + get_y(s)\n\nf()"
+    set text "import list\nfn get_x(state):\n    list::at(state, 0)\n\nfn get_y(state):\n    list::at(state, 1)\n\nfn f():\n    s = \[7, 9\]\n    get_x(s) + get_y(s)\n\nf()"
     list [assertParity $text] [listAllocs $text 1]
 } -result {{int 16} 0}
 
@@ -156,7 +156,7 @@ test paramagg-multi-use-1 {two separate field reads of the same parameter} -body
 # Conditional call of the same virtual aggregate (#54)
 
 test paramagg-conditional-1 {both closed branches consume the same virtual shape} -body {
-    set text "fn use_a(state):\n    list::at(state, 0)\n\nfn use_b(state):\n    list::at(state, 1)\n\nfn f(cond):\n    s = \[1, 2\]\n    if cond:\n        use_a(s)\n    else:\n        use_b(s)\n\nf(true) + f(false)"
+    set text "import list\nfn use_a(state):\n    list::at(state, 0)\n\nfn use_b(state):\n    list::at(state, 1)\n\nfn f(cond):\n    s = \[1, 2\]\n    if cond:\n        use_a(s)\n    else:\n        use_b(s)\n\nf(true) + f(false)"
     list [assertParity $text] [listAllocs $text 1]
 } -result {{int 3} 0}
 
@@ -166,12 +166,12 @@ test paramagg-conditional-1 {both closed branches consume the same virtual shape
 # materializes at any intermediate boundary.
 
 test paramagg-chain-1 {a 3-hop forwarding chain stays scalar throughout} -body {
-    set text "fn helper2(s):\n    list::at(s, 0) + list::at(s, 1)\n\nfn helper1(s):\n    helper2(s)\n\nfn caller():\n    state = \[3, 4\]\n    helper1(state)\n\ncaller()"
+    set text "import list\nfn helper2(s):\n    list::at(s, 0) + list::at(s, 1)\n\nfn helper1(s):\n    helper2(s)\n\nfn caller():\n    state = \[3, 4\]\n    helper1(state)\n\ncaller()"
     list [assertParity $text] [listAllocs $text 1]
 } -result {{int 7} 0}
 
 test paramagg-chain-2 {no function in the chain's NIR mentions listget/listnew} -body {
-    set text "fn helper2(s):\n    list::at(s, 0) + list::at(s, 1)\n\nfn helper1(s):\n    helper2(s)\n\nfn caller():\n    state = \[3, 4\]\n    helper1(state)\n\ncaller()"
+    set text "import list\nfn helper2(s):\n    list::at(s, 0) + list::at(s, 1)\n\nfn helper1(s):\n    helper2(s)\n\nfn caller():\n    state = \[3, 4\]\n    helper1(state)\n\ncaller()"
     set text [nirOf $text]
     regexp {listget|listnew} $text
 } -result 0
@@ -183,12 +183,12 @@ test paramagg-selftail-1 {state threaded through a self-tail loop stays scalar t
     # Every exit of loopState is itself recognized (the trailing `[x + 1,
     # y]` construction, or the self-tail forwarding call): both its
     # parameter and its own result stay virtual across every iteration.
-    set text "fn loopState(state, n):\n    if n == 0:\n        x = list::at(state, 0)\n        y = list::at(state, 1)\n        return \[x, y\]\n    x = list::at(state, 0)\n    y = list::at(state, 1)\n    loopState(\[x + 1, y\], n - 1)\n\nfn f():\n    r = loopState(\[0, 99\], 50)\n    list::at(r, 0) + list::at(r, 1)\n\nf()"
+    set text "import list\nfn loopState(state, n):\n    if n == 0:\n        x = list::at(state, 0)\n        y = list::at(state, 1)\n        return \[x, y\]\n    x = list::at(state, 0)\n    y = list::at(state, 1)\n    loopState(\[x + 1, y\], n - 1)\n\nfn f():\n    r = loopState(\[0, 99\], 50)\n    list::at(r, 0) + list::at(r, 1)\n\nf()"
     list [assertParity $text] [listAllocs $text 1]
 } -result {{int 149} 0}
 
 test paramagg-selftail-2 {the self-tail loop's own NIR is a `tail`, not a per-iteration call, with no listnew/listget anywhere in the whole program} -body {
-    set text "fn loopState(state, n):\n    if n == 0:\n        x = list::at(state, 0)\n        y = list::at(state, 1)\n        return \[x, y\]\n    x = list::at(state, 0)\n    y = list::at(state, 1)\n    loopState(\[x + 1, y\], n - 1)\n\nfn f():\n    r = loopState(\[0, 99\], 50)\n    list::at(r, 0)\n\nf()"
+    set text "import list\nfn loopState(state, n):\n    if n == 0:\n        x = list::at(state, 0)\n        y = list::at(state, 1)\n        return \[x, y\]\n    x = list::at(state, 0)\n    y = list::at(state, 1)\n    loopState(\[x + 1, y\], n - 1)\n\nfn f():\n    r = loopState(\[0, 99\], 50)\n    list::at(r, 0)\n\nf()"
     set text [nirOf $text]
     list [regexp {listget|listnew} $text] [regexp {\mtail } $text]
 } -result {0 1}
@@ -207,7 +207,7 @@ test paramagg-selftail-2 {the self-tail loop's own NIR is a `tail`, not a per-it
 # here -- see native/lower.tcl's own comment on why this is sound).
 
 test paramagg-selftail-3 {a bare `return state` conservatively declines virtualization, with correct semantics either way} -body {
-    set text "fn append(state, value):\n    storage = list::at(state, 0)\n    length = list::at(state, 1)\n    \[storage + value, length + 1\]\n\nfn fillFrom(state, n):\n    if n == 0:\n        return state\n    fillFrom(append(state, n), n - 1)\n\nfn f():\n    r = fillFrom(\[0, 0\], 5)\n    list::at(r, 0) + list::at(r, 1)\n\nf()"
+    set text "import list\nfn append(state, value):\n    storage = list::at(state, 0)\n    length = list::at(state, 1)\n    \[storage + value, length + 1\]\n\nfn fillFrom(state, n):\n    if n == 0:\n        return state\n    fillFrom(append(state, n), n - 1)\n\nfn f():\n    r = fillFrom(\[0, 0\], 5)\n    list::at(r, 0) + list::at(r, 1)\n\nf()"
     assertParity $text
 } -result {int 20}
 
@@ -216,22 +216,22 @@ test paramagg-selftail-3 {a bare `return state` conservatively declines virtuali
 # ordinary List semantics unchanged, with or without the optimization.
 
 test paramagg-canonical-return-1 {a parameter returned directly as itself is never virtualized} -body {
-    set text "fn identity(state):\n    state\n\nfn f():\n    r = identity(\[1, 2\])\n    list::at(r, 0)\n\nf()"
+    set text "import list\nfn identity(state):\n    state\n\nfn f():\n    r = identity(\[1, 2\])\n    list::at(r, 0)\n\nf()"
     assertParity $text
 } -result {int 1}
 
 test paramagg-canonical-store-1 {a parameter stored into another List is never virtualized} -body {
-    set text "fn wrap(state):\n    \[state, state\]\n\nfn f():\n    r = wrap(\[1, 2\])\n    list::at(list::at(r, 0), 0)\n\nf()"
+    set text "import list\nfn wrap(state):\n    \[state, state\]\n\nfn f():\n    r = wrap(\[1, 2\])\n    list::at(list::at(r, 0), 0)\n\nf()"
     assertParity $text
 } -result {int 1}
 
 test paramagg-canonical-dynamic-1 {a dynamic (non-constant) index is never virtualized} -body {
-    set text "fn getAt(state, i):\n    list::at(state, i)\n\nfn f():\n    getAt(\[10, 20, 30\], 1)\n\nf()"
+    set text "import list\nfn getAt(state, i):\n    list::at(state, i)\n\nfn f():\n    getAt(\[10, 20, 30\], 1)\n\nf()"
     assertParity $text
 } -result {int 20}
 
 test paramagg-canonical-outofrange-1 {an out-of-range constant index preserves the ordinary runtime INDEX error} -body {
-    set text "fn bad(state):\n    list::at(state, 5)\n\nfn f():\n    bad(\[1, 2\])\n\nf()"
+    set text "import list\nfn bad(state):\n    list::at(state, 5)\n\nfn f():\n    bad(\[1, 2\])\n\nf()"
     set hir [sourceHir $text]
     lassign [list [catch {native::evalHir $hir -param-aggregate-opt 1} r1] [catch {native::evalHir $hir -param-aggregate-opt 0} r0]] c1 c0
     list $c1 $c0 [expr {$r1 eq $r0}]
@@ -243,7 +243,7 @@ test paramagg-canonical-mixed-caller-1 {one closed caller supplies fields, anoth
     # index elsewhere in the same function, so it only ever has a
     # materialized List in hand for THIS call. Both call the same shared
     # fields callee, get; per call site, not globally, decides.
-    set text "fn get0(state):\n    list::at(state, 0)\n\nfn scalarCaller():\n    get0(\[1, 2\])\n\nfn dynamicCaller(state, i):\n    x = list::at(state, i)\n    y = get0(state)\n    x + y\n\n\[scalarCaller(), dynamicCaller(\[5, 6\], 1)\]"
+    set text "import list\nfn get0(state):\n    list::at(state, 0)\n\nfn scalarCaller():\n    get0(\[1, 2\])\n\nfn dynamicCaller(state, i):\n    x = list::at(state, i)\n    y = get0(state)\n    x + y\n\n\[scalarCaller(), dynamicCaller(\[5, 6\], 1)\]"
     assertParity $text
 } -result {list {{int 1} {int 11}}}
 
@@ -252,12 +252,12 @@ test paramagg-canonical-mixed-caller-1 {one closed caller supplies fields, anoth
 # stay independently represented, not collapsed to `any`.
 
 test paramagg-heterogeneous-1 {mixed field kinds (Int, String, Bool) read independently} -body {
-    set text "fn describe(rec):\n    n = list::at(rec, 0)\n    s = list::at(rec, 1)\n    b = list::at(rec, 2)\n    if b:\n        str::concat(s, \" \")\n    else:\n        s\n\nfn f():\n    describe(\[3, \"x\", true\])\n\nf()"
+    set text "import list\nimport str\nfn describe(rec):\n    n = list::at(rec, 0)\n    s = list::at(rec, 1)\n    b = list::at(rec, 2)\n    if b:\n        str::concat(s, \" \")\n    else:\n        s\n\nfn f():\n    describe(\[3, \"x\", true\])\n\nf()"
     list [assertParity $text] [listAllocs $text 1]
 } -result {{str {x }} 0}
 
 test paramagg-heterogeneous-2 {a MutableArray field, plain reference forwarding} -body {
-    set text "fn touch(rec):\n    arr = list::at(rec, 0)\n    mutable_array::set(arr, 0, 99)\n    mutable_array::at(arr, 0)\n\nfn f():\n    a = mutable_array::allocate(1)\n    touch(\[a, 0\])\n\nf()"
+    set text "import list\nimport mutable_array\nfn touch(rec):\n    arr = list::at(rec, 0)\n    mutable_array::set(arr, 0, 99)\n    mutable_array::at(arr, 0)\n\nfn f():\n    a = mutable_array::allocate(1)\n    touch(\[a, 0\])\n\nf()"
     list [assertParity $text] [listAllocs $text 1]
 } -result {{int 99} 0}
 
@@ -268,7 +268,7 @@ test paramagg-heterogeneous-2 {a MutableArray field, plain reference forwarding}
 
 test paramagg-gc-stress-1 {heterogeneous virtual fields survive a forced collection while live} -body {
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
-    set text "fn build(rec, n):\n    s = list::at(rec, 0)\n    lst = list::at(rec, 1)\n    arr = list::at(rec, 2)\n    if n == 0:\n        mutable_array::set(arr, 0, 1)\n        return str::concat(s, list::at(lst, 0))\n    build(\[str::concat(s, \"x\"), lst, arr\], n - 1)\n\nfn f(n):\n    a = mutable_array::allocate(1)\n    build(\[\"y\", \[\"!\"\], a\], n)\n\nstr::length(f(2000))"
+    set text "import list\nimport mutable_array\nimport str\nfn build(rec, n):\n    s = list::at(rec, 0)\n    lst = list::at(rec, 1)\n    arr = list::at(rec, 2)\n    if n == 0:\n        mutable_array::set(arr, 0, 1)\n        return str::concat(s, list::at(lst, 0))\n    build(\[str::concat(s, \"x\"), lst, arr\], n - 1)\n\nfn f(n):\n    a = mutable_array::allocate(1)\n    build(\[\"y\", \[\"!\"\], a\], n)\n\nstr::length(f(2000))"
     set result [catch {native::evalHir [sourceHir $text]} value]
     unset ::env(BOTLISH_NATIVE_GC_STRESS)
     list $result $value
@@ -281,13 +281,13 @@ test paramagg-gc-stress-1 {heterogeneous virtual fields survive a forced collect
 # independently of -escape-opt (still on).
 
 test paramagg-off-1 {param-aggregate-opt 0 emits no fields/fieldscompanion variant at all} -body {
-    set text "fn bump(state):\n    x = list::at(state, 0)\n    y = list::at(state, 1)\n    \[x, y + 1\]\n\nfn f():\n    r = bump(\[10, 20\])\n    list::at(r, 0)\n\nf()"
+    set text "import list\nfn bump(state):\n    x = list::at(state, 0)\n    y = list::at(state, 1)\n    \[x, y + 1\]\n\nfn f():\n    r = bump(\[10, 20\])\n    list::at(r, 0)\n\nf()"
     set text [nirOf $text -param-aggregate-opt 0]
-    list [regexp {\.0 |\.1 } $text] [native::evalHir [sourceHir "fn bump(state):\n    x = list::at(state, 0)\n    y = list::at(state, 1)\n    \[x, y + 1\]\n\nfn f():\n    r = bump(\[10, 20\])\n    list::at(r, 0)\n\nf()"] -param-aggregate-opt 0]
+    list [regexp {\.0 |\.1 } $text] [native::evalHir [sourceHir "import list\nfn bump(state):\n    x = list::at(state, 0)\n    y = list::at(state, 1)\n    \[x, y + 1\]\n\nfn f():\n    r = bump(\[10, 20\])\n    list::at(r, 0)\n\nf()"] -param-aggregate-opt 0]
 } -result {0 {int 10}}
 
 test paramagg-off-2 {BOTLISH_NATIVE_PARAM_AGGREGATE_OPT=0 has the same effect as -param-aggregate-opt 0} -body {
-    set text "fn bump(state):\n    x = list::at(state, 0)\n    y = list::at(state, 1)\n    \[x, y + 1\]\n\nfn f():\n    r = bump(\[10, 20\])\n    list::at(r, 0)\n\nf()"
+    set text "import list\nfn bump(state):\n    x = list::at(state, 0)\n    y = list::at(state, 1)\n    \[x, y + 1\]\n\nfn f():\n    r = bump(\[10, 20\])\n    list::at(r, 0)\n\nf()"
     set ::env(BOTLISH_NATIVE_PARAM_AGGREGATE_OPT) 0
     set text [nirOf $text]
     unset ::env(BOTLISH_NATIVE_PARAM_AGGREGATE_OPT)
@@ -295,7 +295,7 @@ test paramagg-off-2 {BOTLISH_NATIVE_PARAM_AGGREGATE_OPT=0 has the same effect as
 } -result 0
 
 test paramagg-off-3 {-escape-opt 0 also disables the parameter-boundary pass (it is part of the same analysis)} -body {
-    set text "fn bump(state):\n    x = list::at(state, 0)\n    y = list::at(state, 1)\n    \[x, y + 1\]\n\nfn f():\n    r = bump(\[10, 20\])\n    list::at(r, 0)\n\nf()"
+    set text "import list\nfn bump(state):\n    x = list::at(state, 0)\n    y = list::at(state, 1)\n    \[x, y + 1\]\n\nfn f():\n    r = bump(\[10, 20\])\n    list::at(r, 0)\n\nf()"
     set text [nirOf $text -escape-opt 0]
     regexp {\.0 |\.1 } $text
 } -result 0
@@ -307,12 +307,12 @@ test paramagg-off-3 {-escape-opt 0 also disables the parameter-boundary pass (it
 # coverage, run separately.
 
 test paramagg-regress-1 {local scalar replacement is unaffected} -body {
-    set text "fn f():\n    pair = \[10, 20\]\n    list::at(pair, 0) + list::at(pair, 1)\n\nf()"
+    set text "import list\nfn f():\n    pair = \[10, 20\]\n    list::at(pair, 0) + list::at(pair, 1)\n\nf()"
     list [assertParity $text] [listAllocs $text 1]
 } -result {{int 30} 0}
 
 test paramagg-regress-2 {closed-call return (remote) scalar replacement is unaffected} -body {
-    set text "fn pair():\n    \[1, 2\]\n\nfn f():\n    p = pair()\n    list::at(p, 0) + list::at(p, 1)\n\nf()"
+    set text "import list\nfn pair():\n    \[1, 2\]\n\nfn f():\n    p = pair()\n    list::at(p, 0) + list::at(p, 1)\n\nf()"
     list [assertParity $text] [listAllocs $text 1]
 } -result {{int 3} 0}
 

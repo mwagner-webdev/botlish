@@ -67,7 +67,7 @@ f()
 }
 proc hashtableHir {n} {
     global hashtableSource
-    return [surface::compile "$hashtableSource\n[htProgram $n]\n" bench.bot -strict 0]
+    return [surface::compile [surface::modules::ImportHeader "$hashtableSource\n[htProgram $n]\n"]"$hashtableSource\n[htProgram $n]\n" bench.bot -strict 0]
 }
 
 set out {}

@@ -8,10 +8,11 @@
 #   surface::findNode AST ID                the node with a structural id
 #   surface::lowerToHir AST ?-strict 1|0?   HIR                   (lower.tcl)
 #   surface::hirExprs HIR ID                HIR expressions from AST node ID
-#   surface::compile SOURCE ?FILENAME? ?-strict 1|0?   parse + lowerToHir
+#   surface::compile SOURCE ?FILENAME? ?-strict 1|0?   parse + lowerToHir (the
+#       same import-aware path as readProgramFile, for program text)
 #   surface::readProgramFile PATH ?-strict 1|0?        compile a .bot file,
-#       resolving its module-qualified (mod::name) references across files
-#       (surface/modules.tcl)
+#       loading the modules its `import`s name and resolving its qualified
+#       (mod::name) references across files (surface/modules.tcl, IMPORTS.md)
 #
 # Pipeline:
 #
@@ -45,9 +46,9 @@ proc surface::compile {source args} {
 
 # The HIR of the source file PATH, after loading the libraries it names in
 # "# requires: NAME" comments (as for .ir and .hir files), and every module
-# its own module-qualified (mod::name) references need, transitively
-# (surface/modules.tcl; no "# requires:"-style declaration needed for
-# those -- see modules.tcl's header).
+# its `import` declarations name, transitively (surface/modules.tcl; a
+# module is loaded by an import and by nothing else -- see modules.tcl's
+# header, IMPORTS.md).
 proc surface::readProgramFile {path args} {
     foreach name [core::programFileRequires $path] {
         core::loadLibrary $name

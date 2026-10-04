@@ -105,7 +105,7 @@ test surface-modules-two-namespaces-same-symbol {a::parse and b::parse resolve i
     withScratchLibrary {
         writeModule $dir a "namespace a\n\nfn parse(x):\n    x + 1\n"
         writeModule $dir b "namespace b\n\nfn parse(x):\n    x + 100\n"
-        set main [writeMain $dir "\[a::parse(1), b::parse(1)\]\n"]
+        set main [writeMain $dir "import a\nimport b\n\[a::parse(1), b::parse(1)\]\n"]
         outcomeUnder interp [hir::lower [surface::readProgramFile $main]]
     }
 } -result {value {[2, 101]} {}}
@@ -113,8 +113,8 @@ test surface-modules-two-namespaces-same-symbol {a::parse and b::parse resolve i
 test surface-modules-transitive-dependency {a module's own qualified references are loaded transitively} -body {
     withScratchLibrary {
         writeModule $dir base "namespace base\n\nfn unit_value(x):\n    x + 1\n"
-        writeModule $dir mid "namespace mid\n\nfn twice(x):\n    base::unit_value(base::unit_value(x))\n"
-        set main [writeMain $dir "mid::twice(0)\n"]
+        writeModule $dir mid "namespace mid\n\nimport base\n\nfn twice(x):\n    base::unit_value(base::unit_value(x))\n"
+        set main [writeMain $dir "import mid\nmid::twice(0)\n"]
         outcomeUnder interp [hir::lower [surface::readProgramFile $main]]
     }
 } -result {value 2 {}}
@@ -122,7 +122,7 @@ test surface-modules-transitive-dependency {a module's own qualified references 
 test surface-modules-local-cannot-shadow-qualified {a local binding named like the namespace cannot shadow a qualified reference} -body {
     withScratchLibrary {
         writeModule $dir a "namespace a\n\nfn value(x):\n    x + 1\n"
-        set main [writeMain $dir "a = 999\na::value(1)\n"]
+        set main [writeMain $dir "import a\na = 999\na::value(1)\n"]
         outcomeUnder interp [hir::lower [surface::readProgramFile $main]]
     }
 } -result {value 2 {}}
@@ -132,7 +132,7 @@ test surface-modules-local-cannot-shadow-qualified {a local binding named like t
 
 test surface-modules-unknown-namespace {calling into a namespace with no module file is a distinct diagnostic} -body {
     withScratchLibrary {
-        set main [writeMain $dir "missing::foo()\n"]
+        set main [writeMain $dir "import missing\nmissing::foo()\n"]
         catch {surface::readProgramFile $main} message options
         list [dict get $options -errorcode] [string match "*unknown namespace*" $message]
     }
@@ -141,7 +141,7 @@ test surface-modules-unknown-namespace {calling into a namespace with no module 
 test surface-modules-unknown-symbol {calling an undefined function of a real namespace is a distinct diagnostic} -body {
     withScratchLibrary {
         writeModule $dir a "namespace a\n\nfn value(x):\n    x\n"
-        set main [writeMain $dir "a::does_not_exist()\n"]
+        set main [writeMain $dir "import a\na::does_not_exist()\n"]
         catch {surface::readProgramFile $main} message options
         list [dict get $options -errorcode] [string match "*no definition*does_not_exist*" $message]
     }
@@ -150,7 +150,7 @@ test surface-modules-unknown-symbol {calling an undefined function of a real nam
 test surface-modules-namespace-mismatch {a module file declaring the wrong namespace is a distinct diagnostic} -body {
     withScratchLibrary {
         writeModule $dir a "namespace not_a\n\nfn value(x):\n    x\n"
-        set main [writeMain $dir "a::value(1)\n"]
+        set main [writeMain $dir "import a\na::value(1)\n"]
         catch {surface::readProgramFile $main} message options
         list [dict get $options -errorcode] [string match "*declares*not_a*" $message]
     }
@@ -159,7 +159,7 @@ test surface-modules-namespace-mismatch {a module file declaring the wrong names
 test surface-modules-missing-namespace-decl {a module file with no namespace declaration is a distinct diagnostic} -body {
     withScratchLibrary {
         writeModule $dir a "fn value(x):\n    x\n"
-        set main [writeMain $dir "a::value(1)\n"]
+        set main [writeMain $dir "import a\na::value(1)\n"]
         catch {surface::readProgramFile $main} message options
         dict get $options -errorcode
     }
@@ -170,9 +170,9 @@ test surface-modules-missing-namespace-decl {a module file with no namespace dec
 
 test surface-modules-cycle {a module dependency cycle is rejected with a clear diagnostic} -body {
     withScratchLibrary {
-        writeModule $dir a "namespace a\n\nfn f(x):\n    b::g(x)\n"
-        writeModule $dir b "namespace b\n\nfn g(x):\n    a::f(x)\n"
-        set main [writeMain $dir "a::f(1)\n"]
+        writeModule $dir a "namespace a\n\nimport b\n\nfn f(x):\n    b::g(x)\n"
+        writeModule $dir b "namespace b\n\nimport a\n\nfn g(x):\n    a::f(x)\n"
+        set main [writeMain $dir "import a\na::f(1)\n"]
         catch {surface::readProgramFile $main} message options
         list [dict get $options -errorcode] [string match "*cycle*a*b*" $message]
     }
@@ -181,7 +181,7 @@ test surface-modules-cycle {a module dependency cycle is rejected with a clear d
 test surface-modules-same-module-self-recursion-is-not-a-cycle {a named function's own recursion inside a module is not a module cycle} -body {
     withScratchLibrary {
         writeModule $dir parity "namespace parity\n\nfn even(n):\n    if n == 0:\n        true\n    else:\n        even(n - 2)\n"
-        set main [writeMain $dir "\[parity::even(10), parity::even(4)\]\n"]
+        set main [writeMain $dir "import parity\n\[parity::even(10), parity::even(4)\]\n"]
         outcomeUnder interp [hir::lower [surface::readProgramFile $main]]
     }
 } -result {value {[true, true]} {}}
@@ -189,7 +189,7 @@ test surface-modules-same-module-self-recursion-is-not-a-cycle {a named function
 test surface-modules-same-module-mutual-recursion-rejected {same-module mutual recursion is rejected like any other: a module's definitions are established in source order} -body {
     withScratchLibrary {
         writeModule $dir parity "namespace parity\n\nfn even(n):\n    if n == 0:\n        true\n    else:\n        odd(n - 1)\n\nfn odd(n):\n    if n == 0:\n        false\n    else:\n        even(n - 1)\n"
-        set main [writeMain $dir "\[parity::even(10), parity::even(7)\]\n"]
+        set main [writeMain $dir "import parity\n\[parity::even(10), parity::even(7)\]\n"]
         catch {surface::readProgramFile $main} message options
         list [dict get $options -errorcode] [string match {*parity.bot:7:9: unbound name "odd"*declared later*} $message]
     }
@@ -203,6 +203,8 @@ test surface-modules-same-module-mutual-recursion-rejected {same-module mutual r
 test surface-modules-immutable-values-parity {scalar, nested List, helper-created List, and cross-module values agree on every backend} -body {
     withScratchLibrary {
         writeModule $dir constants {namespace constants
+
+import list
 base = 41
 answer = base + 1
 message = "ok"
@@ -214,7 +216,8 @@ table = make_table()
 fn word(n) errors IndexNotFound:
     list::at(words, n)
 }
-        set main [writeMain $dir {constants = 999
+        set main [writeMain $dir {import constants
+constants = 999
 [constants::answer, constants::message, constants::ints, constants::words, constants::table, constants::word(1)]
 }]
         set hir [surface::readProgramFile $main]
@@ -236,11 +239,14 @@ fn word(n) errors IndexNotFound:
 test surface-modules-immutable-value-once-native {a retained List is built once at startup and passed directly to two calls; MODULE-STATIC-RETAINED-VALUES.md: constants::digits is a module-static slot, read through "staticget", never a flattened trailing parameter (blockescape's own de-closure conversion never applies: constants::digit is envless outright, since a module-static reference is never a capture in the first place)} -body {
     withScratchLibrary {
         set module [writeModule $dir constants {namespace constants
+
+import list
 digits = ["0", "1"]
 fn digit(n) errors IndexNotFound:
     list::at(digits, n)
 }]
-        set main [writeMain $dir {[constants::digit(0), constants::digit(1)]
+        set main [writeMain $dir {import constants
+[constants::digit(0), constants::digit(1)]
 }]
         set hir [surface::readProgramFile $main]
         set nir [dict get [native::lower::program $hir -repr-opt 0] text]
@@ -266,9 +272,12 @@ test surface-modules-value-dependencies-initialize-first {a dependency module va
 answer = 41
 }
         writeModule $dir use {namespace use
+
+import constants
 answer = constants::answer + 1
 }
-        set main [writeMain $dir {use::answer
+        set main [writeMain $dir {import use
+use::answer
 }]
         set exprs [hir::lower [surface::readProgramFile $main]]
         set outcomes [lmap backend $::parityBackends {outcomeUnder $backend $exprs}]
@@ -278,11 +287,14 @@ answer = constants::answer + 1
 test surface-modules-context-dependent-initializer-rejected-transitively {an unclassified native reached through a helper is context-dependent} -body {
     withScratchLibrary {
         writeModule $dir a {namespace a
+
+import mutable_array
 fn denied():
     mutable_array::capacity(mutable_array::allocate(1))
 value = denied()
 }
-        set main [writeMain $dir {a::value
+        set main [writeMain $dir {import a
+a::value
 }]
         catch {surface::readProgramFile $main} message options
         list [dict get $options -errorcode] [string match {*context-free*mutable_array::capacity*} $message]
@@ -292,12 +304,17 @@ value = denied()
 test surface-modules-mutable-retained-values-rejected {direct and nested MutableArray results are separately diagnosed as retained mutability} -body {
     withScratchLibrary {
         writeModule $dir a {namespace a
+
+import mutable_array
 value = mutable_array::allocate(1)
 }
-        set main [writeMain $dir {a::value
+        set main [writeMain $dir {import a
+a::value
 }]
         catch {surface::readProgramFile $main} direct directOptions
         writeModule $dir a {namespace a
+
+import mutable_array
 value = [mutable_array::allocate(1)]
 }
         catch {surface::readProgramFile $main} nested nestedOptions
@@ -311,7 +328,8 @@ test surface-modules-initializer-error-uses-normal-completion {a context-free in
         writeModule $dir a {namespace a
 value = mod(1, 0)
 }
-        set main [writeMain $dir {a::value
+        set main [writeMain $dir {import a
+a::value
 }]
         set exprs [hir::lower [surface::readProgramFile $main]]
         set outcomes [lmap backend $::parityBackends {outcomeUnder $backend $exprs}]
@@ -325,7 +343,8 @@ a = b
 b = 4
 value = a
 }
-        set main [writeMain $dir {a::value
+        set main [writeMain $dir {import a
+a::value
 }]
         catch {surface::readProgramFile $main} message options
         list [dict get $options -errorcode] [string match {*unbound name "b"*declared later*} $message]
@@ -335,7 +354,7 @@ value = a
 test surface-modules-toplevel-statement-rejected {a bare module-level expression statement is rejected} -body {
     withScratchLibrary {
         writeModule $dir a "namespace a\n\n1 + 1\n"
-        set main [writeMain $dir "a::f()\n"]
+        set main [writeMain $dir "import a\na::f()\n"]
         catch {surface::readProgramFile $main} message options
         dict get $options -errorcode
     }
@@ -344,7 +363,7 @@ test surface-modules-toplevel-statement-rejected {a bare module-level expression
 test surface-modules-duplicate-definition-rejected {two definitions of the same name in one module are rejected} -body {
     withScratchLibrary {
         writeModule $dir a "namespace a\n\nfn f(x):\n    x\n\nfn f(x):\n    x + 1\n"
-        set main [writeMain $dir "a::f(1)\n"]
+        set main [writeMain $dir "import a\na::f(1)\n"]
         catch {surface::readProgramFile $main} message options
         dict get $options -errorcode
     }
@@ -365,7 +384,7 @@ test surface-modules-no-import-alias-syntax {an "import ... as" line is rejected
 } -result {SURFACE SYNTAX}
 
 test surface-modules-double-colon-nested-path {a::b::c is member c of the nested namespace a::b (every segment but the last is the namespace path; this used to be a syntax error)} -body {
-    set program [surface::parse "a::b::c\n" t.bot]
+    set program [surface::parse "import a::b\na::b::c\n" t.bot]
     set node [lindex [dict get $program body] 0]
     list [dict get $node kind] [dict get $node namespace] [dict get $node name]
 } -result {qualname a::b c}
@@ -381,7 +400,7 @@ test surface-modules-nested-namespace-file {a nested namespace outer::inner is t
         file mkdir [file join $dir outer]
         writeModule $dir outer "namespace outer\nfn f(x):\n    x + 1\n"
         writeModule $dir outer/inner "namespace outer::inner\nstruct P:\n    v: int\nfn make(x) -> P:\n    P {v: x * 10}\nfn get(p: P) -> int:\n    p.v\n"
-        set main [writeMain $dir "fn twice(p: outer::inner::P):\n    p.v * 2\nq = outer::inner::P {v: 3}\n\[outer::f(1), outer::inner::get(outer::inner::make(4)), twice(q), q\]\n"]
+        set main [writeMain $dir "import outer\nimport outer::inner\nfn twice(p: outer::inner::P):\n    p.v * 2\nq = outer::inner::P {v: 3}\n\[outer::f(1), outer::inner::get(outer::inner::make(4)), twice(q), q\]\n"]
         list [moduleValue $main] [moduleParity $main] \
             [file tail [file dirname [surface::modules::ModulePath outer::inner]]]
     }
@@ -393,7 +412,7 @@ test surface-modules-nested-namespace-errors {nested-namespace diagnostics name 
         writeModule $dir outer/inner "namespace inner\nfn f():\n    1\n"
         writeModule $dir outer/ok "namespace outer::ok\nfn f():\n    1\n"
         set results {}
-        foreach source {"outer::missing::f()" "outer::inner::f()" "outer::ok::g()"} {
+        foreach source {"import outer::missing\nouter::missing::f()" "import outer::inner\nouter::inner::f()" "import outer::ok\nouter::ok::g()"} {
             set main [writeMain $dir "$source\n"]
             catch {surface::readProgramFile $main} message options
             regsub -all {/[^ ]*/} $message {/.../} message
@@ -519,6 +538,8 @@ test surface-modules-refined-checks-still-400-0 {refined-checks.ir is unchanged 
 proc writeC2Fixture {dir} {
     writeModule $dir counter {namespace counter
 
+import list
+
 retained = [1, 2, 3]
 
 fn no_captures(x):
@@ -527,7 +548,8 @@ fn no_captures(x):
 fn module_fn(x):
     x + list::length(retained)
 }
-    return [writeMain $dir {fn wrapper(x):
+    return [writeMain $dir {import counter
+fn wrapper(x):
     counter::module_fn(x)
 
 fn wrapper2(x):
@@ -594,7 +616,8 @@ test surface-modules-c2-native-env {the structural counterpart of the capture-se
 } -result {1 1 1 1}
 
 test surface-modules-c2-existing-corpus-unaffected {the C2 fix changed web::is_unreserved's own raw HIR captures to also name ascii::is_alphanumeric (a qualified reference from inside its body); MODULE-STATIC-RETAINED-VALUES.md changes this further still: both ascii::is_alphanumeric and web::additional_unreserved_chars are module-scope bindings, so neither is a capture any more (module-static references instead) -- is_unreserved's own raw HIR capture set is now empty, and it is fully envless in the emitted NIR (env=0, captures=0), not merely "one real List-valued capture" as before this milestone} -body {
-    set path [makeFile {web::is_unreserved(45)} c2-corpus-unaffected.bot]
+    set path [makeFile {import web
+web::is_unreserved(45)} c2-corpus-unaffected.bot]
     try {
         set hir [surface::readProgramFile $path -strict 0]
         set nir [native::lower::program $hir]
@@ -643,20 +666,21 @@ fn handled(n):
             return -1
     r
 }
-        set main [writeModule $dir main {wmod2::each([1])
+        set main [writeModule $dir main {import wmod2
+wmod2::each([1])
 wmod2::count(3)
 wmod2::pair()
 wmod2::handled(3)
 }]
         set hir [surface::readProgramFile $main -warnings off]
-        # The entry file has four lines: an origin in it past line 4 belongs
+        # The entry file has five lines: an origin in it past line 5 belongs
         # to the module and is mislocated.
         set misplaced {}
         foreach e [hir::walk $hir] {
             set origin [hir::get $hir $e origin]
             if {[lindex $origin 0] eq "file"
                     && [file tail [dict get [hir::sourceFile $hir [lindex $origin 1]] path]] eq "main.bot"
-                    && [dict get [lrange $origin 2 end] line] > 4} {
+                    && [dict get [lrange $origin 2 end] line] > 5} {
                 lappend misplaced [hir::kind $hir $e]
             }
         }

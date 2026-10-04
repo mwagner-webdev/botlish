@@ -35,7 +35,7 @@ set hashtableSource [regsub {\nsample\(\)\n$} \
 
 proc hirOf {text} {
     global hashtableSource
-    return [surface::compile "$hashtableSource\n$text\n" bench.bot -strict 0 -warnings off]
+    return [surface::compile [surface::modules::ImportHeader "$hashtableSource\n$text\n"]"$hashtableSource\n$text\n" bench.bot -strict 0 -warnings off]
 }
 
 proc measureBest {text runs} {

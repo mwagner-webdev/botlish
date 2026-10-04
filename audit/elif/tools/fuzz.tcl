@@ -273,7 +273,7 @@ proc program {kind chain position style} {
 # error {error CODE MESSAGE} (static diagnostics are outcomes too: both
 # spellings must be rejected for the same reason).
 proc outcomeOf {backend source} {
-    if {[catch {surface::compile $source t.bot} hir options]} {
+    if {[catch {surface::compile [surface::modules::ImportHeader $source]$source t.bot} hir options]} {
         return [list error [dict get $options -errorcode] [stripLocations $hir]]
     }
     set outcome [outcomeUnderHir $backend $hir]

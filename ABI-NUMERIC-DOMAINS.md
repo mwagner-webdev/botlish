@@ -81,23 +81,23 @@ namespace abi
 error AbiIntegerBelowRange
 error AbiIntegerAboveRange
 
-type AbiI8Value = Int in -128..127
-type AbiI16Value = Int in -32768..32767
-type AbiI32Value = Int in -2147483648..2147483647
-type AbiI64Value = Int in -9223372036854775808..9223372036854775807
+type I8Value = Int in -128..127
+type I16Value = Int in -32768..32767
+type I32Value = Int in -2147483648..2147483647
+type I64Value = Int in -9223372036854775808..9223372036854775807
 
-type AbiU8Value = Int in 0..255
-type AbiU16Value = Int in 0..65535
-type AbiU32Value = Int in 0..4294967295
-type AbiU64Value = Int in 0..18446744073709551615
+type U8Value = Int in 0..255
+type U16Value = Int in 0..65535
+type U32Value = Int in 0..4294967295
+type U64Value = Int in 0..18446744073709551615
 
 # TARGET-DEPENDENT: the address/size width of the only supported target,
 # Linux x86-64 (64 bits).
-type AbiIsizeValue = Int in -9223372036854775808..9223372036854775807
-type AbiUsizeValue = Int in 0..18446744073709551615
+type IsizeValue = Int in -9223372036854775808..9223372036854775807
+type UsizeValue = Int in 0..18446744073709551615
 
 struct I8:
-    value: AbiI8Value
+    value: I8Value
 # ... likewise I16 I32 I64 U8 U16 U32 U64 Isize Usize, each over its own domain
 
 fn i8(value: int) -> I8 errors AbiIntegerBelowRange, AbiIntegerAboveRange:
@@ -122,7 +122,7 @@ indexing.
 carries the domain to every analysis that reads integer domains (range
 analysis, completion proofs, raw-Int lowering), and a one-field nominal
 struct carries the identity. The domain types alone could not be the ABI
-types: a source `type` is a *subtype of Int*, so `AbiI32Value` would accept
+types: a source `type` is a *subtype of Int*, so `I32Value` would accept
 arithmetic (`x + 1` is an Int) and would be accepted wherever an Int is --
 the opposite of a boundary value. The struct is what makes `abi::I32` and
 `abi::U32` distinct and arithmetic-free. Botlish has no generics over
@@ -130,34 +130,36 @@ nominal types and no macros, so the ten members are written out; each is
 the same three branches.
 
 **Names.** Types are uppercase (`I32`), creators lowercase (`i32`) and
-documented as checked conversions from Int, not constructors. Source `type`
-and `error` declarations are global, unqualified names
-(SOURCE-DEFINED-INTEGER-DOMAINS.md), so the domains are `AbiI8Value` ...
-`AbiUsizeValue` and the errors `AbiIntegerBelowRange`/`AbiIntegerAboveRange`:
-the `Abi` prefix keeps them clear of a program's own names (next section).
-The structs and creators are `abi::`'s.
+documented as checked conversions from Int, not constructors. A source `type`
+is a member of its namespace (IMPORTS.md), so the domains are
+`abi::I8Value` ... `abi::UsizeValue`, beside the structs and creators; a
+consumer writes `x: abi::U8Value` after `import abi`, or binds the short name
+with `import type abi::U8Value`. Source `error` declarations are still
+global, unqualified names (hir/errordecls.tcl), hence the errors
+`AbiIntegerBelowRange`/`AbiIntegerAboveRange` keep their `Abi` prefix.
 
 ### Dependency and global names
 
-`abi::x86_64`'s encoders name the ABI types, so **every program that uses
-`abi::x86_64` -- the raw `register64`/`to_int` included -- now also loads
-`lib/abi.bot`**, and with it its twelve global names (ten domain types, two
-errors) and the ten generic predicate natives every source `type` gets
-(`AbiU8Value?`, ...). The layering requires the edge (`abi::U32 ->
-abi::x86_64::Register64`), and one namespace is one file, so the encoders
-cannot live in a module that loads only when used.
+`abi::x86_64`'s encoders name the ABI types, so `lib/abi/x86_64.bot` declares
+`import abi`, and **every program that imports `abi::x86_64` -- the raw
+`register64`/`to_int` included -- also loads `lib/abi.bot`** (a dependency of
+the module, not of the program's source: the program can use none of `abi`
+without its own `import abi`), with the two global error names and the ten
+generic predicate natives every source `type` gets (`abi::U8Value?`, ...).
+The layering requires the edge (`abi::U32 -> abi::x86_64::Register64`), and
+one namespace is one file, so the encoders cannot live in a module that
+loads only when used.
 
 * **Collisions.** The first version used the brief's conceptual names
-  (`U8Value`, ...); review found that a program declaring its own `type
-  U8Value` and calling `register64` then stopped compiling. The `Abi` prefix
-  makes that unlikely, and a genuine collision now says where the other
-  declaration is: `type "AbiU8Value" is already declared at
-  .../lib/abi.bot:LINE:6 (type and error names are global: every module the
-  program loads, including one it reaches only through another module,
-  declares its names for the whole program)` (`abi-numeric-global-names`).
-  A duplicate within one file keeps its old message. Namespaced `type` and
-  `error` declarations would remove the class of problem; they remain a
-  language change for later.
+  (`U8Value`, ...) as *global* type names; a program declaring its own `type
+  U8Value` and calling `register64` then stopped compiling, so they were
+  prefixed (`U8Value`). IMPORTS.md removed the problem at the root: the
+  domain types are `abi::U8Value` ..., members of namespace `abi`, and a
+  program's own `type U8Value` is a different type (`U8Value`, not
+  `abi::U8Value`) that coexists with it (`abi-numeric-namespaced-types`). The
+  two errors are still global (`error` declarations are not namespaced), so
+  a program declaring `error AbiIntegerAboveRange` collides with the module's
+  and the message says where the other is.
 * **Compile time.** The extra module costs compile time, dominated by
   lexing and parsing the two commented library files. Module ASTs are now
   cached by path and exact file text (`surface::modules::ParseModule`;
@@ -195,7 +197,7 @@ source-type table (`abi-numeric-exact-domains`).
 
 ### Isize and Usize: the target dependency
 
-`AbiIsizeValue`/`AbiUsizeValue` are declared in their own clearly marked
+`IsizeValue`/`UsizeValue` are declared in their own clearly marked
 section of `lib/abi.bot`: "TARGET-DEPENDENT ... The only supported target today is
 Linux x86-64, whose address size is 64 bits. This pair of declarations is
 the one place that width is chosen." The architecture side
@@ -206,7 +208,7 @@ its own architecture layer.
 
 They are **nominally distinct** from I64/U64: different structs, and their
 domains are separate declarations with no parent (not aliases, not
-subtypes: `core::type::subtype AbiIsizeValue AbiI64Value` is 0). `fn f(x:
+subtypes: `core::type::subtype IsizeValue I64Value` is 0). `fn f(x:
 abi::Usize)` rejects an `abi::U64` at compile time; `abi::isize(1) ==
 abi::i64(1)` is false. The documentation describes them as "unsigned/signed
 ABI address/size-width integer; currently 64-bit on the supported x86-64
@@ -263,7 +265,7 @@ the milestone asked for neither merely to obtain the spelling. Ten
 `abi::i32_to_int` functions would only repeat the projection. The projection
 is the smallest coherent interface: no new function, resolved statically by
 the receiver's nominal type, and its static type is the domain
-(`int[AbiU32Value]`), so the proof survives (`abi::usize(u.value)` for `u:
+(`int[U32Value]`), so the proof survives (`abi::usize(u.value)` for `u:
 abi::U64` needs no handler; `byte::from_int(x.value)` for `x: abi::U8` needs
 none).
 
@@ -515,7 +517,7 @@ creators or in signed/narrow encoders, no allocation.
 | `hir/completions.tcl` | the walker's `project` case returns the Range the projected field's declared type implies (`hir::range::ConstrainType`) and records it, as `hir::range::Expr`'s `project` case already does | requirement 20: `fn f(x: abi::U8)` must know `0 <= x.value <= 255` *for the error proof too*; previously only a local bound to the projection carried it |
 | `hir/range.tcl` | `FactsClause`: a TYPE diagnostic prints `facts: ...` only for an Int-kinded (or kind-less) value; `MismatchClause`: two different named structs get the nominal reason | requirement 32: a nominal mismatch must not read like an Int-range problem |
 | `hir/range.tcl` | the same rule for "function result does not prove declared type" | consistency |
-| `hir/sourcetypes.tcl`, `hir/errordecls.tcl` | `ElsewhereClause`: a duplicate type or error name whose earlier declaration is in another file says where it is, and that type and error names are program-wide | the new `abi::x86_64 -> abi` dependency brings global names a program may not know it loaded |
+| `hir/sourcetypes.tcl`, `hir/errordecls.tcl` | `ElsewhereClause`: a duplicate *error* name whose earlier declaration is in another file says where it is, and that error names are program-wide (types are namespace members, IMPORTS.md) | the `abi::x86_64 -> abi` dependency brings the two global error names a program may not know it loaded |
 | `surface/modules.tcl` | `ParseModule`: module ASTs cached by `{path, file text}` | the dependency's compile-time cost |
 | `native/src/runtime/syscall.rs` | one Rust unit test (no runtime change) | requirement 27: the bits the kernel receives |
 
@@ -543,7 +545,7 @@ duplicate declaration and every module. No change to `core/`,
 
 ### How range facts survive into HIR and analysis
 
-* A field typed `AbiU8Value` is `int[AbiU8Value]` in HIR (`hir::structs::fieldType`),
+* A field typed `U8Value` is `int[U8Value]` in HIR (`hir::structs::fieldType`),
   so `x.value`'s static type carries the domain.
 * `hir/range.tcl` reads the interval at every projection (`ConstrainType`):
   native lowering sees `x.value` in `0..255` (raw arithmetic; check-free
@@ -566,9 +568,10 @@ result whatever `CORE_BACKEND` is), and none disturbing a suite-wide
   knows no ABI type (no native, and no non-comment line of `core/`, `hir/`,
   `native/`, `surface/`, `compiler/` or any Rust source names a member,
   domain or error, and the only abi natives are `linux::abi::syscall` and
-  the ten generic predicates every source `type` gets); global names (a
-  program's own `U8Value` beside `register64`; a real collision names
-  `lib/abi.bot`; a same-file duplicate unchanged).
+  the ten generic predicates every source `type` gets); names (a
+  program's own `U8Value` beside `register64` and beside `abi::U8Value`; a
+  real *error* name collision names `lib/abi.bot`; a same-file duplicate
+  unchanged).
 * **Boundaries, one test per type, all four backends:** min-1, min, min+1,
   -1, 0, 1, min/2, max/2, max-1, max, max+1, `-2^128`, `2^128`; for U64/Usize
   also `2^63-1`, `2^63`, `2^63+1`; for I64/Isize also `2^63`, `-2^63-1`. Each
@@ -675,9 +678,9 @@ change's soundness correct. Changed as a result:
   and because `abi::x86_64` now loads `lib/abi.bot`, a program declaring its
   own `type U8Value` (or `error AbiIntegerAboveRange`) and using only
   `register64` stopped compiling, with an error at its own declaration. The
-  types are now `AbiU8Value` ..., a collision names the module declaration
-  it collides with, and the dependency's compile-time cost is measured and
-  reduced (module parse cache).
+  types were then `U8Value` ... (now `abi::U8Value`, IMPORTS.md), and the
+  dependency's compile-time cost is measured and reduced (module parse
+  cache).
 * The mismatch diagnostics print facts only when both sides may be Ints
   (not for a function-typed argument, nor for an Int passed to a struct
   parameter), and the result-type diagnostic follows the same rule.
@@ -762,12 +765,10 @@ change's soundness correct. Changed as a result:
     * *Struct field facts.* A view's length will typically be an
       `abi::Usize` field; checks against it (and the frontier above) need
       field facts that flow through constructions and calls.
-    * *Global names.* Every new domain or error adds a global name (as
-      `AbiI8Value`... and `AbiInteger*Range` do), and every program that
-      uses any part of the layer loads all of a module's names (the
-      `abi::x86_64 -> abi` edge already does); namespaced `type`/`error`
-      declarations would keep a growing ABI layer from colliding with
-      programs.
+    * *Global names.* Every new error adds a global name (as
+      `AbiInteger*Range` do); domain types are namespace members now
+      (`abi::I8Value`...), but `error` declarations are not yet namespaced,
+      which would keep a growing ABI layer from colliding with programs.
     * *Counted-loop proofs.* Index/length loops that convert to `abi::Usize`
       will want the completion proof to seed the induction variable.
     * *The bound-register-struct frontier* (LINUX-X86-64-SYSCALL.md) still

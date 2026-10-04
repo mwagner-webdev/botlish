@@ -105,21 +105,23 @@ proc stringsOf {text args} { return [dict get [lindex [census $text {*}$args] 0]
 # (1) Structural allocation facts
 
 test strings-one-object-no-text-buffer {a dynamic String is one allocation: one object, header plus text, and no text buffer exists to count} -body {
-    set c [census {str::concat("a", "b")}]
+    set c [census {import str
+str::concat("a", "b")}]
     set s [lindex $c 0]
     list [dict get $s objects] [dict get $s heapAllocations] [dict get $s textBufferAllocations] \
         [dict get $s textBufferFrees] [dict get $s bytes]
 } -result {1 1 0 0 27}
 
 test strings-header-is-32-bytes {the fixed header is 25 bytes (it was 40: header plus Box<str> fat pointer); allocatedBytes = 25 + UTF-8 bytes} -body {
-    set k [lindex [census {str::concat("ab", "…")}] 1]
+    set k [lindex [census {import str
+str::concat("ab", "…")}] 1]
     list [dict get $k allocations] [dict get $k headerBytes] [dict get $k payloadBytes] [dict get $k allocatedBytes]
 } -result {1 25 5 30}
 
 test strings-bytes-are-header-plus-utf8 {every dynamic String is 25 header bytes plus its UTF-8 length, for 1-, 2-, 3- and 4-byte scalars} -body {
     set out {}
     foreach {a b} {a b é é … … 😀 😀} {
-        set k [lindex [census "str::concat(\"$a\", \"$b\")"] 1]
+        set k [lindex [census "import str\nstr::concat(\"$a\", \"$b\")"] 1]
         lappend out [dict get $k allocations] [dict get $k allocatedBytes]
     }
     set out
@@ -127,7 +129,7 @@ test strings-bytes-are-header-plus-utf8 {every dynamic String is 25 header bytes
 
 test strings-hundred-byte-string-is-one-block {a 100-byte String is one allocation of 125 bytes} -body {
     set half [string repeat x 50]
-    set k [lindex [census "str::concat(\"$half\", \"$half\")"] 1]
+    set k [lindex [census "import str\nstr::concat(\"$half\", \"$half\")"] 1]
     list [dict get $k allocations] [dict get $k allocatedBytes]
 } -result {1 125}
 
@@ -140,6 +142,7 @@ test strings-constants-allocate-nothing-at-run-time {literals (empty, one char, 
 
 test strings-empty-results-reuse-the-canonical-empty {a dynamic empty String (empty substring) is the canonical static empty: zero allocations, counted as a reuse} -body {
     set s [stringsOf {
+        import str
         fn cut(s, i) errors LowerUnderrun, UpperOverrun:
             str::substring(s, i, i)
 
@@ -155,8 +158,10 @@ test strings-empty-results-reuse-the-canonical-empty {a dynamic empty String (em
 
 test strings-concat-is-one-object-whatever-the-width {a nested concat is one flat construct (virtual construction: one String, no intermediate); ASCII and non-ASCII substrings each allocate one String} -body {
     list \
-        [dict get [stringsOf {str::concat(str::concat("é", "x"), "…")}] objects] \
+        [dict get [stringsOf {import str
+str::concat(str::concat("é", "x"), "…")}] objects] \
         [dict get [stringsOf {
+            import str
             fn cut(s) errors UpperOverrun:
                 str::substring(s, 1, 4)
 
@@ -166,6 +171,7 @@ test strings-concat-is-one-object-whatever-the-width {a nested concat is one fla
             r
         }] objects] \
         [dict get [stringsOf {
+            import str
             fn cut(s) errors UpperOverrun:
                 str::substring(s, 1, 4)
 
@@ -178,6 +184,7 @@ test strings-concat-is-one-object-whatever-the-width {a nested concat is one fla
 
 test strings-frees-match-objects {after the run, the cleanup collection frees exactly one block per String} -body {
     set report [native::allocationReport [srcHir {
+        import str
         fn grow(n, acc):
             if n == 0:
                 acc
@@ -192,6 +199,7 @@ test strings-frees-match-objects {after the run, the cleanup collection frees ex
 
 test strings-large-string-is-one-block {a megabyte-scale String is still one allocation of header plus bytes} -body {
     set s [stringsOf {
+        import str
         fn dbl(n, s):
             if n == 0:
                 s
@@ -205,6 +213,7 @@ test strings-large-string-is-one-block {a megabyte-scale String is still one all
 
 test strings-large-string-bytes {the bytes of the doubling chain are exactly the sum of 25 + 2^i} -body {
     set s [stringsOf {
+        import str
         fn dbl(n, s):
             if n == 0:
                 s
@@ -248,6 +257,7 @@ test strings-short-materialization-is-one-object {a ShortString1 and a packed AS
 test strings-parity-unicode-classes {ASCII, Latin-1, ellipsis, BMP, astral, combining, NUL and empty through concat, substring, length and equality} -body {
     set nul [format %c 0]
     parity "
+        import str
         fn probe(s):
             \[str::length(s), s == \"\", str::concat(s, \"!\"), str::substring(str::concat(s, \"x\"), 0, 1)\]
 
@@ -259,6 +269,7 @@ test strings-parity-unicode-classes {ASCII, Latin-1, ellipsis, BMP, astral, comb
 test strings-parity-nul-is-one-character {NUL is a one-character String of one zero byte, not the empty String} -body {
     set nul [format %c 0]
     parity "
+        import str
         fn n(s):
             \[str::length(s), s == \"\", s == \"$nul\", str::length(str::concat(s, s))\]
 
@@ -268,6 +279,7 @@ test strings-parity-nul-is-one-character {NUL is a one-character String of one z
 
 test strings-parity-substring-boundaries {substring at 0, at the end, empty and full, over ASCII and non-ASCII bases, including multi-byte slices} -body {
     parity {
+        import str
         fn cuts(s) errors LowerUnderrun, UpperOverrun:
             n = str::length(s)
             [str::substring(s, 0, 0), str::substring(s, 0, n), str::substring(s, n, n), str::substring(s, 1, n), str::substring(s, 0, n - 1)]
@@ -278,6 +290,7 @@ test strings-parity-substring-boundaries {substring at 0, at the end, empty and 
 
 test strings-parity-concat-shapes {concat chains of every width, accumulating a String over a loop} -body {
     parity {
+        import str
         fn build(n, acc):
             if n == 0:
                 acc
@@ -298,6 +311,7 @@ test strings-parity-concat-shapes {concat chains of every width, accumulating a 
 
 test strings-parity-errors-keep-their-messages {an out-of-range substring fails with the same declared error on every backend, and its handler sees it} -body {
     set hir [srcHir {
+        import str
         fn cut(s) errors UpperOverrun:
             str::substring(str::concat(s, "é"), 0, 9)
 
@@ -315,6 +329,7 @@ test strings-parity-errors-keep-their-messages {an out-of-range substring fails 
 
 test strings-parity-large {a String over a megabyte, built by doubling, has the right length, ends and equality} -body {
     parity {
+        import str
         fn dbl(n, s):
             if n == 0:
                 s
@@ -338,6 +353,8 @@ test strings-parity-large {a String over a megabyte, built by doubling, has the 
 
 test strings-gc-live-across-allocation-and-storage {Strings held in a List, a struct, a MutableArray and a captured local survive allocation churn under GC stress, with every width} -body {
     set text {
+        import mutable_array
+        import str
         struct Pair:
             left: str
             right: str
@@ -377,6 +394,7 @@ test strings-gc-live-across-allocation-and-storage {Strings held in a List, a st
 
 test strings-gc-recursive-allocating-frames {a String parameter and result across 150 recursive allocating frames under GC stress} -body {
     set text {
+        import str
         fn rec(n, s) errors LowerUnderrun, UpperOverrun:
             if n == 0:
                 s
@@ -400,6 +418,7 @@ test strings-gc-recursive-allocating-frames {a String parameter and result acros
 
 test strings-gc-large-string-survives-collections {a large String stays intact across the collections its own allocation and later garbage trigger} -body {
     set text {
+        import str
         fn dbl(n, s):
             if n == 0:
                 s
@@ -427,6 +446,7 @@ test strings-gc-large-string-survives-collections {a large String stays intact a
 
 test strings-gc-reclaims-and-reuses {a loop that builds and drops many Strings reaches a steady live set: collections reclaim the dropped Strings, one block each} -body {
     set report [native::allocationReport [srcHir {
+        import str
         fn churn(n, acc) errors UpperOverrun:
             if n == 0:
                 str::length(acc)
@@ -482,6 +502,8 @@ proc aotParity {text {extra {}}} {
 test strings-executable-everything {every width, NUL, empty, concat, substring, storage, an error path and a large String in one standalone executable, also under GC stress} -constraints executableAot -body {
     set nul [format %c 0]
     aotParity "
+        import list
+        import str
         error Bad
 
         fn pick(n):
@@ -527,6 +549,7 @@ test strings-executable-everything {every width, NUL, empty, concat, substring, 
 
 test strings-executable-short-optimization-off {the same kind of executable with -short-string-opt 0} -constraints executableAot -body {
     aotParity {
+        import str
         fn pick(flag):
             if flag:
                 ""
@@ -544,7 +567,8 @@ test strings-executable-short-optimization-off {the same kind of executable with
 } -result {[0, 1, "😀…", "😀"]}
 
 test strings-executable-census-has-no-text-buffer {a standalone executable's allocation report shows no text buffer allocations} -constraints executableAot -body {
-    set report [native::allocationReport [srcHir {str::concat(str::concat("a", "b"), "…")}] summary]
+    set report [native::allocationReport [srcHir {import str
+str::concat(str::concat("a", "b"), "…")}] summary]
     list [dict get $report strings textBufferAllocations] [dict get $report strings textBufferFrees]
 } -result {0 0}
 

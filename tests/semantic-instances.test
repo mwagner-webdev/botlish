@@ -70,7 +70,7 @@ proc siBlock {hir name} {
     error "no function named $name"
 }
 
-set idDef "fn identity(x):\n    x\n"
+set idDef "import mutable_array\nfn identity(x):\n    x\n"
 
 # ---------------------------------------------------------------------------
 # identity: the parameter/result relation falls out of ordinary body analysis
@@ -95,7 +95,7 @@ test si-id-4 {the result is used by later analysis: a typed store through the re
 } -result {str 1}
 
 test si-id-5 {an immutable alias inside the instance keeps the concrete type} -body {
-    siLast "fn forward(x):\n    y = x\n    y\nforward(mutable_array::create(1, \"x\"))"
+    siLast "import mutable_array\nfn forward(x):\n    y = x\n    y\nforward(mutable_array::create(1, \"x\"))"
 } -result {MutableArray[str]}
 
 test si-id-6 {an identical call in a chain: nested instances compose} -body {
@@ -117,35 +117,35 @@ test si-id-8 {no semantic instance for an any-typed call; the generic contract i
 # read-only wrappers and typed reads
 
 test si-ro-1 {a read-only untyped wrapper accepts a typed array (no raw-mutarray rejection)} -body {
-    list [siLast "fn capacity(x):\n    mutable_array::capacity(x)\ncapacity(mutable_array::create(3, \"x\"))"] \
-        [siLast "fn capacity(x):\n    mutable_array::capacity(x)\ncapacity(mutable_array::allocate(3))"]
+    list [siLast "import mutable_array\nfn capacity(x):\n    mutable_array::capacity(x)\ncapacity(mutable_array::create(3, \"x\"))"] \
+        [siLast "import mutable_array\nfn capacity(x):\n    mutable_array::capacity(x)\ncapacity(mutable_array::allocate(3))"]
 } -result {int int}
 
 test si-ro-2 {a typed read through an untyped wrapper is the element type} -body {
-    list [siLast "fn first(x) errors IndexNotFound:\n    mutable_array::at(x, 0)\nv = first(mutable_array::create(2, \"x\")):\n    on IndexNotFound:\n        \"z\"\nv"] \
-        [siLast "fn first(x) errors IndexNotFound:\n    mutable_array::at(x, 0)\nv = first(mutable_array::create(2, 1)):\n    on IndexNotFound:\n        0\nv"]
+    list [siLast "import mutable_array\nfn first(x) errors IndexNotFound:\n    mutable_array::at(x, 0)\nv = first(mutable_array::create(2, \"x\")):\n    on IndexNotFound:\n        \"z\"\nv"] \
+        [siLast "import mutable_array\nfn first(x) errors IndexNotFound:\n    mutable_array::at(x, 0)\nv = first(mutable_array::create(2, 1)):\n    on IndexNotFound:\n        0\nv"]
 } -result {str int}
 
 test si-ro-3 {both element types at once from one source function} -body {
-    siInstances "fn first(x) errors IndexNotFound:\n    mutable_array::at(x, 0)\na = first(mutable_array::create(2, \"x\")):\n    on IndexNotFound:\n        \"z\"\nb = first(mutable_array::create(2, 1)):\n    on IndexNotFound:\n        0\nunit"
+    siInstances "import mutable_array\nfn first(x) errors IndexNotFound:\n    mutable_array::at(x, 0)\na = first(mutable_array::create(2, \"x\")):\n    on IndexNotFound:\n        \"z\"\nb = first(mutable_array::create(2, 1)):\n    on IndexNotFound:\n        0\nunit"
 } -result {{first<MutableArray[int]> -> int [valid]} {first<MutableArray[str]> -> str [valid]}}
 
 test si-ro-4 {freeze through a wrapper keeps List[T]} -body {
-    siLast "fn freeze(x):\n    if mutable_array::capacity(x) > 0:\n        return mutable_array::freeze(x, 1)\n    mutable_array::freeze(x, 0)\nfreeze(mutable_array::create(2, 1))"
+    siLast "import mutable_array\nfn freeze(x):\n    if mutable_array::capacity(x) > 0:\n        return mutable_array::freeze(x, 1)\n    mutable_array::freeze(x, 0)\nfreeze(mutable_array::create(2, 1))"
 } -result {List[int]}
 
 # ---------------------------------------------------------------------------
 # invalid instances: rejected at the call, never globally, never by fallback
 
 test si-bad-1 {smash: an untyped writer of a wrong value into MutableArray[str] is rejected at the call} -body {
-    set src "fn smash(x):\n    mutable_array::set(x, 0, 123)\nm = mutable_array::create(2, \"x\")\nsmash(m)"
+    set src "import mutable_array\nfn smash(x):\n    mutable_array::set(x, 0, 123)\nm = mutable_array::create(2, \"x\")\nsmash(m)"
     list [siRejects $src "*call to smash with x : MutableArray\\\[str\\\] is invalid: value of type int is not admissible to element type str*"] \
-        [siRejects $src "*(in the body of smash, at 2:*"]
+        [siRejects $src "*(in the body of smash, at 3:*"]
 } -result {1 1}
 
 test si-bad-2 {the same function with a raw array (or a fitting value) is fine: one bad call does not condemn the function} -body {
-    list [siLast "fn smash(x):\n    if mutable_array::capacity(x) > 0:\n        mutable_array::set(x, 0, 123)\nsmash(mutable_array::allocate(1))"] \
-        [siLast "fn writer(x, v):\n    if mutable_array::capacity(x) > 0:\n        mutable_array::set(x, 0, v)\nwriter(mutable_array::create(1, \"x\"), \"ok\")"]
+    list [siLast "import mutable_array\nfn smash(x):\n    if mutable_array::capacity(x) > 0:\n        mutable_array::set(x, 0, 123)\nsmash(mutable_array::allocate(1))"] \
+        [siLast "import mutable_array\nfn writer(x, v):\n    if mutable_array::capacity(x) > 0:\n        mutable_array::set(x, 0, v)\nwriter(mutable_array::create(1, \"x\"), \"ok\")"]
 } -result {unit unit}
 
 test si-bad-3 {f<int> valid, f<str> invalid: the incompatible call is the one rejected} -body {
@@ -154,19 +154,19 @@ test si-bad-3 {f<int> valid, f<str> invalid: the incompatible call is the one re
 } -result {int 1 1}
 
 test si-bad-4 {a valid instance does not make every call valid: writer with the wrong value is rejected} -body {
-    set def "fn writer(x, v):\n    if mutable_array::capacity(x) > 0:\n        mutable_array::set(x, 0, v)\n"
+    set def "import mutable_array\nfn writer(x, v):\n    if mutable_array::capacity(x) > 0:\n        mutable_array::set(x, 0, v)\n"
     list [siRejects "${def}writer(mutable_array::create(1, \"x\"), 5)" "*call to writer with x : MutableArray\\\[str\\\], v : int is invalid*"] \
         [siLast "${def}writer(mutable_array::create(1, \"x\"), \"ok\")\nwriter(mutable_array::create(1, 1), 5)"]
 } -result {1 unit}
 
 test si-bad-5 {an invalid callee makes the calling instance invalid: the diagnostic names both calls} -body {
-    siRejects "fn a(x):\n    mutable_array::set(x, 0, 1)\nfn b(x):\n    a(x)\nb(mutable_array::create(1, \"x\"))" \
+    siRejects "import mutable_array\nfn a(x):\n    mutable_array::set(x, 0, 1)\nfn b(x):\n    a(x)\nb(mutable_array::create(1, \"x\"))" \
         "*call to b with x : MutableArray\\\[str\\\] is invalid: call to a with x : MutableArray\\\[str\\\] is invalid:*"
 } -result 1
 
 test si-bad-6 {the diagnostic is at the call and shows no synthetic names} -body {
-    set message [siMessage "fn smash(x):\n    mutable_array::set(x, 0, 123)\nm = mutable_array::create(2, \"x\")\nsmash(m)"]
-    list [string match "*:4:1: *" $message] [string match {*\$*} $message] [string match {*Instance*} $message]
+    set message [siMessage "import mutable_array\nfn smash(x):\n    mutable_array::set(x, 0, 123)\nm = mutable_array::create(2, \"x\")\nsmash(m)"]
+    list [string match "*:5:1: *" $message] [string match {*\$*} $message] [string match {*Instance*} $message]
 } -result {1 0 0}
 
 test si-bad-7 {an instance of a function whose body needs a declared contract cannot rescue an invalid definition} -body {
@@ -177,50 +177,50 @@ test si-bad-7 {an instance of a function whose body needs a declared contract ca
 # bearing soundness: precise entry types are not permission to erase
 
 test si-brg-1 {a declared raw result erases the element contract} -body {
-    list [siRejects "fn erase(x) -> mutarray:\n    x\nerase(mutable_array::create(1, \"x\"))" *] \
-        [siRejects "fn erase(x) -> any:\n    x\nerase(mutable_array::create(1, \"x\"))" *]
+    list [siRejects "import mutable_array\nfn erase(x) -> mutarray:\n    x\nerase(mutable_array::create(1, \"x\"))" *] \
+        [siRejects "import mutable_array\nfn erase(x) -> any:\n    x\nerase(mutable_array::create(1, \"x\"))" *]
 } -result {1 1}
 
 test si-brg-2 {storing the typed array into raw storage is an erasure} -body {
-    siRejects "fn erase(x):\n    raw = mutable_array::allocate(1)\n    mutable_array::set(raw, 0, x)\n    raw\nerase(mutable_array::create(1, \"x\"))" \
+    siRejects "import mutable_array\nfn erase(x):\n    raw = mutable_array::allocate(1)\n    mutable_array::set(raw, 0, x)\n    raw\nerase(mutable_array::create(1, \"x\"))" \
         "*call to erase with x : MutableArray\\\[str\\\] is invalid: cannot erase element contract MutableArray\\\[str\\\]*"
 } -result 1
 
 test si-brg-3 {a join with an erasing value is rejected} -body {
-    siRejects "fn erase(x, c):\n    if c:\n        x\n    else:\n        mutable_array::allocate(1)\nerase(mutable_array::create(1, \"x\"), true)" \
+    siRejects "import mutable_array\nfn erase(x, c):\n    if c:\n        x\n    else:\n        mutable_array::allocate(1)\nerase(mutable_array::create(1, \"x\"), true)" \
         "*cannot erase element contract MutableArray\\\[str\\\] in an \"if\" branch*"
 } -result 1
 
 test si-brg-4 {a kind test does not recover a writable untyped alias inside the instance} -body {
-    siRejects "fn f(x):\n    if mutarray?(x):\n        mutable_array::set(x, 0, 123)\n    else:\n        unit\nm = mutable_array::from_list(\[\"a\"\])\nf(m)\nmutable_array::at(m, 0)" \
+    siRejects "import mutable_array\nfn f(x):\n    if mutarray?(x):\n        mutable_array::set(x, 0, 123)\n    else:\n        unit\nm = mutable_array::from_list(\[\"a\"\])\nf(m)\nmutable_array::at(m, 0)" \
         "*call to f with x : MutableArray\\\[str\\\] is invalid: value of type int is not admissible*"
 } -result 1
 
 test si-brg-5 {an unknown (structural) callee of the array is an erasure: no exact target, no instance} -body {
-    set src "fn erase(x, f: Fn{args: \[any\], return: any, errors: \[\]}):\n    f(x)\nfn sink(y):\n    y\nfn sink2(y):\n    unit\nfn pick(fs, i) errors IndexNotFound:\n    list::at(fs, i)\nf = pick(\[sink, sink2\], 1)\nerase(mutable_array::create(1, \"x\"), f)"
+    set src "import list\nimport mutable_array\nfn erase(x, f: Fn{args: \[any\], return: any, errors: \[\]}):\n    f(x)\nfn sink(y):\n    y\nfn sink2(y):\n    unit\nfn pick(fs, i) errors IndexNotFound:\n    list::at(fs, i)\nf = pick(\[sink, sink2\], 1)\nerase(mutable_array::create(1, \"x\"), f)"
     siRejects $src "*cannot erase element contract MutableArray\\\[str\\\]*"
 } -result 1
 
 test si-brg-6 {an exact callable target that keeps the contract is fine (the identity of the code is known)} -body {
-    siLast "fn erase(x, f):\n    f(x)\nfn sink(y):\n    y\nerase(mutable_array::create(1, \"x\"), sink)"
+    siLast "import mutable_array\nfn erase(x, f):\n    f(x)\nfn sink(y):\n    y\nerase(mutable_array::create(1, \"x\"), sink)"
 } -result {MutableArray[str]}
 
 test si-brg-7 {a typed array in a list is still preserved element-wise; erasing that list is rejected} -body {
-    list [siLast "fn stash(x):\n    \[x\]\nstash(mutable_array::create(1, \"x\"))"] \
-        [siRejects "fn stash(x) -> list:\n    \[x\]\nstash(mutable_array::create(1, \"x\"))" *]
+    list [siLast "import mutable_array\nfn stash(x):\n    \[x\]\nstash(mutable_array::create(1, \"x\"))"] \
+        [siRejects "import mutable_array\nfn stash(x) -> list:\n    \[x\]\nstash(mutable_array::create(1, \"x\"))" *]
 } -result {{List[MutableArray[str]]} 1}
 
 test si-brg-8 {the attacks that were rejected without instances stay rejected} -body {
     lmap src {
-        "fn f(x: any):\n    x\nf(mutable_array::create(1, \"a\"))"
-        "fn f(x: mutarray):\n    x\nf(mutable_array::create(1, \"a\"))"
-        "fn f() -> any:\n    mutable_array::create(1, \"a\")\nf()"
-        "m = mutable_array::create(1, \"a\")\nmutable_array::set(m, 0, 1)"
+        "import mutable_array\nfn f(x: any):\n    x\nf(mutable_array::create(1, \"a\"))"
+        "import mutable_array\nfn f(x: mutarray):\n    x\nf(mutable_array::create(1, \"a\"))"
+        "import mutable_array\nfn f() -> any:\n    mutable_array::create(1, \"a\")\nf()"
+        "import mutable_array\nm = mutable_array::create(1, \"a\")\nmutable_array::set(m, 0, 1)"
     } {siRejects $src *}
 } -result {1 1 1 1}
 
 test si-brg-9 {a trusted-contract callee passed to an untyped parameter: the exact callee is analyzed, the wrong argument rejected} -body {
-    set src "fn need(m: MutableArray\[str\]):\n    mutable_array::capacity(m)\nfn app(f, v):\n    f(v)\n"
+    set src "import mutable_array\nfn need(m: MutableArray\[str\]):\n    mutable_array::capacity(m)\nfn app(f, v):\n    f(v)\n"
     list [siLast "${src}app(need, mutable_array::create(1, \"x\"))"] \
         [siRejects "${src}app(need, mutable_array::create(1, 1))" "*is invalid*"]
 } -result {int 1}
@@ -245,14 +245,14 @@ test si-decl-3 {an exact callable narrower than a declared Fn parameter is used 
 # lists
 
 test si-list-1 {first(List[str]) is str, first(List[int]) is int, first(List[MutableArray[str]]) is MutableArray[str]} -body {
-    set def "fn first(xs) errors IndexNotFound:\n    list::at(xs, 0)\n"
+    set def "import list\nimport mutable_array\nfn first(xs) errors IndexNotFound:\n    list::at(xs, 0)\n"
     set read "v = first(%s):\n    on IndexNotFound:\n        %s\nv"
     list [siLast "${def}[format $read {["x", "y"]} {"z"}]"] [siLast "${def}[format $read {[1, 2]} 0]"] \
         [siLast "${def}[format $read {[mutable_array::create(1, "x")]} {mutable_array::create(1, "z")}]"]
 } -result {str int {MutableArray[str]}}
 
 test si-list-2 {one source function, several semantic instances, both used in one program} -body {
-    siInstances "fn first(xs) errors IndexNotFound:\n    list::at(xs, 0)\na = first(\[\"x\", \"y\"\])\nb = first(\[1, 2\])\nunit"
+    siInstances "import list\nfn first(xs) errors IndexNotFound:\n    list::at(xs, 0)\na = first(\[\"x\", \"y\"\])\nb = first(\[1, 2\])\nunit"
 } -result {{first<List[int]> -> int [valid]} {first<List[str]> -> str [valid]}}
 
 test si-list-3 {a returning loop over a typed list gives the typed list without hard-coding copy} -body {
@@ -260,7 +260,7 @@ test si-list-3 {a returning loop over a typed list gives the typed list without 
 } -result {{List[str]} {List[int]}}
 
 test si-list-4 {a recursive accumulator recovers its element type} -body {
-    set def "fn collect(xs, i, acc) errors IndexNotFound:\n    if i == list::length(xs):\n        acc\n    else:\n        collect(xs, i + 1, list::append(acc, list::at(xs, i)))\n"
+    set def "import list\nfn collect(xs, i, acc) errors IndexNotFound:\n    if i == list::length(xs):\n        acc\n    else:\n        collect(xs, i + 1, list::append(acc, list::at(xs, i)))\n"
     set run "v = collect(%s, 0, \[\]):\n    on IndexNotFound:\n        %s\nv"
     list [siLast "${def}[format $run {["a", "b"]} {["z"]}]"] [siLast "${def}[format $run {[1]} {[0]}]"]
 } -result {{List[str]} {List[int]}}
@@ -268,8 +268,8 @@ test si-list-4 {a recursive accumulator recovers its element type} -body {
 # ---------------------------------------------------------------------------
 # higher-order helpers: list::find / any? / all? / none?
 
-set isB "fn is_b(s):\n    s == \"b\"\n"
-set big "fn big(n):\n    n > 5\n"
+set isB "import list\nfn is_b(s):\n    s == \"b\"\n"
+set big "import list\nfn big(n):\n    n > 5\n"
 set findStr "r = list::find(\[\"a\", \"b\"\], is_b):\n    on NotFound:\n        \"none\"\nr"
 set findInt "r = list::find(\[1, 9\], big):\n    on NotFound:\n        0\nr"
 
@@ -282,13 +282,13 @@ test si-hof-2 {list::find(List[int], predicate) is int} -body {
 } -result int
 
 test si-hof-3 {a typed predicate now passes through the untyped helper parameter (its full contract is seeded)} -body {
-    list [siLast "fn is_b(s: str):\n    s == \"b\"\n${findStr}"] [siLast "fn big(n: int):\n    n > 5\n${findInt}"]
+    list [siLast "import list\nfn is_b(s: str):\n    s == \"b\"\n${findStr}"] [siLast "import list\nfn big(n: int):\n    n > 5\n${findInt}"]
 } -result {str int}
 
 test si-hof-4 {List[str] with an int predicate is rejected, untyped or typed, through ordinary body analysis} -body {
     set call "r = list::find(\[\"a\", \"b\"\], big):\n    on NotFound:\n        \"x\"\nr"
-    list [siRejects "fn big(n):\n    n > 5\n${call}" "*call to list::find with xs : List\\\[str\\\], predicate : big/1 -> bool is invalid*"] \
-        [siRejects "fn big(n: int):\n    n > 5\n${call}" "*call to list::find with xs : List\\\[str\\\]*"]
+    list [siRejects "import list\nfn big(n):\n    n > 5\n${call}" "*call to list::find with xs : List\\\[str\\\], predicate : big/1 -> bool is invalid*"] \
+        [siRejects "import list\nfn big(n: int):\n    n > 5\n${call}" "*call to list::find with xs : List\\\[str\\\]*"]
 } -result {1 1}
 
 test si-hof-5 {the instance's successful result and the declared NotFound error} -body {
@@ -298,13 +298,13 @@ test si-hof-5 {the instance's successful result and the declared NotFound error}
 } -result {list::find NotFound}
 
 test si-hof-6 {any?/all?/none? type their loop element and predicate call and stay bool} -body {
-    list [siLast "${isB}list::any?(\[\"a\", \"b\"\], is_b)"] [siLast "fn pos(n):\n    n > 0\nlist::all?(\[1, 2\], pos)"] \
+    list [siLast "${isB}list::any?(\[\"a\", \"b\"\], is_b)"] [siLast "import list\nfn pos(n):\n    n > 0\nlist::all?(\[1, 2\], pos)"] \
         [siLast "${isB}list::none?(\[\"a\"\], is_b)"]
 } -result {bool bool bool}
 
 test si-hof-7 {a callable of the wrong argument type is rejected for any?/all?/none? too} -body {
     lmap helper {any? all? none?} {
-        siRejects "fn pos(n: int):\n    n > 0\nlist::${helper}(\[\"a\"\], pos)" "*is invalid*"
+        siRejects "import list\nfn pos(n: int):\n    n > 0\nlist::${helper}(\[\"a\"\], pos)" "*is invalid*"
     }
 } -result {1 1 1}
 
@@ -313,7 +313,7 @@ test si-hof-8 {a handler whose value does not fit the now-precise find result is
 } -result 1
 
 test si-hof-9 {a helper of typed arrays: find over List[MutableArray[str]] keeps the contract} -body {
-    siLast "fn nonempty(m):\n    mutable_array::capacity(m) > 0\nr = list::find(\[mutable_array::create(1, \"x\")\], nonempty):\n    on NotFound:\n        mutable_array::create(0, \"x\")\nr"
+    siLast "import list\nimport mutable_array\nfn nonempty(m):\n    mutable_array::capacity(m) > 0\nr = list::find(\[mutable_array::create(1, \"x\")\], nonempty):\n    on NotFound:\n        mutable_array::create(0, \"x\")\nr"
 } -result {MutableArray[str]}
 
 # ---------------------------------------------------------------------------
@@ -362,7 +362,7 @@ test si-rec-5 {a per-block budget declines further instances: the generic typing
     set saved $hir::semantic::maxPerBlock
     set hir::semantic::maxPerBlock 1
     try {
-        set def "fn identity(x):\n    x\n"
+        set def "import mutable_array\nfn identity(x):\n    x\n"
         list [siLast "${def}a = identity(1)\nidentity(\"s\")"] \
             [siRejects "${def}a = identity(1)\nidentity(mutable_array::create(1, \"x\"))" "*cannot erase element contract*"]
     } finally {
@@ -375,7 +375,7 @@ test si-rec-6 {the total budget also declines soundly} -body {
     set hir::semantic::maxInstances 0
     try {
         list [siLast "fn identity(x):\n    x\nidentity(1)"] \
-            [siRejects "fn identity(x):\n    x\nidentity(mutable_array::create(1, \"x\"))" "*cannot erase*"]
+            [siRejects "import mutable_array\nfn identity(x):\n    x\nidentity(mutable_array::create(1, \"x\"))" "*cannot erase*"]
     } finally {
         set hir::semantic::maxInstances $saved
     }
@@ -390,46 +390,46 @@ test si-rec-7 {instances are demand driven: a call in a statically unreachable b
 # aliases and captures
 
 test si-alias-1 {an exact alias of a function keeps its identity: the call through the alias is an instance} -body {
-    siLast "fn identity(x):\n    x\nf = identity\nf(mutable_array::create(1, \"x\"))"
+    siLast "import mutable_array\nfn identity(x):\n    x\nf = identity\nf(mutable_array::create(1, \"x\"))"
 } -result {MutableArray[str]}
 
 test si-cap-1 {a closure created inside an instance sees that instance's types for what it captures; the same source closure is typed differently per enclosing instance} -body {
-    set def "fn mk(m) errors IndexNotFound:\n    fn get(i) errors IndexNotFound:\n        mutable_array::at(m, i)\n    get(0)\n"
+    set def "import mutable_array\nfn mk(m) errors IndexNotFound:\n    fn get(i) errors IndexNotFound:\n        mutable_array::at(m, i)\n    get(0)\n"
     set run "v = mk(mutable_array::create(1, %s)):\n    on IndexNotFound:\n        %s\nv"
     list [siLast "${def}[format $run {"x"} {"z"}]"] [siLast "${def}[format $run 1 0]"] \
         [siInstances "${def}a = mk(mutable_array::create(1, \"x\")):\n    on IndexNotFound:\n        \"z\"\nb = mk(mutable_array::create(1, 1)):\n    on IndexNotFound:\n        0\nunit"]
 } -result {str int {{get<int> -> any [valid]} {mk<MutableArray[int]> -> int [valid]} {mk<MutableArray[str]> -> str [valid]}}}
 
 test si-cap-2 {a bad write inside a nested closure of an instance is found by the instance (the closure is part of the region)} -body {
-    siRejects "fn mk(m) errors IndexNotFound:\n    fn put(v):\n        mutable_array::set(m, 0, v)\n    put(5)\nmk(mutable_array::create(1, \"x\"))" \
+    siRejects "import mutable_array\nfn mk(m) errors IndexNotFound:\n    fn put(v):\n        mutable_array::set(m, 0, v)\n    put(5)\nmk(mutable_array::create(1, \"x\"))" \
         "*call to mk with m : MutableArray\\\[str\\\] is invalid: value of type any is not admissible*"
 } -result 1
 
 test si-cap-3 {a closure returned out of an instance keeps the result type computed in place; called later, it is never less precise} -body {
-    siLast "fn mk(m):\n    fn get(i) errors IndexNotFound:\n        mutable_array::at(m, i)\n    get\ng = mk(mutable_array::create(1, \"x\"))\nv = g(0):\n    on IndexNotFound:\n        \"z\"\nv"
+    siLast "import mutable_array\nfn mk(m):\n    fn get(i) errors IndexNotFound:\n        mutable_array::at(m, i)\n    get\ng = mk(mutable_array::create(1, \"x\"))\nv = g(0):\n    on IndexNotFound:\n        \"z\"\nv"
 } -result str
 
 test si-cap-4 {a captured typed value returned through a later-called closure stays typed} -body {
-    siLast "fn mk(m) errors IndexNotFound:\n    fn me(i):\n        m\n    me\ng = mk(mutable_array::create(1, \"x\"))\ng(0)"
+    siLast "import mutable_array\nfn mk(m) errors IndexNotFound:\n    fn me(i):\n        m\n    me\ng = mk(mutable_array::create(1, \"x\"))\ng(0)"
 } -result {MutableArray[str]}
 
 test si-cap-5 {a program-level closure capturing a program-level value is typed under the recorded creation environment} -body {
-    siLast "names = \[\"a\", \"b\"\]\nfn pick(i) errors IndexNotFound:\n    list::at(names, i)\nfn twice(f, i):\n    f(i)\ntwice(pick, 1)"
+    siLast "import list\nnames = \[\"a\", \"b\"\]\nfn pick(i) errors IndexNotFound:\n    list::at(names, i)\nfn twice(f, i):\n    f(i)\ntwice(pick, 1)"
 } -result str
 
 test si-cap-6 {a closure capturing a binding typed by an enclosing recursive function's own (optimistically assumed) result is re-analyzed when that environment settles: the answer is the fixpoint's, never an early assumption's} -body {
-    siLast "fn f(n):\n    y = if n == 0:\n        \"s\"\n    else:\n        f(n - 1)\n    fn get(i) errors IndexNotFound:\n        list::at(\[y\], i)\n    get(0)\nf(3)"
+    siLast "import list\nfn f(n):\n    y = if n == 0:\n        \"s\"\n    else:\n        f(n - 1)\n    fn get(i) errors IndexNotFound:\n        list::at(\[y\], i)\n    get(0)\nf(3)"
 } -result str
 
 # ---------------------------------------------------------------------------
 # the dynamic boundary and forward calls
 
 test si-dyn-1 {a call through a structural Fn or an open value creates no instance} -body {
-    set src "fn apply(f: Fn{args: \[int\], return: int, errors: \[\]}, n: int):\n    f(n)\nfn inc(x: int):\n    x + 1\nfn pick(fs, i) errors IndexNotFound:\n    list::at(fs, i)\ng = pick(\[inc, inc\], 0):\n    on IndexNotFound:\n        inc\napply(g, 1)"
+    set src "import list\nfn apply(f: Fn{args: \[int\], return: int, errors: \[\]}, n: int):\n    f(n)\nfn inc(x: int):\n    x + 1\nfn pick(fs, i) errors IndexNotFound:\n    list::at(fs, i)\ng = pick(\[inc, inc\], 0):\n    on IndexNotFound:\n        inc\napply(g, 1)"
     siLast $src
 } -result int
 
-set fnDefs "fn apply(f, x):\n    f(x)\nfn inc(n: int):\n    n + 1\nfn dec(n: int):\n    n - 1\nfn pick(fs, i) errors IndexNotFound:\n    list::at(fs, i)\ng = pick(\[inc, dec\], 1):\n    on IndexNotFound:\n        inc\n"
+set fnDefs "import list\nfn apply(f, x):\n    f(x)\nfn inc(n: int):\n    n + 1\nfn dec(n: int):\n    n - 1\nfn pick(fs, i) errors IndexNotFound:\n    list::at(fs, i)\ng = pick(\[inc, dec\], 1):\n    on IndexNotFound:\n        inc\n"
 
 test si-fn-1 {a structural Fn argument seeds the untyped parameter with its contract: the callee's result and its argument check come from that contract, the instance is keyed by the full Fn type} -body {
     list [siLast "${fnDefs}apply(g, 5)"] [siInstances "${fnDefs}apply(g, 5)"]
@@ -454,7 +454,7 @@ test si-dyn-5 {a second whole-program walk is not about definition order: a recu
 } -result {2 int}
 
 test si-dyn-4 {captures: a closure's instance uses the environment its creation recorded} -body {
-    siLast "fn mk(x) errors IndexNotFound:\n    fn get(i) errors IndexNotFound:\n        list::at(x, i)\n    get(0)\nv = mk(\[\"a\"\]):\n    on IndexNotFound:\n        \"z\"\nv"
+    siLast "import list\nfn mk(x) errors IndexNotFound:\n    fn get(i) errors IndexNotFound:\n        list::at(x, i)\n    get(0)\nv = mk(\[\"a\"\]):\n    on IndexNotFound:\n        \"z\"\nv"
 } -result str
 
 # ---------------------------------------------------------------------------
@@ -470,7 +470,7 @@ test si-nogen-1 {no generic syntax or type variables exist} -body {
 } -result {rejected rejected rejected rejected}
 
 test si-nogen-2 {public signatures never report instances: params stay the ordinary intrinsic contracts} -body {
-    set hir [siCompile "fn identity(x):\n    x\na = identity(mutable_array::create(1, \"x\"))\nb = identity(1)\nunit"]
+    set hir [siCompile "import mutable_array\nfn identity(x):\n    x\na = identity(mutable_array::create(1, \"x\"))\nb = identity(1)\nunit"]
     set sig [dict get [hir::signatures::of $hir [siBlock $hir identity]] params]
     list [lmap p $sig {dict get $p source}] [hir::types::show [dict get [hir::signatures::of $hir [siBlock $hir identity]] result]]
 } -result {none any}
@@ -490,7 +490,7 @@ test si-sep-1 {KeyType is representation-oriented and unchanged: MutableArray[T]
 } -result {mutarray mutarray {list str} any}
 
 test si-sep-2 {two semantic instances of identity share one codegen instance} -body {
-    set src "fn identity(x):\n    x\na = identity(mutable_array::create(2, \"x\"))\nb = identity(mutable_array::create(2, 1))\nunit"
+    set src "import mutable_array\nfn identity(x):\n    x\na = identity(mutable_array::create(2, \"x\"))\nb = identity(mutable_array::create(2, 1))\nunit"
     set hir [siCompile $src]
     set semantic [llength [lmap row [hir::semantic::census $hir] {
         if {[dict get $row name] ne "identity"} continue
@@ -506,7 +506,7 @@ test si-sep-2 {two semantic instances of identity share one codegen instance} -b
 } -result {2 1}
 
 test si-sep-3 {an instance's key holds full semantic types, the codegen key does not} -body {
-    set hir [siCompile "fn identity(x):\n    x\na = identity(mutable_array::create(2, \"x\"))\nb = identity(mutable_array::create(2, 1))\nunit"]
+    set hir [siCompile "import mutable_array\nfn identity(x):\n    x\na = identity(mutable_array::create(2, \"x\"))\nb = identity(mutable_array::create(2, 1))\nunit"]
     set keys [lsort [lmap {key id} [dict get $hir semantic keys] {
         lassign $key block args
         join [lmap t $args {hir::types::show $t}] ,
@@ -522,7 +522,7 @@ test si-sep-5 {disabling the layer restores the pre-instance behavior exactly} -
     set hir::semantic::enabled 0
     try {
         list [siLast "fn identity(x):\n    x\nidentity(5)"] \
-            [siRejects "fn identity(x):\n    x\nidentity(mutable_array::create(1, \"x\"))" "*cannot erase element contract*"]
+            [siRejects "import mutable_array\nfn identity(x):\n    x\nidentity(mutable_array::create(1, \"x\"))" "*cannot erase element contract*"]
     } finally {
         set hir::semantic::enabled 1
     }
@@ -534,15 +534,16 @@ test si-sep-5 {disabling the layer restores the pre-instance behavior exactly} -
 test si-det-1 {the same canonical instances and results whatever the (legal) definition order: independent helpers may swap, callees stay before callers} -body {
     set a "fn identity(x):\n    x\n"
     set b "fn first(xs) errors IndexNotFound:\n    list::at(xs, 0)\n"
+    set imp "import list\nimport mutable_array\n"
     set c "fn both(xs) errors IndexNotFound:\n    identity(first(xs))\n"
     set use "both(\[\"a\"\])\nboth(\[1\])\nidentity(mutable_array::create(1, \"x\"))"
-    set one [siInstances "${a}${b}${c}${use}"]
-    set two [siInstances "${b}${a}${c}${use}"]
-    list [expr {$one eq $two}] [llength $one] [catch {siCompile "${c}${b}${a}${use}"}]
+    set one [siInstances "${imp}${a}${b}${c}${use}"]
+    set two [siInstances "${imp}${b}${a}${c}${use}"]
+    list [expr {$one eq $two}] [llength $one] [catch {siCompile "${imp}${c}${b}${a}${use}"}]
 } -result {1 7 1}
 
 test si-det-2 {compiling twice gives identical tables} -body {
-    set src "fn first(xs) errors IndexNotFound:\n    list::at(xs, 0)\na = first(\[\"x\"\])\nb = first(\[1\])\nunit"
+    set src "import list\nfn first(xs) errors IndexNotFound:\n    list::at(xs, 0)\na = first(\[\"x\"\])\nb = first(\[1\])\nunit"
     expr {[dict get [siCompile $src] semantic instances] eq [dict get [siCompile $src] semantic instances]}
 } -result 1
 
@@ -561,11 +562,11 @@ proc siParity {src} {
 }
 
 test si-run-1 {identity/first/find/writer run identically on every backend} -body {
-    siParity "fn identity(x):\n    x\nfn first(xs) errors IndexNotFound:\n    list::at(xs, 0)\nfn writer(x, v):\n    mutable_array::set(x, 0, v)\nm = mutable_array::create(2, \"x\")\nn = identity(m)\nwriter(n, \"y\")\n\[first(\[\"p\", \"q\"\]), first(\[1, 2\]), mutable_array::at(n, 0), mutable_array::capacity(identity(m))\]"
+    siParity "import list\nimport mutable_array\nfn identity(x):\n    x\nfn first(xs) errors IndexNotFound:\n    list::at(xs, 0)\nfn writer(x, v):\n    mutable_array::set(x, 0, v)\nm = mutable_array::create(2, \"x\")\nn = identity(m)\nwriter(n, \"y\")\n\[first(\[\"p\", \"q\"\]), first(\[1, 2\]), mutable_array::at(n, 0), mutable_array::capacity(identity(m))\]"
 } -result {value {["p", 1, "y", 2]} {}}
 
 test si-run-2 {list::find with instances runs identically on every backend} -body {
-    siParity "fn is_b(s):\n    s == \"b\"\nr = list::find(\[\"a\", \"b\"\], is_b):\n    on NotFound:\n        \"none\"\nr"
+    siParity "import list\nfn is_b(s):\n    s == \"b\"\nr = list::find(\[\"a\", \"b\"\], is_b):\n    on NotFound:\n        \"none\"\nr"
 } -result {value {"b"} {}}
 
 cleanupTests

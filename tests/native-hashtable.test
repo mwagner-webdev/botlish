@@ -22,7 +22,9 @@ set ::hashtableSource [regsub {\nsample\(\)\n$} [corpus::text hashtable] "\n"]
 
 # TEXT appended after the HashTable implementation, compiled to HIR.
 proc sourceHir {text} {
-    return [surface::compile "$::hashtableSource\n$text\n" t.bot -strict 0]
+    # The test drivers use str::concat/str::length; the implementation's own
+    # header (import list, import mutable_array) follows this line.
+    return [surface::compile "import str\n$::hashtableSource\n$text\n" t.bot -strict 0]
 }
 
 proc sourceIR {text} {

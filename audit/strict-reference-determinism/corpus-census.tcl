@@ -43,7 +43,7 @@ proc build {path} {
 proc buildModule {name} {
     set loaded [surface::modules::LoadNamespaces [list $name]]
     return [hir::buildSyntax {} -strict 0 -files [dict get $loaded files] \
-        -modules [dict get $loaded sections] \
+        -modules [dict get $loaded sections] -imports [dict get $loaded imports] \
         -type-decls [dict get $loaded typeDecls] -error-decls [dict get $loaded errorDecls]]
 }
 

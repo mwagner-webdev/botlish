@@ -127,7 +127,7 @@ for {set s $seed0} {$s < $seed0 + $n} {incr s} {
     set dir [file join [pwd] .fuzz-raw-int-abi]
     file mkdir $dir
     set path [file join $dir p$s.bot]
-    set ch [open $path w]; puts $ch $text; close $ch
+    set ch [open $path w]; puts $ch [surface::modules::ImportHeader $text]$text; close $ch
     if {[catch {set hir [surface::readProgramFile $path]} err]} {
         file delete $path
         continue

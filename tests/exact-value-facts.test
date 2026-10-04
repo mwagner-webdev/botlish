@@ -22,7 +22,7 @@
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
 
-set ::evDecls "type Byte = Int in 0..255\n"
+set ::evDecls "import list\nimport str\ntype Byte = Int in 0..255\n"
 
 # The HIR of SRC.
 proc evCompile {src {strict 1}} {
@@ -52,6 +52,17 @@ proc evFact {src {strict 1}} {
     set hir [evCompile $src $strict]
     set f [hir::exact::Of $hir [lindex [hir::roots $hir] end]]
     expr {$f eq "" ? "none" : [hir::exact::describe $hir $f]}
+}
+
+# The roots of the program's own file: `import list` loads lib/list.bot,
+# whose module functions are roots ahead of the program's statements.
+proc evRoots {hir} {
+    set roots [hir::roots $hir]
+    set file [dict get $hir exprs [lindex $roots end] origin file]
+    lmap r $roots {
+        if {[dict get $hir exprs $r origin file] ne $file} continue
+        set r
+    }
 }
 
 # The block expression bound to NAME.
@@ -297,9 +308,10 @@ test ev-nested-depth-bound {facts nest at most aggregateDepth deep: a fourth lev
 
 test ev-oob-keeps-runtime-error {a provably out-of-bounds read is a compile-time KNOWN-ERROR (STDLIB-NAMESPACES.md), and run anyway (-strict 0) list::at's declared IndexNotFound; no fact is claimed, the type is the ordinary element type} -body {
     set src "x = \[\"a\"\]\nlist::at(x, 3)"
-    catch {core::evalProgram [hir::lower [surface::compile $src t.bot -strict 0]]} message options
+    set full "import list\n$src"
+    catch {core::evalProgram [hir::lower [surface::compile $full t.bot -strict 0]]} message options
     list [evSem $src 0] [evFact $src 0] [dict get $options -errorcode] \
-        [lsort -unique [lmap d [hir::diagnostics [surface::compile $src t.bot -strict 0]] {dict get $d kind}]]
+        [lsort -unique [lmap d [hir::diagnostics [surface::compile $full t.bot -strict 0]] {dict get $d kind}]]
 } -result {str none {CORE SEMANTIC UNCAUGHT-ERROR} KNOWN-ERROR}
 
 test ev-oob-negative {a negative exact index makes no claim either (and is a compile-time KNOWN-ERROR)} -body {
@@ -312,13 +324,13 @@ test ev-bounds-classification {known length + exact/ranged index classify as in/
     # in a -strict 0 build (the classification is this test's subject).
     set hir [evCompile "x = \[1, 2, 3\]\nlist::at(x, 1)\nlist::at(x, 5)\nlist::at(x, 0 - 1)" 0]
     set out {}
-    foreach e [lrange [hir::roots $hir] 1 end] {
+    foreach e [lrange [evRoots $hir] 1 end] {
         set args [hir::get $hir $e args]
         set n [hir::exact::IntOf $hir [lindex $args 1]]
         lappend out [hir::exact::BoundsOf $hir [lindex $args 0] [hir::range::point $n]]
     }
-    lappend out [hir::exact::BoundsOf $hir [lindex [hir::get $hir [lindex [hir::roots $hir] 1] args] 0] {min 0 max 1}]
-    lappend out [hir::exact::BoundsOf $hir [lindex [hir::get $hir [lindex [hir::roots $hir] 1] args] 0] {min 0 max 5}]
+    lappend out [hir::exact::BoundsOf $hir [lindex [hir::get $hir [lindex [evRoots $hir] 1] args] 0] {min 0 max 1}]
+    lappend out [hir::exact::BoundsOf $hir [lindex [hir::get $hir [lindex [evRoots $hir] 1] args] 0] {min 0 max 5}]
     set out
 } -result {in out out in {}}
 
@@ -450,7 +462,7 @@ test ev-contract-alias-index {an aliased exact index changes nothing about the r
 } -result {{xs: list (inferred)}}
 
 test ev-contract-scan-while-unchanged {scan_while's predicate contract and local_char? str requirement are unchanged by value facts} -body {
-    set path [makeFile "web::emailish?(\"a@b.cd\")" ev-web.bot]
+    set path [makeFile "import web\nweb::emailish?(\"a@b.cd\")" ev-web.bot]
     try {
         set hir [surface::readProgramFile $path -strict 1]
     } finally {
@@ -465,7 +477,7 @@ test ev-contract-scan-while-unchanged {scan_while's predicate contract and local
 
 test ev-equal-canonical {two independently built identical Lists have equal canonical facts} -body {
     set hir [evCompile "a = \[\"x\", \[1, 2\]\]\nb = \[\"x\", \[1, 2\]\]\nc = \[\"x\", \[1, 3\]\]\n1"]
-    set roots [hir::roots $hir]
+    set roots [evRoots $hir]
     lassign [lmap r [lrange $roots 0 2] { hir::exact::Of $hir $r }] fa fb fc
     list [hir::exact::Equal $hir $fa $fb] [hir::exact::Equal $hir $fa $fc]
 } -result {1 0}

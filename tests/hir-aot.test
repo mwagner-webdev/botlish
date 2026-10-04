@@ -117,7 +117,7 @@ test hir-aot-8b {shared call facts: self tail calls} -body {
 # Kinds
 
 test hir-aot-9 {operands of unknown kind are reported with their cause, not guessed} -body {
-    set a [aotSource "fn first_plus(xs, n) errors IndexNotFound:\n    list::at(xs, 0) + n\n\nr = first_plus(\[1\], 2):\n    on IndexNotFound:\n        0\nr"]
+    set a [aotSource "import list\nfn first_plus(xs, n) errors IndexNotFound:\n    list::at(xs, 0) + n\n\nr = first_plus(\[1\], 2):\n    on IndexNotFound:\n        0\nr"]
     lmap b [dict get [aotRegion $a first_plus] blockers] {
         list [dict get $b kind] [dict get $b class] [dict get $b requires] [dict get $b cause cause] [dict get $b cause native]
     }
@@ -149,9 +149,9 @@ test hir-aot-13 {an if condition of unknown kind needs a Boolean check} -body {
 # Facts remove blockers
 
 test hir-aot-14 {a flow fact already in HIR removes the later blocker} -body {
-    set a [aotSource "fn f(s):\n    n = str::length(s)\n    str::concat(s, s)\n\nf(\"a\")"]
+    set a [aotSource "import str\nfn f(s):\n    n = str::length(s)\n    str::concat(s, s)\n\nf(\"a\")"]
     lmap b [dict get [aotRegion $a f] blockers] {list [dict get $b requires] [dict get $b location line]}
-} -result {{str 2}}
+} -result {{str 3}}
 
 test hir-aot-15 {a refinement proven by a type test removes the blocker inside the branch} -body {
     set unrefined [aotOf [hirOf {bind f {block {x} {call {ref +} {ref x} {const 1}}}}]]
@@ -225,7 +225,7 @@ test hir-aot-23 {analysis changes neither the HIR nor what the program does} -bo
     list [expr {[hir::format $hir -origins 1] eq $before}] \
          [expr {[corpus::outcome compile $hir] eq $outcomeBefore}] \
          [corpus::outcome interp $hir] [dict size [dict get $analysis regions]]
-} -result {1 1 {value {[[11]]}} 6}
+} -result {1 1 {value {[[11]]}} 11}
 
 test hir-aot-all-programs {every example and benchmark program can be analyzed and explained} -body {
     set failures {}
@@ -281,7 +281,7 @@ proc corpusStatuses {analysis} {
 # named fn(acc, key, value) -> acc" passed as a value), which is genuinely
 # open dispatch -- not a defect to fix, but exactly the kind of dispatch
 # site this milestone exists to expose and document (req #27, #51).
-test hir-aot-corpus-1 {every corpus function has closed dispatch, except hashtable's ht_fold (a deliberate higher-order call)} -body {
+test hir-aot-corpus-1 {every corpus function has closed dispatch, except hashtable's ht_fold (a deliberate higher-order call) and, wherever `import list` loads lib/list.bot, its higher-order library functions list::any?/all?/none?/find (they call their predicate parameter)} -body {
     lmap name [corpus::names] {
         set open {}
         dict for {id region} [dict get [corpusAot $name] regions] {
@@ -291,7 +291,7 @@ test hir-aot-corpus-1 {every corpus function has closed dispatch, except hashtab
         }
         list $name $open
     }
-} -result {{ai_text_clean {}} {csv {}} {csv_chunked {}} {csv_geometric {}} {csv_records {}} {hashtable ht_fold} {matmul {}} {string_replace {}} {string_reverse {}}}
+} -result {{ai_text_clean {}} {csv {list::any? list::all? list::none? list::find}} {csv_chunked {list::any? list::all? list::none? list::find}} {csv_geometric {list::any? list::all? list::none? list::find}} {csv_records {list::any? list::all? list::none? list::find}} {hashtable {list::any? list::all? list::none? list::find ht_fold}} {matmul {list::any? list::all? list::none? list::find}} {string_replace {}} {string_reverse {}}}
 
 # string_reverse and string_replace slice positionally without a proof, so
 # their functions declare LowerUnderrun/UpperOverrun and a closed `sample`
@@ -316,7 +316,7 @@ test hir-aot-corpus-4 {csv: parameter kinds only (the scan structs have no list 
     set a [corpusAot csv]
     list [corpusStatuses $a] [lsort -unique [aotBlockerKinds $a scan_record]] \
          [dict get [aotRegion $a scan_record] requirements]
-} -result {{<program> {closed closed guarded} peek {guarded closed guarded} scan_unquoted {guarded closed guarded} scan_quoted {guarded closed guarded} scan_field {guarded closed guarded} scan_record {guarded closed guarded} scan_records {guarded closed guarded} csv_parse {closed closed guarded}} UnknownParameterKind {bigint list-alloc tagged-values}}
+} -result {{<program> {closed closed guarded} list::get {guarded closed guarded} list::any? {open open open} list::all? {open open open} list::none? {open open open} list::find {open open open} peek {guarded closed guarded} scan_unquoted {guarded closed guarded} scan_quoted {guarded closed guarded} scan_field {guarded closed guarded} scan_record {guarded closed guarded} scan_records {guarded closed guarded} csv_parse {closed closed guarded}} UnknownParameterKind {bigint list-alloc tagged-values}}
 
 test hir-aot-corpus-5 {matmul: the operands of * are list elements of unknown kind} -body {
     set a [corpusAot matmul]
@@ -325,12 +325,12 @@ test hir-aot-corpus-5 {matmul: the operands of * are list elements of unknown ki
         list [dict get $b location line] [dict get $b cause native]
     }]
     list [corpusStatuses $a] $times [dict get [aotRegion $a dot] requirements]
-} -result {{<program> {closed closed guarded} dot {guarded closed guarded} product_row {guarded closed guarded} product_rows {guarded closed guarded} matmul {guarded closed guarded}} {{25 list::at} {25 list::at}} {bigint range-check structural-equality tagged-values}}
+} -result {{<program> {closed closed guarded} list::get {guarded closed guarded} list::any? {open open open} list::all? {open open open} list::none? {open open open} list::find {open open open} dot {guarded closed guarded} product_row {guarded closed guarded} product_rows {guarded closed guarded} matmul {guarded closed guarded}} {{27 list::at} {27 list::at}} {bigint range-check structural-equality tagged-values}}
 
 test hir-aot-explain {the explanation names status, blockers with lines, and runtime needs} -body {
     set text [hir::aot::explain [surface::readProgramFile [corpus::path matmul]]]
     list [string match "*dot: guarded*" $text] \
-         [string match "*line 25:12  e13  UnknownAggregateElementType: * needs int; the element read by list::at at line 25:12*" $text] \
+         [string match "*line 27:12  e*  UnknownAggregateElementType: * needs int; the element read by list::at at line 27:12*" $text] \
          [string match "*dispatch: closed -- natives: ==, *, list::at x3, + x2; functions: dot (self, tail)*" $text] \
          [string match "*runtime:  bigint, range-check, structural-equality, tagged-values*" $text]
 } -result {1 1 1 1}

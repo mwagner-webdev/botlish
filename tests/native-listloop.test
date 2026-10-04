@@ -124,6 +124,7 @@ proc listlibModuleHir {source name} {
 }
 
 set isEven {
+import list
 fn is_even(x):
     mod(x, 2) == 0
 }

@@ -27,6 +27,10 @@
 # Strings -- and every call's result observably contributes to the final
 # value, so nothing here can be dropped as dead work).
 
+import list
+import str
+import web
+
 corpus = ["abcXYZ012", "a b+c?", "café", "hello 世界?"]
 
 fn repeat_uri(i, total, acc):

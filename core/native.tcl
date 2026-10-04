@@ -151,6 +151,9 @@
 
 namespace eval core::native {
     variable registry [dict create]
+    # NAME -> 1: the registered natives that are the predicates of
+    # source-declared types, not compiler intrinsics (markSource).
+    variable sourceNatives [dict create]
     # ALIAS -> CANONICAL: a second source-level spelling for an already-
     # registered native, denoting the exact same registry entry (semantic
     # predicate identity), not a second registration. See `alias` below.
@@ -500,6 +503,12 @@ proc core::native::checkSlice {native start end n} {
     }
 }
 
+# 1 if NAME is a registered native (an alias is not: see aliasNames).
+proc core::native::exists {name} {
+    variable registry
+    return [dict exists $registry $name]
+}
+
 proc core::native::names {} {
     variable registry
     return [dict keys $registry]
@@ -511,7 +520,9 @@ proc core::native::names {} {
 # (surface/modules.tcl, surface/lower.tcl).
 proc core::native::isQualifiedNative {name} {
     variable registry
-    return [expr {[string first :: $name] > 0 && [dict exists $registry $name]}]
+    variable sourceNatives
+    return [expr {[string first :: $name] > 0 && [dict exists $registry $name]
+        && ![dict exists $sourceNatives $name]}]
 }
 
 # The member names of the qualified root natives that live directly in
@@ -521,8 +532,10 @@ proc core::native::isQualifiedNative {name} {
 # NS::MEMBER always denotes. Empty for a namespace with none.
 proc core::native::qualifiedMembers {ns} {
     variable registry
+    variable sourceNatives
     set members {}
     foreach name [dict keys $registry] {
+        if {[dict exists $sourceNatives $name]} continue
         if {[string first ${ns}:: $name] == 0} {
             set member [string range $name [string length ${ns}::] end]
             if {$member ne "" && [string first :: $member] < 0} {
@@ -591,7 +604,20 @@ proc core::native::aliasPairs {} {
 # (compiler-registered, process-lifetime) natives are never unregistered.
 proc core::native::unregister {name} {
     variable registry
+    variable sourceNatives
     dict unset registry $name
+    dict unset sourceNatives $name
+}
+
+# Marks the registered native NAME as declared by Botlish source (the
+# membership predicate of a source-declared type, hir/sourcetypes.tcl) rather
+# than provided by the compiler: such a native is not an *intrinsic* of its
+# namespace -- it does not make the namespace exist, is not protected
+# against redefinition, and is reached by a qualified reference through the
+# namespace's own type, never by surface lowering's intrinsic shortcut.
+proc core::native::markSource {name} {
+    variable sourceNatives
+    dict set sourceNatives $name 1
 }
 
 proc core::native::metadata {name} {

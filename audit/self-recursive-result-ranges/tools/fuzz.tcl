@@ -63,7 +63,7 @@ for {set i 0} {$i < $count} {incr i} {
     set call [join [lmap e $entries {string cat "f($e)"}] " + "]
     set text "$fn\n$call\n"
     if {[catch {
-        set hir [surface::compile $text t.bot -strict 0]
+        set hir [surface::compile [surface::modules::ImportHeader $text]$text t.bot -strict 0]
         set spec [hir::specialize::analyze $hir]
         set a [hir::range::analyze $hir $spec]
     } err]} {
@@ -79,7 +79,7 @@ for {set i 0} {$i < $count} {incr i} {
     set states [dict get $r states]
     set ks [dict keys $states]
     set evalText "$fn\n\[[join [lmap k $ks {string cat "f($k)"}] {, }]\]\n"
-    set hir2 [surface::compile $evalText t.bot -strict 0]
+    set hir2 [surface::compile [surface::modules::ImportHeader $evalText]$evalText t.bot -strict 0]
     set shown [core::value::show [core::evalProgram [hir::lower $hir2]]]
     set values [lmap v [split [string trim $shown {[]}] ,] {string trim $v}]
     foreach k $ks v $values {

@@ -263,7 +263,8 @@ caller()}] caller]
 } -result 1
 
 test tiny-leaf-ineligible-mutating {a leaf that mutates a MutableArray declines (allocation/mutation, not proven effect-free)} -body {
-    set body [FunctionBody [nirTextOf {fn touch(a):
+    set body [FunctionBody [nirTextOf {import mutable_array
+fn touch(a):
     mutable_array::set(a, 0, 1)
 
 fn caller():
@@ -386,7 +387,8 @@ fn caller():
 # using only ordinary, already-native-lowerable operations.
 
 test tiny-leaf-argument-evaluated-once {a callee parameter referenced twice in its body still evaluates its one argument expression exactly once} -body {
-    set text {fn double_use(x):
+    set text {import mutable_array
+fn double_use(x):
     x + x
 
 fn next(a):
@@ -407,7 +409,8 @@ run()}
 } -result {{list {{int 20} {int 11}}} {list {{int 20} {int 11}}} 0}
 
 test tiny-leaf-unused-argument-still-evaluated {a callee parameter the body never references still has its own argument evaluated exactly once} -body {
-    set text {fn ignore_second(x, y):
+    set text {import mutable_array
+fn ignore_second(x, y):
     x + 1
 
 fn next(a):
@@ -427,7 +430,8 @@ run()}
 } -result {{list {{int 6} {int 1}}} {list {{int 6} {int 1}}}}
 
 test tiny-leaf-argument-order-preserved {two argument expressions with observable effects still evaluate left to right, matching ordinary (uninlined) call semantics exactly} -body {
-    set text {fn combine(a, b):
+    set text {import mutable_array
+fn combine(a, b):
     a - b
 
 fn next(arr):
@@ -521,7 +525,8 @@ fn apply(g, y):
 # inlined call inside an allocating caller under forced collection).
 
 test tiny-leaf-gc-stress-smoke {an inlined leaf's own caller still allocates/collects correctly around it} -body {
-    set text {fn double_use(x):
+    set text {import str
+fn double_use(x):
     x + x
 
 fn build(n, i, acc):

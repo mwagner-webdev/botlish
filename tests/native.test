@@ -149,7 +149,7 @@ test native-basic-4-bare-break {a bare break's own Unit result agrees across eve
 } -result same
 
 test native-basic-5 {return from inside a loop and branches} -body {
-    parity "fn find(xs, i, target) errors IndexNotFound:\n    loop:\n        if i == list::length(xs):\n            return -1\n        if list::at(xs, i) == target:\n            return i\n        return find(xs, i + 1, target)\n\n\[find(\[5, 6, 7\], 0, 7), find(\[5\], 0, 9)\]"
+    parity "import list\nfn find(xs, i, target) errors IndexNotFound:\n    loop:\n        if i == list::length(xs):\n            return -1\n        if list::at(xs, i) == target:\n            return i\n        return find(xs, i + 1, target)\n\n\[find(\[5, 6, 7\], 0, 7), find(\[5\], 0, 9)\]"
 } -result same
 
 # ---------------------------------------------------------------------------
@@ -199,14 +199,14 @@ test native-guard-1 {a known operation on an unknown kind is guarded, not dispat
 } -result {1 1 0}
 
 test native-guard-2 {no guard where HIR proves the kind} -body {
-    set body [nirFunction [nirOf "fn f(s):\n    n = str::length(s)\n    str::concat(s, s)\n\nf(\"a\")" -specialize 0] f]
+    set body [nirFunction [nirOf "import str\nfn f(s):\n    n = str::length(s)\n    str::concat(s, s)\n\nf(\"a\")" -specialize 0] f]
     list [regexp -all {guard str %0} $body] [regexp {op strcat %0 %0} $body]
 } -result {1 1}
 
 test native-guard-3 {guard failures raise the reference TYPE errors} -body {
     list [parity "fn inc(x):\n    x + 1\n\ninc(\"a\")"] [native "fn inc(x):\n    x + 1\n\ninc(\"a\")"] \
-         [parity "fn f(s):\n    str::length(s)\n\nf(\[1\])"] [parity "str::concat(\"a\", 1)"] \
-         [parity "fn g(l) errors IndexNotFound:\n    list::at(l, \"0\")\n\ng(\[1\])"]
+         [parity "import str\nfn f(s):\n    str::length(s)\n\nf(\[1\])"] [parity "import str\nstr::concat(\"a\", 1)"] \
+         [parity "import list\nfn g(l) errors IndexNotFound:\n    list::at(l, \"0\")\n\ng(\[1\])"]
 } -result {same {error {CORE SEMANTIC TYPE} {+: expected int, got "a"}} same same same}
 
 test native-guard-4 {a non-Boolean condition} -body {
@@ -214,7 +214,7 @@ test native-guard-4 {a non-Boolean condition} -body {
 } -result {same {error {CORE SEMANTIC NOT-BOOLEAN} {if condition must be a Boolean, got []}}}
 
 test native-error-1 {ARITY of blocks and natives, NOT-CALLABLE, EQUALITY} -body {
-    list [parity "fn f(a, b):\n    a\n\nf(1)"] [parity "str::length(\"a\", \"b\")"] \
+    list [parity "fn f(a, b):\n    a\n\nf(1)"] [parity "import str\nstr::length(\"a\", \"b\")"] \
          [parity "fn call(g, x):\n    g(x)\n\ncall(5, 1)"] \
          [parity "fn call(g, x):\n    g(x)\n\nfn two(a, b):\n    a\n\ncall(two, 1)"] \
          [parity "fn f():\n    1\n\nfn same(a, b):\n    a == b\n\nsame(f, f)"] \
@@ -229,14 +229,14 @@ test native-error-2 {UNBOUND and DUPLICATE are raised at run time, in order; a f
 } -result {same same {CORE SEMANTIC UNBOUND} {value 1}}
 
 test native-error-3 {IndexNotFound of list::at and RANGE errors of str::substring, including big indices} -body {
-    list [parity "list::at(\[1, 2\], 2)"] [parity "list::at(\[\], 0)"] [parity "list::at(\[1\], -1)"] \
-         [parity "list::at(\[1\], 100000000000000000000)"] [parity "str::substring(\"abc\", 2, 1)"] \
-         [parity "str::substring(\"abc\", 0, 4)"] [parity "str::substring(\"abc\", -1, 2)"] \
-         [native "list::at(\[1, 2\], 2)"]
+    list [parity "import list\nlist::at(\[1, 2\], 2)"] [parity "import list\nlist::at(\[\], 0)"] [parity "import list\nlist::at(\[1\], -1)"] \
+         [parity "import list\nlist::at(\[1\], 100000000000000000000)"] [parity "import str\nstr::substring(\"abc\", 2, 1)"] \
+         [parity "import str\nstr::substring(\"abc\", 0, 4)"] [parity "import str\nstr::substring(\"abc\", -1, 2)"] \
+         [native "import list\nlist::at(\[1, 2\], 2)"]
 } -result {same same same same same same same {error {CORE SEMANTIC UNCAUGHT-ERROR} {uncaught propagated error: <error IndexNotFound>}}}
 
 test native-error-4 {errors inside looped tail calls and deep frames propagate} -body {
-    list [parity "fn f(n, acc):\n    if n == 0:\n        return acc\n    f(n - 1, str::concat(acc, n))\n\nf(3, \"x\")"] \
+    list [parity "import str\nfn f(n, acc):\n    if n == 0:\n        return acc\n    f(n - 1, str::concat(acc, n))\n\nf(3, \"x\")"] \
          [parity "fn g(n):\n    if n == 0:\n        return 1 + \"x\"\n    1 + g(n - 1)\n\ng(50)"]
 } -result {same same}
 
@@ -248,8 +248,8 @@ test native-error-5 {unbounded non-tail recursion is a resource error, not a cra
 # Strings, lists, Results, equality
 
 test native-string-1 {string primitives, non-ASCII characters and escapes} -body {
-    list [parity "\[str::length(\"h\u00e9llo\"), str::substring(\"h\u00e9llo\", 1, 3), str::concat(\"\u00e4\", \"\u20ac\"), str::lowercase(\"ABC\u00c4\"), \"a\\\"b\\n\\\\c\\t\"\]"] \
-         [parity "\[\"x\" == \"x\", \"x\" == \"y\", \"\" == \"\", str::substring(\"abc\", 3, 3)\]"]
+    list [parity "import str\n\[str::length(\"h\u00e9llo\"), str::substring(\"h\u00e9llo\", 1, 3), str::concat(\"\u00e4\", \"\u20ac\"), str::lowercase(\"ABC\u00c4\"), \"a\\\"b\\n\\\\c\\t\"\]"] \
+         [parity "import str\n\[\"x\" == \"x\", \"x\" == \"y\", \"\" == \"\", str::substring(\"abc\", 3, 3)\]"]
 } -result {same same}
 
 # A supplementary-plane character (outside the Basic Multilingual Plane) is
@@ -258,12 +258,12 @@ test native-string-1 {string primitives, non-ASCII characters and escapes} -body
 # sequences, matching Botlish's own String semantics (core/core.tcl requires
 # Tcl 9 for exactly this reason).
 test native-string-astral-1 {a supplementary-plane character is one scalar value, not a surrogate pair} -body {
-    list [parity "\[str::length(\"\U0001F642\"), str::length(\"a\U0001F642b\"), str::substring(\"a\U0001F642b\", 1, 2), \"\U0001F642\" == \"\U0001F642\", \"\U0001F642\" == \"\U0001F643\"\]"] \
-         [native "\[str::length(\"\U0001F642\"), str::length(\"a\U0001F642b\"), str::substring(\"a\U0001F642b\", 1, 2), \"\U0001F642\" == \"\U0001F642\", \"\U0001F642\" == \"\U0001F643\"\]"]
+    list [parity "import str\n\[str::length(\"\U0001F642\"), str::length(\"a\U0001F642b\"), str::substring(\"a\U0001F642b\", 1, 2), \"\U0001F642\" == \"\U0001F642\", \"\U0001F642\" == \"\U0001F643\"\]"] \
+         [native "import str\n\[str::length(\"\U0001F642\"), str::length(\"a\U0001F642b\"), str::substring(\"a\U0001F642b\", 1, 2), \"\U0001F642\" == \"\U0001F642\", \"\U0001F642\" == \"\U0001F643\"\]"]
 } -result "same {value {\[1, 3, \"\U0001F642\", true, false\]}}"
 
 test native-list-1 {list primitives and structural equality} -body {
-    list [parity "xs = \[1, \[2, 3\], \"four\"\]\n\[list::length(xs), list::at(xs, 1), list::append(xs, 5), xs\]"] \
+    list [parity "import list\nxs = \[1, \[2, 3\], \"four\"\]\n\[list::length(xs), list::at(xs, 1), list::append(xs, 5), xs\]"] \
          [parity "\[\[1, \[2\]\] == \[1, \[2\]\], \[1\] == \[1, 2\], \[1\] == \[\"1\"\], \[\] == \[\]\]"]
 } -result {same same}
 
@@ -314,7 +314,7 @@ test native-call-4 {calls that are not in tail position stay calls} -body {
 } -result {0 2 same}
 
 test native-call-5 {known natives use no generic dispatch} -body {
-    set clif [clifOf "fn f(s):\n    str::concat(str::substring(s, 0, 1), s)\n\nf(\"ab\")"]
+    set clif [clifOf "import str\nfn f(s):\n    str::concat(str::substring(s, 0, 1), s)\n\nf(\"ab\")"]
     set body [clifFunction $clif 1]
     regexp {; u0:([0-9]+) = rt_call_value} $clif -> dispatch
     list [regexp "= u0:$dispatch " $body] [regexp {; u0:[0-9]+ = rt_substr} $clif]
@@ -343,7 +343,7 @@ test native-call-7 {calls through closures and natives passed as values: exact t
     list [parity "fn apply(f, x):\n    f(x)\n\nfn inc(n):\n    n + 1\n\n\[apply(inc, 1), apply(length, \"abc\")\]"] \
          [regexp {callvalue} [nirFunction [nirOf "fn apply(f, x):\n    f(x)\n\napply(length, \"a\")"] apply]] \
          [parity "fn apply(f, x):\n    f(x)\n\napply(substring, \"abc\")"] \
-         [parity "fn apply2(f, x, y):\n    f(x, y)\n\n\[apply2(list::at, \[1, 2\], 1), apply2(list::at, \[1\], 5)\]"] \
+         [parity "import list\nfn apply2(f, x, y):\n    f(x, y)\n\n\[apply2(list::at, \[1, 2\], 1), apply2(list::at, \[1\], 5)\]"] \
          [regexp {callvalue} [nirFunction [nirOf "fn apply(f, x):\n    f(x)\n\nfn inc(n):\n    n + 1\n\nfn dec(n):\n    n - 1\n\nfn pick(up):\n    if up:\n        inc\n    else:\n        dec\n\napply(pick(true), 1)"] apply]] \
          [parity "fn apply(f, x):\n    f(x)\n\nfn inc(n):\n    n + 1\n\nfn dec(n):\n    n - 1\n\nfn pick(up):\n    if up:\n        inc\n    else:\n        dec\n\n\[apply(pick(true), 1), apply(pick(false), 1)\]"]
 } -result {same 0 same same 1 same}
@@ -473,24 +473,24 @@ test native-spec-8 {List[Int] -> list::at -> Int: no kind guard; a dynamic index
     # never a candidate for this optimization (native-spec-8's own final
     # check): its ordinary runtime range check is unaffected and still
     # correctly raises on an out-of-range index.
-    set text "fn first_plus(xs, n) errors IndexNotFound:\n    list::at(xs, 0) + n\n\nfirst_plus(\[1, 2\], 3)"
+    set text "import list\nfn first_plus(xs, n) errors IndexNotFound:\n    list::at(xs, 0) + n\n\nfirst_plus(\[1, 2\], 3)"
     set nir [nirOf $text]
     set body [nirFunction $nir first_plus {List[int], int}]
     list [nirInstances $nir first_plus] [regexp {guard} $body] [regexp {op listget %0 %[0-9]+} $body] \
          [regexp -all {guard} [nirFunction [nirOf $text -specialize 0] first_plus]] \
-         [parity $text] [parity "fn first_plus(xs, n) errors IndexNotFound:\n    list::at(xs, 0) + n\n\nfirst_plus(\[\], 3)"] \
-         [native "fn at(xs, i) errors IndexNotFound:\n    list::at(xs, i) + 1\n\nat(\[1, 2\], 2)"]
+         [parity $text] [parity "import list\nfn first_plus(xs, n) errors IndexNotFound:\n    list::at(xs, 0) + n\n\nfirst_plus(\[\], 3)"] \
+         [native "import list\nfn at(xs, i) errors IndexNotFound:\n    list::at(xs, i) + 1\n\nat(\[1, 2\], 2)"]
 } -result {{{List[int], int}} 0 0 2 same same {error {CORE SEMANTIC UNCAUGHT-ERROR} {uncaught propagated error: <error IndexNotFound>}}}
 
 test native-spec-9 {nested lists: the matrix's rows and entries are known} -body {
-    set text "fn cell(m, r, c) errors IndexNotFound:\n    list::at(list::at(m, r), c) * 2\n\ncell(\[\[1, 2\], \[3, 4\]\], 1, 0)"
+    set text "import list\nfn cell(m, r, c) errors IndexNotFound:\n    list::at(list::at(m, r), c) * 2\n\ncell(\[\[1, 2\], \[3, 4\]\], 1, 0)"
     set body [nirFunction [nirOf $text] cell {List[List[int]], int, int}]
     list [regexp {guard} $body] [parity $text] [native $text]
 } -result {0 same {value 6}}
 
 test native-spec-10 {heterogeneous lists and appends do not claim an element kind} -body {
-    set appended "fn bump(xs, i) errors IndexNotFound:\n    list::at(xs, i) + 1\n\nbump(list::append(\[1\], \"a\"), 1)"
-    set mixed "fn bump(xs, i) errors IndexNotFound:\n    list::at(xs, i) + 1\n\nbump(\[1, \"a\"\], 0)"
+    set appended "import list\nfn bump(xs, i) errors IndexNotFound:\n    list::at(xs, i) + 1\n\nbump(list::append(\[1\], \"a\"), 1)"
+    set mixed "import list\nfn bump(xs, i) errors IndexNotFound:\n    list::at(xs, i) + 1\n\nbump(\[1, \"a\"\], 0)"
     list [regexp {guard int} [nirFunction [nirOf $appended] bump]] [parity $appended] \
          [nirInstances [nirOf $mixed] bump] [regexp {guard int} [nirFunction [nirOf $mixed] bump]] [parity $mixed] \
          [native $appended]
@@ -508,7 +508,7 @@ test native-spec-10 {heterogeneous lists and appends do not claim an element kin
 # full-disassembly comparison).
 
 test native-listget-fast-1 {a dynamic list::at inlines its bounds check and load; rt_list_get is still declared (the cold fallback), just not the only path} -body {
-    set text "fn at(xs, i) errors IndexNotFound:\n    list::at(xs, i)\n\nat(\[10, 20, 30\], 1)"
+    set text "import list\nfn at(xs, i) errors IndexNotFound:\n    list::at(xs, i)\n\nat(\[10, 20, 30\], 1)"
     set nir [nirOf $text]
     set clif [clifOf $text]
     set inst [lindex [nirInstances $nir at] 0]
@@ -518,7 +518,7 @@ test native-listget-fast-1 {a dynamic list::at inlines its bounds check and load
 } -result {1 1 {value 20}}
 
 test native-listget-fast-2 {BOTLISH_NATIVE_LISTGET_FAST_OPT=0 falls back to the old call-only lowering (no inline bounds check at all); both give the same result} -body {
-    set text "fn at(xs, i) errors IndexNotFound:\n    list::at(xs, i)\n\nat(\[10, 20, 30\], 1)"
+    set text "import list\nfn at(xs, i) errors IndexNotFound:\n    list::at(xs, i)\n\nat(\[10, 20, 30\], 1)"
     set nir [nirOf $text]
     set inst [lindex [nirInstances $nir at] 0]
     set id [nirFunctionId $nir at $inst]
@@ -535,7 +535,7 @@ test native-listget-fast-2 {BOTLISH_NATIVE_LISTGET_FAST_OPT=0 falls back to the 
 } -result {1 0 {value 20} {value 20}}
 
 test native-listget-fast-3 {matmul's dot inner loop: all three dynamic accesses (a_row[k], b[k], b[k][column]) inline their bounds check and load} -body {
-    set text "fn dot(a_row, b, column, k, count, total) errors IndexNotFound:\n    if k == count:\n        return total\n    term = list::at(a_row, k) * list::at(list::at(b, k), column)\n    dot(a_row, b, column, k + 1, count, total + term)\n\ndot(\[1, 2\], \[\[1, 2\], \[3, 4\]\], 0, 0, list::length(\[1, 2\]), 0)"
+    set text "import list\nfn dot(a_row, b, column, k, count, total) errors IndexNotFound:\n    if k == count:\n        return total\n    term = list::at(a_row, k) * list::at(list::at(b, k), column)\n    dot(a_row, b, column, k + 1, count, total + term)\n\ndot(\[1, 2\], \[\[1, 2\], \[3, 4\]\], 0, 0, list::length(\[1, 2\]), 0)"
     set nir [nirOf $text]
     set inst [lindex [nirInstances $nir dot] 0]
     set body [clifFunction [clifOf $text] [nirFunctionId $nir dot $inst]]
@@ -543,7 +543,7 @@ test native-listget-fast-3 {matmul's dot inner loop: all three dynamic accesses 
 } -result {3 {value 7}}
 
 test native-listget-fast-4 {nested list::at(list::at(b, k), column): the first load's result is a valid receiver for the second's inline fast path too} -body {
-    set text "fn cell(m, r, c) errors IndexNotFound:\n    list::at(list::at(m, r), c) * 2\n\ncell(\[\[1, 2\], \[3, 4\]\], 1, 0)"
+    set text "import list\nfn cell(m, r, c) errors IndexNotFound:\n    list::at(list::at(m, r), c) * 2\n\ncell(\[\[1, 2\], \[3, 4\]\], 1, 0)"
     set nir [nirOf $text]
     set inst [lindex [nirInstances $nir cell] 0]
     set body [clifFunction [clifOf $text] [nirFunctionId $nir cell $inst]]
@@ -552,10 +552,10 @@ test native-listget-fast-4 {nested list::at(list::at(b, k), column): the first l
 
 test native-listget-fast-5 {IndexNotFound (negative, ==length, >length, a BigInt index) is byte-identical whether the fast path is on or off} -body {
     set cases [list \
-        "fn at(xs, i) errors IndexNotFound:\n    list::at(xs, i)\n\nat(\[1, 2\], 2)" \
-        "fn at(xs, i) errors IndexNotFound:\n    list::at(xs, i)\n\nat(\[\], 0)" \
-        "fn at(xs, i) errors IndexNotFound:\n    list::at(xs, i)\n\nat(\[1\], -1)" \
-        "fn at(xs, i) errors IndexNotFound:\n    list::at(xs, i)\n\nat(\[1\], 100000000000000000000)"]
+        "import list\nfn at(xs, i) errors IndexNotFound:\n    list::at(xs, i)\n\nat(\[1, 2\], 2)" \
+        "import list\nfn at(xs, i) errors IndexNotFound:\n    list::at(xs, i)\n\nat(\[\], 0)" \
+        "import list\nfn at(xs, i) errors IndexNotFound:\n    list::at(xs, i)\n\nat(\[1\], -1)" \
+        "import list\nfn at(xs, i) errors IndexNotFound:\n    list::at(xs, i)\n\nat(\[1\], 100000000000000000000)"]
     set on [lmap c $cases {native $c}]
     set ::env(BOTLISH_NATIVE_LISTGET_FAST_OPT) 0
     try {
@@ -567,13 +567,13 @@ test native-listget-fast-5 {IndexNotFound (negative, ==length, >length, a BigInt
 } -result {1 {{error {CORE SEMANTIC UNCAUGHT-ERROR} {uncaught propagated error: <error IndexNotFound>}} {error {CORE SEMANTIC UNCAUGHT-ERROR} {uncaught propagated error: <error IndexNotFound>}} {error {CORE SEMANTIC UNCAUGHT-ERROR} {uncaught propagated error: <error IndexNotFound>}} {error {CORE SEMANTIC UNCAUGHT-ERROR} {uncaught propagated error: <error IndexNotFound>}}}}
 
 test native-listget-fast-6 {boundary indices: a length-1 list at index 0 succeeds, at index 1 fails, and the empty list fails at index 0} -body {
-    list [native "fn at(xs, i) errors IndexNotFound:\n    list::at(xs, i)\n\nat(\[42\], 0)"] \
-         [native "fn at(xs, i) errors IndexNotFound:\n    list::at(xs, i)\n\nat(\[42\], 1)"] \
-         [native "fn at(xs, i) errors IndexNotFound:\n    list::at(xs, i)\n\nat(\[\], 0)"]
+    list [native "import list\nfn at(xs, i) errors IndexNotFound:\n    list::at(xs, i)\n\nat(\[42\], 0)"] \
+         [native "import list\nfn at(xs, i) errors IndexNotFound:\n    list::at(xs, i)\n\nat(\[42\], 1)"] \
+         [native "import list\nfn at(xs, i) errors IndexNotFound:\n    list::at(xs, i)\n\nat(\[\], 0)"]
 } -result {{value 42} {error {CORE SEMANTIC UNCAUGHT-ERROR} {uncaught propagated error: <error IndexNotFound>}} {error {CORE SEMANTIC UNCAUGHT-ERROR} {uncaught propagated error: <error IndexNotFound>}}}
 
 test native-listget-fast-7 {a managed element the fast path loads (no allocation of its own) stays correctly rooted across a later allocation, under GC stress} -body {
-    set text "fn f(xs, i) errors IndexNotFound:\n    v = list::at(xs, i)\n    y = str::concat(\"a very long string so it actually allocates\", \"more text here too\")\n    \[v, y\]\n\nf(\[\"first element also fairly long so nothing is virtualized away\", \"second\"\], 0)"
+    set text "import list\nimport str\nfn f(xs, i) errors IndexNotFound:\n    v = list::at(xs, i)\n    y = str::concat(\"a very long string so it actually allocates\", \"more text here too\")\n    \[v, y\]\n\nf(\[\"first element also fairly long so nothing is virtualized away\", \"second\"\], 0)"
     set normal [native $text]
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
     try {
@@ -586,10 +586,10 @@ test native-listget-fast-7 {a managed element the fast path loads (no allocation
 
 test native-spec-11 {errors and big Ints keep their semantics in specializations} -body {
     list [parity "fn double(x):\n    x * 2\n\n\[double(4611686018427387903), double(-4611686018427387904)\]"] \
-         [parity "fn cut(s, n):\n    str::substring(s, 0, n)\n\ncut(\"abc\", 5)"] \
+         [parity "import str\nfn cut(s, n):\n    str::substring(s, 0, n)\n\ncut(\"abc\", 5)"] \
          [parity "fn add(a, b):\n    a + b\n\nadd(1, \"b\")"] \
-         [parity "fn head(xs) errors IndexNotFound:\n    list::at(xs, 0) + 1\n\nhead(\[\])"] \
-         [parity "fn size(s):\n    str::length(s)\n\nsize(\[1\])"] \
+         [parity "import list\nfn head(xs) errors IndexNotFound:\n    list::at(xs, 0) + 1\n\nhead(\[\])"] \
+         [parity "import str\nfn size(s):\n    str::length(s)\n\nsize(\[1\])"] \
          [parity "fn f(c, x):\n    if c:\n        x\n    else:\n        0\n\nf(1, 2)"]
 } -result {same same same same same same}
 
@@ -671,7 +671,15 @@ test native-spec-14 {guard accounting: blockers and emitted guards agree} -body 
 # region has two representation blockers of its own (its unannotated
 # `array` and `index` parameters at the mutable_array::at call); neither
 # program calls it, so no emitted guard changes.
-} -result {{ai_text_clean 5 5 0 0} {csv 15 17 0 0} {csv_chunked 26 26 1 1} {csv_geometric 27 27 2 2} {csv_records 91 unsupported 23 23} {hashtable 67 unsupported 25 25} {matmul 17 17 0 0} {string_replace 12 12 0 0} {string_reverse 4 4 0 0}}
+#
+# csv/csv_chunked/csv_geometric/csv_records/hashtable/matmul blockers +10
+# (and +2 more where mutable_array is imported: csv_chunked, csv_geometric,
+# csv_records, hashtable) with IMPORTS.md: `import list` / `import
+# mutable_array` now load lib/list.bot / lib/mutable_array.bot, whose own
+# generic regions (get/any?/all?/none?/find: 10 blockers; mutable_array::get:
+# 2) count as semantic blockers although no program calls them; generic and
+# specialized guards are unchanged.
+} -result {{ai_text_clean 5 5 0 0} {csv 25 17 0 0} {csv_chunked 38 26 1 1} {csv_geometric 37 27 2 2} {csv_records 101 unsupported 23 23} {hashtable 79 unsupported 25 25} {matmul 27 17 0 0} {string_replace 12 12 0 0} {string_reverse 4 4 0 0}}
 
 # ---------------------------------------------------------------------------
 # Closures
@@ -689,7 +697,7 @@ test native-closure-3 {closures in loops, nested closures, and recursive closure
     list [parity "fn outer(k):\n    fn count(n):\n        if n == 0:\n            return k\n        count(n - 1)\n    fn twice(n):\n        count(n) + count(n)\n    \[count(6), twice(3)\]\n\nouter(5)"] \
          [parity "fn a(x):\n    fn b(y):\n        fn c(z):\n            x + y + z\n        c\n    b\n\na(1)(2)(3)"] \
          [parity "fn make():\n    loop:\n        k = 7\n        fn get():\n            k\n        return get\n\nmake()()"] \
-         [parity "fn make(n):\n    fn get():\n        n\n    get\n\nfn collect(i, acc):\n    if i == 4:\n        return acc\n    collect(i + 1, list::append(acc, make(i)))\n\nfs = collect(0, \[\])\n\[list::at(fs, 0)(), list::at(fs, 3)()\]"]
+         [parity "import list\nfn make(n):\n    fn get():\n        n\n    get\n\nfn collect(i, acc):\n    if i == 4:\n        return acc\n    collect(i + 1, list::append(acc, make(i)))\n\nfs = collect(0, \[\])\n\[list::at(fs, 0)(), list::at(fs, 3)()\]"]
 } -result {same same same same}
 
 test native-closure-4 {a Block cannot be returned to the host} -body {
@@ -954,7 +962,7 @@ test native-repr-12 {a self-tail loop's proven-small parameter is declared raw f
 } -result {1 1 1 1 1 0}
 
 test native-repr-13 {a loop-carried index bounded by an immutable collection length (string_reverse's shape) stays raw across the self-tail backedge} -body {
-    set text "fn reverse_from(text, index, reversed):\n    if index == str::length(text):\n        return reversed\n    character = str::substring(text, index, index + 1)\n    reverse_from(text, index + 1, str::concat(character, reversed))\n\nreverse_from(\"hello\", 0, \"\")"
+    set text "import str\nfn reverse_from(text, index, reversed):\n    if index == str::length(text):\n        return reversed\n    character = str::substring(text, index, index + 1)\n    reverse_from(text, index + 1, str::concat(character, reversed))\n\nreverse_from(\"hello\", 0, \"\")"
     set nir [nirOf $text]
     set body [nirFunction $nir reverse_from]
     list [regexp {func [0-9]+ "reverse_from"[^\n]*rawregs="(?:\d+ )*1(?: \d+)*"} $nir] \
@@ -964,7 +972,7 @@ test native-repr-13 {a loop-carried index bounded by an immutable collection len
 } -result {1 1 1 1 same {value {"olleh"}}}
 
 test native-repr-14 {a parameter seeded, at every external call site, only by a length/list::length-shaped argument (matmul's "count") is itself proven small with no relational reasoning, so an == guard against it stays raw too} -body {
-    set text "fn dot(a_row, b, column, k, count, total) errors IndexNotFound:\n    if k == count:\n        return total\n    term = list::at(a_row, k) * list::at(list::at(b, k), column)\n    dot(a_row, b, column, k + 1, count, total + term)\n\ndot(\[1, 2\], \[\[1, 2\], \[3, 4\]\], 0, 0, list::length(\[1, 2\]), 0)"
+    set text "import list\nfn dot(a_row, b, column, k, count, total) errors IndexNotFound:\n    if k == count:\n        return total\n    term = list::at(a_row, k) * list::at(list::at(b, k), column)\n    dot(a_row, b, column, k + 1, count, total + term)\n\ndot(\[1, 2\], \[\[1, 2\], \[3, 4\]\], 0, 0, list::length(\[1, 2\]), 0)"
     set body [nirFunction [nirOf $text] dot]
     list [regexp {op rieq} $body] [regexp {op riadd} $body] [regexp {op imul} $body] \
          [regexp {op iadd} $body] [parity $text] [native $text]
@@ -977,7 +985,7 @@ test native-repr-15 {an equality-terminated loop whose step is +-2 is not (unsou
 } -result {0 0 1 {value 50000}}
 
 test native-repr-16 {a self-recursive counter with no recognizable step (an opaque, call-derived next value, csv's scan_records shape) safely falls back to tagged: analysis terminates, and execution is still correct} -body {
-    set text "fn next_index(i):\n    i + 1\n\nfn scan(text, index, count):\n    if index >= str::length(text):\n        return count\n    scan(text, next_index(index), count + 1)\n\nscan(\"abcde\", 0, 0)"
+    set text "import str\nfn next_index(i):\n    i + 1\n\nfn scan(text, index, count):\n    if index >= str::length(text):\n        return count\n    scan(text, next_index(index), count + 1)\n\nscan(\"abcde\", 0, 0)"
     set body [nirFunction [nirOf $text] scan]
     list [regexp {op riadd} $body] [regexp {op rige} $body] [native $text]
 } -result {0 0 {value 5}}

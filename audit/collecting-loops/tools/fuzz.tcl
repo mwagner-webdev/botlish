@@ -90,7 +90,7 @@ proc allOutcomes {hir} {
 
 # {ok HIR} or {rejected KIND MESSAGE} for strict compilation of TEXT.
 proc compileStrict {text} {
-    if {[catch {surface::compile $text fuzz.bot} message options]} {
+    if {[catch {surface::compile [surface::modules::ImportHeader $text]$text fuzz.bot} message options]} {
         set code [dict get $options -errorcode]
         return [list rejected [lindex $code end] $message]
     }
@@ -594,7 +594,7 @@ for {set s $seed0} {$s < $seed0 + $n} {incr s} {
                 foreach mv {-2 0 1 3 5} {
                     set call "f($nv, $mv, \[1, 2, 3\])"
                     set full "$text$call\n"
-                    set callHir [surface::compile [string map {"f(" "f("} $full] fuzz.bot -strict 0]
+                    set callHir [surface::compile [surface::modules::ImportHeader $full]$full fuzz.bot -strict 0]
                     set outcome [outcome interp $callHir]
                     if {[lindex $outcome 0] eq "error" && [string match "*proof was wrong*" [lindex $outcome 2]]} {
                         failure $s "sound: an ACCEPTED lockstep loop has unequal runtime counts at n=$nv m=$mv" $text [lindex $outcome 2]
@@ -607,7 +607,7 @@ for {set s $seed0} {$s < $seed0 + $n} {incr s} {
             if {!$bad} {
                 # a few assignments across all backends
                 foreach {nv mv} {2 2 0 0 3 1} {
-                    set callHir [surface::compile "${text}f($nv, $mv, \[1, 2, 3\])\n" fuzz.bot -strict 0]
+                    set callHir [surface::compile [surface::modules::ImportHeader "${text}f($nv, $mv, \[1, 2, 3\])\n"]"${text}f($nv, $mv, \[1, 2, 3\])\n" fuzz.bot -strict 0]
                     if {[hir::diagnostics $callHir] ne ""} continue
                     checkAgree $s sound $text [allOutcomes $callHir] ""
                 }

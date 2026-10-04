@@ -47,6 +47,7 @@ proc seekBytes {text opt} {
 # idiom this milestone targets (examples/stdlib/csv.bot's and
 # examples/stdlib/ai_text_clean.bot's own `peek`).
 set ::peekSrc {
+import str
 fn peek(text, index):
     if index >= str::length(text):
         return ""

@@ -78,6 +78,9 @@
 #
 # expect: [true, true, false, false, true, 1]
 
+import list
+import mutable_array
+
 fn ht_min_capacity():
     8
 

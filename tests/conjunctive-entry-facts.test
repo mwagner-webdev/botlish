@@ -33,6 +33,10 @@ source [file join $::projectRoot surface surface.tcl]
 
 set ::byteDecl "type Byte = Int in 0..255\nfn byteA() -> Byte:\n    97\n\n"
 
+# The same declarations with the namespace import(s) a program using them needs.
+set ::byteListDecl "import list\n$::byteDecl"
+set ::byteSetDecl "import immutable_set\n$::byteDecl"
+
 proc sourceHir {text} {
     return [surface::compile $text t.bot -strict 0]
 }
@@ -132,7 +136,8 @@ test mixed-callers-third-caller-does-not-perturb-identities {a third, different 
 # items 20-21, 37-39, "Theorem combination test").
 
 test empty-instance-observed-theorem-unchanged {the empty-caller instance's own view of xs stays List[never] -- the observed emptiness theorem is not overwritten by the declared theorem transport (spec item 38)} -body {
-    lassign [specOf {fn consume(xs: List[int]) -> int:
+    lassign [specOf {import list
+fn consume(xs: List[int]) -> int:
     list::length(xs)
 [consume([]), consume([1, 2, 3])]}] hir analysis
     paramViewType $hir $analysis {consume<List[never]>} 0
@@ -150,7 +155,7 @@ test empty-listloop-stays-dead-with-declared-theorem {a declared List[Byte] para
     mapped = loop b in xs:
         b
     list::length(mapped)
-[consume([]), consume([byteA(), byteA()])]} $::byteDecl]
+[consume([]), consume([byteA(), byteA()])]} $::byteListDecl]
     set nirText [nirOf $text]
     set emptyStart [string first {instance="List[never]"} $nirText]
     set nonEmptyStart [string first {instance="List[int]"} $nirText]
@@ -163,7 +168,7 @@ test empty-listloop-stays-dead-with-declared-theorem {a declared List[Byte] para
 test empty-caller-does-not-imply-element-existence {the empty instance's own declared-Byte theorem never manufactures an element to read: list::at(xs, 0) for xs=[] still fails at runtime (bounds), on every backend -- emptiness is never eroded by a declared element contract (spec item 63)} -body {
     set text [format {%sfn first(xs: List[Byte]) -> Byte:
     list::at(xs, 0)
-first([])} $::byteDecl]
+first([])} $::byteListDecl]
     set exprs [hir::lower [sourceHir $text]]
     lmap backend {interp compile cranelift-generic cranelift} {
         core::useBackend $backend
@@ -179,7 +184,7 @@ first([])} $::byteDecl]
 test non-empty-coarsened-instance-regains-declared-byte-theorem {a declared List[Byte] parameter's specialization key is the coarser List[int] (KeyType strips named evidence, even from a List's own element) -- the declared Byte theorem now survives inside that instance's own view, where before this milestone it was simply absent (M7A's S05d)} -body {
     set text [format {%sfn consume(xs: List[Byte]) -> int:
     list::length(xs)
-consume([byteA(), byteA()])} $::byteDecl]
+consume([byteA(), byteA()])} $::byteListDecl]
     lassign [specOf $text] hir analysis
     list [specLabels $analysis consume] [paramViewType $hir $analysis {consume<List[int]>} 0]
 } -result {{{consume<List[int]>}} {List[int[Byte]]}}
@@ -216,7 +221,7 @@ sumIt([byteA(), byteA()])} $::byteDecl]
 test list-get-result-regains-declared-byte-theorem {list::at(xs, 0)'s own inferred result type, inside the List[int]-keyed instance of a declared List[Byte] parameter, is Byte -- a downstream consumer besides listloop also benefits, with no consumer-specific code (spec item 62)} -body {
     set text [format {%sfn first(xs: List[Byte]) -> Byte:
     list::at(xs, 0)
-first([byteA(), byteA()])} $::byteDecl]
+first([byteA(), byteA()])} $::byteListDecl]
     lassign [specOf $text] hir analysis
     list [specLabels $analysis first] [specResult $analysis {first<List[int]>}]
 } -result {{{first<List[int]>}} {int[Byte]}}
@@ -224,7 +229,7 @@ first([byteA(), byteA()])} $::byteDecl]
 test instance-identity-unchanged-by-theorem-transport {the coarsened instance's own key stays List[int] (never List[Byte], never split) -- theorem transport is metadata, not an identity change (spec items 26, 59)} -body {
     set text [format {%sfn consume(xs: List[Byte]) -> int:
     list::length(xs)
-[consume([byteA(), byteA()]), consume([byteA()])]} $::byteDecl]
+[consume([byteA(), byteA()]), consume([byteA()])]} $::byteListDecl]
     lassign [specOf $text] hir analysis
     lsort [specLabels $analysis consume]
 } -result {{consume<List[int]>}}
@@ -232,7 +237,7 @@ test instance-identity-unchanged-by-theorem-transport {the coarsened instance's 
 test mixed-empty-and-coarsened-callers-remain-two-instances {a declared List[Byte] parameter called both empty and non-empty keeps exactly the same two-instance partition (List[never], List[int]) that an undeclared/List[int]-declared parameter already had -- declared theorem transport does not merge or split instances (spec items 18-19)} -body {
     set text [format {%sfn consume(xs: List[Byte]) -> int:
     list::length(xs)
-[consume([]), consume([byteA(), byteA()])]} $::byteDecl]
+[consume([]), consume([byteA(), byteA()])]} $::byteListDecl]
     lassign [specOf $text] hir analysis
     lsort [specLabels $analysis consume]
 } -result {{consume<List[int]>} {consume<List[never]>}}
@@ -244,7 +249,7 @@ test mixed-empty-and-coarsened-callers-remain-two-instances {a declared List[Byt
 test nested-declared-theorem-survives-coarsened-outer-and-inner-shape {declared List[List[Byte]], called with a non-empty outer/inner shape that keys List[List[int]] -- the inner Byte theorem survives two levels of recursion through the extended narrow, with the same List[List[int]] instance key} -body {
     set text [format {%sfn consume(xs: List[List[Byte]]) -> int:
     list::length(xs)
-consume([[byteA(), byteA()]])} $::byteDecl]
+consume([[byteA(), byteA()]])} $::byteListDecl]
     lassign [specOf $text] hir analysis
     list [specLabels $analysis consume] \
          [paramViewType $hir $analysis {consume<List[List[int]]>} 0]
@@ -261,7 +266,7 @@ consume([[byteA(), byteA()]])} $::byteDecl]
 test set-declared-theorem-already-transported-by-m1 {a declared ImmutableSet[Byte] parameter's (always-generic-shaped) key already carries the declared element type via M1's pre-existing branch -- unaffected by, and not requiring, this milestone's own new List/Set-specific-key branch} -body {
     set text [format {%sfn consume(xs: ImmutableSet[Byte]) -> int:
     setcontains(xs, byteA())
-consume(immutable_set::from_list([byteA()]))} $::byteDecl]
+consume(immutable_set::from_list([byteA()]))} $::byteSetDecl]
     lassign [specOf $text] hir analysis
     list [specLabels $analysis consume] \
          [paramViewType $hir $analysis [lindex [specLabels $analysis consume] 0] 0]
@@ -270,7 +275,7 @@ consume(immutable_set::from_list([byteA()]))} $::byteDecl]
 test empty-immutable-set-instance-not-formed-by-key {ImmutableSet's key never tracks emptiness (unlike List[never]): an empty-set caller and a non-empty-set caller of the same declared ImmutableSet[T] parameter share the one "immutableSet"-keyed instance -- documented architectural coverage for spec item 50, not a gap this milestone needed to close (no Set-specific empty-instance mechanism exists to combine a theorem with)} -body {
     set text [format {%sfn consume(xs: ImmutableSet[Byte]) -> int:
     1
-[consume(immutable_set::from_list([])), consume(immutable_set::from_list([byteA()]))]} $::byteDecl]
+[consume(immutable_set::from_list([])), consume(immutable_set::from_list([byteA()]))]} $::byteSetDecl]
     lassign [specOf $text] hir analysis
     specLabels $analysis consume
 } -result {consume<immutableSet>}
@@ -401,7 +406,8 @@ fn caller(g, v):
 # treated as though it were a declared contract.
 
 test untyped-parameter-gains-no-declared-style-theorem {fn f(xs): (no declared type) called with a List[int]-shaped argument does not acquire any declared-theorem view beyond the plain observed key -- specialization facts are optimization facts, never a retroactive source-level contract (spec item 79)} -body {
-    lassign [specOf {fn f(xs):
+    lassign [specOf {import list
+fn f(xs):
     list::length(xs)
 f([1, 2, 3])}] hir analysis
     list [specLabels $analysis f] [paramViewType $hir $analysis {f<List[int]>} 0]

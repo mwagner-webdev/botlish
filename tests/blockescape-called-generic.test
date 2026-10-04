@@ -30,6 +30,7 @@ proc dedent {text} {
 # directly (f<int>); in f<generic> the nested closure's call g(a) has an
 # unknown argument and selects g<generic>, in f<int> it selects g<int>.
 set listGetShape {
+    import list
     fn f(a):
         k = 5
         fn g(x):
@@ -41,6 +42,7 @@ set listGetShape {
 }
 
 set bothShape {
+    import list
     fn f(a):
         k = 5
         fn g(x):

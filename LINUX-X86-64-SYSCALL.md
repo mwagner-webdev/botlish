@@ -9,6 +9,9 @@ the complete path is demonstrated with `getpid` -- without the compiler
 knowing what `getpid` is:
 
 ```botlish
+import abi::x86_64
+import linux::abi
+
 fn raw_getpid():
     abi::x86_64::to_int(
         linux::abi::syscall({

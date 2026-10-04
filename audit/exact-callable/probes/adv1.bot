@@ -3,6 +3,8 @@
 #
 # expect: [2, 3, 2, 3, 3]
 
+import str
+
 fn run(v):
     fn walk(i, p):
         if i < 0 or i >= str::length(v):

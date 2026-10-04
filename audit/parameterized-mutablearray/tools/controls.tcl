@@ -60,7 +60,7 @@ foreach {name text} $controls {
     set path [file join [file tempdir] control-$name.bot]
     set out [open $path w]
     fconfigure $out -encoding utf-8
-    puts -nonewline $out "$base\n$text"
+    puts -nonewline $out "[surface::modules::ImportHeader "$base\n$text"]$base\n$text"
     close $out
     if {[catch {surface::readProgramFile $path -strict 0} hir]} {
         puts "$name: NOT COMPILED ([string range $hir 0 90])"

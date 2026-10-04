@@ -102,6 +102,7 @@ proc paramGuards {hir analysis id} {
 # the guard is gone -- through the existing guard machinery, unmodified.
 
 set ::positiveFixture {
+import str
 fn outer(tag):
     fn inner(x):
         str::length(x) + str::length(tag)
@@ -148,6 +149,7 @@ test closed-single-kind-closure-instance-count-unchanged {used-instance count (p
 
 test closed-multi-caller-theorem-not-copied-from-first {a third exact Str caller keeps the theorem exactly Str, not the first caller's own possibly-narrower fact by coincidence} -body {
     lassign [specOf {
+import str
 fn outer(tag):
     fn inner(x):
         str::length(x) + str::length(tag)
@@ -164,6 +166,7 @@ outer("v")
 # single kind, and a guard that is genuinely necessary must stay necessary.
 
 set ::mixedFixture {
+import str
 fn outer(tag):
     fn inner(x):
         str::concat(tag, "")
@@ -186,6 +189,7 @@ test closed-mixed-kind-closure-theorem-widens-to-any {the theorem for inner's ow
 
 test closed-mixed-kind-closure-guard-retained-when-necessary {a genuinely kind-requiring parameter with disagreeing exact callers keeps its guard: closedness never manufactures an unsound narrowing (spec items 27, 64)} -body {
     lassign [specOf {
+import str
 fn outer(tag):
     fn inner(x):
         str::length(x) + str::length(tag)
@@ -206,6 +210,7 @@ outer("v")
 # to pass Str.
 
 set ::openFixture {
+import str
 fn outer(tag):
     fn inner(x):
         str::length(x) + str::length(tag)
@@ -267,6 +272,7 @@ test open-instance-callvalue-with-exact-callable-opt-off {with -exact-callable-o
 
 test exact-alias-reference-is-not-currently-vouched-for {"alias = inner" is a plain value reference to inner: blockescape's own single-level RefsAsCalls check (a reference must itself be a call's callee) does not recognize it, so inner is conservatively NOT closed -- pinning the actual current answer to spec item 19, not assuming one} -body {
     lassign [specOf {
+import str
 fn outer(tag):
     fn inner(x):
         str::length(x) + str::length(tag)
@@ -296,6 +302,7 @@ test escaping-closure-prevents-closedness {a closure passed into an ordinary unt
 # through middle's own (equally closed) caller facts.
 
 set ::capturedThroughParentFixture {
+import str
 fn outer(tag):
     fn inner(x):
         str::length(x) + str::length(tag)
@@ -333,6 +340,7 @@ test captured-through-parent-guard-eliminated {inner's own guard is gone under t
 
 test zero-caller-instance-not-closed {a value-capturing closure with no exact caller at all is not closed: zero callers never produce an arbitrary theorem (spec item 32's own "Required: no")} -body {
     lassign [specOf {
+import str
 fn outer(tag):
     fn inner(x):
         x + str::length(tag)
@@ -350,6 +358,7 @@ outer("v")
 # does).
 
 set ::recursiveFixture {
+import str
 fn outer(tag):
     fn inner(x, s):
         if str::length(s) <= 0:
@@ -382,6 +391,8 @@ test recursive-self-edge-guard-eliminated {both of inner's own guards (x's use, 
 # neither erases the other, and instance identity is still untouched.
 
 set ::declaredPlusCallerFixture {
+import list
+import str
 type Byte = Int in 0..255
 fn byteA() -> Byte:
     97

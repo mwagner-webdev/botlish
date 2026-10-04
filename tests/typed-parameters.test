@@ -210,7 +210,8 @@ fn take_small(x: Small) -> Small:
     x
 }
     close $ch
-    set mainPath [makeFile {typedparamlib::take_small(7)
+    set mainPath [makeFile {import typedparamlib
+typedparamlib::take_small(7)
 } typed-param-cross-module.bot]
     try {
         set h [surface::readProgramFile $mainPath -strict 0]
@@ -232,7 +233,8 @@ fn take_small(x: Small) -> Small:
     x
 }
     close $ch
-    set mainPath [makeFile {typedparamlib2::take_small(99)
+    set mainPath [makeFile {import typedparamlib2
+typedparamlib2::take_small(99)
 } typed-param-cross-module-bad.bot]
     try {
         set h [surface::readProgramFile $mainPath -strict 0]
@@ -390,17 +392,14 @@ test typed-param-no-search-helper {no new "check/validate/assert parameter type"
 # Body-fact tests (spec #90)
 
 test typed-param-body-fact-byte {a Byte-typed parameter's body sees [0,255] without any caller} -body {
-    set path [makeFile {byte::high_nibble(0)
-} typed-param-byte-load.bot]
-    try {
-        surface::readProgramFile $path -strict 0
-    } finally {
-        removeFile typed-param-byte-load.bot
-    }
-    set h [surface::compile {fn byte_identity(x: Byte) -> Byte:
+    # `import type byte::Byte` loads lib/byte.bot; the user's own block is
+    # the one declaring a byte::Byte parameter x (byte.bot's own functions
+    # come first in the walk and also have parameters named x).
+    set h [surface::compile {import type byte::Byte
+fn byte_identity(x: Byte) -> Byte:
     x} byte-body.bot]
-    set block [lindex [hirFind $h block] 0]
-    set ref [lindex [hirFind $h ref x] 0]
+    set block [findTypedParamBlock $h x {int[byte::Byte]}]
+    set ref [lindex [hirFind $h ref x] end]
     set outcome [hir::range::AnalyzeInstance $h verify {} $block [hir::get $h $block params] \
         [lrepeat [llength [hir::get $h $block params]] [hir::range::unknown]] {} {}]
     hir::range::show [dict get [dict get $outcome exprs] $ref]
@@ -493,20 +492,15 @@ test typed-param-no-new-error-completion {a total function taking a typed parame
 # Byte integration microscope (spec #20-21, #31, #100)
 
 test typed-param-byte-low-nibble-microscope {low_nibble's own body already knows x is Int in [0,255] from the declaration alone} -body {
-    set path [makeFile {byte::high_nibble(0)
-} typed-param-microscope-load.bot]
-    try {
-        surface::readProgramFile $path -strict 0
-    } finally {
-        removeFile typed-param-microscope-load.bot
-    }
-    set h [surface::compile {fn low_nibble(x: Byte) -> Nibble:
+    set h [surface::compile {import type byte::Byte
+import type byte::Nibble
+fn low_nibble(x: Byte) -> Nibble:
     bit_and(x, 15)} microscope.bot]
-    set block [lindex [hirFind $h block] 0]
+    set block [findTypedParamBlock $h x {int[byte::Byte]}]
     set params [hir::get $h $block params]
     set outcome [hir::range::AnalyzeInstance $h verify {} $block $params \
         [lrepeat [llength $params] [hir::range::unknown]] {} {}]
-    hir::range::show [dict get [dict get $outcome exprs] [lindex [hirFind $h ref x] 0]]
+    hir::range::show [dict get [dict get $outcome exprs] [lindex [hirFind $h ref x] end]]
 } -result {[0, 255]}
 
 # ---------------------------------------------------------------------------

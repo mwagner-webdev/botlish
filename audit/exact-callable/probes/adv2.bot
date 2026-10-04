@@ -3,6 +3,8 @@
 #
 # expect: [2, 3, 1, 101, 8, 21]
 
+import str
+
 fn outer(p, s):
     fn inner(x):
         p(x)

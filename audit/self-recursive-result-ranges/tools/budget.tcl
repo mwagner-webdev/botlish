@@ -24,7 +24,7 @@ proc median {xs} { set s [lsort -real $xs]; return [lindex $s [expr {[llength $s
 puts [format "%-6s %-12s %-12s %-8s %-10s %s" W off-ms on-ms states fitsSmall "result max"]
 foreach w $widths {
     set text "fn fib(n):\n    if n < 2:\n        n\n    else:\n        fib(n - 1) + fib(n - 2)\n\nfib($w)\n"
-    set hir [surface::compile $text t.bot -strict 0]
+    set hir [surface::compile [surface::modules::ImportHeader $text]$text t.bot -strict 0]
     set spec [hir::specialize::analyze $hir]
     foreach opt {0 1} {
         set times {}

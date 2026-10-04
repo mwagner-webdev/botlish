@@ -126,6 +126,7 @@ test direct-hir-native-namespace-static-scan {no proc of ::native reaches hir::l
 test direct-hir-native-entry-points-never-call-core-ir {native::nir, evalHir, object, executable, codeSize, measure and prepareHir never call hir::lower, hir::build or core::evalProgram} -constraints executableAot -body {
     core::loadLibrary web
     set hir [srcHir {
+        import mutable_array
         fn check(s: str) -> bool:
             emailish?(s)
         q = uriEscape("a b")
@@ -284,6 +285,7 @@ test direct-hir-native-independent-of-hygiene {native lowering of HIR with every
 test direct-hir-shadowed-native-name {a local binding named like a native is not the native: native preparation follows binding identity} -constraints executableAot -body {
     core::loadLibrary web
     set hir [srcHir {
+        import str
         fn uriEscape(s):
             str::length(s)
         [uriEscape("abc"), str::length("xy")]
@@ -307,7 +309,7 @@ proc lenientHir {text} {
 }
 
 test direct-hir-unproven-declared-contract-checked-at-run-time {a declared parameter type the program cannot prove is checked by the native callee: a violating argument raises the reference TYPE error, a valid one runs} -body {
-    set body "fn take(xs: List\[int\]):\n    list::length(xs)\nfn mixed(c):\n    if c:\n        1\n    else:\n        \[\]\n"
+    set body "import list\nfn take(xs: List\[int\]):\n    list::length(xs)\nfn mixed(c):\n    if c:\n        1\n    else:\n        \[\]\n"
     set results {}
     foreach call {take(mixed(true)) take(mixed(false))} {
         set hir [lenientHir "${body}${call}"]
@@ -322,7 +324,8 @@ test direct-hir-unproven-declared-contract-checked-at-run-time {a declared param
 test direct-hir-lowering-state-per-compilation {native lowering starts each compilation clean: a program's NIR (module-static slot table, header) does not depend on what the process compiled before} -body {
     core::loadLibrary web
     set plain [srcHir {[1, 2]}]
-    set withModule [srcHir {[uriEscape("a b"), mathish::inc(1)]}]
+    set withModule [srcHir {import mathish
+[uriEscape("a b"), mathish::inc(1)]}]
     set before [native::nir $plain]
     set module [native::nir $withModule]
     set after [native::nir $plain]
@@ -334,6 +337,8 @@ test direct-hir-lowering-state-per-compilation {native lowering starts each comp
 
 test direct-hir-module-identity-in-native-hir {a module-qualified call and the container intrinsics keep their module identity in the HIR native lowers} -body {
     set hir [srcHir {
+        import mathish
+        import mutable_array
         a = mutable_array::create(3, 0)
         mutable_array::set(a, 1, 7)
         [mathish::inc(41), mutable_array::at(a, 1)]
@@ -349,6 +354,7 @@ test direct-hir-module-identity-in-native-hir {a module-qualified call and the c
 
 test direct-hir-container-call-result-is-semantic-type {the typed result of mutable_array::create comes from HIR's semantic analysis: MutableArray[int], not a rediscovered spelling} -body {
     set hir [srcHir {
+        import mutable_array
         a = mutable_array::create(3, 0)
         a
     }]
@@ -401,7 +407,8 @@ set differentialPrograms {
         s2 = counter_from(20)
         [s1(1)(2), s2(1)(2), s1(3)(4)]
     }
-    {module-call} {[mathish::inc(41), mathish::inc(1)]}
+    {module-call} {import mathish
+[mathish::inc(41), mathish::inc(1)]}
     {errors} {
         error TooSmall
         error TooBig
@@ -438,6 +445,7 @@ set differentialPrograms {
         [first_over([1, 5, 9, 12], 8), first_over([1], 8), sum_to(20)]
     }
     {mutable-array} {
+        import mutable_array
         fn fill(n):
             a = mutable_array::create(n, 0)
             loop i from 0 to n:
@@ -447,6 +455,7 @@ set differentialPrograms {
         [mutable_array::get(a, 5, -1), mutable_array::freeze(a, mutable_array::capacity(a))]
     }
     {semantic-instances} {
+        import list
         fn identity(v):
             v
         fn is_big(n):
@@ -459,6 +468,7 @@ set differentialPrograms {
         [identity(3), identity("s"), find_big([1, 20, 3]), find_big([5])]
     }
     {exact-callables} {
+        import str
         fn apply(f, v):
             f(v)
         fn inc(n):
@@ -523,8 +533,10 @@ test direct-hir-executable-parity-closure-module-mutarray {closure, module call 
     add
 add10 = make_adder(10)
 [add10(32), add10(1)]}
-        {[mathish::inc(41), mathish::inc(1)]}
-        {a = mutable_array::create(3, 0)
+        {import mathish
+[mathish::inc(41), mathish::inc(1)]}
+        {import mutable_array
+a = mutable_array::create(3, 0)
 mutable_array::set(a, 1, 7)
 b = mutable_array::from_list([4, 5, 6])
 [mutable_array::at(a, 1), mutable_array::at(b, 2), mutable_array::freeze(a, 3)]}

@@ -1,3 +1,8 @@
+import ascii
+import byte
+import list
+import type byte::Byte
+
 # Timing harness pair (with steady-ascii-param.bot), not a benchmark
 # source: the same classification work, but here the classifier is a
 # closure that captures a non-Int value (the List), the shape every

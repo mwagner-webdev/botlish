@@ -271,7 +271,8 @@ test warn-repeated-arithmetic-on-unknown {x + 1 returned twice is not an exact v
 } -result {}
 
 test warn-separate-mutable-construction {two separately allocated mutable values are two values} -body {
-    codes {fn f(x):
+    codes {import mutable_array
+fn f(x):
     if x:
         return mutable_array::allocate(1)
     if x == 3:
@@ -280,17 +281,19 @@ test warn-separate-mutable-construction {two separately allocated mutable values
 } -result {}
 
 test warn-same-mutable-binding {the exact same mutable binding returned twice IS one value identity} -body {
-    shown {fn f(x):
+    shown {import mutable_array
+fn f(x):
     m = mutable_array::allocate(1)
     if x:
         return m
     if x == 3:
         return m
     mutable_array::allocate(2)}
-} -result {{the value of `m` is returned from 2 distinct exits @ 4:9 6:9}}
+} -result {{the value of `m` is returned from 2 distinct exits @ 5:9 7:9}}
 
 test warn-alias-of-mutable-binding {an alias of a mutable binding is the same mutable value} -body {
-    shown {fn f(x):
+    shown {import mutable_array
+fn f(x):
     m = mutable_array::allocate(1)
     n = m
     if x:
@@ -298,7 +301,7 @@ test warn-alias-of-mutable-binding {an alias of a mutable binding is the same mu
     if x == 3:
         return n
     mutable_array::allocate(2)}
-} -result {{the value of `m` is returned from 2 distinct exits @ 5:9 7:9}}
+} -result {{the value of `m` is returned from 2 distinct exits @ 6:9 8:9}}
 
 # ---------------------------------------------------------------------------
 # Exits: final value, elif, loops, handlers, nesting, reachability
@@ -937,7 +940,8 @@ fn scan(n):
         close $channel
         set main [file join $dir main.bot]
         set channel [open $main w]
-        puts -nonewline $channel {wmod::scan(10)
+        puts -nonewline $channel {import wmod
+wmod::scan(10)
 }
         close $channel
         set hir [surface::readProgramFile $main -warnings default -warning-channel ""]

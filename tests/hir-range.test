@@ -151,7 +151,7 @@ test range-analyze-3 {an exact call's Ref argument seeds the callee from the cal
 } -result {{{[3, 3] {3}}} {{[3, 3] {3}}}}
 
 test range-analyze-3b {a parameter with no evidence anywhere -- not even indirectly -- stays unknown: the callee only ever sees a genuinely unbounded expression's Range, never a syntactic "not a literal" restriction} -body {
-    lassign [rangeOf "fn add1(x):\n    x + 1\n\nfn go(xs):\n    add1(list::at(xs, 0))\n\ngo(\[1, 2\])"] hir spec analysis
+    lassign [rangeOf "import list\nfn add1(x):\n    x + 1\n\nfn go(xs):\n    add1(list::at(xs, 0))\n\ngo(\[1, 2\])"] hir spec analysis
     paramRanges $analysis [rangeInstance $spec add1]
 } -result {{[-∞, +∞]}}
 
@@ -167,7 +167,7 @@ test range-analyze-5 {a parameter passed unchanged through recursion, seeded by 
 } -result {{[7, 7] {7}} {[0, 3]}}
 
 test range-analyze-6 {a native's -result-range collection-length metadata (length, list::length) proves a String/List length is both non-negative and machine-representable, so str::length(s) is provably small with no relational reasoning} -body {
-    lassign [rangeOf "fn f(s):\n    str::length(s)\n\nf(\"abc\")"] hir spec analysis
+    lassign [rangeOf "import str\nfn f(s):\n    str::length(s)\n\nf(\"abc\")"] hir spec analysis
     set id [rangeInstance $spec f]
     set r [lindex [dict values [dict get [dict get $analysis instances $id] exprs]] end]
     list [hir::range::show $r] [hir::range::fitsSmall $r]
@@ -181,7 +181,7 @@ test range-analyze-7 {if branches join conservatively: two exact branches bound,
 } -result {[1, 2]}
 
 test range-analyze-8 {only + - * and proven-nonneg natives establish a fact; everything else is unknown} -body {
-    lassign [rangeOf "fn f(xs):\n    list::at(xs, 0)\n\nf(\[1, 2\])"] hir spec analysis
+    lassign [rangeOf "import list\nfn f(xs):\n    list::at(xs, 0)\n\nf(\[1, 2\])"] hir spec analysis
     set id [rangeInstance $spec f]
     set r [lindex [dict values [dict get [dict get $analysis instances $id] exprs]] end]
     hir::range::isUnknown $r
@@ -193,14 +193,14 @@ test range-analyze-8 {only + - * and proven-nonneg natives establish a fact; eve
 # the milestone that added them)
 
 test range-induction-1 {an == guard against a stable, immutable-collection-length bound with a +1 step (string_reverse's shape) proves the counter stays within [0, length]} -body {
-    lassign [rangeOf "fn reverse_from(text, index, reversed):\n    if index == str::length(text):\n        return reversed\n    reverse_from(text, index + 1, reversed)\n\nreverse_from(\"hello\", 0, \"\")"] hir spec analysis
+    lassign [rangeOf "import str\nfn reverse_from(text, index, reversed):\n    if index == str::length(text):\n        return reversed\n    reverse_from(text, index + 1, reversed)\n\nreverse_from(\"hello\", 0, \"\")"] hir spec analysis
     set id [rangeInstance $spec reverse_from]
     lassign [paramRanges $analysis $id] textRange indexRange
     list $indexRange [hir::range::fitsSmall [lindex [dict get [dict get $analysis instances $id] params] 1]]
 } -result [list "\[0, $hir::range::smallMax\]" 1]
 
 test range-induction-2 {a parameter seeded, at every external call, only by a length/list::length-shaped argument (matmul's "count") is itself proven small (interprocedural, from hir::range::SeedRange, no relational reasoning needed for the bound itself), so the == guard against it proves the counter small too} -body {
-    lassign [rangeOf "fn dot(a_row, b, column, k, count, total):\n    if k == count:\n        return total\n    dot(a_row, b, column, k + 1, count, total + 1)\n\ndot(\[1, 2\], \[\[1, 2\], \[3, 4\]\], 0, 0, list::length(\[1, 2\]), 0)"] hir spec analysis
+    lassign [rangeOf "import list\nfn dot(a_row, b, column, k, count, total):\n    if k == count:\n        return total\n    dot(a_row, b, column, k + 1, count, total + 1)\n\ndot(\[1, 2\], \[\[1, 2\], \[3, 4\]\], 0, 0, list::length(\[1, 2\]), 0)"] hir spec analysis
     set id [rangeInstance $spec dot]
     set params [dict get [dict get $analysis instances $id] params]
     # k (index 3) is proven small; total (index 5), an unbounded accumulator
@@ -215,7 +215,7 @@ test range-induction-3 {a step of +-2 against an == guard is not proven (it coul
 } -result {{[-∞, 100000]} {[0, +∞]}}
 
 test range-induction-4 {an opaque, call-derived next value (csv's scan_records shape: no i + c pattern at all) is not a step candidate, so hir/induction.tcl itself proves nothing here -- but M9's post-widen narrowing (M9-INSTANCE-ENTRY-INT-FACTS.md), an entirely different, general mechanism, now legitimately recovers a (very loose) upper bound: the branch guard "index >= str::length(text)" already proved next_index's own incoming argument <= smallMax-1 (str::length()'s own collection-length fact), so next_index's body (i + 1) is itself provably <= smallMax, and scan's self-recursive feedback (index <- next_index(index)) carries that back to scan's own entry once narrowing folds self-edges in with external ones -- sound (every reachable index is, trivially, some String's length or less), just far looser than a real trip-count bound; still not fitsSmall (the lower side stays unbounded), so this changes no codegen decision} -body {
-    lassign [rangeOf "fn next_index(i):\n    i + 1\n\nfn scan(text, index, count):\n    if index >= str::length(text):\n        return count\n    scan(text, next_index(index), count + 1)\n\nscan(\"abcde\", 0, 0)"] hir spec analysis
+    lassign [rangeOf "import str\nfn next_index(i):\n    i + 1\n\nfn scan(text, index, count):\n    if index >= str::length(text):\n        return count\n    scan(text, next_index(index), count + 1)\n\nscan(\"abcde\", 0, 0)"] hir spec analysis
     set id [rangeInstance $spec scan]
     lassign [paramRanges $analysis $id] textR indexR countR
     list $indexR [hir::range::fitsSmall [lindex [dict get [dict get $analysis instances $id] params] 1]]
@@ -297,28 +297,28 @@ test range-induction-ambiguous-guards {spec #31: two structurally independent co
 # bindings, extended to immutable function parameters.
 
 test range-narrow-param-1 {a `<`/`>=` guard narrows a parameter reference in each branch exactly as it already narrows a local, on both sides (spec #6, #34); the caller's own argument (an unbounded list element) is not itself informative, isolating this from Part B's own propagation} -body {
-    lassign [rangeOf "fn f(n):\n    if n < 2:\n        n\n    else:\n        n\n\nfn use(xs):\n    f(list::at(xs, 0))\n\nuse(\[1, 2\])"] hir spec analysis
+    lassign [rangeOf "import list\nfn f(n):\n    if n < 2:\n        n\n    else:\n        n\n\nfn use(xs):\n    f(list::at(xs, 0))\n\nuse(\[1, 2\])"] hir spec analysis
     set id [rangeInstance $spec f]
     set b [paramBinding $hir $spec $id n]
     refRanges $hir $analysis $id $b
 } -result {{[-∞, +∞]} {[-∞, 1]} {[2, +∞]}}
 
 test range-narrow-param-2 {branch narrowing on a parameter is not limited to a function's top-level body: it applies wherever it already applies to a local (spec #7)} -body {
-    lassign [rangeOf "fn f(outer, n):\n    if outer:\n        if n >= 0:\n            n\n\nfn use(xs):\n    f(true, list::at(xs, 0))\n\nuse(\[1, 2\])"] hir spec analysis
+    lassign [rangeOf "import list\nfn f(outer, n):\n    if outer:\n        if n >= 0:\n            n\n\nfn use(xs):\n    f(true, list::at(xs, 0))\n\nuse(\[1, 2\])"] hir spec analysis
     set id [rangeInstance $spec f]
     set b [paramBinding $hir $spec $id n]
     refRanges $hir $analysis $id $b
 } -result {{[-∞, +∞]} {[0, +∞]}}
 
 test range-narrow-param-3 {two nested comparisons on a parameter narrow it exactly as they would a local (spec #33)} -body {
-    lassign [rangeOf "fn f(n):\n    if n >= 0:\n        if n < 10:\n            n\n\nfn use(xs):\n    f(list::at(xs, 0))\n\nuse(\[1, 2\])"] hir spec analysis
+    lassign [rangeOf "import list\nfn f(n):\n    if n >= 0:\n        if n < 10:\n            n\n\nfn use(xs):\n    f(list::at(xs, 0))\n\nuse(\[1, 2\])"] hir spec analysis
     set id [rangeInstance $spec f]
     set b [paramBinding $hir $spec $id n]
     refRanges $hir $analysis $id $b
 } -result {{[-∞, +∞]} {[0, +∞]} {[0, 9]}}
 
 test range-narrow-param-4 {a local binding narrows exactly as it did before this milestone (no regression: spec #38)} -body {
-    lassign [rangeOf "fn f(n):\n    b = n\n    if b >= 0:\n        b\n\nfn use(xs):\n    f(list::at(xs, 0))\n\nuse(\[1, 2\])"] hir spec analysis
+    lassign [rangeOf "import list\nfn f(n):\n    b = n\n    if b >= 0:\n        b\n\nfn use(xs):\n    f(list::at(xs, 0))\n\nuse(\[1, 2\])"] hir spec analysis
     set id [rangeInstance $spec f]
     # b is a *local* duplicate-free bind of n, not n's own BindingId.
     set localB ""
@@ -407,12 +407,23 @@ proc ifConditions {hir} {
 proc outcomeOf {text idx name {key ""}} {
     lassign [rangeOf $text] hir spec analysis
     set id [rangeInstance $spec $name $key]
-    set condition [lindex [ifConditions $hir] $idx]
+    # The IDXth `if` of the *program's own file*: `import type byte::Byte`
+    # loads lib/byte.bot, whose functions' `if`s precede the program's.
+    set file [dict get $hir exprs [lindex [hir::roots $hir] end] origin file]
+    set own {}
+    foreach e [lsort -dictionary [dict keys [dict get $hir exprs]]] {
+        set node [dict get $hir exprs $e]
+        if {[dict get $node kind] eq "if" && [dict get $node origin file] eq $file} {
+            lappend own [dict get $node condition]
+        }
+    }
+    set condition [lindex $own $idx]
     return [hir::range::ConditionOutcome $hir $analysis $id $condition]
 }
 
 test condition-outcome-1 {a Byte parameter: b < 0 is AlwaysFalse from the declared domain alone, no caller narrowing needed} -body {
-    outcomeOf {fn f(b: Byte) -> int:
+    outcomeOf {import type byte::Byte
+fn f(b: Byte) -> int:
     if b < 0:
         1
     else:
@@ -421,7 +432,8 @@ f(10)} 0 f
 } -result {0}
 
 test condition-outcome-2 {a Byte parameter: b > 255 is likewise AlwaysFalse} -body {
-    outcomeOf {fn f(b: Byte) -> int:
+    outcomeOf {import type byte::Byte
+fn f(b: Byte) -> int:
     if b > 255:
         1
     else:
@@ -430,7 +442,8 @@ f(10)} 0 f
 } -result {0}
 
 test condition-outcome-3 {a Byte parameter: b >= 0 is AlwaysTrue (the mirror control, spec #16)} -body {
-    outcomeOf {fn f(b: Byte) -> int:
+    outcomeOf {import type byte::Byte
+fn f(b: Byte) -> int:
     if b >= 0:
         1
     else:
@@ -439,7 +452,8 @@ f(10)} 0 f
 } -result {1}
 
 test condition-outcome-4 {a Byte parameter: b < 100 is genuinely Unknown -- two callers spanning the threshold join the entry range to [0 or wider, 255], so neither outcome is impossible (spec #17's own non-overoptimization control)} -body {
-    outcomeOf {fn f(b: Byte) -> int:
+    outcomeOf {import type byte::Byte
+fn f(b: Byte) -> int:
     if b < 100:
         1
     else:
@@ -609,7 +623,8 @@ h(16)}
 # diagnostic-free program (confirmed directly: 0 diagnostics, asserted
 # below alongside the original two ConditionOutcome assertions).
 test condition-outcome-12 {shared-instance adversarial control (legal twin, S03b): byte::from_int(45) (safe) and a genuinely open/dynamic caller sharing the same byte::from_int<int> instance -- the joined entry range is unknown, so neither comparison is decided, even though one caller alone would decide both} -body {
-    set src {byte::from_int(45)
+    set src {import byte
+byte::from_int(45)
 fn dyn(m):
     r = byte::from_int(m + 0):
         on BelowRange:
@@ -668,7 +683,8 @@ test range-callee-position-call-reaches-entry {sel is called once as an ordinary
 } -result {{[1, 10] {1,10}}}
 
 test range-callee-position-call-in-index-reaches-entry {a call inside the index of a list::at in callee position (list::at(fs, pick(10))(0)) is a call site of pick too} -body {
-    lassign [rangeOf {fn pick(k):
+    lassign [rangeOf {import list
+fn pick(k):
     if k > 5:
         1
     else:
@@ -711,7 +727,8 @@ fn apply(g):
     g(0)
 
 [apply(sel(1)), sel(0 - 50)(0)]} {[1, 2]} \
-    list-index {fn pick(k):
+    list-index {import list
+fn pick(k):
     if k > 5:
         1
     else:

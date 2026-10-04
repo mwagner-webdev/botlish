@@ -374,7 +374,7 @@ proc stripLocations {message} {
 }
 
 proc compileOrError {source} {
-    if {[catch {surface::compile $source t.bot} hir options]} {
+    if {[catch {surface::compile [surface::modules::ImportHeader $source]$source t.bot} hir options]} {
         return [list error [dict get $options -errorcode] [stripLocations $hir]]
     }
     return [list ok $hir]

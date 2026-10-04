@@ -417,11 +417,11 @@ test destructure-list-struct-syntax-on-list-source-is-not-list-policy {`{a} = so
 
 test destructure-list-ordinary-list-uses {a List literal followed by `=` anywhere else keeps its meaning} -body {
     list [parity "xs = \[1, 2\]\nys = \[3\]\n\[xs, ys\]"] [parity "\[1, 2\] == \[1, 2\]"] \
-        [parity "x = \[1\] == \[1\]\nx"] [parity "xs = \[\{a: 1\}\]\n\{a\} = list::at(xs, 0)\na"]
+        [parity "x = \[1\] == \[1\]\nx"] [parity "import list\nxs = \[\{a: 1\}\]\n\{a\} = list::at(xs, 0)\na"]
 } -result {{value {[[1, 2], [3]]}} {value true} {value true} {value 1}}
 
 test destructure-list-indexing-unchanged {List indexing is still an ordinary call, in both spellings} -body {
-    bothSpellings "at = list::at\nxs = \[10, 20, 30\]\nxs.at(1)" "xs = \[10, 20, 30\]\nlist::at(xs, 1)"
+    bothSpellings "import list\nat = list::at\nxs = \[10, 20, 30\]\nxs.at(1)" "import list\nxs = \[10, 20, 30\]\nlist::at(xs, 1)"
 } -result {value 20}
 
 test destructure-list-bad-assignment-targets-unchanged {other things before `=` keep their old error} -body {
@@ -695,13 +695,14 @@ test destructure-field-order-is-not-layout {the pattern's order and the declarat
 } -result {{value {[1, 2, 3]}} {value {[1, 2, 3]}} {value {[1, 2, 3]}} {value {[1, 3]}}}
 
 test destructure-fields-of-different-types {heterogeneous results are the point: fields of different types come out as ordinary typed values} -body {
-    parity "\{n, s, xs, p\} = \{n: 3, s: \"text\", xs: \[1, 2\], p: \{q: true\}\}\n\[n + 1, str::length(s), list::length(xs), p.q\]"
+    parity "import list\nimport str\n\{n, s, xs, p\} = \{n: 3, s: \"text\", xs: \[1, 2\], p: \{q: true\}\}\n\[n + 1, str::length(s), list::length(xs), p.q\]"
 } -result {value {[4, 4, 2, true]}}
 
 # ---------------------------------------------------------------------------
 # Evaluate the source once
 
-set ::countDecls {struct Rec:
+set ::countDecls {import mutable_array
+struct Rec:
     a: int
     b: str
     c: int
@@ -832,7 +833,7 @@ test destructure-once-not-per-field {destructuring is not a.f; b.f with the sour
 # Bindings are values, not references into the source struct
 
 test destructure-bound-mutable-value-is-the-same-value {a field holding a MutableArray: the binding denotes that array (its ordinary semantics), so writes through either name are seen through the other} -body {
-    set program "struct Holder:\n    items: MutableArray\[int\]\n    n: int\nfn run():\n    h = Holder \{items: mutable_array::create(2, 0), n: 1\}\n    \{items\} = h\n    a = mutable_array::set(items, 0, 5):\n        on IndexNotFound:\n            unit\n    b = mutable_array::set(h.items, 1, 6):\n        on IndexNotFound:\n            unit\n    \[mutable_array::get(h.items, 0, -1), mutable_array::get(items, 1, -1)\]\nrun()"
+    set program "import mutable_array\nstruct Holder:\n    items: MutableArray\[int\]\n    n: int\nfn run():\n    h = Holder \{items: mutable_array::create(2, 0), n: 1\}\n    \{items\} = h\n    a = mutable_array::set(items, 0, 5):\n        on IndexNotFound:\n            unit\n    b = mutable_array::set(h.items, 1, 6):\n        on IndexNotFound:\n            unit\n    \[mutable_array::get(h.items, 0, -1), mutable_array::get(items, 1, -1)\]\nrun()"
     parity $program
 } -result {value {[5, 6]}}
 
@@ -889,11 +890,15 @@ a = tmp.a}
     x
 tmp = f
 a = tmp.a}
-    native-source   {{a} = list::length}
-                    {tmp = list::length
+    native-source   {import list
+{a} = list::length}
+                    {import list
+tmp = list::length
 a = tmp.a}
-    mutarray-source {{a} = mutable_array::create(1, 0)}
-                    {tmp = mutable_array::create(1, 0)
+    mutarray-source {import mutable_array
+{a} = mutable_array::create(1, 0)}
+                    {import mutable_array
+tmp = mutable_array::create(1, 0)
 a = tmp.a}
     unknown-shape   {fn first(x):
     {a} = x
@@ -1409,7 +1414,8 @@ fn run(r):
     fs
 run({n: 4})}
                  {value {[4, 5]}}
-    capture-two-closures {fn make(r):
+    capture-two-closures {import list
+fn make(r):
     {n} = r
     fn get():
         n
@@ -1418,7 +1424,8 @@ run({n: 4})}
     [get, bump]
 fs = make({n: 7})
 [list::at(fs, 0)(), list::at(fs, 1)(1)]}
-                 {fn make(r):
+                 {import list
+fn make(r):
     t = r
     n = t.n
     fn get():
@@ -1476,7 +1483,8 @@ make(W {inner: K {k: 9}})()}
 # ---------------------------------------------------------------------------
 # Interoperation with method sugar and elif
 
-set ::sugarFns {fn list_sum(xs):
+set ::sugarFns {import list
+fn list_sum(xs):
     total = 0
     loop x in xs:
         total
@@ -1494,7 +1502,7 @@ test destructure-method-sugar-source {a method-call source destructures like any
 } -result {value {[5, 6]}}
 
 test destructure-method-sugar-library {a library call through a destructured List binding} -body {
-    bothSpellings "length = list::length\n\{xs\} = \{xs: \[3, 1, 2\]\}\nxs.length()" "t = \{xs: \[3, 1, 2\]\}\nxs = t.xs\nlist::length(xs)"
+    bothSpellings "import list\n\{xs\} = \{xs: \[3, 1, 2\]\}\nxs.length()" "import list\nt = \{xs: \[3, 1, 2\]\}\nxs = t.xs\nlist::length(xs)"
 } -result {value 3}
 
 test destructure-method-sugar-field-callable {a field holding a function is still called as a field value (no sugar, no ambiguity)} -body {
@@ -1564,7 +1572,7 @@ test destructure-module-top-level-rejected {a module-level destructure is reject
         set results {}
         foreach body [list "\{lo, hi: top\} = \{lo: 3, hi: 9, mid: 6\}\n" "t = \{lo: 3, hi: 9, mid: 6\}\nlo = t.lo\ntop = t.hi\n"] {
             writeModule $dir pair "namespace pair\n$body"
-            set main [writeMain $dir "pair::lo\n"]
+            set main [writeMain $dir "import pair\npair::lo\n"]
             catch {surface::readProgramFile $main} message options
             lappend results [lrange [dict get $options -errorcode] 0 2]
         }
@@ -1575,7 +1583,7 @@ test destructure-module-top-level-rejected {a module-level destructure is reject
 test destructure-module-top-level-message {the module-level rejection names the reason and the way out} -body {
     withScratchLibrary {
         writeModule $dir pair "namespace pair\n\{lo\} = \{lo: 3\}\n"
-        set main [writeMain $dir "pair::lo\n"]
+        set main [writeMain $dir "import pair\npair::lo\n"]
         catch {surface::readProgramFile $main} message
         list [string match "*a struct destructuring is not allowed at module top level*" $message] \
             [string match "*destructure inside a function*" $message]
@@ -1589,7 +1597,8 @@ fn area(r):
     {w, h} = r
     w * h
 }
-        set main [writeMain $dir {geo::area({w: 6, h: 7, tag: "x"})
+        set main [writeMain $dir {import geo
+geo::area({w: 6, h: 7, tag: "x"})
 }]
         set hir [surface::readProgramFile $main]
         lmap backend $::allBackends {lindex [outcomeUnderHir $backend $hir] 1}
@@ -1603,7 +1612,8 @@ struct Point:
     x: int
     y: int
 }
-        set main [writeMain $dir {{x, y: why} = geo::Point {x: 3, y: 4}
+        set main [writeMain $dir {import geo
+{x, y: why} = geo::Point {x: 3, y: 4}
 [x, why]
 }]
         set hir [surface::readProgramFile $main]
@@ -1618,7 +1628,8 @@ x = 1
 if true:
     y = 2
 }
-        set main [writeMain $dir {bad::x
+        set main [writeMain $dir {import bad
+bad::x
 }]
         catch {surface::readProgramFile $main} message options
         lrange [dict get $options -errorcode] 0 2
@@ -1692,7 +1703,7 @@ test destructure-value-bindings-still-work {a destructure followed by more state
 } -result {value 3}
 
 test destructure-value-statement-order {the unit comes after the bindings and before the next statement: the statements around it keep their order} -body {
-    parity "fn bump(log: MutableArray\[int\], id: int, v: int) -> int:\n    if mutable_array::capacity(log) > 0:\n        n = mutable_array::at(log, 0)\n        mutable_array::set(log, 0, n * 10 + id)\n    v\nfn run():\n    log = mutable_array::create(1, 0)\n    x = bump(log, 1, 5)\n    \{a, b\} = \{a: bump(log, 2, 1), b: bump(log, 3, 2)\}\n    y = bump(log, 4, 7)\n    \[x, a, b, y, mutable_array::get(log, 0, 0)\]\nrun()"
+    parity "import mutable_array\nfn bump(log: MutableArray\[int\], id: int, v: int) -> int:\n    if mutable_array::capacity(log) > 0:\n        n = mutable_array::at(log, 0)\n        mutable_array::set(log, 0, n * 10 + id)\n    v\nfn run():\n    log = mutable_array::create(1, 0)\n    x = bump(log, 1, 5)\n    \{a, b\} = \{a: bump(log, 2, 1), b: bump(log, 3, 2)\}\n    y = bump(log, 4, 7)\n    \[x, a, b, y, mutable_array::get(log, 0, 0)\]\nrun()"
 } -result {value {[5, 1, 2, 7, 1234]}}
 
 test destructure-value-ordinary-binding-unchanged {an ordinary binding is not changed to unit to match the destructure: as the last statement it still yields its value} -body {
@@ -1772,7 +1783,7 @@ test destructure-value-evaluate-once {the source of a destructure that is the la
 } -result {{value 12} {value {[12]}}}
 
 test destructure-value-mutable-field-still-same-value {a MutableArray field: the binding is the same array, and a destructure that ends the body is unit} -body {
-    set decls "struct Holder:\n    items: MutableArray\[int\]\n    n: int\n"
+    set decls "import mutable_array\nstruct Holder:\n    items: MutableArray\[int\]\n    n: int\n"
     list [parity "${decls}fn run():\n    h = Holder \{items: mutable_array::create(2, 0), n: 1\}\n    \{items\} = h\nrun()"] \
         [parity "${decls}fn run():\n    h = Holder \{items: mutable_array::create(2, 0), n: 1\}\n    \{items\} = h\n    a = mutable_array::set(items, 0, 5):\n        on IndexNotFound:\n            unit\n    mutable_array::get(h.items, 0, -1)\nrun()"]
 } -result {{value unit} {value 5}}
@@ -1928,7 +1939,8 @@ proc executableValue {text} {
     }
 }
 
-set ::typedDestructured {struct Acc:
+set ::typedDestructured {import mutable_array
+struct Acc:
     total: int
     count: int
     last: int
@@ -1944,7 +1956,8 @@ fn run(n: int) -> int:
     {total, last: l} = step(log, n)
     total * 1000 + l * 100 + mutable_array::get(log, 0, 0)
 [run(1), run(20)]}
-set ::typedExplicit {struct Acc:
+set ::typedExplicit {import mutable_array
+struct Acc:
     total: int
     count: int
     last: int

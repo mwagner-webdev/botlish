@@ -87,10 +87,12 @@ scenario S02f-alias-materializes-callee {an exact alias call (h = g; h(3)) stays
 # The M5/M6 byte::from_int shared-instance case (spec #19)
 
 scenario S03a-from-int-safe-only {byte::from_int(45) as the instance's only caller} \
-    {byte::from_int(45)
+    {import byte
+byte::from_int(45)
 } {byte::from_int}
 scenario S03b-from-int-plus-legal-open-caller {byte::from_int(45) + a legal (handled, untyped) caller reached only through callvalue} \
-    {byte::from_int(45)
+    {import byte
+byte::from_int(45)
 fn dyn(m):
     r = byte::from_int(m + 0):
         on BelowRange:
@@ -103,7 +105,8 @@ fn caller(g, v):
 caller(dyn, 45)
 } {byte::from_int dyn caller}
 scenario S03c-from-int-m6-fixture-as-written {the M6 condition-outcome-12 / M5 shared-instance fixture, compiled as written (non-strict): note its diagnostics} \
-    {byte::from_int(45)
+    {import byte
+byte::from_int(45)
 fn dyn(m: int) -> Byte errors BelowRange, AboveRange:
     byte::from_int(m)
 fn caller(g, v) -> Byte errors BelowRange, AboveRange:
@@ -310,7 +313,8 @@ mk(byte::from_int(5))
 # Completion facts vs instance identity (spec #40-41)
 
 scenario S09-completion-per-call-shared-instance {different per-call effectiveErrors, one shared instance} \
-    {byte::from_int(45)
+    {import byte
+byte::from_int(45)
 fn dyn(m):
     r = byte::from_int(m + 0):
         on BelowRange:

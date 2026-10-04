@@ -199,6 +199,7 @@ proc noShortAnywhere {nir} {
 # Sources shared below
 
 set chooseSource {
+    import str
     fn choose(flag):
         if flag:
             ""
@@ -209,6 +210,7 @@ set chooseSource {
 }
 
 set lamSource {
+    import str
     fn lam(flag):
         if flag:
             "λ"
@@ -219,6 +221,7 @@ set lamSource {
 }
 
 set chainSource {
+    import str
     fn pick(flag):
         if flag:
             ""
@@ -242,12 +245,14 @@ set chainSource {
 
 test short-unicode-model-is-the-scalar-value {a non-ASCII character is one semantic character: length counts scalars, never bytes} -body {
     parityShort {
+        import str
         [str::length("ä"), str::length("€"), str::length("λ"), str::length("猫"), str::length("😀"), str::length("e")]
     }
 } -result {value:[1, 1, 1, 1, 1, 1]}
 
 test short-unicode-model-astral-is-one-character {a supplementary-plane character is one scalar (one character), though 4 UTF-8 bytes and two UTF-16 units} -body {
     parityShort {
+        import str
         [str::length("😀"), str::length(str::substring("a😀b", 1, 2)), str::substring("a😀b", 1, 2) == "😀"]
     }
 } -result {value:[1, 1, true]}
@@ -286,6 +291,7 @@ test short-plan-chain-parameters {f -> g -> h forwards a ShortString1 parameter 
 
 test short-plan-parameter-control {a closed helper whose String parameter is proven length <= 1 gets a ShortString1 parameter} -body {
     set text {
+        import str
         fn describe(c):
             [str::length(c), c == "", c == "q"]
 
@@ -296,6 +302,7 @@ test short-plan-parameter-control {a closed helper whose String parameter is pro
 
 test short-plan-result-control {a closed helper returning a String proven length <= 1 gets a ShortString1 result, consumed by length and equality} -body {
     set text {
+        import str
         fn mark(n):
             if n < 0:
                 ""
@@ -311,6 +318,7 @@ test short-plan-result-control {a closed helper returning a String proven length
 
 test short-plan-long-literal-stays-tagged {"ab" has two characters: never ShortString1} -body {
     set text {
+        import str
         fn two(c):
             str::length(c)
 
@@ -321,6 +329,7 @@ test short-plan-long-literal-stays-tagged {"ab" has two characters: never ShortS
 
 test short-plan-unknown-length-stays-tagged {a String of unknown length (a caller passes concat's result) stays tagged: no speculation from the other callers} -body {
     set text {
+        import str
         fn size(c):
             str::length(c)
 
@@ -331,6 +340,7 @@ test short-plan-unknown-length-stays-tagged {a String of unknown length (a calle
 
 test short-plan-one-long-branch-poisons-the-join {a join with a two-character branch is not ShortString1} -body {
     set text {
+        import str
         fn pick(flag):
             if flag:
                 "a"
@@ -344,6 +354,7 @@ test short-plan-one-long-branch-poisons-the-join {a join with a two-character br
 
 test short-plan-concatenation-is-not-assumed-short {"" + "" is empty and one + one is two characters: concat is not a short producer, only an independently proven bound counts} -body {
     set text {
+        import str
         fn cat(a, b):
             str::concat(a, b)
 
@@ -367,6 +378,7 @@ test short-plan-dead-long-branch-does-not-poison {a branch the existing range an
 
 test short-plan-open-instance-stays-tagged {a function whose value escapes (a generic open instance) keeps the tagged String ABI even though its result is bounded} -body {
     set text {
+        import str
         fn pick(flag):
             if flag:
                 ""
@@ -396,6 +408,7 @@ test short-constants-are-generated-directly {"" "A" NUL "λ" "猫" an astral cha
 test short-nul-is-not-empty {U+0000 is a one-character String (0), distinct from Empty (-1): length, equality and emptiness all see it} -body {
     set nul [format %c 0]
     parityShort "
+        import str
         fn pick(flag):
             if flag:
                 \"$nul\"
@@ -409,6 +422,7 @@ test short-nul-is-not-empty {U+0000 is a one-character String (0), distinct from
 test short-highest-scalar-round-trips {U+10FFFF, the highest scalar value, survives scalar -> String -> scalar} -body {
     set top [format %c 0x10FFFF]
     parityShort "
+        import str
         fn pick(flag):
             if flag:
                 \"$top\"
@@ -441,6 +455,7 @@ test short-nir-length-and-equality-are-scalar {length of a ShortString1 is `shor
 
 test short-nir-parameter-is-short-in-the-callee {the helper's parameter is a short register: no strtoshort, scalar length/eq inside} -body {
     set text {
+        import str
         fn describe(c):
             [str::length(c), c == "", c == "q"]
 
@@ -452,6 +467,7 @@ test short-nir-parameter-is-short-in-the-callee {the helper's parameter is a sho
 
 test short-nir-alias-stays-virtual {x = s; y = x; z = y: aliases are the same short register, no materialization} -body {
     set text {
+        import str
         fn pick(flag):
             if flag:
                 ""
@@ -477,6 +493,7 @@ test short-nir-chain-is-one-continuous-region {pick -> f -> g -> h: no strtoshor
 
 test short-nir-return-stays-virtual {a local virtual short returned through a short result: no scalar -> String -> scalar} -body {
     set text {
+        import str
         fn pick(flag):
             s = if flag:
                 ""
@@ -492,6 +509,7 @@ test short-nir-return-stays-virtual {a local virtual short returned through a sh
 
 test short-nir-tagged-frontier-materializes-once {one ShortString1 forwarded through several exact calls and then stored in a List: one materialization at the storage frontier, not one per transport edge} -body {
     set text {
+        import list
         fn pick(flag):
             if flag:
                 ""
@@ -519,6 +537,8 @@ test short-nir-tagged-frontier-materializes-once {one ShortString1 forwarded thr
 
 test short-nir-mixed-use-boxes-at-the-tagged-use {str::length(s) is scalar; list::append(xs, s) materializes: no suppression heuristic, one recorded conversion} -body {
     set text {
+        import list
+        import str
         fn mixed(s, xs):
             [str::length(s), list::append(xs, s)]
 
@@ -587,6 +607,7 @@ test short-nir-env-disables {BOTLISH_NATIVE_SHORT_STRING_OPT=0 is the same switc
 
 test short-slice-is-an-infallible-extract-after-the-ordinary-check {str::substring(text, 0, 1) as a short value: the same regioncheck an ordinary call runs, then a total strsliceshort; no String allocated} -body {
     set text {
+        import str
         fn first(t) errors UpperOverrun:
             str::substring(t, 0, 1)
 
@@ -603,6 +624,7 @@ test short-slice-is-an-infallible-extract-after-the-ordinary-check {str::substri
 
 test short-slice-peek-shape {peek(text, i): "" past the end, else str::substring(text, i, i + 1): a ShortString1 result (the index step is hir::induction's existing fact)} -body {
     set text {
+        import str
         fn peek(text, index):
             if index < 0 or index >= str::length(text):
                 return ""
@@ -621,6 +643,7 @@ test short-slice-peek-shape {peek(text, i): "" past the end, else str::substring
 # A failure the compiler cannot prove statically (the String is computed),
 # observed through the program's own handler.
 set ::shortEmptySlice {
+        import str
         fn first(t) errors UpperOverrun:
             str::substring(t, 0, 1)
 
@@ -649,6 +672,7 @@ test short-slice-bounds-error-message {the declared error of a ShortString1 slic
 
 test short-slice-non-ascii {a non-ASCII slice: the scalar, not a byte} -body {
     parityShort {
+        import str
         fn first(t) errors UpperOverrun:
             str::substring(t, 0, 1)
 
@@ -664,6 +688,7 @@ test short-slice-non-ascii {a non-ASCII slice: the scalar, not a byte} -body {
 
 test short-error-capable-result {an error-capable function with a ShortString1 success result: Empty is a successful value, failure uses the status word} -body {
     set text {
+        import str
         error Bad
 
         fn guarded(n) -> str errors Bad:
@@ -689,6 +714,7 @@ test short-error-capable-result {an error-capable function with a ShortString1 s
 
 test short-error-escapes-uncaught {a run-time slice failure inside a ShortString1-result function is the same declared error with the optimization on and off, and Empty never stands for it} -body {
     parityShort {
+        import str
         fn at(t, i) errors LowerUnderrun, UpperOverrun:
             str::substring(t, i, i + 1)
 
@@ -712,6 +738,7 @@ test short-error-escapes-uncaught {a run-time slice failure inside a ShortString
 
 test short-error-in-the-caller-handler {a handler around a short-result call: Empty passes through the success path} -body {
     parityShort {
+        import str
         error Bad
 
         fn guarded(n) -> str errors Bad:
@@ -735,6 +762,7 @@ test short-error-in-the-caller-handler {a handler around a short-result call: Em
 
 test short-storage-list-materializes {a short String stored in a List is materialized there (storage stays tagged)} -body {
     parityShort {
+        import list
         fn pick(flag):
             if flag:
                 ""
@@ -748,6 +776,7 @@ test short-storage-list-materializes {a short String stored in a List is materia
 
 test short-general-string-operations-materialize {concat, lowercase and hashing consume the real String} -body {
     parityShort {
+        import str
         fn pick(flag):
             if flag:
                 ""
@@ -760,6 +789,7 @@ test short-general-string-operations-materialize {concat, lowercase and hashing 
 
 test short-equality-with-an-unrestricted-string-materializes {a ShortString1 compared with a String of unknown length materializes the short operand and uses the existing equality} -body {
     set text {
+        import str
         fn same(s, t):
             s == t
 
@@ -793,6 +823,7 @@ test short-dynamic-callable-stays-tagged {a function passed as a value is called
 
 test short-capture-materializes {a short local captured by a closure is stored in the (tagged) environment} -body {
     parityShort {
+        import str
         fn pick(flag):
             if flag:
                 ""
@@ -816,6 +847,8 @@ test short-capture-materializes {a short local captured by a closure is stored i
 test short-parity-corpus-mix {ASCII, non-ASCII, NUL, Empty; branches, aliases, calls, returns, loops, storage} -body {
     set nul [format %c 0]
     parityShort "
+        import list
+        import str
         error Bad
 
         fn pick(n):
@@ -861,6 +894,8 @@ test short-parity-corpus-mix {ASCII, non-ASCII, NUL, Empty; branches, aliases, c
 
 test short-gc-live-across-allocation {a ShortString1 live across unrelated allocations, with ordinary Strings, a List and a struct as live roots, under GC stress} -body {
     set text {
+        import list
+        import str
         struct Pair:
             left: str
             right: int
@@ -890,6 +925,8 @@ test short-gc-live-across-allocation {a ShortString1 live across unrelated alloc
 
 test short-gc-materialize-before-and-after-allocation {a short value materialized before an allocation (the String is a root) and again after (cached: the same String)} -body {
     set text {
+        import list
+        import str
         fn pick(flag):
             if flag:
                 ""
@@ -915,6 +952,7 @@ test short-gc-materialize-before-and-after-allocation {a short value materialize
 
 test short-gc-recursive-exact-call-transport {a ShortString1 parameter and result across 200 recursive, allocating frames under GC stress} -body {
     set text {
+        import str
         fn step(n):
             if n == 0:
                 ""
@@ -940,6 +978,7 @@ test short-gc-recursive-exact-call-transport {a ShortString1 parameter and resul
 
 test short-gc-stack-map-has-no-short-roots {the root report lists the short registers as non-roots} -body {
     set text {
+        import str
         fn pick(flag):
             if flag:
                 ""
@@ -992,6 +1031,8 @@ proc aotParity {text {extra {}}} {
 test short-executable-everything {Empty, ASCII, non-ASCII, NUL, parameter/result transport, a tagged frontier and an error-capable path in one standalone executable, also under GC stress} -constraints executableAot -body {
     set nul [format %c 0]
     aotParity "
+        import list
+        import str
         error Bad
 
         fn pick(n):
@@ -1033,6 +1074,7 @@ test short-executable-everything {Empty, ASCII, non-ASCII, NUL, parameter/result
 
 test short-executable-optimization-off {the same executable with -short-string-opt 0 agrees} -constraints executableAot -body {
     aotParity {
+        import str
         fn pick(flag):
             if flag:
                 ""
@@ -1069,6 +1111,8 @@ proc censusOf {text args} {
 }
 
 set auditSource {
+    import list
+    import str
     fn choose(flag):
         if flag:
             ""
@@ -1133,6 +1177,8 @@ test short-audit-lowering-counters {lowering counts its frontier conversions per
 
 test short-literal-materializes-to-a-constant-not-an-allocation {a short local bound to a literal and stored in a List materializes to a static String constant (`str`), never shorttostr; a scalar use of the same local costs nothing} -body {
     set text {
+        import list
+        import str
         fn keep(xs):
             s = "x"
             [str::length(s), list::append(xs, s)]
@@ -1146,6 +1192,8 @@ test short-literal-materializes-to-a-constant-not-an-allocation {a short local b
 
 test short-mixed-parameter-converts-once {a short parameter used by a tagged consumer and by two scalar consumers is materialized once and read as a scalar for the rest (the cached conversion)} -body {
     set text {
+        import list
+        import str
         fn pick(flag):
             if flag:
                 ""
@@ -1164,6 +1212,8 @@ test short-mixed-parameter-converts-once {a short parameter used by a tagged con
 
 test short-struct-field-and-mutable-array-materialize {a short String stored in a struct field or a MutableArray slot is materialized there: those storage layouts stay tagged} -body {
     set text {
+        import mutable_array
+        import str
         struct Pair:
             left: str
             right: int

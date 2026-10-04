@@ -36,8 +36,9 @@
 # one defect in one method call:
 #
 #   hidden        the function exists but is not visible by that name (a
-#                 module function reached only as list::any?, or a function
-#                 defined after the call): must be rejected, and the
+#                 function of a namespace the program does not import, such as
+#                 byte::complement, or a function defined after the call):
+#                 must be rejected, and the
 #                 diagnostic must say that no function by that name is
 #                 visible
 #   wrong-receiver / wrong-later / wrong-arity
@@ -84,7 +85,11 @@ proc rnd {lo hi} { return [expr {$lo + int(rand() * ($hi - $lo + 1))}] }
 # The prelude: every function visible in generated programs. One entry per
 # function: {NAME RESULT-TYPE PARAM-TYPES}. Types: int str list struct small.
 
-set ::prelude {error TooSmall
+set ::prelude {import list
+import mutable_array
+import str
+
+error TooSmall
 error TooBig
 type Small = Int in 0..10
 
@@ -353,9 +358,10 @@ proc negative {kind} {
     set pred "fn is_big(x):\n    x > 1\n"
     switch -- $kind {
         hidden-module {
-            # list::any? exists, takes a List first: not visible as `any?`.
-            return [list "$::prelude$pred[format $::negativeBase {[a, b].any?(is_big)}]" \
-                "$::prelude$pred[format $::negativeBase {list::any?([a, b], is_big)}]" "no function named \"any?\" is visible"]
+            # byte::complement exists, takes a Byte first, but the program
+            # does not import `byte`: not visible as `complement`.
+            return [list "$::prelude$pred[format $::negativeBase {a.complement()}]" \
+                "" "no function named \"complement\" is visible"]
         }
         hidden-later {
             return [list "$::prelude[format $::negativeBase {a.late(b)}]\nfn late(x, y):\n    x + y" \

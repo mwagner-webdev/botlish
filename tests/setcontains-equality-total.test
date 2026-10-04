@@ -89,8 +89,8 @@ proc effectLineForInstance {text calleeName instanceAttr} {
     return ""
 }
 
-set ::smallDecl "type Small = Int in 0..10\n\nfn one() -> Small:\n    1\n\n"
-set ::byteDecl "type Byte = Int in 0..255\n\nfn byteA() -> Byte:\n    97\n\nfn byteB() -> Byte:\n    122\n\n"
+set ::smallDecl "import immutable_set\ntype Small = Int in 0..10\n\nfn one() -> Small:\n    1\n\n"
+set ::byteDecl "import immutable_set\ntype Byte = Int in 0..255\n\nfn byteA() -> Byte:\n    97\n\nfn byteB() -> Byte:\n    122\n\n"
 
 # ---------------------------------------------------------------------------
 # Positive fixtures: element type and needle type both proven equality-total
@@ -107,7 +107,8 @@ contains_byte(immutable_set::from_list([byteA(), byteB()]), byteA())} $::byteDec
 } -result {1 0 1}
 
 test setcontains-total-int {ImmutableSet[Int] x Int: Byte is not name-special-cased -- plain Int qualifies the identical way, through hir::types::IsEqualityTotal alone} -body {
-    set text {fn contains_int(s: ImmutableSet[int], x: int) -> Bool:
+    set text {import immutable_set
+fn contains_int(s: ImmutableSet[int], x: int) -> Bool:
     immutable_set::contains(s, x)
 
 contains_int(immutable_set::from_list([1, 2, 3]), 2)}
@@ -127,7 +128,8 @@ contains_small(immutable_set::from_list([one()]), one())} $::smallDecl]
 } -result {1 1}
 
 test setcontains-total-bool {ImmutableSet[Bool] x Bool qualifies (spec item 10)} -body {
-    set text {fn contains_bool(s: ImmutableSet[bool], x: bool) -> Bool:
+    set text {import immutable_set
+fn contains_bool(s: ImmutableSet[bool], x: bool) -> Bool:
     immutable_set::contains(s, x)
 
 contains_bool(immutable_set::from_list([true, false]), true)}
@@ -135,7 +137,8 @@ contains_bool(immutable_set::from_list([true, false]), true)}
 } -result 1
 
 test setcontains-total-string {ImmutableSet[String] x String qualifies (spec item 10)} -body {
-    set text {fn contains_str(s: ImmutableSet[str], x: str) -> Bool:
+    set text {import immutable_set
+fn contains_str(s: ImmutableSet[str], x: str) -> Bool:
     immutable_set::contains(s, x)
 
 contains_str(immutable_set::from_list(["a", "b"]), "a")}
@@ -143,7 +146,8 @@ contains_str(immutable_set::from_list(["a", "b"]), "a")}
 } -result 1
 
 test setcontains-total-unicodechar {ImmutableSet[UnicodeChar] x UnicodeChar qualifies (spec item 10) -- the real web::is_unreserved shape, in miniature, without Byte} -body {
-    set text {fn contains_char(s: ImmutableSet[UnicodeChar], x: UnicodeChar) -> Bool:
+    set text {import immutable_set
+fn contains_char(s: ImmutableSet[UnicodeChar], x: UnicodeChar) -> Bool:
     immutable_set::contains(s, x)
 
 contains_char(immutable_set::from_list(['-', '.', '_', '~']), '-')}
@@ -240,7 +244,8 @@ contains_erased(immutable_set::from_list([byteA()]), byteA())} $::byteDecl]
 } -result {1 0}
 
 test setcontains-unsupported-kind-runtime-equality {an ImmutableSet of untyped-closure (Block-kind) members, queried with another closure: stays plain setcontains/may_error=true, and genuinely raises the pre-existing EQUALITY error at runtime -- confirming this milestone never weakens the real failure mode it is refining around (spec items 11, 26-28, 35, 61)} -body {
-    set text {fn g(x):
+    set text {import immutable_set
+fn g(x):
     x
 
 fn h(x):
@@ -361,7 +366,7 @@ test setcontains-m1-control-is-unreserved-param-view-unchanged {web::is_unreserv
     set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
     set analysis [hir::specialize::analyze $hir]
     paramViewTypeOf $hir $analysis {web::is_unreserved<int>} 0
-} -result {int[Byte]}
+} -result {int[byte::Byte]}
 
 test setcontains-m2-control-esc-char-edge-still-direct-callenv {esc_char -> web::is_unreserved is still a direct call (M2's own subject), never callvalue, after M3; MODULE-STATIC-RETAINED-VALUES.md: is_unreserved is envless now, so the call carries no environment (a plain "call", not "callenv") -- still a direct call of a statically known target, never a callvalue, which is the property M2 actually established} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]

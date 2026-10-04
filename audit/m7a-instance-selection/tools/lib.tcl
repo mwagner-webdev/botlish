@@ -59,7 +59,7 @@ proc m7a::source {text {dir ""}} {
     set path [file join $dir probe$counter.bot]
     set f [open $path w]
     fconfigure $f -encoding utf-8
-    puts -nonewline $f $text
+    puts -nonewline $f [surface::modules::ImportHeader $text]$text
     close $f
     return [load $path]
 }

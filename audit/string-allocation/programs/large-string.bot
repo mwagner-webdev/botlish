@@ -7,6 +7,8 @@
 #
 # expect: [1048576, "é…é…", 4092, 540000]
 
+import str
+
 fn dbl(n, s):
     if n == 0:
         return s

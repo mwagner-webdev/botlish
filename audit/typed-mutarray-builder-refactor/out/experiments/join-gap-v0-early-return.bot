@@ -1,3 +1,6 @@
+import list
+import mutable_array
+
 fn g(storage, length, value):
     if length < mutable_array::capacity(storage):
         return storage

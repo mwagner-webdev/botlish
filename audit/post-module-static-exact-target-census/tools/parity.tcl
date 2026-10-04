@@ -60,6 +60,9 @@ proc parseBools {shown} {
 set dir [file dirname [file normalize $out]]
 set bot [file join $dir parity-module.bot]
 writeFile $bot "# requires: web
+import list
+import web
+
 corpus = \[[join [lmap s $corpus {botString $s}] {, }]\]
 
 fn go(i, acc):

@@ -161,10 +161,35 @@ proc hir::types::resolveNamed {name {ns ""}} {
     if {$id ne ""} {
         return [list nstruct $id]
     }
-    if {[string first :: $name] >= 0} {
-        error "unknown struct type \"$name\": no such struct is declared in that module"
+    # A source-defined `type`: spelled bare it is the code's own namespace's
+    # (declared there) or the one a `import type` of its file binds to that
+    # short name; spelled qualified it is exactly that member. Either way the
+    # type is the one canonical `NS::Name` identity -- no alias exists.
+    set canonical [CanonicalTypeName $name $ns]
+    if {[string first :: $canonical] >= 0 && ![core::type::isSource $canonical]} {
+        error "unknown type \"$name\": no source-defined type or struct of that name is declared in that namespace"
     }
-    return [core::type::normalize $name]
+    if {$ns ne "" && $canonical eq $name && [core::type::isSource $name]} {
+        # The entry program's own type: not visible from a module.
+        error "core::type: unknown type \"$name\" (a module sees its own types, the types it imports with `import type`, and the built-in types; not the program's)"
+    }
+    return [core::type::normalize $canonical]
+}
+
+# The registry identity the bare or qualified type spelling NAME denotes in
+# the file of namespace NS ("" for the entry program): a qualified spelling
+# is itself; a bare one is NS's own declared type `NS::NAME` if there is one,
+# else the type its file's `import type` binds to NAME, else NAME unchanged
+# (a built-in type, or the entry program's own).
+proc hir::types::CanonicalTypeName {name ns} {
+    if {[string first :: $name] >= 0} {
+        return $name
+    }
+    if {$ns ne "" && [core::type::isSource ${ns}::$name]} {
+        return ${ns}::$name
+    }
+    set imported [hir::imports::typeNamed $ns $name]
+    return [expr {$imported ne "" ? $imported : $name}]
 }
 
 # The canonical resolved type for type constructor CTOR applied to ARGS (a

@@ -44,6 +44,9 @@
 #
 # expect: [16, 5, "2fast", 11]
 
+import list
+import str
+
 fn is_underscore?(c):
     c == "_"
 

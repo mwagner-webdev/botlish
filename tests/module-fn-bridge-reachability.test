@@ -66,6 +66,10 @@ set channel [open [file join $::bridgeLibrary bridgefix.bot] w]
 fconfigure $channel -encoding utf-8
 puts -nonewline $channel {namespace bridgefix
 
+import immutable_set
+import list
+import str
+
 offset = 10
 scale = 3
 greeting = "hello"
@@ -332,7 +336,7 @@ test module-fn-bridge-identity-independent-of-caller-shape {the bridged function
 test module-fn-bridge-matches-qualified-call {check(s) calling bridgefix::one_dep(s) directly (surface module call) and through probe_one (bridge) agree: neither captures anything (one_dep is envless -- its own module dependency, offset, is a static reference), and both compute the identical result} -body {
     set main [file join $::bridgeLibrary main.bot]
     set ch [open $main w]
-    puts -nonewline $ch "fn check(s):\n    bridgefix::one_dep(s)\ncheck(2)\n"
+    puts -nonewline $ch "import bridgefix\nfn check(s):\n    bridgefix::one_dep(s)\ncheck(2)\n"
     close $ch
     set direct [surface::readProgramFile $main]
     set bridged [nativeHirOfIR [callerShape toplevel-fn probe_one]]
@@ -344,7 +348,7 @@ test module-fn-bridge-matches-qualified-call {check(s) calling bridgefix::one_de
 test module-fn-bridge-matches-qualified-call-instances {the bridged spelling and an ordinary qualified call, from the same program root and function caller, produce the identical instance family: two_deps is envless now (no forced generic fallback -- see module-fn-bridge-identity-independent-of-caller-shape above), so check itself, calling it with a plain parameter forward, is a provably-Int instance too, not generic} -body {
     set main [file join $::bridgeLibrary main2.bot]
     set ch [open $main w]
-    puts -nonewline $ch "fn check(s):\n    bridgefix::two_deps(s)\n\[check(1), bridgefix::two_deps(3)\]\n"
+    puts -nonewline $ch "import bridgefix\nfn check(s):\n    bridgefix::two_deps(s)\n\[check(1), bridgefix::two_deps(3)\]\n"
     close $ch
     set direct [surface::readProgramFile $main]
     set bridged [nativeHirOfIR {

@@ -218,7 +218,7 @@ for {set s $seed0} {$s < $seed0 + $n} {incr s} {
     set dir [file join [pwd] .fuzz-short-string]
     file mkdir $dir
     set path [file join $dir p$s.bot]
-    set ch [open $path w]; fconfigure $ch -encoding utf-8; puts $ch $text; close $ch
+    set ch [open $path w]; fconfigure $ch -encoding utf-8; puts $ch [surface::modules::ImportHeader $text]$text; close $ch
     if {[catch {set hir [surface::readProgramFile $path]} err]} {
         file delete $path
         incr rejected

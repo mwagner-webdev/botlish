@@ -222,6 +222,7 @@ test result-narrow-pinned-summary-untouched {a solved self-recursive summary (ra
 # the dynamic caller this test is about.
 test result-narrow-open-instance-summary-stays-sound {an instance reached through a Block value (open: unknown callers) keeps a summary that covers its dynamic callers: f's generic entry is called with -50 through a List element, so its summary keeps -∞, while the closed f<int> called with 5 narrows to [5, 100]} -body {
     lassign [narrowOf {
+        import list
         fn f(x):
             if x > 100:
                 100
@@ -288,6 +289,7 @@ foreach {name src expected} {
         [gap(-4611686018427387904), gap(0), gap(-5)]
     } {[-9223372036854775807, -4611686018427387903, -4611686018427387908]}
     open-and-closed {
+        import list
         fn f(x):
             if x > 100:
                 100
@@ -302,6 +304,7 @@ foreach {name src expected} {
         [f(5) * 3, apply(0, -50) * 3, apply(0, 4611686018427387903) + f(5), apply(0, -4611686018427387904) - f(5)]
     } {[15, -150, 105, -4611686018427387909]}
     scan-shape {
+        import str
         fn first_space(s):
             n = str::length(s)
             fn at(i):

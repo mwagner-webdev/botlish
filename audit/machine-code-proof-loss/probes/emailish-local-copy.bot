@@ -6,6 +6,9 @@
 #
 # expect: [true, false]
 
+import immutable_set
+import str
+
 local_extra_chars = immutable_set::from_list([".", "_", "%", "+", "-"])
 
 fn my_emailish?(v):

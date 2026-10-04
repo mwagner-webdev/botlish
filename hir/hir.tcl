@@ -282,6 +282,15 @@ proc hir::build {exprs args} {
 #                   by default: every caller but the surface frontend
 #                   (surface/lower.tcl, surface/modules.tcl) and hir::read.
 #
+#   -imports T      the import environments of the compilation (hir/imports.tcl,
+#                   IMPORTS.md): NAMESPACE -> {namespaces {NS ...} types {SHORT
+#                   CANONICAL ...}}, one per file, keyed by the namespace the
+#                   file is the module of ("" for the entry program). Given
+#                   (even empty), it replaces the compilation's table; omitted,
+#                   the table is left as it is (core IR builds, internal
+#                   rebuilds). Consulted by resolution only: no import is ever
+#                   an expression.
+#
 #   -struct-decls D surface/lower.tcl's StructDeclOf dicts (one per "struct
 #                   Name:" declaration, across every module section plus the
 #                   program's own top level): validated and registered, in the
@@ -309,45 +318,257 @@ proc hir::build {exprs args} {
 proc hir::buildSyntax {nodes args} {
     set options [Options hir::buildSyntax \
         {-mode program -strict 1 -origin "" -files {} -modules {} \
-            -type-decls {} -error-decls {} -struct-decls {} -halt-on-resolution-errors 0} $args]
+            -type-decls {} -error-decls {} -struct-decls {} -imports {} -halt-on-resolution-errors 0} $args]
     set mode [dict get $options -mode]
     if {$mode ni {program sequence}} {
         error "hir::build: -mode must be program or sequence"
     }
+    set given [dict create {*}$args]
+    # The analysis build raises nothing itself (a diagnostic is a diagnostic
+    # of the HIR, whatever the caller's -strict): a strict caller's first
+    # diagnostic is raised below, once the method-style calls with several
+    # candidate functions have been decided (DecideMethodCalls) -- which needs
+    # the typed HIR of trial builds, so no build may raise before it.
+    set halt [expr {[dict get $options -strict] || [dict get $options -halt-on-resolution-errors]}]
+    set hir [BuildOnce $nodes $options $given {} $halt checked]
+    if {$checked && [dict exists $hir methodCalls]} {
+        set hir [DecideMethodCalls $nodes $options $given $hir]
+    }
+    if {[dict get $options -strict] && [dict get $hir diagnostics] ne ""} {
+        # Resolution failed, or a static check did: the first diagnostic.
+        core::semanticError [dict get [lindex [dict get $hir diagnostics] 0] kind] \
+            [dict get [lindex [dict get $hir diagnostics] 0] message]
+    }
+    return $hir
+}
+
+# One build of the syntax NODES to HIR: the options of hir::buildSyntax
+# (OPTIONS, with GIVEN the options as the caller wrote them), the method-call
+# choices CHOICES (key -> candidate display, see hir::resolve::MethodChoice),
+# stopping after resolution when HALT and a name is unresolved ("nothing
+# below runs on a HIR whose names are not all resolved"). Sets CHECKEDVAR to
+# whether the static checks ran. Raises nothing for a diagnostic.
+proc hir::BuildOnce {nodes options given choices halt checkedVar} {
+    upvar 1 $checkedVar checked
+    set checked 0
+    if {[dict exists $given -imports]} {
+        hir::imports::apply [dict get $options -imports]
+    }
     set errorDecls [hir::errordecls::apply [dict get $options -error-decls]]
-    if {[dict exists [dict create {*}$args] -struct-decls] && [dict get $options -struct-decls] eq ""} {
+    if {[dict exists $given -struct-decls] && [dict get $options -struct-decls] eq ""} {
         # A frontend that passes -struct-decls (even empty) compiles a program
         # of its own: no struct of an earlier compilation may stay visible.
         hir::structs::Reset
     }
     set sourceTypes [hir::sourcetypes::apply [dict get $options -type-decls] [dict get $options -struct-decls]]
-    set hir [hir::resolve::program $nodes $mode [dict get $options -origin] [dict get $options -modules]]
+    set hir [hir::resolve::program $nodes [dict get $options -mode] [dict get $options -origin] \
+        [dict get $options -modules] $choices]
     dict set hir sourceTypes $sourceTypes
     dict set hir errorDecls $errorDecls
     hir::hygiene::apply hir
     dict for {f path} [dict get $options -files] {
         dict set hir files $f [dict create id $f path $path]
     }
-    if {[dict get $hir diagnostics] ne ""} {
+    if {[dict get $hir diagnostics] ne "" && $halt} {
         # Resolution failed: nothing below runs on a HIR whose names are not
         # all resolved. A caller that raises later (the source frontend adds
         # source locations to the message) asks to stop here with
         # -halt-on-resolution-errors and raises the diagnostics itself.
-        if {[dict get $options -strict]} {
-            core::semanticError [dict get [lindex [dict get $hir diagnostics] 0] kind] \
-                [dict get [lindex [dict get $hir diagnostics] 0] message]
-        }
-        if {[dict get $options -halt-on-resolution-errors]} {
-            return $hir
-        }
+        return $hir
     }
     hir::check hir
-    if {[dict get $options -strict]} {
-        foreach diagnostic [dict get $hir diagnostics] {
-            core::semanticError [dict get $diagnostic kind] [dict get $diagnostic message]
+    set checked 1
+    return $hir
+}
+
+# Diagnostic kinds that say a call is unfit for its receiver the way no
+# other candidate is: everything except the obligations a *fit* call may
+# still carry (an error it declares that nobody handled yet, or that provably
+# always fails) and the ambiguity check itself.
+proc hir::MethodObligationKinds {} {
+    return {UNHANDLED-ERROR KNOWN-ERROR UNDECLARED-ERROR AMBIGUOUS-METHOD-CALL}
+}
+
+# The diagnostics of HIR (a trial build) located in the call EXPR or anything
+# inside it, minus the obligation kinds: what the call's *validity* with the
+# function this build chose for it consists of -- a sorted unique list of
+# {kind message expr}. Empty: the ordinary call is valid.
+proc hir::MethodCallProblems {hir expr} {
+    set inside [dict create]
+    set stack [list $expr]
+    while {$stack ne ""} {
+        set e [lindex $stack end]
+        set stack [lrange $stack 0 end-1]
+        if {[dict exists $inside $e] || ![dict exists $hir exprs $e]} continue
+        dict set inside $e 1
+        lappend stack {*}[hir::children $hir $e]
+    }
+    set problems {}
+    foreach d [dict get $hir diagnostics] {
+        if {![dict exists $d expr] || ![dict exists $inside [dict get $d expr]]} continue
+        if {[dict get $d kind] in [MethodObligationKinds]} continue
+        lappend problems [list [dict get $d kind] [dict get $d message] [dict get $d expr]]
+    }
+    # A native called with a first argument of a statically known other kind
+    # is not diagnosed at compile time (it is the native's run-time TYPE
+    # error, as for any call), but it is plainly not the function the
+    # method-style call means when another candidate accepts the receiver.
+    set node [dict get $hir exprs $expr]
+    if {[dict get $node kind] eq "call" && [dict get $node args] ne ""} {
+        set callee [dict get $hir exprs [dict get $node callee]]
+        if {[dict get $callee kind] eq "ref" && [dict get $callee binding] ne ""} {
+            set binding [dict get $hir bindings [dict get $callee binding]]
+            if {[dict get $binding kind] eq "root" && [dict get $binding symbol] ne ""
+                    && [dict get $hir symbols [dict get $binding symbol] kind] eq "native"} {
+                set native [dict get $binding name]
+                set receiver [lindex [dict get $node args] 0]
+                set receiverType [hir::typeOf $hir $receiver]
+                set kind [hir::types::kindOf $receiverType]
+                set paramTypes [dict get [core::native::metadata $native] paramTypes]
+                set wanted [expr {$paramTypes eq "" ? "" : [core::type::base [lindex $paramTypes 0]]}]
+                if {$receiverType ne "never" && $kind ne "" && $wanted ne "" && $kind ne $wanted} {
+                    lappend problems [list TYPE \
+                        "the receiver is a $kind, but argument 1 of native $native requires $wanted" $receiver]
+                }
+            }
         }
     }
-    return $hir
+    return [lsort -unique $problems]
+}
+
+# Decides the method-style calls `receiver.name(args)` that have several
+# distinct visible candidate functions (lexical ones and members of directly
+# imported namespaces, hir/resolve.tcl's MethodCandidates), by the rule of
+# METHOD-SUGAR.md: the call is accepted exactly when the ordinary call with
+# the receiver as first argument is valid. Candidate k of a call is *valid* if
+# a build that resolves the call to k has no diagnostic inside the call
+# (MethodCallProblems) other than those every candidate shares. If exactly one
+# candidate is valid the call is that candidate's; if several are, the call is
+# rejected with AMBIGUOUS-METHOD-CALL (no precedence: not import order, not
+# the shortest name, not locality); if none is, with NO-APPLICABLE-METHOD,
+# which lists why each candidate fails.
+#
+# The calls of a program are decided together: build t (t = 0, 1, ...) gives
+# every undecided call its t-th candidate, so each call's candidates are
+# tried by as many builds as the longest candidate list, and the rounds
+# repeat with the calls decided so far fixed, because a call's receiver may
+# be another undecided call's result. Only calls with several candidates ever
+# cost a build; a program without one is built once. Returns the final HIR.
+proc hir::DecideMethodCalls {nodes options given hir} {
+    set calls [dict get $hir methodCalls]
+    set decided [dict create]
+    set validity [dict create]
+    set problemsOf [dict create]
+    while 1 {
+        set undecided [lmap {key info} $calls {
+            if {[dict exists $decided $key] || [string is integer -strict $key]} continue
+            set key
+        }]
+        if {$undecided eq ""} break
+        set rounds 0
+        foreach key $undecided {
+            set rounds [expr {max($rounds, [llength [dict get $calls $key candidates]])}]
+        }
+        set validity [dict create]
+        set problemsOf [dict create]
+        for {set t 0} {$t < $rounds} {incr t} {
+            set choices $decided
+            foreach key $undecided {
+                set candidates [dict get $calls $key candidates]
+                dict set choices $key [lindex $candidates [expr {min($t, [llength $candidates] - 1)}]]
+            }
+            set trial [BuildOnce $nodes $options $given $choices 0 checked]
+            if {!$checked} {
+                # Not typeable: no call can be decided on types.
+                set undecided {}
+                break
+            }
+            foreach key $undecided {
+                set candidates [dict get $calls $key candidates]
+                if {$t >= [llength $candidates] || ![dict exists $trial methodCalls $key]} continue
+                dict set problemsOf $key [lindex $candidates $t] \
+                    [MethodCallProblems $trial [dict get $trial methodCalls $key expr]]
+            }
+        }
+        if {$undecided eq ""} break
+        # A problem every candidate shares says nothing about which fits.
+        foreach key $undecided {
+            set perCandidate [dict get $problemsOf $key]
+            set common {}
+            set first 1
+            dict for {candidate problems} $perCandidate {
+                if {$first} {
+                    set common $problems
+                } else {
+                    set kept {}
+                    foreach p $common {
+                        if {$p in $problems} {
+                            lappend kept $p
+                        }
+                    }
+                    set common $kept
+                }
+                set first 0
+            }
+            dict for {candidate problems} $perCandidate {
+                set own {}
+                foreach p $problems {
+                    if {$p ni $common} {
+                        lappend own $p
+                    }
+                }
+                dict set validity $key $candidate [expr {$own eq ""}]
+            }
+        }
+        set progress 0
+        foreach key $undecided {
+            set valid [dict keys [dict filter [dict get $validity $key] value 1]]
+            if {[llength $valid] == 1} {
+                dict set decided $key [lindex $valid 0]
+                set progress 1
+            }
+        }
+        if {!$progress} break
+    }
+    # The rest stand in with a valid candidate if any (so the later analysis
+    # sees a call that types), else the first; they are rejected below.
+    set choices $decided
+    set rejected {}
+    foreach key [dict keys $calls] {
+        if {[dict exists $decided $key] || [string is integer -strict $key] || ![dict exists $validity $key]} continue
+        set valid [dict keys [dict filter [dict get $validity $key] value 1]]
+        if {$valid ne ""} {
+            dict set choices $key [lindex $valid 0]
+        }
+        lappend rejected $key $valid
+    }
+    set final [BuildOnce $nodes $options $given $choices 0 checked]
+    foreach {key valid} $rejected {
+        if {![dict exists $final methodCalls $key]} continue
+        set info [dict get $final methodCalls $key]
+        set e [dict get $info expr]
+        set name [dict get $info name]
+        set origin [dict get $final exprs $e method nameOrigin]
+        if {[llength $valid] > 1} {
+            set message [::format {method-style call "%s" is ambiguous: more than one visible function accepts the receiver (%s); there is no precedence between them: call the one you mean explicitly, e.g. %s(receiver, ...)} \
+                $name [join $valid {, }] [lindex $valid 0]]
+            set kind AMBIGUOUS-METHOD-CALL
+        } else {
+            set reasons {}
+            dict for {candidate problems} [dict get $problemsOf $key] {
+                set reason [expr {$problems eq "" ? "no problem found" : [lindex [lindex $problems 0] 1]}]
+                lappend reasons "$candidate: $reason"
+            }
+            set message [::format {method-style call "%s": none of the visible functions of that name accepts the receiver (%s)} \
+                $name [join $reasons {; }]]
+            set kind NO-APPLICABLE-METHOD
+        }
+        set diagnostics [dict get $final diagnostics]
+        hir::DiagnoseAt final $kind $message $e $origin
+        set added [lindex [dict get $final diagnostics] end]
+        dict set final diagnostics [concat [list $added] $diagnostics]
+    }
+    return $final
 }
 
 # Types resolved HIR (inferring every block's intrinsic contract,
@@ -798,7 +1019,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {syntax resolve flags refcheck hygiene sourcetypes structs syscall errordecls types exactvalue signatures modulebinding refine lower format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep warnings} {
+    foreach file {syntax imports resolve flags refcheck hygiene sourcetypes structs syscall errordecls types exactvalue signatures modulebinding refine lower format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep warnings} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

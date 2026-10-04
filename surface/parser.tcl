@@ -5,9 +5,18 @@
 # Recursive descent over the tokens of lexer.tcl. The grammar, with layout
 # already turned into NEWLINE / INDENT / DEDENT tokens:
 #
-#   program      = [ namespaceDecl ] { NEWLINE | topStatement } EOF
+#   program      = [ namespaceDecl ] { importDecl } { NEWLINE | topStatement } EOF
 #   namespaceDecl = "namespace" path NEWLINE
 #   path         = IDENT { "::" IDENT }  -- a namespace: one or more segments
+#   importDecl   = "import" path NEWLINE            -- a namespace import
+#                | "import" "type" path NEWLINE     -- a type import: the path's
+#                                                      last segment is a type name,
+#                                                      so it has at least two
+#                  -- the file header: after the namespace declaration, before
+#                     anything else (IMPORTS.md). "import" is contextual, not a
+#                     keyword: it starts an import only when immediately
+#                     followed by a name or by "type", which no other
+#                     construct allows, so `import` stays an ordinary name.
 #   topStatement = typeDecl | structDecl | errorDecl | statement
 #   statement    = simple NEWLINE | valued | function | if | loop
 #   simple       = binding | destructure | return | break | continue | fail
@@ -269,10 +278,103 @@ proc surface::parser::Program {pVar} {
     if {[Kind p] eq "namespace"} {
         lassign [NamespaceDecl p] namespaceName namespaceSpan
     }
+    set imports [Imports p]
     set body [Statements p {EOF}]
     set end [dict get [Peek p] span]
     return [surface::ast::node program [surface::ast::cover $start $end] body $body \
-        namespace $namespaceName namespaceSpan $namespaceSpan]
+        namespace $namespaceName namespaceSpan $namespaceSpan imports $imports]
+}
+
+# 1 if the next tokens start an import declaration: the contextual word
+# "import" followed by a name or by "type" (never a valid continuation of an
+# expression, so an ordinary variable called `import` is unaffected).
+proc surface::parser::AtImport {pVar} {
+    upvar 1 $pVar p
+    set token [Peek p]
+    return [expr {[dict get $token kind] eq "IDENT" && [dict get $token text] eq "import"
+        && [Kind p 1] in {IDENT type}}]
+}
+
+# The import declarations of the file header, in written order: a list of
+# `import` and `typeimport` nodes (surface/ast.tcl). Blank lines between
+# them are fine; the first token that does not start an import ends the
+# header. A malformed import is a syntax error like any other (recovered per
+# declaration in a recovering parse).
+proc surface::parser::Imports {pVar} {
+    upvar 1 $pVar p
+    set imports {}
+    while 1 {
+        while {[Kind p] eq "NEWLINE"} {
+            Advance p
+        }
+        if {![AtImport p]} {
+            return $imports
+        }
+        set token [Peek p]
+        if {![catch {Import p} import options]} {
+            lappend imports $import
+            continue
+        }
+        if {![dict get $p recover] || [lrange [dict get $options -errorcode] 0 1] ne {SURFACE SYNTAX}} {
+            return -options $options $import
+        }
+        dict lappend p diagnostics [lindex [dict get $options -errorcode] 2]
+        set before [dict get $p pos]
+        Synchronize p
+        if {[dict get $p pos] == $before} {
+            Advance p
+        }
+    }
+}
+
+# "import" [ "type" ] PATH NEWLINE: a namespace import, or a type import whose
+# PATH ends in the type's name (IMPORTS.md). Returns an `import` node
+# {namespace PATH namespaceSpan}, or a `typeimport` node {namespace NS name T
+# nameSpan namespaceSpan} (NS the path before the last "::"). No alias ("as"),
+# wildcard or selective form exists: each is a specific syntax error.
+proc surface::parser::Import {pVar} {
+    upvar 1 $pVar p
+    set start [dict get [Advance p] span]
+    set isType 0
+    if {[Kind p] eq "type"} {
+        Advance p
+        set isType 1
+    }
+    set first [Expect p IDENT [expr {$isType ? "a qualified type name (NAMESPACE::Type) after \"import type\"" : "a namespace name after \"import\""}]]
+    set segments [list [dict get $first value]]
+    set spans [list [dict get $first span]]
+    while {[Kind p] eq "::"} {
+        Advance p
+        if {[Kind p] eq "*"} {
+            Fail [Peek p] "wildcard imports do not exist: import the exact namespace (\"import [join $segments ::]\") and refer to its members as [join $segments ::]::name"
+        }
+        set segment [Expect p IDENT [expr {$isType ? "a type name after \"::\"" : "a namespace name after \"::\""}]]
+        lappend segments [dict get $segment value]
+        lappend spans [dict get $segment span]
+    }
+    set token [Peek p]
+    if {[dict get $token kind] eq "IDENT" && [dict get $token text] eq "as"} {
+        Fail $token "import aliases do not exist: refer to the imported [expr {$isType ? "type" : "namespace"}] by its full name"
+    }
+    if {[dict get $token kind] ne "NEWLINE" && [dict get $token kind] ne "EOF"} {
+        Fail $token "expected end of line, found [Describe $token]"
+    }
+    if {[dict get $token kind] eq "NEWLINE"} {
+        Advance p
+    }
+    set span [surface::ast::cover $start [lindex $spans end]]
+    if {$isType} {
+        if {[llength $segments] < 2} {
+            Fail [dict create span [lindex $spans 0]] \
+                "a type import needs a qualified name NAMESPACE::Type (found just \"[lindex $segments 0]\")"
+        }
+        return [surface::ast::node typeimport $span \
+            namespace [join [lrange $segments 0 end-1] ::] \
+            namespaceSpan [surface::ast::cover [lindex $spans 0] [lindex $spans end-1]] \
+            name [lindex $segments end] nameSpan [lindex $spans end]]
+    }
+    return [surface::ast::node import $span namespace [join $segments ::] \
+        namespaceSpan [surface::ast::cover [lindex $spans 0] [lindex $spans end]]]
 }
 
 # "namespace" PATH NEWLINE, as the very first statement of a file (a
@@ -401,6 +503,9 @@ proc surface::parser::Statement {pVar} {
         else   { Fail $token "\"else\" without a matching \"if\"" }
         elif   { Fail $token "\"elif\" without a matching \"if\"" }
         namespace { Fail $token "a \"namespace\" declaration must be the first statement in the file" }
+    }
+    if {[AtImport p]} {
+        Fail $token "an import must be in the file header: after the \"namespace\" declaration, before any other declaration or statement, and never inside a function, loop or branch"
     }
     set statement [Simple p]
     if {[dict get $statement kind] eq "handledcall"} {

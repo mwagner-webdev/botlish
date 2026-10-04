@@ -29,7 +29,8 @@ set ::highNibbleDecl "type HighNibble = Int in \{\n    0, 16, 32, 48,\n    64, 8
 # looks up -- see SOURCE-DEFINED-INTEGER-DOMAINS.md's "Compilation
 # isolation").
 proc loadByteLibrary {} {
-    set path [makeFile {byte::high_nibble(0)
+    set path [makeFile {import byte
+byte::high_nibble(0)
 } refined-signature-load-byte.bot]
     try {
         surface::readProgramFile $path -strict 0
@@ -41,7 +42,8 @@ proc loadByteLibrary {} {
 test refined-signature-syntax-1 {result-only annotations are optional AST metadata} -body {
     set plain [lindex [dict get [surface::parse {fn f(x):
     x} plain.bot] body] 0]
-    set typed [lindex [dict get [surface::parse {fn f(x) -> HighNibble:
+    set typed [lindex [dict get [surface::parse {import type byte::HighNibble
+fn f(x) -> HighNibble:
     bit_and(x, 240)} typed.bot] body] 0]
     list [dict get $plain resultType] [dict get $typed resultType]
 } -result {{} HighNibble}
@@ -134,22 +136,22 @@ test refined-signature-specialize-1 {specialized instances retain the public con
 
 test refined-signature-domain-1 {canonical scalar domains seed bounded optimizer facts} -body {
     loadByteLibrary
-    list [hir::range::show [hir::range::TypeFact Byte]] \
-        [hir::range::show [hir::range::TypeFact Nibble]] \
-        [hir::range::show [hir::range::TypeFact LowNibble]] \
-        [hir::range::show [hir::range::TypeFact HighNibble]]
+    list [hir::range::show [hir::range::TypeFact byte::Byte]] \
+        [hir::range::show [hir::range::TypeFact byte::Nibble]] \
+        [hir::range::show [hir::range::TypeFact byte::LowNibble]] \
+        [hir::range::show [hir::range::TypeFact byte::HighNibble]]
 } -result {{[0, 255]} {[0, 15]} {[0, 15]} {[0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240}}}
 
 test refined-signature-domain-2 {nibble identities are distinct Byte subtypes} -body {
     loadByteLibrary
-    list [core::type::subtype Nibble Byte] [core::type::subtype LowNibble Byte] \
-        [core::type::subtype HighNibble Byte] [core::type::subtype Nibble LowNibble] \
-        [core::type::subtype LowNibble Nibble]
+    list [core::type::subtype byte::Nibble byte::Byte] [core::type::subtype byte::LowNibble byte::Byte] \
+        [core::type::subtype byte::HighNibble byte::Byte] [core::type::subtype byte::Nibble byte::LowNibble] \
+        [core::type::subtype byte::LowNibble byte::Nibble]
 } -result {1 1 1 0 0}
 
 test refined-signature-narrow-1 {type-seeded sparse facts compose with inequality narrowing} -body {
     loadByteLibrary
-    set h [hir::range::TypeFact HighNibble]
+    set h [hir::range::TypeFact byte::HighNibble]
     list [hir::range::show [hir::range::Narrowed < $h [hir::range::point 100]]] \
         [hir::range::show [hir::range::PointEqualityNarrow $h [hir::range::point 160] 0]]
 } -result {{[0, 99] {0,16,32,48,64,80,96}} {[0, 240] {0,16,32,48,64,80,96,112,128,144,176,192,208,224,240}}}
@@ -163,7 +165,8 @@ test refined-signature-cross-module-1 {a qualified byte call retains type and fa
     # is no longer resolved first), with no effect on the actual type/range
     # facts asserted here (both unchanged across those changes).
 } -body {
-    set path [makeFile {byte::high_nibble(171)
+    set path [makeFile {import byte
+byte::high_nibble(171)
 } refined-signature-main.bot]
     try {
         set h [surface::readProgramFile $path]
@@ -173,7 +176,7 @@ test refined-signature-cross-module-1 {a qualified byte call retains type and fa
         foreach id [dict get $spec used] {
             set view [hir::specialize::view $h $spec $id]
             foreach e [dict get [dict get $spec instances $id] reachable] {
-                if {[hir::kind $view $e] ne {call} || [hir::types::show [hir::typeOf $view $e]] ne {int[HighNibble]}} continue
+                if {[hir::kind $view $e] ne {call} || [hir::types::show [hir::typeOf $view $e]] ne {int[byte::HighNibble]}} continue
                 lappend found [hir::types::show [hir::typeOf $view $e]] \
                     [hir::range::show [hir::range::of $ranges $id $e]] [hir::format::Target $view [hir::get $view $e target]]
             }
@@ -182,10 +185,11 @@ test refined-signature-cross-module-1 {a qualified byte call retains type and fa
     } finally {
         removeFile refined-signature-main.bot
     }
-} -result {{int[HighNibble]} {[0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240}} block(e2)}
+} -result {{int[byte::HighNibble]} {[0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240}} block(e2)}
 
 test refined-signature-web-1 {web high_nibble infers Nibble transitively without a declaration} -body {
-    set path [makeFile {web::uri_escape_text
+    set path [makeFile {import web
+web::uri_escape_text
 } refined-signature-web.bot]
     try {
         set h [surface::readProgramFile $path]
@@ -194,7 +198,7 @@ test refined-signature-web-1 {web high_nibble infers Nibble transitively without
             set scope [hir::get $h $e bodyScope]
             foreach b [hir::get $h $e params] {
                 if {[dict get [hir::binding $h $b] name] eq {b} \
-                        && [hir::types::show [hir::type $h [hir::get $h $e resultType]]] eq {int[Nibble]}} {
+                        && [hir::types::show [hir::type $h [hir::get $h $e resultType]]] eq {int[byte::Nibble]}} {
                     lappend results [dict get [hir::binding $h $b] name] [dict get [hir::node $h $e] declaredResult]
                 }
             }

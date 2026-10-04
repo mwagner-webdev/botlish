@@ -487,7 +487,8 @@ fn take_small(x: Small) -> Small:
     x
 }
     close $ch
-    set mainPath [makeFile {f = typedcallablelib::take_small
+    set mainPath [makeFile {import typedcallablelib
+f = typedcallablelib::take_small
 f(7)
 } typed-callable-cross-module.bot]
     try {
@@ -510,7 +511,8 @@ fn take_small(x: Small) -> Small:
     x
 }
     close $ch
-    set mainPath [makeFile {fn apply(f, v):
+    set mainPath [makeFile {import typedcallablelib2
+fn apply(f, v):
     f(v)
 apply(typedcallablelib2::take_small, 3)
 } typed-callable-cross-module-bad.bot]

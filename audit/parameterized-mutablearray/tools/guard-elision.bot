@@ -1,3 +1,5 @@
+import mutable_array
+
 fn typed_next(m: MutableArray[int], i: int) -> int:
     mutable_array::at(m, i) + 1
 

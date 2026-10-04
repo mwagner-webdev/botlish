@@ -128,6 +128,7 @@ test raw-internal-abi-refined-checks-region-companion-tagged {char_at's internal
 # The ABI on its own: params, results, recursion, the small-Int boundary
 
 set ::recursionShape {
+    import str
     fn outer(s, base):
         n = str::length(s)
         fn depth(x):
@@ -154,6 +155,7 @@ test raw-internal-abi-recursion {a non-tail self-recursive internal variant call
 } -result {rawparams=0 rawparams=0 1 {[[18, 19, 32], [-4, -1, -4]]}}
 
 set ::resultShape {
+    import str
     fn scanner(s):
         n = str::length(s)
         fn at(i):
@@ -194,6 +196,8 @@ test raw-internal-abi-knob-off {with the knob off no internal variant has a raw 
 } -result {0 {[[18, 19, 32], [-4, -1, -4]]} 0 {[[4, 0, 3], [0, 0, 0], [1, 0, 0]]}}
 
 set ::gcShape {
+    import list
+    import str
     fn mk(k):
         [k, str::concat("a", "b")]
     fn run(s, lim):

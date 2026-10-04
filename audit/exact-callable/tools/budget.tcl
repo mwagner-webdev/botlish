@@ -17,7 +17,7 @@ append src "fn apply_loop(f, i, n):\n    acc = 0\n    loop j from i to n:\n     
 set calls {}
 for {set k 1} {$k <= $n} {incr k} { lappend calls "apply_loop(p${k}, 0, 100)" }
 append src "\[[join $calls {, }]\]\n"
-set hir [surface::compile $src budget.bot -strict 0]
+set hir [surface::compile [surface::modules::ImportHeader $src]$src budget.bot -strict 0]
 set t0 [clock microseconds]
 set nir [native::nir $hir]
 set ms [expr {([clock microseconds]-$t0)/1000}]

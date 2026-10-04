@@ -3,6 +3,8 @@
 #
 # expect: [4, 3]
 
+import str
+
 fn bot_alpha(c):
     str::is_tcl_alpha(c) or c == "_"
 

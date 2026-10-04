@@ -27,7 +27,9 @@ set ::allBackends {interp compile cranelift-generic cranelift}
 # The log is a one-slot MutableArray; the capacity guard is what proves
 # mutable_array::at's index (STDLIB-NAMESPACES.md), so neither helper needs
 # an IndexNotFound handler.
-set ::probePreamble {fn current(log):
+set ::probePreamble {import list
+import mutable_array
+fn current(log):
     if mutable_array::capacity(log) == 1:
         return mutable_array::at(log, 0)
     -1
@@ -597,7 +599,8 @@ test elif-fail-unhandled {an elif branch's declared error that nobody handles is
     bothSpellings $::failElifDefs$rest $::failNestedDefs$rest
 } -match glob -result {error {CORE SEMANTIC UNHANDLED-ERROR} {t.bot:L:C: this call may produce the declared error "Boom"*}}
 
-set ::loopPrelude {fn run():
+set ::loopPrelude {import mutable_array
+fn run():
     acc = mutable_array::allocate(1)
     mutable_array::set(acc, 0, 0)
     loop i from 0 to 9:
@@ -851,7 +854,8 @@ f(5)" \
             3
 f(5)" \
     {value 3} \
-    construction "fn f(a, b):
+    construction "import list
+fn f(a, b):
     if a:
         \[1, 2\]
     elif b:
@@ -859,7 +863,8 @@ f(5)" \
     else:
         \[5, 6\]
 list::length(f(true, false)) + list::length(f(false, true)) + list::length(f(false, false))" \
-    "fn f(a, b):
+    "import list
+fn f(a, b):
     if a:
         \[1, 2\]
     else:
@@ -901,7 +906,8 @@ proc executableValue {text} {
 
 # Closed AOT needs typed code: a typed MutableArray[int] log (the untyped
 # mutable_array::at above has no static kind).
-set ::typedPreamble {fn current(log: MutableArray[int]) -> int:
+set ::typedPreamble {import mutable_array
+fn current(log: MutableArray[int]) -> int:
     if mutable_array::capacity(log) == 1:
         return mutable_array::at(log, 0)
     -1
