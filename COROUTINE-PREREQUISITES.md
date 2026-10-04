@@ -11,6 +11,9 @@ This is a research document written before any implementation.
 
 * No production code was changed.
 * Code claims cite `path:line` at commit `66b52cd`.
+* Appendix B's import inventory was measured on a standalone executable built
+  at `f7bb13c`, whose `native/src` and `native/Cargo.toml` are identical to
+  `66b52cd`'s.
 * Experiments ran under Tcl 9.0.1 (`tclsh9.0`), using throwaway scripts that
   are not committed. Appendix A reproduces their essential parts and their
   output.
@@ -732,6 +735,9 @@ for little extra work.
   SIGSEGV handler for the main thread's guard. Leaving glibc ultimately means
   a `no_std` runtime or the project's own system-call layer, which
   `linux::abi::syscall` (LINUX-X86-64-SYSCALL.md) already points toward.
+  Appendix B lists, measured on a real executable, every glibc and libgcc
+  symbol a produced executable imports, which code needs each one, and what
+  replaces it.
 
 **Guard regions larger than one page.**
 
@@ -1111,3 +1117,116 @@ rename C {}        ;# prints nothing: no finally
 **A.4:** with `interp recursionlimit {} 200`, recursing 150 levels and then
 running `coroutine cz deep 150` there fails with `too many nested evaluations
 (infinite loop?)`, while `deep 150` alone succeeds.
+
+---
+
+## Appendix B: what produced executables take from Rust `std` and glibc
+
+**Method.** At `f7bb13c`, `examples/stdlib/csv.bot` was compiled with
+`tclsh9.0 main.tcl -emit-native-executable`. The executable's dynamic imports
+were then listed with `nm -D --undefined-only`. Each imported symbol was
+attributed to the functions that call it, using the demangled disassembly
+(`objdump -d -C`). The program's own code is irrelevant here: every produced
+executable links the same runtime library and the same generated
+`startup.rs` shape (`native/src/codegen/aot.rs:20-117`).
+
+### B.1 Rust `std` is layered, not monolithic
+
+* **`core`** needs no operating system and no allocator: pointers, `mem`,
+  slices, `fmt`, atomics, `asm!`, `Cell`/`RefCell`/`OnceCell`, iterators.
+* **`alloc`** needs only a global allocator: `Box`, `Vec`, `String`, `Rc`,
+  `Arc`, `BTreeMap`, `format!`.
+* **`std`** re-exports both and adds the operating-system layer:
+  * process startup;
+  * threads, and thread-locals with destructors;
+  * the environment, arguments, I/O, files and time;
+  * `HashMap`'s random seed;
+  * panic unwinding and backtraces.
+
+  On `x86_64-unknown-linux-gnu`, that layer is implemented on glibc.
+
+Almost all of the runtime uses only `core`- and `alloc`-level items. Only the
+uses listed in B.3 need the OS layer. On the `-gnu` target, however, linking
+`std` also brings in `std`'s own runtime initialization, its own overflow
+handler and its panic machinery, whether the runtime uses them or not. B.2
+marks those groups "`std` itself".
+
+### B.2 Imports
+
+`ldd` lists `libc.so.6`, `libm.so.6`, `libgcc_s.so.1` and
+`ld-linux-x86-64.so.2`. The executable has 81 undefined dynamic symbols.
+
+| Group | Imported symbols | Needed by | Without glibc |
+|---|---|---|---|
+| Process startup and exit | `__libc_start_main`, `exit`, `abort`, `pause`, `__cxa_finalize`; the weak `__gmon_start__` and `_ITM_*` | the C startup objects rustc links on `-gnu` (`_start` calls `__libc_start_main`); `std::rt::lang_start_internal`; the generated `fn main` and its `std::process::exit` (`std::sys::exit::unique_thread_exit` uses `pause`) | the runtime's own `_start`, reading `argc`/`argv`/`envp` from the initial stack, and `exit_group` |
+| `std`'s runtime initialization (`std` itself) | `poll`, `fcntl`, `open64`, `dup`, `signal`, `sysconf`, `pthread_self`, `pthread_getattr_np`, `pthread_attr_getstack` | `std::rt::lang_start_internal`: checks that fds 0-2 are open (reopening `/dev/null`), ignores SIGPIPE, records the main thread's stack | nothing; the runtime needs none of it |
+| `std`'s own stack-overflow handler (`std` itself) | `sigaction`, `sigaltstack`, `mmap64`, `mprotect`, `munmap`, `getauxval`, `pthread_attr_getguardsize`, `gettid` | `std::sys::pal::unix::stack_overflow::imp::{make_handler, drop_handler, signal_handler}`: a second SIGSEGV handler, beside the runtime's own | nothing; the runtime's handler (§4.5) is the only one needed |
+| The runtime's overflow guard | `pthread_self`, `pthread_getattr_np`, `pthread_attr_getstack`, `pthread_attr_getguardsize`, `pthread_attr_destroy`, `sigaction`, `sigaltstack`, `sigemptyset`, `signal`, `raise`, `syscall` (for `gettid`), `write`, `_exit`, `__errno_location` | `runtime/platform/x86_64_linux.rs`: `current_stack` (6-25), `fault_handler` (34-55), `OverflowGuard::install_mode` and its `Drop` (65-118) | discovery disappears with the root coroutine (§4.5). The rest become raw system calls: `rt_sigaction` with `SA_RESTORER`, `sigaltstack`, `gettid`, `write`, `exit_group`, `tgkill` |
+| The worker thread | `pthread_create`, `pthread_join`, `pthread_attr_init`, `pthread_attr_setstacksize`, `pthread_attr_destroy`, `pthread_setname_np`, `sysconf`, `dlsym` (`std` looks up `__pthread_get_minstack`) | `std::thread::Builder` in `runtime/aot.rs:31`, and its `join` at `:57-64` | disappears with the root coroutine (§4.5). Later threads use raw `clone` |
+| Memory allocation | `malloc`, `calloc`, `realloc`, `posix_memalign`, `free` | `std`'s `System` allocator (`__rdl_alloc` and siblings) behind every `Box`, `Vec`, `String` and `Rc`. **That includes every GC heap object**: `runtime/heap.rs` allocates objects as boxes, and `runtime/strobj.rs:78` calls `std::alloc::alloc` directly | a `#[global_allocator]` of the runtime's own over `mmap`. This is the largest single piece of work: the collector's heap currently sits on glibc's `malloc` |
+| Thread-locals | `__tls_get_addr`, `__cxa_thread_atexit_impl`, `pthread_key_create`, `pthread_key_delete`, `pthread_setspecific` | `thread_local! PROGRAM` (`runtime/vm.rs:76-83`), whose `RefCell<Option<Rc<…>>>` needs a destructor; `std`'s own thread-locals | move `PROGRAM` into the `Vm`, already a prerequisite for actors (§4.3 item 10). Then the runtime needs no thread-local at all |
+| Environment and arguments | `getenv`, `strlen` | `std::env::var` for `BOTLISH_NATIVE_STACK_BYTES` (`runtime/aot.rs:26`), `BOTLISH_NATIVE_GC_STRESS` and `BOTLISH_NATIVE_GC_MIN` (`runtime/heap.rs:63-64`); `std::env::args_os` in the generated `startup.rs`. On glibc, `std` receives `argc`/`argv` from glibc's `.init_array` call | read `envp` and `argv` from the initial stack in `_start` |
+| Output | `write`, `writev`, `__errno_location`, `__xpg_strerror_r` | `writeln!(std::io::stdout().lock(), …)` for the program's value and `eprintln!` for errors (`runtime/aot.rs:46-66`); `std::io::Error`'s `Display` | `write` on fd 1 or 2 of a `String` formatted with `core::fmt` |
+| Time | `clock_gettime` | `std::time::Instant` for collection timing (`runtime/heap.rs:41, 119`), only when metrics are enabled | `clock_gettime` through the vDSO or a raw system call, or no timing in executables |
+| Randomness | `getrandom`, plus `poll` and `close` on its fallback path | `std::collections::HashMap`'s `RandomState` in the allocation-site statistics (`runtime/metrics.rs:42, 212, 257`), seeded when the table is created | a fixed hasher or a `BTreeMap`; site statistics need no resistance to hash flooding |
+| Panics and backtraces (`std` itself) | `_Unwind_*` (12 symbols from `libgcc_s`), `dl_iterate_phdr`, `open64`, `read`, `fstat64`, `stat64`, `statx`, `lseek64`, `readlink`, `realpath`, `getcwd`, `mmap64`, `munmap`, `close` | `std`'s panic runtime: `rust_eh_personality`, `__rust_start_panic`, and the default hook's backtrace printer (`std::backtrace_rs`, which symbolizes by reading the executable's own debug information) | `panic = "abort"` plus a `#[panic_handler]` that writes one line and exits: no unwinder, no symbolization. Today `runtime/aot.rs:57-64` reports a worker panic as `native executable panicked (NATIVE BUG)` through `join`; without the worker thread, the panic handler must print that line itself to keep the external protocol |
+| Compiler-emitted memory intrinsics | `memcpy`, `memmove`, `memset`, `bcmp`, `strlen` | code rustc generates for copies and comparisons throughout (`core` string search, `num-bigint`, `Vm::new`) | the runtime's own implementations. On the `-gnu` target the toolchain expects libc to supply them |
+| libm | `log2` | `num-bigint`'s radix conversion (`from_radix_digits_be`, `to_radix_le`). With its default `std` feature it estimates sizes with `f64::log2`; without it, it uses integer `ilog2` (`num-bigint-0.4.8/src/biguint/convert.rs:96-105`) | `default-features = false` on `num-bigint` and `num-traits` in `native/Cargo.toml`. `libm.so.6` drops out with no code change |
+
+All three runtime dependencies are `#![no_std]` crates. `num-bigint` and
+`num-traits` enable `std` only through their default `std` feature, and
+`unicode-general-category` needs no feature at all.
+
+### B.3 The runtime's own uses of `std`'s OS layer, by source
+
+| Where | Use |
+|---|---|
+| `runtime/aot.rs:26, 31, 46-66` | `std::env::var`, `std::thread::Builder`, `std::io::stdout` plus `writeln!`, `eprintln!`, and the worker's `join` |
+| `runtime/heap.rs:41, 63-64, 119` | `std::time::Instant`, `std::env::var` |
+| `runtime/metrics.rs:42, 212, 257` | `std::collections::HashMap` (random seed) |
+| `runtime/vm.rs:76-83` | `thread_local!` |
+| `runtime/strobj.rs:78` | `std::alloc::{alloc, dealloc, handle_alloc_error}`. The same functions exist in `alloc::alloc`, but they still need a global allocator |
+| `runtime/platform/x86_64_linux.rs:4` and its `libc::` calls | `std::io::Error::last_os_error`; the `libc` crate (bindings only, which call glibc) |
+| `nir.rs:7, 1108, 2063` | `std::collections::HashMap`/`HashSet` in the NIR parser and validator. The executable never parses NIR, so this code is not linked into it |
+| the generated `startup.rs` (`codegen/aot.rs:20-117`) | `fn main`, `std::env::args_os`, `std::os::unix::ffi::OsStringExt`, `std::process::exit` |
+| the link step (`codegen/aot.rs:119-180`) | refuses anything but `target_env = "gnu"` (`:120`) and runs `rustc` for the default `-gnu` target, which links glibc's startup objects and `libc.so.6`, `libm.so.6` and `libgcc_s.so.1` dynamically |
+
+Everything else in `runtime/` uses `core`- and `alloc`-level items.
+
+The `botlish-native` driver (JIT, object emission, linking) is a host-side
+tool built on Cranelift, `std::process::Command` (for `rustc`), files and
+threads. It is not part of a produced executable and can stay on `std`.
+
+### B.4 Routes off glibc
+
+* **`x86_64-unknown-linux-musl`.** `std` is unchanged, statically linked
+  against musl. This removes glibc but not libc. The link step's target check
+  and `rustc --target` change, and the runtime library is built for the same
+  target.
+* **`#![no_std]` on the `-gnu` target triple.**
+  * The triple's prebuilt `core` and `alloc` need no libc.
+  * The runtime library becomes `#![no_std]` with `alloc`, and `startup.rs`
+    becomes `#![no_main]`.
+  * Link with `-nostartfiles -nostdlib -static` and `panic = "abort"`.
+  * The runtime then supplies `_start`, the global allocator, the panic
+    handler, the memory intrinsics and the system calls.
+
+  This works on stable Rust.
+* **`x86_64-unknown-linux-none`.** It is in this toolchain's target list
+  (rustc 1.97), but `rustup` offers no prebuilt standard library for it. It
+  therefore needs `core` and `alloc` built from source: nightly
+  `-Zbuild-std`, or a vendored sysroot.
+
+**Work in order of effort.** Each step stands alone, and each removes imports
+from B.2:
+
+1. `default-features = false` on `num-bigint` and `num-traits`: `libm` goes.
+2. A fixed hasher for the metrics map: `getrandom` goes.
+3. `PROGRAM` moved into the `Vm`: the runtime's thread-local goes.
+4. The root coroutine (§4.5): the worker thread and the pthread discovery go.
+5. `panic = "abort"` plus a panic handler that keeps the `NATIVE BUG` line:
+   `libgcc_s` and the backtrace machinery go.
+6. The runtime's own allocator: `malloc` and its siblings go.
+7. The runtime's own `_start`, argument and environment reading, output,
+   exit and signal system calls, plus the memory intrinsics. `std` and glibc
+   are then gone from produced executables.
