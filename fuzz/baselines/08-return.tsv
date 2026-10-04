@@ -2,7 +2,7 @@ seed	exit	wall_ms	stdout	stderr-first-line
 plain	0	2	[7, 0, 3]	
 many-args	0	2	[7, 0, 3]	
 numeric-sample-2	0	2	[7, 0, 3]	
-numeric-sample-4	0	2	[7, 0, 3]	
+numeric-sample-4	0	3	[7, 0, 3]	
 numeric-sample-7	0	2	[7, 0, 3]	
 numeric-sample-8	0	2	[7, 0, 3]	
 numeric-sample-9	0	2	[7, 0, 3]	

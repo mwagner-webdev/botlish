@@ -25,11 +25,12 @@ Everything is reproducible from `bash fuzz/scripts/run-all.sh`
 ## 1. Inventory: what the examples actually read
 
 `fuzz/scripts/inventory.tcl` states the mechanical facts per example
-(committed as `fuzz/inventory.tsv`, 34 programs); the classification:
+(committed as `fuzz/inventory.tsv`, 36 programs); the classification:
 
-* 34 example programs: 9 `examples/stdlib/*.bot`, 14
-  `examples/surface/*.bot`, 6 `examples/hir/*.hir`, 5 `examples/*.ir`
-  (`corpus.tcl` and the empty `main.tcl` are tooling, not programs).
+* 36 example programs: 9 `examples/stdlib/*.bot`, 1 `examples/abi/*.bot`,
+  1 `examples/linux/*.bot`, 14 `examples/surface/*.bot`, 6
+  `examples/hir/*.hir`, 5 `examples/*.ir` (`corpus.tcl` and the empty
+  `main.tcl` are tooling, not programs).
 * **No example program reads any input.** Botlish's single external input
   channel is `argv()` (ARGV.md) and no example calls it (source scan;
   there is no other I/O in the language). Per the brief's classification
@@ -44,7 +45,15 @@ Everything is reproducible from `bash fuzz/scripts/run-all.sh`
   with the reachable surface documented: glibc/Rust argv plumbing plus the
   runtime's snapshot copy; **`rt_argv` (UTF-8 validation, String/List
   construction) is unreachable because no example calls `argv()`**.
-* 21 of the 27 compilable programs (`.bot`/`.hir`) emit standalone
+* `examples/abi/numeric-domains.bot` (import system, ABI numeric domains)
+  and `examples/linux/getpid.bot` joined the examples with the upstream
+  explicit-imports refactor mid-campaign; both emit standalone
+  executables and are included in everything below. `getpid.bot` is
+  **native-only by its own header** -- the Tcl backends refuse its raw
+  syscall with `NATIVE-ONLY` -- and its executable performs a real
+  `getpid` syscall each run (the first example whose program behavior
+  touches the kernel; its value `[true, true]` is deterministic).
+* 23 of the 29 compilable programs (`.bot`/`.hir`) emit standalone
   executables (`fuzz/scripts/build-aot.sh`, the repository's own
   `main.tcl -emit-native-executable` path). The other 6 fail the AOT
   readiness gate exactly as designed (`NATIVE AOT NOT-READY`, guarded
@@ -63,10 +72,12 @@ Everything is reproducible from `bash fuzz/scripts/run-all.sh`
 | group | programs | AOT executables (fuzz targets) | in-process only | negative (by design) | core-IR-only |
 |---|---|---|---|---|---|
 | stdlib | 9 | 5 | 4 | 0 | 0 |
+| abi | 1 | 1 | 0 | 0 | 0 |
+| linux | 1 | 1 | 0 | 0 | 0 |
 | surface | 14 | 11 | 1 (`03-closure`) | 2 | 0 |
 | hir | 6 | 5 | 1 (`02-closures`) | 0 | 0 |
 | root `.ir` | 5 | 0 | 0 | 0 | 5 |
-| **total** | **34** | **21** | **6** | **2** | **5** |
+| **total** | **36** | **23** | **6** | **2** | **5** |
 
 Expected failure exit code of an AOT executable: **1** -- a language-level
 failure prints `MESSAGE (ERRORCODE)` to stderr and exits 1
@@ -114,7 +125,9 @@ does not exist in the repository).
 Blind spots, stated plainly (#12):
 
 * Kernel-side work (the exec-time argv copy) is invisible; only its
-  userspace effects are measured.
+  userspace effects are measured. For `getpid` the syscall itself is
+  emulated by QEMU user mode (the instruction executes, the kernel work
+  is outside the map).
 * The decisive limitation is structural, not instrumentation: **none of
   the 21 programs' behavior depends on the input**. Coverage is a
   function of the harness/glibc/runtime argv plumbing only, saturates at
@@ -154,7 +167,7 @@ Blind spots, stated plainly (#12):
 
 ## 4. Campaign parameters per target
 
-All 21 targets, release build and ASan pass alike: `-Q` (QEMU mode),
+All 23 targets, release build and ASan pass alike: `-Q` (QEMU mode),
 `-m none`, `-G 100000` (input cap just under the kernel's 128 KiB
 per-argument limit), input as the argv vector through the harness,
 crash oracle = signals only.
@@ -166,11 +179,11 @@ crash oracle = signals only.
   fuzzer_stats -- no run approached the timeout.
 * Budget: 1200 s (20 min) per release target, one master each, 12 cores
   filled by parallel masters of *different* targets (two batches of 12
-  and 9). With one shared, shallow input surface, parallel masters on
+  and 11). With one shared, shallow input surface, parallel masters on
   distinct programs dominate secondaries on the same program; the brief's
   secondary pattern is reserved for the growth-extension rule, which no
-  target triggered (all plateaued). Total: 21 x 1200 s = **7.0 CPU-hours,
-  8,411,896 executions**. Recorded before the run, enforced by AFL's own
+  target triggered (all plateaued). Total: 23 x 1200 s = **7.7 CPU-hours,
+  9,844,714 executions**. Recorded before the run, enforced by AFL's own
   `-V`, proven by 5-minute snapshot intervals (`fuzz/campaign-stats/`).
 * Memory: `-m none`, recorded, mandatory with the ASan pass.
 * Crash-exitcode: `AFL_CRASH_EXITCODE` deliberately unset -- expected
@@ -190,16 +203,20 @@ crash oracle = signals only.
 x committed seed x {aot, interp, compile, cranelift, cranelift-generic}
 plus the 6 in-process-only programs x their seed sources x the four
 in-process verticals, and the 5 `.ir` programs x an empty vector on
-interp/compile -- 1044 recorded runs. Normalization extracts the value
+interp/compile -- 1109 recorded runs. Normalization extracts the value
 (or language error code) and exit status per vertical.
 
-Result: **1011 compared runs, 0 hard mismatches.** Two documented exception classes are
-recorded as data, not findings:
+Result: **1062 compared runs, 0 hard mismatches**; three documented
+exception classes are recorded as data, not findings:
 
 * `known-limitation` (17 rows): `cranelift-generic` cannot run
   `csv_records` (`NATIVE UNSUPPORTED struct-shape`) -- the repository's
   own documented baseline gap with the cranelift stand-in policy
   (`examples/stdlib/corpus.tcl`, `tests/helpers.tcl`).
+* `native-only-refusal` (14 rows): `getpid` on `interp`/`compile`
+  refuses with `CORE SEMANTIC NATIVE-ONLY` -- exactly what its own header
+  documents as the Tcl backends' designed behavior for the raw syscall
+  intrinsic; the native verticals agree with each other on the value.
 * `display-divergence` (16 rows): `06-refined-strings` on `interp` and
   `compile` shows `ok("a%40b.io"#{UriQueryValue})` where the native
   verticals print `ok("a%40b.io")`. The `#{Type}` suffix is main.tcl's
@@ -211,7 +228,7 @@ recorded as data, not findings:
 
 Nondeterminism probe (#30): every replayed (vertical, input) pair was
 stable (the matrix itself is a repeat; spot-checked repeats identical;
-AFL `stability` 100.00% on all 21 targets).
+AFL `stability` 100.00% on all 23 targets).
 
 ## 6. Campaign statistics
 
@@ -220,32 +237,36 @@ committed under `fuzz/campaign-stats/2026-10-04/release/`):
 
 | target | execs | execs/s | bitmap_cvg | corpus (found) | crashes | hangs | cycles w/o finds |
 |---|---|---|---|---|---|---|---|
-| 01-arithmetic | 350050 | 292 | 0.09% | 19 | 0 | 0 | 42 |
-| 01-scopes | 342765 | 286 | 0.09% | 18 | 0 | 0 | 18 |
-| 02-recursion | 357361 | 298 | 0.09% | 19 | 0 | 0 | 35 |
-| 03-recursion | 350409 | 292 | 0.09% | 17 | 0 | 0 | 38 |
-| 04-branch-value | 358707 | 299 | 0.09% | 19 | 0 | 0 | 35 |
-| 04-refinement | 346788 | 289 | 0.09% | 19 | 0 | 0 | 33 |
-| 05-control | 342018 | 285 | 0.09% | 19 | 0 | 0 | 42 |
-| 05-shadowing | 331072 | 276 | 0.09% | 17 | 0 | 0 | 35 |
-| 06-list | 326353 | 272 | 0.09% | 21 | 0 | 0 | 26 |
-| 06-refined-strings | 331288 | 276 | 0.09% | 20 | 0 | 0 | 35 |
-| 07-loop-break | 327978 | 273 | 0.09% | 16 | 0 | 0 | 32 |
-| 08-return | 345852 | 288 | 0.09% | 18 | 0 | 0 | 33 |
-| 11-boolean-operators | 485347 | 404 | 0.09% | 20 | 0 | 0 | 45 |
-| 12-if-value | 489425 | 408 | 0.09% | 22 | 0 | 0 | 42 |
-| 13-hygiene | 484631 | 404 | 0.09% | 20 | 0 | 0 | 56 |
-| 14-modules | 489217 | 408 | 0.09% | 19 | 0 | 0 | 66 |
-| ai_text_clean | 473443 | 395 | 0.09% | 18 | 0 | 0 | 44 |
-| csv | 484876 | 404 | 0.09% | 17 | 0 | 0 | 54 |
-| matmul | 485381 | 404 | 0.09% | 19 | 0 | 0 | 48 |
-| string_replace | 443893 | 370 | 0.09% | 19 | 0 | 0 | 23 |
-| string_reverse | 465042 | 388 | 0.09% | 21 | 0 | 0 | 39 |
-| **total** | **8411896** | | | | **0** | **0** | |
+| 01-arithmetic | 215042 | 89 | 0.09% | 19 | 0 | 0 | 22 |
+| 01-scopes | 214985 | 89 | 0.09% | 18 | 0 | 0 | 23 |
+| 02-recursion | 441535 | 183 | 0.09% | 19 | 0 | 0 | 45 |
+| 03-recursion | 437325 | 182 | 0.09% | 17 | 0 | 0 | 50 |
+| 04-branch-value | 436024 | 181 | 0.09% | 19 | 0 | 0 | 45 |
+| 04-refinement | 441137 | 183 | 0.09% | 19 | 0 | 0 | 45 |
+| 05-control | 441809 | 184 | 0.09% | 19 | 0 | 0 | 45 |
+| 05-shadowing | 439055 | 182 | 0.09% | 17 | 0 | 0 | 50 |
+| 06-list | 436717 | 181 | 0.09% | 21 | 0 | 0 | 41 |
+| 06-refined-strings | 429218 | 178 | 0.09% | 20 | 0 | 0 | 42 |
+| 07-loop-break | 437021 | 182 | 0.09% | 16 | 0 | 0 | 52 |
+| 08-return | 433657 | 180 | 0.09% | 18 | 0 | 0 | 47 |
+| 11-boolean-operators | 448743 | 186 | 0.09% | 20 | 0 | 0 | 44 |
+| 12-if-value | 458491 | 191 | 0.09% | 22 | 0 | 0 | 41 |
+| 13-hygiene | 458281 | 190 | 0.09% | 20 | 0 | 0 | 45 |
+| 14-modules | 457460 | 190 | 0.09% | 19 | 0 | 0 | 46 |
+| ai_text_clean | 451627 | 188 | 0.09% | 18 | 0 | 0 | 49 |
+| csv | 444896 | 185 | 0.09% | 17 | 0 | 0 | 50 |
+| getpid | 467494 | 389 | 0.09% | 17 | 0 | 0 | 51 |
+| matmul | 466399 | 194 | 0.09% | 19 | 0 | 0 | 48 |
+| numeric-domains | 470843 | 392 | 0.09% | 18 | 0 | 0 | 67 |
+| string_replace | 457048 | 190 | 0.09% | 19 | 0 | 0 | 47 |
+| string_reverse | 459907 | 191 | 0.09% | 21 | 0 | 0 | 43 |
+| **total** | **9844714** | | | | **0** | **0** | |
 
 (bitmap_cvg is relative to AFL's 65536-slot map; absolute edge counts are
-~50-60 tuples per target, matching the shallow reachable surface.
-Snapshot files every 300 s plus per-run `plot_data` are committed.)
+~50-60 tuples per target, matching the shallow reachable surface. The
+execs/s spread reflects concurrent verification jobs sharing the 12
+cores during parts of the run. Snapshot files every 300 s plus per-run
+`plot_data` are committed.)
 
 ASan pass (`campaign-asan.sh`, 600 s/target over the ASan-instrumented
 executables of `build-asan.sh`, same harness and QEMU mode,
@@ -254,30 +275,32 @@ executables of `build-asan.sh`, same harness and QEMU mode,
 
 | target | execs | execs/s | corpus | crashes | hangs |
 |---|---|---|---|---|---|
-| 01-arithmetic | 65000 | 108 | 18 | 0 | 0 |
-| 01-scopes | 32200 | 54 | 18 | 0 | 0 |
-| 02-recursion | 64731 | 108 | 20 | 0 | 0 |
-| 03-recursion | 32000 | 53 | 17 | 0 | 0 |
-| 04-branch-value | 32038 | 53 | 17 | 0 | 0 |
-| 04-refinement | 64112 | 107 | 23 | 0 | 0 |
-| 05-control | 32231 | 54 | 20 | 0 | 0 |
-| 05-shadowing | 64544 | 108 | 19 | 0 | 0 |
-| 06-list | 62263 | 104 | 18 | 0 | 0 |
-| 06-refined-strings | 54051 | 90 | 18 | 0 | 0 |
-| 07-loop-break | 64895 | 108 | 19 | 0 | 0 |
-| 08-return | 63705 | 106 | 20 | 0 | 0 |
-| 11-boolean-operators | 38844 | 65 | 19 | 0 | 0 |
-| 12-if-value | 39350 | 66 | 24 | 0 | 0 |
-| 13-hygiene | 80566 | 134 | 18 | 0 | 0 |
-| 14-modules | 36949 | 62 | 18 | 0 | 0 |
-| ai_text_clean | 36998 | 62 | 19 | 0 | 0 |
-| csv | 36577 | 61 | 20 | 0 | 0 |
-| matmul | 77128 | 129 | 19 | 0 | 0 |
-| string_replace | 36633 | 61 | 20 | 0 | 0 |
-| string_reverse | 76472 | 127 | 19 | 0 | 0 |
-| **total** | **1091287** | | | **0** | **0** |
+| 01-arithmetic | 24188 | 40 | 17 | 0 | 0 |
+| 01-scopes | 74413 | 124 | 20 | 0 | 0 |
+| 02-recursion | 24259 | 40 | 17 | 0 | 0 |
+| 03-recursion | 24165 | 40 | 18 | 0 | 0 |
+| 04-branch-value | 24439 | 40 | 19 | 0 | 0 |
+| 04-refinement | 24138 | 40 | 20 | 0 | 0 |
+| 05-control | 74478 | 124 | 21 | 0 | 0 |
+| 05-shadowing | 24430 | 40 | 21 | 0 | 0 |
+| 06-list | 72758 | 121 | 21 | 0 | 0 |
+| 06-refined-strings | 62970 | 104 | 21 | 0 | 0 |
+| 07-loop-break | 74470 | 124 | 21 | 0 | 0 |
+| 08-return | 74061 | 123 | 18 | 0 | 0 |
+| 11-boolean-operators | 34001 | 56 | 21 | 0 | 0 |
+| 12-if-value | 71520 | 119 | 17 | 0 | 0 |
+| 13-hygiene | 33780 | 56 | 20 | 0 | 0 |
+| 14-modules | 71123 | 118 | 20 | 0 | 0 |
+| ai_text_clean | 62417 | 104 | 20 | 0 | 0 |
+| csv | 63859 | 106 | 19 | 0 | 0 |
+| getpid | 33863 | 56 | 20 | 0 | 0 |
+| matmul | 67756 | 112 | 18 | 0 | 0 |
+| numeric-domains | 33119 | 55 | 18 | 0 | 0 |
+| string_replace | 65105 | 108 | 19 | 0 | 0 |
+| string_reverse | 67030 | 111 | 19 | 0 | 0 |
+| **total** | **1182342** | | | **0** | **0** |
 
-Combined campaign total: **9,503,183 executions** (8.41M release + 1.09M
+Combined campaign total: **11,027,056 executions** (9.84M release + 1.18M
 ASan), zero crashes, zero hangs, zero sanitizer reports.
 
 ## 7. Findings
@@ -290,15 +313,15 @@ was modified; the compiler and runtime are untouched (see §10).
 
 The zero is *explained*, not luck-shaped: the fuzzed surface is the
 executable boundary (argv bytes -> runtime snapshot), every target's
-behavior is input-independent, and 8.4M executions across it found
+behavior is input-independent, and 11.0M executions across it found
 nothing. The layers behind that boundary were still exercised
-cross-vertically by the differential matrix over all 34 programs (§5),
+cross-vertically by the differential matrix over all 36 programs (§5),
 which is where a miscompile would have shown -- also zero (modulo the two
 documented display/baseline exceptions).
 
 ## 8. Pre-fuzzing findings
 
-None. Every one of the 21 targets built AOT cleanly on its first
+None. Every one of the 23 targets built AOT cleanly on its first
 post-setup emission, and every target x seed baseline run exits 0 with
 exactly the documented `expect:` value (`fuzz/baselines/*.tsv`,
 regenerated and identical across two machines/filesystems). The 13
@@ -306,7 +329,7 @@ non-emitting examples fail only through designed gates (§1).
 
 ## 9. Performance observations (#52)
 
-* QEMU-mode throughput: 272-408 execs/s per target (2.5-3.7 ms/exec
+* QEMU-mode throughput: 40-392 execs/s per target (2.5-25 ms/exec
   including fork+exec of the harness and target); the same binaries run
   natively in ~2 ms. QEMU + fork overhead is the campaign's own cost, not
   a program observation.
@@ -319,9 +342,11 @@ non-emitting examples fail only through designed gates (§1).
 ## 10. Verification: the repository is unchanged where it must be
 
 * Full regression (`tclsh9.0 tests/all.tcl`) passes unchanged with the
-  fuzz tree present: **4852 total, 4848 passed, 4 skipped
-  (pre-existing `coreScoping` constraint), 0 failed** -- byte-identical
-  to the pre-campaign baseline run.
+  fuzz tree present: **5330 total, 5326 passed, 4 skipped
+  (pre-existing `coreScoping` constraint), 0 failed** -- the suite and
+  the fuzz tree on current `main` (the upstream explicit-imports refactor
+  grew the suite from 4852 to 5330 tests; both with and without the fuzz
+  additions, 0 failures).
 * Every example still compiles AOT (`build-aot.sh`: 21 ok / 13 by-design
   failures, identical to the pre-campaign state) and matches its recorded
   baseline on seeds (baseline stdout columns identical before/after).
@@ -343,10 +368,10 @@ non-emitting examples fail only through designed gates (§1).
 
 Campaign setup:
 
-1. 34 example programs (inventory in §1 / `fuzz/inventory.tsv`); none
+1. 36 example programs (inventory in §1 / `fuzz/inventory.tsv`); none
    reads any input at the language level; every AOT executable consumes
    its process argv at the runtime level.
-2. Fuzzable: 21 (AOT executables, runtime-argv surface). Not fuzzable:
+2. Fuzzable: 23 (AOT executables, runtime-argv surface). Not fuzzable:
    6 (AOT gate NOT-READY, by design), 2 (negative examples), 5 (core-IR
    inputs, excluded from the AOT path by design) -- each recorded with
    its reason, none hidden, and the 6+5 still covered by the differential
@@ -356,7 +381,7 @@ Campaign setup:
    programs).
 4. Compiler changes required: **no** (the #14 escape hatch was not
    exercised).
-5. Budget 1200 s/target (7.0 CPU-hours total), `-t 200` everywhere
+5. Budget 1200 s/target (7.7 CPU-hours release + 3.8 ASan), `-t 200` everywhere
    (baseline-derived, floor-governed), `-m none`; recorded per target in
    §4/§6 and in the archived stats.
 6. Seeds minimized via `afl-cmin` and committed with dictionaries: **yes**
@@ -377,7 +402,7 @@ Oracle and triage:
    exercised end-to-end on the empty set plus the selftest).
 10. Every reported bug replayed across
     interp/compile/cranelift/cranelift-generic: **yes** vacuously (the
-    replay matrix itself ran for all 21 targets x seeds, §5).
+    replay matrix itself ran for all 23 targets x seeds, §5).
 11. Every reported bug manually reproduced: **yes** vacuously.
 
 Findings:
@@ -395,8 +420,8 @@ Findings:
 
 Verification:
 
-17. Full regression passes: **yes** (4852 total, 0 failed, unchanged from
-    the pre-campaign run; §10).
+17. Full regression passes: **yes** (5330 total, 0 failed, on current
+    main with the fuzz tree; §10).
 18. All examples compile AOT and match recorded baselines: **yes** (§10).
 19. Every step reproducible from committed scripts: **yes**
     (`run-all.sh`; the toolchain build is scripted and idempotent).
@@ -423,6 +448,10 @@ Verification:
 * An input-consuming example application (e.g. a CSV filter reading
   `argv()`), which would unlock the real `rt_argv`/String/List path for
   fuzzing -- the single highest-value next step this campaign identified.
+* Syscall-carrying examples beyond the fixed `getpid` (an
+  argument-taking syscall behind `argv()`) would put the raw syscall
+  path under input control; `examples/linux/getpid.bot` is the seed of
+  that direction.
 * Persistent-mode harnesses for throughput.
 * Compiler-side fuzz instrumentation as a supported (opt-in, default-off)
   mode, if QEMU mode ever becomes unavailable.

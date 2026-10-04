@@ -96,6 +96,16 @@ seed 06-list "list-sample-2" '[]'
 seed 13-hygiene "hygiene-sample-1" '[1, 2]'
 seed 14-modules "module-sample-1" 'mathish::inc(41)'
 
+# The abi example: its own documented values (ABI-NUMERIC-DOMAINS.md).
+seed numeric-domains "abi-sample-1" '255'
+seed numeric-domains "abi-sample-2" '18446744073709551615'
+seed numeric-domains "abi-sample-3" '9223372036854775808'
+seed numeric-domains "abi-sample-4" '0xffffffffffffffff'
+# The linux example: getpid takes no input data; numeric argv only.
+seed getpid "syscall-sample-1" '39'
+seed getpid "syscall-sample-2" '0'
+seed getpid "syscall-sample-3" '-1'
+
 # --- structural seeds: every target gets the argv-shape checklist ------
 ALL_TARGETS=$(ls "$SRC")
 for t in $ALL_TARGETS; do

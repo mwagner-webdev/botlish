@@ -35,7 +35,7 @@ printf 'name\tsource\tresult\tnote\n' > "$MANIFEST"
 # Every example program, in a stable order. The classifier (inventory.tcl,
 # FUZZING-EXAMPLES-AOT.md) explains what each row is; here we only record
 # what the emitter does with it.
-SOURCES="$(ls examples/stdlib/*.bot examples/surface/*.bot examples/hir/*.hir examples/*.ir 2>/dev/null | sort)"
+SOURCES="$(ls examples/stdlib/*.bot examples/abi/*.bot examples/linux/*.bot examples/surface/*.bot examples/hir/*.hir examples/*.ir 2>/dev/null | sort)"
 
 for src in $SOURCES; do
     name="$(basename "$src")"

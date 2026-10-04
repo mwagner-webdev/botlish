@@ -33,7 +33,7 @@ proc readText {path} {
 # The one "# expect: ..." / "# expect-error: ..." line of a source file.
 proc headerComment {text tag} {
     foreach line [split $text \n] {
-        if {[regexp "^\[ \\t\]*\[#\]+\\s*${tag}:\\s*(.*)\$" $line -> value]} {
+        if {[regexp "^\[ \\t\]*\[#\]+\\s*${tag}( \\(\[^)\]*\\))?:\\s*(.*)\$" $line -> _ _ value]} {
             return $value
         }
     }
@@ -41,7 +41,7 @@ proc headerComment {text tag} {
 }
 
 set sources {}
-foreach pattern {stdlib/*.bot surface/*.bot hir/*.hir *.ir} {
+foreach pattern {stdlib/*.bot abi/*.bot linux/*.bot surface/*.bot hir/*.hir *.ir} {
     foreach path [lsort [glob -directory [file join $root examples] $pattern]] {
         set tail [file tail $path]
         if {$tail in {corpus.tcl main.tcl}} continue

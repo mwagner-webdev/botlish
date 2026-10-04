@@ -1,10 +1,10 @@
 seed	exit	wall_ms	stdout	stderr-first-line
 plain	0	2	["hello", "hello  world", "AI-generated", "\"hello\"", "'hello'", "wait... what?"]	
 invalid-utf8	0	2	["hello", "hello  world", "AI-generated", "\"hello\"", "'hello'", "wait... what?"]	
-many-args	0	3	["hello", "hello  world", "AI-generated", "\"hello\"", "'hello'", "wait... what?"]	
+many-args	0	2	["hello", "hello  world", "AI-generated", "\"hello\"", "'hello'", "wait... what?"]	
 nul-inside-arg	0	2	["hello", "hello  world", "AI-generated", "\"hello\"", "'hello'", "wait... what?"]	
-one-empty-arg	0	3	["hello", "hello  world", "AI-generated", "\"hello\"", "'hello'", "wait... what?"]	
+one-empty-arg	0	2	["hello", "hello  world", "AI-generated", "\"hello\"", "'hello'", "wait... what?"]	
 text-sample-4	0	2	["hello", "hello  world", "AI-generated", "\"hello\"", "'hello'", "wait... what?"]	
-text-sample-7	0	3	["hello", "hello  world", "AI-generated", "\"hello\"", "'hello'", "wait... what?"]	
+text-sample-7	0	2	["hello", "hello  world", "AI-generated", "\"hello\"", "'hello'", "wait... what?"]	
 text-sample-8	0	2	["hello", "hello  world", "AI-generated", "\"hello\"", "'hello'", "wait... what?"]	
 three-args	0	2	["hello", "hello  world", "AI-generated", "\"hello\"", "'hello'", "wait... what?"]	

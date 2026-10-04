@@ -1,8 +1,8 @@
 seed	exit	wall_ms	stdout	stderr-first-line
 plain	0	2	[ok("a%40b.io"), error("nope")]	
-many-args	0	3	[ok("a%40b.io"), error("nope")]	
-numeric-sample-2	0	2	[ok("a%40b.io"), error("nope")]	
-numeric-sample-4	0	4	[ok("a%40b.io"), error("nope")]	
+many-args	0	2	[ok("a%40b.io"), error("nope")]	
+numeric-sample-2	0	3	[ok("a%40b.io"), error("nope")]	
+numeric-sample-4	0	2	[ok("a%40b.io"), error("nope")]	
 numeric-sample-7	0	2	[ok("a%40b.io"), error("nope")]	
 numeric-sample-8	0	3	[ok("a%40b.io"), error("nope")]	
 numeric-sample-9	0	2	[ok("a%40b.io"), error("nope")]	

@@ -1,8 +1,8 @@
 seed	exit	wall_ms	stdout	stderr-first-line
 plain	0	2	[["name", "age"], ["Alice", "30"], ["Bob", "40"]]	
-csv-sample-4	0	2	[["name", "age"], ["Alice", "30"], ["Bob", "40"]]	
+csv-sample-4	0	3	[["name", "age"], ["Alice", "30"], ["Bob", "40"]]	
 csv-sample-5	0	2	[["name", "age"], ["Alice", "30"], ["Bob", "40"]]	
-csv-sample-7	0	2	[["name", "age"], ["Alice", "30"], ["Bob", "40"]]	
+csv-sample-7	0	3	[["name", "age"], ["Alice", "30"], ["Bob", "40"]]	
 csv-sample-8	0	2	[["name", "age"], ["Alice", "30"], ["Bob", "40"]]	
 invalid-utf8	0	2	[["name", "age"], ["Alice", "30"], ["Bob", "40"]]	
 many-args	0	3	[["name", "age"], ["Alice", "30"], ["Bob", "40"]]	

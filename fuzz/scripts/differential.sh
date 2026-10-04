@@ -29,6 +29,14 @@ compare_one() {  # compare_one TARGET SEEDNAME SEEDPATH VERTICAL...
         if [[ "$vertical" == "aot" && ! -x "$ROOT/fuzz/build/aot/$target" ]]; then continue; fi
         normalized="$(tclsh9.0 "$ROOT/fuzz/scripts/replay.tcl" "$vertical" "$target" "$seed" 2>/dev/null | paste -sd' ' -)"
         [[ -z "$normalized" ]] && continue
+        # Documented per-vertical baseline, not a finding: a native-only
+        # program (its own header documents the NATIVE-ONLY refusal, e.g.
+        # examples/linux/getpid.bot) refuses on the Tcl backends by design.
+        if [[ "$normalized" == *"NATIVE-ONLY"* ]] && \
+           grep -q 'NATIVE-ONLY' "$ROOT"/fuzz/build/aot/"$target".* 2>/dev/null; then
+            printf '%s\t%s\t%s\t%s\tnative-only-refusal\n' "$target" "$seedname" "$vertical" "$normalized" >> "$REPORT"
+            continue
+        fi
         # Documented baseline gap, not a finding: cranelift-generic has no
         # slot for a struct projection only a semantic instance proves, and
         # the repository's own stand-in policy applies (examples/stdlib/

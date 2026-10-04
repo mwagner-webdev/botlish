@@ -1,33 +1,35 @@
 name	source	kind	input	expect	emit-result	emit-note
-ai_text_clean	examples/stdlib/ai_text_clean.bot	bot	none	["hello", "hello  world", "AI-generated", "\"hello\"", "'hello'", "wait... what?"]	ok	
-csv	examples/stdlib/csv.bot	bot	none	[["name", "age"], ["Alice", "30"], ["Bob", "40"]]	ok	
-csv_chunked	examples/stdlib/csv_chunked.bot	bot	none	[["name", "age"], ["Alice", "30"], ["Bob", "40"]]	fail	NATIVE AOT NOT-READY
-csv_geometric	examples/stdlib/csv_geometric.bot	bot	none	[["name", "age"], ["Alice", "30"], ["Bob", "40"]]	fail	NATIVE AOT NOT-READY
-csv_records	examples/stdlib/csv_records.bot	bot	none	[2, "Alice", "31", "Berlin", "Bob", "Hamburg", true]	fail	NATIVE AOT NOT-READY
-hashtable	examples/stdlib/hashtable.bot	bot	none	[true, true, false, false, true, 1]	fail	NATIVE AOT NOT-READY
-matmul	examples/stdlib/matmul.bot	bot	none	[[58, 64], [139, 154]]	ok	
-string_replace	examples/stdlib/string_replace.bot	bot	none	["abc", "aXc", "bb", "", ""]	ok	
-string_reverse	examples/stdlib/string_reverse.bot	bot	none	["", "a", "cba", "dcba", "üöä"]	ok	
-01-arithmetic	examples/surface/01-arithmetic.bot	bot	none	50	ok	
-02-recursion	examples/surface/02-recursion.bot	bot	none	55	ok	
-03-closure	examples/surface/03-closure.bot	bot	none	42	fail	NATIVE AOT NOT-READY
-04-branch-value	examples/surface/04-branch-value.bot	bot	none	20	ok	
-05-shadowing	examples/surface/05-shadowing.bot	bot	none	1	ok	
-06-list	examples/surface/06-list.bot	bot	none	[1, 2, 3]	ok	
-07-loop-break	examples/surface/07-loop-break.bot	bot	none	unit	ok	
-08-return	examples/surface/08-return.bot	bot	none	[7, 0, 3]	ok	
-09-mutual-recursion	examples/surface/09-mutual-recursion.bot	bot	none	CORE SEMANTIC UNBOUND	fail	CORE SEMANTIC UNBOUND
-10-duplicate-binding	examples/surface/10-duplicate-binding.bot	bot	none	CORE SEMANTIC DUPLICATE	fail	CORE SEMANTIC DUPLICATE
-11-boolean-operators	examples/surface/11-boolean-operators.bot	bot	none	[true, false, true, true]	ok	
-12-if-value	examples/surface/12-if-value.bot	bot	none	["negative", "zero", "positive"]	ok	
-13-hygiene	examples/surface/13-hygiene.bot	bot	none	[[1, 2], 3]	ok	
-14-modules	examples/surface/14-modules.bot	bot	none	[42, 2]	ok	
-01-scopes	examples/hir/01-scopes.hir	hir	none	[20, 10]	ok	
-02-closures	examples/hir/02-closures.hir	hir	none	106	fail	NATIVE AOT NOT-READY
-03-recursion	examples/hir/03-recursion.hir	hir	none	55	ok	
-04-refinement	examples/hir/04-refinement.hir	hir	none	[42, "hi", "other", "yes"]	ok	
-05-control	examples/hir/05-control.hir	hir	none	[[7, ok(7)], "none"]	ok	
-06-refined-strings	examples/hir/06-refined-strings.hir	hir	none	[ok("a%40b.io"#{UriQueryValue}), error("nope")]	ok	
+ai_text_clean	examples/stdlib/ai_text_clean.bot	bot	none		ok	
+csv	examples/stdlib/csv.bot	bot	none		ok	
+csv_chunked	examples/stdlib/csv_chunked.bot	bot	none		fail	NATIVE AOT NOT-READY
+csv_geometric	examples/stdlib/csv_geometric.bot	bot	none		fail	NATIVE AOT NOT-READY
+csv_records	examples/stdlib/csv_records.bot	bot	none		fail	NATIVE AOT NOT-READY
+hashtable	examples/stdlib/hashtable.bot	bot	none		fail	NATIVE AOT NOT-READY
+matmul	examples/stdlib/matmul.bot	bot	none		ok	
+string_replace	examples/stdlib/string_replace.bot	bot	none		ok	
+string_reverse	examples/stdlib/string_reverse.bot	bot	none		ok	
+numeric-domains	examples/abi/numeric-domains.bot	bot	none		ok	
+getpid	examples/linux/getpid.bot	bot	none		ok	
+01-arithmetic	examples/surface/01-arithmetic.bot	bot	none		ok	
+02-recursion	examples/surface/02-recursion.bot	bot	none		ok	
+03-closure	examples/surface/03-closure.bot	bot	none		fail	NATIVE AOT NOT-READY
+04-branch-value	examples/surface/04-branch-value.bot	bot	none		ok	
+05-shadowing	examples/surface/05-shadowing.bot	bot	none		ok	
+06-list	examples/surface/06-list.bot	bot	none		ok	
+07-loop-break	examples/surface/07-loop-break.bot	bot	none		ok	
+08-return	examples/surface/08-return.bot	bot	none		ok	
+09-mutual-recursion	examples/surface/09-mutual-recursion.bot	bot	none		fail	CORE SEMANTIC UNBOUND
+10-duplicate-binding	examples/surface/10-duplicate-binding.bot	bot	none		fail	CORE SEMANTIC DUPLICATE
+11-boolean-operators	examples/surface/11-boolean-operators.bot	bot	none		ok	
+12-if-value	examples/surface/12-if-value.bot	bot	none		ok	
+13-hygiene	examples/surface/13-hygiene.bot	bot	none		ok	
+14-modules	examples/surface/14-modules.bot	bot	none		ok	
+01-scopes	examples/hir/01-scopes.hir	hir	none		ok	
+02-closures	examples/hir/02-closures.hir	hir	none		fail	NATIVE AOT NOT-READY
+03-recursion	examples/hir/03-recursion.hir	hir	none		ok	
+04-refinement	examples/hir/04-refinement.hir	hir	none		ok	
+05-control	examples/hir/05-control.hir	hir	none		ok	
+06-refined-strings	examples/hir/06-refined-strings.hir	hir	none		ok	
 01-adder	examples/01-adder.ir	ir	none		fail	NATIVE AOT INPUT
 02-loop-break	examples/02-loop-break.ir	ir	none		fail	NATIVE AOT INPUT
 03-lexical-closure	examples/03-lexical-closure.ir	ir	none		fail	NATIVE AOT INPUT
