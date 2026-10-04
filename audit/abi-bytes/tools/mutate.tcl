@@ -176,6 +176,21 @@ proc copyTree {destination copyTarget} {
     }
 }
 
+# Run SCRIPT with DIR as the working directory. tests/abi-bytes.test (tcltest)
+# keeps its scratch, executable and output directories in the working
+# directory, so every mutant runs in its own copy of the tree: two mutation
+# runs started at once from the same directory would otherwise share and
+# delete each other's files.
+proc inDir {dir script} {
+    set previous [pwd]
+    cd $dir
+    try {
+        uplevel 1 $script
+    } finally {
+        cd $previous
+    }
+}
+
 proc replaceOnce {path old new} {
     set channel [open $path r]
     fconfigure $channel -encoding utf-8
@@ -213,7 +228,9 @@ foreach m $mutations {
     # without proving anything: run the example once first and refuse such a
     # mutant (the example's compile-time errors print as "error:").
     set probe ""
-    catch {exec [info nameofexecutable] [file join $dir main.tcl] -backend cranelift [file join $dir examples linux write.bot] 2>@1} probe
+    inDir $dir {
+        catch {exec [info nameofexecutable] [file join $dir main.tcl] -backend cranelift [file join $dir examples linux write.bot] 2>@1} probe
+    }
     if {[string match "*   error:*" $probe]} {
         puts "   INVALID MUTANT (does not compile): $name: [string range [lindex [split $probe \n] end] 0 200]"
         lappend survivors "$name (invalid: does not compile)"
@@ -222,14 +239,18 @@ foreach m $mutations {
     }
     set failing {}
     set output ""
-    catch {exec [info nameofexecutable] [file join $dir tests abi-bytes.test] 2>@1} output
+    inDir $dir {
+        catch {exec [info nameofexecutable] [file join $dir tests abi-bytes.test] 2>@1} output
+    }
     foreach line [split $output \n] {
         if {[regexp {^==== (\S+) .*FAILED$} $line -> test]} { lappend failing $test }
     }
     set failing [lsort -unique $failing]
     set fuzzFailures 0
     if {$fuzzPrograms > 0} {
-        catch {exec [info nameofexecutable] [file join $dir audit abi-bytes tools fuzz.tcl] -mode write -n $fuzzPrograms -seed 7000 2>@1} fuzzOutput
+        inDir $dir {
+            catch {exec [info nameofexecutable] [file join $dir audit abi-bytes tools fuzz.tcl] -mode write -n $fuzzPrograms -seed 7000 2>@1} fuzzOutput
+        }
         regexp {failures ([0-9]+)} $fuzzOutput -> fuzzFailures
     }
     if {$failing eq "" && !$fuzzFailures} {
