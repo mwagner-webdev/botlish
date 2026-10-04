@@ -128,8 +128,8 @@ proc hir::read::TypeDecls {lines} {
 # (hir::format::TypeDecl) states; field types are read with the structs
 # registered skeleton-first, so a field may name any struct of the text.
 proc hir::read::StructDeclLine {content number} {
-    if {![regexp {^struct (\S+) name (\S+) ns (\S+) fields (.*)$} $content -> id name ns fieldsText]} {
-        Fail $number "expected \"struct ID name NAME ns NS fields FIELD: TYPE, ...\""
+    if {![regexp {^struct (\S+) name (\S+) ns (\S+) (opaque )?fields (.*)$} $content -> id name ns opaqueWord fieldsText]} {
+        Fail $number "expected \"struct ID name NAME ns NS \[opaque\] fields FIELD: TYPE, ...\""
     }
     set ns [expr {$ns eq "-" ? "" : $ns}]
     # Skeleton: every struct line of the text must be known before any field
@@ -143,7 +143,8 @@ proc hir::read::StructDeclLine {content number} {
         lappend names $fname
         lappend rawFields $fname $ftype
     }
-    return [dict create kind struct name $name id $id namespace $ns fields $rawFields names $names line $number]
+    return [dict create kind struct name $name id $id namespace $ns opaque [expr {$opaqueWord ne ""}] \
+        fields $rawFields names $names line $number]
 }
 
 # The surface/lower.tcl-shaped decl dict for one "type ..." HIR text line

@@ -456,6 +456,10 @@ bounded run (`-n 12`) is part of the test suite
   explicit spelling is rejected as `UNPROVEN-FIELD` as well. Not a destructuring
   rule; the fuzzer stays within three levels.
 * No destructuring at module top level (above).
+* Destructuring reveals representation, so for an `opaque struct`
+  (OPAQUE-STRUCTS.md) it needs the declaring module's authority: it is rejected
+  elsewhere with `OPAQUE-REPRESENTATION`, exactly as its explicit projections
+  are (the lowering is unchanged).
 * The compiler's program-level type listing in `main.tcl` shows the hygienic
   temporary.
 * A struct field of a declared struct has to be spelled as a named struct type

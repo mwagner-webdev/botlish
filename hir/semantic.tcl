@@ -706,7 +706,7 @@ proc hir::semantic::verify {hirVar} {
             }
             set derived [Derived $hir $callee $e $own]
             if {$derived ni [lmap d [dict get $own $caller] {dict get $d message}]} {
-                dict lappend own $caller [dict create kind TYPE message $derived expr $e \
+                dict lappend own $caller [dict create kind [DerivedKind $own $callee] message $derived expr $e \
                     curable [Curable $own $callee]]
                 set changed 1
             }
@@ -742,8 +742,17 @@ proc hir::semantic::verify {hirVar} {
                 continue
             }
         }
-        hir::Diagnose hir TYPE [Derived $hir $callee $e $own] $e
+        hir::Diagnose hir [DerivedKind $own $callee] [Derived $hir $callee $e $own] $e
     }
+}
+
+# The kind a call's diagnostic carries when instance ID (in OWN) is invalid:
+# TYPE, except that a first problem of representation authority over an
+# opaque struct (OPAQUE-STRUCTS.md) keeps its own kind, so the call that made
+# the instance is reported as the opacity violation it is.
+proc hir::semantic::DerivedKind {own id} {
+    set first [lindex [dict get $own $id] 0]
+    return [expr {[dict get $first kind] eq "OPAQUE-REPRESENTATION" ? "OPAQUE-REPRESENTATION" : "TYPE"}]
 }
 
 # 1 if every problem instance ID has (in OWN) is an unproven struct field

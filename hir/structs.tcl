@@ -37,6 +37,33 @@
 # recursion needs no special construction rule). `Name { ... }` resolves
 # `Name` through this registry, never through lexical scope.
 #
+# Representation authority (OPAQUE-STRUCTS.md)
+# ---------------------------------------------
+# A struct declared `opaque struct Name:` is an ordinary named struct whose
+# representation belongs to the module that declares it: only code of that
+# module (its *owner*: the declaring namespace, which is already the
+# registry's `namespace`, "" for an entry program) may construct it from its
+# fields or inspect its fields. The registry records `opaque` per declaration;
+# nothing else about an opaque struct differs (identity, type algebra,
+# equality, hashing, optimization). Authority is decided at the source
+# semantic boundary, from three things: the declaration's owner, the namespace
+# of the code performing the operation, and, for a projection, the receiver's
+# static type. A construction is decided when it is resolved
+# (hir/resolve.tcl's ResolveStruct knows its code's namespace); a projection
+# only once types are known, so hir/resolve.tcl stamps every `project` node and
+# method-call record with the namespace of its code (`ns`). A node carrying no
+# `ns` (core IR, serialized HIR: already past the source boundary) is trusted.
+# No `ns` or opacity is consulted after HIR is checked: the analyses, the
+# interpreter, the compiler and native lowering see ordinary construct/project
+# operations.
+#
+#   OPAQUE-CONSTRUCTION   `NS::Name { ... }` outside the owner (resolve time;
+#                         no field-level diagnostic is ever given for it)
+#   OPAQUE-REPRESENTATION a projection of any field name (so also a
+#                         destructuring, which lowers to projections, and the
+#                         callee of a field-value call) outside the owner,
+#                         whether or not the field exists
+#
 # Static checks (verify, below; hir/structs.tcl is HIR's one home for them)
 # --------------------------------------------------------------------------
 #   * every named construction provides every declared field once, none
@@ -53,9 +80,10 @@
 #     types its callers pass, each analyzed under its actual type.
 
 namespace eval hir::structs {
-    # ID -> {id ID name NAME namespace NS names {FIELD...} types {FIELD TYPE
-    # ...} spans {FIELD SPAN ...} span SPAN}: the registry of the current
-    # compilation's declarations.
+    # ID -> {id ID name NAME namespace NS opaque 0|1 names {FIELD...} types
+    # {FIELD TYPE ...} spans {FIELD SPAN ...} span SPAN}: the registry of the
+    # current compilation's declarations. `namespace` is the declaring module
+    # and, for an opaque struct, the owner of its representation.
     variable registry [dict create]
     # Entries of the previous compilation's registration are dropped by the
     # next apply call that brings declarations.
@@ -122,6 +150,87 @@ proc hir::structs::display {id} {
     return $id
 }
 
+# 1 if struct ID was declared `opaque struct`.
+proc hir::structs::isOpaque {id} {
+    variable registry
+    return [expr {[dict exists $registry $id opaque] && [dict get $registry $id opaque]}]
+}
+
+# The namespace ("" for an entry program) that owns the representation of
+# struct ID: the module that declares it.
+proc hir::structs::owner {id} {
+    variable registry
+    return [dict get $registry $id namespace]
+}
+
+# 1 if code of namespace NS ("" for the entry program) lacks authority over
+# the representation of struct ID: the struct is opaque and NS is not its
+# declaring module. Authority is exact -- no import, parent, child or
+# containing struct ever grants it.
+proc hir::structs::representationDenied {id ns} {
+    return [expr {[isOpaque $id] && [owner $id] ne $ns}]
+}
+
+# "module \"token\"" / "the entry program": the owner of struct ID in prose.
+proc hir::structs::OwnerPhrase {id} {
+    set owner [owner $id]
+    return [expr {$owner eq "" ? "the entry program" : "module \"$owner\""}]
+}
+
+# "that module" / "the entry program": the owner as a back-reference.
+proc hir::structs::OwnerRef {id} {
+    return [expr {[owner $id] eq "" ? "the entry program" : "that module"}]
+}
+
+# The message of OPAQUE-CONSTRUCTION for struct ID. It names the type and its
+# owner, never a field.
+proc hir::structs::ConstructionMessage {id} {
+    return [::format {%s has an opaque representation owned by %s; construct it through the public operations provided by %s} \
+        [display $id] [OwnerPhrase $id] [OwnerRef $id]]
+}
+
+# The message of OPAQUE-REPRESENTATION for struct ID. It does not depend on
+# the field named, so it cannot be used to discover which fields exist.
+proc hir::structs::RepresentationMessage {id} {
+    return [::format {field access on %s is not available outside %s; %s has an opaque representation, so its fields can be neither projected nor destructured here (use the public operations provided by %s)} \
+        [display $id] [OwnerPhrase $id] [display $id] [OwnerRef $id]]
+}
+
+# Moves the representation-authority diagnostics (OPAQUE-CONSTRUCTION,
+# OPAQUE-REPRESENTATION) ahead of the others, keeping every relative order:
+# they are the root cause of whatever follows from a rejected access (the
+# rejected access is typed as an unknown field is, so a later check may report
+# a consequence of that), and the first diagnostic is the one a strict compile
+# raises. A HIR without one is left exactly as it is.
+proc hir::structs::promoteOpacity {hirVar} {
+    upvar 1 $hirVar hir
+    set opaque {}
+    set rest {}
+    foreach d [dict get $hir diagnostics] {
+        if {[dict get $d kind] in {OPAQUE-CONSTRUCTION OPAQUE-REPRESENTATION}} {
+            lappend opaque $d
+        } else {
+            lappend rest $d
+        }
+    }
+    if {$opaque ne "" && $rest ne ""} {
+        dict set hir diagnostics [concat $opaque $rest]
+    }
+}
+
+# 1 if NODE (a `project` node, or a method-call receiver's context) performs
+# its field access without authority over TYPE, a receiver type: TYPE is a
+# named opaque struct whose owner is not the namespace NODE's code is in. A
+# node without an `ns` stamp is trusted (see the file header). Never consulted
+# for a type that is not a named struct.
+proc hir::structs::projectionDenied {type node} {
+    if {![hir::types::IsNamedStruct $type] || ![dict exists $node ns]} {
+        return 0
+    }
+    set id [lindex $type 1]
+    return [expr {[declared $id] && [representationDenied $id [dict get $node ns]]}]
+}
+
 # The struct declaration the expression-level name NAME could be confused
 # with: a non-struct type of the same spelling, for a better diagnostic.
 proc hir::structs::IsOtherType {name} {
@@ -133,8 +242,8 @@ proc hir::structs::IsOtherType {name} {
 # after the integer-domain types of the same compilation are registered (a
 # struct name may collide with none of them), resetting the previous
 # compilation's registry. Returns HIR's own `sourceTypes` entries for them:
-# {kind struct name NAME id ID namespace NS fields {FIELD TYPE ...}}, in
-# declaration order.
+# {kind struct name NAME id ID namespace NS opaque 0|1 fields {FIELD TYPE ...}},
+# in declaration order.
 proc hir::structs::apply {decls} {
     variable registry
     Reset
@@ -163,7 +272,8 @@ proc hir::structs::apply {decls} {
         dict set byId $id $decl
         # The skeleton first: a field type may name any struct of the batch,
         # declared earlier, later, or this one itself.
-        dict set registry $id [dict create id $id name $name namespace $ns names $names \
+        dict set registry $id [dict create id $id name $name namespace $ns \
+            opaque [expr {[dict exists $decl opaque] && [dict get $decl opaque]}] names $names \
             types {} spans $spans span [dict get $decl nameSpan]]
     }
     set entries {}
@@ -183,7 +293,8 @@ proc hir::structs::apply {decls} {
             lappend types $fieldName $resolved
         }
         dict set registry $id types $types
-        lappend entries [dict create kind struct name $name id $id namespace $ns fields $types]
+        lappend entries [dict create kind struct name $name id $id namespace $ns \
+            opaque [dict get $registry $id opaque] fields $types]
     }
     return $entries
 }
@@ -197,7 +308,8 @@ proc hir::structs::applyEntries {entries} {
         set names {}
         foreach {fieldName type} [dict get $entry fields] { lappend names $fieldName }
         dict set registry [dict get $entry id] [dict create id [dict get $entry id] \
-            name [dict get $entry name] namespace [dict get $entry namespace] names $names \
+            name [dict get $entry name] namespace [dict get $entry namespace] \
+            opaque [expr {[dict exists $entry opaque] && [dict get $entry opaque]}] names $names \
             types [dict get $entry fields] spans {} span {}]
     }
 }
@@ -262,6 +374,13 @@ proc hir::structs::ProjectionProblem {hir e} {
         return ""
     }
     set hint [expr {[dict exists $node methodCallee] ? [MethodHint $name] : ""}]
+    if {[projectionDenied $type $node]} {
+        # The receiver is an opaque struct and this code is not its owner
+        # (OPAQUE-STRUCTS.md): whatever the field is called, the access needs
+        # the representation. The same message for a field that exists and
+        # for one that does not, and no field named or listed.
+        return [list OPAQUE-REPRESENTATION "[RepresentationMessage [lindex $type 1]]$hint"]
+    }
     if {[hir::types::IsStructLike $type]} {
         if {[hir::types::StructField $type $name] ne ""} {
             return ""
@@ -388,6 +507,13 @@ proc hir::structs::AmbiguousMethodCall {hir e} {
     if {$type eq "never" || ![hir::types::IsStructLike $type]} {
         return ""
     }
+    # An opaque struct's fields are not source-visible outside its owner
+    # (OPAQUE-STRUCTS.md): they are not method candidates and cannot make the
+    # call ambiguous, and nothing about them is consulted here. The call
+    # record carries the namespace of the code the call is written in.
+    if {[projectionDenied $type [dict get $node method]]} {
+        return ""
+    }
     set name [dict get $node method name]
     if {$name ni [hir::types::StructLayout $type]} {
         return ""
@@ -480,3 +606,8 @@ proc hir::structs::GenericLive {hir} {
     }
     return [dict keys $liveBlocks]
 }
+
+# The value printer (core/value.tcl) renders a value of an opaque struct by its
+# nominal type only; whether an identity is opaque is this registry's
+# knowledge (OPAQUE-STRUCTS.md).
+core::value::setOpaqueStructTest hir::structs::isOpaque

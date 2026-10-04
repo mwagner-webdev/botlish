@@ -1770,6 +1770,7 @@ mod tests {
                     .map(|(name, fields)| ShapeInfo {
                         name: name.map(String::from),
                         fields: fields.iter().map(|f| f.to_string()).collect(),
+                        opaque: false,
                     })
                     .collect(),
             }),
@@ -1834,6 +1835,30 @@ mod tests {
         assert_eq!(h(&mut vm, one), h(&mut vm, two));
         assert_ne!(h(&mut vm, one), h(&mut vm, other));
         assert_ne!(h(&mut vm, other), h(&mut vm, named));
+    }
+
+    #[test]
+    fn an_opaque_struct_shows_its_nominal_type_only() {
+        // OPAQUE-STRUCTS.md: user-facing text never dumps a private
+        // representation (alone or nested); the host value stays complete.
+        use crate::runtime::show::{show, tcl_value};
+        use crate::runtime::vm::ShapeInfo;
+        let mut vm = Vm::new(
+            std::rc::Rc::new(ProgramInfo {
+                functions: Vec::new(),
+                natives: Vec::new(),
+                shapes: vec![
+                    ShapeInfo { name: Some("token::Token".into()), fields: vec!["secret".into()], opaque: true },
+                    ShapeInfo { name: Some("Holder".into()), fields: vec!["token".into()], opaque: false },
+                ],
+            }),
+            AllocMode::Summary,
+        );
+        let token = vm.new_struct(0, vec![small(1234)]);
+        let holder = vm.new_struct(1, vec![token]);
+        assert_eq!(show(token), "<opaque token::Token>");
+        assert_eq!(show(holder), "Holder {token: <opaque token::Token>}");
+        assert_eq!(tcl_value(token).unwrap(), "struct {token::Token secret} {{int 1234}}");
     }
 
     #[test]

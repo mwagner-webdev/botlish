@@ -82,13 +82,17 @@ proc hir::format {hir args} {
 proc hir::format::TypeDecl {entry} {
     if {[dict exists $entry kind] && [dict get $entry kind] eq "struct"} {
         # A struct declaration (hir/structs.tcl): "struct ID name NAME ns NS
-        # fields F1: T1, F2: T2" (NS "-" for the entry program), the fields
-        # in declared (slot) order with their resolved types.
+        # [opaque] fields F1: T1, F2: T2" (NS "-" for the entry program), the
+        # fields in declared (slot) order with their resolved types. The
+        # `opaque` word is printed only for an opaque struct
+        # (OPAQUE-STRUCTS.md), so ordinary declarations print as they always
+        # did.
         set fields [lmap {name type} [dict get $entry fields] {
             format {%s: %s} $name [hir::types::show $type]
         }]
         set ns [dict get $entry namespace]
-        return "struct [dict get $entry id] name [dict get $entry name] ns [expr {$ns eq "" ? "-" : $ns}] fields [join $fields {, }]"
+        set opaque [expr {[dict exists $entry opaque] && [dict get $entry opaque] ? "opaque " : ""}]
+        return "struct [dict get $entry id] name [dict get $entry name] ns [expr {$ns eq "" ? "-" : $ns}] ${opaque}fields [join $fields {, }]"
     }
     set domain [dict get $entry domain]
     if {[lindex $domain 0] eq {interval}} {

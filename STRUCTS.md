@@ -413,6 +413,12 @@ declare is a module error listing what it does declare
 declarations with its type declarations (`loadedStructs`). A module-level
 binding whose initializer is a struct is not supported (known limitation).
 
+A struct may be declared `opaque struct Name:` (OPAQUE-STRUCTS.md): the
+declaring module alone may then construct it from its fields, project its fields
+or destructure it. Everything else on this page is unchanged for it -- identity,
+the type algebra, equality, hashing, representation, optimization -- and an
+ordinary `struct` is exactly as open as described here.
+
 ## Diagnostics
 
 Every diagnostic uses source field names, never slot numbers, and is located at

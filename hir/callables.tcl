@@ -476,8 +476,13 @@ proc hir::callables::WalkExpr {hirVar e} {
             # (STRUCTS.md "Bearing").
             set structType [hir::typeOf $hir $e]
             foreach name [dict get $node names] field [dict get $node fields] {
-                set context [hir::types::StructField $structType $name]
-                CheckPreserved hir $field $context [format {stored in field "%s" of a struct} $name]
+                if {![dict exists $node opaqueDenied]} {
+                    # (Not for a construction of an opaque struct that is
+                    # already rejected as OPAQUE-CONSTRUCTION: the diagnostic
+                    # would name a field of the hidden representation.)
+                    set context [hir::types::StructField $structType $name]
+                    CheckPreserved hir $field $context [format {stored in field "%s" of a struct} $name]
+                }
                 WalkExpr hir $field
             }
         }

@@ -418,8 +418,38 @@ proc core::value::equal {a b} {
 # ---------------------------------------------------------------------------
 # Display: unambiguous human-readable rendering. With WITH-EVIDENCE, evidence
 # is appended as "TEXT"#{Name ...} (for debugging and differential tests).
+#
+# A value of an *opaque struct* (OPAQUE-STRUCTS.md: a struct whose
+# representation belongs to the module declaring it) is rendered by its
+# nominal type only, `<opaque geo::Point>`, wherever it sits (alone, in a list,
+# in a struct, in a Result): normal user-facing text -- the program's printed
+# value, runtime error messages, diagnostics -- never dumps a private
+# representation. REVEAL 1 is the explicit request of internal tooling (the
+# test harness's differential printer, audit scripts) for the full
+# representation, `geo::Point {x: 1, y: 2}`, as for any struct. Which struct
+# identities are opaque is the compilation's struct registry's knowledge
+# (hir/structs.tcl installs the predicate below); a program with no opaque
+# struct renders exactly as before.
 
-proc core::value::show {v {withEvidence 0}} {
+namespace eval core::value {
+    # A command prefix taking a named-struct identity and returning 1 if it
+    # is an opaque struct, or "" (no opaque struct is known).
+    variable opaqueStructTest ""
+}
+
+# Installs the opaque-struct predicate (see above); "" removes it.
+proc core::value::setOpaqueStructTest {command} {
+    variable opaqueStructTest
+    set opaqueStructTest $command
+}
+
+# 1 if ID is the identity of an opaque struct.
+proc core::value::isOpaqueStruct {id} {
+    variable opaqueStructTest
+    return [expr {$id ne "" && $opaqueStructTest ne "" && [{*}$opaqueStructTest $id]}]
+}
+
+proc core::value::show {v {withEvidence 0} {reveal 0}} {
     switch -- [kind $v] {
         int  { return [lindex $v 1] }
         str  {
@@ -439,17 +469,21 @@ proc core::value::show {v {withEvidence 0}} {
         list {
             set parts {}
             foreach item [lindex $v 1] {
-                lappend parts [show $item $withEvidence]
+                lappend parts [show $item $withEvidence $reveal]
             }
             return "\[[join $parts {, }]\]"
         }
-        result { return "[lindex $v 1]([show [lindex $v 2] $withEvidence])" }
+        result { return "[lindex $v 1]([show [lindex $v 2] $withEvidence $reveal])" }
         struct {
             # {name: "Grace", age: 45} / Person {name: "Ada", age: 36}: field
-            # names in slot order (anonymous: canonical sorted order).
+            # names in slot order (anonymous: canonical sorted order). An
+            # opaque struct is its nominal type only (above), unless REVEAL.
+            if {!$reveal && [isOpaqueStruct [lindex $v 1 0]]} {
+                return "<opaque [lindex $v 1 0]>"
+            }
             set parts {}
             foreach field [lrange [lindex $v 1] 1 end] item [lindex $v 2] {
-                lappend parts "$field: [show $item $withEvidence]"
+                lappend parts "$field: [show $item $withEvidence $reveal]"
             }
             set text "{[join $parts {, }]}"
             if {[lindex $v 1 0] ne ""} {
@@ -461,7 +495,7 @@ proc core::value::show {v {withEvidence 0}} {
             # Punctuation only; no semantic ordering is implied (item 87).
             set parts {}
             foreach item [lindex $v 1] {
-                lappend parts [show $item $withEvidence]
+                lappend parts [show $item $withEvidence $reveal]
             }
             return "{[join $parts {, }]}"
         }

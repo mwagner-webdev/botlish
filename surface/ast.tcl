@@ -113,10 +113,18 @@
 #              {kind exact values {V...} spans {SPAN...} span ..}, LO/HI/V
 #              decimal text (a leading "-" allowed).
 #   structdecl name, nameSpan, fields ({name nameSpan type typeSpan} dicts in
-#              declared order; TYPE as surface::parser::TypeExpr returns it)
+#              declared order; TYPE as surface::parser::TypeExpr returns it),
+#              opaque (1 for `opaque struct NAME:`, else 0), opaqueSpan (the
+#              modifier word's span, or "")
 #              -- a top-level nominal struct declaration ("struct NAME:"
 #              followed by its indented "field: Type" lines; STRUCTS.md).
 #              A declaration like typedecl: no runtime meaning, no binding.
+#              `opaque` is a property of the one declaration (the declaring
+#              module alone constructs and inspects its representation,
+#              OPAQUE-STRUCTS.md), not a separate declaration kind; the
+#              owner is not in the AST (the cached AST is importer- and
+#              path-neutral): the loader supplies the module's namespace when
+#              it lowers the declaration (surface/lower.tcl's StructDeclOf).
 #   errordecl  name, nameSpan -- a top-level named-error declaration
 #              ("error NAME", surface/parser.tcl's ErrorDecl; see
 #              hir/errordecls.tcl for what it means). No runtime meaning,
@@ -676,7 +684,8 @@ proc surface::ast::Statement {node indent show linesVar} {
             return
         }
         structdecl {
-            lappend lines "${pad}struct [dict get $node name]$at"
+            set modifier [expr {[dict exists $node opaque] && [dict get $node opaque] ? "opaque " : ""}]
+            lappend lines "${pad}${modifier}struct [dict get $node name]$at"
             foreach field [dict get $node fields] {
                 lappend lines "${pad}    [dict get $field name]: [showType [dict get $field type]]"
             }

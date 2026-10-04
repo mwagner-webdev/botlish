@@ -63,10 +63,18 @@ fn show_into(v: Value, out: &mut String) {
             // struct (fields in canonical order), `Person {name: "Ada",
             // age: 36}` for a named one (declared slot order).
             let obj = struct_of(v);
-            let (name, fields) = current_program(|prog| {
+            let (name, fields, opaque) = current_program(|prog| {
                 let shape = &prog.shapes[obj.shape as usize];
-                (shape.name.clone(), shape.fields.clone())
+                (shape.name.clone(), shape.fields.clone(), shape.opaque)
             });
+            if opaque {
+                // An opaque struct (OPAQUE-STRUCTS.md) is rendered by its
+                // nominal type only, as core::value::show does: normal
+                // user-facing text never dumps a private representation.
+                // (`tcl_value`, the host's runtime value, stays complete.)
+                out.push_str(&format!("<opaque {}>", name.unwrap_or_default()));
+                return;
+            }
             if let Some(name) = name {
                 out.push_str(&name);
                 out.push(' ');

@@ -1472,6 +1472,19 @@ add10(32)          # 42 (add captures x)
   static projection; a receiver the compiler cannot prove is a struct with
   that field is rejected, never looked up at run time. Struct values are
   immutable.
+* **Opaque structs.** `opaque struct Token:` declares an ordinary struct whose
+  representation belongs to the module that declares it: only that module may
+  construct it (`token::Token {...}`) or inspect it (`x.value`, `{value} = x`);
+  everywhere else it is an ordinary value to pass, store, return, compare and
+  hash, and the type is named as any struct's (`token::Token`). Authority is the
+  declaring module exactly: no import, parent, child or holder grants it, an
+  entry program owns its own opaque structs, and the checks are static
+  (`OPAQUE-CONSTRUCTION`, `OPAQUE-REPRESENTATION`) with no runtime test. `opaque`
+  is a contextual word, the compiler still sees the fields (a one-field wrapper
+  scalar-replaces exactly as an ordinary one), and an opaque value prints as
+  `<opaque token::Token>`. It is representation ownership, not OO privacy, and
+  the prerequisite for later `opaque context struct` / `opaque resource struct`.
+  See OPAQUE-STRUCTS.md.
 * **Method-call sugar.** `value.f(a, b)` is another spelling of the ordinary
   call `f(value, a, b)`, allowed exactly when `f` is a function visible by
   that name at the call (under ordinary lexical resolution: a function or

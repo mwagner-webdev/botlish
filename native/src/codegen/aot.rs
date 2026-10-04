@@ -72,7 +72,12 @@ fn startup(program: &Program, object: &ObjectProgram) -> String {
             Some(n) => format!("Some({n:?}.to_string())"),
             None => "None".to_string(),
         };
-        writeln!(s, "ShapeInfo {{ name: {name}, fields: vec!{:?}.into_iter().map(String::from).collect() }},", shape.fields).unwrap();
+        writeln!(
+            s,
+            "ShapeInfo {{ name: {name}, fields: vec!{:?}.into_iter().map(String::from).collect(), opaque: {} }},",
+            shape.fields, shape.opaque
+        )
+        .unwrap();
     }
     s.push_str("] };\nlet mut vm = Vm::new(Rc::new(info), AllocMode::Off);\nlet entries = vec![\n");
     for f in &program.functions {

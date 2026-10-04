@@ -308,7 +308,7 @@ fn program_info(program: &nir::Program) -> ProgramInfo {
         shapes: program
             .shapes
             .iter()
-            .map(|s| ShapeInfo { name: s.name.clone(), fields: s.fields.clone() })
+            .map(|s| ShapeInfo { name: s.name.clone(), fields: s.fields.clone(), opaque: s.opaque })
             .collect(),
     }
 }

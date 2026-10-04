@@ -708,7 +708,8 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 SetField hir $e callee [Expr hir [MethodCalleeSyntax $chosen $name $nameOrigin] $ctx]
                 SetField hir $e args [Sequence hir \
                     [concat [list [dict get $written receiver]] [dict get $node args]] $ctx]
-                SetField hir $e method [dict create name $name nameOrigin $nameOrigin]
+                SetField hir $e method [dict create name $name nameOrigin $nameOrigin \
+                    ns [CtxNamespace $ctx]]
             } else {
                 SetField hir $e callee [Expr hir $written $ctx]
                 SetField hir $e args [Sequence hir [dict get $node args] $ctx]
@@ -888,6 +889,10 @@ proc hir::resolve::Expr {hirVar node ctx} {
             SetField hir $e receiver [Expr hir [dict get $node receiver] $ctx]
             SetField hir $e name [dict get $node name]
             SetField hir $e nameOrigin [dict get $node nameOrigin]
+            # The namespace of the code the projection is written in: what
+            # representation authority over an opaque receiver is checked
+            # against after inference (hir/structs.tcl, OPAQUE-STRUCTS.md).
+            SetField hir $e ns [CtxNamespace $ctx]
         }
         ok - error {
             SetField hir $e value [Expr hir [dict get $node value] $ctx]
@@ -968,6 +973,11 @@ proc hir::resolve::ResolveStruct {hirVar e node ctx} {
     set named [expr {$typeRef ne ""}]
     set id ""
     set spelling ""
+    # Whether a source construction of an opaque struct is made without
+    # authority over its representation (OPAQUE-STRUCTS.md): only a spelling
+    # the source wrote can be (a type reference carrying an `id` is core IR's,
+    # past the source boundary).
+    set denied 0
     if {$named} {
         if {[dict exists $typeRef id]} {
             set id [dict get $typeRef id]
@@ -987,6 +997,10 @@ proc hir::resolve::ResolveStruct {hirVar e node ctx} {
                     ? "\"$tname\" is not a struct type"
                     : "unknown struct type \"$spelling\": no \"struct $tname\" declaration is visible"}]
                 hir::DiagnoseAt hir UNKNOWN-STRUCT $why $e [dict get $typeRef origin]
+            } elseif {[hir::structs::representationDenied $id $ns]} {
+                set denied 1
+                hir::DiagnoseAt hir OPAQUE-CONSTRUCTION [hir::structs::ConstructionMessage $id] $e \
+                    [dict get $typeRef origin]
             }
         }
     }
@@ -1010,6 +1024,12 @@ proc hir::resolve::ResolveStruct {hirVar e node ctx} {
     }
     set seen {}
     foreach name $names origin $fieldOrigins {
+        if {$denied} {
+            # The caller has no authority over the representation: it learns
+            # nothing about its fields (not which exist, not which are
+            # missing), only the one OPAQUE-CONSTRUCTION above.
+            break
+        }
         if {$name in $seen} {
             hir::DiagnoseAt hir DUPLICATE-FIELD \
                 "duplicate field \"$name\" in $what: each field may be given only once" $e $origin
@@ -1021,7 +1041,7 @@ proc hir::resolve::ResolveStruct {hirVar e node ctx} {
                 "struct $spelling has no field \"$name\" (declared fields: [join $layout {, }])" $e $origin
         }
     }
-    if {$named && $id ne ""} {
+    if {$named && $id ne "" && !$denied} {
         foreach declared $layout {
             if {$declared ni $names} {
                 hir::Diagnose hir MISSING-FIELD \
@@ -1030,6 +1050,11 @@ proc hir::resolve::ResolveStruct {hirVar e node ctx} {
         }
     }
     SetField hir $e named $named
+    if {$denied} {
+        # Read by hir::range::VerifyStruct, which must not prove (or word a
+        # diagnostic about) the fields of a construction that is rejected.
+        SetField hir $e opaqueDenied 1
+    }
     SetField hir $e structId $id
     SetField hir $e names $names
     SetField hir $e nameOrigins $nameOrigins

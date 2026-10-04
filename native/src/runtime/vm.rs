@@ -63,6 +63,12 @@ pub struct NativeInfo {
 pub struct ShapeInfo {
     pub name: Option<String>,
     pub fields: Vec<String>,
+    /// The declaration is an `opaque struct` (OPAQUE-STRUCTS.md): its
+    /// representation belongs to the declaring module at the source level.
+    /// Purely a rendering fact -- `show` prints a value of it by its nominal
+    /// type only; no operation, check or layout consults it. Always false for
+    /// an anonymous shape.
+    pub opaque: bool,
 }
 
 pub struct ProgramInfo {

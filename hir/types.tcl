@@ -1783,6 +1783,14 @@ proc hir::types::Project {hirVar ctxVar e} {
         return never
     }
     set name [dict get $node name]
+    if {[hir::structs::projectionDenied $receiver $node]} {
+        # No authority over an opaque receiver's representation
+        # (OPAQUE-STRUCTS.md; hir::structs::ProjectionProblem rejects it): the
+        # access is typed as if no such field were known, never with the
+        # hidden field's declared type, so the representation cannot leak
+        # through the types of the program's later diagnostics.
+        return [expr {[dict exists $ctx spec] ? "never" : "any"}]
+    }
     if {[IsStructLike $receiver]} {
         set t [StructField $receiver $name]
         if {$t ne ""} {

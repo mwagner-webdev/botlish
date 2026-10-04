@@ -282,6 +282,13 @@ naming both sides; no first/last/nearest wins, no implicit qualification):
 Importing the same type twice is `DUPLICATE-IMPORT`. A module's own
 declarations remain usable bare; the import exists for consumers.
 
+An import never grants authority over a struct's *representation*: a struct
+declared `opaque struct` (OPAQUE-STRUCTS.md) may be named, passed, stored and
+compared by any file that imports its namespace, but only the declaring module
+may construct it from its fields or inspect its fields. The owner is the declaring
+namespace exactly (no parent, child or transitive import has any authority), and
+it comes from the loader's canonical module identity, never from the cached AST.
+
 Types and values are separate namespaces in Botlish already (a type name is
 never a lexical binding), so a type import does not collide with a value
 binding of the same spelling (`U8Value = 5` is fine and unrelated).

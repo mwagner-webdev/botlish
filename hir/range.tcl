@@ -1664,6 +1664,13 @@ proc hir::range::VerifyStruct {hirVar ranges e node} {
     if {![dict get $node named] || [dict get $node structId] eq ""} {
         return
     }
+    if {[dict exists $node opaqueDenied]} {
+        # An unauthorized construction of an opaque struct is already
+        # rejected (OPAQUE-CONSTRUCTION); proving its fields against the
+        # hidden schema would only word diagnostics about the representation
+        # (hir/resolve.tcl ResolveStruct, OPAQUE-STRUCTS.md).
+        return
+    }
     set id [dict get $node structId]
     foreach name [dict get $node names] field [dict get $node fields] origin [dict get $node fieldOrigins] {
         set declared [hir::structs::fieldType $id $name]

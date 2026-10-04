@@ -144,9 +144,15 @@ proc surface::lower::SplitTypeDecls {statements {namespace ""}} {
     return [list $executable $decls $errorDecls $structDecls]
 }
 
+# The declaration dict of a `structdecl` node declared in module NAMESPACE (""
+# for the entry program). `namespace` is the representation owner of an
+# opaque struct (OPAQUE-STRUCTS.md): supplied here, by the loader's canonical
+# module identity, never read from the (cached, importer-neutral) AST. `opaque`
+# is the declaration's own modifier.
 proc surface::lower::StructDeclOf {node namespace} {
     return [dict create name [dict get $node name] nameSpan [dict get $node nameSpan] \
-        namespace $namespace fields [dict get $node fields] span [dict get $node span]]
+        namespace $namespace fields [dict get $node fields] span [dict get $node span] \
+        opaque [expr {[dict exists $node opaque] ? [dict get $node opaque] : 0}]]
 }
 
 proc surface::lower::TypeDeclOf {node {namespace ""}} {

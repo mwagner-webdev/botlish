@@ -378,7 +378,11 @@ programs gave 6 equivalence disagreements and 3 negative escapes.
   message (plus the visibility hint), not as an unbound name, because the
   call falls back to the field-value call it had before.
 * The field-vs-function ambiguity is decided on the receiver's static struct
-  type, in the generic analysis and in each semantic instance (see above).
+  type, in the generic analysis and in each semantic instance (see above). The
+  fields of an `opaque struct` (OPAQUE-STRUCTS.md) are not consulted outside its
+  owner: they are not method candidates and cannot make a call ambiguous, and `x.f`
+  as a field projection is `OPAQUE-REPRESENTATION` there while `x.f()` is still
+  the visible function `f`.
 * No bound-method values: `g = x.f` is the field projection error it was.
 * No method-style *lint*: nothing prefers or warns on either spelling.
 

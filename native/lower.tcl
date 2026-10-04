@@ -1476,7 +1476,12 @@ proc native::lower::program {hirProgram args} {
         if {$id eq ""} {
             lappend header "shape [dict get $shapeIds $key] anon fields=[Quote [join $layout { }]]"
         } else {
-            lappend header "shape [dict get $shapeIds $key] named [Quote $id] fields=[Quote [join $layout { }]]"
+            # An opaque struct's shape says so (OPAQUE-STRUCTS.md): the
+            # runtime printer renders it by its nominal type only. Nothing
+            # else (layout, allocation, access) differs from an ordinary
+            # named shape, and an ordinary one prints exactly as before.
+            set opaque [expr {[hir::structs::isOpaque $id] ? " opaque=1" : ""}]
+            lappend header "shape [dict get $shapeIds $key] named [Quote $id]$opaque fields=[Quote [join $layout { }]]"
         }
     }
     set text "[join $header \n]\n\n[join $texts \n\n]\n"

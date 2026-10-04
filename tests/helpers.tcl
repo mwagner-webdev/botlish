@@ -123,7 +123,9 @@ proc errorCodeOf {args} {
 
 # Outcome of EXPRS under BACKEND: {value V LOG} or {error ERRORCODE MESSAGE LOG},
 # where LOG is what test-log recorded. V includes runtime evidence, so the
-# backends must also agree on what values are proven to be.
+# backends must also agree on what values are proven to be, and the full
+# representation of a value of an opaque struct (core::value::show's REVEAL:
+# this is internal differential tooling, not user-facing text, OPAQUE-STRUCTS.md).
 #
 # cranelift-generic (native -specialize 0) compiles every function once, so it
 # has no slot for a struct projection that only a semantic instance proves
@@ -151,7 +153,7 @@ proc outcomeUnder {backend exprs} {
             }
             return $outcome
         }
-        return [list value [core::value::show $result 1] $::testLog]
+        return [list value [core::value::show $result 1 1] $::testLog]
     } finally {
         core::useBackend $saved
     }
@@ -175,7 +177,7 @@ proc outcomeUnderHir {backend hir} {
         }
         return $outcome
     }
-    return [list value [core::value::show $result 1] $::testLog]
+    return [list value [core::value::show $result 1 1] $::testLog]
 }
 
 # The HIR native lowering compiles for a program written as core IR text

@@ -62,7 +62,8 @@
 #
 #   errorDecl    = "error" IDENT NEWLINE
 #
-#   structDecl   = "struct" IDENT ":" NEWLINE INDENT structField { structField } DEDENT
+#   structDecl   = { structModifier } "struct" IDENT ":" NEWLINE INDENT structField { structField } DEDENT
+#   structModifier = "opaque"       -- OPAQUE-STRUCTS.md; contextual (below)
 #   structField  = IDENT ":" typeExpr NEWLINE
 #
 # A structDecl (STRUCTS.md) declares a nominal struct type: like a typeDecl
@@ -71,6 +72,17 @@
 # struct needs at least one field: Botlish has no explicit empty-block
 # syntax (every suite is an INDENT of statements), and none is invented for
 # a zero-field struct.
+#
+# A struct modifier (`opaque struct Token:` -- the declaring module alone may
+# construct and inspect the struct's representation, OPAQUE-STRUCTS.md) is a
+# *contextual* word, not a keyword: it is a modifier only when the words
+# before the `struct` keyword are all modifier words (lookahead through the
+# modifier table, AtStructDecl), which no other construct allows, so `opaque`
+# stays an ordinary name everywhere else (`opaque = 1`, `opaque(x)`,
+# `x.opaque`, a field called `opaque`). A modifier is a property of the one
+# struct declaration (the `structdecl` node's own fields), never a separate
+# declaration kind, so further modifiers extend the table, not the grammar's
+# shape.
 #
 # A handled call (EXPLICIT-ERROR-COMPLETIONS.md) is a bare call expression
 # immediately followed by ":" and an indented block of "on NAME:" handlers,
@@ -162,6 +174,10 @@
 
 namespace eval surface::parser {
     variable comparisons {== != < <= > >=}
+    # The contextual words that may precede `struct` in a struct declaration
+    # (see the grammar above). Each names one boolean property of the
+    # `structdecl` node (`opaque` -> `opaque 0|1`, `opaqueSpan`).
+    variable structModifiers {opaque}
 }
 
 proc surface::parse {source args} {
@@ -382,6 +398,31 @@ proc surface::parser::AtNamespaceDecl {pVar} {
         && [Kind p 1] eq "IDENT"}]
 }
 
+# 1 if the next tokens are struct modifiers followed by the `struct` keyword:
+# one or more contextual modifier words (structModifiers) and then `struct`.
+# Never a valid continuation of an expression, so an ordinary variable called
+# `opaque` is unaffected.
+proc surface::parser::AtStructDecl {pVar} {
+    variable structModifiers
+    upvar 1 $pVar p
+    set i 0
+    while {[Kind p $i] eq "IDENT" && [dict get [Peek p $i] text] in $structModifiers} {
+        incr i
+    }
+    return [expr {$i > 0 && [Kind p $i] eq "struct"}]
+}
+
+# 1 if the next tokens are a struct modifier word directly followed by the
+# keyword of another declaration (`opaque fn`, `opaque type`, `opaque error`):
+# a modifier of nothing. Also never a valid expression continuation.
+proc surface::parser::AtStrayModifier {pVar} {
+    variable structModifiers
+    upvar 1 $pVar p
+    set token [Peek p]
+    return [expr {[dict get $token kind] eq "IDENT" && [dict get $token text] in $structModifiers
+        && [Kind p 1] in {fn type error}}]
+}
+
 # Statements up to a token of a kind in STOP (not consumed).
 proc surface::parser::Statements {pVar stop} {
     upvar 1 $pVar p
@@ -483,6 +524,17 @@ proc surface::parser::Statement {pVar} {
         INDENT { Fail $token "unexpected indentation" }
         else   { Fail $token "\"else\" without a matching \"if\"" }
         elif   { Fail $token "\"elif\" without a matching \"if\"" }
+    }
+    if {[AtStructDecl p]} {
+        # A modifier-led struct declaration (`opaque struct Name:`); the
+        # plain `struct` form is the keyword case above.
+        if {![dict get $p topLevel]} {
+            Fail $token "a struct declaration is only allowed at the top level of a module, not nested in a function/if/loop"
+        }
+        return [StructDecl p]
+    }
+    if {[AtStrayModifier p]} {
+        Fail $token "\"[dict get $token text]\" only modifies a struct declaration (\"[dict get $token text] struct NAME:\"), not a \"[Kind p 1]\" declaration"
     }
     if {[AtNamespaceDecl p]} {
         Fail $token "namespace declarations do not exist: a file's namespace is its path (lib/abi/x86_64.bot is abi::x86_64), so the file needs no \"namespace\" line"
@@ -1833,14 +1885,31 @@ proc surface::parser::FieldInits {pVar} {
     return [surface::ast::node fieldinits [SpanFrom p $start] fields $fields]
 }
 
-# "struct" IDENT ":" NEWLINE INDENT { IDENT ":" typeExpr NEWLINE } DEDENT --
-# a top-level nominal struct declaration. Every field has an explicit type
-# and there are no defaults. A `structdecl` node carries `fields`, one
-# {name nameSpan type typeSpan} dict per declared field in written (slot)
-# order.
+# { modifier } "struct" IDENT ":" NEWLINE INDENT { IDENT ":" typeExpr NEWLINE }
+# DEDENT -- a top-level nominal struct declaration. Every field has an
+# explicit type and there are no defaults. A `structdecl` node carries
+# `fields`, one {name nameSpan type typeSpan} dict per declared field in
+# written (slot) order, and one boolean per struct modifier (structModifiers):
+# `opaque` (1 for `opaque struct`, else 0) with `opaqueSpan` (the modifier
+# word's span, "" when absent). The node is the one struct declaration with a
+# property, never a different declaration kind (OPAQUE-STRUCTS.md).
 proc surface::parser::StructDecl {pVar} {
+    variable structModifiers
     upvar 1 $pVar p
-    set start [dict get [Advance p] span]
+    set start [dict get [Peek p] span]
+    set modifiers [dict create]
+    while {[Kind p] eq "IDENT"} {
+        set word [Advance p]
+        set text [dict get $word text]
+        if {$text ni $structModifiers} {
+            Fail $word "expected \"struct\" after the declaration modifiers, found [Describe $word]"
+        }
+        if {[dict exists $modifiers $text]} {
+            Fail $word "duplicate modifier \"$text\" in this struct declaration"
+        }
+        dict set modifiers $text [dict get $word span]
+    }
+    Advance p
     set name [Expect p IDENT "a struct name after \"struct\""]
     set token [Peek p]
     if {[dict get $token kind] ne ":"} {
@@ -1889,6 +1958,8 @@ proc surface::parser::StructDecl {pVar} {
     if {[Kind p] eq "DEDENT"} {
         Advance p
     }
+    set opaque [dict exists $modifiers opaque]
     return [surface::ast::node structdecl [SpanFrom p $start] \
-        name [dict get $name value] nameSpan [dict get $name span] fields $fields]
+        name [dict get $name value] nameSpan [dict get $name span] fields $fields \
+        opaque $opaque opaqueSpan [expr {$opaque ? [dict get $modifiers opaque] : ""}]]
 }

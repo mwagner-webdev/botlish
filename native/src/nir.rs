@@ -847,10 +847,13 @@ pub struct NativeDecl {
 /// "Name" fields="a b"`): static program metadata the runtime keeps once
 /// per shape (runtime::vm::ShapeInfo), never per object. An anonymous
 /// shape's fields are its canonical (sorted) field set; a named shape's are
-/// its declaration's slot order. Shape numbers are dense, in order.
+/// its declaration's slot order. Shape numbers are dense, in order. A named
+/// shape may carry `opaque=1` (the declaration is an `opaque struct`,
+/// OPAQUE-STRUCTS.md): a rendering fact only, see `ShapeInfo::opaque`.
 pub struct ShapeDecl {
     pub name: Option<String>,
     pub fields: Vec<String>,
+    pub opaque: bool,
 }
 
 pub struct Program {
@@ -1181,7 +1184,15 @@ fn parse_shape(p: &Parser, tokens: &[Token]) -> Result<(u32, ShapeDecl), NirErro
             return p.err("an anonymous shape's fields must be in canonical (sorted) order");
         }
     }
-    Ok((index, ShapeDecl { name, fields }))
+    let opaque = match kv.get("opaque").map(String::as_str) {
+        None | Some("0") => false,
+        Some("1") => true,
+        Some(_) => return p.err("shape opaque= must be 0 or 1"),
+    };
+    if opaque && name.is_none() {
+        return p.err("an anonymous shape cannot be opaque");
+    }
+    Ok((index, ShapeDecl { name, fields, opaque }))
 }
 
 fn parse_func_header(p: &Parser, tokens: &[Token]) -> Result<Function, NirError> {
@@ -2384,6 +2395,21 @@ mod struct_tests {
         assert_eq!(p.shapes[1].fields, vec!["y".to_string(), "x".to_string()]);
         assert!(matches!(&p.functions[0].body[2], Inst::StructNew { shape: 0, .. }));
         assert!(matches!(&p.functions[0].body[3], Inst::StructGet { slot: 1, .. }));
+    }
+
+    #[test]
+    fn an_opaque_named_shape_parses_and_an_ordinary_one_is_not_opaque() {
+        // OPAQUE-STRUCTS.md: `opaque=1` is a rendering fact on a named shape.
+        let p = parse(&text(
+            "shape 0 named \"geo::Point\" fields=\"x y\"\nshape 1 named \"token::Token\" opaque=1 fields=\"v\"\n",
+            "    %0 = unit\n    ret %0",
+        ))
+        .unwrap();
+        assert!(!p.shapes[0].opaque);
+        assert!(p.shapes[1].opaque);
+        let body = "    %0 = unit\n    ret %0";
+        assert!(message(text("shape 0 anon opaque=1 fields=\"x\"\n", body)).contains("anonymous shape cannot be opaque"));
+        assert!(message(text("shape 0 named \"T\" opaque=2 fields=\"x\"\n", body)).contains("0 or 1"));
     }
 
     #[test]

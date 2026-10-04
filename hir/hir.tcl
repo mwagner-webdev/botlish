@@ -103,8 +103,10 @@
 #             A call written `receiver.name(args)` with a function `name`
 #             visible (METHOD-SUGAR.md) is an ordinary call `name(receiver,
 #             args)`, receiver first in `args`; it carries `method` {name
-#             nameOrigin} for the field/function ambiguity check and
-#             diagnostics only (no analysis, lowering or backend reads it).
+#             nameOrigin ns} (ns: the namespace of the code the call is
+#             written in, "" for the entry program) for the field/function
+#             ambiguity check and diagnostics only (no analysis, lowering or
+#             backend reads it).
 #             Without such a function the written callee is a `project`
 #             marked `methodCallee 1` (diagnostic wording only)
 #   if        condition, thenScope, thenBody, elseScope, elseBody,
@@ -142,8 +144,17 @@
 #             layout (the field names in slot order: sorted for an
 #             anonymous struct, declared order for a named one), slots (for
 #             each written field its index in layout, -1 if it names no
-#             layout field). STRUCTS.md; hir/structs.tcl.
-#   project   receiver (ExprId), name, nameOrigin -- `receiver.name`
+#             layout field). STRUCTS.md; hir/structs.tcl. A source
+#             construction of an `opaque struct` outside its owner is rejected
+#             (OPAQUE-CONSTRUCTION) and its node carries `opaqueDenied 1`, read
+#             only by the checks that must not describe its fields.
+#   project   receiver (ExprId), name, nameOrigin, ns -- `receiver.name`; ns
+#             is the namespace of the code the projection is written in ("" for
+#             the entry program), stamped by hir/resolve.tcl for the one check
+#             of representation authority over an opaque receiver (OPAQUE-
+#             REPRESENTATION, hir/structs.tcl, OPAQUE-STRUCTS.md); a node
+#             without it (core IR, HIR text) is past the source boundary and
+#             trusted. No analysis, lowering or backend reads it.
 #   ok        value
 #   error     value                 (core IR error-value)
 #
@@ -619,6 +630,7 @@ proc hir::CheckOnce {hirVar demote} {
     hir::semantic::verify hir
     hir::errorsets::verify hir
     hir::modulebinding::validate hir
+    hir::structs::promoteOpacity hir
 }
 
 # Resolves TARGETS (flat NATIVE-NAME NAMESPACE NAME triples,
