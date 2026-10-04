@@ -1,0 +1,67 @@
+abi-bytes mutation results (audit/abi-bytes/tools/mutate.tcl)
+==============================================================
+
+Host: Linux x86-64, Tcl 9.0.1, rustc 1.97.  Each mutant breaks one piece of the
+implementation in a scratch copy of the tree (never the repository), rebuilds
+the native backend when the mutant is Rust, then runs tests/abi-bytes.test and
+the write-mode fuzzer (-fuzz 4: 4 programs, seed 7000) from inside that copy.
+A mutant is KILLED when any test or the fuzzer fails.  Run one at a time with
+`-only NAME -fuzz 4`; the "first tests" column is the start of the failing list
+the tool prints (the full lists are longer where the count says so).
+
+mutants 12   killed 12   survivors 0
+
+nul-as-terminator          7 failing tests    9 fuzz failures  first tests: abi-bytes-accepts-a-typed-dynamic-list abi-bytes-embedded-nul abi-bytes-every-byte-value-heap-write abi-bytes-gc-stress-in-process abi-bytes-gc-stress-writes-are-exact abi-bytes-kernel-sees-the-nul-payload
+byte-masked-to-7-bits      8 failing tests    8 fuzz failures  first tests: abi-bytes-every-byte-value-heap-write abi-bytes-gc-stress-writes-are-exact abi-bytes-hash-values-agree-across-backends abi-bytes-kernel-sees-the-count-not-the-scalars abi-bytes-large-heap-write abi-bytes-short-write-is-reported-not-completed
+libc-write                 6 failing tests    0 fuzz failures  first tests: abi-bytes-empty-write-to-an-invalid-descriptor-is-still-the-syscall abi-bytes-gc-stress-in-process abi-bytes-kernel-sees-the-write abi-bytes-liveness-join-else-branch abi-bytes-short-write-is-reported-not-completed abi-bytes-write-error-is-the-raw-negative-result
+equality-by-identity       7 failing tests    0 fuzz failures  first tests: abi-bytes-accepts-a-typed-dynamic-list abi-bytes-aliasing-is-ordinary-value-use abi-bytes-equality-is-by-bytes abi-bytes-gc-stress-in-process abi-bytes-in-collections abi-bytes-large-values
+hash-ignores-length        1 failing tests    0 fuzz failures  first tests: abi-bytes-hash-values-agree-across-backends
+count-truncated            4 failing tests    0 fuzz failures  first tests: abi-bytes-large-heap-write abi-bytes-nir-write-path abi-bytes-short-write-is-reported-not-completed abi-bytes-write-to-a-pipe
+no-keepalive               11 failing tests   0 fuzz failures  first tests: abi-bytes-clif-keepalive-and-stack-map abi-bytes-liveness-helper abi-bytes-liveness-inline abi-bytes-liveness-join abi-bytes-liveness-locals abi-bytes-liveness-mutant-without-keepalive-is-detected
+address-in-rdx             17 failing tests   12 fuzz failures first tests: abi-bytes-aliased-writes abi-bytes-embedded-nul abi-bytes-empty-write abi-bytes-every-byte-value-heap-write abi-bytes-example-file-on-every-backend abi-bytes-example-writes-hello-to-stdout
+write-twice                18 failing tests   8 fuzz failures  first tests: abi-bytes-aliased-writes abi-bytes-clif-keepalive-and-stack-map abi-bytes-embedded-nul abi-bytes-every-byte-value-heap-write abi-bytes-example-writes-hello-to-stdout abi-bytes-gc-stress-writes-are-exact
+static-constant-ascii      3 failing tests    0 fuzz failures  first tests: abi-bytes-length-is-bytes-not-scalars abi-bytes-nir-static-forms abi-bytes-utf8-write
+length-off-by-one          31 failing tests   12 fuzz failures first tests: abi-bytes-aliased-writes abi-bytes-aliasing-is-ordinary-value-use abi-bytes-eager-construction-is-independent-of-the-source abi-bytes-embedded-nul abi-bytes-empty-write abi-bytes-every-byte-value-heap-write
+payload-offset-by-one      22 failing tests   8 fuzz failures  first tests: abi-bytes-aliased-writes abi-bytes-embedded-nul abi-bytes-every-byte-value-heap-write abi-bytes-example-file-on-every-backend abi-bytes-example-writes-hello-to-stdout abi-bytes-gc-stress-writes-are-exact
+
+What each mutant is (see the header of tools/mutate.tcl):
+
+  length-off-by-one        the native length accessor returns one too many
+  nul-as-terminator        native creation stops at the first zero byte
+  payload-offset-by-one    the address bridge returns the payload address + 1
+  byte-masked-to-7-bits    native creation stores byte & 0x7f
+  count-truncated          write's count register carries length mod 2^16 (the
+                           same bug as truncating a Usize count to U32, which
+                           only a 4 GiB payload could expose)
+  no-keepalive             the lowering never emits the keepalive after a syscall
+  address-in-rdx           the address and count registers swapped in the wrapper
+  libc-write               the syscall boundary calls libc write(2) for rax = 1
+                           instead of executing the syscall instruction: the
+                           bytes written on success are identical; killed by
+                           the raw-negative-result tests (libc returns -1 and
+                           sets errno where the instruction returns -EBADF /
+                           -EAGAIN) and by the strace-based test (the write's
+                           call stack runs through libc); the strace test is
+                           skipped where ptrace is unavailable, the errno
+                           tests are not
+  write-twice              the wrapper performs the syscall twice
+  equality-by-identity     two storages are equal iff the same object (native)
+  hash-ignores-length      the native hash omits the byte count
+  static-constant-ascii    a static byte constant encoded as ASCII, not UTF-8
+
+Notes:
+
+* hash-ignores-length is killed by exactly one test -- the one that compares
+  the native hash VALUE against the documented hash (the equality/hash
+  consistency tests cannot see it: equal values still hash equal).
+* count-truncated used to be a vacuous kill: the first version of the mutant
+  did not compile, so every test "failed".  The tool now refuses a Tcl-side
+  mutant whose example does not compile, and the mutant became a `trunc16`
+  helper that compiles and is killed by the large-write, short-write and pipe
+  tests.  (A U32-count mutant itself is unobservable below 4 GiB.)
+* The tool's earlier version ran several mutants from one working directory
+  while tcltest keeps its scratch directories there, so concurrent runs shared
+  and deleted each other's files; each mutant now runs inside its own copy.
+  A Rust mutant is not probed for compile errors (the crate building is
+  enough, and a write that is one byte long or one byte off legitimately
+  breaks the in-process runner's own output).
