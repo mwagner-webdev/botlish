@@ -1207,11 +1207,21 @@ fn count_up(n, acc):
 * NIR is byte-identical before and after for all 32 programs in `bench/`,
   `examples/stdlib/`, `examples/surface/` and `examples/abi/`, so the
   scalar-asm audit corpus is unchanged.
-* Full suites (`CORE_BACKEND=interp` and `compile`, as CI runs them) on the
-  fixed commit: still running when this report was first committed. The
-  first 90 of 135 test files per backend had passed with no failures; the
-  final result is recorded in the "Full-suite validation" note at the end
-  of this section.
+* Full suites on the fixed commit (`CORE_BACKEND=interp` and `compile`, as
+  CI runs them):
+  * interp: 5155 tests, 5155 passed;
+  * compile: 5155 tests, 5151 passed, 4 skipped (`coreScoping`, the same as
+    the baseline), 0 failed.
+  * The baseline (66b52cd) had 5151 tests: the four new ones are the
+    regression tests above.
+  * Two baseline runs sharing one worktree concurrently reported 3 and 7
+    failures, all in `argv`, `ascii` and `direct-hir-native` (colliding
+    executable scratch directories). Re-run serially, those files pass
+    (131/131 on each backend).
+* CI's example steps (`main.tcl -backend interp|compile`) succeed.
+* `BOTLISH_NATIVE_GC_STRESS=1` over `hir-range`, `stdlib-namespaces`,
+  `self-recursive-result-ranges`, `instance-entry-range-facts`,
+  `raw-count-loops` and `abi-numeric` (interp): 249 tests, 0 failures.
 
 ### Negative results: hazards checked and found sound
 
