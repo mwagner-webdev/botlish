@@ -128,7 +128,7 @@ test ns-qualified-inventory {every standard intrinsic lives in its value family'
     lmap ns {list str char mutable_array immutable_set byte_store linux::abi abi::x86_64} {
         list $ns [core::native::qualifiedMembers $ns]
     }
-} -result {{list {append at length}} {str {concat encode_utf8 is_tcl_alnum is_tcl_alpha length lowercase substring}} {char scalar_value} {mutable_array {allocate at capacity copy freeze set}} {immutable_set {contains from_list}} {byte_store {byte_count from_list}} {linux::abi syscall} {abi::x86_64 from_bytes}}
+} -result {{list {append at length}} {str {concat encode_utf8 is_tcl_alnum is_tcl_alpha length lowercase substring}} {char scalar_value} {mutable_array {allocate at capacity copy freeze set}} {immutable_set {contains from_list}} {byte_store {byte_count freeze freeze_prefix from_list mutable_copy mutable_count mutable_from mutable_new mutable_set}} {linux::abi syscall} {abi::x86_64 {from_bytes from_mutable_bytes}}}
 
 test ns-no-nested-stdlib {no std::/stdlib::/core:: hierarchy: every qualified intrinsic but the platform's (linux::abi::syscall, abi::x86_64::from_bytes) is NAMESPACE::MEMBER, one level} -body {
     lsort [lmap name [core::native::names] {
