@@ -1,0 +1,100 @@
+# range-fixpoint-scaling.test -- hir::range's interprocedural fixpoint does
+# work proportional to the facts that change, not to rounds x instances
+# (RANGE-FIXPOINT-SCALING.md).
+#
+# A fact travels one call edge per round, so a call chain of depth N needs
+# about N rounds of Fixpoint's ascending phase (and of NarrowRounds, when a
+# narrowed fact travels down it). Re-walking every instance every round made
+# the analysis quadratic in program size. These tests count the per-instance
+# walks (AnalyzeInstance calls) of one hir::range::analyze on two 40-function
+# chains, and pin the facts at both ends of each chain: the facts still
+# travel the whole chain, and the walk count stays a small constant per
+# instance (before the change: 86 and 168 walks per instance).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+# fN(x, y) calls f(N-1) in both branches: entry facts travel down the
+# chain, result summaries back up.
+proc entryChain {n} {
+    set lines [list "fn f0(x, y):" "    x + y"]
+    for {set i 1} {$i <= $n} {incr i} {
+        set p [expr {$i - 1}]
+        lappend lines "fn f$i\(x, y):" "    a = x + $i" "    if a < y:" "        f$p\(a, y)" \
+            "    else:" "        f$p\(x, y - 1)"
+    }
+    lappend lines "f$n\(1, 1000)"
+    return [join $lines \n]
+}
+
+# drive's self-tail loop widens its entry to [0, +inf]; the narrowing
+# rounds recover [0, 500], and the else branch's [500, 500] then travels
+# down the gN ... g0 chain one round per call.
+proc narrowChain {n} {
+    set lines [list "fn g0(x, y):" "    x + y"]
+    for {set i 1} {$i <= $n} {incr i} {
+        set p [expr {$i - 1}]
+        lappend lines "fn g$i\(x, y):" "    if x < y:" "        g$p\(x, y - 1)" \
+            "    else:" "        g$p\(x - 1, y)"
+    }
+    lappend lines "fn drive(n):" "    if n < 500:" "        drive(n + 1)" "    else:" \
+        "        g$n\(n, 7)" "drive(0)"
+    return [join $lines \n]
+}
+
+proc bounds {r} {
+    return [string map {-inf -∞ +inf +∞} "\[[dict get $r min], [dict get $r max]\]"]
+}
+
+# {WALKS INSTANCES FACTS} of one hir::range::analyze of TEXT: the number of
+# AnalyzeInstance calls, the number of used instances, and for each function
+# in NAMES "NAME {entry bounds} result-bounds".
+proc scalingOf {text names} {
+    set hir [surface::compile $text t.bot -strict 0]
+    set spec [hir::specialize::analyze $hir]
+    set ::walks 0
+    rename hir::range::AnalyzeInstance hir::range::AnalyzeInstance__counted
+    proc hir::range::AnalyzeInstance {args} {
+        incr ::walks
+        tailcall AnalyzeInstance__counted {*}$args
+    }
+    try {
+        set analysis [hir::range::analyze $hir $spec]
+    } finally {
+        rename hir::range::AnalyzeInstance {}
+        rename hir::range::AnalyzeInstance__counted hir::range::AnalyzeInstance
+    }
+    set facts {}
+    foreach name $names {
+        foreach id [dict get $spec used] {
+            if {[dict get $spec instances $id name] eq $name} {
+                set instance [dict get $analysis instances $id]
+                lappend facts $name [lmap r [dict get $instance params] {bounds $r}] \
+                    [bounds [dict get $instance result]]
+            }
+        }
+    }
+    return [list $::walks [llength [dict get $spec used]] $facts]
+}
+
+test range-fixpoint-scaling-1.1 {entry facts and summaries travel a 40-function chain} -body {
+    lindex [scalingOf [entryChain 40] {f40 f0}] 2
+} -result {f40 {{[1, 1]} {[1000, 1000]}} {[961, 1821]} f0 {{[1, 821]} {[960, 1000]}} {[961, 1821]}}
+
+test range-fixpoint-scaling-1.2 {a 40-function chain costs a constant number of walks per instance} -body {
+    lassign [scalingOf [entryChain 40] {}] walks instances
+    expr {$walks <= 8 * $instances ? "ok" : "$walks walks for $instances instances"}
+} -result ok
+
+test range-fixpoint-scaling-2.1 {a narrowed fact travels a 40-function chain} -body {
+    lindex [scalingOf [narrowChain 40] {drive g40 g0}] 2
+} -result {drive {{[0, 500]}} {[-∞, +∞]} g40 {{[500, 500]} {[7, 7]}} {[467, 467]} g0 {{[460, 460]} {[7, 7]}} {[467, 467]}}
+
+test range-fixpoint-scaling-2.2 {narrowing a 40-function chain costs a constant number of walks per instance} -body {
+    lassign [scalingOf [narrowChain 40] {}] walks instances
+    expr {$walks <= 12 * $instances ? "ok" : "$walks walks for $instances instances"}
+} -result ok
+
+cleanupTests
