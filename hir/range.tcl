@@ -2390,6 +2390,86 @@ proc hir::range::ResultsRead {results callees} {
     return $read
 }
 
+# The keys of SET (a dict keyed by InstanceId) in ids order (POSITION:
+# InstanceId -> index in ids).
+proc hir::range::InOrder {position set} {
+    return [lmap entry [lsort -integer -index 0 [lmap id [dict keys $set] {list [dict get $position $id] $id}]] {
+        lindex $entry 1
+    }]
+}
+
+# {REACHED CONTRIBUTION}: the per-argument join of the argument Ranges of
+# every exact call of target T in the current OUTCOMES of the instances
+# READERS (its possible callers, in ids order; Fixpoint's readersOf),
+# skipping DORMANT callers and, unless SELFCALLS, T itself -- the order a
+# round's full fold over every instance's calls joins them in. REACHED is 0
+# when no such call was reached (the fold then has no entry for T at all).
+proc hir::range::Contribution {outcomes readers dormant t selfCalls} {
+    set reached 0
+    set contribution {}
+    foreach caller $readers {
+        if {(!$selfCalls && $caller eq $t) || [dict exists $dormant $caller]} {
+            continue
+        }
+        foreach pair [dict get $outcomes $caller calls] {
+            lassign $pair target argRanges
+            if {$target ne $t} {
+                continue
+            }
+            if {!$reached} {
+                set reached 1
+                set contribution [lrepeat [llength $argRanges] never]
+            }
+            set next {}
+            foreach c $contribution r $argRanges {
+                lappend next [join $c $r]
+            }
+            set contribution $next
+        }
+    }
+    return [list $reached $contribution]
+}
+
+# BindingId -> Range: the join, per captured binding, of the capture Ranges
+# of every creation of CHILDBLOCK in the current OUTCOMES of CREATORS (a
+# dict keyed by InstanceId; POSITION orders them as ids does) -- the order a
+# round's full fold over every instance's creation sites joins them in.
+proc hir::range::CaptureFacts {outcomes creators position childBlock} {
+    set facts {}
+    foreach creator [InOrder $position $creators] {
+        foreach pair [dict get $outcomes $creator creates] {
+            lassign $pair created capRanges
+            if {$created ne $childBlock} {
+                continue
+            }
+            dict for {b r} $capRanges {
+                set prior [expr {[dict exists $facts $b] ? [dict get $facts $b] : "never"}]
+                dict set facts $b [join $prior $r]
+            }
+        }
+    }
+    return $facts
+}
+
+# Instance ID was re-walked: its outcome went from PREVIOUS ("" if none) to
+# OUTCOME. Updates CREATORSVAR (child block -> {InstanceId 1 ...}, the
+# instances whose current outcome creates it) and adds every child block
+# either outcome creates to RECAPTUREVAR, the blocks whose capture facts
+# must be refolded.
+proc hir::range::NoteCreates {creatorsVar recaptureVar id previous outcome} {
+    upvar 1 $creatorsVar creatorsOf $recaptureVar recapture
+    foreach pair [expr {$previous eq "" ? {} : [dict get $previous creates]}] {
+        set childBlock [lindex $pair 0]
+        dict set recapture $childBlock 1
+        dict unset creatorsOf $childBlock $id
+    }
+    foreach pair [dict get $outcome creates] {
+        set childBlock [lindex $pair 0]
+        dict set recapture $childBlock 1
+        dict set creatorsOf $childBlock $id 1
+    }
+}
+
 # One bounded descending pass over the used instances (M9's post-widen
 # narrowing, and Fixpoint's result narrowing): starting from the sound facts
 # NARROWED (InstanceId -> entry Ranges), CAPTURES (child block ExprId ->
@@ -2410,73 +2490,89 @@ proc hir::range::ResultsRead {results callees} {
 #
 # CTX holds Fixpoint's per-instance tables (ids blockOf paramsOf viewOf
 # instanceCallsOf monotoneOf lockedOf open dormant captureOpt pinned
-# calleesOf). Returns {CONVERGED NARROWED CAPTURES RESULTS ROUNDS OUTCOMES}:
-# CONVERGED is 1 iff a round changed nothing within ROUNDBUDGET rounds,
-# ROUNDS the rounds run, OUTCOMES the last round's AnalyzeInstance outcomes
-# (computed under the returned facts exactly when CONVERGED). With
-# NARROWRESULTS 0 this is exactly M9's narrowing loop.
+# calleesOf readersOf instancesOf position). Returns {CONVERGED NARROWED
+# CAPTURES RESULTS ROUNDS OUTCOMES}: CONVERGED is 1 iff a round changed
+# nothing within ROUNDBUDGET rounds, ROUNDS the rounds run, OUTCOMES the
+# last round's AnalyzeInstance outcomes (computed under the returned facts
+# exactly when CONVERGED). With NARROWRESULTS 0 this is exactly M9's
+# narrowing loop.
 proc hir::range::NarrowRounds {ctx narrowed captures results narrowResults roundBudget} {
     set ids [dict get $ctx ids]
     set open [dict get $ctx open]
     set dormant [dict get $ctx dormant]
     set captureOpt [dict get $ctx captureOpt]
     set pinned [dict get $ctx pinned]
+    set calleesOf [dict get $ctx calleesOf]
+    set readersOf [dict get $ctx readersOf]
+    set instancesOf [dict get $ctx instancesOf]
+    set position [dict get $ctx position]
     set converged 0
     set rounds 0
-    set freshOutcomes [dict create]
-    # InstanceId -> {KEY OUTCOME}: Fixpoint's SETTLEMEMO, for the single
-    # AnalyzeInstance a round makes here (same argument: a round whose
-    # inputs for ID equal the last walk's reuses its outcome).
+    # Incremental rounds, exactly as Fixpoint's ascending ones (see there):
+    # WALK holds the instances whose inputs changed last round (each still
+    # checked against MEMO, InstanceId -> {KEY OUTCOME}, its last walk);
+    # REFOLD, RENARROW and SUMMARIZE the targets, child blocks and instances
+    # whose entry fold, capture fold and summary narrowing must run again
+    # -- here every one of the three folds narrows its current value, so
+    # each runs again whenever its last run changed that value. OUTCOMES
+    # holds every instance's latest outcome: the last round's outcomes.
     set memo [dict create]
+    set outcomes [dict create]
+    set walk $position
+    set refold [dict create]
+    set renarrow [dict create]
+    set summarize [dict create]
+    set contributionOf [dict create]
+    set creatorsOf [dict create]
     for {set round 1} {$round <= $roundBudget} {incr round} {
         set rounds $round
         set changed 0
-        set contributions [dict create]
-        set roundCaptures [dict create]
-        set freshOutcomes [dict create]
-        foreach id $ids {
+        set nextWalk [dict create]
+        set nextRefold [dict create]
+        set nextRenarrow [dict create]
+        set nextSummarize [dict create]
+        set recontribute [dict create]
+        foreach id [InOrder $position $walk] {
             set block [dict get $ctx blockOf $id]
             set captureSeed [expr {$captureOpt && [dict exists $captures $block] ? [dict get $captures $block] : {}}]
-            set key [list [dict get $narrowed $id] $captureSeed [ResultsRead $results [dict get $ctx calleesOf $id]]]
+            set key [list [dict get $narrowed $id] $captureSeed [ResultsRead $results [dict get $calleesOf $id]]]
             if {[dict exists $memo $id] && [lindex [dict get $memo $id] 0] eq $key} {
-                set outcome [lindex [dict get $memo $id] 1]
-            } else {
-                set outcome [AnalyzeInstance [dict get $ctx viewOf $id] $id [dict get $ctx instanceCallsOf $id] \
-                    $block [dict get $ctx paramsOf $id] [dict get $narrowed $id] \
-                    [dict get $ctx monotoneOf $id] $results $captureSeed]
-                dict set memo $id [list $key $outcome]
+                continue
             }
-            dict set freshOutcomes $id $outcome
-            set evidence [expr {![dict exists $dormant $id]}]
-            foreach pair [expr {$evidence ? [dict get $outcome calls] : {}}] {
-                lassign $pair target argRanges
-                if {[dict exists $open $target]} {
-                    continue
+            set outcome [AnalyzeInstance [dict get $ctx viewOf $id] $id [dict get $ctx instanceCallsOf $id] \
+                $block [dict get $ctx paramsOf $id] [dict get $narrowed $id] \
+                [dict get $ctx monotoneOf $id] $results $captureSeed]
+            dict set memo $id [list $key $outcome]
+            set previous [expr {[dict exists $outcomes $id] ? [dict get $outcomes $id] : {}}]
+            dict set outcomes $id $outcome
+            dict set summarize $id 1
+            if {![dict exists $dormant $id]} {
+                foreach t [dict get $calleesOf $id] {
+                    if {![dict exists $open $t]} {
+                        dict set recontribute $t 1
+                    }
                 }
-                set current [expr {[dict exists $contributions $target]
-                    ? [dict get $contributions $target] : [lrepeat [llength $argRanges] never]}]
-                set next {}
-                foreach c $current r $argRanges {
-                    lappend next [join $c $r]
-                }
-                dict set contributions $target $next
-            }
-            foreach pair [expr {$evidence ? [dict get $outcome creates] : {}}] {
-                lassign $pair childBlock capRanges
-                set current [expr {[dict exists $roundCaptures $childBlock] ? [dict get $roundCaptures $childBlock] : {}}]
-                dict for {b r} $capRanges {
-                    set prior [expr {[dict exists $current $b] ? [dict get $current $b] : "never"}]
-                    dict set current $b [join $prior $r]
-                }
-                dict set roundCaptures $childBlock $current
+                NoteCreates creatorsOf renarrow $id $previous $outcome
             }
         }
-        dict for {target contribution} $contributions {
+        dict for {target _} $recontribute {
+            lassign [Contribution $outcomes [dict get $readersOf $target] $dormant $target 1] reached contribution
+            if {$reached} {
+                dict set contributionOf $target $contribution
+            } else {
+                dict unset contributionOf $target
+            }
+            dict set refold $target 1
+        }
+        dict for {target _} $refold {
+            if {![dict exists $contributionOf $target]} {
+                continue
+            }
             set locked [dict get $ctx lockedOf $target]
             set current [dict get $narrowed $target]
             set next {}
             set i 0
-            foreach o $current c $contribution {
+            foreach o $current c [dict get $contributionOf $target] {
                 if {[dict exists $locked $i]} {
                     lappend next $o
                 } else {
@@ -2486,31 +2582,44 @@ proc hir::range::NarrowRounds {ctx narrowed captures results narrowResults round
             }
             if {$next ne $current} {
                 set changed 1
+                dict set nextRefold $target 1
+                dict set nextWalk $target 1
             }
             dict set narrowed $target $next
         }
-        dict for {childBlock capRanges} $roundCaptures {
+        dict for {childBlock _} $renarrow {
+            if {![dict size [dict get $creatorsOf $childBlock]]} {
+                continue
+            }
             set current [expr {[dict exists $captures $childBlock] ? [dict get $captures $childBlock] : {}}]
             set next $current
-            dict for {b r} $capRanges {
+            dict for {b r} [CaptureFacts $outcomes [dict get $creatorsOf $childBlock] $position $childBlock] {
                 set old [expr {[dict exists $current $b] ? [dict get $current $b] : [unknown]}]
                 dict set next $b [RangeNarrow $old $r]
             }
             if {$next ne $current} {
                 set changed 1
+                dict set nextRenarrow $childBlock 1
+                foreach i [expr {[dict exists $instancesOf $childBlock] ? [dict get $instancesOf $childBlock] : {}}] {
+                    dict set nextWalk $i 1
+                }
             }
             dict set captures $childBlock $next
         }
         if {$narrowResults} {
-            foreach id $ids {
+            foreach id [InOrder $position $summarize] {
                 if {[dict exists $pinned $id] || ![dict exists $results $id]} {
                     continue
                 }
                 set current [dict get $results $id]
-                set next [RangeNarrow $current [dict get $freshOutcomes $id result]]
+                set next [RangeNarrow $current [dict get $outcomes $id result]]
                 if {$next ne $current} {
                     dict set results $id $next
                     set changed 1
+                    dict set nextSummarize $id 1
+                    foreach reader [dict get $readersOf $id] {
+                        dict set nextWalk $reader 1
+                    }
                 }
             }
         }
@@ -2518,8 +2627,12 @@ proc hir::range::NarrowRounds {ctx narrowed captures results narrowResults round
             set converged 1
             break
         }
+        set walk $nextWalk
+        set refold $nextRefold
+        set renarrow $nextRenarrow
+        set summarize $nextSummarize
     }
-    return [list $converged $narrowed $captures $results $rounds $freshOutcomes]
+    return [list $converged $narrowed $captures $results $rounds $outcomes]
 }
 
 # ---------------------------------------------------------------------------
@@ -2696,36 +2809,77 @@ proc hir::range::Fixpoint {hir spec callFactsOpt narrowOpt captureOpt pinned} {
     foreach id $ids {
         dict set selfRecursiveOf $id [expr {$id in [dict values [dict get $instanceCallsOf $id]]}]
     }
-    # The instances whose result summaries ID's walk reads (ResultsRead).
+    # The instances whose result summaries ID's walk reads (ResultsRead);
+    # inverted, READERSOF: the instances that read T's summary, in ids
+    # order -- every instance that can call T, since a walk's exact calls
+    # are exactly its instanceCalls targets. INSTANCESOF: a block's
+    # instances. POSITION: an instance's index in ids.
     set calleesOf [dict create]
+    set readersOf [dict create]
+    set instancesOf [dict create]
+    set position [dict create]
     foreach id $ids {
-        dict set calleesOf $id [lsort -unique [dict values [dict get $instanceCallsOf $id]]]
+        dict set readersOf $id {}
+        dict set position $id [dict size $position]
     }
-    # InstanceId -> {KEY {OUTCOME SETTLED}}: the inputs of ID's last
-    # SettleInstance and what it returned. SettleInstance is a pure function
-    # of its inputs, and within this proc only three of them change between
-    # rounds -- the entry Ranges, the capture seed and the callee summaries
-    # (of which a walk reads only its own targets' entries: ResultsRead) --
-    # so a round whose KEY for ID equals the last one reuses the answer
-    # instead of re-walking ID. Every round still folds every instance's
-    # outcome, so the rounds, and every fact they produce, are exactly those
-    # of re-settling every instance every round; only the walks that would
-    # repeat an earlier one are skipped. Without this, a call chain of depth
-    # N (N rounds for a fact to travel its length) re-walked all N instances
-    # every round: quadratic in program size.
-    set settleMemo [dict create]
+    foreach id $ids {
+        set callees [lsort -unique [dict values [dict get $instanceCallsOf $id]]]
+        dict set calleesOf $id $callees
+        foreach t $callees {
+            dict lappend readersOf $t $id
+        }
+        dict lappend instancesOf [dict get $blockOf $id] $id
+    }
 
     # A bound on rounds that scales with the instance count (a chain of N
     # instances can need up to N rounds for its first real value to
     # propagate end to end) plus a fixed cushion for the self-call/widen
     # settling every instance also does each round -- finite, deterministic,
     # never a per-interval or per-benchmark constant (spec #12, #24, #37).
+    #
+    # Each round is the Jacobi step described above: every instance settled
+    # from the facts the previous round left, then every fold. A chain of N
+    # instances needs N rounds, so redoing all of that every round would be
+    # quadratic in program size; instead a round redoes only the steps
+    # whose inputs changed, and skips the rest, each of which would
+    # recompute the value it already has:
+    #
+    #   * SETTLE holds the instances whose entry Ranges, capture seed or
+    #     callee summaries (the only inputs of SettleInstance that change
+    #     here; a walk reads only its own targets' summaries: ResultsRead)
+    #     changed last round. Each is still checked against SETTLEMEMO
+    #     (InstanceId -> {KEY {OUTCOME SETTLED}}, its last walk), so a
+    #     settle whose inputs came back to those of the last walk reuses it.
+    #   * A target's contribution (the join over its callers' reached calls)
+    #     and a child block's capture facts (the join over its creation
+    #     sites) are refolded only when a caller or creator was re-walked,
+    #     in the same order as a full fold (Contribution, CaptureFacts).
+    #   * REFOLD and SUMMARIZE hold the targets whose entry fold, and the
+    #     instances whose summary update, must run again: their inputs
+    #     changed, or their last run changed their value. A step that ran
+    #     on the same inputs and left its value unchanged would leave it
+    #     unchanged again.
+    #
+    # So the rounds -- how many there are, and every fact each one leaves
+    # -- are exactly those of redoing everything every round.
     set roundBudget [expr {4 * [llength $ids] + 16}]
+    set settleMemo [dict create]
+    set settle $position
+    set refold [dict create]
+    set summarize [dict create]
+    # CONTRIBUTIONOF: target -> the current contribution, absent while no
+    # reached call feeds it. CREATORSOF: child block -> the non-dormant
+    # instances whose current outcome creates it.
+    set contributionOf [dict create]
+    set creatorsOf [dict create]
     for {set round 1} {$round <= $roundBudget} {incr round} {
         set changed 0
-        set contributions [dict create]
-        set roundCaptures [dict create]
-        foreach id $ids {
+        set nextSettle [dict create]
+        set nextRefold [dict create]
+        set nextSummarize [dict create]
+        set recontribute [dict create]
+        set recapture [dict create]
+        foreach id [InOrder $position $settle] {
             set before [dict get $assumed $id]
             set block [dict get $blockOf $id]
             set captureSeed [expr {$captureOpt && [dict exists $captureSeeds $block] ? [dict get $captureSeeds $block] : {}}]
@@ -2738,17 +2892,17 @@ proc hir::range::Fixpoint {hir spec callFactsOpt narrowOpt captureOpt pinned} {
                     [dict get $lockedOf $id] [dict get $monotoneOf $id] $calleeResults $captureSeed]
                 dict set settleMemo $id [list $key $answer]
                 lassign $answer outcome settled
-            }
-            dict set outcomes $id $outcome
-            set evidence [expr {![dict exists $dormant $id]}]
-            foreach pair [expr {$evidence ? [dict get $outcome creates] : {}}] {
-                lassign $pair childBlock capRanges
-                set current [expr {[dict exists $roundCaptures $childBlock] ? [dict get $roundCaptures $childBlock] : {}}]
-                dict for {b r} $capRanges {
-                    set prior [expr {[dict exists $current $b] ? [dict get $current $b] : "never"}]
-                    dict set current $b [join $prior $r]
+                set previous [expr {[dict exists $outcomes $id] ? [dict get $outcomes $id] : {}}]
+                dict set outcomes $id $outcome
+                dict set summarize $id 1
+                if {![dict exists $dormant $id]} {
+                    foreach t [dict get $calleesOf $id] {
+                        if {$t ne $id && ![dict exists $open $t]} {
+                            dict set recontribute $t 1
+                        }
+                    }
+                    NoteCreates creatorsOf recapture $id $previous $outcome
                 }
-                dict set roundCaptures $childBlock $current
             }
             if {$settled ne $before} {
                 set locked [dict get $lockedOf $id]
@@ -2770,22 +2924,24 @@ proc hir::range::Fixpoint {hir spec callFactsOpt narrowOpt captureOpt pinned} {
                 dict set poisonedOf $id $poisoned
                 dict set assumed $id $settled
                 set changed 1
-            }
-            foreach pair [expr {$evidence ? [dict get $outcome calls] : {}}] {
-                lassign $pair target argRanges
-                if {$target eq $id || [dict exists $open $target]} {
-                    continue
-                }
-                set current [expr {[dict exists $contributions $target]
-                    ? [dict get $contributions $target] : [lrepeat [llength $argRanges] never]}]
-                set next {}
-                foreach c $current r $argRanges {
-                    lappend next [join $c $r]
-                }
-                dict set contributions $target $next
+                dict set refold $id 1
+                dict set nextSettle $id 1
             }
         }
-        dict for {target contribution} $contributions {
+        dict for {target _} $recontribute {
+            lassign [Contribution $outcomes [dict get $readersOf $target] $dormant $target 0] reached contribution
+            if {$reached} {
+                dict set contributionOf $target $contribution
+            } else {
+                dict unset contributionOf $target
+            }
+            dict set refold $target 1
+        }
+        dict for {target _} $refold {
+            if {![dict exists $contributionOf $target]} {
+                continue
+            }
+            set contribution [dict get $contributionOf $target]
             set locked [dict get $lockedOf $target]
             set poisoned [dict get $poisonedOf $target]
             set selfRecursive [dict get $selfRecursiveOf $target]
@@ -2835,6 +2991,8 @@ proc hir::range::Fixpoint {hir spec callFactsOpt narrowOpt captureOpt pinned} {
             }
             if {$next ne $current} {
                 set changed 1
+                dict set nextRefold $target 1
+                dict set nextSettle $target 1
             }
             dict set assumed $target $next
         }
@@ -2857,11 +3015,17 @@ proc hir::range::Fixpoint {hir spec callFactsOpt narrowOpt captureOpt pinned} {
         # result (confirmed directly: a two-branch-guarded capture whose
         # true fact is exactly its external caller's point values was stuck
         # at the guard's own bare lower bound instead).
-        dict for {childBlock capRanges} $roundCaptures {
+        dict for {childBlock _} $recapture {
+            if {![dict size [dict get $creatorsOf $childBlock]]} {
+                continue
+            }
             set current [expr {[dict exists $captureSeeds $childBlock] ? [dict get $captureSeeds $childBlock] : {}}]
-            set next $capRanges
+            set next [CaptureFacts $outcomes [dict get $creatorsOf $childBlock] $position $childBlock]
             if {$next ne $current} {
                 set changed 1
+                foreach i [expr {[dict exists $instancesOf $childBlock] ? [dict get $instancesOf $childBlock] : {}}] {
+                    dict set nextSettle $i 1
+                }
             }
             dict set captureSeeds $childBlock $next
         }
@@ -2870,7 +3034,7 @@ proc hir::range::Fixpoint {hir spec callFactsOpt narrowOpt captureOpt pinned} {
         # Once a concrete summary appears it can only widen. If later caller
         # evidence destroys it, unknown is permanent for this analysis.
         if {$callFactsOpt} {
-            foreach id $ids {
+            foreach id [InOrder $position $summarize] {
                 if {[dict exists $pinned $id]} continue
                 set inferred [dict get $outcomes $id result]
                 if {![dict exists $calleeResults $id]} {
@@ -2891,6 +3055,10 @@ proc hir::range::Fixpoint {hir spec callFactsOpt narrowOpt captureOpt pinned} {
                 if {![dict exists $calleeResults $id] || [dict get $calleeResults $id] ne $next} {
                     dict set calleeResults $id $next
                     set changed 1
+                    dict set nextSummarize $id 1
+                    foreach reader [dict get $readersOf $id] {
+                        dict set nextSettle $reader 1
+                    }
                 }
             }
         }
@@ -2900,6 +3068,9 @@ proc hir::range::Fixpoint {hir spec callFactsOpt narrowOpt captureOpt pinned} {
         if {$round == $roundBudget} {
             throw {HIR RANGE LIMIT} "hir::range: closed-call facts did not converge"
         }
+        set settle $nextSettle
+        set refold $nextRefold
+        set summarize $nextSummarize
     }
 
     # ---------------------------------------------------------------------
@@ -2943,7 +3114,8 @@ proc hir::range::Fixpoint {hir spec callFactsOpt narrowOpt captureOpt pinned} {
     # round budget expired.
     set narrowCtx [dict create ids $ids blockOf $blockOf paramsOf $paramsOf viewOf $viewOf \
         instanceCallsOf $instanceCallsOf monotoneOf $monotoneOf lockedOf $lockedOf open $open \
-        dormant $dormant captureOpt $captureOpt pinned $pinned calleesOf $calleesOf]
+        dormant $dormant captureOpt $captureOpt pinned $pinned calleesOf $calleesOf \
+        readersOf $readersOf instancesOf $instancesOf position $position]
     set narrowed $assumed
     set narrowedCaptures $captureSeeds
     if {$narrowOpt} {
