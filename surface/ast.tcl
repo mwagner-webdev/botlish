@@ -73,7 +73,11 @@
 #              none; they follow the ordinary params -- FLAGS.md),
 #              paramsSpan (from "(" to the end of the body: the function
 #              literal), errors ({NAME SPAN} pairs, from the function's own
-#              "errors E1, E2" clause, empty if none), body (suite)
+#              "errors E1, E2" clause, empty if none), body (suite),
+#              nomethod (1 for `nomethod fn NAME(...)`, else 0), nomethodSpan
+#              (the modifier word's span, or "") -- a property of the one
+#              declaration: its author's declaration that it is never the
+#              callee of method syntax (WARNINGS-METHOD-ELIGIBLE.md)
 #   if         condition, then (suite), else (suite or ""). An "elif" clause
 #              is not a node kind of its own (ELIF.md): the parser makes it an
 #              ordinary `if` node (extra field `elif 1`) standing alone in a
@@ -709,7 +713,8 @@ proc surface::ast::Statement {node indent show linesVar} {
             if {[dict get $node flags] ne {}} {
                 lappend params flags {*}[lmap flag [dict get $node flags] {string cat : [dict get $flag name]}]
             }
-            set line "${pad}fn [dict get $node name] ([join $params { }])"
+            set modifier [expr {[dict exists $node nomethod] && [dict get $node nomethod] ? "nomethod " : ""}]
+            set line "${pad}${modifier}fn [dict get $node name] ([join $params { }])"
             if {[dict get $node errors] ne {}} {
                 append line " errors [join [lmap pair [dict get $node errors] {lindex $pair 0}] {, }]"
             }

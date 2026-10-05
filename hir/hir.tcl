@@ -97,7 +97,12 @@
 #   block     bodyScope, params (BindingIds), body (ExprIds),
 #             captures (BindingIds), staticRefs (BindingIds: module-static
 #             references, disjoint from captures -- hir::isModuleBinding,
-#             MODULE-STATIC-RETAINED-VALUES.md), resultType (TypeId)
+#             MODULE-STATIC-RETAINED-VALUES.md), resultType (TypeId),
+#             nomethod (1, only on a `nomethod fn`: its author's declaration
+#             that it is never the callee of method syntax; printed by
+#             hir::format as `nomethod` and read back by hir::parse; the
+#             binding of the function carries `nomethod 1` too, which method
+#             resolution reads -- WARNINGS-METHOD-ELIGIBLE.md)
 #   call      callee, args (ExprIds), target ("" | {native SymbolId} |
 #             {block ExprId}), known ("" | 1 | 0: result decided statically).
 #             A call written `receiver.name(args)` with a function `name`
@@ -108,7 +113,18 @@
 #             ambiguity check and diagnostics only (no analysis, lowering or
 #             backend reads it).
 #             Without such a function the written callee is a `project`
-#             marked `methodCallee 1` (diagnostic wording only)
+#             marked `methodCallee 1` (diagnostic wording only). A call the
+#             source frontend built also carries `written` {form F ns NS}: how
+#             it was spelled (F: function `f(x)`, method `x.f()`, list `[x]`,
+#             operator `x + y`, which no later stage can recover) and the
+#             namespace of the code it is in (NS: "" for the entry program),
+#             recorded in every compilation mode for the METHOD-ELIGIBLE
+#             warning (hir/warnings.tcl, WARNINGS-METHOD-ELIGIBLE.md) and read
+#             by nothing else: no analysis, lowering, backend or hir::format
+#             sees it. Calls from core IR carry no `written`.
+#             A method-style call whose only visible functions of that name are
+#             declared `nomethod` stays a call of the written field value and
+#             is the resolution diagnostic NOMETHOD-CALL
 #   if        condition, thenScope, thenBody, elseScope, elseBody,
 #             refinements (dict OUTCOME -> BindingId FACT pairs)
 #   loop      bodyScope, body

@@ -30,7 +30,10 @@
 #   Name {x: a, y: b}     struct Name (x a) (y b)    the same payload applied
 #                         to the declared struct Name
 #   e.name                project e name             a static field projection
-#   f(a, b)               call f a b
+#   f(a, b)               call f a b            (every call here is marked
+#                         `written FORM`: function for this one, method,
+#                         list and operator for the rules below -- how a call
+#                         was spelled, for diagnostics only)
 #   e.name(a, b)          call (project e name) a b, marked `method`: the
 #                         method-call sugar (METHOD-SUGAR.md). Written as the
 #                         field-value call it has always been (callee
@@ -54,6 +57,9 @@
 #                         is its result (Sequence splices the statements in; a
 #                         nested pattern binds a further temporary)
 #   fn f(a, b): body      bind f (block (a b) body...)
+#   nomethod fn f(a, b):  the same block marked `nomethod 1`: its author
+#                         declares that it is never the callee of method
+#                         syntax (WARNINGS-METHOD-ELIGIBLE.md)
 #   fn f(a, flags :x, :y): body   the same block carrying `flags` ({x ORIGIN}
 #                         {y ORIGIN}) beside its ordinary params; flags are a
 #                         separate parameter category (FLAGS.md), made
@@ -379,13 +385,13 @@ proc surface::lower::Node {node} {
             return $ref
         }
         list {
-            return [hir::syntax::callNode $origin \
+            return [hir::syntax::withWritten [hir::syntax::callNode $origin \
                 [hir::syntax::rootRef [OriginOf $node list] list] \
-                {*}[Sequence [dict get $node items]]]
+                {*}[Sequence [dict get $node items]]] list]
         }
         call {
-            return [hir::syntax::withFlags [hir::syntax::callNode $origin [Node [dict get $node callee]] \
-                {*}[Sequence [dict get $node args]]] [Flags $node]]
+            return [hir::syntax::withFlags [hir::syntax::withWritten [hir::syntax::callNode $origin \
+                [Node [dict get $node callee]] {*}[Sequence [dict get $node args]]] function] [Flags $node]]
         }
         methodcall {
             return [hir::syntax::withFlags [hir::syntax::methodCallNode $origin [Node [dict get $node receiver]] \
@@ -408,18 +414,18 @@ proc surface::lower::Node {node} {
             set op [dict get $node op]
             set opOrigin [Origin [dict get $node opSpan] [dict get $node id]/op]
             if {$op eq "!="} {
-                set equal [hir::syntax::callNode $origin \
+                set equal [hir::syntax::withWritten [hir::syntax::callNode $origin \
                     [hir::syntax::rootRef $opOrigin ==] \
-                    [Node [dict get $node left]] [Node [dict get $node right]]]
+                    [Node [dict get $node left]] [Node [dict get $node right]]] operator]
                 return [Branch $origin $equal [list [Bool $opOrigin false]] [list [Bool $opOrigin true]]]
             }
-            return [hir::syntax::callNode $origin [hir::syntax::rootRef $opOrigin $op] \
-                [Node [dict get $node left]] [Node [dict get $node right]]]
+            return [hir::syntax::withWritten [hir::syntax::callNode $origin [hir::syntax::rootRef $opOrigin $op] \
+                [Node [dict get $node left]] [Node [dict get $node right]]] operator]
         }
         unary {
             set opOrigin [Origin [dict get $node opSpan] [dict get $node id]/op]
-            return [hir::syntax::callNode $origin [hir::syntax::rootRef $opOrigin -] \
-                [hir::syntax::constNode $opOrigin 0] [Node [dict get $node operand]]]
+            return [hir::syntax::withWritten [hir::syntax::callNode $origin [hir::syntax::rootRef $opOrigin -] \
+                [hir::syntax::constNode $opOrigin 0] [Node [dict get $node operand]]] operator]
         }
         not {
             set opOrigin [Origin [dict get $node opSpan] [dict get $node id]/op]
@@ -457,6 +463,9 @@ proc surface::lower::Node {node} {
                 [Origin [dict get $node paramsSpan] [dict get $node id]/block] \
                 $params [Sequence [dict get $node body body]] [dict get $node resultType] $paramTypes $errors \
                 [Flags $node]]
+            if {[dict exists $node nomethod] && [dict get $node nomethod]} {
+                set block [hir::syntax::withNoMethod $block]
+            }
             return [hir::syntax::bindNode $origin [dict get $node name] $block]
         }
         if {

@@ -49,6 +49,29 @@ proc codes {source} {
     return [lmap w [warningsOf $source] {dict get $w code}]
 }
 
+# The SAME-RETURN-VALUE warnings only, as `shown` / `codes` give them. A
+# program that imports lib/mutable_array.bot also compiles that module, whose
+# own source carries a METHOD-ELIGIBLE finding (WARNINGS-METHOD-ELIGIBLE.md:
+# library warnings are shown for any program that loads the module); the
+# tests that import it are about SAME-RETURN-VALUE, not about that finding.
+proc sameReturnShown {source} {
+    set hir [compileWith $source]
+    return [lmap w [hir::warnings::of $hir] {
+        if {[dict get $w code] ne "SAME-RETURN-VALUE"} continue
+        set locations [lmap o [list [dict get $w primary] {*}[dict get $w secondary]] {
+            regsub {^t\.bot:} [hir::originLocation $hir $o] {}
+        }]
+        string cat [dict get $w message] " @ " [join $locations { }]
+    }]
+}
+
+proc sameReturnCodes {source} {
+    return [lmap w [warningsOf $source] {
+        if {[dict get $w code] ne "SAME-RETURN-VALUE"} continue
+        dict get $w code
+    }]
+}
+
 # The compile-time rejection of SOURCE under MODE: {errorcode message}, or
 # "compiled".
 proc rejection {source mode} {
@@ -271,7 +294,7 @@ test warn-repeated-arithmetic-on-unknown {x + 1 returned twice is not an exact v
 } -result {}
 
 test warn-separate-mutable-construction {two separately allocated mutable values are two values} -body {
-    codes {import mutable_array
+    sameReturnCodes {import mutable_array
 fn f(x):
     if x:
         return mutable_array::allocate(1)
@@ -281,7 +304,7 @@ fn f(x):
 } -result {}
 
 test warn-same-mutable-binding {the exact same mutable binding returned twice IS one value identity} -body {
-    shown {import mutable_array
+    sameReturnShown {import mutable_array
 fn f(x):
     m = mutable_array::allocate(1)
     if x:
@@ -292,7 +315,7 @@ fn f(x):
 } -result {{the value of `m` is returned from 2 distinct exits @ 5:9 7:9}}
 
 test warn-alias-of-mutable-binding {an alias of a mutable binding is the same mutable value} -body {
-    shown {import mutable_array
+    sameReturnShown {import mutable_array
 fn f(x):
     m = mutable_array::allocate(1)
     n = m
@@ -762,7 +785,7 @@ test warn-off-runs-no-warning-pass {warnings off does not execute the warning pa
     catch {compileWith $::policySource error}
     set afterError [hir::warnings::stats]
     list $afterOff $afterDefault $afterError
-} -result {{} {SAME-RETURN-VALUE 1} {SAME-RETURN-VALUE 2}}
+} -result {{} {SAME-RETURN-VALUE 1 METHOD-ELIGIBLE 1} {SAME-RETURN-VALUE 2 METHOD-ELIGIBLE 2}}
 
 test warn-off-runs-no-warning-pass-via-trace {an execution trace on the pass proves it is not invoked when off} -body {
     set ::passCalls 0

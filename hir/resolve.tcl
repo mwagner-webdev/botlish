@@ -348,6 +348,25 @@ proc hir::resolve::LexicalTarget {hirVar s name} {
     return ""
 }
 
+# 1 if the function candidate identity IDENTITY (CandidateIdentity's spelling)
+# stands for is declared `nomethod`: a native registered with -nomethod 1, or
+# a function binding whose declaration carries the modifier. Aliases are
+# already followed by the identity, so a name bound to a nomethod function is
+# that function.
+proc hir::resolve::NoMethodIdentity {hirVar identity} {
+    upvar 1 $hirVar hir
+    switch -glob -- $identity {
+        native:* {
+            set native [string range $identity 7 end]
+            return [expr {[core::native::exists $native] && [dict get [core::native::metadata $native] nomethod]}]
+        }
+        binding:* {
+            return [dict exists $hir bindings [string range $identity 8 end] nomethod]
+        }
+    }
+    return 0
+}
+
 # The functions the method-style call `receiver.NAME(args)` (ARGCOUNT: the
 # receiver plus the written arguments) may denote from scope S of CTX: the
 # distinct functions among
@@ -366,8 +385,19 @@ proc hir::resolve::LexicalTarget {hirVar s name} {
 # candidate that is statically a function of a different arity is dropped,
 # unless that would leave none (the ordinary call then keeps its arity
 # error). Empty: no function of that name is visible.
-proc hir::resolve::MethodCandidates {hirVar s name ctx argCount} {
+#
+# A function declared `nomethod` (WARNINGS-METHOD-ELIGIBLE.md: its author
+# declares that it is never the callee of method syntax) is not a candidate at
+# all, before the arity rule: sugar neither resolves to it nor competes with
+# it. HIDDENVAR, if given, names a caller variable that receives the displays
+# of the nomethod functions that were left out, so the caller can tell "no
+# function of that name is visible" from "only nomethod functions are".
+proc hir::resolve::MethodCandidates {hirVar s name ctx argCount {hiddenVar ""}} {
     upvar 1 $hirVar hir
+    if {$hiddenVar ne ""} {
+        upvar 1 $hiddenVar hidden
+    }
+    set hidden {}
     set found [dict create]
     set arities [dict create]
     foreach ns [hir::imports::namespaces [CtxNamespace $ctx]] {
@@ -407,7 +437,14 @@ proc hir::resolve::MethodCandidates {hirVar s name ctx argCount} {
             dict set arities $identity $arity
         }
     }
-    set all [lsort -command {apply {{a b} {string compare [dict get $a display] [dict get $b display]}}} [dict values $found]]
+    set all {}
+    foreach c [lsort -command {apply {{a b} {string compare [dict get $a display] [dict get $b display]}}} [dict values $found]] {
+        if {[NoMethodIdentity hir [dict get $c identity]]} {
+            lappend hidden [dict get $c display]
+        } else {
+            lappend all $c
+        }
+    }
     set fitting [lmap c $all {
         set arity [dict get $arities [dict get $c identity]]
         if {$arity ne "" && $arity ne "*" && $arity != $argCount} continue
@@ -581,6 +618,11 @@ proc hir::resolve::Expr {hirVar node ctx} {
                     # The function's flag interface (FLAGS.md) is known
                     # before its body is resolved, so the body can call it.
                     hir::flags::DeclareFunction hir [dict get $hir exprs $e binding] [dict get $node value]
+                    if {[dict exists $node value nomethod]} {
+                        # The declaration's modifier, known before its body
+                        # (which may call itself) is resolved.
+                        dict set hir bindings [dict get $hir exprs $e binding] nomethod 1
+                    }
                 }
                 SetField hir $e value [Expr hir [dict get $node value] $ctx]
             } else {
@@ -593,6 +635,9 @@ proc hir::resolve::Expr {hirVar node ctx} {
         }
         block {
             set bodyScope [NewScope hir block $scope $e $e $origin]
+            if {[dict exists $node nomethod]} {
+                SetField hir $e nomethod 1
+            }
             set params {}
             set paramTypes [expr {[dict exists $node paramTypes] ? [dict get $node paramTypes]
                 : [lrepeat [llength [dict get $node params]] {}]}]
@@ -681,9 +726,17 @@ proc hir::resolve::Expr {hirVar node ctx} {
         call {
             set written [dict get $node callee]
             set candidates {}
+            set hidden {}
             if {[dict exists $node method]} {
                 set candidates [MethodCandidates hir $scope [dict get $written name] $ctx \
-                    [expr {[llength [dict get $node args]] + 1}]]
+                    [expr {[llength [dict get $node args]] + 1}] hidden]
+            }
+            if {[dict exists $node written]} {
+                # How the call was spelled, and the namespace of the code it
+                # is written in (whose imports the method spelling would
+                # consult): diagnostics' provenance, recorded in every
+                # compilation mode and read by no analysis.
+                SetField hir $e written [dict create form [dict get $node written] ns [CtxNamespace $ctx]]
             }
             if {$candidates ne ""} {
                 # Method-call sugar (METHOD-SUGAR.md): `receiver.name(args)`
@@ -713,7 +766,19 @@ proc hir::resolve::Expr {hirVar node ctx} {
             } else {
                 SetField hir $e callee [Expr hir $written $ctx]
                 SetField hir $e args [Sequence hir [dict get $node args] $ctx]
-                if {[dict exists $node method]} {
+                if {[dict exists $node method] && $hidden ne ""} {
+                    # The only function(s) of that name visible are declared
+                    # nomethod (WARNINGS-METHOD-ELIGIBLE.md): method syntax
+                    # never denotes one. A resolution diagnostic, like an
+                    # unbound name; the call stays the call of a field value
+                    # (never a call of the function), so a -strict 0 program
+                    # that keeps the diagnostic fails at run time as well.
+                    set shown [join [lmap h $hidden {string cat ` $h `}] {, }]
+                    hir::DiagnoseAt hir NOMETHOD-CALL [::format {%s %s declared nomethod and cannot be called with method syntax; call %s as %s(receiver, ...)} \
+                        $shown [expr {[llength $hidden] == 1 ? "is" : "are"}] \
+                        [expr {[llength $hidden] == 1 ? "it" : "one of them"}] [lindex $hidden 0]] \
+                        $e [dict get $written nameOrigin]
+                } elseif {[dict exists $node method]} {
                     # No function `name` is visible: this is the call of a
                     # field value it has always been. Only diagnostics need
                     # to know it was written as a method call.

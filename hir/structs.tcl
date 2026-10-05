@@ -507,23 +507,32 @@ proc hir::structs::AmbiguousMethodCall {hir e} {
     if {$type eq "never" || ![hir::types::IsStructLike $type]} {
         return ""
     }
-    # An opaque struct's fields are not source-visible outside its owner
-    # (OPAQUE-STRUCTS.md): they are not method candidates and cannot make the
-    # call ambiguous, and nothing about them is consulted here. The call
-    # record carries the namespace of the code the call is written in.
-    if {[projectionDenied $type [dict get $node method]]} {
-        return ""
-    }
     set name [dict get $node method name]
-    if {$name ni [hir::types::StructLayout $type]} {
-        return ""
-    }
-    set fieldType [hir::types::StructField $type $name]
-    if {![hir::types::IsCallable $fieldType] && [hir::types::kindOf $fieldType] ni {"" any block native}} {
+    if {![FieldCompetes $type $name [dict get $node method]]} {
         return ""
     }
     return [format {method-style call "%s" is ambiguous: the receiver (type %s) has a field "%s" whose value may be callable, and a function "%s" is also visible here; write (receiver.%s)(...) to call the field, or %s(receiver, ...) to call the function} \
         $name [hir::types::show $type] $name $name $name $name]
+}
+
+# 1 if a receiver of the struct type TYPE (a struct-like type) has a field NAME
+# that could compete with a visible function NAME for `receiver.NAME(args)`:
+# the field exists, is visible to the code the call is in (CONTEXT carries its
+# `ns`; an opaque struct's fields are not source-visible outside its owner,
+# OPAQUE-STRUCTS.md, so they are not method candidates and cannot make the
+# call ambiguous) and its value may be callable (anything not statically some
+# other kind of value). The one rule of the field/function ambiguity above;
+# the METHOD-ELIGIBLE warning (hir/warnings.tcl) asks it of the sugared
+# spelling it would suggest.
+proc hir::structs::FieldCompetes {type name context} {
+    if {[projectionDenied $type $context]} {
+        return 0
+    }
+    if {$name ni [hir::types::StructLayout $type]} {
+        return 0
+    }
+    set fieldType [hir::types::StructField $type $name]
+    return [expr {[hir::types::IsCallable $fieldType] || [hir::types::kindOf $fieldType] in {"" any block native}}]
 }
 
 # The innermost block whose body CODE of expression E is in ("program" at

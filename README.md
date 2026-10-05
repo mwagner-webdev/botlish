@@ -646,7 +646,7 @@ refinement unless its contract explicitly establishes one. So
 | `hir/aot.tcl` | closed-AOT readiness analysis (§19) |
 | `hir/specialize.tcl` | call-site specialization: instances, result fixpoint, views for `hir::aot` (§21) |
 | `hir/exactvalue.tcl` | exact-value facts and value identity (`hir::exact::Of`, `Identity`, `SameValue`) |
-| `hir/warnings.tcl` | compiler warnings: record, static registry, global policy, rendering, error promotion, and `SAME-RETURN-VALUE` (§23) |
+| `hir/warnings.tcl` | compiler warnings: record, static registry, global policy, rendering, error promotion, `SAME-RETURN-VALUE` and `METHOD-ELIGIBLE` (§23) |
 | `hir/syscall.tcl` | the static contract of `linux::abi::syscall`'s register-struct argument (LINUX-X86-64-SYSCALL.md) and of `abi::x86_64::from_bytes`'s `abi::Bytes` argument (ABI-BYTES.md) |
 | `compiler/compiler.tcl` | HIR → Tcl compiler backend |
 | `native/lower.tcl` | HIR → NIR native lowering (§20) |
@@ -1508,6 +1508,29 @@ add10(32)          # 42 (add captures x)
   call whose name is both a visible function and a possibly-callable field of
   the receiver's struct type is rejected as ambiguous
   (`AMBIGUOUS-METHOD-CALL`). See METHOD-SUGAR.md.
+* **`nomethod fn`.** `nomethod fn atan2(y, x):` declares a function that is
+  *never the callee of method syntax*. It is a modifier on the one
+  declaration, accepted wherever `fn` is (top level, modules, nested
+  functions), and a declaration-level fact about the function's interface
+  decided by its author -- the author knows receiver syntax would read badly
+  (`y.atan2(x)`). A `nomethod` function is called functionally exactly like
+  any other: its type, completion, specialization and generated code are
+  identical, and nothing about it is visible outside call-form legality. A
+  method-style call that would resolve to it is the resolution error
+  `NOMETHOD-CALL` (`` `atan2` is declared nomethod and cannot be called with
+  method syntax; call it as atan2(receiver, ...) ``): method syntax skips a
+  `nomethod` function as a candidate, so another visible function of the same
+  name is still found, and only when every visible function of that name is
+  `nomethod` is the call rejected. It follows the class of an unbound name: raised by resolution
+  (before type inference) under `-strict 1`; kept in the HIR under `-strict 0`,
+  where the call stays the call of a field value and fails at run time too.
+  An alias (`g = atan2`) is the same function. The flag is carried by
+  imports (a `nomethod` function of a module behaves identically) and by the
+  builtin registry (`core::native::register -nomethod 1`); no shipped function
+  is marked. `nomethod` is a contextual word (an ordinary name everywhere but
+  before `fn`). It is not a suppression pragma: it changes what call forms are
+  *legal*, not what the compiler *reports* about a call. See
+  WARNINGS-METHOD-ELIGIBLE.md.
 * **Flag parameters.** `fn open(path, flags :append, :cloexec):` declares a
   *flag section* after the ordinary parameters; `open("f", :append)` supplies
   a flag by naming it. A flag is an immutable `Bool` parameter with a fixed
@@ -2794,11 +2817,23 @@ Tcl backends) and `tests/native-coverage.tcl` are unaffected.
 
 ## 23. Compiler warnings
 
-Botlish compiler warnings are **enabled by default**. They preferentially
-report *semantic facts the compiler can prove* rather than enforce source-style
-fashions: a warning says what is true of a legal program and stops. It never
-says what to do about it, and a program that keeps the fact on purpose is
-correct.
+Botlish compiler warnings are **enabled by default**. They report *semantic
+facts the compiler can prove*: a warning says what is true of a legal program
+and stops. It never says what to do about it, and a program that keeps the
+fact on purpose is correct. A warning that cannot cite a compiler proof does
+not belong in a default-on, non-suppressible system.
+
+That bar admits one *preference-shaped* warning, `METHOD-ELIGIBLE` (below), and
+only because it passes the bar rather than because "style warnings are fine
+now": (1) its **fact** is compiler-proven -- the sugared spelling parses and
+resolves to the identical callee, with the parser and the resolver themselves
+as the prover; (2) the **preference** it serves is the language's own declared
+idiom (receiver syntax is Botlish's preferred call form), not a per-warning
+fashion; (3) the **function's author** has first-class control: `nomethod fn`
+withdraws eligibility at the declaration, as part of the interface, which is not
+call-site suppression (there is still no lint-ignore, pragma or per-call
+opt-out); (4) **uncertainty means silence**: wherever the compiler cannot prove
+the sugared form identical, it says nothing.
 
 There is one global policy per compilation, and nothing finer:
 
@@ -2821,8 +2856,10 @@ hir::warnings::of $hir      ;# {code message primary secondary data} records
 `-Wno-foo`, `-Werror=foo`, `-Wall`, warning groups or levels), and no source
 annotation or comment suppresses a warning. This is intentional, not forgotten
 CLI work: every warning is on for everyone, so a warning must be trustworthy
-enough to be, and uncertainty means no warning. Codes (`SAME-RETURN-VALUE`) are
-stable for tests, tooling and documentation, but they are not switches.
+enough to be, and uncertainty means no warning. Codes (`SAME-RETURN-VALUE`,
+`METHOD-ELIGIBLE`) are stable for tests, tooling and documentation, but they are
+not switches. Adding `METHOD-ELIGIBLE` gave `BOTLISH_WARNINGS` and the command
+line nothing: three modes, one option.
 
 `SAME-RETURN-VALUE`: several distinct, reachable exits of one function are
 proven to return the same value.
@@ -2846,3 +2883,39 @@ unproven expression or a separately constructed mutable value is never assumed
 equal, and `unit` is never reported. See WARNINGS-SAME-RETURN.md for the
 semantics, architecture, the corpus audit and known limitations; the tests are
 `tests/warnings.test` and `audit/same-return-value/tools/fuzz.tcl`.
+
+`METHOD-ELIGIBLE`: a reachable call *written* in functional form to a declared
+named function of at least two parameters whose method spelling is proven to
+parse and to resolve to the identical callee.
+
+```
+fn any_hit(xs):
+    return any(xs, hit?)
+```
+```
+f.bot:2:12: warning: call to `any` is eligible for method syntax (METHOD-ELIGIBLE)
+```
+
+The rules are exactly two. (1) Method sugar must be syntactically allowed and
+unambiguous: the receiver (the call's first argument) is, as written, a
+postfix or primary expression -- a name, qualified name, field chain, call or
+method-call result, literal, list or struct literal -- and not an operator
+expression, which would need added parentheses; the callee is a declared named
+function (`fn`, a builtin, a module function), never a function *value* (a
+parameter, an alias) and never `nomethod`; and the resolver's own candidate
+gathering for the sugared spelling finds exactly that function and nothing
+else visible under the name, with no struct field of that name that could
+compete with it. (2) The function declares at least two ordinary parameters
+(flags do not count): the sugar moves a trailing argument behind the dot, and
+`length(s)` has none to move, so it never suggests `s.length()`. That rule
+lives in the warning only; the language's sugar is not restricted by it.
+
+The warning is one-directional (a call already written with sugar is never told
+it could be functional), prints no rewrite and carries no fixit, and is one
+diagnostic per written call site (no grouping, one location, empty
+`secondary`). `x.f(y)` where `f` is `nomethod` is an error, not a warning, so
+`nomethod` is a language declaration and not a way to silence anything. See
+WARNINGS-METHOD-ELIGIBLE.md for the eligibility theorem, the receiver-form
+table, provenance, the corpus audit, the round-trip law and known limitations;
+the tests are `tests/method-eligible.test` and
+`audit/method-eligible/tools/fuzz.tcl`.

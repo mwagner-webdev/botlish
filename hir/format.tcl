@@ -216,6 +216,9 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             if {[dict get $node staticRefs] ne {}} {
                 append text " staticRefs ([BindingList $hir [dict get $node staticRefs]])"
             }
+            if {[dict exists $node nomethod]} {
+                append text " nomethod"
+            }
             if {[dict get $node declaredResult] ne {}} {
                 append text [format { declares %s} [hir::types::show [dict get $node declaredResult]]]
             }

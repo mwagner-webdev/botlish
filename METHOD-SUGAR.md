@@ -384,23 +384,27 @@ programs gave 6 equivalence disagreements and 3 negative escapes.
   as a field projection is `OPAQUE-REPRESENTATION` there while `x.f()` is still
   the visible function `f`.
 * No bound-method values: `g = x.f` is the field projection error it was.
-* No method-style *lint*: nothing prefers or warns on either spelling.
+* No method-style *lint* in this milestone: nothing prefers or warns on either
+  spelling (METHOD-ELIGIBLE, WARNINGS-METHOD-ELIGIBLE.md, later added the
+  one-directional warning).
 
-## Future lint policy (documented, not implemented)
+## Lint policy (implemented later: WARNINGS-METHOD-ELIGIBLE.md)
 
-The intended default style rule, to be implemented by the warning-driven
-idiomatic-source pass, not here: **if method syntax is allowed AND the
-selected function has more than two declared parameters, prefer method
-syntax.** `replace(text, old, new)` would get a style suggestion for
-`text.replace(old, new)`; `sin(angle)` would not recommend `angle.sin()`, and
-ordinary two-parameter functions would not be rewritten automatically. Not
-recommended is not illegal: semantic legality is exactly the eligibility
-theorem above, independent of the lint, and unary and binary functions remain
-legal as methods. Some functions may eventually need a small explicit
-annotation that controls whether method spelling is preferred or suppressed
-(mathematically symmetric or conventional free-function APIs); that
-annotation is deferred, and no inference of a receiver's "semantic role" is
-planned -- the semantic rule is structural.
+This milestone planned a default style rule -- "if method syntax is allowed AND
+the selected function has more than two declared parameters, prefer method
+syntax" -- and an explicit annotation for functions whose receiver spelling
+reads badly, both deferred. They arrived as the `METHOD-ELIGIBLE` warning
+(a call written functionally whose sugared spelling is *proven* to resolve to
+the identical callee, for a function of **at least two** parameters:
+`replace(text, old, new)` and `any(xs, p)` warn, `sin(angle)` never suggests
+`angle.sin()`) and the `nomethod fn` declaration (the author withdraws
+eligibility, and method syntax to that function becomes a resolution error).
+Neither changes the semantic rule of this file: legality is exactly the
+eligibility theorem above, unary and binary functions remain legal as methods,
+and the warning's parameter rule is a property of the warning, not of the
+grammar or the resolver. Where this milestone said "more than two", the
+implemented rule is "at least two" (the 2-parameter `any(xs, p)` is the
+canonical case).
 
 ## Required questions
 
@@ -441,7 +445,7 @@ planned -- the semantic rule is structural.
     (`n.inc()`).
 15. **Can binary functions use method syntax?** Yes, if otherwise eligible.
 16. **Is the future "> 2 parameters" rule part of semantic legality?** No.
-17. **Is that linter implemented now?** No.
+17. **Is that linter implemented now?** Not by this milestone; see "Lint policy" (METHOD-ELIGIBLE).
 18. **Are bound method values such as `x.f` introduced?** No.
 19. **Is the receiver evaluated once?** Yes, as the first argument.
 20. **Do method and ordinary syntax have identical error behavior?** Yes
