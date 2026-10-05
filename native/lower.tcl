@@ -135,7 +135,14 @@ namespace eval native::lower {
         hash         {op hash} \
         char::scalar_value {op charcodepoint} \
         byte_store::from_list {op bytesfromlist} \
-        byte_store::byte_count    {op byteslen}]
+        byte_store::byte_count    {op byteslen} \
+        byte_store::mutable_new   {op mbytesnew} \
+        byte_store::mutable_from  {op mbytesfrom} \
+        byte_store::mutable_count {op mbyteslen} \
+        byte_store::mutable_set   {op mbytesset} \
+        byte_store::mutable_copy  {op mbytesclone} \
+        byte_store::freeze        {op mbytesfreeze} \
+        byte_store::freeze_prefix {op mbytesfreezeprefix}]
     # State of the program being lowered. hir is the view of the instance
     # being lowered, baseHir the program's semantic HIR.
     variable hir {}
@@ -3957,7 +3964,8 @@ proc native::lower::BytesAddrCall {fnVar e node wantVirtual} {
     variable hir
     variable context
     variable structOpt
-    set native [core::bytestore::addressNative]
+    set native [dict get [hir::symbol $hir [lindex [dict get $node target] 1]] name]
+    set bridgeType [core::bytestore::bridgeType $native]
     set problems [hir::syscall::BytesProblems $hir $e $node]
     if {$problems ne ""} {
         # A -strict 0 program whose call hir/syscall.tcl rejected: replay the
@@ -3974,12 +3982,20 @@ proc native::lower::BytesAddrCall {fnVar e node wantVirtual} {
         throw {NATIVE BUG} "native lowering: $native without a declared $registerType ($e)"
     }
     set layout [hir::structs::names $registerType]
-    set storage [StorageOf fn [lindex [dict get $node args] 0]]
+    set storage [StorageOf fn [lindex [dict get $node args] 0] $bridgeType]
     if {$storage eq "never"} {
         return {never tagged}
     }
     dict lappend fn calls [list native $native]
-    set address [Assign fn "op bytesaddr $storage" $e]
+    # The readable bridge's operand is a Bytes storage, the writable one's a
+    # MutableBytes storage: two ops (two run-time kind checks), never
+    # interchanged. Provenance (keepAddr) is the same for both: the storage
+    # must stay live until the syscall has returned; for the writable one the
+    # kernel also changes its contents meanwhile, which needs nothing more
+    # here because every read of a storage is itself a runtime helper call
+    # that Cranelift can neither cache nor reorder across the syscall.
+    set bridgeOp [expr {[core::bytestore::bridgeWritable $native] ? "mbytesaddr" : "bytesaddr"}]
+    set address [Assign fn "op $bridgeOp $storage" $e]
     dict set fn keepAddr $address [list $storage]
     if {$wantVirtual ne ""} {
         if {$wantVirtual != 1} {
@@ -3998,12 +4014,15 @@ proc native::lower::BytesAddrCall {fnVar e node wantVirtual} {
 # or "never": the one field of a Bytes held as virtual fields (a virtual local,
 # or a virtual parameter of a `fields` variant), else read out of the object
 # with `structget`.
-proc native::lower::StorageOf {fnVar arg} {
+proc native::lower::StorageOf {fnVar arg {structType ""}} {
     upvar 1 $fnVar fn
     variable hir
-    set slot [lsearch -exact [hir::structs::names [core::bytestore::bytesType]] [core::bytestore::storageField]]
+    if {$structType eq ""} {
+        set structType [core::bytestore::bytesType]
+    }
+    set slot [lsearch -exact [hir::structs::names $structType] [core::bytestore::storageField]]
     if {$slot < 0} {
-        throw {NATIVE BUG} "native lowering: [core::bytestore::bytesType] has no [core::bytestore::storageField] field"
+        throw {NATIVE BUG} "native lowering: $structType has no [core::bytestore::storageField] field"
     }
     if {[hir::kind $hir $arg] eq "ref"} {
         set b [hir::get $hir $arg binding]
@@ -5111,8 +5130,15 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
     return $result
 }
 
+# The static types of the values an address can be taken from: abi::Bytes
+# (readable) and abi::MutableBytes (writable).
+proc native::lower::BytesStructTypes {} {
+    return [list [list nstruct [core::bytestore::bytesType]] [list nstruct [core::bytestore::mutableBytesType]]]
+}
+
 # 1 if call E (NODE) may carry an address: the program declares abi::Bytes and
-# either the call takes an abi::Bytes or its operands carry a raw address.
+# either the call takes an abi::Bytes or abi::MutableBytes or its operands
+# carry a raw address.
 proc native::lower::BytesFlowCandidate {fnVar e node} {
     upvar 1 $fnVar fn
     variable hir
@@ -5122,9 +5148,8 @@ proc native::lower::BytesFlowCandidate {fnVar e node} {
     if {[dict exists $fn keepAddr]} {
         return 1
     }
-    set bytesType [list nstruct [core::bytestore::bytesType]]
     foreach arg [dict get $node args] {
-        if {[hir::typeOf $hir $arg] eq $bytesType} {
+        if {[hir::typeOf $hir $arg] in [BytesStructTypes]} {
             return 1
         }
     }
@@ -5175,12 +5200,11 @@ proc native::lower::AddressFlowAcrossCall {fnVar e node result} {
         # Which operands are the Bytes: by position when every argument is one
         # operand (each Bytes argument, as its storage or its object), else (a
         # parameter passed as several field registers) every non-raw operand.
-        set bytesType [list nstruct [core::bytestore::bytesType]]
         set argExprs [dict get $node args]
         set picked {}
         if {[llength $argExprs] == [llength $operands]} {
             foreach arg $argExprs operand $operands {
-                if {[hir::typeOf $hir $arg] eq $bytesType} {
+                if {[hir::typeOf $hir $arg] in [BytesStructTypes]} {
                     lappend picked $operand
                 }
             }
@@ -5238,7 +5262,7 @@ proc native::lower::CallInner {fnVar e node want {wantVirtual ""} {wantRegion 0}
             return $static
         }
     }
-    if {$targetKind eq "native" && [dict get [hir::symbol $hir $target] name] eq [core::bytestore::addressNative]} {
+    if {$targetKind eq "native" && [core::bytestore::isBridge [dict get [hir::symbol $hir $target] name]]} {
         # The raw address bridge (core/bytestore.tcl, ABI-BYTES.md): reads the
         # storage out of an abi::Bytes and yields a Register64, so its own
         # form too.

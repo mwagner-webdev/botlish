@@ -75,6 +75,20 @@
 #                             equality. It exists only inside the owning
 #                             module's opaque struct (lib/abi.bot's Bytes);
 #                             no source type spells it.
+#   {mutbytes HEX}            the owned writable byte storage behind
+#                             abi::MutableBytes (MUTABLE-BYTES.md): a finite
+#                             sequence of bytes of one fixed length, HEX its
+#                             lowercase hexadecimal text exactly as for
+#                             `bytestore`. A distinct runtime kind from
+#                             `bytestore` (so a MutableBytes is never
+#                             accepted where an immutable byte storage is
+#                             required, nor the reverse). It is a VALUE, not
+#                             a reference: like every kind but mutarray it
+#                             is an immutable Tcl value, and an update
+#                             (core/bytestore.tcl's mutableSet) returns a
+#                             new one, so two logical copies can never
+#                             influence each other here. Equality is exact
+#                             byte-sequence equality, never identity.
 #   {mutarray ID}             MutableArray handle; ID indexes
 #                             core::mutarray's mutable store (mutarray.tcl).
 #                             The only value kind that is NOT treated as
@@ -82,11 +96,13 @@
 #                             same ID are the same storage, and mutating one
 #                             is observable through the other.
 #
-# Values other than {mutarray ID} are treated as immutable. Code outside this
+# Values other than {mutarray ID} are treated as immutable (a {mutbytes HEX}
+# included: its mutability is a property of the language-level MutableBytes
+# VALUE, which the backends realize by producing a new storage per update). Code outside this
 # file should construct and inspect values only through these procedures.
 
 namespace eval core::value {
-    variable kinds {int str bool unit list result block native mutarray UnicodeChar immutableSet errorId struct bytestore}
+    variable kinds {int str bool unit list result block native mutarray UnicodeChar immutableSet errorId struct bytestore mutbytes}
 }
 
 proc core::value::isCanonicalInt {text} {
@@ -207,6 +223,16 @@ proc core::value::bytestore {hex} {
     return [list bytestore $hex]
 }
 
+# The writable byte storage holding the bytes of HEX (same text form as
+# `bytestore`). Trusted natives only: the one constructor of a mutbytes value
+# (core/bytestore.tcl).
+proc core::value::mutbytes {hex} {
+    if {![regexp {^(?:[0-9a-f][0-9a-f])*$} $hex]} {
+        error "core::value::mutbytes: not lowercase hexadecimal byte text: \"$hex\""
+    }
+    return [list mutbytes $hex]
+}
+
 # The struct value with SHAPE ({ID FIELD...}, see this file's header) and
 # VALUES (one per FIELD, in slot order).
 proc core::value::structOf {shape values} {
@@ -286,6 +312,8 @@ proc core::value::charOf {v} { Require UnicodeChar $v; return [lindex $v 1] }
 proc core::value::immutableSetItems {v} { Require immutableSet $v; return [lindex $v 1] }
 proc core::value::bytestoreHex {v} { Require bytestore $v; return [lindex $v 1] }
 proc core::value::bytestoreLength {v} { Require bytestore $v; return [expr {[string length [lindex $v 1]] / 2}] }
+proc core::value::mutbytesHex {v} { Require mutbytes $v; return [lindex $v 1] }
+proc core::value::mutbytesLength {v} { Require mutbytes $v; return [expr {[string length [lindex $v 1]] / 2}] }
 
 # Returns host 1/0 for a language Boolean.
 proc core::value::isTrue {v} {
@@ -367,9 +395,11 @@ proc core::value::equal {a b} {
         return 0
     }
     switch -- $ka {
-        bytestore {
+        bytestore - mutbytes {
             # Exact byte-sequence equality: the hex text is canonical
-            # (lowercase, two digits per byte), so it is the bytes.
+            # (lowercase, two digits per byte), so it is the bytes. A
+            # MutableBytes compares by its current contents, never by
+            # storage identity (it has none).
             return [string equal [lindex $a 1] [lindex $b 1]]
         }
         int - str - bool - UnicodeChar {
@@ -533,6 +563,10 @@ proc core::value::show {v {withEvidence 0} {reveal 0}} {
             # Internal tooling only (reveal of an opaque abi::Bytes): the
             # byte count and the bytes. Normal rendering never reaches it.
             return "<bytes [expr {[string length [lindex $v 1]] / 2}]: [lindex $v 1]>"
+        }
+        mutbytes {
+            # Internal tooling only (reveal of an opaque abi::MutableBytes).
+            return "<mutbytes [expr {[string length [lindex $v 1]] / 2}]: [lindex $v 1]>"
         }
         block  { return "<block ([join [lindex $v 1] { }])>" }
         native { return "<native [lindex $v 1]>" }

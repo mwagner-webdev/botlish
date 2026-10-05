@@ -10,6 +10,10 @@
 #
 #   linux::write(fd, data)    write(2): ONE syscall, the kernel's raw
 #                             signed result as an ordinary Int.
+#   linux::read(fd, data)     read(2): ONE syscall into the caller's
+#                             abi::MutableBytes (MUTABLE-BYTES.md); the
+#                             kernel's raw signed result and the updated
+#                             buffer come back in a linux::ReadResult.
 #
 # write is the first syscall that moves memory, so it is also the first that
 # needs the memory boundary this milestone adds (ABI-BYTES.md): its buffer is
@@ -58,3 +62,47 @@ fn write(fd: abi::I32, data: abi::Bytes) -> int:
             rdx: abi::x86_64::from_usize(abi::bytes_length(data)),
         })
     )
+
+# What read(2) did, with both halves kept: the kernel's raw signed ssize_t
+# (> 0 the bytes read, 0 end of file, < 0 the kernel's -errno, exactly) and
+# the buffer as the kernel left it. Not a tuple, not an error: the caller
+# decides what a short read, EOF or a negative result means.
+struct ReadResult:
+    result: int
+    data: abi::MutableBytes
+
+# read(2): SYS_read = 0, rdi = fd, rsi = the address of the buffer's payload,
+# rdx = the buffer's byte count.
+#
+# * LOGICAL COPY. `data` is a value: the caller's buffer is never changed.
+#   The kernel writes into this function's own copy (`local`, the writable
+#   address bridge's operand: a freshly detached storage nothing else
+#   observes), and that same copy is returned as the result's `data`. A
+#   caller that keeps `original` and calls read(fd, original) still holds
+#   the unchanged bytes; the bytes the kernel wrote are in result.data. (An
+#   optimizer that proves `data` dead may write into its storage directly;
+#   nobody could tell.)
+# * ONE buffer, one source of truth. There is no `count` parameter: the
+#   address and the count both come from the same MutableBytes (the raw
+#   syscall still receives them in separate registers).
+# * ONE syscall: no retry, no loop, no filling. A positive result smaller
+#   than the buffer is normal (a short read): only the prefix
+#   [0, result) was written, the rest holds what it held before. 0 is end of
+#   file, not an error. A negative result is the kernel's -errno, preserved
+#   exactly (-9 for a bad descriptor), and the buffer is then unchanged.
+# * The buffer keeps its length; nothing is resized to the byte count. Take
+#   the bytes actually read with abi::freeze_prefix(result.data,
+#   abi::usize(result.result)).
+# * The address is taken and consumed synchronously; the compiler keeps the
+#   storage alive until the kernel has returned (native/lower.tcl).
+fn read(fd: abi::I32, data: abi::MutableBytes) -> ReadResult:
+    local = abi::mutable_bytes_copy(data)
+    result = abi::x86_64::to_int(
+        linux::abi::syscall({
+            rax: abi::x86_64::register64(0),
+            rdi: abi::x86_64::from_i32(fd),
+            rsi: abi::x86_64::from_mutable_bytes(local),
+            rdx: abi::x86_64::from_usize(abi::mutable_bytes_length(local)),
+        })
+    )
+    ReadResult {result: result, data: local}

@@ -173,6 +173,11 @@ pub struct Vm {
     /// `abi::bytes([])` allocates nothing. Storages are immutable, so sharing
     /// it is unobservable (a Bytes' identity is not part of its value).
     empty_bytes: *mut Header,
+    /// The one canonical EMPTY writable storage (static): a zero-length
+    /// MutableBytes has no byte any value could write or observe, so sharing
+    /// one object is unobservable. A non-empty storage is never shared
+    /// (MUTABLE-BYTES.md: every non-empty one is its own heap object).
+    empty_mutbytes: *mut Header,
     /// This program's PC-indexed stack-map table (runtime::framemap), set
     /// once by `set_framemap` right after compiling (codegen::CompiledProgram
     /// owns the original; this is an `Rc` clone). `collect_with` walks the
@@ -229,6 +234,7 @@ impl Vm {
             statics: Vec::new(),
             empty_str: StrObj::new_static(""),
             empty_bytes: BytesObj::new_static(&[]),
+            empty_mutbytes: BytesObj::new_static_mutable_empty(),
             framemap: Rc::new(ProgramMap::new()),
             native_stack: {
                 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
@@ -558,21 +564,52 @@ impl Vm {
     /// allocation happens between here and `BytesInit::finish`, so no
     /// collection can observe the half-built object.
     fn alloc_bytes(&mut self, len: usize) -> Result<BytesInit, Value> {
+        self.alloc_byte_storage(KIND_BYTES, len)
+    }
+
+    /// `alloc_bytes` for either storage kind (KIND_BYTES, or KIND_MUTBYTES for
+    /// an `abi::MutableBytes`): the same single block, the same ceiling, the
+    /// same collect-before-the-object-exists sequence.
+    fn alloc_byte_storage(&mut self, kind: u8, len: usize) -> Result<BytesInit, Value> {
         if len > MAX_COLLECTION_LENGTH {
-            let message = format!("a Bytes cannot exceed {MAX_COLLECTION_LENGTH} bytes, got {len}");
+            let what = if kind == KIND_MUTBYTES { "MutableBytes" } else { "Bytes" };
+            let message = format!("a {what} cannot exceed {MAX_COLLECTION_LENGTH} bytes, got {len}");
             return Err(self.fail(RtError::Semantic { kind: "RANGE", message }));
         }
         if self.heap.wants_collection() {
             self.collect();
         }
-        let init = BytesInit::new(len, false);
+        let Some(init) = BytesInit::try_new_kind(kind, len, false) else {
+            let what = if kind == KIND_MUTBYTES { "MutableBytes" } else { "Bytes" };
+            let message = format!("cannot allocate a {len}-byte {what}: out of memory");
+            return Err(self.fail(RtError::Semantic { kind: "RANGE", message }));
+        };
         self.heap.register(init.addr() as *mut Header, BYTES_PAYLOAD_OFFSET + len);
         if self.metrics.enabled() {
             let site = self.alloc_site;
             self.alloc_site = 0;
-            self.metrics.record_alloc(KIND_BYTES, BYTES_PAYLOAD_OFFSET, len, site);
+            self.metrics.record_alloc(kind, BYTES_PAYLOAD_OFFSET, len, site);
         }
         Ok(init)
+    }
+
+    /// A writable byte storage of LEN bytes that FILL writes in place (every
+    /// byte must be written). Always a fresh heap object -- never a static
+    /// constant -- except the zero-length one, which is the shared static
+    /// empty storage. The same rooting rule as `new_bytes_with`: FILL may read
+    /// operands of the allocating instruction, which are roots across the
+    /// collection that may run first.
+    pub fn new_mutbytes_with(&mut self, len: usize, fill: impl FnOnce(&mut BytesInit)) -> Value {
+        if len == 0 {
+            return self.empty_mutbytes as Value;
+        }
+        match self.alloc_byte_storage(KIND_MUTBYTES, len) {
+            Err(v) => v,
+            Ok(mut init) => {
+                fill(&mut init);
+                init.finish() as Value
+            }
+        }
     }
 
     /// A byte storage holding exactly BYTES: one allocation, copied straight
@@ -678,5 +715,6 @@ impl Drop for Vm {
         }
         unsafe { super::heap::free_object(self.empty_str) };
         unsafe { super::heap::free_object(self.empty_bytes) };
+        unsafe { super::heap::free_object(self.empty_mutbytes) };
     }
 }

@@ -98,6 +98,10 @@ pub fn op_may_allocate(op: OpCode) -> bool {
             // The owned byte storage is one allocation (a collection may run
             // first); the empty storage is a shared static (no allocation).
             | BytesFromList
+            // The writable storage family (MUTABLE-BYTES.md): each of these
+            // but length/address makes a fresh object (a collection may run
+            // first, with the operands rooted).
+            | MBytesNew | MBytesFrom | MBytesSet | MBytesClone | MBytesFreeze | MBytesFreezePrefix
             // The proven siblings allocate exactly like their checked forms; only
             // their op_may_error classification differs.
             | SubstrProven | MutArrayFreezeProven | MkError
@@ -124,6 +128,12 @@ pub fn op_may_error(op: OpCode) -> bool {
         // program cannot produce any of them: lib/abi.bot's creator takes
         // a List[Byte] and its storage field only ever holds a storage.
         | BytesFromList | BytesLen | BytesAddr
+        // The writable family: a length that is not 0..the ceiling (RANGE), an
+        // operand of the wrong kind (TYPE: the readable and writable storages
+        // are never interchanged), an index/count outside the payload (RANGE),
+        // a value that is not a byte (TYPE). Checked programs cannot produce
+        // any of them: lib/abi.bot's wrappers prove each before the call.
+        | MBytesNew | MBytesFrom | MBytesLen | MBytesSet | MBytesClone | MBytesFreeze | MBytesFreezePrefix | MBytesAddr
         // Only on an operand that is not a 64-bit register word (TYPE, never
         // a truncation: runtime/syscall.rs), which a checked program cannot
         // produce. The kernel's own result is never an error here.
@@ -411,6 +421,9 @@ fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
         // address -- a static constant, a heap buffer and a copy of either
         // are equal iff their bytes are.
         Kind::ByteStore => bytes_of(a) == bytes_of(b),
+        // The same, for the writable storage: its current contents, never
+        // its identity (a MutableBytes has none).
+        Kind::MutByteStore => mutbytes_of(a) == mutbytes_of(b),
         Kind::List => {
             let (xs, ys) = (list_of(a).items(), list_of(b).items());
             if xs.len() != ys.len() {
@@ -542,6 +555,7 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
         Kind::ImmutableSet => 7,
         Kind::Struct => 8,
         Kind::ByteStore => 9,
+        Kind::MutByteStore => 10,
         Kind::Block | Kind::Native | Kind::MutArray => unreachable!(),
     };
     let h = fnv1a(h, &[tag]);
@@ -564,6 +578,13 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
         // with the byte-sequence equality above.
         Kind::ByteStore => {
             let bytes = bytes_of(v);
+            let h = fnv1a(h, &(bytes.len() as u64).to_le_bytes());
+            fnv1a(h, bytes)
+        }
+        // A MutableBytes hashes by its current contents under its own kind
+        // tag (core/hashing.tcl's `bytestore - mutbytes` case).
+        Kind::MutByteStore => {
+            let bytes = mutbytes_of(v);
             let h = fnv1a(h, &(bytes.len() as u64).to_le_bytes());
             fnv1a(h, bytes)
         }
@@ -721,6 +742,168 @@ pub extern "C" fn rt_bytes_addr(p: *mut Vm, v: Value) -> Value {
 pub extern "C" fn rt_keepalive(_p: *mut Vm, v: Value) -> Value {
     std::hint::black_box(v);
     UNIT
+}
+
+// ---------------------------------------------------------------------------
+// MutableBytes (MUTABLE-BYTES.md): the writable byte storage, KIND_MUTBYTES.
+//
+// One rule makes a MutableBytes a VALUE rather than a reference: a storage is
+// written only while it is private to the operation that created it. Every
+// operation that changes contents (`rt_mbytes_set`, and the clone
+// `rt_mbytes_clone` that linux::read's kernel write goes into) allocates a
+// FRESH object, fills it from its operand, and (for set) writes the one byte;
+// the operand is never written. So a published storage never changes, two
+// logical copies may share it freely, and no boundary (binding, argument,
+// field, List element, closure capture, generic or `any` transport) has to
+// copy anything for independence to hold.
+
+/// The writable storage V, or a TYPE error naming CONTEXT.
+fn mutbytes_operand(p: *mut Vm, v: Value, context: &str) -> Result<(), Value> {
+    if heap_kind(v) == KIND_MUTBYTES {
+        Ok(())
+    } else {
+        Err(vm(p).fail(RtError::Type { context: context.to_string(), expected: Kind::MutByteStore, got: v }))
+    }
+}
+
+/// A non-negative small Int operand as a usize, or the RANGE/TYPE error
+/// CONTEXT names (BigInt and negative are RANGE; a non-Int is TYPE).
+fn index_operand(p: *mut Vm, v: Value, context: &str, what: &str, limit: usize) -> Result<usize, Value> {
+    if !is_small(v) && heap_kind(v) != KIND_BIGINT {
+        return Err(vm(p).fail(RtError::Type { context: context.to_string(), expected: Kind::Int, got: v }));
+    }
+    match int_small(v) {
+        Some(n) if n >= 0 && (n as u64) <= limit as u64 => Ok(n as usize),
+        _ => {
+            let message = format!("{context}: {what} must be in 0..{limit}, got {}", super::show::int_text(v));
+            Err(vm(p).fail(RtError::Semantic { kind: "RANGE", message }))
+        }
+    }
+}
+
+/// `byte_store::mutable_new`: N zero bytes in a fresh writable storage.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_mbytes_new(p: *mut Vm, n: Value) -> Value {
+    let count = match index_operand(p, n, "byte_store::mutable_new", "the length", MAX_COLLECTION_LENGTH) {
+        Ok(count) => count,
+        Err(failed) => return failed,
+    };
+    vm(p).new_mutbytes_with(count, |init| init.push_zeros(count))
+}
+
+/// `byte_store::mutable_from`: a fresh writable copy of immutable storage V.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_mbytes_from(p: *mut Vm, v: Value) -> Value {
+    if let Err(failed) = bytes_operand(p, v, "byte_store::mutable_from") {
+        return failed;
+    }
+    vm(p).metrics.record_list_copy(bytes_of(v).len());
+    vm(p).new_mutbytes_with(bytes_of(v).len(), |init| init.push_slice(bytes_of(v)))
+}
+
+/// `byte_store::mutable_count`: the fixed byte count of writable storage V.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_mbytes_len(p: *mut Vm, v: Value) -> Value {
+    if let Err(failed) = mutbytes_operand(p, v, "byte_store::mutable_count") {
+        return failed;
+    }
+    make_small(mutbytes_of(v).len() as i64)
+}
+
+/// `byte_store::mutable_set`: a fresh storage equal to M with byte I replaced
+/// by B. M is read, never written: the new object is allocated, filled from
+/// M, and only then is its one byte written (it is still private here).
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_mbytes_set(p: *mut Vm, m: Value, i: Value, b: Value) -> Value {
+    const CONTEXT: &str = "byte_store::mutable_set";
+    if let Err(failed) = mutbytes_operand(p, m, CONTEXT) {
+        return failed;
+    }
+    let len = mutbytes_of(m).len();
+    if len == 0 {
+        // An empty storage has no byte to replace; (the shared static empty
+        // storage must never be written either).
+        let message = format!("{CONTEXT}: index {} is outside an empty MutableBytes", super::show::int_text(i));
+        return vm(p).fail(RtError::Semantic { kind: "RANGE", message });
+    }
+    let index = match index_operand(p, i, CONTEXT, "the index", len - 1) {
+        Ok(index) => index,
+        Err(failed) => return failed,
+    };
+    let byte = match int_small(b) {
+        Some(n) if (0..=255).contains(&n) => n as u8,
+        _ => {
+            let got = if is_small(b) || heap_kind(b) == KIND_BIGINT { super::show::int_text(b) } else { super::show::show(b) };
+            let message = format!("{CONTEXT}: the value must be a byte (an Int in 0..255), got {got}");
+            return vm(p).fail(RtError::Semantic { kind: "TYPE", message });
+        }
+    };
+    vm(p).metrics.record_list_copy(len);
+    let r = vm(p).new_mutbytes_with(len, |init| init.push_slice(mutbytes_of(m)));
+    if r != NO_VALUE {
+        // SAFETY: R is the fresh, fully written object this call just
+        // created (len > 0, so it is not the shared empty storage); nothing
+        // else holds it yet.
+        unsafe { BytesObj::payload_mut(r)[index] = byte };
+    }
+    r
+}
+
+/// `byte_store::mutable_copy`: a fresh storage equal to M (the detach).
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_mbytes_clone(p: *mut Vm, m: Value) -> Value {
+    if let Err(failed) = mutbytes_operand(p, m, "byte_store::mutable_copy") {
+        return failed;
+    }
+    vm(p).metrics.record_list_copy(mutbytes_of(m).len());
+    vm(p).new_mutbytes_with(mutbytes_of(m).len(), |init| init.push_slice(mutbytes_of(m)))
+}
+
+/// `byte_store::freeze`: an immutable snapshot of all of M's bytes.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_mbytes_freeze(p: *mut Vm, m: Value) -> Value {
+    if let Err(failed) = mutbytes_operand(p, m, "byte_store::freeze") {
+        return failed;
+    }
+    vm(p).metrics.record_list_copy(mutbytes_of(m).len());
+    vm(p).new_bytes_with(mutbytes_of(m).len(), |init| init.push_slice(mutbytes_of(m)))
+}
+
+/// `byte_store::freeze_prefix`: an immutable snapshot of M's first N bytes.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_mbytes_freeze_prefix(p: *mut Vm, m: Value, n: Value) -> Value {
+    const CONTEXT: &str = "byte_store::freeze_prefix";
+    if let Err(failed) = mutbytes_operand(p, m, CONTEXT) {
+        return failed;
+    }
+    let count = match index_operand(p, n, CONTEXT, "the count", mutbytes_of(m).len()) {
+        Ok(count) => count,
+        Err(failed) => return failed,
+    };
+    vm(p).metrics.record_list_copy(count);
+    vm(p).new_bytes_with(count, |init| init.push_slice(&mutbytes_of(m)[..count]))
+}
+
+/// `abi::x86_64::from_mutable_bytes`, the WRITABLE raw address bridge
+/// (MUTABLE-BYTES.md): the machine address of the first payload byte of
+/// writable storage M, as a small Int. Exactly `rt_bytes_addr`'s contract,
+/// for the other kind: it refuses a readable storage, so the two bridges are
+/// never mixed up; it does not copy (the caller -- linux::read -- holds a
+/// storage it just detached), and the storage must stay live until the
+/// syscall that writes through the address has returned (`op keepalive`).
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_mbytes_addr(p: *mut Vm, m: Value) -> Value {
+    if let Err(failed) = mutbytes_operand(p, m, "abi::x86_64::from_mutable_bytes") {
+        return failed;
+    }
+    let address = BytesObj::payload_address(m) as i64;
+    if !fits_small(address) {
+        let message = format!(
+            "abi::x86_64::from_mutable_bytes: the payload address {address:#x} is outside the small-Int range"
+        );
+        return vm(p).fail(RtError::Semantic { kind: "RANGE", message });
+    }
+    make_small(address)
 }
 
 // ---------------------------------------------------------------------------
@@ -1764,6 +1947,13 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         Hash => rt_hash(p, a[0]),
         BytesFromList => rt_bytes_from_list(p, a[0]),
         BytesLen => rt_bytes_len(p, a[0]),
+        MBytesNew => rt_mbytes_new(p, a[0]),
+        MBytesFrom => rt_mbytes_from(p, a[0]),
+        MBytesLen => rt_mbytes_len(p, a[0]),
+        MBytesSet => rt_mbytes_set(p, a[0], a[1], a[2]),
+        MBytesClone => rt_mbytes_clone(p, a[0]),
+        MBytesFreeze => rt_mbytes_freeze(p, a[0]),
+        MBytesFreezePrefix => rt_mbytes_freeze_prefix(p, a[0], a[1]),
         RegionCheck | RegionEq | RBox | RUnbox | RIAdd | RISub | RIMul | RILt | RILe | RIGt | RIGe | RIEq
         | RIShr | RIShl | StrToShort | ShortToStr | ShortLen | ShortEq | StrSliceShort | StrToAscii | AsciiToStr
         | AsciiLen | AsciiEq | AsciiToShort | AsciiShortEq
@@ -1771,7 +1961,7 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         // linux::abi::syscall and the raw address bridge are never values
         // (hir/syscall.tcl rejects any use but a direct call), so no Native
         // value ever dispatches to them; keepalive is a lowering-internal op.
-        | SyscallLinuxX86_64 | BytesAddr | KeepAlive => {
+        | SyscallLinuxX86_64 | BytesAddr | MBytesAddr | KeepAlive => {
             // Raw (untagged) representation ops, StringRegion ops and String
             // traversal ops never implement a dynamic native: native/lower.tcl
             // emits them only directly, as `op` instructions inline in a
@@ -1831,6 +2021,14 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_bytes_len, 2),
         h!(rt_bytes_addr, 2),
         h!(rt_keepalive, 2),
+        h!(rt_mbytes_new, 2),
+        h!(rt_mbytes_from, 2),
+        h!(rt_mbytes_len, 2),
+        h!(rt_mbytes_set, 4),
+        h!(rt_mbytes_clone, 2),
+        h!(rt_mbytes_freeze, 2),
+        h!(rt_mbytes_freeze_prefix, 3),
+        h!(rt_mbytes_addr, 2),
         h!(rt_is_tcl_alpha, 2),
         h!(rt_is_tcl_alnum, 2),
         h!(rt_str_region_is_tcl_alpha, 4),

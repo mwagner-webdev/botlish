@@ -1146,6 +1146,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             Kind::ImmutableSet => KIND_SET,
             Kind::Struct => KIND_STRUCT,
             Kind::ByteStore => KIND_BYTES,
+            Kind::MutByteStore => KIND_MUTBYTES,
             Kind::Bool | Kind::Unit | Kind::UnicodeChar => unreachable!(),
         };
         let low3 = self.b.ins().band_imm_s(v, 7);
@@ -1375,7 +1376,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                             .to_string(),
                     ));
                 }
-                if *op == OpCode::BytesAddr && !cfg!(all(target_arch = "x86_64", target_os = "linux")) {
+                if matches!(*op, OpCode::BytesAddr | OpCode::MBytesAddr) && !cfg!(all(target_arch = "x86_64", target_os = "linux")) {
                     // The payload address is only ever consumed by the Linux
                     // x86-64 syscall transport, and the small-Int
                     // representation of an address is argued for its 47-bit
@@ -1738,6 +1739,18 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         BytesLen => ("rt_bytes_len", None, true, None),
                         BytesAddr => ("rt_bytes_addr", None, true, None),
                         KeepAlive => ("rt_keepalive", None, false, None),
+                        // The writable byte storage (MUTABLE-BYTES.md): new /
+                        // from / set / clone allocate one object, freeze and
+                        // freeze_prefix one immutable one (all fallible, all
+                        // safepoints); length/address read a header.
+                        MBytesNew => ("rt_mbytes_new", None, true, Some(("mbytesnew", KIND_MUTBYTES))),
+                        MBytesFrom => ("rt_mbytes_from", None, true, Some(("mbytesfrom", KIND_MUTBYTES))),
+                        MBytesLen => ("rt_mbytes_len", None, true, None),
+                        MBytesSet => ("rt_mbytes_set", None, true, Some(("mbytesset", KIND_MUTBYTES))),
+                        MBytesClone => ("rt_mbytes_clone", None, true, Some(("mbytesclone", KIND_MUTBYTES))),
+                        MBytesFreeze => ("rt_mbytes_freeze", None, true, Some(("mbytesfreeze", KIND_BYTES))),
+                        MBytesFreezePrefix => ("rt_mbytes_freeze_prefix", None, true, Some(("mbytesfreezeprefix", KIND_BYTES))),
+                        MBytesAddr => ("rt_mbytes_addr", None, true, None),
                         // Never fallible (see ops.rs's rt_str_decode_char_at):
                         // a one-character String can never exceed
                         // MAX_COLLECTION_LENGTH. Still routed through

@@ -131,6 +131,13 @@ fn show_into(v: Value, out: &mut String) {
             let bytes = bytes_of(v);
             out.push_str(&format!("<bytes {}: {}>", bytes.len(), hex_of(bytes)));
         }
+        Kind::MutByteStore => {
+            // Matches core::value::show's mutbytes rendering (internal tooling
+            // only; an opaque abi::MutableBytes renders as
+            // `<opaque abi::MutableBytes>` and never prints its storage).
+            let bytes = mutbytes_of(v);
+            out.push_str(&format!("<mutbytes {}: {}>", bytes.len(), hex_of(bytes)));
+        }
     }
 }
 
@@ -189,6 +196,8 @@ pub fn tcl_value(v: Value) -> Result<String, RtError> {
         // Matches core::value::bytestore's own representation exactly
         // ({bytestore HEX}, core/value.tcl).
         Kind::ByteStore => tcl_list(&["bytestore".to_string(), hex_of(bytes_of(v))]),
+        // ({mutbytes HEX}, core/value.tcl).
+        Kind::MutByteStore => tcl_list(&["mutbytes".to_string(), hex_of(mutbytes_of(v))]),
         Kind::Result => {
             let r = result_of(v);
             tcl_list(&[

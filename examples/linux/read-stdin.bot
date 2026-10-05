@@ -1,0 +1,48 @@
+# read-stdin.bot -- one chunk from real standard input, echoed to standard
+# output, through Botlish's own raw Linux x86-64 syscall path
+# (MUTABLE-BYTES.md):
+#
+#   abi::mutable_bytes(4096)   a zero-filled, writable, owned byte VALUE
+#     --linux::read-----------> read(2): rax = 0, rdi = 0, rsi = the payload
+#                               address, rdx = 4096; ONE syscall
+#     --linux::ReadResult-----> the kernel's raw ssize_t + the updated buffer
+#     --abi::freeze_prefix----> an immutable abi::Bytes of exactly the bytes read
+#     --linux::write----------> write(2) to descriptor 1 (rax = 1)
+#
+# No libc `read` or `write`, no special runtime implementation of either, and
+# no syscall number known to the compiler. `buffer` is a value: linux::read
+# works on its own copy, so `buffer` still holds 4096 zero bytes afterwards
+# and the bytes the kernel wrote are in `result.data`.
+#
+# This is a one-chunk echo, not `cat`: a short read (a pipe holding less than
+# 4096 bytes) is normal, end of file is a result of 0 (nothing is written),
+# and a negative result is the kernel's raw -errno, returned as the program's
+# value. Native backend only (a standalone executable from
+# `tclsh9.0 main.tcl -emit-native-executable examples/linux/read-stdin.bot`);
+# the Tcl backends refuse the syscall with NATIVE-ONLY.
+#
+#   printf 'hello from stdin\n' | ./read-stdin
+#   hello from stdin
+#   17                      <- the bytes written (the runner prints the result)
+
+import abi
+import linux
+
+buffer = abi::mutable_bytes(abi::usize(4096))
+result = linux::read(abi::i32(0), buffer)
+
+n = result.result
+if n > 0:
+    # Neither handler can run: read(2) returns at most the 4096 it was given,
+    # so the count is a valid Usize within the buffer. But `result` is an
+    # ordinary Int the compiler cannot bound, and the language asks for both
+    # declared errors to be handled; the fallback (write nothing) is harmless.
+    count = abi::usize(n):
+        on AbiIntegerAboveRange:
+            abi::usize(0)
+    data = abi::freeze_prefix(result.data, count):
+        on UpperOverrun:
+            abi::bytes([])
+    linux::write(abi::i32(1), data)
+else:
+    n

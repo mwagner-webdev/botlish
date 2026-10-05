@@ -191,7 +191,7 @@ proc hir::escape::Classify {hir instance arity e {structOpts {}}} {
     lassign [dict get $node target] targetKind target
     if {$targetKind eq "native"} {
         set name [dict get [hir::symbol $hir $target] name]
-        if {$name eq "linux::abi::syscall" || $name eq [core::bytestore::addressNative]} {
+        if {$name eq "linux::abi::syscall" || [core::bytestore::isBridge $name]} {
             # (The raw address bridge builds its Register64 result from the one
             # address word `bytesaddr` produces, exactly the same way.)
             # The raw kernel transition builds its result, an abi::x86_64::
@@ -272,7 +272,7 @@ proc hir::escape::ClassifyIf {hir instance arity e structOpts} {
     return [list [expr {$targets eq "" ? "local" : "remote"}] $desc [lsort -unique $targets]]
 }
 
-# linux::abi::syscall's (or abi::x86_64::from_bytes's) result (call E) as a
+# linux::abi::syscall's (or an address bridge's) result (call E) as a
 # recognized construction: {local {1 {ID LAYOUT}} {}} when its static type is
 # the declared abi::x86_64::Register64 (hir::types::ShapeResult's named-struct
 # result), "" otherwise.
@@ -794,7 +794,7 @@ proc hir::escape::RegionInfo {hir spec id} {
                 foreach f [SyscallFields $view $e] {
                     dict set wordUse $f 1
                 }
-                if {$targetKind eq "native" && [dict get [hir::symbol $view $target] name] eq [core::bytestore::addressNative]
+                if {$targetKind eq "native" && [core::bytestore::isBridge [dict get [hir::symbol $view $target] name]]
                         && [llength $args] == 1} {
                     # The address bridge's abi::Bytes argument is read only for
                     # its one storage field (native/lower.tcl's StorageOf),

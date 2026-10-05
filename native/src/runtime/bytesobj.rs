@@ -18,6 +18,16 @@
 //! the end of its own block (a valid, in-bounds-or-one-past address that is
 //! never dereferenced because the count is zero).
 //!
+//! The same layout, with the header kind KIND_MUTBYTES, is the writable
+//! storage behind `abi::MutableBytes` (MUTABLE-BYTES.md). It differs from
+//! KIND_BYTES in one promise only: a KIND_BYTES object is never written after
+//! it is published; a KIND_MUTBYTES object is written only while it is still
+//! private to the one operation that created it (a fresh clone being updated,
+//! or the clone `linux::read` hands the kernel), and from the moment that
+//! operation returns it is, again, never written. So neither kind is ever
+//! observed to change, which is why copying a value of either kind is plain
+//! sharing. The collector marks and frees both the same way (no tracing).
+//!
 //! # Invariants
 //!
 //! * The payload holds no program value: the collector marks the object and
@@ -42,7 +52,7 @@
 //! written. The source List a conversion reads is an operand of the
 //! allocating instruction and therefore a root across step (1).
 
-use super::value::{Header, KIND_BYTES};
+use super::value::{Header, KIND_BYTES, KIND_MUTBYTES};
 use std::alloc::{Layout, alloc, dealloc, handle_alloc_error};
 use std::mem::offset_of;
 use std::ptr;
@@ -94,6 +104,19 @@ impl BytesObj {
         unsafe { std::slice::from_raw_parts((v as *const u8).add(BYTES_PAYLOAD_OFFSET), Self::len_of(v)) }
     }
 
+    /// The writable payload of the MutableBytes storage at V.
+    ///
+    /// # Safety
+    /// V must be the address of a live, fully constructed KIND_MUTBYTES
+    /// object that no other reference is currently reading, and the returned
+    /// slice must not outlive it. Used only on an object this very operation
+    /// has just created (value semantics: a published storage is never
+    /// written, MUTABLE-BYTES.md) -- every writer fills a fresh clone.
+    #[inline]
+    pub unsafe fn payload_mut<'a>(v: u64) -> &'a mut [u8] {
+        unsafe { std::slice::from_raw_parts_mut((v as *mut u8).add(BYTES_PAYLOAD_OFFSET), Self::len_of(v)) }
+    }
+
     /// The machine address of the first payload byte of the storage at V.
     #[inline]
     pub fn payload_address(v: u64) -> u64 {
@@ -106,6 +129,13 @@ impl BytesObj {
         let mut init = BytesInit::new(bytes.len(), true);
         init.push_slice(bytes);
         init.finish() as *mut Header
+    }
+
+    /// The program-lifetime EMPTY writable storage (zero payload bytes: there
+    /// is nothing in it any value could write or observe, so one shared
+    /// object is unobservable, unlike a non-empty one).
+    pub fn new_static_mutable_empty() -> *mut Header {
+        BytesInit::new_kind(KIND_MUTBYTES, 0, true).finish() as *mut Header
     }
 }
 
@@ -123,21 +153,42 @@ impl BytesInit {
     /// Allocates the one block for LEN payload bytes and writes its header.
     /// `is_static` marks a program-lifetime object (never collected).
     pub fn new(len: usize, is_static: bool) -> BytesInit {
-        let Some(layout) = bytes_layout(len) else {
-            panic!("capacity overflow: a {len}-byte Bytes cannot be allocated");
-        };
+        Self::new_kind(KIND_BYTES, len, is_static)
+    }
+
+    /// As `new`, for a storage of KIND: KIND_BYTES (immutable `abi::Bytes`
+    /// storage) or KIND_MUTBYTES (the writable `abi::MutableBytes` storage,
+    /// MUTABLE-BYTES.md). The two kinds have one layout; only the header's
+    /// kind differs, and nothing ever changes a published object's kind.
+    pub fn new_kind(kind: u8, len: usize, is_static: bool) -> BytesInit {
+        match Self::try_new_kind(kind, len, is_static) {
+            Some(init) => init,
+            None => match bytes_layout(len) {
+                Some(layout) => handle_alloc_error(layout),
+                None => panic!("capacity overflow: a {len}-byte Bytes cannot be allocated"),
+            },
+        }
+    }
+
+    /// As `new_kind`, but None when the block cannot be allocated (a layout
+    /// that overflows, or the allocator refusing): a MutableBytes length is
+    /// program input (abi::mutable_bytes(n)), so exhaustion is a reportable
+    /// error there, not an abort.
+    pub fn try_new_kind(kind: u8, len: usize, is_static: bool) -> Option<BytesInit> {
+        assert!(kind == KIND_BYTES || kind == KIND_MUTBYTES, "not a byte storage kind: {kind}");
+        let layout = bytes_layout(len)?;
         // SAFETY: the layout has nonzero size (BYTES_PAYLOAD_OFFSET at least).
         let thin = unsafe { alloc(layout) };
         if thin.is_null() {
-            handle_alloc_error(layout);
+            return None;
         }
         // SAFETY: THIN is a fresh block of at least BYTES_PAYLOAD_OFFSET + len
         // bytes aligned to 16; the writes stay inside the header.
         unsafe {
-            (thin as *mut Header).write(Header::new(KIND_BYTES, is_static));
+            (thin as *mut Header).write(Header::new(kind, is_static));
             (thin.add(offset_of!(BytesObj, len)) as *mut usize).write(len);
         }
-        BytesInit { thin, len, written: 0 }
+        Some(BytesInit { thin, len, written: 0 })
     }
 
     /// The object's address (what a `Value` holds).
@@ -164,6 +215,15 @@ impl BytesInit {
             ptr::copy_nonoverlapping(bytes.as_ptr(), self.thin.add(BYTES_PAYLOAD_OFFSET + self.written), bytes.len());
         }
         self.written += bytes.len();
+    }
+
+    /// Appends COUNT zero bytes.
+    #[inline]
+    pub fn push_zeros(&mut self, count: usize) {
+        assert!(count <= self.len - self.written, "Bytes payload write out of bounds");
+        // SAFETY: room checked; the destination is inside the block.
+        unsafe { ptr::write_bytes(self.thin.add(BYTES_PAYLOAD_OFFSET + self.written), 0, count) };
+        self.written += count;
     }
 
     /// Publishes the storage: every payload byte must have been written.

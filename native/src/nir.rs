@@ -206,6 +206,38 @@ pub enum OpCode {
     /// storage is live: native/lower.tcl pairs every use of it in a syscall
     /// with a `keepalive` of the storage after that syscall.
     BytesAddr,
+    /// `byte_store::mutable_new` (core/bytestore.tcl, MUTABLE-BYTES.md): a
+    /// fresh writable storage of N zero bytes (one allocation; the shared
+    /// static empty storage for N = 0). One operand, the Int N (RANGE outside
+    /// 0..2^62-1).
+    MBytesNew,
+    /// `byte_store::mutable_from`: a fresh writable copy of an immutable byte
+    /// storage. One operand.
+    MBytesFrom,
+    /// `byte_store::mutable_count`: the fixed byte count of a writable
+    /// storage, a small Int. One operand; TYPE unless it is a writable storage.
+    MBytesLen,
+    /// `byte_store::mutable_set`: a fresh writable storage equal to the first
+    /// operand with byte I (second operand, RANGE if not a valid index)
+    /// replaced by the third (TYPE unless an Int in 0..255). The first
+    /// operand is cloned and the clone written; it is never written itself.
+    MBytesSet,
+    /// `byte_store::mutable_copy`: a fresh writable storage equal to the
+    /// operand (the "detach" before a writable foreign access).
+    MBytesClone,
+    /// `byte_store::freeze`: a fresh immutable byte storage holding the
+    /// operand's current bytes (the shared static empty storage for none).
+    MBytesFreeze,
+    /// `byte_store::freeze_prefix`: the first N bytes (second operand, RANGE
+    /// unless 0 <= N <= the length) of the first, as an immutable storage.
+    MBytesFreezePrefix,
+    /// `abi::x86_64::from_mutable_bytes`, the WRITABLE raw address bridge: the
+    /// machine address of the first payload byte of a writable storage, as a
+    /// small Int. One operand, which must be a KIND_MUTBYTES storage (TYPE
+    /// otherwise: the readable and writable kinds are never interchanged).
+    /// Never allocates. Like `bytesaddr`, every use of it in a syscall is
+    /// paired by native/lower.tcl with a `keepalive` of the storage after it.
+    MBytesAddr,
     /// `%u = op keepalive %b`: a use of %b that is never removed and does
     /// nothing, so %b stays a GC root until here. Result unit.
     KeepAlive,
@@ -396,6 +428,14 @@ impl OpCode {
             "byteslen" => BytesLen,
             "bytesaddr" => BytesAddr,
             "keepalive" => KeepAlive,
+            "mbytesnew" => MBytesNew,
+            "mbytesfrom" => MBytesFrom,
+            "mbyteslen" => MBytesLen,
+            "mbytesset" => MBytesSet,
+            "mbytesclone" => MBytesClone,
+            "mbytesfreeze" => MBytesFreeze,
+            "mbytesfreezeprefix" => MBytesFreezePrefix,
+            "mbytesaddr" => MBytesAddr,
             "strtclalpha" => StrIsTclAlpha,
             "strtclalnum" => StrIsTclAlnum,
             "strregiontclalpha" => StrRegionIsTclAlpha,
@@ -438,8 +478,9 @@ impl OpCode {
             | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | RBox | RUnbox
             | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharCodepoint | SetFromList
             | SetFromListTotal | StrToShort | ShortToStr | ShortLen | StrToAscii | AsciiToStr | AsciiLen
-            | AsciiToShort | BytesFromList | BytesLen | BytesAddr | KeepAlive => Some(1),
-            Substr | SubstrProven | MutArraySet | MutArraySetProven | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum | StrSliceShort => Some(3),
+            | AsciiToShort | BytesFromList | BytesLen | BytesAddr | KeepAlive | MBytesNew | MBytesFrom | MBytesLen
+            | MBytesClone | MBytesFreeze | MBytesAddr => Some(1),
+            Substr | SubstrProven | MutArraySet | MutArraySetProven | MBytesSet | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum | StrSliceShort => Some(3),
             RegionEq => Some(4),
             MutArrayCopy | MutArrayCopyProven => Some(5),
             _ => Some(2),

@@ -94,6 +94,11 @@ pub const KIND_STRUCT: u8 = 12;
 /// immutable, finite, contiguous sequence of bytes, header + length + payload
 /// in one allocation. Its payload holds no program value.
 pub const KIND_BYTES: u8 = 13;
+/// The writable byte storage behind `abi::MutableBytes` (MUTABLE-BYTES.md):
+/// the KIND_BYTES layout under its own kind, so the two are never confused
+/// (a MutableBytes is not accepted where a Bytes storage is required, nor the
+/// reverse). Never written once it is a value (see bytesobj.rs).
+pub const KIND_MUTBYTES: u8 = 14;
 
 #[repr(C)]
 pub struct Header {
@@ -383,6 +388,9 @@ pub enum Kind {
     /// The owned byte storage behind `abi::Bytes` (ABI-BYTES.md): distinct
     /// from List and String. Named as core/value.tcl's `bytestore` kind.
     ByteStore,
+    /// The writable byte storage behind `abi::MutableBytes` (MUTABLE-BYTES.md):
+    /// distinct from ByteStore. Named as core/value.tcl's `mutbytes` kind.
+    MutByteStore,
 }
 
 impl Kind {
@@ -401,6 +409,7 @@ impl Kind {
             "immutableSet" => Kind::ImmutableSet,
             "struct" => Kind::Struct,
             "bytestore" => Kind::ByteStore,
+            "mutbytes" => Kind::MutByteStore,
             _ => return None,
         })
     }
@@ -420,6 +429,7 @@ impl Kind {
             Kind::ImmutableSet => "immutableSet",
             Kind::Struct => "struct",
             Kind::ByteStore => "bytestore",
+            Kind::MutByteStore => "mutbytes",
         }
     }
 
@@ -430,7 +440,7 @@ impl Kind {
     pub fn from_code(code: u8) -> Kind {
         [
             Kind::Int, Kind::Str, Kind::Bool, Kind::Unit, Kind::List, Kind::Result, Kind::Block, Kind::Native,
-            Kind::MutArray, Kind::UnicodeChar, Kind::ImmutableSet, Kind::Struct, Kind::ByteStore,
+            Kind::MutArray, Kind::UnicodeChar, Kind::ImmutableSet, Kind::Struct, Kind::ByteStore, Kind::MutByteStore,
         ][code as usize]
     }
 }
@@ -459,6 +469,7 @@ pub fn kind_of(v: Value) -> Kind {
         KIND_SET => Kind::ImmutableSet,
         KIND_STRUCT => Kind::Struct,
         KIND_BYTES => Kind::ByteStore,
+        KIND_MUTBYTES => Kind::MutByteStore,
         _ => panic!("not a program value: {v:#x}"),
     }
 }
@@ -489,6 +500,15 @@ pub fn bytes_of<'a>(v: Value) -> &'a [u8] {
     debug_assert_eq!(heap_kind(v), KIND_BYTES);
     // SAFETY: V is a live, fully constructed storage (a tagged heap pointer of
     // kind KIND_BYTES); the payload is immutable for the object's life.
+    unsafe { BytesObj::payload(v) }
+}
+
+/// The payload of the MutableBytes storage V (read-only view of its inline
+/// bytes; writers use `BytesObj::payload_mut` on their own fresh clone).
+pub fn mutbytes_of<'a>(v: Value) -> &'a [u8] {
+    debug_assert_eq!(heap_kind(v), KIND_MUTBYTES);
+    // SAFETY: V is a live, fully constructed storage (a tagged heap pointer of
+    // kind KIND_MUTBYTES), written only while private to its creator.
     unsafe { BytesObj::payload(v) }
 }
 
