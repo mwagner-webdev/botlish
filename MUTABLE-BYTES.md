@@ -484,3 +484,134 @@ operations under a collection at every allocation.
   never moves, so only liveness is needed.
 * **`MutableArray`**: still a reference; whether it should become a value too is a
   separate design.
+
+## Fuzz results
+
+`audit/mutable-bytes/tools/fuzz.tcl`, recorded in `audit/mutable-bytes/fuzz-result.txt`. Each program is
+seeded individually (a failure replays with `-seed S -n 1`); the oracle is an independent Tcl byte-list
+model that never reads what the program computes.
+
+| run | what | result |
+|---|---|---|
+| `-mode both -n 60 -seed 1 -items 12` | pure scripts on interp, compile, cranelift-generic and cranelift **and** native read programs, normal and under GC stress | 60 programs, 787 values, **0 failures** |
+| `-mode pure -n 40 -seed 9001 -items 14` | the same pure checks, a second seed range | 40 programs, 441 values, **0 failures** |
+| `-mode read -n 60 -seed 5001 -gc-stress 1` | sequential file reads and a pipe read, whole process under GC stress | 60 programs, 240 values, **0 failures** |
+| `-mode read -n 80 -seed 12001` | the same, a larger run | 80 programs, 320 values, **0 failures** |
+
+The pure scripts check the contents of every variable and snapshot *at the end*, so an update that
+leaked into an earlier copy through any route (binding, generic identity, List, struct, detach, double
+update) would show. The read mode checks every result (`min(capacity, remaining)`), the returned buffer
+(bytes read then the untouched suffix), the caller's own buffer, and the file's remaining input.
+
+## Mutation results
+
+`audit/mutable-bytes/tools/mutate.tcl`, recorded in `audit/mutable-bytes/mutate-result.txt`: eighteen
+mutants run in a scratch copy of the tree (Rust mutants rebuild the native backend there) against
+`tests/abi-mutable-bytes.test` and the read fuzzer: **18 killed, 0 survivors**.
+
+| mutant | killed by |
+|---|---|
+| `clone-aliases` (the detach returns its operand) | 6 tests, fuzzer |
+| `set-aliases` (an update writes its operand in place) | 24 tests |
+| `read-does-not-detach` (the kernel writes the caller's storage) | 10 tests |
+| `freeze-shares` (zero-copy freeze: flips the object into a Bytes) | 22 tests |
+| `from-bytes-shares` (`mutable_bytes_from_bytes` reuses the Bytes' storage) | 2 tests |
+| `clone-zeroes` (the detach loses contents; suffix would read zeros) | 5 tests |
+| `address-one-late` (writable bridge + 1) | 18 tests |
+| `read-uses-bytes-bridge` (readable address op for the writable bridge) | 28 tests |
+| `count-off-by-one` (rdx = length + 1) | 5 tests |
+| `count-unrelated` (rdx = constant 1) | 13 tests |
+| `no-keepalive` | 11 tests (liveness routes, CLIF stack map, the detector) |
+| `result-is-the-original` (read returns the pre-syscall buffer) | 13 tests |
+| `rax-is-write` (syscall number 1) | 12 tests |
+| `libc-read` (libc `read` for rax = 0) | 3 tests: raw negative result (libc gives -1, not -9), the strace stack |
+| `read-twice` | 15 tests |
+| `prefix-is-suffix` | 6 tests |
+| `equality-by-identity` | 8 tests |
+| `hash-ignores-length` | 1 test (the one comparing hash *values* across backends) |
+
+Honest notes. Two mutants were first refused by the tool's own guard, both tool bugs rather than product
+bugs: `read-uses-bytes-bridge` *compiles* and fails at run time (a TYPE error, exactly the kill wanted),
+which the guard misread as a compile error, and `count-off-by-one`'s helper function was appended after
+its use (the language has no forward references). The tool was fixed and those two re-run: both killed.
+A "list/struct copy aliases" mutant is not expressible as such: no boundary copies anything, so the
+aliasing mutants are the two write paths (`clone-aliases`, `set-aliases`), which the List, struct, generic,
+`any` and closure routes of the theorem tests then catch. And `hash-ignores-length` is, as for `Bytes`,
+caught by one test only, since equal values still hash equal without the count.
+
+## Regression
+
+Every run below is the whole suite on the final tree, native backend built from it, under
+`LANG=C.utf8 LC_ALL=C.utf8`.
+
+| run | command | result |
+|---|---|---|
+| interpreter | `CORE_BACKEND=interp tclsh9.0 tests/all.tcl` | 5621 tests, **5621 passed**, 0 failed |
+| Tcl compiler | `CORE_BACKEND=compile tclsh9.0 tests/all.tcl` | 5621 tests, **5617 passed**, 4 skipped (the `coreScoping` constraint, as for every compile run), 0 failed |
+| native/cranelift coverage | `tclsh9.0 tests/native-coverage.tcl` | 5655 tests: 3104 independent of the backend, 70 passed-partial, 60 unsupported (constructs native does not run, as in the baseline), **0 failed** |
+| GC-stress suite | `BOTLISH_NATIVE_GC_STRESS=1 CORE_BACKEND=interp tclsh9.0 tests/all.tcl` | 5621 tests, **5621 passed**, 0 failed |
+| Rust | `cargo test --release --manifest-path native/Cargo.toml` | **183 + 28 passed**, 0 failed |
+
+Named areas, each file on its own: `abi-mutable-bytes` 76/76 (also 76/76 under GC stress and under
+`CORE_BACKEND=compile`), `abi-bytes` 73/73, `abi-numeric` 41/41, `linux-syscall` 37/37,
+`stdlib-namespaces` 74/74; `opaque-struct`, `imports`, `proven-bounds` and the proof files are part of
+the whole-suite runs above.
+
+The first complete interpreter run found four failures, all tests that *pin the exact set of native
+names* (`abi-numeric-no-compiler-knowledge`, `linux-syscall-native-registered`,
+`linux-syscall-no-syscall-specific-intrinsics`, `ns-qualified-inventory`) and so had to list the new
+natives; two Bytes tests that enumerated `abi.bot`'s whole function list and the `byte_store` natives
+were narrowed to the immutable surface (the writable family is pinned in the new file). Nothing else
+changed in an existing test, and the immutable `Bytes` suite is green: `Bytes` is still physically
+shareable and is never subjected to any `MutableBytes` copy behaviour.
+
+## Milestone report (the 48 items)
+
+1. **Declaration:** `opaque struct MutableBytes: storage: any` (lib/abi.bot).
+2. **Constructor:** `abi::mutable_bytes(length: abi::Usize)`, zero-filled.
+3. **`abi::mutable_bytes_from_bytes(data: Bytes)`:** an independent writable copy.
+4. **Length:** `abi::mutable_bytes_length(data) -> abi::Usize`.
+5. **Update:** `abi::mutable_bytes_set(data, index, value) -> MutableBytes errors IndexNotFound`; a new value.
+6. **Freeze:** `abi::freeze(data) -> Bytes`, a copying snapshot.
+7. **Freeze prefix:** `abi::freeze_prefix(data, count: Usize) -> Bytes errors UpperOverrun`.
+8. **Native layout:** `KIND_MUTBYTES = 14`, `hdr(8) | len(8) | payload`, one allocation, 16-aligned, payload at +16, no tracing.
+9. **Tcl representation:** `{mutbytes HEX}`, a value kind of its own.
+10. **Equality:** by current contents.
+11. **Hash:** by current contents, kind tag 10; values agree on all backends.
+12. **Logical copy:** any second observable use of the value (binding, argument, result, field, element, capture, erased transport); independent by construction.
+13. **Boundaries audited:** the census table above.
+14. **Copy mechanism:** "published storage is never written": updates and the kernel's write go to a fresh copy (`rt_mbytes_set`, `rt_mbytes_clone`).
+15. **Through `any`:** independent (tested).
+16. **Through generics:** independent (tested).
+17. **List:** independent; storing copies nothing.
+18. **Struct:** independent.
+19. **Closure:** a captured value never changes.
+20. **`MutableArray`:** unchanged (reference semantics, noted).
+21. **Eager-copy strategy:** every update copies the whole buffer; measured in the allocation table.
+22. **Copy elision for free:** wrapper scalar replacement; the returned buffer is the register the kernel wrote.
+23. **Future COW:** the hook table above (`rt_mbytes_set` / `rt_mbytes_clone`).
+24. **Writable bridge:** `abi::x86_64::from_mutable_bytes(data) -> Register64`.
+25. **Provenance:** the existing `keepAddr`, generalized to both bridges, not duplicated.
+26. **GC keepalive:** `op keepalive` of the exact storage after the syscall; six routes, mutant detected.
+27. **`linux::ReadResult`:** `struct ReadResult: result: int; data: abi::MutableBytes`.
+28. **`linux::read` source:** above.
+29. **Register mapping:** `rax = 0, rdi = fd, rsi = payload address, rdx = length, r10 = r8 = r9 = 0`.
+30. **Caller's buffer:** unchanged (tested, incl. two reads of one original).
+31. **Short reads:** the raw positive count; only the prefix is written.
+32. **EOF:** the raw 0, buffer unchanged.
+33. **Negative errno:** the raw value (-9), buffer unchanged.
+34. **Untouched suffix:** `01 02 03 AA AA AA` test.
+35. **Stdin example:** `examples/linux/read-stdin.bot`.
+36. **Binary stdin test:** NUL, 0x80, 0xff, multi-byte UTF-8, through the example.
+37. **NIR evidence:** above.
+38. **Machine-code evidence:** above.
+39. **strace evidence:** above (stdin read, binary short read, EOF, bad fd).
+40. **libc `read` is not the wrapper path:** no libc read call in `linux::read`; no libc frame in the kernel's stack; one `syscall` instruction in the whole executable.
+41. **Allocation measurements:** the table above.
+42. **GC-stress results:** suite 5621/5621; new suite 76/76; forty-read reassembly exact.
+43. **Fuzz results:** the table above.
+44. **Mutation results:** 18 of 18 killed.
+45. **Full regression:** the table above.
+46. **Limitations:** listed above.
+47. **Before COW:** a uniqueness/count bit and the two hooks.
+48. **Before retained writable pointers/resources:** ownership anchoring, lifetimes beyond one synchronous call, destructors, `direct`/raw-ABI restrictions.
