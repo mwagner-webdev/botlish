@@ -13,10 +13,27 @@ and the NIR of every compilation in `tests/all.tcl`, `tests/native-coverage.tcl`
 the corpus (`bench/corpus.tcl`) and every example/bench `.bot` file are
 identical to the parent's (§ 4).
 
+| program | used instances | range before | range after | `native::lowered` before | after |
+|---|---|---|---|---|---|
+| 100-function chain | 102 | 5,598 ms | **444 ms** | 8,542 ms | 3,147 ms |
+| 200-function chain | 202 | 23,050 ms | **1,151 ms** | 33,890 ms | 11,572 ms |
+| 100-function narrowing chain | 103 | 12,482 ms | **368 ms** | 13,739 ms | 1,829 ms |
+| 200-function narrowing chain | 203 | 51,888 ms | **995 ms** | 58,041 ms | 6,714 ms |
+
+The number of instance walks a range analysis makes is now linear (5 per
+instance on the chain, 8 on the narrowing chain, at every size; before:
+10,608 and 42,026 walks at N=100). No corpus or bench program got slower
+(§ 3). The quadratic term that remains is outside these loops:
+`hir::specialize::view`'s per-instance copy of the whole program (§ 5),
+now the largest part of `native::lowered` on large programs. Separately,
+the frontend fails on static call chains deeper than about 110 functions
+(§ 6). This change addresses neither.
+
 Files: `hir/range.tcl` (`Fixpoint`, `NarrowRounds`, five small helpers),
 `tests/range-fixpoint-scaling.test` (4 tests),
-`audit/range-fixpoint-scaling/tools/` (program generators, timing harness,
-output dump and comparison).
+`audit/range-fixpoint-scaling/tools/` (`chains.tcl` program generators,
+`timing.tcl`, and `dump.tcl`, `lowerall.tcl` and `compare.tcl` for the
+output comparison).
 
 ## 1. Diagnosis
 
@@ -145,11 +162,107 @@ each instance's facts change a constant number of times.
 
 ## 3. Timings
 
-Pending: measured on a quiet machine once the verification runs (§ 4) finish.
+Measured with `audit/range-fixpoint-scaling/tools/timing.tcl` on an
+otherwise idle machine. Programs are from `tools/chains.tcl`; `chain N` is
+the shape from the original report. Times are milliseconds: range is the
+median of 3 runs of `hir::range::analyze` on prepared HIR, lowered is one
+`native::lowered`, and frontend is one `surface::readProgramFile`, which is
+unchanged and shown for scale. Walks is the number of `AnalyzeInstance`
+calls in one analysis. "before" is the parent commit, "step 1" the walk
+memo alone, and "step 2" both changes (this tree).
+
+| program | ids | frontend | range before | range step 1 | range step 2 | lowered before | lowered step 2 | walks before | walks after |
+|---|---|---|---|---|---|---|---|---|---|
+| chain 25 | 27 | 526 | 426 | 106 | **94** | 695 | 362 | 783 | 132 |
+| chain 50 | 52 | 1,025 | 1,480 | 237 | **183** | 2,247 | 1,080 | 2,808 | 257 |
+| chain 100 | 102 | 2,327 | 5,598 | 667 | **444** | 8,542 | 3,147 | 10,608 | 507 |
+| chain 200 | 202 | 5,838 | 23,050 | 2,100 | **1,151** | 33,890 | 11,572 | 41,208 | 1,007 |
+| narrow 25 | 28 | 240 | 676 | 111 | **62** | 1,482 | 848 | 3,026 | 218 |
+| narrow 50 | 53 | 489 | 2,801 | 369 | **154** | 3,143 | 577 | 11,026 | 418 |
+| narrow 100 | 103 | 1,062 | 12,482 | 1,362 | **368** | 13,739 | 1,829 | 42,026 | 818 |
+| narrow 200 | 203 | 2,876 | 51,888 | 4,659 | **995** | 58,041 | 6,714 | 164,026 | 1,618 |
+
+Before, range time grew about 4x per doubling; after, about 2.5x. The walk
+count is exactly linear (5·ids − 3 and 8·ids − 6). What still grows faster
+than linear is the per-walk cost, from 0.7 ms to 1.1 ms per walk between 27
+and 202 instances. That is `Fixpoint`'s one `view` per instance, each a copy
+of the whole program's exprs (§ 5): about a third of the analysis at
+N=200. Step 1 alone already removes the repeated walks. Step 2 removes the
+per-round bookkeeping that remained (the joins and folds over every
+instance), which at N=200 was about half of step 1's time.
+
+Ordinary programs (all `bench/*.bot` and `examples/stdlib/*.bot`, range
+median of 7) got no slower and often faster, because they too re-walked
+instances whose inputs had not changed:
+
+| program | ids | range before | range after | walks before | walks after |
+|---|---|---|---|---|---|
+| `bench/refined-checks.bot` | 32 | 93.1 | 47.5 | 359 | 145 |
+| `examples/stdlib/csv_records.bot` | 60 | 184.0 | 136.4 | 558 | 280 |
+| `examples/stdlib/hashtable.bot` | 31 | 85.4 | 60.1 | 285 | 134 |
+| `examples/stdlib/csv_chunked.bot` | 20 | 51.0 | 41.1 | 126 | 88 |
+| `bench/uri-steady.bot` | 19 | 35.9 | 28.9 | 122 | 87 |
+| `bench/lex-strategy.bot` | 11 | 23.6 | 17.7 | 85 | 56 |
+| `bench/fib.bot` | 2 | 15.2 | 14.8 | 60 | 55 |
+
+The other ten programs took at most 36 ms before and are unchanged or
+faster within noise (`fib` is the median of 21 runs, measured twice).
+
+The regression test `tests/range-fixpoint-scaling.test` counts walks, not
+time: on two 40-function chains it pins the facts at both ends and bounds
+the walks per instance (8 and 12). The parent fails the two walk tests
+(86 and 168 walks per instance) and passes the two fact tests.
 
 ## 4. Verification
 
-Pending: the full-suite and corpus comparison runs are in progress.
+**By construction.** Each skipped step recomputes a value already
+present (§ 2), so the rounds and the facts are those of the parent.
+
+**Byte for byte.** `audit/range-fixpoint-scaling/tools/dump.tcl`, loaded
+into scratch worktrees of the parent, of step 1 and of step 2 (a temporary
+two-line hook, never committed), recorded every `hir::range::analyze`
+result (the whole analysis dict) and every NIR text that
+`native::lower::program` produced, while running:
+
+* `tclsh9.0 tests/all.tcl` (interp and compile backends);
+* `tclsh9.0 tests/native-coverage.tcl` (the whole suite on cranelift);
+* `bench/corpus.tcl -runs 1 -backends "cranelift cranelift-generic"`
+  (every corpus case, specialized and generic);
+* `native::lowered` of every `bench/*.bot` and `examples/*/*.bot` file,
+  specialized and generic (`tools/lowerall.tcl`).
+
+`tools/compare.tcl` compares the multiset of results per suite:
+
+| suite | records (range + NIR) | distinct outputs | step 1 vs parent | step 2 vs parent |
+|---|---|---|---|---|
+| `tests/all.tcl` | 43,900 (21,722 + 22,178) | 8,490 | identical | identical |
+| `tests/native-coverage.tcl` | 22,647 (11,244 + 11,403) | 8,899 | identical | identical |
+| corpus | 266 (133 + 133) | 56 | identical | identical |
+| `.bot` files | 124 (64 + 60) | 110 | identical | identical |
+
+On all three trees, `tests/all.tcl` passed (5,690 interp tests passed; on
+compile 5,686 passed and 4 were skipped), and native coverage was the same:
+2,373 native, 3,221 independent, 70 passed-partial, 60 unsupported,
+0 failed.
+
+**Knobs.** On 8 programs (both chain shapes, `fib`, `refined-checks`,
+`lex-strategy`, `csv_records`, `hashtable`, `string_replace`), every
+combination of `-call-facts-opt`, `narrowOpt`, `captureOpt`,
+`resultNarrowOpt` and `resultNarrowRoundLimit` (unset, 0, 1, 2): 320
+analyses, plus `Fixpoint`'s raw return including its internal `state` (all
+but the views). All identical to the parent's, dict key order included.
+
+Two notes on the method. A call's arguments embed the compiler tree's path
+(an imported module's source location), so the comparison is of outputs,
+not of input/output pairs. And `bench/corpus.tcl` currently fails on main
+independently of this change: its per-case child process compiles with
+warnings on, `examples/stdlib/string_reverse.bot` now draws METHOD-ELIGIBLE
+warnings, and the parent's `exec` treats that stderr output as a failure.
+The corpus runs above set `BOTLISH_WARNINGS=off`. The verification ran on
+the parent commit `08b81e7`. The change was then rebased onto the main of
+the time, whose new commits do not touch `hir/range.tcl` or
+`hir/rangerec.tcl`, and the range test files were re-run there (291 tests,
+all passed).
 
 ## 5. Other quadratic terms found
 
