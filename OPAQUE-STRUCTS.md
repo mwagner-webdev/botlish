@@ -63,7 +63,7 @@ There is no `namespace` declaration, so there is nothing to spell differently.
 Authority is **exact**: the declaring module only. No friend declaration,
 package visibility, access list or namespace inheritance exists, and none was
 invented. A parent module has none over its child's opaque structs, a child none
-over its parent's, `import abi` grants nothing over `abi::Bytes`, a transitive
+over its parent's, `import abi` grants nothing over `abi::bytes::Bytes`, a transitive
 dependency grants nothing, and a struct that merely *holds* an opaque value (in a
 field, a list) grants nothing over it. Imports authorize naming cross-module
 symbols; they never grant representation authority.
@@ -378,7 +378,7 @@ opaque resource context struct Something:   contextual authority / lifetime = th
 
 `context struct`, `resource struct`, `with`, RAII, destructors, drop semantics,
 borrow checking, lifetime parameters, affine/linear types, move semantics,
-actor/thread transfer restrictions, `abi::Bytes`, `MutableBytes`, `CString`, raw
+actor/thread transfer restrictions, `abi::bytes::Bytes`, `MutableBytes`, `CString`, raw
 pointers, FFI pointer retention, friend modules, per-field visibility, protected
 fields, inheritance, visibility levels, reflection, generated getters/setters,
 namespace aliases, new struct equality semantics, custom hash semantics. No

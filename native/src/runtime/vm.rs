@@ -170,7 +170,7 @@ pub struct Vm {
     /// Strings are immutable, so sharing it is unobservable.
     empty_str: *mut Header,
     /// The one canonical empty byte storage (static, like `empty_str`):
-    /// `abi::bytes([])` allocates nothing. Storages are immutable, so sharing
+    /// `abi::bytes::from_list([])` allocates nothing. Storages are immutable, so sharing
     /// it is unobservable (a Bytes' identity is not part of its value).
     empty_bytes: *mut Header,
     /// The one canonical EMPTY writable storage (static): a zero-length
@@ -568,7 +568,7 @@ impl Vm {
     }
 
     /// `alloc_bytes` for either storage kind (KIND_BYTES, or KIND_MUTBYTES for
-    /// an `abi::MutableBytes`): the same single block, the same ceiling, the
+    /// an `abi::bytes::MutableBytes`): the same single block, the same ceiling, the
     /// same collect-before-the-object-exists sequence.
     fn alloc_byte_storage(&mut self, kind: u8, len: usize) -> Result<BytesInit, Value> {
         if len > MAX_COLLECTION_LENGTH {

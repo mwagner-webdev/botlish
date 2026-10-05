@@ -1,5 +1,5 @@
 #!/usr/bin/env tclsh9.0
-# fuzz.tcl -- randomized differential check of abi::Bytes and linux::write
+# fuzz.tcl -- randomized differential check of abi::bytes::Bytes and linux::write
 # (ABI-BYTES.md).
 #
 #   tclsh9.0 audit/abi-bytes/tools/fuzz.tcl ?-mode pure|write|both? ?-n N?
@@ -15,7 +15,7 @@
 #   8-bit data, repeated patterns, and larger buffers up to a few thousand
 #   bytes -- builds each as a List[Byte], and checks against an independent Tcl
 #   byte-sequence oracle:
-#       length          abi::bytes_length(abi::bytes(L)).value == |L|
+#       length          abi::bytes::length(abi::bytes::from_list(L)).value == |L|
 #       contents        the explicit internal reveal of the Bytes itself shows
 #                       exactly the oracle's hex (every byte, in order)
 #       construction    two Bytes built separately from equal Lists are equal
@@ -27,7 +27,7 @@
 #
 # write  (native only, Linux x86-64; the only syscall made is write(2) to a
 #         temp file and to a pipe the harness reads, never a fuzzed number)
-#   Each program writes its K generated payloads (as separate abi::Bytes, plus
+#   Each program writes its K generated payloads (as separate abi::bytes::Bytes, plus
 #   one aliased value written twice) to descriptor 3 (a file) and descriptor 4
 #   (a pipe whose other end this process reads), one linux::write each, and
 #   checks that the bytes the kernel received are exactly the concatenation
@@ -298,24 +298,24 @@ proc pureProgram {specs} {
     set i 0
     foreach spec $specs {
         set source [specSource $spec]
-        append lets "a$i = abi::bytes($source)\n"
-        append lets "c$i = abi::bytes($source)\n"
+        append lets "a$i = abi::bytes::from_list($source)\n"
+        append lets "c$i = abi::bytes::from_list($source)\n"
         append lets "b$i = a$i\n"
         set diffs {}
         set j 0
         foreach m [mutantSpecs $spec] {
-            append lets "m${i}_$j = abi::bytes([specSource $m])\n"
+            append lets "m${i}_$j = abi::bytes::from_list([specSource $m])\n"
             lappend diffs "a$i == m${i}_$j"
             incr j
         }
-        lappend results "abi::bytes_length(a$i).value" "a$i" "a$i == c$i" "hash(a$i) == hash(c$i)" \
+        lappend results "abi::bytes::length(a$i).value" "a$i" "a$i == c$i" "hash(a$i) == hash(c$i)" \
             "a$i == b$i" "\[a$i, b$i\] == \[b$i, a$i\]" {*}$diffs
         if {$i > 0} {
             lappend results "a$i == a[expr {$i - 1}]" "(hash(a$i) == hash(a[expr {$i - 1}]))"
         }
         incr i
     }
-    return "import abi\nimport byte\nimport str\n\n$::genFunctions\n${lets}\[[join $results {, }]\]\n"
+    return "import abi\nimport abi::bytes\nimport byte\nimport str\n\n$::genFunctions\n${lets}\[[join $results {, }]\]\n"
 }
 
 proc boolWord {v} { return [expr {$v ? "true" : "false"}] }
@@ -326,7 +326,7 @@ proc pureExpected {specs} {
     set i 0
     foreach spec $specs {
         set bytes [renderSpec $spec]
-        lappend results [llength $bytes] "abi::Bytes {storage: <bytes [llength $bytes]: [hexOf $bytes]>}" true true true true
+        lappend results [llength $bytes] "abi::bytes::Bytes {storage: <bytes [llength $bytes]: [hexOf $bytes]>}" true true true true
         foreach m [mutantSpecs $spec] {
             # The mutant is unequal by construction unless the rendered bytes
             # happen to coincide: the oracle compares them.
@@ -353,7 +353,7 @@ proc writeProgram {specs} {
     set results {}
     set i 0
     foreach spec $specs {
-        append lets "d$i = abi::bytes([specSource $spec])\n"
+        append lets "d$i = abi::bytes::from_list([specSource $spec])\n"
         lappend results "out([expr {3 + $i % 2}], d$i)"
         incr i
     }
@@ -366,7 +366,7 @@ import linux
 import str
 
 $::genFunctions
-fn out(fd: int, data: abi::Bytes) -> int errors AbiIntegerBelowRange, AbiIntegerAboveRange:
+fn out(fd: int, data: abi::bytes::Bytes) -> int errors AbiIntegerBelowRange, AbiIntegerAboveRange:
     linux::write(abi::i32(fd), data)
 
 ${lets}\[[join $results {, }]\]\n"

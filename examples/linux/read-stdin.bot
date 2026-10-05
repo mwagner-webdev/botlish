@@ -2,11 +2,11 @@
 # output, through Botlish's own raw Linux x86-64 syscall path
 # (MUTABLE-BYTES.md):
 #
-#   abi::mutable_bytes(4096)   a zero-filled, writable, owned byte VALUE
+#   abi::bytes::zeroed(4096)   a zero-filled, writable, owned byte VALUE
 #     --linux::read-----------> read(2): rax = 0, rdi = 0, rsi = the payload
 #                               address, rdx = 4096; ONE syscall
 #     --linux::ReadResult-----> the kernel's raw ssize_t + the updated buffer
-#     --abi::freeze_prefix----> an immutable abi::Bytes of exactly the bytes read
+#     --abi::bytes::freeze_prefix----> an immutable abi::bytes::Bytes of exactly the bytes read
 #     --linux::write----------> write(2) to descriptor 1 (rax = 1)
 #
 # No libc `read` or `write`, no special runtime implementation of either, and
@@ -26,9 +26,10 @@
 #   17                      <- the bytes written (the runner prints the result)
 
 import abi
+import abi::bytes
 import linux
 
-buffer = abi::mutable_bytes(abi::usize(4096))
+buffer = abi::bytes::zeroed(abi::usize(4096))
 result = linux::read(abi::i32(0), buffer)
 
 n = result.result
@@ -40,9 +41,9 @@ if n > 0:
     count = abi::usize(n):
         on AbiIntegerAboveRange:
             abi::usize(0)
-    data = abi::freeze_prefix(result.data, count):
+    data = abi::bytes::freeze_prefix(result.data, count):
         on UpperOverrun:
-            abi::bytes([])
+            abi::bytes::from_list([])
     linux::write(abi::i32(1), data)
 else:
     n

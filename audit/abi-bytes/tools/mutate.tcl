@@ -72,13 +72,13 @@ set mutations {
         {Some(n) if (0..=255).contains(&n) => n as u8,}
         {Some(n) if (0..=255).contains(&n) => (n as u8) & 0x7f,}}
     {count-truncated tcl lib/linux.bot
-        {fn write(fd: abi::I32, data: abi::Bytes) -> int:
+        {fn write(fd: abi::I32, data: abi::bytes::Bytes) -> int:
     abi::x86_64::to_int(
         linux::abi::syscall({
             rax: abi::x86_64::register64(1),
             rdi: abi::x86_64::from_i32(fd),
             rsi: abi::x86_64::from_bytes(data),
-            rdx: abi::x86_64::from_usize(abi::bytes_length(data)),
+            rdx: abi::x86_64::from_usize(abi::bytes::length(data)),
         })
     )}
         {fn trunc16(n: abi::Usize) -> abi::Usize:
@@ -88,13 +88,13 @@ set mutations {
     else:
         abi::Usize {value: v}
 
-fn write(fd: abi::I32, data: abi::Bytes) -> int:
+fn write(fd: abi::I32, data: abi::bytes::Bytes) -> int:
     abi::x86_64::to_int(
         linux::abi::syscall({
             rax: abi::x86_64::register64(1),
             rdi: abi::x86_64::from_i32(fd),
             rsi: abi::x86_64::from_bytes(data),
-            rdx: abi::x86_64::from_usize(trunc16(abi::bytes_length(data))),
+            rdx: abi::x86_64::from_usize(trunc16(abi::bytes::length(data))),
         })
     )}}
     {no-keepalive tcl native/lower.tcl
@@ -105,9 +105,9 @@ fn write(fd: abi::I32, data: abi::Bytes) -> int:
     }}}
     {address-in-rdx tcl lib/linux.bot
         {            rsi: abi::x86_64::from_bytes(data),
-            rdx: abi::x86_64::from_usize(abi::bytes_length(data)),}
+            rdx: abi::x86_64::from_usize(abi::bytes::length(data)),}
         {            rdx: abi::x86_64::from_bytes(data),
-            rsi: abi::x86_64::from_usize(abi::bytes_length(data)),}}
+            rsi: abi::x86_64::from_usize(abi::bytes::length(data)),}}
     {libc-write rust native/src/runtime/syscall.rs
         {    let result: i64;}
         {    if rax == 1 {
@@ -116,15 +116,15 @@ fn write(fd: abi::I32, data: abi::Bytes) -> int:
     }
     let result: i64;}}
     {write-twice tcl lib/linux.bot
-        {fn write(fd: abi::I32, data: abi::Bytes) -> int:
+        {fn write(fd: abi::I32, data: abi::bytes::Bytes) -> int:
     abi::x86_64::to_int(}
-        {fn write(fd: abi::I32, data: abi::Bytes) -> int:
+        {fn write(fd: abi::I32, data: abi::bytes::Bytes) -> int:
     abi::x86_64::to_int(
         linux::abi::syscall({
             rax: abi::x86_64::register64(1),
             rdi: abi::x86_64::from_i32(fd),
             rsi: abi::x86_64::from_bytes(data),
-            rdx: abi::x86_64::from_usize(abi::bytes_length(data)),
+            rdx: abi::x86_64::from_usize(abi::bytes::length(data)),
         })
     )
     abi::x86_64::to_int(}}

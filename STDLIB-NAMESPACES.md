@@ -78,9 +78,9 @@ and `ns-qualified-inventory` pin the after-state in a fresh process):
 | `immutable_set_from_list immutable_set_contains` | standard type op (ImmutableSet) | `immutable_set::from_list/contains` |
 | `char_codepoint` | standard type op (UnicodeChar; the primitive behind `lib/char.bot`'s existing `char::codepoint`) | `char::scalar_value` (the follow-up removed the `char::codepoint` wrapper, §11) |
 | `linux::abi::syscall` | platform-ABI, already qualified | unchanged |
-| (added later, ABI-BYTES.md) `byte_store::from_list`, `byte_store::byte_count` | standard type ops of the byte-storage value kind behind `abi::Bytes` (like `immutable_set::*` for `ImmutableSet`) | `byte_store::*` |
+| (added later, ABI-BYTES.md) `byte_store::from_list`, `byte_store::byte_count` | standard type ops of the byte-storage value kind behind `abi::bytes::Bytes` (like `immutable_set::*` for `ImmutableSet`) | `byte_store::*` |
 | (added later, ABI-BYTES.md) `abi::x86_64::from_bytes` | platform-ABI raw address bridge, already qualified | `abi::x86_64::from_bytes` |
-| (added later, MUTABLE-BYTES.md) `byte_store::mutable_new/_from/_count/_set/_copy`, `byte_store::freeze`, `byte_store::freeze_prefix` | standard type ops of the writable byte-storage value kind behind `abi::MutableBytes` | `byte_store::*` |
+| (added later, MUTABLE-BYTES.md) `mutable_byte_store::zeroed/_from/_count/_set/_copy`, `mutable_byte_store::freeze`, `mutable_byte_store::freeze_prefix` | standard type ops of the writable byte-storage value kind behind `abi::bytes::MutableBytes` | `byte_store::*` |
 | (added later, MUTABLE-BYTES.md) `abi::x86_64::from_mutable_bytes` | platform-ABI writable raw address bridge, already qualified | `abi::x86_64::from_mutable_bytes` |
 
 Source-declared types still register their constructor/predicate natives at

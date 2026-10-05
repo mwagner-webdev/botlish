@@ -1,0 +1,168 @@
+# abi/bytes.bot -- the "abi::bytes" namespace: the ABI memory values
+# (ABI-BYTES.md, MUTABLE-BYTES.md). One module owns BOTH opaque types, so every
+# operation that touches a representation -- a projection of `storage` or a
+# construction -- lives here, and nothing outside can: the single-owner rule of
+# OPAQUE-STRUCTS.md is not loosened, and the two types convert into each other
+# (`from_bytes`, `freeze`) without any public accessor. What is here is only
+# that primitive surface; policy (linux::read, linux::write, ...) is built on it
+# elsewhere. The address bridges (abi::x86_64::from_bytes / from_mutable_bytes)
+# are root natives outside this module: they take an address, never a value.
+#
+# ---------------------------------------------------------------------------
+# Bytes: the first owned ABI memory value (ABI-BYTES.md).
+#
+# A Bytes is an immutable, finite sequence of bytes with an exact length,
+# whose contiguous ABI representation exists whenever a foreign boundary
+# needs it. It is an ordinary Botlish value -- copy it, alias it, store it in
+# a List, compare it, hash it -- with an opaque representation. It is NOT a
+# String (no characters, no encoding), a C string (nothing terminates it: a
+# 0 byte is an ordinary byte and the length is explicit and authoritative), a
+# pointer, a borrow, a resource, a mutable buffer or an iterator.
+#
+#   data = abi::bytes::from_list(str::encode_utf8("héllo\n"))   # 7 bytes
+#   n = abi::bytes::length(data)                                     # an abi::Usize
+#
+# * Creation is EAGER. from_list(values) converts the List into storage the
+#   resulting Bytes owns; afterwards the List (or the String it was encoded
+#   from) is irrelevant -- the Bytes is not a view of it and does not retain
+#   it. Every element must be a byte::Byte and is stored exactly: there is
+#   no `mod 256`, no signed reinterpretation and no character coercion, so a
+#   List that is statically not a List of bytes is rejected by the ordinary
+#   typing of the parameter below.
+# * Equality and hashing are by the bytes: two Bytes with different contents
+#   are unequal. No address, buffer identity, allocation identity or sharing
+#   is observable, and none of the physical choices (a static constant, a heap
+#   buffer, one buffer shared by every alias or a copy per alias) can be told
+#   apart.
+# * The one hidden field, `storage`, is the owned byte storage (a runtime
+#   value of its own kind, core/bytestore.tcl, natively one allocation of
+#   header + length + payload). Only this module may name it: a projection or
+#   construction anywhere else is OPAQUE-REPRESENTATION / OPAQUE-
+#   CONSTRUCTION, and the machine address of the payload is available only
+#   through the raw architecture bridge abi::x86_64::from_bytes, never from
+#   the Bytes itself.
+#
+# ---------------------------------------------------------------------------
+# MutableBytes: the writable counterpart (MUTABLE-BYTES.md).
+#
+# A MutableBytes is a finite sequence of bytes of one fixed length whose
+# CONTENTS can change, and it is a VALUE: mutable storage does not imply
+# reference semantics. If a program logically copies one, the copies are
+# independent -- changing one never changes another because the
+# implementation happened to hold both in the same heap object:
+#
+#   a = abi::bytes::from_bytes(original)
+#   b = a                                       # a logical copy
+#   a2 = abi::bytes::replace(a, 0, x)           # a2 differs from a ...
+#   abi::bytes::freeze(b) == original           # ... and b (and a) did not change
+#
+# This holds through every route a value can take -- a binding, a function
+# argument or result, a struct field, a List element, a generic or `any`
+# parameter, a closure capture -- because there is exactly one rule: a
+# MutableBytes' storage is never written once it is a value anyone can
+# hold. Every operation that changes contents (`replace` here, linux::read's
+# kernel write) works on a FRESH copy of the storage and returns that copy as
+# the new value. Copying a value, passing it and storing it are therefore
+# plain sharing (nothing needs a copy at those boundaries), and an update
+# costs one copy of the bytes. That eager copy is an implementation choice,
+# not part of the semantics: a later optimization (copy-on-write, uniqueness
+# or deadness analysis, return-value transfer) may skip a copy when no other
+# value can observe the storage, and must produce the same results.
+#
+# Contrast the things that DO have identity and are meant to: a raw address
+# (the bits are the value), a file descriptor or other handle (the token is
+# the value), and the existing MutableArray (a reference to a shared store).
+#
+# Equality and hashing are by the current bytes (never by storage identity).
+# A MutableBytes is not a Bytes, String, C string, pointer, borrow, resource,
+# reference, resizable vector or iterator. The length is fixed for the value's
+# lifetime; there is no capacity and no terminator. Nothing is ever
+# uninitialized: `zeroed` zero-fills.
+#
+# The machine address of a payload, for a foreign call that writes it, is
+# available only through abi::x86_64::from_mutable_bytes (the writable twin of
+# from_bytes), which takes the address of the storage of the value it is given
+# and does NOT copy it: a raw-layer caller must hand it a storage nothing else
+# observes (linux::read does, with `detach`). That is the raw layer's sharp
+# edge.
+#
+# Not here, deliberately: slicing, indexing, concatenation, capacity,
+# resizing, NUL-terminated strings (CString), and any retained-pointer or
+# lifetime story.
+import abi
+import byte_store
+import mutable_byte_store
+import type byte::Byte
+
+opaque struct Bytes:
+    storage: any
+
+opaque struct MutableBytes:
+    storage: any
+
+# ---------------------------------------------------------------------------
+# Bytes
+
+# The Bytes holding exactly the given bytes, in order. The empty List gives
+# the empty Bytes (length 0).
+fn from_list(values: List[Byte]) -> Bytes:
+    Bytes {storage: byte_store::from_list(values)}
+
+# The exact byte count of DATA, as the ABI size domain. The runtime's
+# collection-length ceiling (below 2^62) already guarantees the count is a
+# valid native buffer extent, so no caller re-proves 0 <= n <= 2^64 - 1.
+fn length(data: Bytes) -> abi::Usize:
+    abi::Usize {value: byte_store::byte_count(data.storage)}
+
+# ---------------------------------------------------------------------------
+# MutableBytes
+
+# A MutableBytes of LENGTH zero bytes. A length beyond the runtime's
+# collection ceiling (2^62 - 1) is the RANGE error every oversized
+# collection is.
+fn zeroed(length: abi::Usize) -> MutableBytes:
+    MutableBytes {storage: mutable_byte_store::zeroed(length.value)}
+
+# An independent writable copy of DATA's bytes: changing the result never
+# changes DATA.
+fn from_bytes(data: Bytes) -> MutableBytes:
+    MutableBytes {storage: mutable_byte_store::from_storage(data.storage)}
+
+# The exact byte count of DATA; fixed for the life of the value. (Not `length`:
+# this module owns both types and a name denotes one function.)
+fn mutable_length(data: MutableBytes) -> abi::Usize:
+    abi::Usize {value: mutable_byte_store::count(data.storage)}
+
+# DATA with the byte at INDEX replaced by VALUE: a new value; DATA itself is
+# unchanged. IndexNotFound unless 0 <= index < mutable_length(data) (the same
+# error list::at and mutable_array::set use).
+fn replace(data: MutableBytes, index: int, value: Byte) -> MutableBytes errors IndexNotFound:
+    if index < 0:
+        fail IndexNotFound
+    elif index >= mutable_byte_store::count(data.storage):
+        fail IndexNotFound
+    else:
+        MutableBytes {storage: mutable_byte_store::replace(data.storage, index, value)}
+
+# DATA itself, as a value (a logical copy is always the same value), but with
+# its own freshly allocated storage. The one operation that is semantically
+# the identity and physically a copy: what a caller needs before handing the
+# storage to a foreign write (linux::read), because the raw writable bridge
+# writes through the storage it is given. Copy-on-write's "detach", taken
+# every time.
+fn detach(data: MutableBytes) -> MutableBytes:
+    MutableBytes {storage: mutable_byte_store::detach(data.storage)}
+
+# An immutable snapshot of all of DATA's bytes. DATA stays a valid, independent
+# value and the Bytes never changes afterwards.
+fn freeze(data: MutableBytes) -> Bytes:
+    Bytes {storage: mutable_byte_store::freeze(data.storage)}
+
+# An immutable snapshot of the first COUNT bytes of DATA (the bytes a
+# read(2) that returned COUNT wrote). UpperOverrun if COUNT exceeds
+# mutable_length(data): nothing outside the payload is ever read.
+fn freeze_prefix(data: MutableBytes, count: abi::Usize) -> Bytes errors UpperOverrun:
+    if count.value > mutable_byte_store::count(data.storage):
+        fail UpperOverrun
+    else:
+        Bytes {storage: mutable_byte_store::freeze_prefix(data.storage, count.value)}

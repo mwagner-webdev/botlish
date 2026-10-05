@@ -156,12 +156,12 @@ proc hir::syscall::Problems {hir e node} {
 # abi::x86_64::from_mutable_bytes, core/bytestore.tcl) breaks its contract: a
 # list of {KIND MESSAGE EXPR ORIGIN}, as Problems. A bridge takes exactly one
 # argument, and it must statically be the bridge's own opaque struct -- an
-# abi::Bytes for the readable bridge, an abi::MutableBytes for the writable
+# abi::bytes::Bytes for the readable bridge, an abi::bytes::MutableBytes for the writable
 # one, never the other: no run-time check is ever inserted, and native
 # lowering relies on it: it reads the struct's one storage field without
 # looking at the value's kind. (An opaque struct cannot be forged: only
-# module abi can construct one, OPAQUE-STRUCTS.md, so a static abi::Bytes
-# always holds a byte storage and a static abi::MutableBytes a writable one.)
+# module abi can construct one, OPAQUE-STRUCTS.md, so a static abi::bytes::Bytes
+# always holds a byte storage and a static abi::bytes::MutableBytes a writable one.)
 proc hir::syscall::BytesProblems {hir e node} {
     set native [dict get [hir::symbol $hir [lindex [dict get $node target] 1]] name]
     set bytesType [core::bytestore::bridgeType $native]
@@ -177,7 +177,7 @@ proc hir::syscall::BytesProblems {hir e node} {
     }
     if {![hir::structs::declared $bytesType] || ![hir::types::subtype $type [list nstruct $bytesType]]} {
         return [list [list TYPE \
-            "the argument of $native must be an $bytesType ([expr {[core::bytestore::bridgeWritable $native] ? "abi::mutable_bytes(...)" : "abi::bytes(...)"}], lib/abi.bot): the address of an arbitrary value has no meaning, a readable Bytes is never a writable address and a MutableBytes is never a readable one, and no run-time check is inserted; its type here is [hir::types::show $type]" \
+            "the argument of $native must be an $bytesType ([expr {[core::bytestore::bridgeWritable $native] ? "abi::bytes::zeroed(...)" : "abi::bytes::from_list(...)"}], lib/abi.bot): the address of an arbitrary value has no meaning, a readable Bytes is never a writable address and a MutableBytes is never a readable one, and no run-time check is inserted; its type here is [hir::types::show $type]" \
             $arg ""]]
     }
     return {}

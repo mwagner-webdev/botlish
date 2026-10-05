@@ -64,14 +64,14 @@ while {[lindex $args 0] in {-only -list -fuzz}} {
 }
 
 # The library text of linux::read, the one place the Tcl-side mutants rewrite.
-set readHead {fn read(fd: abi::I32, data: abi::MutableBytes) -> ReadResult:
-    local = abi::mutable_bytes_copy(data)
+set readHead {fn read(fd: abi::I32, data: abi::bytes::MutableBytes) -> ReadResult:
+    local = abi::bytes::detach(data)
     result = abi::x86_64::to_int(
         linux::abi::syscall({
             rax: abi::x86_64::register64(0),
             rdi: abi::x86_64::from_i32(fd),
             rsi: abi::x86_64::from_mutable_bytes(local),
-            rdx: abi::x86_64::from_usize(abi::mutable_bytes_length(local)),
+            rdx: abi::x86_64::from_usize(abi::bytes::mutable_length(local)),
         })
     )
     ReadResult {result: result, data: local}}
@@ -89,7 +89,7 @@ set mutations {
         {let r = vm(p).new_mutbytes_with(len, |init| init.push_slice(mutbytes_of(m)));}
         {let r = m;}}
     {read-does-not-detach tcl lib/linux.bot
-        {    local = abi::mutable_bytes_copy(data)}
+        {    local = abi::bytes::detach(data)}
         {    local = data}}
     {freeze-shares rust native/src/runtime/ops.rs
         {    vm(p).metrics.record_list_copy(mutbytes_of(m).len());
@@ -115,10 +115,10 @@ set mutations {
         {set bridgeOp [expr {[core::bytestore::bridgeWritable $native] ? "mbytesaddr" : "bytesaddr"}]}
         {set bridgeOp bytesaddr}}
     {count-off-by-one tcl lib/linux.bot
-        {            rdx: abi::x86_64::from_usize(abi::mutable_bytes_length(local)),}
-        {            rdx: abi::x86_64::from_usize(plus_one(abi::mutable_bytes_length(local))),}}
+        {            rdx: abi::x86_64::from_usize(abi::bytes::mutable_length(local)),}
+        {            rdx: abi::x86_64::from_usize(plus_one(abi::bytes::mutable_length(local))),}}
     {count-unrelated tcl lib/linux.bot
-        {            rdx: abi::x86_64::from_usize(abi::mutable_bytes_length(local)),}
+        {            rdx: abi::x86_64::from_usize(abi::bytes::mutable_length(local)),}
         {            rdx: abi::x86_64::from_usize(abi::usize(1)),}}
     {no-keepalive tcl native/lower.tcl
         {    foreach storage $kept {
@@ -150,7 +150,7 @@ set mutations {
             rax: abi::x86_64::register64(0),
             rdi: abi::x86_64::from_i32(fd),
             rsi: abi::x86_64::from_mutable_bytes(local),
-            rdx: abi::x86_64::from_usize(abi::mutable_bytes_length(local)),
+            rdx: abi::x86_64::from_usize(abi::bytes::mutable_length(local)),
         })
     )
     ReadResult {result: result2, data: local}}}

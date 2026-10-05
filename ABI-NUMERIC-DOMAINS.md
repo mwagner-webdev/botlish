@@ -761,7 +761,7 @@ change's soundness correct. Changed as a result:
     * *Private/trusted construction.* ABI numerics and Register64 are sound
       without privacy because every in-domain value is valid. A view
       (`{address, length}`) is not: arbitrary construction forges pointers.
-      `abi::Bytes` needs a construction only trusted code can perform.
+      `abi::bytes::Bytes` needs a construction only trusted code can perform.
     * *Struct field facts.* A view's length will typically be an
       `abi::Usize` field; checks against it (and the frontier above) need
       field facts that flow through constructions and calls.

@@ -683,13 +683,13 @@ each finding was checked by a separate skeptic. Fixed as a result:
     * *No private construction.* Register64 is sound without privacy because
       every word is a valid register. A borrowed-memory value (an address
       and a length) is not: arbitrary `{address, length}` construction would
-      forge pointers. `abi::Bytes` needs a construction only trusted code
+      forge pointers. `abi::bytes::Bytes` needs a construction only trusted code
       can perform (an opaque/private type) -- the first real type-system
       requirement on this path.
     * *Byte storage.* Strings are immutable single allocations (a stable
       address for a read-only borrow under the non-moving collector); there
       is no mutable byte buffer (MutableArray slots are 8-byte Values), so
-      `abi::MutableBytes` for `read` needs a new runtime object.
+      `abi::bytes::MutableBytes` for `read` needs a new runtime object.
     * *GC across the transition.* The call is a safepoint and the collector
       is non-moving, so a borrowed object stays valid if it is kept live;
       operand registers are spilled as roots at the call today, which is
@@ -705,14 +705,14 @@ each finding was checked by a separate skeptic. Fixed as a result:
 ## Follow-up: owned memory and `write`
 
 The obstacles above that concern memory were resolved by ABI-BYTES.md:
-`abi::Bytes` is an `opaque struct` (a construction only module `abi` can perform)
+`abi::bytes::Bytes` is an `opaque struct` (a construction only module `abi` can perform)
 over an owned, contiguous byte storage; the raw address bridge
 `abi::x86_64::from_bytes` makes the address of its payload a `Register64`; the
 syscall lowering keeps the backing storage alive until the kernel returns
 (`keepalive`); and `linux::write(fd, data)` is the first syscall wrapper that moves
 memory. `linux::abi::syscall` itself is unchanged: still generic, still native-only.
 
-A second follow-up, MUTABLE-BYTES.md, adds the writable direction: `abi::MutableBytes`
+A second follow-up, MUTABLE-BYTES.md, adds the writable direction: `abi::bytes::MutableBytes`
 (a value, not a reference), the writable address bridge
 `abi::x86_64::from_mutable_bytes`, and `linux::read(fd, data)`, the first syscall
 wrapper whose kernel call writes into Botlish memory. Again `linux::abi::syscall` is

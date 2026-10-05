@@ -136,13 +136,13 @@ namespace eval native::lower {
         char::scalar_value {op charcodepoint} \
         byte_store::from_list {op bytesfromlist} \
         byte_store::byte_count    {op byteslen} \
-        byte_store::mutable_new   {op mbytesnew} \
-        byte_store::mutable_from  {op mbytesfrom} \
-        byte_store::mutable_count {op mbyteslen} \
-        byte_store::mutable_set   {op mbytesset} \
-        byte_store::mutable_copy  {op mbytesclone} \
-        byte_store::freeze        {op mbytesfreeze} \
-        byte_store::freeze_prefix {op mbytesfreezeprefix}]
+        mutable_byte_store::zeroed   {op mbytesnew} \
+        mutable_byte_store::from_storage  {op mbytesfrom} \
+        mutable_byte_store::count {op mbyteslen} \
+        mutable_byte_store::replace   {op mbytesset} \
+        mutable_byte_store::detach  {op mbytesclone} \
+        mutable_byte_store::freeze        {op mbytesfreeze} \
+        mutable_byte_store::freeze_prefix {op mbytesfreezeprefix}]
     # State of the program being lowered. hir is the view of the instance
     # being lowered, baseHir the program's semantic HIR.
     variable hir {}
@@ -3817,14 +3817,14 @@ proc native::lower::KeepAddrThrough {fnVar from to} {
     }
 }
 
-# `abi::bytes(BYTES)` (lib/abi.bot) whose argument is a compile-time constant
+# `abi::bytes::from_list(BYTES)` (lib/abi/bytes.bot) whose argument is a compile-time constant
 # byte sequence: the owned storage is a *static constant*,
 #
 #   %b = bytes "HEX"
 #
 # installed once at program start (never collected, never allocated at run
 # time), and the Bytes it belongs to is the one virtual field %b -- so
-# `abi::bytes(str::encode_utf8("hello\n"))` costs no heap buffer, no List and
+# `abi::bytes::from_list(str::encode_utf8("hello\n"))` costs no heap buffer, no List and
 # no run-time conversion. Source semantics are unchanged: a Bytes is a value
 # (equal by its bytes, no identity), so a shared static storage cannot be told
 # from a fresh copy. What is recognized, deliberately narrow (no new analysis;
@@ -3845,7 +3845,7 @@ proc native::lower::StaticBytesCall {fnVar e node wantVirtual} {
         return ""
     }
     set b [hir::get $hir $calleeExpr binding]
-    if {$b eq "" || [dict get [hir::binding $hir $b] name] ne "abi::bytes"} {
+    if {$b eq "" || [dict get [hir::binding $hir $b] name] ne "abi::bytes::from_list"} {
         return ""
     }
     set known [ConstantBytesOf [lindex [dict get $node args] 0]]
@@ -3944,7 +3944,7 @@ proc native::lower::ConstantByteElement {e} {
 }
 
 # abi::x86_64::from_bytes (core/bytestore.tcl, ABI-BYTES.md): the raw address
-# bridge. `from_bytes(DATA)`, DATA an abi::Bytes (hir/syscall.tcl's
+# bridge. `from_bytes(DATA)`, DATA an abi::bytes::Bytes (hir/syscall.tcl's
 # BytesProblems proved that statically), lowers to
 #
 #   %b = <the byte storage of DATA>        a virtual field, or structget
@@ -3971,7 +3971,7 @@ proc native::lower::BytesAddrCall {fnVar e node wantVirtual} {
         # A -strict 0 program whose call hir/syscall.tcl rejected: replay the
         # problem unconditionally, before anything is evaluated, exactly as
         # SyscallCall does -- no address is taken from a value nothing proved
-        # to be an abi::Bytes.
+        # to be an abi::bytes::Bytes.
         lassign [lindex $problems 0] kind message
         dict incr fn skippedGuards [SkippedBlockers [dict get $node args]]
         Emit fn "raise $kind [Quote "$native: $message"]" $e
@@ -4010,7 +4010,7 @@ proc native::lower::BytesAddrCall {fnVar e node wantVirtual} {
     return [list $object tagged]
 }
 
-# The byte storage (a register) of abi::Bytes expression ARG, evaluated here,
+# The byte storage (a register) of abi::bytes::Bytes expression ARG, evaluated here,
 # or "never": the one field of a Bytes held as virtual fields (a virtual local,
 # or a virtual parameter of a `fields` variant), else read out of the object
 # with `structget`.
@@ -5112,7 +5112,7 @@ proc native::lower::ClosedResult {fnVar e result} {
 # Every call lowering goes through here, so the raw-address provenance of
 # ABI-BYTES.md is tracked across calls to ordinary Botlish functions in the
 # calling function (see KeepAddrFlow): CallInner lowers the call, then
-#   * a call that returns an abi::x86_64::Register64 and takes an abi::Bytes (or
+#   * a call that returns an abi::x86_64::Register64 and takes an abi::bytes::Bytes (or
 #     an address-carrying register) may be returning an address into it: its
 #     result registers carry the provenance of the call's operands -- the Bytes
 #     (or its storage) itself, whichever register passes it;
@@ -5130,14 +5130,14 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
     return $result
 }
 
-# The static types of the values an address can be taken from: abi::Bytes
-# (readable) and abi::MutableBytes (writable).
+# The static types of the values an address can be taken from: abi::bytes::Bytes
+# (readable) and abi::bytes::MutableBytes (writable).
 proc native::lower::BytesStructTypes {} {
     return [list [list nstruct [core::bytestore::bytesType]] [list nstruct [core::bytestore::mutableBytesType]]]
 }
 
-# 1 if call E (NODE) may carry an address: the program declares abi::Bytes and
-# either the call takes an abi::Bytes or abi::MutableBytes or its operands
+# 1 if call E (NODE) may carry an address: the program declares abi::bytes::Bytes and
+# either the call takes an abi::bytes::Bytes or abi::bytes::MutableBytes or its operands
 # carry a raw address.
 proc native::lower::BytesFlowCandidate {fnVar e node} {
     upvar 1 $fnVar fn
@@ -5255,7 +5255,7 @@ proc native::lower::CallInner {fnVar e node want {wantVirtual ""} {wantRegion 0}
         return [SyscallCall fn $e $node $wantVirtual]
     }
     if {$targetKind eq "block" && ($wantVirtual ne "" || !$wantRegion)} {
-        # `abi::bytes(BYTES)` whose every byte is known now (StaticBytesCall):
+        # `abi::bytes::from_list(BYTES)` whose every byte is known now (StaticBytesCall):
         # a static byte storage instead of a call and a run-time conversion.
         set static [StaticBytesCall fn $e $node $wantVirtual]
         if {$static ne ""} {
@@ -5264,7 +5264,7 @@ proc native::lower::CallInner {fnVar e node want {wantVirtual ""} {wantRegion 0}
     }
     if {$targetKind eq "native" && [core::bytestore::isBridge [dict get [hir::symbol $hir $target] name]]} {
         # The raw address bridge (core/bytestore.tcl, ABI-BYTES.md): reads the
-        # storage out of an abi::Bytes and yields a Register64, so its own
+        # storage out of an abi::bytes::Bytes and yields a Register64, so its own
         # form too.
         return [BytesAddrCall fn $e $node $wantVirtual]
     }

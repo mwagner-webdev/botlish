@@ -62,7 +62,7 @@
 #                             struct's kind is never `list`. The field names
 #                             live in the shape, never in the individual
 #                             value's own payload.
-#   {bytestore HEX}           the owned byte storage behind abi::Bytes (ABI-
+#   {bytestore HEX}           the owned byte storage behind abi::bytes::Bytes (ABI-
 #                             BYTES.md): an immutable, finite sequence of
 #                             bytes, HEX its lowercase hexadecimal text (two
 #                             digits per byte, so the byte count is
@@ -76,7 +76,7 @@
 #                             module's opaque struct (lib/abi.bot's Bytes);
 #                             no source type spells it.
 #   {mutbytes HEX}            the owned writable byte storage behind
-#                             abi::MutableBytes (MUTABLE-BYTES.md): a finite
+#                             abi::bytes::MutableBytes (MUTABLE-BYTES.md): a finite
 #                             sequence of bytes of one fixed length, HEX its
 #                             lowercase hexadecimal text exactly as for
 #                             `bytestore`. A distinct runtime kind from
@@ -560,12 +560,12 @@ proc core::value::show {v {withEvidence 0} {reveal 0}} {
             return "{[join $parts {, }]}"
         }
         bytestore {
-            # Internal tooling only (reveal of an opaque abi::Bytes): the
+            # Internal tooling only (reveal of an opaque abi::bytes::Bytes): the
             # byte count and the bytes. Normal rendering never reaches it.
             return "<bytes [expr {[string length [lindex $v 1]] / 2}]: [lindex $v 1]>"
         }
         mutbytes {
-            # Internal tooling only (reveal of an opaque abi::MutableBytes).
+            # Internal tooling only (reveal of an opaque abi::bytes::MutableBytes).
             return "<mutbytes [expr {[string length [lindex $v 1]] / 2}]: [lindex $v 1]>"
         }
         block  { return "<block ([join [lindex $v 1] { }])>" }

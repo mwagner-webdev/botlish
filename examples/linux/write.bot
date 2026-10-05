@@ -3,7 +3,7 @@
 #
 #   String
 #     --str::encode_utf8--------> List of bytes
-#     --abi::bytes--------------> abi::Bytes      (owned, contiguous, opaque)
+#     --abi::bytes::from_list--------------> abi::bytes::Bytes      (owned, contiguous, opaque)
 #     --linux::write------------> address + abi::Usize length
 #     --abi::x86_64::from_*-----> Register64 words (rsi, rdx)
 #     --linux::abi::syscall-----> the x86-64 `syscall` instruction (rax = 1)
@@ -27,8 +27,9 @@
 # value  (native): 20, the 20 bytes written
 
 import abi
+import abi::bytes
 import linux
 import str
 
-data = abi::bytes(str::encode_utf8("Hello from Botlish!\n"))
+data = abi::bytes::from_list(str::encode_utf8("Hello from Botlish!\n"))
 linux::write(abi::i32(1), data)

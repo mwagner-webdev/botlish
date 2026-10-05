@@ -1,6 +1,6 @@
 # audit/abi-bytes
 
-Tools and recorded results for `abi::Bytes` and `linux::write` (ABI-BYTES.md).
+Tools and recorded results for `abi::bytes::Bytes` and `linux::write` (ABI-BYTES.md).
 
 * `tools/fuzz.tcl` -- differential fuzzer. `-mode pure` checks construction, length,
   contents, equality, hash consistency and aliasing on every semantic backend

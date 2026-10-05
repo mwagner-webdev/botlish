@@ -781,41 +781,41 @@ fn index_operand(p: *mut Vm, v: Value, context: &str, what: &str, limit: usize) 
     }
 }
 
-/// `byte_store::mutable_new`: N zero bytes in a fresh writable storage.
+/// `mutable_byte_store::zeroed`: N zero bytes in a fresh writable storage.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_mbytes_new(p: *mut Vm, n: Value) -> Value {
-    let count = match index_operand(p, n, "byte_store::mutable_new", "the length", MAX_COLLECTION_LENGTH) {
+    let count = match index_operand(p, n, "mutable_byte_store::zeroed", "the length", MAX_COLLECTION_LENGTH) {
         Ok(count) => count,
         Err(failed) => return failed,
     };
     vm(p).new_mutbytes_with(count, |init| init.push_zeros(count))
 }
 
-/// `byte_store::mutable_from`: a fresh writable copy of immutable storage V.
+/// `mutable_byte_store::from_storage`: a fresh writable copy of immutable storage V.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_mbytes_from(p: *mut Vm, v: Value) -> Value {
-    if let Err(failed) = bytes_operand(p, v, "byte_store::mutable_from") {
+    if let Err(failed) = bytes_operand(p, v, "mutable_byte_store::from_storage") {
         return failed;
     }
     vm(p).metrics.record_list_copy(bytes_of(v).len());
     vm(p).new_mutbytes_with(bytes_of(v).len(), |init| init.push_slice(bytes_of(v)))
 }
 
-/// `byte_store::mutable_count`: the fixed byte count of writable storage V.
+/// `mutable_byte_store::count`: the fixed byte count of writable storage V.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_mbytes_len(p: *mut Vm, v: Value) -> Value {
-    if let Err(failed) = mutbytes_operand(p, v, "byte_store::mutable_count") {
+    if let Err(failed) = mutbytes_operand(p, v, "mutable_byte_store::count") {
         return failed;
     }
     make_small(mutbytes_of(v).len() as i64)
 }
 
-/// `byte_store::mutable_set`: a fresh storage equal to M with byte I replaced
+/// `mutable_byte_store::replace`: a fresh storage equal to M with byte I replaced
 /// by B. M is read, never written: the new object is allocated, filled from
 /// M, and only then is its one byte written (it is still private here).
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_mbytes_set(p: *mut Vm, m: Value, i: Value, b: Value) -> Value {
-    const CONTEXT: &str = "byte_store::mutable_set";
+    const CONTEXT: &str = "mutable_byte_store::replace";
     if let Err(failed) = mutbytes_operand(p, m, CONTEXT) {
         return failed;
     }
@@ -849,30 +849,30 @@ pub extern "C" fn rt_mbytes_set(p: *mut Vm, m: Value, i: Value, b: Value) -> Val
     r
 }
 
-/// `byte_store::mutable_copy`: a fresh storage equal to M (the detach).
+/// `mutable_byte_store::detach`: a fresh storage equal to M (the detach).
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_mbytes_clone(p: *mut Vm, m: Value) -> Value {
-    if let Err(failed) = mutbytes_operand(p, m, "byte_store::mutable_copy") {
+    if let Err(failed) = mutbytes_operand(p, m, "mutable_byte_store::detach") {
         return failed;
     }
     vm(p).metrics.record_list_copy(mutbytes_of(m).len());
     vm(p).new_mutbytes_with(mutbytes_of(m).len(), |init| init.push_slice(mutbytes_of(m)))
 }
 
-/// `byte_store::freeze`: an immutable snapshot of all of M's bytes.
+/// `mutable_byte_store::freeze`: an immutable snapshot of all of M's bytes.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_mbytes_freeze(p: *mut Vm, m: Value) -> Value {
-    if let Err(failed) = mutbytes_operand(p, m, "byte_store::freeze") {
+    if let Err(failed) = mutbytes_operand(p, m, "mutable_byte_store::freeze") {
         return failed;
     }
     vm(p).metrics.record_list_copy(mutbytes_of(m).len());
     vm(p).new_bytes_with(mutbytes_of(m).len(), |init| init.push_slice(mutbytes_of(m)))
 }
 
-/// `byte_store::freeze_prefix`: an immutable snapshot of M's first N bytes.
+/// `mutable_byte_store::freeze_prefix`: an immutable snapshot of M's first N bytes.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_mbytes_freeze_prefix(p: *mut Vm, m: Value, n: Value) -> Value {
-    const CONTEXT: &str = "byte_store::freeze_prefix";
+    const CONTEXT: &str = "mutable_byte_store::freeze_prefix";
     if let Err(failed) = mutbytes_operand(p, m, CONTEXT) {
         return failed;
     }
@@ -3029,7 +3029,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Writable byte storage, abi::MutableBytes (MUTABLE-BYTES.md)
+    // Writable byte storage, abi::bytes::MutableBytes (MUTABLE-BYTES.md)
 
     #[test]
     fn a_mutable_storage_is_zero_filled_fixed_length_and_one_block() {

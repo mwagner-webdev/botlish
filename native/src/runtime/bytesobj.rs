@@ -1,4 +1,4 @@
-//! The owned byte storage behind `abi::Bytes` (ABI-BYTES.md): one heap
+//! The owned byte storage behind `abi::bytes::Bytes` (ABI-BYTES.md): one heap
 //! allocation holding the object header, the byte count and the bytes
 //! themselves, contiguously.
 //!
@@ -19,7 +19,7 @@
 //! never dereferenced because the count is zero).
 //!
 //! The same layout, with the header kind KIND_MUTBYTES, is the writable
-//! storage behind `abi::MutableBytes` (MUTABLE-BYTES.md). It differs from
+//! storage behind `abi::bytes::MutableBytes` (MUTABLE-BYTES.md). It differs from
 //! KIND_BYTES in one promise only: a KIND_BYTES object is never written after
 //! it is published; a KIND_MUTBYTES object is written only while it is still
 //! private to the one operation that created it (a fresh clone being updated,
@@ -156,8 +156,8 @@ impl BytesInit {
         Self::new_kind(KIND_BYTES, len, is_static)
     }
 
-    /// As `new`, for a storage of KIND: KIND_BYTES (immutable `abi::Bytes`
-    /// storage) or KIND_MUTBYTES (the writable `abi::MutableBytes` storage,
+    /// As `new`, for a storage of KIND: KIND_BYTES (immutable `abi::bytes::Bytes`
+    /// storage) or KIND_MUTBYTES (the writable `abi::bytes::MutableBytes` storage,
     /// MUTABLE-BYTES.md). The two kinds have one layout; only the header's
     /// kind differs, and nothing ever changes a published object's kind.
     pub fn new_kind(kind: u8, len: usize, is_static: bool) -> BytesInit {
@@ -172,7 +172,7 @@ impl BytesInit {
 
     /// As `new_kind`, but None when the block cannot be allocated (a layout
     /// that overflows, or the allocator refusing): a MutableBytes length is
-    /// program input (abi::mutable_bytes(n)), so exhaustion is a reportable
+    /// program input (abi::bytes::zeroed(n)), so exhaustion is a reportable
     /// error there, not an abort.
     pub fn try_new_kind(kind: u8, len: usize, is_static: bool) -> Option<BytesInit> {
         assert!(kind == KIND_BYTES || kind == KIND_MUTBYTES, "not a byte storage kind: {kind}");

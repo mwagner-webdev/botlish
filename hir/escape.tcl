@@ -796,7 +796,7 @@ proc hir::escape::RegionInfo {hir spec id} {
                 }
                 if {$targetKind eq "native" && [core::bytestore::isBridge [dict get [hir::symbol $view $target] name]]
                         && [llength $args] == 1} {
-                    # The address bridge's abi::Bytes argument is read only for
+                    # The address bridge's abi::bytes::Bytes argument is read only for
                     # its one storage field (native/lower.tcl's StorageOf),
                     # like a projection of it: a Bytes held as virtual fields
                     # need not be built for it.

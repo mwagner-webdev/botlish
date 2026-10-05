@@ -1,6 +1,6 @@
 # audit/mutable-bytes
 
-Tools and recorded results for `abi::MutableBytes` and `linux::read` (MUTABLE-BYTES.md).
+Tools and recorded results for `abi::bytes::MutableBytes` and `linux::read` (MUTABLE-BYTES.md).
 
 * `tools/fuzz.tcl` -- differential fuzzer. `-mode pure` runs a random SCRIPT of
   value definitions (fresh values from random byte sequences, copies, updates at

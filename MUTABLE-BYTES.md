@@ -1,4 +1,4 @@
-# `abi::MutableBytes`: a writable value, and `linux::read`
+# `abi::bytes::MutableBytes`: a writable value, and `linux::read`
 
 ## Outcome
 
@@ -11,7 +11,7 @@ compiler knowing that syscall number 0 exists:
 import abi
 import linux
 
-buffer = abi::mutable_bytes(abi::usize(4096))
+buffer = abi::bytes::zeroed(abi::usize(4096))
 result = linux::read(abi::i32(0), buffer)
 ...
 ```
@@ -19,9 +19,9 @@ result = linux::read(abi::i32(0), buffer)
 ```
 stdin
   --kernel read(2)-----------------> bytes written through a WRITABLE machine address
-local logical abi::MutableBytes      (linux::read's own detached copy of `buffer`)
+local logical abi::bytes::MutableBytes      (linux::read's own detached copy of `buffer`)
   --linux::ReadResult--------------> raw ssize_t + the updated buffer
-  --abi::freeze_prefix-------------> abi::Bytes of exactly the bytes read
+  --abi::bytes::freeze_prefix-------------> abi::bytes::Bytes of exactly the bytes read
   --linux::write-------------------> write(2) to descriptor 1
 ```
 
@@ -74,9 +74,9 @@ returning it and storing it are plain sharing, and *independence holds through e
 route at once* -- including the ones nobody enumerated -- because there is nothing
 that could write through a shared pointer. The update operations are:
 
-* `abi::mutable_bytes_set(data, i, b)`: a fresh storage equal to `data` with byte `i`
+* `abi::bytes::replace(data, i, b)`: a fresh storage equal to `data` with byte `i`
   replaced (`rt_mbytes_set`: allocate, copy, write one byte; `data` is never written).
-* `linux::read(fd, data)`: starts with `local = abi::mutable_bytes_copy(data)` -- a
+* `linux::read(fd, data)`: starts with `local = abi::bytes::detach(data)` -- a
   fresh storage (`rt_mbytes_clone`) -- and the *kernel* writes into `local`; `local`
   is returned as `result.data`. The caller's `data` is untouched.
 
@@ -90,7 +90,7 @@ spec asked for a runtime-kind-aware copy mechanism "if it fits cleanly"; the cen
 says the boundaries are the wrong place for it in this architecture, and the
 kind-checked clone (`rt_mbytes_clone`, which refuses anything that is not a writable
 storage) is the one primitive such a mechanism would call. Nothing keys on the
-spelling `abi::MutableBytes`: the runtime kind (`KIND_MUTBYTES` / `{mutbytes HEX}`)
+spelling `abi::bytes::MutableBytes`: the runtime kind (`KIND_MUTBYTES` / `{mutbytes HEX}`)
 is the discriminator.
 
 ## Source surface (lib/abi.bot, lib/linux.bot)
@@ -107,20 +107,20 @@ fn mutable_bytes_copy(data: MutableBytes) -> MutableBytes
 fn freeze(data: MutableBytes) -> Bytes
 fn freeze_prefix(data: MutableBytes, count: Usize) -> Bytes errors UpperOverrun
 
-abi::x86_64::from_mutable_bytes(data: abi::MutableBytes) -> abi::x86_64::Register64   # root native
+abi::x86_64::from_mutable_bytes(data: abi::bytes::MutableBytes) -> abi::x86_64::Register64   # root native
 
 struct ReadResult:
     result: int
-    data: abi::MutableBytes
+    data: abi::bytes::MutableBytes
 
-fn read(fd: abi::I32, data: abi::MutableBytes) -> ReadResult
+fn read(fd: abi::I32, data: abi::bytes::MutableBytes) -> ReadResult
 ```
 
 | | |
 |---|---|
-| constructor | `abi::mutable_bytes(n)`: `n` **zero** bytes; nothing uninitialized is ever visible. A length beyond the collection ceiling (2^62 - 1) is the RANGE error every oversized collection is, and an allocation the machine cannot supply is reported as RANGE ("out of memory"), not an abort |
+| constructor | `abi::bytes::zeroed(n)`: `n` **zero** bytes; nothing uninitialized is ever visible. A length beyond the collection ceiling (2^62 - 1) is the RANGE error every oversized collection is, and an allocation the machine cannot supply is reported as RANGE ("out of memory"), not an abort |
 | `from_bytes` | an independent writable copy; changing it never changes the `Bytes` |
-| length | `abi::mutable_bytes_length(data) -> abi::Usize`; fixed for the value's life; there is no capacity |
+| length | `abi::bytes::mutable_length(data) -> abi::Usize`; fixed for the value's life; there is no capacity |
 | update | `mutable_bytes_set`: a **new value**; `data` is unchanged. `IndexNotFound` (the existing list/array convention) unless `0 <= index < length`; the value is a `byte::Byte` by typing |
 | `mutable_bytes_copy` | semantically the identity (a logical copy is the same value), physically a fresh storage: the "detach" a writable foreign access needs (below). The one addition beyond the spec's list, needed so `linux::read` can be ordinary Botlish |
 | `freeze` / `freeze_prefix` | immutable snapshots (a copy). `freeze_prefix` with `count > length` is `UpperOverrun` and reads nothing outside the payload; `count: Usize` already excludes negatives |
@@ -142,21 +142,21 @@ and different static types: nothing compares equal across them and nothing conve
   is a new value, so it cannot corrupt the container's equality or hash invariants
   (tested). No collection semantics were redesigned.
 * **Rendering** is the opaque-struct rule on every backend, alone or nested:
-  `<opaque abi::MutableBytes>` -- no address, allocator id, payload or sharing. The
-  explicit internal reveal shows `abi::MutableBytes {storage: <mutbytes 3: 4100ff>}`,
+  `<opaque abi::bytes::MutableBytes>` -- no address, allocator id, payload or sharing. The
+  explicit internal reveal shows `abi::bytes::MutableBytes {storage: <mutbytes 3: 4100ff>}`,
   which is how backends are compared byte for byte.
 
 ## `linux::read`
 
 ```botlish
-fn read(fd: abi::I32, data: abi::MutableBytes) -> ReadResult:
-    local = abi::mutable_bytes_copy(data)
+fn read(fd: abi::I32, data: abi::bytes::MutableBytes) -> ReadResult:
+    local = abi::bytes::detach(data)
     result = abi::x86_64::to_int(
         linux::abi::syscall({
             rax: abi::x86_64::register64(0),
             rdi: abi::x86_64::from_i32(fd),
             rsi: abi::x86_64::from_mutable_bytes(local),
-            rdx: abi::x86_64::from_usize(abi::mutable_bytes_length(local)),
+            rdx: abi::x86_64::from_usize(abi::bytes::mutable_length(local)),
         })
     )
     ReadResult {result: result, data: local}
@@ -181,7 +181,7 @@ fn read(fd: abi::I32, data: abi::MutableBytes) -> ReadResult:
   `[0, result)` was written; the rest holds what it held before (tested with a real
   short read from a pipe and a file: `AA AA AA AA AA AA` + `01 02 03` becomes
   `01 02 03 AA AA AA`). Nothing is resized: the buffer keeps its length, and
-  `abi::freeze_prefix(result.data, abi::usize(result.result))` yields the bytes read.
+  `abi::bytes::freeze_prefix(result.data, abi::usize(result.result))` yields the bytes read.
 * **Errors.** A refused read returns its raw negative result with the buffer
   unchanged (`-9`, EBADF, for an invalid descriptor, tested).
 * **No retained pointer.** The address is taken and consumed synchronously inside
@@ -222,7 +222,7 @@ that a checked program cannot produce (lib/abi.bot proves each before the call).
 
 `abi::x86_64::from_mutable_bytes(data) -> Register64` is the writable twin of
 `from_bytes`: a root native (only module `abi` can project the storage), statically
-requiring an `abi::MutableBytes` argument (`from_bytes(MutableBytes)`,
+requiring an `abi::bytes::MutableBytes` argument (`from_bytes(MutableBytes)`,
 `from_mutable_bytes(Bytes)`, of an Int, a String, a raw storage or an `abi::U8` are all
 compile-time `TYPE` errors; a `-strict 0` program replays the problem as a run-time
 TYPE before anything is evaluated), callable only directly, native only (the Tcl
@@ -293,7 +293,7 @@ mechanism is required at exactly the operations that write**, which is what
 GVN, hoisting or dead-call removal in HIR or NIR; Cranelift treats every runtime
 helper as an opaque call; no registration flag (`-context-free`, `-runtime`, ...)
 controls deduplication. The one allocation elision is static byte-constant folding for
-`abi::bytes` of a compile-time-known sequence, which is sound only because `Bytes` is
+`abi::bytes::from_list` of a compile-time-known sequence, which is sound only because `Bytes` is
 immutable; it is **not** applied to `MutableBytes` (none of its natives is
 `-context-free`). Tests assert that two `mutable_bytes(n)` calls, and two `mutable_bytes_from_bytes` of the same
 constant, are four separate heap storages (while two constant `Bytes` are static, 0 allocations).
@@ -333,13 +333,13 @@ test's own tuple):
 
 | program | total | MutableBytes | Bytes | Struct | List |
 |---|---|---|---|---|---|
-| `abi::mutable_bytes(abi::usize(0))` | 0 | 0 | 0 | 0 | 0 |
-| `abi::mutable_bytes(abi::usize(16))` (also 4096: one 4112-byte object) | 1 | 1 | 0 | 0 | 0 |
+| `abi::bytes::zeroed(abi::usize(0))` | 0 | 0 | 0 | 0 | 0 |
+| `abi::bytes::zeroed(abi::usize(16))` (also 4096: one 4112-byte object) | 1 | 1 | 0 | 0 | 0 |
 | `b = m; c = b; [len(c), len(m)]` (copy by binding) | 2 | 1 | 0 | 0 | 1 |
 | `id(id(m))` (copy through a function) | 2 | 1 | 0 | 1 | 0 |
 | `[m, m]` / `[m, put(m, ..)]` (into a List) | MutableBytes column 1 / 2 | | | | |
 | `put(m, 0, b)` (`mutable_bytes_set`) | 4 | 2 | 0 | 2 | 0 |
-| `abi::freeze(m)` | 2 | 1 | 1 | 0 | 0 |
+| `abi::bytes::freeze(m)` | 2 | 1 | 1 | 0 | 0 |
 | `rd(1000, m)` (`linux::read`, original + detach clone, + the returned wrapper) | 3 | 2 | 0 | 1 | 0 |
 
 Reading: a binding, a List element and a function pass-and-return copy **no storage**;
@@ -350,7 +350,7 @@ wrapper for the returned buffer. These are the eager copies this milestone accep
 none is hidden.
 
 **Copy elision obtained for free:** the wrapper `Struct` is scalar-replaced inside a
-function (`abi::mutable_bytes_length(local)` is one `op mbyteslen` on the storage
+function (`abi::bytes::mutable_length(local)` is one `op mbyteslen` on the storage
 register); `linux::read`'s returned buffer is the same register the kernel wrote
 (`structnew` over the one storage) -- no second copy at the return. **Not done** (and
 not attempted): eliding the detach when `data` is a fresh temporary or dead after the
@@ -378,12 +378,12 @@ unless unique". Source semantics do not change.
 * **NIR of `linux::read`** (the canonical one, from `-emit-nir`):
 
 ```
-func 14 "linux::read" params=2 ... pnames="fd.0 data.0" instance="abi::I32, abi::MutableBytes" results=2
-    %2 = callmulti 7 %1          ; abi::mutable_bytes_copy(data): the detached local storage
+func 14 "linux::read" params=2 ... pnames="fd.0 data.0" instance="abi::I32, abi::bytes::MutableBytes" results=2
+    %2 = callmulti 7 %1          ; abi::bytes::detach(data): the detached local storage
     %5 = callmulti 9 %3          ; abi::x86_64::register64(0)
     %6 = callmulti 11 %0         ; abi::x86_64::from_i32(fd)
     %7 = op mbytesaddr %2        ; the WRITABLE address of THAT storage: rsi
-    %8 = callmulti 6 %2          ; abi::mutable_bytes_length(local)
+    %8 = callmulti 6 %2          ; abi::bytes::mutable_length(local)
     %9 = callmulti 12 %8         ; abi::x86_64::from_usize(length): rdx
     %11 = op syscall_linux_x86_64 %5 %6 %7 %9 %10 %10 %10   ; rax rdi rsi rdx r10 r8 r9 -- the ONE syscall
     %12 = op keepalive %2        ; the storage stays live across the syscall
@@ -467,7 +467,7 @@ operations under a collection at every allocation.
   refused there (RANGE); natively the ceiling is 2^62 - 1 and exhaustion is reported
   as RANGE.
 * **No actor/thread transfer exists** to verify the receiver rule against.
-* **`abi::mutable_bytes_copy` is a public function.** It is semantically the identity;
+* **`abi::bytes::detach` is a public function.** It is semantically the identity;
   it exists because `linux` cannot touch the storage of an opaque struct, and a
   future compiler that proves deadness could make it free.
 
@@ -568,12 +568,12 @@ shareable and is never subjected to any `MutableBytes` copy behaviour.
 ## Milestone report (the 48 items)
 
 1. **Declaration:** `opaque struct MutableBytes: storage: any` (lib/abi.bot).
-2. **Constructor:** `abi::mutable_bytes(length: abi::Usize)`, zero-filled.
-3. **`abi::mutable_bytes_from_bytes(data: Bytes)`:** an independent writable copy.
-4. **Length:** `abi::mutable_bytes_length(data) -> abi::Usize`.
-5. **Update:** `abi::mutable_bytes_set(data, index, value) -> MutableBytes errors IndexNotFound`; a new value.
-6. **Freeze:** `abi::freeze(data) -> Bytes`, a copying snapshot.
-7. **Freeze prefix:** `abi::freeze_prefix(data, count: Usize) -> Bytes errors UpperOverrun`.
+2. **Constructor:** `abi::bytes::zeroed(length: abi::Usize)`, zero-filled.
+3. **`abi::bytes::from_bytes(data: Bytes)`:** an independent writable copy.
+4. **Length:** `abi::bytes::mutable_length(data) -> abi::Usize`.
+5. **Update:** `abi::bytes::replace(data, index, value) -> MutableBytes errors IndexNotFound`; a new value.
+6. **Freeze:** `abi::bytes::freeze(data) -> Bytes`, a copying snapshot.
+7. **Freeze prefix:** `abi::bytes::freeze_prefix(data, count: Usize) -> Bytes errors UpperOverrun`.
 8. **Native layout:** `KIND_MUTBYTES = 14`, `hdr(8) | len(8) | payload`, one allocation, 16-aligned, payload at +16, no tracing.
 9. **Tcl representation:** `{mutbytes HEX}`, a value kind of its own.
 10. **Equality:** by current contents.
@@ -593,7 +593,7 @@ shareable and is never subjected to any `MutableBytes` copy behaviour.
 24. **Writable bridge:** `abi::x86_64::from_mutable_bytes(data) -> Register64`.
 25. **Provenance:** the existing `keepAddr`, generalized to both bridges, not duplicated.
 26. **GC keepalive:** `op keepalive` of the exact storage after the syscall; six routes, mutant detected.
-27. **`linux::ReadResult`:** `struct ReadResult: result: int; data: abi::MutableBytes`.
+27. **`linux::ReadResult`:** `struct ReadResult: result: int; data: abi::bytes::MutableBytes`.
 28. **`linux::read` source:** above.
 29. **Register mapping:** `rax = 0, rdi = fd, rsi = payload address, rdx = length, r10 = r8 = r9 = 0`.
 30. **Caller's buffer:** unchanged (tested, incl. two reads of one original).

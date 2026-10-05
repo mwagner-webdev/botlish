@@ -126,15 +126,15 @@ fn show_into(v: Value, out: &mut String) {
             // Matches core::value::show's bytestore rendering exactly: the
             // byte count and the bytes in lowercase hex. Reached only for a
             // storage shown on its own (internal tooling): an opaque
-            // abi::Bytes renders as `<opaque abi::Bytes>` above and never
+            // abi::bytes::Bytes renders as `<opaque abi::bytes::Bytes>` above and never
             // prints its storage.
             let bytes = bytes_of(v);
             out.push_str(&format!("<bytes {}: {}>", bytes.len(), hex_of(bytes)));
         }
         Kind::MutByteStore => {
             // Matches core::value::show's mutbytes rendering (internal tooling
-            // only; an opaque abi::MutableBytes renders as
-            // `<opaque abi::MutableBytes>` and never prints its storage).
+            // only; an opaque abi::bytes::MutableBytes renders as
+            // `<opaque abi::bytes::MutableBytes>` and never prints its storage).
             let bytes = mutbytes_of(v);
             out.push_str(&format!("<mutbytes {}: {}>", bytes.len(), hex_of(bytes)));
         }

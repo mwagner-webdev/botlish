@@ -1,5 +1,5 @@
 #!/usr/bin/env tclsh9.0
-# fuzz.tcl -- randomized differential check of abi::MutableBytes value
+# fuzz.tcl -- randomized differential check of abi::bytes::MutableBytes value
 # semantics and linux::read (MUTABLE-BYTES.md).
 #
 #   tclsh9.0 audit/mutable-bytes/tools/fuzz.tcl ?-mode pure|read|both? ?-n N?
@@ -21,9 +21,9 @@
 #       identity         vN = idg(vK)                  (generic function)
 #       list             vN = first([vK, vJ])          (List storage)
 #       struct           vN = unwrap(Holder {data: vK})(struct storage)
-#       detach           vN = abi::mutable_bytes_copy(vK)
+#       detach           vN = abi::bytes::detach(vK)
 #       reuse            vN = put(put(vK, ..), ..)     (copy then two updates)
-#   plus snapshots fN = abi::freeze(vK) and pN = prefix(vK, n) (n may exceed
+#   plus snapshots fN = abi::bytes::freeze(vK) and pN = prefix(vK, n) (n may exceed
 #   the length: the sentinel OVER). The result lists the revealed contents of
 #   EVERY variable and snapshot at the END, so an update that leaked into any
 #   earlier copy, through any route, shows up. The independent oracle (a Tcl
@@ -323,42 +323,42 @@ proc pick {list} { return [lindex $list [expr {int(rand() * [llength $list])}]] 
 # pure: a random script of value definitions, and the oracle that replays it
 
 set pureHelpers {
-fn mbf(d: abi::Bytes) -> abi::MutableBytes:
-    abi::mutable_bytes_from_bytes(d)
+fn mbf(d: abi::bytes::Bytes) -> abi::bytes::MutableBytes:
+    abi::bytes::from_bytes(d)
 
 struct Holder:
-    data: abi::MutableBytes
+    data: abi::bytes::MutableBytes
 
-fn put(m: abi::MutableBytes, i: int, v: Byte) -> abi::MutableBytes:
-    abi::mutable_bytes_set(m, i, v):
+fn put(m: abi::bytes::MutableBytes, i: int, v: Byte) -> abi::bytes::MutableBytes:
+    abi::bytes::replace(m, i, v):
         on IndexNotFound:
             m
 
 fn idg(x):
     x
 
-fn first(xs: List[abi::MutableBytes]) -> abi::MutableBytes:
+fn first(xs: List[abi::bytes::MutableBytes]) -> abi::bytes::MutableBytes:
     list::at(xs, 0):
         on IndexNotFound:
-            abi::mutable_bytes(abi::usize(0))
+            abi::bytes::zeroed(abi::usize(0))
 
-fn unwrap(h: Holder) -> abi::MutableBytes:
+fn unwrap(h: Holder) -> abi::bytes::MutableBytes:
     h.data
 
-fn sentinel() -> abi::Bytes:
-    abi::bytes(str::encode_utf8("OVER"))
+fn sentinel() -> abi::bytes::Bytes:
+    abi::bytes::from_list(str::encode_utf8("OVER"))
 
-fn pre(m: abi::MutableBytes, n: int) -> abi::Bytes:
+fn pre(m: abi::bytes::MutableBytes, n: int) -> abi::bytes::Bytes:
     c = abi::usize(n):
         on AbiIntegerBelowRange:
             abi::usize(0)
         on AbiIntegerAboveRange:
             abi::usize(0)
-    abi::freeze_prefix(m, c):
+    abi::bytes::freeze_prefix(m, c):
         on UpperOverrun:
             sentinel()
 
-fn hashok(a: abi::MutableBytes, b: abi::MutableBytes) -> bool:
+fn hashok(a: abi::bytes::MutableBytes, b: abi::bytes::MutableBytes) -> bool:
     if a == b:
         hash(a) == hash(b)
     else:
@@ -381,7 +381,7 @@ proc pureScript {items} {
             fresh {
                 set spec [randomSpec]
                 set name [newName]
-                lappend lines "$name = mbf(abi::bytes([specSource $spec]))"
+                lappend lines "$name = mbf(abi::bytes::from_list([specSource $spec]))"
                 dict set values $name [renderSpec $spec]
             }
             copy {
@@ -423,7 +423,7 @@ proc pureScript {items} {
             detach {
                 set k [pick $names]
                 set name [newName]
-                lappend lines "$name = abi::mutable_bytes_copy($k)"
+                lappend lines "$name = abi::bytes::detach($k)"
                 dict set values $name [dict get $values $k]
             }
             reuse {
@@ -445,7 +445,7 @@ proc pureScript {items} {
             snap {
                 set k [pick $names]
                 set name f[incr count]
-                lappend lines "$name = abi::freeze($k)"
+                lappend lines "$name = abi::bytes::freeze($k)"
                 lappend snaps [list $name [dict get $values $k]]
             }
             prefix {
@@ -468,13 +468,13 @@ proc pureScript {items} {
     set results {}
     set expected {}
     dict for {name bytes} $values {
-        lappend results "abi::freeze($name)"
-        lappend expected "abi::Bytes {storage: <bytes [llength $bytes]: [hexOf $bytes]>}"
+        lappend results "abi::bytes::freeze($name)"
+        lappend expected "abi::bytes::Bytes {storage: <bytes [llength $bytes]: [hexOf $bytes]>}"
     }
     foreach snap $snaps {
         lassign $snap name bytes
         lappend results $name
-        lappend expected "abi::Bytes {storage: <bytes [llength $bytes]: [hexOf $bytes]>}"
+        lappend expected "abi::bytes::Bytes {storage: <bytes [llength $bytes]: [hexOf $bytes]>}"
     }
     set names [dict keys $values]
     for {set i 0} {$i < 6} {incr i} {
@@ -483,7 +483,7 @@ proc pureScript {items} {
         lappend results "$a == $b" "hashok($a, $b)"
         lappend expected [boolWord [expr {[dict get $values $a] eq [dict get $values $b]}]] true
     }
-    set text "import abi\nimport byte\nimport list\nimport str\nimport type byte::Byte\n\n$::genFunctions\n$::pureHelpers\n[join $lines \n]\n\[[join $results {, }]\]\n"
+    set text "import abi\nimport abi::bytes\nimport byte\nimport list\nimport str\nimport type byte::Byte\n\n$::genFunctions\n$::pureHelpers\n[join $lines \n]\n\[[join $results {, }]\]\n"
     return [list $text $expected [dict size $values]]
 }
 
@@ -504,17 +504,18 @@ proc fillText {cap} {
 }
 
 set readPrelude {import abi
+import abi::bytes
 import byte
 import linux
 import str
 
-fn mbs(s: str) -> abi::MutableBytes:
-    abi::mutable_bytes_from_bytes(abi::bytes(str::encode_utf8(s)))
+fn mbs(s: str) -> abi::bytes::MutableBytes:
+    abi::bytes::from_bytes(abi::bytes::from_list(str::encode_utf8(s)))
 
-fn out(fd: int, data: abi::Bytes) -> int errors AbiIntegerBelowRange, AbiIntegerAboveRange:
+fn out(fd: int, data: abi::bytes::Bytes) -> int errors AbiIntegerBelowRange, AbiIntegerAboveRange:
     linux::write(abi::i32(fd), data)
 
-fn rd(fd: int, data: abi::MutableBytes) -> linux::ReadResult errors AbiIntegerBelowRange, AbiIntegerAboveRange:
+fn rd(fd: int, data: abi::bytes::MutableBytes) -> linux::ReadResult errors AbiIntegerBelowRange, AbiIntegerAboveRange:
     linux::read(abi::i32(fd), data)
 
 }
@@ -530,8 +531,8 @@ proc readProgram {caps} {
         lappend fills $fill
         append lets "b$i = mbs([textLiteral $fill])\n"
         append lets "r$i = rd(0, b$i)\n"
-        append lets "w$i = out(3, abi::freeze(r$i.data))\n"
-        append lets "x$i = out(4, abi::freeze(b$i))\n"
+        append lets "w$i = out(3, abi::bytes::freeze(r$i.data))\n"
+        append lets "x$i = out(4, abi::bytes::freeze(b$i))\n"
         lappend results "r$i.result"
         incr i
     }

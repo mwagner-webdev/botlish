@@ -206,29 +206,29 @@ pub enum OpCode {
     /// storage is live: native/lower.tcl pairs every use of it in a syscall
     /// with a `keepalive` of the storage after that syscall.
     BytesAddr,
-    /// `byte_store::mutable_new` (core/bytestore.tcl, MUTABLE-BYTES.md): a
+    /// `mutable_byte_store::zeroed` (core/bytestore.tcl, MUTABLE-BYTES.md): a
     /// fresh writable storage of N zero bytes (one allocation; the shared
     /// static empty storage for N = 0). One operand, the Int N (RANGE outside
     /// 0..2^62-1).
     MBytesNew,
-    /// `byte_store::mutable_from`: a fresh writable copy of an immutable byte
+    /// `mutable_byte_store::from_storage`: a fresh writable copy of an immutable byte
     /// storage. One operand.
     MBytesFrom,
-    /// `byte_store::mutable_count`: the fixed byte count of a writable
+    /// `mutable_byte_store::count`: the fixed byte count of a writable
     /// storage, a small Int. One operand; TYPE unless it is a writable storage.
     MBytesLen,
-    /// `byte_store::mutable_set`: a fresh writable storage equal to the first
+    /// `mutable_byte_store::replace`: a fresh writable storage equal to the first
     /// operand with byte I (second operand, RANGE if not a valid index)
     /// replaced by the third (TYPE unless an Int in 0..255). The first
     /// operand is cloned and the clone written; it is never written itself.
     MBytesSet,
-    /// `byte_store::mutable_copy`: a fresh writable storage equal to the
+    /// `mutable_byte_store::detach`: a fresh writable storage equal to the
     /// operand (the "detach" before a writable foreign access).
     MBytesClone,
-    /// `byte_store::freeze`: a fresh immutable byte storage holding the
+    /// `mutable_byte_store::freeze`: a fresh immutable byte storage holding the
     /// operand's current bytes (the shared static empty storage for none).
     MBytesFreeze,
-    /// `byte_store::freeze_prefix`: the first N bytes (second operand, RANGE
+    /// `mutable_byte_store::freeze_prefix`: the first N bytes (second operand, RANGE
     /// unless 0 <= N <= the length) of the first, as an immutable storage.
     MBytesFreezePrefix,
     /// `abi::x86_64::from_mutable_bytes`, the WRITABLE raw address bridge: the
@@ -550,7 +550,7 @@ pub enum Inst {
     /// A static byte-storage constant (`bytes "HEX"`): the bytes of lowercase
     /// hexadecimal text HEX (two digits per byte), a program-lifetime object
     /// installed at startup (never collected, never allocated at run time).
-    /// native/lower.tcl emits it for an `abi::bytes` call whose every byte is
+    /// native/lower.tcl emits it for an `abi::bytes::from_list` call whose every byte is
     /// known at compile time (ABI-BYTES.md).
     Bytes { dst: Reg, bytes: Vec<u8> },
     /// A UnicodeChar constant: DIGITS is the canonical decimal codepoint

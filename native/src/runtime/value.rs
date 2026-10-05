@@ -90,11 +90,11 @@ pub const KIND_LISTPLAN: u8 = 11;
 /// A struct value (STRUCTS.md, StructObj): distinct from KIND_LIST, so a
 /// struct and a List are never the same runtime kind, whatever they hold.
 pub const KIND_STRUCT: u8 = 12;
-/// The owned byte storage behind `abi::Bytes` (ABI-BYTES.md, bytesobj.rs): an
+/// The owned byte storage behind `abi::bytes::Bytes` (ABI-BYTES.md, bytesobj.rs): an
 /// immutable, finite, contiguous sequence of bytes, header + length + payload
 /// in one allocation. Its payload holds no program value.
 pub const KIND_BYTES: u8 = 13;
-/// The writable byte storage behind `abi::MutableBytes` (MUTABLE-BYTES.md):
+/// The writable byte storage behind `abi::bytes::MutableBytes` (MUTABLE-BYTES.md):
 /// the KIND_BYTES layout under its own kind, so the two are never confused
 /// (a MutableBytes is not accepted where a Bytes storage is required, nor the
 /// reverse). Never written once it is a value (see bytesobj.rs).
@@ -385,10 +385,10 @@ pub enum Kind {
     ImmutableSet,
     /// A struct value (STRUCTS.md): distinct from List and every other kind.
     Struct,
-    /// The owned byte storage behind `abi::Bytes` (ABI-BYTES.md): distinct
+    /// The owned byte storage behind `abi::bytes::Bytes` (ABI-BYTES.md): distinct
     /// from List and String. Named as core/value.tcl's `bytestore` kind.
     ByteStore,
-    /// The writable byte storage behind `abi::MutableBytes` (MUTABLE-BYTES.md):
+    /// The writable byte storage behind `abi::bytes::MutableBytes` (MUTABLE-BYTES.md):
     /// distinct from ByteStore. Named as core/value.tcl's `mutbytes` kind.
     MutByteStore,
 }

@@ -11,13 +11,13 @@
 #   linux::write(fd, data)    write(2): ONE syscall, the kernel's raw
 #                             signed result as an ordinary Int.
 #   linux::read(fd, data)     read(2): ONE syscall into the caller's
-#                             abi::MutableBytes (MUTABLE-BYTES.md); the
+#                             abi::bytes::MutableBytes (MUTABLE-BYTES.md); the
 #                             kernel's raw signed result and the updated
 #                             buffer come back in a linux::ReadResult.
 #
 # write is the first syscall that moves memory, so it is also the first that
 # needs the memory boundary this milestone adds (ABI-BYTES.md): its buffer is
-# an abi::Bytes -- an immutable, owned, contiguous byte value -- and both the
+# an abi::bytes::Bytes -- an immutable, owned, contiguous byte value -- and both the
 # address and the byte count are derived from that ONE value. The wrapper
 # deliberately has no `count` parameter: a separate count could disagree with
 # the buffer, and `write(fd, bytes, count)` is exactly the pointer/length
@@ -48,18 +48,19 @@
 #   (NATIVE-ONLY) exactly as they refuse getpid; nothing imitates a write
 #   with puts or a Tcl channel.
 import abi
+import abi::bytes
 import abi::x86_64
 import linux::abi
 
 # write(2): SYS_write = 1, rdi = fd, rsi = the address of data's payload,
 # rdx = data's byte count.
-fn write(fd: abi::I32, data: abi::Bytes) -> int:
+fn write(fd: abi::I32, data: abi::bytes::Bytes) -> int:
     abi::x86_64::to_int(
         linux::abi::syscall({
             rax: abi::x86_64::register64(1),
             rdi: abi::x86_64::from_i32(fd),
             rsi: abi::x86_64::from_bytes(data),
-            rdx: abi::x86_64::from_usize(abi::bytes_length(data)),
+            rdx: abi::x86_64::from_usize(abi::bytes::length(data)),
         })
     )
 
@@ -69,7 +70,7 @@ fn write(fd: abi::I32, data: abi::Bytes) -> int:
 # decides what a short read, EOF or a negative result means.
 struct ReadResult:
     result: int
-    data: abi::MutableBytes
+    data: abi::bytes::MutableBytes
 
 # read(2): SYS_read = 0, rdi = fd, rsi = the address of the buffer's payload,
 # rdx = the buffer's byte count.
@@ -91,18 +92,18 @@ struct ReadResult:
 #   file, not an error. A negative result is the kernel's -errno, preserved
 #   exactly (-9 for a bad descriptor), and the buffer is then unchanged.
 # * The buffer keeps its length; nothing is resized to the byte count. Take
-#   the bytes actually read with abi::freeze_prefix(result.data,
+#   the bytes actually read with abi::bytes::freeze_prefix(result.data,
 #   abi::usize(result.result)).
 # * The address is taken and consumed synchronously; the compiler keeps the
 #   storage alive until the kernel has returned (native/lower.tcl).
-fn read(fd: abi::I32, data: abi::MutableBytes) -> ReadResult:
-    local = abi::mutable_bytes_copy(data)
+fn read(fd: abi::I32, data: abi::bytes::MutableBytes) -> ReadResult:
+    local = abi::bytes::detach(data)
     result = abi::x86_64::to_int(
         linux::abi::syscall({
             rax: abi::x86_64::register64(0),
             rdi: abi::x86_64::from_i32(fd),
             rsi: abi::x86_64::from_mutable_bytes(local),
-            rdx: abi::x86_64::from_usize(abi::mutable_bytes_length(local)),
+            rdx: abi::x86_64::from_usize(abi::bytes::mutable_length(local)),
         })
     )
     ReadResult {result: result, data: local}
