@@ -133,17 +133,17 @@ fn raw_getpid():
 # ---------------------------------------------------------------------------
 # Namespaces and registration
 
-test linux-syscall-native-registered {linux::abi::syscall is one root native under its qualified name: arity 1, a struct argument, a Register64 result shape, no declared errors, never context-free; the only qualified natives outside the standard value-family namespaces (STDLIB-NAMESPACES.md) are this one and the byte-storage / address-bridge natives of ABI-BYTES.md} -body {
+test linux-syscall-native-registered {linux::abi::syscall is one root native under its qualified name: arity 1, a struct argument, a Register64 result shape, no declared errors, never context-free; the only qualified natives outside the standard value-family namespaces (STDLIB-NAMESPACES.md) are this one and the byte-storage / address-bridge natives of ABI-BYTES.md and MUTABLE-BYTES.md} -body {
     set meta [core::native::metadata linux::abi::syscall]
     list [dict get $meta arity] [dict get $meta paramTypes] [dict get $meta resultType] \
         [dict get $meta resultShape] [dict get $meta errors] [dict get $meta contextFree] \
         [dict get $meta runtime] [core::native::isQualifiedNative linux::abi::syscall] \
         [lsearch -all -inline -not -regexp [lsearch -all -inline [core::native::names] *::*] {^(list|str|char|mutable_array|immutable_set)::}]
-} -result {1 struct struct {named-struct abi::x86_64::Register64} {} 0 raw-syscall 1 {linux::abi::syscall byte_store::from_list byte_store::byte_count abi::x86_64::from_bytes}}
+} -result {1 struct struct {named-struct abi::x86_64::Register64} {} 0 raw-syscall 1 {linux::abi::syscall byte_store::from_list byte_store::byte_count abi::x86_64::from_bytes byte_store::mutable_new byte_store::mutable_from byte_store::mutable_count byte_store::mutable_set byte_store::mutable_copy byte_store::freeze byte_store::freeze_prefix abi::x86_64::from_mutable_bytes}}
 
-test linux-syscall-no-syscall-specific-intrinsics {the compiler knows the transport, not syscalls: no getpid/write/read/open native, no other linux or abi native -- the one other native in an abi namespace is the raw address bridge abi::x86_64::from_bytes, which knows no syscall either (ABI-BYTES.md)} -body {
+test linux-syscall-no-syscall-specific-intrinsics {the compiler knows the transport, not syscalls: no getpid/write/read/open native, no other linux or abi native -- the only other natives in an abi namespace are the raw address bridges abi::x86_64::from_bytes and from_mutable_bytes, which know no syscall either (ABI-BYTES.md, MUTABLE-BYTES.md)} -body {
     lsearch -all -inline -regexp [core::native::names] {(?i)pid|^write|^read|^open|^close|linux|abi|errno}
-} -result {linux::abi::syscall abi::x86_64::from_bytes}
+} -result {linux::abi::syscall abi::x86_64::from_bytes abi::x86_64::from_mutable_bytes}
 
 test linux-syscall-abi-module-is-nested {abi::x86_64 is the nested-namespace file lib/abi/x86_64.bot: Register64 (one field, a source-defined -2^63..2^63-1 domain), register64, to_int} -body {
     set hir [syscallHir "import abi::x86_64

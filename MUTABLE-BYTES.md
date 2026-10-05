@@ -295,7 +295,8 @@ helper as an opaque call; no registration flag (`-context-free`, `-runtime`, ...
 controls deduplication. The one allocation elision is static byte-constant folding for
 `abi::bytes` of a compile-time-known sequence, which is sound only because `Bytes` is
 immutable; it is **not** applied to `MutableBytes` (none of its natives is
-`-context-free`). A test asserts two `mutable_bytes(n)` calls are two storages.
+`-context-free`). Tests assert that two `mutable_bytes(n)` calls, and two `mutable_bytes_from_bytes` of the same
+constant, are four separate heap storages (while two constant `Bytes` are static, 0 allocations).
 
 ## Value-copy behaviour, route by route
 
@@ -414,7 +415,7 @@ func 14 "linux::read" params=2 ... pnames="fd.0 data.0" instance="abi::I32, abi:
 
 ## Tests
 
-`tests/abi-mutable-bytes.test` (74 tests; all green in a normal run, under
+`tests/abi-mutable-bytes.test` (76 tests; all green in a normal run, under
 `BOTLISH_NATIVE_GC_STRESS=1` and under `CORE_BACKEND=compile`):
 
 * registration (eight natives, none context-free, none knowing a syscall), the
@@ -434,7 +435,8 @@ func 14 "linux::read" params=2 ... pnames="fd.0 data.0" instance="abi::I32, abi:
   larger input than the buffer (one chunk read; the rest still available to a `cat`
   sharing the file offset), the caller's buffer unchanged and two reads of one
   original independent, `ReadResult` copies, a wrapper that never writes through
-  shared values, and the documented raw-layer sharp edge;
+  shared values, the documented raw-layer sharp edge, and the memory barrier (a
+  freeze before a raw read shows the old bytes, one after shows the kernel's);
 * **GC stress**: forty reads reassemble a file exactly; in-process pure values
   identical with and without stress; the six liveness routes; the keepalive mutant
   is detected;
