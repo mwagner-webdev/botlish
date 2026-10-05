@@ -177,7 +177,7 @@ proc hir::syscall::BytesProblems {hir e node} {
     }
     if {![hir::structs::declared $bytesType] || ![hir::types::subtype $type [list nstruct $bytesType]]} {
         return [list [list TYPE \
-            "the argument of $native must be an $bytesType ([expr {[core::bytestore::bridgeWritable $native] ? "abi::bytes::zeroed(...)" : "abi::bytes::from_list(...)"}], lib/abi.bot): the address of an arbitrary value has no meaning, a readable Bytes is never a writable address and a MutableBytes is never a readable one, and no run-time check is inserted; its type here is [hir::types::show $type]" \
+            "the argument of $native must be an $bytesType ([expr {[core::bytestore::bridgeWritable $native] ? "abi::bytes::zeroed(...)" : "abi::bytes::from_list(...)"}], lib/abi/bytes.bot): the address of an arbitrary value has no meaning, a readable Bytes is never a writable address and a MutableBytes is never a readable one, and no run-time check is inserted; its type here is [hir::types::show $type]" \
             $arg ""]]
     }
     return {}

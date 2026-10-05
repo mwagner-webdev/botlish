@@ -51,22 +51,31 @@ That chain -- not a complete FFI system -- is the milestone.
 
 ## Source surface
 
-### `abi::bytes::Bytes` (lib/abi.bot)
+### `abi::bytes::Bytes` (lib/abi/bytes.bot)
 
 ```botlish
 opaque struct Bytes:
     storage: any
 
-fn bytes(values: List[Byte]) -> Bytes:
+fn from_list(values: List[Byte]) -> Bytes:
     Bytes {storage: byte_store::from_list(values)}
 
-fn bytes_length(data: Bytes) -> Usize:
-    Usize {value: byte_store::byte_count(data.storage)}
+fn length(data: Bytes) -> abi::Usize:
+    abi::Usize {value: byte_store::byte_count(data.storage)}
 ```
+
+> **Layout note (MUTABLE-BYTES.md).** `Bytes` originally lived in `lib/abi.bot` as
+> `abi::Bytes` with `abi::bytes(...)` and `abi::bytes_length(...)`. The writable
+> counterpart made the module the home of *two* opaque types, and the single-owner
+> rule of OPAQUE-STRUCTS.md means one module must own both for them to convert into
+> each other without a public accessor, so both moved to `lib/abi/bytes.bot` (module
+> `abi::bytes`): `abi::bytes::Bytes`, `abi::bytes::from_list`, `abi::bytes::length`.
+> `lib/abi.bot` keeps only the numeric domains. Everything below describes the same
+> semantics under those names.
 
 (`Byte` is `byte::Byte` via `import type byte::Byte`.) `abi::bytes::Bytes` is an
 **opaque struct** (OPAQUE-STRUCTS.md): its one hidden field is the owned byte
-storage, and only module `abi` can construct or project it. Nothing new was
+storage, and only module `abi::bytes` can construct or project it. Nothing new was
 invented for privacy.
 
 | | |
@@ -102,7 +111,7 @@ not know which syscall argument it will become, and is not a pointer type:
 `abi::bytes::Bytes` itself exposes no address, and the result is the same transport
 value as every other register word (`Register64`: no arithmetic, no ordering).
 It is a **root native** registered under its qualified name (like
-`linux::abi::syscall`), because only module `abi` may project the storage out
+`linux::abi::syscall`), because only module `abi::bytes` may project the storage out
 of a `Bytes`; the native's static contract (`hir::syscall::BytesProblems`) is
 that it takes exactly one argument whose static type is `abi::bytes::Bytes` (ARITY /
 TYPE otherwise, no run-time check ever inserted) and that it is only ever
@@ -119,7 +128,7 @@ backend. The Tcl backends raise `NATIVE-ONLY` exactly as they do for
 The two natives that make and measure the storage value. `byte_store` is the
 family namespace of the storage kind (as `immutable_set` is for
 `ImmutableSet`). They do not give out a `Bytes` (constructing one outside
-module `abi` is `OPAQUE-CONSTRUCTION`) and a raw storage yields no address, so
+module `abi::bytes` is `OPAQUE-CONSTRUCTION`) and a raw storage yields no address, so
 neither can manufacture a pointer. There is deliberately no operation that
 reads, slices or iterates the bytes. (`byte_count` rather than `length`: a
 member named `length` would make every `xs.length()` method-sugar hint also
@@ -482,11 +491,12 @@ twelve mutants of exactly the failures this boundary is prone to -- see
   "AboveRange"` for a literal 67): four 256-element literals compile, eight do not.
   The fuzzer's generated programs therefore build their Lists with closed-form
   loops instead of per-byte literals.
-* **`import abi` now loads `byte`** (for `Byte` in `abi::bytes::from_list`'s signature): the
+* **`import abi::bytes` loads `byte`** (for `Byte` in `abi::bytes::from_list`'s signature): the
   `byte::` types and the global errors `BelowRange`/`AboveRange` are part of every
-  program that imports `abi`, so such a program cannot declare its own `error
-  BelowRange` (error names are global). `abi`'s numeric domains themselves are
-  unchanged.
+  program that imports `abi::bytes`, so such a program cannot declare its own `error
+  BelowRange` (error names are global). Since the byte values moved out of `lib/abi.bot`
+  (MUTABLE-BYTES.md), a program that imports only `abi` no longer loads `byte` and can
+  declare it (this was a limitation of the first layout, where `Bytes` lived in `abi`).
 * **A module-level binding cannot hold a `Bytes`**: module binding initializers
   must be context-free scalars/Lists (an existing rule: a struct is not an
   accepted initializer), so `payload = abi::bytes::from_list(...)` in a library module is
@@ -524,7 +534,7 @@ twelve mutants of exactly the failures this boundary is prone to -- see
 ## Milestone report
 
 1. **`abi::bytes::Bytes` declaration:** `opaque struct Bytes:` with the one hidden field
-   `storage: any` (lib/abi.bot).
+   `storage: any` (lib/abi/bytes.bot).
 2. **Creator:** `abi::bytes::from_list(values: List[Byte]) -> abi::bytes::Bytes`.
 3. **Accepted source bytes:** exactly `byte::Byte` (0..255), by the parameter's
    `List[Byte]` typing; ordinary diagnostics otherwise.
@@ -557,7 +567,7 @@ twelve mutants of exactly the failures this boundary is prone to -- see
     function; provenance is tracked through the listed routes, not through module
     statics/closures; classified as raw-machine territory, documented.
 18. **`linux::write`:** as above.
-19. **`lib/linux.bot` imports:** `abi`, `abi::x86_64`, `linux::abi`.
+19. **`lib/linux.bot` imports:** `abi`, `abi::bytes`, `abi::x86_64`, `linux::abi`.
 20. **Register mapping:** `rax=1, rdi=fd, rsi=address, rdx=count, r10=r8=r9=0`.
 21. **Return value:** the kernel's raw signed result as an Int (`to_int`).
 22. **Short writes:** one syscall, the kernel's result returned unchanged.

@@ -1,7 +1,7 @@
 # bytestore.tcl -- the owned byte storage behind abi::Bytes (ABI-BYTES.md),
 # and the raw address bridge that reads it.
 #
-# abi::Bytes (lib/abi.bot) is an opaque struct: an ordinary immutable Botlish
+# abi::Bytes (lib/abi/bytes.bot) is an opaque struct: an ordinary immutable Botlish
 # value whose representation belongs to module `abi`. Its one field holds a
 # *byte storage*, a runtime value of its own kind (core/value.tcl,
 # {bytestore HEX}; natively one heap object, header + length + the bytes in
@@ -62,7 +62,7 @@
 
 namespace eval core::bytestore {
     # The declaration identity of the opaque struct whose one field holds a
-    # byte storage (lib/abi.bot), that field's name, and the qualified name of
+    # byte storage (lib/abi/bytes.bot), that field's name, and the qualified name of
     # the raw address bridge: the compiler's only knowledge of Bytes. Like
     # core::linuxabi::registerType for Register64, they come from one place.
     variable bytesType abi::bytes::Bytes
@@ -231,7 +231,7 @@ proc core::bytestore::mutableCount {m} {
 }
 
 # The storage M with byte INDEX replaced by BYTE. The index must designate a
-# byte and BYTE must be in 0..255 (lib/abi.bot's wrapper proves both; a
+# byte and BYTE must be in 0..255 (lib/abi/bytes.bot's wrapper proves both; a
 # violation here is a RANGE/TYPE error, never a wrap or a write elsewhere).
 proc core::bytestore::mutableSet {m index byte} {
     set hex [MutableOperand $m mutable_byte_store::replace]

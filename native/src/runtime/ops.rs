@@ -125,14 +125,14 @@ pub fn op_may_error(op: OpCode) -> bool {
     matches!(op, IMod | IShl | IShr | VEq | Hash | Substr | StrCat | StrUtf8Bytes | Argv | StrIsTclAlpha | StrIsTclAlnum
         // A non-byte element (TYPE, never a truncation), an operand that is
         // not a byte storage (TYPE), an oversized storage (RANGE). A checked
-        // program cannot produce any of them: lib/abi.bot's creator takes
+        // program cannot produce any of them: lib/abi/bytes.bot's creator takes
         // a List[Byte] and its storage field only ever holds a storage.
         | BytesFromList | BytesLen | BytesAddr
         // The writable family: a length that is not 0..the ceiling (RANGE), an
         // operand of the wrong kind (TYPE: the readable and writable storages
         // are never interchanged), an index/count outside the payload (RANGE),
         // a value that is not a byte (TYPE). Checked programs cannot produce
-        // any of them: lib/abi.bot's wrappers prove each before the call.
+        // any of them: lib/abi/bytes.bot's wrappers prove each before the call.
         | MBytesNew | MBytesFrom | MBytesLen | MBytesSet | MBytesClone | MBytesFreeze | MBytesFreezePrefix | MBytesAddr
         // Only on an operand that is not a 64-bit register word (TYPE, never
         // a truncation: runtime/syscall.rs), which a checked program cannot

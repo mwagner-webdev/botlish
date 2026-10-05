@@ -73,7 +73,7 @@
 #                             terminates the sequence (a NUL byte is
 #                             "00"). Equality is exact byte-sequence
 #                             equality. It exists only inside the owning
-#                             module's opaque struct (lib/abi.bot's Bytes);
+#                             module's opaque struct (lib/abi/bytes.bot's Bytes);
 #                             no source type spells it.
 #   {mutbytes HEX}            the owned writable byte storage behind
 #                             abi::bytes::MutableBytes (MUTABLE-BYTES.md): a finite

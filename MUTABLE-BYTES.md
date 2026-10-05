@@ -93,22 +93,32 @@ storage) is the one primitive such a mechanism would call. Nothing keys on the
 spelling `abi::bytes::MutableBytes`: the runtime kind (`KIND_MUTBYTES` / `{mutbytes HEX}`)
 is the discriminator.
 
-## Source surface (lib/abi.bot, lib/linux.bot)
+## Source surface (lib/abi/bytes.bot, lib/linux.bot)
+
+One module, `abi::bytes` (`lib/abi/bytes.bot`), owns **both** opaque types and holds
+only the primitive operations -- every function that projects or constructs a
+representation, and nothing else:
 
 ```botlish
+opaque struct Bytes:
+    storage: any
 opaque struct MutableBytes:
     storage: any
 
-fn mutable_bytes(length: Usize) -> MutableBytes
-fn mutable_bytes_from_bytes(data: Bytes) -> MutableBytes
-fn mutable_bytes_length(data: MutableBytes) -> Usize
-fn mutable_bytes_set(data: MutableBytes, index: int, value: Byte) -> MutableBytes errors IndexNotFound
-fn mutable_bytes_copy(data: MutableBytes) -> MutableBytes
+fn from_list(values: List[Byte]) -> Bytes
+fn length(data: Bytes) -> abi::Usize
+
+fn zeroed(length: abi::Usize) -> MutableBytes
+fn from_bytes(data: Bytes) -> MutableBytes
+fn mutable_length(data: MutableBytes) -> abi::Usize
+fn replace(data: MutableBytes, index: int, value: Byte) -> MutableBytes errors IndexNotFound
+fn detach(data: MutableBytes) -> MutableBytes
 fn freeze(data: MutableBytes) -> Bytes
-fn freeze_prefix(data: MutableBytes, count: Usize) -> Bytes errors UpperOverrun
+fn freeze_prefix(data: MutableBytes, count: abi::Usize) -> Bytes errors UpperOverrun
 
 abi::x86_64::from_mutable_bytes(data: abi::bytes::MutableBytes) -> abi::x86_64::Register64   # root native
 
+# lib/linux.bot
 struct ReadResult:
     result: int
     data: abi::bytes::MutableBytes
@@ -116,13 +126,44 @@ struct ReadResult:
 fn read(fd: abi::I32, data: abi::bytes::MutableBytes) -> ReadResult
 ```
 
+Qualified with the full path (`abi::bytes::zeroed(n)`), the way `abi::x86_64::from_i32` is; after
+`import abi::bytes` the same functions are method candidates (`buffer.freeze_prefix(n)`). A struct
+cannot be imported by short name (`import type` accepts `type` declarations only), so signatures
+spell `abi::bytes::MutableBytes` in full.
+
+### Why one module, and why these names
+
+* **One owner for both types.** `opaque` gives a representation to exactly one module (the owner
+  is the declaring namespace, compared exactly). `from_bytes` must read a `Bytes` and construct a
+  `MutableBytes`, `freeze`/`freeze_prefix` the reverse, so a layout with a module per type needs
+  public hooks that hand out or accept a raw storage as an `any`, and a layout that lets child
+  namespaces reach the parent's opaque types would let any file at `abi/x.bot` into the privileged
+  set. Neither was acceptable, so the module that owns the representations is one, and the
+  single-owner rule is untouched. (A prototype confirmed that an opaque struct in a nested module
+  works on every backend, and that a separate operations module cannot construct it:
+  `OPAQUE-CONSTRUCTION`, naming the types module.)
+* **Primitives only.** All nine functions are one native call plus a wrap. Two could be derived --
+  `freeze` as `freeze_prefix(d, mutable_length(d))` (but `freeze_prefix` declares `UpperOverrun`
+  and the compiler cannot prove it away, leaving a handler for an impossible error) and `detach`
+  as `from_bytes(freeze(d))` (a second copy and wrapper in every `linux::read`, and `detach` is
+  the one place a future copy-on-write hooks in) -- and were deliberately kept. Policy sits above:
+  `linux::read`, `linux::write`.
+* **Names follow the list API, not the spec's.** The spec named these before the rest of the
+  library was in view (`mutable_bytes_set`, `mutable_bytes_copy`, ...). A namespace replaces the
+  `mutable_bytes_` prefix; `replace` says the result is a different value (`set` implies mutation,
+  and `with` is reserved for a future construct); `detach` names the purpose of the copy. One
+  name still carries a prefix, `mutable_length`: a name denotes one function and both types need a
+  length.
+* **`import abi` stays small.** `Bytes` left `lib/abi.bot`, which keeps only the numeric domains;
+  a program that imports only `abi` no longer loads `byte` and its global errors.
+
 | | |
 |---|---|
 | constructor | `abi::bytes::zeroed(n)`: `n` **zero** bytes; nothing uninitialized is ever visible. A length beyond the collection ceiling (2^62 - 1) is the RANGE error every oversized collection is, and an allocation the machine cannot supply is reported as RANGE ("out of memory"), not an abort |
 | `from_bytes` | an independent writable copy; changing it never changes the `Bytes` |
 | length | `abi::bytes::mutable_length(data) -> abi::Usize`; fixed for the value's life; there is no capacity |
-| update | `mutable_bytes_set`: a **new value**; `data` is unchanged. `IndexNotFound` (the existing list/array convention) unless `0 <= index < length`; the value is a `byte::Byte` by typing |
-| `mutable_bytes_copy` | semantically the identity (a logical copy is the same value), physically a fresh storage: the "detach" a writable foreign access needs (below). The one addition beyond the spec's list, needed so `linux::read` can be ordinary Botlish |
+| update | `replace`: a **new value**; `data` is unchanged. `IndexNotFound` (the existing list/array convention) unless `0 <= index < length`; the value is a `byte::Byte` by typing |
+| `detach` | semantically the identity (a logical copy is the same value), physically a fresh storage: the "detach" a writable foreign access needs (below). The one addition beyond the spec's list, needed so `linux::read` can be ordinary Botlish |
 | `freeze` / `freeze_prefix` | immutable snapshots (a copy). `freeze_prefix` with `count > length` is `UpperOverrun` and reads nothing outside the payload; `count: Usize` already excludes negatives |
 | not provided | slicing, indexing, concatenation, capacity, resizing, `Bytes` slicing, an address accessor, `CString` |
 
@@ -216,12 +257,12 @@ of an expression, so each fallible call is bound on its own line).
 NIR ops: `mbytesnew`, `mbytesfrom`, `mbyteslen`, `mbytesset`, `mbytesclone`,
 `mbytesfreeze`, `mbytesfreezeprefix`, `mbytesaddr`. All but `mbyteslen`/`mbytesaddr`
 allocate (GC safepoints); all are fallible only on a wrong-kind or out-of-range operand
-that a checked program cannot produce (lib/abi.bot proves each before the call).
+that a checked program cannot produce (lib/abi/bytes.bot proves each before the call).
 
 ## The writable address bridge and liveness
 
 `abi::x86_64::from_mutable_bytes(data) -> Register64` is the writable twin of
-`from_bytes`: a root native (only module `abi` can project the storage), statically
+`from_bytes`: a root native (only module `abi::bytes` can project the storage), statically
 requiring an `abi::bytes::MutableBytes` argument (`from_bytes(MutableBytes)`,
 `from_mutable_bytes(Bytes)`, of an Int, a String, a raw storage or an `abi::U8` are all
 compile-time `TYPE` errors; a `-strict 0` program replays the problem as a run-time
@@ -295,7 +336,7 @@ helper as an opaque call; no registration flag (`-context-free`, `-runtime`, ...
 controls deduplication. The one allocation elision is static byte-constant folding for
 `abi::bytes::from_list` of a compile-time-known sequence, which is sound only because `Bytes` is
 immutable; it is **not** applied to `MutableBytes` (none of its natives is
-`-context-free`). Tests assert that two `mutable_bytes(n)` calls, and two `mutable_bytes_from_bytes` of the same
+`-context-free`). Tests assert that two `zeroed(n)` calls, and two `from_bytes` of the same
 constant, are four separate heap storages (while two constant `Bytes` are static, 0 allocations).
 
 ## Value-copy behaviour, route by route
@@ -338,7 +379,7 @@ test's own tuple):
 | `b = m; c = b; [len(c), len(m)]` (copy by binding) | 2 | 1 | 0 | 0 | 1 |
 | `id(id(m))` (copy through a function) | 2 | 1 | 0 | 1 | 0 |
 | `[m, m]` / `[m, put(m, ..)]` (into a List) | MutableBytes column 1 / 2 | | | | |
-| `put(m, 0, b)` (`mutable_bytes_set`) | 4 | 2 | 0 | 2 | 0 |
+| `put(m, 0, b)` (`replace`) | 4 | 2 | 0 | 2 | 0 |
 | `abi::bytes::freeze(m)` | 2 | 1 | 1 | 0 | 0 |
 | `rd(1000, m)` (`linux::read`, original + detach clone, + the returned wrapper) | 3 | 2 | 0 | 1 | 0 |
 
@@ -360,14 +401,14 @@ zero-copy `freeze`. Each is legal under the semantics and none is needed for the
 ## How copy-on-write would fit (not implemented)
 
 No reference counts, shared flags or detach-on-write exist; the one operation
-`mutable_bytes_copy`/`rt_mbytes_clone` is the detach. A future COW would:
+`detach`/`rt_mbytes_clone` is the detach. A future COW would:
 
 | operation | would |
 |---|---|
 | logical copy | share the physical backing (increment a count, or not at all) |
 | read-only operation (`length`, `==`, `hash`, `freeze` inspection) | keep sharing |
-| `mutable_bytes_set` | detach first if shared, then write in place |
-| `from_mutable_bytes` / writable foreign access | detach first if shared (what `mutable_bytes_copy` does unconditionally today), then hand out the address |
+| `replace` | detach first if shared, then write in place |
+| `from_mutable_bytes` / writable foreign access | detach first if shared (what `detach` does unconditionally today), then hand out the address |
 | `freeze` | share only if the mutable backing can never be written again (uniqueness/deadness) |
 
 The hook is `rt_mbytes_set` / `rt_mbytes_clone`: replace "always allocate" with "allocate
@@ -451,14 +492,14 @@ operations under a collection at every allocation.
 
 ## Limitations discovered
 
-* **Every update copies the whole buffer.** A loop of *n* `mutable_bytes_set` calls is
+* **Every update copies the whole buffer.** A loop of *n* `replace` calls is
   O(n·length); there is no in-place path for a dead value. Correct, deliberately
   conservative, and measured above rather than hidden.
 * **`linux::read` allocates two storages and a wrapper** (the caller's, the detach,
   the returned wrapper); a fresh temporary buffer is not elided.
 * **The raw writable bridge does not detach** (sharp edge, tested). It is raw-machine
   territory like `from_bytes`; the safe theorem is `linux::read`'s.
-* **`mutable_bytes_set` needs an `IndexNotFound` handler** at each call: the static
+* **`replace` needs an `IndexNotFound` handler** at each call: the static
   completion proofs have no bounds family for it (adding one would touch
   hir/completions.tcl for little). A refinement `if n > 0` also does not apply to a
   field projection, and a handler covers only the outermost call of an expression,
@@ -515,7 +556,7 @@ mutants run in a scratch copy of the tree (Rust mutants rebuild the native backe
 | `set-aliases` (an update writes its operand in place) | 24 tests |
 | `read-does-not-detach` (the kernel writes the caller's storage) | 10 tests |
 | `freeze-shares` (zero-copy freeze: flips the object into a Bytes) | 22 tests |
-| `from-bytes-shares` (`mutable_bytes_from_bytes` reuses the Bytes' storage) | 2 tests |
+| `from-bytes-shares` (`from_bytes` reuses the Bytes' storage) | 2 tests |
 | `clone-zeroes` (the detach loses contents; suffix would read zeros) | 5 tests |
 | `address-one-late` (writable bridge + 1) | 18 tests |
 | `read-uses-bytes-bridge` (readable address op for the writable bridge) | 28 tests |
@@ -567,7 +608,7 @@ shareable and is never subjected to any `MutableBytes` copy behaviour.
 
 ## Milestone report (the 48 items)
 
-1. **Declaration:** `opaque struct MutableBytes: storage: any` (lib/abi.bot).
+1. **Declaration:** `opaque struct MutableBytes: storage: any` (lib/abi/bytes.bot, module `abi::bytes`, beside `Bytes`).
 2. **Constructor:** `abi::bytes::zeroed(length: abi::Usize)`, zero-filled.
 3. **`abi::bytes::from_bytes(data: Bytes)`:** an independent writable copy.
 4. **Length:** `abi::bytes::mutable_length(data) -> abi::Usize`.
