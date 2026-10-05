@@ -1,48 +1,70 @@
 #!/usr/bin/env tclsh9.0
 # compare.tcl -- RANGE-FIXPOINT-SCALING.md: compares two dump directories
-# written by dump.tcl, one subdirectory per suite (all cov corpus bot).
+# written by dump.tcl, one subdirectory per suite.
 #
-#   tclsh9.0 audit/range-fixpoint-scaling/tools/compare.tcl DUMP-A DUMP-B
+#   tclsh9.0 audit/range-fixpoint-scaling/tools/compare.tcl DUMP-A DUMP-B ?SUITE ...?
 #
-# Per suite: the records of each run, the distinct inputs (by KIND), how
-# many inputs map to different outputs, the inputs only one run saw, and the
-# inputs one run lowered to more than one output (a nondeterminism check).
-# Prints IDENTICAL when no input differs and both runs saw the same inputs.
+# SUITE defaults to all cov corpus bot. Per suite, the comparison is of the
+# multiset of {KIND OUTPUT-KEY} records: every range analysis result and
+# every NIR text the run produced, with multiplicities. Input keys are not
+# compared: a call's arguments embed the compiler tree's path (an imported
+# module's source location), so two trees never share them. Process logs are
+# not paired either: concurrent runs reuse process ids, and two processes
+# with one id append to one log. Prints IDENTICAL when every suite's
+# multisets are equal.
 lassign $argv a b
+set suites [lrange $argv 2 end]
+if {$suites eq ""} {
+    set suites {all cov corpus bot}
+}
+
+# {RECORDS MULTISET}: the record count and {KIND OUTPUT-KEY} -> count.
 proc load {dir} {
-    set map [dict create]   ;# kind,inKey -> sorted unique outKeys
-    set count 0
-    foreach f [glob -nocomplain -directory $dir *.log] {
-        set c [open $f r]
-        foreach line [split [read $c] \n] {
+    set multiset [dict create]
+    set records 0
+    foreach path [glob -nocomplain -directory $dir *.log] {
+        set channel [open $path r]
+        foreach line [split [read $channel] \n] {
             if {$line eq ""} continue
             lassign $line kind in out
-            dict lappend map "$kind $in" $out
-            incr count
+            dict incr multiset [list $kind $out]
+            incr records
         }
-        close $c
+        close $channel
     }
-    dict for {k v} $map { dict set map $k [lsort -unique $v] }
-    return [list $count $map]
+    return [list $records $multiset]
 }
-set bad 0
-foreach suite {all cov corpus bot} {
-    lassign [load [file join $a $suite]] ca ma
-    lassign [load [file join $b $suite]] cb mb
-    set diff 0; set onlyA 0; set onlyB 0; set multi 0
+
+# The records of multiset A missing from multiset B (counted with
+# multiplicity), printing the first few.
+proc missing {suite label a b} {
+    set count 0
+    dict for {record n} $a {
+        set m [expr {[dict exists $b $record] ? [dict get $b $record] : 0}]
+        if {$n > $m} {
+            incr count [expr {$n - $m}]
+            if {$count <= 5} {
+                puts "  $suite: only in $label: $record ($n vs $m)"
+            }
+        }
+    }
+    return $count
+}
+
+set same 1
+foreach suite $suites {
+    lassign [load [file join $a $suite]] ra ma
+    lassign [load [file join $b $suite]] rb mb
     set kinds [dict create]
-    dict for {k v} $ma {
-        dict incr kinds [lindex $k 0]
-        if {[llength $v] > 1} { incr multi }
-        if {![dict exists $mb $k]} { incr onlyA; continue }
-        if {[dict get $mb $k] ne $v} {
-            incr diff
-            if {$diff <= 5} { puts "  DIFF $suite $k: $v vs [dict get $mb $k]" }
-        }
+    dict for {record n} $ma {
+        dict incr kinds [lindex $record 0] $n
     }
-    dict for {k v} $mb { if {![dict exists $ma $k]} { incr onlyB } }
-    puts [format "%-7s records %6d/%6d  distinct inputs %5d (%s)  differing %d  only-in-A %d  only-in-B %d  multi-output-inputs %d" \
-        $suite $ca $cb [dict size $ma] $kinds $diff $onlyA $onlyB $multi]
-    if {$diff || $onlyA || $onlyB} { set bad 1 }
+    set onlyA [missing $suite A $ma $mb]
+    set onlyB [missing $suite B $mb $ma]
+    puts [format "%-7s records %6d / %6d (%s)  distinct outputs %5d / %5d  only in A %d  only in B %d" \
+        $suite $ra $rb $kinds [dict size $ma] [dict size $mb] $onlyA $onlyB]
+    if {$onlyA || $onlyB || $ra == 0} {
+        set same 0
+    }
 }
-puts [expr {$bad ? "MISMATCH" : "IDENTICAL"}]
+puts [expr {$same ? "IDENTICAL" : "MISMATCH"}]
