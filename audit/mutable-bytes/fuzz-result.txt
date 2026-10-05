@@ -1,13 +1,10 @@
+# Fuzz campaigns on the final layout (abi::bytes), recorded from the final matrix run
 ## tclsh9.0 audit/mutable-bytes/tools/fuzz.tcl -mode both -n 60 -seed 1 -items 12
 mutable-bytes-fuzz programs 60 values 787 failures 0
-(exit 0)
 ## tclsh9.0 audit/mutable-bytes/tools/fuzz.tcl -mode pure -n 40 -seed 9001 -items 14
 mutable-bytes-fuzz programs 40 values 441 failures 0
-(exit 0)
 ## tclsh9.0 audit/mutable-bytes/tools/fuzz.tcl -mode read -n 60 -seed 5001 -gc-stress 1
 mutable-bytes-fuzz programs 60 values 240 failures 0
-(exit 0)
 ## tclsh9.0 audit/mutable-bytes/tools/fuzz.tcl -mode read -n 80 -seed 12001
 mutable-bytes-fuzz programs 80 values 320 failures 0
-(exit 0)
 finished

@@ -528,9 +528,9 @@ operations under a collection at every allocation.
 
 ## Fuzz results
 
-`audit/mutable-bytes/tools/fuzz.tcl`, recorded in `audit/mutable-bytes/fuzz-result.txt`. Each program is
-seeded individually (a failure replays with `-seed S -n 1`); the oracle is an independent Tcl byte-list
-model that never reads what the program computes.
+`audit/mutable-bytes/tools/fuzz.tcl`, recorded in `audit/mutable-bytes/fuzz-result.txt` (re-run on the final
+`abi::bytes` layout). Each program is seeded individually (a failure replays with `-seed S -n 1`); the oracle is
+an independent Tcl byte-list model that never reads what the program computes.
 
 | run | what | result |
 |---|---|---|
@@ -539,16 +539,19 @@ model that never reads what the program computes.
 | `-mode read -n 60 -seed 5001 -gc-stress 1` | sequential file reads and a pipe read, whole process under GC stress | 60 programs, 240 values, **0 failures** |
 | `-mode read -n 80 -seed 12001` | the same, a larger run | 80 programs, 320 values, **0 failures** |
 
-The pure scripts check the contents of every variable and snapshot *at the end*, so an update that
-leaked into an earlier copy through any route (binding, generic identity, List, struct, detach, double
-update) would show. The read mode checks every result (`min(capacity, remaining)`), the returned buffer
-(bytes read then the untouched suffix), the caller's own buffer, and the file's remaining input.
+The earlier `Bytes` fuzzer (`audit/abi-bytes/tools/fuzz.tcl -mode both -n 40 -seed 1 -items 8`) also passes on
+the new layout: 40 programs, 320 payloads, 0 failures.
+
+The pure scripts check the contents of every variable and snapshot *at the end*, so an update that leaked into an
+earlier copy through any route (binding, generic identity, List, struct, detach, double update) would show. The
+read mode checks every result (`min(capacity, remaining)`), the returned buffer (bytes read then the untouched
+suffix), the caller's own buffer, and the file's remaining input.
 
 ## Mutation results
 
-`audit/mutable-bytes/tools/mutate.tcl`, recorded in `audit/mutable-bytes/mutate-result.txt`: eighteen
-mutants run in a scratch copy of the tree (Rust mutants rebuild the native backend there) against
-`tests/abi-mutable-bytes.test` and the read fuzzer: **18 killed, 0 survivors**.
+`audit/mutable-bytes/tools/mutate.tcl`, recorded in `audit/mutable-bytes/mutate-result.txt`: eighteen mutants run in
+a scratch copy of the tree (Rust mutants rebuild the native backend there) against `tests/abi-mutable-bytes.test`
+and the read fuzzer: **18 killed, 0 survivors**, in one pass on the final layout.
 
 | mutant | killed by |
 |---|---|
@@ -571,40 +574,35 @@ mutants run in a scratch copy of the tree (Rust mutants rebuild the native backe
 | `equality-by-identity` | 8 tests |
 | `hash-ignores-length` | 1 test (the one comparing hash *values* across backends) |
 
-Honest notes. Two mutants were first refused by the tool's own guard, both tool bugs rather than product
-bugs: `read-uses-bytes-bridge` *compiles* and fails at run time (a TYPE error, exactly the kill wanted),
-which the guard misread as a compile error, and `count-off-by-one`'s helper function was appended after
-its use (the language has no forward references). The tool was fixed and those two re-run: both killed.
-A "list/struct copy aliases" mutant is not expressible as such: no boundary copies anything, so the
-aliasing mutants are the two write paths (`clone-aliases`, `set-aliases`), which the List, struct, generic,
-`any` and closure routes of the theorem tests then catch. And `hash-ignores-length` is, as for `Bytes`,
-caught by one test only, since equal values still hash equal without the count.
+The earlier `Bytes` suite (`audit/abi-bytes/tools/mutate.tcl`, twelve mutants) was re-run on the new layout too:
+**12 killed, 0 survivors** (`audit/abi-bytes/mutate-result-after-abi-bytes-layout.txt`), so the immutable
+guarantees did not regress.
+
+Honest notes. During development two mutants were refused by this tool's own guard (a run-time TYPE kill misread
+as a compile error; a helper function appended after its use); the tool was fixed and the final run above has no
+such case. A "list/struct copy aliases" mutant is not expressible as such: no boundary copies anything, so the
+aliasing mutants are the two write paths (`clone-aliases`, `set-aliases`), which the List, struct, generic, `any`
+and closure routes of the theorem tests then catch. And `hash-ignores-length` is, as for `Bytes`, caught by one
+test only, since equal values still hash equal without the count.
 
 ## Regression
 
-Every run below is the whole suite on the final tree, native backend built from it, under
-`LANG=C.utf8 LC_ALL=C.utf8`.
+Every run below is the whole suite on the final tree (the `abi::bytes` layout, with `main`'s newest commits
+merged in: the `METHOD-ELIGIBLE` warning), native backend built from it, under `LANG=C.utf8 LC_ALL=C.utf8`.
 
 | run | command | result |
 |---|---|---|
-| interpreter | `CORE_BACKEND=interp tclsh9.0 tests/all.tcl` | 5621 tests, **5621 passed**, 0 failed |
-| Tcl compiler | `CORE_BACKEND=compile tclsh9.0 tests/all.tcl` | 5621 tests, **5617 passed**, 4 skipped (the `coreScoping` constraint, as for every compile run), 0 failed |
-| native/cranelift coverage | `tclsh9.0 tests/native-coverage.tcl` | 5655 tests: 3104 independent of the backend, 70 passed-partial, 60 unsupported (constructs native does not run, as in the baseline), **0 failed** |
-| GC-stress suite | `BOTLISH_NATIVE_GC_STRESS=1 CORE_BACKEND=interp tclsh9.0 tests/all.tcl` | 5621 tests, **5621 passed**, 0 failed |
+| interpreter | `CORE_BACKEND=interp tclsh9.0 tests/all.tcl` | 5766 tests, **5766 passed**, 0 failed |
+| Tcl compiler | `CORE_BACKEND=compile tclsh9.0 tests/all.tcl` | 5766 tests, **5762 passed**, 4 skipped (the `coreScoping` constraint, as for every compile run), 0 failed |
+| native/cranelift coverage | `tclsh9.0 tests/native-coverage.tcl` | 5800 tests: 2432 ran native, 3238 independent of the backend, 70 passed-partial, 60 unsupported (constructs native does not run, as in the baseline), **0 failed** |
+| GC-stress suite | `BOTLISH_NATIVE_GC_STRESS=1 CORE_BACKEND=interp tclsh9.0 tests/all.tcl` | 5766 tests, **5766 passed**, 0 failed |
 | Rust | `cargo test --release --manifest-path native/Cargo.toml` | **183 + 28 passed**, 0 failed |
 
-Named areas, each file on its own: `abi-mutable-bytes` 76/76 (also 76/76 under GC stress and under
-`CORE_BACKEND=compile`), `abi-bytes` 73/73, `abi-numeric` 41/41, `linux-syscall` 37/37,
-`stdlib-namespaces` 74/74; `opaque-struct`, `imports`, `proven-bounds` and the proof files are part of
-the whole-suite runs above.
-
-The first complete interpreter run found four failures, all tests that *pin the exact set of native
-names* (`abi-numeric-no-compiler-knowledge`, `linux-syscall-native-registered`,
-`linux-syscall-no-syscall-specific-intrinsics`, `ns-qualified-inventory`) and so had to list the new
-natives; two Bytes tests that enumerated `abi.bot`'s whole function list and the `byte_store` natives
-were narrowed to the immutable surface (the writable family is pinned in the new file). Nothing else
-changed in an existing test, and the immutable `Bytes` suite is green: `Bytes` is still physically
-shareable and is never subjected to any `MutableBytes` copy behaviour.
+`tests/abi-mutable-bytes.test` (76) and `tests/abi-bytes.test` (73) are part of those runs and also pass on their own.
+Tests that pin the exact set of native names, or that read the library source, had to follow the rename (the
+`abi-numeric`, `linux-syscall` and `stdlib-namespaces` inventories; the two declaration/surface tests of
+`abi-bytes`); nothing else in an existing test changed, and `Bytes` is still physically shareable and never subjected
+to any `MutableBytes` copy behaviour.
 
 ## Milestone report (the 48 items)
 
@@ -649,7 +647,7 @@ shareable and is never subjected to any `MutableBytes` copy behaviour.
 39. **strace evidence:** above (stdin read, binary short read, EOF, bad fd).
 40. **libc `read` is not the wrapper path:** no libc read call in `linux::read`; no libc frame in the kernel's stack; one `syscall` instruction in the whole executable.
 41. **Allocation measurements:** the table above.
-42. **GC-stress results:** suite 5621/5621; new suite 76/76; forty-read reassembly exact.
+42. **GC-stress results:** suite 5766/5766; new suite 76/76; forty-read reassembly exact.
 43. **Fuzz results:** the table above.
 44. **Mutation results:** 18 of 18 killed.
 45. **Full regression:** the table above.

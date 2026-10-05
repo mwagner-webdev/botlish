@@ -1,0 +1,17 @@
+# Re-run of the earlier Bytes mutation suite (tools/mutate.tcl) on the renamed layout (abi::bytes): 12 mutants.
+
+   killed: length-off-by-one by 31 test(s) abi-bytes-aliased-writes abi-bytes-aliasing-is-ordinary-value-use abi-bytes-eager-construction-is-independent-of-the-source abi-bytes-embedded-nul abi-bytes-empty-write abi-bytes-every-byte-value-heap-write... fuzz failures 0
+   killed: nul-as-terminator by 7 test(s) abi-bytes-accepts-a-typed-dynamic-list abi-bytes-embedded-nul abi-bytes-every-byte-value-heap-write abi-bytes-gc-stress-in-process abi-bytes-gc-stress-writes-are-exact abi-bytes-kernel-sees-the-nul-payload... fuzz failures 0
+   killed: payload-offset-by-one by 22 test(s) abi-bytes-aliased-writes abi-bytes-embedded-nul abi-bytes-every-byte-value-heap-write abi-bytes-example-file-on-every-backend abi-bytes-example-writes-hello-to-stdout abi-bytes-gc-stress-writes-are-exact... fuzz failures 0
+   killed: byte-masked-to-7-bits by 7 test(s) abi-bytes-every-byte-value-heap-write abi-bytes-gc-stress-writes-are-exact abi-bytes-hash-values-agree-across-backends abi-bytes-kernel-sees-the-count-not-the-scalars abi-bytes-large-heap-write abi-bytes-utf8-write... fuzz failures 0
+   killed: count-truncated by 4 test(s) abi-bytes-large-heap-write abi-bytes-nir-write-path abi-bytes-short-write-is-reported-not-completed abi-bytes-write-to-a-pipe... fuzz failures 0
+   killed: no-keepalive by 11 test(s) abi-bytes-clif-keepalive-and-stack-map abi-bytes-liveness-helper abi-bytes-liveness-inline abi-bytes-liveness-join abi-bytes-liveness-locals abi-bytes-liveness-mutant-without-keepalive-is-detected... fuzz failures 0
+   killed: address-in-rdx by 17 test(s) abi-bytes-aliased-writes abi-bytes-embedded-nul abi-bytes-empty-write abi-bytes-every-byte-value-heap-write abi-bytes-example-file-on-every-backend abi-bytes-example-writes-hello-to-stdout... fuzz failures 0
+   killed: libc-write by 6 test(s) abi-bytes-empty-write-to-an-invalid-descriptor-is-still-the-syscall abi-bytes-gc-stress-in-process abi-bytes-kernel-sees-the-write abi-bytes-liveness-join-else-branch abi-bytes-short-write-is-reported-not-completed abi-bytes-write-error-is-the-raw-negative-result... fuzz failures 0
+   killed: write-twice by 18 test(s) abi-bytes-aliased-writes abi-bytes-clif-keepalive-and-stack-map abi-bytes-embedded-nul abi-bytes-every-byte-value-heap-write abi-bytes-example-writes-hello-to-stdout abi-bytes-gc-stress-writes-are-exact... fuzz failures 0
+   killed: equality-by-identity by 6 test(s) abi-bytes-accepts-a-typed-dynamic-list abi-bytes-aliasing-is-ordinary-value-use abi-bytes-equality-is-by-bytes abi-bytes-gc-stress-in-process abi-bytes-in-collections abi-bytes-large-values... fuzz failures 0
+   killed: hash-ignores-length by 1 test(s) abi-bytes-hash-values-agree-across-backends... fuzz failures 0
+   killed: static-constant-ascii by 3 test(s) abi-bytes-length-is-bytes-not-scalars abi-bytes-nir-static-forms abi-bytes-utf8-write... fuzz failures 0
+abi-bytes-mutate mutants 12 killed 12 survivors 0 {}
+
+# Bytes fuzz, same run: abi-bytes-fuzz programs 40 payloads 320 failures 0

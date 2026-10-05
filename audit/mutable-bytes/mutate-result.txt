@@ -1,9 +1,5 @@
-# Final mutation run (tools/mutate.tcl -fuzz 12), on the final tree. 18 mutants.
-# Pass 1 (all 18): 16 killed; read-uses-bytes-bridge and count-off-by-one were refused by the tool's own guard
-# (a run-time TYPE kill misread as a compile error; a helper placed after its use). The tool was fixed (commit e93cc1d)
-# and those two re-run on their own; both killed.
+# Final mutation run (tools/mutate.tcl -fuzz 12) on the final layout (abi::bytes): 18 mutants, all killed in ONE pass (no mutant refused by the tool's guard).
 
-## pass 1
    killed: clone-aliases by 6 test(s) abi-mutable-bytes-allocations abi-mutable-bytes-read-binary-prefix-and-suffix abi-mutable-bytes-read-does-not-change-the-callers-buffer abi-mutable-bytes-read-larger-input-reads-one-chunk abi-mutable-bytes-read-short-read-and-untouched-suffix abi-mutable-bytes-wrapper-read-never-writes-through-shared-values... fuzz failures 48
    killed: set-aliases by 24 test(s) abi-mutable-bytes-allocations abi-mutable-bytes-allocations-aggregates abi-mutable-bytes-copies-are-independent-any abi-mutable-bytes-copies-are-independent-binding abi-mutable-bytes-copies-are-independent-branch-join abi-mutable-bytes-copies-are-independent-closure... fuzz failures 0
    killed: read-does-not-detach by 10 test(s) abi-mutable-bytes-allocations abi-mutable-bytes-detach-function-machine-code abi-mutable-bytes-machine-code-read-function abi-mutable-bytes-nir-operands abi-mutable-bytes-nir-read-path abi-mutable-bytes-read-binary-prefix-and-suffix... fuzz failures 48
@@ -11,8 +7,8 @@
    killed: from-bytes-shares by 2 test(s) abi-mutable-bytes-from-bytes-is-independent abi-mutable-bytes-no-static-mutable-constants... fuzz failures 0
    killed: clone-zeroes by 5 test(s) abi-mutable-bytes-read-binary-prefix-and-suffix abi-mutable-bytes-read-does-not-change-the-callers-buffer abi-mutable-bytes-read-eof abi-mutable-bytes-read-error-is-the-raw-negative-result abi-mutable-bytes-read-short-read-and-untouched-suffix... fuzz failures 28
    killed: address-one-late by 18 test(s) abi-mutable-bytes-example-echoes-stdin abi-mutable-bytes-example-eof-and-binary abi-mutable-bytes-gc-stress-reads-are-exact abi-mutable-bytes-kernel-sees-the-stdin-read abi-mutable-bytes-liveness-callee abi-mutable-bytes-liveness-helper... fuzz failures 48
-   INVALID MUTANT (does not compile): read-uses-bytes-bridge: error: abi::x86_64::from_bytes: expected bytestore, got <mutbytes 4096: 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-   INVALID MUTANT (does not compile): count-off-by-one: error: /tmp/mutable-bytes-mutants_ZBMMal/count-off-by-one/lib/linux.bot:105:42: unbound name "plus_one": "plus_one" is declared later; forward references are not allowed (a binding is visible only after it is established) (CORE SEMANTIC UNBOUND)
+   killed: read-uses-bytes-bridge by 28 test(s) abi-mutable-bytes-allocations abi-mutable-bytes-clif-keepalive-and-stack-map abi-mutable-bytes-example-echoes-stdin abi-mutable-bytes-example-eof-and-binary abi-mutable-bytes-gc-stress-reads-are-exact abi-mutable-bytes-kernel-sees-binary-short-eof-and-bad-fd... fuzz failures 0
+   killed: count-off-by-one by 5 test(s) abi-mutable-bytes-gc-stress-reads-are-exact abi-mutable-bytes-kernel-sees-binary-short-eof-and-bad-fd abi-mutable-bytes-kernel-sees-the-stdin-read abi-mutable-bytes-nir-read-path abi-mutable-bytes-read-larger-input-reads-one-chunk... fuzz failures 30
    killed: count-unrelated by 13 test(s) abi-mutable-bytes-example-echoes-stdin abi-mutable-bytes-example-eof-and-binary abi-mutable-bytes-gc-stress-reads-are-exact abi-mutable-bytes-kernel-sees-binary-short-eof-and-bad-fd abi-mutable-bytes-kernel-sees-the-stdin-read abi-mutable-bytes-nir-operands... fuzz failures 42
    killed: no-keepalive by 11 test(s) abi-mutable-bytes-clif-keepalive-and-stack-map abi-mutable-bytes-liveness-helper abi-mutable-bytes-liveness-inline abi-mutable-bytes-liveness-join abi-mutable-bytes-liveness-locals abi-mutable-bytes-liveness-mutant-without-keepalive-is-detected... fuzz failures 0
    killed: result-is-the-original by 13 test(s) abi-mutable-bytes-example-echoes-stdin abi-mutable-bytes-example-eof-and-binary abi-mutable-bytes-gc-stress-reads-are-exact abi-mutable-bytes-kernel-sees-the-stdin-read abi-mutable-bytes-machine-code-read-function abi-mutable-bytes-nir-operands... fuzz failures 48
@@ -22,12 +18,4 @@
    killed: prefix-is-suffix by 6 test(s) abi-mutable-bytes-example-echoes-stdin abi-mutable-bytes-example-eof-and-binary abi-mutable-bytes-freeze-prefix abi-mutable-bytes-freeze-prefix-after-update abi-mutable-bytes-frozen-bytes-never-change abi-mutable-bytes-kernel-sees-the-stdin-read... fuzz failures 0
    killed: equality-by-identity by 8 test(s) abi-mutable-bytes-copies-are-independent-closure abi-mutable-bytes-copies-are-independent-immutable-set abi-mutable-bytes-equality-is-by-contents abi-mutable-bytes-from-bytes-is-independent abi-mutable-bytes-gc-stress-pure-values abi-mutable-bytes-in-immutable-collections-stay-correct... fuzz failures 0
    killed: hash-ignores-length by 1 test(s) abi-mutable-bytes-hash-agrees-with-equality... fuzz failures 0
-mutable-bytes-mutate mutants 18 killed 16 survivors 2 {{read-uses-bytes-bridge (invalid: does not compile)} {count-off-by-one (invalid: does not compile)}}
-
-## re-run of the two refused mutants, with the fixed tool
-   killed: read-uses-bytes-bridge by 28 test(s) abi-mutable-bytes-allocations abi-mutable-bytes-clif-keepalive-and-stack-map abi-mutable-bytes-example-echoes-stdin abi-mutable-bytes-example-eof-and-binary abi-mutable-bytes-gc-stress-reads-are-exact abi-mutable-bytes-kernel-sees-binary-short-eof-and-bad-fd... fuzz failures 0
-mutable-bytes-mutate mutants 1 killed 1 survivors 0 {}
-   killed: count-off-by-one by 5 test(s) abi-mutable-bytes-gc-stress-reads-are-exact abi-mutable-bytes-kernel-sees-binary-short-eof-and-bad-fd abi-mutable-bytes-kernel-sees-the-stdin-read abi-mutable-bytes-nir-read-path abi-mutable-bytes-read-larger-input-reads-one-chunk... fuzz failures 0
-mutable-bytes-mutate mutants 1 killed 1 survivors 0 {}
-
-## total: 18 mutants, 18 killed, 0 survivors
+mutable-bytes-mutate mutants 18 killed 18 survivors 0 {}
