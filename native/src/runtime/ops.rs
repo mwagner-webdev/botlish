@@ -3027,4 +3027,216 @@ mod tests {
         assert!(vm.error.take().unwrap().message().contains("cannot exceed"));
         assert_eq!(vm.metrics.total_allocations(), before);
     }
+
+    // -----------------------------------------------------------------------
+    // Writable byte storage, abi::MutableBytes (MUTABLE-BYTES.md)
+
+    #[test]
+    fn a_mutable_storage_is_zero_filled_fixed_length_and_one_block() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        for n in [0i64, 1, 7, 8, 9, 15, 16, 17, 31, 32, 33, 4096] {
+            let m = rt_mbytes_new(p, small(n));
+            assert_eq!(heap_kind(m), KIND_MUTBYTES);
+            assert_eq!(rt_mbytes_len(p, m), make_small(n));
+            assert!(mutbytes_of(m).iter().all(|b| *b == 0), "length {n} must be zero-filled");
+            if n > 0 {
+                // header + length + payload, the payload at +16 and 16-aligned.
+                assert_eq!(small_of(rt_mbytes_addr(p, m)) as u64, m + 16);
+                assert_eq!((m + 16) % 16, 0);
+                assert_eq!(unsafe { super::super::heap::object_size(m as *mut Header) }, 16 + n as usize);
+            }
+        }
+        // The empty one is the shared static; a non-empty one is never shared.
+        let (e1, e2) = (rt_mbytes_new(p, small(0)), rt_mbytes_new(p, small(0)));
+        assert_eq!(e1, e2);
+        assert_eq!(unsafe { (*(e1 as *const Header)).is_static }, 1);
+        assert_ne!(rt_mbytes_new(p, small(4)), rt_mbytes_new(p, small(4)));
+    }
+
+    #[test]
+    fn a_mutable_length_outside_the_ceiling_is_a_range_error() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let big = vm.new_big(num_bigint::BigInt::from(1u8) << 70usize);
+        for bad in [small(-1), big, make_small(MAX_COLLECTION_LENGTH as i64 + 1)] {
+            let before = vm.metrics.total_allocations();
+            assert_eq!(rt_mbytes_new(p, bad), NO_VALUE);
+            assert!(vm.error.take().unwrap().message().contains("the length must be in 0.."));
+            assert_eq!(vm.metrics.total_allocations(), before);
+        }
+        // A length the allocator cannot supply is reported, never an abort.
+        assert_eq!(rt_mbytes_new(p, make_small(MAX_COLLECTION_LENGTH as i64)), NO_VALUE);
+        assert!(vm.error.take().unwrap().message().contains("out of memory"));
+    }
+
+    #[test]
+    fn set_updates_a_fresh_copy_and_never_writes_its_operand() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let a = vm.new_bytes(&[1, 2, 3, 4, 5]);
+        let m = rt_mbytes_from(p, a);
+        assert_eq!(mutbytes_of(m), &[1, 2, 3, 4, 5]);
+        let n = rt_mbytes_set(p, m, small(2), small(0xff));
+        assert_ne!(n, m, "an update is a new object");
+        assert_eq!(mutbytes_of(n), &[1, 2, 0xff, 4, 5]);
+        // The operand, and the immutable source it was copied from, are untouched.
+        assert_eq!(mutbytes_of(m), &[1, 2, 3, 4, 5]);
+        assert_eq!(bytes_of(a), &[1, 2, 3, 4, 5]);
+        // Every index, and the last byte, on objects of several sizes.
+        for len in [1usize, 2, 7, 8, 9, 16, 17, 33] {
+            let src: Vec<u8> = (0..len as u8).collect();
+            let base = vm.new_bytes(&src);
+            let m = rt_mbytes_from(p, base);
+            for i in 0..len {
+                let n = rt_mbytes_set(p, m, small(i as i64), small(200));
+                let mut want = src.clone();
+                want[i] = 200;
+                assert_eq!(mutbytes_of(n), &want[..]);
+                assert_eq!(mutbytes_of(m), &src[..]);
+            }
+        }
+    }
+
+    #[test]
+    fn set_refuses_a_bad_index_value_or_operand() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let m = rt_mbytes_new(p, small(3));
+        let empty = rt_mbytes_new(p, small(0));
+        let big = vm.new_big(num_bigint::BigInt::from(1u8) << 70usize);
+        let s = vm.new_str("x");
+        for (target, index, value, kind) in [
+            (m, small(3), small(1), "RANGE"),
+            (m, small(-1), small(1), "RANGE"),
+            (m, big, small(1), "RANGE"),
+            (empty, small(0), small(1), "RANGE"),
+            (m, small(0), small(256), "TYPE"),
+            (m, small(0), small(-1), "TYPE"),
+            (m, small(0), s, "TYPE"),
+            (s, small(0), small(1), "TYPE"),
+        ] {
+            assert_eq!(rt_mbytes_set(p, target, index, value), NO_VALUE);
+            let e = vm.error.take().unwrap();
+            assert_eq!(e.error_code()[1..], ["SEMANTIC", kind], "{}", e.message());
+        }
+        assert_eq!(mutbytes_of(m), &[0, 0, 0]);
+    }
+
+    #[test]
+    fn clone_freeze_and_prefix_copy_and_the_kinds_never_mix() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let a = vm.new_bytes(&[9, 8, 7, 6]);
+        let m = rt_mbytes_from(p, a);
+        let c = rt_mbytes_clone(p, m);
+        assert_ne!(c, m);
+        assert_eq!(mutbytes_of(c), mutbytes_of(m));
+        let f = rt_mbytes_freeze(p, m);
+        assert_eq!(heap_kind(f), KIND_BYTES);
+        assert_eq!(bytes_of(f), &[9, 8, 7, 6]);
+        assert_ne!(f, a, "freeze is a snapshot copy, not the source storage");
+        for (count, want) in [(0usize, &[][..]), (1, &[9][..]), (3, &[9, 8, 7][..]), (4, &[9, 8, 7, 6][..])] {
+            let q = rt_mbytes_freeze_prefix(p, m, small(count as i64));
+            assert_eq!(heap_kind(q), KIND_BYTES);
+            assert_eq!(bytes_of(q), want);
+        }
+        assert_eq!(rt_mbytes_freeze_prefix(p, m, small(5)), NO_VALUE);
+        assert!(vm.error.take().unwrap().message().contains("the count must be in 0..4"));
+        assert_eq!(rt_mbytes_freeze_prefix(p, m, small(-1)), NO_VALUE);
+        vm.error = None;
+        // The two storage kinds are never accepted for one another.
+        assert_eq!(rt_bytes_len(p, m), NO_VALUE);
+        vm.error = None;
+        assert_eq!(rt_bytes_addr(p, m), NO_VALUE);
+        vm.error = None;
+        for helper in [rt_mbytes_len as extern "C" fn(*mut Vm, Value) -> Value, rt_mbytes_addr, rt_mbytes_clone, rt_mbytes_freeze] {
+            assert_eq!(helper(p, a), NO_VALUE, "a Bytes storage is not a MutableBytes");
+            assert!(vm.error.take().unwrap().message().contains("expected mutbytes"));
+            assert_eq!(helper(p, small(1)), NO_VALUE);
+            vm.error = None;
+        }
+        assert_eq!(rt_mbytes_from(p, m), NO_VALUE, "mutable_from takes an immutable storage");
+        vm.error = None;
+    }
+
+    #[test]
+    fn the_writable_address_is_the_payload_and_the_kernel_can_write_through_it() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let m = rt_mbytes_new(p, small(8));
+        let address = small_of(rt_mbytes_addr(p, m)) as u64;
+        assert_eq!(address, m + 16);
+        // A write through the raw address (what the read syscall does) is
+        // visible in the storage's own payload: no copy sits in between.
+        unsafe { std::ptr::copy_nonoverlapping([7u8, 6, 5].as_ptr(), address as *mut u8, 3) };
+        assert_eq!(mutbytes_of(m), &[7, 6, 5, 0, 0, 0, 0, 0]);
+        // The empty storage's address is a valid one-past address.
+        let e = rt_mbytes_new(p, small(0));
+        assert_eq!(small_of(rt_mbytes_addr(p, e)) as u64, e + 16);
+    }
+
+    #[test]
+    fn mutable_equality_hash_and_rendering_are_by_contents_under_their_own_kind() {
+        use crate::runtime::show::{show, tcl_value};
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let src = vm.new_bytes(&[1, 2, 3]);
+        let a = rt_mbytes_from(p, src);
+        let b = rt_mbytes_from(p, src);
+        let c = rt_mbytes_set(p, a, small(0), small(9));
+        assert_ne!(a, b, "two storages, equal contents");
+        assert_eq!(rt_value_eq(p, a, b), TRUE);
+        assert_eq!(rt_value_eq(p, a, c), FALSE);
+        assert_eq!(rt_value_eq(p, a, src), FALSE, "a MutableBytes storage is not a Bytes storage");
+        assert_eq!(rt_hash(p, a), rt_hash(p, b));
+        assert_ne!(rt_hash(p, a), rt_hash(p, c));
+        assert_ne!(rt_hash(p, a), rt_hash(p, src), "its own kind tag (10), not the Bytes tag (9)");
+        // kind tag 10, the byte count as 8 little-endian bytes, then the bytes
+        // (core/hashing.tcl's `bytestore - mutbytes` case).
+        let mut h = fnv1a(FNV_OFFSET, &[10]);
+        h = fnv1a(h, &3u64.to_le_bytes());
+        h = fnv1a(h, &[1, 2, 3]);
+        assert_eq!(rt_hash(p, a), make_small((h & HASH_MASK) as i64));
+        assert_eq!(show(a), "<mutbytes 3: 010203>");
+        assert_eq!(tcl_value(a).unwrap(), "mutbytes 010203");
+        let e = rt_mbytes_new(p, small(0));
+        assert_eq!(show(e), "<mutbytes 0: >");
+        assert_eq!(tcl_value(e).unwrap(), "mutbytes {}");
+    }
+
+    #[test]
+    fn a_mutable_storage_is_collected_when_unreferenced_and_survives_when_rooted() {
+        use crate::runtime::metrics::GcReason;
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let kept = rt_mbytes_new(p, small(100));
+        unsafe { BytesObj::payload_mut(kept)[99] = 0x5a };
+        let _garbage = rt_mbytes_new(p, small(100));
+        vm.heap.collect(std::iter::once(kept), &mut vm.metrics, GcReason::Explicit);
+        assert_eq!(vm.metrics.by_kind[KIND_MUTBYTES as usize].live_objects, 1);
+        assert_eq!(vm.metrics.by_kind[KIND_MUTBYTES as usize].reclaimed_objects, 1);
+        assert_eq!(mutbytes_of(kept)[99], 0x5a);
+    }
+
+    #[test]
+    fn mutable_operations_survive_a_collection_at_every_allocation() {
+        let mut vm = vm();
+        vm.heap.set_stress_for_test(true);
+        let p: *mut Vm = &mut *vm;
+        let src = vm.new_bytes(&[1, 2, 3, 4]);
+        vm.temp_roots.push(src);
+        let m = rt_mbytes_from(p, src);
+        vm.temp_roots.push(m);
+        let n = rt_mbytes_set(p, m, small(1), small(77));
+        vm.temp_roots.push(n);
+        let c = rt_mbytes_clone(p, n);
+        vm.temp_roots.push(c);
+        let f = rt_mbytes_freeze_prefix(p, c, small(3));
+        assert_eq!(mutbytes_of(m), &[1, 2, 3, 4]);
+        assert_eq!(mutbytes_of(n), &[1, 77, 3, 4]);
+        assert_eq!(mutbytes_of(c), &[1, 77, 3, 4]);
+        assert_eq!(bytes_of(f), &[1, 77, 3]);
+        vm.temp_roots.clear();
+    }
 }

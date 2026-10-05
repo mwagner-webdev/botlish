@@ -1111,6 +1111,25 @@ test abi-mutable-bytes-heap-object-layout {the heap storage is ONE allocation of
         [dict get $report byKind MutableBytes payloadBytes] [dict get $report byKind MutableBytes allocatedBytes]
 } -result {1 16 4096 4112}
 
+test abi-mutable-bytes-no-static-mutable-constants {a compile-time-known mutable value is never a shared writable static: two identical mutable_bytes_from_bytes of the same constant Bytes, and two mutable_bytes(3), are FOUR separate heap storages (an immutable constant Bytes, by contrast, is one static object): no unrelated logical values can share writable static storage} -constraints linuxX86_64 -body {
+    list \
+        [lindex [allocationsOf "a = mb(\"abc\")\nb = mb(\"abc\")\n\[abi::mutable_bytes_length(a).value, abi::mutable_bytes_length(b).value\]"] 1] \
+        [lindex [allocationsOf "a = abi::mutable_bytes(abi::usize(3))\nb = abi::mutable_bytes(abi::usize(3))\n\[abi::mutable_bytes_length(a).value, abi::mutable_bytes_length(b).value\]"] 1] \
+        [lindex [allocationsOf "a = abi::bytes(str::encode_utf8(\"abc\"))\nb = abi::bytes(str::encode_utf8(\"abc\"))\n\[abi::bytes_length(a).value, abi::bytes_length(b).value\]"] 2]
+} -result {2 2 0}
+
+test abi-mutable-bytes-raw-write-is-a-memory-barrier {the raw syscall is a strong memory/effect barrier and read is not special-cased: a freeze taken BEFORE a raw read into a buffer shows the old bytes, a freeze taken AFTER shows the kernel's bytes -- neither is cached across the syscall nor moved over it, specialized or not} -constraints {linuxX86_64 posixShell} -body {
+    set program "${::linuxPrelude}
+m = mb(\"______\")
+before = abi::freeze(m)
+n = abi::x86_64::to_int(linux::abi::syscall({rax: abi::x86_64::register64(0), rdi: abi::x86_64::from_i32(abi::i32(0)), rsi: abi::x86_64::from_mutable_bytes(m), rdx: abi::x86_64::from_usize(abi::mutable_bytes_length(m))}))
+after = abi::freeze(m)
+\[n, out(3, before), out(3, after), before == after\]"
+    set exe [buildExecutable barrier $program]
+    lassign [runIn $exe "abcdef"] stdout f3 f4
+    list $stdout $f3
+} -result {{[6, 6, 6, false]} ______abcdef}
+
 removeDirectory abi-mutable-bytes-executables
 removeDirectory abi-mutable-bytes-outputs
 removeDirectory abi-mutable-bytes-scratch

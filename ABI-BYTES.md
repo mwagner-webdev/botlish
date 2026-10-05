@@ -504,7 +504,7 @@ twelve mutants of exactly the failures this boundary is prone to -- see
 
 ## What remains before ...
 
-* **`MutableBytes`**: a writable storage kind (the byte storage here is immutable by
+* **`MutableBytes`** (done: see MUTABLE-BYTES.md; the text below is the plan this milestone was written against): a writable storage kind (the byte storage here is immutable by
   construction, and `Bytes` equality/hash rely on that); `read(2)` needs a pointer
   the kernel *writes* through, so the same address bridge needs a writable variant, a
   mutation API on an opaque owner, and a decision about aliasing a mutable value

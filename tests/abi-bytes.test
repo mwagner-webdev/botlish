@@ -161,9 +161,11 @@ import str
 # ---------------------------------------------------------------------------
 # Registration: the privileged surface is small and knows no syscall
 
-test abi-bytes-natives-registered {three natives and no more serve Bytes: byte_store::from_list and byte_store::byte_count (the owned storage's creation and length) and abi::x86_64::from_bytes (the raw address bridge, the one operation that needs a machine). The bridge is not context-free (an address belongs to one run), allocates nothing, and knows no syscall} -body {
+test abi-bytes-natives-registered {three natives and no more serve the immutable Bytes: byte_store::from_list and byte_store::byte_count (the owned storage's creation and length) and abi::x86_64::from_bytes (the raw address bridge, the one operation that needs a machine). The bridge is not context-free (an address belongs to one run), allocates nothing, and knows no syscall} -body {
     set bridge [core::native::metadata abi::x86_64::from_bytes]
-    list [lsort [lsearch -all -inline [core::native::names] byte_store::*]] \
+    # (The writable counterpart's own natives -- byte_store::mutable_*, freeze,
+    # freeze_prefix, from_mutable_bytes -- are pinned by tests/abi-mutable-bytes.test.)
+    list [lsort [lsearch -all -inline -not -regexp [lsearch -all -inline [core::native::names] byte_store::*] {mutable|freeze}]] \
         [dict get [core::native::metadata byte_store::from_list] paramTypes] \
         [dict get [core::native::metadata byte_store::from_list] contextFree] \
         [dict get [core::native::metadata byte_store::byte_count] resultRange] \
@@ -271,7 +273,8 @@ test abi-bytes-no-accessor-surface {the namespace has the creator and the length
         if {![regexp {^fn ([a-z0-9_]+)} $line -> name]} continue
         set name
     }]
-    list [lsearch -all -inline -regexp $fns {bytes|slice|at|address|pointer|capacity|heap|substring}]
+    # (MutableBytes' functions are pinned by tests/abi-mutable-bytes.test.)
+    list [lsearch -all -inline -regexp [lsearch -all -inline -not -regexp $fns {mutable|freeze}] {bytes|slice|at|address|pointer|capacity|heap|substring}]
 } -result {{bytes bytes_length}}
 
 test abi-bytes-byte-store-gives-no-address {a byte storage value alone yields no address and no bytes: the only natives that accept one are byte_count and the opaque-struct-typed bridge, so abi::x86_64::from_bytes of a raw storage or of any other value is a compile-time TYPE error} -body {

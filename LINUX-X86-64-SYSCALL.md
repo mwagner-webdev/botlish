@@ -711,3 +711,9 @@ over an owned, contiguous byte storage; the raw address bridge
 syscall lowering keeps the backing storage alive until the kernel returns
 (`keepalive`); and `linux::write(fd, data)` is the first syscall wrapper that moves
 memory. `linux::abi::syscall` itself is unchanged: still generic, still native-only.
+
+A second follow-up, MUTABLE-BYTES.md, adds the writable direction: `abi::MutableBytes`
+(a value, not a reference), the writable address bridge
+`abi::x86_64::from_mutable_bytes`, and `linux::read(fd, data)`, the first syscall
+wrapper whose kernel call writes into Botlish memory. Again `linux::abi::syscall` is
+unchanged: syscall number 0 is ordinary data in `lib/linux.bot`.
