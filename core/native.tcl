@@ -60,6 +60,15 @@
 #                   test refines its argument to T when it returns true.
 #                   Knowing this, a compiler may decide the call from static
 #                   types or replace it with an inline membership test.
+#   nomethod        0 | 1 (default 0): the native's author declares that its
+#                   receiver spelling reads badly, so `x.name(...)` never
+#                   denotes it (WARNINGS-METHOD-ELIGIBLE.md): method sugar skips it as a
+#                   candidate, and a method-style call whose only visible
+#                   function of that name is a nomethod one is the
+#                   NOMETHOD-CALL resolution error. Ordinary calls are
+#                   unaffected, and so are its type, completion and code.
+#                   Interface metadata of the callable, like arity: no
+#                   shipped native sets it.
 #   errors          the declared errors (core::native::declareError) a call
 #                   of this native may complete with -- {} for every native
 #                   but `argv` (core/process.tcl). The impl signals one with
@@ -212,7 +221,7 @@ proc core::native::register {name args} {
     }
     set options [dict create -impl "" -arity "" -refines-true {} -refines-false {} \
         -param-types "" -result-type any -tests-type "" -runtime {} -result-shape {} -result-range {} \
-        -native-body {} -module-fn {} -context-free 0 -errors {} -bounds {}]
+        -native-body {} -module-fn {} -context-free 0 -errors {} -bounds {} -nomethod 0]
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "core::native::register: unknown option \"$option\""
@@ -229,6 +238,9 @@ proc core::native::register {name args} {
     }
     if {[dict get $options -context-free] ni {0 1}} {
         error "core::native::register: -context-free of \"$name\" must be 0 or 1"
+    }
+    if {[dict get $options -nomethod] ni {0 1}} {
+        error "core::native::register: -nomethod of \"$name\" must be 0 or 1"
     }
     set testsType [dict get $options -tests-type]
     if {$testsType ne ""} {
@@ -325,7 +337,8 @@ proc core::native::register {name args} {
         testsType $testsType \
         runtime [lsort -unique [dict get $options -runtime]] \
         resultShape $shape resultRange $range nativeBody $nativeBody moduleFn $moduleFn \
-        contextFree [dict get $options -context-free] errors $errors bounds $bounds]
+        contextFree [dict get $options -context-free] errors $errors bounds $bounds \
+        nomethod [dict get $options -nomethod]]
     return [core::value::native $name]
 }
 

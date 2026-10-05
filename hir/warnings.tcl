@@ -48,6 +48,7 @@ namespace eval hir::warnings {
     # one entry here plus its pass; there is no dynamic registration.
     variable passes {
         SAME-RETURN-VALUE hir::warnings::SameReturnValue
+        METHOD-ELIGIBLE   hir::warnings::MethodEligible
     }
     variable modes {default off error}
     # CODE -> number of times its pass has run in this process: test
@@ -478,4 +479,258 @@ proc hir::warnings::SynthesizedBranch {hir node} {
     set then [dict get $hir scopes [dict get $node thenScope] origin]
     set else [dict get $hir scopes [dict get $node elseScope] origin]
     return [expr {$then eq $else}]
+}
+
+# ---------------------------------------------------------------------------
+# METHOD-ELIGIBLE (WARNINGS-METHOD-ELIGIBLE.md)
+#
+# A call written in functional form that is *proven* eligible for method
+# syntax: the sugared spelling `R.name(args...)` parses, is unambiguous and
+# resolves to the identical callee. The fact is local to one call, so each
+# eligible call is its own warning (no grouping, no secondary locations).
+#
+# The rules are exactly two, and the compiler's own parser and resolver are
+# the prover:
+#
+#   1. method sugar must be syntactically allowed and unambiguous:
+#        * the call was *written* `f(x, ...)` (the frontend's `written`
+#          provenance; method sugar, list literals and operators are not
+#          candidates, and a synthesized call is never eligible),
+#        * its first argument -- the receiver -- is, as written, a form the
+#          grammar accepts before a ".": a postfix or primary expression
+#          (ReceiverForm); an operator expression is not (it would need
+#          added parentheses, and HIR does not record parentheses),
+#        * the callee is a declared named function (`fn`, a root native, a
+#          module function) -- never a function *value* (a parameter, an
+#          alias) -- and is not `nomethod`,
+#        * the resolver's own candidate gathering for the sugared spelling
+#          (hir::resolve::MethodCandidates, the code real method calls use)
+#          finds exactly that function and nothing else visible under the
+#          name, and no struct field of that name could compete with it
+#          (SugarFieldSafe);
+#   2. the callee declares at least 2 ordinary parameters (the sugar moves a
+#      trailing argument behind the dot; `length(s)` has none to move).
+#
+# Anything the compiler cannot establish is silence. Calls HIR marks
+# structurally unreachable are skipped. The pass reads the generic source HIR
+# once, never a semantic instance, and adds no analysis of its own.
+
+proc hir::warnings::MethodEligible {hir} {
+    set haveFields 0
+    set fields {}
+    set view ""
+    set warnings {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "call" || ![dict exists $node written]
+                || [dict get $node written form] ne "function" || ![dict get $node reachable]
+                || [lindex [dict get $node origin] 0] ne "file"} {
+            continue
+        }
+        set callee [NamedCallee $hir $node]
+        if {$callee eq "" || [dict get $callee params] < 2
+                || [llength [dict get $node args]] < 2} {
+            continue
+        }
+        set receiver [lindex [dict get $node args] 0]
+        set form [ReceiverForm $hir $receiver]
+        if {$form eq ""} {
+            continue
+        }
+        if {$view eq ""} {
+            set view [ResolutionView $hir]
+        }
+        if {![SugarResolvesTo $view $node $callee]} {
+            continue
+        }
+        if {!$haveFields} {
+            set fields [FieldNames $hir]
+            set haveFields 1
+        }
+        if {![SugarFieldSafe $hir $receiver [dict get $callee method] [dict get $node written ns] $fields]} {
+            continue
+        }
+        set shown [dict get $callee shown]
+        lappend warnings [New METHOD-ELIGIBLE \
+            "call to `$shown` is eligible for method syntax" \
+            [dict get $node origin] {} \
+            [dict create function [dict get $callee target] functionName $shown call $e \
+                receiver $receiver paramCount [dict get $callee params] receiverForm $form]]
+    }
+    return $warnings
+}
+
+# The callee of the call NODE when it is a declared named function, as a dict
+# {identity I target T params N method NAME shown TEXT}: IDENTITY in the resolver's own
+# spelling (hir::resolve::CandidateIdentity: `binding:B` / `native:NAME`),
+# TARGET like a call's `target` ({block ExprId} / {native NAME}), PARAMS its
+# ordinary parameter count (flags are a separate category and not counted;
+# a variadic native has no fixed count and is not a candidate), METHOD the
+# name its method spelling would carry, SHOWN the callee as the diagnostic
+# names it. "" for anything else: a call through
+# a function value (a parameter, an alias, a call result, a projection) never
+# qualifies, because the sugared form's resolution could not be proven
+# identical.
+proc hir::warnings::NamedCallee {hir node} {
+    set callee [dict get $hir exprs [dict get $node callee]]
+    if {[dict get $callee kind] ne "ref" || [dict get $callee binding] eq ""} {
+        return ""
+    }
+    set name [dict get $callee name]
+    set b [dict get $callee binding]
+    set binding [dict get $hir bindings $b]
+    switch -- [dict get $binding kind] {
+        root {
+            set native [dict get $binding name]
+            if {[dict get $binding symbol] eq "" || [dict get $hir symbols [dict get $binding symbol] kind] ne "native"
+                    || ![core::native::exists $native]} {
+                return ""
+            }
+            set arity [dict get [core::native::metadata $native] arity]
+            if {![string is digit -strict $arity]} {
+                return ""
+            }
+            return [dict create identity native:$native target [list native $native] params $arity \
+                method [MemberName $native] shown $name]
+        }
+        local {
+            set d [dict get $binding declaredBy]
+            if {$d eq "" || ![dict exists $hir exprs $d] || [dict get $hir exprs $d kind] ne "bind"
+                    || [dict get $hir exprs $d duplicate]} {
+                return ""
+            }
+            set block [dict get $hir exprs $d value]
+            if {[dict get $hir exprs $block kind] ne "block"} {
+                return ""
+            }
+            set params [expr {[llength [dict get $hir exprs $block params]] - [llength [dict get $hir exprs $block flags]]}]
+            # A binding hygiene renamed (NAME#N) is looked up under the
+            # spelling the programmer wrote, as the method call would.
+            set spelling [expr {[dict exists $binding spelling] ? [dict get $binding spelling] : $name}]
+            return [dict create identity binding:$b target [list block $block] params $params \
+                method [MemberName $spelling] shown [expr {[dict exists $binding spelling] ? $spelling : $name}]]
+        }
+    }
+    return ""
+}
+
+# The member of a possibly namespace-qualified NAME ("list::at" -> "at").
+proc hir::warnings::MemberName {name} {
+    set i [string last :: $name]
+    return [expr {$i < 0 ? $name : [string range $name [expr {$i + 2}] end]}]
+}
+
+# HIR as name resolution saw it: hygiene (hir/hygiene.tcl) renamed every
+# binding of a module's own section scope to its qualified spelling
+# ("list::find") after resolution, but the lookup a method call makes (a
+# scope's `names`, and an imported namespace's members) works on the names as
+# written ("find"). The view differs from HIR in exactly those scopes' name
+# tables; nothing else of it is touched or read differently. (The #N renames
+# of later, shadowing bindings stay: a later binding is invisible to the call
+# anyway, and its renamed key keeps it out of the lookup of the plain name.)
+proc hir::warnings::ResolutionView {hir} {
+    if {![dict exists $hir modules]} {
+        return $hir
+    }
+    dict for {ns scope} [dict get $hir modules] {
+        set prefix "${ns}::"
+        set names [dict create]
+        dict for {name b} [dict get $hir scopes $scope names] {
+            dict set names [expr {[string first $prefix $name] == 0 ? [string range $name [string length $prefix] end] : $name}] $b
+        }
+        dict set hir scopes $scope names $names
+    }
+    return $hir
+}
+
+# 1 if the sugared spelling of the call NODE to CALLEE resolves to exactly
+# CALLEE's function: the resolver's own candidate gathering for
+# `receiver.METHOD(args)` from the call's scope and namespace
+# (hir::resolve::MethodCandidates -- lexical lookup, the directly imported
+# namespaces' members, aliases and arity applied, nomethod functions left out)
+# yields one candidate, and it is that function. No second candidate (a
+# shadowing local, another namespace's member of the name) and no other
+# function: otherwise the real call would be decided by receiver types, be
+# ambiguous, or mean something else, and there is nothing to suggest.
+proc hir::warnings::SugarResolvesTo {hir node callee} {
+    set ctx [dict create namespace [dict get $node written ns]]
+    set candidates [hir::resolve::MethodCandidates hir [dict get $node scope] \
+        [dict get $callee method] $ctx [llength [dict get $node args]]]
+    return [expr {[llength $candidates] == 1
+        && [dict get [lindex $candidates 0] identity] eq [dict get $callee identity]}]
+}
+
+# The receiver-form class of expression E, the first argument of a call, when
+# the grammar accepts it as written before a ".": postfix and primary
+# expressions (surface/parser.tcl: postfix = primary { call | "." IDENT [call] },
+# primary = literal | name | qualified name | list | struct | "(" expr ")").
+# "" for a form that would need parentheses added -- an operator expression,
+# which `.` binds tighter than (`-1.f(y)` is `-(1.f(y))`, `a + b.f(y)` is
+# `a + (b.f(y))`) -- and for anything the frontend did not write as a call
+# argument. HIR records no parentheses, so a receiver written `(a + b)` is
+# the same node as `a + b` and is conservatively not eligible either.
+proc hir::warnings::ReceiverForm {hir e} {
+    set node [dict get $hir exprs $e]
+    switch -- [dict get $node kind] {
+        ref     { return [expr {[string first :: [dict get $node name]] >= 0 ? "qualified-name" : "name"}] }
+        const   { return literal }
+        project { return field }
+        struct  { return struct }
+        call {
+            if {![dict exists $node written]} {
+                return ""
+            }
+            switch -- [dict get $node written form] {
+                function { return call }
+                method   { return method-call }
+                list     { return list }
+            }
+        }
+    }
+    return ""
+}
+
+# The names of every struct field the program can have: its struct
+# declarations' fields (HIR's `sourceTypes`) and the fields of every struct
+# construction expression. A struct *type* can only arise from one of them,
+# so a name absent here is the name of no field of any value the program can
+# make.
+proc hir::warnings::FieldNames {hir} {
+    set names [dict create]
+    foreach entry [dict get $hir sourceTypes] {
+        if {[dict exists $entry kind] && [dict get $entry kind] eq "struct"} {
+            foreach {field type} [dict get $entry fields] {
+                dict set names $field 1
+            }
+        }
+    }
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "struct"} {
+            foreach field [dict get $node names] {
+                dict set names $field 1
+            }
+        }
+    }
+    return $names
+}
+
+# 1 if the sugared spelling `RECEIVER.NAME(args)` cannot be the field-value
+# call of a struct field NAME instead (hir/structs.tcl's field/function
+# ambiguity, which makes the sugared call an error). Provable when no struct
+# of the program has a field NAME (FIELDS, FieldNames); otherwise only when the
+# receiver's static type is a known one -- not a struct, or a struct whose
+# field NAME cannot compete (hir::structs::FieldCompetes). A receiver of
+# unknown type (`any`: a generic parameter) may be given such a struct by an
+# instance, so it is not provably safe.
+proc hir::warnings::SugarFieldSafe {hir receiver name ns fields} {
+    if {![dict exists $fields $name]} {
+        return 1
+    }
+    set type [hir::typeOf $hir $receiver]
+    if {$type eq "never"} {
+        return 0
+    }
+    if {[hir::types::IsStructLike $type]} {
+        return [expr {![hir::structs::FieldCompetes $type $name [dict create ns $ns]]}]
+    }
+    return [expr {[hir::types::kindOf $type] ni {"" any struct}}]
 }

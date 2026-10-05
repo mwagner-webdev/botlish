@@ -1,0 +1,1561 @@
+# method-eligible.test -- the METHOD-ELIGIBLE compiler warning and the
+# `nomethod fn` declaration (WARNINGS-METHOD-ELIGIBLE.md), on the warning
+# framework WARNINGS-SAME-RETURN.md built (hir/warnings.tcl).
+#
+# METHOD-ELIGIBLE: a reachable call *written* `f(x, y)` to a declared named
+# function of at least 2 parameters, not `nomethod`, whose sugared spelling
+# `x.f(y)` provably parses and resolves to the same callee. The warning is
+# one-directional and silent wherever the compiler cannot prove the sugared
+# spelling identical, so most cases here pin where it must NOT fire, and
+# every case that fires is checked against the round-trip law:
+#
+#     the sugared spelling parses, resolves to the same callee, and compiles
+#     to the same program (HIR text, core IR, NIR specialized and generic).
+#
+# Like warnings.test, every compile here passes its policy and channel
+# explicitly (`-warnings MODE`, `-warning-channel ""` to collect without
+# printing), so this file exercises default, off and error whatever the
+# harness's process default is.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+
+set ::allBackends {interp compile cranelift-generic cranelift}
+
+# The HIR of SOURCE under policy MODE (default off error), collecting
+# warnings without printing them.
+proc compileWith {source {mode default}} {
+    return [surface::compile $source t.bot -warnings $mode -warning-channel ""]
+}
+
+# The METHOD-ELIGIBLE warnings of SOURCE's own file (t.bot): the warnings a
+# library module the program loads carries are not what these tests are about.
+proc ownWarnings {hir} {
+    return [lmap w [hir::warnings::of $hir] {
+        if {![string match t.bot:* [hir::originLocation $hir [dict get $w primary]]]} continue
+        set w
+    }]
+}
+
+proc warningsOf {source} {
+    return [ownWarnings [compileWith $source]]
+}
+
+# "LINE:COL" of each warning of SOURCE (own file), in order.
+proc where {source} {
+    set hir [compileWith $source]
+    return [lmap w [ownWarnings $hir] {
+        regsub {^t\.bot:} [hir::originLocation $hir [dict get $w primary]] {}
+    }]
+}
+
+proc codes {source} {
+    return [lmap w [warningsOf $source] {dict get $w code}]
+}
+
+# "MESSAGE @ LINE:COL" for each warning of SOURCE (own file).
+proc shown {source} {
+    set hir [compileWith $source]
+    return [lmap w [ownWarnings $hir] {
+        string cat [dict get $w message] " @ " [regsub {^t\.bot:} [hir::originLocation $hir [dict get $w primary]] {}]
+    }]
+}
+
+# The rejection of SOURCE under MODE: {errorcode message}, or "compiled".
+proc rejection {source mode} {
+    if {[catch {compileWith $source $mode} message options]} {
+        return [list [dict get $options -errorcode] $message]
+    }
+    return compiled
+}
+
+# The NIR text of HIR, or the error native lowering raised (both spellings of
+# a program native cannot lower must fail the same way).
+proc nirOf {hir args} {
+    if {[catch {native::lower::program $hir {*}$args} result options]} {
+        return [list error [dict get $options -errorcode] $result]
+    }
+    return [dict get $result text]
+}
+
+# What identifies SOURCE as a program: its HIR text, core IR and NIR
+# (specialized and generic), computed right after it is compiled.
+proc fingerprint {source} {
+    set hir [compileWith $source off]
+    return [dict create format [hir::format $hir] lower [hir::lower $hir] \
+        nir [nirOf $hir] nirGeneric [nirOf $hir -specialize 0]]
+}
+
+# The ROUND-TRIP LAW for one call: "" if SUGARED (a program) parses, compiles
+# without warning, and is the same program as FUNCTIONAL -- the same HIR text
+# (so the same callee: HIR text prints each call's target), core IR and NIR
+# specialized and generic; else what differs.
+proc roundTrip {functional sugared} {
+    if {[catch {fingerprint $sugared} s]} {
+        return [list does-not-compile $s]
+    }
+    set f [fingerprint $functional]
+    set diffs {}
+    foreach key {format lower nir nirGeneric} {
+        if {[dict get $f $key] ne [dict get $s $key]} {
+            lappend diffs $key
+        }
+    }
+    if {[codes $sugared] ne ""} {
+        lappend diffs [list sugared-warns [codes $sugared]]
+    }
+    return $diffs
+}
+
+# SCRIPT evaluated with ::core::libraryDir a scratch directory holding the
+# modules FILES ({NAME.bot TEXT ...}), restored afterwards.
+proc withModules {files script} {
+    set saved $::core::libraryDir
+    set dir [makeDirectory me-scratch-[pid]]
+    set ::core::libraryDir $dir
+    try {
+        foreach {name text} $files {
+            set channel [open [file join $dir $name] w]
+            puts -nonewline $channel $text
+            close $channel
+        }
+        uplevel 1 $script
+    } finally {
+        set ::core::libraryDir $saved
+        removeDirectory me-scratch-[pid]
+    }
+}
+
+# The program at PATH compiled under MODE; "LOCATION" of each warning relative
+# to DIR.
+proc fileWarnings {path dir {mode default}} {
+    set hir [surface::readProgramFile $path -warnings $mode -warning-channel ""]
+    return [lmap w [hir::warnings::of $hir] {
+        string map [list $dir/ {}] [hir::originLocation $hir [dict get $w primary]]
+    }]
+}
+
+# Two functions every program below can call: `two` takes 2 parameters, `one`
+# takes 1.
+set ::prelude {fn two(a, b):
+    a
+fn one(a):
+    a
+}
+
+# ---------------------------------------------------------------------------
+# The rules: written functional call, at least two parameters
+
+test me-core-example {fn any(xs, p) called as any(xs, hit?) warns; the message names the callee} -body {
+    shown {fn any(xs, p):
+    xs
+fn hit?(x):
+    x
+fn any_hit(xs):
+    return any(xs, hit?)}
+} -result {{call to `any` is eligible for method syntax @ 6:12}}
+
+test me-sugared-spelling-silent {the same program spelled with sugar is silent} -body {
+    shown {fn any(xs, p):
+    xs
+fn hit?(x):
+    x
+fn any_hit(xs):
+    return xs.any(hit?)}
+} -result {}
+
+test me-both-spellings-once {the same call written both ways in one program warns exactly once} -body {
+    shown "${::prelude}fn t(x):
+    two(x, 1)
+    x.two(1)"
+} -result {{call to `two` is eligible for method syntax @ 6:5}}
+
+test me-three-params-warns {a 3-parameter function warns too} -body {
+    shown {fn three(a, b, c):
+    a
+fn t(x):
+    return three(x, 1, 2)}
+} -result {{call to `three` is eligible for method syntax @ 4:12}}
+
+test me-one-param-never-warns {a 1-parameter function (length-shaped) never warns} -body {
+    codes "${::prelude}fn t(x):
+    return one(x)"
+} -result {}
+
+test me-parameter-count-boundary {exactly 1 parameter: silent; exactly 2: warns; 3: warns; 4: warns} -body {
+    set program {fn f1(a):
+    a
+fn f2(a, b):
+    a
+fn f3(a, b, c):
+    a
+fn f4(a, b, c, d):
+    a
+fn t(x):
+    f1(x)
+    f2(x, 1)
+    f3(x, 1, 2)
+    f4(x, 1, 2, 3)
+    0}
+    set hir [compileWith $program]
+    lmap w [ownWarnings $hir] {list [dict get $w data functionName] [dict get $w data paramCount]}
+} -result {{f2 2} {f3 3} {f4 4}}
+
+test me-one-param-sugar-stays-legal {the language still accepts one-parameter sugar: the rule is in the warning, not the grammar} -body {
+    list [codes "${::prelude}fn t(x):
+    return x.one()"] [roundTrip "${::prelude}fn t(x):
+    return one(x)
+t(1)" "${::prelude}fn t(x):
+    return x.one()
+t(1)"]
+} -result {{} {}}
+
+test me-one-param-via-module {a one-parameter module function and a one-parameter intrinsic never warn} -body {
+    withModules {m.bot {fn one(a):
+    a
+}} {
+        list [codes {import m
+import str
+fn t(x, s):
+    m::one(x)
+    str::length(s)
+    0}]
+    }
+} -result {{}}
+
+test me-flags-do-not-count {a function with one ordinary parameter and a flag is a one-parameter function} -body {
+    codes {fn q(a, flags :quiet):
+    a
+fn t(x):
+    return q(x, :quiet)}
+} -result {}
+
+test me-call-with-flags-warns {two ordinary parameters and a flag: warns, and the flagged sugar is the same program} -body {
+    set decl {fn q(a, b, flags :quiet):
+    a
+}
+    list [codes "${decl}fn t(x):
+    return q(x, 1, :quiet)"] [roundTrip "${decl}fn t(x):
+    return q(x, 1, :quiet)
+t(1)" "${decl}fn t(x):
+    return x.q(1, :quiet)
+t(1)"]
+} -result {METHOD-ELIGIBLE {}}
+
+test me-variadic-native-never {a variadic native has no fixed parameter count: never a candidate} -body {
+    codes {fn t(x):
+    return list(x, 1, 2)}
+} -result {}
+
+# ---------------------------------------------------------------------------
+# Chains, granularity, ordering
+
+test me-chain-two-warnings {a chain of functional calls: one warning per written call, in source order} -body {
+    shown {fn map(xs, f):
+    xs
+fn find(xs, p):
+    xs
+fn norm(x):
+    x
+fn ok?(x):
+    x
+fn first(xs):
+    return find(map(xs, norm), ok?)}
+} -result {{call to `find` is eligible for method syntax @ 10:12} {call to `map` is eligible for method syntax @ 10:17}}
+
+test me-chain-fully-sugared-is-silent {the fully sugared chain is silent, and is the same program} -body {
+    set decls {fn map(xs, f):
+    xs
+fn find(xs, p):
+    xs
+fn norm(x):
+    x
+fn ok?(x):
+    x
+}
+    list [codes "${decls}fn first(xs):
+    return xs.map(norm).find(ok?)"] [roundTrip "${decls}fn first(xs):
+    return find(map(xs, norm), ok?)
+first(1)" "${decls}fn first(xs):
+    return xs.map(norm).find(ok?)
+first(1)"]
+} -result {{} {}}
+
+test me-no-grouping-one-per-call {each eligible call is its own warning: identical calls are not deduplicated} -body {
+    shown "${::prelude}fn t(x):
+    two(x, 1)
+    two(x, 1)
+    two(x, 1)"
+} -result {{call to `two` is eligible for method syntax @ 6:5} {call to `two` is eligible for method syntax @ 7:5} {call to `two` is eligible for method syntax @ 8:5}}
+
+test me-source-order {warnings come in source order whatever the function order} -body {
+    where "${::prelude}fn late(x):
+    two(x, 1)
+fn early(x):
+    two(x, 2)"
+} -result {6:5 8:5}
+
+test me-record-shape {the record is {code message primary secondary data}: secondary is empty, data carries the facts} -body {
+    set hir [compileWith "${::prelude}fn t(x):
+    return two(x, 1)"]
+    set w [lindex [ownWarnings $hir] 0]
+    set data [dict get $w data]
+    list [lsort [dict keys $w]] [dict get $w code] [dict get $w secondary] \
+        [dict get $data functionName] [dict get $data paramCount] [dict get $data receiverForm] \
+        [lindex [dict get $data function] 0] \
+        [dict get $hir exprs [dict get $data call] kind] [dict get $hir exprs [dict get $data receiver] kind] \
+        [expr {[dict get $hir exprs [dict get $data call] origin] eq [dict get $w primary]}] \
+        [lsort [dict keys $data]]
+} -result {{code data message primary secondary} METHOD-ELIGIBLE {} two 2 name block call ref 1 {call function functionName paramCount receiver receiverForm}}
+
+test me-data-function-is-the-callee-block {data function names the callee's block ExprId} -body {
+    set hir [compileWith "${::prelude}fn t(x):
+    return two(x, 1)"]
+    set w [lindex [ownWarnings $hir] 0]
+    lassign [dict get $w data function] kind block
+    list $kind [dict get $hir exprs $block kind] [llength [dict get $hir exprs $block params]]
+} -result {block block 2}
+
+test me-data-has-no-rewrite {the structured data carries facts, never rewritten source text} -body {
+    set hir [compileWith "${::prelude}fn t(x):
+    return two(x, 1)"]
+    set data [dict get [lindex [ownWarnings $hir] 0] data]
+    set text [join [dict values $data] " "]
+    list [string match *x.two* $text] [string match *.two(* $text]
+} -result {0 0}
+
+test me-rendering {rendered as FILE:LINE:COL: warning: MESSAGE (CODE), with no note line} -body {
+    set hir [compileWith "${::prelude}fn t(x):
+    return two(x, 1)"]
+    hir::warnings::render $hir [lindex [ownWarnings $hir] 0]
+} -result {t.bot:6:12: warning: call to `two` is eligible for method syntax (METHOD-ELIGIBLE)}
+
+test me-message-is-neutral {the message states eligibility: no rewrite, no imperative, no location, no code} -body {
+    set text [join [lmap w [warningsOf "${::prelude}fn t(x):
+    return two(x, 1)"] {dict get $w message}] \n]
+    set prescriptive 0
+    foreach word {use prefer should rewrite replace instead change write ( ) x.two t.bot METHOD-ELIGIBLE} {
+        if {[string match -nocase *$word* $text]} {
+            incr prescriptive
+        }
+    }
+    list $text $prescriptive
+} -result {{call to `two` is eligible for method syntax} 0}
+
+test me-no-fixit-or-rewrite-in-output {no stderr/stdout rendering prints a rewritten expression} -body {
+    set hir [compileWith "${::prelude}fn t(x):
+    return two(x, 1)"]
+    set rendered [hir::warnings::render $hir [lindex [ownWarnings $hir] 0]]
+    list [string match *x.two* $rendered] [string match *fixit* $rendered]
+} -result {0 0}
+
+# ---------------------------------------------------------------------------
+# Receiver forms: the grammar's own receiver rule
+#
+#   postfix = primary { "(" args ")" | "." IDENT [ "(" args ")" ] }
+#   primary = literal | name | qualified name | list | struct | "(" expr ")"
+#
+# Each row: the form -> eligible? A *eligible* row is exercised by a literal
+# sugared program that parses, resolves to the same callee and compiles to
+# the same program (the round-trip law).
+
+proc formRow {functional sugared} {
+    set drive "\nt(5)"
+    return [list [codes $functional] [roundTrip "$functional$drive" "$sugared$drive"]]
+}
+
+test me-form-name {a plain name is a receiver} -body {
+    formRow "${::prelude}fn t(x):
+    return two(x, 1)" "${::prelude}fn t(x):
+    return x.two(1)"
+} -result {METHOD-ELIGIBLE {}}
+
+test me-form-field-chain {a field chain is a receiver} -body {
+    set program "${::prelude}fn t(n):
+    s = {a: {b: n}}
+    return two(s.a.b, 2)"
+    formRow $program "${::prelude}fn t(n):
+    s = {a: {b: n}}
+    return s.a.b.two(2)"
+} -result {METHOD-ELIGIBLE {}}
+
+test me-form-call-result {a call result is a receiver (and the 1-parameter call inside it is not a finding)} -body {
+    formRow "${::prelude}fn t(x):
+    return two(one(x), 1)" "${::prelude}fn t(x):
+    return one(x).two(1)"
+} -result {METHOD-ELIGIBLE {}}
+
+test me-form-method-call-result {a method-call result is a receiver} -body {
+    formRow "${::prelude}fn t(x):
+    return two(x.one(), 1)" "${::prelude}fn t(x):
+    return x.one().two(1)"
+} -result {METHOD-ELIGIBLE {}}
+
+test me-form-parenthesized-call {a parenthesized call is the call: parentheses are not part of a node} -body {
+    formRow "${::prelude}fn t(x):
+    return two((one(x)), 1)" "${::prelude}fn t(x):
+    return (one(x)).two(1)"
+} -result {METHOD-ELIGIBLE {}}
+
+test me-form-int-literal {an Int literal is a receiver: Botlish has no float literal, so `5.f` cannot re-lex} -body {
+    formRow "${::prelude}fn t(x):
+    return two(5, x)" "${::prelude}fn t(x):
+    return 5.two(x)"
+} -result {METHOD-ELIGIBLE {}}
+
+test me-form-string-literal {a String literal is a receiver} -body {
+    formRow "${::prelude}fn t(x):
+    return two(\"s\", x)" "${::prelude}fn t(x):
+    return \"s\".two(x)"
+} -result {METHOD-ELIGIBLE {}}
+
+test me-form-char-literal {a UnicodeChar literal is a receiver} -body {
+    formRow "${::prelude}fn t(x):
+    return two('a', x)" "${::prelude}fn t(x):
+    return 'a'.two(x)"
+} -result {METHOD-ELIGIBLE {}}
+
+test me-form-bool-and-unit {true, false and unit are receivers} -body {
+    list [formRow "${::prelude}fn t(x):
+    return two(true, x)" "${::prelude}fn t(x):
+    return true.two(x)"] [formRow "${::prelude}fn t(x):
+    return two(unit, x)" "${::prelude}fn t(x):
+    return unit.two(x)"]
+} -result {{METHOD-ELIGIBLE {}} {METHOD-ELIGIBLE {}}}
+
+test me-form-list-literal {a list literal is a receiver} -body {
+    formRow "${::prelude}fn t(x):
+    return two(\[1, 2\], x)" "${::prelude}fn t(x):
+    return \[1, 2\].two(x)"
+} -result {METHOD-ELIGIBLE {}}
+
+test me-form-anonymous-struct {an anonymous struct literal is a receiver} -body {
+    formRow "${::prelude}fn t(x):
+    return two({a: 1}, x)" "${::prelude}fn t(x):
+    return {a: 1}.two(x)"
+} -result {METHOD-ELIGIBLE {}}
+
+test me-form-named-struct {a named struct construction is a receiver} -body {
+    set decl "struct P:\n    a: int\n$::prelude"
+    formRow "${decl}fn t(x):
+    return two(P {a: 1}, x)" "${decl}fn t(x):
+    return P {a: 1}.two(x)"
+} -result {METHOD-ELIGIBLE {}}
+
+test me-form-qualified-name {a module-qualified name is a receiver} -body {
+    withModules {m.bot {value = 7
+}} {
+        formRow "import m
+${::prelude}fn t(x):
+    return two(m::value, x)" "import m
+${::prelude}fn t(x):
+    return m::value.two(x)"
+    }
+} -result {METHOD-ELIGIBLE {}}
+
+test me-form-receiver-forms-recorded {data receiverForm classifies the receiver the grammar accepted} -body {
+    set program "struct P:
+    a: int
+${::prelude}fn t(x):
+    s = {a: x}
+    two(x, 1)
+    two(s.a, 1)
+    two(one(x), 1)
+    two(x.one(), 1)
+    two(5, 1)
+    two(\"s\", 1)
+    two('a', 1)
+    two(\[1\], 1)
+    two({a: 1}, 1)
+    two(P {a: 1}, 1)
+    two(true, 1)
+    0"
+    lmap w [warningsOf $program] {
+        dict get $w data receiverForm
+    }
+} -result {name field call method-call literal literal literal list struct struct name}
+
+# Receivers that are not, as written, a postfix/primary expression need added
+# parentheses: `.` binds tighter than every operator.
+
+test me-form-negative-literal-not-eligible {a negative literal is `-` applied to a literal: it would need parentheses} -body {
+    codes "${::prelude}fn t(x):
+    return two(-1, x)"
+} -result {}
+
+test me-form-negative-without-parens-means-something-else {`-1.two(x)` is `-(1.two(x))`: not the same program} -body {
+    set functional "${::prelude}fn t(x):
+    return two(-1, x)
+t(5)"
+    set sugared "${::prelude}fn t(x):
+    return -1.two(x)
+t(5)"
+    expr {[roundTrip $functional $sugared] ne ""}
+} -result 1
+
+test me-form-negative-with-parens-is-valid-but-not-suggested {the parenthesized receiver is valid and identical: the silence is conservatism, not invalidity} -body {
+    set functional "${::prelude}fn t(x):
+    return two(-1, x)
+t(5)"
+    set sugared "${::prelude}fn t(x):
+    return (-1).two(x)
+t(5)"
+    list [roundTrip $functional $sugared] [codes $functional]
+} -result {{} {}}
+
+test me-form-unary-minus-not-eligible {unary minus on a name is an operator expression} -body {
+    codes "${::prelude}fn t(x):
+    return two(-x, 1)"
+} -result {}
+
+test me-form-binary-operator-not-eligible {an arithmetic receiver is an operator expression (and `a + b.f()` means `a + (b.f())`)} -body {
+    codes "${::prelude}fn t(x):
+    return two(x + 1, 1)"
+} -result {}
+
+test me-form-parenthesized-operator-not-eligible {HIR records no parentheses: (x + 1) is the same node as x + 1, so it is not eligible either} -body {
+    set program "${::prelude}fn t(x):
+    return two((x + 1), 1)
+t(5)"
+    list [codes $program] [roundTrip $program "${::prelude}fn t(x):
+    return (x + 1).two(1)
+t(5)"]
+} -result {{} {}}
+
+test me-form-comparison-not-eligible {a comparison receiver is an operator expression} -body {
+    codes "${::prelude}fn t(x):
+    return two(x == 1, 1)"
+} -result {}
+
+test me-form-boolean-operators-not-eligible {not, and, or and != are conditions the frontend synthesizes: never receivers} -body {
+    codes "${::prelude}fn t(x, y):
+    two(not x, 1)
+    two(x and y, 1)
+    two(x or y, 1)
+    two(x != y, 1)
+    0"
+} -result {}
+
+test me-form-user-function-with-operator-inside-eligible {the call is eligible when only its *later* arguments are operator expressions} -body {
+    shown "${::prelude}fn t(x):
+    return two(x, x + 1)"
+} -result {{call to `two` is eligible for method syntax @ 6:12}}
+
+# ---------------------------------------------------------------------------
+# Callees: qualified, imported, intrinsic, function values
+
+test me-qualified-callee {mod::f(x, y) warns in the importing file when its sugared spelling resolves to the same function} -body {
+    withModules {m.bot {fn two(a, b):
+    a
+}} {
+        set program {import m
+fn t(x):
+    return m::two(x, 1)
+t(5)}
+        list [where $program] [roundTrip $program {import m
+fn t(x):
+    return x.two(1)
+t(5)}]
+    }
+} -result {3:12 {}}
+
+test me-qualified-callee-message-names-qualified-spelling {the message names the callee as written} -body {
+    withModules {m.bot {fn two(a, b):
+    a
+}} {
+        shown {import m
+fn t(x):
+    return m::two(x, 1)}
+    }
+} -result {{call to `m::two` is eligible for method syntax @ 3:12}}
+
+test me-intrinsic-callee {a 2-parameter intrinsic warns when its namespace is imported} -body {
+    set program {import str
+fn t(s):
+    return str::concat(s, "x")
+t("a")}
+    list [where $program] [roundTrip $program {import str
+fn t(s):
+    return s.concat("x")
+t("a")}]
+} -result {3:12 {}}
+
+test me-intrinsic-one-param-silent {a 1-parameter intrinsic never warns} -body {
+    codes {import str
+fn t(s):
+    return str::length(s)}
+} -result {}
+
+test me-imported-two-param-intrinsic-append {list::append(xs, v) warns} -body {
+    set program {import list
+fn t(xs):
+    return list::append(xs, 1)
+t([1])}
+    list [where $program] [roundTrip $program {import list
+fn t(xs):
+    return xs.append(1)
+t([1])}]
+} -result {3:12 {}}
+
+test me-module-warning-located-in-importing-file-and-module {a warning is located in the file its call is written in} -body {
+    withModules {m.bot {fn helper(a, b):
+    a
+
+fn scan(n):
+    loop i from 0 to n:
+        helper(i, 1)
+    0
+}} {
+        set path [makeFile {import m
+fn t(x):
+    return m::helper(x, 1)
+m::scan(3)
+} me-main.bot]
+        try {
+            lsort [lmap l [fileWarnings $path $::core::libraryDir default] {regsub {^.*/} $l {}}]
+        } finally {
+            removeFile me-main.bot
+        }
+    }
+} -result {m.bot:6:9 me-main.bot:3:12}
+
+test me-module-internal-sibling-call-in-loop {a module's own sibling call inside a loop is located in the module file} -body {
+    withModules {m.bot {fn helper(a, b):
+    a
+
+fn scan(n):
+    loop i from 0 to n:
+        helper(i, 1)
+    0
+}} {
+        set path [makeFile {import m
+m::scan(3)
+} me-main2.bot]
+        try {
+            fileWarnings $path $::core::libraryDir default
+        } finally {
+            removeFile me-main2.bot
+        }
+    }
+} -result {m.bot:6:9}
+
+test me-function-value-alias-never {a call through a binding that holds a function value never warns} -body {
+    codes "${::prelude}g = two
+fn t(x):
+    return g(x, 1)"
+} -result {}
+
+test me-function-value-parameter-never {a parameter of function type is not a declared function} -body {
+    codes {fn t(f, x):
+    return f(x, 1)}
+} -result {}
+
+test me-local-shadowing-callee-never {a parameter that shadows a function name is a function value, not the function} -body {
+    codes "${::prelude}fn t(two, x):
+    return two(x, 1)"
+} -result {}
+
+test me-call-result-callee-never {a call whose callee is itself a call result is never a candidate} -body {
+    codes "${::prelude}fn make():
+    two
+fn t(x):
+    return make()(x, 1)"
+} -result {}
+
+test me-local-nested-function-callee {a function declared inside a function is a declared named function} -body {
+    set program {fn t(x):
+    fn inner(a, b):
+        a
+    return inner(x, 1)
+t(5)}
+    list [where $program] [roundTrip $program {fn t(x):
+    fn inner(a, b):
+        a
+    return x.inner(1)
+t(5)}]
+} -result {4:12 {}}
+
+# ---------------------------------------------------------------------------
+# Ambiguity and shadowing: the resolver's own candidate gathering decides
+
+test me-two-candidates-silent {a function and another visible function of the same name: the sugar would be decided by receiver types} -body {
+    withModules {m.bot {fn two(a, b):
+    a
+}} {
+        codes {import m
+fn two(a, b):
+    a
+fn t(x):
+    m::two(x, 1)
+    two(x, 1)
+    0}
+    }
+} -result {}
+
+test me-two-imported-candidates-silent {two imported namespaces with a member of the same name: silent} -body {
+    withModules {m.bot {fn two(a, b):
+    a
+} n.bot {fn two(a, b):
+    b
+}} {
+        codes {import m
+import n
+fn t(x):
+    m::two(x, 1)
+    n::two(x, 1)
+    0}
+    }
+} -result {}
+
+test me-two-candidates-sugar-is-ambiguous {...and the language really cannot say which one a sugared call means} -body {
+    withModules {m.bot {fn two(a, b):
+    a
+} n.bot {fn two(a, b):
+    b
+}} {
+        lindex [rejection {import m
+import n
+fn t(x):
+    x.two(1)
+t(5)} off] 0
+    }
+} -match glob -result {*AMBIGUOUS-METHOD-CALL}
+
+test me-alias-of-the-same-function-is-one-candidate {an alias binding of an imported function adds no second candidate} -body {
+    set program {import list
+append = list::append
+fn t(xs):
+    return list::append(xs, 1)
+t([1])}
+    list [where $program] [roundTrip $program {import list
+append = list::append
+fn t(xs):
+    return xs.append(1)
+t([1])}]
+} -result {4:12 {}}
+
+test me-shadowing-later-binding-does-not-silence {a binding established after the call is invisible to it: both spellings mean the outer function} -body {
+    set program "${::prelude}fn t(x):
+    r = two(x, 1)
+    two = 5
+    r
+t(5)"
+    list [where $program] [roundTrip $program "${::prelude}fn t(x):
+    r = x.two(1)
+    two = 5
+    r
+t(5)"]
+} -result {6:9 {}}
+
+test me-field-named-like-function-unknown-receiver-silent {a struct field of the function's name anywhere in the program: an untyped receiver might be that struct, so silence} -body {
+    codes "${::prelude}s = {two: one}
+fn t(x):
+    return two(x, 1)"
+} -result {}
+
+test me-field-named-like-function-is-a-real-ambiguity {...and the sugared spelling really is rejected for such a receiver} -body {
+    lassign [rejection "${::prelude}s = {two: one}
+fn t(x):
+    return x.two(1)
+t(s)" off] code message
+    list $code [regexp {method-style call "two" is ambiguous: the receiver \(type struct\{two: } $message]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test me-field-named-like-function-known-receiver-warns {a receiver of statically known non-struct type cannot be that struct} -body {
+    set decls "${::prelude}s = {two: one}\n"
+    set functional "${decls}fn t():
+    return two(\[1, 2\], 1)
+t()"
+    list [codes $functional] [roundTrip $functional "${decls}fn t():
+    return \[1, 2\].two(1)
+t()"]
+} -result {METHOD-ELIGIBLE {}}
+
+test me-field-unrelated-name-does-not-silence {structs whose fields have other names do not matter} -body {
+    codes "${::prelude}s = {q: 1}
+fn t(x):
+    return two(x, 1)"
+} -result METHOD-ELIGIBLE
+
+test me-generic-callee-and-receiver-silent-where-unprovable {an untyped receiver and a field of that name: silent; a known non-struct receiver: warns} -body {
+    set decls "fn two(a, b):\n    a\nstruct Box:\n    two: int\n"
+    list [codes "${decls}fn t(x):
+    return two(x, 1)"] [codes "${decls}fn t():
+    return two(5, 1)"]
+} -result {{} METHOD-ELIGIBLE}
+
+# ---------------------------------------------------------------------------
+# Reachability
+
+test me-dead-branch-silent {a call HIR marks structurally unreachable is not reported} -body {
+    codes "${::prelude}fn t(x):
+    if 1 == 2:
+        return two(x, 1)
+    x"
+} -result {}
+
+test me-call-after-return-silent {code after a return is unreachable} -body {
+    codes "${::prelude}fn t(x):
+    return x
+    two(x, 1)"
+} -result {}
+
+test me-reachable-call-in-loop-warns {a reachable call inside a loop is reported} -body {
+    where "${::prelude}fn t(xs):
+    loop x in xs:
+        two(x, 1)
+    0"
+} -result 7:9
+
+test me-counted-loop-and-branch {calls inside counted loops and live branches are reported} -body {
+    where "${::prelude}fn t(n):
+    loop i from 0 to n:
+        if i == 3:
+            two(i, 1)
+    0"
+} -result 8:13
+
+test me-interprocedurally-dead-but-structurally-live-warns {a call in a function nobody calls is structurally reachable: conservative direction} -body {
+    codes "${::prelude}fn never_called(x):
+    return two(x, 1)"
+} -result METHOD-ELIGIBLE
+
+# ---------------------------------------------------------------------------
+# Closures, nested functions, recursion, tail calls, handlers
+
+test me-closure-call {a call inside a closure is reported at its own location} -body {
+    where "${::prelude}fn make(y):
+    fn add(x):
+        return two(x, y)
+    add
+make(1)"
+} -result 7:16
+
+test me-recursion-self-call {a recursive call is an ordinary call: eligible when the rules hold} -body {
+    set program {fn rec(a, b):
+    if b == 0:
+        return a
+    return rec(a, b - 1)
+1.rec(3)}
+    list [where $program] [roundTrip $program {fn rec(a, b):
+    if b == 0:
+        return a
+    return a.rec(b - 1)
+1.rec(3)}]
+} -result {4:12 {}}
+
+test me-recursion-operator-receiver-silent {a recursive call whose receiver is an operator expression is silent} -body {
+    codes {fn rec(a, b):
+    if a == 0:
+        return b
+    return rec(a - 1, b)
+3.rec(1)}
+} -result {}
+
+test me-tail-call {a tail call is an ordinary call: no special case} -body {
+    where "${::prelude}fn t(x):
+    two(x, 1)"
+} -result 6:5
+
+test me-handled-call {the call of a handled-call statement is a call like any other} -body {
+    set decls {error Bad
+fn h(a, b) errors Bad:
+    if a == 0:
+        fail Bad
+    return b
+}
+    set functional "${decls}fn t(x):
+    r = h(x, 1):
+        on Bad:
+            return 0
+    return r
+t(1)"
+    list [where $functional] [roundTrip $functional "${decls}fn t(x):
+    r = x.h(1):
+        on Bad:
+            return 0
+    return r
+t(1)"]
+} -result {7:9 {}}
+
+test me-top-level-call {a top-level call is reported} -body {
+    where "${::prelude}two(5, 1)"
+} -result 5:1
+
+# ---------------------------------------------------------------------------
+# Synthesized calls are never written calls
+
+test me-operators-never-eligible {operators lower to calls of root natives of two parameters: never eligible} -body {
+    codes {fn t(a, b):
+    a + b
+    a - b
+    a * b
+    a == b
+    a < b
+    a <= b
+    a > b
+    a >= b
+    0}
+} -result {}
+
+test me-list-literal-never-eligible {a list literal lowers to a call of `list`: not a written call} -body {
+    codes {fn t(a, b):
+    [a, b]}
+} -result {}
+
+test me-unary-minus-never-eligible {unary minus lowers to a call of `-` with two arguments: not a written call} -body {
+    codes {fn t(a):
+    -a}
+} -result {}
+
+# ---------------------------------------------------------------------------
+# Provenance: how each call was written, recorded in every mode, invisible to
+# everything downstream
+
+proc writtenForms {hir} {
+    set forms {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "call" && [dict exists $node written]} {
+            lappend forms [dict get $node written form]
+        }
+    }
+    return [lsort $forms]
+}
+
+set ::provenanceSource "${::prelude}fn t(x):
+    a = two(x, 1)
+    b = x.two(2)
+    c = x + 1
+    d = \[x, 1\]
+    e = -x
+    f = x != 1
+    a
+t(1)"
+
+test me-provenance-recorded-by-form {each frontend-built call records how it was written} -body {
+    writtenForms [compileWith $::provenanceSource off]
+} -result {function function list method operator operator operator}
+
+test me-provenance-under-off-and-default {the marker does not depend on the warning mode} -body {
+    set off [compileWith $::provenanceSource off]
+    set on [compileWith $::provenanceSource default]
+    list [expr {[writtenForms $off] eq [writtenForms $on]}] [llength [writtenForms $off]]
+} -result {1 7}
+
+test me-provenance-records-namespace {a written call records the namespace of the code it is in} -body {
+    withModules {m.bot {fn helper(a, b):
+    a
+fn go(n):
+    helper(n, 1)
+}} {
+        set hir [surface::compile {import m
+m::go(1)
+fn t(x):
+    two = 1
+    x} t.bot -warnings off]
+        set namespaces {}
+        dict for {e node} [dict get $hir exprs] {
+            if {[dict get $node kind] eq "call" && [dict exists $node written]} {
+                lappend namespaces [dict get $node written ns]
+            }
+        }
+        lsort -unique $namespaces
+    }
+} -result {{} m}
+
+test me-hir-identical-across-modes {the HIR, with its provenance marker, is the same under off and default} -body {
+    set program "${::prelude}fn t(x):
+    return two(x, 1)
+t(1)"
+    set off [compileWith $program off]
+    set on [compileWith $program default]
+    list [expr {$off eq [dict remove $on warnings]}] [expr {[hir::format $off] eq [hir::format $on]}] \
+        [expr {[hir::lower $off] eq [hir::lower $on]}] [dict exists $off warnings]
+} -result {1 1 1 0}
+
+test me-nir-identical-across-modes {native IR is identical with warnings off and on} -body {
+    set program "${::prelude}fn t(x):
+    return two(x, 1)
+t(1)"
+    expr {[native::nir [compileWith $program off]] eq [native::nir [compileWith $program default]]}
+} -result 1
+
+test me-nir-identical-between-spellings {the functional and the sugared spelling compile to the same NIR, report and CLIF} -body {
+    set functional "${::prelude}fn t(x):
+    return two(x, 1)
+t(1)"
+    set sugared "${::prelude}fn t(x):
+    return x.two(1)
+t(1)"
+    set f [compileWith $functional off]
+    set s [compileWith $sugared off]
+    list [expr {[native::nir $f] eq [native::nir $s]}] [expr {[native::nir $f -specialize 0] eq [native::nir $s -specialize 0]}] \
+        [expr {[native::clif $f] eq [native::clif $s]}] [expr {[native::report $f] eq [native::report $s]}]
+} -result {1 1 1 1}
+
+test me-machine-readable-outputs-clean {native::report is identical with and without the warnings side table} -body {
+    set program "${::prelude}fn t(x):
+    return two(x, 1)
+t(1)"
+    set on [compileWith $program default]
+    set bare [dict remove $on warnings]
+    expr {[llength [hir::warnings::of $on]] == 1 && [native::report $on] eq [native::report $bare]
+        && [native::nir $on] eq [native::nir $bare] && [native::clif $on] eq [native::clif $bare]}
+} -result 1
+
+test me-no-warning-text-in-machine-readable-outputs {neither NIR, CLIF nor the report mention a warning or its code} -body {
+    set hir [compileWith "${::prelude}fn t(x):
+    return two(x, 1)
+t(1)" default]
+    set seen 0
+    foreach text [list [native::nir $hir] [native::clif $hir] [native::report $hir] [hir::format $hir]] {
+        foreach word {METHOD-ELIGIBLE eligible warning written} {
+            if {[string match *$word* $text]} {
+                incr seen
+            }
+        }
+    }
+    set seen
+} -result 0
+
+test me-hir-format-never-prints-warnings {hir::format does not print the side table or the provenance marker} -body {
+    set hir [compileWith "${::prelude}fn t(x):
+    return two(x, 1)
+t(1)" default]
+    list [string match *METHOD* [hir::format $hir]] [string match *written* [hir::format $hir]]
+} -result {0 0}
+
+# ---------------------------------------------------------------------------
+# nomethod fn
+
+proc nomethodDecl {} {
+    return "nomethod fn atan2(y, x):\n    y + x\n"
+}
+
+test me-nomethod-parses {nomethod fn parses and the function is called functionally exactly like any other} -body {
+    set hir [compileWith "[nomethodDecl]atan2(1, 2)" default]
+    list [core::formatValue [core::evalProgram [hir::lower $hir]]] [hir::diagnostics $hir]
+} -result {3 {}}
+
+test me-nomethod-sugar-is-a-resolution-error {receiver-form call to a nomethod function is a resolution error with the pinned message} -body {
+    lassign [rejection "[nomethodDecl]5.atan2(1)" off] code message
+    list $code $message
+} -result {{CORE SEMANTIC NOMETHOD-CALL} {t.bot:3:3: `atan2` is declared nomethod and cannot be called with method syntax; call it as atan2(receiver, ...)}}
+
+test me-nomethod-error-before-typing {the error is raised by resolution: before type inference, like an unbound name} -body {
+    set calls 0
+    trace add execution hir::check enter {apply {{args} {incr ::checkCalls}}}
+    set ::checkCalls 0
+    try {
+        catch {compileWith "[nomethodDecl]5.atan2(1)" off}
+        set ::checkCalls
+    } finally {
+        trace remove execution hir::check enter {apply {{args} {incr ::checkCalls}}}
+    }
+} -result 0
+
+test me-nomethod-error-is-an-error-in-every-warning-mode {off, default and error all reject it: it is a language error, not a warning} -body {
+    lmap mode {off default error} {lindex [rejection "[nomethodDecl]5.atan2(1)" $mode] 0}
+} -result {{CORE SEMANTIC NOMETHOD-CALL} {CORE SEMANTIC NOMETHOD-CALL} {CORE SEMANTIC NOMETHOD-CALL}}
+
+test me-nomethod-strict-class {-strict 0 keeps the diagnostic in the HIR, the call stays a call of a field value (it fails at run time too)} -body {
+    set hir [surface::compile "[nomethodDecl]5.atan2(1)" t.bot -strict 0 -warnings default -warning-channel ""]
+    set kinds [lmap d [hir::diagnostics $hir] {dict get $d kind}]
+    set callee [dict get $hir exprs [dict get [dict get $hir exprs [lindex [dict get $hir roots] end]] callee] kind]
+    list [lindex $kinds 0] $callee [hir::warnings::of $hir]
+} -result {NOMETHOD-CALL project {}}
+
+test me-nomethod-functional-call-no-warning {a nomethod function is never reported: its sugared spelling is not legal} -body {
+    codes "[nomethodDecl]fn t(x):
+    return atan2(x, 1)"
+} -result {}
+
+test me-nomethod-same-function-without-modifier-warns {without the modifier the same call warns} -body {
+    codes "fn atan2(y, x):
+    y + x
+fn t(x):
+    return atan2(x, 1)"
+} -result METHOD-ELIGIBLE
+
+test me-nomethod-nested-declaration {nomethod fn is accepted wherever fn is, nested included} -body {
+    set program {fn outer(a):
+    nomethod fn inner(y, x):
+        y + x
+    return inner(a, 1)
+outer(1)}
+    list [codes $program] [lindex [rejection {fn outer(a):
+    nomethod fn inner(y, x):
+        y + x
+    return a.inner(1)
+outer(1)} off] 0]
+} -result {{} {CORE SEMANTIC NOMETHOD-CALL}}
+
+test me-nomethod-via-module-import {a nomethod function imported from a module behaves identically} -body {
+    withModules {m.bot {nomethod fn atan2(y, x):
+    y + x
+
+fn plain(a, b):
+    a
+}} {
+        list [codes {import m
+fn t(x):
+    m::atan2(x, 1)
+    0}] [lindex [rejection {import m
+fn t(x):
+    x.atan2(1)
+    0} off] 0] [codes {import m
+fn t(x):
+    m::plain(x, 1)
+    0}]
+    }
+} -result {{} {CORE SEMANTIC NOMETHOD-CALL} METHOD-ELIGIBLE}
+
+test me-nomethod-alias-is-the-same-function {a name bound to a nomethod function is that function: sugar through the alias is the same error} -body {
+    lindex [rejection "[nomethodDecl]g = atan2
+5.g(1)" off] 0
+} -result {CORE SEMANTIC NOMETHOD-CALL}
+
+test me-nomethod-is-not-a-candidate-so-another-function-wins {sugar skips a nomethod function: another visible function of the name is the one it means} -body {
+    withModules {m.bot {fn atan2(y, x):
+    y - x
+}} {
+        list [lindex [rejection "import m
+[nomethodDecl]5.atan2(1)" off] 0] [core::formatValue [core::evalProgram [hir::lower [compileWith "import m
+[nomethodDecl]5.atan2(1)" off]]]]
+    }
+} -result {compiled 4}
+
+test me-nomethod-field-call-written-with-parentheses {a struct field of the name is called as (s.f)(...), exactly as the ambiguity message advises} -body {
+    set hir [compileWith "[nomethodDecl]s = {atan2: atan2}
+(s.atan2)(1, 2)" off]
+    core::formatValue [core::evalProgram [hir::lower $hir]]
+} -result 3
+
+test me-nomethod-identical-program {nomethod changes no semantics: NIR, core IR and behavior are identical for functional calls} -body {
+    set plain "fn f(x, y):
+    x * y
+fn t(a):
+    return f(a, 3)
+t(5)"
+    set marked "nomethod fn f(x, y):
+    x * y
+fn t(a):
+    return f(a, 3)
+t(5)"
+    set diffs {}
+    set p [fingerprint $plain]
+    set m [fingerprint $marked]
+    foreach key {lower nir nirGeneric} {
+        if {[dict get $p $key] ne [dict get $m $key]} {
+            lappend diffs $key
+        }
+    }
+    set pv [core::formatValue [core::evalProgram [hir::lower [compileWith $plain off]]]]
+    set mv [core::formatValue [core::evalProgram [hir::lower [compileWith $marked off]]]]
+    list $diffs $pv $mv
+} -result {{} 15 15}
+
+test me-nomethod-same-types-and-specialization {the modifier changes no type, completion or specialization} -body {
+    set plain [compileWith "fn f(x, y):\n    x * y\nf(2, 3)" off]
+    set marked [compileWith "nomethod fn f(x, y):\n    x * y\nf(2, 3)" off]
+    list [expr {[hir::specialize::analyze $plain] eq [hir::specialize::analyze $marked]}] \
+        [expr {[native::nir $plain] eq [native::nir $marked]}] \
+        [expr {[native::report $plain] eq [native::report $marked]}]
+} -result {1 1 1}
+
+test me-nomethod-hir-format-renders-modifier {hir::format renders the modifier faithfully and hir::parse reads it back} -body {
+    set hir [compileWith "[nomethodDecl]fn plain(a, b):\n    a\natan2(1, 2)" off]
+    set text [hir::format $hir]
+    set back [hir::parse $text]
+    list [llength [regexp -all {nomethod} $text]] [expr {[hir::format $back] eq $text}] \
+        [dict exists [dict get $back exprs [lindex [dict keys [dict get $back exprs]] 1]] nomethod]
+} -match glob -result {1 1 *}
+
+test me-nomethod-no-modifier-no-text {a function without the modifier prints exactly as before} -body {
+    string match *nomethod* [hir::format [compileWith "fn f(a, b):\n    a\nf(1, 2)" off]]
+} -result 0
+
+test me-nomethod-contextual-word {nomethod is an ordinary name everywhere but before fn} -body {
+    core::formatValue [core::evalProgram [hir::lower [compileWith "nomethod = 3\nfn f(nomethod):\n    nomethod\nf(nomethod)" off]]]
+} -result 3
+
+test me-nomethod-stray-modifier {nomethod before another declaration is a syntax error naming the function declaration} -body {
+    lmap decl {"nomethod struct S:\n    a: Int" "nomethod type T = Int in 0..3" "nomethod error E"} {
+        catch {compileWith $decl off} message options
+        list [lindex [dict get $options -errorcode] 0] [string match {*only modifies a function declaration*} $message]
+    }
+} -result {{SURFACE 1} {SURFACE 1} {SURFACE 1}}
+
+test me-nomethod-duplicate-modifier {a repeated modifier is a syntax error} -body {
+    catch {compileWith "nomethod nomethod fn f(a, b):\n    a" off} message options
+    list [lindex [dict get $options -errorcode] 0] [string match {*duplicate modifier "nomethod"*} $message]
+} -result {SURFACE 1}
+
+test me-nomethod-ast-printer {the surface AST printer shows the modifier} -body {
+    surface::formatAst [surface::parse "nomethod fn f(a, b):\n    a\nfn g(a):\n    a\n" t.bot]
+} -match glob -result {*nomethod fn f (a b)*fn g (a)*}
+
+test me-nomethod-ast-node {the function node carries the modifier and its span; a plain function carries 0} -body {
+    set ast [surface::parse "nomethod fn f(a, b):\n    a\nfn g(a):\n    a\n" t.bot]
+    lmap statement [dict get $ast body] {
+        set span [dict get $statement nomethodSpan]
+        list [dict get $statement name] [dict get $statement nomethod] \
+            [expr {$span eq "" ? "" : "[dict get $span line]:[dict get $span column]"}]
+    }
+} -result {{f 1 1:1} {g 0 {}}}
+
+test me-nomethod-lowers-to-a-marked-block {the lowered syntax marks the block, never a plain function} -body {
+    set ast [surface::parse "nomethod fn f(a, b):\n    a\nfn g(a):\n    a\n" t.bot]
+    lassign [surface::lower::Sequence [dict get $ast body]] f g
+    list [dict exists [dict get $f value] nomethod] [dict exists [dict get $g value] nomethod]
+} -result {1 0}
+
+# The builtin registry carries the flag too.
+
+test me-nomethod-native-default-off {no shipped native is nomethod} -body {
+    set marked {}
+    foreach name [core::native::names] {
+        if {[dict get [core::native::metadata $name] nomethod]} {
+            lappend marked $name
+        }
+    }
+    set marked
+} -result {}
+
+test me-nomethod-native-flag-declarable {a native registered -nomethod 1 is skipped by sugar, callable functionally, and never reported} -body {
+    core::native::register list::probe_nomethod -arity 2 -nomethod 1 \
+        -impl {apply {{a b} {return $a}}} -result-type any
+    try {
+        set meta [dict get [core::native::metadata list::probe_nomethod] nomethod]
+        set functional {import list
+fn t(xs):
+    return list::probe_nomethod(xs, 1)}
+        set sugared {import list
+fn t(xs):
+    return xs.probe_nomethod(1)}
+        list $meta [lindex [rejection $sugared off] 0] [rejection $functional off] [codes $functional]
+    } finally {
+        core::native::unregister list::probe_nomethod
+    }
+} -result {1 {CORE SEMANTIC NOMETHOD-CALL} compiled {}}
+
+test me-nomethod-native-without-flag-is-reported {the same shape of native without the flag is eligible} -body {
+    core::native::register list::probe_plain -arity 2 \
+        -impl {apply {{a b} {return $a}}} -result-type any
+    try {
+        codes {import list
+fn t(xs):
+    return list::probe_plain(xs, 1)}
+    } finally {
+        core::native::unregister list::probe_plain
+    }
+} -result METHOD-ELIGIBLE
+
+test me-nomethod-register-validates-flag {-nomethod must be 0 or 1} -body {
+    core::native::register list::probe_bad -arity 2 -nomethod 2 -impl {apply {{a b} {return $a}}}
+} -returnCodes error -match glob -result {*-nomethod of "list::probe_bad" must be 0 or 1*}
+
+# ---------------------------------------------------------------------------
+# Interleaving with SAME-RETURN-VALUE, ordering, the policy matrix
+
+set ::twoSource "${::prelude}fn dup(x):
+    if x < 0:
+        return 0
+    if x > 100:
+        return 0
+    return 1
+fn t(x):
+    return two(x, 1)
+t(5)"
+
+test me-interleaving-with-same-return-value {both warnings appear, in source order, deterministically} -body {
+    set hir [compileWith $::twoSource default]
+    lmap w [ownWarnings $hir] {
+        list [dict get $w code] [regsub {^t\.bot:} [hir::originLocation $hir [dict get $w primary]] {}]
+    }
+} -result {{SAME-RETURN-VALUE 7:9} {METHOD-ELIGIBLE 12:12}}
+
+test me-interleaving-methodfirst {a METHOD-ELIGIBLE warning that precedes a SAME-RETURN-VALUE one sorts first} -body {
+    set source "${::prelude}fn t(x):
+    return two(x, 1)
+fn dup(x):
+    if x < 0:
+        return 0
+    if x > 100:
+        return 0
+    return 1
+t(5)"
+    lmap w [warningsOf $source] {dict get $w code}
+} -result {METHOD-ELIGIBLE SAME-RETURN-VALUE}
+
+test me-interleaving-deterministic {compiling the same source twice yields the same warnings} -body {
+    expr {[warningsOf $::twoSource] eq [warningsOf $::twoSource]}
+} -result 1
+
+test me-mode-default {default: compiles, and the program carries the warning} -body {
+    set hir [compileWith $::twoSource default]
+    list [lmap w [ownWarnings $hir] {dict get $w code}] [rejection $::twoSource default]
+} -result {{SAME-RETURN-VALUE METHOD-ELIGIBLE} compiled}
+
+test me-mode-off {off: compiles, and nothing is reported} -body {
+    set hir [compileWith $::twoSource off]
+    list [hir::warnings::of $hir] [dict exists $hir warnings]
+} -result {{} 0}
+
+test me-mode-error-only-method-eligible {error: a program with only this warning is rejected with the warning's own code} -body {
+    set source "${::prelude}fn t(x):
+    return two(x, 1)
+t(5)"
+    lassign [rejection $source error] code message
+    list $code $message
+} -result {{CORE SEMANTIC METHOD-ELIGIBLE} {t.bot:6:12: call to `two` is eligible for method syntax}}
+
+test me-mode-error-first-in-sort-order {error with both warnings: exactly one error, the sort-first, with its own code} -body {
+    list [lindex [rejection $::twoSource error] 0] \
+        [lindex [rejection "${::prelude}fn t(x):
+    return two(x, 1)
+fn dup(x):
+    if x < 0:
+        return 0
+    if x > 100:
+        return 0
+    return 1
+t(5)" error] 0]
+} -result {{CORE SEMANTIC SAME-RETURN-VALUE} {CORE SEMANTIC METHOD-ELIGIBLE}}
+
+test me-mode-error-clean-program {error mode accepts a program with no warning} -body {
+    rejection "${::prelude}fn t(x):
+    return one(x)
+t(5)" error
+} -result compiled
+
+test me-mode-default-is-the-default {no option and no environment setting means warnings on, as warnings} -body {
+    set saved $::env(BOTLISH_WARNINGS)
+    unset ::env(BOTLISH_WARNINGS)
+    try {
+        set hir [surface::compile $::twoSource t.bot -warning-channel ""]
+        llength [hir::warnings::of $hir]
+    } finally {
+        set ::env(BOTLISH_WARNINGS) $saved
+    }
+} -result 2
+
+test me-environment-default {BOTLISH_WARNINGS is only the default for a compilation given no -warnings} -body {
+    set saved $::env(BOTLISH_WARNINGS)
+    try {
+        set results {}
+        foreach mode {default off error} {
+            set ::env(BOTLISH_WARNINGS) $mode
+            lappend results [catch {surface::compile $::twoSource t.bot -warning-channel ""} message] \
+                [catch {surface::compile $::twoSource t.bot -warnings off -warning-channel ""}]
+        }
+        set results
+    } finally {
+        set ::env(BOTLISH_WARNINGS) $saved
+    }
+} -result {0 0 0 0 1 0}
+
+test me-unknown-mode {a mode outside default/off/error is a plain usage error} -body {
+    surface::compile $::twoSource t.bot -warnings -Wall -warning-channel ""
+} -returnCodes error -match glob -result {unknown warnings mode "-Wall" (known: default, off, error)}
+
+test me-no-fine-grained-options {there is no per-warning option: -Wno-method-eligible is not an option} -body {
+    surface::compile $::twoSource t.bot -Wno-method-eligible 1
+} -returnCodes error -match glob -result {*unknown option "-Wno-method-eligible"*}
+
+test me-no-new-modes-or-options {the policy surface is exactly default, off, error and the one option} -body {
+    list $hir::warnings::modes [expr {[llength [info commands hir::warnings::enable]] + [llength [info commands hir::warnings::disable]]}]
+} -result {{default off error} 0}
+
+test me-error-promotion-identity {the promoted error keeps the code and the message the warning has} -body {
+    set source "${::prelude}fn t(x):
+    return two(x, 1)
+t(5)"
+    set hir [compileWith $source default]
+    set w [lindex [ownWarnings $hir] 0]
+    lassign [rejection $source error] code message
+    list [lindex $code end] [dict get $w code] [string match "*[dict get $w message]*" $message]
+} -result {METHOD-ELIGIBLE METHOD-ELIGIBLE 1}
+
+test me-off-runs-no-warning-pass {warnings off does not execute the warning pass at all (default does)} -body {
+    set source "${::prelude}fn t(x):
+    return two(x, 1)"
+    hir::warnings::resetStats
+    compileWith $source off
+    set afterOff [hir::warnings::stats]
+    compileWith $source default
+    set afterDefault [hir::warnings::stats]
+    list $afterOff $afterDefault [dict exists $afterOff METHOD-ELIGIBLE] [dict get $afterDefault METHOD-ELIGIBLE]
+} -result {{} {SAME-RETURN-VALUE 1 METHOD-ELIGIBLE 1} 0 1}
+
+test me-off-runs-no-warning-pass-via-trace {an execution trace on the pass proves it is not invoked when off} -body {
+    set source "${::prelude}fn t(x):
+    return two(x, 1)"
+    set ::passCalls 0
+    trace add execution hir::warnings::MethodEligible enter {apply {{args} {incr ::passCalls}}}
+    try {
+        compileWith $source off
+        set off $::passCalls
+        compileWith $source default
+        set on $::passCalls
+    } finally {
+        trace remove execution hir::warnings::MethodEligible enter {apply {{args} {incr ::passCalls}}}
+    }
+    list $off $on
+} -result {0 1}
+
+test me-compilation-with-errors-has-no-warnings {a program the compiler rejects is never warned about} -body {
+    set hir [surface::compile "${::prelude}fn t(x):
+    return two(x, 1)
+nothing" t.bot -strict 0 -warnings default -warning-channel ""]
+    list [llength [hir::diagnostics $hir]] [hir::warnings::of $hir]
+} -result {1 {}}
+
+test me-policy-is-per-compilation {interleaved compilations under different modes never leak a mode} -body {
+    set source "${::prelude}fn t(x):
+    return two(x, 1)"
+    set a [compileWith $source off]
+    set b [compileWith $source default]
+    set c [catch {compileWith $source error}]
+    set d [compileWith $source off]
+    set e [compileWith $source default]
+    list [llength [ownWarnings $a]] [llength [ownWarnings $b]] $c [llength [ownWarnings $d]] [llength [ownWarnings $e]]
+} -result {0 1 1 0 1}
+
+test me-warnings-attached-structurally {hir::warnings::of and collect give the warnings structurally} -body {
+    set hir [compileWith $::twoSource default]
+    list [expr {[hir::warnings::of $hir] eq [hir::warnings::collect $hir]}] [llength [hir::warnings::collect $hir]]
+} -result {1 2}
+
+test me-error-stops-before-backend {error mode rejects before any backend lowers anything} -body {
+    set source "${::prelude}fn t(x):
+    return two(x, 1)
+t(5)"
+    set ::lowerCalls 0
+    foreach command {native::evalHir native::prepareHir hir::lower core::compiler::evalHir} {
+        trace add execution $command enter {apply {{args} {incr ::lowerCalls}}}
+    }
+    try {
+        catch {compileWith $source error}
+    } finally {
+        foreach command {native::evalHir native::prepareHir hir::lower core::compiler::evalHir} {
+            trace remove execution $command enter {apply {{args} {incr ::lowerCalls}}}
+        }
+    }
+    set ::lowerCalls
+} -result 0
+
+# ---------------------------------------------------------------------------
+# Backend independence: warnings are discovered before a backend is chosen
+
+set ::runSource "${::prelude}fn t(x):
+    return two(x, 1)
+t(5)"
+
+test me-backend-independent {every backend runs the program, and sees the one warning set} -body {
+    set hir [compileWith $::runSource default]
+    set outcomes [lmap backend $::allBackends {outcomeUnderHir $backend $hir}]
+    list [llength [lsort -unique [lmap o $outcomes {lindex $o 1}]]] [lindex $outcomes 0 1] [llength [ownWarnings $hir]]
+} -result {1 5 1}
+
+test me-backend-independent-off {the same program runs identically on every backend with warnings off} -body {
+    set hir [compileWith $::runSource off]
+    lsort -unique [lmap backend $::allBackends {lindex [outcomeUnderHir $backend $hir] 1}]
+} -result 5
+
+test me-sugared-and-functional-run-identically {both spellings give the same value on every backend} -body {
+    set sugared "${::prelude}fn t(x):
+    return x.two(1)
+t(5)"
+    lsort -unique [lmap backend $::allBackends {
+        list [lindex [outcomeUnderHir $backend [compileWith $::runSource off]] 1] \
+            [lindex [outcomeUnderHir $backend [compileWith $sugared off]] 1]
+    }]
+} -result {{5 5}}
+
+# ---------------------------------------------------------------------------
+# The command line
+
+test me-cli-modes {main.tcl: default prints the warning on stderr and runs; off is silent; error rejects before running} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource me-cli.bot]
+    set results {}
+    foreach mode {default off error} {
+        set status [catch {exec [info nameofexecutable] $main -warnings $mode $path 2>@1} out]
+        lappend results [list $mode $status \
+            [regexp {warning: call to `two` is eligible for method syntax \(METHOD-ELIGIBLE\)} $out] \
+            [regexp {value: 5} $out] \
+            [regexp {CORE SEMANTIC METHOD-ELIGIBLE} $out]]
+    }
+    removeFile me-cli.bot
+    set results
+} -result {{default 0 1 1 0} {off 0 0 1 0} {error 1 0 0 1}}
+
+test me-cli-no-wno-option {-Wno-method-eligible is an unknown option, not a file name} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource me-cli-wno.bot]
+    catch {exec [info nameofexecutable] $main -Wno-method-eligible $path 2>@1} out
+    removeFile me-cli-wno.bot
+    list [string match "*unknown option*-Wno-method-eligible*" $out] [string match "*value:*" $out]
+} -result {1 0}
+
+test me-cli-unknown-mode {main.tcl rejects an unknown mode} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource me-cli-mode.bot]
+    set status [catch {exec [info nameofexecutable] $main -warnings loud $path 2>@1} out]
+    removeFile me-cli-mode.bot
+    list $status [string match "*unknown warnings mode*" $out]
+} -result {1 1}
+
+test me-cli-stdout-clean {the warning goes to stderr: program stdout carries no warning text} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource me-cli-stdout.bot]
+    set stderrPath [makeFile {} me-cli-stderr.txt]
+    set out [exec [info nameofexecutable] $main -warnings default $path 2> $stderrPath]
+    set err [viewFile me-cli-stderr.txt]
+    removeFile me-cli-stdout.bot
+    removeFile me-cli-stderr.txt
+    list [string match *warning* $out] [string match *METHOD-ELIGIBLE* $err]
+} -result {0 1}
+
+test me-error-cli-stops-before-backend {main.tcl -warnings error on a native backend rejects without lowering or running anything} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource me-cli-error.bot]
+    catch {exec [info nameofexecutable] $main -backend cranelift -warnings error $path 2>@1} out
+    removeFile me-cli-error.bot
+    list [string match "*value:*" $out] [regexp {\(CORE SEMANTIC METHOD-ELIGIBLE\)} $out]
+} -result {0 1}
+
+test me-cli-backend-independent-stdlib {main.tcl prints the same warning text on every backend over the whole stdlib corpus} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set programs [lsort [glob -directory [file join $::projectRoot examples stdlib] *.bot]]
+    set mismatches {}
+    set total 0
+    foreach path $programs {
+        set texts {}
+        foreach backend $::allBackends {
+            set err [makeFile {} me-cli-err.txt]
+            catch {exec [info nameofexecutable] $main -backend $backend -warnings default $path 2> $err}
+            lappend texts [lsearch -all -inline -glob [split [viewFile me-cli-err.txt] \n] *METHOD-ELIGIBLE*]
+            removeFile me-cli-err.txt
+        }
+        incr total [llength [lindex $texts 0]]
+        if {[llength [lsort -unique $texts]] != 1} {
+            lappend mismatches [file tail $path]
+        }
+    }
+    list $mismatches [expr {$total > 0}]
+} -result {{} 1}
+
+# ---------------------------------------------------------------------------
+# Fuzzing: constructed programs, an independent oracle, all three modes
+
+test me-fuzz-smoke {60 generated programs: predicted warnings and only them, off silent, error iff warned, every eligible call round-trips} -constraints executableAot -body {
+    set fuzz [file join $::projectRoot audit method-eligible tools fuzz.tcl]
+    exec [info nameofexecutable] $fuzz 60 1
+} -result {seeds 60 (from 1): * with warnings, * without; failures 0; extra warnings 0; round trips *} -match glob
+
+cleanupTests

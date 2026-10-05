@@ -1,0 +1,10 @@
+# METHOD-ELIGIBLE fuzz result: tclsh9.0 audit/method-eligible/tools/fuzz.tcl SEEDS FIRST
+# 2000 seeds in three chunks (run in parallel); the test suite runs 60 (tests/method-eligible.test)
+
+seeds 700 (from 1): 487 with warnings, 213 without; failures 0; extra warnings 0; round trips 3452 of 3452 predicted sites
+
+seeds 700 (from 701): 485 with warnings, 215 without; failures 0; extra warnings 0; round trips 3400 of 3400 predicted sites
+
+seeds 600 (from 1401): 415 with warnings, 185 without; failures 0; extra warnings 0; round trips 2943 of 2943 predicted sites
+
+total: seeds 2000 (from 1): 1387 with warnings, 613 without; failures 0; extra warnings 0; round trips 9795 of 9795 predicted sites

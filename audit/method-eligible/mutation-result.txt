@@ -1,0 +1,10 @@
+# METHOD-ELIGIBLE mutation results: tclsh9.0 audit/method-eligible/tools/mutate.tcl 40
+# (one-line breaks of the pass or of the nomethod resolution, applied to scratch copies of the tree)
+operator-receivers         killed by fuzz (seeds 40 (from 1): 31 with warnings, 9 without; failures 0; extra warnings 14; round trips 187 of 187 predicted sites)
+one-parameter-rule         killed by unit tests (1 failing of 145; fuzz saw: seeds 40 (from 1): 27 with warnings, 13 without; failures 0; extra warnings 0; round trips 187 of 187 predicted sites)
+ignore-reachability        killed by fuzz (seeds 40 (from 1): 40 with warnings, 0 without; failures 0; extra warnings 58; round trips 187 of 187 predicted sites)
+warn-on-sugar              killed by fuzz (seeds 40 (from 1): 40 with warnings, 0 without; failures 27; extra warnings 189; round trips 187 of 187 predicted sites)
+ignore-nomethod            killed by fuzz (seeds 40 (from 1): 36 with warnings, 4 without; failures 0; extra warnings 24; round trips 187 of 187 predicted sites)
+receiver-forms-everything  killed by fuzz (seeds 40 (from 1): 33 with warnings, 7 without; failures 0; extra warnings 18; round trips 187 of 187 predicted sites)
+candidate-check-skipped    killed by fuzz (seeds 40 (from 1): 36 with warnings, 4 without; failures 0; extra warnings 24; round trips 187 of 187 predicted sites)
+field-check-skipped        killed by unit tests (2 failing of 145; fuzz saw: seeds 40 (from 1): 27 with warnings, 13 without; failures 0; extra warnings 0; round trips 187 of 187 predicted sites)

@@ -27,6 +27,14 @@
 #   error     rejected with {CORE SEMANTIC SAME-RETURN-VALUE} iff a warning
 #             exists, and compiles otherwise
 #
+# A generated program imports lib/mutable_array.bot, and a program that loads
+# a module reports that module's own warnings (WARNINGS-METHOD-ELIGIBLE.md:
+# the frozen library carries a METHOD-ELIGIBLE finding). Those do not depend
+# on the generated function, so they are compared with a baseline (the
+# warnings of a program that only imports the module) and kept out of the
+# oracle's groups; under `error` the sort-first warning of either kind is the
+# one raised.
+#
 # The compiler may legitimately prove *more* than the oracle models; such a
 # group is printed as EXTRA (with its source) for inspection and is not a
 # failure. A predicted group the compiler misses, or a warning that is not a
@@ -145,6 +153,25 @@ proc linesOf {hir w} {
     }]
 }
 
+# The warnings the library module the programs import reports on its own, as
+# {CODE MESSAGE LOCATION} triples.
+proc foreignWarnings {hir} {
+    return [lmap w [hir::warnings::of $hir] {
+        set location [hir::originLocation $hir [dict get $w primary]]
+        if {[string match fuzz.bot:* $location]} continue
+        list [dict get $w code] [dict get $w message] $location
+    }]
+}
+
+proc ownWarnings {hir} {
+    return [lmap w [hir::warnings::of $hir] {
+        if {![string match fuzz.bot:* [hir::originLocation $hir [dict get $w primary]]]} continue
+        set w
+    }]
+}
+
+set baseline [foreignWarnings [compileMode "import mutable_array\nfn f(x):\n    x\n" default]]
+
 set failures 0
 set extras 0
 set warned 0
@@ -155,8 +182,11 @@ for {set seed $first} {$seed < $first + $seeds} {incr seed} {
     if {[catch {compileMode $source default} hir options]} {
         lappend problems "default mode did not compile: $hir"
     } else {
-        set actual [lsort [lmap w [hir::warnings::of $hir] {linesOf $hir $w}]]
-        foreach w [hir::warnings::of $hir] {
+        set actual [lsort [lmap w [ownWarnings $hir] {linesOf $hir $w}]]
+        if {[foreignWarnings $hir] ne $baseline} {
+            lappend problems "the imported library's own warnings changed: [foreignWarnings $hir]"
+        }
+        foreach w [ownWarnings $hir] {
             if {[dict get $w code] ne "SAME-RETURN-VALUE"} {
                 lappend problems "unexpected code [dict get $w code]"
             }
@@ -193,16 +223,19 @@ for {set seed $first} {$seed < $first + $seeds} {incr seed} {
         } elseif {$off ne [dict remove $hir warnings]} {
             lappend problems "HIR differs between off and default"
         }
-        # error: rejected iff a warning exists.
+        # error: rejected iff a warning exists (the library's included),
+        # with the code of the sort-first one.
         set rejected [catch {compileMode $source error} message options]
+        set anyWarning [expr {$actual ne "" || $baseline ne ""}]
         if {$rejected} {
-            if {[dict get $options -errorcode] ne {CORE SEMANTIC SAME-RETURN-VALUE}} {
+            set firstCode [dict get [lindex [hir::warnings::collect $hir] 0] code]
+            if {[dict get $options -errorcode] ne [list CORE SEMANTIC $firstCode]} {
                 lappend problems "error mode rejected with [dict get $options -errorcode]: $message"
             }
-            if {$actual eq ""} {
+            if {!$anyWarning} {
                 lappend problems "error mode rejected a program with no warning"
             }
-        } elseif {$actual ne ""} {
+        } elseif {$anyWarning} {
             lappend problems "error mode accepted a program with warnings"
         }
         if {$actual eq ""} { incr clean } else { incr warned }

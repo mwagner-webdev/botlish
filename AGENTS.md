@@ -183,3 +183,15 @@ don't add a warning that is not backed by a compiler proof. The test harness
 because tcltest counts stderr output as a test-file error; `tests/warnings.test`
 passes its policy explicitly on every compile. Benchmark and analysis scripts
 that compile corpus sources pass `-warnings off` themselves.
+
+`METHOD-ELIGIBLE` (WARNINGS-METHOD-ELIGIBLE.md) is backed by a checked proof,
+the round-trip law: the sugared spelling of every call it reports must parse,
+resolve to the same callee and compile to the same program. If you change
+method sugar, the resolver's candidate gathering or what the frontend records
+in a call's `written` marker, run `tests/method-eligible.test` and
+`audit/method-eligible/tools/fuzz.tcl`. `nomethod fn` is a declaration by the
+function's author that method syntax to it is an error; it is not a warning
+suppression, and there is still no call-site suppression to add. Library
+modules' own findings print for every program that loads them (the corpus is
+frozen), so tests that import `lib/*.bot` and assert on a complete warning set
+filter by code or file.

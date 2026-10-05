@@ -613,6 +613,9 @@ proc hir::read::Expr {hirVar level s path block} {
             Referenced hir $b $name $s $number
             SetField hir $e binding $b
             SetField hir $e value [Expr hir $inner $s [concat $path 2] $block]
+            if {[dict exists $hir exprs [dict get $hir exprs $e value] nomethod]} {
+                dict set hir bindings $b nomethod 1
+            }
             set duplicate [expr {"duplicate" in $flags}]
             SetField hir $e duplicate $duplicate
             if {$duplicate} {
@@ -620,8 +623,11 @@ proc hir::read::Expr {hirVar level s path block} {
             }
         }
         block {
-            if {![BlockHeader $head body params captures staticRefs declared errorsText binds]} {
-                Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)? ?declares ...? ?errors ...? ?binds ...?\""
+            if {![BlockHeader $head body params captures staticRefs declared errorsText binds nomethod]} {
+                Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)? ?nomethod? ?declares ...? ?errors ...? ?binds ...?\""
+            }
+            if {$nomethod} {
+                SetField hir $e nomethod 1
             }
             NewScope hir $body block $s $e $e [list ir $path] $number
             set paramIds {}
@@ -943,14 +949,18 @@ proc hir::read::Expr {hirVar level s path block} {
 # Derives what the text implies: which bind declares each binding, binding
 # types, and id counters past every id in use.
 # Parses a block line's HEAD ("SCOPE (PARAMS) captures (BINDINGS)
-# ?staticRefs (BINDINGS)? ?declares TYPE? ?errors E1, E2? ?binds ...?")
+# ?staticRefs (BINDINGS)? ?nomethod? ?declares TYPE? ?errors E1, E2? ?binds ...?")
 # into the named variables; 0 if malformed. The optional parts are found
 # outside brackets, so a declared type may itself contain spaces, ", " or
 # the word "errors" (a structural function type's own "errors: [...]").
-proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar} {
+proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar {nomethodVar ""}} {
     foreach var {bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar} {
         upvar 1 [set $var] [string range $var 0 end-3]
     }
+    if {$nomethodVar ne ""} {
+        upvar 1 $nomethodVar nomethod
+    }
+    set nomethod 0
     set staticRefs ""
     set declared ""
     set errors ""
@@ -959,6 +969,10 @@ proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar de
         return 0
     }
     regexp {^ staticRefs \((.*?)\)(.*)$} $rest -> staticRefs rest
+    if {[regexp {^ nomethod(.*)$} $rest -> after]} {
+        set nomethod 1
+        set rest $after
+    }
     set i [TopIndex $rest " binds "]
     if {$i >= 0} {
         set binds [string range $rest [expr {$i + 7}] end]

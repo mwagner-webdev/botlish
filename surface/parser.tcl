@@ -27,8 +27,11 @@
 #   handledExpr  = expression [ handlers ]     -- handlers only after a bare
 #                                                  call expression (item 9)
 #   handlers     = ":" NEWLINE INDENT { "on" IDENT ":" suite } DEDENT
-#   function     = "fn" IDENT "(" [ paramList ] ")"
+#   function     = { functionModifier } "fn" IDENT "(" [ paramList ] ")"
 #                  [ "->" IDENT ] [ "errors" IDENT { "," IDENT } ] ":" suite
+#   functionModifier = "nomethod"   -- WARNINGS-METHOD-ELIGIBLE.md; contextual
+#                  (below): the function's author declares that it is never
+#                  called with method syntax
 #   paramList    = [ param { "," param } ] [ "," flagSection ] [ "," ]
 #                  -- sections in canonical order: ordinary parameters, then
 #                  flags (ParamSections)
@@ -83,6 +86,16 @@
 # struct declaration (the `structdecl` node's own fields), never a separate
 # declaration kind, so further modifiers extend the table, not the grammar's
 # shape.
+#
+# A function modifier (`nomethod fn atan2(y, x):`) is a contextual word in
+# the same way: it is a modifier only when the words before the `fn` keyword
+# are all function modifier words (AtFunctionDecl), which no other construct
+# allows, so `nomethod` stays an ordinary name everywhere else
+# (`nomethod = 1`, `nomethod(x)`, `x.nomethod`). Like `opaque`, it is a
+# property of the one declaration (the `function` node's own fields), never a
+# separate declaration kind. It states the *function's* interface (it cannot
+# be the callee of method syntax), decided by its author; it is not a
+# directive to the compiler about a particular call.
 #
 # A handled call (EXPLICIT-ERROR-COMPLETIONS.md) is a bare call expression
 # immediately followed by ":" and an indented block of "on NAME:" handlers,
@@ -178,6 +191,10 @@ namespace eval surface::parser {
     # (see the grammar above). Each names one boolean property of the
     # `structdecl` node (`opaque` -> `opaque 0|1`, `opaqueSpan`).
     variable structModifiers {opaque}
+    # The contextual words that may precede `fn` in a function declaration
+    # (see the grammar above). Each names one boolean property of the
+    # `function` node (`nomethod` -> `nomethod 0|1`, `nomethodSpan`).
+    variable functionModifiers {nomethod}
 }
 
 proc surface::parse {source args} {
@@ -423,6 +440,31 @@ proc surface::parser::AtStrayModifier {pVar} {
         && [Kind p 1] in {fn type error}}]
 }
 
+# 1 if the next tokens are function modifiers followed by the `fn` keyword:
+# one or more contextual modifier words (functionModifiers) and then `fn`.
+# Never a valid continuation of an expression, so an ordinary variable called
+# `nomethod` is unaffected.
+proc surface::parser::AtFunctionDecl {pVar} {
+    variable functionModifiers
+    upvar 1 $pVar p
+    set i 0
+    while {[Kind p $i] eq "IDENT" && [dict get [Peek p $i] text] in $functionModifiers} {
+        incr i
+    }
+    return [expr {$i > 0 && [Kind p $i] eq "fn"}]
+}
+
+# 1 if the next tokens are a function modifier word directly followed by the
+# keyword of a declaration it does not modify (`nomethod struct`, `nomethod
+# type`, `nomethod error`): a modifier of nothing.
+proc surface::parser::AtStrayFunctionModifier {pVar} {
+    variable functionModifiers
+    upvar 1 $pVar p
+    set token [Peek p]
+    return [expr {[dict get $token kind] eq "IDENT" && [dict get $token text] in $functionModifiers
+        && [Kind p 1] in {type struct error}}]
+}
+
 # Statements up to a token of a kind in STOP (not consumed).
 proc surface::parser::Statements {pVar stop} {
     upvar 1 $pVar p
@@ -535,6 +577,14 @@ proc surface::parser::Statement {pVar} {
     }
     if {[AtStrayModifier p]} {
         Fail $token "\"[dict get $token text]\" only modifies a struct declaration (\"[dict get $token text] struct NAME:\"), not a \"[Kind p 1]\" declaration"
+    }
+    if {[AtFunctionDecl p]} {
+        # A modifier-led function declaration (`nomethod fn name(...):`);
+        # the plain `fn` form is the keyword case above.
+        return [Function p]
+    }
+    if {[AtStrayFunctionModifier p]} {
+        Fail $token "\"[dict get $token text]\" only modifies a function declaration (\"[dict get $token text] fn NAME(...):\"), not a \"[Kind p 1]\" declaration"
     }
     if {[AtNamespaceDecl p]} {
         Fail $token "namespace declarations do not exist: a file's namespace is its path (lib/abi/x86_64.bot is abi::x86_64), so the file needs no \"namespace\" line"
@@ -874,18 +924,34 @@ proc surface::parser::FnList {pVar field item} {
 }
 
 proc surface::parser::Function {pVar} {
+    variable functionModifiers
     upvar 1 $pVar p
     dict set p allowFunctionResult 1
-    set start [dict get [Advance p] span]
+    set start [dict get [Peek p] span]
+    set modifiers [dict create]
+    while {[Kind p] eq "IDENT"} {
+        set word [Advance p]
+        set text [dict get $word text]
+        if {$text ni $functionModifiers} {
+            Fail $word "expected \"fn\" after the declaration modifiers, found [Describe $word]"
+        }
+        if {[dict exists $modifiers $text]} {
+            Fail $word "duplicate modifier \"$text\" in this function declaration"
+        }
+        dict set modifiers $text [dict get $word span]
+    }
+    Advance p
     set name [Expect p IDENT "a function name after \"fn\""]
     set open [Expect p ( "\"(\" after the function name"]
     lassign [ParamSections p] params flags
     set body [Suite p "the parameter list"]
+    set nomethod [dict exists $modifiers nomethod]
     return [surface::ast::node function [SpanFrom p $start] \
         name [dict get $name value] nameSpan [dict get $name span] \
         params $params flags $flags paramsSpan [SpanFrom p [dict get $open span]] \
         resultType [dict get $body resultType] resultTypeSpan [dict get $body resultTypeSpan] \
-        errors [dict get $body errors] body $body]
+        errors [dict get $body errors] body $body \
+        nomethod $nomethod nomethodSpan [expr {$nomethod ? [dict get $modifiers nomethod] : ""}]]
 }
 
 # The parameter list of a function declaration, after "(", through ")":

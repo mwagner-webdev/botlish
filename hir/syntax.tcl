@@ -21,9 +21,12 @@
 #             see this file's blockNode), flags (optional: {NAME ORIGIN}
 #             pairs, the function's declared flag section in declaration
 #             order -- FLAGS.md; absent or empty for a function without
-#             flags)
+#             flags), nomethod (optional, 1: `nomethod fn`, the function's author
+#             declares that it is never the callee of method syntax --
+#             WARNINGS-METHOD-ELIGIBLE.md; absent for every other block)
 #   call      callee, args, flags (optional: {NAME ORIGIN} pairs, the flags
-#             the call supplies, in written order -- FLAGS.md)
+#             the call supplies, in written order -- FLAGS.md), written
+#             (optional, see below)
 #   if        condition, thenOrigin, thenBody, elseOrigin, elseBody
 #   loop      bodyOrigin, body
 #   listloop  iterable, elementName, elementOrigin, bodyOrigin, body -- the
@@ -69,6 +72,20 @@
 # and ARGS exclude the receiver; hir::resolve::Expr turns it into the
 # ordinary call `name(receiver, args)` when `name` is visible from the call,
 # and otherwise leaves the call of the field value it has always been.
+#
+# Every `call` node a source frontend builds also carries `written FORM`: how
+# the call was spelled, which no later stage can recover once the sugar and
+# the operators are lowered to ordinary calls (WARNINGS-METHOD-ELIGIBLE.md):
+#
+#   function   `f(a, b)`: a call the programmer wrote in functional form
+#   method     `a.f(b)`: method-call sugar (also carries `method 1`)
+#   list       `[a, b]`: a list literal, lowered to a call of `list`
+#   operator   `a + b`, `a == b`, `-a`: an operator, lowered to a call of the
+#              root native of that name (`a != b`'s inner `==` too)
+#
+# A call that came from core IR carries no `written` field. The marker is
+# written in every compilation mode and read by diagnostics only: no analysis,
+# lowering or backend consults it.
 #   return    value
 #   break     value (node or "")
 #   continue
@@ -185,7 +202,8 @@ proc hir::syntax::withFlags {call flags} {
 
 # `receiver.name(args...)` (METHOD-SUGAR.md): a call of the field projection
 # `receiver.name` marked as method-call sugar. NAMEORIGIN locates `name`.
-# The projection's own origin spans the receiver through the name.
+# The projection's own origin spans the receiver through the name. It is
+# written with method sugar (`written method`).
 proc hir::syntax::methodCallNode {origin receiver name nameOrigin args} {
     set projectOrigin $origin
     if {[dict exists $projectOrigin node]} {
@@ -195,9 +213,25 @@ proc hir::syntax::methodCallNode {origin receiver name nameOrigin args} {
     dict set projectOrigin endLine [dict get $nameOrigin endLine]
     dict set projectOrigin endColumn [dict get $nameOrigin endColumn]
     set callee [projectNode $projectOrigin $receiver $name $nameOrigin]
-    set call [callNode $origin $callee {*}$args]
+    set call [withWritten [callNode $origin $callee {*}$args] method]
     dict set call method 1
     return $call
+}
+
+# CALL (a `call` node) marked as written in spelling FORM (function | method
+# | list | operator, see this file's header).
+proc hir::syntax::withWritten {call form} {
+    if {$form ni {function method list operator}} {
+        core::malformed "a call's written form must be function, method, list or operator" [list call $form]
+    }
+    dict set call written $form
+    return $call
+}
+
+# BLOCK (a `block` node) declared `nomethod` by its author.
+proc hir::syntax::withNoMethod {block} {
+    dict set block nomethod 1
+    return $block
 }
 
 proc hir::syntax::ifNode {origin condition thenOrigin thenBody elseOrigin elseBody} {
