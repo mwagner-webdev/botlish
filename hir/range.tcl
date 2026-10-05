@@ -2376,6 +2376,20 @@ proc hir::range::SettleInstance {hir id instanceCalls block params assumed locke
     return [list $outcome $assumed]
 }
 
+# The part of RESULTS (InstanceId -> successful-result summary) that a walk
+# of an instance whose exact-call targets are CALLEES (sorted, distinct) can
+# read: Call reads calleeResults only at a target of the walked instance's
+# own instanceCalls. A target without a summary is listed bare, so "no
+# summary" and every summary differ. Fixpoint and NarrowRounds key their
+# per-instance memos with it.
+proc hir::range::ResultsRead {results callees} {
+    set read {}
+    foreach t $callees {
+        lappend read [expr {[dict exists $results $t] ? [list $t [dict get $results $t]] : [list $t]}]
+    }
+    return $read
+}
+
 # One bounded descending pass over the used instances (M9's post-widen
 # narrowing, and Fixpoint's result narrowing): starting from the sound facts
 # NARROWED (InstanceId -> entry Ranges), CAPTURES (child block ExprId ->
@@ -2395,12 +2409,12 @@ proc hir::range::SettleInstance {hir id instanceCalls block params assumed locke
 #     instance with no summary at all.
 #
 # CTX holds Fixpoint's per-instance tables (ids blockOf paramsOf viewOf
-# instanceCallsOf monotoneOf lockedOf open dormant captureOpt pinned). Returns
-# {CONVERGED NARROWED CAPTURES RESULTS ROUNDS OUTCOMES}: CONVERGED is 1 iff
-# a round changed nothing within ROUNDBUDGET rounds, ROUNDS the rounds run,
-# OUTCOMES the last round's AnalyzeInstance outcomes (computed under the
-# returned facts exactly when CONVERGED). With NARROWRESULTS 0 this is
-# exactly M9's narrowing loop.
+# instanceCallsOf monotoneOf lockedOf open dormant captureOpt pinned
+# calleesOf). Returns {CONVERGED NARROWED CAPTURES RESULTS ROUNDS OUTCOMES}:
+# CONVERGED is 1 iff a round changed nothing within ROUNDBUDGET rounds,
+# ROUNDS the rounds run, OUTCOMES the last round's AnalyzeInstance outcomes
+# (computed under the returned facts exactly when CONVERGED). With
+# NARROWRESULTS 0 this is exactly M9's narrowing loop.
 proc hir::range::NarrowRounds {ctx narrowed captures results narrowResults roundBudget} {
     set ids [dict get $ctx ids]
     set open [dict get $ctx open]
@@ -2410,6 +2424,10 @@ proc hir::range::NarrowRounds {ctx narrowed captures results narrowResults round
     set converged 0
     set rounds 0
     set freshOutcomes [dict create]
+    # InstanceId -> {KEY OUTCOME}: Fixpoint's SETTLEMEMO, for the single
+    # AnalyzeInstance a round makes here (same argument: a round whose
+    # inputs for ID equal the last walk's reuses its outcome).
+    set memo [dict create]
     for {set round 1} {$round <= $roundBudget} {incr round} {
         set rounds $round
         set changed 0
@@ -2419,9 +2437,15 @@ proc hir::range::NarrowRounds {ctx narrowed captures results narrowResults round
         foreach id $ids {
             set block [dict get $ctx blockOf $id]
             set captureSeed [expr {$captureOpt && [dict exists $captures $block] ? [dict get $captures $block] : {}}]
-            set outcome [AnalyzeInstance [dict get $ctx viewOf $id] $id [dict get $ctx instanceCallsOf $id] \
-                $block [dict get $ctx paramsOf $id] [dict get $narrowed $id] \
-                [dict get $ctx monotoneOf $id] $results $captureSeed]
+            set key [list [dict get $narrowed $id] $captureSeed [ResultsRead $results [dict get $ctx calleesOf $id]]]
+            if {[dict exists $memo $id] && [lindex [dict get $memo $id] 0] eq $key} {
+                set outcome [lindex [dict get $memo $id] 1]
+            } else {
+                set outcome [AnalyzeInstance [dict get $ctx viewOf $id] $id [dict get $ctx instanceCallsOf $id] \
+                    $block [dict get $ctx paramsOf $id] [dict get $narrowed $id] \
+                    [dict get $ctx monotoneOf $id] $results $captureSeed]
+                dict set memo $id [list $key $outcome]
+            }
             dict set freshOutcomes $id $outcome
             set evidence [expr {![dict exists $dormant $id]}]
             foreach pair [expr {$evidence ? [dict get $outcome calls] : {}}] {
@@ -2672,6 +2696,24 @@ proc hir::range::Fixpoint {hir spec callFactsOpt narrowOpt captureOpt pinned} {
     foreach id $ids {
         dict set selfRecursiveOf $id [expr {$id in [dict values [dict get $instanceCallsOf $id]]}]
     }
+    # The instances whose result summaries ID's walk reads (ResultsRead).
+    set calleesOf [dict create]
+    foreach id $ids {
+        dict set calleesOf $id [lsort -unique [dict values [dict get $instanceCallsOf $id]]]
+    }
+    # InstanceId -> {KEY {OUTCOME SETTLED}}: the inputs of ID's last
+    # SettleInstance and what it returned. SettleInstance is a pure function
+    # of its inputs, and within this proc only three of them change between
+    # rounds -- the entry Ranges, the capture seed and the callee summaries
+    # (of which a walk reads only its own targets' entries: ResultsRead) --
+    # so a round whose KEY for ID equals the last one reuses the answer
+    # instead of re-walking ID. Every round still folds every instance's
+    # outcome, so the rounds, and every fact they produce, are exactly those
+    # of re-settling every instance every round; only the walks that would
+    # repeat an earlier one are skipped. Without this, a call chain of depth
+    # N (N rounds for a fact to travel its length) re-walked all N instances
+    # every round: quadratic in program size.
+    set settleMemo [dict create]
 
     # A bound on rounds that scales with the instance count (a chain of N
     # instances can need up to N rounds for its first real value to
@@ -2687,9 +2729,16 @@ proc hir::range::Fixpoint {hir spec callFactsOpt narrowOpt captureOpt pinned} {
             set before [dict get $assumed $id]
             set block [dict get $blockOf $id]
             set captureSeed [expr {$captureOpt && [dict exists $captureSeeds $block] ? [dict get $captureSeeds $block] : {}}]
-            lassign [SettleInstance [dict get $viewOf $id] $id [dict get $instanceCallsOf $id] \
-                $block [dict get $paramsOf $id] $before \
-                [dict get $lockedOf $id] [dict get $monotoneOf $id] $calleeResults $captureSeed] outcome settled
+            set key [list $before $captureSeed [ResultsRead $calleeResults [dict get $calleesOf $id]]]
+            if {[dict exists $settleMemo $id] && [lindex [dict get $settleMemo $id] 0] eq $key} {
+                lassign [lindex [dict get $settleMemo $id] 1] outcome settled
+            } else {
+                set answer [SettleInstance [dict get $viewOf $id] $id [dict get $instanceCallsOf $id] \
+                    $block [dict get $paramsOf $id] $before \
+                    [dict get $lockedOf $id] [dict get $monotoneOf $id] $calleeResults $captureSeed]
+                dict set settleMemo $id [list $key $answer]
+                lassign $answer outcome settled
+            }
             dict set outcomes $id $outcome
             set evidence [expr {![dict exists $dormant $id]}]
             foreach pair [expr {$evidence ? [dict get $outcome creates] : {}}] {
@@ -2894,7 +2943,7 @@ proc hir::range::Fixpoint {hir spec callFactsOpt narrowOpt captureOpt pinned} {
     # round budget expired.
     set narrowCtx [dict create ids $ids blockOf $blockOf paramsOf $paramsOf viewOf $viewOf \
         instanceCallsOf $instanceCallsOf monotoneOf $monotoneOf lockedOf $lockedOf open $open \
-        dormant $dormant captureOpt $captureOpt pinned $pinned]
+        dormant $dormant captureOpt $captureOpt pinned $pinned calleesOf $calleesOf]
     set narrowed $assumed
     set narrowedCaptures $captureSeeds
     if {$narrowOpt} {
