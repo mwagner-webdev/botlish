@@ -423,9 +423,13 @@ eligible call is respelled (last first, so a call is respelled before the
 calls its receiver contains), recompiling after each step: **0 warnings left
 and the original's NIR in all 23**, 443 steps in all. Any failure would be a
 warning-design bug; there were none after the receiver rule and the
-hygiene-aware lookup described above (the first audit run exposed that
+hygiene-aware lookup described above (an early experiment exposed that
 hygiene's qualified module spellings hid every module function from the
-lookup -- silence, never a false warning -- which `ResolutionView` fixed).
+lookup -- silence, never a false warning -- which `ResolutionView` fixed; the
+first corpus audit then also showed that comparing a program's HIR text with
+one compiled long before is not valid, because the declared-error and struct
+registries are process-global, so every baseline is compiled right before its
+respelling).
 
 Library findings print for every program that loads the library (see Known
 limitations): `lib/web.bot`'s 20 findings, `lib/byte.bot`'s 11 and
@@ -635,7 +639,42 @@ findings with the audit's patterns, and mark the `nomethod` candidates above
 
 ## Full regression
 
-@@REGRESSION@@
+`tests/all.tcl` on both Tcl backends with the harness default policy
+(`BOTLISH_WARNINGS=off`), against a suite of **5545 tests before this
+milestone** (counted on the tree before any test was added), then the native
+coverage run, all on the committed tree:
+
+* **`interp`: 5690 tests, 0 failed. `compile`: 5690 tests, 5686 passed, 4
+  skipped (the existing `coreScoping` constraint), 0 failed.** 145 new tests,
+  all in `tests/method-eligible.test` (5690 - 5545); no other test file was
+  added to. The two backends ran as parallel processes, each in its own copy of
+  the tree: milestone 1 found that two processes share fixed-name scratch files
+  in `tests/`, and copies avoid that collision, so there is nothing to explain
+  away this time.
+* `tests/method-eligible.test` passes 145/145 and `tests/warnings.test` 81/81
+  (with the four adapted tests, below) on `interp`, `compile`,
+  `cranelift-generic` and `cranelift`.
+* `tests/native-coverage.tcl` (the suite on `cranelift`, as CI's native job):
+  5724 tests, **0 failed** (2373 native, 3221 independent of the backend, 70
+  passed-partial, 60 unsupported for the constructs it already classifies).
+* An earlier full `interp` run, made after the warning was registered but before
+  the milestone-1 tests were adapted, failed exactly five tests, all in
+  `tests/warnings.test` (the stats shape, three tests importing
+  `mutable_array`, and the fuzz smoke run): they are the "Deviations from the
+  brief" above, and nothing else in 5545 tests failed.
+* CI's plain example steps (`main.tcl -backend interp`, `-backend compile`, and
+  `-backend cranelift` over the corpus, surface and HIR samples) exit 0. The
+  Tcl-backend steps run the core IR examples and print nothing on stderr; the
+  cranelift step over the source corpus prints 305 lines of warnings on stderr
+  (301 `METHOD-ELIGIBLE`, 2 `SAME-RETURN-VALUE`, and their notes) and still
+  exits 0. Benchmarks and analysis scripts already pass `-warnings off`.
+* The milestone-1 fuzzer (`audit/same-return-value/tools/fuzz.tcl`, adapted)
+  passes 300 seeds; this milestone's fuzzer passes its 2000 seeds again on the
+  committed tree (1387 with warnings, 613 without; 0 failures, 0 extras, 9795
+  of 9795 round trips); the corpus audit is unchanged by the final tree.
+* The GC-stress job (`BOTLISH_NATIVE_GC_STRESS=1`, CI, push to `main` only) was
+  not run locally: nothing under `native/` changed, and the marker and the flag
+  are invisible to native lowering.
 
 ## Required questions
 
@@ -735,10 +774,10 @@ findings with the audit's patterns, and mark the `nomethod` candidates above
     config object; 74 one-parameter callees (246 call sites) excluded; `nomethod`
     candidates `mutable_array::copy`, `bit_and`, `bit_or`, `bit_xor`.
 40. *False positives (round-trip failures)?* Zero.
-41. *Warning-mode tests pass?* @@Q41@@
+41. *Warning-mode tests pass?* Yes: `tests/method-eligible.test` 145/145 and `tests/warnings.test` 81/81 on each of `interp`, `compile`, `cranelift-generic` and `cranelift` (`tests/warnings.test` with the adaptations listed under "Deviations from the brief").
 42. *Fuzzer results?* 2000 seeds, 1387 with warnings and 613 without: 0
     failures, 0 missed constructed sites, 0 extra warnings, 9795 of 9795
     round trips; 8 of 8 mutants killed.
 43. *Backend parity?* Identical sets on all four backends, in process and
     through `main.tcl` over `examples/stdlib` (pinned).
-44. *Full regression?* @@Q44@@
+44. *Full regression?* Yes: `interp` 5690 tests and `compile` 5690 (4 skipped, existing) with 0 failures, native coverage 5724 tests with 0 failed; 145 new tests; the only failures seen at any point were the five milestone-1 `tests/warnings.test` cases adapted above (see "Full regression").
