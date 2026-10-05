@@ -1157,7 +1157,18 @@ namespace eval native::lower {
 #   statistics  {functions N generic N specialized N blockers N guards N
 #               perFunction {NAME {generic 0|1 specializations N} ...}}
 #   specialization  the hir::specialize analysis
+#
+# Every analysis Program composes and lowering itself share one view per
+# instance (hir::specialize::memoizeViews), released here however it ends.
 proc native::lower::program {hirProgram args} {
+    try {
+        return [Program $hirProgram {*}$args]
+    } finally {
+        hir::specialize::forgetViews
+    }
+}
+
+proc native::lower::Program {hirProgram args} {
     variable hir
     variable baseHir
     variable spec
@@ -1343,6 +1354,7 @@ proc native::lower::program {hirProgram args} {
         -closed-caller-facts-opt [dict get $options -closed-caller-facts-opt] \
         -exact-callable-opt [dict get $options -exact-callable-opt] \
         -exact-callable-limit [dict get $options -exact-callable-limit]]
+    hir::specialize::memoizeViews $hirProgram $spec
     set ranges [hir::range::analyze $hirProgram $spec [dict get $options -call-facts-opt] 1 1 \
         [dict get $options -recursive-result-range-opt] [dict get $options -recursive-range-limit]]
     # The raw Int ABI plan runs strictly after the closedness and Range

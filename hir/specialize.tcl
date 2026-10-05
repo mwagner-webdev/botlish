@@ -208,6 +208,12 @@ namespace eval hir::specialize {
     # value-capturing closure with a non-Int capture keeps only exact
     # callable key positions, not Int ones).
     variable closureIntKeyOpt 1
+    # The view memo (memoizeViews): whether one is active, the HIR and
+    # analysis it serves, and InstanceId -> view.
+    variable memoActive 0
+    variable memoHir {}
+    variable memoAnalysis {}
+    variable memoViews {}
 }
 
 proc hir::specialize::analyze {hir args} {
@@ -1867,7 +1873,68 @@ proc hir::specialize::genericInstance {hir analysis block} {
 # The HIR as instance ID sees it: the semantic HIR with the instance's
 # overlay applied to its region, its parameters' binding types set to its
 # key types and its block's result type to the instance's result.
+#
+# Building a view costs O(program): its first `dict set` copies HIR's whole
+# exprs table (bindings too, and types and typeIds when intern adds a form).
+# Between memoizeViews and forgetViews it is built once per instance.
 proc hir::specialize::view {hir analysis id} {
+    variable memoActive
+    if {$memoActive} {
+        variable memoHir
+        variable memoAnalysis
+        variable memoViews
+        # O(1) when they are the memoized objects themselves (how the memo's
+        # owner passes them down): `eq` of an object with itself compares
+        # no strings.
+        if {$hir eq $memoHir && $analysis eq $memoAnalysis} {
+            if {![dict exists $memoViews $id]} {
+                dict set memoViews $id [View $hir $analysis $id]
+            }
+            return [dict get $memoViews $id]
+        }
+    }
+    return [View $hir $analysis $id]
+}
+
+# Memoizes view for HIR and ANALYSIS until forgetViews: view then returns one
+# value per instance of ANALYSIS, built on first use. It is the value view
+# would build anyway (view is a function of its arguments), so every consumer
+# sees the same expressions and TypeIds as before: a view's TypeIds index its
+# own types table, and a consumer that interns into, or otherwise changes,
+# its view changes only its own copy.
+#
+# Native lowering (native::lower::program) memoizes its program's views: it
+# and the analyses it composes ask for each used instance's view a dozen
+# times or more. A view of any other HIR or analysis is still built as before
+# meanwhile, but telling the two apart costs a string comparison (`eq` is
+# O(1) only for the very same object), so keep the memo to code that passes
+# the memoized values down unchanged. There is one memo: memoizing again
+# replaces it.
+proc hir::specialize::memoizeViews {hir analysis} {
+    variable memoActive
+    variable memoHir
+    variable memoAnalysis
+    variable memoViews
+    set memoActive 1
+    set memoHir $hir
+    set memoAnalysis $analysis
+    set memoViews [dict create]
+}
+
+# Ends the view memo (memoizeViews), if any, and releases its views.
+proc hir::specialize::forgetViews {} {
+    variable memoActive
+    variable memoHir
+    variable memoAnalysis
+    variable memoViews
+    set memoActive 0
+    set memoHir {}
+    set memoAnalysis {}
+    set memoViews {}
+}
+
+# view itself, without the memo.
+proc hir::specialize::View {hir analysis id} {
     set instance [dict get $analysis instances $id]
     set overlay [dict get $instance overlay]
     if {![dict get $analysis specialize]} {

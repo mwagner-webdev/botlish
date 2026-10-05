@@ -2458,7 +2458,9 @@ again. Mutual recursion (`even<int>` ↔ `odd<int>`) and cycles (`a → b → c
 The analysis never changes the HIR. Its output is an *overlay* per
 instance: the type, known outcome and reachability of each of the region's
 expressions that differ from the semantic HIR. `hir::specialize::view`
-applies an overlay to a copy of the HIR.
+applies an overlay to a copy of the HIR. Native lowering memoizes them
+(`hir::specialize::memoizeViews`): the analyses it composes and lowering
+itself share one view per instance.
 
 ### Aggregate facts
 

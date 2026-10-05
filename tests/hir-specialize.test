@@ -355,4 +355,62 @@ test hir-specialize-m1-exact-call-propagation {a generic caller's own restored d
          }]]
 } -result {{cls<int> cls<generic>} ascii::is_alphanumeric<int> ascii::is_digit<int> ascii::is_alphanumeric<int>}
 
+
+# ---------------------------------------------------------------------------
+# View memo (hir::specialize::memoizeViews)
+
+test hir-specialize-view-memo {under memoizeViews, view returns for every used instance the value it builds without the memo; a view of another HIR is that HIR's own} -body {
+    lassign [specOf "fn inc(x):\n    x + 1\n\nfn wrap(x):\n    \[x\]\n\n\[inc(1), wrap(\"a\"), wrap(2)\]"] hir analysis
+    lassign [specOf "fn dec(x):\n    x - 1\n\ndec(1)"] other otherAnalysis
+    set plain [lmap id [dict get $analysis used] {hir::specialize::view $hir $analysis $id}]
+    set otherPlain [hir::specialize::view $other $otherAnalysis i0]
+    hir::specialize::memoizeViews $hir $analysis
+    try {
+        set memo [lmap id [dict get $analysis used] {hir::specialize::view $hir $analysis $id}]
+        set again [lmap id [dict get $analysis used] {hir::specialize::view $hir $analysis $id}]
+        set otherMemo [hir::specialize::view $other $otherAnalysis i0]
+    } finally {
+        hir::specialize::forgetViews
+    }
+    list [llength $plain] [expr {$memo eq $plain}] [expr {$again eq $plain}] \
+        [expr {$otherMemo eq $otherPlain}] [expr {$otherMemo ne [lindex $memo 0]}] \
+        $hir::specialize::memoActive [dict size $hir::specialize::memoViews]
+} -result {4 1 1 1 1 0 0}
+
+test hir-specialize-view-memo-lowering {native lowering builds each used instance's view once, for all the analyses it composes and itself} -body {
+    set hir [surface::readProgramFile [file join $::projectRoot examples stdlib csv_records.bot]]
+    set ::viewBuilds [dict create]
+    set trace {apply {{command args} {
+        if {$hir::specialize::memoActive} { dict incr ::viewBuilds [lindex $command 3] }
+    }}}
+    trace add execution hir::specialize::View enter $trace
+    try {
+        set used [dict get [native::lowered $hir] specialization used]
+    } finally {
+        trace remove execution hir::specialize::View enter $trace
+    }
+    set builds $::viewBuilds
+    unset ::viewBuilds
+    list [expr {[llength $used] > 20}] [lsort -unique [dict values $builds]] \
+        [expr {[lsort [dict keys $builds]] eq [lsort $used]}] $hir::specialize::memoActive
+} -result {1 1 1 0}
+
+test hir-specialize-view-memo-released {native lowering releases its view memo however it ends} -body {
+    set hir [native::prepareHir [surface::compile "fn inc(x):\n    x + 1\n\ninc(1)" t.bot -strict 0]]
+    set trace {apply {{args} {
+        set ::memoWhenFailed [list $hir::specialize::memoActive [dict size $hir::specialize::memoViews]]
+        error "range analysis failed"
+    }}}
+    trace add execution hir::range::analyze enter $trace
+    try {
+        set failed [catch {native::lower::program $hir} message]
+    } finally {
+        trace remove execution hir::range::analyze enter $trace
+    }
+    set result [list $failed $message $::memoWhenFailed \
+        $hir::specialize::memoActive [dict size $hir::specialize::memoViews]]
+    unset ::memoWhenFailed
+    set result
+} -result {1 {range analysis failed} {1 0} 0 0}
+
 cleanupTests
