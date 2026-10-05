@@ -255,10 +255,9 @@ foreach m $mutations {
     copyTree $dir [expr {$kind eq "rust"}]
     replaceOnce [file join $dir $file] $old $new
     if {[dict exists $::extraLibrary $name]} {
-        set channel [open [file join $dir $file] a]
-        fconfigure $channel -encoding utf-8
-        puts -nonewline $channel [dict get $::extraLibrary $name]
-        close $channel
+        # (placed before `struct ReadResult:`, so before its use: the language
+        # has no forward references)
+        replaceOnce [file join $dir $file] "struct ReadResult:" "[dict get $::extraLibrary $name]\nstruct ReadResult:"
     }
     if {$kind eq "rust"} {
         puts "== $name: rebuilding the native backend"
@@ -281,11 +280,12 @@ foreach m $mutations {
             catch {exec [info nameofexecutable] [file join $dir main.tcl] -backend cranelift [file join $dir examples linux read-stdin.bot] 2>@1} probe
         }
     }
-    if {[string match "*   error:*" $probe]} {
+    if {[regexp {   error: \S+\.bot:[0-9]+:[0-9]+:} $probe]} {
         set shown {}
         foreach line [split $probe \n] {
             if {[string match "*   error:*" $line]} { lappend shown [string trim $line] }
         }
+        # (a RUN-TIME error of the example is not a compile error: such a mutant is valid and expected to be killed)
         puts "   INVALID MUTANT (does not compile): $name: [string range [join $shown { | }] 0 400]"
         lappend survivors "$name (invalid: does not compile)"
         file delete -force $dir
