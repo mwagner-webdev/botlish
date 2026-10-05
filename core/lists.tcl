@@ -30,7 +30,7 @@ proc core::lists::Items {v name} {
 }
 
 proc core::lists::length {l} {
-    return [core::value::int [llength [Items $l list::length]]]
+    return [core::value::intFromNumber [llength [Items $l list::length]]]
 }
 
 # (list::at LIST INDEX): the element at INDEX, 0 <= INDEX < length; any

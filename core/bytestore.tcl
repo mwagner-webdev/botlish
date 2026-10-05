@@ -167,7 +167,7 @@ proc core::bytestore::fromList {l} {
 
 proc core::bytestore::length {storage} {
     core::value::expect bytestore $storage byte_store::byte_count
-    return [core::value::int [core::value::bytestoreLength $storage]]
+    return [core::value::intFromNumber [core::value::bytestoreLength $storage]]
 }
 
 proc core::bytestore::addressImpl {data} {
@@ -227,7 +227,7 @@ proc core::bytestore::mutableFrom {storage} {
 
 proc core::bytestore::mutableCount {m} {
     MutableOperand $m mutable_byte_store::count
-    return [core::value::int [core::value::mutbytesLength $m]]
+    return [core::value::intFromNumber [core::value::mutbytesLength $m]]
 }
 
 # The storage M with byte INDEX replaced by BYTE. The index must designate a

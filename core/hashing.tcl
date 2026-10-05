@@ -221,7 +221,7 @@ proc core::hashing::hash {v} {
     variable FnvOffset
     variable Mask61
     set h [Mix $FnvOffset $v]
-    return [core::value::int [expr {$h & $Mask61}]]
+    return [core::value::intFromNumber [expr {$h & $Mask61}]]
 }
 
 core::native::register hash -arity 1 -impl core::hashing::hash \

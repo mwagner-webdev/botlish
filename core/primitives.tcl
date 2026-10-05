@@ -1,8 +1,10 @@
 # primitives.tcl -- native arithmetic, comparison and equality.
 #
 # Integer operations use Tcl's arbitrary-precision integers. Operands are
-# always canonical decimal text (guaranteed by value.tcl), so no Tcl numeric
-# parsing quirks (octal, whitespace, floats) can apply.
+# always canonical decimal text or integers Tcl computed (guaranteed by
+# value.tcl's `int` and `intFromNumber`), so no Tcl numeric parsing quirks
+# (octal, whitespace, floats) can apply. Integer results are built with
+# intFromNumber: they stay Tcl numbers, never turned into text here.
 
 namespace eval core::primitives {}
 
@@ -16,17 +18,17 @@ proc core::primitives::Ints {name args} {
 
 proc core::primitives::add {a b} {
     lassign [Ints + $a $b] x y
-    return [core::value::int [expr {$x + $y}]]
+    return [core::value::intFromNumber [expr {$x + $y}]]
 }
 
 proc core::primitives::subtract {a b} {
     lassign [Ints - $a $b] x y
-    return [core::value::int [expr {$x - $y}]]
+    return [core::value::intFromNumber [expr {$x - $y}]]
 }
 
 proc core::primitives::multiply {a b} {
     lassign [Ints * $a $b] x y
-    return [core::value::int [expr {$x * $y}]]
+    return [core::value::intFromNumber [expr {$x * $y}]]
 }
 
 proc core::primitives::less {a b} {
@@ -62,7 +64,7 @@ proc core::primitives::modulo {a b} {
     if {$r < 0} {
         set r [expr {$r + abs($y)}]
     }
-    return [core::value::int $r]
+    return [core::value::intFromNumber $r]
 }
 
 proc core::primitives::valueEqual {a b} {

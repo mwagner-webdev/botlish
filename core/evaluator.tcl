@@ -263,7 +263,7 @@ proc core::forms::op-countloop {node env} {
     set results {}
     while {[$holds $i $end]} {
         set iterationEnv [core::env::child $env]
-        core::env::define $iterationEnv $param [core::value::int $i]
+        core::env::define $iterationEnv $param [core::value::intFromNumber $i]
         core::env::declare $iterationEnv [core::ir::scopeBindNames $body]
         try {
             set completion [core::interp::evalSequence $body $iterationEnv]
@@ -368,7 +368,7 @@ proc core::forms::op-lockloop {node env} {
                 core::env::define $iterationEnv $param [lindex [lindex $domain 1] $k]
             } else {
                 core::env::define $iterationEnv $param \
-                    [core::value::int [expr {[lindex $domain 1] + $k * [lindex $domain 2]}]]
+                    [core::value::intFromNumber [expr {[lindex $domain 1] + $k * [lindex $domain 2]}]]
             }
         }
         core::env::declare $iterationEnv [core::ir::scopeBindNames $body]

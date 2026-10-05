@@ -23,7 +23,7 @@ proc core::strings::Text {v name} {
 }
 
 proc core::strings::length {s} {
-    return [core::value::int [string length [Text $s str::length]]]
+    return [core::value::intFromNumber [string length [Text $s str::length]]]
 }
 
 # (str::substring S START END): the characters at START <= i < END, a slice
@@ -70,7 +70,7 @@ proc core::strings::encodeUtf8 {s} {
     set bytes {}
     foreach byte [split [encoding convertto utf-8 $text] ""] {
         scan $byte %c code
-        lappend bytes [core::value::int $code]
+        lappend bytes [core::value::intFromNumber $code]
     }
     return [core::value::listOf $bytes]
 }

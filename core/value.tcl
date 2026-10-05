@@ -132,6 +132,20 @@ proc core::value::int {digits} {
     return [list int $digits]
 }
 
+# The Int whose value is N, an integer Tcl itself computed -- an integer
+# `expr` result on Ints' own payloads (or such a payload itself), or a count
+# such as `llength` or `string length` returns -- never text from a program
+# or other input (that goes through `int`). Tcl renders every integer it
+# computes in canonical decimal, so N is not validated. That is the point:
+# isCanonicalInt's regexp would make Tcl generate the decimal string of a
+# bignum (quadratic in its digits: about 50 s for 2^1048576 in Tcl 9.0.1)
+# and then replace its bignum internal representation by a string one,
+# which the next arithmetic on it has to parse back. Kept unvalidated, a
+# computed Int stays a number until something needs its text.
+proc core::value::intFromNumber {n} {
+    return [list int $n]
+}
+
 proc core::value::str {text} {
     return [list str $text]
 }

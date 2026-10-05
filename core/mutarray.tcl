@@ -65,7 +65,7 @@ proc core::mutarray::Slots {v name} {
 proc core::mutarray::capacity {v} {
     variable store
     set id [Slots $v mutable_array::capacity]
-    return [core::value::int [llength [dict get $store $id]]]
+    return [core::value::intFromNumber [llength [dict get $store $id]]]
 }
 
 # (mutable_array::at ARRAY INDEX): the element at INDEX, 0 <= INDEX <

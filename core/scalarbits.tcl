@@ -103,17 +103,17 @@ namespace eval core::scalarbits {
 
 proc core::scalarbits::bitAnd {a b} {
     lassign [core::primitives::Ints bit_and $a $b] x y
-    return [core::value::int [expr {$x & $y}]]
+    return [core::value::intFromNumber [expr {$x & $y}]]
 }
 
 proc core::scalarbits::bitOr {a b} {
     lassign [core::primitives::Ints bit_or $a $b] x y
-    return [core::value::int [expr {$x | $y}]]
+    return [core::value::intFromNumber [expr {$x | $y}]]
 }
 
 proc core::scalarbits::bitXor {a b} {
     lassign [core::primitives::Ints bit_xor $a $b] x y
-    return [core::value::int [expr {$x ^ $y}]]
+    return [core::value::intFromNumber [expr {$x ^ $y}]]
 }
 
 # The nonnegative shift amount of raw Tcl int K, or a RANGE error: shared by
@@ -129,13 +129,13 @@ proc core::scalarbits::CheckShiftAmount {k} {
 proc core::scalarbits::shiftLeft {a b} {
     lassign [core::primitives::Ints shift_left $a $b] x k
     CheckShiftAmount $k
-    return [core::value::int [expr {$x << $k}]]
+    return [core::value::intFromNumber [expr {$x << $k}]]
 }
 
 proc core::scalarbits::shiftRight {a b} {
     lassign [core::primitives::Ints shift_right $a $b] x k
     CheckShiftAmount $k
-    return [core::value::int [expr {$x >> $k}]]
+    return [core::value::intFromNumber [expr {$x >> $k}]]
 }
 
 foreach {name impl} {

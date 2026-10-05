@@ -67,4 +67,48 @@ test scalarbits-bitwise-differential {bitwise ops agree between interp and compi
     }
 } -result same
 
+# ---------------------------------------------------------------------------
+# Computed Ints stay Tcl numbers (core::value::intFromNumber).
+#
+# Validating an operation's integer result as canonical decimal text made Tcl
+# generate the decimal string of every bignum result -- quadratic in its
+# digits, about 50 s for 2^1048576 on Tcl 9.0.1 -- and replace its bignum
+# representation by a string one the next operation had to parse back:
+# tests/native-bitshift.test's bitshift-shift-count-max-shift-boundary took
+# minutes on interp/compile for that alone. Pinned deterministically, not by
+# timing: the payload of a large Int each Tcl backend computes is still a
+# bignum with no string representation.
+
+# {TYPE STRING?} of Int V's payload: its Tcl internal representation's type
+# and whether it has a string representation.
+proc PayloadRep {v} {
+    set rep [tcl::unsupported::representation [core::value::intOf $v]]
+    regexp {^value is an? (\S+) with} $rep -> type
+    return [list $type [expr {![string match {*no string representation*} $rep]}]]
+}
+
+test scalarbits-computed-int-stays-number {a large Int computed by shift/bitwise/arithmetic primitives keeps its bignum payload, never turned into decimal text, on interp and compile} -body {
+    set big {call {ref shift_left} {const 1} {const 4096}}
+    set saved [core::useBackend]
+    try {
+        lmap backend {interp compile} {
+            core::useBackend $backend
+            lmap e [list $big \
+                    [list call {ref shift_right} [list call {ref *} $big $big] {const 7}] \
+                    [list call {ref bit_and} $big {const -1}] \
+                    [list call {ref bit_or} $big {const 1}] \
+                    [list call {ref bit_xor} $big {const 1}] \
+                    [list call {ref +} $big {const 1}] \
+                    [list call {ref -} {const 0} $big] \
+                    [list call {ref *} $big {const 3}] \
+                    [list call {ref mod} [list call {ref *} $big {const 3}] \
+                        {call {ref shift_left} {const 1} {const 4097}}]] {
+                PayloadRep [runValue $e]
+            }
+        }
+    } finally {
+        core::useBackend $saved
+    }
+} -result [lrepeat 2 [lrepeat 9 {bignum 0}]]
+
 cleanupTests
