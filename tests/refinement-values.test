@@ -1289,26 +1289,14 @@ test refinement-old-mechanism-gone {no runtime evidence, opaque named types, nat
 
 # Mutation of the source declarations (item 57): the facts come from them.
 proc withWebVariant {transform script} {
-    set saved $::core::libraryDir
-    set dir [tcltest::makeDirectory refinement-values-web-[pid]-[incr ::refinementLibCounter]]
-    try {
-        foreach path [glob -directory $saved *.bot] {
-            file copy $path $dir
-        }
-        foreach sub {abi linux} {
-            file copy [file join $saved $sub] [file join $dir $sub]
-        }
-        set web [file join $dir web.bot]
+    withPrivateLibrary {
+        set web [file join $::core::libraryDir web.bot]
         set text [core::ReadFile $web]
         set channel [open $web w]
         fconfigure $channel -encoding utf-8
         puts -nonewline $channel [{*}$transform $text]
         close $channel
-        set ::core::libraryDir $dir
         uplevel 1 $script
-    } finally {
-        set ::core::libraryDir $saved
-        tcltest::removeDirectory [file tail $dir]
     }
 }
 

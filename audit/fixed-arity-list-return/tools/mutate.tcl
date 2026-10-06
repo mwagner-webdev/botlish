@@ -100,7 +100,7 @@ foreach mutant $mutants {
     if {![info exists failures] || $failures > 0 || $extras > 0} {
         set status "killed by fuzz ($summary)"
     } else {
-        set unit [catch {exec [info nameofexecutable] [file join $tree tests fixed-arity-list-return.test] 2>@1} unitOut]
+        set unit [catch {exec [info nameofexecutable] [file join $tree tests fixed-arity-list-return.test] -tmpdir [file join $tree tcltest] 2>@1} unitOut]
         regexp {Total\t([0-9]+)\tPassed\t([0-9]+)\tSkipped\t([0-9]+)\tFailed\t([0-9]+)} $unitOut -> total passed skipped unitFailed
         if {[info exists unitFailed] && $unitFailed > 0} {
             set status "killed by unit tests ($unitFailed failing of $total; fuzz saw: $summary)"

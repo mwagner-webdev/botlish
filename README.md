@@ -2306,22 +2306,24 @@ the builtin natives of §8 (root primitives and standard intrinsics).
 ### Coverage
 
 `tests/native-coverage.tcl` runs the whole suite with
-`CORE_BACKEND=cranelift` and puts every test in exactly one class. With
-`BOTLISH_NATIVE_SPECIALIZE=0` (no specialization, §21) the classification
-is identical:
+`CORE_BACKEND=cranelift` and puts every test in exactly one class. When the
+backend was introduced (757 tests predated it) the classes were 171 native,
+541 independent and 45 unsupported, with none failed. With refinement values
+(REFINEMENT-VALUES.md) the suite has 5,991 tests:
 
-| Class | Tests | Of the 757 tests that predate the backend | Meaning |
-|---|---:|---:|---|
-| native | 218 | 171 | passed, ran native code |
-| independent | 566 | 541 | passed without running a program on the backend (frontend, HIR, analysis) |
-| passed-partial | 3 | 0 | passed; checks an unsupported-construct diagnostic on purpose |
-| unsupported | 45 | 45 | needs a construct listed above |
-| failed | 0 | 0 | anything else |
+| Class | Tests | Meaning |
+|---|---:|---|
+| native | 2,424 | passed, ran native code |
+| independent | 3,440 | passed without running a program on the backend (frontend, HIR, analysis) |
+| passed-partial | 67 | passed; checks an unsupported-construct diagnostic, or compares another backend, on purpose |
+| unsupported | 60 | needs a construct listed above |
+| failed | 0 | anything else |
 
-The 45 unsupported tests need: a Block returned to the host (12), sequence
-mode (7), `test-log`/`test_log` (8), `test-tick`/`test_tick` (6), `web`
-library natives and evidence (9), and the test natives `test-fake-escape`,
-`test-lax-param` and `test-both-ints?` (3).
+The 60 unsupported tests need: a Block value returned to the host (13),
+`test-log`/`test_log` (19), `test-tick`/`test_tick` (12), sequence mode (7),
+the Tcl-registered test validator `NonEmpty?` and the test natives
+`test-fake-nonempty`, `test-both-ints?` (7), and a native's validator
+named-type contract (`test-lax-param`, 2).
 `tests/native.test` (55 tests) checks lowering and CLIF structure, and
 parity of interp, compile, cranelift-generic and cranelift on arithmetic at
 the small/big boundaries, guards, every error class, strings, lists,

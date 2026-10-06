@@ -699,9 +699,12 @@ facts keyed by predicate and alias root, implications through Boolean
 bindings and the `not`/`and`/`or` lowering, and the intersection at joins.
 For each program it predicts acceptance (a rejection must be a compile-time
 `TYPE` error), the `known` of every predicate call in order, and the value,
-which every backend must compute. Four seeds × 600 programs: 1,791 accepted,
-609 rejected, 3,166 predicate calls in accepted programs of which 260 decided
-(true and false), **0 failures**.
+which every backend must compute. Nested branches may also shadow `a` or
+`b` with another value, so a fact keyed by spelling is caught, and the
+prelude's `need3` forgets its `R3` to `R1` through a call, so the chain is
+exercised. Four seeds × 600 programs: 1,794 accepted, 606 rejected, 3,093
+predicate calls in accepted programs of which 264 decided (true and false),
+**0 failures**.
 
 **Mutation testing.** 31 mutants of the compiler, each run against
 `tests/refinement-values.test` + `tests/emailish-predicate.test` (both
@@ -779,7 +782,62 @@ Notes, honestly:
 
 ## Regression
 
-PENDING
+The whole suite (`tests/all.tcl`, 144 files: types, source-defined types and
+`import type`, opaque structs, method sugar and METHOD-ELIGIBLE, callable
+values and structural function types, range and completion proofs, ABI
+numerics, Bytes, MutableBytes, contexts, Linux I/O, semantic instances and
+imprinting, HIR samples and round trips, the native backend's own files).
+
+On the final tree (this milestone merged with `main`, which meanwhile fixed
+the warning tests that had failed on both trees):
+
+| run | tests | failed |
+|---|---:|---:|
+| `CORE_BACKEND=interp` | 5,991 | 0 |
+| `CORE_BACKEND=compile` | 5,991 | 0 |
+| `tests/native-coverage.tcl` (cranelift) | 5,991 | 0 (2,424 native, 3,440 independent, 67 passed-partial, 60 unsupported: test-only Tcl natives, Blocks returned to the host, sequence mode) |
+
+Before that merge, against the tree this milestone started from:
+
+| run | tests | failed | baseline |
+|---|---:|---:|---|
+| `CORE_BACKEND=interp` | 5,990 | 10 = 8 + 2 since fixed | 6,030 tests, the same 8 failures |
+| `CORE_BACKEND=compile` | 5,990 | 10 = 8 + 2 since fixed | 6,030 tests, the same 8 failures |
+| `BOTLISH_NATIVE_GC_STRESS=1` (interp) | 5,990 | 8 | the same 8 failures |
+| `cargo test --release` (native/) | 183 + 31 | 0 | |
+
+The 8 were `me-list-literal-never-eligible` and
+`me-off-runs-no-warning-pass` (`method-eligible.test`) and six `warn-*`
+tests (`warnings.test`), failing identically on the untouched baseline tree
+(`main` has since adapted their pins). The interp and compile runs first
+also failed `ic-scan-while` and `ic-local-char` (`intrinsic-contracts.test`):
+they pinned what intrinsic contracts infer from `lib/web.bot`'s untyped
+`scan_while` and `local_char?`, which this milestone typed. They now compile
+the original untyped helpers inline, so the inference is still pinned, and
+pass on both backends (the GC stress run already includes the fix). The net
+drop of 40 tests is the removed mechanism's tests -- three deleted files with
+35 tests (`module-fn-bridge-param-check`, `module-fn-bridge-reachability`,
+`native-validator-predicate`), 26 fewer in the migrated
+`emailish-predicate`, `refined`, `native-refinement-propagation`,
+`native-uri-escape` and `native-executable` files, and the per-file corpus
+tests generated for the deleted `refined-checks.ir`, `05-refined-strings.ir`
+and `06-refined-strings` sample -- against `refinement-values.test`'s 87 at
+the time of those runs (88 now).
+
+**Scalar machine code.** `native/generate-scalar-audit.tcl` regenerated the
+committed audit corpus (`audit/native-scalar-asm/`, every `bench/*.bot` and
+`examples/stdlib/*.bot`): only `bench/refined-checks` changed (the
+`web::uri_query_value?` call and its two helpers; `local_char?`'s generic
+instance is 62 bytes smaller now that it declares `c: str`). Every other
+program's disassembly is byte-identical: refinements perturb nothing where
+none occur.
+
+**Cross-language parity.** `bench/check-unicode-parity.tcl`: all 19 cases
+agree across Botlish and the Python, Rust and Go equivalents.
+
+The AFL campaign plumbing (`fuzz/`) drops the deleted
+`examples/hir/06-refined-strings` target (its seeds, baseline and inventory
+rows); the historical campaign records are kept.
 
 ## Limitations
 

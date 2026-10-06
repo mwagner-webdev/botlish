@@ -200,45 +200,45 @@ id_str("hi")} valid10.bot
 } -result 1
 
 test typed-param-valid-cross-module {a cross-module direct call enforces and satisfies the declared parameter} -body {
-    set libPath [file join $::core::libraryDir typedparamlib.bot]
-    set ch [open $libPath w]
-    puts $ch {type Small = Int in 0..10
+    withPrivateLibrary {
+        set ch [open [file join $::core::libraryDir typedparamlib.bot] w]
+        puts $ch {type Small = Int in 0..10
 
 fn take_small(x: Small) -> Small:
     x
 }
-    close $ch
-    set mainPath [makeFile {import typedparamlib
+        close $ch
+        set mainPath [makeFile {import typedparamlib
 typedparamlib::take_small(7)
 } typed-param-cross-module.bot]
-    try {
-        set h [surface::readProgramFile $mainPath -strict 0]
-        llength [hir::diagnostics $h]
-    } finally {
-        file delete $libPath
-        removeFile typed-param-cross-module.bot
+        try {
+            set h [surface::readProgramFile $mainPath -strict 0]
+            llength [hir::diagnostics $h]
+        } finally {
+            removeFile typed-param-cross-module.bot
+        }
     }
 } -result 0
 
 test typed-param-invalid-cross-module {a cross-module direct call rejects an argument that cannot satisfy the declared parameter} -body {
-    set libPath [file join $::core::libraryDir typedparamlib2.bot]
-    set ch [open $libPath w]
-    puts $ch {type Small = Int in 0..10
+    withPrivateLibrary {
+        set ch [open [file join $::core::libraryDir typedparamlib2.bot] w]
+        puts $ch {type Small = Int in 0..10
 
 fn take_small(x: Small) -> Small:
     x
 }
-    close $ch
-    set mainPath [makeFile {import typedparamlib2
+        close $ch
+        set mainPath [makeFile {import typedparamlib2
 typedparamlib2::take_small(99)
 } typed-param-cross-module-bad.bot]
-    try {
-        set h [surface::readProgramFile $mainPath -strict 0]
-        list [llength [hir::diagnostics $h]] \
-            [string match {*cannot be proven to satisfy*} [dict get [lindex [hir::diagnostics $h] 0] message]]
-    } finally {
-        file delete $libPath
-        removeFile typed-param-cross-module-bad.bot
+        try {
+            set h [surface::readProgramFile $mainPath -strict 0]
+            list [llength [hir::diagnostics $h]] \
+                [string match {*cannot be proven to satisfy*} [dict get [lindex [hir::diagnostics $h] 0] message]]
+        } finally {
+            removeFile typed-param-cross-module-bad.bot
+        }
     }
 } -result {1 1}
 

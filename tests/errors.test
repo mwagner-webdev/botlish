@@ -379,10 +379,10 @@ r}
 # by namespace.
 
 test errors-cross-module-signature {a library's own error decl + errors-bearing function is enforced identically from a separate calling file} -body {
-    set libPath [file join $::core::libraryDir errorscrossmodulelib.bot]
-    set ch [open $libPath w]
-    fconfigure $ch -encoding utf-8
-    puts -nonewline $ch {error OutOfRange
+    withPrivateLibrary {
+        set ch [open [file join $::core::libraryDir errorscrossmodulelib.bot] w]
+        fconfigure $ch -encoding utf-8
+        puts -nonewline $ch {error OutOfRange
 
 fn clamp(n) -> int errors OutOfRange:
     if n < 0:
@@ -393,25 +393,25 @@ fn clamp(n) -> int errors OutOfRange:
         else:
             n
 }
-    close $ch
-    set mainPath [makeFile {import errorscrossmodulelib
+        close $ch
+        set mainPath [makeFile {import errorscrossmodulelib
 r = errorscrossmodulelib::clamp(500):
     on OutOfRange:
         -1
 r} errors-cross-module-main.bot]
-    try {
-        list [moduleParity $mainPath] [moduleValue $mainPath]
-    } finally {
-        removeFile errors-cross-module-main.bot
-        file delete $libPath
+        try {
+            list [moduleParity $mainPath] [moduleValue $mainPath]
+        } finally {
+            removeFile errors-cross-module-main.bot
+        }
     }
 } -result {same -1}
 
 test errors-cross-module-unhandled-rejected {an unhandled cross-module fallible call is a static UNHANDLED-ERROR at the calling file too} -body {
-    set libPath [file join $::core::libraryDir errorscrossmodulelib2.bot]
-    set ch [open $libPath w]
-    fconfigure $ch -encoding utf-8
-    puts -nonewline $ch {error OutOfRange
+    withPrivateLibrary {
+        set ch [open [file join $::core::libraryDir errorscrossmodulelib2.bot] w]
+        fconfigure $ch -encoding utf-8
+        puts -nonewline $ch {error OutOfRange
 
 fn clamp(n) -> int errors OutOfRange:
     if n < 0:
@@ -419,15 +419,15 @@ fn clamp(n) -> int errors OutOfRange:
     else:
         n
 }
-    close $ch
-    set mainPath [makeFile {import errorscrossmodulelib2
+        close $ch
+        set mainPath [makeFile {import errorscrossmodulelib2
 fn g(m):
     errorscrossmodulelib2::clamp(m)} errors-cross-module-main2.bot]
-    try {
-        diagKinds [surface::readProgramFile $mainPath -strict 0]
-    } finally {
-        removeFile errors-cross-module-main2.bot
-        file delete $libPath
+        try {
+            diagKinds [surface::readProgramFile $mainPath -strict 0]
+        } finally {
+            removeFile errors-cross-module-main2.bot
+        }
     }
 } -result {UNHANDLED-ERROR}
 

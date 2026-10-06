@@ -54,6 +54,10 @@ proc codes {source} {
 # own source carries a METHOD-ELIGIBLE finding (WARNINGS-METHOD-ELIGIBLE.md:
 # library warnings are shown for any program that loads the module); the
 # tests that import it are about SAME-RETURN-VALUE, not about that finding.
+# Likewise a program whose functions return written list literals of one
+# arity carries FIXED-ARITY-LIST-RETURN findings
+# (WARNINGS-FIXED-ARITY-LIST-RETURN.md), which the tests that build their
+# values from such lists are not about.
 proc sameReturnShown {source} {
     set hir [compileWith $source]
     return [lmap w [hir::warnings::of $hir] {
@@ -141,14 +145,14 @@ test warn-different-values-not-same {two distinct literals never group} -body {
 } -result {}
 
 test warn-exact-list {an exactly known List returned twice warns (existing exact-value facts)} -body {
-    shown {fn f(x):
+    sameReturnShown {fn f(x):
     if x:
         return [1, 2]
     return [1, 2]}
 } -result {{value `[1, 2]` is returned from 2 distinct exits @ 3:9 4:5}}
 
 test warn-lists-with-unknown-elements-not-same {Lists built from unproven elements are not proven equal} -body {
-    codes {fn f(x, y):
+    sameReturnCodes {fn f(x, y):
     if x:
         return [y, 1]
     return [y, 1]}
@@ -215,7 +219,7 @@ fn f(a, b):
 # The same binding
 
 test warn-same-binding {the same immutable binding returned from two exits warns without any literal} -body {
-    shown {fn compute(a):
+    sameReturnShown {fn compute(a):
     [a, a + 1]
 fn f(x, y):
     result = compute(y)
@@ -236,7 +240,7 @@ test warn-same-parameter {a parameter is an immutable binding too} -body {
 } -result {{the value of `d` is returned from 2 distinct exits @ 3:9 5:9}}
 
 test warn-alias-of-binding {an alias of a non-exact binding is the same binding value} -body {
-    shown {fn compute(a):
+    sameReturnShown {fn compute(a):
     [a, a + 1]
 fn f(x, y):
     result = compute(y)
@@ -249,7 +253,7 @@ fn f(x, y):
 } -result {{the value of `result` is returned from 2 distinct exits @ 7:9 9:9}}
 
 test warn-different-bindings-not-same {two bindings of equal-looking but unproven values are not the same} -body {
-    codes {fn compute(a):
+    sameReturnCodes {fn compute(a):
     [a, a + 1]
 fn f(x, y):
     p = compute(y)
@@ -785,7 +789,7 @@ test warn-off-runs-no-warning-pass {warnings off does not execute the warning pa
     catch {compileWith $::policySource error}
     set afterError [hir::warnings::stats]
     list $afterOff $afterDefault $afterError
-} -result {{} {SAME-RETURN-VALUE 1 METHOD-ELIGIBLE 1} {SAME-RETURN-VALUE 2 METHOD-ELIGIBLE 2}}
+} -result {{} {SAME-RETURN-VALUE 1 METHOD-ELIGIBLE 1 FIXED-ARITY-LIST-RETURN 1} {SAME-RETURN-VALUE 2 METHOD-ELIGIBLE 2 FIXED-ARITY-LIST-RETURN 2}}
 
 test warn-off-runs-no-warning-pass-via-trace {an execution trace on the pass proves it is not invoked when off} -body {
     set ::passCalls 0

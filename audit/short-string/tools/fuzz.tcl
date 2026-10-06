@@ -211,13 +211,14 @@ proc outcome {kind hir args} {
 set bad 0
 set rejected 0
 set kinds [dict create]
+# Program files live in a fresh system temporary directory, removed when the
+# run ends (never in the working directory, which concurrent runs share).
+set scratch [file tempdir short-string-fuzz]
 for {set s $seed0} {$s < $seed0 + $n} {incr s} {
     expr {srand($s)}
     set text [program]
     if {$dump} { puts "--- seed $s\n$text"; flush stdout }
-    set dir [file join [pwd] .fuzz-short-string]
-    file mkdir $dir
-    set path [file join $dir p$s.bot]
+    set path [file join $scratch p$s.bot]
     set ch [open $path w]; fconfigure $ch -encoding utf-8; puts $ch [surface::modules::ImportHeader $text]$text; close $ch
     if {[catch {set hir [surface::readProgramFile $path]} err]} {
         file delete $path
@@ -261,6 +262,6 @@ for {set s $seed0} {$s < $seed0 + $n} {incr s} {
         puts "DISAGREEMENT seed $s:\n$text\n[join $outcomes \n]"
     }
 }
-file delete -force [file join [pwd] .fuzz-short-string]
+file delete -force $scratch
 puts "programs [expr {$n - $rejected}] of $n (rejected statically $rejected; outcomes/features: $kinds); disagreements $bad"
 exit [expr {$bad ? 1 : 0}]
