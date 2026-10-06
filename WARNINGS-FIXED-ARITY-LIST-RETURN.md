@@ -865,11 +865,14 @@ this milestone**: 5957 minus the 149 new ones, since no other test file changed.
   (204/96, 0 failures, 0 extras, 204/204 conversions). The later commit
   `c612319` only renames the CLI tests' scratch files to pid-unique names
   (AGENTS.md's new rule on concurrent runs). Its 6 CLI tests pass.
-* **After the adaptation** (the commit that edits the two test files, on
-  `origin/main` `6fee7af`, whose only change since `ffbd610` is an audit
-  README): the two adapted files pass on all four backends, and the change
-  touches nothing else. Every full run above failed exactly these 8 tests and
-  nothing else, so the suite is expected to be at 0 failures.
+* **After the adaptation**, on `main` at `c2ce620`, which also includes
+  `origin/main`'s later work keeping test scratch files out of the checkout:
+  **`interp` 6030 tests, 6030 passed, 0 failed; `compile` 6030 tests, 6026
+  passed, 4 skipped (the existing constraint), 0 failed; native coverage 6030
+  tests (2470 native, 3429 independent, 71 passed-partial, 60 unsupported),
+  0 failed.** These were run in one checkout, each with a private `-tmpdir`, as
+  AGENTS.md now describes. The two adapted files also pass on
+  `cranelift-generic`.
 * The GC-stress job (`BOTLISH_NATIVE_GC_STRESS=1`, CI on push to `main`) was not
   run locally: nothing under `native/` changed, and the pass runs before any
   backend and changes no HIR.
@@ -1069,5 +1072,6 @@ ready patch), and its six findings to annotate take `-> list`.
     `cranelift`. On the tree merged with `origin/main` `ffbd610`, each ran 6030
     tests. Every run failed exactly the 8 pins listed under "Parallel work"
     (6 in `tests/warnings.test`, 2 in `tests/method-eligible.test`) and nothing
-    else. Those 8 were then adapted in this milestone, and both files pass on
-    all four backends; the adaptation touches nothing else.
+    else. Those 8 were then adapted in this milestone. On `main` at `c2ce620`
+    the suite has **0 failures**: 6030 tests on `interp`, 6030 on `compile`
+    (4 skipped), and 6030 in native coverage.
