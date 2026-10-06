@@ -110,23 +110,22 @@ test native-executable-generic-entry {known callable kinds can call through gene
     } {-block-escape-opt 0 -tiny-leaf-inline-opt 0}
 } -result {[["ab", "xy"], ["ab", "zw"]]}
 
-test native-executable-native-bridge {source native implementations share existing modules and preserve declared contracts} -constraints executableAot -body {
+test native-executable-source-refinements {source refinements and their proof-producing predicates share existing modules and preserve declared contracts in an executable} -constraints executableAot -body {
     aotParity {
         import byte
         import str
-        # requires: web
-        q = uriEscape("a b")
+        import web
+        q = web::uri_escape_text("a b")
         fn check(s: str) -> bool:
-            emailish?(s)
-        [UriQueryValue?(q), str::length(q), check("a@b.co"), byte::high_nibble(171)]
+            web::emailish?(s)
+        [web::uri_query_value?(q), str::length(q), check("a@b.co"), byte::high_nibble(171)]
     }
 } -result {[true, 5, true, 160]}
 
 test native-executable-native-shadow {native preparation respects local binding identity} -constraints executableAot -body {
     set dir [makeDirectory {aot shadow test}]
     try {
-        core::loadLibrary web
-        set hir [surface::compile "import str\nfn uriEscape(s):\n    str::length(s)\nuriEscape(\"abc\")" shadow.bot]
+        set hir [surface::compile "import str\nfn integer?(s):\n    str::length(s)\ninteger?(\"abc\")" shadow.bot]
         set prepared [native::prepareHir $hir]
         set binary [native::executable $hir [file join $dir program]]
         list [expr {$hir eq $prepared}] [exec $binary]
@@ -134,17 +133,6 @@ test native-executable-native-shadow {native preparation respects local binding 
         removeDirectory {aot shadow test}
     }
 } -result {1 3}
-
-test native-executable-native-body {registered validator bodies compile from resolved HIR} -constraints executableAot -body {
-    set dir [makeDirectory {aot native body test}]
-    try {
-        set hir [surface::compile "fn check(s):\n    NonEmpty?(s)\ncheck(\"hello\")" body.bot]
-        set binary [native::executable $hir [file join $dir program]]
-        exec env BOTLISH_NATIVE_GC_STRESS=1 $binary
-    } finally {
-        removeDirectory {aot native body test}
-    }
-} -result true
 
 test native-executable-output-kinds {standalone rendering supports blocks, mutable arrays and Result values without a Tcl host} -constraints executableAot -body {
     set dir [makeDirectory {aot output test}]

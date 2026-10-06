@@ -13,43 +13,6 @@
 #                   argument (any = no requirement); a call that returns
 #                   proves its arguments had these types. "" = unknown.
 #   resultType      type of every result, or any
-#   moduleFn        "" or {NAMESPACE NAME}: the native (Cranelift) backend
-#                   may use the ordinary cross-file Botlish function
-#                   NAMESPACE::NAME (surface/modules.tcl) as this native's
-#                   *executable* implementation, instead of requiring an
-#                   entry in its own op whitelist (native/lower.tcl's
-#                   `natives`) or a -native-body -- see native/prepare.tcl's
-#                   native::prepareHir. impl (run by interp/compile, and
-#                   by the reference contract check) stays authoritative for
-#                   every other backend and for any semantics -- such as
-#                   attaching evidence for an opaque refined result type --
-#                   that ordinary Botlish cannot itself express (only a
-#                   trusted native impl may do that: see core/type.tcl); the
-#                   native keeps its own registered -result-type for the
-#                   call's static type on every backend, moduleFn or not
-#                   (a call's nativeResultOverride, native/prepare.tcl), and
-#                   its own paramTypes check, under its own name, before
-#                   the module function runs (hir::aot::VisitCall, native/
-#                   lower.tcl's BridgedCheckedNative). A native's
-#                   module function sees only its own module's other
-#                   definitions and ordinary root natives; it captures
-#                   nothing from the call site (an ordinary top-level
-#                   function, no different from any other module export).
-#   nativeBody      "" or a (block PARAMS BODY...) core IR node, with
-#                   PARAMS matching arity, expressing the same operation as
-#                   impl in ordinary Botlish over other natives: an
-#                   *authoritative-for-native-compilation* implementation
-#                   the native (Cranelift) backend may use instead of
-#                   requiring an entry in its own op whitelist
-#                   (native/lower.tcl's `natives`) -- see native/prepare.tcl's
-#                   native::prepareHir. impl (run by interp/compile, and by
-#                   the reference contract check) stays authoritative for
-#                   every other backend and for any semantics -- such as
-#                   attaching evidence for an opaque refined result type --
-#                   that ordinary Botlish cannot itself express (only a
-#                   trusted native impl may do that: see core/type.tcl).
-#                   A native's body sees only other root bindings (other
-#                   natives); it captures nothing from its call site.
 #   testsType       "" or a type T: the native is a *type test*, a pure
 #                   one-argument predicate returning exactly whether its
 #                   argument is a value of T (core::type::acceptsValue).
@@ -152,25 +115,22 @@
 #                                     there)
 #
 # Refinement rules are flat lists of ARG-INDEX TYPE pairs, e.g. {0 int}
-# ("argument 0 is an int") or {0 {refined str {Emailish}}}. The evaluator
-# never special-cases a native by name; it only consults this metadata (see
-# refine.tcl).
+# ("argument 0 is an int") or {0 {refined int {Byte}}}. The evaluator never
+# special-cases a native by name; it only consults this metadata (see
+# refine.tcl). (A Botlish function's own refinement rules are its proof
+# contract, `proves`, REFINEMENT-VALUES.md -- the same shape, from source.)
 #
 # Declared types are a *contract*. After every call the reference runtime
 # asserts that each argument satisfied its parameter type and that the
 # result satisfies the result type, so a native cannot claim to return, say,
-# a UriQueryValue while returning a plain string. Types are accepted in any
-# form type.tcl understands and stored in canonical form.
+# a Byte while returning 300. Types are accepted in any form type.tcl
+# understands and stored in canonical form.
 
 namespace eval core::native {
     variable registry [dict create]
     # NAME -> 1: the registered natives that are the predicates of
     # source-declared types, not compiler intrinsics (markSource).
     variable sourceNatives [dict create]
-    # ALIAS -> CANONICAL: a second source-level spelling for an already-
-    # registered native, denoting the exact same registry entry (semantic
-    # predicate identity), not a second registration. See `alias` below.
-    variable aliases [dict create]
     # Runtime requirement tags (-runtime):
     #   bigint               arbitrary-precision integer arithmetic or
     #                        comparison (a small-integer fast path still needs
@@ -181,7 +141,6 @@ namespace eval core::native {
     #   char-index           counts or indexes a string by character, not byte
     #   range-check          may raise RANGE for an index outside a value
     #   structural-equality  compares values of any kinds structurally
-    #   evidence             reads or attaches refinement evidence
     #   mutarray-alloc       allocates a new MutableArray, or a List by
     #                        finalizing one (mutable_array::freeze)
     #   mutarray-mutate      mutates a MutableArray's slots in place
@@ -203,7 +162,7 @@ namespace eval core::native {
     #                        (the `syscall` instruction) with unknown effects
     #                        (core/linuxabi.tcl; LINUX-X86-64-SYSCALL.md)
     variable runtimeTags {bigint string-alloc list-alloc result-alloc char-index
-        range-check structural-equality evidence mutarray-alloc mutarray-mutate hash set-alloc
+        range-check structural-equality mutarray-alloc mutarray-mutate hash set-alloc
         process-argv raw-syscall bytestore-alloc raw-address}
     # NAME -> 1: the errors the runtime itself declares, visible in every
     # program like a root native and never part of a program's own `error`
@@ -225,7 +184,7 @@ proc core::native::register {name args} {
     }
     set options [dict create -impl "" -arity "" -refines-true {} -refines-false {} \
         -param-types "" -result-type any -tests-type "" -runtime {} -result-shape {} -result-range {} \
-        -native-body {} -module-fn {} -context-free 0 -errors {} -bounds {} -nomethod 0]
+        -context-free 0 -errors {} -bounds {} -nomethod 0]
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "core::native::register: unknown option \"$option\""
@@ -308,13 +267,6 @@ proc core::native::register {name args} {
     if {$range ni {{} nonneg collection-length}} {
         error "core::native::register: bad -result-range \"$range\" for \"$name\""
     }
-    set nativeBody [dict get $options -native-body]
-    if {$nativeBody ne ""} {
-        if {[lindex $nativeBody 0] ne "block" || [llength [core::ir::blockParams $nativeBody]] != $arity} {
-            error "core::native::register: -native-body of \"$name\" must be a (block PARAMS BODY...)\
-                node with $arity parameter(s)"
-        }
-    }
     variable builtinErrors
     set errors [lsort -unique [dict get $options -errors]]
     foreach error $errors {
@@ -326,10 +278,6 @@ proc core::native::register {name args} {
     if {$bounds ne "" && ![ValidBounds $bounds $arity $errors]} {
         error "core::native::register: bad -bounds \"$bounds\" for \"$name\" (with -errors {$errors})"
     }
-    set moduleFn [dict get $options -module-fn]
-    if {$moduleFn ne "" && [llength $moduleFn] != 2} {
-        error "core::native::register: -module-fn of \"$name\" must be a {NAMESPACE NAME} pair"
-    }
     dict set registry $name [dict create \
         name $name \
         impl $impl \
@@ -340,7 +288,7 @@ proc core::native::register {name args} {
         resultType [CanonicalType $name -result-type [dict get $options -result-type]] \
         testsType $testsType \
         runtime [lsort -unique [dict get $options -runtime]] \
-        resultShape $shape resultRange $range nativeBody $nativeBody moduleFn $moduleFn \
+        resultShape $shape resultRange $range \
         contextFree [dict get $options -context-free] errors $errors bounds $bounds \
         nomethod [dict get $options -nomethod]]
     return [core::value::native $name]
@@ -533,7 +481,7 @@ proc core::native::checkSlice {native start end n} {
     }
 }
 
-# 1 if NAME is a registered native (an alias is not: see aliasNames).
+# 1 if NAME is a registered native.
 proc core::native::exists {name} {
     variable registry
     return [dict exists $registry $name]
@@ -576,57 +524,6 @@ proc core::native::qualifiedMembers {ns} {
     return [lsort $members]
 }
 
-# Declares ALIASNAME a second, purely compile-time spelling of the already-
-# registered native CANONICALNAME: every root reference to ALIASNAME (surface
-# source, raw core IR, or the Tcl interpreter's own root environment) resolves
-# to the identical BindingId/SymbolId/runtime value CANONICALNAME's own
-# references do (hir/resolve.tcl's RootBinding, core::rootEnv below) -- never
-# a second registry entry, a runtime Block/wrapper value, or a second
-# specialization instance. ALIASNAME is never itself a key of `registry`;
-# `metadata`/`invoke`/etc. only ever look up CANONICALNAME.
-proc core::native::alias {aliasName canonicalName} {
-    variable registry
-    variable aliases
-    if {![dict exists $registry $canonicalName]} {
-        error "core::native::alias: unknown native \"$canonicalName\""
-    }
-    if {[dict exists $registry $aliasName] || [dict exists $aliases $aliasName]} {
-        error "core::native::alias: \"$aliasName\" is already registered"
-    }
-    dict set aliases $aliasName $canonicalName
-}
-
-proc core::native::isAlias {name} {
-    variable aliases
-    return [dict exists $aliases $name]
-}
-
-# NAME's own registered identity: NAME itself if it is a registered native,
-# the native it aliases if NAME is an alias, or NAME unchanged otherwise (an
-# unknown name -- callers that care already check `names`/`isAlias`/`aliasNames`).
-proc core::native::canonicalName {name} {
-    variable aliases
-    if {[dict exists $aliases $name]} {
-        return [dict get $aliases $name]
-    }
-    return $name
-}
-
-proc core::native::aliasNames {} {
-    variable aliases
-    return [dict keys $aliases]
-}
-
-# Flat ALIAS CANONICAL ALIAS CANONICAL ... pairs, for core::rootEnv.
-proc core::native::aliasPairs {} {
-    variable aliases
-    set pairs {}
-    dict for {alias canonical} $aliases {
-        lappend pairs $alias $canonical
-    }
-    return $pairs
-}
-
 # Removes a previously registered native NAME. Only hir/sourcetypes.tcl uses
 # this, to undo the root constructor/predicate natives it registers for a
 # source-declared type at the start of the next compilation (see
@@ -652,10 +549,6 @@ proc core::native::markSource {name} {
 
 proc core::native::metadata {name} {
     variable registry
-    variable aliases
-    if {[dict exists $aliases $name]} {
-        set name [dict get $aliases $name]
-    }
     if {![dict exists $registry $name]} {
         error "core::native: no native named \"$name\""
     }

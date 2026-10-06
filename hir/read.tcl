@@ -156,6 +156,13 @@ proc hir::read::StructDeclLine {content number} {
 # own), or "" if CONTENT is not a type-declaration line.
 proc hir::read::TypeDeclLine {content number} {
     set span [dict create file <hir-text> line $number column 1]
+    if {[regexp {^refined type (\S+) carrier (.+) owner (\S+)$} $content -> name carrier owner]} {
+        # A refinement type (hir::format::TypeDecl): registered from its
+        # canonical identity, resolved carrier text and owner, in printed
+        # (dependency) order, by hir::sourcetypes::RegisterRefinement.
+        return [dict create kind refined resolved 1 name $name namespace [expr {$owner eq "-" ? "" : $owner}] \
+            nameSpan $span carrier $carrier carrierSpan $span span $span line $number]
+    }
     if {[regexp {^type (\S+) parent (\S+) domain interval (-?[0-9]+) (-?[0-9]+)$} $content \
             -> name parent lo hi]} {
         set domain [dict create kind interval lo $lo loSpan $span hi $hi hiSpan $span span $span]
@@ -519,8 +526,22 @@ proc hir::read::TakeBranchLine {hirVar level role} {
     set line [Peek $hir]
     lassign $line indent content number
     if {$line eq "" || $indent != $level
-            || ![regexp "^$role (s\[0-9\]+)(?: binds (.*?))?(?: refines (.*))?\$" $content -> s binds refines]} {
+            || ![regexp "^$role (s\[0-9\]+)(.*)\$" $content -> s rest]} {
         Fail [expr {$line eq "" ? "end" : $number}] "expected \"$role SCOPE ...\" at indentation level $level"
+    }
+    # " refines " first: a branch may both bind locals and carry facts
+    # (Tcl's regexp matching prefers the first quantifier's greediness, so a
+    # single pattern for both optional parts would read the facts as binds).
+    set binds ""
+    set refines ""
+    set i [string first " refines " $rest]
+    if {$i >= 0} {
+        set refines [string range $rest [expr {$i + 9}] end]
+        set rest [string range $rest 0 [expr {$i - 1}]]
+    }
+    if {[regexp {^ binds (.*)$} $rest -> binds]} {
+    } elseif {$rest ne ""} {
+        Fail $number "expected \"$role SCOPE ?binds ...? ?refines ...?\""
     }
     dict incr hir pos
     set facts {}
@@ -627,8 +648,8 @@ proc hir::read::Expr {hirVar level s path block} {
             }
         }
         block {
-            if {![BlockHeader $head body params captures staticRefs declared errorsText binds nomethod contexts]} {
-                Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)? ?nomethod? ?contexts (IDS) requires (IDS)? ?declares ...? ?errors ...? ?binds ...?\""
+            if {![BlockHeader $head body params captures staticRefs declared errorsText binds nomethod contexts provesText]} {
+                Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)? ?nomethod? ?contexts (IDS) requires (IDS)? ?declares ...? ?proves BINDING NAME: TYPE? ?errors ...? ?binds ...?\""
             }
             if {$nomethod} {
                 SetField hir $e nomethod 1
@@ -662,6 +683,18 @@ proc hir::read::Expr {hirVar level s path block} {
             set declaredType {}
             if {$declared ne {}} { set declaredType [ParseType $declared $number] }
             SetField hir $e declaredResult $declaredType
+            # The proof contract (REFINEMENT-VALUES.md), as printed: one
+            # "BINDING NAME: TYPE" clause naming one of the block's params.
+            set proofs {}
+            if {$provesText ne ""} {
+                if {![regexp {^(b[0-9]+) (\S+): (.+)$} $provesText -> provenBinding provenName provenType]
+                        || [lsearch -exact $paramIds $provenBinding] < 0} {
+                    Fail $number "expected \"proves BINDING NAME: TYPE\" naming a parameter of the block"
+                }
+                lappend proofs [dict create outcome 1 param [lsearch -exact $paramIds $provenBinding] \
+                    binding $provenBinding fact [ParseType $provenType $number]]
+            }
+            SetField hir $e proofs $proofs
             set declaredErrors {}
             if {$errorsText ne {}} {
                 foreach name [split [string map {", " \x01} $errorsText] \x01] {
@@ -966,7 +999,7 @@ proc hir::read::Expr {hirVar level s path block} {
 # into the named variables; 0 if malformed. The optional parts are found
 # outside brackets, so a declared type may itself contain spaces, ", " or
 # the word "errors" (a structural function type's own "errors: [...]").
-proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar {nomethodVar ""} {contextsVar ""}} {
+proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar {nomethodVar ""} {contextsVar ""} {provesVar ""}} {
     foreach var {bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar} {
         upvar 1 [set $var] [string range $var 0 end-3]
     }
@@ -1005,6 +1038,15 @@ proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar de
     if {$i >= 0} {
         set errors [string range $rest [expr {$i + 8}] end]
         set rest [string range $rest 0 [expr {$i - 1}]]
+    }
+    if {$provesVar ne ""} {
+        upvar 1 $provesVar proves
+        set proves ""
+        set i [TopIndex $rest " proves "]
+        if {$i >= 0} {
+            set proves [string range $rest [expr {$i + 8}] end]
+            set rest [string range $rest 0 [expr {$i - 1}]]
+        }
     }
     if {[string match " declares ?*" $rest]} {
         set declared [string range $rest 10 end]

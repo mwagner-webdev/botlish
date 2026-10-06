@@ -107,19 +107,26 @@ test hir-refine-8 {refinement rules come from native metadata, including false b
     list [branchFacts $h $first] [branchFacts $h $second] [hirRefTypes $h a] [hirRefTypes $h b]
 } -result {{{} {{b2 a : int}}} {{{b2 a : int} {b3 b : int}} {}} {any any int any} {any int}}
 
-test hir-refine-9 {named-type evidence accumulates across nested branches} -body {
+# A second validator type on str, beside the harness's NonEmpty.
+if {![core::type::isNamed LowerAscii]} {
+    core::type::register LowerAscii -base str \
+        -validator {apply {{v} {regexp {^[a-z]*$} [core::value::strOf $v]}}}
+    core::type::definePredicate LowerAscii
+}
+
+test hir-refine-9 {named-type facts accumulate across nested branches} -body {
     set h [hirOf {bind f {block {s}
-        {if {call {ref Emailish?} {ref s}}
+        {if {call {ref LowerAscii?} {ref s}}
             {block {} {if {call {ref NonEmpty?} {ref s}} {block {} {bind both {ref s}}} {block {}}}}
             {block {}}}}}]
     list [hir::types::show [hir::typeOf $h [hirFind $h bind both]]] \
          [dict get [hir::refinementsAt $h [hir::get $h [lindex [hirFind $h if] 1] thenScope]] b2]
-} -result {{str[Emailish,NonEmpty]} {{refined str NonEmpty} {refined str Emailish}}}
+} -result {{str[LowerAscii,NonEmpty]} {{refined str NonEmpty} {refined str LowerAscii}}}
 
 test hir-refine-10 {a refinement is not repeated when it is already known} -body {
     set h [hirOf {bind f {block {s}
-        {if {call {ref Emailish?} {ref s}}
-            {block {} {if {call {ref Emailish?} {ref s}} {block {} {const yes}} {block {} {const no}}}}
+        {if {call {ref NonEmpty?} {ref s}}
+            {block {} {if {call {ref NonEmpty?} {ref s}} {block {} {const yes}} {block {} {const no}}}}
             {block {} {const no}}}}}]
     set inner [lindex [hirFind $h if] 1]
     list [hir::get $h [hir::get $h $inner condition] known] \

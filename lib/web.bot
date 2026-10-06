@@ -5,8 +5,8 @@
 # ESCAPE.md moved out of lib/web.tcl's uriEscape native -native-body (raw
 # core IR, pasted into every call site) and into this ordinary cross-file
 # Botlish module definition, so it is resolved and compiled once, like any
-# other function, instead of copied. It is the same algorithm as
-# core::web::uriEscape's Tcl implementation, over the general
+# other function, instead of copied. It is the same algorithm as the
+# removed lib/web.tcl native's Tcl implementation, over the general
 # core/strings.tcl native str::encode_utf8 (str -> List[Byte], one UTF-8 byte per
 # element, STATIC-COMPLETION-PROOFS.md item 25): percent-encode every UTF-8
 # byte of s except the RFC 3986 unreserved characters (A-Za-z0-9._~-), as
@@ -50,14 +50,17 @@
 # reverse_from and examples/stdlib/ai_text_clean.bot's clean_from already
 # use.
 #
-# This module has no bearing on UriQueryValue's opaque evidence: only the
-# escaped *text* is computed here. Only a trusted native -impl may attach
-# UriQueryValue's runtime evidence (core/type.tcl); lib/web.tcl's uriEscape
-# native keeps doing that for interp/compile, and the native (Cranelift)
-# backend keeps the native's own registered result type for the call
-# (native/native.tcl's module-native bridge), so the value this function
-# computes is still treated, everywhere the type system looks at it, as a
-# UriQueryValue -- this module never has to forge that itself.
+# Emailish and UriQueryValue are this module's refinement types
+# (REFINEMENT-VALUES.md): ordinary Botlish declarations, `refined type NAME
+# = str`, each a new nominal type whose values are exactly Strings proven to
+# satisfy its proposition, with the exact runtime representation of str (no
+# wrapper, tag or allocation). This module is their owner: only its own
+# functions may declare a proof of them (`proves`), and each has exactly one
+# such function here, emailish? and uri_query_value?. Code anywhere may call
+# them, pass a proven value where the refinement is required, and use a
+# refined value wherever a str is expected; nothing outside this module can
+# forge the proof. The compiler knows neither name: every fact it derives
+# about them comes from these declarations.
 import ascii
 import byte
 import immutable_set
@@ -65,8 +68,16 @@ import list
 import str
 import type byte::Byte
 
-# emailish?(v) is the root predicate emailish?'s (lib/web.tcl) ordinary
-# Botlish implementation (R2-ORDINARY-EMAILISH-PREDICATE.md): the same
+refined type Emailish = str
+
+# emailish?(v) decides membership in Emailish and, when true, proves it
+# (REFINEMENT-VALUES.md): the proof clause `proves v: Emailish` is what lets
+# a caller's true branch pass v where an Emailish is required. It is a value
+# check over its argument alone (Strings, immutable sets, other value
+# functions), so the compiler proves it repeatable (hir/repeatable.tcl): a
+# second identical call on a path where the first's result is known is
+# decided, not run. Its grammar is the one the predicate always had
+# (R2-ORDINARY-EMAILISH-PREDICATE.md): the same
 # left-to-right scan emailRegex's grammar always described -- local part: 1+
 # of [alnum . _ % + -]; "@"; domain: 1+ of (1+ of [alnum -] then "."); TLD:
 # 2+ alpha -- over str::is_tcl_alnum/str::is_tcl_alpha (core/tclcompat.tcl). R2.a
@@ -78,11 +89,10 @@ import type byte::Byte
 # is this source's final normalization pass, rewriting scan_while and the
 # domain scan around the new "loop i from START to END:" counted-loop
 # construct and renaming every local predicate helper to the trailing-"?"
-# idiom below -- the frozen R2.a source. This module binding
-# (web::emailish?) and the root predicate binding (emailish?, lib/web.tcl)
-# are distinct bindings that merely share a basename: the root's
-# -module-fn bridge is what connects them, not name equality -- see
-# R2A1-MODULE-FN-BRIDGE-REACHABILITY.md's binding-identity section.
+# idiom below -- the frozen R2.a source. REFINEMENT-VALUES.md made it the
+# predicate itself: its signature gained the carrier type, the Boolean
+# result and the proof clause, and the former root-native spelling
+# (lib/web.tcl's registered type test and compatibility alias) is gone.
 #
 # local_extra_chars is the established immutable-set membership idiom
 # (MINIMAL-IMMUTABLE-SET.md) for the local part's punctuation class
@@ -94,7 +104,7 @@ import type byte::Byte
 # bridge-reachability defect that once forced building this per call).
 local_extra_chars = immutable_set::from_list([".", "_", "%", "+", "-"])
 
-fn emailish?(v):
+fn emailish?(v: str) -> bool proves v: Emailish:
 
     n = str::length(v)
 
@@ -107,7 +117,7 @@ fn emailish?(v):
             return ""
         str::substring(v, i, i + 1)
 
-    fn local_char?(c):
+    fn local_char?(c: str) -> bool:
         str::is_tcl_alnum(c) or immutable_set::contains(local_extra_chars, c)
 
     # label_char?'s own extra character is a single "-": a one-element set
@@ -128,13 +138,19 @@ fn emailish?(v):
     # where PREDICATE fails; reaching END with every character matching
     # means the whole remaining domain matched, so the natural-exhaustion
     # value is N itself, exactly the old recursion's own "i >= n" base
-    # case. PREDICATE is passed as an ordinary first-class value (an
-    # untyped-parameter callable, TYPED-CALLABLE-ESCAPE-SOUNDNESS.md item
-    # 10 -- local_char? and str::is_tcl_alpha, the two predicates passed here,
-    # are an untyped-parameter Botlish function and a native, neither of
-    # which is a "typed callable" that rule would block from flowing
-    # through an ordinary parameter).
-    fn scan_while(start, predicate):
+    # case. PREDICATE is passed as an ordinary first-class value, declared
+    # with its call contract (Fn{args: [str], return: bool},
+    # STRUCTURAL-FUNCTION-TYPES.md): local_char? (a typed Botlish function)
+    # and str::is_tcl_alpha (a native) both satisfy it. REFINEMENT-VALUES.md
+    # added that contract and local_char?'s own `c: str`: since emailish? is
+    # now called as the module function it is from every program (no root
+    # native standing in front of it), local_char?'s Block-value entry is
+    # part of every closed program, and a standalone executable needs its
+    # parameter's kind statically. Every call through PREDICATE is a call of
+    # one of those two exact targets, which is also what lets the compiler
+    # prove emailish? repeatable (hir/repeatable.tcl follows exact callables
+    # into the parameters they are passed for).
+    fn scan_while(start, predicate: Fn{args: [str], return: bool}):
         loop i from start to n:
             if predicate(char_at(i)):
                 continue
@@ -199,6 +215,45 @@ additional_unreserved_chars = byte::set(['-', '.', '_', '~'])
 
 fn is_unreserved(b: Byte) -> bool:
     ascii::is_alphanumeric(b) or immutable_set::contains(additional_unreserved_chars, b)
+
+refined type UriQueryValue = str
+
+# uri_query_value?(value) decides whether VALUE is safe to embed as a URI
+# query value, and when true proves it a UriQueryValue (REFINEMENT-
+# VALUES.md): every UTF-8 byte is an RFC 3986 unreserved character
+# (is_unreserved) or begins a percent-encoded triplet "%XX" of two uppercase
+# hexadecimal digits -- exactly the alphabet uri_escape_text writes, so every
+# string it produces passes. The refinement used to be "opaque": a value was
+# a UriQueryValue only when a trusted native had attached runtime evidence
+# to it (lib/web.tcl's uriEscape). Refinements carry no runtime evidence, so
+# the proposition is now this structural check, owned and defined here.
+fn uri_query_value?(value: str) -> bool proves value: UriQueryValue:
+    bytes = str::encode_utf8(value)
+
+    fn upper_hex?(i):
+        if i < 0 or i >= list::length(bytes):
+            false
+        else:
+            b = list::at(bytes, i)
+            ascii::is_digit(b) or (b >= 65 and b <= 70)
+
+    fn valid_from?(i):
+        if i < 0 or i >= list::length(bytes):
+            true
+        else:
+            b = list::at(bytes, i)
+            if b == 37:
+                if upper_hex?(i + 1) and upper_hex?(i + 2):
+                    valid_from?(i + 3)
+                else:
+                    false
+            else:
+                if is_unreserved(b):
+                    valid_from?(i + 1)
+                else:
+                    false
+
+    valid_from?(0)
 
 fn uri_escape_text(s):
 

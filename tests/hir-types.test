@@ -24,19 +24,19 @@ test hir-type-2 {references preserve the binding's type} -body {
 
 test hir-type-3 {known native calls receive their result types} -body {
     set h [hirOf {call {ref -} {const 3} {const 1}} \
-                 {call {ref uriEscape} {const str {a b}}} \
+                 {call {ref test-fake-nonempty} {const str {a b}}} \
                  {call {ref list} {const 1}} \
                  {call {ref <} {const 1} {const 2}} \
                  {call {ref result-value} {ok {const 1}}} \
                  {call {ref integer?} {const x}}]
     shownTypes $h [hir::roots $h]
-} -result {int {str[UriQueryValue]} {List[int]} bool any bool}
+} -result {int {str[NonEmpty]} {List[int]} bool any bool}
 
 test hir-type-4 {if receives the joined type of its branches} -body {
     set h [hirOf {bind f {block {flag s}
                     {bind a {if {ref flag} {block {} {const 1}} {block {} {const 2}}}}
                     {bind b {if {ref flag} {block {} {const 1}} {block {} {const one}}}}
-                    {bind c {if {ref flag} {block {} {call {ref uriEscape} {ref s}}} {block {} {const plain}}}}
+                    {bind c {if {ref flag} {block {} {call {ref test-fake-nonempty} {ref s}}} {block {} {const plain}}}}
                     {bind d {if {ref flag} {block {} {return {const 1}}} {block {} {const two}}}}
                     {ref a}}}]
     shownTypes $h [lmap name {a b c d} {hirFind $h bind $name}]
@@ -117,7 +117,7 @@ test hir-type-12 {flow facts: a returned native call proves its parameter types}
                     {call {ref test-lax-param} {ref s}}
                     {call {ref list} {ref x} {ref s}}}}]
     list [hirRefTypes $h x] [hirRefTypes $h s]
-} -result {{any int} {any {str[Emailish]}}}
+} -result {{any int} {any {str[NonEmpty]}}}
 
 # ---------------------------------------------------------------------------
 # Calls
@@ -169,14 +169,14 @@ test hir-call-5 {argument order is preserved} -body {
 
 test hir-call-6 {type tests are decided from static types} -body {
     set h [hirOf {bind f {block {v}
-                    {bind q {call {ref uriEscape} {const str {a b}}}}
+                    {bind q {call {ref test-fake-nonempty} {const str {a b}}}}
                     {call {ref list}
                         {call {ref integer?} {const 1}}
                         {call {ref integer?} {const a}}
                         {call {ref integer?} {ref v}}
-                        {call {ref UriQueryValue?} {ref q}}
-                        {call {ref Emailish?} {const 5}}
-                        {call {ref Emailish?} {ref q}}}}}]
+                        {call {ref NonEmpty?} {ref q}}
+                        {call {ref NonEmpty?} {const 5}}
+                        {call {ref NonEmpty?} {ref v}}}}}]
     set calls [lrange [hirFind $h call] 2 end]
     lmap e $calls {hir::get $h $e known}
 } -result {1 0 {} 1 {} {}}

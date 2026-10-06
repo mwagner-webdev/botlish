@@ -152,9 +152,9 @@ test opt-native-2 {checks static types prove are not emitted} -body {
 } -result 1
 
 test opt-native-3 {contract violations are still caught} -body {
-    list [differential {{call {ref test-fake-escape} {const str x}}}] \
-         [differential {{call {ref test-lax-param} {const str x}}}] \
-         [lindex [outcomeUnder compile {{call {ref test-fake-escape} {const str x}}}] 1]
+    list [differential {{call {ref test-fake-nonempty} {const str {}}}}] \
+         [differential {{call {ref test-lax-param} {const str {}}}}] \
+         [lindex [outcomeUnder compile {{call {ref test-fake-nonempty} {const str {}}}}] 1]
 } -result {same same {CORE CONTRACT TYPE}}
 
 test opt-native-4 {argument errors are unchanged} -body {

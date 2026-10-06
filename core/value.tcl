@@ -6,11 +6,12 @@
 # distinct values.
 #
 #   {int DIGITS}              arbitrary-precision integer, canonical decimal
-#   {str TEXT ?EVIDENCE?}     string; EVIDENCE is a sorted, non-empty list of
-#                             named types the string is proven to satisfy
-#                             (see type.tcl). Evidence is knowledge *about*
-#                             the string, not part of it: equality, eq and
-#                             display ignore it.
+#   {str TEXT}                string. A String carries nothing but its
+#                             text: a refinement of str (REFINEMENT-VALUES.md)
+#                             is a static proof fact with exactly this
+#                             representation -- no tag, no evidence, no
+#                             wrapper (Strings used to carry runtime
+#                             "evidence" of opaque named types; that is gone).
 #   {bool true|false}         Boolean
 #   {unit}                    the unit value
 #   {UnicodeChar CODEPOINT}   exactly one Unicode scalar value (U+0000..U+D7FF
@@ -19,8 +20,7 @@
 #                             from Int: same tagged-list shape as {int N},
 #                             but a different tag, so a UnicodeChar can never
 #                             be mistaken for an Int by kind (see
-#                             UNICODE-CHAR-LITERALS.md). Immutable, no
-#                             evidence.
+#                             UNICODE-CHAR-LITERALS.md). Immutable.
 #   {list ITEMS}              ITEMS is a Tcl list of runtime values
 #   {immutableSet ITEMS}      an immutable set of unique Botlish values
 #                             (core::value::equal): ITEMS is a Tcl list of
@@ -159,47 +159,6 @@ proc core::value::char {codepoint} {
         error "core::value::char: not a Unicode scalar value: \"$codepoint\""
     }
     return [list UnicodeChar $codepoint]
-}
-
-# ---------------------------------------------------------------------------
-# Evidence
-
-# The named types V carries evidence for (a sorted list, possibly empty).
-proc core::value::evidence {v} {
-    if {[kind $v] eq "str" && [llength $v] == 3} {
-        return [lindex $v 2]
-    }
-    return {}
-}
-
-proc core::value::hasEvidence {v name} {
-    return [expr {$name in [evidence $v]}]
-}
-
-# V with added evidence for every named type in TYPE (a named type or a
-# refined type). Only trusted Tcl code calls this. For validator types the
-# validator must accept V; opaque types are taken on the caller's word, which
-# is what makes such callers trusted.
-proc core::value::withEvidence {v type} {
-    set type [core::type::normalize $type]
-    if {[core::type::base $type] ne [kind $v]} {
-        error "core::value::withEvidence: [show $v] is not of base type [core::type::show $type]"
-    }
-    if {[kind $v] ni $::core::type::evidenceKinds} {
-        error "core::value::withEvidence: [kind $v] values cannot carry evidence"
-    }
-    set names [evidence $v]
-    foreach name [core::type::evidenceOf $type] {
-        if {![dict get [core::type::metadata $name] opaque]
-                && ![core::type::runValidator $name $v]} {
-            error "core::value::withEvidence: [show $v] does not satisfy $name"
-        }
-        lappend names $name
-    }
-    if {$names eq ""} {
-        return $v
-    }
-    return [list str [lindex $v 1] [lsort -unique $names]]
 }
 
 # The single point where a host (Tcl) truth value becomes a language Boolean.
@@ -490,8 +449,12 @@ proc core::value::equal {a b} {
 }
 
 # ---------------------------------------------------------------------------
-# Display: unambiguous human-readable rendering. With WITH-EVIDENCE, evidence
-# is appended as "TEXT"#{Name ...} (for debugging and differential tests).
+# Display: unambiguous human-readable rendering. DEBUG 1 asks for the
+# debugging/differential rendering tests and tools compare backends with; it
+# renders exactly like the plain form now (a String used to append its runtime
+# evidence, "TEXT"#{Name ...}, which REFINEMENT-VALUES.md removed: a refined
+# value renders as its carrier), and stays an argument of its own so REVEAL
+# keeps its position.
 #
 # A value of an *opaque struct* (OPAQUE-STRUCTS.md: a struct whose
 # representation belongs to the module declaring it) is rendered by its
@@ -523,14 +486,11 @@ proc core::value::isOpaqueStruct {id} {
     return [expr {$id ne "" && $opaqueStructTest ne "" && [{*}$opaqueStructTest $id]}]
 }
 
-proc core::value::show {v {withEvidence 0} {reveal 0}} {
+proc core::value::show {v {debug 0} {reveal 0}} {
     switch -- [kind $v] {
         int  { return [lindex $v 1] }
         str  {
             set escaped [string map {\\ \\\\ \" \\\" \n \\n \t \\t} [lindex $v 1]]
-            if {$withEvidence && [evidence $v] ne ""} {
-                return "\"$escaped\"#{[evidence $v]}"
-            }
             return "\"$escaped\""
         }
         bool { return [lindex $v 1] }
@@ -543,11 +503,11 @@ proc core::value::show {v {withEvidence 0} {reveal 0}} {
         list {
             set parts {}
             foreach item [lindex $v 1] {
-                lappend parts [show $item $withEvidence $reveal]
+                lappend parts [show $item $debug $reveal]
             }
             return "\[[join $parts {, }]\]"
         }
-        result { return "[lindex $v 1]([show [lindex $v 2] $withEvidence $reveal])" }
+        result { return "[lindex $v 1]([show [lindex $v 2] $debug $reveal])" }
         struct {
             # {name: "Grace", age: 45} / Person {name: "Ada", age: 36}: field
             # names in slot order (anonymous: canonical sorted order). An
@@ -557,7 +517,7 @@ proc core::value::show {v {withEvidence 0} {reveal 0}} {
             }
             set parts {}
             foreach field [lrange [lindex $v 1] 1 end] item [lindex $v 2] {
-                lappend parts "$field: [show $item $withEvidence $reveal]"
+                lappend parts "$field: [show $item $debug $reveal]"
             }
             set text "{[join $parts {, }]}"
             if {[lindex $v 1 0] ne ""} {
@@ -569,7 +529,7 @@ proc core::value::show {v {withEvidence 0} {reveal 0}} {
             # Punctuation only; no semantic ordering is implied (item 87).
             set parts {}
             foreach item [lindex $v 1] {
-                lappend parts [show $item $withEvidence $reveal]
+                lappend parts [show $item $debug $reveal]
             }
             return "{[join $parts {, }]}"
         }

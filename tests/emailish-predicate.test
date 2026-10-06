@@ -1,73 +1,38 @@
-# emailish-predicate.test -- R2 (R2-ORDINARY-EMAILISH-PREDICATE.md): emailish?
-# as the canonical, ordinary Botlish predicate implementation, with Emailish?
-# kept as a temporary compatibility alias (core::native::alias).
+# emailish-predicate.test -- web::emailish?, the source-defined proof-producing
+# predicate of the source-defined refinement web::Emailish (lib/web.bot,
+# REFINEMENT-VALUES.md):
 #
-# The old architecture: lib/web.tcl's Emailish? predicate carried a
-# -native-body (a copied-per-call-site core IR literal expressing
-# emailRegex's grammar), substituted before HIR ever existed
-# (native::ExpandNativeBodies, native/native.tcl). This erased the call's
-# own predicate identity on the native (Cranelift) backend specifically (its
-# callee became a freshly-materialized, per-call-site anonymous Block
-# literal rather than a reference to the native), which (a) defeated
-# native/lower.tcl's `known`-fold for a statically redundant re-check (the
-# exact shape bench/refined-checks.ir's own `check` uses) and (b) left a
-# dead, materialized callee-position fnvalue that hir::specialize/
-# hir::range classified as an open generic instance.
+#   refined type Emailish = str
+#   fn emailish?(v: str) -> bool proves v: Emailish:
 #
-# The new architecture: emailish? is registered exactly like any other
-# validator-backed named-type predicate (core::type::definePredicate,
-# core/type.tcl) -- a native with -tests-type Emailish, -impl the Tcl
-# validator for interp/compile -- but with no -native-body at all. Its
-# executable form on the native backend is -module-fn {web emailish?}:
-# an ordinary cross-file Botlish function (lib/web.bot), compiled once and
-# referenced like any other module function (NATIVE-MODULES.md's own
-# uriEscape/web::uri_escape_text precedent). hir/types.tcl's BridgedNative
-# and its use in Call/hir::refine::branchFacts recover the predicate's own
-# {native emailish?} identity for known-folding and branch refinement even
-# though its call *target* for codegen is the ordinary resolved module
-# function -- so both the semantic win (redundant call eliminated) and the
-# closedness win (no anonymous per-call-site fnvalue) hold together.
-#
-# Emailish? is a *compatibility alias* for emailish? (core::native::alias):
-# both spellings resolve, via hir/resolve.tcl's RootBinding and
-# core::rootEnv, to the exact same root Binding/Symbol/native value -- one
-# registry entry, one refinement theorem, one HIR call target, one
-# specialization instance family. Never a runtime Block value, a wrapper
-# function, or a second predicate.
+# History: the predicate was a Tcl-registered native type test of a
+# Tcl-registered named type (lib/web.tcl), first with a per-call-site
+# -native-body, then (R2, R2-ORDINARY-EMAILISH-PREDICATE.md) bridged to this
+# same Botlish function through -module-fn, with an Emailish? compatibility
+# alias. Its redundant re-check was folded because the compiler knew the
+# native was a complete recognizer of a registered type. All of that is
+# gone: the type and its proof are ordinary declarations, and the re-check
+# is decided by generic exact predicate-result facts plus the compiler's
+# repeatability proof (hir/repeatable.tcl). This file pins the predicate's
+# behavior (the valid/invalid corpus NATIVE-TCL-UNICODE.md and
+# NATIVE-EMAILISH.md established), its proof, and the redundant check's
+# disappearance; refinement-values.test covers the language feature itself.
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 
-set parityBackends {interp compile cranelift-generic cranelift}
-
-proc fourWay {exprs} {
-    set shown [lmap b $::parityBackends {lindex [outcomeUnder $b $exprs] 1}]
-    if {[llength [lsort -unique $shown]] != 1} {
-        error "mismatch across $::parityBackends: $shown"
-    }
-    return [lindex $shown 0]
+proc emailishCall {address} {
+    return "import web\nweb::emailish?([Quote $address])\n"
 }
 
-proc emailishProgram {predicate s} {
-    return [list [list call [list ref $predicate] [list const str $s]]]
+# ADDRESS as a Botlish string literal.
+proc Quote {text} {
+    return "\"[string map {\\ \\\\ \" \\\" \n \\n} $text]\""
 }
 
 # ---------------------------------------------------------------------------
-# Both spellings work, on every backend.
-
-test emailish-predicate-lowercase-canonical {emailish? works directly, on all four backends} -body {
-    fourWay [emailishProgram emailish? someone@example.com]
-} -result true
-
-test emailish-predicate-uppercase-alias {Emailish? (the compatibility alias) works identically, on all four backends} -body {
-    fourWay [emailishProgram Emailish? someone@example.com]
-} -result true
-
-# ---------------------------------------------------------------------------
-# Semantic parity between spellings, and the valid/invalid corpus
-# NATIVE-TCL-UNICODE.md/NATIVE-EMAILISH.md already established (pinned
-# again here under both spellings, not re-derived): ordinary ASCII, an
-# accepted non-ASCII address, no "@", an invalid local part, an invalid
-# domain label, an invalid/too-short TLD, and boundary/empty cases.
+# The valid/invalid corpus, on every backend: ordinary ASCII, an accepted
+# non-ASCII address, no "@", an invalid local part, an invalid domain label,
+# an invalid/too-short TLD, and boundary/empty cases.
 
 foreach {label address expect} {
     ascii-valid                    someone@example.com          true
@@ -80,214 +45,99 @@ foreach {label address expect} {
     empty-string                   ""                            false
     at-only                        @                             false
 } {
-    test emailish-predicate-parity-$label "emailish?/Emailish? agree on \"$address\" ($expect), on every backend" -body {
-        list [fourWay [emailishProgram emailish? $address]] \
-             [fourWay [emailishProgram Emailish? $address]]
-    } -result [list $expect $expect]
+    test emailish-predicate-parity-$label "web::emailish? on \"$address\" is $expect, on every backend" -body {
+        sourceAgree [emailishCall $address]
+    } -result [list value $expect]
 }
 
 # ---------------------------------------------------------------------------
-# Same refinement theorem, keyed by semantic predicate identity, not spelling.
+# The proof: a true result refines the argument to web::Emailish in the true
+# branch only; the predicate is still an ordinary bool function.
 
-test emailish-predicate-refines-lowercase {a successful emailish?(s) call refines s to str[Emailish]} -body {
-    set hir [hirOf {bind s {const str a@b.io}} {if {call {ref emailish?} {ref s}} {block {} {ref s}} {block {} {ref s}}}]
-    hirRefTypes $hir s
-} -result {str {str[Emailish]} str}
+test emailish-predicate-refines {a successful web::emailish?(s) call refines s to Emailish in the true branch only} -body {
+    set hir [surface::compile {import web
 
-test emailish-predicate-refines-uppercase {a successful Emailish?(s) call refines s to str[Emailish] -- the identical fact, same spelling used to test it} -body {
-    set hir [hirOf {bind s {const str a@b.io}} {if {call {ref Emailish?} {ref s}} {block {} {ref s}} {block {} {ref s}}}]
-    hirRefTypes $hir s
-} -result {str {str[Emailish]} str}
+fn f(s: str):
+    if web::emailish?(s):
+        s
+    else:
+        s
+} -warnings off]
+    lrange [hirRefTypes $hir s] end-2 end
+} -result {str {str[web::Emailish]} str}
 
-test emailish-predicate-refines-cross-spelling {emailish?(s) then Emailish?(s): the second call sees the first's refinement, regardless of spelling} -body {
-    set code [core::compiler::generatedCode {
-        {bind f {block {s}
-            {if {call {ref emailish?} {ref s}}
-                {block {} {call {ref Emailish?} {ref s}}}
-                {block {} {ref false}}}}}
-        {call {ref f} {const str a@b.io}}
-    }]
-    # The second (cross-spelling) check is decided statically, never a
-    # native/module-function call: the "compile" backend never dispatches
-    # through -module-fn at all (only the native/cranelift backend does),
-    # so this pins that no qualified reference to the module implementation
-    # (web::emailish?, sharing emailish?'s own basename since R2.a.2 --
-    # R2A2-TRAILING-QUESTION-IDENTIFIERS.md) appears anywhere. Searching
-    # for the bare, unqualified "emailish?" would trivially always match
-    # (the raw HIR each call embeds always spells the root predicate that
-    # way), so this must search for the qualified spelling specifically.
-    list [regexp {callValue} $code] [regexp {web::emailish\?} $code]
-} -result {0 0}
+test emailish-predicate-ordinary-bool {the predicate's result is an ordinary bool value} -body {
+    sourceAgree {import web
 
-test emailish-predicate-refines-cross-spelling-reverse {Emailish?(s) then emailish?(s): same fact, opposite spelling order} -body {
-    set code [core::compiler::generatedCode {
-        {bind f {block {s}
-            {if {call {ref Emailish?} {ref s}}
-                {block {} {call {ref emailish?} {ref s}}}
-                {block {} {ref false}}}}}
-        {call {ref f} {const str a@b.io}}
-    }]
-    list [regexp {callValue} $code] [regexp {web::emailish\?} $code]
-} -result {0 0}
+x = web::emailish?("a@b.io")
+[x, not x]
+}
+} -result {value {[true, false]}}
+
+test emailish-predicate-signature {the HIR shows the proof contract on the function itself} -body {
+    set hir [surface::compile "import web\nweb::emailish?(\"a@b.io\")\n" -warnings off]
+    regexp -inline {block s[0-9]+ \(b[0-9]+ v:str\)[^\n]* declares bool proves b[0-9]+ v: str\[web::Emailish\]} [hir::format $hir]
+} -match glob -result {*proves b* v: str\[web::Emailish\]*}
 
 # ---------------------------------------------------------------------------
-# The redundant second predicate check disappears through existing HIR/
-# static machinery (hir/refine.tcl's decideTypeTest, unmodified in its own
-# logic -- only fed a recovered identity for a module-bridged call, hir/
-# types.tcl's BridgedNative) -- never a predicate-specific CSE rule, and
-# never runtime memoization. Pinned at both the HIR level (`known`) and the
-# native (Cranelift) machine-code level (zero calls for the redundant check).
+# The redundant second check disappears through generic machinery: an exact
+# predicate-result fact (the same function on the same value returned true
+# on this path) and the function's repeatability -- never the predicate's
+# name, never the refinement fact alone. Pinned at the HIR level (`known`)
+# and in NIR (one call of the shared validator, not two).
 
-test emailish-predicate-redundant-check-known-hir {a redundant emailish? re-check inside its own true branch is HIR-known true, not dynamic} -body {
-    set hir [hirOf \
-        {bind f {block {s}
-            {if {call {ref emailish?} {ref s}}
-                {block {} {call {ref emailish?} {ref s}}}
-                {block {} {ref false}}}}}]
-    set calls [hirFind $hir call]
-    # The inner call (the last one found, pre-order) is known true; the
-    # outer is genuinely dynamic.
-    lmap e $calls {hir::get $hir $e known}
+set redundant {import web
+
+fn f(s: str) -> str:
+    if web::emailish?(s):
+        if web::emailish?(s):
+            "yes"
+        else:
+            "no"
+    else:
+        "no"
+
+[f("someone@example.com"), f("nope")]
+}
+
+test emailish-predicate-repeatable {web::emailish? is proven repeatable} -body {
+    set hir [surface::compile $redundant -warnings off]
+    set block [hir::get $hir [lindex [hirFind $hir ref web::emailish?] 0] binding]
+    set value [hir::get $hir [dict get [hir::binding $hir $block] declaredBy] value]
+    hir::repeatable::explain $hir $value
+} -result {}
+
+test emailish-predicate-redundant-check-known-hir {a redundant re-check inside its own true branch is HIR-known true, not dynamic} -body {
+    set hir [surface::compile $redundant -warnings off]
+    set calls [lmap e [hirFind $hir call] {
+        if {[hir::kind $hir [hir::get $hir $e callee]] ne "ref"
+                || [hir::get $hir [hir::get $hir $e callee] name] ne "web::emailish?"} continue
+        hir::get $hir $e known
+    }]
+    set calls
 } -result {{} 1}
 
 test emailish-predicate-redundant-check-nir-shape {the redundant check compiles to exactly one call to the shared validator on cranelift, not two} -body {
-    set p {
-        {bind f {block {s}
-            {if {call {ref emailish?} {ref s}}
-                {block {} {if {call {ref Emailish?} {ref s}} {block {} {const yes}} {block {} {const no}}}}
-                {block {} {const no}}}}}
-        {call {ref f} {const str someone@example.com}}
-    }
-    set hir [nativeHirOfIR $p]
+    set hir [surface::compile $redundant -warnings off]
     set text [native::nir $hir]
     regexp {func (\d+) "web::emailish\?"} $text -> isEmailishId
-    # R2.a.1: web::emailish? is a closure (it captures its module-
-    # retained local_extra_chars), so the one real call is a `callenv`.
     list [regexp -all {func \d+ "web::emailish\?"} $text] \
          [regexp -all "= call(?:env)? $isEmailishId %" $text] \
-         [fourWay $p]
-} -result {1 1 {"yes"}}
+         [sourceAgree $redundant]
+} -result {1 1 {value {["yes", "no"]}}}
 
 # ---------------------------------------------------------------------------
-# No runtime Block alias object, no extra specialization instance, no
-# wrapper function: both spellings resolve to the identical HIR binding.
+# Instance structure of the motivating corpus program (bench/refined-
+# checks.bot): no anonymous callee-position instance, one instance per
+# scanner helper (scan_while one per exact predicate target, plus entries
+# only dormant callers reach), and check keeps its Int-keyed instance.
 
-test emailish-predicate-alias-same-binding {both spellings resolve to the identical BindingId/SymbolId (not merely equal metadata)} -body {
-    set hir [hirOf {call {ref list} {ref emailish?} {ref Emailish?}}]
-    set bindings [hirRefBindings $hir emailish?]
-    set aliasBindings [hirRefBindings $hir Emailish?]
-    list [llength $bindings] [llength $aliasBindings] [expr {$bindings eq $aliasBindings}]
-} -result {1 1 1}
+proc refinedChecksHir {} {
+    return [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot] -warnings off]
+}
 
-test emailish-predicate-alias-not-runtime-value {referencing Emailish? never constructs a Block value, on any backend -- both spellings are the native value {native emailish?}} -body {
-    list [core::eval {ref emailish?}] [core::eval {ref Emailish?}]
-} -result {{native emailish?} {native emailish?}}
-
-test emailish-predicate-alias-is-alias-not-registration {Emailish? is a core::native::alias, not a second registry entry} -body {
-    list [core::native::isAlias Emailish?] [core::native::isAlias emailish?] \
-         [core::native::canonicalName Emailish?] \
-         [expr {"Emailish?" in [core::native::names]}] [expr {"emailish?" in [core::native::names]}]
-} -result {1 0 emailish? 0 1}
-
-test emailish-predicate-alias-metadata-identical {both spellings' metadata is the identical registry entry} -body {
-    expr {[core::native::metadata Emailish?] eq [core::native::metadata emailish?]}
-} -result 1
-
-test emailish-predicate-no-second-instance {the two spellings never create two specialization instances: refined-checks.ir's real, dynamic call to the shared validator happens exactly once} -body {
-    set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
-    set text [native::nir $hir]
-    regexp -all {func \d+ "web::emailish\?"} $text
-} -result 1
-
-# ---------------------------------------------------------------------------
-# Alias collision semantics: an explicit alias, not case-insensitive lookup.
-# Botlish naming remains case-sensitive.
-
-test emailish-predicate-case-sensitive-otherwise {only the one declared alias unifies; case sensitivity is otherwise unchanged (an unrelated differently-cased name is simply unbound)} -body {
-    catch {core::eval {ref EMAILISH?}} m opts
-    list [dict get $opts -errorcode] [core::native::isAlias EMAILISH?]
-} -result {{CORE SEMANTIC UNBOUND} 0}
-
-# ---------------------------------------------------------------------------
-# Module/library loading path: the alias exists only once the "web" library
-# is loaded (opt-in, unchanged from before R2), and through the ordinary
-# module-loading path, not a hand-built isolated HIR fixture.
-
-test emailish-predicate-alias-opt-in {Emailish?/emailish? are opt-in: unavailable before core::loadLibrary web, both available (as one predicate) after} -body {
-    set child [interp create]
-    try {
-        $child eval [list source [file join $::projectRoot compiler compiler.tcl]]
-        set before [$child eval {expr {[core::native::isAlias Emailish?] || "emailish?" in [core::native::names]}}]
-        $child eval {core::loadLibrary web}
-        set canon [$child eval {core::native::canonicalName Emailish?}]
-        set both [$child eval {list [core::eval {ref emailish?}] [core::eval {ref Emailish?}]}]
-        list $before $canon $both
-    } finally {
-        interp delete $child
-    }
-} -result {0 emailish? {{native emailish?} {native emailish?}}}
-
-# ---------------------------------------------------------------------------
-# Existing source compatibility: an existing-style fixture that never
-# mentions the new lowercase name, and a lowercase canonical-use fixture,
-# both through the ordinary module-loading path (bench/refined-checks.ir
-# and examples/hir/06-refined-strings.hir, exercised by other suites) plus
-# a self-contained pair here.
-
-# (uriEscape combined with a result-typed if/ok/error-value branch hits a
-# separate, pre-existing native-lowering bug unrelated to R2 -- reproduced
-# and confirmed present on the unmodified tree via `git stash`: "native
-# lowering: binding bNN is not reachable from eNN", from uriEscape's own
-# -module-fn bridge (ModuleBridgeBinding) alone, with no Emailish?/emailish?
-# involved at all. Not this milestone's to fix (spec item 27); these
-# fixtures use only emailish?/Emailish? to stay focused on R2's own subject.)
-
-test emailish-predicate-existing-style-fixture {an existing-style fixture using only the historical Emailish? spelling compiles and behaves identically to before R2} -body {
-    set p {
-        {bind contact
-            {block {address}
-                {if {call {ref Emailish?} {ref address}}
-                    {block {} {const yes}}
-                    {block {} {const no}}}}}
-        {call {ref list}
-            {call {ref contact} {const str a@b.io}}
-            {call {ref contact} {const str nope}}}
-    }
-    fourWay $p
-} -result {["yes", "no"]}
-
-test emailish-predicate-canonical-style-fixture {the same fixture, spelled with the canonical lowercase name throughout} -body {
-    set p {
-        {bind contact
-            {block {address}
-                {if {call {ref emailish?} {ref address}}
-                    {block {} {const yes}}
-                    {block {} {const no}}}}}
-        {call {ref list}
-            {call {ref contact} {const str a@b.io}}
-            {call {ref contact} {const str nope}}}
-    }
-    fourWay $p
-} -result {["yes", "no"]}
-
-# ---------------------------------------------------------------------------
-# R2-specific range regression: the bridge-created open generic predicate
-# artifact (a dead, anonymous callee-position fnvalue) is gone. The scanner
-# closures' own entry Int facts were broad when this milestone landed
-# (hir::range::OpenInstances flagged them "open"), for a reason that
-# milestone identified and did not paper over: any nested closure with a
-# free-variable capture (v, n) was "open" under that classification
-# regardless of the native-body bridge. EXACT-CALLABLE-CLOSED-CALLER.md
-# retired that classification: hir::range now reads hir::specialize's one
-# authoritative InstanceClosed, which blockescape's every-reference-is-a-call
-# proof settles for these closures, so their entry Ranges now follow their
-# callers. See R2-ORDINARY-EMAILISH-PREDICATE.md's own census for the full
-# before/after instance/range tables; this regression pins the part that
-# *did* change then: no anonymous, unnamed callee-position instance exists
-# any more.
-
-test emailish-predicate-no-anonymous-callee-instance {no anonymous (unnamed) callee-position block instance exists for emailish? any more} -body {
-    set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+test emailish-predicate-no-anonymous-callee-instance {no anonymous (unnamed) callee-position block instance exists for web::emailish?} -body {
+    set hir [refinedChecksHir]
     set spec [hir::specialize::analyze $hir]
     set anonymous 0
     dict for {id instance} [dict get $spec instances] {
@@ -299,57 +149,22 @@ test emailish-predicate-no-anonymous-callee-instance {no anonymous (unnamed) cal
     set anonymous
 } -result 0
 
-# EXACT-CALLABLE-CLOSED-CALLER.md: still one instance per scanner helper
-# except where the milestone intends more -- scan_while has one codegen
-# instance per exact predicate target (local_char?, str::is_tcl_alpha), plus the
-# generic entry its Block value would need (it is de-closure-converted, so
-# that one is never emitted), and local_char? keeps its generic instance for
-# the Block value passed as an argument next to its exact-call instance. The
-# old native-body bridge's failure mode (one copy per call site) would show
-# up as a larger count for the other helpers.
-# Loss point 1 (GENERIC-PREDICATE-PROOF-LOSS.md): char_at, tld?, domain? and
-# scan_while are called with Ints, so their calls select <int> instances and
-# each keeps its never-entered generic Block-value entry (dormant, not
-# emitted); scan_while also keeps the instance only tld?<generic> calls
-# (scan_while<any, native(str::is_tcl_alpha)>, dormant too).
-test emailish-predicate-check-scanner-instance-count {every scanner helper (and web::emailish? itself) is one emitted instance plus, for the Int-keyed closures, the never-entered generic entry; scan_while has one per exact predicate target, the generic entry and the instance only the dormant tld?<generic> reaches; local_char? its exact-call instance plus the generic Block-value entry} -body {
-    set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+test emailish-predicate-check-scanner-instance-count {every scanner helper (and web::emailish? itself) is one emitted instance plus, for the Int-keyed closures, the never-entered generic entry} -body {
+    set hir [refinedChecksHir]
     set spec [hir::specialize::analyze $hir]
     set counts [dict create]
     dict for {id instance} [dict get $spec instances] {
         if {$id ni [dict get $spec used]} continue
         set name [dict get $instance name]
-        if {$name in {web::emailish? char_at scan_while local_char? label_char? tld? domain?
-                scan_local scan_label scan_alpha tld_ok domain_loop is_local_char is_label_char}} {
+        if {$name in {web::emailish? char_at scan_while local_char? label_char? tld? domain?}} {
             dict incr counts $name
         }
     }
     lmap name [lsort [dict keys $counts]] {list $name [dict get $counts $name]}
 } -result {{char_at 2} {domain? 2} {label_char? 1} {local_char? 2} {scan_while 4} {tld? 2} {web::emailish? 1}}
 
-# ---------------------------------------------------------------------------
-# check.n control: R2 did not disturb M9's own pre-existing improvement of
-# check's own `n` parameter ([0, 400], from check's Int-keyed instance).
-#
-# R2.a.1 (R2A1-MODULE-FN-BRIDGE-REACHABILITY.md) lost it: local_extra_chars
-# was module-retained again, so web::emailish? captured it and was a
-# closure; check reached that closure the way any caller of a module
-# closure did -- by capturing web::emailish?'s binding -- so check itself
-# became a closure with a non-Int capture, forcing hir::specialize's
-# code-growth bound for value-capturing closures to key it generically
-# (check<generic>, parameters `any`), with no Int-keyed instance left for
-# M9's own instance-entry Int fact to attach to.
-#
-# MODULE-STATIC-RETAINED-VALUES.md fixes the actual defect R2.a.1 could only
-# report: local_extra_chars is a module-static reference, never a capture,
-# so web::emailish? (and, transitively, check) no longer captures anything
-# merely to reach it. check recovers its own non-generic, Int-keyed instance
-# naturally, with no specialization-policy change of any kind (spec item 23
-# -- this is exactly the fall-out the milestone predicted, not a change made
-# to get here): check<int, int, str, str>, and check.n recovers [0, 400].
-
-test emailish-predicate-check-n-control {check's own n parameter range recovers to [0,400]: check is check<int, int, str, str> again, not check<generic> -- web::emailish? no longer captures local_extra_chars, so check no longer captures web::emailish? either} -body {
-    set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+test emailish-predicate-check-n-control {check's own n parameter range is [0,400]: check is check<int, int, str, str>} -body {
+    set hir [refinedChecksHir]
     set spec [hir::specialize::analyze $hir]
     set analysis [hir::range::analyze $hir $spec]
     set id ""
@@ -361,5 +176,46 @@ test emailish-predicate-check-n-control {check's own n parameter range recovers 
     list [hir::specialize::label $spec $id] \
         [lindex [lmap p [dict get [dict get $analysis instances $id] params] {hir::range::show $p}] 0]
 } -result [list check<int,\ int,\ str,\ str> "\[0, 400\]"]
+
+# ---------------------------------------------------------------------------
+# Module-retained values (formerly pinned through the -module-fn bridge,
+# module-fn-bridge-reachability.test, deleted with the bridge): emailish?'s
+# module-retained local_extra_chars is built once at module initialization,
+# never per call, and a user-defined block calling the predicate behaves the
+# same on every backend.
+
+test emailish-predicate-set-retained-once {refined-checks.bot: local_extra_chars' List and ImmutableSet are each constructed exactly once (module init), none per emailish? call} -body {
+    set hir [refinedChecksHir]
+    set webPath [file normalize [file join $::projectRoot lib web.bot]]
+    set line [lsearch -regexp [split [core::ReadFile $webPath] \n] {^local_extra_chars = }]
+    incr line
+    set sites {}
+    foreach site [dict get [native::allocationReport $hir sites] sites] {
+        set loc [dict get $site location]
+        if {[dict exists $loc file] && [file normalize [dict get $loc file]] eq $webPath
+                && [dict get $loc line] == $line} {
+            lappend sites [list [dict get $site operation] [dict get $site allocations]]
+        }
+    }
+    set text [native::nir $hir]
+    set body [lindex [regexp -inline {func \d+ "web::emailish\?"[^\n]*\n(.*?)\nend} $text] 1]
+    list [lsort $sites] [regexp -all {op setfromlist} $body] [regexp -all {op listnew} $body]
+} -result {{{listnew 1} {setfromlisttotal 1}} 0 0}
+
+test emailish-predicate-user-block {a user-defined block calling web::emailish?, refining and re-checking, on every backend} -body {
+    sourceAgree {import web
+
+fn check(s: str):
+    if web::emailish?(s):
+        if s.emailish?():
+            s
+        else:
+            "no"
+    else:
+        "no"
+
+[check("someone@example.com"), check("not-an-email"), check("café@例え.テスト")]
+}
+} -result {value {["someone@example.com", "no", "café@例え.テスト"]}}
 
 ::tcltest::cleanupTests

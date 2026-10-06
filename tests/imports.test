@@ -653,11 +653,11 @@ test imports-type-declaration-before-import-is-rejected {a declaration cannot pr
     }
 } -result SYNTAX
 
-test imports-type-collision-builtin {a type import may not bind a built-in type name (Emailish is registered by the compiler)} -body {
+test imports-type-collision-builtin {a type import may not bind a built-in type name (NonEmpty is registered by the test harness, process-wide like any compiler-registered type)} -body {
     withScratchLibrary {
         writeModule $dir shadowy "type Int2 = Int in 0..9\n"
-        writeModule $dir shadowy2 "type Emailish = Int in 0..9\n"
-        list [rejectionKind "import type shadowy::Int2\n1\n"] [rejectionKind "import type shadowy2::Emailish\n1\n"]
+        writeModule $dir shadowy2 "type NonEmpty = Int in 0..9\n"
+        list [rejectionKind "import type shadowy::Int2\n1\n"] [rejectionKind "import type shadowy2::NonEmpty\n1\n"]
     }
 } -result {accepted TYPE-IMPORT-COLLISION}
 

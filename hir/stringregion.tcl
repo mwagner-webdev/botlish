@@ -87,8 +87,8 @@
 # regions" section), never a materialized one-character String.
 #
 # A *user-defined* one-parameter predicate wholly built from those same three
-# native shapes -- `is_local_char`/`is_label_char` in lib/web.tcl's Emailish?
-# native-body are exactly this: `fn is_local_char(c): str::is_tcl_alnum(c) or c ==
+# native shapes -- `local_char?`/`label_char?` in lib/web.bot's emailish?
+# are exactly this: `fn local_char?(c): str::is_tcl_alnum(c) or c ==
 # "." or ...` -- is itself then just as safely region-consuming at that
 # parameter: every one of its own reachable uses of the parameter is already
 # one of the three supported shapes, so calling it with a region argument

@@ -13,7 +13,7 @@
 # added. These tests pin that existing behavior down directly at the
 # parameter level (dict get ... params), the one place the prior
 # milestone's own tests did not look, plus the one real end-to-end case
-# (byte::nibble, from bench/refined-checks.ir) this milestone exists to
+# (byte::nibble, from bench/refined-checks.bot) this milestone exists to
 # answer. No test here mentions Byte/Nibble/HighNibble in any assertion
 # except the real-corpus one, and that one only because it *is* the
 # question this milestone was asked to answer -- the rest use plain
@@ -74,8 +74,7 @@ proc paramRanges {analysis id} {
 # code path here is specific to Byte/Nibble/HighNibble by name.
 
 proc refinedChecksFacts {} {
-    set hir [nativeHirOfIR [core::loadProgramFile \
-        [file join $::projectRoot bench refined-checks.ir]]]
+    set hir [refinedChecksSourceHir]
     set spec [hir::specialize::analyze $hir]
     return [list $hir $spec [hir::range::analyze $hir $spec]]
 }

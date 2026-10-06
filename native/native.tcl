@@ -6,7 +6,7 @@
 # Pipeline (DIRECT-HIR-NATIVE-PATH.md):
 #
 #   source --surface--> resolved + analyzed HIR
-#       --native::prepareHir--> HIR with native implementations attached
+#       --native::prepareHir--> HIR with -strict 0 contracts recovered
 #       --native::lowered (native::lower::program, lower.tcl)--> NIR
 #       --botlish-native--> Cranelift IR --> machine code (JIT / object /
 #                                            standalone executable) --> value
@@ -24,7 +24,7 @@
 # escape, traversal and construction analyses are run once by
 # native::lower::program on that HIR. See "Analysis ownership" in
 # DIRECT-HIR-NATIVE-PATH.md. The one exception is native::prepareHir, which
-# adds a native's module implementation to the HIR and re-checks it.
+# drops a -strict 0 HIR's violated declared parameter types and re-checks it.
 #
 # The Rust driver native/target/release/botlish-native does the rest (build
 # it with `cargo build --release` in native/). Each run is one process: the
@@ -32,7 +32,7 @@
 # error comes back on standard output. Only program mode is supported: a
 # native program cannot run in, or return, a Tcl environment.
 #
-#   native::prepareHir HIR              HIR with native implementations attached
+#   native::prepareHir HIR              HIR with -strict 0 contracts recovered
 #   native::lowered HIR ?OPTIONS?       HIR -> NIR, the one HIR->NIR entry point
 #                                       (a dict: text, functions, statistics)
 #   native::evalHir HIR ?OPTIONS?       runs a program-mode HIR program

@@ -653,107 +653,6 @@ proc hir::CheckOnce {hirVar demote} {
     hir::structs::promoteOpacity hir
 }
 
-# Resolves TARGETS (flat NATIVE-NAME NAMESPACE NAME triples,
-# hir::buildSyntax's -module-native-targets) into HIR's own
-# moduleNativeTargets field: NATIVE-NAME -> {BLOCK-EXPRID ARITY}, consulted
-# by hir::types::BindingType. NAMESPACE::NAME must already be a module
-# definition somewhere in this same HIR (hir::resolve has already run, so
-# its `modules` table, hir/resolve.tcl, is populated): a caller-side bug (a
-# namespace/name the loader never actually merged in) is a plain Tcl
-# error, not a user-facing diagnostic.
-proc hir::ResolveModuleNativeTargets {hirVar targets} {
-    upvar 1 $hirVar hir
-    if {$targets eq ""} {
-        return
-    }
-    set resolved [dict create]
-    set bridged [dict create]
-    foreach {nativeName ns name} $targets {
-        if {![dict exists $hir modules $ns]} {
-            error "hir::buildSyntax: -module-native-targets: module \"$ns\" was not loaded into this program"
-        }
-        set bodyScope [dict get $hir modules $ns]
-        # hir::hygiene::qualifyModules (run between hir::resolve::program
-        # and here -- hir::buildSyntax) has already renamed every binding
-        # this scope declares, and its own `names` entry, from NAME to
-        # "${ns}::${name}"; look it up under that spelling.
-        set qualified "${ns}::${name}"
-        if {![dict exists $hir scopes $bodyScope names $qualified]} {
-            error "hir::buildSyntax: -module-native-targets: module \"$ns\" has no definition \"$name\""
-        }
-        set b [dict get $hir scopes $bodyScope names $qualified]
-        set bindExpr [dict get $hir bindings $b declaredBy]
-        set value [dict get $hir exprs $bindExpr value]
-        if {[dict get $hir exprs $value kind] ne "block"} {
-            error "hir::buildSyntax: -module-native-targets: \"${ns}::${name}\" is not bound to a function"
-        }
-        dict set resolved $nativeName [list $value [llength [dict get $hir exprs $value params]]]
-        set root [dict get $hir scopes [dict get $hir top] parent]
-        dict set bridged [dict get $hir scopes $root names $nativeName] $b
-    }
-    dict set hir moduleNativeTargets $resolved
-    BridgeProvenance hir $bridged
-}
-
-# Records, for every reference to a bridged native's root binding (BRIDGED:
-# root BindingId -> the target module function's own BindingId; an alias
-# spelling shares its canonical name's root binding, so both are covered),
-# what that reference now denotes on this backend: the module function's
-# Block value, which lives in the module function's own binding -- not the
-# native's root binding, which every region reaches for free.
-#
-#   * `bridge` (on the ref) is that module BindingId: the one place native
-#     lowering (native/lower.tcl's ModuleBridgeBinding) reads the bridged
-#     function's value from.
-#   * Every block enclosing the reference reaches that module binding
-#     exactly as a module-qualified reference to it
-#     (hir::resolve::ResolveQualifiedRef) already makes them reach it -- so a
-#     caller reaches the bridged function the same way an ordinary
-#     `NAMESPACE::NAME` call from the same place would. The bridged target is
-#     always itself a module function (a module section's own binding, MODULE
-#     -STATIC-RETAINED-VALUES.md's `staticRefs`), so this records module-
-#     static provenance the same way hir::resolve::Capture does, never an
-#     ordinary lexical capture -- the bridge's target no longer forces every
-#     caller's enclosing function to become closure-valued merely to reach
-#     it.
-#
-# Only the function's own binding is recorded, never anything *it*
-# references: the function's module dependencies were resolved into its own
-# body's own staticRefs/captures by ordinary resolution, where it is defined
-# (its module section), and stay there. hir::resolve cannot do this itself:
-# the bridge's targets are only resolved here, after resolution and hygiene
-# (a bridged reference may also precede the target's own module section).
-proc hir::BridgeProvenance {hirVar bridged} {
-    upvar 1 $hirVar hir
-    if {[dict size $bridged] == 0} {
-        return
-    }
-    dict for {e node} [dict get $hir exprs] {
-        if {[dict get $node kind] ne "ref" || ![dict exists $node binding]
-                || ![dict exists $bridged [dict get $node binding]]} {
-            continue
-        }
-        set b [dict get $bridged [dict get $node binding]]
-        dict set hir exprs $e bridge $b
-        set bindingScope [dict get $hir bindings $b scope]
-        set static [isModuleScope $hir $bindingScope]
-        for {set s [dict get $node scope]} {$s ne ""} {set s [dict get $hir scopes $s parent]} {
-            if {[dict get $hir scopes $s kind] ne "block"} {
-                continue
-            }
-            if {!$static && [scopeWithin $hir $bindingScope $s]} {
-                break
-            }
-            set block [dict get $hir scopes $s owner]
-            set field [expr {$static ? "staticRefs" : "captures"}]
-            set list [dict get $hir exprs $block $field]
-            if {$b ni $list} {
-                dict set hir exprs $block $field [concat $list [list $b]]
-            }
-        }
-    }
-}
-
 proc hir::Options {command defaults given} {
     set options [dict create {*}$defaults]
     foreach {option value} $given {
@@ -1051,7 +950,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {syntax imports resolve flags contexts refcheck hygiene sourcetypes structs syscall errordecls types exactvalue signatures modulebinding refine lower format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep warnings} {
+    foreach file {syntax imports resolve flags contexts refcheck hygiene sourcetypes structs syscall errordecls types exactvalue signatures modulebinding refine repeatable lower format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep warnings} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

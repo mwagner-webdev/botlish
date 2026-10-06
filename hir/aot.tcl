@@ -657,20 +657,6 @@ proc hir::aot::VisitCall {hir stateVar region e node tails statics} {
         Fact state $region [dict merge [FactOf $hir direct-call $e] \
             [dict create block $target name $name tail [expr {$e in $tails}] \
                 self [expr {$target eq $region}]]]
-        # A module-bridged native (native::prepareHir): the module function
-        # replaces only the native's implementation. Its declared parameter
-        # kinds are still checked first, under the native's name, as
-        # core::native::invoke and the native's own impl check them on the
-        # reference backends -- the module function's body may check them
-        # later under another name (length), or not at all.
-        set bridged [hir::types::BridgedNative $hir $callee]
-        if {$bridged ne "" && [dict get $node known] eq ""} {
-            foreach arg $args param [dict get [core::native::metadata $bridged] paramTypes] {
-                if {$arg ne "" && $param ne ""} {
-                    Require $hir state $region $e $arg $param TYPE $bridged
-                }
-            }
-        }
         dict update state regions regions {
             if {$target ni [dict get $regions $region callees]} {
                 dict set regions $region callees [concat [dict get $regions $region callees] [list $target]]

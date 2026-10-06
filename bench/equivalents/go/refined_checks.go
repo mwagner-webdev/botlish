@@ -66,13 +66,31 @@ func emailish(s string) bool {
     }
 }
 
-type UriQueryValue string
-
-func uriQueryValue(q UriQueryValue) bool {
+// uriQueryValue is the structural check of lib/web.bot's
+// web::uri_query_value? (unreserved characters and "%XX" uppercase-hex
+// triplets only), run on the escaped query each time, as the Botlish program
+// does (REFINEMENT-VALUES.md).
+func uriQueryValue(q string) bool {
+    hex := func(c byte) bool { return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') }
+    b := []byte(q)
+    for i := 0; i < len(b); {
+        c := b[i]
+        if c == '%' {
+            if i+2 < len(b) && hex(b[i+1]) && hex(b[i+2]) {
+                i += 3
+                continue
+            }
+            return false
+        }
+        if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '~' || c == '-') {
+            return false
+        }
+        i++
+    }
     return true
 }
 
-func uriEscape(s string) UriQueryValue {
+func uriEscape(s string) string {
     var out strings.Builder
     for _, r := range s {
         if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '~' || r == '-' {
@@ -83,10 +101,10 @@ func uriEscape(s string) UriQueryValue {
             }
         }
     }
-    return UriQueryValue(out.String())
+    return out.String()
 }
 
-func check(n int64, acc int64, s string, q UriQueryValue) int64 {
+func check(n int64, acc int64, s string, q string) int64 {
     if n <= 0 {
         return acc
     }

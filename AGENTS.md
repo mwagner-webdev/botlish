@@ -245,3 +245,17 @@ do not add another opt-out (MULTI-VALUE-RESULTS.md). Library
 modules' own findings print for every program that loads them (the corpus is
 frozen), so tests that import `lib/*.bot` and assert on a complete warning set
 filter by code or file.
+
+## Refinement values
+
+`refined type NAME = CARRIER` and `proves PARAM: NAME` (REFINEMENT-VALUES.md)
+are generic: no compiler or runtime file may name a corpus refinement or its
+predicate (`tests/refinement-values.test` greps for `Emailish`,
+`UriQueryValue`, `emailish?`, `uri_query_value?`), and a refined value has
+exactly its carrier's representation -- never add a runtime tag, wrapper or
+check to recover one. If you change the proof contract resolution
+(`hir/resolve.tcl`'s `ResolveProofs`), implications or call keys
+(`hir/refine.tcl`), the `if` join or the decided-call rule (`hir/types.tcl`),
+repeatability (`hir/repeatable.tcl`) or a native's `-context-free`
+classification, run `tests/refinement-values.test`,
+`tests/emailish-predicate.test` and `audit/refinement-values/tools/fuzz.tcl`.

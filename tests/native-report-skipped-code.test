@@ -199,14 +199,13 @@ test native-report-skipped-code-8 {a construction operand typed never (a String 
     }
 } -result {{1 0 0 0 0 0} {1 0 0 0 0 0}}
 
-test native-report-skipped-code-9 {a call the lowering ends although HIR types it as completing: a bridged native's known error, an ARITY raise} -body {
-    list [reportCounts {
-fn f(n):
-    emailish?(5)
-    n + 1
-
-f(7)
-}] [reportCounts {
+# (This test also pinned "a bridged native's known error": a call of a
+# -module-fn native with a statically wrong argument kind, whose lowering
+# ended in the native's failing guard. The bridge is gone with
+# REFINEMENT-VALUES.md; a plain native's known error is a guard that fails at
+# run time, and the code after it is lowered and counted as usual.)
+test native-report-skipped-code-9 {a call the lowering ends although HIR types it as completing: an ARITY raise} -body {
+    reportCounts {
 fn g(a):
     a
 
@@ -215,8 +214,8 @@ fn f(n):
     n + 1
 
 f(7)
-}]
-} -result {{1 0 0 0 0 1} {1 0 0 0 0 0}}
+}
+} -result {1 0 0 0 0 0}
 
 test native-report-skipped-code-10 {nothing is skipped where both outcomes stay possible: a returning arm, a handled error} -body {
     list [reportCounts {

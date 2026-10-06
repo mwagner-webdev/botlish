@@ -1,0 +1,1334 @@
+# refinement-values.test -- source-defined refinement types and proof-producing
+# functions (REFINEMENT-VALUES.md):
+#
+#   refined type Emailish = str
+#   fn emailish?(v: str) -> bool proves v: Emailish:
+#
+# A refinement is a nominal fact attached to an existing value: a proof may
+# strengthen the static view, forgetting weakens it, and neither changes the
+# value itself. This file pins the language feature generically, with its own
+# small refinements (Mail, Query, Encoded, ...), and the lib/web.bot corpus
+# (web::Emailish, web::UriQueryValue) where the corpus is the point.
+#
+# Every behavioral case runs on interp, compile, cranelift-generic and
+# cranelift (sourceAgree): proof availability, acceptance and rejection,
+# forgetting, joins, return checking and predicate behavior are the front
+# end's (one HIR), and every backend must compute the same value from it.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+# The kind and location-free message of the first compile rejection of
+# SOURCE, or "accepted".
+proc rejection {source} {
+    if {[catch {surface::compile $source -warnings off} message options]} {
+        set code [dict get $options -errorcode]
+        set kind [expr {[lindex $code 1] eq "SYNTAX" ? "SYNTAX" : [lindex $code end]}]
+        return [list $kind [regsub {^[^ ]*:[0-9]+:[0-9]+: } $message {}]]
+    }
+    return accepted
+}
+
+proc rejectionKind {source} {
+    return [lindex [rejection $source] 0]
+}
+
+# The shown static type of the binding NAME (its bind expression) in HIR.
+proc boundTypeOf {hir name} {
+    set binds [hirFind $hir bind $name]
+    return [hir::types::show [hir::typeOf $hir [lindex $binds end]]]
+}
+
+# The `known` field of every call of the function spelled NAME in HIR, in
+# pre-order.
+proc knownOf {hir name} {
+    return [lmap e [hirFind $hir call] {
+        set callee [hir::get $hir $e callee]
+        if {[hir::kind $hir $callee] ne "ref" || [hir::get $hir $callee name] ne $name} continue
+        hir::get $hir $e known
+    }]
+}
+
+# The body lines of NIR function NAME in NIR text, with register numbers,
+# expression origins and function ids normalized away.
+proc nirBody {nir name} {
+    set lines {}
+    set inside 0
+    foreach line [split $nir \n] {
+        if {[string match "func *" $line]} {
+            set inside [string match "func * \"$name\" *" $line]
+            continue
+        }
+        if {$line eq "end"} {
+            set inside 0
+            continue
+        }
+        if {$inside} {
+            lappend lines [regsub -all {@e[0-9]+} [string trim $line] ""]
+        }
+    }
+    return $lines
+}
+
+# The common declarations most cases below use: two sibling refinements of
+# str, a refinement of a refinement, their proof-producing predicates (a
+# second predicate of Mail, and a predicate proving Encoded from a Query).
+set prelude {import list
+import str
+
+refined type Mail = str
+refined type Query = str
+refined type Encoded = Query
+
+fn mail?(s: str) -> bool proves s: Mail:
+    str::length(s) > 3
+
+fn other_mail?(s: str) -> bool proves s: Mail:
+    str::length(s) > 4
+
+fn query?(s: str) -> bool proves s: Query:
+    str::length(s) > 0
+
+fn encoded?(q: Query) -> bool proves q: Encoded:
+    str::length(q) > 1
+
+fn send(m: Mail) -> int:
+    str::length(m)
+
+fn show(s: str) -> str:
+    s
+
+}
+
+# ===========================================================================
+# 1-3. Declaration syntax, namespace and identity
+
+test refinement-decl-parses {"refined type NAME = CARRIER" is a declaration with its own AST form} -body {
+    surface::formatAst [surface::parse "refined type Mail = str\nrefined type Encoded = Query\n"]
+} -match glob -result {*refined type Mail = str*refined type Encoded = Query*}
+
+test refinement-refined-is-contextual {"refined" is an ordinary name everywhere but before "type"} -body {
+    sourceAgree {fn refined(x):
+    x + 1
+
+refined_value = refined(41)
+[refined_value]
+}
+} -result {value {[42]}}
+
+test refinement-proves-is-contextual {"proves" is an ordinary name everywhere but after a result type} -body {
+    sourceAgree {fn f(proves):
+    proves + 1
+
+proves = 2
+[f(proves), proves]
+}
+} -result {value {[3, 2]}}
+
+test refinement-proves-in-ast {the proof clause is part of the function node} -body {
+    surface::formatAst [surface::parse "fn mail?(s: str) -> bool proves s: Mail:\n    true\n"]
+} -match glob -result {*fn mail? (s:str) proves s: Mail*}
+
+test refinement-one-carrier {a refinement has exactly one carrier: no intersections, unions or extra carriers} -body {
+    list [rejectionKind "refined type A = str, int\n1\n"] \
+         [rejectionKind "refined type A = str in 0..1\n1\n"] \
+         [rejectionKind "refined type A\n1\n"]
+} -result {SYNTAX SYNTAX SYNTAX}
+
+test refinement-type-without-refined {a "type NAME = T" without a domain points at "refined type"} -body {
+    rejection "type Mail = str\n1\n"
+} -match glob -result {SYNTAX {*refinement of another type is declared "refined type Mail = CARRIER"*}}
+
+test refinement-nested-declaration {a refinement is declared only at the top level} -body {
+    rejectionKind "fn f():\n    refined type A = str\n    1\nf()\n"
+} -result SYNTAX
+
+test refinement-stray-modifier {"refined" modifies only a type declaration} -body {
+    list [rejection "refined struct A:\n    x: int\n1\n"] [rejectionKind "refined fn f():\n    1\nf()\n"]
+} -match glob -result {{SYNTAX {*"refined" only modifies a type declaration*}} SYNTAX}
+
+test refinement-nominal-identity {a refinement is a new nominal type, not an alias: Mail, Query and str are three types} -body {
+    list [rejectionKind "$prelude\nfn f(s: str) -> int:\n    if query?(s):\n        send(s)\n    else:\n        0\nf(\"abcd\")\n"] \
+         [rejectionKind "$prelude\nsend(\"abcd\")\n"] \
+         [rejectionKind "$prelude\nfn f(s: str) -> int:\n    if mail?(s):\n        send(s)\n    else:\n        0\nf(\"abcd\")\n"]
+} -result {TYPE TYPE accepted}
+
+test refinement-registry-metadata {the registry keeps canonical identity, carrier, owner and declaration span} -body {
+    set hir [surface::compile "$prelude\n1\n" -warnings off]
+    set meta [core::type::refinementOf Encoded]
+    list [core::type::isRefinement Mail] [dict get $meta carrier] [dict get $meta owner] \
+         [dict get $meta span line] [lsearch -inline -index 1 [lmap e [hir::sourceTypes $hir] {list [dict get $e kind] [dict get $e name]}] Encoded]
+} -result {1 {refined str Query} {} 6 {refined Encoded}}
+
+# ===========================================================================
+# 3, 17, 81. Modules: namespace identity, import type, minting authority
+
+proc withRefinementModules {script} {
+    set saved $::core::libraryDir
+    set dir [tcltest::makeDirectory refinement-values-lib-[pid]-[incr ::refinementLibCounter]]
+    set ::core::libraryDir $dir
+    try {
+        file mkdir [file join $dir validation]
+        foreach {name text} {
+            validation {import str
+
+refined type Mail = str
+
+fn mail?(s: str) -> bool proves s: Mail:
+    str::length(s) > 3
+
+fn send(m: Mail) -> int:
+    str::length(m)
+}
+            validation/sub {import validation
+
+fn noop():
+    1
+}
+            consumer {import validation
+import type validation::Mail
+
+fn deliver(m: Mail) -> int:
+    validation::send(m)
+}
+        } {
+            set channel [open [file join $dir {*}[split $name /]].bot w]
+            fconfigure $channel -encoding utf-8
+            puts -nonewline $channel $text
+            close $channel
+        }
+        uplevel 1 $script
+    } finally {
+        set ::core::libraryDir $saved
+        tcltest::removeDirectory [file tail $dir]
+    }
+}
+set ::refinementLibCounter 0
+
+test refinement-module-identity {a module's refinement has its path-derived identity, usable qualified and through import type} -body {
+    withRefinementModules {
+        sourceAgree {import validation
+import consumer
+import type validation::Mail
+
+fn ok(s: str) -> int:
+    if validation::mail?(s):
+        consumer::deliver(s) + validation::send(s)
+    else:
+        0
+
+fn short(m: Mail) -> Mail:
+    m
+
+[ok("abcd"), ok("ab")]
+} {interp compile cranelift}
+    }
+} -result {value {[8, 0]}}
+
+test refinement-import-grants-no-authority {an importing module or program cannot mint another module's refinement} -body {
+    withRefinementModules {
+        list [rejection {import type validation::Mail
+
+fn fake?(s: str) -> bool proves s: Mail:
+    true
+
+1
+}] [rejectionKind {import validation
+
+fn fake?(s: str) -> bool proves s: validation::Mail:
+    true
+
+1
+}]
+    }
+} -match glob -result {{REFINEMENT-MINT-AUTHORITY {*the entry program cannot declare a proof of refinement validation::Mail: only its owning module "validation" may mint it*}} REFINEMENT-MINT-AUTHORITY}
+
+test refinement-child-namespace-grants-no-authority {a child namespace of the owner cannot mint it either} -body {
+    withRefinementModules {
+        set channel [open [file join $::core::libraryDir validation sub.bot] w]
+        puts -nonewline $channel "import type validation::Mail\n\nfn fake?(s: str) -> bool proves s: Mail:\n    true\n"
+        close $channel
+        rejection "import validation::sub\n1\n"
+    }
+} -match glob -result {REFINEMENT-MINT-AUTHORITY {*module "validation::sub" cannot declare a proof of refinement validation::Mail*}}
+
+test refinement-two-importers-cannot-mint {two modules importing the same refinement: neither may mint it, and the cached declaration keeps its owner} -body {
+    withRefinementModules {
+        foreach name {first second} {
+            set channel [open [file join $::core::libraryDir $name.bot] w]
+            puts -nonewline $channel "import type validation::Mail\n\nfn fake?(s: str) -> bool proves s: Mail:\n    true\n"
+            close $channel
+        }
+        list [rejectionKind "import first\n1\n"] [rejectionKind "import second\n1\n"] \
+             [rejectionKind "import validation\nimport first\nimport second\n1\n"] \
+             [dict get [core::type::refinementOf validation::Mail] owner]
+    }
+} -result {REFINEMENT-MINT-AUTHORITY REFINEMENT-MINT-AUTHORITY REFINEMENT-MINT-AUTHORITY validation}
+
+test refinement-owner-entry-program {the entry program owns its own refinements} -body {
+    sourceAgree "$prelude\nfn f(s: str) -> int:\n    if mail?(s):\n        send(s)\n    else:\n        0\n\[f(\"abcd\"), f(\"ab\")\]\n"
+} -result {value {[4, 0]}}
+
+# ===========================================================================
+# 5. Chains and cycles
+
+test refinement-chain-forgets-transitively {Encoded forgets to Query and to str; no strengthening back} -body {
+    list [sourceAgree "$prelude
+fn as_query(q: Query) -> str:
+    q
+
+fn f(s: str) -> str:
+    if query?(s):
+        if encoded?(s):
+            str::concat(as_query(s), show(s))
+        else:
+            \"no\"
+    else:
+        \"no\"
+
+\[f(\"ab\"), f(\"a\")\]
+"] [rejectionKind "$prelude
+fn need(e: Encoded) -> int:
+    1
+
+fn f(s: str) -> int:
+    if query?(s):
+        need(s)
+    else:
+        0
+
+f(\"ab\")
+"]
+} -result {{value {["abab", "no"]}} TYPE}
+
+test refinement-cycle {a cyclic carrier chain is CYCLIC-REFINEMENT} -body {
+    list [rejection "refined type A = B\nrefined type B = A\n1\n"] \
+         [rejectionKind "refined type A = A\n1\n"] \
+         [rejectionKind "refined type A = B\nrefined type B = C\nrefined type C = A\n1\n"]
+} -match glob -result {{CYCLIC-REFINEMENT {cyclic refinement: "*" is its own carrier through *}} CYCLIC-REFINEMENT CYCLIC-REFINEMENT}
+
+test refinement-chain-order-independent {a carrier may be declared later in the same file} -body {
+    sourceAgree "refined type Late = Early\nrefined type Early = str\n1\n"
+} -result {value 1}
+
+# ===========================================================================
+# 6, 85. Carrier eligibility: a semantic rule, not spelling
+
+test refinement-carrier-eligible {scalar value carriers, integer domains and refinements are eligible} -body {
+    sourceAgree {import type byte::Byte
+
+refined type Flag = bool
+refined type Letter = UnicodeChar
+refined type Even = int
+refined type EvenByte = Byte
+refined type Text = str
+refined type Short = Text
+
+fn even?(n: int) -> bool proves n: Even:
+    mod(n, 2) == 0
+
+fn half(n: Even) -> int:
+    mod(n, 7)
+
+fn f(n: int) -> int:
+    if even?(n):
+        half(n)
+    else:
+        -1
+
+[f(10), f(3)]
+}
+} -result {value {[3, -1]}}
+
+test refinement-carrier-mutable-array {a MutableArray carrier is rejected for its reference semantics} -body {
+    rejection "refined type Buffer = MutableArray\[int\]\n1\n"
+} -result {REFINEMENT-CARRIER {invalid refinement carrier MutableArray[int] for "Buffer": MutableArray[int] has reference semantics (a MutableArray's slots change in place), so a proof about one value would not stay true; a refinement needs a carrier whose values never change}}
+
+test refinement-carrier-reaching-mutable {a carrier is judged by what it reaches, not by its name} -body {
+    lmap source [list "refined type Rows = List\[MutableArray\[int\]\]\n1\n" "refined type Words = List\[str\]\n1\n"] {
+        lassign [rejection $source] kind message
+        list $kind [regexp -inline {(has an element type|is a stable value type)[^;(]*} $message]
+    }
+} -result {{REFINEMENT-CARRIER {{has an element type, MutableArray[int], that has reference semantics } {has an element type}}} {REFINEMENT-CARRIER {{is a stable value type, but refinements of aggregate, struct or callable values are not supported yet } {is a stable value type}}}}
+
+test refinement-carrier-struct {a struct carrier is not supported yet, whatever its name says} -body {
+    list [rejection "struct MutableThing:\n    x: int\nrefined type Good = MutableThing\n1\n"] \
+         [rejectionKind "import abi::bytes\nrefined type B = abi::bytes::Bytes\n1\n"] \
+         [rejectionKind "import abi::bytes\nrefined type B = abi::bytes::MutableBytes\n1\n"]
+} -match glob -result {{REFINEMENT-CARRIER {*MutableThing is a struct type, and refinements of struct values are not supported yet*}} REFINEMENT-CARRIER REFINEMENT-CARRIER}
+
+test refinement-carrier-unknown {an unknown carrier is a TYPE error naming it} -body {
+    rejection "refined type A = Nope\n1\n"
+} -match glob -result {TYPE {unknown carrier type Nope for refinement "A": *}}
+
+test refinement-carrier-any-callable {any and callables are not refinement carriers} -body {
+    list [rejectionKind "refined type A = any\n1\n"] \
+         [rejectionKind "refined type F = Fn{args: \[int\], return: int}\n1\n"]
+} -result {REFINEMENT-CARRIER REFINEMENT-CARRIER}
+
+test refinement-name-collisions {a refinement name may not collide with a built-in or another declaration} -body {
+    list [rejectionKind "refined type str = str\n1\n"] \
+         [rejectionKind "refined type List = str\n1\n"] \
+         [rejectionKind "refined type A = str\nrefined type A = str\n1\n"] \
+         [rejectionKind "refined type A = str\nstruct A:\n    x: int\n1\n"]
+} -result {TYPE TYPE TYPE TYPE}
+
+# ===========================================================================
+# 13-16. Proof clauses and their validation
+
+test refinement-proof-target-missing {a proof clause must name an ordinary parameter} -body {
+    list [rejection "refined type M = str\nfn p(s: str) -> bool proves t: M:\n    true\n1\n"] \
+         [rejection "refined type M = str\nfn p(s: str, flags :x) -> bool proves x: M:\n    true\n1\n"]
+} -match glob -result {{PROOF-CLAUSE {*must name one of the function's ordinary parameters: the function has no parameter "t" (its parameters: s)}} {PROOF-CLAUSE {*"x" is a flag, not an ordinary parameter}}}
+
+test refinement-proof-target-not-refinement {the proven type must be a refinement} -body {
+    list [rejection "fn p(s: str) -> bool proves s: str:\n    true\n1\n"] \
+         [rejectionKind "import type byte::Byte\nfn p(n: int) -> bool proves n: Byte:\n    true\n1\n"] \
+         [rejectionKind "fn p(s: str) -> bool proves s: Nope:\n    true\n1\n"]
+} -match glob -result {{PROOF-CLAUSE {*is str, which is not a refinement type*}} PROOF-CLAUSE PROOF-CLAUSE}
+
+test refinement-proof-returns-bool {a proof-producing function declares -> bool} -body {
+    list [rejection "refined type M = str\nfn p(s: str) -> int proves s: M:\n    1\n1\n"] \
+         [rejection "refined type M = str\nfn p(s: str) proves s: M:\n    true\n1\n"]
+} -match glob -result {{PROOF-CLAUSE {*must declare "-> bool"*declared -> int}} {PROOF-CLAUSE {*with no declared result type}}}
+
+test refinement-proof-carrier-mismatch {the proven parameter must already be of the carrier} -body {
+    list [rejection "refined type M = str\nfn p(n: int) -> bool proves n: M:\n    true\n1\n"] \
+         [rejection "refined type M = str\nfn p(s) -> bool proves s: M:\n    true\n1\n"] \
+         [rejection "refined type Q = str\nrefined type E = Q\nfn p(s: str) -> bool proves s: E:\n    true\n1\n"]
+} -result {{PROOF-CLAUSE {proof carrier mismatch: parameter "n" is declared int, but M refines str, and a int value does not forget to a str (a proof can only strengthen what the parameter already is)}} {PROOF-CLAUSE {the proven parameter "s" must declare its type: "proves s: M" refines a str value, so write "s: str" (or a refinement that forgets to it)}} {PROOF-CLAUSE {proof carrier mismatch: parameter "s" is declared str, but E refines str[Q], and a str value does not forget to a str[Q] (a proof can only strengthen what the parameter already is)}}}
+
+test refinement-proof-one-clause {one proof clause, for one parameter} -body {
+    list [rejectionKind "refined type M = str\nfn p(s: str, t: str) -> bool proves s: M, t: M:\n    true\n1\n"] \
+         [rejectionKind "refined type M = str\nfn p(s: str, t: str) -> bool proves s: M proves t: M:\n    true\n1\n"]
+} -result {SYNTAX SYNTAX}
+
+test refinement-proof-arity-abi {a proof clause changes neither arity nor the call: the predicate is an ordinary bool function} -body {
+    sourceAgree "$prelude\nok = mail?(\"abcd\")\nf = mail?\n\[ok, not ok, f(\"ab\")\]\n"
+} -result {value {[true, false, false]}}
+
+test refinement-proof-with-errors {a proof clause sits between the result type and an errors clause} -body {
+    sourceAgree {import str
+
+refined type M = str
+error Weird
+
+fn p(s: str) -> bool proves s: M errors Weird:
+    if s == "?":
+        fail Weird
+    str::length(s) > 1
+
+fn take(m: M) -> int:
+    str::length(m)
+
+fn f(s: str) -> int:
+    ok = p(s):
+        on Weird:
+            return -1
+    if ok:
+        take(s)
+    else:
+        0
+
+[f("abc"), f("a"), f("?")]
+}
+} -result {value {[3, 0, -1]}}
+
+# ===========================================================================
+# 9-12, 19, 28. Forgetting, no strengthening, true-edge propagation
+
+test refinement-forgetting {a refined value is usable wherever its carrier is, with no conversion} -body {
+    sourceAgree "$prelude
+fn f(s: str) -> List\[str\]:
+    if mail?(s):
+        \[show(s), str::concat(s, \"!\"), str::lowercase(s)\]
+    else:
+        \[\]
+
+f(\"abcd\")
+"
+} -result {value {["abcd", "abcd!", "abcd"]}}
+
+test refinement-no-implicit-strengthening {a carrier value is never a refinement without a proof} -body {
+    rejection "$prelude\nfn bad(s: str) -> int:\n    send(s)\nbad(\"abcd\")\n"
+} -result {TYPE {argument for parameter "m" cannot be proven to satisfy str[Mail] (argument type: str); expected Mail but found str: a refinement proof is required (a str value becomes Mail only where one of its owner's proof-producing functions has returned true for it; there is no implicit conversion)}}
+
+test refinement-false-edge-no-proof {the false edge proves nothing about the argument} -body {
+    rejectionKind "$prelude\nfn f(s: str) -> int:\n    if mail?(s):\n        0\n    else:\n        send(s)\nf(\"ab\")\n"
+} -result TYPE
+
+test refinement-param-is-proven {inside a function, a refinement parameter is proven} -body {
+    sourceAgree "$prelude\nfn relay(m: Mail) -> int:\n    send(m) + str::length(m)\nfn f(s: str) -> int:\n    if mail?(s):\n        relay(s)\n    else:\n        0\nf(\"abcde\")\n"
+} -result {value 10}
+
+# ===========================================================================
+# 21-25. Value identity: boolean bindings, copies, joins, rebinding
+
+test refinement-boolean-binding {the proof belongs to the Boolean value: ok = p(s) then if ok} -body {
+    sourceAgree "$prelude
+fn f(s: str) -> int:
+    ok = mail?(s)
+    copy = ok
+    if copy:
+        send(s)
+    else:
+        0
+
+\[f(\"abcd\"), f(\"ab\")\]
+"
+} -result {value {[4, 0]}}
+
+test refinement-not-and-or {not, and, or: facts true on every path to an outcome} -body {
+    sourceAgree "$prelude
+fn neg(s: str) -> int:
+    if not mail?(s):
+        return 0
+    send(s)
+
+fn both(s: str, t: str) -> int:
+    if mail?(s) and mail?(t):
+        send(s) + send(t)
+    else:
+        0
+
+fn either(s: str) -> int:
+    if mail?(s) or other_mail?(s):
+        send(s)
+    else:
+        0
+
+\[neg(\"abcd\"), neg(\"a\"), both(\"abcd\", \"efgh\"), both(\"abcd\", \"e\"), either(\"abcd\"), either(\"a\")\]
+"
+} -result {value {[4, 0, 8, 0, 4, 0]}}
+
+test refinement-or-needs-both {an or of a proof and an unrelated test proves nothing} -body {
+    rejectionKind "$prelude\nfn f(s: str, c: bool) -> int:\n    if mail?(s) or c:\n        send(s)\n    else:\n        0\nf(\"abcd\", true)\n"
+} -result TYPE
+
+test refinement-copy-of-proven-value {a local copy of a proven value is the same value} -body {
+    sourceAgree "$prelude\nfn f(s: str) -> int:\n    if mail?(s):\n        x = s\n        send(x)\n    else:\n        0\nf(\"abcd\")\n"
+} -result {value 4}
+
+test refinement-proof-through-alias {proving an alias proves the value it aliases} -body {
+    sourceAgree "$prelude\nfn f(s: str) -> int:\n    x = s\n    if mail?(x):\n        send(s)\n    else:\n        0\nf(\"abcd\")\n"
+} -result {value 4}
+
+test refinement-join-all-paths {a fact survives a join when every path that reaches it proves it} -body {
+    sourceAgree "$prelude
+error Bad
+
+fn guard(s: str) -> int errors Bad:
+    if mail?(s):
+        unit
+    else:
+        fail Bad
+    send(s)
+
+fn both_branches(s: str) -> int:
+    if str::length(s) > 10:
+        if not mail?(s):
+            return -1
+    else:
+        if not other_mail?(s):
+            return -2
+    send(s)
+
+fn g(s: str) -> int:
+    v = guard(s):
+        on Bad:
+            -9
+    v
+
+\[g(\"abcd\"), g(\"a\"), both_branches(\"abcde\"), both_branches(\"abc\")\]
+"
+} -result {value {[4, -9, 5, -2]}}
+
+test refinement-join-one-path {a fact proven on only one path does not survive the join} -body {
+    rejectionKind "$prelude\nfn f(s: str) -> int:\n    if str::length(s) > 2:\n        if mail?(s):\n            1\n        else:\n            2\n    else:\n        3\n    send(s)\nf(\"abcd\")\n"
+} -result TYPE
+
+test refinement-rebinding {facts belong to values, not spellings: a shadowing binding is not proven} -body {
+    rejectionKind "$prelude\nfn f(s: str) -> int:\n    if mail?(s):\n        fn inner(s: str) -> int:\n            send(s)\n        inner(\"x\")\n    else:\n        0\nf(\"abcd\")\n"
+} -result TYPE
+
+# ===========================================================================
+# 26-29. Returns, fields, parameters
+
+test refinement-return {a function may return a refinement it has proven, with no constructor} -body {
+    sourceAgree "$prelude
+error Invalid
+
+fn parse(s: str) -> Mail errors Invalid:
+    if mail?(s):
+        s
+    else:
+        fail Invalid
+
+fn f(s: str) -> int:
+    m = parse(s):
+        on Invalid:
+            return -1
+    send(m)
+
+\[f(\"abcd\"), f(\"x\")\]
+"
+} -result {value {[4, -1]}}
+
+test refinement-return-unproven {returning an unproven carrier value is rejected} -body {
+    rejection "$prelude\nfn parse(s: str) -> Mail:\n    s\nparse(\"abcd\")\n"
+} -result {TYPE {function result does not prove declared type str[Mail]; expected Mail but found str: a refinement proof is required (a str value becomes Mail only where one of its owner's proof-producing functions has returned true for it; there is no implicit conversion)}}
+
+test refinement-field {a struct field of refinement type accepts only a proven value; the field is a refined value} -body {
+    list [sourceAgree "$prelude
+struct Recipient:
+    email: Mail
+
+fn make(s: str) -> int:
+    if mail?(s):
+        r = Recipient {email: s}
+        send(r.email) + str::length(r.email)
+    else:
+        0
+
+\[make(\"abcd\"), make(\"a\")\]
+"] [rejection "$prelude\nstruct Recipient:\n    email: Mail\nRecipient {email: \"abcd\"}\n"]
+} -result {{value {[8, 0]}} {TYPE {field "email" of struct Recipient cannot be proven to satisfy its declared type str[Mail] (value type: str); expected Mail but found str: a refinement proof is required (a str value becomes Mail only where one of its owner's proof-producing functions has returned true for it; there is no implicit conversion)}}}
+
+# ===========================================================================
+# 30-33. Method sugar and operators
+
+test refinement-method-sugar-forgets {method sugar of carrier functions applies to a refined value} -body {
+    sourceAgree "$prelude\nfn f(s: str) -> int:\n    if mail?(s):\n        s.length() + str::length(s.show())\n    else:\n        0\nf(\"abcd\")\n"
+} -result {value 8}
+
+test refinement-method-sugar-one-way {a function requiring the refinement is no method of a plain carrier value} -body {
+    rejectionKind "$prelude\nfn f(s: str) -> int:\n    s.send()\nf(\"abcd\")\n"
+} -result TYPE
+
+test refinement-method-sugar-ambiguity {no refinement-specific ranking: two applicable candidates stay ambiguous} -body {
+    rejectionKind "$prelude\nfn length(m: Mail) -> int:\n    0\nfn f(s: str) -> int:\n    if mail?(s):\n        s.length()\n    else:\n        0\nf(\"abcd\")\n"
+} -result AMBIGUOUS-METHOD-CALL
+
+test refinement-operators {operators take the carrier: concatenation returns str, equality and comparison are the carrier's} -body {
+    set source "$prelude
+fn f(s: str) -> List\[bool\]:
+    if mail?(s):
+        joined = str::concat(s, \"x\")
+        \[s == \"abcd\", s != \"abce\", joined == \"abcdx\"\]
+    else:
+        \[\]
+
+f(\"abcd\")
+"
+    set hir [surface::compile $source -warnings off]
+    list [sourceAgree $source] [boundTypeOf $hir joined]
+} -result {{value {[true, true, true]}} str}
+
+# ===========================================================================
+# 34-37. Equality, hashing, rendering, any
+
+test refinement-equality-and-hash {equality and hashing are the carrier's, never salted by the refinement} -body {
+    sourceAgree "$prelude
+fn f(s: str, t: str) -> List\[bool\]:
+    if mail?(s):
+        if mail?(t):
+            \[s == t, hash(s) == hash(t), hash(s) == hash(\"abcd\"), s == \"abcd\"\]
+        else:
+            \[\]
+    else:
+        \[\]
+
+f(\"abcd\", \"abcd\")
+"
+} -result {value {[true, true, true, true]}}
+
+test refinement-rendering-value {a refined value renders as its carrier, at top level and inside a list} -body {
+    sourceAgree "$prelude
+fn pick(s: str) -> List\[Mail\]:
+    if mail?(s):
+        \[s\]
+    else:
+        \[\]
+
+\[pick(\"abcd\"), pick(\"a\")\]
+"
+} -result {value {[["abcd"], []]}}
+
+test refinement-any-erasure {through an erased any the proof is lost; where the compiler still knows the exact value, it is kept} -body {
+    list [rejectionKind "$prelude
+fn f(s: str) -> List\[int\]:
+    if mail?(s):
+        loop x in \[s, 1\]:
+            send(x)
+    else:
+        \[\]
+f(\"abcd\")
+"] [sourceAgree "$prelude
+fn f(s: str) -> int:
+    if mail?(s):
+        xs = \[s, 1\]
+        send(list::at(xs, 0))
+    else:
+        0
+f(\"abcd\")
+"]
+} -result {TYPE {value 4}}
+
+# ===========================================================================
+# 38-40, 82. Joins of types, lists, generic imprinting, specialization keys
+
+test refinement-type-joins {the nearest common carrier or refinement} -body {
+    set hir [surface::compile "$prelude
+fn f(s: str, c: bool) -> int:
+    if mail?(s):
+        if query?(s):
+            if encoded?(s):
+                same = if c:
+                    s
+                else:
+                    s
+                to_carrier = if c:
+                    s
+                else:
+                    \"x\"
+                chain = if c:
+                    s
+                else:
+                    \"x\"
+                1
+            else:
+                0
+        else:
+            0
+    else:
+        0
+f(\"abcd\", true)
+" -warnings off]
+    list [boundTypeOf $hir same] [boundTypeOf $hir to_carrier]
+} -result {{str[Encoded,Mail,Query]} str}
+
+test refinement-type-joins-siblings {sibling refinements join to the carrier; a chain to the nearer refinement} -body {
+    list [hir::types::lub {refined str Mail} {refined str Query}] \
+         [hir::types::lub {refined str Encoded} {refined str Query}] \
+         [hir::types::lub {refined str Encoded} {refined str Mail}] \
+         [hir::types::lub {refined str Mail} {refined str Mail}] \
+         [hir::types::lub {refined str Mail} str]
+} -setup {surface::compile "$prelude\n1\n" -warnings off} -result {str {refined str Query} str {refined str Mail} str}
+
+test refinement-list-elements {a list mixing a refinement and its carrier is a list of the carrier} -body {
+    set hir [surface::compile "$prelude
+fn f(s: str, t: str) -> int:
+    if mail?(s):
+        if mail?(t):
+            mails = \[s, t\]
+            mixed = \[s, \"plain\"\]
+            1
+        else:
+            0
+    else:
+        0
+f(\"abcd\", \"efgh\")
+" -warnings off]
+    list [boundTypeOf $hir mails] [boundTypeOf $hir mixed]
+} -result {{List[str[Mail]]} {List[str]}}
+
+test refinement-generic-imprint {an identity function's semantic instance keeps the refinement; one codegen instance serves both} -body {
+    set source "$prelude
+fn identity(x):
+    x
+
+fn f(s: str) -> int:
+    if mail?(s):
+        m = identity(s)
+        p = identity(\"plain\")
+        send(m) + str::length(p)
+    else:
+        0
+
+f(\"abcd\")
+"
+    set hir [surface::compile $source -warnings off]
+    set spec [hir::specialize::analyze $hir]
+    set labels [lmap id [dict get $spec used] {
+        if {[dict get [dict get $spec instances $id] name] ne "identity"} continue
+        hir::specialize::label $spec $id
+    }]
+    list [boundTypeOf $hir m] [boundTypeOf $hir p] $labels [sourceAgree $source]
+} -result {{str[Mail]} str identity<str> {value 9}}
+
+test refinement-semantic-keys-keep-identity {semantic instance keys keep nominal identity: Mail and str are two semantic instances} -body {
+    set hir [surface::compile "$prelude
+fn identity(x):
+    x
+
+fn f(s: str) -> int:
+    if mail?(s):
+        m = identity(s)
+        p = identity(\"plain\")
+        send(m) + str::length(p)
+    else:
+        0
+
+f(\"abcd\")
+" -warnings off]
+    set keys {}
+    set identity [hir::get $hir [lindex [hirFind $hir bind identity] 0] value]
+    dict for {key instance} [dict get $hir semantic keys] {
+        if {[lindex $key 0] eq $identity} {
+            lappend keys [lindex $key 1]
+        }
+    }
+    lsort $keys
+} -result {str {{refined str Mail}}}
+
+test refinement-contract-inference {an untyped function that passes its parameter where a refinement is required requires the refinement of its callers} -body {
+    list [rejection "$prelude\nfn relay(x):\n    send(x)\nfn bad(s: str) -> int:\n    relay(s)\nbad(\"abcd\")\n"] \
+         [sourceAgree "$prelude\nfn relay(x):\n    send(x)\nfn ok(s: str) -> int:\n    if mail?(s):\n        relay(s)\n    else:\n        0\nok(\"abcd\")\n"]
+} -match glob -result {{TYPE {*the parameter type inferred from the function body*}} {value 4}}
+
+# ===========================================================================
+# 48-54, 63-66. Exact predicate-result facts and repeatability
+
+test refinement-repeat-folds-true {a repeated proof predicate on the same value is decided true on the true edge} -body {
+    set source "$prelude
+fn f(s: str) -> int:
+    if mail?(s):
+        if mail?(s):
+            1
+        else:
+            2
+    else:
+        3
+
+\[f(\"abcd\"), f(\"a\")\]
+"
+    set hir [surface::compile $source -warnings off]
+    list [knownOf $hir mail?] [sourceAgree $source]
+} -result {{{} 1} {value {[1, 3]}}}
+
+test refinement-repeat-folds-false {on the false edge the same invocation is decided false: an exact result, never a negative refinement} -body {
+    set source "$prelude
+fn f(s: str) -> int:
+    if mail?(s):
+        1
+    else:
+        if mail?(s):
+            2
+        else:
+            3
+
+\[f(\"abcd\"), f(\"a\")\]
+"
+    set hir [surface::compile $source -warnings off]
+    list [knownOf $hir mail?] [sourceAgree $source]
+} -result {{{} 0} {value {[1, 3]}}}
+
+test refinement-repeat-different-value {the same predicate on a different value is not decided} -body {
+    set hir [surface::compile "$prelude
+fn f(a: str, b: str) -> int:
+    if mail?(a):
+        if mail?(b):
+            1
+        else:
+            2
+    else:
+        3
+f(\"abcd\", \"x\")
+" -warnings off]
+    knownOf $hir mail?
+} -result {{} {}}
+
+test refinement-repeat-rebound-value {a shadowing binding of the same spelling is a different value: not decided} -body {
+    set hir [surface::compile "$prelude
+fn f(s: str) -> int:
+    if mail?(s):
+        fn g(s: str) -> int:
+            if mail?(s):
+                1
+            else:
+                0
+        g(\"x\")
+    else:
+        3
+f(\"abcd\")
+" -warnings off]
+    knownOf $hir mail?
+} -result {{} {}}
+
+test refinement-repeat-alias-same-value {an immutable alias is the same value: decided} -body {
+    set hir [surface::compile "$prelude
+fn f(s: str) -> int:
+    t = s
+    if mail?(s):
+        if mail?(t):
+            1
+        else:
+            2
+    else:
+        3
+f(\"abcd\")
+" -warnings off]
+    knownOf $hir mail?
+} -result {{} 1}
+
+test refinement-repeat-different-predicate {a different predicate proving the same refinement is not decided, though the value is proven} -body {
+    set source "$prelude
+fn f(s: str) -> int:
+    if mail?(s):
+        if other_mail?(s):
+            send(s)
+        else:
+            -send(s)
+    else:
+        0
+
+\[f(\"abcde\"), f(\"abcd\")\]
+"
+    set hir [surface::compile $source -warnings off]
+    list [knownOf $hir other_mail?] [sourceAgree $source]
+} -result {{{}} {value {[5, -4]}}}
+
+test refinement-repeat-through-binding {the exact result travels with a Boolean binding too} -body {
+    set hir [surface::compile "$prelude
+fn f(s: str) -> int:
+    ok = mail?(s)
+    if ok:
+        if mail?(s):
+            1
+        else:
+            2
+    else:
+        3
+f(\"abcd\")
+" -warnings off]
+    knownOf $hir mail?
+} -result {{} 1}
+
+test refinement-repeat-join {an exact result survives a join only when every completing path agrees} -body {
+    set hir [surface::compile "$prelude
+fn f(s: str, c: bool) -> int:
+    if c:
+        if not mail?(s):
+            return 0
+    else:
+        if not mail?(s):
+            return 1
+    if mail?(s):
+        2
+    else:
+        3
+f(\"abcd\", true)
+" -warnings off]
+    knownOf $hir mail?
+} -result {{} {} 1}
+
+test refinement-repeatable-explain {what makes a predicate repeatable, and what does not} -body {
+    set hir [surface::compile {import list
+import mutable_array
+import str
+
+refined type M = str
+
+fn pure?(s: str) -> bool proves s: M:
+    str::length(s) > 2 and list::length([s]) == 1
+
+fn reads?(s: str, a: MutableArray[int]) -> bool proves s: M:
+    n = mutable_array::at(a, 0):
+        on IndexNotFound:
+            return false
+    n > 0
+
+fn writes?(s: str, a: MutableArray[int]) -> bool proves s: M:
+    mutable_array::set(a, 0, 1):
+        on IndexNotFound:
+            return false
+    true
+
+fn calls_unknown?(s: str, f) -> bool proves s: M:
+    f(s)
+
+fn via_helper?(s: str) -> bool proves s: M:
+    fn check(p: Fn{args: [str], return: bool}) -> bool:
+        p(s)
+    check(str::is_tcl_alpha)
+
+1
+} -warnings off]
+    lmap name {pure? reads? writes? calls_unknown? via_helper?} {
+        set block [hir::get $hir [lindex [hirFind $hir bind $name] 0] value]
+        set why [hir::repeatable::explain $hir $block]
+        regsub {^line [0-9]+:[0-9]+: } $why {}
+    }
+} -result {{} {native "mutable_array::at" is not classified as a repeatable value operation} {native "mutable_array::set" is not classified as a repeatable value operation} {a call whose target is not statically known} {}}
+
+test refinement-effectful-not-folded {a proof predicate that reads or writes mutable state still proves, but a repeat is never decided} -body {
+    set source {import mutable_array
+import str
+
+refined type M = str
+
+fn bump?(s: str, a: MutableArray[int]) -> bool proves s: M:
+    n = mutable_array::at(a, 0):
+        on IndexNotFound:
+            return false
+    mutable_array::set(a, 0, n + 1):
+        on IndexNotFound:
+            return false
+    n == 0
+
+fn take(m: M) -> str:
+    m
+
+fn f(s: str) -> List[str]:
+    a = mutable_array::create(1, 0)
+    if bump?(s, a):
+        if bump?(s, a):
+            [take(s), "again"]
+        else:
+            [take(s), "changed"]
+    else:
+        []
+
+f("x")
+}
+    set hir [surface::compile $source -warnings off]
+    list [knownOf $hir bump?] [sourceAgree $source]
+} -result {{{} {}} {value {["x", "changed"]}}}
+
+test refinement-not-a-proof-not-folded {a repeatable bool function without a proof clause is never decided by an earlier call} -body {
+    set hir [surface::compile "$prelude
+fn long?(s: str) -> bool:
+    str::length(s) > 3
+
+fn f(s: str) -> int:
+    if long?(s):
+        if long?(s):
+            1
+        else:
+            2
+    else:
+        3
+f(\"abcd\")
+" -warnings off]
+    knownOf $hir long?
+} -result {{} {}}
+
+# ===========================================================================
+# 7, 41-44, 67-68, 70-71, 74-76. Representation: the carrier's, exactly
+
+# The NIR of SOURCE (cranelift, specialized).
+proc nirOf {source args} {
+    return [native::nir [surface::compile $source -warnings off] {*}$args]
+}
+
+test refinement-nir-proof-passes-register {after a proof, the original carrier register is passed directly: no wrapper, tag, helper or re-check} -body {
+    set nir [nirOf "$prelude
+fn consume(m: Mail) -> int:
+    str::length(m)
+
+fn example(s: str) -> int:
+    if mail?(s):
+        consume(s)
+    else:
+        0
+
+example(\"abcd\")
+"]
+    set body [nirBody $nir example]
+    list [llength [lsearch -all -regexp $body {= call(env)? }]] \
+         [lsearch -all -inline -regexp $body {closure|refine|wrap|tag|alloc|new }] \
+         [regexp {= call[a-z]* [0-9]+ %0\s*$} [lindex [lsearch -all -inline -regexp $body {= call}] end]]
+} -result {2 {} 1}
+
+test refinement-nir-forgetting-is-free {forgetting through an ordinary call: a refined parameter passes on unchanged} -body {
+    set nir [nirOf "$prelude
+fn consume_string(x: str) -> int:
+    str::length(x)
+
+fn consume_email(x: Mail) -> int:
+    consume_string(x)
+
+fn f(s: str) -> int:
+    if mail?(s):
+        consume_email(s)
+    else:
+        0
+
+f(\"abcd\")
+" -tiny-leaf-inline-opt 0]
+    nirBody $nir consume_email
+} -match regexp -result {^\{%[0-9]+ = call [0-9]+ %0 ?\} \{ret %[0-9]+\}$}
+
+test refinement-abi-identical {a function over the refinement and the same function over its carrier compile to identical NIR and the same machine-code size} -body {
+    set common "$prelude
+fn over_refined(x: Mail) -> Mail:
+    if str::length(x) > 100:
+        x
+    else:
+        x
+
+fn over_carrier(x: str) -> str:
+    if str::length(x) > 100:
+        x
+    else:
+        x
+
+fn f(s: str) -> int:
+    if mail?(s):
+        str::length(over_refined(s)) + str::length(over_carrier(s))
+    else:
+        0
+
+f(\"abcd\")
+"
+    set hir [surface::compile $common -warnings off]
+    set nir [native::nir $hir -tiny-leaf-inline-opt 0]
+    set sizes [native::codeSize $hir -tiny-leaf-inline-opt 0]
+    set lowered [native::lowered $hir -tiny-leaf-inline-opt 0]
+    set ids [dict create]
+    set index 0
+    foreach info [dict get $lowered functions] {
+        dict set ids [dict get $info name] $index
+        incr index
+    }
+    set sizeList [lindex $sizes 1]
+    list [expr {[nirBody $nir over_refined] eq [nirBody $nir over_carrier]}] \
+         [expr {[lindex $sizeList [dict get $ids over_refined]] == [lindex $sizeList [dict get $ids over_carrier]]}] \
+         [regexp {func [0-9]+ "over_refined" params=1 env=0 [^\n]*instance="str"} $nir]
+} -result {1 1 1}
+
+test refinement-struct-layout-identical {a struct with a refinement field lowers exactly like the same struct with the carrier field} -body {
+    set nirOfField [lmap fieldType {Mail str} {
+        set nir [nirOf "$prelude
+struct Holder:
+    value: $fieldType
+
+fn build(s: str) -> int:
+    if mail?(s):
+        h = Holder {value: s}
+        str::length(h.value)
+    else:
+        0
+
+build(\"abcd\")
+" -tiny-leaf-inline-opt 0]
+        nirBody $nir build
+    }]
+    expr {[lindex $nirOfField 0] eq [lindex $nirOfField 1]}
+} -result 1
+
+# Both programs allocate the same 50 objects -- one `asciitostr` per
+# iteration, the packed-ASCII constant "abcd" materialized as a String for a
+# String parameter: the carrier representation's own work, identical in
+# both -- and the refinement adds none.
+test refinement-allocation-free {proving, passing, forgetting, returning and storing a refinement allocates nothing: the refined program allocates exactly what the carrier program does} -body {
+    set reports [lmap variant {refined carrier} {
+        set check [expr {$variant eq "refined" ? "mail?(s)" : "str::length(s) > 3"}]
+        set type [expr {$variant eq "refined" ? "Mail" : "str"}]
+        set hir [surface::compile "$prelude
+struct Holder:
+    value: $type
+
+fn ident(x: $type) -> $type:
+    x
+
+fn total(x: str) -> int:
+    str::length(x)
+
+fn run(s: str, n: int, acc: int) -> int:
+    if n == 0:
+        return acc
+    v = if $check:
+        h = Holder {value: ident(s)}
+        total(h.value)
+    else:
+        0
+    run(s, n - 1, acc + v)
+
+run(\"abcd\", 50, 0)
+" -warnings off]
+        set report [native::allocationReport $hir summary]
+        list [dict get $report total allocations] [dict get $report total allocatedBytes]
+    }]
+    list [expr {[lindex $reports 0] eq [lindex $reports 1]}] [lindex $reports 0 0]
+} -result {1 50}
+
+test refinement-rendering-native-runtime {the native runtime renders a refined value as its carrier: no kind, tag or wrapper exists to render} -body {
+    native::evalHir [surface::compile "$prelude\nfn f(s: str) -> List\[Mail\]:\n    if mail?(s):\n        \[s\]\n    else:\n        \[\]\nf(\"abcd\")\n" -warnings off]
+} -result {list {{str abcd}}}
+
+# ===========================================================================
+# 62, 77, 89. The motivating corpus program, end to end
+
+test refinement-corpus-refined-checks-nir {bench/refined-checks.bot: check calls web::emailish? once and web::uri_query_value? once; the repeat is a constant} -body {
+    set hir [refinedChecksSourceHir]
+    set nir [native::nir $hir]
+    regexp {func ([0-9]+) "web::emailish\?"} $nir -> emailish
+    regexp {func ([0-9]+) "web::uri_query_value\?"} $nir -> query
+    set body [nirBody $nir check]
+    list [llength [lsearch -all -regexp $body "= call\[a-z\]* $emailish "]] \
+         [llength [lsearch -all -regexp $body "= call\[a-z\]* $query "]] \
+         [llength [lsearch -all -regexp $body {= bool true}]] \
+         [knownOf $hir web::emailish?]
+} -result {1 1 1 {{} 1}}
+
+test refinement-corpus-refined-checks-machine-code {the Cranelift IR of check makes one call of web::emailish? (and one of web::uri_query_value?)} -body {
+    set clif [native::clif [refinedChecksSourceHir]]
+    regexp {; u0:([0-9]+) = botlish_fn_[0-9]+ \(web::emailish\?\)} $clif -> emailish
+    regexp {; u0:([0-9]+) = botlish_fn_[0-9]+ \(web::uri_query_value\?\)} $clif -> query
+    set check [lindex [regexp -inline {; function [0-9]+ "check":[^\n]*\n(.*?)\n\}} $clif] 1]
+    set refs [dict create]
+    foreach {- ref target} [regexp -all -inline {(fn[0-9]+) = colocated u0:([0-9]+)} $check] {
+        dict set refs $target $ref
+    }
+    list [regexp -all "call [dict get $refs $emailish]\\(" $check] [regexp -all "call [dict get $refs $query]\\(" $check]
+} -result {1 1}
+
+test refinement-corpus-refined-checks-agree {bench/refined-checks.bot computes [400, 0] on every native backend and compile} -body {
+    set hir [refinedChecksSourceHir]
+    lmap b {compile cranelift-generic cranelift} {lrange [outcomeUnderHir $b $hir] 0 1}
+} -result [lrepeat 3 {value {[400, 0]}}]
+
+# ===========================================================================
+# 56-57, 79, 90. Auditability, and nothing of the old mechanism left
+
+# HIR text round trips programs without modules (a module section has no
+# HIR text form), so these use a self-contained program.
+set hirTextProgram {refined type Positive = int
+refined type Big = Positive
+
+fn positive?(n: int) -> bool proves n: Positive:
+    n > 0
+
+fn big?(n: Positive) -> bool proves n: Big:
+    n > 100
+
+fn need(p: Positive) -> int:
+    p
+
+fn f(n: int) -> int:
+    if positive?(n):
+        if positive?(n):
+            need(n)
+        else:
+            -1
+    else:
+        0
+
+[f(5), f(-3)]
+}
+
+test refinement-hir-text {HIR text shows the refinement declarations and proof contracts, and reads back} -body {
+    set text [hir::format [surface::compile $hirTextProgram -warnings off]]
+    set back [hir::format [hir::parse $text]]
+    list [regexp -all -line {^refined type (Positive carrier int|Big carrier int\[Positive\]) owner -$} $text] \
+         [regexp {block s[0-9]+ \(b[0-9]+ n:int\) [^\n]*declares bool proves b[0-9]+ n: int\[Positive\]} $text] \
+         [regexp {then s[0-9]+ refines b[0-9]+ n : int\[Positive\]} $text] \
+         [expr {$text eq $back}]
+} -result {2 1 1 1}
+
+test refinement-hir-round-trip-runs {a program read back from HIR text keeps its proofs and runs the same on every backend} -body {
+    set hir [hir::parse [hir::format [surface::compile $hirTextProgram -warnings off]]]
+    list [knownOf $hir positive?] [lmap b {interp compile cranelift} {lrange [outcomeUnderHir $b $hir] 0 1}]
+} -result {{{} 1} {{value {[5, 0]}} {value {[5, 0]}} {value {[5, 0]}}}}
+
+test refinement-no-compiler-domain-knowledge {no compiler or runtime code names the corpus refinements or their predicates} -body {
+    set hits {}
+    foreach dir {core hir surface native compiler} {
+        foreach path [lsort [glob -nocomplain -directory [file join $::projectRoot $dir] *.tcl *.rs]] {
+            set number 0
+            foreach line [split [core::ReadFile $path] \n] {
+                incr number
+                set code [string trim $line]
+                if {[string match "#*" $code] || [string match "//*" $code]} continue
+                if {[regexp {Emailish|UriQueryValue|emailish\?|uri_query_value\?} $code]} {
+                    lappend hits "[file tail $path]:$number"
+                }
+            }
+        }
+        foreach path [lsort [glob -nocomplain -directory [file join $::projectRoot native src] -- */*.rs *.rs]] {
+            set number 0
+            foreach line [split [core::ReadFile $path] \n] {
+                incr number
+                if {[string match "//*" [string trim $line]]} continue
+                if {[regexp {Emailish|UriQueryValue|emailish\?|uri_query_value\?} $line]} {
+                    lappend hits "[file tail $path]:$number"
+                }
+            }
+        }
+    }
+    lappend hits {*}[glob -nocomplain -directory [file join $::projectRoot lib] *.tcl]
+    set hits
+} -result {}
+
+test refinement-old-mechanism-gone {no runtime evidence, opaque named types, native aliases or native implementation bridges remain} -body {
+    list [info commands core::value::withEvidence] [info commands core::value::evidence] \
+         [info commands core::native::alias] [info commands hir::types::BridgedNative] \
+         [info commands hir::ResolveModuleNativeTargets] [info commands native::AttachNatives] \
+         [catch {core::type::register gone_test::T -base str -opaque 1}] \
+         [catch {core::native::register gone-test -arity 1 -impl list -module-fn {web x}}] \
+         [catch {core::native::register gone-test2 -arity 1 -impl list -native-body {block {v} {ref v}}}] \
+         [lsearch -inline [set ::core::native::runtimeTags] evidence]
+} -result {{} {} {} {} {} {} 1 1 1 {}}
+
+# Mutation of the source declarations (item 57): the facts come from them.
+proc withWebVariant {transform script} {
+    set saved $::core::libraryDir
+    set dir [tcltest::makeDirectory refinement-values-web-[pid]-[incr ::refinementLibCounter]]
+    try {
+        foreach path [glob -directory $saved *.bot] {
+            file copy $path $dir
+        }
+        foreach sub {abi linux} {
+            file copy [file join $saved $sub] [file join $dir $sub]
+        }
+        set web [file join $dir web.bot]
+        set text [core::ReadFile $web]
+        set channel [open $web w]
+        fconfigure $channel -encoding utf-8
+        puts -nonewline $channel [{*}$transform $text]
+        close $channel
+        set ::core::libraryDir $dir
+        uplevel 1 $script
+    } finally {
+        set ::core::libraryDir $saved
+        tcltest::removeDirectory [file tail $dir]
+    }
+}
+
+set redundantWeb {import web
+
+fn consume(e: web::Emailish) -> int:
+    1
+
+fn f(s: str) -> int:
+    if web::emailish?(s):
+        if web::emailish?(s):
+            consume(s)
+        else:
+            2
+    else:
+        3
+
+f("a@b.co")
+}
+
+test refinement-mutant-no-proof-clause {without the proof clause, nothing proves Emailish and nothing decides the repeat} -body {
+    withWebVariant {apply {{text} {string map {"-> bool proves v: Emailish:" "-> bool:"} $text}}} {
+        list [rejectionKind $redundantWeb] \
+             [knownOf [surface::compile [string map {"consume(s)" "1"} $redundantWeb] -warnings off] web::emailish?]
+    }
+} -result {TYPE {{} {}}}
+
+test refinement-mutant-no-declaration {without the refinement declaration, the proof clause names no type} -body {
+    withWebVariant {apply {{text} {string map {"refined type Emailish = str\n" ""} $text}}} {
+        rejection "import web\nweb::emailish?(\"a@b.co\")\n"
+    }
+} -match glob -result {PROOF-CLAUSE {unknown proven type Emailish in "proves v: Emailish": *}}
+
+test refinement-mutant-unrepeatable-predicate {an emailish? that reads mutable state proves, but is not decided} -body {
+    withWebVariant {apply {{text} {string map {"    n = str::length(v)\n" "    n = str::length(v)\n    probe = mutable_array::at(mutable_array::create(1, 0), 0)\n" "import list\n" "import list\nimport mutable_array\n"} $text}}} {
+        knownOf [surface::compile $redundantWeb -warnings off] web::emailish?
+    }
+} -result {{} {}}
+
+::tcltest::cleanupTests

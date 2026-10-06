@@ -1,10 +1,8 @@
 # native-tcl-unicode.test -- core/tclcompat.tcl's str::is_tcl_alpha/str::is_tcl_alnum
 # (the temporary Tcl-compatibility Unicode character-class primitives) and
-# lib/web.tcl's emailish?/Emailish?, which use them through the ordinary
-# Botlish module function web::emailish? (lib/web.bot) expressing
-# emailRegex's exact grammar. See NATIVE-TCL-UNICODE.md for the primitives
-# and this milestone's own corpus, and R2-ORDINARY-EMAILISH-PREDICATE.md for
-# why emailish? is no longer a -native-body.
+# web::emailish? (lib/web.bot), the ordinary Botlish predicate that uses them
+# to express the e-mail grammar. See NATIVE-TCL-UNICODE.md for the primitives
+# and this milestone's own corpus.
 #
 # Direct primitive coverage (spec: "prove the new primitives independently
 # of Emailish?") comes first, exercising the exact edge-case corpus
@@ -15,24 +13,52 @@
 # numeric predicates, a combining mark (Mn), and ordinary punctuation --
 # each labeled with why it is in the corpus, not just what it is.
 #
-# Emailish? parity then reuses the same 16-string corpus this milestone's
-# report cross-checks against the Python and Rust benchmark equivalents
-# (bench/equivalents/{python,rust}/refined_checks.py|rs) and against
-# interp/compile's own core::regex::matches-backed -impl, so a native-body
-# defect that happens to agree with itself on all four Botlish backends but
-# disagrees with the actual regex would still be caught.
+# web::emailish? parity then reuses the same 16-string corpus this
+# milestone's report cross-checks against the Python and Rust benchmark
+# equivalents (bench/equivalents/{python,rust}/refined_checks.py|rs) and
+# against the reference regular expression the grammar was first written as
+# (emailRegex below, formerly lib/web.tcl's validator, which interp and
+# compile used to run instead of the Botlish predicate): every backend now
+# runs the one Botlish predicate, so the regex is checked here directly, and
+# a predicate defect that agrees with itself on all four backends but
+# disagrees with the grammar is still caught.
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
-core::loadLibrary web
 
 set parityBackends {interp compile cranelift-generic cranelift}
+
+# The reference grammar (core/regex.tcl): local part of letters, digits and
+# a few symbols, then "@", one or more labels each followed by ".", and a
+# top-level domain of at least two letters.
+set emailRegex [core::regex::create {
+    seq
+    {repeat {set {class alnum} {char .} {char _} {char %} {char +} {char -}} 1 inf}
+    {lit @}
+    {repeat {seq {repeat {set {class alnum} {char -}} 1 inf} {lit .}} 1 inf}
+    {repeat {class alpha} 2 inf}
+}]
 
 proc classifyProgram {native c} {
     return [list [list call [list ref $native] [list const str $c]]]
 }
 
-proc emailishProgram {s} {
-    return [list [list call {ref Emailish?} [list const str $s]]]
+# web::emailish?(S) as a Botlish program.
+proc emailishSource {s} {
+    return "import web\nweb::emailish?(\"[string map {\\ \\\\ \" \\\"} $s]\")\n"
+}
+
+# The value web::emailish?(S) has on every backend (a Tcl error if they
+# disagree), and whether it agrees with the reference regex.
+proc emailish {s} {
+    set outcome [sourceAgree [emailishSource $s]]
+    if {[lindex $outcome 0] ne "value"} {
+        error "web::emailish? raised: $outcome"
+    }
+    set regex [expr {[core::regex::matches $::emailRegex [core::value::str $s]] ? "true" : "false"}]
+    if {[lindex $outcome 1] ne $regex} {
+        error "web::emailish? says [lindex $outcome 1], the reference regex says $regex"
+    }
+    return [lindex $outcome 1]
 }
 
 proc errorCodeOfUnder {backend exprs} {
@@ -118,10 +144,10 @@ foreach native {str::is_tcl_alpha str::is_tcl_alnum} {
 }
 
 # ---------------------------------------------------------------------------
-# Emailish?: four-way parity, the corpus NATIVE-TCL-UNICODE.md's report
-# cross-checks against Python/Rust too. Each case documents which grammar
-# position it forces Unicode classification in, or which negative case it
-# pins.
+# web::emailish?: four-way parity and the reference regex, the corpus
+# NATIVE-TCL-UNICODE.md's report cross-checks against Python/Rust too. Each
+# case documents which grammar position it forces Unicode classification
+# in, or which negative case it pins.
 
 foreach {label s expect} {
     ascii-valid                       someone@example.com              true
@@ -141,8 +167,8 @@ foreach {label s expect} {
     mixed-case-ascii-tld              a@b.cD                           true
     empty-string                      {}                                false
 } {
-    test native-tcl-unicode-emailish-$label "Emailish?($label) agrees across interp/compile/cranelift-generic/cranelift" -body {
-        fourWay [emailishProgram $s]
+    test native-tcl-unicode-emailish-$label "web::emailish?($label) agrees across interp/compile/cranelift-generic/cranelift and with the reference regex" -body {
+        emailish $s
     } -result $expect
 }
 
@@ -152,12 +178,12 @@ foreach {label s expect} {
 # character (a Roman numeral, general category Nl) must be rejected --
 # distinguishing Tcl's alnum from Python's/Rust's broader is_alnum()/
 # is_alphabetic() the way NATIVE-TCL-UNICODE.md's report requires.
-test native-tcl-unicode-emailish-unicode-digit-in-label "Emailish?(a Unicode Nd digit in a domain label) is accepted" -body {
-    fourWay [emailishProgram "a@b٠.com"]
+test native-tcl-unicode-emailish-unicode-digit-in-label "web::emailish?(a Unicode Nd digit in a domain label) is accepted" -body {
+    emailish "a@b٠.com"
 } -result true
 
-test native-tcl-unicode-emailish-numeric-non-Nd-rejected "Emailish?(a numeric-but-not-Nd character where the TLD must be 2+ alpha) is rejected" -body {
-    fourWay [emailishProgram "a@例え.Ⅰ"]
+test native-tcl-unicode-emailish-numeric-non-Nd-rejected "web::emailish?(a numeric-but-not-Nd character where the TLD must be 2+ alpha) is rejected" -body {
+    emailish "a@例え.Ⅰ"
 } -result false
 
 # ---------------------------------------------------------------------------
@@ -165,53 +191,45 @@ test native-tcl-unicode-emailish-numeric-non-Nd-rejected "Emailish?(a numeric-bu
 # and the classification primitives themselves must survive a collection
 # forced before every allocation.
 
-test native-tcl-unicode-emailish-gc-stress {Emailish? survives a collection forced before every allocation} -body {
+test native-tcl-unicode-emailish-gc-stress {web::emailish? survives a collection forced before every allocation} -body {
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
     try {
-        lindex [outcomeUnder cranelift [emailishProgram {café@例え.テスト}]] 1
+        lindex [outcomeUnderHir cranelift [surface::compile [emailishSource {café@例え.テスト}] -warnings off]] 1
     } finally {
         unset ::env(BOTLISH_NATIVE_GC_STRESS)
     }
 } -result true
 
 # ---------------------------------------------------------------------------
-# R2 (R2-ORDINARY-EMAILISH-PREDICATE.md) closes the gap the test above this
-# comment used to pin: Emailish?/emailish? no longer has a -native-body at
-# all (lib/web.tcl), so ExpandNativeBodies never substitutes a per-call-site
-# copy of it, and its own semantic predicate identity ({native emailish?})
-# survives into HIR on every backend, including cranelift. The HIR-provably-
-# redundant inner Emailish?/emailish? re-check in a pattern like
-# refined-checks.ir's own -- an outer `if Emailish?(s)` whose then-branch
-# re-checks `emailish?(s)` -- now folds via native/lower.tcl's `known`
-# short-circuit exactly as any other type-test predicate's does: zero calls,
-# not a second independently-compiled copy of the validator. See
-# tests/emailish-predicate.test for the focused alias/refinement regressions;
-# this one is kept here, next to its own now-obsolete predecessor, as the
-# direct before/after NIR-shape pin for this file's own milestone.
-test native-tcl-unicode-emailish-known-result-nir-shape {a redundant Emailish?/emailish? check inside its own true branch compiles to exactly one call to the shared validator, not two independent copies} -body {
-    set p {
-        {bind f {block {s}
-            {if {call {ref Emailish?} {ref s}}
-                {block {} {if {call {ref emailish?} {ref s}} {block {} {const yes}} {block {} {const no}}}}
-                {block {} {const no}}}}}
-        {call {ref f} {const str someone@example.com}}
-    }
-    set hir [nativeHirOfIR $p]
+# One shared, compiled validator: an outer `if web::emailish?(s)` whose
+# then-branch re-checks `web::emailish?(s)` compiles to exactly one copy of
+# the validator and one call to it -- the redundant re-check is decided by
+# the outer call's exact result (REFINEMENT-VALUES.md), needing no call. See
+# tests/emailish-predicate.test for the focused refinement regressions.
+test native-tcl-unicode-emailish-known-result-nir-shape {a redundant web::emailish? check inside its own true branch compiles to exactly one call to the shared validator, not two independent copies} -body {
+    set source {import web
+
+fn f(s: str) -> str:
+    if web::emailish?(s):
+        if web::emailish?(s):
+            "yes"
+        else:
+            "no"
+    else:
+        "no"
+
+f("someone@example.com")
+}
+    set hir [surface::compile $source -warnings off]
     set text [native::nir $hir]
     # Exactly one compiled copy of the validator and its scanner helpers
     # (never two, one per call site).
     set isEmailishDefs [regexp -all {func \d+ "web::emailish\?"} $text]
     set domainLoopDefs [regexp -all {func \d+ "domain\?"} $text]
-    # Exactly one real call to it: the outer, genuinely dynamic check. The
-    # inner, statically redundant re-check needs no call at all. Since
-    # R2.a.1 (R2A1-MODULE-FN-BRIDGE-REACHABILITY.md) web::emailish?
-    # captures its module-retained local_extra_chars, so it is a closure
-    # and that one call is a `callenv` (through the closure f reaches via
-    # the bridge), not a plain `call`.
     regexp {func (\d+) "web::emailish\?"} $text -> isEmailishId
     set calls [regexp -all "= call(?:env)? $isEmailishId %" $text]
-    list $isEmailishDefs $domainLoopDefs $calls [fourWay $p]
-} -result {1 1 1 {"yes"}}
+    list $isEmailishDefs $domainLoopDefs $calls [sourceAgree $source]
+} -result {1 1 1 {value {"yes"}}}
 
 # ---------------------------------------------------------------------------
 # lowercase: the Unicode 16 simple (one-to-one, UnicodeData.txt) lowercase

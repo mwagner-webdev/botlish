@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-# Python equivalent of bench/refined-checks.ir: repeated refined-type
-# predicates. Emailish? is a structural check (regex membership test);
-# UriQueryValue? is opaque evidence that only uri_escape can attach.
+# Python equivalent of bench/refined-checks.bot: repeated refinement
+# predicates. emailish is a structural check (regex membership test);
+# uri_query_value is the structural check of lib/web.bot's
+# web::uri_query_value? (unreserved characters and "%XX" uppercase-hex
+# triplets only), run on the escaped query each time, as the Botlish program
+# does (REFINEMENT-VALUES.md).
 #
 # Invoked by bench/bench.tcl; see fib.py for the --runs/value/best_us
 # protocol shared by all four equivalents. The printed value's "[a, b]"
@@ -54,7 +57,7 @@ def is_label_char(c):
 
 
 # Same two-pointer scan as bench/equivalents/rust/refined_checks.rs's
-# `emailish` (and lib/web.tcl's Emailish? native-body): the domain/local
+# `emailish` (and lib/web.bot's web::emailish?): the domain/local
 # structure is ordinary control flow, not a regex -- only the leaf
 # character-class tests above are Unicode-classification-dependent. A
 # regex-based version was deliberately not kept: Python's stdlib `re` has
@@ -90,27 +93,35 @@ def emailish(s):
         # another domain label rather than the final TLD.
 
 
-class UriQueryValue(str):
-    """A str subclass marking evidence that uri_escape produced this value."""
-
-
 def uri_query_value(s):
-    return isinstance(s, UriQueryValue)
+    b = s.encode("utf-8")
+    i = 0
+    hexdigits = b"0123456789ABCDEF"
+    while i < len(b):
+        c = b[i]
+        if c == 0x25:
+            if i + 2 < len(b) and b[i + 1] in hexdigits and b[i + 2] in hexdigits:
+                i += 3
+                continue
+            return False
+        if not (chr(c).isascii() and (chr(c).isalnum() or chr(c) in "-._~")):
+            return False
+        i += 1
+    return True
 
 
 def uri_escape(s):
-    escaped = "".join(
+    return "".join(
         c if re.match(r"[A-Za-z0-9._~-]", c) else "".join(f"%{b:02X}" for b in c.encode("utf-8"))
         for c in s
     )
-    return UriQueryValue(escaped)
 
 
 def check(n, acc, s, q):
     if n <= 0:
         return acc
     if emailish(s):
-        # Statically redundant re-check, mirrored from the IR as written.
+        # Statically redundant re-check, mirrored from the source as written.
         if emailish(s):
             hit = 1 if uri_query_value(q) else 0
         else:

@@ -122,10 +122,9 @@ proc errorCodeOf {args} {
 }
 
 # Outcome of EXPRS under BACKEND: {value V LOG} or {error ERRORCODE MESSAGE LOG},
-# where LOG is what test-log recorded. V includes runtime evidence, so the
-# backends must also agree on what values are proven to be, and the full
-# representation of a value of an opaque struct (core::value::show's REVEAL:
-# this is internal differential tooling, not user-facing text, OPAQUE-STRUCTS.md).
+# where LOG is what test-log recorded. V includes the full representation
+# of a value of an opaque struct (core::value::show's REVEAL: this is internal
+# differential tooling, not user-facing text, OPAQUE-STRUCTS.md).
 #
 # cranelift-generic (native -specialize 0) compiles every function once, so it
 # has no slot for a struct projection that only a semantic instance proves
@@ -182,11 +181,32 @@ proc outcomeUnderHir {backend hir} {
 
 # The HIR native lowering compiles for a program written as core IR text
 # EXPRS: hir::build reads the text (HIR construction, as for the compile
-# backend) and native::prepareHir attaches the native implementations it calls.
-# For tests of native behavior on hand-written core IR (or the frozen bench/*.ir
-# files); a source or HIR program passes its own HIR to native instead.
+# backend) and native::prepareHir prepares it as every native entry point does.
+# For tests of native behavior on hand-written core IR; a source or HIR
+# program passes its own HIR to native instead.
 proc nativeHirOfIR {exprs} {
     return [native::prepareHir [hir::build $exprs -strict 0]]
+}
+
+# The outcome (outcomeUnderHir's shape, minus the test log) of the Botlish
+# source program SOURCE, compiled once, on every backend of BACKENDS -- or a
+# Tcl error naming every backend's outcome when they do not all agree. A
+# compile error is the outcome {error ERRORCODE MESSAGE} on every backend.
+proc sourceAgree {source {backends {interp compile cranelift-generic cranelift}}} {
+    if {[catch {surface::compile $source -warnings off} hir options]} {
+        return [list error [dict get $options -errorcode] $hir]
+    }
+    set outcomes [lmap b $backends {lrange [outcomeUnderHir $b $hir] 0 end-1}]
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        error "mismatch across $backends: $outcomes"
+    }
+    return [lindex $outcomes 0]
+}
+
+# The HIR of bench/refined-checks.bot, the canonical repeated-refinement-
+# predicate workload (REFINEMENT-VALUES.md), as every backend compiles it.
+proc refinedChecksSourceHir {} {
+    return [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot] -warnings off]
 }
 
 # "same" if both backends produce the same outcome; otherwise both outcomes.
@@ -277,34 +297,27 @@ proc resetEffects {} {
     set ::testTicks 0
 }
 
-# The refined-type tests use the optional web library.
-core::loadLibrary web
-
 if {"test-log" ni [core::native::names]} {
     core::registerNative test-log  -arity 1 -impl testLogImpl
     core::registerNative test-tick -arity 0 -impl testTickImpl
 
-    # A second validator type on str, to combine evidence with Emailish.
-    # Its predicate also carries a -native-body (str::length(v) > 0, exactly the
-    # Tcl validator above): an independent, generic proof that a
-    # validator-backed named-type predicate can run on the native (Cranelift)
-    # backend today, through the same mechanism NAME-agnostic native/lower.tcl
-    # already gives any native with a -native-body -- see NATIVE-EMAILISH.md.
+    # A validator type on str for the type-lattice and contract tests (a
+    # structural, runtime-checked named type: core/type.tcl), with its
+    # type-test predicate NonEmpty?.
     core::type::register NonEmpty -base str \
         -validator {apply {{v} {expr {[string length [core::value::strOf $v]] > 0}}}}
-    core::type::definePredicate NonEmpty "" \
-        {block {v} {call {ref >} {call {ref str::length} {ref v}} {const 0}}}
+    core::type::definePredicate NonEmpty
 
     # A native that breaks its declared contract: it claims to return a
-    # UriQueryValue but returns a plain string.
-    core::registerNative test-fake-escape -arity 1 \
+    # NonEmpty but returns its argument, which may be "".
+    core::registerNative test-fake-nonempty -arity 1 \
         -impl {apply {{v} {return $v}}} \
-        -param-types {str} -result-type UriQueryValue
+        -param-types {str} -result-type NonEmpty
 
     # A native whose implementation does not enforce its declared parameter.
     core::registerNative test-lax-param -arity 1 \
         -impl {apply {{v} {core::value::int 1}}} \
-        -param-types {Emailish} -result-type int
+        -param-types {NonEmpty} -result-type int
 }
 
 # SOURCE with an `import NS` header line for every standard namespace it

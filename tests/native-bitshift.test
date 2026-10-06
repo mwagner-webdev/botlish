@@ -26,7 +26,7 @@ proc parity {text} {
 }
 
 # The NIR text of a plain (non-.bot, no module) program TEXT, compiled and
-# lowered directly (no bench/refined-checks.ir needed for the synthetic
+# lowered directly (no bench/refined-checks.bot needed for the synthetic
 # eligibility/rejection cases below). -tiny-leaf-inline-opt 0: every test in
 # this file uses this (together with FunctionBody) to inspect a specific
 # function F's own standalone-compiled body -- exactly the shape
@@ -60,13 +60,12 @@ proc FunctionBody {text name marker} {
 }
 
 proc refinedChecksHir {} {
-    return [nativeHirOfIR [core::loadProgramFile \
-        [file join $::projectRoot bench refined-checks.ir]]]
+    return [refinedChecksSourceHir]
 }
 
 # ---------------------------------------------------------------------------
 # The real acceptance case: byte::nibble's closed instance in the actual
-# refined-checks.ir/web.bot chain.
+# refined-checks.bot/web.bot chain.
 
 test bitshift-real-byte-nibble-fact-and-is-zero {inside the real closed byte::nibble instance (whose actual body is bit_and(bit_or(bit_and(x,15), shift_right(x,4)), 15) -- the inner x&15 is the milestone's own mandatory exact-zero case; the outer bit_and(...,15) is the "final masking" its broad all-Int implementation adds, whose own result is the non-degenerate [0,15] that Phase B's generic AND-identity, not BitOp's range facts alone, later proves redundant)} -body {
     set hir [refinedChecksHir]

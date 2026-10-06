@@ -34,7 +34,16 @@
 #                                                  call expression (item 9)
 #   handlers     = ":" NEWLINE INDENT { "on" IDENT ":" suite } DEDENT
 #   function     = { functionModifier } "fn" IDENT "(" [ paramList ] ")"
-#                  [ "->" IDENT ] [ "errors" IDENT { "," IDENT } ] ":" suite
+#                  [ "->" IDENT ] [ proofClause ]
+#                  [ "errors" IDENT { "," IDENT } ] ":" suite
+#   proofClause  = "proves" IDENT ":" typeExpr
+#                  -- REFINEMENT-VALUES.md: when the function returns true,
+#                  the argument bound to the named parameter is proven to
+#                  satisfy the refinement type. "proves" is contextual: it is
+#                  recognized only here, after the result type (or the
+#                  parameter list) and before "errors"/":", where no other
+#                  construct allows a name, so `proves` stays an ordinary
+#                  name everywhere else
 #   functionModifier = "nomethod"   -- WARNINGS-METHOD-ELIGIBLE.md; contextual
 #                  (below): the function's author declares that it is never
 #                  called with method syntax
@@ -72,6 +81,12 @@
 #   fail         = "fail" IDENT
 #
 #   typeDecl     = "type" IDENT "=" IDENT "in" domain NEWLINE
+#                | "refined" "type" IDENT "=" typeExpr NEWLINE
+#                  -- a refinement type (REFINEMENT-VALUES.md): a new nominal
+#                  type whose values are exactly values of the carrier type
+#                  known to satisfy the type's proposition. "refined" is a
+#                  contextual word: a declaration modifier only directly
+#                  before "type", an ordinary name everywhere else
 #   domain       = signedInt ".." signedInt
 #                | "{" signedInt { "," signedInt } [ "," ] "}"
 #   signedInt    = [ "-" ] INT
@@ -216,6 +231,9 @@ namespace eval surface::parser {
     # (see the grammar above). Each names one boolean property of the
     # `function` node (`nomethod` -> `nomethod 0|1`, `nomethodSpan`).
     variable functionModifiers {nomethod}
+    # The contextual words that may precede `type` in a type declaration
+    # (REFINEMENT-VALUES.md): `refined type NAME = CARRIER`.
+    variable typeModifiers {refined}
 }
 
 proc surface::parse {source args} {
@@ -450,6 +468,29 @@ proc surface::parser::AtStructDecl {pVar} {
     return [expr {$i > 0 && [Kind p $i] eq "struct"}]
 }
 
+# 1 if the next tokens are a type modifier word followed by the `type`
+# keyword (`refined type`, REFINEMENT-VALUES.md). Never a valid continuation
+# of an expression, so an ordinary variable called `refined` is unaffected
+# (`refined = 1`, `refined(x)`, `x.refined`).
+proc surface::parser::AtRefinedTypeDecl {pVar} {
+    variable typeModifiers
+    upvar 1 $pVar p
+    set token [Peek p]
+    return [expr {[dict get $token kind] eq "IDENT" && [dict get $token text] in $typeModifiers
+        && [Kind p 1] eq "type"}]
+}
+
+# 1 if the next tokens are a type modifier word directly followed by the
+# keyword of a declaration it does not modify (`refined struct`, `refined
+# fn`, `refined error`): a modifier of nothing.
+proc surface::parser::AtStrayTypeModifier {pVar} {
+    variable typeModifiers
+    upvar 1 $pVar p
+    set token [Peek p]
+    return [expr {[dict get $token kind] eq "IDENT" && [dict get $token text] in $typeModifiers
+        && [Kind p 1] in {fn struct error}}]
+}
+
 # 1 if the next tokens are a struct modifier word directly followed by the
 # keyword of another declaration (`opaque fn`, `opaque type`, `opaque error`):
 # a modifier of nothing. Also never a valid expression continuation.
@@ -638,6 +679,17 @@ proc surface::parser::Statement {pVar} {
         INDENT { Fail $token "unexpected indentation" }
         else   { Fail $token "\"else\" without a matching \"if\"" }
         elif   { Fail $token "\"elif\" without a matching \"if\"" }
+    }
+    if {[AtRefinedTypeDecl p]} {
+        # `refined type NAME = CARRIER` (REFINEMENT-VALUES.md); the plain
+        # `type` form is the keyword case above.
+        if {![dict get $p topLevel]} {
+            Fail $token "a type declaration is only allowed at the top level of a module, not nested in a function/if/loop"
+        }
+        return [RefinedTypeDecl p]
+    }
+    if {[AtStrayTypeModifier p]} {
+        Fail $token "\"[dict get $token text]\" only modifies a type declaration (\"[dict get $token text] type NAME = CARRIER\"), not a \"[Kind p 1]\" declaration"
     }
     if {[AtStructDecl p]} {
         # A modifier-led struct declaration (`opaque struct Name:`); the
@@ -1026,7 +1078,7 @@ proc surface::parser::Function {pVar} {
         name [dict get $name value] nameSpan [dict get $name span] \
         params $params flags $flags contexts $contexts paramsSpan [SpanFrom p [dict get $open span]] \
         resultType [dict get $body resultType] resultTypeSpan [dict get $body resultTypeSpan] \
-        errors [dict get $body errors] body $body \
+        errors [dict get $body errors] proves [dict get $body proves] body $body \
         nomethod $nomethod nomethodSpan [expr {$nomethod ? [dict get $modifiers nomethod] : ""}]]
 }
 
@@ -1253,17 +1305,51 @@ proc surface::parser::TypeDecl {pVar} {
     set parent [Expect p IDENT "a parent type name"]
     set inToken [Peek p]
     if {[dict get $inToken kind] ne "IDENT" || [dict get $inToken value] ne "in"} {
+        if {[dict get $inToken kind] in {NEWLINE EOF :: \[}} {
+            Fail $inToken "expected \"in\" after the parent type name, found [Describe $inToken] (a \"type\" declaration declares an integer domain, \"type NAME = Int in LO..HI\"; a refinement of another type is declared \"refined type [dict get $name value] = CARRIER\")"
+        }
         Fail $inToken "expected \"in\" after the parent type name, found [Describe $inToken]"
     }
     Advance p
     set domain [Domain p]
     set node [surface::ast::node typedecl [SpanFrom p $start] \
         name [dict get $name value] nameSpan [dict get $name span] \
-        parent [dict get $parent value] parentSpan [dict get $parent span] \
+        form domain parent [dict get $parent value] parentSpan [dict get $parent span] \
         domain $domain]
     set next [Peek p]
     if {[dict get $next kind] ne "NEWLINE"} {
         Fail $next "expected end of line, found [Describe $next]"
+    }
+    Advance p
+    return $node
+}
+
+# "refined" "type" IDENT "=" typeExpr NEWLINE -- a refinement type
+# declaration (REFINEMENT-VALUES.md; hir/sourcetypes.tcl for what it means):
+# a `typedecl` node of form `refined`, CARRIER the as-written type expression
+# (surface::parser::TypeExpr) its values are values of. The carrier is any
+# type expression the grammar has: whether it is an eligible carrier is a
+# semantic question (RefinementCarrierEligible, hir/sourcetypes.tcl), not a
+# syntactic one.
+proc surface::parser::RefinedTypeDecl {pVar} {
+    upvar 1 $pVar p
+    set modifier [Advance p]
+    Advance p
+    set name [Expect p IDENT "a type name after \"refined type\""]
+    Expect p = "\"=\" after the type name (\"refined type [dict get $name value] = CARRIER\")"
+    set carrierStart [dict get [Peek p] span]
+    set carrier [TypeExpr p "a carrier type after \"=\""]
+    set carrierSpan [SpanFrom p $carrierStart]
+    set next [Peek p]
+    if {[dict get $next kind] eq "IDENT" && [dict get $next value] eq "in"} {
+        Fail $next "a refinement type has no domain: \"refined type [dict get $name value] = CARRIER\" is the whole declaration (an integer domain is declared without \"refined\": \"type NAME = Int in LO..HI\")"
+    }
+    set node [surface::ast::node typedecl [SpanFrom p [dict get $modifier span]] \
+        name [dict get $name value] nameSpan [dict get $name span] \
+        form refined refinedSpan [dict get $modifier span] \
+        carrier $carrier carrierSpan $carrierSpan]
+    if {[dict get $next kind] ne "NEWLINE"} {
+        Fail $next "expected end of line after the carrier type, found [Describe $next] (a refinement has exactly one carrier: \"refined type [dict get $name value] = CARRIER\")"
     }
     Advance p
     return $node
@@ -1556,6 +1642,31 @@ proc surface::parser::Suite {pVar after} {
         set resultType [TypeExpr p {a result type after ->}]
         set resultTypeSpan [SpanFrom p $typeStart]
     }
+    # A proof clause (REFINEMENT-VALUES.md): "proves PARAM: TYPE", legal in
+    # exactly the same one position as the result type -- after it (or
+    # after the parameter list), before "errors" and the final ":". The
+    # word is contextual: no other construct allows a name here, so this is
+    # the only place it is recognized. A list of clause dicts, so further
+    # clause forms (several parameters, other outcomes) extend it, never
+    # the node shape; this grammar admits exactly one.
+    set proves {}
+    if {$allowResult && [Kind p] eq "IDENT" && [dict get [Peek p] text] eq "proves"} {
+        set provesToken [Advance p]
+        set paramToken [Expect p IDENT "the name of the proven parameter after \"proves\""]
+        Expect p : "\":\" after the proven parameter's name (\"proves [dict get $paramToken value]: TYPE\")"
+        set typeStart [dict get [Peek p] span]
+        set provenType [TypeExpr p "the proven refinement type after \"proves [dict get $paramToken value]:\""]
+        lappend proves [dict create outcome true \
+            param [dict get $paramToken value] paramSpan [dict get $paramToken span] \
+            type $provenType typeSpan [SpanFrom p $typeStart] \
+            span [SpanFrom p [dict get $provesToken span]]]
+        if {[Kind p] eq ","} {
+            Fail [Peek p] "a function has at most one proof clause: \"proves PARAM: TYPE\" names one parameter and one refinement type"
+        }
+        if {[Kind p] eq "IDENT" && [dict get [Peek p] text] eq "proves"} {
+            Fail [Peek p] "a function has at most one proof clause: \"proves PARAM: TYPE\" names one parameter and one refinement type"
+        }
+    }
     # A function's own "errors E1, E2" declaration (EXPLICIT-ERROR-
     # COMPLETIONS.md items 3/109): the single-line canonical spelling,
     # gated by the identical ALLOWRESULT flag as "->" just above -- it is
@@ -1595,10 +1706,10 @@ proc surface::parser::Suite {pVar after} {
     if {$body eq ""} {
         # Every statement of the block was skipped by recovery.
         return [surface::ast::node suite $start body {} resultType $resultType resultTypeSpan $resultTypeSpan \
-            errors $errors]
+            errors $errors proves $proves]
     }
     return [surface::ast::node suite [SpanFrom p $start] body $body resultType $resultType \
-        resultTypeSpan $resultTypeSpan errors $errors]
+        resultTypeSpan $resultTypeSpan errors $errors proves $proves]
 }
 
 # ---------------------------------------------------------------------------

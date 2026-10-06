@@ -91,11 +91,7 @@ proc outcomeUnderValue {backend exprs} {
 # and web::emailish? itself.
 
 test module-static-local-char-envless {web::local_char? (nested inside web::emailish?) is envless: its only external reference, local_extra_chars, is a module-static reference, never a lexical capture} -body {
-    core::loadLibrary web
-    set hir [nativeHirOfIR {
-        {bind s {const str "a"}}
-        {call {ref Emailish?} {ref s}}
-    }]
+    set hir [surface::compile "import web\ns = \"a\"\nweb::emailish?(s)\n" -warnings off]
     set lowered [native::lower::program $hir]
     set nir [dict get $lowered text]
     set localCharInfo {}
@@ -109,11 +105,7 @@ test module-static-local-char-envless {web::local_char? (nested inside web::emai
 } -result {1 1}
 
 test module-static-emailish-envless {web::emailish? itself is envless: its own module-static dependency (local_extra_chars, through local_char?) never makes it closure-valued} -body {
-    core::loadLibrary web
-    set hir [nativeHirOfIR {
-        {bind s {const str "a"}}
-        {call {ref Emailish?} {ref s}}
-    }]
+    set hir [surface::compile "import web\ns = \"a\"\nweb::emailish?(s)\n" -warnings off]
     set lowered [native::lower::program $hir]
     set emailishInfo {}
     foreach info [dict get $lowered functions] {
@@ -125,17 +117,12 @@ test module-static-emailish-envless {web::emailish? itself is envless: its own m
 } -result 1
 
 test module-static-no-block-allocation {emailish?, called many times, allocates zero Block values (the frozen baseline's own ~800/run local_char? closure allocation is gone)} -body {
-    core::loadLibrary web
-    set hir [nativeHirOfIR {
-        {bind s {const str "example.test@café.example"}}
-        {call {ref Emailish?} {ref s}}
-    }]
+    set hir [surface::compile "import web\ns = \"example.test@café.example\"\nweb::emailish?(s)\n" -warnings off]
     dict get [native::allocationReport $hir summary 1] byKind Block allocations
 } -result 0
 
-test module-static-refined-checks-block-allocations {bench/refined-checks.ir's own steady-state Block allocation count drops from the frozen baseline's ~803/run to 0} -body {
-    core::loadLibrary web
-    set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+test module-static-refined-checks-block-allocations {bench/refined-checks.bot's own steady-state Block allocation count drops from the frozen baseline's ~803/run to 0} -body {
+    set hir [refinedChecksSourceHir]
     dict get [native::allocationReport $hir summary 1] byKind Block allocations
 } -result 0
 
@@ -145,15 +132,13 @@ test module-static-refined-checks-block-allocations {bench/refined-checks.ir's o
 # (the key keeps the predicate's identity), so the callvalue is gone; the
 # opt-off flag still reproduces the old indirect call.
 test module-static-check-callvalue-gone {scan_while's predicate parameter is no longer a dynamic call: both predicates (local_char? and str::is_tcl_alpha) are exact targets of their call sites} -body {
-    core::loadLibrary web
-    set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+    set hir [refinedChecksSourceHir]
     set nir [native::nir $hir]
     regexp -all {callvalue} $nir
 } -result 0
 
 test module-static-check-callvalue-with-exact-callable-off {with -exact-callable-opt 0 the predicate call is the old indirect callvalue (differential baseline)} -body {
-    core::loadLibrary web
-    set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+    set hir [refinedChecksSourceHir]
     set nir [native::nir $hir -exact-callable-opt 0]
     expr {[regexp -all {callvalue} $nir] >= 1}
 } -result 1
@@ -332,11 +317,7 @@ test module-static-gc-stress-mixed-closure {a static reference and a real activa
 } -result {int 47250}
 
 test module-static-repeated-runs-reset {the same compiled program, run repeatedly in one process (Vm::reset between runs, matching the benchmark harness), re-initializes and correctly re-reads its module statics every run, under GC stress} -body {
-    core::loadLibrary web
-    set hir [nativeHirOfIR {
-        {bind s {const str "a b/c%d~e_f.g@h"}}
-        {call {ref uriEscape} {ref s}}
-    }]
+    set hir [surface::compile "import web\ns = \"a b/c%d~e_f.g@h\"\nweb::uri_escape_text(s)\n" -warnings off]
     underGcStress {
         set report [native::allocationReport $hir summary 8]
         expr {[dict get $report byKind String currentLiveObjects] > 0}

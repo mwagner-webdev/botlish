@@ -1,11 +1,12 @@
 # check-unicode-parity.tcl -- cross-language differential check for
-# Emailish's Unicode-aware grammar (NATIVE-TCL-UNICODE.md): runs the same
-# corpus of email-shaped strings through
+# web::Emailish's Unicode-aware grammar (NATIVE-TCL-UNICODE.md): runs the
+# same corpus of email-shaped strings through
 #
-#   Tcl      core::regex::matches against core::web::emailRegex (the
-#            reference validator every Botlish backend's -impl still uses)
-#   Botlish  Emailish? on interp/compile/cranelift-generic/cranelift (the
-#            new -native-body, on the native backends)
+#   Tcl      core::regex::matches against emailRegex below (the reference
+#            grammar, formerly lib/web.tcl's validator)
+#   Botlish  web::emailish? (lib/web.bot, the proof-producing predicate of
+#            the refinement web::Emailish, REFINEMENT-VALUES.md) on
+#            interp/compile/cranelift-generic/cranelift
 #   Python   bench/equivalents/python/refined_checks.py's emailish()
 #   Rust     bench/equivalents/rust/refined_checks.rs's emailish() (via the
 #            already-built benchmark binary, run once per string with n=1
@@ -19,8 +20,17 @@
 
 set root [file dirname [file dirname [file normalize [info script]]]]
 source [file join $root compiler compiler.tcl]
+source [file join $root surface surface.tcl]
 source [file join $root native native.tcl]
-core::loadLibrary web
+interp recursionlimit {} 200000
+
+set emailRegex [core::regex::create {
+    seq
+    {repeat {set {class alnum} {char .} {char _} {char %} {char +} {char -}} 1 inf}
+    {lit @}
+    {repeat {seq {repeat {set {class alnum} {char -}} 1 inf} {lit .}} 1 inf}
+    {repeat {class alpha} 2 inf}
+}]
 
 set corpus {
     someone@example.com
@@ -45,21 +55,21 @@ set corpus {
 }
 
 proc tclReference {s} {
-    return [expr {[core::regex::matches $core::web::emailRegex [core::value::str $s]] ? "true" : "false"}]
+    return [expr {[core::regex::matches $::emailRegex [core::value::str $s]] ? "true" : "false"}]
 }
 
 proc emailishUnder {backend s} {
-    set exprs [list [list call {ref Emailish?} [list const str $s]]]
-    # The native backends compile HIR (native::evalHir), never core IR: the
-    # one-call program is read into HIR (hir::build) first.
+    set source "import web\nweb::emailish?(\"[string map {\\ \\\\ \" \\\"} $s]\")\n"
+    set hir [surface::compile $source -warnings off]
     if {$backend in {cranelift cranelift-generic}} {
         set options [expr {$backend eq "cranelift-generic" ? {-specialize 0} : {}}]
-        return [core::value::show [native::evalHir [hir::build $exprs -strict 0] {*}$options]]
+        return [core::value::show [native::evalHir $hir {*}$options]]
     }
     set saved [core::useBackend]
     core::useBackend $backend
     try {
-        return [core::value::show [core::evalProgram $exprs]]
+        return [core::value::show [expr {$backend eq "compile" ? [core::compiler::evalHir $hir]
+            : [core::evalProgram [hir::lower $hir]]}]]
     } finally {
         core::useBackend $saved
     }

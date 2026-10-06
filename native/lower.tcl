@@ -1606,7 +1606,7 @@ proc native::lower::CollectChecks {region} {
 #     and the checks of the operation it is an operand of. HIR's types
 #     leave that code reachable where they do not see the `never` (a
 #     decided `if` whose live arm returns, a `loop` whose only `break` is
-#     in a dead arm, an ARITY raise, a bridged native's known error), and an
+#     in a dead arm, an ARITY raise), and an
 #     operation with an operand typed `never` (`n + stop()`) never runs.
 # Their blockers are counted in the function's skippedGuards, as a virtual
 # binding's list::at read already is (Call). The NIR does not change.
@@ -5424,81 +5424,6 @@ proc native::lower::FlattenedVirtualRegionCall {fnVar e node target targetInstan
     return [list $dsts region]
 }
 
-# The native-to-module bridge changes a root native call's resolved target to
-# a module Block. When that Block has captures, the root native value is not
-# its closure; fetch the module function's own binding instead -- the one
-# hir::BridgeProvenance (hir/hir.tcl) recorded on this reference as its
-# `bridge`, and made every enclosing block capture, so it is reachable (by
-# Access) from any caller region exactly as a module-qualified reference to
-# it would be. This uses only HIR BindingIds, never a run-time
-# namespace/name lookup.
-proc native::lower::ModuleBridgeBinding {calleeExpr targetKind} {
-    variable hir
-    if {$targetKind ne "block" || [hir::kind $hir $calleeExpr] ne "ref"} {
-        return ""
-    }
-    set node [hir::node $hir $calleeExpr]
-    if {![dict exists $node bridge]} {
-        return ""
-    }
-    return [dict get $node bridge]
-}
-
-# The native a block call E denotes when it is a call of a module-bridged
-# native that hir::aot holds to the native's parameter kinds (VisitCall):
-# its name if some argument needed a check, "" otherwise. The bridge
-# replaces only the implementation; the native's parameter check is still
-# its own, under its own name, before the module function runs.
-proc native::lower::BridgedCheckedNative {e calleeExpr argExprs} {
-    variable hir
-    variable guards
-    variable knownErrors
-    set name [hir::types::BridgedNative $hir $calleeExpr]
-    if {$name eq ""} {
-        return ""
-    }
-    foreach arg $argExprs {
-        set key [list $e $arg]
-        if {[dict exists $guards $key] || [dict exists $knownErrors $key]} {
-            return $name
-        }
-    }
-    return ""
-}
-
-# 1 if some argument of the bridged native call E is statically of the
-# wrong kind (hir::aot's known error), so its parameter check always fails.
-proc native::lower::BridgedKnownError {e argExprs} {
-    variable knownErrors
-    foreach arg $argExprs {
-        if {[dict exists $knownErrors [list $e $arg]]} {
-            return 1
-        }
-    }
-    return 0
-}
-
-# The kind guards of the bridged native NAME's call E (see
-# BridgedCheckedNative), on its arguments ARGREGS as CallArgs evaluated
-# them. Only an argument of no static kind needs a guard, and its slot is
-# then always an ordinary tagged register (raw, short, field and plan slots
-# are each planned only for a proven kind), so the registers are the
-# arguments' own, one per argument.
-proc native::lower::BridgedArgGuards {fnVar e argExprs argRegs fieldWidths rawSlots planSlots name} {
-    upvar 1 $fnVar fn
-    variable guards
-    if {[join $fieldWidths ""] ne "" || [join $planSlots ""] ne ""
-            || [llength $argRegs] != [llength $argExprs]} {
-        throw {NATIVE BUG} "native lowering: bridged native $name call $e has non-register arguments"
-    }
-    foreach arg $argExprs slot $rawSlots {
-        if {[dict exists $guards [list $e $arg]] && $slot ni {"" 0}} {
-            throw {NATIVE BUG} "native lowering: guarded argument $arg of bridged native $name call $e is not tagged"
-        }
-    }
-    EmitArgGuards fn $e $argExprs $argRegs [dict get [core::native::metadata $name] paramTypes] $name
-}
-
 # Preserve the exact call and its completion handling, then substitute a
 # successful-result constant for later value uses when the per-instance range
 # analysis proves one. This is not an effect or totality optimization.
@@ -5872,7 +5797,7 @@ proc native::lower::CallInner {fnVar e node want {wantVirtual ""} {wantRegion 0}
     if {$wantVirtual eq "" && !$wantRegion && $targetKind eq "block" && $stringRegionOpt} {
         # A direct call to an instance hir::stringregion.tcl's ConsumingParams
         # proved region-consuming at some parameter (e.g. `is_local_char
-        # (char_at(i))`, lib/web.tcl's Emailish? native-body): if the
+        # (char_at(i))`, lib/web.bot's emailish?): if the
         # argument at that position is itself region-eligible, its body is
         # lowered directly here, inline, in the caller's own function --
         # never as a `call`/`callenv` to its own compiled function at all
@@ -5928,29 +5853,12 @@ proc native::lower::CallInner {fnVar e node want {wantVirtual ""} {wantRegion 0}
     }
 
     # The callee is evaluated first. A reference to a root native or to an
-    # environment-free function needs no code. A module-native bridge with a
-    # captured module value instead reads the module function binding itself.
+    # environment-free function needs no code.
     set callee ""
-    set bridgeBinding [ModuleBridgeBinding $calleeExpr $targetKind]
-    set bridgeEnvless [expr {$bridgeBinding ne "" && $target in $envless}]
     set skipCallee [expr {[hir::kind $hir $calleeExpr] eq "ref"
-        && ($bridgeEnvless || ($bridgeBinding eq "" &&
-            (($targetKind eq "native" && [dict get [hir::binding $hir [hir::get $hir $calleeExpr binding]] kind] eq "root")
-                || ($targetKind eq "block" && $target in $envless))))}]
-    if {$bridgeBinding ne "" && !$skipCallee} {
-        lassign [Access fn $bridgeBinding] how where
-        switch -- $how {
-            reg { set callee $where }
-            rawreg { set callee [TaggedOf fn $where] }
-            shortreg { set callee [TaggedOfShort fn $where] }
-            fnvalue { set callee [Assign fn "fnvalue $where" $e] }
-            self { set callee [Assign fn self $e] }
-            static { set callee [Assign fn "staticget $where" $e] }
-            default {
-                throw {NATIVE BUG} "native lowering: module bridge binding $bridgeBinding has inaccessible storage $how"
-            }
-        }
-    } elseif {!$skipCallee} {
+        && (($targetKind eq "native" && [dict get [hir::binding $hir [hir::get $hir $calleeExpr binding]] kind] eq "root")
+            || ($targetKind eq "block" && $target in $envless))}]
+    if {!$skipCallee} {
         set callee [Expr fn $calleeExpr]
         if {$callee eq "never"} {
             return {never tagged}
@@ -5981,26 +5889,6 @@ proc native::lower::CallInner {fnVar e node want {wantVirtual ""} {wantRegion 0}
     }
 
     if {$targetKind eq "block"} {
-        set bridged [BridgedCheckedNative $e $calleeExpr $argExprs]
-        if {$bridged ne "" && [BridgedKnownError $e $argExprs]} {
-            # A module-bridged native call whose argument is statically of
-            # the wrong kind: the native's own parameter check always fails
-            # (hir::aot's known error), so the call is never made. The
-            # arguments are evaluated tagged, never in the callee's ABI
-            # form, since that is planned for the wrong kind.
-            set argRegs {}
-            foreach arg $argExprs {
-                set r [Expr fn $arg]
-                if {$r eq "never"} {
-                    return {never tagged}
-                }
-                lappend argRegs $r
-            }
-            EmitArgGuards fn $e $argExprs $argRegs \
-                [dict get [core::native::metadata $bridged] paramTypes] $bridged
-            Emit fn unreachable $e
-            return {never tagged}
-        }
         set params [hir::get $hir $target params]
         set instance [expr {[dict exists $fn targets $e] ? [dict get $fn targets $e] : ""}]
         # The instance hir::specialize chose; a self tail call that stays in
@@ -6065,16 +5953,13 @@ proc native::lower::CallInner {fnVar e node want {wantVirtual ""} {wantRegion 0}
             return {never tagged}
         }
         if {[dict get $node known] ne ""} {
-            # A module-bridged type-test predicate HIR already decided
-            # statically (hir/types.tcl's BridgedNative extension to Call):
-            # the arguments were just evaluated above for effect, but the
-            # call itself needs no code at all -- not even a call to its
-            # bridged module function -- exactly like NativeCall's own
-            # identical fold for an unbridged type test (see there).
+            # A repeated proof-predicate invocation HIR already decided (an
+            # exact predicate-result fact of a repeatable function,
+            # REFINEMENT-VALUES.md; hir/types.tcl's Call): the arguments
+            # were just evaluated above for effect, but the call itself
+            # needs no code at all, exactly like NativeCall's own identical
+            # fold for a decided type test (see there).
             return [list [Assign fn "bool [expr {[dict get $node known] ? "true" : "false"}]" $e] tagged]
-        }
-        if {$bridged ne ""} {
-            BridgedArgGuards fn $e $argExprs $argRegs $fieldWidths $rawSlots $planSlots $bridged
         }
         if {![dict exists $fn targets $e]} {
             throw {NATIVE BUG} "native lowering: hir::specialize chose no instance for call $e"
@@ -8719,10 +8604,7 @@ proc native::lower::PlainNativeCallee {calleeExpr} {
         return 0
     }
     set b [hir::get $hir $calleeExpr binding]
-    if {$b eq "" || [dict get [hir::binding $hir $b] kind] ne "root"} {
-        return 0
-    }
-    return [expr {[ModuleBridgeBinding $calleeExpr native] eq ""}]
+    return [expr {$b ne "" && [dict get [hir::binding $hir $b] kind] eq "root"}]
 }
 
 # The NIR operand text of construction PIECES.
