@@ -769,15 +769,80 @@ exists), the milestone-1 fuzzer's library baseline and the milestone-2 fuzzer
 (their generated programs return no list literal; both smoke runs pass in the
 regression), and `tests/flags.test`'s `-warnings error` test.
 
-**Pinned commit.** The corpus audit ran at `faae181`, which was `origin/main`
-and this milestone's base when the work started and when it was rechecked at
-the end (see "Full regression"). The parallel agent's commits already on
-`main` at `faae181` (bench scripts passing `-warnings off`, a test-file
-cleanup) do not touch the audited sources.
+**Pinned commit, and the tree moving.** The corpus audit ran at `faae181`,
+which was `origin/main` and this milestone's base. The parallel agent's commits
+already on `main` there (bench scripts passing `-warnings off`, a test-file
+cleanup) do not touch the audited sources. **During the milestone `origin/main`
+moved to `ffbd610`.** It gained the contexts milestone (`context struct`, `with
+context`, context parameters: new HIR constructs, parser, native lowering), an
+AGENTS.md section on concurrent test runs, and a scalar-asm corpus
+regeneration. None of these is the parallel agent's warning fixes. The branch
+merged it (`6b5e7a8`, no conflicts) and everything was re-run on the merged
+tree:
+
+* the corpus audit on the merged tree (this pass, `origin/main`'s corpus: the
+  audited paths are byte-identical to `ffbd610`) is **identical to the
+  `faae181` audit** apart from its commit header. Same 8 findings, same
+  classifications, same scratch checks. The two snapshots agree. The contexts
+  milestone added `examples/linux/context-hello.bot` and `lib/linux/io.bot`,
+  outside the audit's corpus definition. They carry **no** finding
+  (`context-hello.bot` compiles with `io.bot`, 0 warnings; `io.bot` does not
+  compile standalone, `CONTEXT-FUNCTION-VALUE`);
+* `tests/fixed-arity-list-return.test` 149/149 on all four backends;
+  `tests/warnings.test` 75/81 and `tests/method-eligible.test` 143/145 (the same
+  8); `tests/contexts.test` with warnings **on** (`BOTLISH_WARNINGS=default`)
+  74/74 with no finding, so the pass handles the new constructs;
+* the full regression on the merged tree (below).
 
 ## Full regression
 
-PENDING
+All runs are on the committed pass (`aa96155`, which is this milestone's code,
+tests and tools on top of the pinned `faae181`). `tests/all.tcl` ran on both Tcl
+backends with the harness default policy (`BOTLISH_WARNINGS=off`), each
+backend in its own git worktree, in parallel. The suite had **5808 tests before
+this milestone**: 5957 minus the 149 new ones, since no other test file changed.
+
+* **`interp`: 5957 tests, 5949 passed, 8 failed. `compile`: 5957 tests, 5945
+  passed, 4 skipped (the existing `coreScoping` constraint), 8 failed.** The 8
+  failures are the same on both backends and are exactly the expected breakage
+  under "Parallel work": 6 in `tests/warnings.test` (`warn-off-runs-no-
+  warning-pass`, `warn-exact-list`, `warn-lists-with-unknown-elements-not-
+  same`, `warn-same-binding`, `warn-alias-of-binding`, `warn-different-
+  bindings-not-same`) and 2 in `tests/method-eligible.test` (`me-off-runs-no-
+  warning-pass`, `me-list-literal-never-eligible`). Each is a stats pin or a
+  complete-set pin over a program that really has the fixed shape. All belong
+  to the parallel agent, and none was edited here. **No other test of the 5808
+  failed.** The parallel agent's fixes are not on the tree (`origin/main`,
+  `ffbd610` at the end, does not contain them), so 0 failures is not yet
+  reachable without editing those two files, which this milestone does not
+  own.
+* `tests/fixed-arity-list-return.test`: **149/149 on each of `interp`,
+  `compile`, `cranelift-generic` and `cranelift`.**
+* `tests/warnings.test` 75/81 and `tests/method-eligible.test` 143/145 on both
+  Tcl backends (the failures above). Their fuzz smoke tests (`warn-fuzz-smoke`,
+  `me-fuzz-smoke`) pass. The milestone-1 and milestone-2 fuzzers also pass 300
+  seeds each on the committed tree (`same-return-value`: 197 with warnings, 103
+  without, 0 failures, 0 extra groups; `method-eligible`: 211/89, 0 failures, 0
+  extras, 1518 of 1518 round trips).
+* `tests/native-coverage.tcl` (the suite on `cranelift`, as CI's native job):
+  5957 tests: 2440 native, 3379 independent of the backend, 70
+  passed-partial, 60 unsupported (the constructs it already classifies, the
+  same 60 as milestone 2), and **8 "failed"**. The tool's heading calls these
+  "native backend bugs", which is only its label for any failure. They are
+  exactly the same 8 expected warning-pin failures, and none involves native
+  code.
+* CI's plain native example step (`main.tcl -backend cranelift` over
+  `examples/stdlib`, `examples/surface/0[1-8]`, `1[1-3]` and
+  `examples/hir/0[1-3]`) exits 0. Stderr has 314 lines of warnings: 8
+  `FIXED-ARITY-LIST-RETURN` (the 7 stdlib findings and `13-hygiene`'s), 301
+  `METHOD-ELIGIBLE`, 2 `SAME-RETURN-VALUE`, and their notes. Stdout carries
+  none of it.
+* This milestone's fuzzer passes 2000 seeds, and the mutation tool kills 12/12,
+  both on the committed tree (above). The corpus audit is the committed
+  `corpus-audit.txt`.
+* The GC-stress job (`BOTLISH_NATIVE_GC_STRESS=1`, CI on push to `main`) was not
+  run locally: nothing under `native/` changed, and the pass runs before any
+  backend and changes no HIR.
 
 ## Known limitations
 
@@ -945,7 +1010,8 @@ ready patch), and its six findings to annotate take `-> list`.
 **Verification**
 
 39. *Corpus findings: how many, which categories, at which commit?* 8 at
-    `faae181`: 2 convert (heterogeneous builder state) and 6 annotate (4
+    `faae181`, and identically 8 on the tree merged with `origin/main`
+    `ffbd610`: 2 convert (heterogeneous builder state) and 6 annotate (4
     same-element, all hand-reviewed as annotate; 2 heterogeneous genuine lists).
     7 are single-exit, and 0 annotated list functions exist.
 40. *False positives under the convert-or-annotate bar?* Zero.
@@ -958,4 +1024,13 @@ ready patch), and its six findings to annotate take `-> list`.
     without: 0 failures, 0 extras, 1341/1341 conversions, 0 excluded runs.
     12 of 12 mutants killed, all by the fuzzer.
 43. *Backend parity?* Identical warning sets on all four backends (pinned).
-44. *Full regression?* See "Full regression".
+44. *Full regression?* The new file passes 100% (149/149 on all four
+    backends). `tests/all.tcl` on `interp` and `compile` ran 5957 tests (5808
+    before this milestone): 8 failures on each, all the expected breakage in
+    `tests/warnings.test` (6) and `tests/method-eligible.test` (2), attributed
+    to the parallel agent's ownership and listed by name. Nothing else failed.
+    The parallel fixes are not on the tree (`origin/main` moved to `ffbd610`
+    with unrelated work, merged and re-verified, but without them), so the "0
+    where present" condition has nothing to apply to yet.
+    Native coverage (the suite on `cranelift`): 5957 tests, the same 8
+    failures and nothing else.
