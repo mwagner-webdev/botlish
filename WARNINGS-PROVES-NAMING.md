@@ -116,8 +116,9 @@ being a general naming linter.
   with two or more ordinary parameters is silent, whatever its name
   (`pn-scope-out-of-shape-proves-silent`). Zero ordinary parameters cannot
   carry `proves` at all -- the clause must name an ordinary parameter
-  (`PROOF-CLAUSE`), in source and in HIR text
-  (`pn-scope-zero-parameters-unrepresentable`). A proves function whose result
+  (`PROOF-CLAUSE`, `pn-scope-zero-parameters-unrepresentable`), and HIR text
+  cannot express it either (`hir::read` requires the clause's binding to be
+  one of the block's parameters). A proves function whose result
   is neither `bool` nor `unit` is rejected by the frontend (`PROOF-CLAUSE`), so
   that silence is pinned on hand-edited HIR text, which `hir::parse` admits:
   `declares str`, `declares int` and no declared result are all silent
@@ -236,7 +237,7 @@ the shape's result), and the convention follows; nothing else. The result type
 is spelled as the repository spells it: `bool` and `unit`, the spelling of the
 annotation (`-> bool`), of `hir::types::show` and of every type diagnostic
 (the brief's example wrote `Bool`; see "Deviations"). The validator tail
-deviates from the brief's `validator names begin with \`validate\``: that
+deviates from the brief's ``validator names begin with `validate` ``: that
 sentence is literally true of `validateX`, `validator_x` and `validates`, all
 of which the rule reports, so the message would contradict its own finding;
 the tail states the rule as it is.
@@ -270,10 +271,14 @@ warns`), and so does one declared in a statically dead branch
 completion walk runs (`pn-no-completion-walk`: a trace on
 `hir::completions::reachedExprs` sees 0 calls), and `hir/completions.tcl` is not
 in the diff. Semantic instances live in the `semantic` side table and are never
-visited: collecting over HIR stripped of that table gives the identical
-warnings, and a function specialized into several instances, aliased and called
-many times is one warning (`pn-instances-never-walked`,
-`pn-one-diagnostic-per-function`; the `instances-visited` mutant is killed).
+visited. An in-shape proves function has no instances of its own (its one
+ordinary parameter is declared of the carrier, so it is never polymorphic), but
+one nested in a polymorphic function sits in each of that function's instance
+snapshots: such a function, covered by three instances, is one warning, and
+collecting over HIR stripped of the `semantic` table gives the identical
+warnings (`pn-instances-never-walked`); an aliased function called many times
+is one warning too (`pn-one-diagnostic-per-function`). The `instances-visited`
+mutant is killed (see "Mutation testing").
 
 ## Architecture
 
@@ -377,7 +382,9 @@ written before this warning and gains nothing: its 43 stderr lines (the
 `METHOD-ELIGIBLE` and `SAME-RETURN-VALUE` findings of `lib/web.bot` and of the
 example) contain no `PROVES-NAMING` line, because both of its proves functions
 (`web::emailish?`, `web::uri_query_value?`) already follow the convention. Zero
-is the honest count, as milestone 4's was. @@CI-MERGED@@
+is the honest count, as milestone 4's was. Re-run on the merged tree (with the
+validator feature), the native step's stderr is byte-identical, and the interp
+step's still empty.
 
 ## Kickoff: ownership and the item-2 inventory
 
@@ -415,21 +422,32 @@ complete-set assertion broke, so no code filter was added anywhere.
 **The refinement milestone's own tests and example, inventoried explicitly.**
 They pass unchanged, but that alone proves nothing: every compile in
 `tests/refinement-values.test` and `tests/emailish-predicate.test` passes
-`-warnings off` (or runs under the harness's `off` default). So a scratch copy
-of the tree was made with those 34 compile sites switched to `-warnings default
--warning-channel stderr` and both files run under `BOTLISH_WARNINGS=default`:
-88/88 and 20/20 passed, with **0 `PROVES-NAMING` lines** (and 423 lines of the
-other codes, from `lib/web.bot` and the programs). The census of their proves
-functions: `refinement-values.test` declares `big?`, `bump?`, `calls_unknown?`,
-`emailish?`, `encoded?`, `even?`, `fake?` (4), `mail?` (3), `other_mail?`,
-`positive?`, `pure?`, `query?`, `reads?`, `via_helper?`, `writes?` -- all
-conforming -- and `p` 13 times, every one in a program the compiler rejects
-(the `PROOF-CLAUSE` and `REFINEMENT-MINT-AUTHORITY` tests), which is never
-warned; `emailish-predicate.test` declares `emailish?`; the refinement fuzzer's
-predicates are `p1?`, `q1?`, `p2?`, `p3?`, `n1?`; `examples/refinement/
-refined-strings.bot` and `bench/refined-checks.bot` use `web::emailish?` and
-`web::uri_query_value?`. So no refinement test, example or fuzzer needed an
-adaptation, and no test's function names were changed.
+`-warnings off`, directly or through `tests/helpers.tcl` (`sourceAgree`,
+`refinedChecksSourceHir`), or runs under the harness's `off` default. So a
+scratch copy of the tree was made with every one of those compile sites -- 28
+and 6 in the two files, 2 in the helpers -- switched to `-warnings default
+-warning-channel stderr`, and both files run under `BOTLISH_WARNINGS=default`
+(a first attempt switched only the test files' own sites and missed the
+helpers'; the counts here are from the complete run). 88/88 and 20/20 passed.
+They print **one `PROVES-NAMING` line in total**, a true finding:
+
+| file | test | function | finding | adaptation |
+|---|---|---|---|---|
+| `tests/refinement-values.test` | `refinement-proof-with-errors` | `fn p(s: str) -> bool proves s: M errors Weird:` | a one-parameter `bool` proves function not ending in `?` | **none**: nothing breaks (the program is compiled by `sourceAgree` with warnings off, and the test asserts on the program's values only); the test's subject is the clause order, not naming, so renaming `p` would also have been legitimate, but no adaptation is needed and the test is left as written |
+
+The census of their proves functions: `refinement-values.test` declares
+`big?`, `bump?`, `calls_unknown?`, `emailish?`, `encoded?`, `even?`, `fake?`
+(4), `mail?` (3), `other_mail?`, `positive?`, `pure?`, `query?`, `reads?`,
+`via_helper?`, `writes?` -- all conforming -- and `p` 13 times: 12 in programs
+the compiler rejects (`refinement-proof-target-missing`,
+`-target-not-refinement`, `-returns-bool`, `-carrier-mismatch`,
+`-one-clause`), which are never warned, and the one finding above;
+`emailish-predicate.test` declares `emailish?`; the refinement fuzzer's
+predicates are `p1?`, `q1?`, `p2?`, `p3?`, `n1?` (and it compiles with
+`-warnings off`); `examples/refinement/refined-strings.bot` and
+`bench/refined-checks.bot` use `web::emailish?` and `web::uri_query_value?`. So
+no refinement test, example or fuzzer needed an adaptation, and no test's
+function names were changed.
 
 **Verify-and-expect-unaffected, confirmed**: the four warning fuzzers' 60-seed
 smoke runs give the identical summary lines with the pass (their generators
@@ -441,8 +459,9 @@ backends in "Full regression".
 
 **The validator feature's own tests** (`tests/refinement-validators.test`, 48
 tests, merged with it) name every validator by the convention and every
-predicate with `?`, as its brief required, and compile cleanly under
-`-warnings error` (its author's check); it needed no adaptation either.
+predicate with `?`, as its brief required: the same complete switch to
+warnings on gives 48/48 and **0 `PROVES-NAMING` lines**. It needed no
+adaptation either.
 
 ## Tests
 
@@ -699,7 +718,49 @@ false]`"). That run found and fixed a bug in the tool's whole-word pattern
 
 ## Full regression
 
-@@REGRESSION@@
+All runs are on `64d1eb5`: this milestone's pass, tests, tools and
+adaptations with the refinement validator feature merged (`982fca1`). Every
+later commit changes documentation and audit outputs only (and one line of the
+corpus tool's rename pattern, which no test runs). The native backend is built
+from that tree (nothing under `native/` changed in this milestone or the merged
+feature). `tests/all.tcl` ran on both Tcl backends with the harness's default
+policy (`BOTLISH_WARNINGS=off`), each with a private `-tmpdir` (AGENTS.md,
+"Running tests concurrently"), in parallel with native coverage and the
+2000-seed fuzz run. The suite had **6090 tests after milestone 4** (its merged
+tree); the validator feature adds 48 (`tests/refinement-validators.test`, 6138)
+and this milestone 84 (`tests/proves-naming.test`): 6222 = 6138 + 84, so no
+other test was added or removed.
+
+* **`interp`: 6222 tests, 6222 passed, 0 failed. `compile`: 6222 tests, 6218
+  passed, 4 skipped (the existing `coreScoping` constraint), 0 failed.**
+* **`tests/native-coverage.tcl`** (the suite on `cranelift`, as CI's native job):
+  6222 tests: 2461 native, 3634 independent of the backend, 67 passed-partial,
+  60 unsupported (the constructs it already classifies, the same 60 as
+  milestones 2-4), **0 failed**.
+* **`cranelift-generic`**, file by file: `tests/proves-naming.test`, the four
+  adapted warning files, `tests/flags.test` and the refinement files
+  (`refinement-values`, `refinement-validators`, `emailish-predicate`): 869
+  tests, 869 passed.
+* **`tests/proves-naming.test`: 84/84 on each of `interp`, `compile`,
+  `cranelift-generic` and `cranelift`.** The item-2 files after their
+  adaptation -- `tests/warnings.test` 81, `tests/method-eligible.test` 145,
+  `tests/fixed-arity-list-return.test` 149, `tests/same-failure.test` 99 --
+  and `tests/flags.test` 155, `tests/refinement-values.test` 88,
+  `tests/refinement-validators.test` 48 and `tests/emailish-predicate.test`
+  20 pass on all four backends (`interp` and `compile` in the full runs,
+  `cranelift` in native coverage, `cranelift-generic` file by file). Their fuzz
+  smoke tests (`warn-`, `me-`, `fa-`, `sf-`, `pn-`, `validator-fuzz-smoke`)
+  pass.
+* CI's plain example steps, reproduced on the merged tree: the native job's
+  `main.tcl -backend cranelift` corpus step exits 0 with the same 314 stderr
+  lines and no `PROVES-NAMING` line; the Tcl jobs' `main.tcl -backend interp`
+  exits 0 with an empty stderr (see "Backend independence and clean outputs").
+* This milestone's fuzzer passes 2000 seeds with the rename law, and the
+  mutation tool kills 17/17, both on this tree. The corpus audit is the
+  committed `corpus-audit.txt`.
+* The GC-stress job (`BOTLISH_NATIVE_GC_STRESS=1`, CI on push to `main`) was not
+  run locally: nothing under `native/` changed, and the pass runs before any
+  backend and changes no HIR (pinned).
 
 ## Known limitations
 
@@ -754,9 +815,9 @@ new CLI option or `BOTLISH_WARNINGS` value.
   it"; the repository spells it `bool` (the annotation `-> bool`,
   `hir::types::show`, every type diagnostic), so the message says `bool` and
   `unit`.
-* **The validator tail states the rule**: `validator names are \`validate\` or
-  begin with \`validate_\``, not the brief's `validator names begin with
-  \`validate\``, which is literally true of `validateX`, `validator_x` and
+* **The validator tail states the rule**: ``validator names are `validate` or
+  begin with `validate_` ``, not the brief's ``validator names begin with
+  `validate` ``, which is literally true of `validateX`, `validator_x` and
   `validates` -- names the rule reports -- and would contradict its own
   finding. Neither template prints the name to use.
 * **The NIR half of the rename law is identity up to function labels**, not
@@ -767,6 +828,10 @@ new CLI option or `BOTLISH_WARNINGS` value.
 * **Zero-parameter proves functions and non-bool/non-unit results are
   unrepresentable in source** (`PROOF-CLAUSE`); the zero case is pinned as a
   rejection and the other-results case on hand-edited HIR text.
+* **The refinement milestone's tests break nothing, but hold one true
+  finding** (`refinement-proof-with-errors`'s `p`), visible only with their
+  compiles switched to warnings on; it is left unadapted because nothing
+  breaks (see "Kickoff").
 * **The corpus has no finding**, so the per-finding rename check has nothing to
   run on; the tool's curated-rename machinery is in place and reports "no
   finding to rename" (see "Corpus findings and census").
@@ -845,7 +910,7 @@ new CLI option or `BOTLISH_WARNINGS` value.
 34. *Rename law at which levels?* Unit (`pn-rename-is-semantics-preserving`),
     the fuzzer (2000 seeds, required) and per corpus finding (none exist; the
     tool's rename check reports nothing to rename).
-35. *Warning-mode tests pass?* @@Q35@@
+35. *Warning-mode tests pass?* Yes. `tests/proves-naming.test` 84/84 on `interp`, `compile`, `cranelift-generic` and `cranelift`; after their adaptation `tests/warnings.test` 81, `tests/method-eligible.test` 145, `tests/fixed-arity-list-return.test` 149 and `tests/same-failure.test` 99 on the same four backends, all passing; `tests/flags.test` 155 and the refinement files (88, 48, 20) too.
 36. *Fuzzer and mutation results?* Fuzzer: 2000 seeds, 1203 with warnings and 797 without, 2831 predicted warnings: 0 failures, 0 extras; the rename law held for 2831 of 2831 renamed functions (4880 NIR labels renamed exactly, 782 inlined away), 0 law failures. Mutation: 17 of 17 killed (the 12 required among them): 14 by the fuzzer, 3 by the unit tests (`result-type-ignored`, `prefix-anywhere`, `reachability-added`: shapes the fuzzer does not generate).
 37. *Backend parity?* Identical sets on all four (in process and CLI).
-38. *Full regression?* @@Q38@@
+38. *Full regression?* 6222 tests on `interp` (6222 passed) and `compile` (6218 passed, 4 skipped by the existing constraint), 0 failures each; native coverage 6222 tests, 0 failed (2461 native, 3634 independent, 67 passed-partial, 60 unsupported). The adaptations changed only the four registry/stats pins listed in "Kickoff", so those four are everything the pass broke; the refinement tests, written before this warning, produce one true finding with warnings on (`refinement-proof-with-errors`'s `p`), which breaks nothing.
