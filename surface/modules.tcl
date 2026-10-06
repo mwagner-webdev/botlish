@@ -216,6 +216,15 @@ proc surface::modules::QualifiedRefsWalk {node foundVar} {
                 TypeRefs [dict get $field type] [dict get $field typeSpan] found
             }
         }
+        traitdecl {
+            # A requirement's parameter and result types (TRAITS.md).
+            foreach r [dict get $node requirements] {
+                foreach param [dict get $r params] {
+                    TypeRefs [lindex $param 2] [lindex $param 3] found
+                }
+                TypeRefs [dict get $r resultType] [dict get $r resultTypeSpan] found
+            }
+        }
     }
     foreach child [surface::ast::Children $node] {
         QualifiedRefsWalk $child found
@@ -430,9 +439,9 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan} {
             Error CONTEXT-INSTALLATION-UNSUPPORTED [dict get $statement span] \
                 "context installation is currently supported only in the entry program's top-level scope, as a statement (this one is inside a module: \"$name\", $path)"
         }
-        if {[dict get $statement kind] ni {function bind typedecl errordecl structdecl}} {
+        if {[dict get $statement kind] ni {function bind typedecl errordecl structdecl traitdecl}} {
             Error INVALID-TOPLEVEL [dict get $statement span] \
-                "module \"$name\" ($path): only function definitions, immutable bindings, type declarations, struct declarations and error declarations are allowed at module top level, found a \"[dict get $statement kind]\" statement"
+                "module \"$name\" ($path): only function definitions, immutable bindings, type declarations, struct declarations, trait declarations and error declarations are allowed at module top level, found a \"[dict get $statement kind]\" statement"
         }
     }
     CheckNativeMembers $ast $name "module \"$name\" ($path)"
@@ -442,7 +451,7 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan} {
     dict incr state nextFile
     CollectAndLoad state $ast $name
     set functionNames [lmap statement [dict get $ast body] {
-        if {[dict get $statement kind] in {typedecl errordecl structdecl}} continue
+        if {[dict get $statement kind] in {typedecl errordecl structdecl traitdecl}} continue
         dict get $statement name
     }]
     dict set state loaded $name $functionNames
@@ -463,10 +472,18 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan} {
         if {[dict get $statement kind] ne "errordecl"} continue
         dict get $statement name
     }]
-    lassign [surface::lower::SplitTypeDecls [dict get $ast body] $name] executable decls errorDecls structDecls
+    # The traits it declares (TRAITS.md): type-level members of the
+    # namespace like its types, named `NAME::Trait` and importable with
+    # `import type`.
+    dict set state loadedTraits $name [lmap statement [dict get $ast body] {
+        if {[dict get $statement kind] ne "traitdecl"} continue
+        dict get $statement name
+    }]
+    lassign [surface::lower::SplitTypeDecls [dict get $ast body] $name] executable decls errorDecls structDecls traitDecls
     dict set state typeDecls [concat [dict get $state typeDecls] $decls]
     dict set state errorDecls [concat [dict get $state errorDecls] $errorDecls]
     dict set state structDecls [concat [dict get $state structDecls] $structDecls]
+    dict set state traitDecls [concat [dict get $state traitDecls] $traitDecls]
     set statements [lmap node [surface::lower::Sequence $executable] {RemapFile $node $fileId}]
     set origin [RemapOrigin [surface::lower::Origin [dict get $ast span] "namespace"] $fileId]
     set section [dict create namespace $name nodes $statements origin $origin \
@@ -568,7 +585,7 @@ proc surface::modules::CheckImports {stateVar ast own} {
     set typeSpans [dict create]
     set local [dict create]
     foreach statement [dict get $ast body] {
-        if {[dict get $statement kind] in {typedecl structdecl} && ![dict exists $local [dict get $statement name]]} {
+        if {[dict get $statement kind] in {typedecl structdecl traitdecl} && ![dict exists $local [dict get $statement name]]} {
             dict set local [dict get $statement name] [dict get $statement nameSpan]
         }
     }
@@ -609,7 +626,7 @@ proc surface::modules::CheckImports {stateVar ast own} {
         if {$hasFile} {
             LoadNamespace state $ns $span
         }
-        set typeNames [expr {$hasFile ? [dict get $state loadedTypes $ns] : {}}]
+        set typeNames [expr {$hasFile ? [concat [dict get $state loadedTypes $ns] [dict get $state loadedTraits $ns]] : {}}]
         if {$name ni $typeNames} {
             set functions [expr {$hasFile ? [dict get $state loaded $ns] : {}}]
             set structs [expr {$hasFile ? [dict get $state loadedStructs $ns] : {}}]
@@ -702,7 +719,7 @@ proc surface::modules::CollectAndLoad {stateVar ast {key ""}} {
         # The import loaded the module.
         if {$refKind in {struct type}} {
             set structNames [dict get $state loadedStructs $namespaceName]
-            set typeNames [expr {$refKind eq "type" ? [dict get $state loadedTypes $namespaceName] : {}}]
+            set typeNames [expr {$refKind eq "type" ? [concat [dict get $state loadedTypes $namespaceName] [dict get $state loadedTraits $namespaceName]] : {}}]
             if {$symbolName ni $structNames && $symbolName ni $typeNames} {
                 set declared [lsort [concat $structNames $typeNames]]
                 Error UNKNOWN-SYMBOL $span \
@@ -732,8 +749,8 @@ proc surface::modules::CollectAndLoad {stateVar ast {key ""}} {
 proc surface::modules::NewState {files nextFile} {
     return [dict create files $files nextFile $nextFile \
         loaded [dict create] loadedStructs [dict create] loadedTypes [dict create] \
-        loadedErrors [dict create] imports [dict create] stack {} sections {} \
-        typeDecls {} errorDecls {} structDecls {}]
+        loadedErrors [dict create] loadedTraits [dict create] imports [dict create] stack {} sections {} \
+        typeDecls {} errorDecls {} structDecls {} traitDecls {}]
 }
 
 # {sections SECTIONS files FILES functions NAMESPACE->{FUNCTION-NAME ...}
@@ -761,7 +778,7 @@ proc surface::modules::LoadNamespaces {namespaces args} {
     return [dict create sections [dict get $state sections] files [dict get $state files] \
         functions [dict get $state loaded] typeDecls [dict get $state typeDecls] \
         errorDecls [dict get $state errorDecls] structDecls [dict get $state structDecls] \
-        imports [dict get $state imports]]
+        traitDecls [dict get $state traitDecls] imports [dict get $state imports]]
 }
 
 # The HIR of the entry program AST (a `program` node whose file is FILE ... in
@@ -773,16 +790,17 @@ proc surface::modules::LoadNamespaces {namespaces args} {
 proc surface::modules::BuildProgram {ast strict} {
     set state [NewState [dict create f1 [dict get $ast span file]] 2]
     CollectAndLoad state $ast ""
-    lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable ownDecls ownErrorDecls ownStructDecls
+    lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable ownDecls ownErrorDecls ownStructDecls ownTraitDecls
     set decls [concat [dict get $state typeDecls] $ownDecls]
     set errorDecls [concat [dict get $state errorDecls] $ownErrorDecls]
     set structDecls [concat [dict get $state structDecls] $ownStructDecls]
+    set traitDecls [concat [dict get $state traitDecls] $ownTraitDecls]
     return [hir::buildSyntax [surface::lower::Sequence $executable] -strict 0 \
         -halt-on-resolution-errors $strict \
         -origin [surface::lower::Origin [dict get $ast span] ""] \
         -files [dict get $state files] -modules [dict get $state sections] \
         -imports [dict get $state imports] \
-        -type-decls $decls -error-decls $errorDecls -struct-decls $structDecls]
+        -type-decls $decls -error-decls $errorDecls -struct-decls $structDecls -trait-decls $traitDecls]
 }
 
 # The HIR of the .bot program file PATH, after loading (and compiling once,

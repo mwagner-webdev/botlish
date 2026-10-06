@@ -159,7 +159,7 @@ namespace eval hir::semantic {
     variable state {}
     # Per-expression facts a walk writes (hir/types.tcl); the ones that are
     # TypeIds are stored as type forms.
-    variable fields {type reachable target known calleeErrors handlerTypes refinements resultType inferredResultType}
+    variable fields {type reachable target known calleeErrors handlerTypes refinements resultType inferredResultType traitCall}
     variable typeFields {type resultType inferredResultType}
 }
 
@@ -267,7 +267,7 @@ proc hir::semantic::Call {hir ctx e block argTypes blockResult} {
     variable maxInstances
     variable maxDepth
     variable levelLimit
-    if {!$enabled || $state eq "" || $blockResult eq "never"} {
+    if {!$enabled || $state eq "" || ($blockResult eq "never" && ![hir::traits::IsPolymorphic $hir $block])} {
         return $blockResult
     }
     set node [dict get $hir exprs $block]
@@ -280,14 +280,25 @@ proc hir::semantic::Call {hir ctx e block argTypes blockResult} {
     set declared [hir::signatures::entryTypes $hir $block]
     set entry {}
     set trivial 1
+    set index 0
     foreach t $argTypes d $declared {
-        if {$d ne {}} {
+        if {$d ne {} && [hir::types::IsTraitConstraint $d]} {
+            # A trait-typed parameter (TRAITS.md): the instance is entered
+            # with the argument's view -- its hidden witness is the instance's
+            # key component, so two witnesses are two instances.
+            set x [hir::traits::EntryView $t $d]
+            set generic [hir::traits::AbstractView $d $block $index]
+        } elseif {$d ne {}} {
             set x [expr {[hir::types::subtype $t $d] ? $t : $d}]
             set generic $d
         } else {
-            set x $t
+            # A view passed where nothing is declared is only its concrete
+            # value: no trait view crosses an untyped boundary (TRAITS.md,
+            # "any").
+            set x [expr {[hir::types::IsTrait $t] ? "any" : $t}]
             set generic any
         }
+        incr index
         if {$x ne $generic} {
             set trivial 0
         }
@@ -535,7 +546,7 @@ proc hir::semantic::Walk {id} {
     dict set scratch exprs $block inferredResultType [hir::types::intern scratch $result]
     set declared [dict get $node declaredResult]
     if {$declared ne {}} {
-        set result $declared
+        set result [hir::traits::ViewResult $declared $result]
     }
     dict set scratch exprs $block resultType [hir::types::intern scratch $result]
     return [list $result $scratch]

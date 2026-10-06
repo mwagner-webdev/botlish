@@ -1340,6 +1340,11 @@ proc hir::range::ProvesType {range type} {
 # `[[]]`, statically `List[List[never]]`) is checked the same way one level
 # down, without making the enclosing non-empty List/Set itself covariant.
 proc hir::range::ProvesValueAcceptedBy {argType argRange declared} {
+    if {[hir::types::IsTraitConstraint $declared]} {
+        # A trait-typed boundary (TRAITS.md): a view of the trait, or a
+        # concrete type that satisfies it structurally (hir::traits).
+        return [hir::traits::Accept $argType $declared]
+    }
     if {[hir::types::IsList $declared] || [hir::types::IsSet $declared]} {
         return [AggregateAdmits [hir::types::Unshaped $argType] $declared]
     }
@@ -1471,6 +1476,11 @@ proc hir::range::verifyDeclaredResults {hirVar} {
     upvar 1 $hirVar hir
     dict for {e node} [dict get $hir exprs] {
         if {[dict get $node kind] ne {block} || [dict get $node declaredResult] eq {}} { continue }
+        if {[hir::types::IsTraitConstraint [dict get $node declaredResult]]} {
+            # A declared trait result is proven per exit, with its witness
+            # (hir::traits::verify: TRAIT-NOT-SATISFIED, TRAIT-WITNESS-JOIN).
+            continue
+        }
         set params [dict get $node params]
         set outcome [AnalyzeInstance $hir verify {} $e $params \
             [lrepeat [llength $params] [unknown]] {} {}]
@@ -1606,6 +1616,17 @@ proc hir::range::VerifyCall {hirVar ranges e node} {
         set argType [hir::typeOf $hir $arg]
         set argRange [expr {[dict exists $ranges $arg] ? [dict get $ranges $arg] : [unknown]}]
         set inferred [hir::signatures::inferredTrusted $hir $targetBlock $i]
+        if {$declaredType ne {} && [hir::types::IsTraitConstraint $declaredType]
+                && ![ProvesValueAcceptedBy $argType $argRange $declaredType]} {
+            # A trait-typed parameter (TRAITS.md): the argument's static type
+            # does not satisfy the trait; say which requirement fails.
+            if {![dict exists $hir semanticContext]} {
+                dict set hir violatedDeclared $paramBinding $arg
+            }
+            hir::Diagnose hir TRAIT-NOT-SATISFIED [hir::traits::NotSatisfiedMessage $hir \
+                [dict get $hir bindings $paramBinding name] $argType $declaredType] $arg
+            continue
+        }
         if {$declaredType ne {} && ![ProvesValueAcceptedBy $argType $argRange $declaredType]} {
             if {$inferred} {
                 dict set hir violatedContracts $paramBinding $arg
@@ -1718,6 +1739,10 @@ proc hir::range::FactsClause {type declared r} {
 # is a nominal type, so equal field layouts (abi::I64 and abi::Isize, both
 # one Int field over the same domain) never make one the other.
 proc hir::range::MismatchClause {argType declared} {
+    if {[hir::types::IsTrait $argType] && ![hir::types::IsTrait $declared] && $declared ne "any"} {
+        return [format {; the value is a %s trait view: only the operations %s declares are available on it, and its concrete type is never recovered (there is no cast, type test or downcast from a trait)} \
+            [hir::types::show $argType] [hir::types::show $argType]]
+    }
     set refinement [RefinementClause $argType $declared]
     if {$refinement ne ""} {
         return $refinement

@@ -336,8 +336,14 @@ proc hir::sourcetypes::RegisterRefinement {decl structDecls} {
             }
         }
     }
-    if {[catch {hir::resolve::ResolveTypeExpr [dict get $decl carrier] $ns} carrier]} {
-        Fail [dict get $decl carrierSpan] "unknown carrier type $carrierText for refinement \"$id\": $carrier"
+    if {[catch {hir::resolve::ResolveTypeExpr [dict get $decl carrier] $ns} carrier options]} {
+        Fail [dict get $decl carrierSpan] "unknown carrier type $carrierText for refinement \"$id\": $carrier" \
+            [hir::resolve::TypeErrorKind $options TYPE]
+    }
+    if {[hir::types::MentionsTrait $carrier]} {
+        Fail [dict get $decl carrierSpan] \
+            "invalid refinement carrier $carrierText for \"$id\": a trait is a static constraint, not a value type with a representation of its own (TRAITS.md)" \
+            REFINEMENT-CARRIER
     }
     set why [RefinementCarrierEligible $carrier]
     if {$why ne ""} {

@@ -18,7 +18,7 @@
 #                     keyword: it starts an import only when immediately
 #                     followed by a name or by "type", which no other
 #                     construct allows, so `import` stays an ordinary name.
-#   topStatement = typeDecl | structDecl | errorDecl | statement
+#   topStatement = typeDecl | structDecl | errorDecl | traitDecl | statement
 #   statement    = simple NEWLINE | valued | function | if | loop
 #                | withDecl NEWLINE
 #   withDecl     = "with" "context" expression    -- CONTEXTS.md: installs
@@ -92,6 +92,19 @@
 #   signedInt    = [ "-" ] INT
 #
 #   errorDecl    = "error" IDENT NEWLINE
+#
+#   traitDecl    = "trait" IDENT ":" NEWLINE INDENT traitRequirement
+#                  { traitRequirement } DEDENT          -- TRAITS.md
+#   traitRequirement = "fn" IDENT "(" [ paramList ] ")" [ "->" typeExpr ]
+#                  [ "errors" IDENT { "," IDENT } ] NEWLINE
+#                  -- a signature only: no body and no trailing ":". "trait"
+#                  is contextual: a declaration only as the first word of a
+#                  top-level statement directly followed by a name (`trait
+#                  Named:`), an ordinary name everywhere else (`trait = 3`,
+#                  `fn f(trait):`, `x.trait`). What a requirement may say
+#                  (the trait as its first parameter, no flags, no context,
+#                  no proof clause) is checked here where it is grammar and
+#                  by hir/traits.tcl where it is meaning
 #
 #   structDecl   = { structModifier } "struct" IDENT ":" NEWLINE INDENT structField { structField } DEDENT
 #   structModifier = "opaque"       -- OPAQUE-STRUCTS.md; contextual (below)
@@ -468,6 +481,126 @@ proc surface::parser::AtStructDecl {pVar} {
     return [expr {$i > 0 && [Kind p $i] eq "struct"}]
 }
 
+# 1 if the next tokens start a trait declaration (TRAITS.md): the contextual
+# word "trait" directly followed by a name. Two names in a row are never a
+# valid expression, so an ordinary variable called `trait` (`trait = 3`,
+# `trait(x)`, `x.trait`, a parameter `trait`) is unaffected.
+proc surface::parser::AtTraitDecl {pVar} {
+    upvar 1 $pVar p
+    set token [Peek p]
+    return [expr {[dict get $token kind] eq "IDENT" && [dict get $token text] eq "trait"
+        && [Kind p 1] eq "IDENT"}]
+}
+
+# "trait" IDENT ":" NEWLINE INDENT traitRequirement { traitRequirement }
+# DEDENT -- a top-level trait declaration (TRAITS.md). A `traitdecl` node
+# {name nameSpan requirements}, each requirement a dict {name nameSpan params
+# (the function node's own {NAME SPAN TYPE TYPESPAN} tuples) paramsSpan
+# resultType resultTypeSpan errors ({NAME SPAN} pairs) span}. A requirement
+# is a signature only: "fn NAME(params) [-> T] [errors E, ...]" ending the
+# line, never a body. A trait needs at least one requirement (TRAIT-EMPTY: a
+# structural trait with none would be satisfied by every type); a
+# requirement may declare no flags (TRAIT-REQUIREMENT-FLAGS), no context
+# (TRAIT-CONTEXT-REQUIREMENT) and no proof clause, and has no modifier.
+proc surface::parser::TraitDecl {pVar} {
+    upvar 1 $pVar p
+    set start [dict get [Advance p] span]
+    set name [Expect p IDENT "a trait name after \"trait\""]
+    set token [Peek p]
+    if {[dict get $token kind] ne ":"} {
+        Fail $token "expected \":\" after the trait name \"[dict get $name value]\", found [Describe $token]"
+    }
+    Advance p
+    set token [Peek p]
+    if {[dict get $token kind] ne "NEWLINE"} {
+        Fail $token "expected a new line and an indented block of requirements after \":\", found [Describe $token]"
+    }
+    Advance p
+    set token [Peek p]
+    if {[dict get $token kind] ne "INDENT"} {
+        FailCode [dict get $name span] TRAIT-EMPTY \
+            "trait \"[dict get $name value]\" declares no requirement: a trait needs at least one \"fn NAME(value: [dict get $name value], ...)\" requirement in an indented block (a requirement-free trait would be satisfied by every type)"
+    }
+    Advance p
+    set requirements {}
+    while {[Kind p] ne "DEDENT" && [Kind p] ne "EOF"} {
+        if {[Kind p] eq "NEWLINE"} {
+            Advance p
+            continue
+        }
+        lappend requirements [TraitRequirement p [dict get $name value]]
+    }
+    if {[Kind p] eq "DEDENT"} {
+        Advance p
+    }
+    return [surface::ast::node traitdecl [SpanFrom p $start] \
+        name [dict get $name value] nameSpan [dict get $name span] requirements $requirements]
+}
+
+# One requirement line of trait TRAIT: "fn" IDENT "(" params ")" [ "->"
+# typeExpr ] [ "errors" IDENT { "," IDENT } ] NEWLINE.
+proc surface::parser::TraitRequirement {pVar trait} {
+    variable functionModifiers
+    upvar 1 $pVar p
+    set token [Peek p]
+    if {[dict get $token kind] eq "IDENT" && [dict get $token text] in $functionModifiers && [Kind p 1] eq "fn"} {
+        Fail $token "a trait requirement has no modifiers: \"[dict get $token text]\" applies to a function declaration, not to a requirement of trait \"$trait\""
+    }
+    if {[dict get $token kind] ne "fn"} {
+        Fail $token "expected a requirement \"fn NAME(value: $trait, ...) -> T\" in trait \"$trait\", found [Describe $token] (a trait declares function signatures only)"
+    }
+    set start [dict get [Advance p] span]
+    set name [Expect p IDENT "a requirement name after \"fn\""]
+    set open [Expect p ( "\"(\" after the requirement name"]
+    lassign [ParamSections p] params flags contexts
+    set paramsSpan [SpanFrom p [dict get $open span]]
+    if {$flags ne {}} {
+        FailCode [dict get [lindex $flags 0] span] TRAIT-REQUIREMENT-FLAGS \
+            "requirement \"[dict get $name value]\" of trait \"$trait\" declares flags: flags in trait requirements are not supported yet"
+    }
+    if {$contexts ne {}} {
+        FailCode [dict get [lindex $contexts 0] nameSpan] TRAIT-CONTEXT-REQUIREMENT \
+            "requirement \"[dict get $name value]\" of trait \"$trait\" declares a context parameter: context-supplied trait operations are not supported yet (a requirement is an ordinary signature over the trait's own values)"
+    }
+    set resultType {}
+    set resultTypeSpan {}
+    if {[Kind p] eq "->"} {
+        Advance p
+        set typeStart [dict get [Peek p] span]
+        set resultType [TypeExpr p "a result type after ->"]
+        set resultTypeSpan [SpanFrom p $typeStart]
+    }
+    if {[Kind p] eq "IDENT" && [dict get [Peek p] text] eq "proves"} {
+        Fail [Peek p] "a trait requirement cannot carry a proof clause: \"proves\" belongs to a refinement's own proof-producing function"
+    }
+    set errors {}
+    if {[Kind p] eq "errors"} {
+        Advance p
+        while 1 {
+            set nameToken [Expect p IDENT "an error name after \"errors\""]
+            lappend errors [list [dict get $nameToken value] [dict get $nameToken span]]
+            if {[Kind p] ne ","} {
+                break
+            }
+            Advance p
+        }
+    }
+    set next [Peek p]
+    if {[dict get $next kind] eq ":"} {
+        FailCode [dict get $next span] TRAIT-REQUIREMENT-BODY \
+            "requirement \"[dict get $name value]\" of trait \"$trait\" is a signature only: it has no body and no trailing \":\" (an implementation is an ordinary function in the namespace that owns the concrete type)"
+    }
+    if {[dict get $next kind] ne "NEWLINE" && [dict get $next kind] ne "DEDENT" && [dict get $next kind] ne "EOF"} {
+        Fail $next "expected end of line after the requirement signature, found [Describe $next]"
+    }
+    if {[dict get $next kind] eq "NEWLINE"} {
+        Advance p
+    }
+    return [dict create name [dict get $name value] nameSpan [dict get $name span] \
+        params $params paramsSpan $paramsSpan resultType $resultType resultTypeSpan $resultTypeSpan \
+        errors $errors span [SpanFrom p $start]]
+}
+
 # 1 if the next tokens are a type modifier word followed by the `type`
 # keyword (`refined type`, REFINEMENT-VALUES.md). Never a valid continuation
 # of an expression, so an ordinary variable called `refined` is unaffected
@@ -679,6 +812,14 @@ proc surface::parser::Statement {pVar} {
         INDENT { Fail $token "unexpected indentation" }
         else   { Fail $token "\"else\" without a matching \"if\"" }
         elif   { Fail $token "\"elif\" without a matching \"if\"" }
+    }
+    if {[AtTraitDecl p]} {
+        # `trait NAME:` (TRAITS.md): a contextual top-level declaration.
+        if {![dict get $p topLevel]} {
+            FailCode [dict get $token span] TRAIT-NESTED \
+                "a trait declaration is only allowed at the top level of a module, not nested in a function/if/loop"
+        }
+        return [TraitDecl p]
     }
     if {[AtRefinedTypeDecl p]} {
         # `refined type NAME = CARRIER` (REFINEMENT-VALUES.md); the plain

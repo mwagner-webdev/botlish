@@ -345,7 +345,7 @@ proc hir::build {exprs args} {
 proc hir::buildSyntax {nodes args} {
     set options [Options hir::buildSyntax \
         {-mode program -strict 1 -origin "" -files {} -modules {} \
-            -type-decls {} -error-decls {} -struct-decls {} -imports {} -halt-on-resolution-errors 0} $args]
+            -type-decls {} -error-decls {} -struct-decls {} -trait-decls {} -imports {} -halt-on-resolution-errors 0} $args]
     set mode [dict get $options -mode]
     if {$mode ni {program sequence}} {
         error "hir::build: -mode must be program or sequence"
@@ -357,9 +357,22 @@ proc hir::buildSyntax {nodes args} {
     # candidate functions have been decided (DecideMethodCalls) -- which needs
     # the typed HIR of trial builds, so no build may raise before it.
     set halt [expr {[dict get $options -strict] || [dict get $options -halt-on-resolution-errors]}]
+    set traits [expr {[dict get $options -trait-decls] ne {}}]
+    if {$traits} {
+        # A trait program (TRAITS.md): every syntax node gets an identity
+        # the monomorphization below can name it by.
+        lassign [hir::traits::Stamp $nodes [dict get $options -modules]] nodes modules syntax
+        dict set options -modules $modules
+        dict set given -modules $modules
+    }
     set hir [BuildOnce $nodes $options $given {} $halt checked]
     if {$checked && [dict exists $hir methodCalls]} {
         set hir [DecideMethodCalls $nodes $options $given $hir]
+    }
+    if {$traits && $checked && [dict get $hir diagnostics] eq ""} {
+        # Checked as written, with trait views; now the program every
+        # backend compiles: the same syntax built again, monomorphized.
+        set hir [hir::traits::monomorphize $nodes $options $given $hir $syntax]
     }
     if {[dict get $options -strict] && [dict get $hir diagnostics] ne ""} {
         # Resolution failed, or a static check did: the first diagnostic.
@@ -387,11 +400,27 @@ proc hir::BuildOnce {nodes options given choices halt checkedVar} {
         # of its own: no struct of an earlier compilation may stay visible.
         hir::structs::Reset
     }
+    set traitDecls ""
+    if {[dict exists $given -trait-decls]} {
+        # Likewise for traits (TRAITS.md): their names first, so every other
+        # type declaration that mentions one recognizes (and rejects) it;
+        # their requirements once every type they may name is registered.
+        hir::traits::declare [dict get $options -trait-decls]
+    }
     set sourceTypes [hir::sourcetypes::apply [dict get $options -type-decls] [dict get $options -struct-decls]]
+    if {[dict exists $given -trait-decls]} {
+        set traitDecls [hir::traits::resolve]
+    }
     set hir [hir::resolve::program $nodes [dict get $options -mode] [dict get $options -origin] \
         [dict get $options -modules] $choices]
     dict set hir sourceTypes $sourceTypes
     dict set hir errorDecls $errorDecls
+    if {$traitDecls ne ""} {
+        dict set hir traits $traitDecls
+        # The implementation candidates conformance reads: every unit's own
+        # top-level definitions, by source name, before hygiene renames them.
+        hir::traits::index $hir
+    }
     hir::hygiene::apply hir
     dict for {f path} [dict get $options -files] {
         dict set hir files $f [dict create id $f path $path]
@@ -489,6 +518,10 @@ proc hir::DecideMethodCalls {nodes options given hir} {
     set decided [dict create]
     set validity [dict create]
     set problemsOf [dict create]
+    # A method-style call on a trait view is an operation of the trait
+    # (TRAITS.md): the candidates visible by name take no part in it, so it
+    # is never ambiguous, whatever the code imports -- decided as is.
+    TraitCallsDecided $hir $calls decided
     while 1 {
         set undecided [lmap {key info} $calls {
             if {[dict exists $decided $key] || [string is integer -strict $key]} continue
@@ -519,6 +552,7 @@ proc hir::DecideMethodCalls {nodes options given hir} {
                 dict set problemsOf $key [lindex $candidates $t] \
                     [MethodCallProblems $trial [dict get $trial methodCalls $key expr]]
             }
+            TraitCallsDecided $trial $calls decided
         }
         if {$undecided eq ""} break
         # A problem every candidate shares says nothing about which fits.
@@ -601,6 +635,24 @@ proc hir::DecideMethodCalls {nodes options given hir} {
     return $final
 }
 
+# Marks, in the caller's DECIDEDVAR, every multi-candidate method call of
+# CALLS (a methodCalls table) that HIR (a typed build) types as a trait
+# operation: such a call is decided by its receiver's trait, never by the
+# candidates, so it keeps the candidate its build stood in with.
+proc hir::TraitCallsDecided {hir calls decidedVar} {
+    upvar 1 $decidedVar decided
+    if {![dict exists $hir methodCalls]} {
+        return
+    }
+    dict for {key info} $calls {
+        if {[dict exists $decided $key] || ![dict exists $hir methodCalls $key]} continue
+        set e [dict get $hir methodCalls $key expr]
+        if {[dict exists $hir exprs $e traitCall]} {
+            dict set decided $key [dict get $hir methodCalls $key chosen]
+        }
+    }
+}
+
 # Types resolved HIR (inferring every block's intrinsic contract,
 # hir/signatures.tcl) and runs every static check over it, collecting
 # diagnostics. hir::buildSyntax's and native::prepareHir's shared tail.
@@ -651,6 +703,7 @@ proc hir::CheckOnce {hirVar demote} {
     hir::errorsets::verify hir
     hir::modulebinding::validate hir
     hir::structs::promoteOpacity hir
+    hir::traits::verify hir
 }
 
 proc hir::Options {command defaults given} {
@@ -950,7 +1003,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {syntax imports resolve flags contexts refcheck hygiene sourcetypes structs syscall errordecls types exactvalue signatures modulebinding refine repeatable lower format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep warnings} {
+    foreach file {syntax imports resolve flags contexts refcheck hygiene sourcetypes structs traits syscall errordecls types exactvalue signatures modulebinding refine repeatable lower format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep warnings} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

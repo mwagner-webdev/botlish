@@ -119,9 +119,97 @@ proc hir::read::TypeDecls {lines} {
         hir::structs::applyEntries $final
         lappend registered {*}$final
     }
+    # Trait declarations (hir::format::TraitDecl's "trait ..." lines) and the
+    # trait-polymorphic functions a monomorphized program replaced
+    # (TRAITS.md): their requirement types may name the structs above.
+    variable lastTraits
+    variable lastTraitFunctions
+    set lastTraits {}
+    set lastTraitFunctions {}
+    set traitLines {}
+    foreach entry $rest {
+        lassign $entry indent content number
+        if {$indent != 0 || [string range $content 0 5] ne "trait "} { break }
+        lappend traitLines $entry
+        set rest [lrange $rest 1 end]
+    }
+    if {$traitLines ne ""} {
+        # Names first (a requirement names its own trait), then the lines.
+        hir::traits::applyEntries [lmap entry $traitLines {
+            regexp {^trait (\S+) } [lindex $entry 1] -> id
+            dict create id $id name $id namespace "" requirements {}
+        }]
+        set lastTraits [lmap entry $traitLines {TraitLine [lindex $entry 1] [lindex $entry 2]}]
+        hir::traits::applyEntries $lastTraits
+    }
+    foreach entry $rest {
+        lassign $entry indent content number
+        if {$indent != 0 || [string range $content 0 7] ne "traitfn "} { break }
+        if {![regexp {^traitfn (\S+) \((.*)\) -> (.+) clones \((.*)\)$} $content -> fname paramsText resultText clonesText]} {
+            Fail $number "expected \"traitfn NAME (P: T, ...) -> R clones (C, ...)\""
+        }
+        set params {}
+        if {$paramsText ne ""} {
+            foreach item [SplitTop $paramsText ", "] {
+                if {![regexp {^(\S+): (.+)$} $item -> p t]} {
+                    Fail $number "expected \"PARAM: TYPE\", got \"$item\""
+                }
+                lappend params $p [ParseType $t $number]
+            }
+        }
+        set clones {}
+        foreach c [expr {$clonesText eq "" ? {} : [split [string map {", " \x01} $clonesText] \x01]}] {
+            lappend clones $c {}
+        }
+        dict set lastTraitFunctions $fname [dict create params $params \
+            result [expr {$resultText eq "-" ? "" : [ParseType $resultText $number]}] clones $clones]
+        set rest [lrange $rest 1 end]
+    }
     variable lastTypeDecls
     set lastTypeDecls $registered
     return $rest
+}
+
+# The `traits` entry hir::format::TraitDecl's line CONTENT states.
+proc hir::read::TraitLine {content number} {
+    if {![regexp {^trait (\S+) owner (\S+) requires (.+)$} $content -> id owner reqsText]} {
+        Fail $number "expected \"trait ID owner NS requires REQ ; ...\""
+    }
+    set requirements {}
+    foreach text [split [string map {" ; " \x01} $reqsText] \x01] {
+        set errorsText ""
+        set i [TopIndex $text " errors "]
+        if {$i >= 0} {
+            set errorsText [string range $text [expr {$i + 8}] end]
+            set text [string range $text 0 [expr {$i - 1}]]
+        }
+        set resultText ""
+        set i [TopIndex $text " -> "]
+        if {$i >= 0} {
+            set resultText [string range $text [expr {$i + 4}] end]
+            set text [string range $text 0 [expr {$i - 1}]]
+        }
+        if {![regexp {^([^(\s]+)\((.*)\)$} $text -> name paramsText]} {
+            Fail $number "bad trait requirement \"$text\""
+        }
+        set params {}
+        foreach item [expr {$paramsText eq "" ? {} : [SplitTop $paramsText ", "]}] {
+            if {![regexp {^(\S+): (.+)$} $item -> p t]} {
+                Fail $number "expected \"PARAM: TYPE\" in a trait requirement, got \"$item\""
+            }
+            set type [ParseType $t $number]
+            lappend params [dict create name $p type $type self [expr {$type eq [list trait $id]}]]
+        }
+        set result ""
+        if {$resultText ne ""} {
+            set type [ParseType $resultText $number]
+            set result [dict create type $type self [expr {$type eq [list trait $id]}]]
+        }
+        set errors [expr {$errorsText eq "" ? {} : [lsort -unique [split [string map {", " \x01} $errorsText] \x01]]}]
+        lappend requirements [dict create name $name nameSpan "" span "" params $params result $result errors $errors]
+    }
+    return [dict create id $id name [lindex [split [string map {:: \x01} $id] \x01] end] \
+        namespace [expr {$owner eq "-" ? "" : $owner}] requirements $requirements]
 }
 
 # The struct sourceTypes entry "struct ID name NAME ns NS fields F: T, ..."
@@ -245,6 +333,14 @@ proc hir::read::Program {text} {
     dict set hir sourceTypes $lastTypeDecls
     variable lastErrorDecls
     dict set hir errorDecls $lastErrorDecls
+    variable lastTraits
+    variable lastTraitFunctions
+    if {$lastTraits ne {}} {
+        dict set hir traits $lastTraits
+    }
+    if {$lastTraitFunctions ne {}} {
+        dict set hir traitFunctions $lastTraitFunctions
+    }
     Finish hir
     return $hir
 }
@@ -461,6 +557,11 @@ proc hir::read::ParseType {text number} {
     if {[hir::structs::declared $text]} {
         return [list nstruct $text]
     }
+    if {[hir::traits::declared $text]} {
+        # A trait constraint (TRAITS.md): only a trait declaration or a
+        # trait function's source signature prints one.
+        return [list trait $text]
+    }
     if {[regexp {^([a-z]+)\[([^\]]*)\]$} $text -> base names]} {
         set text [list refined $base [split $names ,]]
     }
@@ -648,7 +749,7 @@ proc hir::read::Expr {hirVar level s path block} {
             }
         }
         block {
-            if {![BlockHeader $head body params captures staticRefs declared errorsText binds nomethod contexts provesText]} {
+            if {![BlockHeader $head body params captures staticRefs declared errorsText binds nomethod contexts provesText cloneText]} {
                 Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)? ?nomethod? ?contexts (IDS) requires (IDS)? ?declares ...? ?proves BINDING NAME: TYPE? ?errors ...? ?binds ...?\""
             }
             if {$nomethod} {
@@ -695,6 +796,19 @@ proc hir::read::Expr {hirVar level s path block} {
                     binding $provenBinding fact [ParseType $provenType $number]]
             }
             SetField hir $e proofs $proofs
+            if {[dict exists $cloneText views]} {
+                SetField hir $e traitClone [dict get $hir bindings [lindex $paramIds 0] name]
+                foreach item [expr {[dict get $cloneText views] eq "" ? {} : [split [string map {", " \x01} [dict get $cloneText views]] \x01]}] {
+                    if {![regexp {^(b[0-9]+) \S+: (\S+)$} $item -> vb vtrait] || [lsearch -exact $paramIds $vb] < 0} {
+                        Fail $number "expected \"BINDING NAME: TRAIT\" in a clone's views"
+                    }
+                    dict set hir bindings $vb view [hir::types::MakeView $vtrait \
+                        [lindex $declaredParamTypes [lsearch -exact $paramIds $vb]]]
+                }
+            }
+            if {[dict exists $cloneText result]} {
+                SetField hir $e traitResult [list trait [dict get $cloneText result]]
+            }
             set declaredErrors {}
             if {$errorsText ne {}} {
                 foreach name [split [string map {", " \x01} $errorsText] \x01] {
@@ -717,8 +831,19 @@ proc hir::read::Expr {hirVar level s path block} {
             SetField hir $e body $ids
         }
         call {
-            if {![regexp {^(?:native\((.+?)\)|block\((e[0-9]+)\)|(generic))(?: = (true|false))?(?: installs (\S+))?$} $head -> native target generic known installs]} {
-                Fail $number "expected \"call native(NAME)|block(EXPR)|generic ?= true|false? ?installs ID?\""
+            if {![regexp {^(?:native\((.+?)\)|block\((e[0-9]+)\)|(generic))(?: = (true|false))?(?: installs (\S+))?(?: trait (\S+)\.(\S+) witness (.+))?$} $head -> native target generic known installs traitId requirement witnessText]} {
+                Fail $number "expected \"call native(NAME)|block(EXPR)|generic ?= true|false? ?installs ID? ?trait TRAIT.OP witness TYPE?\""
+            }
+            if {$traitId ne ""} {
+                # A trait operation resolved to its implementation
+                # (TRAITS.md): the requirement's contract for the witness.
+                set witness [ParseType $witnessText $number]
+                set req [hir::traits::requirement $traitId $requirement]
+                if {$req eq ""} {
+                    Fail $number "trait $traitId has no requirement \"$requirement\""
+                }
+                SetField hir $e traitImpl [dict create trait $traitId requirement $requirement \
+                    witness $witness contract [hir::traits::RequiredFn $req $witness]]
             }
             # The context a verified installation installs (CONTEXTS.md), as
             # printed: native lowering assigns its fixed slot from it.
@@ -999,7 +1124,7 @@ proc hir::read::Expr {hirVar level s path block} {
 # into the named variables; 0 if malformed. The optional parts are found
 # outside brackets, so a declared type may itself contain spaces, ", " or
 # the word "errors" (a structural function type's own "errors: [...]").
-proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar {nomethodVar ""} {contextsVar ""} {provesVar ""}} {
+proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar {nomethodVar ""} {contextsVar ""} {provesVar ""} {cloneVar ""}} {
     foreach var {bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar} {
         upvar 1 [set $var] [string range $var 0 end-3]
     }
@@ -1022,6 +1147,20 @@ proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar de
     if {[regexp {^ nomethod(.*)$} $rest -> after]} {
         set nomethod 1
         set rest $after
+    }
+    # A trait clone's parameter views and a declared trait result
+    # (TRAITS.md), as hir::format prints them.
+    if {$cloneVar ne ""} {
+        upvar 1 $cloneVar clone
+        set clone ""
+        if {[regexp {^ clone \((.*?)\)(.*)$} $rest -> views after]} {
+            dict set clone views $views
+            set rest $after
+        }
+        if {[regexp {^ traitresult (\S+)(.*)$} $rest -> id after]} {
+            dict set clone result $id
+            set rest $after
+        }
     }
     # The context requirements (CONTEXTS.md): {DIRECT REQUIRED}, as printed
     # (hir::check recomputes the same facts from the loads and calls).
