@@ -104,7 +104,7 @@ set aibench::slowSize {1M 1000000}
 # outputChars outputBytes microseconds allocations stringAllocations
 # allocatedBytes stringBytesCopied gcCycles crc.
 proc aibench::measure {text runs stringRegionOpt} {
-    set hir [corpus::driven ai_text_clean "clean_ai_text([corpus::literal $text])"]
+    set hir [corpus::driven ai_text_clean "clean_ai_text([corpus::literal $text])" -warnings off]
     lassign [native::measure $hir $runs -string-region-opt $stringRegionOpt] lower compile best collections value
     set report [native::allocationReport $hir summary $runs -string-region-opt $stringRegionOpt]
     set outputText [core::value::strOf $value]
