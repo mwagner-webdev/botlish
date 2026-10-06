@@ -819,6 +819,15 @@ fn make() -> Leaky:
 
 set ::leakWords {zeta_secret hidden_tag lurk_inner slot_any hook_fn Lurker shade Secretive 777}
 
+# What the sweep scans of a diagnostic: MESSAGE without the locations it
+# reports ("FILE:LINE:COLUMN", which a strict compile's error starts with). A
+# location says where, not what -- and FILE lies in a scratch directory named
+# after the process id, which can itself contain a leak word (under pid 27770
+# every strict error would "leak" 777).
+proc withoutLocations {message} {
+    regsub -all {[^ ]*\.bot:[0-9]+:[0-9]+(?:: )?} $message {}
+}
+
 set ::leakPrograms {
     {import leaky
 leaky::Leaky {zeta_secret: 5, hidden_tag: "t", lurk_inner: leaky::Lurker {shade: 1}, slot_any: 0, hook_fn: leaky::twice}}
@@ -962,7 +971,7 @@ test opaque-leak-sweep {no diagnostic of any unauthorized program, in any phase,
                 # representation, whose messages are independent of it.
                 if {[string first $word $program] >= 0} continue
                 foreach m $messages {
-                    if {[string first $word $m] >= 0} {
+                    if {[string first $word [withoutLocations $m]] >= 0} {
                         lappend leaks [list $word $m $program]
                     }
                 }
@@ -1001,7 +1010,7 @@ test opaque-leak-sweep-control {the sweep can see a leak: the same words do appe
         } {
             catch {hirOfSource $program 1} m
             foreach word $::leakWords {
-                if {[string first $word $program] < 0 && [string first $word $m] >= 0} { incr found; break }
+                if {[string first $word $program] < 0 && [string first $word [withoutLocations $m]] >= 0} { incr found; break }
             }
         }
         expr {$found >= 2}
