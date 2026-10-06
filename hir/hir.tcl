@@ -409,7 +409,7 @@ proc hir::BuildOnce {nodes options given choices halt checkedVar} {
     }
     set sourceTypes [hir::sourcetypes::apply [dict get $options -type-decls] [dict get $options -struct-decls]]
     if {[dict exists $given -trait-decls]} {
-        set traitDecls [hir::traits::resolve]
+        set traitDecls [hir::traits::resolve $sourceTypes]
     }
     set hir [hir::resolve::program $nodes [dict get $options -mode] [dict get $options -origin] \
         [dict get $options -modules] $choices]

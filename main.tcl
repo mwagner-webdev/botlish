@@ -1,7 +1,7 @@
 # main.tcl -- example runner.
 #
 #   tclsh9.0 main.tcl [-backend interp|compile|cranelift|cranelift-generic] [-code] [-hir] [-ast]
-#                    [-aot] [-aot-data] [-aot-spec] [-contexts] [-emit-nir] [-emit-clif]
+#                    [-aot] [-aot-data] [-aot-spec] [-contexts] [-traits] [-emit-nir] [-emit-clif]
 #                    [-emit-native-executable] [-argv TEXT]... [-argv-hex HEX]...
 #                    [-argv-none] [-warnings default|off|error]
 #                    [FILE.bot|FILE.hir|FILE.ir ...]
@@ -28,6 +28,11 @@
 # order, every function's context parameters, and the direct and transitive
 # context requirements of every function that has one, each with the chain
 # that explains it.
+# -traits prints the program's traits (TRAITS.md, hir::traits::report): each
+# trait and its requirements, every conformance the program relies on (which
+# concrete witness satisfies which trait, through which implementation of
+# each requirement) and every trait-polymorphic function with the
+# specializations it was replaced by.
 # -emit-nir prints the native backend IR the program lowers to
 # (native/lower.tcl), and -emit-clif the Cranelift IR of every function (both
 # need no -backend cranelift; with -backend cranelift-generic, or
@@ -74,7 +79,7 @@ proc probeValues {value} {
 }
 
 proc runFile {path showCode showHir showAst showAot showNative} {
-    global backend nativeBackends warnings showContexts
+    global backend nativeBackends warnings showContexts showTraits
     puts "== [file tail $path] ($backend)"
     set hir ""
     set extension [file extension $path]
@@ -119,11 +124,14 @@ proc runFile {path showCode showHir showAst showAot showNative} {
         set program [core::loadProgramFile $path]
         set run {core::evalProgram $program}
     }
-    if {$showHir || $showAot ne "" || $showNative ne "" || $showContexts} {
+    if {$showHir || $showAot ne "" || $showNative ne "" || $showContexts || $showTraits} {
         set shownHir [expr {$hir ne "" ? $hir : [hir::build $program -strict 0]}]
     }
     if {$showHir} {
         puts [hir::format $shownHir]
+    }
+    if {$showTraits} {
+        puts [hir::traits::report $shownHir]
     }
     if {$showContexts} {
         puts [hir::contexts::summary $shownHir]
@@ -203,6 +211,7 @@ set warnings [hir::warnings::defaultMode]
 set showCode 0
 set showHir 0
 set showContexts 0
+set showTraits 0
 set showAst 0
 set showAot ""
 set showNative ""
@@ -233,6 +242,7 @@ for {set i 0} {$i < [llength $argv]} {incr i} {
         -code    { set showCode 1 }
         -hir     { set showHir 1 }
         -contexts { set showContexts 1 }
+        -traits  { set showTraits 1 }
         -ast     { set showAst 1 }
         -aot     { set showAot text }
         -aot-data { set showAot data }

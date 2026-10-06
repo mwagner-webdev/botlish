@@ -161,9 +161,15 @@ proc hir::traits::declare {decls} {
 # Validates every declared trait and resolves its requirements' types
 # (TRAITS.md, "Declarations"); returns HIR's `traits` entries, in declaration
 # order: {id ID name NAME namespace NS requirements {REQ ...}}.
-proc hir::traits::resolve {} {
+proc hir::traits::resolve {{sourceTypes {}}} {
     variable registry
     set entries {}
+    # The type identities this compilation itself declared (the source-type
+    # registry keeps a previous compilation's until the next one that
+    # declares types: hir/sourcetypes.tcl, "Compilation isolation").
+    set types [lmap t $sourceTypes {
+        expr {[dict exists $t kind] && [dict get $t kind] eq "struct" ? [dict get $t id] : [dict get $t name]}
+    }]
     foreach id [dict keys $registry] {
         set entry [dict get $registry $id]
         set name [dict get $entry name]
@@ -173,7 +179,7 @@ proc hir::traits::resolve {} {
                 || [dict exists $::hir::types::constructors $name]} {
             Fail $span TRAIT-NAME-COLLISION "trait \"$name\" cannot be declared: the name is already a built-in type"
         }
-        if {[hir::structs::declared $id] || [core::type::isNamed $id]} {
+        if {[hir::structs::declared $id] || $id in $types} {
             Fail $span TRAIT-NAME-COLLISION "trait \"$id\" cannot be declared: a type of that name is already declared (types, structs and traits share one namespace)"
         }
         if {![dict exists $entry decl]} {
@@ -236,7 +242,7 @@ proc hir::traits::ResolveRequirement {id ns r} {
     set what "requirement \"$rname\" of trait \"$id\""
     if {$params eq {}} {
         Fail [dict get $r nameSpan] TRAIT-REQUIREMENT-RECEIVER \
-            "$what has no parameter: its first ordinary parameter must be the trait itself (\"fn $rname(value: [dict get [Registry $id] name], ...)\"); static requirements are not supported"
+            "$what has no parameter: its first ordinary parameter must be the trait itself (\"fn ${rname}(value: [dict get [Registry $id] name], ...)\"); static requirements are not supported"
     }
     set resolved {}
     set index 0
@@ -1920,4 +1926,74 @@ proc hir::traits::FunctionsSummary {hir p} {
             [dict create params $params result [expr {$result eq {} ? "" : $result}] clones $clones]
     }
     return $summary
+}
+
+# ---------------------------------------------------------------------------
+# Tooling
+
+# A readable report of HIR's traits (main.tcl -traits): every trait with its
+# requirements; every conformance the program relies on -- the concrete
+# witness, the trait, and the implementation of each requirement, read from
+# the clones' parameter views and the trait operations of the monomorphized
+# program and re-derived by hir::traits::satisfies; and every trait-
+# polymorphic function with its specializations.
+proc hir::traits::report {hir} {
+    if {![dict exists $hir traits]} {
+        return "no traits"
+    }
+    set lines {}
+    foreach entry [dict get $hir traits] {
+        set owner [dict get $entry namespace]
+        lappend lines "trait [dict get $entry id] (owner: [expr {$owner eq "" ? "entry program" : $owner}])"
+        foreach r [dict get $entry requirements] {
+            set text "    fn [dict get $r name]([join [lmap p [dict get $r params] {format {%s: %s} [dict get $p name] [hir::types::show [dict get $p type]]}] {, }])"
+            if {[dict get $r result] ne ""} {
+                append text " -> [hir::types::show [dict get $r result type]]"
+            }
+            if {[dict get $r errors] ne {}} {
+                append text " errors [join [dict get $r errors] {, }]"
+            }
+            lappend lines $text
+        }
+    }
+    set pairs {}
+    dict for {b binding} [dict get $hir bindings] {
+        if {[dict exists $binding view]} {
+            set view [dict get $binding view]
+            lappend pairs [list [lindex $view 2] [lindex $view 1]]
+        }
+    }
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict exists $node traitImpl]} {
+            lappend pairs [list [dict get $node traitImpl witness] [dict get $node traitImpl trait]]
+        }
+    }
+    if {$pairs ne {}} {
+        lappend lines "conformance:"
+        foreach pair [lsort -unique $pairs] {
+            lassign $pair witness id
+            set s [satisfies $witness $id]
+            if {![dict get $s ok]} {
+                lappend lines "    [hir::types::show $witness] does NOT satisfy $id: [dict get $s reason]"
+                continue
+            }
+            lappend lines "    [hir::types::show $witness] satisfies $id"
+            foreach {name impl} [dict get $s impls] {
+                set target [expr {[dict get $impl kind] eq "native" ? "[dict get $impl name] (intrinsic)"
+                    : [QualifiedName [dict get $impl unit] [dict get $impl name]]}]
+                lappend lines "        $name -> $target"
+            }
+        }
+    }
+    if {[dict exists $hir traitFunctions]} {
+        lappend lines "trait-polymorphic functions:"
+        dict for {name fn} [dict get $hir traitFunctions] {
+            set result [expr {[dict get $fn result] eq "" ? "" : " -> [hir::types::show [dict get $fn result]]"}]
+            lappend lines "    $name ([join [lmap {p t} [dict get $fn params] {format {%s: %s} $p [hir::types::show $t]}] {, }])$result"
+            foreach {clone witnesses} [dict get $fn clones] {
+                lappend lines "        $clone[expr {$witnesses eq {} ? "" : "   [join [lmap {p w} $witnesses {format {%s = %s} $p [hir::types::show $w]}] {, }]"}]"
+            }
+        }
+    }
+    return [join $lines \n]
 }

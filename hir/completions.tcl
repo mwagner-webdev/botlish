@@ -966,7 +966,17 @@ proc hir::completions::EvalCall {hirVar ctxVar diagnose enclosing guard e node} 
     set argExact [ArgExactValues $hir $ctx $argExprs]
     set argExactLists [ArgExactLists $hir $ctx $argExprs]
     lassign [EffectiveFacts hir ctx $target $argRanges $argExact $argExactLists $guard] normal errors resultRange
-    if {$diagnose} {
+    if {[dict exists $node traitImpl]} {
+        # A trait operation of a monomorphized clone (TRAITS.md): its
+        # legality is its requirement's error contract, exactly as the
+        # source function was checked against it -- never a diagnostic only
+        # one witness's implementation would give (no instantiation-time
+        # errors). The implementation's own facts still give the result.
+        set errors [hir::types::FnErrors [dict get $node traitImpl contract]]
+        if {$diagnose} {
+            CheckStructuralCallLegality hir $e [dict get $node traitImpl contract] $errors {} $enclosing
+        }
+    } elseif {$diagnose} {
         CheckCallLegality hir $e $target $normal $errors {} $enclosing
     }
     # A bare (unhandled) call's own effective errors are not absorbed here --
@@ -1624,7 +1634,14 @@ proc hir::completions::EvalHandle {hirVar ctxVar diagnose enclosing guard e node
             set argExact [ArgExactValues $hir $ctx $argExprs]
             set argExactLists [ArgExactLists $hir $ctx $argExprs]
             lassign [EffectiveFacts hir ctx $target $argRanges $argExact $argExactLists $guard] normal errors callResult
-            if {$diagnose} {
+            if {[dict exists $callNode traitImpl]} {
+                # A trait operation of a clone: its requirement's contract
+                # (EvalCall's own case).
+                set errors [hir::types::FnErrors [dict get $callNode traitImpl contract]]
+                if {$diagnose} {
+                    CheckStructuralCallLegality hir $e [dict get $callNode traitImpl contract] $errors $handled $enclosing
+                }
+            } elseif {$diagnose} {
                 CheckCallLegality hir $e $target $normal $errors $handled $enclosing
             }
         } elseif {$targetKind eq {} && [hir::types::IsFn $calleeType]} {
