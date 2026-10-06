@@ -679,7 +679,7 @@ the refinement declaration the proof clause names no type
 
 ## Tests, fuzzing and mutation testing
 
-`tests/refinement-values.test` (87 tests) pins every item above, each
+`tests/refinement-values.test` (88 tests) pins every item above, each
 behavioral case on interp, compile, cranelift-generic and cranelift through
 one HIR (`sourceAgree`). `tests/emailish-predicate.test` and the other test
 files that used the old machinery were migrated (`hir-refinement`,
@@ -703,7 +703,79 @@ which every backend must compute. Four seeds × 600 programs: 1,791 accepted,
 609 rejected, 3,166 predicate calls in accepted programs of which 260 decided
 (true and false), **0 failures**.
 
-**Mutation testing**: PENDING
+**Mutation testing.** 31 mutants of the compiler, each run against
+`tests/refinement-values.test` + `tests/emailish-predicate.test` (both
+backends) and the fuzzer (seed 1, 300 programs, all four backends). A mutant
+is killed when a test fails, a test file fails to load, or the fuzzer reports
+a failure.
+
+| # | mutant (the spec's item-87 list, where it maps) | tests failing | fuzzer failures | result |
+|---|---|---:|---:|---|
+| m01 | carrier -> refinement admitted without a proof | 13 | 71 | killed |
+| m02 | owner check on proof minting disabled | 3 | 0 | killed |
+| m03 | true edge drops the proof's facts | 34 | 17 | killed |
+| m04 | proof facts flow to the false edge too | 3 | 10 | killed |
+| m05 | exact results keyed by spelling, not value identity | 2 | 5 | killed |
+| m06 | different predicates on one value treated as one | 2 | 51 | killed |
+| m07 | one predicate on different values treated as one | 3 | 30 | killed |
+| m08 | join keeps the first completing branch's facts (one path proves it) | 2 | 22 | killed |
+| m09 | join takes the union of branch facts (one path proves it) | 2 | 23 | killed |
+| m10 | join counts branches that return/fail | 3 | 20 | killed |
+| m11 | redundant predicate elimination disabled | 10 | 22 | killed |
+| m12 | every proof function treated as repeatable (effectful folded) | 2 | 5 | killed |
+| m13 | every native treated as a repeatable value operation | 3 | 5 | killed |
+| m14 | a call through an unknown callable treated as repeatable | 1 | 0 | killed |
+| m15 | Boolean bindings forget their implication | 3 | 3 | killed |
+| m16 | `not`/`and`/`or` implication swaps the condition's edges | 3 | 19 | killed |
+| m17 | a join keeps an exact result the paths disagree on | 0 | 7 | killed |
+| m18 | forgetting disabled (a refined str is not a str) | load error | 47 | killed |
+| m19 | refinement chains not transitive | 1 | 235 | killed |
+| m20 | carrier eligibility not checked | 3 | 0 | killed |
+| m21 | cycles not diagnosed as `CYCLIC-REFINEMENT` | 1 | 0 | killed |
+| m22 | proof carrier mismatch not checked | 1 | 0 | killed |
+| m23 | semantic instance keys collapse a refinement to its carrier | 29 | 0 | killed |
+| m24 | the runtime demands a refinement tag values do not carry | 0 | 0 | **survived** (equivalent) |
+| m25 | a decided call keeps both outcomes possible | 0 | 1 | killed |
+| m26 | a proof not attached to the alias root | 1 | 1 | killed |
+| m27 | proof functions need not return `bool` | 1 | 0 | killed |
+| m28 | exact results recorded on the true edge only | 1 | 14 | killed |
+| m29 | a proof carried over to a later binding of the same spelling (fact retained after rebinding) | 0 → 1 | 0 | survived, then killed by a new test |
+| m31 | join drops facts every completing branch proves (all paths prove it) | 1 | 6 | killed |
+| m32 | refined values lose their carrier kind at the representation boundary (view not erased) | 5 | 0 | killed |
+
+Notes, honestly:
+
+* **m24 survives, and is equivalent.** `core::type::validate` of a
+  refinement is reached only from native contracts and type-test natives,
+  and neither can name a source-defined refinement (`definePredicate`
+  rejects refinements; natives are registered before any source type). So no
+  runtime path of any backend ever asks whether a value is a refinement
+  member: making that question fail changes nothing. Its survival is the
+  representation theorem observed from the other side.
+* **m29 survived the first run.** Both existing rebinding tests shadowed the
+  proven name with an inner function's *parameter*; a later *local*
+  `s = "x"` in the proven branch was unpinned.
+  `refinement-rebinding-local` now pins both the refinement and the exact
+  result for a local shadow and kills m29 (and m05). The fuzzer does not
+  kill m29: it needs a program whose only error is a refinement use of a
+  shadowed name, which random generation rarely produces (also unbiased,
+  `-accept 0`: 0 of 300).
+* m05 and m19 were first killed only by tests; after the fuzzer gained
+  shadowing in nested branches and a prelude that forgets R3 to R1 through a
+  call, the fuzzer kills them too (the table shows the second run). m17 and
+  m25 are killed by the fuzzer alone.
+* Not constructible as written: "make refinement hashing include the nominal
+  type", "allocate a wrapper for a refinement" and "fail to erase
+  forget/refine view in NIR" need a runtime object or a HIR operation that
+  does not exist -- hashing, allocation and NIR never see a refinement.
+  m24 (Tcl runtime) and m32 (native representation) are the closest real
+  mutants, and `refinement-equality-and-hash`, `refinement-allocation-free`
+  and `refinement-abi-identical` would fail on any such addition.
+  "Leave the old Emailish hardcoding active" is pinned statically:
+  `refinement-no-compiler-domain-knowledge` and
+  `refinement-old-mechanism-gone` fail if any of it comes back, and
+  `refinement-mutant-no-proof-clause`/`-no-declaration` show the corpus
+  behavior disappears without its source declarations.
 
 ## Regression
 
