@@ -268,6 +268,19 @@ and never enters a nested function either). If you change any of those, or how
 `fail`, `errors` or an on-handler body lowers or resolves, run
 `tests/same-failure.test` and `audit/same-failure/tools/fuzz.tcl`.
 
+`PROVES-NAMING` (WARNINGS-PROVES-NAMING.md) reads, per function declaration, the
+block's resolved proof contract (`proofs`, `hir/resolve.tcl`'s
+`ResolveProofs`), its `params` minus its `flags`, its `declaredResult`, and the
+declaring binding's written name (hygiene's recorded `spelling`, else the name
+without a `#N` suffix, then `hir::warnings::MemberName` for a module's
+qualified spelling). It runs no walk and reads no reachability. If you change
+the proof-clause grammar or validation, how a declared result or the flag
+section is recorded, hygiene's renames (`hir/hygiene.tcl`: `spelling`,
+`qualifyModules`), or the naming convention in REFINEMENT-VALUES.md ("Naming"),
+run `tests/proves-naming.test` and `audit/proves-naming/tools/fuzz.tcl`. The
+response to this warning is a rename; do not add an opt-out, a reverse rule
+(`?` implies bool) or a check on functions without `proves`.
+
 ## Refinement values
 
 `refined type NAME = CARRIER` and `proves PARAM: NAME` (REFINEMENT-VALUES.md)
