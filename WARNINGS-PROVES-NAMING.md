@@ -602,7 +602,55 @@ a small, local break of the pass (or its registry line), applied to a scratch
 copy of the tree; the fuzzer runs first (40 seeds), and
 `tests/proves-naming.test` runs for any mutant the fuzzer does not kill.
 
-@@MUTATION@@
+| mutant | required | killed by |
+|---|---|---|
+| scope guard dropped (`scope-guard-dropped`: every declared function looked at, proves or not) -- **the critical mutant** | yes | fuzz: 24 extra warnings, 19 failures (the non-proves twins with violating names) |
+| parameter count ignored (`parameter-count-ignored`) | yes | fuzz: 14 extras, 11 failures (the wrong-shape proves functions) |
+| result type ignored (`result-type-ignored`: any result other than unit is a predicate; "str-returning warned") | yes | unit tests: `pn-scope-other-results-silent-in-hir-text` |
+| predicate rule applied to unit-returners (`predicate-rule-on-unit`) | yes | fuzz: 65 extras, 33 failures |
+| validator rule applied to bool-returners (`validator-rule-on-bool`) | yes | fuzz: 44 extras, 31 failures |
+| bare `validate` rejected (`bare-validate-rejected`) | yes | fuzz: 10 extras, 10 failures |
+| the `validate_` prefix match broken, case-insensitive (`prefix-case-insensitive`) | yes | fuzz: 7 failures (`Validate_STEM`, `VALIDATE_STEM` missed) |
+| the `validate_` prefix match broken, matched anywhere (`prefix-anywhere`) | yes | unit tests: `pn-validator-prefix-is-literal-and-case-sensitive` |
+| the `?` check inverted (`question-check-inverted`) | yes | fuzz: 31 extras, 31 failures |
+| written name replaced by hygiene's spelling (`hygiene-spelling-checked`: the binding's `name`) | yes | fuzz: 26 extras, 19 failures (`NAME#N`, `pnm::NAME`) |
+| instances visited (`instances-visited`: each warning once more per semantic instance whose snapshot covers the function) | yes | fuzz: 17 failures (warnings reported more than once) |
+| registry line removed (`registry-line-removed`) | yes | fuzz: 21 failures (every prediction missed; the smoke pin fails the same way) |
+| prefix without the underscore (`prefix-without-underscore`: `validateX` conforms) | extra | fuzz: 3 failures |
+| empty suffix rejected (`empty-suffix-rejected`: a nonempty-suffix constraint invented) | extra | fuzz: 8 extras, 8 failures |
+| flags counted as parameters (`flags-counted`) | extra | fuzz: 8 failures |
+| a reachability notion added (`reachability-added`: unreachable declarations skipped) | extra | unit tests: `pn-no-reachability-notion` |
+| the qualified module spelling checked (`qualified-name-checked`: `MemberName` dropped) | extra | fuzz: 5 extras, 5 failures |
+
+**17 of 17 mutants killed: the 12 required, 14 of all 17 by the fuzzer and 3 by
+the unit tests.** Under most fuzz-killed mutants the rename law fails too (the
+renamed program carries a warning the mutant invents). The three the fuzzer
+cannot see are cases it deliberately or necessarily does not generate:
+
+* `result-type-ignored`: a proves function whose result is neither `bool` nor
+  `unit` cannot be written (`PROOF-CLAUSE`), so only hand-edited HIR text has
+  one; the unit test edits HIR text.
+* `prefix-anywhere`: the fuzzer's violating validator names never contain
+  `validate_` other than as a prefix; the unit test's `x_validate_y` does.
+* `reachability-added`: the fuzzer places no declaration in a dead branch; the
+  unit test does.
+
+**`instances-visited` needed design.** Milestone 4's form of this mutant
+(repeat each warning per entry of the function's own `semantic byBlock`) is
+**equivalent by construction** here, and that is a finding: an in-shape proves
+function has exactly one ordinary parameter, declared of the refinement's
+carrier, so it is never polymorphic and has no semantic instances of its own
+(`pn-instances-never-walked` pins `byBlock` absent). Instances do reach it when
+it is nested in a polymorphic function: each instance's snapshot covers the
+nested function. So the mutant walks those snapshots, the unit test pins a
+nested proves function in three instances' snapshots, and the fuzzer's wrapper
+functions are polymorphic in a second parameter, called with three argument
+types; the fuzzer then kills it.
+
+The first mutation run surfaced two tool bugs, both fixed before the run
+recorded here: mutation texts that open a brace they do not close must be
+double-quoted in Tcl (the tool aborted), and the milestone-4 form of
+`instances-visited` above.
 
 ## Corpus findings and census
 
@@ -798,6 +846,6 @@ new CLI option or `BOTLISH_WARNINGS` value.
     the fuzzer (2000 seeds, required) and per corpus finding (none exist; the
     tool's rename check reports nothing to rename).
 35. *Warning-mode tests pass?* @@Q35@@
-36. *Fuzzer and mutation results?* @@Q36@@
+36. *Fuzzer and mutation results?* Fuzzer: 2000 seeds, 1203 with warnings and 797 without, 2831 predicted warnings: 0 failures, 0 extras; the rename law held for 2831 of 2831 renamed functions (4880 NIR labels renamed exactly, 782 inlined away), 0 law failures. Mutation: 17 of 17 killed (the 12 required among them): 14 by the fuzzer, 3 by the unit tests (`result-type-ignored`, `prefix-anywhere`, `reachability-added`: shapes the fuzzer does not generate).
 37. *Backend parity?* Identical sets on all four (in process and CLI).
 38. *Full regression?* @@Q38@@
