@@ -129,7 +129,9 @@ proc hir::warnings::run {hir mode {channel stderr}} {
     if {[Mode $mode] eq "off" || [dict get $hir diagnostics] ne ""} {
         return $hir
     }
-    set warnings [collect $hir]
+    # A monomorphized trait program (TRAITS.md) is warned about as written:
+    # its checked source build, where each function exists once.
+    set warnings [collect [expr {[dict exists $hir traitSource] ? [dict get $hir traitSource] : $hir}]]
     if {$mode eq "error" && $warnings ne ""} {
         Raise $hir [lindex $warnings 0]
     }

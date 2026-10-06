@@ -1896,6 +1896,10 @@ proc hir::traits::monomorphize {nodes options given hir syntax} {
         }]
     }
     dict set mono traitFunctions [FunctionsSummary $hir $p]
+    # The checked source program: what compiler warnings are about (each
+    # source function once, a trait-polymorphic one included whether or not
+    # it has clones). No analysis or backend reads it.
+    dict set mono traitSource $hir
     return $mono
 }
 
