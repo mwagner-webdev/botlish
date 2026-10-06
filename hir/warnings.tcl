@@ -49,6 +49,7 @@ namespace eval hir::warnings {
     variable passes {
         SAME-RETURN-VALUE hir::warnings::SameReturnValue
         METHOD-ELIGIBLE   hir::warnings::MethodEligible
+        FIXED-ARITY-LIST-RETURN hir::warnings::FixedArityListReturn
     }
     variable modes {default off error}
     # CODE -> number of times its pass has run in this process: test
@@ -733,4 +734,301 @@ proc hir::warnings::SugarFieldSafe {hir receiver name ns fields} {
         return [expr {![hir::structs::FieldCompetes $type $name [dict create ns $ns]]}]
     }
     return [expr {[hir::types::kindOf $type] ni {"" any struct}}]
+}
+
+# ---------------------------------------------------------------------------
+# FIXED-ARITY-LIST-RETURN (WARNINGS-FIXED-ARITY-LIST-RETURN.md)
+#
+# Every reachable value exit of one function produces a written list literal
+# of the same arity N >= 2: the positional multi-value result that struct
+# values name the parts of (MULTI-VALUE-RESULTS.md: structs have named parts
+# and destructure; lists deliberately do not). One warning per function,
+# anchored at its first exit in source order, the other exits as secondary
+# locations.
+#
+# The shape theorem. A function is reported exactly when it has at least one
+# literal exit, and every reachable value exit is
+#   * a written list literal of arity N (a call carrying the frontend's
+#     `written {form list}` provenance; N is its argument count),
+#   * a read of a binding whose initializer is such a literal (followed
+#     through `y = x` aliases to the root binding, hir::exact::AliasRoot:
+#     bindings are immutable and a same-scope rebinding is a DUPLICATE error,
+#     so each binding has exactly one initializer), or
+#   * a direct self-call (the callee resolves to this function itself,
+#     hir::resolve::CandidateIdentity, aliases followed): its value is the
+#     function's own, so it inherits N and contributes none,
+# all with the same N >= 2. Self-calls alone state nothing.
+#
+# Exits are SAME-RETURN-VALUE's (Exits, Leaves above: returns targeting the
+# function, wherever they sit, and the final-expression leaves), with three
+# deliberate deviations:
+#   * unit is a MISMATCH, not a skip. A bare `return`, `return unit`, a final
+#     unit, a destructuring statement's unit, and the implicit fall-through of
+#     an else-less final `if` (FallThroughs: an empty branch whose outcome is
+#     not statically excluded) make the function "a list or nothing", an
+#     optional, not a fixed-arity result. SAME-RETURN-VALUE skips unit
+#     because repeated unit carries no information; here skipping it would
+#     manufacture the claim "every exit is a list".
+#   * `fail` does not block: it is not a value exit (inherited), so a guard
+#     `if bad: fail E` before a list result is the common shape and warns. An
+#     exit whose value can never complete (type never) is likewise not a
+#     value exit.
+#   * a self-call exit counts (above).
+# Anything else -- a computed list (list::append, str::concat, method sugar,
+# an operator), a struct, a mutable value, a parameter, an `if`/`loop`/handled
+# value, a call through a function value, indirect or mutual recursion -- is a
+# mismatch, and one mismatch silences. No element is looked at: no types, no
+# equality, no heterogeneity; arity and literal-ness are facts of the written
+# form. A call without the provenance marker (core IR, .hir input) is never a
+# literal.
+#
+# The author's voice: a function whose declaration carries a written result
+# annotation of a list type (`-> List[int]`, `-> list`: the block's
+# `declaredResult`, recorded by hir::resolve in every compilation mode) has
+# declared its result a list, and is never reported, whatever its exits.
+#
+# Reachability is milestone 1's: HIR's structural `reachable` flags, then, for
+# a candidate (at least one literal exit of arity >= 2), the completion
+# proof's recording walk prunes proven-unreachable exits. Unlike
+# SAME-RETURN-VALUE, removing an exit can create this warning (a pruned
+# mismatch no longer breaks uniformity); it is still sound, because a pruned
+# exit is proven unable to execute, so every exit that can carries shape N.
+#
+# Scope: the generic source HIR, once per source function; instances are
+# never walked.
+
+namespace eval hir::warnings {
+    # The smallest arity stated: a one-element list holds a single value,
+    # and there is nothing to name.
+    variable minListArity 2
+}
+
+proc hir::warnings::FixedArityListReturn {hir} {
+    set names [dict create]
+    set selves [dict create]
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "bind"
+                && [dict get $hir exprs [dict get $node value] kind] eq "block"} {
+            dict set names [dict get $node value] [dict get $node name]
+            if {![dict get $node duplicate]} {
+                dict set selves [dict get $node value] [dict get $node binding]
+            }
+        }
+    }
+    set warnings {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "block" || ![dict get $node reachable]} {
+            continue
+        }
+        set warning [FixedArityIn $hir $e \
+            [expr {[dict exists $names $e] ? [dict get $names $e] : ""}] \
+            [expr {[dict exists $selves $e] ? [dict get $selves $e] : ""}]]
+        if {$warning ne ""} {
+            lappend warnings $warning
+        }
+    }
+    return $warnings
+}
+
+# The warning for BLOCK (bound to NAME through binding SELF), or "".
+proc hir::warnings::FixedArityIn {hir block name self} {
+    variable minListArity
+    if {[DeclaresListResult $hir $block]} {
+        return ""
+    }
+    set exits [lmap exit [ShapeExits $hir $block] {
+        lassign $exit site value
+        list $site [ExitShape $hir $value $self]
+    }]
+    # Cheap first: without a literal exit of arity >= 2 there is nothing to
+    # state, and pruning unreachable exits never adds one.
+    set candidate 0
+    foreach exit $exits {
+        set shape [lindex $exit 1]
+        if {[lindex $shape 0] in {list alias} && [lindex $shape 1] >= $minListArity} {
+            set candidate 1
+            break
+        }
+    }
+    if {!$candidate} {
+        return ""
+    }
+    # Only for a candidate: which exits can execute at all, by the completion
+    # proof's walk (range-infeasible branches never entered). Absent means
+    # proven unreachable.
+    set reached [hir::completions::reachedExprs $hir $block]
+    set arity ""
+    set sites {}
+    set selfCalls {}
+    foreach exit $exits {
+        lassign $exit site shape
+        if {![dict exists $reached $site]} {
+            continue
+        }
+        switch -- [lindex $shape 0] {
+            never {
+                # Not a value exit: it cannot complete.
+                continue
+            }
+            self {
+                lappend selfCalls $site
+            }
+            list - alias {
+                set n [lindex $shape 1]
+                if {$n < $minListArity || ($arity ne "" && $n != $arity)} {
+                    return ""
+                }
+                set arity $n
+            }
+            unit {
+                # A mismatch (see the header): "list or nothing" is not a
+                # fixed-arity result.
+                return ""
+            }
+            default {
+                return ""
+            }
+        }
+        lappend sites $site
+    }
+    if {$arity eq ""} {
+        return ""
+    }
+    set count [llength $sites]
+    set where [expr {$count == 1 ? "the only value exit" : "all $count value exits"}]
+    set origins [lmap site $sites {hir::get $hir $site origin}]
+    return [New FIXED-ARITY-LIST-RETURN \
+        "a $arity-element list is returned from $where; a struct value names the parts" \
+        [lindex $origins 0] [lrange $origins 1 end] \
+        [dict create function $block functionName $name arity $arity exits $count \
+            sites $sites selfCalls $selfCalls note "also returned here"]]
+}
+
+# 1 if BLOCK's declaration carries a written result annotation whose type is
+# a list type as the checker resolved it (List[T], the bare `list`, a
+# refinement of list).
+proc hir::warnings::DeclaresListResult {hir block} {
+    set node [dict get $hir exprs $block]
+    if {![dict exists $node declaredResult] || [dict get $node declaredResult] eq ""} {
+        return 0
+    }
+    return [expr {[hir::types::kindOf [dict get $node declaredResult]] eq "list"}]
+}
+
+# BLOCK's exits as {SITE VALUE} pairs in source order: SAME-RETURN-VALUE's
+# exits (Exits), plus each implicit unit fall-through of the final expression
+# (FallThroughs) as {IF ""}.
+proc hir::warnings::ShapeExits {hir block} {
+    set exits [dict create]
+    foreach exit [Exits $hir $block] {
+        dict set exits [lindex $exit 0] $exit
+    }
+    set body [dict get $hir exprs $block body]
+    if {$body ne ""} {
+        foreach site [FallThroughs $hir [lindex $body end]] {
+            dict set exits $site [list $site ""]
+        }
+    }
+    return [lmap e [BodyExprs $hir $block] {
+        if {![dict exists $exits $e]} {
+            continue
+        }
+        dict get $exits $e
+    }]
+}
+
+# The written `if`s on the final-expression path of E (the leaves' path,
+# Leaves) with a missing branch -- an else-less `if` -- that HIR does not
+# decide away: falling through such an `if` completes the function with
+# unit.
+proc hir::warnings::FallThroughs {hir e} {
+    set node [dict get $hir exprs $e]
+    if {![dict get $node reachable] || [dict get $node kind] ne "if"
+            || [SynthesizedBranch $hir $node] || [hir::typeOf $hir $e] eq "never"} {
+        return {}
+    }
+    set known [hir::types::KnownOutcome $hir [dict get $node condition]]
+    set sites {}
+    foreach {outcome role} {1 then 0 else} {
+        set body [dict get $node ${role}Body]
+        if {$body ne ""} {
+            lappend sites {*}[FallThroughs $hir [lindex $body end]]
+        } elseif {$known eq "" || $known == $outcome} {
+            lappend sites $e
+        }
+    }
+    return $sites
+}
+
+# The shape of an exit whose value is VALUE ("" for a fall-through) in the
+# function bound through binding SELF:
+#   {list N}    a written list literal of N elements
+#   {alias N}   a read of a binding whose initializer is one
+#   self        a direct self-call
+#   unit        the unit value
+#   never       a value that cannot complete (not a value exit)
+#   other       anything else
+proc hir::warnings::ExitShape {hir value self} {
+    if {$value eq ""} {
+        return unit
+    }
+    set type [hir::typeOf $hir $value]
+    if {$type eq "never"} {
+        return never
+    }
+    if {[hir::types::kindOf $type] eq "unit"} {
+        return unit
+    }
+    set node [dict get $hir exprs $value]
+    switch -- [dict get $node kind] {
+        call {
+            if {[dict exists $node written] && [dict get $node written form] eq "list"} {
+                return [list list [llength [dict get $node args]]]
+            }
+            if {$self ne "" && [SelfCall $hir $node $self]} {
+                return self
+            }
+        }
+        ref {
+            set n [InitializerArity $hir $value]
+            if {$n ne ""} {
+                return [list alias $n]
+            }
+        }
+    }
+    return other
+}
+
+# The arity of the written list literal that initializes the alias root of
+# the reference E (hir::exact::AliasRoot), or "".
+proc hir::warnings::InitializerArity {hir e} {
+    set root [hir::exact::AliasRoot $hir $e]
+    if {$root eq "" || [dict get $hir bindings $root kind] ne "local"} {
+        return ""
+    }
+    set d [dict get $hir bindings $root declaredBy]
+    if {$d eq "" || ![dict exists $hir exprs $d]} {
+        return ""
+    }
+    set bind [dict get $hir exprs $d]
+    if {[dict get $bind kind] ne "bind" || [dict get $bind duplicate]} {
+        return ""
+    }
+    set value [dict get $hir exprs [dict get $bind value]]
+    if {[dict get $value kind] ne "call" || ![dict exists $value written]
+            || [dict get $value written form] ne "list"} {
+        return ""
+    }
+    return [llength [dict get $value args]]
+}
+
+# 1 if the call NODE's callee resolves to the function bound through binding
+# SELF: a plain self-call or one through an alias (`g = f`), as the
+# resolver's candidate identity follows aliases.
+proc hir::warnings::SelfCall {hir node self} {
+    set callee [dict get $hir exprs [dict get $node callee]]
+    if {[dict get $callee kind] ne "ref" || [dict get $callee binding] eq ""} {
+        return 0
+    }
+    return [expr {[hir::resolve::CandidateIdentity hir [dict get $callee binding]] eq "binding:$self"}]
 }

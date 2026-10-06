@@ -1,0 +1,1514 @@
+# fixed-arity-list-return.test -- the FIXED-ARITY-LIST-RETURN compiler warning
+# (WARNINGS-FIXED-ARITY-LIST-RETURN.md, MULTI-VALUE-RESULTS.md) on the warning
+# framework WARNINGS-SAME-RETURN.md built (hir/warnings.tcl).
+#
+# The shape theorem: a function is reported exactly when it has at least one
+# literal exit, and every reachable value exit is a written list literal of
+# arity N (N >= 2), a read of a binding whose initializer is a written list
+# literal of N elements, or a direct self-call -- all with the same N.
+#
+# Any single mismatch silences, so most cases here pin where it must NOT
+# fire. Three exit treatments deliberately differ from SAME-RETURN-VALUE's
+# and are pinned as such: a unit exit is a mismatch (not a skip), `fail` does
+# not block, and a self-call exit counts and inherits N.
+#
+# Like warnings.test and method-eligible.test, every compile here passes its
+# policy and channel explicitly (`-warnings MODE`, `-warning-channel ""` to
+# collect without printing), so this file exercises default, off and error
+# whatever the harness's process default is.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+
+set ::allBackends {interp compile cranelift-generic cranelift}
+set ::faCode FIXED-ARITY-LIST-RETURN
+
+# The HIR of SOURCE under policy MODE (default off error), collecting
+# warnings without printing them.
+proc compileWith {source {mode default}} {
+    return [surface::compile $source t.bot -warnings $mode -warning-channel ""]
+}
+
+# "LINE:COL" of ORIGIN in HIR, without the file name when it is t.bot.
+proc loc {hir origin} {
+    return [regsub {^t\.bot:} [hir::originLocation $hir $origin] {}]
+}
+
+# The FIXED-ARITY-LIST-RETURN warnings of HIR.
+proc fixedOf {hir} {
+    return [lmap w [hir::warnings::of $hir] {
+        if {[dict get $w code] ne $::faCode} continue
+        set w
+    }]
+}
+
+# Each FIXED-ARITY-LIST-RETURN warning of SOURCE as
+# {PRIMARY ARITY EXITS {SECONDARY...}}, locations as LINE:COL.
+proc fixed {source} {
+    set hir [compileWith $source]
+    return [lmap w [fixedOf $hir] {
+        list [loc $hir [dict get $w primary]] [dict get $w data arity] [dict get $w data exits] \
+            [lmap o [dict get $w secondary] {loc $hir $o}]
+    }]
+}
+
+# "MESSAGE @ PRIMARY SECONDARY..." for each FIXED-ARITY-LIST-RETURN warning.
+proc shown {source} {
+    set hir [compileWith $source]
+    return [lmap w [fixedOf $hir] {
+        string cat [dict get $w message] " @ " \
+            [join [lmap o [list [dict get $w primary] {*}[dict get $w secondary]] {loc $hir $o}] { }]
+    }]
+}
+
+# 1 if SOURCE compiles with no FIXED-ARITY-LIST-RETURN warning.
+proc silent {source} {
+    return [expr {[fixedOf [compileWith $source]] eq ""}]
+}
+
+# Every warning of SOURCE (all codes) as {CODE PRIMARY}.
+proc allWarnings {source} {
+    set hir [compileWith $source]
+    return [lmap w [hir::warnings::of $hir] {list [dict get $w code] [loc $hir [dict get $w primary]]}]
+}
+
+# The rejection of SOURCE under MODE: {errorcode message}, or "compiled".
+proc rejection {source mode} {
+    if {[catch {compileWith $source $mode} message options]} {
+        return [list [dict get $options -errorcode] $message]
+    }
+    return compiled
+}
+
+# SCRIPT evaluated with ::core::libraryDir a scratch directory holding the
+# modules FILES ({NAME.bot TEXT ...}), restored afterwards.
+proc withModules {files script} {
+    set saved $::core::libraryDir
+    set dir [makeDirectory fa-scratch-[pid]]
+    set ::core::libraryDir $dir
+    try {
+        foreach {name text} $files {
+            set channel [open [file join $dir $name] w]
+            puts -nonewline $channel $text
+            close $channel
+        }
+        uplevel 1 $script
+    } finally {
+        set ::core::libraryDir $saved
+        removeDirectory fa-scratch-[pid]
+    }
+}
+
+# A helper the scanner examples call (the corpus's own `peek`): five lines,
+# so the function after it starts on line 6.
+set ::peek {import str
+fn peek(text, index) errors LowerUnderrun:
+    if index >= str::length(text):
+        return ""
+    str::substring(text, index, index + 1)
+}
+
+# ---------------------------------------------------------------------------
+# The motivating shapes
+
+test fa-scan-quoted {scan_quoted: one 2-element literal and two self-calls; anchored at the first exit, the recursive return} -body {
+    shown "${::peek}fn scan_quoted(text, index, field) errors LowerUnderrun:
+    character = peek(text, index)
+    if character == \"\\\"\":
+        if peek(text, index + 1) == \"\\\"\":
+            return scan_quoted(text, index + 2, str::concat(field, \"\\\"\"))
+
+        return \[field, index + 1\]
+
+    scan_quoted(text, index + 1, str::concat(field, character))"
+} -result {{a 2-element list is returned from all 3 value exits; a struct value names the parts @ 10:13 12:9 14:5}}
+
+test fa-scan-quoted-rendered {the rendered diagnostic: one warning line and one note per other exit} -body {
+    set hir [compileWith "${::peek}fn scan_quoted(text, index, field) errors LowerUnderrun:
+    character = peek(text, index)
+    if character == \"\\\"\":
+        if peek(text, index + 1) == \"\\\"\":
+            return scan_quoted(text, index + 2, str::concat(field, \"\\\"\"))
+
+        return \[field, index + 1\]
+
+    scan_quoted(text, index + 1, str::concat(field, character))"]
+    hir::warnings::render $hir [lindex [fixedOf $hir] 0]
+} -result {t.bot:10:13: warning: a 2-element list is returned from all 3 value exits; a struct value names the parts (FIXED-ARITY-LIST-RETURN)
+t.bot:12:9: note: also returned here
+t.bot:14:5: note: also returned here}
+
+test fa-scan-record-rest {scan_record_rest's shape: one self-call and two 2-element literals} -body {
+    fixed "${::peek}fn scan_record_rest(text, stop, count) errors LowerUnderrun:
+    delimiter = peek(text, stop)
+    if delimiter == \",\":
+        return scan_record_rest(text, stop + 1, count + 1)
+
+    if delimiter == \"\\n\":
+        return \[count, stop + 1\]
+
+    \[count, stop\]"
+} -result {{9:9 2 3 {12:9 14:5}}}
+
+test fa-chunked-builder {a builder state returned as a 3-element list from two exits (csv_chunked's shape)} -body {
+    fixed {fn chunked_append(builder, value, completed, current, filled):
+    if filled == 64:
+        return [completed, value, 1]
+    [completed, current, filled + 1]}
+} -result {{3:9 3 2 4:5}}
+
+test fa-fully-literal-uniform {every exit a written 2-element literal, no recursion} -body {
+    fixed {fn split_at(xs, i):
+    if i == 0:
+        return [[], xs]
+    if i == 1:
+        return [xs, []]
+    [xs, xs]}
+} -result {{3:9 2 3 {5:9 6:5}}}
+
+# ---------------------------------------------------------------------------
+# Shape and arity (items 7, 8, 14)
+
+test fa-two-elements-warn {a uniform 2-element function warns} -body {
+    fixed {fn f(x, a, b):
+    if x:
+        return [a, b]
+    [b, a]}
+} -result {{3:9 2 2 4:5}}
+
+test fa-three-elements-warn {a uniform 3-element function warns} -body {
+    fixed {fn f(x, a, b):
+    if x:
+        return [a, b, a]
+    [b, a, b]}
+} -result {{3:9 3 2 4:5}}
+
+test fa-arity-boundary {arity 1: silent; 2: warns; 3: warns; 0: silent} -body {
+    fixed {fn f0(x):
+    if x:
+        return []
+    []
+fn f1(x, a):
+    if x:
+        return [a]
+    [a]
+fn f2(x, a):
+    if x:
+        return [a, a]
+    [a, a]
+fn f3(x, a):
+    if x:
+        return [a, a, a]
+    [a, a, a]}
+} -result {{11:9 2 2 12:5} {15:9 3 2 16:5}}
+
+test fa-empty-list-exit-mismatches {a `[]` exit beside 2-element literals is a mismatch} -body {
+    silent {fn f(x, a, b):
+    if x:
+        return []
+    [a, b]}
+} -result 1
+
+test fa-one-element-exit-mismatches {a 1-element exit beside 2-element literals is a mismatch} -body {
+    silent {fn f(x, a, b):
+    if x:
+        return [a]
+    [a, b]}
+} -result 1
+
+test fa-single-exit-warns {single-exit functions warn (unlike SAME-RETURN-VALUE's two-exit threshold)} -body {
+    shown {fn pair(a, b):
+    [a, b]}
+} -result {{a 2-element list is returned from the only value exit; a struct value names the parts @ 2:5}}
+
+test fa-single-exit-one-element-silent {a single-exit 1-element function is silent} -body {
+    silent {fn wrap(a):
+    [a]}
+} -result 1
+
+test fa-mixed-arity-silent {mixed arity silences} -body {
+    silent {fn f(x, a, b):
+    if x:
+        return [a, b, a]
+    [a, b]}
+} -result 1
+
+test fa-element-types-irrelevant {element types are never consulted: unknown, mixed and uniform elements all count} -body {
+    fixed {fn date(y, m, d):
+    [y, m, d]
+fn table(t, i):
+    [t, i]
+fn mixed(x, s):
+    if x:
+        return [1, s]
+    ["one", [s]]}
+} -result {{2:5 3 1 {}} {4:5 2 1 {}} {7:9 2 2 8:5}}
+
+test fa-computed-elements-count {elements that are calls or operators do not matter: the exit is still a written 2-element literal} -body {
+    fixed {fn compute(x):
+    x
+fn f(x, y):
+    return [compute(x), y + 1]}
+} -result {{4:5 2 1 {}}}
+
+test fa-nested-list-elements-outer-arity {a literal of literals has its outer arity} -body {
+    fixed {fn f(a, b):
+    [[a, b, a], [b]]}
+} -result {{2:5 2 1 {}}}
+
+# ---------------------------------------------------------------------------
+# Literal-shaped, not text-matched (item 9): only `written {form list}` counts
+
+test fa-computed-list-append-silent {an exit built by list::append is not literal-shaped} -body {
+    silent {import list
+fn f(x, a, b):
+    if x:
+        return [a, b]
+    list::append([a], b)}
+} -result 1
+
+test fa-computed-concat-silent {an exit built by str::concat (or any other function) is not literal-shaped} -body {
+    silent {import str
+fn f(x, a, b):
+    if x:
+        return [a, b]
+    str::concat(a, b)}
+} -result 1
+
+test fa-method-sugar-construction-silent {a list built with method sugar is not literal-shaped} -body {
+    silent {import list
+fn f(x, xs, b):
+    if x:
+        return [b, b]
+    xs.append(b)}
+} -result 1
+
+test fa-computed-list-alone-silent {a function whose only exit is a computed 2-element list is silent} -body {
+    silent {import list
+fn f(a, b):
+    list::append([a], b)}
+} -result 1
+
+test fa-operator-exit-silent {an operator exit is not a literal} -body {
+    silent {fn f(x, a, b):
+    if x:
+        return [a, b]
+    a + b}
+} -result 1
+
+test fa-function-value-call-exit-silent {a call through a function value (a parameter) is a mismatch} -body {
+    silent {fn f(x, k, a, b):
+    if x:
+        return [a, b]
+    k(a, b)}
+} -result 1
+
+test fa-call-of-list-returning-helper-silent {a call to another list-returning function is an ordinary call of unknown shape} -body {
+    fixed {fn pair(a, b):
+    [a, b]
+fn f(x, a, b):
+    if x:
+        return [a, b]
+    pair(b, a)}
+} -result {{2:5 2 1 {}}}
+
+test fa-if-valued-return-silent {`return if ...` is one exit whose value is an `if`, not a written literal (conservative)} -body {
+    silent {fn f(x, a, b):
+    return if x:
+        [a, b]
+    else:
+        [b, a]}
+} -result 1
+
+test fa-if-valued-binding-silent {a binding initialized by an `if` value is not a literal initializer (conservative)} -body {
+    silent {fn f(x, a, b):
+    r = if x:
+        [a, b]
+    else:
+        [b, a]
+    r}
+} -result 1
+
+test fa-collecting-loop-exit-silent {a final collecting loop is a computed list (bench/source-checks.bot's shape)} -body {
+    silent {fn classify(name, checks):
+    if name == "":
+        return [false, false]
+    loop check in checks:
+        check(name)}
+} -result 1
+
+test fa-handled-value-exit-silent {a handled call's value is not a literal} -body {
+    silent {import list
+fn f(xs, a, b):
+    if a == b:
+        return [a, b]
+    return list::at(xs, 0):
+        on IndexNotFound:
+            [b, a]}
+} -result 1
+
+test fa-core-ir-input-silent {HIR built from core IR carries no written provenance: never a literal} -body {
+    set hir [hir::build {{bind f {block {a b} {call {ref list} {ref a} {ref b}}}} {call {ref f} {const 1} {const 2}}}]
+    hir::warnings::collect $hir
+} -result {}
+
+test fa-hir-text-input-silent {HIR read back from hir::format text carries no provenance: the source HIR warns, the parsed one never} -body {
+    set hir [compileWith {fn f(a, b):
+    [a, b]
+f(1, 2)}]
+    set parsed [hir::parse [hir::format $hir]]
+    list [llength [fixedOf $hir]] [lmap w [hir::warnings::collect $parsed] {dict get $w code}]
+} -result {1 {}}
+
+# ---------------------------------------------------------------------------
+# Computed and mutable values; structs and mixed shapes (items 10, 13)
+
+test fa-mutable-value-silent {a mutable value exit (a MutableArray) is a mismatch} -body {
+    silent {import mutable_array
+fn f(x, a, b):
+    if x:
+        return [a, b]
+    mutable_array::allocate(2)}
+} -result 1
+
+test fa-parameter-exit-silent {a parameter exit is a mismatch} -body {
+    silent {fn f(x, p, a, b):
+    if x:
+        return [a, b]
+    p}
+} -result 1
+
+test fa-struct-exit-silent {a struct-value exit is not a list} -body {
+    silent {fn f(a, b):
+    {first: a, second: b}}
+} -result 1
+
+test fa-mixed-struct-list-silent {mixed struct and list exits are silent: a half-converted function does not nag} -body {
+    silent {fn f(x, a, b):
+    if x:
+        return {first: a, second: b}
+    [a, b]}
+} -result 1
+
+test fa-converted-scan-quoted-silent {the converted form (struct literal) of scan_quoted is silent} -body {
+    silent "${::peek}fn scan_quoted(text, index, field) errors LowerUnderrun:
+    character = peek(text, index)
+    if character == \"\\\"\":
+        if peek(text, index + 1) == \"\\\"\":
+            return scan_quoted(text, index + 2, str::concat(field, \"\\\"\"))
+
+        return {field: field, index: index + 1}
+
+    scan_quoted(text, index + 1, str::concat(field, character))"
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Unit exits are a MISMATCH (item 5): the documented deviation from
+# SAME-RETURN-VALUE, which skips unit exits
+
+test fa-unit-elseless-if-optional {fn f(x): if x: [a, b] -- "list or nothing" is an optional, not a fixed-arity result: silent} -body {
+    silent {fn f(x, a, b):
+    if x:
+        [a, b]}
+} -result 1
+
+test fa-unit-elseless-if-control {the same function with an else warns: the silence above is the fall-through's doing} -body {
+    fixed {fn f(x, a, b):
+    if x:
+        [a, b]
+    else:
+        [b, a]}
+} -result {{3:9 2 2 5:9}}
+
+test fa-unit-bare-return {a bare `return` beside a list final is a unit exit: silent} -body {
+    silent {fn f(x, a, b):
+    if x:
+        return
+    [a, b]}
+} -result 1
+
+test fa-unit-return-unit {`return unit` is a unit exit: silent} -body {
+    silent {fn f(x, a, b):
+    if x:
+        return unit
+    [a, b]}
+} -result 1
+
+test fa-unit-final-unit {a final `unit` is a unit exit: silent} -body {
+    silent {fn f(x, a, b):
+    if x:
+        return [a, b]
+    unit}
+} -result 1
+
+test fa-unit-destructuring-final {a destructuring statement as the last statement completes with unit: silent} -body {
+    silent {fn f(x, a, b):
+    if x:
+        return [a, b]
+    {p} = {p: a}}
+} -result 1
+
+test fa-unit-final-binding-of-alias {a final `s = r` statement completes with unit, not with r's list: silent} -body {
+    silent {fn f(a, b):
+    r = [a, b]
+    s = r}
+} -result 1
+
+test fa-unit-elseless-if-with-return {an else-less final `if` whose branch returns still falls through with unit} -body {
+    silent {fn f(x, a, b):
+    if x:
+        return [a, b]}
+} -result 1
+
+test fa-unit-elif-without-else {an elif chain without else falls through: silent; with an else it warns} -body {
+    list [silent {fn f(x, a, b):
+    if x == 1:
+        [a, b]
+    elif x == 2:
+        [b, a]}] [fixed {fn f(x, a, b):
+    if x == 1:
+        [a, b]
+    elif x == 2:
+        [b, a]
+    else:
+        [a, a]}]
+} -result {1 {{3:9 2 3 {5:9 7:9}}}}
+
+test fa-unit-fallthrough-decided-away {a fall-through HIR decides away (`if true:`) is not an exit} -body {
+    fixed {fn f(a, b):
+    if true:
+        [a, b]}
+} -result {{3:9 2 1 {}}}
+
+test fa-unit-milestone1-policy-differs {the same unit-bearing function: SAME-RETURN-VALUE skips the unit exits, this warning is silenced by them} -body {
+    set hir [compileWith {fn f(x, a, b):
+    if x == 1:
+        return
+    if x == 2:
+        return
+    [a, b]}]
+    list [lmap w [hir::warnings::of $hir] {dict get $w code}]
+} -result {{}}
+
+test fa-unit-non-final-elseless-if-is-no-exit {an else-less `if` that is not the last statement falls through to the next statement, not out of the function} -body {
+    fixed {fn f(x, a, b):
+    if x:
+        a
+    [a, b]}
+} -result {{4:5 2 1 {}}}
+
+# ---------------------------------------------------------------------------
+# `fail` does not block (item 6)
+
+test fa-fail-guard-warns {the procedural guard pattern warns: fail is not a value exit} -body {
+    shown {import list
+error Empty
+fn f(xs) errors Empty:
+    if xs == []:
+        fail Empty
+    [xs, list::length(xs)]}
+} -result {{a 2-element list is returned from the only value exit; a struct value names the parts @ 6:5}}
+
+test fa-fail-final-contributes-no-exit {a body ending in fail contributes no exit} -body {
+    fixed {error Bad
+fn f(x, a, b) errors Bad:
+    if x:
+        return [a, b]
+    fail Bad}
+} -result {{4:9 2 1 {}}}
+
+test fa-fail-all-silent {a function whose every completion is fail has no value exit: silent} -body {
+    silent {error Bad
+fn f(x) errors Bad:
+    if x:
+        fail Bad
+    fail Bad}
+} -result 1
+
+test fa-fail-in-branch-beside-literals {fail in one branch of a final if, literals in the others} -body {
+    fixed {error Bad
+fn f(x, a, b) errors Bad:
+    if x == 1:
+        [a, b]
+    elif x == 2:
+        fail Bad
+    else:
+        [b, a]}
+} -result {{4:9 2 2 8:9}}
+
+test fa-never-completing-exit-is-no-value-exit {an exit whose value can never complete is not a value exit} -body {
+    fixed {fn spin():
+    loop:
+        unit
+fn f(x, a, b):
+    if x:
+        return [a, spin()]
+    [a, b]}
+} -result {{7:5 2 1 {}}}
+
+# ---------------------------------------------------------------------------
+# Alias-of-literal exits (item 11). Soundness precondition, verified:
+# bindings are immutable and a second binding of a name in the same scope is
+# a DUPLICATE error, so every binding has exactly one initializer; a branch's
+# binding of the same name is a new (shadowing) binding.
+
+test fa-alias-initializer-literal {r = [a, b]; return r -- the initializer decides} -body {
+    fixed {fn f(x, a, b):
+    r = [a, b]
+    if x:
+        return r
+    [b, a]}
+} -result {{4:9 2 2 5:5}}
+
+test fa-alias-chain-to-root {an alias chain resolves to the root binding, whose initializer decides} -body {
+    fixed {fn f(a, b):
+    r = [a, b]
+    s = r
+    t = s
+    t}
+} -result {{5:5 2 1 {}}}
+
+test fa-alias-beside-literal-same-arity {an alias-of-literal exit beside a literal of the same arity} -body {
+    fixed {fn f(x, a, b):
+    r = [a, b, a]
+    if x:
+        return r
+    [b, a, b]}
+} -result {{4:9 3 2 5:5}}
+
+test fa-alias-beside-literal-other-arity {an alias of a 3-element literal beside a 2-element literal mismatches} -body {
+    silent {fn f(x, a, b):
+    r = [a, b, a]
+    if x:
+        return r
+    [b, a]}
+} -result 1
+
+test fa-alias-of-computed-silent {an alias of a computed list is not literal-shaped} -body {
+    silent {import list
+fn f(x, a, b):
+    r = list::append([a], b)
+    if x:
+        return r
+    [b, a]}
+} -result 1
+
+test fa-alias-of-parameter-silent {an alias of a parameter is a parameter} -body {
+    silent {fn f(x, p, a, b):
+    r = p
+    if x:
+        return r
+    [a, b]}
+} -result 1
+
+test fa-alias-of-mutable-silent {an alias of a mutable value is a mismatch} -body {
+    silent {import mutable_array
+fn f(x, a, b):
+    r = mutable_array::allocate(2)
+    if x:
+        return r
+    [a, b]}
+} -result 1
+
+test fa-alias-module-level-binding {a top-level binding initialized by a literal counts like a local one} -body {
+    fixed {pair = [1, 2]
+fn f(x, a):
+    if x:
+        return pair
+    [a, a]}
+} -result {{4:9 2 2 5:5}}
+
+test fa-rebinding-same-scope-is-an-error {a same-scope rebinding is DUPLICATE: the program is rejected and never warned about} -body {
+    set source {fn f(a, b):
+    r = [a, b]
+    r = [a, b, a]
+    r}
+    set hir [surface::compile $source t.bot -strict 0 -warnings default -warning-channel ""]
+    list [lindex [rejection $source default] 0] [lmap d [hir::diagnostics $hir] {dict get $d kind}] [hir::warnings::of $hir]
+} -result {{CORE SEMANTIC DUPLICATE} DUPLICATE {}}
+
+test fa-rebinding-in-branch-is-a-shadow {a branch's `r = ...` is a new binding with its own initializer: 3 and 2 elements mismatch} -body {
+    silent {fn f(x, a, b):
+    r = [a, b]
+    if x:
+        r = [a, b, a]
+        return r
+    r}
+} -result 1
+
+test fa-rebinding-in-branch-same-arity {the shadowing binding and the outer one, both 2-element literals: two alias exits} -body {
+    fixed {fn f(x, a, b):
+    r = [a, b]
+    if x:
+        r = [b, a]
+        return r
+    r}
+} -result {{5:9 2 2 6:5}}
+
+test fa-alias-is-not-a-final-value-copy {the binding statement itself is never an exit: only a read of the binding is} -body {
+    fixed {fn f(a, b):
+    r = [a, b]
+    r}
+} -result {{3:5 2 1 {}}}
+
+# ---------------------------------------------------------------------------
+# Self-recursion (item 12)
+
+test fa-self-call-and-literal {one self-call and one literal: the self-call is counted and inherits N} -body {
+    set hir [compileWith {fn f(n, a, b):
+    if n == 0:
+        return [a, b]
+    f(n - 1, a, b)}]
+    set w [lindex [fixedOf $hir] 0]
+    list [dict get $w data exits] [llength [dict get $w data selfCalls]] [dict get $w data arity] \
+        [lmap s [dict get $w data selfCalls] {dict get $hir exprs $s kind}]
+} -result {2 1 2 call}
+
+test fa-all-self-calls-silent {a function whose exits are all self-calls has no N: silent} -body {
+    silent {fn f(n, a, b):
+    if n == 0:
+        return f(n, a, b)
+    f(n - 1, a, b)}
+} -result 1
+
+test fa-aliased-self-call {a self-call through an alias (g = f inside f) counts as a self-call} -body {
+    set hir [compileWith {fn f(n, a, b):
+    g = f
+    if n == 0:
+        return [a, b]
+    g(n - 1, a, b)}]
+    set w [lindex [fixedOf $hir] 0]
+    list [dict get $w data exits] [llength [dict get $w data selfCalls]]
+} -result {2 1}
+
+test fa-method-sugar-self-call {a self-call written with method sugar is a self-call} -body {
+    fixed {fn f(n, a, b):
+    if n == 0:
+        return [a, b]
+    (n - 1).f(a, b)}
+} -result {{3:9 2 2 4:6}}
+
+test fa-indirect-recursion-silent {indirect recursion through a nested helper is an ordinary call of unknown shape: silent} -body {
+    silent {fn f(n, a, b):
+    fn h(m):
+        f(m, a, b)
+    if n == 0:
+        return [a, b]
+    h(n - 1)}
+} -result 1
+
+test fa-mutual-recursion-silent {a mutually recursive pair (a nested function and its enclosing one): neither is reported} -body {
+    silent {fn f(n, a, b):
+    fn g(m):
+        if m == 0:
+            return [a, b]
+        f(m - 1, a, b)
+    if n == 0:
+        return [b, a]
+    g(n - 1)}
+} -result 1
+
+test fa-higher-order-recursion-silent {recursion through a function value passed in is not a self-call} -body {
+    silent {fn f(k, n, a, b):
+    if n == 0:
+        return [a, b]
+    k(k, n - 1, a, b)}
+} -result 1
+
+test fa-self-call-of-nested-function {a nested function's self-call is its own, reported at its own location} -body {
+    fixed {fn outer(a, b):
+    fn inner(n):
+        if n == 0:
+            return [a, b]
+        inner(n - 1)
+    {x: inner(3)}}
+} -result {{4:13 2 2 5:9}}
+
+test fa-call-of-enclosing-function-from-nested-is-not-self {inside a nested function, a call to the enclosing function is not a self-call of the nested one} -body {
+    silent {fn f(n, a, b):
+    fn g(m):
+        if m == 0:
+            return [a, b]
+        f(m, a, b)
+    {x: g(n)}}
+} -result 1
+
+test fa-self-call-termination-trivial {deep self-recursion (and a recursion that never terminates at run time) is read syntactically: the pass terminates} -body {
+    fixed {fn f(n, a, b):
+    if n == 0:
+        return f(n, a, b)
+    if n == 1:
+        return f(n, a, b)
+    if n == 2:
+        return [a, b]
+    f(n, a, b)}
+} -result {{3:9 2 4 {5:9 7:9 8:5}}}
+
+# ---------------------------------------------------------------------------
+# The annotation: the author's voice (item 15)
+
+test fa-annotation-silences {a written list-typed result annotation silences} -body {
+    list [silent {fn coords(dx: int, dy: int) -> List[int]:
+    [dx, dy]}] [fixed {fn coords(dx: int, dy: int):
+    [dx, dy]}]
+} -result {1 {{2:5 2 1 {}}}}
+
+test fa-annotation-bare-list {the bare `-> list` (List[any]) is a list type and silences} -body {
+    silent {fn coords(dx, dy) -> list:
+    [dx, dy]}
+} -result 1
+
+test fa-annotation-element-type-irrelevant {List[str], nested List[List[int]]: any list type silences} -body {
+    list [silent {fn names(a: str, b: str) -> List[str]:
+    [a, b]}] [silent {fn rows(a: int, b: int) -> List[List[int]]:
+    [[a], [b]]}]
+} -result {1 1}
+
+test fa-annotation-any-does-not-silence {a non-list annotation does not silence: `-> any` admits uniform list exits and the warning fires} -body {
+    fixed {fn coords(dx, dy) -> any:
+    [dx, dy]}
+} -result {{2:5 2 1 {}}}
+
+test fa-annotation-struct-is-a-checker-error {a struct annotation over list exits is a checker error, so the program is never warned about} -body {
+    set source {struct P:
+    x: int
+fn f(a: int) -> P:
+    [a, a]}
+    set hir [surface::compile $source t.bot -strict 0 -warnings default -warning-channel ""]
+    list [lindex [rejection $source default] 0] [expr {[hir::diagnostics $hir] ne ""}] [hir::warnings::of $hir]
+} -result {{CORE SEMANTIC TYPE} 1 {}}
+
+test fa-annotation-decides-not-the-shape {`-> List[...]` on a function whose exits mismatch is silent, and its exits are never examined} -body {
+    set source {fn f(x: int) -> List[int]:
+    if x == 0:
+        return [x]
+    [x, x]}
+    set ::shapeCalls 0
+    trace add execution hir::warnings::ShapeExits enter {apply {{args} {incr ::shapeCalls}}}
+    try {
+        set result [silent $source]
+    } finally {
+        trace remove execution hir::warnings::ShapeExits enter {apply {{args} {incr ::shapeCalls}}}
+    }
+    list $result $::shapeCalls
+} -result {1 0}
+
+test fa-annotation-nested-function {the annotation is respected on a nested function} -body {
+    fixed {fn outer(a: int, b: int):
+    fn inner(x: int, y: int) -> List[int]:
+        [x, y]
+    fn bare(x, y):
+        [x, y]
+    {p: inner(a, b), q: bare(a, b)}}
+} -result {{5:9 2 1 {}}}
+
+test fa-annotation-through-module-import {a module's annotated function is silent in an importing program; its unannotated twin warns, located in the module file} -body {
+    withModules {geo.bot {fn coords(dx: int, dy: int) -> List[int]:
+    [dx, dy]
+fn bare(dx, dy):
+    [dx, dy]
+}} {
+        set hir [surface::compile {import geo
+geo::coords(1, 2)
+geo::bare(1, 2)} t.bot -warnings default -warning-channel ""]
+        lmap w [fixedOf $hir] {list [file tail [hir::originLocation $hir [dict get $w primary]]] [dict get $w data functionName]}
+    }
+} -result {{geo.bot:4:5 geo::bare}}
+
+test fa-annotation-is-the-existing-declared-result {the annotation the warning reads is the block's existing declaredResult, recorded in every mode} -body {
+    set source {fn coords(dx: int, dy: int) -> List[int]:
+    [dx, dy]}
+    set off [compileWith $source off]
+    set on [compileWith $source default]
+    list [hir::types::show [dict get $off exprs e2 declaredResult]] \
+        [expr {[dict get $off exprs e2 declaredResult] eq [dict get $on exprs e2 declaredResult]}] \
+        [expr {$off eq [dict remove $on warnings]}]
+} -result {{List[int]} 1 1}
+
+test fa-annotation-round-trips-through-hir-text {hir::format prints the annotation (`declares`) and hir::parse reads it back} -body {
+    set hir [compileWith {fn coords(dx: int, dy: int) -> List[int]:
+    [dx, dy]
+coords(1, 2)} off]
+    set parsed [hir::parse [hir::format $hir]]
+    list [string match "*declares List\\\[int\\\]*" [hir::format $hir]] \
+        [expr {[dict get $parsed exprs e2 declaredResult] eq [dict get $hir exprs e2 declaredResult]}]
+} -result {1 1}
+
+test fa-annotation-no-other-opt-out {there is no other author-side opt-out: an unannotated function cannot be silenced by a comment or modifier} -body {
+    list [fixed {# lint: ignore FIXED-ARITY-LIST-RETURN
+fn pair(a, b):
+    [a, b]}] [catch {compileWith {notuple fn pair(a, b):
+    [a, b]}}]
+} -result {{{3:5 2 1 {}}} 1}
+
+# ---------------------------------------------------------------------------
+# Reachability (item 21)
+
+test fa-reach-dead-branch {a structurally dead branch's exit is not an exit} -body {
+    fixed {fn f(a, b):
+    if 1 == 2:
+        return [a]
+    [a, b]}
+} -result {{4:5 2 1 {}}}
+
+test fa-reach-code-after-return {code after a return is not an exit} -body {
+    fixed {fn f(a, b):
+    return [a, b]
+    [a]}
+} -result {{2:5 2 1 {}}}
+
+test fa-reach-range-pruned-enables-warning {a range-unreachable 3-element exit beside a reachable 2-element exit: pruning it lets the 2-element shape be stated (sound: it cannot execute)} -body {
+    fixed {fn f(x, a, b):
+    if x < 0:
+        if x > 5:
+            return [a, b, a]
+    [a, b]}
+} -result {{5:5 2 1 {}}}
+
+test fa-reach-range-feasible-control {the same shape with a feasible condition keeps the 3-element exit, so the arities mismatch: silent} -body {
+    silent {fn f(x, a, b):
+    if x < 0:
+        if x > -5:
+            return [a, b, a]
+    [a, b]}
+} -result 1
+
+test fa-reach-range-pruned-unit {a range-unreachable unit exit no longer silences} -body {
+    fixed {fn f(x, a, b):
+    if x < 0:
+        if x > 5:
+            return
+    [a, b]}
+} -result {{5:5 2 1 {}}}
+
+test fa-reach-range-pruned-literal-leaves-only-self-calls {pruning the only literal exit leaves self-calls alone: silent} -body {
+    silent {fn f(x, a, b):
+    if x < 0:
+        if x > 5:
+            return [a, b]
+    f(x - 1, a, b)}
+} -result 1
+
+test fa-reach-walk-only-for-candidates {the completion walk runs only for a function with a literal exit of arity >= 2} -body {
+    set ::walks {}
+    trace add execution hir::completions::reachedExprs enter {apply {{command args} {lappend ::walks [lindex $command 2]}}}
+    try {
+        set hir [compileWith {fn none(a):
+    a
+fn one(a):
+    [a]
+fn two(a):
+    [a, a]}]
+    } finally {
+        trace remove execution hir::completions::reachedExprs enter {apply {{command args} {lappend ::walks [lindex $command 2]}}}
+    }
+    # The walks SAME-RETURN-VALUE makes are none here (no repeated value).
+    list [llength $::walks] [expr {[lindex $::walks 0] eq [dict get [lindex [fixedOf $hir] 0] data function]}]
+} -result {1 1}
+
+test fa-reach-loops {returns inside list and counted loops are exits} -body {
+    fixed {fn f(xs, a, b):
+    loop x in xs:
+        if x == a:
+            return [x, b]
+    loop i from 0 to 3:
+        if i == b:
+            return [i, a]
+    [a, b]}
+} -result {{4:13 2 3 {7:13 8:5}}}
+
+test fa-reach-handler-return {a return inside an on-handler is an exit of the enclosing function} -body {
+    fixed {import list
+fn f(xs, a, b) errors IndexNotFound:
+    v = list::at(xs, 0):
+        on IndexNotFound:
+            return [a, b]
+    [v, a]}
+} -result {{5:13 2 2 6:5}}
+
+test fa-reach-module-code-located-in-module {a module function's exits (inside a loop) are located in the module file} -body {
+    withModules {m.bot {fn find(xs, a):
+    loop x in xs:
+        if x == a:
+            return [x, a]
+    [a, a]
+}} {
+        set hir [surface::compile {import m
+m::find([1, 2], 2)} t.bot -warnings default -warning-channel ""]
+        lmap w [fixedOf $hir] {
+            list [file tail [hir::originLocation $hir [dict get $w primary]]] \
+                [lmap o [dict get $w secondary] {file tail [hir::originLocation $hir $o]}]
+        }
+    }
+} -result {{m.bot:4:13 m.bot:5:5}}
+
+# ---------------------------------------------------------------------------
+# Structure: nesting, synthesized forms, records, ordering
+
+test fa-nested-functions-own-their-exits {a nested function's list exits are its own; the enclosing function (a struct result) is silent} -body {
+    fixed {fn outer(a, b):
+    fn inner(x):
+        if x:
+            return [a, b]
+        [b, a]
+    {r: inner(true)}}
+} -result {{4:13 2 2 5:9}}
+
+test fa-nested-returns-do-not-leak-out {an enclosing function with list exits is not affected by a nested function's other exits} -body {
+    fixed {fn outer(x, a, b):
+    fn inner(y):
+        if y:
+            return [a]
+        unit
+    if x:
+        return [a, b]
+    [b, a]}
+} -result {{7:9 2 2 8:5}}
+
+test fa-closure-capturing {a closure (nested function capturing locals) with uniform list exits warns at its own location} -body {
+    fixed {fn make(a, b):
+    fn pick(x):
+        if x:
+            return [a, b]
+        [b, a]
+    pick}
+} -result {{4:13 2 2 5:9}}
+
+test fa-boolean-operator-if-never-opened {a synthesized `and`/`or`/`not` if is one expression, never branches: a mismatch} -body {
+    list [silent {fn f(x, y, a, b):
+    if x:
+        return [a, b]
+    x and y}] [silent {fn f(x, a, b):
+    if x:
+        return [a, b]
+    not x}]
+} -result {1 1}
+
+test fa-operators-never-literal {an operator call (written form operator) is never a list literal} -body {
+    set hir [compileWith {fn f(a, b):
+    [a, b]
+fn g(a, b):
+    a - b}]
+    set forms {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "call" && [dict exists $node written] && [dict get $node written form] in {list operator}} {
+            lappend forms [dict get $node written form]
+        }
+    }
+    list [lsort $forms] [lmap w [fixedOf $hir] {dict get $w data functionName}]
+} -result {{list operator} f}
+
+test fa-record-shape {a record has exactly {code message primary secondary data}} -body {
+    set w [lindex [fixedOf [compileWith {fn f(x, a, b):
+    if x:
+        return [a, b]
+    [b, a]}]] 0]
+    list [dict keys $w] [dict get $w code]
+} -result {{code message primary secondary data} FIXED-ARITY-LIST-RETURN}
+
+test fa-record-data-fields {data: function, functionName, arity, exits, sites, selfCalls (and the note text)} -body {
+    set hir [compileWith {fn f(n, a, b):
+    if n == 0:
+        return [a, b]
+    f(n - 1, a, b)}]
+    set w [lindex [fixedOf $hir] 0]
+    set data [dict get $w data]
+    list [lsort [dict keys $data]] [dict get $hir exprs [dict get $data function] kind] [dict get $data functionName] \
+        [dict get $data arity] [dict get $data exits] [llength [dict get $data sites]] \
+        [lmap s [dict get $data sites] {dict get $hir exprs $s kind}] \
+        [expr {[lindex [dict get $data selfCalls] 0] eq [lindex [dict get $data sites] 1]}]
+} -result {{arity exits function functionName note selfCalls sites} block f 2 2 2 {return call} 1}
+
+test fa-record-secondary-are-the-other-exits {primary is the first exit's origin, secondary the others in source order} -body {
+    set hir [compileWith {fn f(x, a, b):
+    if x == 1:
+        return [a, b]
+    if x == 2:
+        return [b, a]
+    [a, a]}]
+    set w [lindex [fixedOf $hir] 0]
+    set origins [lmap s [dict get $w data sites] {hir::get $hir $s origin}]
+    list [expr {[dict get $w primary] eq [lindex $origins 0]}] [expr {[dict get $w secondary] eq [lrange $origins 1 end]}] \
+        [llength [dict get $w secondary]]
+} -result {1 1 2}
+
+test fa-message-text {the pinned message: arity and exit count, the struct preference named, nothing prescriptive} -body {
+    list [lmap w [fixedOf [compileWith {fn f(x, a, b):
+    if x:
+        return [a, b, a]
+    [b, a, b]}]] {dict get $w message}] [lmap w [fixedOf [compileWith {fn f(a, b):
+    [a, b]}]] {dict get $w message}]
+} -result {{{a 3-element list is returned from all 2 value exits; a struct value names the parts}} {{a 2-element list is returned from the only value exit; a struct value names the parts}}}
+
+test fa-message-is-not-prescriptive {no imperative, no rewrite, no suggested literal, no field names} -body {
+    set hir [compileWith {fn scan(text, index, field):
+    if index == 0:
+        return [field, index]
+    [text, index + 1]}]
+    set w [lindex [fixedOf $hir] 0]
+    set text "[dict get $w message] [hir::warnings::render $hir $w]"
+    set hits {}
+    foreach word {use convert should must replace instead consider prefer rewrite field: index: "\{" "->" "list\[" fix} {
+        if {[string first $word $text] >= 0} {
+            lappend hits $word
+        }
+    }
+    list $hits [string match "*struct value*" [dict get $w message]]
+} -result {{} 1}
+
+test fa-data-has-no-rendered-source {data is structured: ids and numbers, no source text, no field-name suggestion} -body {
+    set w [lindex [fixedOf [compileWith {fn f(field, index):
+    [field, index]}]] 0]
+    set data [dict get $w data]
+    list [string match {e[0-9]*} [dict get $data function]] [string is integer -strict [dict get $data arity]] \
+        [string is integer -strict [dict get $data exits]] [string first "field" [dict remove $data functionName]]
+} -result {1 1 1 -1}
+
+test fa-one-warning-per-function {one diagnostic per function, never one per exit or per pair} -body {
+    llength [fixedOf [compileWith {fn f(x, a, b):
+    if x == 1:
+        return [a, b]
+    if x == 2:
+        return [a, b]
+    if x == 3:
+        return [a, b]
+    [a, b]}]]
+} -result 1
+
+test fa-source-order-across-functions {several functions' warnings in source order} -body {
+    lmap w [fixed {fn g(a):
+    [a, a, a]
+fn f(a):
+    [a, a]}] {lindex $w 0}
+} -result {2:5 4:5}
+
+test fa-deterministic {compiling the same source twice gives identical warnings} -body {
+    set source "${::peek}fn scan_quoted(text, index, field) errors LowerUnderrun:
+    character = peek(text, index)
+    if character == \"\\\"\":
+        return \[field, index + 1\]
+    scan_quoted(text, index + 1, str::concat(field, character))"
+    expr {[hir::warnings::of [compileWith $source]] eq [hir::warnings::of [compileWith $source]]}
+} -result 1
+
+test fa-generic-hir-once-instances-never-walked {a function analyzed as several semantic instances is one warning} -body {
+    set hir [compileWith {fn f(a, b):
+    [a, b]
+f(1, 2)
+f("x", "y")
+f([1], [2])}]
+    list [expr {[dict size [dict get $hir semantic instances]] >= 2}] [llength [fixedOf $hir]]
+} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# Interleaving with the two existing codes, ordering, the policy matrix
+
+set ::threeSource {fn dup(x):
+    if x < 0:
+        return 0
+    if x > 100:
+        return 0
+    return 1
+fn two(a, b):
+    a
+fn pair(a, b):
+    [a, b]
+fn t(x):
+    return two(x, 1)}
+
+test fa-interleaving-three-codes {all three codes in one program, in source order} -body {
+    allWarnings $::threeSource
+} -result {{SAME-RETURN-VALUE 3:9} {FIXED-ARITY-LIST-RETURN 10:5} {METHOD-ELIGIBLE 12:12}}
+
+test fa-interleaving-three-codes-other-order {the same three warnings with the functions in the other order sort by location, not by code} -body {
+    allWarnings {fn two(a, b):
+    a
+fn t(x):
+    return two(x, 1)
+fn pair(a, b):
+    [a, b]
+fn dup(x):
+    if x < 0:
+        return 0
+    if x > 100:
+        return 0
+    return 1}
+} -result {{METHOD-ELIGIBLE 4:12} {FIXED-ARITY-LIST-RETURN 6:5} {SAME-RETURN-VALUE 9:9}}
+
+test fa-interleaving-same-location {a function whose exits are both a repeated list value and a uniform shape: two codes, one location, ordered by code} -body {
+    allWarnings {fn f(x):
+    if x:
+        return [1, 2]
+    [1, 2]}
+} -result {{FIXED-ARITY-LIST-RETURN 3:9} {SAME-RETURN-VALUE 3:9}}
+
+test fa-interleaving-deterministic {compiling the three-code program twice yields the same warnings} -body {
+    expr {[hir::warnings::of [compileWith $::threeSource]] eq [hir::warnings::of [compileWith $::threeSource]]}
+} -result 1
+
+test fa-mode-default {default: compiles, and the program carries the warning} -body {
+    list [lmap w [fixedOf [compileWith $::threeSource default]] {dict get $w code}] [rejection $::threeSource default]
+} -result {FIXED-ARITY-LIST-RETURN compiled}
+
+test fa-mode-off {off: compiles, and nothing is reported} -body {
+    set hir [compileWith $::threeSource off]
+    list [hir::warnings::of $hir] [dict exists $hir warnings]
+} -result {{} 0}
+
+test fa-mode-error-only-this-code {error: a program with only this warning is rejected with the warning's own code} -body {
+    rejection {fn f(x, a, b):
+    if x:
+        return [a, b]
+    [b, a]} error
+} -result {{CORE SEMANTIC FIXED-ARITY-LIST-RETURN} {t.bot:3:9: a 2-element list is returned from all 2 value exits; a struct value names the parts (also at t.bot:4:5)}}
+
+test fa-mode-error-first-in-sort-order {error with three codes: exactly one error, the sort-first, with its own code} -body {
+    list [lindex [rejection $::threeSource error] 0] [lindex [rejection {fn pair(a, b):
+    [a, b]
+fn dup(x):
+    if x < 0:
+        return 0
+    if x > 100:
+        return 0
+    return 1} error] 0]
+} -result {{CORE SEMANTIC SAME-RETURN-VALUE} {CORE SEMANTIC FIXED-ARITY-LIST-RETURN}}
+
+test fa-mode-error-clean-program {error mode accepts a program with no warning} -body {
+    rejection {fn f(x, a, b):
+    if x:
+        return [a, b]
+    [a]} error
+} -result compiled
+
+test fa-mode-default-is-the-default {no option and no environment setting means warnings on, as warnings} -body {
+    set saved $::env(BOTLISH_WARNINGS)
+    unset ::env(BOTLISH_WARNINGS)
+    try {
+        set hir [surface::compile {fn pair(a, b):
+    [a, b]} t.bot -warning-channel ""]
+        lmap w [hir::warnings::of $hir] {dict get $w code}
+    } finally {
+        set ::env(BOTLISH_WARNINGS) $saved
+    }
+} -result FIXED-ARITY-LIST-RETURN
+
+test fa-environment-default {BOTLISH_WARNINGS is only the default for a compilation given no -warnings} -body {
+    set saved $::env(BOTLISH_WARNINGS)
+    set source {fn pair(a, b):
+    [a, b]}
+    try {
+        set results {}
+        foreach mode {default off error} {
+            set ::env(BOTLISH_WARNINGS) $mode
+            lappend results [catch {surface::compile $source t.bot -warning-channel ""}] \
+                [catch {surface::compile $source t.bot -warnings off -warning-channel ""}]
+        }
+        set results
+    } finally {
+        set ::env(BOTLISH_WARNINGS) $saved
+    }
+} -result {0 0 0 0 1 0}
+
+test fa-unknown-mode {a mode outside default/off/error is a plain usage error} -body {
+    surface::compile $::threeSource t.bot -warnings strict -warning-channel ""
+} -returnCodes error -match glob -result {unknown warnings mode "strict" (known: default, off, error)}
+
+test fa-no-fine-grained-options {there is no per-warning option: -Wno-fixed-arity-list-return is not an option} -body {
+    surface::compile $::threeSource t.bot -Wno-fixed-arity-list-return 1
+} -returnCodes error -match glob -result {*unknown option "-Wno-fixed-arity-list-return"*}
+
+test fa-no-new-modes-or-options {the policy surface is still exactly default, off, error; the registry is static, one line per code} -body {
+    list $hir::warnings::modes [dict keys $hir::warnings::passes] \
+        [expr {[llength [info commands hir::warnings::enable]] + [llength [info commands hir::warnings::disable]]}]
+} -result {{default off error} {SAME-RETURN-VALUE METHOD-ELIGIBLE FIXED-ARITY-LIST-RETURN} 0}
+
+test fa-error-promotion-identity {the promoted error keeps the code and the message the warning has} -body {
+    set source {fn pair(a, b):
+    [a, b]}
+    set w [lindex [fixedOf [compileWith $source default]] 0]
+    lassign [rejection $source error] code message
+    list [lindex $code end] [dict get $w code] [string match "*[dict get $w message]*" $message]
+} -result {FIXED-ARITY-LIST-RETURN FIXED-ARITY-LIST-RETURN 1}
+
+test fa-off-runs-no-warning-pass {warnings off does not execute the pass at all (default does): the stats counter} -body {
+    set source {fn pair(a, b):
+    [a, b]}
+    hir::warnings::resetStats
+    compileWith $source off
+    set afterOff [hir::warnings::stats]
+    compileWith $source default
+    set afterDefault [hir::warnings::stats]
+    list $afterOff [dict exists $afterOff FIXED-ARITY-LIST-RETURN] [dict get $afterDefault FIXED-ARITY-LIST-RETURN]
+} -result {{} 0 1}
+
+test fa-off-runs-no-warning-pass-via-trace {an execution trace on the pass proves it is not invoked when off} -body {
+    set source {fn pair(a, b):
+    [a, b]}
+    set ::passCalls 0
+    trace add execution hir::warnings::FixedArityListReturn enter {apply {{args} {incr ::passCalls}}}
+    try {
+        compileWith $source off
+        set off $::passCalls
+        compileWith $source default
+        set on $::passCalls
+    } finally {
+        trace remove execution hir::warnings::FixedArityListReturn enter {apply {{args} {incr ::passCalls}}}
+    }
+    list $off $on
+} -result {0 1}
+
+test fa-compilation-with-errors-has-no-warnings {a program the compiler rejects is never warned about} -body {
+    set hir [surface::compile {fn pair(a, b):
+    [a, b]
+nothing} t.bot -strict 0 -warnings default -warning-channel ""]
+    list [llength [hir::diagnostics $hir]] [hir::warnings::of $hir]
+} -result {1 {}}
+
+test fa-policy-is-per-compilation {interleaved compilations under different modes never leak a mode} -body {
+    set source {fn pair(a, b):
+    [a, b]}
+    set a [compileWith $source off]
+    set b [compileWith $source default]
+    set c [catch {compileWith $source error}]
+    set d [compileWith $source off]
+    set e [compileWith $source default]
+    list [llength [fixedOf $a]] [llength [fixedOf $b]] $c [llength [fixedOf $d]] [llength [fixedOf $e]]
+} -result {0 1 1 0 1}
+
+test fa-warnings-attached-structurally {hir::warnings::of equals collect} -body {
+    set hir [compileWith $::threeSource default]
+    list [expr {[hir::warnings::of $hir] eq [hir::warnings::collect $hir]}] [llength [hir::warnings::collect $hir]]
+} -result {1 3}
+
+test fa-error-stops-before-backend {error mode rejects before any backend lowers anything (traces on all four entry points)} -body {
+    set source {fn pair(a, b):
+    [a, b]
+pair(1, 2)}
+    set ::lowerCalls 0
+    foreach command {native::evalHir native::prepareHir hir::lower core::compiler::evalHir} {
+        trace add execution $command enter {apply {{args} {incr ::lowerCalls}}}
+    }
+    try {
+        set rejected [catch {compileWith $source error}]
+    } finally {
+        foreach command {native::evalHir native::prepareHir hir::lower core::compiler::evalHir} {
+            trace remove execution $command enter {apply {{args} {incr ::lowerCalls}}}
+        }
+    }
+    list $rejected $::lowerCalls
+} -result {1 0}
+
+# ---------------------------------------------------------------------------
+# No semantics change (item 24)
+
+set ::runSource {fn pair(a, b):
+    if a == 0:
+        return [b, a]
+    [a, b]
+p = pair(3, 4)
+p}
+
+test fa-hir-identical-across-modes {HIR (minus the side table), hir::format and hir::lower are identical under off and default} -body {
+    set off [compileWith $::runSource off]
+    set on [compileWith $::runSource default]
+    list [llength [fixedOf $on]] [expr {$off eq [dict remove $on warnings]}] [expr {[hir::format $off] eq [hir::format $on]}] \
+        [expr {[hir::lower $off] eq [hir::lower $on]}] [dict exists $off warnings]
+} -result {1 1 1 1 0}
+
+test fa-nir-identical-across-modes {native IR (specialized and generic) is identical with warnings off and on} -body {
+    set off [compileWith $::runSource off]
+    set on [compileWith $::runSource default]
+    list [expr {[native::nir $off] eq [native::nir $on]}] [expr {[native::nir $off -specialize 0] eq [native::nir $on -specialize 0]}]
+} -result {1 1}
+
+test fa-machine-readable-outputs-clean {native::report, NIR and CLIF are identical with and without the warnings side table} -body {
+    set on [compileWith $::runSource default]
+    set bare [dict remove $on warnings]
+    expr {[llength [fixedOf $on]] == 1 && [native::report $on] eq [native::report $bare]
+        && [native::nir $on] eq [native::nir $bare] && [native::clif $on] eq [native::clif $bare]}
+} -result 1
+
+test fa-no-warning-text-in-machine-readable-outputs {neither NIR, CLIF, the report nor HIR text mention the warning} -body {
+    set hir [compileWith $::runSource default]
+    set seen 0
+    foreach text [list [native::nir $hir] [native::clif $hir] [native::report $hir] [hir::format $hir]] {
+        foreach word {FIXED-ARITY warning "struct value" "names the parts"} {
+            if {[string first $word $text] >= 0} {
+                incr seen
+            }
+        }
+    }
+    set seen
+} -result 0
+
+test fa-annotation-changes-nothing-else {annotated and unannotated twins: same core IR shape and value; the annotation is a type declaration, not a warning switch} -body {
+    set annotated [compileWith {fn pair(a: int, b: int) -> List[int]:
+    [a, b]
+pair(3, 4)} off]
+    set plain [compileWith {fn pair(a: int, b: int):
+    [a, b]
+pair(3, 4)} off]
+    list [core::formatValue [core::evalProgram [hir::lower $annotated]]] \
+        [core::formatValue [core::evalProgram [hir::lower $plain]]] \
+        [expr {[hir::lower $annotated] eq [hir::lower $plain]}]
+} -result {{[3, 4]} {[3, 4]} 1}
+
+# ---------------------------------------------------------------------------
+# Backend independence
+
+test fa-backend-independent {every backend runs the program identically; the one warning set is the HIR's} -body {
+    set hir [compileWith $::runSource default]
+    set outcomes [lmap backend $::allBackends {outcomeUnderHir $backend $hir}]
+    list [llength [lsort -unique [lmap o $outcomes {lindex $o 1}]]] [lindex $outcomes 0 1] [llength [fixedOf $hir]]
+} -result {1 {[3, 4]} 1}
+
+test fa-backend-independent-off {the same program runs identically on every backend with warnings off} -body {
+    set hir [compileWith $::runSource off]
+    lsort -unique [lmap backend $::allBackends {lindex [outcomeUnderHir $backend $hir] 1}]
+} -result {{[3, 4]}}
+
+# ---------------------------------------------------------------------------
+# The conversion's checker, as it actually is (WARNINGS-FIXED-ARITY-LIST-
+# RETURN.md, "The honest gap"): converted call sites that read fields are
+# type-checked; a leftover positional read is caught statically only where it
+# reaches a source function's inferred list parameter, at run time where it
+# reaches a native directly, and not at all by `==` against a list.
+
+set ::converted {import list
+fn pair(a, b):
+    {p0: a, p1: b}
+}
+
+test fa-conversion-field-reads-checked {a field read that does not exist on the converted result is a compile-time UNKNOWN-FIELD} -body {
+    lindex [rejection "${::converted}fn use(x):
+    r = pair(x, 1)
+    r.p2
+use(1)" default] 0
+} -result {CORE SEMANTIC UNKNOWN-FIELD}
+
+test fa-conversion-field-reads-compile {the converted reads compile and run} -body {
+    set hir [compileWith "${::converted}fn use(x):
+    r = pair(x, 1)
+    \[r.p1, r.p0\]
+use(5)" off]
+    core::formatValue [core::evalProgram [hir::lower $hir]]
+} -result {[1, 5]}
+
+test fa-conversion-leftover-through-source-function {a leftover positional read through a source function (list::get) is a compile-time TYPE error} -body {
+    lindex [rejection "${::converted}list::get(pair(1, 2), 0, 7)" default] 0
+} -result {CORE SEMANTIC TYPE}
+
+test fa-conversion-leftover-native-read-is-a-run-time-error {GAP: a leftover direct native read (list::at) compiles and fails at run time with a kind error} -body {
+    set hir [compileWith "${::converted}v = list::at(pair(1, 2), 0):
+    on IndexNotFound:
+        0
+v" off]
+    list [catch {core::evalProgram [hir::lower $hir]} message] [string match "*expected list*" $message]
+} -result {1 1}
+
+test fa-conversion-leftover-equality-is-silent {GAP: a leftover `==` against a list literal compiles and is silently false} -body {
+    set hir [compileWith "${::converted}pair(1, 2) == \[1, 2\]" off]
+    core::formatValue [core::evalProgram [hir::lower $hir]]
+} -result false
+
+# ---------------------------------------------------------------------------
+# The command line
+
+test fa-cli-modes {main.tcl: default prints the warning and its notes on stderr and runs; off is silent; error rejects before running} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource fa-cli.bot]
+    set results {}
+    foreach mode {default off error} {
+        set status [catch {exec [info nameofexecutable] $main -warnings $mode $path 2>@1} out]
+        lappend results [list $mode $status \
+            [regexp {warning: a 2-element list is returned from all 2 value exits; a struct value names the parts \(FIXED-ARITY-LIST-RETURN\)} $out] \
+            [regexp {note: also returned here} $out] \
+            [regexp {value: \[3, 4\]} $out] \
+            [regexp {CORE SEMANTIC FIXED-ARITY-LIST-RETURN} $out]]
+    }
+    removeFile fa-cli.bot
+    set results
+} -result {{default 0 1 1 1 0} {off 0 0 0 1 0} {error 1 0 0 0 1}}
+
+test fa-cli-no-wno-option {-Wno-fixed-arity-list-return is an unknown option, not a file name} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource fa-cli-wno.bot]
+    catch {exec [info nameofexecutable] $main -Wno-fixed-arity-list-return $path 2>@1} out
+    removeFile fa-cli-wno.bot
+    list [string match "*unknown option*-Wno-fixed-arity-list-return*" $out] [string match "*value:*" $out]
+} -result {1 0}
+
+test fa-cli-unknown-mode {main.tcl rejects an unknown mode} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource fa-cli-mode.bot]
+    set status [catch {exec [info nameofexecutable] $main -warnings tuples $path 2>@1} out]
+    removeFile fa-cli-mode.bot
+    list $status [string match "*unknown warnings mode*" $out]
+} -result {1 1}
+
+test fa-cli-stdout-clean {the warning goes to stderr: program stdout carries no warning text} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource fa-cli-stdout.bot]
+    set stderrPath [makeFile {} fa-cli-stderr.txt]
+    set out [exec [info nameofexecutable] $main -warnings default $path 2> $stderrPath]
+    set err [viewFile fa-cli-stderr.txt]
+    removeFile fa-cli-stdout.bot
+    removeFile fa-cli-stderr.txt
+    list [string match *warning* $out] [string match *FIXED-ARITY-LIST-RETURN* $err] [string match {*value: \[3, 4\]*} $out]
+} -result {0 1 1}
+
+test fa-error-cli-stops-before-backend {main.tcl -backend cranelift -warnings error rejects without lowering or running anything} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource fa-cli-error.bot]
+    catch {exec [info nameofexecutable] $main -backend cranelift -warnings error $path 2>@1} out
+    removeFile fa-cli-error.bot
+    list [string match "*value:*" $out] [regexp {\(CORE SEMANTIC FIXED-ARITY-LIST-RETURN\)} $out]
+} -result {0 1}
+
+test fa-cli-backend-independent-stdlib {main.tcl prints the same FIXED-ARITY-LIST-RETURN text on every backend over the whole stdlib corpus} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set programs [lsort [glob -directory [file join $::projectRoot examples stdlib] *.bot]]
+    set mismatches {}
+    set total 0
+    foreach path $programs {
+        set texts {}
+        foreach backend $::allBackends {
+            set err [makeFile {} fa-cli-err.txt]
+            catch {exec [info nameofexecutable] $main -backend $backend -warnings default $path 2> $err}
+            set lines [split [viewFile fa-cli-err.txt] \n]
+            set block {}
+            set inside 0
+            foreach line $lines {
+                if {[string match *FIXED-ARITY-LIST-RETURN* $line]} {
+                    set inside 1
+                    lappend block $line
+                } elseif {$inside && [string match "*: note: *" $line]} {
+                    lappend block $line
+                } else {
+                    set inside 0
+                }
+            }
+            lappend texts $block
+            removeFile fa-cli-err.txt
+        }
+        incr total [llength [lsearch -all [lindex $texts 0] *FIXED-ARITY-LIST-RETURN*]]
+        if {[llength [lsort -unique $texts]] != 1} {
+            lappend mismatches [file tail $path]
+        }
+    }
+    list $mismatches [expr {$total > 0}]
+} -result {{} 1}
+
+# ---------------------------------------------------------------------------
+# Fuzzing: constructed programs, an independent oracle, all three modes, and
+# the conversion law
+
+test fa-fuzz-smoke {60 generated programs: predicted warnings (anchor and notes) and only them, off silent, error iff warned, every conversion holds} -constraints executableAot -body {
+    set fuzz [file join $::projectRoot audit fixed-arity-list-return tools fuzz.tcl]
+    exec [info nameofexecutable] $fuzz 60 1
+} -result {seeds 60 (from 1): * with warnings, * without; failures 0; extra warnings 0; conversions * of *; excluded runs 0} -match glob
+
+cleanupTests
