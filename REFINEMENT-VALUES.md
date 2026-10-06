@@ -699,9 +699,12 @@ facts keyed by predicate and alias root, implications through Boolean
 bindings and the `not`/`and`/`or` lowering, and the intersection at joins.
 For each program it predicts acceptance (a rejection must be a compile-time
 `TYPE` error), the `known` of every predicate call in order, and the value,
-which every backend must compute. Four seeds × 600 programs: 1,791 accepted,
-609 rejected, 3,166 predicate calls in accepted programs of which 260 decided
-(true and false), **0 failures**.
+which every backend must compute. Nested branches may also shadow `a` or
+`b` with another value, so a fact keyed by spelling is caught, and the
+prelude's `need3` forgets its `R3` to `R1` through a call, so the chain is
+exercised. Four seeds × 600 programs: 1,794 accepted, 606 rejected, 3,093
+predicate calls in accepted programs of which 264 decided (true and false),
+**0 failures**.
 
 **Mutation testing.** 31 mutants of the compiler, each run against
 `tests/refinement-values.test` + `tests/emailish-predicate.test` (both
