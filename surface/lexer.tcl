@@ -20,7 +20,8 @@
 #             digits) -- see UNICODE-CHAR-LITERALS.md
 #   keywords  fn if elif else loop return break continue true false unit and or not
 #             type struct error errors fail on (kind is the word
-#             itself)
+#             itself; the parser reads `unit` in a type position as the
+#             unit type's name, surface::parser::TypeExpr)
 #   operators ( ) [ ] { } , : :: = == != < <= > >= + - * -> .. .
 #             (kind is the text itself; "." is field projection, STRUCTS.md,
 #             and ".." the integer-domain range of a type declaration)

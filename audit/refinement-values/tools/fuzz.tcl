@@ -1,10 +1,16 @@
 # fuzz.tcl -- differential fuzzer for refinement values (REFINEMENT-VALUES.md).
 #
-#   tclsh9.0 audit/refinement-values/tools/fuzz.tcl ?-seed N? ?-count N? ?-backends LIST? ?-accept P? ?-v 1? ?-show 1?
+#   tclsh9.0 audit/refinement-values/tools/fuzz.tcl ?-seed N? ?-count N? ?-backends LIST? ?-accept P? ?-validators 0|1? ?-v 1? ?-show 1?
 #
 # -accept P: the share of programs drawn (by retrying) until the oracle
-# accepts them; the rest are taken as generated, mostly rejections.
-# -show 1 prints every accepted program with a decided call.
+# accepts them; the rest are taken as generated, mostly rejections (with
+# validators, 70% of the rest are drawn until the oracle rejects exactly one
+# use: the programs a compiler that proves too much would accept).
+# -show 1 prints every accepted program with a decided call, -show 2 every
+# accepted program with a validator call.
+# -validators 0 generates exactly the programs of the predicate-only
+# generator (the same random draws, prelude and printing), so its recorded
+# runs stay reproducible; 1 (the default) adds validators (below).
 #
 # Generates random programs over a fixed set of refinements and proof-
 # producing predicates -- two sibling refinements of str (R1, R2), a
@@ -20,26 +26,49 @@
 # forgets its R3 to R1 through a call, so the prelude itself depends on the
 # chain. Conditions are predicate calls, Boolean bindings, not, and, or.
 #
+# Validators (`-> unit proves s: R`, REFINEMENT-VALUES.md "Validators"):
+# validate_r1 and validate_q1 prove R1 with different failure thresholds,
+# validate_r2 proves R2, validate_r3 proves R3 from an R1, and validate_lax
+# proves R2 and never fails (no errors clause). f declares `errors Invalid`
+# and the program calls it through g, whose handler turns an escaping
+# Invalid into -1. Validator statements, in bodies and in statement-if
+# branches: a plain call, a binding `uN = validate_x(v)`, method sugar
+# `v.validate_x()`; a handled call (statement or bound) whose handler
+# returns, fails, completes without a proof, completes after a guard, uses a
+# value (so a handler that sees the failed call's proof is caught) or
+# validates again; `pair(validate_x(v), need(v))`, the validator as an
+# argument (its fact holds for the later argument; handled, the handler also
+# runs when the argument fails, so it must not see that proof); a counted
+# loop whose body validates and uses (its facts end with the body); and
+# `use` statements, a leaf call whose value is discarded.
+#
 # An independent oracle (this file; it shares no code with the compiler)
 # models what the language says:
 #
 #   * carrier and nominal refinement facts per binding (a closure: R3
-#     implies R1), established by a true proof and attached to the value --
-#     the argument's binding and the binding it aliases, never a spelling;
+#     implies R1), established by a true proof or a validator's normal
+#     completion and attached to the value -- the argument's binding and the
+#     binding it aliases, never a spelling;
 #   * exact predicate-result facts, keyed by predicate and value identity
-#     (the alias root), decided only for repeatable predicates;
+#     (the alias root), decided only for repeatable predicates; a validator
+#     call is never decided;
 #   * control flow: each outcome's facts of not/and/or (their lowering to
 #     if-expressions), Boolean bindings carrying their implication, and the
 #     join of a statement if: facts true at the end of every reachable
-#     branch that completes;
+#     branch that completes; after a handled validator call, the facts true
+#     on the call's normal completion and at the end of every handler that
+#     completes (each handler starting from the facts before the call); a
+#     loop body's facts end with it;
 #   * acceptance: every leaf's argument proven what its parameter requires
-#     (reachable or not: the compiler type-checks dead code too);
+#     (reachable or not: the compiler type-checks dead code too), and so is
+#     every validate_r3/p3? argument;
 #   * the value of the program, evaluated concretely.
 #
 # Each program is compiled once. A predicted rejection must be a compile-time
 # TYPE error; a predicted acceptance must compile, run to the oracle's value
 # on every backend, and decide exactly the predicate calls the oracle
-# decides (the HIR `known` field of each predicate call, in order).
+# decides (the HIR `known` field of each predicate and validator call, in
+# order).
 
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
 source [file join $root compiler compiler.tcl]
@@ -47,12 +76,13 @@ source [file join $root surface surface.tcl]
 source [file join $root native native.tcl]
 interp recursionlimit {} 200000
 
-set options [dict create -seed 1 -count 200 -backends {interp compile cranelift-generic cranelift} -accept 0.7 -v 0 -show 0]
+set options [dict create -seed 1 -count 200 -backends {interp compile cranelift-generic cranelift} -accept 0.7 -validators 1 -v 0 -show 0]
 foreach {option value} $argv {
     if {![dict exists $options $option]} { error "unknown option $option" }
     dict set options $option $value
 }
 expr {srand([dict get $options -seed])}
+set validating [dict get $options -validators]
 
 proc pick {list} { lindex $list [expr {int(rand() * [llength $list])}] }
 proc chance {p} { expr {rand() < $p} }
@@ -92,6 +122,38 @@ fn plain(x: str) -> int:
 
 }
 
+if {$validating} {
+    append prelude {error Invalid
+
+fn validate_r1(s: str) -> unit proves s: R1 errors Invalid:
+    if str::length(s) <= 2:
+        fail Invalid
+    unit
+
+fn validate_q1(s: str) -> unit proves s: R1 errors Invalid:
+    if str::length(s) <= 3:
+        fail Invalid
+    unit
+
+fn validate_r2(s: str) -> unit proves s: R2 errors Invalid:
+    if str::length(s) >= 5:
+        fail Invalid
+    unit
+
+fn validate_r3(s: R1) -> unit proves s: R3 errors Invalid:
+    if str::length(s) <= 4:
+        fail Invalid
+    unit
+
+fn validate_lax(s: str) -> unit proves s: R2:
+    unit
+
+fn pair(u: unit, n: int) -> int:
+    n
+
+}
+}
+
 # Predicate -> {refinement proven, refinement required of the argument,
 # repeatable, concrete test}.
 set preds {
@@ -100,6 +162,15 @@ set preds {
     p2? {R2 {} 1 {expr {$n < 5}}}
     p3? {R3 R1 1 {expr {$n > 4}}}
     n1? {R1 {} 0 {expr {$n > 2}}}
+}
+# Validator -> {refinement proven, refinement required of the argument,
+# concrete failure test}.
+set validators {
+    validate_r1 {R1 {} {expr {$n <= 2}}}
+    validate_q1 {R1 {} {expr {$n <= 3}}}
+    validate_r2 {R2 {} {expr {$n >= 5}}}
+    validate_r3 {R3 R1 {expr {$n <= 4}}}
+    validate_lax {R2 {} {expr {0}}}
 }
 set closure {R1 {R1} R2 {R2} R3 {R1 R3}}
 set inputs {{ab abcdef} {abcd x} {abcdefg abc} {{} abcde} {abcde abcde}}
@@ -136,8 +207,113 @@ proc genBranch {strs bools counterVar} {
     if {[chance 0.5]} {
         lappend stmts [list guard [genCond $strs $bools 1] [expr {int(rand() * 9)}]]
     }
+    if {$::validating} {
+        # A validator in a branch: its fact holds in the branch, and after
+        # the if only when every completing branch proves it.
+        if {[chance 0.5]} {
+            lappend stmts {*}[genValidation $strs $bools counter 0]
+        }
+        if {[chance 0.4]} {
+            lappend stmts [list use [genUseLeaf $strs]]
+        }
+    }
     lappend stmts [list alias t[incr counter] [pick $strs]]
     return $stmts
+}
+
+# A string binding to pass, the current a and b drawn twice as often.
+proc pickStr {strs} {
+    return [pick [concat $strs [lsearch -all -inline -regexp $strs {^[ab](#|$)}]]]
+}
+
+# A leaf for a `use` statement (its value is discarded).
+proc genUseLeaf {strs} {
+    return [list leaf [pick {need1 need2 need3 plain}] [pickStr $strs]]
+}
+
+# A leaf that needs what validator X proves of V (or, half the time, any
+# leaf; sometimes what X proves, of another value -- an alias root, a
+# shadowed or unrelated one): what a fact that is (or is not) there is caught
+# by.
+proc genTargetLeaf {strs x v} {
+    if {[chance 0.5]} {
+        return [genUseLeaf $strs]
+    }
+    set need [dict get {validate_r1 need1 validate_q1 need1 validate_r2 need2 validate_r3 need3 validate_lax need2} $x]
+    return [list leaf $need [expr {[chance 0.7] ? $v : [pickStr $strs]}]]
+}
+
+# Validator statements (-validators 1), a list of:
+#
+#   {validate X V FORM NAME}     X(V), NAME = X(V) or V.X() (FORM stmt, bind,
+#                                method)
+#   {vhandle X V HANDLER NAME}   X(V) handled by HANDLER, bound to NAME
+#                                unless NAME is ""
+#   {varg X V LEAF HANDLER NAME} pair(X(V), LEAF): the validator as an
+#                                argument, handled unless HANDLER is "",
+#                                bound unless NAME is ""
+#   {use LEAF}                   LEAF as a statement
+#   {vloop K STMTS}              loop i from 0 to K: STMTS (LOOPS 1 only)
+#
+# A validator call is often followed by a use that needs what it proves.
+proc genValidation {strs bools counterVar {loops 1}} {
+    upvar 1 $counterVar counter
+    set r [expr {rand()}]
+    set v [pickStr $strs]
+    set x [pick {validate_r1 validate_r1 validate_q1 validate_r2 validate_r3 validate_lax}]
+    if {$r < 0.30} {
+        set stmt [list validate $x $v [pick {stmt stmt bind method}] u[incr counter]]
+    } elseif {$r < 0.60} {
+        set stmt [list vhandle $x $v [genHandler $strs $bools $x $v] [expr {[chance 0.4] ? "u[incr counter]" : ""}]]
+    } elseif {$r < 0.75} {
+        set handler [expr {[chance 0.5] ? [genHandler $strs $bools $x $v] : ""}]
+        set stmt [list varg $x $v [genTargetLeaf $strs $x $v] $handler [expr {[chance 0.4] ? "w[incr counter]" : ""}]]
+    } elseif {$r < 0.85 || !$loops} {
+        return [list [list use [genUseLeaf $strs]]]
+    } else {
+        set body [genValidation $strs $bools counter 0]
+        if {[chance 0.5]} {
+            lappend body [list use [genUseLeaf $strs]]
+        }
+        set result [list [list vloop [expr {int(rand() * 3)}] $body]]
+        # After the loop: a use of what the body proved (it must not hold).
+        set first [lindex $body 0]
+        if {[lindex $first 0] in {validate vhandle varg} && [chance 0.6]} {
+            lappend result [list use [genTargetLeaf $strs [lindex $first 1] [lindex $first 2]]]
+        }
+        return $result
+    }
+    set result [list $stmt]
+    if {[chance 0.6]} {
+        lappend result [list use [genTargetLeaf $strs $x $v]]
+    }
+    return $result
+}
+
+# The `on Invalid` handler of a handled call of validator X on V: {return
+# K}, {fail}, {complete} (the handled call's value: completes with no
+# proof), {guard C K} (`if C: return K`, then completes), {use LEAF} (then
+# completes; often a leaf needing what the failed call would have proven)
+# or {revalidate X V} (another validator call, then completes).
+proc genHandler {strs bools x v} {
+    set r [expr {rand()}]
+    if {$r < 0.2} {
+        return [list return [expr {int(rand() * 9)}]]
+    }
+    if {$r < 0.35} {
+        return [list fail]
+    }
+    if {$r < 0.5} {
+        return [list complete]
+    }
+    if {$r < 0.7} {
+        return [list guard [genCond $strs $bools 1] [expr {int(rand() * 9)}]]
+    }
+    if {$r < 0.85} {
+        return [list use [genTargetLeaf $strs $x $v]]
+    }
+    return [list revalidate [pick {validate_r1 validate_q1 validate_r2 validate_r3 validate_lax}] \
+        [expr {[chance 0.5] ? $v : [pickStr $strs]}]]
 }
 
 # A block's statements and final expression. NESTED: the block is an if
@@ -149,9 +325,13 @@ proc genBranch {strs bools counterVar} {
 proc genBlock {strs bools depth counterVar {nested 0}} {
     upvar 1 $counterVar counter
     set stmts {}
-    set n [expr {int(rand() * 4)}]
+    set n [expr {int(rand() * ($::validating ? 5 : 4))}]
     set shadowed 0
     for {set i 0} {$i < $n} {incr i} {
+        if {$::validating && [chance 0.35]} {
+            lappend stmts {*}[genValidation $strs $bools counter]
+            continue
+        }
         set r [expr {rand()}]
         if {$nested && !$shadowed && $r < 0.2} {
             set shadowed 1
@@ -229,9 +409,53 @@ proc stmtLines {stmts indent} {
                     {*}[stmtLines [lindex $s 2] [expr {$indent + 1}]] "${pad}else:" \
                     {*}[stmtLines [lindex $s 3] [expr {$indent + 1}]]
             }
+            validate {
+                lassign $s - x v form name
+                switch -- $form {
+                    stmt   { lappend lines "$pad$x\([spell $v])" }
+                    bind   { lappend lines "$pad$name = $x\([spell $v])" }
+                    method { lappend lines "$pad[spell $v].$x\()" }
+                }
+            }
+            vhandle {
+                lassign $s - x v handler name
+                set head [expr {$name eq "" ? "" : "$name = "}]
+                lappend lines "$pad$head$x\([spell $v]):" "$pad    on Invalid:" \
+                    {*}[handlerLines $handler unit [expr {$indent + 2}]]
+            }
+            varg {
+                lassign $s - x v leaf handler name
+                set head [expr {$name eq "" ? "" : "$name = "}]
+                set call "pair($x\([spell $v]), [leafText $leaf])"
+                if {$handler eq ""} {
+                    lappend lines "$pad$head$call"
+                } else {
+                    lappend lines "$pad$head$call:" "$pad    on Invalid:" \
+                        {*}[handlerLines $handler 0 [expr {$indent + 2}]]
+                }
+            }
+            use {
+                lappend lines "$pad[leafText [lindex $s 1]]"
+            }
+            vloop {
+                lappend lines "${pad}loop i from 0 to [lindex $s 1]:" {*}[stmtLines [lindex $s 2] [expr {$indent + 1}]]
+            }
         }
     }
     return $lines
+}
+
+# The lines of handler H, completing (where it does) with VALUE.
+proc handlerLines {h value indent} {
+    set pad [string repeat "    " $indent]
+    switch -- [lindex $h 0] {
+        return     { return [list "${pad}return [lindex $h 1]"] }
+        fail       { return [list "${pad}fail Invalid"] }
+        complete   { return [list "$pad$value"] }
+        guard      { return [list "${pad}if [condText [lindex $h 1]]:" "$pad    return [lindex $h 2]" "$pad$value"] }
+        use        { return [list "$pad[leafText [lindex $h 1]]" "$pad$value"] }
+        revalidate { return [list "$pad[lindex $h 1]([spell [lindex $h 2]])" "$pad$value"] }
+    }
 }
 
 proc blockLines {block indent} {
@@ -257,9 +481,14 @@ proc leafText {e} {
 }
 
 proc programText {body} {
-    global prelude inputs
-    set calls [lmap pair $inputs {format {f("%s", "%s")} {*}$pair}]
-    return "${prelude}fn f(a: str, b: str) -> int:\n[join [blockLines $body 1] \n]\n\n\[[join $calls {, }]\]\n"
+    global prelude inputs validating
+    if {!$validating} {
+        set calls [lmap pair $inputs {format {f("%s", "%s")} {*}$pair}]
+        return "${prelude}fn f(a: str, b: str) -> int:\n[join [blockLines $body 1] \n]\n\n\[[join $calls {, }]\]\n"
+    }
+    # A validator's Invalid may escape f; g turns it into -1.
+    set calls [lmap pair $inputs {format {g("%s", "%s")} {*}$pair}]
+    return "${prelude}fn f(a: str, b: str) -> int errors Invalid:\n[join [blockLines $body 1] \n]\n\nfn g(a: str, b: str) -> int:\n    r = f(a, b):\n        on Invalid:\n            -1\n    r\n\n\[[join $calls {, }]\]\n"
 }
 
 # ---------------------------------------------------------------------------
@@ -456,6 +685,107 @@ proc stmts {stVar list} {
                     dict set st reach 0
                 }
             }
+            validate {
+                # A normal completion proves: the rest of the path has it.
+                lassign $s - x v
+                applyFacts st [vcall st $x $v]
+            }
+            vhandle {
+                lassign $s - x v h
+                set entryF [dict get $st F]
+                set proof [vcall st $x $v]
+                handled st $entryF [union $entryF $proof] $h
+            }
+            varg {
+                # The validator argument completes before the leaf
+                # argument is evaluated; a handler runs instead of the
+                # whole call, so it starts from the facts before it.
+                lassign $s - x v leaf h
+                set entryF [dict get $st F]
+                applyFacts st [vcall st $x $v]
+                useLeaf st $leaf
+                if {$h ne ""} {
+                    handled st $entryF [dict get $st F] $h
+                }
+            }
+            use {
+                useLeaf st [lindex $s 1]
+            }
+            vloop {
+                # The body's facts are the body's: none survive the loop.
+                set entryF [dict get $st F]
+                set entryReach [dict get $st reach]
+                stmts st [lindex $s 2]
+                dict set st F $entryF
+                dict set st reach $entryReach
+            }
+        }
+    }
+}
+
+# A call of validator X on V: checks what X requires of V, records the call
+# (never decided) and returns the facts its normal completion proves.
+proc vcall {stVar x v} {
+    upvar 1 $stVar st
+    global validators closure
+    lassign [dict get $validators $x] proven required
+    if {$required ne {} && $required ni [factsOf [dict get $st F] $v]} {
+        dict lappend st rejects "$x\($v) needs $required"
+    }
+    dict lappend st decided ""
+    dict incr st vcalls
+    set proof [dict get $closure $proven]
+    return [dict create [list b $v] $proof [list b [rootOf st $v]] $proof]
+}
+
+# Checks leaf E's argument.
+proc useLeaf {stVar e} {
+    upvar 1 $stVar st
+    lassign $e - fn v
+    set need [dict get {need1 R1 need2 R2 need3 R3 plain {}} $fn]
+    # Checked whether or not the leaf is reachable: dead code is type-checked
+    # too.
+    if {$need ne {} && $need ni [factsOf [dict get $st F] $v]} {
+        dict lappend st rejects "$fn\($v) needs $need"
+    }
+}
+
+# The facts after a handled call: those on its normal completion (NORMAL)
+# met with those at the end of handler H when H completes, H starting from
+# ENTRY, the facts before the handled call.
+proc handled {stVar entry normal h} {
+    upvar 1 $stVar st
+    set entryReach [dict get $st reach]
+    set ends [list $normal]
+    dict set st F $entry
+    if {[handlerRun st $h]} {
+        lappend ends [dict get $st F]
+    }
+    dict set st F [meetAll $ends]
+    dict set st reach $entryReach
+}
+
+# Runs handler H in ST; returns whether it can complete normally (a guard
+# decided true always returns).
+proc handlerRun {stVar h} {
+    upvar 1 $stVar st
+    switch -- [lindex $h 0] {
+        return - fail { return 0 }
+        complete { return 1 }
+        guard {
+            lassign [cond st [lindex $h 1]] I known
+            if {[dict get $st reach] && ($known eq "" || $known == 0) && [dict get $I 0] ne "never"} {
+                applyFacts st [dict get $I 0]
+            }
+            return [expr {$known ne "1"}]
+        }
+        use {
+            useLeaf st [lindex $h 1]
+            return 1
+        }
+        revalidate {
+            applyFacts st [vcall st [lindex $h 1] [lindex $h 2]]
+            return 1
         }
     }
 }
@@ -490,22 +820,16 @@ proc oracleExpr {stVar e} {
         }
         int {}
         leaf {
-            lassign $e - fn v
-            set need [dict get {need1 R1 need2 R2 need3 R3 plain {}} $fn]
-            # Checked whether or not the leaf is reachable: dead code is
-            # type-checked too.
-            if {$need ne {} && $need ni [factsOf [dict get $st F] $v]} {
-                dict lappend st rejects "$fn\($v) needs $need"
-            }
+            useLeaf st $e
         }
     }
 }
 
-# {REJECTS DECIDED} for program body BODY.
+# {REJECTS DECIDED VCALLS} for program body BODY: VCALLS validator calls.
 proc oracle {body} {
-    set st [dict create F {} roots {} implies {} reach 1 rejects {} decided {}]
+    set st [dict create F {} roots {} implies {} reach 1 rejects {} decided {} vcalls 0]
     block st $body
-    return [list [dict get $st rejects] [dict get $st decided]]
+    return [list [dict get $st rejects] [dict get $st decided] [dict get $st vcalls]]
 }
 
 # ---------------------------------------------------------------------------
@@ -542,6 +866,57 @@ proc runStmts {envVar list} {
                 set inner $env
                 runStmts inner [lindex $s [expr {[truth $env [lindex $s 1]] ? 2 : 3}]]
             }
+            validate {
+                if {[fails $env [lindex $s 1] [lindex $s 2]]} {
+                    throw {FUZZ FAIL} fail
+                }
+            }
+            vhandle {
+                if {[fails $env [lindex $s 1] [lindex $s 2]]} {
+                    runHandler $env [lindex $s 3]
+                }
+            }
+            varg {
+                if {[fails $env [lindex $s 1] [lindex $s 2]]} {
+                    if {[lindex $s 4] eq ""} {
+                        throw {FUZZ FAIL} fail
+                    }
+                    runHandler $env [lindex $s 4]
+                }
+            }
+            use {}
+            vloop {
+                for {set k 0} {$k < [lindex $s 1]} {incr k} {
+                    set inner $env
+                    runStmts inner [lindex $s 2]
+                }
+            }
+        }
+    }
+}
+
+# 1 if validator X fails on the value of V in ENV.
+proc fails {env x v} {
+    global validators
+    set n [string length [dict get $env $v]]
+    return [eval [lindex [dict get $validators $x] 2]]
+}
+
+# Runs handler H in ENV: a return throws {FUZZ RETURN K}, an escaping
+# Invalid {FUZZ FAIL}.
+proc runHandler {env h} {
+    switch -- [lindex $h 0] {
+        return { throw [list FUZZ RETURN [lindex $h 1]] return }
+        fail { throw {FUZZ FAIL} fail }
+        guard {
+            if {[truth $env [lindex $h 1]]} {
+                throw [list FUZZ RETURN [lindex $h 2]] return
+            }
+        }
+        revalidate {
+            if {[fails $env [lindex $h 1] [lindex $h 2]]} {
+                throw {FUZZ FAIL} fail
+            }
         }
     }
 }
@@ -571,6 +946,9 @@ proc concrete {body} {
             lappend values [runBlock [dict create a [lindex $pair 0] b [lindex $pair 1]] $body]
         } trap {FUZZ RETURN} {- options} {
             lappend values [lindex [dict get $options -errorcode] 2]
+        } trap {FUZZ FAIL} {} {
+            # Invalid escaped f: g's handler.
+            lappend values -1
         }
     }
     return "\[[join $values {, }]\]"
@@ -579,13 +957,16 @@ proc concrete {body} {
 # ---------------------------------------------------------------------------
 # The compiler side.
 
-# The `known` of every predicate call in HIR, in pre-order (source order).
+# The `known` of every predicate and validator call in HIR, in pre-order
+# (source order).
 proc compilerDecided {hir} {
-    global preds
+    global preds validators
     return [lmap e [hir::walk $hir] {
         if {[hir::kind $hir $e] ne "call"} continue
         set callee [hir::get $hir $e callee]
-        if {[hir::kind $hir $callee] ne "ref" || ![dict exists $preds [hir::get $hir $callee name]]} continue
+        if {[hir::kind $hir $callee] ne "ref"} continue
+        set name [hir::get $hir $callee name]
+        if {![dict exists $preds $name] && ![dict exists $validators $name]} continue
         hir::get $hir $e known
     }]
 }
@@ -609,21 +990,26 @@ proc outcome {backend hir} {
 # ---------------------------------------------------------------------------
 # Driver
 
-set stats [dict create programs 0 accepted 0 rejected 0 calls 0 decided 0 failures 0]
+set stats [dict create programs 0 accepted 0 rejected 0 calls 0 decided 0 vcalls 0 failures 0]
 set failures {}
 for {set i 0} {$i < [dict get $options -count]} {incr i} {
     # With probability -accept, draw until the oracle accepts (most random
-    # bodies use a refinement nothing proved).
+    # bodies use a refinement nothing proved). With validators, most of the
+    # other programs are drawn until the oracle rejects exactly one use: a
+    # compiler that proves too much (a handler seeing the failed call's
+    # proof, a join keeping a fact one path lacks) accepts exactly those.
     set wantAccept [chance [dict get $options -accept]]
+    set wantSingle [expr {!$wantAccept && $validating && [chance 0.7]}]
     for {set try 0} {$try < 500} {incr try} {
         set counter 0
         set body [genBlock {a b} {} 2 counter]
-        lassign [oracle $body] rejects decided
-        if {!$wantAccept || $rejects eq {}} break
+        lassign [oracle $body] rejects decided vcalls
+        if {$wantSingle ? [llength $rejects] == 1 : (!$wantAccept || $rejects eq {})} break
     }
     set text [programText $body]
     dict incr stats programs
-    if {[dict get $options -show] && [llength [lsearch -all -not -exact $decided ""]] > 0 && $rejects eq {}} {
+    if {$rejects eq {} && (([dict get $options -show] == 1 && [llength [lsearch -all -not -exact $decided ""]] > 0)
+            || ([dict get $options -show] == 2 && $vcalls > 0))} {
         puts "---- program $i (decided: $decided)\n$text"
     }
     set problem ""
@@ -641,7 +1027,8 @@ for {set i 0} {$i < [dict get $options -count]} {incr i} {
     } else {
         dict incr stats accepted
         set got [compilerDecided $hir]
-        dict incr stats calls [llength $decided]
+        dict incr stats calls [expr {[llength $decided] - $vcalls}]
+        dict incr stats vcalls $vcalls
         dict incr stats decided [llength [lsearch -all -not -exact $decided ""]]
         if {$got ne $decided} {
             set problem "decided calls: compiler {$got}, oracle {$decided}"
@@ -669,5 +1056,6 @@ foreach failure $failures {
         puts $text
     }
 }
-puts "seed [dict get $options -seed]: [dict get $stats programs] programs, [dict get $stats accepted] accepted, [dict get $stats rejected] rejected, [dict get $stats calls] predicate calls in accepted programs ([dict get $stats decided] decided), [dict get $stats failures] failures"
+set validatorCalls [expr {$validating ? ", [dict get $stats vcalls] validator calls (never decided)" : ""}]
+puts "seed [dict get $options -seed]: [dict get $stats programs] programs, [dict get $stats accepted] accepted, [dict get $stats rejected] rejected, [dict get $stats calls] predicate calls in accepted programs ([dict get $stats decided] decided)$validatorCalls, [dict get $stats failures] failures"
 exit [expr {[dict get $stats failures] > 0}]

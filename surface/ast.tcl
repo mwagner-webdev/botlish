@@ -77,9 +77,10 @@
 #              paramsSpan (from "(" to the end of the body: the function
 #              literal), errors ({NAME SPAN} pairs, from the function's own
 #              "errors E1, E2" clause, empty if none), proves (the proof
-#              clauses, REFINEMENT-VALUES.md: a list of {outcome true param
-#              NAME paramSpan SPAN type TYPE typeSpan SPAN span SPAN} dicts,
-#              at most one, empty if none), body (suite),
+#              clauses, REFINEMENT-VALUES.md: a list of {outcome true|normal
+#              param NAME paramSpan SPAN type TYPE typeSpan SPAN span SPAN}
+#              dicts, at most one, empty if none; `normal` after `-> unit`, a
+#              validator), body (suite),
 #              nomethod (1 for `nomethod fn NAME(...)`, else 0), nomethodSpan
 #              (the modifier word's span, or "") -- a property of the one
 #              declaration: its author's declaration that it is never the

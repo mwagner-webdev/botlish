@@ -250,8 +250,11 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             }
             if {[dict exists $node proofs]} {
                 # The proof contract (REFINEMENT-VALUES.md): "proves BINDING
-                # NAME: TYPE" -- when a call returns true, its argument for
-                # that parameter satisfies TYPE.
+                # NAME: TYPE" -- when a call returns true (a predicate,
+                # `declares bool`) or completes normally (a validator,
+                # `declares unit`), its argument for that parameter
+                # satisfies TYPE. The outcome is the declared result's, so
+                # hir::read derives it back from the `declares` above.
                 foreach proof [dict get $node proofs] {
                     append text [format { proves %s: %s} [BindingLabel $hir [dict get $proof binding]] \
                         [hir::types::show [dict get $proof fact]]]

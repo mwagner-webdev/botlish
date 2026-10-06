@@ -1813,19 +1813,65 @@ proc hir::types::Project {hirVar ctxVar e} {
 # conservative (entry-reachable, like an `if` whose outcome isn't known):
 # nothing here claims to know which error, if any, a call actually
 # produces at run time (spec items 27/82 defer that proof).
+#
+# Facts. A handler runs instead of a normal completion of the handled call
+# expression -- the call itself failed, or one of its arguments did (the
+# handler catches any matching error the expression produces,
+# core::forms::op-handle). So a validator's completion fact
+# (REFINEMENT-VALUES.md, "Validators") established anywhere in that
+# expression -- the handled call's own, or an argument's -- does not hold
+# in a handler: Call logs the bindings such facts narrow (`completionLog`),
+# and each handler starts from the facts after the call with those bindings
+# as they were before it. After the construct, a fact holds when it holds at
+# the end of every way the construct completes normally: the call's normal
+# completion and each handler body that completes normally (a handler that
+# returns, fails, breaks or continues contributes nothing) -- the join of
+# an `if` (If), applied when a validator fact is involved; otherwise the
+# construct keeps the facts after the call, as it always has.
 proc hir::types::Handle {hirVar ctxVar e} {
     upvar 1 $hirVar hir $ctxVar ctx
     set node [dict get $hir exprs $e]
     set entry [dict get $ctx reachable]
+    set before [dict get $ctx facts]
+    set outerLog [expr {[dict exists $ctx completionLog] ? [dict get $ctx completionLog] : ""}]
+    set hadLog [dict exists $ctx completionLog]
+    dict set ctx completionLog {}
     set callType [Expr hir ctx [dict get $node call]]
+    set validated [dict keys [dict get $ctx completionLog]]
+    if {$hadLog} {
+        dict set ctx completionLog [dict merge $outerLog [dict get $ctx completionLog]]
+    } else {
+        dict unset ctx completionLog
+    }
     dict set ctx reachable $entry
+    set completed [dict get $ctx facts]
+    set handlerEntry $completed
+    foreach b $validated {
+        if {[dict exists $before $b]} {
+            dict set handlerEntry $b [dict get $before $b]
+        } else {
+            dict unset handlerEntry $b
+        }
+    }
 
     set handlerTypes {}
+    set ends [expr {$callType ne "never" ? [list $completed] : {}}]
     foreach body [dict get $node handlerBodies] {
         dict set ctx reachable $entry
-        set saved [dict get $ctx facts]
-        lappend handlerTypes [Sequence hir ctx $body]
-        dict set ctx facts $saved
+        dict set ctx facts $handlerEntry
+        set handlerType [Sequence hir ctx $body]
+        lappend handlerTypes $handlerType
+        if {$handlerType ne "never"} {
+            lappend ends [dict get $ctx facts]
+        }
+    }
+    dict set ctx facts $completed
+    if {$validated ne {} && $ends ne {}} {
+        set joined [lindex $ends 0]
+        foreach end [lrange $ends 1 end] {
+            set joined [hir::refine::Meet $joined $end 1]
+        }
+        dict set ctx facts $joined
     }
     dict set ctx reachable $entry
     # Recorded for hir/errorsets.tcl, which (after this whole inference
@@ -2072,7 +2118,7 @@ proc hir::types::Call {hirVar ctxVar e} {
     } elseif {[IsExactBlock $calleeType]} {
         lassign $calleeType _ block arity blockResult
         set target [list block $block]
-        if {$known eq "" && !$dead && [hir::refine::ProofsOf $hir $block] ne {}} {
+        if {$known eq "" && !$dead && [hir::refine::IsPredicate $hir $block]} {
             # An exact predicate-result fact (REFINEMENT-VALUES.md): this
             # very invocation -- the same proof-producing function on the
             # same argument values -- already returned a known result on
@@ -2080,6 +2126,9 @@ proc hir::types::Call {hirVar ctxVar e} {
             # (hir/repeatable.tcl), so the call is decided. A refinement
             # fact about the argument alone never decides it: another
             # function proving the same refinement need not return true.
+            # A validator (`-> unit proves`) has no exact result to record
+            # and is never decided: removing a repeated validator call
+            # would also remove the failure it may raise.
             set key [hir::refine::CallKey $hir $block $argExprs]
             if {$key ne "" && [dict exists $ctx facts $key] && [hir::repeatable::Block $hir $block]} {
                 set known [dict get $ctx facts $key]
@@ -2157,6 +2206,21 @@ proc hir::types::Call {hirVar ctxVar e} {
         set calleeErrors [FnErrors $calleeType]
     }
     dict set hir exprs $e calleeErrors $calleeErrors
+    if {!$dead && [lindex $target 0] eq "block"} {
+        # A validator's proof (REFINEMENT-VALUES.md, "Validators"): once
+        # this call completes normally, its argument satisfies the
+        # contract's refinement -- a flow fact about the rest of the path,
+        # like a native's parameter types above, scoped and joined like
+        # every other fact. Inside a handled call, the bindings it narrows
+        # are logged for Handle: a handler may run instead of this
+        # completion, and must not see its proof.
+        foreach {b fact} [hir::refine::CompletionFacts $hir $e] {
+            Narrow $hir ctx $b $fact
+            if {[dict exists $ctx completionLog]} {
+                dict set ctx completionLog $b 1
+            }
+        }
+    }
     return [expr {$dead ? "never" : $result}]
 }
 

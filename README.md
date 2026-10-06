@@ -354,11 +354,12 @@ Refinement introspection: `core::refinementsOf ENV NAME` and
 `core::blockEnv` (see `examples/04-refinement-scope.ir`).
 
 Botlish source declares its own refinements: `refined type Emailish = str`
-is a nominal type over a carrier, and `fn emailish?(v: str) -> bool proves
-v: Emailish:` is a function whose true result proves its argument one
-(§14, REFINEMENT-VALUES.md). Those facts are static only: the compiler
-(§13) derives them from the function's declared proof contract, and no
-runtime value or environment records them.
+is a nominal type over a carrier, `fn emailish?(v: str) -> bool proves
+v: Emailish:` is a function whose true result proves its argument one, and
+`fn validate_emailish(v: str) -> unit proves v: Emailish errors Invalid:`
+one whose normal completion does (§14, REFINEMENT-VALUES.md). Those facts
+are static only: the compiler (§13) derives them from the function's
+declared proof contract, and no runtime value or environment records them.
 
 ## 7. Invalid programs vs application errors
 
@@ -838,9 +839,14 @@ representation: the compiler maps a block's `EXPR` to the proc it generates.
   accumulate facts. As in the interpreter, only arguments that are plain
   `(ref NAME)` are refined (an immutable alias's root value too), and a
   Boolean binding carries what its value implies (`ok = p(s)` then `if ok:`).
+  A *validator*'s contract (`-> unit proves v: Emailish`) is a flow fact
+  instead: once its call completes, the argument is refined for the rest of
+  the path (not inside a handler of the call; after a handled call only if
+  every handler that completes proves it too).
   A fact survives an `if` when every branch that completes normally proves it.
 * **Exact predicate results** (REFINEMENT-VALUES.md): a call of a
-  proof-producing function also records its own result for its exact
+  predicate (a `-> bool` proof-producing function; never a validator, whose
+  repeated call is always made) also records its own result for its exact
   argument values on each edge. A second identical call on a path where that
   result is known is decided (the call's `known`, and every backend elides
   it) only when the function is *repeatable* (`hir/repeatable.tcl`: everything
@@ -977,7 +983,8 @@ form, with names sorted and unique, and every registry stores canonical types.
 * A **refinement** type is nominal (REFINEMENT-VALUES.md). Source declares
   it over one carrier type, `refined type Emailish = str`, and a value of the
   carrier is one only where a proof says so: a call of a proof-producing
-  function of the declaring module returned true for it. There is no runtime
+  function of the declaring module returned true for it (a predicate) or
+  completed normally for it (a validator). There is no runtime
   test, tag or wrapper: a refined value is exactly a value of its carrier, so
   equality, hashing, rendering, the ABI and layouts are the carrier's.
 
@@ -1269,8 +1276,10 @@ metadata gives facts about the arguments that are plain references; when it
 calls a known function with a proof contract (`proves x: R`, resolved onto
 the block as its `proofs`), the contract does. Facts are BindingId/type
 pairs, plus the exact-result facts of proof-producing calls (§13). They're recorded on the `if` (per outcome) and on the
-branch scope, and they narrow the binding only inside that branch. Nothing in
-the HIR refers to a predicate by name. A type test decided by static types
+branch scope, and they narrow the binding only inside that branch. A
+validator's contract (`-> unit proves x: R`, outcome `normal`) is no
+condition fact: a call of it that completes narrows its argument for the
+rest of the path (§13). Nothing in the HIR refers to a predicate by name. A type test decided by static types
 (§8) sets the call's `known` field. If an `if` condition is known (a decided
 test, or the root binding `true` or `false`), the other branch is marked
 unreachable.
@@ -1293,7 +1302,8 @@ The `hir::format` notation is also an input format. `hir::parse` (and
 rebuilds a complete HIR program from it. The text states the binding ids,
 scopes, types, captures, refinements, call targets and flags, and a
 source refinement's declaration (`refined type ID carrier T owner NS`) and a
-block's proof contract (` proves BINDING NAME: TYPE`). The reader
+block's proof contract (` proves BINDING NAME: TYPE`, a predicate's or a
+validator's as its `declares bool`/`declares unit` says). The reader
 derives everything else: binding kinds and types, scope structure, closures,
 root symbols, diagnostics and origins. It rejects text that is malformed or
 inconsistent (an id declared twice, a reference to a binding that isn't
@@ -1517,16 +1527,24 @@ add10(32)          # 42 (add captures x)
   `context` (below) composes with it as an independent modifier
   (`opaque context struct`), and a later `resource` will too.
   See OPAQUE-STRUCTS.md.
+* A result annotation `-> unit` declares the unit result (`fn log(x) ->
+  unit:`): `unit` is the unit value's keyword everywhere else, and the unit
+  type's name in a type position (results, parameters, `List[unit]`, `Fn{...}`
+  fields, struct fields).
 * **Refinement types and proofs.** `refined type Emailish = str` declares a
   nominal refinement of one carrier type, and `fn emailish?(v: str) -> bool
-  proves v: Emailish:` declares the function whose true result proves it: in
+  proves v: Emailish:` declares a *predicate* whose true result proves it: in
   `if emailish?(s):` (or `ok = emailish?(s)` then `if ok:`, or through `not`,
-  `and`, `or`), `s` is an `Emailish`. The proof clause names one declared
-  parameter, sits after `-> bool` and before an `errors` clause, and may
-  appear only in the module that declares the refinement. A refined value is
-  its carrier everywhere a carrier is expected; nothing else converts to it.
-  `refined` and `proves` are contextual words, not reserved. See §14 and
-  REFINEMENT-VALUES.md.
+  `and`, `or`), `s` is an `Emailish`. `fn validate_emailish(v: str) -> unit
+  proves v: Emailish errors Invalid:` declares a *validator* whose normal
+  completion proves it: after `validate_emailish(s)` returns, `s` is an
+  `Emailish` for the rest of the path (a handled call keeps the fact only if
+  every handler that completes proves it too). The proof clause names one
+  declared parameter, sits after `-> bool` or `-> unit` and before an
+  `errors` clause, and may appear only in the module that declares the
+  refinement. A refined value is its carrier everywhere a carrier is
+  expected; nothing else converts to it. `refined` and `proves` are
+  contextual words, not reserved. See §14 and REFINEMENT-VALUES.md.
 * **Method-call sugar.** `value.f(a, b)` is another spelling of the ordinary
   call `f(value, a, b)`, allowed exactly when `f` is a function visible by
   that name at the call (under ordinary lexical resolution: a function or

@@ -289,8 +289,12 @@ predicate (`tests/refinement-values.test` greps for `Emailish`,
 `UriQueryValue`, `emailish?`, `uri_query_value?`), and a refined value has
 exactly its carrier's representation -- never add a runtime tag, wrapper or
 check to recover one. If you change the proof contract resolution
-(`hir/resolve.tcl`'s `ResolveProofs`), implications or call keys
-(`hir/refine.tcl`), the `if` join or the decided-call rule (`hir/types.tcl`),
-repeatability (`hir/repeatable.tcl`) or a native's `-context-free`
-classification, run `tests/refinement-values.test`,
-`tests/emailish-predicate.test` and `audit/refinement-values/tools/fuzz.tcl`.
+(`hir/resolve.tcl`'s `ResolveProofs`), implications, call keys or a
+validator's completion facts (`hir/refine.tcl`), the `if` join, the
+decided-call rule or how a call's completion facts flow and a handled call
+joins its handlers (`hir/types.tcl`'s `Call` and `Handle`), repeatability
+(`hir/repeatable.tcl`), a native's `-context-free` classification, or how
+`-> unit` and a proof clause parse, run `tests/refinement-values.test`,
+`tests/refinement-validators.test`, `tests/emailish-predicate.test` and
+`audit/refinement-values/tools/fuzz.tcl` (validators are on by default;
+`-validators 0` reproduces the predicate-only generator's runs).

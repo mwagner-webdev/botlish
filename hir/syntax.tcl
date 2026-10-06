@@ -238,11 +238,12 @@ proc hir::syntax::withNoMethod {block} {
 }
 
 # BLOCK (a `block` node) with the proof clauses PROOFS (REFINEMENT-VALUES.md):
-# a list of {outcome true param NAME paramOrigin ORIGIN type TYPEEXPR
+# a list of {outcome true|normal param NAME paramOrigin ORIGIN type TYPEEXPR
 # typeOrigin ORIGIN} dicts, TYPEEXPR the as-written refinement type. A proof
 # clause is part of the function's contract, like its declared result: it
-# says that when a call returns OUTCOME, the argument of parameter NAME
-# satisfies the refinement. hir/resolve.tcl validates it and records the
+# says that when a call returns true (a predicate) or completes normally (a
+# validator, `-> unit`), the argument of parameter NAME satisfies the
+# refinement. hir/resolve.tcl validates it and records the
 # resolved contract on the block expression (`proofs`).
 proc hir::syntax::withProofs {block proofs} {
     foreach clause $proofs {

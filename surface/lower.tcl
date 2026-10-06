@@ -63,7 +63,9 @@
 #   fn p(x: T) -> bool proves x: R:   the same block carrying `proofs`
 #                         ({outcome true param x paramOrigin .. type R
 #                         typeOrigin ..}): a proof contract, resolved and
-#                         validated by hir::resolve (REFINEMENT-VALUES.md)
+#                         validated by hir::resolve (REFINEMENT-VALUES.md);
+#                         `-> unit proves x: R` (a validator) has outcome
+#                         `normal`
 #   fn f(a, flags :x, :y): body   the same block carrying `flags` ({x ORIGIN}
 #                         {y ORIGIN}) beside its ordinary params; flags are a
 #                         separate parameter category (FLAGS.md), made

@@ -1,0 +1,776 @@
+# refinement-validators.test -- validators: proof-producing functions whose
+# normal completion is the proof (REFINEMENT-VALUES.md, "Validators"):
+#
+#   refined type Mail = str
+#   error Invalid
+#
+#   fn validate_mail(s: str) -> unit proves s: Mail errors Invalid:
+#       if str::length(s) < 4:
+#           fail Invalid
+#       unit
+#
+#   fn use(s: str) -> int errors Invalid:
+#       validate_mail(s)      # completes normally only if s is a Mail
+#       send(s)               # accepted: s is proven Mail from here on
+#
+# and the `-> unit` result annotation the validator shape needs. Every
+# behavioral case runs on interp, compile, cranelift-generic and cranelift
+# through one HIR (sourceAgree): the facts are the front end's, and every
+# backend must compute the same value from the same program.
+#
+# Naming: validators are named validate_* (or exactly validate), predicates
+# end in "?".
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+# The kind and location-free message of the first compile rejection of
+# SOURCE, or "accepted".
+proc rejection {source} {
+    if {[catch {surface::compile $source -warnings off} message options]} {
+        set code [dict get $options -errorcode]
+        set kind [expr {[lindex $code 1] eq "SYNTAX" ? "SYNTAX" : [lindex $code end]}]
+        return [list $kind [regsub {^[^ ]*:[0-9]+:[0-9]+: } $message {}]]
+    }
+    return accepted
+}
+
+proc rejectionKind {source} {
+    return [lindex [rejection $source] 0]
+}
+
+# The `known` field of every call of the function spelled NAME in HIR, in
+# pre-order.
+proc knownOf {hir name} {
+    return [lmap e [hirFind $hir call] {
+        set callee [hir::get $hir $e callee]
+        if {[hir::kind $hir $callee] ne "ref" || [hir::get $hir $callee name] ne $name} continue
+        hir::get $hir $e known
+    }]
+}
+
+# The resolved proof contract of the function bound to NAME.
+proc proofsOf {hir name} {
+    set block [hir::get $hir [lindex [hirFind $hir bind $name] 0] value]
+    return [hir::get $hir $block proofs]
+}
+
+# The body lines of NIR function NAME in NIR text, expression origins
+# removed.
+proc nirBody {nir name} {
+    set lines {}
+    set inside 0
+    foreach line [split $nir \n] {
+        if {[string match "func *" $line]} {
+            set inside [string match "func * \"$name\" *" $line]
+            continue
+        }
+        if {$line eq "end"} {
+            set inside 0
+            continue
+        }
+        if {$inside} {
+            lappend lines [regsub -all {@e[0-9]+} [string trim $line] ""]
+        }
+    }
+    return $lines
+}
+
+# The declarations most cases use: a refinement Mail of str and a chain
+# Strict = Mail, two validators of Mail (different thresholds), a validator
+# of Strict from a Mail, an infallible one, a predicate of Mail, and
+# functions requiring Mail and Strict.
+set prelude {import list
+import str
+
+refined type Mail = str
+refined type Strict = Mail
+error Invalid
+error Other
+
+fn validate_mail(s: str) -> unit proves s: Mail errors Invalid:
+    if str::length(s) < 4:
+        fail Invalid
+    unit
+
+fn validate_long_mail(s: str) -> unit proves s: Mail errors Invalid:
+    if str::length(s) < 6:
+        fail Invalid
+    unit
+
+fn validate_strict(m: Mail) -> unit proves m: Strict errors Invalid:
+    if str::length(m) < 5:
+        fail Invalid
+    unit
+
+fn validate_any_mail(s: str) -> unit proves s: Mail:
+    unit
+
+fn mail?(s: str) -> bool proves s: Mail:
+    str::length(s) > 3
+
+fn send(m: Mail) -> int:
+    str::length(m)
+
+fn send_strict(m: Strict) -> int:
+    100 * str::length(m)
+
+fn pair(u: unit, n: int) -> int:
+    n
+
+}
+
+# A program over the prelude whose function `use` may let Invalid escape:
+# top(S) is use(S), or -1 when Invalid escapes. CALLS is the list literal of
+# the program's top-level value.
+proc withTop {body calls} {
+    return "$::prelude$body
+fn top(s: str) -> int:
+    r = use(s):
+        on Invalid:
+            -1
+    r
+
+$calls
+"
+}
+
+# ===========================================================================
+# `-> unit`: the unit type is writable wherever a type is
+
+test validator-unit-result-annotation {"-> unit" parses and declares the unit result; a non-proving -> unit function is ordinary} -body {
+    list [sourceAgree "fn log(x) -> unit:\n    unit\n\[log(1), log(\"a\")\]\n"] \
+         [sourceAgree "fn log(x) -> unit:\n    if x > 1:\n        unit\n\[log(1), log(2)\]\n"] \
+         [hir::types::show [hir::get [set hir [surface::compile "fn log(x) -> unit:\n    unit\n1\n" -warnings off]] \
+             [hir::get $hir [lindex [hirFind $hir bind log] 0] value] declaredResult]]
+} -result {{value {[unit, unit]}} {value {[unit, unit]}} unit}
+
+test validator-unit-result-checked {a declared -> unit is checked like any declared result: a body whose value is not unit is a TYPE error} -body {
+    list [rejection "fn log(x) -> unit:\n    1\nlog(1)\n"] \
+         [rejection "fn log(x) -> unit:\n    y = x\nlog(1)\n"] \
+         [rejection "fn log(x) -> unit:\n    if x > 1:\n        return 3\n    unit\nlog(1)\n"]
+} -match glob -result {{TYPE {function result does not prove declared type unit*}} {TYPE {function result does not prove declared type unit*}} {TYPE *}}
+
+test validator-unit-type-positions {"unit" names the unit type in every type position: parameters, applied and structural function types, fields} -body {
+    sourceAgree {struct Box:
+    value: unit
+
+fn f(x: unit, g: Fn{args: [unit], return: unit}) -> List[unit]:
+    [g(x), Box {value: x}.value]
+
+fn id(u: unit) -> unit:
+    u
+
+f(unit, id)
+}
+} -result {value {[unit, unit]}}
+
+test validator-unit-stays-a-value {"unit" is still the unit value everywhere but a type position, and no applied or qualified type} -body {
+    list [sourceAgree "x = unit\n\[x, unit\]\n"] \
+         [rejectionKind "unit = 1\n1\n"] \
+         [rejection "fn f(x) -> unit\[int\]:\n    unit\nf(1)\n"] \
+         [rejectionKind "fn f(x) -> unit::x:\n    unit\nf(1)\n"]
+} -result {{value {[unit, unit]}} SYNTAX {TYPE {unknown or invalid result type unit[int]: "unit" is not a type constructor}} SYNTAX}
+
+test validator-ast-outcome {a proof clause after "-> unit" is a validator clause (outcome normal), after any other result a predicate clause (outcome true)} -body {
+    set program [surface::parse "fn validate_m(s: str) -> unit proves s: M:\n    unit\nfn m?(s: str) -> bool proves s: M:\n    true\n"]
+    list [lmap node [dict get $program body] {dict get [lindex [dict get $node proves] 0] outcome}] \
+         [surface::formatAst $program]
+} -match glob -result {{normal true} {*fn validate_m (s:str) proves s: M*fn m? (s:str) proves s: M*}}
+
+# ===========================================================================
+# Validation of the proof clause: both shapes, the same rules
+
+test validator-proof-result-shapes {a proof-producing function declares -> bool (a predicate) or -> unit (a validator); any other result, or none, is PROOF-CLAUSE} -body {
+    list [rejection "refined type M = str\nfn validate_m(s: str) -> int proves s: M:\n    1\n1\n"] \
+         [rejection "refined type M = str\nfn validate_m(s: str) proves s: M:\n    unit\n1\n"] \
+         [rejectionKind "refined type M = str\nrefined type U = unit\nfn validate_m(s: str) -> U proves s: M:\n    unit\n1\n"] \
+         [rejection "refined type M = str\nfn validate_m(s: str) -> unit proves s: M:\n    unit\n1\n"] \
+         [rejection "refined type M = str\nfn m?(s: str) -> bool proves s: M:\n    true\n1\n"]
+} -result {{PROOF-CLAUSE {a proof-producing function must declare "-> bool" (a predicate: its true result is the proof) or "-> unit" (a validator: its normal completion is the proof), but "proves s: M" is on a function declared -> int}} {PROOF-CLAUSE {a proof-producing function must declare "-> bool" (a predicate: its true result is the proof) or "-> unit" (a validator: its normal completion is the proof), but "proves s: M" is on a function with no declared result type}} PROOF-CLAUSE accepted accepted}
+
+test validator-proof-clause-rules {a validator's clause is validated exactly like a predicate's: an ordinary parameter, a refinement type, a declared carrier parameter} -body {
+    list [rejection "refined type M = str\nfn validate_m(s: str) -> unit proves t: M:\n    unit\n1\n"] \
+         [rejection "refined type M = str\nfn validate_m(s: str, flags :x) -> unit proves x: M:\n    unit\n1\n"] \
+         [rejection "fn validate_m(s: str) -> unit proves s: str:\n    unit\n1\n"] \
+         [rejection "refined type M = str\nfn validate_m(n: int) -> unit proves n: M:\n    unit\n1\n"] \
+         [rejection "refined type M = str\nfn validate_m(s) -> unit proves s: M:\n    unit\n1\n"] \
+         [rejectionKind "refined type M = str\nfn validate_m(s: str) -> unit proves s: Nope:\n    unit\n1\n"]
+} -match glob -result {{PROOF-CLAUSE {*the function has no parameter "t" (its parameters: s)}} {PROOF-CLAUSE {*"x" is a flag, not an ordinary parameter}} {PROOF-CLAUSE {*is str, which is not a refinement type*}} {PROOF-CLAUSE {proof carrier mismatch: parameter "n" is declared int, but M refines str*}} {PROOF-CLAUSE {the proven parameter "s" must declare its type*}} PROOF-CLAUSE}
+
+test validator-proof-rule-shape {the resolved contract: outcome normal for a validator, 1 for a predicate; parameter index, binding and refinement type, no names} -body {
+    set hir [surface::compile "$prelude\n1\n" -warnings off]
+    lmap name {validate_mail validate_strict mail?} {
+        set proof [lindex [proofsOf $hir $name] 0]
+        list [dict get $proof outcome] [dict get $proof param] \
+             [expr {[dict get $proof binding] eq [lindex [hir::get $hir [hir::get $hir [lindex [hirFind $hir bind $name] 0] value] params] 0]}] \
+             [hir::types::show [dict get $proof fact]]
+    }
+} -result {{normal 0 1 {str[Mail]}} {normal 0 1 {str[Strict]}} {1 0 1 {str[Mail]}}}
+
+test validator-predicate-is-no-validator {a predicate's call completing proves nothing: only its true result does} -body {
+    rejectionKind "$prelude\nfn use(s: str) -> int:\n    mail?(s)\n    send(s)\nuse(\"abcd\")\n"
+} -result TYPE
+
+test validator-not-a-condition {a validator's call is a unit, not a Boolean: as an if condition it raises NOT-BOOLEAN on every backend, and its contract records no branch facts} -body {
+    set source "$prelude\nfn use(s: str) -> int:\n    if validate_any_mail(s):\n        1\n    else:\n        0\nuse(\"abcd\")\n"
+    set hir [surface::compile $source -warnings off]
+    list [lrange [sourceAgree $source] 0 1] [hir::get $hir [lindex [hirFind $hir if] end] refinements]
+} -result {{error {CORE SEMANTIC NOT-BOOLEAN}} {1 {} 0 {}}}
+
+test validator-no-implicit-strengthening {without a validator call, a carrier value is still no refinement; the diagnostic names both proofs} -body {
+    rejection "$prelude\nfn use(s: str) -> int:\n    send(s)\nuse(\"abcd\")\n"
+} -result {TYPE {argument for parameter "m" cannot be proven to satisfy str[Mail] (argument type: str); expected Mail but found str: a refinement proof is required (a str value becomes Mail only where one of its owner's proof-producing functions has proven it: a predicate returned true for it, or a validator completed normally for it; there is no implicit conversion)}}
+
+# ===========================================================================
+# Facts after a normally completing call: statements, bindings, method sugar
+
+test validator-statement-call {after a statement call completes, the argument is proven for the rest of the body} -body {
+    sourceAgree [withTop "fn use(s: str) -> int errors Invalid:
+    validate_mail(s)
+    send(s) + send(s)
+" {[top("abcd"), top("ab")]}]
+} -result {value {[8, -1]}}
+
+test validator-not-before-call {before the call, nothing is proven} -body {
+    rejectionKind "$prelude\nfn use(s: str) -> int errors Invalid:\n    n = send(s)\n    validate_mail(s)\n    n\n1\n"
+} -result TYPE
+
+test validator-binding-call {a bound validator call proves the same; the binding is an ordinary unit} -body {
+    sourceAgree [withTop "fn use(s: str) -> int errors Invalid:
+    done = validate_mail(s)
+    if done == unit:
+        send(s)
+    else:
+        0
+" {[top("abcde"), top("a")]}]
+} -result {value {[5, -1]}}
+
+test validator-method-sugar {method sugar s.validate_mail() is the same call and proves the same} -body {
+    sourceAgree [withTop "fn use(s: str) -> int errors Invalid:
+    s.validate_mail()
+    s.send()
+" {[top("abcd"), top("abc")]}]
+} -result {value {[4, -1]}}
+
+test validator-argument-order {a validator call as an argument proves its argument for the arguments evaluated after it, not before} -body {
+    list [sourceAgree [withTop "fn use(s: str) -> int errors Invalid:
+    pair(validate_mail(s), send(s))
+" {[top("abcd"), top("ab")]}]] \
+         [rejectionKind "$prelude\nfn swap(n: int, u: unit) -> int:\n    n\nfn use(s: str) -> int errors Invalid:\n    swap(send(s), validate_mail(s))\n1\n"]
+} -result {{value {[4, -1]}} TYPE}
+
+test validator-chain {a validator may require a refinement another validator proved: Strict from a Mail} -body {
+    list [sourceAgree [withTop "fn use(s: str) -> int errors Invalid:
+    validate_mail(s)
+    validate_strict(s)
+    send_strict(s) + send(s)
+" {[top("abcdef"), top("abcd"), top("a")]}]] \
+         [rejectionKind "$prelude\nfn use(s: str) -> int errors Invalid:\n    validate_strict(s)\n    1\n1\n"]
+} -result {{value {[606, -1, -1]}} TYPE}
+
+test validator-infallible {a validator without an errors clause is the owner's prerogative: its every call proves} -body {
+    sourceAgree "$prelude\nfn use(s: str) -> int:\n    validate_any_mail(s)\n    send(s)\n\[use(\"a\"), use(\"\")\]\n"
+} -result {value {[1, 0]}}
+
+test validator-last-statement {a validator call as a function's last statement: the function completes with unit, nothing is after it} -body {
+    sourceAgree "$prelude
+fn check(s: str) -> unit errors Invalid:
+    validate_mail(s)
+
+fn use(s: str) -> int:
+    r = check(s):
+        on Invalid:
+            return -1
+    if r == unit:
+        1
+    else:
+        0
+
+\[use(\"abcd\"), use(\"ab\")\]
+"
+} -result {value {[1, -1]}}
+
+test validator-callee-proves-nothing-for-caller {a wrapper that validates its parameter proves nothing for its caller: the fact is about the wrapper's own path} -body {
+    rejectionKind "$prelude\nfn check(s: str) -> unit errors Invalid:\n    validate_mail(s)\nfn use(s: str) -> int errors Invalid:\n    check(s)\n    send(s)\n1\n"
+} -result TYPE
+
+test validator-closure-after-call {a function created after the call sees the fact; one created before does not} -body {
+    list [sourceAgree [withTop "fn use(s: str) -> int errors Invalid:
+    validate_mail(s)
+    fn later() -> int:
+        send(s)
+    later()
+" {[top("abcd"), top("a")]}]] \
+         [rejectionKind "$prelude\nfn use(s: str) -> int errors Invalid:\n    fn earlier() -> int:\n        send(s)\n    validate_mail(s)\n    earlier()\n1\n"]
+} -result {{value {[4, -1]}} TYPE}
+
+test validator-contract-inference {an untyped parameter that is validated before a refinement use requires only the validator's carrier of its callers} -body {
+    sourceAgree [withTop "fn relay(x) -> int errors Invalid:
+    validate_mail(x)
+    send(x)
+
+fn use(s: str) -> int errors Invalid:
+    relay(s)
+" {[top("abcd"), top("a")]}]
+} -result {value {[4, -1]}}
+
+# ===========================================================================
+# Branches and joins
+
+test validator-inside-branch {a fact established in a branch holds in that branch} -body {
+    sourceAgree [withTop "fn use(s: str) -> int errors Invalid:
+    if str::length(s) > 1:
+        validate_mail(s)
+        send(s)
+    else:
+        0
+" {[top("abcd"), top("a"), top("ab")]}]
+} -result {value {[4, 0, -1]}}
+
+test validator-join-one-branch {a fact established in one branch only does not survive the join (else-less if included)} -body {
+    list [rejectionKind "$prelude\nfn use(s: str, c: bool) -> int errors Invalid:\n    if c:\n        validate_mail(s)\n    send(s)\n1\n"] \
+         [rejectionKind "$prelude\nfn use(s: str, c: bool) -> int errors Invalid:\n    if c:\n        validate_mail(s)\n    else:\n        unit\n    send(s)\n1\n"]
+} -result {TYPE TYPE}
+
+test validator-join-all-branches {a fact survives the join when every branch that completes normally proves it (by any validator or predicate)} -body {
+    sourceAgree [withTop "fn use(s: str) -> int errors Invalid:
+    if str::length(s) > 5:
+        validate_long_mail(s)
+    else:
+        validate_mail(s)
+    send(s)
+
+fn both(s: str) -> int:
+    if str::length(s) > 5:
+        validate_any_mail(s)
+    else:
+        if not mail?(s):
+            return -2
+    send(s)
+" {[top("abcdefg"), top("abcd"), top("ab"), both("abcdefg"), both("abcd"), both("ab")]}]
+} -result {value {[7, 4, -1, 7, 4, -2]}}
+
+test validator-join-other-branch-leaves {a branch that returns, fails or breaks contributes nothing to the join} -body {
+    sourceAgree [withTop "fn use(s: str) -> int errors Invalid:
+    if str::length(s) > 2:
+        validate_mail(s)
+    else:
+        return 0
+    send(s)
+
+fn fails(s: str) -> int errors Invalid:
+    if str::length(s) > 2:
+        validate_mail(s)
+    else:
+        fail Invalid
+    send(s)
+
+fn breaks(xs: List\[str\]) -> int:
+    n = 0
+    total = loop x in xs:
+        if str::length(x) > 3:
+            validate_any_mail(x)
+        else:
+            break
+        send(x)
+    list::length(total)
+" {[top("abcd"), top("ab"), top("abc"), breaks(["abcd", "ab", "abcde"])]}]
+} -result {value {[4, 0, -1, 1]}}
+
+# ===========================================================================
+# Loops
+
+test validator-loop-body {in a loop body the fact holds for the rest of that iteration's body; not before the call, and not after the loop} -body {
+    list [sourceAgree [withTop "fn use(s: str) -> int errors Invalid:
+    sizes = loop x in \[s, str::concat(s, \"!\")\]:
+        validate_mail(x)
+        send(x)
+    list::length(sizes)
+" {[top("abcd"), top("abc"), top("a")]}]] \
+         [rejectionKind "$prelude\nfn use(s: str) -> int errors Invalid:\n    loop i from 0 to 2:\n        validate_mail(s)\n    send(s)\n1\n"] \
+         [rejectionKind "$prelude\nfn use(xs: List\[str\]) -> int errors Invalid:\n    sizes = loop x in xs:\n        n = send(x)\n        validate_mail(x)\n        n\n    1\n1\n"] \
+         [rejectionKind "$prelude\nfn use(s: str, n: int) -> int errors Invalid:\n    loop:\n        if n > 0:\n            break\n        validate_mail(s)\n        break\n    send(s)\n1\n"]
+} -result {{value {[2, -1, -1]}} TYPE TYPE TYPE}
+
+test validator-loop-handler-continue {a handler that continues the loop contributes nothing: the rest of the body is proven} -body {
+    sourceAgree "$prelude
+fn use(xs: List\[str\]) -> List\[int\]:
+    loop x in xs:
+        validate_mail(x):
+            on Invalid:
+                continue
+        send(x)
+
+use(\[\"abcd\", \"ab\", \"abcdef\"\])
+"
+} -result {value {[4, 6]}}
+
+# ===========================================================================
+# Handled calls: the call's normal completion met with each handler
+
+test validator-handled-return {a handler that returns contributes nothing: after the handled call the argument is proven} -body {
+    sourceAgree "$prelude
+fn use(s: str) -> int:
+    validate_mail(s):
+        on Invalid:
+            return -1
+    send(s)
+
+fn bound(s: str) -> int:
+    done = validate_mail(s):
+        on Invalid:
+            return -2
+    send(s)
+
+\[use(\"abcd\"), use(\"ab\"), bound(\"abcde\"), bound(\"a\")\]
+"
+} -result {value {[4, -1, 5, -2]}}
+
+test validator-handled-fail {a handler that fails contributes nothing either} -body {
+    sourceAgree "$prelude
+fn use(s: str) -> int errors Other:
+    validate_mail(s):
+        on Invalid:
+            fail Other
+    send(s)
+
+fn top2(s: str) -> int:
+    r = use(s):
+        on Other:
+            -3
+    r
+
+\[top2(\"abcd\"), top2(\"ab\")\]
+"
+} -result {value {[4, -3]}}
+
+test validator-handled-completes-unproven {a handler that completes normally without proving kills the fact} -body {
+    list [rejectionKind "$prelude\nfn use(s: str) -> int:\n    validate_mail(s):\n        on Invalid:\n            unit\n    send(s)\nuse(\"abcd\")\n"] \
+         [rejectionKind "$prelude\nfn use(s: str) -> int:\n    done = validate_mail(s):\n        on Invalid:\n            unit\n    send(s)\nuse(\"abcd\")\n"]
+} -result {TYPE TYPE}
+
+test validator-handled-completes-reproven {a handler that completes normally after proving the same refinement keeps the fact: by another validator, or a predicate guard} -body {
+    sourceAgree "$prelude
+fn fallback(s: str) -> int errors Invalid:
+    validate_long_mail(s):
+        on Invalid:
+            validate_mail(s)
+    send(s)
+
+fn guarded(s: str) -> int:
+    validate_long_mail(s):
+        on Invalid:
+            if not mail?(s):
+                return -2
+            unit
+    send(s)
+
+fn top2(s: str) -> int:
+    r = fallback(s):
+        on Invalid:
+            -1
+    r
+
+\[top2(\"abcdefg\"), top2(\"abcd\"), top2(\"ab\"), guarded(\"abcdefg\"), guarded(\"abcd\"), guarded(\"ab\")\]
+"
+} -result {value {[7, 4, -1, 7, 4, -2]}}
+
+test validator-handler-does-not-see-proof {inside a handler the failed call's proof does not hold} -body {
+    rejection "$prelude\nfn use(s: str) -> int:\n    validate_mail(s):\n        on Invalid:\n            return send(s)\n    0\nuse(\"abcd\")\n"
+} -match glob -result {TYPE {argument for parameter "m" cannot be proven*}}
+
+test validator-handled-argument-failure {a handler also runs when a validator argument of the handled call fails, so it does not see that argument's proof either} -body {
+    list [sourceAgree [withTop "fn use(s: str) -> int errors Invalid:
+    v = pair(validate_mail(s), send(s)):
+        on Invalid:
+            -7
+    v
+" {[top("abcd"), top("ab")]}]] \
+         [rejectionKind "$prelude\nfn use(s: str) -> int errors Invalid:\n    v = pair(validate_mail(s), send(s)):\n        on Invalid:\n            send(s)\n    v\n1\n"] \
+         [rejectionKind "$prelude\nfn use(s: str) -> int errors Invalid:\n    v = pair(validate_mail(s), send(s)):\n        on Invalid:\n            -7\n    send(s)\n1\n"]
+} -result {{value {[4, -7]}} TYPE TYPE}
+
+test validator-handled-several-handlers {with several handlers, the fact survives when each handler that completes proves it} -body {
+    list [sourceAgree "$prelude
+fn validate_both(s: str) -> unit proves s: Mail errors Invalid, Other:
+    if str::length(s) < 4:
+        fail Invalid
+    if str::length(s) > 8:
+        fail Other
+    unit
+
+fn use(s: str) -> int:
+    validate_both(s):
+        on Invalid:
+            return -1
+        on Other:
+            validate_any_mail(s)
+    send(s)
+
+\[use(\"abcd\"), use(\"ab\"), use(\"abcdefghij\")\]
+"] [rejectionKind "$prelude
+fn validate_both(s: str) -> unit proves s: Mail errors Invalid, Other:
+    if str::length(s) < 4:
+        fail Invalid
+    unit
+
+fn use(s: str) -> int:
+    validate_both(s):
+        on Invalid:
+            return -1
+        on Other:
+            unit
+    send(s)
+
+1
+"]
+} -result {{value {[4, -1, 10]}} TYPE}
+
+# ===========================================================================
+# Value identity: aliases, shadowing, non-references, callables
+
+test validator-alias-root {validating an immutable alias proves the value it aliases; a copy bound after the proof is proven} -body {
+    sourceAgree [withTop "fn use(s: str) -> int errors Invalid:
+    x = s
+    validate_mail(x)
+    y = s
+    send(s) + send(x) + send(y)
+" {[top("abcd"), top("a")]}]
+} -result {value {[12, -1]}}
+
+test validator-alias-bound-before {exactly as for a predicate's true edge, an alias bound before the proof keeps the type it was bound with} -body {
+    list [rejectionKind "$prelude\nfn use(s: str) -> int errors Invalid:\n    x = s\n    validate_mail(s)\n    send(x)\n1\n"] \
+         [rejectionKind "$prelude\nfn use(s: str) -> int:\n    x = s\n    if mail?(s):\n        send(x)\n    else:\n        0\n1\n"]
+} -result {TYPE TYPE}
+
+test validator-shadowing {facts belong to values, not spellings: a later binding of the same name is not proven} -body {
+    list [rejectionKind "$prelude\nfn use(s: str) -> int errors Invalid:\n    validate_mail(s)\n    if true:\n        s = \"x\"\n        send(s)\n    else:\n        0\n1\n"] \
+         [rejectionKind "$prelude\nfn use(s: str) -> int errors Invalid:\n    validate_mail(s)\n    fn inner(s: str) -> int:\n        send(s)\n    inner(\"x\")\n1\n"] \
+         [rejectionKind "$prelude\nfn use(s: str, t: str) -> int errors Invalid:\n    validate_mail(t)\n    send(s)\n1\n"]
+} -result {TYPE TYPE TYPE}
+
+test validator-non-reference-argument {an argument that is not a plain reference proves nothing} -body {
+    list [rejectionKind "$prelude\nfn id(x: str) -> str:\n    x\nfn use(s: str) -> int errors Invalid:\n    validate_mail(id(s))\n    send(s)\n1\n"] \
+         [rejectionKind "$prelude\nfn use(s: str) -> int errors Invalid:\n    validate_mail(str::concat(s, \"\"))\n    send(s)\n1\n"]
+} -result {TYPE TYPE}
+
+test validator-through-callables {a call through an Fn-typed value proves nothing; a call through an immutable alias of the function itself is a call of that function, as for predicates} -body {
+    list [rejectionKind "$prelude\nfn use(s: str, check: Fn{args: \[str\], return: unit, errors: \[Invalid\]}) -> int errors Invalid:\n    check(s)\n    send(s)\n1\n"] \
+         [sourceAgree [withTop "fn use(s: str) -> int errors Invalid:
+    check = validate_mail
+    check(s)
+    send(s)
+" {[top("abcd"), top("a")]}]]
+} -result {TYPE {value {[4, -1]}}}
+
+# ===========================================================================
+# Repeated calls: never decided
+
+test validator-repeat-never-decided {a repeated validator call on the same value is never decided or removed: it may fail} -body {
+    set source [withTop "fn use(s: str) -> int errors Invalid:
+    validate_mail(s)
+    validate_mail(s)
+    send(s)
+" {[top("abcd"), top("a")]}]
+    set hir [surface::compile $source -warnings off]
+    set nir [native::nir $hir -tiny-leaf-inline-opt 0]
+    regexp {func ([0-9]+) "validate_mail"} $nir -> id
+    list [knownOf $hir validate_mail] [llength [lsearch -all -regexp [nirBody $nir use] "= call\[a-z\]* $id "]] [sourceAgree $source]
+} -result {{{} {}} 2 {value {[4, -1]}}}
+
+test validator-does-not-decide-predicate {a validator's fact never decides a predicate call on the same value: a refinement fact is no exact result} -body {
+    set hir [surface::compile "$prelude
+fn use(s: str) -> int errors Invalid:
+    validate_mail(s)
+    if mail?(s):
+        send(s)
+    else:
+        0
+1
+" -warnings off]
+    knownOf $hir mail?
+} -result {{}}
+
+# ===========================================================================
+# Modules: the owner, qualified calls, method sugar
+
+# Runs SCRIPT with $::core::libraryDir pointed at a private library holding
+# module `path` (a refinement Path and its validator `validate`) and module
+# `client` (which imports path).
+proc withPathModule {script} {
+    set saved $::core::libraryDir
+    set dir [tcltest::makeDirectory refinement-validators-lib-[pid]-[incr ::validatorLibCounter]]
+    set ::core::libraryDir $dir
+    try {
+        foreach {name text} {
+            path {import str
+
+refined type Path = str
+error ContainsReservedCharacters
+error TooLong
+
+fn validate(v: str) -> unit proves v: Path errors ContainsReservedCharacters, TooLong:
+    n = str::length(v)
+    if n > 12:
+        fail TooLong
+    loop i from 0 to n:
+        if str::substring(v, i, i + 1) == ":":
+            fail ContainsReservedCharacters
+    unit
+
+fn open(p: Path) -> int:
+    str::length(p)
+}
+            client {import path
+import type path::Path
+
+fn validate_fake(v: str) -> unit proves v: Path:
+    unit
+}
+        } {
+            set channel [open [file join $dir $name.bot] w]
+            fconfigure $channel -encoding utf-8
+            puts -nonewline $channel $text
+            close $channel
+        }
+        uplevel 1 $script
+    } finally {
+        set ::core::libraryDir $saved
+        tcltest::removeDirectory [file tail $dir]
+    }
+}
+set ::validatorLibCounter 0
+
+test validator-module-qualified {a module's validator called qualified (path::validate(p)) proves the module's refinement for the caller; method sugar too} -body {
+    withPathModule {
+        sourceAgree {import path
+import type path::Path
+import str
+
+fn measure(p: Path) -> int:
+    str::length(p)
+
+fn use(p: str) -> int:
+    path::validate(p):
+        on ContainsReservedCharacters:
+            return -1
+        on TooLong:
+            return -2
+    measure(p) + path::open(p)
+
+fn sugar(p: str) -> int:
+    p.validate():
+        on ContainsReservedCharacters:
+            return -1
+        on TooLong:
+            return -2
+    measure(p)
+
+[use("a/b"), use("a:b"), use("abcdefghijklmnop"), sugar("xy")]
+}
+    }
+} -result {value {[6, -1, -2, 2]}}
+
+test validator-mint-authority {only the refinement's owner may declare a validator of it: neither an importing module nor the entry program} -body {
+    withPathModule {
+        list [rejection "import client\n1\n"] \
+             [rejectionKind "import path\nimport type path::Path\nfn validate_fake(v: str) -> unit proves v: Path:\n    unit\n1\n"]
+    }
+} -match glob -result {{REFINEMENT-MINT-AUTHORITY {module "client" cannot declare a proof of refinement path::Path: only its owning module "path" may mint it*}} REFINEMENT-MINT-AUTHORITY}
+
+# ===========================================================================
+# HIR text and representation
+
+set hirTextProgram {refined type Positive = int
+error NotPositive
+
+fn validate_positive(n: int) -> unit proves n: Positive errors NotPositive:
+    if n <= 0:
+        fail NotPositive
+    unit
+
+fn need(p: Positive) -> int:
+    p
+
+fn f(n: int) -> int:
+    validate_positive(n):
+        on NotPositive:
+            return 0
+    need(n)
+
+[f(5), f(-3)]
+}
+
+test validator-hir-text {HIR text shows a validator's contract after "declares unit", the proven reference after the call, and reads back to the same text and contract} -body {
+    set hir [surface::compile $hirTextProgram -warnings off]
+    set text [hir::format $hir]
+    set back [hir::parse $text]
+    list [regexp {block s[0-9]+ \(b[0-9]+ n:int\) [^\n]*declares unit proves b[0-9]+ n: int\[Positive\] errors NotPositive} $text] \
+         [regexp {call block\(e[0-9]+\) : int\n *e[0-9]+ ref b[0-9]+ need : [^\n]*\n *e[0-9]+ ref b[0-9]+ n : int\[Positive\]} $text] \
+         [expr {[hir::format $back] eq $text}] \
+         [dict get [lindex [proofsOf $back validate_positive] 0] outcome]
+} -result {1 1 1 normal}
+
+test validator-hir-round-trip-runs {a program read back from HIR text keeps its validator proofs and runs the same on every backend} -body {
+    set hir [hir::parse [hir::format [surface::compile $hirTextProgram -warnings off]]]
+    lmap b {interp compile cranelift-generic cranelift} {lrange [outcomeUnderHir $b $hir] 0 1}
+} -result [lrepeat 4 {value {[5, 0]}}]
+
+# A validator-proven program and the same program over the carrier, with a
+# non-proving check of the same body.
+proc representationPair {} {
+    return [lmap variant {refined carrier} {
+        set check [expr {$variant eq "refined" ? "validate_mail" : "check_mail"}]
+        set type [expr {$variant eq "refined" ? "Mail" : "str"}]
+        string cat $::prelude "
+fn check_mail(s: str) -> unit errors Invalid:
+    if str::length(s) < 4:
+        fail Invalid
+    unit
+
+fn consume(m: $type) -> int:
+    str::length(m)
+
+fn example(s: str) -> int errors Invalid:
+    ${check}(s)
+    consume(s)
+
+fn run(s: str, n: int, acc: int) -> int:
+    if n == 0:
+        return acc
+    v = example(s):
+        on Invalid:
+            -1
+    run(s, n - 1, acc + v)
+
+run(\"abcd\", 20, 0)
+"
+    }]
+}
+
+test validator-representation-unchanged {a validator changes nothing at run time: after the call the parameter's own register is passed on, and the program's NIR and allocations are the carrier program's} -body {
+    set results [lmap source [representationPair] {
+        set hir [surface::compile $source -warnings off]
+        set report [native::allocationReport $hir summary]
+        list [nirBody [native::nir $hir -tiny-leaf-inline-opt 0] example] \
+             [list [dict get $report total allocations] [dict get $report total allocatedBytes]] \
+             [lrange [outcomeUnderHir cranelift $hir] 0 1]
+    }]
+    lassign $results refined carrier
+    list [expr {$refined eq $carrier}] \
+         [regexp {= call[a-z]* [0-9]+ %0\s*$} [lindex $refined 0 end-1]] \
+         [lsearch -all -inline -regexp [lindex $refined 0] {refine|wrap|tag|alloc|new }] \
+         [lindex $refined 2]
+} -result {1 1 {} {value 80}}
+
+# ===========================================================================
+# Fuzzing (audit/refinement-values/tools/fuzz.tcl): a bounded run of the
+# refinement fuzzer with validators on every backend; a longer one is
+# `tclsh9.0 audit/refinement-values/tools/fuzz.tcl -seed 1 -count 600`.
+
+test validator-fuzz-smoke {generated programs with predicates and validators (statement, bound, method, handled and argument calls, branches, loops): the oracle's acceptance, decisions and values} -body {
+    set fuzz [file join $::projectRoot audit refinement-values tools fuzz.tcl]
+    exec [info nameofexecutable] $fuzz -seed 11 -count 30 2>@1
+} -match regexp -result {^seed 11: 30 programs, [0-9]+ accepted, [0-9]+ rejected, [0-9]+ predicate calls in accepted programs \([0-9]+ decided\), [1-9][0-9]* validator calls \(never decided\), 0 failures$}
+
+cleanupTests
