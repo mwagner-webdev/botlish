@@ -784,6 +784,22 @@ was added or removed.
 * The GC-stress job (`BOTLISH_NATIVE_GC_STRESS=1`, CI on push to `main`) was not
   run locally: nothing under `native/` changed, and the pass runs before any
   backend and changes no HIR (pinned).
+* **Second snapshot: the tree merged with `origin/main` `64659f7`** (merge
+  `cb939a9`). While this milestone ran, `main` gained the refinement-values
+  milestone (REFINEMENT-VALUES.md: `refined type` and `proves` contracts, new
+  parser, HIR and native code, a rewritten `lib/web.bot`, a new
+  `examples/refinement/` program, and test files added and removed). The only
+  textual conflict was AGENTS.md, where both sides appended independent text
+  (both kept). Re-run on the merged tree: **`interp` 6090 tests, 6090 passed;
+  `compile` 6090, 6086 passed, 4 skipped, 0 failed; native coverage 6090 tests
+  (2428 native, 3535 independent, 67 passed-partial, 60 unsupported), 0
+  failed**; the four warning test files pass on `cranelift-generic` too (99,
+  81, 145, 149). The corpus audit on the merged tree is identical to the
+  committed `d9a71f5` audit apart from its commit header (the same single
+  finding, the same census and merge check): `main`'s new library and example
+  code carries no `SAME-FAILURE` finding, and its new constructs pass through
+  the pass without effect. CI's native example step is unchanged (exit 0, the
+  same 314 stderr lines, no `SAME-FAILURE` line).
 
 ## Known limitations
 
@@ -867,8 +883,9 @@ payload-equality machinery, and any new CLI option or `BOTLISH_WARNINGS` value.
   warnings section carries the facts.
 * **Branch.** `AGENTS.md` says to push finished work to `main`. This session was
   assigned a development branch and told not to push elsewhere without
-  permission, so the work was pushed to that branch, as milestone 3's was
-  first.
+  permission, so the work was pushed to that branch first, as milestone 3's
+  was. It was merged into `main` when asked to, after merging `origin/main`
+  (`64659f7`) into it and re-running the regression (above).
 
 ## Required questions
 
