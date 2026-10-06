@@ -31,8 +31,9 @@
 # -traits prints the program's traits (TRAITS.md, hir::traits::report): each
 # trait and its requirements, every conformance the program relies on (which
 # concrete witness satisfies which trait, through which implementation of
-# each requirement) and every trait-polymorphic function with the
-# specializations it was replaced by.
+# each requirement), every concrete type the program declares against every
+# trait (satisfied through which implementations, or why not) and every
+# trait-polymorphic function with the specializations it was replaced by.
 # -emit-nir prints the native backend IR the program lowers to
 # (native/lower.tcl), and -emit-clif the Cranelift IR of every function (both
 # need no -backend cranelift; with -backend cranelift-generic, or

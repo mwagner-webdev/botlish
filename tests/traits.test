@@ -1009,8 +1009,8 @@ found:
     fn b(P) -> int   (at <input>:8:1)
 return type int does not satisfy required str}
 
-test trait-report {main.tcl -traits: traits, conformances with their implementations, and specializations} -body {
-    set hir [moduleHir $principalLib "${principalHeader}\[describe(Person {value: \"Alice\"}), describe(services::make_service(\"db\"))\]\n"]
+test trait-report {main.tcl -traits: traits, the conformances the program uses with their implementations, every declared type against every trait (how or why not), and specializations} -body {
+    set hir [moduleHir $principalLib "${principalHeader}struct Thing:\n    v: int\n\[describe(Person {value: \"Alice\"}), describe(services::make_service(\"db\"))\]\n"]
     hir::traits::report $hir
 } -result {trait ui::named::Named (owner: ui::named)
     fn name(value: ui::named::Named) -> str
@@ -1019,6 +1019,10 @@ conformance:
         name -> name
     services::Service satisfies ui::named::Named
         name -> services::name
+declared types:
+    services::Service satisfies ui::named::Named (name -> services::name)
+    Person satisfies ui::named::Named (name -> name)
+    Thing does not satisfy ui::named::Named: parameter 1 requires Person, which does not admit the required Thing
 trait-polymorphic functions:
     describe (value: ui::named::Named) -> str
         describe<Person>   value = Person

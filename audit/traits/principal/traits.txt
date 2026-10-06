@@ -5,6 +5,9 @@ conformance:
         name -> name
     services::Service satisfies ui::named::Named
         name -> services::name
+declared types:
+    services::Service satisfies ui::named::Named (name -> services::name)
+    Person satisfies ui::named::Named (name -> name)
 trait-polymorphic functions:
     describe (value: ui::named::Named) -> str
         describe<Person>   value = Person

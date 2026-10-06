@@ -503,7 +503,10 @@ visible candidates.
   programs' HIR text does not round-trip, for every program: a pre-existing
   limitation of HIR text).
 * **CLI**: `tclsh9.0 main.tcl -traits FILE` prints the traits, each
-  conformance the program uses with its implementation mapping, and each
+  conformance the program uses with its implementation mapping, every
+  concrete type the program declares (structs, refinements, integer domains
+  of every unit) against every trait -- "does `model::Person` satisfy
+  `ui::Named`? through which implementations? if not, why?" -- and each
   trait-polymorphic function's specializations
   (audit/traits/principal/traits.txt).
 * **APIs**: `hir::traits::satisfies TYPE TRAIT` and `hir::traits::explain

@@ -1989,6 +1989,36 @@ proc hir::traits::report {hir} {
             }
         }
     }
+    # Every concrete type the program declares (a struct, refinement or
+    # integer domain of any unit) against every trait: does it satisfy it,
+    # through which implementations, or why not.
+    set declaredTypes {}
+    if {[dict exists $hir sourceTypes]} {
+        foreach t [dict get $hir sourceTypes] {
+            if {[dict exists $t kind] && [dict get $t kind] eq "struct"} {
+                lappend declaredTypes [list nstruct [dict get $t id]]
+            } elseif {![catch {core::type::normalize [dict get $t name]} type]} {
+                lappend declaredTypes $type
+            }
+        }
+    }
+    if {$declaredTypes ne {}} {
+        lappend lines "declared types:"
+        foreach type $declaredTypes {
+            foreach entry [dict get $hir traits] {
+                set id [dict get $entry id]
+                set s [satisfies $type $id]
+                if {[dict get $s ok]} {
+                    lappend lines "    [hir::types::show $type] satisfies $id ([join [lmap {name impl} [dict get $s impls] {
+                        format {%s -> %s} $name [expr {[dict get $impl kind] eq "native" ? [dict get $impl name]
+                            : [QualifiedName [dict get $impl unit] [dict get $impl name]]}]
+                    }] {, }])"
+                } else {
+                    lappend lines "    [hir::types::show $type] does not satisfy $id: [dict get $s reason]"
+                }
+            }
+        }
+    }
     if {[dict exists $hir traitFunctions]} {
         lappend lines "trait-polymorphic functions:"
         dict for {name fn} [dict get $hir traitFunctions] {
