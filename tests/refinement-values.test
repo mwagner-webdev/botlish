@@ -553,6 +553,23 @@ test refinement-rebinding {facts belong to values, not spellings: a shadowing bi
 # ===========================================================================
 # 26-29. Returns, fields, parameters
 
+test refinement-rebinding-local {a local binding that shadows a proven name is a different value: neither proven nor decided} -body {
+    set decided "$prelude
+fn f(s: str) -> int:
+    if mail?(s):
+        s = \"xy\"
+        if mail?(s):
+            1
+        else:
+            2
+    else:
+        0
+f(\"abcd\")
+"
+    list [rejectionKind "$prelude\nfn f(s: str) -> int:\n    if mail?(s):\n        s = \"x\"\n        send(s)\n    else:\n        0\nf(\"abcd\")\n"] \
+         [knownOf [surface::compile $decided -warnings off] mail?] [sourceAgree $decided]
+} -result {TYPE {{} {}} {value 2}}
+
 test refinement-return {a function may return a refinement it has proven, with no constructor} -body {
     sourceAgree "$prelude
 error Invalid
