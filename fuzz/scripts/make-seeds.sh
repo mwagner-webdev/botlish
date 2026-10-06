@@ -83,7 +83,7 @@ NUM_SAMPLES=('0' '1' '-1' '42' '9223372036854775807' '-9223372036854775808'
              '9223372036854775808' '007' '0x10' '3.14' '1e9')
 for t in matmul 01-arithmetic 02-recursion 04-branch-value 05-shadowing \
          07-loop-break 08-return 11-boolean-operators 12-if-value \
-         01-scopes 03-recursion 04-refinement 05-control 06-refined-strings; do
+         01-scopes 03-recursion 04-refinement 05-control; do
     i=0
     for s in "${NUM_SAMPLES[@]}"; do
         i=$((i+1)); seed "$t" "numeric-sample-$i" "$s"

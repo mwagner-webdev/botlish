@@ -76,7 +76,10 @@
 #              LinuxIO)`; empty if none; the last section -- CONTEXTS.md),
 #              paramsSpan (from "(" to the end of the body: the function
 #              literal), errors ({NAME SPAN} pairs, from the function's own
-#              "errors E1, E2" clause, empty if none), body (suite),
+#              "errors E1, E2" clause, empty if none), proves (the proof
+#              clauses, REFINEMENT-VALUES.md: a list of {outcome true param
+#              NAME paramSpan SPAN type TYPE typeSpan SPAN span SPAN} dicts,
+#              at most one, empty if none), body (suite),
 #              nomethod (1 for `nomethod fn NAME(...)`, else 0), nomethodSpan
 #              (the modifier word's span, or "") -- a property of the one
 #              declaration: its author's declaration that it is never the
@@ -113,12 +116,16 @@
 #   return     value (an expression, an if, or "")
 #   break      value (an expression, an if, or "")
 #   continue
-#   typedecl   name, nameSpan, parent, parentSpan, domain -- a top-level
-#              bounded-integer-refinement declaration (surface/parser.tcl's
-#              TypeDecl; see hir/sourcetypes.tcl for what it means). `domain`
-#              is {kind interval lo LO loSpan .. hi HI hiSpan .. span ..} or
-#              {kind exact values {V...} spans {SPAN...} span ..}, LO/HI/V
-#              decimal text (a leading "-" allowed).
+#   typedecl   name, nameSpan, form, and then, for form `domain`: parent,
+#              parentSpan, domain -- a top-level bounded-integer-refinement
+#              declaration (surface/parser.tcl's TypeDecl; see
+#              hir/sourcetypes.tcl for what it means). `domain` is {kind
+#              interval lo LO loSpan .. hi HI hiSpan .. span ..} or {kind
+#              exact values {V...} spans {SPAN...} span ..}, LO/HI/V decimal
+#              text (a leading "-" allowed). For form `refined` ("refined
+#              type NAME = CARRIER", REFINEMENT-VALUES.md): refinedSpan (the
+#              modifier word), carrier (a surface::parser::TypeExpr result)
+#              and carrierSpan -- a nominal refinement of the carrier type.
 #   structdecl name, nameSpan, fields ({name nameSpan type typeSpan} dicts in
 #              declared order; TYPE as surface::parser::TypeExpr returns it),
 #              opaque (1 for `opaque struct NAME:`, else 0), opaqueSpan (the
@@ -693,6 +700,10 @@ proc surface::ast::Statement {node indent show linesVar} {
     set at [At $node $show]
     switch -- [dict get $node kind] {
         typedecl {
+            if {[dict exists $node form] && [dict get $node form] eq "refined"} {
+                lappend lines "${pad}refined type [dict get $node name] = [showType [dict get $node carrier]]$at"
+                return
+            }
             lappend lines "${pad}type [dict get $node name] = [dict get $node parent] in [DomainText [dict get $node domain]]$at"
             return
         }
@@ -736,6 +747,11 @@ proc surface::ast::Statement {node indent show linesVar} {
             }
             set modifier [expr {[dict exists $node nomethod] && [dict get $node nomethod] ? "nomethod " : ""}]
             set line "${pad}${modifier}fn [dict get $node name] ([join $params { }])"
+            if {[dict exists $node proves]} {
+                foreach clause [dict get $node proves] {
+                    append line " proves [dict get $clause param]: [showType [dict get $clause type]]"
+                }
+            }
             if {[dict get $node errors] ne {}} {
                 append line " errors [join [lmap pair [dict get $node errors] {lindex $pair 0}] {, }]"
             }

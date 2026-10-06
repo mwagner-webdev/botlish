@@ -168,7 +168,7 @@ proc hir::resolve::IsModuleScope {hirVar s} {
 }
 
 proc hir::resolve::RootNames {} {
-    return [concat [core::native::names] [core::native::aliasNames] {true false unit}]
+    return [concat [core::native::names] {true false unit}]
 }
 
 proc hir::resolve::NewScope {hirVar kind parent invocation owner origin} {
@@ -217,18 +217,6 @@ proc hir::resolve::RootBinding {hirVar root name} {
     upvar 1 $hirVar hir
     if {[dict exists $hir scopes $root names $name]} {
         return [dict get $hir scopes $root names $name]
-    }
-    # A native alias (core::native::alias, e.g. Emailish? -> emailish?)
-    # denotes the exact same predicate identity as its canonical spelling,
-    # never a second binding: this reference reuses the canonical name's own
-    # root Binding/Symbol (creating it first if this is the first reference
-    # to either spelling), and is memoized under its own alias spelling too,
-    # so a later reference to it finds the shared binding directly. No new
-    # Binding, Symbol, or runtime value is ever created for the alias name.
-    if {$name ni {true false unit} && [core::native::isAlias $name]} {
-        set b [RootBinding hir $root [core::native::canonicalName $name]]
-        dict set hir scopes $root names $name $b
-        return $b
     }
     set b [NewBinding hir $name root $root {builtin root}]
     set y [hir::NewId hir symbol]
@@ -558,6 +546,96 @@ proc hir::resolve::ResolveTypeExpr {typeExpr {ns ""}} {
     return [hir::types::resolveApplication $name [list [ResolveTypeExpr $arg $ns]]]
 }
 
+# The resolved proof contract of block E (REFINEMENT-VALUES.md): its syntax
+# NODE's proof clauses (hir::syntax::withProofs), each validated and turned
+# into the generic rule {outcome 1 param INDEX binding B fact TYPE} -- "when
+# a call of E returns true, its argument INDEX satisfies the refinement
+# TYPE". PARAMS are E's parameter bindings (ordinary ones first, then
+# flags), DECLAREDTYPES their resolved declared types, DECLARED the resolved
+# declared result. A clause that fails validation is diagnosed at its own
+# origin and contributes no rule:
+#
+#   PROOF-CLAUSE               the clause names no ordinary parameter, its
+#                              type is not a refinement type, the parameter's
+#                              declared type does not forget to the
+#                              refinement's carrier, or the function does not
+#                              declare `-> bool`
+#   REFINEMENT-MINT-AUTHORITY  the function is not in the refinement's
+#                              owning module (its exact declaring namespace;
+#                              no import, parent or child grants it)
+#
+# The parameter must be *declared* of the carrier (or of a type that forgets
+# to it): the clause adds a fact to a value its callers have already proven
+# to be a carrier value, so a refinement of a refinement can only be minted
+# from an already-proven carrier refinement, never from the bare base kind.
+proc hir::resolve::ResolveProofs {hirVar e node params declaredTypes declared ctx} {
+    upvar 1 $hirVar hir
+    if {![dict exists $node proofs]} {
+        return {}
+    }
+    set ns [CtxNamespace $ctx]
+    set ordinary [lmap param [dict get $node params] {lindex $param 0}]
+    set rules {}
+    foreach clause [dict get $node proofs] {
+        set name [dict get $clause param]
+        set paramOrigin [dict get $clause paramOrigin]
+        set typeOrigin [dict get $clause typeOrigin]
+        set typeText [ShowTypeExpr [dict get $clause type]]
+        set index [lsearch -exact $ordinary $name]
+        if {$index < 0} {
+            set flags [expr {[dict exists $node flags] ? [lmap f [dict get $node flags] {lindex $f 0}] : {}}]
+            set contexts [expr {[dict exists $node contextParams] ? [lmap c [dict get $node contextParams] {lindex $c 0}] : {}}]
+            if {$name in $flags} {
+                set why "\"$name\" is a flag, not an ordinary parameter"
+            } elseif {$name in $contexts} {
+                set why "\"$name\" is a context parameter, not an ordinary parameter"
+            } else {
+                set why "the function has no parameter \"$name\" (its parameters: [expr {$ordinary eq {} ? "none" : [join $ordinary {, }]}])"
+            }
+            hir::DiagnoseAt hir PROOF-CLAUSE "proof clause \"proves $name: $typeText\" must name one of the function's ordinary parameters: $why" $e $paramOrigin
+            continue
+        }
+        if {[catch {ResolveTypeExpr [dict get $clause type] $ns} fact]} {
+            hir::DiagnoseAt hir PROOF-CLAUSE "unknown proven type $typeText in \"proves $name: $typeText\": $fact" $e $typeOrigin
+            continue
+        }
+        set refinement [core::type::refinementName $fact]
+        if {$refinement eq ""} {
+            hir::DiagnoseAt hir PROOF-CLAUSE [format {the proven type of "proves %s: %s" is %s, which is not a refinement type: a proof clause establishes a refinement declared with "refined type NAME = CARRIER"} \
+                $name $typeText [hir::types::show $fact]] $e $typeOrigin
+            continue
+        }
+        set meta [core::type::refinementOf $refinement]
+        set owner [dict get $meta owner]
+        if {$owner ne $ns} {
+            hir::DiagnoseAt hir REFINEMENT-MINT-AUTHORITY [format {%s cannot declare a proof of refinement %s: only its owning %s may mint it (no import, parent or child namespace grants that authority)} \
+                [expr {$ns eq "" ? "the entry program" : "module \"$ns\""}] $refinement \
+                [expr {$owner eq "" ? "entry program" : "module \"$owner\""}]] $e $typeOrigin
+            continue
+        }
+        set carrier [dict get $meta carrier]
+        set paramType [lindex $declaredTypes $index]
+        if {$paramType eq {}} {
+            hir::DiagnoseAt hir PROOF-CLAUSE [format {the proven parameter "%s" must declare its type: "proves %s: %s" refines a %s value, so write "%s: %s" (or a refinement that forgets to it)} \
+                $name $name $typeText [hir::types::show $carrier] $name [hir::types::show $carrier]] $e $paramOrigin
+            continue
+        }
+        if {![hir::types::subtype $paramType $carrier]} {
+            hir::DiagnoseAt hir PROOF-CLAUSE [format {proof carrier mismatch: parameter "%s" is declared %s, but %s refines %s, and a %s value does not forget to a %s (a proof can only strengthen what the parameter already is)} \
+                $name [hir::types::show $paramType] $refinement [hir::types::show $carrier] \
+                [hir::types::show $paramType] [hir::types::show $carrier]] $e $paramOrigin
+            continue
+        }
+        if {$declared ne "bool"} {
+            hir::DiagnoseAt hir PROOF-CLAUSE [format {a proof-producing function must declare "-> bool" (its true result is the proof), but "proves %s: %s" is on a function %s} \
+                $name $typeText [expr {$declared eq {} ? "with no declared result type" : "declared -> [hir::types::show $declared]"}]] $e $typeOrigin
+            continue
+        }
+        lappend rules [dict create outcome 1 param $index binding [lindex $params $index] fact $fact]
+    }
+    return $rules
+}
+
 # TYPEEXPR as canonical source text ("List[Small]"), for a diagnostic about
 # a type expression that failed to resolve (so there is no resolved type
 # to format with hir::types::show yet). Mirrors surface::ast::showType's
@@ -702,6 +780,10 @@ proc hir::resolve::Expr {hirVar node ctx} {
             }
             SetField hir $e declaredResult $declared
             SetField hir $e resultType ""
+            # A proof contract (REFINEMENT-VALUES.md), validated against the
+            # resolved parameters and result: the generic metadata every
+            # consumer reads (hir/refine.tcl), never a predicate's name.
+            SetField hir $e proofs [ResolveProofs hir $e $node $params $declaredParamTypes $declared $ctx]
             set declaredErrorPairs [expr {[dict exists $node declaredErrors] ? [dict get $node declaredErrors] : {}}]
             set errorNames {}
             set seenErrors [dict create]
@@ -1155,8 +1237,8 @@ proc hir::resolve::Sequence {hirVar nodes ctx} {
 # NAMESPACE or NAME (no local scope is ever consulted at all) -- and,
 # unlike the raw pre-resolution -native-body substitution the native backend
 # once did on core IR text (NATIVE-URI-ESCAPE.md; removed by
-# DIRECT-HIR-NATIVE-PATH.md -- native::prepareHir now attaches native
-# implementations to already resolved HIR), this runs as part of
+# DIRECT-HIR-NATIVE-PATH.md, and the module-native bridge that replaced
+# it by REFINEMENT-VALUES.md), this runs as part of
 # hir::resolve's own ordinary walk, after full lexical resolution of
 # everything reachable so far.
 #

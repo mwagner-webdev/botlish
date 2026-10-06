@@ -394,32 +394,17 @@ test surface-modules-nested-namespace-errors {nested-namespace diagnostics name 
 } -match glob -result {UNKNOWN-NAMESPACE {*unknown namespace "outer::missing"*/.../missing.bot*} UNKNOWN-SYMBOL {*namespace "outer::ok" has no definition "g"*}}
 
 # ---------------------------------------------------------------------------
-# uriEscape: the module-native bridge (native/native.tcl), lib/web.bot.
+# web::uri_escape_text, lib/web.bot: an ordinary module function (it used to
+# also be reached through lib/web.tcl's uriEscape native and the
+# module-native bridge, both removed by REFINEMENT-VALUES.md).
 
-test surface-modules-uri-escape-uses-web-module {uriEscape's native call lowers to a direct call of web::uri_escape_text} -body {
-    core::loadLibrary web
-    set hir [nativeHirOfIR {
-        {bind s {const str "a b"}}
-        {call {ref uriEscape} {ref s}}
-    }]
+test surface-modules-uri-escape-uses-web-module {a web::uri_escape_text call lowers to a direct call of the module function, returning a plain str} -body {
+    set hir [surface::compile "import web\ns = \"a b\"\nweb::uri_escape_text(s)\n" -warnings off]
     set callE [lindex [hirFind $hir call] end]
     lassign [hir::get $hir $callE target] kind block
     list $kind [dict get [hir::node $hir $block] kind] \
         [hir::types::show [hir::typeOf $hir $callE]]
-} -result [list block block str\[UriQueryValue\]]
-
-# The raw value core::evalProgram returns under BACKEND (no evidence-vs-
-# not-evidence stringification quirks -- used only for the direct-text
-# comparison below).
-proc outcomeUnderValue {backend exprs} {
-    set saved [core::useBackend]
-    core::useBackend $backend
-    try {
-        return [core::evalProgram $exprs]
-    } finally {
-        core::useBackend $saved
-    }
-}
+} -result [list block block str]
 
 # ASCII-AND-URI-UNRESERVED.md: is_unreserved moved out of uri_escape_text
 # (it is now the top-level web::is_unreserved) and web.bot gained its own
@@ -442,11 +427,7 @@ proc outcomeUnderValue {backend exprs} {
 # the identical reason) resolves as a plain constant-pool fnvalue, and
 # hex_digits/additional_unreserved_chars resolve as "staticget" reads.
 test surface-modules-uri-hex-digits-startup {web::hex_digits is one startup List; uri_escape_text is fully envless (module-static references are never captures), with no closure/callenv anywhere in its own startup or call path} -body {
-    core::loadLibrary web
-    set hir [nativeHirOfIR {
-        {bind s {const str "a b"}}
-        {call {ref uriEscape} {ref s}}
-    }]
+    set hir [surface::compile "import web\ns = \"a b\"\nweb::uri_escape_text(s)\n" -warnings off]
     set lowered [native::lower::program $hir -repr-opt 0]
     set nir [dict get $lowered text]
     set report [native::allocationReport $hir sites]
@@ -470,20 +451,13 @@ test surface-modules-uri-hex-digits-startup {web::hex_digits is one startup List
         [regexp -all {staticget} $nir] \
         [expr {[regexp -all {closure [0-9]+ } $nir] > 0}] [expr {[regexp -all {callenv [0-9]+ } $nir] > 0}]
 } -result {4 1 1 1 3 0 0}
-test surface-modules-uri-escape-native-parity {uriEscape's escaped text agrees interp vs. cranelift; only cranelift drops evidence} -body {
-    core::loadLibrary web
-    set exprs {
-        {bind s {const str "a b/c%d~e_f.g@h"}}
-        {call {ref uriEscape} {ref s}}
-    }
-    set interpValue [core::value::show [outcomeUnderValue interp $exprs] 1]
-    set nativeValue [core::value::show [native::evalHir [nativeHirOfIR $exprs]] 1]
-    list $interpValue $nativeValue
-} -result {{"a%20b%2Fc%25d~e_f.g%40h"#{UriQueryValue}} {"a%20b%2Fc%25d~e_f.g%40h"}}
+test surface-modules-uri-escape-native-parity {web::uri_escape_text's escaped text agrees interp vs. cranelift (a String carries no evidence on any backend)} -body {
+    set hir [surface::compile "import web\ns = \"a b/c%d~e_f.g@h\"\nweb::uri_escape_text(s)\n" -warnings off]
+    list [lindex [outcomeUnderHir interp $hir] 1] [lindex [outcomeUnderHir cranelift $hir] 1]
+} -result {{"a%20b%2Fc%25d~e_f.g%40h"} {"a%20b%2Fc%25d~e_f.g%40h"}}
 
-test surface-modules-refined-checks-still-400-0 {refined-checks.ir is unchanged on cranelift: [400, 0]} -body {
-    core::loadLibrary web
-    set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+test surface-modules-refined-checks-still-400-0 {refined-checks.bot is unchanged on cranelift: [400, 0]} -body {
+    set hir [refinedChecksSourceHir]
     core::value::show [native::evalHir $hir] 1
 } -result {[400, 0]}
 

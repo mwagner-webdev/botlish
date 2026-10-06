@@ -237,6 +237,26 @@ proc hir::syntax::withNoMethod {block} {
     return $block
 }
 
+# BLOCK (a `block` node) with the proof clauses PROOFS (REFINEMENT-VALUES.md):
+# a list of {outcome true param NAME paramOrigin ORIGIN type TYPEEXPR
+# typeOrigin ORIGIN} dicts, TYPEEXPR the as-written refinement type. A proof
+# clause is part of the function's contract, like its declared result: it
+# says that when a call returns OUTCOME, the argument of parameter NAME
+# satisfies the refinement. hir/resolve.tcl validates it and records the
+# resolved contract on the block expression (`proofs`).
+proc hir::syntax::withProofs {block proofs} {
+    foreach clause $proofs {
+        if {[catch {dict get $clause outcome; dict get $clause param; dict get $clause paramOrigin
+                dict get $clause type; dict get $clause typeOrigin}]} {
+            core::malformed "block proof clauses must be {outcome param paramOrigin type typeOrigin} dicts" [list block $proofs]
+        }
+    }
+    if {$proofs ne {}} {
+        dict set block proofs $proofs
+    }
+    return $block
+}
+
 # BLOCK (a `block` node) with the context parameter section CONTEXTPARAMS
 # (CONTEXTS.md): {NAME ORIGIN TYPE TYPEORIGIN} tuples in written order, TYPE
 # the as-written type expression of the required context. They are not

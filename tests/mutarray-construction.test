@@ -140,7 +140,7 @@ test mutarray-meta-5 {mutarray? is a registered type test: any -> bool, refines 
 } -result {any bool mutarray {0 mutarray} {} {}}
 
 test mutarray-meta-6 {mutarray? has exactly the shape of its sibling kind predicates} -body {
-    set shape {m {lmap k {arity paramTypes resultType runtime resultShape resultRange nativeBody moduleFn contextFree} {dict get $m $k}}}
+    set shape {m {lmap k {arity paramTypes resultType runtime resultShape resultRange contextFree} {dict get $m $k}}}
     expr {[apply $shape [core::native::metadata mutarray?]] eq [apply $shape [core::native::metadata list?]]}
 } -result 1
 

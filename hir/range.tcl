@@ -1718,6 +1718,10 @@ proc hir::range::FactsClause {type declared r} {
 # is a nominal type, so equal field layouts (abi::I64 and abi::Isize, both
 # one Int field over the same domain) never make one the other.
 proc hir::range::MismatchClause {argType declared} {
+    set refinement [RefinementClause $argType $declared]
+    if {$refinement ne ""} {
+        return $refinement
+    }
     if {[hir::types::IsNamedStruct $argType] && [hir::types::IsNamedStruct $declared]
             && $argType ne $declared} {
         return [format {; %s and %s are distinct named struct types: a named struct type is nominal, and no value is ever converted from one to another implicitly} \
@@ -1741,6 +1745,31 @@ proc hir::range::MismatchClause {argType declared} {
     }
     set why [hir::types::explainMismatch $argType $declared]
     return [expr {$why eq "" ? "" : "; $why"}]
+}
+
+# The explanation, when DECLARED requires a refinement (REFINEMENT-VALUES.md)
+# that a value of static type ARGTYPE -- a value of its carrier -- is not
+# proven to satisfy: a refinement is established only by a proof (the true
+# result of one of its owner's proof-producing functions), never by a
+# conversion; or "" when that is not why ARGTYPE is not admissible.
+proc hir::range::RefinementClause {argType declared} {
+    if {$argType in {any never} || [hir::types::IsSpecific $argType] || [hir::types::IsSpecific $declared]
+            || [catch {core::type::evidenceOf $declared} wanted]} {
+        return ""
+    }
+    set missing {}
+    set have [core::type::evidenceClosure $argType]
+    foreach name $wanted {
+        if {[core::type::isRefinement $name] && $name ni $have} {
+            lappend missing $name
+        }
+    }
+    if {$missing eq {} || [core::type::base $argType] ne [core::type::base $declared]} {
+        return ""
+    }
+    set names [::join $missing ", "]
+    return [format {; expected %s but found %s: a refinement proof is required (a %s value becomes %s only where one of its owner's proof-producing functions has returned true for it; there is no implicit conversion)} \
+        $names [hir::types::show $argType] [hir::types::show $argType] $names]
 }
 
 # A call E through a structural function type CALLEETYPE

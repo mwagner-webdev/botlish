@@ -60,6 +60,10 @@
 #   nomethod fn f(a, b):  the same block marked `nomethod 1`: its author
 #                         declares that it is never the callee of method
 #                         syntax (WARNINGS-METHOD-ELIGIBLE.md)
+#   fn p(x: T) -> bool proves x: R:   the same block carrying `proofs`
+#                         ({outcome true param x paramOrigin .. type R
+#                         typeOrigin ..}): a proof contract, resolved and
+#                         validated by hir::resolve (REFINEMENT-VALUES.md)
 #   fn f(a, flags :x, :y): body   the same block carrying `flags` ({x ORIGIN}
 #                         {y ORIGIN}) beside its ordinary params; flags are a
 #                         separate parameter category (FLAGS.md), made
@@ -170,7 +174,18 @@ proc surface::lower::StructDeclOf {node namespace} {
         context [expr {[dict exists $node context] ? [dict get $node context] : 0}]]
 }
 
+# The declaration dict of a `typedecl` node declared in module NAMESPACE (""
+# for the entry program). `namespace` is the declaring module, supplied here
+# by the loader's canonical module identity (never read from the cached,
+# importer-neutral AST): for a refinement it is also the type's owner, the
+# one module that may mint it (REFINEMENT-VALUES.md).
 proc surface::lower::TypeDeclOf {node {namespace ""}} {
+    if {[dict exists $node form] && [dict get $node form] eq "refined"} {
+        return [dict create kind refined \
+            name [dict get $node name] nameSpan [dict get $node nameSpan] namespace $namespace \
+            carrier [dict get $node carrier] carrierSpan [dict get $node carrierSpan] \
+            span [dict get $node span]]
+    }
     return [dict create \
         name [dict get $node name] nameSpan [dict get $node nameSpan] namespace $namespace \
         parent [dict get $node parent] parentSpan [dict get $node parentSpan] \
@@ -480,6 +495,15 @@ proc surface::lower::Node {node} {
                 [Flags $node]]
             if {[dict exists $node nomethod] && [dict get $node nomethod]} {
                 set block [hir::syntax::withNoMethod $block]
+            }
+            if {[dict exists $node proves] && [dict get $node proves] ne {}} {
+                set block [hir::syntax::withProofs $block [lmap clause [dict get $node proves] {
+                    set param [dict get $clause param]
+                    dict create outcome [dict get $clause outcome] param $param \
+                        paramOrigin [Origin [dict get $clause paramSpan] "[dict get $node id]/proves($param)"] \
+                        type [dict get $clause type] \
+                        typeOrigin [Origin [dict get $clause typeSpan] "[dict get $node id]/proves($param)/type"]
+                }]]
             }
             if {[dict exists $node contexts]} {
                 set block [hir::syntax::withContextParams $block [lmap c [dict get $node contexts] {

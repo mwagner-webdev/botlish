@@ -222,15 +222,6 @@ proc hir::contexts::Denotes {hir b {seen {}}} {
         return ""
     }
     set binding [dict get $hir bindings $b]
-    if {[dict get $binding kind] eq "root"} {
-        set name [dict get $binding name]
-        if {[dict exists $hir moduleNativeTargets $name]} {
-            # A native whose executable body is a module function
-            # (core/native.tcl's -module-fn): calling it runs that block.
-            return [lindex [dict get $hir moduleNativeTargets $name] 0]
-        }
-        return ""
-    }
     if {[dict get $binding kind] ne "local"} {
         return ""
     }

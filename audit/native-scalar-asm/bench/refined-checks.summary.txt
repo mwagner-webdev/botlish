@@ -2,7 +2,7 @@ source:  bench/refined-checks.bot
 backend: Cranelift (specialize=1)
 asm:     refined-checks.asm
 vcode:   refined-checks.vcode
-machine-code bytes: 8187 (per function: 1415 217 609 74 74 74 128 128 342 115 154 176 238 295 344 183 770 140 127 103 313 642 367 815 344)
+machine-code bytes: 9371 (per function: 1415 217 609 74 74 74 128 128 342 115 154 176 176 295 344 183 770 140 131 357 725 127 103 313 642 367 815 377)
 
 functions:
   0 <program entry>: nir-regs=43
@@ -18,18 +18,21 @@ functions:
   10 char_at<int>: nir-regs=18
   11 local_char?<str>: nir-regs=9
   12 local_char?<generic>: nir-regs=9
-  13 scan_while<int, block(e307)>: nir-regs=16
+  13 scan_while<int, block(e251)>: nir-regs=16
   14 scan_while<int, native(str::is_tcl_alpha)>: nir-regs=18
   15 tld?<int>: nir-regs=14
   16 domain?<int>: nir-regs=58
   17 web::is_unreserved<int>: nir-regs=10
-  18 web::uri_escape_text<str>: nir-regs=5
-  19 high_nibble<int>: nir-regs=15
-  20 hex_pair<int>: nir-regs=10
-  21 esc_bytes<List[int], int, str>: nir-regs=16
-  22 esc_char<str>: nir-regs=21
-  23 esc_from<str, int, str>: nir-regs=21
-  24 check<int, int, str, str>: nir-regs=21
+  18 web::uri_query_value?<str>: nir-regs=5
+  19 upper_hex?<int>: nir-regs=28
+  20 valid_from?<int>: nir-regs=39
+  21 web::uri_escape_text<str>: nir-regs=5
+  22 high_nibble<int>: nir-regs=15
+  23 hex_pair<int>: nir-regs=10
+  24 esc_bytes<List[int], int, str>: nir-regs=16
+  25 esc_char<str>: nir-regs=21
+  26 esc_from<str, int, str>: nir-regs=21
+  27 check<int, int, str, str>: nir-regs=24
 
 GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
   function 0 "<program>"
@@ -266,7 +269,46 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 18 "web::uri_escape_text"
+  function 18 "web::uri_query_value?"
+    NIR regs: 5
+    raw regs: 1
+    managed-capable regs: 4
+    effects: may_error=true may_gc=true
+    safepoints: 2
+    root candidates: 3
+    max live roots: 2
+    shadow slots: 2
+    entry zero slots: 1
+    depth reservation: no
+    storage: native frame
+  
+  function 19 "upper_hex?"
+    NIR regs: 28
+    raw regs: 3
+    managed-capable regs: 25
+    effects: may_error=false may_gc=false
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+  
+  function 20 "valid_from?"
+    NIR regs: 39
+    raw regs: 6
+    managed-capable regs: 33
+    effects: may_error=false may_gc=true
+    safepoints: 4
+    root candidates: 6
+    max live roots: 3
+    shadow slots: 3
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+  
+  function 21 "web::uri_escape_text"
     NIR regs: 5
     raw regs: 2
     managed-capable regs: 3
@@ -279,7 +321,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 19 "high_nibble"
+  function 22 "high_nibble"
     NIR regs: 15
     raw regs: 7
     managed-capable regs: 8
@@ -292,7 +334,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 20 "hex_pair"
+  function 23 "hex_pair"
     NIR regs: 10
     raw regs: 1
     managed-capable regs: 9
@@ -305,7 +347,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 21 "esc_bytes"
+  function 24 "esc_bytes"
     NIR regs: 16
     raw regs: 1
     managed-capable regs: 15
@@ -318,7 +360,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 22 "esc_char"
+  function 25 "esc_char"
     NIR regs: 21
     raw regs: 5
     managed-capable regs: 16
@@ -331,7 +373,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 23 "esc_from"
+  function 26 "esc_from"
     NIR regs: 21
     raw regs: 4
     managed-capable regs: 17
@@ -344,12 +386,12 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 24 "check"
-    NIR regs: 21
-    raw regs: 6
-    managed-capable regs: 15
+  function 27 "check"
+    NIR regs: 24
+    raw regs: 7
+    managed-capable regs: 17
     effects: may_error=true may_gc=true
-    safepoints: 2
+    safepoints: 3
     root candidates: 4
     max live roots: 4
     shadow slots: 4
@@ -358,7 +400,6 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
 
 mechanical pattern counts (triage only; see report for interpretation):
-  5 x calls to rt_int_add
-  4 x calls to rt_int_cmp
-  42 x calls to other rt_* helpers
-  1 x guard/guardbool instructions
+  9 x calls to rt_int_add
+  6 x calls to rt_int_cmp
+  44 x calls to other rt_* helpers

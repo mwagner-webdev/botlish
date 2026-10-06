@@ -63,11 +63,10 @@ proc HasCallIn {body} {
 }
 
 # The real acceptance case: byte::nibble/byte::high_nibble's closed
-# instances in the actual refined-checks.ir/web.bot chain (identical to
+# instances in the actual refined-checks.bot/web.bot chain (identical to
 # tests/native-bitshift.test's own refinedChecksHir).
 proc refinedChecksHir {} {
-    return [nativeHirOfIR [core::loadProgramFile \
-        [file join $::projectRoot bench refined-checks.ir]]]
+    return [refinedChecksSourceHir]
 }
 
 # ---------------------------------------------------------------------------

@@ -1,13 +1,16 @@
-// Rust equivalent of bench/refined-checks.ir: repeated refined-type
+// Rust equivalent of bench/refined-checks.bot: repeated refinement
 // predicates. emailish is a structural check (regex-equivalent membership
 // test, hand-rolled below rather than pulling in the `regex` crate);
-// UriQueryValue is opaque evidence that only uri_escape can attach.
+// uri_query_value is the structural check of lib/web.bot's
+// web::uri_query_value? (unreserved characters and "%XX" uppercase-hex
+// triplets only), run on the escaped query each time, as the Botlish program
+// does (REFINEMENT-VALUES.md).
 //
 // Invoked by bench/bench.tcl; see fib.rs for the --runs/value/best_us
 // protocol shared by all four equivalents. The printed "[a, b]" shape
 // matches core::value::show's rendering of a Botlish list.
 //
-// Email grammar, matching lib/web.tcl's emailRegex:
+// Email grammar, matching lib/web.bot's emailish? (formerly lib/web.tcl's emailRegex):
 //   local: 1+ of [alnum . _ % + -]   (Tcl [:alnum:]: Unicode-aware, see below)
 //   '@'
 //   domain: 1+ of ( 1+ of [alnum -] followed by '.' )
@@ -15,14 +18,14 @@
 //
 // "alnum"/"alpha" here are Tcl 9's own Unicode-aware [:alnum:]/[:alpha:]
 // regexp bracket-expression classes (core::regex::matches's semantics,
-// lib/web.tcl's own reference validator) -- NOT c.is_ascii_alphanumeric()/
+// the reference grammar) -- NOT c.is_ascii_alphanumeric()/
 // is_ascii_alphabetic(), which this file used before this milestone. That
 // was a real semantic narrowing (a benchmark bug, not a broader/narrower
 // "simplification"): Tcl 9's [:alpha:]/[:alnum:] accept e.g. "café" and
 // "日本語", which the ASCII-only version silently rejected. See
 // tcl_unicode.rs and NATIVE-TCL-UNICODE.md for the exact classification
 // this now reproduces (matching native/src/runtime/ops.rs's
-// rt_is_tcl_alpha/rt_is_tcl_alnum and lib/web.tcl's Emailish? native-body).
+// rt_is_tcl_alpha/rt_is_tcl_alnum, used by lib/web.bot's web::emailish?).
 mod tcl_unicode;
 
 use std::hint::black_box;
@@ -80,13 +83,28 @@ fn emailish(s: &str) -> bool {
     i == n
 }
 
-struct UriQueryValue(#[allow(dead_code)] String);
-
-fn uri_query_value(_q: &UriQueryValue) -> bool {
+fn uri_query_value(q: &str) -> bool {
+    let b = q.as_bytes();
+    let hex = |c: u8| c.is_ascii_digit() || (b'A'..=b'F').contains(&c);
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        if c == b'%' {
+            if i + 2 < b.len() && hex(b[i + 1]) && hex(b[i + 2]) {
+                i += 3;
+                continue;
+            }
+            return false;
+        }
+        if !(c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'~' | b'-')) {
+            return false;
+        }
+        i += 1;
+    }
     true
 }
 
-fn uri_escape(s: &str) -> UriQueryValue {
+fn uri_escape(s: &str) -> String {
     let mut escaped = String::new();
     for byte in s.as_bytes() {
         let c = *byte as char;
@@ -96,15 +114,15 @@ fn uri_escape(s: &str) -> UriQueryValue {
             escaped.push_str(&format!("%{:02X}", byte));
         }
     }
-    UriQueryValue(escaped)
+    escaped
 }
 
-fn check(n: i64, acc: i64, s: &str, q: &UriQueryValue) -> i64 {
+fn check(n: i64, acc: i64, s: &str, q: &str) -> i64 {
     if n <= 0 {
         return acc;
     }
     let hit = if emailish(s) {
-        // Statically redundant re-check, mirrored from the IR as written.
+        // Statically redundant re-check, mirrored from the source as written.
         if emailish(s) {
             if uri_query_value(q) { 1 } else { 0 }
         } else {

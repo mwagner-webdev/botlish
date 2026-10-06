@@ -49,8 +49,8 @@
 # normalization itself (spec's own #3-4); byte::nibble(...) is the separate
 # conversion that does that. See lib/byte.bot's own header for exactly why
 # these are ordinary functions here rather than natives with a declared
-# HighNibble/LowNibble/Nibble result type: native lowering's -native-body/
-# -module-fn bridge (native/native.tcl) is a syntactic pre-pass over only
+# HighNibble/LowNibble/Nibble result type: native lowering's former
+# -native-body/-module-fn bridge (since removed) was a syntactic pre-pass over only
 # the entry program's own raw core IR, so a native whose sole executable
 # form is one of those is unsupported on Cranelift the moment it is called
 # from *inside* a cross-file module function -- exactly web.bot's own

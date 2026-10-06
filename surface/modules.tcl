@@ -198,6 +198,18 @@ proc surface::modules::QualifiedRefsWalk {node foundVar} {
                 TypeRefs [lindex $param 2] [lindex $param 3] found
             }
             TypeRefs [dict get $node resultType] [dict get $node resultTypeSpan] found
+            if {[dict exists $node proves]} {
+                foreach clause [dict get $node proves] {
+                    TypeRefs [dict get $clause type] [dict get $clause typeSpan] found
+                }
+            }
+        }
+        typedecl {
+            # A refinement's carrier (REFINEMENT-VALUES.md) may be a
+            # qualified type of another module.
+            if {[dict exists $node form] && [dict get $node form] eq "refined"} {
+                TypeRefs [dict get $node carrier] [dict get $node carrierSpan] found
+            }
         }
         structdecl {
             foreach field [dict get $node fields] {
@@ -727,9 +739,8 @@ proc surface::modules::NewState {files nextFile} {
 # {sections SECTIONS files FILES functions NAMESPACE->{FUNCTION-NAME ...}
 # imports NAMESPACE->ENV ...} for NAMESPACES and everything they
 # transitively import -- the general module loader's entry point for a
-# caller with no source AST of its own (native/native.tcl's module-native
-# bridge: it names the namespaces a native's registered -module-fn needs
-# directly, not via source syntax). SECTIONS is ready for hir::buildSyntax's
+# caller with no source AST of its own (it names the namespaces directly,
+# not via source syntax). SECTIONS is ready for hir::buildSyntax's
 # -modules; FILES is ready to merge into its -files; imports (the import
 # environments of every loaded module) into its -imports. FileIds start at
 # f(START), so a caller that reserves f1 for its own root file can pass

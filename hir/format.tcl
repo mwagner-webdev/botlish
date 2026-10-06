@@ -20,7 +20,10 @@
 #   eN bind BINDING NAME
 #   eN block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)?
 #                                        staticRefs (hir::isModuleBinding)
-#                                        omitted when empty; then ?nomethod?
+#                                        omitted when empty; then ?nomethod?,
+#                                        ?declares TYPE?, ?proves BINDING
+#                                        NAME: TYPE? (a proof contract,
+#                                        REFINEMENT-VALUES.md), ?errors ...?
 #                                        and ?contexts (DIRECT) requires
 #                                        (REQUIRED)? -- the block's direct and
 #                                        transitive context requirements
@@ -86,6 +89,14 @@ proc hir::format {hir args} {
 # `declares TYPE`/`: TYPE` text (below) resolves exactly as it did when the
 # HIR was first built, without needing the original Botlish source again.
 proc hir::format::TypeDecl {entry} {
+    if {[dict exists $entry kind] && [dict get $entry kind] eq "refined"} {
+        # A refinement type (REFINEMENT-VALUES.md): "refined type ID carrier
+        # TYPE owner NS" (NS "-" for the entry program) -- its canonical
+        # identity, its resolved carrier, and the one module that may mint
+        # it. Read back by hir::read::TypeDeclLine.
+        set owner [dict get $entry owner]
+        return "refined type [dict get $entry name] carrier [hir::types::show [dict get $entry carrier]] owner [expr {$owner eq "" ? "-" : $owner}]"
+    }
     if {[dict exists $entry kind] && [dict get $entry kind] eq "struct"} {
         # A struct declaration (hir/structs.tcl): "struct ID name NAME ns NS
         # [opaque] fields F1: T1, F2: T2" (NS "-" for the entry program), the
@@ -236,6 +247,15 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             }
             if {[dict get $node declaredResult] ne {}} {
                 append text [format { declares %s} [hir::types::show [dict get $node declaredResult]]]
+            }
+            if {[dict exists $node proofs]} {
+                # The proof contract (REFINEMENT-VALUES.md): "proves BINDING
+                # NAME: TYPE" -- when a call returns true, its argument for
+                # that parameter satisfies TYPE.
+                foreach proof [dict get $node proofs] {
+                    append text [format { proves %s: %s} [BindingLabel $hir [dict get $proof binding]] \
+                        [hir::types::show [dict get $proof fact]]]
+                }
             }
             if {[dict get $node declaredErrors] ne {}} {
                 append text " errors [join [dict get $node declaredErrors] {, }]"

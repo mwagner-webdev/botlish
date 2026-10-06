@@ -29,9 +29,7 @@ getpid	examples/linux/getpid.bot	bot	none		ok
 03-recursion	examples/hir/03-recursion.hir	hir	none		ok	
 04-refinement	examples/hir/04-refinement.hir	hir	none		ok	
 05-control	examples/hir/05-control.hir	hir	none		ok	
-06-refined-strings	examples/hir/06-refined-strings.hir	hir	none		ok	
 01-adder	examples/01-adder.ir	ir	none		fail	NATIVE AOT INPUT
 02-loop-break	examples/02-loop-break.ir	ir	none		fail	NATIVE AOT INPUT
 03-lexical-closure	examples/03-lexical-closure.ir	ir	none		fail	NATIVE AOT INPUT
 04-refinement-scope	examples/04-refinement-scope.ir	ir	none		fail	NATIVE AOT INPUT
-05-refined-strings	examples/05-refined-strings.ir	ir	none		fail	NATIVE AOT INPUT

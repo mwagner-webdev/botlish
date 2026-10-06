@@ -49,10 +49,10 @@ lappend corpus \
     } \
     refined {
         {bind f {block {s}
-            {if {call {ref Emailish?} {ref s}}
-                {block {} {call {ref list} {ref s} {call {ref uriEscape} {ref s}}}}
+            {if {call {ref NonEmpty?} {ref s}}
+                {block {} {call {ref list} {ref s} {call {ref str::lowercase} {ref s}}}}
                 {block {} {const str {}}}}}}
-        {call {ref list} {call {ref f} {const str a@b.io}} {call {ref f} {const str nope}}}
+        {call {ref list} {call {ref f} {const str AB}} {call {ref f} {const str {}}}}
     } \
     duplicate {
         {bind a {const 1}}

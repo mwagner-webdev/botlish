@@ -121,25 +121,25 @@ test direct-hir-native-namespace-static-scan {no proc of ::native reaches hir::l
 } -result {}
 
 # Dynamic version of the same fact: run every production native entry point on
-# a program that uses modules, a native with a module implementation and a
-# validator body, and watch the procs that would betray a round trip.
+# a program that uses modules, source refinements and their proof-producing
+# predicates, and watch the procs that would betray a round trip.
 test direct-hir-native-entry-points-never-call-core-ir {native::nir, evalHir, object, executable, codeSize, measure and prepareHir never call hir::lower, hir::build or core::evalProgram} -constraints executableAot -body {
-    core::loadLibrary web
     set hir [srcHir {
         import mutable_array
+        import web
         fn check(s: str) -> bool:
-            emailish?(s)
-        q = uriEscape("a b")
+            web::emailish?(s)
+        q = web::uri_escape_text("a b")
         a = mutable_array::create(2, 0)
-        [check("a@b.co"), UriQueryValue?(q), mutable_array::capacity(a)]
+        [check("a@b.co"), web::uri_query_value?(q), mutable_array::capacity(a)]
     }]
     set ::trips {}
     proc ::Trip {command args} { lappend ::trips [lindex $command 0] }
     set watched {hir::lower hir::build hir::buildSyntax hir::syntax::fromIR core::evalProgram core::ir::check
         core::compiler::compileUnit core::compiler::evalHir}
-    # hir::syntax::fromIR is legitimate inside prepareHir (a native's own
-    # registered body is core IR data): only the program itself must never be
-    # read that way, so it is checked separately below.
+    # hir::syntax::fromIR used to be legitimate inside prepareHir (a native's
+    # own registered body was core IR data; no native has one any more): only
+    # the program itself must never be read that way.
     foreach c [lrange $watched 0 2] { trace add execution $c enter ::Trip }
     foreach c [lrange $watched 4 end] { trace add execution $c enter ::Trip }
     set dir [makeDirectory {direct hir entries}]
@@ -282,13 +282,12 @@ test direct-hir-native-independent-of-hygiene {native lowering of HIR with every
         [nativeValue $plain]
 } -result {1 1 {[[1, 2, 2], 1]}}
 
-test direct-hir-shadowed-native-name {a local binding named like a native is not the native: native preparation follows binding identity} -constraints executableAot -body {
-    core::loadLibrary web
+test direct-hir-shadowed-native-name {a local binding named like a native is not the native: lowering follows binding identity} -constraints executableAot -body {
     set hir [srcHir {
         import str
-        fn uriEscape(s):
+        fn integer?(s):
             str::length(s)
-        [uriEscape("abc"), str::length("xy")]
+        [integer?("abc"), str::length("xy")]
     }]
     list [referenceValue $hir] [nativeValue $hir] [executableValue $hir]
 } -result {{[3, 2]} {[3, 2]} {[3, 2]}}
@@ -322,10 +321,10 @@ test direct-hir-unproven-declared-contract-checked-at-run-time {a declared param
 } -result {1 error {CORE SEMANTIC TYPE} 1 0 1 1}
 
 test direct-hir-lowering-state-per-compilation {native lowering starts each compilation clean: a program's NIR (module-static slot table, header) does not depend on what the process compiled before} -body {
-    core::loadLibrary web
     set plain [srcHir {[1, 2]}]
     set withModule [srcHir {import mathish
-[uriEscape("a b"), mathish::inc(1)]}]
+import web
+[web::uri_escape_text("a b"), mathish::inc(1)]}]
     set before [native::nir $plain]
     set module [native::nir $withModule]
     set after [native::nir $plain]
@@ -375,12 +374,12 @@ test direct-hir-semantic-instances-not-recomputed {native lowering does not re-r
     list [expr {[dict get $hir semantic] eq $before}] [dict get $before walks] [dict get $before rounds]
 } -result {1 3 1}
 
-test direct-hir-prepare-is-idempotent-and-noop-without-natives {prepareHir returns HIR unchanged when no native implementation is needed and is idempotent otherwise} -body {
-    core::loadLibrary web
+test direct-hir-prepare-is-idempotent-and-noop-without-natives {prepareHir returns a strict HIR unchanged (no native needs an attached implementation any more, REFINEMENT-VALUES.md), and is idempotent} -body {
     set plain [srcHir {[1, 2]}]
-    set withNative [srcHir {uriEscape("a b")}]
-    set once [native::prepareHir $withNative]
-    list [expr {[native::prepareHir $plain] eq $plain}] [expr {$once ne $withNative}] \
+    set withModule [srcHir {import web
+web::uri_escape_text("a b")}]
+    set once [native::prepareHir $withModule]
+    list [expr {[native::prepareHir $plain] eq $plain}] [expr {$once eq $withModule}] \
         [expr {[native::prepareHir $once] eq $once}]
 } -result {1 1 1}
 
@@ -579,12 +578,12 @@ test direct-hir-executable-corpus-csv-and-strings {a larger corpus program (CSV 
     set results
 } -result {1 1 1}
 
-test direct-hir-executable-module-native-bridge {a native with a module implementation (uriEscape) and a validator body compile into an executable from HIR} -constraints executableAot -body {
-    core::loadLibrary web
+test direct-hir-executable-source-refinements {source refinements and their proof-producing predicates (lib/web.bot) compile into an executable from HIR} -constraints executableAot -body {
     set hir [srcHir {
+        import web
         fn check(s: str) -> bool:
-            emailish?(s)
-        [uriEscape("a b/c"), check("a@b.co"), check("nope")]
+            web::emailish?(s)
+        [web::uri_escape_text("a b/c"), check("a@b.co"), check("nope")]
     }]
     list [nativeValue $hir] [executableValue $hir]
 } -result {{["a%20b%2Fc", true, false]} {["a%20b%2Fc", true, false]}}

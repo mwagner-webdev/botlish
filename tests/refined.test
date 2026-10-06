@@ -1,8 +1,16 @@
-# refined.test -- programs using refined types, on both backends.
+# refined.test -- core-IR programs using named type tests, on both backends.
 #
-# The acceptance targets: a regex-validated type refined by an ordinary
-# predicate, an opaque type produced only by a trusted transform, and string
-# operations that discard refinements.
+# A validator type (core/type.tcl) is a structural, runtime-checked named
+# type; its predicate NAME? is a native type test (-tests-type) that refines
+# its argument in the true branch, and that compilers may decide from static
+# types. The tests use the harness's NonEmpty (tests/helpers.tcl).
+#
+# Source-level refinement types (`refined type`, proof-producing functions)
+# are a different mechanism -- nominal, proven, never tested at run time --
+# and are tested in refinement-values.test (REFINEMENT-VALUES.md). This file
+# used to test lib/web.tcl's Tcl-registered String refinements (Emailish,
+# UriQueryValue), their runtime "evidence" and the uriEscape native; all of
+# those are gone.
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 
@@ -17,191 +25,101 @@ proc boundType {exprs name} {
     return "(not bound)"
 }
 
-set emailProgram {
-    {bind x {const str foo@example.com}}
-    {if {call {ref Emailish?} {ref x}}
+set nonEmptyProgram {
+    {bind x {const str foo}}
+    {if {call {ref NonEmpty?} {ref x}}
         {block {} {bind seen {ref x}} {ref seen}}
-        {block {} {bind other {ref x}} {const str invalid}}}
+        {block {} {bind other {ref x}} {const str empty}}}
 }
 
-set escapeProgram {
-    {bind raw {const str {a&b=c}}}
-    {bind escaped {call {ref uriEscape} {ref raw}}}
-    {bind part {call {ref str::substring} {ref escaped} {const 0} {const 3}}}
-    {call {ref list} {ref escaped} {ref part}}
-}
+test refined-1 {NonEmpty? program evaluates in the then branch} -body {
+    list [run {*}$nonEmptyProgram] [differential $nonEmptyProgram]
+} -result {{"foo"} same}
 
-test refined-1 {Emailish? program evaluates in the then branch} -body {
-    list [run {*}$emailProgram] [differential $emailProgram]
-} -result {{"foo@example.com"} same}
+test refined-2 {compiler sees x : NonEmpty in the then branch only} -body {
+    list [boundType $nonEmptyProgram seen] [boundType $nonEmptyProgram other] [boundType $nonEmptyProgram x]
+} -result {{refined str NonEmpty} str str}
 
-test refined-2 {compiler sees x : Emailish in the then branch only} -body {
-    list [boundType $emailProgram seen] [boundType $emailProgram other] [boundType $emailProgram x]
-} -result {{refined str Emailish} str str}
-
-test refined-3 {interpreter records the Emailish refinement for the branch} -body {
-    set v [runValue {bind x {const str foo@example.com}} \
-                    {if {call {ref Emailish?} {ref x}}
+test refined-3 {interpreter records the NonEmpty refinement for the branch} -body {
+    set v [runValue {bind x {const str foo}} \
+                    {if {call {ref NonEmpty?} {ref x}}
                         {block {} {block {} {ref x}}}
                         {block {} {const unreachable}}}]
     core::refinementsOf [core::blockEnv $v] x
-} -result {{refined str Emailish}}
+} -result {{refined str NonEmpty}}
 
 test refined-4 {a failing validator takes the else branch} -body {
-    set p {{bind x {const str not-an-email}}
-           {if {call {ref Emailish?} {ref x}} {block {} {const yes}} {block {} {const no}}}}
+    set p {{bind x {const str {}}}
+           {if {call {ref NonEmpty?} {ref x}} {block {} {const yes}} {block {} {const no}}}}
     list [run {*}$p] [differential $p]
 } -result {{"no"} same}
 
-test refined-5 {Emailish? requires a string} -body {
-    # The error message names emailish? (the canonical resolved target,
-    # core::native::alias), not the Emailish? spelling this call site used
-    # -- same resolved target regardless of spelling, per R2-ORDINARY-
-    # EMAILISH-PREDICATE.md.
-    list [differential {{call {ref Emailish?} {const 5}}}] \
-         [catch {core::eval {call {ref Emailish?} {const 5}}} m opts] $m [dict get $opts -errorcode]
-} -result {same 1 {emailish?: expected str, got 5} {CORE SEMANTIC TYPE}}
+test refined-5 {NonEmpty? requires a string} -body {
+    list [differential {{call {ref NonEmpty?} {const 5}}}] \
+         [catch {core::eval {call {ref NonEmpty?} {const 5}}} m opts] $m [dict get $opts -errorcode]
+} -result {same 1 {NonEmpty?: expected str, got 5} {CORE SEMANTIC TYPE}}
 
-test refined-6 {independent refinements accumulate} -body {
+test refined-6 {string transformations discard refinements} -body {
     set p {
-        {bind x {const str a@b.io}}
-        {if {call {ref Emailish?} {ref x}}
-            {block {} {if {call {ref NonEmpty?} {ref x}}
-                          {block {} {bind both {ref x}} {block {} {ref x}}}
-                          {block {}}}}
-            {block {}}}
+        {bind x {const str abc}}
+        {if {call {ref NonEmpty?} {ref x}}
+            {block {}
+                {bind lower {call {ref str::lowercase} {ref x}}}
+                {bind joined {call {ref str::concat} {ref x} {const str !}}}
+                {call {ref list} {ref lower} {ref joined}}}
+            {block {} {const none}}}
     }
-    set v [runValue {*}$p]
-    list [boundType $p both] [core::refinementsOf [core::blockEnv $v] x] [differential $p]
-} -result {{refined str {Emailish NonEmpty}} {{refined str NonEmpty} {refined str Emailish}} same}
+    list [run {*}$p] [differential $p] [boundType $p lower] [boundType $p joined]
+} -result {{["abc", "abc!"]} same str str}
 
-test refined-7 {uriEscape: static types} -body {
-    dict map {name type} [core::compiler::programTypes $escapeProgram] {set type}
-} -result {raw str escaped {refined str UriQueryValue} part str}
-
-test refined-8 {uriEscape: runtime evidence on both backends} -body {
-    list [differential $escapeProgram] [lindex [outcomeUnder interp $escapeProgram] 1]
-} -result {same {["a%26b%3Dc"#{UriQueryValue}, "a%2"]}}
-
-test refined-9 {escaped equals the plain string with the same characters} -body {
-    set p [concat [lrange $escapeProgram 0 1] {
-        {call {ref list}
-            {call {ref ==} {ref escaped} {const str a%26b%3Dc}}
-            {call {ref string?} {ref escaped}}}
-    }]
-    list [run {*}$p] [differential $p]
-} -result {{[true, true]} same}
-
-test refined-10 {substring of escaped is a plain str, with no evidence} -body {
-    set saved [core::useBackend]
-    try {
-        set results {}
-        foreach backend {interp compile} {
-            core::useBackend $backend
-            set part [lindex [core::value::items [core::evalProgram $escapeProgram]] 1]
-            lappend results [core::value::evidence $part] [core::type::ofValue $part]
-        }
-        set results
-    } finally {
-        core::useBackend $saved
-    }
-} -result {{} str {} str}
-
-test refined-11 {string transformations discard refinements} -body {
-    set p {
-        {bind escaped {call {ref uriEscape} {const str {x y}}}}
-        {bind lower {call {ref str::lowercase} {ref escaped}}}
-        {bind joined {call {ref str::concat} {ref escaped} {const str !}}}
-        {bind n {call {ref str::length} {ref escaped}}}
-        {call {ref list}
-            {call {ref UriQueryValue?} {ref escaped}}
-            {call {ref UriQueryValue?} {ref lower}}
-            {call {ref UriQueryValue?} {ref joined}}
-            {ref n}}
-    }
-    list [run {*}$p] [differential $p] \
-         [dict map {name type} [core::compiler::programTypes $p] {set type}]
-} -result {{[true, false, false, 5]} same {escaped {refined str UriQueryValue} lower str joined str n int}}
-
-test refined-12 {an opaque type cannot be manufactured from a literal} -body {
-    set p {{call {ref UriQueryValue?} {const str a%26b}}}
-    list [run {*}$p] [differential $p]
-} -result {false same}
-
-test refined-13 {a native claiming a refined result must deliver the evidence} -body {
-    list [differential {{call {ref test-fake-escape} {const str abc}}}] \
-         [catch {core::eval {call {ref test-fake-escape} {const str abc}}} m opts] $m \
+test refined-13 {a native claiming a named result type must deliver it} -body {
+    list [differential {{call {ref test-fake-nonempty} {const str {}}}}] \
+         [catch {core::eval {call {ref test-fake-nonempty} {const str {}}}} m opts] $m \
          [dict get $opts -errorcode]
-} -result {same 1 {test-fake-escape result: contract violation: expected str[UriQueryValue], got "abc"} {CORE CONTRACT TYPE}}
+} -result {same 1 {test-fake-nonempty result: contract violation: expected str[NonEmpty], got ""} {CORE CONTRACT TYPE}}
 
 test refined-14 {a native must enforce its declared parameter types} -body {
-    list [differential {{call {ref test-lax-param} {const str nope}}}] \
-         [catch {core::eval {call {ref test-lax-param} {const str nope}}} m opts] $m \
+    list [differential {{call {ref test-lax-param} {const str {}}}}] \
+         [catch {core::eval {call {ref test-lax-param} {const str {}}}} m opts] $m \
          [dict get $opts -errorcode]
-} -result {same 1 {test-lax-param argument 0: contract violation: expected str[Emailish], got "nope"} {CORE CONTRACT TYPE}}
+} -result {same 1 {test-lax-param argument 0: contract violation: expected str[NonEmpty], got ""} {CORE CONTRACT TYPE}}
 
 test refined-15 {refinement from a flow fact: a refined parameter proves its argument} -body {
     set p {
         {bind f {block {s} {call {ref test-lax-param} {ref s}} {bind after {ref s}} {ref after}}}
-        {call {ref f} {const str a@b.io}}
+        {call {ref f} {const str abc}}
     }
     list [run {*}$p] [differential $p] [boundType $p after]
-} -result {{"a@b.io"} same {refined str Emailish}}
+} -result {{"abc"} same {refined str NonEmpty}}
 
-test refined-library-1 {the web library is opt-in} -body {
-    # Emailish? is a compatibility alias (core::native::alias), never a
-    # `core::native::names` registry entry itself (R2-ORDINARY-EMAILISH-
-    # PREDICATE.md), so "opt-in" is checked through core::native::isAlias
-    # rather than registry membership.
-    set child [interp create]
-    try {
-        $child eval [list source [file join $::projectRoot compiler compiler.tcl]]
-        set before [$child eval {expr {[core::native::isAlias Emailish?]
-                                       || [core::type::isNamed Emailish]}}]
-        $child eval {core::loadLibrary web; core::loadLibrary web}
-        set after [$child eval {expr {[core::native::isAlias Emailish?]
-                                      && [core::type::isNamed UriQueryValue]}}]
-        set value [$child eval {core::formatValue [core::eval {call {ref Emailish?} {const str a@b.io}}]}]
-        list $before $after $value
-    } finally {
-        interp delete $child
-    }
-} -result {0 1 true}
-
-test refined-library-2 {program files declare the libraries they need} -body {
-    core::programFileRequires [file join $::projectRoot examples 05-refined-strings.ir]
-} -result web
+test refined-library-1 {lib/ has no Tcl-registered library left} -body {
+    # The optional Tcl library mechanism (core::loadLibrary, `# requires:`)
+    # remains, but its only library, lib/web.tcl, was replaced by source
+    # declarations in lib/web.bot (REFINEMENT-VALUES.md).
+    list [glob -nocomplain -directory [file join $::projectRoot lib] *.tcl] \
+         [catch {core::loadLibrary web} m] $m
+} -match glob -result {{} 1 {core::loadLibrary: no library "web" in *}}
 
 # ---------------------------------------------------------------------------
 # Type tests (-tests-type)
 
 set typeTestCases {
     param-kind-error-not-folded {
-        {call {ref Emailish?} {const 5}}
+        {call {ref NonEmpty?} {const 5}}
     }
     param-kind-error-through-unknown-type {
-        {bind f {block {v} {call {ref Emailish?} {ref v}}}}
-        {call {ref list} {call {ref f} {const str a@b.io}} {call {ref f} {const 5}}}
+        {bind f {block {v} {call {ref NonEmpty?} {ref v}}}}
+        {call {ref list} {call {ref f} {const str a}} {call {ref f} {const 5}}}
     }
     plain-string-is-not-proven {
-        {call {ref list} {call {ref Emailish?} {const str nope}} {call {ref UriQueryValue?} {const str a%20b}}}
-    }
-    evidence-decides-opaque-test {
-        {bind q {call {ref uriEscape} {const str {a b}}}}
-        {call {ref list} {call {ref UriQueryValue?} {ref q}} {call {ref string?} {ref q}} {call {ref integer?} {ref q}}}
+        {call {ref list} {call {ref NonEmpty?} {const str {}}} {call {ref NonEmpty?} {const str a}}}
     }
     refinement-decides-nested-test {
         {bind f {block {s}
-            {if {call {ref Emailish?} {ref s}}
-                {block {} {call {ref list} {call {ref Emailish?} {ref s}} {call {ref string?} {ref s}}
-                                           {call {ref NonEmpty?} {ref s}}}}
-                {block {} {call {ref list} {call {ref Emailish?} {ref s}}}}}}}
-        {call {ref list} {call {ref f} {const str a@b.io}} {call {ref f} {const str nope}}}
-    }
-    other-evidence-does-not-decide {
-        {bind f {block {s}
-            {if {call {ref NonEmpty?} {ref s}} {block {} {call {ref Emailish?} {ref s}}} {block {} {const none}}}}}
-        {call {ref list} {call {ref f} {const str a@b.io}} {call {ref f} {const str x}} {call {ref f} {const str {}}}}
+            {if {call {ref NonEmpty?} {ref s}}
+                {block {} {call {ref list} {call {ref NonEmpty?} {ref s}} {call {ref string?} {ref s}}}}
+                {block {} {call {ref list} {call {ref NonEmpty?} {ref s}}}}}}}
+        {call {ref list} {call {ref f} {const str a}} {call {ref f} {const str {}}}}
     }
     result-tag-tests {
         {bind r {ok {const 1}}}
@@ -220,43 +138,32 @@ foreach {name exprs} $typeTestCases {
     } -result same
 }
 
-test refined-type-test-fold-1 {a test proven by evidence compiles to a constant} -body {
-    set code [core::compiler::generatedCode {
-        {bind q {call {ref uriEscape} {const str {a b}}}}
-        {call {ref UriQueryValue?} {ref q}}
-    }]
-    list [regexp {acceptsCanonical|native UriQueryValue\?} $code] [regexp {core::web::uriEscape} $code]
-} -result {0 1}
-
 test refined-type-test-fold-2 {a test proven by an enclosing refinement is not repeated} -body {
     set code [core::compiler::generatedCode {
         {bind f {block {s}
-            {if {call {ref Emailish?} {ref s}}
-                {block {} {if {call {ref Emailish?} {ref s}} {block {} {const yes}} {block {} {const no}}}}
+            {if {call {ref NonEmpty?} {ref s}}
+                {block {} {if {call {ref NonEmpty?} {ref s}} {block {} {const yes}} {block {} {const no}}}}
                 {block {} {const no}}}}}
-        {call {ref f} {const str a@b.io}}
+        {call {ref f} {const str a}}
     }]
     list [regexp -all {acceptsCanonical} $code] [regexp {str no\}\s*\n\s*\} else} $code]
 } -result {1 0}
 
 test refined-type-test-fold-3 {an undecided test is inline, not a native call} -body {
-    # Generated code names emailish? (the canonical resolved target), not
-    # the Emailish? spelling this call site used -- same resolved target
-    # regardless of spelling, per R2-ORDINARY-EMAILISH-PREDICATE.md.
     set code [core::compiler::generatedCode {
-        {bind f {block {s} {call {ref Emailish?} {ref s}}}}
-        {call {ref f} {const str a@b.io}}
+        {bind f {block {s} {call {ref NonEmpty?} {ref s}}}}
+        {call {ref f} {const str a}}
     }]
-    list [regexp {callValue} $code] [regexp {core::value::expect str \$v[0-9]+ emailish\?} $code] \
-         [regexp {acceptsCanonical \{refined str Emailish\}} $code]
+    list [regexp {callValue} $code] [regexp {core::value::expect str \$v[0-9]+ NonEmpty\?} $code] \
+         [regexp {acceptsCanonical \{refined str NonEmpty\}} $code]
 } -result {0 1 1}
 
 test refined-type-test-register-1 {type test registration rules} -body {
     set impl {apply {{v} {core::value::true}}}
     lmap options [list \
         [list -arity 2 -tests-type int] \
-        [list -arity 1 -param-types Emailish -tests-type Emailish] \
-        [list -arity 1 -param-types int -tests-type Emailish] \
+        [list -arity 1 -param-types NonEmpty -tests-type NonEmpty] \
+        [list -arity 1 -param-types int -tests-type NonEmpty] \
         [list -arity 1 -result-type int -tests-type int] \
     ] {
         list [catch {core::registerNative test-bad-type-test -impl $impl {*}$options} message] \
@@ -265,10 +172,10 @@ test refined-type-test-register-1 {type test registration rules} -body {
 } -result [lrepeat 4 {1 1}]
 
 test refined-type-test-register-2 {a type test gets bool result and its refinement} -body {
-    set meta [core::native::metadata Emailish?]
+    set meta [core::native::metadata NonEmpty?]
     list [dict get $meta resultType] [dict get $meta paramTypes] [dict get $meta testsType] \
          [dict get $meta refinesTrue] [dict get [core::native::metadata integer?] testsType]
-} -result {bool str {refined str Emailish} {0 {refined str Emailish}} int}
+} -result {bool str {refined str NonEmpty} {0 {refined str NonEmpty}} int}
 
 test refined-type-test-contract {the reference runtime verifies a type test's answers} -setup {
     if {"test-lying-int?" ni [core::native::names]} {

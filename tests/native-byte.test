@@ -2,7 +2,7 @@
 # byte::complement/byte::position_low/byte::position_high (lib/byte.bot)
 # and the generic bit_and/bit_or/bit_xor/shift_left/shift_right primitives
 # (core/scalarbits.tcl) on the native (Cranelift) backend, and web.bot's
-# rewritten high_nibble via bench/refined-checks.ir -- the milestone's
+# rewritten high_nibble via bench/refined-checks.bot -- the milestone's
 # primary acceptance case. See BYTE-NIBBLE-BIT-ARITHMETIC.md.
 #
 # byte::high_nibble/byte::low_nibble/byte::nibble/etc. are ordinary,
@@ -276,17 +276,16 @@ test native-byte-high-nibble-nir-is-mask-not-branch {byte::high_nibble's own NIR
 
 # ---------------------------------------------------------------------------
 # The primary acceptance case: web.bot's high_nibble, exercised through
-# bench/refined-checks.ir on every backend (NATIVE-OPAQUE-REFINEMENT.md's
+# bench/refined-checks.bot on every backend (NATIVE-OPAQUE-REFINEMENT.md's
 # own benchmark, unmodified apart from web.bot's own high_nibble body).
 
-test native-refined-checks-cranelift-value {refined-checks.ir still computes [400, 0] on cranelift after the high_nibble rewrite} -body {
-    set exprs [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]
-    lindex [outcomeUnder cranelift $exprs] 1
+test native-refined-checks-cranelift-value {refined-checks.bot still computes [400, 0] on cranelift after the high_nibble rewrite} -body {
+    lindex [outcomeUnderHir cranelift [refinedChecksSourceHir]] 1
 } -result {[400, 0]}
 
-test native-refined-checks-compile-cranelift-agree {compile and cranelift agree on refined-checks.ir (interp hits Tcl's own recursion limit at this depth, pre-existing and unrelated -- see NATIVE-OPAQUE-REFINEMENT.md \167 12)} -body {
-    set exprs [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]
-    list [outcomeUnder compile $exprs] [outcomeUnder cranelift $exprs]
+test native-refined-checks-compile-cranelift-agree {compile and cranelift agree on refined-checks.bot (interp hits Tcl's own recursion limit at this depth, pre-existing and unrelated -- see NATIVE-OPAQUE-REFINEMENT.md \167 12)} -body {
+    set hir [refinedChecksSourceHir]
+    list [outcomeUnderHir compile $hir] [outcomeUnderHir cranelift $hir]
 } -result {{value {[400, 0]} {}} {value {[400, 0]} {}}}
 
 test native-refined-checks-no-old-ladder {web.bot's high_nibble no longer contains the old 15-branch threshold ladder} -body {

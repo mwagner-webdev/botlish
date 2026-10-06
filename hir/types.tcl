@@ -1290,7 +1290,7 @@ proc hir::types::inferRegion {hirVar region types handler} {
 }
 
 proc hir::types::NewContext {} {
-    return [dict create types {} facts {} returnType never breakTypes {} reachable 1]
+    return [dict create types {} facts {} implies {} returnType never breakTypes {} reachable 1]
 }
 
 # The static type of constant V under aggregate facts.
@@ -1499,24 +1499,6 @@ proc hir::types::BindingType {hir ctx b} {
     }
     if {[dict get $hir bindings $b kind] eq "root"} {
         set value [dict get $hir bindings $b value]
-        if {[core::value::kind $value] eq "native" && [dict exists $hir moduleNativeTargets]} {
-            set name [core::value::nativeName $value]
-            if {[dict exists $hir moduleNativeTargets $name]} {
-                # native::prepareHir (native/prepare.tcl, through
-                # hir::ResolveModuleNativeTargets) redirected native NAME to
-                # an ordinary top-level
-                # function elsewhere in this same HIR: a reference to the
-                # native is typed as a call of that function, not of the
-                # native, on every inference of it (including
-                # hir/specialize.tcl's own per-instance re-inference, which
-                # calls BindingType again -- so this stays correct there
-                # too, unlike a one-shot post-hoc edit of a single call's
-                # `target` field would). Every other backend leaves
-                # moduleNativeTargets unset, so this is a no-op for them.
-                lassign [dict get $hir moduleNativeTargets $name] block arity
-                return [blockType $hir $block $arity any]
-            }
-        }
         return [ofValue $value]
     }
     if {[hir::isModuleBinding $hir $b]} {
@@ -1902,6 +1884,16 @@ proc hir::types::Bind {hirVar ctxVar e} {
     if {$typed} {
         dict set ctx types $b $value
         dict set hir bindings $b type [intern hir $value]
+        if {$value eq "bool"} {
+            # What the Boolean value implies is a property of the value, so
+            # it belongs to the immutable binding that holds it: `ok =
+            # p(s)` then `if ok:` proves what `if p(s):` would
+            # (REFINEMENT-VALUES.md, hir/refine.tcl's Implication).
+            set implication [hir::refine::Implication $hir $ctx $valueExpr]
+            if {$implication ne [hir::refine::Nothing]} {
+                dict set ctx implies $b $implication
+            }
+        }
     }
     return $value
 }
@@ -1952,6 +1944,7 @@ proc hir::types::Block {hirVar outerVar e self} {
         set ctx [NewContext]
         dict set ctx types [dict get $outer types]
         dict set ctx facts [dict get $outer facts]
+        dict set ctx implies [dict get $outer implies]
         if {[dict exists $outer inst]} {
             dict set ctx inst [dict get $outer inst]
         }
@@ -1989,32 +1982,6 @@ proc hir::types::Block {hirVar outerVar e self} {
     if {$declared ne {}} { set result $declared }
     dict set hir exprs $e resultType [intern hir $result]
     return [blockType $hir $e $arity $result]
-}
-
-# The native NAME a reference to a *module-bridged* type-test predicate
-# denotes, when CALLEEEXPR's own reported type was redirected from
-# {native NAME} to {block ...} by the module-native bridge (BindingType's
-# moduleNativeTargets case, above) -- so a bridged predicate's known-folding
-# (this proc, below) and branch refinement (hir/refine.tcl) still key off its
-# real semantic identity, the same way an unbridged native predicate's always
-# have, even though its call *target* for lowering purposes is the ordinary
-# resolved module function BindingType redirected it to. "" if CALLEEEXPR is
-# not such a reference (an ordinary block call, or a native the bridge never
-# retyped). Never consulted for a plain {native NAME} callee: that case
-# already has its own name directly, with no redirection to see through.
-proc hir::types::BridgedNative {hir calleeExpr} {
-    if {[hir::kind $hir $calleeExpr] ne "ref"} {
-        return ""
-    }
-    set b [hir::get $hir $calleeExpr binding]
-    if {$b eq "" || [dict get [hir::binding $hir $b] kind] ne "root"} {
-        return ""
-    }
-    set value [dict get [hir::binding $hir $b] value]
-    if {[core::value::kind $value] ne "native"} {
-        return ""
-    }
-    return [core::value::nativeName $value]
 }
 
 proc hir::types::Call {hirVar ctxVar e} {
@@ -2105,31 +2072,23 @@ proc hir::types::Call {hirVar ctxVar e} {
     } elseif {[IsExactBlock $calleeType]} {
         lassign $calleeType _ block arity blockResult
         set target [list block $block]
-        if {[llength $argTypes] == 1} {
-            # A module-bridged type-test predicate (BridgedNative, above):
-            # its call target is the ordinary resolved module function, but
-            # its known-folding still uses its real native identity, exactly
-            # as an unbridged native predicate's always has -- both spellings
-            # of a compatibility-aliased predicate share this identity
-            # (core::native::alias), so this is spelling-independent.
-            set bridged [BridgedNative $hir [dict get $node callee]]
-            if {$bridged ne "" && [dict get [core::native::metadata $bridged] testsType] ne ""} {
-                set known [hir::refine::decideTypeTest $bridged [lindex $argTypes 0]]
+        if {$known eq "" && !$dead && [hir::refine::ProofsOf $hir $block] ne {}} {
+            # An exact predicate-result fact (REFINEMENT-VALUES.md): this
+            # very invocation -- the same proof-producing function on the
+            # same argument values -- already returned a known result on
+            # every path reaching here, and the function is repeatable
+            # (hir/repeatable.tcl), so the call is decided. A refinement
+            # fact about the argument alone never decides it: another
+            # function proving the same refinement need not return true.
+            set key [hir::refine::CallKey $hir $block $argExprs]
+            if {$key ne "" && [dict exists $ctx facts $key] && [hir::repeatable::Block $hir $block]} {
+                set known [dict get $ctx facts $key]
             }
         }
         if {$arity == [llength $argExprs]} {
             set result $blockResult
             if {$spec && !$dead && [dict get $ctx reachable]} {
                 set result [{*}[dict get $ctx spec] call $e $block $argTypes]
-            }
-            if {!$dead && [dict exists $node nativeResultOverride]} {
-                # A trusted native's declared result type survives the
-                # native-body attachment of native::prepareHir:
-                # still run the spec handler above unconditionally, so
-                # instance discovery/edges for the substituted body are
-                # unaffected, but the call's own *type* is the registered
-                # one, not whatever the body block infers.
-                set result [dict get $node nativeResultOverride]
             }
             if {!$dead} {
                 # An intrinsic container rule of the resolved callee
@@ -2139,8 +2098,7 @@ proc hir::types::Call {hirVar ctxVar e} {
                 set rule [hir::containers::RuleOf $hir $block]
                 if {$rule ne ""} {
                     set result [hir::containers::CallResult $rule $argTypes $result]
-                } elseif {!$spec && [dict get $ctx reachable]
-                        && ![dict exists $node nativeResultOverride]} {
+                } elseif {!$spec && [dict get $ctx reachable]} {
                     # An opportunistic semantic instance of the callee
                     # (hir/semantic.tcl): its ordinary body analyzed under
                     # this call's concrete argument types. The call is
@@ -2246,6 +2204,7 @@ proc hir::types::If {hirVar ctxVar e} {
 
     set known ""
     set refinements [dict create 1 {} 0 {}]
+    set implication [hir::refine::Nothing]
     if {[dict exists $ctx spec] && [kindOf $test] ni {"" bool}} {
         # Region inference: the condition is statically not a Boolean, so
         # the if always raises NOT-BOOLEAN.
@@ -2258,21 +2217,49 @@ proc hir::types::If {hirVar ctxVar e} {
             # The if raises unless the condition is a Boolean.
             Narrow $hir ctx [ValueBinding $hir $condition] bool
         }
-        set refinements [hir::refine::branchFacts $hir $condition]
+        set implication [hir::refine::Implication $hir $ctx $condition]
+        set refinements [hir::refine::branchFacts $hir $condition $ctx]
     }
     dict set hir exprs $e refinements $refinements
 
     set branchTypes [dict create]
+    set saved [dict get $ctx facts]
+    set ends {}
     foreach {outcome role} {1 then 0 else} {
-        set saved [dict get $ctx facts]
-        dict set ctx reachable [expr {$live && ($known eq "" || $known == $outcome)}]
+        set reachable [expr {$live && ($known eq "" || $known == $outcome)}]
+        dict set ctx reachable $reachable
         dict set hir scopes [dict get $node ${role}Scope] refinements [dict get $refinements $outcome]
         foreach {b fact} [dict get $refinements $outcome] {
             Narrow $hir ctx $b $fact
         }
+        if {$test ne "never" && [dict get $implication $outcome] ne "never"} {
+            # The exact predicate results this outcome establishes
+            # (hir/refine.tcl's call keys), for Call's decided repeats.
+            dict for {key value} [dict get $implication $outcome] {
+                if {[hir::refine::IsCallKey $key]} {
+                    dict set ctx facts $key $value
+                }
+            }
+        }
         dict set branchTypes $outcome [Sequence hir ctx [dict get $node ${role}Body]]
+        if {$reachable && [dict get $branchTypes $outcome] ne "never"} {
+            lappend ends [dict get $ctx facts]
+        }
         dict set ctx facts $saved
         dict set ctx reachable $entry
+    }
+    if {$ends ne {}} {
+        # The join (REFINEMENT-VALUES.md): a fact survives the if exactly
+        # when it holds at the end of every branch that completes normally
+        # -- a branch that returns, fails or breaks contributes nothing,
+        # like a never-completing branch contributes nothing to the if's
+        # value type. Facts about one binding join by lub; an exact
+        # predicate result survives when every such branch agrees.
+        set joined [lindex $ends 0]
+        foreach end [lrange $ends 1 end] {
+            set joined [hir::refine::Meet $joined $end 1]
+        }
+        dict set ctx facts $joined
     }
     if {$test eq "never"} {
         return never

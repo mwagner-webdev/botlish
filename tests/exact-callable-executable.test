@@ -182,8 +182,8 @@ test exact-callable-executable-bench-refined-checks {the real bench/refined-chec
     fconfigure $channel -encoding utf-8
     set text [read $channel]
     close $channel
-    # cranelift-generic (-specialize 0) cannot compile the validator
-    # predicate UriQueryValue? this program calls (pre-existing).
+    # cranelift-generic (-specialize 0) is left out as before (it once
+    # could not compile the old UriQueryValue? root native; it can now).
     aotParity $text 0 {interp compile cranelift}
 } -result {[400, 0]}
 

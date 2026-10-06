@@ -80,8 +80,7 @@
 # scalar of a longer string.
 #
 # native/src/runtime/ops.rs's rt_is_tcl_alpha/rt_is_tcl_alnum are the
-# Cranelift-native counterpart used through -native-body (see
-# core::type::definePredicate and lib/web.tcl's Emailish); this file (Tcl's
+# Cranelift-native counterpart (used by lib/web.bot's emailish?); this file (Tcl's
 # own built-in `string is alpha -strict`/`string is alnum -strict`, verified
 # identical to `regexp {^[:alpha:]$}`/`{^[:alnum:]}$}` on the same corpus)
 # stays authoritative for interp/compile and for the reference contract
@@ -109,7 +108,11 @@ proc core::tclcompat::isTclAlnum {c} {
     return [core::value::bool [string is alnum -strict $text]]
 }
 
+# Both are context-free value operations (a pure function of the String
+# argument, no I/O or process state): a module initializer may call them, and
+# a function calling them can be repeatable (hir/repeatable.tcl,
+# REFINEMENT-VALUES.md).
 core::native::register str::is_tcl_alpha -arity 1 -impl core::tclcompat::isTclAlpha \
-    -param-types {str} -result-type bool -runtime {char-index range-check}
+    -param-types {str} -result-type bool -runtime {char-index range-check} -context-free 1
 core::native::register str::is_tcl_alnum -arity 1 -impl core::tclcompat::isTclAlnum \
-    -param-types {str} -result-type bool -runtime {char-index range-check}
+    -param-types {str} -result-type bool -runtime {char-index range-check} -context-free 1

@@ -646,8 +646,8 @@ proc hir::specialize::Intersect {a b} {
 # A call's argument that is anything other than an unchanged forward of the
 # very parameter it feeds contributes its own semantic type's evidence
 # (hir/types.tcl's Call already computed this on the first, generic pass --
-# including, through a call's nativeResultOverride, a trusted native's
-# declared result). A transformed value (e.g. str::concat(q, "")) has no
+# a refinement proven by a proof-producing function in a caller's branch,
+# REFINEMENT-VALUES.md, or a native's declared result). A transformed value (e.g. str::concat(q, "")) has no
 # evidence in its own semantic type unless the operation is itself known to
 # preserve it, so it correctly contributes {} -- dropping the fact for that
 # parameter unless some other call proves it independently.

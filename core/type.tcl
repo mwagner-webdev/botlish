@@ -6,36 +6,38 @@
 #                             every value of that kind (a *primitive* type)
 #   any                       every value
 #   {refined BASE {NAME...}}  values of kind BASE that satisfy every named
-#                             type NAME (an *evidence set*, sorted, unique)
+#                             type NAME (sorted, unique)
 #
-# A registered name may be written alone as shorthand: Emailish means
-# {refined str {Emailish}}. normalize produces the canonical form, and all
+# A registered name may be written alone as shorthand: Byte means
+# {refined int {Byte}}. normalize produces the canonical form, and all
 # registries store canonical types.
 #
-# Named types are registered from Tcl:
+# A named type is one of two kinds:
 #
-#   core::type::register Emailish -base str -validator {core::regex::matches $re}
-#   core::type::register UriQueryValue -base str -opaque 1
+#   * a *validator* type is structural: a command prefix, called with the
+#     value, decides membership (1/0). The integer domains Botlish source
+#     declares ("type Byte = Int in 0..255", lib/byte.bot) are validator
+#     types (-integer-domain, which supplies the validator; see
+#     SOURCE-DEFINED-INTEGER-DOMAINS.md); so are the Result tags
+#     (core/predicates.tcl). -source marks a source-declared entry, purely so
+#     hir/sourcetypes.tcl can unregister it again between compilations
+#     (core::type::unregister) -- everything else about it (validation,
+#     subtyping, facts) is identical to a Tcl-registered type.
+#   * a *refinement* type (-refinement, REFINEMENT-VALUES.md) is nominal:
+#     "refined type Emailish = str" declares a new type whose values are
+#     exactly values of its carrier type known, by a proof, to satisfy its
+#     proposition. Membership is a static proof fact only -- established by
+#     a proof-producing function of the declaring module (`proves`), never by
+#     a runtime test -- and a refined value has exactly its carrier's runtime
+#     representation: no evidence, tag or wrapper. Its parents are its
+#     carrier's own named types, so it is a subtype of its carrier (and of
+#     its carrier's carrier): forgetting a refinement is ordinary subtyping.
 #
-# A named integer-domain refinement ("type Byte = Int in 0..255",
-# lib/byte.bot) is the one thing Botlish source itself can declare
-# directly, via -integer-domain below; hir/sourcetypes.tcl turns such a
-# declaration into exactly the -integer-domain register call this file
-# always accepted (see SOURCE-DEFINED-INTEGER-DOMAINS.md). -source below
-# marks such an entry, purely so hir/sourcetypes.tcl can unregister it
-# again between compilations (core::type::unregister) -- everything else
-# about it (validation, subtyping, facts) is identical to a Tcl-registered
-# type.
-#
-# A *validator* type is structural: a command prefix, called with the value,
-# decides membership (1/0). An *opaque* type has no validator: a value
-# belongs to it only if it carries runtime *evidence* of the type, which only
-# trusted natives attach (core::value::withEvidence). Evidence on a value of a
-# validator type is an optimization; evidence of an opaque type is the only
-# proof there is.
-#
-# The interpreter is the specification of these rules; the compiler
-# (compiler/types.tcl) consumes the same definitions for its static types.
+# Values carry no type information beyond their kind: there is no runtime
+# evidence (Strings used to carry "evidence" of opaque named types, attached
+# by trusted natives; REFINEMENT-VALUES.md replaced that with source-level
+# proofs). The interpreter is the specification of these rules; the compiler
+# (hir/types.tcl) consumes the same definitions for its static types.
 
 namespace eval core::type {
     # UnicodeChar is a builtin primitive here (not a source-defined int
@@ -60,9 +62,9 @@ namespace eval core::type {
     # field types, a named struct's declaration -- are HIR static types
     # (hir/types.tcl), exactly as {list ELEM} refines the bare `list` kind.
     variable primitives {int str bool unit list result block native mutarray UnicodeChar immutableSet struct}
-    # Kinds whose runtime representation can carry evidence (see value.tcl).
-    variable evidenceKinds {str}
-    # NAME -> {name NAME base KIND validator CMD opaque 0|1}
+    # NAME -> {name NAME base KIND validator CMD parents {NAME...}
+    # integerDomain DOMAIN source 0|1 refinement {} | {carrier TYPE owner NS
+    # span SPAN}}
     variable registry [dict create]
 }
 
@@ -71,7 +73,6 @@ namespace eval core::type {
 
 proc core::type::register {name args} {
     variable primitives
-    variable evidenceKinds
     variable registry
     # A source-declared type of a module is named `NAMESPACE::Name` (its
     # qualified identity, hir/sourcetypes.tcl); a nested namespace has more
@@ -86,9 +87,10 @@ proc core::type::register {name args} {
     if {[llength $args] % 2} {
         error "core::type::register: options must be -option value pairs"
     }
-    set options [dict create -base "" -validator "" -opaque 0 -source 0]
+    set options [dict create -base "" -validator "" -source 0]
     dict set options -parents {}
     dict set options -integer-domain {}
+    dict set options -refinement {}
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "core::type::register: unknown option \"$option\""
@@ -97,36 +99,78 @@ proc core::type::register {name args} {
     }
     set base [dict get $options -base]
     set validator [dict get $options -validator]
-    set opaque [dict get $options -opaque]
     set parents [dict get $options -parents]
     set integerDomain [dict get $options -integer-domain]
     set source [dict get $options -source]
+    set refinement [dict get $options -refinement]
     if {$base ni $primitives} {
         error "core::type::register: -base must be one of: $primitives"
     }
+    if {$refinement ne {}} {
+        # A nominal refinement (REFINEMENT-VALUES.md): no validator, no
+        # runtime evidence, no domain -- membership is a static proof fact
+        # only, established by a proof-producing function of its owner.
+        # Its parents are the evidence its carrier type already has, so
+        # forgetting is subtyping (evidenceClosure) and needs no rule here.
+        if {$validator ne "" || $integerDomain ne {}} {
+            error "core::type::register: -refinement excludes -validator and -integer-domain"
+        }
+        if {[catch {dict get $refinement carrier; dict get $refinement owner}]} {
+            error "core::type::register: -refinement must be a {carrier TYPE owner NAMESPACE ...} dict"
+        }
+        set carrier [normalize [dict get $refinement carrier]]
+        if {[base $carrier] ne $base || [lsort [evidenceOf $carrier]] ne [lsort $parents]} {
+            error "core::type::register: a refinement's -base and -parents are its carrier's base and evidence"
+        }
+        dict set refinement carrier $carrier
+    }
     if {$integerDomain ne {}} {
-        if {$base ne {int} || $validator ne {} || $opaque} {
+        if {$base ne {int} || $validator ne {}} {
             error {core::type::register: -integer-domain requires -base int and supplies the validator}
         }
         set integerDomain [NormalizeIntegerDomain $integerDomain]
         set validator [list core::type::IntegerDomainValidator $integerDomain]
     }
-    if {$opaque ni {0 1}} {
-        error "core::type::register: -opaque must be 0 or 1"
-    }
-    if {($validator ne "") == $opaque} {
-        error "core::type::register: \"$name\" needs exactly one of -validator or -opaque 1"
-    }
-    if {$opaque && $base ni $evidenceKinds} {
-        error "core::type::register: opaque types need a base that carries evidence ($evidenceKinds)"
+    if {($refinement eq {}) == ($validator eq "")} {
+        error "core::type::register: \"$name\" needs exactly one of -validator or -refinement"
     }
     foreach parent $parents {
         if {![dict exists $registry $parent]} { error [format {core::type::register: unknown parent type %s} $parent] }
         if {[dict get $registry $parent base] ne $base} { error [format {core::type::register: parent %s has a different base} $parent] }
     }
-    dict set registry $name [dict create name $name base $base validator $validator opaque $opaque \
-        parents $parents integerDomain $integerDomain source $source]
+    dict set registry $name [dict create name $name base $base validator $validator \
+        parents $parents integerDomain $integerDomain source $source refinement $refinement]
     return $name
+}
+
+# 1 if NAME is a nominal refinement type (REFINEMENT-VALUES.md): declared
+# `refined type NAME = CARRIER`, a member exactly when a proof says so.
+proc core::type::isRefinement {name} {
+    variable registry
+    return [expr {[dict exists $registry $name] && [dict get $registry $name refinement] ne {}}]
+}
+
+# The refinement metadata of NAME: {carrier TYPE owner NAMESPACE ...}, the
+# carrier its canonical type and the owner the exact declaring module ("" for
+# the entry program) -- the one module that may mint NAME.
+proc core::type::refinementOf {name} {
+    return [dict get [metadata $name] refinement]
+}
+
+# The one refinement name TYPE denotes, when TYPE is exactly a nominal
+# refinement type (its evidence set is one refinement and what that
+# refinement's carrier already implies), else "".
+proc core::type::refinementName {type} {
+    if {[catch {normalize $type} type] || [lindex $type 0] ne "refined"} {
+        return ""
+    }
+    set names [evidenceOf $type]
+    foreach name $names {
+        if {[isRefinement $name] && [lsort [evidenceClosure $type]] eq [lsort [evidenceClosure $name]]} {
+            return $name
+        }
+    }
+    return ""
 }
 
 # Removes a -source 1 type NAME from the registry (hir/sourcetypes.tcl's own
@@ -341,7 +385,11 @@ proc core::type::integerFacts {type} {
     set type [normalize $type]
     if {[base $type] ne {int}} { return {} }
     set result {}
-    foreach name [evidenceOf $type] {
+    # The closure, not only the names: a refinement of an integer domain
+    # (REFINEMENT-VALUES.md) has no domain of its own and inherits its
+    # carrier's (an integer domain's own parents already imply its domain,
+    # so for those the closure adds nothing new).
+    foreach name [evidenceClosure $type] {
         set domain [dict get [metadata $name] integerDomain]
         if {$domain eq {}} { continue }
         if {[lindex $domain 0] eq {interval}} {
@@ -374,51 +422,22 @@ proc core::type::IntersectIntegerFacts {a b} {
 # requires a value of the type's base kind and answers whether it satisfies
 # NAME. It is declared a type test of NAME (see native.tcl -tests-type), so
 # it refines its argument to NAME in the true branch and compilers may
-# decide it from static types.
-#
-# NATIVEBODY, if given, is a (block {v} BODY...) core IR node (see
-# core/native.tcl's -native-body) computing the same 0/1 membership as
-# NAME's -validator, in ordinary Botlish over other natives -- forwarded
-# verbatim to -native-body. It is meaningful only for a *validator-backed*
-# NAME: PredicateImpl's contract is core::type::validate, which for a
-# validator type is "evidence, or run the validator" (never revalidate an
-# opaque type -- see core::type::validate above), so NATIVEBODY must
-# likewise decide membership without evidence, exactly as the validator
-# does. Passing one for an opaque NAME would be wrong (it has no validator
-# to reproduce: only evidence proves membership) and is not done by any
-# caller today. Omitted (the default): the predicate has no -native-body,
-# exactly as before -- the native (Cranelift) backend has no executable
-# form of it and rejects a dynamic call, whether NAME is opaque or
-# validator-backed. This is what lets validator-backed named-type
-# predicates run natively in general, through the same call-site body
-# attachment native::prepareHir (native/prepare.tcl) already gives any
-# native (see NATIVE-EMAILISH.md): native/lower.tcl needs no named-type
-# awareness at all.
-#
-# MODULEFN, if given, is a {NAMESPACE NAME} pair forwarded verbatim to
-# -module-fn (core/native.tcl): an ordinary cross-file Botlish function the
-# native (Cranelift) backend calls directly for a call this type test's own
-# `known` folding (hir/types.tcl's Call, via decideTypeTest) does not already
-# decide statically -- see R2-ORDINARY-EMAILISH-PREDICATE.md. Unlike
-# NATIVEBODY, this keeps the predicate's own {native NAME} identity intact
-# for every reference (hir/types.tcl's BridgedNative), so its known-folding
-# and branch refinement (hir/refine.tcl) survive on every backend, and its
-# call target is one ordinary, shared, resolved function rather than a
-# literal pasted into every call site. A caller should give a predicate at
-# most one of NATIVEBODY or MODULEFN (both are accepted by core::native::
-# register, but no current predicate needs both).
-proc core::type::definePredicate {name {predicateName ""} {nativeBody ""} {moduleFn ""}} {
+# decide it from static types. Only a validator type has one: a refinement
+# type's membership is a proof, not a runtime test, and its predicates are
+# the owner's own proof-producing functions (REFINEMENT-VALUES.md).
+proc core::type::definePredicate {name {predicateName ""}} {
     if {$predicateName eq ""} {
         set predicateName $name?
     }
-    set base [dict get [metadata $name] base]
+    set meta [metadata $name]
+    if {[dict get $meta refinement] ne {}} {
+        error "core::type::definePredicate: \"$name\" is a refinement type: its membership is proven by its owner's proof-producing functions, never tested at run time"
+    }
+    set base [dict get $meta base]
     return [core::native::register $predicateName -arity 1 \
         -impl [list core::type::PredicateImpl $name] \
         -param-types [list $base] \
-        -tests-type [list refined $base [list $name]] \
-        -runtime evidence \
-        -native-body $nativeBody \
-        -module-fn $moduleFn]
+        -tests-type [list refined $base [list $name]]]
 }
 
 # The runtime has already checked the base kind (a -tests-type contract).
@@ -578,10 +597,10 @@ proc core::type::show {type} {
 # ---------------------------------------------------------------------------
 # Values
 
-# The type a value demonstrably has without running validators: its kind,
-# refined by the evidence it carries.
+# The type a value demonstrably has without running validators: its kind
+# (a value carries no named-type information, REFINEMENT-VALUES.md).
 proc core::type::ofValue {v} {
-    return [Make [core::value::kind $v] [core::value::evidence $v]]
+    return [core::value::kind $v]
 }
 
 # Runs NAME's validator on V (which must have NAME's base kind). Returns 1/0.
@@ -599,11 +618,18 @@ proc core::type::validate {name v} {
     if {[core::value::kind $v] ne [dict get $meta base]} {
         return 0
     }
-    if {[core::value::hasEvidence $v $name]} {
+    if {[dict get $meta refinement] ne {}} {
+        # A refinement's proposition is a static proof fact with no runtime
+        # representation (REFINEMENT-VALUES.md): a value carries no tag that
+        # could say it was proven, so the runtime can check only that it is
+        # a value of the carrier. Static typing is what guarantees the rest
+        # (hir/types.tcl's invariant, for a refinement, is exactly this).
+        foreach parent [dict get $meta parents] {
+            if {![validate $parent $v]} {
+                return 0
+            }
+        }
         return 1
-    }
-    if {[dict get $meta opaque]} {
-        return 0
     }
     return [runValidator $name $v]
 }

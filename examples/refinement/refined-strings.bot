@@ -1,0 +1,51 @@
+# Refinement values (REFINEMENT-VALUES.md): web::Emailish and
+# web::UriQueryValue are ordinary source declarations of lib/web.bot,
+#
+#   refined type Emailish = str
+#   fn emailish?(v: str) -> bool proves v: Emailish
+#   refined type UriQueryValue = str
+#   fn uri_query_value?(value: str) -> bool proves value: UriQueryValue
+#
+# address  - web::emailish? proves the address an Emailish in its true
+#            branch, so it may be passed where one is required (contact),
+#            and it is still a str wherever a str is wanted (str::length).
+# query    - web::uri_escape_text returns a plain str; web::uri_query_value?
+#            proves it a UriQueryValue.
+# prefix   - substring returns the carrier: a plain str, not a refinement.
+#            The length guard proves the slice 0..3 in bounds, so
+#            str::substring's LowerUnderrun/UpperOverrun need no handler.
+#
+# A refined value is its carrier at run time: it prints, compares and hashes
+# as the String it is, with no tag, wrapper or allocation of its own.
+#
+# expect: [12, "a%26b%3Dc", "a%2", true]
+
+import str
+import web
+
+fn contact(address: web::Emailish) -> int:
+    str::length(address)
+
+fn safe(query: web::UriQueryValue) -> str:
+    query
+
+address = "foo@x.com.au"
+
+n = if web::emailish?(address):
+    contact(address)
+else:
+    0
+
+raw = web::uri_escape_text("a&b=c")
+
+query = if web::uri_query_value?(raw):
+    safe(raw)
+else:
+    ""
+
+prefix = if str::length(query) < 3:
+    ""
+else:
+    str::substring(query, 0, 3)
+
+[n, query, prefix, query == "a%26b%3Dc"]

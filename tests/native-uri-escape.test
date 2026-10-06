@@ -1,76 +1,59 @@
 # native-uri-escape.test -- str::encode_utf8 (core/strings.tcl, general: a
-# String's UTF-8 encoding as a List of Int, one per byte) and uriEscape's
-# -native-body (lib/web.tcl, core/native.tcl): the ordinary-Botlish
-# implementation the native (Cranelift) backend runs instead of requiring
-# an entry in native/lower.tcl's own op whitelist. See NATIVE-URI-ESCAPE.md.
+# String's UTF-8 encoding as a List of Int, one per byte) and
+# web::uri_escape_text / web::uri_query_value? (lib/web.bot), the ordinary
+# Botlish percent-encoding algorithm and the proof-producing predicate of the
+# web::UriQueryValue refinement. See NATIVE-URI-ESCAPE.md for the algorithm's
+# history and REFINEMENT-VALUES.md for the refinement.
 #
-# str::encode_utf8 is checked four-way (interp, compile, cranelift-generic,
-# cranelift): nothing about it involves evidence, so its value must be
-# byte-identical everywhere. uriEscape is checked for its escaped *text* on
-# all four backends, and separately for its UriQueryValue *evidence*, which
-# only interp/compile can show (core/type.tcl: only a trusted native -impl
-# may mint evidence for an opaque type; the native backend's -native-body
-# never does, by design -- see lib/web.tcl's own comment on this). That
-# split -- not a text mismatch -- is the only difference parity is allowed
-# to find here.
+# Everything is checked four-way (interp, compile, cranelift-generic,
+# cranelift): a refined value is its carrier, so no backend may differ. The
+# escaping is also checked against an independent Tcl reference (the former
+# lib/web.tcl uriEscape implementation, uriEscapeReference below).
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 
 set parityBackends {interp compile cranelift-generic cranelift}
 
-# The plain (evidence-stripped) text of EXPRS's value under BACKEND: fails
-# the test immediately (via outcomeUnder's own error propagation) if EXPRS
-# does not evaluate to a String.
-proc textUnder {backend exprs} {
-    lassign [outcomeUnder $backend $exprs] kind shown
-    if {$kind ne "value"} {
-        error "expected a value under $backend, got: $shown"
-    }
-    # shown is core::value::show ... 1 -- a quoted string, optionally
-    # followed by #{...} evidence; strip both back to the plain text so
-    # this compares the same thing str::encode_utf8/uriEscape's own callers
-    # would ever compare (core::value::equal ignores evidence the same
-    # way -- see core/type.tcl's header).
-    return [string range $shown 1 [expr {[string last \" $shown] - 1}]]
-}
-
-# 1 if EXPRS's value under BACKEND is a str carrying UriQueryValue evidence.
-proc hasUriQueryEvidence {backend exprs} {
-    lassign [outcomeUnder $backend $exprs] kind shown
-    return [expr {$kind eq "value" && [string match {*#{UriQueryValue}*} $shown]}]
-}
-
-proc errorCodeOfUnder {backend exprs} {
-    set saved [core::useBackend]
-    core::useBackend $backend
-    try {
-        if {[catch {core::evalProgram $exprs} message options]} {
-            return [dict get $options -errorcode]
-        }
-        return "no error; value [core::formatValue $message]"
-    } finally {
-        core::useBackend $saved
-    }
-}
-
-proc textParity {exprs} {
-    set texts [lmap b $::parityBackends {textUnder $b $exprs}]
-    if {[llength [lsort -unique $texts]] != 1} {
-        error "text mismatch across $::parityBackends: $texts"
-    }
-    return [lindex $texts 0]
-}
-
 proc encodeUtf8Program {s} {
     return [list [list call {ref str::encode_utf8} [list const str $s]]]
 }
 
-proc uriEscapeProgram {s} {
-    return [list [list call {ref uriEscape} [list const str $s]]]
+# S as a Botlish string literal.
+proc botString {s} {
+    return "\"[string map {\\ \\\\ \" \\\" \n \\n} $s]\""
+}
+
+# Percent-encodes every byte of the UTF-8 form of S except the RFC 3986
+# unreserved characters: the reference the Botlish algorithm must match.
+proc uriEscapeReference {s} {
+    set escaped ""
+    foreach byte [split [encoding convertto utf-8 $s] ""] {
+        if {[regexp {^[A-Za-z0-9._~-]$} $byte]} {
+            append escaped $byte
+        } else {
+            scan $byte %c code
+            append escaped [format %%%02X $code]
+        }
+    }
+    return $escaped
+}
+
+# The text web::uri_escape_text(S) has on every backend (a Tcl error if they
+# disagree, or if it differs from the reference).
+proc escapeText {s} {
+    set outcome [sourceAgree "import web\nweb::uri_escape_text([botString $s])\n"]
+    if {[lindex $outcome 0] ne "value"} {
+        error "web::uri_escape_text raised: $outcome"
+    }
+    set text [string range [lindex $outcome 1] 1 end-1]
+    if {$text ne [uriEscapeReference $s]} {
+        error "web::uri_escape_text gives $text, the reference [uriEscapeReference $s]"
+    }
+    return $text
 }
 
 # ---------------------------------------------------------------------------
-# str::encode_utf8: four-way value parity (no evidence involved at all).
+# str::encode_utf8: four-way value parity.
 
 foreach {name s expect} {
     empty        {}      {[]}
@@ -91,8 +74,9 @@ foreach {name s expect} {
 }
 
 # ---------------------------------------------------------------------------
-# uriEscape: text parity across all four backends (RFC 3986 unreserved set:
-# A-Za-z0-9._~-; everything else percent-encoded, byte by byte).
+# web::uri_escape_text: text parity across all four backends and with the
+# reference (RFC 3986 unreserved set: A-Za-z0-9._~-; everything else
+# percent-encoded, byte by byte).
 
 foreach {name s expect} {
     empty         {}                    {}
@@ -103,57 +87,60 @@ foreach {name s expect} {
     astral        😀                    %F0%9F%98%80
     percent-like  {50%}                 50%25
 } {
-    test native-uri-escape-text-$name "uriEscape($s) text agrees across interp/compile/cranelift-generic/cranelift" -body {
-        textParity [uriEscapeProgram $s]
+    test native-uri-escape-text-$name "web::uri_escape_text($s) text agrees across interp/compile/cranelift-generic/cranelift" -body {
+        escapeText $s
     } -result $expect
 }
 
 # ---------------------------------------------------------------------------
-# Evidence: interp and compile attach UriQueryValue; the native backend's
-# -native-body deliberately does not (it cannot -- see this file's header).
-# This is the one place these backends are *expected* to disagree, and the
-# disagreement is exactly this, nothing else.
+# web::uri_query_value?: the structural proposition of web::UriQueryValue --
+# unreserved characters and "%XX" triplets of uppercase hex digits only.
+# Every escaped text passes; text that is not safe to embed does not.
 
-test native-uri-escape-evidence-interp {interp's uriEscape result carries UriQueryValue evidence} -body {
-    hasUriQueryEvidence interp [uriEscapeProgram {a b}]
-} -result 1
+foreach {name s expect} {
+    escaped-space      a%20b          true
+    unreserved         a~b_c-d.e      true
+    empty              {}             true
+    escaped-astral     %F0%9F%98%80   true
+    raw-space          {a b}          false
+    raw-percent        {50%}          false
+    truncated-escape   %2             false
+    lowercase-hex      %2f            false
+    non-hex            %G0            false
+    raw-non-ascii      é              false
+    reserved           a&b=c          false
+} {
+    test native-uri-escape-query-value-$name "web::uri_query_value?($s) is $expect on every backend" -body {
+        sourceAgree "import web\nweb::uri_query_value?([botString $s])\n"
+    } -result [list value $expect]
+}
 
-test native-uri-escape-evidence-compile {compile's uriEscape result carries UriQueryValue evidence} -body {
-    hasUriQueryEvidence compile [uriEscapeProgram {a b}]
-} -result 1
+test native-uri-escape-escaped-is-query-value {web::uri_query_value? accepts what web::uri_escape_text produces, on every backend} -body {
+    sourceAgree {import web
 
-test native-uri-escape-evidence-cranelift {cranelift's uriEscape result is plain text, no evidence} -body {
-    hasUriQueryEvidence cranelift [uriEscapeProgram {a b}]
-} -result 0
+texts = ["", "a b", "someone@example.com", "é", "😀", "50%", "a&b=c", "déjà vu"]
+loop t in texts:
+    web::uri_query_value?(web::uri_escape_text(t))
+}
+} -result {value {[true, true, true, true, true, true, true, true]}}
+
+test native-uri-escape-query-value-repeatable {web::uri_query_value? is proven repeatable} -body {
+    set hir [surface::compile "import web\nweb::uri_query_value?(\"a\")\n" -warnings off]
+    set binding [hir::get $hir [lindex [hirFind $hir ref web::uri_query_value?] 0] binding]
+    hir::repeatable::explain $hir [hir::get $hir [dict get [hir::binding $hir $binding] declaredBy] value]
+} -result {}
 
 # ---------------------------------------------------------------------------
-# GC stress: str::encode_utf8 and uriEscape both allocate on the native backend
-# (a List, and a chain of Strings/Lists respectively).
+# GC stress: str::encode_utf8 and the escaping both allocate on the native
+# backend (a List, and a chain of Strings/Lists respectively).
 
-test native-uri-escape-gc-stress {uriEscape survives a collection forced before every allocation} -body {
+test native-uri-escape-gc-stress {web::uri_escape_text survives a collection forced before every allocation} -body {
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
     try {
-        lindex [outcomeUnder cranelift [uriEscapeProgram {a b c déjà vu 😀}]] 0
+        lrange [outcomeUnderHir cranelift [surface::compile "import web\nweb::uri_query_value?(web::uri_escape_text(\"a b c déjà vu 😀\"))\n" -warnings off]] 0 1
     } finally {
         unset ::env(BOTLISH_NATIVE_GC_STRESS)
     }
-} -result {value}
-
-# ---------------------------------------------------------------------------
-# refined-checks.ir's own blocker: uriEscape's native lowering now succeeds
-# (its -native-body needs no native/lower.tcl op-whitelist entry), so the
-# benchmark's Cranelift compilation progresses past uriEscape. At the time
-# this milestone (see NATIVE-URI-ESCAPE.md) landed, the next blocker was
-# Emailish?; the NATIVE-TCL-UNICODE.md milestone later gave Emailish? a
-# -native-body too, so the blocker has since moved again, to the opaque
-# UriQueryValue? (see tests/native-tcl-unicode.test). This test only pins
-# "uriEscape itself is not the blocker" -- which UNSUPPORTED native is
-# reported here is a later milestone's concern, tracked in its own test
-# file, not this one's.
-test native-uri-escape-refined-checks-blocker {refined-checks.ir's native blocker is no longer uriEscape} -body {
-    set exprs [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]
-    set code [errorCodeOfUnder cranelift $exprs]
-    return [expr {$code eq {NATIVE UNSUPPORTED {native uriEscape}} ? "still uriEscape: $code" : "not uriEscape"}]
-} -result {not uriEscape}
+} -result {value true}
 
 ::tcltest::cleanupTests

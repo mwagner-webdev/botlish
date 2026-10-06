@@ -13,9 +13,7 @@
 #   1. Reads the program to HIR with surface::readProgramFile, the same way
 #      main.tcl and bench/corpus.tcl do, and hands that HIR straight to
 #      native::object/native::nir/... -- the production HIR->NIR route
-#      (native::lowered, which first attaches the native implementations the
-#      program calls, native::prepareHir; currently uriEscape ->
-#      web::uri_escape_text and validator predicates -- NATIVE-MODULES.md).
+#      (native::lowered, through native::prepareHir).
 #      No core IR is involved (DIRECT-HIR-NATIVE-PATH.md); before that
 #      milestone this step lowered to core IR and rebuilt the HIR
 #      (native::buildProgramHir), which is gone.

@@ -332,8 +332,7 @@ runtime, so code run through `core::evalIn` gets the same errors.
 A callable can carry refinement metadata: facts that are proven when it
 returns `true` or `false`. A fact is a **type** (§14). For example, the
 metadata for `integer?` is `-refines-true {0 int}` ("when the result is
-true, argument 0 is an `int`"). The metadata for `Emailish?` is
-`{0 {refined str {Emailish}}}`.
+true, argument 0 is an `int`").
 
 When an `if` condition has the form `(call (ref P) ARG...)`, the evaluator:
 
@@ -353,6 +352,13 @@ under another name keeps its metadata, and a user block that shadows
 Refinement introspection: `core::refinementsOf ENV NAME` and
 `core::envRefinements ENV`. To inspect a scope, create a block in it and use
 `core::blockEnv` (see `examples/04-refinement-scope.ir`).
+
+Botlish source declares its own refinements: `refined type Emailish = str`
+is a nominal type over a carrier, and `fn emailish?(v: str) -> bool proves
+v: Emailish:` is a function whose true result proves its argument one
+(§14, REFINEMENT-VALUES.md). Those facts are static only: the compiler
+(§13) derives them from the function's declared proof contract, and no
+runtime value or environment records them.
 
 ## 7. Invalid programs vs application errors
 
@@ -494,13 +500,11 @@ proven impossible: the completion proof also reads String lengths (a
 literal, `str::concat`'s sum, a guard such as `if str::length(s) > 0:` or
 `if i < 0 or i >= str::length(s): return ...`) and array capacities.
 
-Optional library `web` (`# requires: web`, lib/web.tcl):
-
-| Name | Signature | Refinement |
-|------|-----------|------------|
-| `Emailish?` | str → bool, type test of `Emailish` | true: arg 0 : `Emailish` |
-| `UriQueryValue?` | str → bool, type test of `UriQueryValue` | true: arg 0 : `UriQueryValue` |
-| `uriEscape` | str → `UriQueryValue` | |
+The former optional native library `web` (lib/web.tcl: `Emailish?`,
+`UriQueryValue?`, `uriEscape`) is gone. The Botlish module `web`
+(lib/web.bot, `import web`) declares `web::Emailish` and
+`web::UriQueryValue` as source refinement types with their proof-producing
+functions `web::emailish?` and `web::uri_query_value?` (§14).
 
 New natives are registered through the registry, not by changing the
 evaluator:
@@ -514,7 +518,7 @@ core::registerNative even? -arity 1 -impl myEvenImpl -refines-true {0 Even}
 `-runtime {TAG…}` states what a native implementation of the operation
 needs from a runtime beyond bare machine operations: `bigint`,
 `string-alloc`, `list-alloc`, `result-alloc`, `char-index`, `range-check`,
-`structural-equality`, `evidence`, `process-argv`, `raw-syscall`
+`structural-equality`, `process-argv`, `raw-syscall`
 (`core/native.tcl` defines each). It is metadata for static analysis (§19) and never changes what a call
 does.
 
@@ -535,14 +539,13 @@ the registration rather than from the native's name.
 
 Natives may also declare a signature. `-param-types {int int}` lists the
 type each argument must have (`any` means no requirement), and
-`-result-type int` gives the type of every result. Types can be refined, for
-example `-result-type {refined str {UriQueryValue}}`.
+`-result-type int` gives the type of every result. Types can be refined
+(`{refined BASE {NAME…}}`, §14).
 
 **Declared types are a contract.** After every call, the reference runtime
 checks that each argument satisfied its parameter type and that the result
 satisfies the result type. A violation raises `CORE CONTRACT TYPE`. So a
-native can't claim to return a `UriQueryValue` while returning a plain
-string. The compiler relies on these declarations (§13). Compiled code
+native can't claim a result type its results don't have. The compiler relies on these declarations (§13). Compiled code
 never re-checks them: its inlined intrinsics and type tests are exact, and
 generic calls go through the runtime, which checks.
 
@@ -564,9 +567,9 @@ type test. `core::type::definePredicate` registers type tests, and so do the
 builtin kind and tag predicates.
 
 **Strings discard refinements.** A string transformation's result carries no
-refinement unless its contract explicitly establishes one. So
-`str::substring(UriQueryValue)` is a plain `str`, while `uriEscape(str)` is a
-`UriQueryValue`.
+refinement unless its contract explicitly establishes one. So `str::substring`
+of a `web::UriQueryValue` is a plain `str`, and so is `web::uri_escape_text`'s
+result until `web::uri_query_value?` proves it one.
 
 ## 9. Public API
 
@@ -634,7 +637,6 @@ refinement unless its contract explicitly establishes one. So
 | `core/linuxabi.tcl` | `linux::abi::syscall`, the raw Linux x86-64 kernel transition (native only; LINUX-X86-64-SYSCALL.md) |
 | `core/contexts.tcl` | the two internal context operations `context#install` / `context#load` and the Tcl backends' per-run context environment (CONTEXTS.md) |
 | `core/bytestore.tcl` | the byte-storage value kinds' natives (immutable `bytestore`, writable `mutbytes`) and the raw address bridges `abi::x86_64::from_bytes` / `from_mutable_bytes` (ABI-BYTES.md, MUTABLE-BYTES.md) |
-| `lib/web.tcl` | optional demonstration library (`core::loadLibrary web`): `Emailish`, `UriQueryValue`, `uriEscape` |
 | `hir/hir.tcl` | HIR data model, ids, `hir::build`, queries |
 | `hir/syntax.tcl` | syntax nodes: HIR's input, and core IR → syntax |
 | `hir/hygiene.tcl` | renaming bindings that shadow root references |
@@ -816,8 +818,8 @@ the kind) and contract (to `any`).
 
 `hir::types::lub`, `narrow` and `kindOf` handle the extra forms themselves
 and delegate everything else to `core::type`. For example,
-`kindOf {refined str {Emailish}}` is `str`, and narrowing `str` by
-`Emailish` gives `{refined str {Emailish}}`. None of these forms mention a
+`kindOf {refined str {web::Emailish}}` is `str`, and narrowing `str` by
+`web::Emailish` gives `{refined str {web::Emailish}}`. None of these forms mention a
 representation: the compiler maps a block's `EXPR` to the proc it generates.
 
 **Where types come from.**
@@ -826,13 +828,24 @@ representation: the compiler maps a block's `EXPR` to the proc it generates.
 * **Root constants** in program mode: `+` has type `{native +}`, and `true`
   has type `bool` (and, as an `if` condition, decides the branch).
 * **Native signatures** (§8): a call of `-` has type `int`, and a call of
-  `uriEscape` has type `{refined str {UriQueryValue}}`.
+  `str::length` has type `int`.
 * **Immutability:** a binding has the type of the expression it was bound
   to, and keeps it.
 * **Refinements:** inside the `then` branch of `(if (call (ref integer?) (ref x)) …)`,
-  `x` is `int`. Inside the `then` branch of `Emailish?`, it's
-  `{refined str {Emailish}}`. Nested predicates accumulate evidence. As in
-  the interpreter, only arguments that are plain `(ref NAME)` are refined.
+  `x` is `int`. Inside the `then` branch of `if web::emailish?(x):`, it's
+  `{refined str {web::Emailish}}`: the function's proof contract (`proves v:
+  Emailish`, §14) says what its true result proves. Nested predicates
+  accumulate facts. As in the interpreter, only arguments that are plain
+  `(ref NAME)` are refined (an immutable alias's root value too), and a
+  Boolean binding carries what its value implies (`ok = p(s)` then `if ok:`).
+  A fact survives an `if` when every branch that completes normally proves it.
+* **Exact predicate results** (REFINEMENT-VALUES.md): a call of a
+  proof-producing function also records its own result for its exact
+  argument values on each edge. A second identical call on a path where that
+  result is known is decided (the call's `known`, and every backend elides
+  it) only when the function is *repeatable* (`hir/repeatable.tcl`: everything
+  it can reach is a deterministic value computation). Another function
+  proving the same refinement is never decided by it.
 * **Flow facts:** when a native that requires a type returns, its argument
   had that type. The runtime contract check guarantees this. Because
   bindings are immutable, the argument keeps the type for the rest of the
@@ -877,9 +890,8 @@ representation: the compiler maps a block's `EXPR` to the proc it generates.
 * **Type tests** (natives declared with `-tests-type T`, §8), with argument
   of static type `S` and parameter kind `P` (decided by the HIR, which marks
   the call `known`):
-  * **Folded to true** if `S ⊑ P` and `S ⊑ T`. For example, `Emailish?` on a
-    value already refined to `Emailish`, or `UriQueryValue?` on the result
-    of `uriEscape`.
+  * **Folded to true** if `S ⊑ P` and `S ⊑ T`. For example, `integer?` on
+    a value already known to be an `int`.
   * **Folded to false** if `S ⊑ P` and `S`'s base differs from `T`'s. For
     example, `integer?` on a string.
   * **Otherwise inline:** the parameter kind check, then either
@@ -932,12 +944,14 @@ Native type contracts are checked on generic native calls, which costs
 compiled `sum-refined` roughly 10%; inlined intrinsics and type tests are
 unaffected.
 
-`refined-checks.ir` repeats `Emailish?` and `UriQueryValue?` checks, some of
-them made redundant by an enclosing refinement. Compiled, it went from
-20.9 ms to 8.5 ms once type tests were folded and inlined instead of called
-generically.
+`bench/refined-checks.bot` repeats `web::emailish?` and checks
+`web::uri_query_value?`; the repeated `web::emailish?` call, inside the true
+branch of the first one, is decided and disappears from the generated code
+(REFINEMENT-VALUES.md). (Its Core-IR predecessor `refined-checks.ir`, over
+the removed `Emailish?`/`UriQueryValue?` type-test natives, went from
+20.9 ms to 8.5 ms compiled once type tests were folded and inlined.)
 
-## 14. Types, named types and evidence
+## 14. Types, named types and refinements
 
 `core/type.tcl` owns the meaning of types. The interpreter is the
 specification; the compiler consumes the same definitions.
@@ -948,26 +962,53 @@ specification; the compiler consumes the same definitions.
 |------|--------|
 | `int` `str` `bool` `unit` `list` `result` `block` `native` | every value of that kind |
 | `any` | every value |
-| `{refined BASE {NAME…}}` | values of kind `BASE` that satisfy every named type (an evidence set) |
+| `{refined BASE {NAME…}}` | values of kind `BASE` that satisfy every named type |
 
-A registered name on its own is shorthand: `Emailish` means
-`{refined str {Emailish}}`. `core::type::normalize` gives the canonical form,
-with names sorted and unique, and every registry stores canonical types.
+A registered name on its own is shorthand: `web::Emailish` means
+`{refined str {web::Emailish}}`. `core::type::normalize` gives the canonical
+form, with names sorted and unique, and every registry stores canonical types.
 
-**Named types** are registered from Tcl. There's no type declaration IR yet:
-
-```tcl
-core::type::register Emailish      -base str -validator [list core::regex::matches $re]
-core::type::register UriQueryValue -base str -opaque 1
-core::type::definePredicate Emailish          ;# registers the native Emailish?
-```
+**Named types** come in two kinds:
 
 * A **validator** type is structural. The validator (a command prefix called
-  with the value, returning 1/0) decides membership.
-* An **opaque** type has no validator. A value belongs to it only if it
-  carries runtime *evidence*, which only trusted natives attach. For opaque
-  types, evidence is the semantics. For validator types, evidence is only an
-  optimization.
+  with the value, returning 1/0) decides membership. The integer domains
+  source declares (`type Byte = Int in 0..255`, SOURCE-DEFINED-INTEGER-DOMAINS.md)
+  and the Result tags are validator types.
+* A **refinement** type is nominal (REFINEMENT-VALUES.md). Source declares
+  it over one carrier type, `refined type Emailish = str`, and a value of the
+  carrier is one only where a proof says so: a call of a proof-producing
+  function of the declaring module returned true for it. There is no runtime
+  test, tag or wrapper: a refined value is exactly a value of its carrier, so
+  equality, hashing, rendering, the ABI and layouts are the carrier's.
+
+```
+refined type Emailish = str
+
+fn emailish?(value: str) -> bool proves value: Emailish:
+    ...
+
+fn consume(e: Emailish) -> int:
+    str::length(e)
+
+fn ok(s: str) -> int:
+    if emailish?(s):
+        consume(s)              # s is proven an Emailish here
+    else:
+        0
+```
+
+`consume(s)` outside the true branch is rejected ("a refinement proof is
+required"): nothing converts a carrier value implicitly. A refined value is a
+value of its carrier everywhere a carrier is expected (forgetting is
+subtyping), and a refinement may refine another (`refined type Encoded =
+Query`), forgetting transitively. A refinement's identity is its declaring
+module's (`web::Emailish`), and only that exact module may declare a proof of
+it (`REFINEMENT-MINT-AUTHORITY`; no import, parent or child namespace grants
+it). A carrier must be a scalar value type whose values never change (str,
+int, bool, UnicodeChar, an integer domain or another refinement over them;
+`REFINEMENT-CARRIER`), and a chain of refinements may not return to itself
+(`CYCLIC-REFINEMENT`). `lib/web.bot` declares `web::Emailish` and
+`web::UriQueryValue` this way; the compiler knows neither name.
 
 **Operations.**
 
@@ -976,56 +1017,32 @@ core::type::definePredicate Emailish          ;# registers the native Emailish?
 | `valid T` | `T` is a well-formed type |
 | `base T` | its primitive kind (`""` for `any`) |
 | `subtype A B` | every value of `A` is a value of `B` |
-| `acceptsValue T V` | `V` is a value of `T` |
-| `validate NAME V` | `V` satisfies the named type (evidence, else validator; opaque: evidence only) |
-| `lub A B` | same base: the evidence both share; otherwise `any` |
-| `narrow A B` | same base: the union of the evidence; otherwise `B` (a contradiction only happens on unreachable paths) |
+| `acceptsValue T V` | `V` is a value of `T` (a refinement: of its carrier; its proposition is static) |
+| `validate NAME V` | `V` satisfies the named type (validator; refinement: its carrier) |
+| `lub A B` | same base: the named types both share; otherwise `any` |
+| `narrow A B` | same base: the union of the named types; otherwise `B` (a contradiction only happens on unreachable paths) |
 | `assertValue T V CONTEXT` | contract check; raises `CORE CONTRACT TYPE` |
 
-For example, `lub(Emailish, str)` is `str`, and
-`narrow(Emailish, NonEmpty)` is `{refined str {Emailish NonEmpty}}`. Proving a
-second property never erases the first.
+For example, `lub(Emailish, str)` is `str`, the lub of two refinements of
+one carrier is their nearest common carrier, and `narrow(Emailish,
+NonEmpty)` is `{refined str {Emailish NonEmpty}}`. Proving a second property
+never erases the first.
 
-**Runtime evidence.** Strings may carry evidence:
+**Values carry no proofs.** A value has only its kind and contents: the
+former runtime *evidence* on Strings (attached by trusted natives to make a
+String a member of an *opaque* named type) is gone with the opaque types
+themselves. A refinement is knowledge the compiler has about a binding on a
+path, never part of the value.
 
-```
-{str TEXT}                          plain
-{str TEXT {UriQueryValue}}          proven UriQueryValue
-{str TEXT {Emailish UriQueryValue}}
-```
-
-`core::value::evidence`, `withEvidence` and `hasEvidence` work with it.
-`strOf` still returns the text. **Evidence is knowledge about a value, not
-part of it:** `==` and ordinary display ignore it, so `"foo"` proven to
-be a `UriQueryValue` still equals `"foo"`. `core::value::show V 1` shows
-evidence as `"foo"#{UriQueryValue}`; the differential tests use this form, so
-both backends must agree on evidence too. Only string values carry evidence
-for now.
-
-**The predicate pattern.** A named type gets an ordinary predicate. `if`
-knows nothing about named types:
+**The predicate pattern.** `if` knows nothing about named types; a condition
+that calls a proof-producing function proves what its contract says, per
+outcome:
 
 ```
-(if (call (ref Emailish?) (ref x))
-    (block {} … x : {refined str {Emailish}} …)
+(if (call (ref emailish?) (ref x))
+    (block {} … x : {refined str {web::Emailish}} …)
     (block {} …))
 ```
-
-A future surface form such as `if string is Emailish x:` can lower to this
-call without new core semantics.
-
-**Trusted transforms produce evidence.** `uriEscape` percent-encodes its
-input and returns `withEvidence [str $escaped] UriQueryValue`. Its declared
-result type is `{refined str {UriQueryValue}}`. The compiler knows the
-static type, and the runtime value carries the proof through dynamically
-typed code. The contract check stops a native from claiming that type
-without delivering the evidence.
-
-`lib/web.tcl` defines `Emailish`, `UriQueryValue`, their predicates and
-`uriEscape` as an optional demonstration library. It isn't loaded by core:
-call `core::loadLibrary web`, or put `# requires: web` in a program file,
-which `main.tcl` and `bench/bench.tcl` honor. `examples/05-refined-strings.ir`
-shows all of it.
 
 ## 15. Regular expressions
 
@@ -1248,8 +1265,10 @@ representation: no Tcl variables, frames or boxing.
 
 Refinements (`hir/refine.tcl`) follow the run-time rule of §6. When a
 condition calls a callee whose static type is a known native, that native's
-metadata gives facts about the arguments that are plain references. Facts are
-BindingId/type pairs. They're recorded on the `if` (per outcome) and on the
+metadata gives facts about the arguments that are plain references; when it
+calls a known function with a proof contract (`proves x: R`, resolved onto
+the block as its `proofs`), the contract does. Facts are BindingId/type
+pairs, plus the exact-result facts of proof-producing calls (§13). They're recorded on the `if` (per outcome) and on the
 branch scope, and they narrow the binding only inside that branch. Nothing in
 the HIR refers to a predicate by name. A type test decided by static types
 (§8) sets the call's `known` field. If an `if` condition is known (a decided
@@ -1272,7 +1291,9 @@ under the interpreter and the compiler.
 The `hir::format` notation is also an input format. `hir::parse` (and
 `hir::readFile`, which honors `# requires:` and skips `#` comment lines)
 rebuilds a complete HIR program from it. The text states the binding ids,
-scopes, types, captures, refinements, call targets and flags. The reader
+scopes, types, captures, refinements, call targets and flags, and a
+source refinement's declaration (`refined type ID carrier T owner NS`) and a
+block's proof contract (` proves BINDING NAME: TYPE`). The reader
 derives everything else: binding kinds and types, scope structure, closures,
 root symbols, diagnostics and origins. It rejects text that is malformed or
 inconsistent (an id declared twice, a reference to a binding that isn't
@@ -1285,8 +1306,7 @@ rebuilding it from IR, and runs it like `core::evalProgram`. The compiler
 trusts the HIR's facts.
 
 `examples/hir/NAME.hir` are samples covering scopes and shadowing, closures,
-recursion, refinements, control flow, refined strings and use before
-binding. Each sits next to the `NAME.ir` it lowers to and states its outcome
+recursion, refinements, control flow and use before binding. Each sits next to the `NAME.ir` it lowers to and states its outcome
 in a `# expect:` or `# expect-error:` comment. `tests/hir-samples.test`
 checks, for every sample, that:
 
@@ -1497,6 +1517,16 @@ add10(32)          # 42 (add captures x)
   `context` (below) composes with it as an independent modifier
   (`opaque context struct`), and a later `resource` will too.
   See OPAQUE-STRUCTS.md.
+* **Refinement types and proofs.** `refined type Emailish = str` declares a
+  nominal refinement of one carrier type, and `fn emailish?(v: str) -> bool
+  proves v: Emailish:` declares the function whose true result proves it: in
+  `if emailish?(s):` (or `ok = emailish?(s)` then `if ok:`, or through `not`,
+  `and`, `or`), `s` is an `Emailish`. The proof clause names one declared
+  parameter, sits after `-> bool` and before an `errors` clause, and may
+  appear only in the module that declares the refinement. A refined value is
+  its carrier everywhere a carrier is expected; nothing else converts to it.
+  `refined` and `proves` are contextual words, not reserved. See §14 and
+  REFINEMENT-VALUES.md.
 * **Method-call sugar.** `value.f(a, b)` is another spelling of the ordinary
   call `f(value, a, b)`, allowed exactly when `f` is a function visible by
   that name at the call (under ordinary lexical resolution: a function or
@@ -1603,8 +1633,10 @@ add10(32)          # 42 (add captures x)
 * Blocks are delimited by indentation (spaces only; tabs are an error).
   Blank and comment lines (`#`) don't count. Newlines inside `( )` and `[ ]`
   are ignored. Trailing commas are allowed in parameters, arguments and lists.
-* Names are `[A-Za-z_][A-Za-z0-9_]*`. `?` is reserved, so natives like
-  `integer?` or `test-log` can't be named from source yet.
+* Names are `[A-Za-z_][A-Za-z0-9_]*`, optionally ending in one `?` (the
+  predicate idiom: `emailish?`, `integer?`); a `?` anywhere else is a syntax
+  error, so natives like `result-value` or `test-log` can't be named from
+  source.
 
 The full grammar is at the top of `surface/parser.tcl`.
 
@@ -1737,9 +1769,9 @@ references and hygiene.
   written with `elif` (ELIF.md); a chain's length is bounded only by the
   nesting depth the passes can recurse to (a few hundred clauses at Tcl's
   default recursion limit, as for the same chain written as nested `if`s).
-* Natives whose names contain `?` or `-` (`integer?`, `ok?`, `result-value`,
-  `test-log`) can't be named from source. `?` is reserved, and `-` is an
-  operator.
+* Natives whose names contain `-` (`result-value`, `test-log`) can't be named
+  from source: `-` is an operator. A `?` may end a name, so `integer?` and
+  `ok?` can.
 
 **Hygiene**
 
@@ -2265,9 +2297,8 @@ the builtin natives of §8 (root primitives and standard intrinsics).
 
 **Not supported** (each reported as `NATIVE UNSUPPORTED`):
 
-* natives implemented only in Tcl: the `web` and regex libraries and the
-  test suite's instrumentation natives (`test-log`, `test-tick`, …)
-* named types and evidence (`Emailish?`, refined parameter types)
+* natives implemented only in Tcl: the regex library and the test suite's
+  instrumentation natives (`test-log`, `test-tick`, …)
 * sequence mode (`core::evalIn` in an existing Tcl environment)
 * handing a Block value back to the host, and so refinement probes through
   `core::blockEnv`
@@ -2275,22 +2306,24 @@ the builtin natives of §8 (root primitives and standard intrinsics).
 ### Coverage
 
 `tests/native-coverage.tcl` runs the whole suite with
-`CORE_BACKEND=cranelift` and puts every test in exactly one class. With
-`BOTLISH_NATIVE_SPECIALIZE=0` (no specialization, §21) the classification
-is identical:
+`CORE_BACKEND=cranelift` and puts every test in exactly one class. When the
+backend was introduced (757 tests predated it) the classes were 171 native,
+541 independent and 45 unsupported, with none failed. With refinement values
+(REFINEMENT-VALUES.md) the suite has 5,991 tests:
 
-| Class | Tests | Of the 757 tests that predate the backend | Meaning |
-|---|---:|---:|---|
-| native | 218 | 171 | passed, ran native code |
-| independent | 566 | 541 | passed without running a program on the backend (frontend, HIR, analysis) |
-| passed-partial | 3 | 0 | passed; checks an unsupported-construct diagnostic on purpose |
-| unsupported | 45 | 45 | needs a construct listed above |
-| failed | 0 | 0 | anything else |
+| Class | Tests | Meaning |
+|---|---:|---|
+| native | 2,424 | passed, ran native code |
+| independent | 3,440 | passed without running a program on the backend (frontend, HIR, analysis) |
+| passed-partial | 67 | passed; checks an unsupported-construct diagnostic, or compares another backend, on purpose |
+| unsupported | 60 | needs a construct listed above |
+| failed | 0 | anything else |
 
-The 45 unsupported tests need: a Block returned to the host (12), sequence
-mode (7), `test-log`/`test_log` (8), `test-tick`/`test_tick` (6), `web`
-library natives and evidence (9), and the test natives `test-fake-escape`,
-`test-lax-param` and `test-both-ints?` (3).
+The 60 unsupported tests need: a Block value returned to the host (13),
+`test-log`/`test_log` (19), `test-tick`/`test_tick` (12), sequence mode (7),
+the Tcl-registered test validator `NonEmpty?` and the test natives
+`test-fake-nonempty`, `test-both-ints?` (7), and a native's validator
+named-type contract (`test-lax-param`, 2).
 `tests/native.test` (55 tests) checks lowering and CLIF structure, and
 parity of interp, compile, cranelift-generic and cranelift on arithmetic at
 the small/big boundaries, guards, every error class, strings, lists,
@@ -2402,8 +2435,10 @@ A key is `{BLOCK ARG-TYPES}`: the block's ExprId and one *key type* per
 parameter. Key types are the static types of the arguments reduced to what
 choosing an operation depends on:
 
-* the kinds `int str bool unit result any`, with named-type evidence
-  dropped (the instance still sees the base kind)
+* the kinds `int str bool unit result any`, with named types (integer
+  domains, refinements) dropped: the instance still sees the base kind, and a
+  refined value has its carrier's representation (semantic instance keys,
+  §13, keep the refinement)
 * `block` and `native` for callables, without which one
 * `list`, `{list ELEM}` and `{list ELEM SHAPE}`, with key-typed elements
 

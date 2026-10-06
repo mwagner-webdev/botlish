@@ -11,8 +11,16 @@ proc writeText {path value} {
     puts -nonewline $ch $value
     close $ch
 }
+source [file join $root surface surface.tcl]
 foreach name {fib loop-count sum-refined refined-checks} {
-    set hir [native::prepareHir [hir::build [core::loadProgramFile [file join $root bench "$name.ir"]] -strict 0]]
+    # refined-checks exists only as source since REFINEMENT-VALUES.md (its
+    # .ir form needed lib/web.tcl, which is gone).
+    set ir [file join $root bench "$name.ir"]
+    if {[file exists $ir]} {
+        set hir [native::prepareHir [hir::build [core::loadProgramFile $ir] -strict 0]]
+    } else {
+        set hir [surface::readProgramFile [file join $root bench "$name.bot"] -warnings off]
+    }
     writeText [file join $out "$name.hir"] [hir::format $hir]
     writeText [file join $out "$name.nir"] [native::nir $hir]
     writeText [file join $out "$name.clif"] [native::clif $hir]

@@ -310,7 +310,7 @@ test blockescape-sum-refined-2 {sum-refined's NIR has no closure/callenv/rt_clos
 # native/lower.tcl's Call dispatches such a call to the callee's *internal
 # region companion* instead of its ordinary internal variant, reusing the
 # exact same flattened captures either way. char_at's own before/after shape
-# is exercised directly on refined-checks.ir further below; the fixtures
+# is exercised directly on refined-checks.bot further below; the fixtures
 # here are deliberately independent of Emailish?/web.tcl (#33/#34): the same
 # composition, proven general.
 
@@ -668,23 +668,26 @@ test blockescape-region-companion-flags-both-off {both off: the fully unoptimize
 # calls' accepted inputs), total allocations 8020 -> 6820. The local-part
 # scan's 6,800 one-character Strings remain (set membership is not a region
 # consumer).
-test blockescape-region-companion-refined-checks-1 {refined-checks.ir: local_extra_chars' List/ImmutableSet are module-init only (R2.a.1); Block drops from 803 (R2.a.1's own per-call local_char? closure, capturing the module set) to 0 -- local_char? is envless now, a module-static reference is never a capture (MODULE-STATIC-RETAINED-VALUES.md); the exact predicate str::is_tcl_alpha makes the TLD scan a StringRegion consumer, so String falls 8004 -> 6804 (the local part's set-membership characters remain)} -body {
-    core::loadLibrary web
-    set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+# REFINEMENT-VALUES.md: web::uri_query_value?(q) is now a real check of
+# q's text (UriQueryValue used to be decided by runtime evidence a trusted
+# native attached), run on each of the 400 true paths: its str::encode_utf8
+# builds one List per call, so List 12 -> 412 and the total 6820 -> 7220.
+# Nothing else moves.
+test blockescape-region-companion-refined-checks-1 {refined-checks.bot: local_extra_chars' List/ImmutableSet are module-init only (R2.a.1); Block drops from 803 (R2.a.1's own per-call local_char? closure, capturing the module set) to 0 -- local_char? is envless now, a module-static reference is never a capture (MODULE-STATIC-RETAINED-VALUES.md); the exact predicate str::is_tcl_alpha makes the TLD scan a StringRegion consumer, so String falls 8004 -> 6804 (the local part's set-membership characters remain)} -body {
+    set hir [refinedChecksSourceHir]
     # -short-string-opt 0: the pinned String count is the region analysis's
     # own effect; ShortString1 (SHORT-STRING.md) removes three more.
     set on [native::allocationReport $hir summary 1 -short-string-opt 0]
     list [native::evalHir $hir -short-string-opt 0] [dict get $on total allocations] [dict get $on byKind Block allocations] \
         [dict get $on byKind String allocations] [dict get $on byKind List allocations] \
         [dict get $on byKind ImmutableSet allocations]
-} -result {{list {{int 400} {int 0}}} 6820 0 6804 12 2}
+} -result {{list {{int 400} {int 0}}} 7220 0 6804 412 2}
 
 # (GENERIC-PREDICATE-PROOF-LOSS.md, loss point 1: char_at is only called with an Int,
 # so its one emitted instance is keyed instance="int" rather than "generic".
 # Its slice guard, `if i < 0 or i >= n`, makes n a third explicit parameter.)
-test blockescape-region-companion-refined-checks-2 {refined-checks.ir: char_at's NIR has no closure/callenvmulti, and env=0/results=3 -- R2 (R2-ORDINARY-EMAILISH-PREDICATE.md) collapses this to one shared instance, not two per-call-site copies} -body {
-    core::loadLibrary web
-    set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+test blockescape-region-companion-refined-checks-2 {refined-checks.bot: char_at's NIR has no closure/callenvmulti, and env=0/results=3 -- R2 (R2-ORDINARY-EMAILISH-PREDICATE.md) collapses this to one shared instance, not two per-call-site copies} -body {
+    set hir [refinedChecksSourceHir]
     set nirText [dict get [native::lower::program $hir] text]
     list [regexp {"char_at" params=1} $nirText] \
         [llength [regexp -all -inline {"char_at" params=3 env=0 regs=\d+ pnames="i n v" captures=0 instance="int" results=3} $nirText]] \
@@ -703,9 +706,8 @@ test blockescape-region-companion-refined-checks-2 {refined-checks.ir: char_at's
 # still exactly one used generic instance each, still capturing n/v
 # directly (never char_at) as ordinary flattened parameters, not a
 # per-call-site copy.
-test blockescape-region-companion-refined-checks-3 {refined-checks.ir: scan_while/tld?/domain? flatten captures to [n, v] (domain_loop is gone; scan_while's own induction param is renamed i -> start) -- tld? and domain? remain one shared instance each; scan_while has one instance per exact predicate target (local_char?, str::is_tcl_alpha), each flattened (EXACT-CALLABLE-CLOSED-CALLER.md: blockescape de-closes a literal with several instances), and no closure is built} -body {
-    core::loadLibrary web
-    set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+test blockescape-region-companion-refined-checks-3 {refined-checks.bot: scan_while/tld?/domain? flatten captures to [n, v] (domain_loop is gone; scan_while's own induction param is renamed i -> start) -- tld? and domain? remain one shared instance each; scan_while has one instance per exact predicate target (local_char?, str::is_tcl_alpha), each flattened (EXACT-CALLABLE-CLOSED-CALLER.md: blockescape de-closes a literal with several instances), and no closure is built} -body {
+    set hir [refinedChecksSourceHir]
     set nirText [dict get [native::lower::program $hir] text]
     set noDomainLoop [expr {![regexp {"domain_loop"} $nirText]}]
     list $noDomainLoop \
@@ -715,9 +717,8 @@ test blockescape-region-companion-refined-checks-3 {refined-checks.ir: scan_whil
         [regexp -all {= closure } $nirText] [regexp -all {callvalue} $nirText]
 } -result {1 2 1 1 0 0}
 
-test blockescape-region-companion-refined-checks-4 {refined-checks.ir under GC stress: unchanged value, on the composed representation} -body {
-    core::loadLibrary web
-    set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+test blockescape-region-companion-refined-checks-4 {refined-checks.bot under GC stress: unchanged value, on the composed representation} -body {
+    set hir [refinedChecksSourceHir]
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
     set result [catch {native::evalHir $hir} value]
     unset ::env(BOTLISH_NATIVE_GC_STRESS)
@@ -742,12 +743,16 @@ test blockescape-region-companion-refined-checks-4 {refined-checks.ir under GC s
 # of emailish?'s own helpers any more: they belong to uri_escape_text's
 # esc_bytes/esc_from (unrelated, untouched by this milestone) and check's
 # own self-tail recursion (the benchmark's own driver loop).
-test blockescape-region-companion-refined-checks-5 {refined-checks.ir: R2.a.3 drops the backedge count from 5 to 3 -- scan_while/domain? no longer self-tail-recurse at all (their own counted-loop bodies are plain jump/label CFG backedges); the 3 remaining `tail` sites are esc_bytes/esc_from/check, none of them emailish?'s own} -body {
-    core::loadLibrary web
-    set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+#
+# REFINEMENT-VALUES.md adds two: web::uri_query_value?'s valid_from? walks
+# the bytes by self-tail recursion (`valid_from?(i + 3)` after a "%XX"
+# triplet, `valid_from?(i + 1)` after an unreserved byte). Still none of
+# emailish?'s own.
+test blockescape-region-companion-refined-checks-5 {refined-checks.bot: R2.a.3 dropped the backedge count from 5 to 3 -- scan_while/domain? no longer self-tail-recurse at all (their own counted-loop bodies are plain jump/label CFG backedges); the remaining `tail` sites are esc_bytes/esc_from/check and uri_query_value?'s valid_from? (two), none of them emailish?'s own} -body {
+    set hir [refinedChecksSourceHir]
     set nirText [dict get [native::lower::program $hir] text]
     list [regexp {tailenv} $nirText] [llength [regexp -all -inline -line {^\s+tail .*$} $nirText]]
-} -result {0 3}
+} -result {0 5}
 
 # ---------------------------------------------------------------------------
 # Enclosing-instance consistency: a de-closure-converted binding's region is

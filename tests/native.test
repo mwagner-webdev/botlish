@@ -802,8 +802,8 @@ test native-diagnostic-3 {invalid NIR is rejected by the driver, not executed} -
 # a native implementation merely in order to disappear. "test-known-int?" is
 # registered the ordinary way (core::registerNative, like test_log above),
 # so it exists in the core native registry but, deliberately, nowhere in
-# native/lower.tcl -- exactly lib/web.tcl's Emailish?/UriQueryValue?/uriEscape
-# shape, kept minimal and general instead of tied to that library.
+# native/lower.tcl -- the shape lib/web.tcl's natives once had, kept minimal
+# and general instead of tied to that (since removed) library.
 
 test native-known-unsupported-1 {a proven call to an otherwise-unsupported native lowers to its known result, with no call left behind} -setup {
     if {"test-known-int?" ni [core::native::names]} {

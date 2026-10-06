@@ -655,7 +655,7 @@ test ic-module-signature {an unannotated module export reports its body-inferred
 
 # ---------------------------------------------------------------------------
 # Canonical acceptance cases (spec items 23-25, 38, 52-57): the real,
-# unchanged lib/web.bot and lib/list.bot
+# lib/web.bot and lib/list.bot
 
 # Programs loading library modules (web, byte, list) take no local
 # type/error declarations: the modules declare their own Byte/NotFound.
@@ -663,13 +663,49 @@ proc icWebHir {} {
     return [icCompile "import web\nweb::emailish?(\"a@b.cd\")" 1 ""]
 }
 
+# emailish?'s scanning helpers as lib/web.bot wrote them before
+# REFINEMENT-VALUES.md declared local_char?'s `c: str` and scan_while's
+# `predicate: Fn{args: [str], return: bool}` (a standalone executable needs
+# local_char?'s parameter kind statically now that emailish? is called as the
+# module function from every program): untyped, so the tests below still pin
+# what the intrinsic contracts infer from these bodies alone.
+proc icScanHir {} {
+    return [icCompile {import immutable_set
+import str
+
+local_extra_chars = immutable_set::from_list([".", "_", "%", "+", "-"])
+
+fn scan(v):
+    n = str::length(v)
+
+    fn char_at(i):
+        if i < 0 or i >= n:
+            return ""
+        str::substring(v, i, i + 1)
+
+    fn local_char?(c):
+        str::is_tcl_alnum(c) or immutable_set::contains(local_extra_chars, c)
+
+    fn scan_while(start, predicate):
+        loop i from start to n:
+            if predicate(char_at(i)):
+                continue
+            return i
+        n
+
+    [scan_while(0, local_char?), scan_while(0, str::is_tcl_alpha)]
+
+scan("ab.c@d")
+} 1 ""]
+}
+
 test ic-scan-while {scan_while's own body infers start : int (the counted loop's bound, checked) and predicate : Fn{args: [str], return: bool, errors: []} (trusted) from predicate(char_at(i)) used as an if condition, in an error-free function -- no caller consulted} -body {
-    set h [icWebHir]
+    set h [icScanHir]
     list [icSig $h scan_while] [icWhy $h scan_while start]
 } -result {{{start: int (inferred checked)} {predicate: Fn{args: [str], return: bool, errors: []} (inferred trusted)}} {{checked the start of a counted loop -> int}}}
 
 test ic-scan-while-call {predicate(char_at(i)) is typed from the contract: bool, no errors, still no target} -body {
-    set h [icWebHir]
+    set h [icScanHir]
     set block [icBlock $h scan_while]
     set p [lindex [hir::get $h $block params] 1]
     set out {}
@@ -684,7 +720,7 @@ test ic-scan-while-call {predicate(char_at(i)) is typed from the contract: bool,
 } -result {bool {} {}}
 
 test ic-local-char {local_char?(c): str::is_tcl_alnum requires str (checked), set membership requires nothing (immutable_set::contains accepts any element); their meet is str; the result is bool} -body {
-    set h [icWebHir]
+    set h [icScanHir]
     list [icSig $h local_char?] [icWhy $h local_char? c] \
         [hir::types::show [dict get [hir::signatures::of $h [icBlock $h local_char?]] result]]
 } -result {{{c: str (inferred checked)}} {{checked argument 1 of native str::is_tcl_alnum -> str}} bool}

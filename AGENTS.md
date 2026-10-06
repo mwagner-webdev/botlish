@@ -267,3 +267,17 @@ completion walk (`hir::completions::reachedExprs`, which records `fail` sites
 and never enters a nested function either). If you change any of those, or how
 `fail`, `errors` or an on-handler body lowers or resolves, run
 `tests/same-failure.test` and `audit/same-failure/tools/fuzz.tcl`.
+
+## Refinement values
+
+`refined type NAME = CARRIER` and `proves PARAM: NAME` (REFINEMENT-VALUES.md)
+are generic: no compiler or runtime file may name a corpus refinement or its
+predicate (`tests/refinement-values.test` greps for `Emailish`,
+`UriQueryValue`, `emailish?`, `uri_query_value?`), and a refined value has
+exactly its carrier's representation -- never add a runtime tag, wrapper or
+check to recover one. If you change the proof contract resolution
+(`hir/resolve.tcl`'s `ResolveProofs`), implications or call keys
+(`hir/refine.tcl`), the `if` join or the decided-call rule (`hir/types.tcl`),
+repeatability (`hir/repeatable.tcl`) or a native's `-context-free`
+classification, run `tests/refinement-values.test`,
+`tests/emailish-predicate.test` and `audit/refinement-values/tools/fuzz.tcl`.
