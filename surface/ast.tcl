@@ -71,6 +71,9 @@
 #              flags ({name NAME span SPAN} dicts: the declared flags in
 #              written, canonical order -- `fn f(x, flags :a, :b)`; empty if
 #              none; they follow the ordinary params -- FLAGS.md),
+#              contexts ({name nameSpan type typeSpan} dicts: the declared
+#              context parameters in written order -- `fn f(x, context io:
+#              LinuxIO)`; empty if none; the last section -- CONTEXTS.md),
 #              paramsSpan (from "(" to the end of the body: the function
 #              literal), errors ({NAME SPAN} pairs, from the function's own
 #              "errors E1, E2" clause, empty if none), body (suite),
@@ -119,7 +122,8 @@
 #   structdecl name, nameSpan, fields ({name nameSpan type typeSpan} dicts in
 #              declared order; TYPE as surface::parser::TypeExpr returns it),
 #              opaque (1 for `opaque struct NAME:`, else 0), opaqueSpan (the
-#              modifier word's span, or "")
+#              modifier word's span, or ""), context (1 for `context struct
+#              NAME:`, else 0) and contextSpan likewise (CONTEXTS.md)
 #              -- a top-level nominal struct declaration ("struct NAME:"
 #              followed by its indented "field: Type" lines; STRUCTS.md).
 #              A declaration like typedecl: no runtime meaning, no binding.
@@ -133,6 +137,11 @@
 #              ("error NAME", surface/parser.tcl's ErrorDecl; see
 #              hir/errordecls.tcl for what it means). No runtime meaning,
 #              exactly like typedecl.
+#   with       form (context), formSpan, value -- "with context EXPR": a
+#              declaration-like statement installing EXPR's value as the
+#              execution-environment context of its type for the rest of
+#              the scope (CONTEXTS.md); `form` leaves room for later `with`
+#              declarations
 #   fail       name, nameSpan -- "fail NAME": produces the named error's
 #              completion (EXPLICIT-ERROR-COMPLETIONS.md).
 #   handledcall  call (a `call` or `methodcall` node), handlers (a list of {name nameSpan
@@ -318,6 +327,9 @@ proc surface::ast::Ids {node id} {
             dict set node left [Ids [dict get $node left] $id/left]
             dict set node right [Ids [dict get $node right] $id/right]
         }
+        with {
+            dict set node value [Ids [dict get $node value] $id/value]
+        }
         bind - return - break - destructure {
             if {[dict get $node value] ne ""} {
                 dict set node value [Ids [dict get $node value] $id/value]
@@ -422,6 +434,7 @@ proc surface::ast::Children {node} {
         bind - return - break - destructure {
             return [expr {[dict get $node value] eq "" ? {} : [list [dict get $node value]]}]
         }
+        with               { return [list [dict get $node value]] }
         function           { return [list [dict get $node body]] }
         loop {
             if {[llength [dict get $node clauses]] > 1} {
@@ -689,6 +702,9 @@ proc surface::ast::Statement {node indent show linesVar} {
         }
         structdecl {
             set modifier [expr {[dict exists $node opaque] && [dict get $node opaque] ? "opaque " : ""}]
+            if {[dict exists $node context] && [dict get $node context]} {
+                append modifier "context "
+            }
             lappend lines "${pad}${modifier}struct [dict get $node name]$at"
             foreach field [dict get $node fields] {
                 lappend lines "${pad}    [dict get $field name]: [showType [dict get $field type]]"
@@ -712,6 +728,11 @@ proc surface::ast::Statement {node indent show linesVar} {
             # interpolation of a list value, never adds that quoting).
             if {[dict get $node flags] ne {}} {
                 lappend params flags {*}[lmap flag [dict get $node flags] {string cat : [dict get $flag name]}]
+            }
+            if {[dict exists $node contexts] && [dict get $node contexts] ne {}} {
+                lappend params context {*}[lmap c [dict get $node contexts] {
+                    string cat [dict get $c name] : [showType [dict get $c type]]
+                }]
             }
             set modifier [expr {[dict exists $node nomethod] && [dict get $node nomethod] ? "nomethod " : ""}]
             set line "${pad}${modifier}fn [dict get $node name] ([join $params { }])"
@@ -737,6 +758,10 @@ proc surface::ast::Statement {node indent show linesVar} {
                 lappend lines "${pad}loop$at"
             }
             Body [dict get $node body] [expr {$indent + 1}] $show lines
+            return
+        }
+        with {
+            lappend lines "${pad}with [dict get $node form]$at [Expr [dict get $node value] $show]"
             return
         }
         bind - return - break - destructure {

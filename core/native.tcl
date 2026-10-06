@@ -122,6 +122,10 @@
 #                                     compiling program's struct registry
 #                                     (hir/structs.tcl); the declared
 #                                     result type when ID is not declared
+#                     context-struct I  the result is a struct of the named
+#                                     declaration whose identity is argument
+#                                     I's String literal (context#load,
+#                                     core/contexts.tcl; CONTEXTS.md)
 #                     typed NAME LO HI  every element is an Int in LO..HI (a
 #                                     fixed fact about the native itself, not
 #                                     derived from this call's own arguments);
@@ -403,6 +407,14 @@ proc core::native::ValidShape {shape count} {
         # program's own struct registry (a library struct is declared by a
         # .bot module long after core bootstrap registers the native).
         return [expr {$length == 2 && [regexp {^[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*$} [lindex $shape 1]]}]
+    }
+    if {[lindex $shape 0] eq {context-struct}} {
+        # {context-struct I}: the result is the installed context of the
+        # context-struct declaration whose canonical identity is the String
+        # literal of argument I (context#load, core/contexts.tcl): a struct of
+        # that named declaration, resolved by hir::types::ShapeResult.
+        return [expr {$length == 2 && [string is digit -strict [lindex $shape 1]]
+            && ($count eq "" || [lindex $shape 1] < $count)}]
     }
     if {[lindex $shape 0] eq {typed}} {
         # {typed NAME LO HI}: every element of the result List is an Int

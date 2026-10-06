@@ -121,6 +121,20 @@ pub struct Symbols {
     /// own rel32-range check on a real address this backend cannot vouch
     /// for the distance of.
     pub direct_helpers: bool,
+    /// The program's context area (CONTEXTS.md, nir::Program::context_bytes):
+    /// one linker-local, zero-initialized, writable data object, declared by
+    /// `declare` when the program has context slots. Generated code reaches it
+    /// through its symbol only -- no Vm field, no lookup, no extra argument.
+    pub context_area: Option<cranelift_module::DataId>,
+    /// Whether code addresses the context area PC-relatively (the AOT object,
+    /// where the symbol is linker-local and so "colocated": Cranelift emits
+    /// a GOT-relative load, which `mod.rs`'s `relax_context_got` marks
+    /// relaxable so the static linker rewrites it to `lea
+    /// botlish_context_area(%rip)`), or by its absolute address (`movabs`:
+    /// the JIT, which places data and code independently, so a rel32 reach
+    /// cannot be vouched for). Either way a fixed program address, never a
+    /// lookup.
+    pub context_pc_relative: bool,
 }
 
 /// How many machine words F's direct function returns. Ordinarily
@@ -192,7 +206,25 @@ pub fn declare<M: Module>(module: &mut M, program: &nir::Program, export: bool) 
         helpers: HashMap::new(),
         names: HashMap::new(),
         direct_helpers,
+        context_area: None,
+        context_pc_relative: export,
     };
+    if program.context_bytes > 0 {
+        // The context area (CONTEXTS.md): every context slot, at the offsets
+        // native/lower.tcl assigned, zero until the program function's own
+        // `contextstore`s install the values. Linker-local (`Linkage::Local`
+        // is "final", so the object backend may address it PC-relatively),
+        // writable, not thread-local: process-wide storage of the main
+        // execution domain.
+        let id = module
+            .declare_data("botlish_context_area", Linkage::Local, true, false)
+            .map_err(module_error)?;
+        let mut data = cranelift_module::DataDescription::new();
+        data.define_zeroinit(program.context_bytes as usize);
+        data.set_align(8);
+        module.define_data(id, &data).map_err(module_error)?;
+        symbols.context_area = Some(id);
+    }
     for (name, params, _) in helpers() {
         let id = module.declare_function(name, Linkage::Import, &signature(module, params)).map_err(module_error)?;
         symbols.helpers.insert(name, id);
@@ -475,6 +507,9 @@ struct Translator<'a, 'b, M: Module> {
     /// `error_exit` itself in `new`, never popped below that.
     error_exit_stack: Vec<ir::Block>,
     refs: HashMap<ModuleFuncId, ir::FuncRef>,
+    /// This function's global value for the context area (`context_addr`),
+    /// declared on first use.
+    context_gv: Option<ir::GlobalValue>,
     terminated: bool,
     /// The hidden trailing pointer parameter of a `results > 2` function
     /// (signature_n): `RetMulti` writes fields 1.. through it instead of
@@ -555,6 +590,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             error_exit,
             error_exit_stack: vec![error_exit],
             refs: HashMap::new(),
+            context_gv: None,
             terminated: false,
             plan,
             result_buf: None,
@@ -834,6 +870,27 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
 
     fn get(&mut self, reg: Reg) -> ir::Value {
         self.b.use_var(self.vars[reg as usize])
+    }
+
+    /// The address of the program's context area (CONTEXTS.md):
+    /// `symbol_value` of its data symbol -- PC-relative in the AOT object,
+    /// absolute in the JIT (Symbols::context_pc_relative).
+    fn context_addr(&mut self) -> Result<ir::Value, BackendError> {
+        let Some(id) = self.symbols.context_area else {
+            return Err(BackendError::Bug("context access in a program without a context area".into()));
+        };
+        let gv = match self.context_gv {
+            Some(gv) => gv,
+            None => {
+                let gv = self.module.declare_data_in_func(id, self.b.func);
+                if let ir::GlobalValueData::Symbol { colocated, .. } = &mut self.b.func.global_values[gv] {
+                    *colocated = self.symbols.context_pc_relative;
+                }
+                self.context_gv = Some(gv);
+                gv
+            }
+        };
+        Ok(self.b.ins().symbol_value(I64, gv))
     }
 
     fn func_ref(&mut self, id: ModuleFuncId) -> ir::FuncRef {
@@ -1271,6 +1328,20 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 let table = self.b.ins().load(I64, MemFlagsData::trusted(), self.vm, VM_STATICS_OFFSET);
                 let v = self.get(*value);
                 self.b.ins().store(MemFlagsData::trusted(), v, table, (*index * 8) as i32);
+            }
+            Inst::ContextLoad { dst, offset } => {
+                // One scalar leaf of an installed context (CONTEXTS.md): the
+                // area's fixed address plus a constant offset; the word is a
+                // tagged immediate, never a pointer.
+                let area = self.context_addr()?;
+                let v = self.b.ins().load(I64, MemFlagsData::trusted(), area, *offset as i32);
+                self.def(*dst, v);
+            }
+            Inst::ContextStore { offset, value } => {
+                // A `with context` installation (program function only).
+                let area = self.context_addr()?;
+                let v = self.get(*value);
+                self.b.ins().store(MemFlagsData::trusted(), v, area, *offset as i32);
             }
             Inst::Move { dst, src } => {
                 let v = self.get(*src);

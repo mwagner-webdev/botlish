@@ -413,7 +413,10 @@ proc hir::BuildOnce {nodes options given choices halt checkedVar} {
 # still carry (an error it declares that nobody handled yet, or that provably
 # always fails) and the ambiguity check itself.
 proc hir::MethodObligationKinds {} {
-    return {UNHANDLED-ERROR KNOWN-ERROR UNDECLARED-ERROR AMBIGUOUS-METHOD-CALL}
+    # MISSING-CONTEXT: a context the selected function needs is an obligation
+    # of the call (CONTEXTS.md), never evidence that the candidate does not
+    # fit -- exactly like a declared error nobody handled yet.
+    return {UNHANDLED-ERROR KNOWN-ERROR UNDECLARED-ERROR AMBIGUOUS-METHOD-CALL MISSING-CONTEXT}
 }
 
 # The diagnostics of HIR (a trial build) located in the call EXPR or anything
@@ -642,6 +645,7 @@ proc hir::CheckOnce {hirVar demote} {
     hir::callables::verify hir
     hir::lockstep::verify hir
     hir::structs::verify hir
+    hir::contexts::verify hir
     hir::syscall::verify hir
     hir::semantic::verify hir
     hir::errorsets::verify hir
@@ -1047,7 +1051,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {syntax imports resolve flags refcheck hygiene sourcetypes structs syscall errordecls types exactvalue signatures modulebinding refine lower format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep warnings} {
+    foreach file {syntax imports resolve flags contexts refcheck hygiene sourcetypes structs syscall errordecls types exactvalue signatures modulebinding refine lower format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep warnings} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

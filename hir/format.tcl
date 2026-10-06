@@ -20,9 +20,15 @@
 #   eN bind BINDING NAME
 #   eN block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)?
 #                                        staticRefs (hir::isModuleBinding)
-#                                        omitted when empty
+#                                        omitted when empty; then ?nomethod?
+#                                        and ?contexts (DIRECT) requires
+#                                        (REQUIRED)? -- the block's direct and
+#                                        transitive context requirements
+#                                        (CONTEXTS.md), omitted when empty
 #   eN call TARGET                       native(NAME), block(eN) or generic;
-#                                        "= true"/"= false" when decided
+#                                        "= true"/"= false" when decided;
+#                                        "installs ID" on a verified context
+#                                        installation (CONTEXTS.md)
 #   eN if                                followed by "then SCOPE ..." and
 #                                        "else SCOPE ..." lines with the
 #                                        refinements proven on entry
@@ -92,6 +98,9 @@ proc hir::format::TypeDecl {entry} {
         }]
         set ns [dict get $entry namespace]
         set opaque [expr {[dict exists $entry opaque] && [dict get $entry opaque] ? "opaque " : ""}]
+        if {[dict exists $entry context] && [dict get $entry context]} {
+            append opaque "context "
+        }
         return "struct [dict get $entry id] name [dict get $entry name] ns [expr {$ns eq "" ? "-" : $ns}] ${opaque}fields [join $fields {, }]"
     }
     set domain [dict get $entry domain]
@@ -219,6 +228,12 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             if {[dict exists $node nomethod]} {
                 append text " nomethod"
             }
+            if {[dict exists $node requiredContexts] && [dict get $node requiredContexts] ne {}} {
+                # CONTEXTS.md: the context types the block's own region loads
+                # (its context parameters) and the ones it transitively
+                # requires through its calls (hir/contexts.tcl).
+                append text " contexts ([join [dict get $node directContexts] {, }]) requires ([join [dict get $node requiredContexts] {, }])"
+            }
             if {[dict get $node declaredResult] ne {}} {
                 append text [format { declares %s} [hir::types::show [dict get $node declaredResult]]]
             }
@@ -239,6 +254,10 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             switch -- [dict get $node known] {
                 1 { append text " = true" }
                 0 { append text " = false" }
+            }
+            set installs [hir::contexts::installId $hir $e]
+            if {$installs ne ""} {
+                append text " installs $installs"
             }
             Line $hir $e $text $indent $origins lines
             Expr $hir [dict get $node callee] $inner $origins lines

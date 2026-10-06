@@ -578,6 +578,16 @@ pub enum Inst {
     /// VALUES.md) -- never by any other instruction, and never read back by
     /// the same function through anything but a later StaticGet.
     StaticSet { index: u32, value: Reg },
+    /// Reads the 64-bit word at byte OFFSET of the program's fixed context
+    /// area (CONTEXTS.md): one scalar leaf of an installed context, a tagged
+    /// immediate (small Int, Bool, Unit or UnicodeChar -- never a heap
+    /// pointer, which is what makes the area need no GC root). The area is
+    /// one writable data symbol of the program (`Program::context_bytes`),
+    /// addressed directly: no Vm field, no lookup, no hidden argument.
+    ContextLoad { dst: Reg, offset: u32 },
+    /// Writes VALUE (such an immediate) to byte OFFSET of the context area:
+    /// a `with context` installation, emitted only by the program function.
+    ContextStore { offset: u32, value: Reg },
     Move { dst: Reg, src: Reg },
     Closure { dst: Reg, func: FuncId, captures: Vec<Reg> },
     Guard { kind: Kind, value: Reg, context: String },
@@ -924,10 +934,28 @@ pub struct ShapeDecl {
     pub opaque: bool,
 }
 
+/// One statically assigned context slot (`context N "ID" offset=O words=W
+/// fields="..."`, CONTEXTS.md): the installed value of context-struct ID
+/// lives, flattened to W scalar words in FIELDS' order (dotted paths through
+/// nested structs), at byte offset O of the context area. Program metadata
+/// for listings and validation; codegen reads only offsets.
+pub struct ContextDecl {
+    pub name: String,
+    pub offset: u32,
+    pub words: u32,
+    pub fields: Vec<String>,
+}
+
 pub struct Program {
     pub natives: Vec<NativeDecl>,
     pub shapes: Vec<ShapeDecl>,
     pub functions: Vec<Function>,
+    /// The size in bytes of the program's context area (the header's
+    /// `contexts=N`, CONTEXTS.md): one zero-initialized, 8-byte-aligned,
+    /// writable, linker-local data object holding every context slot. Zero
+    /// for a program without contexts (no data object is emitted).
+    pub context_bytes: u32,
+    pub contexts: Vec<ContextDecl>,
     /// The number of module-static slots this program uses (the header's
     /// own `statics=N`, MODULE-STATIC-RETAINED-VALUES.md): runtime::vm::Vm's
     /// own `statics` table is sized to this once, at program-install time,
@@ -1077,7 +1105,14 @@ fn word(t: &Token) -> Option<&str> {
 
 pub fn parse(text: &str) -> Result<Program, NirError> {
     let mut p = Parser { line: 0 };
-    let mut program = Program { natives: Vec::new(), shapes: Vec::new(), functions: Vec::new(), statics: 0 };
+    let mut program = Program {
+        natives: Vec::new(),
+        shapes: Vec::new(),
+        functions: Vec::new(),
+        statics: 0,
+        context_bytes: 0,
+        contexts: Vec::new(),
+    };
     let mut current: Option<Function> = None;
     let mut seen_header = false;
     let mut call_effects = true;
@@ -1097,6 +1132,13 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
                 Some(v) => v.parse().or_else(|_| p.err("bad statics count"))?,
                 None => 0,
             };
+            program.context_bytes = match kv.get("contexts") {
+                Some(v) => v.parse().or_else(|_| p.err("bad contexts size"))?,
+                None => 0,
+            };
+            if program.context_bytes % 8 != 0 {
+                return p.err("the context area size must be a multiple of 8 bytes");
+            }
             seen_header = true;
             continue;
         }
@@ -1110,6 +1152,18 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
                         return p.err(format!("shape numbers must be dense and in order, got {}", shape.0));
                     }
                     program.shapes.push(shape.1);
+                }
+                "context" => {
+                    let decl = parse_context(&p, &tokens)?;
+                    if decl.0 as usize != program.contexts.len() {
+                        return p.err(format!("context slot numbers must be dense and in order, got {}", decl.0));
+                    }
+                    let end = decl.1.offset as u64 + 8 * decl.1.words as u64;
+                    if decl.1.offset % 8 != 0 || end > program.context_bytes as u64 {
+                        return p.err(format!("context slot {} lies outside the {}-byte context area", decl.0,
+                            program.context_bytes));
+                    }
+                    program.contexts.push(decl.1);
                 }
                 "func" => current = Some(parse_func_header(&p, &tokens)?),
                 _ => return p.err(format!("expected native or func, got {raw:?}")),
@@ -1224,6 +1278,33 @@ fn parse_native(p: &Parser, tokens: &[Token]) -> Result<NativeDecl, NirError> {
 }
 
 /// `shape N anon fields="a b ..."` or `shape N named "Name" fields="a b ..."`.
+
+/// `context N "ID" offset=O words=W fields="P1 P2 ..."` (CONTEXTS.md).
+fn parse_context(p: &Parser, tokens: &[Token]) -> Result<(u32, ContextDecl), NirError> {
+    let slot = match tokens.get(1).and_then(word).map(str::parse::<u32>) {
+        Some(Ok(n)) => n,
+        _ => return p.err("context needs a slot number"),
+    };
+    let name = match tokens.get(2) {
+        Some(Token::Quoted(q)) => q.clone(),
+        _ => return p.err("context needs a quoted type identity"),
+    };
+    let kv = pairs(tokens);
+    let number = |key: &str| -> Result<u32, NirError> {
+        match kv.get(key).map(|v| v.parse::<u32>()) {
+            Some(Ok(n)) => Ok(n),
+            _ => p.err(format!("context needs {key}=N")),
+        }
+    };
+    let offset = number("offset")?;
+    let words = number("words")?;
+    let fields: Vec<String> = kv.get("fields").map(|f| f.split_whitespace().map(String::from).collect()).unwrap_or_default();
+    if words == 0 || fields.len() != words as usize {
+        return p.err(format!("context {name} needs one field path per word ({words} words)"));
+    }
+    Ok((slot, ContextDecl { name, offset, words, fields }))
+}
+
 fn parse_shape(p: &Parser, tokens: &[Token]) -> Result<(u32, ShapeDecl), NirError> {
     let Some(index) = tokens.get(1).and_then(word).and_then(|w| w.parse::<u32>().ok()) else {
         return p.err("shape needs a number");
@@ -1516,6 +1597,13 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
                 }
                 Inst::StaticGet { dst, index }
             }
+            "contextload" => {
+                let offset = num(3)?;
+                if offset % 8 != 0 || offset as u64 + 8 > program.context_bytes as u64 {
+                    return p.err(format!("bad context offset {offset}"));
+                }
+                Inst::ContextLoad { dst, offset }
+            }
             "move" => Inst::Move { dst, src: reg(3)? },
             "closure" => Inst::Closure { dst, func: num(3)?, captures: regs_from(4)? },
             "op" => {
@@ -1578,6 +1666,13 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
                 return p.err(format!("bad static slot {index}"));
             }
             Inst::StaticSet { index, value: reg(2)? }
+        }
+        "contextstore" => {
+            let offset = num(1)?;
+            if offset % 8 != 0 || offset as u64 + 8 > program.context_bytes as u64 {
+                return p.err(format!("bad context offset {offset}"));
+            }
+            Inst::ContextStore { offset, value: reg(2)? }
         }
         "guard" => {
             let kind = tokens.get(1).and_then(word).and_then(Kind::parse);
@@ -1747,6 +1842,8 @@ fn validate(program: &Program) -> Result<(), NirError> {
                 // per-function count to cross-check here, unlike Capture's
                 // own `f.captures`.
                 Inst::StaticGet { dst, .. } => used.push(*dst),
+                // Offsets were checked against the context area at parse time.
+                Inst::ContextLoad { dst, .. } => used.push(*dst),
                 Inst::FnValue { dst, func: g } => {
                     match func(*g) {
                         Some(g) if g.has_scalar_abi() => {
@@ -1760,6 +1857,7 @@ fn validate(program: &Program) -> Result<(), NirError> {
                 }
                 Inst::Move { dst, src } => used.extend([*dst, *src]),
                 Inst::StaticSet { value, .. } => used.push(*value),
+                Inst::ContextStore { value, .. } => used.push(*value),
                 Inst::Closure { dst, func: g, captures } => {
                     match func(*g) {
                         Some(g) if g.has_scalar_abi() => {
@@ -2118,8 +2216,9 @@ fn validate_plans(program: &Program) -> Result<(), NirError> {
                 | Inst::AsciiLit { .. }
                 | Inst::Str { .. } | Inst::Bytes { .. } | Inst::Char { .. } | Inst::Bool { .. } | Inst::Unit { .. }
                 | Inst::Native { .. } | Inst::FnValue { .. } | Inst::SelfClosure { .. } | Inst::Capture { .. }
-                | Inst::StaticGet { .. } => {}
+                | Inst::StaticGet { .. } | Inst::ContextLoad { .. } => {}
                 Inst::StaticSet { value, .. } => used.push(*value),
+                Inst::ContextStore { value, .. } => used.push(*value),
                 Inst::Closure { captures, .. } => used.extend(captures),
                 Inst::Guard { value, .. } | Inst::GuardBool { value } => used.push(*value),
                 Inst::Op { args, .. } => used.extend(args),
