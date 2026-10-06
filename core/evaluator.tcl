@@ -558,7 +558,11 @@ proc core::evalProgram {exprs} {
     core::env::declare $env [core::ir::scopeBindNames $exprs]
     set value ""
     try {
-        set value [core::completion::atProgramBoundary [core::RunWithBackend program $exprs $env]]
+        # Every run starts with an empty execution-environment context set
+        # (core/contexts.tcl, CONTEXTS.md).
+        set value [core::contexts::fresh {
+            core::completion::atProgramBoundary [core::RunWithBackend program $exprs $env]
+        }]
     } finally {
         core::releaseProgram $mark $value
     }

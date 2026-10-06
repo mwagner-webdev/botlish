@@ -335,8 +335,174 @@ pub fn emit_object(program: &Program) -> Result<ObjectProgram, BackendError> {
     for f in &program.functions {
         functions.push(clif::define(&mut module, &symbols, f, &mut pool, &mut sites, false, false)?);
     }
-    let bytes = module.finish().emit().map_err(|e| BackendError::Codegen(e.to_string()))?;
+    let mut bytes = module.finish().emit().map_err(|e| BackendError::Codegen(e.to_string()))?;
+    if program.context_bytes > 0 {
+        relax_context_got(&mut bytes);
+    }
     Ok(ObjectProgram { bytes, pool, functions })
+}
+
+/// The context area's symbol (CONTEXTS.md, clif.rs's `declare`).
+pub const CONTEXT_AREA_SYMBOL: &[u8] = b"botlish_context_area";
+
+/// Makes every GOT-relative reference to the context area *relaxable*, so the
+/// static linker turns it into a direct RIP-relative address (CONTEXTS.md).
+///
+/// Cranelift's x86-64 backend materializes any symbol address in PIC code as
+/// `movq sym@GOTPCREL(%rip), %reg` (cranelift-codegen's `LoadExtName`),
+/// colocated or not, and cranelift-object records it as R_X86_64_GOTPCREL,
+/// which a linker must honour with a real GOT slot: one extra load from the
+/// GOT before every context access. The context area is a linker-local
+/// symbol (STB_LOCAL, never preemptible), so the same instruction may carry
+/// R_X86_64_REX_GOTPCRELX instead, the relocation that permits the linker
+/// to rewrite `movq sym@GOTPCREL(%rip), %reg` into `leaq sym(%rip), %reg`
+/// (x86-64 psABI, "GOTPCRELX relaxation"; GNU ld and lld both do it for a
+/// non-preemptible symbol). Only relocations against this one symbol whose
+/// instruction is exactly that `REX.W 8B /r` RIP-relative load are changed;
+/// the linker still checks the instruction and keeps the GOT slot if it
+/// cannot relax. Returns how many relocations were changed. A no-op for
+/// anything that is not a little-endian ELF64 object.
+pub fn relax_context_got(bytes: &mut [u8]) -> usize {
+    const R_X86_64_GOTPCREL: u64 = 9;
+    const R_X86_64_REX_GOTPCRELX: u64 = 42;
+    let mut changed = 0;
+    for (entry, r_type, code_at) in context_relocations(bytes) {
+        // movq disp32(%rip), %reg: REX.W (0x48/0x4c), 0x8b, ModRM 00 reg 101.
+        if r_type != R_X86_64_GOTPCREL
+            || code_at < 3
+            || bytes[code_at - 3] & 0xfb != 0x48
+            || bytes[code_at - 2] != 0x8b
+            || bytes[code_at - 1] & 0xc7 != 0x05
+        {
+            continue;
+        }
+        let symbol = u64::from_le_bytes(bytes[entry + 8..entry + 16].try_into().unwrap()) >> 32;
+        let relaxed = (symbol << 32) | R_X86_64_REX_GOTPCRELX;
+        bytes[entry + 8..entry + 16].copy_from_slice(&relaxed.to_le_bytes());
+        changed += 1;
+    }
+    changed
+}
+
+/// Every relocation of a little-endian ELF64 object against the context area
+/// symbol: (byte offset of the Rela entry, its type, byte offset in the file
+/// of the patched field). Empty for anything else.
+pub fn context_relocations(bytes: &[u8]) -> Vec<(usize, u64, usize)> {
+    const SHT_SYMTAB: u32 = 2;
+    const SHT_RELA: u32 = 4;
+    let u16_at = |o: usize| u16::from_le_bytes([bytes[o], bytes[o + 1]]);
+    let u32_at = |o: usize| u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
+    let u64_at = |o: usize| u64::from_le_bytes(bytes[o..o + 8].try_into().unwrap());
+    let mut found = Vec::new();
+    if bytes.len() < 64 || &bytes[0..4] != b"\x7fELF" || bytes[4] != 2 || bytes[5] != 1 {
+        return found;
+    }
+    let shoff = u64_at(0x28) as usize;
+    let shentsize = u16_at(0x3a) as usize;
+    let shnum = u16_at(0x3c) as usize;
+    // (type, offset, size, link, info, entsize)
+    let section = |i: usize| -> (u32, usize, usize, u32, u32, usize) {
+        let h = shoff + i * shentsize;
+        (u32_at(h + 4), u64_at(h + 0x18) as usize, u64_at(h + 0x20) as usize,
+            u32_at(h + 0x28), u32_at(h + 0x2c), u64_at(h + 0x38) as usize)
+    };
+    // The symbol index of the context area in the symbol table.
+    let mut target = None;
+    for i in 0..shnum {
+        let (kind, offset, size, link, _, entsize) = section(i);
+        if kind != SHT_SYMTAB || entsize == 0 {
+            continue;
+        }
+        let (_, strtab, _, _, _, _) = section(link as usize);
+        for index in 0..size / entsize {
+            let name = strtab + u32_at(offset + index * entsize) as usize;
+            let end = bytes[name..].iter().position(|&c| c == 0).map_or(name, |n| name + n);
+            if &bytes[name..end] == CONTEXT_AREA_SYMBOL {
+                target = Some((i, index as u64));
+            }
+        }
+    }
+    let Some((symtab, symbol)) = target else { return found };
+    for i in 0..shnum {
+        let (kind, offset, size, link, info, entsize) = section(i);
+        if kind != SHT_RELA || link as usize != symtab || entsize != 24 {
+            continue;
+        }
+        let (_, code, code_size, _, _, _) = section(info as usize);
+        for index in 0..size / entsize {
+            let entry = offset + index * entsize;
+            let r_offset = u64_at(entry) as usize;
+            let r_info = u64_at(entry + 8);
+            if r_info >> 32 != symbol || r_offset + 4 > code_size {
+                continue;
+            }
+            found.push((entry, r_info & 0xffff_ffff, code + r_offset));
+        }
+    }
+    found
+}
+
+#[cfg(test)]
+mod context_area_tests {
+    use super::*;
+
+    /// A program with a two-slot context area: the program installs, f reads.
+    const PROGRAM: &str = concat!(
+        "nir 1 call-effects=1 statics=0 contexts=16\n",
+        "context 0 \"A\" offset=0 words=1 fields=\"value\"\n",
+        "context 1 \"B\" offset=8 words=1 fields=\"value\"\n\n",
+        "func 0 \"<program>\" params=0 env=0 regs=4 pnames=\"\" captures=0\n",
+        "    %0 = int 3\n    contextstore 0 %0\n    %1 = int 4\n    contextstore 8 %1\n",
+        "    %2 = call 1\n    ret %2\nend\n\n",
+        "func 1 \"f\" params=0 env=0 regs=1 pnames=\"\" captures=0\n",
+        "    %0 = contextload 8\n    ret %0\nend\n",
+    );
+
+    #[test]
+    fn context_lines_and_instructions_parse_and_validate() {
+        let program = crate::nir::parse(PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
+        assert_eq!(program.context_bytes, 16);
+        let names: Vec<_> = program.contexts.iter().map(|c| (c.name.as_str(), c.offset, c.words)).collect();
+        assert_eq!(names, vec![("A", 0, 1), ("B", 8, 1)]);
+        // An offset outside the area, or unaligned, is invalid NIR.
+        for bad in ["contextload 16", "contextload 4"] {
+            let text = PROGRAM.replace("contextload 8", bad);
+            assert!(crate::nir::parse(&text).is_err(), "{bad} must be rejected");
+        }
+        let text = PROGRAM.replace("contexts=16", "contexts=8");
+        assert!(crate::nir::parse(&text).is_err(), "a slot beyond the area must be rejected");
+    }
+
+    #[test]
+    fn the_object_addresses_the_area_with_relaxable_relocations_only() {
+        let program = crate::nir::parse(PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
+        let object = emit_object(&program).unwrap_or_else(|e| panic!("{}", e.message()));
+        let types: Vec<u64> = context_relocations(&object.bytes).iter().map(|r| r.1).collect();
+        // Two functions use the area: each takes its address once.
+        assert_eq!(types, vec![42, 42], "R_X86_64_REX_GOTPCRELX, never a plain GOTPCREL");
+        let mut again = object.bytes.clone();
+        assert_eq!(relax_context_got(&mut again), 0, "nothing left to relax");
+    }
+
+    #[test]
+    fn the_jit_reads_and_writes_the_area() {
+        use crate::runtime::metrics::AllocMode;
+        use crate::runtime::vm::ProgramInfo;
+        use std::rc::Rc;
+        let program = crate::nir::parse(PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
+        let options = CompileOptions { clif: true, vcode: false, alloc_sites: false };
+        let compiled = CraneliftJit.compile(&program, &options).expect("compiles");
+        let clif = compiled.clif.clone().unwrap();
+        assert!(clif.contains("symbol_value.i64"), "{clif}");
+        let mut vm = Vm::new(
+            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new() }),
+            AllocMode::Summary,
+        );
+        compiled.install_constants(&mut vm);
+        vm.set_framemap(compiled.framemap.clone());
+        let result = (compiled.entry)(&mut *vm);
+        assert_eq!(result, (4 << 1) | 1, "f reads B's slot, the tagged small Int 4");
+    }
 }
 
 /// The generic-entry wrapper of a function with the ShortString1 ABI

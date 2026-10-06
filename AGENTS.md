@@ -137,6 +137,46 @@ The WSL checkout is the same working tree as the Windows checkout, not a
 separate clone. Check `git status` before running tests and do not stash or
 discard changes merely to switch environments.
 
+## Running tests concurrently
+
+Two test runs that share a working directory or a checkout interfere, and the
+failures look like real bugs (`couldn't open ".../contexts-scratch/p79.bot":
+no such file or directory`, `no such module file .../lib/X.bot`). This covers
+an agent parallelizing its own runs, two sessions in one checkout, and a
+Windows run beside a WSL run (same tree, above). What is shared
+(TEST-SUITE-COST.md section 4 has the measurements):
+
+* **tcltest's temporary directory is the current working directory** unless
+  `-tmpdir` is given. Test files create fixed-name scratch directories in it
+  (`abi-bytes-scratch`, `argv-aot`, `contexts-scratch`, ...) and delete or
+  sweep them, so two runs of the *same* test file with one temporary directory
+  delete each other's files. Pass a private absolute directory:
+  `tclsh9.0 tests/all.tcl -tmpdir /tmp/run-A ...` (tcltest forwards it to
+  every per-file child process). *Different* test files sharing one
+  temporary directory, two or three at a time, ran the whole suite cleanly.
+* **The real `lib/` and the repository root.** Some tests write fixed-name
+  modules into `lib/` itself (TEST-SUITE-COST.md lists them), and
+  `stdlib-namespaces.test`'s fuzz smoke uses a fixed `.fuzz-stdlib-namespaces`
+  directory in the repository root. `-tmpdir` does not isolate these: two
+  concurrent runs that include those files need separate trees.
+* **`tests/native-coverage.tcl`** writes (and first deletes)
+  `native-coverage.log` in the current directory and passes no options to
+  `all.tcl`: start each coverage run from its own empty directory.
+* **`native/target/release`.** Every native test runs `botlish-native` from
+  there, and the executable (AOT) tests link `libbotlish_native.rlib` at test
+  time. A `cargo build` during a run swaps them under it. A copied tree needs
+  all of `native/target` (a symlink to the original works); a copy with only
+  the binary fails every AOT test with `runtime library missing`.
+
+So for concurrent runs: one tree per run (for example `tar
+--exclude=./native/target --exclude=./.git` into a scratch directory plus a
+`native/target` symlink), each started from its own working directory or with
+its own `-tmpdir`, and no native rebuild until they finish. A run started from
+the repository root and interrupted leaves its scratch directories in the
+working tree: check `git status` before committing. New tests and tools
+should not add to the list: use `file tempdir` (or a name with `[pid]`) for
+scratch space, never a fixed name in the working directory or the repository.
+
 ## Native GC-stress validation
 
 `BOTLISH_NATIVE_GC_STRESS=1` forces a GC attempt at every allocation site,

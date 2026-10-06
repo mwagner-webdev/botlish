@@ -632,6 +632,7 @@ refinement unless its contract explicitly establishes one. So
 | `core/primitives.tcl`, `core/predicates.tcl`, `core/strings.tcl`, `core/lists.tcl` | builtin natives |
 | `core/process.tcl` | the process boundary: `argv()`, its builtin error, argv injection (ARGV.md) |
 | `core/linuxabi.tcl` | `linux::abi::syscall`, the raw Linux x86-64 kernel transition (native only; LINUX-X86-64-SYSCALL.md) |
+| `core/contexts.tcl` | the two internal context operations `context#install` / `context#load` and the Tcl backends' per-run context environment (CONTEXTS.md) |
 | `core/bytestore.tcl` | the byte-storage value kinds' natives (immutable `bytestore`, writable `mutbytes`) and the raw address bridges `abi::x86_64::from_bytes` / `from_mutable_bytes` (ABI-BYTES.md, MUTABLE-BYTES.md) |
 | `lib/web.tcl` | optional demonstration library (`core::loadLibrary web`): `Emailish`, `UriQueryValue`, `uriEscape` |
 | `hir/hir.tcl` | HIR data model, ids, `hir::build`, queries |
@@ -647,6 +648,7 @@ refinement unless its contract explicitly establishes one. So
 | `hir/specialize.tcl` | call-site specialization: instances, result fixpoint, views for `hir::aot` (§21) |
 | `hir/exactvalue.tcl` | exact-value facts and value identity (`hir::exact::Of`, `Identity`, `SameValue`) |
 | `hir/warnings.tcl` | compiler warnings: record, static registry, global policy, rendering, error promotion, `SAME-RETURN-VALUE` and `METHOD-ELIGIBLE` (§23) |
+| `hir/contexts.tcl` | execution-environment contexts: context parameters, direct and transitive requirements, installation order, `MISSING-CONTEXT` chains, function-value frontier (CONTEXTS.md) |
 | `hir/syscall.tcl` | the static contract of `linux::abi::syscall`'s register-struct argument (LINUX-X86-64-SYSCALL.md) and of `abi::x86_64::from_bytes`'s `abi::bytes::Bytes` argument (ABI-BYTES.md) |
 | `compiler/compiler.tcl` | HIR → Tcl compiler backend |
 | `native/lower.tcl` | HIR → NIR native lowering (§20) |
@@ -658,6 +660,7 @@ refinement unless its contract explicitly establishes one. So
 | `lib/abi/bytes.bot` | the ABI memory values, both owned by this one module (the single-owner rule of OPAQUE-STRUCTS.md, so they convert into each other without a public accessor): `abi::bytes::Bytes`, immutable, opaque over contiguous byte storage (`from_list`, `length`; ABI-BYTES.md), and `abi::bytes::MutableBytes`, its writable counterpart, a *value* whose copies are independent (`zeroed`, `from_bytes`, `mutable_length`, `replace`, `detach`, `freeze`, `freeze_prefix`; MUTABLE-BYTES.md) |
 | `hir/imports.tcl` | the import environments of a compilation: which namespaces and short type names each file's header imported (IMPORTS.md) |
 | `lib/linux.bot` | `linux::write(fd, data)`: one `write(2)` syscall over an `abi::bytes::Bytes`, the kernel's raw signed result as an Int (ABI-BYTES.md); `linux::read(fd, data)`: one `read(2)` into the caller's `abi::bytes::MutableBytes` (copied: the caller's value is never changed), returning a `linux::ReadResult` of the raw `ssize_t` and the updated buffer (MUTABLE-BYTES.md) |
+| `lib/linux/io.bot` | `linux::io::LinuxIO`, the process's standard I/O as one opaque context over three opaque `FileDescriptor` tokens; `create()`, and the contextual `write`, `write_error`, `read` over `linux::write` / `linux::read` (CONTEXTS.md) |
 | `lib/abi/x86_64.bot` | `abi::x86_64::Register64`, the x86-64 register word as a transport value, and its two Int conversions (LINUX-X86-64-SYSCALL.md); `from_i8` ... `from_usize` encode ABI numeric values as register words, sign- or zero-extended (ABI-NUMERIC-DOMAINS.md) |
 | `native/src/codegen/` | the `Backend` interface; NIR → Cranelift IR for JIT and object files |
 | `surface/lexer.tcl` | source → tokens, indentation → `INDENT`/`DEDENT` |
@@ -1490,8 +1493,9 @@ add10(32)          # 42 (add captures x)
   (`OPAQUE-CONSTRUCTION`, `OPAQUE-REPRESENTATION`) with no runtime test. `opaque`
   is a contextual word, the compiler still sees the fields (a one-field wrapper
   scalar-replaces exactly as an ordinary one), and an opaque value prints as
-  `<opaque token::Token>`. It is representation ownership, not OO privacy, and
-  the prerequisite for later `opaque context struct` / `opaque resource struct`.
+  `<opaque token::Token>`. It is representation ownership, not OO privacy;
+  `context` (below) composes with it as an independent modifier
+  (`opaque context struct`), and a later `resource` will too.
   See OPAQUE-STRUCTS.md.
 * **Method-call sugar.** `value.f(a, b)` is another spelling of the ordinary
   call `f(value, a, b)`, allowed exactly when `f` is a function visible by
@@ -1545,6 +1549,28 @@ add10(32)          # 42 (add captures x)
   aliases (`g = open`). A function with flags can only be called or aliased,
   not passed around as a value. `flags` is a contextual marker, not a reserved
   word. See FLAGS.md.
+* **Contexts.** `context struct Clock:` (or `opaque context struct LinuxIO:`)
+  declares a struct whose values may be installed into the current execution
+  environment; `with context EXPR` installs EXPR's value -- its inferred type
+  must be exactly one context struct -- from that statement on (entry program
+  top level only, for now); and a function states a value of that
+  environment it directly uses in a last parameter section, after the
+  ordinary parameters and flags: `fn write(data, context io: LinuxIO):`.
+  `io` is an ordinary local; the call is `write(data)` -- context parameters
+  are not arguments and do not count in the arity. A context is identified by
+  its type alone (at most one installed value per type; the local name means
+  nothing outside the function). Only the function that uses a context
+  declares it: the compiler derives every caller's transitive requirement
+  from the call graph and proves, statement by statement, that each call at
+  the top level runs after the installation of everything it needs
+  (`MISSING-CONTEXT`, with the call chain that explains it), that no type is
+  installed twice (`DUPLICATE-CONTEXT`) and that a function needing a context
+  never becomes a value (`CONTEXT-FUNCTION-VALUE`). Natively a context lives in
+  a statically assigned slot of the program's writable data, read with fixed
+  PC-relative addressing where it is used: no hidden argument, no reserved
+  register, no lookup. `context` and `with` are contextual words. The first
+  context is `linux::io::LinuxIO` (lib/linux/io.bot): `with context
+  linux::io::create()` then `linux::io::write(bytes)`. See CONTEXTS.md.
 * **Struct destructuring.** `{user, expires: expiry} = result` binds fields
   of a struct value by name: it evaluates `result` once, then binds `user` to
   `result.user` and `expiry` to `result.expires`, exactly as the explicit

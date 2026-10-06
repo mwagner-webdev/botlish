@@ -411,6 +411,13 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan} {
             Error INVALID-TOPLEVEL [dict get $statement span] \
                 "module \"$name\" ($path): a struct destructuring is not allowed at module top level (module bindings are context-free immutable values, and a struct value is not one: MODULE-BINDINGS.md); destructure inside a function"
         }
+        if {[dict get $statement kind] eq "with"} {
+            # `with context EXPR` (CONTEXTS.md): installation exists only in
+            # the entry program's top-level scope -- its own diagnostic, the
+            # one HIR gives an installation anywhere else.
+            Error CONTEXT-INSTALLATION-UNSUPPORTED [dict get $statement span] \
+                "context installation is currently supported only in the entry program's top-level scope, as a statement (this one is inside a module: \"$name\", $path)"
+        }
         if {[dict get $statement kind] ni {function bind typedecl errordecl structdecl}} {
             Error INVALID-TOPLEVEL [dict get $statement span] \
                 "module \"$name\" ($path): only function definitions, immutable bindings, type declarations, struct declarations and error declarations are allowed at module top level, found a \"[dict get $statement kind]\" statement"

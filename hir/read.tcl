@@ -128,8 +128,8 @@ proc hir::read::TypeDecls {lines} {
 # (hir::format::TypeDecl) states; field types are read with the structs
 # registered skeleton-first, so a field may name any struct of the text.
 proc hir::read::StructDeclLine {content number} {
-    if {![regexp {^struct (\S+) name (\S+) ns (\S+) (opaque )?fields (.*)$} $content -> id name ns opaqueWord fieldsText]} {
-        Fail $number "expected \"struct ID name NAME ns NS \[opaque\] fields FIELD: TYPE, ...\""
+    if {![regexp {^struct (\S+) name (\S+) ns (\S+) (opaque )?(context )?fields (.*)$} $content -> id name ns opaqueWord contextWord fieldsText]} {
+        Fail $number "expected \"struct ID name NAME ns NS \[opaque\] \[context\] fields FIELD: TYPE, ...\""
     }
     set ns [expr {$ns eq "-" ? "" : $ns}]
     # Skeleton: every struct line of the text must be known before any field
@@ -143,8 +143,12 @@ proc hir::read::StructDeclLine {content number} {
         lappend names $fname
         lappend rawFields $fname $ftype
     }
-    return [dict create kind struct name $name id $id namespace $ns opaque [expr {$opaqueWord ne ""}] \
+    set decl [dict create kind struct name $name id $id namespace $ns opaque [expr {$opaqueWord ne ""}] \
         fields $rawFields names $names line $number]
+    if {$contextWord ne ""} {
+        dict set decl context 1
+    }
+    return $decl
 }
 
 # The surface/lower.tcl-shaped decl dict for one "type ..." HIR text line
@@ -623,11 +627,15 @@ proc hir::read::Expr {hirVar level s path block} {
             }
         }
         block {
-            if {![BlockHeader $head body params captures staticRefs declared errorsText binds nomethod]} {
-                Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)? ?nomethod? ?declares ...? ?errors ...? ?binds ...?\""
+            if {![BlockHeader $head body params captures staticRefs declared errorsText binds nomethod contexts]} {
+                Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)? ?nomethod? ?contexts (IDS) requires (IDS)? ?declares ...? ?errors ...? ?binds ...?\""
             }
             if {$nomethod} {
                 SetField hir $e nomethod 1
+            }
+            if {$contexts ne ""} {
+                SetField hir $e directContexts [lindex $contexts 0]
+                SetField hir $e requiredContexts [lindex $contexts 1]
             }
             NewScope hir $body block $s $e $e [list ir $path] $number
             set paramIds {}
@@ -676,8 +684,13 @@ proc hir::read::Expr {hirVar level s path block} {
             SetField hir $e body $ids
         }
         call {
-            if {![regexp {^(?:native\((.+)\)|block\((e[0-9]+)\)|(generic))(?: = (true|false))?$} $head -> native target generic known]} {
-                Fail $number "expected \"call native(NAME)|block(EXPR)|generic ?= true|false?\""
+            if {![regexp {^(?:native\((.+?)\)|block\((e[0-9]+)\)|(generic))(?: = (true|false))?(?: installs (\S+))?$} $head -> native target generic known installs]} {
+                Fail $number "expected \"call native(NAME)|block(EXPR)|generic ?= true|false? ?installs ID?\""
+            }
+            # The context a verified installation installs (CONTEXTS.md), as
+            # printed: native lowering assigns its fixed slot from it.
+            if {$installs ne ""} {
+                SetField hir $e context $installs
             }
             if {$native ne ""} {
                 SetField hir $e target [list native [Symbol hir native $native]]
@@ -953,14 +966,18 @@ proc hir::read::Expr {hirVar level s path block} {
 # into the named variables; 0 if malformed. The optional parts are found
 # outside brackets, so a declared type may itself contain spaces, ", " or
 # the word "errors" (a structural function type's own "errors: [...]").
-proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar {nomethodVar ""}} {
+proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar {nomethodVar ""} {contextsVar ""}} {
     foreach var {bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar} {
         upvar 1 [set $var] [string range $var 0 end-3]
     }
     if {$nomethodVar ne ""} {
         upvar 1 $nomethodVar nomethod
     }
+    if {$contextsVar ne ""} {
+        upvar 1 $contextsVar contexts
+    }
     set nomethod 0
+    set contexts ""
     set staticRefs ""
     set declared ""
     set errors ""
@@ -971,6 +988,12 @@ proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar de
     regexp {^ staticRefs \((.*?)\)(.*)$} $rest -> staticRefs rest
     if {[regexp {^ nomethod(.*)$} $rest -> after]} {
         set nomethod 1
+        set rest $after
+    }
+    # The context requirements (CONTEXTS.md): {DIRECT REQUIRED}, as printed
+    # (hir::check recomputes the same facts from the loads and calls).
+    if {[regexp {^ contexts \((.*?)\) requires \((.*?)\)(.*)$} $rest -> direct required after]} {
+        set contexts [list [lmap id [split $direct ,] {string trim $id}] [lmap id [split $required ,] {string trim $id}]]
         set rest $after
     }
     set i [TopIndex $rest " binds "]

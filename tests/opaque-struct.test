@@ -348,7 +348,7 @@ test opaque-ast-contextual {`opaque` is not reserved: it stays an ordinary name,
 test opaque-ast-owner-not-in-ast {the cached AST is importer- and path-neutral: the declaration carries no namespace or owner} -body {
     set d [lindex [dict get [surface::parse "opaque struct A:\n    v: int\n"] body] 0]
     lsort [dict keys $d]
-} -result {fields id kind name nameSpan opaque opaqueSpan span}
+} -result {context contextSpan fields id kind name nameSpan opaque opaqueSpan span}
 
 foreach {name source message} {
     duplicate   "opaque opaque struct T:\n    a: int\n"          {duplicate modifier "opaque" in this struct declaration}
@@ -358,7 +358,6 @@ foreach {name source message} {
     nested      "fn f():\n    opaque struct T:\n        a: int\n    1\n" {a struct declaration is only allowed at the top level of a module, not nested in a function/if/loop}
     no-name     "opaque struct:\n    a: int\n"                   {expected a struct name after "struct", found ":"}
     no-fields   "opaque struct T:\n"                             {a struct declaration needs at least one "field: Type" line in an indented block (there is no empty-struct syntax), found end of file}
-    not-yet     "opaque context struct T:\n    a: int\n"          {expected end of line, found name "context"}
     not-yet-2   "opaque resource struct T:\n    a: int\n"         {expected end of line, found name "resource"}
     after-name  "struct opaque T:\n    a: int\n"                  {expected ":" after the struct name "opaque", found name "T"}
 } {

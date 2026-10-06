@@ -20,6 +20,12 @@
 #                     construct allows, so `import` stays an ordinary name.
 #   topStatement = typeDecl | structDecl | errorDecl | statement
 #   statement    = simple NEWLINE | valued | function | if | loop
+#                | withDecl NEWLINE
+#   withDecl     = "with" "context" expression    -- CONTEXTS.md: installs
+#                  the expression's value as the context of its (inferred,
+#                  exact) context-struct type for the rest of the scope.
+#                  "with" and "context" are contextual (below); no binding
+#                  name, no type annotation, no list, no block, no colon
 #   simple       = binding | destructure | return | break | continue | fail
 #                | expression
 #   valued       = IDENT "=" (if|loop|handledExpr)
@@ -32,13 +38,20 @@
 #   functionModifier = "nomethod"   -- WARNINGS-METHOD-ELIGIBLE.md; contextual
 #                  (below): the function's author declares that it is never
 #                  called with method syntax
-#   paramList    = [ param { "," param } ] [ "," flagSection ] [ "," ]
+#   paramList    = [ param { "," param } ] [ "," flagSection ]
+#                  [ "," contextSection ] [ "," ]
 #                  -- sections in canonical order: ordinary parameters, then
-#                  flags (ParamSections)
+#                  flags, then context (ParamSections); any may be absent
 #   param        = IDENT [ ":" IDENT ]
 #   flagSection  = "flags" flagDecl { "," flagDecl }   -- FLAGS.md; "flags" is
 #                  contextual: `flags :name` only (an ordinary name otherwise)
 #   flagDecl     = ":" IDENT                          -- the name glued to ":"
+#   contextSection = "context" contextDecl { "," contextDecl }   -- CONTEXTS.md;
+#                  "context" is contextual: it opens the section only when
+#                  followed by a name (`context io: T`); `context`,
+#                  `context: T` are an ordinary parameter named context
+#   contextDecl  = IDENT ":" typeExpr       -- a local name and the required
+#                  context type (always written)
 #   if           = "if" expression ":" suite
 #                  { "elif" expression ":" suite } [ "else" ":" suite ]
 #   loop         = "loop" [ clause { "and" clause } ] ":" suite
@@ -67,6 +80,10 @@
 #
 #   structDecl   = { structModifier } "struct" IDENT ":" NEWLINE INDENT structField { structField } DEDENT
 #   structModifier = "opaque"       -- OPAQUE-STRUCTS.md; contextual (below)
+#                  | "context"      -- CONTEXTS.md; contextual (below). The
+#                  modifiers are independent boolean properties, in any
+#                  order, each at most once; canonical spelling
+#                  `opaque context struct`
 #   structField  = IDENT ":" typeExpr NEWLINE
 #
 # A structDecl (STRUCTS.md) declares a nominal struct type: like a typeDecl
@@ -77,12 +94,14 @@
 # a zero-field struct.
 #
 # A struct modifier (`opaque struct Token:` -- the declaring module alone may
-# construct and inspect the struct's representation, OPAQUE-STRUCTS.md) is a
-# *contextual* word, not a keyword: it is a modifier only when the words
+# construct and inspect the struct's representation, OPAQUE-STRUCTS.md;
+# `context struct Clock:` -- a value of the type may be installed into the
+# execution environment and satisfy a function's context dependency,
+# CONTEXTS.md) is a *contextual* word, not a keyword: it is a modifier only when the words
 # before the `struct` keyword are all modifier words (lookahead through the
 # modifier table, AtStructDecl), which no other construct allows, so `opaque`
 # stays an ordinary name everywhere else (`opaque = 1`, `opaque(x)`,
-# `x.opaque`, a field called `opaque`). A modifier is a property of the one
+# `x.opaque`, a field called `opaque`; likewise `context`). A modifier is a property of the one
 # struct declaration (the `structdecl` node's own fields), never a separate
 # declaration kind, so further modifiers extend the table, not the grammar's
 # shape.
@@ -189,8 +208,10 @@ namespace eval surface::parser {
     variable comparisons {== != < <= > >=}
     # The contextual words that may precede `struct` in a struct declaration
     # (see the grammar above). Each names one boolean property of the
-    # `structdecl` node (`opaque` -> `opaque 0|1`, `opaqueSpan`).
-    variable structModifiers {opaque}
+    # `structdecl` node (`opaque` -> `opaque 0|1`, `opaqueSpan`; `context`
+    # -> `context 0|1`, `contextSpan`). A future `resource` is one more
+    # entry here and one more property, nothing else.
+    variable structModifiers {opaque context}
     # The contextual words that may precede `fn` in a function declaration
     # (see the grammar above). Each names one boolean property of the
     # `function` node (`nomethod` -> `nomethod 0|1`, `nomethodSpan`).
@@ -465,6 +486,57 @@ proc surface::parser::AtStrayFunctionModifier {pVar} {
         && [Kind p 1] in {type struct error}}]
 }
 
+# 1 if the next tokens start a `with` declaration: the contextual word "with"
+# followed by a name (CONTEXTS.md). `with NAME` is never a valid expression
+# continuation, so an ordinary variable called `with` (`with = 1`, `with(x)`,
+# `with.x`) is unaffected.
+proc surface::parser::AtWith {pVar} {
+    upvar 1 $pVar p
+    set token [Peek p]
+    return [expr {[dict get $token kind] eq "IDENT" && [dict get $token text] eq "with"
+        && [Kind p 1] eq "IDENT"}]
+}
+
+# "with" FORM ... -- a declaration that establishes something from this
+# point until the end of the enclosing scope, with no block of its own
+# (CONTEXTS.md). The one form that exists is
+#
+#   "with" "context" expression
+#
+# which installs the expression's value as the execution-environment context
+# of its inferred type: a `with` node {form context formSpan value}. FORM is
+# the word after "with"; the node is shaped for further forms (a future
+# `with NAME = EXPR` resource declaration would be form `resource` with a
+# name), none of which exists: they are located syntax errors. Where a `with`
+# may appear is decided by HIR (CONTEXT-INSTALLATION-UNSUPPORTED), not here.
+proc surface::parser::WithDecl {pVar} {
+    upvar 1 $pVar p
+    set start [dict get [Advance p] span]
+    set form [Peek p]
+    if {[dict get $form text] ne "context"} {
+        if {[Kind p 1] eq "="} {
+            Fail $form "a \"with NAME = EXPR\" declaration does not exist yet: the only \"with\" declaration is \"with context EXPR\""
+        }
+        Fail $form "expected \"context\" after \"with\" (the only \"with\" declaration is \"with context EXPR\"), found [Describe $form]"
+    }
+    Advance p
+    if {[Kind p] in {NEWLINE EOF DEDENT}} {
+        Fail [Peek p] "expected an expression after \"with context\" (the value to install), found [Describe [Peek p]]"
+    }
+    if {[Kind p] eq ":"} {
+        Fail [Peek p] "\"with context\" takes one expression and no block: write \"with context EXPR\" on its own line; the context is installed for the rest of the scope"
+    }
+    set value [Expression p]
+    if {[Kind p] eq ","} {
+        Fail [Peek p] "\"with context\" installs one value: write one \"with context EXPR\" line per context"
+    }
+    if {[Kind p] eq ":"} {
+        Fail [Peek p] "\"with context\" takes one expression and no block: write \"with context EXPR\" on its own line; the context is installed for the rest of the scope"
+    }
+    return [surface::ast::node with [SpanFrom p $start] form context \
+        formSpan [dict get $form span] value $value]
+}
+
 # Statements up to a token of a kind in STOP (not consumed).
 proc surface::parser::Statements {pVar stop} {
     upvar 1 $pVar p
@@ -592,7 +664,11 @@ proc surface::parser::Statement {pVar} {
     if {[AtImport p]} {
         Fail $token "an import must be in the file header: after the \"namespace\" declaration, before any other declaration or statement, and never inside a function, loop or branch"
     }
-    set statement [Simple p]
+    if {[AtWith p]} {
+        set statement [WithDecl p]
+    } else {
+        set statement [Simple p]
+    }
     if {[dict get $statement kind] eq "handledcall"} {
         # The handler suite(s) already ended the line.
         return $statement
@@ -943,12 +1019,12 @@ proc surface::parser::Function {pVar} {
     Advance p
     set name [Expect p IDENT "a function name after \"fn\""]
     set open [Expect p ( "\"(\" after the function name"]
-    lassign [ParamSections p] params flags
+    lassign [ParamSections p] params flags contexts
     set body [Suite p "the parameter list"]
     set nomethod [dict exists $modifiers nomethod]
     return [surface::ast::node function [SpanFrom p $start] \
         name [dict get $name value] nameSpan [dict get $name span] \
-        params $params flags $flags paramsSpan [SpanFrom p [dict get $open span]] \
+        params $params flags $flags contexts $contexts paramsSpan [SpanFrom p [dict get $open span]] \
         resultType [dict get $body resultType] resultTypeSpan [dict get $body resultTypeSpan] \
         errors [dict get $body errors] body $body \
         nomethod $nomethod nomethodSpan [expr {$nomethod ? [dict get $modifiers nomethod] : ""}]]
@@ -956,48 +1032,71 @@ proc surface::parser::Function {pVar} {
 
 # The parameter list of a function declaration, after "(", through ")":
 #
-#   params       = [ ordinary ] [ flagSection ]       (see paramSectionOrder)
+#   params       = [ ordinary ] [ flagSection ] [ contextSection ]
+#                                                     (see paramSectionOrder)
 #   ordinary     = param { "," param }
 #   param        = IDENT [ ":" typeExpr ]
 #   flagSection  = "flags" flagDecl { "," flagDecl }
 #   flagDecl     = ":" IDENT                          -- no space after ":"
+#   contextSection = "context" contextDecl { "," contextDecl }
+#   contextDecl  = IDENT ":" typeExpr
 #
-# optionally followed by a trailing ",". Returns {PARAMS FLAGS}: PARAMS the
-# ordinary parameters {NAME SPAN TYPE TYPESPAN}, FLAGS the declared flags
-# {NAME SPAN} in written order (SPAN covers ":name").
+# optionally followed by a trailing ",". Returns {PARAMS FLAGS CONTEXTS}:
+# PARAMS the ordinary parameters {NAME SPAN TYPE TYPESPAN}, FLAGS the declared
+# flags {NAME SPAN} in written order (SPAN covers ":name"), CONTEXTS the
+# declared context parameters {name nameSpan type typeSpan} dicts in written
+# order (CONTEXTS.md).
 #
 # The parameter list is a sequence of *sections* in one canonical order,
-# paramSectionOrder: ordinary parameters, then flags. A new section is
-# introduced by its marker word and runs until the next section marker or the
-# closing ")"; it never swallows "the rest of the signature" -- the list is
-# parsed one entry at a time and each entry knows which section it belongs
-# to, so a later section (the planned `context`, `variadic`) is one more
-# marker and one more rank in the order, with the same ordering diagnostic.
+# paramSectionOrder: ordinary parameters, then flags, then context. A new
+# section is introduced by its marker word and runs until the next section
+# marker or the closing ")"; it never swallows "the rest of the signature" --
+# the list is parsed one entry at a time and each entry knows which section it
+# belongs to, so a later section (the planned `variadic`) is one more marker
+# and one more rank in the order, with the same ordering diagnostic.
 #
 # "flags" is a contextual marker, not a keyword: it opens the flag section
 # only where an entry is spelled `flags :NAME` -- the name, then a colon that
 # is separated from it by space and glued to the NAME after it (FlagsMarker).
 # `flags` anywhere else is an ordinary parameter name, typed or not
 # (`fn f(flags)`, `fn f(flags: Int)`, `fn f(flags : Int)`).
+#
+# "context" is contextual the same way: it opens the context section only
+# where it is directly followed by a name (`context io: LinuxIO`,
+# ContextMarker), which no ordinary parameter can be. `fn f(context)` and
+# `fn f(context: Int)` are an ordinary parameter named context. Inside the
+# section every entry is `NAME: Type`; the type is always written, since it
+# is the context's identity (the local name is not).
 proc surface::parser::ParamSections {pVar} {
     upvar 1 $pVar p
     variable paramSectionOrder
     set params {}
     set flags {}
+    set contexts {}
     set section ordinary
     while {[Kind p] ne ")"} {
         set token [Peek p]
-        if {[Kind p] eq ":" || [FlagsMarker p]} {
+        if {[ContextMarker p]} {
+            Advance p
+            EnterSection p section context [dict get $token span]
+            lappend contexts [ContextEntry p]
+        } elseif {[Kind p] eq ":" || [FlagsMarker p]} {
             if {[Kind p] ne ":"} {
                 Advance p
                 set markerSpan [dict get $token span]
                 EnterSection p section flags $markerSpan
+            } elseif {$section eq "context"} {
+                set flag [FlagEntry p]
+                FailCode [dict get $flag span] MALFORMED-CONTEXT-SECTION \
+                    "flag :[dict get $flag name] cannot follow the context section: a parameter list is ordinary parameters, then flags, then context"
             } elseif {$section ne "flags"} {
                 set flag [FlagEntry p]
                 FailCode [dict get $flag span] MALFORMED-FLAG-SECTION \
                     "flag :[dict get $flag name] is outside a flag section: declare flags after the ordinary parameters as \"flags :[dict get $flag name]\""
             }
             lappend flags [FlagEntry p]
+        } elseif {$section eq "context"} {
+            lappend contexts [ContextEntry p]
         } else {
             set param [Expect p IDENT "a parameter name"]
             if {$section ne "ordinary"} {
@@ -1021,13 +1120,13 @@ proc surface::parser::ParamSections {pVar} {
         }
     }
     Advance p
-    return [list $params $flags]
+    return [list $params $flags $contexts]
 }
 
-# The canonical order of a declaration's parameter sections. Only `ordinary`
-# and `flags` exist; `context` and `variadic` (terminal) are planned.
+# The canonical order of a declaration's parameter sections. `variadic`
+# (terminal) is planned.
 namespace eval surface::parser {
-    variable paramSectionOrder {ordinary flags}
+    variable paramSectionOrder {ordinary flags context}
 }
 
 # Moves SECTIONVAR to section NEW (marker at SPAN), or fails when NEW is not
@@ -1036,10 +1135,52 @@ proc surface::parser::EnterSection {pVar sectionVar new span} {
     upvar 1 $pVar p $sectionVar section
     variable paramSectionOrder
     if {[lsearch -exact $paramSectionOrder $new] <= [lsearch -exact $paramSectionOrder $section]} {
+        if {$new eq "context"} {
+            FailCode $span MALFORMED-CONTEXT-SECTION \
+                "a \"context\" section cannot follow the $section section: a parameter list has at most one context section, after the ordinary parameters and flags (list several contexts in one section: \"context a: A, b: B\")"
+        }
+        if {$section eq "context"} {
+            FailCode $span MALFORMED-CONTEXT-SECTION \
+                "a \"$new\" section cannot follow the context section: a parameter list is ordinary parameters, then flags, then context"
+        }
         FailCode $span MALFORMED-FLAG-SECTION \
             "a \"$new\" section cannot follow the $section section: a parameter list has at most one $new section, after the ordinary parameters"
     }
     set section $new
+}
+
+# 1 if the next tokens are the context-section marker: the name `context`
+# directly followed by another name -- `context io: T` (CONTEXTS.md). Never an
+# ordinary parameter (a parameter name is followed by ":", "," or ")"), so
+# `fn f(context)` and `fn f(context: T)` keep their meaning.
+proc surface::parser::ContextMarker {pVar} {
+    upvar 1 $pVar p
+    set name [Peek p]
+    return [expr {[dict get $name kind] eq "IDENT" && [dict get $name value] eq "context"
+        && [Kind p 1] eq "IDENT"}]
+}
+
+# One context parameter `NAME ":" typeExpr` of the context section. Returns
+# {name NAME nameSpan SPAN type TYPE typeSpan SPAN}. The type is required:
+# a context is identified by its type, never by the local name.
+proc surface::parser::ContextEntry {pVar} {
+    upvar 1 $pVar p
+    set token [Peek p]
+    if {[dict get $token kind] ne "IDENT"} {
+        FailCode [dict get $token span] MALFORMED-CONTEXT-SECTION \
+            "expected a context parameter \"NAME: Type\" in the context section, found [Describe $token]"
+    }
+    Advance p
+    if {[Kind p] ne ":"} {
+        FailCode [dict get $token span] MALFORMED-CONTEXT-SECTION \
+            "context parameter \"[dict get $token value]\" needs its context type: write \"[dict get $token value]: Type\" (a context is identified by its type)"
+    }
+    Advance p
+    set typeStart [dict get [Peek p] span]
+    set type [TypeExpr p "a context type after \":\""]
+    set typeSpan [SpanFrom p $typeStart]
+    return [dict create name [dict get $token value] nameSpan [dict get $token span] \
+        type $type typeSpan $typeSpan]
 }
 
 # 1 if the next tokens are the flag-section marker: the name `flags` and a
@@ -1957,8 +2098,10 @@ proc surface::parser::FieldInits {pVar} {
 # `fields`, one {name nameSpan type typeSpan} dict per declared field in
 # written (slot) order, and one boolean per struct modifier (structModifiers):
 # `opaque` (1 for `opaque struct`, else 0) with `opaqueSpan` (the modifier
-# word's span, "" when absent). The node is the one struct declaration with a
-# property, never a different declaration kind (OPAQUE-STRUCTS.md).
+# word's span, "" when absent), and `context` / `contextSpan` likewise
+# (CONTEXTS.md). The node is the one struct declaration with properties,
+# never a different declaration kind (OPAQUE-STRUCTS.md); the modifiers are
+# order-independent and each may be written once.
 proc surface::parser::StructDecl {pVar} {
     variable structModifiers
     upvar 1 $pVar p
@@ -2025,7 +2168,9 @@ proc surface::parser::StructDecl {pVar} {
         Advance p
     }
     set opaque [dict exists $modifiers opaque]
+    set context [dict exists $modifiers context]
     return [surface::ast::node structdecl [SpanFrom p $start] \
         name [dict get $name value] nameSpan [dict get $name span] fields $fields \
-        opaque $opaque opaqueSpan [expr {$opaque ? [dict get $modifiers opaque] : ""}]]
+        opaque $opaque opaqueSpan [expr {$opaque ? [dict get $modifiers opaque] : ""}] \
+        context $context contextSpan [expr {$context ? [dict get $modifiers context] : ""}]]
 }

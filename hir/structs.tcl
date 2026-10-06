@@ -80,7 +80,7 @@
 #     types its callers pass, each analyzed under its actual type.
 
 namespace eval hir::structs {
-    # ID -> {id ID name NAME namespace NS opaque 0|1 names {FIELD...} types
+    # ID -> {id ID name NAME namespace NS opaque 0|1 context 0|1 names {FIELD...} types
     # {FIELD TYPE ...} spans {FIELD SPAN ...} span SPAN}: the registry of the
     # current compilation's declarations. `namespace` is the declaring module
     # and, for an opaque struct, the owner of its representation.
@@ -154,6 +154,14 @@ proc hir::structs::display {id} {
 proc hir::structs::isOpaque {id} {
     variable registry
     return [expr {[dict exists $registry $id opaque] && [dict get $registry $id opaque]}]
+}
+
+# 1 if struct ID was declared `context struct` (or `opaque context struct`):
+# a value of it may be installed into the execution environment and satisfy
+# a function's context dependency (CONTEXTS.md). Independent of opacity.
+proc hir::structs::isContext {id} {
+    variable registry
+    return [expr {[dict exists $registry $id context] && [dict get $registry $id context]}]
 }
 
 # The namespace ("" for an entry program) that owns the representation of
@@ -273,7 +281,8 @@ proc hir::structs::apply {decls} {
         # The skeleton first: a field type may name any struct of the batch,
         # declared earlier, later, or this one itself.
         dict set registry $id [dict create id $id name $name namespace $ns \
-            opaque [expr {[dict exists $decl opaque] && [dict get $decl opaque]}] names $names \
+            opaque [expr {[dict exists $decl opaque] && [dict get $decl opaque]}] \
+            context [expr {[dict exists $decl context] && [dict get $decl context]}] names $names \
             types {} spans $spans span [dict get $decl nameSpan]]
     }
     set entries {}
@@ -293,8 +302,14 @@ proc hir::structs::apply {decls} {
             lappend types $fieldName $resolved
         }
         dict set registry $id types $types
-        lappend entries [dict create kind struct name $name id $id namespace $ns \
+        set entry [dict create kind struct name $name id $id namespace $ns \
             opaque [dict get $registry $id opaque] fields $types]
+        if {[dict get $registry $id context]} {
+            # Present only for a context struct (CONTEXTS.md), so an ordinary
+            # declaration's entry is unchanged.
+            dict set entry context 1
+        }
+        lappend entries $entry
     }
     return $entries
 }
@@ -309,7 +324,8 @@ proc hir::structs::applyEntries {entries} {
         foreach {fieldName type} [dict get $entry fields] { lappend names $fieldName }
         dict set registry [dict get $entry id] [dict create id [dict get $entry id] \
             name [dict get $entry name] namespace [dict get $entry namespace] \
-            opaque [expr {[dict exists $entry opaque] && [dict get $entry opaque]}] names $names \
+            opaque [expr {[dict exists $entry opaque] && [dict get $entry opaque]}] \
+            context [expr {[dict exists $entry context] && [dict get $entry context]}] names $names \
             types [dict get $entry fields] spans {} span {}]
     }
 }

@@ -40,12 +40,13 @@ option that is not naturally "optional Bool, absent means false" is an
 ordinary parameter, an enum, a struct value, ...
 
 **Section order.** A parameter list is a sequence of *sections* in one
-canonical order, `ordinary* -> flags? -> context? -> variadic?`; only
-`ordinary` and `flags` exist. The parser (`surface/parser.tcl`,
+canonical order, `ordinary* -> flags? -> context? -> variadic?`; `ordinary`,
+`flags` and (since CONTEXTS.md) `context` exist. The parser (`surface/parser.tcl`,
 `ParamSections`) reads one entry at a time and each entry knows its section
 (`paramSectionOrder`, `EnterSection`); `flags` does not swallow the rest of the
-signature, so `context` after it, and a terminal `variadic`, are one more
-marker and one more rank. An ordinary parameter after the flag section, a
+signature, so `context` after it (CONTEXTS.md: `fn f(x, flags :q, context io:
+LinuxIO)`, its own `MALFORMED-CONTEXT-SECTION` diagnostics), and a terminal
+`variadic`, are one more marker and one more rank. An ordinary parameter after the flag section, a
 second `flags` section, or a flag outside the section is
 `MALFORMED-FLAG-SECTION`.
 

@@ -1306,6 +1306,19 @@ proc hir::types::AggregateOfValue {v} {
 # RESULT.
 proc hir::types::ShapeResult {hir shape argExprs argTypes result} {
     switch -- [lindex $shape 0] {
+        context-struct {
+            # context#load("ID") (core/contexts.tcl, CONTEXTS.md): the
+            # installed context of the context-struct declaration ID, a
+            # struct of exactly that named declaration.
+            set arg [lindex $argExprs [lindex $shape 1]]
+            if {$arg ne "" && [hir::kind $hir $arg] eq "const"} {
+                set id [lindex [hir::get $hir $arg literal] end]
+                if {[hir::structs::declared $id]} {
+                    return [list nstruct $id]
+                }
+            }
+            return $result
+        }
         named-struct {
             # A struct of one named declaration (core/native.tcl's
             # {named-struct ID}: linux::abi::syscall's abi::x86_64::
