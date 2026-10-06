@@ -579,7 +579,20 @@ register, no call target, no ExprId.
 **`?`-suffixed method sugar parses** (`s.emailish?()`, `s.mail1?(:strict)`): no
 language finding there; the fuzzer renames method-syntax call sites too.
 
-@@FUZZ@@
+**2000 seeds (one run, at `64d1eb5`): 1203 programs with warnings, 797
+without; 0 failures, 0 extra warnings; 2831 predicted warnings, all matched;
+the rename law held for all 2831 renamed functions in the 1203 programs (0 law
+failures): of the 5662 label checks (specialized and generic NIR), 4880
+relabeled exactly and 782 were inlined validators absent from both texts.** The
+generated corpus: 3018 proves predicates (1590 conforming, 1428 violating) and
+3034 proves validators (1631 conforming, 1403 violating), 1466 non-proves
+twins, 1481 wrong-shape proves functions; 2028 nested functions, 1438 closures,
+1002 hygiene-renamed declarations, 605 module functions; 797 only-silent
+programs (40%: the third that is quiet by construction plus programs that
+happen to draw no violating in-shape function). The suite runs 60
+(`pn-fuzz-smoke`). Before validators existed, a predicate-only version of the
+generator passed 500 seeds the same way (444 of 444 renames); its discriminating
+power is what the mutation step below measures.
 
 ## Mutation testing
 
