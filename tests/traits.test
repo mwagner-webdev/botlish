@@ -538,6 +538,11 @@ test trait-no-type-test-or-kind-operation {no type test, cast or kind-specific n
          [rejectionKind "${prelude}fn f(v: Named) -> int:\n    if v:\n        1\n    else:\n        2\nf(Person {value: \"a\"})\n"]
 } -match glob -result {{TRAIT-VIEW-MISUSE {string? cannot test a Named trait view*}} TRAIT-VIEW-MISUSE TRAIT-VIEW-MISUSE}
 
+test trait-view-never-narrowed {even where a type test of a view is rejected (-strict 0 keeps checking), the test's outcome never strengthens the view to a concrete type} -body {
+    set hir [surface::compile "${prelude}fn f(v: Named) -> int:\n    if integer?(v):\n        x = v\n        1\n    else:\n        0\nf(Person {value: \"a\"})\n" -warnings off -strict 0]
+    list [lsort -unique [lmap d [dict get $hir diagnostics] {dict get $d kind}]] [boundTypeOf $hir x]
+} -result {TRAIT-VIEW-MISUSE Named}
+
 test trait-no-implicit-trait-parameter {an untyped parameter never becomes trait-polymorphic: forwarding it to a trait parameter is rejected at the definition} -body {
     rejection "${prelude}fn relay(x):\n    describe(x)\nrelay(Person {value: \"a\"})\n"
 } -match glob -result {TRAIT-NOT-SATISFIED {*any cannot be a trait witness*}}

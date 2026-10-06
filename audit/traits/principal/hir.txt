@@ -1,0 +1,49 @@
+struct services::Service name Service ns services opaque fields internal_name: str
+struct Person name Person ns - fields value: str
+trait ui::named::Named owner ui::named requires name(value: ui::named::Named) -> str
+traitfn describe (value: ui::named::Named) -> str clones (describe<Person>, describe<services::Service>)
+program s2 binds b5 name, b7 describe_person, b9 describe<Person>, b11 describe<services::Service>
+e1 bind b1 services::make_service : block(e2)/0 -> services::Service
+    e2 block s5 () captures () declares services::Service : block(e2)/0 -> services::Service
+        e3 struct services::Service (internal_name) : services::Service
+            e4 const str db : str
+e5 bind b2 services::name : block(e6)/1 -> str
+    e6 block s6 (b3 value:services::Service) captures () declares str : block(e6)/1 -> str
+        e7 call native(str::concat) : str
+            e8 ref b4 str::concat : native str::concat
+            e9 const str svc: : str
+            e10 project internal_name : str
+                e11 ref b3 value : services::Service
+e12 bind b5 name : block(e13)/1 -> str
+    e13 block s7 (b6 value:Person) captures () declares str : block(e13)/1 -> str
+        e14 project value : str
+            e15 ref b6 value : Person
+e16 bind b7 describe_person : block(e17)/1 -> str
+    e17 block s8 (b8 value:Person) captures (b5 name) declares str : block(e17)/1 -> str
+        e18 call block(e13) : str
+            e19 ref b5 name : block(e13)/1 -> str
+            e20 ref b8 value : Person
+e21 bind b9 describe<Person> : block(e22)/1 -> str
+    e22 block s9 (b10 value:Person) captures (b5 name) clone (b10 value: ui::named::Named) declares str : block(e22)/1 -> str
+        e23 call block(e13) trait ui::named::Named.name witness Person : str
+            e24 ref b5 name : block(e13)/1 -> str
+            e25 ref b10 value : Person
+e26 bind b11 describe<services::Service> : block(e27)/1 -> str
+    e27 block s10 (b12 value:services::Service) captures () staticRefs (b2 services::name) clone (b12 value: ui::named::Named) declares str : block(e27)/1 -> str
+        e28 call block(e6) trait ui::named::Named.name witness services::Service : str
+            e29 ref b2 services::name : block(e6)/1 -> str
+            e30 ref b12 value : services::Service
+e31 call native(list) : List[str]
+    e32 ref b13 list : native list
+    e33 call block(e22) : str
+        e34 ref b9 describe<Person> : block(e22)/1 -> str
+        e35 struct Person (value) : Person
+            e36 const str Alice : str
+    e37 call block(e27) : str
+        e38 ref b11 describe<services::Service> : block(e27)/1 -> str
+        e39 call block(e2) : services::Service
+            e40 ref b1 services::make_service : block(e2)/0 -> services::Service
+    e41 call block(e17) : str
+        e42 ref b7 describe_person : block(e17)/1 -> str
+        e43 struct Person (value) : Person
+            e44 const str Bob : str

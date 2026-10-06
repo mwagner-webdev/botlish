@@ -1,0 +1,11 @@
+trait ui::named::Named (owner: ui::named)
+    fn name(value: ui::named::Named) -> str
+conformance:
+    Person satisfies ui::named::Named
+        name -> name
+    services::Service satisfies ui::named::Named
+        name -> services::name
+trait-polymorphic functions:
+    describe (value: ui::named::Named) -> str
+        describe<Person>   value = Person
+        describe<services::Service>   value = services::Service

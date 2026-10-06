@@ -1,0 +1,2 @@
+trait Named:
+    fn name(value: Named) -> str

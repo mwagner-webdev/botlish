@@ -23,9 +23,10 @@
 #     parameter, or a receiver declared `int` -- which admits an int-carrier
 #     witness and no struct); optionally the built-in str (length and
 #     lowercase are str's intrinsics) and an entry-program struct Local;
-#   * optionally a module `hp`, imported by the entry program, with correctly
-#     typed functions of a requirement's name for a witness that lacks it:
-#     imports never implement a requirement;
+#   * optionally a module `hp`, imported by the entry program, and functions
+#     of the entry program itself, with correctly typed functions of a
+#     requirement's name for a witness that lacks it: neither an import nor
+#     the calling program ever implements a requirement;
 #   * trait consumers: unary, two independent trait parameters, recursion
 #     (also with the two parameters swapped: polymorphic recursion when their
 #     witnesses differ), identity/requirement-result trait returns, same-
@@ -436,7 +437,7 @@ proc genMain {defect} {
 
 proc genProgram {} {
     set defect [chance 0.5]
-    set ::P [dict create traits [genTraits] witnesses {} traps {} consumers {} helpers {} aliases {} main {}]
+    set ::P [dict create traits [genTraits] witnesses {} traps {} callerTraps {} consumers {} helpers {} aliases {} main {}]
     dict set ::P traitHome [expr {[chance 0.5] ? "entry" : "module"}]
     dict set ::P spelling [expr {[chance 0.5] ? "short" : "qualified"}]
     dict set ::P witnesses [genWitnesses]
@@ -451,6 +452,26 @@ proc genProgram {} {
         dict for {op status} [dict get $w impls] {
             if {$status ne "ok" && $op ni $used && [chance 0.4]} {
                 dict lappend ::P traps [list $op [dict get $w id]]
+                lappend used $op
+            }
+        }
+    }
+    # Nor does the calling program: correctly typed entry-program functions
+    # of a requirement's name for module witnesses that lack it (a name the
+    # entry program's own Local does not define).
+    set used {}
+    foreach w [dict get $::P witnesses] {
+        if {[dict get $w kind] eq "local"} {
+            dict for {op status} [dict get $w impls] {
+                if {$status ne "missing"} { lappend used $op }
+            }
+        }
+    }
+    foreach w [dict get $::P witnesses] {
+        if {[dict get $w kind] in {str local}} continue
+        dict for {op status} [dict get $w impls] {
+            if {$status ne "ok" && $op ni $used && [chance 0.4]} {
+                dict lappend ::P callerTraps [list $op [dict get $w id]]
                 lappend used $op
             }
         }
@@ -686,6 +707,13 @@ proc programText {} {
             if {$status eq "missing"} continue
             append entry "[implText $w $op $status]\n"
         }
+    }
+    foreach tr [dict get $::P callerTraps] {
+        lassign $tr op id
+        set canon [dict get [witness $id] canon]
+        set result [dict get $::pool $op]
+        set body [dict get {label {"t"} size 0 length 0 lowercase value} $op]
+        append entry "fn $op\(value: $canon) -> [expr {$result eq "self" ? $canon : $result}]:\n    $body\n\n"
     }
     foreach c [dict get $::P consumers] {
         append entry "[consumerText $c]\n"
