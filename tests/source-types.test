@@ -504,23 +504,23 @@ type Nibble = Byte in 0..15
 } -result {1 {{name Byte parent Int domain {interval 0 255}} {name Nibble parent Byte domain {interval 0 15}}}}
 
 test source-type-cross-module {a type declared in a namespace module is a member of its namespace (canonical name srctypeslib::Widget) and is usable, as a result type, by code that imports that module (surface/modules.tcl maps a namespace to exactly one file under core::libraryDir -- the byte:: vertical is exactly this, tests/native-byte.test; here with a throwaway synthetic module)} -body {
-    set libPath [file join $::core::libraryDir srctypeslib.bot]
-    set ch [open $libPath w]
-    puts $ch {type Widget = Int in 0..100
+    withPrivateLibrary {
+        set ch [open [file join $::core::libraryDir srctypeslib.bot] w]
+        puts $ch {type Widget = Int in 0..100
 
 fn make() -> Widget:
     50
 }
-    close $ch
-    set mainPath [makeFile {import srctypeslib
+        close $ch
+        set mainPath [makeFile {import srctypeslib
 srctypeslib::make()
 } srctypeslib-main.bot]
-    try {
-        set h [surface::readProgramFile $mainPath -strict 0]
-        list [llength [hir::diagnostics $h]] [hir::types::show [hir::typeOf $h [lindex [hirFind $h call] end]]]
-    } finally {
-        file delete $libPath
-        removeFile srctypeslib-main.bot
+        try {
+            set h [surface::readProgramFile $mainPath -strict 0]
+            list [llength [hir::diagnostics $h]] [hir::types::show [hir::typeOf $h [lindex [hirFind $h call] end]]]
+        } finally {
+            removeFile srctypeslib-main.bot
+        }
     }
 } -result {0 {int[srctypeslib::Widget]}}
 

@@ -121,12 +121,13 @@ proc outcome {kind hir args} {
 
 set bad 0
 set kinds [dict create]
+# Program files live in a fresh system temporary directory, removed when the
+# run ends (never in the working directory, which concurrent runs share).
+set scratch [file tempdir raw-int-abi-fuzz]
 for {set s $seed0} {$s < $seed0 + $n} {incr s} {
     expr {srand($s)}
     set text [program]
-    set dir [file join [pwd] .fuzz-raw-int-abi]
-    file mkdir $dir
-    set path [file join $dir p$s.bot]
+    set path [file join $scratch p$s.bot]
     set ch [open $path w]; puts $ch [surface::modules::ImportHeader $text]$text; close $ch
     if {[catch {set hir [surface::readProgramFile $path]} err]} {
         file delete $path
@@ -150,6 +151,6 @@ for {set s $seed0} {$s < $seed0 + $n} {incr s} {
         puts "DISAGREEMENT seed $s:\n$text\n[join $outcomes \n]"
     }
 }
-file delete -force [file join [pwd] .fuzz-raw-int-abi]
+file delete -force $scratch
 puts "programs [expr {$n}] (value/error: $kinds); disagreements $bad"
 exit [expr {$bad ? 1 : 0}]
