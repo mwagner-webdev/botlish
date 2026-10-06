@@ -609,6 +609,12 @@ proc hir::DecideMethodCalls {nodes options given hir} {
     set final [BuildOnce $nodes $options $given $choices 0 checked]
     foreach {key valid} $rejected {
         if {![dict exists $final methodCalls $key]} continue
+        if {[UnknownTraitOperationInside [dict get $problemsOf $key]]} {
+            # A receiver computed by an operation its trait does not declare
+            # (TRAIT-UNKNOWN-OPERATION, typed any as a stand-in) fails every
+            # candidate: that diagnostic is the cause and is already reported.
+            continue
+        }
         set info [dict get $final methodCalls $key]
         set e [dict get $info expr]
         set name [dict get $info name]
@@ -633,6 +639,20 @@ proc hir::DecideMethodCalls {nodes options given hir} {
         dict set final diagnostics [concat [list $added] $diagnostics]
     }
     return $final
+}
+
+# 1 if every candidate's problems (PERCANDIDATE, as MethodCallProblems gives
+# them) include an operation a trait does not declare.
+proc hir::UnknownTraitOperationInside {perCandidate} {
+    if {[dict size $perCandidate] == 0} {
+        return 0
+    }
+    dict for {candidate problems} $perCandidate {
+        if {[lsearch -exact -index 0 $problems TRAIT-UNKNOWN-OPERATION] < 0} {
+            return 0
+        }
+    }
+    return 1
 }
 
 # Marks, in the caller's DECIDEDVAR, every multi-candidate method call of

@@ -519,6 +519,15 @@ test trait-no-delayed-duck-typing {the body type-checks against the trait alone:
          [rejectionKind "${prelude}fn f(value: Named) -> int:\n    value + 1\nf(Person {value: \"a\"})\n"]
 } -result {TRAIT-UNKNOWN-OPERATION TRAIT-VIEW-MISUSE}
 
+test trait-unknown-operation-is-the-cause {a method call on the result of an undeclared trait operation reports that operation, not "no applicable method" among the visible candidates} -body {
+    moduleRejection {other.bot {struct O:
+    v: str
+
+fn name(o: O) -> str:
+    o.v
+}} "import other\n${prelude}fn f(value: Named) -> str:\n    value.secret().name()\nf(Person {value: \"a\"})\n"
+} -result {TRAIT-UNKNOWN-OPERATION {trait Named has no operation "secret" (its operations: name): a trait view exposes exactly its trait's requirements, whatever concrete type is underneath}}
+
 test trait-no-field-access {a trait view has no fields} -body {
     rejection "${prelude}fn f(value: Named) -> str:\n    value.value\nf(Person {value: \"a\"})\n"
 } -match glob -result {TRAIT-VIEW-MISUSE {a Named trait view has no fields*}}
