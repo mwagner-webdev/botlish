@@ -11,11 +11,14 @@
 # refinement of a refinement (R3 = R1), two different predicates proving R1
 # (p1?, q1?), one proving R2 (p2?), one proving R3 from an R1 (p3?), and a
 # predicate proving R1 that is NOT repeatable (n1?: it hashes) -- and a
-# random function body of: plain values and immutable aliases, Boolean
-# bindings of conditions, guards with early returns, statement-level ifs
-# whose branches only bind (so facts must survive the join), nested
-# if-expressions, and leaves that need R1/R2/R3 or only str. Conditions are
-# predicate calls, Boolean bindings, not, and, or.
+# random body for f(a: str, b: str) of: immutable aliases, Boolean bindings
+# of conditions, guards with early returns, statement-level ifs whose
+# branches may hold a guard before binding (so a fact a branch did not
+# start with can hold at its end, and the join matters), nested
+# if-expressions whose branches may shadow a or b with another value (so a
+# spelling is not a value), and leaves that need R1/R2/R3 or only str. need3
+# forgets its R3 to R1 through a call, so the prelude itself depends on the
+# chain. Conditions are predicate calls, Boolean bindings, not, and, or.
 #
 # An independent oracle (this file; it shares no code with the compiler)
 # models what the language says:
@@ -82,7 +85,7 @@ fn need2(x: R2) -> int:
     10 * str::length(x)
 
 fn need3(x: R3) -> int:
-    100 * str::length(x)
+    100 * need1(x)
 
 fn plain(x: str) -> int:
     1000
