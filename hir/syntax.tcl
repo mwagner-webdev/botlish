@@ -23,7 +23,10 @@
 #             order -- FLAGS.md; absent or empty for a function without
 #             flags), nomethod (optional, 1: `nomethod fn`, the function's author
 #             declares that it is never the callee of method syntax --
-#             WARNINGS-METHOD-ELIGIBLE.md; absent for every other block)
+#             WARNINGS-METHOD-ELIGIBLE.md; absent for every other block),
+#             contextParams (optional: {NAME ORIGIN TYPE TYPEORIGIN} tuples,
+#             the function's context parameter section -- CONTEXTS.md;
+#             absent for a function without one)
 #   call      callee, args, flags (optional: {NAME ORIGIN} pairs, the flags
 #             the call supplies, in written order -- FLAGS.md), written
 #             (optional, see below)
@@ -232,6 +235,43 @@ proc hir::syntax::withWritten {call form} {
 proc hir::syntax::withNoMethod {block} {
     dict set block nomethod 1
     return $block
+}
+
+# BLOCK (a `block` node) with the context parameter section CONTEXTPARAMS
+# (CONTEXTS.md): {NAME ORIGIN TYPE TYPEORIGIN} tuples in written order, TYPE
+# the as-written type expression of the required context. They are not
+# parameters: hir/resolve.tcl binds each NAME, at the start of the body, to
+# the installed context of TYPE's resolved identity (an explicit
+# context#load), and the block's `params` (its call arity) are unchanged.
+proc hir::syntax::withContextParams {block contextParams} {
+    foreach entry $contextParams {
+        if {[llength $entry] != 4 || [lindex $entry 0] eq ""} {
+            core::malformed "block context parameters must be {NAME ORIGIN TYPE TYPEORIGIN} tuples" [list block $contextParams]
+        }
+    }
+    if {$contextParams ne {}} {
+        dict set block contextParams $contextParams
+    }
+    return $block
+}
+
+# `with context VALUE` (CONTEXTS.md): two statements --
+#
+#     bind TEMP VALUE                      evaluate the value, in order
+#     call ^context#install (ref TEMP)     install it as the context of its
+#                                          inferred context-struct type
+#
+# TEMP is a hygienic temporary (its name contains "#", which source cannot
+# spell), so the installation reads an ordinary local: the install is an
+# explicit call of the internal root native context#install (core/
+# contexts.tcl) that hir/contexts.tcl finds by native identity, infers the
+# type of and verifies, and a native backend can consume the value's fields
+# without building the object (hir/escape.tcl counts the install as a
+# structural use). Returns the two nodes.
+proc hir::syntax::contextInstallNodes {origin temp value} {
+    set bind [bindNode $origin $temp $value]
+    set call [callNode $origin [rootRef $origin [core::contexts::installNative]] [refNode $origin $temp]]
+    return [list $bind $call]
 }
 
 proc hir::syntax::ifNode {origin condition thenOrigin thenBody elseOrigin elseBody} {

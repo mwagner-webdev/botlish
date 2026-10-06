@@ -1409,6 +1409,9 @@ proc native::lower::Program {hirProgram args} {
     # a tagged String, as a struct none of whose uses is free does.
     set shortDemandOpt [dict get $options -short-demand-opt]
     set shortPlan [native::shortstr::plan $hirProgram $spec $ranges $shortStringOpt $blockEscapeOpt $construction $asciiPackOpt $shortDemandOpt native::lower::DemandCallTagged]
+    # The program's context slots (CONTEXTS.md), fixed before any function
+    # is lowered.
+    ContextSlots
     set context [dict get $spec context]
     set selfTail [dict get $context selfTails]
     set envless [dict get $context envless]
@@ -1484,7 +1487,9 @@ proc native::lower::Program {hirProgram args} {
         lappend infos [string map $map $info]
     }
 
-    set header [list "nir 1 call-effects=$callEffectsOpt statics=[StaticCount]"]
+    variable contextBytes
+    set header [list "nir 1 call-effects=$callEffectsOpt statics=[StaticCount][expr {$contextBytes > 0 ? " contexts=$contextBytes" : ""}]"]
+    lappend header {*}[ContextHeader]
     foreach name [lsort $usedNatives] {
         set meta [core::native::metadata $name]
         set kinds [lmap type [dict get $meta paramTypes] {
@@ -2172,7 +2177,15 @@ proc native::lower::Function {id} {
     if {$region ne "program"} {
         dict set fn planResult [hir::construction::resultFamily $construction $id]
     }
-    if {[ResultRaw fn]} {
+    set contextProblem [expr {$region eq "program" ? [ContextDiagnostic] : ""}]
+    if {$contextProblem ne ""} {
+        # A -strict 0 program that failed context verification (CONTEXTS.md):
+        # its first context diagnostic is the run's failure; no code whose
+        # context loads were not proven runs.
+        lassign $contextProblem kind message
+        Emit fn "raise $kind [Quote $message]"
+        set result never
+    } elseif {[ResultRaw fn]} {
         set result [SequenceRaw fn $body]
     } elseif {[ResultShort fn] ne ""} {
         set result [SequenceShort fn $body [ResultShort fn]]
@@ -3588,6 +3601,12 @@ proc native::lower::Project {fnVar e node} {
     variable hir
     variable escape
     variable currentInstance
+    set path [ContextPath fn $e]
+    if {$path ne ""} {
+        # A projection chain of a context parameter (CONTEXTS.md): the slot
+        # word of a leaf, read directly (no receiver is evaluated).
+        return [ContextAt fn $e {*}$path]
+    }
     set receiver [dict get $node receiver]
     set type [hir::typeOf $hir $receiver]
     set name [dict get $node name]
@@ -3641,6 +3660,365 @@ proc native::lower::Project {fnVar e node} {
         return never
     }
     return [Assign fn "structget $slot $r" $e]
+}
+
+# ---------------------------------------------------------------------------
+# Contexts (CONTEXTS.md)
+#
+# The first native lowering of execution-environment contexts is deliberately
+# the simplest one for the common case -- a process installs its contexts at
+# startup, once each -- and is static all the way down:
+#
+#   * one context area per program: a single zero-initialized, 8-byte
+#     aligned, writable, linker-local data object (`botlish_context_area`,
+#     codegen/clif.rs), holding every context slot;
+#   * one slot per context-struct type the program installs, assigned at
+#     compile time in installation (program) order (ContextSlots), at a fixed
+#     byte offset, and laid out flattened: one 64-bit word per scalar leaf of
+#     the struct, nested structs inlined, in declared field order
+#     (ContextLeaves);
+#   * `with context EXPR` (the program function) evaluates EXPR in ordinary
+#     execution order and stores its leaves: `contextstore OFFSET %leaf`;
+#   * a context parameter `io` is a local whose value is never loaded as a
+#     whole: a projection chain `io.stdout.raw.value` that ends at a leaf is
+#     one `contextload OFFSET` (ContextAt), and a sub-struct handed to a
+#     callee that receives it as fields (`linux::write`'s `fd`) is its leaves
+#     (ContextFields); only a use that needs the physical object (passing
+#     `io` itself to a function that keeps it whole, storing it, returning
+#     it) materializes one, from loads, with `structnew` -- exactly where an
+#     ordinary struct of the same shape would be materialized.
+#
+# Codegen turns OFFSET into the area's fixed address plus a constant
+# displacement: a PC-relative `lea` of the data symbol in the AOT object, an
+# absolute address in the JIT. No context pointer is passed, no register is
+# reserved, nothing is looked up, and there is no presence flag: hir/
+# contexts.tcl proved every load is preceded by its installation.
+#
+# Eligibility (StaticContextEligible, ContextLeaves): a leaf must be a value
+# whose tagged word is never a heap pointer -- an Int whose declared domain
+# fits the small-Int representation, a Bool, Unit or a UnicodeChar -- so the
+# area needs no GC root, no tracing and no dynamic layout. Any other context
+# type is CONTEXT-NATIVE-LOWERING-UNSUPPORTED (native compilation fails,
+# naming the field and why); nothing is boxed, pointed to or looked up
+# instead.
+
+namespace eval native::lower {
+    # The program's context slots: ID -> {slot N offset BYTES leaves
+    # {{PATH TYPE} ...}}, PATH a list of field names (ContextSlots).
+    variable contextSlots [dict create]
+    variable contextBytes 0
+}
+
+# {ok LEAVES} or {no REASON}: the flattened native layout of context-struct
+# ID. LEAVES lists {PATH TYPE} in slot order, PATH the field names from ID
+# down to the leaf.
+proc native::lower::ContextLeaves {id {seen {}}} {
+    if {![hir::structs::declared $id]} {
+        return [list no "its declaration is not part of the program"]
+    }
+    if {$id in $seen} {
+        return [list no "it contains itself (a recursive layout has no fixed size)"]
+    }
+    set leaves {}
+    foreach {field type} [hir::structs::fieldTypes $id] {
+        if {[lindex $type 0] eq "nstruct"} {
+            lassign [ContextLeaves [lindex $type 1] [concat $seen [list $id]]] status inner
+            if {$status ne "ok"} {
+                return [list no "field \"$field\" ([hir::types::show $type]) cannot be flattened: $inner"]
+            }
+            foreach leaf $inner {
+                lassign $leaf path leafType
+                lappend leaves [list [concat [list $field] $path] $leafType]
+            }
+            continue
+        }
+        set kind [hir::types::kindOf $type]
+        switch -- $kind {
+            bool - unit - UnicodeChar {
+                lappend leaves [list [list $field] $type]
+            }
+            int {
+                if {![hir::range::fitsSmall [hir::range::TypeFact $type]]} {
+                    return [list no "field \"$field\" is an Int ([hir::types::show $type]) whose declared domain does not fit the small-Int representation, so its value may be a heap-allocated big integer that fixed program data could not keep alive (no GC root)"]
+                }
+                lappend leaves [list [list $field] $type]
+            }
+            default {
+                return [list no "field \"$field\" has type [hir::types::show $type], a value that may be (or contain) a GC-managed heap object, and fixed program data holds no GC root"]
+            }
+        }
+    }
+    return [list ok $leaves]
+}
+
+# Assigns the program's context slots (contextSlots, contextBytes), in the
+# order the program installs them: its top-level installations that
+# verification gave an identity (hir::contexts::installId, which HIR text
+# carries as "installs ID", so a HIR read back from text gets the same
+# slots). Raises CONTEXT-NATIVE-LOWERING-UNSUPPORTED for an installed context
+# whose type is not StaticContextEligible.
+proc native::lower::ContextSlots {} {
+    variable baseHir
+    variable hir
+    variable contextSlots
+    variable contextBytes
+    set contextSlots [dict create]
+    set contextBytes 0
+    foreach c [dict get $baseHir roots] {
+        if {![hir::contexts::isInstall $baseHir $c]} continue
+        set id [hir::contexts::installId $baseHir $c]
+        if {$id eq "" || [dict exists $contextSlots $id]} continue
+        lassign [ContextLeaves $id] status leaves
+        if {$status ne "ok"} {
+            set where ""
+            set location [hir::aot::Location $baseHir [hir::get $baseHir $c origin]]
+            if {[dict exists $location line]} {
+                set where "[dict get $location file]:[dict get $location line]:[dict get $location column]: "
+            }
+            throw {NATIVE UNSUPPORTED CONTEXT-NATIVE-LOWERING-UNSUPPORTED} \
+                "${where}CONTEXT-NATIVE-LOWERING-UNSUPPORTED: context $id cannot currently be stored in a fixed native context slot because $leaves"
+        }
+        dict set contextSlots $id [dict create slot [dict size $contextSlots] offset $contextBytes leaves $leaves]
+        incr contextBytes [expr {8 * [llength $leaves]}]
+    }
+}
+
+# The NIR header lines of the context area: `contexts=BYTES` is appended to
+# the `nir` line by the caller; one `context` line per slot.
+proc native::lower::ContextHeader {} {
+    variable contextSlots
+    set lines {}
+    dict for {id slot} $contextSlots {
+        set paths [lmap leaf [dict get $slot leaves] {join [lindex $leaf 0] .}]
+        lappend lines "context [dict get $slot slot] [Quote $id] offset=[dict get $slot offset] words=[llength $paths] fields=[Quote [join $paths { }]]"
+    }
+    return $lines
+}
+
+# The slot record of installed context ID, or "" when the program does not
+# install it.
+proc native::lower::ContextOffsetSlot {id} {
+    variable contextSlots
+    if {![dict exists $contextSlots $id]} {
+        return ""
+    }
+    return [dict get $contextSlots $id]
+}
+
+# The byte offset in the context area of the word of leaf PATH (field
+# names) of installed context ID, or "" when PATH is not a leaf.
+proc native::lower::ContextOffset {id path} {
+    variable contextSlots
+    set slot [dict get $contextSlots $id]
+    set i 0
+    foreach leaf [dict get $slot leaves] {
+        if {[lindex $leaf 0] eq $path} {
+            return [expr {[dict get $slot offset] + 8 * $i}]
+        }
+        incr i
+    }
+    return ""
+}
+
+# The declared type of the value at PATH (field names) below context-struct
+# ID ({nstruct ID} for an empty PATH).
+proc native::lower::ContextTypeAt {id path} {
+    set type [list nstruct $id]
+    foreach name $path {
+        set type [hir::structs::fieldType [lindex $type 1] $name]
+    }
+    return $type
+}
+
+# The first context diagnostic of the program (hir/contexts.tcl), as
+# {KIND MESSAGE}, or "": a -strict 0 program that failed context verification
+# raises it when it starts (native code never runs code whose context loads
+# were not proven).
+proc native::lower::ContextDiagnostic {} {
+    variable baseHir
+    foreach d [dict get $baseHir diagnostics] {
+        if {[dict get $d kind] in {MISSING-CONTEXT DUPLICATE-CONTEXT NOT-A-CONTEXT CONTEXT-TYPE-NOT-EXACT
+                CONTEXT-INSTALLATION-UNSUPPORTED CONTEXT-FUNCTION-VALUE CONTEXT-BINDING-COLLISION
+                DUPLICATE-CONTEXT-PARAMETER}} {
+            return [list [dict get $d kind] [dict get $d message]]
+        }
+    }
+    return ""
+}
+
+# A load (at E) of context ID, which the program never installs: only
+# possible in a program that failed verification (whose program function
+# raises the diagnostic before anything runs, Function), and then unreachable
+# code; anything else is a lowering bug.
+proc native::lower::UninstalledContext {fnVar e id} {
+    upvar 1 $fnVar fn
+    if {[ContextDiagnostic] eq ""} {
+        throw {NATIVE BUG} "native lowering: context load $e of context \"$id\", which the program does not install"
+    }
+    Emit fn "raise MISSING-CONTEXT [Quote "$id: no context of this type is installed"]" $e
+    return never
+}
+
+# `with context VALUE` (call E, NODE): VALUE is evaluated in ordinary order,
+# then each scalar leaf of it is stored into the type's slot. Returns
+# {REG tagged} (unit) like a call.
+proc native::lower::ContextInstallCall {fnVar e node} {
+    upvar 1 $fnVar fn
+    variable hir
+    variable contextSlots
+    if {[dict get $fn region] ne "program"} {
+        throw {NATIVE BUG} "native lowering: context installation outside the program function ($e)"
+    }
+    set id [hir::contexts::installId $hir $e]
+    if {$id eq "" || ![dict exists $contextSlots $id]} {
+        throw {NATIVE BUG} "native lowering: context installation $e has no assigned slot"
+    }
+    set arg [lindex [dict get $node args] 0]
+    set slot [dict get $contextSlots $id]
+    set leaves {}
+    set b [expr {[hir::kind $hir $arg] eq "ref" ? [hir::get $hir $arg binding] : ""}]
+    set local [expr {$b ne "" && [dict exists $fn locals $b] ? [dict get $fn locals $b] : ""}]
+    if {[lindex $local 0] eq "virtual" && [lindex $local 2] ne ""} {
+        # The installed value held as fields (the hygienic temporary of
+        # `with context`, hir/escape.tcl's ctxUse): its leaves without the
+        # object, a closed inner struct read with `structget`.
+        lassign $local - fields shape - - cut
+        set leaves [ContextLeafRegs fn $e $shape $cut $fields]
+    } else {
+        set value [Expr fn $arg]
+        if {$value eq "never"} {
+            return {never tagged}
+        }
+        set leaves [ContextObjectLeaves fn $e $id $value]
+    }
+    set offset [dict get $slot offset]
+    if {[llength $leaves] != [llength [dict get $slot leaves]]} {
+        throw {NATIVE BUG} "native lowering: context installation $e yields [llength $leaves] words for a [llength [dict get $slot leaves]]-word slot"
+    }
+    foreach r $leaves {
+        Emit fn "contextstore $offset $r" $e
+        incr offset 8
+    }
+    dict lappend fn calls [list native [core::contexts::installNative]]
+    return [list [Assign fn unit $e] tagged]
+}
+
+# The leaf registers, in slot order, of the struct object in register VALUE
+# whose type is the named struct ID: `structget` down every path.
+proc native::lower::ContextObjectLeaves {fnVar e id value} {
+    upvar 1 $fnVar fn
+    set regs {}
+    foreach {name type} [hir::structs::fieldTypes $id] {
+        set index [lsearch -exact [hir::structs::names $id] $name]
+        set r [Assign fn "structget $index $value" $e]
+        if {[lindex $type 0] eq "nstruct"} {
+            lappend regs {*}[ContextObjectLeaves fn $e [lindex $type 1] $r]
+        } else {
+            lappend regs $r
+        }
+    }
+    return $regs
+}
+
+# The leaf registers, in slot order, of a struct of SHAPE opened as CUT whose
+# physical fields are the registers FIELDS (a virtual value): an opened field
+# contributes its own fields' leaves, a closed struct field its object's
+# (ContextObjectLeaves), a scalar field itself.
+proc native::lower::ContextLeafRegs {fnVar e shape cut fields} {
+    upvar 1 $fnVar fn
+    lassign $shape id layout
+    set cuts [CutDict $cut]
+    set regs {}
+    set pos 0
+    foreach name $layout {
+        if {[dict exists $cuts $name]} {
+            lassign [dict get $cuts $name] sub subcut
+            set w [hir::escape::CutFields $sub $subcut]
+            lappend regs {*}[ContextLeafRegs fn $e $sub $subcut [lrange $fields $pos [expr {$pos + $w - 1}]]]
+            incr pos $w
+            continue
+        }
+        set r [lindex $fields $pos]
+        incr pos
+        set type [hir::structs::fieldType $id $name]
+        if {[lindex $type 0] eq "nstruct"} {
+            lappend regs {*}[ContextObjectLeaves fn $e [lindex $type 1] $r]
+        } else {
+            lappend regs $r
+        }
+    }
+    return $regs
+}
+
+# {ID PATH} when expression E (of the current instance) denotes the value at
+# PATH (field names) of the installed context ID: a reference to a context
+# parameter local, or a projection chain rooted at one. "" otherwise.
+proc native::lower::ContextPath {fnVar e} {
+    upvar 1 $fnVar fn
+    variable hir
+    set names {}
+    while {[hir::kind $hir $e] eq "project"} {
+        set names [linsert $names 0 [hir::get $hir $e name]]
+        set e [hir::get $hir $e receiver]
+    }
+    if {[hir::kind $hir $e] ne "ref"} {
+        return ""
+    }
+    set b [hir::get $hir $e binding]
+    if {$b eq "" || ![dict exists $fn locals $b] || [lindex [dict get $fn locals $b] 0] ne "context"} {
+        return ""
+    }
+    return [list [lindex [dict get $fn locals $b] 1] $names]
+}
+
+# The tagged register of the value at PATH of installed context ID (source
+# expression E): one `contextload` for a scalar leaf; for a struct, the
+# physical object built from its leaves' loads (a use that needs the object).
+proc native::lower::ContextAt {fnVar e id path} {
+    upvar 1 $fnVar fn
+    set offset [ContextOffset $id $path]
+    if {$offset ne ""} {
+        return [Assign fn "contextload $offset" $e]
+    }
+    set type [ContextTypeAt $id $path]
+    if {[lindex $type 0] ne "nstruct"} {
+        throw {NATIVE BUG} "native lowering: context path $id.[join $path .] is neither a leaf nor a struct ($e)"
+    }
+    set sid [lindex $type 1]
+    set regs [lmap name [hir::structs::names $sid] {
+        ContextAt fn $e $id [concat $path [list $name]]
+    }]
+    return [Assign fn "structnew [ShapeIndex $sid [hir::structs::names $sid]] [join $regs { }]" $e]
+}
+
+# The physical fields of the struct value at PATH of installed context ID,
+# opened as CUT (hir/escape.tcl's cut of the receiving parameter): each opened
+# field contributes its own fields, each closed one a register (a leaf's load,
+# or a struct field's materialized object).
+proc native::lower::ContextFields {fnVar e id path cut} {
+    upvar 1 $fnVar fn
+    set sid [lindex [ContextTypeAt $id $path] 1]
+    set cuts [CutDict $cut]
+    set regs {}
+    foreach name [hir::structs::names $sid] {
+        if {[dict exists $cuts $name]} {
+            lassign [dict get $cuts $name] sub subcut
+            lappend regs {*}[ContextFields fn $e $id [concat $path [list $name]] $subcut]
+        } else {
+            lappend regs [ContextAt fn $e $id [concat $path [list $name]]]
+        }
+    }
+    return $regs
+}
+
+# The number of physical fields ContextFields gives for PATH of ID under CUT.
+proc native::lower::ContextFieldCount {id path cut} {
+    set type [ContextTypeAt $id $path]
+    if {[lindex $type 0] ne "nstruct"} {
+        return ""
+    }
+    set sid [lindex $type 1]
+    return [hir::escape::CutFields [list $sid [hir::structs::names $sid]] $cut]
 }
 
 # ---------------------------------------------------------------------------
@@ -4281,6 +4659,11 @@ proc native::lower::Ref {fnVar e node want} {
             # could reference it (the same guarantee a root binding has).
             return [list [Assign fn "staticget $where" $e] tagged]
         }
+        context {
+            # A context parameter used as a whole value (CONTEXTS.md): the
+            # physical struct, built from its slot's words.
+            return [list [ContextAt fn $e $where {}] tagged]
+        }
     }
     throw {NATIVE BUG} "native lowering: bad access $access for $b ($e)"
 }
@@ -4373,6 +4756,18 @@ proc native::lower::Bind {fnVar e node} {
     variable shortStringOpt
     set valueExpr [dict get $node value]
     set b [dict get $node binding]
+    if {[hir::contexts::isLoad $hir $valueExpr] && ![dict get $node duplicate]
+            && [dict exists $context discarded $e] && [dict get [hir::binding $hir $b] kind] eq "local"} {
+        # A context parameter (CONTEXTS.md): nothing is loaded here. Every use
+        # reads exactly the slot words it needs (Project, TryFields) or, if it
+        # needs the object, materializes it (Ref).
+        set id [hir::contexts::loadId $hir $valueExpr]
+        if {$id eq "" || [ContextOffsetSlot $id] eq ""} {
+            return [UninstalledContext fn $e $id]
+        }
+        dict set fn locals $b [list context $id]
+        return ""
+    }
     if {[hir::kind $hir $valueExpr] eq "block" && $valueExpr in [dict get $context envless]
             && ![dict get $node duplicate] && [dict exists $context discarded $e]
             && [dict get [hir::binding $hir $b] kind] eq "local"} {
@@ -4551,6 +4946,7 @@ proc native::lower::CaptureRegsOf {fnVar bindings} {
             shortreg   { lappend values [TaggedOfShort fn $where] }
             fnvalue    { lappend values [Assign fn "fnvalue $where"] }
             self       { lappend values [Assign fn self] }
+            context    { lappend values [ContextAt fn "" $where {}] }
             default {
                 throw {NATIVE BUG} "native lowering: binding $b ($how) cannot be captured"
             }
@@ -4717,12 +5113,23 @@ proc native::lower::CanSupplyFields {fnVar argExprs fieldWidths {fieldCuts {}}} 
                         return 0
                     }
                 }
-                ref {
-                    set b [hir::get $hir $arg binding]
-                    if {$b eq "" || ![dict exists $fn locals $b]
-                            || [lindex [dict get $fn locals $b] 0] ne "virtual"
-                            || [llength [lindex [dict get $fn locals $b] 1]] != $width} {
+                ref - project {
+                    set path [ContextPath fn $arg]
+                    if {$path ne ""} {
+                        # A context value (CONTEXTS.md): its fields are its
+                        # slot's words, under any cut.
+                        if {[ContextFieldCount {*}$path $cut] != $width} {
+                            return 0
+                        }
+                    } elseif {[hir::kind $hir $arg] eq "project"} {
                         return 0
+                    } else {
+                        set b [hir::get $hir $arg binding]
+                        if {$b eq "" || ![dict exists $fn locals $b]
+                                || [lindex [dict get $fn locals $b] 0] ne "virtual"
+                                || [llength [lindex [dict get $fn locals $b] 1]] != $width} {
+                            return 0
+                        }
                     }
                 }
                 default {
@@ -4755,6 +5162,15 @@ proc native::lower::CanSupplyFields {fnVar argExprs fieldWidths {fieldCuts {}}} 
 proc native::lower::TryFields {fnVar e n {cut ""}} {
     upvar 1 $fnVar fn
     variable hir
+    set path [ContextPath fn $e]
+    if {$path ne ""} {
+        # A context value (CONTEXTS.md): its slot's words, as the callee's
+        # cut opens them; nothing is materialized but a closed inner struct.
+        if {[ContextFieldCount {*}$path $cut] != $n} {
+            return ""
+        }
+        return [ContextFields fn $e {*}$path $cut]
+    }
     switch -- [hir::kind $hir $e] {
         ref {
             set b [hir::get $hir $e binding]
@@ -5265,6 +5681,19 @@ proc native::lower::CallInner {fnVar e node want {wantVirtual ""} {wantRegion 0}
         # The raw Linux x86-64 kernel transition (core/linuxabi.tcl): its own
         # form, never NativeCall's one-operand-per-argument shape.
         return [SyscallCall fn $e $node $wantVirtual]
+    }
+    if {$targetKind eq "native" && [dict get [hir::symbol $hir $target] name] eq [core::contexts::installNative]} {
+        # `with context EXPR` (CONTEXTS.md): stores into the type's fixed slot.
+        return [ContextInstallCall fn $e $node]
+    }
+    if {$targetKind eq "native" && [dict get [hir::symbol $hir $target] name] eq [core::contexts::loadNative]} {
+        # A context load outside a context parameter's own binding (Bind
+        # keeps those lazy): the whole installed value, from its slot.
+        set id [hir::contexts::loadId $hir $e]
+        if {$id eq "" || [ContextOffsetSlot $id] eq ""} {
+            return [list [UninstalledContext fn $e $id] tagged]
+        }
+        return [list [ContextAt fn $e $id {}] tagged]
     }
     if {$targetKind eq "block" && ($wantVirtual ne "" || !$wantRegion)} {
         # `abi::bytes::from_list(BYTES)` whose every byte is known now (StaticBytesCall):

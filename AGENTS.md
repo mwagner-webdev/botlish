@@ -139,8 +139,31 @@ discard changes merely to switch environments.
 
 ## Running tests concurrently
 
-Several test runs can share one checkout (two agents, or a pool over test
-files and backends) as long as each run has its own tcltest `-tmpdir`:
+Two test runs that share a working directory or a checkout interfere unless
+each has its own tcltest temporary directory, and the failures look like real
+bugs (`couldn't open ".../contexts-scratch/p79.bot": no such file or
+directory`). This covers an agent parallelizing its own runs, two sessions in
+one checkout, and a Windows run beside a WSL run (same tree, above). What is
+shared (TEST-SUITE-COST.md section 4 has the measurements):
+
+* **tcltest's temporary directory is the current working directory** unless
+  `-tmpdir` is given. Test files create fixed-name scratch directories in it
+  (`abi-bytes-scratch`, `argv-aot`, `contexts-scratch`, ...) and delete or
+  sweep them, so two runs of the *same* test file with one temporary directory
+  delete each other's files. Pass a private absolute directory:
+  `tclsh9.0 tests/all.tcl -tmpdir /tmp/run-A ...` (tcltest forwards it to
+  every per-file child process). *Different* test files sharing one
+  temporary directory, two or three at a time, ran the whole suite cleanly.
+  `tests/native-coverage.tcl` gives the suite it runs a private `-tmpdir` (and
+  keeps its log there) by itself.
+* **`native/target/release`.** Every native test runs `botlish-native` from
+  there, and the executable (AOT) tests link `libbotlish_native.rlib` at test
+  time. A `cargo build` during a run swaps them under it. A copied tree needs
+  all of `native/target` (a symlink to the original works); a copy with only
+  the binary fails every AOT test with `runtime library missing`.
+
+So for concurrent runs in one checkout: one `-tmpdir` per run, and no native
+rebuild until they finish:
 
 ```sh
 export LANG=C.utf8 LC_ALL=C.utf8
@@ -149,21 +172,21 @@ CORE_BACKEND=compile tclsh9.0 tests/all.tcl -tmpdir "$(mktemp -d)" &
 wait
 ```
 
-Without `-tmpdir`, tcltest's temporary directory is the working directory
-(normally the checkout), and tests create fixed names there
-(`makeDirectory abi-bytes-scratch`, `argv-aot`, `makeFile` program files), so
-concurrent runs overwrite and delete each other's files.
-`tests/native-coverage.tcl` gives the suite it runs a private `-tmpdir` of its
-own.
+A run started from the repository root without `-tmpdir` and interrupted
+leaves its scratch directories in the working tree: check `git status` before
+committing.
 
-Nothing else a test does may create a fixed name in the checkout:
+Outside its tcltest temporary directory, nothing a test does may use a fixed
+name; new tests and tools must keep it that way:
 
 * A test that needs a throwaway module next to the standard ones wraps its
   body in `withPrivateLibrary` (`tests/helpers.tcl`), which points
   `$::core::libraryDir` at a per-process copy of `lib/` in the tcltest
   temporary directory. Never write into the real `lib/`.
-* A script or audit tool that a test spawns keeps its scratch files in a
-  `file tempdir` directory and removes it when it finishes.
+* A script or audit tool keeps its scratch files in a `file tempdir` directory
+  (or under a name with `[pid]`) and removes it when it finishes, never under a
+  fixed name in the working directory or the repository; one that runs a test
+  file passes it a private `-tmpdir`.
 
 ## Native GC-stress validation
 

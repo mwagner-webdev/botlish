@@ -64,6 +64,14 @@
 #                         {y ORIGIN}) beside its ordinary params; flags are a
 #                         separate parameter category (FLAGS.md), made
 #                         Bool bindings by hir::resolve
+#   fn f(a, context io: T): body   the same block carrying `contextParams`
+#                         ({io ORIGIN T TYPEORIGIN}): not parameters; hir::resolve
+#                         binds io at the start of the body to the installed
+#                         context of T (CONTEXTS.md)
+#   with context e        bind tmp e; call ^context#install (ref tmp)
+#                         (CONTEXTS.md): the value, then the explicit
+#                         installation of it; tmp is a hygienic temporary
+#                         (context#START), Sequence splices both in
 #   f(a, :x)              call f a, carrying `flags` ({x ORIGIN}): names, not
 #                         expressions (FLAGS.md); a method call likewise
 #   if c: t else: e       if c {t...} {e...}    inline branches; a missing
@@ -158,7 +166,8 @@ proc surface::lower::SplitTypeDecls {statements {namespace ""}} {
 proc surface::lower::StructDeclOf {node namespace} {
     return [dict create name [dict get $node name] nameSpan [dict get $node nameSpan] \
         namespace $namespace fields [dict get $node fields] span [dict get $node span] \
-        opaque [expr {[dict exists $node opaque] ? [dict get $node opaque] : 0}]]
+        opaque [expr {[dict exists $node opaque] ? [dict get $node opaque] : 0}] \
+        context [expr {[dict exists $node context] ? [dict get $node context] : 0}]]
 }
 
 proc surface::lower::TypeDeclOf {node {namespace ""}} {
@@ -247,6 +256,12 @@ proc surface::lower::Sequence {nodes} {
     foreach node $nodes {
         if {[dict get $node kind] eq "destructure"} {
             lappend result {*}[Destructure $node]
+        } elseif {[dict get $node kind] eq "with"} {
+            # `with context EXPR` (CONTEXTS.md): the value bound to a hygienic
+            # temporary, then the explicit installation of it (placement,
+            # type, duplicates and order: hir/contexts.tcl).
+            lappend result {*}[hir::syntax::contextInstallNodes [OriginOf $node] \
+                "context#[dict get $node span start]" [Node [dict get $node value]]]
         } else {
             lappend result [Node $node]
         }
@@ -465,6 +480,13 @@ proc surface::lower::Node {node} {
                 [Flags $node]]
             if {[dict exists $node nomethod] && [dict get $node nomethod]} {
                 set block [hir::syntax::withNoMethod $block]
+            }
+            if {[dict exists $node contexts]} {
+                set block [hir::syntax::withContextParams $block [lmap c [dict get $node contexts] {
+                    set name [dict get $c name]
+                    list $name [Origin [dict get $c nameSpan] "[dict get $node id]/context($name)"] \
+                        [dict get $c type] [Origin [dict get $c typeSpan] "[dict get $node id]/context($name)/type"]
+                }]]
             }
             return [hir::syntax::bindNode $origin [dict get $node name] $block]
         }

@@ -1,0 +1,831 @@
+# contexts.test -- execution-environment contexts (CONTEXTS.md):
+#
+#   opaque context struct LinuxIO: ...           a context type
+#   with context linux::io::create()             install one, entry top level
+#   fn write(data, context io: LinuxIO): ...     a direct context dependency
+#   linux::io::write(data)                       an ordinary call
+#
+# * grammar: the `context` struct modifier (orthogonal to `opaque`), the
+#   `with context EXPR` declaration, the context parameter section after
+#   flags; `context` and `with` stay ordinary names everywhere else;
+# * static semantics: type identity, installation type inference, source
+#   order, duplicates, placement, binding collisions, the transitive
+#   requirement (chains, recursion, unreachable consumers), function values,
+#   method calls, opacity, the MISSING-CONTEXT chain diagnostic;
+# * the same programs on every backend (interp, compile, cranelift-generic,
+#   cranelift) and the run-time replay of a -strict 0 program;
+# * linux::io: create, write, write_error, read, one LinuxIO;
+# * native evidence: the NIR context area and slots, no hidden argument, the
+#   CLIF data symbol, PC-relative machine code against a linker-local .bss
+#   symbol, strace, allocations, eligibility (CONTEXT-NATIVE-LOWERING-
+#   UNSUPPORTED), GC stress;
+# * a bounded run of the generated-program fuzzer (audit/contexts/tools).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+set allBackends {interp compile cranelift-generic cranelift}
+set nativeBackends {cranelift-generic cranelift}
+
+testConstraint linuxX86_64 [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+testConstraint objdump [expr {[auto_execok objdump] ne ""}]
+testConstraint posixShell [expr {[auto_execok sh] ne ""}]
+testConstraint strace [expr {[auto_execok strace] ne "" && ![catch {exec strace -f -qq -o /dev/null true 2>@1}]}]
+
+set scratch [makeDirectory contexts-scratch]
+set programCounter 0
+
+# ---------------------------------------------------------------------------
+# Helpers
+
+# The HIR of source TEXT, compiled as a program file (so lib modules load).
+proc ctxHir {text {strict 1}} {
+    set path [file join $::scratch p[incr ::programCounter].bot]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8
+    puts -nonewline $channel $text
+    close $channel
+    return [surface::readProgramFile $path -strict $strict -warnings off]
+}
+
+# The sorted diagnostic kinds of source TEXT.
+proc diagKinds {text} {
+    return [lsort -unique [lmap d [hir::diagnostics [ctxHir $text 0]] {dict get $d kind}]]
+}
+
+# {KIND LINE:COLUMN MESSAGE} of the first diagnostic strict compilation of
+# TEXT raises.
+proc strictError {text} {
+    if {![catch {ctxHir $text} message options]} {
+        return "no error"
+    }
+    regexp {^[^ ]*:([0-9]+:[0-9]+): (.*)$} $message -> location text
+    return [list [lindex [dict get $options -errorcode] end] $location $text]
+}
+
+# The outcome of source TEXT on every backend in BACKENDS.
+proc outcomesOf {text {backends ""}} {
+    if {$backends eq ""} {
+        set backends $::allBackends
+    }
+    set hir [ctxHir $text]
+    return [lmap backend $backends {outcomeUnderHir $backend $hir}]
+}
+
+# The one shown value every backend in BACKENDS agrees on for TEXT, or a
+# description of the disagreement or error.
+proc agree {text {backends ""}} {
+    if {$backends eq ""} {
+        set backends $::allBackends
+    }
+    set outcomes [outcomesOf $text $backends]
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        return "DISAGREE: [join [lmap b $backends o $outcomes {list $b $o}] { / }]"
+    }
+    set outcome [lindex $outcomes 0]
+    if {[lindex $outcome 0] ne "value"} {
+        return "ERROR: $outcome"
+    }
+    return [lindex $outcome 1]
+}
+
+proc withEnv {name value body} {
+    set had [info exists ::env($name)]
+    if {$had} {
+        set saved $::env($name)
+    }
+    set ::env($name) $value
+    try {
+        uplevel 1 $body
+    } finally {
+        if {$had} {
+            set ::env($name) $saved
+        } else {
+            unset ::env($name)
+        }
+    }
+}
+
+# The NIR text of function NAME (its first instance) in NIR.
+proc nirFunction {nir name} {
+    set lines [split $nir \n]
+    set start [lsearch -regexp $lines "^func \[0-9\]+ \"[string map {: \\:} $name]\""]
+    if {$start < 0} {
+        return ""
+    }
+    set end [lsearch -start $start -exact $lines end]
+    return [join [lrange $lines $start $end] \n]
+}
+
+# The id of function NAME in NIR.
+proc nirFunctionId {nir name} {
+    regexp "func (\[0-9\]+) \"[string map {: \\:} $name]\"" $nir -> id
+    return $id
+}
+
+# The instruction lines of NIR function text F (no header, no `end`), each
+# without its trailing @ExprId.
+proc nirBody {f} {
+    set lines [lrange [split $f \n] 1 end-1]
+    return [lmap line $lines {regsub { @e[0-9]+$} [string trim $line] {}}]
+}
+
+# The block ExprId of the function NAME (as written; a module function
+# qualified) in HIR.
+proc blockNamed {hir name} {
+    dict for {b binding} [dict get $hir bindings] {
+        if {[dict get $binding kind] ne "local"} continue
+        set shown [expr {[dict exists $binding spelling] && ![hir::isModuleBinding $hir $b]
+            ? [dict get $binding spelling] : [dict get $binding name]}]
+        if {$shown ne $name} continue
+        set by [dict get $binding declaredBy]
+        if {$by ne "" && [hir::kind $hir $by] eq "bind" && [hir::kind $hir [hir::get $hir $by value]] eq "block"} {
+            return [hir::get $hir $by value]
+        }
+    }
+    return ""
+}
+
+# {NAME DIRECT REQUIRED} of each function NAMES in the HIR of TEXT.
+proc requirements {text names} {
+    set hir [ctxHir $text]
+    lmap name $names {
+        set b [blockNamed $hir $name]
+        list $name [hir::contexts::direct $hir $b] [hir::contexts::required $hir $b]
+    }
+}
+
+proc readBinary {path} {
+    set channel [open $path rb]
+    set data [read $channel]
+    close $channel
+    return $data
+}
+
+proc readFile {path} {
+    set channel [open $path r]
+    fconfigure $channel -encoding utf-8
+    set data [read $channel]
+    close $channel
+    return $data
+}
+
+proc writeFile {path data} {
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8
+    puts -nonewline $channel $data
+    close $channel
+}
+
+proc writeBinary {path data} {
+    set channel [open $path wb]
+    puts -nonewline $channel $data
+    close $channel
+}
+
+set executableDir [makeDirectory contexts-executables]
+set outputDir [makeDirectory contexts-outputs]
+foreach stale [glob -nocomplain -directory $executableDir *] {
+    file delete -force $stale
+}
+
+# The standalone executable of source TEXT (built once per NAME).
+proc buildExecutable {name text} {
+    set path [file join $::executableDir $name]
+    if {![file exists $path]} {
+        native::executable [ctxHir $text] $path
+    }
+    return $path
+}
+
+# {STDOUT STDERR} (binary) of one run of EXECUTABLE with standard input from
+# the bytes INPUT.
+proc runExecutable {executable {input ""} {gcStress 0}} {
+    set n [incr ::runCounter]
+    set in [file join $::outputDir in.$n]
+    set out [file join $::outputDir out.$n]
+    set err [file join $::outputDir err.$n]
+    writeBinary $in $input
+    set command [list sh -c {exec "$0" <"$1" >"$2" 2>"$3"} $executable $in $out $err]
+    if {$gcStress} {
+        withEnv BOTLISH_NATIVE_GC_STRESS 1 {exec {*}$command}
+    } else {
+        exec {*}$command
+    }
+    return [list [readBinary $out] [readBinary $err]]
+}
+set runCounter 0
+
+# A synthetic context whose fields fit fixed native slots (CONTEXTS.md's
+# eligibility rule), and consumers of it.
+set synthetic {type Small = Int in 0..1000000
+
+context struct Counter:
+    value: Small
+    enabled: bool
+
+fn read_value(context c: Counter):
+    c.value
+
+fn read_enabled(context k: Counter):
+    k.enabled
+}
+
+set linuxPrelude {import abi
+import abi::bytes
+import linux
+import linux::io
+import str
+
+fn mk(s: str):
+    abi::bytes::from_list(str::encode_utf8(s))
+}
+
+# ---------------------------------------------------------------------------
+# Grammar
+
+test contexts-parse-modifiers {`context` is a struct modifier, orthogonal to `opaque`, in either order; the AST is the one structdecl node with both booleans and their spans} -body {
+    set ast [surface::parse "context struct A:\n    v: int\nopaque context struct B:\n    v: int\ncontext opaque struct C:\n    v: int\nopaque struct D:\n    v: int\nstruct E:\n    v: int\n"]
+    list [lmap d [dict get $ast body] {list [dict get $d name] [dict get $d opaque] [dict get $d context] \
+            [expr {[dict get $d contextSpan] ne ""}]}] \
+        [surface::formatAst $ast]
+} -result {{{A 0 1 1} {B 1 1 1} {C 1 1 1} {D 1 0 0} {E 0 0 0}} {context struct A
+    v: int
+opaque context struct B
+    v: int
+opaque context struct C
+    v: int
+opaque struct D
+    v: int
+struct E
+    v: int}}
+
+foreach {name source message} {
+    duplicate       "context context struct T:\n    a: int\n"     {duplicate modifier "context" in this struct declaration}
+    duplicate-mixed "context opaque context struct T:\n    a: int\n" {duplicate modifier "context" in this struct declaration}
+    stray-fn        "context fn f():\n    1\n"                    {"context" only modifies a struct declaration ("context struct NAME:"), not a "fn" declaration}
+    stray-type      "context type T = Int in 0..3\n"              {"context" only modifies a struct declaration ("context struct NAME:"), not a "type" declaration}
+    nested          "fn f():\n    context struct T:\n        a: int\n    1\n" {a struct declaration is only allowed at the top level of a module, not nested in a function/if/loop}
+    resource        "context resource struct T:\n    a: int\n"   {expected end of line, found name "resource"}
+} {
+    test contexts-syntax-modifier-$name {a malformed context struct declaration is a located syntax error} -body {
+        catch {surface::parse $source} m
+        regsub {^<input>:[0-9]+:[0-9]+: } $m {}
+    } -result $message
+}
+
+test contexts-parse-contextual {`context` and `with` stay ordinary names: bindings, calls, fields, projections, parameters, typed parameters} -body {
+    set ast [surface::parse "context = 1\ncontext(x)\nwith = 2\nwith(x)\ny = x.context\nz = x.with\nfn f(context):\n    context\nfn g(context: int, with):\n    context\nstruct S:\n    context: int\n"]
+    surface::formatAst $ast
+} -result {(bind context (int 1))
+(call (name context) (name x))
+(bind with (int 2))
+(call (name with) (name x))
+(bind y (project (name x) context))
+(bind z (project (name x) with))
+fn f (context)
+    (name context)
+fn g (context:int with)
+    (name context)
+struct S
+    context: int}
+
+test contexts-contextual-run {programs using `context` and `with` as ordinary names run unchanged} -body {
+    agree "struct S:\n    context: int\nfn f(context, with):\n    context + with\ncontext = S {context: 3}\nwith = 4\nf(context.context, with)\n"
+} -result 7
+
+test contexts-parse-with {`with context EXPR`: a declaration-like statement, its own AST node (form context), any expression} -body {
+    set ast [surface::parse "with context linux::io::create()\nwith context x\nwith context A {v: 1}\nwith context f(g(1), 2)\n"]
+    list [lmap s [dict get $ast body] {list [dict get $s kind] [dict get $s form]}] [surface::formatAst $ast]
+} -result {{{with context} {with context} {with context} {with context}} {with context (call (qualname linux::io::create))
+with context (name x)
+with context (struct A (v (int 1)))
+with context (call (name f) (call (name g) (int 1)) (int 2))}}
+
+foreach {name source message} {
+    no-value    "with context\n"                {expected an expression after "with context" (the value to install), found end of line}
+    block       "with context x:\n    1\n"      {"with context" takes one expression and no block: write "with context EXPR" on its own line; the context is installed for the rest of the scope}
+    colon       "with context:\n    1\n"        {"with context" takes one expression and no block: write "with context EXPR" on its own line; the context is installed for the rest of the scope}
+    list        "with context a, b\n"           {"with context" installs one value: write one "with context EXPR" line per context}
+    resource    "with c = db::connect()\n"      {a "with NAME = EXPR" declaration does not exist yet: the only "with" declaration is "with context EXPR"}
+    other       "with foo\n"                    {expected "context" after "with" (the only "with" declaration is "with context EXPR"), found name "foo"}
+    trailing    "with context x y\n"            {expected end of line, found name "y"}
+} {
+    test contexts-syntax-with-$name {a malformed `with` declaration is a located syntax error} -body {
+        catch {surface::parse $source} m
+        regsub {^<input>:[0-9]+:[0-9]+: } $m {}
+    } -result $message
+}
+
+test contexts-parse-param-section {the context section is the last parameter section: after ordinary parameters and flags, several entries, each NAME: Type; the AST keeps them apart from params and flags} -body {
+    set ast [surface::parse "fn f(a, b: int, flags :x, :y, context io: LinuxIO, clock: Clock,):\n    a\nfn g(context c: C):\n    1\nfn h(flags :q, context c: m::C):\n    1\n"]
+    list [lmap f [dict get $ast body] {
+        list [llength [dict get $f params]] [lmap fl [dict get $f flags] {dict get $fl name}] \
+            [lmap c [dict get $f contexts] {list [dict get $c name] [dict get $c type]}]
+    }] [surface::formatAst $ast]
+} -result {{{2 {x y} {{io LinuxIO} {clock Clock}}} {0 {} {{c C}}} {0 q {{c m::C}}}} {fn f (a b:int flags :x :y context io:LinuxIO clock:Clock)
+    (name a)
+fn g (context c:C)
+    (int 1)
+fn h (flags :q context c:m::C)
+    (int 1)}}
+
+foreach {name source code message} {
+    second-section  "fn f(context a: A, context b: B):\n    1\n" MALFORMED-CONTEXT-SECTION {a "context" section cannot follow the context section: a parameter list has at most one context section, after the ordinary parameters and flags (list several contexts in one section: "context a: A, b: B")}
+    flags-after     "fn f(context a: A, flags :x):\n    1\n"     MALFORMED-CONTEXT-SECTION {a "flags" section cannot follow the context section: a parameter list is ordinary parameters, then flags, then context}
+    flag-after      "fn f(context a: A, :x):\n    1\n"           MALFORMED-CONTEXT-SECTION {flag :x cannot follow the context section: a parameter list is ordinary parameters, then flags, then context}
+    untyped         "fn f(context a):\n    1\n"                  MALFORMED-CONTEXT-SECTION {context parameter "a" needs its context type: write "a: Type" (a context is identified by its type)}
+    untyped-second  "fn f(context a: A, b):\n    1\n"            MALFORMED-CONTEXT-SECTION {context parameter "b" needs its context type: write "b: Type" (a context is identified by its type)}
+    ordinary-after  "fn f(flags :x, y):\n    1\n"                MALFORMED-FLAG-SECTION   {parameter "y" cannot follow the flags section: a parameter list is ordinary parameters, then flags}
+} {
+    test contexts-syntax-param-$name {a malformed context section is a located syntax error with its own code} -body {
+        catch {surface::parse $source} m
+        regsub {^<input>:[0-9]+:[0-9]+: } $m {}
+    } -result "$code: $message"
+}
+
+test contexts-lower-syntax {surface lowering: a context section is block syntax beside params and flags (not parameters); `with context EXPR` is a hygienic temporary bind and an explicit call of the internal install native} -body {
+    set ast [surface::ast::assignIds [surface::parse "fn f(x, context io: T):\n    x\nwith context make()\n"]]
+    set nodes [surface::lower::Sequence [dict get $ast body]]
+    set f [dict get [lindex $nodes 0] value]
+    lassign [lrange $nodes 1 2] bind call
+    list [lmap p [dict get $f params] {lindex $p 0}] [lmap c [dict get $f contextParams] {list [lindex $c 0] [lindex $c 2]}] \
+        [dict get $bind kind] [string match context#* [dict get $bind name]] \
+        [dict get $call kind] [dict get $call callee name] [dict get $call callee root] \
+        [dict get [lindex [dict get $call args] 0] name] [expr {[dict get [lindex [dict get $call args] 0] name] eq [dict get $bind name]}]
+} -result {x {{io T}} bind 1 call context#install 1 context#30 1}
+
+# ---------------------------------------------------------------------------
+# Context types
+
+test contexts-registry {the struct registry and HIR's sourceTypes record `context` per declaration, independent of `opaque`; an ordinary struct's entry is unchanged} -body {
+    set hir [ctxHir "context struct A:\n    v: int\nopaque context struct B:\n    v: int\nstruct C:\n    v: int\n1\n"]
+    list [lmap id {A B C} {list [hir::structs::isContext $id] [hir::structs::isOpaque $id]}] \
+        [lmap e [hir::sourceTypes $hir] {expr {[dict exists $e context] ? [dict get $e context] : "-"}}] \
+        [lmap line [lrange [split [hir::format $hir] \n] 0 2] {set line}]
+} -result {{{1 0} {1 1} {0 0}} {1 1 -} {{struct A name A ns - context fields v: int} {struct B name B ns - opaque context fields v: int} {struct C name C ns - fields v: int}}}
+
+test contexts-registry-roundtrip {HIR text round trip keeps the context modifier, the loads, the installs (with the identity each installs, which native slot assignment reads) and the requirements; the HIR read back runs on every backend} -body {
+    set hir [ctxHir "${::synthetic}fn outer():\n    read_value()\nwith context Counter {value: 7, enabled: true}\nouter()\n"]
+    set text [hir::format $hir]
+    set again [hir::format [hir::parse $text]]
+    list [expr {$text eq $again}] \
+        [llength [regexp -all -inline {call native\(context#load\)} $text]] \
+        [llength [regexp -all -inline {call native\(context#install\) installs Counter} $text]] \
+        [regexp -all {contexts \(Counter\) requires \(Counter\)} $text] \
+        [regexp -all {contexts \(\) requires \(Counter\)} $text] \
+        [core::formatValue [core::evalProgram [hir::lower [hir::parse $text]]]] \
+        [lsort -unique [lmap backend $::allBackends {outcomeUnderHir $backend [hir::parse $text]}]]
+} -result {1 2 1 2 1 7 {{value 7 {}}}}
+
+test contexts-not-a-context-param {a context parameter's type must be a `context struct`: an ordinary struct, a primitive, an unknown type are rejected at the type} -body {
+    list [strictError "struct X:\n    v: int\nfn f(context x: X):\n    x.v\n1\n"] \
+        [strictError "fn f(context x: int):\n    x\n1\n"] \
+        [strictError "fn f(context x: Nope):\n    x\n1\n"]
+} -result {{NOT-A-CONTEXT 3:17 {context parameter "x": X is not a context (only a value of a type declared "context struct" can be a context)}} {NOT-A-CONTEXT 1:17 {context parameter "x": int is not a context (only a value of a type declared "context struct" can be a context)}} {TYPE 1:17 {unknown or invalid type Nope for context parameter "x": core::type: unknown type "Nope"}}}
+
+test contexts-not-a-context-install {`with context EXPR` infers EXPR's type, which must be exactly one context struct: an ordinary struct, a primitive, an anonymous struct, an untyped value are rejected} -body {
+    list [strictError "struct X:\n    value: int\nwith context X {value: 1}\n1\n"] \
+        [strictError "with context 3\n1\n"] \
+        [strictError "with context {value: 1}\n1\n"] \
+        [strictError "context struct A:\n    v: int\nfn pick(c):\n    if c:\n        A {v: 1}\n    else:\n        1\nwith context pick(true)\n1\n"] \
+        [strictError "context struct A:\n    v: int\ncontext struct B:\n    v: int\nfn pick(c):\n    if c:\n        A {v: 1}\n    else:\n        B {v: 2}\nwith context pick(true)\n1\n"]
+} -result {{NOT-A-CONTEXT 3:1 {with context: X is not a context (only a value of a type declared "context struct" can be installed)}} {NOT-A-CONTEXT 1:1 {with context: a value of type int is not a context (only a value of a type declared "context struct" can be installed)}} {CONTEXT-TYPE-NOT-EXACT 1:1 {with context: the installed value must have one exact context-struct type, but its type is struct{value: int}}} {CONTEXT-TYPE-NOT-EXACT 8:1 {with context: the installed value must have one exact context-struct type, but its type is any}} {CONTEXT-TYPE-NOT-EXACT 10:1 {with context: the installed value must have one exact context-struct type, but its type is any}}}
+
+test contexts-install-is-not-construction {`with context` installs the value of any expression: a binding, a call, a literal; the context mechanism knows nothing of how it was made} -body {
+    list [agree "${::synthetic}x = Counter {value: 5, enabled: false}\nwith context x\nread_value()\n"] \
+        [agree "${::synthetic}fn make(n: Small) -> Counter:\n    Counter {value: n, enabled: true}\nwith context make(42)\nread_value()\n"]
+} -result {5 42}
+
+# ---------------------------------------------------------------------------
+# Identity, order, duplicates
+
+test contexts-identity-is-the-type {a context is identified by its type alone: two functions with different local names read the same installed value} -body {
+    agree "${::synthetic}fn a(context io: Counter):\n    io.value\nfn b(context system_io: Counter):\n    system_io.value + 1\nwith context Counter {value: 10, enabled: true}\n\[a(), b(), read_value(), read_enabled()\]\n"
+} -result {[10, 11, 10, true]}
+
+test contexts-source-order {a context is available from its `with context` line on, never before: a call before the installation is MISSING-CONTEXT although the installation is in the file} -body {
+    list [strictError "${::synthetic}read_value()\nwith context Counter {value: 1, enabled: true}\nread_value()\n"] \
+        [agree "${::synthetic}with context Counter {value: 1, enabled: true}\nread_value()\n"]
+} -result [list [list MISSING-CONTEXT 12:1 "Counter is required by this call but is not installed here (install it with \"with context EXPR\" before the call):\n    read_value\n        directly requires Counter"] 1]
+
+test contexts-duplicate-install {one installed value per type: a second installation of the same type is DUPLICATE-CONTEXT, before anything runs (no last-one-wins)} -body {
+    list [strictError "${::synthetic}with context Counter {value: 1, enabled: true}\nwith context Counter {value: 2, enabled: true}\nread_value()\n"] \
+        [strictError "import linux::io\nwith context linux::io::create()\nwith context linux::io::create()\n1\n"]
+} -result {{DUPLICATE-CONTEXT 13:1 {Counter is already installed in this scope}} {DUPLICATE-CONTEXT 3:1 {linux::io::LinuxIO is already installed in this scope}}}
+
+test contexts-constructor-order {consecutive installations run in source order, and a later constructor may use an earlier context; the reverse order is MISSING-CONTEXT (a context is never visible to its own or an earlier constructor)} -body {
+    set types "type Small = Int in 0..1000\ntype Big = Int in 0..2000\ncontext struct First:\n    value: Small\ncontext struct Second:\n    value: Big\nfn make_second(context f: First) -> Second:\n    Second {value: f.value + 1}\nfn read_second(context s: Second):\n    s.value\n"
+    list [agree "${types}with context First {value: 41}\nwith context make_second()\nread_second()\n"] \
+        [strictError "${types}with context make_second()\nwith context First {value: 41}\nread_second()\n"] \
+        [strictError "${types}fn self_made(context s: Second) -> Second:\n    s\nwith context self_made()\n1\n"]
+} -result [list 42 \
+    [list MISSING-CONTEXT 11:14 "First is required by this call but is not installed here (install it with \"with context EXPR\" before the call):\n    make_second\n        directly requires First"] \
+    [list MISSING-CONTEXT 13:14 "Second is required by this call but is not installed here (install it with \"with context EXPR\" before the call):\n    self_made\n        directly requires Second"]]
+
+test contexts-multiple-types {several context types are several independent slots: each consumer reads its own type's value, whatever the installation order or the local names} -body {
+    set types "type Small = Int in 0..1000\ncontext struct A:\n    value: Small\ncontext struct B:\n    value: Small\nfn read_a(context b: A):\n    b.value\nfn read_b(context a: B):\n    a.value\nfn both(context x: B, y: A):\n    x.value * 1000 + y.value\n"
+    list [agree "${types}with context A {value: 1}\nwith context B {value: 2}\n\[read_a(), read_b(), both()\]\n"] \
+        [agree "${types}with context B {value: 2}\nwith context A {value: 1}\n\[read_a(), read_b(), both()\]\n"]
+} -result {{[1, 2, 2001]} {[1, 2, 2001]}}
+
+test contexts-placement {installation is supported only in the entry program's top-level scope, as a statement: in a function, a loop, a branch, a handler and a module it is CONTEXT-INSTALLATION-UNSUPPORTED} -body {
+    set c "context struct A:\n    v: int\n"
+    list [strictError "${c}fn f():\n    with context A {v: 1}\n    1\nf()\n"] \
+        [strictError "${c}loop i from 0 to 2:\n    with context A {v: i}\n1\n"] \
+        [strictError "${c}if true:\n    with context A {v: 1}\n1\n"] \
+        [strictError "${c}error E\nfn g() errors E:\n    fail E\nx = g():\n    on E:\n        with context A {v: 1}\n        2\nx\n"] \
+        [strictError "${c}fn outer():\n    fn inner():\n        with context A {v: 1}\n    inner()\nouter()\n"]
+} -result {{CONTEXT-INSTALLATION-UNSUPPORTED 4:5 {context installation is currently supported only in the entry program's top-level scope, as a statement (this one is inside a function)}} {CONTEXT-INSTALLATION-UNSUPPORTED 4:5 {context installation is currently supported only in the entry program's top-level scope, as a statement (this one is inside a loop)}} {CONTEXT-INSTALLATION-UNSUPPORTED 4:5 {context installation is currently supported only in the entry program's top-level scope, as a statement (this one is inside an if branch or error handler)}} {CONTEXT-INSTALLATION-UNSUPPORTED 8:9 {context installation is currently supported only in the entry program's top-level scope, as a statement (this one is inside an if branch or error handler)}} {CONTEXT-INSTALLATION-UNSUPPORTED 5:9 {context installation is currently supported only in the entry program's top-level scope, as a statement (this one is inside a function)}}}
+
+test contexts-placement-module {an installation in a module's top level is CONTEXT-INSTALLATION-UNSUPPORTED (located in the module); a module that only defines context consumers needs nothing} -body {
+    set saved $::core::libraryDir
+    set dir [tcltest::makeDirectory contexts-lib-[pid]]
+    set ::core::libraryDir $dir
+    try {
+        writeFile [file join $dir ctxmod.bot] "context struct A:\n    v: int\nwith context A {v: 1}\nfn get(context a: A):\n    a.v\n"
+        writeFile [file join $dir ctxdefs.bot] "type Small = Int in 0..100\ncontext struct A:\n    v: Small\nfn get(context a: A):\n    a.v\n"
+        list [strictError "import ctxmod\n1\n"] \
+            [agree "import ctxdefs\n7\n"] \
+            [agree "import ctxdefs\nwith context ctxdefs::A {v: 3}\nctxdefs::get()\n"]
+    } finally {
+        set ::core::libraryDir $saved
+        tcltest::removeDirectory [file tail $dir]
+    }
+} -match glob -result {{CONTEXT-INSTALLATION-UNSUPPORTED 3:1 {context installation is currently supported only in the entry program's top-level scope, as a statement (this one is inside a module: "ctxmod", *ctxmod.bot)}} 7 3}
+
+test contexts-module-init-call {a module's own top-level code runs before the entry program installs anything: a module initializer that calls a context consumer is MISSING-CONTEXT} -body {
+    set saved $::core::libraryDir
+    set dir [tcltest::makeDirectory contexts-lib2-[pid]]
+    set ::core::libraryDir $dir
+    try {
+        writeFile [file join $dir ctxinit.bot] "type Small = Int in 0..100\ncontext struct A:\n    v: Small\nfn get(context a: A):\n    a.v\nx = get()\n"
+        lindex [strictError "import ctxinit\nwith context ctxinit::A {v: 3}\n1\n"] 0
+    } finally {
+        set ::core::libraryDir $saved
+        tcltest::removeDirectory [file tail $dir]
+    }
+} -result MISSING-CONTEXT
+
+# ---------------------------------------------------------------------------
+# Context parameters
+
+test contexts-arity {context parameters are not call parameters: a function's call arity counts its ordinary parameters (and its flags, as before); an explicit extra argument is an ordinary ARITY error} -body {
+    set hir [ctxHir "${::synthetic}fn add(x, flags :double, context c: Counter):\n    if double:\n        2 * (x + c.value)\n    else:\n        x + c.value\n1\n"]
+    set b [blockNamed $hir add]
+    list [llength [hir::get $hir $b params]] [hir::get $hir $b flags] [hir::get $hir $b contextParams] \
+        [agree "${::synthetic}fn add(x, flags :double, context c: Counter):\n    if double:\n        2 * (x + c.value)\n    else:\n        x + c.value\nwith context Counter {value: 5, enabled: true}\n\[add(1), add(1, :double)\]\n"] \
+        [lsort -unique [lmap o [outcomesOf "${::synthetic}with context Counter {value: 5, enabled: true}\nread_value(1)\n"] {lrange $o 0 1}]]
+} -result {2 double {{name c context Counter}} {[6, 12]} {{error {CORE SEMANTIC ARITY}}}}
+
+test contexts-binding-collision {a context parameter is an ordinary local of the function: a parameter, a flag or another context parameter of the same name is CONTEXT-BINDING-COLLISION; a body binding of the name is the ordinary DUPLICATE; a nested scope may shadow it} -body {
+    set c "context struct A:\n    v: int\ncontext struct B:\n    v: int\n"
+    list [strictError "${c}fn f(io, context io: A):\n    io\n1\n"] \
+        [strictError "${c}fn f(flags :io, context io: A):\n    io\n1\n"] \
+        [strictError "${c}fn f(context io: A, io: B):\n    io\n1\n"] \
+        [lindex [strictError "${c}fn f(context io: A):\n    io = 1\n    io\n1\n"] 0] \
+        [agree "type Small = Int in 0..100\ncontext struct A:\n    v: Small\nfn f(context io: A):\n    fn g(io):\n        io + 1\n    g(io.v)\nwith context A {v: 4}\nf()\n"]
+} -result {{CONTEXT-BINDING-COLLISION 5:18 {context parameter "io" has the name of a parameter or flag of the same function: context parameters are ordinary locals of the function and share its one namespace}} {CONTEXT-BINDING-COLLISION 5:25 {context parameter "io" has the name of a parameter or flag of the same function: context parameters are ordinary locals of the function and share its one namespace}} {CONTEXT-BINDING-COLLISION 5:21 {context parameter "io" has the name of another context parameter: context parameters are ordinary locals of the function and share its one namespace}} DUPLICATE 5}
+
+test contexts-duplicate-param-type {one value per context type: the same type twice in one function is DUPLICATE-CONTEXT-PARAMETER, whatever the local names} -body {
+    strictError "context struct Clock:\n    t: int\nfn bad(context a: Clock, b: Clock):\n    1\n1\n"
+} -result {DUPLICATE-CONTEXT-PARAMETER 3:29 {context Clock is declared twice (as "a" and "b"): a function receives at most one value of each context type, whatever the local names}}
+
+test contexts-param-is-ordinary-local {a context parameter is an ordinary immutable value inside the function: projected, passed, compared, stored, captured by a closure} -body {
+    agree "${::synthetic}fn keep(c: Counter):\n    c.value\nfn use(context c: Counter):\n    fn later():\n        c.value + 1\n    \[c.value, keep(c), c == Counter {value: 9, enabled: true}, later(), {held: c}.held.value\]\nwith context Counter {value: 9, enabled: true}\nuse()\n"
+} -result {[9, 9, true, 10, 9]}
+
+test contexts-method-sugar {a context consumer called with method syntax: the context is an obligation of the selected call, never an extra receiver, and a missing context does not make the candidate disappear -- with a second candidate of the same name in scope, the call is still the consumer's and fails as MISSING-CONTEXT, not NO-APPLICABLE-METHOD} -body {
+    set c "type Small = Int in 0..1000\ncontext struct Scale:\n    k: Small\nfn scaled(x: int, context s: Scale):\n    x * s.k\n"
+    set saved $::core::libraryDir
+    set dir [tcltest::makeDirectory contexts-lib4-[pid]]
+    set ::core::libraryDir $dir
+    try {
+        writeFile [file join $dir textual.bot] "fn scaled(x: str):\n    x\n"
+        list [agree "${c}with context Scale {k: 3}\n\[7.scaled(), scaled(7)\]\n"] \
+            [lindex [strictError "${c}7.scaled()\n"] 0] \
+            [agree "import textual\n${c}with context Scale {k: 3}\n\[7.scaled(), \"a\".scaled()\]\n"] \
+            [lindex [strictError "import textual\n${c}7.scaled()\n"] 0]
+    } finally {
+        set ::core::libraryDir $saved
+        tcltest::removeDirectory [file tail $dir]
+    }
+} -result {{[21, 21]} MISSING-CONTEXT {[21, "a"]} MISSING-CONTEXT}
+
+# ---------------------------------------------------------------------------
+# Transitive requirements
+
+set chain {import abi::bytes
+import linux::io
+import str
+
+fn message():
+    abi::bytes::from_list(str::encode_utf8("chain\n"))
+
+fn c():
+    linux::io::write(message())
+
+fn b():
+    c()
+
+fn a():
+    b()
+
+fn unused():
+    linux::io::write(message())
+}
+
+test contexts-transitive-chain {only the direct consumer declares the context; the compiler derives every caller's requirement (write direct, c b a transitive), message and unused-but-defined functions are context-free, and no source changes} -body {
+    requirements "${::chain}with context linux::io::create()\na()\n" {linux::io::write linux::io::write_error linux::io::read c b a message unused hello}
+} -result {{linux::io::write linux::io::LinuxIO linux::io::LinuxIO} {linux::io::write_error linux::io::LinuxIO linux::io::LinuxIO} {linux::io::read linux::io::LinuxIO linux::io::LinuxIO} {c {} linux::io::LinuxIO} {b {} linux::io::LinuxIO} {a {} linux::io::LinuxIO} {message {} {}} {unused {} linux::io::LinuxIO} {hello {} {}}}
+
+test contexts-missing-chain {without the installation the call of a is MISSING-CONTEXT, and the diagnostic shows the deterministic chain a -> b -> c -> linux::io::write and the direct requirement} -body {
+    strictError "${::chain}a()\n"
+} -result [list MISSING-CONTEXT 19:1 "linux::io::LinuxIO is required by this call but is not installed here (install it with \"with context EXPR\" before the call):\n    a\n     -> b\n     -> c\n     -> linux::io::write\n        directly requires linux::io::LinuxIO"]
+
+test contexts-unused-consumer {a program that defines (or imports) context consumers but never calls one needs no installation: reachability, not source scanning} -body {
+    list [agree "${::chain}1 + 1\n"] [agree "${::synthetic}2\n"] [agree "import linux::io\n3\n"]
+} -result {2 2 3}
+
+test contexts-unreachable-call {a call that cannot run (statically unreachable) requires nothing} -body {
+    agree "${::synthetic}fn f(x):\n    return x\n    read_value()\nf(4)\n"
+} -result 4
+
+test contexts-recursion {recursive requirements converge: a self-recursive consumer, and a cycle through a nested function (a calls b, b needs Counter and calls a) both require Counter, and both run} -body {
+    set prog "${::synthetic}fn countdown(n, context c: Counter):\n    if n == 0:\n        c.value\n    else:\n        countdown(n - 1)\nfn a(n):\n    fn b(m, context c: Counter):\n        if m == 0:\n            c.value\n        else:\n            a(m - 1)\n    b(n)\n"
+    list [requirements "${prog}with context Counter {value: 3, enabled: true}\na(2)\n" {countdown a b}] \
+        [agree "${prog}with context Counter {value: 3, enabled: true}\n\[countdown(5), a(4)\]\n"] \
+        [lindex [strictError "${prog}a(1)\n"] 0]
+} -result {{{countdown Counter Counter} {a {} Counter} {b Counter Counter}} {[3, 3]} MISSING-CONTEXT}
+
+test contexts-explain {the derivation is kept for tooling: hir::contexts::of and ::explain answer "what does f use / require, and why"} -body {
+    set hir [ctxHir "${::chain}with context linux::io::create()\na()\n"]
+    set a [blockNamed $hir a]
+    list [hir::contexts::of $hir $a] [hir::contexts::explain $hir $a linux::io::LinuxIO] [hir::contexts::explain $hir [blockNamed $hir message] linux::io::LinuxIO]
+} -result {{direct {} required linux::io::LinuxIO} {    a
+     -> b
+     -> c
+     -> linux::io::write
+        directly requires linux::io::LinuxIO} {}}
+
+test contexts-summary {hir::contexts::summary (main.tcl -contexts): the context structs, installations, context parameters and every function's direct and required contexts} -body {
+    set hir [ctxHir "${::synthetic}fn outer():\n    read_value()\nwith context Counter {value: 1, enabled: true}\nouter()\n"]
+    regsub -all {e[0-9]+} [hir::contexts::summary $hir] eN
+} -result {contextstruct Counter
+contextinstall eN Counter
+contextparam eN c Counter
+contextparam eN k Counter
+function read_value eN direct-contexts (Counter) required-contexts (Counter)
+function read_enabled eN direct-contexts (Counter) required-contexts (Counter)
+function outer eN direct-contexts () required-contexts (Counter)}
+
+# ---------------------------------------------------------------------------
+# Function values (the higher-order frontier)
+
+test contexts-function-value {a function that requires a context may be called or aliased, never used as a value: passing, returning, storing it (or a closure over a consumer) is CONTEXT-FUNCTION-VALUE; a context-free function value is unaffected} -body {
+    set c "${::synthetic}fn apply(g):\n    g()\n"
+    list [strictError "${c}apply(read_value)\n"] \
+        [lindex [strictError "${c}fn make():\n    fn inner():\n        read_value()\n    inner\nmake()\n"] 0] \
+        [lindex [strictError "${c}xs = \[read_value\]\n1\n"] 0] \
+        [lindex [strictError "${c}fn wrap():\n    read_value()\nx = {f: wrap}\n1\n"] 0] \
+        [lindex [strictError "${c}fn other():\n    1\nfn choose(c):\n    if c:\n        read_value\n    else:\n        other\nx = choose(true)\nx()\n"] 0] \
+        [lindex [strictError "${c}fn other():\n    1\nx = if 1 == 1:\n    read_value\nelse:\n    other\nwith context Counter {value: 1, enabled: true}\nx()\n"] 0] \
+        [agree "${c}g = read_value\nwith context Counter {value: 6, enabled: true}\nh = g\n\[g(), h()\]\n"] \
+        [agree "${c}fn seven():\n    7\napply(seven)\n"]
+} -result {{CONTEXT-FUNCTION-VALUE 14:7 {function read_value requires context Counter, so it can only be called (or bound to another name as a statement): it cannot be passed, returned or stored as a value, because a call through an unknown function value could not prove that context installed}} CONTEXT-FUNCTION-VALUE CONTEXT-FUNCTION-VALUE CONTEXT-FUNCTION-VALUE CONTEXT-FUNCTION-VALUE CONTEXT-FUNCTION-VALUE {[6, 6]} 7}
+
+test contexts-alias-calls {a call through an alias (g = f, h = g) is a call of f: it carries f's requirement, at the top level and inside another function} -body {
+    list [strictError "${::synthetic}g = read_value\nh = g\nh()\nwith context Counter {value: 1, enabled: true}\n1\n"] \
+        [requirements "${::synthetic}g = read_value\nfn through():\n    g()\n1\n" {through}] \
+        [agree "${::synthetic}g = read_value\nfn through():\n    g()\nwith context Counter {value: 8, enabled: true}\nthrough()\n"]
+} -result [list [list MISSING-CONTEXT 14:1 "Counter is required by this call but is not installed here (install it with \"with context EXPR\" before the call):\n    read_value\n        directly requires Counter"] {{through {} Counter}} 8]
+
+test contexts-function-value-last-statement {a program (or function) whose value is a consumer function lets it escape to its caller: rejected as a value; followed by another statement it is a plain definition} -body {
+    list [lindex [strictError "${::synthetic}fn tail():\n    read_value()\n"] 0] [agree "${::synthetic}fn tail():\n    read_value()\n5\n"]
+} -result {CONTEXT-FUNCTION-VALUE 5}
+
+# ---------------------------------------------------------------------------
+# Opacity is independent
+
+test contexts-non-opaque-context {`context` does not imply opacity: outside code constructs, projects and destructures an ordinary context struct} -body {
+    agree "type Small = Int in 0..100\ncontext struct TestContext:\n    value: Small\nfn get(context t: TestContext):\n    {value} = t\n    value + t.value\nwith context TestContext {value: 4}\nget()\n"
+} -result 8
+
+test contexts-opacity-exact {context authority is not representation authority: outside linux::io a LinuxIO context parameter can be held, passed and compared, but not projected, destructured or constructed} -body {
+    list [lindex [strictError "import linux::io\nfn f(context io: linux::io::LinuxIO):\n    io.stdout\nwith context linux::io::create()\nf()\n"] 0] \
+        [lindex [strictError "import linux::io\nfn f(context io: linux::io::LinuxIO):\n    {stdout} = io\n    1\nwith context linux::io::create()\nf()\n"] 0] \
+        [lindex [strictError "import linux::io\nwith context linux::io::LinuxIO {stdin: 1, stdout: 2, stderr: 3}\n1\n"] 0] \
+        [agree "import linux::io\nfn same(context io: linux::io::LinuxIO):\n    io == linux::io::create()\nwith context linux::io::create()\nsame()\n"]
+} -result {OPAQUE-REPRESENTATION OPAQUE-REPRESENTATION OPAQUE-CONSTRUCTION true}
+
+# ---------------------------------------------------------------------------
+# linux::io
+
+test contexts-linux-io-surface {linux::io exports exactly create, write, write_error and read (no descriptor accessors, no current-context getter); FileDescriptor and LinuxIO are opaque, LinuxIO alone is a context} -body {
+    set hir [ctxHir "import linux::io\n1\n"]
+    set names [lsort [lmap b [dict get $hir scopes [dict get $hir modules linux::io] bindings] {dict get $hir bindings $b name}]]
+    list $names [lmap id {linux::io::FileDescriptor linux::io::LinuxIO} {list [hir::structs::isOpaque $id] [hir::structs::isContext $id]}] \
+        [hir::structs::fieldTypes linux::io::LinuxIO] [hir::structs::fieldTypes linux::io::FileDescriptor]
+} -result {{linux::io::create linux::io::read linux::io::write linux::io::write_error} {{1 0} {1 1}} {stdin {nstruct linux::io::FileDescriptor} stdout {nstruct linux::io::FileDescriptor} stderr {nstruct linux::io::FileDescriptor}} {raw {nstruct abi::I32}}}
+
+test contexts-no-context-api {no source-visible context API: the two context operations are internal root natives no program can spell, and no native or function looks a context up by any other means} -body {
+    list [lsort [lsearch -all -inline -glob [core::native::names] *context*]] \
+        [lindex [strictError "x = context#load\n1\n"] 0] \
+        [catch {surface::parse "context#load(\"A\")\n"}]
+} -result {{context#install context#load} UNBOUND 0}
+
+test contexts-linux-io-tcl-backends {the Tcl backends verify and run a linux::io program up to the syscall, which they refuse (NATIVE-ONLY); the context itself (create, install, the descriptors) is ordinary Botlish} -body {
+    set hir [ctxHir "${::linuxPrelude}with context linux::io::create()\nlinux::io::write(mk(\"x\"))\n"]
+    lmap backend {interp compile} {lrange [outcomeUnderHir $backend $hir] 0 1}
+} -result {{error {CORE SEMANTIC NATIVE-ONLY}} {error {CORE SEMANTIC NATIVE-ONLY}}}
+
+test contexts-linux-io-create-descriptors {create mints the three standard descriptor tokens 0, 1, 2 (checked inside the owner: ordinary Botlish, every backend)} -body {
+    set saved $::core::libraryDir
+    set dir [tcltest::makeDirectory contexts-lib3-[pid]]
+    try {
+        # A copy of linux::io with one more (test-only) function, so the owner
+        # can show its own representation.
+        file mkdir [file join $dir linux]
+        foreach f [glob -directory $saved *.bot] { file copy $f $dir }
+        file copy [file join $saved abi] [file join $dir abi]
+        set text [readFile [file join $saved linux io.bot]]
+        writeFile [file join $dir linux io.bot] "${text}\nfn probe(context io: LinuxIO):\n    \[io.stdin.raw.value, io.stdout.raw.value, io.stderr.raw.value\]\n"
+        set ::core::libraryDir $dir
+        agree "import linux::io\nwith context linux::io::create()\nlinux::io::probe()\n"
+    } finally {
+        set ::core::libraryDir $saved
+        tcltest::removeDirectory [file tail $dir]
+    }
+} -result {[0, 1, 2]}
+
+# ---------------------------------------------------------------------------
+# Run-time replay (-strict 0)
+
+test contexts-strict0-runtime {a -strict 0 program that failed verification fails with the same semantic error at run time, never with an arbitrary value: the Tcl backends when the load (or the second install) runs, natively when the program starts} -body {
+    set missing [ctxHir "${::synthetic}x = 1\nread_value()\n" 0]
+    set duplicate [ctxHir "${::synthetic}with context Counter {value: 1, enabled: true}\nwith context Counter {value: 2, enabled: true}\nread_value()\n" 0]
+    list [lmap backend $::allBackends {lrange [outcomeUnderHir $backend $missing] 0 1}] \
+        [lmap backend $::allBackends {lrange [outcomeUnderHir $backend $duplicate] 0 1}]
+} -result {{{error {CORE SEMANTIC MISSING-CONTEXT}} {error {CORE SEMANTIC MISSING-CONTEXT}} {error {CORE SEMANTIC MISSING-CONTEXT}} {error {CORE SEMANTIC MISSING-CONTEXT}}} {{error {CORE SEMANTIC DUPLICATE-CONTEXT}} {error {CORE SEMANTIC DUPLICATE-CONTEXT}} {error {CORE SEMANTIC DUPLICATE-CONTEXT}} {error {CORE SEMANTIC DUPLICATE-CONTEXT}}}}
+
+test contexts-fresh-per-run {the Tcl backends' context environment is per run: a second run starts empty} -body {
+    set hir [ctxHir "${::synthetic}with context Counter {value: 1, enabled: true}\nread_value()\n"]
+    set ir [hir::lower $hir]
+    list [core::formatValue [core::evalProgram $ir]] [core::formatValue [core::evalProgram $ir]] [dict size $::core::contexts::installed]
+} -result {1 1 0}
+
+# ---------------------------------------------------------------------------
+# Native lowering
+
+set helloText [readFile [file join $::projectRoot examples linux context-hello.bot]]
+
+test contexts-native-nir-hello {NIR of the Hello World: one 24-byte context area with one LinuxIO slot of three words; the program stores the three descriptors (no LinuxIO object); hello calls linux::io::write with its one ordinary argument; linux::io::write loads stdout's word (offset 8) and passes it to linux::write's fields variant: no context operand anywhere} -constraints linuxX86_64 -body {
+    set nir [native::nir [ctxHir $::helloText]]
+    set header [lrange [split $nir \n] 0 1]
+    set write [nirFunction $nir linux::io::write]
+    set hello [nirFunction $nir hello]
+    list $header [regexp -all {contextstore} $nir] [regexp -all {contextload} $nir] \
+        [lindex [split $write \n] 0] [nirBody $write] [nirBody $hello]
+} -result {{{nir 1 call-effects=1 statics=0 contexts=24} {context 0 "linux::io::LinuxIO" offset=0 words=3 fields="stdin.raw.value stdout.raw.value stderr.raw.value"}} 3 1 {func 9 "linux::io::write" params=1 env=0 regs=3 pnames="data.0" captures=0 instance="abi::bytes::Bytes" @e509} {{%1 = contextload 8} {%2 = call 7 %1 %0} {ret %2}} {{%0 = bytes "48656c6c6f2c20776f726c64210a"} {%1 = call 9 %0} {ret %1}}}
+
+test contexts-native-no-hidden-argument {the three-level chain compiles to the calling convention it would have without any context: every function has params=0 env=0, every call passes no operand, and only the consumer does anything about the context -- its own fixed-slot load} -constraints linuxX86_64 -body {
+    set nir [native::nir [ctxHir "${::synthetic}fn middle():\n    read_value()\nfn top():\n    middle()\nwith context Counter {value: 3, enabled: true}\ntop()\n"]]
+    list [lmap name {top middle read_value} {lindex [regexp -inline {params=[0-9]+ env=[0-9]+} [nirFunction $nir $name]] 0}] \
+        [lmap name {top middle} {regsub -all {call [0-9]+} [nirBody [nirFunction $nir $name]] {call F}}] \
+        [nirBody [nirFunction $nir read_value]]
+} -result {{{params=0 env=0} {params=0 env=0} {params=0 env=0}} {{{%0 = call F} {ret %0}} {{%0 = call F} {ret %0}}} {{%0 = contextload 0} {ret %0}}}
+
+test contexts-native-clif {CLIF of linux::io::write: the signature is (vm, data) -> value, the context area is a data global value read at a constant offset; no extra parameter} -constraints linuxX86_64 -body {
+    set clif [native::clif [ctxHir $::helloText]]
+    set start [string first {"linux::io::write"} $clif]
+    set end [string first "; function" $clif [expr {$start + 1}]]
+    set f [string range $clif $start $end]
+    list [regexp {function u0:[0-9]+\(i64, i64\) -> i64} $f] [regexp {gv[0-9]+ = symbol (colocated )?userextname[0-9]+} $f] \
+        [regexp {symbol_value\.i64 gv[0-9]+} $f] [regexp {load\.i64 notrap aligned v[0-9]+\+8} $f]
+} -result {1 1 1 1}
+
+test contexts-native-eligibility {a context whose layout cannot live in fixed program data is CONTEXT-NATIVE-LOWERING-UNSUPPORTED, naming the reason; the Tcl backends run it; an eligible nested layout (Bool, bounded Int, nested struct) is flattened} -constraints linuxX86_64 -body {
+    set unbounded "context struct Big:\n    n: int\nfn get(context b: Big):\n    b.n\nwith context Big {n: 99999999999999999999}\nget()\n"
+    set text "context struct Named:\n    name: str\nfn get(context b: Named):\n    b.name\nwith context Named {name: \"x\"}\nget()\n"
+    set nested "type Small = Int in 0..9\nstruct Inner:\n    a: Small\n    b: bool\ncontext struct Outer:\n    inner: Inner\n    c: Small\nfn get(context o: Outer):\n    \[o.inner.a, o.inner.b, o.c, o.inner\]\nwith context Outer {inner: Inner {a: 1, b: true}, c: 2}\nget()\n"
+    set r {}
+    foreach prog [list $unbounded $text] {
+        set hir [ctxHir $prog]
+        catch {native::nir $hir} m o
+        lappend r [dict get $o -errorcode] [regsub {^[^ ]+: } $m {}] [lindex [outcomeUnderHir interp $hir] 0]
+    }
+    lappend r [agree $nested] [lindex [split [native::nir [ctxHir $nested]] \n] 1]
+} -result {{NATIVE UNSUPPORTED CONTEXT-NATIVE-LOWERING-UNSUPPORTED} {CONTEXT-NATIVE-LOWERING-UNSUPPORTED: context Big cannot currently be stored in a fixed native context slot because field "n" is an Int (int) whose declared domain does not fit the small-Int representation, so its value may be a heap-allocated big integer that fixed program data could not keep alive (no GC root)} value {NATIVE UNSUPPORTED CONTEXT-NATIVE-LOWERING-UNSUPPORTED} {CONTEXT-NATIVE-LOWERING-UNSUPPORTED: context Named cannot currently be stored in a fixed native context slot because field "name" has type str, a value that may be (or contain) a GC-managed heap object, and fixed program data holds no GC root} value {[1, true, 2, Inner {a: 1, b: true}]} {context 0 "Outer" offset=0 words=3 fields="inner.a inner.b c"}}
+
+test contexts-native-allocations {allocations: installing a literal context and reading it allocates nothing; the Hello World allocates only linux::io::create's own LinuxIO, FileDescriptors and abi::I32s, once (the existing optimizer materializes a zero-parameter constructor's struct result), and nothing per write} -constraints linuxX86_64 -body {
+    proc counts {text} {
+        set report [native::allocationReport [ctxHir $text] summary]
+        list [dict get $report total allocations] [dict get $report byKind Struct allocations]
+    }
+    list [counts "${::synthetic}fn many(n):\n    if n == 0:\n        0\n    else:\n        read_value() + many(n - 1)\nwith context Counter {value: 2, enabled: true}\nmany(50)\n"] \
+        [counts $::helloText] \
+        [counts "${::linuxPrelude}with context linux::io::create()\nm = mk(\"x\\n\")\nloop i from 0 to 1:\n    linux::io::write(m)\n0\n"] \
+        [counts "${::linuxPrelude}with context linux::io::create()\nm = mk(\"x\\n\")\nloop i from 0 to 20:\n    linux::io::write(m)\n0\n"]
+} -result {{0 0} {7 7} {9 7} {9 7}}
+
+test contexts-native-gc-stress {context programs under a collection at every allocation site: the context words are never roots and survive every collection} -constraints linuxX86_64 -body {
+    withEnv BOTLISH_NATIVE_GC_STRESS 1 {
+        list [agree "import list\n${::synthetic}fn many(n):\n    xs = \[n, n + 1\]\n    if n == 0:\n        read_value()\n    else:\n        many(n - 1) + list::length(xs) - 2\nwith context Counter {value: 2, enabled: true}\nmany(30)\n" $::nativeBackends] \
+            [agree "type Small = Int in 0..9\nstruct Inner:\n    a: Small\n    b: bool\ncontext struct Outer:\n    inner: Inner\n    c: Small\nfn get(context o: Outer):\n    \[o.inner, o.inner, \[o.c\]\]\nwith context Outer {inner: Inner {a: 1, b: true}, c: 2}\nget()\n" $::nativeBackends]
+    }
+} -result {2 {[Inner {a: 1, b: true}, Inner {a: 1, b: true}, [2]]}}
+
+test contexts-native-executable-hello {examples/linux/context-hello.bot as a standalone executable: descriptor 1 receives exactly "Hello, world!\n", followed by the runner's own result line (14, the bytes written); nothing on descriptor 2} -constraints {linuxX86_64 posixShell} -body {
+    set exe [buildExecutable hello $::helloText]
+    runExecutable $exe
+} -result [list "Hello, world!\n14\n" ""]
+
+test contexts-native-executable-descriptors {stdout, stderr and stdin come from the one installed LinuxIO: write goes to descriptor 1 only, write_error to descriptor 2 only, read reads descriptor 0 (one read(2), the caller's buffer unchanged, the result's detached buffer updated)} -constraints {linuxX86_64 posixShell} -body {
+    set exe [buildExecutable descriptors "${::linuxPrelude}with context linux::io::create()
+n1 = linux::io::write(mk(\"normal\\n\"))
+n2 = linux::io::write_error(mk(\"error\\n\"))
+buffer = abi::bytes::zeroed(abi::usize(8))
+result = linux::io::read(buffer)
+original = abi::bytes::freeze_prefix(buffer, abi::usize(8)):
+    on UpperOverrun:
+        abi::bytes::from_list(\[\])
+got = abi::bytes::freeze_prefix(result.data, abi::usize(8)):
+    on UpperOverrun:
+        abi::bytes::from_list(\[\])
+zero = abi::bytes::freeze_prefix(abi::bytes::zeroed(abi::usize(8)), abi::usize(8)):
+    on UpperOverrun:
+        abi::bytes::from_list(\[\])
+\[n1, n2, result.result, original == zero, got == mk(\"stdin-ok\")\]
+"]
+    list [runExecutable $exe "stdin-ok and more"] [runExecutable $exe "stdin-ok" 1]
+} -result [list [list "normal\n\[7, 6, 8, true, true\]\n" "error\n"] [list "normal\n\[7, 6, 8, true, true\]\n" "error\n"]]
+
+proc machineCode {exe function} {
+    exec objdump -d --no-show-raw-insn --disassemble=$function $exe
+}
+
+test contexts-native-machine-code {the machine code of linux::io::write in the standalone executable: stdout's descriptor is ONE load from the linker-local context area, addressed RIP-relatively (lea of botlish_context_area, then +8), with no GOT load, no helper call and no other call than linux::write; the area is a local 24-byte object in .bss} -constraints {linuxX86_64 objdump posixShell} -body {
+    set exe [buildExecutable hello $::helloText]
+    set id [nirFunctionId [native::nir [ctxHir $::helloText]] linux::io::write]
+    set code [machineCode $exe botlish_fn_$id]
+    set write [nirFunctionId [native::nir [ctxHir $::helloText]] linux::write]
+    set symbols [exec objdump -t $exe]
+    list [regexp {lea\s+0x[0-9a-f]+\(%rip\),%(\w+)\s+# [0-9a-f]+ <botlish_context_area>} $code] \
+        [regexp {mov\s+0x8\(%r\w+\),%rsi} $code] \
+        [regexp -all {\(%rip\)} $code] [regexp -all {GLOBAL_OFFSET|_DYNAMIC} $code] \
+        [expr {[lmap line [regexp -all -inline {call\s+[0-9a-f]+ <[^>]+>} $code] {regsub {call\s+[0-9a-f]+ } $line {}}] eq [list <botlish_fn_$write>]}] \
+        [regexp {[0-9a-f]+ l\s+O \.bss\s+0+18\s+botlish_context_area} $symbols]
+} -result {1 1 1 0 1 1}
+
+test contexts-native-object-relocation {the AOT object's reference to the context area is the relaxable R_X86_64_REX_GOTPCRELX against the local symbol, so the linker turns Cranelift's PIC GOT load into the direct lea seen above} -constraints {linuxX86_64 objdump} -body {
+    set obj [file join $::outputDir hello.o]
+    native::object [ctxHir $::helloText] $obj
+    set relocs [exec objdump -r $obj]
+    list [llength [regexp -all -inline {R_X86_64_REX_GOTPCRELX\s+botlish_context_area} $relocs]] \
+        [llength [regexp -all -inline {R_X86_64_GOTPCREL\s+botlish_context_area} $relocs]]
+} -result {2 0}
+
+test contexts-native-strace {the kernel receives write(1, "Hello, world!\n", 14) from the raw syscall boundary, called by the runtime helper, called by linux::write, called by linux::io::write, called by hello -- no libc write frame in that call's stack} -constraints {linuxX86_64 strace posixShell} -body {
+    set exe [buildExecutable hello $::helloText]
+    set log [file join $::outputDir strace.hello]
+    exec strace -f -qq -k -e trace=write -o $log $exe >/dev/null 2>@1
+    set text [readBinary $log]
+    set records {}
+    set current {}
+    foreach line [split $text \n] {
+        if {[regexp {^(?:\[pid +[0-9]+\]|[0-9]+) +(write\(.*)$} $line -> call]} {
+            if {$current ne ""} { lappend records $current }
+            regsub {\) +=} $call ") =" call
+            set current [list $call]
+        } elseif {[string match " > *" $line] && $current ne ""} {
+            lappend current $line
+        }
+    }
+    if {$current ne ""} { lappend records $current }
+    set ours [lsearch -inline -exact -index 0 $records {write(1, "Hello, world!\n", 14) = 14}]
+    set stack [join [lrange $ours 1 end] \n]
+    set nir [native::nir [ctxHir $::helloText]]
+    set frames [lmap name {linux::write linux::io::write hello} {
+        regexp "botlish_fn_[nirFunctionId $nir $name]\\+" $stack
+    }]
+    list [lindex $ours 0] [regexp {botlish_linux_x86_64_syscall} $stack] [regexp {rt_linux_x86_64_syscall} $stack] \
+        $frames [regexp {__write|libc\.so\.6\(write} $stack]
+} -result {{write(1, "Hello, world!\n", 14) = 14} 1 1 {1 1 1} 0}
+
+test contexts-native-jit-absolute {the in-process JIT addresses the same area by its absolute address (no rel32 reach to vouch for): the program runs and reads the installed values} -constraints linuxX86_64 -body {
+    agree "${::synthetic}with context Counter {value: 77, enabled: false}\n\[read_value(), read_enabled()\]\n" {cranelift cranelift-generic}
+} -result {[77, false]}
+
+# ---------------------------------------------------------------------------
+# Fuzzing (audit/contexts/tools/fuzz.tcl)
+
+test contexts-fuzz-smoke {a bounded run of the static-context generator: random context types, installations in random order, direct consumers, chains, recursion, unused consumers, missing and duplicate installations -- acceptance/rejection and the diagnostic kind match the oracle, accepted programs agree on every backend} -constraints linuxX86_64 -body {
+    set script [file join $::projectRoot audit contexts tools fuzz.tcl]
+    set output [exec [info nameofexecutable] $script -n 12 -seed 7 2>@1]
+    lindex [split [string trim $output] \n] end
+} -result {programs 12 disagreements 0}
+
+cleanupTests

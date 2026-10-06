@@ -41,9 +41,10 @@ structModifier = "opaque"
   `opaqueSpan` (the modifier word's span), and everything else about it is the
   ordinary node. A duplicate modifier, `opaque` before `fn`/`type`/`error`, and an
   `opaque struct` nested in a function or branch are located syntax errors.
-  `opaque context struct` and `opaque resource struct` are *not* accepted (they
-  are `expected end of line, found name "context"`): neither `context` nor
-  `resource` exists as a language feature.
+  `opaque resource struct` is *not* accepted (`expected end of line, found name
+  "resource"`): `resource` does not exist as a language feature. `context` does
+  since CONTEXTS.md: `opaque context struct` is two independent modifiers of
+  the one declaration (`context struct` alone is a context without opacity).
 * The ordinary form is unchanged, and an ordinary struct is no more restrictive
   than before: everything below applies only to a struct written `opaque
   struct`. Protection is **per struct**, never per module: a module may declare
@@ -346,9 +347,10 @@ opaque resource context struct Something:   contextual authority / lifetime = th
   has to reimplement representation privacy, because the representation check is
   one predicate over (declaring owner, accessing namespace), independent of the
   other properties.
-* Not implemented here, and not accepted by the parser: `context`, `resource`,
-  cleanup functions, `with`, ownership anchoring, context storage requirements,
-  actor ownership, transfer restrictions.
+* Not implemented here, and not accepted by the parser: `resource`, cleanup
+  functions, resource `with`, ownership anchoring, actor ownership, transfer
+  restrictions. (`context` and `with context` came later, as the table entry
+  and independent property this section planned: CONTEXTS.md.)
 
 ## Known limitations
 

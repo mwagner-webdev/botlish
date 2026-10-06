@@ -58,6 +58,11 @@ pub const SEMANTIC_KINDS: &[&str] = &[
     // A -strict 0 program's rejected linux::abi::syscall register struct,
     // replayed at run time (native::lower::SyscallCall; hir/syscall.tcl).
     "UNKNOWN-FIELD", "MISSING-FIELD",
+    // A -strict 0 program that failed context verification (CONTEXTS.md),
+    // replayed when it starts (native::lower's ContextDiagnostic).
+    "MISSING-CONTEXT", "DUPLICATE-CONTEXT", "NOT-A-CONTEXT", "CONTEXT-TYPE-NOT-EXACT",
+    "CONTEXT-INSTALLATION-UNSUPPORTED", "CONTEXT-FUNCTION-VALUE", "CONTEXT-BINDING-COLLISION",
+    "DUPLICATE-CONTEXT-PARAMETER",
 ];
 
 pub fn semantic_kind(name: &str) -> Option<&'static str> {

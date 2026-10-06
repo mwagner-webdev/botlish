@@ -1,0 +1,39 @@
+# context-hello.bot -- the first context-based Hello World (CONTEXTS.md):
+#
+#   with context linux::io::create()     installs the process's standard I/O
+#                                        environment, one linux::io::LinuxIO
+#   hello()                              an ordinary call: no context argument
+#     linux::io::write(message)          declares `context io: LinuxIO`; reads
+#                                        stdout from the installed context
+#       linux::write(fd, message)        the raw-thin write(2) wrapper
+#         linux::abi::syscall            the x86-64 `syscall` instruction
+#
+# `hello` says nothing about contexts: the compiler derives that it requires
+# LinuxIO (through linux::io::write) and proves that the call below runs after
+# the installation. Moving `hello()` above the `with context` line is a
+# compile-time MISSING-CONTEXT error that names the chain hello ->
+# linux::io::write. No libc, no compiler knowledge of write(2), no context
+# argument, no lookup: natively, linux::io::write loads descriptor 1 from the
+# fixed context slot of the program's data.
+#
+# Native backend only for the write itself (cranelift, or a standalone
+# executable from `tclsh9.0 main.tcl -emit-native-executable
+# examples/linux/context-hello.bot`); the Tcl backends verify and run
+# everything up to the syscall, which they refuse with NATIVE-ONLY.
+#
+# stdout (native): Hello, world!
+# value  (native): 14, the bytes written
+
+import abi::bytes
+import linux::io
+import str
+
+fn hello():
+    message = abi::bytes::from_list(
+        str::encode_utf8("Hello, world!\n")
+    )
+    linux::io::write(message)
+
+with context linux::io::create()
+
+hello()

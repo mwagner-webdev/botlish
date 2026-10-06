@@ -761,6 +761,10 @@ proc hir::escape::RegionInfo {hir spec id} {
     # A register field of an inline linux::abi::syscall literal (SyscallFields)
     # -> 1: read for its one word, like a projection of that word.
     set wordUse [dict create]
+    # The value of a context installation (CONTEXTS.md) -> 1: native/lower.tcl
+    # stores its leaves into the context's fixed slot, reading its fields --
+    # a structural use whatever the struct's width.
+    set ctxUse [dict create]
     foreach e $exprs {
         switch -- [hir::kind $view $e] {
             block {
@@ -794,6 +798,9 @@ proc hir::escape::RegionInfo {hir spec id} {
                 foreach f [SyscallFields $view $e] {
                     dict set wordUse $f 1
                 }
+                if {[hir::contexts::isInstall $view $e] && [llength $args] == 1} {
+                    dict set ctxUse [lindex $args 0] 1
+                }
                 if {$targetKind eq "native" && [core::bytestore::isBridge [dict get [hir::symbol $view $target] name]]
                         && [llength $args] == 1} {
                     # The address bridge's abi::bytes::Bytes argument is read only for
@@ -820,7 +827,7 @@ proc hir::escape::RegionInfo {hir spec id} {
     return [dict create view $view instance $instance region $region exprs $exprs \
         trailing $trailing captured $captured refsByBinding $refsByBinding \
         listGetByArg $listGetByArg argPos $argPos projByRecv $projByRecv \
-        bindValue $bindValue wordUse $wordUse parent $parent loopOf $loopOf]
+        bindValue $bindValue wordUse $wordUse ctxUse $ctxUse parent $parent loopOf $loopOf]
 }
 
 # {PARENT LOOPOF} of the region whose top-level body is TOPBODY (VIEW): PARENT
@@ -895,6 +902,10 @@ proc hir::escape::ArgShape {view instance arity rawLocal rawParam callerId e {st
     if {$c ne ""} {
         return [lindex $c 1]
     }
+    set context [ContextArgShape $view $e $structOpts]
+    if {$context ne ""} {
+        return $context
+    }
     if {[hir::kind $view $e] ne "ref"} {
         return ""
     }
@@ -909,6 +920,40 @@ proc hir::escape::ArgShape {view instance arity rawLocal rawParam callerId e {st
         return [dict get $rawParam $callerId $b]
     }
     return ""
+}
+
+# The descriptor of argument E (VIEW) when it is a struct value of an
+# installed context (CONTEXTS.md): a context parameter, or a projection chain
+# of one, of named struct type. native/lower.tcl supplies such a value's
+# fields straight from the context's fixed slot (ContextFields), so it has
+# the shape of its static type at every call, like a struct literal. ""
+# otherwise.
+proc hir::escape::ContextArgShape {view e structOpts} {
+    if {![StructEnabled $structOpts]} {
+        return ""
+    }
+    set root $e
+    while {[hir::kind $view $root] eq "project"} {
+        set root [hir::get $view $root receiver]
+    }
+    if {[hir::kind $view $root] ne "ref"} {
+        return ""
+    }
+    set b [hir::get $view $root binding]
+    if {$b eq "" || [dict get [hir::binding $view $b] kind] ne "local"} {
+        return ""
+    }
+    set by [dict get [hir::binding $view $b] declaredBy]
+    if {$by eq "" || [hir::kind $view $by] ne "bind" || ![hir::contexts::isLoad $view [hir::get $view $by value]]} {
+        return ""
+    }
+    set type [hir::typeOf $view $e]
+    if {[lindex $type 0] ne "nstruct" || ![hir::structs::declared [lindex $type 1]]} {
+        return ""
+    }
+    set id [lindex $type 1]
+    set layout [hir::structs::names $id]
+    return [list [llength $layout] [list $id $layout]]
 }
 
 # {RESULT TARGETS ALIASOF WHY}: RESULT is InstanceId -> BindingId -> DESC, for
@@ -1233,6 +1278,11 @@ proc hir::escape::UseVerdict {candidates regions aliasOf id b desc isParam bindE
         }
         if {[dict exists $wordUse $r] && [llength $layout] == 1} {
             # A syscall register: reads the one field, like a projection.
+            incr structural
+            continue
+        }
+        if {[dict exists [dict get $info ctxUse] $r]} {
+            # A context installation: stores the fields (CONTEXTS.md).
             incr structural
             continue
         }

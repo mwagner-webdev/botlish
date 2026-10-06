@@ -1,7 +1,7 @@
 # main.tcl -- example runner.
 #
 #   tclsh9.0 main.tcl [-backend interp|compile|cranelift|cranelift-generic] [-code] [-hir] [-ast]
-#                    [-aot] [-aot-data] [-aot-spec] [-emit-nir] [-emit-clif]
+#                    [-aot] [-aot-data] [-aot-spec] [-contexts] [-emit-nir] [-emit-clif]
 #                    [-emit-native-executable] [-argv TEXT]... [-argv-hex HEX]...
 #                    [-argv-none] [-warnings default|off|error]
 #                    [FILE.bot|FILE.hir|FILE.ir ...]
@@ -23,6 +23,11 @@
 # dict (hir::aot::analyze), before running the program; -aot-spec prints the
 # same report for every function instance call-site specialization uses,
 # next to each function's semantic report (hir::specialize::explain).
+# -contexts prints the program's execution-environment contexts (CONTEXTS.md,
+# hir::contexts::summary): the context structs, the installations in program
+# order, every function's context parameters, and the direct and transitive
+# context requirements of every function that has one, each with the chain
+# that explains it.
 # -emit-nir prints the native backend IR the program lowers to
 # (native/lower.tcl), and -emit-clif the Cranelift IR of every function (both
 # need no -backend cranelift; with -backend cranelift-generic, or
@@ -69,7 +74,7 @@ proc probeValues {value} {
 }
 
 proc runFile {path showCode showHir showAst showAot showNative} {
-    global backend nativeBackends warnings
+    global backend nativeBackends warnings showContexts
     puts "== [file tail $path] ($backend)"
     set hir ""
     set extension [file extension $path]
@@ -114,11 +119,22 @@ proc runFile {path showCode showHir showAst showAot showNative} {
         set program [core::loadProgramFile $path]
         set run {core::evalProgram $program}
     }
-    if {$showHir || $showAot ne "" || $showNative ne ""} {
+    if {$showHir || $showAot ne "" || $showNative ne "" || $showContexts} {
         set shownHir [expr {$hir ne "" ? $hir : [hir::build $program -strict 0]}]
     }
     if {$showHir} {
         puts [hir::format $shownHir]
+    }
+    if {$showContexts} {
+        puts [hir::contexts::summary $shownHir]
+        if {[dict exists $shownHir contexts]} {
+            foreach b [dict get $shownHir contexts blocks] {
+                foreach id [hir::contexts::required $shownHir $b] {
+                    puts "why [hir::contexts::BlockName $shownHir $b] requires $id:"
+                    puts [hir::contexts::explain $shownHir $b $id]
+                }
+            }
+        }
     }
     switch -- $showAot {
         text { puts [hir::aot::explain $shownHir] }
@@ -186,6 +202,7 @@ set files {}
 set warnings [hir::warnings::defaultMode]
 set showCode 0
 set showHir 0
+set showContexts 0
 set showAst 0
 set showAot ""
 set showNative ""
@@ -215,6 +232,7 @@ for {set i 0} {$i < [llength $argv]} {incr i} {
         }
         -code    { set showCode 1 }
         -hir     { set showHir 1 }
+        -contexts { set showContexts 1 }
         -ast     { set showAst 1 }
         -aot     { set showAot text }
         -aot-data { set showAot data }

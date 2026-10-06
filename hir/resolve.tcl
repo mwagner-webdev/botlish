@@ -679,7 +679,11 @@ proc hir::resolve::Expr {hirVar node ctx} {
             lappend params {*}$flagBindings
             lappend declaredParamTypes {*}$flagTypes
             SetField hir $e flags [lmap flag [expr {[dict exists $node flags] ? [dict get $node flags] : {}}] {lindex $flag 0}]
-            set body [dict get $node body]
+            # The context section (CONTEXTS.md): not parameters. Each entry
+            # is an ordinary local of the body, bound first, to the installed
+            # context of its type (hir::contexts::DeclareParams).
+            set body [concat [hir::contexts::DeclareParams hir $e $node $bodyScope [CtxNamespace $ctx]] \
+                [dict get $node body]]
             NoteBody hir $bodyScope $body
             AddClosure hir $scope $e
             SetField hir $e bodyScope $bodyScope

@@ -1,0 +1,88 @@
+# io.bot -- the "linux::io" namespace: the process's standard I/O as one
+# execution-environment context (CONTEXTS.md).
+#
+#   with context linux::io::create()        install it (entry program)
+#   linux::io::write(data)                  write(2) to the context's stdout
+#   linux::io::write_error(data)            write(2) to the context's stderr
+#   linux::io::read(buffer)                 read(2) from the context's stdin
+#
+# LinuxIO is ONE context, the process I/O environment, holding the three
+# standard descriptors; it is not three contexts. A function that uses it says
+# so once, in its context section (`context io: LinuxIO`), and is called with
+# its ordinary arguments only: `linux::io::write(data)`. Code between the entry
+# program and such a function declares nothing -- the compiler derives that it
+# requires LinuxIO -- and a call made before `with context linux::io::create()`
+# is rejected at compile time (MISSING-CONTEXT, with the call chain).
+#
+# This module is one level above `linux` (lib/linux.bot): every operation here
+# is the existing raw-thin wrapper applied to a descriptor taken from the
+# context, and every external effect still flows
+#
+#   linux::io::write --> linux::write --> linux::abi::syscall --> `syscall`
+#
+# with no libc, no compiler knowledge of write(2) and no new syscall code. The
+# low-level layer stays as it is: code that wants an explicit descriptor calls
+# linux::write(fd, data) / linux::read(fd, buffer) directly.
+#
+# Representation authority. FileDescriptor and LinuxIO are opaque
+# (OPAQUE-STRUCTS.md): only this module may construct them or look inside.
+# Outside it a LinuxIO -- even one a function receives as its context -- can be
+# held and passed but not taken apart (`io.stdout` is OPAQUE-REPRESENTATION):
+# being a context grants no representation authority. Inside, the consumers
+# below project `io.stdout.raw` directly; there are deliberately no public
+# descriptor accessors.
+#
+# FileDescriptor's theorem is narrow: "this value is a Linux file-descriptor
+# token minted by the owning Linux I/O abstraction". It does not claim the
+# descriptor is open, or stays open. The machine token is an abi::I32 (so the
+# value is proven to be in the signed 32-bit domain); application code gets no
+# .raw, no integer conversion and no address. Minting needs no special
+# mechanism: the opaque representation already makes this module the only code
+# that can build one, so create() mints the three standard tokens 0, 1, 2 --
+# constants the existing completion proofs show are in abi::I32's domain, with
+# no run-time range check.
+#
+# Not here (deliberately): errno mapping (results are the kernel's raw signed
+# values), buffering, completion of short writes, close/ownership/RAII (the
+# standard descriptors need no application cleanup), other descriptors
+# (openat, sockets), mutable contexts, substitutable (trait) contexts.
+import abi
+import abi::bytes
+import linux
+
+# A Linux file-descriptor token minted by this module.
+opaque struct FileDescriptor:
+    raw: abi::I32
+
+# The process I/O environment: the standard input, output and error
+# descriptors of the process. One context.
+opaque context struct LinuxIO:
+    stdin: FileDescriptor
+    stdout: FileDescriptor
+    stderr: FileDescriptor
+
+# The standard process I/O environment: descriptors 0, 1 and 2. An ordinary
+# constructor; `with context linux::io::create()` installs its value.
+fn create() -> LinuxIO:
+    LinuxIO {
+        stdin: FileDescriptor {raw: abi::i32(0)},
+        stdout: FileDescriptor {raw: abi::i32(1)},
+        stderr: FileDescriptor {raw: abi::i32(2)},
+    }
+
+# write(2) of DATA to the context's standard output: ONE syscall, the kernel's
+# raw signed result unchanged (bytes written, or -errno). linux::write's
+# semantics exactly (lib/linux.bot).
+fn write(data: abi::bytes::Bytes, context io: LinuxIO) -> int:
+    linux::write(io.stdout.raw, data)
+
+# write(2) of DATA to the context's standard error.
+fn write_error(data: abi::bytes::Bytes, context io: LinuxIO) -> int:
+    linux::write(io.stderr.raw, data)
+
+# read(2) from the context's standard input into a logical copy of DATA:
+# linux::read's semantics exactly (one syscall; the caller's buffer is
+# unchanged; the kernel's raw result and the updated buffer come back in a
+# linux::ReadResult).
+fn read(data: abi::bytes::MutableBytes, context io: LinuxIO) -> linux::ReadResult:
+    linux::read(io.stdin.raw, data)
