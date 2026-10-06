@@ -51,6 +51,7 @@ namespace eval hir::warnings {
         METHOD-ELIGIBLE   hir::warnings::MethodEligible
         FIXED-ARITY-LIST-RETURN hir::warnings::FixedArityListReturn
         SAME-FAILURE      hir::warnings::SameFailure
+        PROVES-NAMING     hir::warnings::ProvesNaming
     }
     variable modes {default off error}
     # CODE -> number of times its pass has run in this process: test
@@ -1154,4 +1155,116 @@ proc hir::warnings::FailureWarning {hir block name failure sites} {
         [lindex $origins 0] [lrange $origins 1 end] \
         [dict create function $block functionName $name failure $failure failureName $failure \
             exits $count sites $sites note "also raised here"]]
+}
+
+# ---------------------------------------------------------------------------
+# PROVES-NAMING (WARNINGS-PROVES-NAMING.md)
+#
+# A function fitted with a `proves` contract (REFINEMENT-VALUES.md) whose
+# shape is one the refinement feature defines, and whose written name does
+# not follow that shape's naming convention (REFINEMENT-VALUES.md, "Naming"):
+#
+#   predicate  one ordinary parameter, result bool: the name ends in `?`
+#   validator  one ordinary parameter, result unit: the name is exactly
+#              `validate` (a module export: `path::validate`) or begins
+#              with `validate_` (a literal, case-sensitive prefix; the bare
+#              `validate_` conforms too)
+#
+# The scope guard is the warning's boundary. Only a function whose block
+# carries a resolved proof contract (its `proofs`, hir/resolve.tcl's
+# ResolveProofs) is looked at: a function without `proves` is nobody's
+# business, whatever its name, parameters or result. Of those, only the two
+# shapes above: a proves function with zero or two or more ordinary
+# parameters, or with any other result, is silent. There is no reverse rule
+# (a `?` name returning something else, a `validate_` name that is not a
+# validator): nothing is ever read from a function without `proves`.
+#
+# The facts, all of them already on the block or its declaring `bind`:
+#   * the proof contract: the block's `proofs` is non-empty;
+#   * the ordinary parameter count: the block's `params` minus its `flags`,
+#     as METHOD-ELIGIBLE counts (flags are a separate category; context
+#     parameters are not in `params` at all);
+#   * the result: the block's `declaredResult`, the declared result the
+#     checker resolved and proves the body against (a proof contract
+#     requires one), compared with the canonical `bool` and `unit` types;
+#   * the written name: the declaring binding's name as the author wrote it
+#     (WrittenName), never hygiene's spelling of it.
+# Nothing else: no provenance, no annotation beyond the result, no value
+# identity, no exits, no reachability and no walk. A declaration is checked
+# once, in the generic source HIR, whether or not anything calls it, and
+# wherever it sits (a nested function or closure included); semantic
+# instances are never visited. One warning per function, anchored at its
+# declaration (the `bind`'s origin: the `fn` keyword); no secondary
+# locations. The message states the shape and the convention and never the
+# name to use: the validator convention has two conforming forms, and which
+# one fits is the author's call.
+
+proc hir::warnings::ProvesNaming {hir} {
+    set warnings {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "bind"} {
+            continue
+        }
+        set block [dict get $node value]
+        set fn [dict get $hir exprs $block]
+        if {[dict get $fn kind] ne "block" || ![dict exists $fn proofs] || [dict get $fn proofs] eq ""} {
+            continue
+        }
+        set kind [ProvesShape $fn]
+        if {$kind eq ""} {
+            continue
+        }
+        set name [WrittenName $hir [dict get $node binding]]
+        if {[ConventionalName $kind $name]} {
+            continue
+        }
+        set convention [expr {$kind eq "predicate"
+            ? "predicate names end in `?`"
+            : "validator names are `validate` or begin with `validate_`"}]
+        lappend warnings [New PROVES-NAMING \
+            "`$name` proves a contract and returns [hir::types::show [dict get $fn declaredResult]]; $convention" \
+            [dict get $node origin] {} \
+            [dict create function $block functionName $name kind $kind]]
+    }
+    return $warnings
+}
+
+# The proof-producing shape of the function block FN: `predicate` (one
+# ordinary parameter, declared result bool), `validator` (one ordinary
+# parameter, declared result unit), or "" for any other shape. (A block read
+# from HIR text records no `flags`.)
+proc hir::warnings::ProvesShape {fn} {
+    set flags [expr {[dict exists $fn flags] ? [dict get $fn flags] : {}}]
+    if {[llength [dict get $fn params]] - [llength $flags] != 1
+            || ![dict exists $fn declaredResult]} {
+        return ""
+    }
+    switch -- [dict get $fn declaredResult] {
+        bool { return predicate }
+        unit { return validator }
+    }
+    return ""
+}
+
+# The name the function bound through binding B was written with: the
+# spelling hygiene recorded when it renamed the binding (NAME#N), else its
+# name; for a module's own definition, the member the module declared
+# ("emailish?" for web::emailish?). A name read back from HIR text keeps no
+# spelling, so a hygiene suffix there is dropped (source can never spell #).
+proc hir::warnings::WrittenName {hir b} {
+    set binding [dict get $hir bindings $b]
+    if {[dict exists $binding spelling]} {
+        set name [dict get $binding spelling]
+    } else {
+        regsub {#[0-9]+$} [dict get $binding name] {} name
+    }
+    return [MemberName $name]
+}
+
+# 1 if NAME follows the naming convention of the proof shape KIND.
+proc hir::warnings::ConventionalName {kind name} {
+    if {$kind eq "predicate"} {
+        return [expr {[string index $name end] eq "?"}]
+    }
+    return [expr {$name eq "validate" || [string first validate_ $name] == 0}]
 }
