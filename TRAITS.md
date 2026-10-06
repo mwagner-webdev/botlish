@@ -698,7 +698,45 @@ Final run (the milestone's eighteen mutants, in its order):
 
 ## Regression
 
-REGRESSION-RESULTS
+Every run below is on a frozen snapshot of this milestone's code (a git
+worktree at the commit before the last two documentation/tooling commits,
+which change no compiler behavior but the `-traits` report, covered by
+`tests/traits.test`), next to a clean baseline worktree at the commit before
+the milestone (`e6a871f`), both using the same built native backend (no
+Rust source changed). Each suite run has its own `-tmpdir`.
+
+| run | baseline (`e6a871f`) | this milestone |
+|---|---|---|
+| `CORE_BACKEND=interp tests/all.tcl` (146 files) | 6090 passed, 0 failed | **6165 passed, 0 failed** |
+| `CORE_BACKEND=compile tests/all.tcl` | 6086 passed, 4 skipped, 0 failed | **6161 passed, 4 skipped, 0 failed** |
+| `tests/native-coverage.tcl` (whole suite on Cranelift) | 6090: native 2428, independent 3535, passed-partial 67, unsupported 60, failed 0 | **6165: native 2456, independent 3582, passed-partial 67, unsupported 60, failed 0** |
+| `BOTLISH_NATIVE_GC_STRESS=1 tests/all.tcl` (both backends, as CI's `gc-stress` job) | -- | **interp pass 6165 passed; compile pass 6161 passed, 4 skipped; 0 failed** |
+| `cargo test --release` (native/, separate target dir) | -- | **214 passed (183 + 31), 0 failed** |
+
+The 75 new tests are exactly `tests/traits.test`'s (28 run native code, 47
+are frontend/HIR-only); every other count, and the unsupported-construct
+list of the native coverage report, is unchanged. The suite covers the
+milestone's regression list: source-defined types and `import type`,
+refinement values and proof predicates/repeatability, opaque structs, method
+sugar and METHOD-ELIGIBLE, callable values and structural function types,
+semantic instances and imprinting, type joins, errors and completions,
+contexts, Bytes/MutableBytes, ABI numerics, range/completion analysis, HIR
+samples and round trips, and the native backend's own files.
+
+The other subsystems' fuzzers whose code this milestone touches
+(hir/types.tcl, hir/resolve.tcl, hir/semantic.tcl, hir/completions.tcl,
+hir/warnings.tcl, the method-call decision in hir/hir.tcl), on the same
+snapshot:
+
+| fuzzer | result |
+|---|---|
+| `audit/refinement-values/tools/fuzz.tcl -seed 1 -count 300` | 300 programs, 235 accepted, 65 rejected, 0 failures |
+| `audit/method-eligible/tools/fuzz.tcl` | 300 seeds, 1518 of 1518 predicted round trips, 0 failures, 0 extra warnings |
+| `audit/same-failure/tools/fuzz.tcl` | 300 seeds, 0 failures, 0 extra warnings |
+| `audit/fixed-arity-list-return/tools/fuzz.tcl` | 300 seeds, 204 of 204 conversions, 0 failures, 0 extra warnings |
+
+CI runs only on pushes to `main` and on pull requests, so this branch's
+pushes were not checked there; the runs above are local.
 
 ## Scalar machine-code audit
 
