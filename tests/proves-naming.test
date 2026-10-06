@@ -287,13 +287,17 @@ fn pair?(a, b):
 [weird?("a"), ok?("b"), pair?(1, 2)]}
 } -result 1
 
-test pn-scope-out-of-shape-proves-silent {a proves function with two or more ordinary parameters is silent, whatever its name} -body {
+test pn-scope-out-of-shape-proves-silent {a proves function with two or more ordinary parameters is silent, whatever its name, its result and which parameter it proves} -body {
     silent "$::E
 fn same(a: str, b: str) -> bool proves a: E:
     a == b
 fn three(a: str, b: str, c: str) -> bool proves b: E:
     a == c
 fn validate_pair_x(a: str, b: str) -> bool proves a: E:
+    a == b
+fn check_second(a: str, b: str) -> unit proves b: E:
+    unit
+fn second(a: str, b: str) -> bool proves b: E:
     a == b"
 } -result 1
 
@@ -335,15 +339,19 @@ test pn-shape-parameter-count {0 ordinary parameters cannot carry proves, exactl
         [lindex [diagnosed "$::E\nfn zero() -> bool proves a: E:\n    true"] 0]
 } -result {one 1 PROOF-CLAUSE}
 
-test pn-shape-flags-do-not-count {flags are a separate category, not ordinary parameters (METHOD-ELIGIBLE's count): one ordinary parameter plus flags is in shape; two ordinary parameters plus flags are not} -body {
-    list [naming "$::E
+test pn-shape-flags-do-not-count {flags are a separate category, not ordinary parameters (METHOD-ELIGIBLE's count): one ordinary parameter plus flags is in shape, for a predicate and a validator; two ordinary parameters plus flags are not} -body {
+    naming "$::E
 fn strict(v: str, flags :exact, :loose) -> bool proves v: E:
     exact
 fn strict2?(v: str, flags :exact) -> bool proves v: E:
     exact
 fn two(a: str, b: str, flags :exact) -> bool proves a: E:
-    exact"]
-} -result {{{4:1 strict predicate}}}
+    exact
+fn assure(v: str, flags :exact) -> unit proves v: E:
+    unit
+fn validate_exact(v: str, flags :exact) -> unit proves v: E:
+    unit"
+} -result {{4:1 strict predicate} {10:1 assure validator}}
 
 test pn-shape-context-parameters-do-not-count {a context parameter is not an ordinary parameter (and not in the block's params at all): one ordinary parameter plus a context is in shape} -body {
     naming "$::E
