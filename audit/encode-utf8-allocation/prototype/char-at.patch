@@ -1,0 +1,329 @@
+--- a/core/strings.tcl
++++ b/core/strings.tcl
+@@ -75,6 +75,22 @@
+     return [core::value::listOf $bytes]
+ }
+ 
++# (str::char_at S I): the Unicode scalar at character index I as a
++# UnicodeChar (PROTOTYPE, ENCODE-UTF8-ALLOCATION-RESEARCH.md); any other
++# Int fails with IndexNotFound, exactly like list::at.
++proc core::strings::charAt {s index} {
++    set text [Text $s str::char_at]
++    set i [core::value::intOf [core::value::expect int $index str::char_at]]
++    if {$i < 0 || $i >= [string length $text]} {
++        core::native::failDeclared IndexNotFound \
++            "str::char_at: index $i is outside 0..[expr {[string length $text] - 1}]"
++    }
++    return [core::value::char [scan [string index $text $i] %c]]
++}
++
++core::native::register str::char_at -arity 2 -impl core::strings::charAt \
++    -param-types {str int} -result-type UnicodeChar -runtime {char-index range-check} \
++    -context-free 1 -errors IndexNotFound -bounds {index str 0 1}
+ core::native::register str::length    -arity 1 -impl core::strings::length \
+     -param-types {str} -result-type int -runtime char-index -result-range collection-length -context-free 1
+ core::native::register str::substring -arity 3 -impl core::strings::substring \
+--- a/hir/completions.tcl
++++ b/hir/completions.tcl
+@@ -1517,6 +1517,8 @@
+     # against, and either one may be the constant the range check needs.
+     if {$family eq "list"} {
+         set size [hir::cardinality::ListLength $hir $container steps]
++    } elseif {$family eq "str"} {
++        set size [hir::cardinality::StrLength $hir $container steps]
+     } else {
+         set size [hir::cardinality::Capacity $hir $container steps]
+     }
+--- a/native/lower.tcl
++++ b/native/lower.tcl
+@@ -110,6 +110,7 @@
+         str::lowercase    {op strlower} \
+         str::concat       {op strcat} \
+         str::encode_utf8  {op strutf8bytes} \
++        str::char_at      {op strcharat} \
+         str::is_tcl_alpha {op strtclalpha} \
+         str::is_tcl_alnum {op strtclalnum} \
+         argv         {op argv} \
+@@ -7080,7 +7081,7 @@
+ namespace eval native::lower {
+     variable provenOps [dict create \
+         listget listgetproven  mutarrayget mutarraygetproven  mutarrayset mutarraysetproven \
+-        substr substrproven  mutarraycopy mutarraycopyproven  mutarrayfreeze mutarrayfreezeproven]
++        substr substrproven  strcharat strcharatproven  mutarraycopy mutarraycopyproven  mutarrayfreeze mutarrayfreezeproven]
+ }
+ 
+ # 1 if native call E has every bounds check proven (and the optimization is on).
+--- a/native/src/nir.rs
++++ b/native/src/nir.rs
+@@ -172,6 +172,9 @@
+     /// builds on this plus List/Int operations instead of needing its own
+     /// native.
+     StrUtf8Bytes,
++    /// PROTOTYPE: `str::char_at` (checked, IndexNotFound) and its proven sibling.
++    StrCharAt,
++    StrCharAtProven,
+     /// `argv()` (core/process.tcl, ARGV.md): the process argument snapshot
+     /// of this run as a List of Strings -- every argument validated as UTF-8
+     /// *by this operation* (never earlier), all or nothing. Takes no
+@@ -422,6 +425,8 @@
+             "decodecharat" => DecodeCharAt,
+             "strbytelen" => StrByteLen,
+             "strutf8bytes" => StrUtf8Bytes,
++            "strcharat" => StrCharAt,
++            "strcharatproven" => StrCharAtProven,
+             "argv" => Argv,
+             "syscall_linux_x86_64" => SyscallLinuxX86_64,
+             "bytesfromlist" => BytesFromList,
+--- a/native/src/runtime/ops.rs
++++ b/native/src/runtime/ops.rs
+@@ -122,7 +122,7 @@
+ /// Whether OP can report a Botlish semantic error by returning NO_VALUE.
+ pub fn op_may_error(op: OpCode) -> bool {
+     use OpCode::*;
+-    matches!(op, IMod | IShl | IShr | VEq | Hash | Substr | StrCat | StrUtf8Bytes | Argv | StrIsTclAlpha | StrIsTclAlnum
++    matches!(op, IMod | IShl | IShr | VEq | Hash | Substr | StrCat | StrUtf8Bytes | StrCharAt | Argv | StrIsTclAlpha | StrIsTclAlnum
+         // A non-byte element (TYPE, never a truncation), an operand that is
+         // not a byte storage (TYPE), an oversized storage (RANGE). A checked
+         // program cannot produce any of them: lib/abi/bytes.bot's creator takes
+@@ -1216,6 +1216,33 @@
+     r
+ }
+ 
++/// PROTOTYPE `str::char_at`: the scalar at character index I as a
++/// UnicodeChar immediate (no allocation). ASCII: a byte read; otherwise a
++/// forward decode from byte 0 (the same seek rt_substr pays).
++fn char_at_index(p: *mut Vm, s: Value, i: usize) -> Value {
++    let obj = str_of(s);
++    if obj.ascii {
++        return make_char(obj.as_bytes()[i] as u32);
++    }
++    let text = obj.as_str();
++    let (at, c) = text.char_indices().nth(i).expect("index validated");
++    vm(p).metrics.record_utf8_seek(at);
++    make_char(c as u32)
++}
++
++#[unsafe(no_mangle)]
++pub extern "C" fn rt_str_char_at(p: *mut Vm, s: Value, index: Value) -> Value {
++    match int_small(index) {
++        Some(i) if i >= 0 && (i as usize) < str_of(s).chars => char_at_index(p, s, i as usize),
++        _ => index_not_found(p),
++    }
++}
++
++#[unsafe(no_mangle)]
++pub extern "C" fn rt_str_char_at_proven(p: *mut Vm, s: Value, index: Value) -> Value {
++    char_at_index(p, s, int_small(index).expect("proven index") as usize)
++}
++
+ /// `argv()` (core/process.tcl, ARGV.md): the run's argument snapshot as a
+ /// List of Strings, each argument validated as UTF-8 only now, all or
+ /// nothing. An invalid argument records the declared builtin error
+@@ -1899,6 +1926,8 @@
+         StrLower => rt_str_lower(p, a[0]),
+         StrCat => rt_str_cat(p, a[0], a[1]),
+         StrUtf8Bytes => rt_str_utf8_bytes(p, a[0]),
++        StrCharAt => rt_str_char_at(p, a[0], a[1]),
++        StrCharAtProven => rt_str_char_at_proven(p, a[0], a[1]),
+         Argv => rt_argv(p),
+         StrIsTclAlpha => rt_is_tcl_alpha(p, a[0]),
+         StrIsTclAlnum => rt_is_tcl_alnum(p, a[0]),
+@@ -2015,6 +2044,8 @@
+         h!(rt_str_lower, 2),
+         h!(rt_str_cat, 3),
+         h!(rt_str_utf8_bytes, 2),
++        h!(rt_str_char_at, 3),
++        h!(rt_str_char_at_proven, 3),
+         h!(rt_argv, 1),
+         h!(rt_linux_x86_64_syscall, 8),
+         h!(rt_bytes_from_list, 2),
+--- a/native/src/codegen/clif.rs
++++ b/native/src/codegen/clif.rs
+@@ -1621,6 +1621,69 @@
+             ILt | ILe | IGt | IGe | IEq => self.int_compare(op, a[0], a[1]),
+             ListGet if self.listget_fast => self.list_get(a[0], a[1]),
+             ListGetProven if self.listget_fast => self.list_get_proven(a[0], a[1]),
++            // PROTOTYPE (ENCODE-UTF8-ALLOCATION-RESEARCH.md): inline String
++            // length, scalar value and ASCII char_at.
++            StrLen => {
++                let chars = self.b.ins().load(I64, MemFlagsData::trusted(), a[0], STR_CHARS_OFFSET);
++                let shifted = self.b.ins().ishl_imm_s(chars, 1);
++                self.b.ins().bor_imm_s(shifted, 1)
++            }
++            CharCodepoint => {
++                let cp = self.b.ins().ushr_imm_s(a[0], 3);
++                let shifted = self.b.ins().ishl_imm_s(cp, 1);
++                self.b.ins().bor_imm_s(shifted, 1)
++            }
++            StrCharAtProven => {
++                let ascii_path = self.b.create_block();
++                let wide = self.b.create_block();
++                let done = self.b.create_block();
++                let result = self.b.append_block_param(done, I64);
++                let ascii = self.b.ins().uload8(I64, MemFlagsData::trusted(), a[0], STR_ASCII_OFFSET);
++                self.b.ins().brif(ascii, ascii_path, &[], wide, &[]);
++                self.b.switch_to_block(ascii_path);
++                let idx = self.b.ins().sshr_imm_s(a[1], 1);
++                let addr = self.b.ins().iadd(a[0], idx);
++                let byte = self.b.ins().uload8(I64, MemFlagsData::trusted(), addr, STR_TEXT_OFFSET as i32);
++                let shifted = self.b.ins().ishl_imm_s(byte, 3);
++                let ch = self.b.ins().bor_imm_s(shifted, CHAR_TAG as i64);
++                self.b.ins().jump(done, &[BlockArg::Value(ch)]);
++                self.b.switch_to_block(wide);
++                let v = self.call_helper("rt_str_char_at_proven", &[self.vm, a[0], a[1]]);
++                self.b.ins().jump(done, &[BlockArg::Value(v)]);
++                self.b.switch_to_block(done);
++                result
++            }
++            VEq if self.listget_fast => {
++                // Two UnicodeChar immediates compare as words.
++                let chars = self.b.create_block();
++                let other = self.b.create_block();
++                let done = self.b.create_block();
++                let result = self.b.append_block_param(done, I64);
++                let ta = self.b.ins().band_imm_s(a[0], CHAR_TAG_MASK as i64);
++                let tb = self.b.ins().band_imm_s(a[1], CHAR_TAG_MASK as i64);
++                let ca = self.b.ins().icmp_imm_s(IntCC::Equal, ta, CHAR_TAG as i64);
++                let cb = self.b.ins().icmp_imm_s(IntCC::Equal, tb, CHAR_TAG as i64);
++                let both = self.b.ins().band(ca, cb);
++                self.b.ins().brif(both, chars, &[], other, &[]);
++                self.b.switch_to_block(chars);
++                let eq = self.b.ins().icmp(IntCC::Equal, a[0], a[1]);
++                let r = self.bool_of(eq);
++                self.b.ins().jump(done, &[BlockArg::Value(r)]);
++                self.b.switch_to_block(other);
++                let (fast, slow, done2, result2) = self.both_small_split(a[0], a[1]);
++                self.b.switch_to_block(fast);
++                let eq = self.b.ins().icmp(IntCC::Equal, a[0], a[1]);
++                let r = self.bool_of(eq);
++                self.b.ins().jump(done2, &[BlockArg::Value(r)]);
++                self.b.switch_to_block(slow);
++                let r = self.call_helper("rt_value_eq", &[self.vm, a[0], a[1]]);
++                self.check(r);
++                self.b.ins().jump(done2, &[BlockArg::Value(r)]);
++                self.b.switch_to_block(done2);
++                self.b.ins().jump(done, &[BlockArg::Value(result2)]);
++                self.b.switch_to_block(done);
++                result
++            }
+             VEq => {
+                 // Two small Ints compare as words; everything else structurally.
+                 let (fast, slow, done, result) = self.both_small_split(a[0], a[1]);
+@@ -1799,6 +1862,8 @@
+                         StrEq => ("rt_str_eq", None, false, None),
+                         StrLen => ("rt_str_len", None, false, None),
+                         StrByteLen => ("rt_str_byte_len", None, false, None),
++                        StrCharAt => ("rt_str_char_at", None, true, None),
++                        StrCharAtProven => ("rt_str_char_at_proven", None, false, None),
+                         // The owned byte storage (ABI-BYTES.md). from_list
+                         // allocates one object (or returns the static empty
+                         // one) and is fallible (a non-byte element is TYPE);
+--- a/lib/web.bot
++++ b/lib/web.bot
+@@ -63,6 +63,7 @@
+ # about them comes from these declarations.
+ import ascii
+ import byte
++import char
+ import immutable_set
+ import list
+ import str
+@@ -228,30 +229,39 @@
+ # to it (lib/web.tcl's uriEscape). Refinements carry no runtime evidence, so
+ # the proposition is now this structural check, owned and defined here.
+ fn uri_query_value?(value: str) -> bool proves value: UriQueryValue:
+-    bytes = str::encode_utf8(value)
+ 
++    # Every byte of a non-ASCII scalar's UTF-8 encoding is >= 0x80, so it is
++    # neither unreserved nor '%' nor a hex digit: the byte condition holds
++    # exactly when every scalar is ASCII and the scalar condition holds.
+     fn upper_hex?(i):
+-        if i < 0 or i >= list::length(bytes):
++        if i < 0 or i >= str::length(value):
+             false
+         else:
+-            b = list::at(bytes, i)
+-            ascii::is_digit(b) or (b >= 65 and b <= 70)
++            v = char::scalar_value(str::char_at(value, i))
++            if v > 127:
++                false
++            else:
++                ascii::is_digit(v) or (v >= 65 and v <= 70)
+ 
+     fn valid_from?(i):
+-        if i < 0 or i >= list::length(bytes):
++        if i < 0 or i >= str::length(value):
+             true
+         else:
+-            b = list::at(bytes, i)
+-            if b == 37:
++            c = str::char_at(value, i)
++            if c == '%':
+                 if upper_hex?(i + 1) and upper_hex?(i + 2):
+                     valid_from?(i + 3)
+                 else:
+                     false
+             else:
+-                if is_unreserved(b):
+-                    valid_from?(i + 1)
+-                else:
++                v = char::scalar_value(c)
++                if v > 127:
+                     false
++                else:
++                    if is_unreserved(v):
++                        valid_from?(i + 1)
++                    else:
++                        false
+ 
+     valid_from?(0)
+ 
+@@ -263,27 +273,33 @@
+     fn hex_pair(b):
+         str::concat(list::at(hex_digits, high_nibble(b)), list::at(hex_digits, mod(b, 16)))
+ 
+-    fn esc_bytes(bytes, i, acc):
+-        if i < 0 or i >= list::length(bytes):
+-            acc
+-        else:
+-            esc_bytes(bytes, i + 1, str::concat(acc, str::concat("%", hex_pair(list::at(bytes, i)))))
++    fn pct(b):
++        str::concat("%", hex_pair(b))
+ 
+-    fn esc_char(c):
+-        bytes = str::encode_utf8(c)
+-        if list::length(bytes) == 1:
+-            b = list::at(bytes, 0)
+-            if is_unreserved(b):
+-                c
+-            else:
+-                esc_bytes(bytes, 0, "")
++    fn cont(v, shift):
++        pct(bit_or(128, bit_and(shift_right(v, shift), 63)))
++
++    # The %XX escapes of the UTF-8 bytes of the non-ASCII scalar V.
++    fn esc_scalar(v):
++        if v < 2048:
++            str::concat(pct(bit_or(192, shift_right(v, 6))), cont(v, 0))
+         else:
+-            esc_bytes(bytes, 0, "")
++            if v < 65536:
++                str::concat(pct(bit_or(224, shift_right(v, 12))), str::concat(cont(v, 6), cont(v, 0)))
++            else:
++                str::concat(pct(bit_or(240, shift_right(v, 18))), str::concat(cont(v, 12), str::concat(cont(v, 6), cont(v, 0))))
+ 
+     fn esc_from(text, i, acc):
+         if i < 0 or i >= str::length(text):
+             acc
+         else:
+-            esc_from(text, i + 1, str::concat(acc, esc_char(str::substring(text, i, i + 1))))
++            v = char::scalar_value(str::char_at(text, i))
++            if v > 127:
++                esc_from(text, i + 1, str::concat(acc, esc_scalar(v)))
++            else:
++                if is_unreserved(v):
++                    esc_from(text, i + 1, str::concat(acc, str::substring(text, i, i + 1)))
++                else:
++                    esc_from(text, i + 1, str::concat(acc, pct(v)))
+ 
+     esc_from(s, 0, "")
