@@ -12,9 +12,9 @@ are complete.
 
 ## Compiler revision
 
-- git commit: 99c2f294eedfd6e4e0a9373d14f1c833d452a378
+- git commit: 04608bd6b8c2842ecda3e657bad883c9093e19f0
 - Tcl: 9.0.1
-- rustc 1.99.0 (b940084d7 2026-09-28)
+- rustc 1.97.0 (2d8144b78 2026-07-07)
 - cranelift-codegen: 0.135.2
 - target: x86_64 (System V ABI, Linux ELF64)
 - backend flags: cranelift, -specialize 1 (default), -repr-opt 1 (default)
@@ -28,8 +28,8 @@ are complete.
 - examples/stdlib/ files attempted: 9
 - native-compilable programs: 13
 - unsupported/failed programs: 0
-- total native functions inspected: 190
-- total committed disassembly bytes of machine code: 81133
+- total native functions inspected: 193
+- total committed disassembly bytes of machine code: 82317
 
 ## Status
 
@@ -38,7 +38,7 @@ are complete.
 | bench/fib.bot | compiled / inspected | [bench/fib.asm](bench/fib.asm) / [bench/fib.vcode](bench/fib.vcode) | 2 functions, 181 bytes |
 | bench/loop-count.bot | compiled / inspected | [bench/loop-count.asm](bench/loop-count.asm) / [bench/loop-count.vcode](bench/loop-count.vcode) | 3 functions, 274 bytes |
 | bench/sum-refined.bot | compiled / inspected | [bench/sum-refined.asm](bench/sum-refined.asm) / [bench/sum-refined.vcode](bench/sum-refined.vcode) | 3 functions, 277 bytes |
-| bench/refined-checks.bot | compiled / inspected | [bench/refined-checks.asm](bench/refined-checks.asm) / [bench/refined-checks.vcode](bench/refined-checks.vcode) | 25 functions, 8187 bytes |
+| bench/refined-checks.bot | compiled / inspected | [bench/refined-checks.asm](bench/refined-checks.asm) / [bench/refined-checks.vcode](bench/refined-checks.vcode) | 28 functions, 9371 bytes |
 | examples/stdlib/ai_text_clean.bot | compiled / inspected | [examples-stdlib/ai_text_clean.asm](examples-stdlib/ai_text_clean.asm) / [examples-stdlib/ai_text_clean.vcode](examples-stdlib/ai_text_clean.vcode) | 6 functions, 2611 bytes |
 | examples/stdlib/csv.bot | compiled / inspected | [examples-stdlib/csv.asm](examples-stdlib/csv.asm) / [examples-stdlib/csv.vcode](examples-stdlib/csv.vcode) | 11 functions, 5968 bytes |
 | examples/stdlib/csv_chunked.bot | compiled / inspected | [examples-stdlib/csv_chunked.asm](examples-stdlib/csv_chunked.asm) / [examples-stdlib/csv_chunked.vcode](examples-stdlib/csv_chunked.vcode) | 20 functions, 10490 bytes |
