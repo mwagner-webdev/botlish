@@ -782,7 +782,53 @@ Notes, honestly:
 
 ## Regression
 
-PENDING
+The whole suite (`tests/all.tcl`, 144 files: types, source-defined types and
+`import type`, opaque structs, method sugar and METHOD-ELIGIBLE, callable
+values and structural function types, range and completion proofs, ABI
+numerics, Bytes, MutableBytes, contexts, Linux I/O, semantic instances and
+imprinting, HIR samples and round trips, the native backend's own files), each
+run on its own copy of the tree:
+
+| run | tests | failed | baseline (the tree before this milestone) |
+|---|---:|---:|---|
+| `CORE_BACKEND=interp` | 5,990 | 10 = 8 + 2 since fixed | 6,030 tests, the same 8 failures |
+| `CORE_BACKEND=compile` | 5,990 | 10 = 8 + 2 since fixed | 6,030 tests, the same 8 failures |
+| `BOTLISH_NATIVE_GC_STRESS=1` (interp) | 5,990 | 8 | the same 8 failures |
+| `tests/native-coverage.tcl` (cranelift) | COVERAGE | | |
+| `cargo test --release` (native/) | 183 + 31 | 0 | |
+
+The 8 failures are pre-existing and unrelated: `me-list-literal-never-eligible`
+and `me-off-runs-no-warning-pass` (`method-eligible.test`) and six `warn-*`
+tests (`warnings.test`), failing identically on the untouched baseline tree.
+The interp and compile runs first also failed `ic-scan-while` and
+`ic-local-char` (`intrinsic-contracts.test`): they pinned what intrinsic
+contracts infer from `lib/web.bot`'s untyped `scan_while` and `local_char?`,
+which this milestone typed. They now compile the original untyped helpers
+inline, so the inference is still pinned, and pass on both backends (the GC
+stress run already includes the fix). The net drop of 40 tests is the removed
+mechanism's tests -- three deleted files with 35 tests
+(`module-fn-bridge-param-check`, `module-fn-bridge-reachability`,
+`native-validator-predicate`), 26 fewer in the migrated
+`emailish-predicate`, `refined`, `native-refinement-propagation`,
+`native-uri-escape` and `native-executable` files, and the per-file corpus
+tests generated for the deleted `refined-checks.ir`, `05-refined-strings.ir`
+and `06-refined-strings` sample -- against `refinement-values.test`'s 87 at
+the time of the runs (88 now).
+
+**Scalar machine code.** `native/generate-scalar-audit.tcl` regenerated the
+committed audit corpus (`audit/native-scalar-asm/`, every `bench/*.bot` and
+`examples/stdlib/*.bot`): only `bench/refined-checks` changed (the
+`web::uri_query_value?` call and its two helpers; `local_char?`'s generic
+instance is 62 bytes smaller now that it declares `c: str`). Every other
+program's disassembly is byte-identical: refinements perturb nothing where
+none occur.
+
+**Cross-language parity.** `bench/check-unicode-parity.tcl`: all 19 cases
+agree across Botlish and the Python, Rust and Go equivalents.
+
+The AFL campaign plumbing (`fuzz/`) drops the deleted
+`examples/hir/06-refined-strings` target (its seeds, baseline and inventory
+rows); the historical campaign records are kept.
 
 ## Limitations
 
