@@ -2314,18 +2314,16 @@ backend was introduced (757 tests predated it) the classes were 171 native,
 | Class | Tests | Meaning |
 |---|---:|---|
 | native | 2,424 | passed, ran native code |
-| independent | 3,432 | passed without running a program on the backend (frontend, HIR, analysis) |
+| independent | 3,440 | passed without running a program on the backend (frontend, HIR, analysis) |
 | passed-partial | 67 | passed; checks an unsupported-construct diagnostic, or compares another backend, on purpose |
 | unsupported | 60 | needs a construct listed above |
-| failed | 8 | anything else |
+| failed | 0 | anything else |
 
 The 60 unsupported tests need: a Block value returned to the host (13),
 `test-log`/`test_log` (19), `test-tick`/`test_tick` (12), sequence mode (7),
 the Tcl-registered test validator `NonEmpty?` and the test natives
 `test-fake-nonempty`, `test-both-ints?` (7), and a native's validator
-named-type contract (`test-lax-param`, 2). The 8 failed tests are the
-`me-*`/`warn-*` warning tests that fail identically on every backend (they
-predate the milestone and are not native defects).
+named-type contract (`test-lax-param`, 2).
 `tests/native.test` (55 tests) checks lowering and CLIF structure, and
 parity of interp, compile, cranelift-generic and cranelift on arithmetic at
 the small/big boundaries, guards, every error class, strings, lists,
