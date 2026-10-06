@@ -1419,7 +1419,7 @@ test fa-conversion-leftover-equality-is-silent {GAP: a leftover `==` against a l
 
 test fa-cli-modes {main.tcl: default prints the warning and its notes on stderr and runs; off is silent; error rejects before running} -constraints executableAot -body {
     set main [file join $::projectRoot main.tcl]
-    set path [makeFile $::runSource fa-cli.bot]
+    set path [makeFile $::runSource fa-cli-[pid].bot]
     set results {}
     foreach mode {default off error} {
         set status [catch {exec [info nameofexecutable] $main -warnings $mode $path 2>@1} out]
@@ -1429,42 +1429,42 @@ test fa-cli-modes {main.tcl: default prints the warning and its notes on stderr 
             [regexp {value: \[3, 4\]} $out] \
             [regexp {CORE SEMANTIC FIXED-ARITY-LIST-RETURN} $out]]
     }
-    removeFile fa-cli.bot
+    removeFile fa-cli-[pid].bot
     set results
 } -result {{default 0 1 1 1 0} {off 0 0 0 1 0} {error 1 0 0 0 1}}
 
 test fa-cli-no-wno-option {-Wno-fixed-arity-list-return is an unknown option, not a file name} -constraints executableAot -body {
     set main [file join $::projectRoot main.tcl]
-    set path [makeFile $::runSource fa-cli-wno.bot]
+    set path [makeFile $::runSource fa-cli-wno-[pid].bot]
     catch {exec [info nameofexecutable] $main -Wno-fixed-arity-list-return $path 2>@1} out
-    removeFile fa-cli-wno.bot
+    removeFile fa-cli-wno-[pid].bot
     list [string match "*unknown option*-Wno-fixed-arity-list-return*" $out] [string match "*value:*" $out]
 } -result {1 0}
 
 test fa-cli-unknown-mode {main.tcl rejects an unknown mode} -constraints executableAot -body {
     set main [file join $::projectRoot main.tcl]
-    set path [makeFile $::runSource fa-cli-mode.bot]
+    set path [makeFile $::runSource fa-cli-mode-[pid].bot]
     set status [catch {exec [info nameofexecutable] $main -warnings tuples $path 2>@1} out]
-    removeFile fa-cli-mode.bot
+    removeFile fa-cli-mode-[pid].bot
     list $status [string match "*unknown warnings mode*" $out]
 } -result {1 1}
 
 test fa-cli-stdout-clean {the warning goes to stderr: program stdout carries no warning text} -constraints executableAot -body {
     set main [file join $::projectRoot main.tcl]
-    set path [makeFile $::runSource fa-cli-stdout.bot]
-    set stderrPath [makeFile {} fa-cli-stderr.txt]
+    set path [makeFile $::runSource fa-cli-stdout-[pid].bot]
+    set stderrPath [makeFile {} fa-cli-stderr-[pid].txt]
     set out [exec [info nameofexecutable] $main -warnings default $path 2> $stderrPath]
-    set err [viewFile fa-cli-stderr.txt]
-    removeFile fa-cli-stdout.bot
-    removeFile fa-cli-stderr.txt
+    set err [viewFile fa-cli-stderr-[pid].txt]
+    removeFile fa-cli-stdout-[pid].bot
+    removeFile fa-cli-stderr-[pid].txt
     list [string match *warning* $out] [string match *FIXED-ARITY-LIST-RETURN* $err] [string match {*value: \[3, 4\]*} $out]
 } -result {0 1 1}
 
 test fa-error-cli-stops-before-backend {main.tcl -backend cranelift -warnings error rejects without lowering or running anything} -constraints executableAot -body {
     set main [file join $::projectRoot main.tcl]
-    set path [makeFile $::runSource fa-cli-error.bot]
+    set path [makeFile $::runSource fa-cli-error-[pid].bot]
     catch {exec [info nameofexecutable] $main -backend cranelift -warnings error $path 2>@1} out
-    removeFile fa-cli-error.bot
+    removeFile fa-cli-error-[pid].bot
     list [string match "*value:*" $out] [regexp {\(CORE SEMANTIC FIXED-ARITY-LIST-RETURN\)} $out]
 } -result {0 1}
 
@@ -1476,9 +1476,9 @@ test fa-cli-backend-independent-stdlib {main.tcl prints the same FIXED-ARITY-LIS
     foreach path $programs {
         set texts {}
         foreach backend $::allBackends {
-            set err [makeFile {} fa-cli-err.txt]
+            set err [makeFile {} fa-cli-err-[pid].txt]
             catch {exec [info nameofexecutable] $main -backend $backend -warnings default $path 2> $err}
-            set lines [split [viewFile fa-cli-err.txt] \n]
+            set lines [split [viewFile fa-cli-err-[pid].txt] \n]
             set block {}
             set inside 0
             foreach line $lines {
@@ -1492,7 +1492,7 @@ test fa-cli-backend-independent-stdlib {main.tcl prints the same FIXED-ARITY-LIS
                 }
             }
             lappend texts $block
-            removeFile fa-cli-err.txt
+            removeFile fa-cli-err-[pid].txt
         }
         incr total [llength [lsearch -all [lindex $texts 0] *FIXED-ARITY-LIST-RETURN*]]
         if {[llength [lsort -unique $texts]] != 1} {
