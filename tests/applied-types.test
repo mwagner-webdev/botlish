@@ -192,27 +192,27 @@ test applied-type-hir-roundtrip-nested {a nested List[List[T]] parameter round-t
 # Module signatures (spec 45, 74)
 
 test applied-type-module-signature {hir::moduleSignatures reports an exported function's real List[T] parameter/result type, not a placeholder} -body {
-    set libPath [file join $::core::libraryDir appliedtypeslib.bot]
-    set ch [open $libPath w]
-    puts $ch [format {%sfn make_smalls() -> List[Small]:
+    withPrivateLibrary {
+        set ch [open [file join $::core::libraryDir appliedtypeslib.bot] w]
+        puts $ch [format {%sfn make_smalls() -> List[Small]:
     [one(), two()]
 
 fn consume(xs: List[Small]) -> int:
     1
 } $::smallDecl]
-    close $ch
-    set mainPath [makeFile {import appliedtypeslib
+        close $ch
+        set mainPath [makeFile {import appliedtypeslib
 appliedtypeslib::consume(appliedtypeslib::make_smalls())
 } applied-type-module-main.bot]
-    try {
-        set h [surface::readProgramFile $mainPath -strict 0]
-        set sigs [hir::moduleSignatures $h]
-        list [hir::types::show [lindex [dict get [dict get $sigs appliedtypeslib::consume] params] 0]] \
-             [hir::types::show [dict get [dict get $sigs appliedtypeslib::make_smalls] result]] \
-             [llength [hir::diagnostics $h]]
-    } finally {
-        file delete $libPath
-        removeFile applied-type-module-main.bot
+        try {
+            set h [surface::readProgramFile $mainPath -strict 0]
+            set sigs [hir::moduleSignatures $h]
+            list [hir::types::show [lindex [dict get [dict get $sigs appliedtypeslib::consume] params] 0]] \
+                 [hir::types::show [dict get [dict get $sigs appliedtypeslib::make_smalls] result]] \
+                 [llength [hir::diagnostics $h]]
+        } finally {
+            removeFile applied-type-module-main.bot
+        }
     }
 } -result {{List[int[appliedtypeslib::Small]]} {List[int[appliedtypeslib::Small]]} 0}
 
@@ -439,46 +439,46 @@ fn make_smalls() -> List[Small]:
 # Cross-module (spec 45, 74)
 
 test applied-type-cross-module-valid {a cross-module direct call enforces and satisfies a declared List[Small] parameter} -body {
-    set libPath [file join $::core::libraryDir appliedtypeslib2.bot]
-    set ch [open $libPath w]
-    puts $ch [format {%sfn make_smalls() -> List[Small]:
+    withPrivateLibrary {
+        set ch [open [file join $::core::libraryDir appliedtypeslib2.bot] w]
+        puts $ch [format {%sfn make_smalls() -> List[Small]:
     [one(), two()]
 
 fn consume(xs: List[Small]) -> int:
     1
 } $::smallDecl]
-    close $ch
-    set mainPath [makeFile {import appliedtypeslib2
+        close $ch
+        set mainPath [makeFile {import appliedtypeslib2
 appliedtypeslib2::consume(appliedtypeslib2::make_smalls())
 } applied-type-cross-module-ok.bot]
-    try {
-        set h [surface::readProgramFile $mainPath -strict 0]
-        llength [hir::diagnostics $h]
-    } finally {
-        file delete $libPath
-        removeFile applied-type-cross-module-ok.bot
+        try {
+            set h [surface::readProgramFile $mainPath -strict 0]
+            llength [hir::diagnostics $h]
+        } finally {
+            removeFile applied-type-cross-module-ok.bot
+        }
     }
 } -result 0
 
 test applied-type-cross-module-invalid {a cross-module direct call rejects a broad-List argument against a declared List[Small] parameter} -body {
-    set libPath [file join $::core::libraryDir appliedtypeslib3.bot]
-    set ch [open $libPath w]
-    puts $ch [format {%sfn consume(xs: List[Small]) -> int:
+    withPrivateLibrary {
+        set ch [open [file join $::core::libraryDir appliedtypeslib3.bot] w]
+        puts $ch [format {%sfn consume(xs: List[Small]) -> int:
     1
 } $::smallDecl]
-    close $ch
-    set mainPath [makeFile {import appliedtypeslib3
+        close $ch
+        set mainPath [makeFile {import appliedtypeslib3
 fn make_ints():
     [1, 2]
 appliedtypeslib3::consume(make_ints())
 } applied-type-cross-module-bad.bot]
-    try {
-        set h [surface::readProgramFile $mainPath -strict 0]
-        list [llength [hir::diagnostics $h]] \
-            [string match {*cannot be proven to satisfy*} [dict get [lindex [hir::diagnostics $h] 0] message]]
-    } finally {
-        file delete $libPath
-        removeFile applied-type-cross-module-bad.bot
+        try {
+            set h [surface::readProgramFile $mainPath -strict 0]
+            list [llength [hir::diagnostics $h]] \
+                [string match {*cannot be proven to satisfy*} [dict get [lindex [hir::diagnostics $h] 0] message]]
+        } finally {
+            removeFile applied-type-cross-module-bad.bot
+        }
     }
 } -result {1 1}
 

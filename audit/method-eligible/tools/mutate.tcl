@@ -87,7 +87,7 @@ foreach mutant $mutants {
     } else {
         # The fuzzer does not generate shadowing or field-named functions:
         # the unit tests must kill what it cannot.
-        set unit [catch {exec [info nameofexecutable] [file join $tree tests method-eligible.test] 2>@1} unitOut]
+        set unit [catch {exec [info nameofexecutable] [file join $tree tests method-eligible.test] -tmpdir [file join $tree tcltest] 2>@1} unitOut]
         regexp {Total\t([0-9]+)\tPassed\t([0-9]+)\tSkipped\t([0-9]+)\tFailed\t([0-9]+)} $unitOut -> total passed skipped unitFailed
         if {[info exists unitFailed] && $unitFailed > 0} {
             set status "killed by unit tests ($unitFailed failing of $total; fuzz saw: $summary)"

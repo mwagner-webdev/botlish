@@ -158,7 +158,7 @@ proc check {dir} {
     set fuzz [catch {exec env LANG=C.utf8 LC_ALL=C.utf8 tclsh9.0 [file join $dir audit contexts tools fuzz.tcl] \
         -n $n -seed 1 2>@1} fuzzOut]
     # (A tcltest file run directly exits 0 whatever failed: read its totals.)
-    catch {exec env LANG=C.utf8 LC_ALL=C.utf8 CORE_BACKEND=interp tclsh9.0 [file join $dir tests contexts.test] 2>@1} testOut
+    catch {exec env LANG=C.utf8 LC_ALL=C.utf8 CORE_BACKEND=interp tclsh9.0 [file join $dir tests contexts.test] -tmpdir [file join $dir tcltest] 2>@1} testOut
     set reason ""
     if {![regexp {Total\t(\d+)\tPassed\t(\d+)\tSkipped\t(\d+)\tFailed\t(\d+)} $testOut -> total passed skipped failed]} {
         set reason "tests (did not finish)"
