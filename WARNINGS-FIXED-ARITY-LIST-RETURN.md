@@ -840,6 +840,16 @@ this milestone**: 5957 minus the 149 new ones, since no other test file changed.
 * This milestone's fuzzer passes 2000 seeds, and the mutation tool kills 12/12,
   both on the committed tree (above). The corpus audit is the committed
   `corpus-audit.txt`.
+* **Second snapshot: the tree merged with `origin/main` `ffbd610`** (`bcf18ae`,
+  the contexts milestone in; see "Parallel work"), native backend rebuilt
+  first, each run in its own worktree: **`interp` 6030 tests, 6022 passed, 8
+  failed; `compile` 6030, 6018 passed, 4 skipped, 8 failed; native coverage
+  6030 tests (2470 native, 3421 independent, 71 passed-partial, 60
+  unsupported) with the same 8 failed.** The failures are the same 8 named
+  above, and nothing else failed. The fuzzer passes 300 seeds on the merged tree
+  (204/96, 0 failures, 0 extras, 204/204 conversions). The later commit
+  `c612319` only renames the CLI tests' scratch files to pid-unique names
+  (AGENTS.md's new rule on concurrent runs). Its 6 CLI tests pass.
 * The GC-stress job (`BOTLISH_NATIVE_GC_STRESS=1`, CI on push to `main`) was not
   run locally: nothing under `native/` changed, and the pass runs before any
   backend and changes no HIR.
@@ -1033,4 +1043,6 @@ ready patch), and its six findings to annotate take `-> list`.
     with unrelated work, merged and re-verified, but without them), so the "0
     where present" condition has nothing to apply to yet.
     Native coverage (the suite on `cranelift`): 5957 tests, the same 8
-    failures and nothing else.
+    failures and nothing else. On the tree merged with `origin/main`
+    `ffbd610`: 6030 tests on each of `interp`, `compile` and native coverage,
+    again exactly those 8.
