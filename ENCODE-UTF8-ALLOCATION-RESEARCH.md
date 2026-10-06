@@ -1,6 +1,7 @@
 # Eliminating `str::encode_utf8`'s read-only Lists
 
-Research report, no compiler/runtime/library change committed. Question:
+Research report; its recommendation is now implemented (see
+"Implemented" below). Question:
 `web::uri_query_value?` (REFINEMENT-VALUES.md) materializes
 `str::encode_utf8(value)` as a fresh `List[Byte]` on every call and only ever
 reads it back with `list::length`/`list::at`. In `bench/refined-checks.bot`
@@ -31,6 +32,103 @@ recommend that, not a byte-level native and not a compiler-side elision.
 
 (The 9 remaining Lists are module-level literals and `byte::set`'s
 construction, built once.)
+
+## Implemented
+
+The recommendation (§4) is in the tree. It differs from the measured
+prototype (`audit/encode-utf8-allocation/prototype/char-at.patch`) in one
+respect. The prototype gave `VEq` a UnicodeChar fast path in codegen, which
+put a tag test in front of *every* generic equality. Instead,
+`native::lower::NativeCallOp` now picks a new NIR op `chareq` (word
+equality, never fails) when both operands of `==` are statically
+`UnicodeChar`, the same way it already picks `ieq`/`streq`.
+
+What changed:
+
+* **`core/strings.tcl`**: `str::char_at` (reference implementation and
+  registration, `-bounds {index str 0 1}`).
+* **`hir/completions.tcl`**: `IndexBounds`' `str` family is now measured
+  against the String's scalar length.
+* **`native/lower.tcl`**:
+  * `str::char_at` → `strcharat`, with `strcharatproven` as its proven
+    sibling;
+  * `chareq`.
+* **`native/src/nir.rs`**: the ops `StrCharAt`, `StrCharAtProven`, `CharEq`.
+* **`native/src/runtime/ops.rs`**: `rt_str_char_at[_proven]`, with unit
+  tests.
+* **`native/src/codegen/clif.rs`**: inline `StrLen`, `CharCodepoint`,
+  `StrCharAtProven` (ASCII byte load, helper otherwise) and `CharEq`. The
+  now-unreachable helper-table entries for `StrLen`/`CharCodepoint` are
+  removed.
+* **`lib/web.bot`**: `uri_query_value?` and `uri_escape_text` read
+  characters with `str::char_at`. `esc_char`/`esc_bytes` are replaced by
+  `pct`/`cont`/`esc_scalar`, and `esc_from` makes three tail calls.
+* **Docs**: README's intrinsics table, STDLIB-NAMESPACES.md's `str`
+  inventory.
+
+Measured on the implemented tree (`results/implemented.txt`, best of 10 × 20
+runs; same tools as everywhere else here):
+
+| program | Lists | objects | best run | machine code |
+|---|---|---|---|---|
+| `query-value-steady.bot` | 2009 → 9 | 2011 → 11 | 356 → 200 µs (−44%) | 4509 → 4661 B |
+| `bench/uri-steady.bot` | 14009 → 9 | 38511 → 10511 | 4045 → 2170 µs (−46%) | 5444 → 6972 B |
+| `bench/refined-checks.bot` | 412 → 9 | 7223 → 6817 | 475 → 462 µs (noise) | 9371 → 11086 B |
+| `examples/refinement/refined-strings.bot` | 15 → 9 | 37 → 26 | 2.4 → 2.1 µs | 9393 → 11095 B |
+
+The inline `str::length` also shortens unrelated programs a little. In the
+regenerated `audit/native-scalar-asm` corpus:
+* `examples/stdlib/csv.bot` goes 5968 → 5958 B with 4 fewer helper calls;
+* `ai_text_clean.bot` goes 2611 → 2547 B.
+
+Tests:
+
+* **`tests/str-char-at.test` (new, 14 tests)**: the native's contract,
+  four-way:
+  * values over 1-, 2-, 3- and 4-byte scalars;
+  * equality with char literals, and agreement with `str::substring`;
+  * `IndexNotFound` for -1, the length, past the end, `""` and a BigInt;
+  * the unhandled-obligation compile error;
+  * the proven op under a guard, the checked op otherwise, and `chareq`
+    instead of `veq`;
+  * a call through a first-class `str::char_at` value;
+  * repeatability of a predicate over it;
+  * zero allocations for a non-ASCII scan.
+* **`tests/native-uri-escape.test` (+12 tests and cases)**:
+  * escaping parity with the independent Tcl reference at every UTF-8 width
+    boundary, and more query-value cases;
+  * `uri_escape_text` repeatability;
+  * "no per-call allocation" pins (List and String counts identical at 10
+    and 50 calls; no per-character List in the escaping);
+  * an NIR pin: `valid_from?`, `upper_hex?` and `esc_from` read with
+    `strcharatproven`, and none has `strutf8bytes`/`listlen`/`listget*`.
+
+  The three new allocation/NIR pins fail against the old `lib/web.bot` and
+  pass against the new one.
+* **Updated structural pins.** These named the removed
+  `esc_char`/`esc_bytes` or counted the old allocations; each keeps the
+  property it checked, retargeted to the new helper:
+  * `native-block-escape`: the refined-checks allocation pin
+    (7220/6804/412 → 6814/6801/9) and the tail-call count (5 → 6);
+  * `hir-callable-target` and `setcontains-equality-total`: the caller of
+    `web::is_unreserved` is now `esc_from`, still a direct call, and the
+    edge is still `may_error=false`;
+  * `virtual-construction`: the URI helper family, and Strings 47500/16000 →
+    39500/2000;
+  * `stdlib-namespaces`/`imports`: the `str` inventory.
+* **`audit/encode-utf8-allocation/tools/fuzz.tcl` (new)**: a differential
+  fuzzer for both functions against a Tcl oracle over UTF-8 bytes, on all
+  four backends. Seed 20261006: 1000 strings, 0 disagreements. It catches
+  three hand-made mutations of the library: a wrong 3-byte lead byte, `G`
+  accepted as a hex digit, and `'%'` replaced by `'#'`.
+
+Validation:
+* `cargo test --release`: 186 + 31 passed.
+* Full Tcl suite: the only failures were the pins listed above, and each
+  updated file passes when rerun.
+* `BOTLISH_NATIVE_GC_STRESS=1` on `str-char-at.test` and
+  `native-uri-escape.test`: 51/51 passed.
+* `audit/refinement-values/tools/fuzz.tcl -seed 7 -count 300`: 0 failures.
 
 ## How this was measured
 

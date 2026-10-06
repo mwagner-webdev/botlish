@@ -673,6 +673,12 @@ test blockescape-region-companion-flags-both-off {both off: the fully unoptimize
 # native attached), run on each of the 400 true paths: its str::encode_utf8
 # builds one List per call, so List 12 -> 412 and the total 6820 -> 7220.
 # Nothing else moves.
+# ENCODE-UTF8-ALLOCATION-RESEARCH.md: uri_query_value? and uri_escape_text
+# read characters with str::char_at, so the predicate's per-call List is
+# gone (List 412 -> 9: only module-initialization Lists remain, three of the
+# old 12 were uri_escape_text("a b")'s per-character Lists) and the escaping
+# of "a b" builds three fewer one-character Strings (6804 -> 6801); the
+# total is 7220 -> 6814.
 test blockescape-region-companion-refined-checks-1 {refined-checks.bot: local_extra_chars' List/ImmutableSet are module-init only (R2.a.1); Block drops from 803 (R2.a.1's own per-call local_char? closure, capturing the module set) to 0 -- local_char? is envless now, a module-static reference is never a capture (MODULE-STATIC-RETAINED-VALUES.md); the exact predicate str::is_tcl_alpha makes the TLD scan a StringRegion consumer, so String falls 8004 -> 6804 (the local part's set-membership characters remain)} -body {
     set hir [refinedChecksSourceHir]
     # -short-string-opt 0: the pinned String count is the region analysis's
@@ -681,7 +687,7 @@ test blockescape-region-companion-refined-checks-1 {refined-checks.bot: local_ex
     list [native::evalHir $hir -short-string-opt 0] [dict get $on total allocations] [dict get $on byKind Block allocations] \
         [dict get $on byKind String allocations] [dict get $on byKind List allocations] \
         [dict get $on byKind ImmutableSet allocations]
-} -result {{list {{int 400} {int 0}}} 7220 0 6804 412 2}
+} -result {{list {{int 400} {int 0}}} 6814 0 6801 9 2}
 
 # (GENERIC-PREDICATE-PROOF-LOSS.md, loss point 1: char_at is only called with an Int,
 # so its one emitted instance is keyed instance="int" rather than "generic".
@@ -748,11 +754,16 @@ test blockescape-region-companion-refined-checks-4 {refined-checks.bot under GC 
 # the bytes by self-tail recursion (`valid_from?(i + 3)` after a "%XX"
 # triplet, `valid_from?(i + 1)` after an unreserved byte). Still none of
 # emailish?'s own.
-test blockescape-region-companion-refined-checks-5 {refined-checks.bot: R2.a.3 dropped the backedge count from 5 to 3 -- scan_while/domain? no longer self-tail-recurse at all (their own counted-loop bodies are plain jump/label CFG backedges); the remaining `tail` sites are esc_bytes/esc_from/check and uri_query_value?'s valid_from? (two), none of them emailish?'s own} -body {
+#
+# ENCODE-UTF8-ALLOCATION-RESEARCH.md: esc_bytes is gone and esc_from's
+# three outcomes (a non-ASCII scalar's escapes, an unreserved character, an
+# ASCII escape) are three self-tail calls, so 5 -> 6: esc_from (3), check
+# and valid_from? (2). Still none of emailish?'s own.
+test blockescape-region-companion-refined-checks-5 {refined-checks.bot: R2.a.3 dropped the backedge count from 5 to 3 -- scan_while/domain? no longer self-tail-recurse at all (their own counted-loop bodies are plain jump/label CFG backedges); the remaining `tail` sites are esc_from (three), check and uri_query_value?'s valid_from? (two), none of them emailish?'s own} -body {
     set hir [refinedChecksSourceHir]
     set nirText [dict get [native::lower::program $hir] text]
     list [regexp {tailenv} $nirText] [llength [regexp -all -inline -line {^\s+tail .*$} $nirText]]
-} -result {0 5}
+} -result {0 6}
 
 # ---------------------------------------------------------------------------
 # Enclosing-instance consistency: a de-closure-converted binding's region is
