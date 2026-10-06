@@ -70,14 +70,16 @@ proc corpus::text {name} {
 # module its imports (`import mutable_array`) name loaded and compiled
 # alongside it: surface::modules::compileProgramFile's own steps over text
 # instead of a file (a corpus program is a definitions-only prefix plus a
-# driver). -strict as surface::compile's.
+# driver). -strict and -warnings as surface::compile's.
 proc corpus::compile {source filename args} {
     set strict 1
+    set warnings ""
     foreach {option value} $args {
-        if {$option ne "-strict"} {
-            error "corpus::compile: unknown option \"$option\""
+        switch -- $option {
+            -strict   { set strict $value }
+            -warnings { set warnings $value }
+            default   { error "corpus::compile: unknown option \"$option\"" }
         }
-        set strict $value
     }
     # A corpus program is a program file plus a driver assembled here: the
     # driver's own dependencies (a `list::length(...)` in it) are declared
@@ -85,7 +87,7 @@ proc corpus::compile {source filename args} {
     set source [surface::modules::ImportHeader $source]$source
     set ast [surface::parse $source $filename]
     set hir [surface::modules::BuildProgram $ast 0]
-    return [surface::lower::Finish $hir $strict]
+    return [surface::lower::Finish $hir $strict $warnings]
 }
 
 # DRIVER (top-level Botlish statements) as the body of a function whose
