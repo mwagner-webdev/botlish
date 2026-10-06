@@ -1573,8 +1573,8 @@ proc native::lower::CollectChecks {region} {
         switch -- [dict get $blocker class] {
             representation {
                 if {[dict get $blocker kind] eq "UnprovenRefinement"} {
-                    Unsupported [dict get $blocker expr] "refinement evidence" \
-                        "the operation needs [core::type::show [dict get $blocker requires]]; named types and evidence are not supported natively"
+                    Unsupported [dict get $blocker expr] "validator contract" \
+                        "the operation needs [core::type::show [dict get $blocker requires]]; a native's validator named-type contract is checked only by the reference runtime, not natively"
                 }
                 dict set guards [list [dict get $blocker operation] [dict get $blocker expr]] \
                     [dict get $blocker requires]

@@ -794,10 +794,11 @@ run on its own copy of the tree:
 | `CORE_BACKEND=interp` | 5,990 | 10 = 8 + 2 since fixed | 6,030 tests, the same 8 failures |
 | `CORE_BACKEND=compile` | 5,990 | 10 = 8 + 2 since fixed | 6,030 tests, the same 8 failures |
 | `BOTLISH_NATIVE_GC_STRESS=1` (interp) | 5,990 | 8 | the same 8 failures |
-| `tests/native-coverage.tcl` (cranelift) | COVERAGE | | |
+| `tests/native-coverage.tcl` (cranelift) | 5,991 | 8 (the same 8) | 2,424 native, 3,432 independent, 67 passed-partial, 60 unsupported (test-only Tcl natives, Blocks returned to the host, sequence mode) |
 | `cargo test --release` (native/) | 183 + 31 | 0 | |
 
-The 8 failures are pre-existing and unrelated: `me-list-literal-never-eligible`
+(The coverage run includes `refinement-rebinding-local`, added after the
+other runs.) The 8 failures are pre-existing and unrelated: `me-list-literal-never-eligible`
 and `me-off-runs-no-warning-pass` (`method-eligible.test`) and six `warn-*`
 tests (`warnings.test`), failing identically on the untouched baseline tree.
 The interp and compile runs first also failed `ic-scan-while` and

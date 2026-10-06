@@ -90,8 +90,9 @@
 #                                       whose result type is unknown
 #               UnknownValueKind        any other operand without a kind
 #                                       (e.g. a merge of different kinds)
-#               UnprovenRefinement      the kind is right but a named type
-#                                       (evidence) is not proven
+#               UnprovenRefinement      the kind is right but a named
+#                                       (validator) type a native requires
+#                                       is not proven
 #   class     semantic | representation
 #   expr      ExprId of the operand or operation the blocker is about
 #   origin    its HIR origin; location: its location dict
