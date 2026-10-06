@@ -243,7 +243,9 @@ foreach {file pair} $renames {
     file copy [file join $auditRoot lib] $lib
     set path [file join $scratch $file]
     set text [readText $path]
-    set renamedText [regsub -all "(?:^|(?!\[A-Za-z0-9_:\]))\\m[string map {? \\?} $old](?!\[A-Za-z0-9_?\])" $text $new]
+    # Whole words only: \m (a word start: not after a letter, digit or _)
+    # and no identifier character after it.
+    set renamedText [regsub -all "\\m[string map {? \\?} $old](?!\[A-Za-z0-9_?\])" $text $new]
     writeText $path $renamedText
     set probe [dict get $probes $file]
     set saved $::core::libraryDir

@@ -533,6 +533,52 @@ static.
   counts only the callee's errors as handled), even though at run time the
   handler catches it; the handler-entry rule above is sound for both readings.
 
+## Naming
+
+The names of proof-producing functions are part of this feature's declared
+interface. Each of the two shapes has one convention:
+
+* a **predicate** -- one ordinary parameter, `-> bool`, a proof clause -- is
+  named with a trailing `?`:
+
+  ```
+  fn emailish?(v: str) -> bool proves v: Emailish:
+  ```
+
+  (`web::emailish?`, `web::uri_query_value?`);
+* a **validator** -- one ordinary parameter, `-> unit`, a proof clause -- is
+  named beginning with `validate_`:
+
+  ```
+  fn validate_emailish(v: str) -> unit proves v: Emailish errors Invalid:
+  ```
+
+  or exactly `validate`, the form for a module export, where restating the
+  namespace in the name is redundant (`path::validate`, not
+  `path::validate_path`):
+
+  ```
+  fn validate(v: str) -> unit proves v: Path errors ContainsReservedCharacters, TooLong:
+  ```
+
+The prefix is literal and case-sensitive: `Validate_x`, `validateX` and
+`validator_x` do not follow it, and the bare `validate_` does (an empty suffix,
+as the literal rule reads). Flags and context parameters are not ordinary
+parameters, so `fn strict?(v: str, flags :exact) -> bool proves v: R` is a
+predicate; an `errors` clause changes neither shape. The convention covers
+exactly these two shapes: a proof-producing function of two or more ordinary
+parameters has none yet, and a function without a proof clause is not covered
+at all, whatever its name -- `?` and `validate_` carry no meaning of their own
+and are not reserved. The name is the one written at the declaration (a module
+function's member name), and it is not part of the proof: a rename changes no
+fact, type, instance or behavior -- only the label native code gives the
+function.
+
+The compiler reports a function that has one of the two shapes and a name
+outside its convention (`PROVES-NAMING`, WARNINGS-PROVES-NAMING.md). The
+response is a rename; the message states the shape and the convention, never
+the name to use (`validate_f` and the bare `validate` both conform).
+
 ## The corpus
 
 `lib/web.bot`:
