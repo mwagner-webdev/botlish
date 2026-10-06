@@ -32,7 +32,11 @@
 #
 # About a third of the programs contain only silent functions. Method syntax
 # is used for every call that would otherwise be METHOD-ELIGIBLE, so the only
-# other code that can appear is SAME-RETURN-VALUE (a repeated exact value).
+# other codes that can appear are SAME-RETURN-VALUE (a repeated exact value)
+# and SAME-FAILURE (`fail Bad` from two or more exits of one function). The
+# fails are known by construction too, so the oracle predicts SAME-FAILURE
+# exactly (WARNINGS-SAME-FAILURE.md): every `fail Bad` of a function is a
+# reachable exit, and two or more are one group, anchored at the first.
 #
 # The oracle is independent of the compiler: from how each function was built
 # it knows its value exits (dead and range-unreachable ones are not exits) and
@@ -42,14 +46,15 @@
 #   default   compiles; the FIXED-ARITY-LIST-RETURN warnings are exactly the
 #             predicted functions with the predicted anchor and notes (a missed
 #             or mislocated prediction is a failure; an unpredicted warning is
-#             printed as EXTRA and counted, and the summary must show 0)
+#             printed as EXTRA and counted, and the summary must show 0); the
+#             SAME-FAILURE warnings likewise
 #   off       compiles; no warning, no pass ran (stats counter, execution
 #             trace on the pass), and the HIR equals default's without its
 #             side table
 #   error     rejected iff default had any warning, with the code of the
 #             sort-first one (so with {CORE SEMANTIC FIXED-ARITY-LIST-RETURN}
-#             whenever that is a predicted warning); a predicted warning is
-#             always a rejection
+#             whenever that is a predicted warning); a predicted warning (of
+#             either code) is always a rejection
 #   conversion  THE CONVERSION LAW (the weakened analogue of METHOD-ELIGIBLE's
 #             round-trip law). Every predicted function is converted: each
 #             literal exit [e0, ..., eN-1] (and each alias initializer that an
@@ -189,7 +194,7 @@ proc genFunction {f quiet} {
         lappend body [list "    if x == $K:"] [list "        return g$f\(x - 1, a, b)"] [list "    g$f\(x - 1, a, b)"]
         set last [expr {[llength $body] - 1}]
         return [dict create lines $body exits [list [list [expr {$last - 1}] 9 self ""] [list $last 5 self ""]] \
-            annotation "" fails 0 nested {}]
+            annotation "" fails 0 failSites {} nested {}]
     }
     set n [pick {2 2 2 3 3 1}]
     set annotation [pick {"" "" "" "" "" " -> list" " -> any"}]
@@ -203,6 +208,7 @@ proc genFunction {f quiet} {
     set exits {}
     set bindings {}
     set fails 0
+    set failSites {}
     set nestedWarn {}
     # The base guard (self-recursion terminates there).
     if {$hasSelf} {
@@ -246,6 +252,7 @@ proc genFunction {f quiet} {
             }
             fail {
                 lappend body [list "    if x == 7:"] [list "        fail Bad"]
+                lappend failSites [list [expr {[llength $body] - 1}] 9]
                 set fails 1
             }
             dead {
@@ -328,6 +335,7 @@ proc genFunction {f quiet} {
         }
         fail {
             lappend body [list "    fail Bad"]
+            lappend failSites [list [expr {[llength $body] - 1}] 5]
             set fails 1
         }
         mismatch {
@@ -361,11 +369,13 @@ proc genFunction {f quiet} {
     set shift [expr {1 + [llength $bindings]}]
     set lines [concat [list [list conv $header [string map {" -> any" ""} $header]]] $bindings $body]
     set exits [lmap e $exits {lset e 0 [expr {[lindex $e 0] + $shift}]; set e}]
+    set failSites [lmap e $failSites {lset e 0 [expr {[lindex $e 0] + $shift}]; set e}]
     set nestedWarn [lmap w $nestedWarn {
         lassign $w line col notes
         list [expr {$line + $shift}] $col [lmap o $notes {list [expr {[lindex $o 0] + $shift}] [lindex $o 1]}]
     }]
-    return [dict create lines $lines exits $exits annotation $annotation fails $fails nested $nestedWarn]
+    return [dict create lines $lines exits $exits annotation $annotation fails $fails \
+        failSites $failSites nested $nestedWarn]
 }
 
 # The oracle: {LINE COL NOTES ARITY} for a function that warns (absolute
@@ -397,6 +407,16 @@ proc predict {fn base} {
     return [list {*}[lindex $located 0] [lrange $located 1 end] $arity]
 }
 
+# The SAME-FAILURE oracle: {LINE COL NOTES} for a function failing `Bad` from
+# two or more exits (absolute lines from BASE), "" otherwise.
+proc predictFailures {fn base} {
+    set located [lmap e [dict get $fn failSites] {list [expr {$base + [lindex $e 0] + 1}] [lindex $e 1]}]
+    if {[llength $located] < 2} {
+        return ""
+    }
+    return [list {*}[lindex $located 0] [lrange $located 1 end]]
+}
+
 # Renders ITEMS for the original program (CONVERT 0), the converted program's
 # copy of a converted function (CONVERT 1: each conv item's converted text,
 # range-unreachable exits conformed to ARITY fields), or of an unconverted one
@@ -419,12 +439,14 @@ proc render {items convert arity} {
     }]
 }
 
-# {SOURCE CONVERTED PREDICTED}: PREDICTED a list of {LINE COL NOTES}.
+# {SOURCE CONVERTED PREDICTED DRIVERS FAILURES}: PREDICTED (FIXED-ARITY-LIST-
+# RETURN) and FAILURES (SAME-FAILURE) lists of {LINE COL NOTES}.
 proc generate {seed} {
     expr {srand($seed)}
     set quiet [expr {rand() < 0.33}]
     set header [list "import list" "error Bad" "fn helper(p, q):" [expr {$quiet ? "    \[p\]" : "    \[p, q\]"}]]
     set predicted {}
+    set failures {}
     if {!$quiet} {
         lappend predicted [list 4 5 {}]
     }
@@ -438,6 +460,10 @@ proc generate {seed} {
         set fn [genFunction $f $quiet]
         set base [llength $original]
         set p [predict $fn $base]
+        set pf [predictFailures $fn $base]
+        if {$pf ne ""} {
+            lappend failures $pf
+        }
         foreach w [dict get $fn nested] {
             lassign $w line col notes
             lappend predicted [list [expr {$base + $line + 1}] $col \
@@ -478,18 +504,19 @@ proc generate {seed} {
     set result [expr {$drivers eq "" ? "0" : "\{[join [lmap v $drivers {string cat $v ": " $v}] {, }]\}"}]
     lappend original "ks = \[0, 1, 2, 3, 4, 7\]" {*}$callers $result
     lappend converted "ks = \[0, 1, 2, 3, 4, 7\]" {*}$convertedCallers $result
-    return [list [join $original \n] [join $converted \n] [lsort -dictionary $predicted] [llength $drivers]]
+    return [list [join $original \n] [join $converted \n] [lsort -dictionary $predicted] [llength $drivers] \
+        [lsort -dictionary $failures]]
 }
 
 proc compileMode {source mode} {
     return [surface::compile $source fuzz.bot -warnings $mode -warning-channel ""]
 }
 
-# {LINE COL NOTES} of each FIXED-ARITY-LIST-RETURN warning of HIR.
-proc fixedOf {hir} {
+# {LINE COL NOTES} of each CODE warning of HIR.
+proc fixedOf {hir {code FIXED-ARITY-LIST-RETURN}} {
     set result {}
     foreach w [hir::warnings::of $hir] {
-        if {[dict get $w code] ne "FIXED-ARITY-LIST-RETURN"} continue
+        if {[dict get $w code] ne $code} continue
         set at [lrange [dict get $w primary] 2 end]
         set notes [lmap o [dict get $w secondary] {
             set fields [lrange $o 2 end]
@@ -508,8 +535,8 @@ proc valueOf {hir} {
 }
 
 if {$show ne ""} {
-    lassign [generate $show] source converted predicted
-    puts "$source\n--- predicted (line col notes):\n[join $predicted \n]\n--- converted:\n$converted"
+    lassign [generate $show] source converted predicted drivers failures
+    puts "$source\n--- predicted (line col notes):\n[join $predicted \n]\n--- predicted SAME-FAILURE:\n[join $failures \n]\n--- converted:\n$converted"
     exit 0
 }
 
@@ -522,14 +549,14 @@ set convertible 0
 set excluded 0
 set rejectedFixed 0
 for {set seed $first} {$seed < $first + $seeds} {incr seed} {
-    lassign [generate $seed] source converted predicted driverCount
+    lassign [generate $seed] source converted predicted driverCount predictedFailures
     set problems {}
     if {[catch {compileMode $source default} hir options]} {
         lappend problems "default mode did not compile: $hir"
     } else {
         set actual [fixedOf $hir]
         foreach w [hir::warnings::of $hir] {
-            if {[dict get $w code] ni {FIXED-ARITY-LIST-RETURN SAME-RETURN-VALUE}} {
+            if {[dict get $w code] ni {FIXED-ARITY-LIST-RETURN SAME-RETURN-VALUE SAME-FAILURE}} {
                 lappend problems "unexpected code [dict get $w code]"
             }
         }
@@ -544,6 +571,22 @@ for {set seed $first} {$seed < $first + $seeds} {incr seed} {
         foreach a $actual {
             if {$a ni $predicted} {
                 puts "EXTRA seed $seed: warning $a is not predicted:\n$source"
+                incr extras
+            }
+        }
+        # SAME-FAILURE: the construction-known fails, exactly.
+        set actualFailures [fixedOf $hir SAME-FAILURE]
+        foreach p $predictedFailures {
+            if {$p ni $actualFailures} {
+                lappend problems "MISSED predicted SAME-FAILURE $p (actual: $actualFailures)"
+            }
+        }
+        if {[llength $actualFailures] != [llength [lsort -unique $actualFailures]]} {
+            lappend problems "a failure group was reported more than once: $actualFailures"
+        }
+        foreach a $actualFailures {
+            if {$a ni $predictedFailures} {
+                puts "EXTRA seed $seed: SAME-FAILURE $a is not predicted:\n$source"
                 incr extras
             }
         }
@@ -577,7 +620,7 @@ for {set seed $first} {$seed < $first + $seeds} {incr seed} {
         } elseif {$all ne ""} {
             lappend problems "error mode accepted a program with warnings"
         }
-        if {$predicted ne "" && !$rejected} {
+        if {($predicted ne "" || $predictedFailures ne "") && !$rejected} {
             lappend problems "error mode accepted a program with a predicted warning"
         }
         # The conversion law.

@@ -57,7 +57,10 @@ proc codes {source} {
 # Likewise a program whose functions return written list literals of one
 # arity carries FIXED-ARITY-LIST-RETURN findings
 # (WARNINGS-FIXED-ARITY-LIST-RETURN.md), which the tests that build their
-# values from such lists are not about.
+# values from such lists are not about, and a function that fails one declared
+# error from several exits carries a SAME-FAILURE finding
+# (WARNINGS-SAME-FAILURE.md), which the tests pinning that `fail` is never
+# grouped with a return are not about.
 proc sameReturnShown {source} {
     set hir [compileWith $source]
     return [lmap w [hir::warnings::of $hir] {
@@ -438,7 +441,7 @@ fn f(n):
 } -result {{value `-1` is returned from 2 distinct exits @ 9:13 11:9}}
 
 test warn-failures-are-not-returns {fail and return are different completion kinds: never grouped} -body {
-    codes {error Bad
+    sameReturnCodes {error Bad
 fn f(x) -> int errors Bad:
     if x < 0:
         fail Bad
@@ -789,7 +792,7 @@ test warn-off-runs-no-warning-pass {warnings off does not execute the warning pa
     catch {compileWith $::policySource error}
     set afterError [hir::warnings::stats]
     list $afterOff $afterDefault $afterError
-} -result {{} {SAME-RETURN-VALUE 1 METHOD-ELIGIBLE 1 FIXED-ARITY-LIST-RETURN 1} {SAME-RETURN-VALUE 2 METHOD-ELIGIBLE 2 FIXED-ARITY-LIST-RETURN 2}}
+} -result {{} {SAME-RETURN-VALUE 1 METHOD-ELIGIBLE 1 FIXED-ARITY-LIST-RETURN 1 SAME-FAILURE 1} {SAME-RETURN-VALUE 2 METHOD-ELIGIBLE 2 FIXED-ARITY-LIST-RETURN 2 SAME-FAILURE 2}}
 
 test warn-off-runs-no-warning-pass-via-trace {an execution trace on the pass proves it is not invoked when off} -body {
     set ::passCalls 0
