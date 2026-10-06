@@ -650,6 +650,18 @@ test trait-recursion-two-witnesses {a recursive trait-polymorphic function speci
     list [moduleAgree $principalLib $source] [lsort -unique $self] [llength [lsearch -all [functionNames $hir] recurse*]]
 } -result {{value {["p", "svc:s"]}} {recurse<Person> recurse<services::Service>} 2}
 
+test trait-instance-budget-fallback {a trait-polymorphic function called with more distinct argument types than the semantic-instance budget still specializes: past the budget, an instance keyed by its witnesses alone} -body {
+    set structs ""
+    set calls {}
+    for {set i 0} {$i < 20} {incr i} {
+        append structs "struct S$i:\n    v: int\n"
+        lappend calls "tag(Person {value: \"t\"}, S$i {v: $i})"
+    }
+    set source "${prelude}${structs}fn tag(value: Named, extra) -> str:\n    value.name()\n\[[join $calls {, }]\]\n"
+    set hir [surface::compile $source -warnings off]
+    list [sourceAgree $source] [lsearch -all -inline -glob [functionNames $hir] tag*]
+} -result [list [list value "\[[join [lrepeat 20 {"t"}] {, }]\]"] tag<Person>]
+
 test trait-polymorphic-recursion-rejected {recursion between different witnesses' specializations is rejected} -body {
     set lib {other.bot {struct O:
     v: str
@@ -911,6 +923,78 @@ test trait-unchecked-trait-operation-raises {a -strict 0 program whose trait che
     list [lindex [dict get [lindex [dict get $hir diagnostics] 0] kind] 0] \
          [lindex [outcomeUnder interp [hir::lower $hir]] 1]
 } -result {TYPE {CORE SEMANTIC UNBOUND}}
+
+# ===========================================================================
+# 108-109. Contexts stay orthogonal
+
+test trait-context-orthogonal {a context struct value may be a trait witness like any struct; an implementation that needs a context is not one (no context-supplied implementations)} -body {
+    set head "trait Valued:\n    fn amount(value: Valued) -> int\ncontext struct Counter:\n    value: int\n"
+    set r [rejection "${head}struct P:\n    v: int\nfn amount(value: P, context c: Counter) -> int:\n    c.value\nfn total(v: Valued) -> int:\n    v.amount()\nwith context Counter {value: 3}\ntotal(P {v: 1})\n"]
+    list [sourceAgree "${head}fn amount(value: Counter) -> int:\n    value.value\nfn total(v: Valued) -> int:\n    v.amount()\ntotal(Counter {value: 3})\n"] \
+         [lindex $r 0] [lindex [split [lindex $r 1] \n] end]
+} -result {{value 3} TRAIT-NOT-SATISFIED {amount requires a context (Counter): context-dependent implementations are not supported yet}}
+
+# ===========================================================================
+# 111. The intended later use: a Path trait over a refinement and a struct
+
+test trait-future-path-shape {a Path-like trait with a non-receiver parameter and self results specializes to a refined str and to a module struct, with no erased path object} -body {
+    set lib {windows.bot {import str
+
+struct WindowsPath:
+    text: str
+
+fn concat(path: WindowsPath, component: str) -> WindowsPath:
+    WindowsPath {text: str::concat(str::concat(path.text, "\\"), component)}
+
+fn parent(path: WindowsPath) -> WindowsPath:
+    path
+
+fn render(path: WindowsPath) -> str:
+    path.text
+}}
+    set source {import str
+import windows
+
+trait Path:
+    fn concat(path: Path, component: str) -> Path
+    fn parent(path: Path) -> Path
+    fn render(path: Path) -> str
+
+refined type LinuxPath = str
+
+fn linux?(s: str) -> bool proves s: LinuxPath:
+    str::length(s) > 0
+
+fn concat(path: LinuxPath, component: str) -> LinuxPath:
+    joined = str::concat(str::concat(path, "/"), component)
+    if linux?(joined):
+        joined
+    else:
+        path
+
+fn parent(path: LinuxPath) -> LinuxPath:
+    path
+
+fn render(path: LinuxPath) -> str:
+    path
+
+fn somewhere(path: Path) -> Path:
+    path.concat("child")
+
+fn home() -> str:
+    "/home"
+
+h = home()
+lin = if linux?(h):
+    somewhere(h).render()
+else:
+    ""
+[lin, somewhere(windows::WindowsPath {text: "C:"}).parent().render()]
+}
+    list [moduleAgree $lib $source] \
+         [lsort [lsearch -all -inline -glob [functionNames [moduleHir $lib $source]] somewhere*]] \
+         [traitFree [moduleHir $lib $source]]
+} -result {{value {["/home/child", "C:\\child"]}} {somewhere<LinuxPath> somewhere<windows::WindowsPath>} 1}
 
 # ===========================================================================
 # 103. Tooling

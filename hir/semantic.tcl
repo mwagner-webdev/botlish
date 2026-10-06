@@ -279,6 +279,7 @@ proc hir::semantic::Call {hir ctx e block argTypes blockResult} {
     # Entry types (header, "The key").
     set declared [hir::signatures::entryTypes $hir $block]
     set entry {}
+    set generics {}
     set trivial 1
     set index 0
     foreach t $argTypes d $declared {
@@ -303,6 +304,7 @@ proc hir::semantic::Call {hir ctx e block argTypes blockResult} {
             set trivial 0
         }
         lappend entry $x
+        lappend generics $generic
     }
     if {$trivial} {
         dict incr state trivial
@@ -335,25 +337,39 @@ proc hir::semantic::Call {hir ctx e block argTypes blockResult} {
                 set reason nesting
             }
         }
-        if {$reason ne ""} {
+        if {$reason in {budget-total budget-block} && [hir::traits::IsPolymorphic $hir $block]} {
+            # A trait-polymorphic function's call has no generic fallback:
+            # its witnesses decide which specialization it is (TRAITS.md).
+            # Past the budget it gets the instance keyed by its trait
+            # parameters' views alone, every other parameter at its generic
+            # type -- at most one per witness combination.
+            set entry [lmap x $entry g $generics {expr {[hir::types::IsView $x] ? $x : $g}}]
+            set key [list $block $entry]
+            set reason ""
+        }
+        if {$reason eq "" && [dict exists $state keys $key]} {
+            dict incr state hits
+            set id [dict get $state keys $key]
+        } elseif {$reason ne ""} {
             dict set state declined $callKey $reason
             Bump declinedCount $reason
             if {$reason eq "no-env"} {
                 dict set state pendingEnv $block 1
             }
             return $blockResult
-        }
-        set id [Create $block $entry $key]
-        if {[dict get $state stack] eq {}} {
-            dict set state base $hir
-            try {
-                Analyze $id
-                Drain
-            } finally {
-                dict set state base ""
-            }
         } else {
-            Analyze $id
+            set id [Create $block $entry $key]
+            if {[dict get $state stack] eq {}} {
+                dict set state base $hir
+                try {
+                    Analyze $id
+                    Drain
+                } finally {
+                    dict set state base ""
+                }
+            } else {
+                Analyze $id
+            }
         }
     }
     dict set state calls $callKey $id
