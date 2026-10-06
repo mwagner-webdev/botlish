@@ -685,13 +685,18 @@ proc hir::read::Expr {hirVar level s path block} {
             SetField hir $e declaredResult $declaredType
             # The proof contract (REFINEMENT-VALUES.md), as printed: one
             # "BINDING NAME: TYPE" clause naming one of the block's params.
+            # Its outcome is the declared result's, exactly as
+            # hir::resolve::ResolveProofs derived it: `declares unit` is a
+            # validator (a normal completion proves), anything else a
+            # predicate (a true result proves).
             set proofs {}
             if {$provesText ne ""} {
                 if {![regexp {^(b[0-9]+) (\S+): (.+)$} $provesText -> provenBinding provenName provenType]
                         || [lsearch -exact $paramIds $provenBinding] < 0} {
                     Fail $number "expected \"proves BINDING NAME: TYPE\" naming a parameter of the block"
                 }
-                lappend proofs [dict create outcome 1 param [lsearch -exact $paramIds $provenBinding] \
+                lappend proofs [dict create outcome [expr {$declaredType eq "unit" ? "normal" : 1}] \
+                    param [lsearch -exact $paramIds $provenBinding] \
                     binding $provenBinding fact [ParseType $provenType $number]]
             }
             SetField hir $e proofs $proofs

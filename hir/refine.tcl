@@ -32,9 +32,10 @@
 #   * a call of a native with refinement metadata (core::native's
 #     -refines-true/-refines-false, -tests-type): its rules, applied to the
 #     arguments that are plain references;
-#   * a call of a function with a proof contract (`proves x: R`, the block's
-#     `proofs`, hir/resolve.tcl's ResolveProofs): when true, the argument of
-#     the proven parameter satisfies R; either way, the call key records the
+#   * a call of a *predicate*, a function with a Boolean proof contract
+#     (`-> bool proves x: R`, the block's `proofs` with outcome 1,
+#     hir/resolve.tcl's ResolveProofs): when true, the argument of the
+#     proven parameter satisfies R; either way, the call key records the
 #     exact outcome of that invocation (a *predicate-result* fact, distinct
 #     from the refinement fact: another function proving R need not return
 #     true for the same value);
@@ -52,6 +53,21 @@
 # Anything else implies nothing, which is always sound. Nothing here knows any
 # predicate by name: the rules are the native's registered metadata or the
 # function's declared proof contract.
+#
+# A *validator* (`-> unit proves x: R`, a rule with outcome `normal`) proves
+# by completing, not by a Boolean: its call has no implication (its value is
+# unit, never a condition) and no call key. What it proves is a fact about
+# the rest of the path instead:
+#
+#   CompletionFacts HIR E   => BindingId FACT pairs
+#
+# what holds once the (typed) call E completes normally -- the same argument
+# facts a predicate's true edge attaches (AddArgumentFact: a plain reference's
+# binding and its immutable alias root, by value identity). hir/types.tcl's
+# Call narrows the path's facts with them right after the call, so they hold
+# for everything that runs after it on that path and are scoped and joined
+# like every other flow fact (an `if` join, a loop body, a handled call's
+# handlers: hir/types.tcl's If and Handle).
 #
 # Whether a known exact call result may *replace* a later identical call is a
 # separate question, answered by hir/repeatable.tcl (hir/types.tcl's Call
@@ -190,8 +206,10 @@ proc hir::refine::CallImplication {hir e node} {
             }
         }
         block {
-            set proofs [ProofsOf $hir $target]
-            if {$proofs ne {}} {
+            # Only a predicate's contract speaks about a Boolean result; a
+            # validator's (outcome `normal`) is a completion fact, never a
+            # true-edge one (CompletionFacts).
+            if {[IsPredicate $hir $target]} {
                 foreach outcome {1 0} {
                     foreach {index fact} [ProofRules $hir $target $outcome] {
                         AddArgumentFact $hir result $outcome $args $index $fact
@@ -331,7 +349,9 @@ proc hir::refine::Conjoin {a b} {
 }
 
 # The resolved proof contract of block BLOCK (hir/resolve.tcl ResolveProofs):
-# {outcome 1 param INDEX binding B fact TYPE} dicts, empty if none.
+# {outcome OUTCOME param INDEX binding B fact TYPE} dicts, empty if none.
+# OUTCOME is 1 for a predicate (`-> bool`: a true result proves) and `normal`
+# for a validator (`-> unit`: a normal completion proves).
 proc hir::refine::ProofsOf {hir block} {
     if {![dict exists $hir exprs $block proofs]} {
         return {}
@@ -340,16 +360,53 @@ proc hir::refine::ProofsOf {hir block} {
 }
 
 # The INDEX FACT pairs block BLOCK's proof contract proves of a call's
-# arguments when the call returns OUTCOME (1/0): the same flat shape as a
-# native's refinement rules (core::native::refinementRules).
+# arguments when the call returns OUTCOME (1/0), or, for OUTCOME `normal`,
+# when it completes normally: the same flat shape as a native's refinement
+# rules (core::native::refinementRules). Outcomes compare as words, so a
+# validator's rule is never read as a true-edge (or false-edge) one.
 proc hir::refine::ProofRules {hir block outcome} {
     set rules {}
     foreach proof [ProofsOf $hir $block] {
-        if {[dict get $proof outcome] == $outcome} {
+        if {[dict get $proof outcome] eq $outcome} {
             lappend rules [dict get $proof param] [dict get $proof fact]
         }
     }
     return $rules
+}
+
+# 1 if block BLOCK is a predicate: its proof contract proves on a true
+# result, so its calls have a Boolean implication and exact call keys (and a
+# repeated call may be decided, hir/types.tcl's Call).
+proc hir::refine::IsPredicate {hir block} {
+    foreach proof [ProofsOf $hir $block] {
+        if {[dict get $proof outcome] eq "1"} {
+            return 1
+        }
+    }
+    return 0
+}
+
+# The BindingId FACT pairs that hold once the call E (typed: its `target`
+# is known) completes normally: its callee's validator rules (outcome
+# `normal`), each attached to its argument the way a predicate's true edge
+# attaches it (AddArgumentFact: a plain reference's binding and immutable
+# alias root; any other argument, or a call without an exact block target --
+# a native, a structural Fn value -- proves nothing). Empty for a call of
+# anything but a validator.
+proc hir::refine::CompletionFacts {hir e} {
+    set node [dict get $hir exprs $e]
+    if {[dict get $node kind] ne "call" || ![dict exists $node target]} {
+        return {}
+    }
+    lassign [dict get $node target] kind target
+    if {$kind ne "block"} {
+        return {}
+    }
+    set result [dict create normal {}]
+    foreach {index fact} [ProofRules $hir $target normal] {
+        AddArgumentFact $hir result normal [dict get $node args] $index $fact
+    }
+    return [dict get $result normal]
 }
 
 # The exact-invocation key of a call of block BLOCK on the argument
