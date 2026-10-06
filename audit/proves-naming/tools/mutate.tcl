@@ -16,24 +16,29 @@ set seeds [expr {[llength $argv] > 0 ? [lindex $argv 0] : 40}]
 set only [expr {[llength $argv] > 1 ? [lindex $argv 1] : "*"}]
 
 # The pass's own lines the mutants replace (each must occur exactly once in
-# hir/warnings.tcl).
-set guard {        if {[dict get $fn kind] ne "block" || ![dict exists $fn proofs] || [dict get $fn proofs] eq ""} {}
-set count {    if {[llength [dict get $fn params]] - [llength $flags] != 1}
+# hir/warnings.tcl). `instances-visited` also reports each warning once more
+# per semantic instance whose snapshot covers the function: an in-shape
+# proves function has one declared-type parameter and no instances of its
+# own, but one nested in a polymorphic function is in each of that function's
+# instance snapshots.
+# (Texts that open a brace they do not close are double-quoted.)
+set guard "        if \{\[dict get \$fn kind\] ne \"block\" || !\[dict exists \$fn proofs\] || \[dict get \$fn proofs\] eq \"\"\} \{"
+set count "    if \{\[llength \[dict get \$fn params\]\] - \[llength \$flags\] != 1"
 set shapes "        bool \{ return predicate \}\n        unit \{ return validator \}\n    \}\n    return \"\""
 set question {        return [expr {[string index $name end] eq "?"}]}
 set validator {    return [expr {$name eq "validate" || [string first validate_ $name] == 0}]}
 set written "    if \{\[dict exists \$binding spelling\]\} \{\n        set name \[dict get \$binding spelling\]\n    \} else \{\n        regsub \{#\[0-9\]+\$\} \[dict get \$binding name\] \{\} name\n    \}\n    return \[MemberName \$name\]"
-set append "        lappend warnings \[New PROVES-NAMING \\"
+set returned "    return \$warnings\n\}\n\n# The proof-producing shape"
 
 # {NAME FILE OLD NEW}: OLD must occur exactly once in FILE. The first eleven
 # are the milestone's required kill list, in its order; the rest are extra.
 set mutants [list \
     [list scope-guard-dropped hir/warnings.tcl \
         $guard \
-        {        if {[dict get $fn kind] ne "block"} {}] \
+        "        if \{\[dict get \$fn kind\] ne \"block\"\} \{"] \
     [list parameter-count-ignored hir/warnings.tcl \
         $count \
-        {    if {0}}] \
+        "    if \{0"] \
     [list result-type-ignored hir/warnings.tcl \
         $shapes \
         "        unit \{ return validator \}\n    \}\n    return predicate"] \
@@ -59,8 +64,8 @@ set mutants [list \
         $written \
         {    return [dict get $binding name]}] \
     [list instances-visited hir/warnings.tcl \
-        $append \
-        "        lappend warnings \{*\}\[lrepeat \[expr \{1 + (\[dict exists \$hir semantic byBlock \$block\] ? \[dict get \$hir semantic byBlock \$block\] : 0)\}\] {*}\[New PROVES-NAMING \\"] \
+        $returned \
+        "    if \{\[dict exists \$hir semantic instances\]\} \{\n        dict for \{id instance\} \[dict get \$hir semantic instances\] \{\n            foreach w \$warnings \{\n                if \{\[dict exists \$instance snapshot exprs \[dict get \$w data function\]\]\} \{\n                    lappend warnings \$w\n                \}\n            \}\n        \}\n    \}\n$returned"] \
     [list registry-line-removed hir/warnings.tcl \
         "        PROVES-NAMING     hir::warnings::ProvesNaming\n" \
         ""] \
@@ -72,10 +77,10 @@ set mutants [list \
         {    return [expr {$name eq "validate" || ([string first validate_ $name] == 0 && $name ne "validate_")}]}] \
     [list flags-counted hir/warnings.tcl \
         $count \
-        {    if {[llength [dict get $fn params]] != 1}] \
+        "    if \{\[llength \[dict get \$fn params\]\] != 1"] \
     [list reachability-added hir/warnings.tcl \
         $guard \
-        {        if {[dict get $fn kind] ne "block" || ![dict get $fn reachable] || ![dict exists $fn proofs] || [dict get $fn proofs] eq ""} {}] \
+        "        if \{\[dict get \$fn kind\] ne \"block\" || !\[dict get \$fn reachable\] || !\[dict exists \$fn proofs\] || \[dict get \$fn proofs\] eq \"\"\} \{"] \
     [list qualified-name-checked hir/warnings.tcl \
         "    return \[MemberName \$name\]" \
         "    return \$name"] \

@@ -28,7 +28,9 @@
 #               bool or unit, named from either pool (always silent)
 #
 # Each function is placed at the top level, nested in a wrapper function
-# (sometimes a closure over the wrapper's parameter), in the module (proving
+# (sometimes a closure over the wrapper's parameter; the wrapper is
+# polymorphic in a second parameter and called with three argument types, so
+# the nested function sits in several semantic instances), in the module (proving
 # the module's own refinement; called qualified), or -- the hygiene case --
 # nested in a wrapper after an earlier reference to a top-level non-proves
 # function of the *same* name, so hygiene renames the nested binding (NAME#N)
@@ -70,7 +72,8 @@
 # identical native IR (specialized and generic) up to the labels of the
 # renamed functions (NIR names a function by its spelling, `func N "NAME"`:
 # each renamed function's label must change from exactly its old name to
-# exactly its new one, and nothing else may differ), and evaluate to the
+# exactly its new one -- or, for a function inlined away as a tiny leaf,
+# appear in neither text -- and nothing else may differ), and evaluate to the
 # identical value on the reference interpreter. A law failure is a fuzzer
 # failure.
 #
@@ -167,9 +170,8 @@ proc generate {seed} {
     set useModule [chance 0.4]
     for {set i 0} {$i < $count} {incr i} {
         set stem [pick $::stems]$i
-        set role [pick {proves proves proves twin wrong}]
+        set role [pick {proves proves proves proves twin wrong}]
         set shape [pick {predicate validator}]
-        if {[info exists ::env(PN_FUZZ_PREDICATES_ONLY)]} { set shape predicate }
         set placement [pick {top top nested closure hygiene module}]
         if {$placement eq "module" && !$useModule} {
             set placement top
@@ -177,7 +179,7 @@ proc generate {seed} {
         if {$role ne "proves" && $placement eq "hygiene"} {
             set placement nested
         }
-        set conforming [expr {$quiet || [chance 0.5]}]
+        set conforming [expr {$quiet || [chance 0.3]}]
         if {$role eq "proves"} {
             set name [nameFor $shape $conforming $stem used]
         } else {
@@ -290,7 +292,7 @@ proc generate {seed} {
                 census module
             }
             nested - closure {
-                lappend wrappers [list w$i [concat [list "fn w$i\(s: str) -> int:"] $decl [lmap l $use {string cat "    " $l}]]]
+                lappend wrappers [list w$i [concat [list "fn w$i\(s: str, t) -> int:"] $decl [lmap l $use {string cat "    " $l}]]]
                 set anchorFile fuzz.bot
                 census $placement
             }
@@ -308,7 +310,7 @@ proc generate {seed} {
                     lappend top [list "fn $T\(v: str) -> unit:" "    unit"]
                     set early "early = $T\(s)"
                 }
-                lappend wrappers [list w$i [concat [list "fn w$i\(s: str) -> int:" "    $early"] $decl [lmap l $use {string cat "    " $l}]]]
+                lappend wrappers [list w$i [concat [list "fn w$i\(s: str, t) -> int:" "    $early"] $decl [lmap l $use {string cat "    " $l}]]]
                 set anchorFile fuzz.bot
                 census hygiene
             }
@@ -329,9 +331,13 @@ proc generate {seed} {
         lappend main {*}$decl
     }
     set results {}
+    # A wrapper takes an extra untyped parameter and is called with three
+    # argument types (method syntax: a functional two-argument call would be
+    # METHOD-ELIGIBLE), so it has several semantic instances, each of whose
+    # snapshots covers its nested function.
     foreach w $wrappers {
         lappend main {*}[lindex $w 1]
-        lappend results "[lindex $w 0]\(\"k[string range [lindex $w 0] 1 end]\")" "[lindex $w 0]\(\"x\")" "[lindex $w 0]\(\"\")"
+        lappend results "\"k[string range [lindex $w 0] 1 end]\".[lindex $w 0]\(1)" "\"x\".[lindex $w 0]\(\"z\")" "\"\".[lindex $w 0]\(\[1\])"
     }
     foreach d $drivers {
         lappend main {*}[lindex $d 1]
@@ -405,9 +411,10 @@ proc valueOf {hir} {
     return $v
 }
 
-# NIR text with every function label replaced by its position: the labels
-# of BEFORE's and AFTER's functions as {OLD NEW} pairs where they differ,
-# and whether everything else is identical.
+# Compares the NIR texts BEFORE and AFTER a rename: {SAME PAIRS LABELS},
+# SAME whether they are identical once every function label is blanked,
+# PAIRS the {OLD NEW} label pairs where a function's label differs, LABELS
+# every label of either text.
 proc nirDiff {before after} {
     set strip {func ([0-9]+) "([^"]*)"}
     set a [regsub -all -line $strip $before {func \1 "-"}]
@@ -415,12 +422,14 @@ proc nirDiff {before after} {
     set la [regexp -all -inline -line $strip $before]
     set lb [regexp -all -inline -line $strip $after]
     set pairs {}
+    set labels {}
     foreach {- ia na} $la {- ib nb} $lb {
+        lappend labels $na $nb
         if {$na ne $nb} {
-            lappend pairs [list [regsub {<.*>$} $na {}] [regsub {<.*>$} $nb {}]]
+            lappend pairs [list $na $nb]
         }
     }
-    return [list [expr {$a eq $b}] [lsort -unique $pairs]]
+    return [list [expr {$a eq $b}] [lsort -unique $pairs] [lsort -unique $labels]]
 }
 
 set ::libraryDir [file tempdir proves-naming-fuzz]
@@ -520,13 +529,28 @@ for {set seed $first} {$seed < $first + $seeds} {incr seed} {
                     lappend law "the renamed program has diagnostics or warnings: [hir::diagnostics $rhir] [lmap w [hir::warnings::of $rhir] {dict get $w message}]"
                 }
                 foreach options {{} {-specialize 0}} {
-                    lassign [nirDiff [native::nir $hir {*}$options] [native::nir $rhir {*}$options]] same pairs
+                    lassign [nirDiff [native::nir $hir {*}$options] [native::nir $rhir {*}$options]] same pairs labels
                     if {!$same} {
                         lappend law "native IR ($options) differs beyond function labels"
                     }
+                    # Every changed label is a rename, exactly; a renamed
+                    # function with no label of its own in either text was
+                    # inlined away (a tiny leaf: an infallible validator's
+                    # `unit`), and the rest of the text is still identical.
                     set expected [lsort -unique [dict get $g labels]]
-                    if {$pairs ne $expected} {
-                        lappend law "native IR ($options) labels changed $pairs, expected $expected"
+                    foreach pair $pairs {
+                        if {$pair ni $expected} {
+                            lappend law "native IR ($options) label changed $pair, not a predicted rename"
+                        }
+                    }
+                    foreach pair $expected {
+                        if {$pair in $pairs} {
+                            census nirRelabeled
+                        } elseif {[lindex $pair 0] in $labels || [lindex $pair 1] in $labels} {
+                            lappend law "native IR ($options) renamed $pair inconsistently"
+                        } else {
+                            census nirInlined
+                        }
                     }
                 }
                 set before [valueOf $hir]
@@ -554,5 +578,5 @@ set c $::census
 proc get {c key} {
     return [expr {[dict exists $c $key] ? [dict get $c $key] : 0}]
 }
-puts "seeds $seeds (from $first): $warned with warnings, $clean without; failures $failures; extra warnings $extras; renames $renamedFunctions of $predictedTotal; law failures $lawFailures; predicates [get $c conformingpredicate] conforming / [get $c violatingpredicate] violating, validators [get $c conformingvalidator] conforming / [get $c violatingvalidator] violating, twins [expr {[get $c twinpredicate] + [get $c twinvalidator]}], wrong shapes [expr {[get $c wrongpredicate] + [get $c wrongvalidator]}], nested [get $c nested], closures [get $c closure], hygiene [get $c hygiene], module [get $c module], only-silent programs [get $c silentPrograms]"
+puts "seeds $seeds (from $first): $warned with warnings, $clean without; failures $failures; extra warnings $extras; renames $renamedFunctions of $predictedTotal; law failures $lawFailures (NIR labels renamed [get $c nirRelabeled], inlined away [get $c nirInlined]); predicates [get $c conformingpredicate] conforming / [get $c violatingpredicate] violating, validators [get $c conformingvalidator] conforming / [get $c violatingvalidator] violating, twins [expr {[get $c twinpredicate] + [get $c twinvalidator]}], wrong shapes [expr {[get $c wrongpredicate] + [get $c wrongvalidator]}], nested [get $c nested], closures [get $c closure], hygiene [get $c hygiene], module [get $c module], only-silent programs [get $c silentPrograms]"
 exit [expr {$failures > 0 || $extras > 0}]

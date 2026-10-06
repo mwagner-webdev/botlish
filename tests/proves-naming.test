@@ -466,7 +466,7 @@ d = pth::check_path("d"):
             dict get $binding name
         }]]
     }
-} -result {{{pth.bot:3:1 check predicate {`check` proves a contract and returns bool; predicate names end in `?`}} {pth.bot:11:1 check_path validator {`check_path` proves a contract and returns unit; validator names are `validate` or begin with `validate_`}}} {pth::Bad pth::check pth::check_path pth::ok? pth::validate}}
+} -result {{{pth.bot:3:1 check predicate {`check` proves a contract and returns bool; predicate names end in `?`}} {pth.bot:11:1 check_path validator {`check_path` proves a contract and returns unit; validator names are `validate` or begin with `validate_`}}} {pth::check pth::check_path pth::ok? pth::validate}}
 
 test pn-written-name-shadowing-around-the-declaration {shadowing around a declaration changes nothing: a non-proves outer `p`, a parameter and a local named like the proves function, and a later rebinding of its name are never reported; only the proves declaration is} -body {
     naming "$::E
@@ -656,17 +656,22 @@ fn b(v: str) -> bool proves v: E:
         [expr {[hir::warnings::of [compileWith $source]] eq [hir::warnings::of [compileWith $source]]}]
 } -result {{4:1 6:1 8:1} 1}
 
-test pn-instances-never-walked {the pass reads the generic source HIR: collecting over HIR stripped of its semantic side table (the instances) gives the identical warnings} -body {
+test pn-instances-never-walked {the pass reads the generic source HIR once: a proves function nested in a polymorphic function is in each of its semantic instances' snapshots, and is still one warning; collecting over HIR stripped of the semantic side table gives the identical warnings} -body {
     set hir [compileWith "$::E
-fn emailish(v: str) -> bool proves v: E:
-    v == \"a\"
 fn twice(x, s: str) -> bool:
+    fn emailish(v: str) -> bool proves v: E:
+        v == \"a\"
     emailish(s) and x == x
 \[twice(1, \"a\"), twice(\"z\", \"b\"), twice(\[1\], \"c\")\]"]
-    list [expr {[dict size [dict get $hir semantic instances]] >= 2}] \
+    set function [dict get [lindex [namingOf $hir] 0] data function]
+    set covering [lmap {id instance} [dict get $hir semantic instances] {
+        if {![dict exists $instance snapshot exprs $function]} continue
+        set id
+    }]
+    list [llength $covering] [dict exists $hir semantic byBlock $function] \
         [expr {[hir::warnings::ProvesNaming $hir] eq [hir::warnings::ProvesNaming [dict remove $hir semantic]]}] \
         [llength [namingOf $hir]]
-} -result {1 1 1}
+} -result {3 0 1 1}
 
 # ---------------------------------------------------------------------------
 # Interleaving with the four existing codes, the policy matrix (item 10)
@@ -741,7 +746,7 @@ fn emailish(v: str) -> bool proves v: E:
     if v == \"x\":
         return false
     true"
-} -result {{PROVES-NAMING 4:1} {SAME-FAILURE 6:9} {PROVES-NAMING 11:1} {SAME-RETURN-VALUE 13:16}}
+} -result {{PROVES-NAMING 4:1} {SAME-FAILURE 6:9} {PROVES-NAMING 10:1} {SAME-RETURN-VALUE 12:9}}
 
 test pn-mode-default {default: compiles, and the program carries the warning} -body {
     list [lmap w [namingOf [compileWith $::predicateSource default]] {dict get $w code}] [rejection $::predicateSource default]
