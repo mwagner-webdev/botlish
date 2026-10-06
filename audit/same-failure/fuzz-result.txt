@@ -1,0 +1,12 @@
+# SAME-FAILURE fuzz result: tclsh9.0 audit/same-failure/tools/fuzz.tcl SEEDS FIRST
+# 2000 seeds in four chunks (run in parallel); the test suite runs 60 (tests/same-failure.test, sf-fuzz-smoke)
+
+seeds 500 (from 1): 289 with warnings, 211 without; failures 0; extra warnings 0; groups 572; functions 1000, reachable fail sites 1909 (guards 660, elif pairs 234, list loops 241, counted loops 231, handlers 80, re-raises 144, final 120), dead 357, range-unreachable 344, propagating calls 456, bare final calls 191, returns 669, nested functions 270, only-silent programs 211
+
+seeds 500 (from 501): 279 with warnings, 221 without; failures 0; extra warnings 0; groups 553; functions 1000, reachable fail sites 1811 (guards 666, elif pairs 213, list loops 216, counted loops 203, handlers 74, re-raises 144, final 124), dead 351, range-unreachable 355, propagating calls 467, bare final calls 195, returns 684, nested functions 280, only-silent programs 221
+
+seeds 500 (from 1001): 296 with warnings, 204 without; failures 0; extra warnings 0; groups 605; functions 1001, reachable fail sites 1938 (guards 673, elif pairs 229, list loops 224, counted loops 259, handlers 78, re-raises 169, final 129), dead 340, range-unreachable 344, propagating calls 465, bare final calls 178, returns 684, nested functions 282, only-silent programs 204
+
+seeds 500 (from 1501): 284 with warnings, 216 without; failures 0; extra warnings 0; groups 568; functions 1002, reachable fail sites 1883 (guards 703, elif pairs 222, list loops 210, counted loops 214, handlers 74, re-raises 143, final 140), dead 353, range-unreachable 340, propagating calls 491, bare final calls 197, returns 717, nested functions 276, only-silent programs 216
+
+total: seeds 2000 (from 1): 1148 with warnings, 852 without; failures 0; extra warnings 0; groups 2298; functions 4003, reachable fail sites 7541 (guards 2702, elif pairs 898, list loops 891, counted loops 907, handlers 306, re-raises 600, final 513), dead 1401, range-unreachable 1383, propagating calls 1879, bare final calls 761, returns 2754, nested functions 1108, only-silent programs 852

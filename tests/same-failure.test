@@ -1,0 +1,1397 @@
+# same-failure.test -- the SAME-FAILURE compiler warning
+# (WARNINGS-SAME-FAILURE.md) on the warning framework WARNINGS-SAME-RETURN.md
+# built (hir/warnings.tcl).
+#
+# The theorem: a failure group is reported exactly when two or more distinct,
+# reachable exits of one function `fail` the same declared failure -- the same
+# failure as the compiler resolves it, never the same text. One warning per
+# group, anchored at the group's first exit, the others as notes.
+#
+# Exits here are exactly the written `fail` operations whose target is the
+# function: the mirror image of SAME-RETURN-VALUE's exits. A final expression,
+# a fall-through, a return and a call that fails (propagation) are never
+# exits of this warning, and a nested function's fails are its own.
+#
+# Like the other warning test files, every compile here passes its policy and
+# channel explicitly (`-warnings MODE`, `-warning-channel ""` to collect
+# without printing), so this file exercises default, off and error whatever
+# the harness's process default is.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+
+set ::allBackends {interp compile cranelift-generic cranelift}
+set ::sfCode SAME-FAILURE
+
+# The HIR of SOURCE under policy MODE (default off error), collecting
+# warnings without printing them.
+proc compileWith {source {mode default}} {
+    return [surface::compile $source t.bot -warnings $mode -warning-channel ""]
+}
+
+# "LINE:COL" of ORIGIN in HIR, without the file name when it is t.bot.
+proc loc {hir origin} {
+    return [regsub {^t\.bot:} [hir::originLocation $hir $origin] {}]
+}
+
+# The SAME-FAILURE warnings of HIR.
+proc failuresOf {hir} {
+    return [lmap w [hir::warnings::of $hir] {
+        if {[dict get $w code] ne $::sfCode} continue
+        set w
+    }]
+}
+
+# Each SAME-FAILURE warning of SOURCE as {PRIMARY FAILURE EXITS {SECONDARY...}},
+# locations as LINE:COL.
+proc failures {source} {
+    set hir [compileWith $source]
+    return [lmap w [failuresOf $hir] {
+        list [loc $hir [dict get $w primary]] [dict get $w data failure] [dict get $w data exits] \
+            [lmap o [dict get $w secondary] {loc $hir $o}]
+    }]
+}
+
+# "MESSAGE @ PRIMARY SECONDARY..." for each SAME-FAILURE warning of SOURCE.
+proc shown {source} {
+    set hir [compileWith $source]
+    return [lmap w [failuresOf $hir] {
+        string cat [dict get $w message] " @ " \
+            [join [lmap o [list [dict get $w primary] {*}[dict get $w secondary]] {loc $hir $o}] { }]
+    }]
+}
+
+# 1 if SOURCE compiles with no SAME-FAILURE warning.
+proc silent {source} {
+    return [expr {[failuresOf [compileWith $source]] eq ""}]
+}
+
+# Every warning of SOURCE (all codes) as {CODE PRIMARY}.
+proc allWarnings {source} {
+    set hir [compileWith $source]
+    return [lmap w [hir::warnings::of $hir] {list [dict get $w code] [loc $hir [dict get $w primary]]}]
+}
+
+# The rejection of SOURCE under MODE: {errorcode message}, or "compiled".
+proc rejection {source mode} {
+    if {[catch {compileWith $source $mode} message options]} {
+        return [list [dict get $options -errorcode] $message]
+    }
+    return compiled
+}
+
+# Runs SCRIPT with module files FILES ({NAME TEXT ...}) in a private library
+# directory (a per-process name in the tcltest temporary directory).
+proc withModules {files script} {
+    set saved $::core::libraryDir
+    set dir [makeDirectory sf-scratch-[pid]]
+    set ::core::libraryDir $dir
+    try {
+        foreach {name text} $files {
+            set channel [open [file join $dir $name] w]
+            puts -nonewline $channel $text
+            close $channel
+        }
+        uplevel 1 $script
+    } finally {
+        set ::core::libraryDir $saved
+        removeDirectory sf-scratch-[pid]
+    }
+}
+
+# The names of the functions whose blocks hir::completions::reachedExprs is
+# asked about while SCRIPT runs (the pass's candidate-gated walk).
+proc walkedFunctions {hir script} {
+    set ::walked {}
+    set names [hir::warnings::BlockNames $hir]
+    trace add execution hir::completions::reachedExprs enter {apply {{command op} {lappend ::walked [lindex $command 2]}}}
+    try {
+        uplevel 1 $script
+    } finally {
+        trace remove execution hir::completions::reachedExprs enter {apply {{command op} {lappend ::walked [lindex $command 2]}}}
+    }
+    return [lmap e $::walked {dict get $names $e}]
+}
+
+# ---------------------------------------------------------------------------
+# Groups (items 3, 11): one warning per declared failure raised from N >= 2
+# distinct, reachable exits
+
+test sf-parse-record-rendered {the motivating guard pair: one warning at the first exit, one note, rendered exactly} -body {
+    set source {error Invalid
+fn parse_record(text, pos) errors Invalid:
+    if text == "":
+        fail Invalid
+    if pos == 3:
+        fail Invalid
+    pos + 1}
+    set hir [compileWith $source]
+    lmap w [failuresOf $hir] {hir::warnings::render $hir $w}
+} -result {{t.bot:4:9: warning: failure `Invalid` is raised from 2 distinct exits (SAME-FAILURE)
+t.bot:6:9: note: also raised here}}
+
+test sf-two-exits {two fails of one declared failure: one warning} -body {
+    failures {error E
+fn f(x) errors E:
+    if x < 0:
+        fail E
+    if x > 9:
+        fail E
+    x}
+} -result {{4:9 E 2 6:9}}
+
+test sf-three-exits {three fails of one declared failure: one warning, two notes} -body {
+    failures {error E
+fn f(x) errors E:
+    if x < 0:
+        fail E
+    if x > 9:
+        fail E
+    if x == 5:
+        fail E
+    x}
+} -result {{4:9 E 3 {6:9 8:9}}}
+
+test sf-one-diagnostic-per-group-never-pairwise {four fails of one failure are one diagnostic with three notes, not six pairs} -body {
+    set hir [compileWith {error E
+fn f(x) errors E:
+    if x == 1:
+        fail E
+    if x == 2:
+        fail E
+    if x == 3:
+        fail E
+    if x == 4:
+        fail E
+    x}]
+    list [llength [hir::warnings::of $hir]] [dict get [lindex [failuresOf $hir] 0] data exits] \
+        [llength [dict get [lindex [failuresOf $hir] 0] secondary]]
+} -result {1 4 3}
+
+test sf-a-a-b-b-c {A A B B C: two warnings (A and B), correct anchors, C silent} -body {
+    failures {error A
+error B
+error C
+fn f(x) errors A, B, C:
+    if x == 1:
+        fail A
+    if x == 2:
+        fail B
+    if x == 3:
+        fail A
+    if x == 4:
+        fail B
+    if x == 5:
+        fail C
+    x}
+} -result {{6:9 A 2 10:9} {8:9 B 2 12:9}}
+
+test sf-two-groups-are-two-diagnostics {A twice and B three times in one function: two warnings, each its own count} -body {
+    shown {error A
+error B
+fn f(x) errors A, B:
+    if x == 1:
+        fail B
+    if x == 2:
+        fail A
+    if x == 3:
+        fail B
+    if x == 4:
+        fail A
+    if x == 5:
+        fail B
+    x}
+} -result {{failure `B` is raised from 3 distinct exits @ 5:9 9:9 13:9} {failure `A` is raised from 2 distinct exits @ 7:9 11:9}}
+
+test sf-single-fail-silent {a single exit never warns} -body {
+    silent {error E
+fn f(x) errors E:
+    if x < 0:
+        fail E
+    x}
+} -result 1
+
+test sf-different-declared-failures-never-group {two different declared failures, once each: silent} -body {
+    silent {error BelowRange
+error AboveRange
+fn from_int(value) errors BelowRange, AboveRange:
+    if value < 0:
+        fail BelowRange
+    if value > 255:
+        fail AboveRange
+    value}
+} -result 1
+
+test sf-similar-names-never-group {A, A2, a and AError are four failures: once each is silent; only a real repeat groups, alone} -body {
+    set decls {error A
+error A2
+error a
+error AError
+}
+    list [silent "${decls}fn f(x) errors A, A2, a, AError:
+    if x == 1:
+        fail A
+    if x == 2:
+        fail A2
+    if x == 3:
+        fail a
+    if x == 4:
+        fail AError
+    x"] [failures "${decls}fn f(x) errors A, A2, a, AError:
+    if x == 1:
+        fail A
+    if x == 2:
+        fail A2
+    if x == 3:
+        fail A
+    if x == 4:
+        fail AError
+    x"]
+} -result {1 {{7:9 A 2 11:9}}}
+
+test sf-one-name-is-one-declaration-program-wide {two declarations of one name (two modules, a module and the program, a builtin) are rejected: identical text never names two failures} -body {
+    withModules {m.bot {error Invalid
+fn g(x):
+    x
+} n.bot {error Invalid
+fn h(x):
+    x
+}} {
+        list [lindex [rejection "import m\nimport n\nn::h(1)" default] 0] \
+            [lindex [rejection "import m\nerror Invalid\nm::g(1)" default] 0] \
+            [lindex [rejection "error IndexNotFound\n1" default] 0]
+    }
+} -result {{CORE SEMANTIC UNDECLARED-ERROR} {CORE SEMANTIC UNDECLARED-ERROR} {CORE SEMANTIC UNDECLARED-ERROR}}
+
+test sf-module-failure-is-the-same-failure {a fail of a module's declared error and the program's own fail of it are one identity: the name the resolver admits} -body {
+    withModules {m.bot {error Invalid
+fn g(x) errors Invalid:
+    if x == 0:
+        fail Invalid
+    x
+}} {
+        failures {import m
+fn f(x) errors Invalid:
+    if x < 0:
+        fail Invalid
+    if x > 9:
+        fail Invalid
+    m::g(x)}
+    }
+} -result {{4:9 Invalid 2 6:9}}
+
+test sf-builtin-error-groups {a builtin error of the runtime (IndexNotFound) is a declared failure like any other} -body {
+    failures {fn f(x) errors IndexNotFound:
+    if x < 0:
+        fail IndexNotFound
+    if x > 9:
+        fail IndexNotFound
+    x}
+} -result {{3:9 IndexNotFound 2 5:9}}
+
+test sf-never-across-functions {one failure, once in each of two functions: never grouped across functions} -body {
+    silent {error E
+fn f(x) errors E:
+    if x < 0:
+        fail E
+    x
+fn g(x) errors E:
+    if x > 9:
+        fail E
+    x}
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Kind separation (item 4): the mirror-image exits table
+
+test sf-returns-never-grouped-with-fails {repeated returns and one fail: SAME-RETURN-VALUE only; the returns are not failure exits} -body {
+    allWarnings {error E
+fn f(x) errors E:
+    if x == 1:
+        return 0
+    if x == 2:
+        fail E
+    if x == 3:
+        return 0
+    x}
+} -result {{SAME-RETURN-VALUE 4:9}}
+
+test sf-fails-never-grouped-with-returns {the milestone-1 pin, now in both directions: two fails beside returns are a group of exactly the two fails, and no return value groups} -body {
+    set hir [compileWith {error Bad
+fn f(x) -> int errors Bad:
+    if x < 0:
+        fail Bad
+    if x > 9:
+        fail Bad
+    if x == 5:
+        return 0
+    1}]
+    lmap w [hir::warnings::of $hir] {list [dict get $w code] [dict get $w data exits] [loc $hir [dict get $w primary]]}
+} -result {{SAME-FAILURE 2 4:9}}
+
+test sf-repeated-returns-and-fails-two-warnings {repeated returns and repeated fails in one function: two independent diagnostics} -body {
+    allWarnings {error E
+fn f(x) errors E:
+    if x == 1:
+        return 0
+    if x == 2:
+        fail E
+    if x == 3:
+        return 0
+    if x == 4:
+        fail E
+    0}
+} -result {{SAME-RETURN-VALUE 4:9} {SAME-FAILURE 6:9}}
+
+test sf-final-expression-is-not-an-exit {the final expression and a fall-through are normal completions, never failure exits} -body {
+    list [silent {error E
+fn f(x) errors E:
+    if x == 1:
+        fail E
+    if x == 2:
+        return 0
+    0}] [silent {error E
+fn f(x) errors E:
+    if x == 1:
+        fail E
+    if x == 2:
+        0}]
+} -result {1 1}
+
+test sf-fails-and-falls-through {a function that fails and falls through: the fall-through contributes nothing, the fails count} -body {
+    failures {error E
+fn f(x) errors E:
+    if x == 1:
+        fail E
+    if x == 2:
+        fail E}
+} -result {{4:9 E 2 6:9}}
+
+test sf-propagated-failure-is-not-an-exit {two calls of a failing function propagate its failure: ordinary calls, silent} -body {
+    silent {error E
+fn g(x) errors E:
+    if x == 1:
+        fail E
+    x
+fn f(x) errors E:
+    if x == 2:
+        return g(x)
+    g(x + 1)}
+} -result 1
+
+test sf-propagated-beside-one-fail-silent {one fail and a propagating call of the same failure: one exit, silent} -body {
+    silent {error E
+fn g(x) errors E:
+    if x == 1:
+        fail E
+    x
+fn f(x) errors E:
+    if x == 2:
+        fail E
+    g(x)}
+} -result 1
+
+test sf-body-ending-in-bare-failing-call-silent {a body that ends in a bare failing call: the call is no exit} -body {
+    silent {error E
+fn g(x) errors E:
+    if x == 1:
+        fail E
+    x
+fn f(x) errors E:
+    g(x)
+    g(x + 1)}
+} -result 1
+
+test sf-handled-call-is-not-an-exit {a handled call absorbs its callee's failure; only written fails count} -body {
+    silent {error E
+fn g(x) errors E:
+    if x == 1:
+        fail E
+    x
+fn f(x) errors E:
+    y = g(x):
+        on E:
+            0
+    if y == 3:
+        fail E
+    y}
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Where fails live (item 5)
+
+test sf-if-else-branches {fail in both branches of a written if/else} -body {
+    failures {error E
+fn f(x) errors E:
+    if x < 0:
+        fail E
+    else:
+        fail E}
+} -result {{4:9 E 2 6:9}}
+
+test sf-elif-is-a-nested-if {elif branches are nested ifs: each fail is an exit} -body {
+    failures {error E
+fn f(x) errors E:
+    if x < 0:
+        fail E
+    elif x > 9:
+        fail E
+    elif x == 5:
+        fail E
+    else:
+        x}
+} -result {{4:9 E 3 {6:9 8:9}}}
+
+test sf-fail-as-final-statement {fail as the body's final statement counts} -body {
+    failures {error E
+fn f(x) errors E:
+    if x < 0:
+        fail E
+    fail E}
+} -result {{4:9 E 2 5:5}}
+
+test sf-every-loop-form {fail inside every loop form (list, counted, lockstep, unconditional) participates} -body {
+    failures {error E
+fn f(xs, n) errors E:
+    loop x in xs:
+        if x == 1:
+            fail E
+    loop i from 0 to n:
+        if i == 3:
+            fail E
+    loop x in xs and y in xs:
+        if x == y:
+            fail E
+    loop:
+        if n == 2:
+            fail E
+        break
+    0}
+} -result {{5:13 E 4 {8:13 11:13 14:13}}}
+
+test sf-loop-and-top-level {one fail in a loop and one outside: two exits} -body {
+    failures {error E
+fn f(xs) errors E:
+    loop x in xs:
+        if x == 0:
+            fail E
+    if xs == []:
+        fail E
+    xs}
+} -result {{5:13 E 2 7:9}}
+
+test sf-handler-body {a fail inside an on-handler body is an exit of the enclosing function} -body {
+    failures {error A
+error E
+fn g(x) errors A:
+    if x == 1:
+        fail A
+    x
+fn f(x) errors E:
+    y = g(x):
+        on A:
+            fail E
+    if y == 3:
+        fail E
+    y}
+} -result {{10:13 E 2 12:9}}
+
+test sf-re-raise-counts {a re-raise (on Invalid: fail Invalid) is a written fail: it counts} -body {
+    failures {error Invalid
+fn g(x) errors Invalid:
+    if x == 1:
+        fail Invalid
+    x
+fn f(x) errors Invalid:
+    if x < 0:
+        fail Invalid
+    y = g(x):
+        on Invalid:
+            fail Invalid
+    y}
+} -result {{8:9 Invalid 2 11:13}}
+
+test sf-re-raise-alone-silent {a lone re-raise is one exit: silent} -body {
+    silent {error Invalid
+fn g(x) errors Invalid:
+    if x == 1:
+        fail Invalid
+    x
+fn f(x) errors Invalid:
+    y = g(x):
+        on Invalid:
+            fail Invalid
+    y}
+} -result 1
+
+test sf-two-handlers-same-failure {two handlers of one call failing one failure: two exits} -body {
+    failures {error A
+error B
+error E
+fn g(x) errors A, B:
+    if x == 1:
+        fail A
+    if x == 2:
+        fail B
+    x
+fn f(x) errors E:
+    y = g(x):
+        on A:
+            fail E
+        on B:
+            fail E
+    y}
+} -result {{13:13 E 2 15:13}}
+
+test sf-nested-function-owns-its-fails {target confusion: the enclosing function and its nested function fail E once each -- both silent, never one group of 2} -body {
+    silent {error E
+fn f(x) errors E:
+    fn inner(y) errors E:
+        if y == 1:
+            fail E
+        y
+    if x == 1:
+        fail E
+    inner(x)}
+} -result 1
+
+test sf-nested-function-warns-on-its-own {a nested function's repeated fail is its own warning; the enclosing function's group counts only its own fails} -body {
+    set hir [compileWith {error E
+fn f(x) errors E:
+    fn inner(y) errors E:
+        if y == 1:
+            fail E
+        if y == 2:
+            fail E
+        y
+    if x == 1:
+        fail E
+    if x == 2:
+        fail E
+    inner(x)}]
+    lmap w [failuresOf $hir] {list [dict get $w data functionName] [dict get $w data exits] [loc $hir [dict get $w primary]]}
+} -result {{inner 2 5:13} {f 2 10:9}}
+
+test sf-closure-owns-its-fails {a closure capturing the enclosing parameter owns its fails} -body {
+    set hir [compileWith {error E
+fn f(x) errors E:
+    fn check(y) errors E:
+        if y == x:
+            fail E
+        if y > x:
+            fail E
+        y
+    if x < 0:
+        fail E
+    check(x + 1)}]
+    lmap w [failuresOf $hir] {list [dict get $w data functionName] [dict get $w data exits]}
+} -result {{check 2}}
+
+test sf-nested-function-in-branch-and-loop {nested functions defined in a branch or a loop body still own their fails} -body {
+    silent {error E
+fn f(xs) errors E:
+    if xs == []:
+        fn a(y) errors E:
+            if y == 1:
+                fail E
+            y
+        return a(1)
+    loop x in xs:
+        fn b(y) errors E:
+            if y == 2:
+                fail E
+            y
+        if b(x) == 3:
+            fail E
+    0}
+} -result 1
+
+test sf-synthesized-boolean-if-never-opened {a guard on `a or b` / `not a and b` is one exit, not one per operand} -body {
+    list [silent {error E
+fn f(x) errors E:
+    if x < 0 or x > 9:
+        fail E
+    x}] [failures {error E
+fn f(x) errors E:
+    if x < 0 or x > 9:
+        fail E
+    if not (x == 5) and x != 4:
+        fail E
+    x}]
+} -result {1 {{4:9 E 2 6:9}}}
+
+# ---------------------------------------------------------------------------
+# Reachability (item 9)
+
+test sf-dead-branch-never-counts {a fail under a statically false branch is no exit: with two reachable ones the count is 2, with one it is silent} -body {
+    list [failures {error Invalid
+fn f(x) errors Invalid:
+    if 1 == 2:
+        fail Invalid
+    if x == 7:
+        fail Invalid
+    if x == 8:
+        fail Invalid
+    x}] [silent {error Invalid
+fn f(x) errors Invalid:
+    if 1 == 2:
+        fail Invalid
+    if x == 7:
+        fail Invalid
+    x}]
+} -result {{{6:9 Invalid 2 8:9}} 1}
+
+test sf-code-after-return-never-counts {a fail after an unconditional return is unreachable} -body {
+    silent {error Invalid
+fn f(x) errors Invalid:
+    if x == 7:
+        fail Invalid
+    return x
+    fail Invalid}
+} -result 1
+
+test sf-range-unreachable-pruned {a range-unreachable fail beside two reachable ones: the count stays 2, the dead site is in no location} -body {
+    failures {error Invalid
+fn f(x) errors Invalid:
+    if x < 0:
+        if x > 5:
+            fail Invalid
+    if x == 7:
+        fail Invalid
+    if x == 8:
+        fail Invalid
+    x}
+} -result {{7:9 Invalid 2 9:9}}
+
+test sf-range-feasible-control {the feasible control (x < -5 inside x < 0) keeps all three} -body {
+    failures {error Invalid
+fn f(x) errors Invalid:
+    if x < 0:
+        if x < -5:
+            fail Invalid
+    if x == 7:
+        fail Invalid
+    if x == 8:
+        fail Invalid
+    x}
+} -result {{5:13 Invalid 3 {7:9 9:9}}}
+
+test sf-range-pruning-removes-a-group {a structural pair whose second site is range-unreachable is no group: pruning only removes sites} -body {
+    silent {error Invalid
+fn f(x) errors Invalid:
+    if x < 0:
+        if x > 5:
+            fail Invalid
+    if x == 7:
+        fail Invalid
+    x}
+} -result 1
+
+test sf-walk-only-for-candidates {the completion walk runs only for a function with a structurally repeated failure of its own, once each: a dead site or a nested function's fail never makes a candidate} -body {
+    set hir [compileWith {error A
+error B
+fn none(x):
+    x
+fn one(x) errors A:
+    if x == 1:
+        fail A
+    x
+fn distinct(x) errors A, B:
+    if x == 1:
+        fail A
+    if x == 2:
+        fail B
+    x
+fn deadpair(x) errors A:
+    if 1 == 2:
+        fail A
+    if x == 1:
+        fail A
+    x
+fn pair(x) errors A:
+    if x == 1:
+        fail A
+    if x == 2:
+        fail A
+    x
+fn rangepair(x) errors A:
+    if x < 0:
+        if x > 5:
+            fail A
+    if x == 1:
+        fail A
+    x
+fn nestedpair(x) errors A:
+    fn inner(y) errors A:
+        if y == 1:
+            fail A
+        y
+    if x == 1:
+        fail A
+    inner(x)} off]
+    walkedFunctions $hir {hir::warnings::SameFailure $hir}
+} -result {pair rangepair}
+
+test sf-walk-records-fail-sites {the recording walk records fail sites as it is (no extension): reached sites present, the range-unreachable one absent} -body {
+    set hir [compileWith {error Invalid
+fn f(x) errors Invalid:
+    if x < 0:
+        if x > 5:
+            fail Invalid
+    if x == 7:
+        fail Invalid
+    x} off]
+    set block [lindex [dict keys [hir::warnings::BlockNames $hir]] 0]
+    set reached [hir::completions::reachedExprs $hir $block]
+    lmap e [hir::warnings::BodyExprs $hir $block] {
+        if {[dict get $hir exprs $e kind] ne "fail"} continue
+        list [loc $hir [dict get $hir exprs $e origin]] [dict exists $reached $e]
+    }
+} -result {{5:13 0} {7:9 1}}
+
+test sf-pruning-leaves-the-count-right {the count, the sites and the notes are those of the reachable exits only} -body {
+    set hir [compileWith {error Invalid
+fn f(x) errors Invalid:
+    if x < 0:
+        if x > 5:
+            fail Invalid
+    if 1 == 2:
+        fail Invalid
+    if x == 7:
+        fail Invalid
+    if x == 8:
+        fail Invalid
+    if x == 9:
+        fail Invalid
+    x}]
+    set w [lindex [failuresOf $hir] 0]
+    list [dict get $w data exits] [llength [dict get $w data sites]] [llength [dict get $w secondary]] \
+        [lmap e [dict get $w data sites] {loc $hir [dict get $hir exprs $e origin]}]
+} -result {3 3 2 {9:9 11:9 13:9}}
+
+test sf-repeated-range-guard-pruned {a repeated `if x < 0: fail E` is dead after the first, and the range facts prove it: silent} -body {
+    silent {error E
+fn f(x) errors E:
+    if x < 0:
+        fail E
+    if x < 0:
+        fail E
+    x}
+} -result 1
+
+test sf-limit-repeated-equality-guard-counts {LIMIT: a repeated `if x == 7: fail E` is dead after the first at run time, but range facts cannot exclude one point, so it is not provably unreachable and counts (over-count, never a miss)} -body {
+    failures {error E
+fn f(x) errors E:
+    if x == 7:
+        fail E
+    if x == 7:
+        fail E
+    x}
+} -result {{4:9 E 2 6:9}}
+
+test sf-unreachable-function-is-not-walked {a nested function in a statically dead branch is never reported} -body {
+    silent {error E
+fn f(x) errors E:
+    if 1 == 2:
+        fn inner(y) errors E:
+            if y == 1:
+                fail E
+            if y == 2:
+                fail E
+            y
+        return inner(x)
+    x}
+} -result 1
+
+test sf-reach-module-code-located-in-module {a module function's fail exits (one inside a loop) are located in the module file} -body {
+    withModules {m.bot {error Invalid
+fn parse(xs, a) errors Invalid:
+    loop x in xs:
+        if x == a:
+            fail Invalid
+    if a == 0:
+        fail Invalid
+    a
+}} {
+        set hir [surface::compile {import m
+y = m::parse([1, 2], 3):
+    on Invalid:
+        0
+y} t.bot -warnings default -warning-channel ""]
+        lmap w [failuresOf $hir] {
+            list [file tail [hir::originLocation $hir [dict get $w primary]]] \
+                [lmap o [dict get $w secondary] {file tail [hir::originLocation $hir $o]}] \
+                [dict get $w data functionName]
+        }
+    }
+} -result {{m.bot:5:13 m.bot:7:9 m::parse}}
+
+# ---------------------------------------------------------------------------
+# Declared failures only (item 8)
+
+test sf-strict0-unadmitted-fail-never-warned {-strict 0: fails the function does not declare keep an UNHANDLED-ERROR diagnostic; the program is never warned about} -body {
+    set hir [surface::compile {error E
+fn f(x):
+    if x == 1:
+        fail E
+    if x == 2:
+        fail E
+    x} t.bot -strict 0 -warnings default -warning-channel ""]
+    list [lsort -unique [lmap d [hir::diagnostics $hir] {dict get $d kind}]] [hir::warnings::of $hir]
+} -result {UNHANDLED-ERROR {}}
+
+test sf-strict0-undeclared-error-never-warned {-strict 0: fails of an undeclared error keep an UNDECLARED-ERROR diagnostic; never warned} -body {
+    set hir [surface::compile {fn f(x) errors Nope:
+    if x == 1:
+        fail Nope
+    if x == 2:
+        fail Nope
+    x} t.bot -strict 0 -warnings default -warning-channel ""]
+    list [lsort -unique [lmap d [hir::diagnostics $hir] {dict get $d kind}]] [hir::warnings::of $hir]
+} -result {UNDECLARED-ERROR {}}
+
+test sf-hir-text-input-warns {identity is the name, which HIR text keeps: the parsed HIR has the same group (no provenance needed)} -body {
+    set hir [compileWith {error E
+fn f(x) errors E:
+    if x == 1:
+        fail E
+    if x == 2:
+        fail E
+    x} off]
+    set parsed [hir::parse [hir::format $hir]]
+    lmap w [hir::warnings::collect $parsed] {list [dict get $w code] [dict get $w data failure] [dict get $w data exits]}
+} -result {{SAME-FAILURE E 2}}
+
+test sf-unresolved-site-silent {a fail whose name is not one of the function's resolved declared failures (hand-written HIR text, which hir::parse admits) is silent} -body {
+    set hir [compileWith {error E
+fn f(x) errors E:
+    if x == 1:
+        fail E
+    if x == 2:
+        fail E
+    x} off]
+    set text [hir::format $hir]
+    set edited [hir::parse [string map {" errors E :" " :"} $text]]
+    list [string match "* errors E :*" $text] [hir::diagnostics $edited] \
+        [dict get $edited exprs e2 declaredErrors] [hir::warnings::collect $edited]
+} -result {1 {} {} {}}
+
+# ---------------------------------------------------------------------------
+# Payload (item 7): `fail` carries no payload, so identity is the name
+
+test sf-fail-carries-no-payload {the grammar is `fail NAME`: a payload is a syntax error, and the HIR fail node has no value child} -body {
+    set hir [compileWith {error E
+fn f(x) errors E:
+    if x == 1:
+        fail E
+    x} off]
+    set fails [lmap {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "fail"} continue
+        list [dict exists $node value] [hir::children $hir $e] [dict get $node name]
+    }]
+    list [lrange [lindex [rejection {error E
+fn f(x) errors E:
+    fail E(x)} default] 0] 0 1] [lrange [lindex [rejection {error E
+fn f(x) errors E:
+    fail E x} default] 0] 0 1] $fails
+} -result {{SURFACE SYNTAX} {SURFACE SYNTAX} {{0 {} E}}}
+
+test sf-identity-is-the-name {the record's failure is the declared name; failureName is the same name} -body {
+    set w [lindex [failuresOf [compileWith {error Invalid
+fn f(x) errors Invalid:
+    if x == 1:
+        fail Invalid
+    if x == 2:
+        fail Invalid
+    x}]] 0]
+    list [dict get $w data failure] [dict get $w data failureName]
+} -result {Invalid Invalid}
+
+# ---------------------------------------------------------------------------
+# Structure (item 12): record, data, message, anchors, ordering
+
+set ::groupSource {error Invalid
+fn parse(x) errors Invalid:
+    if x < 0:
+        fail Invalid
+    if x > 9:
+        fail Invalid
+    if x == 5:
+        fail Invalid
+    x}
+
+test sf-record-shape {the record is {code message primary secondary data}} -body {
+    lsort [dict keys [lindex [failuresOf [compileWith $::groupSource]] 0]]
+} -result {code data message primary secondary}
+
+test sf-record-data-fields {data: function (block ExprId), functionName, failure, failureName, exits, sites (fail ExprIds in source order), note} -body {
+    set hir [compileWith $::groupSource]
+    set w [lindex [failuresOf $hir] 0]
+    set data [dict get $w data]
+    list [lsort [dict keys $data]] [dict get $hir exprs [dict get $data function] kind] \
+        [dict get $data functionName] [dict get $data exits] \
+        [lmap e [dict get $data sites] {list [dict get $hir exprs $e kind] [dict get $hir exprs $e name] [loc $hir [dict get $hir exprs $e origin]]}] \
+        [dict get $data note] \
+        [expr {[lmap e [dict get $data sites] {dict get $hir exprs $e origin}] eq [list [dict get $w primary] {*}[dict get $w secondary]]}]
+} -result {{exits failure failureName function functionName note sites} block parse 3 {{fail Invalid 4:9} {fail Invalid 6:9} {fail Invalid 8:9}} {also raised here} 1}
+
+test sf-no-rendered-source-in-data {data carries identities and counts, never source text} -body {
+    set data [dict get [lindex [failuresOf [compileWith $::groupSource]] 0] data]
+    list [string first "fail " $data] [string first "if " $data] [string first "x <" $data]
+} -result {-1 -1 -1}
+
+test sf-message-text {one template: names the failure and states the count} -body {
+    lmap w [failuresOf [compileWith $::groupSource]] {dict get $w message}
+} -result {{failure `Invalid` is raised from 3 distinct exits}}
+
+test sf-message-is-not-prescriptive {no imperative, no rewrite, no suggestion to merge or split} -body {
+    set hir [compileWith $::groupSource]
+    set text [join [lmap w [failuresOf $hir] {hir::warnings::render $hir $w}] \n]
+    set found {}
+    foreach word {merge combine split richer should consider use instead "or " " and " rewrite distinct- "->" "fail "} {
+        if {[string first $word $text] >= 0} {
+            lappend found $word
+        }
+    }
+    set found
+} -result {}
+
+test sf-notes-one-per-secondary {each secondary exit is one note line with the note text} -body {
+    set hir [compileWith $::groupSource]
+    set lines [split [hir::warnings::render $hir [lindex [failuresOf $hir] 0]] \n]
+    list [llength $lines] [lmap line [lrange $lines 1 end] {regsub {^t\.bot:[0-9]+:[0-9]+: } $line {}}]
+} -result {3 {{note: also raised here} {note: also raised here}}}
+
+test sf-anchor-first-in-source-order {the primary is the group's first exit in source order (a loop's fail before a later guard)} -body {
+    failures {error E
+fn f(xs, n) errors E:
+    if n == 0:
+        loop x in xs:
+            if x == n:
+                fail E
+    if n == 1:
+        fail E
+    n}
+} -result {{6:17 E 2 8:9}}
+
+test sf-source-order-across-functions {several functions' warnings in source order} -body {
+    lmap w [failures {error E
+fn g(x) errors E:
+    if x == 1:
+        fail E
+    if x == 2:
+        fail E
+    x
+fn f(x) errors E:
+    if x == 3:
+        fail E
+    if x == 4:
+        fail E
+    x}] {lindex $w 0}
+} -result {4:9 10:9}
+
+test sf-deterministic {compiling the same source twice gives identical warnings} -body {
+    expr {[hir::warnings::of [compileWith $::groupSource]] eq [hir::warnings::of [compileWith $::groupSource]]}
+} -result 1
+
+test sf-generic-hir-once-instances-never-walked {a function analyzed as several semantic instances is one warning} -body {
+    set hir [compileWith {error E
+fn f(x, y) errors E:
+    if x == y:
+        fail E
+    if y == 0:
+        fail E
+    x
+a = f(1, 2):
+    on E:
+        0
+b = f("s", 2):
+    on E:
+        "z"
+c = f([1], 2):
+    on E:
+        [0]
+[a, b, c]}]
+    list [expr {[dict size [dict get $hir semantic instances]] >= 2}] [llength [failuresOf $hir]]
+} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# Interleaving with the three existing codes, the policy matrix (item 13)
+
+set ::fourSource {error Bad
+fn dup(x):
+    if x < 0:
+        return 0
+    if x > 100:
+        return 0
+    return 1
+fn two(a, b):
+    a
+fn pair(a, b):
+    [a, b]
+fn t(x):
+    return two(x, 1)
+fn check(x) errors Bad:
+    if x < 0:
+        fail Bad
+    if x > 9:
+        fail Bad
+    x}
+
+test sf-interleaving-four-codes {all four codes in one program, in source order} -body {
+    allWarnings $::fourSource
+} -result {{SAME-RETURN-VALUE 4:9} {FIXED-ARITY-LIST-RETURN 11:5} {METHOD-ELIGIBLE 13:12} {SAME-FAILURE 16:9}}
+
+test sf-interleaving-four-codes-other-order {the same four warnings with the functions in the other order sort by location, not by code} -body {
+    allWarnings {error Bad
+fn check(x) errors Bad:
+    if x < 0:
+        fail Bad
+    if x > 9:
+        fail Bad
+    x
+fn two(a, b):
+    a
+fn t(x):
+    return two(x, 1)
+fn pair(a, b):
+    [a, b]
+fn dup(x):
+    if x < 0:
+        return 0
+    if x > 100:
+        return 0
+    return 1}
+} -result {{SAME-FAILURE 4:9} {METHOD-ELIGIBLE 11:12} {FIXED-ARITY-LIST-RETURN 13:5} {SAME-RETURN-VALUE 16:9}}
+
+test sf-interleaving-deterministic {compiling the four-code program twice yields the same warnings} -body {
+    expr {[hir::warnings::of [compileWith $::fourSource]] eq [hir::warnings::of [compileWith $::fourSource]]}
+} -result 1
+
+test sf-mode-default {default: compiles, and the program carries the warning} -body {
+    list [lmap w [failuresOf [compileWith $::fourSource default]] {dict get $w code}] [rejection $::fourSource default]
+} -result {SAME-FAILURE compiled}
+
+test sf-mode-off {off: compiles, and nothing is reported} -body {
+    set hir [compileWith $::fourSource off]
+    list [hir::warnings::of $hir] [dict exists $hir warnings]
+} -result {{} 0}
+
+test sf-mode-error-only-this-code {error: a program with only this warning is rejected with the warning's own code and message} -body {
+    rejection {error Bad
+fn check(x) errors Bad:
+    if x < 0:
+        fail Bad
+    if x > 9:
+        fail Bad
+    x} error
+} -result {{CORE SEMANTIC SAME-FAILURE} {t.bot:4:9: failure `Bad` is raised from 2 distinct exits (also at t.bot:6:9)}}
+
+test sf-mode-error-first-in-sort-order {error with four codes: exactly one error, the sort-first, with its own code} -body {
+    list [lindex [rejection $::fourSource error] 0] [lindex [rejection {error Bad
+fn check(x) errors Bad:
+    if x < 0:
+        fail Bad
+    if x > 9:
+        fail Bad
+    x
+fn pair(a, b):
+    [a, b]} error] 0]
+} -result {{CORE SEMANTIC SAME-RETURN-VALUE} {CORE SEMANTIC SAME-FAILURE}}
+
+test sf-mode-error-clean-program {error mode accepts a program whose failures are each raised once} -body {
+    rejection {error A
+error B
+fn f(x) errors A, B:
+    if x < 0:
+        fail A
+    if x > 9:
+        fail B
+    x} error
+} -result compiled
+
+test sf-mode-default-is-the-default {no option and no environment setting means warnings on, as warnings} -body {
+    set saved $::env(BOTLISH_WARNINGS)
+    unset ::env(BOTLISH_WARNINGS)
+    try {
+        set hir [surface::compile $::groupSource t.bot -warning-channel ""]
+        lmap w [hir::warnings::of $hir] {dict get $w code}
+    } finally {
+        set ::env(BOTLISH_WARNINGS) $saved
+    }
+} -result SAME-FAILURE
+
+test sf-environment-default {BOTLISH_WARNINGS is only the default for a compilation given no -warnings, read fresh each time} -body {
+    set saved $::env(BOTLISH_WARNINGS)
+    try {
+        set results {}
+        foreach mode {default off error} {
+            set ::env(BOTLISH_WARNINGS) $mode
+            lappend results [catch {surface::compile $::groupSource t.bot -warning-channel ""}] \
+                [catch {surface::compile $::groupSource t.bot -warnings off -warning-channel ""}]
+        }
+        set results
+    } finally {
+        set ::env(BOTLISH_WARNINGS) $saved
+    }
+} -result {0 0 0 0 1 0}
+
+test sf-unknown-mode {a mode outside default/off/error is a plain usage error} -body {
+    surface::compile $::groupSource t.bot -warnings failures -warning-channel ""
+} -returnCodes error -match glob -result {unknown warnings mode "failures" (known: default, off, error)}
+
+test sf-no-fine-grained-options {there is no per-warning option: -Wno-same-failure is not an option} -body {
+    surface::compile $::groupSource t.bot -Wno-same-failure 1
+} -returnCodes error -match glob -result {*unknown option "-Wno-same-failure"*}
+
+test sf-no-new-modes-or-options {the policy surface is still exactly default, off, error; the registry is static, one line per code} -body {
+    list $hir::warnings::modes [dict keys $hir::warnings::passes] [dict get $hir::warnings::passes SAME-FAILURE] \
+        [expr {[llength [info commands hir::warnings::enable]] + [llength [info commands hir::warnings::disable]]}]
+} -result {{default off error} {SAME-RETURN-VALUE METHOD-ELIGIBLE FIXED-ARITY-LIST-RETURN SAME-FAILURE} hir::warnings::SameFailure 0}
+
+test sf-error-promotion-identity {the promoted error keeps the code and the message the warning has} -body {
+    set w [lindex [failuresOf [compileWith $::groupSource default]] 0]
+    lassign [rejection $::groupSource error] code message
+    list [lindex $code end] [dict get $w code] [string match "*[dict get $w message]*" $message]
+} -result {SAME-FAILURE SAME-FAILURE 1}
+
+test sf-off-runs-no-warning-pass {warnings off does not execute the pass at all (default does): the stats counter} -body {
+    hir::warnings::resetStats
+    compileWith $::groupSource off
+    set afterOff [hir::warnings::stats]
+    compileWith $::groupSource default
+    set afterDefault [hir::warnings::stats]
+    list $afterOff [dict exists $afterOff SAME-FAILURE] [dict get $afterDefault SAME-FAILURE]
+} -result {{} 0 1}
+
+test sf-off-runs-no-warning-pass-via-trace {an execution trace on the pass proves it is not invoked when off} -body {
+    set ::passCalls 0
+    trace add execution hir::warnings::SameFailure enter {apply {{args} {incr ::passCalls}}}
+    try {
+        compileWith $::groupSource off
+        set off $::passCalls
+        compileWith $::groupSource default
+        set on $::passCalls
+    } finally {
+        trace remove execution hir::warnings::SameFailure enter {apply {{args} {incr ::passCalls}}}
+    }
+    list $off $on
+} -result {0 1}
+
+test sf-compilation-with-errors-has-no-warnings {a program the compiler rejects is never warned about} -body {
+    set hir [surface::compile "$::groupSource\nnothing" t.bot -strict 0 -warnings default -warning-channel ""]
+    list [expr {[llength [hir::diagnostics $hir]] > 0}] [hir::warnings::of $hir]
+} -result {1 {}}
+
+test sf-policy-is-per-compilation {interleaved compilations under different modes never leak a mode} -body {
+    set a [compileWith $::groupSource off]
+    set b [compileWith $::groupSource default]
+    set c [catch {compileWith $::groupSource error}]
+    set d [compileWith $::groupSource off]
+    set e [compileWith $::groupSource default]
+    list [llength [failuresOf $a]] [llength [failuresOf $b]] $c [llength [failuresOf $d]] [llength [failuresOf $e]]
+} -result {0 1 1 0 1}
+
+test sf-warnings-attached-structurally {hir::warnings::of equals collect} -body {
+    set hir [compileWith $::fourSource default]
+    list [expr {[hir::warnings::of $hir] eq [hir::warnings::collect $hir]}] [llength [hir::warnings::collect $hir]]
+} -result {1 4}
+
+test sf-error-stops-before-backend {error mode rejects before any backend lowers anything (traces on all four entry points)} -body {
+    set source "$::groupSource\ny = parse(3):\n    on Invalid:\n        0\ny"
+    set ::lowerCalls 0
+    foreach command {native::evalHir native::prepareHir hir::lower core::compiler::evalHir} {
+        trace add execution $command enter {apply {{args} {incr ::lowerCalls}}}
+    }
+    try {
+        set rejected [catch {compileWith $source error} message options]
+    } finally {
+        foreach command {native::evalHir native::prepareHir hir::lower core::compiler::evalHir} {
+            trace remove execution $command enter {apply {{args} {incr ::lowerCalls}}}
+        }
+    }
+    list $rejected [dict get $options -errorcode] $::lowerCalls
+} -result {1 {CORE SEMANTIC SAME-FAILURE} 0}
+
+# ---------------------------------------------------------------------------
+# No semantics change (item 14)
+
+set ::runSource {error Invalid
+fn parse(x) errors Invalid:
+    if x < 0:
+        fail Invalid
+    if x > 9:
+        fail Invalid
+    x * 2
+v = loop k in [1, -1, 12, 4]:
+    r = parse(k):
+        on Invalid:
+            0
+    r
+v}
+
+test sf-hir-identical-across-modes {HIR (minus the side table), hir::format and hir::lower are identical under off and default} -body {
+    set off [compileWith $::runSource off]
+    set on [compileWith $::runSource default]
+    list [llength [failuresOf $on]] [expr {$off eq [dict remove $on warnings]}] [expr {[hir::format $off] eq [hir::format $on]}] \
+        [expr {[hir::lower $off] eq [hir::lower $on]}] [dict exists $off warnings]
+} -result {1 1 1 1 0}
+
+test sf-no-new-hir-state {nothing new is recorded on HIR: default adds only the warnings side table; every node has the fields it has under off} -body {
+    set off [compileWith $::runSource off]
+    set on [compileWith $::runSource default]
+    set added [lmap key [dict keys $on] {if {[dict exists $off $key]} continue; set key}]
+    set changed 0
+    dict for {e node} [dict get $on exprs] {
+        if {[lsort [dict keys $node]] ne [lsort [dict keys [dict get $off exprs $e]]]} {
+            incr changed
+        }
+    }
+    list $added $changed [expr {[dict get $on bindings] eq [dict get $off bindings]}] \
+        [expr {[dict get $on scopes] eq [dict get $off scopes]}]
+} -result {warnings 0 1 1}
+
+test sf-nir-identical-across-modes {native IR (specialized and generic) is identical with warnings off and on} -body {
+    set off [compileWith $::runSource off]
+    set on [compileWith $::runSource default]
+    list [expr {[native::nir $off] eq [native::nir $on]}] [expr {[native::nir $off -specialize 0] eq [native::nir $on -specialize 0]}]
+} -result {1 1}
+
+test sf-machine-readable-outputs-clean {native::report, NIR and CLIF are identical with and without the warnings side table} -body {
+    set on [compileWith $::runSource default]
+    set bare [dict remove $on warnings]
+    expr {[llength [failuresOf $on]] == 1 && [native::report $on] eq [native::report $bare]
+        && [native::nir $on] eq [native::nir $bare] && [native::clif $on] eq [native::clif $bare]}
+} -result 1
+
+test sf-no-warning-text-in-machine-readable-outputs {neither NIR, CLIF, the report nor HIR text mention the warning} -body {
+    set hir [compileWith $::runSource default]
+    set seen 0
+    foreach text [list [native::nir $hir] [native::clif $hir] [native::report $hir] [hir::format $hir]] {
+        foreach word {SAME-FAILURE warning "raised from" "distinct exits"} {
+            if {[string first $word $text] >= 0} {
+                incr seen
+            }
+        }
+    }
+    set seen
+} -result 0
+
+# ---------------------------------------------------------------------------
+# Backend independence (item 15)
+
+test sf-backend-independent {every backend runs the program identically; the one warning set is the HIR's} -body {
+    set hir [compileWith $::runSource default]
+    set outcomes [lmap backend $::allBackends {outcomeUnderHir $backend $hir}]
+    list [llength [lsort -unique [lmap o $outcomes {lindex $o 1}]]] [lindex $outcomes 0 1] [llength [failuresOf $hir]]
+} -result {1 {[2, 0, 0, 8]} 1}
+
+test sf-backend-independent-off {the same program runs identically on every backend with warnings off} -body {
+    set hir [compileWith $::runSource off]
+    lsort -unique [lmap backend $::allBackends {lindex [outcomeUnderHir $backend $hir] 1}]
+} -result {{[2, 0, 0, 8]}}
+
+# ---------------------------------------------------------------------------
+# The command line
+
+test sf-cli-modes {main.tcl: default prints the warning and its note on stderr and runs; off is silent; error rejects before running} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource sf-cli-[pid].bot]
+    set results {}
+    foreach mode {default off error} {
+        set status [catch {exec [info nameofexecutable] $main -warnings $mode $path 2>@1} out]
+        lappend results [list $mode $status \
+            [regexp {:4:9: warning: failure `Invalid` is raised from 2 distinct exits \(SAME-FAILURE\)} $out] \
+            [regexp {:6:9: note: also raised here} $out] \
+            [regexp {value: \[2, 0, 0, 8\]} $out] \
+            [regexp {CORE SEMANTIC SAME-FAILURE} $out]]
+    }
+    removeFile sf-cli-[pid].bot
+    set results
+} -result {{default 0 1 1 1 0} {off 0 0 0 1 0} {error 1 0 0 0 1}}
+
+test sf-cli-no-wno-option {-Wno-same-failure is an unknown option, not a file name} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource sf-cli-wno-[pid].bot]
+    catch {exec [info nameofexecutable] $main -Wno-same-failure $path 2>@1} out
+    removeFile sf-cli-wno-[pid].bot
+    list [string match "*unknown option*-Wno-same-failure*" $out] [string match "*value:*" $out]
+} -result {1 0}
+
+test sf-cli-unknown-mode {main.tcl rejects an unknown mode} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource sf-cli-mode-[pid].bot]
+    set status [catch {exec [info nameofexecutable] $main -warnings failures $path 2>@1} out]
+    removeFile sf-cli-mode-[pid].bot
+    list $status [string match "*unknown warnings mode*" $out]
+} -result {1 1}
+
+test sf-cli-stdout-clean {the warning goes to stderr: program stdout carries no warning text} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource sf-cli-stdout-[pid].bot]
+    set stderrPath [makeFile {} sf-cli-stderr-[pid].txt]
+    set out [exec [info nameofexecutable] $main -warnings default $path 2> $stderrPath]
+    set err [viewFile sf-cli-stderr-[pid].txt]
+    removeFile sf-cli-stdout-[pid].bot
+    removeFile sf-cli-stderr-[pid].txt
+    list [string match *warning* $out] [string match *raised* $out] [string match *SAME-FAILURE* $err] \
+        [string match {*value: \[2, 0, 0, 8\]*} $out]
+} -result {0 0 1 1}
+
+test sf-error-cli-stops-before-backend {main.tcl -backend cranelift -warnings error rejects without lowering or running anything} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource sf-cli-error-[pid].bot]
+    catch {exec [info nameofexecutable] $main -backend cranelift -warnings error $path 2>@1} out
+    removeFile sf-cli-error-[pid].bot
+    list [string match "*value:*" $out] [regexp {\(CORE SEMANTIC SAME-FAILURE\)} $out]
+} -result {0 1}
+
+# The warning lines (and their notes) of main.tcl's stderr for PATH on
+# BACKEND, with the file's directory stripped.
+proc cliWarningText {path backend} {
+    set main [file join $::projectRoot main.tcl]
+    set err [makeFile {} sf-cli-err-[pid].txt]
+    catch {exec [info nameofexecutable] $main -backend $backend -warnings default $path 2> $err}
+    set lines [lmap line [split [viewFile sf-cli-err-[pid].txt] \n] {
+        if {![string match "*: warning: *" $line] && ![string match "*: note: *" $line]} continue
+        set line
+    }]
+    removeFile sf-cli-err-[pid].txt
+    return $lines
+}
+
+test sf-cli-backend-independent {main.tcl prints the identical SAME-FAILURE text, notes included, on every backend} -constraints executableAot -body {
+    set path [makeFile "$::fourSource\ny = check(3):\n    on Bad:\n        0\ny" sf-cli-four-[pid].bot]
+    set texts [lmap backend $::allBackends {cliWarningText $path $backend}]
+    removeFile sf-cli-four-[pid].bot
+    set first [lindex $texts 0]
+    list [llength [lsort -unique $texts]] [llength [lsearch -all $first *SAME-FAILURE*]] \
+        [llength [lsearch -all $first "*note: also raised here"]] [llength $first]
+} -result {1 1 1 6}
+
+test sf-cli-backend-independent-stdlib {main.tcl prints the identical warning text (every code, notes included) on every backend over the whole stdlib corpus} -constraints executableAot -body {
+    set programs [lsort [glob -directory [file join $::projectRoot examples stdlib] *.bot]]
+    set mismatches {}
+    set total 0
+    foreach path $programs {
+        set texts [lmap backend $::allBackends {cliWarningText $path $backend}]
+        incr total [llength [lindex $texts 0]]
+        if {[llength [lsort -unique $texts]] != 1} {
+            lappend mismatches [file tail $path]
+        }
+    }
+    list $mismatches [expr {$total > 0}]
+} -result {{} 1}
+
+# ---------------------------------------------------------------------------
+# Fuzzing: constructed programs, an independent oracle, all three modes
+
+test sf-fuzz-smoke {60 generated programs: predicted groups (anchor and notes) and only them, off silent with identical HIR, error iff warned} -constraints executableAot -body {
+    set fuzz [file join $::projectRoot audit same-failure tools fuzz.tcl]
+    exec [info nameofexecutable] $fuzz 60 1
+} -result {seeds 60 (from 1): * with warnings, * without; failures 0; extra warnings 0; groups *} -match glob
+
+cleanupTests

@@ -1391,7 +1391,7 @@ test me-off-runs-no-warning-pass {warnings off does not execute the warning pass
     compileWith $source default
     set afterDefault [hir::warnings::stats]
     list $afterOff $afterDefault [dict exists $afterOff METHOD-ELIGIBLE] [dict get $afterDefault METHOD-ELIGIBLE]
-} -result {{} {SAME-RETURN-VALUE 1 METHOD-ELIGIBLE 1 FIXED-ARITY-LIST-RETURN 1} 0 1}
+} -result {{} {SAME-RETURN-VALUE 1 METHOD-ELIGIBLE 1 FIXED-ARITY-LIST-RETURN 1 SAME-FAILURE 1} 0 1}
 
 test me-off-runs-no-warning-pass-via-trace {an execution trace on the pass proves it is not invoked when off} -body {
     set source "${::prelude}fn t(x):

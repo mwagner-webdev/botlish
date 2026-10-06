@@ -2891,10 +2891,10 @@ hir::warnings::of $hir      ;# {code message primary secondary data} records
 annotation or comment suppresses a warning. This is intentional, not forgotten
 CLI work: every warning is on for everyone, so a warning must be trustworthy
 enough to be, and uncertainty means no warning. Codes (`SAME-RETURN-VALUE`,
-`METHOD-ELIGIBLE`, `FIXED-ARITY-LIST-RETURN`) are stable for tests, tooling and
-documentation, but they are not switches. Adding `METHOD-ELIGIBLE` and
-`FIXED-ARITY-LIST-RETURN` gave `BOTLISH_WARNINGS` and the command line nothing:
-three modes, one option.
+`METHOD-ELIGIBLE`, `FIXED-ARITY-LIST-RETURN`, `SAME-FAILURE`) are stable for
+tests, tooling and documentation, but they are not switches. Adding
+`METHOD-ELIGIBLE`, `FIXED-ARITY-LIST-RETURN` and `SAME-FAILURE` gave
+`BOTLISH_WARNINGS` and the command line nothing: three modes, one option.
 
 `SAME-RETURN-VALUE`: several distinct, reachable exits of one function are
 proven to return the same value.
@@ -2997,3 +2997,47 @@ the shape theorem, the soundness arguments, the corpus audit and known
 limitations, and MULTI-VALUE-RESULTS.md for the idiom; the tests are
 `tests/fixed-arity-list-return.test` and
 `audit/fixed-arity-list-return/tools/fuzz.tcl`.
+
+`SAME-FAILURE`: several distinct, reachable exits of one function `fail` the
+same declared failure.
+
+```
+error Invalid
+fn parse_record(text, pos) errors Invalid:
+    if text == "":
+        fail Invalid
+    if pos == 3:
+        fail Invalid
+    pos + 1
+```
+```
+f.bot:4:9: warning: failure `Invalid` is raised from 2 distinct exits (SAME-FAILURE)
+f.bot:6:9: note: also raised here
+```
+
+It is `SAME-RETURN-VALUE`'s theorem on the other completion kind, and it makes
+milestone 1's rule bidirectional: a `fail` is never grouped with a return, and
+a return is never grouped with a `fail`. The exits are exactly the written
+`fail` statements of the function's own body, wherever they sit (branches,
+every loop form, on-handler bodies; a re-raise `on E: fail E` is a written
+`fail` and counts). Nothing else is a failure exit: the final expression and a
+fall-through are normal completions, and a call that fails (an unhandled call
+of a fallible function, a final bare call included) propagates its callee's
+failure and is an ordinary call. Identity is nominal: `fail` carries a declared
+error's name and no payload, and a declared error's name is its identity across
+the whole program (a second declaration of a name is rejected), so two sites
+fail the same failure exactly when they fail the same name the function's
+`errors` clause admits -- similarly named failures (`A`, `A2`) are different
+failures. It is silent for a single exit, for different declared failures, for
+unreachable sites (statically decided branches, code after a completion, and
+branches the completion proof's range facts prove infeasible), for propagated
+failures, and for a nested function's or closure's fails, which belong to that
+function and are checked on their own; whatever the compiler cannot establish
+is silence. One diagnostic per failure group, anchored at its first exit, the
+others as notes; a function failing two names repeatedly gets two warnings. The
+warning states the fact and stops: it does not suggest merging the guards,
+splitting the failure into richer ones, or that the repetition is wrong -- each
+can be the right response, and so can keeping the uniform failure. See
+WARNINGS-SAME-FAILURE.md for the theorem, the mirror-image exits table, the
+reachability argument, the corpus audit and known limitations; the tests are
+`tests/same-failure.test` and `audit/same-failure/tools/fuzz.tcl`.

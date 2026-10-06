@@ -50,6 +50,7 @@ namespace eval hir::warnings {
         SAME-RETURN-VALUE hir::warnings::SameReturnValue
         METHOD-ELIGIBLE   hir::warnings::MethodEligible
         FIXED-ARITY-LIST-RETURN hir::warnings::FixedArityListReturn
+        SAME-FAILURE      hir::warnings::SameFailure
     }
     variable modes {default off error}
     # CODE -> number of times its pass has run in this process: test
@@ -1031,4 +1032,126 @@ proc hir::warnings::SelfCall {hir node self} {
         return 0
     }
     return [expr {[hir::resolve::CandidateIdentity hir [dict get $callee binding]] eq "binding:$self"}]
+}
+
+# ---------------------------------------------------------------------------
+# SAME-FAILURE (WARNINGS-SAME-FAILURE.md)
+#
+# Several distinct, reachable exits of one function `fail` the same declared
+# failure: SAME-RETURN-VALUE's theorem on the other completion kind. There,
+# `fail` is not a return and is never grouped with one; here, a return is not
+# a failure and is never grouped with one.
+#
+# Exits are exactly the written `fail` operations whose target is the
+# function: every reachable `fail` of the block's own body, wherever it sits
+# (branches, every loop form, on-handler bodies, a re-raise `on E: fail E`
+# included), never entering a nested function or closure, whose fails are its
+# own and checked on their own (the resolver admits a `fail` against the
+# `errors` clause of the innermost enclosing block, which is its target).
+# Nothing else is an exit here:
+#   * the final expression and the fall-through are not: a function never
+#     fails implicitly, and its normal completion is a return;
+#   * a call that fails is an ordinary call propagating its callee's failure,
+#     not an exit of this function (the fact would be about the callee).
+# An exit is a source operation, so no fall-through analysis is needed: a
+# function that both fails and falls through simply has fewer fail exits.
+#
+# Identity is nominal. `fail` names a declared error and carries no payload
+# (the surface grammar is `fail IDENT`). A declared error's name is its
+# identity, unique across one whole compiled program (hir/errordecls.tcl: a
+# second declaration of a name, in any module, and the name of a builtin
+# error are rejected), and the resolver admits a `fail` only when the
+# function declares its name in its own `errors` clause (the block's
+# resolved `declaredErrors`). Two sites fail the same failure exactly when
+# both fail one name of that set; a site whose name is not in it (never the
+# case in a program without diagnostics) is silent. Similar names are
+# different failures, and no value identity is involved.
+#
+# Reachability is SAME-RETURN-VALUE's, in two tiers: HIR's structural
+# `reachable` flags, then -- only for a function in which some failure has
+# at least two structurally reachable sites (pruning can only remove sites,
+# and a group needs two) -- the completion proof's recording walk
+# (hir::completions::reachedExprs), which prunes sites under branches its
+# range facts prove infeasible. A site absent from the walk is proven unable
+# to execute; imprecision keeps a site, which can only lose a warning.
+#
+# One warning per failure raised from N >= 2 exits, anchored at its first
+# exit (source order), the others as secondary locations; a function failing
+# two names repeatedly gets two warnings. Scope: the generic source HIR, once
+# per source function; instances are never walked.
+
+proc hir::warnings::SameFailure {hir} {
+    set names [BlockNames $hir]
+    set warnings {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "block" || ![dict get $node reachable]} {
+            continue
+        }
+        lappend warnings {*}[SameFailureIn $hir $e [expr {[dict exists $names $e] ? [dict get $names $e] : ""}]]
+    }
+    return $warnings
+}
+
+proc hir::warnings::SameFailureIn {hir block name} {
+    set sites [FailSites $hir $block]
+    # Cheap first: candidate groups from the names alone.
+    if {![HasRepeat [FailureGroups $sites]]} {
+        return {}
+    }
+    # A failure repeats structurally, so it is worth asking the completion
+    # proof which sites can execute at all. Absent means proven unreachable.
+    set reached [hir::completions::reachedExprs $hir $block]
+    set sites [lmap site $sites {
+        if {![dict exists $reached [lindex $site 0]]} {
+            continue
+        }
+        set site
+    }]
+    set warnings {}
+    foreach group [FailureGroups $sites] {
+        lassign $group failure members
+        if {[llength $members] >= 2} {
+            lappend warnings [FailureWarning $hir $block $name $failure $members]
+        }
+    }
+    return $warnings
+}
+
+# BLOCK's fail exits as {SITE FAILURE} pairs in source order: each
+# structurally reachable `fail` of its own body (BodyExprs) that fails one
+# of the function's declared errors.
+proc hir::warnings::FailSites {hir block} {
+    set node [dict get $hir exprs $block]
+    set declared [expr {[dict exists $node declaredErrors] ? [dict get $node declaredErrors] : {}}]
+    set sites {}
+    foreach e [BodyExprs $hir $block] {
+        set node [dict get $hir exprs $e]
+        if {[dict get $node kind] eq "fail" && [dict get $node reachable]
+                && [dict get $node name] in $declared} {
+            lappend sites [list $e [dict get $node name]]
+        }
+    }
+    return $sites
+}
+
+# SITES ({SITE FAILURE} pairs, source order) grouped by failure: a list of
+# {FAILURE MEMBER-SITES}, in order of first appearance.
+proc hir::warnings::FailureGroups {sites} {
+    set groups [dict create]
+    foreach site $sites {
+        lassign $site e failure
+        dict lappend groups $failure $e
+    }
+    return [lmap {failure members} $groups {list $failure $members}]
+}
+
+# The one warning for SITES (source order) failing FAILURE.
+proc hir::warnings::FailureWarning {hir block name failure sites} {
+    set count [llength $sites]
+    set origins [lmap site $sites {hir::get $hir $site origin}]
+    return [New SAME-FAILURE \
+        "failure `$failure` is raised from $count distinct exits" \
+        [lindex $origins 0] [lrange $origins 1 end] \
+        [dict create function $block functionName $name failure $failure failureName $failure \
+            exits $count sites $sites note "also raised here"]]
 }

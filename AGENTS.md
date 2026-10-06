@@ -255,4 +255,15 @@ lowers, run `tests/fixed-arity-list-return.test` and
 do not add another opt-out (MULTI-VALUE-RESULTS.md). Library
 modules' own findings print for every program that loads them (the corpus is
 frozen), so tests that import `lib/*.bot` and assert on a complete warning set
-filter by code or file.
+filter by code or file. `lib/abi/bytes.bot`'s `replace` carries a
+`SAME-FAILURE` finding, so every program that loads `abi::bytes` (`lib/linux.bot`
+and the `examples/linux` programs among them) prints it.
+
+`SAME-FAILURE` (WARNINGS-SAME-FAILURE.md) reads the `fail` sites of a function's
+own body (milestone 1's `BodyExprs`, which never enters a nested function), each
+`fail` node's `name` and `reachable` flag, the block's resolved `declaredErrors`,
+the program-wide uniqueness of error names (`hir/errordecls.tcl`) and the
+completion walk (`hir::completions::reachedExprs`, which records `fail` sites
+and never enters a nested function either). If you change any of those, or how
+`fail`, `errors` or an on-handler body lowers or resolves, run
+`tests/same-failure.test` and `audit/same-failure/tools/fuzz.tcl`.
