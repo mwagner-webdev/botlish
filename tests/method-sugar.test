@@ -482,17 +482,16 @@ test method-failure-locations {a failing method call is located at the receiver 
 # module's functions are not visible to the program that loads it.
 
 test method-in-a-module {a module function uses the sugar on its own earlier functions; the program imports the module and uses its functions as methods (an alias of one stays the same single candidate); without the import none of the module's names is visible} -body {
-    set libPath [file join $::core::libraryDir methodsugarlib.bot]
-    set ch [open $libPath w]
-    fconfigure $ch -encoding utf-8
-    puts -nonewline $ch {fn inc(a):
+    withPrivateLibrary {
+        set ch [open [file join $::core::libraryDir methodsugarlib.bot] w]
+        fconfigure $ch -encoding utf-8
+        puts -nonewline $ch {fn inc(a):
     a + 1
 
 fn inc_twice(a):
     a.inc().inc()
 }
-    close $ch
-    try {
+        close $ch
         set imp "import methodsugarlib\n"
         set bind "${imp}inc_twice = methodsugarlib::inc_twice\n"
         list [bothSpellings "${imp}5.inc_twice()" "${imp}methodsugarlib::inc_twice(5)"] \
@@ -501,8 +500,6 @@ fn inc_twice(a):
             [bothSpellings "${imp}5.inc().inc_twice()" "${imp}methodsugarlib::inc_twice(methodsugarlib::inc(5))"] \
             [rejection "5.inc()"] \
             [rejection "methodsugarlib::inc_twice(5).inc()"]
-    } finally {
-        file delete $libPath
     }
 } -match glob -result {{value 7} {value 7} {value 9} {value 8} {NOT-A-STRUCT: *cannot project field "inc"*no function named "inc" is visible here either*} {MISSING-IMPORT: *namespace "methodsugarlib" is not imported*}}
 

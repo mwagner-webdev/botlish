@@ -253,7 +253,7 @@ constraint does.
 
 The fixes overlap (for example `corpus::driven` removes compiles the
 double-build fix would otherwise halve); the table composes them, it does not
-add them. The parallel columns assume the prerequisites of section 4.
+add them. The parallel columns assume the prerequisite of section 4.
 
 ## 4. Run in parallel
 
@@ -261,21 +261,10 @@ add them. The parallel columns assume the prerequisites of section 4.
 A pool over (file × backend) units, longest first, brings the post-bitshift
 serial run (about 4370-4380 s, depending on whether per-process load is counted)
 to 1095 s at 4 workers and 548 s at 8; after section 3, about 378 s at 4
-workers. Three prerequisites:
-
-* A private tcltest `-tmpdir` per unit (tests create fixed names such as
-  `abi-bytes-scratch` and `argv-aot` in the working directory).
-* **16 tests in 9 files write fixed-name modules into the real `lib/`**
-  (`[file join $::core::libraryDir X.bot]`): applied-types (3), byte-set (1),
-  errors (2), immutable-set (3), method-sugar (1), source-types (1),
-  structural-fn-types (1), typed-callable-escape (2), typed-parameters (2).
-  Starting a file's two units together failed spuriously in 7 of 30 trials
-  (`no such module file .../lib/appliedtypeslib2.bot`). Give each run a private
-  library directory or unique module names.
-* `audit/stdlib-namespaces/tools/fuzz.tcl:450` (spawned by
-  `stdlib-namespaces.test`'s `ns-fuzz-smoke`) uses a fixed
-  `.fuzz-stdlib-namespaces` directory in the repository root; two concurrent
-  instances delete each other's scratch directory. Use `file tempdir`.
+workers. One prerequisite: a private tcltest `-tmpdir` per unit (tests create
+fixed names such as `abi-bytes-scratch` and `argv-aot` in it, and by default it
+is the working directory). AGENTS.md, "Running tests concurrently", has the
+invocation.
 
 A persisted duration cache is not worth it on 4 cores (alphabetical order is
 within 4 s of longest-first); at 8-16 workers a hard-coded list of the dozen
@@ -456,9 +445,8 @@ What the measurements say the framework should make the default:
 6. Per-compile reset of `hir::errordecls`/`hir::sourcetypes` state, the
    rotating isolation job, and explicit options instead of ambient knobs: the
    prerequisites of step 7's deduplication and of any later caching.
-7. Tree-key skip; the `lib/` writer and stdlib-namespaces fuzz scratch-dir fixes
-   plus the parallel pool; the pass-2 deduplication (replaces step 1's
-   interp-only rule).
+7. Tree-key skip; the parallel pool; the pass-2 deduplication (replaces step
+   1's interp-only rule).
 8. The remaining section 3.3 fixes.
 9. CI gate on agent branches with the landing protocol.
 

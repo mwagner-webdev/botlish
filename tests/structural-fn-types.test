@@ -495,10 +495,10 @@ fn choose(strict):
 } -result {[false, true]}
 
 test fn-accept-cross-module {a module function may declare an Fn parameter; another file passes it a local Block and a native, and the module's own call through it is checked and runs on every backend} -body {
-    set libPath [file join $::core::libraryDir fntypeslib.bot]
-    set ch [open $libPath w]
-    fconfigure $ch -encoding utf-8
-    puts $ch {import list
+    withPrivateLibrary {
+        set ch [open [file join $::core::libraryDir fntypeslib.bot] w]
+        fconfigure $ch -encoding utf-8
+        puts $ch {import list
 
 fn count_where(xs: List[str], keep: Fn{args: [str], return: bool}) -> int:
     kept = loop x in xs:
@@ -507,13 +507,10 @@ fn count_where(xs: List[str], keep: Fn{args: [str], return: bool}) -> int:
         x
     list::length(kept)
 }
-    close $ch
-    try {
+        close $ch
         fnRun {fn vowel?(c):
     c == "a" or c == "e"
 [fntypeslib::count_where(["a", "b", "e"], vowel?), fntypeslib::count_where(["a", "1", "-"], str::is_tcl_alnum)]} "import fntypeslib\nimport str\n\n"
-    } finally {
-        file delete $libPath
     }
 } -result {[2, 2]}
 

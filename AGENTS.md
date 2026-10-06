@@ -139,12 +139,12 @@ discard changes merely to switch environments.
 
 ## Running tests concurrently
 
-Two test runs that share a working directory or a checkout interfere, and the
-failures look like real bugs (`couldn't open ".../contexts-scratch/p79.bot":
-no such file or directory`, `no such module file .../lib/X.bot`). This covers
-an agent parallelizing its own runs, two sessions in one checkout, and a
-Windows run beside a WSL run (same tree, above). What is shared
-(TEST-SUITE-COST.md section 4 has the measurements):
+Two test runs that share a working directory or a checkout interfere unless
+each has its own tcltest temporary directory, and the failures look like real
+bugs (`couldn't open ".../contexts-scratch/p79.bot": no such file or
+directory`). This covers an agent parallelizing its own runs, two sessions in
+one checkout, and a Windows run beside a WSL run (same tree, above). What is
+shared (TEST-SUITE-COST.md section 4 has the measurements):
 
 * **tcltest's temporary directory is the current working directory** unless
   `-tmpdir` is given. Test files create fixed-name scratch directories in it
@@ -154,28 +154,39 @@ Windows run beside a WSL run (same tree, above). What is shared
   `tclsh9.0 tests/all.tcl -tmpdir /tmp/run-A ...` (tcltest forwards it to
   every per-file child process). *Different* test files sharing one
   temporary directory, two or three at a time, ran the whole suite cleanly.
-* **The real `lib/` and the repository root.** Some tests write fixed-name
-  modules into `lib/` itself (TEST-SUITE-COST.md lists them), and
-  `stdlib-namespaces.test`'s fuzz smoke uses a fixed `.fuzz-stdlib-namespaces`
-  directory in the repository root. `-tmpdir` does not isolate these: two
-  concurrent runs that include those files need separate trees.
-* **`tests/native-coverage.tcl`** writes (and first deletes)
-  `native-coverage.log` in the current directory and passes no options to
-  `all.tcl`: start each coverage run from its own empty directory.
+  `tests/native-coverage.tcl` gives the suite it runs a private `-tmpdir` (and
+  keeps its log there) by itself.
 * **`native/target/release`.** Every native test runs `botlish-native` from
   there, and the executable (AOT) tests link `libbotlish_native.rlib` at test
   time. A `cargo build` during a run swaps them under it. A copied tree needs
   all of `native/target` (a symlink to the original works); a copy with only
   the binary fails every AOT test with `runtime library missing`.
 
-So for concurrent runs: one tree per run (for example `tar
---exclude=./native/target --exclude=./.git` into a scratch directory plus a
-`native/target` symlink), each started from its own working directory or with
-its own `-tmpdir`, and no native rebuild until they finish. A run started from
-the repository root and interrupted leaves its scratch directories in the
-working tree: check `git status` before committing. New tests and tools
-should not add to the list: use `file tempdir` (or a name with `[pid]`) for
-scratch space, never a fixed name in the working directory or the repository.
+So for concurrent runs in one checkout: one `-tmpdir` per run, and no native
+rebuild until they finish:
+
+```sh
+export LANG=C.utf8 LC_ALL=C.utf8
+CORE_BACKEND=interp tclsh9.0 tests/all.tcl -tmpdir "$(mktemp -d)" &
+CORE_BACKEND=compile tclsh9.0 tests/all.tcl -tmpdir "$(mktemp -d)" &
+wait
+```
+
+A run started from the repository root without `-tmpdir` and interrupted
+leaves its scratch directories in the working tree: check `git status` before
+committing.
+
+Outside its tcltest temporary directory, nothing a test does may use a fixed
+name; new tests and tools must keep it that way:
+
+* A test that needs a throwaway module next to the standard ones wraps its
+  body in `withPrivateLibrary` (`tests/helpers.tcl`), which points
+  `$::core::libraryDir` at a per-process copy of `lib/` in the tcltest
+  temporary directory. Never write into the real `lib/`.
+* A script or audit tool keeps its scratch files in a `file tempdir` directory
+  (or under a name with `[pid]`) and removes it when it finishes, never under a
+  fixed name in the working directory or the repository; one that runs a test
+  file passes it a private `-tmpdir`.
 
 ## Native GC-stress validation
 

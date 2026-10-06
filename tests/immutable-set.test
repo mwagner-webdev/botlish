@@ -533,27 +533,27 @@ test set-hir-roundtrip-preserves-type {the read-back HIR's declaredParamTypes is
 # Module signatures (spec 47)
 
 test set-module-signature {hir::moduleSignatures reports an exported function's real ImmutableSet[T] parameter/result type} -body {
-    set libPath [file join $::core::libraryDir immutablesetlib.bot]
-    set ch [open $libPath w]
-    puts $ch [format {%sfn make() -> ImmutableSet[Small]:
+    withPrivateLibrary {
+        set ch [open [file join $::core::libraryDir immutablesetlib.bot] w]
+        puts $ch [format {%sfn make() -> ImmutableSet[Small]:
     immutable_set::from_list([one()])
 
 fn consume(s: ImmutableSet[Small]) -> int:
     1
 } $::smallDecl]
-    close $ch
-    set mainPath [makeFile {import immutablesetlib
+        close $ch
+        set mainPath [makeFile {import immutablesetlib
 immutablesetlib::consume(immutablesetlib::make())
 } set-module-main.bot]
-    try {
-        set h [surface::readProgramFile $mainPath -strict 0]
-        set sigs [hir::moduleSignatures $h]
-        list [hir::types::show [lindex [dict get [dict get $sigs immutablesetlib::consume] params] 0]] \
-             [hir::types::show [dict get [dict get $sigs immutablesetlib::make] result]] \
-             [llength [hir::diagnostics $h]]
-    } finally {
-        file delete $libPath
-        removeFile set-module-main.bot
+        try {
+            set h [surface::readProgramFile $mainPath -strict 0]
+            set sigs [hir::moduleSignatures $h]
+            list [hir::types::show [lindex [dict get [dict get $sigs immutablesetlib::consume] params] 0]] \
+                 [hir::types::show [dict get [dict get $sigs immutablesetlib::make] result]] \
+                 [llength [hir::diagnostics $h]]
+        } finally {
+            removeFile set-module-main.bot
+        }
     }
 } -result {{ImmutableSet[int[immutablesetlib::Small]]} {ImmutableSet[int[immutablesetlib::Small]]} 0}
 
@@ -561,49 +561,49 @@ immutablesetlib::consume(immutablesetlib::make())
 # Cross-module direct-call enforcement (spec 80)
 
 test set-cross-module-valid {a cross-module direct call enforces and satisfies a declared ImmutableSet[Small] parameter} -body {
-    set libPath [file join $::core::libraryDir immutablesetlib2.bot]
-    set ch [open $libPath w]
-    puts $ch [format {%sfn make() -> ImmutableSet[Small]:
+    withPrivateLibrary {
+        set ch [open [file join $::core::libraryDir immutablesetlib2.bot] w]
+        puts $ch [format {%sfn make() -> ImmutableSet[Small]:
     immutable_set::from_list([one()])
 
 fn consume(s: ImmutableSet[Small]) -> int:
     1
 } $::smallDecl]
-    close $ch
-    set mainPath [makeFile {import immutablesetlib2
+        close $ch
+        set mainPath [makeFile {import immutablesetlib2
 immutablesetlib2::consume(immutablesetlib2::make())
 } set-cross-module-ok.bot]
-    try {
-        set h [surface::readProgramFile $mainPath -strict 0]
-        llength [hir::diagnostics $h]
-    } finally {
-        file delete $libPath
-        removeFile set-cross-module-ok.bot
+        try {
+            set h [surface::readProgramFile $mainPath -strict 0]
+            llength [hir::diagnostics $h]
+        } finally {
+            removeFile set-cross-module-ok.bot
+        }
     }
 } -result 0
 
 test set-cross-module-invalid {a cross-module direct call rejects a broad-ImmutableSet argument against a declared ImmutableSet[Small] parameter} -body {
-    set libPath [file join $::core::libraryDir immutablesetlib3.bot]
-    set ch [open $libPath w]
-    puts $ch {type Small = Int in 0..10
+    withPrivateLibrary {
+        set ch [open [file join $::core::libraryDir immutablesetlib3.bot] w]
+        puts $ch {type Small = Int in 0..10
 
 fn consume(s: ImmutableSet[Small]) -> int:
     1
 }
-    close $ch
-    set mainPath [makeFile {import immutable_set
+        close $ch
+        set mainPath [makeFile {import immutable_set
 import immutablesetlib3
 fn make_ints():
     immutable_set::from_list([1, "x"])
 immutablesetlib3::consume(make_ints())
 } set-cross-module-bad.bot]
-    try {
-        set h [surface::readProgramFile $mainPath -strict 0]
-        list [llength [hir::diagnostics $h]] \
-            [string match {*cannot be proven to satisfy*} [dict get [lindex [hir::diagnostics $h] 0] message]]
-    } finally {
-        file delete $libPath
-        removeFile set-cross-module-bad.bot
+        try {
+            set h [surface::readProgramFile $mainPath -strict 0]
+            list [llength [hir::diagnostics $h]] \
+                [string match {*cannot be proven to satisfy*} [dict get [lindex [hir::diagnostics $h] 0] message]]
+        } finally {
+            removeFile set-cross-module-bad.bot
+        }
     }
 } -result {1 1}
 

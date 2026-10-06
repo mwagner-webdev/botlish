@@ -20,18 +20,21 @@
 set testDir [file dirname [file normalize [info script]]]
 set verbose [expr {"-verbose" in $argv}]
 
-set log [file join [pwd] native-coverage.log]
-file delete $log
+# The coverage log and the suite's tcltest temporary files live in a fresh
+# system temporary directory, removed when the run ends (never in the working
+# directory, which concurrent runs share).
+set scratch [file tempdir native-coverage]
+set log [file join $scratch native-coverage.log]
 set env(CORE_BACKEND) cranelift
 set env(NATIVE_COVERAGE) $log
-catch {exec [info nameofexecutable] [file join $testDir all.tcl] 2>@1} output
+catch {exec [info nameofexecutable] [file join $testDir all.tcl] -tmpdir [file join $scratch tmp] 2>@1} output
 unset env(NATIVE_COVERAGE)
 
 set channel [open $log r]
 fconfigure $channel -encoding utf-8
 set records [split [string trimright [read $channel] \n] \n]
 close $channel
-file delete $log
+file delete -force $scratch
 
 set counts [dict create native 0 independent 0 passed-partial 0 unsupported 0 failed 0]
 set needs [dict create]

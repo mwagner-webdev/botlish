@@ -334,3 +334,28 @@ proc withImports {source} {
     }
     return $header$source
 }
+
+# Runs SCRIPT in the caller's scope with $::core::libraryDir pointed at a
+# private copy of the library (every module and subdirectory of the current
+# one), restoring it afterwards. A test that needs a throwaway module next to
+# the standard ones writes it there, never into the real lib/: runs in one
+# checkout share lib/, so a fixed module name there makes concurrent runs
+# delete each other's module, and a run cut short leaves it behind. The copy
+# is a tcltest temporary directory, named per process so runs that share a
+# -tmpdir do not collide either.
+proc withPrivateLibrary {script} {
+    set saved $::core::libraryDir
+    set name private-lib-[pid]-[incr ::privateLibraryCounter]
+    set dir [makeDirectory $name]
+    foreach entry [glob -nocomplain -directory $saved *] {
+        file copy -force $entry $dir
+    }
+    set ::core::libraryDir $dir
+    try {
+        uplevel 1 $script
+    } finally {
+        set ::core::libraryDir $saved
+        removeDirectory $name
+    }
+}
+set ::privateLibraryCounter 0
