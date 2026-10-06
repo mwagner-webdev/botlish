@@ -191,7 +191,17 @@ method sugar, the resolver's candidate gathering or what the frontend records
 in a call's `written` marker, run `tests/method-eligible.test` and
 `audit/method-eligible/tools/fuzz.tcl`. `nomethod fn` is a declaration by the
 function's author that method syntax to it is an error; it is not a warning
-suppression, and there is still no call-site suppression to add. Library
+suppression, and there is still no call-site suppression to add.
+
+`FIXED-ARITY-LIST-RETURN` (WARNINGS-FIXED-ARITY-LIST-RETURN.md) reads the
+frontend's `written {form list}` provenance, milestone 1's exit enumeration
+(`Exits`/`Leaves`) and completion walk, `hir::exact::AliasRoot`,
+`hir::resolve::CandidateIdentity` and the block's `declaredResult`. If you change
+any of those, or how a list literal, an else-less `if` or a result annotation
+lowers, run `tests/fixed-arity-list-return.test` and
+`audit/fixed-arity-list-return/tools/fuzz.tcl`. A list-typed result annotation
+(`-> list`, `-> List[T]`) is a real type the checker proves, not a suppression;
+do not add another opt-out (MULTI-VALUE-RESULTS.md). Library
 modules' own findings print for every program that loads them (the corpus is
 frozen), so tests that import `lib/*.bot` and assert on a complete warning set
 filter by code or file.

@@ -2826,17 +2826,22 @@ and stops. It never says what to do about it, and a program that keeps the
 fact on purpose is correct. A warning that cannot cite a compiler proof does
 not belong in a default-on, non-suppressible system.
 
-That bar admits one *preference-shaped* warning, `METHOD-ELIGIBLE` (below), and
-only because it passes the bar rather than because "style warnings are fine
-now": (1) its **fact** is compiler-proven -- the sugared spelling parses and
-resolves to the identical callee, with the parser and the resolver themselves
-as the prover; (2) the **preference** it serves is the language's own declared
-idiom (receiver syntax is Botlish's preferred call form), not a per-warning
-fashion; (3) the **function's author** has first-class control: `nomethod fn`
-withdraws eligibility at the declaration, as part of the interface, which is not
-call-site suppression (there is still no lint-ignore, pragma or per-call
-opt-out); (4) **uncertainty means silence**: wherever the compiler cannot prove
-the sugared form identical, it says nothing.
+That bar admits two *preference-shaped* warnings, `METHOD-ELIGIBLE` and
+`FIXED-ARITY-LIST-RETURN` (below), and only because each passes the bar rather
+than because "style warnings are fine now": (1) its **fact** is compiler-proven
+-- the sugared spelling parses and resolves to the identical callee; every
+reachable value exit is a written list literal of one arity -- with the
+compiler's own parser, resolver, provenance and reachability as the prover;
+(2) the **preference** it serves is the language's own declared design
+(receiver syntax is Botlish's preferred call form; struct values have named
+parts and destructure, Lists deliberately do not: MULTI-VALUE-RESULTS.md), not
+a per-warning fashion; (3) the **function's author** has first-class control at
+the declaration, as part of the interface: `nomethod fn` withdraws method
+eligibility, and a result type `-> list` / `-> List[T]` declares a list result.
+Neither is call-site suppression, and both have semantic consequences the
+checker enforces (there is still no lint-ignore, pragma or per-call opt-out);
+(4) **uncertainty means silence**: wherever the compiler cannot prove the fact,
+it says nothing.
 
 There is one global policy per compilation, and nothing finer:
 
@@ -2860,9 +2865,10 @@ hir::warnings::of $hir      ;# {code message primary secondary data} records
 annotation or comment suppresses a warning. This is intentional, not forgotten
 CLI work: every warning is on for everyone, so a warning must be trustworthy
 enough to be, and uncertainty means no warning. Codes (`SAME-RETURN-VALUE`,
-`METHOD-ELIGIBLE`) are stable for tests, tooling and documentation, but they are
-not switches. Adding `METHOD-ELIGIBLE` gave `BOTLISH_WARNINGS` and the command
-line nothing: three modes, one option.
+`METHOD-ELIGIBLE`, `FIXED-ARITY-LIST-RETURN`) are stable for tests, tooling and
+documentation, but they are not switches. Adding `METHOD-ELIGIBLE` and
+`FIXED-ARITY-LIST-RETURN` gave `BOTLISH_WARNINGS` and the command line nothing:
+three modes, one option.
 
 `SAME-RETURN-VALUE`: several distinct, reachable exits of one function are
 proven to return the same value.
@@ -2922,3 +2928,46 @@ WARNINGS-METHOD-ELIGIBLE.md for the eligibility theorem, the receiver-form
 table, provenance, the corpus audit, the round-trip law and known limitations;
 the tests are `tests/method-eligible.test` and
 `audit/method-eligible/tools/fuzz.tcl`.
+
+`FIXED-ARITY-LIST-RETURN`: every reachable value exit of one function produces
+a written list literal of the same arity N >= 2 -- the positional multi-value
+result that struct values name the parts of.
+
+```
+fn scan_quoted(text, index, field) errors LowerUnderrun:
+    character = peek(text, index)
+    if character == "\"":
+        if peek(text, index + 1) == "\"":
+            return scan_quoted(text, index + 2, str::concat(field, "\""))
+
+        return [field, index + 1]
+
+    scan_quoted(text, index + 1, str::concat(field, character))
+```
+```
+f.bot:4:13: warning: a 2-element list is returned from all 3 value exits; a struct value names the parts (FIXED-ARITY-LIST-RETURN)
+f.bot:7:9: note: also returned here
+f.bot:9:5: note: also returned here
+```
+
+An exit counts as the shape when it is a written list literal (the frontend's
+provenance, never text), a read of a binding whose initializer is one (bindings
+are immutable, so the initializer is the value), or a direct self-call (whose
+value is the function's own: it inherits N); at least one literal is required.
+Any single other exit silences: a unit exit (a bare `return`, a final `unit`,
+or the fall-through of an else-less final `if` -- "a list or nothing" is an
+optional, not a fixed-arity result; this deliberately differs from
+`SAME-RETURN-VALUE`, which skips unit), a computed or mutable list, a struct, a
+call of any other function, mixed arities, and one- or zero-element lists.
+`fail` is not a value exit, so a guard that fails before a list result does not
+block the warning; unreachable exits (structurally, or by the completion
+proof's range facts) are not exits. Element types are never consulted. A
+function whose declaration carries a list-typed result annotation (`-> list`,
+`-> List[T]`) has declared its result a list and is never reported; that
+annotation is a real type the checker must prove, not a suppression. One
+diagnostic per function, anchored at its first exit, the others as notes; no
+rewrite, no suggested field names. See WARNINGS-FIXED-ARITY-LIST-RETURN.md for
+the shape theorem, the soundness arguments, the corpus audit and known
+limitations, and MULTI-VALUE-RESULTS.md for the idiom; the tests are
+`tests/fixed-arity-list-return.test` and
+`audit/fixed-arity-list-return/tools/fuzz.tcl`.

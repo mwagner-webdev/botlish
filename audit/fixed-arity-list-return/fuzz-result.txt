@@ -1,0 +1,8 @@
+# FIXED-ARITY-LIST-RETURN fuzz result: tclsh9.0 audit/fixed-arity-list-return/tools/fuzz.tcl SEEDS FIRST
+# 2000 seeds in two chunks (run in parallel), on the committed pass; the test suite runs 60 (tests/fixed-arity-list-return.test, fa-fuzz-smoke)
+
+seeds 1000 (from 1): 673 with warnings, 327 without; failures 0; extra warnings 0; conversions 673 of 673; excluded runs 0
+
+seeds 1000 (from 1001): 668 with warnings, 332 without; failures 0; extra warnings 0; conversions 668 of 668; excluded runs 0
+
+total: seeds 2000 (from 1): 1341 with warnings, 659 without; failures 0; extra warnings 0; conversions 1341 of 1341; excluded runs 0
