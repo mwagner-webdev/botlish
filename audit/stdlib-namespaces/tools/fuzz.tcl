@@ -447,8 +447,10 @@ proc checkNegative {outcomes check} {
     return ""
 }
 
-set scratch [file join $root .fuzz-stdlib-namespaces]
-file mkdir $scratch
+# The negative programs' library copies live in a fresh system temporary
+# directory, removed when the run ends (never inside the checkout, where
+# concurrent runs would delete each other's).
+set scratch [file tempdir stdlib-namespaces-fuzz]
 
 set programs 0
 set values 0

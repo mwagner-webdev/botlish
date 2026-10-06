@@ -477,49 +477,49 @@ f(5)} sparse-bad.bot} message options
 # Cross-module callable value (spec #23, #59)
 
 test callable-escape-cross-module-alias-valid {a cross-module typed function's value survives an exact local alias, same as a local one} -body {
-    set libPath [file join $::core::libraryDir typedcallablelib.bot]
-    set ch [open $libPath w]
-    puts $ch {type Small = Int in 0..10
+    withPrivateLibrary {
+        set ch [open [file join $::core::libraryDir typedcallablelib.bot] w]
+        puts $ch {type Small = Int in 0..10
 
 fn take_small(x: Small) -> Small:
     x
 }
-    close $ch
-    set mainPath [makeFile {import typedcallablelib
+        close $ch
+        set mainPath [makeFile {import typedcallablelib
 f = typedcallablelib::take_small
 f(7)
 } typed-callable-cross-module.bot]
-    try {
-        set h [surface::readProgramFile $mainPath -strict 0]
-        llength [hir::diagnostics $h]
-    } finally {
-        file delete $libPath
-        removeFile typed-callable-cross-module.bot
+        try {
+            set h [surface::readProgramFile $mainPath -strict 0]
+            llength [hir::diagnostics $h]
+        } finally {
+            removeFile typed-callable-cross-module.bot
+        }
     }
 } -result 0
 
 test callable-escape-cross-module-escape-rejected {...and the cross-module callable is protected against the same untyped-parameter escape} -body {
-    set libPath [file join $::core::libraryDir typedcallablelib2.bot]
-    set ch [open $libPath w]
-    puts $ch {type Small = Int in 0..10
+    withPrivateLibrary {
+        set ch [open [file join $::core::libraryDir typedcallablelib2.bot] w]
+        puts $ch {type Small = Int in 0..10
 
 fn take_small(x: Small) -> Small:
     x
 }
-    close $ch
-    set mainPath [makeFile {import typedcallablelib2
+        close $ch
+        set mainPath [makeFile {import typedcallablelib2
 fn apply(f, v):
     f(v)
 apply(typedcallablelib2::take_small, 3)
 } typed-callable-cross-module-bad.bot]
-    try {
-        set h [surface::readProgramFile $mainPath -strict 0]
-        set diags [hir::diagnostics $h]
-        list [llength $diags] \
-            [string match {*call to apply* is invalid: argument for parameter*cannot be proven to satisfy*} [dict get [lindex $diags 0] message]]
-    } finally {
-        file delete $libPath
-        removeFile typed-callable-cross-module-bad.bot
+        try {
+            set h [surface::readProgramFile $mainPath -strict 0]
+            set diags [hir::diagnostics $h]
+            list [llength $diags] \
+                [string match {*call to apply* is invalid: argument for parameter*cannot be proven to satisfy*} [dict get [lindex $diags 0] message]]
+        } finally {
+            removeFile typed-callable-cross-module-bad.bot
+        }
     }
 } -result {1 1}
 

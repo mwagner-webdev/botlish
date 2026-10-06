@@ -137,6 +137,34 @@ The WSL checkout is the same working tree as the Windows checkout, not a
 separate clone. Check `git status` before running tests and do not stash or
 discard changes merely to switch environments.
 
+## Running tests concurrently
+
+Several test runs can share one checkout (two agents, or a pool over test
+files and backends) as long as each run has its own tcltest `-tmpdir`:
+
+```sh
+export LANG=C.utf8 LC_ALL=C.utf8
+CORE_BACKEND=interp tclsh9.0 tests/all.tcl -tmpdir "$(mktemp -d)" &
+CORE_BACKEND=compile tclsh9.0 tests/all.tcl -tmpdir "$(mktemp -d)" &
+wait
+```
+
+Without `-tmpdir`, tcltest's temporary directory is the working directory
+(normally the checkout), and tests create fixed names there
+(`makeDirectory abi-bytes-scratch`, `argv-aot`, `makeFile` program files), so
+concurrent runs overwrite and delete each other's files.
+`tests/native-coverage.tcl` gives the suite it runs a private `-tmpdir` of its
+own.
+
+Nothing else a test does may create a fixed name in the checkout:
+
+* A test that needs a throwaway module next to the standard ones wraps its
+  body in `withPrivateLibrary` (`tests/helpers.tcl`), which points
+  `$::core::libraryDir` at a per-process copy of `lib/` in the tcltest
+  temporary directory. Never write into the real `lib/`.
+* A script or audit tool that a test spawns keeps its scratch files in a
+  `file tempdir` directory and removes it when it finishes.
+
 ## Native GC-stress validation
 
 `BOTLISH_NATIVE_GC_STRESS=1` forces a GC attempt at every allocation site,

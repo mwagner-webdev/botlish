@@ -80,6 +80,11 @@ source [file join $root tests helpers.tcl]
 source [file join $root surface surface.tcl]
 interp recursionlimit {} 100000
 
+# Program files (makeFile) live in a fresh system temporary directory, removed
+# when the run ends (never in the working directory, tcltest's default).
+set scratch [file tempdir struct-destructuring-fuzz]
+tcltest::configure -tmpdir $scratch
+
 set n 100
 set seed0 1
 set dump 0
@@ -733,5 +738,6 @@ for {set k 0} {$k < $n} {incr k} {
         puts "NEGATIVE ESCAPE seed $seed ($kind): $escape"
     }
 }
+file delete -force $scratch
 puts "destructuring-fuzz programs $programs values $values errors $errors negatives $negatives equivalence-disagreements $equivalenceDisagreements negative-escapes $negativeEscapes backend-disagreements $backendDisagreements"
 exit [expr {$equivalenceDisagreements || $negativeEscapes || $backendDisagreements ? 1 : 0}]

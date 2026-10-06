@@ -272,10 +272,10 @@ byte::set(['A'])} byte-set-charlist.bot]
 # a name distinctive enough not to collide with any real library file.
 
 test byte-set-module-retained-value {additional_unreserved_chars = byte::set([...]) at module scope is retained: built once, reused by repeated calls} -body {
-    set libPath [file join $::core::libraryDir bytesetretentionlib.bot]
-    set ch [open $libPath w]
-    fconfigure $ch -encoding utf-8
-    puts -nonewline $ch {import byte
+    withPrivateLibrary {
+        set ch [open [file join $::core::libraryDir bytesetretentionlib.bot] w]
+        fconfigure $ch -encoding utf-8
+        puts -nonewline $ch {import byte
 import immutable_set
 
 additional_unreserved_chars = byte::set(['-', '.', '_', '~'])
@@ -283,31 +283,31 @@ additional_unreserved_chars = byte::set(['-', '.', '_', '~'])
 fn has_dash() -> bool:
     immutable_set::contains(additional_unreserved_chars, 45)
 }
-    close $ch
-    set mainPath [makeFile {import bytesetretentionlib
+        close $ch
+        set mainPath [makeFile {import bytesetretentionlib
 [bytesetretentionlib::has_dash(), bytesetretentionlib::has_dash()]} byte-set-retention-main.bot]
-    try {
-        set hir [surface::readProgramFile $mainPath]
-        set diagCount [llength [hir::diagnostics $hir]]
-        set value [core::value::show [core::evalProgram [hir::lower $hir]]]
-        native::lower::program $hir -repr-opt 0
-        set report [native::allocationReport $hir sites]
-        set setfromlistAllocations 0
-        foreach site [dict get $report sites] {
-            # "setfromlisttotal" (M4-EQUALITY-TOTAL-SETFROMLIST-EFFECT.md):
-            # additional_unreserved_chars's own List[Byte] source is
-            # statically proven equality-total, so this site now carries
-            # the refined opcode's own operation label -- same
-            # rt_set_from_list helper, same allocation, only the site name
-            # differs.
-            if {[dict get $site operation] in {setfromlist setfromlisttotal}} {
-                incr setfromlistAllocations [dict get $site allocations]
+        try {
+            set hir [surface::readProgramFile $mainPath]
+            set diagCount [llength [hir::diagnostics $hir]]
+            set value [core::value::show [core::evalProgram [hir::lower $hir]]]
+            native::lower::program $hir -repr-opt 0
+            set report [native::allocationReport $hir sites]
+            set setfromlistAllocations 0
+            foreach site [dict get $report sites] {
+                # "setfromlisttotal" (M4-EQUALITY-TOTAL-SETFROMLIST-EFFECT.md):
+                # additional_unreserved_chars's own List[Byte] source is
+                # statically proven equality-total, so this site now carries
+                # the refined opcode's own operation label -- same
+                # rt_set_from_list helper, same allocation, only the site name
+                # differs.
+                if {[dict get $site operation] in {setfromlist setfromlisttotal}} {
+                    incr setfromlistAllocations [dict get $site allocations]
+                }
             }
+            list $diagCount $value $setfromlistAllocations
+        } finally {
+            removeFile byte-set-retention-main.bot
         }
-        list $diagCount $value $setfromlistAllocations
-    } finally {
-        removeFile byte-set-retention-main.bot
-        file delete $libPath
     }
 } -result {0 {[true, true]} 1}
 
