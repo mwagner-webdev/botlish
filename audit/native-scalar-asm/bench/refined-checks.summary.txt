@@ -2,7 +2,7 @@ source:  bench/refined-checks.bot
 backend: Cranelift (specialize=1)
 asm:     refined-checks.asm
 vcode:   refined-checks.vcode
-machine-code bytes: 11086 (per function: 1415 217 617 74 74 74 128 128 353 115 154 176 176 295 344 183 770 140 60 477 829 127 103 313 219 287 1255 1615 368)
+machine-code bytes: 11134 (per function: 1415 217 617 74 74 74 128 128 353 115 154 176 176 295 344 183 770 140 60 501 853 127 103 313 219 287 1255 1615 368)
 
 functions:
   0 <program entry>: nir-regs=43
@@ -24,8 +24,8 @@ functions:
   16 domain?<int>: nir-regs=58
   17 web::is_unreserved<int>: nir-regs=10
   18 web::uri_query_value?<str>: nir-regs=4
-  19 upper_hex?<int>: nir-regs=34
-  20 valid_from?<int>: nir-regs=43
+  19 upper_hex?<int>: nir-regs=37
+  20 valid_from?<int>: nir-regs=46
   21 web::uri_escape_text<str>: nir-regs=5
   22 high_nibble<int>: nir-regs=15
   23 hex_pair<int>: nir-regs=10
@@ -284,9 +284,9 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 19 "upper_hex?"
-    NIR regs: 34
+    NIR regs: 37
     raw regs: 4
-    managed-capable regs: 30
+    managed-capable regs: 33
     effects: may_error=false may_gc=false
     safepoints: 0
     root candidates: 0
@@ -297,9 +297,9 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 20 "valid_from?"
-    NIR regs: 43
+    NIR regs: 46
     raw regs: 5
-    managed-capable regs: 38
+    managed-capable regs: 41
     effects: may_error=false may_gc=true
     safepoints: 4
     root candidates: 6

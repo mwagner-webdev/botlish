@@ -39,9 +39,10 @@
 # exact call -- no handler, no placeholder fallback set, no `on` clause.
 #
 # is_unreserved's callers pass it an ASCII scalar value as a Byte with no
-# conversion: char::scalar_value's result is nonnegative and each call sits
-# under a `v > 127` test's false branch, so the range analysis proves
-# 0..127, inside Byte's domain (no byte::from_int, no handler).
+# conversion: char::scalar_value's result is nonnegative and each call is
+# guarded by `v <= 127` (an `and` operand or an `if` branch), so the range
+# analysis proves 0..127, inside Byte's domain (no byte::from_int, no
+# handler).
 #
 # esc_from/esc_scalar accumulate their result by repeated concat,
 # the same recursive idiom examples/stdlib/string_reverse.bot's
@@ -236,10 +237,7 @@ fn uri_query_value?(value: str) -> bool proves value: UriQueryValue:
             false
         else:
             v = char::scalar_value(str::char_at(value, i))
-            if v > 127:
-                false
-            else:
-                ascii::is_digit(v) or (v >= 65 and v <= 70)
+            v <= 127 and (ascii::is_digit(v) or (v >= 65 and v <= 70))
 
     fn valid_from?(i):
         if i < 0 or i >= str::length(value):
@@ -253,13 +251,10 @@ fn uri_query_value?(value: str) -> bool proves value: UriQueryValue:
                     false
             else:
                 v = char::scalar_value(c)
-                if v > 127:
-                    false
+                if v <= 127 and is_unreserved(v):
+                    valid_from?(i + 1)
                 else:
-                    if is_unreserved(v):
-                        valid_from?(i + 1)
-                    else:
-                        false
+                    false
 
     valid_from?(0)
 
