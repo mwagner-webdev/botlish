@@ -122,6 +122,7 @@ try {
     foreach {name description edits} $mutants {
         if {$only ne {} && $name ni $only} continue
         set touched [dict create]
+        set applied 1
         foreach {file old new} $edits {
             set path [file join $tree $file]
             if {![dict exists $touched $file]} {
@@ -130,9 +131,19 @@ try {
             set text [readFile $path]
             set first [string first $old $text]
             if {$first < 0 || [string first $old $text [expr {$first + 1}]] >= 0} {
-                error "mutant $name: the text to replace does not occur exactly once in $file"
+                set applied 0
+                break
             }
             writeFile $path [string replace $text $first [expr {$first + [string length $old] - 1}] $new]
+        }
+        if {!$applied} {
+            # The code the mutant edits changed: update mutants.txt.
+            lappend results [list $name $description NOT-APPLIED "" ""]
+            puts "NOT-APPLIED $name: the text to replace does not occur exactly once in $file"
+            dict for {file text} $touched {
+                writeFile [file join $tree $file] $text
+            }
+            continue
         }
         set tmp [file tempdir botlish-trait-mutant-run]
         lassign [run [dict get $options -timeout] tclsh9.0 [file join $tree tests traits.test] -tmpdir $tmp] status output
@@ -164,4 +175,7 @@ try {
 }
 
 set survivors [lmap r $results {if {[lindex $r 2] ne "SURVIVED"} continue; lindex $r 0}]
-puts "[llength $results] mutants, [expr {[llength $results] - [llength $survivors]}] killed, [llength $survivors] survived[expr {$survivors eq {} ? "" : ": [join $survivors {, }]"}]"
+set unapplied [lmap r $results {if {[lindex $r 2] ne "NOT-APPLIED"} continue; lindex $r 0}]
+set killed [llength [lsearch -all -index 2 $results KILLED]]
+puts "[llength $results] mutants, $killed killed, [llength $survivors] survived[expr {$survivors eq {} ? "" : ": [join $survivors {, }]"}][expr {$unapplied eq {} ? "" : ", [llength $unapplied] not applied: [join $unapplied {, }]"}]"
+exit [expr {$survivors ne {} || $unapplied ne {}}]

@@ -253,8 +253,10 @@
 ## hir/semantic.tcl
 <<<<
     set key [list $block $entry]
+    set caller [expr {[dict exists $ctx inst] ? [dict get $ctx inst] : "generic"}]
 ====
     set key [list $block [lmap x $entry {expr {[hir::types::IsView $x] ? [list trait [hir::types::ViewTrait $x]] : $x}}]]
+    set caller [expr {[dict exists $ctx inst] ? [dict get $ctx inst] : "generic"}]
 >>>>
 
 @@ one-codegen-instance treat two different trait implementations as one codegen instance (one clone per function: the first witness's)

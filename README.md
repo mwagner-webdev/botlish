@@ -650,6 +650,7 @@ result until `web::uri_query_value?` proves it one.
 | `hir/specialize.tcl` | call-site specialization: instances, result fixpoint, views for `hir::aot` (§21) |
 | `hir/exactvalue.tcl` | exact-value facts and value identity (`hir::exact::Of`, `Identity`, `SameValue`) |
 | `hir/warnings.tcl` | compiler warnings: record, static registry, global policy, rendering, error promotion, `SAME-RETURN-VALUE` and `METHOD-ELIGIBLE` (§23) |
+| `hir/traits.tcl` | eager structural traits: the trait registry, structural conformance (`hir::traits::satisfies`/`explain`), trait views and trait operations, their checks, and the monomorphization plan that turns every trait-polymorphic function into one ordinary function per witness (TRAITS.md) |
 | `hir/contexts.tcl` | execution-environment contexts: context parameters, direct and transitive requirements, installation order, `MISSING-CONTEXT` chains, function-value frontier (CONTEXTS.md) |
 | `hir/syscall.tcl` | the static contract of `linux::abi::syscall`'s register-struct argument (LINUX-X86-64-SYSCALL.md) and of `abi::x86_64::from_bytes`'s `abi::bytes::Bytes` argument (ABI-BYTES.md) |
 | `compiler/compiler.tcl` | HIR → Tcl compiler backend |
@@ -1009,6 +1010,15 @@ int, bool, UnicodeChar, an integer domain or another refinement over them;
 `REFINEMENT-CARRIER`), and a chain of refinements may not return to itself
 (`CYCLIC-REFINEMENT`). `lib/web.bot` declares `web::Emailish` and
 `web::UriQueryValue` this way; the compiler knows neither name.
+
+A **trait** (TRAITS.md) is not a value type at all. `trait Named: fn
+name(value: Named) -> str` declares a nominal, signature-only view that a
+concrete type satisfies structurally (its owner namespace declares a
+compatible `name`). A trait-typed parameter accepts such a value as a *view*:
+source code may use only the trait's operations on it, while the compiler
+keeps the concrete type as hidden provenance and compiles one ordinary
+function per concrete type, each trait operation a direct call. Nothing of a
+trait exists at run time.
 
 **Operations.**
 
