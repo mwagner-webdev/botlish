@@ -1,5 +1,5 @@
 # PROVES-NAMING corpus audit: tclsh9.0 audit/proves-naming/tools/corpus.tcl
-# commit 64d1eb5641440d642a97f3dbba42ddc418c7862d (corpus paths clean)
+# commit 2ddbc5b8c36cc8dd4e18eecd9ee8283357bb656d (corpus paths clean)
 
 compiled 36 of 40 programs
   not compiled: examples/surface/09-mutual-recursion.bot (CORE SEMANTIC UNBOUND) -- a deliberate rejection
