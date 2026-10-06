@@ -902,8 +902,10 @@ test me-operators-never-eligible {operators lower to calls of root natives of tw
 } -result {}
 
 test me-list-literal-never-eligible {a list literal lowers to a call of `list`: not a written call} -body {
-    codes {fn t(a, b):
-    [a, b]}
+    # The function does carry a FIXED-ARITY-LIST-RETURN finding (a 2-element
+    # list from its only exit); this test is about METHOD-ELIGIBLE.
+    lmap code [codes {fn t(a, b):
+    [a, b]}] {if {$code ne "METHOD-ELIGIBLE"} continue; set code}
 } -result {}
 
 test me-unary-minus-never-eligible {unary minus lowers to a call of `-` with two arguments: not a written call} -body {
@@ -1389,7 +1391,7 @@ test me-off-runs-no-warning-pass {warnings off does not execute the warning pass
     compileWith $source default
     set afterDefault [hir::warnings::stats]
     list $afterOff $afterDefault [dict exists $afterOff METHOD-ELIGIBLE] [dict get $afterDefault METHOD-ELIGIBLE]
-} -result {{} {SAME-RETURN-VALUE 1 METHOD-ELIGIBLE 1} 0 1}
+} -result {{} {SAME-RETURN-VALUE 1 METHOD-ELIGIBLE 1 FIXED-ARITY-LIST-RETURN 1} 0 1}
 
 test me-off-runs-no-warning-pass-via-trace {an execution trace on the pass proves it is not invoked when off} -body {
     set source "${::prelude}fn t(x):

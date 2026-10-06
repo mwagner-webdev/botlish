@@ -42,10 +42,13 @@ parts"), the `METHOD-SUGAR.md` analogue the warning points at. An author whose
 result really is a list says so at the declaration (`-> list`,
 `-> List[T]`), and the warning is silent.
 
-Coordination: a parallel agent owns every existing test file and the corpus.
-This milestone edited neither. The expected breakage in `tests/warnings.test`
-and `tests/method-eligible.test` is listed under "Parallel work". The corpus was
-audited at a pinned commit, `faae181`.
+Coordination: a parallel agent owns the corpus and the failures default-on
+warnings induce elsewhere. This milestone edited no corpus file. It first left
+the breakage it causes in `tests/warnings.test` and `tests/method-eligible.test`
+to that agent, as the brief assigned. That was then reversed: the 8 tests were
+adapted here, test-only and without weakening any pin, because only this
+milestone creates them (see "Parallel work"). The corpus was audited at a pinned
+commit, `faae181`.
 
 ### Why a third preference-shaped warning belongs
 
@@ -738,32 +741,45 @@ equivalent. It is now one constant. And the first run killed `mixed-arity-
 accepted` only with the unit tests, which led to more frequent mixed arity in
 the generator.
 
-## Parallel work: coordination and reported-but-not-fixed breakage
+## Parallel work: coordination, and the breakage this milestone causes
 
-Ownership as instructed. This milestone wrote the pass, the registry line,
+This milestone wrote the pass, the registry line,
 `tests/fixed-arity-list-return.test`, `audit/fixed-arity-list-return/`,
 MULTI-VALUE-RESULTS.md, this report, the README's warnings section, and a
 paragraph in AGENTS.md's "Compiler warnings" (what to re-run when changing the
 facts this warning reads).
-**No existing test file and no corpus file (`examples/`, `bench/`, `lib/`) was
-edited.** The annotation needed no recording, so no frontend file changed
-either.
+It also adapted 8 tests in two existing test files (below). **No corpus file
+(`examples/`, `bench/`, `lib/`) was edited.** The annotation needed no recording,
+so no frontend file changed either.
 
-**Expected breakage, reported and not fixed** (it belongs to the parallel
-agent). Each failure is a pin that enumerated a complete warning set or the
-registry, over a program that really has the fixed shape:
+**The breakage, and its adaptation in this milestone.** Adding a third code
+breaks 8 existing tests. Each is a pin that listed the registry's codes, or
+asserted a complete warning set (often "no warning at all"), over a program that
+really has the fixed shape:
 
-| file | test | why it fails now | the finding is |
-|---|---|---|---|
-| `tests/warnings.test` | `warn-off-runs-no-warning-pass` | the stats pin lists the codes, and a third exists (`{SAME-RETURN-VALUE 1 METHOD-ELIGIBLE 1 FIXED-ARITY-LIST-RETURN 1}`) | -- |
-| `tests/warnings.test` | `warn-exact-list` | complete set; `f` returns `[1, 2]` from both exits | true (2 exits) |
-| `tests/warnings.test` | `warn-lists-with-unknown-elements-not-same` | asserts no warning at all; `f` returns `[y, 1]` twice | true |
-| `tests/warnings.test` | `warn-same-binding`, `warn-alias-of-binding`, `warn-different-bindings-not-same` | complete set; the helper `compute(a): [a, a + 1]` | true (single exit) |
-| `tests/method-eligible.test` | `me-off-runs-no-warning-pass` | the same stats pin | -- |
-| `tests/method-eligible.test` | `me-list-literal-never-eligible` | asserts no warning at all; `fn t(a, b): [a, b]` | true (single exit) |
+| file | test | why it fails with the pass | the finding is | adaptation |
+|---|---|---|---|---|
+| `tests/warnings.test` | `warn-off-runs-no-warning-pass` | the stats pin lists the codes, and a third exists | -- | the third code added to the expected stats |
+| `tests/warnings.test` | `warn-exact-list` | complete set; `f` returns `[1, 2]` from both exits | true (2 exits) | `shown` -> `sameReturnShown` |
+| `tests/warnings.test` | `warn-lists-with-unknown-elements-not-same` | asserts no warning at all; `f` returns `[y, 1]` twice | true | `codes` -> `sameReturnCodes` |
+| `tests/warnings.test` | `warn-same-binding`, `warn-alias-of-binding` | complete set; the helper `compute(a): [a, a + 1]` | true (single exit) | `shown` -> `sameReturnShown` |
+| `tests/warnings.test` | `warn-different-bindings-not-same` | asserts no warning; the same helper | true (single exit) | `codes` -> `sameReturnCodes` |
+| `tests/method-eligible.test` | `me-off-runs-no-warning-pass` | the same stats pin | -- | the third code added |
+| `tests/method-eligible.test` | `me-list-literal-never-eligible` | asserts no warning at all; `fn t(a, b): [a, b]` | true (single exit) | only `METHOD-ELIGIBLE` codes counted |
 
-The adaptation is milestone 2's: filter by code (`sameReturnShown`, the file's
-own helpers) or add the third code to the stats pins. **Not affected:**
+The brief assigned these to the parallel agent ("expected breakage you must
+report but not fix"), and the first version of this milestone, including its
+first merge to `main`, left them failing. That split was wrong for these 8. They
+are not failures default-on warnings induce in the corpus, which is the
+parallel agent's work. They are consequences of adding this code, and they exist
+only on a tree that already has the pass, so an agent working without it would
+never see them. Leaving them made `main` red. They were therefore adapted here,
+as milestone 2 adapted milestone 1's tests (WARNINGS-METHOD-ELIGIBLE.md,
+"Deviations from the brief"): `sameReturnShown`/`sameReturnCodes` are the
+file's existing code filters (their comment now names this warning too), and the
+stats pins gained the third code. No pin was weakened: each still asserts the
+complete set of its own warning code. `tests/warnings.test` passes 81/81 and
+`tests/method-eligible.test` 145/145 on all four backends. **Not affected:**
 complete-set tests over programs that import a library (no `lib/*.bot` finding
 exists), the milestone-1 fuzzer's library baseline and the milestone-2 fuzzer
 (their generated programs return no list literal; both smoke runs pass in the
@@ -804,22 +820,21 @@ this milestone**: 5957 minus the 149 new ones, since no other test file changed.
 
 * **`interp`: 5957 tests, 5949 passed, 8 failed. `compile`: 5957 tests, 5945
   passed, 4 skipped (the existing `coreScoping` constraint), 8 failed.** The 8
-  failures are the same on both backends and are exactly the expected breakage
+  failures are the same on both backends and are exactly the breakage listed
   under "Parallel work": 6 in `tests/warnings.test` (`warn-off-runs-no-
   warning-pass`, `warn-exact-list`, `warn-lists-with-unknown-elements-not-
   same`, `warn-same-binding`, `warn-alias-of-binding`, `warn-different-
   bindings-not-same`) and 2 in `tests/method-eligible.test` (`me-off-runs-no-
   warning-pass`, `me-list-literal-never-eligible`). Each is a stats pin or a
-  complete-set pin over a program that really has the fixed shape. All belong
-  to the parallel agent, and none was edited here. **No other test of the 5808
-  failed.** The parallel agent's fixes are not on the tree (`origin/main`,
-  `ffbd610` at the end, does not contain them), so 0 failures is not yet
-  reachable without editing those two files, which this milestone does not
-  own.
+  complete-set pin over a program that really has the fixed shape. They were
+  left failing at first and then adapted in this milestone (below and "Parallel
+  work"). **No other test of the 5808 failed.**
 * `tests/fixed-arity-list-return.test`: **149/149 on each of `interp`,
   `compile`, `cranelift-generic` and `cranelift`.**
 * `tests/warnings.test` 75/81 and `tests/method-eligible.test` 143/145 on both
-  Tcl backends (the failures above). Their fuzz smoke tests (`warn-fuzz-smoke`,
+  Tcl backends before the adaptation (the failures above), and **81/81 and
+  145/145 after it on each of `interp`, `compile`, `cranelift-generic` and
+  `cranelift`**. Their fuzz smoke tests (`warn-fuzz-smoke`,
   `me-fuzz-smoke`) pass. The milestone-1 and milestone-2 fuzzers also pass 300
   seeds each on the committed tree (`same-return-value`: 197 with warnings, 103
   without, 0 failures, 0 extra groups; `method-eligible`: 211/89, 0 failures, 0
@@ -850,6 +865,11 @@ this milestone**: 5957 minus the 149 new ones, since no other test file changed.
   (204/96, 0 failures, 0 extras, 204/204 conversions). The later commit
   `c612319` only renames the CLI tests' scratch files to pid-unique names
   (AGENTS.md's new rule on concurrent runs). Its 6 CLI tests pass.
+* **After the adaptation** (the commit that edits the two test files, on
+  `origin/main` `6fee7af`, whose only change since `ffbd610` is an audit
+  README): the two adapted files pass on all four backends, and the change
+  touches nothing else. Every full run above failed exactly these 8 tests and
+  nothing else, so the suite is expected to be at 0 failures.
 * The GC-stress job (`BOTLISH_NATIVE_GC_STRESS=1`, CI on push to `main`) was not
   run locally: nothing under `native/` changed, and the pass runs before any
   backend and changes no HIR.
@@ -930,9 +950,19 @@ ready patch), and its six findings to annotate take `-> list`.
   rejects.
 * **`data` also carries `note`** (the note text `render` reads), as milestone 1's
   record did.
+* **Ownership of the 8 breaking pins (reversed).** The brief gave the
+  `tests/warnings.test` stats pin, and by extension the other complete-set
+  pins, to the parallel agent, and asked for no existing test file to be
+  edited. The 8 pins were left failing at first, including on the first merge
+  to `main`. They were then adapted in this milestone, test-only, because only
+  this milestone creates them (see "Parallel work"). Acceptance condition 15
+  ("existing tests ... untouched by this milestone") therefore does not hold
+  for these two files. It still holds for every other test file and for the
+  whole corpus.
 * **Branch.** `AGENTS.md` says to push finished work to `main`. This session was
   assigned a development branch and told not to push elsewhere without
-  permission, so the work is pushed to that branch, as milestone 2's was.
+  permission, so the work was pushed to that branch first. It was merged into
+  `main` (a fast-forward) when asked to.
 
 ## Required questions
 
@@ -1025,24 +1055,19 @@ ready patch), and its six findings to annotate take `-> list`.
     same-element, all hand-reviewed as annotate; 2 heterogeneous genuine lists).
     7 are single-exit, and 0 annotated list functions exist.
 40. *False positives under the convert-or-annotate bar?* Zero.
-41. *Warning-mode tests pass?* `tests/fixed-arity-list-return.test` 149/149 on
-    each of the four backends. `tests/warnings.test` 75/81 and
-    `tests/method-eligible.test` 143/145: the 6 and 2 failures are the expected
-    breakage listed under "Parallel work" (stats pins and complete-set pins
-    over true findings), owned by the parallel agent and not edited here.
+41. *Warning-mode tests pass?* Yes. `tests/fixed-arity-list-return.test` 149/149,
+    `tests/warnings.test` 81/81 and `tests/method-eligible.test` 145/145, each on
+    the four backends. The last two include the 8 adapted pins (stats pins and
+    complete-set pins over true findings) listed under "Parallel work".
 42. *Fuzzer and mutation results?* 2000 seeds, 1341 with warnings and 659
     without: 0 failures, 0 extras, 1341/1341 conversions, 0 excluded runs.
     12 of 12 mutants killed, all by the fuzzer.
 43. *Backend parity?* Identical warning sets on all four backends (pinned).
 44. *Full regression?* The new file passes 100% (149/149 on all four
     backends). `tests/all.tcl` on `interp` and `compile` ran 5957 tests (5808
-    before this milestone): 8 failures on each, all the expected breakage in
-    `tests/warnings.test` (6) and `tests/method-eligible.test` (2), attributed
-    to the parallel agent's ownership and listed by name. Nothing else failed.
-    The parallel fixes are not on the tree (`origin/main` moved to `ffbd610`
-    with unrelated work, merged and re-verified, but without them), so the "0
-    where present" condition has nothing to apply to yet.
-    Native coverage (the suite on `cranelift`): 5957 tests, the same 8
-    failures and nothing else. On the tree merged with `origin/main`
-    `ffbd610`: 6030 tests on each of `interp`, `compile` and native coverage,
-    again exactly those 8.
+    before this milestone), and native coverage ran the same suite on
+    `cranelift`. On the tree merged with `origin/main` `ffbd610`, each ran 6030
+    tests. Every run failed exactly the 8 pins listed under "Parallel work"
+    (6 in `tests/warnings.test`, 2 in `tests/method-eligible.test`) and nothing
+    else. Those 8 were then adapted in this milestone, and both files pass on
+    all four backends; the adaptation touches nothing else.
