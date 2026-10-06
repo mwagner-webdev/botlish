@@ -47,7 +47,7 @@ set csvRecordsSource [regsub {\nsample\(\)\n$} \
 
 proc hirOf {text} {
     global csvRecordsSource
-    return [corpus::compile "$csvRecordsSource\n$text\n" bench.bot -strict 0]
+    return [corpus::compile "$csvRecordsSource\n$text\n" bench.bot -strict 0 -warnings off]
 }
 
 # TEXT as a Botlish string literal (examples/stdlib/corpus.tcl's own

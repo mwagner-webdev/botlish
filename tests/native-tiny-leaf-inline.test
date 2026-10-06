@@ -591,3 +591,5 @@ test tiny-leaf-env-precedence-matches-convention {BOTLISH_NATIVE_TINY_LEAF_INLIN
     unset ::env(BOTLISH_NATIVE_TINY_LEAF_INLINE_OPT)
     set results
 } -result {1 1 1 1 1 1}
+
+cleanupTests
