@@ -707,6 +707,13 @@ Final run (the milestone's eighteen mutants, in its order):
   clone's generic analysis), which is what the fuzzer reports; the same
   evidence tests kill it.
 
+**Rerun with the widened import traps** (trap modules over every module
+witness kind, after the qualified-module-type fix; same mutants, seed 11, 40
+programs, on the tree merged with `main`): **18 of 18 killed** again. Tests
+failing as above, except #1 (13). Fuzzer failures of 40: #1 31, #2 3, #3 7,
+#4 22, #5 15, #6 12, #7 1, #9 40, #10 14, #11 1 (now killed by the fuzzer
+too), #13 15, #15 23, #16 15; #8, #12, #14, #17 and #18 still 0.
+
 ## Regression
 
 Every run below is on a frozen snapshot of this milestone's code (a git
