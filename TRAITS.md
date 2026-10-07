@@ -735,13 +735,16 @@ snapshot:
 | `audit/same-failure/tools/fuzz.tcl` | 300 seeds, 0 failures, 0 extra warnings |
 | `audit/fixed-arity-list-return/tools/fuzz.tcl` | 300 seeds, 204 of 204 conversions, 0 failures, 0 extra warnings |
 
-After merging `main` (7 commits: `str::char_at` and the encode_utf8
-allocation work, with Rust runtime changes; the native backend rebuilt), on
-the merged tree: `tests/traits.test` 75 passed; `CORE_BACKEND=interp`
-6190 passed, 0 failed; `CORE_BACKEND=compile` 6186 passed, 4 skipped, 0
-failed (`main`'s 6115 + the 75 trait tests); the trait fuzzer (seeds 1-2,
-100 programs each) 163 accepted, 37 rejected, 0 failures; the scalar audit
-byte-identical to `main`'s corpus.
+After merging `main` (the `str::char_at`/encode_utf8 allocation work, with
+Rust runtime changes, so the native backend was rebuilt; then refinement
+validators and the `PROVES-NAMING` warning, which touch hir/types.tcl,
+hir/resolve.tcl, hir/warnings.tcl, the parser and HIR text), on the merged
+tree: `CORE_BACKEND=interp` 6322 passed, 0 failed; `CORE_BACKEND=compile`
+6318 passed, 4 skipped, 0 failed; the trait fuzzer (seeds 1-2, 100
+programs each) 163 accepted, 37 rejected, 0 failures; the refinement fuzzer
+(now with validators, seed 1, 300 programs) and the PROVES-NAMING fuzzer
+(300 seeds) 0 failures; every mutant in `mutants.txt` still applies; the
+scalar audit (after the first merge) byte-identical to `main`'s corpus.
 
 The runs above are local; CI checks the push to `main`.
 
