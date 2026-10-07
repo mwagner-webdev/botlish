@@ -1,0 +1,23 @@
+# Generic paths (CONTEXT-TRAITS.md): child() is written against the portable
+# io::path::Path trait and specialized for linux::path::LinuxPath, so
+# path.concat compiles to a direct call of linux::path::concat and the
+# result is the same LinuxPath witness, with no wrapper.
+import io::path
+import linux::path
+import str
+import type io::path::Path
+
+fn child(path: Path) -> Path errors NotAPath:
+    path.concat("child")
+
+fn add_config(path: Path) -> Path errors NotAPath:
+    path.concat(".config").concat("awesome_tool")
+
+fn run(value: str) -> str errors NotAPath:
+    linux::path::validate(value)
+    home = add_config(value)
+    str::concat(str::concat(io::path::text(child(value)), " "), io::path::text(home))
+
+run("/home/me"):
+    on NotAPath:
+        "not a path"

@@ -149,6 +149,9 @@
 #              signature-only "fn ..." requirement lines; TRAITS.md). A
 #              declaration like structdecl: no runtime meaning, no binding;
 #              the owner (the declaring module) is supplied by the loader.
+#              `context` (0|1) and `contextSpan`: the `context` modifier
+#              (`context trait IO:`, CONTEXT-TRAITS.md), a property of the
+#              one declaration kind, never a separate kind.
 #   errordecl  name, nameSpan -- a top-level named-error declaration
 #              ("error NAME", surface/parser.tcl's ErrorDecl; see
 #              hir/errordecls.tcl for what it means). No runtime meaning,
@@ -721,7 +724,8 @@ proc surface::ast::Statement {node indent show linesVar} {
             return
         }
         traitdecl {
-            lappend lines "${pad}trait [dict get $node name]$at"
+            set modifier [expr {[dict exists $node context] && [dict get $node context] ? "context " : ""}]
+            lappend lines "${pad}${modifier}trait [dict get $node name]$at"
             foreach r [dict get $node requirements] {
                 set params [lmap pair [dict get $r params] {
                     lassign $pair name _ type

@@ -5612,6 +5612,12 @@ proc native::lower::CallInner {fnVar e node want {wantVirtual ""} {wantRegion 0}
         # `with context EXPR` (CONTEXTS.md): stores into the type's fixed slot.
         return [ContextInstallCall fn $e $node]
     }
+    if {$targetKind eq "native" && [dict get [hir::symbol $hir $target] name] eq [core::contexts::unreachableNative]} {
+        # Code no installed context reaches (CONTEXT-TRAITS.md): HIR
+        # verification proved it never runs, so there is nothing to call.
+        Emit fn unreachable $e
+        return {never tagged}
+    }
     if {$targetKind eq "native" && [dict get [hir::symbol $hir $target] name] eq [core::contexts::loadNative]} {
         # A context load outside a context parameter's own binding (Bind
         # keeps those lazy): the whole installed value, from its slot.

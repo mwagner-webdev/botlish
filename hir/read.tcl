@@ -172,8 +172,8 @@ proc hir::read::TypeDecls {lines} {
 
 # The `traits` entry hir::format::TraitDecl's line CONTENT states.
 proc hir::read::TraitLine {content number} {
-    if {![regexp {^trait (\S+) owner (\S+) requires (.+)$} $content -> id owner reqsText]} {
-        Fail $number "expected \"trait ID owner NS requires REQ ; ...\""
+    if {![regexp {^trait (\S+)( context)? owner (\S+) requires (.+)$} $content -> id context owner reqsText]} {
+        Fail $number "expected \"trait ID ?context? owner NS requires REQ ; ...\""
     }
     set requirements {}
     foreach text [split [string map {" ; " \x01} $reqsText] \x01] {
@@ -209,7 +209,8 @@ proc hir::read::TraitLine {content number} {
         lappend requirements [dict create name $name nameSpan "" span "" params $params result $result errors $errors]
     }
     return [dict create id $id name [lindex [split [string map {:: \x01} $id] \x01] end] \
-        namespace [expr {$owner eq "-" ? "" : $owner}] requirements $requirements]
+        namespace [expr {$owner eq "-" ? "" : $owner}] requirements $requirements \
+        context [expr {$context ne ""}]]
 }
 
 # The struct sourceTypes entry "struct ID name NAME ns NS fields F: T, ..."
@@ -811,6 +812,9 @@ proc hir::read::Expr {hirVar level s path block} {
                         [lindex $declaredParamTypes [lsearch -exact $paramIds $vb]]]
                 }
             }
+            if {[dict exists $cloneText selection]} {
+                SetField hir $e contextClone [dict get $cloneText selection]
+            }
             if {[dict exists $cloneText result]} {
                 SetField hir $e traitResult [list trait [dict get $cloneText result]]
             }
@@ -836,19 +840,26 @@ proc hir::read::Expr {hirVar level s path block} {
             SetField hir $e body $ids
         }
         call {
-            if {![regexp {^(?:native\((.+?)\)|block\((e[0-9]+)\)|(generic))(?: = (true|false))?(?: installs (\S+))?(?: trait (\S+)\.(\S+) witness (.+))?$} $head -> native target generic known installs traitId requirement witnessText]} {
-                Fail $number "expected \"call native(NAME)|block(EXPR)|generic ?= true|false? ?installs ID? ?trait TRAIT.OP witness TYPE?\""
+            if {![regexp {^(?:native\((.+?)\)|block\((e[0-9]+)\)|(generic))(?: = (true|false))?(?: installs (\S+))?(?: (trait|contexttrait) (\S+)\.(\S+) witness (.+))?$} $head -> native target generic known installs traitWord traitId requirement witnessText]} {
+                Fail $number "expected \"call native(NAME)|block(EXPR)|generic ?= true|false? ?installs ID? ?trait|contexttrait TRAIT.OP witness TYPE?\""
             }
             if {$traitId ne ""} {
                 # A trait operation resolved to its implementation
-                # (TRAITS.md): the requirement's contract for the witness.
+                # (TRAITS.md): the requirement's contract for the witness; a
+                # context-trait operation (CONTEXT-TRAITS.md) resolved to the
+                # selected context's implementation.
                 set witness [ParseType $witnessText $number]
                 set req [hir::traits::requirement $traitId $requirement]
                 if {$req eq ""} {
                     Fail $number "trait $traitId has no requirement \"$requirement\""
                 }
-                SetField hir $e traitImpl [dict create trait $traitId requirement $requirement \
-                    witness $witness contract [hir::traits::RequiredFn $req $witness]]
+                if {$traitWord eq "contexttrait"} {
+                    SetField hir $e traitImpl [dict create trait $traitId requirement $requirement \
+                        witness $witness contract [hir::traits::RequiredFn $req ""] context 1]
+                } else {
+                    SetField hir $e traitImpl [dict create trait $traitId requirement $requirement \
+                        witness $witness contract [hir::traits::RequiredFn $req $witness]]
+                }
             }
             # The context a verified installation installs (CONTEXTS.md), as
             # printed: native lowering assigns its fixed slot from it.
@@ -1160,6 +1171,17 @@ proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar de
         set clone ""
         if {[regexp {^ clone \((.*?)\)(.*)$} $rest -> views after]} {
             dict set clone views $views
+            set rest $after
+        }
+        if {[regexp {^ contextclone \((.*?)\)(.*)$} $rest -> selection after]} {
+            set pairs {}
+            foreach item [split [string map {", " \x01} $selection] \x01] {
+                if {![regexp {^([^=]+)=(.+)$} $item -> c w]} {
+                    error "expected \"TRAIT=CONTEXT\" in a clone's context selection, got \"$item\""
+                }
+                lappend pairs $c $w
+            }
+            dict set clone selection $pairs
             set rest $after
         }
         if {[regexp {^ traitresult (\S+)(.*)$} $rest -> id after]} {

@@ -1,0 +1,45 @@
+# path.bot -- the "io::path" namespace: the portable textual path abstraction
+# (CONTEXT-TRAITS.md, "Paths").
+#
+#   fn child(path: Path) -> Path errors NotAPath:
+#       path.concat("child")
+#
+# Path is an ordinary eager trait (TRAITS.md): a value of any concrete path
+# type whose own namespace implements `concat` and `text` may enter it, and
+# a function over Path is specialized per concrete type, so `path.concat`
+# above compiles to a direct call of the concrete type's own concat (for a
+# linux::path::LinuxPath, linux::path::concat), with no wrapper or dispatch.
+# The concrete types live with their platforms -- linux::path::LinuxPath, a
+# future Windows path -- and this namespace knows none of them.
+#
+# A Path is *textual*: `text` is its canonical String form, losslessly (for
+# LinuxPath exactly the carrier string), never an escaped or display-only
+# rendering; the standard formatting of a portable textual Path should equal
+# its `text`. Arbitrary-byte native paths are a different, lower-level
+# abstraction.
+
+# A String is not a valid path of the kind an operation needs (empty,
+# containing NUL, or -- for a component appended with `concat` -- absolute).
+# The one path-validation error: no hierarchy of reasons.
+error NotAPath
+
+# A textual path of some platform's syntax.
+#
+#   concat(path, component)  PATH joined with the relative fragment COMPONENT
+#                            by one separator as the platform's syntax needs
+#                            (path joining, not String concatenation); a path
+#                            of the same concrete type, or NotAPath
+#   text(path)               the path's canonical String form, lossless
+trait Path:
+    fn concat(path: Path, component: str) -> Path errors NotAPath
+    fn text(path: Path) -> str
+
+# PATH joined with COMPONENT (path.concat(component)), for code that prefers
+# the namespace spelling; specialized per concrete path type like any
+# trait-polymorphic function.
+fn concat(path: Path, component: str) -> Path errors NotAPath:
+    path.concat(component)
+
+# PATH's canonical String form (path.text()).
+fn text(path: Path) -> str:
+    path.text()

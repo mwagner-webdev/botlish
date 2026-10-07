@@ -537,6 +537,11 @@ proc hir::resolve::ResolveTypeExpr {typeExpr {ns ""}} {
         set argTypes [lmap t [dict get $arg args] {ResolveTypeExpr $t $ns}]
         set result [ResolveTypeExpr [dict get $arg return] $ns]
         foreach t [concat $argTypes [list $result]] {
+            set contextTrait [hir::types::MentionedContextTrait $t]
+            if {$contextTrait ne ""} {
+                return -code error -errorcode {BOTLISH CONTEXT-TRAIT-POSITION} \
+                    [hir::types::ContextTraitPositionMessage $contextTrait "part of a function type"]
+            }
             if {[hir::types::MentionsTrait $t]} {
                 # A function type over a trait would be a callable value whose
                 # calls need a witness only the caller knows: there is no
@@ -791,6 +796,14 @@ proc hir::resolve::Expr {hirVar node ctx} {
                     hir::Diagnose hir [TypeErrorKind $options TYPE] \
                         [format {unknown or invalid type %s for parameter "%s": %s} [ShowTypeExpr $paramType] $name $normalized] $e
                     lappend declaredParamTypes {}
+                } elseif {[hir::types::MentionedContextTrait $normalized] ne ""} {
+                    # A context trait (CONTEXT-TRAITS.md) is not a value type:
+                    # only a context parameter may have one.
+                    hir::DiagnoseAt hir CONTEXT-TRAIT-POSITION \
+                        [hir::types::ContextTraitPositionMessage [hir::types::MentionedContextTrait $normalized] \
+                            "the type of the ordinary parameter \"$name\" (write \"context $name: [ShowTypeExpr $paramType]\" in the function's context section)"] \
+                        $e $paramOrigin
+                    lappend declaredParamTypes {}
                 } else {
                     lappend declaredParamTypes $normalized
                 }
@@ -806,6 +819,11 @@ proc hir::resolve::Expr {hirVar node ctx} {
                     lset declaredParamTypes $i $witness
                 }
                 SetField hir $e traitClone [dict get $head key]
+                if {[dict get $head selection] ne {}} {
+                    # The installed contexts this clone's context-trait
+                    # operations call (CONTEXT-TRAITS.md): {TRAIT WITNESS ...}.
+                    SetField hir $e contextClone [dict get $head selection]
+                }
             }
             # The flag section (FLAGS.md): the last parameters, one bool
             # binding per declared flag, after the ordinary ones.
@@ -829,6 +847,10 @@ proc hir::resolve::Expr {hirVar node ctx} {
             if {$declared ne {}} {
                 if {[catch {ResolveTypeExpr $declared [CtxNamespace $ctx]} normalized options]} {
                     hir::Diagnose hir [TypeErrorKind $options TYPE] [format {unknown or invalid result type %s: %s} [ShowTypeExpr $declared] $normalized] $e
+                    set declared {}
+                } elseif {[hir::types::MentionedContextTrait $normalized] ne ""} {
+                    hir::Diagnose hir CONTEXT-TRAIT-POSITION \
+                        [hir::types::ContextTraitPositionMessage [hir::types::MentionedContextTrait $normalized] "a function's result type"] $e
                     set declared {}
                 } else {
                     set declared $normalized
@@ -1341,7 +1363,8 @@ proc hir::resolve::ResolveClone {hirVar key ctx} {
     }
     set inner [dict replace $ctx namespace [dict get $clone namespace] traitContext $key \
         clone [dict get $clone function] cloneHead [dict create key $key sid [dict get $node value sid] \
-            params [dict get $clone params] result [dict get $clone result]]]
+            params [dict get $clone params] result [dict get $clone result] \
+            selection [dict get $clone selection]]]
     SetField hir $e value [Expr hir [dict get $node value] $inner]
     return $e
 }
@@ -1387,10 +1410,37 @@ proc hir::resolve::ResolveIdent {hirVar e ident ctx} {
 
 # Resolves call E (syntax NODE) as the trait plan's ACTION says: {redirect
 # KEY} calls clone KEY, {trait IDENT ...} the implementation IDENT names, the
-# receiver of a method-syntax call becoming the first argument.
+# receiver of a method-syntax call becoming the first argument; {context
+# OPERATION ?KEY?} the selected context's implementation of a context-trait
+# operation (or, with KEY, that implementation's own clone), with the written
+# arguments only -- the context-trait binding that was the receiver is no
+# value and is not evaluated (CONTEXT-TRAITS.md); {unreachable} code no
+# installed context reaches, never executed: the internal native
+# context#unreachable, with no arguments.
 proc hir::resolve::ResolvePlannedCall {hirVar e node action ctx} {
     upvar 1 $hirVar hir
     set written [dict get $node callee]
+    if {[lindex $action 0] in {context unreachable}} {
+        set origin [expr {[dict exists $node method] ? [dict get $written nameOrigin] : [dict get $written origin]}]
+        set c [hir::NewId hir expr]
+        dict set hir exprs $c [dict create id $c kind ref origin $origin scope [dict get $ctx scope] type "" reachable 1]
+        if {[lindex $action 0] eq "unreachable"} {
+            ResolveRef hir $c [hir::contexts::UnreachableNative] 1 $ctx
+            SetField hir $e callee $c
+            SetField hir $e args {}
+            return
+        }
+        set operation [lindex $action 1]
+        if {[llength $action] > 2} {
+            ResolveIdent hir $c [list clone [lindex $action 2]] $ctx
+        } else {
+            ResolveIdent hir $c [dict get $operation impl] $ctx
+        }
+        SetField hir $e traitImpl $operation
+        SetField hir $e callee $c
+        SetField hir $e args [Sequence hir [dict get $node args] $ctx]
+        return
+    }
     if {[dict exists $node written]} {
         SetField hir $e written [dict create form [dict get $node written] ns [CtxNamespace $ctx]]
     }

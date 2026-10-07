@@ -624,18 +624,24 @@ test contexts-opacity-exact {context authority is not representation authority: 
 # ---------------------------------------------------------------------------
 # linux::io
 
-test contexts-linux-io-surface {linux::io exports exactly create, write, write_error and read (no descriptor accessors, no current-context getter); FileDescriptor and LinuxIO are opaque, LinuxIO alone is a context} -body {
+# (CONTEXT-TRAITS.md added write_text and write_error_text, LinuxIO's
+# implementation of the portable io::IO context trait, and their helper
+# write_all, whose FileDescriptor parameter no code outside linux::io can
+# supply: still no descriptor accessor and no context getter.)
+test contexts-linux-io-surface {linux::io exports exactly create, write, write_error and read, plus io::IO's implementation (write_text, write_error_text, write_all over an opaque FileDescriptor) (no descriptor accessors, no current-context getter); FileDescriptor and LinuxIO are opaque, LinuxIO alone is a context} -body {
     set hir [ctxHir "import linux::io\n1\n"]
     set names [lsort [lmap b [dict get $hir scopes [dict get $hir modules linux::io] bindings] {dict get $hir bindings $b name}]]
     list $names [lmap id {linux::io::FileDescriptor linux::io::LinuxIO} {list [hir::structs::isOpaque $id] [hir::structs::isContext $id]}] \
         [hir::structs::fieldTypes linux::io::LinuxIO] [hir::structs::fieldTypes linux::io::FileDescriptor]
-} -result {{linux::io::create linux::io::read linux::io::write linux::io::write_error} {{1 0} {1 1}} {stdin {nstruct linux::io::FileDescriptor} stdout {nstruct linux::io::FileDescriptor} stderr {nstruct linux::io::FileDescriptor}} {raw {nstruct abi::I32}}}
+} -result {{linux::io::create linux::io::read linux::io::write linux::io::write_all linux::io::write_error linux::io::write_error_text linux::io::write_text} {{1 0} {1 1}} {stdin {nstruct linux::io::FileDescriptor} stdout {nstruct linux::io::FileDescriptor} stderr {nstruct linux::io::FileDescriptor}} {raw {nstruct abi::I32}}}
 
-test contexts-no-context-api {no source-visible context API: the two context operations are internal root natives no program can spell, and no native or function looks a context up by any other means} -body {
+# (context#unreachable, CONTEXT-TRAITS.md, is the placeholder of code no
+# installed context reaches: it looks nothing up and never runs.)
+test contexts-no-context-api {no source-visible context API: the context operations are internal root natives no program can spell, and no native or function looks a context up by any other means} -body {
     list [lsort [lsearch -all -inline -glob [core::native::names] *context*]] \
         [lindex [strictError "x = context#load\n1\n"] 0] \
         [catch {surface::parse "context#load(\"A\")\n"}]
-} -result {{context#install context#load} UNBOUND 0}
+} -result {{context#install context#load context#unreachable} UNBOUND 0}
 
 test contexts-linux-io-tcl-backends {the Tcl backends verify and run a linux::io program up to the syscall, which they refuse (NATIVE-ONLY); the context itself (create, install, the descriptors) is ordinary Botlish} -body {
     set hir [ctxHir "${::linuxPrelude}with context linux::io::create()\nlinux::io::write(mk(\"x\"))\n"]
@@ -689,7 +695,7 @@ test contexts-native-nir-hello {NIR of the Hello World: one 24-byte context area
     set hello [nirFunction $nir hello]
     list $header [regexp -all {contextstore} $nir] [regexp -all {contextload} $nir] \
         [lindex [split $write \n] 0] [nirBody $write] [nirBody $hello]
-} -result {{{nir 1 call-effects=1 statics=0 contexts=24} {context 0 "linux::io::LinuxIO" offset=0 words=3 fields="stdin.raw.value stdout.raw.value stderr.raw.value"}} 3 1 {func 9 "linux::io::write" params=1 env=0 regs=3 pnames="data.0" captures=0 instance="abi::bytes::Bytes" @e509} {{%1 = contextload 8} {%2 = call 7 %1 %0} {ret %2}} {{%0 = bytes "48656c6c6f2c20776f726c64210a"} {%1 = call 9 %0} {ret %1}}}
+} -result {{{nir 1 call-effects=1 statics=0 contexts=24} {context 0 "linux::io::LinuxIO" offset=0 words=3 fields="stdin.raw.value stdout.raw.value stderr.raw.value"}} 3 1 {func 9 "linux::io::write" params=1 env=0 regs=3 pnames="data.0" captures=0 instance="abi::bytes::Bytes" @e566} {{%1 = contextload 8} {%2 = call 7 %1 %0} {ret %2}} {{%0 = bytes "48656c6c6f2c20776f726c64210a"} {%1 = call 9 %0} {ret %1}}}
 
 test contexts-native-no-hidden-argument {the three-level chain compiles to the calling convention it would have without any context: every function has params=0 env=0, every call passes no operand, and only the consumer does anything about the context -- its own fixed-slot load} -constraints linuxX86_64 -body {
     set nir [native::nir [ctxHir "${::synthetic}fn middle():\n    read_value()\nfn top():\n    middle()\nwith context Counter {value: 3, enabled: true}\ntop()\n"]]

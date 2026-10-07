@@ -98,8 +98,12 @@
 #
 #   errorDecl    = "error" IDENT NEWLINE
 #
-#   traitDecl    = "trait" IDENT ":" NEWLINE INDENT traitRequirement
-#                  { traitRequirement } DEDENT          -- TRAITS.md
+#   traitDecl    = [ "context" ] "trait" IDENT ":" NEWLINE INDENT
+#                  traitRequirement { traitRequirement } DEDENT
+#                  -- TRAITS.md; with the `context` modifier a context
+#                  trait (CONTEXT-TRAITS.md: an environment abstraction
+#                  whose requirements have no receiver parameter).
+#                  `context` is contextual here exactly as before `struct`
 #   traitRequirement = "fn" IDENT "(" [ paramList ] ")" [ "->" typeExpr ]
 #                  [ "errors" IDENT { "," IDENT } ] NEWLINE
 #                  -- a signature only: no body and no trailing ":". "trait"
@@ -487,29 +491,70 @@ proc surface::parser::AtStructDecl {pVar} {
 }
 
 # 1 if the next tokens start a trait declaration (TRAITS.md): the contextual
-# word "trait" directly followed by a name. Two names in a row are never a
-# valid expression, so an ordinary variable called `trait` (`trait = 3`,
-# `trait(x)`, `x.trait`, a parameter `trait`) is unaffected.
+# word "trait" directly followed by a name, optionally after struct-style
+# modifier words (`context trait IO:`, CONTEXT-TRAITS.md; TraitDecl decides
+# which modifiers a trait admits). Two names in a row are never a valid
+# expression, so an ordinary variable called `trait` (`trait = 3`,
+# `trait(x)`, `x.trait`, a parameter `trait`) or `context` is unaffected.
 proc surface::parser::AtTraitDecl {pVar} {
+    variable structModifiers
     upvar 1 $pVar p
-    set token [Peek p]
+    set i 0
+    while {[Kind p $i] eq "IDENT" && [dict get [Peek p $i] text] in $structModifiers
+            && [Kind p [expr {$i + 1}]] eq "IDENT"} {
+        incr i
+    }
+    set token [Peek p $i]
     return [expr {[dict get $token kind] eq "IDENT" && [dict get $token text] eq "trait"
-        && [Kind p 1] eq "IDENT"}]
+        && [Kind p [expr {$i + 1}]] eq "IDENT"}]
 }
 
-# "trait" IDENT ":" NEWLINE INDENT traitRequirement { traitRequirement }
-# DEDENT -- a top-level trait declaration (TRAITS.md). A `traitdecl` node
-# {name nameSpan requirements}, each requirement a dict {name nameSpan params
-# (the function node's own {NAME SPAN TYPE TYPESPAN} tuples) paramsSpan
-# resultType resultTypeSpan errors ({NAME SPAN} pairs) span}. A requirement
-# is a signature only: "fn NAME(params) [-> T] [errors E, ...]" ending the
-# line, never a body. A trait needs at least one requirement (TRAIT-EMPTY: a
-# structural trait with none would be satisfied by every type); a
-# requirement may declare no flags (TRAIT-REQUIREMENT-FLAGS), no context
-# (TRAIT-CONTEXT-REQUIREMENT) and no proof clause, and has no modifier.
+# [ "context" ] "trait" IDENT ":" NEWLINE INDENT traitRequirement
+# { traitRequirement } DEDENT -- a top-level trait declaration (TRAITS.md). A
+# `traitdecl` node {name nameSpan requirements context contextSpan}, each
+# requirement a dict {name nameSpan params (the function node's own {NAME SPAN
+# TYPE TYPESPAN} tuples) paramsSpan resultType resultTypeSpan errors ({NAME
+# SPAN} pairs) span}. A requirement is a signature only: "fn NAME(params) [->
+# T] [errors E, ...]" ending the line, never a body. A trait needs at least
+# one requirement (TRAIT-EMPTY: a structural trait with none would be
+# satisfied by every type); a requirement may declare no flags
+# (TRAIT-REQUIREMENT-FLAGS), no context (TRAIT-CONTEXT-REQUIREMENT) and no
+# proof clause, and has no modifier.
+#
+# `context` is the one modifier a trait admits (CONTEXT-TRAITS.md): the same
+# orthogonal declaration modifier as on `context struct`, here making the
+# trait an *environment* abstraction (operations an installed context
+# supplies, invoked through a context parameter) instead of a value
+# abstraction. Its requirements have no receiver parameter -- the context is
+# the implicit receiver -- which hir/traits.tcl checks; the grammar is the
+# same. `opaque` (a representation property) modifies no trait.
 proc surface::parser::TraitDecl {pVar} {
+    variable structModifiers
     upvar 1 $pVar p
-    set start [dict get [Advance p] span]
+    set context 0
+    set contextSpan ""
+    set seen {}
+    set start ""
+    while {[Kind p] eq "IDENT" && [dict get [Peek p] text] in $structModifiers} {
+        set token [Advance p]
+        if {$start eq ""} {
+            set start [dict get $token span]
+        }
+        set word [dict get $token text]
+        if {$word in $seen} {
+            Fail $token "duplicate modifier \"$word\" in this trait declaration"
+        }
+        lappend seen $word
+        if {$word ne "context"} {
+            Fail $token "\"$word\" does not modify a trait declaration (the only trait modifier is \"context\": \"context trait NAME:\")"
+        }
+        set context 1
+        set contextSpan [dict get $token span]
+    }
+    set keyword [dict get [Advance p] span]
+    if {$start eq ""} {
+        set start $keyword
+    }
     set name [Expect p IDENT "a trait name after \"trait\""]
     set token [Peek p]
     if {[dict get $token kind] ne ":"} {
@@ -523,6 +568,10 @@ proc surface::parser::TraitDecl {pVar} {
     Advance p
     set token [Peek p]
     if {[dict get $token kind] ne "INDENT"} {
+        if {$context} {
+            FailCode [dict get $name span] TRAIT-EMPTY \
+                "context trait \"[dict get $name value]\" declares no requirement: a context trait needs at least one \"fn NAME(...)\" requirement in an indented block (a requirement-free context trait would be satisfied by every installed context)"
+        }
         FailCode [dict get $name span] TRAIT-EMPTY \
             "trait \"[dict get $name value]\" declares no requirement: a trait needs at least one \"fn NAME(value: [dict get $name value], ...)\" requirement in an indented block (a requirement-free trait would be satisfied by every type)"
     }
@@ -533,25 +582,31 @@ proc surface::parser::TraitDecl {pVar} {
             Advance p
             continue
         }
-        lappend requirements [TraitRequirement p [dict get $name value]]
+        lappend requirements [TraitRequirement p [dict get $name value] $context]
     }
     if {[Kind p] eq "DEDENT"} {
         Advance p
     }
     return [surface::ast::node traitdecl [SpanFrom p $start] \
-        name [dict get $name value] nameSpan [dict get $name span] requirements $requirements]
+        name [dict get $name value] nameSpan [dict get $name span] requirements $requirements \
+        context $context contextSpan $contextSpan]
 }
 
-# One requirement line of trait TRAIT: "fn" IDENT "(" params ")" [ "->"
-# typeExpr ] [ "errors" IDENT { "," IDENT } ] NEWLINE.
-proc surface::parser::TraitRequirement {pVar trait} {
+# One requirement line of trait TRAIT (a context trait when CONTEXT): "fn"
+# IDENT "(" params ")" [ "->" typeExpr ] [ "errors" IDENT { "," IDENT } ]
+# NEWLINE.
+proc surface::parser::TraitRequirement {pVar trait {context 0}} {
     variable functionModifiers
     upvar 1 $pVar p
+    set what [expr {$context ? "context trait" : "trait"}]
     set token [Peek p]
     if {[dict get $token kind] eq "IDENT" && [dict get $token text] in $functionModifiers && [Kind p 1] eq "fn"} {
-        Fail $token "a trait requirement has no modifiers: \"[dict get $token text]\" applies to a function declaration, not to a requirement of trait \"$trait\""
+        Fail $token "a trait requirement has no modifiers: \"[dict get $token text]\" applies to a function declaration, not to a requirement of $what \"$trait\""
     }
     if {[dict get $token kind] ne "fn"} {
+        if {$context} {
+            Fail $token "expected a requirement \"fn NAME(PARAMS) -> T\" in context trait \"$trait\", found [Describe $token] (a context trait declares function signatures only)"
+        }
         Fail $token "expected a requirement \"fn NAME(value: $trait, ...) -> T\" in trait \"$trait\", found [Describe $token] (a trait declares function signatures only)"
     }
     set start [dict get [Advance p] span]
@@ -561,7 +616,11 @@ proc surface::parser::TraitRequirement {pVar trait} {
     set paramsSpan [SpanFrom p [dict get $open span]]
     if {$flags ne {}} {
         FailCode [dict get [lindex $flags 0] span] TRAIT-REQUIREMENT-FLAGS \
-            "requirement \"[dict get $name value]\" of trait \"$trait\" declares flags: flags in trait requirements are not supported yet"
+            "requirement \"[dict get $name value]\" of $what \"$trait\" declares flags: flags in trait requirements are not supported yet"
+    }
+    if {$contexts ne {} && $context} {
+        FailCode [dict get [lindex $contexts 0] nameSpan] TRAIT-CONTEXT-REQUIREMENT \
+            "requirement \"[dict get $name value]\" of context trait \"$trait\" declares a context parameter: the installed context is the requirement's implicit receiver, so a requirement declares only its ordinary parameters"
     }
     if {$contexts ne {}} {
         FailCode [dict get [lindex $contexts 0] nameSpan] TRAIT-CONTEXT-REQUIREMENT \

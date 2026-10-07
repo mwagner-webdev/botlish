@@ -150,7 +150,9 @@ proc hir::format::TraitDecl {entry} {
         lappend reqs $text
     }
     set ns [dict get $entry namespace]
-    return "trait [dict get $entry id] owner [expr {$ns eq "" ? "-" : $ns}] requires [join $reqs { ; }]"
+    # A context trait (CONTEXT-TRAITS.md) carries its modifier.
+    set context [expr {[dict exists $entry context] && [dict get $entry context] ? " context" : ""}]
+    return "trait [dict get $entry id]$context owner [expr {$ns eq "" ? "-" : $ns}] requires [join $reqs { ; }]"
 }
 
 # One line for a trait-polymorphic source function the monomorphized program
@@ -289,6 +291,12 @@ proc hir::format::Expr {hir e indent origins linesVar} {
                 }
                 append text " clone ([join $views {, }])"
             }
+            if {[dict exists $node contextClone]} {
+                # The installed context each context trait the clone's
+                # operations call was statically selected as
+                # (CONTEXT-TRAITS.md).
+                append text " contextclone ([join [lmap {c w} [dict get $node contextClone] {string cat $c = $w}] {, }])"
+            }
             if {[dict exists $node traitResult]} {
                 append text " traitresult [lindex [dict get $node traitResult] 1]"
             }
@@ -339,7 +347,8 @@ proc hir::format::Expr {hir e indent origins linesVar} {
                 # A trait operation resolved to its witness's implementation
                 # (TRAITS.md): an ordinary direct call, annotated.
                 set impl [dict get $node traitImpl]
-                append text " trait [dict get $impl trait].[dict get $impl requirement] witness [hir::types::show [dict get $impl witness]]"
+                set word [expr {[dict exists $impl context] ? "contexttrait" : "trait"}]
+                append text " $word [dict get $impl trait].[dict get $impl requirement] witness [hir::types::show [dict get $impl witness]]"
             }
             Line $hir $e $text $indent $origins lines
             Expr $hir [dict get $node callee] $inner $origins lines

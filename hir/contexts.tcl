@@ -82,6 +82,7 @@ namespace eval hir::contexts {}
 
 proc hir::contexts::LoadNative {} { return [core::contexts::loadNative] }
 proc hir::contexts::InstallNative {} { return [core::contexts::installNative] }
+proc hir::contexts::UnreachableNative {} { return [core::contexts::unreachableNative] }
 
 # ---------------------------------------------------------------------------
 # Resolution (called by hir/resolve.tcl's block case)
@@ -123,6 +124,34 @@ proc hir::contexts::DeclareParams {hirVar e node bodyScope ns} {
                 [format {unknown or invalid type %s for context parameter "%s": %s} \
                     [hir::resolve::ShowTypeExpr $typeExpr] $name $type] $e $typeOrigin
             set id ""
+        } elseif {[hir::traits::IsContextTraitType $type]} {
+            # A context trait (CONTEXT-TRAITS.md): the binding is the
+            # source-visible capability; the installed context that provides
+            # it is selected statically where the requirement is met.
+            set id [lindex $type 1]
+            if {[dict exists $seenTypes $id]} {
+                hir::DiagnoseAt hir DUPLICATE-CONTEXT-PARAMETER \
+                    [format {context trait %s is declared twice (as "%s" and "%s"): a function receives at most one binding of each context requirement, whatever the local names} \
+                        $id [dict get $seenTypes $id] $name] $e $typeOrigin
+                continue
+            }
+            dict set seenTypes $id $name
+            if {[hir::traits::Planning]} {
+                # The monomorphized build (hir::traits::monomorphize): every
+                # operation on the binding is a direct call of the selected
+                # implementation, so the binding does not exist at all.
+                continue
+            }
+            lappend records [dict create name $name context $id trait 1]
+            lappend binds [hir::syntax::bindNode $origin $name \
+                [hir::syntax::callNode $origin [hir::syntax::rootRef $origin [LoadNative]] \
+                    [hir::syntax::constNode $origin str $id]]]
+            continue
+        } elseif {[hir::types::IsTrait $type]} {
+            hir::DiagnoseAt hir NOT-A-CONTEXT \
+                [format {context parameter "%s": %s is a trait, an abstraction over values, not a context (a context parameter's type is a "context struct" or a "context trait")} \
+                    $name [hir::types::show $type]] $e $typeOrigin
+            set id ""
         } elseif {[lindex $type 0] ne "nstruct" || ![hir::structs::isContext [lindex $type 1]]} {
             hir::DiagnoseAt hir NOT-A-CONTEXT \
                 [format {context parameter "%s": %s is not a context (only a value of a type declared "context struct" can be a context)} \
@@ -145,6 +174,190 @@ proc hir::contexts::DeclareParams {hirVar e node bodyScope ns} {
     }
     dict set hir exprs $e contextParams $records
     return $binds
+}
+
+# ---------------------------------------------------------------------------
+# Context traits (CONTEXT-TRAITS.md)
+#
+#   context trait IO:
+#       fn write_text(text: str) -> unit errors WriteFailed
+#
+# A context trait is an environment abstraction: a set of operations an
+# installed context supplies. A concrete context struct W satisfies it
+# structurally, decided from W's owner namespace alone: for every requirement
+# R, the owner declares a top-level function named R whose ordinary signature
+# is compatible with R's (hir::types::FnMismatch: arity, contravariant
+# parameters, covariant result, error subset) and whose context section is
+# exactly `context NAME: W` -- the implementation's implicit receiver, absent
+# from its arity and its machine signature exactly as for every context
+# parameter. Imports, the call site and every other namespace take no part.
+
+namespace eval hir::contexts {
+    # {WITNESS TRAIT} -> satisfiesTrait result, for the current compilation
+    # (cleared with the implementation index, hir::traits::index).
+    variable traitCache [dict create]
+}
+
+proc hir::contexts::ResetTraitCache {} {
+    variable traitCache
+    set traitCache [dict create]
+}
+
+# 1 if context identity ID (a load key, a required identity) is a context
+# trait rather than a context struct.
+proc hir::contexts::isTrait {id} {
+    return [hir::traits::isContext $id]
+}
+
+# The context-struct identity CONTEXT names: an identity, or a type
+# {nstruct ID}.
+proc hir::contexts::WitnessId {context} {
+    if {[lindex $context 0] eq "nstruct" && [llength $context] == 2} {
+        return [lindex $context 1]
+    }
+    return $context
+}
+
+# Whether the concrete context CONTEXT (a context-struct identity or its type)
+# satisfies context trait TRAIT: {ok 0|1 trait TRAIT witness W owner NS impls
+# {REQUIREMENT IMPL ...} reason WHY requirement NAME found TEXT} -- IMPLS the
+# static requirement -> implementation mapping (IMPL {kind block unit NS name
+# NAME binding B block E}), never materialized at run time; REASON,
+# REQUIREMENT and FOUND the first missing or incompatible requirement when not
+# ok. Cached per compilation: two importers of one context and one trait get
+# one answer and one mapping.
+proc hir::contexts::satisfiesTrait {context trait} {
+    variable traitCache
+    set w [WitnessId $context]
+    set key [list $w $trait]
+    if {[dict exists $traitCache $key]} {
+        return [dict get $traitCache $key]
+    }
+    set result [dict create ok 0 trait $trait witness $w owner "" impls {} \
+        reason "" requirement "" found ""]
+    if {![hir::traits::declared $trait] || ![hir::traits::isContext $trait]} {
+        dict set result reason "$trait is not a context trait"
+    } elseif {![hir::structs::declared $w] || ![hir::structs::isContext $w]} {
+        dict set result reason "$w is not a context struct: only an installed context satisfies a context trait"
+    } else {
+        set owner [hir::structs::owner $w]
+        dict set result owner $owner
+        set impls {}
+        set ok 1
+        foreach name [hir::traits::requirementNames $trait] {
+            set found [TraitImplementation [hir::traits::requirement $trait $name] $w $owner]
+            if {![dict get $found ok]} {
+                dict set result reason [dict get $found reason]
+                dict set result requirement $name
+                dict set result found [dict get $found found]
+                set ok 0
+                break
+            }
+            lappend impls $name [dict get $found impl]
+        }
+        dict set result ok $ok
+        dict set result impls $impls
+    }
+    dict set traitCache $key $result
+    return $result
+}
+
+# The implementation of context-trait requirement REQ for context struct W
+# owned by namespace OWNER: {ok 1 impl IMPL found TEXT} or {ok 0 reason WHY
+# found TEXT}. Only OWNER's own top-level function of the requirement's name
+# is a candidate (hir::traits::ImplInfo, the per-build index).
+proc hir::contexts::TraitImplementation {req w owner} {
+    set name [dict get $req name]
+    set qualified [hir::traits::QualifiedName $owner $name]
+    set required [hir::traits::RequiredFn $req ""]
+    set info [hir::traits::ImplInfo $owner $name]
+    if {$info eq ""} {
+        return [dict create ok 0 reason "no function $qualified exists: \"$name\" is not defined by [hir::traits::OwnerPhrase $owner module] (only the namespace that owns $w implements its context-trait operations)" found ""]
+    }
+    if {[dict get $info kind] ne "block"} {
+        return [dict create ok 0 reason "$qualified is not a function declaration (a value binding cannot implement a requirement)" found ""]
+    }
+    set params [lmap t [dict get $info params] {expr {$t eq {} ? "any" : $t}}]
+    set declared [dict get $info result]
+    set actual [hir::types::MakeFn $params [expr {$declared eq {} ? "any" : $declared}] [dict get $info errors]]
+    set found [ShowImplementation $qualified $info]
+    if {[dict get $info flags] ne {}} {
+        return [dict create ok 0 reason "$qualified declares flags ([join [lmap f [dict get $info flags] {string cat : $f}] {, }]): implementations with flags are not supported yet" found $found]
+    }
+    set contexts [dict get $info contexts]
+    if {[llength $contexts] == 0} {
+        return [dict create ok 0 reason "$qualified declares no context parameter: an implementation of a context-trait operation receives the context it implements as its one context parameter (\"context NAME: [namespace tail $w]\")" found $found]
+    }
+    if {[llength $contexts] > 1} {
+        return [dict create ok 0 reason "$qualified declares [llength $contexts] context parameters ([join [lmap c $contexts {dict get $c context}] {, }]): an implementation takes exactly one, the context $w it implements" found $found]
+    }
+    set c [lindex $contexts 0]
+    if {[dict get $c context] ne $w} {
+        return [dict create ok 0 reason "the context parameter of $qualified is [dict get $c context], not $w: an implementation receives exactly the concrete context it implements" found $found]
+    }
+    if {$declared eq {} && [dict get $req result] ne ""} {
+        return [dict create ok 0 reason "$qualified declares no result type: satisfaction is decided from declarations, so an implementation of a requirement with a result must declare it (\"-> [hir::types::show [hir::types::FnReturn $required]]\")" found $found]
+    }
+    set why [hir::traits::Mismatch $actual $required $req]
+    if {$why ne ""} {
+        return [dict create ok 0 reason $why found $found]
+    }
+    return [dict create ok 1 found $found impl [dict create kind block unit $owner name $name \
+        binding [dict get $info binding] block [dict get $info block]]]
+}
+
+# "fn linux::io::write_text(str, context linux::io::LinuxIO) -> unit errors
+# WriteFailed": an implementation candidate's declared signature, its context
+# section included.
+proc hir::contexts::ShowImplementation {qualified info} {
+    set parts [lmap t [dict get $info params] {expr {$t eq {} ? "any" : [hir::types::show $t]}}]
+    if {[dict get $info contexts] ne {}} {
+        lappend parts "context [join [lmap c [dict get $info contexts] {dict get $c context}] {, }]"
+    }
+    set text "fn ${qualified}([join $parts {, }])"
+    if {[dict get $info result] ne {}} {
+        append text " -> [hir::types::show [dict get $info result]]"
+    }
+    if {[dict get $info errors] ne {}} {
+        append text " errors [join [dict get $info errors] {, }]"
+    }
+    return $text
+}
+
+# "" if context CONTEXT satisfies context trait TRAIT, else the explanation:
+#
+#   linux::io::BrokenIO does not satisfy io::IO
+#   required:
+#       fn write_text(str) -> unit errors WriteFailed   (declared at io.bot:4:8)
+#   found:
+#       fn linux::io::write_text(int, context linux::io::BrokenIO) -> unit   (at io.bot:30:4)
+#   parameter 1 requires int, which does not admit the required str
+proc hir::contexts::explainTrait {context trait {hir ""}} {
+    set s [satisfiesTrait $context $trait]
+    if {[dict get $s ok]} {
+        return ""
+    }
+    set lines [list "[dict get $s witness] does not satisfy $trait"]
+    set name [dict get $s requirement]
+    if {$name eq ""} {
+        lappend lines [dict get $s reason]
+        return [join $lines \n]
+    }
+    set req [hir::traits::requirement $trait $name]
+    lappend lines "required:" "    [hir::traits::ShowRequired $req ""][hir::traits::SpanText [dict get $req nameSpan]]"
+    if {[dict get $s found] ne ""} {
+        set where ""
+        set info [hir::traits::ImplInfo [dict get $s owner] $name]
+        if {$info ne "" && $hir ne ""} {
+            set origin [dict get $info origin]
+            if {[lindex $origin 0] eq "file" && [dict exists $hir files [lindex $origin 1]]} {
+                set where "   (at [hir::originLocation $hir $origin])"
+            }
+        }
+        lappend lines "found:" "    [dict get $s found]$where"
+    }
+    lappend lines [dict get $s reason]
+    return [join $lines \n]
 }
 
 # ---------------------------------------------------------------------------
@@ -432,6 +645,14 @@ proc hir::contexts::verify {hirVar} {
             if {$o eq ""} {
                 continue
             }
+            if {[dict exists $hir exprs $c traitCall]} {
+                # A trait operation (TRAITS.md, CONTEXT-TRAITS.md) calls no
+                # function the code can see, whatever its method-syntax
+                # callee names: its implementation is the witness's (or the
+                # selected context's), bound only in the monomorphized
+                # program, where the call is an ordinary edge.
+                continue
+            }
             set target [Callee $hir $c]
             if {$target ne ""} {
                 dict lappend edges $o [list $c $target]
@@ -473,9 +694,17 @@ proc hir::contexts::verify {hirVar} {
     }
     # No function that needs a context may become a value.
     CheckValues hir $parent $required
+    # Every reference to a context-trait binding is the receiver of one of
+    # its trait's operations, and nothing else (CONTEXT-TRAITS.md).
+    CheckTraitBindings hir $parent
     # Top-level code, in evaluation order.
     set installed {}
     set installs {}
+    # Root call -> {TRAIT WITNESS ...}: the installed context each context
+    # trait a top-level call requires was statically provided by; and the
+    # program-wide TRAIT -> WITNESS those selections agree on.
+    set selections [dict create]
+    set selected [dict create]
     set topCalls [expr {[dict exists $calls ""] ? [dict get $calls ""] : {}}]
     # The calls of each root's region, in pre-order.
     set callsOfRoot [dict create]
@@ -504,9 +733,18 @@ proc hir::contexts::verify {hirVar} {
             if {[isLoad $hir $c]} continue
             set target [Callee $hir $c]
             if {$target eq "" || ![dict exists $required $target]} continue
-            foreach id [dict get $required $target] {
-                if {$id ni $installed} {
-                    Missing hir $c $target $id $reasons
+            set selection [Obligations hir $c $target $installed $required $reasons]
+            if {[dict size $selection] > 0} {
+                dict set selections $c $selection
+                dict for {trait w} $selection {
+                    if {[dict exists $selected $trait] && [dict get $selected $trait] ne $w} {
+                        # Installation only grows, in source order, so every
+                        # call that finds exactly one provider of a trait finds
+                        # the same one: two different ones is a compiler bug.
+                        hir::Diagnose hir CONTEXT-TRAIT-INTERNAL \
+                            "context trait $trait was provided by [dict get $selected $trait] at an earlier call and by $w here" $c
+                    }
+                    dict set selected $trait $w
                 }
             }
         }
@@ -522,7 +760,150 @@ proc hir::contexts::verify {hirVar} {
             }
         }
     }
-    dict set hir contexts [dict create blocks $blocks installs $installs reasons $reasons]
+    dict set hir contexts [dict create blocks $blocks installs $installs reasons $reasons \
+        selections $selections selected $selected]
+}
+
+# The context obligations of top-level call C of block TARGET, against the
+# INSTALLED context structs (in installation order): every context struct
+# TARGET requires must be installed (MISSING-CONTEXT), and every context trait
+# it requires must be implemented by exactly one installed context
+# (CONTEXT-TRAITS.md, "Selection"):
+#
+#   none installed implements it   MISSING-CONTEXT
+#   one does                       selected, statically
+#   several do                     AMBIGUOUS-CONTEXT-IMPLEMENTATION
+#
+# There is no ranking: no "most specific", no installation-order or namespace
+# preference. The selected context's implementations are calls this call
+# makes too, so their own requirements are this call's obligations as well
+# (checked the same way, with the chain through the implementation). Returns
+# the selection, {TRAIT WITNESS ...}.
+proc hir::contexts::Obligations {hirVar c target installed required reasons} {
+    upvar 1 $hirVar hir
+    set selection [dict create]
+    set seen [dict create]
+    set work {}
+    foreach id [dict get $required $target] {
+        lappend work [list $id $target {}]
+    }
+    while {$work ne {}} {
+        lassign [lindex $work 0] id from prefix
+        set work [lrange $work 1 end]
+        if {[dict exists $seen $id]} continue
+        dict set seen $id 1
+        set chain [concat $prefix [ChainLines $hir $from $id $reasons [expr {$prefix ne {}}]]]
+        if {![isTrait $id]} {
+            if {$id ni $installed} {
+                hir::Diagnose hir MISSING-CONTEXT \
+                    "$id is required by this call but is not installed here (install it with \"with context EXPR\" before the call):\n[join $chain \n]" $c
+            }
+            continue
+        }
+        set providers {}
+        foreach w $installed {
+            if {[dict get [satisfiesTrait $w $id] ok]} {
+                lappend providers $w
+            }
+        }
+        if {[llength $providers] == 0} {
+            set lines [list "installed contexts:"]
+            if {$installed eq {}} {
+                lappend lines "    none"
+            }
+            foreach w $installed {
+                lappend lines "    $w (does not implement $id: [dict get [satisfiesTrait $w $id] reason])"
+            }
+            hir::Diagnose hir MISSING-CONTEXT \
+                "$id is required by this call, but no installed context implements it (install one with \"with context EXPR\" before the call):\n[join $chain \n]\n[join $lines \n]" $c
+            continue
+        }
+        if {[llength $providers] > 1} {
+            hir::Diagnose hir AMBIGUOUS-CONTEXT-IMPLEMENTATION \
+                "$id is required by this call, and more than one installed context implements it:\n[join [lmap w $providers {string cat "    " $w}] \n]\nno installed context is preferred over another (there is no ranking and no installation-order preference): install exactly one context implementing $id where this call runs\n[join $chain \n]" $c
+            continue
+        }
+        set w [lindex $providers 0]
+        dict set selection $id $w
+        # What the selected implementations need: requirements of calls this
+        # call makes once the operations are bound to them.
+        set via [lrange $chain 0 end-1]
+        lappend via "[lindex $chain end], which installed context $w implements:"
+        foreach {name impl} [dict get [satisfiesTrait $w $id] impls] {
+            set e [dict get $impl block]
+            if {![dict exists $required $e]} continue
+            foreach id2 [dict get $required $e] {
+                if {![dict exists $seen $id2]} {
+                    lappend work [list $id2 $e $via]
+                }
+            }
+        }
+    }
+    return $selection
+}
+
+# Every reference to a context-trait binding (`context io: IO`, IO a context
+# trait) must be the receiver of a method-syntax call, `io.op(...)`: the
+# binding is a compile-time capability, not a value, so it cannot be passed,
+# stored, returned, compared, projected, captured as a value or tested, and
+# the installed context behind it is never recovered (CONTEXT-TRAIT-MISUSE).
+# Whether OP is one of the trait's operations is the trait call's own check
+# (TRAIT-UNKNOWN-OPERATION).
+proc hir::contexts::CheckTraitBindings {hirVar parent} {
+    upvar 1 $hirVar hir
+    set traitBindings [dict create]
+    dict for {b binding} [dict get $hir bindings] {
+        if {[dict get $binding kind] ne "local"} continue
+        set by [dict get $binding declaredBy]
+        if {$by eq "" || ![dict exists $hir exprs $by] || [hir::kind $hir $by] ne "bind"} continue
+        set id [loadId $hir [hir::get $hir $by value]]
+        if {$id ne "" && [isTrait $id]} {
+            dict set traitBindings $b $id
+        }
+    }
+    if {[dict size $traitBindings] == 0} {
+        return
+    }
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "ref" || ![dict exists $traitBindings [dict get $node binding]]} {
+            continue
+        }
+        if {[ContextTraitReceiver $hir $parent $e]} {
+            continue
+        }
+        set id [dict get $traitBindings [dict get $node binding]]
+        set ops [hir::traits::requirementNames $id]
+        hir::Diagnose hir CONTEXT-TRAIT-MISUSE \
+            [::format {"%s" is a context-trait binding (%s): it is not a value -- the only use of a context-trait binding is calling one of %s's operations on it (%s.%s(...)); it cannot be passed, stored, returned, compared, projected or tested, and the installed context that provides it is never recovered} \
+                [dict get $node name] $id $id [dict get $node name] [lindex $ops 0]] $e
+    }
+}
+
+# 1 if reference E is the receiver of a method-syntax call: the first
+# argument of a call written `E.op(...)` (a visible function `op` made it a
+# candidate call), or the receiver of the callee projection `E.op` of one.
+proc hir::contexts::ContextTraitReceiver {hir parent e} {
+    if {![dict exists $parent $e]} {
+        return 0
+    }
+    lassign [dict get $parent $e] p role
+    if {$p eq ""} {
+        return 0
+    }
+    set node [dict get $hir exprs $p]
+    switch -- [dict get $node kind] {
+        call {
+            return [expr {[dict exists $node method] && [lindex [dict get $node args] 0] eq $e}]
+        }
+        project {
+            if {![dict exists $node methodCallee] || ![dict exists $parent $p]} {
+                return 0
+            }
+            lassign [dict get $parent $p] pp prole
+            return [expr {$pp ne "" && $prole eq "callee"}]
+        }
+    }
+    return 0
 }
 
 # Every reference to (or literal of) a function whose requirement is not
@@ -626,13 +1007,22 @@ proc hir::contexts::Missing {hirVar c target id reasons} {
 #      -> linux::io::write
 #         directly requires linux::io::LinuxIO
 proc hir::contexts::Chain {hir b id reasons} {
+    return [join [ChainLines $hir $b $id $reasons] \n]
+}
+
+# Chain's lines; CONTINUED: the first function is a continuation of an
+# earlier chain (" -> NAME").
+proc hir::contexts::ChainLines {hir b id reasons {continued 0}} {
     set lines {}
     set seen {}
-    set first 1
+    set first [expr {!$continued}]
     while {$b ne "" && $b ni $seen} {
         lappend seen $b
         lappend lines [expr {$first ? "    [BlockName $hir $b]" : "     -> [BlockName $hir $b]"}]
         set first 0
+        if {![dict exists $reasons $b $id]} {
+            break
+        }
         set reason [dict get $reasons $b $id]
         if {$reason eq "direct"} {
             lappend lines "        directly requires $id"
@@ -640,7 +1030,7 @@ proc hir::contexts::Chain {hir b id reasons} {
         }
         set b [lindex $reason 2]
     }
-    return [join $lines \n]
+    return $lines
 }
 
 # ---------------------------------------------------------------------------
@@ -693,6 +1083,78 @@ proc hir::contexts::summary {hir} {
     foreach b [dict get $hir contexts blocks] {
         if {[required $hir $b] eq {}} continue
         lappend lines "function [BlockName $hir $b] $b direct-contexts ([join [direct $hir $b] {, }]) required-contexts ([join [required $hir $b] {, }])"
+    }
+    set traits [TraitSummary $hir]
+    if {$traits ne ""} {
+        lappend lines $traits
+    }
+    return [join $lines \n]
+}
+
+# The context-trait part of the summary (CONTEXT-TRAITS.md), from the
+# checked source program (a monomorphized program's `traitSource`, where the
+# context-trait bindings and operations are; the program itself has none):
+#
+#   contexttrait ID
+#       OP(PARAMS) -> R errors E
+#   contexttraitparam eB NAME ID         a context parameter of trait type
+#   source-function NAME eB direct-contexts (IDS) required-contexts (IDS)
+#   contextselect eC ID WITNESS          a top-level call's static selection
+#       OP -> IMPLEMENTATION
+#   contextclone NAME TRAIT=WITNESS ...  the clones the program compiles
+#
+# "" when the program declares no context trait.
+proc hir::contexts::TraitSummary {hir} {
+    set source [expr {[dict exists $hir traitSource] ? [dict get $hir traitSource] : $hir}]
+    if {![dict exists $source traits]} {
+        return ""
+    }
+    set lines {}
+    foreach entry [dict get $source traits] {
+        if {![dict exists $entry context] || ![dict get $entry context]} continue
+        lappend lines "contexttrait [dict get $entry id]"
+        foreach r [dict get $entry requirements] {
+            set text "    [dict get $r name]([join [lmap p [dict get $r params] {format {%s: %s} [dict get $p name] [hir::types::show [dict get $p type]]}] {, }])"
+            if {[dict get $r result] ne ""} {
+                append text " -> [hir::types::show [dict get $r result type]]"
+            }
+            if {[dict get $r errors] ne {}} {
+                append text " errors [join [dict get $r errors] {, }]"
+            }
+            lappend lines $text
+        }
+    }
+    if {$lines eq {} || ![dict exists $source contexts]} {
+        return [join $lines \n]
+    }
+    foreach b [dict get $source contexts blocks] {
+        if {![dict exists $source exprs $b contextParams]} continue
+        foreach record [dict get $source exprs $b contextParams] {
+            if {[dict exists $record trait]} {
+                lappend lines "contexttraitparam $b [dict get $record name] [dict get $record context]"
+            }
+        }
+    }
+    foreach b [dict get $source contexts blocks] {
+        set ids [lmap id [required $source $b] {expr {[isTrait $id] ? $id : [continue]}}]
+        if {$ids eq {}} continue
+        lappend lines "source-function [BlockName $source $b] $b direct-contexts ([join [direct $source $b] {, }]) required-contexts ([join [required $source $b] {, }])"
+    }
+    if {[dict exists $source contexts selections]} {
+        dict for {c selection} [dict get $source contexts selections] {
+            dict for {trait w} $selection {
+                lappend lines "contextselect $c $trait $w"
+                foreach {name impl} [dict get [satisfiesTrait $w $trait] impls] {
+                    lappend lines "    $name -> [hir::traits::QualifiedName [dict get $impl unit] [dict get $impl name]]"
+                }
+            }
+        }
+    }
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict exists $node contextClone]} {
+            set name [BlockName $hir $e]
+            lappend lines "contextclone $name [join [lmap {c w} [dict get $node contextClone] {string cat $c = $w}] { }]"
+        }
     }
     return [join $lines \n]
 }

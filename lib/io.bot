@@ -1,0 +1,67 @@
+# io.bot -- the "io" namespace: portable text output through the execution
+# environment (CONTEXT-TRAITS.md).
+#
+#   io::print(text)              TEXT on the environment's standard output
+#   io::print_line(text)         TEXT and a newline, as one operation
+#   io::write_error(text)        TEXT on the environment's error output
+#   io::write_error_line(text)   TEXT and a newline on the error output
+#
+# Each succeeds (unit) or fails with WriteFailed; none exposes a descriptor,
+# a byte count, a buffer, a raw syscall result or an errno. The caller writes
+# no context: the operations declare `context io: IO`, the compiler derives
+# that every function calling them requires IO, and the program installs one
+# context that implements IO before the first call that needs it:
+#
+#   import io
+#   import linux::io
+#
+#   fn hello():
+#       io::print_line("Hello, world!")
+#
+#   with context linux::io::create()
+#   hello()
+#
+# IO is a *context trait*: a set of operations an installed context supplies,
+# never a value. A concrete context implements it structurally, in its own
+# namespace -- linux::io::LinuxIO through linux::io::write_text and
+# linux::io::write_error_text -- with no registration and no `implements`.
+# Where a call needs IO the compiler selects, statically, the one installed
+# context that implements it (two would be AMBIGUOUS-CONTEXT-IMPLEMENTATION,
+# none MISSING-CONTEXT), and compiles `io.write_text(...)` below to a direct
+# call of that context's implementation: no dispatch, no hidden argument, no
+# provider table at run time.
+#
+# Not here (deliberately): input, files, paths, buffering, a byte-count or
+# errno API. Buffering, batching and scratch storage can live behind these
+# operations later without any caller changing.
+import str
+
+# A portable output operation did not complete: the environment could not
+# write all of the text (on Linux: write(2) returned an error, or made no
+# progress). The portable API says only that; the low-level layers
+# (linux::write, linux::abi::syscall) keep the raw kernel result for callers
+# that want it.
+error WriteFailed
+
+# The environment's text output: what a context must provide for portable
+# output to run. Each operation writes all of TEXT (UTF-8) or fails.
+context trait IO:
+    fn write_text(text: str) -> unit errors WriteFailed
+    fn write_error_text(text: str) -> unit errors WriteFailed
+
+# TEXT on the standard output.
+fn print(text: str, context io: IO) -> unit errors WriteFailed:
+    io.write_text(text)
+
+# TEXT followed by a newline on the standard output: one string, one write
+# request (never a second visible write for the newline).
+fn print_line(text: str, context io: IO) -> unit errors WriteFailed:
+    io.write_text(str::concat(text, "\n"))
+
+# TEXT on the error output.
+fn write_error(text: str, context io: IO) -> unit errors WriteFailed:
+    io.write_error_text(text)
+
+# TEXT followed by a newline on the error output, as one write request.
+fn write_error_line(text: str, context io: IO) -> unit errors WriteFailed:
+    io.write_error_text(str::concat(text, "\n"))
