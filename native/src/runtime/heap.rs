@@ -115,7 +115,13 @@ impl Heap {
     /// place every object's fate -- live or reclaimed -- is known for
     /// certain, so live/peak/reclaimed accounting lives here rather than
     /// being approximated from allocation counts.
-    pub fn collect(&mut self, roots: impl Iterator<Item = Value>, metrics: &mut Metrics, reason: GcReason) {
+    pub fn collect(
+        &mut self,
+        roots: impl Iterator<Item = Value>,
+        metrics: &mut Metrics,
+        reason: GcReason,
+        framemap: &super::framemap::ProgramMap,
+    ) {
         let started = metrics.enabled().then(Instant::now);
         let mut stack: Vec<Value> = roots.collect();
         while let Some(v) = stack.pop() {
@@ -145,6 +151,23 @@ impl Heap {
                 // A List plan's elements are ordinary program values held
                 // until materialization; a String plan holds only bytes.
                 KIND_LISTPLAN => stack.extend_from_slice(&super::construct::listplan_of(v).items),
+                // A coroutine (COROUTINES.md): its thunk, transport slot and
+                // cached failure, and -- while it is suspended -- every root
+                // of every frame on its stack, from where it switched away
+                // (runtime/coroutine.rs). A running one's stack is walked
+                // with the running chain (Vm::collect_with).
+                KIND_COROUTINE => {
+                    let co = super::coroutine::coroutine_of(v);
+                    stack.extend(super::coroutine::fields(co));
+                    if co.state == super::coroutine::CO_SUSPENDED {
+                        if let Some(bounds) = co.stack.as_ref().map(|s| s.bounds()) {
+                            let start = super::coroutine::suspended_rbp(co.saved_sp);
+                            super::framewalk::walk_from(framemap, start, Some(&bounds), |addr| {
+                                stack.push(unsafe { *addr })
+                            });
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -242,6 +265,7 @@ pub unsafe fn object_size(object: *mut Header) -> usize {
             KIND_NATIVE => size_of::<NativeObj>(),
             KIND_STRPLAN => size_of::<StrPlanObj>() + super::construct::strplan_of(v).buf.len(),
             KIND_LISTPLAN => size_of::<ListPlanObj>() + super::construct::listplan_of(v).items.capacity() * 8,
+            KIND_COROUTINE => size_of::<super::coroutine::CoroutineObj>(),
             kind => panic!("bad heap object kind {kind}"),
         }
     }
@@ -280,6 +304,9 @@ pub unsafe fn free_object(object: *mut Header) {
             KIND_MUTARRAY => drop(Box::from_raw(object as *mut MutArrayObj)),
             KIND_STRPLAN => drop(Box::from_raw(object as *mut StrPlanObj)),
             KIND_LISTPLAN => drop(Box::from_raw(object as *mut ListPlanObj)),
+            // Its stack, if it still has one (an abandoned suspended
+            // coroutine), goes back to the pool: nothing on it runs.
+            KIND_COROUTINE => drop(Box::from_raw(object as *mut super::coroutine::CoroutineObj)),
             kind => panic!("bad heap object kind {kind}"),
         }
     }
@@ -349,7 +376,7 @@ mod tests {
         // Before any collection, an allocation is optimistically live.
         assert_eq!(metrics.current_live_objects, 2);
 
-        heap.collect(std::iter::once(kept), &mut metrics, GcReason::Explicit);
+        heap.collect(std::iter::once(kept), &mut metrics, GcReason::Explicit, &crate::runtime::framemap::ProgramMap::new());
 
         assert_eq!(metrics.current_live_objects, 1);
         assert_eq!(metrics.current_live_bytes, "kept".len() as u64 + STR_HEADER_SIZE as u64);
@@ -374,7 +401,7 @@ mod tests {
 
         // Only the list is rooted; its elements must be kept reachable
         // through it, not freed as if unrooted.
-        heap.collect(std::iter::once(list), &mut metrics, GcReason::Explicit);
+        heap.collect(std::iter::once(list), &mut metrics, GcReason::Explicit, &crate::runtime::framemap::ProgramMap::new());
 
         assert_eq!(metrics.current_live_objects, 3);
         assert_eq!(metrics.by_kind[KIND_STR as usize].reclaimed_objects, 0);
@@ -389,7 +416,7 @@ mod tests {
         }
         assert_eq!(metrics.peak_live_objects, 5);
 
-        heap.collect(std::iter::empty(), &mut metrics, GcReason::Explicit);
+        heap.collect(std::iter::empty(), &mut metrics, GcReason::Explicit, &crate::runtime::framemap::ProgramMap::new());
 
         assert_eq!(metrics.current_live_objects, 0);
         assert_eq!(metrics.peak_live_objects, 5);
@@ -402,7 +429,7 @@ mod tests {
         let mut metrics = Metrics::new(AllocMode::Off);
         str_val(&mut heap, &mut metrics, "x");
         assert_eq!(metrics.total_allocations(), 0);
-        heap.collect(std::iter::empty(), &mut metrics, GcReason::Explicit);
+        heap.collect(std::iter::empty(), &mut metrics, GcReason::Explicit, &crate::runtime::framemap::ProgramMap::new());
         assert_eq!(metrics.gc_cycles.len(), 0);
         assert_eq!(metrics.current_live_objects, 0);
     }

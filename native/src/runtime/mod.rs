@@ -5,6 +5,7 @@ pub mod aot;
 pub mod bytesobj;
 pub mod constants;
 pub mod construct;
+pub mod coroutine;
 pub mod error;
 pub mod framemap;
 pub mod framewalk;

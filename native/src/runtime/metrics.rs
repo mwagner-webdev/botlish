@@ -36,15 +36,15 @@
 
 use super::show::tcl_list;
 use super::value::{
-    KIND_BIGINT, KIND_BYTES, KIND_CLOSURE, KIND_LIST, KIND_LISTPLAN, KIND_MUTARRAY, KIND_MUTBYTES, KIND_NATIVE, KIND_RESULT, KIND_SET,
-    KIND_STR, KIND_STRPLAN, KIND_STRUCT,
+    KIND_BIGINT, KIND_BYTES, KIND_CLOSURE, KIND_COROUTINE, KIND_LIST, KIND_LISTPLAN, KIND_MUTARRAY, KIND_MUTBYTES, KIND_NATIVE,
+    KIND_RESULT, KIND_SET, KIND_STR, KIND_STRPLAN, KIND_STRUCT,
 };
 use std::collections::HashMap;
 use std::time::Duration;
 
 /// One more than the largest `Header::kind` value: `by_kind`/`static_by_kind`
 /// are indexed directly by kind byte (index 0 unused).
-pub const KIND_COUNT: usize = 15;
+pub const KIND_COUNT: usize = 16;
 
 pub fn kind_name(kind: u8) -> &'static str {
     match kind {
@@ -61,6 +61,7 @@ pub fn kind_name(kind: u8) -> &'static str {
         KIND_MUTBYTES => "MutableBytes",
         KIND_STRPLAN => "StringPlan",
         KIND_LISTPLAN => "ListPlan",
+        KIND_COROUTINE => "Coroutine",
         _ => "?",
     }
 }
@@ -406,7 +407,13 @@ impl Metrics {
             ("peakLiveObjects", n(self.peak_live_objects)),
             ("peakLiveBytes", n(self.peak_live_bytes)),
         ]);
-        let by_kind = dict(&KINDS.iter().map(|&k| (kind_name(k), kind_dict(&self.by_kind[k as usize], &n))).collect::<Vec<_>>());
+        // Coroutine handles (COROUTINES.md) are reported only by a program
+        // that allocated one, so every other program's report is unchanged.
+        let mut kinds = KINDS.to_vec();
+        if self.by_kind[KIND_COROUTINE as usize].allocations > 0 {
+            kinds.push(KIND_COROUTINE);
+        }
+        let by_kind = dict(&kinds.iter().map(|&k| (kind_name(k), kind_dict(&self.by_kind[k as usize], &n))).collect::<Vec<_>>());
         let static_by_kind =
             dict(&KINDS.iter().map(|&k| (kind_name(k), static_kind_dict(&self.static_by_kind[k as usize], &n))).collect::<Vec<_>>());
         let statics = dict(&[

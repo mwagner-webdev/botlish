@@ -143,7 +143,12 @@ namespace eval native::lower {
         mutable_byte_store::replace   {op mbytesset} \
         mutable_byte_store::detach  {op mbytesclone} \
         mutable_byte_store::freeze        {op mbytesfreeze} \
-        mutable_byte_store::freeze_prefix {op mbytesfreezeprefix}]
+        mutable_byte_store::freeze_prefix {op mbytesfreezeprefix} \
+        coroutine#create {op cocreate} \
+        coroutine#start  {op costart} \
+        coroutine#resume {coroutine-resume} \
+        coroutine#yield  {op coyield} \
+        coroutine::done? {op codone}]
     # State of the program being lowered. hir is the view of the instance
     # being lowered, baseHir the program's semantic HIR.
     variable hir {}
@@ -7036,6 +7041,12 @@ proc native::lower::NativeCallOp {e node} {
             }
             return [list $name $op]
         }
+        coroutine-resume {
+            # A coroutine resume (COROUTINES.md): the handle alone for the
+            # zero-message protocol, the handle and the one message
+            # otherwise (static typing fixed which, COROUTINE-RESUME-ARITY).
+            return [list $name [expr {[llength $argExprs] == 1 ? "coresume0" : "coresume"}]]
+        }
         equality-list {
             # SetFromList's generic form (rt_set_from_list) dedups its
             # source List by ordinary equality, which can raise EQUALITY
@@ -7715,6 +7726,7 @@ proc native::lower::NativeImpl {name} {
         equality      { return veq }
         equality-set  { return setcontains }
         equality-list { return setfromlist }
+        coroutine-resume { return coresume }
         default       { return [lindex $impl 1] }
     }
 }

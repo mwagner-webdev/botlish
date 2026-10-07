@@ -54,6 +54,18 @@ extern "C" fn fault_handler(signal: libc::c_int, info: *mut libc::siginfo_t, _: 
     }
 }
 
+/// Makes STACK the stack whose guard region the fault handler reports as an
+/// overflow: called on every coroutine stack switch (COROUTINES.md). A no-op
+/// while no guard is installed. Two relaxed stores: the handler runs on this
+/// same thread, between instructions, and reads whichever pair it finds.
+pub fn set_active_stack(stack: &NativeStack) {
+    if ACTIVE_TID.load(Ordering::Relaxed) == 0 {
+        return;
+    }
+    GUARD_LOW.store(stack.guard_low, Ordering::Relaxed);
+    USABLE_LOW.store(stack.low_bound, Ordering::Relaxed);
+}
+
 pub struct OverflowGuard {
     _alt_stack: Vec<u8>,
     old_stack: libc::stack_t,

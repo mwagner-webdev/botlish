@@ -191,6 +191,11 @@ pub struct Vm {
     /// roots -- harmless for the brief window before a program is compiled.
     framemap: Rc<ProgramMap>,
     native_stack: Option<NativeStack>,
+    /// The innermost running coroutine (COROUTINES.md, runtime/coroutine.rs),
+    /// null while the main stack runs. With each running coroutine's own
+    /// `resumer` link it is the chain of running coroutines: every one a GC
+    /// root, and every stack on it walked by `collect_with`.
+    pub co_current: *mut super::coroutine::CoroutineObj,
 }
 
 pub const VM_SS_TOP_OFFSET: i32 = offset_of!(Vm, ss_top) as i32;
@@ -242,7 +247,23 @@ impl Vm {
                 #[cfg(not(all(target_arch = "x86_64", target_os = "linux")))]
                 { None }
             },
+            co_current: std::ptr::null_mut(),
         })
+    }
+
+    /// Publishes STACK (None: the main stack) as the one native stack running
+    /// now, for the overflow handler: a fault in its guard is a stack
+    /// overflow (runtime/coroutine.rs switches stacks).
+    pub fn publish_active_stack(&mut self, stack: Option<NativeStack>) {
+        #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+        {
+            let stack = stack.or(self.native_stack);
+            if let Some(stack) = stack {
+                super::platform::x86_64_linux::set_active_stack(&stack);
+            }
+        }
+        #[cfg(not(all(target_arch = "x86_64", target_os = "linux")))]
+        let _ = stack;
     }
 
     /// Replaces the argument snapshot with ARGV (raw bytes, one Vec per
@@ -369,7 +390,26 @@ impl Vm {
         // `native`'s are three disjoint sets of memory locations, never the
         // same logical root scanned twice.
         let mut native_frame_roots = Vec::new();
-        super::framewalk::walk(&self.framemap, self.native_stack.as_ref(), |addr| native_frame_roots.push(unsafe { *addr }));
+        // The running stacks (COROUTINES.md): the current one from here, then
+        // every resumer of the running coroutine chain from the point it
+        // switched away, each bounded by its own stack. Every running
+        // coroutine object is a root itself.
+        use super::coroutine::{suspended_rbp, CoroutineObj};
+        let stack_of = |co: *mut CoroutineObj, main: Option<NativeStack>| -> Option<NativeStack> {
+            if co.is_null() { main } else { unsafe { (*co).stack.as_ref().map(|s| s.bounds()) } }
+        };
+        let current = stack_of(self.co_current, self.native_stack);
+        super::framewalk::walk(&self.framemap, current.as_ref(), |addr| native_frame_roots.push(unsafe { *addr }));
+        let mut running = self.co_current;
+        while !running.is_null() {
+            native_frame_roots.push(running as Value);
+            let (resumer, resumer_sp) = unsafe { ((*running).resumer, (*running).resumer_sp) };
+            let bounds = stack_of(resumer, self.native_stack);
+            super::framewalk::walk_from(&self.framemap, suspended_rbp(resumer_sp), bounds.as_ref(), |addr| {
+                native_frame_roots.push(unsafe { *addr })
+            });
+            running = resumer;
+        }
         let error_values = self.error.as_ref().map(|e| e.values()).unwrap_or_default();
         let roots = stack
             .iter()
@@ -379,7 +419,8 @@ impl Vm {
             .chain(error_values)
             .chain(self.temp_roots.iter().copied())
             .chain(self.statics_table.iter().copied());
-        self.heap.collect(roots.collect::<Vec<_>>().into_iter(), &mut self.metrics, reason);
+        let framemap = self.framemap.clone();
+        self.heap.collect(roots.collect::<Vec<_>>().into_iter(), &mut self.metrics, reason, &framemap);
     }
 
     /// Prepares for the next run: empty shadow stack, no error, empty heap,

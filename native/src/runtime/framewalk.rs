@@ -123,8 +123,19 @@ fn current_rbp() -> usize {
 /// below as defensive backstops rather than as the intended termination
 /// condition.
 #[cfg(target_arch = "x86_64")]
-pub fn walk(map: &ProgramMap, stack: Option<&NativeStack>, mut visit: impl FnMut(*mut Value)) {
-    let mut rbp = current_rbp();
+pub fn walk(map: &ProgramMap, stack: Option<&NativeStack>, visit: impl FnMut(*mut Value)) {
+    walk_from(map, current_rbp(), stack, visit)
+}
+
+/// `walk`, starting at the frame record RBP instead of the current frame: a
+/// stack that is not running now -- a suspended coroutine's, or a running
+/// coroutine's resumer's (COROUTINES.md, runtime/coroutine.rs) -- whose chain
+/// starts at the frame its stack switch opened. STACK bounds the walk to that
+/// one stack, which is also where its chain ends (a coroutine stack's first
+/// frame record holds a zero frame pointer).
+#[cfg(target_arch = "x86_64")]
+pub fn walk_from(map: &ProgramMap, start: usize, stack: Option<&NativeStack>, mut visit: impl FnMut(*mut Value)) {
+    let mut rbp = start;
     for _ in 0..MAX_FRAMES {
         if rbp == 0 || rbp % 8 != 0 || stack.is_some_and(|s| !s.contains(rbp, 16)) {
             break;
@@ -156,6 +167,9 @@ pub fn walk(map: &ProgramMap, stack: Option<&NativeStack>, mut visit: impl FnMut
         rbp = saved_rbp;
     }
 }
+
+#[cfg(not(target_arch = "x86_64"))]
+pub fn walk_from(_map: &ProgramMap, _start: usize, _stack: Option<&NativeStack>, _visit: impl FnMut(*mut Value)) {}
 
 #[cfg(not(target_arch = "x86_64"))]
 pub fn walk(_map: &ProgramMap, _stack: Option<&NativeStack>, _visit: impl FnMut(*mut Value)) {

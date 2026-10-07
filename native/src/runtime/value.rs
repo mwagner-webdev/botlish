@@ -99,6 +99,10 @@ pub const KIND_BYTES: u8 = 13;
 /// (a MutableBytes is not accepted where a Bytes storage is required, nor the
 /// reverse). Never written once it is a value (see bytesobj.rs).
 pub const KIND_MUTBYTES: u8 = 14;
+/// A coroutine handle (COROUTINES.md, runtime/coroutine.rs's CoroutineObj):
+/// the lifecycle state of one started computation and, while it is
+/// suspended, the native stack its frames live on.
+pub const KIND_COROUTINE: u8 = 15;
 
 #[repr(C)]
 pub struct Header {
@@ -391,6 +395,9 @@ pub enum Kind {
     /// The writable byte storage behind `abi::bytes::MutableBytes` (MUTABLE-BYTES.md):
     /// distinct from ByteStore. Named as core/value.tcl's `mutbytes` kind.
     MutByteStore,
+    /// A coroutine handle (COROUTINES.md). Like Block/Native/MutArray it has
+    /// no equality and no hash; the compiler keeps it in local bindings only.
+    Coroutine,
 }
 
 impl Kind {
@@ -410,6 +417,7 @@ impl Kind {
             "struct" => Kind::Struct,
             "bytestore" => Kind::ByteStore,
             "mutbytes" => Kind::MutByteStore,
+            "coroutine" => Kind::Coroutine,
             _ => return None,
         })
     }
@@ -430,6 +438,7 @@ impl Kind {
             Kind::Struct => "struct",
             Kind::ByteStore => "bytestore",
             Kind::MutByteStore => "mutbytes",
+            Kind::Coroutine => "coroutine",
         }
     }
 
@@ -441,6 +450,7 @@ impl Kind {
         [
             Kind::Int, Kind::Str, Kind::Bool, Kind::Unit, Kind::List, Kind::Result, Kind::Block, Kind::Native,
             Kind::MutArray, Kind::UnicodeChar, Kind::ImmutableSet, Kind::Struct, Kind::ByteStore, Kind::MutByteStore,
+            Kind::Coroutine,
         ][code as usize]
     }
 }
@@ -470,6 +480,7 @@ pub fn kind_of(v: Value) -> Kind {
         KIND_STRUCT => Kind::Struct,
         KIND_BYTES => Kind::ByteStore,
         KIND_MUTBYTES => Kind::MutByteStore,
+        KIND_COROUTINE => Kind::Coroutine,
         _ => panic!("not a program value: {v:#x}"),
     }
 }

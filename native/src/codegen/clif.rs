@@ -1204,6 +1204,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             Kind::Struct => KIND_STRUCT,
             Kind::ByteStore => KIND_BYTES,
             Kind::MutByteStore => KIND_MUTBYTES,
+            Kind::Coroutine => KIND_COROUTINE,
             Kind::Bool | Kind::Unit | Kind::UnicodeChar => unreachable!(),
         };
         let low3 = self.b.ins().band_imm_s(v, 7);
@@ -1865,6 +1866,17 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         MBytesFreeze => ("rt_mbytes_freeze", None, true, Some(("mbytesfreeze", KIND_BYTES))),
                         MBytesFreezePrefix => ("rt_mbytes_freeze_prefix", None, true, Some(("mbytesfreezeprefix", KIND_BYTES))),
                         MBytesAddr => ("rt_mbytes_addr", None, true, None),
+                        // Coroutines (COROUTINES.md, runtime/coroutine.rs):
+                        // plain helper calls. Every one but codone is a
+                        // safepoint (ops.rs's op_may_allocate), so the call's
+                        // stack map holds this frame's roots while the
+                        // coroutine is suspended inside it.
+                        CoCreate => ("rt_co_create", None, false, Some(("cocreate", KIND_COROUTINE))),
+                        CoStart => ("rt_co_start", None, true, None),
+                        CoResume => ("rt_co_resume", None, true, None),
+                        CoResume0 => ("rt_co_resume0", None, true, None),
+                        CoYield => ("rt_co_yield", None, true, None),
+                        CoDone => ("rt_co_done", None, false, None),
                         // Never fallible (see ops.rs's rt_str_decode_char_at):
                         // a one-character String can never exceed
                         // MAX_COLLECTION_LENGTH. Still routed through

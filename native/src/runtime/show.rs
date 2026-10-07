@@ -126,6 +126,9 @@ fn show_into(v: Value, out: &mut String) {
         Kind::MutArray => {
             out.push_str(&format!("<mutable-array capacity={}>", mutarray_of(v).slots.len()));
         }
+        Kind::Coroutine => {
+            out.push_str("<coroutine>");
+        }
         Kind::ByteStore => {
             // Matches core::value::show's bytestore rendering exactly: the
             // byte count and the bytes in lowercase hex. Reached only for a
@@ -224,6 +227,12 @@ pub fn tcl_value(v: Value) -> Result<String, RtError> {
         Kind::MutArray => {
             return Err(RtError::Unsupported(format!(
                 "the native backend cannot return a MutableArray to the host (finalize it to a List first): {}",
+                show(v)
+            )));
+        }
+        Kind::Coroutine => {
+            return Err(RtError::Unsupported(format!(
+                "the native backend cannot return a coroutine handle to the host: {}",
                 show(v)
             )));
         }

@@ -9,7 +9,7 @@
 use super::show::show;
 use super::value::*;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum RtError {
     /// `core::value::expect`: CONTEXT: expected KIND, got VALUE.
     Type { context: String, expected: Kind, got: Value },
@@ -63,6 +63,9 @@ pub const SEMANTIC_KINDS: &[&str] = &[
     "MISSING-CONTEXT", "DUPLICATE-CONTEXT", "NOT-A-CONTEXT", "CONTEXT-TYPE-NOT-EXACT",
     "CONTEXT-INSTALLATION-UNSUPPORTED", "CONTEXT-FUNCTION-VALUE", "CONTEXT-BINDING-COLLISION",
     "DUPLICATE-CONTEXT-PARAMETER",
+    // Coroutine lifecycle states a checked program cannot reach (the affine
+    // discipline, COROUTINES.md), kept as defensive runtime checks.
+    "COROUTINE-RUNNING", "COROUTINE-STATE", "YIELD-OUTSIDE-COROUTINE",
 ];
 
 pub fn semantic_kind(name: &str) -> Option<&'static str> {

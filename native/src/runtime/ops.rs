@@ -74,6 +74,7 @@
 //! | rt_stack_overflow      |                     | records NATIVE LIMIT STACK   | no        |
 
 use super::construct::{rt_construct, rt_plan_materialize};
+use super::coroutine::{rt_co_create, rt_co_done, rt_co_resume, rt_co_resume0, rt_co_start, rt_co_yield};
 use super::error::{semantic_kind, RtError};
 use super::syscall::rt_linux_x86_64_syscall;
 use super::value::*;
@@ -120,6 +121,12 @@ pub fn op_may_allocate(op: OpCode) -> bool {
             // may_error and may_gc are independent effect dimensions, and
             // this milestone changes only the former.
             | SetFromListTotal
+            // Coroutines (COROUTINES.md): create allocates the handle; start,
+            // resume and yield run arbitrary code (the body's segment, or
+            // other coroutines while this one is suspended), and suspension
+            // in particular must be a safepoint -- a suspended frame's roots
+            // are found only through its stack map.
+            | CoCreate | CoStart | CoResume | CoResume0 | CoYield
     )
 }
 
@@ -163,7 +170,11 @@ pub fn op_may_error(op: OpCode) -> bool {
         // (M3-EQUALITY-TOTAL-SETCONTAINS-EFFECT.md,
         // M4-EQUALITY-TOTAL-SETFROMLIST-EFFECT.md). Generic SetFromList/
         // SetContains keep their unconditional classification.
-        | SetFromList | SetContains)
+        | SetFromList | SetContains
+        // A segment ends with the body's unhandled error; a yield outside a
+        // running coroutine is a defensive runtime check a checked program
+        // never reaches.
+        | CoStart | CoResume | CoResume0 | CoYield)
 }
 
 pub type GenericEntry = extern "C" fn(*mut Vm, Value, *const Value) -> Value;
@@ -404,7 +415,9 @@ fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
     let (ka, kb) = (kind_of(a), kind_of(b));
     // MutableArray, like Block/Native, has no structural equality (req #31:
     // its identity/equality semantics are a separate design question).
-    if matches!(ka, Kind::Block | Kind::Native | Kind::MutArray) || matches!(kb, Kind::Block | Kind::Native | Kind::MutArray) {
+    if matches!(ka, Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine)
+        || matches!(kb, Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine)
+    {
         vm(p).fail(RtError::Equality { a, b });
         return Err(());
     }
@@ -462,7 +475,7 @@ fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
             }
             true
         }
-        Kind::Block | Kind::Native | Kind::MutArray => unreachable!(),
+        Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine => unreachable!(),
     })
 }
 
@@ -540,7 +553,7 @@ fn fnv1a(h: u64, bytes: &[u8]) -> u64 {
 /// a Result payload exactly as `equal` recurses (see ops.rs's `equal`).
 fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
     let kind = kind_of(v);
-    if matches!(kind, Kind::Block | Kind::Native | Kind::MutArray) {
+    if matches!(kind, Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine) {
         vm(p).fail(RtError::Unhashable { value: v });
         return Err(());
     }
@@ -560,7 +573,7 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
         Kind::Struct => 8,
         Kind::ByteStore => 9,
         Kind::MutByteStore => 10,
-        Kind::Block | Kind::Native | Kind::MutArray => unreachable!(),
+        Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine => unreachable!(),
     };
     let h = fnv1a(h, &[tag]);
     Ok(match kind {
@@ -645,7 +658,7 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
             h = fnv1a(h, &combined.to_le_bytes());
             h
         }
-        Kind::Block | Kind::Native | Kind::MutArray => unreachable!(),
+        Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine => unreachable!(),
     })
 }
 
@@ -1995,6 +2008,12 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         MBytesClone => rt_mbytes_clone(p, a[0]),
         MBytesFreeze => rt_mbytes_freeze(p, a[0]),
         MBytesFreezePrefix => rt_mbytes_freeze_prefix(p, a[0], a[1]),
+        CoCreate => rt_co_create(p, a[0]),
+        CoStart => rt_co_start(p, a[0]),
+        CoResume => rt_co_resume(p, a[0], a[1]),
+        CoResume0 => rt_co_resume0(p, a[0]),
+        CoYield => rt_co_yield(p, a[0]),
+        CoDone => rt_co_done(p, a[0]),
         RegionCheck | RegionEq | RBox | RUnbox | RIAdd | RISub | RIMul | RILt | RILe | RIGt | RIGe | RIEq
         | RIShr | RIShl | StrToShort | ShortToStr | ShortLen | ShortEq | StrSliceShort | StrToAscii | AsciiToStr
         | AsciiLen | AsciiEq | AsciiToShort | AsciiShortEq
@@ -2103,6 +2122,12 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_char_codepoint, 2),
         h!(rt_closure_new, 5),
         h!(rt_call_value, 4),
+        h!(rt_co_create, 2),
+        h!(rt_co_start, 2),
+        h!(rt_co_resume, 3),
+        h!(rt_co_resume0, 2),
+        h!(rt_co_yield, 2),
+        h!(rt_co_done, 2),
     ]
 }
 
@@ -3118,7 +3143,7 @@ mod tests {
         let mut vm = vm();
         let kept = vm.new_bytes(&[1; 100]);
         let _garbage = vm.new_bytes(&[2; 100]);
-        vm.heap.collect(std::iter::once(kept), &mut vm.metrics, GcReason::Explicit);
+        vm.heap.collect(std::iter::once(kept), &mut vm.metrics, GcReason::Explicit, &crate::runtime::framemap::ProgramMap::new());
         assert_eq!(vm.metrics.by_kind[KIND_BYTES as usize].live_objects, 1);
         assert_eq!(vm.metrics.by_kind[KIND_BYTES as usize].reclaimed_objects, 1);
         // The payload holds no program value: the survivor is intact.
@@ -3320,7 +3345,7 @@ mod tests {
         let kept = rt_mbytes_new(p, small(100));
         unsafe { BytesObj::payload_mut(kept)[99] = 0x5a };
         let _garbage = rt_mbytes_new(p, small(100));
-        vm.heap.collect(std::iter::once(kept), &mut vm.metrics, GcReason::Explicit);
+        vm.heap.collect(std::iter::once(kept), &mut vm.metrics, GcReason::Explicit, &crate::runtime::framemap::ProgramMap::new());
         assert_eq!(vm.metrics.by_kind[KIND_MUTBYTES as usize].live_objects, 1);
         assert_eq!(vm.metrics.by_kind[KIND_MUTBYTES as usize].reclaimed_objects, 1);
         assert_eq!(mutbytes_of(kept)[99], 0x5a);
