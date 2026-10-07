@@ -1246,3 +1246,32 @@ proc hir::coroutines::thunkErrors {hir e} {
     }
     return [dict get $hir exprs $root declaredErrors]
 }
+
+# The thunk of the coroutine handle expression E denotes (a reference to the
+# handle's binding, or to a binding it was moved to), or "": a handle is
+# only ever a local binding of a construction (or a move of one), so the
+# chain always ends at one construction.
+proc hir::coroutines::thunkOfHandle {hir e {seen {}}} {
+    if {![dict exists $hir coroutines thunks] || ![dict exists $hir exprs $e]} {
+        return ""
+    }
+    set node [dict get $hir exprs $e]
+    if {[dict get $node kind] ne "ref" || [dict get $node binding] eq ""} {
+        return ""
+    }
+    set b [dict get $node binding]
+    if {$b in $seen || ![dict exists $hir bindings $b]} {
+        return ""
+    }
+    set by [dict get $hir bindings $b declaredBy]
+    if {$by eq "" || ![dict exists $hir exprs $by] || [dict get $hir exprs $by kind] ne "bind"
+            || ![dict exists $hir exprs $by value] || [dict get $hir exprs $by value] eq ""} {
+        return ""
+    }
+    set value [dict get $hir exprs $by value]
+    if {[NativeOf $hir $value] eq [core::coroutines::createNative]} {
+        set thunk [lindex [dict get $hir exprs $value args] 0]
+        return [expr {[dict exists $hir coroutines thunks $thunk] ? $thunk : ""}]
+    }
+    return [thunkOfHandle $hir $value [concat $seen [list $b]]]
+}

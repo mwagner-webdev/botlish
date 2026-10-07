@@ -1614,6 +1614,13 @@ proc hir::range::VerifyCall {hirVar ranges e node} {
         set i $index
         incr index
         set argType [hir::typeOf $hir $arg]
+        if {[hir::types::IsCoroutine $argType]} {
+            # A coroutine handle is never a function's argument: that is the
+            # affine discipline's rejection (hir/coroutines.tcl:
+            # COROUTINE-NOT-FUNCTION, COROUTINE-STORAGE-UNSUPPORTED), not a
+            # second, type-level one.
+            continue
+        }
         set argRange [expr {[dict exists $ranges $arg] ? [dict get $ranges $arg] : [unknown]}]
         set inferred [hir::signatures::inferredTrusted $hir $targetBlock $i]
         if {$declaredType ne {} && [hir::types::IsTraitConstraint $declaredType]

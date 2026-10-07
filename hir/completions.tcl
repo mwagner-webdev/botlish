@@ -922,8 +922,8 @@ proc hir::completions::EvalCall {hirVar ctxVar diagnose enclosing guard e node} 
         # `list::at`) is held to the same legality rule as any other
         # fallible call, under its own call-specific facts
         # (NativeEffectiveFacts).
-        if {[dict get [core::native::metadata $name] errors] ne {}} {
-            lassign [NativeEffectiveFacts $hir $ctx $name $argExprs $argRanges] normal errors verdicts
+        if {[NativeDeclaredErrors $hir $e $name] ne {}} {
+            lassign [NativeCallFacts hir ctx $guard $e $name $argExprs $argRanges] normal errors verdicts
             if {$diagnose} {
                 CheckNativeCallLegality hir $e $name $normal $errors {} $enclosing
                 NoteBounds ctx $e $verdicts
@@ -1038,6 +1038,11 @@ proc hir::completions::EffectiveFacts {hirVar ctxVar target argRanges argExact a
     variable maxAnalyses
     variable cache
     set declared [hir::get $hir $target declaredErrors]
+    if {[dict exists $hir coroutines thunks $target]} {
+        # A coroutine's thunk (NativeCallFacts) declares nothing itself: its
+        # contract is its root's.
+        set declared [hir::coroutines::thunkErrors $hir $target]
+    }
     if {[dict exists $guard $target]} {
         # Self/mutual recursion: never assume an error impossible because
         # analysis recursed (item 34) -- the conservative, always-sound
@@ -1142,11 +1147,17 @@ proc hir::completions::CheckNativeCallLegality {hirVar e name normal errors hand
             $name [ErrorsPhrase $errors]] $e
         return
     }
+    # A coroutine segment is named as the operation it is written as.
+    set what [switch -- $name {
+        coroutine#start { expr {"coroutine construction"} }
+        coroutine#resume { expr {"coroutine resume"} }
+        default { format {call of "%s"} $name }
+    }]
     foreach error $errors {
         if {$error ni $handled && $error ni $enclosing} {
             hir::Diagnose hir UNHANDLED-ERROR [format \
-                {this call of "%s" may produce the declared error "%s", which is neither handled here nor admitted by the enclosing function's own "errors" declaration} \
-                $name $error] $e
+                {this %s may produce the declared error "%s", which is neither handled here nor admitted by the enclosing function's own "errors" declaration} \
+                $what $error] $e
         }
     }
 }
@@ -1172,6 +1183,38 @@ proc hir::completions::CheckNativeCallLegality {hirVar e name normal errors hand
 # because two checks of one call can raise the same declared error name
 # (a native with two slices): the call's flat `errors` cannot say which
 # check an error comes from. {} for a native without bounds.
+# The declared errors call E of the root native NAME may complete with: the
+# native's registered -errors -- or, for a native that completes with what
+# the Botlish code it runs leaves unhandled (core/native.tcl's -completion: a
+# coroutine segment, COROUTINES.md), the call's own calleeErrors, which type
+# inference took from the coroutine handle's type (hir/types.tcl's Call).
+proc hir::completions::NativeDeclaredErrors {hir e name} {
+    set meta [core::native::metadata $name]
+    if {[dict get $meta completion]} {
+        return [expr {[dict exists $hir exprs $e calleeErrors] ? [dict get $hir exprs $e calleeErrors] : {}}]
+    }
+    return [dict get $meta errors]
+}
+
+# NativeEffectiveFacts for call E. A coroutine segment (start, resume) may
+# complete with what its coroutine's whole computation may: the effective
+# facts of its thunk (EffectiveFacts, as for an exact call: the root call
+# under its captured arguments), whose errors are what any one segment can
+# leave unhandled. A segment may always complete normally (it may yield).
+# A handle whose construction is not found keeps the declared errors.
+proc hir::completions::NativeCallFacts {hirVar ctxVar guard e name argExprs argRanges} {
+    upvar 1 $hirVar hir $ctxVar ctx
+    if {[dict get [core::native::metadata $name] completion]} {
+        set thunk [hir::coroutines::thunkOfHandle $hir [lindex $argExprs 0]]
+        if {$thunk eq ""} {
+            return [list 1 [NativeDeclaredErrors $hir $e $name] {}]
+        }
+        lassign [EffectiveFacts hir ctx $thunk {} {} {} $guard] normal errors
+        return [list 1 $errors {}]
+    }
+    return [NativeEffectiveFacts $hir $ctx $name $argExprs $argRanges]
+}
+
 proc hir::completions::NativeEffectiveFacts {hir ctx name argExprs argRanges} {
     set meta [core::native::metadata $name]
     set errors [dict get $meta errors]
@@ -1658,11 +1701,11 @@ proc hir::completions::EvalHandle {hirVar ctxVar diagnose enclosing guard e node
                 CheckStructuralCallLegality hir $e $calleeType $errors $handled $enclosing
             }
         } elseif {$targetKind eq {native}
-                && [dict get [core::native::metadata [dict get [hir::symbol $hir $target] name]] errors] ne {}} {
+                && [NativeDeclaredErrors $hir $call [dict get [hir::symbol $hir $target] name]] ne {}} {
             # A handled call of a native with declared errors (`argv`,
-            # `list::at`).
+            # `list::at`), or of a coroutine segment (start, resume).
             set name [dict get [hir::symbol $hir $target] name]
-            lassign [NativeEffectiveFacts $hir $ctx $name $argExprs $argRanges] normal errors verdicts
+            lassign [NativeCallFacts hir ctx $guard $call $name $argExprs $argRanges] normal errors verdicts
             set callResult [hir::range::ConstrainType $hir $call \
                 [NativeResultRange $hir $ctx $name $argExprs $argRanges]]
             if {$diagnose} {

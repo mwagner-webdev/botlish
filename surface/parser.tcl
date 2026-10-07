@@ -993,6 +993,14 @@ proc surface::parser::Simple {pVar} {
             if {[CoroutineAhead p]} {
                 return [CoroutineBind p]
             }
+            if {[dict get $token value] eq "coroutine" && [Kind p 1] eq "IDENT" && [Kind p 2] eq "="} {
+                FailCode [dict get [Peek p 1] span] COROUTINE-BINDING-FIELD \
+                    "a coroutine binding names its results in braces: write \"coroutine \{step: [dict get [Peek p 1] value]\} = CALL\" (there is no \"coroutine NAME = CALL\" form)"
+            }
+            if {[dict get $token value] eq "coroutine" && [Kind p 1] in {( \[} && [PatternEnd p 1] >= 0} {
+                FailCode [dict get [Peek p 1] span] COROUTINE-BINDING-FIELD \
+                    "a coroutine binding's results are named, never positional: write \"coroutine \{step, first\} = CALL\""
+            }
         }
         \{ {
             # A braced pattern followed by "=" at the start of a statement
@@ -1376,6 +1384,9 @@ proc surface::parser::ParamSections {pVar} {
     while {[Kind p] ne ")"} {
         set token [Peek p]
         if {$section eq "resume"} {
+            if {[ResumeMarker p]} {
+                Fail $token "a function declares at most one resume clause (\"resume TYPE\", the last entry of its parameter list)"
+            }
             Fail $token "the resume clause must be the last entry of the parameter list, found [Describe $token] after it"
         }
         if {[ResumeMarker p]} {

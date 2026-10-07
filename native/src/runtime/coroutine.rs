@@ -520,3 +520,187 @@ pub extern "C" fn rt_co_done(_p: *mut Vm, handle: Value) -> Value {
 pub fn suspended_rbp(saved_sp: usize) -> usize {
     saved_sp + SWITCH_FRAME_OFFSET
 }
+
+#[cfg(all(test, target_arch = "x86_64", target_os = "linux"))]
+mod tests {
+    use super::*;
+    use crate::runtime::metrics::{AllocMode, GcReason};
+    use crate::runtime::vm::ProgramInfo;
+
+    fn new_vm() -> Box<Vm> {
+        Vm::new(std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new() }), AllocMode::Summary)
+    }
+
+    /// A zero-argument Block whose code is the Rust function CODE (the
+    /// generic entry ABI), standing in for a compiled thunk.
+    fn thunk(vm: &mut Vm, code: GenericEntry) -> Value {
+        let caps: Box<[Value]> = Vec::new().into_boxed_slice();
+        vm.alloc(
+            ClosureObj {
+                hdr: Header::new(KIND_CLOSURE, false),
+                func: 0,
+                arity: 0,
+                code: code as *const () as usize,
+                ncaps: 0,
+                caps: Box::into_raw(caps) as *mut Value,
+            },
+            0,
+        )
+    }
+
+    /// Yields 1, then the message + 10, then returns the second message * 2.
+    extern "C" fn counting(p: *mut Vm, _closure: Value, _args: *const Value) -> Value {
+        let m = rt_co_yield(p, make_small(1));
+        let n = rt_co_yield(p, make_small(small_of(m) + 10));
+        make_small(small_of(n) * 2)
+    }
+
+    /// Fails at once with a semantic error.
+    extern "C" fn failing(p: *mut Vm, _closure: Value, _args: *const Value) -> Value {
+        unsafe { (*p).fail(RtError::Semantic { kind: "RANGE", message: "boom".to_string() }) }
+    }
+
+    /// Returns at once: a coroutine need not reach a yield.
+    extern "C" fn immediate(_p: *mut Vm, _closure: Value, _args: *const Value) -> Value {
+        make_small(7)
+    }
+
+    /// Yields, allocating heavily (with collections forced) both before and
+    /// after the yield, and yields once more.
+    extern "C" fn allocating(p: *mut Vm, _closure: Value, _args: *const Value) -> Value {
+        for _ in 0..50 {
+            unsafe { (*p).new_big(num_bigint::BigInt::from(1u8) << 100u32) };
+        }
+        let m = rt_co_yield(p, make_small(5));
+        for _ in 0..50 {
+            unsafe { (*p).new_big(num_bigint::BigInt::from(1u8) << 100u32) };
+        }
+        rt_co_yield(p, m);
+        make_small(0)
+    }
+
+    thread_local! {
+        static INNER: std::cell::Cell<Value> = const { std::cell::Cell::new(0) };
+    }
+
+    /// Starts and resumes another coroutine (counting) inside its own
+    /// segments: nested coroutines, each on its own stack.
+    extern "C" fn outer(p: *mut Vm, _closure: Value, _args: *const Value) -> Value {
+        let t = thunk(unsafe { &mut *p }, counting);
+        let inner = rt_co_create(p, t);
+        INNER.with(|c| c.set(inner));
+        let a = rt_co_start(p, inner);
+        let m = rt_co_yield(p, a);
+        let b = rt_co_resume(p, inner, m);
+        make_small(small_of(b) * 100)
+    }
+
+    #[test]
+    fn yields_resumes_and_keeps_its_final_result() {
+        let mut vm = new_vm();
+        let t = thunk(&mut vm, counting);
+        let co = rt_co_create(&mut *vm, t);
+        vm.temp_roots.push(co);
+        assert_eq!(rt_co_done(&mut *vm, co), FALSE);
+        assert_eq!(rt_co_start(&mut *vm, co), make_small(1));
+        assert_eq!(rt_co_done(&mut *vm, co), FALSE);
+        assert_eq!(rt_co_resume(&mut *vm, co, make_small(5)), make_small(15));
+        assert_eq!(rt_co_resume(&mut *vm, co, make_small(21)), make_small(42));
+        assert_eq!(rt_co_done(&mut *vm, co), TRUE);
+        // Stable terminal success: the same value, no body code.
+        assert_eq!(rt_co_resume(&mut *vm, co, make_small(999)), make_small(42));
+        assert_eq!(rt_co_resume0(&mut *vm, co), make_small(42));
+        assert!(coroutine_of(co).stack.is_none());
+        assert!(vm.co_current.is_null());
+    }
+
+    #[test]
+    fn a_failure_is_terminal_and_raised_again() {
+        let mut vm = new_vm();
+        let t = thunk(&mut vm, failing);
+        let co = rt_co_create(&mut *vm, t);
+        vm.temp_roots.push(co);
+        assert_eq!(rt_co_start(&mut *vm, co), NO_VALUE);
+        assert_eq!(vm.error.take().map(|e| e.message()), Some("boom".to_string()));
+        assert_eq!(rt_co_done(&mut *vm, co), TRUE);
+        assert_eq!(rt_co_resume0(&mut *vm, co), NO_VALUE);
+        assert_eq!(vm.error.take().map(|e| e.error_code()), Some(vec!["CORE", "SEMANTIC", "RANGE"]));
+    }
+
+    #[test]
+    fn return_before_any_yield_completes_at_the_start() {
+        let mut vm = new_vm();
+        let t = thunk(&mut vm, immediate);
+        let co = rt_co_create(&mut *vm, t);
+        vm.temp_roots.push(co);
+        assert_eq!(rt_co_start(&mut *vm, co), make_small(7));
+        assert_eq!(rt_co_done(&mut *vm, co), TRUE);
+        assert_eq!(rt_co_resume0(&mut *vm, co), make_small(7));
+    }
+
+    #[test]
+    fn collections_inside_and_between_segments_keep_live_values() {
+        let mut vm = new_vm();
+        vm.heap.set_stress_for_test(true);
+        // Values held only by these Rust frames are rooted by hand (compiled
+        // code's own operands are, by its stack maps).
+        let t = thunk(&mut vm, allocating);
+        vm.temp_roots.push(t);
+        let co = rt_co_create(&mut *vm, t);
+        vm.temp_roots.push(co);
+        assert_eq!(rt_co_start(&mut *vm, co), make_small(5));
+        let message = vm.new_big(num_bigint::BigInt::from(3u8) << 80u32);
+        vm.temp_roots.push(message);
+        vm.collect_for_test(GcReason::Explicit);
+        // The message is rooted only by the transport slot across the
+        // switch, then by the coroutine's own stack while it allocates.
+        let back = rt_co_resume(&mut *vm, co, message);
+        assert_eq!(back, message);
+        assert_eq!(rt_co_resume0(&mut *vm, co), make_small(0));
+    }
+
+    #[test]
+    fn nested_coroutines_run_on_their_own_stacks() {
+        let mut vm = new_vm();
+        let t = thunk(&mut vm, outer);
+        let co = rt_co_create(&mut *vm, t);
+        vm.temp_roots.push(co);
+        assert_eq!(rt_co_start(&mut *vm, co), make_small(1));
+        let inner = INNER.with(|c| c.get());
+        vm.temp_roots.push(inner);
+        assert_eq!(rt_co_done(&mut *vm, inner), FALSE);
+        assert_eq!(rt_co_resume(&mut *vm, co, make_small(2)), make_small(1200));
+        assert_eq!(rt_co_done(&mut *vm, co), TRUE);
+        assert_eq!(rt_co_done(&mut *vm, inner), FALSE);
+    }
+
+    #[test]
+    fn an_abandoned_suspended_coroutine_is_collected_and_its_stack_pooled() {
+        let mut vm = new_vm();
+        let t = thunk(&mut vm, counting);
+        let co = rt_co_create(&mut *vm, t);
+        vm.temp_roots.push(co);
+        assert_eq!(rt_co_start(&mut *vm, co), make_small(1));
+        assert!(coroutine_of(co).stack.is_some());
+        let before = pooled_stacks();
+        vm.temp_roots.clear();
+        vm.collect_for_test(GcReason::Explicit);
+        assert_eq!(pooled_stacks(), before + 1);
+        // A pooled stack is reused by the next start.
+        let t = thunk(&mut vm, immediate);
+        let again = rt_co_create(&mut *vm, t);
+        vm.temp_roots.push(again);
+        assert_eq!(rt_co_start(&mut *vm, again), make_small(7));
+        assert_eq!(pooled_stacks(), before + 1);
+    }
+
+    #[test]
+    fn yield_outside_a_coroutine_is_an_error() {
+        let mut vm = new_vm();
+        assert_eq!(rt_co_yield(&mut *vm, UNIT), NO_VALUE);
+        assert_eq!(
+            vm.error.take().map(|e| e.error_code()),
+            Some(vec!["CORE", "SEMANTIC", "YIELD-OUTSIDE-COROUTINE"])
+        );
+    }
+}
