@@ -2,7 +2,7 @@ source:  examples/stdlib/string_reverse.bot
 backend: Cranelift (specialize=1)
 asm:     string_reverse.asm
 vcode:   string_reverse.vcode
-machine-code bytes: 1214 (per function: 224 482 90 418)
+machine-code bytes: 1208 (per function: 224 476 90 418)
 
 functions:
   0 <program entry>: nir-regs=6
@@ -64,4 +64,4 @@ GC roots (string_reverse.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
 
 mechanical pattern counts (triage only; see report for interpretation):
-  11 x calls to other rt_* helpers
+  10 x calls to other rt_* helpers

@@ -2,7 +2,7 @@ source:  examples/stdlib/csv_chunked.bot
 backend: Cranelift (specialize=1)
 asm:     csv_chunked.asm
 vcode:   csv_chunked.vcode
-machine-code bytes: 10490 (per function: 312 195 534 534 534 534 498 418 540 540 365 430 585 1141 352 799 833 537 612 197)
+machine-code bytes: 10470 (per function: 312 195 534 534 534 534 498 418 540 540 365 438 585 1141 352 799 833 525 596 197)
 
 functions:
   0 <program entry>: nir-regs=9
@@ -291,5 +291,5 @@ mechanical pattern counts (triage only; see report for interpretation):
   20 x calls to rt_int_add
   2 x calls to rt_int_mul
   7 x calls to rt_int_cmp
-  62 x calls to other rt_* helpers
+  58 x calls to other rt_* helpers
   1 x guard/guardbool instructions

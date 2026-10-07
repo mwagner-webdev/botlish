@@ -5,6 +5,11 @@
 # web::UriQueryValue refinement. See NATIVE-URI-ESCAPE.md for the algorithm's
 # history and REFINEMENT-VALUES.md for the refinement.
 #
+# Both read their argument one character at a time with str::char_at
+# (tests/str-char-at.test), never through str::encode_utf8's List; the
+# allocation and NIR pins below hold them to that
+# (ENCODE-UTF8-ALLOCATION-RESEARCH.md).
+#
 # Everything is checked four-way (interp, compile, cranelift-generic,
 # cranelift): a refined value is its carrier, so no backend may differ. The
 # escaping is also checked against an independent Tcl reference (the former
@@ -86,6 +91,9 @@ foreach {name s expect} {
     two-byte      é                     %C3%A9
     astral        😀                    %F0%9F%98%80
     percent-like  {50%}                 50%25
+    mixed-words   {déjà vu}             d%C3%A9j%C3%A0%20vu
+    three-byte    世界                  %E4%B8%96%E7%95%8C
+    escape-like   %41%4a                %2541%254a
 } {
     test native-uri-escape-text-$name "web::uri_escape_text($s) text agrees across interp/compile/cranelift-generic/cranelift" -body {
         escapeText $s
@@ -109,6 +117,10 @@ foreach {name s expect} {
     non-hex            %G0            false
     raw-non-ascii      é              false
     reserved           a&b=c          false
+    escaped-boundaries %7F%C2%80%DF%BF%E0%A0%80%EF%BF%BF%F0%90%80%80%F4%8F%BF%BF true
+    raw-astral         a😀            false
+    hex-at-end         a%4            false
+    escaped-percent    %25            true
 } {
     test native-uri-escape-query-value-$name "web::uri_query_value?($s) is $expect on every backend" -body {
         sourceAgree "import web\nweb::uri_query_value?([botString $s])\n"
@@ -129,6 +141,63 @@ test native-uri-escape-query-value-repeatable {web::uri_query_value? is proven r
     set binding [hir::get $hir [lindex [hirFind $hir ref web::uri_query_value?] 0] binding]
     hir::repeatable::explain $hir [hir::get $hir [dict get [hir::binding $hir $binding] declaredBy] value]
 } -result {}
+
+test native-uri-escape-text-repeatable {web::uri_escape_text is proven repeatable} -body {
+    set hir [surface::compile "import web\nweb::uri_escape_text(\"a\")\n" -warnings off]
+    set binding [hir::get $hir [lindex [hirFind $hir ref web::uri_escape_text] 0] binding]
+    hir::repeatable::explain $hir [hir::get $hir [dict get [hir::binding $hir $binding] declaredBy] value]
+} -result {}
+
+# ---------------------------------------------------------------------------
+# No per-call or per-character List: the program's List and String counts do
+# not grow with the number of predicate calls, and the escaping allocates no
+# List at all beyond the module's own literals; neither function's NIR
+# reads a List or encodes UTF-8.
+
+# The body of NIR function NAME (its first instance) in TEXT, line by line:
+# from its `func N "NAME"` header to the next `end`.
+proc nirBody {text name} {
+    set body {}
+    set on 0
+    foreach line [split $text \n] {
+        if {!$on} {
+            set on [expr {[string first "\"$name\" " $line] > 0 && [string match {func *} $line]}]
+        } elseif {$line eq "end"} {
+            break
+        } else {
+            lappend body $line
+        }
+    }
+    return [join $body \n]
+}
+
+# {LISTS STRINGS} native allocations of a program that runs CALL N times.
+proc allocationsOfRepeated {call n} {
+    set hir [surface::compile "import str\nimport web\n\nfn go(i, acc):\n    if i >= $n:\n        return acc\n    hit = if $call:\n        1\n    else:\n        0\n    go(i + 1, acc + hit)\n\ngo(0, 0)\n" -warnings off]
+    set report [native::allocationReport $hir summary]
+    return [list [dict get $report byKind List allocations] [dict get $report byKind String allocations]]
+}
+
+test native-uri-escape-query-value-allocates-nothing-per-call {web::uri_query_value? allocates nothing per call} -body {
+    set call {web::uri_query_value?("hello%20%E4%B8%96%E7%95%8C%3F")}
+    expr {[allocationsOfRepeated $call 10] eq [allocationsOfRepeated $call 50]}
+} -result 1
+
+test native-uri-escape-text-allocates-no-list {web::uri_escape_text allocates no List per call or per character} -body {
+    set call {str::length(web::uri_escape_text("a b+c? café 世界")) > 0}
+    lassign [allocationsOfRepeated $call 10] lists10
+    lassign [allocationsOfRepeated $call 50] lists50
+    expr {$lists10 == $lists50}
+} -result 1
+
+test native-uri-escape-nir-reads-characters {the predicate and the escaping read characters with strcharatproven, never a List} -body {
+    set text [native::nir [surface::compile "import web\n\[web::uri_query_value?(\"a\"), web::uri_escape_text(\"a\")\]\n" -warnings off]]
+    lmap name {valid_from? upper_hex? esc_from web::uri_query_value?} {
+        set body [nirBody $text $name]
+        list $name [regexp {op strcharatproven } $body] \
+            [regexp {op (strutf8bytes|listlen|listget|listgetproven|strcharat) } $body]
+    }
+} -result {{valid_from? 1 0} {upper_hex? 1 0} {esc_from 1 0} {web::uri_query_value? 0 0}}
 
 # ---------------------------------------------------------------------------
 # GC stress: str::encode_utf8 and the escaping both allocate on the native

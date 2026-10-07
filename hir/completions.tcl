@@ -1527,6 +1527,10 @@ proc hir::completions::IndexBounds {hir ctx family container index indexRange} {
     # against, and either one may be the constant the range check needs.
     if {$family eq "list"} {
         set size [hir::cardinality::ListLength $hir $container steps]
+    } elseif {$family eq "str"} {
+        # A character index (str::char_at): checked against the String's
+        # length in Unicode scalars, the size str::length's guards state.
+        set size [hir::cardinality::StrLength $hir $container steps]
     } else {
         set size [hir::cardinality::Capacity $hir $container steps]
     }

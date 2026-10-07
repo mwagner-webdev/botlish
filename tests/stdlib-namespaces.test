@@ -129,7 +129,7 @@ test ns-qualified-inventory {every standard intrinsic lives in its value family'
     lmap ns {list str char mutable_array immutable_set byte_store mutable_byte_store linux::abi abi::x86_64} {
         list $ns [core::native::qualifiedMembers $ns]
     }
-} -result {{list {append at length}} {str {concat encode_utf8 is_tcl_alnum is_tcl_alpha length lowercase substring}} {char scalar_value} {mutable_array {allocate at capacity copy freeze set}} {immutable_set {contains from_list}} {byte_store {byte_count from_list}} {mutable_byte_store {count detach freeze freeze_prefix from_storage replace zeroed}} {linux::abi syscall} {abi::x86_64 {from_bytes from_mutable_bytes}}}
+} -result {{list {append at length}} {str {char_at concat encode_utf8 is_tcl_alnum is_tcl_alpha length lowercase substring}} {char scalar_value} {mutable_array {allocate at capacity copy freeze set}} {immutable_set {contains from_list}} {byte_store {byte_count from_list}} {mutable_byte_store {count detach freeze freeze_prefix from_storage replace zeroed}} {linux::abi syscall} {abi::x86_64 {from_bytes from_mutable_bytes}}}
 
 test ns-no-nested-stdlib {no std::/stdlib::/core:: hierarchy: every qualified intrinsic but the platform's (linux::abi::syscall, abi::x86_64::from_bytes) is NAMESPACE::MEMBER, one level} -body {
     lsort [lmap name [core::native::names] {
@@ -265,7 +265,7 @@ test ns-local-names-are-unrelated {a local function named at is an ordinary bind
 test ns-unknown-member-of-intrinsic-namespace {a namespace with only intrinsics reports an unknown member against them, not as a missing module file} -body {
     rejection {import str
 str::nope("a")}
-} -match glob -result {UNKNOWN-SYMBOL {*namespace "str" has no definition "nope" (its members are the intrinsics: concat, encode_utf8, is_tcl_alnum, is_tcl_alpha, length, lowercase, substring)}}
+} -match glob -result {UNKNOWN-SYMBOL {*namespace "str" has no definition "nope" (its members are the intrinsics: char_at, concat, encode_utf8, is_tcl_alnum, is_tcl_alpha, length, lowercase, substring)}}
 
 test ns-unknown-member-lists-intrinsics-too {a namespace with a module lists the module's definitions and the intrinsics} -body {
     rejection {import list

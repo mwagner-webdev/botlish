@@ -242,7 +242,7 @@ test imports-unknown-member-vs-missing-import {the namespace is authorized first
 
 test imports-unknown-member-names-the-intrinsics {the unknown-member diagnostic of an intrinsic namespace lists its members} -body {
     rejection "import str\nstr::reverse(\"a\")\n"
-} -result {UNKNOWN-SYMBOL: namespace "str" has no definition "reverse" (its members are the intrinsics: concat, encode_utf8, is_tcl_alnum, is_tcl_alpha, length, lowercase, substring)}
+} -result {UNKNOWN-SYMBOL: namespace "str" has no definition "reverse" (its members are the intrinsics: char_at, concat, encode_utf8, is_tcl_alnum, is_tcl_alpha, length, lowercase, substring)}
 
 test imports-unknown-namespace-at-the-import {an import of a namespace that does not exist is reported at the import, before any use} -body {
     rejection "import does_not_exist\n1\n"

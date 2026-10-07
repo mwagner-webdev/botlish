@@ -30,6 +30,10 @@
 //! | rt_str_lower           | Str                 | Str                          | yes       |
 //! | rt_str_cat             | Str, Str            | Str                          | yes       |
 //! | rt_str_utf8_bytes      | Str                 | List of Int (0..255); RANGE  | yes       |
+//! | rt_str_char_at         | Str, Int            | UnicodeChar; declared        | no        |
+//! |                        |                     | IndexNotFound (str::char_at) |           |
+//! | rt_str_char_at_proven  | Str, Int            | UnicodeChar (index proven    | no        |
+//! |                        |                     | valid by hir/completions.tcl)|           |
 //! | rt_argv                |                     | List of Str; declared        | yes       |
 //! |                        |                     | InvalidArgumentEncoding      |           |
 //! | rt_linux_x86_64_syscall| 7 Ints (i64 words)  | Int: raw rax, signed (see    | big Ints  |
@@ -122,7 +126,7 @@ pub fn op_may_allocate(op: OpCode) -> bool {
 /// Whether OP can report a Botlish semantic error by returning NO_VALUE.
 pub fn op_may_error(op: OpCode) -> bool {
     use OpCode::*;
-    matches!(op, IMod | IShl | IShr | VEq | Hash | Substr | StrCat | StrUtf8Bytes | Argv | StrIsTclAlpha | StrIsTclAlnum
+    matches!(op, IMod | IShl | IShr | VEq | Hash | Substr | StrCat | StrUtf8Bytes | StrCharAt | Argv | StrIsTclAlpha | StrIsTclAlnum
         // A non-byte element (TYPE, never a truncation), an operand that is
         // not a byte storage (TYPE), an oversized storage (RANGE). A checked
         // program cannot produce any of them: lib/abi/bytes.bot's creator takes
@@ -1216,6 +1220,40 @@ pub extern "C" fn rt_str_utf8_bytes(p: *mut Vm, s: Value) -> Value {
     r
 }
 
+/// `str::char_at(S, I)` (core/strings.tcl's `charAt`) at a character index
+/// I already known valid: the scalar as a UnicodeChar immediate, never an
+/// allocation. An ASCII String's character I is its byte I; otherwise
+/// character I is located by decoding forward from byte 0 -- the same seek
+/// `rt_substr`'s non-ASCII path pays, counted the same way in
+/// `utf8SeekBytes`. codegen::clif inlines the ASCII path of the proven form.
+fn char_at_index(p: *mut Vm, s: Value, i: usize) -> Value {
+    let obj = str_of(s);
+    if obj.ascii {
+        return make_char(obj.as_bytes()[i] as u32);
+    }
+    let text = obj.as_str();
+    let (at, c) = text.char_indices().nth(i).expect("index validated");
+    vm(p).metrics.record_utf8_seek(at);
+    make_char(c as u32)
+}
+
+/// `str::char_at` checked: any index that is not a small Int in 0..chars (a
+/// negative one, one at or past the end, a BigInt) is the declared
+/// IndexNotFound, exactly like `rt_list_get`.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_str_char_at(p: *mut Vm, s: Value, index: Value) -> Value {
+    match int_small(index) {
+        Some(i) if i >= 0 && (i as usize) < str_of(s).chars => char_at_index(p, s, i as usize),
+        _ => index_not_found(p),
+    }
+}
+
+/// `rt_str_char_at` at an index proven to designate a character (`strcharatproven`).
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_str_char_at_proven(p: *mut Vm, s: Value, index: Value) -> Value {
+    char_at_index(p, s, int_small(index).expect("proven index") as usize)
+}
+
 /// `argv()` (core/process.tcl, ARGV.md): the run's argument snapshot as a
 /// List of Strings, each argument validated as UTF-8 only now, all or
 /// nothing. An invalid argument records the declared builtin error
@@ -1893,12 +1931,15 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         IEq => cmp(|o| o == Ordering::Equal),
         VEq => rt_value_eq(p, a[0], a[1]),
         StrEq => rt_str_eq(p, a[0], a[1]),
+        CharEq => bool_value(a[0] == a[1]),
         ListNew => rt_list_new(p, a.len() as u64, a.as_ptr()),
         StrLen => rt_str_len(p, a[0]),
         Substr => rt_substr(p, a[0], a[1], a[2]),
         StrLower => rt_str_lower(p, a[0]),
         StrCat => rt_str_cat(p, a[0], a[1]),
         StrUtf8Bytes => rt_str_utf8_bytes(p, a[0]),
+        StrCharAt => rt_str_char_at(p, a[0], a[1]),
+        StrCharAtProven => rt_str_char_at_proven(p, a[0], a[1]),
         Argv => rt_argv(p),
         StrIsTclAlpha => rt_is_tcl_alpha(p, a[0]),
         StrIsTclAlnum => rt_is_tcl_alnum(p, a[0]),
@@ -2015,6 +2056,8 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_str_lower, 2),
         h!(rt_str_cat, 3),
         h!(rt_str_utf8_bytes, 2),
+        h!(rt_str_char_at, 3),
+        h!(rt_str_char_at_proven, 3),
         h!(rt_argv, 1),
         h!(rt_linux_x86_64_syscall, 8),
         h!(rt_bytes_from_list, 2),
@@ -2545,6 +2588,53 @@ mod tests {
         let mut vm = vm();
         let s = str_val(&mut vm, "a\u{e9}\u{1f600}");
         assert_eq!(utf8_bytes_of(&mut vm, s), vec![97, 0xC3, 0xA9, 0xF0, 0x9F, 0x98, 0x80]);
+    }
+
+    // char_at (core/strings.tcl's charAt): the scalar at a character index
+    // as a UnicodeChar immediate, ASCII and non-ASCII alike; only the
+    // non-ASCII path seeks (utf8SeekBytes, the bytes before the character).
+    fn char_at_all(vm: &mut Vm, s: Value, n: i64) -> Vec<u32> {
+        (0..n)
+            .map(|i| {
+                let checked = rt_str_char_at(vm, s, small(i));
+                let proven = rt_str_char_at_proven(vm, s, small(i));
+                assert_eq!(checked, proven);
+                assert!(is_char(checked));
+                char_of(checked)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn char_at_ascii_reads_without_seeking() {
+        let mut vm = vm();
+        let s = str_val(&mut vm, "a%2F");
+        assert_eq!(char_at_all(&mut vm, s, 4), vec![97, 37, 50, 70]);
+        assert_eq!(vm.metrics.utf8_seek_bytes, 0);
+    }
+
+    #[test]
+    fn char_at_mixed_width_scalars() {
+        let mut vm = vm();
+        let s = str_val(&mut vm, "a\u{e9}\u{4e16}\u{1f600}z");
+        assert_eq!(char_at_all(&mut vm, s, 5), vec![97, 0xE9, 0x4E16, 0x1F600, 122]);
+        // Each read seeks from byte 0 to its character (0 + 1 + 3 + 6 + 10
+        // bytes), and char_at_all reads every character twice.
+        assert_eq!(vm.metrics.utf8_seek_bytes, 40);
+    }
+
+    #[test]
+    fn char_at_outside_the_string_is_index_not_found() {
+        let mut vm = vm();
+        let s = str_val(&mut vm, "\u{e9}");
+        let empty = str_val(&mut vm, "");
+        let big = vm.new_big(num_bigint::BigInt::from(1u8) << 80);
+        for (text, index) in [(s, small(1)), (s, small(-1)), (s, big), (empty, small(0))] {
+            assert_eq!(rt_str_char_at(&mut *vm, text, index), NO_VALUE);
+            assert_eq!(vm.declared_error, crate::runtime::error::ERR_INDEX_NOT_FOUND);
+            vm.error = None;
+            vm.declared_error = 0;
+        }
     }
 
     // -----------------------------------------------------------------------

@@ -72,7 +72,7 @@ and `ns-qualified-inventory` pin the after-state in a fresh process):
 | `hash` | language primitive (the structural hash `==` agrees with; any value) | root, unchanged |
 | `argv` | platform/process primitive (ARGV.md) | root, unchanged |
 | `eq` | historical leftover | **removed** (§1) |
-| `length substring lowercase concat encode_utf8 is_tcl_alpha is_tcl_alnum` | standard type op (String) | `str::*` |
+| `length substring lowercase concat encode_utf8 char_at is_tcl_alpha is_tcl_alnum` | standard type op (String) | `str::*` |
 | `list_length list_get list_append` | standard type op (List) | `list::length`, `list::at`, `list::append` |
 | `mutable_array_allocate _capacity _get _set _copy _freeze` | standard type op (MutableArray) | `mutable_array::allocate/capacity/at/set/copy/freeze` |
 | `immutable_set_from_list immutable_set_contains` | standard type op (ImmutableSet) | `immutable_set::from_list/contains` |
@@ -104,7 +104,7 @@ hierarchy (`ns-no-nested-stdlib`):
 
 | Namespace | Intrinsics (qualified root natives) | Library members (`lib/*.bot`) |
 |-----------|-------------------------------------|-------------------------------|
-| `str` | `length substring lowercase concat encode_utf8 is_tcl_alpha is_tcl_alnum` | none (no module file) |
+| `str` | `length substring lowercase concat encode_utf8 char_at is_tcl_alpha is_tcl_alnum` | none (no module file) |
 | `list` | `length at append` | `get` (new), `find any? all? none?` ... (existing `lib/list.bot`) |
 | `mutable_array` | `allocate capacity at set copy freeze` | `from_list create` (moved from the old `mutarray` module), `get` (new) |
 | `immutable_set` | `from_list contains` | none |

@@ -1,0 +1,8 @@
+# escape-parity.bot -- web::uri_escape_text and web::uri_query_value? over
+# edge inputs (1- to 4-byte scalars, the UTF-8 width boundaries U+007E,
+# U+0080, U+07FF, U+0800, U+FFFF, U+10000, U+10FFFF, lowercase and
+# truncated escapes): the parity check of ENCODE-UTF8-ALLOCATION-RESEARCH.md.
+import web
+texts = ["", "a b", "someone@example.com", "é", "😀", "50%", "a&b=c", "déjà vu", "世界", "~-._", "%41%4a", "%4", "~߿ࠀ￿𐀀􏿿"]
+loop t in texts:
+    [web::uri_escape_text(t), web::uri_query_value?(web::uri_escape_text(t)), web::uri_query_value?(t)]

@@ -207,7 +207,7 @@ f(5)}
 } -result {0 1}
 
 # ---------------------------------------------------------------------------
-# The real motivating path: esc_char -> web::is_unreserved (a typed,
+# The real motivating path: esc_char (now esc_from) -> web::is_unreserved (a typed,
 # declared-Byte-parameter callable, forwarded to a nested function through
 # a captured immutable module binding, exactly the capture-to-parameter
 # shape above) is already a direct call to a statically known target
@@ -222,23 +222,38 @@ f(5)}
 # callvalue, which is the actual property M2 established and this milestone
 # leaves untouched.
 
-test callable-target-uri-esc-char-is-unreserved-already-direct {esc_char's call to web::is_unreserved, in the real frozen uri-steady.bot, is already a direct call to a statically-known target, not a callvalue (M2's own real-path finding: no first loss found here)} -body {
+# ENCODE-UTF8-ALLOCATION-RESEARCH.md: esc_char is gone; esc_from, which
+# now classifies each character itself (str::char_at), is is_unreserved's
+# caller in uri_escape_text, and the property is unchanged: a direct call.
+
+test callable-target-uri-esc-from-is-unreserved-already-direct {esc_from's call to web::is_unreserved, in the real frozen uri-steady.bot, is a direct call to a statically-known target, not a callvalue (M2's own real-path finding: no first loss found here)} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
     set nirText [dict get [native::lower::program $hir] text]
-    # esc_char<generic>'s own body: find its "func N ... pnames=... " header
-    # and confirm the function contains no callvalue, and does contain a
-    # direct call of web::is_unreserved's own function number.
-    set escCharFunc ""
+    # esc_from's own body: find its "func N ... pnames=... " header and
+    # confirm the function contains no callvalue, and does contain a direct
+    # call of web::is_unreserved's own function number.
+    set escFunc ""
     set uriFunc ""
     foreach {whole id name} [regexp -all -inline {func (\d+) "([^"]*)"} $nirText] {
-        if {$name eq "esc_char"} { set escCharFunc $id }
+        if {$name eq "esc_from" && $escFunc eq ""} { set escFunc $id }
         if {$name eq "web::is_unreserved"} { set uriFunc $id }
     }
-    if {$escCharFunc eq "" || $uriFunc eq ""} {
-        error "could not find esc_char/web::is_unreserved in NIR"
+    if {$escFunc eq "" || $uriFunc eq ""} {
+        error "could not find esc_from/web::is_unreserved in NIR"
     }
-    # Extract esc_char's own function body text.
-    regexp "func $escCharFunc \[^\n\]*\n(.*?)\nend" $nirText -> body
+    # Extract esc_from's own function body text, line by line.
+    set body {}
+    set on 0
+    foreach line [split $nirText \n] {
+        if {!$on} {
+            set on [string match "func $escFunc *" $line]
+        } elseif {$line eq "end"} {
+            break
+        } else {
+            lappend body $line
+        }
+    }
+    set body [join $body \n]
     list [regexp {callvalue} $body] [regexp "call $uriFunc " $body]
 } -result {0 1}
 

@@ -429,6 +429,7 @@ Standard intrinsics (qualified root natives):
 | `str::lowercase` | str → str (Unicode 16 simple one-to-one case mapping; see §"Strings") |
 | `str::concat` | str, str → str |
 | `str::encode_utf8` | str → `List[Byte]` (the UTF-8 bytes) |
+| `str::char_at` | str, int → UnicodeChar, errors `IndexNotFound`: the scalar at character index `0 <= i < length` (the index space of `length`/`substring`); any other Int index fails with `IndexNotFound`; never allocates. With char literals (`c == '%'`) and `char::scalar_value` it classifies a String's characters without a one-character String or an `encode_utf8` List (ENCODE-UTF8-ALLOCATION-RESEARCH.md) |
 | `str::is_tcl_alpha` `str::is_tcl_alnum` | one-scalar str → bool (temporary Tcl-compatibility classes, core/tclcompat.tcl) |
 | `char::scalar_value` | UnicodeChar → int (the Unicode scalar value: `0..0x10FFFF` without the surrogates, never a byte or a code unit of an encoding) |
 | `mutable_array::allocate` | int → mutarray (every slot `unit`) |
@@ -450,7 +451,8 @@ Ordinary Botlish members of the same namespaces (library modules, not
 natives): `list::get`, `list::any?`, `list::all?`, `list::none?`,
 `list::find` (`lib/list.bot`); `mutable_array::from_list`,
 `mutable_array::create`, `mutable_array::get` (`lib/mutable_array.bot`).
-`char` has no library module: `char::scalar_value` is its one member (a
+`char` has no library module: `char::scalar_value` is its one member
+(`str::char_at` produces a UnicodeChar from a String position; a
 "code point" also names surrogates and, colloquially, Latin-1 or other
 encodings' numbers; a scalar value is exactly what a UnicodeChar holds).
 Like every native's parameter types, its `UnicodeChar` requirement is

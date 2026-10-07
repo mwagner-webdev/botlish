@@ -290,6 +290,9 @@ fn caller(s, x):
 # identified residual (esc_char -> web::is_unreserved's caller-side
 # completion retest), through the frozen bench/uri-steady.bot itself, not a
 # synthetic stand-in (spec items 32-33, 65-66, 81).
+# ENCODE-UTF8-ALLOCATION-RESEARCH.md: esc_char is gone and esc_from, which
+# classifies each character itself (str::char_at), is is_unreserved's caller
+# now: the edge the tests below follow is esc_from -> web::is_unreserved.
 
 test setcontains-uri-web-is-unreserved-local-op-total {web::is_unreserved's own body: the immutable_set::contains(additional_unreserved_chars, b) call lowers to setcontainstotal, not setcontains -- additional_unreserved_chars : ImmutableSet[Byte], b : Byte, both statically proven equality-total} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
@@ -314,12 +317,12 @@ test setcontains-uri-web-is-unreserved-may-error-false {web::is_unreserved's own
     expr {$found ? "all-false" : "not-found"}
 } -result all-false
 
-test setcontains-uri-esc-char-edge-becomes-non-erroring {esc_char -> web::is_unreserved's edge, M2's own identified residual, naturally collapses to may_error=false through existing, unmodified call-effect propagation -- no esc_char-specific or web::is_unreserved-specific code} -body {
+test setcontains-uri-esc-from-edge-becomes-non-erroring {esc_from -> web::is_unreserved's edge (esc_char's, M2's own identified residual, before ENCODE-UTF8-ALLOCATION-RESEARCH.md) naturally collapses to may_error=false through existing, unmodified call-effect propagation -- no esc_from-specific or web::is_unreserved-specific code} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
     set nirText [dict get [native::lower::program $hir -tiny-leaf-inline-opt 0] text]
     set effects [native::Driver calls $nirText]
     set lines [lmap line $effects {
-        if {![string match {*caller_name="esc_char"*callee_name="web::is_unreserved*} $line]} continue
+        if {![string match {*caller_name="esc_from"*callee_name="web::is_unreserved*} $line]} continue
         set line
     }]
     list [llength $lines] [lmap l $lines {string match {*may_error=false*} $l}]
@@ -368,10 +371,10 @@ test setcontains-m1-control-is-unreserved-param-view-unchanged {web::is_unreserv
     paramViewTypeOf $hir $analysis {web::is_unreserved<int>} 0
 } -result {int[byte::Byte]}
 
-test setcontains-m2-control-esc-char-edge-still-direct-callenv {esc_char -> web::is_unreserved is still a direct call (M2's own subject), never callvalue, after M3; MODULE-STATIC-RETAINED-VALUES.md: is_unreserved is envless now, so the call carries no environment (a plain "call", not "callenv") -- still a direct call of a statically known target, never a callvalue, which is the property M2 actually established} -body {
+test setcontains-m2-control-esc-from-edge-still-direct-callenv {esc_from (esc_char before ENCODE-UTF8-ALLOCATION-RESEARCH.md) -> web::is_unreserved is still a direct call (M2's own subject), never callvalue, after M3; MODULE-STATIC-RETAINED-VALUES.md: is_unreserved is envless now, so the call carries no environment (a plain "call", not "callenv") -- still a direct call of a statically known target, never a callvalue, which is the property M2 actually established} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
     set nirText [dict get [native::lower::program $hir -tiny-leaf-inline-opt 0] text]
-    regexp {func \d+ "esc_char[^\n]*\n(?:.*\n)*?end} $nirText body
+    regexp {func \d+ "esc_from[^\n]*\n(?:.*\n)*?end} $nirText body
     list [regexp {= call \d+ } $body] [regexp {callvalue} $body]
 } -result {1 0}
 

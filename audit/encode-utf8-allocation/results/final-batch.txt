@@ -1,0 +1,218 @@
+# final-batch.txt -- tools/measure.tcl -repeat 10 per program on: the
+# checkout; treeD = prototype natives + codegen with the CURRENT lib/web.bot;
+# treeC = full prototype (prototype/char-at.patch). Then GC stress.
+== audit/encode-utf8-allocation/programs/query-value-steady.bot @ botlish
+value interp 1334
+value compile 1334
+value cranelift-generic 1334
+value cranelift 1334
+alloc 2011 232648 List 2009/232528B ImmutableSet 2/120B
+size 4509
+fnsize web::uri_query_value? 131
+fnsize valid_from? 725
+fnsize upper_hex? 357
+fnsize esc_from 0
+fnsize esc_char 0
+fnsize esc_bytes 0
+fnsize esc_scalar 0
+fnsize web::uri_escape_text 0
+best 355.5
+repeatable web::uri_query_value? {}
+== audit/encode-utf8-allocation/programs/query-value-steady.bot @ treeD
+value interp 1334
+value compile 1334
+value cranelift-generic 1334
+value cranelift 1334
+alloc 2011 232648 List 2009/232528B ImmutableSet 2/120B
+size 4517
+fnsize web::uri_query_value? 131
+fnsize valid_from? 725
+fnsize upper_hex? 357
+fnsize esc_from 0
+fnsize esc_char 0
+fnsize esc_bytes 0
+fnsize esc_scalar 0
+fnsize web::uri_escape_text 0
+best 363.0
+repeatable web::uri_query_value? {}
+== audit/encode-utf8-allocation/programs/query-value-steady.bot @ treeC
+value interp 1334
+value compile 1334
+value cranelift-generic 1334
+value cranelift 1334
+alloc 11 664 List 9/544B ImmutableSet 2/120B
+size 4811
+fnsize web::uri_query_value? 81
+fnsize valid_from? 949
+fnsize upper_hex? 477
+fnsize esc_from 0
+fnsize esc_char 0
+fnsize esc_bytes 0
+fnsize esc_scalar 0
+fnsize web::uri_escape_text 0
+best 237.5
+repeatable web::uri_query_value? {}
+== bench/uri-steady.bot @ botlish
+value interp 29500
+value compile 29500
+value cranelift-generic 29500
+value cranelift 29500
+alloc 38511 1730648 String 16000/446000B List 14009/468528B ImmutableSet 2/120B StringPlan 8500/816000B
+size 5444
+fnsize web::uri_query_value? 0
+fnsize valid_from? 0
+fnsize upper_hex? 0
+fnsize esc_from 692
+fnsize esc_char 367
+fnsize esc_bytes 642
+fnsize esc_scalar 0
+fnsize web::uri_escape_text 94
+best 4045.3
+repeatable web::uri_escape_text {}
+== bench/uri-steady.bot @ treeD
+value interp 29500
+value compile 29500
+value cranelift-generic 29500
+value cranelift 29500
+alloc 38511 1730648 String 16000/446000B List 14009/468528B ImmutableSet 2/120B StringPlan 8500/816000B
+size 5420
+fnsize web::uri_query_value? 0
+fnsize valid_from? 0
+fnsize upper_hex? 0
+fnsize esc_from 676
+fnsize esc_char 367
+fnsize esc_bytes 642
+fnsize esc_scalar 0
+fnsize web::uri_escape_text 94
+best 3900.6
+repeatable web::uri_escape_text {}
+== bench/uri-steady.bot @ treeC
+value interp 29500
+value compile 29500
+value cranelift-generic 29500
+value cranelift 29500
+alloc 10511 896148 String 2000/79500B List 9/528B ImmutableSet 2/120B StringPlan 8500/816000B
+size 6972
+fnsize web::uri_query_value? 0
+fnsize valid_from? 0
+fnsize upper_hex? 0
+fnsize esc_from 1476
+fnsize esc_char 0
+fnsize esc_bytes 0
+fnsize esc_scalar 1255
+fnsize web::uri_escape_text 94
+best 2188.3
+repeatable web::uri_escape_text {}
+== bench/refined-checks.bot @ botlish
+value interp [400, 0]
+value compile [400, 0]
+value cranelift-generic [400, 0]
+value cranelift [400, 0]
+alloc 7223 203912 String 6807/177392B List 412/26208B ImmutableSet 2/120B StringPlan 2/192B
+size 9371
+fnsize web::uri_query_value? 131
+fnsize valid_from? 725
+fnsize upper_hex? 357
+fnsize esc_from 815
+fnsize esc_char 367
+fnsize esc_bytes 642
+fnsize esc_scalar 0
+fnsize web::uri_escape_text 127
+best 475.2
+repeatable web::uri_query_value? {}
+repeatable web::uri_escape_text {}
+== bench/refined-checks.bot @ treeD
+value interp [400, 0]
+value compile [400, 0]
+value cranelift-generic [400, 0]
+value cranelift [400, 0]
+alloc 7223 203912 String 6807/177392B List 412/26208B ImmutableSet 2/120B StringPlan 2/192B
+size 9390
+fnsize web::uri_query_value? 131
+fnsize valid_from? 725
+fnsize upper_hex? 357
+fnsize esc_from 815
+fnsize esc_char 367
+fnsize esc_bytes 642
+fnsize esc_scalar 0
+fnsize web::uri_escape_text 127
+best 426.6
+repeatable web::uri_query_value? {}
+repeatable web::uri_escape_text {}
+== bench/refined-checks.bot @ treeC
+value interp [400, 0]
+value compile [400, 0]
+value cranelift-generic [400, 0]
+value cranelift [400, 0]
+alloc 6817 178138 String 6804/177314B List 9/512B ImmutableSet 2/120B StringPlan 2/192B
+size 11236
+fnsize web::uri_query_value? 81
+fnsize valid_from? 949
+fnsize upper_hex? 477
+fnsize esc_from 1615
+fnsize esc_char 0
+fnsize esc_bytes 0
+fnsize esc_scalar 1255
+fnsize web::uri_escape_text 127
+best 429.8
+repeatable web::uri_query_value? {}
+repeatable web::uri_escape_text {}
+== examples/refinement/refined-strings.bot @ botlish
+value interp [12, "a%26b%3Dc", "a%2", true]
+value compile [12, "a%26b%3Dc", "a%2", true]
+value cranelift-generic [12, "a%26b%3Dc", "a%2", true]
+value cranelift [12, "a%26b%3Dc", "a%2", true]
+alloc 37 1734 String 16/446B List 15/784B ImmutableSet 2/120B StringPlan 4/384B
+size 9393
+fnsize web::uri_query_value? 131
+fnsize valid_from? 725
+fnsize upper_hex? 357
+fnsize esc_from 815
+fnsize esc_char 367
+fnsize esc_bytes 642
+fnsize esc_scalar 0
+fnsize web::uri_escape_text 127
+best 2.4
+repeatable web::uri_query_value? {}
+repeatable web::uri_escape_text {}
+== examples/refinement/refined-strings.bot @ treeD
+value interp [12, "a%26b%3Dc", "a%2", true]
+value compile [12, "a%26b%3Dc", "a%2", true]
+value cranelift-generic [12, "a%26b%3Dc", "a%2", true]
+value cranelift [12, "a%26b%3Dc", "a%2", true]
+alloc 37 1734 String 16/446B List 15/784B ImmutableSet 2/120B StringPlan 4/384B
+size 9399
+fnsize web::uri_query_value? 131
+fnsize valid_from? 725
+fnsize upper_hex? 357
+fnsize esc_from 815
+fnsize esc_char 367
+fnsize esc_bytes 642
+fnsize esc_scalar 0
+fnsize web::uri_escape_text 127
+best 2.3
+repeatable web::uri_query_value? {}
+repeatable web::uri_escape_text {}
+== examples/refinement/refined-strings.bot @ treeC
+value interp [12, "a%26b%3Dc", "a%2", true]
+value compile [12, "a%26b%3Dc", "a%2", true]
+value cranelift-generic [12, "a%26b%3Dc", "a%2", true]
+value cranelift [12, "a%26b%3Dc", "a%2", true]
+alloc 26 1348 String 11/316B List 9/528B ImmutableSet 2/120B StringPlan 4/384B
+size 11245
+fnsize web::uri_query_value? 81
+fnsize valid_from? 949
+fnsize upper_hex? 477
+fnsize esc_from 1615
+fnsize esc_char 0
+fnsize esc_bytes 0
+fnsize esc_scalar 1255
+fnsize web::uri_escape_text 127
+best 1.9
+repeatable web::uri_query_value? {}
+repeatable web::uri_escape_text {}
+== GC stress treeC
+value cranelift-generic [["", true, true], ["a%20b", true, false], ["someone%40example.com", true, false], ["%C3%A9", true, false], ["%F0%9F%98%80", true, false], ["50%25", true, false], ["a%26b%3Dc", true, false], ["d%C3%A9j%C3%A0%20vu", true, false], ["%E4%B8%96%E7%95%8C", true, false], ["~-._", true, true], ["%2541%254a", true, false], ["%254", true, false], ["~%C2%80%DF%BF%E0%A0%80%EF%BF%BF%F0%90%80%80%F4%8F%BF%BF", true, false]]
+value cranelift [["", true, true], ["a%20b", true, false], ["someone%40example.com", true, false], ["%C3%A9", true, false], ["%F0%9F%98%80", true, false], ["50%25", true, false], ["a%26b%3Dc", true, false], ["d%C3%A9j%C3%A0%20vu", true, false], ["%E4%B8%96%E7%95%8C", true, false], ["~-._", true, true], ["%2541%254a", true, false], ["%254", true, false], ["~%C2%80%DF%BF%E0%A0%80%EF%BF%BF%F0%90%80%80%F4%8F%BF%BF", true, false]]
+value cranelift-generic 29500
+value cranelift 29500

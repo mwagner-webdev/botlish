@@ -1,0 +1,37 @@
+# implemented.txt -- tools/measure.tcl -repeat 10 on the tree with the
+# recommendation implemented (str::char_at, chareq, inline StrLen/
+# CharCodepoint/StrCharAtProven, the rewritten lib/web.bot).
+== audit/encode-utf8-allocation/programs/query-value-steady.bot
+value cranelift 1334
+alloc 11 664 List 9/544B ImmutableSet 2/120B
+size 4661
+fnsize web::uri_query_value? 60
+fnsize web::uri_escape_text 0
+best 200.2
+repeatable web::uri_query_value? {}
+== bench/uri-steady.bot
+value cranelift 29500
+alloc 10511 896148 String 2000/79500B List 9/528B ImmutableSet 2/120B StringPlan 8500/816000B
+size 6972
+fnsize web::uri_query_value? 0
+fnsize web::uri_escape_text 94
+best 2170.2
+repeatable web::uri_escape_text {}
+== bench/refined-checks.bot
+value cranelift [400, 0]
+alloc 6817 178138 String 6804/177314B List 9/512B ImmutableSet 2/120B StringPlan 2/192B
+size 11086
+fnsize web::uri_query_value? 60
+fnsize web::uri_escape_text 127
+best 462.0
+repeatable web::uri_query_value? {}
+repeatable web::uri_escape_text {}
+== examples/refinement/refined-strings.bot
+value cranelift [12, "a%26b%3Dc", "a%2", true]
+alloc 26 1348 String 11/316B List 9/528B ImmutableSet 2/120B StringPlan 4/384B
+size 11095
+fnsize web::uri_query_value? 60
+fnsize web::uri_escape_text 127
+best 2.1
+repeatable web::uri_query_value? {}
+repeatable web::uri_escape_text {}
