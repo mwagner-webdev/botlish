@@ -445,10 +445,7 @@ proc genProgram {} {
     # requirement's name for module witnesses that lack it.
     set used {}
     foreach w [dict get $::P witnesses] {
-        # (a module names another module's refinement or integer domain
-        # only through `import type`, which would bind one short name for
-        # several witnesses: struct witnesses only)
-        if {[dict get $w kind] ni {struct opaque}} continue
+        if {[dict get $w kind] in {str local}} continue
         dict for {op status} [dict get $w impls] {
             if {$status ne "ok" && $op ni $used && [chance 0.4]} {
                 dict lappend ::P traps [list $op [dict get $w id]]

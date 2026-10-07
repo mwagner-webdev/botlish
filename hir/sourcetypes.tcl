@@ -35,11 +35,13 @@
 # types are would let one program's declaration leak into, or collide
 # with, another's.
 #
-# apply's own answer: a call given a non-empty DECLS first Resets --
-# unregisters -- every type/native the *previous* such call registered
-# (`generation`, below), then registers DECLS fresh; a call given an empty
-# DECLS does nothing at all, neither resetting nor registering (see apply's
-# own comment for exactly why that half matters just as much). hir::
+# apply's own answer: a call that declares any source type -- a non-empty
+# DECLS, or a non-empty STRUCTDECLS (struct declarations, hir/structs.tcl,
+# which share this type namespace) -- first Resets -- unregisters -- every
+# type/native the *previous* such call registered (`generation`, below),
+# then registers its declarations fresh; a call given neither does nothing
+# at all, neither resetting nor registering (see apply's own comment for
+# exactly why that half matters just as much). hir::
 # buildSyntax (hir/hir.tcl) calls apply exactly once, right before hir::
 # resolve::program, on every top-level build (an ordinary source compile,
 # or hir::read reconstructing a serialized HIR -- see hir/read.tcl). This
@@ -50,7 +52,11 @@
 #   * two sequential, non-overlapping compiles never see each other's
 #     domain for the same spelling -- item 110: by the time the second
 #     program's hir::buildSyntax call starts, the first's registration has
-#     already been cleared.
+#     already been cleared;
+#   * that holds when the second program declares only structs as well: a
+#     module rewritten from `refined type Item = int` to `struct Item:`
+#     compiles in the same process (hir/read.tcl's struct-only text resets
+#     the same way).
 # What this does NOT give: two *live* HIR objects, from two different
 # hir::buildSyntax calls, whose compiled Tcl procs or native code both
 # still need a same-spelled-but-different-domain source type to resolve
@@ -127,9 +133,16 @@ proc hir::sourcetypes::apply {decls {structDecls {}}} {
         # see this file's own header, "Compilation isolation".
         return {}
     }
+    # Any source type declaration -- an integer domain, a refinement or a
+    # struct -- makes this a program of its own, so it reclaims the registry
+    # even when it declares only structs: a previous compilation's
+    # `refined type Item` must not stay registered to collide with this
+    # one's `struct Item` (hir::structs::apply rejects a struct name that is
+    # already a declared type) or to stay resolvable under a name this
+    # program does not declare.
+    Reset
     set order {}
     if {$decls ne ""} {
-        Reset
         set byName [dict create]
         foreach decl $decls {
             set id [Identity $decl]

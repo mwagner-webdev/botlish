@@ -608,20 +608,24 @@ agree with the oracle on every witness × trait, and all four backends must
 compute the oracle's value.
 
 Four seeds × 150 programs (`-seed 1..4 -count 150`, `-accept 0.6`, every
-backend):
+backend), with the import traps over every module witness kind (288 of
+their functions take a refinement or an integer domain, 298 a struct or an
+opaque struct):
 
 | seed | accepted | specializations | rejected | failures |
 |---:|---:|---:|---:|---:|
-| 1 | 123 | 385 | 27 | 0 |
-| 2 | 120 | 363 | 30 | 0 |
-| 3 | 116 | 333 | 34 | 0 |
-| 4 | 125 | 344 | 25 | 0 |
-| **total** | **484** | **1,425** | **116** | **0** |
+| 1 | 120 | 358 | 30 | 0 |
+| 2 | 114 | 329 | 36 | 0 |
+| 3 | 118 | 349 | 32 | 0 |
+| 4 | 111 | 327 | 39 | 0 |
+| **total** | **463** | **1,363** | **137** | **0** |
 
-The 116 rejections, each of a predicted kind: `TRAIT-NOT-SATISFIED` 69,
-`TRAIT-WITNESS-JOIN` 11, `TYPE` (a view to a concrete function) 10,
-`TRAIT-UNKNOWN-OPERATION` 9, `TRAIT-VIEW-MISUSE` 9,
-`TRAIT-POLYMORPHIC-RECURSION` 8.
+The 137 rejections, each of a predicted kind: `TRAIT-NOT-SATISFIED` 93,
+`TRAIT-WITNESS-JOIN` 10, `TYPE` (a view to a concrete function) 10,
+`TRAIT-POLYMORPHIC-RECURSION` 9, `TRAIT-VIEW-MISUSE` 8,
+`TRAIT-UNKNOWN-OPERATION` 7. (The milestone's generator, with struct-only
+import traps, drew other programs from the same seeds: 484 accepted, 1,425
+specializations, 116 rejected, 0 failures.)
 
 What fuzzing found, honestly:
 
@@ -636,8 +640,15 @@ What fuzzing found, honestly:
   (`trait-instance-budget-fallback`; found while reviewing the budget for
   the report, not by the generator).
 * **Two pre-existing, non-trait bugs** the generator first tripped over,
-  listed under [Limitations](#limitations) and worked around in the
-  generator (per-kind type names; trap modules only over struct witnesses).
+  worked around in the generator at first. One is fixed since: a module
+  could not spell another module's refinement or integer domain qualified
+  (`fn f(x: w2::Small)` in a module was "unknown type"; `hir::types::
+  resolveNamed` hid every qualified source type from modules, not only the
+  entry program's bare ones), so trap modules were struct witnesses only;
+  they now cover every module witness kind (`imports-type-qualified-
+  reference-from-module`). The other is listed under
+  [Limitations](#limitations) and still worked around (per-kind type
+  names).
 
 **Mutation testing** (`audit/traits/tools/mutate.tcl`, mutants in
 `mutants.txt`): each mutant is applied to a private copy of the compiler and
@@ -700,6 +711,13 @@ Final run (the milestone's eighteen mutants, in its order):
   monomorphized program (a boxed argument loses its exact type in the
   clone's generic analysis), which is what the fuzzer reports; the same
   evidence tests kill it.
+
+**Rerun with the widened import traps** (trap modules over every module
+witness kind, after the qualified-module-type fix; same mutants, seed 11, 40
+programs, on the tree merged with `main`): **18 of 18 killed** again. Tests
+failing as above, except #1 (13). Fuzzer failures of 40: #1 31, #2 3, #3 7,
+#4 22, #5 15, #6 12, #7 1, #9 40, #10 14, #11 1 (now killed by the fuzzer
+too), #13 15, #15 23, #16 15; #8, #12, #14, #17 and #18 still 0.
 
 ## Regression
 
@@ -801,13 +819,13 @@ concrete function.
   when method calls must be decided), so compile time grows with the
   program; runtime cost is zero.
 * **HIR text** of programs with modules does not round-trip (pre-existing).
-* Found while fuzzing, **not trait-specific and not fixed here**: a module
-  cannot spell another module's refinement or integer domain qualified
-  (`fn f(x: qa::M)` in a module is "unknown type"; structs are fine), and
-  the source-type registry of a previous compilation in the same process is
+* Found while fuzzing, **not trait-specific and not fixed here**: the
+  source-type registry of a previous compilation in the same process is
   not reset by one that declares only structs (a later `struct w1::Item`
   collides with an earlier `refined type w1::Item`). The fuzzer works around
-  both.
+  it (per-kind type names). (The other bug found that way, a module unable
+  to spell another module's refinement or integer domain qualified, is
+  fixed.)
 
 ## Toward trait-aware contexts and portable path/I/O
 

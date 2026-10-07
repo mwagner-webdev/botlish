@@ -492,6 +492,60 @@ r
     list $v1 $e2 $v3
 } -result {10 {CORE SEMANTIC UNCAUGHT-ERROR} 105}
 
+test source-type-struct-only-compilation-reclaims-registry {a compilation whose only source types are structs still reclaims the registry: after a program whose module w1 declares "refined type Item = int", rewriting w1.bot to declare "struct Item:" compiles and runs in the same process (instead of failing "\"Item\" cannot be declared as a struct"), and w1::Item is no longer a registered core type} -body {
+    withPrivateLibrary {
+        set module [file join $::core::libraryDir w1.bot]
+        set ch [open $module w]
+        puts $ch {refined type Item = int
+
+fn one() -> int:
+    1
+}
+        close $ch
+        set mainPath [makeFile {import w1
+w1::one()
+} sourcetype-reclaim-main.bot]
+        try {
+            set h1 [surface::readProgramFile $mainPath]
+            set first [list [hir::sourceTypes $h1] [core::formatValue [core::evalProgram [hir::lower $h1]]]]
+            set ch [open $module w]
+            puts $ch {struct Item:
+    count: int
+
+fn make() -> Item:
+    Item { count: 3 }
+}
+            close $ch
+            makeFile {import w1
+w1::make().count
+} sourcetype-reclaim-main.bot
+            set h2 [surface::readProgramFile $mainPath]
+            list $first [hir::sourceTypes $h2] [core::type::valid w1::Item] \
+                [core::formatValue [core::evalProgram [hir::lower $h2]]]
+        } finally {
+            removeFile sourcetype-reclaim-main.bot
+        }
+    }
+} -result {{{{kind refined name w1::Item carrier int owner w1}} 1} {{kind struct name Item id w1::Item namespace w1 opaque 0 fields {count int}}} 0 3}
+
+test source-type-struct-only-hir-text-reclaims-registry {reading HIR text whose only source types are structs reclaims the registry the same way: the refinement "Item" an earlier compile registered is gone, and the text's own struct Item round-trips and runs} -body {
+    set text [hir::format [surface::compile {struct Item:
+    count: int
+
+fn make() -> Item:
+    Item { count: 3 }
+
+make().count
+} t.bot]]
+    surface::compile {refined type Item = int
+1
+} t.bot
+    set before [core::type::valid Item]
+    set h [hir::parse $text]
+    list $before [core::type::valid Item] [expr {[hir::format $h] eq $text}] \
+        [core::formatValue [core::evalProgram [hir::lower $h]]]
+} -result {1 0 1 3}
+
 # ---------------------------------------------------------------------------
 # Module tests (items 108, 89-90)
 

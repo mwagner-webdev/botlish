@@ -168,12 +168,15 @@ are process-global, but two different Botlish programs can validly declare
 the *same spelling* with *different* domains, in the same long-lived Tcl
 process (tests, a REPL, a batch driver).
 
-**The model:** `hir::buildSyntax` calls `hir::sourcetypes::apply DECLS`
-before resolution. When `DECLS` is non-empty, `apply` first unregisters
-everything the *previous* non-empty-`DECLS` call registered
+**The model:** `hir::buildSyntax` calls `hir::sourcetypes::apply DECLS
+STRUCTDECLS` before resolution. When the compilation declares any source
+type — `DECLS` (integer domains, refinements) or `STRUCTDECLS` (structs,
+which share the type namespace) is non-empty — `apply` first unregisters
+everything the *previous* such call registered
 (`hir::sourcetypes::generation`), then registers the new batch fresh. When
-`DECLS` is empty, `apply` does nothing at all — neither reset nor
-register — and leaves the registry exactly as it is.
+both are empty, `apply` does nothing at all — neither reset nor
+register — and leaves the registry exactly as it is. `hir::read` follows
+the same rule for serialized HIR text, struct-only text included.
 
 That second rule is deliberate and load-bearing, not an afterthought: every
 internal re-derivation of an *already built* program's HIR (the Tcl
@@ -203,6 +206,11 @@ a reset.
   other's domain: by the time B's `hir::buildSyntax` call runs, A's own
   build (and everything A did with the resulting HIR up to that point) is
   already finished — `source-type-sequential-non-leaking-compilation`.
+- That includes a second program whose only source types are structs: a
+  module rewritten from `refined type Item = int` to `struct Item:` compiles
+  in the same process instead of colliding with the stale refinement —
+  `source-type-struct-only-compilation-reclaims-registry` (and
+  `source-type-struct-only-hir-text-reclaims-registry` for HIR text).
 - What it does **not** guarantee: two *live* HIR objects from two different
   `hir::buildSyntax` calls, holding conflicting same-spelled declarations,
   both still needing correct name-based resolution *after* a third,
