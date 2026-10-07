@@ -404,21 +404,21 @@ proc hir::coroutines::ExplainReason {hir reason protocols} {
     for {set i 0} {$i < 64} {incr i} {
         switch -- [lindex $reason 0] {
             declared {
-                lappend steps "[Name $hir [lindex $reason 1]] declares it"
+                lappend steps [expr {$steps eq {} ? "[Name $hir [lindex $reason 1]] declares it" : "which declares it"}]
                 break
             }
             use {
                 lassign $reason _ y at
-                lappend steps "the value of the yield at [Where $hir $y] is passed to a parameter declared [hir::types::show [lindex $at 1]] at [Where $hir [lindex $at 0]]"
+                lappend steps "[expr {$steps eq {} ? "" : "where "}]the value of the yield at [Where $hir $y] is passed to a parameter declared [hir::types::show [lindex $at 1]] ([Where $hir [lindex $at 0]])"
                 break
             }
             default {
-                lappend steps "[Name $hir [lindex $reason 1]] uses the value of a yield without a declared protocol (zero-message)"
+                lappend steps "[expr {$steps eq {} ? "" : "where "}][Name $hir [lindex $reason 1]] uses the value of a yield without a declared protocol (zero-message)"
                 break
             }
             call {
                 lassign $reason _ c target
-                lappend steps "it calls [Name $hir $target] at [Where $hir $c]"
+                lappend steps "[expr {$steps eq {} ? "it calls" : "which calls"}] [Name $hir $target] ([Where $hir $c])"
                 if {![dict exists $protocols $target]} break
                 set reason [dict get $protocols $target reason]
             }
@@ -427,7 +427,7 @@ proc hir::coroutines::ExplainReason {hir reason protocols} {
             }
         }
     }
-    return [join $steps {, which }]
+    return [join $steps {, }]
 }
 
 # How the value of yield call Y is used, from the parent map PARENT
@@ -1199,6 +1199,31 @@ proc hir::coroutines::MoveText {hir bind} {
     set target [dict get $hir exprs $bind name]
     set source [dict get $hir exprs [dict get $hir exprs $bind value] name]
     return "$target = $source  ([Where $hir $bind])"
+}
+
+# The coroutine effect of block E as HIR text shows it ("" if E may not
+# yield): `yields TYPE, resume PROTOCOL` -- the join of what its own and its
+# callees' reachable yields send, and the resume protocol they evaluate to.
+proc hir::coroutines::EffectText {hir e} {
+    if {![dict exists $hir coroutines mayYield]} {
+        # HIR read from text (hir/read.tcl): the effect as it was printed.
+        return [expr {[dict exists $hir exprs $e coroutineEffect] ? [dict get $hir exprs $e coroutineEffect] : ""}]
+    }
+    if {![MayYield $hir $e] || ![dict exists $hir coroutines blocks $e]} {
+        return ""
+    }
+    set sent never
+    foreach {y type} [YieldTypes $hir $e 1] {
+        set sent [hir::types::lub $sent $type]
+    }
+    set protocol [dict get $hir coroutines blocks $e protocol]
+    set shown [switch -- $protocol {
+        none { expr {"none"} }
+        unit { expr {"unit"} }
+        conflict { expr {"conflict"} }
+        default { hir::types::show $protocol }
+    }]
+    return "yields [hir::types::show $sent], resume $shown"
 }
 
 # The thunk block expressions (the coroutine boundaries) of HIR.

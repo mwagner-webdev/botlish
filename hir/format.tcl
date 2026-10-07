@@ -231,6 +231,11 @@ proc hir::format::Line {hir e text indent origins linesVar {typed 1}} {
             if {[dict get $node duplicate]} {
                 lappend flags duplicate
             }
+            if {[dict exists $hir coroutines moves $e] || [dict exists $node coroutineMove]} {
+                # The move of a coroutine handle to a new owner
+                # (COROUTINES.md): the bound-from binding is dead from here.
+                lappend flags move
+            }
         }
     }
     if {![dict get $node reachable]} {
@@ -321,8 +326,19 @@ proc hir::format::Expr {hir e indent origins linesVar} {
                         [hir::types::show [dict get $proof fact]]]
                 }
             }
+            if {[dict exists $node declaredResume] && [dict get $node declaredResume] ne {}} {
+                # A declared coroutine resume protocol (COROUTINES.md).
+                append text " resume [hir::types::show [dict get $node declaredResume]]"
+            }
             if {[dict get $node declaredErrors] ne {}} {
                 append text " errors [join [dict get $node declaredErrors] {, }]"
+            }
+            set effect [hir::coroutines::EffectText $hir $e]
+            if {$effect ne ""} {
+                # The function's coroutine effect (COROUTINES.md), derived
+                # (hir::check recomputes it): what its yields send and what
+                # they evaluate to.
+                append text " coroutine-effect ($effect)"
             }
             set binds [Binds $hir [dict get $node bodyScope]]
             if {$binds ne ""} {

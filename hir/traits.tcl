@@ -1059,11 +1059,17 @@ proc hir::traits::Parents {hir} {
 }
 
 # The block ExprId (or "program") whose body E is in, not entering nested
-# blocks: E's nearest enclosing block.
+# blocks: E's nearest enclosing block. A coroutine construction's thunk
+# (COROUTINES.md) is no owner: its body runs right at the construction, in
+# the code around it (hir::contexts::Callee).
 proc hir::traits::OwnerBlock {hir parents e} {
     while {[dict exists $parents $e]} {
         set e [dict get $parents $e]
         if {[dict get $hir exprs $e kind] eq "block"} {
+            if {[dict exists $parents $e]
+                    && [hir::coroutines::NativeOf $hir [dict get $parents $e]] eq [core::coroutines::createNative]} {
+                continue
+            }
             return $e
         }
     }

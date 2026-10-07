@@ -20,7 +20,7 @@
 # ( ) , or whitespace inside names; ordinary IR names are.
 
 namespace eval hir::read {
-    variable flags {unbound deferred duplicate unreachable}
+    variable flags {unbound deferred duplicate unreachable move}
     # TypeDecls' own result from the current Program call, for Program to
     # store as the returned HIR's `sourceTypes` field.
     variable lastTypeDecls {}
@@ -529,6 +529,18 @@ proc hir::read::ParseType {text number} {
         set errors [expr {$errorsText eq "" ? {} : [SplitTop $errorsText ", "]}]
         return [hir::types::MakeFn $argTypes [ParseType $returnText $number] $errors]
     }
+    if {[regexp {^Coroutine\{(.*)\}$} $text -> inner]} {
+        # hir::types::show's coroutine handle notation (COROUTINES.md).
+        set fields [SplitTop $inner ", "]
+        if {[llength $fields] != 3
+                || ![regexp {^resume: (.+)$} [lindex $fields 0] -> resumeText]
+                || ![regexp {^yield: (.+)$} [lindex $fields 1] -> yieldText]
+                || ![regexp {^errors: \[(.*)\]$} [lindex $fields 2] -> errorsText]} {
+            Fail $number "bad coroutine type \"$text\": expected \"Coroutine{resume: ..., yield: ..., errors: \[...\]}\""
+        }
+        set errors [expr {$errorsText eq "" ? {} : [SplitTop $errorsText ", "]}]
+        return [hir::types::MakeCoroutine [ParseType $resumeText $number] [ParseType $yieldText $number] $errors]
+    }
     if {[regexp {^List\[(.+)\]$} $text -> inner]} {
         # hir::types::show's own applied-type notation (MINIMAL-APPLIED-
         # LIST-TYPES.md): always exactly "List[" + show(ELEM) + "]", so the
@@ -713,6 +725,10 @@ proc hir::read::Expr {hirVar level s path block} {
     dict set hir exprs $e [dict create id $e kind $kind origin [list ir $path] scope $s \
         type [hir::types::intern hir [dict get $line type]] \
         reachable [expr {"unreachable" ni $flags}]]
+    if {"move" in $flags} {
+        # A coroutine handle's move (COROUTINES.md), as printed.
+        dict set hir exprs $e coroutineMove 1
+    }
     set inner [expr {$level + 1}]
 
     switch -- $kind {
@@ -757,7 +773,7 @@ proc hir::read::Expr {hirVar level s path block} {
             }
         }
         block {
-            if {![BlockHeader $head body params captures staticRefs declared errorsText binds nomethod contexts provesText cloneText]} {
+            if {![BlockHeader $head body params captures staticRefs declared errorsText binds nomethod contexts provesText cloneText resumeText]} {
                 Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)? ?nomethod? ?contexts (IDS) requires (IDS)? ?declares ...? ?proves BINDING NAME: TYPE? ?errors ...? ?binds ...?\""
             }
             if {$nomethod} {
@@ -809,6 +825,12 @@ proc hir::read::Expr {hirVar level s path block} {
                     binding $provenBinding fact [ParseType $provenType $number]]
             }
             SetField hir $e proofs $proofs
+            # A declared coroutine resume protocol (COROUTINES.md), and the
+            # derived effect as printed.
+            SetField hir $e declaredResume [expr {$resumeText eq "" ? "" : [ParseType $resumeText $number]}]
+            if {$effectText ne ""} {
+                SetField hir $e coroutineEffect $effectText
+            }
             if {[dict exists $cloneText views]} {
                 SetField hir $e traitClone [dict get $hir bindings [lindex $paramIds 0] name]
                 foreach item [expr {[dict get $cloneText views] eq "" ? {} : [split [string map {", " \x01} [dict get $cloneText views]] \x01]}] {
@@ -1147,7 +1169,7 @@ proc hir::read::Expr {hirVar level s path block} {
 # into the named variables; 0 if malformed. The optional parts are found
 # outside brackets, so a declared type may itself contain spaces, ", " or
 # the word "errors" (a structural function type's own "errors: [...]").
-proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar {nomethodVar ""} {contextsVar ""} {provesVar ""} {cloneVar ""}} {
+proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar {nomethodVar ""} {contextsVar ""} {provesVar ""} {cloneVar ""} {resumeVar ""}} {
     foreach var {bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar} {
         upvar 1 [set $var] [string range $var 0 end-3]
     }
@@ -1206,6 +1228,29 @@ proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar de
     if {$i >= 0} {
         set binds [string range $rest [expr {$i + 7}] end]
         set rest [string range $rest 0 [expr {$i - 1}]]
+    }
+    # The coroutine effect (COROUTINES.md): derived (hir::check recomputes
+    # it), kept as printed.
+    if {$resumeVar ne ""} {
+        upvar 1 $resumeVar resume
+        upvar 1 effectText effectText
+        set resume ""
+        set effectText ""
+    }
+    set i [TopIndex $rest " coroutine-effect "]
+    if {$i >= 0} {
+        if {$resumeVar ne "" && [regexp {^ coroutine-effect \((.*)\)$} [string range $rest $i end] -> effectText]} {}
+        set rest [string range $rest 0 [expr {$i - 1}]]
+    }
+    set i [TopIndex $rest " resume "]
+    if {$i >= 0 && $resumeVar ne ""} {
+        set resume [string range $rest [expr {$i + 8}] end]
+        set rest [string range $rest 0 [expr {$i - 1}]]
+        set j [TopIndex $resume " errors "]
+        if {$j >= 0} {
+            set rest "$rest[string range $resume $j end]"
+            set resume [string range $resume 0 [expr {$j - 1}]]
+        }
     }
     set i [TopIndex $rest " errors "]
     if {$i >= 0} {
