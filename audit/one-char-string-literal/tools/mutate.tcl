@@ -21,6 +21,9 @@ set only [expr {[llength $argv] > 1 ? [lindex $argv 1] : "*"}]
 # The pass's own lines the mutants replace (each must occur exactly once in
 # hir/warnings.tcl). `computed-string-warned` evaluates a native call whose
 # arguments are exactly known (the "heroic proving" the warning must never do);
+# `character-literal-warned` drops the kind check and measures a character
+# literal as the one-character String of its scalar (so it warns, rather than
+# crashing str::length);
 # `first-site-per-value` also declares its `seen` dict (below). (Texts that open
 # a brace they do not close are double-quoted.)
 set guard "        if \{\[dict get \$node kind\] ne \"const\" || \[dict exists \$keys \$e\]\} \{"
@@ -43,8 +46,8 @@ set mutants [list \
         $length \
         "        if \{\[core::value::intOf \[core::strings::length \$value\]\] < 1\} \{"] \
     [list character-literal-warned hir/warnings.tcl \
-        $kind \
-        "        if \{\[lindex \$fact 0\] ne \"val\" || \[core::value::kind \[lindex \$fact 1\]\] ni \{str UnicodeChar\}\} \{"] \
+        "$kind\n            continue\n        \}\n        set value \[lindex \$fact 1\]\n" \
+        "        if \{\[lindex \$fact 0\] ne \"val\" || \[core::value::kind \[lindex \$fact 1\]\] ni \{str UnicodeChar\}\} \{\n            continue\n        \}\n        set value \[lindex \$fact 1\]\n        if \{\[core::value::kind \$value\] eq \"UnicodeChar\"\} \{\n            set value \[core::value::str \[format %c \[core::value::charOf \$value\]\]\]\n        \}\n"] \
     [list use-site-read-warned hir/warnings.tcl \
         $guard \
         "        if \{\[dict get \$node kind\] ni \{const ref\} || \[dict exists \$keys \$e\]\} \{"] \
@@ -59,7 +62,9 @@ set mutants [list \
                 expr \{\[lindex \$f 0\] eq \"int\" ? \[core::value::int \[lindex \$f 1\]\] : \[lindex \$f 0\] eq \"val\" ? \[lindex \$f 1\] : \"\"\}
             \}\]
             if \{\"\" ni \$argValues && !\[catch \{core::native::invoke \[core::value::native \[dict get \$hir symbols \[lindex \[dict get \$node target\] 1\] name\]\] \$argValues\} v\]\} \{
-                set fact \[list val \$v\]
+                if \{\[lindex \$v 0\] eq \"value\"\} \{
+                    set fact \[list val \[lindex \$v 1\]\]
+                \}
             \}
         \}"] \
     [list raw-spelling-counted hir/warnings.tcl \
