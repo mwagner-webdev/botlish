@@ -180,11 +180,11 @@
 ## hir/types.tcl
 <<<<
     foreach t $argTypes {
-        if {[MentionsTrait $t]} {
+        set contextTrait [MentionedContextTrait $t]
 ====
-    set argTypes [lmap t $argTypes {expr {[MentionsTrait $t] ? "any" : $t}}]
+    set argTypes [lmap t $argTypes {expr {[MentionsTrait $t] && [MentionedContextTrait $t] eq "" ? "any" : $t}}]
     foreach t $argTypes {
-        if {[MentionsTrait $t]} {
+        set contextTrait [MentionedContextTrait $t]
 >>>>
 
 @@ runtime-wrapper add a runtime trait wrapper: a trait argument crosses into a specialization boxed in a closure, unboxed on entry
@@ -269,19 +269,19 @@ proc hir::traits::Plan {hir syntax} {
 >>>>
 ## hir/traits.tcl
 <<<<
-            set ckey [list $h [WitnessesOf $hir $h [dict get $inst args]]]
+                set params [WitnessesOf $hir $h [dict get $inst args]]
 ====
-            set mw [WitnessesOf $hir $h [dict get $inst args]]
-            if {![dict exists $::mutantFirst $h]} { dict set ::mutantFirst $h $mw }
-            set ckey [list $h [dict get $::mutantFirst $h]]
+                set params [WitnessesOf $hir $h [dict get $inst args]]
+                if {![dict exists $::mutantFirst $h]} { dict set ::mutantFirst $h $params }
+                set params [dict get $::mutantFirst $h]
 >>>>
 ## hir/traits.tcl
 <<<<
-                        set witnesses [WitnessesOf $hir $tb [dict get $instances $j args]]
+                            set witnesses [WitnessesOf $hir $tb [dict get $instances $j args]]
 ====
-                        set witnesses [WitnessesOf $hir $tb [dict get $instances $j args]]
-                        if {![dict exists $::mutantFirst $tb]} { dict set ::mutantFirst $tb $witnesses }
-                        set witnesses [dict get $::mutantFirst $tb]
+                            set witnesses [WitnessesOf $hir $tb [dict get $instances $j args]]
+                            if {![dict exists $::mutantFirst $tb]} { dict set ::mutantFirst $tb $witnesses }
+                            set witnesses [dict get $::mutantFirst $tb]
 >>>>
 ## hir/traits.tcl
 <<<<

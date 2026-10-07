@@ -1,0 +1,342 @@
+# portable-io.test -- the portable `io` text-output API (lib/io.bot) and its
+# Linux implementation (lib/linux/io.bot), CONTEXT-TRAITS.md:
+#
+#   import io
+#   import linux::io
+#
+#   fn hello() errors WriteFailed:
+#       io::print_line("Hello, world!")
+#
+#   with context linux::io::create()
+#   hello()
+#
+# io::print/print_line/write_error/write_error_line need the io::IO context
+# trait; hello declares no context and acquires the requirement; the
+# installed linux::io::LinuxIO is the one context implementing io::IO, so
+# every portable operation compiles to a direct call of linux::io's own
+# implementation, which writes with the raw write(2) path (no libc). Short
+# writes are completed; a failed or stalled write is WriteFailed; no count,
+# descriptor or errno reaches the portable caller. Real syscalls are checked
+# with strace, including injected short writes and errors.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+testConstraint linuxX86_64 [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+testConstraint posixShell [expr {[auto_execok sh] ne ""}]
+testConstraint strace [expr {[auto_execok strace] ne "" && ![catch {exec strace -f -qq -o /dev/null true 2>@1}]}]
+# strace's fault injection (-e inject=...), used to provoke short writes and
+# write errors on the real syscall path.
+testConstraint straceInject [expr {[testConstraint strace]
+    && ![catch {exec strace -f -qq -o /dev/null -e inject=getpid:retval=1 true 2>@1}]}]
+
+set scratch [makeDirectory portable-io-[pid]]
+set programCounter 0
+
+proc readFile {path} {
+    set channel [open $path r]
+    fconfigure $channel -encoding utf-8
+    set data [read $channel]
+    close $channel
+    return $data
+}
+
+proc readBinary {path} {
+    set channel [open $path rb]
+    set data [read $channel]
+    close $channel
+    return $data
+}
+
+# The HIR of source TEXT, compiled as a program file (so lib modules load).
+proc ioHir {text} {
+    set path [file join $::scratch p[incr ::programCounter].bot]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8
+    puts -nonewline $channel $text
+    close $channel
+    return [surface::readProgramFile $path -warnings off]
+}
+
+# The standalone executable of source TEXT (built once per NAME).
+proc buildExecutable {name text} {
+    set path [file join $::scratch $name]
+    if {![file exists $path]} {
+        native::executable [ioHir $text] $path
+    }
+    return $path
+}
+
+# {STDOUT STDERR} (UTF-8 bytes as binary strings) of one run of COMMAND
+# (an executable, possibly under strace), stdin empty.
+proc runCaptured {args} {
+    set n [incr ::runCounter]
+    set out [file join $::scratch out.$n]
+    set err [file join $::scratch err.$n]
+    exec {*}$args </dev/null >$out 2>$err
+    return [list [readBinary $out] [readBinary $err]]
+}
+set runCounter 0
+
+# The write(2) calls of an strace log: {FD DATA RESULT} each, as strace
+# printed them.
+proc writesOf {log} {
+    set calls {}
+    foreach line [split [readFile $log] \n] {
+        if {[regexp {write\((\d+), "(.*)", \d+\) += (-?\d+)} $line -> fd data result]} {
+            lappend calls [list $fd $data $result]
+        }
+    }
+    return $calls
+}
+
+# The NIR of HIR, and the id of function NAME in it.
+proc nirId {nir name} {
+    foreach line [split $nir \n] {
+        if {[string match "func * \"$name\" *" $line]} {
+            return [lindex $line 1]
+        }
+    }
+    return ""
+}
+
+proc nirBody {nir name} {
+    set lines {}
+    set inside 0
+    foreach line [split $nir \n] {
+        if {[string match "func *" $line]} {
+            set inside [string match "func * \"$name\" *" $line]
+            continue
+        }
+        if {$line eq "end"} {
+            set inside 0
+            continue
+        }
+        if {$inside} {
+            lappend lines [string trim [regsub -all {@e[0-9]+} $line ""]]
+        }
+    }
+    return $lines
+}
+
+set helloText [readFile [file join $::projectRoot examples io hello.bot]]
+
+# Every portable operation, UTF-8 beyond ASCII (a two-byte and a four-byte
+# scalar), routed to stdout and stderr; the program's value says whether a
+# WriteFailed reached it.
+set routingText {import io
+import linux::io
+
+fn emit_all() -> str errors WriteFailed:
+    io::print("out:")
+    io::print_line(" é 𝄞")
+    io::write_error("err:")
+    io::write_error_line(" done")
+    "ok"
+
+with context linux::io::create()
+
+emit_all():
+    on WriteFailed:
+        "failed"
+}
+
+# The Hello World whose value says whether the write failed.
+set statusText {import io
+import linux::io
+
+fn hello() -> str errors WriteFailed:
+    io::print_line("Hello, world!")
+    "ok"
+
+with context linux::io::create()
+
+hello():
+    on WriteFailed:
+        "failed"
+}
+
+# ---------------------------------------------------------------------------
+# The portable surface
+
+test io-portable-surface {io exports exactly print, print_line, write_error and write_error_line, each over one str and nothing else (no descriptor, buffer or count), all requiring the io::IO context trait whose operations are write_text and write_error_text; WriteFailed is the one error} -body {
+    set hir [ioHir "import io\n1\n"]
+    set source [dict get $hir traitSource]
+    set names [lsort [lmap b [dict get $source scopes [dict get $source modules io] bindings] {dict get $source bindings $b name}]]
+    set io [lindex [lmap entry [dict get $source traits] {expr {[dict get $entry id] eq "io::IO" ? $entry : [continue]}}] 0]
+    set shapes [lmap b [dict get $source scopes [dict get $source modules io] bindings] {
+        set block [hir::get $source [dict get $source bindings $b declaredBy] value]
+        list [hir::get $source $block declaredParamTypes] [hir::get $source $block declaredResult] \
+            [hir::get $source $block declaredErrors] [hir::contexts::required $source $block]
+    }]
+    list $names [dict get $io context] [lmap r [dict get $io requirements] {
+        list [dict get $r name] [lmap p [dict get $r params] {dict get $p type}] [dict get $r result type] [dict get $r errors]
+    }] [lsort -unique $shapes] [lsearch -inline [hir::errorDecls $hir] WriteFailed]
+} -result {{io::print io::print_line io::write_error io::write_error_line} 1 {{write_text str unit WriteFailed} {write_error_text str unit WriteFailed}} {{str unit WriteFailed io::IO}} WriteFailed}
+
+test io-linux-implements {linux::io::LinuxIO implements io::IO through linux::io::write_text and linux::io::write_error_text, from its own module only} -body {
+    ioHir "import io\nimport linux::io\n1\n"
+    set s [hir::contexts::satisfiesTrait linux::io::LinuxIO io::IO]
+    list [dict get $s ok] [lmap {r impl} [dict get $s impls] {list $r [hir::traits::QualifiedName [dict get $impl unit] [dict get $impl name]]}]
+} -result {1 {{write_text linux::io::write_text} {write_error_text linux::io::write_error_text}}}
+
+test io-transitive {hello declares no context: it requires io::IO through io::print_line, the one top-level call selects LinuxIO, and the compiled hello is the clone calling print_line's clone} -body {
+    set hir [ioHir $::helloText]
+    set source [dict get $hir traitSource]
+    set hello [lindex [lmap e [hirFind $source bind] {
+        expr {[dict get $source bindings [hir::get $source $e binding] name] eq "hello" ? [hir::get $source $e value] : [continue]}}] 0]
+    list [expr {[dict exists $source exprs $hello contextParams] ? [dict get $source exprs $hello contextParams] : {}}] \
+        [hir::contexts::of $source $hello] [hir::contexts::explain $source $hello io::IO] \
+        [dict values [dict get $source contexts selections]]
+} -result {{} {direct {} required io::IO} {    hello
+     -> io::print_line
+        directly requires io::IO} {{io::IO linux::io::LinuxIO}}}
+
+test io-nir-direct {NIR: io::print_line's clone calls linux::io::write_text directly with one operand (no context operand); write_text loads stdout's word from LinuxIO's slot; hello's clone calls print_line's clone with one operand} -body {
+    set nir [native::nir [ioHir $::helloText]]
+    set writeText [nirId $nir linux::io::write_text]
+    set printLine [nirId $nir io::print_line<io::IO=linux::io::LinuxIO>]
+    set print [nirBody $nir io::print_line<io::IO=linux::io::LinuxIO>]
+    list [regexp -all -line "= call $writeText %\[0-9\]+\$" [join $print \n]] \
+        [lsearch -all -inline -glob $print {*call*}] \
+        [lindex [nirBody $nir linux::io::write_text] 0] \
+        [lsearch -all -inline -glob [nirBody $nir hello<io::IO=linux::io::LinuxIO>] "*call $printLine *"] \
+        [regexp -all {callvalue} $nir]
+} -match glob -result {1 {{%* = call * %*}} {%1 = contextload 8} {{%1 = call * %0}} 0}
+
+test io-tcl-backends {the Tcl backends verify the portable program and run it up to the write(2) boundary, which they refuse (NATIVE-ONLY), as for every linux::io program} -body {
+    set hir [ioHir $::helloText]
+    lmap backend {interp compile} {lrange [outcomeUnderHir $backend $hir] 0 1}
+} -result {{error {CORE SEMANTIC NATIVE-ONLY}} {error {CORE SEMANTIC NATIVE-ONLY}}}
+
+# A context implementing io::IO without Linux: every write fails when the
+# text is longer than the context's limit, so the portable API runs on every
+# backend with a substitute environment (selected statically, like LinuxIO).
+set limitedLib {
+limited.bot {import io
+import str
+type Limit = Int in 0..1000
+
+context struct Limited:
+    max: Limit
+
+fn create(max: Limit) -> Limited:
+    Limited {max: max}
+
+fn write_text(text: str, context c: Limited) -> unit errors WriteFailed:
+    if str::length(text) > c.max:
+        fail WriteFailed
+    unit
+
+fn write_error_text(text: str, context c: Limited) -> unit errors WriteFailed:
+    fail WriteFailed
+}
+}
+
+test io-substitute-context {a test context implementing io::IO is selected like LinuxIO: io::print_line succeeds or fails with WriteFailed by what its implementation does, the same on every backend} -body {
+    withPrivateLibrary {
+        set f [open [file join $::core::libraryDir limited.bot] w]
+        puts -nonewline $f [lindex $::limitedLib 1]
+        close $f
+        set result [lmap max {20 3} {
+            sourceAgree "import io\nimport limited\nfn greet() -> List\[str\] errors WriteFailed:\n    io::print_line(\"hi\")\n    io::print(\"there\")\n    \[\"ok\"\]\nwith context limited::create($max)\nr = greet():\n    on WriteFailed:\n        \[\"failed\"\]\nr\n"
+        }]
+    }
+    set result
+} -result {{value {["ok"]}} {value {["failed"]}}}
+
+# ---------------------------------------------------------------------------
+# Real output (standalone executables)
+
+test io-hello-executable {examples/io/hello.bot as a standalone executable: descriptor 1 receives exactly "Hello, world!\n" (then the runner's own result line); nothing on descriptor 2; the same under GC stress} -constraints {linuxX86_64 posixShell} -body {
+    set exe [buildExecutable hello $::helloText]
+    set plain [runCaptured $exe]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        set stressed [runCaptured $exe]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+    list $plain [expr {$plain eq $stressed}]
+} -result {{{Hello, world!
+unit
+} {}} 1}
+
+test io-routing-utf8 {print and print_line write to descriptor 1, write_error and write_error_line to descriptor 2, as UTF-8 (a two-byte and a four-byte scalar), each line ending in exactly one newline} -constraints {linuxX86_64 posixShell} -body {
+    set exe [buildExecutable routing $::routingText]
+    lassign [runCaptured $exe] out err
+    list [encoding convertfrom utf-8 $out] [encoding convertfrom utf-8 $err] [string length $out]
+} -result {{out: é 𝄞
+"ok"
+} {err: done
+} 18}
+
+test io-strace {each portable operation is one write(2) of the complete text on the right descriptor; the Hello World's write comes from the raw syscall boundary through linux::write, linux::io::write_all, linux::io::write_text, print_line's clone and hello's clone -- no libc frame} -constraints {linuxX86_64 strace posixShell} -body {
+    set exe [buildExecutable routing $::routingText]
+    set log [file join $::scratch strace.routing]
+    exec strace -f -qq -e trace=write -o $log $exe >/dev/null 2>/dev/null
+    set routing [lrange [writesOf $log] 0 3]
+    set hello [buildExecutable hello $::helloText]
+    set log [file join $::scratch strace.hello]
+    exec strace -f -qq -k -e trace=write -o $log $hello >/dev/null 2>/dev/null
+    set nir [native::nir [ioHir $::helloText]]
+    set names [dict create]
+    foreach line [split $nir \n] {
+        if {[regexp {^func (\d+) "([^"]+)"} $line -> id name]} {
+            dict set names botlish_fn_$id $name
+        }
+    }
+    set frames {}
+    set first 1
+    foreach line [split [readFile $log] \n] {
+        if {[string match "*write(1, \"Hello*" $line]} {
+            set first 0
+            continue
+        }
+        if {$first} continue
+        if {![string match " >*" $line]} break
+        if {[regexp {\((botlish_fn_\d+)\+} $line -> fn]} {
+            lappend frames [dict get $names $fn]
+        } elseif {[regexp {\((botlish_linux_x86_64_syscall|rt_linux_x86_64_syscall)\+} $line -> fn]} {
+            lappend frames $fn
+        } elseif {[string match "*libc*" $line] && [lindex $frames end] ne "<program>"} {
+            lappend frames LIBC
+        }
+    }
+    list $routing [lrange $frames 0 7]
+} -result {{{1 out: 4} {1 { \303\251 \360\235\204\236\n} 9} {2 err: 4} {2 { done\n} 6}} {botlish_linux_x86_64_syscall rt_linux_x86_64_syscall linux::write linux::io::write_all linux::io::write_text io::print_line<io::IO=linux::io::LinuxIO> hello<io::IO=linux::io::LinuxIO> <program>}}
+
+test io-short-write-completed {a short write is completed: when the kernel accepts 5 of the 14 bytes (strace-injected), the remaining 9 bytes are written next, and the caller sees success -- never a byte count} -constraints {linuxX86_64 straceInject posixShell} -body {
+    set exe [buildExecutable status $::statusText]
+    set log [file join $::scratch strace.short]
+    lassign [runCaptured strace -f -qq -o $log -e trace=write -e inject=write:retval=5:when=1 $exe] out err
+    list [lrange [writesOf $log] 0 1] $out
+} -result {{{1 {Hello, world!\n} 5} {1 {, world!\n} 9}} {, world!
+"ok"
+}}
+
+test io-write-failed {a negative write result (the kernel's -errno, here an injected EBADF) and a write that makes no progress (0 bytes) are WriteFailed: the portable caller's handler runs; the errno never reaches it} -constraints {linuxX86_64 straceInject posixShell} -body {
+    set exe [buildExecutable status $::statusText]
+    lmap inject {write:error=EBADF:when=1 write:retval=0:when=1} {
+        set log [file join $::scratch strace.fail]
+        lassign [runCaptured strace -f -qq -o $log -e trace=write -e inject=$inject $exe] out err
+        list [llength [writesOf $log]] $out
+    }
+} -result {{2 {"failed"
+}} {2 {"failed"
+}}}
+
+test io-allocations {allocation evidence: the context-trait path adds nothing -- io::print_line(text) allocates exactly what the direct linux::io::write_text(str::concat(text, "\n")) does: the line String, the UTF-8 byte List and the Bytes (the operation's own), plus linux::io::create's 7 structs and the one struct linux::write builds} -constraints {linuxX86_64} -body {
+    set pre "import io\nimport linux::io\nimport str\nwith context linux::io::create()\n"
+    lmap call {{io::print_line("Hello, world!")} {linux::io::write_text(str::concat("Hello, world!", "\n"))}} {
+        set report [native::allocationReport [ioHir "${pre}r = $call:\n    on WriteFailed:\n        unit\nr\n"] summary]
+        list [dict get $report total allocations] [dict get $report total allocatedBytes] \
+            [lmap {k v} [dict get $report byKind] {expr {[dict get $v allocations] ? "$k=[dict get $v allocations]" : [continue]}}]
+    }
+} -result {{11 541 {String=1 List=1 Struct=8 Bytes=1}} {11 541 {String=1 List=1 Struct=8 Bytes=1}}}
+
+removeDirectory portable-io-[pid]
+cleanupTests

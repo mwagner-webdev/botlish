@@ -45,6 +45,21 @@ namespace eval core::contexts {
 proc core::contexts::installNative {} { return context#install }
 proc core::contexts::loadNative {} { return context#load }
 
+# The placeholder for code no installed context reaches (CONTEXT-TRAITS.md):
+# the monomorphized program has a call of `context#unreachable()` where the
+# checked program has a context-trait operation, or a call of a function that
+# requires a context trait, that static verification proved is never
+# executed -- an operation in a nested function its enclosing function never
+# calls, a call in statically unreachable code -- because no top-level call
+# selects an installed context for it there. It is not a context lookup: it
+# never runs (here it would raise; native code is an `unreachable` trap).
+proc core::contexts::unreachableNative {} { return context#unreachable }
+
+proc core::contexts::unreachableImpl {args} {
+    core::semanticError UNREACHABLE \
+        "context#unreachable: code that no installed context reaches was executed (a compiler bug: static verification proved it never runs)"
+}
+
 proc core::contexts::installImpl {value} {
     variable installed
     set id [core::value::structId $value]
@@ -86,3 +101,5 @@ core::native::register context#install -arity 1 -impl core::contexts::installImp
     -param-types {struct} -result-type unit
 core::native::register context#load -arity 1 -impl core::contexts::loadImpl \
     -param-types {str} -result-type struct -result-shape {context-struct 0}
+core::native::register context#unreachable -arity 0 -impl core::contexts::unreachableImpl \
+    -result-shape {never}

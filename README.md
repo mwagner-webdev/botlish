@@ -655,7 +655,7 @@ result until `web::uri_query_value?` proves it one.
 | `core/primitives.tcl`, `core/predicates.tcl`, `core/strings.tcl`, `core/lists.tcl` | builtin natives |
 | `core/process.tcl` | the process boundary: `argv()`, its builtin error, argv injection (ARGV.md) |
 | `core/linuxabi.tcl` | `linux::abi::syscall`, the raw Linux x86-64 kernel transition (native only; LINUX-X86-64-SYSCALL.md) |
-| `core/contexts.tcl` | the two internal context operations `context#install` / `context#load` and the Tcl backends' per-run context environment (CONTEXTS.md) |
+| `core/contexts.tcl` | the two internal context operations `context#install` / `context#load` and the Tcl backends' per-run context environment (CONTEXTS.md); `context#unreachable`, the placeholder of code no installed context reaches (CONTEXT-TRAITS.md) |
 | `core/bytestore.tcl` | the byte-storage value kinds' natives (immutable `bytestore`, writable `mutbytes`) and the raw address bridges `abi::x86_64::from_bytes` / `from_mutable_bytes` (ABI-BYTES.md, MUTABLE-BYTES.md) |
 | `hir/hir.tcl` | HIR data model, ids, `hir::build`, queries |
 | `hir/syntax.tcl` | syntax nodes: HIR's input, and core IR → syntax |
@@ -670,8 +670,8 @@ result until `web::uri_query_value?` proves it one.
 | `hir/specialize.tcl` | call-site specialization: instances, result fixpoint, views for `hir::aot` (§21) |
 | `hir/exactvalue.tcl` | exact-value facts and value identity (`hir::exact::Of`, `Identity`, `SameValue`) |
 | `hir/warnings.tcl` | compiler warnings: record, static registry, global policy, rendering, error promotion, `SAME-RETURN-VALUE` and `METHOD-ELIGIBLE` (§23) |
-| `hir/traits.tcl` | eager structural traits: the trait registry, structural conformance (`hir::traits::satisfies`/`explain`), trait views and trait operations, their checks, and the monomorphization plan that turns every trait-polymorphic function into one ordinary function per witness (TRAITS.md) |
-| `hir/contexts.tcl` | execution-environment contexts: context parameters, direct and transitive requirements, installation order, `MISSING-CONTEXT` chains, function-value frontier (CONTEXTS.md) |
+| `hir/traits.tcl` | eager structural traits: the trait registry, structural conformance (`hir::traits::satisfies`/`explain`), trait views and trait operations, their checks, and the monomorphization plan that turns every trait-polymorphic function into one ordinary function per witness (TRAITS.md) and every function requiring a context trait into one clone under the selected context (CONTEXT-TRAITS.md) |
+| `hir/contexts.tcl` | execution-environment contexts: context parameters, direct and transitive requirements, installation order, `MISSING-CONTEXT` chains, function-value frontier (CONTEXTS.md); context traits: structural satisfaction (`satisfiesTrait`/`explainTrait`), the one-way binding check, exactly-one provider selection (CONTEXT-TRAITS.md) |
 | `hir/syscall.tcl` | the static contract of `linux::abi::syscall`'s register-struct argument (LINUX-X86-64-SYSCALL.md) and of `abi::x86_64::from_bytes`'s `abi::bytes::Bytes` argument (ABI-BYTES.md) |
 | `compiler/compiler.tcl` | HIR → Tcl compiler backend |
 | `native/lower.tcl` | HIR → NIR native lowering (§20) |
@@ -683,7 +683,10 @@ result until `web::uri_query_value?` proves it one.
 | `lib/abi/bytes.bot` | the ABI memory values, both owned by this one module (the single-owner rule of OPAQUE-STRUCTS.md, so they convert into each other without a public accessor): `abi::bytes::Bytes`, immutable, opaque over contiguous byte storage (`from_list`, `length`; ABI-BYTES.md), and `abi::bytes::MutableBytes`, its writable counterpart, a *value* whose copies are independent (`zeroed`, `from_bytes`, `mutable_length`, `replace`, `detach`, `freeze`, `freeze_prefix`; MUTABLE-BYTES.md) |
 | `hir/imports.tcl` | the import environments of a compilation: which namespaces and short type names each file's header imported (IMPORTS.md) |
 | `lib/linux.bot` | `linux::write(fd, data)`: one `write(2)` syscall over an `abi::bytes::Bytes`, the kernel's raw signed result as an Int (ABI-BYTES.md); `linux::read(fd, data)`: one `read(2)` into the caller's `abi::bytes::MutableBytes` (copied: the caller's value is never changed), returning a `linux::ReadResult` of the raw `ssize_t` and the updated buffer (MUTABLE-BYTES.md) |
-| `lib/linux/io.bot` | `linux::io::LinuxIO`, the process's standard I/O as one opaque context over three opaque `FileDescriptor` tokens; `create()`, and the contextual `write`, `write_error`, `read` over `linux::write` / `linux::read` (CONTEXTS.md) |
+| `lib/linux/io.bot` | `linux::io::LinuxIO`, the process's standard I/O as one opaque context over three opaque `FileDescriptor` tokens; `create()`, and the contextual `write`, `write_error`, `read` over `linux::write` / `linux::read` (CONTEXTS.md); `write_text`/`write_error_text`, LinuxIO's implementation of `io::IO`, completing short writes (CONTEXT-TRAITS.md) |
+| `lib/io.bot` | the portable text output: the context trait `io::IO`, `WriteFailed`, `io::print`, `print_line`, `write_error`, `write_error_line` (CONTEXT-TRAITS.md) |
+| `lib/io/path.bot` | the portable textual path trait `io::path::Path` (`concat`, `text`) and `NotAPath` (CONTEXT-TRAITS.md) |
+| `lib/linux/path.bot` | `linux::path::LinuxPath`, a refinement of str (non-empty, no U+0000): `valid?`, `validate`, `concat`, `text` (CONTEXT-TRAITS.md) |
 | `lib/abi/x86_64.bot` | `abi::x86_64::Register64`, the x86-64 register word as a transport value, and its two Int conversions (LINUX-X86-64-SYSCALL.md); `from_i8` ... `from_usize` encode ABI numeric values as register words, sign- or zero-extended (ABI-NUMERIC-DOMAINS.md) |
 | `native/src/codegen/` | the `Backend` interface; NIR → Cranelift IR for JIT and object files |
 | `surface/lexer.tcl` | source → tokens, indentation → `INDENT`/`DEDENT` |
@@ -1045,6 +1048,16 @@ source code may use only the trait's operations on it, while the compiler
 keeps the concrete type as hidden provenance and compiles one ordinary
 function per concrete type, each trait operation a direct call. Nothing of a
 trait exists at run time.
+
+A **context trait** (CONTEXT-TRAITS.md) is not a value type either. `context
+trait IO: fn write_text(text: str) -> unit errors WriteFailed` declares
+operations an installed context supplies; a function uses it through a
+context parameter (`fn print_line(text: str, context io: IO)`, then
+`io.write_text(...)`), the installed context that implements it
+(`linux::io::LinuxIO`, through `linux::io::write_text(text: str, context io:
+LinuxIO)`) is selected statically at each top-level call -- exactly one, or
+`MISSING-CONTEXT` / `AMBIGUOUS-CONTEXT-IMPLEMENTATION` -- and every operation
+compiles to a direct call of that context's implementation.
 
 **Operations.**
 
@@ -1647,7 +1660,11 @@ add10(32)          # 42 (add captures x)
   PC-relative addressing where it is used: no hidden argument, no reserved
   register, no lookup. `context` and `with` are contextual words. The first
   context is `linux::io::LinuxIO` (lib/linux/io.bot): `with context
-  linux::io::create()` then `linux::io::write(bytes)`. See CONTEXTS.md.
+  linux::io::create()` then `linux::io::write(bytes)`. See CONTEXTS.md. A
+  context parameter may also have a *context trait* type (`context io:
+  io::IO`): the one installed context implementing it is selected statically,
+  and portable code (`io::print_line`) compiles to direct calls of its
+  implementation. See CONTEXT-TRAITS.md.
 * **Struct destructuring.** `{user, expires: expiry} = result` binds fields
   of a struct value by name: it evaluates `result` once, then binds `user` to
   `result.user` and `expiry` to `result.expires`, exactly as the explicit

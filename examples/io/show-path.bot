@@ -1,0 +1,28 @@
+# Path + I/O (CONTEXT-TRAITS.md): validate a String as a Linux path in place,
+# report an invalid one on the error output, and keep using the validated
+# value as the String it still is. show_path declares no context: io::IO is
+# required through io::print_line and io::write_error_line, and the
+# installed linux::io::LinuxIO provides it.
+import io
+import linux::io
+import linux::path
+import str
+
+fn show_path(value: str) -> str errors WriteFailed:
+    linux::path::validate(value):
+        on NotAPath:
+            io::write_error_line(str::concat(value, " is not a valid path"))
+            return "rejected"
+    # value is a linux::path::LinuxPath here, and still a str.
+    io::print_line(str::concat("Path: ", value))
+    "shown"
+
+with context linux::io::create()
+
+shown = show_path("/tmp/example"):
+    on WriteFailed:
+        "failed"
+rejected = show_path(""):
+    on WriteFailed:
+        "failed"
+[shown, rejected]

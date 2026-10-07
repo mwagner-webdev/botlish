@@ -339,3 +339,32 @@ instance key of a trait parameter (`hir/semantic.tcl`), the plan or build 2
 `audit/traits/tools/mutants.txt` to still apply: update a mutant's text when
 you change the code it mutates, and keep it a mutant of the same rule).
 `audit/traits/tools/evidence.tcl` regenerates `audit/traits/principal/`.
+
+## Context traits
+
+Context traits (CONTEXT-TRAITS.md) are environment abstractions resolved
+entirely before any backend runs: a `context trait` has no value, slot, tag,
+table or runtime representation; the one installed context implementing it
+is selected statically at each top-level call (exactly one, never ranked);
+every function whose requirement includes a context trait is cloned for the
+selection by the trait monomorphization (`hir::traits::Plan`), and every
+operation becomes a direct call of the selected context's implementation.
+Never add a runtime provider lookup, a context-trait slot in the native
+context area, a hidden context or dictionary argument, or context-trait code
+in `core/`, `compiler/` or `native/` (the one exception is the dead-code
+placeholder `context#unreachable`, which never runs). Satisfaction reads only
+the concrete context's owner namespace (`hir::contexts::satisfiesTrait`).
+
+If you change satisfaction (`hir::contexts::satisfiesTrait`,
+`TraitImplementation`), selection (`hir::contexts::Obligations`), the binding
+check (`CheckTraitBindings`), context-trait typing (`hir::traits::TypeCall`,
+`hir::types::ShapeResult`'s context-trait case), the plan's context-trait
+actions or the planned-call resolution (`hir/resolve.tcl`'s
+`ResolvePlannedCall`), or lib/io.bot, lib/linux/io.bot, lib/linux/path.bot,
+run `tests/context-traits.test`, `tests/portable-io.test`,
+`tests/linux-path.test`, `audit/context-traits/tools/fuzz.tcl` and
+`audit/context-traits/tools/mutate.tcl` (every mutant in
+`audit/context-traits/tools/mutants.txt` must still apply: update a mutant's
+text when you change the code it mutates, keeping it a mutant of the same
+rule). Changing `hir::traits::Plan` also means re-checking the trait mutants
+(`audit/traits/tools/mutants.txt`).

@@ -42,13 +42,26 @@
 # constants the existing completion proofs show are in abi::I32's domain, with
 # no run-time range check.
 #
-# Not here (deliberately): errno mapping (results are the kernel's raw signed
-# values), buffering, completion of short writes, close/ownership/RAII (the
-# standard descriptors need no application cleanup), other descriptors
-# (openat, sockets), mutable contexts, substitutable (trait) contexts.
+# LinuxIO implements the portable io::IO context trait (CONTEXT-TRAITS.md)
+# with write_text and write_error_text below: ordinary functions of this
+# module whose one context parameter is a LinuxIO -- the implicit receiver --
+# and whose signatures match io::IO's requirements. Nothing registers them:
+# where a call needs io::IO and LinuxIO is the one installed context that
+# implements it, the compiler binds `io.write_text(...)` to a direct call of
+# linux::io::write_text, which loads its descriptor from LinuxIO's own
+# context slot as every function here does.
+#
+# Not here (deliberately): errno mapping beyond io::WriteFailed (the raw
+# write/read below return the kernel's signed values), buffering,
+# close/ownership/RAII (the standard descriptors need no application cleanup),
+# other descriptors (openat, sockets), mutable contexts.
 import abi
 import abi::bytes
+import io
 import linux
+import list
+import str
+import type byte::Byte
 
 # A Linux file-descriptor token minted by this module.
 opaque struct FileDescriptor:
@@ -86,3 +99,35 @@ fn write_error(data: abi::bytes::Bytes, context io: LinuxIO) -> int:
 # linux::ReadResult).
 fn read(data: abi::bytes::MutableBytes, context io: LinuxIO) -> linux::ReadResult:
     linux::read(io.stdin.raw, data)
+
+# ---------------------------------------------------------------------------
+# io::IO (CONTEXT-TRAITS.md)
+
+# Writes every byte of BYTES to FD. One write(2) of the whole text in the
+# common case; a short write (fewer bytes than asked, but some) is completed
+# by writing the rest, again and again, so the caller only ever sees all or
+# WriteFailed. A negative result (the kernel's -errno) and a write that makes
+# no progress are WriteFailed; no count or errno escapes.
+fn write_all(fd: FileDescriptor, bytes: List[Byte]) -> unit errors WriteFailed:
+    n = list::length(bytes)
+    if n == 0:
+        return unit
+    written = fd.raw.write(abi::bytes::from_list(bytes))
+    if written <= 0:
+        fail WriteFailed
+    if written < n:
+        # The unwritten suffix: indices WRITTEN..n-1, which the checks above
+        # prove are inside BYTES.
+        remaining = loop i from written to n:
+            bytes.at(i)
+        return fd.write_all(remaining)
+    unit
+
+# All of TEXT, UTF-8 encoded, on the context's standard output; WriteFailed
+# when Linux reports an error or stops making progress. Never a byte count.
+fn write_text(text: str, context io: LinuxIO) -> unit errors WriteFailed:
+    io.stdout.write_all(str::encode_utf8(text))
+
+# All of TEXT, UTF-8 encoded, on the context's standard error.
+fn write_error_text(text: str, context io: LinuxIO) -> unit errors WriteFailed:
+    io.stderr.write_all(str::encode_utf8(text))

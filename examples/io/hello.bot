@@ -1,0 +1,16 @@
+# The portable Hello World (CONTEXT-TRAITS.md): hello() declares no context;
+# io::print_line requires the io::IO context trait; the installed
+# linux::io::LinuxIO is the one context that implements it, so the call
+# compiles to a direct call of linux::io::write_text -- one write(2) of
+# "Hello, world!\n" to descriptor 1, with no libc in the path.
+import io
+import linux::io
+
+fn hello() errors WriteFailed:
+    io::print_line("Hello, world!")
+
+with context linux::io::create()
+
+hello():
+    on WriteFailed:
+        unit

@@ -782,6 +782,9 @@ context area, no header line and no different instruction.
 * Installation only at the entry program's top level; no nested, function-
   local, dynamic or overriding installation, no test doubles by replacement.
 * Exact nominal identity; no traits, no substitutable contexts.
+  (Since CONTEXT-TRAITS.md: a context parameter may have a context-trait
+  type, satisfied structurally by the one installed context that implements
+  it; exact nominal contexts are unchanged.)
 * Function values that need a context are rejected (`CONTEXT-FUNCTION-
   VALUE`), aliases aside; requirements are not part of function types.
 * Native slots only for layouts of non-pointer leaves; a context holding a

@@ -175,7 +175,8 @@ proc surface::lower::SplitTypeDecls {statements {namespace ""}} {
 # from the (cached, importer-neutral) AST.
 proc surface::lower::TraitDeclOf {node namespace} {
     return [dict create name [dict get $node name] nameSpan [dict get $node nameSpan] \
-        namespace $namespace requirements [dict get $node requirements] span [dict get $node span]]
+        namespace $namespace requirements [dict get $node requirements] span [dict get $node span] \
+        context [expr {[dict exists $node context] ? [dict get $node context] : 0}]]
 }
 
 # The declaration dict of a `structdecl` node declared in module NAMESPACE (""

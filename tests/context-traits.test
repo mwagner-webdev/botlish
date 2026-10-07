@@ -1,0 +1,821 @@
+# context-traits.test -- context traits: trait-aware contexts with static
+# exactly-one implementation selection (CONTEXT-TRAITS.md):
+#
+#   context trait Out:
+#       fn emit(n: int) -> int errors WriteFailed
+#
+#   fn twice(n: int, context out: Out) -> int errors WriteFailed:
+#       out.emit(n) + out.emit(n)
+#
+#   context struct A: ...
+#   fn emit(n: int, context c: A) -> int errors WriteFailed: ...   (A's owner)
+#
+#   with context a::create()
+#   twice(3)                  # A is the one installed context implementing Out
+#
+# A context trait is an environment abstraction: operations an installed
+# context supplies, used only through a context parameter. A concrete context
+# struct satisfies it structurally, from its owner namespace alone; a
+# top-level call that needs it selects, statically, the one installed context
+# that implements it (none: MISSING-CONTEXT; several:
+# AMBIGUOUS-CONTEXT-IMPLEMENTATION); every function whose requirement
+# includes the trait is cloned for the selection and every operation becomes
+# a direct call of the selected context's implementation. Nothing exists at
+# run time: no slot, no provider table, no dispatch, no hidden argument.
+#
+# Every behavioral case runs on interp, compile, cranelift-generic and
+# cranelift through one HIR (moduleAgree / sourceAgree).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+testConstraint linuxX86_64 [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+testConstraint objdump [expr {[auto_execok objdump] ne ""}]
+testConstraint posixShell [expr {[auto_execok sh] ne ""}]
+testConstraint strace [expr {[auto_execok strace] ne "" && ![catch {exec strace -f -qq -o /dev/null true 2>@1}]}]
+
+# ---------------------------------------------------------------------------
+# Helpers
+
+# The kind and location-free message of the first compile rejection of
+# SOURCE, or "accepted".
+proc rejection {source} {
+    if {[catch {surface::compile $source -warnings off} message options]} {
+        set code [dict get $options -errorcode]
+        set kind [expr {[lindex $code 1] eq "SYNTAX" ? "SYNTAX" : [lindex $code end]}]
+        if {[lindex $code 1] eq "SYNTAX" && [dict exists [lindex $code 2] code]} {
+            set kind [dict get [lindex $code 2] code]
+        }
+        return [list $kind [regsub {^[^ ]*:[0-9]+:[0-9]+: } $message {}]]
+    }
+    return accepted
+}
+
+proc rejectionKind {source} {
+    return [lindex [rejection $source] 0]
+}
+
+# Writes the module files FILES ({PATH TEXT ...}, PATH relative to the
+# library) into the current (private) library.
+proc writeModules {files} {
+    foreach {path text} $files {
+        set full [file join $::core::libraryDir $path]
+        file mkdir [file dirname $full]
+        set f [open $full w]
+        fconfigure $f -encoding utf-8
+        puts -nonewline $f $text
+        close $f
+    }
+}
+
+# sourceAgree of SOURCE with the module files FILES in a private library.
+proc moduleAgree {files source {backends {interp compile cranelift-generic cranelift}}} {
+    withPrivateLibrary {
+        writeModules $files
+        set result [sourceAgree $source $backends]
+    }
+    return $result
+}
+
+proc moduleRejection {files source} {
+    withPrivateLibrary {
+        writeModules $files
+        set result [rejection $source]
+    }
+    return $result
+}
+
+proc moduleHir {files source} {
+    withPrivateLibrary {
+        writeModules $files
+        set hir [surface::compile $source -warnings off]
+    }
+    return $hir
+}
+
+# The body lines of NIR function NAME in NIR text, expression origins
+# normalized away.
+proc nirBody {nir name} {
+    set lines {}
+    set inside 0
+    foreach line [split $nir \n] {
+        if {[string match "func *" $line]} {
+            set inside [string match "func * \"$name\" *" $line]
+            continue
+        }
+        if {$line eq "end"} {
+            set inside 0
+            continue
+        }
+        if {$inside} {
+            lappend lines [string trim [regsub -all {@e[0-9]+} $line ""]]
+        }
+    }
+    return $lines
+}
+
+# The NIR header line of function NAME (origin removed), or "".
+proc nirHeader {nir name} {
+    foreach line [split $nir \n] {
+        if {[string match "func * \"$name\" *" $line]} {
+            return [regsub { @e[0-9]+$} $line ""]
+        }
+    }
+    return ""
+}
+
+# The NIR function id of the function named NAME in NIR.
+proc nirId {nir name} {
+    foreach line [split $nir \n] {
+        if {[string match "func * \"$name\" *" $line]} {
+            return [lindex $line 1]
+        }
+    }
+    return ""
+}
+
+# The function binding names of HIR (clones included), sorted.
+proc functionNames {hir} {
+    set names {}
+    foreach e [hirFind $hir bind] {
+        if {[hir::kind $hir [hir::get $hir $e value]] eq "block"} {
+            lappend names [dict get $hir bindings [hir::get $hir $e binding] name]
+        }
+    }
+    return [lsort $names]
+}
+
+# The block ExprId of the function bound to NAME (its binding name as HIR
+# keeps it: a module function qualified, a clone by its clone name).
+proc blockOf {hir name} {
+    foreach e [hirFind $hir bind] {
+        if {[dict get $hir bindings [hir::get $hir $e binding] name] eq $name
+                && [hir::kind $hir [hir::get $hir $e value]] eq "block"} {
+            return [hir::get $hir $e value]
+        }
+    }
+    return ""
+}
+
+# 1 if HIR (a compiled program) contains no context-trait operation, no
+# context-trait binding and no context-trait type; else what it found.
+proc contextTraitFree {hir} {
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict exists $node traitCall]} {
+            return [list traitCall $e]
+        }
+        if {[hir::contexts::isLoad $hir $e] && [hir::contexts::isTrait [hir::contexts::loadId $hir $e]]} {
+            return [list load $e]
+        }
+        if {[dict exists $node contextParams]} {
+            foreach record [dict get $node contextParams] {
+                if {[dict exists $record trait]} {
+                    return [list contextParam $e]
+                }
+            }
+        }
+    }
+    dict for {t type} [dict get $hir types] {
+        if {[hir::types::MentionedContextTrait $type] ne ""} {
+            return [list type $type]
+        }
+    }
+    return 1
+}
+
+# The synthetic context library: a context trait Out (ct::out) with a
+# consumer twice; two concrete contexts A and B (ct::a, ct::b) in their own
+# owners, each implementing Out differently (A adds its k, B multiplies by
+# its k); a caller module ct::app with no context parameter; a Clock context
+# and a context Timed whose implementation of Out needs the Clock.
+set ctLib {
+ct/out.bot {error WriteFailed
+
+context trait Out:
+    fn emit(n: int) -> int errors WriteFailed
+
+fn twice(n: int, context out: Out) -> int errors WriteFailed:
+    out.emit(n) + out.emit(n)
+}
+ct/a.bot {import ct::out
+type Small = Int in 0..1000
+
+context struct A:
+    k: Small
+
+fn create() -> A:
+    A {k: 1}
+
+fn emit(n: int, context c: A) -> int errors WriteFailed:
+    n + c.k
+}
+ct/b.bot {import ct::out
+type Small = Int in 0..1000
+
+context struct B:
+    k: Small
+
+fn create() -> B:
+    B {k: 100}
+
+fn emit(n: int, context c: B) -> int errors WriteFailed:
+    n * c.k
+}
+ct/app.bot {import ct::out
+
+fn run(n: int) -> int errors WriteFailed:
+    ct::out::twice(n) + 1
+}
+ct/clock.bot {type Tick = Int in 0..1000
+
+context struct Clock:
+    now: Tick
+
+fn create() -> Clock:
+    Clock {now: 7}
+
+fn now(context c: Clock) -> int:
+    c.now
+}
+ct/timed.bot {import ct::out
+import ct::clock
+type Small = Int in 0..1000
+
+context struct Timed:
+    k: Small
+
+fn create() -> Timed:
+    Timed {k: 2}
+
+fn emit(n: int, context c: Timed) -> int errors WriteFailed:
+    n * c.k + ct::clock::now()
+}
+}
+
+# A one-file program over the same shape: the entry program owns the trait,
+# the context A and A's implementation.
+set entryPrelude {error WriteFailed
+type Small = Int in 0..1000
+
+context trait Out:
+    fn emit(n: int) -> int errors WriteFailed
+
+context struct A:
+    k: Small
+
+fn emit(n: int, context c: A) -> int errors WriteFailed:
+    n + c.k
+
+fn twice(n: int, context out: Out) -> int errors WriteFailed:
+    out.emit(n) + out.emit(n)
+
+}
+
+# The program calling ct::app::run(5) after the installations INSTALLS
+# (lines), every ct module imported.
+proc selectionProgram {installs} {
+    set text "import ct::app\nimport ct::a\nimport ct::b\nimport ct::clock\nimport ct::timed\n\n"
+    foreach line $installs {
+        append text "with context $line\n"
+    }
+    append text "r = ct::app::run(5):\n    on WriteFailed:\n        0\nr\n"
+    return $text
+}
+
+# ---------------------------------------------------------------------------
+# Syntax
+
+test ct-syntax {`context trait NAME:` is a traitdecl with context 1 (the struct modifier, on a trait); its requirements are ordinary signatures with no receiver; the AST prints it back} -body {
+    set ast [surface::parse "error E\ncontext trait Out:\n    fn emit(n: int) -> int errors E\n    fn flush()\n"]
+    set decl [lindex [dict get $ast body] 1]
+    list [dict get $decl kind] [dict get $decl name] [dict get $decl context] \
+        [lmap r [dict get $decl requirements] {list [dict get $r name] [lmap p [dict get $r params] {lindex $p 0}]}] \
+        [lrange [split [surface::formatAst $ast] \n] 1 3]
+} -result {traitdecl Out 1 {{emit n} {flush {}}} {{context trait Out} {    fn emit (n:int) -> int errors E} {    fn flush ()}}}
+
+test ct-contextual {`context` and `trait` stay ordinary names everywhere but before `trait NAME` / a name: variables, parameters, fields, calls} -body {
+    sourceAgree {context = 3
+trait = 4
+fn f(context, trait):
+    context * trait
+struct S:
+    context: int
+s = S {context: 5}
+[context + trait, f(context, trait), s.context]
+}
+} -result {value {[7, 12, 5]}}
+
+test ct-modifiers {`context` is the one trait modifier: opaque, a repeated modifier, and opaque context are syntax errors; a context trait nested in a function is TRAIT-NESTED} -body {
+    list [rejection "opaque trait T:\n    fn f(v: T) -> int\n"] \
+        [rejection "context context trait T:\n    fn f() -> int\n"] \
+        [rejectionKind "opaque context trait T:\n    fn f() -> int\n"] \
+        [rejectionKind "fn g():\n    context trait T:\n        fn f() -> int\n    1\ng()\n"]
+} -result {{SYNTAX {"opaque" does not modify a trait declaration (the only trait modifier is "context": "context trait NAME:")}} {SYNTAX {duplicate modifier "context" in this trait declaration}} SYNTAX TRAIT-NESTED}
+
+test ct-declaration-diagnostics {context-trait declarations: empty, body on a requirement, flags, a context parameter, an ordinary trait parameter or result, a context trait parameter, duplicate requirement, name collision, undeclared error} -body {
+    list [rejectionKind "context trait T:\n1\n"] \
+        [rejectionKind "context trait T:\n    fn f() -> int:\n        1\n"] \
+        [rejectionKind "context trait T:\n    fn f(flags :x) -> int\n"] \
+        [rejectionKind "struct C:\n    x: int\ncontext trait T:\n    fn f(context c: C) -> int\n"] \
+        [rejection "trait P:\n    fn p(v: P) -> int\ncontext trait T:\n    fn f(v: P) -> int\n"] \
+        [rejection "trait P:\n    fn p(v: P) -> int\ncontext trait T:\n    fn f() -> P\n"] \
+        [rejectionKind "context trait T:\n    fn f(t: T) -> int\n"] \
+        [rejectionKind "context trait T:\n    fn f() -> int\n    fn f(n: int) -> int\n"] \
+        [rejectionKind "struct T:\n    x: int\ncontext trait T:\n    fn f() -> int\n"] \
+        [rejectionKind "context trait T:\n    fn f() -> int errors Nope\n"]
+} -result {TRAIT-EMPTY TRAIT-REQUIREMENT-BODY TRAIT-REQUIREMENT-FLAGS TRAIT-CONTEXT-REQUIREMENT {TRAIT-OTHER-TRAIT {requirement "f" of context trait "T" mentions a trait (P) in parameter "v": a context-trait requirement takes ordinary values only (an operation chosen jointly by the context's witness and a value's trait witness is not supported yet)}} {TRAIT-OTHER-TRAIT {requirement "f" of context trait "T" returns a trait (P): a context-trait requirement returns an ordinary concrete value (trait-typed results of context operations are not supported yet)}} TRAIT-OTHER-TRAIT TRAIT-DUPLICATE-REQUIREMENT TRAIT-NAME-COLLISION UNDECLARED-ERROR}
+
+test ct-requirements-no-receiver {a requirement has no receiver: no parameter at all, untyped parameters and ordinary types are fine; the registry marks the trait context and every parameter self 0} -body {
+    set hir [surface::compile "context trait T:\n    fn tick() -> int\n    fn put(a, b: str)\n1\n" -warnings off]
+    set entry [lindex [dict get $hir traits] 0]
+    list [dict get $entry context] [lmap r [dict get $entry requirements] {
+        list [dict get $r name] [lmap p [dict get $r params] {list [dict get $p name] [dict get $p type] [dict get $p self]}] [dict get $r result]
+    }]
+} -result {1 {{tick {} {type int self 0}} {put {{a any 0} {b str 0}} {}}}}
+
+# ---------------------------------------------------------------------------
+# Structural satisfaction (hir::contexts::satisfiesTrait / explainTrait)
+
+test ct-satisfies-structural {a concrete context satisfies a context trait from its owner's declarations: the result names the trait, the witness, the owner and the static requirement -> implementation mapping; an ordinary value never satisfies a context trait} -body {
+    set hir [moduleHir $::ctLib "import ct::a\nimport ct::b\nimport ct::timed\n1\n"]
+    set a [hir::contexts::satisfiesTrait ct::a::A ct::out::Out]
+    set t [hir::contexts::satisfiesTrait {nstruct ct::timed::Timed} ct::out::Out]
+    list [dict get $a ok] [dict get $a trait] [dict get $a witness] [dict get $a owner] \
+        [lmap {r impl} [dict get $a impls] {list $r [dict get $impl unit] [dict get $impl name]}] \
+        [dict get $t ok] [dict get [hir::traits::satisfies {nstruct ct::a::A} ct::out::Out] ok] \
+        [hir::contexts::explainTrait ct::a::A ct::out::Out]
+} -result {1 ct::out::Out ct::a::A ct::a {{emit ct::a emit}} 1 0 {}}
+
+# The library of a trait whose candidate implementations are wrong one way
+# each (module cx owns the contexts and the functions).
+set brokenLib {
+cx/out.bot {error WriteFailed
+error Other
+
+context trait Out:
+    fn emit(n: int) -> int errors WriteFailed
+}
+cx/param.bot {import cx::out
+context struct C:
+    k: bool
+fn emit(n: str, context c: C) -> int errors WriteFailed:
+    1
+}
+cx/result.bot {import cx::out
+context struct C:
+    k: bool
+fn emit(n: int, context c: C) -> str:
+    "x"
+}
+cx/errs.bot {import cx::out
+context struct C:
+    k: bool
+fn emit(n: int, context c: C) -> int errors WriteFailed, Other:
+    1
+}
+cx/ctx.bot {import cx::out
+context struct C:
+    k: bool
+context struct D:
+    k: bool
+fn emit(n: int, context d: D) -> int:
+    1
+}
+cx/none.bot {import cx::out
+context struct C:
+    k: bool
+fn emit(n: int) -> int:
+    1
+}
+cx/two.bot {import cx::out
+context struct C:
+    k: bool
+context struct D:
+    k: bool
+fn emit(n: int, context c: C, d: D) -> int:
+    1
+}
+cx/missing.bot {import cx::out
+context struct C:
+    k: bool
+}
+cx/arity.bot {import cx::out
+context struct C:
+    k: bool
+fn emit(n: int, m: int, context c: C) -> int:
+    1
+}
+cx/undeclared.bot {import cx::out
+context struct C:
+    k: bool
+fn emit(n: int, context c: C):
+    1
+}
+cx/value.bot {import cx::out
+context struct C:
+    k: bool
+emit = 3
+}
+cx/flags.bot {import cx::out
+context struct C:
+    k: bool
+fn emit(n: int, flags :loud, context c: C) -> int:
+    1
+}
+cx/fewer.bot {import cx::out
+context struct C:
+    k: bool
+fn emit(n, context c: C) -> int:
+    1
+}
+}
+
+test ct-explain-mismatches {why a context does not satisfy a context trait: a wrong parameter, a wrong result, an error the requirement does not admit, another context type, no context parameter, two context parameters, no implementation, a wrong arity, no declared result, a value binding, flags; fewer errors and a wider (untyped) parameter are fine} -body {
+    set hir [moduleHir $::brokenLib "import cx::param\nimport cx::result\nimport cx::errs\nimport cx::ctx\nimport cx::none\nimport cx::two\nimport cx::missing\nimport cx::arity\nimport cx::undeclared\nimport cx::value\nimport cx::flags\nimport cx::fewer\n1\n"]
+    lmap m {param result errs ctx none two missing arity undeclared value flags fewer} {
+        set s [hir::contexts::satisfiesTrait cx::${m}::C cx::out::Out]
+        list $m [dict get $s ok] [dict get $s reason]
+    }
+} -result {{param 0 {parameter 1 requires str, which does not admit the required int}} {result 0 {return type str does not satisfy required int}} {errs 0 {it may fail with Other, which the requirement's error contract [WriteFailed] does not admit}} {ctx 0 {the context parameter of cx::ctx::emit is cx::ctx::D, not cx::ctx::C: an implementation receives exactly the concrete context it implements}} {none 0 {cx::none::emit declares no context parameter: an implementation of a context-trait operation receives the context it implements as its one context parameter ("context NAME: C")}} {two 0 {cx::two::emit declares 2 context parameters (cx::two::C, cx::two::D): an implementation takes exactly one, the context cx::two::C it implements}} {missing 0 {no function cx::missing::emit exists: "emit" is not defined by module "cx::missing" (only the namespace that owns cx::missing::C implements its context-trait operations)}} {arity 0 {it takes 2 parameter(s), the requirement 1}} {undeclared 0 {cx::undeclared::emit declares no result type: satisfaction is decided from declarations, so an implementation of a requirement with a result must declare it ("-> int")}} {value 0 {cx::value::emit is not a function declaration (a value binding cannot implement a requirement)}} {flags 0 {cx::flags::emit declares flags (:loud): implementations with flags are not supported yet}} {fewer 1 {}}}
+
+test ct-explain-text {explainTrait: the required and found signatures (the context section included) and the reason} -body {
+    set hir [moduleHir $::brokenLib "import cx::param\n1\n"]
+    regsub -all {\(declared at [^)]*\)|\(at [^)]*\)} [hir::contexts::explainTrait cx::param::C cx::out::Out $hir] {(at ...)}
+} -result {cx::param::C does not satisfy cx::out::Out
+required:
+    fn emit(int) -> int errors WriteFailed   (at ...)
+found:
+    fn cx::param::emit(str, context cx::param::C) -> int errors WriteFailed   (at ...)
+parameter 1 requires str, which does not admit the required int}
+
+test ct-owner-only {only the context's owner implements: a function of the operation's name with the right signature in the calling program, or in an imported module, does not make a context satisfy the trait} -body {
+    set files [concat $::brokenLib {cx/helper.bot {import cx::out
+import cx::missing
+fn emit(n: int, context c: cx::missing::C) -> int errors WriteFailed:
+    n
+}}]
+    list [moduleRejection $files "import cx::out\nimport cx::missing\nimport cx::helper\nimport type cx::out::Out\n\nfn emit(n: int, context c: cx::missing::C) -> int errors WriteFailed:\n    n\n\nfn use(context o: Out) -> int errors WriteFailed:\n    o.emit(1)\n\nwith context cx::missing::C {k: true}\nr = use():\n    on WriteFailed:\n        0\nr\n"]
+} -result {{MISSING-CONTEXT {cx::out::Out is required by this call, but no installed context implements it (install one with "with context EXPR" before the call):
+    use
+        directly requires cx::out::Out
+installed contexts:
+    cx::missing::C (does not implement cx::out::Out: no function cx::missing::emit exists: "emit" is not defined by module "cx::missing" (only the namespace that owns cx::missing::C implements its context-trait operations))}}}
+
+test ct-import-independence {adding imports to the calling program changes neither the satisfaction answer nor the mapping} -body {
+    set one [moduleHir $::ctLib "import ct::a\n1\n"]
+    set first [hir::contexts::satisfiesTrait ct::a::A ct::out::Out]
+    set two [moduleHir $::ctLib "import ct::a\nimport ct::b\nimport ct::timed\nimport ct::app\nimport ct::clock\n1\n"]
+    set second [hir::contexts::satisfiesTrait ct::a::A ct::out::Out]
+    list [expr {$first eq $second}] [dict get $second ok]
+} -result {1 1}
+
+test ct-two-importers {two modules that import the same context and context trait get one satisfaction answer and one mapping (cached per compilation, owner-only); neither acquires implementation authority} -body {
+    set files [concat $::ctLib {ct/m1.bot {import ct::out
+import ct::a
+fn one(n: int) -> int errors WriteFailed:
+    ct::out::twice(n)
+} ct/m2.bot {import ct::out
+import ct::a
+fn two(n: int) -> int errors WriteFailed:
+    ct::out::twice(n) * 10
+}}]
+    set value [moduleAgree $files "import ct::m1\nimport ct::m2\nimport ct::a\nfn both() -> List\[int\] errors WriteFailed:\n    \[ct::m1::one(1), ct::m2::two(1)\]\nwith context ct::a::create()\nr = both():\n    on WriteFailed:\n        \[\]\nr\n"]
+    set hir [moduleHir $files "import ct::m1\nimport ct::m2\nimport ct::a\n1\n"]
+    set s [hir::contexts::satisfiesTrait ct::a::A ct::out::Out]
+    list $value [lmap {r impl} [dict get $s impls] {list $r [dict get $impl unit] [dict get $impl name]}]
+} -result {{value {[4, 40]}} {{emit ct::a emit}}}
+
+# ---------------------------------------------------------------------------
+# The context-trait binding: one-way abstraction
+
+test ct-one-way {inside `fn f(context out: Out)` the binding is only the trait's operations: returning, passing (to a parameter of the only installed context's type, or untyped), projecting a field of the hidden context, type-testing, comparing, storing it, calling an operation the trait does not declare -- all rejected, whatever is installed} -body {
+    set pre "$::entryPrelude"
+    lmap body {
+        {out}
+        {take_a(out)}
+        {fn untyped(x):\n        1\n    untyped(out)}
+        {out.k}
+        {string?(out)}
+        {out == out}
+        {[out]}
+        {out.nope(1)}
+        {if out:\n        1\n    else:\n        2}
+    } {
+        set src "${pre}fn take_a(a: A) -> int:\n    1\n\nfn f(context out: Out):\n    [subst -nocommands -novariables $body]\n\nwith context A {k: 1}\n1\n"
+        rejectionKind $src
+    }
+} -result {CONTEXT-TRAIT-MISUSE CONTEXT-TRAIT-MISUSE CONTEXT-TRAIT-MISUSE CONTEXT-TRAIT-MISUSE CONTEXT-TRAIT-MISUSE CONTEXT-TRAIT-MISUSE CONTEXT-TRAIT-MISUSE TRAIT-UNKNOWN-OPERATION CONTEXT-TRAIT-MISUSE}
+
+test ct-one-way-message {the misuse diagnostic names the binding and the trait; an undeclared operation names the trait's operations} -body {
+    list [lindex [rejection "${::entryPrelude}fn f(context out: Out):\n    out\n1\n"] 1] \
+        [lindex [rejection "${::entryPrelude}fn f(context out: Out):\n    out.k()\n1\n"] 1]
+} -result {{"out" is a context-trait binding (Out): it is not a value -- the only use of a context-trait binding is calling one of Out's operations on it (out.emit(...)); it cannot be passed, stored, returned, compared, projected or tested, and the installed context that provides it is never recovered} {context trait Out has no operation "k" (its operations: emit): a context-trait binding exposes exactly its trait's requirements, whatever installed context provides them}}
+
+test ct-positions {a context trait is not a value type: an ordinary parameter, a result, a struct field, a List or MutableArray element, a function type, a refinement carrier, a value-trait requirement reject it} -body {
+    set pre "error WriteFailed\ncontext trait Out:\n    fn emit(n: int) -> int errors WriteFailed\n"
+    list [rejectionKind "${pre}fn f(x: Out):\n    1\n1\n"] \
+        [rejectionKind "${pre}fn f() -> Out:\n    1\n1\n"] \
+        [rejectionKind "${pre}struct S:\n    o: Out\n1\n"] \
+        [rejectionKind "${pre}fn f(x: List\[Out\]):\n    1\n1\n"] \
+        [rejectionKind "${pre}fn f(x: MutableArray\[Out\]):\n    1\n1\n"] \
+        [rejectionKind "${pre}fn f(x: Fn{args: \[Out\], return: int, errors: \[\]}):\n    1\n1\n"] \
+        [rejectionKind "${pre}refined type R = Out\n1\n"] \
+        [rejectionKind "${pre}trait P:\n    fn p(v: P, o: Out) -> int\n1\n"]
+} -result {CONTEXT-TRAIT-POSITION CONTEXT-TRAIT-POSITION CONTEXT-TRAIT-POSITION CONTEXT-TRAIT-POSITION CONTEXT-TRAIT-POSITION CONTEXT-TRAIT-POSITION REFINEMENT-CARRIER TRAIT-OTHER-TRAIT}
+
+test ct-orthogonal {an ordinary trait is not a context: a context parameter of a value trait is NOT-A-CONTEXT, a value-trait view cannot be installed (CONTEXT-TYPE-NOT-EXACT), and a context-trait binding cannot be a value-trait argument} -body {
+    set pre "${::entryPrelude}trait P:\n    fn p(v: P) -> int\nstruct Q:\n    v: int\nfn p(v: Q) -> int:\n    v.v\nfn make() -> P:\n    Q {v: 1}\nfn use_p(v: P) -> int:\n    v.p()\n"
+    list [rejectionKind "${pre}fn f(context x: P):\n    1\n1\n"] \
+        [rejectionKind "${pre}with context make()\n1\n"] \
+        [rejectionKind "${pre}fn f(context out: Out):\n    use_p(out)\n1\n"]
+} -result {NOT-A-CONTEXT CONTEXT-TYPE-NOT-EXACT CONTEXT-TRAIT-MISUSE}
+
+test ct-duplicate-parameter {one context trait twice in one function is DUPLICATE-CONTEXT-PARAMETER; an exact context and a context trait together are fine} -body {
+    list [rejectionKind "${::entryPrelude}fn f(context a: Out, b: Out):\n    1\n1\n"] \
+        [sourceAgree "${::entryPrelude}fn f(n: int, context a: A, out: Out) -> int errors WriteFailed:\n    out.emit(n) * a.k\nwith context A {k: 3}\nr = f(2):\n    on WriteFailed:\n        0\nr\n"]
+} -result {DUPLICATE-CONTEXT-PARAMETER {value 15}}
+
+# ---------------------------------------------------------------------------
+# Installed-context selection: exactly one, statically
+
+test ct-select-matrix {two concrete contexts implementing one context trait: only A installed selects A, only B selects B, both are ambiguous, neither is missing -- the same program text, no runtime branch} -body {
+    list [moduleAgree $::ctLib [selectionProgram {ct::a::create()}]] \
+        [moduleAgree $::ctLib [selectionProgram {ct::b::create()}]] \
+        [lindex [moduleRejection $::ctLib [selectionProgram {ct::a::create() ct::b::create()}]] 0] \
+        [lindex [moduleRejection $::ctLib [selectionProgram {}]] 0]
+} -result {{value 13} {value 1001} AMBIGUOUS-CONTEXT-IMPLEMENTATION MISSING-CONTEXT}
+
+test ct-ambiguous-diagnostic {the ambiguity lists every installed context implementing the trait, in installation order, prefers none, and shows the requiring chain; installation order does not decide anything} -body {
+    list [lindex [moduleRejection $::ctLib [selectionProgram {ct::a::create() ct::b::create()}]] 1] \
+        [lindex [moduleRejection $::ctLib [selectionProgram {ct::b::create() ct::a::create()}]] 0]
+} -result {{ct::out::Out is required by this call, and more than one installed context implements it:
+    ct::a::A
+    ct::b::B
+no installed context is preferred over another (there is no ranking and no installation-order preference): install exactly one context implementing ct::out::Out where this call runs
+    ct::app::run
+     -> ct::out::twice
+        directly requires ct::out::Out} AMBIGUOUS-CONTEXT-IMPLEMENTATION}
+
+test ct-missing-diagnostic {no installed context implements the trait: MISSING-CONTEXT with the chain and every installed context with why it does not implement the trait} -body {
+    lindex [moduleRejection $::ctLib [selectionProgram {ct::clock::create()}]] 1
+} -result {ct::out::Out is required by this call, but no installed context implements it (install one with "with context EXPR" before the call):
+    ct::app::run
+     -> ct::out::twice
+        directly requires ct::out::Out
+installed contexts:
+    ct::clock::Clock (does not implement ct::out::Out: no function ct::clock::emit exists: "emit" is not defined by module "ct::clock" (only the namespace that owns ct::clock::Clock implements its context-trait operations))}
+
+test ct-source-position {selection reads the contexts installed at the call: a call before the installation is missing; a context installed after a call does not make that call ambiguous} -body {
+    set before "import ct::app\nimport ct::a\nimport ct::b\nr = ct::app::run(1):\n    on WriteFailed:\n        0\nwith context ct::a::create()\nr\n"
+    set after "import ct::app\nimport ct::a\nimport ct::b\nwith context ct::a::create()\nr = ct::app::run(1):\n    on WriteFailed:\n        0\nwith context ct::b::create()\nr\n"
+    list [lindex [moduleRejection $::ctLib $before] 0] [moduleAgree $::ctLib $after]
+} -result {MISSING-CONTEXT {value 5}}
+
+test ct-selection-recorded {verification records each top-level call's selection and the program-wide selection it agrees on} -body {
+    set hir [moduleHir $::ctLib [selectionProgram {ct::b::create()}]]
+    set source [dict get $hir traitSource]
+    list [dict values [dict get $source contexts selections]] [dict get $source contexts selected]
+} -result {{{ct::out::Out ct::b::B}} {ct::out::Out ct::b::B}}
+
+test ct-implementation-obligations {the selected context's implementations are calls the requiring call makes: their own requirements must be installed too (the chain goes through the implementation); installed, the program runs} -body {
+    list [lindex [moduleRejection $::ctLib [selectionProgram {ct::timed::create()}]] 1] \
+        [moduleAgree $::ctLib [selectionProgram {ct::clock::create() ct::timed::create()}]]
+} -result {{ct::clock::Clock is required by this call but is not installed here (install it with "with context EXPR" before the call):
+    ct::app::run
+     -> ct::out::twice
+        directly requires ct::out::Out, which installed context ct::timed::Timed implements:
+     -> ct::timed::emit
+     -> ct::clock::now
+        directly requires ct::clock::Clock} {value 35}}
+
+test ct-implementation-order {an implementation declared after the first code that needs it is TRAIT-IMPL-ORDER (no forward references)} -body {
+    rejectionKind "error WriteFailed\ntype Small = Int in 0..1000\ncontext trait Out:\n    fn emit(n: int) -> int errors WriteFailed\ncontext struct A:\n    k: Small\nfn twice(n: int, context out: Out) -> int errors WriteFailed:\n    out.emit(n)\nwith context A {k: 1}\nr = twice(3):\n    on WriteFailed:\n        0\nfn emit(n: int, context c: A) -> int errors WriteFailed:\n    n + c.k\nr\n"
+} -result {TRAIT-IMPL-ORDER}
+
+# ---------------------------------------------------------------------------
+# Transitive requirements
+
+test ct-transitive {a function with no context parameter that calls a context-trait consumer requires the trait (direct/required, the context fixed point); the chain is the shortest call chain} -body {
+    set hir [moduleHir $::ctLib [selectionProgram {ct::a::create()}]]
+    set source [dict get $hir traitSource]
+    set run [hir::traits::ContextTraitsOf $source [lindex [lmap e [hirFind $source bind] {
+        expr {[dict get $source bindings [hir::get $source $e binding] name] eq "ct::app::run" ? [hir::get $source $e value] : [continue]}}] 0]]
+    set twice [lindex [lmap e [hirFind $source bind] {
+        expr {[dict get $source bindings [hir::get $source $e binding] name] eq "ct::out::twice" ? [hir::get $source $e value] : [continue]}}] 0]
+    list $run [hir::contexts::of $source $twice] [hir::contexts::explain $source $twice ct::out::Out]
+} -result {ct::out::Out {direct ct::out::Out required ct::out::Out} {    ct::out::twice
+        directly requires ct::out::Out}}
+
+test ct-missing-chain {main -> render -> twice: the missing-context diagnostic shows the whole chain} -body {
+    lindex [rejection "${::entryPrelude}fn render(n: int) -> int errors WriteFailed:\n    twice(n)\nfn main() -> int errors WriteFailed:\n    render(1)\nr = main():\n    on WriteFailed:\n        0\nr\n"] 1
+} -result {Out is required by this call, but no installed context implements it (install one with "with context EXPR" before the call):
+    main
+     -> render
+     -> twice
+        directly requires Out
+installed contexts:
+    none}
+
+test ct-unreachable-requires-nothing {consumers nobody calls, a consumer called only in statically unreachable code, a nested consumer its function never calls: none requires anything; with nothing installed the program runs} -body {
+    sourceAgree "${::entryPrelude}fn unused(n: int) -> int errors WriteFailed:\n    twice(n)\nfn holder(n: int) -> int:\n    fn inner(m: int, context out: Out) -> int errors WriteFailed:\n        out.emit(m)\n    n * 2\nfn guarded(n: int) -> int errors WriteFailed:\n    if false:\n        return twice(n)\n    n + 3\ng = guarded(1):\n    on WriteFailed:\n        0\nif false:\n    twice(1):\n        on WriteFailed:\n            0\n\[holder(4), g\]\n"
+} -result {value {[8, 4]}}
+
+test ct-flags {a function requiring a context trait may declare flags: live calls of its clone pass them; a call in dead code becomes the placeholder, which takes no flags} -body {
+    sourceAgree "type Small = Int in 0..1000\ncontext trait Out:\n    fn emit(n: int) -> int\ncontext struct A:\n    k: Small\nfn emit(n: int, context c: A) -> int:\n    n + c.k\nfn loud(n: int, flags :twice, context out: Out) -> int:\n    if twice:\n        out.emit(n) * 2\n    else:\n        out.emit(n)\nfn g(n: int) -> int:\n    if false:\n        return loud(n, :twice)\n    n\nwith context A {k: 1}\n\[g(3), loud(4, :twice), loud(4)\]\n"
+} -result {value {[3, 10, 5]}}
+
+test ct-function-value-frontier {a function requiring a context trait is never a value (CONTEXT-FUNCTION-VALUE); an alias in statement position is called like the function} -body {
+    list [rejectionKind "${::entryPrelude}fn apply(f, n):\n    f(n)\nwith context A {k: 1}\napply(twice, 1)\n"] \
+        [sourceAgree "${::entryPrelude}t = twice\nwith context A {k: 1}\nr = t(2):\n    on WriteFailed:\n        0\nr\n"]
+} -result {CONTEXT-FUNCTION-VALUE {value 6}}
+
+test ct-shapes {recursion, a nested function calling the operation (capturing the binding), method syntax to a consumer, and a function polymorphic in an ordinary trait and a context trait at once} -body {
+    set files [concat $::ctLib {ct/named.bot {trait Named:
+    fn name(v: Named) -> int
+
+struct P:
+    v: int
+
+fn name(v: P) -> int:
+    v.v
+}}]
+    moduleAgree $files {import ct::out
+import ct::a
+import ct::named
+import type ct::out::Out
+
+fn countdown(n: int, context out: Out) -> int errors WriteFailed:
+    if n <= 0:
+        return 0
+    fn step(m: int) -> int errors WriteFailed:
+        out.emit(m)
+    step(n) + countdown(n - 1)
+
+fn both(v: ct::named::Named, context out: Out) -> int errors WriteFailed:
+    out.emit(v.name())
+
+fn by_method(n: int) -> int errors WriteFailed:
+    n.countdown()
+
+fn all() -> List[int] errors WriteFailed:
+    [countdown(3), both(ct::named::P {v: 40}), by_method(2)]
+
+with context ct::a::create()
+r = all():
+    on WriteFailed:
+        []
+r
+}
+} -result {value {[9, 41, 5]}}
+
+test ct-exact-contexts-unchanged {an exact context parameter still requires exactly its nominal context: a function needing A is MISSING-CONTEXT under B even though B implements Out, and Out never satisfies an exact requirement} -body {
+    list [lindex [moduleRejection $::ctLib "import ct::a\nimport ct::b\nwith context ct::b::create()\nr = ct::a::emit(1):\n    on WriteFailed:\n        0\nr\n"] 1] \
+        [moduleAgree $::ctLib "import ct::a\nimport ct::b\nwith context ct::a::create()\nr = ct::a::emit(1):\n    on WriteFailed:\n        0\nr\n"]
+} -result {{ct::a::A is required by this call but is not installed here (install it with "with context EXPR" before the call):
+    ct::a::emit
+        directly requires ct::a::A} {value 2}}
+
+# ---------------------------------------------------------------------------
+# Specialization and lowering: no context trait below HIR
+
+test ct-mono-hir {the compiled program has no context-trait operation, binding or type: every function requiring the trait is replaced by one clone under the selection (an intermediate function in another module included), each operation is a direct call of the selected context's implementation; the checked source keeps the bindings and operations} -body {
+    set hir [moduleHir $::ctLib [selectionProgram {ct::b::create()}]]
+    set source [dict get $hir traitSource]
+    set ops 0
+    dict for {e node} [dict get $source exprs] {
+        if {[dict exists $node traitCall context]} { incr ops }
+    }
+    set impls {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict exists $node traitImpl]} {
+            set impl [dict get $node traitImpl]
+            lappend impls [list [dict get $impl trait] [dict get $impl requirement] [dict get $impl witness] [dict get $impl implementation] [lindex [dict get $node target] 0]]
+        }
+    }
+    list [contextTraitFree $hir] $ops [lsearch -all -inline -glob [functionNames $hir] *<*] [lsort -unique $impls] \
+        [hir::get $hir [blockOf $hir ct::out::twice<ct::out::Out=ct::b::B>] contextClone]
+} -result {1 2 {ct::app::run<ct::out::Out=ct::b::B> ct::out::twice<ct::out::Out=ct::b::B>} {{ct::out::Out emit {nstruct ct::b::B} ct::b::emit block}} {ct::out::Out ct::b::B}}
+
+test ct-hir-text {HIR text shows the context trait declaration, each clone's selection and each operation's selected implementation; a one-file program reads back to the same text and runs the same on every backend} -body {
+    set src "${::entryPrelude}fn run(n: int) -> int errors WriteFailed:\n    twice(n) + 1\nwith context A {k: 1}\nr = run(5):\n    on WriteFailed:\n        0\nr\n"
+    set hir [surface::compile $src -warnings off]
+    set text [hir::format $hir]
+    set lines [split $text \n]
+    set again [hir::parse $text]
+    list [lsearch -inline -glob $lines {trait Out *}] \
+        [lindex [regexp -inline {contextclone \([^)]*\)} [lsearch -inline -glob $lines {*contextclone*}]] 0] \
+        [llength [lsearch -all -glob $lines {*contexttrait Out.emit witness A*}]] \
+        [expr {[hir::format $again] eq $text}] \
+        [lsort -unique [lmap b {interp compile cranelift-generic cranelift} {lrange [outcomeUnderHir $b $again] 0 end-1}]]
+} -result {{trait Out context owner - requires emit(n: int) -> int errors WriteFailed} {contextclone (Out=A)} 2 1 {{value 13}}}
+
+# The evidence program: a context trait without errors, a consumer twice
+# over it, and the same function written by hand against the concrete
+# context (twice_a); sum/sum_a call each 50 times.
+set evidence {type Small = Int in 0..1000
+
+context trait Out:
+    fn emit(n: int) -> int
+
+context struct A:
+    k: Small
+
+fn emit(n: int, context c: A) -> int:
+    n + c.k
+
+fn twice(n: int, context out: Out) -> int:
+    out.emit(n) + out.emit(n)
+
+fn twice_a(n: int, context c: A) -> int:
+    emit(n) + emit(n)
+
+fn sum(i: int, acc: int) -> int:
+    if i == 0:
+        return acc
+    sum(i - 1, acc + twice(i))
+
+fn sum_a(i: int, acc: int) -> int:
+    if i == 0:
+        return acc
+    sum_a(i - 1, acc + twice_a(i))
+
+with context A {k: 1}
+}
+
+test ct-nir-direct {NIR: the clone calls the selected implementation directly with its one ordinary operand (params=1, no extra argument, no callvalue); the implementation loads its context from the fixed slot; the clone's body is the hand-written concrete function's} -body {
+    set hir [surface::compile "$::evidence\n\[sum(50, 0), sum_a(50, 0)\]\n" -warnings off]
+    set nir [native::nir $hir]
+    set emit [nirId $nir emit]
+    list [nirHeader $nir twice<Out=A>] [nirBody $nir twice<Out=A>] \
+        [expr {[nirBody $nir twice<Out=A>] eq [nirBody $nir twice_a]}] \
+        [nirBody $nir emit] [regexp -all {callvalue|callindirect} $nir] $emit
+} -result {{func 4 "twice<Out=A>" params=1 env=0 regs=5 pnames="n" captures=0 instance="int" rawregs="0 1 2 3" rawparams="0"} {{%1 = call 1 %0} {%2 = call 1 %0} {%3 = op riadd %1 %2} {%4 = op rbox %3} {ret %4}} 1 {{%1 = contextload 0} {%2 = op runbox %1} {%3 = op riadd %0 %2} {ret %3}} 0 1}
+
+test ct-native-context-area {the native context area has a slot for the installed context struct only: a context trait never gets a slot, a tag or a table} -body {
+    set nir [native::nir [surface::compile "$::evidence\nsum(50, 0)\n" -warnings off]]
+    lsearch -all -inline -regexp [split $nir \n] {^(nir|context) }
+} -result {{nir 1 call-effects=1 statics=0 contexts=8} {context 0 "A" offset=0 words=1 fields="k"}}
+
+test ct-allocation-free {context-trait specialization allocates nothing: 100 operations through the trait, like 100 direct calls of the concrete implementation, allocate 0 objects} -constraints {linuxX86_64} -body {
+    lmap last {{sum(50, 0)} {sum_a(50, 0)}} {
+        set report [native::allocationReport [surface::compile "$::evidence\n$last\n" -warnings off] summary]
+        list [dict get $report total allocations] [dict get $report total allocatedBytes]
+    }
+} -result {{0 0} {0 0}}
+
+test ct-machine-code-direct {machine code: the clone calls the implementation with a direct call (no indirect call), and is exactly as long as the hand-written concrete function} -constraints {linuxX86_64 objdump posixShell} -body {
+    set dir [makeDirectory ct-exe-[pid]]
+    set exe [file join $dir evidence]
+    set hir [surface::compile "$::evidence\n\[sum(50, 0), sum_a(50, 0)\]\n" -warnings off]
+    native::executable $hir $exe
+    set nir [native::nir $hir]
+    set clone botlish_fn_[nirId $nir twice<Out=A>]
+    set concrete botlish_fn_[nirId $nir twice_a]
+    set emit botlish_fn_[nirId $nir emit]
+    set symbols [exec objdump -t $exe]
+    set sizes [lmap f [list $clone $concrete] {
+        regexp "(\[0-9a-f\]+)\\s+$f\n" "$symbols\n" -> size
+        scan $size %x
+    }]
+    set code [exec objdump -d --no-show-raw-insn $exe]
+    set body [lindex [regexp -inline "<$clone>:\n(.*?)\n\n" "$code\n\n"] 1]
+    set result [list [exec $exe] [lindex $sizes 0] [expr {[lindex $sizes 0] == [lindex $sizes 1]}] \
+        [regexp -all "call +\[0-9a-f\]+ <$emit>" $body] [regexp -all {call +\*} $body]]
+    removeDirectory ct-exe-[pid]
+    set result
+} -result {{[2650, 2650]} 89 1 2 0}
+
+test ct-tooling {-contexts names the context trait, its bindings, the source functions requiring it, each call's selection with its implementation mapping, and the clones; -traits shows which context structs implement it} -body {
+    set hir [moduleHir $::ctLib [selectionProgram {ct::a::create()}]]
+    set summary [split [hir::contexts::summary $hir] \n]
+    list [lsearch -all -inline -regexp $summary {^(contexttrait|    emit|contextselect|    emit ->|contextclone)}] \
+        [lsearch -all -inline -glob $summary {source-function ct::app::run *}] \
+        [lsearch -all -inline -glob [split [hir::traits::report $hir] \n] {*context ct::* implement*}]
+} -match glob -result {{{contexttrait ct::out::Out} {    emit(n: int) -> int errors WriteFailed} {contexttraitparam e* out ct::out::Out} {contextselect e* ct::out::Out ct::a::A} {    emit -> ct::a::emit} {contextclone ct::out::twice<ct::out::Out=ct::a::A> ct::out::Out=ct::a::A} {contextclone ct::app::run<ct::out::Out=ct::a::A> ct::out::Out=ct::a::A}} {{source-function ct::app::run e* direct-contexts () required-contexts (ct::out::Out)}} {{    context ct::a::A implements ct::out::Out (emit -> ct::a::emit)} {    context ct::b::B implements ct::out::Out (emit -> ct::b::emit)} {    context ct::clock::Clock does not implement ct::out::Out: *} {    context ct::timed::Timed implements ct::out::Out (emit -> ct::timed::emit)}}}
+
+test ct-no-traits-unchanged {a program that declares no trait or context trait is built once, with no trait metadata} -body {
+    set hir [surface::compile "fn f(n: int) -> int:\n    n + 1\nf(2)\n" -warnings off]
+    list [dict exists $hir traitSource] [dict exists $hir traits]
+} -result {0 0}
+
+test ct-source-audit {no backend implements context traits: core/, compiler/ and native/ never name a library context trait, context or refinement, never read the trait registry, satisfaction or selection, and the only context-trait mention below HIR is the dead-code placeholder's comment} -body {
+    set hits {}
+    foreach dir {core compiler native native/src native/src/codegen native/src/runtime} {
+        foreach file [glob -nocomplain -directory [file join $::projectRoot $dir] *.tcl *.rs] {
+            set f [open $file r]
+            set text [read $f]
+            close $f
+            foreach pattern {io::IO LinuxIO LinuxPath io::path satisfiesTrait isContext selections hir::traits:: contextClone traitImpl} {
+                if {[string first $pattern $text] >= 0} {
+                    lappend hits [list [file tail $file] $pattern]
+                }
+            }
+        }
+    }
+    lsort -unique $hits
+} -result {}
+
+cleanupTests

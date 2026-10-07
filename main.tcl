@@ -144,6 +144,18 @@ proc runFile {path showCode showHir showAst showAot showNative} {
                 }
             }
         }
+        if {[dict exists $shownHir traitSource contexts]} {
+            # Context-trait requirements (CONTEXT-TRAITS.md) exist in the
+            # checked source program only: explain them there.
+            set source [dict get $shownHir traitSource]
+            foreach b [dict get $source contexts blocks] {
+                foreach id [hir::contexts::required $source $b] {
+                    if {![hir::contexts::isTrait $id]} continue
+                    puts "why [hir::contexts::BlockName $source $b] requires $id:"
+                    puts [hir::contexts::explain $source $b $id]
+                }
+            }
+        }
     }
     switch -- $showAot {
         text { puts [hir::aot::explain $shownHir] }

@@ -241,6 +241,11 @@ proc hir::types::resolveApplication {ctor argTypes} {
         error "\"$ctor\" takes $arity type argument(s), got [llength $argTypes]"
     }
     foreach t $argTypes {
+        set contextTrait [MentionedContextTrait $t]
+        if {$contextTrait ne ""} {
+            return -code error -errorcode {BOTLISH CONTEXT-TRAIT-POSITION} \
+                [ContextTraitPositionMessage $contextTrait "the element type of $ctor\[[show $t]\]"]
+        }
         if {[MentionsTrait $t]} {
             # A container of trait values would have to carry arbitrary
             # witnesses: there is no erased/heterogeneous trait
@@ -318,6 +323,38 @@ proc hir::types::MentionsTrait {type} {
         }
     }
     return 0
+}
+
+# The context trait (CONTEXT-TRAITS.md) TYPE is or contains -- an element, a
+# field, a function type's argument or result -- or "". A context trait is an
+# environment capability, never a value type: it is valid only as the type of
+# a context parameter, and every other position rejects it
+# (CONTEXT-TRAIT-POSITION, ContextTraitPositionMessage).
+proc hir::types::MentionedContextTrait {type} {
+    if {[IsTrait $type]} {
+        return [expr {[hir::traits::isContext [lindex $type 1]] ? [lindex $type 1] : ""}]
+    }
+    set inner {}
+    if {[IsList $type] || [IsSet $type] || [IsMutArray $type]} {
+        set inner [list [lindex $type 1]]
+    } elseif {[IsFn $type]} {
+        set inner [concat [FnArgs $type] [list [FnReturn $type]]]
+    } elseif {[IsStruct $type]} {
+        set inner [lmap {name t} [lindex $type 1] {set t}]
+    }
+    foreach t $inner {
+        set id [MentionedContextTrait $t]
+        if {$id ne ""} {
+            return $id
+        }
+    }
+    return ""
+}
+
+# The CONTEXT-TRAIT-POSITION message for context trait ID used as WHAT ("the
+# type of parameter \"x\"", "a List element", ...).
+proc hir::types::ContextTraitPositionMessage {id what} {
+    return "$id is a context trait, which cannot be $what: a context trait is an execution-environment capability, not a value type -- it has no value, representation or storage, and is valid only as the type of a context parameter (\"context NAME: [namespace tail $id]\")"
 }
 
 # The hidden witness of a join of views with witnesses A and B: the one
@@ -1456,6 +1493,10 @@ proc hir::types::AggregateOfValue {v} {
 # RESULT.
 proc hir::types::ShapeResult {hir shape argExprs argTypes result} {
     switch -- [lindex $shape 0] {
+        never {
+            # context#unreachable (core/contexts.tcl): never completes.
+            return never
+        }
         context-struct {
             # context#load("ID") (core/contexts.tcl, CONTEXTS.md): the
             # installed context of the context-struct declaration ID, a
@@ -1465,6 +1506,13 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result} {
                 set id [lindex [hir::get $hir $arg literal] end]
                 if {[hir::structs::declared $id]} {
                     return [list nstruct $id]
+                }
+                if {[hir::traits::declared $id] && [hir::traits::isContext $id]} {
+                    # A context-trait binding (CONTEXT-TRAITS.md): source
+                    # code sees the context trait's operations only; the
+                    # installed context that provides them is selected
+                    # statically and never becomes this binding's type.
+                    return [list trait $id]
                 }
             }
             return $result

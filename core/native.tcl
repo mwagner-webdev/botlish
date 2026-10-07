@@ -356,6 +356,11 @@ proc core::native::ValidShape {shape count} {
         # .bot module long after core bootstrap registers the native).
         return [expr {$length == 2 && [regexp {^[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*$} [lindex $shape 1]]}]
     }
+    if {$shape eq {never}} {
+        # {never}: the native never completes normally
+        # (context#unreachable, core/contexts.tcl).
+        return 1
+    }
     if {[lindex $shape 0] eq {context-struct}} {
         # {context-struct I}: the result is the installed context of the
         # context-struct declaration whose canonical identity is the String

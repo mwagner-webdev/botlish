@@ -300,6 +300,11 @@ proc hir::structs::apply {decls} {
                         [hir::resolve::ShowTypeExpr $typeExpr] $fieldName $name $resolved] \
                     [hir::resolve::TypeErrorKind $options TYPE]
             }
+            if {[hir::types::MentionedContextTrait $resolved] ne ""} {
+                Fail [dict get $field typeSpan] \
+                    [hir::types::ContextTraitPositionMessage [hir::types::MentionedContextTrait $resolved] \
+                        "the type of field \"$fieldName\" of struct \"$name\""] CONTEXT-TRAIT-POSITION
+            }
             if {[hir::types::MentionsTrait $resolved]} {
                 # A stored trait value would need its witness stored beside
                 # it: an existential representation this milestone does not
