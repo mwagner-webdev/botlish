@@ -36,7 +36,13 @@
 # and SAME-FAILURE (`fail Bad` from two or more exits of one function). The
 # fails are known by construction too, so the oracle predicts SAME-FAILURE
 # exactly (WARNINGS-SAME-FAILURE.md): every `fail Bad` of a function is a
-# reachable exit, and two or more are one group, anchored at the first.
+# reachable exit, and two or more are one group, anchored at the first. The
+# element pool's `"s"` is the generator's only one-character String literal,
+# and a ONE-CHAR-STRING-LITERAL finding wherever it is written
+# (WARNINGS-ONE-CHAR-STRING-LITERAL.md: dead and range-unreachable branches
+# included, since that warning has no reachability notion); nothing else the
+# generator writes contains the text `"s"`, so the oracle predicts that code at
+# every occurrence of it, exactly.
 #
 # The oracle is independent of the compiler: from how each function was built
 # it knows its value exits (dead and range-unreachable ones are not exits) and
@@ -47,7 +53,7 @@
 #             predicted functions with the predicted anchor and notes (a missed
 #             or mislocated prediction is a failure; an unpredicted warning is
 #             printed as EXTRA and counted, and the summary must show 0); the
-#             SAME-FAILURE warnings likewise
+#             SAME-FAILURE and ONE-CHAR-STRING-LITERAL warnings likewise
 #   off       compiles; no warning, no pass ran (stats counter, execution
 #             trace on the pass), and the HIR equals default's without its
 #             side table
@@ -527,6 +533,25 @@ proc fixedOf {hir {code FIXED-ARITY-LIST-RETURN}} {
     return [lsort -dictionary $result]
 }
 
+# {LINE COL} of every `"s"` in SOURCE: the predicted ONE-CHAR-STRING-LITERAL
+# sites (the element pool's one one-character String literal).
+proc literalSites {source} {
+    set sites {}
+    set n 0
+    foreach line [split $source \n] {
+        incr n
+        foreach range [regexp -all -inline -indices {"s"} $line] {
+            lappend sites [list $n [expr {[lindex $range 0] + 1}]]
+        }
+    }
+    return [lsort -dictionary $sites]
+}
+
+# {LINE COL} of each ONE-CHAR-STRING-LITERAL warning of HIR.
+proc literalsOf {hir} {
+    return [lsort -dictionary [lmap w [fixedOf $hir ONE-CHAR-STRING-LITERAL] {lrange $w 0 1}]]
+}
+
 proc valueOf {hir} {
     if {[catch {core::formatValue [core::evalProgram [hir::lower $hir]]} v]} {
         return [list error $v]
@@ -556,8 +581,22 @@ for {set seed $first} {$seed < $first + $seeds} {incr seed} {
     } else {
         set actual [fixedOf $hir]
         foreach w [hir::warnings::of $hir] {
-            if {[dict get $w code] ni {FIXED-ARITY-LIST-RETURN SAME-RETURN-VALUE SAME-FAILURE}} {
+            if {[dict get $w code] ni {FIXED-ARITY-LIST-RETURN SAME-RETURN-VALUE SAME-FAILURE ONE-CHAR-STRING-LITERAL}} {
                 lappend problems "unexpected code [dict get $w code]"
+            }
+        }
+        # ONE-CHAR-STRING-LITERAL: the construction-known `"s"` sites, exactly.
+        set predictedLiterals [literalSites $source]
+        set actualLiterals [literalsOf $hir]
+        foreach l $predictedLiterals {
+            if {$l ni $actualLiterals} {
+                lappend problems "MISSED predicted ONE-CHAR-STRING-LITERAL at $l (actual: $actualLiterals)"
+            }
+        }
+        foreach l $actualLiterals {
+            if {$l ni $predictedLiterals} {
+                puts "EXTRA seed $seed: ONE-CHAR-STRING-LITERAL at $l is not predicted:\n$source"
+                incr extras
             }
         }
         foreach p $predicted {
@@ -620,7 +659,7 @@ for {set seed $first} {$seed < $first + $seeds} {incr seed} {
         } elseif {$all ne ""} {
             lappend problems "error mode accepted a program with warnings"
         }
-        if {($predicted ne "" || $predictedFailures ne "") && !$rejected} {
+        if {($predicted ne "" || $predictedFailures ne "" || $predictedLiterals ne "") && !$rejected} {
             lappend problems "error mode accepted a program with a predicted warning"
         }
         # The conversion law.

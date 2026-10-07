@@ -30,7 +30,10 @@
 # third of the programs contain only silent functions (no failure raised from
 # two reachable exits of one function). Every call is written so that no other
 # warning code can fire (method syntax for the generated functions; one-
-# parameter helpers; no list-literal exits), so the oracle is single-code: any
+# parameter helpers; no list-literal exits), with one exception the oracle
+# predicts too: the drivers' argument `"s"`, the generator's only one-character
+# String literal, is a ONE-CHAR-STRING-LITERAL finding wherever it is written
+# (WARNINGS-ONE-CHAR-STRING-LITERAL.md; its sites are construction-known). Any
 # other code is a failure.
 #
 # The oracle is independent of the compiler: per function, it groups the
@@ -45,8 +48,10 @@
 #             summary must show 0; a group reported twice is a failure)
 #   off       compiles; no warning, no pass ran (stats counter, execution trace
 #             on the pass), and the HIR equals default's without its side table
-#   error     rejected with {CORE SEMANTIC SAME-FAILURE} iff a warning is
-#             predicted; compiles otherwise
+#   error     rejected iff a warning of either code is predicted, with the code
+#             of the predicted warning that sorts first (source order:
+#             {CORE SEMANTIC SAME-FAILURE} when a group is predicted, since the
+#             drivers follow every function); compiles otherwise
 #
 # There is no conversion law: no mechanical rewrite exists for this warning's
 # response space (merging conditions and splitting a failure are semantic
@@ -306,10 +311,16 @@ proc generate {seed} {
     }
     lappend lines "ks = \[0, 1, 2, 3, 4, 7\]"
     set results {}
+    # {LINE COL} of every `"s"` written (ONE-CHAR-STRING-LITERAL sites).
+    set literals {}
     foreach driver $drivers {
         lassign $driver f declared
         foreach {v args} [list v$f {1, [1, 2]} u$f {"s", [3]}] {
             lappend lines "$v = loop k in ks:" "    w = k.g$f\($args):"
+            set at [string first {"s"} [lindex $lines end]]
+            if {$at >= 0} {
+                lappend literals [list [llength $lines] [expr {$at + 1}]]
+            }
             foreach n $declared {
                 lappend lines "        on $n:" "            -1"
             }
@@ -321,7 +332,28 @@ proc generate {seed} {
     if {$predicted eq ""} {
         census silentPrograms
     }
-    return [list [join $lines \n] [lsort -dictionary $predicted]]
+    return [list [join $lines \n] [lsort -dictionary $predicted] $literals]
+}
+
+# {LINE COL} of each ONE-CHAR-STRING-LITERAL warning of HIR, in source order.
+proc literalsOf {hir} {
+    set result {}
+    foreach w [hir::warnings::of $hir] {
+        if {[dict get $w code] ne "ONE-CHAR-STRING-LITERAL"} continue
+        set at [lrange [dict get $w primary] 2 end]
+        lappend result [list [dict get $at line] [dict get $at column]]
+    }
+    return [lsort -dictionary $result]
+}
+
+# The code of the predicted warning that sorts first (source order), or "".
+proc firstPredictedCode {predicted literals} {
+    set all [concat [lmap p $predicted {list [lindex $p 0] [lindex $p 1] SAME-FAILURE}] \
+        [lmap l $literals {list {*}$l ONE-CHAR-STRING-LITERAL}]]
+    if {$all eq ""} {
+        return ""
+    }
+    return [lindex [lsort -dictionary $all] 0 2]
 }
 
 proc compileMode {source mode} {
@@ -345,8 +377,8 @@ proc failuresOf {hir} {
 }
 
 if {$show ne ""} {
-    lassign [generate $show] source predicted
-    puts "$source\n--- predicted (line col notes failure function exits):\n[join $predicted \n]"
+    lassign [generate $show] source predicted literals
+    puts "$source\n--- predicted (line col notes failure function exits):\n[join $predicted \n]\n--- predicted ONE-CHAR-STRING-LITERAL sites (line col):\n[join $literals \n]"
     exit 0
 }
 
@@ -357,15 +389,27 @@ set warned 0
 set clean 0
 set groups 0
 for {set seed $first} {$seed < $first + $seeds} {incr seed} {
-    lassign [generate $seed] source predicted
+    lassign [generate $seed] source predicted literals
     incr groups [llength $predicted]
     set problems {}
     if {[catch {compileMode $source default} hir options]} {
         lappend problems "default mode did not compile: $hir"
     } else {
         foreach w [hir::warnings::of $hir] {
-            if {[dict get $w code] ne "SAME-FAILURE"} {
+            if {[dict get $w code] ni {SAME-FAILURE ONE-CHAR-STRING-LITERAL}} {
                 lappend problems "unexpected code [dict get $w code]: [dict get $w message]"
+            }
+        }
+        set actualLiterals [literalsOf $hir]
+        foreach l $literals {
+            if {$l ni $actualLiterals} {
+                lappend problems "MISSED predicted ONE-CHAR-STRING-LITERAL at $l (actual: $actualLiterals)"
+            }
+        }
+        foreach l $actualLiterals {
+            if {$l ni $literals} {
+                puts "EXTRA seed $seed: ONE-CHAR-STRING-LITERAL at $l is not predicted:\n$source"
+                incr extras
             }
         }
         set actual [failuresOf $hir]
@@ -401,13 +445,14 @@ for {set seed $first} {$seed < $first + $seeds} {incr seed} {
         }
         # error: rejected with this code iff a warning is predicted.
         set rejected [catch {compileMode $source error} message options]
+        set firstCode [firstPredictedCode $predicted $literals]
         if {$rejected} {
-            if {$predicted eq ""} {
+            if {$firstCode eq ""} {
                 lappend problems "error mode rejected a program with no predicted warning: $message"
-            } elseif {[dict get $options -errorcode] ne {CORE SEMANTIC SAME-FAILURE}} {
+            } elseif {[dict get $options -errorcode] ne [list CORE SEMANTIC $firstCode]} {
                 lappend problems "error mode rejected with [dict get $options -errorcode]: $message"
             }
-        } elseif {$predicted ne ""} {
+        } elseif {$firstCode ne ""} {
             lappend problems "error mode accepted a program with a predicted warning"
         }
         if {$actual eq ""} { incr clean } else { incr warned }

@@ -43,7 +43,12 @@
 # Every call is written so that no other warning code can fire: one-argument
 # calls (functional or method syntax, a flag where the function has one),
 # method syntax for the wrong-shape functions, one fail per validator, one
-# exit per predicate. A driver per function calls it twice and uses the proof
+# exit per predicate -- with one exception the oracle predicts too: the
+# generator's one-character String literals (the drivers' `"x"` and `"z"`,
+# the wrong-shape arguments `"x"` and `"y"`, the hygiene twin's `"t"`) are
+# ONE-CHAR-STRING-LITERAL findings wherever they are written
+# (WARNINGS-ONE-CHAR-STRING-LITERAL.md); no other text the generator writes
+# contains them, so that code is predicted at every occurrence, exactly. A driver per function calls it twice and uses the proof
 # where the shape makes one (a predicate's true edge, a validator's normal
 # completion), so the renamed program must still type-check. About a third of
 # the programs are silent by construction (every proves function in shape is
@@ -57,18 +62,21 @@
 #   default   compiles; the PROVES-NAMING warnings are exactly the prediction
 #             (a missed or mislocated one fails; an unpredicted one is
 #             printed as EXTRA and counted, and the summary must show 0; a
-#             function reported twice fails); any other code fails
+#             function reported twice fails); the ONE-CHAR-STRING-LITERAL
+#             warnings likewise; any other code fails
 #   off       compiles; no warning, no pass ran (stats counter, execution
 #             trace on the pass), and the HIR equals default's without its
 #             side table
-#   error     rejected with {CORE SEMANTIC PROVES-NAMING} iff a warning is
-#             predicted; compiles otherwise
+#   error     rejected iff a warning of either code is predicted, with the
+#             code of the predicted warning that sorts first (the entry file,
+#             then the module; line, column); compiles otherwise
 #
 # and the rename law: every predicted function and all its call sites are
 # renamed mechanically -- a predicate f -> f?, a validator f -> validate_f
 # (the canonical mechanical rewrite; the bare `validate` would conform too,
 # which is why the message never suggests a name) -- and the renamed program
-# must compile with no diagnostic and no warning of any code, have the
+# must compile with no diagnostic and no warning of any code (but the
+# ONE-CHAR-STRING-LITERAL findings of its literals, exactly), have the
 # identical native IR (specialized and generic) up to the labels of the
 # renamed functions (NIR names a function by its spelling, `func N "NAME"`:
 # each renamed function's label must change from exactly its old name to
@@ -404,6 +412,46 @@ proc namingOf {hir} {
     return [lsort -dictionary $result]
 }
 
+# {FILE LINE COL} of every one-character String literal the generator wrote
+# in the entry program SOURCE and the module MODULE: the predicted
+# ONE-CHAR-STRING-LITERAL sites.
+proc literalSites {source module} {
+    set sites {}
+    foreach {file text} [list fuzz.bot $source pnm.bot $module] {
+        set n 0
+        foreach line [split $text \n] {
+            incr n
+            foreach range [regexp -all -inline -indices {"[txyz]"} $line] {
+                lappend sites [list $file $n [expr {[lindex $range 0] + 1}]]
+            }
+        }
+    }
+    return [lsort -dictionary $sites]
+}
+
+# {FILE LINE COL} of each ONE-CHAR-STRING-LITERAL warning of HIR.
+proc literalsOf {hir} {
+    set result {}
+    foreach w [hir::warnings::of $hir] {
+        if {[dict get $w code] ne "ONE-CHAR-STRING-LITERAL"} continue
+        set at [lrange [dict get $w primary] 2 end]
+        set file [file tail [lindex [split [hir::originLocation $hir [dict get $w primary]] :] 0]]
+        lappend result [list $file [dict get $at line] [dict get $at column]]
+    }
+    return [lsort -dictionary $result]
+}
+
+# The code of the predicted warning that sorts first (the entry file before
+# the module, then line and column), or "".
+proc firstPredictedCode {predicted literals} {
+    set all [concat [lmap p $predicted {list [expr {[lindex $p 0] eq "fuzz.bot" ? 0 : 1}] {*}[lrange $p 1 2] PROVES-NAMING}] \
+        [lmap l $literals {list [expr {[lindex $l 0] eq "fuzz.bot" ? 0 : 1}] {*}[lrange $l 1 2] ONE-CHAR-STRING-LITERAL}]]
+    if {$all eq ""} {
+        return ""
+    }
+    return [lindex [lsort -dictionary $all] 0 3]
+}
+
 proc valueOf {hir} {
     if {[catch {core::formatValue [core::evalProgram [hir::lower $hir]]} v]} {
         return [list error $v]
@@ -465,13 +513,26 @@ for {set seed $first} {$seed < $first + $seeds} {incr seed} {
     incr predictedTotal [llength $predicted]
     set source [render [dict get $g main] $names]
     writeModule [render [dict get $g module] $names]
+    set literals [literalSites $source [render [dict get $g module] $names]]
     set problems {}
     if {[catch {compileMode $source default} hir options]} {
         lappend problems "default mode did not compile: $hir"
     } else {
         foreach w [hir::warnings::of $hir] {
-            if {[dict get $w code] ne "PROVES-NAMING"} {
+            if {[dict get $w code] ni {PROVES-NAMING ONE-CHAR-STRING-LITERAL}} {
                 lappend problems "unexpected code [dict get $w code]: [dict get $w message]"
+            }
+        }
+        set actualLiterals [literalsOf $hir]
+        foreach l $literals {
+            if {$l ni $actualLiterals} {
+                lappend problems "MISSED predicted ONE-CHAR-STRING-LITERAL at $l (actual: $actualLiterals)"
+            }
+        }
+        foreach l $actualLiterals {
+            if {$l ni $literals} {
+                puts "EXTRA seed $seed: ONE-CHAR-STRING-LITERAL at $l is not predicted:\n$source"
+                incr extras
             }
         }
         set actual [namingOf $hir]
@@ -505,15 +566,17 @@ for {set seed $first} {$seed < $first + $seeds} {incr seed} {
         } elseif {$off ne [dict remove $hir warnings]} {
             lappend problems "HIR differs between off and default"
         }
-        # error: rejected with this code iff a warning is predicted.
+        # error: rejected iff a warning is predicted, with the sort-first
+        # predicted code.
         set rejected [catch {compileMode $source error} message options]
+        set firstCode [firstPredictedCode $predicted $literals]
         if {$rejected} {
-            if {$predicted eq ""} {
+            if {$firstCode eq ""} {
                 lappend problems "error mode rejected a program with no predicted warning: $message"
-            } elseif {[dict get $options -errorcode] ne {CORE SEMANTIC PROVES-NAMING}} {
+            } elseif {[dict get $options -errorcode] ne [list CORE SEMANTIC $firstCode]} {
                 lappend problems "error mode rejected with [dict get $options -errorcode]: $message"
             }
-        } elseif {$predicted ne ""} {
+        } elseif {$firstCode ne ""} {
             lappend problems "error mode accepted a program with a predicted warning"
         }
         # The rename law.
@@ -521,11 +584,16 @@ for {set seed $first} {$seed < $first + $seeds} {incr seed} {
             set newNames [dict merge $names [dict get $g renames]]
             set renamedSource [render [dict get $g main] $newNames]
             writeModule [render [dict get $g module] $newNames]
+            set renamedLiterals [literalSites $renamedSource [render [dict get $g module] $newNames]]
             set law {}
             if {[catch {compileMode $renamedSource default} rhir]} {
                 lappend law "the renamed program does not compile: $rhir"
             } else {
-                if {[hir::diagnostics $rhir] ne "" || [hir::warnings::of $rhir] ne ""} {
+                set others [lmap w [hir::warnings::of $rhir] {
+                    if {[dict get $w code] eq "ONE-CHAR-STRING-LITERAL"} continue
+                    dict get $w message
+                }]
+                if {[hir::diagnostics $rhir] ne "" || $others ne "" || [literalsOf $rhir] ne $renamedLiterals} {
                     lappend law "the renamed program has diagnostics or warnings: [hir::diagnostics $rhir] [lmap w [hir::warnings::of $rhir] {dict get $w message}]"
                 }
                 foreach options {{} {-specialize 0}} {

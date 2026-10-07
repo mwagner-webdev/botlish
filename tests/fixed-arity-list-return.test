@@ -1223,7 +1223,7 @@ test fa-no-fine-grained-options {there is no per-warning option: -Wno-fixed-arit
 test fa-no-new-modes-or-options {the policy surface is still exactly default, off, error; the registry is static, one line per code} -body {
     list $hir::warnings::modes [dict keys $hir::warnings::passes] \
         [expr {[llength [info commands hir::warnings::enable]] + [llength [info commands hir::warnings::disable]]}]
-} -result {{default off error} {SAME-RETURN-VALUE METHOD-ELIGIBLE FIXED-ARITY-LIST-RETURN SAME-FAILURE PROVES-NAMING} 0}
+} -result {{default off error} {SAME-RETURN-VALUE METHOD-ELIGIBLE FIXED-ARITY-LIST-RETURN SAME-FAILURE PROVES-NAMING ONE-CHAR-STRING-LITERAL} 0}
 
 test fa-error-promotion-identity {the promoted error keeps the code and the message the warning has} -body {
     set source {fn pair(a, b):

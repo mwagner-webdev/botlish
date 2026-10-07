@@ -24,18 +24,24 @@
 #
 # No shadowing is generated (the unit tests own it). The oracle is independent
 # of the compiler: it knows, from how each statement was built, which calls are
-# eligible, and predicts the exact (line, column) of each warning. For every
-# program it checks
+# eligible, and predicts the exact (line, column) of each warning. The
+# generator's one-character String literals -- each function's `s = "s"`, the
+# receiver `"t"`, concat's argument `"x"` -- are ONE-CHAR-STRING-LITERAL
+# findings wherever they are written (WARNINGS-ONE-CHAR-STRING-LITERAL.md); no
+# other text the generator writes contains them, so the oracle predicts that
+# code at every occurrence, exactly. For every program it checks
 #
 #   default   compiles; the warnings are exactly the predicted sites (a
 #             predicted site the compiler misses is a failure; an extra warning
 #             is printed as EXTRA for inspection and counted, and fails only if
-#             it is not a METHOD-ELIGIBLE warning)
+#             it is of neither predicted code); the ONE-CHAR-STRING-LITERAL
+#             warnings likewise
 #   off       compiles; no warning, no warning pass ran (the stats counter and
 #             an execution trace), and the HIR equals the default compile's
 #             HIR without its side table
-#   error     rejected with {CORE SEMANTIC METHOD-ELIGIBLE} iff a warning is
-#             predicted, and compiles otherwise
+#   error     rejected iff a warning of either code is predicted, with the
+#             code of the predicted warning that sorts first (source order),
+#             and compiles otherwise
 #   round trip  for every predicted site, the program with that one call
 #             written with method sugar compiles with one warning fewer to the
 #             same HIR text, core IR and NIR (specialized and generic), and --
@@ -226,6 +232,38 @@ proc sitesOf {hir} {
     }]
 }
 
+# {LINE COL} of every one-character String literal the generator wrote in
+# SOURCE (`"s"`, `"t"`, `"x"`): the predicted ONE-CHAR-STRING-LITERAL sites.
+proc literalSites {source} {
+    set sites {}
+    set n 0
+    foreach line [split $source \n] {
+        incr n
+        foreach range [regexp -all -inline -indices {"[stx]"} $line] {
+            lappend sites [list $n [expr {[lindex $range 0] + 1}]]
+        }
+    }
+    return [lsort -dictionary $sites]
+}
+
+proc literalsOf {hir} {
+    return [lsort -dictionary [lmap w [hir::warnings::of $hir] {
+        if {[dict get $w code] ne "ONE-CHAR-STRING-LITERAL"} continue
+        set f [lrange [dict get $w primary] 2 end]
+        list [dict get $f line] [dict get $f column]
+    }]]
+}
+
+# The code of the predicted warning that sorts first (source order), or "".
+proc firstPredictedCode {predicted literals} {
+    set all [concat [lmap p $predicted {list {*}$p METHOD-ELIGIBLE}] \
+        [lmap l $literals {list {*}$l ONE-CHAR-STRING-LITERAL}]]
+    if {$all eq ""} {
+        return ""
+    }
+    return [lindex [lsort -dictionary $all] 0 2]
+}
+
 proc nirOf {hir args} {
     if {[catch {native::lower::program $hir {*}$args} result options]} {
         return [list error [dict get $options -errorcode]]
@@ -260,11 +298,24 @@ for {set seed $first} {$seed < $first + $seeds} {incr seed} {
     } else {
         set actual [sitesOf $hir]
         foreach w [hir::warnings::of $hir] {
-            if {[dict get $w code] ne "METHOD-ELIGIBLE"} {
+            if {[dict get $w code] ni {METHOD-ELIGIBLE ONE-CHAR-STRING-LITERAL}} {
                 lappend problems "unexpected code [dict get $w code]"
             }
             if {[dict get $w secondary] ne ""} {
-                lappend problems "METHOD-ELIGIBLE with a secondary location"
+                lappend problems "[dict get $w code] with a secondary location"
+            }
+        }
+        set literals [literalSites $source]
+        set actualLiterals [literalsOf $hir]
+        foreach l $literals {
+            if {$l ni $actualLiterals} {
+                lappend problems "MISSED predicted ONE-CHAR-STRING-LITERAL at $l (actual: $actualLiterals)"
+            }
+        }
+        foreach l $actualLiterals {
+            if {$l ni $literals} {
+                puts "EXTRA seed $seed: ONE-CHAR-STRING-LITERAL at $l is not predicted:\n$source"
+                incr extras
             }
         }
         foreach site $predicted {
@@ -299,16 +350,17 @@ for {set seed $first} {$seed < $first + $seeds} {incr seed} {
         } elseif {$off ne [dict remove $hir warnings]} {
             lappend problems "HIR differs between off and default"
         }
-        # error: rejected iff a warning is predicted.
+        # error: rejected iff a warning is predicted, with the sort-first
+        # predicted code.
         set rejected [catch {compileMode $source error} message options]
+        set firstCode [firstPredictedCode $predicted $literals]
         if {$rejected} {
-            if {[dict get $options -errorcode] ne {CORE SEMANTIC METHOD-ELIGIBLE}} {
+            if {$firstCode eq ""} {
+                lappend problems "error mode rejected a program with no warning"
+            } elseif {[dict get $options -errorcode] ne [list CORE SEMANTIC $firstCode]} {
                 lappend problems "error mode rejected with [dict get $options -errorcode]: $message"
             }
-            if {$actual eq ""} {
-                lappend problems "error mode rejected a program with no warning"
-            }
-        } elseif {$actual ne ""} {
+        } elseif {$firstCode ne ""} {
             lappend problems "error mode accepted a program with warnings"
         }
         # The round-trip law, once per predicted site.
