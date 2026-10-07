@@ -1,0 +1,172 @@
+# ONE-CHAR-STRING-LITERAL corpus audit: tclsh9.0 audit/one-char-string-literal/tools/corpus.tcl
+# commit 61f1864d99a85e2ab3ead4cd7cc975887f41665d (corpus paths clean)
+
+compiled 36 of 40 programs
+  not compiled: examples/surface/09-mutual-recursion.bot (CORE SEMANTIC UNBOUND) -- a deliberate rejection
+  not compiled: examples/surface/10-duplicate-binding.bot (CORE SEMANTIC DUPLICATE) -- a deliberate rejection
+  not compiled: lib/list.bot (SURFACE MODULE MISSING-IMPORT)
+  not compiled: lib/mutable_array.bot (SURFACE MODULE MISSING-IMPORT)
+
+## Findings: 92 distinct (a library module's finding once)
+convert-now        0
+API-deficiency    81
+deliberate        11
+UNCLASSIFIED       0
+false positives (the token at the anchor is not a one-character String literal of the warned value): 0
+spelling law clauses 1-2 (the character spelling lexes, is the UnicodeChar of the same code point, and a UnicodeChar parameter takes it): 92 of 92 hold, over 50 distinct characters
+
+## Findings per file
+  22  examples/stdlib/ai_text_clean.bot
+   8  examples/stdlib/csv.bot
+   8  examples/stdlib/csv_chunked.bot
+   8  examples/stdlib/csv_geometric.bot
+   8  examples/stdlib/csv_records.bot
+   7  examples/stdlib/string_replace.bot
+   1  examples/stdlib/string_reverse.bot
+  26  lib/web.bot
+   2  bench/lex-strategy.bot
+   2  bench/source-checks.bot
+
+## The rewrite, per finding class (outcome over every probe: rejected KIND / runtime KIND / diverges / changed / same)
+convert-now: 
+API-deficiency: same 80, changed 22, diverges 8, runtime TYPE 23
+deliberate: runtime TYPE 3, rejected TYPE 8
+
+## API-deficiency catalog (one row per distinct consumer)
+* == against a one-character String sliced by a peek/char_at helper (str::substring) -- 31 findings
+    consumers: == str-substring:char_at(); == str-substring:character; == str-substring:delimiter; == str-substring:peek()
+    files: examples/stdlib/csv.bot, examples/stdlib/csv_chunked.bot, examples/stdlib/csv_geometric.bot, examples/stdlib/csv_records.bot, lib/web.bot
+    rewrite: changed 12, same 17, diverges 8
+    lacks: the helper returns a one-character String (or "" past the end); str::char_at returns a UnicodeChar but fails outside the String, where the helper returns ""
+* == against a str parameter or a String-typed binding -- 3 findings
+    consumers: == str-param:param:c
+    files: bench/lex-strategy.bot, lib/web.bot
+    rewrite: same 3, changed 2
+    lacks: the parameter is declared or inferred str: its callers pass one-character Strings sliced from text
+* == against an untyped parameter that receives one-character Strings -- 21 findings
+    consumers: == any-param:param:c; == any-param:param:character
+    files: bench/source-checks.bot, examples/stdlib/ai_text_clean.bot
+    rewrite: same 13, changed 8
+    lacks: the callers pass str::substring slices (peek, a first-character slice); the comparison would hold for a UnicodeChar only if the callers changed too
+* str::concat argument -- 5 findings
+    consumers: call str::concat:arg0; call str::concat:arg1
+    files: examples/stdlib/csv.bot, examples/stdlib/csv_chunked.bot, examples/stdlib/csv_geometric.bot, examples/stdlib/csv_records.bot, lib/web.bot
+    rewrite: same 4, runtime TYPE 3
+    lacks: str::concat takes two Strings: there is no append of a UnicodeChar to a String
+* element of a List[str] made an ImmutableSet[str], queried with one-character Strings -- 5 findings
+    consumers: list-element immutable_set::from_list:arg0
+    files: lib/web.bot
+    rewrite: same 15
+    lacks: the set is queried (immutable_set::contains) with one-character String slices; a set of UnicodeChars needs the scanner to read characters (str::char_at)
+* element of a List[str] table indexed (list::at) and concatenated (str::concat) -- 16 findings
+    consumers: list-element bind:web::hex_digits
+    files: lib/web.bot
+    rewrite: same 28, runtime TYPE 20
+    lacks: the digits are appended to output text with str::concat: no append of a UnicodeChar
+
+## Deliberate String usage
+  examples/stdlib/ai_text_clean.bot:58:16 "-" (clean_char): replacement texts: clean_char maps a character to "" (a removed emoji), "..." (an ellipsis) or a one-character normalization -- results of 0, 1 and 3 characters, so its result is a String of variable length; the comparisons beside them are catalogued separately
+  examples/stdlib/ai_text_clean.bot:61:16 "'" (clean_char): replacement texts: clean_char maps a character to "" (a removed emoji), "..." (an ellipsis) or a one-character normalization -- results of 0, 1 and 3 characters, so its result is a String of variable length; the comparisons beside them are catalogued separately
+  examples/stdlib/ai_text_clean.bot:64:16 "\"" (clean_char): replacement texts: clean_char maps a character to "" (a removed emoji), "..." (an ellipsis) or a one-character normalization -- results of 0, 1 and 3 characters, so its result is a String of variable length; the comparisons beside them are catalogued separately
+  examples/stdlib/string_replace.bot:49:21 "x" (sample): test data of a substring replacement: needles and replacements of 0, 1, 2 and 3 characters ("x", "aa", "abc", "") in one call list -- a one-character needle or replacement is the length-1 case of a String argument
+  examples/stdlib/string_replace.bot:49:26 "y" (sample): test data of a substring replacement: needles and replacements of 0, 1, 2 and 3 characters ("x", "aa", "abc", "") in one call list -- a one-character needle or replacement is the length-1 case of a String argument
+  examples/stdlib/string_replace.bot:49:47 "b" (sample): test data of a substring replacement: needles and replacements of 0, 1, 2 and 3 characters ("x", "aa", "abc", "") in one call list -- a one-character needle or replacement is the length-1 case of a String argument
+  examples/stdlib/string_replace.bot:49:52 "X" (sample): test data of a substring replacement: needles and replacements of 0, 1, 2 and 3 characters ("x", "aa", "abc", "") in one call list -- a one-character needle or replacement is the length-1 case of a String argument
+  examples/stdlib/string_replace.bot:49:80 "b" (sample): test data of a substring replacement: needles and replacements of 0, 1, 2 and 3 characters ("x", "aa", "abc", "") in one call list -- a one-character needle or replacement is the length-1 case of a String argument
+  examples/stdlib/string_replace.bot:49:128 "x" (sample): test data of a substring replacement: needles and replacements of 0, 1, 2 and 3 characters ("x", "aa", "abc", "") in one call list -- a one-character needle or replacement is the length-1 case of a String argument
+  examples/stdlib/string_replace.bot:49:133 "y" (sample): test data of a substring replacement: needles and replacements of 0, 1, 2 and 3 characters ("x", "aa", "abc", "") in one call list -- a one-character needle or replacement is the length-1 case of a String argument
+  examples/stdlib/string_reverse.bot:31:39 "a" (sample): test inputs of a String reversal of 0, 1, 3, 4 and 3 non-ASCII characters -- "a" is the length-1 boundary case of a String argument
+
+## Every finding: location, value, function, consumer (static type), rewrite outcome(s), class
+examples/stdlib/ai_text_clean.bot:46:19 "😀" cleaner_emoji | == any-param:param:character (any) | same | API-deficiency
+examples/stdlib/ai_text_clean.bot:46:39 "😂" cleaner_emoji | == any-param:param:character (any) | same | API-deficiency
+examples/stdlib/ai_text_clean.bot:46:59 "🙂" cleaner_emoji | == any-param:param:character (any) | changed | API-deficiency
+examples/stdlib/ai_text_clean.bot:46:79 "😍" cleaner_emoji | == any-param:param:character (any) | same | API-deficiency
+examples/stdlib/ai_text_clean.bot:47:25 "🔥" cleaner_emoji | == any-param:param:character (any) | same | API-deficiency
+examples/stdlib/ai_text_clean.bot:47:45 "🚀" cleaner_emoji | == any-param:param:character (any) | same | API-deficiency
+examples/stdlib/ai_text_clean.bot:47:65 "✅" cleaner_emoji | == any-param:param:character (any) | same | API-deficiency
+examples/stdlib/ai_text_clean.bot:47:85 "❌" cleaner_emoji | == any-param:param:character (any) | same | API-deficiency
+examples/stdlib/ai_text_clean.bot:48:25 "🎉" cleaner_emoji | == any-param:param:character (any) | same | API-deficiency
+examples/stdlib/ai_text_clean.bot:48:45 "🤖" cleaner_emoji | == any-param:param:character (any) | same | API-deficiency
+examples/stdlib/ai_text_clean.bot:48:65 "👍" cleaner_emoji | == any-param:param:character (any) | same | API-deficiency
+examples/stdlib/ai_text_clean.bot:48:85 "💡" cleaner_emoji | == any-param:param:character (any) | same | API-deficiency
+examples/stdlib/ai_text_clean.bot:57:21 "–" clean_char | == any-param:param:character (any) | same | API-deficiency
+examples/stdlib/ai_text_clean.bot:57:41 "—" clean_char | == any-param:param:character (any) | changed | API-deficiency
+examples/stdlib/ai_text_clean.bot:58:16 "-" clean_char | return (never) | runtime TYPE | deliberate
+examples/stdlib/ai_text_clean.bot:60:21 "‘" clean_char | == any-param:param:character (any) | changed | API-deficiency
+examples/stdlib/ai_text_clean.bot:60:41 "’" clean_char | == any-param:param:character (any) | changed | API-deficiency
+examples/stdlib/ai_text_clean.bot:61:16 "'" clean_char | return (never) | runtime TYPE | deliberate
+examples/stdlib/ai_text_clean.bot:63:21 "“" clean_char | == any-param:param:character (any) | changed | API-deficiency
+examples/stdlib/ai_text_clean.bot:63:41 "”" clean_char | == any-param:param:character (any) | changed | API-deficiency
+examples/stdlib/ai_text_clean.bot:64:16 "\"" clean_char | return (never) | runtime TYPE | deliberate
+examples/stdlib/ai_text_clean.bot:66:21 "…" clean_char | == any-param:param:character (any) | changed | API-deficiency
+examples/stdlib/csv.bot:40:40 "," scan_unquoted | == str-substring:character (str) | changed | API-deficiency
+examples/stdlib/csv.bot:40:60 "\n" scan_unquoted | == str-substring:character (str) | changed | API-deficiency
+examples/stdlib/csv.bot:49:21 "\"" scan_quoted | == str-substring:character (str) | same | API-deficiency
+examples/stdlib/csv.bot:50:37 "\"" scan_quoted | == str-substring:peek() (str) | same | API-deficiency
+examples/stdlib/csv.bot:51:68 "\"" scan_quoted | call str::concat:arg1 (str) | same | API-deficiency
+examples/stdlib/csv.bot:59:29 "\"" scan_field | == str-substring:peek() (str) | same | API-deficiency
+examples/stdlib/csv.bot:71:21 "," scan_record | == str-substring:delimiter (str) | diverges | API-deficiency
+examples/stdlib/csv.bot:74:21 "\n" scan_record | == str-substring:delimiter (str) | diverges | API-deficiency
+examples/stdlib/csv_chunked.bot:85:40 "," scan_unquoted | == str-substring:character (str) | changed | API-deficiency
+examples/stdlib/csv_chunked.bot:85:60 "\n" scan_unquoted | == str-substring:character (str) | changed | API-deficiency
+examples/stdlib/csv_chunked.bot:92:21 "\"" scan_quoted | == str-substring:character (str) | same | API-deficiency
+examples/stdlib/csv_chunked.bot:93:37 "\"" scan_quoted | == str-substring:peek() (str) | same | API-deficiency
+examples/stdlib/csv_chunked.bot:94:68 "\"" scan_quoted | call str::concat:arg1 (str) | same | API-deficiency
+examples/stdlib/csv_chunked.bot:101:29 "\"" scan_field | == str-substring:peek() (str) | same | API-deficiency
+examples/stdlib/csv_chunked.bot:111:21 "," scan_record | == str-substring:delimiter (str) | diverges | API-deficiency
+examples/stdlib/csv_chunked.bot:114:21 "\n" scan_record | == str-substring:delimiter (str) | diverges | API-deficiency
+examples/stdlib/csv_geometric.bot:102:40 "," scan_unquoted | == str-substring:character (str) | changed | API-deficiency
+examples/stdlib/csv_geometric.bot:102:60 "\n" scan_unquoted | == str-substring:character (str) | changed | API-deficiency
+examples/stdlib/csv_geometric.bot:109:21 "\"" scan_quoted | == str-substring:character (str) | same | API-deficiency
+examples/stdlib/csv_geometric.bot:110:37 "\"" scan_quoted | == str-substring:peek() (str) | same | API-deficiency
+examples/stdlib/csv_geometric.bot:111:68 "\"" scan_quoted | call str::concat:arg1 (str) | same | API-deficiency
+examples/stdlib/csv_geometric.bot:118:29 "\"" scan_field | == str-substring:peek() (str) | same | API-deficiency
+examples/stdlib/csv_geometric.bot:132:21 "," scan_record_rest | == str-substring:delimiter (str) | diverges | API-deficiency
+examples/stdlib/csv_geometric.bot:137:21 "\n" scan_record_rest | == str-substring:delimiter (str) | diverges | API-deficiency
+examples/stdlib/csv_records.bot:178:40 "," scan_unquoted | == str-substring:character (str) | changed | API-deficiency
+examples/stdlib/csv_records.bot:178:60 "\n" scan_unquoted | == str-substring:character (str) | changed | API-deficiency
+examples/stdlib/csv_records.bot:185:21 "\"" scan_quoted | == str-substring:character (str) | same | API-deficiency
+examples/stdlib/csv_records.bot:186:37 "\"" scan_quoted | == str-substring:peek() (str) | same | API-deficiency
+examples/stdlib/csv_records.bot:187:68 "\"" scan_quoted | call str::concat:arg1 (str) | same | API-deficiency
+examples/stdlib/csv_records.bot:194:29 "\"" scan_field | == str-substring:peek() (str) | same | API-deficiency
+examples/stdlib/csv_records.bot:208:21 "," scan_record_rest | == str-substring:delimiter (str) | diverges | API-deficiency
+examples/stdlib/csv_records.bot:213:21 "\n" scan_record_rest | == str-substring:delimiter (str) | diverges | API-deficiency
+examples/stdlib/string_replace.bot:49:21 "x" sample | call replace:arg1 (untyped) | rejected TYPE | deliberate
+examples/stdlib/string_replace.bot:49:26 "y" sample | call replace:arg2 (untyped) | rejected TYPE | deliberate
+examples/stdlib/string_replace.bot:49:47 "b" sample | call replace:arg1 (untyped) | rejected TYPE | deliberate
+examples/stdlib/string_replace.bot:49:52 "X" sample | call replace:arg2 (untyped) | rejected TYPE | deliberate
+examples/stdlib/string_replace.bot:49:80 "b" sample | call replace:arg2 (untyped) | rejected TYPE | deliberate
+examples/stdlib/string_replace.bot:49:128 "x" sample | call replace:arg1 (untyped) | rejected TYPE | deliberate
+examples/stdlib/string_replace.bot:49:133 "y" sample | call replace:arg2 (untyped) | rejected TYPE | deliberate
+examples/stdlib/string_reverse.bot:31:39 "a" sample | call reverse_chars:arg0 (untyped) | rejected TYPE | deliberate
+lib/web.bot:105:47 "." top | list-element immutable_set::from_list:arg0 (List[str]) | same, same, same | API-deficiency
+lib/web.bot:105:52 "_" top | list-element immutable_set::from_list:arg0 (List[str]) | same, same, same | API-deficiency
+lib/web.bot:105:57 "%" top | list-element immutable_set::from_list:arg0 (List[str]) | same, same, same | API-deficiency
+lib/web.bot:105:62 "+" top | list-element immutable_set::from_list:arg0 (List[str]) | same, same, same | API-deficiency
+lib/web.bot:105:67 "-" top | list-element immutable_set::from_list:arg0 (List[str]) | same, same, same | API-deficiency
+lib/web.bot:129:38 "-" label_char? | == str-param:param:c (str) | same, same, same | API-deficiency
+lib/web.bot:188:30 "." domain? | == str-substring:char_at() (str) | changed, changed, same | API-deficiency
+lib/web.bot:191:38 "." domain? | == str-substring:char_at() (str) | same, same, same | API-deficiency
+lib/web.bot:207:38 "@" emailish? | == str-substring:char_at() (str) | changed, changed, same | API-deficiency
+lib/web.bot:212:15 "0" top | list-element bind:web::hex_digits (List[str]) | same, runtime TYPE, runtime TYPE | API-deficiency
+lib/web.bot:212:20 "1" top | list-element bind:web::hex_digits (List[str]) | same, same, same | API-deficiency
+lib/web.bot:212:25 "2" top | list-element bind:web::hex_digits (List[str]) | runtime TYPE, runtime TYPE, runtime TYPE | API-deficiency
+lib/web.bot:212:30 "3" top | list-element bind:web::hex_digits (List[str]) | runtime TYPE, same, runtime TYPE | API-deficiency
+lib/web.bot:212:35 "4" top | list-element bind:web::hex_digits (List[str]) | same, same, runtime TYPE | API-deficiency
+lib/web.bot:212:40 "5" top | list-element bind:web::hex_digits (List[str]) | same, same, runtime TYPE | API-deficiency
+lib/web.bot:212:45 "6" top | list-element bind:web::hex_digits (List[str]) | runtime TYPE, same, runtime TYPE | API-deficiency
+lib/web.bot:212:50 "7" top | list-element bind:web::hex_digits (List[str]) | same, same, runtime TYPE | API-deficiency
+lib/web.bot:212:55 "8" top | list-element bind:web::hex_digits (List[str]) | same, same, runtime TYPE | API-deficiency
+lib/web.bot:212:60 "9" top | list-element bind:web::hex_digits (List[str]) | same, same, runtime TYPE | API-deficiency
+lib/web.bot:212:65 "A" top | list-element bind:web::hex_digits (List[str]) | same, same, runtime TYPE | API-deficiency
+lib/web.bot:212:70 "B" top | list-element bind:web::hex_digits (List[str]) | same, same, runtime TYPE | API-deficiency
+lib/web.bot:212:75 "C" top | list-element bind:web::hex_digits (List[str]) | same, same, runtime TYPE | API-deficiency
+lib/web.bot:212:80 "D" top | list-element bind:web::hex_digits (List[str]) | runtime TYPE, same, same | API-deficiency
+lib/web.bot:212:85 "E" top | list-element bind:web::hex_digits (List[str]) | same, same, runtime TYPE | API-deficiency
+lib/web.bot:212:90 "F" top | list-element bind:web::hex_digits (List[str]) | same, same, runtime TYPE | API-deficiency
+lib/web.bot:270:21 "%" pct | call str::concat:arg0 (str) | runtime TYPE, runtime TYPE, runtime TYPE | API-deficiency
+bench/lex-strategy.bot:44:34 "_" lenient_ident_char? | == str-param:param:c (str) | changed | API-deficiency
+bench/lex-strategy.bot:44:46 "-" lenient_ident_char? | == str-param:param:c (str) | changed | API-deficiency
+bench/source-checks.bot:51:10 "_" is_underscore? | == any-param:param:c (any) | changed | API-deficiency
+bench/source-checks.bot:54:10 "-" is_hyphen? | == any-param:param:c (any) | same | API-deficiency

@@ -36,7 +36,8 @@ API takes a String -- in two of the three String-taking context kinds it
 *does* type-check, and then fails at run time (a native's `str` parameter) or
 silently changes the program (`==` of a String and a character is `false`; in
 the corpus, a scanner whose loop exits on such a comparison runs forever after
-the rewrite). The 92 corpus findings are the catalog of those APIs (see
+the rewrite). 81 of the 92 corpus findings form the catalog of those APIs;
+the other 11 are deliberate Strings, and none can be converted today (see
 "Corpus findings").
 
 The three goals:
@@ -79,7 +80,7 @@ The brief opened with four calls to flag if wrong.
    String-taking context kinds accept it: a native's `str` parameter is
    checked only at run time (`str::length('a')` compiles and fails with
    `TYPE`), and `==` of a String and a UnicodeChar type-checks and is `false`
-   (README §1: values of different kinds are never equal). In the corpus, 59
+   (README §1: values of different kinds are never equal). In the corpus, 55
    of the 92 findings are such comparisons. So the deficiency surface is wider
    than "where it would not type-check", and the strongest reason the warning
    must not be autofixable is the silent case, not the rejected one. The
@@ -714,7 +715,111 @@ brace they do not close are double-quoted, milestone 5's note.
 
 ## Corpus findings and the API-deficiency catalog
 
-CORPUS-RESULTS
+`audit/one-char-string-literal/tools/corpus.tcl`, output
+`audit/one-char-string-literal/corpus-audit.txt`, at the **pinned commit
+`61f1864`** recorded in its header (corpus paths clean: `examples`, `bench` and
+`lib` are byte-identical to the kickoff base `e7f715c`; the corpus is not
+edited). It compiles `examples/stdlib` (9), `examples/surface` (14),
+`examples/refinement` (1), `bench/*.bot` (8) and `lib/*.bot` (8) with warnings
+on. 36 of 40 compile standalone: the two deliberate rejections (`09`, `10`),
+and `lib/list.bot` and `lib/mutable_array.bot` (which use their own namespace
+without importing it, as milestones 2-5 recorded).
+
+**92 distinct findings** (a module's finding once: `lib/web.bot`'s 26 are
+reported by every program that loads `web`). Volume is information (milestone
+2): they sit in 10 files, and three shapes repeat --
+
+| file | findings |
+|---|---|
+| `lib/web.bot` | 26 |
+| `examples/stdlib/ai_text_clean.bot` | 22 |
+| `examples/stdlib/csv.bot`, `csv_chunked.bot`, `csv_geometric.bot`, `csv_records.bot` | 8 each (one scanner, four copies) |
+| `examples/stdlib/string_replace.bot` | 7 |
+| `bench/lex-strategy.bot`, `bench/source-checks.bot` | 2 each |
+| `examples/stdlib/string_reverse.bot` | 1 |
+
+**False positives: 0.** The tool re-lexes the source token at every finding's
+anchor with the lexer's own `String` procedure, independently of the pass: all
+92 are String literals whose decoded value is the warning's and is one
+character long. (The only way this warning can be wrong is a value that is not
+one character, and the exact value makes that impossible; the check confirms
+it on the corpus.)
+
+**The spelling law at corpus level, per finding.** Clauses 1 and 2 hold for all
+92 (50 distinct characters: the character spelling lexes, its exact value is
+the UnicodeChar of the same code point, and a `UnicodeChar` parameter takes
+it). Then each literal alone is rewritten to its character spelling in a
+scratch copy, and the rewritten program -- for a `lib/web.bot` finding, each of
+the three corpus programs that load `web` (`examples/refinement/refined-
+strings.bot`, `bench/refined-checks.bot`, `bench/uri-steady.bot`) -- is
+compiled and evaluated against the original in a child process under a 60 s
+limit:
+
+| class | rewrite outcomes (over every probe) |
+|---|---|
+| API-deficiency (81 findings) | same 80, changed 22, runtime `TYPE` 23, **diverges 8** |
+| deliberate (11) | rejected `TYPE` 8, runtime `TYPE` 3 |
+
+**8 rewrites diverge**: the four CSV scanners' `delimiter == ","` and
+`delimiter == "\n"` (`scan_record` / `scan_record_rest`) end the record loop;
+rewritten, the comparison can never be true, and the scan does not terminate.
+This is the sharpest form of the "silently changes" outcome, and it was found
+the hard way: the audit's first run hung on it, which is why every evaluation
+now runs in a time-limited child. "Same" is common because a program's own run
+need not reach the literal with the matching character (the emoji filter is
+exercised with a few emoji; a probe may not escape every hex digit) -- which is
+why "the rewrite compiles and keeps this run's value" is not the convert-now
+criterion.
+
+**Classification** (the tool's rules, with a hand table for "deliberate"; a
+finding no rule classifies would fail the tool -- none does):
+
+* **convert-now: 0.** Convert-now requires the rewrite to keep every probe's
+  value *and* the consumer to accept the character type statically (the other
+  side of `==` is a UnicodeChar, a parameter declares `UnicodeChar`). No
+  corpus consumer of a one-character String literal does: every one of them
+  meets a String. The corpus's character code already uses character literals
+  -- `uri_query_value?` in the same `lib/web.bot` reads `str::char_at` and
+  compares with `'%'`, and has no finding -- and everything that warns predates
+  that style. A rewrite that merely compiles is never counted: 55 of the 92 are
+  `==` comparisons, where it always compiles.
+* **API-deficiency: 81**, in six rows -- the deliverable to the future API and
+  autofix work:
+
+| catalog row | findings | consumers (the tool's keys) | where | rewrite | what the API lacks |
+|---|---|---|---|---|---|
+| `==` against a one-character String sliced by a `peek`/`char_at` helper (`str::substring`) | 31 | `== str-substring:peek()`, `:character`, `:delimiter`, `:char_at()` | the four CSV scanners; `lib/web.bot`'s `emailish?` (`domain?`) | changed 12, same 17, **diverges 8** | the helper returns a one-character String, or `""` past the end; `str::char_at` returns a UnicodeChar but fails (`IndexNotFound`) outside the String, so a scanner needs an end-of-input form that is not `""` |
+| `==` against an untyped parameter that receives one-character Strings | 21 | `== any-param:param:character`, `:c` | `ai_text_clean`'s `cleaner_emoji` and `clean_char`; `bench/source-checks.bot`'s `is_underscore?`, `is_hyphen?` | same 13, changed 8 | the callers pass `str::substring` slices (`peek`, a first-character slice inside a list of `str` predicates with `str::is_tcl_alpha`/`alnum`); the comparison would hold for a UnicodeChar only if every caller changed too |
+| element of a `List[str]` table indexed (`list::at`) and concatenated (`str::concat`) | 16 | `list-element bind:web::hex_digits` | `lib/web.bot`'s `uri_escape_text` | same 28, runtime `TYPE` 20 | the digits are appended to output text with `str::concat`: there is no append of a UnicodeChar to a String |
+| element of a `List[str]` made an `ImmutableSet[str]`, queried with one-character Strings | 5 | `list-element immutable_set::from_list:arg0` | `lib/web.bot`'s `local_extra_chars` (`emailish?`) | same 15 | `immutable_set::contains` is queried with `char_at` slices; a set of UnicodeChars needs the scanner to read characters (`str::char_at`) |
+| `str::concat` argument | 5 | `call str::concat:arg0`, `:arg1` | the four CSV scanners (`"\""` appended to a field), `lib/web.bot`'s `pct` (`"%"`) | same 4, runtime `TYPE` 3 | `str::concat` takes two Strings |
+| `==` against a `str` parameter | 3 | `== str-param:param:c` | `bench/lex-strategy.bot`'s `lenient_ident_char?`; `lib/web.bot`'s `label_char?` | same 3, changed 2 | the parameter is declared or inferred `str`: its callers pass one-character Strings sliced from text |
+
+  Reading the table as an API work list: almost everything reduces to two
+  missing pieces -- **reading characters** (a scanner over `str::char_at` with
+  a total end-of-input form, replacing every `peek`/`char_at`/first-character
+  slice; that unlocks the 31 + 21 + 3 + 5 comparison and set findings) and
+  **appending a character to text** (a String builder or `str::concat` taking a
+  UnicodeChar; that unlocks the 16 + 5 table and concatenation findings).
+* **deliberate String usage: 11**, by hand, with reasons
+  (`corpus-audit.txt`, "Deliberate String usage"):
+  * `examples/stdlib/string_replace.bot`, `sample` (7): test data of a substring
+    replacement whose needles and replacements are 0, 1, 2 and 3 characters long
+    in one call list -- a one-character needle is the length-1 case of a String
+    argument (the rewrite is rejected statically: `TYPE`);
+  * `examples/stdlib/string_reverse.bot`, `sample` (1): the length-1 boundary
+    input of a String reversal (rejected: `TYPE`);
+  * `examples/stdlib/ai_text_clean.bot`, `clean_char`'s three returned
+    replacements (`"-"`, `"'"`, `"\""`): `clean_char` maps a character to `""`,
+    `"..."` or a one-character normalization, so its result is a String of
+    variable length (the rewrite fails at run time: `TYPE`). The comparisons in
+    the same function are API-deficiency, catalogued above.
+
+  This is the brief's "code whose subject is String syntax itself" category in
+  the corpus's own form: Strings that are one character long by value, not by
+  kind.
+
+**False positives: 0. Corpus edited: no.**
 
 ## The idiom, the non-autofixable rationale and the graduation criteria
 
@@ -732,7 +837,7 @@ it as an allocation finding, so it is cited, not quoted.
 changes, and the warning is the instrument that surfaces them. Measured
 (fuzzer catalog, corpus audit): the rewrite is rejected statically by a
 declared `str` parameter, fails at run time in a native's `str` parameter, and
-silently changes a comparison with a String -- in the corpus, 59 of 92 findings
+silently changes a comparison with a String -- in the corpus, 55 of 92 findings
 are such comparisons, and rewriting one in a scanner can remove its loop's
 only exit (`diverges` in the audit). A fixit would therefore be wrong in most
 of the corpus and dangerous where it compiles.
