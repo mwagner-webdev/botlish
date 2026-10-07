@@ -197,8 +197,9 @@ proc core::compiler::evalHir {hir} {
     core::env::declare $env $names
     set value ""
     try {
-        set completion [Run ::core::compiler::code::[dict get $unit name] $env]
-        set value [core::completion::atProgramBoundary $completion]
+        set value [core::coroutines::fresh {
+            core::completion::atProgramBoundary [Run ::core::compiler::code::[dict get $unit name] $env]
+        }]
     } finally {
         core::releaseProgram $mark $value
     }
@@ -1088,6 +1089,13 @@ proc core::compiler::CompileNativeCall {ctxVar e callee name argOps} {
     }
     if {[N $e known] ne ""} {
         return [Op bool [N $e known] bool]
+    }
+    if {[dict get $meta completion]} {
+        # A native that returns a completion (core/coroutines.tcl's start and
+        # resume: a coroutine segment may end with the body's own declared
+        # error): only the generic call boundary turns it into compiled
+        # code's Tcl completion code 5.
+        return [GenericCall ctx $callee $argOps]
     }
     if {[dict get $meta errors] ne "" && ![hir::completions::BoundsProven $hir $e]} {
         # A native with declared errors (`argv`, `list::at`) completes with

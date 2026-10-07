@@ -864,6 +864,10 @@ proc hir::resolve::Expr {hirVar node ctx} {
             }
             SetField hir $e declaredResult $declared
             SetField hir $e resultType ""
+            # A declared coroutine resume protocol (`resume T`,
+            # COROUTINES.md): a struct type, the one message every yield of
+            # the function's coroutine evaluates to (hir/coroutines.tcl).
+            SetField hir $e declaredResume [ResolveResume hir $e $node $ctx]
             # A proof contract (REFINEMENT-VALUES.md), validated against the
             # resolved parameters and result: the generic metadata every
             # consumer reads (hir/refine.tcl), never a predicate's name.
@@ -956,6 +960,12 @@ proc hir::resolve::Expr {hirVar node ctx} {
             } else {
                 SetField hir $e callee [Expr hir $written $ctx]
                 SetField hir $e args [Sequence hir [dict get $node args] $ctx]
+                if {![dict exists $node method]} {
+                    # `step(m)` on a coroutine handle (COROUTINES.md) is the
+                    # explicit resume operation, not a call of a function
+                    # value: the handle becomes its first argument.
+                    CoroutineResume hir $e $ctx
+                }
                 if {[dict exists $node method] && $hidden ne ""} {
                     # The only function(s) of that name visible are declared
                     # nomethod (WARNINGS-METHOD-ELIGIBLE.md): method syntax
@@ -1202,6 +1212,82 @@ proc hir::resolve::Expr {hirVar node ctx} {
         }
     }
     return $e
+}
+
+# The resolved `resume TYPE` clause of block syntax NODE (resolved as ExprId
+# E), or "" (COROUTINES.md). The resume message of a first-milestone
+# coroutine is one struct value of a declared struct type: no scalar, List or
+# function protocol (COROUTINE-RESUME-TYPE), so a later tagged union of
+# struct cases extends it rather than replacing it.
+proc hir::resolve::ResolveResume {hirVar e node ctx} {
+    upvar 1 $hirVar hir
+    if {![dict exists $node resume]} {
+        return ""
+    }
+    lassign [dict get $node resume] typeExpr origin
+    if {[catch {ResolveTypeExpr $typeExpr [CtxNamespace $ctx]} type options]} {
+        hir::DiagnoseAt hir [TypeErrorKind $options TYPE] \
+            [format {unknown or invalid resume type %s: %s} [ShowTypeExpr $typeExpr] $type] $e $origin
+        return ""
+    }
+    if {[lindex $type 0] ne "nstruct"} {
+        hir::DiagnoseAt hir COROUTINE-RESUME-TYPE \
+            [format {the resume message type must be a declared struct type, not %s: a coroutine is resumed with one structured message (put several values in the fields of a struct, e.g. "struct Input:" with one field per value)} \
+                [ShowTypeExpr $typeExpr]] $e $origin
+        return ""
+    }
+    return $type
+}
+
+# 1 if binding B holds a coroutine handle by construction: it is bound to the
+# result of coroutine#create (surface/lower.tcl's CoroutineBind), or to a
+# reference of another such binding (a move, `next = step`).
+proc hir::resolve::IsCoroutineBinding {hirVar b {seen {}}} {
+    upvar 1 $hirVar hir
+    if {$b eq "" || $b in $seen || ![dict exists $hir bindings $b]} {
+        return 0
+    }
+    set by [dict get $hir bindings $b declaredBy]
+    if {$by eq "" || ![dict exists $hir exprs $by] || [dict get $hir exprs $by kind] ne "bind"} {
+        return 0
+    }
+    if {![dict exists $hir exprs $by value] || [dict get $hir exprs $by value] eq ""} {
+        return 0
+    }
+    set value [dict get $hir exprs [dict get $hir exprs $by value]]
+    switch -- [dict get $value kind] {
+        ref {
+            return [IsCoroutineBinding hir [dict get $value binding] [concat $seen [list $b]]]
+        }
+        call {
+            set callee [dict get $hir exprs [dict get $value callee]]
+            if {[dict get $callee kind] ne "ref" || [dict get $callee binding] eq ""} {
+                return 0
+            }
+            set binding [dict get $hir bindings [dict get $callee binding]]
+            return [expr {[dict get $binding kind] eq "root"
+                && [dict get $binding name] eq [core::coroutines::createNative]}]
+        }
+    }
+    return 0
+}
+
+# Call E, already resolved as the call of its written callee: when that is a
+# reference to a coroutine handle (IsCoroutineBinding), the call is the
+# resume operation `coroutine#resume(handle, ARGS...)` (COROUTINES.md) and is
+# rewritten to say so -- the handle becomes the first argument of the internal
+# root native, the written arguments follow.
+proc hir::resolve::CoroutineResume {hirVar e ctx} {
+    upvar 1 $hirVar hir
+    set callee [dict get $hir exprs $e callee]
+    set node [dict get $hir exprs $callee]
+    if {[dict get $node kind] ne "ref" || ![IsCoroutineBinding hir [dict get $node binding]]} {
+        return
+    }
+    set origin [dict get $node origin]
+    set native [Expr hir [hir::syntax::rootRef $origin [core::coroutines::resumeNative]] $ctx]
+    SetField hir $e callee $native
+    SetField hir $e args [concat [list $callee] [dict get $hir exprs $e args]]
 }
 
 # The module namespace ("" for the entry program) the code of CTX is in:

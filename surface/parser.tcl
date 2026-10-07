@@ -26,8 +26,19 @@
 #                  exact) context-struct type for the rest of the scope.
 #                  "with" and "context" are contextual (below); no binding
 #                  name, no type annotation, no list, no block, no colon
-#   simple       = binding | destructure | return | break | continue | fail
-#                | expression
+#   simple       = binding | destructure | coroutineBind | return | break
+#                | continue | fail | expression
+#   coroutineBind = "coroutine" "{" coField { "," coField } [ "," ] "}"
+#                  "=" valueOrHandled     -- COROUTINES.md: eagerly starts
+#                  the call on its right side as a coroutine. "coroutine" is
+#                  contextual: a binding form only when directly followed by
+#                  a braced group and "=" (CoroutineAhead), so `coroutine` is
+#                  an ordinary name everywhere else (`coroutine::done?(h)`,
+#                  `coroutine = 1`). The fields are exactly the two named
+#                  results of construction, each optional and renamable:
+#   coField      = ( "step" | "first" ) [ ":" IDENT ]
+#                  -- step the affine coroutine handle, first the first
+#                  outward result; any other name is COROUTINE-BINDING-FIELD
 #   valued       = IDENT "=" (if|loop|handledExpr)
 #                | "return" (if|loop|handledExpr)
 #   handledExpr  = expression [ handlers ]     -- handlers only after a bare
@@ -53,9 +64,16 @@
 #                  (below): the function's author declares that it is never
 #                  called with method syntax
 #   paramList    = [ param { "," param } ] [ "," flagSection ]
-#                  [ "," contextSection ] [ "," ]
+#                  [ "," contextSection ] [ "," resumeClause ] [ "," ]
 #                  -- sections in canonical order: ordinary parameters, then
-#                  flags, then context (ParamSections); any may be absent
+#                  flags, then context, then the resume clause
+#                  (ParamSections); any may be absent
+#   resumeClause = "resume" typeExpr   -- COROUTINES.md: the one structured
+#                  message a yield of this function's coroutine evaluates
+#                  to. "resume" is contextual: the clause only when directly
+#                  followed by a type (ResumeMarker); `resume`, `resume: T`
+#                  are an ordinary parameter named resume. At most one, and
+#                  always last
 #   param        = IDENT [ ":" typeExpr ]
 #   flagSection  = "flags" flagDecl { "," flagDecl }   -- FLAGS.md; "flags" is
 #                  contextual: `flags :name` only (an ordinary name otherwise)
@@ -186,7 +204,12 @@
 # SOURCE-DEFINED-INTEGER-DOMAINS.md) found no program using "type" or "in"
 # as an ordinary name.
 #
-#   expression   = disjunction
+#   expression   = "yield" expression | disjunction
+#                  -- COROUTINES.md: `yield V` sends V outward, suspends the
+#                  whole coroutine, and evaluates to the resume message.
+#                  Lowest precedence: `yield a + b` yields a + b, and an
+#                  operand needs parentheses (`1 + (yield x)`). "yield" is a
+#                  keyword (lexer.tcl)
 #   disjunction  = conjunction { "or" conjunction }
 #   conjunction  = inversion { "and" inversion }
 #   inversion    = "not" inversion | comparison
@@ -612,8 +635,11 @@ proc surface::parser::TraitRequirement {pVar trait {context 0}} {
     set start [dict get [Advance p] span]
     set name [Expect p IDENT "a requirement name after \"fn\""]
     set open [Expect p ( "\"(\" after the requirement name"]
-    lassign [ParamSections p] params flags contexts
+    lassign [ParamSections p] params flags contexts resume
     set paramsSpan [SpanFrom p [dict get $open span]]
+    if {$resume ne ""} {
+        Fail [dict create span [dict get $resume span]] "requirement \"[dict get $name value]\" of $what \"$trait\" declares a resume clause: a trait requirement cannot be a coroutine protocol"
+    }
     if {$flags ne {}} {
         FailCode [dict get [lindex $flags 0] span] TRAIT-REQUIREMENT-FLAGS \
             "requirement \"[dict get $name value]\" of $what \"$trait\" declares flags: flags in trait requirements are not supported yet"
@@ -930,7 +956,7 @@ proc surface::parser::Statement {pVar} {
         # The handler suite(s) already ended the line.
         return $statement
     }
-    if {[dict get $statement kind] in {bind return destructure}
+    if {[dict get $statement kind] in {bind return destructure coroutinebind}
             && [dict get $statement value] ne ""
             && [dict get $statement value kind] in {if loop handledcall}} {
         # The if's (or loop's, or the handler suite's) suite(s) already
@@ -963,6 +989,9 @@ proc surface::parser::Simple {pVar} {
                 set value [ValueOrHandled p]
                 return [surface::ast::node bind [SpanFrom p $start] \
                     name [dict get $token value] nameSpan $start value $value]
+            }
+            if {[CoroutineAhead p]} {
+                return [CoroutineBind p]
             }
         }
         \{ {
@@ -1287,7 +1316,7 @@ proc surface::parser::Function {pVar} {
     Advance p
     set name [Expect p IDENT "a function name after \"fn\""]
     set open [Expect p ( "\"(\" after the function name"]
-    lassign [ParamSections p] params flags contexts
+    lassign [ParamSections p] params flags contexts resume
     set body [Suite p "the parameter list"]
     set nomethod [dict exists $modifiers nomethod]
     return [surface::ast::node function [SpanFrom p $start] \
@@ -1295,7 +1324,8 @@ proc surface::parser::Function {pVar} {
         params $params flags $flags contexts $contexts paramsSpan [SpanFrom p [dict get $open span]] \
         resultType [dict get $body resultType] resultTypeSpan [dict get $body resultTypeSpan] \
         errors [dict get $body errors] proves [dict get $body proves] body $body \
-        nomethod $nomethod nomethodSpan [expr {$nomethod ? [dict get $modifiers nomethod] : ""}]]
+        nomethod $nomethod nomethodSpan [expr {$nomethod ? [dict get $modifiers nomethod] : ""}] \
+        resume $resume]
 }
 
 # The parameter list of a function declaration, after "(", through ")":
@@ -1341,10 +1371,21 @@ proc surface::parser::ParamSections {pVar} {
     set params {}
     set flags {}
     set contexts {}
+    set resume ""
     set section ordinary
     while {[Kind p] ne ")"} {
         set token [Peek p]
-        if {[ContextMarker p]} {
+        if {$section eq "resume"} {
+            Fail $token "the resume clause must be the last entry of the parameter list, found [Describe $token] after it"
+        }
+        if {[ResumeMarker p]} {
+            Advance p
+            EnterSection p section resume [dict get $token span]
+            set typeStart [dict get [Peek p] span]
+            set type [TypeExpr p "the resume message type after \"resume\""]
+            set resume [dict create type $type typeSpan [SpanFrom p $typeStart] \
+                span [SpanFrom p [dict get $token span]]]
+        } elseif {[ContextMarker p]} {
             Advance p
             EnterSection p section context [dict get $token span]
             lappend contexts [ContextEntry p]
@@ -1388,13 +1429,24 @@ proc surface::parser::ParamSections {pVar} {
         }
     }
     Advance p
-    return [list $params $flags $contexts]
+    return [list $params $flags $contexts $resume]
 }
 
 # The canonical order of a declaration's parameter sections. `variadic`
 # (terminal) is planned.
 namespace eval surface::parser {
-    variable paramSectionOrder {ordinary flags context}
+    variable paramSectionOrder {ordinary flags context resume}
+}
+
+# 1 if the next tokens are the resume clause marker: the name `resume`
+# directly followed by a type (a name, or the `unit` keyword) -- `resume
+# StepInput` (COROUTINES.md). Never an ordinary parameter (a parameter name is
+# followed by ":", "," or ")"), so `fn f(resume)` keeps its meaning.
+proc surface::parser::ResumeMarker {pVar} {
+    upvar 1 $pVar p
+    set name [Peek p]
+    return [expr {[dict get $name kind] eq "IDENT" && [dict get $name value] eq "resume"
+        && [Kind p 1] in {IDENT unit}}]
 }
 
 # Moves SECTIONVAR to section NEW (marker at SPAN), or fails when NEW is not
@@ -1403,6 +1455,9 @@ proc surface::parser::EnterSection {pVar sectionVar new span} {
     upvar 1 $pVar p $sectionVar section
     variable paramSectionOrder
     if {[lsearch -exact $paramSectionOrder $new] <= [lsearch -exact $paramSectionOrder $section]} {
+        if {$new eq "resume"} {
+            Fail [dict create span $span] "a function declares at most one resume clause (\"resume TYPE\", the last entry of its parameter list)"
+        }
         if {$new eq "context"} {
             FailCode $span MALFORMED-CONTEXT-SECTION \
                 "a \"context\" section cannot follow the $section section: a parameter list has at most one context section, after the ordinary parameters and flags (list several contexts in one section: \"context a: A, b: B\")"
@@ -1937,6 +1992,15 @@ proc surface::parser::Suite {pVar after} {
 
 proc surface::parser::Expression {pVar} {
     upvar 1 $pVar p
+    if {[Kind p] eq "yield"} {
+        # `yield V` (COROUTINES.md): the lowest-precedence expression form.
+        set token [Advance p]
+        if {[Kind p] in {NEWLINE DEDENT EOF ) \] , :}} {
+            Fail [Peek p] "\"yield\" needs the value to send outward (write \"yield VALUE\"; \"yield unit\" sends unit), found [Describe [Peek p]]"
+        }
+        set value [Expression p]
+        return [surface::ast::node yield [SpanFrom p [dict get $token span]] value $value]
+    }
     return [Logical p or Conjunction]
 }
 
@@ -2200,6 +2264,9 @@ proc surface::parser::Primary {pVar} {
         if {
             Fail $token "an \"if\" value must be the whole right side of \"=\" or \"return\""
         }
+        yield {
+            Fail $token "a yield expression is an operand only in parentheses: write (yield VALUE)"
+        }
         : {
             set name [Peek p 1]
             if {[dict get $name kind] eq "IDENT" && [dict get $name span start] == [dict get $token span end]} {
@@ -2238,10 +2305,10 @@ proc surface::parser::PatternAhead {pVar} {
 # The offset (from the current token) of the token that closes the bracket the
 # current token opens, if "=" follows it; else -1. Brackets nest; a layout
 # token inside means the group is not closed on this logical line.
-proc surface::parser::PatternEnd {pVar} {
+proc surface::parser::PatternEnd {pVar {from 0}} {
     upvar 1 $pVar p
     set depth 0
-    for {set i 0} 1 {incr i} {
+    for {set i $from} 1 {incr i} {
         switch -- [Kind p $i] {
             \{ - [ - ( {
                 incr depth
@@ -2290,6 +2357,62 @@ proc surface::parser::Destructure {pVar} {
     Expect p = "\"=\""
     set value [ValueOrHandled p]
     return [surface::ast::node destructure [SpanFrom p $start] pattern $pattern value $value]
+}
+
+# ---------------------------------------------------------------------------
+# Coroutine construction (COROUTINES.md)
+#
+#   coroutineBind = "coroutine" "{" coField { "," coField } [ "," ] "}"
+#                   "=" valueOrHandled
+#   coField       = ( "step" | "first" ) [ ":" IDENT ]
+#
+# The named-destructuring model of STRUCT-DESTRUCTURING.md, over the two fixed
+# results of a construction rather than a struct value: `step` is the affine
+# coroutine handle, `first` the first outward result of the eager start.
+# Either may be omitted (`{step: next}` discards the first result, `{first}`
+# drops the handle after the start) or renamed. No two-field value ever
+# exists: the right side is lowered to the construction and the start
+# (surface/lower.tcl's CoroutineBind), each field binding one of their
+# results. Unknown fields are COROUTINE-BINDING-FIELD; there is no
+# positional form and no `coroutine NAME = CALL` sugar.
+
+# 1 if the tokens at the current position are the contextual word
+# "coroutine" followed by a braced group and "=": a coroutine binding.
+# `coroutine {x: 1} = ...` cannot be anything else (a named construction is
+# never followed by "="), and `coroutine` alone stays an ordinary name.
+proc surface::parser::CoroutineAhead {pVar} {
+    upvar 1 $pVar p
+    set token [Peek p]
+    return [expr {[dict get $token kind] eq "IDENT" && [dict get $token value] eq "coroutine"
+        && [Kind p 1] eq "\{" && [PatternEnd p 1] >= 0}]
+}
+
+# "coroutine" "{" coField ... "}" "=" valueOrHandled, at the "coroutine" word
+# CoroutineAhead accepted. Node: coroutinebind, pattern (destructure-shaped:
+# {span fields}, each field {name nameSpan local localSpan nested ""
+# shorthand span}), value (the call, a handled call, or -- rejected by HIR as
+# COROUTINE-RHS-NOT-YIELDING -- any other expression).
+proc surface::parser::CoroutineBind {pVar} {
+    upvar 1 $pVar p
+    set start [dict get [Advance p] span]
+    set open [Peek p]
+    set pattern [Pattern p]
+    foreach field [dict get $pattern fields] {
+        if {[dict get $field name] ni {step first}} {
+            FailCode [dict get $field nameSpan] COROUTINE-BINDING-FIELD \
+                "unknown field \"[dict get $field name]\" in a coroutine binding: a coroutine construction has exactly two results, \"step\" (the coroutine handle) and \"first\" (its first outward result), each optional and renamable (\{step: next, first: initial\})"
+        }
+        if {[dict get $field nested] ne ""} {
+            FailCode [dict get $field span] COROUTINE-BINDING-FIELD \
+                "the coroutine binding field \"[dict get $field name]\" binds one name: write \"[dict get $field name]: NAME\" (destructure the first result with a separate statement)"
+        }
+    }
+    Expect p = "\"=\""
+    if {[Kind p] in {if loop}} {
+        Fail [Peek p] "the right side of a coroutine binding is the call that starts the coroutine, found [Describe [Peek p]]"
+    }
+    set value [ValueOrHandled p]
+    return [surface::ast::node coroutinebind [SpanFrom p $start] pattern $pattern value $value]
 }
 
 # A pattern: {span SPAN fields {FIELD...}}, each FIELD a dict

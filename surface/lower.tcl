@@ -96,6 +96,25 @@
 #                         down from; core/ir.tcl's `countloop`)
 #   loop x in e and i from a to b: body   lockloop {domains} {body...}
 #                         (lockstep; core/ir.tcl's `lockloop`)
+#   yield e               call ^coroutine#yield e      (COROUTINES.md: an
+#                         internal root native, typed by hir/coroutines.tcl)
+#   coroutine {step: s, first: f} = g(a, b)
+#                         bind coroutine#N#arg1 a; bind coroutine#N#arg2 b;
+#                         bind s (call ^coroutine#create (block {} (call g
+#                         (ref coroutine#N#arg1) (ref coroutine#N#arg2))));
+#                         bind f (call ^coroutine#start (ref s)); ^unit
+#                         -- the arguments are evaluated first, in order,
+#                         into hygienic temporaries (a constant stays in
+#                         place); create wraps the call in a zero-argument
+#                         thunk without running it; start runs it eagerly to
+#                         its first outward boundary. Handlers on the right
+#                         side handle the start call. An omitted step binds
+#                         the handle to the temporary coroutine#N, an
+#                         omitted first discards start's value. See
+#                         CoroutineBind
+#   fn f(a, resume T): body   the block carrying `resume {T ORIGIN}`: the
+#                         function's declared resume protocol (COROUTINES.md),
+#                         not a parameter; resolved by hir::resolve
 #   return / return e     return ^unit / return e
 #   break / break e       break / break e
 #   continue              continue
@@ -288,6 +307,8 @@ proc surface::lower::Sequence {nodes} {
     foreach node $nodes {
         if {[dict get $node kind] eq "destructure"} {
             lappend result {*}[Destructure $node]
+        } elseif {[dict get $node kind] eq "coroutinebind"} {
+            lappend result {*}[CoroutineBind $node]
         } elseif {[dict get $node kind] eq "with"} {
             # `with context EXPR` (CONTEXTS.md): the value bound to a hygienic
             # temporary, then the explicit installation of it (placement,
@@ -361,6 +382,104 @@ proc surface::lower::Projections {pattern temp} {
         }
     }
     return $nodes
+}
+
+# A coroutine binding (COROUTINES.md): `coroutine {step: s, first: f} =
+# CALL` is
+#
+#     coroutine#N#arg1 = A1        each argument of CALL that is not a
+#     ...                          literal, in written order (a method call's
+#                                  receiver first): evaluated here, before
+#                                  the coroutine exists, exactly as an
+#                                  ordinary call evaluates them
+#     s = coroutine#create(THUNK)  THUNK: a zero-argument block whose body is
+#                                  CALL over those temporaries; nothing runs
+#     f = coroutine#start(s)       the eager start: runs CALL to its first
+#                                  outward boundary (yield, return or an
+#                                  unhandled fail); CALL's handlers, if any,
+#                                  handle this call
+#     unit                         the statement's own value
+#
+# N is the statement's start offset, and `#` makes every temporary hygienic
+# (source cannot spell it). An omitted `step` binds the handle to
+# coroutine#N, an omitted `first` leaves start's value unbound. No two-field
+# value is ever built. What the right side calls -- that it is a function
+# that may yield, and its protocol -- is HIR's to check
+# (hir/coroutines.tcl); a right side that is not a call becomes the thunk's
+# whole body, which HIR rejects (COROUTINE-RHS-NOT-YIELDING).
+proc surface::lower::CoroutineBind {node} {
+    set origin [OriginOf $node]
+    set value [dict get $node value]
+    set handlers {}
+    set call $value
+    if {[dict get $value kind] eq "handledcall"} {
+        set call [dict get $value call]
+        set handlers [lmap handler [dict get $value handlers] {
+            dict create name [dict get $handler name] nameSpan [dict get $handler nameSpan] \
+                origin [OriginOf [dict get $handler body]] \
+                body [Sequence [dict get [dict get $handler body] body]]
+        }]
+    }
+    set n [dict get $node span start]
+    set pre {}
+    set index 0
+    # The value of argument AST node ARG inside the thunk: the node itself for
+    # a literal, else a reference to the temporary it is evaluated into here.
+    set argument {{arg} {
+        upvar 1 pre pre index index n n
+        if {[dict get $arg kind] in {int string char bool unit}} {
+            return [surface::lower::Node $arg]
+        }
+        incr index
+        set temp "coroutine#$n#arg$index"
+        set argOrigin [surface::lower::OriginOf $arg]
+        lappend pre [hir::syntax::bindNode $argOrigin $temp [surface::lower::Node $arg]]
+        return [hir::syntax::refNode $argOrigin $temp]
+    }}
+    switch -- [dict get $call kind] {
+        call {
+            set callee [Node [dict get $call callee]]
+            set args [lmap arg [dict get $call args] {apply $argument $arg}]
+            set inner [hir::syntax::withFlags [hir::syntax::callNode [OriginOf $call] $callee {*}$args] \
+                [Flags $call]]
+        }
+        methodcall {
+            set receiver [apply $argument [dict get $call receiver]]
+            set args [lmap arg [dict get $call args] {apply $argument $arg}]
+            set inner [hir::syntax::withFlags [hir::syntax::methodCallNode [OriginOf $call] $receiver \
+                [dict get $call name] [Origin [dict get $call nameSpan] [dict get $call id]/method] \
+                {*}$args] [Flags $call]]
+        }
+        default {
+            set inner [Node $call]
+        }
+    }
+    set thunk [hir::syntax::blockNode [OriginOf $node thunk] {} [list $inner]]
+    set step ""
+    set first ""
+    foreach field [dict get $node pattern fields] {
+        set fieldOrigin [Origin [dict get $field localSpan] [dict get $field id]/binding]
+        dict set field origin $fieldOrigin
+        set [dict get $field name] $field
+    }
+    if {$step ne ""} {
+        set handle [dict get $step local]
+        set handleOrigin [dict get $step origin]
+    } else {
+        set handle "coroutine#$n"
+        set handleOrigin $origin
+    }
+    set create [hir::syntax::bindNode $handleOrigin $handle \
+        [hir::syntax::callNode $origin [hir::syntax::rootRef $origin [core::coroutines::createNative]] $thunk]]
+    set start [hir::syntax::callNode $origin [hir::syntax::rootRef $origin [core::coroutines::startNative]] \
+        [hir::syntax::refNode $origin $handle]]
+    if {$handlers ne {}} {
+        set start [hir::syntax::handleNode [OriginOf $value] $start $handlers]
+    }
+    if {$first ne ""} {
+        set start [hir::syntax::bindNode [dict get $first origin] [dict get $first local] $start]
+    }
+    return [concat $pre [list $create $start [hir::syntax::rootRef [OriginOf $node unit] unit]]]
 }
 
 # The {NAME ORIGIN} flag pairs of the function declaration or call AST node
@@ -522,6 +641,10 @@ proc surface::lower::Node {node} {
                         typeOrigin [Origin [dict get $clause typeSpan] "[dict get $node id]/proves($param)/type"]
                 }]]
             }
+            if {[dict exists $node resume] && [dict get $node resume] ne ""} {
+                set block [hir::syntax::withResume $block [dict get $node resume type] \
+                    [Origin [dict get $node resume typeSpan] "[dict get $node id]/resume"]]
+            }
             if {[dict exists $node contexts]} {
                 set block [hir::syntax::withContextParams $block [lmap c [dict get $node contexts] {
                     set name [dict get $c name]
@@ -604,6 +727,10 @@ proc surface::lower::Node {node} {
         }
         fail {
             return [hir::syntax::failNode $origin [dict get $node name]]
+        }
+        yield {
+            return [hir::syntax::callNode $origin \
+                [hir::syntax::rootRef $origin [core::coroutines::yieldNative]] [Node [dict get $node value]]]
         }
         handledcall {
             set handlers [lmap handler [dict get $node handlers] {

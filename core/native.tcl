@@ -38,6 +38,14 @@
 #                   core::native::failDeclared, and core::native::invoke turns
 #                   that into an ordinary propagate-error completion, exactly
 #                   like a Botlish `fail NAME` (EXPLICIT-ERROR-COMPLETIONS.md).
+#   completion      0 | 1 (default 0): the impl returns a *completion*, not a
+#                   value -- normal, or the propagate-error of a program's own
+#                   declared error that Botlish code it ran to a boundary of
+#                   its own completed with (core/coroutines.tcl: a coroutine
+#                   segment). Which errors are possible is not the native's
+#                   (they are the program's): static typing charges them to
+#                   the call (hir/coroutines.tcl), and compiled code always
+#                   calls such a native through the generic call boundary.
 #   bounds          "" or the bounds checks behind a native's argument-
 #                   dependent errors (STDLIB-NAMESPACES.md), stated once here
 #                   so static analyses (hir/completions.tcl) read them by
@@ -184,7 +192,7 @@ proc core::native::register {name args} {
     }
     set options [dict create -impl "" -arity "" -refines-true {} -refines-false {} \
         -param-types "" -result-type any -tests-type "" -runtime {} -result-shape {} -result-range {} \
-        -context-free 0 -errors {} -bounds {} -nomethod 0]
+        -context-free 0 -errors {} -bounds {} -nomethod 0 -completion 0]
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "core::native::register: unknown option \"$option\""
@@ -204,6 +212,9 @@ proc core::native::register {name args} {
     }
     if {[dict get $options -nomethod] ni {0 1}} {
         error "core::native::register: -nomethod of \"$name\" must be 0 or 1"
+    }
+    if {[dict get $options -completion] ni {0 1}} {
+        error "core::native::register: -completion of \"$name\" must be 0 or 1"
     }
     set testsType [dict get $options -tests-type]
     if {$testsType ne ""} {
@@ -290,7 +301,7 @@ proc core::native::register {name args} {
         runtime [lsort -unique [dict get $options -runtime]] \
         resultShape $shape resultRange $range \
         contextFree [dict get $options -context-free] errors $errors bounds $bounds \
-        nomethod [dict get $options -nomethod]]
+        nomethod [dict get $options -nomethod] completion [dict get $options -completion]]
     return [core::value::native $name]
 }
 
@@ -355,6 +366,13 @@ proc core::native::ValidShape {shape count} {
         # program's own struct registry (a library struct is declared by a
         # .bot module long after core bootstrap registers the native).
         return [expr {$length == 2 && [regexp {^[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*$} [lindex $shape 1]]}]
+    }
+    if {$shape in {coroutine-create coroutine-outward coroutine-yield}} {
+        # The coroutine operations (core/coroutines.tcl, COROUTINES.md): the
+        # result is typed by hir::types::ShapeResult from the program's
+        # coroutine analysis (hir/coroutines.tcl) -- a handle's protocol, the
+        # outward value of its segment, the resume message of a yield.
+        return 1
     }
     if {$shape eq {never}} {
         # {never}: the native never completes normally
@@ -580,6 +598,19 @@ proc core::native::invoke {nativeValue argValues} {
         if {$param ne "any"} {
             core::value::expect $param [lindex $argValues 0] $name
         }
+    }
+    if {[dict get $meta completion]} {
+        # A native whose implementation runs Botlish code to a boundary of
+        # its own and returns that code's completion (core/coroutines.tcl:
+        # a coroutine segment ends normally or with the body's own
+        # propagate-error, which this call then completes with). Only a
+        # normal or propagate-error completion may cross it.
+        set completion [{*}[dict get $meta impl] {*}$argValues]
+        if {[core::completion::kind $completion] ni {value propagate-error}} {
+            throw [list CORE CONTRACT TYPE] \
+                "$name: contract violation: it completed with [core::completion::show $completion]"
+        }
+        return $completion
     }
     set errors [dict get $meta errors]
     if {$errors ne ""} {

@@ -450,9 +450,20 @@ proc hir::contexts::Denotes {hir b {seen {}}} {
     return ""
 }
 
-# The block a call E calls, statically and exactly, or "".
+# The block a call E calls, statically and exactly, or "". A coroutine
+# construction (COROUTINES.md: `coroutine#create(THUNK)`) calls its thunk:
+# the thunk's body runs right there, eagerly, in the execution environment
+# of the construction -- resumptions continue that same execution, so the
+# contexts it needs are this call's requirement.
 proc hir::contexts::Callee {hir e} {
     set callee [hir::get $hir $e callee]
+    if {[hir::coroutines::NativeOf $hir $e] eq [core::coroutines::createNative]} {
+        set thunk [lindex [hir::get $hir $e args] 0]
+        if {$thunk ne "" && [hir::kind $hir $thunk] eq "block"} {
+            return $thunk
+        }
+        return ""
+    }
     switch -- [hir::kind $hir $callee] {
         block { return $callee }
         ref   { return [Denotes $hir [hir::get $hir $callee binding]] }
@@ -604,6 +615,11 @@ proc hir::contexts::Walk {hir} {
 proc hir::contexts::Observed {hir parent e} {
     lassign [dict get $parent $e] p role
     if {$role eq "callee"} {
+        return 0
+    }
+    if {$p ne "" && [hir::kind $hir $e] eq "block"
+            && [hir::coroutines::NativeOf $hir $p] eq [core::coroutines::createNative]} {
+        # A coroutine construction's thunk is called by it, eagerly (Callee).
         return 0
     }
     if {$role eq "seq 0"} {

@@ -552,8 +552,12 @@ proc core::evalProgram {exprs} {
     try {
         # Every run starts with an empty execution-environment context set
         # (core/contexts.tcl, CONTEXTS.md).
+        # So does the coroutine store (core/coroutines.tcl): coroutines a run
+        # leaves suspended end with it.
         set value [core::contexts::fresh {
-            core::completion::atProgramBoundary [core::RunWithBackend program $exprs $env]
+            core::coroutines::fresh {
+                core::completion::atProgramBoundary [core::RunWithBackend program $exprs $env]
+            }
         }]
     } finally {
         core::releaseProgram $mark $value

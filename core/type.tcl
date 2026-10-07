@@ -61,7 +61,12 @@ namespace eval core::type {
     # like the runtime kind tag; the precise forms -- an anonymous struct's
     # field types, a named struct's declaration -- are HIR static types
     # (hir/types.tcl), exactly as {list ELEM} refines the bare `list` kind.
-    variable primitives {int str bool unit list result block native mutarray UnicodeChar immutableSet struct}
+    #
+    # coroutine is the kind of a coroutine handle (COROUTINES.md): never a
+    # source-spellable type (a handle's precise static type is the HIR form
+    # {coroutine RESUME OUTWARD ERRORS}, hir/types.tcl), registered so that
+    # the runtime kind has a core type, exactly as `block` and `native` do.
+    variable primitives {int str bool unit list result block native mutarray UnicodeChar immutableSet struct coroutine}
     # NAME -> {name NAME base KIND validator CMD parents {NAME...}
     # integerDomain DOMAIN source 0|1 refinement {} | {carrier TYPE owner NS
     # span SPAN}}

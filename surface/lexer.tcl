@@ -19,7 +19,7 @@
 #             scalar's canonical decimal codepoint (like an INT token's
 #             digits) -- see UNICODE-CHAR-LITERALS.md
 #   keywords  fn if elif else loop return break continue true false unit and or not
-#             type struct error errors fail on (kind is the word
+#             type struct error errors fail on yield (kind is the word
 #             itself; the parser reads `unit` in a type position as the
 #             unit type's name, surface::parser::TypeExpr)
 #   operators ( ) [ ] { } , : :: = == != < <= > >= + - * -> .. .
@@ -65,7 +65,7 @@
 
 namespace eval surface::lexer {
     variable keywords {fn if elif else loop return break continue true false unit and or not type \
-        struct error errors fail on}
+        struct error errors fail on yield}
     # Longest operators first ("::" before ":", so a module-qualified name
     # like web::uri_escape does not lex as ":" ":"). "{" and "}" are not
     # ordinary block syntax (Botlish blocks are ":" + indentation): they

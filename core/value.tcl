@@ -89,6 +89,16 @@
 #                             new one, so two logical copies can never
 #                             influence each other here. Equality is exact
 #                             byte-sequence equality, never identity.
+#   {coroutine ID}            a coroutine handle (COROUTINES.md); ID indexes
+#                             core::coroutines' store (coroutines.tcl), which
+#                             holds the coroutine's lifecycle state (fresh,
+#                             suspended, running, completed, failed) and its
+#                             continuation. Not a value in the immutable
+#                             sense: resuming it changes that state. The
+#                             compiler proves every handle has one owner
+#                             (an affine binding), so the store's mutation
+#                             is never observable as aliasing. No equality,
+#                             no hash, no storage in another value.
 #   {mutarray ID}             MutableArray handle; ID indexes
 #                             core::mutarray's mutable store (mutarray.tcl).
 #                             The only value kind that is NOT treated as
@@ -102,7 +112,7 @@
 # file should construct and inspect values only through these procedures.
 
 namespace eval core::value {
-    variable kinds {int str bool unit list result block native mutarray UnicodeChar immutableSet errorId struct bytestore mutbytes}
+    variable kinds {int str bool unit list result block native mutarray UnicodeChar immutableSet errorId struct bytestore mutbytes coroutine}
 }
 
 proc core::value::isCanonicalInt {text} {
@@ -321,6 +331,7 @@ proc core::value::structGet {v name} {
 
 proc core::value::nativeName {v}  { Require native $v; return [lindex $v 1] }
 proc core::value::mutarrayId {v}  { Require mutarray $v; return [lindex $v 1] }
+proc core::value::coroutineId {v} { Require coroutine $v; return [lindex $v 1] }
 
 # 1 if V is a Block or contains one (in a list or Result).
 proc core::value::containsBlock {v} {
@@ -360,7 +371,7 @@ proc core::value::equal {a b} {
     # MutableArray, like Block/Native, has no structural equality (its
     # identity/equality semantics are a separate design question: see
     # mutarray.tcl).
-    if {$ka in {block native mutarray} || $kb in {block native mutarray}} {
+    if {$ka in {block native mutarray coroutine} || $kb in {block native mutarray coroutine}} {
         core::semanticError EQUALITY \
             "== is not defined for callables: [show $a] == [show $b]"
     }
@@ -549,5 +560,6 @@ proc core::value::show {v {debug 0} {reveal 0}} {
         native { return "<native [lindex $v 1]>" }
         errorId { return "<error [lindex $v 1]>" }
         mutarray { return "<mutable-array capacity=[core::value::intOf [core::mutarray::capacity $v]]>" }
+        coroutine { return "<coroutine>" }
     }
 }

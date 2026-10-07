@@ -711,6 +711,9 @@ proc hir::check {hirVar} {
 
 proc hir::CheckOnce {hirVar demote} {
     upvar 1 $hirVar hir
+    # The coroutine protocols (hir/coroutines.tcl) type every yield, so they
+    # are inferred before the types are.
+    hir::coroutines::analyze hir
     hir::signatures::infer hir $demote
     hir::range::verifyDeclaredResults hir
     hir::range::verifyDeclaredParams hir
@@ -718,6 +721,7 @@ proc hir::CheckOnce {hirVar demote} {
     hir::lockstep::verify hir
     hir::structs::verify hir
     hir::contexts::verify hir
+    hir::coroutines::verify hir
     hir::syscall::verify hir
     hir::semantic::verify hir
     hir::errorsets::verify hir
@@ -1023,7 +1027,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {syntax imports resolve flags contexts refcheck hygiene sourcetypes structs traits syscall errordecls types exactvalue signatures modulebinding refine repeatable lower format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep warnings} {
+    foreach file {syntax imports resolve flags contexts coroutines refcheck hygiene sourcetypes structs traits syscall errordecls types exactvalue signatures modulebinding refine repeatable lower format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep warnings} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

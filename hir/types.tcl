@@ -78,6 +78,20 @@
 #                                   (hir/callables.tcl audits every position
 #                                   that would). The bare atom `mutarray` is
 #                                   the raw, element-untyped substrate type.
+#   {coroutine RESUME OUTWARD ERRORS}
+#                                   a coroutine handle (COROUTINES.md): the
+#                                   affine, resumable computation one
+#                                   `coroutine {...} = CALL` construction
+#                                   started. RESUME is its protocol (unit:
+#                                   resumed with no message; a named struct
+#                                   type: with one message of it), OUTWARD
+#                                   the static type of every value a
+#                                   segment ends with (a yield's or the
+#                                   final return's), ERRORS the sorted
+#                                   declared errors a segment may end with.
+#                                   Never source-spellable, never erased:
+#                                   a handle lives only in local bindings
+#                                   (hir/coroutines.tcl's affine frontier)
 #
 # The list and immutableSet forms are *aggregate facts*. Semantic inference
 # (infer) never produces a *shaped* (positional) one: a program's HIR types
@@ -263,8 +277,25 @@ proc hir::types::resolveApplication {ctor argTypes} {
 
 proc hir::types::IsSpecific {type} {
     return [expr {$type eq "never"
-                  || ([llength $type] > 1 && [lindex $type 0] in {native block list immutableSet mutarray fn struct nstruct trait})}]
+                  || ([llength $type] > 1 && [lindex $type 0] in {native block list immutableSet mutarray fn struct nstruct trait coroutine})}]
 }
+
+# ---------------------------------------------------------------------------
+# Coroutine handles (COROUTINES.md; the header's {coroutine ...} form)
+
+proc hir::types::IsCoroutine {type} {
+    return [expr {[lindex $type 0] eq "coroutine" && [llength $type] == 4}]
+}
+
+# The handle type of a coroutine resumed with RESUME (unit or a named struct
+# type), whose segments end with values of OUTWARD or one of ERRORS.
+proc hir::types::MakeCoroutine {resume outward errors} {
+    return [list coroutine $resume $outward [lsort -unique $errors]]
+}
+
+proc hir::types::CoroutineResume {type}  { return [lindex $type 1] }
+proc hir::types::CoroutineOutward {type} { return [lindex $type 2] }
+proc hir::types::CoroutineErrors {type}  { return [lindex $type 3] }
 
 # ---------------------------------------------------------------------------
 # Trait types (TRAITS.md; the header's {trait ID} and {trait ID WITNESS})
@@ -1331,6 +1362,12 @@ proc hir::types::show {type} {
                 # hir::traits::showView, never in a source-level message).
                 return [lindex $type 1]
             }
+            coroutine {
+                # Not a source type: a notation in the shape of Fn{...}, so
+                # HIR text can state and read back a handle's protocol.
+                return [format {Coroutine{resume: %s, yield: %s, errors: [%s]}} \
+                    [show [lindex $type 1]] [show [lindex $type 2]] [join [lindex $type 3] {, }]]
+            }
             immutableSet {
                 # Same convention as List[T] above: the canonical applied-
                 # type notation, matching what a declared ImmutableSet[T]
@@ -1496,6 +1533,11 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result} {
         never {
             # context#unreachable (core/contexts.tcl): never completes.
             return never
+        }
+        coroutine-create - coroutine-outward - coroutine-yield {
+            # The coroutine operations (core/coroutines.tcl): typed from the
+            # program's coroutine analysis (hir/coroutines.tcl).
+            return [hir::coroutines::ShapeResult $hir [lindex $shape 0] $argExprs $argTypes]
         }
         context-struct {
             # context#load("ID") (core/contexts.tcl, CONTEXTS.md): the
@@ -2424,8 +2466,14 @@ proc hir::types::Call {hirVar ctxVar e} {
         set calleeErrors [dict get $hir exprs [lindex $target 1] declaredErrors]
     } elseif {[lindex $target 0] eq "native"} {
         # A root native declares errors only through its registry entry
-        # (-errors: `argv`'s InvalidArgumentEncoding).
+        # (-errors: `argv`'s InvalidArgumentEncoding) -- except a coroutine
+        # segment (start, resume: COROUTINES.md), which ends with whatever
+        # declared error its body lets escape, as the handle's type says.
         set calleeErrors [dict get [core::native::metadata [dict get [hir::symbol $hir [lindex $target 1]] name]] errors]
+        if {[dict get [core::native::metadata [dict get [hir::symbol $hir [lindex $target 1]] name]] completion]
+                && [IsCoroutine [lindex $argTypes 0]]} {
+            set calleeErrors [CoroutineErrors [lindex $argTypes 0]]
+        }
     } elseif {[IsFn $calleeType]} {
         # A structural callee's declared error contract: every error it
         # permits may escape this call, since which implementation runs

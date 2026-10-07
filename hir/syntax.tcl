@@ -26,7 +26,9 @@
 #             WARNINGS-METHOD-ELIGIBLE.md; absent for every other block),
 #             contextParams (optional: {NAME ORIGIN TYPE TYPEORIGIN} tuples,
 #             the function's context parameter section -- CONTEXTS.md;
-#             absent for a function without one)
+#             absent for a function without one), resume (optional: {TYPE
+#             ORIGIN}, the function's `resume TYPE` clause -- COROUTINES.md;
+#             its declared coroutine resume protocol, never a parameter)
 #   call      callee, args, flags (optional: {NAME ORIGIN} pairs, the flags
 #             the call supplies, in written order -- FLAGS.md), written
 #             (optional, see below)
@@ -273,6 +275,16 @@ proc hir::syntax::withContextParams {block contextParams} {
     if {$contextParams ne {}} {
         dict set block contextParams $contextParams
     }
+    return $block
+}
+
+# BLOCK (a `block` node) declaring the coroutine resume protocol TYPE (the
+# as-written type expression of its `resume TYPE` clause, at ORIGIN;
+# COROUTINES.md): hir/resolve.tcl resolves it into the block's
+# `declaredResume`, and hir/coroutines.tcl holds every yield of the
+# function's coroutine to it.
+proc hir::syntax::withResume {block type origin} {
+    dict set block resume [list $type $origin]
     return $block
 }
 

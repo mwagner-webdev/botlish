@@ -84,7 +84,10 @@
 #              nomethod (1 for `nomethod fn NAME(...)`, else 0), nomethodSpan
 #              (the modifier word's span, or "") -- a property of the one
 #              declaration: its author's declaration that it is never the
-#              callee of method syntax (WARNINGS-METHOD-ELIGIBLE.md)
+#              callee of method syntax (WARNINGS-METHOD-ELIGIBLE.md),
+#              resume ("" or {type TYPE typeSpan SPAN span SPAN}: the
+#              function's `resume TYPE` clause, COROUTINES.md -- the last
+#              entry of its parameter list, never a parameter)
 #   if         condition, then (suite), else (suite or ""). An "elif" clause
 #              is not a node kind of its own (ELIF.md): the parser makes it an
 #              ordinary `if` node (extra field `elif 1`) standing alone in a
@@ -163,6 +166,16 @@
 #              declarations
 #   fail       name, nameSpan -- "fail NAME": produces the named error's
 #              completion (EXPLICIT-ERROR-COMPLETIONS.md).
+#   yield      value -- "yield VALUE" (COROUTINES.md): sends VALUE outward,
+#              suspends the coroutine, evaluates to the resume message
+#   coroutinebind  pattern, value -- "coroutine {step: s, first: f} = CALL"
+#              (COROUTINES.md): pattern is destructure-shaped ({span fields},
+#              each field {name nameSpan local localSpan nested shorthand span},
+#              name step or first), value the call that starts the coroutine
+#              (a call, methodcall or handledcall node; anything else is the
+#              HIR's COROUTINE-RHS-NOT-YIELDING). Only the parser and the
+#              printer know it by this name: lowering turns it into the
+#              construction and the eager start (surface/lower.tcl)
 #   handledcall  call (a `call` or `methodcall` node), handlers (a list of {name nameSpan
 #              body} dicts, one per "on NAME:" clause in written order;
 #              body a suite) -- "CALL: on NAME: ... on NAME: ...". Only a
@@ -177,6 +190,7 @@
 #
 #   NAME()     function NAME          NAME=      binding of NAME
 #   if loop return break continue destructure     KIND       any other
+#   coroutine (a coroutine binding)
 #                                                 expression statement
 #
 # the Nth statement with the same key among its siblings adding "#N" (N > 1).
@@ -272,6 +286,7 @@ proc surface::ast::Statements {statements parent} {
         switch -- [dict get $statement kind] {
             function { set key "[dict get $statement name]()" }
             bind     { set key "[dict get $statement name]=" }
+            coroutinebind { set key coroutine }
             default  { set key [dict get $statement kind] }
         }
         dict incr counts $key
@@ -346,14 +361,14 @@ proc surface::ast::Ids {node id} {
             dict set node left [Ids [dict get $node left] $id/left]
             dict set node right [Ids [dict get $node right] $id/right]
         }
-        with {
+        with - yield {
             dict set node value [Ids [dict get $node value] $id/value]
         }
-        bind - return - break - destructure {
+        bind - return - break - destructure - coroutinebind {
             if {[dict get $node value] ne ""} {
                 dict set node value [Ids [dict get $node value] $id/value]
             }
-            if {[dict get $node kind] eq "destructure"} {
+            if {[dict get $node kind] in {destructure coroutinebind}} {
                 dict set node pattern [PatternIds [dict get $node pattern] $id]
             }
         }
@@ -450,10 +465,10 @@ proc surface::ast::Children {node} {
         project            { return [list [dict get $node receiver]] }
         methodcall         { return [concat [list [dict get $node receiver]] [dict get $node args]] }
         binary - logical   { return [list [dict get $node left] [dict get $node right]] }
-        bind - return - break - destructure {
+        bind - return - break - destructure - coroutinebind {
             return [expr {[dict get $node value] eq "" ? {} : [list [dict get $node value]]}]
         }
-        with               { return [list [dict get $node value]] }
+        with - yield       { return [list [dict get $node value]] }
         function           { return [list [dict get $node body]] }
         loop {
             if {[llength [dict get $node clauses]] > 1} {
@@ -626,6 +641,12 @@ proc surface::ast::Expr {node show} {
         destructure {
             return "(destructure [PatternText [dict get $node pattern] $show] [Expr [dict get $node value] $show])$at"
         }
+        coroutinebind {
+            return "(coroutine [PatternText [dict get $node pattern] $show] [Expr [dict get $node value] $show])$at"
+        }
+        yield {
+            return "(yield [Expr [dict get $node value] $show])$at"
+        }
         return - break {
             if {[dict get $node value] eq ""} {
                 return "([dict get $node kind])$at"
@@ -776,6 +797,9 @@ proc surface::ast::Statement {node indent show linesVar} {
                     string cat [dict get $c name] : [showType [dict get $c type]]
                 }]
             }
+            if {[dict exists $node resume] && [dict get $node resume] ne ""} {
+                lappend params resume [showType [dict get $node resume type]]
+            }
             set modifier [expr {[dict exists $node nomethod] && [dict get $node nomethod] ? "nomethod " : ""}]
             set line "${pad}${modifier}fn [dict get $node name] ([join $params { }])"
             if {[dict exists $node proves]} {
@@ -811,11 +835,12 @@ proc surface::ast::Statement {node indent show linesVar} {
             lappend lines "${pad}with [dict get $node form]$at [Expr [dict get $node value] $show]"
             return
         }
-        bind - return - break - destructure {
+        bind - return - break - destructure - coroutinebind {
             set value [dict get $node value]
             set prefix [switch -- [dict get $node kind] {
                 bind { expr {"bind [dict get $node name]$at = "} }
                 destructure { expr {"destructure [PatternText [dict get $node pattern] $show]$at = "} }
+                coroutinebind { expr {"coroutine [PatternText [dict get $node pattern] $show]$at = "} }
                 default { expr {"[dict get $node kind]$at "} }
             }]
             if {$value ne "" && [dict get $value kind] eq "if"} {
