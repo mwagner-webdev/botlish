@@ -1027,6 +1027,12 @@ added because they are imaginable.
     behavior is unchanged: tests/contexts.test passes with three pins updated
     for additions only (linux::io's new functions, the new internal native,
     one ExprId shifted by lib/linux/io.bot's new imports).
+
+    After merging `main` (ten commits: qualified module source types, the
+    source-type registry reset, the traits fuzzer's widened import traps),
+    the merged tree passes the interp suite (**6396 passed, 0 failed**: the
+    milestone's 6392 and `main`'s new tests), and every mutant of the three
+    mutation suites still applies exactly once.
 57. **Eager-trait fuzzer regression.** `audit/traits/tools/fuzz.tcl -seed
     1|2 -count 150 -accept 0.6`, every backend: seed 1 -- 150 programs, 123
     accepted (385 specializations), 27 rejected, 0 failures; seed 2 -- 120
