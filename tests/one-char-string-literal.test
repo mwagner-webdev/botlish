@@ -435,7 +435,30 @@ x = "C"
         [lindex [outcomeUnderHir interp $hir] 1]
 } -result {{{const {str C} 3:14}} 6:5 {{"C"}} {[3, "C"]}}
 
-test oc-synthesized-string-consts-enumerated {SOURCE AUDIT: the frontend builds a String const in exactly two places -- the written literal (surface/lower.tcl) and the context load key (hir/contexts.tcl) -- and every const node is built by hir::syntax::constNode or read from core IR (hir::syntax::fromIR); a new synthesized String const fails here} -body {
+test oc-context-trait-key-is-not-a-literal {SYNTHESIZED, pinned: a context-trait parameter is bound to context#load("TRAIT") in the checked source build -- one character for a context trait named T; it is silent, while a written "T" warns, from source and from HIR text} -body {
+    set source {context trait T:
+    fn tick(n: int) -> int
+context struct W:
+    v: int
+fn tick(n: int, context w: W) -> int:
+    w.v + n
+fn f(n: int, context t: T) -> int:
+    t.tick(n)
+with context W {v: 3}
+x = "T"
+[f(1), x]}
+    set hir [compileWith $source]
+    set checked [dict get $hir traitSource]
+    set keys [lmap e [dict keys [dict get $checked exprs]] {
+        if {![hir::contexts::isLoad $checked $e]} continue
+        dict get $checked exprs [lindex [dict get $checked exprs $e args] 0] value
+    }]
+    set parsed [hir::parse [hir::format [compileWith $source off]]]
+    list [lsort $keys] [lmap w [literalsOf $hir] {loc $hir [dict get $w primary]}] \
+        [lmap w [hir::warnings::collect $parsed] {core::value::show [dict get $w data value]}] [lindex [outcomeUnderHir interp $hir] 1]
+} -result {{{str T} {str W}} 10:5 {{"T"}} {[4, "T"]}}
+
+test oc-synthesized-string-consts-enumerated {SOURCE AUDIT: the frontend builds a String const in exactly three places -- the written literal (surface/lower.tcl) and the context load key of a context struct and of a context trait (hir/contexts.tcl) -- and every const node is built by hir::syntax::constNode or read from core IR (hir::syntax::fromIR); a new synthesized String const fails here} -body {
     set found {}
     foreach path [lsort [concat [glob [file join $::projectRoot hir *.tcl]] [glob [file join $::projectRoot surface *.tcl]]]] {
         set channel [open $path]
@@ -451,7 +474,7 @@ test oc-synthesized-string-consts-enumerated {SOURCE AUDIT: the frontend builds 
         }
     }
     set found
-} -result {{hir/contexts.tcl {[hir::syntax::constNode $origin str $id]]]}} {hir/syntax.tcl {return [Node const $origin literal $args]}} {hir/syntax.tcl {return [Node const $origin literal [lrange $node 1 end]]}} {surface/lower.tcl {return [hir::syntax::constNode $origin str [dict get $node value]]}}}
+} -result {{hir/contexts.tcl {[hir::syntax::constNode $origin str $trait]]]}} {hir/contexts.tcl {[hir::syntax::constNode $origin str $id]]]}} {hir/syntax.tcl {return [Node const $origin literal $args]}} {hir/syntax.tcl {return [Node const $origin literal [lrange $node 1 end]]}} {surface/lower.tcl {return [hir::syntax::constNode $origin str [dict get $node value]]}}}
 
 test oc-desugarings-build-no-string-const {every construct the frontend desugars -- unary minus, !=, not, and, or, elif, struct destructuring, flags, with context, collecting and lockstep loops, method sugar -- builds no String const: a program using them all without a written String literal has none but the context load key, and no warning} -body {
     set hir [compileWith {context struct Box:
