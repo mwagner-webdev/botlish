@@ -742,11 +742,21 @@ descriptor token it passes to `write_all` (NIR `structnew 2 %1` after the
   `io::IO` implementation; the root-native list includes `context#unreachable`;
   one ExprId), tests/stdlib-namespaces.test (the root-native inventory).
 
-**Fuzzer** (`audit/context-traits/tools/fuzz.tcl`): see its header and
-§16 item 54 for results.
+**Fuzzer** (`audit/context-traits/tools/fuzz.tcl`): 1-3 context traits over
+a pool of operations (some declaring `Fail`, names shared between traits),
+1-3 concrete contexts in their own modules with per-operation correct,
+correct-with-`Fail`, missing, wrong-parameter, wrong-result, context-free and
+other-context implementations, entry-program traps named like operations,
+consumers of six shapes (direct with one or two context-trait parameters,
+transitive, nested over the binding, recursive, exact, alias), unused
+consumers, and installation sets that are mostly exactly-one per trait and
+otherwise random. The independent oracle predicts satisfaction, every
+consumer's requirement, each call's selection and first error, every
+operation's implementation in the compiled program and every value. 300
+programs, 0 disagreements (§16 item 54).
 
 **Mutation testing** (`audit/context-traits/tools/mutate.tcl`, 23 mutants in
-`mutants.txt`): see §16 item 55.
+`mutants.txt`): 23 of 23 killed; see §16 item 55.
 
 ## 13. Regression and audits
 
@@ -951,11 +961,96 @@ added because they are imaginable.
     the existing refinement fuzzer generates validators, handled calls whose
     handlers return, fail, complete or re-prove, and validator calls in every
     position (REFINEMENT-VALUES.md); its run is item 58.
-55. **Mutation results.** MUTATION-RESULTS
-56. **Full regression.** REGRESSION-RESULTS
-57. **Eager-trait fuzzer regression.** TRAIT-FUZZ-RESULTS
-58. **Refinement fuzzer regression.** REFINEMENT-FUZZ-RESULTS
-59. **Scalar machine-code audit.** SCALAR-AUDIT-RESULTS
+55. **Mutation results.** `audit/context-traits/tools/mutate.tcl` (23
+    mutants in `mutants.txt`, each in a private copy of the tree against
+    tests/context-traits.test, tests/portable-io.test, tests/linux-path.test
+    and 25 fuzzer programs at seed 11 on every backend): **23 of 23 killed**.
+
+    | mutant | killed by |
+    |---|---|
+    | caller-imports-provide (the calling program implements) | `ct-owner-only` |
+    | any-context-satisfies-any-trait | 6 tests; fuzzer 22/25 |
+    | context-type-unchecked (any context parameter accepted) | `ct-explain-mismatches`; fuzzer 5/25 |
+    | context-error-set-ignored | `ct-explain-mismatches`; fuzzer 9/25 |
+    | choose-first-of-several | `ct-ambiguous-diagnostic`, `ct-select-matrix` |
+    | choose-last-installed | `ct-ambiguous-diagnostic`, `ct-select-matrix` |
+    | missing-provider-silent (missing provider silently dropped) | 5 tests; fuzzer 6/25 |
+    | witness-leaks-into-source (no one-way check) | `ct-one-way`, `-one-way-message`, `-orthogonal` |
+    | transitive-trait-requirement-dropped | 25 tests; fuzzer 9/25 |
+    | unreachable-consumer-requires | `ct-unreachable-requires-nothing` |
+    | context-op-indirect (operation through the requirement's function type) | `ct-machine-code-direct`, `ct-mono-hir`, `ct-nir-direct`, `io-nir-direct` |
+    | hidden-provider-argument (an extra argument at the call) | 22 tests; fuzzer 10/25 |
+    | context-trait-runtime-slot (the binding kept: a runtime load of the trait) | 23 tests; fuzzer 10/25 |
+    | validator-proves-on-error-edge | `path-validator-proof`, `-rejoining-handler` |
+    | validator-proof-lost-on-success | 19 tests |
+    | validator-proof-survives-rejoining-handler | `path-validator-rejoining-handler` |
+    | linuxpath-validator-reads-environment (argv) | `path-no-filesystem` |
+    | linuxpath-permits-nul | `path-concat-semantics`, `path-validity` |
+    | path-conformance-from-carrier | 7 tests |
+    | print-line-two-writes | `io-allocations`, `io-nir-direct`, `io-short-write-completed`, `io-strace` |
+    | short-write-not-completed | `io-short-write-completed` |
+    | zero-progress-retried | `io-write-failed` |
+    | stdout-stderr-swapped | `io-routing-utf8`, `io-strace`, `path-io-vertical` |
+
+    Honestly: the fuzzer alone kills 7 of the 23 (it checks satisfaction,
+    requirements, selections, bindings and values, not code shape, I/O or the
+    path library); the selection mutants `choose-first-of-several` and
+    `choose-last-installed` survive the 25-program fuzz run (ambiguous
+    programs are about 3% of the generator's output) and
+    `caller-imports-provide` too (its trap needs a context lacking exactly
+    the trapped operation): the tests kill all three. The existing mutation
+    suites still kill everything on the changed code: traits
+    (audit/traits/tools/mutate.tcl) **18 of 18**, contexts
+    (audit/contexts/tools/mutate.tcl -n 30) **26 of 26** -- two trait mutants
+    and three context mutants were re-anchored to the moved code first, each
+    the same mutation.
+56. **Full regression.** On a frozen snapshot of the milestone (a worktree at
+    b8e94e2; the later commits change documentation only), each run with
+    private `-tmpdir`s, the suite split over four parallel groups:
+
+    | run | result |
+    |---|---|
+    | `CORE_BACKEND=interp tests/all.tcl` | **6392 passed, 0 failed** (6322 before; +70: tests/context-traits.test 39, tests/portable-io.test 12, tests/linux-path.test 19) |
+    | `CORE_BACKEND=compile tests/all.tcl` | **6388 passed, 4 skipped (bindings.test, as before), 0 failed** |
+    | native coverage (the suite on Cranelift) | NATIVE-COVERAGE-RESULTS |
+    | `BOTLISH_NATIVE_GC_STRESS=1`, interp pass | GC-STRESS-RESULTS |
+    | `cargo test --release` (native/, separate target dir) | **186 + 31 passed, 0 failed** (no Rust source changed) |
+
+    The suite covers the list the milestone names: contexts, traits,
+    refinements and proofs/repeatability (tests/refinement-values.test,
+    tests/refinement-validators.test, tests/emailish-predicate.test), opaque
+    structs, method sugar, semantic instances, function values, errors and
+    completions, ABI numerics, Bytes/MutableBytes, Linux I/O, range/completion
+    proofs, HIR round trips and the native backend's own files. Exact-context
+    behavior is unchanged: tests/contexts.test passes with three pins updated
+    for additions only (linux::io's new functions, the new internal native,
+    one ExprId shifted by lib/linux/io.bot's new imports).
+57. **Eager-trait fuzzer regression.** `audit/traits/tools/fuzz.tcl -seed
+    1|2 -count 150 -accept 0.6`, every backend: seed 1 -- 150 programs, 123
+    accepted (385 specializations), 27 rejected, 0 failures; seed 2 -- 120
+    accepted (363 specializations), 30 rejected, 0 failures: **exactly
+    TRAITS.md's numbers** before this milestone. Ordinary trait satisfaction,
+    owner lookup, views, returns, witness joins, clones, method resolution and
+    the storage frontier are unchanged; the trait mutation suite still kills
+    18 of 18 (item 55).
+58. **Refinement fuzzer regression.** `audit/refinement-values/tools/fuzz.tcl
+    -seed 1 -count 300` (validators on): 300 programs, 209 accepted, 91
+    rejected, 199 predicate calls in accepted programs (17 decided), 100
+    validator calls (never decided), **0 failures**. The `emailish?` corpus
+    and its redundant-check decisions are pinned by tests/refinement-values.test
+    and tests/emailish-predicate.test (both in the full regression, item 56).
+    Also re-run on the snapshot, all with 0 failures: the contexts fuzzer (400
+    programs at seed 20261006: 291 accepted, 109 rejected, 0 disagreements --
+    CONTEXTS.md's numbers), METHOD-ELIGIBLE (300 seeds, 1518 of 1518 round
+    trips), SAME-FAILURE (300 seeds), FIXED-ARITY-LIST-RETURN and
+    PROVES-NAMING (300 seeds each), method sugar.
+59. **Scalar machine-code audit.** `native/generate-scalar-audit.tcl`
+    regenerated from the snapshot: all 13 corpus programs (bench/ and
+    examples/stdlib/) compile, and every `.asm` and summary file is
+    **byte-identical** to the committed audit/native-scalar-asm/; only the
+    README's provenance lines (commit, rustc) differ, so the corpus is not
+    re-committed. Context traits change no generated code for programs that
+    do not use them.
 60. **Compile-time impact.** Context-trait resolution itself is small: on the
     portable Hello World, the plan takes ~5 ms and the whole context
     verification ~22 ms of ~450 ms. The cost is the build structure: before
