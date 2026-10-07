@@ -1,19 +1,20 @@
 # ONE-CHAR-STRING-LITERAL corpus audit: tclsh9.0 audit/one-char-string-literal/tools/corpus.tcl
-# commit 61f1864d99a85e2ab3ead4cd7cc975887f41665d (corpus paths clean)
+# commit 1db647e97f5ed34e242974585c5b531680b96d99 (corpus paths clean)
 
-compiled 36 of 40 programs
+compiled 39 of 44 programs
   not compiled: examples/surface/09-mutual-recursion.bot (CORE SEMANTIC UNBOUND) -- a deliberate rejection
   not compiled: examples/surface/10-duplicate-binding.bot (CORE SEMANTIC DUPLICATE) -- a deliberate rejection
+  not compiled: lib/io.bot (CORE SEMANTIC CONTEXT-FUNCTION-VALUE)
   not compiled: lib/list.bot (SURFACE MODULE MISSING-IMPORT)
   not compiled: lib/mutable_array.bot (SURFACE MODULE MISSING-IMPORT)
 
-## Findings: 92 distinct (a library module's finding once)
+## Findings: 97 distinct (a library module's finding once)
 convert-now        0
-API-deficiency    81
+API-deficiency    86
 deliberate        11
 UNCLASSIFIED       0
 false positives (the token at the anchor is not a one-character String literal of the warned value): 0
-spelling law clauses 1-2 (the character spelling lexes, is the UnicodeChar of the same code point, and a UnicodeChar parameter takes it): 92 of 92 hold, over 50 distinct characters
+spelling law clauses 1-2 (the character spelling lexes, is the UnicodeChar of the same code point, and a UnicodeChar parameter takes it): 97 of 97 hold, over 52 distinct characters
 
 ## Findings per file
   22  examples/stdlib/ai_text_clean.bot
@@ -24,20 +25,23 @@ spelling law clauses 1-2 (the character spelling lexes, is the UnicodeChar of th
    7  examples/stdlib/string_replace.bot
    1  examples/stdlib/string_reverse.bot
   26  lib/web.bot
+   1  examples/io/child-path.bot
+   2  lib/linux/path.bot
+   2  lib/io.bot
    2  bench/lex-strategy.bot
    2  bench/source-checks.bot
 
 ## The rewrite, per finding class (outcome over every probe: rejected KIND / runtime KIND / diverges / changed / same)
 convert-now: 
-API-deficiency: same 80, changed 22, diverges 8, runtime TYPE 23
+API-deficiency: same 84, changed 22, diverges 8, runtime TYPE 28
 deliberate: runtime TYPE 3, rejected TYPE 8
 
 ## API-deficiency catalog (one row per distinct consumer)
-* == against a one-character String sliced by a peek/char_at helper (str::substring) -- 31 findings
-    consumers: == str-substring:char_at(); == str-substring:character; == str-substring:delimiter; == str-substring:peek()
-    files: examples/stdlib/csv.bot, examples/stdlib/csv_chunked.bot, examples/stdlib/csv_geometric.bot, examples/stdlib/csv_records.bot, lib/web.bot
-    rewrite: changed 12, same 17, diverges 8
-    lacks: the helper returns a one-character String (or "" past the end); str::char_at returns a UnicodeChar but fails outside the String, where the helper returns ""
+* == against a one-character String sliced by str::substring or a peek/char_at helper -- 32 findings
+    consumers: == str-substring:char_at(); == str-substring:character; == str-substring:delimiter; == str-substring:peek(); == str-substring:str::substring()
+    files: examples/stdlib/csv.bot, examples/stdlib/csv_chunked.bot, examples/stdlib/csv_geometric.bot, examples/stdlib/csv_records.bot, lib/linux/path.bot, lib/web.bot
+    rewrite: changed 12, same 19, diverges 8
+    lacks: the slice is a one-character String (a helper returns "" past the end); str::char_at returns a UnicodeChar but fails outside the String, where the helper returns ""
 * == against a str parameter or a String-typed binding -- 3 findings
     consumers: == str-param:param:c
     files: bench/lex-strategy.bot, lib/web.bot
@@ -48,10 +52,10 @@ deliberate: runtime TYPE 3, rejected TYPE 8
     files: bench/source-checks.bot, examples/stdlib/ai_text_clean.bot
     rewrite: same 13, changed 8
     lacks: the callers pass str::substring slices (peek, a first-character slice); the comparison would hold for a UnicodeChar only if the callers changed too
-* str::concat argument -- 5 findings
+* str::concat argument -- 9 findings
     consumers: call str::concat:arg0; call str::concat:arg1
-    files: examples/stdlib/csv.bot, examples/stdlib/csv_chunked.bot, examples/stdlib/csv_geometric.bot, examples/stdlib/csv_records.bot, lib/web.bot
-    rewrite: same 4, runtime TYPE 3
+    files: examples/io/child-path.bot, examples/stdlib/csv.bot, examples/stdlib/csv_chunked.bot, examples/stdlib/csv_geometric.bot, examples/stdlib/csv_records.bot, lib/io.bot, lib/linux/path.bot, lib/web.bot
+    rewrite: same 6, runtime TYPE 8
     lacks: str::concat takes two Strings: there is no append of a UnicodeChar to a String
 * element of a List[str] made an ImmutableSet[str], queried with one-character Strings -- 5 findings
     consumers: list-element immutable_set::from_list:arg0
@@ -166,6 +170,11 @@ lib/web.bot:212:80 "D" top | list-element bind:web::hex_digits (List[str]) | run
 lib/web.bot:212:85 "E" top | list-element bind:web::hex_digits (List[str]) | same, same, runtime TYPE | API-deficiency
 lib/web.bot:212:90 "F" top | list-element bind:web::hex_digits (List[str]) | same, same, runtime TYPE | API-deficiency
 lib/web.bot:270:21 "%" pct | call str::concat:arg0 (str) | runtime TYPE, runtime TYPE, runtime TYPE | API-deficiency
+examples/io/child-path.bot:19:59 " " run | call str::concat:arg1 (str) | runtime TYPE | API-deficiency
+lib/linux/path.bot:81:55 "/" concat | == str-substring:str::substring() (str) | same, same | API-deficiency
+lib/linux/path.bot:84:39 "/" concat | call str::concat:arg1 (str) | runtime TYPE, same | API-deficiency
+lib/io.bot:59:31 "\n" print_line | call str::concat:arg1 (str) | runtime TYPE, runtime TYPE | API-deficiency
+lib/io.bot:67:37 "\n" write_error_line | call str::concat:arg1 (str) | same, runtime TYPE | API-deficiency
 bench/lex-strategy.bot:44:34 "_" lenient_ident_char? | == str-param:param:c (str) | changed | API-deficiency
 bench/lex-strategy.bot:44:46 "-" lenient_ident_char? | == str-param:param:c (str) | changed | API-deficiency
 bench/source-checks.bot:51:10 "_" is_underscore? | == any-param:param:c (any) | changed | API-deficiency
