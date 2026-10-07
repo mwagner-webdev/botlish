@@ -141,6 +141,14 @@
 #              owner is not in the AST (the cached AST is importer- and
 #              path-neutral): the loader supplies the module's namespace when
 #              it lowers the declaration (surface/lower.tcl's StructDeclOf).
+#   traitdecl  name, nameSpan, requirements ({name nameSpan params paramsSpan
+#              resultType resultTypeSpan errors span} dicts in written order;
+#              params are the function node's {NAME SPAN TYPE TYPESPAN}
+#              tuples, errors {NAME SPAN} pairs) -- a top-level trait
+#              declaration ("trait NAME:" followed by its indented
+#              signature-only "fn ..." requirement lines; TRAITS.md). A
+#              declaration like structdecl: no runtime meaning, no binding;
+#              the owner (the declaring module) is supplied by the loader.
 #   errordecl  name, nameSpan -- a top-level named-error declaration
 #              ("error NAME", surface/parser.tcl's ErrorDecl; see
 #              hir/errordecls.tcl for what it means). No runtime meaning,
@@ -710,6 +718,24 @@ proc surface::ast::Statement {node indent show linesVar} {
         }
         errordecl {
             lappend lines "${pad}error [dict get $node name]$at"
+            return
+        }
+        traitdecl {
+            lappend lines "${pad}trait [dict get $node name]$at"
+            foreach r [dict get $node requirements] {
+                set params [lmap pair [dict get $r params] {
+                    lassign $pair name _ type
+                    expr {$type eq "" ? $name : "$name:[showType $type]"}
+                }]
+                set line "${pad}    fn [dict get $r name] ([join $params { }])"
+                if {[dict get $r resultType] ne ""} {
+                    append line " -> [showType [dict get $r resultType]]"
+                }
+                if {[dict get $r errors] ne {}} {
+                    append line " errors [join [lmap pair [dict get $r errors] {lindex $pair 0}] {, }]"
+                }
+                lappend lines $line
+            }
             return
         }
         structdecl {

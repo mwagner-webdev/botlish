@@ -1,0 +1,225 @@
+; principal.bot: native::object (Cranelift, specialize=1), objdump -dr --no-show-raw-insn -M intel
+
+principal.o:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+0000000000000000 <botlish_fn_0 (<program>)>:
+   0:	push   rbp
+   1:	mov    rbp,rsp
+   4:	sub    rsp,0x50
+   8:	mov    QWORD PTR [rsp+0x30],rbx
+   d:	mov    QWORD PTR [rsp+0x38],r12
+  12:	mov    QWORD PTR [rsp+0x40],r15
+  17:	mov    QWORD PTR [rsp+0x8],0x0
+  20:	mov    QWORD PTR [rsp+0x10],0x0
+  29:	mov    rax,QWORD PTR [rdi+0x10]
+  2d:	mov    r15,rdi
+  30:	mov    rsi,QWORD PTR [rax]
+  33:	call   38 <botlish_fn_0 (<program>)+0x38>
+			34: R_X86_64_PLT32	botlish_fn_5 (describe<Person>)-0x4
+  38:	mov    QWORD PTR [rsp],rax
+  3c:	mov    rbx,rax
+  3f:	mov    rdi,r15
+  42:	call   47 <botlish_fn_0 (<program>)+0x47>
+			43: R_X86_64_PLT32	botlish_fn_1 (services::make_service)-0x4
+  47:	mov    QWORD PTR [rsp+0x8],rax
+  4c:	mov    rsi,rax
+  4f:	mov    rdi,r15
+  52:	call   57 <botlish_fn_0 (<program>)+0x57>
+			53: R_X86_64_PLT32	botlish_fn_6 (describe<services::Service>)-0x4
+  57:	test   rax,rax
+  5a:	je     ad <botlish_fn_0 (<program>)+0xad>
+  60:	mov    QWORD PTR [rsp+0x8],rax
+  65:	mov    rdi,r15
+  68:	mov    r12,rax
+  6b:	mov    rax,QWORD PTR [rdi+0x10]
+  6f:	mov    rsi,QWORD PTR [rax+0x8]
+  73:	call   78 <botlish_fn_0 (<program>)+0x78>
+			74: R_X86_64_PLT32	botlish_fn_4 (describe_person)-0x4
+  78:	mov    QWORD PTR [rsp+0x10],rax
+  7d:	lea    rdx,[rsp+0x18]
+  82:	mov    rcx,rbx
+  85:	mov    QWORD PTR [rsp+0x18],rcx
+  8a:	mov    rcx,r12
+  8d:	mov    QWORD PTR [rsp+0x20],rcx
+  92:	mov    QWORD PTR [rsp+0x28],rax
+  97:	mov    esi,0x3
+  9c:	mov    rdi,r15
+  9f:	call   a4 <botlish_fn_0 (<program>)+0xa4>
+			a0: R_X86_64_PLT32	rt_list_new-0x4
+  a4:	test   rax,rax
+  a7:	jne    c8 <botlish_fn_0 (<program>)+0xc8>
+  ad:	xor    rax,rax
+  b0:	mov    rbx,QWORD PTR [rsp+0x30]
+  b5:	mov    r12,QWORD PTR [rsp+0x38]
+  ba:	mov    r15,QWORD PTR [rsp+0x40]
+  bf:	add    rsp,0x50
+  c3:	mov    rsp,rbp
+  c6:	pop    rbp
+  c7:	ret
+  c8:	mov    rbx,QWORD PTR [rsp+0x30]
+  cd:	mov    r12,QWORD PTR [rsp+0x38]
+  d2:	mov    r15,QWORD PTR [rsp+0x40]
+  d7:	add    rsp,0x50
+  db:	mov    rsp,rbp
+  de:	pop    rbp
+  df:	ret
+
+00000000000000e0 <botlish_entry_0 (<program>)>:
+  e0:	push   rbp
+  e1:	mov    rbp,rsp
+  e4:	call   e9 <botlish_entry_0 (<program>)+0x9>
+			e5: R_X86_64_PLT32	botlish_fn_0 (<program>)-0x4
+  e9:	mov    rsp,rbp
+  ec:	pop    rbp
+  ed:	ret
+
+00000000000000ee <botlish_fn_1 (services::make_service)>:
+  ee:	push   rbp
+  ef:	mov    rbp,rsp
+  f2:	sub    rsp,0x10
+  f6:	mov    r9,QWORD PTR [rdi+0x10]
+  fa:	mov    r9,QWORD PTR [r9+0x10]
+  fe:	mov    QWORD PTR [rsp],r9
+ 102:	lea    rcx,[rsp+0x8]
+ 107:	mov    QWORD PTR [rsp+0x8],r9
+ 10c:	xor    rsi,rsi
+ 10f:	mov    edx,0x1
+ 114:	call   119 <botlish_fn_1 (services::make_service)+0x2b>
+			115: R_X86_64_PLT32	rt_struct_new-0x4
+ 119:	add    rsp,0x10
+ 11d:	mov    rsp,rbp
+ 120:	pop    rbp
+ 121:	ret
+
+0000000000000122 <botlish_entry_1 (services::make_service)>:
+ 122:	push   rbp
+ 123:	mov    rbp,rsp
+ 126:	call   12b <botlish_entry_1 (services::make_service)+0x9>
+			127: R_X86_64_PLT32	botlish_fn_1 (services::make_service)-0x4
+ 12b:	mov    rsp,rbp
+ 12e:	pop    rbp
+ 12f:	ret
+
+0000000000000130 <botlish_fn_2 (services::name)>:
+ 130:	push   rbp
+ 131:	mov    rbp,rsp
+ 134:	sub    rsp,0x10
+ 138:	mov    rax,rsi
+ 13b:	mov    r10,QWORD PTR [rdi+0x10]
+ 13f:	mov    rsi,QWORD PTR [r10+0x18]
+ 143:	mov    QWORD PTR [rsp],rsi
+ 147:	mov    r11,QWORD PTR [rax+0x18]
+ 14b:	mov    rdx,QWORD PTR [r11]
+ 14e:	mov    QWORD PTR [rsp+0x8],rdx
+ 153:	call   158 <botlish_fn_2 (services::name)+0x28>
+			154: R_X86_64_PLT32	rt_str_cat-0x4
+ 158:	test   rax,rax
+ 15b:	jne    16d <botlish_fn_2 (services::name)+0x3d>
+ 161:	xor    rax,rax
+ 164:	add    rsp,0x10
+ 168:	mov    rsp,rbp
+ 16b:	pop    rbp
+ 16c:	ret
+ 16d:	add    rsp,0x10
+ 171:	mov    rsp,rbp
+ 174:	pop    rbp
+ 175:	ret
+
+0000000000000176 <botlish_entry_2 (services::name)>:
+ 176:	push   rbp
+ 177:	mov    rbp,rsp
+ 17a:	mov    rsi,QWORD PTR [rdx]
+ 17d:	call   182 <botlish_entry_2 (services::name)+0xc>
+			17e: R_X86_64_PLT32	botlish_fn_2 (services::name)-0x4
+ 182:	mov    rsp,rbp
+ 185:	pop    rbp
+ 186:	ret
+
+0000000000000187 <botlish_fn_3 (name)>:
+ 187:	push   rbp
+ 188:	mov    rbp,rsp
+ 18b:	mov    rax,rsi
+ 18e:	mov    rsp,rbp
+ 191:	pop    rbp
+ 192:	ret
+
+0000000000000193 <botlish_entry_3 (name)>:
+ 193:	push   rbp
+ 194:	mov    rbp,rsp
+ 197:	mov    rsi,QWORD PTR [rdx]
+ 19a:	call   19f <botlish_entry_3 (name)+0xc>
+			19b: R_X86_64_PLT32	botlish_fn_3 (name)-0x4
+ 19f:	mov    rsp,rbp
+ 1a2:	pop    rbp
+ 1a3:	ret
+
+00000000000001a4 <botlish_fn_4 (describe_person)>:
+ 1a4:	push   rbp
+ 1a5:	mov    rbp,rsp
+ 1a8:	call   1ad <botlish_fn_4 (describe_person)+0x9>
+			1a9: R_X86_64_PLT32	botlish_fn_3 (name)-0x4
+ 1ad:	mov    rsp,rbp
+ 1b0:	pop    rbp
+ 1b1:	ret
+
+00000000000001b2 <botlish_entry_4 (describe_person)>:
+ 1b2:	push   rbp
+ 1b3:	mov    rbp,rsp
+ 1b6:	mov    rsi,QWORD PTR [rdx]
+ 1b9:	call   1be <botlish_entry_4 (describe_person)+0xc>
+			1ba: R_X86_64_PLT32	botlish_fn_4 (describe_person)-0x4
+ 1be:	mov    rsp,rbp
+ 1c1:	pop    rbp
+ 1c2:	ret
+
+00000000000001c3 <botlish_fn_5 (describe<Person>)>:
+ 1c3:	push   rbp
+ 1c4:	mov    rbp,rsp
+ 1c7:	call   1cc <botlish_fn_5 (describe<Person>)+0x9>
+			1c8: R_X86_64_PLT32	botlish_fn_3 (name)-0x4
+ 1cc:	mov    rsp,rbp
+ 1cf:	pop    rbp
+ 1d0:	ret
+
+00000000000001d1 <botlish_entry_5 (describe<Person>)>:
+ 1d1:	push   rbp
+ 1d2:	mov    rbp,rsp
+ 1d5:	mov    rsi,QWORD PTR [rdx]
+ 1d8:	call   1dd <botlish_entry_5 (describe<Person>)+0xc>
+			1d9: R_X86_64_PLT32	botlish_fn_5 (describe<Person>)-0x4
+ 1dd:	mov    rsp,rbp
+ 1e0:	pop    rbp
+ 1e1:	ret
+
+00000000000001e2 <botlish_fn_6 (describe<services::Service>)>:
+ 1e2:	push   rbp
+ 1e3:	mov    rbp,rsp
+ 1e6:	sub    rsp,0x10
+ 1ea:	mov    QWORD PTR [rsp],rsi
+ 1ee:	call   1f3 <botlish_fn_6 (describe<services::Service>)+0x11>
+			1ef: R_X86_64_PLT32	botlish_fn_2 (services::name)-0x4
+ 1f3:	test   rax,rax
+ 1f6:	jne    208 <botlish_fn_6 (describe<services::Service>)+0x26>
+ 1fc:	xor    rax,rax
+ 1ff:	add    rsp,0x10
+ 203:	mov    rsp,rbp
+ 206:	pop    rbp
+ 207:	ret
+ 208:	add    rsp,0x10
+ 20c:	mov    rsp,rbp
+ 20f:	pop    rbp
+ 210:	ret
+
+0000000000000211 <botlish_entry_6 (describe<services::Service>)>:
+ 211:	push   rbp
+ 212:	mov    rbp,rsp
+ 215:	mov    rsi,QWORD PTR [rdx]
+ 218:	call   21d <botlish_entry_6 (describe<services::Service>)+0xc>
+			219: R_X86_64_PLT32	botlish_fn_6 (describe<services::Service>)-0x4
+ 21d:	mov    rsp,rbp
+ 220:	pop    rbp
+ 221:	ret
+

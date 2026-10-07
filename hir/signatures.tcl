@@ -724,7 +724,12 @@ proc hir::signatures::ArgSinks {hir e node} {
             set i 0
             foreach d [dict get $tnode declaredParamTypes] {
                 set label "argument [expr {$i + 1}] of $name"
-                if {$d ne {}} {
+                if {$d ne {} && [hir::types::IsTraitConstraint $d]} {
+                    # A trait-typed parameter is an explicit boundary
+                    # (TRAITS.md): it never makes an untyped parameter
+                    # implicitly trait-polymorphic.
+                    lappend sinks flow
+                } elseif {$d ne {}} {
                     lappend sinks [list type $d trusted "$label (declared [hir::types::show $d])"]
                 } else {
                     lappend sinks [list param $target $i $label]

@@ -136,14 +136,16 @@ proc surface::lowerToHir {ast args} {
         [dict get $options -warnings] [dict get $options -warning-channel]]
 }
 
-# STATEMENTS split into {EXECUTABLE DECLS ERRORDECLS STRUCTDECLS}: EXECUTABLE keeps
+# STATEMENTS split into {EXECUTABLE DECLS ERRORDECLS STRUCTDECLS TRAITDECLS}: EXECUTABLE keeps
 # every statement with runtime meaning, in order (ready for Sequence);
 # DECLS is the type declarations among them (surface/parser.tcl's
 # `typedecl` nodes), converted to the plain dicts hir::buildSyntax's
 # -type-decls option takes (see hir/sourcetypes.tcl); ERRORDECLS likewise
 # for named-error declarations (`errordecl` nodes, hir/errordecls.tcl's
 # -error-decls); STRUCTDECLS likewise for struct declarations (`structdecl`
-# nodes, hir/structs.tcl's -struct-decls; STRUCTS.md); structs and types are
+# nodes, hir/structs.tcl's -struct-decls; STRUCTS.md), TRAITDECLS for trait
+# declarations (`traitdecl`, hir/traits.tcl's -trait-decls; TRAITS.md); structs,
+# traits and types are
 # tagged with NAMESPACE (the declaring module's, "" for the entry program):
 # it makes their identity `NAMESPACE::Name` (IMPORTS.md). No kind of declaration
 # is lowered to an hir/syntax.tcl node: compile-time-only metadata (spec
@@ -153,15 +155,27 @@ proc surface::lower::SplitTypeDecls {statements {namespace ""}} {
     set decls {}
     set errorDecls {}
     set structDecls {}
+    set traitDecls {}
     foreach statement $statements {
         switch -- [dict get $statement kind] {
             typedecl   { lappend decls [TypeDeclOf $statement $namespace] }
             errordecl  { lappend errorDecls [ErrorDeclOf $statement] }
             structdecl { lappend structDecls [StructDeclOf $statement $namespace] }
+            traitdecl  { lappend traitDecls [TraitDeclOf $statement $namespace] }
             default    { lappend executable $statement }
         }
     }
-    return [list $executable $decls $errorDecls $structDecls]
+    return [list $executable $decls $errorDecls $structDecls $traitDecls]
+}
+
+# The declaration dict of a `traitdecl` node declared in module NAMESPACE (""
+# for the entry program), for hir::buildSyntax's -trait-decls (TRAITS.md).
+# `namespace` -- the trait's owner, the one module that defines its
+# requirement set -- is the loader's canonical module identity, never read
+# from the (cached, importer-neutral) AST.
+proc surface::lower::TraitDeclOf {node namespace} {
+    return [dict create name [dict get $node name] nameSpan [dict get $node nameSpan] \
+        namespace $namespace requirements [dict get $node requirements] span [dict get $node span]]
 }
 
 # The declaration dict of a `structdecl` node declared in module NAMESPACE (""

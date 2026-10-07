@@ -1,0 +1,102 @@
+; function 2 "services::name": botlish_fn_2
+function u0:84(i64, i64) -> i64 system_v {
+    ss0 = explicit_slot 16, align = 8
+    sig0 = (i64, i64, i64) -> i64 system_v
+    fn0 = u0:33 sig0
+
+block2(v0: i64, v1: i64):
+    v6 -> v1
+    v2 = stack_addr.i64 ss0
+    jump block0
+
+block1:
+    v3 = iconst.i64 0
+    return v3  ; v3 = 0
+
+block0:
+    v4 = load.i64 notrap aligned v0+16
+    v5 = load.i64 notrap aligned v4+24
+    store notrap aligned v5, v2
+    v7 = load.i64 notrap aligned v6+24
+    v8 = load.i64 notrap aligned v7
+    store notrap aligned v8, v2+8
+    v9 = call fn0(v0, v5, v8), stack_map=[i64 @ ss0+0, i64 @ ss0+8]
+    brif v9, block3, block1
+
+block3:
+    return v9
+}
+
+; function 3 "name": botlish_fn_3
+function u0:86(i64, i64) -> i64 system_v {
+block2(v0: i64, v1: i64):
+    v3 -> v1
+    jump block0
+
+block1:
+    v2 = iconst.i64 0
+    return v2  ; v2 = 0
+
+block0:
+    return v3
+}
+
+; function 4 "describe_person": botlish_fn_4
+function u0:88(i64, i64) -> i64 system_v {
+    sig0 = (i64, i64) -> i64 system_v
+    fn0 = colocated u0:86 sig0
+
+block2(v0: i64, v1: i64):
+    v3 -> v1
+    jump block0
+
+block1:
+    v2 = iconst.i64 0
+    return v2  ; v2 = 0
+
+block0:
+    v4 = call fn0(v0, v3)
+    return v4
+}
+
+; function 5 "describe<Person>": botlish_fn_5
+function u0:90(i64, i64) -> i64 system_v {
+    sig0 = (i64, i64) -> i64 system_v
+    fn0 = colocated u0:86 sig0
+
+block2(v0: i64, v1: i64):
+    v3 -> v1
+    jump block0
+
+block1:
+    v2 = iconst.i64 0
+    return v2  ; v2 = 0
+
+block0:
+    v4 = call fn0(v0, v3)
+    return v4
+}
+
+; function 6 "describe<services::Service>": botlish_fn_6
+function u0:92(i64, i64) -> i64 system_v {
+    ss0 = explicit_slot 8, align = 8
+    sig0 = (i64, i64) -> i64 system_v
+    fn0 = colocated u0:84 sig0
+
+block2(v0: i64, v1: i64):
+    v4 -> v1
+    v2 = stack_addr.i64 ss0
+    store notrap aligned v1, v2
+    jump block0
+
+block1:
+    v3 = iconst.i64 0
+    return v3  ; v3 = 0
+
+block0:
+    v5 = call fn0(v0, v4), stack_map=[i64 @ ss0+0]
+    brif v5, block3, block1
+
+block3:
+    return v5
+}

@@ -70,6 +70,16 @@ proc hir::format {hir args} {
     foreach entry [hir::sourceTypes $hir] {
         lappend lines [hir::format::TypeDecl $entry]
     }
+    if {[dict exists $hir traits]} {
+        foreach entry [dict get $hir traits] {
+            lappend lines [hir::format::TraitDecl $entry]
+        }
+    }
+    if {[dict exists $hir traitFunctions]} {
+        dict for {name fn} [dict get $hir traitFunctions] {
+            lappend lines [hir::format::TraitFunction $name $fn]
+        }
+    }
     foreach name [hir::errorDecls $hir] {
         lappend lines "error $name"
     }
@@ -121,6 +131,35 @@ proc hir::format::TypeDecl {entry} {
         set domainText "exact [lindex $domain 1]"
     }
     return "type [dict get $entry name] parent [dict get $entry parent] domain $domainText"
+}
+
+# One line for a trait declaration (TRAITS.md, HIR's `traits`): "trait ID
+# owner NS requires REQ ; REQ ...", each REQ "NAME(P: T, ...) -> R errors E,
+# ..." with the trait's own type spelled as its identity (NS "-" for the
+# entry program). Read back by hir::read::TraitLine.
+proc hir::format::TraitDecl {entry} {
+    set reqs {}
+    foreach r [dict get $entry requirements] {
+        set text "[dict get $r name]([join [lmap p [dict get $r params] {format {%s: %s} [dict get $p name] [hir::types::show [dict get $p type]]}] {, }])"
+        if {[dict get $r result] ne ""} {
+            append text " -> [hir::types::show [dict get $r result type]]"
+        }
+        if {[dict get $r errors] ne {}} {
+            append text " errors [join [dict get $r errors] {, }]"
+        }
+        lappend reqs $text
+    }
+    set ns [dict get $entry namespace]
+    return "trait [dict get $entry id] owner [expr {$ns eq "" ? "-" : $ns}] requires [join $reqs { ; }]"
+}
+
+# One line for a trait-polymorphic source function the monomorphized program
+# replaced by its clones (HIR's `traitFunctions`): "traitfn NAME (P: T, ...)
+# -> R clones (C, ...)" (R "-" when undeclared).
+proc hir::format::TraitFunction {name fn} {
+    set params [join [lmap {p t} [dict get $fn params] {format {%s: %s} $p [hir::types::show $t]}] {, }]
+    set result [expr {[dict get $fn result] eq "" ? "-" : [hir::types::show [dict get $fn result]]}]
+    return "traitfn $name ($params) -> $result clones ([join [lmap {c w} [dict get $fn clones] {set c}] {, }])"
 }
 
 proc hir::format::BindingLabel {hir b} {
@@ -239,6 +278,20 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             if {[dict exists $node nomethod]} {
                 append text " nomethod"
             }
+            if {[dict exists $node traitClone]} {
+                # A trait clone (TRAITS.md): each trait parameter's source
+                # view -- its declared type is the witness.
+                set views {}
+                foreach b [dict get $node params] {
+                    if {[dict exists $hir bindings $b view]} {
+                        lappend views "[BindingLabel $hir $b]: [lindex [dict get $hir bindings $b view] 1]"
+                    }
+                }
+                append text " clone ([join $views {, }])"
+            }
+            if {[dict exists $node traitResult]} {
+                append text " traitresult [lindex [dict get $node traitResult] 1]"
+            }
             if {[dict exists $node requiredContexts] && [dict get $node requiredContexts] ne {}} {
                 # CONTEXTS.md: the context types the block's own region loads
                 # (its context parameters) and the ones it transitively
@@ -281,6 +334,12 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             set installs [hir::contexts::installId $hir $e]
             if {$installs ne ""} {
                 append text " installs $installs"
+            }
+            if {[dict exists $node traitImpl]} {
+                # A trait operation resolved to its witness's implementation
+                # (TRAITS.md): an ordinary direct call, annotated.
+                set impl [dict get $node traitImpl]
+                append text " trait [dict get $impl trait].[dict get $impl requirement] witness [hir::types::show [dict get $impl witness]]"
             }
             Line $hir $e $text $indent $origins lines
             Expr $hir [dict get $node callee] $inner $origins lines

@@ -1,0 +1,10 @@
+import str
+
+opaque struct Service:
+    internal_name: str
+
+fn make_service() -> Service:
+    Service {internal_name: "db"}
+
+fn name(value: Service) -> str:
+    str::concat("svc:", value.internal_name)

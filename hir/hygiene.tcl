@@ -161,6 +161,11 @@ proc hir::hygiene::qualifyModules {hirVar} {
     }
     dict for {ns bodyScope} [dict get $hir modules] {
         foreach b [dict get $hir scopes $bodyScope bindings] {
+            if {[dict exists $hir bindings $b traitClone]} {
+                # A trait clone (TRAITS.md) already has its one qualified,
+                # collision-free name: its source function's.
+                continue
+            }
             RenameTo hir $b "${ns}::[dict get $hir bindings $b name]"
         }
     }

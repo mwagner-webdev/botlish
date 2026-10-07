@@ -536,6 +536,16 @@ proc hir::resolve::ResolveTypeExpr {typeExpr {ns ""}} {
         # identity, exactly as in a function's own "errors" clause.
         set argTypes [lmap t [dict get $arg args] {ResolveTypeExpr $t $ns}]
         set result [ResolveTypeExpr [dict get $arg return] $ns]
+        foreach t [concat $argTypes [list $result]] {
+            if {[hir::types::MentionsTrait $t]} {
+                # A function type over a trait would be a callable value whose
+                # calls need a witness only the caller knows: there is no
+                # runtime trait dispatch to give it one (TRAITS.md,
+                # "Function values").
+                return -code error -errorcode {BOTLISH TRAIT-POLYMORPHIC-FUNCTION-VALUE} \
+                    "a function type cannot mention a trait ([hir::types::show $t]): a trait-polymorphic function is not a general callable value (there is no runtime trait dispatch)"
+            }
+        }
         foreach errName [dict get $arg errors] {
             if {![hir::errordecls::isDeclared $errName]} {
                 error "unknown error \"$errName\" in the function type's \"errors\" list: no \"error $errName\" declaration is visible"
@@ -544,6 +554,17 @@ proc hir::resolve::ResolveTypeExpr {typeExpr {ns ""}} {
         return [hir::types::MakeFn $argTypes $result [dict get $arg errors]]
     }
     return [hir::types::resolveApplication $name [list [ResolveTypeExpr $arg $ns]]]
+}
+
+# The diagnostic kind of a failed ResolveTypeExpr whose catch OPTIONS are
+# given: the code the type function raised it with ({BOTLISH KIND}), else
+# DEFAULT.
+proc hir::resolve::TypeErrorKind {options default} {
+    set code [dict get $options -errorcode]
+    if {[lindex $code 0] eq "BOTLISH" && [llength $code] == 2} {
+        return [lindex $code 1]
+    }
+    return $default
 }
 
 # The resolved proof contract of block E (REFINEMENT-VALUES.md): its syntax
@@ -681,6 +702,11 @@ proc hir::resolve::Expr {hirVar node ctx} {
     set e [hir::NewId hir expr]
     dict set hir exprs $e [dict create id $e kind $kind origin $origin \
         scope $scope type "" reachable 1]
+    if {[dict exists $node sid]} {
+        # The syntax node's identity (hir::traits::Stamp): what a trait
+        # program's monomorphization plan names expressions by across builds.
+        SetField hir $e sid [dict get $node sid]
+    }
 
     switch -- $kind {
         const {
@@ -689,7 +715,13 @@ proc hir::resolve::Expr {hirVar node ctx} {
             SetField hir $e value [core::ir::literalValue [list const {*}$literal]]
         }
         ref {
-            if {[dict exists $node qualified]} {
+            set ident [hir::traits::ExternalIdent $ctx $node]
+            if {$ident ne ""} {
+                # A reference of a trait clone's body to a binding outside
+                # its function, resolved to the binding the source function's
+                # own resolution found (TRAITS.md, "Monomorphization").
+                ResolveIdent hir $e $ident $ctx
+            } elseif {[dict exists $node qualified]} {
                 ResolveQualifiedRef hir $e [dict get $node qualified] $ctx
             } else {
                 ResolveRef hir $e [dict get $node name] [dict get $node root] $ctx
@@ -755,13 +787,25 @@ proc hir::resolve::Expr {hirVar node ctx} {
                     lappend declaredParamTypes {}
                     continue
                 }
-                if {[catch {ResolveTypeExpr $paramType [CtxNamespace $ctx]} normalized]} {
-                    hir::Diagnose hir TYPE \
+                if {[catch {ResolveTypeExpr $paramType [CtxNamespace $ctx]} normalized options]} {
+                    hir::Diagnose hir [TypeErrorKind $options TYPE] \
                         [format {unknown or invalid type %s for parameter "%s": %s} [ShowTypeExpr $paramType] $name $normalized] $e
                     lappend declaredParamTypes {}
                 } else {
                     lappend declaredParamTypes $normalized
                 }
+            }
+            set head [hir::traits::CloneHead $ctx $node]
+            if {$head ne ""} {
+                # The block of a trait clone (TRAITS.md, "Monomorphization"):
+                # each trait parameter takes its witness type -- the
+                # representation it has -- and records the view it is.
+                dict for {i witness} [dict get $head params] {
+                    set view [hir::types::MakeView [lindex [lindex $declaredParamTypes $i] 1] $witness]
+                    dict set hir bindings [lindex $params $i] view $view
+                    lset declaredParamTypes $i $witness
+                }
+                SetField hir $e traitClone [dict get $head key]
             }
             # The flag section (FLAGS.md): the last parameters, one bool
             # binding per declared flag, after the ordinary ones.
@@ -783,12 +827,18 @@ proc hir::resolve::Expr {hirVar node ctx} {
             SetField hir $e staticRefs {}
             set declared [expr {[dict exists $node declaredResult] ? [dict get $node declaredResult] : {}}]
             if {$declared ne {}} {
-                if {[catch {ResolveTypeExpr $declared [CtxNamespace $ctx]} normalized]} {
-                    hir::Diagnose hir TYPE [format {unknown or invalid result type %s: %s} [ShowTypeExpr $declared] $normalized] $e
+                if {[catch {ResolveTypeExpr $declared [CtxNamespace $ctx]} normalized options]} {
+                    hir::Diagnose hir [TypeErrorKind $options TYPE] [format {unknown or invalid result type %s: %s} [ShowTypeExpr $declared] $normalized] $e
                     set declared {}
                 } else {
                     set declared $normalized
                 }
+            }
+            set resultWitness [hir::traits::ResultOverride $ctx $node $head]
+            if {$resultWitness ne ""} {
+                # A declared trait result: the witness the plan proved it has.
+                SetField hir $e traitResult $declared
+                set declared [expr {$resultWitness eq "-" ? {} : $resultWitness}]
             }
             SetField hir $e declaredResult $declared
             SetField hir $e resultType ""
@@ -819,13 +869,29 @@ proc hir::resolve::Expr {hirVar node ctx} {
             set inner [dict create scope $bodyScope callable $e loop "" errors $errorNames \
                 blocks [concat [dict get $ctx blocks] [list [list $e $bodyScope]]] \
                 namespace [CtxNamespace $ctx]]
+            foreach field {traitContext clone} {
+                if {[dict exists $ctx $field]} {
+                    dict set inner $field [dict get $ctx $field]
+                }
+            }
             SetField hir $e body [Sequence hir $body $inner]
         }
         call {
             set written [dict get $node callee]
             set candidates {}
             set hidden {}
-            if {[dict exists $node method]} {
+            set planned [hir::traits::CallAction $ctx $node]
+            if {$planned ne "" && $planned ne "field"} {
+                # A call the trait plan rewrites (TRAITS.md): a trait
+                # operation to its implementation, a call of a trait-
+                # polymorphic function to its clone for the call's witnesses.
+                ResolvePlannedCall hir $e $node $planned $ctx
+                hir::flags::ResolveCall hir $e $node $ctx
+                SetField hir $e target ""
+                SetField hir $e known ""
+                return $e
+            }
+            if {[dict exists $node method] && $planned ne "field"} {
                 set candidates [MethodCandidates hir $scope [dict get $written name] $ctx \
                     [expr {[llength [dict get $node args]] + 1}] hidden]
             }
@@ -1231,10 +1297,133 @@ proc hir::resolve::ResolveStruct {hirVar e node ctx} {
 proc hir::resolve::Sequence {hirVar nodes ctx} {
     upvar 1 $hirVar hir
     set ids {}
+    set planned [hir::traits::Planning]
     foreach node $nodes {
+        if {$planned && [dict exists $node sid]} {
+            # A trait program's monomorphization plan (TRAITS.md): a trait-
+            # polymorphic declaration (and an alias of one) is replaced by its
+            # clones, each placed before the first top-level statement that
+            # needs it.
+            if {[hir::traits::Dropped [dict get $node sid]]} {
+                continue
+            }
+            foreach key [hir::traits::PlacedBefore [dict get $node sid]] {
+                lappend ids [ResolveClone hir $key $ctx]
+            }
+        }
         lappend ids [Expr hir $node $ctx]
     }
     return $ids
+}
+
+# Resolves trait clone KEY (hir::traits::Plan) as a function bound in the
+# scope of CTX: the source function's own block syntax, resolved with its
+# own namespace, its trait parameters typed by the clone's witnesses, every
+# reference outside the function resolved to the binding the source
+# function's resolution found, and every call the plan rewrites rewritten for
+# this clone. Returns the bind's ExprId.
+proc hir::resolve::ResolveClone {hirVar key ctx} {
+    upvar 1 $hirVar hir
+    set clone [hir::traits::CloneRecord $key]
+    set node [dict get $clone node]
+    set scope [dict get $ctx scope]
+    set origin [dict get $node origin]
+    set e [hir::NewId hir expr]
+    dict set hir exprs $e [dict create id $e kind bind origin $origin scope $scope type "" reachable 1]
+    SetField hir $e name [dict get $clone name]
+    Establish hir $e $scope [dict get $clone name] $origin
+    set b [dict get $hir exprs $e binding]
+    dict set hir bindings $b traitClone $key
+    hir::traits::NoteCloneBinding $key $b
+    hir::flags::DeclareFunction hir $b [dict get $node value]
+    if {[dict exists $node value nomethod]} {
+        dict set hir bindings $b nomethod 1
+    }
+    set inner [dict replace $ctx namespace [dict get $clone namespace] traitContext $key \
+        clone [dict get $clone function] cloneHead [dict create key $key sid [dict get $node value sid] \
+            params [dict get $clone params] result [dict get $clone result]]]
+    SetField hir $e value [Expr hir [dict get $node value] $inner]
+    return $e
+}
+
+# Resolves the already-created reference expression E to the binding IDENT
+# names (hir::traits's location-independent identities: {root NAME},
+# {native QUALIFIED}, {module NS NAME}, {entry NAME}, {clone KEY},
+# {local NAME}).
+proc hir::resolve::ResolveIdent {hirVar e ident ctx} {
+    upvar 1 $hirVar hir
+    switch -- [lindex $ident 0] {
+        root - native {
+            ResolveRef hir $e [lindex $ident 1] 1 $ctx
+        }
+        local {
+            ResolveRef hir $e [lindex $ident 1] 0 $ctx
+        }
+        module {
+            ResolveQualifiedRef hir $e [lrange $ident 1 2] $ctx
+        }
+        entry - clone {
+            if {[lindex $ident 0] eq "entry"} {
+                set top [dict get $hir top]
+                set name [lindex $ident 1]
+                if {![dict exists $hir scopes $top names $name]} {
+                    core::malformed "trait plan: entry-program binding \"$name\" is not established here" [list ref $name]
+                }
+                set b [dict get $hir scopes $top names $name]
+            } else {
+                set b [hir::traits::CloneBinding [lindex $ident 1]]
+            }
+            SetField hir $e name [dict get $hir bindings $b name]
+            SetField hir $e binding $b
+            SetField hir $e init yes
+            hir::flags::NoteRef hir $e
+            Capture hir $ctx [dict get $hir bindings $b scope] $b
+        }
+        default {
+            error "hir::resolve::ResolveIdent: unknown identity $ident"
+        }
+    }
+}
+
+# Resolves call E (syntax NODE) as the trait plan's ACTION says: {redirect
+# KEY} calls clone KEY, {trait IDENT ...} the implementation IDENT names, the
+# receiver of a method-syntax call becoming the first argument.
+proc hir::resolve::ResolvePlannedCall {hirVar e node action ctx} {
+    upvar 1 $hirVar hir
+    set written [dict get $node callee]
+    if {[dict exists $node written]} {
+        SetField hir $e written [dict create form [dict get $node written] ns [CtxNamespace $ctx]]
+    }
+    if {[dict exists $node method]} {
+        set calleeOrigin [dict get $written nameOrigin]
+        set argNodes [concat [list [dict get $written receiver]] [dict get $node args]]
+    } else {
+        set calleeOrigin [dict get $written origin]
+        set argNodes [dict get $node args]
+    }
+    set c [hir::NewId hir expr]
+    dict set hir exprs $c [dict create id $c kind ref origin $calleeOrigin scope [dict get $ctx scope] type "" reachable 1]
+    switch -- [lindex $action 0] {
+        redirect {
+            ResolveIdent hir $c [list clone [lindex $action 1]] $ctx
+        }
+        trait {
+            ResolveIdent hir $c [dict get [lindex $action 1] impl] $ctx
+            SetField hir $e traitImpl [lindex $action 1]
+        }
+        method {
+            # A method-syntax call in a clone: the function the source
+            # function's own resolution chose, whatever is visible where the
+            # clone is placed.
+            ResolveIdent hir $c [lindex $action 1] $ctx
+        }
+    }
+    if {[dict exists $node method]} {
+        SetField hir $e method [dict create name [dict get $written name] \
+            nameOrigin [dict get $written nameOrigin] ns [CtxNamespace $ctx]]
+    }
+    SetField hir $e callee $c
+    SetField hir $e args [Sequence hir $argNodes $ctx]
 }
 
 # Resolves module-qualified reference E (a {NAMESPACE NAME} pair) directly

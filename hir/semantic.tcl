@@ -159,7 +159,7 @@ namespace eval hir::semantic {
     variable state {}
     # Per-expression facts a walk writes (hir/types.tcl); the ones that are
     # TypeIds are stored as type forms.
-    variable fields {type reachable target known calleeErrors handlerTypes refinements resultType inferredResultType}
+    variable fields {type reachable target known calleeErrors handlerTypes refinements resultType inferredResultType traitCall}
     variable typeFields {type resultType inferredResultType}
 }
 
@@ -267,7 +267,7 @@ proc hir::semantic::Call {hir ctx e block argTypes blockResult} {
     variable maxInstances
     variable maxDepth
     variable levelLimit
-    if {!$enabled || $state eq "" || $blockResult eq "never"} {
+    if {!$enabled || $state eq "" || ($blockResult eq "never" && ![hir::traits::IsPolymorphic $hir $block])} {
         return $blockResult
     }
     set node [dict get $hir exprs $block]
@@ -279,19 +279,32 @@ proc hir::semantic::Call {hir ctx e block argTypes blockResult} {
     # Entry types (header, "The key").
     set declared [hir::signatures::entryTypes $hir $block]
     set entry {}
+    set generics {}
     set trivial 1
+    set index 0
     foreach t $argTypes d $declared {
-        if {$d ne {}} {
+        if {$d ne {} && [hir::types::IsTraitConstraint $d]} {
+            # A trait-typed parameter (TRAITS.md): the instance is entered
+            # with the argument's view -- its hidden witness is the instance's
+            # key component, so two witnesses are two instances.
+            set x [hir::traits::EntryView $t $d]
+            set generic [hir::traits::AbstractView $d $block $index]
+        } elseif {$d ne {}} {
             set x [expr {[hir::types::subtype $t $d] ? $t : $d}]
             set generic $d
         } else {
-            set x $t
+            # A view passed where nothing is declared is only its concrete
+            # value: no trait view crosses an untyped boundary (TRAITS.md,
+            # "any").
+            set x [expr {[hir::types::IsTrait $t] ? "any" : $t}]
             set generic any
         }
+        incr index
         if {$x ne $generic} {
             set trivial 0
         }
         lappend entry $x
+        lappend generics $generic
     }
     if {$trivial} {
         dict incr state trivial
@@ -324,25 +337,39 @@ proc hir::semantic::Call {hir ctx e block argTypes blockResult} {
                 set reason nesting
             }
         }
-        if {$reason ne ""} {
+        if {$reason in {budget-total budget-block} && [hir::traits::IsPolymorphic $hir $block]} {
+            # A trait-polymorphic function's call has no generic fallback:
+            # its witnesses decide which specialization it is (TRAITS.md).
+            # Past the budget it gets the instance keyed by its trait
+            # parameters' views alone, every other parameter at its generic
+            # type -- at most one per witness combination.
+            set entry [lmap x $entry g $generics {expr {[hir::types::IsView $x] ? $x : $g}}]
+            set key [list $block $entry]
+            set reason ""
+        }
+        if {$reason eq "" && [dict exists $state keys $key]} {
+            dict incr state hits
+            set id [dict get $state keys $key]
+        } elseif {$reason ne ""} {
             dict set state declined $callKey $reason
             Bump declinedCount $reason
             if {$reason eq "no-env"} {
                 dict set state pendingEnv $block 1
             }
             return $blockResult
-        }
-        set id [Create $block $entry $key]
-        if {[dict get $state stack] eq {}} {
-            dict set state base $hir
-            try {
-                Analyze $id
-                Drain
-            } finally {
-                dict set state base ""
-            }
         } else {
-            Analyze $id
+            set id [Create $block $entry $key]
+            if {[dict get $state stack] eq {}} {
+                dict set state base $hir
+                try {
+                    Analyze $id
+                    Drain
+                } finally {
+                    dict set state base ""
+                }
+            } else {
+                Analyze $id
+            }
         }
     }
     dict set state calls $callKey $id
@@ -535,7 +562,7 @@ proc hir::semantic::Walk {id} {
     dict set scratch exprs $block inferredResultType [hir::types::intern scratch $result]
     set declared [dict get $node declaredResult]
     if {$declared ne {}} {
-        set result $declared
+        set result [hir::traits::ViewResult $declared $result]
     }
     dict set scratch exprs $block resultType [hir::types::intern scratch $result]
     return [list $result $scratch]

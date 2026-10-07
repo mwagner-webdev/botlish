@@ -298,3 +298,28 @@ joins its handlers (`hir/types.tcl`'s `Call` and `Handle`), repeatability
 `tests/refinement-validators.test`, `tests/emailish-predicate.test` and
 `audit/refinement-values/tools/fuzz.tcl` (validators are on by default;
 `-validators 0` reproduces the predicate-only generator's runs).
+
+## Traits
+
+Traits (TRAITS.md) are eager, one-way, entirely static views: a trait-typed
+value is its concrete witness's value, and every backend compiles a
+monomorphized program with no trait type, no trait operation and no
+trait-polymorphic function (`hir::traits::monomorphize`). Never add trait
+knowledge below HIR: no runtime trait value, wrapper, tag, vtable,
+dictionary, witness argument or indirect call for a trait operation, and no
+trait code in `core/`, `compiler/`, `native/` (`tests/traits.test`'s
+`trait-source-audit`, `-principal-nir`, `-machine-code-direct`,
+`-allocation-free` and `-code-quality-identical` pin this). Conformance reads
+only the witness's owner namespace's own declarations: never the call
+site's imports or another namespace.
+
+If you change conformance (`hir::traits::satisfies` and what it reads), trait
+views in inference (`hir/types.tcl`'s subtype/lub/narrow of views,
+`hir::traits::Accept`/`EntryView`/`ViewResult`/`TypeCall`), the semantic
+instance key of a trait parameter (`hir/semantic.tcl`), the plan or build 2
+(`hir::traits::Plan`, hir/resolve.tcl's clone/planned-call resolution), run
+`tests/traits.test`, `audit/traits/tools/fuzz.tcl` and
+`audit/traits/tools/mutate.tcl` (which needs every mutant in
+`audit/traits/tools/mutants.txt` to still apply: update a mutant's text when
+you change the code it mutates, and keep it a mutant of the same rule).
+`audit/traits/tools/evidence.tcl` regenerates `audit/traits/principal/`.
