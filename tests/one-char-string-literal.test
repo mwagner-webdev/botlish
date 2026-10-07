@@ -1,0 +1,1093 @@
+# one-char-string-literal.test -- the ONE-CHAR-STRING-LITERAL compiler warning
+# (WARNINGS-ONE-CHAR-STRING-LITERAL.md) on the warning framework
+# WARNINGS-SAME-RETURN.md built (hir/warnings.tcl).
+#
+# The theorem: a literal site is reported exactly when it is a written String
+# literal whose exact value is a String of character length 1. One diagnostic
+# per site, anchored at the literal, no secondary locations; everything else
+# is silent:
+#
+#   * the empty String and Strings of two or more characters (length counted
+#     in characters, i.e. Unicode scalar values, as str::length counts: escapes
+#     resolved, a supplementary-plane character is one, a base character plus
+#     a combining mark is two);
+#   * character literals ('x', a UnicodeChar);
+#   * anything that is not a written literal: a binding read at a use site, an
+#     alias, a parameter, a call result, a computed String -- whatever its
+#     value -- and the one String const the frontend synthesizes (a context
+#     parameter's load key).
+#
+# The pass is context-blind (it never looks at what consumes a literal, so it
+# warns exactly where the character spelling would not type-check today: that
+# is the API-deficiency surface it exists to expose) and has no reachability
+# notion (a literal in a dead branch or an uncalled function warns). The
+# message renders the written literal's exact value and never the character
+# spelling: the warning is deliberately not autofixable.
+#
+# Like the other warning test files, every compile here passes its policy and
+# channel explicitly (`-warnings MODE`, `-warning-channel ""` to collect
+# without printing), so this file exercises default, off and error whatever
+# the harness's process default is.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+
+set ::allBackends {interp compile cranelift-generic cranelift}
+set ::ocCode ONE-CHAR-STRING-LITERAL
+
+# The HIR of SOURCE under policy MODE (default off error), collecting
+# warnings without printing them.
+proc compileWith {source {mode default}} {
+    return [surface::compile $source t.bot -warnings $mode -warning-channel ""]
+}
+
+# "LINE:COL" of ORIGIN in HIR, without the file name when it is t.bot.
+proc loc {hir origin} {
+    return [regsub {^t\.bot:} [hir::originLocation $hir $origin] {}]
+}
+
+# The ONE-CHAR-STRING-LITERAL warnings of HIR.
+proc literalsOf {hir} {
+    return [lmap w [hir::warnings::of $hir] {
+        if {[dict get $w code] ne $::ocCode} continue
+        set w
+    }]
+}
+
+# Each ONE-CHAR-STRING-LITERAL warning of SOURCE as {PRIMARY VALUE}, VALUE the
+# data's exact value as the repository displays it (core::value::show).
+proc sites {source} {
+    set hir [compileWith $source]
+    return [lmap w [literalsOf $hir] {
+        list [loc $hir [dict get $w primary]] [core::value::show [dict get $w data value]]
+    }]
+}
+
+# "LINE:COL" of each ONE-CHAR-STRING-LITERAL warning of SOURCE, in order.
+proc where {source} {
+    return [lmap s [sites $source] {lindex $s 0}]
+}
+
+# "MESSAGE @ PRIMARY" for each ONE-CHAR-STRING-LITERAL warning of SOURCE.
+proc shown {source} {
+    set hir [compileWith $source]
+    return [lmap w [literalsOf $hir] {
+        string cat [dict get $w message] " @ " [loc $hir [dict get $w primary]]
+    }]
+}
+
+# 1 if SOURCE compiles with no ONE-CHAR-STRING-LITERAL warning.
+proc silent {source} {
+    return [expr {[literalsOf [compileWith $source]] eq ""}]
+}
+
+# Every warning of SOURCE (all codes) as {CODE PRIMARY}.
+proc allWarnings {source} {
+    set hir [compileWith $source]
+    return [lmap w [hir::warnings::of $hir] {list [dict get $w code] [loc $hir [dict get $w primary]]}]
+}
+
+# The rejection of SOURCE under MODE: {errorcode message}, or "compiled".
+proc rejection {source mode} {
+    if {[catch {compileWith $source $mode} message options]} {
+        return [list [dict get $options -errorcode] $message]
+    }
+    return compiled
+}
+
+# What SOURCE does on the reference interpreter, compiled with warnings off:
+# {value V}, {runtime ERRORCODE} or {rejected ERRORCODE}.
+proc behavior {source} {
+    if {[catch {compileWith $source off} hir options]} {
+        return [list rejected [dict get $options -errorcode]]
+    }
+    set outcome [outcomeUnderHir interp $hir]
+    if {[lindex $outcome 0] eq "value"} {
+        return [list value [lindex $outcome 1]]
+    }
+    return [list runtime [lindex $outcome 1]]
+}
+
+# Runs SCRIPT with module files FILES ({NAME TEXT ...}) in a private library
+# directory (a per-process name in the tcltest temporary directory).
+proc withModules {files script} {
+    set saved $::core::libraryDir
+    set dir [makeDirectory oc-scratch-[pid]]
+    foreach entry [glob -nocomplain -directory $saved *] {
+        file copy -force $entry $dir
+    }
+    set ::core::libraryDir $dir
+    try {
+        foreach {name text} $files {
+            set channel [open [file join $dir $name] w]
+            fconfigure $channel -encoding utf-8
+            puts -nonewline $channel $text
+            close $channel
+        }
+        uplevel 1 $script
+    } finally {
+        set ::core::libraryDir $saved
+        removeDirectory oc-scratch-[pid]
+    }
+}
+
+# The character-literal spelling of the one character CH: the mechanical
+# rewrite the spelling law checks (WARNINGS-ONE-CHAR-STRING-LITERAL.md). It
+# lives here and in the audit tools only; the compiler never computes it.
+proc charSpelling {ch} {
+    return "'[string map [list \\ \\\\ ' \\' \n \\n \t \\t \r \\r] $ch]'"
+}
+
+# ---------------------------------------------------------------------------
+# Shape and the length boundary (items 3, 5)
+
+test oc-motivating-rendered {the motivating quote literal: one warning at the literal, rendered exactly, no notes} -body {
+    set hir [surface::compile {fn peek(text, index):
+    text
+fn scan_quoted(text, index, field):
+    character = peek(text, index)
+    if character == "\"":
+        return field
+    scan_quoted(text, index + 1, field)} f.bot -warnings default -warning-channel ""]
+    lmap w [literalsOf $hir] {hir::warnings::render $hir $w}
+} -result {{f.bot:5:21: warning: the String literal `"\""` is one character long; a single character is written as a character literal (ONE-CHAR-STRING-LITERAL)}}
+
+test oc-length-boundary {0, 1 and 2 characters: only the one-character literal warns} -body {
+    sites {["", "a", "ab"]}
+} -result {{1:6 {"a"}}}
+
+test oc-empty-string-silent {the empty String is length 0: silent, wherever it is} -body {
+    silent {fn f(x):
+    if x == "":
+        return ""
+    [x, ""]
+f("")}
+} -result 1
+
+test oc-two-or-more-characters-silent {Strings of two or more characters are silent, escapes included} -body {
+    silent {["ab", "\n\n", "\\\\", "\"a", "abc", "a b"]}
+} -result 1
+
+test oc-escaped-one-character {an escape denoting one character warns: newline, tab, carriage return, a quote inside, a backslash; the value is the one character} -body {
+    set hir [compileWith {["\n", "\t", "\r", "\"", "\\"]}]
+    lmap w [literalsOf $hir] {
+        list [loc $hir [dict get $w primary]] [scan [core::value::strOf [dict get $w data value]] %c]
+    }
+} -result {{1:2 10} {1:8 9} {1:14 13} {1:20 34} {1:26 92}}
+
+test oc-escapes-are-resolved-by-the-exact-value {the exact value decides, not the spelling: "\n" (two source characters) is one character; "\\n" (a backslash and an n) is two} -body {
+    sites {["\n", "\\n"]}
+} -result {{1:2 {"\n"}}}
+
+test oc-apostrophe-in-a-string {a one-character String holding an apostrophe warns like any other} -body {
+    sites {["'", "''"]}
+} -result {{1:2 {"'"}}}
+
+test oc-non-bmp-single-code-point {a supplementary-plane character is one character: it warns} -body {
+    set hir [compileWith "\[\"\U1F600\", \"\U1D11E\", \"\U1F600\U1F600\"\]"]
+    lmap w [literalsOf $hir] {
+        set text [core::value::strOf [dict get $w data value]]
+        list [loc $hir [dict get $w primary]] [string length $text] [format %X [scan $text %c]]
+    }
+} -result {{1:2 1 1F600} {1:7 1 1D11E}}
+
+test oc-grapheme-of-two-code-points-silent {a base character plus a combining mark is two characters (a grapheme cluster, never a character): silent; the precomposed character warns} -body {
+    set decomposed "é"
+    set precomposed "é"
+    set hir [compileWith "\[\"$decomposed\", \"$precomposed\"\]"]
+    list [lmap w [literalsOf $hir] {loc $hir [dict get $w primary]}] \
+        [string length $decomposed] [string length $precomposed]
+} -result {1:8 2 1}
+
+test oc-length-is-str-length {the length is the language's own: the literals that warn are exactly those whose str::length is 1, on every backend} -body {
+    set strings [list "" a ab "é" "é" "\U1F600" "\U1F600a" "\\\\" "\\n"]
+    set items [lmap s $strings {string cat "str::length(\"" $s "\")"}]
+    set source "import str\n\[[join $items {, }]\]"
+    set hir [compileWith $source]
+    set lengths [lsort -unique [lmap b $::allBackends {lindex [outcomeUnderHir $b $hir] 1}]]
+    set warned [lmap w [literalsOf $hir] {core::value::show [dict get $w data value]}]
+    list $lengths $warned
+} -result {{{[0, 1, 2, 2, 1, 1, 2, 1, 1]}} {{"a"} {"é"} {"😀"} {"\\"} {"\n"}}}
+
+# ---------------------------------------------------------------------------
+# Literals only: no heroic proving (items 4, 6)
+
+test oc-initializer-is-the-site {a binding's written initializer is the site, once; reads of the binding at use sites are never sites} -body {
+    sites {import str
+sep = ","
+fn join2(a, b):
+    a.concat(sep).concat(b)
+[join2("ab", "cd"), sep, sep.concat(sep), [sep]]}
+} -result {{2:7 {","}}}
+
+test oc-alias-silent {an alias of a literal is silent at the alias and at its uses: the literal is the site} -body {
+    where {first = ";"
+second = first
+third = second
+[first, second, third]}
+} -result 1:9
+
+test oc-parameters-silent {a parameter is never a site, whatever its callers pass: the call's literal is the site} -body {
+    where {import str
+fn twice(c):
+    c.concat(c)
+fn width(c: str) -> int:
+    str::length(c)
+[twice("x"), width("y"), twice("xy")]}
+} -result {6:8 6:20}
+
+test oc-call-results-silent {a call result is never a site, even when every possible result is one character} -body {
+    set source {import str
+fn second() -> str:
+    "xy".substring(1, 2)
+fn pick(flag) -> str:
+    if flag:
+        "ab".substring(0, 1)
+    else:
+        "cd".substring(1, 2)
+[second(), pick(true), pick(false)]}
+    list [silent $source] [behavior $source]
+} -result {1 {value {["y", "a", "d"]}}}
+
+test oc-computed-strings-silent {a computed String is never a site: concatenations, substrings and lowercase are not evaluated; only the written one-character literal inside is} -body {
+    set hir [compileWith {import str
+a = str::concat("ab", "")
+b = "AB".lowercase().substring(0, 1)
+c = str::concat("x", "")
+[a, b, c]}]
+    list [lmap w [literalsOf $hir] {loc $hir [dict get $w primary]}] [lindex [outcomeUnderHir interp $hir] 1]
+} -result {4:17 {["ab", "a", "x"]}}
+
+test oc-list-and-struct-elements-are-sites {list elements and struct field values written as literals are sites, nested ones included} -body {
+    where {xs = ["a", "bc", "d"]
+ys = [["e"], ["fg", "h"]]
+p = {left: "(", right: "()", inner: {mark: "!"}}
+[xs, ys, p]}
+} -result {1:7 1:18 2:8 2:21 3:12 3:44}
+
+test oc-nested-positions {sites in every position: a nested function, a closure, a loop body, a handler body, a condition, a method receiver and argument, a return} -body {
+    where {import str
+error Bad
+fn risky(x) errors Bad:
+    if x == "!":
+        fail Bad
+    x
+fn outer(s):
+    fn inner(t):
+        t.concat("-")
+    fn k(t):
+        s.concat("+")
+    parts = loop c in ["p", "qr"]:
+        c
+    r = risky(s):
+        on Bad:
+            return "?"
+    if s == "=":
+        return inner("*".concat("~"))
+    [inner(s), k(s), parts, r]
+outer("ab")}
+} -result {4:13 9:18 11:18 12:24 16:20 17:13 18:22 18:33}
+
+# ---------------------------------------------------------------------------
+# Context-blindness (item 7): the literal is all the pass reads
+
+test oc-str-parameter-is-the-api-deficiency-shape {API-DEFICIENCY SHAPE, pinned: a one-character literal passed to a str-typed parameter warns, although its character spelling does not type-check there today} -body {
+    set original {fn width(text: str) -> int:
+    7
+width("a")}
+    set rewritten [string map {{"a"} {'a'}} $original]
+    list [where $original] [behavior $original] [lindex [behavior $rewritten] 0] [lindex [behavior $rewritten] 1]
+} -result {3:7 {value 7} rejected {CORE SEMANTIC TYPE}}
+
+test oc-str-native-argument-warns {a one-character literal passed to a native's str parameter warns; its character spelling compiles there and fails at run time (native parameter types are checked at run time)} -body {
+    set original {import str
+str::length("a")}
+    set rewritten [string map {{"a"} {'a'}} $original]
+    list [where $original] [behavior $original] [behavior $rewritten]
+} -result {2:13 {value 1} {runtime {CORE SEMANTIC TYPE}}}
+
+test oc-comparison-with-a-string-warns {a one-character literal compared with a String warns; its character spelling compiles there and silently changes the value (== of two kinds is false): the hazard an autofix would hide} -body {
+    set original {fn is_quote(text: str) -> bool:
+    text == "\""
+[is_quote("\""), is_quote("ab")]}
+    set rewritten [string map {{== "\""} {== '"'}} $original]
+    list [where $original] [behavior $original] [behavior $rewritten]
+} -result {{2:13 3:11} {value {[true, false]}} {value {[false, false]}}}
+
+test oc-character-accepting-context-warns {the same literal warns in a context that accepts the character type: a kind-tolerant consumer, where the character spelling compiles and gives the same value} -body {
+    set original {fn is_comma(c):
+    c == ',' or c == ","
+is_comma(",")}
+    set rewritten [string map {{is_comma(",")} {is_comma(',')}} $original]
+    list [where $original] [behavior $original] [behavior $rewritten] [where $rewritten]
+} -result {{2:22 3:10} {value true} {value true} 2:22}
+
+test oc-character-typed-parameter {a UnicodeChar parameter takes the character spelling; the String spelling there is a TYPE error, so no program the warning runs on has one} -body {
+    set char {import char
+fn code(c: UnicodeChar) -> int:
+    char::scalar_value(c)
+code(',')}
+    set string [string map {{code(',')} {code(",")}} $char]
+    list [where $char] [behavior $char] [lindex [rejection $string default] 0]
+} -result {{} {value 44} {CORE SEMANTIC TYPE}}
+
+test oc-the-message-names-no-context {the message is the literal's own: the same literal in five different consumers yields five identical messages} -body {
+    set hir [compileWith {import str
+fn width(text: str) -> int:
+    str::length(text)
+fn same(c):
+    c == c
+x = "."
+[width("."), ".".concat("ab"), same("."), "." == x]}]
+    list [llength [literalsOf $hir]] [lsort -unique [lmap w [literalsOf $hir] {dict get $w message}]]
+} -result {5 {{the String literal `"."` is one character long; a single character is written as a character literal}}}
+
+test oc-dead-branch-literal-warns {no reachability notion: a literal in a statically dead branch, after a return and under a range-infeasible branch warns -- where METHOD-ELIGIBLE skips the dead call beside it (the milestone-2 contrast)} -body {
+    allWarnings {fn two(a, b):
+    a
+fn f(x):
+    if 1 == 2:
+        y = two(x, "a")
+        return y
+    if x < 0:
+        if x > 5:
+            return "b"
+    return x
+    "c"
+f(1)}
+} -result {{ONE-CHAR-STRING-LITERAL 5:20} {ONE-CHAR-STRING-LITERAL 9:20} {ONE-CHAR-STRING-LITERAL 11:5}}
+
+test oc-uncalled-and-unreachable-functions-warn {a function nobody calls and one declared in a dead branch are written source: their literals warn} -body {
+    where {fn never_called(x):
+    [x, "a"]
+fn f(x):
+    if 1 == 2:
+        fn dead(y):
+            [y, "b"]
+        return dead(x)
+    x
+f(1)}
+} -result {2:9 6:17}
+
+test oc-no-completion-walk {no completion walk runs for this warning: hir::completions::reachedExprs is never called by the pass} -body {
+    set hir [compileWith {fn f(x):
+    if x == 1:
+        return "a"
+    if x < 0:
+        if x > 5:
+            return "b"
+    "c"} off]
+    set ::walks 0
+    trace add execution hir::completions::reachedExprs enter {apply {{args} {incr ::walks}}}
+    try {
+        set warnings [hir::warnings::OneCharStringLiteral $hir]
+    } finally {
+        trace remove execution hir::completions::reachedExprs enter {apply {{args} {incr ::walks}}}
+    }
+    list [llength $warnings] $::walks
+} -result {3 0}
+
+# ---------------------------------------------------------------------------
+# Kind (item 13): character literals are never Strings
+
+test oc-character-literals-never-warn {character literals are silent: letters, escapes, quotes, a supplementary-plane character} -body {
+    silent "\['a', '\\n', '\\t', '\\\\', '\\'', '\"', '\U1F600'\]"
+} -result 1
+
+test oc-string-beside-character-of-the-same-character {a one-character String beside a character literal of the same character: the String warns, the character is silent} -body {
+    where {["a", 'a', "\n", '\n']}
+} -result {1:2 1:12}
+
+# ---------------------------------------------------------------------------
+# Written String literals: the representation and its robustness (item 4)
+
+test oc-hir-text-input-warns {HIR text keeps a String literal's value: the parsed HIR has the same findings (the written-literal nature survives format and parse)} -body {
+    set hir [compileWith {fn f(x):
+    if x == ",":
+        return ";"
+    [x, "ab", '!']
+f(":")} off]
+    set parsed [hir::parse [hir::format $hir]]
+    set warnings [hir::warnings::collect $parsed]
+    list [lmap w $warnings {dict get $w code}] [lmap w $warnings {core::value::show [dict get $w data value]}] \
+        [lmap w $warnings {lindex [dict get $w primary] 0}]
+} -result {{ONE-CHAR-STRING-LITERAL ONE-CHAR-STRING-LITERAL ONE-CHAR-STRING-LITERAL} {{","} {";"} {":"}} {ir ir ir}}
+
+test oc-context-load-key-is-not-a-literal {SYNTHESIZED, pinned: a context parameter is bound to context#load("ID"), a String const the frontend builds -- one character for a context struct named C; it is no written literal and silent, while a written "C" warns, from source and from HIR text} -body {
+    set source {context struct C:
+    v: int
+fn f(context c: C):
+    c.v
+with context C {v: 3}
+x = "C"
+[f(), x]}
+    set hir [compileWith $source]
+    set keys [lmap e [dict keys [dict get $hir exprs]] {
+        if {![hir::contexts::isLoad $hir $e]} continue
+        set key [lindex [dict get $hir exprs $e args] 0]
+        list [dict get $hir exprs $key kind] [dict get $hir exprs $key value] [loc $hir [dict get $hir exprs $key origin]]
+    }]
+    set parsed [hir::parse [hir::format [compileWith $source off]]]
+    list $keys [where $source] [lmap w [hir::warnings::collect $parsed] {core::value::show [dict get $w data value]}] \
+        [lindex [outcomeUnderHir interp $hir] 1]
+} -result {{{const {str C} 3:14}} 6:5 {{"C"}} {[3, "C"]}}
+
+test oc-context-trait-key-is-not-a-literal {SYNTHESIZED, pinned: a context-trait parameter is bound to context#load("TRAIT") in the checked source build -- one character for a context trait named T; it is silent, while a written "T" warns, from source and from HIR text} -body {
+    set source {context trait T:
+    fn tick(n: int) -> int
+context struct W:
+    v: int
+fn tick(n: int, context w: W) -> int:
+    w.v + n
+fn f(n: int, context t: T) -> int:
+    t.tick(n)
+with context W {v: 3}
+x = "T"
+[f(1), x]}
+    set hir [compileWith $source]
+    set checked [dict get $hir traitSource]
+    set keys [lmap e [dict keys [dict get $checked exprs]] {
+        if {![hir::contexts::isLoad $checked $e]} continue
+        dict get $checked exprs [lindex [dict get $checked exprs $e args] 0] value
+    }]
+    set parsed [hir::parse [hir::format [compileWith $source off]]]
+    list [lsort $keys] [lmap w [literalsOf $hir] {loc $hir [dict get $w primary]}] \
+        [lmap w [hir::warnings::collect $parsed] {core::value::show [dict get $w data value]}] [lindex [outcomeUnderHir interp $hir] 1]
+} -result {{{str T} {str W}} 10:5 {{"T"}} {[4, "T"]}}
+
+test oc-synthesized-string-consts-enumerated {SOURCE AUDIT: the frontend builds a String const in exactly three places -- the written literal (surface/lower.tcl) and the context load key of a context struct and of a context trait (hir/contexts.tcl) -- and every const node is built by hir::syntax::constNode or read from core IR (hir::syntax::fromIR); a new synthesized String const fails here} -body {
+    set found {}
+    foreach path [lsort [concat [glob [file join $::projectRoot hir *.tcl]] [glob [file join $::projectRoot surface *.tcl]]]] {
+        set channel [open $path]
+        set lines [split [read $channel] \n]
+        close $channel
+        set n 0
+        foreach line $lines {
+            incr n
+            if {[regexp {^\s*#} $line]} continue
+            if {[regexp {constNode \S+ str\M} $line] || [regexp {Node const } $line]} {
+                lappend found [list [file join [file tail [file dirname $path]] [file tail $path]] [string trim $line]]
+            }
+        }
+    }
+    set found
+} -result {{hir/contexts.tcl {[hir::syntax::constNode $origin str $trait]]]}} {hir/contexts.tcl {[hir::syntax::constNode $origin str $id]]]}} {hir/syntax.tcl {return [Node const $origin literal $args]}} {hir/syntax.tcl {return [Node const $origin literal [lrange $node 1 end]]}} {surface/lower.tcl {return [hir::syntax::constNode $origin str [dict get $node value]]}}}
+
+test oc-desugarings-build-no-string-const {every construct the frontend desugars -- unary minus, !=, not, and, or, elif, struct destructuring, flags, with context, collecting and lockstep loops, method sugar -- builds no String const: a program using them all without a written String literal has none but the context load key, and no warning} -body {
+    set hir [compileWith {context struct Box:
+    v: int
+fn get(context b: Box):
+    b.v
+fn flagged(x, flags :neg):
+    if neg:
+        -x
+    else:
+        x
+fn f(a, b):
+    {p, q: r} = {p: a, q: b}
+    t = if not (p != r) and (p == 1 or r == 2):
+        1
+    elif p < r:
+        2
+    else:
+        3
+    s = loop v in [p, r] and i from 0 to 2:
+        v + i
+    {t: t, s: s, n: flagged(p, :neg), m: p.flagged()}
+with context Box {v: 4}
+[1.f(2), get()]}]
+    set keys [dict create]
+    dict for {e node} [dict get $hir exprs] {
+        if {[hir::contexts::isLoad $hir $e]} {
+            dict set keys [lindex [dict get $node args] 0] 1
+        }
+    }
+    set strings [lmap {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "const" || [lindex [dict get $node value] 0] ne "str"} continue
+        list [dict get $node value] [dict exists $keys $e]
+    }]
+    list $strings [hir::warnings::of $hir]
+} -result {{{{str Box} 1}} {}}
+
+# ---------------------------------------------------------------------------
+# Structure (items 8, 9, 13): record, data, message, ordering
+
+set ::literalSource {import str
+fn quote(text: str) -> str:
+    text.concat("\"")
+fn width(text: str) -> int:
+    str::length(text)
+[quote("ab"), width(","), width("")]}
+
+test oc-record-shape {the record is {code message primary secondary data}, secondary empty} -body {
+    set w [lindex [literalsOf [compileWith $::literalSource]] 0]
+    list [lsort [dict keys $w]] [dict get $w secondary]
+} -result {{code data message primary secondary} {}}
+
+test oc-record-data-fields {data: site (the literal's ExprId) and value (the exact String value, the repository's representation) -- nothing else} -body {
+    set hir [compileWith $::literalSource]
+    lmap w [literalsOf $hir] {
+        set site [dict get $w data site]
+        list [lsort [dict keys [dict get $w data]]] [dict get $hir exprs $site kind] [dict get $w data value] \
+            [expr {[list val [dict get $w data value]] eq [hir::exact::Of $hir $site]}]
+    }
+} -result {{{site value} const {str {"}} 1} {{site value} const {str ,} 1}}
+
+test oc-primary-is-the-literal {primary is the literal's own origin: the span of the written token, quotes included} -body {
+    set hir [compileWith {x = "\t"}]
+    set origin [dict get [lindex [literalsOf $hir] 0] primary]
+    set fields [lrange $origin 2 end]
+    list [dict get $fields line] [dict get $fields column] [dict get $fields endColumn] \
+        [expr {$origin eq [dict get $hir exprs [dict get [lindex [literalsOf $hir] 0] data site] origin]}]
+} -result {1 5 9 1}
+
+test oc-render-has-no-notes {secondary is empty, so rendering is one line: no note: lines} -body {
+    set hir [compileWith $::literalSource]
+    lmap w [literalsOf $hir] {llength [split [hir::warnings::render $hir $w] \n]}
+} -result {1 1}
+
+test oc-message-template {the template: the written literal (its exact value, as the repository displays values), the fact, the form; nothing else} -body {
+    shown $::literalSource
+} -result {{the String literal `"\""` is one character long; a single character is written as a character literal @ 3:17} {the String literal `","` is one character long; a single character is written as a character literal @ 6:21}}
+
+test oc-message-renders-the-value-convention {the literal is rendered by the repository's exact-value convention (core::value::show), escapes included} -body {
+    set hir [compileWith {["\\", "\n", "\t", "\"", "'", "%"]}]
+    lmap w [literalsOf $hir] {
+        expr {[string first "`[core::value::show [dict get $w data value]]`" [dict get $w message]] >= 0}
+    }
+} -result {1 1 1 1 1 1}
+
+test oc-no-character-spelling-anywhere {the character spelling is never printed -- not in a message, not in data, not in the rendered text -- and nothing is prescribed: no rewrite, no API advice, no imperative} -body {
+    set chars [list a , \" \\ ' \n \t % "\U1F600"]
+    set source "\[[join [lmap c $chars {string cat \" [string map [list \\ \\\\ \" \\\" \n \\n \t \\t] $c] \"}] {, }]\]"
+    set hir [compileWith $source]
+    set seen {}
+    foreach w [literalsOf $hir] {
+        set texts [list [dict get $w message] [dict get $w data] [hir::warnings::render $hir $w]]
+        foreach text $texts {
+            foreach c $chars {
+                if {[string first [charSpelling $c] $text] >= 0} {
+                    lappend seen [charSpelling $c]
+                }
+            }
+            foreach word {should consider " use " instead prefer replace rewrite "did you mean" suggest fix -> callee parameter API stdlib str:: UnicodeChar " Char "} {
+                if {[string first $word $text] >= 0} {
+                    lappend seen $word
+                }
+            }
+        }
+    }
+    list [llength [literalsOf $hir]] [lsort -unique $seen]
+} -result {9 {}}
+
+test oc-one-diagnostic-per-site {one diagnostic per written literal, no grouping: two identical literals are two warnings} -body {
+    where {a = "x"
+b = "x"
+[a, b, "x"]}
+} -result {1:5 2:5 3:8}
+
+test oc-source-order-and-determinism {warnings in source order; compiling twice gives identical warnings} -body {
+    set source {fn c():
+    "z"
+fn a():
+    "y"
+[c(), a(), "x"]}
+    list [where $source] [expr {[hir::warnings::of [compileWith $source]] eq [hir::warnings::of [compileWith $source]]}]
+} -result {{2:5 4:5 5:12} 1}
+
+test oc-module-literal-located-in-the-module {a module's literal is located in the module file, and reported once for the program that loads it} -body {
+    withModules {seps.bot {fn comma():
+    ","
+fn pair():
+    "<>"
+}} {
+        set hir [compileWith {import seps
+[seps::comma(), seps::pair(), seps::comma()]}]
+        lmap w [literalsOf $hir] {file tail [hir::originLocation $hir [dict get $w primary]]}
+    }
+} -result {seps.bot:2:5}
+
+test oc-instances-never-walked {the pass reads the generic source HIR once: a literal in a polymorphic function with three semantic instances is one warning; collecting over HIR stripped of the semantic side table gives the identical warnings} -body {
+    set hir [compileWith {fn poly(x):
+    sep = ","
+    x == sep
+[poly(1), poly("ab"), poly(true)]}]
+    set site [dict get [lindex [literalsOf $hir] 0] data site]
+    set covering [lmap {id instance} [dict get $hir semantic instances] {
+        if {![dict exists $instance snapshot exprs $site]} continue
+        set id
+    }]
+    list [llength $covering] [llength [literalsOf $hir]] \
+        [expr {[hir::warnings::OneCharStringLiteral $hir] eq [hir::warnings::OneCharStringLiteral [dict remove $hir semantic]]}]
+} -result {3 1 1}
+
+test oc-trait-program-warned-as-written {a trait-polymorphic function's literal is one warning: the program is warned as written (its checked source build), never as monomorphized, where the literal exists once per witness} -body {
+    withModules {wa.bot {struct A:
+    v: str
+fn name(value: A) -> str:
+    value.v
+} wb.bot {struct B:
+    t: str
+fn name(value: B) -> str:
+    value.t
+}} {
+        set hir [compileWith {import str
+import wa
+import wb
+trait Named:
+    fn name(value: Named) -> str
+fn describe(value: Named) -> str:
+    sep = "-"
+    value.name().concat(sep)
+[describe(wa::A {v: "ab"}), describe(wb::B {t: "cd"})]}]
+        set clones 0
+        dict for {e node} [dict get $hir exprs] {
+            if {[dict get $node kind] eq "const" && [dict get $node value] eq {str -}} {
+                incr clones
+            }
+        }
+        list [where {}] $clones [lmap w [literalsOf $hir] {loc $hir [dict get $w primary]}] [lindex [outcomeUnderHir interp $hir] 1]
+    }
+} -result {{} 2 7:11 {["ab-", "cd-"]}}
+
+# ---------------------------------------------------------------------------
+# Interleaving with the five existing codes (item 9)
+
+set ::sixSource {refined type E = str
+error Bad
+fn dup(x):
+    if x < 0:
+        return 0
+    if x > 100:
+        return 0
+    return 1
+fn two(a, b):
+    a
+fn pair(a, b):
+    [a, b]
+fn t(x):
+    return two(x, 1)
+fn check(x) errors Bad:
+    if x < 0:
+        fail Bad
+    if x > 9:
+        fail Bad
+    x
+fn emailish(v: str) -> bool proves v: E:
+    v == "@"}
+
+test oc-interleaving-six-codes {all six codes in one program, in source order} -body {
+    allWarnings $::sixSource
+} -result {{SAME-RETURN-VALUE 5:9} {FIXED-ARITY-LIST-RETURN 12:5} {METHOD-ELIGIBLE 14:12} {SAME-FAILURE 17:9} {PROVES-NAMING 21:1} {ONE-CHAR-STRING-LITERAL 22:10}}
+
+test oc-interleaving-six-codes-other-order {the same six warnings with the functions in the other order sort by location, not by code} -body {
+    allWarnings {refined type E = str
+error Bad
+fn emailish(v: str) -> bool proves v: E:
+    v == "@"
+fn check(x) errors Bad:
+    if x < 0:
+        fail Bad
+    if x > 9:
+        fail Bad
+    x
+fn two(a, b):
+    a
+fn t(x):
+    return two(x, 1)
+fn pair(a, b):
+    [a, b]
+fn dup(x):
+    if x < 0:
+        return 0
+    if x > 100:
+        return 0
+    return 1}
+} -result {{PROVES-NAMING 3:1} {ONE-CHAR-STRING-LITERAL 4:10} {SAME-FAILURE 7:9} {METHOD-ELIGIBLE 14:12} {FIXED-ARITY-LIST-RETURN 16:5} {SAME-RETURN-VALUE 19:9}}
+
+test oc-interleaving-deterministic {compiling the six-code program twice yields the same warnings} -body {
+    expr {[hir::warnings::of [compileWith $::sixSource]] eq [hir::warnings::of [compileWith $::sixSource]]}
+} -result 1
+
+test oc-independent-of-other-codes {one-character literals inside a construct that trips other codes are independent diagnostics: a list literal of a repeated value returned from two exits (SAME-RETURN-VALUE and FIXED-ARITY-LIST-RETURN) and a method-eligible call with a literal receiver (METHOD-ELIGIBLE)} -body {
+    allWarnings {fn two(a, b):
+    a
+fn dashes(x):
+    if x:
+        return ["-", "-"]
+    ["-", "-"]
+two("+", 1)}
+} -result {{FIXED-ARITY-LIST-RETURN 5:9} {SAME-RETURN-VALUE 5:9} {ONE-CHAR-STRING-LITERAL 5:17} {ONE-CHAR-STRING-LITERAL 5:22} {ONE-CHAR-STRING-LITERAL 6:6} {ONE-CHAR-STRING-LITERAL 6:11} {METHOD-ELIGIBLE 7:1} {ONE-CHAR-STRING-LITERAL 7:5}}
+
+# ---------------------------------------------------------------------------
+# The policy matrix, inherited (item 10)
+
+test oc-mode-default {default: compiles, and the program carries the warnings} -body {
+    list [lmap w [literalsOf [compileWith $::literalSource default]] {dict get $w code}] [rejection $::literalSource default]
+} -result {{ONE-CHAR-STRING-LITERAL ONE-CHAR-STRING-LITERAL} compiled}
+
+test oc-mode-off {off: compiles, and nothing is reported} -body {
+    set hir [compileWith $::literalSource off]
+    list [hir::warnings::of $hir] [dict exists $hir warnings]
+} -result {{} 0}
+
+test oc-mode-error-only-this-code {error: a program with only this warning is rejected with the warning's own code and message (the sort-first literal)} -body {
+    rejection $::literalSource error
+} -result {{CORE SEMANTIC ONE-CHAR-STRING-LITERAL} {t.bot:3:17: the String literal `"\""` is one character long; a single character is written as a character literal}}
+
+test oc-mode-error-first-in-sort-order {error with six codes: exactly one error, the sort-first, with its own code (both orders)} -body {
+    list [lindex [rejection $::sixSource error] 0] [lindex [rejection {refined type E = str
+fn check(v: str) -> bool:
+    v == "@"
+fn emailish(v: str) -> bool proves v: E:
+    v == "ab"
+fn two(a, b):
+    a
+two(1, 2)} error] 0]
+} -result {{CORE SEMANTIC SAME-RETURN-VALUE} {CORE SEMANTIC ONE-CHAR-STRING-LITERAL}}
+
+test oc-mode-error-clean-program {error mode accepts a program whose String literals are empty or longer than one character and whose characters are character literals} -body {
+    rejection {import str
+fn quote(text: str) -> str:
+    text.concat("\"\"")
+[quote("ab"), "", ',', '\n', "\n\n"]} error
+} -result compiled
+
+test oc-mode-default-is-the-default {no option and no environment setting means warnings on, as warnings} -body {
+    set saved $::env(BOTLISH_WARNINGS)
+    unset ::env(BOTLISH_WARNINGS)
+    try {
+        set hir [surface::compile $::literalSource t.bot -warning-channel ""]
+        lmap w [hir::warnings::of $hir] {dict get $w code}
+    } finally {
+        set ::env(BOTLISH_WARNINGS) $saved
+    }
+} -result {ONE-CHAR-STRING-LITERAL ONE-CHAR-STRING-LITERAL}
+
+test oc-environment-default {BOTLISH_WARNINGS is only the default for a compilation given no -warnings, read fresh each time} -body {
+    set saved $::env(BOTLISH_WARNINGS)
+    try {
+        set results {}
+        foreach mode {default off error} {
+            set ::env(BOTLISH_WARNINGS) $mode
+            lappend results [catch {surface::compile $::literalSource t.bot -warning-channel ""}] \
+                [catch {surface::compile $::literalSource t.bot -warnings off -warning-channel ""}]
+        }
+        set results
+    } finally {
+        set ::env(BOTLISH_WARNINGS) $saved
+    }
+} -result {0 0 0 0 1 0}
+
+test oc-unknown-mode {a mode outside default/off/error is a plain usage error} -body {
+    surface::compile $::literalSource t.bot -warnings literals -warning-channel ""
+} -returnCodes error -match glob -result {unknown warnings mode "literals" (known: default, off, error)}
+
+test oc-no-fine-grained-options {there is no per-warning option: -Wno-one-char-string-literal is not an option} -body {
+    surface::compile $::literalSource t.bot -Wno-one-char-string-literal 1
+} -returnCodes error -match glob -result {*unknown option "-Wno-one-char-string-literal"*}
+
+test oc-no-new-modes-or-options {the policy surface is still exactly default, off, error; the registry is static, one line per code} -body {
+    list $hir::warnings::modes [dict keys $hir::warnings::passes] [dict get $hir::warnings::passes ONE-CHAR-STRING-LITERAL] \
+        [expr {[llength [info commands hir::warnings::enable]] + [llength [info commands hir::warnings::disable]]}]
+} -result {{default off error} {SAME-RETURN-VALUE METHOD-ELIGIBLE FIXED-ARITY-LIST-RETURN SAME-FAILURE PROVES-NAMING ONE-CHAR-STRING-LITERAL} hir::warnings::OneCharStringLiteral 0}
+
+test oc-error-promotion-identity {the promoted error keeps the code and the message the warning has} -body {
+    set w [lindex [literalsOf [compileWith $::literalSource default]] 0]
+    lassign [rejection $::literalSource error] code message
+    list [lindex $code end] [dict get $w code] [expr {[string first [dict get $w message] $message] >= 0}]
+} -result {ONE-CHAR-STRING-LITERAL ONE-CHAR-STRING-LITERAL 1}
+
+test oc-off-runs-no-warning-pass {warnings off does not execute the pass at all (default does): the stats counter} -body {
+    hir::warnings::resetStats
+    compileWith $::literalSource off
+    set afterOff [hir::warnings::stats]
+    compileWith $::literalSource default
+    set afterDefault [hir::warnings::stats]
+    list $afterOff [dict exists $afterOff ONE-CHAR-STRING-LITERAL] [dict get $afterDefault ONE-CHAR-STRING-LITERAL]
+} -result {{} 0 1}
+
+test oc-off-runs-no-warning-pass-via-trace {an execution trace on the pass proves it is not invoked when off} -body {
+    set ::passCalls 0
+    trace add execution hir::warnings::OneCharStringLiteral enter {apply {{args} {incr ::passCalls}}}
+    try {
+        compileWith $::literalSource off
+        set off $::passCalls
+        compileWith $::literalSource default
+        set on $::passCalls
+    } finally {
+        trace remove execution hir::warnings::OneCharStringLiteral enter {apply {{args} {incr ::passCalls}}}
+    }
+    list $off $on
+} -result {0 1}
+
+test oc-compilation-with-errors-has-no-warnings {a program the compiler rejects is never warned about} -body {
+    set hir [surface::compile "$::literalSource\nnothing" t.bot -strict 0 -warnings default -warning-channel ""]
+    list [expr {[llength [hir::diagnostics $hir]] > 0}] [hir::warnings::of $hir]
+} -result {1 {}}
+
+test oc-policy-is-per-compilation {interleaved compilations under different modes never leak a mode} -body {
+    set a [compileWith $::literalSource off]
+    set b [compileWith $::literalSource default]
+    set c [catch {compileWith $::literalSource error}]
+    set d [compileWith $::literalSource off]
+    set e [compileWith $::literalSource default]
+    list [llength [literalsOf $a]] [llength [literalsOf $b]] $c [llength [literalsOf $d]] [llength [literalsOf $e]]
+} -result {0 2 1 0 2}
+
+test oc-warnings-attached-structurally {hir::warnings::of equals collect} -body {
+    set hir [compileWith $::sixSource default]
+    list [expr {[hir::warnings::of $hir] eq [hir::warnings::collect $hir]}] [llength [hir::warnings::collect $hir]]
+} -result {1 6}
+
+test oc-error-stops-before-backend {error mode rejects before any backend lowers anything (traces on all four entry points)} -body {
+    set ::lowerCalls 0
+    foreach command {native::evalHir native::prepareHir hir::lower core::compiler::evalHir} {
+        trace add execution $command enter {apply {{args} {incr ::lowerCalls}}}
+    }
+    try {
+        set rejected [catch {compileWith $::literalSource error} message options]
+    } finally {
+        foreach command {native::evalHir native::prepareHir hir::lower core::compiler::evalHir} {
+            trace remove execution $command enter {apply {{args} {incr ::lowerCalls}}}
+        }
+    }
+    list $rejected [dict get $options -errorcode] $::lowerCalls
+} -result {1 {CORE SEMANTIC ONE-CHAR-STRING-LITERAL} 0}
+
+# ---------------------------------------------------------------------------
+# No semantics change (item 11)
+
+set ::runSource {import str
+sep = ","
+fn quote(text: str) -> str:
+    "\"".concat(text).concat("\"")
+fn joined(a, b):
+    a.concat(sep).concat(b)
+fn width(text: str) -> int:
+    str::length(text)
+[quote("a"), joined("x", "yz"), width(";"), width(""), [',', "ab"]]}
+
+test oc-hir-identical-across-modes {HIR (minus the side table), hir::format and hir::lower are identical under off and default} -body {
+    set off [compileWith $::runSource off]
+    set on [compileWith $::runSource default]
+    list [llength [literalsOf $on]] [expr {$off eq [dict remove $on warnings]}] [expr {[hir::format $off] eq [hir::format $on]}] \
+        [expr {[hir::lower $off] eq [hir::lower $on]}] [dict exists $off warnings]
+} -result {6 1 1 1 0}
+
+test oc-no-new-hir-state {nothing new is recorded on HIR: default adds only the warnings side table; every node has the fields it has under off} -body {
+    set off [compileWith $::runSource off]
+    set on [compileWith $::runSource default]
+    set added [lmap key [dict keys $on] {if {[dict exists $off $key]} continue; set key}]
+    set changed 0
+    dict for {e node} [dict get $on exprs] {
+        if {[lsort [dict keys $node]] ne [lsort [dict keys [dict get $off exprs $e]]]} {
+            incr changed
+        }
+    }
+    list $added $changed [expr {[dict get $on bindings] eq [dict get $off bindings]}] \
+        [expr {[dict get $on scopes] eq [dict get $off scopes]}] [expr {[dict get $on exprs] eq [dict get $off exprs]}]
+} -result {warnings 0 1 1 1}
+
+test oc-const-nodes-unchanged {a String literal's const node has exactly the fields every const node has had: id kind origin scope type reachable literal value -- no provenance marker} -body {
+    set hir [compileWith $::runSource]
+    lsort -unique [lmap w [literalsOf $hir] {lsort [dict keys [dict get $hir exprs [dict get $w data site]]]}]
+} -result {{id kind literal origin reachable scope type value}}
+
+test oc-nir-identical-across-modes {native IR (specialized and generic) is identical with warnings off and on} -body {
+    set off [compileWith $::runSource off]
+    set on [compileWith $::runSource default]
+    list [expr {[native::nir $off] eq [native::nir $on]}] [expr {[native::nir $off -specialize 0] eq [native::nir $on -specialize 0]}]
+} -result {1 1}
+
+test oc-machine-readable-outputs-clean {native::report, NIR and CLIF are identical with and without the warnings side table} -body {
+    set on [compileWith $::runSource default]
+    set bare [dict remove $on warnings]
+    expr {[llength [literalsOf $on]] == 6 && [native::report $on] eq [native::report $bare]
+        && [native::nir $on] eq [native::nir $bare] && [native::clif $on] eq [native::clif $bare]}
+} -result 1
+
+test oc-no-warning-text-in-machine-readable-outputs {neither NIR, CLIF, the report nor HIR text mention the warning} -body {
+    set hir [compileWith $::runSource default]
+    set seen 0
+    foreach text [list [native::nir $hir] [native::clif $hir] [native::report $hir] [hir::format $hir]] {
+        foreach word {ONE-CHAR-STRING-LITERAL warning "one character long" "character literal"} {
+            if {[string first $word $text] >= 0} {
+                incr seen
+            }
+        }
+    }
+    set seen
+} -result 0
+
+# ---------------------------------------------------------------------------
+# Backend independence (item 12)
+
+test oc-backend-independent {every backend runs the program identically; the one warning set is the HIR's} -body {
+    set hir [compileWith $::runSource default]
+    set outcomes [lmap backend $::allBackends {outcomeUnderHir $backend $hir}]
+    list [llength [lsort -unique [lmap o $outcomes {lindex $o 1}]]] [lindex $outcomes 0 1] [llength [literalsOf $hir]]
+} -result {1 {["\"a\"", "x,yz", 1, 0, [',', "ab"]]} 6}
+
+test oc-backend-independent-off {the same program runs identically on every backend with warnings off} -body {
+    set hir [compileWith $::runSource off]
+    lsort -unique [lmap backend $::allBackends {lindex [outcomeUnderHir $backend $hir] 1}]
+} -result {{["\"a\"", "x,yz", 1, 0, [',', "ab"]]}}
+
+# ---------------------------------------------------------------------------
+# The command line
+
+test oc-cli-modes {main.tcl: default prints the warnings on stderr and runs; off is silent; error rejects before running} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource oc-cli-[pid].bot]
+    set results {}
+    foreach mode {default off error} {
+        set status [catch {exec [info nameofexecutable] $main -warnings $mode $path 2>@1} out]
+        lappend results [list $mode $status \
+            [regexp -all {: warning: the String literal `"[^`]*"` is one character long; a single character is written as a character literal \(ONE-CHAR-STRING-LITERAL\)} $out] \
+            [regexp {note:} $out] \
+            [regexp {value: } $out] \
+            [regexp {CORE SEMANTIC ONE-CHAR-STRING-LITERAL} $out]]
+    }
+    removeFile oc-cli-[pid].bot
+    set results
+} -result {{default 0 6 0 1 0} {off 0 0 0 1 0} {error 1 0 0 0 1}}
+
+test oc-cli-no-wno-option {-Wno-one-char-string-literal is an unknown option, not a file name} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource oc-cli-wno-[pid].bot]
+    catch {exec [info nameofexecutable] $main -Wno-one-char-string-literal $path 2>@1} out
+    removeFile oc-cli-wno-[pid].bot
+    list [string match "*unknown option*-Wno-one-char-string-literal*" $out] [string match "*value:*" $out]
+} -result {1 0}
+
+test oc-cli-unknown-mode {main.tcl rejects an unknown mode} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource oc-cli-mode-[pid].bot]
+    set status [catch {exec [info nameofexecutable] $main -warnings literals $path 2>@1} out]
+    removeFile oc-cli-mode-[pid].bot
+    list $status [string match "*unknown warnings mode*" $out]
+} -result {1 1}
+
+test oc-cli-stdout-clean {the warnings go to stderr: program stdout carries no warning text} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource oc-cli-stdout-[pid].bot]
+    set stderrPath [makeFile {} oc-cli-stderr-[pid].txt]
+    set out [exec [info nameofexecutable] $main -warnings default $path 2> $stderrPath]
+    set err [viewFile oc-cli-stderr-[pid].txt]
+    removeFile oc-cli-stdout-[pid].bot
+    removeFile oc-cli-stderr-[pid].txt
+    list [string match *warning* $out] [string match "*one character long*" $out] [regexp -all {ONE-CHAR-STRING-LITERAL} $err] \
+        [string match {*value: *} $out]
+} -result {0 0 6 1}
+
+test oc-error-cli-stops-before-backend {main.tcl -backend cranelift -warnings error rejects without lowering or running anything} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource oc-cli-error-[pid].bot]
+    catch {exec [info nameofexecutable] $main -backend cranelift -warnings error $path 2>@1} out
+    removeFile oc-cli-error-[pid].bot
+    list [string match "*value:*" $out] [regexp {\(CORE SEMANTIC ONE-CHAR-STRING-LITERAL\)} $out]
+} -result {0 1}
+
+# The warning lines (and their notes) of main.tcl's stderr for PATH on
+# BACKEND, with the file's directory stripped.
+proc cliWarningText {path backend} {
+    set main [file join $::projectRoot main.tcl]
+    set err [makeFile {} oc-cli-err-[pid].txt]
+    catch {exec [info nameofexecutable] $main -backend $backend -warnings default $path 2> $err}
+    set lines [lmap line [split [viewFile oc-cli-err-[pid].txt] \n] {
+        if {![string match "*: warning: *" $line] && ![string match "*: note: *" $line]} continue
+        set line
+    }]
+    removeFile oc-cli-err-[pid].txt
+    return $lines
+}
+
+test oc-cli-backend-independent {main.tcl prints the identical warning text, all six codes, on every backend} -constraints executableAot -body {
+    set path [makeFile "$::sixSource\ny = check(3):\n    on Bad:\n        0\n\[y, emailish(\"ab\")\]" oc-cli-six-[pid].bot]
+    set texts [lmap backend $::allBackends {cliWarningText $path $backend}]
+    removeFile oc-cli-six-[pid].bot
+    set first [lindex $texts 0]
+    list [llength [lsort -unique $texts]] [llength [lsearch -all $first *ONE-CHAR-STRING-LITERAL*]] [llength $first]
+} -result {1 1 8}
+
+test oc-cli-backend-independent-corpus {main.tcl prints the identical warning text (every code, notes included) on every backend over the stdlib corpus, the refinement example and the string-heavy surface and bench programs; this warning's lines are there} -constraints executableAot -body {
+    set programs [lsort [glob -directory [file join $::projectRoot examples stdlib] *.bot]]
+    lappend programs [file join $::projectRoot examples refinement refined-strings.bot] \
+        [file join $::projectRoot examples surface 06-csv-records.bot] \
+        [file join $::projectRoot bench lex-strategy.bot]
+    set mismatches {}
+    set total 0
+    set literals 0
+    foreach path $programs {
+        set texts [lmap backend $::allBackends {cliWarningText $path $backend}]
+        incr total [llength [lindex $texts 0]]
+        incr literals [llength [lsearch -all [lindex $texts 0] *ONE-CHAR-STRING-LITERAL*]]
+        if {[llength [lsort -unique $texts]] != 1} {
+            lappend mismatches [file tail $path]
+        }
+    }
+    list $mismatches [expr {$total > $literals}] [expr {$literals > 0}]
+} -result {{} 1 1}
+
+# ---------------------------------------------------------------------------
+# The spelling law at unit level (item 14): each finding's character spelling
+# lexes and parses, and its exact value is the UnicodeChar of the same code
+# point; where the character type is required, it type-checks
+
+test oc-spelling-law-unit {for a letter, punctuation, both quotes, a backslash, newline, tab, carriage return, a two-byte, a three-byte and a supplementary-plane character: the warned String's character spelling compiles, its exact value is the UnicodeChar of the same code point, and a UnicodeChar parameter takes it} -body {
+    set chars [list a , \" ' \\ \n \t \r "é" "世" "\U1F600"]
+    set source "\[[join [lmap c $chars {string cat \" [string map [list \\ \\\\ \" \\\" \n \\n \t \\t \r \\r] $c] \"}] {, }]\]"
+    set hir [compileWith $source]
+    set results {}
+    foreach w [literalsOf $hir] {
+        set text [core::value::strOf [dict get $w data value]]
+        set codepoint [scan $text %c]
+        set spelling [charSpelling $text]
+        set probe [compileWith "x = $spelling\nx" off]
+        set consts [lmap {e node} [dict get $probe exprs] {
+            if {[dict get $node kind] ne "const"} continue
+            set e
+        }]
+        set fact [expr {[llength $consts] == 1 ? [hir::exact::Of $probe [lindex $consts 0]] : "consts: $consts"}]
+        set typed [behavior "import char\nfn code(c: UnicodeChar) -> int:\n    char::scalar_value(c)\ncode($spelling)"]
+        lappend results [expr {$fact eq [list val [list UnicodeChar $codepoint]] && $typed eq [list value $codepoint]}]
+    }
+    list [llength [literalsOf $hir]] [lsort -unique $results]
+} -result {11 1}
+
+test oc-spelling-law-no-gap-sampled {no spelling gap: every Unicode scalar of a sample across all planes (the controls, the surrogate boundaries, each plane's first and last scalars) has a one-character String spelling and a character-literal spelling the lexer reads as that scalar (the audit fuzzer checks all 1112064)} -body {
+    set sample {}
+    for {set cp 0} {$cp < 0x100} {incr cp} {
+        lappend sample $cp
+    }
+    lappend sample 0xD7FF 0xE000 0xFFFD 0xFFFE 0xFFFF
+    for {set plane 1} {$plane <= 16} {incr plane} {
+        lappend sample [expr {$plane << 16}] [expr {($plane << 16) | 0xFFFF}]
+    }
+    set gaps {}
+    foreach cp $sample {
+        set ch [format %c $cp]
+        set diagnostics {}
+        set string [surface::lexer::String "\"[string map [list \\ \\\\ \" \\\" \n \\n \t \\t \r \\r] $ch]\"" 0 f 1 0 diagnostics]
+        set char [surface::lexer::Char [charSpelling $ch] 0 f 1 0 diagnostics]
+        if {$diagnostics ne "" || [dict get $string value] ne $ch || [dict get $char value] != $cp} {
+            lappend gaps [format U+%04X $cp]
+        }
+    }
+    list [llength $sample] $gaps
+} -result {293 {}}
+
+# ---------------------------------------------------------------------------
+# Fuzzing: constructed programs, an independent oracle, all three modes and
+# the spelling law
+
+test oc-fuzz-smoke {60 generated programs: predicted warnings (anchor, value) and only them, off silent with identical HIR, error iff warned, and the spelling law} -constraints executableAot -body {
+    set fuzz [file join $::projectRoot audit one-char-string-literal tools fuzz.tcl]
+    lindex [split [string trim [exec [info nameofexecutable] $fuzz 60 1]] \n] end
+} -result {seeds 60 (from 1): * with warnings, * without; failures 0; extra warnings 0; spelling law * of * findings, failures 0*} -match glob
+
+cleanupTests

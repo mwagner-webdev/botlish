@@ -52,6 +52,7 @@ namespace eval hir::warnings {
         FIXED-ARITY-LIST-RETURN hir::warnings::FixedArityListReturn
         SAME-FAILURE      hir::warnings::SameFailure
         PROVES-NAMING     hir::warnings::ProvesNaming
+        ONE-CHAR-STRING-LITERAL hir::warnings::OneCharStringLiteral
     }
     variable modes {default off error}
     # CODE -> number of times its pass has run in this process: test
@@ -1269,4 +1270,85 @@ proc hir::warnings::ConventionalName {kind name} {
         return [expr {[string index $name end] eq "?"}]
     }
     return [expr {$name eq "validate" || [string first validate_ $name] == 0}]
+}
+
+# ---------------------------------------------------------------------------
+# ONE-CHAR-STRING-LITERAL (WARNINGS-ONE-CHAR-STRING-LITERAL.md)
+#
+# A written String literal whose exact value is one character. A single
+# character is written as a character literal ('x', a UnicodeChar), and a
+# String is a sequence of characters (README.md, "Strings and characters"):
+# the warning states that the literal's value is one character and names the
+# form, nothing else. It is deliberately not autofixable and prints no
+# rewritten spelling: where the literal's consumer takes a String (a `str`
+# parameter), the character spelling would not type-check, and that finding
+# belongs to the API, which the warning exists to make visible.
+#
+# The theorem. A literal site is reported exactly when
+#   * it is a written String literal: a `const` node -- the frontend lowers
+#     every written "..." to one (surface/lower.tcl: `"text"` -> const str
+#     text), and HIR text spells one as `const str ...` -- whose exact value
+#     (hir::exact::Of, the fact milestone 1's grouping uses) is a String, and
+#   * that String's length is 1, counted by the language's own str::length
+#     (core::strings::length, its reference implementation): characters, i.e.
+#     Unicode scalar values, never bytes. Escapes are already resolved in the
+#     exact value ("\n" is one character), a supplementary-plane character is
+#     one, and a base character plus a combining mark is two.
+# The empty String and every String of two or more characters are silent; a
+# character literal (const UnicodeChar) is never a String.
+#
+# The one String const the frontend synthesizes is not a written literal and
+# is never reported: a context parameter is bound to `context#load("ID")`
+# (hir/contexts.tcl's DeclareParams), whose key is the identity of the context
+# struct or context trait -- one character for one named `C`. It is
+# recognized by the compiler's own predicate for that construct
+# (hir::contexts::isLoad); no source can spell `context#load`, so no written
+# literal is ever such a key.
+#
+# Literals only. Nothing else is looked at: not a binding read at a use site
+# (`sep = ","` is reported at its initializer, once, never where `sep` is
+# read), not an alias, a parameter, a call result or a computed String, even
+# when its value is one character; no value is followed and nothing is
+# evaluated. Context-blind: the pass never looks at what consumes a literal --
+# not the callee or its parameter types, not the other side of a comparison,
+# not an enclosing container. No reachability: the fact is about the written
+# source, so a literal in a dead branch or an uncalled function is reported
+# like any other. One diagnostic per literal site; two equal literals are two
+# sites. Scope: the generic source HIR, whose every written literal is one
+# const node; semantic instances are never visited.
+
+proc hir::warnings::OneCharStringLiteral {hir} {
+    set keys [ContextLoadKeys $hir]
+    set warnings {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "const" || [dict exists $keys $e]} {
+            continue
+        }
+        set fact [hir::exact::Of $hir $e]
+        if {[lindex $fact 0] ne "val" || [core::value::kind [lindex $fact 1]] ne "str"} {
+            continue
+        }
+        set value [lindex $fact 1]
+        if {[core::value::intOf [core::strings::length $value]] != 1} {
+            continue
+        }
+        lappend warnings [New ONE-CHAR-STRING-LITERAL \
+            "the String literal `[core::value::show $value]` is one character long; a single character is written as a character literal" \
+            [dict get $node origin] {} [dict create site $e value $value]]
+    }
+    return $warnings
+}
+
+# The const ExprIds that are context identity keys: the argument of every
+# context load (`context#load("ID")`, hir::contexts::isLoad) in HIR.
+proc hir::warnings::ContextLoadKeys {hir} {
+    set keys [dict create]
+    dict for {e node} [dict get $hir exprs] {
+        if {[hir::contexts::isLoad $hir $e]} {
+            foreach arg [dict get $node args] {
+                dict set keys $arg 1
+            }
+        }
+    }
+    return $keys
 }

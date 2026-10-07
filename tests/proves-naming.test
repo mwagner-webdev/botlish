@@ -75,10 +75,24 @@ proc silent {source} {
     return [expr {[namingOf [compileWith $source]] eq ""}]
 }
 
-# Every warning of SOURCE (all codes) as {CODE PRIMARY}.
+# WARNINGS without ONE-CHAR-STRING-LITERAL findings
+# (WARNINGS-ONE-CHAR-STRING-LITERAL.md): the one-character String literals
+# these programs use as incidental data (`v == "a"`, `use("x")`) carry one,
+# which the complete-set pins here (five-code interleaving, counts, the
+# rename law's clean result) are not about; that code's own interleaving with
+# all six is pinned in tests/one-char-string-literal.test.
+proc exceptLiterals {warnings} {
+    return [lmap w $warnings {
+        if {[dict get $w code] eq "ONE-CHAR-STRING-LITERAL"} continue
+        set w
+    }]
+}
+
+# Every warning of SOURCE (all codes but the literal-level one: exceptLiterals)
+# as {CODE PRIMARY}.
 proc allWarnings {source} {
     set hir [compileWith $source]
-    return [lmap w [hir::warnings::of $hir] {list [dict get $w code] [loc $hir [dict get $w primary]]}]
+    return [lmap w [exceptLiterals [hir::warnings::of $hir]] {list [dict get $w code] [loc $hir [dict get $w primary]]}]
 }
 
 # The rejection of SOURCE under MODE: {errorcode message}, or "compiled".
@@ -649,7 +663,7 @@ g = emailish
 fn use(s: str) -> bool:
     emailish(s) and g(s) and emailish(s)
 \[use(\"a\"), emailish(\"b\"), g(\"c\")\]"]
-    list [llength [hir::warnings::of $hir]] [lmap w [namingOf $hir] {dict get $w data functionName}]
+    list [llength [exceptLiterals [hir::warnings::of $hir]]] [lmap w [namingOf $hir] {dict get $w data functionName}]
 } -result {1 emailish}
 
 test pn-source-order-and-determinism {several functions' warnings in source order; compiling twice gives identical warnings} -body {
@@ -785,14 +799,14 @@ fn check(x) errors Bad:
 test pn-mode-error-clean-program {error mode accepts a program whose proves functions follow the convention} -body {
     rejection "$::E
 fn emailish?(v: str) -> bool proves v: E:
-    v == \"a\"
+    v == \"a@b\"
 fn validate_emailish(v: str) -> unit proves v: E errors Bad:
     if v == \"\":
         fail Bad
     unit
 fn is_empty(v: str) -> bool:
     v == \"\"
-\[emailish?(\"a\"), is_empty(\"b\")\]" error
+\[emailish?(\"a@b\"), is_empty(\"bc\")\]" error
 } -result compiled
 
 test pn-mode-default-is-the-default {no option and no environment setting means warnings on, as warnings} -body {
@@ -800,7 +814,7 @@ test pn-mode-default-is-the-default {no option and no environment setting means 
     unset ::env(BOTLISH_WARNINGS)
     try {
         set hir [surface::compile $::predicateSource t.bot -warning-channel ""]
-        lmap w [hir::warnings::of $hir] {dict get $w code}
+        lmap w [exceptLiterals [hir::warnings::of $hir]] {dict get $w code}
     } finally {
         set ::env(BOTLISH_WARNINGS) $saved
     }
@@ -832,7 +846,7 @@ test pn-no-fine-grained-options {there is no per-warning option: -Wno-proves-nam
 test pn-no-new-modes-or-options {the policy surface is still exactly default, off, error; the registry is static, one line per code} -body {
     list $hir::warnings::modes [dict keys $hir::warnings::passes] [dict get $hir::warnings::passes PROVES-NAMING] \
         [expr {[llength [info commands hir::warnings::enable]] + [llength [info commands hir::warnings::disable]]}]
-} -result {{default off error} {SAME-RETURN-VALUE METHOD-ELIGIBLE FIXED-ARITY-LIST-RETURN SAME-FAILURE PROVES-NAMING} hir::warnings::ProvesNaming 0}
+} -result {{default off error} {SAME-RETURN-VALUE METHOD-ELIGIBLE FIXED-ARITY-LIST-RETURN SAME-FAILURE PROVES-NAMING ONE-CHAR-STRING-LITERAL} hir::warnings::ProvesNaming 0}
 
 test pn-error-promotion-identity {the promoted error keeps the code and the message the warning has} -body {
     set w [lindex [namingOf [compileWith $::predicateSource default]] 0]
@@ -879,7 +893,7 @@ test pn-policy-is-per-compilation {interleaved compilations under different mode
 
 test pn-warnings-attached-structurally {hir::warnings::of equals collect} -body {
     set hir [compileWith $::fiveSource default]
-    list [expr {[hir::warnings::of $hir] eq [hir::warnings::collect $hir]}] [llength [hir::warnings::collect $hir]]
+    list [expr {[hir::warnings::of $hir] eq [hir::warnings::collect $hir]}] [llength [exceptLiterals [hir::warnings::collect $hir]]]
 } -result {1 5}
 
 test pn-error-stops-before-backend {error mode rejects before any backend lowers anything (traces on all four entry points)} -body {
@@ -1057,7 +1071,8 @@ test pn-cli-backend-independent {main.tcl prints the identical warning text, all
     set texts [lmap backend $::allBackends {cliWarningText $path $backend}]
     removeFile pn-cli-five-[pid].bot
     set first [lindex $texts 0]
-    list [llength [lsort -unique $texts]] [llength [lsearch -all $first *PROVES-NAMING*]] [llength $first]
+    list [llength [lsort -unique $texts]] [llength [lsearch -all $first *PROVES-NAMING*]] \
+        [llength [lsearch -all -not $first *ONE-CHAR-STRING-LITERAL*]]
 } -result {1 1 7}
 
 test pn-cli-backend-independent-stdlib-and-refinement {main.tcl prints the identical warning text (every code, notes included) on every backend over the whole stdlib corpus and the refinement example} -constraints executableAot -body {
@@ -1092,7 +1107,7 @@ test pn-rename-is-semantics-preserving {renaming a reported function and its cal
     set before [compileWith $::runSource]
     set after [compileWith [string map {emailish emailish? check_email validate_check_email} $::runSource]]
     set nirBefore [string map {{"emailish"} {"emailish?"} {"check_email"} {"validate_check_email"}} [native::nir $before]]
-    list [llength [namingOf $before]] [hir::warnings::of $after] \
+    list [llength [namingOf $before]] [exceptLiterals [hir::warnings::of $after]] \
         [expr {[lindex [outcomeUnderHir interp $before] 1] eq [lindex [outcomeUnderHir interp $after] 1]}] \
         [expr {$nirBefore eq [native::nir $after]}] [expr {[native::nir $before] eq [native::nir $after]}]
 } -result {2 {} 1 1 0}

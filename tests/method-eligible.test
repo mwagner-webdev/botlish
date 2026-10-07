@@ -33,9 +33,13 @@ proc compileWith {source {mode default}} {
 
 # The METHOD-ELIGIBLE warnings of SOURCE's own file (t.bot): the warnings a
 # library module the program loads carries are not what these tests are about.
+# Nor are ONE-CHAR-STRING-LITERAL findings (WARNINGS-ONE-CHAR-STRING-LITERAL.md):
+# a fact about a written literal (`"s"` as a receiver, `"x"` as an argument),
+# which the functional and the sugared spelling carry alike.
 proc ownWarnings {hir} {
     return [lmap w [hir::warnings::of $hir] {
-        if {![string match t.bot:* [hir::originLocation $hir [dict get $w primary]]]} continue
+        if {![string match t.bot:* [hir::originLocation $hir [dict get $w primary]]]
+                || [dict get $w code] eq "ONE-CHAR-STRING-LITERAL"} continue
         set w
     }]
 }
@@ -1391,7 +1395,7 @@ test me-off-runs-no-warning-pass {warnings off does not execute the warning pass
     compileWith $source default
     set afterDefault [hir::warnings::stats]
     list $afterOff $afterDefault [dict exists $afterOff METHOD-ELIGIBLE] [dict get $afterDefault METHOD-ELIGIBLE]
-} -result {{} {SAME-RETURN-VALUE 1 METHOD-ELIGIBLE 1 FIXED-ARITY-LIST-RETURN 1 SAME-FAILURE 1 PROVES-NAMING 1} 0 1}
+} -result {{} {SAME-RETURN-VALUE 1 METHOD-ELIGIBLE 1 FIXED-ARITY-LIST-RETURN 1 SAME-FAILURE 1 PROVES-NAMING 1 ONE-CHAR-STRING-LITERAL 1} 0 1}
 
 test me-off-runs-no-warning-pass-via-trace {an execution trace on the pass proves it is not invoked when off} -body {
     set source "${::prelude}fn t(x):

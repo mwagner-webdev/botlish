@@ -257,7 +257,10 @@ modules' own findings print for every program that loads them (the corpus is
 frozen), so tests that import `lib/*.bot` and assert on a complete warning set
 filter by code or file. `lib/abi/bytes.bot`'s `replace` carries a
 `SAME-FAILURE` finding, so every program that loads `abi::bytes` (`lib/linux.bot`
-and the `examples/linux` programs among them) prints it.
+and the `examples/linux` programs among them) prints it. `lib/web.bot` carries
+26 `ONE-CHAR-STRING-LITERAL` findings (its one-character Strings: `"."`, the
+hex digits, ...), `lib/io.bot` 2 (`"\n"`) and `lib/linux/path.bot` 2 (`"/"`),
+so every program that loads one of them prints them.
 
 `SAME-FAILURE` (WARNINGS-SAME-FAILURE.md) reads the `fail` sites of a function's
 own body (milestone 1's `BodyExprs`, which never enters a nested function), each
@@ -280,6 +283,20 @@ section is recorded, hygiene's renames (`hir/hygiene.tcl`: `spelling`,
 run `tests/proves-naming.test` and `audit/proves-naming/tools/fuzz.tcl`. The
 response to this warning is a rename; do not add an opt-out, a reverse rule
 (`?` implies bool) or a check on functions without `proves`.
+
+`ONE-CHAR-STRING-LITERAL` (WARNINGS-ONE-CHAR-STRING-LITERAL.md) reads, per
+`const` node, its exact value (`hir::exact::Of`: exact String values) and
+measures it with the reference `str::length` (`core::strings::length`); the one
+String const the frontend synthesizes, a context parameter's
+`context#load("ID")` key, is recognized by `hir::contexts::isLoad` and never
+reported. If you change how a String or character literal lexes, lowers or reads
+back from HIR text, the exact value of a constant, `str::length`, or build a
+String const anywhere in the frontend (`tests/one-char-string-literal.test`'s
+`oc-synthesized-string-consts-enumerated` lists every place that does), run
+`tests/one-char-string-literal.test` and
+`audit/one-char-string-literal/tools/fuzz.tcl`. The warning is context-blind and
+not autofixable on purpose: do not add a context gate, an opt-out, the
+character spelling to its message or data, or a fixit.
 
 ## Refinement values
 

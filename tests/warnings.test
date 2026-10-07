@@ -60,7 +60,10 @@ proc codes {source} {
 # values from such lists are not about, and a function that fails one declared
 # error from several exits carries a SAME-FAILURE finding
 # (WARNINGS-SAME-FAILURE.md), which the tests pinning that `fail` is never
-# grouped with a return are not about.
+# grouped with a return are not about. And a written one-character String
+# literal (the String "1" among different kinds of returned values) carries a
+# ONE-CHAR-STRING-LITERAL finding (WARNINGS-ONE-CHAR-STRING-LITERAL.md), which
+# the tests pinning that different kinds never group are not about.
 proc sameReturnShown {source} {
     set hir [compileWith $source]
     return [lmap w [hir::warnings::of $hir] {
@@ -128,7 +131,7 @@ test warn-char-literal {repeated UnicodeChar literals warn} -body {
 } -result {{value `'a'` is returned from 2 distinct exits @ 3:9 5:9}}
 
 test warn-different-kinds-not-same {the Int 1, the String "1" and true are different values} -body {
-    codes {fn f(x):
+    sameReturnCodes {fn f(x):
     if x < 0:
         return 1
     if x > 100:
@@ -792,7 +795,7 @@ test warn-off-runs-no-warning-pass {warnings off does not execute the warning pa
     catch {compileWith $::policySource error}
     set afterError [hir::warnings::stats]
     list $afterOff $afterDefault $afterError
-} -result {{} {SAME-RETURN-VALUE 1 METHOD-ELIGIBLE 1 FIXED-ARITY-LIST-RETURN 1 SAME-FAILURE 1 PROVES-NAMING 1} {SAME-RETURN-VALUE 2 METHOD-ELIGIBLE 2 FIXED-ARITY-LIST-RETURN 2 SAME-FAILURE 2 PROVES-NAMING 2}}
+} -result {{} {SAME-RETURN-VALUE 1 METHOD-ELIGIBLE 1 FIXED-ARITY-LIST-RETURN 1 SAME-FAILURE 1 PROVES-NAMING 1 ONE-CHAR-STRING-LITERAL 1} {SAME-RETURN-VALUE 2 METHOD-ELIGIBLE 2 FIXED-ARITY-LIST-RETURN 2 SAME-FAILURE 2 PROVES-NAMING 2 ONE-CHAR-STRING-LITERAL 2}}
 
 test warn-off-runs-no-warning-pass-via-trace {an execution trace on the pass proves it is not invoked when off} -body {
     set ::passCalls 0
