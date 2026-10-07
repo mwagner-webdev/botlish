@@ -554,11 +554,17 @@ test oc-message-template {the template: the written literal (its exact value, as
 } -result {{the String literal `"\""` is one character long; a single character is written as a character literal @ 3:17} {the String literal `","` is one character long; a single character is written as a character literal @ 6:21}}
 
 test oc-message-renders-the-value-convention {the literal is rendered by the repository's exact-value convention (core::value::show), escapes included} -body {
-    set hir [compileWith {["\\", "\n", "\t", "\"", "'", "%"]}]
+    set hir [compileWith {["\\", "\n", "\r", "\t", "\"", "'", "%"]}]
     lmap w [literalsOf $hir] {
         expr {[string first "`[core::value::show [dict get $w data value]]`" [dict get $w message]] >= 0}
     }
-} -result {1 1 1 1 1 1}
+} -result {1 1 1 1 1 1 1}
+
+test oc-message-escapes-a-carriage-return {the warning for "\r" shows the literal as "\r", as the other escapes: neither the message nor the rendered line carries a raw carriage return (tests/value-display.test)} -body {
+    set hir [compileWith {["\r"]}]
+    set w [lindex [literalsOf $hir] 0]
+    list [dict get $w message] [string first \r [hir::warnings::render $hir $w]]
+} -result {{the String literal `"\r"` is one character long; a single character is written as a character literal} -1}
 
 test oc-no-character-spelling-anywhere {the character spelling is never printed -- not in a message, not in data, not in the rendered text -- and nothing is prescribed: no rewrite, no API advice, no imperative} -body {
     set chars [list a , \" \\ ' \n \t % "\U1F600"]

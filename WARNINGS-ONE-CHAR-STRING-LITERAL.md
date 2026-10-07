@@ -101,7 +101,8 @@ The brief opened with four calls to flag if wrong.
    diagnostics: "empty character literal", "unterminated character literal";
    the type is `UnicodeChar`), not "Char literal"; and the rendering of the
    literal follows the exact-value convention (`core::value::show`), which
-   leaves a carriage return raw (see "Known limitations").
+   escapes a carriage return as `\r`, as a character literal does (see
+   "Record, message, ordering").
 
 ## The theorem
 
@@ -327,6 +328,14 @@ anywhere` scans for the rewrites `'a'`, `','`, `'"'`, `'\\'`, `'\''`, `'\n'`,
 `replace`, `rewrite`, `did you mean`, `suggest`, `fix`, `->`, `callee`,
 `parameter`, `API`, `stdlib`, `str::`, `UnicodeChar` and ` Char `). No API
 advice anywhere: the deficiency catalog lives in the audit.
+
+A String's display escapes what a character literal's does (`\\ \n \r \t` and
+its own quote; `tests/value-display.test`), so the warning for `"\r"` shows
+`"\r"` and no message carries a raw carriage return
+(`oc-message-escapes-a-carriage-return`). This milestone first recorded the
+opposite as a known limitation: a String's display left `\r` raw, and on a
+terminal the warning's line was overwritten from its start. `core::value::show`
+and the native runtime's renderer now escape it for every String value.
 
 **Ordering.** The inherited `Sort`. All six codes interleave by location in
 both orders (`oc-interleaving-six-codes`, `-other-order`, `-deterministic`),
@@ -914,14 +923,6 @@ the new file (`git diff e7f715c -- tests/`), so the kickoff base `e7f715c` had
 
 ## Known limitations
 
-* **A carriage return renders raw.** The message renders the literal's value by
-  the exact-value convention, `core::value::show`, which escapes `\\ \" \n \t`
-  in a String but not `\r` (it does escape `\r` in a character literal). So the
-  warning for `"\r"` carries a raw carriage return inside its backticks, and on
-  a terminal the line is overwritten from its start. The data field is exact.
-  Changing `core::value::show` changes how every String value is displayed
-  (program output included), so it is out of this milestone's scope; recorded
-  as a separate task.
 * **The context-load exclusion is structural.** The one synthesized String
   const is recognized by its construct (`hir::contexts::isLoad`), and a new
   synthesized String const would be a false positive until it is recognized
