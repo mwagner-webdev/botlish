@@ -930,7 +930,9 @@ the new file (`git diff e7f715c -- tests/`), so the kickoff base `e7f715c` had
   84 tests). Re-run there (at `391100c`; later commits change comments,
   documentation and the corpus tool only): **`interp` 6480 tests, 6480 passed;
   `compile` 6480, 6476 passed, 4 skipped, 0 failed** (6480 = 6409 + `main`'s
-  70 + the new pin); MERGED-NATIVE-COVERAGE. On `interp`, the item-2 files, the
+  70 + the new pin); **native coverage 6480 tests: 2550 native, 3803
+  independent, 67 passed-partial, the same 60 unsupported, 0 failed**;
+  `tests/one-char-string-literal.test` 84/84 on `cranelift-generic`. On `interp`, the item-2 files, the
   new file and `main`'s new and changed context files (`context-traits`,
   `portable-io`, `linux-path`, `contexts`, `stdlib-namespaces`): 1185/1185, run
   separately first. The six warning fuzzers' and the refinement fuzzer's
@@ -1123,8 +1125,12 @@ checks on character literals or a reverse rule, and any new CLI option or
 37. *Backend parity?* Identical warning sets on all four backends, in process
     and through the CLI (a six-code program, the stdlib corpus, the refinement
     example and two string-heavy programs).
-38. *Full regression?* 6409 tests on `interp` (6409 passed) and `compile`
-    (6405 passed, 4 skipped by the existing constraint), 0 failures each; native
+38. *Full regression?* On the tree merged with `main` (`391100c`): 6480 tests
+    on `interp` (6480 passed) and `compile` (6476 passed, 4 skipped), native
+    coverage 6480 (2550 native, 3803 independent, 67 passed-partial, 60
+    unsupported), 0 failures anywhere. Before the merge (`6d9f8a8`): 6409
+    tests on `interp` (6409 passed) and `compile` (6405 passed, 4 skipped by the
+    existing constraint), 0 failures each; native
     coverage 6409 tests, 0 failed (2516 native, 3766 independent, 67
     passed-partial, 60 unsupported); CI's plain example steps exit 0, the native
     one with 376 stderr lines (62 `ONE-CHAR-STRING-LITERAL`, 301
