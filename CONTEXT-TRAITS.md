@@ -640,6 +640,23 @@ func 13 "hello<io::IO=linux::io::LinuxIO>" params=0 ...
     %1 = call 12 %0                         print_line's clone: one operand
 ```
 
+**CLIF** (`main.tcl -emit-clif`; the JIT's, where the area is an absolute
+symbol):
+
+```
+; function 12 "io::print_line<io::IO=linux::io::LinuxIO>": botlish_fn_12
+function u0:106(i64, i64) -> i64 system_v {            (vm, text): no context parameter
+    fn1 = colocated u0:104 sig1                          linux::io::write_text
+    ...
+    v7 = call fn0(v0, v6, v5)                            str::concat(text, "\n")
+    v8 = call fn1(v0, v7)                                write_text(vm, line): direct
+; function 11 "linux::io::write_text": botlish_fn_11
+function u0:104(i64, i64) -> i64 system_v {            (vm, text)
+    gv0 = symbol userextname0                            the context area
+    v5 = symbol_value.i64 gv0
+    v6 = load.i64 notrap aligned v5+8                    stdout's descriptor word
+```
+
 **strace** (`io-strace`; `-k` stack, frames mapped to NIR functions):
 
 ```
@@ -686,16 +703,20 @@ exactly the hand-written function's size.
 | the same through the hand-written concrete function | **0** |
 | `io::print_line("Hello, world!")`, whole program | 11 (541 bytes): String 1, List 1, Bytes 1, Struct 8 |
 | `linux::io::write_text(str::concat("Hello, world!", "\n"))`, whole program | 11 (541 bytes): the same |
+| 1 / 2 / 4 `io::print_line` calls | 11 / 15 / 23: 7 once + 4 per call |
 | `child<LinuxPath>` vs hand-written `child_l(LinuxPath)` | equal |
 
 Context-trait adaptation and path refinement adaptation allocate nothing. The
-output operation's own allocations are the line String (`concat`), the UTF-8
-byte List (`str::encode_utf8`) and the `Bytes`; of the 8 structs, 7 are
-`linux::io::create`'s (CONTEXTS.md §7) and one is built by `linux::write`.
+output operation's own allocations, per call, are the line String
+(`concat`), the UTF-8 byte List (`str::encode_utf8`), the `Bytes`
+(`abi::bytes::from_list`) and one `abi::I32`: `write_text` materializes the
+descriptor token it passes to `write_all` (NIR `structnew 2 %1` after the
+`contextload 8`). The 7 others are `linux::io::create`'s, once (CONTEXTS.md
+§7).
 
 ## 12. Tests, fuzzing, mutation testing
 
-* **tests/context-traits.test** (37 tests): syntax and contextual words,
+* **tests/context-traits.test** (39 tests): syntax and contextual words,
   modifiers, declaration diagnostics, requirements without receiver;
   satisfaction (structural, every mismatch reason and its explanation,
   owner-only, import independence, two importers); the one-way binding,
@@ -703,11 +724,12 @@ byte List (`str::encode_utf8`) and the `Bytes`; of the 8 structs, 7 are
   selection (the A/B/both/neither matrix, the ambiguity and missing
   diagnostics, source position, recorded selections, implementation
   obligations, implementation order); transitive requirements and chains;
-  unreachable consumers; the function-value frontier; recursion, nested
+  unreachable consumers; flags; the function-value frontier; recursion, nested
   functions over the binding, method syntax, mixed ordinary/context traits;
   exact contexts unchanged; the context-trait-free compiled program; HIR text
   round trip; NIR, the context area, allocations, machine code; tooling;
-  programs without traits built once.
+  programs without traits built once; the source audit (no context-trait
+  code, library name or registry access in core/, compiler/, native/).
 * **tests/portable-io.test** (12 tests): the surface, LinuxIO's
   implementation, transitive requirement, NIR, the Tcl backends, a substitute
   context on every backend, the executable (also under GC stress), routing and
@@ -780,4 +802,191 @@ added because they are imaginable.
 
 ## 16. Milestone report
 
-(Filled in below.)
+1. **Grammar.** `traitDecl = [ "context" ] "trait" IDENT ":" NEWLINE INDENT
+   traitRequirement { traitRequirement } DEDENT`; `traitRequirement = "fn"
+   IDENT "(" [ paramList ] ")" [ "->" typeExpr ] [ "errors" IDENT { "," IDENT
+   } ] NEWLINE`; a context section entry's type may be a context trait.
+2. **Contextual/modifier behavior.** `context` is the struct modifier applied
+   to `trait`; recognized only as `context trait NAME` at the start of a
+   top-level statement; `context`, `trait` stay ordinary names elsewhere;
+   `opaque` and a repeated `context` are rejected on traits (§1).
+3. **AST/HIR representation.** One `traitdecl` node with `context 0|1`,
+   `contextSpan`; the trait registry and HIR's `traits` entries carry `context
+   1`; requirements `{name params {{name type self 0}} result errors}`;
+   context parameters `{name io context io::IO trait 1}`; the binding is
+   `bind io (call ^context#load "io::IO")` typed `{trait io::IO}`; operations
+   are calls marked `traitCall {trait requirement receiver args shape context
+   1}` (build 1). HIR text: `trait ID context owner NS requires ...` (§7).
+4. **Identity/imports.** A namespace member's (`io::IO`), the type namespace
+   shared with structs, types and traits; `import type io::IO`; imports never
+   affect satisfaction.
+5. **Requirement restrictions.** No receiver; ordinary (or untyped)
+   parameters, ordinary concrete results, declared errors; no ordinary trait
+   or context trait parameter or result (`TRAIT-OTHER-TRAIT`), no context
+   parameter, flags, body, proof clause; at least one requirement; no
+   duplicate names (§1).
+6. **Structural concrete-context satisfaction.** Every requirement has a
+   compatible implementation in the context struct's owner (§2); no
+   `implements`, `provides`, instance or registration.
+7. **Owner lookup rule.** The owner namespace's own top-level function of the
+   requirement's name; never an import, the caller, or another namespace
+   (`ct-owner-only`).
+8. **Signature compatibility.** Exactly one context parameter, of the
+   concrete context (not part of the arity); the ordinary signature through
+   the existing structural function compatibility (`FnMismatch`); a declared
+   result when the requirement has one; no flags.
+9. **Error compatibility.** The implementation's errors ⊆ the requirement's
+   (fewer is fine), the ordinary error-set rule.
+10. **Satisfaction API.** `hir::contexts::satisfiesTrait CONTEXT TRAIT` ->
+    `{ok trait witness owner impls {REQ IMPL ...} reason requirement found}`;
+    `hir::contexts::explainTrait CONTEXT TRAIT ?HIR?` (§2).
+11. **Source-visible binding.** Only the context trait: its operations, as
+    `io.op(args)`; every other use `CONTEXT-TRAIT-MISUSE` (§3).
+12. **Hidden concrete witness.** Never a type: selected after checking, read
+    only by the plan; in the compiled program it is the clone's
+    `contextClone {TRAIT WITNESS}` and each operation's `traitImpl ...
+    witness`.
+13. **Exactly-one selection.** Per reachable top-level call, per required
+    context trait, among the contexts installed at that position (§4).
+14. **Zero providers.** `MISSING-CONTEXT`, with the chain and every installed
+    context and why it does not implement the trait.
+15. **Multiple providers.** `AMBIGUOUS-CONTEXT-IMPLEMENTATION` listing them in
+    installation order, with the chain; no ranking or preference.
+16. **Source-position installation.** Selection reads the set installed
+    before the call; later installations do not affect it.
+17. **Transitive propagation.** The unchanged context fixed point, carrying
+    context-trait identities; trait operations are never call edges (§5).
+18. **Unreachable calls.** Require nothing; their code becomes the
+    `context#unreachable` placeholder in the compiled program (§6).
+19. **Call-chain diagnostics.** Shortest deterministic chains, extended
+    through a selected implementation for its own requirements (§4, §5).
+20. **One-way abstraction.** `ct-one-way`: no projection, passing, type test,
+    comparison, storage or undeclared operation, whatever is installed.
+21. **Monomorphization rule.** Every top-level function whose requirement
+    includes a context trait is replaced by one clone per selection (key
+    `{function, ordinary witnesses, {TRAIT WITNESS ...}}`), bound in the entry
+    program before its first use; the body is checked once against the trait
+    (§6).
+22. **Direct operation lowering.** `io.write_text(t)` -> `call
+    block(linux::io::write_text) t` in the clone (no receiver).
+23. **Exact-context interaction.** Exact contexts unchanged; the selected
+    implementation's own `context io: LinuxIO` is an ordinary exact context
+    load; both kinds may appear in one function.
+24. **Native context area.** Unchanged; no slot, tag or table for a context
+    trait (`ct-native-context-area`).
+25. **Function-value frontier.** Unchanged (`CONTEXT-FUNCTION-VALUE`); no new
+    escaping case; no dictionary-bearing closure.
+26. **Interpreter.** Runs the core IR of the monomorphized program; no change.
+27. **Tcl compiler.** Compiles the same; no change.
+28. **Native.** Lowers the monomorphized HIR; one change: the dead-code
+    placeholder `context#unreachable` lowers to `unreachable`.
+29. **HIR evidence.** `contextclone (io::IO=linux::io::LinuxIO)`, `call
+    block(e648) contexttrait io::IO.write_text witness linux::io::LinuxIO`;
+    `ct-mono-hir` (no context-trait operation, binding, load or type remains),
+    `ct-hir-text` (round trip).
+30. **NIR evidence.** `io::print_line<...>`: `%3 = call 11 %2` (one operand),
+    `linux::io::write_text`: `%1 = contextload 8`; the evidence clone's body
+    equals the hand-written function's (§11).
+31. **CLIF/assembly evidence.** `fn1 = colocated u0:104`, `call fn1(v0, v7)`;
+    machine code: two direct `call <botlish_fn_1>`, no indirect call, 89
+    bytes = the hand-written function (§11).
+32. **ABI evidence.** `params=` and CLIF signatures are the ordinary
+    parameters (`(vm, text)`); no context operand on any call.
+33. **Allocation evidence.** Context-trait adaptation 0, path adaptation 0;
+    output: 4 objects per `print_line` (String, List, Bytes, `abi::I32`), 7
+    once for `create` (§11).
+34. **Validator proof grammar.** The existing `-> unit proves PARAM: R errors
+    ...` (REFINEMENT-VALUES.md): the same `proves` clause, outcome `normal`.
+35. **Validator success semantics.** Normal completion proves the argument
+    (and its alias root) for the rest of the path (`path-validator-proof`).
+36. **Handled-error join.** A handler that leaves contributes no normal path
+    (proof kept); one that completes rejoins without the proof (TYPE), unless
+    it re-proves (`path-validator-terminating-handler`,
+    `-rejoining-handler`).
+37. **Predicate regression.** Unchanged: `path-predicate-proof`, the
+    refinement tests and fuzzer, the `emailish?` corpus (items 56-58).
+38. **LinuxPath definition.** `refined type LinuxPath = str` in
+    lib/linux/path.bot; owner `linux::path`; no compiler knowledge
+    (`path-declaration`).
+39. **Validity rules.** Non-empty, no U+0000; nothing else; no normalization
+    (§9).
+40. **`valid?`.** `value.length() > 0 and value.nul_free?()`, `nul_free?` a
+    counted scan of `char_at(i).scalar_value()`; repeatable.
+41. **`validate`.** `if valid?(value): unit else: fail NotAPath`.
+42. **`io::path::Path`.** `trait Path: fn concat(path: Path, component: str)
+    -> Path errors NotAPath; fn text(path: Path) -> str`, plus the helpers
+    `io::path::concat`/`text` (§9).
+43. **Conformance mapping.** `concat -> linux::path::concat`, `text ->
+    linux::path::text` (owner's declarations; `str` does not satisfy Path).
+44. **`concat` semantics.** Join with one `/` unless the path ends with one;
+    the component non-empty, NUL-free, not absolute; `.`, `..`, `//` kept; the
+    result validated (§9 table).
+45. **`text` semantics.** The carrier String itself: lossless, not escaped,
+    not display-only.
+46. **Generic Path specialization.** `child<linux::path::LinuxPath>`,
+    `add_config<...>`: direct calls of `linux::path::concat`; the same
+    witness returned; no wrapper; per-witness with a second (test) witness.
+47. **Portable IO context trait.** `context trait io::IO: write_text,
+    write_error_text (str) -> unit errors WriteFailed`.
+48. **Portable `io::` functions.** `print`, `print_line`, `write_error`,
+    `write_error_line` (§8).
+49. **Linux implementations.** `linux::io::write_text`, `write_error_text`
+    over `write_all`, `linux::write`, `abi::bytes`, `str::encode_utf8`.
+50. **Short-write policy.** Completed by writing the remaining suffix until
+    done; zero progress is `WriteFailed` (strace-injected evidence, §8).
+51. **Error translation.** Negative result or no progress -> `WriteFailed`;
+    no errno, count or descriptor reaches the portable caller.
+52. **Portable Hello World.** examples/io/hello.bot: no context parameter,
+    `io::IO` inferred transitively, LinuxIO selected, direct call of
+    `linux::io::write_text`, one raw write(2), no libc in the path (§11).
+53. **Path + IO vertical.** examples/io/show-path.bot (`path-io-vertical`),
+    examples/io/child-path.bot (`path-child-example`).
+54. **Fuzz results.** `audit/context-traits/tools/fuzz.tcl`, four seeds ×
+    75 programs (`-seed 1, 1001, 2001, 3001`), every backend: **300 programs,
+    134 accepted (249 selections checked), 166 rejected as predicted
+    (MISSING-CONTEXT 156, AMBIGUOUS-CONTEXT-IMPLEMENTATION 10), 0
+    disagreements** -- satisfaction of every context × trait, every
+    consumer's requirement, each call's selection, every operation's
+    implementation and every value agreed with the oracle. Validator proofs:
+    the existing refinement fuzzer generates validators, handled calls whose
+    handlers return, fail, complete or re-prove, and validator calls in every
+    position (REFINEMENT-VALUES.md); its run is item 58.
+55. **Mutation results.** MUTATION-RESULTS
+56. **Full regression.** REGRESSION-RESULTS
+57. **Eager-trait fuzzer regression.** TRAIT-FUZZ-RESULTS
+58. **Refinement fuzzer regression.** REFINEMENT-FUZZ-RESULTS
+59. **Scalar machine-code audit.** SCALAR-AUDIT-RESULTS
+60. **Compile-time impact.** Context-trait resolution itself is small: on the
+    portable Hello World, the plan takes ~5 ms and the whole context
+    verification ~22 ms of ~450 ms. The cost is the build structure: before
+    this milestone every program was already built twice (the method-call
+    decision's final rebuild, TEST-SUITE-COST.md); a program declaring or
+    loading a trait or context trait is built a third time, monomorphized.
+    Since lib/linux/io.bot now imports `io`, existing `linux::io` programs
+    pay it too, and each build is larger (the `io` module and the new
+    implementation): examples/linux/context-hello.bot ~240 ms -> ~505-630
+    ms (warm, averaged). Programs without traits are unchanged
+    (examples/stdlib/matmul.bot ~205 ms before and after), as are
+    ordinary-trait programs (the traits principal program ~50 ms both).
+    Runtime: zero dispatch overhead (items 30-33).
+61. **Remaining limitations.** §14.
+62. **Context maturity criterion.** Met (§15): `context` is frozen for now.
+63. **Before coroutines.** COROUTINE-PREREQUISITES.md's list is unchanged by
+    this milestone; for contexts specifically: a coroutine body that requires
+    a context trait would need its selection fixed when it is created (the
+    clone already is), and suspended frames that hold no context value
+    (true today: contexts are loaded from their slots, never captured as
+    hidden arguments) -- context traits add no frame state. Actor- or
+    coroutine-local installation needs the per-scope selection of §14.
+64. **Before MutableVector.** Nothing context-specific: a growable mutable
+    container needs its own ownership/mutation design (MUTABLEARRAY and
+    MUTABLE-BYTES precedents); for I/O it would carry buffered output, which
+    can then live behind `io::IO`'s operations in a mutable context without
+    any caller change.
+65. **Before the Botlish-native test framework.** Substitutable environments
+    now exist: a test installs a fake context implementing `io::IO` (or any
+    context trait) instead of LinuxIO, selected statically like the real one
+    (`io-substitute-context`). Still missing for the framework: mutable
+    contexts (a capturing fake that records output), scoped/nested
+    installation (one installation per test rather than per program), and
+    test discovery/assertion syntax.

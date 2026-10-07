@@ -623,6 +623,10 @@ test ct-unreachable-requires-nothing {consumers nobody calls, a consumer called 
     sourceAgree "${::entryPrelude}fn unused(n: int) -> int errors WriteFailed:\n    twice(n)\nfn holder(n: int) -> int:\n    fn inner(m: int, context out: Out) -> int errors WriteFailed:\n        out.emit(m)\n    n * 2\nfn guarded(n: int) -> int errors WriteFailed:\n    if false:\n        return twice(n)\n    n + 3\ng = guarded(1):\n    on WriteFailed:\n        0\nif false:\n    twice(1):\n        on WriteFailed:\n            0\n\[holder(4), g\]\n"
 } -result {value {[8, 4]}}
 
+test ct-flags {a function requiring a context trait may declare flags: live calls of its clone pass them; a call in dead code becomes the placeholder, which takes no flags} -body {
+    sourceAgree "type Small = Int in 0..1000\ncontext trait Out:\n    fn emit(n: int) -> int\ncontext struct A:\n    k: Small\nfn emit(n: int, context c: A) -> int:\n    n + c.k\nfn loud(n: int, flags :twice, context out: Out) -> int:\n    if twice:\n        out.emit(n) * 2\n    else:\n        out.emit(n)\nfn g(n: int) -> int:\n    if false:\n        return loud(n, :twice)\n    n\nwith context A {k: 1}\n\[g(3), loud(4, :twice), loud(4)\]\n"
+} -result {value {[3, 10, 5]}}
+
 test ct-function-value-frontier {a function requiring a context trait is never a value (CONTEXT-FUNCTION-VALUE); an alias in statement position is called like the function} -body {
     list [rejectionKind "${::entryPrelude}fn apply(f, n):\n    f(n)\nwith context A {k: 1}\napply(twice, 1)\n"] \
         [sourceAgree "${::entryPrelude}t = twice\nwith context A {k: 1}\nr = t(2):\n    on WriteFailed:\n        0\nr\n"]

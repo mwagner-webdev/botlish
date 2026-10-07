@@ -908,7 +908,11 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 # operation to its implementation, a call of a trait-
                 # polymorphic function to its clone for the call's witnesses.
                 ResolvePlannedCall hir $e $node $planned $ctx
-                hir::flags::ResolveCall hir $e $node $ctx
+                if {[lindex $planned 0] ne "unreachable"} {
+                    # (The placeholder of never-executed code takes nothing,
+                    # flags included.)
+                    hir::flags::ResolveCall hir $e $node $ctx
+                }
                 SetField hir $e target ""
                 SetField hir $e known ""
                 return $e
