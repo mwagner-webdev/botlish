@@ -36,7 +36,7 @@ API takes a String -- in two of the three String-taking context kinds it
 *does* type-check, and then fails at run time (a native's `str` parameter) or
 silently changes the program (`==` of a String and a character is `false`; in
 the corpus, a scanner whose loop exits on such a comparison runs forever after
-the rewrite). 81 of the 92 corpus findings form the catalog of those APIs;
+the rewrite). 86 of the 97 corpus findings form the catalog of those APIs;
 the other 11 are deliberate Strings, and none can be converted today (see
 "Corpus findings").
 
@@ -80,8 +80,8 @@ The brief opened with four calls to flag if wrong.
    String-taking context kinds accept it: a native's `str` parameter is
    checked only at run time (`str::length('a')` compiles and fails with
    `TYPE`), and `==` of a String and a UnicodeChar type-checks and is `false`
-   (README §1: values of different kinds are never equal). In the corpus, 55
-   of the 92 findings are such comparisons. So the deficiency surface is wider
+   (README §1: values of different kinds are never equal). In the corpus, 56
+   of the 97 findings are such comparisons. So the deficiency surface is wider
    than "where it would not type-check", and the strongest reason the warning
    must not be autofixable is the silent case, not the rejected one. The
    decision stands; its documentation says this.
@@ -726,17 +726,25 @@ brace they do not close are double-quoted, milestone 5's note.
 
 `audit/one-char-string-literal/tools/corpus.tcl`, output
 `audit/one-char-string-literal/corpus-audit.txt`, at the **pinned commit
-`61f1864`** recorded in its header (corpus paths clean: `examples`, `bench` and
-`lib` are byte-identical to the kickoff base `e7f715c`; the corpus is not
-edited). It compiles `examples/stdlib` (9), `examples/surface` (14),
-`examples/refinement` (1), `bench/*.bot` (8) and `lib/*.bot` (8) with warnings
-on. 36 of 40 compile standalone: the two deliberate rejections (`09`, `10`),
-and `lib/list.bot` and `lib/mutable_array.bot` (which use their own namespace
-without importing it, as milestones 2-5 recorded).
+`1db647e`** recorded in its header: this milestone merged with `origin/main`
+`8afa168` (context traits), corpus paths clean -- `examples`, `bench` and `lib`
+are `main`'s, unedited by this milestone. It compiles `examples/stdlib` (9),
+`examples/surface` (14), `examples/refinement` (1), `examples/io` (3, new with
+context traits: the corpus's only loaders of `lib/io.bot`, `lib/io/path.bot` and
+`lib/linux/path.bot`, as `examples/refinement` is of the refinement code),
+`bench/*.bot` (8) and `lib/*.bot` (9) with warnings on. 39 of 44 compile
+standalone: the two deliberate rejections (`09`, `10`), `lib/list.bot` and
+`lib/mutable_array.bot` (which use their own namespace without importing it, as
+milestones 2-5 recorded), and `lib/io.bot` (`CONTEXT-FUNCTION-VALUE`: a module
+of context-trait operations is not a program; `examples/io` loads it).
 
-**92 distinct findings** (a module's finding once: `lib/web.bot`'s 26 are
+(Before the merge, at `61f1864`, the same tool over the usual corpus found 92;
+the merge adds exactly the 5 in `lib/io.bot`, `lib/linux/path.bot` and
+`examples/io`, and changes nothing else.)
+
+**97 distinct findings** (a module's finding once: `lib/web.bot`'s 26 are
 reported by every program that loads `web`). Volume is information (milestone
-2): they sit in 10 files, and three shapes repeat --
+2): they sit in 13 files, and three shapes repeat --
 
 | file | findings |
 |---|---|
@@ -744,18 +752,19 @@ reported by every program that loads `web`). Volume is information (milestone
 | `examples/stdlib/ai_text_clean.bot` | 22 |
 | `examples/stdlib/csv.bot`, `csv_chunked.bot`, `csv_geometric.bot`, `csv_records.bot` | 8 each (one scanner, four copies) |
 | `examples/stdlib/string_replace.bot` | 7 |
+| `lib/io.bot`, `lib/linux/path.bot` | 2 each |
 | `bench/lex-strategy.bot`, `bench/source-checks.bot` | 2 each |
-| `examples/stdlib/string_reverse.bot` | 1 |
+| `examples/stdlib/string_reverse.bot`, `examples/io/child-path.bot` | 1 each |
 
 **False positives: 0.** The tool re-lexes the source token at every finding's
 anchor with the lexer's own `String` procedure, independently of the pass: all
-92 are String literals whose decoded value is the warning's and is one
+97 are String literals whose decoded value is the warning's and is one
 character long. (The only way this warning can be wrong is a value that is not
 one character, and the exact value makes that impossible; the check confirms
 it on the corpus.)
 
 **The spelling law at corpus level, per finding.** Clauses 1 and 2 hold for all
-92 (50 distinct characters: the character spelling lexes, its exact value is
+97 (52 distinct characters: the character spelling lexes, its exact value is
 the UnicodeChar of the same code point, and a `UnicodeChar` parameter takes
 it). Then each literal alone is rewritten to its character spelling in a
 scratch copy, and the rewritten program -- for a `lib/web.bot` finding, each of
@@ -766,7 +775,7 @@ limit:
 
 | class | rewrite outcomes (over every probe) |
 |---|---|
-| API-deficiency (81 findings) | same 80, changed 22, runtime `TYPE` 23, **diverges 8** |
+| API-deficiency (86 findings) | same 84, changed 22, runtime `TYPE` 28, **diverges 8** |
 | deliberate (11) | rejected `TYPE` 8, runtime `TYPE` 3 |
 
 **8 rewrites diverge**: the four CSV scanners' `delimiter == ","` and
@@ -790,26 +799,26 @@ finding no rule classifies would fail the tool -- none does):
   meets a String. The corpus's character code already uses character literals
   -- `uri_query_value?` in the same `lib/web.bot` reads `str::char_at` and
   compares with `'%'`, and has no finding -- and everything that warns predates
-  that style. A rewrite that merely compiles is never counted: 55 of the 92 are
+  that style. A rewrite that merely compiles is never counted: 56 of the 97 are
   `==` comparisons, where it always compiles.
-* **API-deficiency: 81**, in six rows -- the deliverable to the future API and
+* **API-deficiency: 86**, in six rows -- the deliverable to the future API and
   autofix work:
 
 | catalog row | findings | consumers (the tool's keys) | where | rewrite | what the API lacks |
 |---|---|---|---|---|---|
-| `==` against a one-character String sliced by a `peek`/`char_at` helper (`str::substring`) | 31 | `== str-substring:peek()`, `:character`, `:delimiter`, `:char_at()` | the four CSV scanners; `lib/web.bot`'s `emailish?` (`domain?`) | changed 12, same 17, **diverges 8** | the helper returns a one-character String, or `""` past the end; `str::char_at` returns a UnicodeChar but fails (`IndexNotFound`) outside the String, so a scanner needs an end-of-input form that is not `""` |
+| `==` against a one-character String sliced by `str::substring` or a `peek`/`char_at` helper | 32 | `== str-substring:peek()`, `:character`, `:delimiter`, `:char_at()`, `:str::substring()` | the four CSV scanners; `lib/web.bot`'s `emailish?` (`domain?`); `lib/linux/path.bot`'s `concat` (`path.substring(n - 1, n) == "/"`, two lines below its own `component.char_at(0) == '/'`) | changed 12, same 19, **diverges 8** | the helper returns a one-character String, or `""` past the end; `str::char_at` returns a UnicodeChar but fails (`IndexNotFound`) outside the String, so a scanner needs an end-of-input form that is not `""` |
 | `==` against an untyped parameter that receives one-character Strings | 21 | `== any-param:param:character`, `:c` | `ai_text_clean`'s `cleaner_emoji` and `clean_char`; `bench/source-checks.bot`'s `is_underscore?`, `is_hyphen?` | same 13, changed 8 | the callers pass `str::substring` slices (`peek`, a first-character slice inside a list of `str` predicates with `str::is_tcl_alpha`/`alnum`); the comparison would hold for a UnicodeChar only if every caller changed too |
 | element of a `List[str]` table indexed (`list::at`) and concatenated (`str::concat`) | 16 | `list-element bind:web::hex_digits` | `lib/web.bot`'s `uri_escape_text` | same 28, runtime `TYPE` 20 | the digits are appended to output text with `str::concat`: there is no append of a UnicodeChar to a String |
 | element of a `List[str]` made an `ImmutableSet[str]`, queried with one-character Strings | 5 | `list-element immutable_set::from_list:arg0` | `lib/web.bot`'s `local_extra_chars` (`emailish?`) | same 15 | `immutable_set::contains` is queried with `char_at` slices; a set of UnicodeChars needs the scanner to read characters (`str::char_at`) |
-| `str::concat` argument | 5 | `call str::concat:arg0`, `:arg1` | the four CSV scanners (`"\""` appended to a field), `lib/web.bot`'s `pct` (`"%"`) | same 4, runtime `TYPE` 3 | `str::concat` takes two Strings |
+| `str::concat` argument | 9 | `call str::concat:arg0`, `:arg1` | the four CSV scanners (`"\""` appended to a field), `lib/web.bot`'s `pct` (`"%"`), `lib/io.bot`'s `print_line` and `write_error_line` (`text.concat("\n")`), `lib/linux/path.bot`'s `concat` (`"/"`), `examples/io/child-path.bot` (`" "`) | same 6, runtime `TYPE` 8 | `str::concat` takes two Strings |
 | `==` against a `str` parameter | 3 | `== str-param:param:c` | `bench/lex-strategy.bot`'s `lenient_ident_char?`; `lib/web.bot`'s `label_char?` | same 3, changed 2 | the parameter is declared or inferred `str`: its callers pass one-character Strings sliced from text |
 
   Reading the table as an API work list: almost everything reduces to two
   missing pieces -- **reading characters** (a scanner over `str::char_at` with
   a total end-of-input form, replacing every `peek`/`char_at`/first-character
-  slice; that unlocks the 31 + 21 + 3 + 5 comparison and set findings) and
+  slice; that unlocks the 32 + 21 + 3 + 5 comparison and set findings) and
   **appending a character to text** (a String builder or `str::concat` taking a
-  UnicodeChar; that unlocks the 16 + 5 table and concatenation findings).
+  UnicodeChar; that unlocks the 16 + 9 table and concatenation findings).
 * **deliberate String usage: 11**, by hand, with reasons
   (`corpus-audit.txt`, "Deliberate String usage"):
   * `examples/stdlib/string_replace.bot`, `sample` (7): test data of a substring
@@ -846,7 +855,7 @@ it as an allocation finding, so it is cited, not quoted.
 changes, and the warning is the instrument that surfaces them. Measured
 (fuzzer catalog, corpus audit): the rewrite is rejected statically by a
 declared `str` parameter, fails at run time in a native's `str` parameter, and
-silently changes a comparison with a String -- in the corpus, 55 of 92 findings
+silently changes a comparison with a String -- in the corpus, 56 of 97 findings
 are such comparisons, and rewriting one in a scanner can remove its loop's
 only exit (`diverges` in the audit). A fixit would therefore be wrong in most
 of the corpus and dangerous where it compiles.
@@ -911,6 +920,28 @@ the new file (`git diff e7f715c -- tests/`), so the kickoff base `e7f715c` had
 * The GC-stress job (`BOTLISH_NATIVE_GC_STRESS=1`, CI on push to `main`) was not
   run locally: nothing under `native/` changed, and the pass runs before any
   backend and changes no HIR (pinned).
+* **Second snapshot: the tree merged with `origin/main` `8afa168`** (merge
+  `bec19a1`; `main` gained context traits while this milestone ran:
+  CONTEXT-TRAITS.md, `lib/io.bot`, `lib/io/path.bot`, `lib/linux/path.bot`,
+  `examples/io`, 70 tests). The merge had no conflict. It added a second
+  synthesized String const -- a context-trait parameter's load key -- which the
+  source audit caught as designed, which `hir::contexts::isLoad` already
+  recognizes, and which `oc-context-trait-key-is-not-a-literal` now pins (`391100c`;
+  84 tests). Re-run there (at `391100c`; later commits change comments,
+  documentation and the corpus tool only): **`interp` 6480 tests, 6480 passed;
+  `compile` 6480, 6476 passed, 4 skipped, 0 failed** (6480 = 6409 + `main`'s
+  70 + the new pin); MERGED-NATIVE-COVERAGE. On `interp`, the item-2 files, the
+  new file and `main`'s new and changed context files (`context-traits`,
+  `portable-io`, `linux-path`, `contexts`, `stdlib-namespaces`): 1185/1185, run
+  separately first. The six warning fuzzers' and the refinement fuzzer's
+  60-seed smokes give the identical summary lines; `main`'s context-trait
+  fuzzer compiles with `-warnings off` and is unaffected by construction.
+  CI's example steps are unchanged (native: exit 0, the same 376 stderr lines,
+  62 of them this warning's; interp and compile: exit 0, empty stderr). The
+  new library modules carry 4 findings (`lib/io.bot` 2, `lib/linux/path.bot` 2),
+  printed by `examples/io` and any program loading them; `main`'s tests compile
+  with `-warnings off`, so none breaks. The corpus audit at `1db647e` is the
+  committed one (97 findings; 92 before the merge).
 
 ## Known limitations
 
@@ -1053,15 +1084,17 @@ checks on character literals or a reverse rule, and any new CLI option or
 
 **Verification**
 
-32. *Corpus findings and the API-deficiency catalog?* 92 distinct findings
-    (`lib/web.bot` 26, `ai_text_clean` 22, the four CSV programs 8 each,
-    `string_replace` 7, `lex-strategy` and `source-checks` 2 each,
-    `string_reverse` 1): 0 convert-now, 81 API-deficiency, 11 deliberate. The
-    catalog has six rows -- `==` against a one-character String sliced by a
-    `peek`/`char_at` helper (31), `==` against an untyped parameter fed such
-    slices (21), a `List[str]` hex-digit table concatenated into output (16), a
-    `List[str]` made an `ImmutableSet[str]` of characters (5), `str::concat`
-    arguments (5), `==` against a `str` parameter (3) -- and reduces to two
+32. *Corpus findings and the API-deficiency catalog?* 97 distinct findings at
+    `1db647e` (merged with `main`; `lib/web.bot` 26, `ai_text_clean` 22, the
+    four CSV programs 8 each, `string_replace` 7, `lib/io.bot`,
+    `lib/linux/path.bot`, `lex-strategy` and `source-checks` 2 each,
+    `string_reverse` and `examples/io/child-path.bot` 1 each; 92 before the
+    merge): 0 convert-now, 86 API-deficiency, 11 deliberate. The catalog has six
+    rows -- `==` against a one-character String sliced by `str::substring` or a
+    `peek`/`char_at` helper (32), `==` against an untyped parameter fed such
+    slices (21), a `List[str]` hex-digit table concatenated into output (16),
+    `str::concat` arguments (9), a `List[str]` made an `ImmutableSet[str]` of
+    characters (5), `==` against a `str` parameter (3) -- and reduces to two
     missing API pieces: reading characters (a `str::char_at` scanner with a
     total end-of-input form) and appending a character to text. The 11
     deliberate are one-character test data of String functions (8) and
@@ -1070,8 +1103,8 @@ checks on character literals or a reverse rule, and any new CLI option or
 34. *Spelling law at which levels?* Unit (`oc-spelling-law-unit`,
     `oc-spelling-law-no-gap-sampled`, and the context tests that rewrite a
     literal), the fuzzer (2000 seeds, 5118 of 5118 findings, plus all 1,112,064
-    scalars for the lexer clause), and per corpus finding (clauses 1-2 for 92 of
-    92; the scratch rewrite of every finding, classified; no finding is
+    scalars for the lexer clause), and per corpus finding (clauses 1-2 for 97 of
+    97; the scratch rewrite of every finding, classified; no finding is
     convert-now, so no corpus rewrite was required to keep its value). No
     spelling gap: no language finding.
 35. *Warning-mode tests pass?* Yes. `tests/one-char-string-literal.test` 84/84
