@@ -115,6 +115,7 @@ Values are immutable. Every value has exactly one kind:
 |----------|------------------|----------------------------------------------------|
 | `int`    | `42`             | arbitrary precision; no fixed-width overflow       |
 | `str`    | `"hello"`        | a string                                           |
+| `UnicodeChar` | `'A'`       | exactly one Unicode scalar value (UNICODE-CHAR-LITERALS.md) |
 | `bool`   | `true` / `false` | the only valid condition values                    |
 | `unit`   | `unit`           | value of an empty sequence                         |
 | `list`   | `[1, "a"]`       | an ordered sequence of values                      |
@@ -125,6 +126,22 @@ Values are immutable. Every value has exactly one kind:
 
 Kinds never blur: the integer `10`, the string `"10"`, and the string
 `"true"` are all different values, and none of the strings is a Boolean.
+
+**Strings and characters.** A String (`str`) is a sequence of characters; a
+character is a `UnicodeChar`, exactly one Unicode scalar value. **A single
+character is written as a character literal** (`','`, `'"'`, `'\n'`, `'\''`,
+`'😀'`); the empty String `""` and every String of two or more characters are
+Strings. Characters are counted as `str::length` counts them: Unicode scalar
+values, never bytes and never grapheme clusters (an `é` written as `e` plus a
+combining accent is two characters). The two kinds never convert implicitly: a
+String and a UnicodeChar are never equal (`==` of the two is `false`), a `str`
+parameter does not take a UnicodeChar, and `str::char_at` is the operation that
+reads a String's character as a value (ENCODE-UTF8-ALLOCATION-RESEARCH.md). A
+one-character String literal is therefore a String spelling of what the
+language writes as a character; the `ONE-CHAR-STRING-LITERAL` warning (§23)
+reports each one. Where an API takes a String for what is one character, that
+String spelling is what the API requires today, and the finding is about the
+API.
 
 **Equality (`==`)** compares structure. Values of different kinds are never
 equal. Integers compare numerically, strings compare exact characters, lists
@@ -2917,26 +2934,32 @@ and stops. It never says what to do about it, and a program that keeps the
 fact on purpose is correct. A warning that cannot cite a compiler proof does
 not belong in a default-on, non-suppressible system.
 
-That bar admits three *preference-shaped* warnings, `METHOD-ELIGIBLE`,
-`FIXED-ARITY-LIST-RETURN` and `PROVES-NAMING` (below), and only because each
-passes the bar rather than because "style warnings are fine now": (1) its
-**fact** is compiler-proven -- the sugared spelling parses and resolves to the
-identical callee; every reachable value exit is a written list literal of one
-arity; the declaration carries a resolved proof contract of one of the
-refinement feature's two shapes and its written name is outside that shape's
-convention -- with the compiler's own parser, resolver, provenance and
-reachability as the prover; (2) the **preference** it serves is the language's
-own declared design (receiver syntax is Botlish's preferred call form; struct
-values have named parts and destructure, Lists deliberately do not:
-MULTI-VALUE-RESULTS.md; proof-producing functions are named by their shape,
-the refinement feature's declared interface: REFINEMENT-VALUES.md, "Naming"),
-not a per-warning fashion; (3) the **function's author** has first-class
+That bar admits four *preference-shaped* warnings, `METHOD-ELIGIBLE`,
+`FIXED-ARITY-LIST-RETURN`, `PROVES-NAMING` and `ONE-CHAR-STRING-LITERAL`
+(below), and only because each passes the bar rather than because "style
+warnings are fine now": (1) its **fact** is compiler-proven -- the sugared
+spelling parses and resolves to the identical callee; every reachable value
+exit is a written list literal of one arity; the declaration carries a resolved
+proof contract of one of the refinement feature's two shapes and its written
+name is outside that shape's convention; a written String literal's exact value
+is one character long -- with the compiler's own parser, resolver, provenance,
+exact values and reachability as the prover; (2) the **preference** it serves
+is the language's own declared design (receiver syntax is Botlish's preferred
+call form; struct values have named parts and destructure, Lists deliberately
+do not: MULTI-VALUE-RESULTS.md; proof-producing functions are named by their
+shape, the refinement feature's declared interface: REFINEMENT-VALUES.md,
+"Naming"; a single character is written as a character literal: §1, "Strings
+and characters"), not a per-warning fashion; (3) the **author** has first-class
 control at the declaration, as part of the interface: `nomethod fn` withdraws
 method eligibility, a result type `-> list` / `-> List[T]` declares a list
-result, and a proof-producing function's name is its author's own choice, which
-a rename changes and nothing else does. None is call-site suppression (there is
-still no lint-ignore, pragma or per-call opt-out); (4) **uncertainty means
-silence**: wherever the compiler cannot prove the fact, it says nothing.
+result, a proof-producing function's name is its author's own choice, which a
+rename changes and nothing else does, and a literal's spelling is its writer's
+-- where the literal's consumer takes a String, the declaration that decides is
+that API's, and changing it is the response (`ONE-CHAR-STRING-LITERAL`
+deliberately has no context gate and no opt-out: making those APIs visible is
+its purpose). None is call-site suppression (there is still no lint-ignore,
+pragma or per-call opt-out); (4) **uncertainty means silence**: wherever the
+compiler cannot prove the fact, it says nothing.
 
 There is one global policy per compilation, and nothing finer:
 
@@ -2960,11 +2983,11 @@ hir::warnings::of $hir      ;# {code message primary secondary data} records
 annotation or comment suppresses a warning. This is intentional, not forgotten
 CLI work: every warning is on for everyone, so a warning must be trustworthy
 enough to be, and uncertainty means no warning. Codes (`SAME-RETURN-VALUE`,
-`METHOD-ELIGIBLE`, `FIXED-ARITY-LIST-RETURN`, `SAME-FAILURE`, `PROVES-NAMING`)
-are stable for tests, tooling and documentation, but they are not switches.
-Adding `METHOD-ELIGIBLE`, `FIXED-ARITY-LIST-RETURN`, `SAME-FAILURE` and
-`PROVES-NAMING` gave `BOTLISH_WARNINGS` and the command line nothing: three
-modes, one option.
+`METHOD-ELIGIBLE`, `FIXED-ARITY-LIST-RETURN`, `SAME-FAILURE`, `PROVES-NAMING`,
+`ONE-CHAR-STRING-LITERAL`) are stable for tests, tooling and documentation, but
+they are not switches. Adding `METHOD-ELIGIBLE`, `FIXED-ARITY-LIST-RETURN`,
+`SAME-FAILURE`, `PROVES-NAMING` and `ONE-CHAR-STRING-LITERAL` gave
+`BOTLISH_WARNINGS` and the command line nothing: three modes, one option.
 
 `SAME-RETURN-VALUE`: several distinct, reachable exits of one function are
 proven to return the same value.
@@ -3157,3 +3180,47 @@ never reported. See WARNINGS-PROVES-NAMING.md for the two rules, the scope
 guard, the shape decisions, the rename law, the corpus census and known
 limitations; the tests are `tests/proves-naming.test` and
 `audit/proves-naming/tools/fuzz.tcl`.
+
+`ONE-CHAR-STRING-LITERAL`: a written String literal whose exact value is one
+character.
+
+```
+fn peek(text, index):
+    text
+fn scan_quoted(text, index, field):
+    character = peek(text, index)
+    if character == "\"":
+        return field
+    scan_quoted(text, index + 1, field)
+```
+```
+f.bot:5:21: warning: the String literal `"\""` is one character long; a single character is written as a character literal (ONE-CHAR-STRING-LITERAL)
+```
+
+The fact is the literal's own exact value (`hir::exact::Of`), measured as
+`str::length` measures: escapes are resolved (`"\n"` and `"\""` are one
+character), a supplementary-plane character is one, and `e` plus a combining
+accent is two. The empty String and Strings of two or more characters are
+silent, and so is a character literal. **Literals only**: a binding's written
+initializer is the site (`sep = ","` warns once, there), and nothing else is --
+not a read of `sep`, an alias, a parameter, a call result or a computed String,
+whatever its value; no value is followed and no call is evaluated. **Context-
+blind by design**: the warning never looks at what consumes the literal, so it
+also fires where the character spelling would not work today -- a `str`
+parameter (rejected statically), a native's `str` argument (rejected at run
+time), a comparison with a String (`==` of the two kinds type-checks and is
+false). Those findings are the point: they catalogue the APIs that take a
+String where a character is meant. There is no reachability notion (a literal
+in a dead branch or an uncalled function is written source and warns), no
+grouping (two equal literals are two warnings) and no opt-out. The message
+renders the literal's value and names the form; it never prints the character
+spelling. The warning is **deliberately not autofixable**: the rewrite changes
+the program wherever the consumer takes a String, silently so in a comparison.
+It graduates to an autofixable warning only when the APIs the corpus audit
+catalogues take characters (or the language gains the conversions that make the
+rewrite total). See WARNINGS-ONE-CHAR-STRING-LITERAL.md for the theorem, the
+representation argument (one synthesized String const exists: a context
+parameter's load key, which is never reported), the spelling law, the corpus
+audit with its API-deficiency catalog, and known limitations; the tests are
+`tests/one-char-string-literal.test` and
+`audit/one-char-string-literal/tools/fuzz.tcl`.

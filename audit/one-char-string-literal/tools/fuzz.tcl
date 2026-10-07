@@ -17,25 +17,28 @@
 # contexts:
 #
 #   str-param      the argument of a declared `fn take_s(text: str) -> int`
-#   str-native     the argument of str::length, or the receiver of
-#                  `.concat("..")` (method syntax: str::concat's functional
-#                  form would be METHOD-ELIGIBLE)
+#   str-length     the argument of str::length (a native's str parameter)
+#   str-concat     the receiver of `.concat("ab")` (str::concat; method
+#                  syntax: the functional form would be METHOD-ELIGIBLE)
 #   str-compare    one side of `==` whose other side is a String (a computed
 #                  one-character String `sxK`)
 #   char-accepting the argument of a declared kind-tolerant matcher
 #                  `fn is_K(c): c == 'X' or c == sxK` -- an untyped parameter
 #                  observed as a character, accepting the character type and a
-#                  one-character String alike (no typed parameter does: a
-#                  UnicodeChar parameter rejects a String statically)
-#   element        a list element or a struct field value of the program's
-#                  result (its kind is visible in the value)
+#                  one-character String alike (a declared UnicodeChar
+#                  parameter rejects the original String statically, and a
+#                  str one rejects the rewrite)
+#   element        a list element of the program's result, and
+#   field          a struct field value of it (the kind is visible in the
+#                  value)
 #   binding        the initializer of `bI = LIT`, read later by one of the
 #                  contexts above (the read is never a site)
 #
 # and placed at the top level, in a nested function, in a closure, in a
 # statically dead branch (`if 1 == 2:`), under a range-infeasible branch, after
 # a `return`, or in a function nobody calls. Character literals of the same
-# characters appear in the same contexts (never sites), and so do computed
+# characters appear in the same contexts where the original program accepts
+# them (never sites), and so do computed
 # one-character Strings (`"aX".substring(1, 2)`, call results) and binding
 # reads. Some programs declare a context struct named `C` and a function with a
 # context parameter of it: the frontend synthesizes the one-character String
@@ -76,8 +79,9 @@
 #      and evaluates to the identical value on the reference interpreter.
 #      Everywhere else the rewrite's outcome is catalogued per context, never a
 #      failure: rejected statically, failing at run time, a changed value, or
-#      the same value (a dead placement) -- those contexts are the warning's
-#      purpose, the API surface that takes String where a character is meant.
+#      the same value (a dead placement, or a comparison that is false with
+#      either spelling) -- those contexts are the warning's purpose, the API
+#      surface that takes String where a character is meant.
 #
 # Exits non-zero on any failure.
 
