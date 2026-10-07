@@ -1,7 +1,8 @@
 # coroutines.tcl -- the coroutine performance report (COROUTINES.md,
 # "Performance").
 #
-#   tclsh9.0 bench/coroutines.tcl ?-runs N? ?-n N? ?-hold K?
+#   tclsh9.0 bench/coroutines.tcl ?-runs N? ?-n N? ?-native-n N? ?-hold K?
+#                                 ?-native-hold K? ?-backends LIST?
 #
 # Times, on every backend (Tcl interp, Tcl compile, Cranelift), programs that
 # each repeat one coroutine operation N times, against a baseline program
@@ -21,8 +22,9 @@
 #
 # then, natively, the allocations per construction (the runtime's
 # allocation report) and the memory of suspended and terminal coroutines:
-# the peak resident set of a process holding K suspended coroutines at once
-# (each suspended D frames deep) against one holding none, per coroutine;
+# the peak resident set of a process holding K suspended (or completed)
+# coroutines at once (each suspended D frames deep) against one holding none,
+# per coroutine (K = -hold on the Tcl backends, -native-hold natively);
 # for the Tcl backends the same peak of this process (VmHWM, reset through
 # /proc/self/clear_refs before each run). Every timed number is best of RUNS
 # in-process executions, compilation excluded (bench/bench.tcl's method).
@@ -37,12 +39,18 @@ interp recursionlimit {} 200000
 
 set runs 5
 set n 20000
-set hold 10000
+set hold 2000
+set nativeHold 10000
+set nativeN 200000
+set backends {interp compile native}
 foreach {option value} $args {
     switch -- $option {
         -runs { set runs $value }
         -n { set n $value }
         -hold { set hold $value }
+        -native-hold { set nativeHold $value }
+        -native-n { set nativeN $value }
+        -backends { set backends $value }
         default { error "unknown option $option" }
     }
 }
@@ -53,42 +61,62 @@ proc program {kind n {depth 1}} {
     return [surface::compile [programText $kind $n $depth] -warnings off]
 }
 
+# N repetitions of the statements LINES (the last one's value is kept; `i`
+# counts 0..N-1) as two nested collecting loops of at most 100 iterations
+# each: one List of N elements built by a single collecting loop costs time
+# quadratic in N natively (each iteration copies the List so far), which
+# would swamp the operation being measured.
+proc Repeat {n lines} {
+    set outer [expr {($n + 99) / 100}]
+    set text "xs = loop o from 0 to $outer:\n    ys = loop j from 0 to 100:\n        i = o * 100 + j\n"
+    foreach line $lines {
+        append text "        $line\n"
+    }
+    append text "    list::length(ys)\nlist::length(xs)\n"
+    return $text
+}
+
 proc programText {kind n {depth 1}} {
     set p $::prelude
     switch -- $kind {
         create {
             append p "fn w(k: int) -> V:\n    yield V {n: k}\n    return V {n: k + 1}\n"
-            append p "xs = loop i from 0 to $n:\n    coroutine {first} = w(i)\n    first.n\nlist::length(xs)\n"
+            append p [Repeat $n {"coroutine {first} = w(i)" first.n}]
+        }
+        create-alloc {
+            append p "fn w(k: int) -> V:\n    yield V {n: k}\n    return V {n: k + 1}\n"
+            append p "fn go(i: int, m: int) -> int:\n    if i == m:\n        return 0\n    coroutine {first} = w(i)\n    first.n + go(i + 1, m)\n"
+            append p "go(0, $n)\n"
         }
         create-base {
             append p "fn w(k: int) -> V:\n    V {n: k}\n"
-            append p "xs = loop i from 0 to $n:\n    w(i).n\nlist::length(xs)\n"
+            append p [Repeat $n {w(i).n}]
         }
         complete {
             append p "fn w(k: int) -> V:\n    yield V {n: k}\n    return V {n: k + 1}\n"
-            append p "xs = loop i from 0 to $n:\n    coroutine {step, first} = w(i)\n    last = step()\n    again = step()\n    first.n + last.n + again.n\nlist::length(xs)\n"
+            append p [Repeat $n {"coroutine {step, first} = w(i)" "last = step()" "again = step()" "first.n + last.n + again.n"}]
         }
         complete-base {
             append p "fn w(k: int) -> V:\n    V {n: k}\n"
-            append p "xs = loop i from 0 to $n:\n    w(i).n + w(i + 1).n + w(i + 1).n\nlist::length(xs)\n"
+            append p [Repeat $n {"w(i).n + w(i + 1).n + w(i + 1).n"}]
         }
         resume {
             append p "fn counter(m: int) -> V:\n    loop i from 0 to m:\n        yield V {n: i}\n    return V {n: m}\n"
-            append p "coroutine {step, first} = counter($n)\nxs = loop i from 0 to $n:\n    step().n\nlist::length(xs)\n"
+            append p "coroutine {step, first} = counter($n)\n" [Repeat $n {step().n}]
         }
         resume-base {
             append p "fn make(i: int) -> V:\n    V {n: i}\n"
-            append p "xs = loop i from 0 to $n:\n    make(i).n\nlist::length(xs)\n"
+            append p [Repeat $n {make(i).n}]
         }
         deep {
             append p "fn down(d: int, i: int) -> int:\n    if d == 0:\n        yield V {n: i}\n        return 0\n    down(d - 1, i) + 1\n"
             append p "fn counter(m: int) -> V:\n    loop i from 0 to m:\n        down($depth, i)\n    return V {n: m}\n"
-            append p "coroutine {step, first} = counter($n)\nxs = loop i from 0 to $n:\n    step().n\nlist::length(xs)\n"
+            append p "coroutine {step, first} = counter($n)\n" [Repeat $n {step().n}]
         }
         deep-base {
             append p "fn down(d: int, i: int) -> int:\n    if d == 0:\n        return 0\n    down(d - 1, i) + 1\n"
             append p "fn make(i: int) -> V:\n    V {n: i + down($depth, i)}\n"
-            append p "xs = loop i from 0 to $n:\n    make(i).n\nlist::length(xs)\n"
+            append p [Repeat $n {make(i).n}]
         }
         hold {
             append p "fn down(d: int, k: int) -> int:\n    if d == 0:\n        yield V {n: k}\n        return k\n    down(d - 1, k) + 1\n"
@@ -128,17 +156,17 @@ proc timeOn {backend hir} {
 }
 
 proc perOp {kind base backend {depth 1}} {
-    set t [timeOn $backend [program $kind $::n $depth]]
-    set b [timeOn $backend [program $base $::n $depth]]
-    return [list [expr {($t - $b) * 1000.0 / $::n}] [expr {$t * 1000.0 / $::n}]]
+    set n [expr {$backend eq "native" ? $::nativeN : $::n}]
+    set t [timeOn $backend [program $kind $n $depth]]
+    set b [timeOn $backend [program $base $n $depth]]
+    return [list [expr {($t - $b) * 1000.0 / $n}] [expr {$t * 1000.0 / $n}]]
 }
 
 proc ns {x} {
     return [format "%.0f ns" $x]
 }
 
-set backends {interp compile native}
-puts "Coroutine performance (n = $n operations per program, best of $runs runs)\n"
+puts "Coroutine performance (n = $n operations per program on the Tcl backends, $nativeN natively; best of $runs runs)\n"
 puts [bench::backends::manifest $backends]
 puts ""
 puts "Time per operation (program time minus its baseline's, divided by n; the whole program's time per iteration in parentheses):\n"
@@ -161,8 +189,11 @@ foreach {label kind base depth} {
 }
 
 # Allocations per construction, natively.
-puts "\nNative allocations of $n constructions (allocation report, summary):\n"
-set report [native::allocationReport [program create $n] summary]
+if {"native" ni $backends} {
+    exit 0
+}
+puts "\nNative allocations of $n constructions (allocation report, summary; a recursion, so that no List is built):\n"
+set report [native::allocationReport [program create-alloc $n] summary]
 puts "| kind | allocations | bytes | per construction |"
 puts "|---|---:|---:|---:|"
 dict for {kind info} [dict get $report byKind] {
@@ -215,7 +246,7 @@ proc tclPeakKiB {backend text} {
     return [lindex [split [string trim $out] \n] end]
 }
 
-puts "\nResident memory per coroutine held at once (peak RSS with K = $hold coroutines alive minus with K = 0, divided by K):\n"
+puts "\nResident memory per coroutine held at once (peak RSS with K coroutines alive minus with K = 0, divided by K; K = $hold on the Tcl backends, $nativeHold natively):\n"
 puts "| state | [join [lmap b $backends {bench::backends::displayName $b}] { | }] |"
 puts "|---|[string repeat ---:| [llength $backends]]"
 foreach {label kind depth} {
@@ -226,13 +257,15 @@ foreach {label kind depth} {
     set cells {}
     foreach backend $backends {
         if {$backend eq "native"} {
-            set with [nativePeakKiB [program $kind $hold $depth]]
+            set k $nativeHold
+            set with [nativePeakKiB [program $kind $k $depth]]
             set without [nativePeakKiB [program $kind 0 $depth]]
         } else {
-            set with [tclPeakKiB $backend [programText $kind $hold $depth]]
+            set k $hold
+            set with [tclPeakKiB $backend [programText $kind $k $depth]]
             set without [tclPeakKiB $backend [programText $kind 0 $depth]]
         }
-        lappend cells "[format %.1f [expr {($with - $without) * 1024.0 / $hold / 1024.0}]] KiB"
+        lappend cells "[format %.1f [expr {($with - $without) / double($k)}]] KiB"
     }
     puts "| $label | [join $cells { | }] |"
 }

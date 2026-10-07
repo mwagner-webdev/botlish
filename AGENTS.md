@@ -369,3 +369,41 @@ run `tests/context-traits.test`, `tests/portable-io.test`,
 text when you change the code it mutates, keeping it a mutant of the same
 rule). Changing `hir::traits::Plan` also means re-checking the trait mutants
 (`audit/traits/tools/mutants.txt`).
+
+## Coroutines
+
+Coroutines (COROUTINES.md) are eagerly started, affine resumable
+computations: `yield` is a statically tracked deep control effect, and every
+coroutine operation is an internal root native (`coroutine#create`,
+`#start`, `#resume`, `#yield`, and `coroutine::done?`). Ownership is entirely
+static: there is no runtime moved state, no copy, fork or clone operation,
+no iterator protocol, no exhaustion error and no resumable error -- don't add
+any (`tests/coroutines.test`'s `co-source-*` tests pin this). A handle is a
+local binding only: a new place it may live (a List, a struct field, a
+closure capture, an erasing argument) is a deliberate extension of the
+storage frontier (`hir::coroutines::RefRole`), never a side effect.
+Contexts and context traits stay static: a coroutine's providers are the
+ones selected at its construction, and suspension adds no context or trait
+machinery to either runtime.
+
+If you change the coroutine grammar (`yield`, the coroutine binding, the
+resume clause), `hir/coroutines.tcl` (protocols, the yield effect, the
+affine analysis), how a construction lowers (`surface/lower.tcl`'s
+`CoroutineBind`) or resolves (`hir/resolve.tcl`'s `CoroutineResume`), a
+segment's error facts (`hir/completions.tcl`'s `NativeCallFacts`), the Tcl
+runtime (`core/coroutines.tcl`) or the native one
+(`native/src/runtime/coroutine.rs`, the GC's walk of suspended and resumer
+stacks in `heap.rs`/`vm.rs`), run `tests/coroutines.test`,
+`audit/coroutines/tools/fuzz.tcl` (several seeds) and
+`audit/coroutines/tools/mutate.tcl` (every mutant in
+`audit/coroutines/tools/mutants.txt` must still apply and be killed: update a
+mutant's text when you change the code it mutates, keeping it a mutant of
+the same rule; native mutants rebuild a private copy of `native/`, never this
+checkout's). A change to native stack switching or its GC walk also needs a
+`BOTLISH_NATIVE_GC_STRESS=1` run of `tests/coroutines.test` and
+`cargo test --release --manifest-path native/Cargo.toml --lib coroutine`.
+`bench/coroutines.tcl` regenerates the performance report.
+
+Native coroutines switch stacks with hand-written x86-64 assembly and exist
+on x86-64 Linux only; elsewhere the native backend reports them unsupported
+(the Tcl backends run them everywhere).

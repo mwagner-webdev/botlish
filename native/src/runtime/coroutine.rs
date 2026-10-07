@@ -587,7 +587,9 @@ mod tests {
     /// segments: nested coroutines, each on its own stack.
     extern "C" fn outer(p: *mut Vm, _closure: Value, _args: *const Value) -> Value {
         let t = thunk(unsafe { &mut *p }, counting);
+        unsafe { (*p).temp_roots.push(t) };
         let inner = rt_co_create(p, t);
+        unsafe { (*p).temp_roots.push(inner) };
         INNER.with(|c| c.set(inner));
         let a = rt_co_start(p, inner);
         let m = rt_co_yield(p, a);
@@ -595,10 +597,15 @@ mod tests {
         make_small(small_of(b) * 100)
     }
 
+    // Every test roots the values only its own Rust frames hold
+    // (`Vm::temp_roots`), as compiled code's stack maps root its operands, so
+    // the tests hold under BOTLISH_NATIVE_GC_STRESS=1 too.
+
     #[test]
     fn yields_resumes_and_keeps_its_final_result() {
         let mut vm = new_vm();
         let t = thunk(&mut vm, counting);
+        vm.temp_roots.push(t);
         let co = rt_co_create(&mut *vm, t);
         vm.temp_roots.push(co);
         assert_eq!(rt_co_done(&mut *vm, co), FALSE);
@@ -618,6 +625,7 @@ mod tests {
     fn a_failure_is_terminal_and_raised_again() {
         let mut vm = new_vm();
         let t = thunk(&mut vm, failing);
+        vm.temp_roots.push(t);
         let co = rt_co_create(&mut *vm, t);
         vm.temp_roots.push(co);
         assert_eq!(rt_co_start(&mut *vm, co), NO_VALUE);
@@ -631,6 +639,7 @@ mod tests {
     fn return_before_any_yield_completes_at_the_start() {
         let mut vm = new_vm();
         let t = thunk(&mut vm, immediate);
+        vm.temp_roots.push(t);
         let co = rt_co_create(&mut *vm, t);
         vm.temp_roots.push(co);
         assert_eq!(rt_co_start(&mut *vm, co), make_small(7));
@@ -663,6 +672,7 @@ mod tests {
     fn nested_coroutines_run_on_their_own_stacks() {
         let mut vm = new_vm();
         let t = thunk(&mut vm, outer);
+        vm.temp_roots.push(t);
         let co = rt_co_create(&mut *vm, t);
         vm.temp_roots.push(co);
         assert_eq!(rt_co_start(&mut *vm, co), make_small(1));
@@ -678,6 +688,7 @@ mod tests {
     fn an_abandoned_suspended_coroutine_is_collected_and_its_stack_pooled() {
         let mut vm = new_vm();
         let t = thunk(&mut vm, counting);
+        vm.temp_roots.push(t);
         let co = rt_co_create(&mut *vm, t);
         vm.temp_roots.push(co);
         assert_eq!(rt_co_start(&mut *vm, co), make_small(1));
@@ -688,6 +699,7 @@ mod tests {
         assert_eq!(pooled_stacks(), before + 1);
         // A pooled stack is reused by the next start.
         let t = thunk(&mut vm, immediate);
+        vm.temp_roots.push(t);
         let again = rt_co_create(&mut *vm, t);
         vm.temp_roots.push(again);
         assert_eq!(rt_co_start(&mut *vm, again), make_small(7));

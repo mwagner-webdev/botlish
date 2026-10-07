@@ -123,6 +123,7 @@ Values are immutable. Every value has exactly one kind:
 | `result` | `ok(v)` / `error(v)` | an application-level outcome                   |
 | `block`  | `<block (x y)>`  | a closure: parameters, body, captured environment  |
 | `native` | `<native +>`     | a primitive callable, possibly with refinement metadata |
+| `coroutine` | `<coroutine>` | the affine handle of one started coroutine (COROUTINES.md): resumed by calling it, observed with `coroutine::done?`, never compared, hashed, copied or stored |
 
 Kinds never blur: the integer `10`, the string `"10"`, and the string
 `"true"` are all different values, and none of the strings is a Boolean.
@@ -656,6 +657,7 @@ result until `web::uri_query_value?` proves it one.
 | `core/process.tcl` | the process boundary: `argv()`, its builtin error, argv injection (ARGV.md) |
 | `core/linuxabi.tcl` | `linux::abi::syscall`, the raw Linux x86-64 kernel transition (native only; LINUX-X86-64-SYSCALL.md) |
 | `core/contexts.tcl` | the two internal context operations `context#install` / `context#load` and the Tcl backends' per-run context environment (CONTEXTS.md); `context#unreachable`, the placeholder of code no installed context reaches (CONTEXT-TRAITS.md) |
+| `core/coroutines.tcl` | the coroutine operations `coroutine#create` / `#start` / `#resume` / `#yield` and `coroutine::done?`, and the Tcl backends' coroutine store: one Tcl coroutine per Botlish coroutine (COROUTINES.md) |
 | `core/bytestore.tcl` | the byte-storage value kinds' natives (immutable `bytestore`, writable `mutbytes`) and the raw address bridges `abi::x86_64::from_bytes` / `from_mutable_bytes` (ABI-BYTES.md, MUTABLE-BYTES.md) |
 | `hir/hir.tcl` | HIR data model, ids, `hir::build`, queries |
 | `hir/syntax.tcl` | syntax nodes: HIR's input, and core IR → syntax |
@@ -671,6 +673,7 @@ result until `web::uri_query_value?` proves it one.
 | `hir/exactvalue.tcl` | exact-value facts and value identity (`hir::exact::Of`, `Identity`, `SameValue`) |
 | `hir/warnings.tcl` | compiler warnings: record, static registry, global policy, rendering, error promotion, `SAME-RETURN-VALUE` and `METHOD-ELIGIBLE` (§23) |
 | `hir/traits.tcl` | eager structural traits: the trait registry, structural conformance (`hir::traits::satisfies`/`explain`), trait views and trait operations, their checks, and the monomorphization plan that turns every trait-polymorphic function into one ordinary function per witness (TRAITS.md) and every function requiring a context trait into one clone under the selected context (CONTEXT-TRAITS.md) |
+| `hir/coroutines.tcl` | coroutines: thunks and call graph, the resume-protocol fixed point, yield and handle typing, the transitive yield effect, `UNWRAPPED-YIELD` chains, the affine handle discipline and storage frontier (COROUTINES.md) |
 | `hir/contexts.tcl` | execution-environment contexts: context parameters, direct and transitive requirements, installation order, `MISSING-CONTEXT` chains, function-value frontier (CONTEXTS.md); context traits: structural satisfaction (`satisfiesTrait`/`explainTrait`), the one-way binding check, exactly-one provider selection (CONTEXT-TRAITS.md) |
 | `hir/syscall.tcl` | the static contract of `linux::abi::syscall`'s register-struct argument (LINUX-X86-64-SYSCALL.md) and of `abi::x86_64::from_bytes`'s `abi::bytes::Bytes` argument (ABI-BYTES.md) |
 | `compiler/compiler.tcl` | HIR → Tcl compiler backend |
@@ -1687,6 +1690,24 @@ add10(32)          # 42 (add captures x)
   `LIST-DESTRUCTURING`): APIs returning heterogeneous values should prefer
   struct values with named fields, and a List remains the type of a sequence.
   See STRUCT-DESTRUCTURING.md.
+* **Coroutines.** `yield V` (an expression, lowest precedence: `1 + (yield
+  x)` needs the parentheses) sends `V` outward, suspends the whole coroutine
+  -- arbitrarily deep in its call stack -- and evaluates to the message the
+  next resume sends. `coroutine {step, first} = worker(a)` eagerly starts the
+  exact call `worker(a)` as a coroutine, running it to its first `yield`, its
+  return or an unhandled `fail`: `first` is that first result and `step` the
+  coroutine's affine handle (either field may be omitted or renamed,
+  `{step: next, first: initial}`). `step(m)` resumes it with one message of
+  the struct type the function declares as the last entry of its parameter
+  list (`fn worker(a: str, resume Input) -> Event:`, inferred where the
+  yields' uses determine it), or `step()` for the zero-message protocol. A
+  completed handle keeps returning its final result and a failed one raises
+  its error again; `coroutine::done?(step)` (`import coroutine`) is `true`
+  once it has done either.
+  A handle is moved by `other = step` and never copied or stored; a function
+  that may yield is called only inside a coroutine (`UNWRAPPED-YIELD`).
+  `coroutine` and `resume` stay ordinary names elsewhere; `yield` is a
+  keyword. See COROUTINES.md.
 * Integers (decimal, arbitrary precision, no leading zeros), strings
   (`"..."`, escapes `\\ \" \n \r \t`), `true`, `false`, `unit`, lists
   `[a, b]`, calls `f(x)(y)`.

@@ -110,6 +110,7 @@ hierarchy (`ns-no-nested-stdlib`):
 | `immutable_set` | `from_list contains` | none |
 | `char` | `scalar_value` | none (no module file since §11) |
 | `linux::abi` | `syscall` | (unchanged) |
+| `coroutine` | `done?` (COROUTINES.md; its other operations are internal `coroutine#...` root natives no source spells) | none (no module file) |
 
 `lib/mutarray.bot` was renamed to `lib/mutable_array.bot` (its namespace
 `mutable_array` is its path): one family, one namespace. `mutarray::create`/`from_list`
