@@ -112,22 +112,22 @@ fn write_all(fd: FileDescriptor, bytes: List[Byte]) -> unit errors WriteFailed:
     n = list::length(bytes)
     if n == 0:
         return unit
-    written = linux::write(fd.raw, abi::bytes::from_list(bytes))
+    written = fd.raw.write(abi::bytes::from_list(bytes))
     if written <= 0:
         fail WriteFailed
     if written < n:
         # The unwritten suffix: indices WRITTEN..n-1, which the checks above
         # prove are inside BYTES.
         remaining = loop i from written to n:
-            list::at(bytes, i)
-        return write_all(fd, remaining)
+            bytes.at(i)
+        return fd.write_all(remaining)
     unit
 
 # All of TEXT, UTF-8 encoded, on the context's standard output; WriteFailed
 # when Linux reports an error or stops making progress. Never a byte count.
 fn write_text(text: str, context io: LinuxIO) -> unit errors WriteFailed:
-    write_all(io.stdout, str::encode_utf8(text))
+    io.stdout.write_all(str::encode_utf8(text))
 
 # All of TEXT, UTF-8 encoded, on the context's standard error.
 fn write_error_text(text: str, context io: LinuxIO) -> unit errors WriteFailed:
-    write_all(io.stderr, str::encode_utf8(text))
+    io.stderr.write_all(str::encode_utf8(text))

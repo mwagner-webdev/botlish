@@ -27,8 +27,8 @@ while {[lindex $args 0] in {-n -only -list}} {
 # {NAME FILE OLD NEW}: NEW replaces the single occurrence of OLD in FILE.
 set mutations {
     {missing-context-check-off hir/contexts.tcl
-        {Missing hir $c $target $id $reasons}
-        {# (mutated: no MISSING-CONTEXT)}}
+        {if {$id ni $installed}}
+        {if {0}}}
     {context-available-before-its-line hir/contexts.tcl
         {foreach r [dict get $hir roots]}
         {foreach r [lreverse [dict get $hir roots]]}}

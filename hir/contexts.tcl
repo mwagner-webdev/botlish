@@ -128,24 +128,24 @@ proc hir::contexts::DeclareParams {hirVar e node bodyScope ns} {
             # A context trait (CONTEXT-TRAITS.md): the binding is the
             # source-visible capability; the installed context that provides
             # it is selected statically where the requirement is met.
-            set id [lindex $type 1]
-            if {[dict exists $seenTypes $id]} {
+            set trait [lindex $type 1]
+            if {[dict exists $seenTypes $trait]} {
                 hir::DiagnoseAt hir DUPLICATE-CONTEXT-PARAMETER \
                     [format {context trait %s is declared twice (as "%s" and "%s"): a function receives at most one binding of each context requirement, whatever the local names} \
-                        $id [dict get $seenTypes $id] $name] $e $typeOrigin
+                        $trait [dict get $seenTypes $trait] $name] $e $typeOrigin
                 continue
             }
-            dict set seenTypes $id $name
+            dict set seenTypes $trait $name
             if {[hir::traits::Planning]} {
                 # The monomorphized build (hir::traits::monomorphize): every
                 # operation on the binding is a direct call of the selected
                 # implementation, so the binding does not exist at all.
                 continue
             }
-            lappend records [dict create name $name context $id trait 1]
+            lappend records [dict create name $name context $trait trait 1]
             lappend binds [hir::syntax::bindNode $origin $name \
                 [hir::syntax::callNode $origin [hir::syntax::rootRef $origin [LoadNative]] \
-                    [hir::syntax::constNode $origin str $id]]]
+                    [hir::syntax::constNode $origin str $trait]]]
             continue
         } elseif {[hir::types::IsTrait $type]} {
             hir::DiagnoseAt hir NOT-A-CONTEXT \

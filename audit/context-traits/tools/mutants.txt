@@ -1,0 +1,245 @@
+# Mutants of context traits, validator proofs, the Linux path library and the
+# portable io library (audit/context-traits/tools/mutate.tcl;
+# CONTEXT-TRAITS.md).
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant may have several edits. Lines starting with # outside an edit are
+# comments.
+
+@@ caller-imports-provide a function in the calling program provides a context's implementation when its owner has none
+## hir/contexts.tcl
+<<<<
+    set info [hir::traits::ImplInfo $owner $name]
+====
+    set info [hir::traits::ImplInfo $owner $name]
+    if {$info eq ""} {
+        set info [hir::traits::ImplInfo "" $name]
+    }
+>>>>
+
+@@ any-context-satisfies-any-trait every context struct satisfies every context trait
+## hir/contexts.tcl
+<<<<
+        dict set result ok $ok
+        dict set result impls $impls
+    }
+    dict set traitCache $key $result
+====
+        dict set result ok 1
+        dict set result impls $impls
+    }
+    dict set traitCache $key $result
+>>>>
+
+@@ context-type-unchecked an implementation's context parameter may be any context, not the one it implements
+## hir/contexts.tcl
+<<<<
+    if {[dict get $c context] ne $w} {
+====
+    if {0} {
+>>>>
+
+@@ context-error-set-ignored an implementation may fail with errors the requirement does not admit
+## hir/contexts.tcl
+<<<<
+    set why [hir::traits::Mismatch $actual $required $req]
+====
+    set why [hir::traits::Mismatch $actual $required $req]
+    if {[string match "it may fail with*" $why]} {
+        set why ""
+    }
+>>>>
+
+@@ choose-first-of-several with several installed providers, select the first installed (no ambiguity)
+## hir/contexts.tcl
+<<<<
+        if {[llength $providers] > 1} {
+====
+        if {[llength $providers] > 1} {
+            set providers [lrange $providers 0 0]
+        }
+        if {[llength $providers] > 1} {
+>>>>
+
+@@ choose-last-installed with several installed providers, select the most recently installed
+## hir/contexts.tcl
+<<<<
+        if {[llength $providers] > 1} {
+====
+        if {[llength $providers] > 1} {
+            set providers [lrange $providers end end]
+        }
+        if {[llength $providers] > 1} {
+>>>>
+
+@@ missing-provider-silent no installed provider is not diagnosed (the requirement is silently dropped)
+## hir/contexts.tcl
+<<<<
+        if {[llength $providers] == 0} {
+====
+        if {[llength $providers] == 0} {
+            continue
+>>>>
+
+@@ witness-leaks-into-source the context-trait binding may be used as a value (no one-way check)
+## hir/contexts.tcl
+<<<<
+    CheckTraitBindings hir $parent
+====
+    # (mutated: no binding check)
+>>>>
+
+@@ transitive-trait-requirement-dropped context-trait requirements do not propagate to callers
+## hir/contexts.tcl
+<<<<
+                    if {$id ni [dict get $required $b]} {
+====
+                    if {$id ni [dict get $required $b] && ![isTrait $id]} {
+>>>>
+
+@@ unreachable-consumer-requires an unreachable call of a context-trait-dependent function is redirected as if a provider reached it
+## hir/traits.tcl
+<<<<
+                            set reaches [hir::get $hir $e reachable]
+====
+                            set reaches 1
+>>>>
+
+@@ context-op-indirect a context-trait operation is called through the requirement's function type (no implementation target)
+## hir/types.tcl
+<<<<
+    if {[lindex $calleeType 0] eq "native" && [llength $calleeType] == 2} {
+        set name [lindex $calleeType 1]
+        set target [list native [hir::resolve::nativeSymbol hir $name]]
+====
+    if {[dict exists $node traitImpl context]} {
+        set calleeType [dict get $node traitImpl contract]
+    }
+    if {[lindex $calleeType 0] eq "native" && [llength $calleeType] == 2} {
+        set name [lindex $calleeType 1]
+        set target [list native [hir::resolve::nativeSymbol hir $name]]
+>>>>
+
+@@ hidden-provider-argument the selected implementation receives an extra hidden argument
+## hir/resolve.tcl
+<<<<
+        SetField hir $e traitImpl $operation
+        SetField hir $e callee $c
+        SetField hir $e args [Sequence hir [dict get $node args] $ctx]
+====
+        SetField hir $e traitImpl $operation
+        SetField hir $e callee $c
+        SetField hir $e args [concat [Sequence hir [dict get $node args] $ctx] \
+            [Sequence hir [list [hir::syntax::rootRef [dict get $node origin] unit]] $ctx]]
+>>>>
+
+@@ context-trait-runtime-slot the compiled program keeps the context-trait binding: a runtime load of the context trait
+## hir/contexts.tcl
+<<<<
+            if {[hir::traits::Planning]} {
+                # The monomorphized build (hir::traits::monomorphize): every
+====
+            if {0} {
+                # The monomorphized build (hir::traits::monomorphize): every
+>>>>
+
+@@ validator-proves-on-error-edge a handler of a validator call sees the validator's proof
+## hir/types.tcl
+<<<<
+        dict set ctx facts $handlerEntry
+====
+        dict set ctx facts $completed
+>>>>
+
+@@ validator-proof-lost-on-success a validator's normal completion proves nothing
+## hir/types.tcl
+<<<<
+        foreach {b fact} [hir::refine::CompletionFacts $hir $e] {
+            Narrow $hir ctx $b $fact
+====
+        foreach {b fact} [hir::refine::CompletionFacts $hir $e] {
+>>>>
+
+@@ validator-proof-survives-rejoining-handler a handler that completes normally does not take part in the join after a validator call
+## hir/types.tcl
+<<<<
+        if {$handlerType ne "never"} {
+            lappend ends [dict get $ctx facts]
+        }
+====
+>>>>
+
+@@ linuxpath-validator-reads-environment LinuxPath's predicate consults the process environment (here argv) instead of only the String
+## lib/linux/path.bot
+<<<<
+fn valid?(value: str) -> bool proves value: LinuxPath:
+    value.length() > 0 and value.nul_free?()
+====
+fn valid?(value: str) -> bool proves value: LinuxPath:
+    seen = argv():
+        on InvalidArgumentEncoding:
+            []
+    value.length() > 0 and value.nul_free?()
+>>>>
+
+@@ linuxpath-permits-nul LinuxPath admits U+0000
+## lib/linux/path.bot
+<<<<
+        if value.char_at(i).scalar_value() == 0:
+====
+        if value.char_at(i).scalar_value() == -1:
+>>>>
+
+@@ path-conformance-from-carrier a refinement's trait implementations are looked up in its carrier's namespace
+## hir/traits.tcl
+<<<<
+            return [list [dict get [core::type::refinementOf $name] owner] module]
+====
+            return [list str builtin]
+>>>>
+
+@@ print-line-two-writes io::print_line writes the text and the newline separately
+## lib/io.bot
+<<<<
+fn print_line(text: str, context io: IO) -> unit errors WriteFailed:
+    io.write_text(text.concat("\n"))
+====
+fn print_line(text: str, context io: IO) -> unit errors WriteFailed:
+    io.write_text(text)
+    io.write_text("\n")
+>>>>
+
+@@ short-write-not-completed a short write is reported as WriteFailed instead of being completed
+## lib/linux/io.bot
+<<<<
+        return fd.write_all(remaining)
+====
+        fail WriteFailed
+>>>>
+
+@@ zero-progress-retried a write that makes no progress is retried instead of failing
+## lib/linux/io.bot
+<<<<
+    if written <= 0:
+        fail WriteFailed
+====
+    if written < 0:
+        fail WriteFailed
+    if written == 0:
+        return fd.write_all(bytes)
+>>>>
+
+@@ stdout-stderr-swapped the portable error output goes to standard output
+## lib/linux/io.bot
+<<<<
+    io.stderr.write_all(str::encode_utf8(text))
+====
+    io.stdout.write_all(str::encode_utf8(text))
+>>>>

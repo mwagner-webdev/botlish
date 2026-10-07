@@ -40,16 +40,17 @@ import io::path
 
 refined type LinuxPath = str
 
+# true when no character of VALUE is U+0000.
+fn nul_free?(value: str) -> bool:
+    loop i from 0 to value.length():
+        if value.char_at(i).scalar_value() == 0:
+            return false
+    true
+
 # true when VALUE is a valid textual Linux path (non-empty, no U+0000), which
 # proves it a LinuxPath; false proves nothing.
 fn valid?(value: str) -> bool proves value: LinuxPath:
-    n = str::length(value)
-    if n == 0:
-        return false
-    loop i from 0 to n:
-        if char::scalar_value(str::char_at(value, i)) == 0:
-            return false
-    true
+    value.length() > 0 and value.nul_free?()
 
 # Completes normally only when VALUE is a valid textual Linux path, which
 # proves it a LinuxPath for the rest of the caller's path; fails with
@@ -73,11 +74,11 @@ fn text(path: LinuxPath) -> str:
 # for any other COMPONENT. The result is a LinuxPath by validation, the
 # ordinary owner proof.
 fn concat(path: LinuxPath, component: str) -> LinuxPath errors NotAPath:
-    m = str::length(component)
-    if m == 0 or str::char_at(component, 0) == '/' or not valid?(component):
+    m = component.length()
+    if m == 0 or component.char_at(0) == '/' or not valid?(component):
         fail NotAPath
-    n = str::length(path)
-    joined = if n > 0 and str::substring(path, n - 1, n) == "/":
+    n = path.length()
+    joined = if n > 0 and path.substring(n - 1, n) == "/":
         str::concat(path, component)
     else:
         str::concat(str::concat(path, "/"), component)
