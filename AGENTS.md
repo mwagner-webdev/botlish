@@ -259,7 +259,8 @@ filter by code or file. `lib/abi/bytes.bot`'s `replace` carries a
 `SAME-FAILURE` finding, so every program that loads `abi::bytes` (`lib/linux.bot`
 and the `examples/linux` programs among them) prints it. `lib/web.bot` carries
 26 `ONE-CHAR-STRING-LITERAL` findings (its one-character Strings: `"."`, the
-hex digits, ...), so every program that loads `web` prints them.
+hex digits, ...), `lib/io.bot` 2 (`"\n"`) and `lib/linux/path.bot` 2 (`"/"`),
+so every program that loads one of them prints them.
 
 `SAME-FAILURE` (WARNINGS-SAME-FAILURE.md) reads the `fail` sites of a function's
 own body (milestone 1's `BodyExprs`, which never enters a nested function), each

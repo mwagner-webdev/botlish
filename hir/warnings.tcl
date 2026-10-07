@@ -1299,10 +1299,11 @@ proc hir::warnings::ConventionalName {kind name} {
 #
 # The one String const the frontend synthesizes is not a written literal and
 # is never reported: a context parameter is bound to `context#load("ID")`
-# (hir/contexts.tcl's DeclareParams), whose key is the context struct's
-# identity -- one character for a struct named `C`. It is recognized by the
-# compiler's own predicate for that construct (hir::contexts::isLoad); no
-# source can spell `context#load`, so no written literal is ever such a key.
+# (hir/contexts.tcl's DeclareParams), whose key is the identity of the context
+# struct or context trait -- one character for one named `C`. It is
+# recognized by the compiler's own predicate for that construct
+# (hir::contexts::isLoad); no source can spell `context#load`, so no written
+# literal is ever such a key.
 #
 # Literals only. Nothing else is looked at: not a binding read at a use site
 # (`sep = ","` is reported at its initializer, once, never where `sep` is

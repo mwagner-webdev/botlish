@@ -3237,7 +3237,8 @@ It graduates to an autofixable warning only when the APIs the corpus audit
 catalogues take characters (or the language gains the conversions that make the
 rewrite total). See WARNINGS-ONE-CHAR-STRING-LITERAL.md for the theorem, the
 representation argument (one synthesized String const exists: a context
-parameter's load key, which is never reported), the spelling law, the corpus
+parameter's load key, for a context struct or a context trait, which is never
+reported), the spelling law, the corpus
 audit with its API-deficiency catalog, and known limitations; the tests are
 `tests/one-char-string-literal.test` and
 `audit/one-char-string-literal/tools/fuzz.tcl`.

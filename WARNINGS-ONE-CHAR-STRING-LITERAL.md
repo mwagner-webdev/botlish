@@ -141,11 +141,13 @@ node.** Every `const` node in the HIR the pass reads comes from one of two
 constructors (the source audit `oc-synthesized-string-consts-enumerated` lists
 every occurrence in `hir/` and `surface/`):
 
-* `hir::syntax::constNode`, called from exactly five places: the frontend's
+* `hir::syntax::constNode`, called from exactly six places: the frontend's
   integer, String and character literal rules (written literals), the unary
   minus rule (`-a` -> `call ^- (const 0) a`: an Int, never a String), and
-  **`hir/contexts.tcl`'s `DeclareParams`, which builds `const str ID`** -- the
-  context-load key;
+  **`hir/contexts.tcl`'s `DeclareParams`, which builds `const str ID` twice**
+  -- the context-load key of a context-struct parameter and, since context
+  traits (CONTEXT-TRAITS.md, merged from `main` during this milestone), of a
+  context-trait parameter in the checked source build;
 * `hir::syntax::fromIR`, which reads core IR text (`hir::build`): core IR
   programs are hand-written IR, and no source compilation calls it (warnings
   run only in `surface::lower::Finish`).
@@ -186,7 +188,13 @@ recognizes the load in HIR read back from text, so source and HIR text agree
 warns, from source and from HIR text, and the key does not); (3) the fuzzer
 declares `context struct C` with a context parameter in 30% of its programs
 (602 of 2000), and the `context-key-reported` mutant (the exclusion dropped) is
-killed by it. The alternatives were weighed and rejected for now: a `written`
+killed by it. Context traits, merged from `main` while this milestone ran,
+added the second construction (`fn f(n: int, context t: T)` binds `t` to
+`context#load("T")` in the checked source build); the source audit failed on it
+as designed, the same predicate recognizes it, and
+`oc-context-trait-key-is-not-a-literal` pins a trait named `T` silent beside a
+written `"T"` that warns, from source and from HIR text. The alternatives were
+weighed and rejected for now: a `written`
 marker on source-built const nodes is new HIR state (the brief requires none)
 and would make HIR text silent unless `hir::read` set it too (the brief
 requires HIR text to warn); deriving literal-ness from the origin's node role
@@ -517,8 +525,8 @@ four backends in "Full regression".
 
 ## Tests
 
-`tests/one-char-string-literal.test`, **83 tests**, every compile passing its
-policy explicitly (83/83 on `interp`, `compile`, `cranelift-generic` and
+`tests/one-char-string-literal.test`, **84 tests**, every compile passing its
+policy explicitly (84/84 on `interp`, `compile`, `cranelift-generic` and
 `cranelift`):
 
 * **Shape and boundary**: the motivating quote literal rendered exactly; 0, 1
@@ -543,9 +551,10 @@ policy explicitly (83/83 on `interp`, `compile`, `cranelift-generic` and
   functions, no completion walk (trace).
 * **Kind**: character literals never warn; a String beside the character
   literal of the same character.
-* **Representation**: HIR text input warns; the context-load key is silent and
-  a written `"C"` warns (source and HIR text); the source audit of String
-  consts; every desugaring builds none.
+* **Representation**: HIR text input warns; the context-load key of a context
+  struct and of a context trait is silent and a written `"C"` / `"T"` warns
+  (source and HIR text); the source audit of String consts; every desugaring
+  builds none.
 * **Structure**: record shape, data fields (the value is the exact value),
   primary is the literal, no notes, the template, the value convention, no
   character spelling or advice anywhere, one diagnostic per site, source order
@@ -949,7 +958,8 @@ checks on character literals or a reverse rule, and any new CLI option or
 ## Deviations from the brief
 
 * **A synthesized String const exists** (item 4 expected none): the
-  context-load key. It is excluded by recognizing the construct with
+  context-load key, of a context struct's parameter and -- since context traits
+  were merged from `main` -- of a context trait's. It is excluded by recognizing the construct with
   `hir::contexts::isLoad`, which is the one place the pass looks beyond a
   `const` node -- a reading of "callee sniffing" the brief forbade *for
   deriving literal-ness*; here it derives non-literal-ness of a construct no
@@ -1064,7 +1074,7 @@ checks on character literals or a reverse rule, and any new CLI option or
     92; the scratch rewrite of every finding, classified; no finding is
     convert-now, so no corpus rewrite was required to keep its value). No
     spelling gap: no language finding.
-35. *Warning-mode tests pass?* Yes. `tests/one-char-string-literal.test` 83/83
+35. *Warning-mode tests pass?* Yes. `tests/one-char-string-literal.test` 84/84
     on `interp`, `compile`, `cranelift-generic` and `cranelift`; after their
     adaptation `tests/warnings.test` 81, `tests/method-eligible.test` 145,
     `tests/fixed-arity-list-return.test` 149, `tests/same-failure.test` 99 and
