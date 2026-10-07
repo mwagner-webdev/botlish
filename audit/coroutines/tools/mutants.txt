@@ -1,0 +1,461 @@
+# Mutants of the coroutine milestone (audit/coroutines/tools/mutate.tcl;
+# COROUTINES.md): the mutants item 62 of the milestone brief names, in the
+# Tcl reference runtime (core/coroutines.tcl, which the interpreter and the
+# Tcl compiler share), the static analysis (hir/coroutines.tcl and its
+# callers) and the native runtime (native/src/runtime/).
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant may have several edits. A mutant editing native/ is a native
+# mutant: mutate.tcl rebuilds the native backend for it. Lines starting with
+# # outside an edit are comments.
+
+# ---------------------------------------------------------------------------
+# Tcl reference runtime
+
+@@ construction-lazy construction does not run the body: the first resume starts it
+## core/coroutines.tcl
+<<<<
+    set command ::core::coroutines::co$id
+    return [Segment $id [list coroutine $command ::core::coroutines::Body $id]]
+====
+    dict set store $id state lazy
+    return [core::completion::normal [core::value::unit]]
+>>>>
+## core/coroutines.tcl
+<<<<
+        suspended {
+            return [Segment $id [list [dict get $store $id continuation] $message]]
+        }
+====
+        suspended {
+            return [Segment $id [list [dict get $store $id continuation] $message]]
+        }
+        lazy {
+            return [Segment $id [list coroutine ::core::coroutines::co$id ::core::coroutines::Body $id]]
+        }
+>>>>
+
+@@ first-yield-discarded construction runs past the first yield: its value is lost
+## core/coroutines.tcl
+<<<<
+    set command ::core::coroutines::co$id
+    return [Segment $id [list coroutine $command ::core::coroutines::Body $id]]
+====
+    set command ::core::coroutines::co$id
+    set first [Segment $id [list coroutine $command ::core::coroutines::Body $id]]
+    if {[dict get $store $id state] eq "suspended"} {
+        return [Segment $id [list [dict get $store $id continuation] [core::value::unit]]]
+    }
+    return $first
+>>>>
+
+@@ return-before-yield-exhaustion a body that returns before yielding fails the construction as exhausted
+## core/coroutines.tcl
+<<<<
+    set command ::core::coroutines::co$id
+    return [Segment $id [list coroutine $command ::core::coroutines::Body $id]]
+====
+    set command ::core::coroutines::co$id
+    set first [Segment $id [list coroutine $command ::core::coroutines::Body $id]]
+    if {[dict get $store $id state] eq "completed"} {
+        core::semanticError COROUTINE-STATE "coroutine $id is exhausted"
+    }
+    return $first
+>>>>
+
+@@ completed-raises-exhaustion a call of a completed handle raises an exhaustion error
+## core/coroutines.tcl
+<<<<
+        completed {
+            # Stable terminal success: the same final result, no body code.
+            return [core::completion::normal [dict get $store $id value]]
+        }
+====
+        completed {
+            core::semanticError COROUTINE-STATE "coroutine $id is exhausted"
+        }
+>>>>
+
+@@ completed-reruns-body a call of a completed handle runs the body again from its beginning
+## core/coroutines.tcl
+<<<<
+            dict unset store $id continuation
+            dict set store $id thunk {}
+====
+            dict unset store $id continuation
+>>>>
+## core/coroutines.tcl
+<<<<
+        completed {
+            # Stable terminal success: the same final result, no body code.
+            return [core::completion::normal [dict get $store $id value]]
+        }
+====
+        completed {
+            return [Segment $id [list coroutine ::core::coroutines::co$id ::core::coroutines::Body $id]]
+        }
+>>>>
+
+@@ failed-resumes-body a call of a failed handle runs the body again
+## core/coroutines.tcl
+<<<<
+            dict unset store $id continuation
+            dict set store $id thunk {}
+====
+            dict unset store $id continuation
+>>>>
+## core/coroutines.tcl
+<<<<
+        failed {
+            # Stable terminal failure: the same error, no body code.
+            lassign [dict get $store $id failure] how payload options
+====
+        failed {
+            return [Segment $id [list coroutine ::core::coroutines::co$id ::core::coroutines::Body $id]]
+            lassign [dict get $store $id failure] how payload options
+>>>>
+
+@@ failed-loses-error a call of a failed handle completes normally with unit instead of raising the original error
+## core/coroutines.tcl
+<<<<
+        failed {
+            # Stable terminal failure: the same error, no body code.
+            lassign [dict get $store $id failure] how payload options
+====
+        failed {
+            return [core::completion::normal [core::value::unit]]
+            lassign [dict get $store $id failure] how payload options
+>>>>
+
+@@ message-wrong-yield each resume delivers the previous resume's message (the first, unit)
+## core/coroutines.tcl
+<<<<
+        suspended {
+            return [Segment $id [list [dict get $store $id continuation] $message]]
+        }
+====
+        suspended {
+            set previous [expr {[dict exists $store $id last] ? [dict get $store $id last] : [core::value::unit]}]
+            dict set store $id last $message
+            return [Segment $id [list [dict get $store $id continuation] $previous]]
+        }
+>>>>
+
+# ---------------------------------------------------------------------------
+# Static analysis
+
+@@ effect-one-caller the yield effect reaches the direct callers of a yielding function and no further
+## hir/coroutines.tcl
+<<<<
+        foreach b $added {
+            dict set mayYield $b 1
+        }
+        set frontier $added
+====
+        foreach b $added {
+            dict set mayYield $b 1
+        }
+        set frontier {}
+>>>>
+
+@@ call-crosses-yield an ordinary top-level call of a yielding function is allowed
+## hir/coroutines.tcl
+<<<<
+            if {$target eq "" || ![dict exists $mayYield $target]} continue
+            hir::Diagnose hir UNWRAPPED-YIELD \
+====
+            continue
+            hir::Diagnose hir UNWRAPPED-YIELD \
+>>>>
+
+@@ protocol-widened-any every coroutine accepts any resume message: the handle's protocol is any
+## hir/coroutines.tcl
+<<<<
+            return [hir::types::MakeCoroutine [Resolved [dict get $table blocks $root protocol]] \
+====
+            return [hir::types::MakeCoroutine any \
+>>>>
+
+@@ two-protocols-accepted a second, different protocol reaching a function is ignored (the first wins)
+## hir/coroutines.tcl
+<<<<
+                if {![dict exists $conflicts $b]} {
+                    dict set conflicts $b [list $p $reason $q $why]
+                }
+                set p conflict
+                break
+====
+                continue
+>>>>
+
+@@ scalar-resume-accepted a declared resume type need not be a struct
+## hir/resolve.tcl
+<<<<
+    if {[lindex $type 0] ne "nstruct"} {
+        hir::DiagnoseAt hir COROUTINE-RESUME-TYPE \
+====
+    if {0} {
+        hir::DiagnoseAt hir COROUTINE-RESUME-TYPE \
+>>>>
+
+@@ assignment-aliases binding a handle to another name is no move: both names stay usable
+## hir/coroutines.tcl
+<<<<
+                return [list move $p]
+====
+                return use
+>>>>
+
+@@ assignment-forks binding a handle to another name starts a new coroutine of the same call: the new name runs a copy from the beginning
+## hir/lower.tcl
+<<<<
+        bind {
+            return [list bind [dict get $node name] [expr $hir [dict get $node value]]]
+        }
+====
+        bind {
+            if {[dict exists $hir coroutines moves $e]} {
+                set thunk [hir::coroutines::thunkOfHandle $hir [dict get $node value]]
+                set fork "coroutine#fork#[dict get $node name]"
+                return [list bind [dict get $node name] [list call [list block {} \
+                    [list bind $fork [list call [list ref coroutine#create] [expr $hir $thunk]]] \
+                    [list call [list ref coroutine#start] [list ref $fork]] \
+                    [list ref $fork]]]]
+            }
+            return [list bind [dict get $node name] [expr $hir [dict get $node value]]]
+        }
+>>>>
+
+@@ move-keeps-source a move does not invalidate the binding moved from
+## hir/coroutines.tcl
+<<<<
+    if {$what eq "move"} {
+        dict set state $b [list moved $detail]
+    }
+====
+>>>>
+
+@@ join-keeps-live a handle moved on one branch only is live after the join
+## hir/coroutines.tcl
+<<<<
+        } elseif {$x eq "live" || $y eq "live" || [lindex $x 0] eq "maybe" || [lindex $y 0] eq "maybe"} {
+====
+        } elseif {$x eq "live" || $y eq "live"} {
+            dict set result $key live
+        } elseif {[lindex $x 0] eq "maybe" || [lindex $y 0] eq "maybe"} {
+>>>>
+
+@@ step-call-moves a resume consumes the handle: its owner is moved by the call
+## hir/coroutines.tcl
+<<<<
+    lassign [RefRole $hir $affineParent $e] what detail
+    if {$what eq "move"} {
+====
+    lassign [RefRole $hir $affineParent $e] what detail
+    if {[NativeOf $hir [lindex [dict get $affineParent $e] 0]] eq [core::coroutines::resumeNative]} {
+        set what move
+        set detail [lindex [dict get $affineParent $e] 0]
+    }
+    if {$what eq "move"} {
+>>>>
+## hir/coroutines.tcl
+<<<<
+proc hir::coroutines::MoveText {hir bind} {
+====
+proc hir::coroutines::MoveText {hir bind} {
+    if {[dict get $hir exprs $bind kind] ne "bind"} {
+        return "a consuming call ([Where $hir $bind])"
+    }
+>>>>
+
+@@ done-consumes coroutine::done? consumes the handle: its owner is moved by the query
+## hir/coroutines.tcl
+<<<<
+    lassign [RefRole $hir $affineParent $e] what detail
+    if {$what eq "move"} {
+====
+    lassign [RefRole $hir $affineParent $e] what detail
+    if {[NativeOf $hir [lindex [dict get $affineParent $e] 0]] eq [core::coroutines::doneNative]} {
+        set what move
+        set detail [lindex [dict get $affineParent $e] 0]
+    }
+    if {$what eq "move"} {
+>>>>
+## hir/coroutines.tcl
+<<<<
+proc hir::coroutines::MoveText {hir bind} {
+====
+proc hir::coroutines::MoveText {hir bind} {
+    if {[dict get $hir exprs $bind kind] ne "bind"} {
+        return "a consuming call ([Where $hir $bind])"
+    }
+>>>>
+
+@@ handle-as-fn a handle is accepted where a structural Fn value is expected
+## hir/coroutines.tcl
+<<<<
+                if {[hir::types::IsFn $declared]} {
+                    return [list function "a function value of type [hir::types::show $declared]"]
+                }
+====
+                if {[hir::types::IsFn $declared]} {
+                    return use
+                }
+>>>>
+
+@@ handle-erased-to-any a handle is accepted as an argument of an untyped (any) parameter
+## hir/coroutines.tcl
+<<<<
+            return [list storage "passed as an argument (it would be erased to a value another function could keep)"]
+====
+            return use
+>>>>
+
+@@ context-reselected-per-resume every top-level resume selects the coroutine's context-trait providers again
+## hir/contexts.tcl
+<<<<
+            if {[isLoad $hir $c]} continue
+            set target [Callee $hir $c]
+====
+            if {[isLoad $hir $c]} continue
+            set target [Callee $hir $c]
+            if {[hir::coroutines::NativeOf $hir $c] eq [core::coroutines::resumeNative]} {
+                set thunk [hir::coroutines::thunkOfHandle $hir [lindex [hir::get $hir $c args] 0]]
+                if {$thunk ne ""} {
+                    set target [dict get $hir coroutines thunks $thunk root]
+                }
+            }
+>>>>
+
+# ---------------------------------------------------------------------------
+# Native runtime
+
+@@ native-construction-lazy construction does not run the body natively: the first resume starts it
+## native/src/runtime/coroutine.rs
+<<<<
+        (*co).saved_sp = prepare(&stack, p, co);
+        (*co).stack = Some(stack);
+        segment(p, co)
+====
+        (*co).saved_sp = prepare(&stack, p, co);
+        (*co).stack = Some(stack);
+        (*co).state = CO_SUSPENDED;
+        UNIT
+>>>>
+
+@@ native-first-yield-discarded native construction runs past the first yield
+## native/src/runtime/coroutine.rs
+<<<<
+        (*co).saved_sp = prepare(&stack, p, co);
+        (*co).stack = Some(stack);
+        segment(p, co)
+====
+        (*co).saved_sp = prepare(&stack, p, co);
+        (*co).stack = Some(stack);
+        let first = segment(p, co);
+        if (*co).state == CO_SUSPENDED {
+            (*co).value = UNIT;
+            return segment(p, co);
+        }
+        first
+>>>>
+
+@@ native-completed-raises-exhaustion a call of a completed handle raises an exhaustion error natively
+## native/src/runtime/coroutine.rs
+<<<<
+            CO_COMPLETED => (*co).value,
+            // Stable terminal failure: the cached error, no body code.
+====
+            CO_COMPLETED => vm(p).fail(RtError::Semantic { kind: "COROUTINE-STATE", message: "exhausted".to_string() }),
+            // Stable terminal failure: the cached error, no body code.
+>>>>
+
+@@ native-completed-reruns-body a call of a completed handle runs the body again natively
+## native/src/runtime/coroutine.rs
+<<<<
+        (*co).thunk = UNIT;
+        if result == NO_VALUE {
+====
+        if result == NO_VALUE {
+>>>>
+## native/src/runtime/coroutine.rs
+<<<<
+            CO_COMPLETED => (*co).value,
+            // Stable terminal failure: the cached error, no body code.
+====
+            CO_COMPLETED => {
+                (*co).state = CO_FRESH;
+                rt_co_start(p, handle)
+            }
+            // Stable terminal failure: the cached error, no body code.
+>>>>
+
+@@ native-failed-loses-error a call of a failed handle completes normally with unit natively
+## native/src/runtime/coroutine.rs
+<<<<
+            CO_FAILED => reraise(p, co),
+            CO_RUNNING => vm(p).fail(RtError::Semantic {
+====
+            CO_FAILED => UNIT,
+            CO_RUNNING => vm(p).fail(RtError::Semantic {
+>>>>
+
+@@ native-message-wrong-yield a native resume does not deliver its message: the yield evaluates to its own outward value
+## native/src/runtime/coroutine.rs
+<<<<
+            CO_SUSPENDED => {
+                (*co).value = message;
+                segment(p, co)
+            }
+====
+            CO_SUSPENDED => {
+                let _ = message;
+                segment(p, co)
+            }
+>>>>
+
+@@ native-deep-stack-not-preserved a suspended coroutine's stack is released (pooled for reuse) while its frames are suspended on it
+## native/src/runtime/coroutine.rs
+<<<<
+        match (*co).state {
+            CO_SUSPENDED => (*co).value,
+            CO_COMPLETED => {
+====
+        match (*co).state {
+            CO_SUSPENDED => {
+                if let Some(stack) = &(*co).stack {
+                    // Released to the pool without unmapping: the next
+                    // started coroutine reuses it.
+                    let _ = POOL.try_with(|pool| pool.borrow_mut().push(CoStack { base: stack.base, size: stack.size, guard: stack.guard }));
+                }
+                (*co).value
+            }
+            CO_COMPLETED => {
+>>>>
+
+@@ gc-suspended-frames-untraced the collector does not trace the frames of a suspended coroutine's stack
+## native/src/runtime/heap.rs
+<<<<
+                    if co.state == super::coroutine::CO_SUSPENDED {
+                        if let Some(bounds) = co.stack.as_ref().map(|s| s.bounds()) {
+====
+                    if co.state == super::coroutine::CO_SUSPENDED && false {
+                        if let Some(bounds) = co.stack.as_ref().map(|s| s.bounds()) {
+>>>>
+
+@@ gc-resumer-frames-untraced the collector does not trace the frames suspended below a running coroutine (its resumers' stacks)
+## native/src/runtime/vm.rs
+<<<<
+            super::framewalk::walk_from(&self.framemap, suspended_rbp(resumer_sp), bounds.as_ref(), |addr| {
+                native_frame_roots.push(unsafe { *addr })
+            });
+====
+            let _ = (bounds, resumer_sp, suspended_rbp(0));
+>>>>

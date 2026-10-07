@@ -966,6 +966,11 @@ proc hir::completions::EvalCall {hirVar ctxVar diagnose enclosing guard e node} 
     set argExact [ArgExactValues $hir $ctx $argExprs]
     set argExactLists [ArgExactLists $hir $ctx $argExprs]
     lassign [EffectiveFacts hir ctx $target $argRanges $argExact $argExactLists $guard] normal errors resultRange
+    if {!$normal && [hir::coroutines::isBoundaryCall $hir $e]} {
+        # A coroutine's root call (COROUTINES.md): its segments may complete
+        # normally by yielding even when its last one always fails.
+        set normal 1
+    }
     if {[dict exists $node traitImpl]} {
         # A trait operation of a monomorphized clone (TRAITS.md): its
         # legality is its requirement's error contract, exactly as the

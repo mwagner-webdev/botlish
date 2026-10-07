@@ -88,6 +88,23 @@ proc coFunc {nir name} {
     return $lines
 }
 
+# SCRIPT's value with the module files FILES ({PATH TEXT ...}, PATH relative
+# to the library) in a private library.
+proc coWithModules {files script} {
+    withPrivateLibrary {
+        foreach {path text} $files {
+            set full [file join $::core::libraryDir $path]
+            file mkdir [file dirname $full]
+            set f [open $full w]
+            fconfigure $f -encoding utf-8
+            puts -nonewline $f $text
+            close $f
+        }
+        set result [uplevel 1 $script]
+    }
+    return $result
+}
+
 # The NIR text of TEXT.
 proc coNir {text args} {
     return [native::nir [surface::compile $text -warnings off] {*}$args]
@@ -290,8 +307,9 @@ test co-protocol-arity {zero-message coroutines take no message, struct-protocol
 
 test co-protocol-conflict {two different deep protocols reaching one function are a conflict, explained through both chains; never a union} -body {
     set text "struct A:\n    a: int\nstruct B:\n    b: int\nstruct Ev:\n    n: int\nfn ha(resume A) -> int:\n    m = yield Ev {n: 1}\n    m.a\nfn hb(resume B) -> int:\n    m = yield Ev {n: 2}\n    m.b\nfn both() -> Ev:\n    return Ev {n: ha() + hb()}\ncoroutine {step} = both()\n"
-    list [coCode $text] [lrange [split [coMessage $text] \n] 1 end]
-} -cleanup {unset -nocomplain text} -result {{CORE SEMANTIC COROUTINE-RESUME-CONFLICT} {{    resume A: it calls ha (<input>:14:19), which declares it} {    resume B: it calls hb (<input>:14:26), which declares it}}}
+    list [coCode $text] [lrange [split [coMessage $text] \n] 1 end] \
+        [coKinds "${text}step(A {a: 1})\nstep()\n"]
+} -cleanup {unset -nocomplain text} -result {{CORE SEMANTIC COROUTINE-RESUME-CONFLICT} {{    resume A: it calls ha (<input>:14:19), which declares it} {    resume B: it calls hb (<input>:14:26), which declares it}} COROUTINE-RESUME-CONFLICT}
 
 test co-protocol-underconstrained {a yield's value used as a struct with nothing to determine its type needs a declared protocol} -body {
     coCode "struct Ev:\n    n: int\nfn w() -> Ev:\n    m = yield Ev {n: 1}\n    return Ev {n: m.n}\ncoroutine {step} = w()\n"
@@ -310,6 +328,10 @@ test co-protocol-default-meets-struct {an unconstrained helper whose yield value
 test co-protocol-unconstrained-helper {a helper whose yields all discard their value adapts to any protocol} -body {
     coAgree "${protocolDecls}fn progress(n: int) -> int:\n    yield Out {v: n}\n    n\nfn w(resume In) -> Out:\n    a = progress(1)\n    m = yield Out {v: a + 1}\n    b = progress(m.v)\n    return Out {v: b * 10}\nfn t() -> Out:\n    return Out {v: progress(7)}\ncoroutine {step, first} = w()\nx = step(In {v: 0})\ny = step(In {v: 5})\nz = step(In {v: 0})\ncoroutine {step: s2, first: f2} = t()\nlast = s2()\n\[first.v, x.v, y.v, z.v, f2.v, last.v\]\n"
 } -result {value {[1, 2, 5, 50, 7, 7]}}
+
+test co-protocol-discarded-collections {a yield that is the last statement of a collecting loop or an if whose own value is discarded discards its value too: the helper still adapts} -body {
+    coAgree "${protocolDecls}fn helper(n: int) -> int:\n    loop i from 0 to 2:\n        yield Out {v: i}\n    if n > 3:\n        yield Out {v: n}\n    else:\n        yield Out {v: 0 - n}\n    n\nfn w(resume In) -> Out:\n    m = yield Out {v: 100}\n    return Out {v: helper(m.v)}\ncoroutine {step, first} = w()\na = step(In {v: 4})\nb = step(In {v: 0})\nc = step(In {v: 0})\nd = step(In {v: 0})\n\[first.v, a.v, b.v, c.v, d.v\]\n"
+} -result {value {[100, 0, 1, 4, 4]}}
 
 # ---------------------------------------------------------------------------
 # Binding forms (items 2, 4, 53)
@@ -528,6 +550,10 @@ test co-errors-segment {a deep fail after resumes crosses the resume call; the f
     coAgree "${errorDecls}fn later() -> list errors Broken:\n    coroutine {step, first} = worker(1)\n    a = step(Msg {v: 5})\n    b = step(Msg {v: -1}):\n        on Broken:\n            Ev {v: 999}\n    c = step(Msg {v: 7}):\n        on Broken:\n            Ev {v: 1000}\n    \[first.v, a.v, b.v, c.v, coroutine::done?(step)\]\nlater():\n    on Broken:\n        \[\]\n"
 } -result {value {[1, 6, 999, 1000, true]}}
 
+test co-errors-last-segment-always-fails {a root that always fails after yielding is no statically known failure: construction yields, the last resume fails} -body {
+    coAgree "error Boom\nstruct Ev:\n    v: int\nfn w() -> Ev errors Boom:\n    yield Ev {v: 1}\n    fail Boom\nfn g() -> list:\n    coroutine {step, first} = w():\n        on Boom:\n            Ev {v: 0}\n    last = step():\n        on Boom:\n            Ev {v: -1}\n    again = step():\n        on Boom:\n            Ev {v: -2}\n    \[first, last, again\]\ng()\n"
+} -result {value {[Ev {v: 1}, Ev {v: -1}, Ev {v: -2}]}}
+
 test co-errors-declared-propagation {an unhandled segment error propagates through a function that declares it; uncaught at the top it is an ordinary UNHANDLED-ERROR} -body {
     list [coAgree "${errorDecls}fn inner() -> int errors Broken:\n    coroutine {step, first} = worker(2)\n    a = step(Msg {v: -5})\n    a.v\nfn outer() -> int:\n    inner():\n        on Broken:\n            42\nouter()\n"] \
         [coCode "${errorDecls}coroutine {step} = worker(2)\n"] \
@@ -649,6 +675,20 @@ test co-storage-frontier {a handle in a List, a struct field, an erasing argumen
     } {lindex [coCode "${storageDecls}$body"] 2}
 } -result {COROUTINE-STORAGE-UNSUPPORTED COROUTINE-STORAGE-UNSUPPORTED COROUTINE-STORAGE-UNSUPPORTED COROUTINE-STORAGE-UNSUPPORTED COROUTINE-STORAGE-UNSUPPORTED COROUTINE-NOT-FUNCTION COROUTINE-STORAGE-UNSUPPORTED COROUTINE-STORAGE-UNSUPPORTED}
 
+test co-storage-module {a module's top level cannot construct a coroutine (only definitions and immutable bindings are module members), so no module binding ever holds a handle} -body {
+    coWithModules {co/m.bot {struct T:
+    n: int
+
+fn t() -> T:
+    yield T {n: 1}
+    return T {n: 2}
+
+coroutine {step, first} = t()
+}} {
+        lindex [coCode "import co::m\n1\n"] end
+    }
+} -result INVALID-TOPLEVEL
+
 test co-storage-equality {a handle has no equality (rejected as storage: it would be erased into an argument)} -body {
     lindex [coCode "${storageDecls}coroutine {step: a} = t()\ncoroutine {step: b} = t()\nx = a == b\n"] 2
 } -result COROUTINE-STORAGE-UNSUPPORTED
@@ -693,6 +733,110 @@ second = step():
 test co-context-trait {a deep context-trait operation inside a coroutine: the provider is selected statically at construction and the same implementation runs after a resume} -body {
     coAgree $contextProgram
 } -result {value {[15, 20]}}
+
+# A context trait Out in its own module with a yielding consumer, and two
+# concrete contexts A (adds its k) and B (multiplies by its k), each in its
+# own owner module.
+set coContextLib {
+co/out.bot {error WriteFailed
+
+struct Ev:
+    n: int
+
+context trait Out:
+    fn emit(n: int) -> int errors WriteFailed
+
+fn deep(n: int, context out: Out) -> int errors WriteFailed:
+    x = out.emit(n)
+    yield Ev {n: x}
+    out.emit(x)
+
+fn worker(n: int) -> Ev errors WriteFailed:
+    y = deep(n)
+    return Ev {n: y}
+}
+co/a.bot {import co::out
+type Small = Int in 0..1000
+
+context struct A:
+    k: Small
+
+fn create() -> A:
+    A {k: 1}
+
+fn emit(n: int, context c: A) -> int errors WriteFailed:
+    n + c.k
+}
+co/b.bot {import co::out
+type Small = Int in 0..1000
+
+context struct B:
+    k: Small
+
+fn create() -> B:
+    B {k: 100}
+
+fn emit(n: int, context c: B) -> int errors WriteFailed:
+    n * c.k
+}
+}
+
+test co-context-fixed-at-construction {the provider is the one selected at construction: a context implementing the same trait installed before a resume changes nothing (no re-selection per resume), while a new construction there is ambiguous} -body {
+    set program "import co::out\nimport co::a\nimport co::b\nwith context co::a::create()\ncoroutine {step, first} = co::out::worker(10):\n    on WriteFailed:\n        co::out::Ev {n: -1}\nwith context co::b::create()\nsecond = step():\n    on WriteFailed:\n        co::out::Ev {n: -2}\n"
+    coWithModules $::coContextLib {
+        list [coAgree "${program}\[first.n, second.n\]\n"] \
+            [lindex [coCode "${program}coroutine {step: again} = co::out::worker(1):\n    on WriteFailed:\n        co::out::Ev {n: -3}\n1\n"] end]
+    }
+} -cleanup {unset -nocomplain program} -result {{value {[11, 12]}} AMBIGUOUS-CONTEXT-IMPLEMENTATION}
+
+# A substitute environment for the portable io::IO trait (lib/io.bot): writes
+# succeed up to the context's limit and fail with WriteFailed beyond it.
+set coLimitedLib {
+limited.bot {import io
+import str
+type Limit = Int in 0..1000
+
+context struct Limited:
+    max: Limit
+
+fn create(max: Limit) -> Limited:
+    Limited {max: max}
+
+fn write_text(text: str, context c: Limited) -> unit errors WriteFailed:
+    if str::length(text) > c.max:
+        fail WriteFailed
+    unit
+
+fn write_error_text(text: str, context c: Limited) -> unit errors WriteFailed:
+    fail WriteFailed
+}
+}
+
+test co-context-portable-io {io::print_line deep inside a coroutine, through the real io::IO context trait and a substitute context: each segment writes through the provider selected at construction, and a write failure after a resume crosses that resume and stays the coroutine's terminal error} -body {
+    set program "import io\nimport limited\nstruct Ev:\n    n: int\nfn say(text: str) -> int errors WriteFailed:\n    io::print_line(text)\n    yield Ev {n: 10}\n    1\nfn worker() -> Ev errors WriteFailed:\n    a = say(\"hi\")\n    b = say(\"a much longer line\")\n    return Ev {n: a + b}\n"
+    set driver "coroutine {step, first} = worker():\n    on WriteFailed:\n        Ev {n: -1}\nsecond = step():\n    on WriteFailed:\n        Ev {n: -2}\nthird = step():\n    on WriteFailed:\n        Ev {n: -3}\n\[first.n, second.n, third.n\]\n"
+    coWithModules $::coLimitedLib {
+        lmap max {100 5} {
+            coAgree "${program}with context limited::create($max)\n$driver"
+        }
+    }
+} -cleanup {unset -nocomplain program driver} -result {{value {[10, 10, 2]}} {value {[10, -2, -3]}}}
+
+test co-executable-linux-io {a standalone executable printing through io::print_line and linux::io::LinuxIO before and after a yield: descriptor 1 receives both lines in segment order, then the result; the same under GC stress} -constraints linuxX86_64 -body {
+    set exe [file join [temporaryDirectory] co-io-[pid]]
+    native::executable [surface::compile "import str\nimport io\nimport linux::io\nstruct Ev:\n    n: int\nfn report(label: str) -> unit errors WriteFailed:\n    io::print_line(str::concat(\"report \", label))\nfn worker(n: int) -> Ev errors WriteFailed:\n    report(\"before\")\n    yield Ev {n: n}\n    report(\"after\")\n    return Ev {n: n + 2}\nwith context linux::io::create()\ncoroutine {step, first} = worker(1):\n    on WriteFailed:\n        Ev {n: -1}\nlast = step():\n    on WriteFailed:\n        Ev {n: -2}\n\[first.n, last.n\]\n" -warnings off] $exe
+    set plain [exec $exe]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        set stressed [exec $exe]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+        file delete $exe
+    }
+    list $plain [expr {$stressed eq $plain}]
+} -cleanup {unset -nocomplain exe plain stressed} -result {{report before
+report after
+[1, 3]} 1}
 
 test co-context-trait-native {native evidence: the yielding clone of deep takes no context argument and calls the selected implementation directly; the thunk calls the clone of worker} -constraints linuxX86_64 -body {
     set nir [coNir $contextProgram]
@@ -818,5 +962,92 @@ test co-gc-stress {the same program with a collection before every native alloca
 test co-gc-many-coroutines {thousands of short coroutines: abandoned and finished ones are reclaimed (their stacks pooled), the program stays correct} -body {
     coAgree "import list\nstruct V:\n    n: int\nfn w(k: int) -> V:\n    yield V {n: k}\n    return V {n: k * 2}\nfn one(k: int) -> int:\n    coroutine {step, first} = w(k)\n    coroutine {step: abandoned} = w(k + 1)\n    last = step()\n    first.n + last.n\nxs = loop i from 0 to 2000:\n    one(i)\nlast = list::at(xs, 1999):\n    on IndexNotFound:\n        0\nlist::length(xs) + last\n"
 } -result {value 7997}
+
+# ---------------------------------------------------------------------------
+# Source audit (item 66): what the milestone must not contain.
+
+proc coSource {path} {
+    set f [open [file join $::projectRoot $path] r]
+    fconfigure $f -encoding utf-8
+    set text [read $f]
+    close $f
+    return $text
+}
+
+# Every implementation source file: the compiler, the runtimes, the native
+# backend, the library.
+proc coImplementationFiles {} {
+    set files {}
+    foreach pattern {core/*.tcl compiler/*.tcl hir/*.tcl surface/*.tcl native/*.tcl
+                     native/src/*.rs native/src/*/*.rs native/src/*/*/*.rs lib/*.bot lib/*/*.bot} {
+        foreach path [glob -nocomplain -directory $::projectRoot $pattern] {
+            lappend files [string range $path [string length $::projectRoot/] end]
+        }
+    }
+    return [lsort $files]
+}
+
+test co-source-no-iterator-or-exhaustion {no iterator protocol, StopIteration-like error, exhaustion condition, yieldto, fork or clone operation, or resumable error anywhere in the implementation} -body {
+    set hits {}
+    foreach path [coImplementationFiles] {
+        set text [coSource $path]
+        foreach pattern {StopIteration CoroutineExhausted COROUTINE-EXHAUSTED yieldto coroutine::fork
+                         coroutine#fork coroutine::clone coroutine#clone coroutine::next coroutine#next
+                         coroutine::iter coroutine#iter ResumableError {resumable error} {resumable exception}} {
+            if {[string first $pattern $text] >= 0} {
+                lappend hits "$path: $pattern"
+            }
+        }
+    }
+    set hits
+} -cleanup {unset -nocomplain hits path text pattern} -result {}
+
+test co-source-operations {the coroutine operations are exactly create, start, resume (at most one message), yield and done?, in the Tcl runtime and in NIR: no copy, fork or move operation exists at run time} -body {
+    set runtime [coSource core/coroutines.tcl]
+    set registered [lmap {- name} [regexp -all -inline {core::native::register (coroutine\S+)} $runtime] {set name}]
+    set nir [coSource native/src/nir.rs]
+    set ops [lmap {- name} [regexp -all -inline {"(co[a-z0-9]+)" => Co} $nir] {set name}]
+    list $registered [core::coroutines::natives] $ops [regexp {\[llength \$args\] > 1} $runtime]
+} -cleanup {unset -nocomplain runtime registered nir ops} -result {{coroutine#create coroutine#start coroutine#resume coroutine#yield coroutine::done?} {coroutine#create coroutine#start coroutine#resume coroutine#yield coroutine::done?} {cocreate costart coresume coresume0 coyield codone} 1}
+
+test co-source-state-machine {the runtime states are exactly fresh, running, suspended, completed and failed: there is no moved sentinel (ownership is static), and a coroutine object is never cloned} -body {
+    set runtime [coSource core/coroutines.tcl]
+    set states [lsort -unique [concat \
+        [lmap {- s} [regexp -all -inline {dict set store \$id state ([a-z]+)} $runtime] {set s}] \
+        [lmap {- s} [regexp -all -inline {dict create state ([a-z]+)} $runtime] {set s}]]]
+    set native [coSource native/src/runtime/coroutine.rs]
+    set constants [lmap {- c} [regexp -all -inline {pub const (CO_[A-Z]+): u8} $native] {set c}]
+    set object [string range $native [string first "pub struct CoroutineObj" $native] end]
+    set before [string range $native [expr {[string first "pub struct CoroutineObj" $native] - 200}] [string first "pub struct CoroutineObj" $native]]
+    list $states $constants [regexp -nocase {moved} "$runtime$native"] \
+        [regexp {Clone} $before] [regexp {impl Clone for CoroutineObj} $native]
+} -cleanup {unset -nocomplain runtime states native constants object before} -result {{completed failed fresh running suspended} {CO_FRESH CO_RUNNING CO_SUSPENDED CO_COMPLETED CO_FAILED} 0 0 0}
+
+test co-source-no-context-dispatch {suspension adds no trait or context machinery: neither coroutine runtime refers to contexts or traits} -body {
+    set hits {}
+    foreach path {core/coroutines.tcl native/src/runtime/coroutine.rs} {
+        set text [coSource $path]
+        foreach pattern {core::contexts context# hir::traits trait_ ContextArea context_area} {
+            if {[string first $pattern $text] >= 0} {
+                lappend hits "$path: $pattern"
+            }
+        }
+    }
+    set hits
+} -cleanup {unset -nocomplain hits path text pattern} -result {}
+
+# ---------------------------------------------------------------------------
+# The fuzzer (item 61)
+
+test co-fuzz-bounded {a bounded run of the coroutine fuzzer (audit/coroutines/tools/fuzz.tcl): every backend agrees with the independent oracle on every accepted program, and every rejected one has the predicted diagnostic} -constraints linuxX86_64 -body {
+    set here [pwd]
+    cd [temporaryDirectory]
+    try {
+        set output [exec [info nameofexecutable] [file join $::projectRoot audit coroutines tools fuzz.tcl] -n 12 -seed 101 2>@1]
+    } finally {
+        cd $here
+    }
+    lindex [split [string trim $output] \n] end
+} -cleanup {unset -nocomplain here output} -result {programs 12 disagreements 0}
 
 cleanupTests

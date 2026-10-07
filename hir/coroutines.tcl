@@ -99,6 +99,7 @@
 #
 # What HIR keeps (dict `coroutines`): blocks (yielding function -> protocol
 # and yield type), thunks (thunk -> its create call and root function),
+# boundaries (a thunk's boundary call -> the thunk),
 # yields (yield call -> its function), and, after verify, mayYield (the
 # functions that may yield) and moves (move bind -> moved binding).
 
@@ -313,8 +314,14 @@ proc hir::coroutines::analyze {hirVar} {
         dict set table $b [dict create protocol $p yieldType $yieldType \
             reason [dict get $protocols $b reason]]
     }
+    set boundaries [dict create]
+    dict for {t info} $thunks {
+        if {[dict get $info call] ne ""} {
+            dict set boundaries [dict get $info call] $t
+        }
+    }
     dict set hir coroutines [dict create blocks $table thunks $thunks yields $yields \
-        edges $edges direct $direct]
+        edges $edges direct $direct boundaries $boundaries]
 }
 
 # The declared `resume T` protocol of block E, or "".
@@ -323,9 +330,15 @@ proc hir::coroutines::DeclaredResume {hir e} {
 }
 
 # The protocol a coroutine whose root has inferred protocol P is resumed
-# with: an unconstrained root is zero-message.
+# with: an unconstrained root is zero-message; a conflict (already
+# COROUTINE-RESUME-CONFLICT) is any, so that no resume of it is diagnosed
+# again.
 proc hir::coroutines::Resolved {p} {
-    return [expr {$p eq "none" ? "unit" : $p}]
+    return [switch -- $p {
+        none { expr {"unit"} }
+        conflict { expr {"any"} }
+        default { set p }
+    }]
 }
 
 # The yield-capable functions reachable from ROOT (itself included) over
@@ -481,10 +494,11 @@ proc hir::coroutines::YieldUses {hir parent y} {
 
 # 1 if the value of expression E is discarded, by the parent map PARENT
 # (hir::contexts::Walk): a statement that is not the last of its body, or the
-# last statement of an if branch or handler whose own value is discarded, or
-# of a plain `loop:` body (whose value is never the loop's). The last
-# statement of a function body is its result, of a collecting loop's body an
-# element, of the top level the program's result.
+# last statement of an if branch, a handler or a collecting loop's body
+# (COLLECTING-LOOPS.md: an element of the loop's List) whose own value is
+# discarded, or of a plain `loop:` body (whose value is never the loop's).
+# The last statement of a function body is its result, of the top level the
+# program's result.
 proc hir::coroutines::Discarded {hir parent e} {
     for {set i 0} {$i < 4096} {incr i} {
         if {![dict exists $parent $e]} {
@@ -498,7 +512,7 @@ proc hir::coroutines::Discarded {hir parent e} {
             return 0
         }
         switch -- [dict get $hir exprs $p kind] {
-            if - handle { set e $p }
+            if - handle - listloop - countloop - lockloop { set e $p }
             loop { return 1 }
             default { return 0 }
         }
@@ -715,6 +729,7 @@ proc hir::coroutines::verify {hirVar} {
         if {![hir::types::IsCoroutine $handle]} continue
         set protocol [hir::types::CoroutineResume $handle]
         set name [dict get $hir exprs [lindex $args 0] name]
+        if {$protocol eq "any"} continue
         if {$protocol eq "unit"} {
             if {[llength $args] != 1} {
                 hir::Diagnose hir COROUTINE-RESUME-ARITY \
@@ -1274,4 +1289,13 @@ proc hir::coroutines::thunkOfHandle {hir e {seen {}}} {
         return [expr {[dict exists $hir coroutines thunks $thunk] ? $thunk : ""}]
     }
     return [thunkOfHandle $hir $value [concat $seen [list $b]]]
+}
+
+# 1 if call E is a thunk's boundary call: the call of a coroutine's root. Its
+# completion is the coroutine's last segment's, never the construction's:
+# that it can never complete normally (a root that always fails after
+# yielding) is no statically known failure of any one call
+# (hir/completions.tcl's KNOWN-ERROR rule does not apply).
+proc hir::coroutines::isBoundaryCall {hir e} {
+    return [dict exists $hir coroutines boundaries $e]
 }
