@@ -1029,7 +1029,11 @@ added because they are imaginable.
     1|2 -count 150 -accept 0.6`, every backend: seed 1 -- 150 programs, 123
     accepted (385 specializations), 27 rejected, 0 failures; seed 2 -- 120
     accepted (363 specializations), 30 rejected, 0 failures: **exactly
-    TRAITS.md's numbers** before this milestone. Ordinary trait satisfaction,
+    TRAITS.md's numbers** before this milestone. After merging `main` (whose
+    traits fuzzer now sets import traps over every module witness kind),
+    the merged tree gives seed 1 -- 120 accepted (358 specializations), 30
+    rejected; seed 2 -- 114 accepted (329), 36 rejected; 0 failures:
+    exactly `main`'s updated TRAITS.md numbers. Ordinary trait satisfaction,
     owner lookup, views, returns, witness joins, clones, method resolution and
     the storage frontier are unchanged; the trait mutation suite still kills
     18 of 18 (item 55).
