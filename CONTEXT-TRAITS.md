@@ -1012,7 +1012,7 @@ added because they are imaginable.
     |---|---|
     | `CORE_BACKEND=interp tests/all.tcl` | **6392 passed, 0 failed** (6322 before; +70: tests/context-traits.test 39, tests/portable-io.test 12, tests/linux-path.test 19) |
     | `CORE_BACKEND=compile tests/all.tcl` | **6388 passed, 4 skipped (bindings.test, as before), 0 failed** |
-    | native coverage (the suite on Cranelift) | NATIVE-COVERAGE-RESULTS |
+    | native coverage (the suite on Cranelift, `NATIVE_COVERAGE`) | **6392 tests: 2544 native, 3721 independent, 67 passed-partial, 60 unsupported, 0 failed** (before: 6322 tests, 2510 native, 3685 independent, 67, 60, 0; the 60 unsupported are exactly the same tests) |
     | `BOTLISH_NATIVE_GC_STRESS=1`, interp pass | GC-STRESS-RESULTS |
     | `cargo test --release` (native/, separate target dir) | **186 + 31 passed, 0 failed** (no Rust source changed) |
 
