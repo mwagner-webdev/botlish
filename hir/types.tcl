@@ -169,8 +169,11 @@ proc hir::types::resolveNamed {name {ns ""}} {
     if {[string first :: $canonical] >= 0 && ![core::type::isSource $canonical]} {
         error "unknown type \"$name\": no source-defined type or struct of that name is declared in that namespace"
     }
-    if {$ns ne "" && $canonical eq $name && [core::type::isSource $name]} {
-        # The entry program's own type: not visible from a module.
+    if {$ns ne "" && [string first :: $canonical] < 0 && [core::type::isSource $canonical]} {
+        # The entry program's own type (the only source types with a bare
+        # identity): not visible from a module. A qualified spelling is a
+        # module's member, authorized by its file's imports
+        # (surface/modules.tcl), never the program's.
         error "core::type: unknown type \"$name\" (a module sees its own types, the types it imports with `import type`, and the built-in types; not the program's)"
     }
     return [core::type::normalize $canonical]

@@ -320,14 +320,15 @@ one flat, program-wide namespace (`hir::errordecls`, `UNDECLARED-ERROR`,
 
 ## Tests and fuzzing
 
-* `tests/imports.test` (102 tests): grammar and AST, exact authorization
+* `tests/imports.test` (104 tests): grammar and AST, exact authorization
   (parent / child / transitive / intrinsic-only / nested / `linux::abi`),
   unknown member vs missing import vs unknown namespace, duplicate and self
   imports, no injected names, no import in HIR/core IR/NIR, method
   candidates (imports, typed winners, ambiguity in either import order, nested
   exactness, lexical candidates, aliases), types (identity, `import type`,
-  collisions, non-types, nested namespaces, ABI), cache non-leakage,
-  dependency graph, cycles, protected intrinsics.
+  a module naming another module's integer domain and refinement qualified
+  or type-imported, collisions, non-types, nested namespaces, ABI), cache
+  non-leakage, dependency graph, cycles, protected intrinsics.
 * `audit/imports/tools/fuzz.tcl`: random valid programs over `list::`,
   `str::`, `mutable_array::`, `abi::`, `abi::x86_64::` and `linux::abi::` with
   exactly the imports they need, method and type-import spellings checked
