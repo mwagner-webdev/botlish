@@ -58,6 +58,15 @@ proc hir::lower::expr {hir e} {
             return [list block [params $hir $e] {*}[body $hir $e]]
         }
         call {
+            if {[dict exists $node traitCall]} {
+                # A trait operation of a program that was not monomorphized
+                # (its check failed: TRAITS.md): it has no implementation to
+                # call, so it raises at run time like any static error a
+                # -strict 0 program keeps -- never a call of whatever function
+                # the method name happened to resolve to.
+                return [list call [list ref "trait-operation#[dict get $node traitCall requirement]"] \
+                    {*}[Exprs $hir [dict get $node args]]]
+            }
             return [list call {*}[Exprs $hir [concat [list [dict get $node callee]] [dict get $node args]]]]
         }
         if {

@@ -1,0 +1,310 @@
+# Mutants of the trait implementation (audit/traits/tools/mutate.tcl).
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant may have several edits. Lines starting with # outside an edit are
+# comments.
+
+@@ every-type-satisfies allow every type to satisfy every trait
+## hir/traits.tcl
+<<<<
+            dict set result ok $ok
+            dict set result impls $impls
+====
+            dict set result ok 1
+            dict set result impls $impls
+>>>>
+## hir/traits.tcl
+<<<<
+        if {$kind eq "none"} {
+            dict set result reason "[hir::types::show $type] cannot be a trait witness: $why"
+====
+        if {0} {
+            dict set result reason "[hir::types::show $type] cannot be a trait witness: $why"
+>>>>
+
+@@ caller-namespace-implements make conformance depend on the caller: the entry program's function implements a requirement the witness's owner lacks
+## hir/traits.tcl
+<<<<
+    if {$kind eq "module"} {
+        set info [ImplInfo $owner $name]
+    }
+====
+    if {$kind eq "module"} {
+        set info [ImplInfo $owner $name]
+        if {$info eq "" && $owner ne ""} {
+            set info [ImplInfo "" $name]
+            set owner ""
+        }
+    }
+>>>>
+
+@@ search-imported-namespaces search other (imported) namespaces for a compatible implementation
+## hir/traits.tcl
+<<<<
+    if {$kind eq "module"} {
+        set info [ImplInfo $owner $name]
+    }
+====
+    if {$kind eq "module"} {
+        set info [ImplInfo $owner $name]
+        if {$info eq ""} {
+            variable impls
+            foreach u [dict keys $impls] {
+                set c [ImplInfo $u $name]
+                if {$c eq "" || [dict get $c kind] ne "block"} continue
+                set ps [lmap t [dict get $c params] {expr {$t eq {} ? "any" : $t}}]
+                set r [dict get $c result]
+                if {[hir::types::FnMismatch [hir::types::MakeFn $ps [expr {$r eq {} ? "any" : $r}] [dict get $c errors]] $required] eq ""} {
+                    set info $c
+                    set owner $u
+                    break
+                }
+            }
+        }
+    }
+>>>>
+
+@@ ignore-one-missing ignore one missing requirement
+## hir/traits.tcl
+<<<<
+                if {![dict get $found ok]} {
+                    dict set result reason [dict get $found reason]
+====
+                if {![dict get $found ok] && ![info exists skipped] && [string match {no function*} [dict get $found reason]]} {
+                    set skipped 1
+                    continue
+                }
+                if {![dict get $found ok]} {
+                    dict set result reason [dict get $found reason]
+>>>>
+
+@@ ignore-result-mismatch ignore an implementation's result mismatch
+## hir/traits.tcl
+<<<<
+        return {
+            return [format {return type %s does not satisfy required %s} \
+====
+        return {
+            return ""
+            return [format {return type %s does not satisfy required %s} \
+>>>>
+
+@@ collapse-refinement-witnesses collapse sibling refinement witnesses by representation (conformance cached on the carrier)
+## hir/traits.tcl
+<<<<
+    set key [list $type $id]
+    if {[dict exists $cache $key]} {
+====
+    set key [list [expr {[lindex $type 0] eq "refined" ? [lindex $type 1] : $type}] $id]
+    if {[dict exists $cache $key]} {
+>>>>
+
+@@ witness-leaks-into-applicability let the hidden witness leak into ordinary source applicability (a view is a subtype of its witness)
+## hir/types.tcl
+<<<<
+    if {$b eq "never"} {
+        return 0
+    }
+    if {[IsList $b]} {
+        if {![IsList $a] || ![subtype [lindex $a 1] [lindex $b 1]]} {
+====
+    if {$b eq "never"} {
+        return 0
+    }
+    if {[IsView $a] && [subtype [ViewWitness $a] $b]} {
+        return 1
+    }
+    if {[IsList $b]} {
+        if {![IsList $a] || ![subtype [lindex $a 1] [lindex $b 1]]} {
+>>>>
+
+@@ strengthen-view allow trait -> concrete strengthening (a fact about a view's value narrows it)
+## hir/types.tcl
+<<<<
+    if {[IsTrait $current]} {
+        # A trait view is never strengthened by a fact about its value
+====
+    if {0} {
+        # A trait view is never strengthened by a fact about its value
+>>>>
+
+@@ concrete-method-search resolve a trait method with the ordinary concrete method search
+## hir/traits.tcl
+<<<<
+    set receiverType [hir::typeOf $hir [dict get $shape receiver]]
+    if {![hir::types::IsTrait $receiverType]} {
+====
+    set receiverType [hir::typeOf $hir [dict get $shape receiver]]
+    if {1} {
+>>>>
+
+@@ forget-witness-onward forget the witness when a trait view is passed to another trait consumer
+## hir/traits.tcl
+<<<<
+    if {[hir::types::IsView $type] && [hir::types::ViewTrait $type] eq $id} {
+        return $type
+    }
+====
+    if {[hir::types::IsView $type] && [hir::types::ViewTrait $type] eq $id} {
+        return $constraint
+    }
+>>>>
+
+@@ mix-witnesses-at-join mix witnesses at a control-flow join (keep the first branch's witness)
+## hir/types.tcl
+<<<<
+        return [MakeView [lindex $a 1] [JoinWitness [ViewWitness $a] [ViewWitness $b]]]
+====
+        return [canonical $a]
+>>>>
+
+@@ trait-storage-as-any allow trait field/container storage by pretending it is any
+## hir/structs.tcl
+<<<<
+            if {[hir::types::MentionsTrait $resolved]} {
+                # A stored trait value would need its witness stored beside
+====
+            if {[hir::types::MentionsTrait $resolved]} {
+                set resolved any
+            }
+            if {0} {
+                # A stored trait value would need its witness stored beside
+>>>>
+## hir/types.tcl
+<<<<
+    foreach t $argTypes {
+        if {[MentionsTrait $t]} {
+====
+    set argTypes [lmap t $argTypes {expr {[MentionsTrait $t] ? "any" : $t}}]
+    foreach t $argTypes {
+        if {[MentionsTrait $t]} {
+>>>>
+
+@@ runtime-wrapper add a runtime trait wrapper: a trait argument crosses into a specialization boxed in a closure, unboxed on entry
+## hir/resolve.tcl
+<<<<
+    SetField hir $e callee $c
+    SetField hir $e args [Sequence hir $argNodes $ctx]
+}
+====
+    SetField hir $e callee $c
+    if {[lindex $action 0] eq "redirect"} {
+        set wrapped {}
+        set i 0
+        foreach a $argNodes {
+            if {[dict exists [dict get [hir::traits::CloneRecord [lindex $action 1]] params] $i]} {
+                set a [dict create kind block origin [dict get $a origin] params {} body [list $a] paramTypes {} declaredErrors {} flags {}]
+            }
+            lappend wrapped $a
+            incr i
+        }
+        set argNodes $wrapped
+    }
+    SetField hir $e args [Sequence hir $argNodes $ctx]
+}
+>>>>
+## hir/resolve.tcl
+<<<<
+    SetField hir $e value [Expr hir [dict get $node value] $inner]
+====
+    set blk [dict get $node value]
+    set ps [dict get $blk params]
+    set pre {}
+    foreach {i w} [dict get $clone params] {
+        set p [lindex $ps $i]
+        set orig [lindex $p 0]
+        lset ps $i 0 __w$i
+        lappend pre [dict create kind bind origin [lindex $p 1] name $orig value [dict create kind call origin [lindex $p 1] callee [dict create kind ref origin [lindex $p 1] name __w$i root 0] args {}]]
+    }
+    dict set blk params $ps
+    dict set blk body [concat $pre [dict get $blk body]]
+    SetField hir $e value [Expr hir $blk $inner]
+>>>>
+## hir/resolve.tcl
+<<<<
+                    lset declaredParamTypes $i $witness
+====
+                    lset declaredParamTypes $i {}
+>>>>
+
+@@ indirect-trait-calls lower trait calls indirectly (through the requirement's function type, not the implementation's target)
+## hir/types.tcl
+<<<<
+    if {[lindex $calleeType 0] eq "native" && [llength $calleeType] == 2} {
+        set name [lindex $calleeType 1]
+        set target [list native [hir::resolve::nativeSymbol hir $name]]
+====
+    if {[dict exists $node traitImpl]} {
+        set calleeType [dict get $node traitImpl contract]
+    }
+    if {[lindex $calleeType 0] eq "native" && [llength $calleeType] == 2} {
+        set name [lindex $calleeType 1]
+        set target [list native [hir::resolve::nativeSymbol hir $name]]
+>>>>
+
+@@ omit-witness-from-key omit the witness from the specialization (semantic instance) key
+## hir/semantic.tcl
+<<<<
+    set key [list $block $entry]
+    set caller [expr {[dict exists $ctx inst] ? [dict get $ctx inst] : "generic"}]
+====
+    set key [list $block [lmap x $entry {expr {[hir::types::IsView $x] ? [list trait [hir::types::ViewTrait $x]] : $x}}]]
+    set caller [expr {[dict exists $ctx inst] ? [dict get $ctx inst] : "generic"}]
+>>>>
+
+@@ one-codegen-instance treat two different trait implementations as one codegen instance (one clone per function: the first witness's)
+## hir/traits.tcl
+<<<<
+proc hir::traits::Plan {hir syntax} {
+====
+proc hir::traits::Plan {hir syntax} {
+    set ::mutantFirst [dict create]
+>>>>
+## hir/traits.tcl
+<<<<
+            set ckey [list $h [WitnessesOf $hir $h [dict get $inst args]]]
+====
+            set mw [WitnessesOf $hir $h [dict get $inst args]]
+            if {![dict exists $::mutantFirst $h]} { dict set ::mutantFirst $h $mw }
+            set ckey [list $h [dict get $::mutantFirst $h]]
+>>>>
+## hir/traits.tcl
+<<<<
+                        set witnesses [WitnessesOf $hir $tb [dict get $instances $j args]]
+====
+                        set witnesses [WitnessesOf $hir $tb [dict get $instances $j args]]
+                        if {![dict exists $::mutantFirst $tb]} { dict set ::mutantFirst $tb $witnesses }
+                        set witnesses [dict get $::mutantFirst $tb]
+>>>>
+## hir/traits.tcl
+<<<<
+    if {[dict exists $actions $key] && [dict get $actions $key] ne $action} {
+====
+    if {0} {
+>>>>
+
+@@ break-opacity break opaque representation while checking traits (no opacity check in a program that declares a trait)
+## hir/structs.tcl
+<<<<
+    if {[projectionDenied $type $node]} {
+====
+    if {[projectionDenied $type $node] && ![hir::traits::hasTraits]} {
+>>>>
+
+@@ function-value-escape allow a trait-polymorphic function to escape as an ordinary Fn
+## hir/traits.tcl
+<<<<
+proc hir::traits::VerifyFunctionValues {hirVar parents} {
+    upvar 1 $hirVar hir
+====
+proc hir::traits::VerifyFunctionValues {hirVar parents} {
+    upvar 1 $hirVar hir
+    return
+>>>>

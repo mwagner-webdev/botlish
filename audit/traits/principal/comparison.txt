@@ -1,0 +1,36 @@
+principal.bot runs to ["Alice", "svc:db", "Bob"] on the native backend.
+
+== NIR (-tiny-leaf-inline-opt 0)
+
+func 5 "describe<Person>" params=1 env=0 regs=2 pnames="value.0" captures=0 instance="Person"
+    %1 = call 3 %0
+    ret %1
+end
+
+func 6 "describe<services::Service>" params=1 env=0 regs=2 pnames="value" captures=0 instance="services::Service"
+    %1 = call 2 %0
+    ret %1
+end
+
+func 4 "describe_person" params=1 env=0 regs=2 pnames="value.0" captures=0 instance="Person"
+    %1 = call 3 %0
+    ret %1
+end
+
+describe<Person> body identical to describe_person body: 1
+
+== Machine code bytes per function (native::codeSize, specialize=1, default options)
+
+total 567
+<program>: 245
+services::make_service: 73
+services::name: 94
+name: 29
+describe_person: 31
+describe<Person>: 31
+describe<services::Service>: 64
+
+== Allocation (native::allocationReport summary; 50 calls in a loop)
+
+trait (describe(p)): allocations 0, bytes 0
+concrete (name(p)): allocations 0, bytes 0

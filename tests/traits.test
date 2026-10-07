@@ -1,0 +1,1051 @@
+# traits.test -- eager structural traits (TRAITS.md):
+#
+#   trait Named:
+#       fn name(value: Named) -> str
+#
+#   fn describe(value: Named) -> str:
+#       value.name()
+#
+# A trait is a nominal, statically resolved view a concrete type satisfies
+# structurally (its owner namespace has a compatible function per
+# requirement). Inside a trait consumer the value is source-visible only as
+# the trait; the compiler keeps the concrete witness as hidden provenance and
+# monomorphizes: every trait-polymorphic function becomes one clone per
+# witness, every trait operation a direct call of the witness's
+# implementation. Nothing exists at run time.
+#
+# Every behavioral case runs on interp, compile, cranelift-generic and
+# cranelift (sourceAgree / moduleAgree): one HIR, four backends, one value.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+# The kind and location-free message of the first compile rejection of
+# SOURCE, or "accepted".
+proc rejection {source} {
+    if {[catch {surface::compile $source -warnings off} message options]} {
+        set code [dict get $options -errorcode]
+        set kind [expr {[lindex $code 1] eq "SYNTAX" ? "SYNTAX" : [lindex $code end]}]
+        if {[lindex $code 1] eq "SYNTAX" && [dict exists [lindex $code 2] code]} {
+            set kind [dict get [lindex $code 2] code]
+        }
+        return [list $kind [regsub {^[^ ]*:[0-9]+:[0-9]+: } $message {}]]
+    }
+    return accepted
+}
+
+proc rejectionKind {source} {
+    return [lindex [rejection $source] 0]
+}
+
+# Writes the module files FILES ({PATH TEXT ...}, PATH relative to the
+# library, e.g. ui/named.bot) into the current (private) library.
+proc writeModules {files} {
+    foreach {path text} $files {
+        set full [file join $::core::libraryDir $path]
+        file mkdir [file dirname $full]
+        set f [open $full w]
+        fconfigure $f -encoding utf-8
+        puts -nonewline $f $text
+        close $f
+    }
+}
+
+# sourceAgree of SOURCE with the module files FILES in a private library.
+proc moduleAgree {files source {backends {interp compile cranelift-generic cranelift}}} {
+    withPrivateLibrary {
+        writeModules $files
+        set result [sourceAgree $source $backends]
+    }
+    return $result
+}
+
+# rejection of SOURCE with the module files FILES in a private library.
+proc moduleRejection {files source} {
+    withPrivateLibrary {
+        writeModules $files
+        set result [rejection $source]
+    }
+    return $result
+}
+
+# The HIR of SOURCE with the module files FILES in a private library.
+proc moduleHir {files source} {
+    withPrivateLibrary {
+        writeModules $files
+        set hir [surface::compile $source -warnings off]
+    }
+    return $hir
+}
+
+# The body lines of NIR function NAME in NIR text, expression origins
+# normalized away.
+proc nirBody {nir name} {
+    set lines {}
+    set inside 0
+    foreach line [split $nir \n] {
+        if {[string match "func *" $line]} {
+            set inside [string match "func * \"$name\" *" $line]
+            continue
+        }
+        if {$line eq "end"} {
+            set inside 0
+            continue
+        }
+        if {$inside} {
+            lappend lines [string trim [regsub -all {@e[0-9]+} $line ""]]
+        }
+    }
+    return $lines
+}
+
+# The NIR function id of the function named NAME in NIR.
+proc nirId {nir name} {
+    if {![regexp "func (\[0-9\]+) \"[string map {[ \\[ ] \\] < \\< > \\> ? \\? + \\+ . \\.} $name]\" " $nir -> id]} {
+        return ""
+    }
+    return $id
+}
+
+# The block-level names of HIR: every function binding (clones included).
+proc functionNames {hir} {
+    set names {}
+    foreach e [hirFind $hir bind] {
+        if {[hir::kind $hir [hir::get $hir $e value]] eq "block"} {
+            lappend names [dict get $hir bindings [hir::get $hir $e binding] name]
+        }
+    }
+    return $names
+}
+
+# Every static type of every expression and binding of HIR mentions no trait.
+proc traitFree {hir} {
+    dict for {t type} [dict get $hir types] {
+        if {[string first "trait" $type] >= 0 && [hir::types::MentionsTrait $type]} {
+            return [list type $type]
+        }
+    }
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict exists $node traitCall]} {
+            return [list traitCall $e]
+        }
+    }
+    return 1
+}
+
+# The library of the principal vertical test (TRAITS.md item 120): the trait
+# in ui::named, an opaque Service with its operations in services.
+set principalLib {
+ui/named.bot {trait Named:
+    fn name(value: Named) -> str
+}
+services.bot {import str
+
+opaque struct Service:
+    internal_name: str
+
+fn make_service(n: str) -> Service:
+    Service {internal_name: n}
+
+fn name(value: Service) -> str:
+    str::concat("svc:", value.internal_name)
+
+fn secret(value: Service) -> str:
+    "secret"
+}
+}
+
+set principalHeader {import ui::named
+import services
+import type ui::named::Named
+
+struct Person:
+    value: str
+
+fn name(value: Person) -> str:
+    value.value
+
+fn person_only(p: Person) -> str:
+    p.value
+
+fn describe(value: Named) -> str:
+    value.name()
+
+}
+
+# The shown static type of the binding NAME (its last bind) in HIR.
+proc boundTypeOf {hir name} {
+    set binds [hirFind $hir bind $name]
+    return [hir::types::show [hir::typeOf $hir [lindex $binds end]]]
+}
+
+# A single-file prelude (one namespace: one implementation per name).
+set prelude {trait Named:
+    fn name(value: Named) -> str
+
+struct Person:
+    value: str
+
+fn name(value: Person) -> str:
+    value.value
+
+fn secret(value: Person) -> str:
+    "hidden"
+
+fn person_only(p: Person) -> str:
+    p.value
+
+fn describe(value: Named) -> str:
+    value.name()
+
+}
+
+# ===========================================================================
+# 6-7. Declaration syntax; `trait` is contextual
+
+test trait-decl-parses {"trait NAME:" declares signature-only requirements} -body {
+    surface::formatAst [surface::parse "trait Named:\n    fn name(value: Named) -> str\n    fn rename(value: Named, to: str) -> Named errors Bad\n"]
+} -result {trait Named
+    fn name (value:Named) -> str
+    fn rename (value:Named to:str) -> Named errors Bad}
+
+test trait-is-contextual {"trait" is an ordinary name everywhere but as a top-level declaration} -body {
+    sourceAgree {fn f(trait):
+    trait + 1
+
+trait = 3
+[f(trait), trait]
+}
+} -result {value {[4, 3]}}
+
+test trait-decl-top-level-only {a trait declaration nested in a function is rejected} -body {
+    rejectionKind "fn f():\n    trait Named:\n        fn name(value: Named) -> str\n    1\nf()\n"
+} -result TRAIT-NESTED
+
+test trait-empty-rejected {a trait with no requirement is rejected: it would be satisfied by every type} -body {
+    rejection "trait Marker:\n\n1\n"
+} -match glob -result {TRAIT-EMPTY {*declares no requirement*every type*}}
+
+test trait-requirement-body-rejected {a requirement is a signature only} -body {
+    rejection "trait Named:\n    fn name(value: Named) -> str:\n        \"x\"\n1\n"
+} -match glob -result {TRAIT-REQUIREMENT-BODY {*signature only*}}
+
+test trait-requirement-flags-and-context-rejected {requirements declare no flags and no context parameters} -body {
+    list [rejectionKind "trait N:\n    fn name(value: N, flags :quiet) -> str\n1\n"] \
+         [rejectionKind "context struct Io:\n    fd: int\ntrait N:\n    fn name(value: N, context io: Io) -> str\n1\n"]
+} -result {TRAIT-REQUIREMENT-FLAGS TRAIT-CONTEXT-REQUIREMENT}
+
+test trait-duplicate-requirement {two requirements of one name are rejected} -body {
+    rejection "trait N:\n    fn name(value: N) -> str\n    fn name(value: N) -> int\n1\n"
+} -match glob -result {TRAIT-DUPLICATE-REQUIREMENT {*declares requirement "name" twice*}}
+
+test trait-requirement-receiver {every requirement's first ordinary parameter is the trait itself} -body {
+    list [rejectionKind "trait N:\n    fn make() -> N\n1\n"] \
+         [rejectionKind "trait N:\n    fn name(value: str) -> str\n1\n"] \
+         [rejectionKind "trait N:\n    fn name(value) -> str\n1\n"]
+} -result {TRAIT-REQUIREMENT-RECEIVER TRAIT-REQUIREMENT-RECEIVER TRAIT-REQUIREMENT-RECEIVER}
+
+test trait-self-position {the trait's own type is allowed only as the first parameter and the result} -body {
+    list [rejection "trait N:\n    fn equals(a: N, b: N) -> bool\n1\n"] \
+         [rejection "trait N:\n    fn concat(path: N, component: str) -> N\n1\n"]
+} -match glob -result {{TRAIT-SELF-POSITION {*relational requirement*}} accepted}
+
+test trait-other-trait {a requirement mentioning another trait is rejected} -body {
+    list [rejectionKind "trait A:\n    fn a(value: A) -> int\ntrait B:\n    fn b(value: B, other: A) -> int\n1\n"] \
+         [rejectionKind "trait A:\n    fn a(value: A) -> int\ntrait B:\n    fn b(value: B) -> A\n1\n"]
+} -result {TRAIT-OTHER-TRAIT TRAIT-OTHER-TRAIT}
+
+test trait-name-collision {a trait shares the type namespace: no struct, type, builtin or second trait of its name} -body {
+    list [rejectionKind "struct Named:\n    v: int\ntrait Named:\n    fn name(value: Named) -> str\n1\n"] \
+         [rejectionKind "trait str:\n    fn name(value: str) -> str\n1\n"] \
+         [rejectionKind "trait N:\n    fn a(value: N) -> int\ntrait N:\n    fn b(value: N) -> int\n1\n"] \
+         [rejectionKind "type N = Int in 0..3\ntrait N:\n    fn b(value: N) -> int\n1\n"]
+} -result {TRAIT-NAME-COLLISION TRAIT-NAME-COLLISION TRAIT-NAME-COLLISION TRAIT-NAME-COLLISION}
+
+test trait-requirement-errors-declared {a requirement's errors are declared errors} -body {
+    list [rejectionKind "trait N:\n    fn a(value: N) -> int errors Nope\n1\n"] \
+         [rejection "error Bad\ntrait N:\n    fn a(value: N) -> int errors Bad\n1\n"]
+} -result {UNDECLARED-ERROR accepted}
+
+test trait-unknown-trait {an unknown trait name in an annotation is an unknown type} -body {
+    rejectionKind "fn f(v: Nope) -> int:\n    1\nf(1)\n"
+} -result TYPE
+
+# ===========================================================================
+# 8, 101. Identity, namespaces, imports
+
+test trait-module-identity {a module's trait is NS::Name; import type and the qualified spelling denote one trait} -body {
+    set hir [moduleHir {
+ui/named.bot {trait Named:
+    fn name(value: Named) -> str
+}
+} {import ui::named
+import type ui::named::Named
+
+struct P:
+    v: str
+
+fn name(p: P) -> str:
+    p.v
+
+fn short(value: Named) -> str:
+    value.name()
+
+fn long(value: ui::named::Named) -> str:
+    value.name()
+
+[short(P {v: "a"}), long(P {v: "b"})]
+}]
+    list [lmap t [dict get $hir traits] {dict get $t id}] \
+         [dict keys [dict get $hir traitFunctions]] \
+         [lmap {name fn} [dict get $hir traitFunctions] {lindex [dict get $fn params] 1}]
+} -result {ui::named::Named {short long} {{trait ui::named::Named} {trait ui::named::Named}}}
+
+test trait-import-type {`import type` accepts a trait; an unimported module trait is not visible by its short name} -body {
+    set lib {ui/named.bot {trait Named:
+    fn name(value: Named) -> str
+}}
+    list [moduleRejection $lib "import ui::named\nimport type ui::named::Named\nfn f(v: Named) -> int:\n    1\n1\n"] \
+         [lindex [moduleRejection $lib "import ui::named\nfn f(v: Named) -> int:\n    1\n1\n"] 0]
+} -result {accepted TYPE}
+
+# ===========================================================================
+# 15-25, 86-89. Structural conformance
+
+test trait-satisfies-api {hir::traits::satisfies: success with the static implementation mapping; explain is empty} -body {
+    set hir [surface::compile "${prelude}describe(Person {value: \"a\"})\n" -warnings off]
+    set s [hir::traits::satisfies {nstruct Person} Named]
+    list [dict get $s ok] [dict get $s witness] [dict get $s owner] \
+         [lmap {req impl} [dict get $s impls] {list $req [dict get $impl kind] [dict get $impl name]}] \
+         [hir::traits::explain {nstruct Person} Named]
+} -result {1 {nstruct Person} {} {{name block name}} {}}
+
+test trait-missing-requirement {a type missing one operation does not satisfy: satisfies 0 and the diagnostic names the missing function} -body {
+    withPrivateLibrary {
+        writeModules {bare.bot {struct Thing:
+    v: int
+}}
+        set r [rejection "import bare\n${prelude}describe(bare::Thing {v: 1})\n"]
+        set ok [dict get [hir::traits::satisfies {nstruct bare::Thing} Named] ok]
+    }
+    list [lindex $r 0] [lindex [split [lindex $r 1] \n] 0] [lrange [split [lindex $r 1] \n] 1 end] $ok
+} -result {TRAIT-NOT-SATISFIED {argument for parameter "value" does not satisfy trait Named:} {{bare::Thing does not satisfy Named} required: {    fn name(bare::Thing) -> str   (declared at <input>:3:8)} {no function bare::name exists: "name" is not defined by module "bare"}} 0}
+
+test trait-wrong-signature {a same-named function with the wrong result, parameter or error contract does not establish conformance} -body {
+    set lib {model.bot {error Bad
+
+struct Thing:
+    v: int
+
+fn name(value: Thing) -> int:
+    3
+}}
+    set r1 [moduleRejection $lib "import model\ntrait Named:\n    fn name(value: Named) -> str\nfn d(v: Named) -> str:\n    v.name()\nd(model::Thing {v: 1})\n"]
+    set lib2 {model.bot {error Bad
+
+struct Thing:
+    v: int
+
+fn name(value: Thing) -> str errors Bad:
+    fail Bad
+}}
+    set r2 [moduleRejection $lib2 "import model\ntrait Named:\n    fn name(value: Named) -> str\nfn d(v: Named) -> str:\n    v.name()\nd(model::Thing {v: 1})\n"]
+    list [lindex $r1 0] [lrange [split [lindex $r1 1] \n] 4 end] [lindex [split [lindex $r2 1] \n] end]
+} -match glob -result {TRAIT-NOT-SATISFIED {found: {    fn model::name(model::Thing) -> int   (at *model.bot:6:1)} {return type int does not satisfy required str}} {it may fail with Bad, which the requirement's error contract \[\] does not admit}}
+
+test trait-wrong-parameter {an implementation whose receiver parameter does not admit the witness is not one} -body {
+    set r [moduleRejection {model.bot {struct Thing:
+    v: int
+
+struct Other:
+    v: int
+
+fn name(value: Other) -> str:
+    "o"
+}} "import model\ntrait Named:\n    fn name(value: Named) -> str\nfn d(v: Named) -> str:\n    v.name()\nd(model::Thing {v: 1})\n"]
+    lindex [split [lindex $r 1] \n] end
+} -result {parameter 1 requires model::Other, which does not admit the required model::Thing}
+
+test trait-impl-declares-result {conformance is decided from declarations: an implementation must declare the required result} -body {
+    set r [rejection "trait N:\n    fn name(value: N) -> str\nstruct P:\n    v: str\nfn name(p: P):\n    p.v\nfn d(v: N) -> str:\n    v.name()\nd(P {v: \"a\"})\n"]
+    lindex [split [lindex $r 1] \n] end
+} -match glob -result {name declares no result type: conformance is decided from declarations*}
+
+test trait-imports-do-not-affect-satisfaction {a compatible helper in an imported namespace never implements a requirement: only the type's owner counts} -body {
+    set lib {a.bot {struct Thing:
+    v: int
+}
+b.bot {import a
+
+fn name(t: a::Thing) -> str:
+    "from b"
+}}
+    set source "import a\nimport b\ntrait Named:\n    fn name(value: Named) -> str\nfn d(v: Named) -> str:\n    v.name()\nd(a::Thing {v: 1})\n"
+    set r [moduleRejection $lib $source]
+    list [lindex $r 0] [lindex [split [lindex $r 1] \n] end] \
+         [moduleRejection $lib "import a\nimport b\nb::name(a::Thing {v: 1})\n"]
+} -result {TRAIT-NOT-SATISFIED {no function a::name exists: "name" is not defined by module "a"} accepted}
+
+test trait-two-importers-same-answer {two modules importing the type and the trait get one conformance result and one implementation mapping (cached modules keep their owners)} -body {
+    set lib {ui/named.bot {trait Named:
+    fn name(value: Named) -> str
+}
+model.bot {struct Person:
+    v: str
+
+fn name(p: Person) -> str:
+    p.v
+}
+first.bot {import ui::named
+import model
+import type ui::named::Named
+
+fn show(v: Named) -> str:
+    v.name()
+
+fn first() -> str:
+    show(model::Person {v: "1"})
+}
+second.bot {import ui::named
+import model
+import type ui::named::Named
+
+fn show(v: Named) -> str:
+    v.name()
+
+fn second() -> str:
+    show(model::Person {v: "2"})
+}}
+    withPrivateLibrary {
+        writeModules $lib
+        set hir [surface::compile "import first\nimport second\n\[first::first(), second::second()\]\n" -warnings off]
+        set mapping [hir::traits::satisfies {nstruct model::Person} ui::named::Named]
+        set again [surface::compile "import second\nimport first\nsecond::second()\n" -warnings off]
+        set mapping2 [hir::traits::satisfies {nstruct model::Person} ui::named::Named]
+        set value [sourceAgree "import first\nimport second\n\[first::first(), second::second()\]\n"]
+    }
+    list [dict get $mapping ok] [expr {[dict get $mapping impls] eq [dict get $mapping2 impls]}] \
+         [lmap {r i} [dict get $mapping impls] {list $r [dict get $i unit] [dict get $i name]}] $value
+} -result {1 1 {{name model name}} {value {["1", "2"]}}}
+
+# ===========================================================================
+# 120. The principal vertical test
+
+test trait-principal-vertical {describe(Person) and describe(make_service()): two static specializations, each calling its implementation directly} -body {
+    moduleAgree $principalLib "${principalHeader}\[describe(Person {value: \"Alice\"}), describe(services::make_service(\"db\"))\]\n"
+} -result {value {["Alice", "svc:db"]}}
+
+test trait-principal-hir {the monomorphized HIR: describe is replaced by describe<Person> and describe<services::Service>, each an exact call of its witness's implementation, and no trait type is left} -body {
+    set hir [moduleHir $principalLib "${principalHeader}\[describe(Person {value: \"Alice\"}), describe(services::make_service(\"db\"))\]\n"]
+    set targets {}
+    foreach e [hirFind $hir call] {
+        if {![dict exists [hir::node $hir $e] traitImpl]} continue
+        set target [lindex [hir::get $hir $e target] 1]
+        set block [hir::get $hir $e scope]
+        lappend targets [list [hir::traits::showView [list trait [dict get [hir::get $hir $e traitImpl] trait] [dict get [hir::get $hir $e traitImpl] witness]]] \
+            [dict get $hir bindings [hir::get $hir [hir::get $hir $e callee] binding] name] [hir::kind $hir $target]]
+    }
+    list [lsearch -all -inline -glob [functionNames $hir] describe*] [lsort $targets] [traitFree $hir]
+} -result {{describe<Person> describe<services::Service>} {{{ui::named::Named[witness Person]} name block} {{ui::named::Named[witness services::Service]} services::name block}} 1}
+
+test trait-principal-nir {NIR: each specialization is one direct call of its implementation -- no indirect call, no extra parameter, no allocation} -body {
+    withPrivateLibrary {
+        writeModules $principalLib
+        set hir [surface::compile "${principalHeader}\[describe(Person {value: \"Alice\"}), describe(services::make_service(\"db\"))\]\n" -warnings off]
+        set nir [native::nir $hir -tiny-leaf-inline-opt 0]
+    }
+    set person [nirBody $nir describe<Person>]
+    set service [nirBody $nir describe<services::Service>]
+    list $person $service \
+         [regexp "func \[0-9\]+ \"describe<Person>\" params=1 env=0 " $nir] \
+         [regexp "func \[0-9\]+ \"describe<services::Service>\" params=1 env=0 " $nir] \
+         [string match "*= call [nirId $nir name] %0" [lindex $person 0]] \
+         [string match "*= call [nirId $nir services::name] %0" [lindex $service 0]] \
+         [regexp {callvalue|calldyn|callind} $nir]
+} -match glob -result {{{%1 = call * %0} {ret %1}} {{%1 = call * %0} {ret %1}} 1 1 1 1 0}
+
+test trait-machine-code-direct {Cranelift IR: each specialization calls its implementation's function directly (a colocated function reference), never through a pointer} -body {
+    withPrivateLibrary {
+        writeModules $principalLib
+        set hir [surface::compile "${principalHeader}\[describe(Person {value: \"Alice\"}), describe(services::make_service(\"db\"))\]\n" -warnings off]
+        set clif [native::clif $hir -tiny-leaf-inline-opt 0]
+    }
+    set result {}
+    foreach {fn impl} {describe<Person> name describe<services::Service> services::name} {
+        set body [lindex [regexp -inline "; function \[0-9\]+ \"[string map {< \\< > \\> : \\:} $fn]\":\[^\n\]*\n(.*?)\n\}" $clif] 1]
+        regexp "; u0:(\[0-9\]+) = botlish_fn_\[0-9\]+ \\([string map {: \\:} $impl]\\)" $clif -> target
+        set refs [regexp -all -inline {(fn[0-9]+) = colocated u0:([0-9]+)} $body]
+        set direct 0
+        foreach {- ref t} $refs {
+            if {$t eq $target && [regexp "call $ref\\(" $body]} { set direct 1 }
+        }
+        lappend result $direct [regexp {call_indirect} $body]
+    }
+    set result
+} -result {1 0 1 0}
+
+test trait-code-quality-identical {the trait specialization compiles to the same NIR as the hand-written concrete function} -body {
+    set hir [surface::compile "${prelude}fn concrete(p: Person) -> str:\n    p.name()\n\[describe(Person {value: \"a\"}), concrete(Person {value: \"b\"})\]\n" -warnings off]
+    set nir [native::nir $hir -tiny-leaf-inline-opt 0]
+    list [expr {[nirBody $nir describe<Person>] eq [nirBody $nir concrete]}] [nirBody $nir concrete]
+} -match glob -result {1 {{%1 = call * %0} {ret %1}}}
+
+test trait-allocation-free {trait adaptation allocates nothing: the trait program allocates exactly what the concrete program does} -body {
+    set reports [lmap variant {trait concrete} {
+        set call [expr {$variant eq "trait" ? "describe(p)" : "name(p)"}]
+        set hir [surface::compile "${prelude}fn run(p: Person, n: int, acc: int) -> int:\n    if n == 0:\n        return acc\n    v = $call\n    run(p, n - 1, acc + 1)\nrun(Person {value: \"a\"}, 50, 0)\n" -warnings off]
+        set report [native::allocationReport $hir summary]
+        list [dict get $report total allocations] [dict get $report total allocatedBytes]
+    }]
+    list [expr {[lindex $reports 0] eq [lindex $reports 1]}] [lindex $reports 0]
+} -result {1 {0 0}}
+
+test trait-no-runtime-wrapper {a trait view is its witness's value at run time: no wrapper, tag or witness field} -body {
+    sourceAgree "${prelude}fn same(v: Named) -> Named:\n    v\nsame(Person {value: \"a\"})\n"
+} -result {value {Person {value: "a"}}}
+
+# ===========================================================================
+# 30-34, 72, 92. One-way abstraction
+
+test trait-one-way-source {a concrete-only operation on a trait parameter is rejected, even when every caller passes that concrete type} -body {
+    rejection "${prelude}fn generic(value: Named) -> str:\n    person_only(value)\ngeneric(Person {value: \"a\"})\n"
+} -match glob -result {TYPE {argument for parameter "p" cannot be proven to satisfy Person (argument type: Named); the value is a Named trait view*no cast, type test or downcast*}}
+
+test trait-hidden-method-unavailable {a method of the hidden witness that the trait does not declare is unavailable, even in the Person instance} -body {
+    rejection "${prelude}fn f(value: Named) -> str:\n    value.secret()\nf(Person {value: \"a\"})\n"
+} -result {TRAIT-UNKNOWN-OPERATION {trait Named has no operation "secret" (its operations: name): a trait view exposes exactly its trait's requirements, whatever concrete type is underneath}}
+
+test trait-no-delayed-duck-typing {the body type-checks against the trait alone: an operation no trait declares is rejected whatever witness reaches it} -body {
+    list [rejectionKind "${prelude}fn f(value: Named) -> str:\n    value.whatever_happens_to_compile()\n1\n"] \
+         [rejectionKind "${prelude}fn f(value: Named) -> int:\n    value + 1\nf(Person {value: \"a\"})\n"]
+} -result {TRAIT-UNKNOWN-OPERATION TRAIT-VIEW-MISUSE}
+
+test trait-unknown-operation-is-the-cause {a method call on the result of an undeclared trait operation reports that operation, not "no applicable method" among the visible candidates} -body {
+    moduleRejection {other.bot {struct O:
+    v: str
+
+fn name(o: O) -> str:
+    o.v
+}} "import other\n${prelude}fn f(value: Named) -> str:\n    value.secret().name()\nf(Person {value: \"a\"})\n"
+} -result {TRAIT-UNKNOWN-OPERATION {trait Named has no operation "secret" (its operations: name): a trait view exposes exactly its trait's requirements, whatever concrete type is underneath}}
+
+test trait-no-field-access {a trait view has no fields} -body {
+    rejection "${prelude}fn f(value: Named) -> str:\n    value.value\nf(Person {value: \"a\"})\n"
+} -match glob -result {TRAIT-VIEW-MISUSE {a Named trait view has no fields*}}
+
+test trait-no-type-test-or-kind-operation {no type test, cast or kind-specific native recovers the concrete type} -body {
+    list [rejection "${prelude}fn f(v: Named) -> int:\n    if string?(v):\n        1\n    else:\n        2\nf(Person {value: \"a\"})\n"] \
+         [rejectionKind "import str\n${prelude}fn f(v: Named) -> int:\n    str::length(v)\nf(Person {value: \"a\"})\n"] \
+         [rejectionKind "${prelude}fn f(v: Named) -> int:\n    if v:\n        1\n    else:\n        2\nf(Person {value: \"a\"})\n"]
+} -match glob -result {{TRAIT-VIEW-MISUSE {string? cannot test a Named trait view*}} TRAIT-VIEW-MISUSE TRAIT-VIEW-MISUSE}
+
+test trait-view-never-narrowed {even where a type test of a view is rejected (-strict 0 keeps checking), the test's outcome never strengthens the view to a concrete type} -body {
+    set hir [surface::compile "${prelude}fn f(v: Named) -> int:\n    if integer?(v):\n        x = v\n        1\n    else:\n        0\nf(Person {value: \"a\"})\n" -warnings off -strict 0]
+    list [lsort -unique [lmap d [dict get $hir diagnostics] {dict get $d kind}]] [boundTypeOf $hir x]
+} -result {TRAIT-VIEW-MISUSE Named}
+
+test trait-no-implicit-trait-parameter {an untyped parameter never becomes trait-polymorphic: forwarding it to a trait parameter is rejected at the definition} -body {
+    rejection "${prelude}fn relay(x):\n    describe(x)\nrelay(Person {value: \"a\"})\n"
+} -match glob -result {TRAIT-NOT-SATISFIED {*any cannot be a trait witness*}}
+
+# ===========================================================================
+# 5, 41-43, 93. Provenance, trait returns
+
+test trait-provenance-identity {identity(person) keeps the witness: later trait operations specialize to Person, while the result stays source-visible as the trait} -body {
+    set source "${prelude}fn identity(x: Named) -> Named:\n    x\ny = identity(Person {value: \"a\"})\ny.name()\n"
+    set hir [surface::compile $source -warnings off]
+    set call [lindex [lmap e [hirFind $hir call] {if {![dict exists [hir::node $hir $e] traitImpl]} continue; set e}] end]
+    list [sourceAgree $source] \
+         [dict get $hir bindings [hir::get $hir [hir::get $hir $call callee] binding] name] \
+         [rejection "${prelude}fn identity(x: Named) -> Named:\n    x\ny = identity(Person {value: \"a\"})\nperson_only(y)\n"]
+} -match glob -result {{value {"a"}} name {TYPE {argument for parameter "p" cannot be proven to satisfy Person (argument type: Named)*}}}
+
+test trait-returns-from-requirements {a requirement returning the trait yields a view with the receiver's witness: valid for trait operations, not for concrete ones} -body {
+    set common {trait Norm:
+    fn normalize(value: Norm) -> Norm
+    fn label(value: Norm) -> str
+
+struct C:
+    n: int
+
+fn normalize(value: C) -> C:
+    C {n: value.n + 1}
+
+fn label(value: C) -> str:
+    "c"
+
+fn c_only(c: C) -> int:
+    c.n
+
+fn twice(value: Norm) -> Norm:
+    value.normalize().normalize()
+
+}
+    list [sourceAgree "${common}x = twice(C {n: 1})\n\[x.label(), twice(x).label()\]\n"] \
+         [rejectionKind "${common}fn f(value: Norm) -> int:\n    x = value.normalize()\n    c_only(x)\nf(C {n: 1})\n"] \
+         [sourceAgree "${common}twice(C {n: 1})\n"]
+} -result {{value {["c", "c"]}} TYPE {value {C {n: 3}}}}
+
+# ===========================================================================
+# 44-47, 57, 94. Witness joins
+
+test trait-same-witness-join {branches that yield the same witness keep the view} -body {
+    sourceAgree "${prelude}fn pick(v: Named, flag: bool) -> Named:\n    if flag:\n        v\n    else:\n        v\nfn make() -> Named:\n    Person {value: \"m\"}\nx = if 1 < 2:\n    pick(Person {value: \"a\"}, true)\nelse:\n    make()\nx.name()\n"
+} -result {value {"a"}}
+
+test trait-witness-join-rejected {different witnesses meeting at a join are rejected, never erased to any} -body {
+    set lib {other.bot {struct O:
+    v: str
+
+fn name(o: O) -> str:
+    o.v
+}}
+    list [moduleRejection $lib "import other\n${prelude}fn choose(flag: bool) -> Named:\n    if flag:\n        Person {value: \"a\"}\n    else:\n        other::O {v: \"b\"}\nchoose(true).name()\n"] \
+         [lindex [moduleRejection $lib "import other\n${prelude}fn same(v: Named) -> Named:\n    v\nfn f(flag: bool) -> str:\n    x = if flag:\n        same(Person {value: \"a\"})\n    else:\n        same(other::O {v: \"b\"})\n    x.name()\nf(true)\n"] 0] \
+         [lindex [rejection "${prelude}fn pick(a: Named, b: Named, flag: bool) -> Named:\n    if flag:\n        a\n    else:\n        b\npick(Person {value: \"a\"}, Person {value: \"b\"}, true)\n"] 1]
+} -result {{TRAIT-WITNESS-JOIN {the function's result has trait type Named but may contain either Person or other::O; heterogeneous trait values are not supported (every exit of a trait-typed result needs the same witness)}} TRAIT-WITNESS-JOIN {expression has trait type Named but may contain either the witness of parameter "a" of pick or the witness of parameter "b" of pick; heterogeneous trait values are not supported (there is no erased trait representation to hold a run-time choice between witnesses)}}
+
+test trait-no-implicit-trait-join {two unrelated types that both satisfy a trait never join to the trait} -body {
+    set lib {other.bot {struct O:
+    v: str
+
+fn name(o: O) -> str:
+    o.v
+}}
+    withPrivateLibrary {
+        writeModules $lib
+        set hir [surface::compile "import other\n${prelude}fn f(flag: bool):\n    x = if flag:\n        Person {value: \"a\"}\n    else:\n        other::O {v: \"b\"}\n    x\nf(true)\n" -warnings off -strict 0]
+    }
+    boundTypeOf $hir x
+} -result any
+
+# ===========================================================================
+# 48-51, 95. Independent parameters, passing onward, recursion
+
+test trait-independent-parameters {two trait parameters have independent witnesses: show_pair(person, service) is one specialization with both} -body {
+    set source "${principalHeader}fn show_pair(a: Named, b: Named) -> List\[str\]:\n    \[a.name(), b.name()\]\nshow_pair(Person {value: \"p\"}, services::make_service(\"s\"))\n"
+    list [moduleAgree $principalLib $source] \
+         [lsearch -all -inline -glob [functionNames [moduleHir $principalLib $source]] show_pair*]
+} -result {{value {["p", "svc:s"]}} show_pair<Person,services::Service>}
+
+test trait-passing-onward {a view passed to another trait consumer keeps its witness, statically} -body {
+    set source "${prelude}fn inner(v: Named) -> str:\n    v.name()\nfn outer(v: Named) -> str:\n    inner(v)\nouter(Person {value: \"o\"})\n"
+    set hir [surface::compile $source -warnings off]
+    set outerClone [lindex [hirFind $hir bind outer<Person>] 0]
+    set call [lindex [hir::get $hir [hir::get $hir $outerClone value] body] 0]
+    list [sourceAgree $source] [dict get $hir bindings [hir::get $hir [hir::get $hir $call callee] binding] name]
+} -result {{value {"o"}} inner<Person>}
+
+test trait-recursion-two-witnesses {a recursive trait-polymorphic function specializes once per witness, each calling itself directly} -body {
+    set source "${principalHeader}fn recurse(value: Named, n: int) -> str:\n    if n > 0:\n        recurse(value, n - 1)\n    else:\n        value.name()\n\[recurse(Person {value: \"p\"}, 3), recurse(services::make_service(\"s\"), 4)\]\n"
+    set hir [moduleHir $principalLib $source]
+    set self {}
+    foreach clone {recurse<Person> recurse<services::Service>} {
+        set block [hir::get $hir [lindex [hirFind $hir bind $clone] 0] value]
+        foreach e [hirFind $hir call] {
+            if {[hir::get $hir $e target] eq [list block $block]} {
+                lappend self $clone
+            }
+        }
+    }
+    list [moduleAgree $principalLib $source] [lsort -unique $self] [llength [lsearch -all [functionNames $hir] recurse*]]
+} -result {{value {["p", "svc:s"]}} {recurse<Person> recurse<services::Service>} 2}
+
+test trait-instance-budget-fallback {a trait-polymorphic function called with more distinct argument types than the semantic-instance budget still specializes: past the budget, an instance keyed by its witnesses alone} -body {
+    set structs ""
+    set calls {}
+    for {set i 0} {$i < 20} {incr i} {
+        append structs "struct S$i:\n    v: int\n"
+        lappend calls "tag(Person {value: \"t\"}, S$i {v: $i})"
+    }
+    set source "${prelude}${structs}fn tag(value: Named, extra) -> str:\n    value.name()\n\[[join $calls {, }]\]\n"
+    set hir [surface::compile $source -warnings off]
+    list [sourceAgree $source] [lsearch -all -inline -glob [functionNames $hir] tag*]
+} -result [list [list value "\[[join [lrepeat 20 {"t"}] {, }]\]"] tag<Person>]
+
+test trait-polymorphic-recursion-rejected {recursion between different witnesses' specializations is rejected} -body {
+    set lib {other.bot {struct O:
+    v: str
+
+fn name(o: O) -> str:
+    o.v
+}}
+    lindex [moduleRejection $lib "import other\n${prelude}fn flip(v: Named, n: int) -> str:\n    if n == 0:\n        v.name()\n    else:\n        if mod(n, 2) == 0:\n            flip(Person {value: \"p\"}, n - 1)\n        else:\n            flip(other::O {v: \"o\"}, n - 1)\nflip(Person {value: \"x\"}, 3)\n"] 0
+} -result TRAIT-POLYMORPHIC-RECURSION
+
+# ===========================================================================
+# 52-54, 96. Function values and closures
+
+test trait-alias-direct-call {an immutable alias of a trait-polymorphic function called directly is the specialization} -body {
+    sourceAgree "${prelude}f = describe\ng = f\n\[f(Person {value: \"a\"}), g(Person {value: \"b\"})\]\n"
+} -result {value {["a", "b"]}}
+
+test trait-function-value-escape {a trait-polymorphic function never escapes into a general callable} -body {
+    list [rejection "${prelude}fn apply(f, x):\n    f(x)\napply(describe, Person {value: \"a\"})\n"] \
+         [rejectionKind "${prelude}fs = \[describe\]\n1\n"] \
+         [rejectionKind "${prelude}fn get():\n    describe\nget()\n"] \
+         [rejectionKind "${prelude}fn f(g: Fn{args: \[Named\], return: str}) -> int:\n    1\n1\n"]
+} -match glob -result {{TRAIT-POLYMORPHIC-FUNCTION-VALUE {describe is a trait-polymorphic function*there is no runtime trait dispatch)}} TRAIT-POLYMORPHIC-FUNCTION-VALUE TRAIT-POLYMORPHIC-FUNCTION-VALUE TRAIT-POLYMORPHIC-FUNCTION-VALUE}
+
+test trait-closure-capture {a closure capturing a trait view is part of the specialization: its witness is fixed there} -body {
+    sourceAgree "${prelude}fn greeter(v: Named) -> str:\n    fn hello() -> str:\n        v.name()\n    hello()\nfn later(v: Named):\n    fn get() -> str:\n        v.name()\n    get\n\[greeter(Person {value: \"g\"}), later(Person {value: \"l\"})()\]\n"
+} -result {value {["g", "l"]}}
+
+test trait-nested-polymorphic-rejected {a trait-polymorphic function must be top-level} -body {
+    rejectionKind "${prelude}fn outer(x):\n    fn inner(v: Named) -> str:\n        v.name()\n    inner(x)\nouter(Person {value: \"a\"})\n"
+} -result TRAIT-NESTED-POLYMORPHIC
+
+# ===========================================================================
+# 55-58, 97-98. Storage, containers, any
+
+test trait-storage-unsupported {no trait-typed struct field, container element or function-type position} -body {
+    list [rejection "${prelude}struct Box:\n    value: Named\n1\n"] \
+         [rejectionKind "${prelude}fn f(xs: List\[Named\]) -> int:\n    1\n1\n"] \
+         [rejectionKind "${prelude}fn f(xs: MutableArray\[Named\]) -> int:\n    1\n1\n"] \
+         [rejectionKind "${prelude}fn f(xs: ImmutableSet\[Named\]) -> int:\n    1\n1\n"] \
+         [rejectionKind "${prelude}fn f() -> List\[Named\]:\n    \[\]\n1\n"]
+} -match glob -result {{TRAIT-STORAGE-UNSUPPORTED {field "value" of struct "Box" cannot have trait type Named*}} TRAIT-STORAGE-UNSUPPORTED TRAIT-STORAGE-UNSUPPORTED TRAIT-STORAGE-UNSUPPORTED TRAIT-STORAGE-UNSUPPORTED}
+
+test trait-any-erasure {a view stored where any is accepted is only its concrete value: no trait metadata, and the trait is not recovered from any} -body {
+    list [sourceAgree "${prelude}fn f(v: Named) -> List\[any\]:\n    xs = \[v, 1\]\n    xs\nf(Person {value: \"a\"})\n"] \
+         [sourceAgree "${prelude}fn f(v: Named) -> bool:\n    v == Person {value: \"a\"}\nf(Person {value: \"a\"})\n"] \
+         [rejectionKind "import list\n${prelude}fn f(v: Named) -> str:\n    xs = \[v, 1\]\n    describe(list::at(xs, 1))\nf(Person {value: \"a\"})\n"]
+} -result {{value {[Person {value: "a"}, 1]}} {value true} TRAIT-NOT-SATISFIED}
+
+# ===========================================================================
+# 59-63, 90-91. Opaque structs, refinements, integer domains, built-ins,
+# applied types
+
+test trait-opaque-witness {an opaque struct satisfies a trait through its owner's operation; the consumer works; field projection outside the owner stays rejected} -body {
+    list [moduleAgree $principalLib "${principalHeader}describe(services::make_service(\"x\"))\n"] \
+         [lindex [moduleRejection $principalLib "${principalHeader}services::make_service(\"x\").internal_name\n"] 0]
+} -result {{value {"svc:x"}} OPAQUE-REPRESENTATION}
+
+test trait-refinement-witness-identity {sibling refinements of str with different operations are distinct witnesses: distinct specializations, distinct targets, one representation} -body {
+    # (one namespace declares one `display`: each refinement in its own module)
+    set lib {wa.bot {import str
+
+refined type A = str
+
+fn a?(s: str) -> bool proves s: A:
+    str::length(s) > 0
+
+fn display(value: A) -> str:
+    str::concat("A:", value)
+}
+wb.bot {import str
+
+refined type B = str
+
+fn b?(s: str) -> bool proves s: B:
+    str::length(s) > 0
+
+fn display(value: B) -> str:
+    str::concat("B:", value)
+}}
+    # One value proven both A and B has no single witness; prove them apart:
+    set source "import wa\nimport wb\ntrait Displayable:\n    fn display(value: Displayable) -> str\nfn show(v: Displayable) -> str:\n    v.display()\nfn one(s: str) -> str:\n    if wa::a?(s):\n        show(s)\n    else:\n        \"\"\nfn two(s: str) -> str:\n    if wb::b?(s):\n        show(s)\n    else:\n        \"\"\n\[one(\"x\"), two(\"y\")\]\n"
+    withPrivateLibrary {
+        writeModules $lib
+        set hir [surface::compile $source -warnings off]
+        set nir [native::nir $hir -tiny-leaf-inline-opt 0]
+        set value [sourceAgree $source]
+    }
+    set a [nirBody $nir show<wa::A>]
+    set b [nirBody $nir show<wb::B>]
+    list $value [expr {$a ne $b}] \
+         [string match "*= call [nirId $nir wa::display] %0" [lindex $a 0]] \
+         [string match "*= call [nirId $nir wb::display] %0" [lindex $b 0]] \
+         [regexp {func [0-9]+ "show<wa::A>" params=1 env=0 [^\n]*instance="str"} $nir] \
+         [regexp {func [0-9]+ "show<wb::B>" params=1 env=0 [^\n]*instance="str"} $nir]
+} -result {{value {["A:x", "B:y"]}} 1 1 1 1 1}
+
+test trait-refinement-forgetting-not-satisfaction {a refinement does not inherit its carrier's conformance: its owner's own operations decide} -body {
+    withPrivateLibrary {
+        writeModules {w.bot {refined type Word = str
+}}
+        set hir [surface::compile "import w\ntrait Measured:\n    fn length(value: Measured) -> int\n1\n" -warnings off]
+        set s1 [hir::traits::satisfies str Measured]
+        set s2 [hir::traits::satisfies [core::type::normalize w::Word] Measured]
+    }
+    list [dict get $s1 ok] [lmap {r i} [dict get $s1 impls] {list $r [dict get $i kind] [dict get $i name]}] \
+         [dict get $s2 ok] [dict get $s2 reason]
+} -result {1 {{length native str::length}} 0 {no function w::length exists: "length" is not defined by module "w"}}
+
+test trait-builtin-scalar-witness {a built-in scalar satisfies a trait through its namespace's intrinsics} -body {
+    sourceAgree "trait Measured:\n    fn length(value: Measured) -> int\nfn size(v: Measured) -> int:\n    v.length()\nsize(\"hello\")\n"
+} -result {value 5}
+
+test trait-integer-domain-witness {an integer domain satisfies a trait through its owner's operations; its range semantics are unchanged} -body {
+    moduleAgree {units.bot {type Meters = Int in 0..1000
+
+fn label(m: Meters) -> str:
+    "meters"
+}} "import units\ntrait Labeled:\n    fn label(value: Labeled) -> str\nfn show(v: Labeled) -> str:\n    v.label()\nfn mk(n: units::Meters) -> units::Meters:\n    n\nshow(mk(5))\n"
+} -result {value {"meters"}}
+
+test trait-applied-witness-unsupported {an applied/container type is not a trait witness yet} -body {
+    set r [rejection "trait N:\n    fn name(value: N) -> str\nfn d(v: N) -> str:\n    v.name()\nd(\[1, 2\])\n"]
+    list [lindex $r 0] [lindex [split [lindex $r 1] \n] end]
+} -match glob -result {TRAIT-NOT-SATISFIED {*applied, container or callable type*not supported as trait witnesses yet}}
+
+# ===========================================================================
+# 64-66, 99. Method sugar
+
+test trait-concrete-method-sugar-unchanged {method sugar on a concrete value still resolves the visible function} -body {
+    sourceAgree "${prelude}p = Person {value: \"c\"}\n\[p.name(), p.secret()\]\n"
+} -result {value {["c", "hidden"]}}
+
+test trait-method-sugar-import-stable {an imported namespace with a same-named function makes neither a trait operation ambiguous nor different} -body {
+    set lib {ui/named.bot {trait Named:
+    fn name(value: Named) -> str
+}
+noise.bot {fn name(x: int) -> str:
+    "noise"
+}}
+    moduleAgree $lib "import ui::named\nimport noise\nimport type ui::named::Named\nstruct P:\n    v: str\nfn name(p: P) -> str:\n    p.v\nfn d(value: Named) -> str:\n    value.name()\nd(P {v: \"quiet\"})\n"
+} -result {value {"quiet"}}
+
+test trait-operation-needs-no-import {a trait consumer calls the witness's implementation without importing its namespace} -body {
+    moduleAgree {ui/named.bot {trait Named:
+    fn name(value: Named) -> str
+}
+consumer.bot {import ui::named
+import type ui::named::Named
+
+fn describe(value: Named) -> str:
+    value.name()
+}
+model.bot {struct Person:
+    v: str
+
+fn name(p: Person) -> str:
+    p.v
+}} "import consumer\nimport model\nconsumer::describe(model::Person {v: \"no import\"})\n"
+} -result {value {"no import"}}
+
+# ===========================================================================
+# 21, 100. Error contracts
+
+test trait-error-contracts {a requirement's error contract: an implementation with fewer errors satisfies it, a broader one does not, and one that always fails is not an instantiation-time error} -body {
+    set lib {quiet.bot {error Invalid
+error Other
+
+struct Quiet:
+    v: int
+
+fn normalize(value: Quiet) -> Quiet:
+    value
+}
+loud.bot {struct Loud:
+    v: int
+
+fn normalize(value: Loud) -> Loud errors Invalid, Other:
+    value
+}}
+    set common "import quiet\nimport loud\ntrait Parseable:\n    fn normalize(value: Parseable) -> Parseable errors Invalid\nstruct Good:\n    v: int\nfn normalize(value: Good) -> Good errors Invalid:\n    fail Invalid\nfn clean(value: Parseable) -> int:\n    x = value.normalize():\n        on Invalid:\n            value\n    1\n"
+    list [moduleAgree $lib "${common}\[clean(Good {v: 1}), clean(quiet::Quiet {v: 2})\]\n"] \
+         [lindex [moduleRejection $lib "${common}clean(loud::Loud {v: 2})\n"] 0] \
+         [lindex [moduleRejection $lib "${common}fn bad(value: Parseable) -> int:\n    value.normalize()\n    1\nbad(Good {v: 1})\n"] 0]
+} -result {{value {[1, 1]}} TRAIT-NOT-SATISFIED UNHANDLED-ERROR}
+
+# ===========================================================================
+# Ordering: implementations are established before their first use
+
+test trait-impl-order {an implementation declared after the code that first needs it is rejected, like any forward reference} -body {
+    list [rejectionKind "trait N:\n    fn name(value: N) -> str\nstruct P:\n    v: str\nfn d(v: N) -> str:\n    v.name()\nfn early() -> str:\n    d(P {v: \"a\"})\nfn name(p: P) -> str:\n    p.v\nearly()\n"] \
+         [rejectionKind "trait N:\n    fn name(value: N) -> str\nstruct P:\n    v: str\nfn d(v: N) -> str:\n    v.name()\nfn name(p: P) -> str:\n    d(p)\nname(P {v: \"a\"})\n"]
+} -result {TRAIT-IMPL-ORDER TRAIT-IMPL-ORDER}
+
+test trait-unreachable-call {a call of a trait-polymorphic function in unreachable code still has its specialization} -body {
+    sourceAgree "${prelude}fn f(flag: bool) -> str:\n    if false:\n        describe(Person {value: \"dead\"})\n    else:\n        \"live\"\nf(true)\n"
+} -result {value {"live"}}
+
+# ===========================================================================
+# 74-77. HIR
+
+test trait-hir-text {HIR text keeps the trait declaration, the replaced function's source signature, each clone's parameter views and each trait call's operation and witness} -body {
+    set hir [surface::compile "${prelude}describe(Person {value: \"a\"})\n" -warnings off]
+    set text [hir::format $hir]
+    list [lsearch -all -inline -regexp [split $text \n] {^trait |^traitfn }] \
+         [regexp {block s[0-9]+ \(b[0-9]+ value:Person\) captures \(b[0-9]+ name\) clone \(b[0-9]+ value: Named\) declares str} $text] \
+         [regexp {call block\(e[0-9]+\) trait Named.name witness Person : str} $text]
+} -result {{{trait Named owner - requires name(value: Named) -> str} {traitfn describe (value: Named) -> str clones (describe<Person>)}} 1 1}
+
+test trait-hir-round-trip {a trait program's HIR reads back to the same text and runs the same on every backend} -body {
+    set source {error Invalid
+
+trait Shape:
+    fn area(value: Shape) -> int
+    fn scaled(value: Shape, k: int) -> Shape errors Invalid
+
+struct Square:
+    side: int
+
+fn area(value: Square) -> int:
+    value.side * value.side
+
+fn scaled(value: Square, k: int) -> Square errors Invalid:
+    if k < 0:
+        fail Invalid
+    Square {side: value.side * k}
+
+fn grow(s: Shape) -> Shape errors Invalid:
+    s.scaled(2)
+
+fn total(s: Shape) -> int:
+    big = grow(s):
+        on Invalid:
+            s
+    big.area()
+
+total(Square {side: 3})
+}
+    set hir [surface::compile $source -warnings off]
+    set text [hir::format $hir]
+    set back [hir::parse $text]
+    list [expr {[hir::format $back] eq $text}] \
+         [lmap b {interp compile cranelift-generic cranelift} {lrange [outcomeUnderHir $b $back] 0 1}]
+} -result {1 {{value 36} {value 36} {value 36} {value 36}}}
+
+test trait-mono-hir-trait-free {the monomorphized HIR every backend compiles has no trait type and no unresolved trait operation} -body {
+    set hir [moduleHir $principalLib "${principalHeader}fn same(v: Named) -> Named:\n    v\nx = same(Person {value: \"a\"})\n\[x.name(), describe(x), describe(services::make_service(\"b\"))\]\n"]
+    traitFree $hir
+} -result 1
+
+test trait-no-traits-unchanged {a program that declares no trait is built once, with no trait metadata} -body {
+    set hir [surface::compile "fn f(x: int) -> int:\n    x + 1\nf(1)\n" -warnings off]
+    list [dict exists $hir traits] [dict exists $hir traitFunctions] \
+         [llength [lmap {e node} [dict get $hir exprs] {if {![dict exists $node sid]} continue; set e}]]
+} -result {0 0 0}
+
+test trait-unchecked-trait-operation-raises {a -strict 0 program whose trait check failed never runs a trait operation through a stand-in callee} -body {
+    set hir [surface::compile "${prelude}fn f(value: Named) -> str:\n    value.name()\nfn g(value: Named) -> str:\n    person_only(value)\nf(Person {value: \"a\"})\n" -warnings off -strict 0]
+    list [lindex [dict get [lindex [dict get $hir diagnostics] 0] kind] 0] \
+         [lindex [outcomeUnder interp [hir::lower $hir]] 1]
+} -result {TYPE {CORE SEMANTIC UNBOUND}}
+
+# ===========================================================================
+# 108-109. Contexts stay orthogonal
+
+test trait-context-orthogonal {a context struct value may be a trait witness like any struct; an implementation that needs a context is not one (no context-supplied implementations)} -body {
+    set head "trait Valued:\n    fn amount(value: Valued) -> int\ncontext struct Counter:\n    value: int\n"
+    set r [rejection "${head}struct P:\n    v: int\nfn amount(value: P, context c: Counter) -> int:\n    c.value\nfn total(v: Valued) -> int:\n    v.amount()\nwith context Counter {value: 3}\ntotal(P {v: 1})\n"]
+    list [sourceAgree "${head}fn amount(value: Counter) -> int:\n    value.value\nfn total(v: Valued) -> int:\n    v.amount()\ntotal(Counter {value: 3})\n"] \
+         [lindex $r 0] [lindex [split [lindex $r 1] \n] end]
+} -result {{value 3} TRAIT-NOT-SATISFIED {amount requires a context (Counter): context-dependent implementations are not supported yet}}
+
+# ===========================================================================
+# 111. The intended later use: a Path trait over a refinement and a struct
+
+test trait-future-path-shape {a Path-like trait with a non-receiver parameter and self results specializes to a refined str and to a module struct, with no erased path object} -body {
+    set lib {windows.bot {import str
+
+struct WindowsPath:
+    text: str
+
+fn concat(path: WindowsPath, component: str) -> WindowsPath:
+    WindowsPath {text: str::concat(str::concat(path.text, "\\"), component)}
+
+fn parent(path: WindowsPath) -> WindowsPath:
+    path
+
+fn render(path: WindowsPath) -> str:
+    path.text
+}}
+    set source {import str
+import windows
+
+trait Path:
+    fn concat(path: Path, component: str) -> Path
+    fn parent(path: Path) -> Path
+    fn render(path: Path) -> str
+
+refined type LinuxPath = str
+
+fn linux?(s: str) -> bool proves s: LinuxPath:
+    str::length(s) > 0
+
+fn concat(path: LinuxPath, component: str) -> LinuxPath:
+    joined = str::concat(str::concat(path, "/"), component)
+    if linux?(joined):
+        joined
+    else:
+        path
+
+fn parent(path: LinuxPath) -> LinuxPath:
+    path
+
+fn render(path: LinuxPath) -> str:
+    path
+
+fn somewhere(path: Path) -> Path:
+    path.concat("child")
+
+fn home() -> str:
+    "/home"
+
+h = home()
+lin = if linux?(h):
+    somewhere(h).render()
+else:
+    ""
+[lin, somewhere(windows::WindowsPath {text: "C:"}).parent().render()]
+}
+    list [moduleAgree $lib $source] \
+         [lsort [lsearch -all -inline -glob [functionNames [moduleHir $lib $source]] somewhere*]] \
+         [traitFree [moduleHir $lib $source]]
+} -result {{value {["/home/child", "C:\\child"]}} {somewhere<LinuxPath> somewhere<windows::WindowsPath>} 1}
+
+# ===========================================================================
+# 103. Tooling
+
+test trait-explain-api {hir::traits::explain names the first missing or incompatible requirement, with both locations} -body {
+    set hir [surface::compile "trait N:\n    fn a(value: N) -> int\n    fn b(value: N) -> str\nstruct P:\n    v: int\nfn a(p: P) -> int:\n    1\nfn b(p: P) -> int:\n    2\n1\n" -warnings off]
+    hir::traits::explain {nstruct P} N $hir
+} -result {P does not satisfy N
+required:
+    fn b(P) -> str   (declared at <input>:3:8)
+found:
+    fn b(P) -> int   (at <input>:8:1)
+return type int does not satisfy required str}
+
+test trait-report {main.tcl -traits: traits, the conformances the program uses with their implementations, every declared type against every trait (how or why not), and specializations} -body {
+    set hir [moduleHir $principalLib "${principalHeader}struct Thing:\n    v: int\n\[describe(Person {value: \"Alice\"}), describe(services::make_service(\"db\"))\]\n"]
+    hir::traits::report $hir
+} -result {trait ui::named::Named (owner: ui::named)
+    fn name(value: ui::named::Named) -> str
+conformance:
+    Person satisfies ui::named::Named
+        name -> name
+    services::Service satisfies ui::named::Named
+        name -> services::name
+declared types:
+    services::Service satisfies ui::named::Named (name -> services::name)
+    Person satisfies ui::named::Named (name -> name)
+    Thing does not satisfy ui::named::Named: parameter 1 requires Person, which does not admit the required Thing
+trait-polymorphic functions:
+    describe (value: ui::named::Named) -> str
+        describe<Person>   value = Person
+        describe<services::Service>   value = services::Service}
+
+# ===========================================================================
+# 117. Source audit
+
+test trait-source-audit {no compiler or runtime source implements traits with runtime names, method maps, dictionaries, function-pointer tables or backend tags} -body {
+    set hits {}
+    foreach dir {core native/src compiler} {
+        foreach file [glob -nocomplain -directory [file join $::projectRoot $dir] -types f *] {
+            set f [open $file]
+            set text [read $f]
+            close $f
+            foreach pattern {vtable traitcall_indirect lookup_trait_method load_vtable trait_cast trait_tag witness_table trait_dictionary} {
+                if {[string first $pattern $text] >= 0} {
+                    lappend hits [list [file tail $file] $pattern]
+                }
+            }
+        }
+    }
+    set hits
+} -result {}
+
+cleanupTests

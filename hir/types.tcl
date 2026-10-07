@@ -52,6 +52,21 @@
 #                                   depth-truncated struct type, and the
 #                                   runtime kind's own name); no field can
 #                                   be projected from it.
+#   {trait ID}                      a trait *constraint* (TRAITS.md): what a
+#                                   parameter or result annotation naming
+#                                   trait ID resolves to; never a value's type
+#   {trait ID WITNESS}              a *trait view*: a value accepted through
+#                                   trait ID's constraint. Source-visible as
+#                                   ID only (its requirements are its whole
+#                                   interface); WITNESS is the compiler's
+#                                   hidden static provenance -- the concrete
+#                                   witness type, {param E I} (the abstract
+#                                   witness of parameter I of block E) or
+#                                   {join W...} (a rejected join). A view is a
+#                                   subtype of its constraint and of any, of
+#                                   nothing else; no concrete type is a
+#                                   subtype of a constraint (acceptance is
+#                                   hir::traits::Accept, at the boundary)
 #   {mutarray ELEM}                 a MutableArray[ELEM] (PARAMETERIZED-
 #                                   MUTABLEARRAY.md): a mutable object whose
 #                                   static contract is that every slot value
@@ -161,6 +176,14 @@ proc hir::types::resolveNamed {name {ns ""}} {
     if {$id ne ""} {
         return [list nstruct $id]
     }
+    # A trait (TRAITS.md): the same type namespace and visibility rules as a
+    # struct or a source-defined type, `import type` included. A bare
+    # annotation names the constraint; only a parameter or result position
+    # accepts one (every other position rejects it: MentionsTrait).
+    set trait [hir::traits::lookup $name $ns]
+    if {$trait ne ""} {
+        return [list trait $trait]
+    }
     # A source-defined `type`: spelled bare it is the code's own namespace's
     # (declared there) or the one a `import type` of its file binds to that
     # short name; spelled qualified it is exactly that member. Either way the
@@ -217,6 +240,15 @@ proc hir::types::resolveApplication {ctor argTypes} {
     if {[llength $argTypes] != $arity} {
         error "\"$ctor\" takes $arity type argument(s), got [llength $argTypes]"
     }
+    foreach t $argTypes {
+        if {[MentionsTrait $t]} {
+            # A container of trait values would have to carry arbitrary
+            # witnesses: there is no erased/heterogeneous trait
+            # representation (TRAITS.md, "Storage").
+            return -code error -errorcode {BOTLISH TRAIT-STORAGE-UNSUPPORTED} \
+                "$ctor\[[show $t]\] would store trait values: a container element cannot be a trait (there is no erased or heterogeneous trait representation: elements need one concrete witness type)"
+        }
+    }
     switch -- $ctor {
         List { return [MakeList [lindex $argTypes 0] {} 0 0] }
         ImmutableSet { return [MakeSet [lindex $argTypes 0] 0] }
@@ -226,7 +258,92 @@ proc hir::types::resolveApplication {ctor argTypes} {
 
 proc hir::types::IsSpecific {type} {
     return [expr {$type eq "never"
-                  || ([llength $type] > 1 && [lindex $type 0] in {native block list immutableSet mutarray fn struct nstruct})}]
+                  || ([llength $type] > 1 && [lindex $type 0] in {native block list immutableSet mutarray fn struct nstruct trait})}]
+}
+
+# ---------------------------------------------------------------------------
+# Trait types (TRAITS.md; the header's {trait ID} and {trait ID WITNESS})
+
+# 1 if TYPE is a trait constraint or a trait view.
+proc hir::types::IsTrait {type} {
+    return [expr {[lindex $type 0] eq "trait" && [llength $type] in {2 3}}]
+}
+
+# 1 if TYPE is a trait constraint ({trait ID}: an annotation).
+proc hir::types::IsTraitConstraint {type} {
+    return [expr {[lindex $type 0] eq "trait" && [llength $type] == 2}]
+}
+
+# 1 if TYPE is a trait view ({trait ID WITNESS}: a value's type).
+proc hir::types::IsView {type} {
+    return [expr {[lindex $type 0] eq "trait" && [llength $type] == 3}]
+}
+
+proc hir::types::ViewTrait {type} { return [lindex $type 1] }
+proc hir::types::ViewWitness {type} { return [lindex $type 2] }
+
+# The view of trait ID whose hidden witness is WITNESS.
+proc hir::types::MakeView {id witness} {
+    return [list trait $id $witness]
+}
+
+# 1 if WITNESS (a view's hidden witness) is a rejected join of several.
+proc hir::types::IsJoinWitness {witness} {
+    return [expr {[lindex $witness 0] eq "join" && [llength $witness] > 2}]
+}
+
+# 1 if WITNESS is an abstract witness ({param E I}).
+proc hir::types::IsAbstractWitness {witness} {
+    return [expr {[lindex $witness 0] eq "param" && [llength $witness] == 3}]
+}
+
+# 1 if TYPE is or contains a trait type (an element, a field, a function
+# type's argument or result): the positions where a trait cannot appear.
+proc hir::types::MentionsTrait {type} {
+    if {[IsTrait $type]} {
+        return 1
+    }
+    if {[IsList $type] || [IsSet $type] || [IsMutArray $type]} {
+        return [MentionsTrait [lindex $type 1]]
+    }
+    if {[IsFn $type]} {
+        foreach t [FnArgs $type] {
+            if {[MentionsTrait $t]} { return 1 }
+        }
+        return [MentionsTrait [FnReturn $type]]
+    }
+    if {[IsStruct $type]} {
+        foreach {name t} [lindex $type 1] {
+            if {[MentionsTrait $t]} { return 1 }
+        }
+    }
+    return 0
+}
+
+# The hidden witness of a join of views with witnesses A and B: the one
+# witness when they are the same, else {join W...} (sorted, flattened).
+proc hir::types::JoinWitness {a b} {
+    if {$a eq $b} {
+        return $a
+    }
+    set all {}
+    foreach w [list $a $b] {
+        if {[IsJoinWitness $w]} {
+            lappend all {*}[lrange $w 1 end]
+        } else {
+            lappend all $w
+        }
+    }
+    set all [lsort -unique $all]
+    return [expr {[llength $all] == 1 ? [lindex $all 0] : [linsert $all 0 join]}]
+}
+
+# TYPE as an aggregate element/field: a view is erased to any (the concrete
+# runtime value is what is stored; no witness or tag is kept, TRAITS.md
+# "any"), so no List/ImmutableSet/MutableArray/struct type ever has a trait
+# element.
+proc hir::types::Unviewed {type} {
+    return [expr {[IsTrait $type] ? "any" : $type}]
 }
 
 # ---------------------------------------------------------------------------
@@ -270,7 +387,7 @@ proc hir::types::MakeStruct {fields depth} {
         if {$t eq "never"} {
             set t any
         }
-        lappend canonical $name [Unshaped [Bound $t $inner]]
+        lappend canonical $name [Unviewed [Unshaped [Bound $t $inner]]]
     }
     return [list struct $canonical]
 }
@@ -678,7 +795,7 @@ proc hir::types::MakeMutArray {elem depth} {
     if {$elem eq "never"} {
         set elem any
     }
-    return [list mutarray [Unshaped [Bound $elem [expr {$depth + 1}]]]]
+    return [list mutarray [Unviewed [Unshaped [Bound $elem [expr {$depth + 1}]]]]]
 }
 
 # 1 if element contracts A and B are the same contract: identical, or each
@@ -714,7 +831,7 @@ proc hir::types::MakeList {elem {positions {}} {shaped 0} {depth 0}} {
     }
     set inner [expr {$depth + 1}]
     if {$shaped} {
-        set positions [lmap p $positions {Unshaped [Bound $p $inner]}]
+        set positions [lmap p $positions {Unviewed [Unshaped [Bound $p $inner]]}]
         set elem never
         foreach p $positions {
             set elem [lub $elem $p]
@@ -723,7 +840,7 @@ proc hir::types::MakeList {elem {positions {}} {shaped 0} {depth 0}} {
             set shaped 0
         }
     }
-    set elem [Unshaped [Bound $elem $inner]]
+    set elem [Unviewed [Unshaped [Bound $elem $inner]]]
     if {$shaped} {
         return [list list $elem $positions]
     }
@@ -743,7 +860,7 @@ proc hir::types::MakeSet {elem depth} {
     if {$depth >= $aggregateDepth} {
         return immutableSet
     }
-    set elem [Unshaped [Bound $elem [expr {$depth + 1}]]]
+    set elem [Unviewed [Unshaped [Bound $elem [expr {$depth + 1}]]]]
     if {$elem eq "any"} {
         return immutableSet
     }
@@ -867,6 +984,14 @@ proc hir::types::subtype {a b} {
         # differently named struct with the same fields is never one.
         return 0
     }
+    if {[IsTraitConstraint $b]} {
+        # A trait constraint (TRAITS.md) is satisfied, as a type, only by a
+        # view of the same trait with one witness. A concrete type that
+        # satisfies the trait structurally is *accepted* at a trait-typed
+        # boundary (hir::traits::Accept), never a subtype: lub must not join
+        # unrelated types to a trait they happen to satisfy.
+        return [expr {[IsView $a] && [ViewTrait $a] eq [lindex $b 1] && ![IsJoinWitness [ViewWitness $a]]}]
+    }
     if {[IsFn $b]} {
         # A structural function type: any callable whose own call contract
         # is compatible with B's (an exact native/block through its
@@ -892,6 +1017,16 @@ proc hir::types::lub {a b} {
         # is a property of the block expression -- blockType): keep the
         # exact identity, join what its calls return.
         return [canonical [lreplace $a 3 3 [lub [lindex $a 3] [lindex $b 3]]]]
+    }
+    if {[IsTrait $a] && [IsTrait $b] && [lindex $a 1] eq [lindex $b 1]} {
+        # Two views of one trait keep the trait only with one witness: there
+        # is no trait object to hold a choice between two (TRAITS.md, "Witness
+        # joins"). Different witnesses join to a {join ...} witness, which
+        # hir::traits::verify reports (TRAIT-WITNESS-JOIN) -- never any.
+        if {[IsTraitConstraint $a] || [IsTraitConstraint $b]} {
+            return [list trait [lindex $a 1]]
+        }
+        return [MakeView [lindex $a 1] [JoinWitness [ViewWitness $a] [ViewWitness $b]]]
     }
     if {[IsList $a] && [IsList $b]} {
         set elem [lub [lindex $a 1] [lindex $b 1]]
@@ -984,6 +1119,12 @@ proc hir::types::narrow {current fact} {
     if {$fact eq "any" || $current eq "never"} {
         return $current
     }
+    if {[IsTrait $current]} {
+        # A trait view is never strengthened by a fact about its value (a
+        # kind test, a native's parameter type): its source-visible type is
+        # its trait, whatever runs underneath (TRAITS.md, "One-way").
+        return $current
+    }
     if {[IsList $current] && [IsList $fact]} {
         set elem [narrow [lindex $current 1] [lindex $fact 1]]
         set positions [shapeOf $current]
@@ -1053,7 +1194,7 @@ proc hir::types::IsEqualityTotal {type} {
 
 # The runtime value kind every value of TYPE has, or "" if not fixed.
 proc hir::types::kindOf {type} {
-    if {$type eq "never" || [IsFn $type]} {
+    if {$type eq "never" || [IsFn $type] || [IsTrait $type]} {
         # A structural function type's value is a Block or a native: no
         # one runtime kind.
         return ""
@@ -1069,7 +1210,7 @@ proc hir::types::kindOf {type} {
 
 # The core type (core/type.tcl) a static type implies.
 proc hir::types::semantic {type} {
-    if {$type eq "never" || [IsFn $type]} {
+    if {$type eq "never" || [IsFn $type] || [IsTrait $type]} {
         return any
     }
     if {[IsStructLike $type]} {
@@ -1146,6 +1287,12 @@ proc hir::types::show {type} {
             nstruct {
                 # A named struct, by its declared name.
                 return [hir::structs::display [lindex $type 1]]
+            }
+            trait {
+                # A trait constraint or view, by the trait's name only: the
+                # source-visible type (a view's hidden witness is shown by
+                # hir::traits::showView, never in a source-level message).
+                return [lindex $type 1]
             }
             immutableSet {
                 # Same convention as List[T] above: the canonical applied-
@@ -1984,7 +2131,9 @@ proc hir::types::Block {hirVar outerVar e self} {
     }
     hir::semantic::RecordEnv $hir $outer $e $self $selfType
     set declared [dict get $node declaredResult]
-    set assumed [expr {$declared eq {} ? {never} : $declared}]
+    # A declared trait result is a view whose witness the body decides
+    # (hir::traits::ViewResult), so it is inferred like an undeclared one.
+    set assumed [expr {$declared eq {} || [IsTraitConstraint $declared] ? {never} : $declared}]
     set attempts [expr {$self eq "" ? 1 : 3}]
     for {set attempt 1} {$attempt <= $attempts} {incr attempt} {
         if {$attempt == $attempts && $attempts > 1} {
@@ -2015,10 +2164,18 @@ proc hir::types::Block {hirVar outerVar e self} {
         # (hir::signatures::entryTypes, INTRINSIC-FUNCTION-CONTRACT-
         # INFERENCE.md): every call is held to it exactly like a
         # declaration, so the body may assume it the same way.
+        set index 0
         foreach b [dict get $node params] declaredType [hir::signatures::entryTypes $hir $e] {
             if {$declaredType ne {}} {
+                if {[IsTraitConstraint $declaredType]} {
+                    # A trait-typed parameter (TRAITS.md): the body sees a
+                    # view of the trait whose witness is this parameter's
+                    # own, unknown and independent of every other's.
+                    set declaredType [hir::traits::AbstractView $declaredType $e $index]
+                }
                 dict set ctx types $b $declaredType
             }
+            incr index
         }
         set body [Sequence hir ctx [dict get $node body]]
         set result [lub $body [dict get $ctx returnType]]
@@ -2028,7 +2185,7 @@ proc hir::types::Block {hirVar outerVar e self} {
         set assumed $result
     }
     dict set hir exprs $e inferredResultType [intern hir $result]
-    if {$declared ne {}} { set result $declared }
+    if {$declared ne {}} { set result [hir::traits::ViewResult $declared $result] }
     dict set hir exprs $e resultType [intern hir $result]
     return [blockType $hir $e $arity $result]
 }
@@ -2056,6 +2213,19 @@ proc hir::types::Call {hirVar ctxVar e} {
     set known ""
     set result any
     set spec [dict exists $ctx spec]
+    if {!$spec} {
+        # A method-syntax call whose receiver is a trait view is an operation
+        # of the trait (TRAITS.md): typed from the requirement, never from
+        # whatever function of that name the code can see.
+        set traitCall [hir::traits::TypeCall hir $e $node]
+        if {$traitCall ne ""} {
+            lassign $traitCall result calleeErrors
+            dict set hir exprs $e target ""
+            dict set hir exprs $e known ""
+            dict set hir exprs $e calleeErrors $calleeErrors
+            return [expr {$dead ? "never" : $result}]
+        }
+    }
     if {[lindex $calleeType 0] eq "native" && [llength $calleeType] == 2} {
         set name [lindex $calleeType 1]
         set target [list native [hir::resolve::nativeSymbol hir $name]]
@@ -2138,6 +2308,9 @@ proc hir::types::Call {hirVar ctxVar e} {
             }
         }
         if {$arity == [llength $argExprs]} {
+            # A view the callee returns of one of its own trait parameters is
+            # the caller's argument's view (TRAITS.md, "Provenance").
+            set blockResult [hir::traits::SubstituteResult $blockResult $block $argTypes]
             set result $blockResult
             if {$spec && !$dead && [dict get $ctx reachable]} {
                 set result [{*}[dict get $ctx spec] call $e $block $argTypes]
@@ -2150,7 +2323,10 @@ proc hir::types::Call {hirVar ctxVar e} {
                 set rule [hir::containers::RuleOf $hir $block]
                 if {$rule ne ""} {
                     set result [hir::containers::CallResult $rule $argTypes $result]
-                } elseif {!$spec && [dict get $ctx reachable]} {
+                } elseif {!$spec && ([dict get $ctx reachable] || [hir::traits::IsPolymorphic $hir $block])} {
+                    # (A call of a trait-polymorphic function always gets its
+                    # instance, reachable or not: its witnesses decide which
+                    # specialization the call is, TRAITS.md.)
                     # An opportunistic semantic instance of the callee
                     # (hir/semantic.tcl): its ordinary body analyzed under
                     # this call's concrete argument types. The call is

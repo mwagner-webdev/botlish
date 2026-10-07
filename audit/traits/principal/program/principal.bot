@@ -1,0 +1,17 @@
+import ui::named
+import services
+import type ui::named::Named
+
+struct Person:
+    value: str
+
+fn name(value: Person) -> str:
+    value.value
+
+fn describe(value: Named) -> str:
+    value.name()
+
+fn describe_person(value: Person) -> str:
+    value.name()
+
+[describe(Person {value: "Alice"}), describe(services::make_service()), describe_person(Person {value: "Bob"})]

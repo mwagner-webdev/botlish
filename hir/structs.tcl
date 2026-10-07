@@ -94,8 +94,8 @@ proc hir::structs::Reset {} {
     set registry [dict create]
 }
 
-proc hir::structs::Fail {span message} {
-    core::semanticError TYPE "[dict get $span file]:[dict get $span line]:[dict get $span column]: $message"
+proc hir::structs::Fail {span message {kind TYPE}} {
+    core::semanticError $kind "[dict get $span file]:[dict get $span line]:[dict get $span column]: $message"
 }
 
 # The declaration identity a struct NAME declared in module NAMESPACE (""
@@ -294,10 +294,19 @@ proc hir::structs::apply {decls} {
         foreach field [dict get $decl fields] {
             set fieldName [dict get $field name]
             set typeExpr [dict get $field type]
-            if {[catch {hir::resolve::ResolveTypeExpr $typeExpr $ns} resolved]} {
+            if {[catch {hir::resolve::ResolveTypeExpr $typeExpr $ns} resolved options]} {
                 Fail [dict get $field typeSpan] \
                     [format {unknown or invalid type %s for field "%s" of struct "%s": %s} \
-                        [hir::resolve::ShowTypeExpr $typeExpr] $fieldName $name $resolved]
+                        [hir::resolve::ShowTypeExpr $typeExpr] $fieldName $name $resolved] \
+                    [hir::resolve::TypeErrorKind $options TYPE]
+            }
+            if {[hir::types::MentionsTrait $resolved]} {
+                # A stored trait value would need its witness stored beside
+                # it: an existential representation this milestone does not
+                # have (TRAITS.md, "Storage").
+                Fail [dict get $field typeSpan] \
+                    [format {field "%s" of struct "%s" cannot have trait type %s: a struct field stores one concrete representation, and there is no erased or heterogeneous trait representation (store a concrete type)} \
+                        $fieldName $name [hir::types::show $resolved]] TRAIT-STORAGE-UNSUPPORTED
             }
             lappend types $fieldName $resolved
         }
@@ -382,6 +391,11 @@ proc hir::structs::addDecls {decls} {
 # "": the projection E is proven in HIR's current types; else {KIND MESSAGE}
 # (KIND UNPROVEN-FIELD is the one an instance may cure).
 proc hir::structs::ProjectionProblem {hir e} {
+    if {[dict exists $hir exprs $e traitCallee]} {
+        # The `receiver.op` of a trait operation (TRAITS.md) with no function
+        # `op` visible: not a field access (hir::traits::TypeCall).
+        return ""
+    }
     set node [dict get $hir exprs $e]
     set receiver [dict get $node receiver]
     set type [hir::typeOf $hir $receiver]
