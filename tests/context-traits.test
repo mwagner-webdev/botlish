@@ -797,4 +797,21 @@ test ct-no-traits-unchanged {a program that declares no trait or context trait i
     list [dict exists $hir traitSource] [dict exists $hir traits]
 } -result {0 0}
 
+test ct-source-audit {no backend implements context traits: core/, compiler/ and native/ never name a library context trait, context or refinement, never read the trait registry, satisfaction or selection, and the only context-trait mention below HIR is the dead-code placeholder's comment} -body {
+    set hits {}
+    foreach dir {core compiler native native/src native/src/codegen native/src/runtime} {
+        foreach file [glob -nocomplain -directory [file join $::projectRoot $dir] *.tcl *.rs] {
+            set f [open $file r]
+            set text [read $f]
+            close $f
+            foreach pattern {io::IO LinuxIO LinuxPath io::path satisfiesTrait isContext selections hir::traits:: contextClone traitImpl} {
+                if {[string first $pattern $text] >= 0} {
+                    lappend hits [list [file tail $file] $pattern]
+                }
+            }
+        }
+    }
+    lsort -unique $hits
+} -result {}
+
 cleanupTests

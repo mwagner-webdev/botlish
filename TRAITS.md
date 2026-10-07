@@ -459,6 +459,11 @@ Trait metadata (the registry, the implementation mapping per `{type,
 trait}`, the plan's per-operation actions) is kept so such a rule can be
 added later without changing the basic theorem.
 
+(Since CONTEXT-TRAITS.md: `context trait` declarations, satisfied by
+installed contexts through their owners' functions with one context
+parameter, selected statically per top-level call, and monomorphized by the
+same plan. Ordinary trait requirements still take no context parameter.)
+
 ## Diagnostics
 
 | code | where |
