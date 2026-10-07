@@ -1,0 +1,162 @@
+# value-display.test -- how a String and a UnicodeChar are displayed
+# (core::value::show, core/value.tcl; native/src/runtime/show.rs renders the
+# same text for the native runtime's own messages and a standalone
+# executable's output): each in its own quotes, escaping the lexer's escape
+# set (surface/lexer.tcl, `String` and `Char`) -- backslash, newline, carriage
+# return, tab and the kind's own quote -- and writing every other character
+# raw. So both kinds escape the same control characters, the display of such
+# a value is a literal that denotes it, and no display carries a raw carriage
+# return (a terminal takes one as "back to the start of the line").
+#
+# The native backends hand a value or a message back to Tcl as Tcl list text
+# (show.rs's tcl_value and tcl_element), so every control character a String
+# can hold has to survive that transport too before it is displayed.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+
+set scratch [makeDirectory value-display-scratch]
+
+# The text between the quotes of a display.
+proc inner {shown} {
+    return [string range $shown 1 end-1]
+}
+
+# Every ASCII control character but the line feed, which a String literal
+# cannot hold raw, and DEL.
+proc controls {} {
+    set text ""
+    foreach code [list {*}[lseq 0 9] {*}[lseq 11 31] 127] {
+        append text [format %c $code]
+    }
+    return $text
+}
+
+# TEXT as the body of a String literal: the lexer's escapes where the source
+# needs one or the test wants one, every other character raw.
+proc literalBody {text} {
+    return [string map {\\ \\\\ \" \\\" \n \\n \r \\r \t \\t} $text]
+}
+
+# A list literal of one one-character String per control character, then a
+# String of all of them; and that list as a runtime value.
+proc controlsSource {} {
+    set items [lmap ch [split [controls] ""] {string cat \" [literalBody $ch] \"}]
+    lappend items "\"[literalBody [controls]]\""
+    return "\[[join $items {, }]\]"
+}
+proc controlsValue {} {
+    set items [lmap ch [split [controls] ""] {core::value::str $ch}]
+    lappend items [core::value::str [controls]]
+    return [core::value::listOf $items]
+}
+
+# The outcome (sourceAgree's shape) of source TEXT compiled with -strict 0, so
+# that its type error is left to run time, on every backend -- or a Tcl error
+# naming every outcome when they do not all agree.
+proc laxAgree {text} {
+    set hir [surface::compile $text -strict 0 -warnings off]
+    set outcomes [lmap backend {interp compile cranelift-generic cranelift} {
+        lrange [outcomeUnderHir $backend $hir] 0 end-1
+    }]
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        error "mismatch: $outcomes"
+    }
+    return [lindex $outcomes 0]
+}
+
+# ---------------------------------------------------------------------------
+# A program's value, on every backend.
+
+test value-display-carriage-return {a String holding a carriage return displays it as \r, as a UnicodeChar does, on every backend} -body {
+    sourceAgree {["\r", "a\rb", "\r\n", '\r']}
+} -result {value {["\r", "a\rb", "\r\n", '\r']}}
+
+test value-display-is-the-literal {each escape of either kind displays as the literal that denotes it, on every backend} -body {
+    set source {["\\", "\"", "'", "\n", "\r", "\t", '\\', '\'', '"', '\n', '\r', '\t']}
+    expr {[sourceAgree $source] eq [list value $source]}
+} -result 1
+
+test value-display-controls {every ASCII control character, alone and together, survives the native backends' transport and displays the same on every backend, carriage return escaped} -body {
+    set outcome [sourceAgree [controlsSource]]
+    list [lindex $outcome 0] [expr {[lindex $outcome 1] eq [core::value::show [controlsValue]]}] \
+        [string first \r [lindex $outcome 1]]
+} -result {value 1 -1}
+
+# ---------------------------------------------------------------------------
+# The two kinds' escapes, over code points.
+
+test value-display-same-escapes {a one-character String and the UnicodeChar of the same code point display the same text between their quotes, except for the two quote characters; exactly backslash, newline, carriage return and tab are escaped} -body {
+    set differ {}
+    set escaped {}
+    foreach code [list {*}[lseq 0 767] 8232 65279 128512 1114111] {
+        if {$code in {34 39}} continue
+        set ch [format %c $code]
+        set string [inner [core::value::show [core::value::str $ch]]]
+        set char [inner [core::value::show [core::value::char $code]]]
+        if {$string ne $char} { lappend differ $code }
+        if {$string ne $ch} { lappend escaped $code $string }
+    }
+    list $differ $escaped [lmap v [list [core::value::str \"] [core::value::char 39] \
+        [core::value::str '] [core::value::char 34]] {core::value::show $v}]
+} -result [list {} {9 {\t} 10 {\n} 13 {\r} 92 {\\}} [list {"\""} {'\''} {"'"} {'"'}]]
+
+# ---------------------------------------------------------------------------
+# The native runtime's own rendering: a runtime type error names the value it
+# got, rendered by show.rs on cranelift and cranelift-generic and by
+# core::value::show on interp and compile.
+
+test value-display-native-message {a runtime error naming a String or a UnicodeChar with a carriage return renders it escaped, the same on every backend} -body {
+    list [laxAgree "fn inc(x):\n    x + 1\n\ninc(\"a\\rb\")"] \
+        [laxAgree "fn inc(x):\n    x + 1\n\ninc('\\r')"]
+} -result {{error {CORE SEMANTIC TYPE} {+: expected int, got "a\rb"}} {error {CORE SEMANTIC TYPE} {+: expected int, got '\r'}}}
+
+test value-display-native-message-controls {a runtime error naming a String of every ASCII control character renders it as core::value::show does, on every backend} -body {
+    set outcome [laxAgree "fn inc(x):\n    x + 1\n\ninc(\"[literalBody [controls]]\")"]
+    list [lrange $outcome 0 1] \
+        [expr {[lindex $outcome 2] eq "+: expected int, got [core::value::show [core::value::str [controls]]]"}]
+} -result {{error {CORE SEMANTIC TYPE}} 1}
+
+# ---------------------------------------------------------------------------
+# Printed output: main.tcl's value line, and a standalone executable's stdout
+# (show.rs). Both are read back without end-of-line translation, so a raw
+# carriage return could not be translated away.
+
+test value-display-main {main.tcl prints a value holding a carriage return escaped, on every backend} -body {
+    set path [file join $scratch main.bot]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts $channel {["a\rb", '\r']}
+    close $channel
+    lmap backend {interp compile cranelift-generic cranelift} {
+        set channel [open |[list [info nameofexecutable] [file join $::projectRoot main.tcl] -backend $backend $path] r]
+        fconfigure $channel -translation lf -encoding utf-8
+        set output [read $channel]
+        close $channel
+        lindex [split $output \n] 1
+    }
+} -result [lrepeat 4 {   value: ["a\rb", '\r']}]
+
+test value-display-executable {a standalone executable prints a carriage return escaped, and every ASCII control character as core::value::show does} -constraints executableAot -body {
+    set lines {}
+    foreach {source value} [list {["a\rb", "\r", '\r']} {} [controlsSource] [controlsValue]] {
+        set path [file join $scratch executable]
+        native::executable [surface::compile $source -warnings off] $path
+        set channel [open |[list env PATH= $path] r]
+        fconfigure $channel -translation lf -encoding utf-8
+        set output [read $channel]
+        close $channel
+        file delete $path
+        if {$value ne ""} {
+            set output [expr {$output eq "[core::value::show $value]\n"}]
+        }
+        lappend lines $output
+    }
+    set lines
+} -result [list "\[\"a\\rb\", \"\\r\", '\\r'\]\n" 1]
+
+removeDirectory value-display-scratch
+
+::tcltest::cleanupTests

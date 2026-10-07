@@ -490,7 +490,10 @@ proc core::value::show {v {debug 0} {reveal 0}} {
     switch -- [kind $v] {
         int  { return [lindex $v 1] }
         str  {
-            set escaped [string map {\\ \\\\ \" \\\" \n \\n \t \\t} [lindex $v 1]]
+            # The lexer's escape set, as for a UnicodeChar below (with \"
+            # for \'): the display is a literal denoting the String, and
+            # never carries a raw line break or carriage return.
+            set escaped [string map {\\ \\\\ \" \\\" \n \\n \r \\r \t \\t} [lindex $v 1]]
             return "\"$escaped\""
         }
         bool { return [lindex $v 1] }

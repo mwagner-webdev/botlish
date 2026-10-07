@@ -2239,6 +2239,23 @@ mod tests {
     }
 
     #[test]
+    fn a_string_and_a_character_show_the_same_escapes() {
+        // core::value::show: the lexer's escape set, each kind in its own
+        // quotes; a carriage return is never written raw.
+        use crate::runtime::show::show;
+        let mut vm = vm();
+        for (c, shown) in [('\\', "\\\\"), ('\n', "\\n"), ('\r', "\\r"), ('\t', "\\t"), ('a', "a"), ('é', "é")] {
+            let s = str_val(&mut vm, &c.to_string());
+            assert_eq!(show(s), format!("\"{shown}\""));
+            assert_eq!(show(make_char(c as u32)), format!("'{shown}'"));
+        }
+        let quotes = str_val(&mut vm, "\"'");
+        assert_eq!(show(quotes), "\"\\\"'\"");
+        assert_eq!(show(make_char('\'' as u32)), "'\\''");
+        assert_eq!(show(make_char('"' as u32)), "'\"'");
+    }
+
+    #[test]
     fn struct_fields_are_traced_and_reclaimed() {
         use crate::runtime::metrics::GcReason;
         let mut vm = vm_with_shapes(&[(None, &["a", "b"])]);

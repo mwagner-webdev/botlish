@@ -17,12 +17,16 @@ fn show_into(v: Value, out: &mut String) {
     match kind_of(v) {
         Kind::Int => out.push_str(&int_text(v)),
         Kind::Str => {
+            // Matches core::value::show's String rendering exactly
+            // (core/value.tcl): the escapes of a character, below, with `"`
+            // for `'`.
             out.push('"');
             for c in str_of(v).as_str().chars() {
                 match c {
                     '\\' => out.push_str("\\\\"),
                     '"' => out.push_str("\\\""),
                     '\n' => out.push_str("\\n"),
+                    '\r' => out.push_str("\\r"),
                     '\t' => out.push_str("\\t"),
                     c => out.push(c),
                 }
@@ -236,7 +240,10 @@ pub fn tcl_element(s: &str) -> String {
     if s.is_empty() {
         return "{}".to_string();
     }
-    let special = |c: char| matches!(c, ' ' | '\t' | '\n' | '\r' | ';' | '$' | '[' | ']' | '{' | '}' | '"' | '\\');
+    // Tcl's list parser separates elements at every one of ' ' \t \n \v \f \r.
+    let special = |c: char| {
+        matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r' | ';' | '$' | '[' | ']' | '{' | '}' | '"' | '\\')
+    };
     if !s.contains(special) && !s.starts_with('#') {
         return s.to_string();
     }
@@ -249,6 +256,8 @@ pub fn tcl_element(s: &str) -> String {
         match c {
             '\n' => out.push_str("\\n"),
             '\t' => out.push_str("\\t"),
+            '\x0b' => out.push_str("\\v"),
+            '\x0c' => out.push_str("\\f"),
             '\r' => out.push_str("\\r"),
             c if special(c) || c == '#' => {
                 out.push('\\');
