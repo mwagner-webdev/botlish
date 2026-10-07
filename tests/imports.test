@@ -515,6 +515,43 @@ test imports-type-qualified-reference {a qualified type annotation needs only im
     }
 } -result {6 MISSING-IMPORT}
 
+# A module that owns an integer domain and a refinement (it spells them bare
+# and qualified), one that uses them qualified after `import qtypes` (also as
+# a refinement's carrier), and one that uses them through `import type` alone.
+proc writeQualifiedTypeModules {dir} {
+    writeModule $dir qtypes "import str\n\ntype Small = Int in 0..10\nrefined type Word = str\n\nfn mk(n: Small) -> Small:\n    n\n\nfn word?(s: str) -> bool proves s: Word:\n    str::length(s) > 2\n\nfn own(x: qtypes::Small) -> qtypes::Small:\n    x\n"
+    writeModule $dir quser "import qtypes\nimport str\n\nrefined type Phrase = qtypes::Word\n\nfn f(x: qtypes::Small) -> int:\n    x + 1\n\nfn len(w: qtypes::Word) -> int:\n    str::length(w)\n\nfn g(s: str) -> int:\n    if qtypes::word?(s):\n        len(s)\n    else:\n        0\n"
+    writeModule $dir qshort "import str\nimport type qtypes::Small\nimport type qtypes::Word\n\nfn f(x: Small) -> int:\n    x + 2\n\nfn len(w: Word) -> int:\n    str::length(w)\n"
+}
+
+test imports-type-qualified-reference-from-module {a module names another module's integer domain and refinement qualified after its import, or short after import type: one identity, every backend} -body {
+    withScratchLibrary {
+        writeQualifiedTypeModules $dir
+        set source "import qtypes\nimport quser\nimport qshort\n\nfn h(s: str) -> int:\n    if qtypes::word?(s):\n        qshort::len(s)\n    else:\n        0\n\n\[quser::f(qtypes::mk(3)), qshort::f(qtypes::mk(3)), qtypes::own(4), quser::g(\"abcd\"), quser::g(\"ab\"), h(\"abcde\")\]\n"
+        set hir [hirOfSource $source]
+        set types {}
+        foreach e [hir::walk $hir] {
+            if {[hir::kind $hir $e] eq "block" && [dict exists [hir::node $hir $e] declaredParamTypes]} {
+                set d [dict get [hir::node $hir $e] declaredParamTypes]
+                if {[llength $d] == 1 && [lindex $d 0] ne ""} {lappend types [hir::types::show [lindex $d 0]]}
+            }
+        }
+        list [agree $source] [lsort -unique $types]
+    }
+} -result {{[4, 5, 4, 4, 0, 5]} {{int[qtypes::Small]} str {str[qtypes::Word]}}}
+
+test imports-type-qualified-reference-from-module-authorization {in a module too, a qualified type needs its namespace imported, and the owner alone mints a refinement} -body {
+    withScratchLibrary {
+        writeQualifiedTypeModules $dir
+        writeModule $dir qnoimport "fn f(x: qtypes::Small):\n    x\n"
+        writeModule $dir qtypeonly "import type qtypes::Small\n\nfn f(x: Small, w: qtypes::Word):\n    x\n"
+        writeModule $dir qmint "import qtypes\n\nfn fake?(s: str) -> bool proves s: qtypes::Word:\n    true\n"
+        list [rejectionKind "import qtypes\nimport qnoimport\nqnoimport::f(qtypes::mk(1))\n"] \
+            [rejectionKind "import qtypes\nimport qtypeonly\nqtypeonly::f(qtypes::mk(1), \"w\")\n"] \
+            [rejectionKind "import qmint\nqmint::fake?(\"w\")\n"]
+    }
+} -result {MISSING-IMPORT MISSING-IMPORT REFINEMENT-MINT-AUTHORITY}
+
 test imports-type-import-short-name {import type binds exactly one short type name} -body {
     withScratchLibrary {
         writeFixtures $dir
