@@ -1,6 +1,7 @@
 # strings.tcl -- native string operations: the `str` namespace's
 # intrinsics (str::length, str::substring, str::lowercase, str::concat,
-# str::encode_utf8; core/tclcompat.tcl adds str::is_tcl_alpha/alnum).
+# str::encode_utf8, str::char_at; core/tclcompat.tcl adds
+# str::is_tcl_alpha/alnum).
 # Each is a root native registered under its qualified name
 # (core::native::isQualifiedNative): there is no lib/str.bot module, and a
 # future one could add other members but never redefine these
@@ -75,6 +76,25 @@ proc core::strings::encodeUtf8 {s} {
     return [core::value::listOf $bytes]
 }
 
+# (str::char_at S I): the Unicode scalar at character index I (the index
+# space of length and substring) as a UnicodeChar, 0 <= I < length(S); any
+# other Int fails with the declared builtin error IndexNotFound, exactly like
+# list::at. The one operation that reads a String's characters as values: a
+# UnicodeChar is compared with char literals ('%') and measured with
+# char::scalar_value, so classifying the characters of a String needs neither
+# a one-character String per position nor str::encode_utf8's List
+# (ENCODE-UTF8-ALLOCATION-RESEARCH.md). Total over its domain, never
+# allocates. Mirrors native/src/runtime/ops.rs's rt_str_char_at.
+proc core::strings::charAt {s index} {
+    set text [Text $s str::char_at]
+    set i [core::value::intOf [core::value::expect int $index str::char_at]]
+    if {$i < 0 || $i >= [string length $text]} {
+        core::native::failDeclared IndexNotFound \
+            "str::char_at: index $i is outside 0..[expr {[string length $text] - 1}]"
+    }
+    return [core::value::char [scan [string index $text $i] %c]]
+}
+
 core::native::register str::length    -arity 1 -impl core::strings::length \
     -param-types {str} -result-type int -runtime char-index -result-range collection-length -context-free 1
 core::native::register str::substring -arity 3 -impl core::strings::substring \
@@ -88,3 +108,6 @@ core::native::register str::concat    -arity 2 -impl core::strings::concat \
 core::native::register str::encode_utf8 -arity 1 -impl core::strings::encodeUtf8 \
     -param-types {str} -result-type list -runtime list-alloc -context-free 1 \
     -result-shape {typed byte::Byte 0 255}
+core::native::register str::char_at -arity 2 -impl core::strings::charAt \
+    -param-types {str int} -result-type UnicodeChar -runtime {char-index range-check} \
+    -context-free 1 -errors IndexNotFound -bounds {index str 0 1}

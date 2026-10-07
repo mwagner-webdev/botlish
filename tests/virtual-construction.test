@@ -387,7 +387,13 @@ test vc-types-2 {types, instance keys and function counts are identical with vir
     list [parity $text] [expr {[typeCensus $text 1] eq [typeCensus $text 0]}]
 } -result {{value {["<0<1<2<3", [0, 1, 2, 3]]}} 1}
 
-test vc-identity-uri-1 {uri-steady: the four URI helpers' own instance family is identical with virtual construction on and off, instance count unchanged, while their String materializations collapse; MODULE-STATIC-RETAINED-VALUES.md: they are no longer forced <generic> at all -- web::is_unreserved (reached transitively through esc_char) is envless now, so nothing downstream of it is closure-valued either, and every helper specializes on its own real argument types instead} -body {
+# ENCODE-UTF8-ALLOCATION-RESEARCH.md: uri_escape_text's helpers are now
+# hex_pair, pct, cont, esc_scalar and esc_from (esc_char/esc_bytes are gone:
+# characters are read with str::char_at, a non-ASCII scalar's bytes are
+# computed by esc_scalar), and the per-character one-character Strings are
+# gone too, so the String counts are 39500 (off) and 2000 (on: only the
+# results).
+test vc-identity-uri-1 {uri-steady: the URI helpers' own instance family is identical with virtual construction on and off, instance count unchanged, while their String materializations collapse; MODULE-STATIC-RETAINED-VALUES.md: they are no longer forced <generic> at all -- web::is_unreserved (reached through esc_from) is envless now, so nothing downstream of it is closure-valued either, and every helper specializes on its own real argument types instead} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
     set rows {}
     foreach opt {0 1} {
@@ -399,12 +405,12 @@ test vc-identity-uri-1 {uri-steady: the four URI helpers' own instance family is
             [native::Outcome [native::Driver run [dict get $lowered text]]]]
     }
     lassign $rows off on
-    set helpers [lmap name {hex_pair esc_bytes esc_char esc_from} {
+    set helpers [lmap name {hex_pair pct cont esc_scalar esc_from} {
         expr {[lsearch -glob [lindex $on 0] "$name<*"] >= 0}
     }]
     list [expr {[lindex $off 0] eq [lindex $on 0]}] [expr {[lindex $off 1] == [lindex $on 1]}] $helpers \
         [lindex $off 3] [lindex $on 3] [lindex $off 2] [lindex $on 2]
-} -result {1 1 {1 1 1 1} {int 29500} {int 29500} 47500 16000}
+} -result {1 1 {1 1 1 1 1} {int 29500} {int 29500} 39500 2000}
 
 test vc-identity-uri-2 {the URI helpers expose their construction to exact callers without a new identity; MODULE-STATIC-RETAINED-VALUES.md: they now specialize on their own real (exact) argument types, not <generic> -- module-static references no longer force genericity through the closure chain that used to reach web::is_unreserved} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
@@ -414,7 +420,7 @@ test vc-identity-uri-2 {the URI helpers expose their construction to exact calle
     set results [lsort [lmap id [dict keys [dict get $analysis results]] {hir::specialize::label $spec $id}]]
     set params [lsort [lmap id [dict keys [dict get $analysis params]] {hir::specialize::label $spec $id}]]
     list $results $params
-} -result {{{esc_bytes<List[int], int, str>} esc_char<str> hex_pair<int>} {{esc_bytes<List[int], int, str>} {esc_from<str, int, str>}}}
+} -result {{{cont<int, int>} esc_scalar<int> hex_pair<int> pct<int>} {{esc_from<str, int, str>}}}
 
 # ---------------------------------------------------------------------------
 # The NIR plan discipline (nir.rs's validate_plans) rejects every misuse

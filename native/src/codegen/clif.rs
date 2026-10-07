@@ -1621,6 +1621,48 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             ILt | ILe | IGt | IGe | IEq => self.int_compare(op, a[0], a[1]),
             ListGet if self.listget_fast => self.list_get(a[0], a[1]),
             ListGetProven if self.listget_fast => self.list_get_proven(a[0], a[1]),
+            // Inline String/UnicodeChar reads (ENCODE-UTF8-ALLOCATION-
+            // RESEARCH.md): a character scan over str::length, str::char_at
+            // and char::scalar_value runs without a helper call on ASCII text.
+            // The String's character count, re-tagged as a small Int.
+            StrLen => {
+                let chars = self.b.ins().load(I64, MemFlagsData::trusted(), a[0], STR_CHARS_OFFSET);
+                let shifted = self.b.ins().ishl_imm_s(chars, 1);
+                self.b.ins().bor_imm_s(shifted, 1)
+            }
+            // char::scalar_value: the immediate's payload (cp << 3 | CHAR_TAG)
+            // re-tagged as a small Int (cp << 1 | 1); never fails.
+            CharCodepoint => {
+                let cp = self.b.ins().ushr_imm_s(a[0], 3);
+                let shifted = self.b.ins().ishl_imm_s(cp, 1);
+                self.b.ins().bor_imm_s(shifted, 1)
+            }
+            // str::char_at at a proven index: an ASCII String's character I is
+            // its text byte I; otherwise rt_str_char_at_proven decodes.
+            StrCharAtProven => {
+                let ascii_path = self.b.create_block();
+                let wide = self.b.create_block();
+                let done = self.b.create_block();
+                let result = self.b.append_block_param(done, I64);
+                let ascii = self.b.ins().uload8(I64, MemFlagsData::trusted(), a[0], STR_ASCII_OFFSET);
+                self.b.ins().brif(ascii, ascii_path, &[], wide, &[]);
+                self.b.switch_to_block(ascii_path);
+                let idx = self.b.ins().sshr_imm_s(a[1], 1);
+                let addr = self.b.ins().iadd(a[0], idx);
+                let byte = self.b.ins().uload8(I64, MemFlagsData::trusted(), addr, STR_TEXT_OFFSET as i32);
+                let shifted = self.b.ins().ishl_imm_s(byte, 3);
+                let ch = self.b.ins().bor_imm_s(shifted, CHAR_TAG as i64);
+                self.b.ins().jump(done, &[BlockArg::Value(ch)]);
+                self.b.switch_to_block(wide);
+                let v = self.call_helper("rt_str_char_at_proven", &[self.vm, a[0], a[1]]);
+                self.b.ins().jump(done, &[BlockArg::Value(v)]);
+                self.b.switch_to_block(done);
+                result
+            }
+            CharEq => {
+                let eq = self.b.ins().icmp(IntCC::Equal, a[0], a[1]);
+                self.bool_of(eq)
+            }
             VEq => {
                 // Two small Ints compare as words; everything else structurally.
                 let (fast, slow, done, result) = self.both_small_split(a[0], a[1]);
@@ -1797,8 +1839,9 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         RegionCheck => ("rt_str_region_check", None, true, None),
                         RegionEq => ("rt_str_region_eq", None, false, None),
                         StrEq => ("rt_str_eq", None, false, None),
-                        StrLen => ("rt_str_len", None, false, None),
                         StrByteLen => ("rt_str_byte_len", None, false, None),
+                        StrCharAt => ("rt_str_char_at", None, true, None),
+                        StrCharAtProven => ("rt_str_char_at_proven", None, false, None),
                         // The owned byte storage (ABI-BYTES.md). from_list
                         // allocates one object (or returns the static empty
                         // one) and is fallible (a non-byte element is TYPE);
@@ -1978,10 +2021,6 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         IsError => ("rt_is_result", Some(0), false, None),
                         ResultValue => ("rt_result_payload", Some(1), true, None),
                         ResultError => ("rt_result_payload", Some(0), true, None),
-                        // Total, never fails, never allocates (always an
-                        // immediate small Int result): see ops.rs's
-                        // rt_char_codepoint.
-                        CharCodepoint => ("rt_char_codepoint", None, false, None),
                         MkOk | MkError => {
                             let ok = self.iconst((op == MkOk) as u64);
                             let operation = if op == MkOk { "mkok" } else { "mkerror" };

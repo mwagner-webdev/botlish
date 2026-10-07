@@ -6,11 +6,14 @@
 # core IR, pasted into every call site) and into this ordinary cross-file
 # Botlish module definition, so it is resolved and compiled once, like any
 # other function, instead of copied. It is the same algorithm as the
-# removed lib/web.tcl native's Tcl implementation, over the general
-# core/strings.tcl native str::encode_utf8 (str -> List[Byte], one UTF-8 byte per
-# element, STATIC-COMPLETION-PROOFS.md item 25): percent-encode every UTF-8
+# removed lib/web.tcl native's Tcl implementation: percent-encode every UTF-8
 # byte of s except the RFC 3986 unreserved characters (A-Za-z0-9._~-), as
-# uppercase %XX.
+# uppercase %XX. It reads s one character at a time with str::char_at
+# (core/strings.tcl: str -> UnicodeChar, no allocation) and
+# char::scalar_value, and writes a non-ASCII scalar's UTF-8 bytes from the
+# scalar with bit arithmetic (esc_scalar), so it builds neither a
+# one-character String per position nor a str::encode_utf8 List per
+# character (ENCODE-UTF8-ALLOCATION-RESEARCH.md).
 #
 # high_nibble extracts the high half of a byte and normalizes it to a
 # logical nibble via the Byte/Nibble/HighNibble scalar domains and typed bit
@@ -35,17 +38,13 @@
 # byte::set's own declared AboveRange error is proven impossible for this
 # exact call -- no handler, no placeholder fallback set, no `on` clause.
 #
-# esc_char, is_unreserved's one call site, now receives each UTF-8 byte of a
-# single-byte-encoded char directly as a Byte from str::encode_utf8's own
-# truthful List[Byte] result type (item 25-27, 74-76) -- list::at's already-
-# generic List[T] element typing gives `list::at(bytes, 0) : Byte` with no
-# web-specific code here at all, so the old per-byte byte::from_int(...)
-# conversion (and its always-unreachable-in-practice handler fallback) is
-# gone: it was working around an under-typed str::encode_utf8, not a genuine
-# runtime possibility, and item 26/54 says not to keep a redundant
-# conversion once the producer's own static contract is honest.
+# is_unreserved's callers pass it an ASCII scalar value as a Byte with no
+# conversion: char::scalar_value's result is nonnegative and each call is
+# guarded by `v <= 127` (an `and` operand or an `if` branch), so the range
+# analysis proves 0..127, inside Byte's domain (no byte::from_int, no
+# handler).
 #
-# esc_bytes/esc_char/esc_from accumulate their result by repeated concat,
+# esc_from/esc_scalar accumulate their result by repeated concat,
 # the same recursive idiom examples/stdlib/string_reverse.bot's
 # reverse_from and examples/stdlib/ai_text_clean.bot's clean_from already
 # use.
@@ -63,6 +62,7 @@
 # about them comes from these declarations.
 import ascii
 import byte
+import char
 import immutable_set
 import list
 import str
@@ -122,8 +122,8 @@ fn emailish?(v: str) -> bool proves v: Emailish:
 
     # label_char?'s own extra character is a single "-": a one-element set
     # would be less idiomatic than the direct equality already used
-    # throughout this codebase for singleton comparisons (e.g. esc_char's
-    # own char-count check), so it stays a plain "==" rather than a second
+    # throughout this codebase for singleton comparisons (e.g.
+    # uri_query_value?'s c == '%'), so it stays a plain "==" rather than a second
     # membership set.
     fn label_char?(c):
         str::is_tcl_alnum(c) or c == "-"
@@ -228,27 +228,30 @@ refined type UriQueryValue = str
 # to it (lib/web.tcl's uriEscape). Refinements carry no runtime evidence, so
 # the proposition is now this structural check, owned and defined here.
 fn uri_query_value?(value: str) -> bool proves value: UriQueryValue:
-    bytes = str::encode_utf8(value)
 
+    # Every byte of a non-ASCII scalar's UTF-8 encoding is >= 0x80, so it is
+    # neither unreserved nor '%' nor a hex digit: the byte condition holds
+    # exactly when every scalar is ASCII and the scalar condition holds.
     fn upper_hex?(i):
-        if i < 0 or i >= list::length(bytes):
+        if i < 0 or i >= str::length(value):
             false
         else:
-            b = list::at(bytes, i)
-            ascii::is_digit(b) or (b >= 65 and b <= 70)
+            v = char::scalar_value(str::char_at(value, i))
+            v <= 127 and (ascii::is_digit(v) or (v >= 65 and v <= 70))
 
     fn valid_from?(i):
-        if i < 0 or i >= list::length(bytes):
+        if i < 0 or i >= str::length(value):
             true
         else:
-            b = list::at(bytes, i)
-            if b == 37:
+            c = str::char_at(value, i)
+            if c == '%':
                 if upper_hex?(i + 1) and upper_hex?(i + 2):
                     valid_from?(i + 3)
                 else:
                     false
             else:
-                if is_unreserved(b):
+                v = char::scalar_value(c)
+                if v <= 127 and is_unreserved(v):
                     valid_from?(i + 1)
                 else:
                     false
@@ -263,27 +266,33 @@ fn uri_escape_text(s):
     fn hex_pair(b):
         str::concat(list::at(hex_digits, high_nibble(b)), list::at(hex_digits, mod(b, 16)))
 
-    fn esc_bytes(bytes, i, acc):
-        if i < 0 or i >= list::length(bytes):
-            acc
-        else:
-            esc_bytes(bytes, i + 1, str::concat(acc, str::concat("%", hex_pair(list::at(bytes, i)))))
+    fn pct(b):
+        str::concat("%", hex_pair(b))
 
-    fn esc_char(c):
-        bytes = str::encode_utf8(c)
-        if list::length(bytes) == 1:
-            b = list::at(bytes, 0)
-            if is_unreserved(b):
-                c
-            else:
-                esc_bytes(bytes, 0, "")
+    fn cont(v, shift):
+        pct(bit_or(128, bit_and(shift_right(v, shift), 63)))
+
+    # The %XX escapes of the UTF-8 bytes of the non-ASCII scalar V.
+    fn esc_scalar(v):
+        if v < 2048:
+            str::concat(pct(bit_or(192, shift_right(v, 6))), cont(v, 0))
         else:
-            esc_bytes(bytes, 0, "")
+            if v < 65536:
+                str::concat(pct(bit_or(224, shift_right(v, 12))), str::concat(cont(v, 6), cont(v, 0)))
+            else:
+                str::concat(pct(bit_or(240, shift_right(v, 18))), str::concat(cont(v, 12), str::concat(cont(v, 6), cont(v, 0))))
 
     fn esc_from(text, i, acc):
         if i < 0 or i >= str::length(text):
             acc
         else:
-            esc_from(text, i + 1, str::concat(acc, esc_char(str::substring(text, i, i + 1))))
+            v = char::scalar_value(str::char_at(text, i))
+            if v > 127:
+                esc_from(text, i + 1, str::concat(acc, esc_scalar(v)))
+            else:
+                if is_unreserved(v):
+                    esc_from(text, i + 1, str::concat(acc, str::substring(text, i, i + 1)))
+                else:
+                    esc_from(text, i + 1, str::concat(acc, pct(v)))
 
     esc_from(s, 0, "")

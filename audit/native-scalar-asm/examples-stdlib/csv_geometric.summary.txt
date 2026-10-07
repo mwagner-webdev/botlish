@@ -2,7 +2,7 @@ source:  examples/stdlib/csv_geometric.bot
 backend: Cranelift (specialize=1)
 asm:     csv_geometric.asm
 vcode:   csv_geometric.vcode
-machine-code bytes: 7884 (per function: 312 453 453 81 81 357 412 412 279 279 81 365 430 585 1141 352 783 215 488 325)
+machine-code bytes: 7877 (per function: 312 453 453 81 81 357 412 412 279 279 81 365 438 585 1141 352 783 215 480 318)
 
 functions:
   0 <program entry>: nir-regs=9
@@ -291,5 +291,5 @@ mechanical pattern counts (triage only; see report for interpretation):
   15 x calls to rt_int_add
   1 x calls to rt_int_mul
   8 x calls to rt_int_cmp
-  41 x calls to other rt_* helpers
+  37 x calls to other rt_* helpers
   2 x guard/guardbool instructions

@@ -1,0 +1,42 @@
+--- a/lib/web.bot
++++ b/lib/web.bot
+@@ -227,28 +227,31 @@
+ # a UriQueryValue only when a trusted native had attached runtime evidence
+ # to it (lib/web.tcl's uriEscape). Refinements carry no runtime evidence, so
+ # the proposition is now this structural check, owned and defined here.
++uri_unreserved_text = immutable_set::from_list(["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "-", ".", "_", "~"])
++
++uri_upper_hex_text = immutable_set::from_list(["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F"])
++
+ fn uri_query_value?(value: str) -> bool proves value: UriQueryValue:
+-    bytes = str::encode_utf8(value)
++    n = str::length(value)
+ 
+     fn upper_hex?(i):
+-        if i < 0 or i >= list::length(bytes):
++        if i < 0 or i >= n:
+             false
+         else:
+-            b = list::at(bytes, i)
+-            ascii::is_digit(b) or (b >= 65 and b <= 70)
++            immutable_set::contains(uri_upper_hex_text, str::substring(value, i, i + 1))
+ 
+     fn valid_from?(i):
+-        if i < 0 or i >= list::length(bytes):
++        if i < 0 or i >= n:
+             true
+         else:
+-            b = list::at(bytes, i)
+-            if b == 37:
++            c = str::substring(value, i, i + 1)
++            if c == "%":
+                 if upper_hex?(i + 1) and upper_hex?(i + 2):
+                     valid_from?(i + 3)
+                 else:
+                     false
+             else:
+-                if is_unreserved(b):
++                if immutable_set::contains(uri_unreserved_text, c):
+                     valid_from?(i + 1)
+                 else:
+                     false

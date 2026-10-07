@@ -1,0 +1,18 @@
+# query-value-steady.bot -- web::uri_query_value? alone, 2000 calls over
+# percent-encoded texts of 9..33 bytes (ASCII, accepted) plus two rejected
+# inputs (non-ASCII, lowercase hex). ENCODE-UTF8-ALLOCATION-RESEARCH.md.
+import list
+import web
+
+texts = ["abcXYZ012", "a%20b%2Bc%3F", "caf%C3%A9", "hello%20%E4%B8%96%E7%95%8C%3F", "café", "a%2fb"]
+
+fn count(i, total, acc):
+    if i >= total:
+        return acc
+    hit = if web::uri_query_value?(list::at(texts, mod(i, list::length(texts)))):
+        1
+    else:
+        0
+    count(i + 1, total, acc + hit)
+
+count(0, 2000, 0)

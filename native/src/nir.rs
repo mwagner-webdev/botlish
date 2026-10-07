@@ -35,6 +35,9 @@ pub enum OpCode {
     IEq,
     VEq,
     StrEq,
+    /// `==` of two operands statically UnicodeChar (native/lower.tcl's
+    /// NativeCallOp): word equality of the two immediates; never fails.
+    CharEq,
     ListNew,
     StrLen,
     Substr,
@@ -172,6 +175,16 @@ pub enum OpCode {
     /// builds on this plus List/Int operations instead of needing its own
     /// native.
     StrUtf8Bytes,
+    /// `str::char_at(S, I)` (core/strings.tcl): the Unicode scalar at
+    /// character index I as a UnicodeChar immediate, never allocating. The
+    /// checked form fails with the declared builtin error IndexNotFound for
+    /// any I outside 0..chars (a BigInt included); the proven sibling is
+    /// emitted only where hir/completions.tcl proved the index in range.
+    /// An ASCII String is a byte read; otherwise the scalar is located by
+    /// decoding forward from byte 0 (the seek `Substr` pays, counted in
+    /// `utf8SeekBytes`).
+    StrCharAt,
+    StrCharAtProven,
     /// `argv()` (core/process.tcl, ARGV.md): the process argument snapshot
     /// of this run as a List of Strings -- every argument validated as UTF-8
     /// *by this operation* (never earlier), all or nothing. Takes no
@@ -381,6 +394,7 @@ impl OpCode {
             "ieq" => IEq,
             "veq" => VEq,
             "streq" => StrEq,
+            "chareq" => CharEq,
             "listnew" => ListNew,
             "strlen" => StrLen,
             "substr" => Substr,
@@ -422,6 +436,8 @@ impl OpCode {
             "decodecharat" => DecodeCharAt,
             "strbytelen" => StrByteLen,
             "strutf8bytes" => StrUtf8Bytes,
+            "strcharat" => StrCharAt,
+            "strcharatproven" => StrCharAtProven,
             "argv" => Argv,
             "syscall_linux_x86_64" => SyscallLinuxX86_64,
             "bytesfromlist" => BytesFromList,

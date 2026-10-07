@@ -1,0 +1,39 @@
+# query-value-variants.txt -- query-value-steady.bot (programs/), best of
+# 5 x native::measure 20, on: the checkout; treeA = source-only, String sets
+# (prototype/source-only-sets.patch); treeA2 = source-only, == chains
+# (source-only-equality.patch); treeC = str::char_at native BEFORE the
+# inline Cranelift fast paths (the final prototype is in final-batch.txt).
+== <checkout>
+value interp 1334
+value cranelift 1334
+alloc 2011 232648 String 0 List 2009 MutableArray 0 Block 0 Result 0 BigInt 0
+size 4509
+fnsize valid_from? 725
+fnsize upper_hex? 357
+best 357.7
+== treeA
+value interp 1334
+value cranelift 1334
+alloc 17682 461747 String 17667 List 11 MutableArray 0 Block 0 Result 0 BigInt 0
+size 7930
+fnsize valid_from? 900
+fnsize upper_hex? 356
+best 4223.9
+== treeA2
+value interp 1334
+value cranelift 1334
+alloc 11 664 String 0 List 9 MutableArray 0 Block 0 Result 0 BigInt 0
+size 10337
+fnsize valid_from? 6076
+fnsize upper_hex? 1476
+best 3070.4
+== treeC
+value interp 1334
+value cranelift 1334
+alloc 11 664 String 0 List 9 MutableArray 0 Block 0 Result 0 BigInt 0
+size 4787
+fnsize valid_from? 933
+fnsize upper_hex? 477
+best 451.0
+
+[exited with code 0]

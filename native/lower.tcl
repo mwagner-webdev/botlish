@@ -110,6 +110,7 @@ namespace eval native::lower {
         str::lowercase    {op strlower} \
         str::concat       {op strcat} \
         str::encode_utf8  {op strutf8bytes} \
+        str::char_at      {op strcharat} \
         str::is_tcl_alpha {op strtclalpha} \
         str::is_tcl_alnum {op strtclalnum} \
         argv         {op argv} \
@@ -6953,7 +6954,7 @@ proc native::lower::InlineLeafCall {fnVar e node calleeId callerArgRegs} {
 }
 
 # {NAME OP}: the native NODE's target's name, and the NIR op its call
-# resolves to (an "equality" implementation picks veq/ieq/streq from the two
+# resolves to (an "equality" implementation picks veq/ieq/streq/chareq from the two
 # argument expressions' static types, exactly as NativeCall always has;
 # an "equality-set" implementation -- immutable_set::contains -- picks
 # setcontainstotal over the generic setcontains the identical way, from the
@@ -6991,6 +6992,10 @@ proc native::lower::NativeCallOp {e node} {
                 set op ieq
             } elseif {$ka eq $kb && $ka eq "str"} {
                 set op streq
+            } elseif {$ka eq $kb && $ka eq "UnicodeChar"} {
+                # Two UnicodeChar immediates: scalar equality is word
+                # equality, and it cannot fail (str::char_at(s, i) == '%').
+                set op chareq
             }
             return [list $name $op]
         }
@@ -7080,7 +7085,7 @@ proc native::lower::NativeCallOp {e node} {
 namespace eval native::lower {
     variable provenOps [dict create \
         listget listgetproven  mutarrayget mutarraygetproven  mutarrayset mutarraysetproven \
-        substr substrproven  mutarraycopy mutarraycopyproven  mutarrayfreeze mutarrayfreezeproven]
+        substr substrproven  strcharat strcharatproven  mutarraycopy mutarraycopyproven  mutarrayfreeze mutarrayfreezeproven]
 }
 
 # 1 if native call E has every bounds check proven (and the optimization is on).
