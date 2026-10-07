@@ -341,12 +341,17 @@ foreach path $programs {
         dict lappend loads [rel [dict get $file path]] $path
     }
     set parent ""
+    # The HIR the warnings were computed from: a trait program is warned
+    # about as written, its checked source build (hir::warnings::run), so a
+    # warning's `site` is an ExprId of `traitSource`, not of the
+    # monomorphized program.
+    set warned [expr {[dict exists $hir traitSource] ? [dict get $hir traitSource] : $hir}]
     foreach w [hir::warnings::of $hir] {
         if {[dict get $w code] ne "ONE-CHAR-STRING-LITERAL"} continue
         set where [rel [hir::originLocation $hir [dict get $w primary]]]
         if {[dict exists $findings $where]} continue
         if {$parent eq ""} {
-            set parent [parents $hir]
+            set parent [parents $warned]
         }
         set site [dict get $w data site]
         set origin [dict get $w primary]
@@ -360,9 +365,9 @@ foreach path $programs {
         set token [surface::lexer::String $line [expr {[dict get $fields column] - 1}] f 1 0 diagnostics]
         set genuine [expr {[string index $line [expr {[dict get $fields column] - 1}]] eq "\""
             && $diagnostics eq "" && [dict get $token value] eq $text && [string length $text] == 1}]
-        lassign [consumerOf $hir $parent $site] key type detail
+        lassign [consumerOf $warned $parent $site] key type detail
         dict set findings $where [dict create file $file line [dict get $fields line] col [dict get $fields column] \
-            text $text spelling [dict get $token text] source [string trim $line] function [enclosingFunction $hir $parent $site] \
+            text $text spelling [dict get $token text] source [string trim $line] function [enclosingFunction $warned $parent $site] \
             consumer $key type $type detail $detail genuine $genuine]
     }
 }
