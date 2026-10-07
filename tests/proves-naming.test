@@ -1,0 +1,1109 @@
+# proves-naming.test -- the PROVES-NAMING compiler warning
+# (WARNINGS-PROVES-NAMING.md) on the warning framework WARNINGS-SAME-RETURN.md
+# built (hir/warnings.tcl).
+#
+# The rule: a function fitted with a `proves` contract (REFINEMENT-VALUES.md)
+# that declares exactly one ordinary parameter is reported when
+#
+#   * its result is bool (a predicate) and its written name does not end in
+#     `?`, or
+#   * its result is unit (a validator) and its written name is neither
+#     exactly `validate` nor begins with `validate_`.
+#
+# The scope guard is the warning's boundary: a function without `proves` is
+# never looked at, whatever its name; a proves function of any other shape is
+# silent; there is no reverse rule. One warning per function, anchored at the
+# declaration, no secondary locations, and the message never prints the name
+# to use.
+#
+# Like the other warning test files, every compile here passes its policy and
+# channel explicitly (`-warnings MODE`, `-warning-channel ""` to collect
+# without printing), so this file exercises default, off and error whatever
+# the harness's process default is.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+
+set ::allBackends {interp compile cranelift-generic cranelift}
+set ::pnCode PROVES-NAMING
+
+# The HIR of SOURCE under policy MODE (default off error), collecting
+# warnings without printing them.
+proc compileWith {source {mode default}} {
+    return [surface::compile $source t.bot -warnings $mode -warning-channel ""]
+}
+
+# "LINE:COL" of ORIGIN in HIR, without the file name when it is t.bot.
+proc loc {hir origin} {
+    return [regsub {^t\.bot:} [hir::originLocation $hir $origin] {}]
+}
+
+# The PROVES-NAMING warnings of HIR.
+proc namingOf {hir} {
+    return [lmap w [hir::warnings::of $hir] {
+        if {[dict get $w code] ne $::pnCode} continue
+        set w
+    }]
+}
+
+# Each PROVES-NAMING warning of SOURCE as {PRIMARY FUNCTION-NAME KIND}.
+proc naming {source} {
+    set hir [compileWith $source]
+    return [lmap w [namingOf $hir] {
+        list [loc $hir [dict get $w primary]] [dict get $w data functionName] [dict get $w data kind]
+    }]
+}
+
+# The functionName of each PROVES-NAMING warning of SOURCE, in order.
+proc named {source} {
+    return [lmap w [naming $source] {lindex $w 1}]
+}
+
+# "MESSAGE @ PRIMARY" for each PROVES-NAMING warning of SOURCE.
+proc shown {source} {
+    set hir [compileWith $source]
+    return [lmap w [namingOf $hir] {
+        string cat [dict get $w message] " @ " [loc $hir [dict get $w primary]]
+    }]
+}
+
+# 1 if SOURCE compiles with no PROVES-NAMING warning.
+proc silent {source} {
+    return [expr {[namingOf [compileWith $source]] eq ""}]
+}
+
+# Every warning of SOURCE (all codes) as {CODE PRIMARY}.
+proc allWarnings {source} {
+    set hir [compileWith $source]
+    return [lmap w [hir::warnings::of $hir] {list [dict get $w code] [loc $hir [dict get $w primary]]}]
+}
+
+# The rejection of SOURCE under MODE: {errorcode message}, or "compiled".
+proc rejection {source mode} {
+    if {[catch {compileWith $source $mode} message options]} {
+        return [list [dict get $options -errorcode] $message]
+    }
+    return compiled
+}
+
+# The diagnostic kinds of SOURCE compiled with -strict 0 (kept, not raised),
+# and its warnings.
+proc diagnosed {source} {
+    set hir [surface::compile $source t.bot -strict 0 -warnings default -warning-channel ""]
+    return [list [lsort -unique [lmap d [hir::diagnostics $hir] {dict get $d kind}]] [hir::warnings::of $hir]]
+}
+
+# Runs SCRIPT with module files FILES ({NAME TEXT ...}) in a private library
+# directory (a per-process name in the tcltest temporary directory).
+proc withModules {files script} {
+    set saved $::core::libraryDir
+    set dir [makeDirectory pn-scratch-[pid]]
+    set ::core::libraryDir $dir
+    try {
+        foreach {name text} $files {
+            set channel [open [file join $dir $name] w]
+            puts -nonewline $channel $text
+            close $channel
+        }
+        uplevel 1 $script
+    } finally {
+        set ::core::libraryDir $saved
+        removeDirectory pn-scratch-[pid]
+    }
+}
+
+# The PROVES-NAMING warnings HIR text TEXT gets (hir::parse, then collect),
+# as {FUNCTION-NAME KIND}, and its diagnostics.
+proc namingOfText {text} {
+    set parsed [hir::parse $text]
+    return [list [hir::diagnostics $parsed] [lmap w [hir::warnings::collect $parsed] {
+        if {[dict get $w code] ne $::pnCode} continue
+        list [dict get $w data functionName] [dict get $w data kind]
+    }]]
+}
+
+# The refinement every program below proves (the entry program owns it).
+set ::E "refined type E = str\nerror Bad\n"
+
+# ---------------------------------------------------------------------------
+# Predicates (items 3, 13): one ordinary parameter, result bool, the name
+# ends in `?`
+
+test pn-emailish-rendered {the motivating predicate: one warning at the declaration, rendered exactly, no notes} -body {
+    set hir [compileWith "refined type Emailish = str
+fn emailish(v: str) -> bool proves v: Emailish:
+    v == \"a@b\""]
+    lmap w [namingOf $hir] {hir::warnings::render $hir $w}
+} -result {{t.bot:2:1: warning: `emailish` proves a contract and returns bool; predicate names end in `?` (PROVES-NAMING)}}
+
+test pn-predicate-conforming-silent {`emailish?` follows the convention: silent} -body {
+    silent "refined type Emailish = str
+fn emailish?(v: str) -> bool proves v: Emailish:
+    v == \"a@b\""
+} -result 1
+
+test pn-predicate-violating-warns {a proves predicate without the trailing `?` warns as a predicate, at its `fn`} -body {
+    naming "$::E
+fn is_emailish(v: str) -> bool proves v: E:
+    v == \"a@b\""
+} -result {{4:1 is_emailish predicate}}
+
+test pn-question-mark-boundary {the rule is the trailing `?`: present silent, absent warns; `?` elsewhere does not lex (R2A2), so there is no mid-name case} -body {
+    list [silent "$::E\nfn ok?(v: str) -> bool proves v: E:\n    true"] \
+        [named "$::E\nfn ok(v: str) -> bool proves v: E:\n    true"] \
+        [lrange [lindex [rejection "$::E\nfn x?y(v: str) -> bool proves v: E:\n    true" default] 0] 0 1] \
+        [lrange [lindex [rejection "$::E\nfn x??(v: str) -> bool proves v: E:\n    true" default] 0] 0 1] \
+        [named "$::E\nfn question_mark(v: str) -> bool proves v: E:\n    true"]
+} -result {1 ok {SURFACE SYNTAX} {SURFACE SYNTAX} question_mark}
+
+test pn-predicate-result-is-the-declared-bool {the shape is the checker's result fact, the declared bool a proof contract requires: an always-true body, an always-failing body and a computed one are all predicates} -body {
+    named "$::E
+fn always(v: str) -> bool proves v: E:
+    true
+fn never_completes(v: str) -> bool proves v: E errors Bad:
+    fail Bad
+fn computed(v: str) -> bool proves v: E:
+    v == \"a\" or v == \"b\""
+} -result {always never_completes computed}
+
+test pn-predicate-needs-a-declared-bool {a proves clause on a function without a declared `-> bool` is a PROOF-CLAUSE error, so there is no inferred-bool, any or union predicate to look at; such a program is never warned} -body {
+    list [diagnosed "$::E\nfn p(v: str) proves v: E:\n    true"] \
+        [diagnosed "$::E\nfn p(v: str) -> str proves v: E:\n    v"] \
+        [diagnosed "$::E\nfn p(v: str) -> int proves v: E:\n    1"]
+} -result {{PROOF-CLAUSE {}} {PROOF-CLAUSE {}} {PROOF-CLAUSE {}}}
+
+test pn-fallible-predicate {an errors clause does not disqualify: a fallible predicate warns or is silent by its name alone} -body {
+    list [named "$::E
+fn checked(v: str) -> bool proves v: E errors Bad:
+    if v == \"\":
+        fail Bad
+    v == \"a\""] [silent "$::E
+fn checked?(v: str) -> bool proves v: E errors Bad:
+    if v == \"\":
+        fail Bad
+    v == \"a\""]
+} -result {checked 1}
+
+# ---------------------------------------------------------------------------
+# Validators (items 3, 13): one ordinary parameter, result unit, the name is
+# `validate` or begins with `validate_`
+
+test pn-validator-conforming-silent {`validate_f` and the bare `validate` follow the convention: silent} -body {
+    list [silent "$::E
+fn validate_emailish(v: str) -> unit proves v: E errors Bad:
+    if v == \"\":
+        fail Bad
+    unit"] [silent "$::E
+fn validate(v: str) -> unit proves v: E errors Bad:
+    if v == \"\":
+        fail Bad
+    unit"]
+} -result {1 1}
+
+test pn-validator-violating-warns {check_email, validator_x, Validate_x and validateX warn as validators, at their `fn`} -body {
+    naming "$::E
+fn check_email(v: str) -> unit proves v: E errors Bad:
+    if v == \"\":
+        fail Bad
+    unit
+fn validator_x(v: str) -> unit proves v: E errors Bad:
+    if v == \"\":
+        fail Bad
+    unit
+fn Validate_x(v: str) -> unit proves v: E errors Bad:
+    if v == \"\":
+        fail Bad
+    unit
+fn validateX(v: str) -> unit proves v: E errors Bad:
+    if v == \"\":
+        fail Bad
+    unit"
+} -result {{4:1 check_email validator} {8:1 validator_x validator} {12:1 Validate_x validator} {16:1 validateX validator}}
+
+test pn-validator-empty-suffix-sharp-edge {SHARP EDGE, pinned: the literal `validate_` prefix rule admits the bare `validate_` (empty suffix); no nonempty-suffix constraint is invented} -body {
+    silent "$::E
+fn validate_(v: str) -> unit proves v: E errors Bad:
+    if v == \"\":
+        fail Bad
+    unit"
+} -result 1
+
+test pn-validator-prefix-is-literal-and-case-sensitive {the prefix match is literal and case-sensitive: VALIDATE_x, Validate_x, validate-less suffix forms and a validate_ inside the name all warn} -body {
+    named "$::E
+fn VALIDATE_x(v: str) -> unit proves v: E:
+    unit
+fn x_validate_y(v: str) -> unit proves v: E:
+    unit
+fn x_validate(v: str) -> unit proves v: E:
+    unit
+fn validates(v: str) -> unit proves v: E:
+    unit
+fn valid(v: str) -> unit proves v: E:
+    unit"
+} -result {VALIDATE_x x_validate_y x_validate validates valid}
+
+test pn-fallible-and-infallible-validators {an errors clause neither qualifies nor disqualifies: fallible and infallible validators are judged by their names alone} -body {
+    list [named "$::E
+fn check(v: str) -> unit proves v: E errors Bad:
+    if v == \"\":
+        fail Bad
+    unit
+fn assure(v: str) -> unit proves v: E:
+    unit"] [silent "$::E
+fn validate_strict(v: str) -> unit proves v: E errors Bad:
+    if v == \"\":
+        fail Bad
+    unit
+fn validate_lax(v: str) -> unit proves v: E:
+    unit"]
+} -result {{check assure} 1}
+
+# ---------------------------------------------------------------------------
+# The scope guard (item 4): no `proves`, no opinion
+
+test pn-scope-no-proves-bool-never-warned {LOAD-BEARING: a bool-returning one-parameter function without proves is never warned, whatever its name (declared or inferred result)} -body {
+    silent {fn is_empty(v: str) -> bool:
+    v == ""
+fn emailish(v: str) -> bool:
+    v == "a@b"
+fn looks_valid(v):
+    v == "x"
+x = [is_empty("a"), emailish("b"), looks_valid("x")]
+x}
+} -result 1
+
+test pn-scope-question-without-proves-never-warned {a `?`-suffixed function without proves is never warned, whatever it returns} -body {
+    silent {fn weird?(v: str) -> int:
+    1
+fn ok?(v: str) -> bool:
+    true
+fn none?(v: str):
+    unit
+fn pair?(a, b):
+    a == b
+[weird?("a"), ok?("b"), pair?(1, 2)]}
+} -result 1
+
+test pn-scope-out-of-shape-proves-silent {a proves function with two or more ordinary parameters is silent, whatever its name, its result and which parameter it proves} -body {
+    silent "$::E
+fn same(a: str, b: str) -> bool proves a: E:
+    a == b
+fn three(a: str, b: str, c: str) -> bool proves b: E:
+    a == c
+fn validate_pair_x(a: str, b: str) -> bool proves a: E:
+    a == b
+fn check_second(a: str, b: str) -> unit proves b: E:
+    unit
+fn second(a: str, b: str) -> bool proves b: E:
+    a == b"
+} -result 1
+
+test pn-scope-no-reverse-rules {there is no reverse rule: a `?` name returning something else, `validate_` names that are not validators and `validate` returning bool are silent without proves} -body {
+    silent {fn count?(v: str) -> int:
+    1
+fn validate_x(v: str) -> bool:
+    v == ""
+fn validate_y(v: str) -> int:
+    2
+fn validate(v: str) -> bool:
+    true
+fn ok?(v: str):
+    unit
+[count?("a"), validate_x("b"), validate_y("c"), validate("d")]}
+} -result 1
+
+test pn-scope-zero-parameters-unrepresentable {a proves function with zero ordinary parameters cannot be written: the clause must name an ordinary parameter (PROOF-CLAUSE), and the program is never warned} -body {
+    list [diagnosed "$::E\nfn p() -> bool proves v: E:\n    true"] \
+        [diagnosed "$::E\nfn p(flags :v) -> bool proves v: E:\n    true"]
+} -result {{PROOF-CLAUSE {}} {PROOF-CLAUSE {}}}
+
+test pn-scope-other-results-silent-in-hir-text {a proves block whose declared result is neither bool nor unit (or absent) is silent: the frontend rejects it, so it is pinned on hand-edited HIR text, which hir::parse admits} -body {
+    set hir [compileWith "$::E\nfn p(v: str) -> bool proves v: E:\n    true" off]
+    set text [hir::format $hir]
+    list [string match "* declares bool proves *" $text] \
+        [namingOfText $text] \
+        [namingOfText [string map {" declares bool proves " " declares str proves "} $text]] \
+        [namingOfText [string map {" declares bool proves " " declares int proves "} $text]] \
+        [namingOfText [string map {" declares bool proves " " proves "} $text]]
+} -result {1 {{} {{p predicate}}} {{} {}} {{} {}} {{} {}}}
+
+# ---------------------------------------------------------------------------
+# Shape details (item 5)
+
+test pn-shape-parameter-count {0 ordinary parameters cannot carry proves, exactly 1 is in shape, 2 is silent} -body {
+    list [named "$::E\nfn one(a: str) -> bool proves a: E:\n    true"] \
+        [silent "$::E\nfn two(a: str, b: str) -> bool proves a: E:\n    true"] \
+        [lindex [diagnosed "$::E\nfn zero() -> bool proves a: E:\n    true"] 0]
+} -result {one 1 PROOF-CLAUSE}
+
+test pn-shape-flags-do-not-count {flags are a separate category, not ordinary parameters (METHOD-ELIGIBLE's count): one ordinary parameter plus flags is in shape, for a predicate and a validator; two ordinary parameters plus flags are not} -body {
+    naming "$::E
+fn strict(v: str, flags :exact, :loose) -> bool proves v: E:
+    exact
+fn strict2?(v: str, flags :exact) -> bool proves v: E:
+    exact
+fn two(a: str, b: str, flags :exact) -> bool proves a: E:
+    exact
+fn assure(v: str, flags :exact) -> unit proves v: E:
+    unit
+fn validate_exact(v: str, flags :exact) -> unit proves v: E:
+    unit"
+} -result {{4:1 strict predicate} {10:1 assure validator}}
+
+test pn-shape-context-parameters-do-not-count {a context parameter is not an ordinary parameter (and not in the block's params at all): one ordinary parameter plus a context is in shape} -body {
+    naming "$::E
+context struct Clock:
+    tick: int
+fn fresh(v: str, context clock: Clock) -> bool proves v: E:
+    clock.tick > 0
+fn fresh?(v: str, context clock: Clock) -> bool proves v: E:
+    clock.tick > 0
+with context Clock{tick: 1}
+\[fresh(\"a\"), fresh?(\"b\")\]"
+} -result {{6:1 fresh predicate}}
+
+test pn-shape-result-kinds-distinct {bool and unit are distinct shapes: a function satisfies at most one, and each gets its own template} -body {
+    shown "$::E
+fn p(v: str) -> bool proves v: E:
+    true
+fn q(v: str) -> unit proves v: E:
+    unit"
+} -result {{`p` proves a contract and returns bool; predicate names end in `?` @ 4:1} {`q` proves a contract and returns unit; validator names are `validate` or begin with `validate_` @ 6:1}}
+
+# ---------------------------------------------------------------------------
+# Cross-shape (item 13): the shape decides the rule, never the name
+
+test pn-cross-validate-name-predicate-shape {a bool-returning proves function named validate_emailish (a validator's name, a predicate's shape) warns as a predicate} -body {
+    shown "$::E
+fn validate_emailish(v: str) -> bool proves v: E:
+    true"
+} -result {{`validate_emailish` proves a contract and returns bool; predicate names end in `?` @ 4:1}}
+
+test pn-cross-question-name-validator-shape {a unit-returning proves function named weird? (a predicate's name, a validator's shape) warns as a validator} -body {
+    shown "$::E
+fn weird?(v: str) -> unit proves v: E:
+    unit"
+} -result {{`weird?` proves a contract and returns unit; validator names are `validate` or begin with `validate_` @ 4:1}}
+
+test pn-cross-bare-validate-predicate-shape {the bare `validate` is a validator's name only: as a predicate it warns} -body {
+    naming "$::E
+fn validate(v: str) -> bool proves v: E:
+    true"
+} -result {{4:1 validate predicate}}
+
+test pn-cross-two-parameters-silent {a proves function with two parameters is silent whichever name and result it has} -body {
+    silent "$::E
+fn check(a: str, b: str) -> bool proves a: E:
+    a == b
+fn validate_x?(a: str, b: str) -> bool proves b: E:
+    a == b"
+} -result 1
+
+# ---------------------------------------------------------------------------
+# The written name (item 6): never hygiene's spelling
+
+test pn-written-name-hygiene-renamed {a function whose binding hygiene renamed (NAME#N: a later binding an earlier reference would see) is checked under its written name: the violating one reported as written, the conforming one silent} -body {
+    set hir [compileWith "$::E
+fn p(v: str) -> bool:
+    v == \"a\"
+fn q?(v: str) -> bool:
+    v == \"b\"
+fn outer(s: str) -> bool:
+    early = p(s)
+    early2 = q?(s)
+    fn p(v: str) -> bool proves v: E:
+        v == \"c\"
+    fn q?(v: str) -> bool proves v: E:
+        v == \"d\"
+    early and early2 and p(s) and q?(s)
+outer(\"a\")"]
+    set renamed [lmap {b binding} [dict get $hir bindings] {
+        if {![dict exists $binding spelling]} continue
+        list [dict get $binding name] [dict get $binding spelling]
+    }]
+    list [lsort $renamed] [lmap w [namingOf $hir] {list [loc $hir [dict get $w primary]] [dict get $w data functionName]}] \
+        [string first # [join [lmap w [namingOf $hir] {dict get $w message}]]]
+} -result {{{p#1 p} {q?#1 q?}} {{11:5 p}} -1}
+
+test pn-written-name-root-shadow {a proves function named like a root binding the frontend's own references need (`list`, which a list literal calls) is renamed by hygiene and reported as written} -body {
+    set hir [compileWith "$::E
+fn list(v: str) -> bool proves v: E:
+    v == \"a\"
+xs = \[list(\"a\"), true\]
+xs"]
+    list [lmap {b binding} [dict get $hir bindings] {
+        if {![dict exists $binding spelling] || [dict get $binding spelling] ne "list"} continue
+        dict get $binding name
+    }] [lmap w [namingOf $hir] {dict get $w data functionName}] [lmap w [namingOf $hir] {dict get $w message}]
+} -result {list#1 list {{`list` proves a contract and returns bool; predicate names end in `?`}}}
+
+test pn-written-name-module-function {a module function is checked under the member name its author wrote (not the qualified web-style spelling), located in the module file; a conforming module predicate and the bare validator are silent} -body {
+    withModules {pth.bot {refined type Path = str
+error Bad
+fn check(v: str) -> bool proves v: Path:
+    v != ""
+fn ok?(v: str) -> bool proves v: Path:
+    v != ""
+fn validate(v: str) -> unit proves v: Path errors Bad:
+    if v == "":
+        fail Bad
+    unit
+fn check_path(v: str) -> unit proves v: Path errors Bad:
+    if v == "":
+        fail Bad
+    unit
+}} {
+        set hir [surface::compile {import pth
+a = pth::check("a")
+b = pth::ok?("b")
+c = pth::validate("c"):
+    on Bad:
+        unit
+d = pth::check_path("d"):
+    on Bad:
+        unit
+[a, b]} t.bot -warnings default -warning-channel ""]
+        list [lmap w [namingOf $hir] {
+            list [file tail [hir::originLocation $hir [dict get $w primary]]] [dict get $w data functionName] \
+                [dict get $w data kind] [dict get $w message]
+        }] [lsort [lmap {b binding} [dict get $hir bindings] {
+            if {![string match pth::* [dict get $binding name]]} continue
+            dict get $binding name
+        }]]
+    }
+} -result {{{pth.bot:3:1 check predicate {`check` proves a contract and returns bool; predicate names end in `?`}} {pth.bot:11:1 check_path validator {`check_path` proves a contract and returns unit; validator names are `validate` or begin with `validate_`}}} {pth::check pth::check_path pth::ok? pth::validate}}
+
+test pn-written-name-shadowing-around-the-declaration {shadowing around a declaration changes nothing: a non-proves outer `p`, a parameter and a local named like the proves function, and a later rebinding of its name are never reported; only the proves declaration is} -body {
+    naming "$::E
+fn p(v: str) -> bool:
+    v == \"a\"
+fn g(p: str) -> bool:
+    fn emailish(v: str) -> bool proves v: E:
+        v == p
+    emailish(p)
+fn h(s: str) -> bool:
+    emailish = s == \"x\"
+    emailish
+\[p(\"a\"), g(\"b\"), h(\"c\")\]"
+} -result {{7:5 emailish predicate}}
+
+test pn-written-name-hir-text {HIR text keeps no spelling: a hygiene suffix read back is dropped, so a renamed conforming predicate stays silent and a violating one is reported as written} -body {
+    set hir [compileWith "$::E
+fn p(v: str) -> bool:
+    v == \"a\"
+fn q?(v: str) -> bool:
+    v == \"b\"
+fn outer(s: str) -> bool:
+    early = p(s)
+    early2 = q?(s)
+    fn p(v: str) -> bool proves v: E:
+        v == \"c\"
+    fn q?(v: str) -> bool proves v: E:
+        v == \"d\"
+    early and early2 and p(s) and q?(s)
+outer(\"a\")" off]
+    set text [hir::format $hir]
+    list [regexp {bind b[0-9]+ p#1 } $text] [regexp {bind b[0-9]+ q\?#1 } $text] [namingOfText $text]
+} -result {1 1 {{} {{p predicate}}}}
+
+# ---------------------------------------------------------------------------
+# Declarations, wherever they are (items 5, 9)
+
+test pn-nested-function-and-closure {a nested function and a closure over the enclosing parameter carrying proves are checked like any declaration} -body {
+    naming "$::E
+fn outer(s: str) -> bool:
+    fn inner(v: str) -> bool proves v: E:
+        v == \"a\"
+    fn closure(v: str) -> bool proves v: E:
+        v == s
+    fn inner_ok?(v: str) -> bool proves v: E:
+        v == \"b\"
+    inner(s) and closure(s) and inner_ok?(s)
+outer(\"a\")"
+} -result {{5:5 inner predicate} {7:5 closure predicate}}
+
+test pn-uncalled-declaration-warns {a declaration is warned regardless of callers: an uncalled violating function warns} -body {
+    named "$::E
+fn never_called(v: str) -> bool proves v: E:
+    true
+1"
+} -result never_called
+
+test pn-no-reachability-notion {there is no reachability notion: a declaration in a statically dead branch is still a declaration} -body {
+    naming "$::E
+fn f(x) -> int:
+    if 1 == 2:
+        fn dead(v: str) -> bool proves v: E:
+            true
+        return 0
+    x
+f(1)"
+} -result {{6:9 dead predicate}}
+
+test pn-no-completion-walk {no completion walk runs for this warning: hir::completions::reachedExprs is never called by the pass} -body {
+    set hir [compileWith "$::E
+fn p(v: str) -> bool proves v: E:
+    if v == \"a\":
+        return false
+    if v == \"b\":
+        return false
+    true" off]
+    set ::walks 0
+    trace add execution hir::completions::reachedExprs enter {apply {{args} {incr ::walks}}}
+    try {
+        set warnings [hir::warnings::ProvesNaming $hir]
+    } finally {
+        trace remove execution hir::completions::reachedExprs enter {apply {{args} {incr ::walks}}}
+    }
+    list [llength $warnings] $::walks
+} -result {1 0}
+
+# ---------------------------------------------------------------------------
+# Structure (items 7, 8, 13): record, data, message, ordering
+
+set ::predicateSource "$::E
+fn emailish(v: str) -> bool proves v: E:
+    v == \"a@b\"
+fn use(s: str) -> int:
+    if emailish(s):
+        1
+    else:
+        0
+\[use(\"a@b\"), use(\"x\")\]"
+
+test pn-record-shape {the record is {code message primary secondary data}, secondary empty} -body {
+    set w [lindex [namingOf [compileWith $::predicateSource]] 0]
+    list [lsort [dict keys $w]] [dict get $w secondary]
+} -result {{code data message primary secondary} {}}
+
+test pn-record-data-fields {data: function (the block ExprId), functionName (written), kind -- nothing else} -body {
+    set hir [compileWith $::predicateSource]
+    set data [dict get [lindex [namingOf $hir] 0] data]
+    list [lsort [dict keys $data]] [dict get $hir exprs [dict get $data function] kind] \
+        [expr {[dict get $hir exprs [dict get $data function] proofs] ne ""}] \
+        [dict get $data functionName] [dict get $data kind]
+} -result {{function functionName kind} block 1 emailish predicate}
+
+test pn-primary-is-the-declaration {primary is the declaration's own origin (the bind of the `fn`, its first column), the repo convention for declaration-level diagnostics} -body {
+    set hir [compileWith $::predicateSource]
+    set w [lindex [namingOf $hir] 0]
+    set function [dict get $w data function]
+    set binds [lmap {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "bind" || [dict get $node value] ne $function} continue
+        set e
+    }]
+    list [llength $binds] [expr {[dict get $w primary] eq [dict get $hir exprs [lindex $binds 0] origin]}] [loc $hir [dict get $w primary]]
+} -result {1 1 4:1}
+
+test pn-render-has-no-notes {secondary is empty, so rendering is one line: no note: lines} -body {
+    set hir [compileWith $::predicateSource]
+    llength [split [hir::warnings::render $hir [lindex [namingOf $hir] 0]] \n]
+} -result 1
+
+test pn-kind-values {kind is predicate or validator, from the shape} -body {
+    lmap w [naming "$::E
+fn a(v: str) -> bool proves v: E:
+    true
+fn b(v: str) -> unit proves v: E:
+    unit"] {lindex $w 2}
+} -result {predicate validator}
+
+test pn-message-templates {the two templates: function named, both facts stated, the convention, nothing else; result types as the repo spells them} -body {
+    set hir [compileWith "$::E
+fn emailish(v: str) -> bool proves v: E:
+    true
+fn check_email(v: str) -> unit proves v: E:
+    unit"]
+    lmap w [namingOf $hir] {dict get $w message}
+} -result {{`emailish` proves a contract and returns bool; predicate names end in `?`} {`check_email` proves a contract and returns unit; validator names are `validate` or begin with `validate_`}}
+
+test pn-no-suggested-name {the message never prints a name to use (no `NAME?`, no `validate_NAME`), no rewrite, no `->`, no imperative} -body {
+    set hir [compileWith "$::E
+fn emailish(v: str) -> bool proves v: E:
+    true
+fn check_email(v: str) -> unit proves v: E:
+    unit"]
+    set text [join [lmap w [namingOf $hir] {hir::warnings::render $hir $w}] \n]
+    set found {}
+    foreach word {emailish? validate_check_email check_email? validate_emailish -> rename should consider use instead try change prefer "did you mean" suggest fix} {
+        if {[string first $word $text] >= 0} {
+            lappend found $word
+        }
+    }
+    set found
+} -result {}
+
+test pn-no-rendered-source-in-data {data carries an identity, a name and a kind, never source text} -body {
+    set data [dict get [lindex [namingOf [compileWith $::predicateSource]] 0] data]
+    list [string first "proves" $data] [string first "fn " $data] [string first "str" $data] [string first "->" $data]
+} -result {-1 -1 -1 -1}
+
+test pn-one-diagnostic-per-function {one diagnostic per function, however often it is called, aliased or specialized} -body {
+    set hir [compileWith "$::E
+fn emailish(v: str) -> bool proves v: E:
+    v == \"a\"
+g = emailish
+fn use(s: str) -> bool:
+    emailish(s) and g(s) and emailish(s)
+\[use(\"a\"), emailish(\"b\"), g(\"c\")\]"]
+    list [llength [hir::warnings::of $hir]] [lmap w [namingOf $hir] {dict get $w data functionName}]
+} -result {1 emailish}
+
+test pn-source-order-and-determinism {several functions' warnings in source order; compiling twice gives identical warnings} -body {
+    set source "$::E
+fn c(v: str) -> bool proves v: E:
+    true
+fn a(v: str) -> unit proves v: E:
+    unit
+fn b(v: str) -> bool proves v: E:
+    true"
+    list [lmap w [naming $source] {lindex $w 0}] \
+        [expr {[hir::warnings::of [compileWith $source]] eq [hir::warnings::of [compileWith $source]]}]
+} -result {{4:1 6:1 8:1} 1}
+
+test pn-instances-never-walked {the pass reads the generic source HIR once: a proves function nested in a polymorphic function is in each of its semantic instances' snapshots, and is still one warning; collecting over HIR stripped of the semantic side table gives the identical warnings} -body {
+    set hir [compileWith "$::E
+fn twice(x, s: str) -> bool:
+    fn emailish(v: str) -> bool proves v: E:
+        v == \"a\"
+    emailish(s) and x == x
+\[twice(1, \"a\"), twice(\"z\", \"b\"), twice(\[1\], \"c\")\]"]
+    set function [dict get [lindex [namingOf $hir] 0] data function]
+    set covering [lmap {id instance} [dict get $hir semantic instances] {
+        if {![dict exists $instance snapshot exprs $function]} continue
+        set id
+    }]
+    list [llength $covering] [dict exists $hir semantic byBlock $function] \
+        [expr {[hir::warnings::ProvesNaming $hir] eq [hir::warnings::ProvesNaming [dict remove $hir semantic]]}] \
+        [llength [namingOf $hir]]
+} -result {3 0 1 1}
+
+# ---------------------------------------------------------------------------
+# Interleaving with the four existing codes, the policy matrix (item 10)
+
+set ::fiveSource "refined type E = str
+error Bad
+fn dup(x):
+    if x < 0:
+        return 0
+    if x > 100:
+        return 0
+    return 1
+fn two(a, b):
+    a
+fn pair(a, b):
+    \[a, b\]
+fn t(x):
+    return two(x, 1)
+fn check(x) errors Bad:
+    if x < 0:
+        fail Bad
+    if x > 9:
+        fail Bad
+    x
+fn emailish(v: str) -> bool proves v: E:
+    v == \"a\""
+
+test pn-interleaving-five-codes {all five codes in one program, in source order} -body {
+    allWarnings $::fiveSource
+} -result {{SAME-RETURN-VALUE 5:9} {FIXED-ARITY-LIST-RETURN 12:5} {METHOD-ELIGIBLE 14:12} {SAME-FAILURE 17:9} {PROVES-NAMING 21:1}}
+
+test pn-interleaving-five-codes-other-order {the same five warnings with the functions in the other order sort by location, not by code} -body {
+    allWarnings "refined type E = str
+error Bad
+fn emailish(v: str) -> bool proves v: E:
+    v == \"a\"
+fn check(x) errors Bad:
+    if x < 0:
+        fail Bad
+    if x > 9:
+        fail Bad
+    x
+fn two(a, b):
+    a
+fn t(x):
+    return two(x, 1)
+fn pair(a, b):
+    \[a, b\]
+fn dup(x):
+    if x < 0:
+        return 0
+    if x > 100:
+        return 0
+    return 1"
+} -result {{PROVES-NAMING 3:1} {SAME-FAILURE 7:9} {METHOD-ELIGIBLE 14:12} {FIXED-ARITY-LIST-RETURN 16:5} {SAME-RETURN-VALUE 19:9}}
+
+test pn-interleaving-deterministic {compiling the five-code program twice yields the same warnings} -body {
+    expr {[hir::warnings::of [compileWith $::fiveSource]] eq [hir::warnings::of [compileWith $::fiveSource]]}
+} -result 1
+
+test pn-independent-of-other-codes {a proves function that also trips an existing code gets independent diagnostics: a validator repeating a failure (SAME-FAILURE), a predicate returning false from two exits (SAME-RETURN-VALUE)} -body {
+    allWarnings "$::E
+fn check_email(v: str) -> unit proves v: E errors Bad:
+    if v == \"\":
+        fail Bad
+    if v == \"x\":
+        fail Bad
+    unit
+fn emailish(v: str) -> bool proves v: E:
+    if v == \"\":
+        return false
+    if v == \"x\":
+        return false
+    true"
+} -result {{PROVES-NAMING 4:1} {SAME-FAILURE 6:9} {PROVES-NAMING 10:1} {SAME-RETURN-VALUE 12:9}}
+
+test pn-mode-default {default: compiles, and the program carries the warning} -body {
+    list [lmap w [namingOf [compileWith $::predicateSource default]] {dict get $w code}] [rejection $::predicateSource default]
+} -result {PROVES-NAMING compiled}
+
+test pn-mode-off {off: compiles, and nothing is reported} -body {
+    set hir [compileWith $::predicateSource off]
+    list [hir::warnings::of $hir] [dict exists $hir warnings]
+} -result {{} 0}
+
+test pn-mode-error-only-this-code {error: a program with only this warning is rejected with the warning's own code and message} -body {
+    rejection $::predicateSource error
+} -result {{CORE SEMANTIC PROVES-NAMING} {t.bot:4:1: `emailish` proves a contract and returns bool; predicate names end in `?`}}
+
+test pn-mode-error-first-in-sort-order {error with five codes: exactly one error, the sort-first, with its own code (both orders)} -body {
+    list [lindex [rejection $::fiveSource error] 0] [lindex [rejection "refined type E = str
+error Bad
+fn emailish(v: str) -> bool proves v: E:
+    v == \"a\"
+fn check(x) errors Bad:
+    if x < 0:
+        fail Bad
+    if x > 9:
+        fail Bad
+    x" error] 0]
+} -result {{CORE SEMANTIC SAME-RETURN-VALUE} {CORE SEMANTIC PROVES-NAMING}}
+
+test pn-mode-error-clean-program {error mode accepts a program whose proves functions follow the convention} -body {
+    rejection "$::E
+fn emailish?(v: str) -> bool proves v: E:
+    v == \"a\"
+fn validate_emailish(v: str) -> unit proves v: E errors Bad:
+    if v == \"\":
+        fail Bad
+    unit
+fn is_empty(v: str) -> bool:
+    v == \"\"
+\[emailish?(\"a\"), is_empty(\"b\")\]" error
+} -result compiled
+
+test pn-mode-default-is-the-default {no option and no environment setting means warnings on, as warnings} -body {
+    set saved $::env(BOTLISH_WARNINGS)
+    unset ::env(BOTLISH_WARNINGS)
+    try {
+        set hir [surface::compile $::predicateSource t.bot -warning-channel ""]
+        lmap w [hir::warnings::of $hir] {dict get $w code}
+    } finally {
+        set ::env(BOTLISH_WARNINGS) $saved
+    }
+} -result PROVES-NAMING
+
+test pn-environment-default {BOTLISH_WARNINGS is only the default for a compilation given no -warnings, read fresh each time} -body {
+    set saved $::env(BOTLISH_WARNINGS)
+    try {
+        set results {}
+        foreach mode {default off error} {
+            set ::env(BOTLISH_WARNINGS) $mode
+            lappend results [catch {surface::compile $::predicateSource t.bot -warning-channel ""}] \
+                [catch {surface::compile $::predicateSource t.bot -warnings off -warning-channel ""}]
+        }
+        set results
+    } finally {
+        set ::env(BOTLISH_WARNINGS) $saved
+    }
+} -result {0 0 0 0 1 0}
+
+test pn-unknown-mode {a mode outside default/off/error is a plain usage error} -body {
+    surface::compile $::predicateSource t.bot -warnings naming -warning-channel ""
+} -returnCodes error -match glob -result {unknown warnings mode "naming" (known: default, off, error)}
+
+test pn-no-fine-grained-options {there is no per-warning option: -Wno-proves-naming is not an option} -body {
+    surface::compile $::predicateSource t.bot -Wno-proves-naming 1
+} -returnCodes error -match glob -result {*unknown option "-Wno-proves-naming"*}
+
+test pn-no-new-modes-or-options {the policy surface is still exactly default, off, error; the registry is static, one line per code} -body {
+    list $hir::warnings::modes [dict keys $hir::warnings::passes] [dict get $hir::warnings::passes PROVES-NAMING] \
+        [expr {[llength [info commands hir::warnings::enable]] + [llength [info commands hir::warnings::disable]]}]
+} -result {{default off error} {SAME-RETURN-VALUE METHOD-ELIGIBLE FIXED-ARITY-LIST-RETURN SAME-FAILURE PROVES-NAMING} hir::warnings::ProvesNaming 0}
+
+test pn-error-promotion-identity {the promoted error keeps the code and the message the warning has} -body {
+    set w [lindex [namingOf [compileWith $::predicateSource default]] 0]
+    lassign [rejection $::predicateSource error] code message
+    list [lindex $code end] [dict get $w code] [string match "*[dict get $w message]*" $message]
+} -result {PROVES-NAMING PROVES-NAMING 1}
+
+test pn-off-runs-no-warning-pass {warnings off does not execute the pass at all (default does): the stats counter} -body {
+    hir::warnings::resetStats
+    compileWith $::predicateSource off
+    set afterOff [hir::warnings::stats]
+    compileWith $::predicateSource default
+    set afterDefault [hir::warnings::stats]
+    list $afterOff [dict exists $afterOff PROVES-NAMING] [dict get $afterDefault PROVES-NAMING]
+} -result {{} 0 1}
+
+test pn-off-runs-no-warning-pass-via-trace {an execution trace on the pass proves it is not invoked when off} -body {
+    set ::passCalls 0
+    trace add execution hir::warnings::ProvesNaming enter {apply {{args} {incr ::passCalls}}}
+    try {
+        compileWith $::predicateSource off
+        set off $::passCalls
+        compileWith $::predicateSource default
+        set on $::passCalls
+    } finally {
+        trace remove execution hir::warnings::ProvesNaming enter {apply {{args} {incr ::passCalls}}}
+    }
+    list $off $on
+} -result {0 1}
+
+test pn-compilation-with-errors-has-no-warnings {a program the compiler rejects is never warned about} -body {
+    set hir [surface::compile "$::predicateSource\nnothing" t.bot -strict 0 -warnings default -warning-channel ""]
+    list [expr {[llength [hir::diagnostics $hir]] > 0}] [hir::warnings::of $hir]
+} -result {1 {}}
+
+test pn-policy-is-per-compilation {interleaved compilations under different modes never leak a mode} -body {
+    set a [compileWith $::predicateSource off]
+    set b [compileWith $::predicateSource default]
+    set c [catch {compileWith $::predicateSource error}]
+    set d [compileWith $::predicateSource off]
+    set e [compileWith $::predicateSource default]
+    list [llength [namingOf $a]] [llength [namingOf $b]] $c [llength [namingOf $d]] [llength [namingOf $e]]
+} -result {0 1 1 0 1}
+
+test pn-warnings-attached-structurally {hir::warnings::of equals collect} -body {
+    set hir [compileWith $::fiveSource default]
+    list [expr {[hir::warnings::of $hir] eq [hir::warnings::collect $hir]}] [llength [hir::warnings::collect $hir]]
+} -result {1 5}
+
+test pn-error-stops-before-backend {error mode rejects before any backend lowers anything (traces on all four entry points)} -body {
+    set ::lowerCalls 0
+    foreach command {native::evalHir native::prepareHir hir::lower core::compiler::evalHir} {
+        trace add execution $command enter {apply {{args} {incr ::lowerCalls}}}
+    }
+    try {
+        set rejected [catch {compileWith $::predicateSource error} message options]
+    } finally {
+        foreach command {native::evalHir native::prepareHir hir::lower core::compiler::evalHir} {
+            trace remove execution $command enter {apply {{args} {incr ::lowerCalls}}}
+        }
+    }
+    list $rejected [dict get $options -errorcode] $::lowerCalls
+} -result {1 {CORE SEMANTIC PROVES-NAMING} 0}
+
+# ---------------------------------------------------------------------------
+# No semantics change (item 11)
+
+set ::runSource "$::E
+fn emailish(v: str) -> bool proves v: E:
+    v == \"a@b\"
+fn check_email(v: str) -> unit proves v: E errors Bad:
+    if v == \"\":
+        fail Bad
+    unit
+fn need(v: E) -> int:
+    7
+fn use(s: str) -> int:
+    if emailish(s):
+        need(s)
+    else:
+        0
+fn use2(s: str) -> int:
+    check_email(s):
+        on Bad:
+            return -1
+    3
+\[use(\"a@b\"), use(\"x\"), use2(\"\"), use2(\"y\")\]"
+
+test pn-hir-identical-across-modes {HIR (minus the side table), hir::format and hir::lower are identical under off and default} -body {
+    set off [compileWith $::runSource off]
+    set on [compileWith $::runSource default]
+    list [llength [namingOf $on]] [expr {$off eq [dict remove $on warnings]}] [expr {[hir::format $off] eq [hir::format $on]}] \
+        [expr {[hir::lower $off] eq [hir::lower $on]}] [dict exists $off warnings]
+} -result {2 1 1 1 0}
+
+test pn-no-new-hir-state {nothing new is recorded on HIR: default adds only the warnings side table; every node has the fields it has under off} -body {
+    set off [compileWith $::runSource off]
+    set on [compileWith $::runSource default]
+    set added [lmap key [dict keys $on] {if {[dict exists $off $key]} continue; set key}]
+    set changed 0
+    dict for {e node} [dict get $on exprs] {
+        if {[lsort [dict keys $node]] ne [lsort [dict keys [dict get $off exprs $e]]]} {
+            incr changed
+        }
+    }
+    list $added $changed [expr {[dict get $on bindings] eq [dict get $off bindings]}] \
+        [expr {[dict get $on scopes] eq [dict get $off scopes]}] [expr {[dict get $on exprs] eq [dict get $off exprs]}]
+} -result {warnings 0 1 1 1}
+
+test pn-nir-identical-across-modes {native IR (specialized and generic) is identical with warnings off and on} -body {
+    set off [compileWith $::runSource off]
+    set on [compileWith $::runSource default]
+    list [expr {[native::nir $off] eq [native::nir $on]}] [expr {[native::nir $off -specialize 0] eq [native::nir $on -specialize 0]}]
+} -result {1 1}
+
+test pn-machine-readable-outputs-clean {native::report, NIR and CLIF are identical with and without the warnings side table} -body {
+    set on [compileWith $::runSource default]
+    set bare [dict remove $on warnings]
+    expr {[llength [namingOf $on]] == 2 && [native::report $on] eq [native::report $bare]
+        && [native::nir $on] eq [native::nir $bare] && [native::clif $on] eq [native::clif $bare]}
+} -result 1
+
+test pn-no-warning-text-in-machine-readable-outputs {neither NIR, CLIF, the report nor HIR text mention the warning} -body {
+    set hir [compileWith $::runSource default]
+    set seen 0
+    foreach text [list [native::nir $hir] [native::clif $hir] [native::report $hir] [hir::format $hir]] {
+        foreach word {PROVES-NAMING warning "proves a contract" "names end in" "names are"} {
+            if {[string first $word $text] >= 0} {
+                incr seen
+            }
+        }
+    }
+    set seen
+} -result 0
+
+# ---------------------------------------------------------------------------
+# Backend independence (item 12)
+
+test pn-backend-independent {every backend runs the program identically; the one warning set is the HIR's} -body {
+    set hir [compileWith $::runSource default]
+    set outcomes [lmap backend $::allBackends {outcomeUnderHir $backend $hir}]
+    list [llength [lsort -unique [lmap o $outcomes {lindex $o 1}]]] [lindex $outcomes 0 1] [llength [namingOf $hir]]
+} -result {1 {[7, 0, -1, 3]} 2}
+
+test pn-backend-independent-off {the same program runs identically on every backend with warnings off} -body {
+    set hir [compileWith $::runSource off]
+    lsort -unique [lmap backend $::allBackends {lindex [outcomeUnderHir $backend $hir] 1}]
+} -result {{[7, 0, -1, 3]}}
+
+# ---------------------------------------------------------------------------
+# The command line
+
+test pn-cli-modes {main.tcl: default prints the warnings on stderr and runs; off is silent; error rejects before running} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource pn-cli-[pid].bot]
+    set results {}
+    foreach mode {default off error} {
+        set status [catch {exec [info nameofexecutable] $main -warnings $mode $path 2>@1} out]
+        lappend results [list $mode $status \
+            [regexp {:4:1: warning: `emailish` proves a contract and returns bool; predicate names end in `\?` \(PROVES-NAMING\)} $out] \
+            [regexp {:6:1: warning: `check_email` proves a contract and returns unit; validator names are `validate` or begin with `validate_` \(PROVES-NAMING\)} $out] \
+            [regexp {note:} $out] \
+            [regexp {value: \[7, 0, -1, 3\]} $out] \
+            [regexp {CORE SEMANTIC PROVES-NAMING} $out]]
+    }
+    removeFile pn-cli-[pid].bot
+    set results
+} -result {{default 0 1 1 0 1 0} {off 0 0 0 0 1 0} {error 1 0 0 0 0 1}}
+
+test pn-cli-no-wno-option {-Wno-proves-naming is an unknown option, not a file name} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource pn-cli-wno-[pid].bot]
+    catch {exec [info nameofexecutable] $main -Wno-proves-naming $path 2>@1} out
+    removeFile pn-cli-wno-[pid].bot
+    list [string match "*unknown option*-Wno-proves-naming*" $out] [string match "*value:*" $out]
+} -result {1 0}
+
+test pn-cli-unknown-mode {main.tcl rejects an unknown mode} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource pn-cli-mode-[pid].bot]
+    set status [catch {exec [info nameofexecutable] $main -warnings naming $path 2>@1} out]
+    removeFile pn-cli-mode-[pid].bot
+    list $status [string match "*unknown warnings mode*" $out]
+} -result {1 1}
+
+test pn-cli-stdout-clean {the warnings go to stderr: program stdout carries no warning text} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource pn-cli-stdout-[pid].bot]
+    set stderrPath [makeFile {} pn-cli-stderr-[pid].txt]
+    set out [exec [info nameofexecutable] $main -warnings default $path 2> $stderrPath]
+    set err [viewFile pn-cli-stderr-[pid].txt]
+    removeFile pn-cli-stdout-[pid].bot
+    removeFile pn-cli-stderr-[pid].txt
+    list [string match *warning* $out] [string match *proves* $out] [regexp -all {PROVES-NAMING} $err] \
+        [string match {*value: \[7, 0, -1, 3\]*} $out]
+} -result {0 0 2 1}
+
+test pn-error-cli-stops-before-backend {main.tcl -backend cranelift -warnings error rejects without lowering or running anything} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource pn-cli-error-[pid].bot]
+    catch {exec [info nameofexecutable] $main -backend cranelift -warnings error $path 2>@1} out
+    removeFile pn-cli-error-[pid].bot
+    list [string match "*value:*" $out] [regexp {\(CORE SEMANTIC PROVES-NAMING\)} $out]
+} -result {0 1}
+
+# The warning lines (and their notes) of main.tcl's stderr for PATH on
+# BACKEND, with the file's directory stripped.
+proc cliWarningText {path backend} {
+    set main [file join $::projectRoot main.tcl]
+    set err [makeFile {} pn-cli-err-[pid].txt]
+    catch {exec [info nameofexecutable] $main -backend $backend -warnings default $path 2> $err}
+    set lines [lmap line [split [viewFile pn-cli-err-[pid].txt] \n] {
+        if {![string match "*: warning: *" $line] && ![string match "*: note: *" $line]} continue
+        set line
+    }]
+    removeFile pn-cli-err-[pid].txt
+    return $lines
+}
+
+test pn-cli-backend-independent {main.tcl prints the identical warning text, all five codes, on every backend} -constraints executableAot -body {
+    set path [makeFile "$::fiveSource\ny = check(3):\n    on Bad:\n        0\n\[y, emailish(\"a\")\]" pn-cli-five-[pid].bot]
+    set texts [lmap backend $::allBackends {cliWarningText $path $backend}]
+    removeFile pn-cli-five-[pid].bot
+    set first [lindex $texts 0]
+    list [llength [lsort -unique $texts]] [llength [lsearch -all $first *PROVES-NAMING*]] [llength $first]
+} -result {1 1 7}
+
+test pn-cli-backend-independent-stdlib-and-refinement {main.tcl prints the identical warning text (every code, notes included) on every backend over the whole stdlib corpus and the refinement example} -constraints executableAot -body {
+    set programs [lsort [glob -directory [file join $::projectRoot examples stdlib] *.bot]]
+    lappend programs [file join $::projectRoot examples refinement refined-strings.bot]
+    set mismatches {}
+    set total 0
+    set naming 0
+    foreach path $programs {
+        set texts [lmap backend $::allBackends {cliWarningText $path $backend}]
+        incr total [llength [lindex $texts 0]]
+        incr naming [llength [lsearch -all [lindex $texts 0] *PROVES-NAMING*]]
+        if {[llength [lsort -unique $texts]] != 1} {
+            lappend mismatches [file tail $path]
+        }
+    }
+    list $mismatches [expr {$total > 0}] $naming
+} -result {{} 1 0}
+
+# ---------------------------------------------------------------------------
+# The language facts the rename law relies on
+
+test pn-question-method-sugar-parses {a `?`-suffixed method-sugar call parses and resolves (`s.emailish?()`), so the predicate rename covers method-syntax call sites} -body {
+    set hir [compileWith "$::E
+fn emailish?(v: str) -> bool proves v: E:
+    v == \"a\"
+\[\"a\".emailish?(), \"b\".emailish?()\]" off]
+    lindex [outcomeUnderHir interp $hir] 1
+} -result {[true, false]}
+
+test pn-rename-is-semantics-preserving {renaming a reported function and its call sites (f -> f?, f -> validate_f) silences it and keeps the value; native IR differs only in the function's label} -body {
+    set before [compileWith $::runSource]
+    set after [compileWith [string map {emailish emailish? check_email validate_check_email} $::runSource]]
+    set nirBefore [string map {{"emailish"} {"emailish?"} {"check_email"} {"validate_check_email"}} [native::nir $before]]
+    list [llength [namingOf $before]] [hir::warnings::of $after] \
+        [expr {[lindex [outcomeUnderHir interp $before] 1] eq [lindex [outcomeUnderHir interp $after] 1]}] \
+        [expr {$nirBefore eq [native::nir $after]}] [expr {[native::nir $before] eq [native::nir $after]}]
+} -result {2 {} 1 1 0}
+
+# ---------------------------------------------------------------------------
+# Fuzzing: constructed programs, an independent oracle, all three modes and
+# the rename law
+
+test pn-fuzz-smoke {60 generated programs: predicted warnings (anchor, name, kind) and only them, off silent with identical HIR, error iff warned, and the rename law} -constraints executableAot -body {
+    set fuzz [file join $::projectRoot audit proves-naming tools fuzz.tcl]
+    exec [info nameofexecutable] $fuzz 60 1
+} -result {seeds 60 (from 1): * with warnings, * without; failures 0; extra warnings 0; renames * of *; law failures 0*} -match glob
+
+cleanupTests

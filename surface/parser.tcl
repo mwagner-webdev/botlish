@@ -34,12 +34,17 @@
 #                                                  call expression (item 9)
 #   handlers     = ":" NEWLINE INDENT { "on" IDENT ":" suite } DEDENT
 #   function     = { functionModifier } "fn" IDENT "(" [ paramList ] ")"
-#                  [ "->" IDENT ] [ proofClause ]
+#                  [ "->" typeExpr ] [ proofClause ]
 #                  [ "errors" IDENT { "," IDENT } ] ":" suite
+#                  -- typeExpr (TypeExpr) is a type name, a qualified or
+#                  applied one, a structural Fn type, or the keyword "unit"
+#                  as the unit type's name (`-> unit`)
 #   proofClause  = "proves" IDENT ":" typeExpr
-#                  -- REFINEMENT-VALUES.md: when the function returns true,
-#                  the argument bound to the named parameter is proven to
-#                  satisfy the refinement type. "proves" is contextual: it is
+#                  -- REFINEMENT-VALUES.md: when the function returns true
+#                  (a predicate, "-> bool") or completes normally (a
+#                  validator, "-> unit"), the argument bound to the named
+#                  parameter is proven to satisfy the refinement type.
+#                  "proves" is contextual: it is
 #                  recognized only here, after the result type (or the
 #                  parameter list) and before "errors"/":", where no other
 #                  construct allows a name, so `proves` stays an ordinary
@@ -51,7 +56,7 @@
 #                  [ "," contextSection ] [ "," ]
 #                  -- sections in canonical order: ordinary parameters, then
 #                  flags, then context (ParamSections); any may be absent
-#   param        = IDENT [ ":" IDENT ]
+#   param        = IDENT [ ":" typeExpr ]
 #   flagSection  = "flags" flagDecl { "," flagDecl }   -- FLAGS.md; "flags" is
 #                  contextual: `flags :name` only (an ordinary name otherwise)
 #   flagDecl     = ":" IDENT                          -- the name glued to ":"
@@ -1044,12 +1049,23 @@ proc surface::parser::Value {pVar} {
 # errors here, each with its own message.
 proc surface::parser::TypeExpr {pVar what} {
     upvar 1 $pVar p
-    set token [Expect p IDENT $what]
-    set name [dict get $token value]
+    if {[Kind p] eq "unit"} {
+        # `unit` is a keyword (the unit value, lexer.tcl); in a type
+        # position it is the name of the unit type (`fn log(x) -> unit:`,
+        # a validator's `-> unit proves v: R`, REFINEMENT-VALUES.md). No
+        # expression can stand here, so the keyword keeps its value meaning
+        # everywhere else. It is a plain name: never qualified, never a
+        # constructor (`unit[int]` is resolution's "not a type constructor").
+        Advance p
+        set name unit
+    } else {
+        set token [Expect p IDENT $what]
+        set name [dict get $token value]
+    }
     if {$name eq "Fn"} {
         return [FnType p $token]
     }
-    while {[Kind p] eq "::"} {
+    while {$name ne "unit" && [Kind p] eq "::"} {
         # A module-qualified type name (STRUCTS.md): "geo::Point" names the
         # struct Point declared by module geo, "abi::x86_64::Register64" the
         # struct Register64 of the nested namespace abi::x86_64. Kept as the
@@ -1789,7 +1805,11 @@ proc surface::parser::Suite {pVar after} {
     # word is contextual: no other construct allows a name here, so this is
     # the only place it is recognized. A list of clause dicts, so further
     # clause forms (several parameters, other outcomes) extend it, never
-    # the node shape; this grammar admits exactly one.
+    # the node shape; this grammar admits exactly one. Its outcome is what
+    # the written result says carries the proof: `-> unit` (a validator)
+    # proves by completing normally (`normal`), anything else by returning
+    # true (`true`, a predicate; hir/resolve.tcl's ResolveProofs holds the
+    # declared result to exactly `bool` or `unit`).
     set proves {}
     if {$allowResult && [Kind p] eq "IDENT" && [dict get [Peek p] text] eq "proves"} {
         set provesToken [Advance p]
@@ -1797,7 +1817,7 @@ proc surface::parser::Suite {pVar after} {
         Expect p : "\":\" after the proven parameter's name (\"proves [dict get $paramToken value]: TYPE\")"
         set typeStart [dict get [Peek p] span]
         set provenType [TypeExpr p "the proven refinement type after \"proves [dict get $paramToken value]:\""]
-        lappend proves [dict create outcome true \
+        lappend proves [dict create outcome [expr {$resultType eq "unit" ? "normal" : "true"}] \
             param [dict get $paramToken value] paramSpan [dict get $paramToken span] \
             type $provenType typeSpan [SpanFrom p $typeStart] \
             span [SpanFrom p [dict get $provesToken span]]]

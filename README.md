@@ -354,11 +354,12 @@ Refinement introspection: `core::refinementsOf ENV NAME` and
 `core::blockEnv` (see `examples/04-refinement-scope.ir`).
 
 Botlish source declares its own refinements: `refined type Emailish = str`
-is a nominal type over a carrier, and `fn emailish?(v: str) -> bool proves
-v: Emailish:` is a function whose true result proves its argument one
-(§14, REFINEMENT-VALUES.md). Those facts are static only: the compiler
-(§13) derives them from the function's declared proof contract, and no
-runtime value or environment records them.
+is a nominal type over a carrier, `fn emailish?(v: str) -> bool proves
+v: Emailish:` is a function whose true result proves its argument one, and
+`fn validate_emailish(v: str) -> unit proves v: Emailish errors Invalid:`
+one whose normal completion does (§14, REFINEMENT-VALUES.md). Those facts
+are static only: the compiler (§13) derives them from the function's
+declared proof contract, and no runtime value or environment records them.
 
 ## 7. Invalid programs vs application errors
 
@@ -841,9 +842,14 @@ representation: the compiler maps a block's `EXPR` to the proc it generates.
   accumulate facts. As in the interpreter, only arguments that are plain
   `(ref NAME)` are refined (an immutable alias's root value too), and a
   Boolean binding carries what its value implies (`ok = p(s)` then `if ok:`).
+  A *validator*'s contract (`-> unit proves v: Emailish`) is a flow fact
+  instead: once its call completes, the argument is refined for the rest of
+  the path (not inside a handler of the call; after a handled call only if
+  every handler that completes proves it too).
   A fact survives an `if` when every branch that completes normally proves it.
 * **Exact predicate results** (REFINEMENT-VALUES.md): a call of a
-  proof-producing function also records its own result for its exact
+  predicate (a `-> bool` proof-producing function; never a validator, whose
+  repeated call is always made) also records its own result for its exact
   argument values on each edge. A second identical call on a path where that
   result is known is decided (the call's `known`, and every backend elides
   it) only when the function is *repeatable* (`hir/repeatable.tcl`: everything
@@ -980,7 +986,8 @@ form, with names sorted and unique, and every registry stores canonical types.
 * A **refinement** type is nominal (REFINEMENT-VALUES.md). Source declares
   it over one carrier type, `refined type Emailish = str`, and a value of the
   carrier is one only where a proof says so: a call of a proof-producing
-  function of the declaring module returned true for it. There is no runtime
+  function of the declaring module returned true for it (a predicate) or
+  completed normally for it (a validator). There is no runtime
   test, tag or wrapper: a refined value is exactly a value of its carrier, so
   equality, hashing, rendering, the ABI and layouts are the carrier's.
 
@@ -1281,8 +1288,10 @@ metadata gives facts about the arguments that are plain references; when it
 calls a known function with a proof contract (`proves x: R`, resolved onto
 the block as its `proofs`), the contract does. Facts are BindingId/type
 pairs, plus the exact-result facts of proof-producing calls (§13). They're recorded on the `if` (per outcome) and on the
-branch scope, and they narrow the binding only inside that branch. Nothing in
-the HIR refers to a predicate by name. A type test decided by static types
+branch scope, and they narrow the binding only inside that branch. A
+validator's contract (`-> unit proves x: R`, outcome `normal`) is no
+condition fact: a call of it that completes narrows its argument for the
+rest of the path (§13). Nothing in the HIR refers to a predicate by name. A type test decided by static types
 (§8) sets the call's `known` field. If an `if` condition is known (a decided
 test, or the root binding `true` or `false`), the other branch is marked
 unreachable.
@@ -1305,7 +1314,8 @@ The `hir::format` notation is also an input format. `hir::parse` (and
 rebuilds a complete HIR program from it. The text states the binding ids,
 scopes, types, captures, refinements, call targets and flags, and a
 source refinement's declaration (`refined type ID carrier T owner NS`) and a
-block's proof contract (` proves BINDING NAME: TYPE`). The reader
+block's proof contract (` proves BINDING NAME: TYPE`, a predicate's or a
+validator's as its `declares bool`/`declares unit` says). The reader
 derives everything else: binding kinds and types, scope structure, closures,
 root symbols, diagnostics and origins. It rejects text that is malformed or
 inconsistent (an id declared twice, a reference to a binding that isn't
@@ -1529,16 +1539,24 @@ add10(32)          # 42 (add captures x)
   `context` (below) composes with it as an independent modifier
   (`opaque context struct`), and a later `resource` will too.
   See OPAQUE-STRUCTS.md.
+* A result annotation `-> unit` declares the unit result (`fn log(x) ->
+  unit:`): `unit` is the unit value's keyword everywhere else, and the unit
+  type's name in a type position (results, parameters, `List[unit]`, `Fn{...}`
+  fields, struct fields).
 * **Refinement types and proofs.** `refined type Emailish = str` declares a
   nominal refinement of one carrier type, and `fn emailish?(v: str) -> bool
-  proves v: Emailish:` declares the function whose true result proves it: in
+  proves v: Emailish:` declares a *predicate* whose true result proves it: in
   `if emailish?(s):` (or `ok = emailish?(s)` then `if ok:`, or through `not`,
-  `and`, `or`), `s` is an `Emailish`. The proof clause names one declared
-  parameter, sits after `-> bool` and before an `errors` clause, and may
-  appear only in the module that declares the refinement. A refined value is
-  its carrier everywhere a carrier is expected; nothing else converts to it.
-  `refined` and `proves` are contextual words, not reserved. See §14 and
-  REFINEMENT-VALUES.md.
+  `and`, `or`), `s` is an `Emailish`. `fn validate_emailish(v: str) -> unit
+  proves v: Emailish errors Invalid:` declares a *validator* whose normal
+  completion proves it: after `validate_emailish(s)` returns, `s` is an
+  `Emailish` for the rest of the path (a handled call keeps the fact only if
+  every handler that completes proves it too). The proof clause names one
+  declared parameter, sits after `-> bool` or `-> unit` and before an
+  `errors` clause, and may appear only in the module that declares the
+  refinement. A refined value is its carrier everywhere a carrier is
+  expected; nothing else converts to it. `refined` and `proves` are
+  contextual words, not reserved. See §14 and REFINEMENT-VALUES.md.
 * **Method-call sugar.** `value.f(a, b)` is another spelling of the ordinary
   call `f(value, a, b)`, allowed exactly when `f` is a function visible by
   that name at the call (under ordinary lexical resolution: a function or
@@ -2899,22 +2917,26 @@ and stops. It never says what to do about it, and a program that keeps the
 fact on purpose is correct. A warning that cannot cite a compiler proof does
 not belong in a default-on, non-suppressible system.
 
-That bar admits two *preference-shaped* warnings, `METHOD-ELIGIBLE` and
-`FIXED-ARITY-LIST-RETURN` (below), and only because each passes the bar rather
-than because "style warnings are fine now": (1) its **fact** is compiler-proven
--- the sugared spelling parses and resolves to the identical callee; every
-reachable value exit is a written list literal of one arity -- with the
-compiler's own parser, resolver, provenance and reachability as the prover;
-(2) the **preference** it serves is the language's own declared design
-(receiver syntax is Botlish's preferred call form; struct values have named
-parts and destructure, Lists deliberately do not: MULTI-VALUE-RESULTS.md), not
-a per-warning fashion; (3) the **function's author** has first-class control at
-the declaration, as part of the interface: `nomethod fn` withdraws method
-eligibility, and a result type `-> list` / `-> List[T]` declares a list result.
-Neither is call-site suppression, and both have semantic consequences the
-checker enforces (there is still no lint-ignore, pragma or per-call opt-out);
-(4) **uncertainty means silence**: wherever the compiler cannot prove the fact,
-it says nothing.
+That bar admits three *preference-shaped* warnings, `METHOD-ELIGIBLE`,
+`FIXED-ARITY-LIST-RETURN` and `PROVES-NAMING` (below), and only because each
+passes the bar rather than because "style warnings are fine now": (1) its
+**fact** is compiler-proven -- the sugared spelling parses and resolves to the
+identical callee; every reachable value exit is a written list literal of one
+arity; the declaration carries a resolved proof contract of one of the
+refinement feature's two shapes and its written name is outside that shape's
+convention -- with the compiler's own parser, resolver, provenance and
+reachability as the prover; (2) the **preference** it serves is the language's
+own declared design (receiver syntax is Botlish's preferred call form; struct
+values have named parts and destructure, Lists deliberately do not:
+MULTI-VALUE-RESULTS.md; proof-producing functions are named by their shape,
+the refinement feature's declared interface: REFINEMENT-VALUES.md, "Naming"),
+not a per-warning fashion; (3) the **function's author** has first-class
+control at the declaration, as part of the interface: `nomethod fn` withdraws
+method eligibility, a result type `-> list` / `-> List[T]` declares a list
+result, and a proof-producing function's name is its author's own choice, which
+a rename changes and nothing else does. None is call-site suppression (there is
+still no lint-ignore, pragma or per-call opt-out); (4) **uncertainty means
+silence**: wherever the compiler cannot prove the fact, it says nothing.
 
 There is one global policy per compilation, and nothing finer:
 
@@ -2938,10 +2960,11 @@ hir::warnings::of $hir      ;# {code message primary secondary data} records
 annotation or comment suppresses a warning. This is intentional, not forgotten
 CLI work: every warning is on for everyone, so a warning must be trustworthy
 enough to be, and uncertainty means no warning. Codes (`SAME-RETURN-VALUE`,
-`METHOD-ELIGIBLE`, `FIXED-ARITY-LIST-RETURN`, `SAME-FAILURE`) are stable for
-tests, tooling and documentation, but they are not switches. Adding
-`METHOD-ELIGIBLE`, `FIXED-ARITY-LIST-RETURN` and `SAME-FAILURE` gave
-`BOTLISH_WARNINGS` and the command line nothing: three modes, one option.
+`METHOD-ELIGIBLE`, `FIXED-ARITY-LIST-RETURN`, `SAME-FAILURE`, `PROVES-NAMING`)
+are stable for tests, tooling and documentation, but they are not switches.
+Adding `METHOD-ELIGIBLE`, `FIXED-ARITY-LIST-RETURN`, `SAME-FAILURE` and
+`PROVES-NAMING` gave `BOTLISH_WARNINGS` and the command line nothing: three
+modes, one option.
 
 `SAME-RETURN-VALUE`: several distinct, reachable exits of one function are
 proven to return the same value.
@@ -3088,3 +3111,49 @@ can be the right response, and so can keeping the uniform failure. See
 WARNINGS-SAME-FAILURE.md for the theorem, the mirror-image exits table, the
 reachability argument, the corpus audit and known limitations; the tests are
 `tests/same-failure.test` and `audit/same-failure/tools/fuzz.tcl`.
+
+`PROVES-NAMING`: a function fitted with a `proves` contract, of one of the two
+shapes the refinement feature defines, whose written name does not follow that
+shape's naming convention (REFINEMENT-VALUES.md, "Naming").
+
+```
+refined type Emailish = str
+fn emailish(v: str) -> bool proves v: Emailish:
+    ...
+```
+```
+f.bot:2:1: warning: `emailish` proves a contract and returns bool; predicate names end in `?` (PROVES-NAMING)
+```
+
+**The scope guard is the warning's boundary: no `proves`, no opinion.** Only a
+function whose declaration carries a `proves` clause is ever looked at. A
+function without one is never warned, whatever its name, parameters or result:
+`fn is_empty(v: str) -> bool` is silent, and so is a `?`-named function that
+returns an `int`. Of the proves-fitted functions, exactly two shapes are
+covered, each with its convention:
+
+* a **predicate** -- one ordinary parameter, result `bool` -- is named with a
+  trailing `?` (`emailish?`);
+* a **validator** -- one ordinary parameter, result `unit` -- is named exactly
+  `validate` (a module export: `path::validate`) or beginning with `validate_`
+  (`validate_emailish`). The prefix is literal and case-sensitive:
+  `Validate_x`, `validateX` and `validator_x` are reported, and the bare
+  `validate_` conforms, as the literal rule reads.
+
+Flags and context parameters are not ordinary parameters; an `errors` clause
+neither qualifies nor disqualifies. A proves function with two or more
+ordinary parameters is silent, whatever its name. There is no reverse rule:
+nothing checks that a `?` name returns `bool` or that a `validate_` name is a
+validator. The name checked is the one the author wrote -- a module function's
+member name (`check`, not `path::check`), never hygiene's `NAME#N` spelling --
+and a declaration is checked wherever it is (nested functions and closures
+included), once, whether or not anything calls it. One diagnostic per
+function, at its `fn`, with no notes. The message states the shape and the
+convention and never prints a name: the response is a rename, which is
+semantics-preserving and fully checked by the compiler, and for a validator
+both `validate_f` and the bare `validate` conform, so the author chooses. There
+is no opt-out, and nothing to opt out of: a function outside the two shapes is
+never reported. See WARNINGS-PROVES-NAMING.md for the two rules, the scope
+guard, the shape decisions, the rename law, the corpus census and known
+limitations; the tests are `tests/proves-naming.test` and
+`audit/proves-naming/tools/fuzz.tcl`.

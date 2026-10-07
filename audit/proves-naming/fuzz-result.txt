@@ -1,0 +1,3 @@
+# PROVES-NAMING fuzz results: tclsh9.0 audit/proves-naming/tools/fuzz.tcl 2000 1
+# (at 64d1eb5: this milestone with the refinement validator feature merged; one run of 2000 seeds; FAIL and EXTRA lines would precede the summary)
+seeds 2000 (from 1): 1203 with warnings, 797 without; failures 0; extra warnings 0; renames 2831 of 2831; law failures 0 (NIR labels renamed 4880, inlined away 782); predicates 1590 conforming / 1428 violating, validators 1631 conforming / 1403 violating, twins 1466, wrong shapes 1481, nested 2028, closures 1438, hygiene 1002, module 605, only-silent programs 797

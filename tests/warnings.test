@@ -792,7 +792,7 @@ test warn-off-runs-no-warning-pass {warnings off does not execute the warning pa
     catch {compileWith $::policySource error}
     set afterError [hir::warnings::stats]
     list $afterOff $afterDefault $afterError
-} -result {{} {SAME-RETURN-VALUE 1 METHOD-ELIGIBLE 1 FIXED-ARITY-LIST-RETURN 1 SAME-FAILURE 1} {SAME-RETURN-VALUE 2 METHOD-ELIGIBLE 2 FIXED-ARITY-LIST-RETURN 2 SAME-FAILURE 2}}
+} -result {{} {SAME-RETURN-VALUE 1 METHOD-ELIGIBLE 1 FIXED-ARITY-LIST-RETURN 1 SAME-FAILURE 1 PROVES-NAMING 1} {SAME-RETURN-VALUE 2 METHOD-ELIGIBLE 2 FIXED-ARITY-LIST-RETURN 2 SAME-FAILURE 2 PROVES-NAMING 2}}
 
 test warn-off-runs-no-warning-pass-via-trace {an execution trace on the pass proves it is not invoked when off} -body {
     set ::passCalls 0

@@ -389,7 +389,7 @@ test refinement-proof-target-not-refinement {the proven type must be a refinemen
 test refinement-proof-returns-bool {a proof-producing function declares -> bool} -body {
     list [rejection "refined type M = str\nfn p(s: str) -> int proves s: M:\n    1\n1\n"] \
          [rejection "refined type M = str\nfn p(s: str) proves s: M:\n    true\n1\n"]
-} -match glob -result {{PROOF-CLAUSE {*must declare "-> bool"*declared -> int}} {PROOF-CLAUSE {*with no declared result type}}}
+} -match glob -result {{PROOF-CLAUSE {*must declare "-> bool"*or "-> unit"*declared -> int}} {PROOF-CLAUSE {*with no declared result type}}}
 
 test refinement-proof-carrier-mismatch {the proven parameter must already be of the carrier} -body {
     list [rejection "refined type M = str\nfn p(n: int) -> bool proves n: M:\n    true\n1\n"] \
@@ -450,7 +450,7 @@ f(\"abcd\")
 
 test refinement-no-implicit-strengthening {a carrier value is never a refinement without a proof} -body {
     rejection "$prelude\nfn bad(s: str) -> int:\n    send(s)\nbad(\"abcd\")\n"
-} -result {TYPE {argument for parameter "m" cannot be proven to satisfy str[Mail] (argument type: str); expected Mail but found str: a refinement proof is required (a str value becomes Mail only where one of its owner's proof-producing functions has returned true for it; there is no implicit conversion)}}
+} -result {TYPE {argument for parameter "m" cannot be proven to satisfy str[Mail] (argument type: str); expected Mail but found str: a refinement proof is required (a str value becomes Mail only where one of its owner's proof-producing functions has proven it: a predicate returned true for it, or a validator completed normally for it; there is no implicit conversion)}}
 
 test refinement-false-edge-no-proof {the false edge proves nothing about the argument} -body {
     rejectionKind "$prelude\nfn f(s: str) -> int:\n    if mail?(s):\n        0\n    else:\n        send(s)\nf(\"ab\")\n"
@@ -592,7 +592,7 @@ fn f(s: str) -> int:
 
 test refinement-return-unproven {returning an unproven carrier value is rejected} -body {
     rejection "$prelude\nfn parse(s: str) -> Mail:\n    s\nparse(\"abcd\")\n"
-} -result {TYPE {function result does not prove declared type str[Mail]; expected Mail but found str: a refinement proof is required (a str value becomes Mail only where one of its owner's proof-producing functions has returned true for it; there is no implicit conversion)}}
+} -result {TYPE {function result does not prove declared type str[Mail]; expected Mail but found str: a refinement proof is required (a str value becomes Mail only where one of its owner's proof-producing functions has proven it: a predicate returned true for it, or a validator completed normally for it; there is no implicit conversion)}}
 
 test refinement-field {a struct field of refinement type accepts only a proven value; the field is a refined value} -body {
     list [sourceAgree "$prelude
@@ -608,7 +608,7 @@ fn make(s: str) -> int:
 
 \[make(\"abcd\"), make(\"a\")\]
 "] [rejection "$prelude\nstruct Recipient:\n    email: Mail\nRecipient {email: \"abcd\"}\n"]
-} -result {{value {[8, 0]}} {TYPE {field "email" of struct Recipient cannot be proven to satisfy its declared type str[Mail] (value type: str); expected Mail but found str: a refinement proof is required (a str value becomes Mail only where one of its owner's proof-producing functions has returned true for it; there is no implicit conversion)}}}
+} -result {{value {[8, 0]}} {TYPE {field "email" of struct Recipient cannot be proven to satisfy its declared type str[Mail] (value type: str); expected Mail but found str: a refinement proof is required (a str value becomes Mail only where one of its owner's proof-producing functions has proven it: a predicate returned true for it, or a validator completed normally for it; there is no implicit conversion)}}}
 
 # ===========================================================================
 # 30-33. Method sugar and operators

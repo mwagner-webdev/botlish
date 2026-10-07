@@ -268,6 +268,19 @@ and never enters a nested function either). If you change any of those, or how
 `fail`, `errors` or an on-handler body lowers or resolves, run
 `tests/same-failure.test` and `audit/same-failure/tools/fuzz.tcl`.
 
+`PROVES-NAMING` (WARNINGS-PROVES-NAMING.md) reads, per function declaration, the
+block's resolved proof contract (`proofs`, `hir/resolve.tcl`'s
+`ResolveProofs`), its `params` minus its `flags`, its `declaredResult`, and the
+declaring binding's written name (hygiene's recorded `spelling`, else the name
+without a `#N` suffix, then `hir::warnings::MemberName` for a module's
+qualified spelling). It runs no walk and reads no reachability. If you change
+the proof-clause grammar or validation, how a declared result or the flag
+section is recorded, hygiene's renames (`hir/hygiene.tcl`: `spelling`,
+`qualifyModules`), or the naming convention in REFINEMENT-VALUES.md ("Naming"),
+run `tests/proves-naming.test` and `audit/proves-naming/tools/fuzz.tcl`. The
+response to this warning is a rename; do not add an opt-out, a reverse rule
+(`?` implies bool) or a check on functions without `proves`.
+
 ## Refinement values
 
 `refined type NAME = CARRIER` and `proves PARAM: NAME` (REFINEMENT-VALUES.md)
@@ -276,11 +289,15 @@ predicate (`tests/refinement-values.test` greps for `Emailish`,
 `UriQueryValue`, `emailish?`, `uri_query_value?`), and a refined value has
 exactly its carrier's representation -- never add a runtime tag, wrapper or
 check to recover one. If you change the proof contract resolution
-(`hir/resolve.tcl`'s `ResolveProofs`), implications or call keys
-(`hir/refine.tcl`), the `if` join or the decided-call rule (`hir/types.tcl`),
-repeatability (`hir/repeatable.tcl`) or a native's `-context-free`
-classification, run `tests/refinement-values.test`,
-`tests/emailish-predicate.test` and `audit/refinement-values/tools/fuzz.tcl`.
+(`hir/resolve.tcl`'s `ResolveProofs`), implications, call keys or a
+validator's completion facts (`hir/refine.tcl`), the `if` join, the
+decided-call rule or how a call's completion facts flow and a handled call
+joins its handlers (`hir/types.tcl`'s `Call` and `Handle`), repeatability
+(`hir/repeatable.tcl`), a native's `-context-free` classification, or how
+`-> unit` and a proof clause parse, run `tests/refinement-values.test`,
+`tests/refinement-validators.test`, `tests/emailish-predicate.test` and
+`audit/refinement-values/tools/fuzz.tcl` (validators are on by default;
+`-validators 0` reproduces the predicate-only generator's runs).
 
 ## Traits
 
@@ -306,4 +323,3 @@ instance key of a trait parameter (`hir/semantic.tcl`), the plan or build 2
 `audit/traits/tools/mutants.txt` to still apply: update a mutant's text when
 you change the code it mutates, and keep it a mutant of the same rule).
 `audit/traits/tools/evidence.tcl` regenerates `audit/traits/principal/`.
-

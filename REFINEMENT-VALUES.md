@@ -26,13 +26,15 @@ fn bad(s: str) -> int:
 
 A **refinement type** is a new nominal type over exactly one *carrier* type:
 its values are exactly the carrier's values that a proof says satisfy its
-proposition. A **proof-producing function** is an ordinary `-> bool` function
-whose declaration says what its true result proves about one argument. The
-compiler learns refinement facts from control flow over such calls, lets a
-refined value flow wherever its carrier is expected (*forgetting*, ordinary
-subtyping), refuses the reverse direction without a proof, and -- separately
--- decides a repeated identical call of a *repeatable* proof-producing
-function from the result the first call already established on the path.
+proposition. A **proof-producing function** is an ordinary function whose
+declaration says what it proves about one argument: a *predicate* (`-> bool`)
+by its true result, a *validator* (`-> unit`, "Validators" below) by
+completing normally. The compiler learns refinement facts from control flow
+over such calls, lets a refined value flow wherever its carrier is expected
+(*forgetting*, ordinary subtyping), refuses the reverse direction without a
+proof, and -- separately -- decides a repeated identical call of a
+*repeatable* predicate from the result the first call already established on
+the path.
 
 At run time nothing exists: a refined value is its carrier's value, with the
 carrier's representation, equality, hashing, rendering, storage, GC behavior
@@ -56,7 +58,16 @@ function     = { functionModifier } "fn" IDENT "(" [ paramList ] ")"
                [ "->" typeExpr ] [ proofClause ]
                [ "errors" IDENT { "," IDENT } ] ":" suite
 proofClause  = "proves" IDENT ":" typeExpr
+typeExpr     = typeName [ "[" typeExpr "]" ] | fnType | "unit"
 ```
+
+The proof clause sits after the result type and before `errors`; the result
+type says which outcome carries the proof: `-> bool proves x: R` is a
+predicate (a true result proves), `-> unit proves x: R` a validator (a normal
+completion proves). `unit` is the keyword of the unit value everywhere else;
+in a type position, where no expression can stand, it names the unit type, so
+`-> unit` (and `x: unit`, `List[unit]`, `Fn{..., return: unit}`, a field
+`f: unit`) is writable, with or without a proof clause.
 
 * `refined` is **contextual**: it is a declaration modifier only directly
   before `type` at the start of a top-level statement
@@ -74,7 +85,8 @@ proofClause  = "proves" IDENT ":" typeExpr
   The clause is a list of clause dicts in the AST and HIR (outcome, parameter,
   type), so several parameters or other outcomes can extend the list without
   changing the node shape; this grammar admits exactly one, for the `true`
-  outcome.
+  outcome (after any result but `-> unit`) or the `normal` outcome (after
+  `-> unit`).
 
 ## Representation
 
@@ -82,8 +94,9 @@ proofClause  = "proves" IDENT ":" typeExpr
 refined`, `name`, `nameSpan`, `refinedSpan` (the modifier), `carrier` (a type
 expression, the same form a parameter annotation parses to) and
 `carrierSpan`; an integer domain is the same node kind with `form domain`. A
-function node gains `proves`: `{outcome true param NAME paramSpan SPAN type
-TYPEEXPR typeSpan SPAN span SPAN}` clauses (empty without a clause).
+function node gains `proves`: `{outcome true|normal param NAME paramSpan SPAN
+type TYPEEXPR typeSpan SPAN span SPAN}` clauses (empty without a clause;
+`normal` when the written result is `unit`).
 `surface::ast::format` prints both back (`refined type X = C`, ` proves p:
 T`), and `hir::syntax::withProofs` carries the clauses onto the HIR syntax
 `block` node.
@@ -111,10 +124,14 @@ refined type web::Emailish carrier str owner web
 ```
 
 (`owner -` for the entry program), and a block with a proof contract as
-` proves BINDING NAME: TYPE` on its block line. `hir::read` reads both back,
+` proves BINDING NAME: TYPE` on its block line. The outcome is not printed:
+it is the declared result's, which the same line shows (`declares bool` for a
+predicate, `declares unit` for a validator), and `hir::read` derives it from
+there exactly as `ResolveProofs` did. `hir::read` reads both back,
 re-registering the refinement with its original owner, so a program read back
 from HIR text keeps its proofs and runs the same
-(`refinement-hir-text`, `refinement-hir-round-trip-runs`).
+(`refinement-hir-text`, `refinement-hir-round-trip-runs`, `validator-hir-text`,
+`validator-hir-round-trip-runs`).
 
 ## Namespaces, imports and the owner
 
@@ -139,8 +156,9 @@ As with opaque structs, the owner *defines* what its refinement means: the
 compiler does not check that `emailish?`'s body matches any notion of an
 e-mail address. The soundness theorem is that code outside the owner cannot
 forge the fact: the only way to obtain a value statically typed `Emailish` is
-a true result of one of the owner's proof-producing functions (or a value
-already typed `Emailish`: a parameter, a field, a result).
+a true result of one of the owner's predicates or a normal completion of one
+of its validators (or a value already typed `Emailish`: a parameter, a field,
+a result).
 
 ## Carriers
 
@@ -191,8 +209,9 @@ refinement is required. The admissibility diagnostic says why:
 ```
 argument for parameter "a" cannot be proven to satisfy str[A] (argument type: str);
 expected A but found str: a refinement proof is required (a str value becomes
-A only where one of its owner's proof-producing functions has returned true for
-it; there is no implicit conversion)
+A only where one of its owner's proof-producing functions has proven it: a
+predicate returned true for it, or a validator completed normally for it;
+there is no implicit conversion)
 ```
 
 There is no cast, `as`, `assume` or unsafe refine.
@@ -223,10 +242,12 @@ fn emailish?(value: str) -> bool proves value: Emailish:
 means: whenever this invocation returns `true`, the argument passed for
 `value` satisfies `Emailish`. The function is otherwise an ordinary
 `bool` function: same arity, same call, same ABI, `x = emailish?(s)` is an
-ordinary `bool` (`refinement-proof-arity-abi`).
+ordinary `bool` (`refinement-proof-arity-abi`). A *validator* (`-> unit
+proves value: Emailish`) is the other shape: its normal completion is the
+proof ("Validators" below).
 
 **Validation** (`hir/resolve.tcl`, `ResolveProofs`; each a located
-`PROOF-CLAUSE` diagnostic unless noted):
+`PROOF-CLAUSE` diagnostic unless noted), the same for both shapes:
 
 * the clause names one of the function's ordinary parameters ("the function
   has no parameter `t` (its parameters: s)");
@@ -236,14 +257,20 @@ ordinary `bool` (`refinement-proof-arity-abi`).
 * the parameter declares a type, and that type forgets to the refinement's
   carrier ("proof carrier mismatch: parameter "s" is declared int, but A
   refines str"); a proof can only strengthen what the parameter already is;
-* the function declares `-> bool`.
+* the function declares `-> bool` (a predicate) or `-> unit` (a validator).
+  No declared result, or any other one (`-> int`, a refinement of `unit`), is
+  `PROOF-CLAUSE` ("a proof-producing function must declare "-> bool" (a
+  predicate: its true result is the proof) or "-> unit" (a validator: its
+  normal completion is the proof)", `validator-proof-result-shapes`).
 
 **HIR proof metadata.** The resolved contract is the block's `proofs`: a list
-of `{outcome 1 param INDEX binding PARAM-BINDING fact TYPE}` -- the outcome,
-the parameter's position and BindingId, and the refinement type. Nothing in
-it is a name. `hir::refine::ProofRules` turns it into the same `INDEX TYPE`
-rule shape a native's `-refines-true` metadata has, so the consumers do not
-care where a rule came from.
+of `{outcome OUTCOME param INDEX binding PARAM-BINDING fact TYPE}` -- the
+outcome (`1` for a predicate, `normal` for a validator), the parameter's
+position and BindingId, and the refinement type. Nothing in it is a name.
+`hir::refine::ProofRules` turns it into the same `INDEX TYPE` rule shape a
+native's `-refines-true` metadata has, so the consumers do not care where a
+rule came from; it compares outcomes as words, so asking for the true edge's
+rules never returns a validator's (`validator-proof-rule-shape`).
 
 ## Facts: what a call implies
 
@@ -259,12 +286,14 @@ or `never`. A fact set holds two kinds of keys:
   binding the argument denotes after following aliases, or an exactly known
   value.
 
-A call of a function with a proof contract implies, on the true edge, the
-contract's refinement for the argument (when the argument is a plain
-reference: the binding and, for an immutable alias, the binding it aliases --
-one value) and `key = 1`; on the false edge, only `key = 0` -- never a
-negative refinement, because `proves` is a sufficient condition, not an
-iff. A decided call (below) makes its other outcome `never`.
+A call of a predicate implies, on the true edge, the contract's refinement
+for the argument (when the argument is a plain reference: the binding and,
+for an immutable alias, the binding it aliases -- one value) and `key = 1`;
+on the false edge, only `key = 0` -- never a negative refinement, because
+`proves` is a sufficient condition, not an iff. A decided call (below) makes
+its other outcome `never`. A validator's call implies nothing as a Boolean
+(`hir::refine::IsPredicate`; its value is unit): what it proves holds after
+it completes ("Validators").
 
 Implications compose:
 
@@ -360,6 +389,195 @@ an `emailish?` that reads a `MutableArray` still proves, but a repeat is a
 call), and a repeatable function without a proof contract is never decided
 (`refinement-not-a-proof-not-folded`): this milestone records exact results
 only for proof-producing calls; general CSE is a non-goal.
+
+## Validators
+
+```
+refined type Emailish = str
+error Invalid
+
+fn validate_emailish(v: str) -> unit proves v: Emailish errors Invalid:
+    if str::length(v) < 3:
+        fail Invalid
+    unit
+
+fn consume(v: Emailish) -> int:
+    str::length(v)
+
+fn use(s: str) -> int errors Invalid:
+    validate_emailish(s)      # completes normally only if s is an Emailish
+    consume(s)                # accepted: s is proven Emailish from here on
+```
+
+A **validator** is the second proof-producing shape: a function declaring
+`-> unit` whose **normal completion** -- it returns, rather than failing with
+one of its declared errors -- proves that the argument passed for the named
+parameter satisfies the refinement. A module's validator is declared and
+called like any of its functions (`fn validate(v: str) -> unit proves v: Path
+errors ContainsReservedCharacters, TooLong:` in module `path`, called
+`path::validate(p)` or `p.validate()`, `validator-module-qualified`). It is
+otherwise an ordinary `unit` function: same arity, call and ABI, and a
+binding of its call is an ordinary `unit`.
+
+**Declaration.** `-> unit` is the result annotation of the unit type (see
+Syntax: `unit` names the type in a type position), so the parser records the
+clause with outcome `normal`, and `ResolveProofs` validates it exactly like a
+predicate's -- an ordinary parameter, a refinement type, the owner
+(`REFINEMENT-MINT-AUTHORITY`), the parameter declared of the carrier
+(`validator-proof-clause-rules`, `validator-mint-authority`) -- and resolves
+it to the rule `{outcome normal param INDEX binding B fact TYPE}`. An
+`errors` clause is not required: an infallible validator (`fn
+validate_any(v: str) -> unit proves v: R: unit`) is the owner's prerogative,
+exactly as `-> bool proves v: R: true` is (`validator-infallible`); the
+fallible ones are the point. A declared `-> unit` without a proof clause is
+an ordinary declared result, checked like any other: a body whose value is
+not unit is a `TYPE` error (`validator-unit-result-checked`).
+
+**Facts after a normally completing call.** `hir::refine::CompletionFacts`
+is what a call of a validator establishes when it completes: its rules,
+attached to the argument exactly as a predicate's true edge attaches them
+(`AddArgumentFact`: a plain reference's binding and its immutable alias
+root, by value identity, never spelling). `hir/types.tcl`'s `Call` narrows
+the path's facts with them right after the call -- the flow-fact mechanism
+a native's parameter types already use -- so the fact holds for everything
+that executes after the call on that path, and is scoped and joined like
+every other fact:
+
+| where the call is | what is proven | tests |
+|---|---|---|
+| a statement `validate(s)` | `s` (and its alias root) for the rest of the sequence; nothing before the call | `validator-statement-call`, `validator-not-before-call` |
+| a binding `r = validate(s)` | the same; `r` is unit | `validator-binding-call` |
+| method sugar `s.validate()` | the same: it is the same call | `validator-method-sugar`, `validator-module-qualified` |
+| an argument `f(validate(s), g(s))` | `s` for the arguments evaluated after it (and after the call); not for those before it | `validator-argument-order` |
+| a branch | inside the branch; after the `if`, only when every branch that completes normally proves it (by any validator or predicate) -- the existing join, unchanged; a branch that returns, fails, breaks or continues contributes nothing; an else-less `if` has a branch that proves nothing | `validator-inside-branch`, `validator-join-one-branch`, `validator-join-all-branches`, `validator-join-other-branch-leaves` |
+| a loop body | the rest of that iteration's body; never before the call in the body, never after the loop | `validator-loop-body`, `validator-loop-handler-continue` |
+| a function's last statement | nothing: nothing runs after it (and a wrapper proves nothing for its caller) | `validator-last-statement`, `validator-callee-proves-nothing-for-caller` |
+| before a nested function is created | the nested function sees it (it inherits the facts known where it is created) | `validator-closure-after-call` |
+
+An argument that is not a plain reference (`validate(f(x))`) proves nothing,
+and neither does a call through an `Fn`-typed value (no static contract); a
+call through an immutable alias of the function itself (`check =
+validate_mail`, `check(s)`) is a call of that function and proves, exactly as
+for predicates (`validator-non-reference-argument`,
+`validator-through-callables`). An alias bound *before* the proof keeps the
+type it was bound with, as with a predicate's true edge
+(`validator-alias-bound-before`); a later binding of the same name is a
+different value (`validator-shadowing`). Intrinsic contract inference sees
+the narrowed use: an untyped `relay(x)` that validates `x` before passing it
+where a refinement is required asks its callers only for the validator's
+carrier (`validator-contract-inference`).
+
+**Handled calls.** A handler runs instead of a normal completion of the
+handled call expression: when the call itself fails, and also when one of
+its arguments does (a handler catches any matching error the expression
+produces, `core::forms::op-handle`; every backend agrees,
+`validator-handled-argument-failure`). So inside a handler, no validator
+fact established anywhere in that expression holds: `Call` logs the bindings
+such facts narrow (`completionLog`), and `Handle` starts each handler from
+the facts after the call with those bindings as they were before it
+(`validator-handler-does-not-see-proof`). After the construct, a fact holds
+when it holds at the end of every way the construct completes normally --
+the call's normal completion and each handler body that completes normally,
+met as an `if`'s branches are (`hir::refine::Meet`), following how a handled
+predicate call is met with each handler (`HandleImplication`):
+
+* a handler that returns, fails, breaks or continues contributes nothing:
+  after the call the argument is proven (`validator-handled-return`,
+  `validator-handled-fail`, `validator-loop-handler-continue`);
+* a handler that completes normally without proving kills the fact
+  (`on Invalid: unit`, `validator-handled-completes-unproven`);
+* a handler that completes after proving the same refinement keeps it -- by
+  another validator, or a predicate guard (`if not mail?(s): return -2`)
+  (`validator-handled-completes-reproven`); with several handlers, every one
+  that completes must (`validator-handled-several-handlers`).
+
+A handled call that establishes no validator fact keeps exactly the facts it
+always had (those after the call), so nothing changes for existing programs.
+
+**Repeated calls.** A validator has no exact result to record: its call has
+no call key and is never decided (`known` stays empty), so a repeated
+validator call on the same value is always made -- eliding it would also
+elide the failure it may raise -- and a validator's refinement fact never
+decides a predicate (`validator-repeat-never-decided`,
+`validator-does-not-decide-predicate`). The predicate-only decision in
+`hir/types.tcl`'s `Call` asks `hir::refine::IsPredicate`.
+
+**A predicate is not a validator, and the reverse.** A predicate's call
+completing proves nothing (`mail?(s)` as a statement, then `send(s)`:
+`TYPE`, `validator-predicate-is-no-validator`); a validator's rule is never
+read as a true-edge rule (`ProofRules` compares outcomes as words,
+`CallImplication` consults only predicates). A validator call used as an `if`
+condition is a unit, not a Boolean: like any non-Boolean condition it raises
+`NOT-BOOLEAN` at run time on every backend, and its contract records no
+branch facts (`validator-not-a-condition`).
+
+**Representation.** Nothing changes at run time: no tag, wrapper, check or
+evidence. After the call, the parameter's own register is passed on, and a
+program proven by a validator has exactly the NIR and allocations of the same
+program over the carrier with a non-proving check of the same body
+(`validator-representation-unchanged`). No backend changed: the facts are
+static.
+
+**Limitations** (in addition to the general ones below):
+
+* Facts established in a loop body never survive the loop, even for a loop
+  whose body always runs to the call (`loop: validate(s); break`) -- the
+  conservative scoping every fact has.
+* A function that calls a validator proves nothing for its own caller: only
+  a validator's own contract does, and only the owner may declare one.
+* A handled call's join is the conservative one: every handler is assumed
+  able to run (no analysis of which errors the call can actually produce
+  here), so one that completes without proving kills the fact.
+* Statically, an argument's error escaping a handled call must still be
+  admitted by the enclosing function's `errors` (EXPLICIT-ERROR-COMPLETIONS.md
+  counts only the callee's errors as handled), even though at run time the
+  handler catches it; the handler-entry rule above is sound for both readings.
+
+## Naming
+
+The names of proof-producing functions are part of this feature's declared
+interface. Each of the two shapes has one convention:
+
+* a **predicate** -- one ordinary parameter, `-> bool`, a proof clause -- is
+  named with a trailing `?`:
+
+  ```
+  fn emailish?(v: str) -> bool proves v: Emailish:
+  ```
+
+  (`web::emailish?`, `web::uri_query_value?`);
+* a **validator** -- one ordinary parameter, `-> unit`, a proof clause -- is
+  named beginning with `validate_`:
+
+  ```
+  fn validate_emailish(v: str) -> unit proves v: Emailish errors Invalid:
+  ```
+
+  or exactly `validate`, the form for a module export, where restating the
+  namespace in the name is redundant (`path::validate`, not
+  `path::validate_path`):
+
+  ```
+  fn validate(v: str) -> unit proves v: Path errors ContainsReservedCharacters, TooLong:
+  ```
+
+The prefix is literal and case-sensitive: `Validate_x`, `validateX` and
+`validator_x` do not follow it, and the bare `validate_` does (an empty suffix,
+as the literal rule reads). Flags and context parameters are not ordinary
+parameters, so `fn strict?(v: str, flags :exact) -> bool proves v: R` is a
+predicate; an `errors` clause changes neither shape. The convention covers
+exactly these two shapes: a proof-producing function of two or more ordinary
+parameters has none yet, and a function without a proof clause is not covered
+at all, whatever its name -- `?` and `validate_` carry no meaning of their own
+and are not reserved. The name is the one written at the declaration (a module
+function's member name), and it is not part of the proof: a rename changes no
+fact, type, instance or behavior -- only the label native code gives the
+function.
+
+The compiler reports a function that has one of the two shapes and a name
+outside its convention (`PROVES-NAMING`, WARNINGS-PROVES-NAMING.md). The
+response is a rename; the message states the shape and the convention, never
+the name to use (`validate_f` and the bare `validate` both conform).
 
 ## The corpus
 
@@ -647,9 +865,9 @@ code). Strings are unchanged.
 | proof target not a refinement | `PROOF-CLAUSE` | the proven type of "proves s: str" is str, which is not a refinement type |
 | proof parameter missing | `PROOF-CLAUSE` | proof clause "proves t: A" must name one of the function's ordinary parameters: the function has no parameter "t" |
 | carrier mismatch | `PROOF-CLAUSE` | proof carrier mismatch: parameter "s" is declared int, but A refines str |
-| non-bool proof function | `PROOF-CLAUSE` | a proof-producing function must declare "-> bool" (its true result is the proof) |
+| proof function declaring neither `-> bool` nor `-> unit` | `PROOF-CLAUSE` | a proof-producing function must declare "-> bool" (a predicate: its true result is the proof) or "-> unit" (a validator: its normal completion is the proof) |
 | mint outside the owner | `REFINEMENT-MINT-AUTHORITY` | the entry program cannot declare a proof of refinement web::Emailish: only its owning module "web" may mint it |
-| carrier where a refinement is required | `TYPE` | expected A but found str: a refinement proof is required |
+| carrier where a refinement is required | `TYPE` | expected A but found str: a refinement proof is required (... a predicate returned true for it, or a validator completed normally for it ...) |
 | name collides with a built-in or another declaration | `TYPE` | type "str" cannot be declared: the name is already a built-in type |
 | nested declaration, two proof clauses, `refined` before anything but `type` | `SYNTAX` | "refined" only modifies a type declaration ... |
 
@@ -780,6 +998,98 @@ Notes, honestly:
   `refinement-mutant-no-proof-clause`/`-no-declaration` show the corpus
   behavior disappears without its source declarations.
 
+### Validators: tests, fuzzing and mutation testing
+
+`tests/refinement-validators.test` (48 tests) pins the "Validators" section
+item by item (the test names are in its table and paragraphs): `-> unit` in
+every type position and checked as a declared result, the AST outcome, both
+proof shapes' `PROOF-CLAUSE` rules, the rule shape, the facts after
+statement, bound, method-sugar and argument calls, branches and joins,
+loops, every handler kind, aliases, shadowing, non-reference arguments,
+callables, repeated calls, module validators called qualified and through
+method sugar, minting authority, HIR text and its round trip, and the
+unchanged representation. Every behavioral case runs on interp, compile,
+cranelift-generic and cranelift through one HIR (`sourceAgree`), and
+`validator-fuzz-smoke` runs a bounded fuzzer campaign (seed 11, 30
+programs, every backend). The three messages `tests/refinement-values.test`
+pins verbatim changed with the admitted shapes and the refinement-proof
+explanation; nothing else in it changed.
+
+**Fuzzer.** `audit/refinement-values/tools/fuzz.tcl` generates validators
+and validator calls by default (`-validators 0` reproduces the
+predicate-only generator draw for draw: the same programs, prelude and
+printing). The prelude gains four fallible validators -- two proving `R1`
+with different thresholds, one proving `R2`, one proving `R3` from an `R1`
+-- and an infallible one proving `R2`; `f` declares `errors Invalid` and the
+program calls it through `g`, whose handler turns an escaping `Invalid` into
+`-1`. Bodies and statement-`if` branches get plain, bound and method-sugar
+validator calls; handled calls (statement or bound) whose handler returns,
+fails, completes without a proof, completes after a predicate guard, uses a
+value or validates again; `pair(validate_x(v), need(v))`, a validator as an
+argument, unhandled or handled; counted loops whose body validates and uses;
+and `use` statements, often needing exactly what the preceding validator
+proved (of its argument, or of another value), including inside handlers and
+after loops. The independent oracle tracks a validator's completion fact
+like a true proof (per value identity and alias root), starts each handler
+from the facts before the handled call, meets the call's normal completion
+with every handler that can complete, drops a loop body's facts at its end,
+and expects every validator call undecided. Besides drawing accepted
+programs (`-accept`), it draws most of the others until the oracle rejects
+exactly one use, the programs a compiler that proves too much would accept.
+
+Four seeds × 600 programs on all four backends: 1,691 accepted, 709
+rejected, 1,662 predicate calls in accepted programs of which 139 decided,
+814 validator calls in accepted programs (none decided), **0 failures**.
+With `-validators 0` the four seeds reproduce the record above exactly
+(1,794 accepted, 606 rejected, 3,093 predicate calls, 264 decided, 0
+failures), so the generator's predicate part is unchanged.
+
+**Mutation testing.** 15 mutants of the validator machinery, each run
+against `tests/refinement-validators.test` and
+`tests/refinement-values.test` (interp) and the fuzzer (seeds 1 and 2, 150
+programs each, interp). All are killed:
+
+| # | mutant | tests failing | fuzzer failures (seed 1, 2) | result |
+|---|---|---:|---:|---|
+| v01 | validators prove nothing (no completion facts) | 26 | 19, 18 | killed |
+| v02 | handlers see the failed call's proof (no handler-entry reset) | 4 | 0, 1 | killed |
+| v03 | a handled call keeps the proof whatever its handlers do (no join) | 3 | 0, 1 | killed |
+| v04 | the join counts handlers that never complete | 8 | 6, 7 | killed |
+| v05 | handler entry resets only the handled call's own proof, not its arguments' | 1 | 0, 0 | killed |
+| v06 | a predicate's normal completion proves (predicate read as validator) | 3 | 3, 6 | killed |
+| v07 | a repeated validator call is decided (exact result recorded and used) | 1 | 2, 3 | killed |
+| v08 | loop body facts survive the loop (every loop kind) | 2 | 0, 0 | killed |
+| v09 | completion facts not attached to the alias root | 1 | 0, 3 | killed |
+| v10 | `-> unit` resolved as a Boolean outcome (validators are predicates) | 28 | 19, 18 | killed |
+| v11 | any declared result admitted as a validator | 2 | 0, 0 | killed |
+| v12 | HIR text reads every contract back as a predicate's | 1 | 0, 0 | killed |
+| v13 | the join only when the handled call itself validates (an argument's proof survives a completing handler) | 1 | 0, 0 | killed |
+| v14 | an `if` join keeps the first completing branch's facts | 4 | 5, 3 | killed |
+| v15 | the join ignores the last handler that completes | 3 | 0, 1 | killed |
+
+Notes: the first fuzzer version drew only accepted or unconstrained programs
+and killed none of v02, v03, v05 (a compiler that proves too much is caught
+only by a program whose single error is the over-proven use); drawing
+single-rejection programs added those kills. v05 and v13 -- a handler that
+runs because an *argument* validator failed -- are killed by
+`validator-handled-argument-failure` on every run and by the fuzzer on some
+seeds (the first single-draw version killed v05 on seed 2). v08 is killed by
+`validator-loop-body` (its bare `loop:` case was added after the mutant
+first survived: the first version of the mutant removed only the bare
+loop's restore, which no test exercised) and by `validator-fuzz-smoke`.
+v11 and v12 are syntax and HIR-text properties the fuzzer does not reach.
+
+**Regression with validators.** The whole suite on the final tree:
+`CORE_BACKEND=interp` 6,138 tests, 0 failed; `CORE_BACKEND=compile` 6,138
+tests (4 skipped: Core-IR scoping cases that run on the interpreter only), 0
+failed -- 48 more than before, the new file's. The refinement files
+(`refinement-values`, `refinement-validators`, `emailish-predicate`,
+`hir-refinement`, `native-refinement-propagation`) with
+`CORE_BACKEND=cranelift` and with `CORE_BACKEND=cranelift-generic`: 175
+tests each, 0 failed (`refined.test` fails its 8 cases that call test-only
+Tcl natives there, `NATIVE UNSUPPORTED`, exactly as on the tree before this
+change). No file under `native/` changed: validator facts are static.
+
 ## Regression
 
 The whole suite (`tests/all.tcl`, 144 files: types, source-defined types and
@@ -848,9 +1158,12 @@ rows); the historical campaign records are kept.
   has no applied or struct forms. `Bytes`/`MutableBytes` would additionally
   need `ValueStability` to see through their `any`-typed `storage` field.
 * Facts attach to plain references (and their alias roots). A proof about an
-  argument that is not a reference (`p(f(x))`) proves nothing; a proof made
-  by calling through a `Fn`-typed value proves nothing (no static contract is
-  known for the callee).
+  argument that is not a reference (`p(f(x))`, `validate(f(x))`) proves
+  nothing; a proof made by calling through a `Fn`-typed value proves nothing
+  (no static contract is known for the callee).
+* Validators have the limitations their section lists: a loop body's facts
+  end with the body, a wrapper proves nothing for its caller, and a handled
+  call assumes every handler can run.
 * Exact results decide only the same function on the same values; a
   different predicate that would necessarily return true is never decided
   (by design: owner-defined predicates need not be canonical).
@@ -874,9 +1187,16 @@ rows); the historical campaign records are kept.
 * **Generalized proof minting** (a `socket()` result, resource ownership,
   relational facts): the proof contract is a list of clause dicts with an
   outcome, so a "result satisfies R" clause or a non-Boolean outcome extends
-  it; the consumers already take rules in a uniform shape. What is missing is
-  the grammar, validation for those forms and a story for minting without a
-  Boolean edge.
+  it; the consumers already take rules in a uniform shape. Minting without a
+  Boolean edge now exists for one shape: a validator's normal completion
+  (`outcome normal`, "Validators"). What remains: a clause about the
+  *result* (a parser returning a refined value it built, `-> R` where the
+  result is the proven value), proofs carried by an *error* outcome (a
+  failure that proves something about the argument), more than one clause or
+  parameter per function (and relational facts between parameters), and a
+  way for a function outside the owner to forward a validator's fact to its
+  own caller (today a wrapper proves nothing for its caller; only the
+  owner's own validators and predicates mint).
 * **Traits**: refinement identity is a nominal registry entry that survives
   in semantic types and semantic instance keys, so a future trait can accept
   `LinuxPath` and `WindowsPath` as distinct types; nothing at run time needs

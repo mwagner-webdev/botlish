@@ -1775,8 +1775,9 @@ proc hir::range::MismatchClause {argType declared} {
 # The explanation, when DECLARED requires a refinement (REFINEMENT-VALUES.md)
 # that a value of static type ARGTYPE -- a value of its carrier -- is not
 # proven to satisfy: a refinement is established only by a proof (the true
-# result of one of its owner's proof-producing functions), never by a
-# conversion; or "" when that is not why ARGTYPE is not admissible.
+# result of one of its owner's predicates, or the normal completion of one of
+# its validators), never by a conversion; or "" when that is not why ARGTYPE
+# is not admissible.
 proc hir::range::RefinementClause {argType declared} {
     if {$argType in {any never} || [hir::types::IsSpecific $argType] || [hir::types::IsSpecific $declared]
             || [catch {core::type::evidenceOf $declared} wanted]} {
@@ -1793,7 +1794,7 @@ proc hir::range::RefinementClause {argType declared} {
         return ""
     }
     set names [::join $missing ", "]
-    return [format {; expected %s but found %s: a refinement proof is required (a %s value becomes %s only where one of its owner's proof-producing functions has returned true for it; there is no implicit conversion)} \
+    return [format {; expected %s but found %s: a refinement proof is required (a %s value becomes %s only where one of its owner's proof-producing functions has proven it: a predicate returned true for it, or a validator completed normally for it; there is no implicit conversion)} \
         $names [hir::types::show $argType] [hir::types::show $argType] $names]
 }
 

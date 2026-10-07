@@ -569,18 +569,26 @@ proc hir::resolve::TypeErrorKind {options default} {
 
 # The resolved proof contract of block E (REFINEMENT-VALUES.md): its syntax
 # NODE's proof clauses (hir::syntax::withProofs), each validated and turned
-# into the generic rule {outcome 1 param INDEX binding B fact TYPE} -- "when
-# a call of E returns true, its argument INDEX satisfies the refinement
-# TYPE". PARAMS are E's parameter bindings (ordinary ones first, then
-# flags), DECLAREDTYPES their resolved declared types, DECLARED the resolved
+# into the generic rule {outcome OUTCOME param INDEX binding B fact TYPE}.
+# The declared result decides the outcome that carries the proof:
+#
+#   -> bool   OUTCOME 1       a predicate: "when a call of E returns true,
+#                             its argument INDEX satisfies the refinement
+#                             TYPE"
+#   -> unit   OUTCOME normal  a validator: "when a call of E completes
+#                             normally (returns rather than failing), its
+#                             argument INDEX satisfies TYPE"
+#
+# PARAMS are E's parameter bindings (ordinary ones first, then flags),
+# DECLAREDTYPES their resolved declared types, DECLARED the resolved
 # declared result. A clause that fails validation is diagnosed at its own
 # origin and contributes no rule:
 #
 #   PROOF-CLAUSE               the clause names no ordinary parameter, its
 #                              type is not a refinement type, the parameter's
 #                              declared type does not forget to the
-#                              refinement's carrier, or the function does not
-#                              declare `-> bool`
+#                              refinement's carrier, or the function declares
+#                              neither `-> bool` nor `-> unit`
 #   REFINEMENT-MINT-AUTHORITY  the function is not in the refinement's
 #                              owning module (its exact declaring namespace;
 #                              no import, parent or child grants it)
@@ -647,12 +655,16 @@ proc hir::resolve::ResolveProofs {hirVar e node params declaredTypes declared ct
                 [hir::types::show $paramType] [hir::types::show $carrier]] $e $paramOrigin
             continue
         }
-        if {$declared ne "bool"} {
-            hir::DiagnoseAt hir PROOF-CLAUSE [format {a proof-producing function must declare "-> bool" (its true result is the proof), but "proves %s: %s" is on a function %s} \
-                $name $typeText [expr {$declared eq {} ? "with no declared result type" : "declared -> [hir::types::show $declared]"}]] $e $typeOrigin
-            continue
+        switch -- $declared {
+            bool { set outcome 1 }
+            unit { set outcome normal }
+            default {
+                hir::DiagnoseAt hir PROOF-CLAUSE [format {a proof-producing function must declare "-> bool" (a predicate: its true result is the proof) or "-> unit" (a validator: its normal completion is the proof), but "proves %s: %s" is on a function %s} \
+                    $name $typeText [expr {$declared eq {} ? "with no declared result type" : "declared -> [hir::types::show $declared]"}]] $e $typeOrigin
+                continue
+            }
         }
-        lappend rules [dict create outcome 1 param $index binding [lindex $params $index] fact $fact]
+        lappend rules [dict create outcome $outcome param $index binding [lindex $params $index] fact $fact]
     }
     return $rules
 }
