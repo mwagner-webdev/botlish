@@ -863,7 +863,43 @@ list.
 
 ## Full regression
 
-REGRESSION-RESULTS
+All runs are on this milestone's code as committed at `6d9f8a8` (the pass,
+its tests, fuzzer and mutants; every later commit changes documentation, the
+corpus tool and audit outputs only, none of which a test runs). The native
+backend is built from that tree (nothing under `native/` changed).
+`tests/all.tcl` ran on both Tcl backends with the harness's default policy
+(`BOTLISH_WARNINGS=off`), each with a private `-tmpdir` (AGENTS.md, "Running
+tests concurrently"), in parallel. This milestone adds 83 tests
+(`tests/one-char-string-literal.test`) and adapts 18 existing tests in place,
+some through their file's helper; no `test` line is added or removed outside
+the new file (`git diff e7f715c -- tests/`), so the kickoff base `e7f715c` had
+6409 - 83 = 6326 (derived, not a separate run).
+
+* **`interp`: 6409 tests, 6409 passed, 0 failed. `compile`: 6409 tests, 6405
+  passed, 4 skipped (the existing `coreScoping` constraint), 0 failed.**
+* **`tests/native-coverage.tcl`** (the suite on `cranelift`, as CI's native
+  job): NATIVE-COVERAGE.
+* **`cranelift-generic`**, file by file: `tests/one-char-string-literal.test`
+  83, the five adapted warning files (`warnings` 81, `method-eligible` 145,
+  `fixed-arity-list-return` 149, `same-failure` 99, `proves-naming` 84),
+  `tests/flags.test` 155, the refinement trio (88, 48, 20) and
+  `tests/str-char-at.test` 14: **966 tests, 966 passed**.
+* **`tests/one-char-string-literal.test`: 83/83 on each of `interp`, `compile`,
+  `cranelift-generic` and `cranelift`.** The item-2 files after adaptation pass
+  on all four backends (`interp` and `compile` in the full runs, `cranelift` in
+  native coverage, `cranelift-generic` file by file), and their fuzz smoke tests
+  (`warn-`, `me-`, `fa-`, `sf-`, `pn-`, `oc-fuzz-smoke`) pass.
+* CI's plain example steps, reproduced: the native job's `main.tcl -backend
+  cranelift` corpus step exits 0 with 376 stderr lines (62 of them this
+  warning's); the Tcl jobs' `main.tcl -backend interp` and `-backend compile`
+  exit 0 with an empty stderr (see "Backend independence and clean outputs").
+* The fuzzer passes 2000 seeds with the spelling law and the exhaustive lexer
+  check finds no gap (`fuzz-result.txt`, at `dac80d3`); the mutation tool kills
+  15/15 (`mutation-result.txt`, at `6d9f8a8`); the corpus audit is
+  `corpus-audit.txt`, at `61f1864`.
+* The GC-stress job (`BOTLISH_NATIVE_GC_STRESS=1`, CI on push to `main`) was not
+  run locally: nothing under `native/` changed, and the pass runs before any
+  backend and changes no HIR (pinned).
 
 ## Known limitations
 
@@ -1005,4 +1041,48 @@ checks on character literals or a reverse rule, and any new CLI option or
 
 **Verification**
 
-REQUIRED-VERIFICATION
+32. *Corpus findings and the API-deficiency catalog?* 92 distinct findings
+    (`lib/web.bot` 26, `ai_text_clean` 22, the four CSV programs 8 each,
+    `string_replace` 7, `lex-strategy` and `source-checks` 2 each,
+    `string_reverse` 1): 0 convert-now, 81 API-deficiency, 11 deliberate. The
+    catalog has six rows -- `==` against a one-character String sliced by a
+    `peek`/`char_at` helper (31), `==` against an untyped parameter fed such
+    slices (21), a `List[str]` hex-digit table concatenated into output (16), a
+    `List[str]` made an `ImmutableSet[str]` of characters (5), `str::concat`
+    arguments (5), `==` against a `str` parameter (3) -- and reduces to two
+    missing API pieces: reading characters (a `str::char_at` scanner with a
+    total end-of-input form) and appending a character to text. The 11
+    deliberate are one-character test data of String functions (8) and
+    variable-length replacement texts (3).
+33. *False positives?* Zero (each finding's token re-lexed independently).
+34. *Spelling law at which levels?* Unit (`oc-spelling-law-unit`,
+    `oc-spelling-law-no-gap-sampled`, and the context tests that rewrite a
+    literal), the fuzzer (2000 seeds, 5118 of 5118 findings, plus all 1,112,064
+    scalars for the lexer clause), and per corpus finding (clauses 1-2 for 92 of
+    92; the scratch rewrite of every finding, classified; no finding is
+    convert-now, so no corpus rewrite was required to keep its value). No
+    spelling gap: no language finding.
+35. *Warning-mode tests pass?* Yes. `tests/one-char-string-literal.test` 83/83
+    on `interp`, `compile`, `cranelift-generic` and `cranelift`; after their
+    adaptation `tests/warnings.test` 81, `tests/method-eligible.test` 145,
+    `tests/fixed-arity-list-return.test` 149, `tests/same-failure.test` 99 and
+    `tests/proves-naming.test` 84 on the same four backends, and
+    `tests/flags.test` 155, the refinement files (88, 48, 20) and
+    `tests/str-char-at.test` 14 too.
+36. *Fuzzer and mutation results?* Fuzzer: 2000 seeds, 1375 with warnings and
+    625 without, 0 failures, 0 extras; the spelling law held for 5118 of 5118
+    findings (1199 character-accepting rewrites, all keeping their value); no
+    spelling gap over all 1,112,064 scalars. Mutation: 15 of 15 killed (the 10
+    the brief lists among them): 14 by the fuzzer, 1 by the unit tests
+    (`character-spelling-printed`).
+37. *Backend parity?* Identical warning sets on all four backends, in process
+    and through the CLI (a six-code program, the stdlib corpus, the refinement
+    example and two string-heavy programs).
+38. *Full regression?* 6409 tests on `interp` (6409 passed) and `compile`
+    (6405 passed, 4 skipped by the existing constraint), 0 failures each; native
+    coverage NATIVE-COVERAGE-SHORT; CI's plain example steps exit 0, the native
+    one with 376 stderr lines (62 `ONE-CHAR-STRING-LITERAL`, 301
+    `METHOD-ELIGIBLE`, 8 `FIXED-ARITY-LIST-RETURN`, 2 `SAME-RETURN-VALUE`, 3
+    notes), the Tcl ones with none. The adaptations changed 18 existing tests'
+    assertions or data (5 pins, 12 complete-set assertions, 1 program) and four
+    fuzzers' oracles; everything the pass broke is listed in "Kickoff".
