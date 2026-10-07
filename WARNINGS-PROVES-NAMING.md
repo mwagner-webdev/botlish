@@ -761,6 +761,20 @@ other test was added or removed.
 * The GC-stress job (`BOTLISH_NATIVE_GC_STRESS=1`, CI on push to `main`) was not
   run locally: nothing under `native/` changed, and the pass runs before any
   backend and changes no HIR (pinned).
+* **Second snapshot: the tree merged with `origin/main` `0246598`** (merge
+  `3f422d2`). While this milestone ran, `main` gained the encode-utf8
+  allocation work (`str::char_at` reading String characters as UnicodeChars,
+  `lib/web.bot` without its `encode_utf8` List, native runtime and codegen
+  changes, `tests/str-char-at.test` among the new tests). The merge had no
+  conflict; the native backend was rebuilt from the merged tree. Re-run there:
+  **`interp` 6247 tests, 6247 passed; `compile` 6247, 6243 passed, 4 skipped,
+  0 failed; native coverage 6247 tests (2482 native, 3638 independent, 67
+  passed-partial, 60 unsupported), 0 failed** (6247 = 6222 + the 25 tests
+  `main` added). The corpus audit on the merged tree is identical to the
+  pre-merge audit apart from its commit header (0 findings; the same two
+  proves functions of `lib/web.bot`, at the same lines), and CI's example
+  steps are unchanged (native: exit 0, the same 314 stderr lines, no
+  `PROVES-NAMING` line; interp: exit 0, empty stderr).
 
 ## Known limitations
 
@@ -837,7 +851,9 @@ new CLI option or `BOTLISH_WARNINGS` value.
   finding to rename" (see "Corpus findings and census").
 * **Branch.** `AGENTS.md` says to push finished work to `main`. This session was
   assigned a development branch and told not to push elsewhere without
-  permission, so the work is pushed to that branch.
+  permission, so the work was pushed to that branch first. It was pushed to
+  `main` when asked to, after merging `origin/main` (`0246598`) into it and
+  re-running the regression (see "Full regression").
 
 ## Required questions
 
