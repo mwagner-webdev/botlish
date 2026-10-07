@@ -99,6 +99,13 @@ proc hir::read::TypeDecls {lines} {
         set rest [lrange $rest 1 end]
     }
     if {$structEntries ne ""} {
+        if {$decls eq ""} {
+            # Struct declarations alone still make this text a program of
+            # its own: no source type of an earlier compilation stays
+            # registered (hir::sourcetypes::apply's rule for a compilation
+            # that declares only structs).
+            hir::sourcetypes::Reset
+        }
         # Skeletons first, then the field types (which may name any struct
         # of the text, itself included).
         set skeleton [lmap entry $structEntries {
