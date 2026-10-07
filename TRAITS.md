@@ -735,8 +735,15 @@ snapshot:
 | `audit/same-failure/tools/fuzz.tcl` | 300 seeds, 0 failures, 0 extra warnings |
 | `audit/fixed-arity-list-return/tools/fuzz.tcl` | 300 seeds, 204 of 204 conversions, 0 failures, 0 extra warnings |
 
-CI runs only on pushes to `main` and on pull requests, so this branch's
-pushes were not checked there; the runs above are local.
+After merging `main` (7 commits: `str::char_at` and the encode_utf8
+allocation work, with Rust runtime changes; the native backend rebuilt), on
+the merged tree: `tests/traits.test` 75 passed; `CORE_BACKEND=interp`
+6190 passed, 0 failed; `CORE_BACKEND=compile` 6186 passed, 4 skipped, 0
+failed (`main`'s 6115 + the 75 trait tests); the trait fuzzer (seeds 1-2,
+100 programs each) 163 accepted, 37 rejected, 0 failures; the scalar audit
+byte-identical to `main`'s corpus.
+
+The runs above are local; CI checks the push to `main`.
 
 ## Scalar machine-code audit
 
@@ -745,8 +752,11 @@ pushes were not checked there; the runs above are local.
 examples/stdlib/*.bot program; none declares a trait) at this milestone's
 code: **all 39 program files (disassembly and summaries) are byte-identical**
 to the committed corpus. The only difference is README.md's provenance lines
-(the commit, and the rustc of this environment), committed as the record of
-the regeneration. Traits do not alter code generation for programs that use
+(the commit, and the rustc of this environment). After merging `main` (whose
+string work regenerated the corpus at `5e0eb7f`), the regeneration was
+repeated on the merged tree: again every program file is byte-identical to
+`main`'s corpus, and only the provenance lines differ, so the committed
+corpus is `main`'s unchanged. Traits do not alter code generation for programs that use
 none -- also pinned by `trait-no-traits-unchanged` (such a program is built
 once, with no trait metadata).
 
