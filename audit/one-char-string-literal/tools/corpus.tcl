@@ -1,8 +1,12 @@
 # corpus.tcl -- observational audit of ONE-CHAR-STRING-LITERAL over the corpus
 # (WARNINGS-ONE-CHAR-STRING-LITERAL.md, "Corpus findings and the API-
 # deficiency catalog"). Compiles every program of examples/stdlib,
-# examples/surface, examples/refinement, bench/*.bot and lib/*.bot with
-# warnings on (collected, not emitted) and reports, at the commit it runs on:
+# examples/surface, examples/refinement, examples/io, bench/*.bot and
+# lib/*.bot with warnings on (collected, not emitted) and reports, at the
+# commit it runs on (examples/io is the context-trait feature's example
+# directory, as examples/refinement is the refinement feature's: its programs
+# are the corpus's only loaders of lib/io.bot -- which does not compile as a
+# program on its own -- and of lib/io/path.bot and lib/linux/path.bot):
 #
 #   * every distinct finding (a library module's finding once, with every
 #     corpus program that loaded the module), with its value, its source line,
@@ -85,6 +89,7 @@ set programs [concat \
     [lsort [glob -directory [file join $auditRoot examples stdlib] *.bot]] \
     [lsort [glob -directory [file join $auditRoot examples surface] *.bot]] \
     [lsort [glob -directory [file join $auditRoot examples refinement] *.bot]] \
+    [lsort [glob -directory [file join $auditRoot examples io] *.bot]] \
     [lsort [glob -directory [file join $auditRoot bench] *.bot]] \
     [lsort [glob -directory [file join $auditRoot lib] *.bot]]]
 
@@ -108,8 +113,8 @@ set deliberate {
 # order; ROW names the catalog row, WHAT says which API would let the literal
 # be a character.
 set apiRows {
-    {== str-substring:*} {"== against a one-character String sliced by a peek/char_at helper (str::substring)"
-        "the helper returns a one-character String (or \"\" past the end); str::char_at returns a UnicodeChar but fails outside the String, where the helper returns \"\""}
+    {== str-substring:*} {"== against a one-character String sliced by str::substring or a peek/char_at helper"
+        "the slice is a one-character String (a helper returns \"\" past the end); str::char_at returns a UnicodeChar but fails outside the String, where the helper returns \"\""}
     {== str-param:*} {"== against a str parameter or a String-typed binding"
         "the parameter is declared or inferred str: its callers pass one-character Strings sliced from text"}
     {== any-param:*} {"== against an untyped parameter that receives one-character Strings"
@@ -267,7 +272,7 @@ proc consumerOf {hir parent site} {
                 set type [hir::types::show [hir::typeOf $hir $other]]
                 set onode [dict get $hir exprs $other]
                 set shape [operand $hir $other]
-                if {[dict get $onode kind] eq "call" && [SlicingHelper $hir $onode]} {
+                if {[dict get $onode kind] eq "call" && ([CalleeName $hir $onode] eq "str::substring" || [SlicingHelper $hir $onode])} {
                     return [list "== str-substring:[CalleeName $hir $onode]()" $type $shape]
                 }
                 if {[dict get $onode kind] eq "ref" && [string match bind-of-call:* $shape]} {
