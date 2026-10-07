@@ -878,7 +878,9 @@ the new file (`git diff e7f715c -- tests/`), so the kickoff base `e7f715c` had
 * **`interp`: 6409 tests, 6409 passed, 0 failed. `compile`: 6409 tests, 6405
   passed, 4 skipped (the existing `coreScoping` constraint), 0 failed.**
 * **`tests/native-coverage.tcl`** (the suite on `cranelift`, as CI's native
-  job): NATIVE-COVERAGE.
+  job): 6409 tests: 2516 native, 3766 independent of the backend, 67
+  passed-partial, 60 unsupported (the constructs it already classifies, the
+  same 60 as milestones 2-5), **0 failed**.
 * **`cranelift-generic`**, file by file: `tests/one-char-string-literal.test`
   83, the five adapted warning files (`warnings` 81, `method-eligible` 145,
   `fixed-arity-list-return` 149, `same-failure` 99, `proves-naming` 84),
@@ -1080,7 +1082,8 @@ checks on character literals or a reverse rule, and any new CLI option or
     example and two string-heavy programs).
 38. *Full regression?* 6409 tests on `interp` (6409 passed) and `compile`
     (6405 passed, 4 skipped by the existing constraint), 0 failures each; native
-    coverage NATIVE-COVERAGE-SHORT; CI's plain example steps exit 0, the native
+    coverage 6409 tests, 0 failed (2516 native, 3766 independent, 67
+    passed-partial, 60 unsupported); CI's plain example steps exit 0, the native
     one with 376 stderr lines (62 `ONE-CHAR-STRING-LITERAL`, 301
     `METHOD-ELIGIBLE`, 8 `FIXED-ARITY-LIST-RETURN`, 2 `SAME-RETURN-VALUE`, 3
     notes), the Tcl ones with none. The adaptations changed 18 existing tests'
