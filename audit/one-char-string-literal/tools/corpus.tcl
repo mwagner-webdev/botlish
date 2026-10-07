@@ -96,8 +96,8 @@ set deliberateRejections {examples/surface/09-mutual-recursion.bot examples/surf
 # one-character literals there are Strings by the author's judgment, with the
 # reason. Every other finding is classified by the rules above.
 set deliberate {
-    {examples/stdlib/string_replace.bot top} {test data of a substring replacement: needles and replacements of 0, 1, 2 and 3 characters ("x", "aa", "abc", "") in one call list -- a one-character needle or replacement is the length-1 case of a String argument}
-    {examples/stdlib/string_reverse.bot top} {test inputs of a String reversal of 0, 1, 3, 4 and 3 non-ASCII characters -- "a" is the length-1 boundary case of a String argument}
+    {examples/stdlib/string_replace.bot sample} {test data of a substring replacement: needles and replacements of 0, 1, 2 and 3 characters ("x", "aa", "abc", "") in one call list -- a one-character needle or replacement is the length-1 case of a String argument}
+    {examples/stdlib/string_reverse.bot sample} {test inputs of a String reversal of 0, 1, 3, 4 and 3 non-ASCII characters -- "a" is the length-1 boundary case of a String argument}
     {examples/stdlib/ai_text_clean.bot clean_char} {replacement texts: clean_char maps a character to "" (a removed emoji), "..." (an ellipsis) or a one-character normalization -- results of 0, 1 and 3 characters, so its result is a String of variable length; the comparisons beside them are catalogued separately}
 }
 # The comparisons in clean_char are not deliberate: only its returned
@@ -118,7 +118,7 @@ set apiRows {
         "str::concat takes two Strings: there is no append of a UnicodeChar to a String"}
     {list-element immutable_set::from_list:*} {"element of a List[str] made an ImmutableSet[str], queried with one-character Strings"
         "the set is queried (immutable_set::contains) with one-character String slices; a set of UnicodeChars needs the scanner to read characters (str::char_at)"}
-    {list-element bind:hex_digits*} {"element of a List[str] table indexed (list::at) and concatenated (str::concat)"
+    {list-element bind:*hex_digits} {"element of a List[str] table indexed (list::at) and concatenated (str::concat)"
         "the digits are appended to output text with str::concat: no append of a UnicodeChar"}
 }
 
@@ -215,10 +215,13 @@ proc operand {hir e} {
     switch -- [dict get $node kind] {
         ref {
             set b [dict get $node binding]
+            if {$b ne "" && [dict get $hir bindings $b kind] eq "param"} {
+                return "param:[dict get $node name]"
+            }
             if {$b ne "" && [dict get $hir bindings $b kind] eq "local"} {
                 set d [dict get $hir bindings $b declaredBy]
                 if {$d eq "" || ![dict exists $hir exprs $d] || [dict get $hir exprs $d kind] ne "bind"} {
-                    return "param:[dict get $node name]"
+                    return "ref:[dict get $node name]"
                 }
                 set init [dict get $hir exprs [dict get $hir exprs $d value]]
                 if {[dict get $init kind] eq "call"} {
