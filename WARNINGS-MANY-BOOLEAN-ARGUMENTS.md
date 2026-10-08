@@ -510,9 +510,10 @@ counts the pass's runs and the warnings it returns.
 | refinement (`-seed 1 -count 60`) | 0 (compiles with `-warnings off`) | 0 | identical |
 
 The brief's prime suspects are silent for a structural reason: no generator
-declares a `bool` parameter (`fa`'s `gF(x, a, b)` and `sf`'s drivers pass
-literals to untyped parameters, which are not proven `bool`), so no generated
-callee passes the gate. No oracle needed teaching and no filter was added.
+writes a `: bool` annotation anywhere (a grep over the six fuzzers), and their
+callees -- `fa`'s `fn gF(x, a, b)`, `sf`'s `fn gF(x, a, xs)` -- take untyped
+parameters, which are not proven `bool`, so no generated callee passes the
+gate. No oracle needed teaching and no filter was added.
 
 **The milestone-5/6 sweep, applied here.** The files whose compiles run under
 `off` were re-run in a scratch copy with every explicit `-warnings off` switched
@@ -545,8 +546,8 @@ evidence rule. Both boundaries, in an existing test file, untouched.
 Outside the warning files, the only test that compiles under an explicit
 warnings mode is `flags-warnings-none` (`-warnings error` over flag programs);
 it passes. `tests/flags.test` has no multi-bool-literal call to a gated
-signature; its 37 `true, false`-shaped lines are list values and expected
-results.
+signature; its 37 `true, false`-shaped lines are expected-result values
+(`{[7, true, false, false]}`) of calls that pass flags.
 
 **After adaptation**: the 12 item-2 files, 976/976 on `interp` and on
 `compile`; on all four backends in "Full regression".
@@ -884,7 +885,51 @@ the declaration, may then be the better design. Nothing of it is built.
 
 ## Full regression
 
-@@REGRESSION@@
+All runs are on this milestone's code as committed at `2c1d889` (the pass, its
+tests, fuzzer, mutants and corpus tool; later commits change documentation and
+audit outputs only, none of which a test runs). The native backend is built
+from that tree (nothing under `native/` changed). `tests/all.tcl` ran on both
+Tcl backends with the harness's default policy (`BOTLISH_WARNINGS=off`), each
+with a private `-tmpdir` (AGENTS.md, "Running tests concurrently"), in
+parallel with `tests/native-coverage.tcl`. This milestone adds 90 tests
+(`tests/many-boolean-arguments.test`) and changes 6 existing tests' expected
+results in place; no `test` line is added or removed outside the new file
+(`git diff 23dbfd8 -- tests/`), so the kickoff base `23dbfd8` had 6715 - 90 =
+6625 (derived, not a separate run).
+
+* **`interp`: 6715 tests, 6715 passed, 0 failed. `compile`: 6715 tests, 6711
+  passed, 4 skipped (the existing `coreScoping` constraint), 0 failed.**
+* **`tests/native-coverage.tcl`** (the suite on `cranelift`, as CI's native
+  job): 6715 tests: 2652 native, 3935 independent of the backend, 68
+  passed-partial, 60 unsupported (the constructs it already classifies, the
+  same 60 as milestones 2-6), **0 failed**.
+* **`cranelift-generic`**, file by file: `tests/many-boolean-arguments.test`
+  90, the six adapted warning files (81, 145, 149, 99, 84, 85),
+  `tests/flags.test` 155, the refinement trio (88, 48, 20),
+  `tests/str-char-at.test` 14 and `tests/value-display.test` 8: **1066 tests,
+  1066 passed**.
+* **`tests/many-boolean-arguments.test`: 90/90 on each of `interp`, `compile`,
+  `cranelift-generic` and `cranelift`.** The item-2 files after adaptation pass
+  on all four backends (`interp` and `compile` in the full runs, `cranelift`
+  in native coverage, `cranelift-generic` file by file), and their fuzz smoke
+  tests (`warn-`, `me-`, `fa-`, `sf-`, `pn-`, `oc-`, `mb-fuzz-smoke`,
+  `validator-fuzz-smoke`) pass.
+* CI's plain example steps, reproduced at `2c1d889`: the native job's
+  `main.tcl -backend cranelift` corpus step exits 0 with 376 stderr lines (0 of
+  them this warning's, the count unchanged); the Tcl jobs' `main.tcl -backend
+  interp` and `-backend compile` exit 0 with an empty stderr (see "Backend
+  independence and clean outputs").
+* The fuzzer passes 2000 seeds with the conversion law (`fuzz-result.txt`, at
+  `1c59bf2`, whose fuzzer and pass are `2c1d889`'s); the mutation tool kills
+  20/20 (`mutation-result.txt`, at `2c1d889`); the corpus audit is
+  `corpus-audit.txt`, at `1c59bf2`.
+* A first attempt at the full runs was stopped by this session's background
+  time limit after about two thirds of the files (101 and 102 of 157, 0
+  failures so far); it was discarded and all three suites were rerun to
+  completion, the results above.
+* The GC-stress job (`BOTLISH_NATIVE_GC_STRESS=1`, CI on push to `main`) was not
+  run locally: nothing under `native/` changed, and the pass runs before any
+  backend and changes no HIR (pinned).
 
 ## Known limitations
 
@@ -1072,4 +1117,14 @@ any new CLI option or `BOTLISH_WARNINGS` value.
 40. *Backend parity?* Identical warning sets on all four backends in process,
     and identical warning text through `main.tcl` (a seven-code program; the
     stdlib corpus and the refinement example).
-41. *Full regression?* @@REG41@@
+41. *Full regression?* At `2c1d889`: 6715 tests on `interp` (6715 passed) and
+    `compile` (6711 passed, 4 skipped by the existing constraint), 0 failures
+    each; native coverage 6715 tests, 0 failed (2652 native, 3935 independent,
+    68 passed-partial, 60 unsupported); `cranelift-generic` 1066/1066 over the
+    item-2 files and the new one; CI's plain example steps exit 0, the native
+    one with 376 stderr lines -- unchanged, 0 `MANY-BOOLEAN-ARGUMENTS` (301
+    `METHOD-ELIGIBLE`, 62 `ONE-CHAR-STRING-LITERAL`, 8 `FIXED-ARITY-LIST-RETURN`,
+    2 `SAME-RETURN-VALUE`, 3 notes) -- the Tcl ones with none. The adaptations
+    changed 6 existing tests' expected results (the code-enumerating pins) and
+    nothing else; every complete-set assertion, every fuzzer and the
+    warnings-on sweep were checked and left unchanged ("Kickoff").
