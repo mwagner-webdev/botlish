@@ -799,7 +799,7 @@ test oc-no-fine-grained-options {there is no per-warning option: -Wno-one-char-s
 test oc-no-new-modes-or-options {the policy surface is still exactly default, off, error; the registry is static, one line per code} -body {
     list $hir::warnings::modes [dict keys $hir::warnings::passes] [dict get $hir::warnings::passes ONE-CHAR-STRING-LITERAL] \
         [expr {[llength [info commands hir::warnings::enable]] + [llength [info commands hir::warnings::disable]]}]
-} -result {{default off error} {SAME-RETURN-VALUE METHOD-ELIGIBLE FIXED-ARITY-LIST-RETURN SAME-FAILURE PROVES-NAMING ONE-CHAR-STRING-LITERAL} hir::warnings::OneCharStringLiteral 0}
+} -result {{default off error} {SAME-RETURN-VALUE METHOD-ELIGIBLE FIXED-ARITY-LIST-RETURN SAME-FAILURE PROVES-NAMING ONE-CHAR-STRING-LITERAL MANY-BOOLEAN-ARGUMENTS} hir::warnings::OneCharStringLiteral 0}
 
 test oc-error-promotion-identity {the promoted error keeps the code and the message the warning has} -body {
     set w [lindex [literalsOf [compileWith $::literalSource default]] 0]
