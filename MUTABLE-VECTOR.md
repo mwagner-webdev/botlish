@@ -732,11 +732,41 @@ RESULTS-REGRESSION
 
 ### 67. Affine regression
 
-RESULTS-AFFINE
+Every AFFINE-VALUES.md guarantee holds with the vector added:
+`tests/affine.test` passes on every suite run (item 66); the affine fuzzer
+(`audit/affine/tools/fuzz.tcl`, seeds 1, 101 and 202, 30 programs each:
+90 programs, 236 identities whose releases were checked) reports no
+disagreement; and the affine mutation harness
+(`audit/affine/tools/mutate.tcl`) kills **29 of 29** mutants. Two of its
+mutants (`partial-destructure-leak`, `last-use-raw-only`) edit the
+last-use release code this milestone changed (path releases): their text
+was updated to the new code, each still a mutant of the same rule, and
+both are killed. The one deliberate change to existing behavior is the
+path-release fix (AFFINE-VALUES.md point 32): a binding maybe moved by its
+last statement is released on each path still owning it, never after the
+join -- the old placement released a coroutine the join's value owned
+(`x = if c: step else: make(2)`).
 
 ### 68. Coroutine regression
 
-RESULTS-COROUTINE
+`tests/coroutines.test` passes on every suite run (item 66), also under
+GC stress; the coroutine fuzzer (`audit/coroutines/tools/fuzz.tcl`, seeds
+1, 101 and 202: 90 programs) reports no disagreement; and the coroutine
+mutation harness kills **52 of 52** mutants (`release-never`'s text was
+updated to the new `Releases` call). A coroutine in a vector stays the same
+execution through push, growth (`mv-affine-growth`: 1000 suspended
+coroutines), a whole-vector move, pop, take, swap through another slot,
+a function transfer and consuming iteration: the tests resume it after
+these transfers and check the value its original execution produces
+(`mv-principal-scheduler`, `mv-affine-pop-take-swap`,
+`mv-affine-struct-elements`, `mv-affine-growth`, `mv-loop-consumes`, and
+the fuzzer's affine family, which resumes moved identities and checks each
+accumulator), and the release-call probe sees each one created once and
+released once. The one
+coroutine test whose expectation changed is `co-release-placement` (the
+path-release fix: the release now sits inside the branch that still owns
+the handle). `co-source-operations` caught this milestone's context-root
+NIR op spelled with the coroutine prefix (`contextroot`); it is `ctxroot`.
 
 ### 69. Native coverage
 
