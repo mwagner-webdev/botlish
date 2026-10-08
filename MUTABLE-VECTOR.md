@@ -651,7 +651,25 @@ identity exactly once; each group of slots dropped together released
 consecutively, first to last); natively the release counters (and, with
 `-gc-stress 1`, the value under GC stress).
 
-RESULTS-FUZZ
+Results on the final tree (every backend; native release counters on):
+
+| run | programs | accepted | rejected (as predicted) | identities checked | disagreements |
+|---|---:|---:|---:|---:|---:|
+| `-seed 5000 -n 80` | 80 | 55 | 25 | 396 | 0 |
+| `-seed 6000 -n 80` | 80 | 58 | 22 | 387 | 0 |
+| `-seed 7000 -n 60 -gc-stress 1` | 60 | 39 | 21 | 389 | 0 |
+
+The rejected programs carried the predicted diagnostic every time:
+`MUTABLE-VECTOR-RECEIVER` 20, `TYPE` 14, `USE-AFTER-MOVE` 14,
+`MUTABLE-VECTOR-CAPTURE` 7, `AFFINE-CAPTURE-UNSUPPORTED` 7,
+`AFFINE-ERASURE-UNSUPPORTED` 3, `AFFINE-VECTOR-COPY-OUT` 3 (earlier seeds
+also produced `AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE`). During development
+the fuzzer found one real bug: an affine `at` through a struct field path
+(`mutable_vector::at(h3.items, 0)`) was accepted, because the field read's
+rejection was deferred to its receiver while a receiver-path receiver is a
+place, not a read (`hir::affine::AffineProjection` now reports it at the
+projection; `mv-affine-at` pins it). Its mutation-harness run (item 65)
+kills 32 of the 43 mutants on its own, with 25 programs per mutant.
 
 ### 65. Mutation results
 
