@@ -2137,6 +2137,18 @@ mod tests {
     use crate::runtime::metrics::AllocMode;
     use crate::runtime::vm::{ProgramInfo, Vm};
 
+    /// Evaluates V and pushes it onto `Vm::temp_roots` for the rest of the
+    /// test, as compiled code's stack maps root a live value: under
+    /// BOTLISH_NATIVE_GC_STRESS=1 every allocation collects first, so a value
+    /// held only in a Rust local is freed by the next allocation.
+    macro_rules! rooted {
+        ($vm:expr, $v:expr) => {{
+            let v = $v;
+            $vm.temp_roots.push(v);
+            v
+        }};
+    }
+
     fn vm() -> Box<Vm> {
         Vm::new(
             std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new() }),
@@ -2177,14 +2189,14 @@ mod tests {
             (Some("Account"), &["a", "b"]),
             (None, &["a"]),
         ]);
-        let s = str_val(&mut vm, "x");
-        let s2 = str_val(&mut vm, "x");
-        let anon1 = vm.new_struct(0, vec![small(1), s]);
-        let anon2 = vm.new_struct(0, vec![small(1), s2]);
-        let anon3 = vm.new_struct(0, vec![small(2), s]);
-        let person = vm.new_struct(1, vec![small(1), s]);
-        let account = vm.new_struct(2, vec![small(1), s]);
-        let short = vm.new_struct(3, vec![small(1)]);
+        let s = rooted!(vm, str_val(&mut vm, "x"));
+        let s2 = rooted!(vm, str_val(&mut vm, "x"));
+        let anon1 = rooted!(vm, vm.new_struct(0, vec![small(1), s]));
+        let anon2 = rooted!(vm, vm.new_struct(0, vec![small(1), s2]));
+        let anon3 = rooted!(vm, vm.new_struct(0, vec![small(2), s]));
+        let person = rooted!(vm, vm.new_struct(1, vec![small(1), s]));
+        let account = rooted!(vm, vm.new_struct(2, vec![small(1), s]));
+        let short = rooted!(vm, vm.new_struct(3, vec![small(1)]));
         let eq = |vm: &mut Vm, a, b| rt_value_eq(vm, a, b);
         assert_eq!(eq(&mut vm, anon1, anon2), TRUE);
         assert_eq!(eq(&mut vm, anon1, anon3), FALSE);
@@ -2201,9 +2213,9 @@ mod tests {
     #[test]
     fn struct_equality_keeps_the_no_equality_rule_for_arrays() {
         let mut vm = vm_with_shapes(&[(None, &["a"])]);
-        let array = vm.new_mutarray(1);
-        let x = vm.new_struct(0, vec![array]);
-        let y = vm.new_struct(0, vec![array]);
+        let array = rooted!(vm, vm.new_mutarray(1));
+        let x = rooted!(vm, vm.new_struct(0, vec![array]));
+        let y = rooted!(vm, vm.new_struct(0, vec![array]));
         assert_eq!(rt_value_eq(&mut *vm, x, y), NO_VALUE);
         assert!(vm.error.is_some());
     }
@@ -2211,12 +2223,12 @@ mod tests {
     #[test]
     fn struct_hash_agrees_with_equality() {
         let mut vm = vm_with_shapes(&[(None, &["a", "b"]), (None, &["a"]), (Some("P"), &["a"])]);
-        let s = str_val(&mut vm, "x");
-        let s2 = str_val(&mut vm, "x");
-        let one = vm.new_struct(0, vec![small(1), s]);
-        let two = vm.new_struct(0, vec![small(1), s2]);
-        let other = vm.new_struct(1, vec![small(1)]);
-        let named = vm.new_struct(2, vec![small(1)]);
+        let s = rooted!(vm, str_val(&mut vm, "x"));
+        let s2 = rooted!(vm, str_val(&mut vm, "x"));
+        let one = rooted!(vm, vm.new_struct(0, vec![small(1), s]));
+        let two = rooted!(vm, vm.new_struct(0, vec![small(1), s2]));
+        let other = rooted!(vm, vm.new_struct(1, vec![small(1)]));
+        let named = rooted!(vm, vm.new_struct(2, vec![small(1)]));
         let h = |vm: &mut Vm, v| rt_hash(vm, v);
         assert_eq!(h(&mut vm, one), h(&mut vm, two));
         assert_ne!(h(&mut vm, one), h(&mut vm, other));
@@ -2240,8 +2252,8 @@ mod tests {
             }),
             AllocMode::Summary,
         );
-        let token = vm.new_struct(0, vec![small(1234)]);
-        let holder = vm.new_struct(1, vec![token]);
+        let token = rooted!(vm, vm.new_struct(0, vec![small(1234)]));
+        let holder = rooted!(vm, vm.new_struct(1, vec![token]));
         assert_eq!(show(token), "<opaque token::Token>");
         assert_eq!(show(holder), "Holder {token: <opaque token::Token>}");
         assert_eq!(tcl_value(token).unwrap(), "struct {token::Token secret} {{int 1234}}");
@@ -2251,10 +2263,10 @@ mod tests {
     fn struct_show_names_fields_in_shape_order() {
         use crate::runtime::show::{show, tcl_value};
         let mut vm = vm_with_shapes(&[(None, &["age", "name"]), (Some("geo::Point"), &["y", "x"]), (None, &[])]);
-        let name = str_val(&mut vm, "Grace");
-        let anon = vm.new_struct(0, vec![small(45), name]);
-        let named = vm.new_struct(1, vec![small(2), small(1)]);
-        let empty = vm.new_struct(2, vec![]);
+        let name = rooted!(vm, str_val(&mut vm, "Grace"));
+        let anon = rooted!(vm, vm.new_struct(0, vec![small(45), name]));
+        let named = rooted!(vm, vm.new_struct(1, vec![small(2), small(1)]));
+        let empty = rooted!(vm, vm.new_struct(2, vec![]));
         assert_eq!(show(anon), "{age: 45, name: \"Grace\"}");
         assert_eq!(show(named), "geo::Point {y: 2, x: 1}");
         assert_eq!(show(empty), "{}");
@@ -2284,12 +2296,16 @@ mod tests {
     fn struct_fields_are_traced_and_reclaimed() {
         use crate::runtime::metrics::GcReason;
         let mut vm = vm_with_shapes(&[(None, &["a", "b"])]);
-        let kept = str_val(&mut vm, "kept");
-        let inner = vm.new_struct(0, vec![kept, small(1)]);
+        let kept = rooted!(vm, str_val(&mut vm, "kept"));
+        let inner = rooted!(vm, vm.new_struct(0, vec![kept, small(1)]));
         let outer = vm.new_struct(0, vec![inner, small(2)]);
+        // Only OUTER stays rooted: INNER and KEPT survive by being traced
+        // through it. The garbage stays unrooted on purpose (under stress the
+        // struct's allocation already reclaims the garbage String).
+        vm.temp_roots.clear();
+        vm.temp_roots.push(outer);
         let _garbage = str_val(&mut vm, "garbage");
         let _garbage_struct = vm.new_struct(0, vec![small(3), small(4)]);
-        vm.temp_roots.push(outer);
         vm.collect_for_test(GcReason::Explicit);
         // The struct, its nested struct and the string reachable through both
         // survive; the unreachable string and struct are reclaimed.
@@ -2357,7 +2373,7 @@ mod tests {
         // loop would (byte_i += strbytelen(decoded)), never seeking.
         let mut vm = vm();
         let text = "A\u{e9}\u{6771}\u{1f642}A";
-        let s = str_val(&mut vm, text);
+        let s = rooted!(vm, str_val(&mut vm, text));
         let mut byte_offset = 0i64;
         let expected: Vec<char> = text.chars().collect();
         for want in expected {
@@ -2406,7 +2422,9 @@ mod tests {
         // fresh String. The empty String is the one canonical static object
         // (STRING-ALLOCATION.md: not an interning table, one shared immutable
         // empty), so every Empty materialization is that same object.
-        assert_ne!(rt_short_to_str(&mut *vm, 97), rt_short_to_str(&mut *vm, 97));
+        // (The first is rooted: freed, its address could be the second's.)
+        let first = rooted!(vm, rt_short_to_str(&mut *vm, 97));
+        assert_ne!(first, rt_short_to_str(&mut *vm, 97));
         assert_eq!(rt_short_to_str(&mut *vm, (-1i64) as u64), rt_short_to_str(&mut *vm, (-1i64) as u64));
         let empty = rt_short_to_str(&mut *vm, (-1i64) as u64);
         assert_eq!((str_of(empty).chars, str_of(empty).len_bytes()), (0, 0));
@@ -2454,12 +2472,12 @@ mod tests {
     fn slice_short_matches_substring_for_widths_zero_and_one() {
         let mut vm = vm();
         for text in ["hello", "\u{e9}t\u{e9}", "a\u{3bb}\u{1f600}\u{732b}z"] {
-            let s = str_val(&mut vm, text);
+            let s = rooted!(vm, str_val(&mut vm, text));
             let n = text.chars().count();
             for from in 0..=n {
                 for to in from..=(from + 1).min(n) {
                     let short = rt_str_slice_short(&mut *vm, s, small(from as i64), small(to as i64));
-                    let sub = rt_substr(&mut *vm, s, small(from as i64), small(to as i64));
+                    let sub = rooted!(vm, rt_substr(&mut *vm, s, small(from as i64), small(to as i64)));
                     let back = rt_short_to_str(&mut *vm, short);
                     assert_eq!(str_of(back).as_str(), str_of(sub).as_str(), "{text:?}[{from}..{to}]");
                 }
@@ -2487,7 +2505,7 @@ mod tests {
     #[test]
     fn substr_ascii_records_no_seek() {
         let mut vm = vm();
-        let s = str_val(&mut vm, "hello world");
+        let s = rooted!(vm, str_val(&mut vm, "hello world"));
         rt_substr(&mut *vm, s, small(2), small(5));
         assert_eq!(vm.metrics.utf8_seek_bytes, 0);
     }
@@ -2497,7 +2515,7 @@ mod tests {
         let mut vm = vm();
         // Every character is U+00E9 (2 bytes): character index 3 has byte offset
         // is exactly 6.
-        let s = str_val(&mut vm, &"\u{e9}".repeat(10));
+        let s = rooted!(vm, str_val(&mut vm, &"\u{e9}".repeat(10)));
         rt_substr(&mut *vm, s, small(3), small(4));
         assert_eq!(vm.metrics.utf8_seek_bytes, 6);
     }
@@ -2505,7 +2523,7 @@ mod tests {
     #[test]
     fn substr_non_ascii_seek_grows_with_start_index() {
         let mut vm = vm();
-        let s = str_val(&mut vm, &"\u{e9}".repeat(50));
+        let s = rooted!(vm, str_val(&mut vm, &"\u{e9}".repeat(50)));
         rt_substr(&mut *vm, s, small(1), small(2));
         let first = vm.metrics.utf8_seek_bytes;
         rt_substr(&mut *vm, s, small(40), small(41));
@@ -2524,7 +2542,7 @@ mod tests {
     #[test]
     fn region_eq_non_ascii_records_seek_bytes() {
         let mut vm = vm();
-        let base = str_val(&mut vm, &"\u{e9}".repeat(10));
+        let base = rooted!(vm, str_val(&mut vm, &"\u{e9}".repeat(10)));
         let other = str_val(&mut vm, "\u{e9}");
         rt_str_region_check(&mut *vm, base, small(3), small(4));
         rt_str_region_eq(&mut *vm, base, small(3), small(4), other);
@@ -2668,9 +2686,9 @@ mod tests {
     #[test]
     fn char_at_outside_the_string_is_index_not_found() {
         let mut vm = vm();
-        let s = str_val(&mut vm, "\u{e9}");
-        let empty = str_val(&mut vm, "");
-        let big = vm.new_big(num_bigint::BigInt::from(1u8) << 80);
+        let s = rooted!(vm, str_val(&mut vm, "\u{e9}"));
+        let empty = rooted!(vm, str_val(&mut vm, ""));
+        let big = rooted!(vm, vm.new_big(num_bigint::BigInt::from(1u8) << 80));
         for (text, index) in [(s, small(1)), (s, small(-1)), (s, big), (empty, small(0))] {
             assert_eq!(rt_str_char_at(&mut *vm, text, index), NO_VALUE);
             assert_eq!(vm.declared_error, crate::runtime::error::ERR_INDEX_NOT_FOUND);
@@ -2753,13 +2771,13 @@ mod tests {
     #[test]
     fn indexed_reads_fail_with_index_not_found() {
         let mut vm = vm();
-        let list = vm.new_list(vec![small(10), small(20)]);
+        let list = rooted!(vm, vm.new_list(vec![small(10), small(20)]));
         assert_eq!(small_of(rt_list_get(&mut *vm, list, small(1))), 20);
         assert_eq!(vm.declared_error, 0);
-        let arr = rt_mutarray_allocate(&mut *vm, small(2));
+        let arr = rooted!(vm, rt_mutarray_allocate(&mut *vm, small(2)));
         rt_mutarray_set(&mut *vm, arr, small(0), small(7));
         assert_eq!(small_of(rt_mutarray_get(&mut *vm, arr, small(0))), 7);
-        let big = vm.new_big(num_bigint::BigInt::from(1u8) << 80);
+        let big = rooted!(vm, vm.new_big(num_bigint::BigInt::from(1u8) << 80));
         for index in [small(2), small(-1), big] {
             let reads: [(extern "C" fn(*mut Vm, Value, Value) -> Value, Value); 2] =
                 [(rt_list_get, list), (rt_mutarray_get, arr)];
@@ -2783,22 +2801,22 @@ mod tests {
     #[test]
     fn proven_helpers_agree_with_checked_ones_on_valid_bounds() {
         let mut vm = vm();
-        let list = vm.new_list(vec![small(10), small(20), small(30)]);
+        let list = rooted!(vm, vm.new_list(vec![small(10), small(20), small(30)]));
         for i in 0..3 {
             assert_eq!(rt_list_get_proven(&mut *vm, list, small(i)), rt_list_get(&mut *vm, list, small(i)));
         }
-        let arr = rt_mutarray_allocate(&mut *vm, small(4));
+        let arr = rooted!(vm, rt_mutarray_allocate(&mut *vm, small(4)));
         for i in 0..4 {
             assert_eq!(rt_mutarray_set_proven(&mut *vm, arr, small(i), small(i * 5)), UNIT);
             assert_eq!(small_of(rt_mutarray_get_proven(&mut *vm, arr, small(i))), i * 5);
             assert_eq!(rt_mutarray_get_proven(&mut *vm, arr, small(i)), rt_mutarray_get(&mut *vm, arr, small(i)));
         }
         for text in ["hello", "\u{e9}t\u{e9}", "a\u{3bb}\u{1f600}\u{732b}z", ""] {
-            let s = str_val(&mut vm, text);
+            let s = rooted!(vm, str_val(&mut vm, text));
             let n = text.chars().count() as i64;
             for from in 0..=n {
                 for to in from..=n {
-                    let checked = rt_substr(&mut *vm, s, small(from), small(to));
+                    let checked = rooted!(vm, rt_substr(&mut *vm, s, small(from), small(to)));
                     let proven = rt_substr_proven(&mut *vm, s, small(from), small(to));
                     assert_eq!(str_of(proven).as_str(), str_of(checked).as_str(), "{text:?}[{from}..{to}]");
                     assert_eq!(str_of(proven).chars, str_of(checked).chars);
@@ -2810,8 +2828,8 @@ mod tests {
         for dst_start in 0..=4 {
             for src_start in 0..=4 {
                 for count in 0..=(4 - dst_start.max(src_start)) {
-                    let a = rt_mutarray_allocate(&mut *vm, small(4));
-                    let b = rt_mutarray_allocate(&mut *vm, small(4));
+                    let a = rooted!(vm, rt_mutarray_allocate(&mut *vm, small(4)));
+                    let b = rooted!(vm, rt_mutarray_allocate(&mut *vm, small(4)));
                     for i in 0..4 {
                         rt_mutarray_set(&mut *vm, a, small(i), small(i));
                         rt_mutarray_set(&mut *vm, b, small(i), small(i));
@@ -2825,7 +2843,7 @@ mod tests {
             }
         }
         for count in 0..=4 {
-            let checked = rt_mutarray_freeze(&mut *vm, arr, small(count));
+            let checked = rooted!(vm, rt_mutarray_freeze(&mut *vm, arr, small(count)));
             let proven = rt_mutarray_freeze_proven(&mut *vm, arr, small(count));
             assert_eq!(list_of(proven).items(), list_of(checked).items());
         }
@@ -2847,9 +2865,9 @@ mod tests {
     fn slices_fail_with_lower_underrun_or_upper_overrun() {
         use crate::runtime::error::{ERR_LOWER_UNDERRUN as LO, ERR_UPPER_OVERRUN as UP};
         let mut vm = vm();
-        let s = str_val(&mut vm, "abc");
-        let neg_big = vm.new_big(-(num_bigint::BigInt::from(1u8) << 80usize));
-        let pos_big = vm.new_big(num_bigint::BigInt::from(1u8) << 80usize);
+        let s = rooted!(vm, str_val(&mut vm, "abc"));
+        let neg_big = rooted!(vm, vm.new_big(-(num_bigint::BigInt::from(1u8) << 80usize)));
+        let pos_big = rooted!(vm, vm.new_big(num_bigint::BigInt::from(1u8) << 80usize));
         let cases = [
             (small(-1), small(2), LO),  // start below 0
             (small(4), small(4), UP),   // start above the length
@@ -2870,8 +2888,8 @@ mod tests {
         assert_eq!(str_of(rt_substr(&mut *vm, s, small(3), small(3))).as_str(), "");
         assert_eq!(rt_str_region_check(&mut *vm, s, small(0), small(3)), UNIT);
 
-        let arr = rt_mutarray_allocate(&mut *vm, small(2));
-        let big = rt_mutarray_allocate(&mut *vm, small(5));
+        let arr = rooted!(vm, rt_mutarray_allocate(&mut *vm, small(2)));
+        let big = rooted!(vm, rt_mutarray_allocate(&mut *vm, small(5)));
         assert_eq!(rt_mutarray_set(&mut *vm, arr, small(2), small(1)), NO_VALUE);
         assert_eq!(pending(&mut vm), crate::runtime::error::ERR_INDEX_NOT_FOUND);
         for (count, id) in [(small(-1), LO), (small(3), UP)] {
@@ -2964,15 +2982,16 @@ mod tests {
         .collect();
         for x in &values {
             for k in [0u32, 1, 2, 60, 61, 62, 63, 64, 65, 100, 200] {
-                let a = match i64::try_from(x) {
+                let a = rooted!(vm, match i64::try_from(x) {
                     Ok(n) => vm.new_int(n),
                     Err(_) => vm.new_big(x.clone()),
-                };
-                let b = vm.new_int(k as i64);
+                });
+                let b = rooted!(vm, vm.new_int(k as i64));
                 let shl = rt_int_shl(p, a, b);
                 assert_eq!(int_to_big(shl), x << (k as usize), "{x} << {k}");
                 let shr = rt_int_shr(p, a, b);
                 assert_eq!(int_to_big(shr), x >> (k as usize), "{x} >> {k}");
+                vm.temp_roots.clear();
             }
         }
     }
@@ -3041,15 +3060,15 @@ mod tests {
         }
         let mut strings = vm();
         let p: *mut Vm = &mut *strings;
-        let text = strings.new_str("a");
-        let l = strings.new_list(vec![text]);
+        let text = rooted!(strings, strings.new_str("a"));
+        let l = rooted!(strings, strings.new_list(vec![text]));
         assert_eq!(rt_bytes_from_list(p, l), NO_VALUE);
         assert!(strings.error.take().unwrap().message().contains("got \"a\""));
         // A BigInt (above the small range) is no byte either.
         let mut bigs = vm();
         let p: *mut Vm = &mut *bigs;
-        let big = bigs.new_big(num_bigint::BigInt::from(1u64 << 63) * 4);
-        let l = bigs.new_list(vec![big]);
+        let big = rooted!(bigs, bigs.new_big(num_bigint::BigInt::from(1u64 << 63) * 4));
+        let l = rooted!(bigs, bigs.new_list(vec![big]));
         assert_eq!(rt_bytes_from_list(p, l), NO_VALUE);
     }
 
@@ -3088,10 +3107,10 @@ mod tests {
     fn storage_equality_is_by_bytes_never_identity() {
         let mut vm = vm();
         let p: *mut Vm = &mut *vm;
-        let a = vm.new_bytes(&[1, 2, 3]);
-        let b = vm.new_bytes(&[1, 2, 3]);
-        let c = vm.new_bytes(&[1, 2, 4]);
-        let d = vm.new_bytes(&[1, 2]);
+        let a = rooted!(vm, vm.new_bytes(&[1, 2, 3]));
+        let b = rooted!(vm, vm.new_bytes(&[1, 2, 3]));
+        let c = rooted!(vm, vm.new_bytes(&[1, 2, 4]));
+        let d = rooted!(vm, vm.new_bytes(&[1, 2]));
         let static_copy = BytesObj::new_static(&[1, 2, 3]) as Value;
         assert_ne!(a, b);
         assert_eq!(rt_value_eq(p, a, b), TRUE);
@@ -3109,11 +3128,11 @@ mod tests {
     fn storage_hash_agrees_with_equality_and_with_the_documented_encoding() {
         let mut vm = vm();
         let p: *mut Vm = &mut *vm;
-        let a = vm.new_bytes(&[1, 2, 3]);
-        let b = vm.new_bytes(&[1, 2, 3]);
-        let c = vm.new_bytes(&[1, 2, 4]);
-        let zero = vm.new_bytes(&[0]);
-        let two_zeros = vm.new_bytes(&[0, 0]);
+        let a = rooted!(vm, vm.new_bytes(&[1, 2, 3]));
+        let b = rooted!(vm, vm.new_bytes(&[1, 2, 3]));
+        let c = rooted!(vm, vm.new_bytes(&[1, 2, 4]));
+        let zero = rooted!(vm, vm.new_bytes(&[0]));
+        let two_zeros = rooted!(vm, vm.new_bytes(&[0, 0]));
         assert_eq!(rt_hash(p, a), rt_hash(p, b));
         assert_ne!(rt_hash(p, a), rt_hash(p, c));
         assert_ne!(rt_hash(p, zero), rt_hash(p, two_zeros));
@@ -3141,7 +3160,9 @@ mod tests {
     fn an_unreferenced_storage_is_collected_and_a_rooted_one_survives() {
         use crate::runtime::metrics::GcReason;
         let mut vm = vm();
-        let kept = vm.new_bytes(&[1; 100]);
+        // KEPT is rooted across the garbage's allocation (a collection
+        // under stress); the explicit collection below roots only KEPT.
+        let kept = rooted!(vm, vm.new_bytes(&[1; 100]));
         let _garbage = vm.new_bytes(&[2; 100]);
         vm.heap.collect(std::iter::once(kept), &mut vm.metrics, GcReason::Explicit, &crate::runtime::framemap::ProgramMap::new());
         assert_eq!(vm.metrics.by_kind[KIND_BYTES as usize].live_objects, 1);
@@ -3183,7 +3204,9 @@ mod tests {
         let (e1, e2) = (rt_mbytes_new(p, small(0)), rt_mbytes_new(p, small(0)));
         assert_eq!(e1, e2);
         assert_eq!(unsafe { (*(e1 as *const Header)).is_static }, 1);
-        assert_ne!(rt_mbytes_new(p, small(4)), rt_mbytes_new(p, small(4)));
+        // (The first is rooted: freed, its address could be the second's.)
+        let first = rooted!(vm, rt_mbytes_new(p, small(4)));
+        assert_ne!(first, rt_mbytes_new(p, small(4)));
     }
 
     #[test]
@@ -3206,8 +3229,8 @@ mod tests {
     fn set_updates_a_fresh_copy_and_never_writes_its_operand() {
         let mut vm = vm();
         let p: *mut Vm = &mut *vm;
-        let a = vm.new_bytes(&[1, 2, 3, 4, 5]);
-        let m = rt_mbytes_from(p, a);
+        let a = rooted!(vm, vm.new_bytes(&[1, 2, 3, 4, 5]));
+        let m = rooted!(vm, rt_mbytes_from(p, a));
         assert_eq!(mutbytes_of(m), &[1, 2, 3, 4, 5]);
         let n = rt_mbytes_set(p, m, small(2), small(0xff));
         assert_ne!(n, m, "an update is a new object");
@@ -3218,8 +3241,8 @@ mod tests {
         // Every index, and the last byte, on objects of several sizes.
         for len in [1usize, 2, 7, 8, 9, 16, 17, 33] {
             let src: Vec<u8> = (0..len as u8).collect();
-            let base = vm.new_bytes(&src);
-            let m = rt_mbytes_from(p, base);
+            let base = rooted!(vm, vm.new_bytes(&src));
+            let m = rooted!(vm, rt_mbytes_from(p, base));
             for i in 0..len {
                 let n = rt_mbytes_set(p, m, small(i as i64), small(200));
                 let mut want = src.clone();
@@ -3234,10 +3257,10 @@ mod tests {
     fn set_refuses_a_bad_index_value_or_operand() {
         let mut vm = vm();
         let p: *mut Vm = &mut *vm;
-        let m = rt_mbytes_new(p, small(3));
-        let empty = rt_mbytes_new(p, small(0));
-        let big = vm.new_big(num_bigint::BigInt::from(1u8) << 70usize);
-        let s = vm.new_str("x");
+        let m = rooted!(vm, rt_mbytes_new(p, small(3)));
+        let empty = rooted!(vm, rt_mbytes_new(p, small(0)));
+        let big = rooted!(vm, vm.new_big(num_bigint::BigInt::from(1u8) << 70usize));
+        let s = rooted!(vm, vm.new_str("x"));
         for (target, index, value, kind) in [
             (m, small(3), small(1), "RANGE"),
             (m, small(-1), small(1), "RANGE"),
@@ -3259,12 +3282,12 @@ mod tests {
     fn clone_freeze_and_prefix_copy_and_the_kinds_never_mix() {
         let mut vm = vm();
         let p: *mut Vm = &mut *vm;
-        let a = vm.new_bytes(&[9, 8, 7, 6]);
-        let m = rt_mbytes_from(p, a);
-        let c = rt_mbytes_clone(p, m);
+        let a = rooted!(vm, vm.new_bytes(&[9, 8, 7, 6]));
+        let m = rooted!(vm, rt_mbytes_from(p, a));
+        let c = rooted!(vm, rt_mbytes_clone(p, m));
         assert_ne!(c, m);
         assert_eq!(mutbytes_of(c), mutbytes_of(m));
-        let f = rt_mbytes_freeze(p, m);
+        let f = rooted!(vm, rt_mbytes_freeze(p, m));
         assert_eq!(heap_kind(f), KIND_BYTES);
         assert_eq!(bytes_of(f), &[9, 8, 7, 6]);
         assert_ne!(f, a, "freeze is a snapshot copy, not the source storage");
@@ -3313,10 +3336,10 @@ mod tests {
         use crate::runtime::show::{show, tcl_value};
         let mut vm = vm();
         let p: *mut Vm = &mut *vm;
-        let src = vm.new_bytes(&[1, 2, 3]);
-        let a = rt_mbytes_from(p, src);
-        let b = rt_mbytes_from(p, src);
-        let c = rt_mbytes_set(p, a, small(0), small(9));
+        let src = rooted!(vm, vm.new_bytes(&[1, 2, 3]));
+        let a = rooted!(vm, rt_mbytes_from(p, src));
+        let b = rooted!(vm, rt_mbytes_from(p, src));
+        let c = rooted!(vm, rt_mbytes_set(p, a, small(0), small(9)));
         assert_ne!(a, b, "two storages, equal contents");
         assert_eq!(rt_value_eq(p, a, b), TRUE);
         assert_eq!(rt_value_eq(p, a, c), FALSE);
@@ -3342,7 +3365,9 @@ mod tests {
         use crate::runtime::metrics::GcReason;
         let mut vm = vm();
         let p: *mut Vm = &mut *vm;
-        let kept = rt_mbytes_new(p, small(100));
+        // KEPT is rooted across the garbage's allocation (a collection
+        // under stress); the explicit collection below roots only KEPT.
+        let kept = rooted!(vm, rt_mbytes_new(p, small(100)));
         unsafe { BytesObj::payload_mut(kept)[99] = 0x5a };
         let _garbage = rt_mbytes_new(p, small(100));
         vm.heap.collect(std::iter::once(kept), &mut vm.metrics, GcReason::Explicit, &crate::runtime::framemap::ProgramMap::new());

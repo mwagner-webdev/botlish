@@ -226,8 +226,12 @@ mod tests {
         let r = rt_linux_x86_64_syscall(p, nr, zero, zero, zero, zero, zero, zero);
         assert_eq!(int_small(r), Some(this_pid()));
         // BigInt operands (the i64 extremes) are read as their words too.
+        // Rooted (as compiled code's stack maps root operands): BIG_MAX's
+        // allocation may collect, always under BOTLISH_NATIVE_GC_STRESS=1.
         let big_min = vm.new_int(i64::MIN);
+        vm.temp_roots.push(big_min);
         let big_max = vm.new_int(i64::MAX);
+        vm.temp_roots.push(big_max);
         let r = rt_linux_x86_64_syscall(p, nr, big_min, big_max, zero, zero, zero, zero);
         assert_eq!(int_small(r), Some(this_pid()));
     }
@@ -262,7 +266,11 @@ mod tests {
         use crate::runtime::ops::rt_int_sub;
         let mut vm = new_vm();
         let p = &mut *vm as *mut Vm;
+        // Every BigInt here is rooted (as compiled code's stack maps root
+        // operands) before the next allocation, which may collect (always,
+        // under BOTLISH_NATIVE_GC_STRESS=1).
         let two_64 = vm.new_big(num_bigint::BigInt::from(1u128 << 64));
+        vm.temp_roots.push(two_64);
         // Signed values are sign-extended: the word is the value itself.
         for (value, bits) in [
             (-1i64, 0xffff_ffff_ffff_ffffu64), // I8/I16/I32/I64/Isize -1
@@ -290,6 +298,7 @@ mod tests {
             ((1u128 << 64) - 1, 0xffff_ffff_ffff_ffff),    // U64/Usize max
         ] {
             let v = vm.new_big(num_bigint::BigInt::from(value));
+            vm.temp_roots.push(v);
             let word = rt_int_sub(p, v, two_64);
             assert_eq!(register_word(word).map(|w| w as u64), Some(bits), "{value}");
             // A word outside the 63-bit small range stays a BigInt in
