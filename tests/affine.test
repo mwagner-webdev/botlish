@@ -528,6 +528,8 @@ test af-native-evidence {item 73: natively a coroutine argument is a register th
 test af-native-runtime-source {the runtime adds no ownership state: no moved flag, reference count or ownership object; the one new operation is affinedrop, which never allocates (no safepoint) and walks only what its static descriptor names} -body {
     set root [file join $::projectRoot native src]
     set affine [read [set f [open [file join $root runtime affine.rs]]]][close $f]
+    # The runtime code only, not its unit tests (which build VMs and values).
+    set affine [string range $affine 0 [string first "#\[cfg(test)\]" $affine]-1]
     set ops [read [set f [open [file join $root runtime ops.rs]]]][close $f]
     set mayAllocate [string range $ops [string first "pub fn op_may_allocate" $ops] [string first "pub fn op_may_error" $ops]]
     list [regexp -nocase {refcount|ref_count|moved|owner_count} $affine] \
