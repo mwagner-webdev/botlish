@@ -298,6 +298,26 @@ String const anywhere in the frontend (`tests/one-char-string-literal.test`'s
 not autofixable on purpose: do not add a context gate, an opt-out, the
 character spelling to its message or data, or a fixit.
 
+`MANY-BOOLEAN-ARGUMENTS` (WARNINGS-MANY-BOOLEAN-ARGUMENTS.md) reads, per call,
+the frontend's `written` provenance (`function`/`method` only), the call's
+`reachable` flag and `args`, the callee reference resolved through aliases by
+`hir::resolve::CandidateIdentity` to a declaring `bind` of a block (or a root
+native and its registry `paramTypes`), the block's `params` minus its `flags`,
+and the parameter types the checker proves (`hir::signatures::entryTypes`:
+declared, else the TRUSTED inferred contract -- never a CHECKED one). Its
+evidence is an argument that is a reference to the root `true` or `false`,
+which is how the frontend lowers those keywords; flag arguments are the
+trailing `bool` constants hir/flags.tcl appends and are never read. If you
+change call provenance, how `true`/`false` or a call's arguments lower, the
+flag transport (`hir::flags::ResolveCall`), alias resolution, the trusted /
+checked split of `hir/signatures.tcl`, or a native's parameter types, run
+`tests/many-boolean-arguments.test` and
+`audit/many-boolean-arguments/tools/fuzz.tcl`. The warning counts literals
+only and is not autofixable on purpose: do not count flags, bindings or
+computed bools, follow exact values, group per callee, warn on a declaration
+without call evidence, print a flag spelling, or add a fixit or an opt-out
+(FLAGS.md, "Boolean arguments", records the graduation criteria).
+
 ## Refinement values
 
 `refined type NAME = CARRIER` and `proves PARAM: NAME` (REFINEMENT-VALUES.md)

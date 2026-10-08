@@ -14,7 +14,7 @@
 #   bool       declared `: bool`, or
 #   inferred   untyped and forwarded to `weight`'s declared bool parameter
 #              (`p.weight(W)`): the checker's TRUSTED inferred contract,
-# 0-1 parameters of an unprovable kind, each either
+# 0-2 parameters of an unprovable kind, each either
 #   unproven   untyped and only used as a condition (`p.pick(W)`, pick's
 #              parameter is a checked condition): a CHECKED contract, not a
 #              proof, or
@@ -159,9 +159,11 @@ proc boolKind {kind} {
 # subject.
 proc newCallee {k hasContext} {
     set params {}
-    set nbool [pick {0 1 2 2 2 3 3 3}]
-    set nunp [pick {0 0 0 1}]
-    set nsub [pick {0 1 1 1 2}]
+    set nbool [pick {0 1 1 2 2 2 3 3 3}]
+    # Unprovable parameters are subjects to the gate, never bools: often the
+    # only subject, or the would-be second bool of a one-bool callee.
+    set nunp [pick {0 0 1 1 2}]
+    set nsub [pick {0 0 1 1 2}]
     if {$nbool + $nunp + $nsub == 0} {
         set nsub 1
     }
@@ -169,7 +171,7 @@ proc newCallee {k hasContext} {
         lappend params [list b${k}_$i [pick {bool bool inferred}]]
     }
     for {set i 0} {$i < $nunp} {incr i} {
-        lappend params [list u${k}_$i [pick {unproven any}]]
+        lappend params [list u${k}_$i [pick {unproven unproven any}]]
     }
     for {set i 0} {$i < $nsub} {incr i} {
         lappend params [list s${k}_$i [pick {int subject}]]

@@ -523,6 +523,39 @@ r = open_file(\"p\", true, false, true)
 \[p, q, r\]"
 } -result 5:5
 
+test mb-synthesized-bool-refs-enumerated {SOURCE AUDIT: the frontend builds a root true/false reference in exactly three ways -- the written keyword (surface/lower.tcl's `bool` case), `Bool` inside the branches of the !=, not, and, or desugarings (an `if`'s value, never an argument), and the flag transport's appended constants (hir/flags.tcl, after the ordinary arguments); a new one fails here} -body {
+    set found {}
+    foreach path [lsort [concat [glob [file join $::projectRoot hir *.tcl]] [glob [file join $::projectRoot surface *.tcl]]]] {
+        set channel [open $path]
+        set lines [split [read $channel] \n]
+        close $channel
+        foreach line $lines {
+            if {[regexp {^\s*#} $line]} continue
+            if {[regexp {rootRef \S+ (\$value|\[dict get \$node value\])} $line] || [regexp {\[Bool } $line]} {
+                lappend found [list [file join [file tail [file dirname $path]] [file tail $path]] [string trim $line]]
+            }
+        }
+    }
+    set found
+} -result {{hir/flags.tcl {lappend args [hir::resolve::Expr hir [hir::syntax::rootRef $origin $value] $ctx]}} {surface/lower.tcl {return [hir::syntax::rootRef $origin $value]}} {surface/lower.tcl {return [hir::syntax::rootRef $origin [dict get $node value]]}} {surface/lower.tcl {return [Branch $origin $equal [list [Bool $opOrigin false]] [list [Bool $opOrigin true]]]}} {surface/lower.tcl {[list [Bool $opOrigin false]] [list [Bool $opOrigin true]]]}} {surface/lower.tcl {[list [Bool $rightOrigin true]] [list [Bool $rightOrigin false]]]}} {surface/lower.tcl {[list $test] [list [Bool $opOrigin false]]]}} {surface/lower.tcl {[list [Bool $opOrigin true]] [list $test]]}}}
+
+test mb-desugarings-pass-no-bool-literal {options built by every boolean desugaring (not, !=, and, or) are `if` nodes, never root true/false references, at the ordinary positions of a written call: no evidence and no warning; the call's only root `true` argument is its supplied flag, appended after the ordinary ones} -body {
+    set hir [compileWith {fn opts(x, a: bool, b: bool, c: bool, flags :q):
+    x
+fn f(p, r):
+    opts(p, not r, p != r, r and (r or r), :q)
+f(1, true == true)}]
+    set kinds {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "call" && [dict exists $node written] && [dict get $node written form] eq "function"
+                && [dict get $hir exprs [dict get $node callee] name] eq "opts"} {
+            set kinds [lmap a [dict get $node args] {dict get $hir exprs $a kind}]
+            set positions [hir::warnings::BoolLiteralPositions $hir [dict get $node args]]
+        }
+    }
+    list $kinds $positions [manyOf $hir]
+} -result {{ref if if if ref} 5 {}}
+
 test mb-core-ir-input-silent {HIR built from core IR carries no written provenance: never a candidate} -body {
     set hir [hir::build {{bind f {block {p a b} {ref p}}} {call {ref f} {const 1} {ref true} {ref false}}}]
     lmap w [hir::warnings::collect $hir] {dict get $w code}

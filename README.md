@@ -1641,7 +1641,10 @@ add10(32)          # 42 (add captures x)
   parameters, and work through method sugar (`path.open(:append)`) and
   aliases (`g = open`). A function with flags can only be called or aliased,
   not passed around as a value. `flags` is a contextual marker, not a reserved
-  word. See FLAGS.md.
+  word. Flags are the language's form for options: a call passing two or more
+  boolean literals to a function with a subject and boolean options is
+  `MANY-BOOLEAN-ARGUMENTS` (§23). See FLAGS.md ("Boolean arguments" states
+  the idiom).
 * **Contexts.** `context struct Clock:` (or `opaque context struct LinuxIO:`)
   declares a struct whose values may be installed into the current execution
   environment; `with context EXPR` installs EXPR's value -- its inferred type
@@ -2976,32 +2979,38 @@ and stops. It never says what to do about it, and a program that keeps the
 fact on purpose is correct. A warning that cannot cite a compiler proof does
 not belong in a default-on, non-suppressible system.
 
-That bar admits four *preference-shaped* warnings, `METHOD-ELIGIBLE`,
-`FIXED-ARITY-LIST-RETURN`, `PROVES-NAMING` and `ONE-CHAR-STRING-LITERAL`
-(below), and only because each passes the bar rather than because "style
-warnings are fine now": (1) its **fact** is compiler-proven -- the sugared
-spelling parses and resolves to the identical callee; every reachable value
-exit is a written list literal of one arity; the declaration carries a resolved
-proof contract of one of the refinement feature's two shapes and its written
-name is outside that shape's convention; a written String literal's exact value
-is one character long -- with the compiler's own parser, resolver, provenance,
-exact values and reachability as the prover; (2) the **preference** it serves
-is the language's own declared design (receiver syntax is Botlish's preferred
-call form; struct values have named parts and destructure, Lists deliberately
-do not: MULTI-VALUE-RESULTS.md; proof-producing functions are named by their
-shape, the refinement feature's declared interface: REFINEMENT-VALUES.md,
-"Naming"; a single character is written as a character literal: §1, "Strings
-and characters"), not a per-warning fashion; (3) the **author** has first-class
-control at the declaration, as part of the interface: `nomethod fn` withdraws
-method eligibility, a result type `-> list` / `-> List[T]` declares a list
-result, a proof-producing function's name is its author's own choice, which a
-rename changes and nothing else does, and a literal's spelling is its writer's
--- where the literal's consumer takes a String, the declaration that decides is
-that API's, and changing it is the response (`ONE-CHAR-STRING-LITERAL`
-deliberately has no context gate and no opt-out: making those APIs visible is
-its purpose). None is call-site suppression (there is still no lint-ignore,
-pragma or per-call opt-out); (4) **uncertainty means silence**: wherever the
-compiler cannot prove the fact, it says nothing.
+That bar admits five *preference-shaped* warnings, `METHOD-ELIGIBLE`,
+`FIXED-ARITY-LIST-RETURN`, `PROVES-NAMING`, `ONE-CHAR-STRING-LITERAL` and
+`MANY-BOOLEAN-ARGUMENTS` (below), and only because each passes the bar rather
+than because "style warnings are fine now": (1) its **fact** is
+compiler-proven -- the sugared spelling parses and resolves to the identical
+callee; every reachable value exit is a written list literal of one arity; the
+declaration carries a resolved proof contract of one of the refinement
+feature's two shapes and its written name is outside that shape's convention; a
+written String literal's exact value is one character long; a written call
+passes two or more boolean literals to a declared callee whose signature has a
+subject and at least two parameters the checker proves bool -- with the
+compiler's own parser, resolver, provenance, exact values, parameter types and
+reachability as the prover; (2) the **preference** it serves is the language's
+own declared design (receiver syntax is Botlish's preferred call form; struct
+values have named parts and destructure, Lists deliberately do not:
+MULTI-VALUE-RESULTS.md; proof-producing functions are named by their shape, the
+refinement feature's declared interface: REFINEMENT-VALUES.md, "Naming"; a
+single character is written as a character literal: §1, "Strings and
+characters"; options are flags: FLAGS.md, "Boolean arguments"), not a
+per-warning fashion; (3) the **author** has first-class control at the
+declaration, as part of the interface: `nomethod fn` withdraws method
+eligibility, a result type `-> list` / `-> List[T]` declares a list result, a
+proof-producing function's name is its author's own choice, which a rename
+changes and nothing else does, a literal's spelling is its writer's -- where
+the literal's consumer takes a String, the declaration that decides is that
+API's, and changing it is the response (`ONE-CHAR-STRING-LITERAL` deliberately
+has no context gate and no opt-out: making those APIs visible is its purpose)
+-- and a function's options are its author's signature, which flags change
+(`MANY-BOOLEAN-ARGUMENTS` has no opt-out either: a bool the caller names or
+computes is not evidence in the first place). None is call-site suppression
+(there is still no lint-ignore, pragma or per-call opt-out); (4) **uncertainty
+means silence**: wherever the compiler cannot prove the fact, it says nothing.
 
 There is one global policy per compilation, and nothing finer:
 
@@ -3026,10 +3035,11 @@ annotation or comment suppresses a warning. This is intentional, not forgotten
 CLI work: every warning is on for everyone, so a warning must be trustworthy
 enough to be, and uncertainty means no warning. Codes (`SAME-RETURN-VALUE`,
 `METHOD-ELIGIBLE`, `FIXED-ARITY-LIST-RETURN`, `SAME-FAILURE`, `PROVES-NAMING`,
-`ONE-CHAR-STRING-LITERAL`) are stable for tests, tooling and documentation, but
-they are not switches. Adding `METHOD-ELIGIBLE`, `FIXED-ARITY-LIST-RETURN`,
-`SAME-FAILURE`, `PROVES-NAMING` and `ONE-CHAR-STRING-LITERAL` gave
-`BOTLISH_WARNINGS` and the command line nothing: three modes, one option.
+`ONE-CHAR-STRING-LITERAL`, `MANY-BOOLEAN-ARGUMENTS`) are stable for tests,
+tooling and documentation, but they are not switches. Adding
+`METHOD-ELIGIBLE`, `FIXED-ARITY-LIST-RETURN`, `SAME-FAILURE`, `PROVES-NAMING`,
+`ONE-CHAR-STRING-LITERAL` and `MANY-BOOLEAN-ARGUMENTS` gave `BOTLISH_WARNINGS`
+and the command line nothing: three modes, one option.
 
 `SAME-RETURN-VALUE`: several distinct, reachable exits of one function are
 proven to return the same value.
@@ -3267,3 +3277,49 @@ reported), the spelling law, the corpus
 audit with its API-deficiency catalog, and known limitations; the tests are
 `tests/one-char-string-literal.test` and
 `audit/one-char-string-literal/tools/fuzz.tcl`.
+
+`MANY-BOOLEAN-ARGUMENTS`: a written call passes two or more boolean literals
+to a function whose signature takes a subject and boolean options.
+
+```
+fn open_file(path, append: bool, create: bool, sync: bool):
+    path
+
+open_file("file.txt", true, false, true)
+```
+```
+f.bot:4:1: warning: the call to `open_file` passes 3 boolean literals; flags name options (MANY-BOOLEAN-ARGUMENTS)
+```
+
+The harm is anonymity: `true` carries no name. Flags are the language's answer
+for options (`fn open_file(path, flags :append, :create, :sync)`, called
+`open_file("file.txt", :append, :sync)`; FLAGS.md, "Boolean arguments"). The
+scope is narrow on purpose. **Written calls only**: a call the frontend
+synthesizes (`true != false`, `[true, false]`) or one with no provenance
+marker (core IR, HIR text) is never a candidate. **Literals only**: the
+evidence is a written `true`/`false` token at an ordinary argument position (a
+method call's receiver included); a named binding -- even one provably holding
+`true` -- and a computed bool (`n > 0`, a call) already say what they mean and
+never count, so `f(true, compute(), false)` passes 2 and `f(true, compute())`
+passes 1 (silent). **The gate**: the callee is a declared function (an alias of
+one included) or a native, never a function value, and among its ordinary
+parameters at least two are proven `bool` -- declared, or a trusted inferred
+contract; an untyped parameter the body merely tests has only a run-time
+checked contract and does not count, so in practice the options must be
+annotated -- and at least one is not (a function whose parameters are all bool,
+`xor(a: bool, b: bool)`, takes data, not options). **Flags are never counted**,
+in the gate or the threshold: they are the idiom. Natives are included because
+the call site is the caller's code; no native takes a bool today.
+Structurally unreachable calls are skipped (a call that cannot execute makes
+no call; contrast `ONE-CHAR-STRING-LITERAL`, whose fact is about written
+source). One diagnostic per call site, no notes, no grouping by callee. The
+message states the count, names the callee and names the form; it never prints
+a flag spelling. The warning is **deliberately not autofixable**: a flag
+defaults to `false`, so a mis-mapped rewrite still has a valid argument count
+and is silently wrong, and which `true` means which option is the author's
+intent, not a proof. The graduation criteria (a declared, total literal-to-flag
+mapping, or flag-variables landing) are recorded in FLAGS.md. See
+WARNINGS-MANY-BOOLEAN-ARGUMENTS.md for the theorem, the gate, the conversion
+law, the corpus census and known limitations; the tests are
+`tests/many-boolean-arguments.test` and
+`audit/many-boolean-arguments/tools/fuzz.tcl`.
