@@ -2,12 +2,12 @@ source:  bench/refined-checks.bot
 backend: Cranelift (specialize=1)
 asm:     refined-checks.asm
 vcode:   refined-checks.vcode
-machine-code bytes: 11134 (per function: 1415 217 617 74 74 74 128 128 353 115 154 176 176 295 344 183 770 140 60 501 853 127 103 313 219 287 1255 1615 368)
+machine-code bytes: 11262 (per function: 1415 217 745 74 74 74 128 128 353 115 154 176 176 295 344 183 770 140 60 501 853 127 103 313 219 287 1255 1615 368)
 
 functions:
   0 <program entry>: nir-regs=43
   1 byte::from_int<int>: nir-regs=5
-  2 byte::set<List[UnicodeChar]>: nir-regs=17
+  2 byte::set<List[UnicodeChar]>: nir-regs=18
   3 ascii::is_digit<int>: nir-regs=12
   4 ascii::is_upper<int>: nir-regs=12
   5 ascii::is_lower<int>: nir-regs=12
@@ -63,11 +63,11 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 2 "byte::set"
-    NIR regs: 17
+    NIR regs: 18
     raw regs: 2
-    managed-capable regs: 15
+    managed-capable regs: 16
     effects: may_error=true may_gc=true
-    safepoints: 4
+    safepoints: 5
     root candidates: 7
     max live roots: 5
     shadow slots: 5
@@ -416,4 +416,4 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
 mechanical pattern counts (triage only; see report for interpretation):
   10 x calls to rt_int_add
   7 x calls to rt_int_cmp
-  49 x calls to other rt_* helpers
+  50 x calls to other rt_* helpers
