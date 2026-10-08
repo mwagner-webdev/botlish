@@ -193,15 +193,23 @@ proc inDir {dir script} {
     }
 }
 
+# Replaces the single occurrence of OLD in PATH by NEW. An OLD that occurs
+# more than once is refused like one that does not occur: replacing the first
+# would silently mutate whichever site happens to come first, which need not be
+# the one the mutant describes.
 proc replaceOnce {path old new} {
     set channel [open $path r]
     fconfigure $channel -encoding utf-8
     set text [read $channel]
     close $channel
-    set index [string first $old $text]
-    if {$index < 0} {
-        error "mutation target not found in $path: [string range $old 0 60]"
+    set count 0
+    for {set at [string first $old $text]} {$at >= 0} {set at [string first $old $text [expr {$at + 1}]]} {
+        incr count
     }
+    if {$count != 1} {
+        error "the text to replace occurs $count times in $path (expected exactly 1): [string range $old 0 60]"
+    }
+    set index [string first $old $text]
     set text [string replace $text $index [expr {$index + [string length $old] - 1}] $new]
     set channel [open $path w]
     fconfigure $channel -encoding utf-8
@@ -216,7 +224,12 @@ foreach m $mutations {
     set dir [file join $work $name]
     puts "== $name: copying the tree"
     copyTree $dir [expr {$kind eq "rust"}]
-    replaceOnce [file join $dir $file] $old $new
+    if {[catch {replaceOnce [file join $dir $file] $old $new} message]} {
+        puts "   MUTATION ERROR $name: $message"
+        lappend survivors "$name (bad mutation)"
+        file delete -force $dir
+        continue
+    }
     if {$kind eq "rust"} {
         puts "== $name: rebuilding the native backend"
         set status [catch {exec cargo build --release --manifest-path [file join $dir native Cargo.toml] 2>@1} output]
