@@ -484,6 +484,44 @@ test af-drop-native {natively every abandoned coroutine an aggregate owned is re
         [withGcStress {lrange [outcomeUnderHir cranelift $hir] 0 1}]
 } -cleanup {unset -nocomplain text hir} -result {{stacksMapped 3 stacksReused 4997 released 5000 releasedSuspended 5000 sweptSuspended 0} {value 1000}}
 
+test af-native-evidence {item 73: natively a coroutine argument is a register the callee resumes and releases; returning it, storing it in a struct and moving the struct are register transfers (the struct travels as its fields, never allocated); a List owning two handles is one listnew and one affinedrop; a generic HOF specialized to a function is the direct (inlined) call, specialized to a coroutine a resume -- one Coroutine object per construction, no callvalue, no ownership object} -constraints linuxX86_64 -body {
+    set text "${affPlainDecls}fn run_once(step: Coroutine{args: \[Message\], return: Event}, m: Message) -> Event:\n    step(m)\nfn wrap(step: Coroutine{args: \[Message\], return: Event}) -> Running:\n    Running {name: \"w\", step: step}\nfn invoke(f, x):\n    f(x)\nfn double(x: int) -> int:\n    x * 2\nfn main() -> int:\n    a = make(1)\n    e1 = run_once(a, Message {value: 2})\n    r = wrap(make(3))\n    r2 = r\n    {step} = r2\n    e2 = invoke(step, Message {value: 4})\n    xs = \[make(5), make(6)\]\n    ys = xs\n    d = invoke(double, 7)\n    e1.value + e2.value + d\nmain()\n"
+    set hir [surface::compile $text -warnings off]
+    set nir [native::nir $hir]
+    set report [native::allocationReport $hir summary]
+    set main [affOps [affFunc $nir main]]
+    list [affAgree $text] \
+        [affOps [affFunc $nir run_once]] \
+        [affOps [affFunc $nir wrap]] \
+        [affOps [affFunc $nir {invoke<Coroutine{args:[Message],return:Event,errors:[]}>}]] \
+        [lsearch -all -inline -regexp [affFunc $nir {invoke}] {call|callvalue}] \
+        [llength [lsearch -all $main affinedrop]] [llength [lsearch -all $main callvalue]] \
+        [llength [lsearch -all $main structnew]] \
+        [dict get $report byKind Coroutine allocations] [dict get $report coroutines released] \
+        [dict get $report coroutines sweptSuspended]
+} -cleanup {unset -nocomplain text hir nir report main} -result {{value 20} {coresume corelease ret} retmulti {coresume corelease ret} {} 1 0 2 4 4 0}
+
+test af-native-runtime-source {the runtime adds no ownership state: no moved flag, reference count or ownership object; the one new operation is affinedrop, which never allocates (no safepoint) and walks only what its static descriptor names} -body {
+    set root [file join $::projectRoot native src]
+    set affine [read [set f [open [file join $root runtime affine.rs]]]][close $f]
+    set ops [read [set f [open [file join $root runtime ops.rs]]]][close $f]
+    set mayAllocate [string range $ops [string first "pub fn op_may_allocate" $ops] [string first "pub fn op_may_error" $ops]]
+    list [regexp -nocase {refcount|ref_count|moved|owner_count} $affine] \
+        [regexp {alloc} [regsub -all {//[^\n]*} $affine ""]] \
+        [regexp {AffineDrop} $mayAllocate]
+} -cleanup {unset -nocomplain root affine ops mayAllocate f} -result {0 0 0}
+
+test af-fuzz-bounded {a bounded run of the ownership fuzzer (audit/affine/tools/fuzz.tcl): every backend computes the oracle's value on every accepted program, every identity is released exactly as the oracle's owner record says (the interpreter's release calls, the native counters), and every rejected program has the predicted diagnostic} -body {
+    set here [pwd]
+    cd [temporaryDirectory]
+    try {
+        set output [exec [info nameofexecutable] [file join $::projectRoot audit affine tools fuzz.tcl] -n 8 -seed 101 2>@1]
+    } finally {
+        cd $here
+    }
+    lindex [split [string trim $output] \n] end
+} -cleanup {unset -nocomplain here output} -result {programs 8 disagreements 0}
+
 # ---------------------------------------------------------------------------
 # HIR evidence (items 51, 52)
 
