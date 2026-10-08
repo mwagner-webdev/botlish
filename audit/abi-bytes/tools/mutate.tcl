@@ -236,6 +236,7 @@ foreach m $mutations {
         if {$status} {
             puts "   BUILD FAILED: [string range $output end-600 end]"
             lappend survivors "$name (build failed)"
+            file delete -force $dir
             continue
         }
     }
