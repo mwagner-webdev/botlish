@@ -101,7 +101,7 @@
 ## native/src/runtime/mutvec.rs
 <<<<
             vm(p).metrics.record_mutvec_share();
-            new_header(p, backing)
+            new_header(p, backing, 0)
 ====
             vm(p).metrics.record_mutvec_share();
             drop(backing);

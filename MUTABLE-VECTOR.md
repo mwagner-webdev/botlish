@@ -753,7 +753,8 @@ warning), each suite run with a private `-tmpdir`, `LANG=C.utf8`:
 |---|---:|---:|---:|---:|
 | `CORE_BACKEND=interp tests/all.tcl` | 6766 | 6766 | 0 | 0 |
 | `CORE_BACKEND=compile tests/all.tcl` | 6766 | 6762 | 4 (`coreScoping`, as on main) | 0 |
-| `BOTLISH_NATIVE_GC_STRESS=1 tests/all.tcl` | GC-STRESS-RESULT |
+| `BOTLISH_NATIVE_GC_STRESS=1 tests/all.tcl`, interp pass | 6766 | 6766 | 0 | 0 |
+| `BOTLISH_NATIVE_GC_STRESS=1 tests/all.tcl`, compile pass | 6766 | 6762 | 4 (`coreScoping`) | 0 |
 | `cargo test --release` (native crate) | 236 | 236 | 0 | 0 |
 
 The Rust count is 205 library tests (7 of them this milestone's
@@ -828,15 +829,142 @@ existing type is unchanged (a vector is the only new case it reaches).
 
 ### 71. Performance
 
-RESULTS-PERFORMANCE
+`bench/mutable-vector.tcl` (its header has the method): N = 2000
+operations per program on the Tcl backends, 200 000 natively (20 000 for
+the rows that keep N coroutines suspended at once: N native stacks are N
+memory mappings); best of 5 runs; time per operation as (program -
+baseline) / N, the whole program per operation in parentheses. The Tcl
+backends' numbers are dominated by their own per-statement cost and vary
+by tens of percent between runs; the native ones are the meaningful
+comparison.
+
+| operation | baseline | Tcl interp | Tcl compile | Cranelift |
+|---|---|---:|---:|---:|
+| List construction (collecting loop), per element | -- | 22720 ns (22720 ns) | 1218 ns (1218 ns) | 43 ns (43 ns) |
+| List iteration, per element | list-build | 21120 ns (44469 ns) | 558 ns (1891 ns) | 35 ns (79 ns) |
+| construct from a List (from_list), per element | list-build | 4 ns (23264 ns) | -950 ns (1443 ns) | -2 ns (42 ns) |
+| iterate an unrestricted vector (snapshot), per element | from-list | 23433 ns (48743 ns) | 1349 ns (2768 ns) | 68 ns (109 ns) |
+| push an Int into a unique vector | loop-base | 40184 ns (64530 ns) | 6710 ns (8054 ns) | 12 ns (57 ns) |
+| MutableArray set (preallocated), for comparison | loop-base | 152628 ns (176167 ns) | 33142 ns (34433 ns) | 18 ns (62 ns) |
+| push a struct into a unique vector | loop-base | 61214 ns (84372 ns) | 8306 ns (9587 ns) | 66 ns (109 ns) |
+| at | vector-base | 62205 ns (86865 ns) | 13810 ns (15196 ns) | 31 ns (85 ns) |
+| pop | vector-base | 47520 ns (75312 ns) | 10573 ns (12016 ns) | 37 ns (81 ns) |
+| take from the end | vector-base | 105634 ns (130448 ns) | 15112 ns (16446 ns) | 45 ns (88 ns) |
+| take from the front | vector-base | 64203 ns (88544 ns) | 14014 ns (15321 ns) | 39 ns (82 ns) |
+| swap | vector-base | 73628 ns (98724 ns) | 22233 ns (23681 ns) | 40 ns (85 ns) |
+| create and release a coroutine (no vector) | -- | 441972 ns (441972 ns) | 94336 ns (94336 ns) | 801 ns (801 ns) |
+| push a coroutine and pop it again | make-drop | 121796 ns (540920 ns) | 23061 ns (116896 ns) | 173 ns (1563 ns) |
+| push N coroutines, the vector dropped whole (N stacks live at once) | make-drop | -18906 ns (454774 ns) | 20900 ns (123921 ns) | 20817 ns (21571 ns) |
+| clear an affine vector, per element | affine-drop | -4620 ns (472110 ns) | 2034 ns (124708 ns) | -227 ns (21839 ns) |
+| consume an affine vector in a loop, per element | affine-drop | 79288 ns (593936 ns) | 12034 ns (136359 ns) | -407 ns (20996 ns) |
+
+Natively a push into a unique vector costs about 12 ns over the loop
+(growth included: 17 capacity doublings for 200 000 pushes), against 43 ns
+per element for building a List with a collecting loop and a comparable
+cost for setting a preallocated MutableArray slot. `at`, `pop`, `take` and
+`swap` are each one runtime call with its bounds check (30-45 ns); taking
+from the front costs what taking from the end does (a `VecDeque`). A
+snapshot iteration costs one List copy of the elements plus the List
+iteration. For coroutines the vector adds next to nothing: a push and a
+pop around a creation cost a few hundred nanoseconds or less over creating
+and releasing it alone (801 ns, a stack taken from the pool and given
+back); holding N coroutines suspended at once costs about 21 us each --
+that is mapping N native stacks (the pool keeps 32), not the vector --
+and clearing or consuming the vector instead of dropping it whole is the
+same cost within the noise.
 
 ### 72. COW complexity measurements
 
-RESULTS-COW
+Natively (K = 200 copies of an S-element vector per program; per copy):
+
+| operation, S | baseline | Tcl interp | Tcl compile | Cranelift |
+|---|---|---:|---:|---:|
+| copy (read-out of a mutated binding), S = 10 | copy-base-10 | 58395 ns (119340 ns) | 5900 ns (15345 ns) | 82 ns (123 ns) |
+| copy, then its first write (detach), S = 10 | copy-10 | 55890 ns (170950 ns) | 3645 ns (19120 ns) | 95 ns (184 ns) |
+| copy (read-out of a mutated binding), S = 1000 | copy-base-1000 | 55460 ns (238810 ns) | 6155 ns (21240 ns) | 53 ns (256 ns) |
+| copy, then its first write (detach), S = 1000 | copy-1000 | 65415 ns (291960 ns) | 14830 ns (35640 ns) | 5787 ns (6043 ns) |
+| copy (read-out of a mutated binding), S = 10000 | copy-base-10000 | 21180 ns (1233750 ns) | 7245 ns (56365 ns) | -30 ns (1934 ns) |
+| copy, then its first write (detach), S = 10000 | copy-10000 | 126625 ns (1346455 ns) | 65075 ns (118725 ns) | 21807 ns (23846 ns) |
+
+| program | shares | detaches | elements copied by detaches | growths |
+|---|---:|---:|---:|---:|
+| copy-10 | 200 | 0 | 0 | 1 |
+| copy-write-10 | 200 | 200 | 2200 | 201 |
+| copy-1000 | 200 | 0 | 0 | 1 |
+| copy-write-1000 | 200 | 200 | 200200 | 201 |
+| copy-10000 | 200 | 0 | 0 | 1 |
+| copy-write-10000 | 200 | 200 | 2000200 | 201 |
+| push-int, 200000 pushes into one unique vector | 0 | 0 | 0 | 17 (2097152 bytes) |
+
+The shape the brief asks for:
+
+* **copy: O(1).** A logical copy is one header (`shares` = 200, no element
+  copied: `detaches` = 0); its cost does not grow with S (82, 53 and -30 ns
+  over the baseline for S = 10, 1 000 and 10 000 -- the last within noise).
+* **first write after a copy: O(S).** It detaches once, copying the S
+  element words (`detachElements` = 200 * (S + 1)): 95 ns at S = 10, 5.8 us
+  at S = 1 000, 21.8 us at S = 10 000.
+* **later writes of the now-unique backing: amortized O(1).** 200 000
+  pushes into one vector: 0 shares, 0 detaches, 17 growths.
+
+On the Tcl backends a copy is a new store slot holding the same Tcl list
+(Tcl's own copy-on-write), so the copy is likewise O(1) and the first
+write copies the list (the Tcl compiler's first-write column grows from
+3.6 us to 65 us between S = 10 and 10 000).
+
+This measurement found a real defect, now fixed: every logical copy used
+to register the whole shared backing's size with the native heap, so
+copying an S-element vector counted as S words of allocation and triggered
+collections in proportion to S -- the copy was O(S) amortized (82 ns, 200
+ns and 1.7 us for S = 10, 1 000, 10 000). A share now registers its header
+only; the backing was counted when it was made, and a detach counts the
+copy it makes (`new_header`; the Rust test
+`a_copy_shares_and_only_the_first_write_detaches` pins the registered
+bytes).
 
 ### 73. Scheduler benchmark
 
-RESULTS-SCHEDULER
+N coroutines of K = 8 resume steps each (`steps(k)`: a loop of `yield`
+then a return), pushed into one vector and run until it is empty; per
+resume step. Per coroutine: 1 construction, 1 push, 8 takes (or pops), 8
+resumes, 7 pushes back, 1 release.
+
+| discipline | baseline | Tcl interp | Tcl compile | Cranelift |
+|---|---|---:|---:|---:|
+| round-robin: take(0), push back | -- | 545310 ns | 57946 ns | 4024 ns |
+| LIFO: pop, push back | -- | 526518 ns | 54098 ns | 3707 ns |
+| round-robin in batches of 32 (the native stack pool size) | -- | 463445 ns | 47948 ns | 344 ns |
+
+Native counters, N = 25 000 coroutines (the batch run creates 781 batches
+of 32, so 24 992):
+
+| program | allocations per coroutine | vector growths (bytes) | stacks mapped | stacks reused | peak live heap bytes | released |
+|---|---:|---:|---:|---:|---:|---:|
+| sched-fifo-8 | 19.0 | 14 (262144) | 25000 | 0 | 14586520 | 25000 |
+| sched-lifo-8 | 19.0 | 14 (262144) | 25000 | 0 | 10437080 | 25000 |
+| sched-batch-8 | 19.1 | 3124 (199936) | 32 | 24960 | 66256 | 24992 |
+
+* **operations per coroutine**: as above -- every operation is a single
+  runtime call on the vector's header register; nothing is allocated for
+  ownership.
+* **allocations**: 19 heap objects per coroutine (its handle and thunk, and
+  the Cmd and Event structs of its 8 resumes); the vector itself allocates
+  only its header and grows 14 times (256 KiB of element words in all) for
+  25 000 queued coroutines.
+* **coroutine stack reuse**: with all 25 000 suspended at once every one
+  maps a stack (the pool keeps 32); in batches of 32 all but the first 32
+  reuse a pooled stack. That -- not the queue discipline or the vector --
+  decides the cost per step: about 4 us with 25 000 live stacks against
+  344 ns per step in batches, natively.
+* **peak memory**: 14.6 MB of live heap at the peak for 25 000 round-robin
+  coroutines (their handles, thunks and pending Events), 66 KB in
+  batches.
+* **drops/releases**: every coroutine released exactly once, by the
+  elaborated releases (`released` equals the coroutines created; none is
+  swept by a collection).
+
+`take(0)` (round-robin) costs what `pop` (LIFO) does natively, since the
+front removal is O(1): the future test runner can keep either discipline.
 
 ### 74. Limitations remaining before enums and the basic test framework
 

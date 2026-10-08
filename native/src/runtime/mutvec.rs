@@ -84,9 +84,13 @@ pub fn object_size(v: Value) -> usize {
     std::mem::size_of::<MutVecObj>() + obj.backing.capacity() * 8 / Rc::strong_count(&obj.backing)
 }
 
-/// A new header on BACKING (allocates; may collect first).
-fn new_header(p: *mut Vm, backing: Rc<VecDeque<Value>>) -> Value {
-    let bytes = backing.capacity() * 8;
+/// A new header on BACKING (allocates; may collect first), registering
+/// BYTES of element storage with the heap: a new backing's, or 0 for a
+/// share -- its backing was counted when it was made, and the detach that
+/// later copies it counts the copy (`writable`). Counting a shared backing
+/// once per header would make every copy of an N-element vector look like
+/// N words of allocation, and so trigger collections in proportion to N.
+fn new_header(p: *mut Vm, backing: Rc<VecDeque<Value>>, bytes: usize) -> Value {
     vm(p).alloc(MutVecObj { hdr: Header::new(KIND_MUTVEC, false), backing }, bytes)
 }
 
@@ -130,7 +134,8 @@ fn push_counted(p: *mut Vm, items: &mut VecDeque<Value>, x: Value) {
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_mv_from_list(p: *mut Vm, list: Value) -> Value {
     let items: VecDeque<Value> = list_of(list).items().iter().copied().collect();
-    new_header(p, Rc::new(items))
+    let bytes = items.capacity() * 8;
+    new_header(p, Rc::new(items), bytes)
 }
 
 #[unsafe(no_mangle)]
@@ -282,7 +287,7 @@ fn share_by(p: *mut Vm, value: Value, d: &[u8], pos: &mut usize) -> Value {
         b'h' => {
             let backing = Rc::clone(&mutvec_of(value).backing);
             vm(p).metrics.record_mutvec_share();
-            new_header(p, backing)
+            new_header(p, backing, 0)
         }
         b's' => {
             let n = number(d, pos);
@@ -368,6 +373,9 @@ mod tests {
         assert_ne!(a, b);
         assert!(Rc::ptr_eq(&mutvec_of(a).backing, &mutvec_of(b).backing));
         assert_eq!((vm.metrics.mutvec.shares, vm.metrics.mutvec.detaches), (1, 0));
+        // The copy registers its header only, not the shared elements again.
+        let elements = (mutvec_of(a).backing.capacity() * 8) as u64;
+        assert_eq!(vm.metrics.by_kind[KIND_MUTVEC as usize].payload_bytes, elements);
         // The first write through either detaches it, once.
         rt_mv_push(&mut *vm, b, make_small(5));
         assert_eq!((vm.metrics.mutvec.detaches, vm.metrics.mutvec.detach_elements), (1, 4));

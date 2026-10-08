@@ -8,7 +8,9 @@
 #
 #   * operations: programs that each repeat one operation N times, reported
 #     as time per operation, (program - baseline) / N, the whole program per
-#     operation in parentheses (bench/affine.tcl's method);
+#     operation in parentheses (bench/affine.tcl's method); natively the
+#     coroutine rows use N = 20 000 (a program holding N suspended
+#     coroutines maps N native stacks at once);
 #   * copy-on-write complexity: K logical copies of an S-element vector (a
 #     read-out of a mutated binding: one header, no element copied), K
 #     copies each written once (the first write of a copy detaches its
@@ -286,7 +288,14 @@ foreach {label kind base} {
 } {
     set cells {}
     foreach backend $backends {
-        lassign [perOp $kind $base $backend] delta whole
+        # Programs keeping N coroutines suspended at once map N native stacks
+        # (each one a mapping plus a guard page): at most 20 000 of them,
+        # well inside the kernel's default vm.max_map_count (65 530).
+        set count [nOf $backend]
+        if {$kind in {affine-drop affine-clear affine-consume} || ($kind eq "make-drop" && $count > 20000)} {
+            set count [expr {min($count, 20000)}]
+        }
+        lassign [perOp $kind $base $backend $count] delta whole
         lappend cells "[ns $delta] ([ns $whole])"
     }
     puts "| $label | [expr {$base eq "" ? "--" : $base}] | [join $cells { | }] |"
