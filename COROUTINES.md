@@ -25,6 +25,8 @@ already provided, the roadblocks); this document is what was built.
 * [Report](#report) -- the 61 points of the milestone report, in order
 * [Release at the last use](#release-at-the-last-use) -- the follow-up that
   frees a coroutine where its handle dies
+* [Release on every early exit](#release-on-every-early-exit) -- and where a
+  return, fail, break, continue or propagated error leaves its scope first
 * [Files](#files)
 
 ## The principal program
@@ -662,10 +664,12 @@ Native (`runtime/heap.rs`, `runtime/vm.rs`, `runtime/framewalk.rs`):
   caller of a function that may yield has its live values in stack maps);
 * an unreachable suspended coroutine is swept: its stack goes back to the
   pool, nothing on it runs (no frame owns a Rust value with a destructor).
-  Since [Release at the last use](#release-at-the-last-use), that is the
-  fallback: a coroutine whose handle's last use the compiler sees is released
-  there, and only the cases it does not cover (an early exit before the last
-  use) wait for a sweep.
+  Since [Release at the last use](#release-at-the-last-use) and [Release on
+  every early exit](#release-on-every-early-exit), that is the fallback: a
+  coroutine is released where its handle's last use is, or where an exit
+  leaves the handle's scope first, and only what those do not cover (a
+  coroutine held by a released suspended coroutine's own frames, a shadowed
+  name at an exit) waits for a sweep.
 
 `co-gc-suspended-stacks`, `co-gc-stress` and the Rust runtime tests run
 collections from inside other coroutines' segments and from the main
@@ -701,7 +705,8 @@ interpreter and the Tcl compiler:
   the call as the ordinary propagate-error completion;
 * `coroutine#release(h)` (since [Release at the last
   use](#release-at-the-last-use)) unwinds a suspended coroutine whose handle
-  is dead and drops what any released coroutine holds;
+  is dead (after its last use, or on an exit leaving its scope) and drops
+  what any released coroutine holds;
 * `core::coroutines::fresh` gives each program run its own store, deleting
   leftover Tcl coroutines at the end.
 
@@ -718,8 +723,8 @@ evaluator.
 
 * NIR (`native/src/nir.rs`): `op cocreate THUNK`, `op costart H`,
   `op coresume H M`, `op coresume0 H`, `op coyield V`, `op codone H`, and
-  `op corelease H` after a handle's last use (`native/lower.tcl` maps the
-  natives). An environment-free thunk is a
+  `op corelease H` after a handle's last use or on an exit leaving its
+  scope (`native/lower.tcl` maps the natives). An environment-free thunk is a
   static closure (`fnvalue`); one capturing temporaries is an ordinary
   closure.
 * Code generation (`native/src/codegen/clif.rs`): each is a call of a runtime
@@ -815,7 +820,10 @@ helper levels, each body 1..5 statements over an accumulator chain: yields
 (value discarded, passed to a struct-typed parameter, or projected under a
 declared protocol), calls of the next level (handled or not), counted loops
 of yields, branches, guarded fails and returns, nested generator coroutines,
-and side effects folded into a checksum in a MutableArray. A driver -- at the
+side effects folded into a checksum in a MutableArray and (since [Release
+on every early exit](#release-on-every-early-exit)) coroutines held across
+the function's later exits and loops whose iterations break and continue
+past their own coroutine. A driver -- at the
 top level or in a function -- constructs (field forms and renames vary),
 resumes 0..6 times with the protocol's messages, checks `done?` and moves
 the handle; after every segment it reads the side-effect checksum.
@@ -835,25 +843,30 @@ the diagnostic class the oracle predicts: `USE-AFTER-MOVE`,
 `COROUTINE-STORAGE-UNSUPPORTED`, `UNWRAPPED-YIELD`,
 `YIELD-OUTSIDE-FUNCTION`, `COROUTINE-RESULT-MISMATCH`,
 `COROUTINE-RESUME-CONFLICT`; a root that cannot yield is
-`COROUTINE-RHS-NOT-YIELDING`.
+`COROUTINE-RHS-NOT-YIELDING`. It also predicts where the final owner of the
+driver's coroutine is released, and what every exit of every generated
+function releases (compared with the compiler's tables).
 
 Results (every run on all four backends unless noted; "accepted" programs
 are compared value by value, "rejected" ones by diagnostic class):
 
 | seeds | programs | accepted | rejected | disagreements |
 |---|---:|---:|---:|---:|
-| 1-100 | 100 | 54 | 46 | 0 |
-| 3000-3099 | 100 | 55 | 45 | 0 |
-| 7000-7099 | 100 | 49 | 51 | 0 |
+| 1-100 | 100 | 64 | 36 | 0 |
+| 3000-3099 | 100 | 56 | 44 | 0 |
+| 7000-7099 | 100 | 58 | 42 | 0 |
+| 1-100, 3000-3099, 7000-7099 (an earlier generator, before early exits) | 300 | 158 | 142 | 0 |
 | 1000-1199 (an earlier generator, before side effects) | 200 | 123 | 77 | 0 |
 | 5000-5199 (an earlier generator, before deep programs) | 200 | 125 | 75 | 0 |
 | 101-112 (`co-fuzz-bounded`, in the test suite) | 12 | | | 0 |
 
 Every predicted diagnostic class occurred (in the final 300: `COROUTINE-RHS-
-NOT-YIELDING` 51, `COROUTINE-RESUME-ARITY` 16, `COROUTINE-STORAGE-
-UNSUPPORTED` 13, `AFFINE-NOT-DEFINITELY-LIVE` 14, `UNWRAPPED-YIELD` 14,
-`YIELD-OUTSIDE-FUNCTION` 9, `COROUTINE-RESULT-MISMATCH` 9, `TYPE` 7,
-`USE-AFTER-MOVE` 5, `COROUTINE-RESUME-CONFLICT` 4).
+NOT-YIELDING` 48, `AFFINE-NOT-DEFINITELY-LIVE` 12, `YIELD-OUTSIDE-FUNCTION`
+12, `COROUTINE-RESUME-ARITY` 11, `COROUTINE-RESULT-MISMATCH` 11,
+`COROUTINE-STORAGE-UNSUPPORTED` 8, `UNWRAPPED-YIELD` 8, `USE-AFTER-MOVE` 6,
+`TYPE` 3, `COROUTINE-RESUME-CONFLICT` 3), and the accepted 178 checked 394
+releasing exits: 58 returns, 135 fails, 39 calls failing with `Boom`, 80
+breaks and 82 continues.
 
 The fuzzer found two compiler bugs while it was written, both fixed with
 tests: a yield that is the last statement of a discarded collecting loop
@@ -869,56 +882,72 @@ library and native backend (native mutants rebuild that copy) and runs
 `tests/coroutines.test`, the fuzzer (25 programs, every backend) and, for
 native mutants, the Rust runtime tests.
 
-**41 mutants, 41 killed, 0 survived** -- every mutant item 62 of the
+**52 mutants, 52 killed, 0 survived** -- every mutant item 62 of the
 brief names, in each runtime where it can live, plus the native ones it
 implies, plus 10 for [Release at the last use](#release-at-the-last-use)
-(`release-*`, `compiler-release-missing`, `native-release-*`). What killed
-each (a test name, the number of failing tests, or the number of disagreeing
-fuzz programs of 25, seed 11; Tcl-only mutants run first, native ones after):
+(`release-*`, `compiler-release-missing`, `native-release-*`) and 11 for
+[Release on every early exit](#release-on-every-early-exit) (`exit-release-*`,
+`core-ir-error-release-missing`, `compiler-exit-release-missing`,
+`compiler-error-release-missing`, `native-exit-release-missing`,
+`native-error-release-missing`). What killed each (a test name, the number
+of failing tests, or the number of disagreeing fuzz programs of 25, seed 11;
+Tcl-only mutants run first, native ones after; the run with the early-exit
+tests and fuzzer, so the counts are higher than before them):
 
 | mutant | `tests/coroutines.test` | fuzzer | Rust runtime tests |
 |---|---|---|---|
-| **construction-lazy**: construction does not run the body: the first resume starts it | 41 tests | 13/25 programs | -- |
-| **first-yield-discarded**: construction runs past the first yield: its value is lost | 38 tests | 12/25 programs | -- |
+| **construction-lazy**: construction does not run the body: the first resume starts it | 43 tests | 18/25 programs | -- |
+| **first-yield-discarded**: construction runs past the first yield: its value is lost | 39 tests | 18/25 programs | -- |
 | **return-before-yield-exhaustion**: a body that returns before yielding fails the construction as exhausted | `co-empty-loop`, `co-terminal-success` | survived | -- |
-| **completed-raises-exhaustion**: a call of a completed handle raises an exhaustion error | 11 tests | 3/25 programs | -- |
-| **completed-reruns-body**: a call of a completed handle runs the body again from its beginning | 10 tests | 3/25 programs | -- |
-| **failed-resumes-body**: a call of a failed handle runs the body again | `co-context-portable-io`, `co-errors-last-segment-always-fails`, `co-errors-segment` | 1/25 programs | -- |
+| **completed-raises-exhaustion**: a call of a completed handle raises an exhaustion error | 11 tests | 5/25 programs | -- |
+| **completed-reruns-body**: a call of a completed handle runs the body again from its beginning | 10 tests | 5/25 programs | -- |
+| **failed-resumes-body**: a call of a failed handle runs the body again | 4 tests | 2/25 programs | -- |
 | **failed-loses-error**: a call of a failed handle completes normally with unit instead of raising the original error | 5 tests | 2/25 programs | -- |
-| **message-wrong-yield**: each resume delivers the previous resume's message (the first, unit) | 14 tests | 6/25 programs | -- |
+| **message-wrong-yield**: each resume delivers the previous resume's message (the first, unit) | 13 tests | 8/25 programs | -- |
 | **effect-one-caller**: the yield effect reaches the direct callers of a yielding function and no further | 7 tests | 2/25 programs | -- |
-| **call-crosses-yield**: an ordinary top-level call of a yielding function is allowed | `co-unwrapped-chain` | 2/25 programs | -- |
-| **protocol-widened-any**: every coroutine accepts any resume message: the handle's protocol is any | `co-hir-text`, `co-protocol-arity`, `co-protocol-wrong-type` | 2/25 programs | -- |
-| **two-protocols-accepted**: a second, different protocol reaching a function is ignored (the first wins) | `co-protocol-conflict`, `co-protocol-default-meets-struct` | survived | -- |
+| **call-crosses-yield**: an ordinary top-level call of a yielding function is allowed | `co-unwrapped-chain` | survived | -- |
+| **protocol-widened-any**: every coroutine accepts any resume message: the handle's protocol is any | `co-hir-text`, `co-protocol-arity`, `co-protocol-wrong-type` | survived | -- |
+| **two-protocols-accepted**: a second, different protocol reaching a function is ignored (the first wins) | `co-protocol-conflict`, `co-protocol-default-meets-struct` | 1/25 programs | -- |
 | **scalar-resume-accepted**: a declared resume type need not be a struct | `co-protocol-struct-only` | survived | -- |
-| **assignment-aliases**: binding a handle to another name is no move: both names stay usable | 9 tests | 6/25 programs | -- |
-| **assignment-forks**: binding a handle to another name starts a new coroutine of the same call: the new name runs a copy from the beginning | `co-affine-move-never-forks`, `co-fuzz-bounded`, `co-source-no-iterator-or-exhaustion` | 5/25 programs | -- |
-| **move-keeps-source**: a move does not invalidate the binding moved from | 8 tests | 6/25 programs | -- |
-| **join-keeps-live**: a handle moved on one branch only is live after the join | `co-affine-branch-join`, `co-affine-loop` | survived | -- |
-| **step-call-moves**: a resume consumes the handle: its owner is moved by the call | 28 tests | 13/25 programs | -- |
-| **done-consumes**: coroutine::done? consumes the handle: its owner is moved by the query | 8 tests | 11/25 programs | -- |
+| **assignment-aliases**: binding a handle to another name is no move: both names stay usable | 10 tests | 9/25 programs | -- |
+| **assignment-forks**: binding a handle to another name starts a new coroutine of the same call: the new name runs a copy from the beginning | 4 tests | 7/25 programs | -- |
+| **move-keeps-source**: a move does not invalidate the binding moved from | 9 tests | 9/25 programs | -- |
+| **join-keeps-live**: a handle moved on one branch only is live after the join | `co-affine-branch-join`, `co-affine-loop` | 1/25 programs | -- |
+| **step-call-moves**: a resume consumes the handle: its owner is moved by the call | 31 tests | 17/25 programs | -- |
+| **done-consumes**: coroutine::done? consumes the handle: its owner is moved by the query | 8 tests | 12/25 programs | -- |
 | **handle-as-fn**: a handle is accepted where a structural Fn value is expected | `co-storage-frontier` | survived | -- |
 | **handle-erased-to-any**: a handle is accepted as an argument of an untyped (any) parameter | `co-storage-equality`, `co-storage-frontier` | survived | -- |
 | **context-reselected-per-resume**: every top-level resume selects the coroutine's context-trait providers again | `co-context-fixed-at-construction` | survived | -- |
-| **release-never**: no coroutine is released at its handle's last use: every one waits for a collection (Tcl: the program's end) | 5 tests | 15/25 programs | -- |
-| **release-moved-handle**: a handle moved away is released too: its new owner's coroutine is released while still in use | 5 tests | 6/25 programs | -- |
-| **release-at-declaration**: a coroutine is released right after its handle's binding, before its uses | 47 tests | 15/25 programs | -- |
-| **release-before-statement**: the Tcl lowering releases before the statement of the last use instead of after it | 35 tests | 15/25 programs | -- |
-| **release-last-value-lost**: a release after a sequence's last statement makes the release's unit the sequence's value | 10 tests | survived | -- |
-| **compiler-release-missing**: the Tcl compiler compiling HIR (main.tcl's compile backend) emits no release | `co-release-tcl-runtime` | survived | -- |
+| **release-never**: no coroutine is released at its handle's last use: every one waits for a collection (Tcl: the program's end) | 7 tests | 19/25 programs | -- |
+| **release-moved-handle**: a handle moved away is released too: its new owner's coroutine is released while still in use | 6 tests | 8/25 programs | -- |
+| **release-at-declaration**: a coroutine is released right after its handle's binding, before its uses | 52 tests | 19/25 programs | -- |
+| **release-before-statement**: the Tcl lowering releases before the statement of the last use instead of after it | 37 tests | 19/25 programs | -- |
+| **release-last-value-lost**: a release after a sequence's last statement makes the release's unit the sequence's value | 11 tests | survived | -- |
+| **compiler-release-missing**: the Tcl compiler compiling HIR (main.tcl's compile backend) emits no release | `co-exit-release-tcl-runtime`, `co-release-tcl-runtime` | survived | -- |
 | **release-leaves-frames**: the Tcl runtime deletes a released suspended coroutine without unwinding it: its frames stay until the run ends | `co-release-tcl-runtime` | survived | -- |
-| **release-resumes-body**: a released suspended Tcl coroutine is resumed (with unit) instead of unwound: its body runs on after the yield | `co-release-values` | survived | -- |
-| **native-construction-lazy**: construction does not run the body natively: the first resume starts it | 44 tests | 13/25 programs | 6 tests |
-| **native-first-yield-discarded**: native construction runs past the first yield | 41 tests | 12/25 programs | 4 tests |
-| **native-completed-raises-exhaustion**: a call of a completed handle raises an exhaustion error natively | 12 tests | 3/25 programs | `yields_resumes_and_keeps_its_final_result`, `return_before_any_yield_completes_at_the_start` |
-| **native-completed-reruns-body**: a call of a completed handle runs the body again natively | 11 tests | 3/25 programs | `yields_resumes_and_keeps_its_final_result` |
+| **release-resumes-body**: a released suspended Tcl coroutine is resumed (with unit) instead of unwound: its body runs on after the yield | `co-release-values` | 2/25 programs | -- |
+| **exit-release-never**: no exit releases anything: a coroutine left by a return, fail, break, continue or failing call waits for a collection (Tcl: the program's end) | 5 tests | 13/25 programs | -- |
+| **exit-release-crosses-loop**: a break or continue releases every handle of its function, not only those of the loop body it leaves: a handle the function still uses after the loop is released | 4 tests | 5/25 programs | -- |
+| **exit-release-handled-error**: a handled call releases on the errors its handlers handle too: the handler resumes a released coroutine | 10 tests | 9/25 programs | -- |
+| **exit-release-before-value**: an exit releases every handle before evaluating its value, also one the value resumes | 4 tests | survived | -- |
+| **exit-release-after-last-use**: an exit after a handle's last use releases it again (it was released at that last use) | `co-exit-release-placement`, `co-fuzz-bounded` | 14/25 programs | -- |
+| **exit-release-shadowed**: an exit releases a handle whose name a nested binding rebinds: the release names the other binding | `co-exit-release-placement` | survived | -- |
+| **core-ir-error-release-missing**: the Core IR lowering releases nothing on a call's propagated error | `co-exit-release-tcl-runtime` | survived | -- |
+| **compiler-exit-release-missing**: the Tcl compiler compiling HIR releases nothing before an exit statement | `co-exit-release-tcl-runtime` | survived | -- |
+| **compiler-error-release-missing**: the Tcl compiler compiling HIR releases nothing on a call's propagated error | `co-exit-release-tcl-runtime` | survived | -- |
+| **native-construction-lazy**: construction does not run the body natively: the first resume starts it | 46 tests | 18/25 programs | 6 tests |
+| **native-first-yield-discarded**: native construction runs past the first yield | 43 tests | 18/25 programs | 4 tests |
+| **native-completed-raises-exhaustion**: a call of a completed handle raises an exhaustion error natively | 12 tests | 5/25 programs | `yields_resumes_and_keeps_its_final_result`, `return_before_any_yield_completes_at_the_start` |
+| **native-completed-reruns-body**: a call of a completed handle runs the body again natively | 11 tests | 5/25 programs | `yields_resumes_and_keeps_its_final_result` |
 | **native-failed-loses-error**: a call of a failed handle completes normally with unit natively | 5 tests | 2/25 programs | `a_failure_is_terminal_and_raised_again` |
-| **native-message-wrong-yield**: a native resume does not deliver its message: the yield evaluates to its own outward value | 15 tests | 6/25 programs | 3 tests |
-| **native-deep-stack-not-preserved**: a suspended coroutine's stack is released (pooled for reuse) while its frames are suspended on it | 7 tests | 4/25 programs | survived |
+| **native-message-wrong-yield**: a native resume does not deliver its message: the yield evaluates to its own outward value | 14 tests | 4/25 programs | 3 tests |
+| **native-deep-stack-not-preserved**: a suspended coroutine's stack is released (pooled for reuse) while its frames are suspended on it | 10 tests | 10/25 programs | survived |
 | **gc-suspended-frames-untraced**: the collector does not trace the frames of a suspended coroutine's stack | `co-gc-stress` | survived | survived |
-| **gc-resumer-frames-untraced**: the collector does not trace the frames suspended below a running coroutine (its resumers' stacks) | 4 tests | survived | survived |
-| **native-release-not-emitted**: native lowering emits no corelease | `co-nir-operations`, `co-release-native-stacks` | survived | survived |
-| **native-release-keeps-stack**: a native release leaves a suspended coroutine's stack in place (a collection frees it later) | `co-release-native-stacks` | survived | survived |
+| **gc-resumer-frames-untraced**: the collector does not trace the frames suspended below a running coroutine (its resumers' stacks) | 6 tests | survived | survived |
+| **native-release-not-emitted**: native lowering emits no corelease | `co-exit-release-native-stacks`, `co-nir-operations`, `co-release-native-stacks` | survived | survived |
+| **native-release-keeps-stack**: a native release leaves a suspended coroutine's stack in place (a collection frees it later) | `co-exit-release-native-stacks`, `co-release-native-stacks` | survived | survived |
+| **native-exit-release-missing**: native lowering releases nothing before a return | `co-exit-release-native-stacks` | survived | survived |
+| **native-error-release-missing**: native lowering's failure pad of a call releases nothing | `co-exit-release-native-stacks` | survived | survived |
 
 Notes:
 
@@ -941,12 +970,17 @@ Notes:
   focused test. The GC mutants need collections at the right moment:
   `co-gc-stress` (and `co-gc-many-coroutines`) kill them.
 * A release is unobservable by design, so a release mutant that only wastes
-  resources (frames or a stack kept, no release emitted natively) changes no
-  value: the fuzzer cannot see it, and the focused tests that count Tcl
-  coroutines, frames and native stacks kill it. A release mutant that frees
-  too early, or frees a coroutine still owned, is caught everywhere, as a
-  resume of a released coroutine.
-* No equivalent mutant survives.
+  resources (frames or a stack kept, no release emitted natively, none on an
+  exit) changes no value: the fuzzer's values cannot see it, and the focused
+  tests that count Tcl coroutines, frames and native stacks kill it (the
+  fuzzer's release oracle kills those that move a release in the tables). A
+  release mutant that frees too early, or frees a coroutine still owned, is
+  caught everywhere, as a resume of a released coroutine.
+* No equivalent mutant survives. One did while the early-exit mutants were
+  written: removing the check that an exit leaves after the handle's binding
+  statement changed nothing, because a binding not yet bound there is not in
+  the liveness state at all. The check was redundant and is gone, and so is
+  the mutant.
 
 ### 54. Full regression
 
@@ -1122,14 +1156,18 @@ What this says about the architecture (no optimization was attempted):
   the GC walk) and wasm (no program-visible stack) are later work
   (COROUTINE-PREREQUISITES.md R3); the Tcl backends run coroutines
   everywhere.
-* **Stack reclamation on early exits waits for a collection.** A coroutine
-  is released right after its handle's last use ([Release at the last
-  use](#release-at-the-last-use)), but a path that leaves the handle's scope
-  before that (`return`, `break`, `continue`, an error) leaves it to the
-  collector, which keeps a suspended one's stack until it proves the handle
-  dead (only 32 freed stacks are pooled, the rest are unmapped). Before the
-  release existed, every abandoned suspended coroutine went this way, at
-  ~10x the construction cost (point 58).
+* **Stack reclamation is static, not total.** A coroutine is released right
+  after its handle's last use ([Release at the last
+  use](#release-at-the-last-use)), or on an exit that leaves the handle's
+  scope first ([Release on every early exit](#release-on-every-early-exit)).
+  What is left to the collector, which keeps a suspended coroutine's stack
+  until it proves the handle dead (only 32 freed stacks are pooled, the rest
+  are unmapped): a coroutine held by the frames of a suspended coroutine that
+  is itself released (its frames are discarded, their exits never run), a
+  handle whose name is rebound between an exit and its scope, and programs
+  the discipline rejects (`-strict 0`). Before releases existed, every
+  abandoned suspended coroutine went this way, at ~10x the construction cost
+  (point 58).
 * **Stack size is fixed per coroutine** (8 MiB of address space by default,
   `BOTLISH_NATIVE_COROUTINE_STACK_BYTES`); recursion deeper than that inside
   a coroutine is `NATIVE LIMIT STACK`, the same resource limit as the main
@@ -1137,7 +1175,7 @@ What this says about the architecture (no optimization was attempted):
 * **Tcl backends keep an unreleased abandoned coroutine's frames** until
   the program run ends (deleting a suspended Tcl coroutine runs no
   `finally`; COROUTINE-PREREQUISITES.md A.3). A released one is unwound
-  instead, frames and all; what is left is the early-exit case above.
+  instead, frames and all; what is left are the cases above.
 * **Protocols are inferred over every syntactic call edge**, reachable or
   not (type inference runs before reachability is known): an unreachable
   call of a function with a different protocol is still a conflict.
@@ -1156,9 +1194,11 @@ What this says about the architecture (no optimization was attempted):
   general affine discipline.
 * A pre-existing native limitation, not coroutine-specific, showed up while
   testing: a literal empty List argument whose element type is projected
-  (`worker([])` with `xs: List[S]` and `x.f`) is `NATIVE UNSUPPORTED
-  struct-shape` with or without coroutines; the tests pass such Lists
-  through parameters.
+  (`worker([])` with `xs: List[S]` and `x.f`) was `NATIVE UNSUPPORTED
+  struct-shape` with or without coroutines, so the tests pass such Lists
+  through parameters. It has since been fixed (`c40a163`: a read of a
+  `List[never]` is never-typed, and a projection of it unreachable); such a
+  coroutine now runs natively too.
 
 ### 60. What remains before `MutableVector`
 
@@ -1186,11 +1226,12 @@ needs:
 
 * **a scheduler-shaped storage frontier**: a List (or queue) of handles,
   i.e. affine containers (point 60);
-* **cheap abandonment natively**: done for the common case by [Release at
-  the last use](#release-at-the-last-use) (a dead handle's stack goes back
-  to the pool at once). Still open: releases on early exits (drop
-  elaboration), and `madvise(MADV_DONTNEED)` of pooled stacks above a
-  high-water mark, so that a burst of deep tests does not keep its pages;
+* **cheap abandonment natively**: done by [Release at the last
+  use](#release-at-the-last-use) and [Release on every early
+  exit](#release-on-every-early-exit) (a dead handle's stack goes back to
+  the pool at once, also when a test returns or fails early). Still open:
+  `madvise(MADV_DONTNEED)` of pooled stacks above a high-water mark, so that
+  a burst of deep tests does not keep its pages;
 * **typed protocols per test kind** are already enough (one struct message);
   what is missing is a way to pass a handle to a runner function (handles as
   arguments, point 60);
@@ -1254,7 +1295,7 @@ some path:
 | `live` (never moved) | yes | no reference to it follows; nothing else owns the coroutine |
 | `maybe` (moved on some paths, inside that statement) | yes | the new owner is bound inside a branch, loop body or handler of that statement, out of scope after it (and released there itself); a `maybe` binding referred to later is `AFFINE-NOT-DEFINITELY-LIVE` |
 | `moved` | no | its new owner is a live binding of the same sequence; it is released after *its* last use |
-| unreachable (the statement cannot complete) | no | `return step().n`: nothing runs after it |
+| unreachable (the statement cannot complete) | no | `return step().n`: nothing runs after it (the `return` releases it: [Release on every early exit](#release-on-every-early-exit)) |
 
 Consequences:
 
@@ -1271,12 +1312,11 @@ Consequences:
   `tests/coroutines.test` and the fuzzer show identical values on every
   backend.
 
-What it does not cover yet (a collection still reclaims these, as before):
-a path that leaves the sequence before the last use (`return`, `break`,
-`continue`, a `fail` or an error propagating through), and a handle in a
-program the discipline rejected but that runs anyway (`-strict 0`). Releasing
-on early exits needs releases before each exit of the owning scopes, which is
-drop elaboration. That is the next step for general affine values.
+What it does not cover (a collection still reclaims these, as before): a
+path that leaves the sequence before the last use (`return`, `break`,
+`continue`, a `fail` or an error propagating through) -- since covered by
+[Release on every early exit](#release-on-every-early-exit) -- and a handle
+in a program the discipline rejected but that runs anyway (`-strict 0`).
 
 ### Representation and lowering
 
@@ -1394,6 +1434,199 @@ released coroutine is cheaper than leaving its Tcl coroutine and frames
 alive until the run ends (the compiler: 176 to 101 us). Resume costs and the
 memory of coroutines whose handles are still in use are unchanged (they are
 not released).
+
+## Release on every early exit
+
+The second follow-up closes the gap [Release at the last
+use](#release-at-the-last-use) left: a path that leaves a handle's scope
+before its last use (`return`, `fail`, `break`, `continue`, or a call whose
+declared error propagates out) releases the coroutines it takes out of scope
+too, instead of leaving them to a collection (Tcl: to the end of the run).
+This is drop elaboration for the one affine value the language has: every
+exit of a scope releases what the scope still owns.
+
+### Why
+
+The last-use release runs after a statement completes normally, so an
+abrupt completion before it skipped it. Such exits are ordinary code: a
+function that constructs a coroutine and returns early on some input, a
+loop that `continue`s past an element, a helper whose callee fails. Over
+2,100 rows of `co-exit-release-native-stacks` (each row calls eight
+functions, one per kind of exit; 27,900 constructions, 18,000 of them
+abandoned while suspended), natively:
+
+| | stacks mapped | stacks reused | released | released suspended | swept suspended (a collection found them) |
+|---|---:|---:|---:|---:|---:|
+| last-use releases only | 3,353 | 24,547 | 8,700 | 900 | 17,053 |
+| and releases on every exit | **2** | 27,898 | 27,900 | 18,000 | **0** |
+
+On the Tcl backends, 7 rows left 57 suspended Tcl coroutines (and their
+frames) alive until the run ended; now none.
+
+### The rule
+
+An *exit* is an abrupt completion. What it leaves, and when its releases
+run:
+
+| exit | leaves every sequence up to | released |
+|---|---|---|
+| `return V` | the function's body (or the top level) | before evaluating `V`, except the handles `V` refers to: those after it (`return step().n`) |
+| `fail E` | the function's body | before failing |
+| `break`, `continue` | the target loop's body | before leaving |
+| a call propagating declared error `E` | the function's body, unless a `handle` whose call contains the call handles `E` (then no sequence: the grammar puts no sequence inside a call) | on the way out: per such `E`, release and propagate `E` unchanged |
+
+A handle binding is released on exit X when X leaves the binding's sequence
+from a statement after its binding statement and at or before its last use
+(after it, the last-use release already ran), and the binding owns its
+coroutine (live, or maybe moved) in the liveness state where X leaves.
+
+It is sound for the same reason as the last-use rule: after X, no binding
+still in scope owns the coroutine. A move target is declared where the move
+is, so every binding the coroutine may have moved to is in a sequence X
+leaves too; and handles never leave their function (no return, argument,
+field, List element or capture), so a function's exit ends every coroutine
+it still owns. A release is idempotent, so a maybe-moved binding and its
+new owner may both be released. Nothing observable changes, as before.
+
+Details:
+
+* The errors of a call's error edge are its type-level declared errors
+  (`calleeErrors`: the callee's `errors` clause, a structural callee's
+  contract, a coroutine segment's errors), never a narrower proof, so the
+  completion facts stay inspection data. A failure that is not a declared
+  error (a run-time fault) ends the program and needs no release.
+* A call inside an exit's value does not release again what the exit
+  released before evaluating it.
+* A self tail call has no error edge: the Tcl compiler and native lowering
+  compile it as a restart of the function, which a catch around the call
+  would break. Its `return` already released the handles its arguments do
+  not use, before the call.
+* Core IR names a released handle (it resolves names), so a handle whose
+  name a nested binding rebinds between the exit and the handle's own scope
+  is not released at that exit (on any backend, so they all agree); it is
+  left to a collection.
+
+### Representation and lowering
+
+* HIR: two more side tables of `coroutines`, `exits` (an exit statement ->
+  bindings) and `errorExits` (a call, or a handled call's `handle` -> error
+  name -> bindings), printed as flags and read back by `hir/read.tcl`:
+
+  ```
+  e83 bind b36 step : Coroutine{resume: unit, yield: V, errors: []}
+  e99 return -> e80 : never exit-release=b36
+  e105 call block(e71) : int error-release=Boom=b36
+  e113 fail Boom : never exit-release=b36
+  e114 call native(+) : int release=b36
+  ```
+
+* Core IR (`hir::lower::Seq`, `hir::lower::ReleasingOnError`): the releases
+  before the exit statement, or `(bind coroutine#kept#E V)`, the releases,
+  `(return (ref coroutine#kept#E))`; a call with an error edge becomes
+  `(handle CALL E (block {} RELEASES... (fail E)) ...)`, and a `handle` gets
+  those handlers added. An error is its name, so failing with the same name
+  again is the same propagation.
+* The Tcl compiler from HIR (`CompileForm`, `ReleasingOnError`): the
+  releases around the exit's value; a call with an error edge runs in a
+  `catch` whose propagate-error completion (code 5) of such an error
+  releases, and every abrupt completion goes on with `return -options`
+  (`CompileHandle`'s technique); a handled call gets a switch arm per
+  unhandled name.
+* Native (`native::lower::Expr`, `Call`, `Handle`): `op corelease` before
+  `ret`/`retmulti`, the loop's jump or `faildeclared` (after the value for
+  the handles it uses); a call with an error edge is bracketed by
+  `pusherrorexit PAD`/`poperrorexit`, and the pad tests the pending error
+  per name (`declarederroreq`), releases, and `reraise`s it unchanged
+  (`Handle`'s technique, with no handler); `Handle` releases for the names
+  its handlers do not handle before its own `reraise`.
+
+### Evidence
+
+* `co-exit-release-placement`: what each exit releases, before or after its
+  value: a `return` before the last use (before its value) and one whose
+  value resumes the handle (after it); a `fail`; an unhandled call's `Boom`;
+  a handled call whose handler handles `Boom` (nothing) but not `Late`
+  (released); a `break` and a `continue` (only the loop body's handle, not
+  the function's); a shadowed name (nothing); a self tail call (its `return`
+  releases before the call, the call has no error edge); a `return` whose
+  value both fails and resumes (released after the value and on the
+  value's error); a moved-from handle (nothing; its new owner instead); a
+  handle bound after the exit, or last used before it (nothing).
+* `co-exit-release-values`: one function per exit kind, called for k = 0..6
+  (7 x 8 results, two rows checked by hand): identical on every backend,
+  including a handler that resumes the handle after a handled error and a
+  function using its handle after a loop that broke and continued.
+* `co-exit-release-tcl-runtime`: after those 7 rows no Tcl coroutine is
+  alive, on the interpreter and on both Tcl compiler routes (57 were before).
+* `co-exit-release-native-stacks`: 2,100 rows, the table under "Why"; the
+  same value under GC stress.
+* `co-exit-release-hir-text`: the flags print, read back to the same text,
+  and lower to the same Core IR.
+* The fuzzer (point 52) generates `held` coroutines (constructed mid-function,
+  resumed only at its end, so later returns, fails and failing calls leave
+  them suspended) and `scan` loops (a coroutine per iteration, `break` and
+  `continue` before its resume). Its oracle predicts, function by function
+  in source order, what every exit releases, and that no other exit
+  releases anything; a release of the wrong handle (one still resumed after
+  the loop, after a handled error) shows as a resume of a released
+  coroutine on every backend. Over 300 programs (seeds 1-100, 3000-3099,
+  7000-7099, every backend), 394 releasing exits were predicted and checked,
+  with no disagreement.
+* Mutation: 11 more mutants, all killed (point 53): no exit releases
+  anything; a `break`/`continue` releases the whole function's handles; a
+  handled error releases too; every handle released before the exit's
+  value; an exit after the last use releases again; a shadowed handle
+  released; and each lowering in turn not releasing (Core IR on a call's
+  error, the Tcl compiler before an exit and on a call's error, native
+  before a `return` and in a call's failure pad).
+* Regression: `tests/all.tcl` 6568 passed on the interpreter, 6564 passed
+  and the same 4 skipped (`coreScoping`) on the Tcl compiler, and the same
+  under `BOTLISH_NATIVE_GC_STRESS=1`; native coverage 2604 native, 3837
+  independent, 67 passed-partial, the same 60 unsupported, 0 failed;
+  `cargo test --release` 194 + 31 passed, also under stress; the scalar
+  assembly audit byte-identical (no program in it uses coroutines).
+
+### Measurements
+
+`bench/coroutines.tcl -runs 5 -n 4000` (200,000 operations natively), its
+`exit-*` rows: a construction abandoned while suspended on each kind of
+exit, against the same function building the struct instead. Before is the
+parent commit running the same benchmark file; nothing else ran meanwhile.
+
+| construction abandoned on | Cranelift before | Cranelift after | Tcl compile before | Tcl compile after |
+|---|---:|---:|---:|---:|
+| an early return | 4,705 ns | **449 ns** | 115 us | 104 us |
+| a fail | 5,316 ns | **489 ns** | 127 us | 203 us (*) |
+| a callee's propagated error | 4,655 ns | **521 ns** | 129 us | 118 us |
+| a break | 4,640 ns | **458 ns** | 151 us | 139 us |
+| (its last use, for comparison) | 464 ns | 451 ns | 90 us | 99 us |
+
+(*) An outlier that did not reproduce: measured alone twice more, the same
+row was 91 us after against 103 and 111 us before.
+
+Natively an exit now costs what the last use costs: the same mechanism as
+under [Release at the last use](#release-at-the-last-use) ("Why"), a dead
+coroutine's stack going straight back to the pool instead of through a
+collection. An error edge costs a little more than a plain return (521
+against 449 ns: the call's failure pad tests the error and reraises it). On
+the Tcl backends the differences are within the noise of these runs (the
+rows of unchanged operations moved by up to 15% between the two); what
+changes there is memory: an abandoned coroutine's Tcl coroutine and frames
+no longer live until the run ends (`co-exit-release-tcl-runtime`). Resume
+costs and the memory of coroutines still held are unchanged.
+
+### What it does not cover
+
+* **A suspended coroutine's own frames.** Releasing a suspended coroutine
+  discards its frames (natively) or unwinds them by a Tcl error no Botlish
+  handler catches (Tcl): their exits do not run, so a coroutine one of those
+  frames held is left to a collection (natively) or to the end of the run
+  (Tcl).
+* **A shadowed name at the exit** (above), and the post-value release of a
+  `return` whose value is a self tail call using the handle (the backends
+  that restart the function never reach it).
+* **Programs the discipline rejects** that run anyway (`-strict 0`), as
+  before.
 
 ## Files
 

@@ -20,6 +20,12 @@
 #   nested     the function constructs and drives its own zero-message
 #              generator coroutine (isolation: the function does not yield
 #              by it)
+#   held       the function constructs a generator coroutine that it
+#              resumes only at its end: every later return, fail and failing
+#              call leaves while it is still suspended
+#   scan       a counted loop whose body constructs a generator coroutine,
+#              `break`s or `continue`s on given iterations before its
+#              resume, and notes the resumed value
 #   effect     `note(log, T)`: an observable side effect, folding T into a
 #              checksum in a MutableArray every function is passed
 #
@@ -64,7 +70,12 @@
 # use"): right after the statement of its last reference, and nowhere else
 # -- no handle it was moved from is released. A release placed too early, of
 # a moved-from handle, or of a handle still in use shows on every backend as
-# a resume of a released coroutine.
+# a resume of a released coroutine. And it predicts what every early exit of
+# a generated function releases ("... and on every early exit"): a return,
+# fail or call failing with Boom releases the held coroutines constructed
+# before it, a scan's break or continue only that iteration's coroutine --
+# never the held ones its function still resumes after the loop -- and
+# nothing else in the program releases on an exit.
 #
 # The last line is "programs N disagreements D"; exit status 1 if D > 0.
 
@@ -155,6 +166,18 @@ proc Statements {k struct callee deep} {
         set handled [expr {[dict get $callee errors] && [chance 50]}]
         set stmts [linsert $stmts [rnd [expr {[llength $stmts] + 1}]] [dict create kind call handled $handled]]
     }
+    # Coroutines the function's early exits leave suspended (in its first
+    # half, so that exits follow), and a loop leaving its own.
+    for {set i 0} {$i < 2} {incr i} {
+        if {[chance 40]} {
+            set stmts [linsert $stmts [rnd [expr {[llength $stmts] / 2 + 1}]] [dict create kind held]]
+        }
+    }
+    if {[chance 30]} {
+        set count [expr {1 + [rnd 4]}]
+        set stmts [linsert $stmts [rnd [expr {[llength $stmts] + 1}]] [dict create kind scan count $count \
+            break [expr {[chance 60] ? [rnd $count] : -1}] continue [expr {[chance 60] ? [rnd $count] : -1}]]]
+    }
     return $stmts
 }
 
@@ -213,6 +236,7 @@ proc FunctionText {k f levels} {
     lappend lines "    a0 = n"
     set a 0
     set m 0
+    set held {}
     foreach s [dict get $f stmts] {
         set acc a$a
         switch -- [dict get $s kind] {
@@ -262,6 +286,23 @@ proc FunctionText {k f levels} {
                     "    h$m = g${m}()" \
                     "    a[incr a] = $acc + f$m.v + h$m.v"
             }
+            held {
+                incr m
+                lappend lines "    coroutine {step: g$m, first: f$m} = gen($acc)"
+                lappend held $m
+            }
+            scan {
+                incr m
+                lappend lines "    loop i from 0 to [dict get $s count]:" \
+                    "        coroutine {step: s$m, first: t$m} = gen(i)"
+                if {[dict get $s break] >= 0} {
+                    lappend lines "        if i == [dict get $s break]:" "            break"
+                }
+                if {[dict get $s continue] >= 0} {
+                    lappend lines "        if i == [dict get $s continue]:" "            continue"
+                }
+                lappend lines "        note(log, s${m}().v + t$m.v)"
+            }
             other {
                 lappend lines "    a[incr a] = $acc + other()"
             }
@@ -270,8 +311,58 @@ proc FunctionText {k f levels} {
             }
         }
     }
+    # The held coroutines, resumed at last.
+    foreach h $held {
+        set acc a$a
+        lappend lines "    r$h = g${h}()" "    a[incr a] = $acc + f$h.v + r$h.v"
+    }
     lappend lines "    [expr {$root ? "return Ev {tag: 999, v: a$a}" : "a$a"}]"
     return $lines
+}
+
+# The oracle's prediction of what each early exit of function F (with
+# callee facts CALLEE, "" for the deepest) releases, in source order: {KIND
+# HANDLES} for each exit that releases any -- a return or fail statement or
+# a call failing with Boom (KIND call) the held coroutines constructed
+# before it, a scan's break or continue that scan's own coroutine.
+proc Exits {f callee} {
+    set exits {}
+    set held {}
+    set m 0
+    foreach s [dict get $f stmts] {
+        switch -- [dict get $s kind] {
+            yield {
+                if {[dict get $s use] ne "none"} {
+                    incr m
+                }
+            }
+            nested {
+                incr m
+            }
+            held {
+                lappend held g[incr m]
+            }
+            scan {
+                incr m
+                foreach kind {break continue} {
+                    if {[dict get $s $kind] >= 0} {
+                        lappend exits [list $kind s$m]
+                    }
+                }
+            }
+            fail - return {
+                if {$held ne {}} {
+                    lappend exits [list [dict get $s kind] [lsort $held]]
+                }
+            }
+            call {
+                if {$held ne {} && [dict get $callee errors] && ![dict get $s handled]} {
+                    lappend exits [list call [lsort $held]]
+                }
+            }
+        }
+    }
+    return $exits
 }
 
 # One program: a dict text, expect ({error KIND} | {value V}), mayYield (the
@@ -532,8 +623,14 @@ proc generate {seed} {
     } else {
         set expect [list value [Observe $funcs $levels $arg $ops $resolved $firstName]]
     }
+    set exits [dict create]
+    for {set k 0} {$k <= $levels} {incr k} {
+        dict set exits $k [Exits [dict get $funcs $k] \
+            [expr {$k < $levels ? [dict get $funcs [expr {$k + 1}]] : ""}]]
+    }
     return [dict create text [join $lines \n] expect $expect mayYield $mayYield \
-        protocol $resolved levels $levels fault $fault owner $current release $releaseAfter]
+        protocol $resolved levels $levels fault $fault owner $current release $releaseAfter \
+        exits $exits]
 }
 
 # ---------------------------------------------------------------------------
@@ -546,6 +643,7 @@ proc generate {seed} {
 proc Exec {funcs k n} {
     set acc $n
     set root [expr {$k == 0}]
+    set held {}
     foreach s [dict get $funcs $k stmts] {
         switch -- [dict get $s kind] {
             yield {
@@ -593,10 +691,25 @@ proc Exec {funcs k n} {
                 # gen(acc) yields Ev(50, acc), then returns Ev(51, acc + 1).
                 set acc [expr {$acc + $acc + $acc + 1}]
             }
+            held {
+                # Resumed at the end, with the accumulator of its start.
+                lappend held $acc
+            }
+            scan {
+                for {set i 0} {$i < [dict get $s count]} {incr i} {
+                    if {$i == [dict get $s break]} break
+                    if {$i == [dict get $s continue]} continue
+                    # gen(i) yields Ev(50, i), then returns Ev(51, i + 1).
+                    set ::log [expr {$::log * 3 + $i + 1 + $i}]
+                }
+            }
             effect {
                 set ::log [expr {$::log * 3 + [dict get $s tag]}]
             }
         }
+    }
+    foreach c $held {
+        set acc [expr {$acc + $c + $c + 1}]
     }
     return [list ok [expr {$root ? [Ev 999 $acc] : $acc}]]
 }
@@ -678,9 +791,37 @@ proc blockOf {hir name} {
     return ""
 }
 
+# The compiler's exit releases in function block B, in source order: {KIND
+# HANDLES} for each exit of the exit table (return, fail, break, continue)
+# and each call of the error-exit table (KIND call; the handles a Boom
+# releases).
+proc ExitsOf {hir b} {
+    set result {}
+    set nodes {}
+    set work [list $b]
+    while {$work ne {}} {
+        set e [lindex $work end]
+        set work [lrange $work 0 end-1]
+        lappend nodes $e
+        lappend work {*}[hir::children $hir $e]
+    }
+    set name {{hir b} {regsub {#[0-9]+$} [dict get $hir bindings $b name] ""}}
+    foreach e [lsort -dictionary $nodes] {
+        if {[dict exists $hir coroutines exits $e]} {
+            lappend result [list [hir::kind $hir $e] [lsort [lmap h [dict get $hir coroutines exits $e] {apply $name $hir $h}]]]
+        }
+        if {[dict exists $hir coroutines errorExits $e]} {
+            set byName [dict get $hir coroutines errorExits $e]
+            lappend result [list call [lsort [lmap h [expr {[dict exists $byName Boom] ? [dict get $byName Boom] : {}}] {apply $name $hir $h}]]]
+        }
+    }
+    return $result
+}
+
 set disagreements 0
 set accepted 0
 set kinds [dict create]
+set exitKinds [dict create]
 set faults [dict create]
 for {set i 0} {$i < $n} {incr i} {
     set seed [expr {$seed0 + $i}]
@@ -736,6 +877,23 @@ for {set i 0} {$i < $n} {incr i} {
         if {$released ne [list [dict get $p release]]} {
             lappend problems "release of [dict get $p owner]: oracle after {[dict get $p release]}, compiler after {[join $released {, }]}"
         }
+        # What every early exit releases, function by function in source
+        # order; no other exit releases anything.
+        set counted 0
+        for {set k 0} {$k <= [dict get $p levels]} {incr k} {
+            set got [ExitsOf $hir [blockOf $hir w$k]]
+            incr counted [llength $got]
+            foreach exit [dict get $p exits $k] {
+                dict incr exitKinds [lindex $exit 0]
+            }
+            if {$got ne [dict get $p exits $k]} {
+                lappend problems "exits of w$k: oracle {[dict get $p exits $k]}, compiler {$got}"
+            }
+        }
+        set all [expr {[dict size [dict get $hir coroutines exits]] + [dict size [dict get $hir coroutines errorExits]]}]
+        if {$all != $counted} {
+            lappend problems "exits: [expr {$all - $counted}] outside the generated functions release"
+        }
         foreach backend $backends {
             set outcome [outcomeUnderHir $backend $hir]
             if {[lindex $outcome 0] ne "value" || [lindex $outcome 1] ne [lindex $expect 1]} {
@@ -749,5 +907,6 @@ for {set i 0} {$i < $n} {incr i} {
     }
 }
 puts "accepted $accepted rejected [expr {$n - $accepted}] ([join [lmap {k v} $kinds {string cat $k " " $v}] {, }])"
+puts "early exits releasing coroutines: [join [lmap k {return fail call break continue} {string cat $k " " [expr {[dict exists $exitKinds $k] ? [dict get $exitKinds $k] : 0}]}] {, }]"
 puts "programs $n disagreements $disagreements"
 exit [expr {$disagreements > 0}]

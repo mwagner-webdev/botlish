@@ -390,11 +390,20 @@ A coroutine is released right after its handle's last use
 (`hir::coroutines::Releases`, COROUTINES.md "Release at the last use"):
 every backend emits the release after that statement (`hir/lower.tcl`'s
 `Seq`, the Tcl compiler's `CompileSequence`, `native/lower.tcl`'s `Sequence`)
-and keeps the statement's value. A release must stay unobservable -- it
-never runs Botlish code (a released suspended Tcl coroutine is unwound by an
-error no handler catches) and never changes a value -- and must never
-release a coroutine some live binding still owns. Extending it (releases on
-early exits, other affine values) keeps both properties.
+and keeps the statement's value. An exit that leaves the handle's scope
+first -- a `return`, `fail`, `break` or `continue`, or a call propagating a
+declared error -- releases it there (`hir::coroutines::ExitReleases`,
+COROUTINES.md "Release on every early exit"): before the exit (after its
+value, for a handle the value uses), and on a call's error edge through a
+handler-shaped catch that releases and propagates the same error on
+(`hir/lower.tcl`'s `ReleasingOnError`, the Tcl compiler's
+`ReleasingOnError`/`CompileHandle`, `native/lower.tcl`'s `Call`/`Handle`
+pads). An error edge uses the call's type-level `calleeErrors`, never the
+completion proofs. A release must stay unobservable -- it never runs
+Botlish code (a released suspended Tcl coroutine is unwound by an error no
+handler catches) and never changes a value -- and must never release a
+coroutine some live binding still owns. Extending it (other affine values)
+keeps both properties.
 
 If you change the coroutine grammar (`yield`, the coroutine binding, the
 resume clause), `hir/coroutines.tcl` (protocols, the yield effect, the

@@ -633,7 +633,9 @@ proc hir::read::TakeExprLine {hirVar level} {
     }
     set found {}
     while {[llength $tail] > 1 && ([lindex $tail end] in $flags
-            || [string match release=* [lindex $tail end]])} {
+            || [string match release=* [lindex $tail end]]
+            || [string match exit-release=* [lindex $tail end]]
+            || [string match error-release=* [lindex $tail end]])} {
         set found [linsert $found 0 [lindex $tail end]]
         set tail [lrange $tail 0 end-1]
     }
@@ -735,6 +737,22 @@ proc hir::read::Expr {hirVar level s path block} {
         # The coroutines released after this statement (COROUTINES.md), as
         # printed.
         dict set hir exprs $e coroutineRelease [split [string range $release 8 end] ,]
+    }
+    set release [lsearch -inline -glob $flags exit-release=*]
+    if {$release ne ""} {
+        # The coroutines this exit releases as it leaves (COROUTINES.md).
+        dict set hir exprs $e coroutineExitRelease [split [string range $release 13 end] ,]
+    }
+    set release [lsearch -inline -glob $flags error-release=*]
+    if {$release ne ""} {
+        # The coroutines released when this call propagates a declared
+        # error: NAME=B,B;... (COROUTINES.md).
+        set byName [dict create]
+        foreach group [split [string range $release 14 end] {;}] {
+            set at [string first = $group]
+            dict set byName [string range $group 0 $at-1] [split [string range $group $at+1 end] ,]
+        }
+        dict set hir exprs $e coroutineErrorRelease $byName
     }
     set inner [expr {$level + 1}]
 

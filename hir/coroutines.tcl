@@ -101,9 +101,11 @@
 # and yield type), thunks (thunk -> its create call and root function),
 # boundaries (a thunk's boundary call -> the thunk), yields (yield call -> its
 # function), and, after verify, mayYield (the functions that may yield),
-# moves (move bind -> moved binding) and releases (a statement -> the handle
-# bindings whose coroutines are released after it: "Release at the last use"
-# below).
+# moves (move bind -> moved binding), releases (a statement -> the handle
+# bindings whose coroutines are released after it), exits (an exit statement
+# -> the bindings released when it leaves) and errorExits (a call or handle
+# -> NAME -> the bindings released when it propagates declared error NAME):
+# "Release at the last use, and on every early exit" below.
 
 namespace eval hir::coroutines {}
 
@@ -851,6 +853,9 @@ namespace eval hir::coroutines {
     variable loopExits {}
     # Statement ExprId -> the liveness state after it (Seq; Releases).
     variable afterStates {}
+    # Exit ExprId (a return, break, continue or fail; a call) -> the
+    # liveness state where it leaves (Flow; ExitReleases).
+    variable exitStates {}
 }
 
 proc hir::coroutines::IsHandleBinding {hir b} {
@@ -870,10 +875,12 @@ proc hir::coroutines::Affine {hirVar parent blocks calls} {
     variable affineParent
     variable loopExits
     variable afterStates
+    variable exitStates
     set affineDiagnostics [dict create]
     set affineParent $parent
     set loopExits [dict create]
     set afterStates [dict create]
+    set exitStates [dict create]
     # Positions first: every reference to a handle, by its context.
     set moves [dict create]
     dict for {e node} [dict get $hir exprs] {
@@ -923,12 +930,19 @@ proc hir::coroutines::Affine {hirVar parent blocks calls} {
         hir::Diagnose hir $kind $message $at
     }
     # Releases: only for a program the discipline accepts (a rejected one
-    # that still runs, -strict 0, keeps every coroutine until collected).
-    dict set hir coroutines releases [expr {[dict size $affineDiagnostics] ? {} : [Releases $hir $parent]}]
+    # that still runs, -strict 0, keeps every coroutine until collected),
+    # and never twice: HIR rebuilt from lowered Core IR (hir/lower.tcl)
+    # already has every release written out.
+    set scopes [expr {[dict size $affineDiagnostics] || [WrittenReleases $hir $parent]
+        ? {} : [HandleScopes $hir $parent]}]
+    dict set hir coroutines releases [Releases $hir $scopes]
+    lassign [ExitReleases $hir $parent $scopes] exits errorExits
+    dict set hir coroutines exits $exits
+    dict set hir coroutines errorExits $errorExits
 }
 
 # ---------------------------------------------------------------------------
-# Release at the last use
+# Release at the last use, and on every early exit
 #
 # A handle binding is dead after the last statement of its own sequence that
 # refers to it: nothing can resume or observe its coroutine through it again.
@@ -950,11 +964,55 @@ proc hir::coroutines::Affine {hirVar parent blocks calls} {
 # after evaluating the statement and keep its value as the sequence's value
 # when it is the last one (hir/lower.tcl, native/lower.tcl). A release is
 # idempotent: the new owner of a `maybe` binding may have released the same
-# coroutine already, inside the branch. Not released here (a collection still
-# reclaims them): a binding definitely moved (its new owner releases it), one
-# whose last statement cannot complete normally, and every path that leaves
-# the sequence early (return, break, continue, a failure) before the last
-# use.
+# coroutine already, inside the branch.
+#
+# A path can also leave a handle's sequence before that statement completes:
+# an abrupt completion. Each one is an *exit*, and the handles it takes out of
+# scope are released on it:
+#
+#   return V, fail E      leave every sequence up to the function's body (or
+#                         the top level)
+#   break, continue       leave every sequence up to the target loop's body
+#   a call's propagated   leaves every sequence up to the function's body,
+#   declared error E      unless a `handle` whose call contains the call
+#                         handles E: then only the sequences inside that
+#                         call (none, as the grammar has it: a sequence
+#                         is never inside a call's arguments)
+#
+# A binding is released on exit X when X leaves its sequence from a statement
+# at or before its last use (after it, the last-use release already ran) and
+# it owns its coroutine (live or maybe) in the liveness state where X leaves
+# (so it is bound there). That is the same proof as the last-use
+# rule: no binding live after X owns the coroutine, because every binding a
+# move could have made it the owner of is declared in a sequence X leaves too
+# (a move target is declared where the move is). Handles never leave their
+# function (they cannot be returned, passed, stored or captured), so an exit
+# of the function is the end of every coroutine it still owns.
+#
+# EXITS maps an explicit exit statement (return, break, continue, fail) to the
+# bindings it releases: before evaluating its value, unless the value refers
+# to the binding (then after it: `return step().n`); a release before the
+# value keeps a `return f(...)` a tail call. ERROREXITS maps a call (or, for a
+# handled call, its `handle`) to NAME -> bindings for each declared error the
+# call may propagate (its calleeErrors, the type-level set: never a narrower
+# proof) that leaves a handle's sequence: the backends catch exactly those
+# errors there, release, and propagate the same error on unchanged. A
+# failure that is not a declared error (a run-time fault) ends the program,
+# and a suspended coroutine released by its owner never runs its exits (its
+# frames are discarded, not unwound through Botlish code): what those still
+# held is reclaimed when collected (natively) or when the run ends (Tcl).
+
+# 1 if HIR already has releases written out: HIR rebuilt from Core IR that
+# hir/lower.tcl lowered (source cannot spell `coroutine#release`).
+proc hir::coroutines::WrittenReleases {hir parent} {
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "ref" && [dict exists $parent $e]
+                && [NativeOf $hir [lindex [dict get $parent $e] 0]] eq [core::coroutines::releaseNative]} {
+            return 1
+        }
+    }
+    return 0
+}
 
 # The sequence (a list of ExprIds) of parent P that holds statement E: a body
 # of a block, branch, loop or handler, or the top level (P "").
@@ -977,61 +1035,247 @@ proc hir::coroutines::SequenceOf {hir p e} {
     return ""
 }
 
-# The release table of HIR (above), by the parent map PARENT and the
-# post-statement states the liveness analysis recorded.
-proc hir::coroutines::Releases {hir parent} {
-    variable afterStates
+# The handle bindings of HIR a release may apply to, by the parent map
+# PARENT: B -> {sequence LIST key KEY last J}. LIST is the sequence its
+# binding statement is in (KEY its first statement, naming it) and J the
+# index of the last statement of LIST that refers to it (at least the binding
+# statement's own). Only a local binding of a reachable binding statement
+# every reference to which is inside its own sequence.
+proc hir::coroutines::HandleScopes {hir parent} {
     set refs [dict create]
-    set released [dict create]
     dict for {e node} [dict get $hir exprs] {
         if {[dict get $node kind] eq "ref" && [IsHandleBinding $hir [dict get $node binding]]} {
             dict lappend refs [dict get $node binding] $e
-            # A release already written out (HIR rebuilt from lowered Core
-            # IR, hir/lower.tcl): not released twice.
-            if {[dict exists $parent $e]
-                    && [NativeOf $hir [lindex [dict get $parent $e] 0]] eq [core::coroutines::releaseNative]} {
-                dict set released [dict get $node binding] 1
-            }
         }
     }
-    set releases [dict create]
+    set scopes [dict create]
     foreach b [lsort -dictionary [dict keys [dict get $hir bindings]]] {
-        if {![IsHandleBinding $hir $b] || [hir::isModuleBinding $hir $b] || [dict exists $released $b]} continue
+        if {![IsHandleBinding $hir $b] || [hir::isModuleBinding $hir $b]} continue
         set by [dict get $hir bindings $b declaredBy]
         if {$by eq "" || ![dict exists $hir exprs $by] || [dict get $hir exprs $by kind] ne "bind"
                 || ![dict get $hir exprs $by reachable] || ![dict exists $parent $by]} continue
         set p [lindex [dict get $parent $by] 0]
         set sequence [SequenceOf $hir $p $by]
-        set last [lsearch -exact $sequence $by]
-        if {$last < 0} continue
+        set index [lsearch -exact $sequence $by]
+        if {$index < 0} continue
+        set last $index
         set found 1
         foreach r [expr {[dict exists $refs $b] ? [dict get $refs $b] : {}}] {
             # The statement of SEQUENCE the reference is in.
             set x $r
-            set index -1
+            set at -1
             for {set i 0} {$i < 4096 && [dict exists $parent $x]} {incr i} {
                 set up [lindex [dict get $parent $x] 0]
-                if {$up eq $p && [set index [lsearch -exact $sequence $x]] >= 0} {
+                if {$up eq $p && [set at [lsearch -exact $sequence $x]] >= 0} {
                     break
                 }
                 if {$up eq ""} break
                 set x $up
             }
-            if {$index < 0} {
+            if {$at < 0} {
                 set found 0
                 break
             }
-            set last [expr {max($last, $index)}]
+            set last [expr {max($last, $at)}]
         }
         if {!$found} continue
-        set statement [lindex $sequence $last]
-        if {![dict exists $afterStates $statement]} continue
-        set state [dict get $afterStates $statement]
-        if {$state eq "dead" || ![dict exists $state $b]
-                || [lindex [dict get $state $b] 0] ni {live maybe}} continue
+        dict set scopes $b [dict create sequence $sequence key [lindex $sequence 0] last $last]
+    }
+    return $scopes
+}
+
+# 1 if binding B owns its coroutine (live, or maybe moved) in liveness STATE.
+proc hir::coroutines::Owns {state b} {
+    return [expr {$state ne "dead" && [dict exists $state $b]
+        && [lindex [dict get $state $b] 0] in {live maybe}}]
+}
+
+# The release table (above): each binding of SCOPES (HandleScopes) that
+# still owns its coroutine after its last use's statement, by the
+# post-statement states the liveness analysis recorded.
+proc hir::coroutines::Releases {hir scopes} {
+    variable afterStates
+    set releases [dict create]
+    dict for {b info} $scopes {
+        set statement [lindex [dict get $info sequence] [dict get $info last]]
+        if {![dict exists $afterStates $statement] || ![Owns [dict get $afterStates $statement] $b]} continue
         dict lappend releases $statement $b
     }
     return $releases
+}
+
+# The sequences an abrupt completion at X leaves, innermost first, as {KEY
+# INDEX} pairs (the sequence's key, HandleScopes, and the index of the
+# statement it leaves from), up to and including the body of LOOP (break,
+# continue) or of the enclosing function (LOOP "": the top level's roots at
+# the outermost). With NAMES (the declared errors a call propagates):
+# NAME -> pairs, each name's walk ending at a `handle` whose call contains X
+# and which handles it.
+proc hir::coroutines::Crossed {hir parent x loop names} {
+    set pairs {}
+    set result [dict create]
+    for {set i 0} {$i < 4096 && [dict exists $parent $x]} {incr i} {
+        set p [lindex [dict get $parent $x] 0]
+        if {$p eq ""} {
+            set roots [dict get $hir roots]
+            lappend pairs [list [lindex $roots 0] [lsearch -exact $roots $x]]
+            break
+        }
+        set node [dict get $hir exprs $p]
+        if {$names ne {} && [dict get $node kind] eq "handle" && $x eq [dict get $node call]} {
+            set remaining {}
+            foreach name $names {
+                if {$name in [dict get $node handlerNames]} {
+                    dict set result $name $pairs
+                } else {
+                    lappend remaining $name
+                }
+            }
+            set names $remaining
+            if {$names eq {}} {
+                return $result
+            }
+        }
+        set sequence [SequenceOf $hir $p $x]
+        if {$sequence ne ""} {
+            lappend pairs [list [lindex $sequence 0] [lsearch -exact $sequence $x]]
+        }
+        if {[dict get $node kind] eq "block" || ($loop ne "" && $p eq $loop)} break
+        set x $p
+    }
+    if {$names eq {}} {
+        return $pairs
+    }
+    foreach name $names {
+        dict set result $name $pairs
+    }
+    return $result
+}
+
+# The bindings of SCOPES (in the sequences of PAIRS, BYKEY: sequence key ->
+# its bindings) exit X from PAIRS releases in liveness STATE. A binding whose
+# binding statement has not run where X leaves is not in STATE (a loop
+# body's bindings are not in its head's state either), so it owns nothing.
+proc hir::coroutines::Leaving {hir scopes byKey pairs state x} {
+    set result {}
+    foreach pair $pairs {
+        lassign $pair key at
+        if {![dict exists $byKey $key]} continue
+        foreach b [dict get $byKey $key] {
+            if {$at <= [dict get $scopes $b last] && [Owns $state $b] && ![Shadowed $hir $x $b]} {
+                lappend result $b
+            }
+        }
+    }
+    return [lsort -dictionary $result]
+}
+
+# 1 if the name of binding B may denote another binding at expression X: a
+# binding of that name in a scope between X's and B's own. A release names
+# its handle (Core IR resolves names, hir/lower.tcl), so a shadowed handle
+# is left to the collector there.
+proc hir::coroutines::Shadowed {hir x b} {
+    set name [dict get $hir bindings $b name]
+    set home [dict get $hir bindings $b scope]
+    set s [dict get $hir exprs $x scope]
+    for {set i 0} {$i < 4096 && $s ne ""} {incr i} {
+        if {$s eq $home} {
+            return 0
+        }
+        foreach other [dict get $hir scopes $s bindings] {
+            if {$other ne $b && [dict get $hir bindings $other name] eq $name} {
+                return 1
+            }
+        }
+        set s [dict get $hir scopes $s parent]
+    }
+    return 1
+}
+
+# The exit and error-exit tables (above) of the bindings of SCOPES: {EXITS
+# ERROREXITS}.
+proc hir::coroutines::ExitReleases {hir parent scopes} {
+    variable exitStates
+    set exits [dict create]
+    set errorExits [dict create]
+    if {[dict size $scopes] == 0} {
+        return [list $exits $errorExits]
+    }
+    set byKey [dict create]
+    dict for {b info} $scopes {
+        dict lappend byKey [dict get $info key] $b
+    }
+    # Explicit exits first: a call in an exit's value runs after the exit
+    # released what the value does not refer to.
+    set kinds [dict create return 0 fail 0 break 0 continue 0 call 1]
+    set order [lsort -command [list apply {{kinds a b} {
+        expr {[dict get $kinds [lindex $a 1]] - [dict get $kinds [lindex $b 1]]}
+    }} $kinds] [lmap x [dict keys $exitStates] {list $x [dict get $hir exprs $x kind]}]]
+    set already [dict create]
+    set tails [hir::aot::selfTailCalls $hir]
+    foreach entry $order {
+        set x [lindex $entry 0]
+        set state [dict get $exitStates $x]
+        set node [dict get $hir exprs $x]
+        switch -- [dict get $node kind] {
+            return - fail - break - continue {
+                # A statement (the grammar's only place for one).
+                if {![dict exists $parent $x] || [lindex [dict get $parent $x] 1 0] ne "seq"} continue
+                set loop [expr {[dict get $node kind] in {break continue} ? [dict get $node target] : ""}]
+                set names {}
+                if {[dict get $node kind] eq "fail"} {
+                    set names [list [dict get $node name]]
+                }
+                set crossed [Crossed $hir $parent $x $loop $names]
+                set pairs [expr {$names eq {} ? $crossed : [dict get $crossed [lindex $names 0]]}]
+                set released [Leaving $hir $scopes $byKey $pairs $state $x]
+                if {$released eq {}} continue
+                dict set exits $x $released
+                if {[dict exists $node value] && [dict get $node value] ne ""} {
+                    set used [RefsIn $hir [dict get $node value]]
+                    set before [lmap b $released {expr {$b in $used ? [continue] : $b}}]
+                    foreach c [CallsIn $hir [dict get $node value]] {
+                        dict lappend already $c {*}$before
+                    }
+                }
+            }
+            call {
+                if {[dict exists $tails $x]} {
+                    # A self tail call: the backends that restart the
+                    # function for it cannot catch around it (its exit
+                    # released the handles its arguments do not use).
+                    continue
+                }
+                set at $x
+                set names [expr {[dict exists $node calleeErrors] ? [dict get $node calleeErrors] : {}}]
+                lassign [dict get $parent $x] p
+                if {$p ne "" && [dict get $hir exprs $p kind] eq "handle" && [dict get $hir exprs $p call] eq $x} {
+                    # A handled call: what its handlers do not handle leaves
+                    # from the handle.
+                    set at $p
+                    set names [lmap name $names {
+                        if {$name in [dict get $hir exprs $p handlerNames]} continue
+                        set name
+                    }]
+                }
+                if {$names eq {}} continue
+                set byName [dict create]
+                set done [expr {[dict exists $already $x] ? [dict get $already $x] : {}}]
+                dict for {name pairs} [Crossed $hir $parent $at "" [lsort -unique $names]] {
+                    set released [lmap b [Leaving $hir $scopes $byKey $pairs $state $x] {
+                        expr {$b in $done ? [continue] : $b}
+                    }]
+                    if {$released ne {}} {
+                        dict set byName $name $released
+                    }
+                }
+                if {[dict size $byName]} {
+                    dict set errorExits $at $byName
+                }
+            }
+        }
+    }
+    return [list $exits $errorExits]
 }
 
 # The handle bindings to release after statement E: the analysis's table, or
@@ -1042,6 +1286,74 @@ proc hir::coroutines::releasesAfter {hir e} {
     }
     if {[dict exists $hir exprs $e coroutineRelease]} {
         return [dict get $hir exprs $e coroutineRelease]
+    }
+    return {}
+}
+
+# The handle bindings to release when exit statement E (return, break,
+# continue, fail) leaves, as {BEFORE AFTER}: released before evaluating its
+# value (bindings the value does not refer to), and after it.
+proc hir::coroutines::releasesOnExit {hir e} {
+    if {[dict exists $hir coroutines exits $e]} {
+        set bindings [dict get $hir coroutines exits $e]
+    } elseif {[dict exists $hir exprs $e coroutineExitRelease]} {
+        set bindings [dict get $hir exprs $e coroutineExitRelease]
+    } else {
+        return {{} {}}
+    }
+    set value [expr {[dict exists $hir exprs $e value] ? [dict get $hir exprs $e value] : ""}]
+    set used [expr {$value eq "" ? {} : [RefsIn $hir $value]}]
+    set before {}
+    set after {}
+    foreach b $bindings {
+        if {$b in $used} {
+            lappend after $b
+        } else {
+            lappend before $b
+        }
+    }
+    return [list $before $after]
+}
+
+# The bindings referred to in the subtree of expression E.
+proc hir::coroutines::RefsIn {hir e} {
+    set result {}
+    set work [list $e]
+    while {$work ne {}} {
+        set x [lindex $work end]
+        set work [lrange $work 0 end-1]
+        if {[dict get $hir exprs $x kind] eq "ref"} {
+            lappend result [dict get $hir exprs $x binding]
+        }
+        lappend work {*}[hir::children $hir $x]
+    }
+    return $result
+}
+
+# The call ExprIds in the subtree of expression E.
+proc hir::coroutines::CallsIn {hir e} {
+    set result {}
+    set work [list $e]
+    while {$work ne {}} {
+        set x [lindex $work end]
+        set work [lrange $work 0 end-1]
+        if {[dict get $hir exprs $x kind] eq "call"} {
+            lappend result $x
+        }
+        lappend work {*}[hir::children $hir $x]
+    }
+    return $result
+}
+
+# The coroutines to release when call (or handled call's `handle`) E
+# propagates a declared error, as NAME -> bindings (only the names that
+# release any).
+proc hir::coroutines::releasesOnError {hir e} {
+    if {[dict exists $hir coroutines errorExits $e]} {
+        return [dict get $hir coroutines errorExits $e]
+    }
+    if {[dict exists $hir exprs $e coroutineErrorRelease]} {
+        return [dict get $hir exprs $e coroutineErrorRelease]
     }
     return {}
 }
@@ -1183,6 +1495,7 @@ proc hir::coroutines::Seq {hirVar exprs state} {
 proc hir::coroutines::Flow {hirVar e state} {
     upvar 1 $hirVar hir
     variable loopExits
+    variable exitStates
     set node [dict get $hir exprs $e]
     if {![dict get $node reachable]} {
         return dead
@@ -1207,6 +1520,7 @@ proc hir::coroutines::Flow {hirVar e state} {
         }
         block - const - fail {
             if {[dict get $node kind] eq "fail"} {
+                dict set exitStates $e $state
                 return dead
             }
         }
@@ -1216,6 +1530,11 @@ proc hir::coroutines::Flow {hirVar e state} {
                 if {$state eq "dead"} {
                     return dead
                 }
+            }
+            if {[dict get $node kind] eq "call"} {
+                # Where a declared error this call propagates leaves
+                # (ExitReleases): the call itself runs after its operands.
+                dict set exitStates $e $state
             }
         }
         if {
@@ -1257,7 +1576,10 @@ proc hir::coroutines::Flow {hirVar e state} {
             return $after
         }
         return {
-            Flow hir [dict get $node value] $state
+            set state [Flow hir [dict get $node value] $state]
+            if {$state ne "dead"} {
+                dict set exitStates $e $state
+            }
             return dead
         }
         break {
@@ -1265,13 +1587,17 @@ proc hir::coroutines::Flow {hirVar e state} {
                 set state [Flow hir [dict get $node value] $state]
             }
             set loop [dict get $node target]
-            if {$state ne "dead" && [dict exists $loopExits $loop]} {
-                dict set loopExits $loop breaks [concat [dict get $loopExits $loop breaks] [list $state]]
+            if {$state ne "dead"} {
+                dict set exitStates $e $state
+                if {[dict exists $loopExits $loop]} {
+                    dict set loopExits $loop breaks [concat [dict get $loopExits $loop breaks] [list $state]]
+                }
             }
             return dead
         }
         continue {
             set loop [dict get $node target]
+            dict set exitStates $e $state
             if {[dict exists $loopExits $loop]} {
                 dict set loopExits $loop continues [concat [dict get $loopExits $loop continues] [list $state]]
             }

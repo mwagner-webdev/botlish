@@ -1090,6 +1090,157 @@ test co-release-native-stacks {natively a released suspended coroutine's stack g
 } -cleanup {unset -nocomplain hir report} -result {{stacksMapped 1 stacksReused 1999 released 2000 releasedSuspended 2000 sweptSuspended 0} {value 2000}}
 
 # ---------------------------------------------------------------------------
+# Release on every early exit (COROUTINES.md): a return, fail, break or
+# continue, or a call propagating a declared error, that leaves a handle's
+# scope before its last use releases the coroutine it still owns.
+
+# The exit releases of TEXT, in ExprId order: {KIND BEFORE AFTER} for an exit
+# statement (released before its value, and after it), {call|handle NAME
+# RELEASED} for a call (or handled call) propagating declared error NAME.
+proc coExits {text} {
+    set hir [surface::compile $text -warnings off]
+    set name {{hir b} {regsub {#[0-9]+$} [dict get $hir bindings $b name] ""}}
+    set rows {}
+    set table [dict merge [dict get $hir coroutines exits] [dict get $hir coroutines errorExits]]
+    foreach e [lsort -dictionary [dict keys $table]] {
+        if {[dict exists $hir coroutines exits $e]} {
+            lassign [hir::coroutines::releasesOnExit $hir $e] before after
+            lappend rows [list [hir::kind $hir $e] [lmap b $before {apply $name $hir $b}] [lmap b $after {apply $name $hir $b}]]
+        } else {
+            dict for {error bs} [dict get $hir coroutines errorExits $e] {
+                lappend rows [list [hir::kind $hir $e] $error [lmap b $bs {apply $name $hir $b}]]
+            }
+        }
+    }
+    return $rows
+}
+
+set exitDecls {import coroutine
+struct V:
+    n: int
+error Boom
+error Late
+fn w(k: int) -> V:
+    yield V {n: k}
+    return V {n: k + 1}
+fn bad(k: int) -> int errors Boom:
+    if k > 2:
+        fail Boom
+    k
+fn worse(k: int) -> int errors Boom, Late:
+    if k > 4:
+        fail Late
+    bad(k)
+}
+
+# One function per kind of exit, and a row of all their results for one k.
+set exitProgram {fn ret(k: int) -> int:
+    coroutine {step, first} = w(k)
+    if k > 1:
+        return first.n
+    step().n
+fn uses(k: int) -> int:
+    coroutine {step} = w(k)
+    return step().n
+fn failing(k: int) -> int errors Boom:
+    coroutine {step} = w(k)
+    if k > 1:
+        fail Boom
+    step().n
+fn calling(k: int) -> int errors Boom:
+    coroutine {step} = w(k)
+    x = bad(k)
+    step().n + x
+fn handled(k: int) -> int errors Late:
+    coroutine {step} = w(k)
+    x = worse(k):
+        on Boom:
+            step().n
+    x + 100
+fn looping(k: int) -> int:
+    coroutine {step, first} = w(k)
+    xs = loop i from 0 to 4:
+        coroutine {step: inner, first: one} = w(i)
+        if i == k:
+            break
+        if i < k:
+            continue
+        inner().n + one.n
+    step().n * 10 + first.n
+fn tail(k: int) -> int errors Boom:
+    coroutine {step} = w(k)
+    if k > 1:
+        return tail(k - 1)
+    step().n + bad(k)
+fn moved(k: int) -> int:
+    coroutine {step} = w(k)
+    if k > 1:
+        other = step
+        if k > 2:
+            return 0
+        other().n
+    else:
+        step().n
+fn row(k: int) -> list:
+    a = failing(k):
+        on Boom:
+            -1
+    b = calling(k):
+        on Boom:
+            -1
+    c = handled(k):
+        on Late:
+            -1
+    d = tail(k):
+        on Boom:
+            -1
+    [ret(k), uses(k), a, b, c, looping(k), d, moved(k)]
+}
+
+test co-exit-release-placement {an exit releases what it takes out of scope before the handle's last use: a return before its value (after it, when the value uses the handle), a fail, a call's unhandled declared error, a break or continue only the loop body's own handle; a handled error releases nothing, a shadowed name and a self tail call's error nothing, a moved-from handle nothing (its new owner instead), a handle bound after the exit or used for the last time before it nothing (released at that last use)} -body {
+    lmap body {
+        "fn f(k: int) -> int:\n    coroutine {step, first} = w(k)\n    if k > 1:\n        return first.n\n    step().n\nf(1)\n"
+        "fn f(k: int) -> int:\n    coroutine {step} = w(k)\n    return step().n\nf(1)\n"
+        "fn f(k: int) -> int errors Boom:\n    coroutine {step} = w(k)\n    if k > 1:\n        fail Boom\n    step().n\nf(1):\n    on Boom:\n        0\n"
+        "fn f(k: int) -> int errors Boom:\n    coroutine {step} = w(k)\n    x = bad(k)\n    step().n + x\nf(1):\n    on Boom:\n        0\n"
+        "fn f(k: int) -> int errors Late:\n    coroutine {step} = w(k)\n    x = worse(k):\n        on Boom:\n            step().n\n    step().n + x\nf(1):\n    on Late:\n        0\n"
+        "fn f(k: int) -> int:\n    coroutine {step} = w(k)\n    xs = loop i from 0 to 3:\n        coroutine {step: inner} = w(i)\n        if i == k:\n            break\n        if i > k:\n            continue\n        inner().n\n    step().n\nf(1)\n"
+        "fn f(k: int) -> int:\n    coroutine {step} = w(k)\n    xs = loop i from 0 to 3:\n        step = i\n        if i == k:\n            return step\n        i\n    step().n\nf(1)\n"
+        "fn f(k: int) -> int errors Boom:\n    coroutine {step} = w(k)\n    if k > 1:\n        return f(k - 1)\n    step().n\nf(1):\n    on Boom:\n        0\n"
+        "fn f(k: int) -> int errors Boom:\n    coroutine {step} = w(k)\n    if k > 1:\n        return bad(k) + step().n\n    step().n\nf(1):\n    on Boom:\n        0\n"
+        "fn f(k: int) -> int:\n    coroutine {step} = w(k)\n    if k > 1:\n        other = step\n        if k > 2:\n            return 0\n        other().n\n    else:\n        step().n\nf(1)\n"
+        "fn f(k: int) -> int:\n    if k > 1:\n        return 0\n    coroutine {step} = w(k)\n    step().n\nf(1)\n"
+        "fn f(k: int) -> int:\n    coroutine {step} = w(k)\n    x = step().n\n    if x > 1:\n        return 0\n    x\nf(1)\n"
+    } {coExits "${exitDecls}$body"}
+} -cleanup {unset -nocomplain body} -result {{{return step {}}} {{return {} step}} {{fail step {}}} {{call Boom step}} {{handle Late step}} {{break inner {}} {continue inner {}}} {} {{return step {}}} {{return {} step} {call Boom step}} {{return other {}}} {} {}}
+
+test co-exit-release-values {a release on an exit changes no value: every exit kind, a handler resuming the handle after a handled error, a loop's break and continue leaving the function's own handle live, a self tail call -- the same values on every backend} -body {
+    coAgree "${exitDecls}${exitProgram}xs = loop k from 0 to 7:\n    row(k)\nxs\n"
+} -result {value {[[1, 1, 1, 1, 100, 10, 1, 1], [2, 2, 2, 3, 101, 21, 3, 2], [2, 3, -1, 5, 102, 32, 3, 3], [3, 4, -1, -1, 104, 43, 3, 0], [4, 5, -1, -1, 105, 54, 3, 0], [5, 6, -1, -1, -1, 65, 3, 0], [6, 7, -1, -1, -1, 76, 3, 0]]}}
+
+test co-exit-release-tcl-runtime {on the Tcl backends no exit leaves a suspended coroutine behind: after every exit kind on every path, no Tcl coroutine is alive (57 were before exits released), on both compile routes} -body {
+    set text "${exitDecls}${exitProgram}xs = loop k from 0 to 7:\n    row(k)\ntest_live_coroutines()\n"
+    list {*}[lmap backend {interp compile} {
+        lrange [outcomeUnderHir $backend [surface::compile $text -warnings off]] 0 1
+    }] [core::value::show [core::compiler::evalHir [surface::compile $text -warnings off]] 1 1]
+} -cleanup {unset -nocomplain text} -result {{value 0} {value 0} 0}
+
+test co-exit-release-native-stacks {natively every coroutine an exit leaves is released, none is left for a collection: 2100 rows (27900 constructions, 18000 abandoned suspended on an exit or at a last use) map two stacks (an outer and a loop's inner coroutine are alive at once) and sweep none; the same under GC stress} -constraints linuxX86_64 -body {
+    set hir [surface::compile "import list\n${exitDecls}${exitProgram}xs = loop j from 0 to 300:\n    ys = loop k from 0 to 7:\n        row(k)\n    list::length(ys)\nlist::length(xs)\n" -warnings off]
+    set report [native::allocationReport $hir summary]
+    list [dict get $report coroutines] [withGcStress {lrange [outcomeUnderHir cranelift $hir] 0 1}]
+} -cleanup {unset -nocomplain hir report} -result {{stacksMapped 2 stacksReused 27898 released 27900 releasedSuspended 18000 sweptSuspended 0} {value 300}}
+
+test co-exit-release-hir-text {HIR text states each exit's releases and each call's per error, and reads back to the same text and the same lowered program} -body {
+    set hir [surface::compile "${exitDecls}fn f(k: int) -> int errors Boom:\n    coroutine {step} = w(k)\n    if k > 1:\n        return step().n\n    x = bad(k)\n    if k > 5:\n        fail Boom\n    step().n + x\nf(1):\n    on Boom:\n        0\n" -warnings off]
+    set text [hir::format $hir]
+    set back [hir::parse $text]
+    list [llength [regexp -all -inline { exit-release=b[0-9]+} $text]] \
+        [llength [regexp -all -inline { error-release=Boom=b[0-9]+} $text]] \
+        [expr {[hir::format $back] eq $text}] [expr {[hir::lower $back] eq [hir::lower $hir]}]
+} -cleanup {unset -nocomplain hir text back} -result {2 1 1 1}
+
+# ---------------------------------------------------------------------------
 # Source audit (item 66): what the milestone must not contain.
 
 proc coSource {path} {

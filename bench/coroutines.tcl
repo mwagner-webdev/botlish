@@ -19,6 +19,10 @@
 #   deep-D    as resume, every yield D frames below the coroutine's root
 #             (D = 1, 8, 32); baseline: the same D-deep recursion with no
 #             coroutine: what a deep suspension costs per resume
+#   exit-K    N constructions each abandoned suspended on an early exit of
+#             kind K: a return, a fail, a callee's propagated error, a break
+#             (released there, COROUTINES.md "Release on every early exit");
+#             baseline: the same function building the struct instead
 #
 # then, natively, the allocations per construction (the runtime's
 # allocation report) and the memory of suspended and terminal coroutines:
@@ -123,6 +127,52 @@ proc programText {kind n {depth 1}} {
             append p "fn hold(k: int) -> int:\n    if k == 0:\n        return 0\n    coroutine {step, first} = w(k)\n    x = hold(k - 1)\n    if coroutine::done?(step):\n        return x\n    x + first.n\n"
             append p "hold($n)\n"
         }
+        exit-return {
+            append p "fn w(k: int) -> V:\n    yield V {n: k}\n    return V {n: k + 1}\n"
+            append p "fn f(k: int) -> int:\n    coroutine {step, first} = w(k)\n    if k >= 0:\n        return first.n\n    step().n\n"
+            append p [Repeat $n {f(i)}]
+        }
+        exit-return-base {
+            append p "fn w(k: int) -> V:\n    V {n: k}\n"
+            append p "fn f(k: int) -> int:\n    first = w(k)\n    if k >= 0:\n        return first.n\n    first.n + 1\n"
+            append p [Repeat $n {f(i)}]
+        }
+        exit-fail {
+            append p "error Boom\nfn w(k: int) -> V:\n    yield V {n: k}\n    return V {n: k + 1}\n"
+            append p "fn g(k: int) -> int errors Boom:\n    coroutine {step, first} = w(k)\n    if k >= 0:\n        fail Boom\n    step().n\n"
+            append p "fn f(k: int) -> int:\n    g(k):\n        on Boom:\n            k\n"
+            append p [Repeat $n {f(i)}]
+        }
+        exit-fail-base {
+            append p "error Boom\nfn w(k: int) -> V:\n    V {n: k}\n"
+            append p "fn g(k: int) -> int errors Boom:\n    first = w(k)\n    if k >= 0:\n        fail Boom\n    first.n\n"
+            append p "fn f(k: int) -> int:\n    g(k):\n        on Boom:\n            k\n"
+            append p [Repeat $n {f(i)}]
+        }
+        exit-error {
+            append p "error Boom\nfn w(k: int) -> V:\n    yield V {n: k}\n    return V {n: k + 1}\n"
+            append p "fn bad(k: int) -> int errors Boom:\n    if k >= 0:\n        fail Boom\n    k\n"
+            append p "fn g(k: int) -> int errors Boom:\n    coroutine {step, first} = w(k)\n    x = bad(k)\n    step().n + x\n"
+            append p "fn f(k: int) -> int:\n    g(k):\n        on Boom:\n            k\n"
+            append p [Repeat $n {f(i)}]
+        }
+        exit-error-base {
+            append p "error Boom\nfn w(k: int) -> V:\n    V {n: k}\n"
+            append p "fn bad(k: int) -> int errors Boom:\n    if k >= 0:\n        fail Boom\n    k\n"
+            append p "fn g(k: int) -> int errors Boom:\n    first = w(k)\n    x = bad(k)\n    first.n + x\n"
+            append p "fn f(k: int) -> int:\n    g(k):\n        on Boom:\n            k\n"
+            append p [Repeat $n {f(i)}]
+        }
+        exit-break {
+            append p "fn w(k: int) -> V:\n    yield V {n: k}\n    return V {n: k + 1}\n"
+            append p "fn f(k: int) -> int:\n    xs = loop j from 0 to 2:\n        coroutine {step, first} = w(j + k)\n        if j >= 0:\n            break\n        step().n\n    k\n"
+            append p [Repeat $n {f(i)}]
+        }
+        exit-break-base {
+            append p "fn w(k: int) -> V:\n    V {n: k}\n"
+            append p "fn f(k: int) -> int:\n    xs = loop j from 0 to 2:\n        first = w(j + k)\n        if j >= 0:\n            break\n        first.n\n    k\n"
+            append p [Repeat $n {f(i)}]
+        }
         terminal {
             append p "fn w(k: int) -> V:\n    yield V {n: k}\n    return V {n: k + 1}\n"
             append p "fn hold(k: int) -> int:\n    if k == 0:\n        return 0\n    coroutine {step, first} = w(k)\n    last = step()\n    x = hold(k - 1)\n    if coroutine::done?(step):\n        return x + last.n\n    x\n"
@@ -175,6 +225,10 @@ foreach {label kind base depth} {
     "resume, yield 1 frame deep" deep deep-base 1
     "resume, yield 8 frames deep" deep deep-base 8
     "resume, yield 32 frames deep" deep deep-base 32
+    "construction, abandoned on an early return" exit-return exit-return-base 1
+    "construction, abandoned on a fail" exit-fail exit-fail-base 1
+    "construction, abandoned on a callee's propagated error" exit-error exit-error-base 1
+    "construction, abandoned on a break" exit-break exit-break-base 1
 } {
     set cells {}
     foreach backend $backends {

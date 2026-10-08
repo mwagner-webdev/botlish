@@ -247,6 +247,18 @@ proc hir::format::Line {hir e text indent origins linesVar {typed 1}} {
         # dead from here (COROUTINES.md, "Release at the last use").
         lappend flags "release=[join $releases ,]"
     }
+    set exiting [concat {*}[hir::coroutines::releasesOnExit $hir $e]]
+    if {$exiting ne ""} {
+        # The coroutines this exit (return, break, continue, fail) releases
+        # as it leaves their handles' scope.
+        lappend flags "exit-release=[join [lsort -dictionary $exiting] ,]"
+    }
+    set failing [hir::coroutines::releasesOnError $hir $e]
+    if {$failing ne ""} {
+        # The coroutines released when this call propagates a declared
+        # error, per error name.
+        lappend flags "error-release=[join [lmap {name bs} $failing {string cat $name = [join $bs ,]}] {;}]"
+    }
     if {$flags ne ""} {
         append line " [join $flags { }]"
     }

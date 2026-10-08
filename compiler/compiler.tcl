@@ -788,6 +788,14 @@ proc core::compiler::CompileExpr {ctxVar e} {
 
 proc core::compiler::CompileForm {ctxVar e} {
     upvar 1 $ctxVar ctx
+    variable hir
+    # The coroutines an exit statement takes out of scope (COROUTINES.md,
+    # "Release on every early exit"): released before its value, or, those
+    # the value refers to, after it.
+    lassign [hir::coroutines::releasesOnExit $hir $e] before after
+    foreach b $before {
+        CompileRelease ctx $b
+    }
     switch -- [Kind $e] {
         const {
             set value [N $e value]
@@ -806,7 +814,7 @@ proc core::compiler::CompileForm {ctxVar e} {
             return [CompileBlock ctx $e]
         }
         call {
-            return [CompileCall ctx $e]
+            return [ReleasingOnError ctx $e {CompileCall ctx $e}]
         }
         if {
             return [CompileIf ctx $e]
@@ -827,6 +835,9 @@ proc core::compiler::CompileForm {ctxVar e} {
             set value [CompileExpr ctx [N $e value]]
             if {[OpType $value] eq "never"} {
                 return $value
+            }
+            foreach b $after {
+                CompileRelease ctx $b
             }
             if {[dict get $ctx inBlock]} {
                 Emit ctx "return [BoxWord $value]"
@@ -856,6 +867,9 @@ proc core::compiler::CompileForm {ctxVar e} {
                 set value [CompileExpr ctx [N $e value]]
                 if {[OpType $value] eq "never"} {
                     return $value
+                }
+                foreach b $after {
+                    CompileRelease ctx $b
                 }
             }
             if {$var ne ""} {
@@ -897,6 +911,73 @@ proc core::compiler::CompileForm {ctxVar e} {
             return [CompileHandle ctx $e]
         }
     }
+}
+
+# The operand of call E compiled by COMPILE (a script evaluated in the
+# caller), releasing the coroutines whose handles a declared error the call
+# propagates takes out of scope (hir::coroutines::releasesOnError): the
+# call's code runs in a `catch`; a propagate-error completion (code 5) of
+# such an error releases them, and every abrupt completion goes on unchanged
+# (`return -options`, CompileHandle's technique). The value is computed
+# inside the catch, keeping its representation.
+proc core::compiler::ReleasingOnError {ctxVar e compile} {
+    upvar 1 $ctxVar ctx
+    variable hir
+    set byName [hir::coroutines::releasesOnError $hir $e]
+    if {$byName eq ""} {
+        return [uplevel 1 $compile]
+    }
+    set stVar [NewTemp]
+    set resVar [NewTemp]
+    set optsVar [NewTemp]
+    set valueVar [NewTemp]
+    set savedLines [dict get $ctx lines]
+    dict set ctx lines {}
+    Indent ctx 1
+    set value [uplevel 1 $compile]
+    if {[OpType $value] ne "never"} {
+        Emit ctx "set $valueVar [lindex $value 1]"
+    }
+    Indent ctx -1
+    set callLines [dict get $ctx lines]
+    dict set ctx lines $savedLines
+    Emit ctx "set $stVar \[catch \{"
+    foreach line $callLines { dict lappend ctx lines $line }
+    Emit ctx "\} $resVar $optsVar\]"
+    Emit ctx "if {\$$stVar != 0} \{"
+    Indent ctx 1
+    ReleaseOnErrorCode ctx $byName $stVar $resVar
+    Emit ctx "return -options \$$optsVar \$$resVar"
+    Indent ctx -1
+    Emit ctx "\}"
+    if {[OpType $value] eq "never"} {
+        return $value
+    }
+    return [lreplace $value 1 1 "\$$valueVar"]
+}
+
+# In code where the Tcl completion STVAR/RESVAR of a call is abrupt: releases
+# the coroutines of BYNAME (hir::coroutines::releasesOnError) when it is the
+# propagate-error of one of its names.
+proc core::compiler::ReleaseOnErrorCode {ctxVar byName stVar resVar} {
+    upvar 1 $ctxVar ctx
+    Emit ctx "if {\$$stVar == 5} \{"
+    Indent ctx 1
+    Emit ctx "switch -exact -- \[lindex \$$resVar 1\] \{"
+    Indent ctx 1
+    dict for {name bindings} $byName {
+        Emit ctx "[Word $name] \{"
+        Indent ctx 1
+        foreach b $bindings {
+            CompileRelease ctx $b
+        }
+        Indent ctx -1
+        Emit ctx "\}"
+    }
+    Indent ctx -1
+    Emit ctx "\}"
+    Indent ctx -1
+    Emit ctx "\}"
 }
 
 # Struct construction (STRUCTS.md): the field values are compiled, and so
@@ -1321,7 +1402,7 @@ proc core::compiler::CompileIf {ctxVar e} {
     set condition [N $e condition]
     set refining [expr {[Kind $condition] eq "call" && [Kind [N $condition callee]] eq "ref"}]
     if {$refining} {
-        set test [CompileCall ctx $condition callee argOps]
+        set test [ReleasingOnError ctx $condition {CompileCall ctx $condition callee argOps}]
         if {[OpType $test] ne "never"} {
             set test [lreplace $test 2 2 [Type $condition]]
         }
@@ -1760,6 +1841,19 @@ proc core::compiler::CompileHandle {ctxVar e} {
             Emit ctx "set $result [BoxWord $hValue]"
             set live 1
         }
+        Indent ctx -1
+        Emit ctx "\}"
+    }
+    variable hir
+    dict for {name bindings} [hir::coroutines::releasesOnError $hir $e] {
+        # A declared error the handlers do not handle, leaving the scope of
+        # coroutine handles (COROUTINES.md): released on its way out.
+        Emit ctx "[Word $name] \{"
+        Indent ctx 1
+        foreach b $bindings {
+            CompileRelease ctx $b
+        }
+        Emit ctx "return -options \$$optsVar \$$resVar"
         Indent ctx -1
         Emit ctx "\}"
     }

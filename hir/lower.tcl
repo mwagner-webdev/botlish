@@ -67,7 +67,8 @@ proc hir::lower::expr {hir e} {
                 return [list call [list ref "trait-operation#[dict get $node traitCall requirement]"] \
                     {*}[Exprs $hir [dict get $node args]]]
             }
-            return [list call {*}[Exprs $hir [concat [list [dict get $node callee]] [dict get $node args]]]]
+            return [ReleasingOnError $hir $e \
+                [list call {*}[Exprs $hir [concat [list [dict get $node callee]] [dict get $node args]]]]]
         }
         if {
             return [list if [expr $hir [dict get $node condition]] \
@@ -159,7 +160,7 @@ proc hir::lower::expr {hir e} {
             foreach name [dict get $node handlerNames] body [dict get $node handlerBodies] {
                 lappend handlers $name [list block {} {*}[Seq $hir $body]]
             }
-            return [list handle [expr $hir [dict get $node call]] {*}$handlers]
+            return [ReleasingOnError $hir $e [list handle [expr $hir [dict get $node call]] {*}$handlers]]
         }
     }
 }
@@ -179,22 +180,36 @@ proc hir::lower::body {hir e} {
 # (hir::coroutines::releasesAfter, COROUTINES.md "Release at the last use").
 # A release after the sequence's last statement keeps that statement's value
 # as the sequence's: `bind T STATEMENT; release...; T` (a binding statement
-# `bind N V` is followed by `ref N` instead).
+# `bind N V` is followed by `ref N` instead). An exit statement (return,
+# break, continue, fail) releases the coroutines whose handles it takes out
+# of scope (hir::coroutines::releasesOnExit) before it, or, for those its
+# value refers to, between evaluating the value and leaving:
+# `bind T VALUE; release...; return T`.
 proc hir::lower::Seq {hir ids} {
     set result {}
     set n [llength $ids]
     set i 0
     foreach id $ids {
         incr i
+        lassign [hir::coroutines::releasesOnExit $hir $id] before after
+        if {$before ne {} || $after ne {}} {
+            lappend result {*}[Releases $hir $before]
+            if {$after eq {}} {
+                lappend result [expr $hir $id]
+            } else {
+                set kept "coroutine#kept#$id"
+                lappend result [list bind $kept [expr $hir [dict get $hir exprs $id value]]] \
+                    {*}[Releases $hir $after] [list [dict get $hir exprs $id kind] [list ref $kept]]
+            }
+            continue
+        }
         set lowered [expr $hir $id]
         set releases [hir::coroutines::releasesAfter $hir $id]
         if {$releases eq ""} {
             lappend result $lowered
             continue
         }
-        set calls [lmap b $releases {
-            list call [list ref [core::coroutines::releaseNative]] [list ref [dict get $hir bindings $b name]]
-        }]
+        set calls [Releases $hir $releases]
         if {$i < $n} {
             lappend result $lowered {*}$calls
         } elseif {[lindex $lowered 0] eq "bind"} {
@@ -206,6 +221,32 @@ proc hir::lower::Seq {hir ids} {
         }
     }
     return $result
+}
+
+# The core IR releasing the coroutines of handle bindings BINDINGS.
+proc hir::lower::Releases {hir bindings} {
+    return [lmap b $bindings {
+        list call [list ref [core::coroutines::releaseNative]] [list ref [dict get $hir bindings $b name]]
+    }]
+}
+
+# LOWERED, the core IR of call (or handle) E, releasing the coroutines whose
+# handles a declared error it propagates takes out of scope
+# (hir::coroutines::releasesOnError): a handler per such error that releases
+# and fails with the same error again -- an error is its name, so the
+# propagation goes on unchanged.
+proc hir::lower::ReleasingOnError {hir e lowered} {
+    set byName [hir::coroutines::releasesOnError $hir $e]
+    if {$byName eq ""} {
+        return $lowered
+    }
+    if {[lindex $lowered 0] ne "handle"} {
+        set lowered [list handle $lowered]
+    }
+    dict for {name bindings} $byName {
+        lappend lowered $name [list block {} {*}[Releases $hir $bindings] [list fail $name]]
+    }
+    return $lowered
 }
 
 proc hir::lower::Exprs {hir ids} {

@@ -3253,15 +3253,46 @@ proc native::lower::Sequence {fnVar exprs} {
         # The coroutines whose handles are dead after this statement
         # (COROUTINES.md, "Release at the last use"); the statement's value
         # register stays the sequence's value.
-        foreach b [hir::coroutines::releasesAfter $hir $e] {
-            lassign [Access fn $b] how where
-            if {$how ne "reg"} {
-                throw {NATIVE BUG} "native lowering: coroutine handle $b is not in a register"
-            }
-            Assign fn "op corelease $where" $e
-        }
+        ReleaseHandles fn [hir::coroutines::releasesAfter $hir $e] $e
     }
     return $result
+}
+
+# Releases the coroutines of handle bindings BINDINGS (`corelease`, at
+# expression E): COROUTINES.md, "Release at the last use" and "Release on
+# every early exit".
+proc native::lower::ReleaseHandles {fnVar bindings e} {
+    upvar 1 $fnVar fn
+    foreach b $bindings {
+        lassign [Access fn $b] how where
+        if {$how ne "reg"} {
+            throw {NATIVE BUG} "native lowering: coroutine handle $b is not in a register"
+        }
+        Assign fn "op corelease $where" $e
+    }
+}
+
+# Where a failure of call (or handle) E is pending: releases the coroutines
+# whose handles a declared error it propagates takes out of scope
+# (hir::coroutines::releasesOnError), by the pending error's name, each
+# matching group then propagating it on unchanged (`reraise`). The code
+# after it runs only for other failures.
+proc native::lower::ReleaseOnError {fnVar e byName} {
+    upvar 1 $fnVar fn
+    set saved [dict get $fn locals]
+    set savedRaw [dict get $fn rawCache]
+    dict for {name bindings} $byName {
+        set eqReg [Assign fn "declarederroreq [ErrorId $name]" $e]
+        set matchLabel [NewLabel fn]
+        set nextLabel [NewLabel fn]
+        Emit fn "br $eqReg $matchLabel $nextLabel" $e
+        EmitLabel fn $matchLabel
+        ReleaseHandles fn $bindings $e
+        Emit fn "reraise" $e
+        EmitLabel fn $nextLabel
+    }
+    dict set fn locals $saved
+    dict set fn rawCache $savedRaw
 }
 
 proc native::lower::Expr {fnVar e {want tagged}} {
@@ -3309,6 +3340,11 @@ proc native::lower::Expr {fnVar e {want tagged}} {
         struct    { set result [Struct fn $e $node] }
         project   { set result [Project fn $e $node] }
         return {
+            # The coroutines this exit takes out of scope: released before
+            # its value, or (those the value refers to) right before
+            # leaving.
+            lassign [hir::coroutines::releasesOnExit $hir $e] before after
+            ReleaseHandles fn $before $e
             set companion [dict get $fn companion]
             if {$companion ne ""} {
                 # A scalar-replacement companion function (see the "Scalar
@@ -3320,6 +3356,7 @@ proc native::lower::Expr {fnVar e {want tagged}} {
                 set fields [VirtualValue fn [dict get $node value] $companion \
                     [hir::escape::resultCut $escape [dict get $fn instance]]]
                 if {$fields ne "never"} {
+                    ReleaseHandles fn $after $e
                     Emit fn "retmulti [join $fields { }]" $e
                 }
             } elseif {[dict get $fn regionCompanion]} {
@@ -3331,6 +3368,7 @@ proc native::lower::Expr {fnVar e {want tagged}} {
                 # produces.
                 set fields [Expr fn [dict get $node value] region]
                 if {$fields ne "never"} {
+                    ReleaseHandles fn $after $e
                     Emit fn "retmulti [join $fields { }]" $e
                 }
             } elseif {[PlanResultFamily fn] ne ""} {
@@ -3339,17 +3377,21 @@ proc native::lower::Expr {fnVar e {want tagged}} {
                 # the returned construction stays virtual.
                 set value [SequenceTo fn [list [dict get $node value]] [PlanResultFamily fn]]
                 if {$value ne "never"} {
+                    ReleaseHandles fn $after $e
                     Emit fn "ret $value" $e
                 }
             } else {
                 set value [Expr fn [dict get $node value] [expr {[ResultRaw fn] ? "rawjoin" : [ResultShort fn] ne "" ? [ResultShort fn] : "tagged"}]]
                 if {$value ne "never"} {
+                    ReleaseHandles fn $after $e
                     Emit fn "ret $value" $e
                 }
             }
             set result never
         }
         break {
+            lassign [hir::coroutines::releasesOnExit $hir $e] before after
+            ReleaseHandles fn $before $e
             lassign [dict get $fn loops [dict get $node target]] head exit resultReg accReg
             if {$accReg ne ""} {
                 # A returning iterable loop (listloop, RETURNING-ITERABLE-
@@ -3374,6 +3416,7 @@ proc native::lower::Expr {fnVar e {want tagged}} {
                     set value [Expr fn [dict get $node value]]
                 }
                 if {$value ne "never"} {
+                    ReleaseHandles fn $after $e
                     if {$value eq ""} {
                         set value [Assign fn unit]
                     }
@@ -3385,6 +3428,7 @@ proc native::lower::Expr {fnVar e {want tagged}} {
             }
         }
         continue {
+            ReleaseHandles fn [lindex [hir::coroutines::releasesOnExit $hir $e] 0] $e
             lassign [dict get $fn loops [dict get $node target]] head
             Emit fn "jump $head" $e
             dict set fn continued [dict get $node target] 1
@@ -3399,6 +3443,7 @@ proc native::lower::Expr {fnVar e {want tagged}} {
             }
         }
         fail {
+            ReleaseHandles fn [lindex [hir::coroutines::releasesOnExit $hir $e] 0] $e
             Emit fn "faildeclared [ErrorId [dict get $node name]] [Quote [dict get $node name]]" $e
             set result never
         }
@@ -5508,9 +5553,33 @@ proc native::lower::ClosedResult {fnVar e result} {
 # one dict-exists test.
 proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
     upvar 1 $fnVar fn
+    variable hir
+    # A declared error this call propagates out of the scope of coroutine
+    # handles releases them on its way (hir::coroutines::releasesOnError):
+    # the call's failures land on a pad that does, then go on (Handle's
+    # technique, with no handler).
+    set byName [hir::coroutines::releasesOnError $hir $e]
+    if {$byName ne ""} {
+        set pad [NewLabel fn]
+        Emit fn "pusherrorexit $pad" $e
+    }
     set result [CallInner fn $e $node $want $wantVirtual $wantRegion]
     if {[lindex [dict get $node target] 0] eq "block" && [BytesFlowCandidate fn $e $node]} {
         AddressFlowAcrossCall fn $e $node $result
+    }
+    if {$byName ne ""} {
+        Emit fn "poperrorexit" $e
+        set normal [expr {[lindex $result 0] ne "never"}]
+        if {$normal} {
+            set join [NewLabel fn]
+            Emit fn "jump $join" $e
+        }
+        EmitLabel fn $pad
+        ReleaseOnError fn $e $byName
+        Emit fn "reraise" $e
+        if {$normal} {
+            EmitLabel fn $join
+        }
     }
     return $result
 }
@@ -8539,6 +8608,7 @@ proc native::lower::LockLoop {fnVar e node} {
 # has already restored it by then).
 proc native::lower::Handle {fnVar e node} {
     upvar 1 $fnVar fn
+    variable hir
     set call [dict get $node call]
     set names [dict get $node handlerNames]
     set scopes [dict get $node handlerScopes]
@@ -8583,6 +8653,9 @@ proc native::lower::Handle {fnVar e node} {
         }
         EmitLabel fn $nextLabel
     }
+    # A declared error no handler handles, leaving the scope of coroutine
+    # handles (hir::coroutines::releasesOnError): released on its way out.
+    ReleaseOnError fn $e [hir::coroutines::releasesOnError $hir $e]
     Emit fn "reraise" $e
 
     if {!$joined} {

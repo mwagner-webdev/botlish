@@ -466,7 +466,7 @@ proc hir::coroutines::MoveText {hir bind} {
 @@ release-never no coroutine is released at its handle's last use: every one waits for a collection (Tcl: the program's end)
 ## hir/coroutines.tcl
 <<<<
-    dict set hir coroutines releases [expr {[dict size $affineDiagnostics] ? {} : [Releases $hir $parent]}]
+    dict set hir coroutines releases [Releases $hir $scopes]
 ====
     dict set hir coroutines releases {}
 >>>>
@@ -474,15 +474,15 @@ proc hir::coroutines::MoveText {hir bind} {
 @@ release-moved-handle a handle moved away is released too: its new owner's coroutine is released while still in use
 ## hir/coroutines.tcl
 <<<<
-                || [lindex [dict get $state $b] 0] ni {live maybe}} continue
+        && [lindex [dict get $state $b] 0] in {live maybe}}]
 ====
-                || [lindex [dict get $state $b] 0] ni {live maybe moved}} continue
+        && [lindex [dict get $state $b] 0] in {live maybe moved}}]
 >>>>
 
 @@ release-at-declaration a coroutine is released right after its handle's binding, before its uses
 ## hir/coroutines.tcl
 <<<<
-            set last [expr {max($last, $index)}]
+            set last [expr {max($last, $at)}]
 ====
             set last $last
 >>>>
@@ -538,9 +538,9 @@ proc hir::coroutines::MoveText {hir bind} {
 @@ native-release-not-emitted native lowering emits no corelease
 ## native/lower.tcl
 <<<<
-            Assign fn "op corelease $where" $e
+        Assign fn "op corelease $where" $e
 ====
-            list $where
+        list $where
 >>>>
 
 @@ native-release-keeps-stack a native release leaves a suspended coroutine's stack in place (a collection frees it later)
@@ -550,4 +550,111 @@ proc hir::coroutines::MoveText {hir bind} {
     co.thunk = UNIT;
 ====
     co.thunk = UNIT;
+>>>>
+
+# ---------------------------------------------------------------------------
+# Release on every early exit (COROUTINES.md)
+
+@@ exit-release-never no exit releases anything: a coroutine left by a return, fail, break, continue or failing call waits for a collection (Tcl: the program's end)
+## hir/coroutines.tcl
+<<<<
+    lassign [ExitReleases $hir $parent $scopes] exits errorExits
+====
+    lassign {{} {}} exits errorExits
+>>>>
+
+@@ exit-release-crosses-loop a break or continue releases every handle of its function, not only those of the loop body it leaves: a handle the function still uses after the loop is released
+## hir/coroutines.tcl
+<<<<
+        if {[dict get $node kind] eq "block" || ($loop ne "" && $p eq $loop)} break
+====
+        if {[dict get $node kind] eq "block"} break
+>>>>
+
+@@ exit-release-handled-error a handled call releases on the errors its handlers handle too: the handler resumes a released coroutine
+## hir/coroutines.tcl
+<<<<
+                        if {$name in [dict get $hir exprs $p handlerNames]} continue
+====
+>>>>
+
+@@ exit-release-before-value an exit releases every handle before evaluating its value, also one the value resumes
+## hir/coroutines.tcl
+<<<<
+        if {$b in $used} {
+            lappend after $b
+====
+        if {0} {
+            lappend after $b
+>>>>
+
+@@ exit-release-after-last-use an exit after a handle's last use releases it again (it was released at that last use)
+## hir/coroutines.tcl
+<<<<
+            if {$at <= [dict get $scopes $b last] && [Owns $state $b] && ![Shadowed $hir $x $b]} {
+====
+            if {[Owns $state $b] && ![Shadowed $hir $x $b]} {
+>>>>
+
+@@ exit-release-shadowed an exit releases a handle whose name a nested binding rebinds: the release names the other binding
+## hir/coroutines.tcl
+<<<<
+            if {$other ne $b && [dict get $hir bindings $other name] eq $name} {
+                return 1
+            }
+====
+>>>>
+
+@@ core-ir-error-release-missing the Core IR lowering releases nothing on a call's propagated error
+## hir/lower.tcl
+<<<<
+    if {$byName eq ""} {
+        return $lowered
+    }
+    if {[lindex $lowered 0] ne "handle"} {
+====
+    if {1} {
+        return $lowered
+    }
+    if {[lindex $lowered 0] ne "handle"} {
+>>>>
+
+@@ compiler-exit-release-missing the Tcl compiler compiling HIR releases nothing before an exit statement
+## compiler/compiler.tcl
+<<<<
+    foreach b $before {
+        CompileRelease ctx $b
+    }
+    switch -- [Kind $e] {
+====
+    switch -- [Kind $e] {
+>>>>
+
+@@ compiler-error-release-missing the Tcl compiler compiling HIR releases nothing on a call's propagated error
+## compiler/compiler.tcl
+<<<<
+    Indent ctx 1
+    ReleaseOnErrorCode ctx $byName $stVar $resVar
+====
+    Indent ctx 1
+>>>>
+
+@@ native-exit-release-missing native lowering releases nothing before a return
+## native/lower.tcl
+<<<<
+            lassign [hir::coroutines::releasesOnExit $hir $e] before after
+            ReleaseHandles fn $before $e
+            set companion [dict get $fn companion]
+====
+            lassign [hir::coroutines::releasesOnExit $hir $e] before after
+            set companion [dict get $fn companion]
+>>>>
+
+@@ native-error-release-missing native lowering's failure pad of a call releases nothing
+## native/lower.tcl
+<<<<
+        EmitLabel fn $pad
+        ReleaseOnError fn $e $byName
+====
+        EmitLabel fn $pad
 >>>>
