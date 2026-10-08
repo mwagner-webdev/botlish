@@ -991,13 +991,13 @@ proc coReleases {text} {
         expr {[regexp {^coroutine#[0-9]+$} $n] ? "<handle>" : [regsub {#[0-9]+$} $n ""]}
     }}
     set rows {}
-    foreach e [lsort -dictionary [dict keys [dict get $hir coroutines releases]]] {
+    foreach e [lsort -dictionary [dict keys [dict get $hir affine releases]]] {
         set node [dict get $hir exprs $e]
         set label [dict get $node kind]
         if {$label eq "bind"} {
             set label "bind [apply $name $hir [dict get $node binding]]"
         }
-        lappend rows [list $label {*}[lmap b [dict get $hir coroutines releases $e] {apply $name $hir $b}]]
+        lappend rows [list $label {*}[lmap b [dict get $hir affine releases $e] {apply $name $hir $b}]]
     }
     return $rows
 }
@@ -1101,13 +1101,13 @@ proc coExits {text} {
     set hir [surface::compile $text -warnings off]
     set name {{hir b} {regsub {#[0-9]+$} [dict get $hir bindings $b name] ""}}
     set rows {}
-    set table [dict merge [dict get $hir coroutines exits] [dict get $hir coroutines errorExits]]
+    set table [dict merge [dict get $hir affine exits] [dict get $hir affine errorExits]]
     foreach e [lsort -dictionary [dict keys $table]] {
-        if {[dict exists $hir coroutines exits $e]} {
-            lassign [hir::coroutines::releasesOnExit $hir $e] before after
+        if {[dict exists $hir affine exits $e]} {
+            lassign [hir::affine::releasesOnExit $hir $e] before after
             lappend rows [list [hir::kind $hir $e] [lmap b $before {apply $name $hir $b}] [lmap b $after {apply $name $hir $b}]]
         } else {
-            dict for {error bs} [dict get $hir coroutines errorExits $e] {
+            dict for {error bs} [dict get $hir affine errorExits $e] {
                 lappend rows [list [hir::kind $hir $e] $error [lmap b $bs {apply $name $hir $b}]]
             }
         }

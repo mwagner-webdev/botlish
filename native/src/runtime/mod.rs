@@ -2,6 +2,7 @@
 //! helper ABI generated code calls. Independent of Cranelift.
 
 pub mod aot;
+pub mod affine;
 pub mod bytesobj;
 pub mod constants;
 pub mod construct;

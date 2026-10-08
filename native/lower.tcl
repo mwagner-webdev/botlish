@@ -149,7 +149,8 @@ namespace eval native::lower {
         coroutine#resume {coroutine-resume} \
         coroutine#yield  {op coyield} \
         coroutine::done? {op codone} \
-        coroutine#release {op corelease}]
+        coroutine#release {op corelease} \
+        affine#drop {op affinedrop}]
     # State of the program being lowered. hir is the view of the instance
     # being lowered, baseHir the program's semantic HIR.
     variable hir {}
@@ -162,6 +163,7 @@ namespace eval native::lower {
     variable parents {}
     variable selfTail {}
     variable envless {}
+    variable affineTemps {}
     variable captureLists {}
     variable pending {}
     variable usedNatives {}
@@ -1318,6 +1320,22 @@ proc native::lower::Program {hirProgram args} {
     set hir $hirProgram
     variable parents
     set parents [dict create]
+    variable affineTemps
+    # The construction operands a release names as pending temporaries
+    # (hir::affine::temporaries, AFFINE-VALUES.md): Expr records their
+    # registers (fn `temps`) for ReleaseHandles.
+    set affineTemps [hir::affine::temporaries $hirProgram]
+    # A discarded construction is not built (Struct's and the List
+    # literal's discarded paths): its release is its affine components'
+    # (hir::affine::Components), whose registers Expr records too.
+    if {[dict exists $hirProgram affine releases]} {
+        dict for {statement items} [dict get $hirProgram affine releases] {
+            if {$statement ni $items} continue
+            foreach {component type} [hir::affine::Components $hirProgram $statement] {
+                dict set affineTemps $component 1
+            }
+        }
+    }
     set reprOpt [dict get $options -repr-opt]
     set callFactsOpt [dict get $options -call-facts-opt]
     set callEffectsOpt [dict get $options -call-effects-opt]
@@ -3250,31 +3268,138 @@ proc native::lower::Sequence {fnVar exprs} {
         if {$result eq "never"} {
             break
         }
-        # The coroutines whose handles are dead after this statement
-        # (COROUTINES.md, "Release at the last use"); the statement's value
-        # register stays the sequence's value.
-        ReleaseHandles fn [hir::coroutines::releasesAfter $hir $e] $e
+        # The affine values dead after this statement (AFFINE-VALUES.md;
+        # COROUTINES.md, "Release at the last use"), its own discarded value
+        # included; the statement's value register stays the sequence's
+        # value.
+        ReleaseHandles fn [hir::affine::releasesAfter $hir $e] $e $result
     }
     return $result
 }
 
-# Releases the coroutines of handle bindings BINDINGS (`corelease`, at
-# expression E): COROUTINES.md, "Release at the last use" and "Release on
-# every early exit".
-proc native::lower::ReleaseHandles {fnVar bindings e} {
+# Releases what the release items ITEMS hold (hir::affine::DropPlan), at
+# expression E: a binding's value (its register, or the field registers of
+# a virtualized aggregate), a pending temporary's (the register Expr
+# recorded for it, fn `temps`), or the statement E's own value (register
+# RESULT). A coroutine is `corelease`d, an aggregate `affinedrop`ped by its
+# static descriptor: AFFINE-VALUES.md; COROUTINES.md, "Release at the last
+# use" and "Release on every early exit".
+proc native::lower::ReleaseHandles {fnVar items e {result ""}} {
     upvar 1 $fnVar fn
-    foreach b $bindings {
-        lassign [Access fn $b] how where
-        if {$how ne "reg"} {
-            throw {NATIVE BUG} "native lowering: coroutine handle $b is not in a register"
+    variable hir
+    foreach item $items {
+        set plan [hir::affine::DropPlan $hir $item]
+        if {$plan eq ""} continue
+        set descriptor [expr {[lindex $plan 0] eq "coroutine" ? "c" : [lindex $plan 1]}]
+        if {[string match b* $item]} {
+            set access [Access fn $item]
+        } elseif {$item eq $e && [hir::kind $hir $e] eq "struct"
+                || ($item eq $e && [hir::affine::NativeName $hir $e] eq "list")} {
+            # A discarded construction (not built): its components.
+            foreach {component type} [hir::affine::Components $hir $e] {
+                if {[dict exists $fn temps $component]} {
+                    DropAccess fn [dict get $fn temps $component] [hir::affine::Descriptor $hir $type] $e
+                }
+            }
+            continue
+        } elseif {$item eq $e && $result ne ""} {
+            set access [list reg $result]
+        } elseif {[dict exists $fn temps $item]} {
+            set access [dict get $fn temps $item]
+        } else {
+            # A pending temporary not evaluated on this path.
+            continue
         }
-        Assign fn "op corelease $where" $e
+        DropAccess fn $access $descriptor $e
     }
 }
 
-# Where a failure of call (or handle) E is pending: releases the coroutines
-# whose handles a declared error it propagates takes out of scope
-# (hir::coroutines::releasesOnError), by the pending error's name, each
+# Drops the affine value at ACCESS (a register, or a virtualized
+# aggregate's field registers in slot order) by DESCRIPTOR
+# (hir::affine::Descriptor), at expression E.
+proc native::lower::DropAccess {fnVar access descriptor e} {
+    upvar 1 $fnVar fn
+    switch -- [lindex $access 0] {
+        reg {
+            set where [lindex $access 1]
+            if {$descriptor eq "c"} {
+                Assign fn "op corelease $where" $e
+            } else {
+                set d [Assign fn "str [Quote $descriptor]" $e]
+                Assign fn "op affinedrop $where $d" $e
+            }
+        }
+        virtual {
+            # A virtualized construction (its fields in registers, never
+            # materialized): the descriptor applied to its fields directly.
+            set fields [lindex $access 1]
+            set pos 0
+            foreach {field inner} [DescriptorParts $descriptor] {
+                if {$field eq "*"} {
+                    foreach r $fields {
+                        DropAccess fn [list reg $r] $inner $e
+                    }
+                } else {
+                    DropAccess fn [list reg [lindex $fields $field]] $inner $e
+                }
+            }
+        }
+        default {
+            throw {NATIVE BUG} "native lowering: an affine value at $access cannot be released"
+        }
+    }
+}
+
+# The parts of an aggregate drop DESCRIPTOR as {SLOT INNER ...} pairs ("*"
+# for every element of a List).
+proc native::lower::DescriptorParts {descriptor} {
+    switch -- [string index $descriptor 0] {
+        l {
+            return [list * [string range $descriptor 1 end]]
+        }
+        s {
+            set pos 1
+            set n [DescriptorNumber $descriptor pos]
+            set parts {}
+            for {set i 0} {$i < $n} {incr i} {
+                set slot [DescriptorNumber $descriptor pos]
+                set start $pos
+                DescriptorSkip $descriptor pos
+                lappend parts $slot [string range $descriptor $start $pos-1]
+            }
+            return $parts
+        }
+    }
+    throw {NATIVE BUG} "native lowering: bad drop descriptor $descriptor"
+}
+
+proc native::lower::DescriptorNumber {descriptor posVar} {
+    upvar 1 $posVar pos
+    set end [string first . $descriptor $pos]
+    set n [string range $descriptor $pos $end-1]
+    set pos [expr {$end + 1}]
+    return $n
+}
+
+proc native::lower::DescriptorSkip {descriptor posVar} {
+    upvar 1 $posVar pos
+    set c [string index $descriptor $pos]
+    incr pos
+    switch -- $c {
+        l { DescriptorSkip $descriptor pos }
+        s {
+            set n [DescriptorNumber $descriptor pos]
+            for {set i 0} {$i < $n} {incr i} {
+                DescriptorNumber $descriptor pos
+                DescriptorSkip $descriptor pos
+            }
+        }
+    }
+}
+
+# Where a failure of call (or handle) E is pending: releases the affine
+# values a declared error it propagates takes out of scope or abandons
+# (hir::affine::releasesOnError), by the pending error's name, each
 # matching group then propagating it on unchanged (`reraise`). The code
 # after it runs only for other failures.
 proc native::lower::ReleaseOnError {fnVar e byName} {
@@ -3343,7 +3468,7 @@ proc native::lower::Expr {fnVar e {want tagged}} {
             # The coroutines this exit takes out of scope: released before
             # its value, or (those the value refers to) right before
             # leaving.
-            lassign [hir::coroutines::releasesOnExit $hir $e] before after
+            lassign [hir::affine::releasesOnExit $hir $e] before after
             ReleaseHandles fn $before $e
             set companion [dict get $fn companion]
             if {$companion ne ""} {
@@ -3390,7 +3515,7 @@ proc native::lower::Expr {fnVar e {want tagged}} {
             set result never
         }
         break {
-            lassign [hir::coroutines::releasesOnExit $hir $e] before after
+            lassign [hir::affine::releasesOnExit $hir $e] before after
             ReleaseHandles fn $before $e
             lassign [dict get $fn loops [dict get $node target]] head exit resultReg accReg
             if {$accReg ne ""} {
@@ -3428,7 +3553,7 @@ proc native::lower::Expr {fnVar e {want tagged}} {
             }
         }
         continue {
-            ReleaseHandles fn [lindex [hir::coroutines::releasesOnExit $hir $e] 0] $e
+            ReleaseHandles fn [lindex [hir::affine::releasesOnExit $hir $e] 0] $e
             lassign [dict get $fn loops [dict get $node target]] head
             Emit fn "jump $head" $e
             dict set fn continued [dict get $node target] 1
@@ -3443,7 +3568,7 @@ proc native::lower::Expr {fnVar e {want tagged}} {
             }
         }
         fail {
-            ReleaseHandles fn [lindex [hir::coroutines::releasesOnExit $hir $e] 0] $e
+            ReleaseHandles fn [lindex [hir::affine::releasesOnExit $hir $e] 0] $e
             Emit fn "faildeclared [ErrorId [dict get $node name]] [Quote [dict get $node name]]" $e
             set result never
         }
@@ -3461,6 +3586,11 @@ proc native::lower::Expr {fnVar e {want tagged}} {
     }
     if {$result eq "never"} {
         return [Never fn $e]
+    }
+    variable affineTemps
+    if {[dict exists $affineTemps $e]} {
+        # A pending temporary a release may name (ReleaseHandles).
+        dict set fn temps $e [list reg $result]
     }
     if {$result ne "never" && $want eq "raw" && $repr eq "tagged"} {
         # WANT could not be produced directly (Ref/Call are the only kinds
@@ -5554,11 +5684,11 @@ proc native::lower::ClosedResult {fnVar e result} {
 proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
     upvar 1 $fnVar fn
     variable hir
-    # A declared error this call propagates out of the scope of coroutine
-    # handles releases them on its way (hir::coroutines::releasesOnError):
-    # the call's failures land on a pad that does, then go on (Handle's
-    # technique, with no handler).
-    set byName [hir::coroutines::releasesOnError $hir $e]
+    # A declared error this call propagates out of the scope of affine
+    # owners, or past pending temporaries, releases them on its way
+    # (hir::affine::releasesOnError): the call's failures land on a pad that
+    # does, then go on (Handle's technique, with no handler).
+    set byName [hir::affine::releasesOnError $hir $e]
     if {$byName ne ""} {
         set pad [NewLabel fn]
         Emit fn "pusherrorexit $pad" $e
@@ -8653,9 +8783,9 @@ proc native::lower::Handle {fnVar e node} {
         }
         EmitLabel fn $nextLabel
     }
-    # A declared error no handler handles, leaving the scope of coroutine
-    # handles (hir::coroutines::releasesOnError): released on its way out.
-    ReleaseOnError fn $e [hir::coroutines::releasesOnError $hir $e]
+    # A declared error no handler handles, leaving the scope of affine
+    # owners (hir::affine::releasesOnError): released on its way out.
+    ReleaseOnError fn $e [hir::affine::releasesOnError $hir $e]
     Emit fn "reraise" $e
 
     if {!$joined} {

@@ -720,7 +720,8 @@ proc surface::ast::showType {type} {
     if {$name eq "fn"} {
         # A structural function type (surface::parser::FnType): its
         # canonical source spelling, fields in canonical order.
-        return [format {Fn{args: [%s], return: %s, errors: [%s]}} \
+        return [format {%s{args: [%s], return: %s, errors: [%s]}} \
+            [expr {[dict exists $arg kind] ? "Coroutine" : "Fn"}] \
             [join [lmap t [dict get $arg args] {showType $t}] {, }] \
             [showType [dict get $arg return]] [join [dict get $arg errors] {, }]]
     }

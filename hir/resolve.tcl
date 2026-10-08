@@ -543,7 +543,7 @@ proc hir::resolve::ResolveTypeExpr {typeExpr {ns ""}} {
                     [hir::types::ContextTraitPositionMessage $contextTrait "part of a function type"]
             }
             if {[hir::types::MentionsTrait $t]} {
-                # A function type over a trait would be a callable value whose
+                # A function (or coroutine) type over a trait would be a callable value whose
                 # calls need a witness only the caller knows: there is no
                 # runtime trait dispatch to give it one (TRAITS.md,
                 # "Function values").
@@ -551,10 +551,29 @@ proc hir::resolve::ResolveTypeExpr {typeExpr {ns ""}} {
                     "a function type cannot mention a trait ([hir::types::show $t]): a trait-polymorphic function is not a general callable value (there is no runtime trait dispatch)"
             }
         }
+        set coroutine [expr {[dict exists $arg kind] && [dict get $arg kind] eq "coroutine"}]
+        set what [expr {$coroutine ? "coroutine type" : "function type"}]
         foreach errName [dict get $arg errors] {
             if {![hir::errordecls::isDeclared $errName]} {
-                error "unknown error \"$errName\" in the function type's \"errors\" list: no \"error $errName\" declaration is visible"
+                error "unknown error \"$errName\" in the $what's \"errors\" list: no \"error $errName\" declaration is visible"
             }
+        }
+        if {$coroutine} {
+            # A coroutine handle type (AFFINE-VALUES.md): the resume
+            # protocol is its args -- no message, or exactly one of a named
+            # struct type (COROUTINES.md's structured-message restriction).
+            # Construction arguments are never part of it.
+            if {[llength $argTypes] > 1} {
+                return -code error -errorcode {BOTLISH COROUTINE-CONTRACT} \
+                    "a coroutine is resumed with at most one message, but this coroutine type's \"args\" lists [llength $argTypes] types (put several values in the fields of one struct)"
+            }
+            foreach t $argTypes {
+                if {![hir::coroutines::IsStructProtocol $t]} {
+                    return -code error -errorcode {BOTLISH COROUTINE-CONTRACT} \
+                        "the message type in a coroutine type's \"args\" must be a declared struct type, not [hir::types::show $t] (a coroutine is resumed with one structured message)"
+                }
+            }
+            return [hir::types::MakeCoroutineType $argTypes $result [dict get $arg errors]]
         }
         return [hir::types::MakeFn $argTypes $result [dict get $arg errors]]
     }
@@ -686,7 +705,8 @@ proc hir::resolve::ShowTypeExpr {typeExpr} {
     }
     lassign $typeExpr name arg
     if {$name eq "fn"} {
-        return [format {Fn{args: [%s], return: %s, errors: [%s]}} \
+        return [format {%s{args: [%s], return: %s, errors: [%s]}} \
+            [expr {[dict exists $arg kind] ? "Coroutine" : "Fn"}] \
             [join [lmap t [dict get $arg args] {ShowTypeExpr $t}] {, }] \
             [ShowTypeExpr [dict get $arg return]] [join [dict get $arg errors] {, }]]
     }
@@ -814,6 +834,13 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 # each trait parameter takes its witness type -- the
                 # representation it has -- and records the view it is.
                 dict for {i witness} [dict get $head params] {
+                    if {[lindex $declaredParamTypes $i] eq {}} {
+                        # An untyped parameter given an affine argument
+                        # (AFFINE-VALUES.md, "Generic callables"): the clone
+                        # declares it with the argument's type.
+                        lset declaredParamTypes $i $witness
+                        continue
+                    }
                     set view [hir::types::MakeView [lindex [lindex $declaredParamTypes $i] 1] $witness]
                     dict set hir bindings [lindex $params $i] view $view
                     lset declaredParamTypes $i $witness

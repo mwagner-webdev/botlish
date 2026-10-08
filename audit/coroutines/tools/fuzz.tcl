@@ -807,11 +807,11 @@ proc ExitsOf {hir b} {
     }
     set name {{hir b} {regsub {#[0-9]+$} [dict get $hir bindings $b name] ""}}
     foreach e [lsort -dictionary $nodes] {
-        if {[dict exists $hir coroutines exits $e]} {
-            lappend result [list [hir::kind $hir $e] [lsort [lmap h [dict get $hir coroutines exits $e] {apply $name $hir $h}]]]
+        if {[dict exists $hir affine exits $e]} {
+            lappend result [list [hir::kind $hir $e] [lsort [lmap h [dict get $hir affine exits $e] {apply $name $hir $h}]]]
         }
-        if {[dict exists $hir coroutines errorExits $e]} {
-            set byName [dict get $hir coroutines errorExits $e]
+        if {[dict exists $hir affine errorExits $e]} {
+            set byName [dict get $hir affine errorExits $e]
             lappend result [list call [lsort [lmap h [expr {[dict exists $byName Boom] ? [dict get $byName Boom] : {}}] {apply $name $hir $h}]]]
         }
     }
@@ -863,7 +863,7 @@ for {set i 0} {$i < $n} {incr i} {
         # The final owner is released once, right after its last reference;
         # every earlier owner was moved, so is not released at all.
         set released {}
-        dict for {e bs} [dict get $hir coroutines releases] {
+        dict for {e bs} [dict get $hir affine releases] {
             foreach b $bs {
                 if {[regsub {#[0-9]+$} [dict get $hir bindings $b name] ""] ne [dict get $p owner]} continue
                 set node [dict get $hir exprs $e]
@@ -890,7 +890,7 @@ for {set i 0} {$i < $n} {incr i} {
                 lappend problems "exits of w$k: oracle {[dict get $p exits $k]}, compiler {$got}"
             }
         }
-        set all [expr {[dict size [dict get $hir coroutines exits]] + [dict size [dict get $hir coroutines errorExits]]}]
+        set all [expr {[dict size [dict get $hir affine exits]] + [dict size [dict get $hir affine errorExits]]}]
         if {$all != $counted} {
             lappend problems "exits: [expr {$all - $counted}] outside the generated functions release"
         }

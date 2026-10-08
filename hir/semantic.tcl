@@ -267,7 +267,11 @@ proc hir::semantic::Call {hir ctx e block argTypes blockResult} {
     variable maxInstances
     variable maxDepth
     variable levelLimit
-    if {!$enabled || $state eq "" || ($blockResult eq "never" && ![hir::traits::IsPolymorphic $hir $block])} {
+    if {!$enabled || $state eq "" || ($blockResult eq "never" && ![hir::traits::IsPolymorphic $hir $block]
+            && ![hir::types::AnyAffine $argTypes])} {
+        # (A call that gives an affine argument always gets its instance,
+        # like a trait-polymorphic one: it decides the call's specialization,
+        # AFFINE-VALUES.md.)
         return $blockResult
     }
     set node [dict get $hir exprs $block]
@@ -291,6 +295,14 @@ proc hir::semantic::Call {hir ctx e block argTypes blockResult} {
             set generic [hir::traits::AbstractView $d $block $index]
         } elseif {$d ne {}} {
             set x [expr {[hir::types::subtype $t $d] ? $t : $d}]
+            if {[hir::signatures::inferredTrusted $hir $block $index]
+                    && [hir::signatures::CallableAdmits $t $d]} {
+                # A coroutine handle supplied for an untyped parameter the
+                # body calls (AFFINE-VALUES.md): its inferred contract is a
+                # callable contract, and the instance runs with the handle's
+                # own type, of its own callable kind.
+                set x $t
+            }
             set generic $d
         } else {
             # A view passed where nothing is declared is only its concrete
@@ -337,13 +349,18 @@ proc hir::semantic::Call {hir ctx e block argTypes blockResult} {
                 set reason nesting
             }
         }
-        if {$reason in {budget-total budget-block} && [hir::traits::IsPolymorphic $hir $block]} {
+        if {$reason in {budget-total budget-block}
+                && ([hir::traits::IsPolymorphic $hir $block] || [hir::types::AnyAffine $entry])} {
             # A trait-polymorphic function's call has no generic fallback:
             # its witnesses decide which specialization it is (TRAITS.md).
             # Past the budget it gets the instance keyed by its trait
             # parameters' views alone, every other parameter at its generic
-            # type -- at most one per witness combination.
-            set entry [lmap x $entry g $generics {expr {[hir::types::IsView $x] ? $x : $g}}]
+            # type -- at most one per witness combination. So does a call
+            # that gives an affine argument (AFFINE-VALUES.md), keyed by its
+            # affine entry types.
+            set entry [lmap x $entry g $generics {
+                expr {[hir::types::IsView $x] || [hir::types::IsAffine $x] ? $x : $g}
+            }]
             set key [list $block $entry]
             set reason ""
         }
@@ -710,6 +727,13 @@ proc hir::semantic::verify {hirVar} {
         hir::range::verifyBlocks view $blocks
         hir::callables::verifyBlocks view $blocks
         hir::structs::verifyExprs view [Region $view $block]
+        if {[hir::types::AnyAffine [dict get $semantic instances $id args]]} {
+            # An instance that owns an affine argument (AFFINE-VALUES.md):
+            # the ownership discipline, with the instance's own types -- a
+            # generic function that would duplicate or erase the value it
+            # was given is invalid for the call that gives it one.
+            hir::affine::verifyInstance view $block [Region $view $block]
+        }
         dict set own $id [lmap d [dict get $view diagnostics] {
             if {[dict exists $definitional [list [dict get $d expr] [dict get $d message]]]} continue
             dict set d curable [expr {[dict get $d kind] eq "UNPROVEN-FIELD"}]
@@ -779,7 +803,12 @@ proc hir::semantic::verify {hirVar} {
 # the instance is reported as the opacity violation it is.
 proc hir::semantic::DerivedKind {own id} {
     set first [lindex [dict get $own $id] 0]
-    return [expr {[dict get $first kind] eq "OPAQUE-REPRESENTATION" ? "OPAQUE-REPRESENTATION" : "TYPE"}]
+    set kind [dict get $first kind]
+    if {$kind eq "OPAQUE-REPRESENTATION" || [string match AFFINE-* $kind] || $kind eq "USE-AFTER-MOVE"} {
+        # (An ownership violation keeps its own kind: AFFINE-VALUES.md.)
+        return $kind
+    }
+    return TYPE
 }
 
 # 1 if every problem instance ID has (in OWN) is an unproven struct field

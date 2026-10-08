@@ -277,6 +277,12 @@ pub enum OpCode {
     CoYield,
     CoDone,
     CoRelease,
+    /// `affinedrop %v %d`: the owner of the affine aggregate %v is dead from
+    /// here (AFFINE-VALUES.md; native/lower.tcl emits it where the affine
+    /// analysis put a release): releases every affine value %v owns, by the
+    /// static drop descriptor %d (a String, runtime/affine.rs). Result unit;
+    /// never fails or allocates (no safepoint), like `corelease`.
+    AffineDrop,
     /// Tcl 9-compatible Unicode alpha/alnum character classification
     /// (core/tclcompat.tcl's `is_tcl_alpha`/`is_tcl_alnum`): the operand is
     /// a one-Unicode-scalar String (RANGE if not). TEMPORARY compatibility
@@ -474,6 +480,7 @@ impl OpCode {
             "coyield" => CoYield,
             "codone" => CoDone,
             "corelease" => CoRelease,
+            "affinedrop" => AffineDrop,
             "mbytesnew" => MBytesNew,
             "mbytesfrom" => MBytesFrom,
             "mbyteslen" => MBytesLen,

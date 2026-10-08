@@ -1349,7 +1349,7 @@ proc hir::range::ProvesValueAcceptedBy {argType argRange declared} {
         return [AggregateAdmits [hir::types::Unshaped $argType] $declared]
     }
     if {[hir::types::IsFn $declared] || [hir::types::IsMutArray $declared]
-            || [hir::types::IsStructLike $declared]} {
+            || [hir::types::IsStructLike $declared] || [hir::types::IsCoroutine $declared]} {
         # A struct type (STRUCTS.md) is admitted by hir::types::subtype
         # alone: a named struct only ever by the same declaration, an
         # anonymous one by the same field set with admissible field types.
@@ -1582,8 +1582,18 @@ proc hir::range::VerifyCall {hirVar ranges e node} {
     lassign [dict get $node target] targetKind targetBlock
     if {$targetKind eq {}} {
         set calleeType [hir::typeOf $hir [dict get $node callee]]
-        if {[hir::types::IsFn $calleeType]} {
-            VerifyStructuralCall hir $ranges $e $node $calleeType
+        if {[hir::types::IsFn $calleeType] || [hir::types::IsCoroutine $calleeType]} {
+            VerifyStructuralCall hir $ranges $e $node $calleeType [dict get $node callee] [dict get $node args]
+        }
+        return
+    }
+    if {$targetKind eq {native} && [dict get [hir::symbol $hir $targetBlock] name] eq [core::coroutines::resumeNative]} {
+        # A coroutine resume written out as the internal native (COROUTINES.md):
+        # the call of its handle, checked by the same contract rules.
+        set args [dict get $node args]
+        set handleType [hir::typeOf $hir [lindex $args 0]]
+        if {[hir::types::IsCoroutine $handleType]} {
+            VerifyStructuralCall hir $ranges $e $node $handleType [lindex $args 0] [lrange $args 1 end]
         }
         return
     }
@@ -1614,15 +1624,15 @@ proc hir::range::VerifyCall {hirVar ranges e node} {
         set i $index
         incr index
         set argType [hir::typeOf $hir $arg]
-        if {[hir::types::IsCoroutine $argType]} {
-            # A coroutine handle is never a function's argument: that is the
-            # affine discipline's rejection (hir/coroutines.tcl:
-            # COROUTINE-NOT-FUNCTION, COROUTINE-STORAGE-UNSUPPORTED), not a
-            # second, type-level one.
-            continue
-        }
         set argRange [expr {[dict exists $ranges $arg] ? [dict get $ranges $arg] : [unknown]}]
         set inferred [hir::signatures::inferredTrusted $hir $targetBlock $i]
+        if {$inferred && [hir::signatures::CallableAdmits $argType $declaredType]} {
+            # An untyped parameter the body calls (its inferred contract is
+            # a callable contract, never a callable kind: AFFINE-VALUES.md):
+            # a coroutine handle with a compatible contract is admissible;
+            # the call's instance is analyzed with the handle itself.
+            continue
+        }
         if {$declaredType ne {} && [hir::types::IsTraitConstraint $declaredType]
                 && ![ProvesValueAcceptedBy $argType $argRange $declaredType]} {
             # A trait-typed parameter (TRAITS.md): the argument's static type
@@ -1632,6 +1642,20 @@ proc hir::range::VerifyCall {hirVar ranges e node} {
             }
             hir::Diagnose hir TRAIT-NOT-SATISFIED [hir::traits::NotSatisfiedMessage $hir \
                 [dict get $hir bindings $paramBinding name] $argType $declaredType] $arg
+            continue
+        }
+        if {$declaredType ne {} && !$inferred && [hir::types::IsFn $declaredType] && [hir::types::IsCoroutine $argType]} {
+            # A coroutine handle where a function value is declared
+            # (AFFINE-VALUES.md): Fn and Coroutine share the callable contract
+            # but are distinct callable kinds -- never an implicit conversion.
+            if {![dict exists $hir semanticContext]} {
+                dict set hir violatedDeclared $paramBinding $arg
+            }
+            hir::Diagnose hir COROUTINE-NOT-FUNCTION [format \
+                {"%s" is a coroutine handle, not a function value: it carries the evolving state of one coroutine and cannot be passed where a function value of type %s is expected (Fn and Coroutine are distinct callable kinds, even with the same contract; declare the parameter %s, or leave it untyped)} \
+                [expr {[dict get $hir exprs $arg kind] eq "ref" ? [dict get $hir exprs $arg name] : "this value"}] \
+                [hir::types::show $declaredType] \
+                [hir::types::show [list coroutine [lindex $declaredType 1]]]] $arg
             continue
         }
         if {$declaredType ne {} && ![ProvesValueAcceptedBy $argType $argRange $declaredType]} {
@@ -1813,23 +1837,49 @@ proc hir::range::RefinementClause {argType declared} {
 # contract also fixes the arity, so a call passing another number of
 # arguments is rejected statically (a direct call of an exact target with
 # the wrong arity remains the run-time ARITY error it always was).
-proc hir::range::VerifyStructuralCall {hirVar ranges e node calleeType} {
+proc hir::range::VerifyStructuralCall {hirVar ranges e node calleeType callee argExprs} {
     upvar 1 $hirVar hir
-    set declaredTypes [hir::types::FnArgs $calleeType]
-    set args [dict get $node args]
-    if {[llength $args] != [llength $declaredTypes]} {
+    # One contract check for every callable kind that carries its contract in
+    # its type (AFFINE-VALUES.md): a structural Fn value's call and a
+    # coroutine handle's resume. Arity and argument admissibility are the same
+    # proof; only the wording names the kind (a resume's arity is
+    # COROUTINE-RESUME-ARITY, phrased as its message protocol).
+    set declaredTypes [dict get [hir::types::Contract $calleeType] args]
+    set coroutine [hir::types::IsCoroutine $calleeType]
+    if {$coroutine && [hir::types::CoroutineResume $calleeType] eq "any"} {
+        # A protocol conflict, already diagnosed (COROUTINE-RESUME-CONFLICT).
+        return
+    }
+    if {[llength $argExprs] != [llength $declaredTypes]} {
+        if {$coroutine} {
+            set name [expr {[dict get $hir exprs $callee kind] eq "ref" ? [dict get $hir exprs $callee name] : "step"}]
+            if {$declaredTypes eq {}} {
+                hir::Diagnose hir COROUTINE-RESUME-ARITY \
+                    "this coroutine has the zero-message protocol: resume it with no argument, \"${name}()\", got [llength $argExprs] argument(s)" $e
+            } else {
+                set protocol [hir::types::show [lindex $declaredTypes 0]]
+                hir::Diagnose hir COROUTINE-RESUME-ARITY \
+                    "this coroutine is resumed with exactly one $protocol message: \"${name}($protocol {...})\", got [llength $argExprs] argument(s)" $e
+            }
+            return
+        }
         hir::Diagnose hir TYPE [format \
             {this call passes %d argument(s) to a callable of function type %s, whose contract takes %d} \
-            [llength $args] [hir::types::show $calleeType] [llength $declaredTypes]] $e
+            [llength $argExprs] [hir::types::show $calleeType] [llength $declaredTypes]] $e
         return
     }
     set index 0
-    foreach arg $args declaredType $declaredTypes {
+    foreach arg $argExprs declaredType $declaredTypes {
         incr index
         if {$declaredType eq "any"} { continue }
         set argType [hir::typeOf $hir $arg]
         set argRange [expr {[dict exists $ranges $arg] ? [dict get $ranges $arg] : [unknown]}]
         if {[ProvesValueAcceptedBy $argType $argRange $declaredType]} {
+            continue
+        }
+        if {$coroutine} {
+            hir::Diagnose hir TYPE \
+                "the resume message of this coroutine must be a [hir::types::show $declaredType], got [hir::types::show $argType]" $arg
             continue
         }
         hir::Diagnose hir TYPE [format \

@@ -87,11 +87,42 @@ namespace eval hir::structs {
     variable registry [dict create]
     # Entries of the previous compilation's registration are dropped by the
     # next apply call that brings declarations.
+    # ID -> 1|0: whether struct ID is affine (IsAffine), for this registry.
+    variable affinity [dict create]
 }
 
 proc hir::structs::Reset {} {
     variable registry
+    variable affinity
     set registry [dict create]
+    set affinity [dict create]
+}
+
+# 1 if struct ID is affine (hir::types::Affinity, AFFINE-VALUES.md): a field
+# type is. Derived, never declared: there is no `affine struct`. SEEN guards
+# a struct whose fields mention itself (through a List): such a cycle adds no
+# affinity -- a struct is affine only if some field path reaches an affine
+# root. Cached per registration (Reset clears it).
+proc hir::structs::IsAffine {id {seen {}}} {
+    variable registry
+    variable affinity
+    if {[dict exists $affinity $id]} {
+        return [dict get $affinity $id]
+    }
+    if {$id in $seen || ![dict exists $registry $id]} {
+        return 0
+    }
+    set result 0
+    foreach {name t} [dict get $registry $id types] {
+        if {[hir::types::IsAffine $t [concat $seen [list $id]]]} {
+            set result 1
+            break
+        }
+    }
+    if {$seen eq {}} {
+        dict set affinity $id $result
+    }
+    return $result
 }
 
 proc hir::structs::Fail {span message {kind TYPE}} {
@@ -254,13 +285,14 @@ proc hir::structs::IsOtherType {name} {
 # in declaration order.
 proc hir::structs::apply {decls} {
     variable registry
+    variable affinity
     Reset
     set byId [dict create]
     foreach decl $decls {
         set name [dict get $decl name]
         set ns [dict get $decl namespace]
         set id [identity $name $ns]
-        if {$name in {Int any never Fn} || [core::type::isBuiltinName $name] || [core::type::valid $id]
+        if {$name in {Int any never Fn Coroutine} || [core::type::isBuiltinName $name] || [core::type::valid $id]
                 || [dict exists $::hir::types::constructors $name]} {
             Fail [dict get $decl nameSpan] "\"$name\" cannot be declared as a struct: the name is already a built-in or declared type"
         }
@@ -325,6 +357,8 @@ proc hir::structs::apply {decls} {
         }
         lappend entries $entry
     }
+    # (Affinity read while field types were still being resolved is stale.)
+    set affinity [dict create]
     return $entries
 }
 
@@ -332,6 +366,7 @@ proc hir::structs::apply {decls} {
 # a serialized HIR carries its declarations as resolved types).
 proc hir::structs::applyEntries {entries} {
     variable registry
+    variable affinity
     Reset
     foreach entry $entries {
         set names {}
@@ -342,12 +377,14 @@ proc hir::structs::applyEntries {entries} {
             context [expr {[dict exists $entry context] && [dict get $entry context]}] names $names \
             types [dict get $entry fields] spans {} span {}]
     }
+    set affinity [dict create]
 }
 
 # Adds the entries of DECLS (as apply takes them) to the registry without
 # resetting it (native::prepareHir loading more modules into a program).
 proc hir::structs::addDecls {decls} {
     variable registry
+    variable affinity
     set saved $registry
     set entries [apply $decls]
     foreach {id entry} $saved {
@@ -355,6 +392,7 @@ proc hir::structs::addDecls {decls} {
             dict set registry $id $entry
         }
     }
+    set affinity [dict create]
     return $entries
 }
 
