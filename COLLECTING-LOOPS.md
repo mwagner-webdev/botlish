@@ -231,7 +231,12 @@ fuzzing, not language semantics.
   Lists and one ListPlan and copies O(N) elements, where the original
   per-iteration `listappend` allocated N + 1 Lists and copied N(N-1)/2
   elements (`tests/virtual-construction.test`'s `vc-collect-*`).
-  `-virtual-construction-opt 0` keeps the eager `listappend`.
+  `-virtual-construction-opt 0` keeps the eager `listappend`. The price is
+  a fixed cost per retained loop (the plan object and its materialization):
+  measured per loop execution, a loop collecting 1 element takes ~215 ns
+  instead of ~130 ns, 2 elements ~235 ns instead of ~175 ns; it breaks even
+  at 3 (~255 ns) and wins from there on (16 elements: ~770 ns instead of
+  ~1440 ns; 100,000 elements: 3.5 ms instead of 13.5 s).
 * **Passes updated** (every one that knows loop kinds): `hir/types.tcl`
   (`List[R]`), `hir/range.tcl` (`InductionSeed`), `hir/completions.tcl`,
   `hir/callables.tcl`, `hir/signatures.tcl`, `hir/construction.tcl`,
