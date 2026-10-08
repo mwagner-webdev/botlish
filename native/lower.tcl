@@ -3670,6 +3670,13 @@ proc native::lower::Project {fnVar e node} {
         }
         return [lindex $fields [FieldOffset $shape $cut $name]]
     }
+    if {$type eq "never"} {
+        # HIR proved the receiver never completes normally (an element of a
+        # `List[never]`, which is empty, in an instance for the argument
+        # `[]`), so the projection is unreachable: Expr ends the receiver's
+        # evaluation in `unreachable` and the projection needs no slot.
+        return [Expr fn $receiver]
+    }
     set slot [expr {[hir::types::IsStructLike $type] ? [lsearch -exact [hir::types::StructLayout $type] $name] : -1}]
     if {$slot < 0} {
         Unsupported $e struct-shape \
@@ -4512,6 +4519,11 @@ proc native::lower::ProjectChain {fnVar e node} {
         incr i
         foreach next [lrange $nodes $i end] {
             set recvType [hir::typeOf $hir [hir::get $hir $next receiver]]
+            if {$recvType eq "never"} {
+                # As in Project: a never-typed receiver is unreachable.
+                Emit fn unreachable [hir::get $hir $next receiver]
+                return never
+            }
             set slot [expr {[hir::types::IsStructLike $recvType] ? [lsearch -exact [hir::types::StructLayout $recvType] [hir::get $hir $next name]] : -1}]
             if {$slot < 0} {
                 Unsupported $next struct-shape "the field projection \".[hir::get $hir $next name]\" has a receiver whose slot is not statically known"

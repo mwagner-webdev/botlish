@@ -679,7 +679,11 @@ test native-spec-14 {guard accounting: blockers and emitted guards agree} -body 
 # generic regions (get/any?/all?/none?/find: 10 blockers; mutable_array::get:
 # 2) count as semantic blockers although no program calls them; generic and
 # specialized guards are unchanged.
-} -result {{ai_text_clean 5 5 0 0} {csv 25 17 0 0} {csv_chunked 38 26 1 1} {csv_geometric 37 27 2 2} {csv_records 101 unsupported 23 23} {hashtable 79 unsupported 25 25} {matmul 27 17 0 0} {string_replace 12 12 0 0} {string_reverse 4 4 0 0}}
+#
+# csv_chunked 1 -> 0 specialized guards: the one was the kind guard on
+# `chunk` in chunked_copy_chunks<List[never], ...>, dead now that a read of
+# an empty List is typed never (hir-specialize-corpus-1).
+} -result {{ai_text_clean 5 5 0 0} {csv 25 17 0 0} {csv_chunked 38 26 0 0} {csv_geometric 37 27 2 2} {csv_records 101 unsupported 23 23} {hashtable 79 unsupported 25 25} {matmul 27 17 0 0} {string_replace 12 12 0 0} {string_reverse 4 4 0 0}}
 
 # ---------------------------------------------------------------------------
 # Closures

@@ -157,4 +157,50 @@ test native-listloop-find-no-output-list-failing {list::find's listloop allocate
     string first "listappend" [native::nir $failHir]
 } -result -1
 
+# ---------------------------------------------------------------------------
+# A field projection of a `List[never]` element. A call with the empty
+# literal `[]` for a `List[S]` parameter gets its own instance keyed
+# `List[never]` (M7AA-EMPTY-COLLECTION-AND-APPLIED-TYPE-SEMANTICS.md), in
+# which the loop element is `never`-typed: the projection has no slot, and
+# it is unreachable (a List[never] is empty), so native lowering compiles it
+# as `unreachable` instead of rejecting the program (struct-shape).
+
+test native-listloop-never-element-projection {a projection of a never-typed loop element in the [] instance runs on every backend} -body {
+    sourceAgree {import list
+struct S:
+    f: int
+fn total(xs: List[S]) -> int:
+    ys = loop x in xs:
+        x.f
+    list::length(ys)
+total([])}
+} -result {value 0}
+
+test native-listloop-never-element-projection-unreachable {the List[never] instance's projection lowers to unreachable code with no structget; the List[S] instance keeps its structget} -body {
+    set text [native::nir [sourceHir {import list
+struct S:
+    f: int
+fn total(xs: List[S]) -> int:
+    ys = loop x in xs:
+        x.f
+    list::length(ys)
+[total([]), total([S{f: 1}])]}]]
+    set empty [string first {instance="List[never]"} $text]
+    set body [string range $text $empty [string first "\nend" $text $empty]]
+    list [expr {$empty >= 0}] [expr {[string first unreachable $body] >= 0}] \
+        [expr {[string first structget $body] >= 0}] [expr {[string first structget $text] >= 0}]
+} -result {1 1 0 1}
+
+test native-listloop-never-element-neighbours {the same projection reached through a lockstep loop, a nested [[]], an empty literal passed on through a second call, a projection chain, and an undeclared parameter with mixed callers} -body {
+    set struct "import list\nstruct T:\n    g: int\nstruct S:\n    f: int\n    t: T\n"
+    lmap program [list \
+        "fn total(xs: List\[S\]) -> int:\n    ys = loop x in xs and i from 0 to list::length(xs):\n        x.f + i\n    list::length(ys)\ntotal(\[\])" \
+        "fn total(xss: List\[List\[S\]\]) -> int:\n    ys = loop xs in xss:\n        zs = loop x in xs:\n            x.f\n        list::length(zs)\n    list::length(ys)\ntotal(\[\[\]\])" \
+        "fn total(xs: List\[S\]) -> int:\n    ys = loop x in xs:\n        x.f\n    list::length(ys)\nfn outer(xs: List\[S\]) -> int:\n    total(xs)\nouter(\[\])" \
+        "fn total(xs: List\[S\]) -> int:\n    ys = loop x in xs:\n        x.t.g\n    list::length(ys)\ntotal(\[\])" \
+        "fn total(xs) -> int:\n    ys = loop x in xs:\n        x.t.g + x.f\n    list::length(ys)\n\[total(\[S{f: 1, t: T{g: 2}}\]), total(\[\])\]"] {
+        sourceAgree "$struct$program"
+    }
+} -result {{value 0} {value 1} {value 0} {value 0} {value {[1, 0]}}}
+
 cleanupTests

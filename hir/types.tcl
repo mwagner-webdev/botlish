@@ -1588,9 +1588,21 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result} {
             }
             set list [lindex $argTypes $l]
             set elem [elementOf $list]
-            if {$elem eq "" || $elem eq "never"} {
-                # Nothing known, or an empty list: no element to describe.
+            if {$elem eq ""} {
+                # Nothing known: no element to describe.
                 return $result
+            }
+            if {$elem eq "never"} {
+                # A List[never] is empty (no value has type never), so no
+                # read of it completes normally. The native's declared
+                # result here would be wider than the element type of any
+                # List it is a subtype of: an instance entered with `[]`
+                # for a `List[S]` parameter would type an element read
+                # `any` where the declared contract's analysis has `S`,
+                # and reject a body valid for its contract
+                # (OPPORTUNISTIC-SEMANTIC-INSTANCES.md: a narrower
+                # argument may only add precision).
+                return never
             }
             set positions [shapeOf $list]
             if {$positions ne ""} {

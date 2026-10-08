@@ -292,4 +292,41 @@ test join-empty-and-nonempty-arms-satisfies-declared-result {a function joining 
 1}
 } -result ok
 
+# ---------------------------------------------------------------------------
+# Element reads in the empty caller's instance. A read of a List[never] (it
+# is empty) never completes normally, so it is typed never -- not the
+# native's declared `any`, which is wider than the element type a List[S]
+# read has in the declared contract's analysis and made the instance
+# reject a body valid for its contract ("call to first with xs :
+# List[never] is invalid: cannot project field").
+
+test empty-caller-element-read-handled {list::at of an empty caller's List[S] with an IndexNotFound handler, then a field projection, is accepted and agrees on every backend} -body {
+    sourceAgree {import list
+struct S:
+    f: int
+fn first(xs: List[S]) -> int:
+    s = list::at(xs, 0):
+        on IndexNotFound:
+            S{f: 7}
+    s.f
+first([])}
+} -result {value 7}
+
+test empty-caller-element-read-propagated {an empty caller's list::at failure propagated through a declared errors clause, and lib/list.bot's list::get with a default, both agree on every backend} -body {
+    list [sourceAgree {import list
+struct S:
+    f: int
+fn first(xs: List[S]) -> int errors IndexNotFound:
+    list::at(xs, 0).f
+r = first([]):
+    on IndexNotFound:
+        5
+r}] [sourceAgree {import list
+struct S:
+    f: int
+fn first(xs: List[S]) -> int:
+    list::get(xs, 0, S{f: 3}).f
+first([])}]
+} -result {{value 5} {value 3}}
+
 ::tcltest::cleanupTests
