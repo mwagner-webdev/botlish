@@ -59,7 +59,8 @@
 # diagnostic the oracle predicts: a use after a move (USE-AFTER-MOVE), a move
 # in a branch (AFFINE-NOT-DEFINITELY-LIVE), a resume of the wrong arity
 # (COROUTINE-RESUME-ARITY), a message of the wrong type (TYPE), a handle
-# stored in a List (COROUTINE-STORAGE-UNSUPPORTED), a direct call of the root
+# compared for equality (AFFINE-EQUALITY-UNSUPPORTED; a List element became
+# an ownership-moving position in AFFINE-VALUES.md), a direct call of the root
 # (UNWRAPPED-YIELD), a top-level yield (YIELD-OUTSIDE-FUNCTION), a yield of an
 # Int (COROUTINE-RESULT-MISMATCH) and a second protocol reaching the root
 # (COROUTINE-RESUME-CONFLICT); a root that cannot yield at all is
@@ -586,7 +587,9 @@ proc generate {seed} {
             lappend driver "late = coroutine::done?($moved)"
         }
         storage {
-            lappend driver "kept = \[$current\]"
+            # (A List element is an ownership-moving position since
+            # AFFINE-VALUES.md; equality stays rejected.)
+            lappend driver "kept = $current == $current"
         }
         unwrapped {
             lappend driver "direct = w0(1, log)[expr {$rootErrors ? ":" : ""}]"
@@ -616,7 +619,7 @@ proc generate {seed} {
     } elseif {$fault ne ""} {
         set expect [list error [dict get {
             aftermove USE-AFTER-MOVE branchmove AFFINE-NOT-DEFINITELY-LIVE
-            arity COROUTINE-RESUME-ARITY type TYPE storage COROUTINE-STORAGE-UNSUPPORTED
+            arity COROUTINE-RESUME-ARITY type TYPE storage AFFINE-EQUALITY-UNSUPPORTED
             unwrapped UNWRAPPED-YIELD outside YIELD-OUTSIDE-FUNCTION
             mismatch COROUTINE-RESULT-MISMATCH conflict COROUTINE-RESUME-CONFLICT
         } $fault]]

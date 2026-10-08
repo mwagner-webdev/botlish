@@ -508,7 +508,9 @@ proc hir::affine::Analyze {hirVar parentMap regions exprs program} {
         if {![hir::types::IsAffine [hir::typeOf $hir $e]]} continue
         set consumer [Consumer $hir $parent $e]
         dict set consumers $e $consumer
-        if {[lindex $consumer 0] eq "reject"} {
+        if {[lindex $consumer 0] eq "reject" && !($kind eq "project" && [AffineProjection $hir $e])} {
+            # (A projection of an affine field outside a destructuring is
+            # diagnosed once, at its receiver.)
             dict set diagnostics $e [list [lindex $consumer 1] [lindex $consumer 2] $e]
         }
         if {$kind ne "ref"} continue
@@ -557,6 +559,18 @@ proc hir::affine::Analyze {hirVar parentMap regions exprs program} {
     return [expr {[dict size $diagnostics] == 0}]
 }
 
+# 1 if projection E reads an affine field out of anything but a
+# destructuring temporary: AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE, reported at
+# its receiver.
+proc hir::affine::AffineProjection {hir e} {
+    set receiver [dict get $hir exprs $e receiver]
+    if {[dict get $hir exprs $receiver kind] eq "ref" && [dict get $hir exprs $receiver binding] ne ""
+            && [IsDestructureTemp $hir [dict get $hir exprs $receiver binding]]} {
+        return 0
+    }
+    return [hir::types::IsAffine [hir::typeOf $hir $e]]
+}
+
 # The thunk block (a coroutine boundary, hir/coroutines.tcl) reference E is
 # inside, or "".
 proc hir::affine::ThunkOf {hir e} {
@@ -601,6 +615,32 @@ proc hir::affine::verifyInstance {viewVar block exprs} {
     foreach e [lsort -dictionary [dict keys $diagnostics]] {
         lassign [dict get $diagnostics $e] kind message at
         hir::Diagnose view $kind $message $at
+    }
+    # A resume of a coroutine the instance was given charges its declared
+    # errors exactly as a direct resume does (AFFINE-VALUES.md, "Generic
+    # callables"): the generic body called an untyped value, which no
+    # error was charged to.
+    foreach e $exprs {
+        set node [dict get $view exprs $e]
+        if {[dict get $node kind] ne "call" || [dict get $node target] ne "" || ![dict get $node reachable]} continue
+        set calleeType [hir::typeOf $view [dict get $node callee]]
+        if {![hir::types::IsCoroutine $calleeType]} continue
+        set handled {}
+        if {[dict exists $parentMap $e]} {
+            set p [lindex [dict get $parentMap $e] 0]
+            if {$p ne "" && [dict get $view exprs $p kind] eq "handle" && [dict get $view exprs $p call] eq $e} {
+                set handled [dict get $view exprs $p handlerNames]
+            }
+        }
+        set fn [dict get $view scopes [dict get $node scope] invocation]
+        set enclosing [expr {$fn eq "" ? {} : [dict get $view exprs $fn declaredErrors]}]
+        foreach name [hir::types::CoroutineErrors $calleeType] {
+            if {$name ni $handled && $name ni $enclosing} {
+                hir::Diagnose view UNHANDLED-ERROR [format \
+                    {this coroutine resume may produce the declared error "%s", which is neither handled here nor admitted by the enclosing function's own "errors" declaration} \
+                    $name] $e
+            }
+        }
     }
 }
 

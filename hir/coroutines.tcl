@@ -723,11 +723,37 @@ proc hir::coroutines::verify {hirVar} {
             continue
         }
         ResultMismatch hir $create $root
+        AffineProtocol hir $create $root
     }
     # Resume calls are checked by the shared callable contract check
     # (hir::range::VerifyStructuralCall, AFFINE-VALUES.md): arity
     # (COROUTINE-RESUME-ARITY) and the message's type (TYPE); ownership by
     # hir::affine::verify.
+}
+
+# COROUTINE-CONTRACT at construction CREATE of root ROOT when the coroutine's
+# outward type or its resume message is affine (AFFINE-VALUES.md): a
+# completed coroutine returns its cached final result again on every later
+# resume, which would make several owners of one affine result; and a message
+# sent to a coroutine that has already completed is never received, so
+# nothing would own (or release) it. Both stay unrestricted for now.
+proc hir::coroutines::AffineProtocol {hirVar create root} {
+    upvar 1 $hirVar hir
+    set type [hir::typeOf $hir $create]
+    if {![hir::types::IsCoroutine $type]} {
+        return
+    }
+    if {[hir::types::IsAffine [hir::types::CoroutineOutward $type]]} {
+        hir::Diagnose hir COROUTINE-CONTRACT [format \
+            {%s's coroutine would end its segments with an affine %s: a completed coroutine returns its cached final result again on every later resume, which would give one affine value several owners (yield and return unrestricted values; pass affine values in at construction)} \
+            [Name $hir $root] [hir::types::show [hir::types::CoroutineOutward $type]]] $create
+    }
+    set protocol [hir::types::CoroutineResume $type]
+    if {$protocol ni {unit any} && [hir::types::IsAffine $protocol]} {
+        hir::Diagnose hir COROUTINE-CONTRACT [format \
+            {%s's coroutine is resumed with the affine message %s: a message sent to a coroutine that has already completed is never received, so nothing would own or release it (resume with an unrestricted message; pass affine values in at construction)} \
+            [Name $hir $root] [hir::types::show $protocol]] $create
+    }
 }
 
 # The deterministic call chain from function B to a direct yield, as

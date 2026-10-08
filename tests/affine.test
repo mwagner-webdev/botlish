@@ -1,0 +1,511 @@
+# affine.test -- general affinity and callable abstraction (AFFINE-VALUES.md).
+#
+# Affinity is a compositional property of a value's type: a coroutine handle
+# is affine, and so is every struct, anonymous struct and List that owns one.
+# An affine value has one usable owner; binding, argument passing, return,
+# aggregate construction and List construction move it. Fn and Coroutine
+# share one callable contract (args, return, errors) and stay distinct
+# callable kinds. A generic (untyped) function given an affine argument is
+# specialized for it (a clone in the monomorphized program), never dispatched
+# at run time.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+# Shared declarations: a one-yield worker resumed with a Message.
+set affDecls {import coroutine
+import list
+
+error Boom
+
+struct Message:
+    value: int
+
+struct Event:
+    value: int
+
+struct Running:
+    name: str
+    step: Coroutine{args: [Message], return: Event}
+
+struct Pair:
+    first: Coroutine{args: [Message], return: Event}
+    second: Coroutine{args: [Message], return: Event}
+
+fn worker(seed: int, resume Message) -> Event:
+    message = yield Event {value: seed}
+    return Event {value: message.value}
+
+fn make(seed: int) -> Coroutine{args: [Message], return: Event}:
+    coroutine {step} = worker(seed)
+    step
+
+fn might_fail(x: int) -> int errors Boom:
+    if x > 0:
+        fail Boom
+    x
+
+fn consume(s: Coroutine{args: [Message], return: Event}, n: int) -> int:
+    e = s(Message {value: n})
+    e.value
+
+}
+
+# The same, with no import: HIR text of a program with modules does not read
+# back (hir/read.tcl reads one program).
+set affPlainDecls [string map [list "import coroutine\nimport list\n" ""] $affDecls]
+
+# The outcome of TEXT on every backend (they must agree).
+proc affAgree {text} {
+    return [sourceAgree $text]
+}
+
+# The error code of the first diagnostic of TEXT, or "ok".
+proc affCode {text} {
+    if {[catch {surface::compile $text -warnings off} message options]} {
+        return [lindex [dict get $options -errorcode] end]
+    }
+    return ok
+}
+
+proc affMessage {text} {
+    if {[catch {surface::compile $text -warnings off} message options]} {
+        regsub {^[^:]*:[0-9]+:[0-9]+: } $message {} message
+        return $message
+    }
+    return ok
+}
+
+# Test-only probes of the Tcl runtime: the Tcl coroutines alive (a suspended
+# coroutine not released yet), and the release order.
+proc affLiveCoroutines {} {
+    return [core::value::int [llength [info commands {::core::coroutines::co[0-9]*}]]]
+}
+if {"test_aff_live" ni [core::native::names]} {
+    core::registerNative test_aff_live -arity 0 -impl affLiveCoroutines
+}
+
+# {VALUE-ON-THE-TCL-BACKENDS VALUE-ON-EVERY-BACKEND}: TEXT once with the
+# live-coroutine probe (the interpreter and the Tcl compiler, which share the
+# runtime), and on every backend with the probe replaced by 0.
+proc affReleased {text} {
+    set tcl [sourceAgree $text {interp compile}]
+    set all [sourceAgree [string map {test_aff_live() 0} $text]]
+    return [list $tcl $all]
+}
+
+# The IDs of the coroutines TEXT releases, in release order, on the
+# interpreter (core::coroutines::releaseTrace).
+proc affReleaseOrder {text} {
+    set hir [surface::compile $text -warnings off]
+    set core::coroutines::releaseTrace {}
+    try {
+        outcomeUnderHir interp $hir
+        set ids $core::coroutines::releaseTrace
+    } finally {
+        set core::coroutines::releaseTrace none
+    }
+    # By construction order: the first coroutine constructed is 1.
+    set sorted [lsort -integer $ids]
+    return [lmap id $ids {expr {[lsearch -exact $sorted $id] + 1}}]
+}
+
+# The native coroutine counters of TEXT (native::allocationReport).
+proc affNative {text} {
+    set hir [surface::compile $text -warnings off]
+    return [dict get [native::allocationReport $hir summary] coroutines]
+}
+
+proc affNir {text args} {
+    return [native::nir [surface::compile $text -warnings off] {*}$args]
+}
+
+# The instruction lines of function NAME in NIR text.
+proc affFunc {nir name} {
+    set lines {}
+    set inside 0
+    foreach line [split $nir \n] {
+        if {[regexp {^func [0-9]+ "([^"]*)"} $line -> fname]} {
+            set inside [expr {$fname eq $name}]
+            continue
+        }
+        if {$line eq "end"} {
+            set inside 0
+            continue
+        }
+        if {$inside} {
+            lappend lines [string trim $line]
+        }
+    }
+    return $lines
+}
+
+# The op names (the word after "op", or the instruction word) of LINES.
+proc affOps {lines} {
+    set ops {}
+    foreach line $lines {
+        if {[regexp {= op ([a-z0-9]+)} $line -> op]} {
+            lappend ops $op
+        } elseif {[regexp {= (call|callvalue|callenv|structnew|structget|closure|fnvalue) } $line -> op]} {
+            lappend ops $op
+        } elseif {[regexp {^(ret|retmulti|reraise|faildeclared)} $line -> op]} {
+            lappend ops $op
+        }
+    }
+    return $ops
+}
+
+proc withGcStress {script} {
+    set had [info exists ::env(BOTLISH_NATIVE_GC_STRESS)]
+    set saved [expr {$had ? $::env(BOTLISH_NATIVE_GC_STRESS) : ""}]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        return [uplevel 1 $script]
+    } finally {
+        if {$had} {
+            set ::env(BOTLISH_NATIVE_GC_STRESS) $saved
+        } else {
+            unset ::env(BOTLISH_NATIVE_GC_STRESS)
+        }
+    }
+}
+
+testConstraint linuxX86_64 [expr {$::tcl_platform(os) eq "Linux"
+    && $::tcl_platform(machine) in {x86_64 amd64}}]
+
+# ---------------------------------------------------------------------------
+# Principal programs (items 59-63, 79)
+
+test af-principal-callable {item 59: a coroutine passed to an untyped HOF moves into it, the HOF is specialized for the coroutine (its call is a resume), the worker completes with the message, and the original binding is moved} -body {
+    set program "${affDecls}fn invoke(callable, message):\n    callable(message)\n\ncoroutine {step, first} = worker(10)\nsecond = invoke(step, Message {value: 20})\n\[first.value, second.value\]\n"
+    list [affAgree $program] \
+        [affCode "${affDecls}fn invoke(callable, message):\n    callable(message)\n\ncoroutine {step, first} = worker(10)\nsecond = invoke(step, Message {value: 20})\nstep(Message {value: 1})\n"]
+} -cleanup {unset -nocomplain program} -result {{value {[10, 20]}} USE-AFTER-MOVE}
+
+test af-principal-preserve {item 60: caller step -> parameter -> Advanced.step -> destructured step2 -> resumed: one continuation (the cached terminal result answers the later resume), no alias; the original step is moved} -body {
+    set pre "${affDecls}struct Advanced:\n    step: Coroutine{args: \[Message\], return: Event}\n    event: Event\n\nfn advance(step: Coroutine{args: \[Message\], return: Event}, message: Message) -> Advanced:\n    event = step(message)\n    Advanced {\n        step: step,\n        event: event\n    }\n\ncoroutine {step} = worker(10)\n{step: step2, event} = advance(\n    step,\n    Message {value: 20}\n)\n"
+    list [affAgree "${pre}next = step2(Message {value: 30})\n\[event.value, next.value, coroutine::done?(step2)\]\n"] \
+        [affCode "${pre}step(Message {value: 30})\n"]
+} -cleanup {unset -nocomplain pre} -result {{value {[20, 20, true]}} USE-AFTER-MOVE}
+
+test af-principal-struct {item 61: storing a handle in a struct moves it (the old binding is use-after-move); destructuring the struct continues the same coroutine; the struct is moved by the destructuring} -body {
+    set pre "${affDecls}coroutine {step} = worker(10)\nrunning = Running {\n    name: \"worker\",\n    step: step\n}\n"
+    list [affCode "${pre}step(Message {value: 1})\n"] \
+        [affAgree "${pre}{step: next} = running\ne = next(Message {value: 1})\ne.value\n"] \
+        [affCode "${pre}{step: next} = running\nrunning.name\n"]
+} -cleanup {unset -nocomplain pre} -result {USE-AFTER-MOVE {value 1} USE-AFTER-MOVE}
+
+test af-principal-list {item 62: a List literal consumes its elements; the List is affine and moves whole; dropping the moved List releases both coroutines} -body {
+    set pre "${affDecls}coroutine {step: a} = worker(1)\ncoroutine {step: b} = worker(2)\nsteps = \[a, b\]\n"
+    list [affCode "${pre}a(Message {value: 1})\n"] \
+        [affCode "${pre}other = steps\nlist::length(steps)\n"] \
+        [affReleased "${affDecls}fn f():\n    coroutine {step: a} = worker(1)\n    coroutine {step: b} = worker(2)\n    steps = \[a, b\]\n    other = steps\n    n = test_aff_live()\n    list::length(other) * 10 + n\nn = f()\n\[n, test_aff_live()\]\n"]
+} -cleanup {unset -nocomplain pre} -result {USE-AFTER-MOVE USE-AFTER-MOVE {{value {[22, 0]}} {value {[20, 0]}}}}
+
+test af-principal-theorem {item 79: Running owns the worker, returning Running moves it to the caller, destructuring moves it into step, invoke specializes against Coroutine and resumes the same continuation; an ordinary function passed to the same invoke stays usable at its binding} -body {
+    set text "${affDecls}struct Running2:\n    name: str\n    step: Coroutine{\n        args: \[Message\],\n        return: Event,\n        errors: \[\]\n    }\n\nfn invoke(callable, argument):\n    callable(argument)\n\nfn make2(seed: int) -> Running2:\n    coroutine {step} = worker(seed)\n\n    Running2 {\n        name: \"worker\",\n        step: step\n    }\n\nfn double(x: int) -> int:\n    x * 2\n\nrunning = make2(10)\n\n{step} = running\n\nresult = invoke(\n    step,\n    Message {value: 20}\n)\nd = invoke(double, 4)\n\[result.value, d, double(5)\]\n"
+    set hir [surface::compile $text -warnings off]
+    set clones [lmap {b binding} [dict get $hir bindings] {
+        if {![string match invoke<* [dict get $binding name]]} continue
+        dict get $binding name
+    }]
+    list [affAgree $text] [llength $clones] [string equal [lindex $clones 0] "invoke<Coroutine{args:\[Message\],return:Event,errors:\[\]}>"]
+} -cleanup {unset -nocomplain text hir clones} -result {{value {[20, 8, 10]}} 1 1}
+
+test af-exact-alias {item 63: an exact function aliased twice stays one unrestricted identity: no move, no affinity diagnostic, direct calls natively (no closure allocated for the aliases)} -body {
+    set text "fn positive(x: int) -> bool:\n    x > 0\n\na = positive\nb = a\n\n\[a(1), b(2), positive(3)\]\n"
+    set hir [surface::compile $text -warnings off]
+    list [affAgree $text] [dict get $hir affine] [regexp -all { move\M} [hir::format $hir]] \
+        [lsearch -all -inline -regexp [affFunc [native::nir $hir] <program>] {closure|callvalue}]
+} -cleanup {unset -nocomplain text hir} -result {{value {[true, true, true]}} {} 0 {}}
+
+test af-explicit-fn {item 64: an explicitly typed Fn HOF behaves as before for functions; a coroutine with the same contract is rejected (COROUTINE-NOT-FUNCTION), and a function is no Coroutine (TYPE)} -body {
+    set apply "fn apply(\n    predicate: Fn{\n        args: \[str\],\n        return: bool,\n        errors: \[\]\n    },\n    value: str\n) -> bool:\n    predicate(value)\n\n"
+    list [affAgree "import str\n${apply}fn long?(s: str) -> bool:\n    str::length(s) > 3\n\[apply(long?, \"abcd\"), apply(long?, \"ab\")\]\n"] \
+        [affCode "${affDecls}struct S:\n    v: str\nfn w(resume S) -> bool:\n    yield true\n    false\nfn apply(f: Fn{args: \[S\], return: bool, errors: \[\]}, x: S) -> bool:\n    f(x)\ncoroutine {step} = w()\napply(step, S {v: \"a\"})\n"] \
+        [affCode "${affDecls}fn drive(s: Coroutine{args: \[Message\], return: Event}) -> Event:\n    s(Message {value: 1})\nfn h(m: Message) -> Event:\n    Event {value: m.value}\ndrive(h)\n"]
+} -cleanup {unset -nocomplain apply} -result {{value {[true, false]}} COROUTINE-NOT-FUNCTION TYPE}
+
+test af-generic-dual {item 65: one untyped HOF instantiated with an ordinary function and with a coroutine: the function's call stays the ordinary (natively direct) call and the function stays usable; the coroutine's specialization resumes it, owns it (releases it), and has no callable-kind branch} -constraints linuxX86_64 -body {
+    set text "${affDecls}fn invoke(f, x):\n    f(x)\n\nfn positive(x: int) -> bool:\n    x > 0\n\ncoroutine {step, first} = worker(10)\na = invoke(positive, 5)\nb = invoke(step, Message {value: 20})\nc = positive(1)\n\[a, b.value, c\]\n"
+    set nir [affNir $text]
+    set generic [affNir $text -specialize 0]
+    list [affAgree $text] \
+        [affOps [affFunc $nir {invoke<Coroutine{args:[Message],return:Event,errors:[]}>}]] \
+        [affOps [affFunc $generic {invoke<Coroutine{args:[Message],return:Event,errors:[]}>}]] \
+        [affOps [affFunc $generic invoke]]
+} -cleanup {unset -nocomplain text nir generic} -result {{value {[true, 20, true]}} {coresume corelease ret} {coresume corelease ret} {callvalue ret}}
+
+# ---------------------------------------------------------------------------
+# Affine aggregates (item 66)
+
+test af-aggregate-move {binding an affine struct moves the whole value: a later use of the old binding, even of an unrestricted field, is use-after-move} -body {
+    set pre "${affDecls}r = Running {name: \"a\", step: make(1)}\nq = r\n"
+    list [affCode "${pre}r.name\n"] [affCode "${pre}{step} = r\n1\n"] \
+        [affAgree "${pre}{step, name} = q\ne = step(Message {value: 5})\n\[name, e.value\]\n"]
+} -cleanup {unset -nocomplain pre} -result {USE-AFTER-MOVE USE-AFTER-MOVE {value {["a", 5]}}}
+
+test af-aggregate-field-read {reading an unrestricted field leaves the struct live; projecting an affine field is AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE (no partial-move state), naming the destructuring to use} -body {
+    set pre "${affDecls}r = Running {name: \"a\", step: make(1)}\n"
+    list [affAgree "${pre}n = r.name\n{step} = r\ne = step(Message {value: 4})\n\[n, e.value\]\n"] \
+        [affCode "${pre}s = r.step\n1\n"] \
+        [string match {*"{step} = r"*} [affMessage "${pre}s = r.step\n1\n"]] \
+        [affCode "${pre}coroutine::done?(r.step)\n"]
+} -cleanup {unset -nocomplain pre} -result {{value {["a", 4]}} AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE 1 AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE}
+
+test af-aggregate-destructure {destructuring consumes the struct: selected affine fields move into their bindings, unrestricted ones bind normally, omitted affine fields are released, nested patterns follow the same ownership tree} -body {
+    list \
+        [affReleased "${affDecls}fn f():\n    p = Pair {first: make(1), second: make(2)}\n    {first} = p\n    before = test_aff_live()\n    e = first(Message {value: 3})\n    before * 10 + e.value\n\[f(), test_aff_live()\]\n"] \
+        [affReleased "${affDecls}struct Outer:\n    tag: int\n    pair: Pair\nfn f():\n    o = Outer {tag: 7, pair: Pair {first: make(1), second: make(2)}}\n    {tag, pair: {second}} = o\n    live = test_aff_live()\n    e = second(Message {value: 5})\n    tag * 100 + live * 10 + e.value\n\[f(), test_aff_live()\]\n"]
+} -result {{{value {[13, 0]}} {value {[3, 0]}}} {{value {[715, 0]}} {value {[705, 0]}}}}
+
+test af-aggregate-branch {a move on one branch only leaves the binding maybe-moved (AFFINE-NOT-DEFINITELY-LIVE at a later use); a branch that returns does not reach the join, so the remaining path keeps it live} -body {
+    list \
+        [affCode "${affDecls}fn f(c: bool) -> int:\n    r = Running {name: \"a\", step: make(1)}\n    if c:\n        q = r\n    {step} = r\n    1\nf(true)\n"] \
+        [affAgree "${affDecls}fn f(c: bool) -> int:\n    r = Running {name: \"a\", step: make(1)}\n    if c:\n        {step} = r\n        e = step(Message {value: 9})\n        return e.value\n    {step} = r\n    e = step(Message {value: 8})\n    e.value\n\[f(true), f(false)\]\n"]
+} -result {AFFINE-NOT-DEFINITELY-LIVE {value {[9, 8]}}}
+
+test af-aggregate-return-fail {an affine struct is returned (moved to the caller); a fail while one is live releases it} -body {
+    affReleased "${affDecls}fn build(n: int) -> Running:\n    Running {name: \"r\", step: make(n)}\nfn g(k: int) -> int errors Boom:\n    r = build(1)\n    might_fail(k)\n    {step} = r\n    e = step(Message {value: 6})\n    e.value\nfn h(k: int) -> int:\n    g(k):\n        on Boom:\n            -1\n\[h(1), h(0), test_aff_live()\]\n"
+} -result {{value {[-1, 6, 0]}} {value {[-1, 6, 0]}}}
+
+# ---------------------------------------------------------------------------
+# Call boundaries (items 13-19, 67)
+
+test af-call-transfer {an affine argument moves into the parameter (use-after-move in the caller); several affine arguments; a move through several call levels; repeated resumes of a live parameter} -body {
+    list \
+        [affCode "${affDecls}s = make(1)\nconsume(s, 1)\ns(Message {value: 2})\n"] \
+        [affAgree "${affDecls}fn both(a: Coroutine{args: \[Message\], return: Event}, b: Coroutine{args: \[Message\], return: Event}) -> int:\n    x = a(Message {value: 1})\n    y = b(Message {value: 2})\n    x.value + y.value\nboth(make(1), make(2))\n"] \
+        [affAgree "${affDecls}fn l3(s: Coroutine{args: \[Message\], return: Event}) -> int:\n    consume(s, 3)\nfn l2(s: Coroutine{args: \[Message\], return: Event}) -> int:\n    l3(s)\nfn l1(s: Coroutine{args: \[Message\], return: Event}) -> int:\n    l2(s)\nl1(make(1))\n"] \
+        [affAgree "${affDecls}struct T:\n    n: int\nfn ticks() -> T:\n    yield T {n: 1}\n    yield T {n: 2}\n    T {n: 3}\nfn drive(step: Coroutine{args: \[\], return: T}) -> int:\n    a = step()\n    b = step()\n    a.n * 10 + b.n\ncoroutine {step} = ticks()\ndrive(step)\n"]
+} -result {USE-AFTER-MOVE {value 3} {value 3} {value 23}}
+
+test af-call-return {a function returns its affine parameter (caller -> parameter -> result -> caller's binding) or a new affine value; the caller owns it} -body {
+    list \
+        [affAgree "${affDecls}fn preserve(step: Coroutine{args: \[Message\], return: Event}) -> Coroutine{args: \[Message\], return: Event}:\n    step(Message {value: 7})\n    return step\ns = preserve(make(1))\ne = s(Message {value: 8})\n\[e.value, coroutine::done?(s)\]\n"] \
+        [affAgree "${affDecls}s = make(4)\ne = s(Message {value: 5})\ne.value\n"]
+} -result {{value {[7, true]}} {value 5}}
+
+test af-call-release {the callee owns its affine parameter: released at its last use when it returns normally, by its exit cleanup when it fails; the caller's binding stays moved either way} -body {
+    list \
+        [affReleased "${affDecls}fn keep(s: Coroutine{args: \[Message\], return: Event}, k: int) -> int:\n    k + 1\nfn f() -> int:\n    x = keep(make(1), 2)\n    x * 10 + test_aff_live()\n\[f(), test_aff_live()\]\n"] \
+        [affReleased "${affDecls}fn eat(s: Coroutine{args: \[Message\], return: Event}, k: int) -> int errors Boom:\n    might_fail(k)\nfn g(k: int) -> int:\n    coroutine {step} = worker(1)\n    eat(step, k):\n        on Boom:\n            -1\n\[g(1), g(0), test_aff_live()\]\n"]
+} -result {{{value {[30, 0]}} {value {[30, 0]}}} {{value {[-1, 0, 0]}} {value {[-1, 0, 0]}}}}
+
+test af-call-pending {a later argument that fails after an earlier affine argument moved into the call's temporary: the temporary releases it (the source binding stays moved, the call is never entered) -- a reference, a fresh value, a struct field and a List element; the handler that catches the failure sees no leak} -body {
+    lmap body {
+        "fn f(k: int) -> int errors Boom:\n    coroutine {step} = worker(1)\n    consume(step, might_fail(k))\n"
+        "fn f(k: int) -> int errors Boom:\n    consume(make(5), might_fail(k))\n"
+        "fn f(k: int) -> int errors Boom:\n    coroutine {step} = worker(1)\n    p = Pair {first: step, second: make(might_fail(k))}\n    {first} = p\n    0\n"
+        "fn f(k: int) -> int errors Boom:\n    xs = \[make(1), make(might_fail(k))\]\n    0\n"
+    } {
+        affReleased "${affDecls}${body}fn g(k: int) -> int:\n    f(k):\n        on Boom:\n            -1\n\[g(1), g(0), test_aff_live()\]\n"
+    }
+} -result [lrepeat 4 {{value {[-1, 0, 0]}} {value {[-1, 0, 0]}}}]
+
+test af-call-pending-hir {a pending temporary is named on the failing call's error edge: the moved binding (step) or the value's own expression} -body {
+    set hir [surface::compile "${affPlainDecls}fn f(k: int) -> int errors Boom:\n    coroutine {step} = worker(1)\n    consume(step, might_fail(k))\nfn f2(k: int) -> int errors Boom:\n    consume(make(5), might_fail(k))\n1\n" -warnings off]
+    set text [hir::format $hir]
+    list [regexp {call block\(e[0-9]+\) : int error-release=Boom=b[0-9]+} $text] \
+        [regexp {call block\(e[0-9]+\) : int error-release=Boom=e[0-9]+} $text] \
+        [expr {[hir::format [hir::parse $text]] eq $text}]
+} -cleanup {unset -nocomplain hir text} -result {1 1 1}
+
+test af-call-tail {a self tail call passes its affine parameter on: no release on the way, the final call resumes the same coroutine} -body {
+    affReleased "${affDecls}fn drive(s: Coroutine{args: \[Message\], return: Event}, n: int) -> int:\n    if n == 0:\n        e = s(Message {value: 42})\n        return e.value\n    return drive(s, n - 1)\n\[drive(make(1), 5), test_aff_live()\]\n"
+} -result {{value {[42, 0]}} {value {[42, 0]}}}
+
+test af-call-construction-argument {an affine argument of a coroutine construction moves into the coroutine (its thunk runs once): a supervisor coroutine owns its child} -body {
+    affReleased "${affDecls}fn sup(child: Coroutine{args: \[Message\], return: Event}, resume Message) -> Event:\n    m = yield Event {value: 0}\n    child(m)\ncoroutine {step, first} = sup(make(7))\ne = step(Message {value: 5})\n\[first.value, e.value, test_aff_live()\]\n"
+} -result {{value {[0, 5, 0]}} {value {[0, 5, 0]}}}
+
+# ---------------------------------------------------------------------------
+# Lists (items 29-31, 62, 68)
+
+test af-list-ownership {List[Coroutine] inferred and annotated; construction consumes elements; whole-List move, return and argument; dropping releases every element, also on an early exit} -body {
+    list \
+        [affAgree "${affDecls}fn mk(n: int) -> List\[Coroutine{args: \[Message\], return: Event}\]:\n    \[make(n), make(n + 1)\]\nfn count(xs: List\[Coroutine{args: \[Message\], return: Event}\]) -> int:\n    list::length(xs)\nxs = mk(1)\nys = xs\ncount(ys)\n"] \
+        [affReleased "${affDecls}fn f(k: int) -> int errors Boom:\n    xs = \[make(1), make(2), make(3)\]\n    might_fail(k)\n    list::length(xs)\nfn g(k: int) -> int:\n    f(k):\n        on Boom:\n            -1\n\[g(1), g(0), test_aff_live()\]\n"]
+} -result {{value 2} {{value {[-1, 3, 0]}} {value {[-1, 3, 0]}}}}
+
+test af-list-operations {List operations that would copy an affine element are AFFINE-LIST-OPERATION-UNSUPPORTED (list::at, list::append, iteration, a collecting loop of affine values); a List of affine values is never erased to a List of any} -body {
+    set pre "${affDecls}xs = \[make(1), make(2)\]\n"
+    list [affCode "${pre}s = list::at(xs, 0)\n1\n"] \
+        [affCode "${pre}ys = list::append(xs, make(3))\n1\n"] \
+        [affCode "${pre}ys = loop s in xs:\n    1\n1\n"] \
+        [affCode "${affDecls}ys = loop i from 0 to 3:\n    make(i)\n1\n"] \
+        [affCode "${affDecls}ys = \[make(1), 2\]\n1\n"]
+} -cleanup {unset -nocomplain pre} -result {AFFINE-LIST-OPERATION-UNSUPPORTED AFFINE-LIST-OPERATION-UNSUPPORTED AFFINE-LIST-OPERATION-UNSUPPORTED AFFINE-LIST-OPERATION-UNSUPPORTED AFFINE-ERASURE-UNSUPPORTED}
+
+# ---------------------------------------------------------------------------
+# Callable contracts (items 2-5, 33-35, 69)
+
+test af-contract-forms {Coroutine{...} parses like Fn{...}: zero args, one named-struct arg, omitted errors meaning []; more than one arg and a scalar arg are COROUTINE-CONTRACT; a bad field is a syntax error naming the coroutine type} -body {
+    list \
+        [affAgree "import coroutine\nstruct T:\n    n: int\nfn ticks() -> T:\n    yield T {n: 1}\n    T {n: 2}\nfn pump(s: Coroutine{args: \[\], return: T, errors: \[\]}) -> int:\n    a = s()\n    b = s()\n    a.n * 10 + b.n\ncoroutine {step} = ticks()\npump(step)\n"] \
+        [affCode "${affDecls}fn f(s: Coroutine{args: \[Message, Message\], return: Event}) -> int:\n    1\n1\n"] \
+        [affCode "${affDecls}fn f(s: Coroutine{args: \[int\], return: Event}) -> int:\n    1\n1\n"] \
+        [affMessage "${affDecls}fn f(s: Coroutine{args: \[Message\], yield: Event}) -> int:\n    1\n1\n"]
+} -result {{value 22} COROUTINE-CONTRACT COROUTINE-CONTRACT {expected a field name (args, return or errors) in the coroutine type, found "yield"}}
+
+test af-contract-compat {return and error-set mismatches are TYPE errors naming the contract part; coroutines of different constructors with one contract share one type (one List); a resume charges the contract's errors} -body {
+    list \
+        [affMessage "${affDecls}fn f(s: Coroutine{args: \[Message\], return: Message}) -> int:\n    1\nf(make(1))\n"] \
+        [affCode "${affDecls}fn w2(seed: int, resume Message) -> Event errors Boom:\n    m = yield Event {value: seed}\n    if m.value > 5:\n        fail Boom\n    Event {value: 1}\nfn f(s: Coroutine{args: \[Message\], return: Event}) -> int:\n    1\nf(make(1))\ng = 1\n"] \
+        [affAgree "${affDecls}fn other(x: str, resume Message) -> Event:\n    m = yield Event {value: 100}\n    Event {value: m.value + 1}\ncoroutine {step: a} = worker(1)\ncoroutine {step: b} = other(\"x\")\nxs = \[a, b\]\nys = xs\nlist::length(ys)\n"] \
+        [affAgree "${affDecls}fn w2(seed: int, resume Message) -> Event errors Boom:\n    m = yield Event {value: seed}\n    if m.value > 5:\n        fail Boom\n    Event {value: 1}\nfn f(s: Coroutine{args: \[Message\], return: Event, errors: \[Boom\]}) -> int:\n    e = s(Message {value: 9}):\n        on Boom:\n            Event {value: -7}\n    e.value\ncoroutine {step} = w2(1):\n    on Boom:\n        Event {value: 0}\nf(step)\n"]
+} -result {{argument for parameter "s" cannot be proven to satisfy Coroutine{args: [Message], return: Message, errors: []} (argument type: Coroutine{args: [Message], return: Event, errors: []}); return incompatible: each resume returns Event, not usable as Message} ok {value 2} {value -7}}
+
+test af-contract-error-set {an error-set mismatch names the extra error; an unhandled error a resume through a Coroutine parameter may produce is UNHANDLED-ERROR} -body {
+    set w2 "fn w2(seed: int, resume Message) -> Event errors Boom:\n    m = yield Event {value: seed}\n    if m.value > 5:\n        fail Boom\n    Event {value: 1}\n"
+    list \
+        [string match {*error set incompatible: a resume may raise Boom*} [affMessage "${affDecls}${w2}fn f(s: Coroutine{args: \[Message\], return: Event}) -> int:\n    1\ncoroutine {step} = w2(1):\n    on Boom:\n        Event {value: 0}\nf(step)\n"]] \
+        [affCode "${affDecls}fn f(s: Coroutine{args: \[Message\], return: Event, errors: \[Boom\]}) -> int:\n    e = s(Message {value: 9})\n    e.value\n1\n"]
+} -cleanup {unset -nocomplain w2} -result {1 UNHANDLED-ERROR}
+
+test af-contract-fn-param {a function value receiving an affine argument must own it: a typed function satisfies Fn{args: [Coroutine{...}]}, an untyped one does not (it has no specialization to carry ownership)} -body {
+    set apply "fn apply(f: Fn{args: \[Coroutine{args: \[Message\], return: Event}\], return: int}, s: Coroutine{args: \[Message\], return: Event}) -> int:\n    f(s)\n"
+    list \
+        [affAgree "${affDecls}${apply}fn take(c: Coroutine{args: \[Message\], return: Event}) -> int:\n    e = c(Message {value: 5})\n    e.value\napply(take, make(1))\n"] \
+        [affCode "${affDecls}${apply}fn take(c) -> int:\n    1\napply(take, make(1))\n"]
+} -cleanup {unset -nocomplain apply} -result {{value 5} TYPE}
+
+# ---------------------------------------------------------------------------
+# Generic callables (items 36-43)
+
+test af-generic-return {item 40: a generic HOF that resumes its argument and returns it moves the coroutine in and back out; instantiated with a function it is ordinary value semantics} -body {
+    affAgree "${affDecls}fn advance_and_return(callable, value):\n    callable(value)\n    return callable\nfn inc(x: int) -> int:\n    x + 1\ns2 = advance_and_return(make(1), Message {value: 7})\ne = s2(Message {value: 8})\nf = advance_and_return(inc, 1)\n\[e.value, f(10), inc(1)\]\n"
+} -result {value {[7, 11, 2]}}
+
+test af-generic-errors {item 41: a coroutine's errors cross the specialized generic call exactly as a direct resume's: unhandled inside an untyped HOF that does not admit them, the call that specializes it is invalid; admitted, they propagate to the handler} -body {
+    set w2 "fn w2(seed: int, resume Message) -> Event errors Boom:\n    m = yield Event {value: seed}\n    if m.value > 5:\n        fail Boom\n    Event {value: m.value}\n"
+    list \
+        [affCode "${affDecls}${w2}fn invoke(c, m):\n    c(m)\ncoroutine {step} = w2(1):\n    on Boom:\n        Event {value: 0}\ninvoke(step, Message {value: 9})\n"] \
+        [affAgree "${affDecls}${w2}fn invoke(c, m) errors Boom:\n    c(m)\nfn run(v: int) -> int:\n    coroutine {step} = w2(1):\n        on Boom:\n            Event {value: 0}\n    e = invoke(step, Message {value: v}):\n        on Boom:\n            Event {value: -1}\n    e.value\n\[run(9), run(3)\]\n"]
+} -cleanup {unset -nocomplain w2} -result {UNHANDLED-ERROR {value {[-1, 3]}}}
+
+test af-generic-ownership {item 39: a generic HOF that would duplicate its affine argument is invalid for the call that gives it one (reported at that call with the instance's own ownership error); erasing it inside is too} -body {
+    list \
+        [affCode "${affDecls}fn dup(f):\n    \[f, f\]\ndup(make(1))\n1\n"] \
+        [affCode "${affDecls}fn same(a):\n    a == a\nsame(make(1))\n"] \
+        [affAgree "${affDecls}fn dup(f):\n    \[f, f\]\nx = dup(1)\nlist::length(x)\n"]
+} -result {USE-AFTER-MOVE AFFINE-EQUALITY-UNSUPPORTED {value 2}}
+
+test af-generic-terminal {item 42: through a struct, a function return, a generic HOF and several moves a coroutine keeps one execution: terminal success and terminal failure stay cached} -body {
+    affAgree "${affDecls}fn w3(resume Message) -> Event errors Boom:\n    m = yield Event {value: 1}\n    fail Boom\nfn pass(c, m) errors Boom:\n    e = c(m)\n    {callable: c, event: e}\nfn run():\n    s = make(5)\n    r = Running {name: \"r\", step: s}\n    {step} = r\n    {callable: again, event: a} = pass(step, Message {value: 6}):\n        on Boom:\n            return \[0\]\n    b = again(Message {value: 7})\n    coroutine {step: f} = w3():\n        on Boom:\n            return \[0\]\n    x = f(Message {value: 1}):\n        on Boom:\n            Event {value: -1}\n    y = f(Message {value: 2}):\n        on Boom:\n            Event {value: -2}\n    \[a.value, b.value, x.value, y.value, coroutine::done?(again) == coroutine::done?(f)\]\nrun()\n"
+} -result {value {[6, 6, -1, -2, true]}}
+
+test af-generic-nested {a generic function declared inside another one cannot be specialized for an affine argument (AFFINE-GENERIC-NESTED-UNSUPPORTED); a typed parameter can take it} -body {
+    list \
+        [affCode "${affDecls}fn outer() -> int:\n    fn inner(c):\n        c(Message {value: 1})\n    e = inner(make(1))\n    e.value\nouter()\n"] \
+        [affAgree "${affDecls}fn outer() -> int:\n    fn inner(c: Coroutine{args: \[Message\], return: Event}) -> Event:\n        c(Message {value: 1})\n    e = inner(make(1))\n    e.value\nouter()\n"]
+} -result {AFFINE-GENERIC-NESTED-UNSUPPORTED {value 1}}
+
+test af-done-generalized {item 43: coroutine::done? observes a live handle however ownership reached it: a parameter, a destructuring, a return, a generic HOF's return -- without moving it} -body {
+    affAgree "${affDecls}fn ret(c):\n    c\nfn d(s: Coroutine{args: \[Message\], return: Event}) -> bool:\n    x = coroutine::done?(s)\n    s(Message {value: 1})\n    coroutine::done?(s) and not x\nr = Running {name: \"r\", step: make(1)}\n{step} = r\nt = ret(step)\na = coroutine::done?(t)\n\[d(t), a, d(make(2))\]\n"
+} -result {value {[true, false, true]}}
+
+proc affWithModules {files script} {
+    withPrivateLibrary {
+        foreach {path text} $files {
+            set full [file join $::core::libraryDir $path]
+            file mkdir [file dirname $full]
+            set f [open $full w]
+            fconfigure $f -encoding utf-8
+            puts -nonewline $f $text
+            close $f
+        }
+        set result [uplevel 1 $script]
+    }
+    return $result
+}
+
+test af-generic-transitive {a generic HOF that passes its affine argument to another generic HOF, and a recursive one, specialize transitively (one clone each, the recursion calling its own clone)} -body {
+    set text "${affDecls}fn inner(c, m):\n    c(m)\nfn outer(c, m):\n    inner(c, m)\nfn drain(c, n: int):\n    if n == 0:\n        return c\n    c(Message {value: n})\n    drain(c, n - 1)\nfn w5(resume Message) -> Event:\n    a = yield Event {value: 0}\n    b = yield Event {value: a.value}\n    Event {value: a.value + b.value}\ncoroutine {step} = w5()\nlast = drain(step, 2)\ne = last(Message {value: 100})\nx = outer(make(1), Message {value: 4})\n\[e.value, x.value\]\n"
+    set hir [surface::compile $text -warnings off]
+    set clones [lsort [lmap {b binding} [dict get $hir bindings] {
+        if {![regexp {^([a-z_]+)<.*>$} [dict get $binding name] -> base]} continue
+        set base
+    }]]
+    list [affAgree $text] $clones
+} -cleanup {unset -nocomplain text hir clones} -result {{value {[3, 4]}} {drain inner outer}}
+
+test af-generic-module {a generic HOF declared in a module, called with a coroutine from the entry program, is specialized there: its clone resolves the module's own bindings} -body {
+    affWithModules {lib/hof.bot {fn twice(c, m):
+    c(m)
+    c(m)
+
+fn apply(c, m):
+    twice(c, m)
+}} {
+        affAgree "import lib::hof\n${affDecls}fn w5(resume Message) -> Event:\n    a = yield Event {value: 0}\n    b = yield Event {value: a.value}\n    Event {value: a.value + b.value + 1}\ncoroutine {step} = w5()\ne = lib::hof::apply(step, Message {value: 10})\ne.value\n"
+    }
+} -result {value 21}
+
+test af-coroutine-affine-protocol {a coroutine's result and message stay unrestricted: an affine result would be cached and returned again by every later resume, an affine message to a completed coroutine would never be received (COROUTINE-CONTRACT)} -body {
+    list \
+        [affCode "${affDecls}fn gen() -> Coroutine{args: \[Message\], return: Event}:\n    yield make(1)\n    make(2)\ncoroutine {step} = gen()\n1\n"] \
+        [affCode "${affDecls}struct Cmd:\n    child: Coroutine{args: \[Message\], return: Event}\nfn sink(resume Cmd) -> int:\n    c = yield 1\n    {child} = c\n    2\ncoroutine {step} = sink()\n1\n"]
+} -result {COROUTINE-CONTRACT COROUTINE-CONTRACT}
+
+# ---------------------------------------------------------------------------
+# Restrictions (items 44, 46, 47)
+
+test af-restrictions {closure capture, equality of a handle or an affine struct, erasure into any (parameter, List of mixed elements, program result), a module-free MutableArray or ImmutableSet of affine elements} -body {
+    list \
+        [affCode "${affDecls}s = make(1)\nfn g() -> Event:\n    s(Message {value: 1})\n1\n"] \
+        [affCode "${affDecls}a = make(1)\nb = make(2)\na == b\n"] \
+        [affCode "${affDecls}r = Running {name: \"a\", step: make(1)}\nq = Running {name: \"a\", step: make(2)}\nr == q\n"] \
+        [affCode "${affDecls}fn f(x: any) -> int:\n    1\nf(make(1))\n"] \
+        [affCode "${affDecls}make(1)\n"] \
+        [affCode "${affDecls}fn f(m: MutableArray\[Coroutine{args: \[Message\], return: Event}\]) -> int:\n    1\n1\n"] \
+        [affCode "${affDecls}fn f(m: ImmutableSet\[Running\]) -> int:\n    1\n1\n"]
+} -result {AFFINE-CAPTURE-UNSUPPORTED AFFINE-EQUALITY-UNSUPPORTED AFFINE-EQUALITY-UNSUPPORTED AFFINE-ERASURE-UNSUPPORTED AFFINE-ERASURE-UNSUPPORTED AFFINE-CONTAINER-UNSUPPORTED AFFINE-CONTAINER-UNSUPPORTED}
+
+test af-join {item 49: an if whose branches each produce a coroutine joins into one owner; a discarded affine value is released right after its statement} -body {
+    list \
+        [affReleased "${affDecls}fn pick(c: bool) -> int:\n    s = if c:\n        make(1)\n    else:\n        make(2)\n    e = s(Message {value: 9})\n    e.value\n\[pick(true), pick(false), test_aff_live()\]\n"] \
+        [affReleased "${affDecls}fn f():\n    make(1)\n    Running {name: \"x\", step: make(2)}\n    \[make(3)\]\n    test_aff_live()\n\[f(), test_aff_live()\]\n"]
+} -result {{{value {[9, 9, 0]}} {value {[9, 9, 0]}}} {{value {[0, 0]}} {value {[0, 0]}}}}
+
+# ---------------------------------------------------------------------------
+# Drop glue (items 20, 34, 55, 56)
+
+test af-drop-order {an affine struct's fields are released last-declared first; a List's elements first to last; a struct inside a List per element} -body {
+    list \
+        [affReleaseOrder "${affDecls}fn f() -> int:\n    a = make(1)\n    b = make(2)\n    p = Pair {first: a, second: b}\n    1\nf()\n"] \
+        [affReleaseOrder "${affDecls}fn f() -> int:\n    xs = \[make(1), make(2), make(3)\]\n    1\nf()\n"] \
+        [affReleaseOrder "${affDecls}fn f() -> int:\n    xs = \[Pair {first: make(1), second: make(2)}, Pair {first: make(3), second: make(4)}\]\n    1\nf()\n"]
+} -result {{2 1} {1 2 3} {2 1 4 3}}
+
+test af-drop-native {natively every abandoned coroutine an aggregate owned is released where its owner dies: 1000 rows of structs, Lists and destructurings (at most three coroutines alive at once) map three stacks, reuse them for the other 4997 constructions and sweep none; the same under GC stress} -constraints linuxX86_64 -body {
+    set text "import str\n${affDecls}fn row(i: int) -> int:\n    p = Pair {first: make(i), second: make(i + 1)}\n    xs = \[make(i), make(i)\]\n    r = Running {name: \"r\", step: make(i)}\n    {name} = r\n    ys = xs\n    str::length(name)\nxs = loop i from 0 to 1000:\n    row(i)\nlist::length(xs)\n"
+    set hir [surface::compile $text -warnings off]
+    list [dict get [native::allocationReport $hir summary] coroutines] \
+        [withGcStress {lrange [outcomeUnderHir cranelift $hir] 0 1}]
+} -cleanup {unset -nocomplain text hir} -result {{stacksMapped 3 stacksReused 4997 released 5000 releasedSuspended 5000 sweptSuspended 0} {value 1000}}
+
+# ---------------------------------------------------------------------------
+# HIR evidence (items 51, 52)
+
+test af-hir-text {HIR text states every move (on the moving reference and the binding statement), a destructuring temporary's consumed fields, every release, and reads back to the same text; Coroutine{...} prints in the callable-contract notation} -body {
+    set hir [surface::compile "${affPlainDecls}fn advance(s: Coroutine{args: \[Message\], return: Event}) -> Running:\n    s(Message {value: 1})\n    Running {name: \"n\", step: s}\nr = advance(make(1))\n{step} = r\ne = step(Message {value: 2})\ne.value\n" -warnings off]
+    set text [hir::format $hir]
+    list [regexp {ref b[0-9]+ s : Coroutine\{args: \[Message\], return: Event, errors: \[\]\} move} $text] \
+        [regexp {bind b[0-9]+ destructure#[0-9]+ : Running move consumed=step} $text] \
+        [regexp {bind b[0-9]+ e : Event release=b[0-9]+} $text] \
+        [regexp {struct Running name Running ns - fields name: str, step: Coroutine\{args: \[Message\], return: Event, errors: \[\]\}} $text] \
+        [expr {[hir::format [hir::parse $text]] eq $text}]
+} -cleanup {unset -nocomplain hir text} -result {1 1 1 1 1}
+
+test af-hir-affinity {the central affinity query: a coroutine is affine, a struct or List of one too (derived), a function, a scalar, a struct of scalars unrestricted} -body {
+    surface::compile "${affDecls}1\n" -warnings off
+    set c [hir::types::MakeCoroutine {nstruct Message} {nstruct Event} {}]
+    list [hir::types::Affinity $c] [hir::types::Affinity {nstruct Running}] \
+        [hir::types::Affinity [hir::types::MakeList $c]] \
+        [hir::types::Affinity [hir::types::MakeList [hir::types::MakeList {nstruct Pair}]]] \
+        [hir::types::Affinity [hir::types::MakeFn {int} bool {}]] \
+        [hir::types::Affinity int] [hir::types::Affinity {nstruct Message}] \
+        [hir::types::Affinity [hir::types::MakeFn [list $c] int {}]]
+} -cleanup {unset -nocomplain c} -result {affine affine affine affine unrestricted unrestricted unrestricted unrestricted}
+
+cleanupTests

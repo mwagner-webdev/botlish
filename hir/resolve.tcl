@@ -573,6 +573,10 @@ proc hir::resolve::ResolveTypeExpr {typeExpr {ns ""}} {
                         "the message type in a coroutine type's \"args\" must be a declared struct type, not [hir::types::show $t] (a coroutine is resumed with one structured message)"
                 }
             }
+            # (A coroutine's results are cached and its messages may go
+            # unreceived: neither may be affine, hir::coroutines::
+            # AffineProtocol. Checked where a construction has a type, as
+            # struct field types may not be complete while this resolves.)
             return [hir::types::MakeCoroutineType $argTypes $result [dict get $arg errors]]
         }
         return [hir::types::MakeFn $argTypes $result [dict get $arg errors]]

@@ -1652,8 +1652,8 @@ proc hir::range::VerifyCall {hirVar ranges e node} {
                 dict set hir violatedDeclared $paramBinding $arg
             }
             hir::Diagnose hir COROUTINE-NOT-FUNCTION [format \
-                {"%s" is a coroutine handle, not a function value: it carries the evolving state of one coroutine and cannot be passed where a function value of type %s is expected (Fn and Coroutine are distinct callable kinds, even with the same contract; declare the parameter %s, or leave it untyped)} \
-                [expr {[dict get $hir exprs $arg kind] eq "ref" ? [dict get $hir exprs $arg name] : "this value"}] \
+                {%s is a coroutine handle, not a function value: it carries the evolving state of one coroutine and cannot be passed where a function value of type %s is expected (Fn and Coroutine are distinct callable kinds, even with the same contract; declare the parameter %s, or leave it untyped)} \
+                [expr {[dict get $hir exprs $arg kind] eq "ref" ? "\"[dict get $hir exprs $arg name]\"" : "this value"}] \
                 [hir::types::show $declaredType] \
                 [hir::types::show [list coroutine [lindex $declaredType 1]]]] $arg
             continue
@@ -1796,7 +1796,7 @@ proc hir::range::MismatchClause {argType declared} {
         return [format {; only a value already known to be a %s satisfies this contract: a kind test proves the kind, never the element type, and no element check is inserted} \
             [hir::types::show $declared]]
     }
-    if {![hir::types::IsFn $declared]} {
+    if {![hir::types::IsFn $declared] && ![hir::types::IsCoroutine $declared]} {
         return ""
     }
     set why [hir::types::explainMismatch $argType $declared]

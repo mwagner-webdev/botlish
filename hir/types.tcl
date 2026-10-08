@@ -266,6 +266,13 @@ proc hir::types::resolveApplication {ctor argTypes} {
             return -code error -errorcode {BOTLISH CONTEXT-TRAIT-POSITION} \
                 [ContextTraitPositionMessage $contextTrait "the element type of $ctor\[[show $t]\]"]
         }
+        if {$ctor ne "List" && [IsAffine $t]} {
+            # A MutableArray copies elements out on every read and an
+            # ImmutableSet compares and hashes its members: neither can own
+            # affine values (AFFINE-VALUES.md). A List can (whole-List moves).
+            return -code error -errorcode {BOTLISH AFFINE-CONTAINER-UNSUPPORTED} \
+                "$ctor\[[show $t]\] would hold affine values: a [expr {$ctor eq "MutableArray" ? "MutableArray copies its elements out on every read" : "ImmutableSet compares and hashes its members"}], so it cannot own them (a List of them can be moved whole)"
+        }
         if {[MentionsTrait $t]} {
             # A container of trait values would have to carry arbitrary
             # witnesses: there is no erased/heterogeneous trait
@@ -964,6 +971,34 @@ proc hir::types::explainMismatch {actual expected} {
     if {[IsCoroutine $actual] && [IsFn $expected]} {
         return "a coroutine handle is not a function value: Coroutine and Fn are distinct callable kinds, even with the same contract"
     }
+    if {[IsCoroutine $expected]} {
+        if {![IsCoroutine $actual]} {
+            return "only a coroutine handle is a Coroutine: a function value is not one, even with the same contract (Fn and Coroutine are distinct callable kinds)"
+        }
+        # The same contract rules as a Fn's (CoroutineMismatch), worded for
+        # a resume.
+        set s [list fn [lindex $actual 1]]
+        set expected [list fn [lindex $expected 1]]
+        set why [FnMismatch $s $expected]
+        switch -- [lindex $why 0] {
+            arity {
+                return "resume protocol mismatch: the coroutine takes [lindex $why 1] message(s), the type [lindex $why 2]"
+            }
+            arg {
+                return [format {message type mismatch: the coroutine is resumed with %s, the type with %s} \
+                    [show [lindex [FnArgs $s] 0]] [show [lindex [FnArgs $expected] 0]]]
+            }
+            return {
+                return [format {return incompatible: each resume returns %s, not usable as %s} \
+                    [show [FnReturn $s]] [show [FnReturn $expected]]]
+            }
+            errors {
+                return [format {error set incompatible: a resume may raise %s, but the type allows only [%s]} \
+                    [join [lrange $why 1 end] {, }] [join [FnErrors $expected] {, }]]
+            }
+        }
+        return ""
+    }
     if {$s eq ""} {
         if {[IsExactNative $actual]} {
             return "native [lindex $actual 1] takes a variable number of arguments, so it has no function type"
@@ -1410,10 +1445,10 @@ proc hir::types::narrow {current fact} {
         # (legal callers already proved it).
         return [expr {[IsMutArray $current] ? $current : $fact}]
     }
-    if {[IsFn $fact] || [IsStructLike $fact]} {
-        # A structural contract fact (a function contract, a struct type): a
-        # value already known to satisfy it (a narrower contract, the same
-        # struct) says more.
+    if {[IsFn $fact] || [IsStructLike $fact] || [IsCoroutine $fact]} {
+        # A structural contract fact (a function contract, a struct type, a
+        # coroutine handle's contract): a value already known to satisfy it
+        # (a narrower contract, the same struct) says more.
         return [expr {[subtype $current $fact] ? $current : $fact}]
     }
     if {[IsFn $current] && $fact in {block native}} {

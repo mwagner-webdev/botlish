@@ -804,7 +804,7 @@ proc hir::semantic::verify {hirVar} {
 proc hir::semantic::DerivedKind {own id} {
     set first [lindex [dict get $own $id] 0]
     set kind [dict get $first kind]
-    if {$kind eq "OPAQUE-REPRESENTATION" || [string match AFFINE-* $kind] || $kind eq "USE-AFTER-MOVE"} {
+    if {$kind in {OPAQUE-REPRESENTATION USE-AFTER-MOVE UNHANDLED-ERROR} || [string match AFFINE-* $kind]} {
         # (An ownership violation keeps its own kind: AFFINE-VALUES.md.)
         return $kind
     }
