@@ -414,7 +414,8 @@ every allocation site), the Rust test `clear_drop_releases_every_element_once`
 ### 37. Unrestricted growth
 
 `growth_keeps_every_element_once` (100 pushes), `mv-cow-evidence`, the
-benchmark's growth counters (200 000 pushes into one vector: 17 capacity doublings, 2 MiB of element words in all, 0 shares, 0 detaches).
+benchmark's growth counters (200 000 pushes into one vector: 17 capacity
+doublings, 2 MiB of element words in all, 0 shares, 0 detaches).
 
 ### 38. `from_list` unrestricted
 
