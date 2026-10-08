@@ -661,7 +661,70 @@ is not equivalent in this representation (the file's header names the
 equivalent ones and why), plus the mutants of this milestone's own rules
 (fresh results, context results, GC tracing, the Tcl compiler's drain).
 
-RESULTS-MUTATION
+**43 mutants, 43 killed, 0 survived** (34 that edit the compiler or the
+Tcl runtime, 9 native mutants that rebuild a private copy of the native
+backend). Each column is a detector: the failing tests of
+`tests/mutable-vector.test`, the fuzz programs that disagree with the model
+(`-fuzz-count 25 -fuzz-seed 11`, every backend), and the failing Rust tests
+of `runtime::mutvec` (native mutants only).
+
+| mutant | tests failed | fuzz | Rust |
+|---|---|---|---|
+| `vector-affine-unrestricted` | 24 (`mv-affine-at`, `mv-affine-clear`, ...) | 12/25 | -- |
+| `descriptor-omits-vector` | 17 (`mv-affine-clear`, `mv-affine-drop-order`, ...) | 6/25 | -- |
+| `vector-erased-any` | 1 (`mv-affine-erasure`) | 3/25 | -- |
+| `share-aliases-tcl` | 12 (`mv-context-installed-copy`, `mv-context-member`, ...) | 6/25 | -- |
+| `share-aliases-native` | 12 (`mv-context-installed-copy`, `mv-context-member`, ...) | 6/25 | 1 test |
+| `copy-eager-deep` | 2 (`mv-cow-evidence`, `mv-cow-fresh-results`) | survived | 1 test |
+| `callee-mutation-leaks` | 1 (`mv-cow-fresh-results`) | 2/25 | -- |
+| `fresh-result-unowned` | 1 (`mv-cow-fresh-results`) | survived | -- |
+| `result-move-context` | 1 (`mv-context-member`) | survived | -- |
+| `snapshot-aliasing` | 1 (`mv-cow-loop`) | 8/25 | -- |
+| `context-detached-local` | 2 (`mv-context-installed-copy`, `mv-context-member`) | survived | -- |
+| `context-read-aliases` | 1 (`mv-context-member`) | survived | -- |
+| `affine-move-cow-fork` | 1 (`mv-affine-growth`) | 1/25 | -- |
+| `push-no-invalidate` | 5 (`mv-affine-from-list`, `mv-affine-push-moves`, ...) | survived | -- |
+| `push-copies` | 6 (`mv-affine-growth`, `mv-affine-push-moves`, ...) | 2/25 | -- |
+| `from-list-no-consume` | 1 (`mv-affine-from-list`) | survived | -- |
+| `from-list-duplicates` | 24 (`mv-affine-pop-take-swap`, `mv-affine-struct-field`, ...) | 11/25 | 3 tests |
+| `at-accepts-affine` | 1 (`mv-affine-at`) | survived | -- |
+| `pop-leaves-owner` | 5 (`mv-affine-pop-take-swap`, `mv-affine-struct-elements`, ...) | 8/25 | -- |
+| `pop-leaves-owner-native` | 5 (`mv-affine-pop-take-swap`, `mv-affine-struct-elements`, ...) | 7/25 | 3 tests |
+| `take-duplicate-owner` | 6 (`mv-affine-pop-take-swap`, `mv-affine-struct-field`, ...) | 7/25 | -- |
+| `swap-copies-replacement` | 3 (`mv-affine-gc-stress`, `mv-affine-pop-take-swap`, ...) | 1/25 | -- |
+| `swap-loses-old` | 6 (`mv-affine-gc-stress`, `mv-affine-pop-take-swap`, ...) | 3/25 | -- |
+| `failed-swap-leaks` | 1 (`mv-affine-swap-failure`) | 3/25 | -- |
+| `failed-swap-leaks-native` | 1 (`mv-affine-native-releases`) | 3/25 | 1 test |
+| `failed-swap-restores-source` | 1 (`mv-affine-swap-failure`) | 3/25 | -- |
+| `clear-not-elaborated` | 2 (`mv-affine-clear`, `mv-native-evidence`) | 1/25 | -- |
+| `clear-leaks` | 1 (`mv-affine-clear`) | 1/25 | -- |
+| `clear-leaks-native` | 1 (`mv-affine-native-releases`) | 1/25 | 1 test |
+| `clear-releases-twice` | 1 (`mv-affine-clear`) | 1/25 | -- |
+| `drop-ignores-elements` | 14 (`mv-affine-clear`, `mv-affine-drop-order`, ...) | 6/25 | -- |
+| `drop-ignores-elements-native` | 4 (`mv-affine-gc-stress`, `mv-affine-growth`, ...) | 6/25 | 1 test |
+| `drop-order-reversed` | 7 (`mv-affine-clear`, `mv-affine-drop-order`, ...) | 6/25 | -- |
+| `growth-forks` | 6 (`mv-affine-gc-stress`, `mv-affine-growth`, ...) | 10/25 | -- |
+| `growth-forks-native` | 18 (`mv-affine-gc-stress`, `mv-affine-growth`, ...) | 8/25 | 5 tests |
+| `growth-drops-relocated` | 2 (`mv-affine-gc-stress`, `mv-affine-growth`) | 3/25 | -- |
+| `trace-omits-elements` | 4 (`mv-affine-gc-stress`, `mv-affine-growth`, ...) | 1/25 | survived |
+| `loop-no-move` | 3 (`mv-loop-consumes`, `mv-loop-exits`, ...) | survived | -- |
+| `loop-aliases-element` | 3 (`mv-affine-growth`, `mv-loop-error-propagation`, ...) | 1/25 | -- |
+| `loop-aliases-element-compiled` | survived | 1/25 | -- |
+| `continue-leaks` | 1 (`mv-loop-exits`) | survived | -- |
+| `break-leaks-suffix` | 4 (`mv-affine-gc-stress`, `mv-affine-growth`, ...) | survived | -- |
+| `exit-leaks-suffix` | 2 (`mv-loop-error-propagation`, `mv-loop-exits`) | 1/25 | -- |
+
+Two findings of the harness itself. The native leak mutants of `clear` and
+of a failed swap were first caught only by the fuzzer and the Rust tests;
+`mv-affine-native-releases` now checks the native release counters after
+both, and kills them alone. And the first run of the native mutants showed
+every one of them failing the GC-stress tests whatever its edit: the
+harness's tree copy lacked the repo-root `.cargo/config.toml` (frame
+pointers, which the collector's stack walk needs), which cargo finds only
+from its working directory. The harness now copies it and builds from the
+copy's root, and the native mutants above were rerun that way; the affine,
+coroutine, abi-bytes and mutable-bytes harnesses had the same dependence on
+being launched from the repo root and were fixed the same way.
 
 ### 66. Full regression
 
@@ -681,7 +744,16 @@ RESULTS-COVERAGE
 
 ### 70. Scalar audit
 
-RESULTS-SCALAR
+`native/generate-scalar-audit.tcl -outdir DIR` regenerated the committed
+scalar machine-code corpus (`audit/native-scalar-asm/`: the canonical
+`bench/*.bot` programs and every `examples/stdlib/*.bot` program, none of
+which uses a vector) with this milestone's compiler and backend: all 39
+`.asm`, `.vcode` and `.summary.txt` files (13 programs) are byte-identical
+to the committed ones (only the README's commit hash and rustc version line
+differ). Programs that use no vector get no new code: every elaboration of
+`hir/mutvec.tcl` returns at once when no type or name of the program
+mentions a vector (`hir::mutvec::Used`), and the affinity query of every
+existing type is unchanged (a vector is the only new case it reaches).
 
 ### 71. Performance
 
