@@ -323,7 +323,8 @@ if {"native" in $backends} {
 }
 
 puts "\n## Scheduler\n"
-puts "N coroutines of K = 8 resume steps each; time per resume step (take or pop, resume, push back unless done).\n"
+puts "N coroutines of K = 8 resume steps each; time per resume step (take or pop, resume, push back unless done)."
+puts "Operations per coroutine: 1 construction, 1 push, 8 takes (or pops), 8 resumes, 7 pushes back, 1 release.\n"
 header "discipline"
 foreach {label kind} {
     "round-robin: take(0), push back" sched-fifo-8

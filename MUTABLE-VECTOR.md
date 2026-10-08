@@ -414,7 +414,7 @@ every allocation site), the Rust test `clear_drop_releases_every_element_once`
 ### 37. Unrestricted growth
 
 `growth_keeps_every_element_once` (100 pushes), `mv-cow-evidence`, the
-benchmark's growth counters (200 000 pushes: 16 growths).
+benchmark's growth counters (200 000 pushes into one vector: 17 capacity doublings, 2 MiB of element words in all, 0 shares, 0 detaches).
 
 ### 38. `from_list` unrestricted
 
@@ -510,8 +510,14 @@ release the current element and the suffix (`mv-loop-exits` modes 3-4,
 ### 52. Efficient drain lowering
 
 Natively each iteration is `mvempty` + `mvtakefront` (`VecDeque::pop_front`,
-O(1)) -- never a `take(0)` shift (`mv-loop-native`). On the Tcl backends
-`lpop 0` of the vector's list.
+O(1)) -- never a `take(0)` shift (`mv-loop-native`). Taking the last element
+frees the drained vector's storage at once (the brief's queue-drain example:
+after normal completion the old vector owns nothing and its storage is
+released; only the empty header waits for a collection; the Rust test
+`draining_the_last_element_frees_the_storage`). On the Tcl backends each
+step is `lpop 0` of the vector's list, which Tcl 9 implements with a move of
+the remaining elements (measured: ~0.4 us per step at 10 000 elements, ~3
+us at 100 000).
 
 ### 53. HIR type
 
