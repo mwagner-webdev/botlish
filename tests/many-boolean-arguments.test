@@ -289,10 +289,10 @@ test mb-flags-never-make-the-gate {a function with ONE ordinary bool and flags i
 p = one(true, true, :x, :y)
 q = one("q", true, :x)
 [p, q]}]
-    list [manyOf $hir] [lmap e {} {}] [behavior {fn one(path, a: bool, flags :x, :y):
+    list [manyOf $hir] [behavior {fn one(path, a: bool, flags :x, :y):
     [path, a, x, y]
 one(true, true, :x, :y)}]
-} -result {{} {} {value {[true, true, true, true]}}}
+} -result {{} {value {[true, true, true, true]}}}
 
 test mb-flags-never-make-the-threshold {flags never count toward the threshold: one ordinary literal and any supplied flags is one literal (silent)} -body {
     silent {fn mixed(path, a: bool, b: bool, flags :x, :y):
