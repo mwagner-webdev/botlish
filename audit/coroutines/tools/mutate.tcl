@@ -122,7 +122,7 @@ set selected [concat $selected $nativeSelected]
 # tools and the native backend. Its native/target is a real copy when a
 # native mutant is selected (it is rebuilt), else a link to this checkout's.
 set tree [file tempdir botlish-coroutine-mutants]
-foreach dir {compiler core hir surface lib tests examples audit/coroutines} {
+foreach dir {compiler core hir surface lib tests examples audit/coroutines .cargo} {
     if {![file exists [file join $root $dir]]} continue
     file mkdir [file dirname [file join $tree $dir]]
     file copy [file join $root $dir] [file join $tree $dir]
@@ -186,8 +186,13 @@ try {
         set native [isNative $edits]
         set rust ""
         if {$native} {
+            # Cargo finds the copy's .cargo/config.toml (frame pointers: the
+            # collector's stack walk needs them) from the working directory.
+            set here [pwd]
+            cd $tree
             lassign [run [dict get $options -timeout] cargo build --release --manifest-path $manifest] status output
             if {$status != 0} {
+                cd $here
                 lappend results [list $name $description NOT-BUILT "" "" ""]
                 puts "NOT-BUILT $name: [lastLine $output]"
                 dict for {file text} $touched {
@@ -196,6 +201,7 @@ try {
                 continue
             }
             lassign [run [dict get $options -timeout] cargo test --release --manifest-path $manifest --lib coroutine] status output
+            cd $here
             if {$status != 0} {
                 set failing [regexp -all -inline -line {^test (\S+) \.\.\. FAILED$} $output]
                 set names [lmap {- n} $failing {set n}]
