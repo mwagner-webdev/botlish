@@ -31,12 +31,19 @@
 #
 #   read-out    a value use of a place path (anything but a vector
 #               operation's receiver, a field projection continuing the path,
-#               or a discarded statement) is shared: what leaves the place is
-#               a logical copy, so the place may later mutate its own header;
+#               a discarded statement, or the function's result) is shared:
+#               what leaves the place is a logical copy, so the place may
+#               later mutate its own header. A function's result (its final
+#               value, a `return`'s value) moves its own place's header out
+#               instead: the place dies with the invocation, and no other
+#               place ever got that header (every other value use is a
+#               read-out, and no nested function may refer to a place root);
 #   entry       a place root's initial value is shared unless it is fresh (a
-#               from_list result, a share, a struct literal of fresh fields):
-#               a local binding's value, a parameter on entry, a loop
-#               variable per iteration, a context installation's value.
+#               from_list result, a share, a struct literal of fresh fields,
+#               a call of a function whose every result is fresh -- one of
+#               these, or a place root of its own: FreshFunctions): a local
+#               binding's value, a parameter on entry, a loop variable per
+#               iteration, a context installation's value.
 #
 # A share descriptor ("h" a vector header; "s"N"."(SLOT"."D)*N a struct whose
 # listed slots are shared) is type-directed through struct fields only: a
@@ -71,6 +78,9 @@ namespace eval hir::mutvec {
         mutable_vector#take_front   mutate \
         mutable_vector#clear_drop   mutate \
         mutable_vector#swap_drop    mutate]
+    # The function blocks whose every result is fresh (FreshFunctions), for
+    # the elaboration under way.
+    variable freshFunctions [dict create]
 }
 
 proc hir::mutvec::ShareNative {} { return mutable_vector#share }
@@ -239,6 +249,8 @@ proc hir::mutvec::ShareDescriptor {type} {
 
 proc hir::mutvec::Elaborate {hirVar} {
     upvar 1 $hirVar hir
+    variable freshFunctions
+    set freshFunctions [dict create]
     if {[hir::mode $hir] ne "program" || ![Used $hir]} {
         return
     }
@@ -287,14 +299,16 @@ proc hir::mutvec::Elaborate {hirVar} {
             lappend roots $b
         }
     }
-    if {$roots eq {}} {
-        Installations hir
-        return
-    }
     lassign [hir::contexts::Walk $hir] owner parent rootOf calls blocks
     set rootSet [dict create]
     foreach b $roots {
         dict set rootSet $b 1
+    }
+    set freshFunctions [FreshFunctions $hir $parent $blocks $rootSet]
+    if {$roots eq {}} {
+        Installations hir
+        set freshFunctions [dict create]
+        return
     }
     # Read-outs.
     set wraps {}
@@ -306,6 +320,10 @@ proc hir::mutvec::Elaborate {hirVar} {
         if {$d eq "" || ![dict exists $parent $e]} continue
         lassign [dict get $parent $e] p role
         if {$role eq "seq 0" || $role eq "callee"} continue
+        if {[OwnResult $hir $parent $e [lindex $path 0]]} {
+            # The function's result moves its own place's header out.
+            continue
+        }
         if {$p ne ""} {
             set pnode [dict get $hir exprs $p]
             if {[dict get $pnode kind] eq "project"} continue
@@ -339,6 +357,7 @@ proc hir::mutvec::Elaborate {hirVar} {
     }
     Apply hir $wraps
     Installations hir
+    set freshFunctions [dict create]
 }
 
 # Context installations: the installed value is the entry of the context's
@@ -361,10 +380,15 @@ proc hir::mutvec::Installations {hirVar} {
 # 1 if the value of E is a vector-bearing value nothing else refers to: a
 # new vector, a logical copy, or a struct literal of such.
 proc hir::mutvec::Fresh {hir e} {
+    variable freshFunctions
     set node [dict get $hir exprs $e]
     switch -- [dict get $node kind] {
         call {
-            return [expr {[hir::affine::NativeName $hir $e] in [list mutable_vector::from_list [ShareNative]]}]
+            if {[hir::affine::NativeName $hir $e] in [list mutable_vector::from_list [ShareNative]]} {
+                return 1
+            }
+            set target [hir::contexts::Callee $hir $e]
+            return [expr {$target ne "" && [dict exists $freshFunctions $target]}]
         }
         struct {
             foreach f [dict get $node fields] {
@@ -376,6 +400,127 @@ proc hir::mutvec::Fresh {hir e} {
         }
     }
     return 0
+}
+
+# 1 if E is in result position (Results) of the function whose body it is
+# in, and ROOT -- the place root of E's path -- is a local or parameter of
+# that function (not a context parameter: the installed context outlives
+# the call). Returning E then moves the place's header out of a place that
+# dies with the invocation.
+proc hir::mutvec::OwnResult {hir parent e root} {
+    if {[IsContextParam $hir $root] || ![IsResult $hir $parent $e]} {
+        return 0
+    }
+    set bindingScope [dict get $hir bindings $root scope]
+    set scope [dict get $hir exprs $e scope]
+    return [expr {[dict get $hir scopes $bindingScope invocation] eq [dict get $hir scopes $scope invocation]}]
+}
+
+# 1 if E's value is the result of the function whose body it is in: the
+# body's final statement or a `return`'s value, directly or as the final
+# statement of a branch of an `if` that is.
+proc hir::mutvec::IsResult {hir parent e} {
+    set x $e
+    for {set i 0} {$i < 4096} {incr i} {
+        if {![dict exists $parent $x]} {
+            return 0
+        }
+        lassign [dict get $parent $x] p role
+        if {$p eq ""} {
+            return 0
+        }
+        switch -- [dict get $hir exprs $p kind] {
+            return {
+                return 1
+            }
+            block {
+                return [expr {$role eq "seq 1"}]
+            }
+            if {
+                if {$role ne "seq 1"} {
+                    return 0
+                }
+                set x $p
+            }
+            default {
+                return 0
+            }
+        }
+    }
+    return 0
+}
+
+# The expressions whose value function block F returns (IsResult): its
+# body's final statement and every `return` value of its own invocation,
+# each `if` among them replaced by its branches' final statements.
+proc hir::mutvec::Results {hir f} {
+    set body [dict get $hir exprs $f body]
+    set work {}
+    if {$body ne {}} {
+        lappend work [lindex $body end]
+    }
+    set stack [list {*}$body]
+    while {$stack ne {}} {
+        set x [lindex $stack end]
+        set stack [lrange $stack 0 end-1]
+        set node [dict get $hir exprs $x]
+        if {[dict get $node kind] eq "block"} continue
+        if {[dict get $node kind] eq "return" && [dict exists $node value] && [dict get $node value] ne ""} {
+            lappend work [dict get $node value]
+        }
+        lappend stack {*}[hir::children $hir $x]
+    }
+    set results {}
+    while {$work ne {}} {
+        set x [lindex $work end]
+        set work [lrange $work 0 end-1]
+        set node [dict get $hir exprs $x]
+        switch -- [dict get $node kind] {
+            if {
+                foreach field {thenBody elseBody} {
+                    if {[dict get $node $field] ne {}} {
+                        lappend work [lindex [dict get $node $field] end]
+                    }
+                }
+            }
+            return {
+                # (its value is among the work already)
+            }
+            default {
+                lappend results $x
+            }
+        }
+    }
+    return $results
+}
+
+# The function blocks of BLOCKS whose every result (Results) carries no
+# vector, or is fresh: a new vector, a share, a struct literal of fresh
+# fields, a call of such a function, or a place path from a place root
+# (ROOTSET) of the function's own -- moved out, not shared (OwnResult). The
+# greatest such set: a recursive call is fresh when every result of the
+# recursion is (each value it can return traces back to a fresh one).
+proc hir::mutvec::FreshFunctions {hir parent blocks rootSet} {
+    variable freshFunctions
+    set freshFunctions [dict create]
+    foreach f $blocks {
+        dict set freshFunctions $f [Results $hir $f]
+    }
+    set changed 1
+    while {$changed} {
+        set changed 0
+        dict for {f results} $freshFunctions {
+            foreach x $results {
+                if {[ShareDescriptor [hir::typeOf $hir $x]] eq "" || [Fresh $hir $x]} continue
+                set path [expr {[dict get $hir exprs $x kind] in {ref project} ? [Path $hir $x] : ""}]
+                if {$path ne "" && [dict exists $rootSet [lindex $path 0]] && [OwnResult $hir $parent $x [lindex $path 0]]} continue
+                dict unset freshFunctions $f
+                set changed 1
+                break
+            }
+        }
+    }
+    return $freshFunctions
 }
 
 # Applies WRAPS ({EXPR NATIVE DESCRIPTOR} triples): each EXPR replaced, in its
@@ -417,9 +562,11 @@ proc hir::mutvec::NewConst {hirVar text at} {
     upvar 1 $hirVar hir
     set node [dict get $hir exprs $at]
     set c [hir::NewId hir expr]
-    dict set hir exprs $c [dict create id $c kind const origin [dict get $node origin] \
+    set origin [dict get $node origin]
+    set literal [hir::syntax::constNode $origin str $text]
+    dict set hir exprs $c [dict merge $literal [dict create id $c \
         scope [dict get $node scope] type [hir::types::intern hir str] reachable [dict get $node reachable] \
-        literal [list str $text] value [core::value::str $text]]
+        value [core::value::str $text]]]
     return $c
 }
 

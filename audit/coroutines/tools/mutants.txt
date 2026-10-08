@@ -459,9 +459,9 @@
 @@ release-never no coroutine is released at its handle's last use: every one waits for a collection (Tcl: the program's end)
 ## hir/affine.tcl
 <<<<
-    dict set hir affine releases [Releases $hir $parentMap $scopes $accepted]
+    dict set hir affine releases [Releases hir $parentMap $scopes $accepted]
 ====
-    dict set hir affine releases {}
+    dict set hir affine releases {}; set ::hir::affine::pathExits {}
 >>>>
 
 @@ release-moved-handle a handle moved away is released too: its new owner's coroutine is released while still in use

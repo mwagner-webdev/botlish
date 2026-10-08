@@ -240,10 +240,16 @@ pub extern "C" fn rt_mv_swap_drop(p: *mut Vm, v: Value, i: Value, x: Value, d: V
 }
 
 /// `mutable_vector#take_front(v)`: the first element of a non-empty vector,
-/// moved out (a consuming loop's step, O(1)).
+/// moved out (a consuming loop's step, O(1)). Taking the last one frees the
+/// drained vector's storage at once, not when the collector finds the header.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_mv_take_front(p: *mut Vm, v: Value) -> Value {
-    writable(p, v).pop_front().expect("mutable_vector#take_front: an empty vector")
+    let items = writable(p, v);
+    let x = items.pop_front().expect("mutable_vector#take_front: an empty vector");
+    if items.is_empty() {
+        *items = VecDeque::new();
+    }
+    x
 }
 
 /// `mutable_vector#to_list(v)`: an immutable List snapshot of the elements
@@ -324,5 +330,189 @@ pub fn drop_elements(p: *mut Vm, v: Value, d: &[u8], pos: &mut usize) {
     for item in items {
         *pos = start;
         super::affine::drop_at(p, item, d, pos);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::metrics::AllocMode;
+    use crate::runtime::vm::ProgramInfo;
+
+    fn new_vm() -> Box<Vm> {
+        Vm::new(Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new() }), AllocMode::Summary)
+    }
+
+    /// A rooted vector of the Ints XS.
+    fn ints(vm: &mut Vm, xs: &[i64]) -> Value {
+        let list = vm.new_list(xs.iter().map(|&x| make_small(x)).collect());
+        vm.temp_roots.push(list);
+        let v = rt_mv_from_list(vm, list);
+        vm.temp_roots.push(v);
+        v
+    }
+
+    fn contents(v: Value) -> Vec<i64> {
+        elements(v).map(small_of).collect()
+    }
+
+    #[test]
+    fn a_copy_shares_and_only_the_first_write_detaches() {
+        let mut vm = new_vm();
+        let a = ints(&mut vm, &[1, 2, 3, 4]);
+        let d = vm.new_str("h");
+        vm.temp_roots.push(d);
+        let b = rt_mv_share(&mut *vm, a, d);
+        vm.temp_roots.push(b);
+        // The copy is a new header on the same backing: no element copied.
+        assert_ne!(a, b);
+        assert!(Rc::ptr_eq(&mutvec_of(a).backing, &mutvec_of(b).backing));
+        assert_eq!((vm.metrics.mutvec.shares, vm.metrics.mutvec.detaches), (1, 0));
+        // The first write through either detaches it, once.
+        rt_mv_push(&mut *vm, b, make_small(5));
+        assert_eq!((vm.metrics.mutvec.detaches, vm.metrics.mutvec.detach_elements), (1, 4));
+        // Later writes to the now-unique backings never detach again.
+        rt_mv_push(&mut *vm, b, make_small(6));
+        rt_mv_pop(&mut *vm, a);
+        rt_mv_swap(&mut *vm, a, make_small(0), make_small(9));
+        assert_eq!(vm.metrics.mutvec.detaches, 1);
+        assert_eq!((contents(a), contents(b)), (vec![9, 2, 3], vec![1, 2, 3, 4, 5, 6]));
+    }
+
+    #[test]
+    fn pop_take_and_swap_move_elements_out() {
+        let mut vm = new_vm();
+        let v = ints(&mut vm, &[10, 11, 12, 13]);
+        assert_eq!(small_of(rt_mv_pop(&mut *vm, v)), 13);
+        assert_eq!(small_of(rt_mv_take(&mut *vm, v, make_small(0))), 10);
+        assert_eq!(small_of(rt_mv_swap(&mut *vm, v, make_small(1), make_small(7))), 12);
+        assert_eq!(contents(v), vec![11, 7]);
+        assert_eq!(small_of(rt_mv_take_front(&mut *vm, v)), 11);
+        assert_eq!(small_of(rt_mv_len(&mut *vm, v)), 1);
+        // Out of range: IndexNotFound, and nothing changes.
+        assert_eq!(rt_mv_take(&mut *vm, v, make_small(1)), NO_VALUE);
+        assert_eq!(rt_mv_swap(&mut *vm, v, make_small(-1), make_small(3)), NO_VALUE);
+        assert_eq!(contents(v), vec![7]);
+        rt_mv_clear(&mut *vm, v);
+        assert_eq!(rt_mv_pop(&mut *vm, v), NO_VALUE);
+        assert_eq!(contents(v), Vec::<i64>::new());
+    }
+
+    #[test]
+    fn draining_the_last_element_frees_the_storage() {
+        let mut vm = new_vm();
+        let v = ints(&mut vm, &[1, 2, 3]);
+        rt_mv_push(&mut *vm, v, make_small(4));
+        assert!(mutvec_of(v).backing.capacity() >= 4);
+        let drained: Vec<i64> = (0..4).map(|_| small_of(rt_mv_take_front(&mut *vm, v))).collect();
+        assert_eq!(drained, vec![1, 2, 3, 4]);
+        assert_eq!(mutvec_of(v).backing.capacity(), 0);
+    }
+
+    #[test]
+    fn growth_keeps_every_element_once() {
+        let mut vm = new_vm();
+        let v = ints(&mut vm, &[]);
+        for i in 0..100 {
+            rt_mv_push(&mut *vm, v, make_small(i));
+        }
+        assert!(vm.metrics.mutvec.growths >= 3);
+        assert_eq!(contents(v), (0..100).collect::<Vec<i64>>());
+    }
+
+    #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+    mod affine {
+        use super::*;
+        use crate::runtime::coroutine::{coroutine_of, rt_co_create, CO_FRESH, CO_RELEASED};
+        use crate::runtime::ops::GenericEntry;
+
+        extern "C" fn body(_p: *mut Vm, _closure: Value, _args: *const Value) -> Value {
+            make_small(0)
+        }
+
+        /// A fresh (never started) coroutine, rooted.
+        fn coroutine(vm: &mut Vm) -> Value {
+            let caps: Box<[Value]> = Vec::new().into_boxed_slice();
+            let code: GenericEntry = body;
+            let t = vm.alloc(
+                ClosureObj {
+                    hdr: Header::new(KIND_CLOSURE, false),
+                    func: 0,
+                    arity: 0,
+                    code: code as *const () as usize,
+                    ncaps: 0,
+                    caps: Box::into_raw(caps) as *mut Value,
+                },
+                0,
+            );
+            vm.temp_roots.push(t);
+            let co = rt_co_create(vm, t);
+            vm.temp_roots.push(co);
+            co
+        }
+
+        fn state(v: Value) -> u8 {
+            coroutine_of(v).state
+        }
+
+        /// A rooted vector of N fresh coroutines (pushed: it grows).
+        fn queue(vm: &mut Vm, n: usize) -> (Value, Vec<Value>) {
+            let v = ints(vm, &[]);
+            let cs: Vec<Value> = (0..n).map(|_| coroutine(vm)).collect();
+            for &c in &cs {
+                rt_mv_push(vm, v, c);
+            }
+            (v, cs)
+        }
+
+        #[test]
+        fn clear_drop_releases_every_element_once() {
+            let mut vm = new_vm();
+            let (v, cs) = queue(&mut vm, 40);
+            assert!(vm.metrics.mutvec.growths > 0);
+            let d = vm.new_str("c");
+            vm.temp_roots.push(d);
+            rt_mv_clear_drop(&mut *vm, v, d);
+            assert!(cs.iter().all(|&c| state(c) == CO_RELEASED));
+            assert_eq!(vm.metrics.coroutines.released, 40);
+            assert_eq!(small_of(rt_mv_len(&mut *vm, v)), 0);
+        }
+
+        #[test]
+        fn a_vector_drop_releases_only_its_live_elements() {
+            let mut vm = new_vm();
+            let (v, cs) = queue(&mut vm, 5);
+            // Two moved out (now owned elsewhere), one exchanged.
+            let popped = rt_mv_pop(&mut *vm, v);
+            let taken = rt_mv_take(&mut *vm, v, make_small(0));
+            let replacement = coroutine(&mut vm);
+            let old = rt_mv_swap(&mut *vm, v, make_small(0), replacement);
+            assert_eq!((popped, taken, old), (cs[4], cs[0], cs[1]));
+            let d = vm.new_str("vc");
+            vm.temp_roots.push(d);
+            assert_eq!(crate::runtime::affine::rt_affine_drop(&mut *vm, v, d), UNIT);
+            assert_eq!(
+                cs.iter().map(|&c| state(c)).collect::<Vec<u8>>(),
+                vec![CO_FRESH, CO_FRESH, CO_RELEASED, CO_RELEASED, CO_FRESH]
+            );
+            assert_eq!(state(replacement), CO_RELEASED);
+            assert_eq!(vm.metrics.coroutines.released, 3);
+            // The dropped vector is empty: a second drop releases nothing.
+            crate::runtime::affine::rt_affine_drop(&mut *vm, v, d);
+            assert_eq!(vm.metrics.coroutines.released, 3);
+        }
+
+        #[test]
+        fn a_failed_swap_drop_drops_the_replacement_and_keeps_the_vector() {
+            let mut vm = new_vm();
+            let (v, cs) = queue(&mut vm, 2);
+            let replacement = coroutine(&mut vm);
+            let d = vm.new_str("c");
+            vm.temp_roots.push(d);
+            assert_eq!(rt_mv_swap_drop(&mut *vm, v, make_small(2), replacement, d), NO_VALUE);
+            assert_eq!(state(replacement), CO_RELEASED);
+            assert_eq!((state(cs[0]), state(cs[1])), (CO_FRESH, CO_FRESH));
+            assert_eq!(mutvec_of(v).backing.iter().copied().collect::<Vec<Value>>(), cs);
+        }
     }
 }

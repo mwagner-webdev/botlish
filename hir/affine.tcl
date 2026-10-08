@@ -639,8 +639,14 @@ proc hir::affine::Analyze {hirVar parentMap regions exprs program} {
 
 # 1 if projection E reads an affine field out of anything but a
 # destructuring temporary: AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE, reported at
-# its receiver.
+# its receiver. A step of a MutableVector operation's receiver place is not
+# such a read (its receiver is a `use place`): whatever its own consumer
+# rejects -- an affine `at` of `state.queue` -- is reported at it.
 proc hir::affine::AffineProjection {hir e} {
+    variable parent
+    if {[hir::mutvec::InReceiverPath $hir $parent $e]} {
+        return 0
+    }
     set receiver [dict get $hir exprs $e receiver]
     if {[dict get $hir exprs $receiver kind] eq "ref" && [dict get $hir exprs $receiver binding] ne ""
             && [IsDestructureTemp $hir [dict get $hir exprs $receiver binding]]} {
