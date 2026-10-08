@@ -1205,6 +1205,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             Kind::ByteStore => KIND_BYTES,
             Kind::MutByteStore => KIND_MUTBYTES,
             Kind::Coroutine => KIND_COROUTINE,
+            Kind::MutVec => KIND_MUTVEC,
             Kind::Bool | Kind::Unit | Kind::UnicodeChar => unreachable!(),
         };
         let low3 = self.b.ins().band_imm_s(v, 7);
@@ -1879,6 +1880,22 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         CoDone => ("rt_co_done", None, false, None),
                         CoRelease => ("rt_co_release", None, false, None),
                         AffineDrop => ("rt_affine_drop", None, false, None),
+                        // MutableVector (MUTABLE-VECTOR.md, runtime/mutvec.rs).
+                        MvFromList => ("rt_mv_from_list", None, false, Some(("mvfromlist", KIND_MUTVEC))),
+                        MvLen => ("rt_mv_len", None, false, None),
+                        MvEmpty => ("rt_mv_empty", None, false, None),
+                        MvAt => ("rt_mv_at", None, true, None),
+                        MvPush => ("rt_mv_push", None, false, None),
+                        MvPop => ("rt_mv_pop", None, true, None),
+                        MvTake => ("rt_mv_take", None, true, None),
+                        MvSwap => ("rt_mv_swap", None, true, None),
+                        MvClear => ("rt_mv_clear", None, false, None),
+                        MvShare => ("rt_mv_share", None, false, Some(("mvshare", KIND_MUTVEC))),
+                        MvToList => ("rt_mv_to_list", None, false, Some(("mvtolist", KIND_LIST))),
+                        MvTakeFront => ("rt_mv_take_front", None, false, None),
+                        MvClearDrop => ("rt_mv_clear_drop", None, false, None),
+                        MvSwapDrop => ("rt_mv_swap_drop", None, true, None),
+                        ContextRoot => ("rt_context_root", None, false, None),
                         // Never fallible (see ops.rs's rt_str_decode_char_at):
                         // a one-character String can never exceed
                         // MAX_COLLECTION_LENGTH. Still routed through

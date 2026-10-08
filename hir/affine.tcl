@@ -113,6 +113,16 @@ namespace eval hir::affine {
     variable consumers {}
     # Destructuring temporary -> the affine fields read out of it so far.
     variable consumed {}
+    # Join ExprId -> the liveness state on each path into it (Flow): an if's
+    # {THEN ELSE}, a handle's {CALL HANDLER...}, a loop's {NORMAL BREAK...}
+    # (NORMAL "dead" for `loop`). Where a binding moved on some paths only
+    # is released (PathReleases).
+    variable joinStates {}
+    # Loop ExprId -> its `break`s, in the order of joinStates' break paths.
+    variable loopBreaks {}
+    # Release points on infinite loops' breaks (PathReleases): break ->
+    # bindings, merged into the exit table.
+    variable pathExits {}
 }
 
 # ---------------------------------------------------------------------------
@@ -149,6 +159,13 @@ proc hir::affine::BindingType {hir b} {
     }
     if {[dict get $hir bindings $b kind] eq "param"} {
         set block [dict get $hir scopes [dict get $hir bindings $b scope] owner]
+        if {$block ne "" && [dict exists $hir exprs $block] && [dict get $hir exprs $block kind] eq "listloop"
+                && [dict get $hir exprs $block elementBinding] eq $b} {
+            # A loop variable: its iterable's element type (a consuming
+            # loop's over an affine MutableVector, MUTABLE-VECTOR.md).
+            set t [hir::types::IterationElementOf [hir::typeOf $hir [dict get $hir exprs $block iterable]]]
+            return [expr {$t eq "" ? "any" : $t}]
+        }
         if {$block ne "" && [dict exists $hir exprs $block] && [dict get $hir exprs $block kind] eq "block"} {
             set index [lsearch -exact [dict get $hir exprs $block params] $b]
             if {[dict exists $hir semanticContext] && [dict get $hir semanticContext] ne "generic"} {
@@ -260,6 +277,12 @@ proc hir::affine::Consumer {hir parent e} {
             return [Erasure $hir $e "the value of field \"$name\" of type [hir::types::show [expr {$fieldType eq "" ? "any" : $fieldType}]]"]
         }
         project {
+            if {[hir::mutvec::InReceiverPath $hir $parent $p]} {
+                # A step of a MutableVector operation's receiver place
+                # (`state.queue.push(x)`, MUTABLE-VECTOR.md): the operation
+                # updates the field in place; nothing moves out of it.
+                return {use place}
+            }
             set name [dict get $node name]
             set fieldType [hir::types::StructField $type $name]
             set affineField [expr {$fieldType ne "" && [hir::types::IsAffine $fieldType]}]
@@ -304,6 +327,13 @@ proc hir::affine::Consumer {hir parent e} {
             return [Into $hir $e [list move break $p] $dest "the value of a loop of type"]
         }
         loop - listloop - countloop - lockloop {
+            if {$role eq "operand" && [dict get $node kind] eq "listloop" && [hir::types::IsMutVec $type]} {
+                # A consuming loop over an affine MutableVector
+                # (MUTABLE-VECTOR.md): the vector moves into the loop, which
+                # moves each element, in order, into the loop variable, and
+                # releases what is left when it is left early.
+                return [list move loop $p]
+            }
             if {$role eq "operand"} {
                 return [list reject AFFINE-LIST-OPERATION-UNSUPPORTED \
                     "[Named $hir $e] is a [TypeText $hir $e]: iterating a List of affine values would copy each element into the loop variable while the List still owns it (whole-List moves are supported; element-wise access waits for ownership-moving operations)"]
@@ -356,6 +386,42 @@ proc hir::affine::CallConsumer {hir p e role type} {
                     return [Temporary $hir $e "measure"]
                 }
                 return {use length}
+            }
+            mutable_vector::length - mutable_vector::empty? {
+                # A non-consuming observation of the vector (MUTABLE-
+                # VECTOR.md), like coroutine::done?: it needs an owner.
+                if {$index == 0} {
+                    if {[dict get $hir exprs $e kind] ni {ref project}} {
+                        return [Temporary $hir $e "measure"]
+                    }
+                    return {use observe}
+                }
+            }
+            mutable_vector::at {
+                if {$index == 0} {
+                    return [list reject AFFINE-VECTOR-COPY-OUT \
+                        "mutable_vector::at would copy an affine element out of [Named $hir $e] ([TypeText $hir $e]) while the vector still owns it, making a second owner: move it out instead -- `take(i)` removes it, `pop()` removes the last one, `swap(i, replacement)` exchanges it for another (there are no references to elements)"]
+                }
+            }
+            mutable_vector::push - mutable_vector::pop - mutable_vector::take - mutable_vector::clear
+            - mutable_vector#take_front - mutable_vector#clear_drop {
+                if {$index == 0} {
+                    # The receiver place: updated in place, still the owner
+                    # (a temporary receiver is MUTABLE-VECTOR-RECEIVER).
+                    return {use place}
+                }
+                return [list move vector $p $index]
+            }
+            mutable_vector::swap - mutable_vector#swap_drop {
+                if {$index == 0} {
+                    return {use place}
+                }
+                return [list move vector $p $index]
+            }
+            mutable_vector::from_list {
+                # The List moves into the conversion: the vector becomes the
+                # one owner of every element.
+                return [list move vector $p $index]
             }
             == - hash - immutable_set::from_list - immutable_set::contains {
                 return [list reject AFFINE-EQUALITY-UNSUPPORTED \
@@ -461,8 +527,16 @@ proc hir::affine::verify {hirVar} {
     set scopes [expr {!$accepted || [WrittenReleases $hir $parentMap] ? {} : [Scopes $hir $parentMap]}]
     variable consumed
     dict set hir affine consumed $consumed
-    dict set hir affine releases [Releases $hir $parentMap $scopes $accepted]
+    dict set hir affine releases [Releases hir $parentMap $scopes $accepted]
     lassign [ExitReleases $hir $parentMap $scopes] exits errorExits
+    variable pathExits
+    dict for {x items} $pathExits {
+        foreach item $items {
+            if {![dict exists $exits $x] || $item ni [dict get $exits $x]} {
+                dict lappend exits $x $item
+            }
+        }
+    }
     dict set hir affine exits $exits
     dict set hir affine errorExits $errorExits
 }
@@ -498,6 +572,10 @@ proc hir::affine::Analyze {hirVar parentMap regions exprs program} {
     set exitStates [dict create]
     set consumers [dict create]
     set consumed [dict create]
+    variable joinStates
+    variable loopBreaks
+    set joinStates [dict create]
+    set loopBreaks [dict create]
     set moves [dict create]
     set moveRefs [dict create]
     foreach e $exprs {
@@ -692,6 +770,8 @@ proc hir::affine::Seq {hirVar exprs state} {
 proc hir::affine::Flow {hirVar e state} {
     upvar 1 $hirVar hir
     variable loopExits
+    variable joinStates
+    variable loopBreaks
     variable exitStates
     variable consumers
     variable parent
@@ -763,6 +843,7 @@ proc hir::affine::Flow {hirVar e state} {
             }
             set then [Seq hir [dict get $node thenBody] $state]
             set else [Seq hir [dict get $node elseBody] $state]
+            dict set joinStates $e [list $then $else]
             return [Join $then $else]
         }
         loop - listloop - countloop - lockloop {
@@ -775,9 +856,19 @@ proc hir::affine::Flow {hirVar e state} {
             }
             set entry $state
             set head $state
+            # A consuming loop's variable (MUTABLE-VECTOR.md) owns one
+            # element per iteration, freshly.
+            set element [expr {[dict get $node kind] eq "listloop" ? [dict get $node elementBinding] : ""}]
+            if {$element ne "" && ![IsAffineBinding $hir $element]} {
+                set element ""
+            }
             for {set pass 0} {$pass < 64} {incr pass} {
-                dict set loopExits $e [dict create breaks {} continues {}]
-                set out [Seq hir [dict get $node body] $head]
+                dict set loopExits $e [dict create breaks {} breakNodes {} continues {}]
+                set start $head
+                if {$element ne ""} {
+                    dict set start $element live
+                }
+                set out [Seq hir [dict get $node body] $start]
                 set exits [dict get $loopExits $e]
                 set next [Join $entry $out]
                 foreach c [dict get $exits continues] {
@@ -788,9 +879,13 @@ proc hir::affine::Flow {hirVar e state} {
                 set head $next
             }
             set after [expr {[dict get $node kind] eq "loop" ? "dead" : $head}]
+            set paths [list $after]
             foreach b [dict get $exits breaks] {
                 set after [Join $after [Restrict $b $entry]]
+                lappend paths [Restrict $b $entry]
             }
+            dict set joinStates $e $paths
+            dict set loopBreaks $e [dict get $exits breakNodes]
             dict unset loopExits $e
             return $after
         }
@@ -810,6 +905,7 @@ proc hir::affine::Flow {hirVar e state} {
                 dict set exitStates $e $state
                 if {[dict exists $loopExits $loop]} {
                     dict set loopExits $loop breaks [concat [dict get $loopExits $loop breaks] [list $state]]
+                    dict set loopExits $loop breakNodes [concat [dict get $loopExits $loop breakNodes] [list $e]]
                 }
             }
             return dead
@@ -827,9 +923,13 @@ proc hir::affine::Flow {hirVar e state} {
             set state [Flow hir [dict get $node call] $state]
             set entry [expr {$state eq "dead" ? $before : $state}]
             set result $state
+            set paths [list $state]
             foreach body [dict get $node handlerBodies] {
-                set result [Join $result [Seq hir $body $entry]]
+                set out [Seq hir $body $entry]
+                set result [Join $result $out]
+                lappend paths $out
             }
+            dict set joinStates $e $paths
             return $result
         }
     }
@@ -938,6 +1038,12 @@ proc hir::affine::MoveText {hir move} {
         element {
             return "$source stored in a List  ([Where $hir $move])"
         }
+        vector {
+            return "$source moved into a MutableVector  ([Where $hir $move])"
+        }
+        loop {
+            return "$source consumed by a loop  ([Where $hir $move])"
+        }
         return - result {
             return "$source returned  ([Where $hir $move])"
         }
@@ -993,7 +1099,7 @@ proc hir::affine::Scopes {hir parent} {
         set binding [dict get $hir bindings $b]
         if {[dict get $binding kind] eq "param"} {
             set block [dict get $hir scopes [dict get $binding scope] owner]
-            if {$block eq "" || ![dict exists $hir exprs $block] || [dict get $hir exprs $block kind] ne "block"
+            if {$block eq "" || ![dict exists $hir exprs $block] || [dict get $hir exprs $block kind] ni {block listloop}
                     || ![dict get $hir exprs $block reachable]} continue
             set p $block
             set sequence [dict get $hir exprs $block body]
@@ -1043,14 +1149,32 @@ proc hir::affine::Owns {state b} {
 # The release table: each binding of SCOPES that still owns its value after
 # its last use's statement, and (ACCEPTED programs only) each discarded fresh
 # affine value right after its statement.
-proc hir::affine::Releases {hir parent scopes accepted} {
+proc hir::affine::Releases {hirVar parent scopes accepted} {
+    upvar 1 $hirVar hir
     variable afterStates
     variable consumers
+    variable pathExits
+    set pathExits [dict create]
     set releases [dict create]
     dict for {b info} $scopes {
         set statement [lindex [dict get $info sequence] [dict get $info last]]
         if {![dict exists $afterStates $statement] || ![Owns [dict get $afterStates $statement] $b]} continue
         if {[Descriptor $hir [BindingType $hir $b] [ConsumedFields $hir $b]] eq ""} continue
+        if {[lindex [dict get $afterStates $statement $b] 0] eq "maybe"} {
+            # Moved on some paths only: released on each path that still
+            # owns it, never after the join -- where a path that moved it
+            # may have given it to an owner that lives on (a join's value,
+            # a MutableVector place, ...).
+            foreach point [PathReleases hir $parent $b $statement] {
+                lassign $point kind at
+                if {$kind eq "after"} {
+                    dict lappend releases $at $b
+                } else {
+                    dict lappend pathExits $at $b
+                }
+            }
+            continue
+        }
         dict lappend releases $statement $b
     }
     if {$accepted && ![WrittenReleases $hir $parent]} {
@@ -1062,6 +1186,104 @@ proc hir::affine::Releases {hir parent scopes accepted} {
         }
     }
     return $releases
+}
+
+# Where binding B, moved on some paths through statement S only (its last
+# use), is released: a list of {after STATEMENT} (after a statement completes
+# normally) and {exit BREAK} (as an infinite loop's `break` leaves) points,
+# one for every path into a join inside S on which B is still owned while
+# another path moved it -- an `if` branch's end (an empty `else` is given a
+# `unit` statement to hold it), a handler body's end, a `loop`'s break. A
+# path no statement ends -- a handled call's normal completion, a counting
+# or iterating loop's exhaustion -- cannot hold a release:
+# AFFINE-PATH-RELEASE-UNSUPPORTED (move the value on every path, or on
+# none).
+proc hir::affine::PathReleases {hirVar parent b statement} {
+    upvar 1 $hirVar hir
+    variable joinStates
+    set points {}
+    set work [list $statement]
+    while {$work ne {}} {
+        set x [lindex $work end]
+        set work [lrange $work 0 end-1]
+        set node [dict get $hir exprs $x]
+        if {[dict get $node kind] eq "block"} continue
+        lappend work {*}[hir::children $hir $x]
+        if {![dict exists $joinStates $x]} continue
+        set paths [dict get $joinStates $x]
+        set live {}
+        set moved 0
+        set i 0
+        foreach path $paths {
+            if {$path ne "dead" && [dict exists $path $b]} {
+                switch -- [lindex [dict get $path $b] 0] {
+                    live { lappend live $i }
+                    default { set moved 1 }
+                }
+            }
+            incr i
+        }
+        if {!$moved} continue
+        foreach i $live {
+            set point [PathPoint hir $x $i $b]
+            if {$point ne ""} {
+                lappend points $point
+            }
+        }
+    }
+    return $points
+}
+
+# The release point of path I into join X for binding B (PathReleases), or
+# "" (diagnosed, or a shadowed name left to the collector).
+proc hir::affine::PathPoint {hirVar x i b} {
+    upvar 1 $hirVar hir
+    variable loopBreaks
+    set node [dict get $hir exprs $x]
+    set name [dict get $hir bindings $b name]
+    switch -- [dict get $node kind] {
+        if {
+            set field [expr {$i == 0 ? "thenBody" : "elseBody"}]
+            set body [dict get $node $field]
+            if {$body eq {}} {
+                set body [list [UnitStatement hir $x [dict get $node [expr {$i == 0 ? "thenScope" : "elseScope"}]]]]
+                dict set hir exprs $x $field $body
+            }
+            set at [lindex $body end]
+            return [expr {[Shadowed $hir $at $b] ? "" : [list after $at]}]
+        }
+        handle {
+            if {$i > 0} {
+                set at [lindex [lindex [dict get $node handlerBodies] [expr {$i - 1}]] end]
+                return [expr {[Shadowed $hir $at $b] ? "" : [list after $at]}]
+            }
+            hir::Diagnose hir AFFINE-PATH-RELEASE-UNSUPPORTED \
+                "`$name` is moved by a handler of this call but still owned when the call completes normally: no statement ends that path to release it there (move it on every path, or on none -- e.g. bind the call's result first and move `$name` in an if)" $x
+            return ""
+        }
+        default {
+            if {$i > 0 && [dict exists $loopBreaks $x]} {
+                set at [lindex [dict get $loopBreaks $x] [expr {$i - 1}]]
+                return [expr {[Shadowed $hir $at $b] ? "" : [list exit $at]}]
+            }
+            hir::Diagnose hir AFFINE-PATH-RELEASE-UNSUPPORTED \
+                "`$name` is moved on a path that breaks out of this loop but still owned when the loop runs to its end: no statement ends that path to release it there (move it on every path, or on none -- e.g. use an infinite `loop:` whose every exit is a `break`)" $x
+            return ""
+        }
+    }
+}
+
+# A new `unit` statement (a reference to the root binding unit) in scope S,
+# placed like X: what an empty `else` holds when a release must end it.
+proc hir::affine::UnitStatement {hirVar x s} {
+    upvar 1 $hirVar hir
+    set root [dict get $hir scopes [dict get $hir top] parent]
+    set b [dict get $hir scopes $root names unit]
+    set r [hir::NewId hir expr]
+    dict set hir exprs $r [dict create id $r kind ref origin [dict get $hir exprs $x origin] scope $s \
+        type [hir::types::intern hir unit] reachable [dict get $hir exprs $x reachable] \
+        name unit binding $b init yes]
+    return $r
 }
 
 # The fields moved out of destructuring temporary B (none for any other
@@ -1095,7 +1317,7 @@ proc hir::affine::ConsumedFields {hir b} {
 # (drop) elaboration"): {PAIRS PENDING}. With NAMES (the declared errors a
 # call propagates): NAME -> {PAIRS PENDING}, each name's walk ending at a
 # `handle` whose call contains X and which handles it.
-proc hir::affine::Crossed {hir parent x loop names} {
+proc hir::affine::Crossed {hir parent x loop names {keep ""}} {
     set pairs {}
     set pending {}
     set result [dict create]
@@ -1124,6 +1346,12 @@ proc hir::affine::Crossed {hir parent x loop names} {
         if {[dict get $node kind] in {call struct} && $role eq "operand"} {
             lappend pending {*}[PendingBefore $hir $p $x]
         }
+        if {$role ne "operand" && $p ne $keep && [hir::mutvec::IsConsumingLoop $hir $p]} {
+            # Leaving a consuming loop over an affine MutableVector: what is
+            # left of the vector (the elements not taken yet) is released
+            # (MUTABLE-VECTOR.md). A `continue` of this loop keeps it (KEEP).
+            lappend pending [LoopDomain $hir $p]
+        }
         set sequence [hir::coroutines::SequenceOf $hir $p $x]
         if {$sequence ne ""} {
             lappend pairs [list [lindex $sequence 0] [lsearch -exact $sequence $x]]
@@ -1138,6 +1366,17 @@ proc hir::affine::Crossed {hir parent x loop names} {
         dict set result $name [list $pairs $pending]
     }
     return $result
+}
+
+# The pending item of consuming loop P's domain (its iterable's value): a
+# reference's binding (which still holds the vector being drained at run
+# time), any other operand's ExprId.
+proc hir::affine::LoopDomain {hir p} {
+    set it [dict get $hir exprs $p iterable]
+    if {[dict get $hir exprs $it kind] eq "ref" && [IsAffineBinding $hir [dict get $hir exprs $it binding]]} {
+        return [list ref $it [dict get $hir exprs $it binding]]
+    }
+    return [list value $it]
 }
 
 # The pending temporaries of construction P (a call or a struct) while its
@@ -1251,7 +1490,8 @@ proc hir::affine::ExitReleases {hir parent scopes} {
                 if {[dict get $node kind] eq "fail"} {
                     set names [list [dict get $node name]]
                 }
-                set crossed [Crossed $hir $parent $x $loop $names]
+                set keep [expr {[dict get $node kind] eq "continue" ? $loop : ""}]
+                set crossed [Crossed $hir $parent $x $loop $names $keep]
                 lassign [expr {$names eq {} ? $crossed : [dict get $crossed [lindex $names 0]]}] pairs pending
                 set released [concat [Leaving $hir $scopes $byKey $pairs $state $x] [PendingItems $hir $pending $x]]
                 if {$released eq {}} continue
@@ -1463,6 +1703,8 @@ proc hir::affine::temporaries {hir} {
 #
 #   c                      a coroutine handle: release it (coroutine#release)
 #   l D                    a List: drop every element by D, in index order
+#   v D                    a MutableVector: drop every live element by D,
+#                          lowest index first, leaving it empty
 #   s N . (SLOT . D)*N     a struct: drop field SLOT (its index in the
 #                          struct's layout) by D, for each of its N affine
 #                          fields, in reverse layout (declaration) order
@@ -1483,6 +1725,15 @@ proc hir::affine::Descriptor {hir type {exclude {}}} {
             return ""
         }
         return "l$inner"
+    }
+    if {[hir::types::IsMutVec $type]} {
+        # A MutableVector drops its live elements, first to last
+        # (MUTABLE-VECTOR.md), and is left empty.
+        set inner [Descriptor $hir [lindex $type 1]]
+        if {$inner eq ""} {
+            return ""
+        }
+        return "v$inner"
     }
     if {[hir::types::IsStructLike $type]} {
         set layout [hir::types::StructLayout $type]

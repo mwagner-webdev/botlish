@@ -1014,7 +1014,7 @@ fn w(k: int) -> V:
     return V {n: k + 1}
 }
 
-test co-release-placement {a release follows the last statement of the handle's own sequence that refers to it: after the last resume, per loop iteration, after a loop using it, after a function's last statement, after the branch that moved it on one path (its new owner is released inside); a moved-from handle is not released (its new owner is), nor one whose last use cannot complete} -body {
+test co-release-placement {a release follows the last statement of the handle's own sequence that refers to it: after the last resume, per loop iteration, after a loop using it, after a function's last statement, at the end of the path that still owns it when another path moved it (the empty `else` holds a `unit` statement for it; the new owner is released inside its own branch), never after the join, where a moved path's new owner may live on (MUTABLE-VECTOR.md); a moved-from handle is not released (its new owner is), nor one whose last use cannot complete} -body {
     lmap body {
         "coroutine {step, first} = w(1)\na = step()\nb = step()\n\[first.n, a.n, b.n\]\n"
         "coroutine {step} = w(1)\nother = step\nx = other()\nx.n\n"
@@ -1025,7 +1025,7 @@ test co-release-placement {a release follows the last statement of the handle's 
         "fn g(c: bool) -> int:\n    coroutine {step, first} = w(1)\n    if c:\n        return first.n\n    step().n\ng(true)\n"
         "fn h() -> int:\n    coroutine {step} = w(1)\n    return step().n\nh()\n"
     } {coReleases "${releaseDecls}$body"}
-} -cleanup {unset -nocomplain body} -result {{{{bind b} step}} {{{bind x} other}} {{if step} {{bind gone} gone}} {{project step}} {{{bind first} <handle>}} {{{bind xs} step}} {{project step}} {}}
+} -cleanup {unset -nocomplain body} -result {{{{bind b} step}} {{{bind x} other}} {{{bind gone} gone} {ref step}} {{project step}} {{{bind first} <handle>}} {{{bind xs} step}} {{project step}} {}}
 
 test co-release-values {a release changes no value: after a last statement whose value is a function's result, a loop element, an if's value or the program's result, the value is kept; a released suspended body runs no further code} -body {
     coAgree "${releaseDecls}fn note(a: MutableArray\[int\], v: int) -> int:

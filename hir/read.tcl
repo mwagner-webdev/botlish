@@ -20,7 +20,7 @@
 # ( ) , or whitespace inside names; ordinary IR names are.
 
 namespace eval hir::read {
-    variable flags {unbound deferred duplicate unreachable move}
+    variable flags {unbound deferred duplicate unreachable move move-out consuming}
     # TypeDecls' own result from the current Program call, for Program to
     # store as the returned HIR's `sourceTypes` field.
     variable lastTypeDecls {}
@@ -558,6 +558,10 @@ proc hir::read::ParseType {text number} {
         # "ImmutableSet" are different constructor names.
         return [list immutableSet [ParseType $inner $number]]
     }
+    if {[regexp {^MutableVector\[(.+)\]$} $text -> inner]} {
+        # MUTABLE-VECTOR.md: hir::types::show's own notation.
+        return [list mutvec [ParseType $inner $number]]
+    }
     if {[regexp {^MutableArray\[(.+)\]$} $text -> inner]} {
         # PARAMETERIZED-MUTABLEARRAY.md: hir::types::show's own notation.
         return [list mutarray [ParseType $inner $number]]
@@ -638,7 +642,9 @@ proc hir::read::TakeExprLine {hirVar level} {
             || [string match release=* [lindex $tail end]]
             || [string match exit-release=* [lindex $tail end]]
             || [string match error-release=* [lindex $tail end]]
-            || [string match consumed=* [lindex $tail end]])} {
+            || [string match consumed=* [lindex $tail end]]
+            || [string match vector=* [lindex $tail end]]
+            || [string match place=* [lindex $tail end]])} {
         set found [linsert $found 0 [lindex $tail end]]
         set tail [lrange $tail 0 end-1]
     }

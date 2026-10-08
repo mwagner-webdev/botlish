@@ -83,6 +83,15 @@
 #                                     the result is a T (PARAMETERIZED-
 #                                     MUTABLEARRAY.md); a raw `mutarray`
 #                                     argument keeps the declared result
+#                     mutvec-from-list L  argument L is a List[T]: the
+#                                     result is a MutableVector[T]
+#                                     (MUTABLE-VECTOR.md)
+#                     mutvec-element V    argument V is a MutableVector[T]:
+#                                     the result is a T
+#                     mutvec-to-list V    argument V is a MutableVector[T]:
+#                                     the result is a List[T]
+#                     same A          the result has argument A's own
+#                                     static type (mutable_vector#share)
 #                     mutarray-freeze A   argument A is a MutableArray[T]:
 #                                     the result is a List[T]; a raw
 #                                     `mutarray` argument keeps the declared
@@ -166,12 +175,16 @@ namespace eval core::native {
     #   raw-address          produces the machine address of an owned byte
     #                        storage's payload (abi::x86_64::from_bytes; native
     #                        only, ABI-BYTES.md)
+    #   mutvec-alloc         allocates a new MutableVector header
+    #                        (core/mutvec.tcl; MUTABLE-VECTOR.md)
+    #   mutvec-mutate        mutates a MutableVector header in place (push,
+    #                        pop, take, swap, clear)
     #   raw-syscall          executes a raw Linux x86-64 kernel transition
     #                        (the `syscall` instruction) with unknown effects
     #                        (core/linuxabi.tcl; LINUX-X86-64-SYSCALL.md)
     variable runtimeTags {bigint string-alloc list-alloc result-alloc char-index
         range-check structural-equality mutarray-alloc mutarray-mutate hash set-alloc
-        process-argv raw-syscall bytestore-alloc raw-address}
+        process-argv raw-syscall bytestore-alloc raw-address mutvec-alloc mutvec-mutate}
     # NAME -> 1: the errors the runtime itself declares, visible in every
     # program like a root native and never part of a program's own `error`
     # declarations (hir/errordecls.tcl). Only a native's -errors may name one;
@@ -430,6 +443,13 @@ proc core::native::ValidShape {shape count} {
         element - append { return [expr {$length == 3 && $count ne ""}] }
         immutable-set { return [expr {$length == 2}] }
         mutarray-element - mutarray-freeze { return [expr {$length == 2 && $count ne ""}] }
+        mutvec-from-list - mutvec-element - mutvec-to-list - same {
+            # MUTABLE-VECTOR.md (hir::types::ShapeResult): from_list's
+            # List[T] -> MutableVector[T]; an element read or removal's
+            # MutableVector[T] -> T; to_list's MutableVector[T] -> List[T];
+            # `same A`: the result has argument A's own type (a share).
+            return [expr {$length == 2 && $count ne ""}]
+        }
     }
     return 0
 }

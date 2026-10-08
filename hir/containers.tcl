@@ -43,7 +43,10 @@ namespace eval hir::containers {
     # Native name -> rule for the natives that write a MutableArray's slots.
     variable nativeRules [dict create \
         mutable_array::set  set \
-        mutable_array::copy copy]
+        mutable_array::copy copy \
+        mutable_vector::push        {vector 1} \
+        mutable_vector::swap        {vector 2} \
+        mutable_vector#swap_drop    {vector 2}]
 }
 
 # Records, as HIR's `intrinsicBlocks` field (block ExprId -> rule), which
@@ -211,7 +214,18 @@ proc hir::containers::VerifyNative {hirVar ranges e node name} {
         return
     }
     set args [dict get $node args]
-    switch -- [dict get $nativeRules $name] {
+    set rule [dict get $nativeRules $name]
+    if {[lindex $rule 0] eq "vector"} {
+        # A MutableVector[T] (MUTABLE-VECTOR.md): an element pushed or
+        # swapped in must be proven admissible for T, exactly as a
+        # MutableArray store.
+        set i [lindex $rule 1]
+        if {[llength $args] > $i} {
+            VerifyElement hir $ranges [lindex $args 0] [lindex $args $i]
+        }
+        return
+    }
+    switch -- $rule {
         set {
             if {[llength $args] == 3} {
                 VerifyStore hir $ranges [lindex $args 0] [lindex $args 2]
@@ -246,6 +260,30 @@ proc hir::containers::VerifyStore {hirVar ranges array value} {
     hir::Diagnose hir TYPE [format \
         {value of type %s is not admissible to element type %s of %s (facts: %s): a MutableArray's element type is fixed for its lifetime, a store never widens it and inserts no check} \
         [hir::types::show $valueType] [hir::types::show $elem] [hir::types::show $arrayType] \
+        [hir::range::show $range]] $value
+}
+
+# mutable_vector::push(VECTOR, VALUE) / swap(VECTOR, i, VALUE): when VECTOR is
+# a MutableVector[T], VALUE must be proven admissible for T.
+proc hir::containers::VerifyElement {hirVar ranges vector value} {
+    upvar 1 $hirVar hir
+    set vectorType [hir::typeOf $hir $vector]
+    if {![hir::types::IsMutVec $vectorType]} {
+        return
+    }
+    set elem [lindex $vectorType 1]
+    set valueType [hir::typeOf $hir $value]
+    if {$elem eq "any" || $valueType eq "never"} {
+        return
+    }
+    set range [expr {[dict exists $ranges $value] ? [dict get $ranges $value] : [hir::range::unknown]}]
+    if {$elem ne "never" && [hir::range::ProvesValueAcceptedBy $valueType $range $elem]} {
+        # (MutableVector[never], the proven-empty vector, admits nothing.)
+        return
+    }
+    hir::Diagnose hir TYPE [format \
+        {value of type %s is not admissible to element type %s of %s (facts: %s): a MutableVector's element type is fixed by its type, and an element pushed or swapped in is never widened or checked at run time} \
+        [hir::types::show $valueType] [hir::types::show $elem] [hir::types::show $vectorType] \
         [hir::range::show $range]] $value
 }
 

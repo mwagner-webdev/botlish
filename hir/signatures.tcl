@@ -805,6 +805,14 @@ proc hir::signatures::Meet {a b} {
     if {[hir::types::IsMutArray $b] && $a eq "mutarray"} {
         return $b
     }
+    if {[hir::types::IsMutVec $a] && $b eq "mutvec"} {
+        # A MutableVector native's `mutvec` kind requirement: any
+        # MutableVector[T] satisfies it (MUTABLE-VECTOR.md).
+        return $a
+    }
+    if {[hir::types::IsMutVec $b] && $a eq "mutvec"} {
+        return $b
+    }
     return [hir::types::glb $a $b]
 }
 
@@ -813,7 +821,7 @@ proc hir::signatures::Meet {a b} {
 # placeholder -- no `any`, no bare aggregate kind (an element type `any`),
 # no callable (which also keeps inferred Fn types first-order: finite).
 proc hir::signatures::Concrete {type} {
-    if {$type in {any never list immutableSet mutarray block native}} {
+    if {$type in {any never list immutableSet mutarray mutvec block native}} {
         return 0
     }
     if {[hir::types::IsList $type] || [hir::types::IsSet $type]} {

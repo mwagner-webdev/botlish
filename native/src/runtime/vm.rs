@@ -160,6 +160,9 @@ pub struct Vm {
     /// never observable, and never a GC root (a plain index).
     argv_invalid: std::cell::OnceCell<Option<usize>>,
     pub temp_roots: Vec<Value>,
+    /// The MutableVector headers installed in the context area this run
+    /// (`contextroot`, MUTABLE-VECTOR.md): roots for the rest of the run.
+    pub context_roots: Vec<Value>,
     pub info: Rc<ProgramInfo>,
     pub metrics: Metrics,
     const_table: Vec<Value>,
@@ -233,6 +236,7 @@ impl Vm {
             argv: DEFAULT_ARGV.iter().map(|a| a.as_bytes().to_vec()).collect(),
             argv_invalid: std::cell::OnceCell::new(),
             temp_roots: Vec::new(),
+            context_roots: Vec::new(),
             info,
             metrics: Metrics::new(alloc_mode),
             const_table: Vec::new(),
@@ -418,6 +422,7 @@ impl Vm {
             .chain(native_frame_roots)
             .chain(error_values)
             .chain(self.temp_roots.iter().copied())
+            .chain(self.context_roots.iter().copied())
             .chain(self.statics_table.iter().copied());
         let framemap = self.framemap.clone();
         self.heap.collect(roots.collect::<Vec<_>>().into_iter(), &mut self.metrics, reason, &framemap);
@@ -444,6 +449,7 @@ impl Vm {
         self.error = None;
         self.declared_error = 0;
         self.temp_roots.clear();
+        self.context_roots.clear();
         self.metrics.reset();
         self.collect_with(GcReason::Explicit);
     }

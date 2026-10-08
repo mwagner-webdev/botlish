@@ -12,6 +12,7 @@
 //! |-----------------------|------------------------------------------------|
 //! | `c`                   | a coroutine handle (`rt_co_release`)           |
 //! | `l` D                 | every element of a List by D, first to last    |
+//! | `v` D                 | every live element of a MutableVector by D, first to last, leaving it empty (runtime/mutvec.rs) |
 //! | `s` N `.` (SLOT `.` D)* | the struct fields at those slots by their D, in the descriptor's order |
 //!
 //! The descriptor is type-directed: only positions the static type says are
@@ -27,11 +28,20 @@ use super::vm::Vm;
 /// Releases every affine value VALUE owns, by DESCRIPTOR (a String).
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_affine_drop(p: *mut Vm, value: Value, descriptor: Value) -> Value {
-    let text = str_of(descriptor).as_str().as_bytes();
-    let mut pos = 0;
-    drop_by(p, value, text, &mut pos);
-    debug_assert_eq!(pos, text.len(), "affine drop descriptor not consumed");
+    drop_descriptor(p, value, str_of(descriptor).as_str().as_bytes());
     UNIT
+}
+
+/// Releases every affine value VALUE owns, by descriptor text D.
+pub fn drop_descriptor(p: *mut Vm, value: Value, d: &[u8]) {
+    let mut pos = 0;
+    drop_at(p, value, d, &mut pos);
+    debug_assert_eq!(pos, d.len(), "affine drop descriptor not consumed");
+}
+
+/// The drop of VALUE by the descriptor at POS of D, advancing POS past it.
+pub fn drop_at(p: *mut Vm, value: Value, d: &[u8], pos: &mut usize) {
+    drop_by(p, value, d, pos)
 }
 
 fn drop_by(p: *mut Vm, value: Value, d: &[u8], pos: &mut usize) {
@@ -60,17 +70,18 @@ fn drop_by(p: *mut Vm, value: Value, d: &[u8], pos: &mut usize) {
                 drop_by(p, fields[slot], d, pos);
             }
         }
+        b'v' => super::mutvec::drop_elements(p, value, d, pos),
         _ => panic!("bad affine drop descriptor {:?}", std::str::from_utf8(d)),
     }
 }
 
 /// Moves POS past the descriptor at POS without dropping anything.
-fn skip(d: &[u8], pos: &mut usize) {
+pub fn skip(d: &[u8], pos: &mut usize) {
     let c = d[*pos];
     *pos += 1;
     match c {
         b'c' => {}
-        b'l' => skip(d, pos),
+        b'l' | b'v' => skip(d, pos),
         b's' => {
             let n = number(d, pos);
             for _ in 0..n {

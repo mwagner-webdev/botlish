@@ -137,7 +137,8 @@ proc hir::callables::Bearing {hir type {mutable 1}} {
         }
         return 0
     }
-    if {[hir::types::IsSet $type]} {
+    if {[hir::types::IsSet $type] || [hir::types::IsMutVec $type]} {
+        # (A MutableVector is a value: it bears what its elements bear.)
         return [Bearing $hir [lindex $type 1] $mutable]
     }
     if {[hir::types::IsStruct $type]} {
@@ -217,6 +218,9 @@ proc hir::callables::Preserves {hir type final} {
         return 1
     }
     if {[hir::types::IsSet $type] && [hir::types::IsSet $final]} {
+        return [Preserves $hir [lindex $type 1] [lindex $final 1]]
+    }
+    if {[hir::types::IsMutVec $type] && [hir::types::IsMutVec $final]} {
         return [Preserves $hir [lindex $type 1] [lindex $final 1]]
     }
     if {[hir::types::IsStruct $type] && [hir::types::IsStruct $final]} {
@@ -307,7 +311,7 @@ proc hir::callables::HasMutArray {type} {
         }
         return 0
     }
-    if {[hir::types::IsSet $type]} {
+    if {[hir::types::IsSet $type] || [hir::types::IsMutVec $type]} {
         return [HasMutArray [lindex $type 1]]
     }
     if {[hir::types::IsFn $type]} {

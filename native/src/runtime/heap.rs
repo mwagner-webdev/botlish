@@ -144,6 +144,9 @@ impl Heap {
                 // be mistaken for an arbitrary root.
                 KIND_MUTARRAY => stack.extend_from_slice(&mutarray_of(v).slots),
                 KIND_RESULT => stack.push(result_of(v).payload),
+                // A MutableVector (MUTABLE-VECTOR.md): exactly its live
+                // elements, never spare capacity or removed slots.
+                KIND_MUTVEC => stack.extend(super::mutvec::elements(v)),
                 KIND_CLOSURE => {
                     let c = closure_of(v);
                     stack.extend_from_slice(unsafe { std::slice::from_raw_parts(c.caps, c.ncaps) });
@@ -270,6 +273,7 @@ pub unsafe fn object_size(object: *mut Header) -> usize {
             KIND_STRPLAN => size_of::<StrPlanObj>() + super::construct::strplan_of(v).buf.len(),
             KIND_LISTPLAN => size_of::<ListPlanObj>() + super::construct::listplan_of(v).items.capacity() * 8,
             KIND_COROUTINE => size_of::<super::coroutine::CoroutineObj>(),
+            KIND_MUTVEC => super::mutvec::object_size(v),
             kind => panic!("bad heap object kind {kind}"),
         }
     }
@@ -311,6 +315,9 @@ pub unsafe fn free_object(object: *mut Header) {
             // Its stack, if it still has one (an abandoned suspended
             // coroutine), goes back to the pool: nothing on it runs.
             KIND_COROUTINE => drop(Box::from_raw(object as *mut super::coroutine::CoroutineObj)),
+            // The header's share of its backing goes back (the backing is
+            // freed with its last header).
+            KIND_MUTVEC => drop(Box::from_raw(object as *mut super::mutvec::MutVecObj)),
             kind => panic!("bad heap object kind {kind}"),
         }
     }

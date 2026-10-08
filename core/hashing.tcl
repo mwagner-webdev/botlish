@@ -117,7 +117,7 @@ proc core::hashing::Mix {h v} {
     variable KindTag
     variable Mask64
     set kind [core::value::kind $v]
-    if {$kind in {block native mutarray coroutine}} {
+    if {$kind in {block native mutarray coroutine mutvec}} {
         core::semanticError EQUALITY \
             "hash is not defined for callables: [core::value::show $v]"
     }

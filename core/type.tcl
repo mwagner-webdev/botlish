@@ -66,7 +66,11 @@ namespace eval core::type {
     # source-spellable type (a handle's precise static type is the HIR form
     # {coroutine RESUME OUTWARD ERRORS}, hir/types.tcl), registered so that
     # the runtime kind has a core type, exactly as `block` and `native` do.
-    variable primitives {int str bool unit list result block native mutarray UnicodeChar immutableSet struct coroutine}
+    #
+    # mutvec is the kind of a MutableVector header (MUTABLE-VECTOR.md): the
+    # source-spellable type is the applied MutableVector[T] ({mutvec T},
+    # hir/types.tcl); the bare kind is what natives' -param-types say.
+    variable primitives {int str bool unit list result block native mutarray UnicodeChar immutableSet struct coroutine mutvec}
     # NAME -> {name NAME base KIND validator CMD parents {NAME...}
     # integerDomain DOMAIN source 0|1 refinement {} | {carrier TYPE owner NS
     # span SPAN}}

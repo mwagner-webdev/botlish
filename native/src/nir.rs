@@ -283,6 +283,43 @@ pub enum OpCode {
     /// static drop descriptor %d (a String, runtime/affine.rs). Result unit;
     /// never fails or allocates (no safepoint), like `corelease`.
     AffineDrop,
+    /// MutableVector (MUTABLE-VECTOR.md, runtime/mutvec.rs). A vector is a
+    /// header over a copy-on-write backing; every mutation changes the
+    /// header in place (its register never changes).
+    ///   `mvfromlist %xs`       a fresh vector of a List's elements (allocates)
+    ///   `mvlen %v`, `mvempty %v`  observations (never detach)
+    ///   `mvat %v %i`           an element; IndexNotFound
+    ///   `mvpush %v %x`         append (detaching a shared backing first)
+    ///   `mvpop %v`, `mvtake %v %i`, `mvswap %v %i %x`  removal/exchange,
+    ///                          the element moved out; IndexNotFound
+    ///   `mvclear %v`           remove every (unrestricted) element
+    ///   `mvshare %v %d`        a logical copy by share descriptor %d (a new
+    ///                          header on the same backing; allocates)
+    ///   `mvtolist %v`          an immutable List snapshot (allocates)
+    ///   `mvtakefront %v`       a consuming loop's step (non-empty vector)
+    ///   `mvcleardrop %v %d`    clear of affine elements, each dropped by %d
+    ///   `mvswapdrop %v %i %x %d`  swap of affine elements; on IndexNotFound
+    ///                          the replacement %x is dropped by %d
+    /// Push/pop/take/swap/clear grow or detach the backing with Rust
+    /// allocations only: no Botlish allocation, so no safepoint.
+    MvFromList,
+    MvLen,
+    MvEmpty,
+    MvAt,
+    MvPush,
+    MvPop,
+    MvTake,
+    MvSwap,
+    MvClear,
+    MvShare,
+    MvToList,
+    MvTakeFront,
+    MvClearDrop,
+    MvSwapDrop,
+    /// `contextroot %h`: %h (a MutableVector header just installed in the
+    /// context area, MUTABLE-VECTOR.md) is a GC root for the rest of the
+    /// run. Never fails or allocates; result unit.
+    ContextRoot,
     /// Tcl 9-compatible Unicode alpha/alnum character classification
     /// (core/tclcompat.tcl's `is_tcl_alpha`/`is_tcl_alnum`): the operand is
     /// a one-Unicode-scalar String (RANGE if not). TEMPORARY compatibility
@@ -481,6 +518,21 @@ impl OpCode {
             "codone" => CoDone,
             "corelease" => CoRelease,
             "affinedrop" => AffineDrop,
+            "mvfromlist" => MvFromList,
+            "mvlen" => MvLen,
+            "mvempty" => MvEmpty,
+            "mvat" => MvAt,
+            "mvpush" => MvPush,
+            "mvpop" => MvPop,
+            "mvtake" => MvTake,
+            "mvswap" => MvSwap,
+            "mvclear" => MvClear,
+            "mvshare" => MvShare,
+            "mvtolist" => MvToList,
+            "mvtakefront" => MvTakeFront,
+            "mvcleardrop" => MvClearDrop,
+            "mvswapdrop" => MvSwapDrop,
+            "contextroot" => ContextRoot,
             "mbytesnew" => MBytesNew,
             "mbytesfrom" => MBytesFrom,
             "mbyteslen" => MBytesLen,
@@ -533,9 +585,10 @@ impl OpCode {
             | SetFromListTotal | StrToShort | ShortToStr | ShortLen | StrToAscii | AsciiToStr | AsciiLen
             | AsciiToShort | BytesFromList | BytesLen | BytesAddr | KeepAlive | MBytesNew | MBytesFrom | MBytesLen
             | MBytesClone | MBytesFreeze | MBytesAddr | CoCreate | CoStart | CoResume0 | CoYield | CoDone
-            | CoRelease => Some(1),
-            Substr | SubstrProven | MutArraySet | MutArraySetProven | MBytesSet | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum | StrSliceShort => Some(3),
-            RegionEq => Some(4),
+            | CoRelease | MvFromList | MvLen | MvEmpty | MvPop | MvClear | MvToList | MvTakeFront | ContextRoot => Some(1),
+            Substr | SubstrProven | MutArraySet | MutArraySetProven | MBytesSet | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum | StrSliceShort
+            | MvSwap => Some(3),
+            RegionEq | MvSwapDrop => Some(4),
             MutArrayCopy | MutArrayCopyProven => Some(5),
             _ => Some(2),
         }

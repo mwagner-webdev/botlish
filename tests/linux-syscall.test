@@ -138,7 +138,7 @@ test linux-syscall-native-registered {linux::abi::syscall is one root native und
     list [dict get $meta arity] [dict get $meta paramTypes] [dict get $meta resultType] \
         [dict get $meta resultShape] [dict get $meta errors] [dict get $meta contextFree] \
         [dict get $meta runtime] [core::native::isQualifiedNative linux::abi::syscall] \
-        [lsearch -all -inline -not -regexp [lsearch -all -inline [core::native::names] *::*] {^(list|str|char|mutable_array|immutable_set|coroutine)::}]
+        [lsearch -all -inline -not -regexp [lsearch -all -inline [core::native::names] *::*] {^(list|str|char|mutable_array|immutable_set|coroutine|mutable_vector)::}]
 } -result {1 struct struct {named-struct abi::x86_64::Register64} {} 0 raw-syscall 1 {linux::abi::syscall byte_store::from_list byte_store::byte_count abi::x86_64::from_bytes mutable_byte_store::zeroed mutable_byte_store::from_storage mutable_byte_store::count mutable_byte_store::replace mutable_byte_store::detach mutable_byte_store::freeze mutable_byte_store::freeze_prefix abi::x86_64::from_mutable_bytes}}
 
 test linux-syscall-no-syscall-specific-intrinsics {the compiler knows the transport, not syscalls: no getpid/write/read/open native, no other linux or abi native -- the only other natives in an abi namespace are the raw address bridges abi::x86_64::from_bytes and from_mutable_bytes, which know no syscall either (ABI-BYTES.md, MUTABLE-BYTES.md)} -body {

@@ -193,7 +193,13 @@ proc native::Outcome {lines} {
         }
         switch -- $tag {
             value {
-                return [lindex $line 1]
+                set value [lindex $line 1]
+                if {[string first mutvecitems $value] >= 0} {
+                    # A MutableVector in the result (MUTABLE-VECTOR.md): the
+                    # host's own vector value of those elements.
+                    set value [HostVectors $value]
+                }
+                return $value
             }
             error {
                 lassign $line _ code message
@@ -206,6 +212,27 @@ proc native::Outcome {lines} {
         }
     }
     throw {NATIVE BUG} "native backend produced no result:\n[join $lines \n]"
+}
+
+# VALUE (a host runtime value as the native runtime renders it) with every
+# `mutvecitems ITEMS` (runtime/show.rs's rendering of a MutableVector) made a
+# vector of the host runtime (core/mutvec.tcl).
+proc native::HostVectors {value} {
+    switch -- [lindex $value 0] {
+        mutvecitems {
+            return [core::mutvec::New [lmap item [lindex $value 1] {HostVectors $item}]]
+        }
+        list - immutableSet {
+            return [list [lindex $value 0] [lmap item [lindex $value 1] {HostVectors $item}]]
+        }
+        struct {
+            return [list struct [lindex $value 1] [lmap item [lindex $value 2] {HostVectors $item}]]
+        }
+        result {
+            return [list result [lindex $value 1] [HostVectors [lindex $value 2]]]
+        }
+    }
+    return $value
 }
 
 proc native::evalHir {hir args} {

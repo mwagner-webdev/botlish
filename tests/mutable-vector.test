@@ -1,0 +1,505 @@
+# mutable-vector.test -- MutableVector[T] (MUTABLE-VECTOR.md).
+#
+# A MutableVector is a growable mutable VALUE: copies of an unrestricted one
+# are copy-on-write and never observe each other's mutations; a vector of
+# affine elements is itself affine, uniquely owns every element, moves whole,
+# and moves elements across its boundary only through explicit operations
+# (push/swap in, pop/take/swap out, consuming iteration), releasing whatever
+# it still owns where it dies. A mutation updates its receiver *place* (a
+# binding, a field path of one, a context member) in place.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+# Shared declarations: a one-yield worker resumed with a Command.
+set mvDecls {import coroutine
+import list
+import mutable_vector
+
+error Boom
+
+struct Command:
+    value: int
+
+struct Event:
+    value: int
+
+struct Running:
+    name: str
+    step: Coroutine{args: [Command], return: Event}
+
+fn worker(seed: int, resume Command) -> Event:
+    command = yield Event {value: seed}
+    return Event {value: command.value + seed}
+
+fn make(seed: int) -> Coroutine{args: [Command], return: Event}:
+    coroutine {step} = worker(seed)
+    step
+
+fn empty_queue() -> MutableVector[Coroutine{args: [Command], return: Event}]:
+    mutable_vector::from_list([])
+
+fn boom(x: int) -> int errors Boom:
+    if x > 0:
+        fail Boom
+    x
+
+}
+
+# The same, without imports (HIR text of a program whose namespaces have
+# module files does not read back; these have none).
+set mvPlainDecls [string map [list "import list\n" ""] $mvDecls]
+
+proc mvAgree {text} {
+    return [sourceAgree $text]
+}
+
+# The error code of the first diagnostic of TEXT, or "ok".
+proc mvCode {text} {
+    if {[catch {surface::compile $text -warnings off} message options]} {
+        return [lindex [dict get $options -errorcode] end]
+    }
+    return ok
+}
+
+proc mvMessage {text} {
+    if {[catch {surface::compile $text -warnings off} message options]} {
+        regsub {^[^:]*:[0-9]+:[0-9]+: } $message {} message
+        return $message
+    }
+    return ok
+}
+
+# {VALUE CREATED CALLS-PER-ID ORDER} of TEXT on the interpreter: the
+# coroutines it creates and, for each (by creation order, 1 first), how
+# many times it was released, and the release order
+# (core::coroutines::releaseCalls / releaseTrace).
+proc mvReleases {text {backend interp}} {
+    set hir [surface::compile $text -warnings off]
+    set before $core::coroutines::nextId
+    set core::coroutines::releaseCalls {}
+    set core::coroutines::releaseTrace {}
+    try {
+        set outcome [outcomeUnderHir $backend $hir]
+        set calls $core::coroutines::releaseCalls
+        set order $core::coroutines::releaseTrace
+    } finally {
+        set core::coroutines::releaseCalls none
+        set core::coroutines::releaseTrace none
+    }
+    set created [expr {$core::coroutines::nextId - $before}]
+    set counts {}
+    for {set i 1} {$i <= $created} {incr i} {
+        lappend counts [llength [lsearch -all -exact $calls [expr {$before + $i}]]]
+    }
+    return [list [lrange $outcome 0 1] $created [lsort -unique $counts] [lmap id $order {expr {$id - $before}}]]
+}
+
+# The native counters of TEXT (native::allocationReport): {COROUTINES
+# MUTABLEVECTOR}, the coroutine stack counters and the copy-on-write ones.
+proc mvNative {text} {
+    set hir [surface::compile $text -warnings off]
+    set report [native::allocationReport $hir summary]
+    return [list [expr {[dict exists $report coroutines] ? [dict get $report coroutines] : {}}] \
+        [dict get $report mutableVector]]
+}
+
+# The static type of the (first) binding named NAME in HIR.
+proc mvBindingType {hir name} {
+    dict for {b binding} [dict get $hir bindings] {
+        if {[dict get $binding name] eq $name && [dict get $binding type] ne ""} {
+            return [hir::bindingType $hir $b]
+        }
+    }
+    return ""
+}
+
+proc mvNir {text args} {
+    return [native::nir [surface::compile $text -warnings off] {*}$args]
+}
+
+# The instruction lines of function NAME in NIR text.
+proc mvFunc {nir name} {
+    set lines {}
+    set inside 0
+    foreach line [split $nir \n] {
+        if {[regexp {^func [0-9]+ "([^"]*)"} $line -> fname]} {
+            set inside [expr {$fname eq $name}]
+            continue
+        }
+        if {$line eq "end"} {
+            set inside 0
+            continue
+        }
+        if {$inside} {
+            lappend lines [regsub { @e[0-9]+$} [string trim $line] ""]
+        }
+    }
+    return $lines
+}
+
+# The op names of LINES (the word after "op", or a call/struct instruction).
+proc mvOps {lines} {
+    set ops {}
+    foreach line $lines {
+        if {[regexp {= op ([a-z0-9]+)} $line -> op]} {
+            lappend ops $op
+        } elseif {[regexp {= (call|callvalue|structnew|closure) } $line -> op]} {
+            lappend ops $op
+        }
+    }
+    return $ops
+}
+
+proc withGcStress {script} {
+    set had [info exists ::env(BOTLISH_NATIVE_GC_STRESS)]
+    set saved [expr {$had ? $::env(BOTLISH_NATIVE_GC_STRESS) : ""}]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        return [uplevel 1 $script]
+    } finally {
+        if {$had} {
+            set ::env(BOTLISH_NATIVE_GC_STRESS) $saved
+        } else {
+            unset ::env(BOTLISH_NATIVE_GC_STRESS)
+        }
+    }
+}
+
+testConstraint linuxX86_64 [expr {$::tcl_platform(os) eq "Linux"
+    && $::tcl_platform(machine) in {x86_64 amd64}}]
+
+# ---------------------------------------------------------------------------
+# The principal theorem (items 57, 102)
+
+set mvPrincipal "${mvDecls}fn schedule() -> List\[int\] errors IndexNotFound:
+    coroutine {step: first} = worker(1)
+    coroutine {step: second} = worker(2)
+    queue = mutable_vector::from_list(\[first, second\])
+    step = queue.take(0)
+    event = step(Command {value: 10})
+    if not coroutine::done?(step):
+        queue.push(step)
+    next = queue.pop()
+    result = next(Command {value: 20})
+    \[event.value, result.value, queue.length()\]
+r = schedule():
+    on IndexNotFound:
+        \[\]
+r
+"
+
+test mv-principal-scheduler {item 102: first and second move into the List and the List into the vector; take moves one continuation out, resuming it advances the same execution, push moves it back, pop moves the other out; every continuation is released exactly once, none forked, on every backend} -body {
+    list [mvAgree $mvPrincipal] [mvReleases $mvPrincipal] [mvReleases $mvPrincipal compile]
+} -result {{value {[11, 22, 0]}} {{value {[11, 22, 0]}} 2 1 {1 2}} {{value {[11, 22, 0]}} 2 1 {1 2}}}
+
+test mv-principal-moves {item 102: the List literal and from_list move the continuations (a later use is USE-AFTER-MOVE), the vector is affine, take moves one out, push moves it back in} -body {
+    set pre "${mvDecls}fn f() -> int errors IndexNotFound:\n    coroutine {step: first} = worker(1)\n    coroutine {step: second} = worker(2)\n    queue = mutable_vector::from_list(\[first, second\])\n"
+    list [mvCode "${pre}    e = first(Command {value: 1})\n    1\n"] \
+        [mvCode "${pre}    step = queue.take(0)\n    queue.push(step)\n    e = step(Command {value: 1})\n    1\n"] \
+        [mvCode "${pre}    other = queue\n    queue.length()\n"] \
+        [hir::types::Affinity [mvBindingType [surface::compile "${pre}    queue.length()\n" -warnings off] queue]]
+} -cleanup {unset -nocomplain pre} -result {USE-AFTER-MOVE USE-AFTER-MOVE USE-AFTER-MOVE affine}
+
+test mv-principal-unrestricted {item 102: an unrestricted vector's copy is independent: a = [1,2,3]; b = a; a.push(4) leaves b = [1,2,3]} -body {
+    mvAgree "import mutable_vector\na = mutable_vector::from_list(\[1, 2, 3\])\nb = a\na.push(4)\n\[a, b\]\n"
+} -result {value {[<mutable-vector [1, 2, 3, 4]>, <mutable-vector [1, 2, 3]>]}}
+
+# ---------------------------------------------------------------------------
+# Type, affinity, construction (items 2, 3, 10-12, 74, 98)
+
+test mv-type-affinity {items 2, 98: Affinity(MutableVector[T]) = Affinity(T): vectors of Ints, Strings and unrestricted structs are unrestricted (mutation implies nothing), of coroutines or affine structs affine, and so is every List or struct owning one} -body {
+    set hir [surface::compile "${mvDecls}struct Plain:\n    n: int\nstruct State:\n    queue: MutableVector\[Coroutine{args: \[Command\], return: Event}\]\nstruct Capture:\n    events: MutableVector\[str\]\n1\n" -warnings off]
+    set c [hir::types::MakeCoroutineType [list {nstruct Command}] {nstruct Event} {}]
+    lmap t [list {mutvec int} {mutvec str} {mutvec {nstruct Plain}} [list mutvec $c] {mutvec {nstruct Running}} \
+            [list list [list mutvec $c]] {nstruct State} {nstruct Capture} {list {mutvec int}} {mutvec {mutvec int}} [list mutvec [list mutvec $c]]] {
+        hir::types::Affinity $t
+    }
+} -cleanup {unset -nocomplain hir c} -result {unrestricted unrestricted unrestricted affine affine affine affine unrestricted unrestricted unrestricted affine}
+
+test mv-type-syntax {items 3, 74: MutableVector[T] is an applied type like List[T]: shown and read back as MutableVector[T]; no argument, two arguments, or a lowercase spelling are errors} -body {
+    list [hir::types::show {mutvec {list str}}] [hir::read::ParseType {MutableVector[List[str]]} 1] \
+        [mvCode "import mutable_vector\nfn f(v: MutableVector) -> int:\n    1\nf(1)\n"] \
+        [lindex [mvCode "import mutable_vector\nfn f(v: MutableVector\[int, str\]) -> int:\n    1\nf(1)\n"] end] \
+        [mvCode "import mutable_vector\nfn f(v: mutable_vector\[int\]) -> int:\n    1\nf(1)\n"]
+} -result {{MutableVector[List[str]]} {mutvec {list str}} TYPE {expected "]" after the type argument, found ","} TYPE}
+
+test mv-construction {items 10-12: from_list(List[T]) is MutableVector[T]; the empty literal gives the proven-empty MutableVector[never], admissible as a declared MutableVector[T] (the typed empty vector) and into which nothing can be pushed; from_list leaves an unrestricted List usable and unchanged by later pushes} -body {
+    list [mvAgree "import mutable_vector\nimport list\nxs = \[1, 2\]\nv = mutable_vector::from_list(xs)\nv.push(3)\n\[xs, v, list::length(xs)\]\n"] \
+        [hir::types::show [mvBindingType [surface::compile "import mutable_vector\nv = mutable_vector::from_list(\[\])\nv.length()\n" -warnings off] v]] \
+        [mvAgree "${mvDecls}q = empty_queue()\nq.push(make(1))\nq.length()\n"] \
+        [mvCode "import mutable_vector\nv = mutable_vector::from_list(\[\])\nv.push(1)\n1\n"]
+} -result {{value {[[1, 2], <mutable-vector [1, 2, 3]>, 2]}} {MutableVector[never]} {value 1} TYPE}
+
+test mv-element-type {item 20: a pushed or swapped-in element must be proven admissible to the element type (no widening, no run-time check)} -body {
+    list [mvMessage "import mutable_vector\nv = mutable_vector::from_list(\[1\])\nv.push(\"s\")\n1\n"] \
+        [mvCode "import mutable_vector\nv = mutable_vector::from_list(\[1\])\nx = v.swap(0, true):\n    on IndexNotFound:\n        0\n1\n"]
+} -result {{value of type str is not admissible to element type int of MutableVector[int] (facts: [-∞, +∞]): a MutableVector's element type is fixed by its type, and an element pushed or swapped in is never widened or checked at run time} TYPE}
+
+# ---------------------------------------------------------------------------
+# Unrestricted value semantics (items 5, 6, 11, 18, 38, 39, 43-46, 49, 69)
+
+test mv-cow-copies {item 38: copies mutate independently: a.push(4) leaves b, b.swap(0, 9) leaves a; a copy taken before a pop keeps the element} -body {
+    mvAgree "import mutable_vector\na = mutable_vector::from_list(\[1, 2, 3\])\nb = a\na.push(4)\nold = b.swap(0, 9):\n    on IndexNotFound:\n        0\nc = a\nlast = a.pop():\n    on IndexNotFound:\n        0\n\[a, b, c, old, last\]\n"
+} -result {value {[<mutable-vector [1, 2, 3]>, <mutable-vector [9, 2, 3]>, <mutable-vector [1, 2, 3, 4]>, 1, 4]}}
+
+test mv-cow-calls {item 39: passing a vector to a function that mutates its parameter changes the callee's logical copy only; returning a vector and storing it in a List copies it logically} -body {
+    mvAgree "import mutable_vector\nfn modify(v: MutableVector\[int\]) -> int:\n    v.push(4)\n    v.length()\nfn keep(v: MutableVector\[int\]) -> List\[MutableVector\[int\]\]:\n    \[v\]\nfn grow(v: MutableVector\[int\]) -> MutableVector\[int\]:\n    v.push(9)\n    v\na = mutable_vector::from_list(\[1, 2, 3\])\nn = modify(a)\nxs = keep(a)\nb = grow(a)\na.push(5)\nb.push(6)\n\[n, a, xs, b\]\n"
+} -result {value {[4, <mutable-vector [1, 2, 3, 5]>, [<mutable-vector [1, 2, 3]>], <mutable-vector [1, 2, 3, 9, 6]>]}}
+
+test mv-cow-struct-field {items 43, 45: a struct with a vector field stays unrestricted; copying the struct copies the vector logically; `s.events.push(x)` updates that field's place; `copy = s.events` is a snapshot} -body {
+    mvAgree "import mutable_vector\nstruct Capture:\n    events: MutableVector\[str\]\n    n: int\ncap = Capture {events: mutable_vector::from_list(\[\"x0\"\]), n: 1}\ncap2 = cap\ncap.events.push(\"y0\")\nsnap = cap.events\ncap.events.push(\"z0\")\ncap2.events.clear()\n\[cap, cap2, snap\]\n"
+} -result {value {[Capture {events: <mutable-vector ["x0", "y0", "z0"]>, n: 1}, Capture {events: <mutable-vector []>, n: 1}, <mutable-vector ["x0", "y0"]>]}}
+
+test mv-cow-list-element {item 46: List[MutableVector[int]] is unrestricted; an element read out of the List is a logical copy whose mutation leaves the List's element unchanged} -body {
+    mvAgree "import mutable_vector\nimport list\nfn f() -> List\[int\] errors IndexNotFound:\n    xs = \[mutable_vector::from_list(\[1\]), mutable_vector::from_list(\[2\])\]\n    v = list::at(xs, 0)\n    v.push(5)\n    w = list::at(xs, 0)\n    \[v.length(), w.length()\]\nr = f():\n    on IndexNotFound:\n        \[\]\nr\n"
+} -result {value {[2, 1]}}
+
+test mv-cow-nested {item 69: MutableVector[MutableVector[int]]: reading (at) or taking an inner vector gives a logical copy; mutating it never changes the element still stored in the outer vector} -body {
+    mvAgree "import mutable_vector\nfn f() -> List\[int\] errors IndexNotFound:\n    outer = mutable_vector::from_list(\[mutable_vector::from_list(\[1\]), mutable_vector::from_list(\[2, 3\])\])\n    inner = outer.at(0)\n    inner.push(10)\n    taken = outer.take(1)\n    taken.push(20)\n    again = outer.at(0)\n    \[inner.length(), taken.length(), again.length(), outer.length()\]\nr = f():\n    on IndexNotFound:\n        \[\]\nr\n"
+} -result {value {[2, 3, 1, 1]}}
+
+test mv-cow-loop {item 49: a loop over an unrestricted vector iterates a snapshot: mutating the vector inside the loop never changes what it iterates; the loop collects as usual} -body {
+    mvAgree "import mutable_vector\na = mutable_vector::from_list(\[1, 2, 3\])\nxs = loop x in a:\n    a.push(x * 10)\n    x\n\[xs, a\]\n"
+} -result {value {[[1, 2, 3], <mutable-vector [1, 2, 3, 10, 20, 30]>]}}
+
+test mv-context-member {item 44: a context struct's vector member is a place every function sharing the context mutates in place; a snapshot read out of it (in any function, mutating or not) is independent of later writes; natively the installed header is a GC root} -body {
+    set text "import mutable_vector\ncontext struct CaptureIO:\n    output: MutableVector\[str\]\nfn write_text(text: str, context io: CaptureIO) -> unit:\n    io.output.push(text)\nfn count(context io: CaptureIO) -> int:\n    io.output.length()\nfn snapshot(context io: CaptureIO) -> MutableVector\[str\]:\n    io.output\nwith context CaptureIO {output: mutable_vector::from_list(\[\"s0\"\])}\nwrite_text(\"a0\")\ns1 = snapshot()\nwrite_text(\"b0\")\nwrite_text(\"c0\")\ns2 = snapshot()\n\[count(), s1, s2\]\n"
+    list [mvAgree $text] [withGcStress {lrange [outcomeUnderHir cranelift [surface::compile $text -warnings off]] 0 1}]
+} -cleanup {unset -nocomplain text} -result {{value {[4, <mutable-vector ["s0", "a0"]>, <mutable-vector ["s0", "a0", "b0", "c0"]>]}} {value {[4, <mutable-vector ["s0", "a0"]>, <mutable-vector ["s0", "a0", "b0", "c0"]>]}}}
+
+test mv-context-installed-copy {item 44: installing a context copies the value logically: the binding it came from does not observe the context's later writes} -body {
+    mvAgree "import mutable_vector\ncontext struct CaptureIO:\n    output: MutableVector\[str\]\nfn write_text(text: str, context io: CaptureIO) -> unit:\n    io.output.push(text)\nfn count(context io: CaptureIO) -> int:\n    io.output.length()\nx = CaptureIO {output: mutable_vector::from_list(\[\"s0\"\])}\nwith context x\nwrite_text(\"a0\")\n\[count(), x.output.length()\]\n"
+} -result {value {[2, 1]}}
+
+test mv-ops {items 16-30: length, empty?, at, push, pop, take (order kept), swap, clear on unrestricted elements; an empty pop and a bad index are the handleable IndexNotFound and change nothing} -body {
+    mvAgree "import mutable_vector\nfn f() -> List\[int\] errors IndexNotFound:\n    v = mutable_vector::from_list(\[1, 2, 3, 4\])\n    a = v.at(1)\n    t = v.take(1)\n    s = v.swap(0, 7)\n    p = v.pop()\n    n = v.length()\n    v.clear()\n    e = if v.empty?():\n        1\n    else:\n        0\n    \[a, t, s, p, n, v.length(), e\]\nfn bad() -> List\[int\]:\n    v = mutable_vector::from_list(\[1\])\n    a = v.at(5):\n        on IndexNotFound:\n            -1\n    b = v.take(-1):\n        on IndexNotFound:\n            -2\n    c = v.swap(1, 9):\n        on IndexNotFound:\n            -3\n    v.clear()\n    d = v.pop():\n        on IndexNotFound:\n            -4\n    \[a, b, c, d, v.length()\]\nr = f():\n    on IndexNotFound:\n        \[\]\n\[r, bad()\]\n"
+} -result {value {[[2, 2, 1, 4, 2, 0, 1], [-1, -2, -3, -4, 0]]}}
+
+test mv-take-order {items 24, 25: take(i) keeps the relative order of the elements after i; take(0) repeatedly is a queue} -body {
+    mvAgree "import mutable_vector\nfn f() -> List\[int\] errors IndexNotFound:\n    v = mutable_vector::from_list(\[1, 2, 3, 4, 5\])\n    a = v.take(2)\n    b = v.take(0)\n    v.push(6)\n    c = v.take(0)\n    \[a, b, c, v.at(0), v.at(1), v.at(2), v.length()\]\nr = f():\n    on IndexNotFound:\n        \[\]\nr\n"
+} -result {value {[3, 1, 2, 4, 5, 6, 3]}}
+
+test mv-show {a vector shows as its current elements on every backend; == and hash of a vector are the EQUALITY error (none was added), statically AFFINE-EQUALITY-UNSUPPORTED for an affine one} -body {
+    list [mvAgree "import mutable_vector\nv = mutable_vector::from_list(\[\"a0\", \"b0\"\])\n\[v, mutable_vector::from_list(\[\])\]\n"] \
+        [lindex [mvAgree "import mutable_vector\nv = mutable_vector::from_list(\[1\])\nv == v\n"] 1] \
+        [lindex [mvAgree "import mutable_vector\nv = mutable_vector::from_list(\[1\])\nhash(v)\n"] 1] \
+        [mvCode "${mvDecls}q = empty_queue()\nq == q\n"]
+} -result {{value {[<mutable-vector ["a0", "b0"]>, <mutable-vector []>]}} {CORE SEMANTIC EQUALITY} {CORE SEMANTIC EQUALITY} AFFINE-EQUALITY-UNSUPPORTED}
+
+test mv-generic {item 72: an untyped function given a vector is specialized by the vector's static type: one size(xs) serves unrestricted and affine vectors (the affine one moves in and is released by the clone)} -body {
+    set text "${mvDecls}fn size(xs) -> int:\n    mutable_vector::length(xs)\n\[size(mutable_vector::from_list(\[1, 2, 3\])), size(mutable_vector::from_list(\[make(1)\]))\]\n"
+    list [mvAgree $text] [lrange [mvReleases $text] 1 2] [dict get [lindex [mvNative $text] 0] released]
+} -cleanup {unset -nocomplain text} -result {{value {[3, 1]}} {1 1} 1}
+
+# ---------------------------------------------------------------------------
+# Affine vectors (items 7, 8, 12, 19-36, 40-42, 47, 60, 81)
+
+test mv-affine-push-moves {item 21: pushing an affine element moves it: the pushed binding is USE-AFTER-MOVE while the vector stays usable} -body {
+    list [mvCode "${mvDecls}fn f() -> int:\n    queue = empty_queue()\n    coroutine {step} = worker(1)\n    queue.push(step)\n    e = step(Command {value: 1})\n    queue.length()\nf()\n"] \
+        [mvAgree "${mvDecls}fn f() -> int:\n    queue = empty_queue()\n    coroutine {step} = worker(1)\n    queue.push(step)\n    queue.length()\nf()\n"]
+} -result {USE-AFTER-MOVE {value 1}}
+
+test mv-affine-whole-moves {items 7, 8, 40, 41: an affine vector moves whole through bindings, arguments and results (the old owner is USE-AFTER-MOVE); no copy is made of it or of any element} -body {
+    set pre "${mvDecls}fn pass(values: MutableVector\[Coroutine{args: \[Command\], return: Event}\]) -> MutableVector\[Coroutine{args: \[Command\], return: Event}\]:\n    values\nfn consume(queue: MutableVector\[Coroutine{args: \[Command\], return: Event}\]) -> int:\n    queue.length()\n"
+    set ok "${pre}fn f() -> int:\n    q = mutable_vector::from_list(\[make(1), make(2)\])\n    r = pass(q)\n    s = r\n    consume(s)\nf()\n"
+    list [mvAgree $ok] [lrange [mvReleases $ok] 1 2] \
+        [mvCode "${pre}fn f() -> int:\n    q = empty_queue()\n    r = pass(q)\n    q.length()\nf()\n"] \
+        [mvCode "${pre}fn f() -> int:\n    q = empty_queue()\n    n = consume(q)\n    q.push(make(1))\n    n\nf()\n"] \
+        [mvCode "${pre}fn f() -> int:\n    q = empty_queue()\n    w = q\n    q.length()\nf()\n"] \
+        [llength [lsearch -all [mvOps [mvFunc [mvNir $ok] f]] mvshare]]
+} -cleanup {unset -nocomplain pre ok} -result {{value 2} {2 1} USE-AFTER-MOVE USE-AFTER-MOVE USE-AFTER-MOVE 0}
+
+test mv-affine-from-list {item 12: from_list of an affine List consumes the List (USE-AFTER-MOVE afterwards); the vector owns every element} -body {
+    list [mvCode "${mvDecls}fn f() -> int:\n    xs = \[make(1), make(2)\]\n    v = mutable_vector::from_list(xs)\n    list::length(xs)\nf()\n"] \
+        [lrange [mvReleases "${mvDecls}fn f() -> int:\n    xs = \[make(1), make(2)\]\n    v = mutable_vector::from_list(xs)\n    v.length()\nf()\n"] 0 2]
+} -result {USE-AFTER-MOVE {{value 2} 2 1}}
+
+test mv-affine-at {item 19: `at` of an affine element is AFFINE-VECTOR-COPY-OUT, naming the moving alternatives} -body {
+    list [mvCode "${mvDecls}fn f() -> int:\n    q = empty_queue()\n    s = mutable_vector::at(q, 0):\n        on IndexNotFound:\n            make(1)\n    1\nf()\n"] \
+        [mvMessage "${mvDecls}fn f() -> int:\n    q = empty_queue()\n    s = mutable_vector::at(q, 0):\n        on IndexNotFound:\n            make(1)\n    1\nf()\n"]
+} -result {AFFINE-VECTOR-COPY-OUT {mutable_vector::at would copy an affine element out of `q` (MutableVector[Coroutine{args: [Command], return: Event, errors: []}]) while the vector still owns it, making a second owner: move it out instead -- `take(i)` removes it, `pop()` removes the last one, `swap(i, replacement)` exchanges it for another (there are no references to elements)}}
+
+test mv-affine-pop-take-swap {items 22-27: pop and take move exactly one element out (the vector owns the rest), swap moves the replacement in and the old element out; a resumed element is the same execution; every coroutine is released exactly once} -body {
+    set text "${mvDecls}fn f() -> List\[int\] errors IndexNotFound:\n    q = mutable_vector::from_list(\[make(1), make(2), make(3)\])\n    a = q.pop()\n    b = q.take(0)\n    e1 = b(Command {value: 10})\n    old = q.swap(0, b)\n    e2 = old(Command {value: 20})\n    \[e1.value, e2.value, q.length()\]\nr = f():\n    on IndexNotFound:\n        \[\]\nr\n"
+    list [mvAgree $text] [mvReleases $text]
+} -cleanup {unset -nocomplain text} -result {{value {[11, 22, 1]}} {{value {[11, 22, 1]}} 3 1 {3 2 1}}}
+
+test mv-affine-swap-failure {items 28, 59: a failed swap leaves the vector unchanged and releases the replacement it was given (owned by the failed operation, never handed back: the source binding stays moved); the handler runs; nothing leaks} -body {
+    set text "${mvDecls}fn f() -> int:\n    q = mutable_vector::from_list(\[make(1), make(2)\])\n    coroutine {step} = worker(3)\n    old = q.swap(999, step):\n        on IndexNotFound:\n            make(4)\n    e = old(Command {value: 1})\n    e.value * 10 + q.length()\nf()\n"
+    list [mvAgree $text] [mvReleases $text] \
+        [mvCode "${mvDecls}fn f() -> int:\n    q = mutable_vector::from_list(\[make(1)\])\n    coroutine {step} = worker(3)\n    old = q.swap(999, step):\n        on IndexNotFound:\n            make(4)\n    e = step(Command {value: 1})\n    1\nf()\n"]
+} -cleanup {unset -nocomplain text} -result {{value 52} {{value 52} 4 1 {3 4 1 2}} USE-AFTER-MOVE}
+
+test mv-affine-swap-discarded {item 29: a swap in statement position releases the displaced element right after the statement} -body {
+    mvReleases "${mvDecls}fn f() -> int:\n    q = mutable_vector::from_list(\[make(1), make(2)\])\n    q.swap(0, make(3)):\n        on IndexNotFound:\n            make(4)\n    q.length()\nf()\n"
+} -result {{value 2} 3 1 {1 3 2}}
+
+test mv-affine-clear {items 30, 31, 60: clear releases every element at once, first to last, exactly once; the vector stays usable} -body {
+    mvReleases "${mvDecls}fn f() -> int:\n    q = mutable_vector::from_list(\[make(1), make(2), make(3)\])\n    q.clear()\n    q.push(make(5))\n    n = q.length()\n    n\nf()\n"
+} -result {{value 1} 4 1 {1 2 3 4}}
+
+test mv-affine-drop-order {items 32, 33, 81: a vector dropped with live elements releases each exactly once, lowest index first; a vector of affine structs drops each struct by its descriptor (vs1.1.c)} -body {
+    list [mvReleases "${mvDecls}fn f() -> int:\n    q = mutable_vector::from_list(\[make(1), make(2), make(3)\])\n    1\nf()\n"] \
+        [mvReleases "${mvDecls}fn f() -> int:\n    q = mutable_vector::from_list(\[Running {name: \"a0\", step: make(1)}, Running {name: \"b0\", step: make(2)}\])\n    1\nf()\n"] \
+        [hir::affine::Descriptor {} [list mutvec {nstruct Running}]]
+} -result {{{value 1} 3 1 {1 2 3}} {{value 1} 2 1 {1 2}} vs1.1.c}
+
+test mv-affine-struct-elements {item 47: a vector of affine structs: push moves the struct (USE-AFTER-MOVE of even its unrestricted field), pop moves one out, destructuring it continues the same coroutine} -body {
+    set pre "${mvDecls}fn f() -> str errors IndexNotFound:\n    running = Running {name: \"w0\", step: make(7)}\n    queue = mutable_vector::from_list(\[Running {name: \"a0\", step: make(8)}\])\n    queue.push(running)\n"
+    list [mvCode "${pre}    running.name\nr = f():\n    on IndexNotFound:\n        \"\"\nr\n"] \
+        [mvAgree "${pre}    item = queue.pop()\n    {step, name} = item\n    e = step(Command {value: 1})\n    name\nr = f():\n    on IndexNotFound:\n        \"\"\nr\n"]
+} -cleanup {unset -nocomplain pre} -result {USE-AFTER-MOVE {value {"w0"}}}
+
+test mv-affine-struct-field {item 42: an affine vector as a struct field makes the struct affine; the field is a mutable place (`s.queue.push(...)`), the struct moves whole, a consuming destructuring takes the vector out} -body {
+    set text "${mvDecls}struct State:\n    name: str\n    queue: MutableVector\[Coroutine{args: \[Command\], return: Event}\]\nfn f() -> int errors IndexNotFound:\n    s = State {name: \"s0\", queue: mutable_vector::from_list(\[make(1)\])}\n    s.queue.push(make(2))\n    n = s.queue.length()\n    moved = s\n    {queue} = moved\n    first = queue.take(0)\n    e = first(Command {value: 5})\n    n * 100 + e.value\nr = f():\n    on IndexNotFound:\n        0\nr\n"
+    list [mvAgree $text] [lrange [mvReleases $text] 1 2] \
+        [mvCode "${mvDecls}struct State:\n    queue: MutableVector\[Coroutine{args: \[Command\], return: Event}\]\nfn f() -> int:\n    s = State {queue: empty_queue()}\n    q = s.queue\n    1\nf()\n"]
+} -cleanup {unset -nocomplain text} -result {{value 206} {2 1} AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE}
+
+test mv-affine-list-of-vectors {item 46: List[MutableVector[Coroutine]] is affine: it moves whole and drops every vector's elements; copying an element out is still rejected} -body {
+    list [mvReleases "${mvDecls}fn f() -> int:\n    qs = \[mutable_vector::from_list(\[make(1)\]), mutable_vector::from_list(\[make(2), make(3)\])\]\n    other = qs\n    list::length(other)\nf()\n"] \
+        [mvCode "${mvDecls}fn f() -> int:\n    qs = \[empty_queue()\]\n    q = list::at(qs, 0):\n        on IndexNotFound:\n            empty_queue()\n    1\nf()\n"]
+} -result {{{value 2} 3 1 {1 2 3}} AFFINE-LIST-OPERATION-UNSUPPORTED}
+
+test mv-affine-erasure {item 71: an affine vector never becomes `any` (a parameter declared any, a module binding)} -body {
+    list [mvCode "${mvDecls}fn g(x: any) -> int:\n    1\nfn f() -> int:\n    g(empty_queue())\nf()\n"] \
+        [mvCode "${mvDecls}fn f() -> any:\n    empty_queue()\nf()\n1\n"]
+} -result {AFFINE-ERASURE-UNSUPPORTED AFFINE-ERASURE-UNSUPPORTED}
+
+test mv-affine-growth {items 35, 36: 1000 suspended coroutines pushed through many capacity changes, then drained: every one released exactly once, in order, none forked, lost or released early; natively every one released (none left to the collector), also under GC stress} -body {
+    set text "${mvDecls}fn grow(n: int, keep: int) -> int:\n    queue = empty_queue()\n    loop i from 0 to n:\n        coroutine {step} = worker(i)\n        queue.push(step)\n    total = loop step in queue:\n        if step(Command {value: 0}).value >= keep:\n            break\n        1\n    list::length(total)\n\[grow(1000, 2000), grow(1000, 500)\]\n"
+    set r [mvReleases $text]
+    list [mvAgree $text] [lrange $r 1 2] [expr {[lindex $r 3] eq [lmap i [lrepeat 2000 0] {incr k}]}] \
+        [dict get [lindex [mvNative $text] 0] released] \
+        [withGcStress {lrange [outcomeUnderHir cranelift [surface::compile $text -warnings off]] 0 1}]
+} -cleanup {unset -nocomplain text r k} -result {{value {[1000, 500]}} {2000 1} 1 2000 {value {[1000, 500]}}}
+
+# ---------------------------------------------------------------------------
+# Consuming iteration (items 48, 50-56, 58)
+
+set mvLoopDecls "${mvDecls}fn q4() -> MutableVector\[Coroutine{args: \[Command\], return: Event}\]:\n    mutable_vector::from_list(\[make(1), make(2), make(3), make(4)\])\n"
+
+test mv-loop-consumes {items 48, 58: `loop item in queue` over an affine vector consumes it: the binding is moved at loop entry, each element moves into the loop variable in order and is released at the end of its iteration; the loop collects unrestricted values} -body {
+    set text "${mvLoopDecls}fn f() -> List\[int\]:\n    queue = q4()\n    loop step in queue:\n        e = step(Command {value: 100})\n        e.value\nf()\n"
+    list [mvAgree $text] [mvReleases $text] \
+        [mvCode "${mvLoopDecls}fn f() -> int:\n    queue = q4()\n    xs = loop step in queue:\n        1\n    queue.length()\nf()\n"]
+} -cleanup {unset -nocomplain text} -result {{value {[101, 102, 103, 104]}} {{value {[101, 102, 103, 104]}} 4 1 {1 2 3 4}} USE-AFTER-MOVE}
+
+test mv-loop-exits {items 50-53: continue releases the current element; break releases it and the remaining suffix; return and fail release the suffix too; a moved-on element is kept by its new owner -- every element exactly once, lowest index first} -body {
+    set body "${mvLoopDecls}fn run(mode: int) -> int errors Boom:\n    queue = q4()\n    keep = empty_queue()\n    xs = loop step in queue:\n        e = step(Command {value: 0})\n        if e.value == 2 and mode == 1:\n            continue\n        if e.value == 2 and mode == 2:\n            break\n        if e.value == 2 and mode == 3:\n            return 0 - keep.length()\n        if e.value == 2 and mode == 4:\n            fail Boom\n        if e.value == 3 and mode == 5:\n            keep.push(step)\n            continue\n        e.value\n    list::length(xs) * 10 + keep.length()\nfn go(mode: int) -> int:\n    r = run(mode):\n        on Boom:\n            -1\n    r\n"
+    lmap mode {1 2 3 4 5} {mvReleases "${body}go($mode)\n"}
+} -cleanup {unset -nocomplain body} -result {{{value 30} 4 1 {1 2 3 4}} {{value 10} 4 1 {1 2 3 4}} {{value 0} 4 1 {1 2 3 4}} {{value -1} 4 1 {1 2 3 4}} {{value 31} 4 1 {1 2 4 3}}}
+
+test mv-loop-error-propagation {item 53: a declared error propagated out of a consuming loop's body releases the current element and the suffix} -body {
+    mvReleases "${mvLoopDecls}fn run() -> int errors Boom:\n    xs = loop step in q4():\n        e = step(Command {value: 0})\n        n = boom(e.value - 2)\n        n\n    list::length(xs)\nfn go() -> int:\n    r = run():\n        on Boom:\n            -1\n    r\ngo()\n"
+} -result {{value -1} 4 1 {1 2 3 4}}
+
+test mv-loop-native {items 52, 55, 89: natively a consuming loop is mvempty/mvtakefront per iteration (O(1), never a take(0) shift); break releases the element and `affinedrop`s the domain; every coroutine is released, also under GC stress} -constraints linuxX86_64 -body {
+    set text "${mvLoopDecls}fn drain(q: MutableVector\[Coroutine{args: \[Command\], return: Event}\]) -> int:\n    loop step in q:\n        if step(Command {value: 1}).value > 2:\n            break\n    1\ndrain(q4())\n"
+    set ops [mvOps [mvFunc [mvNir $text] drain]]
+    list [lsort -unique [lsearch -all -inline -glob $ops mv*]] [expr {"mvtake" in $ops}] [llength [lsearch -all $ops affinedrop]] \
+        [dict get [lindex [mvNative $text] 0] released] \
+        [withGcStress {lrange [outcomeUnderHir cranelift [surface::compile $text -warnings off]] 0 1}]
+} -cleanup {unset -nocomplain text ops} -result {{mvempty mvtakefront} 0 1 4 {value 1}}
+
+test mv-loop-collect-affine {item 56: a consuming loop whose body produces affine values keeps the existing rejection} -body {
+    mvCode "${mvLoopDecls}fn f() -> int:\n    xs = loop step in q4():\n        step\n    1\nf()\n"
+} -result AFFINE-LIST-OPERATION-UNSUPPORTED
+
+# ---------------------------------------------------------------------------
+# Places and diagnostics (items 13-15, 76, 99)
+
+test mv-receiver-places {items 13, 14: locals, parameters, struct field paths and context members are places; the binding stays usable after each mutation} -body {
+    mvAgree "import mutable_vector\nstruct Inner:\n    v: MutableVector\[int\]\nstruct Outer:\n    inner: Inner\nfn param(v: MutableVector\[int\]) -> int:\n    v.push(1)\n    v.push(2)\n    v.length()\no = Outer {inner: Inner {v: mutable_vector::from_list(\[\])}}\no.inner.v.push(5)\no.inner.v.push(6)\nlocal = mutable_vector::from_list(\[9\])\nlocal.push(8)\n\[param(local), o.inner.v.length(), local.length()\]\n"
+} -result {value {[4, 2, 2]}}
+
+test mv-receiver-temporary {item 15: a mutation of a temporary (a call's result, a List element) or of a non-vector is MUTABLE-VECTOR-RECEIVER: the updated vector would be lost} -body {
+    list [mvCode "import mutable_vector\nfn make() -> MutableVector\[int\]:\n    mutable_vector::from_list(\[1\])\nmake().push(2)\n1\n"] \
+        [mvMessage "import mutable_vector\nfn make() -> MutableVector\[int\]:\n    mutable_vector::from_list(\[1\])\nmake().push(2)\n1\n"] \
+        [mvCode "import mutable_vector\nimport list\nxs = \[mutable_vector::from_list(\[1\])\]\nx = list::at(xs, 0).pop():\n    on IndexNotFound:\n        0\n1\n"] \
+        [mvCode "import mutable_vector\nfn f(x: str) -> int:\n    y = x\n    mutable_vector::push(y, 1)\n    1\nf(\"s0\")\n"]
+} -result {MUTABLE-VECTOR-RECEIVER {the receiver of mutable_vector::push is not a place: it is a temporary value, so the updated vector would be lost (a MutableVector is a value; bind it to a name, mutate the name, and use the name afterwards)} MUTABLE-VECTOR-RECEIVER MUTABLE-VECTOR-RECEIVER}
+
+test mv-receiver-captured {items 14, 76: a nested function may neither mutate a vector of its enclosing function nor capture one its enclosing function mutates (bindings never change underneath a closure)} -body {
+    list [mvCode "import mutable_vector\nfn f() -> int:\n    v = mutable_vector::from_list(\[1\])\n    fn g() -> int:\n        v.push(3)\n        1\n    g()\nf()\n"] \
+        [mvCode "import mutable_vector\nfn f() -> int:\n    v = mutable_vector::from_list(\[1\])\n    fn g() -> int:\n        v.length()\n    v.push(2)\n    g()\nf()\n"] \
+        [mvAgree "import mutable_vector\nfn f() -> int:\n    v = mutable_vector::from_list(\[1\])\n    fn g() -> int:\n        v.length()\n    g()\nf()\n"]
+} -result {MUTABLE-VECTOR-RECEIVER MUTABLE-VECTOR-CAPTURE {value 1}}
+
+test mv-path-release {an affine binding moved on some paths only is released on each path that still owns it -- never after the join, where a moved path's new owner (a vector place, a join's value) lives on; a path no statement ends is AFFINE-PATH-RELEASE-UNSUPPORTED} -body {
+    list [mvReleases "${mvDecls}fn f(c: bool) -> int:\n    queue = empty_queue()\n    coroutine {step} = worker(1)\n    if c:\n        queue.push(step)\n    queue.length()\n\[f(true), f(false)\]\n"] \
+        [mvReleases "${mvDecls}fn f(c: bool) -> int:\n    coroutine {step} = worker(1)\n    x = if c:\n        step\n    else:\n        make(2)\n    e = x(Command {value: 5})\n    e.value\n\[f(true), f(false)\]\n"] \
+        [mvCode "${mvDecls}fn f() -> int:\n    v = empty_queue()\n    s = make(1)\n    loop i from 0 to 3:\n        if i == 1:\n            v.push(s)\n            break\n    1\nf()\n"] \
+        [mvReleases "${mvDecls}fn f() -> int:\n    v = empty_queue()\n    s = make(1)\n    i = 0\n    loop:\n        if i == 0:\n            v.push(s)\n            break\n        break\n    v.length()\nf()\n"]
+} -result {{{value {[1, 0]}} 2 1 {1 2}} {{value {[6, 7]}} 3 1 {1 2 3}} AFFINE-PATH-RELEASE-UNSUPPORTED {{value 1} 1 1 1}}
+
+# ---------------------------------------------------------------------------
+# HIR evidence (items 53, 54, 75)
+
+test mv-hir-evidence {item 75: HIR text distinguishes an observation, a mutation of a place (its root binding and field path), an affine element moved in (`move`), moved out (`move-out`), a consuming loop, a logical copy (mutable_vector#share), and the drops (`release=`); it reads back to the same text} -body {
+    set text "${mvPlainDecls}struct State:\n    queue: MutableVector\[Coroutine{args: \[Command\], return: Event}\]\nfn f() -> int errors IndexNotFound:\n    s = State {queue: empty_queue()}\n    s.queue.push(make(1))\n    q = mutable_vector::from_list(\[make(2)\])\n    coroutine {step} = worker(3)\n    q.push(step)\n    a = q.pop()\n    n = q.length()\n    xs = loop t in q:\n        1\n    v = mutable_vector::from_list(\[1\])\n    w = v\n    w.push(2)\n    n\nr = f():\n    on IndexNotFound:\n        0\nr\n"
+    set hir [surface::compile $text -warnings off]
+    set formatted [hir::format $hir]
+    set flags {}
+    foreach line [split $formatted \n] {
+        foreach pattern {{call native\(mutable_vector::[a-z?_]+\)} {call native\(mutable_vector#[a-z_]+\)} {vector=[a-z]+} {place=[b0-9.a-z]+} {move-out} {listloop s[0-9]+ \([^)]*\) : \S+ consuming} {const str h\M}} {
+            if {[regexp $pattern $line match]} {
+                lappend flags [regsub -all {b[0-9]+} [regsub {s[0-9]+} $match {S}] B]
+            }
+        }
+    }
+    list [lsort -unique $flags] [expr {[hir::format [hir::parse $formatted]] eq $formatted}]
+} -cleanup {unset -nocomplain text hir formatted flags line pattern match} -result {{{call native(mutable_vector#share)} {call native(mutable_vector::from_list)} {call native(mutable_vector::length)} {call native(mutable_vector::pop)} {call native(mutable_vector::push)} {const str h} {listloop S (B t) : List[int] consuming} move-out place=B place=B.queue vector=mutate vector=observe} 1}
+
+test mv-hir-type-roundtrip {item 74: the MutableVector type and the elaborated operations read back from HIR text unchanged} -body {
+    set hir [surface::compile "import mutable_vector\nfn f(v: MutableVector\[MutableVector\[str\]\]) -> int:\n    v.push(mutable_vector::from_list(\[\"a0\"\]))\n    v.length()\nf(mutable_vector::from_list(\[\]))\n" -warnings off]
+    set formatted [hir::format $hir]
+    list [regexp {MutableVector\[MutableVector\[str\]\]} $formatted] [expr {[hir::format [hir::parse $formatted]] eq $formatted}]
+} -cleanup {unset -nocomplain hir formatted} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# Copy-on-write evidence (items 61, 87, 93)
+
+test mv-cow-evidence {items 61, 87, 93: natively a logical copy shares the backing (no element is copied: O(1)); the first write through a shared header detaches it once (O(N)); later writes through the now-unique header never copy again (amortized O(1) pushes). A vector entering a place from a call's result is conservatively a copy: its first push detaches once (here an empty backing), then never again} -constraints linuxX86_64 -body {
+    set copy "import mutable_vector\nfn ints() -> MutableVector\[int\]:\n    mutable_vector::from_list(\[\])\nfn fill(n: int) -> MutableVector\[int\]:\n    v = ints()\n    loop i from 0 to n:\n        v.push(i)\n    v\nfn f() -> int:\n    a = fill(1000)\n    b = a\n    a.push(1)\n    a.push(2)\n    a.push(3)\n    a.length() + b.length()\nf()\n"
+    set unique "import mutable_vector\nfn ints() -> MutableVector\[int\]:\n    mutable_vector::from_list(\[\])\nfn f() -> int:\n    v = ints()\n    loop i from 0 to 1000:\n        v.push(i)\n    v.length()\nf()\n"
+    set c [lindex [mvNative $copy] 1]
+    set u [lindex [mvNative $unique] 1]
+    list [mvAgree $copy] [dict get $c detaches] [expr {[dict get $c detachElements] >= 1000 && [dict get $c detachElements] < 2100}] \
+        [dict get $u shares] [dict get $u detaches] [dict get $u detachElements] [expr {[dict get $u growths] < 20}]
+} -cleanup {unset -nocomplain copy unique c u} -result {{value 2003} 2 1 1 1 0 1}
+
+test mv-cow-gc-stress {items 64, 67, 94: heap values reachable only through vector elements survive collections at every allocation; copies stay valid and independent while either is mutated, collected and read} -constraints linuxX86_64 -body {
+    set text "import mutable_vector\nimport str\nfn f() -> List\[str\] errors IndexNotFound:\n    a = mutable_vector::from_list(\[str::concat(\"x\", \"1\"), str::concat(\"y\", \"2\")\])\n    b = a\n    a.push(str::concat(\"z\", \"3\"))\n    junk = loop i from 0 to 50:\n        str::concat(\"j\", \"k\")\n    s = b.swap(0, str::concat(\"w\", \"4\"))\n    t = a.take(0)\n    \[a.at(0), a.at(1), b.at(0), b.at(1), s, t\]\nr = f():\n    on IndexNotFound:\n        \[\]\nr\n"
+    list [mvAgree $text] [withGcStress {lrange [outcomeUnderHir cranelift [surface::compile $text -warnings off]] 0 1}]
+} -cleanup {unset -nocomplain text} -result {{value {["y2", "z3", "w4", "y2", "x1", "x1"]}} {value {["y2", "z3", "w4", "y2", "x1", "x1"]}}}
+
+test mv-affine-gc-stress {items 66, 94: under a collection at every allocation, suspended coroutines held only as vector elements survive growth, relocation, pop/take/swap and consuming iteration with early exits, and every one is released exactly once} -constraints linuxX86_64 -body {
+    set text "${mvLoopDecls}fn churn(n: int) -> int errors IndexNotFound:\n    q = empty_queue()\n    loop i from 0 to n:\n        q.push(make(i))\n    a = q.take(0)\n    b = q.pop()\n    old = q.swap(1, a)\n    q.push(b)\n    e = old(Command {value: 1})\n    xs = loop step in q:\n        if step(Command {value: 2}).value > 10:\n            break\n        1\n    e.value + list::length(xs)\nr = churn(40):\n    on IndexNotFound:\n        0\nr\n"
+    list [mvAgree $text] [withGcStress {lrange [outcomeUnderHir cranelift [surface::compile $text -warnings off]] 0 1}] \
+        [withGcStress {set c [lindex [mvNative $text] 0]; list [dict get $c released] [dict get $c sweptSuspended]}]
+} -cleanup {unset -nocomplain text c} -result {{value 11} {value 11} {40 0}}
+
+# ---------------------------------------------------------------------------
+# Native evidence (items 89, 90)
+
+test mv-native-evidence {item 89: push/pop/take/swap/clear/drop of affine elements are single runtime operations on the header register; affine moves produce no ownership object and no clone (no mvshare); an unrestricted shared push is one mvshare then mvpush} -constraints linuxX86_64 -body {
+    set text "${mvDecls}fn affine() -> int errors IndexNotFound:\n    q = mutable_vector::from_list(\[make(1)\])\n    q.push(make(2))\n    a = q.pop()\n    b = q.take(0)\n    q.push(b)\n    old = q.swap(0, a)\n    q.clear()\n    q.push(old)\n    1\nfn ints() -> int:\n    v = mutable_vector::from_list(\[1\])\n    w = v\n    w.push(2)\n    v.push(3)\n    w.length()\na = affine():\n    on IndexNotFound:\n        0\n\[a, ints()\]\n"
+    set nir [mvNir $text]
+    set a [mvOps [mvFunc $nir affine]]
+    list [lsearch -all -inline -glob $a mv*] [llength [lsearch -all $a affinedrop]] [expr {"mvshare" in $a}] \
+        [lsearch -all -inline -glob [mvOps [mvFunc $nir ints]] mv*]
+} -cleanup {unset -nocomplain text nir a} -result {{mvfromlist mvpush mvpop mvtake mvpush mvswapdrop mvcleardrop mvpush} 4 0 {mvfromlist mvshare mvpush mvpush mvlen}}
+
+test mv-runtime-source {item 90: the vector runtime keeps no ownership state (no moved flag, owner, affine flag or ownership table): it stores elements, and the only count is the backing's copy-on-write sharing (Rc); the mutations are no safepoint} -body {
+    set root [file join $::projectRoot native src]
+    set mv [read [set f [open [file join $root runtime mutvec.rs]]]][close $f]
+    set tcl [read [set f [open [file join $::projectRoot core mutvec.tcl]]]][close $f]
+    set ops [read [set f [open [file join $root runtime ops.rs]]]][close $f]
+    set mayAllocate [string range $ops [string first "pub fn op_may_allocate" $ops] [string first "pub fn op_may_error" $ops]]
+    set code [regsub -all {//[^\n]*} $mv ""]
+    list [regexp -nocase {\m(moved|owner|owners|is_affine|affine_flag|borrow)\M} $code] [regexp -nocase {\m(moved|owner|borrow)\M} [regsub -all {#[^\n]*} $tcl ""]] \
+        [lmap op {MvPush MvPop MvTake MvSwap MvClear MvClearDrop MvSwapDrop MvTakeFront} {regexp "\\m$op\\M" $mayAllocate}]
+} -cleanup {unset -nocomplain root mv tcl ops mayAllocate code f} -result {0 0 {0 0 0 0 0 0 0 0}}
+
+cleanupTests

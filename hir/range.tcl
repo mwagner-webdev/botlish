@@ -1345,7 +1345,7 @@ proc hir::range::ProvesValueAcceptedBy {argType argRange declared} {
         # concrete type that satisfies it structurally (hir::traits).
         return [hir::traits::Accept $argType $declared]
     }
-    if {[hir::types::IsList $declared] || [hir::types::IsSet $declared]} {
+    if {[hir::types::IsList $declared] || [hir::types::IsSet $declared] || [hir::types::IsMutVec $declared]} {
         return [AggregateAdmits [hir::types::Unshaped $argType] $declared]
     }
     if {[hir::types::IsFn $declared] || [hir::types::IsMutArray $declared]
@@ -1383,6 +1383,14 @@ proc hir::range::AggregateAdmits {arg declared} {
         return [expr {$elem eq "never" || [AggregateAdmits $elem [lindex $declared 1]]}]
     }
     if {[hir::types::IsSet $declared] && [hir::types::IsSet $arg]} {
+        set elem [lindex $arg 1]
+        return [expr {$elem eq "never" || [AggregateAdmits $elem [lindex $declared 1]]}]
+    }
+    if {[hir::types::IsMutVec $declared] && [hir::types::IsMutVec $arg]} {
+        # A MutableVector (MUTABLE-VECTOR.md) the same way: the proven-empty
+        # MutableVector[never] (from_list([])) is admissible for any element
+        # type -- nothing can ever be pushed into it under its own type, and
+        # every place that mutates a vector owns its own header.
         set elem [lindex $arg 1]
         return [expr {$elem eq "never" || [AggregateAdmits $elem [lindex $declared 1]]}]
     }
@@ -1433,7 +1441,7 @@ proc hir::range::FactsSatisfiable {observedType observedRange declared} {
     if {$observedType eq "never"} {
         return 0
     }
-    if {[hir::types::IsList $declared] || [hir::types::IsSet $declared]} {
+    if {[hir::types::IsList $declared] || [hir::types::IsSet $declared] || [hir::types::IsMutVec $declared]} {
         return [AggregateAdmits [hir::types::Unshaped $observedType] $declared]
     }
     if {[hir::types::IsFn $declared] || [hir::types::IsMutArray $declared]
