@@ -662,18 +662,20 @@ fn t() -> T:
 
 }
 
-test co-storage-frontier {a handle in a List, a struct field, an erasing argument, a function's result, a closure capture or a module binding is rejected; a structural Fn parameter is COROUTINE-NOT-FUNCTION} -body {
+test co-storage-frontier {the first milestone's storage frontier, generalized (AFFINE-VALUES.md): a handle may now be a List element, a struct field, a generic function's argument, a function's result and an if's value -- each a move; a closure capture, a structural Fn parameter (COROUTINE-NOT-FUNCTION: a distinct callable kind), a Fn-typed struct field (TYPE: no implicit conversion either), a parameter declared any (an erasure) and the program's result stay rejected} -body {
     lmap body {
-        "coroutine {step} = t()\nxs = \[step\]\n"
-        "coroutine {step} = t()\ns = {h: step}\n"
-        "fn keep(x):\n    x\ncoroutine {step} = t()\nk = keep(step)\n"
-        "fn make():\n    coroutine {step} = t()\n    step\n"
+        "coroutine {step} = t()\nxs = \[step\]\n1\n"
+        "coroutine {step} = t()\ns = {h: step}\n1\n"
+        "fn keep(x):\n    x\ncoroutine {step} = t()\nk = keep(step)\n1\n"
+        "fn make():\n    coroutine {step} = t()\n    step\n1\n"
         "fn g() -> int:\n    coroutine {step} = t()\n    fn h():\n        step()\n    3\ng()\n"
         "fn apply(f: Fn{args: \[\], return: T}) -> T:\n    f()\ncoroutine {step} = t()\nx = apply(step)\n"
         "coroutine {step} = t()\nstep\n"
-        "coroutine {step} = t()\nx = if true:\n    step\nelse:\n    step\n"
-    } {lindex [coCode "${storageDecls}$body"] 2}
-} -result {COROUTINE-STORAGE-UNSUPPORTED COROUTINE-STORAGE-UNSUPPORTED COROUTINE-STORAGE-UNSUPPORTED COROUTINE-STORAGE-UNSUPPORTED COROUTINE-STORAGE-UNSUPPORTED COROUTINE-NOT-FUNCTION COROUTINE-STORAGE-UNSUPPORTED COROUTINE-STORAGE-UNSUPPORTED}
+        "coroutine {step} = t()\nx = if true:\n    step\nelse:\n    step\n1\n"
+        "struct H:\n    f: Fn{args: \[\], return: T}\ncoroutine {step} = t()\nh = H {f: step}\n1\n"
+        "fn keep(x: any) -> int:\n    1\ncoroutine {step} = t()\nk = keep(step)\n1\n"
+    } {lindex [coCode "${storageDecls}$body"] end}
+} -result {ok ok ok ok AFFINE-CAPTURE-UNSUPPORTED COROUTINE-NOT-FUNCTION AFFINE-ERASURE-UNSUPPORTED ok TYPE AFFINE-ERASURE-UNSUPPORTED}
 
 test co-storage-module {a module's top level cannot construct a coroutine (only definitions and immutable bindings are module members), so no module binding ever holds a handle} -body {
     coWithModules {co/m.bot {struct T:
@@ -689,9 +691,9 @@ coroutine {step, first} = t()
     }
 } -result INVALID-TOPLEVEL
 
-test co-storage-equality {a handle has no equality (rejected as storage: it would be erased into an argument)} -body {
+test co-storage-equality {a handle has no equality and no hash (AFFINE-EQUALITY-UNSUPPORTED: comparing would observe what it owns)} -body {
     lindex [coCode "${storageDecls}coroutine {step: a} = t()\ncoroutine {step: b} = t()\nx = a == b\n"] 2
-} -result COROUTINE-STORAGE-UNSUPPORTED
+} -result AFFINE-EQUALITY-UNSUPPORTED
 
 # ---------------------------------------------------------------------------
 # Contexts and traits (items 37, 38, 60)
@@ -877,7 +879,7 @@ test co-hir-text {checked HIR states each yielding function's effect, the handle
     set hir [surface::compile "${principal}other = step\nx = other(Message {value: 1})\nx.value\n" -warnings off]
     set text [hir::format $hir]
     list [regexp -all {coroutine-effect \(yields Event, resume Message\)} $text] \
-        [regexp {bind b[0-9]+ step : Coroutine\{resume: Message, yield: Event, errors: \[\]\}} $text] \
+        [regexp {bind b[0-9]+ step : Coroutine\{args: \[Message\], return: Event, errors: \[\]\}} $text] \
         [regexp {bind b[0-9]+ other : Coroutine\{[^\n]*\} move} $text] \
         [expr {[hir::format [hir::parse $text]] eq $text}]
 } -cleanup {unset -nocomplain hir text} -result {2 1 1 1}
@@ -991,13 +993,13 @@ proc coReleases {text} {
         expr {[regexp {^coroutine#[0-9]+$} $n] ? "<handle>" : [regsub {#[0-9]+$} $n ""]}
     }}
     set rows {}
-    foreach e [lsort -dictionary [dict keys [dict get $hir coroutines releases]]] {
+    foreach e [lsort -dictionary [dict keys [dict get $hir affine releases]]] {
         set node [dict get $hir exprs $e]
         set label [dict get $node kind]
         if {$label eq "bind"} {
             set label "bind [apply $name $hir [dict get $node binding]]"
         }
-        lappend rows [list $label {*}[lmap b [dict get $hir coroutines releases $e] {apply $name $hir $b}]]
+        lappend rows [list $label {*}[lmap b [dict get $hir affine releases $e] {apply $name $hir $b}]]
     }
     return $rows
 }
@@ -1101,13 +1103,13 @@ proc coExits {text} {
     set hir [surface::compile $text -warnings off]
     set name {{hir b} {regsub {#[0-9]+$} [dict get $hir bindings $b name] ""}}
     set rows {}
-    set table [dict merge [dict get $hir coroutines exits] [dict get $hir coroutines errorExits]]
+    set table [dict merge [dict get $hir affine exits] [dict get $hir affine errorExits]]
     foreach e [lsort -dictionary [dict keys $table]] {
-        if {[dict exists $hir coroutines exits $e]} {
-            lassign [hir::coroutines::releasesOnExit $hir $e] before after
+        if {[dict exists $hir affine exits $e]} {
+            lassign [hir::affine::releasesOnExit $hir $e] before after
             lappend rows [list [hir::kind $hir $e] [lmap b $before {apply $name $hir $b}] [lmap b $after {apply $name $hir $b}]]
         } else {
-            dict for {error bs} [dict get $hir coroutines errorExits $e] {
+            dict for {error bs} [dict get $hir affine errorExits $e] {
                 lappend rows [list [hir::kind $hir $e] $error [lmap b $bs {apply $name $hir $b}]]
             }
         }

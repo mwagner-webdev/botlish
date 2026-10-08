@@ -942,7 +942,7 @@ proc hir::completions::EvalCall {hirVar ctxVar diagnose enclosing guard e node} 
     }
     if {$targetKind ne {block}} {
         set calleeType [hir::typeOf $hir [dict get $node callee]]
-        if {![hir::types::IsFn $calleeType]} {
+        if {![hir::types::IsFn $calleeType] && ![hir::types::IsCoroutine $calleeType]} {
             return [hir::range::unknown]
         }
         # A call through a structural function type (STRUCTURAL-FUNCTION-
@@ -951,7 +951,9 @@ proc hir::completions::EvalCall {hirVar ctxVar diagnose enclosing guard e node} 
         # exactly like an exact callee whose own proof ran out (the
         # conservative fallback EffectiveFacts itself uses), and the call's
         # result is what the contract promises.
-        set errors [hir::types::FnErrors $calleeType]
+        # (A coroutine handle's resume, AFFINE-VALUES.md: the same contract,
+        # the errors any one segment may end with.)
+        set errors [dict get [hir::types::Contract $calleeType] errors]
         if {$diagnose} {
             CheckStructuralCallLegality hir $e $calleeType $errors {} $enclosing
         }
@@ -1129,6 +1131,12 @@ proc hir::completions::CheckStructuralCallLegality {hirVar e calleeType errors h
     dict set hir exprs $e mayReturnNormally 1
     foreach name $errors {
         if {$name ni $handled && $name ni $enclosing} {
+            if {[hir::types::IsCoroutine $calleeType]} {
+                hir::Diagnose hir UNHANDLED-ERROR [format \
+                    {this coroutine resume may produce the declared error "%s", which is neither handled here nor admitted by the enclosing function's own "errors" declaration} \
+                    $name] $e
+                continue
+            }
             hir::Diagnose hir UNHANDLED-ERROR [format \
                 {this call through a callable of function type %s may produce the declared error "%s", which is neither handled here nor admitted by the enclosing function's own "errors" declaration} \
                 [hir::types::show $calleeType] $name] $e
@@ -1696,11 +1704,12 @@ proc hir::completions::EvalHandle {hirVar ctxVar diagnose enclosing guard e node
             } elseif {$diagnose} {
                 CheckCallLegality hir $e $target $normal $errors $handled $enclosing
             }
-        } elseif {$targetKind eq {} && [hir::types::IsFn $calleeType]} {
-            # A handled call through a structural function type: its
-            # contract's whole declared error set (EvalCall's own case).
+        } elseif {$targetKind eq {} && ([hir::types::IsFn $calleeType] || [hir::types::IsCoroutine $calleeType])} {
+            # A handled call through a structural function type (or a
+            # coroutine handle's resume): its contract's whole declared error
+            # set (EvalCall's own case).
             set normal 1
-            set errors [hir::types::FnErrors $calleeType]
+            set errors [dict get [hir::types::Contract $calleeType] errors]
             set callResult [hir::range::ConstrainType $hir $call [hir::range::unknown]]
             if {$diagnose} {
                 CheckStructuralCallLegality hir $e $calleeType $errors $handled $enclosing

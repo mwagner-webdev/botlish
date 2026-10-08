@@ -1,0 +1,422 @@
+# Mutants of general affinity and callable abstraction
+# (audit/affine/tools/mutate.tcl; AFFINE-VALUES.md): the mutants the
+# milestone brief names (item 72), each a deliberate bug in the affinity
+# query (hir/types.tcl, hir/structs.tcl), the ownership analysis and release
+# elaboration (hir/affine.tcl), the callable contract and generic
+# specialization (hir/types.tcl, hir/semantic.tcl, hir/traits.tcl,
+# hir/coroutines.tcl) or the drop runtimes (core/affine.tcl,
+# native/src/runtime/affine.rs, native/lower.tcl).
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant may have several edits. A mutant editing native/src/ or the
+# native crate's manifest is a native mutant: mutate.tcl rebuilds the native
+# backend for it (native/lower.tcl is Tcl, read by every native test run, and
+# needs no rebuild). Lines starting with # outside an edit are comments.
+#
+# Not a mutant: "dropping an affine List releases an element twice" on the
+# native backend. A coroutine release is idempotent by design (a released
+# handle's second release returns at once, rt_co_release), so a native drop
+# that visits an element twice is observably the same program; the Tcl
+# runtime's twice-visiting drop is the mutant (list-drop-twice), caught by
+# the release-call probe (core::coroutines::releaseCalls) that counts every
+# release call, not every first release.
+
+# ---------------------------------------------------------------------------
+# The affinity query
+
+@@ struct-affine-unrestricted a named struct with an affine field is unrestricted
+## hir/structs.tcl
+<<<<
+        if {[hir::types::IsAffine $t [concat $seen [list $id]]]} {
+====
+        if {0} {
+>>>>
+
+@@ list-affine-unrestricted a List of affine elements is unrestricted
+## hir/types.tcl
+<<<<
+            if {[IsAffine [lindex $type 1] $seen]} {
+                return 1
+            }
+            if {[llength $type] == 3} {
+====
+            if {0} {
+                return 1
+            }
+            if {[llength $type] == 3} {
+>>>>
+
+@@ alias-becomes-move an exact function value is affine: binding it to another name moves it, so the original name is dead
+## hir/types.tcl
+<<<<
+    switch -- [lindex $type 0] {
+        coroutine {
+            return 1
+        }
+        list {
+====
+    switch -- [lindex $type 0] {
+        coroutine - block {
+            return 1
+        }
+        list {
+>>>>
+
+# ---------------------------------------------------------------------------
+# Moves
+
+@@ assignment-copies binding an affine value to another name copies it: both names stay usable
+## hir/affine.tcl
+<<<<
+        bind {
+            return [list move bind $p]
+        }
+====
+        bind {
+            return {use bind}
+        }
+>>>>
+
+@@ arg-no-invalidate passing an affine value as a call argument does not invalidate the caller's binding
+## hir/affine.tcl
+<<<<
+        } else {
+            dict set state $b [list moved $e]
+        }
+====
+        } elseif {[lindex $consumer 1] ne "arg"} {
+            dict set state $b [list moved $e]
+        }
+>>>>
+
+@@ list-no-consume a List construction does not consume its affine elements: their bindings stay usable
+## hir/affine.tcl
+<<<<
+                    return [list move element $p $index]
+====
+                    return {use element}
+>>>>
+
+@@ destructure-aliases a destructuring's moved-out affine field stays owned by the destructured struct too: its release drops the moved value
+## hir/affine.tcl
+<<<<
+            dict set consumed $b [lindex $consumer 3] 1
+====
+>>>>
+
+@@ projection-aliases a projection of an affine field outside a destructuring is accepted: the field gets a second owner
+## hir/affine.tcl
+<<<<
+            if {$affineField} {
+                set shown [expr {$kind eq "ref" ? [dict get $hir exprs $e name] : "value"}]
+====
+            if {0} {
+                set shown [expr {$kind eq "ref" ? [dict get $hir exprs $e name] : "value"}]
+>>>>
+
+@@ any-erasure-hides erasing an affine value into an unrestricted position (any, an unrestricted field or argument) is accepted
+## hir/affine.tcl
+<<<<
+proc hir::affine::Erasure {hir e what} {
+    return [list reject AFFINE-ERASURE-UNSUPPORTED \
+====
+proc hir::affine::Erasure {hir e what} {
+    return {use erased}
+    return [list reject AFFINE-ERASURE-UNSUPPORTED \
+>>>>
+
+@@ closure-capture-hides a closure capturing an affine binding is accepted
+## hir/affine.tcl
+<<<<
+            } else {
+                dict set diagnostics $e [list AFFINE-CAPTURE-UNSUPPORTED \
+====
+            } elseif {0} {
+                dict set diagnostics $e [list AFFINE-CAPTURE-UNSUPPORTED \
+>>>>
+
+# ---------------------------------------------------------------------------
+# Releases and drops
+
+@@ return-releases-before-transfer a return releases the affine value it returns (its exit state is the one before the value moved): the caller receives a released value
+## hir/affine.tcl
+<<<<
+        return {
+            set state [Flow hir [dict get $node value] $state]
+            if {$state ne "dead"} {
+                dict set exitStates $e $state
+            }
+====
+        return {
+            set entryState $state
+            set state [Flow hir [dict get $node value] $state]
+            if {$state ne "dead"} {
+                dict set exitStates $e $entryState
+            }
+>>>>
+
+@@ callee-fail-no-drop a function that fails (by fail, or a call propagating a declared error) does not release its affine parameters
+## hir/affine.tcl
+<<<<
+                set released [concat [Leaving $hir $scopes $byKey $pairs $state $x] [PendingItems $hir $pending $x]]
+                if {$released eq {}} continue
+====
+                set released [concat [Leaving $hir $scopes $byKey $pairs $state $x] [PendingItems $hir $pending $x]]
+                if {[dict get $node kind] eq "fail"} {
+                    set released [lmap b $released {
+                        expr {[dict exists $hir bindings $b] && [dict get $hir bindings $b kind] eq "param" ? [continue] : $b}
+                    }]
+                }
+                if {$released eq {}} continue
+>>>>
+## hir/affine.tcl
+<<<<
+                    set released [lmap b [concat [Leaving $hir $scopes $byKey $pairs $state $x] [PendingItems $hir $pending $x]] {
+                        expr {$b in $done ? [continue] : $b}
+                    }]
+====
+                    set released [lmap b [concat [Leaving $hir $scopes $byKey $pairs $state $x] [PendingItems $hir $pending $x]] {
+                        expr {$b in $done || ([dict exists $hir bindings $b] && [dict get $hir bindings $b kind] eq "param") ? [continue] : $b}
+                    }]
+>>>>
+
+@@ pending-arg-leak a call argument that fails leaks the affine arguments evaluated (and moved) before it
+## hir/affine.tcl
+<<<<
+        if {[dict get $node kind] in {call struct} && $role eq "operand"} {
+====
+        if {[dict get $node kind] in {struct} && $role eq "operand"} {
+>>>>
+
+@@ aggregate-field-leak a struct field whose evaluation fails leaks the affine fields evaluated (and moved) before it
+## hir/affine.tcl
+<<<<
+        if {[dict get $node kind] in {call struct} && $role eq "operand"} {
+====
+        if {[dict get $node kind] in {call} && $role eq "operand"} {
+>>>>
+
+@@ partial-destructure-leak a destructuring that does not name every affine field never drops the fields it omits
+## hir/affine.tcl
+<<<<
+        if {[Descriptor $hir [BindingType $hir $b] [ConsumedFields $hir $b]] eq ""} continue
+        dict lappend releases $statement $b
+====
+        if {[IsDestructureTemp $hir $b] || [Descriptor $hir [BindingType $hir $b] [ConsumedFields $hir $b]] eq ""} continue
+        dict lappend releases $statement $b
+>>>>
+
+@@ last-use-raw-only the release at an owner's last use (and of a discarded value) recognizes only a raw Coroutine: a struct or List owning one is never dropped
+## hir/affine.tcl
+<<<<
+        if {[Descriptor $hir [BindingType $hir $b] [ConsumedFields $hir $b]] eq ""} continue
+        dict lappend releases $statement $b
+====
+        if {![hir::types::IsCoroutine [BindingType $hir $b]]} continue
+        dict lappend releases $statement $b
+>>>>
+## hir/affine.tcl
+<<<<
+            if {[dict get $hir exprs $e kind] ni {call struct handle loop}} continue
+====
+            if {[dict get $hir exprs $e kind] ni {call struct handle loop} || ![hir::types::IsCoroutine [hir::typeOf $hir $e]]} continue
+>>>>
+
+@@ exit-raw-only an early exit releases only raw Coroutine bindings: a struct or List owning one is left to the collector
+## hir/affine.tcl
+<<<<
+                    && [Descriptor $hir [BindingType $hir $b] [ConsumedFields $hir $b]] ne ""} {
+====
+                    && [hir::types::IsCoroutine [BindingType $hir $b]]} {
+>>>>
+
+@@ list-drop-no-elements (Tcl runtime) dropping a List of affine values releases none of its elements
+## core/affine.tcl
+<<<<
+            foreach element [core::value::items $value] {
+                Drop $element [lindex $tree 1]
+            }
+====
+>>>>
+
+@@ list-drop-twice (Tcl runtime) dropping a List of affine values releases each element twice
+## core/affine.tcl
+<<<<
+                Drop $element [lindex $tree 1]
+====
+                Drop $element [lindex $tree 1]
+                Drop $element [lindex $tree 1]
+>>>>
+
+@@ struct-drop-no-fields (Tcl runtime) dropping a struct releases none of its affine fields
+## core/affine.tcl
+<<<<
+                Drop [lindex $values $slot] $inner
+====
+>>>>
+
+# ---------------------------------------------------------------------------
+# Callable contracts and generic specialization
+
+@@ explicit-fn-accepts-coroutine a coroutine handle is accepted where an explicit Fn{...} with the same contract is expected
+## hir/types.tcl
+<<<<
+        set s [structuralOf $a]
+        return [expr {$s ne "" && [FnSubtype $s $b]}]
+====
+        set s [expr {[IsCoroutine $a] ? [list fn [lindex $a 1]] : [structuralOf $a]}]
+        return [expr {$s ne "" && [FnSubtype $s $b]}]
+>>>>
+
+@@ explicit-coroutine-accepts-fn a function value is accepted where an explicit Coroutine{...} with the same contract is expected
+## hir/types.tcl
+<<<<
+        return [expr {[IsCoroutine $a] && [CoroutineMismatch $a $b] eq ""}]
+====
+        set s [expr {[IsCoroutine $a] ? $a : [structuralOf $a]}]
+        return [expr {$s ne "" && [CoroutineMismatch $s $b] eq ""}]
+>>>>
+
+@@ generic-coerces-fn a generic function's semantic instance takes a coroutine argument at the parameter's inferred Fn contract, not at its own Coroutine type
+## hir/semantic.tcl
+<<<<
+                # own type, of its own callable kind.
+                set x $t
+====
+                # own type, of its own callable kind.
+                set x $d
+>>>>
+
+@@ generic-runtime-dispatch a generic function given a coroutine is not specialized: its calls dispatch on the callee's runtime kind (a coroutine handle is resumed)
+## hir/traits.tcl
+<<<<
+proc hir::traits::NeedsAffinePlan {hir} {
+    return [expr {[dict size [AffinePolys $hir]] > 0}]
+====
+proc hir::traits::NeedsAffinePlan {hir} {
+    return 0
+    return [expr {[dict size [AffinePolys $hir]] > 0}]
+>>>>
+## core/callable.tcl
+<<<<
+        native {
+            return [core::native::invoke $callee $argValues]
+        }
+        default {
+====
+        native {
+            return [core::native::invoke $callee $argValues]
+        }
+        coroutine {
+            return [core::coroutines::resumeImpl $callee {*}$argValues]
+        }
+        default {
+>>>>
+
+@@ hof-restarts a coroutine resumed through a parameter (a HOF's, typed or specialized) restarts from its construction instead of continuing
+## hir/coroutines.tcl
+<<<<
+        set callee [dict get $node callee]
+        set r [hir::NewId hir expr]
+====
+        set callee [dict get $node callee]
+        set native [core::coroutines::resumeNative]
+        if {[dict get $hir exprs $callee kind] eq "ref"
+                && [dict get $hir bindings [dict get $hir exprs $callee binding] kind] eq "param"} {
+            set native coroutine#restart
+        }
+        set b [dict get $hir scopes $root names $native]
+        set y [dict get $hir bindings $b symbol]
+        set nativeType [hir::types::intern hir [list native $native]]
+        set r [hir::NewId hir expr]
+>>>>
+## core/coroutines.tcl
+<<<<
+core::native::register coroutine#release -arity 1 -impl core::coroutines::releaseImpl \
+====
+proc core::coroutines::restartImpl {handle args} {
+    variable store
+    set fresh [createImpl [dict get $store [Entry $handle] thunk]]
+    startImpl $fresh
+    return [resumeImpl $fresh {*}$args]
+}
+core::native::register coroutine#restart -arity * -impl core::coroutines::restartImpl \
+    -completion 1 -result-shape {coroutine-outward}
+core::native::register coroutine#release -arity 1 -impl core::coroutines::releaseImpl \
+>>>>
+
+@@ struct-move-changes-identity a coroutine moved into a struct field is replaced by a fresh coroutine of the same construction (a fork): the struct owns another identity
+## hir/lower.tcl
+<<<<
+            foreach name [dict get $node names] field [dict get $node fields] {
+                lappend parts $name [expr $hir $field]
+            }
+====
+            foreach name [dict get $node names] field [dict get $node fields] {
+                set op [expr $hir $field]
+                if {[hir::types::IsCoroutine [hir::typeOf $hir $field]]} {
+                    set op [list call [list ref coroutine#fork] $op]
+                }
+                lappend parts $name $op
+            }
+>>>>
+## core/coroutines.tcl
+<<<<
+core::native::register coroutine#release -arity 1 -impl core::coroutines::releaseImpl \
+====
+proc core::coroutines::forkImpl {handle} {
+    variable store
+    set fresh [createImpl [dict get $store [Entry $handle] thunk]]
+    startImpl $fresh
+    return $fresh
+}
+core::native::register coroutine#fork -arity 1 -impl core::coroutines::forkImpl \
+    -result-type coroutine
+core::native::register coroutine#release -arity 1 -impl core::coroutines::releaseImpl \
+>>>>
+
+# ---------------------------------------------------------------------------
+# Native backend
+
+@@ native-affinedrop-not-emitted native lowering emits no affinedrop: an aggregate owning coroutines is never dropped (only raw handles are released)
+## native/lower.tcl
+<<<<
+                set d [Assign fn "str [Quote $descriptor]" $e]
+                Assign fn "op affinedrop $where $d" $e
+====
+>>>>
+
+@@ native-list-drop-no-elements the native drop of a List of affine values releases none of its elements
+## native/src/runtime/affine.rs
+<<<<
+            let start = *pos;
+            let items = list_of(value).items();
+            if items.is_empty() {
+                skip(d, pos);
+            }
+            for &item in items {
+                *pos = start;
+                drop_by(p, item, d, pos);
+            }
+====
+            let _ = list_of(value).items();
+            skip(d, pos);
+>>>>
+
+@@ native-struct-drop-no-fields the native drop of a struct releases none of its affine fields
+## native/src/runtime/affine.rs
+<<<<
+                let slot = number(d, pos);
+                drop_by(p, fields[slot], d, pos);
+====
+                let _slot = number(d, pos);
+                let _ = fields.len();
+                skip(d, pos);
+>>>>

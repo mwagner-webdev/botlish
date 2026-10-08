@@ -378,21 +378,22 @@ coroutine operation is an internal root native (`coroutine#create`,
 `#start`, `#resume`, `#yield`, `#release`, and `coroutine::done?`).
 Ownership is entirely static: there is no runtime moved state, no copy, fork
 or clone operation, no iterator protocol, no exhaustion error and no
-resumable error -- don't add any (`tests/coroutines.test`'s `co-source-*` tests pin this). A handle is a
-local binding only: a new place it may live (a List, a struct field, a
-closure capture, an erasing argument) is a deliberate extension of the
-storage frontier (`hir::coroutines::RefRole`), never a side effect.
+resumable error -- don't add any (`tests/coroutines.test`'s `co-source-*` tests pin this). A handle is an
+affine value (next section): where it may live is decided by
+`hir::affine::Consumer` for every affine value alike, and a new place (a
+closure capture, an erasing argument, a mutable container) is a deliberate
+extension of that discipline, never a side effect.
 Contexts and context traits stay static: a coroutine's providers are the
 ones selected at its construction, and suspension adds no context or trait
 machinery to either runtime.
 
 A coroutine is released right after its handle's last use
-(`hir::coroutines::Releases`, COROUTINES.md "Release at the last use"):
+(`hir::affine::Releases`, COROUTINES.md "Release at the last use"):
 every backend emits the release after that statement (`hir/lower.tcl`'s
 `Seq`, the Tcl compiler's `CompileSequence`, `native/lower.tcl`'s `Sequence`)
 and keeps the statement's value. An exit that leaves the handle's scope
 first -- a `return`, `fail`, `break` or `continue`, or a call propagating a
-declared error -- releases it there (`hir::coroutines::ExitReleases`,
+declared error -- releases it there (`hir::affine::ExitReleases`,
 COROUTINES.md "Release on every early exit"): before the exit (after its
 value, for a handle the value uses), and on a call's error edge through a
 handler-shaped catch that releases and propagates the same error on
@@ -402,12 +403,12 @@ pads). An error edge uses the call's type-level `calleeErrors`, never the
 completion proofs. A release must stay unobservable -- it never runs
 Botlish code (a released suspended Tcl coroutine is unwound by an error no
 handler catches) and never changes a value -- and must never release a
-coroutine some live binding still owns. Extending it (other affine values)
-keeps both properties.
+coroutine some live binding still owns. The affine-values milestone
+extended it to every affine value, keeping both properties.
 
 If you change the coroutine grammar (`yield`, the coroutine binding, the
-resume clause), `hir/coroutines.tcl` (protocols, the yield effect, the
-affine analysis), how a construction lowers (`surface/lower.tcl`'s
+resume clause), `hir/coroutines.tcl` (protocols, the yield effect),
+`hir/affine.tcl` (the ownership analysis), how a construction lowers (`surface/lower.tcl`'s
 `CoroutineBind`) or resolves (`hir/resolve.tcl`'s `CoroutineResume`), a
 segment's error facts (`hir/completions.tcl`'s `NativeCallFacts`), where
 releases go or how they lower, the Tcl runtime (`core/coroutines.tcl`) or the
@@ -427,3 +428,46 @@ checkout's). A change to native stack switching or its GC walk also needs a
 Native coroutines switch stacks with hand-written x86-64 assembly and exist
 on x86-64 Linux only; elsewhere the native backend reports them unsupported
 (the Tcl backends run them everywhere).
+
+## Affine values
+
+Affinity (AFFINE-VALUES.md) is a compositional property of a value's type:
+the coroutine handle is the one primitive affine root, and a struct,
+anonymous struct or List that owns an affine value is affine too
+(`hir::types::Affinity`/`IsAffine`, the one query every ownership decision
+asks). An affine value has one usable owner and moves through bindings,
+arguments, results, struct fields and List elements; it is released where
+its owner dies, by its type's static drop descriptor (`coroutine#release`,
+or `affine#drop`/`affinedrop` for an aggregate). `Fn{...}` and
+`Coroutine{...}` share one callable contract (args, return, errors) and stay
+distinct callable kinds: never add an implicit conversion between them, a
+runtime callable-kind dispatch, or runtime ownership state (a moved flag, a
+reference count, an ownership object): `tests/affine.test`'s
+`af-native-runtime-source`, `af-generic-dual` and `af-native-evidence` pin
+this. An exact function value stays unrestricted. A generic (untyped)
+function given an affine argument is specialized for it by the trait
+monomorphization (`hir::traits::NeedsAffinePlan`, `AffineWitnesses`), never
+dispatched at run time; `hir/affine.tcl` must never ask whether a value is a
+coroutine, only whether its type is affine. The terms are unrestricted,
+affine, move, release/drop, callable contract and callable kind; an affine
+value is not a reference, a borrow or a linear value, and may be dropped
+unused.
+
+If you change the affinity query (`hir/types.tcl`, `hir/structs.tcl`),
+`hir/affine.tcl`, contract-based call typing of `Fn`/`Coroutine` callees
+(`hir/types.tcl`'s `Call`, `hir/range.tcl`'s `VerifyStructuralCall`,
+`hir/completions.tcl`), `hir::coroutines::ElaborateResumes`, the affine
+specialization (`hir/traits.tcl`, `hir/semantic.tcl`'s affine instances,
+`hir::signatures::CallableAdmits`), release or pending-temporary lowering in
+any backend, or the drop runtimes (`core/affine.tcl`,
+`native/src/runtime/affine.rs`), run `tests/affine.test`,
+`tests/coroutines.test`, `audit/affine/tools/fuzz.tcl` (several seeds),
+`audit/affine/tools/mutate.tcl` and `audit/coroutines/tools/mutate.tcl`
+(every mutant in both `mutants.txt` files must still apply and be killed;
+the coroutine mutants of ownership and release edit `hir/affine.tcl` too).
+A change to `hir::traits::Plan` for affine witnesses also means re-checking
+the trait and context-trait mutants. A change to native drop or release
+lowering also needs a `BOTLISH_NATIVE_GC_STRESS=1` run of
+`tests/affine.test` and `cargo test --release --manifest-path
+native/Cargo.toml --lib affine`. `bench/affine.tcl` regenerates the
+performance report.

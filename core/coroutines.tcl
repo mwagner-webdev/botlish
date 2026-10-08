@@ -73,6 +73,12 @@ namespace eval core::coroutines {
     # The IDs whose segments are executing, innermost last: a resume nested in
     # another coroutine's segment pushes, its boundary pops.
     variable running {}
+    # Test probes (AFFINE-VALUES.md, "Drop glue"): when not "none", every
+    # release of a coroutine not released yet appends its ID (releaseTrace),
+    # and every release call appends it, a repeated one included
+    # (releaseCalls).
+    variable releaseTrace none
+    variable releaseCalls none
 }
 
 proc core::coroutines::createNative {} { return coroutine#create }
@@ -254,7 +260,15 @@ proc core::coroutines::doneImpl {handle} {
 proc core::coroutines::releaseImpl {handle} {
     variable store
     variable running
+    variable releaseTrace
+    variable releaseCalls
     set id [Entry $handle]
+    if {$releaseTrace ne "none" && [dict get $store $id state] ne "released"} {
+        lappend releaseTrace $id
+    }
+    if {$releaseCalls ne "none"} {
+        lappend releaseCalls $id
+    }
     switch -- [dict get $store $id state] {
         suspended {
             set continuation [dict get $store $id continuation]

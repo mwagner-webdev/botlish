@@ -1554,6 +1554,79 @@ proc hir::traits::WitnessesOf {hir block entry} {
     return $result
 }
 
+# {I T ...}: the affine entry type T of each *untyped* parameter I of block
+# BLOCK in the entry types ENTRY of one of its instances (AFFINE-VALUES.md,
+# "Generic callables"): a generic function given an affine argument is
+# specialized for it -- the clone's parameter is declared with the argument's
+# type, so its calls of the parameter are what that type makes them (a
+# coroutine's: resumes), its ownership is checked and released like any
+# affine parameter's, and nothing is decided at run time.
+proc hir::traits::AffineWitnesses {hir block entry} {
+    set result {}
+    set i 0
+    foreach d [dict get $hir exprs $block declaredParamTypes] t $entry {
+        if {$d eq {} && $t ne "" && [hir::types::IsAffine $t]} {
+            lappend result $i $t
+        }
+        incr i
+    }
+    return $result
+}
+
+# The clone witnesses of block BLOCK's instance with entry types ENTRY: its
+# trait parameters' witnesses (WitnessesOf; "" if one is not concrete) and
+# its untyped parameters' affine types (AffineWitnesses), by parameter index.
+proc hir::traits::CloneWitnesses {hir block entry} {
+    set traitWitnesses [WitnessesOf $hir $block $entry]
+    if {$traitWitnesses eq "" && [IsPolymorphic $hir $block]} {
+        return ""
+    }
+    return [lsort -integer -stride 2 -index 0 [concat $traitWitnesses [AffineWitnesses $hir $block $entry]]]
+}
+
+# The blocks of HIR some semantic instance of which has affine witnesses:
+# the generic functions that are specialized for affine arguments.
+proc hir::traits::AffinePolys {hir} {
+    set result [dict create]
+    if {![dict exists $hir semantic instances]} {
+        return $result
+    }
+    dict for {id inst} [dict get $hir semantic instances] {
+        set block [dict get $inst block]
+        if {[AffineWitnesses $hir $block [dict get $inst args]] ne {}} {
+            dict set result $block 1
+        }
+    }
+    return $result
+}
+
+# 1 if syntax NODES or module sections MODULES may construct a coroutine --
+# the only way a program gets an affine value (AFFINE-VALUES.md): only then
+# can a generic function need a specialization for one. A textual test (the
+# internal native's name contains "#", which source cannot spell; a String
+# literal that happens to spell it only costs a plan that finds nothing).
+proc hir::traits::UsesCoroutines {nodes modules} {
+    set native [core::coroutines::createNative]
+    return [expr {[string first $native $nodes] >= 0 || [string first $native $modules] >= 0}]
+}
+
+# 1 if call E (in VIEW) passes an affine argument to an untyped parameter of
+# block BLOCK.
+proc hir::traits::AffineArgumentsUntyped {view e block} {
+    foreach arg [dict get $view exprs $e args] d [dict get $view exprs $block declaredParamTypes] {
+        if {$arg ne "" && $d eq {} && [hir::types::IsAffine [hir::typeOf $view $arg]]} {
+            return 1
+        }
+    }
+    return 0
+}
+
+# 1 if checked HIR calls a generic function with an affine argument: it needs
+# the specializing build (monomorphize) even without a trait.
+proc hir::traits::NeedsAffinePlan {hir} {
+    return [expr {[dict size [AffinePolys $hir]] > 0}]
+}
+
 # The location-independent identity of binding B as a reference from outside
 # its unit: {root NAME}, {entry NAME} or {module NS NAME} (NAME the source
 # name), or "".
@@ -1583,6 +1656,11 @@ proc hir::traits::WitnessName {w} {
     if {[hir::types::IsNamedStruct $w]} {
         return [lindex $w 1]
     }
+    if {[hir::types::IsAffine $w]} {
+        # An affine witness (a coroutine handle type, a List or struct of
+        # one): its type text, without spaces.
+        return [string map {" " ""} [hir::types::show $w]]
+    }
     if {![catch {core::type::evidenceOf $w} names] && $names ne {}} {
         return [join $names +]
     }
@@ -1610,6 +1688,10 @@ proc hir::traits::Plan {hir syntax} {
     # clone under the provider the installed contexts statically select,
     # bound where every implementation it calls is established).
     set polys [dict create]
+    # (The generic functions some call gives an affine argument through an
+    # untyped parameter, AFFINE-VALUES.md: specialized per affine type, the
+    # source function kept for every other call.)
+    set affinePolys [AffinePolys $hir]
     foreach r $roots {
         set node [dict get $hir exprs $r]
         if {[dict get $node kind] ne "bind" || [dict get $hir exprs [dict get $node value] kind] ne "block"} {
@@ -1618,7 +1700,8 @@ proc hir::traits::Plan {hir syntax} {
         set block [dict get $node value]
         set trait [IsPolymorphic $hir $block]
         set contextTraits [ContextTraitsOf $hir $block]
-        if {(!$trait && $contextTraits eq {}) || ![dict exists $node sid]} {
+        set affine [dict exists $affinePolys $block]
+        if {(!$trait && $contextTraits eq {} && !$affine) || ![dict exists $node sid]} {
             continue
         }
         set b [dict get $node binding]
@@ -1630,7 +1713,7 @@ proc hir::traits::Plan {hir syntax} {
             set ns $unitOrName
         }
         dict set polys $block [dict create bind $r binding $b sid [dict get $node sid] \
-            namespace $ns name $name index [dict get $rootIndex $r] trait $trait \
+            namespace $ns name $name index [dict get $rootIndex $r] trait $trait affine $affine \
             contextTraits $contextTraits selection [ContextSelection $hir $contextTraits]]
     }
     # Each expression's home: the replaced function whose body it is in (a
@@ -1680,7 +1763,7 @@ proc hir::traits::Plan {hir syntax} {
                 set view [hir::semantic::View $hir $context]
                 set h [dict get $inst block]
                 set caller $context
-                set params [WitnessesOf $hir $h [dict get $inst args]]
+                set params [CloneWitnesses $hir $h [dict get $inst args]]
                 set rt [dict get $inst result]
             }
             set fn [dict get $polys $h]
@@ -1787,6 +1870,15 @@ proc hir::traits::Plan {hir syntax} {
                         lappend implUses [list $ckey $impl $e]
                     } else {
                         lassign [dict get $node target] tk tb
+                        if {$tk eq "block" && ![dict exists $polys $tb] && [dict exists $calls [list $caller $e]]
+                                && [AffineWitnesses $hir $tb [dict get $instances [dict get $calls [list $caller $e]] args]] ne {}} {
+                            # A generic function declared inside another one
+                            # given an affine argument: its specializations
+                            # would be per activation of the enclosing one.
+                            lappend diagnostics [list AFFINE-GENERIC-NESTED-UNSUPPORTED [format {this call gives an affine argument to an untyped parameter of %s, a function declared inside another function: a generic function is specialized for an affine argument only when it is declared at the top level of a module or the program (declare the parameter's type, or move the function to the top level)} \
+                                [hir::contexts::BlockName $hir $tb]] $e]
+                            continue
+                        }
                         if {$tk ne "block" || ![dict exists $polys $tb]} {
                             continue
                         }
@@ -1826,14 +1918,36 @@ proc hir::traits::Plan {hir syntax} {
                                 continue
                             }
                             set j [dict get $calls [list $caller $e]]
-                            set witnesses [WitnessesOf $hir $tb [dict get $instances $j args]]
+                            set witnesses [CloneWitnesses $hir $tb [dict get $instances $j args]]
                             if {$witnesses eq ""} {
                                 lappend diagnostics [list TRAIT-INTERNAL "a call of [dict get $polys $tb name] has no concrete witness" $e]
                                 continue
                             }
-                        } else {
+                        } elseif {[dict get $fn contextTraits] ne {}} {
+                            if {[dict exists $calls [list $caller $e]]
+                                    && [AffineWitnesses $hir $tb [dict get $instances [dict get $calls [list $caller $e]] args]] ne {}} {
+                                lappend diagnostics [list AFFINE-GENERIC-NESTED-UNSUPPORTED [format {this call gives an affine argument to an untyped parameter of %s, whose requirement includes a context trait: such a function is specialized once for its context, not per argument type (declare the parameter's type)} \
+                                    [dict get $polys $tb name]] $e]
+                                continue
+                            }
                             set j [list contextfn $tb]
                             set witnesses {}
+                        } else {
+                            # A generic function some call gives an affine
+                            # argument (AFFINE-VALUES.md): this call's
+                            # specialization, if its instance has one.
+                            if {![dict exists $calls [list $caller $e]]} {
+                                if {[AffineArgumentsUntyped $view $e $tb]} {
+                                    lappend diagnostics [list AFFINE-INSTANCE-BUDGET [format {this call gives an affine argument to an untyped parameter of %s but has no static specialization (the compiler's semantic-instance budget declined it), and there is no runtime ownership or callable-kind dispatch to fall back to (declare the parameter's type)} \
+                                        [dict get $polys $tb name]] $e]
+                                }
+                                continue
+                            }
+                            set j [dict get $calls [list $caller $e]]
+                            set witnesses [CloneWitnesses $hir $tb [dict get $instances $j args]]
+                            if {$witnesses eq {}} {
+                                continue
+                            }
                         }
                         set k [list $tb $witnesses [dict get $fn selection]]
                         SetAction actions diagnostics $ckey $sid [list redirect $k] $e
@@ -1939,10 +2053,14 @@ proc hir::traits::Plan {hir syntax} {
     if {$diagnostics ne {}} {
         return [dict create diagnostics $diagnostics]
     }
-    # The declarations the clones replace, and the aliases of them.
+    # The declarations the clones replace, and the aliases of them (a generic
+    # function specialized for affine arguments stays: its other calls call
+    # it).
     set drop [dict create]
     dict for {block fn} $polys {
-        dict set drop [dict get $fn sid] 1
+        if {[dict get $fn trait] || [dict get $fn contextTraits] ne {}} {
+            dict set drop [dict get $fn sid] 1
+        }
     }
     dict for {e node} [dict get $hir exprs] {
         if {[dict get $node kind] eq "bind" && [dict exists $node sid] && ![dict get $node duplicate]
@@ -1952,7 +2070,8 @@ proc hir::traits::Plan {hir syntax} {
                 # An alias of a context-trait-dependent function.
                 set fn [hir::contexts::Denotes $hir [dict get $node binding]]
             }
-            if {$fn ne "" && [dict exists $polys $fn]} {
+            if {$fn ne "" && [dict exists $polys $fn]
+                    && ([dict get $polys $fn trait] || [dict get $polys $fn contextTraits] ne {})} {
                 dict set drop [dict get $node sid] 1
             }
         }
@@ -2160,6 +2279,11 @@ proc hir::traits::monomorphize {nodes options given hir syntax} {
 proc hir::traits::FunctionsSummary {hir p} {
     set summary [dict create]
     dict for {block fn} [dict get $p polys] {
+        if {![dict get $fn trait] && [dict get $fn contextTraits] eq {}} {
+            # (A generic function specialized for affine arguments is not
+            # replaced: its clones are ordinary bindings of the program.)
+            continue
+        }
         set node [dict get $hir exprs $block]
         set params {}
         foreach b [dict get $node params] t [dict get $node declaredParamTypes] {

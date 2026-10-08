@@ -19,6 +19,16 @@ The architectural theorem the milestone establishes:
 COROUTINE-PREREQUISITES.md is the research this builds on (what each backend
 already provided, the roadblocks); this document is what was built.
 
+AFFINE-VALUES.md generalizes the ownership half of this milestone: affinity
+is now a property of any value whose type owns a coroutine (a struct, a
+List), a coroutine handle type is spelled `Coroutine{args: [M], return: R,
+errors: [E]}` in source and shares `Fn`'s callable contract, handles move
+through arguments, results, struct fields and List elements, and the
+ownership analysis and release elaboration live in `hir/affine.tcl`. The
+points below that it changes (30, 31, 33, 36, 37, 38 and the two release
+sections) say so where they stand; coroutine control semantics are
+unchanged.
+
 ## Contents
 
 * [The principal program](#the-principal-program)
@@ -506,6 +516,11 @@ not-move`).
 
 ### 30. Coroutine handle compiler type
 
+*Superseded by AFFINE-VALUES.md points 1-5:* the type is now `{coroutine
+{args {M} return R errors {E}}}`, spelled `Coroutine{args: [Message],
+return: Event, errors: [Broken]}` in source and in HIR text, with `Fn`'s
+callable contract. As built here:
+
 `{coroutine RESUME OUTWARD ERRORS}` in HIR (`hir/types.tcl`), shown
 `Coroutine{resume: Message, yield: Event, errors: [Broken]}`: the resolved
 protocol (`unit` or a named struct type), the outward type, and the root's
@@ -515,6 +530,10 @@ and read back a handle's type), and its values have no equality and no hash
 (`core/value.tcl`'s kind `coroutine` is excluded from both; natively too).
 
 ### 31. Affine binding representation
+
+*Generalized by AFFINE-VALUES.md points 9-13:* a binding is affine when its
+type is (a coroutine, or a struct or List owning one); its state lives in
+`hir::affine`'s analysis. As built here:
 
 There is no affine type or annotation: a binding is a *handle binding* when
 its type is a coroutine type. Its ownership state lives only in the static
@@ -532,6 +551,9 @@ handle continues the one coroutine where it stopped
 (`co-affine-move-never-forks`).
 
 ### 33. Use-after-move analysis
+
+*Generalized by AFFINE-VALUES.md point 14 (`hir::affine::Consumer`).* As
+built here:
 
 Every reference to a handle binding has a role (`RefRole`): a *use* (the
 handle of a resume, of `done?`, or a reference in statement position), a
@@ -565,6 +587,13 @@ there is never a second name for it.
 
 ### 36. Unsupported affine storage frontier
 
+*Superseded by AFFINE-VALUES.md:* a handle may now be a struct field, a List
+element, an argument, a result and the value of an `if`, handler or loop
+(points 16-31); what remains rejected is erasure, equality, capture, module
+bindings and element-copying List operations, under the `AFFINE-*` codes
+(points 27, 31, 37-39). `COROUTINE-STORAGE-UNSUPPORTED` no longer exists. As
+built here:
+
 A handle can be bound, moved to another local binding, resumed and observed.
 Everything else is `COROUTINE-STORAGE-UNSUPPORTED`, with what it would have
 been (`co-storage-frontier`, `co-storage-equality`):
@@ -580,6 +609,10 @@ been (`co-storage-frontier`, `co-storage-equality`):
 
 ### 37. Function-value interaction
 
+*Unchanged in substance by AFFINE-VALUES.md (points 5, 40): `Fn` and
+`Coroutine` share a callable contract but stay distinct kinds; an untyped
+higher-order function given a coroutine is specialized for it (point 7).*
+
 A handle is not a function value: passing it where a structural `Fn` is
 expected is `COROUTINE-NOT-FUNCTION` ("it carries the evolving state of one
 coroutine and cannot be passed where a function value of type
@@ -589,6 +622,9 @@ diagnostic). A *function that may yield* cannot become a value either
 not a call-graph edge, so the effect could not follow it.
 
 ### 38. Closure interaction
+
+*Since AFFINE-VALUES.md the diagnostic is `AFFINE-CAPTURE-UNSUPPORTED`, for
+every affine binding (point 37).*
 
 A handle cannot be captured by a nested function (`COROUTINE-STORAGE-
 UNSUPPORTED`): a closure is a value that may be stored, copied and called
@@ -1244,6 +1280,10 @@ needs:
 
 ## Release at the last use
 
+*Generalized by AFFINE-VALUES.md (points 32-35): the same rule now applies
+to every affine binding and discarded affine value, a struct or List being
+dropped by its type's descriptor; the tables live in `hir::affine`.*
+
 A follow-up to the milestone: a coroutine is released as soon as the affine
 analysis proves its handle dead, instead of when a collection finds the
 handle unreachable. This is resource cleanup that comes from the type
@@ -1436,6 +1476,9 @@ memory of coroutines whose handles are still in use are unchanged (they are
 not released).
 
 ## Release on every early exit
+
+*Generalized by AFFINE-VALUES.md (points 18, 22, 33): every affine binding,
+and the pending temporaries of a call or construction an exit abandons.*
 
 The second follow-up closes the gap [Release at the last
 use](#release-at-the-last-use) left: a path that leaves a handle's scope
@@ -1645,3 +1688,4 @@ costs and the memory of coroutines still held are unchanged.
 | `tests/coroutines.test` | the milestone's tests |
 | `audit/coroutines/tools/fuzz.tcl`, `mutate.tcl`, `mutants.txt` | fuzzer and mutation testing |
 | `bench/coroutines.tcl` | the performance report |
+| `hir/affine.tcl` (AFFINE-VALUES.md) | since the affine-values milestone: the ownership analysis and release elaboration (moved out of `hir/coroutines.tcl`, generalized) |

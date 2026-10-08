@@ -1161,6 +1161,11 @@ proc surface::parser::TypeExpr {pVar what} {
     if {$name eq "Fn"} {
         return [FnType p $token]
     }
+    if {$name eq "Coroutine"} {
+        # A coroutine handle type (AFFINE-VALUES.md): the same callable
+        # contract grammar, of the coroutine callable kind.
+        return [FnType p $token coroutine]
+    }
     while {$name ne "unit" && [Kind p] eq "::"} {
         # A module-qualified type name (STRUCTS.md): "geo::Point" names the
         # struct Point declared by module geo, "abi::x86_64::Register64" the
@@ -1195,14 +1200,21 @@ proc surface::parser::TypeExpr {pVar what} {
 # errors {NAME...}} in canonical field order: "fn" is a keyword, so this
 # pair can never be mistaken for an applied type {NAME ARG}. Adding a field
 # later (the planned `context`) is one more case below.
-proc surface::parser::FnType {pVar fn} {
+proc surface::parser::FnType {pVar fn {kind fn}} {
     upvar 1 $pVar p
-    set usage "Fn{args: \[...\], return: ..., errors: \[...\]}"
+    if {$kind eq "coroutine"} {
+        set head Coroutine
+        set what "coroutine type"
+    } else {
+        set head Fn
+        set what "function type"
+    }
+    set usage "$head{args: \[...\], return: ..., errors: \[...\]}"
     if {[Kind p] eq "\["} {
-        Fail [Peek p] "a function type has named fields, not positional type arguments: write $usage"
+        Fail [Peek p] "a $what has named fields, not positional type arguments: write $usage"
     }
     if {[Kind p] ne "\{"} {
-        Fail [Peek p] "expected \"\{\" after \"Fn\" (a function type is written $usage), found [Describe [Peek p]]"
+        Fail [Peek p] "expected \"\{\" after \"$head\" (a $what is written $usage), found [Describe [Peek p]]"
     }
     set open [Advance p]
     set fields [dict create]
@@ -1213,29 +1225,29 @@ proc surface::parser::FnType {pVar fn} {
                 set field [expr {[dict get $token kind] eq "IDENT" ? [dict get $token value] : [dict get $token kind]}]
             }
             default {
-                Fail $token "expected a field name (args, return or errors) in the function type, found [Describe $token]"
+                Fail $token "expected a field name (args, return or errors) in the $what, found [Describe $token]"
             }
         }
         if {$field ni {args return errors}} {
             if {$field in {target targets}} {
-                Fail $token "a function type cannot name its target: \"$field\" is not a field (a function type describes only the call contract: args, return, errors)"
+                Fail $token "a $what cannot name its target: \"$field\" is not a field (a $what describes only the call contract: args, return, errors)"
             }
             if {$field eq "context"} {
-                Fail $token "the function type field \"context\" is not supported yet (fields: args, return, errors)"
+                Fail $token "the $what field \"context\" is not supported yet (fields: args, return, errors)"
             }
-            Fail $token "unknown field \"$field\" in the function type (fields: args, return, errors)"
+            Fail $token "unknown field \"$field\" in the $what (fields: args, return, errors)"
         }
         if {[dict exists $fields $field]} {
-            Fail $token "duplicate field \"$field\" in the function type"
+            Fail $token "duplicate field \"$field\" in the $what"
         }
         Advance p
         if {[Kind p] ne ":"} {
-            Fail [Peek p] "expected \":\" after the function type field \"$field\", found [Describe [Peek p]]"
+            Fail [Peek p] "expected \":\" after the $what field \"$field\", found [Describe [Peek p]]"
         }
         Advance p
         switch -- $field {
             args {
-                dict set fields args [FnList p args {
+                dict set fields args [FnList p args $what {
                     TypeExpr p "a parameter type in the \"args\" list"
                 }]
             }
@@ -1243,7 +1255,7 @@ proc surface::parser::FnType {pVar fn} {
                 dict set fields return [TypeExpr p "a type after \"return:\""]
             }
             errors {
-                set names [FnList p errors {
+                set names [FnList p errors $what {
                     set name [Expect p IDENT "an error name in the \"errors\" list"]
                     if {[Kind p] eq "\["} {
                         Fail [Peek p] "the \"errors\" list names declared errors, not types: expected \",\" or \"\]\" after the error name \"[dict get $name value]\""
@@ -1254,7 +1266,7 @@ proc surface::parser::FnType {pVar fn} {
                 foreach pair $names {
                     lassign $pair name nameToken
                     if {$name in $seen} {
-                        Fail $nameToken "duplicate error \"$name\" in the function type's \"errors\" list"
+                        Fail $nameToken "duplicate error \"$name\" in the $what's \"errors\" list"
                     }
                     lappend seen $name
                 }
@@ -1264,31 +1276,38 @@ proc surface::parser::FnType {pVar fn} {
         if {[Kind p] eq ","} {
             Advance p
         } elseif {[Kind p] ne "\}"} {
-            Fail [Peek p] "expected \",\" or \"\}\" after the function type field \"$field\", found [Describe [Peek p]]"
+            Fail [Peek p] "expected \",\" or \"\}\" after the $what field \"$field\", found [Describe [Peek p]]"
         }
     }
     set close [Peek p]
     foreach required {args return} {
         if {![dict exists $fields $required]} {
-            Fail $close "the function type is missing its \"$required\" field ($usage)"
+            Fail $close "the $what is missing its \"$required\" field ($usage)"
         }
     }
     Advance p
     if {![dict exists $fields errors]} {
         dict set fields errors {}
     }
-    return [list fn [dict create args [dict get $fields args] return [dict get $fields return] \
-        errors [dict get $fields errors]]]
+    set result [dict create args [dict get $fields args] return [dict get $fields return] \
+        errors [dict get $fields errors]]
+    if {$kind eq "coroutine"} {
+        # One more named entry: the callable kind (surface type expressions
+        # keep the {fn FIELDS} form, so every walker of a type's argument
+        # and return types handles both kinds).
+        dict set result kind coroutine
+    }
+    return [list fn $result]
 }
 
 # "[" [ ITEM { "," ITEM } [ "," ] ] "]" for function type field FIELD, each
 # ITEM parsed by the script ITEM (in the caller's frame, with p visible).
 # Returns the items' values.
-proc surface::parser::FnList {pVar field item} {
+proc surface::parser::FnList {pVar field typeWhat item} {
     upvar 1 $pVar p
     if {[Kind p] ne "\["} {
         set what [expr {$field eq "args" ? "a list of parameter types" : "a list of declared error names"}]
-        Fail [Peek p] "the \"$field\" field of a function type must be $what in \"\[...\]\", found [Describe [Peek p]]"
+        Fail [Peek p] "the \"$field\" field of a $typeWhat must be $what in \"\[...\]\", found [Describe [Peek p]]"
     }
     Advance p
     set items {}

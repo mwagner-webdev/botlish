@@ -358,7 +358,12 @@ proc hir::buildSyntax {nodes args} {
     # the typed HIR of trial builds, so no build may raise before it.
     set halt [expr {[dict get $options -strict] || [dict get $options -halt-on-resolution-errors]}]
     set traits [expr {[dict get $options -trait-decls] ne {}}]
-    if {$traits} {
+    # A source program that may construct coroutines may give a generic
+    # function an affine argument, which the monomorphization below
+    # specializes (AFFINE-VALUES.md).
+    set affine [expr {[dict exists $given -trait-decls]
+        && [hir::traits::UsesCoroutines $nodes [dict get $options -modules]]}]
+    if {$traits || $affine} {
         # A trait program (TRAITS.md): every syntax node gets an identity
         # the monomorphization below can name it by.
         lassign [hir::traits::Stamp $nodes [dict get $options -modules]] nodes modules syntax
@@ -369,10 +374,15 @@ proc hir::buildSyntax {nodes args} {
     if {$checked && [dict exists $hir methodCalls]} {
         set hir [DecideMethodCalls $nodes $options $given $hir]
     }
-    if {$traits && $checked && [dict get $hir diagnostics] eq ""} {
+    if {($traits || ($affine && [hir::traits::NeedsAffinePlan $hir])) && $checked && [dict get $hir diagnostics] eq ""} {
         # Checked as written, with trait views; now the program every
         # backend compiles: the same syntax built again, monomorphized.
         set hir [hir::traits::monomorphize $nodes $options $given $hir $syntax]
+    }
+    if {$checked} {
+        # Calls of coroutine handles typed as resumes, written out as the
+        # resume operation (AFFINE-VALUES.md): what every backend compiles.
+        hir::coroutines::ElaborateResumes hir
     }
     if {[dict get $options -strict] && [dict get $hir diagnostics] ne ""} {
         # Resolution failed, or a static check did: the first diagnostic.
@@ -417,8 +427,13 @@ proc hir::BuildOnce {nodes options given choices halt checkedVar} {
     dict set hir errorDecls $errorDecls
     if {$traitDecls ne ""} {
         dict set hir traits $traitDecls
+    }
+    if {$traitDecls ne "" || [dict exists $given -trait-decls]} {
         # The implementation candidates conformance reads: every unit's own
-        # top-level definitions, by source name, before hygiene renames them.
+        # top-level definitions, by source name, before hygiene renames them
+        # -- also the location-independent identities a specialization of a
+        # generic function for an affine argument resolves its references by
+        # (hir::traits::IdentOf, AFFINE-VALUES.md).
         hir::traits::index $hir
     }
     hir::hygiene::apply hir
@@ -722,6 +737,7 @@ proc hir::CheckOnce {hirVar demote} {
     hir::structs::verify hir
     hir::contexts::verify hir
     hir::coroutines::verify hir
+    hir::affine::verify hir
     hir::syscall::verify hir
     hir::semantic::verify hir
     hir::errorsets::verify hir
@@ -1027,7 +1043,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {syntax imports resolve flags contexts coroutines refcheck hygiene sourcetypes structs traits syscall errordecls types exactvalue signatures modulebinding refine repeatable lower format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep warnings} {
+    foreach file {syntax imports resolve flags contexts coroutines affine refcheck hygiene sourcetypes structs traits syscall errordecls types exactvalue signatures modulebinding refine repeatable lower format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep warnings} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

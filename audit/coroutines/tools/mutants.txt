@@ -1,8 +1,10 @@
 # Mutants of the coroutine milestone (audit/coroutines/tools/mutate.tcl;
 # COROUTINES.md): the mutants item 62 of the milestone brief names, in the
 # Tcl reference runtime (core/coroutines.tcl, which the interpreter and the
-# Tcl compiler share), the static analysis (hir/coroutines.tcl and its
-# callers) and the native runtime (native/src/runtime/).
+# Tcl compiler share), the static analysis (hir/coroutines.tcl; the
+# ownership discipline and release elaboration, generalized to every affine
+# value, are hir/affine.tcl's since AFFINE-VALUES.md) and its callers, and
+# the native runtime (native/src/runtime/).
 #
 #   @@ NAME DESCRIPTION
 #   ## FILE
@@ -206,11 +208,15 @@
 >>>>
 
 @@ assignment-aliases binding a handle to another name is no move: both names stay usable
-## hir/coroutines.tcl
+## hir/affine.tcl
 <<<<
-                return [list move $p]
+        bind {
+            return [list move bind $p]
+        }
 ====
-                return use
+        bind {
+            return {use bind}
+        }
 >>>>
 
 @@ assignment-forks binding a handle to another name starts a new coroutine of the same call: the new name runs a copy from the beginning
@@ -234,16 +240,18 @@
 >>>>
 
 @@ move-keeps-source a move does not invalidate the binding moved from
-## hir/coroutines.tcl
+## hir/affine.tcl
 <<<<
-    if {$what eq "move"} {
-        dict set state $b [list moved $detail]
-    }
+        } else {
+            dict set state $b [list moved $e]
+        }
 ====
+        } else {
+        }
 >>>>
 
 @@ join-keeps-live a handle moved on one branch only is live after the join
-## hir/coroutines.tcl
+## hir/affine.tcl
 <<<<
         } elseif {$x eq "live" || $y eq "live" || [lindex $x 0] eq "maybe" || [lindex $y 0] eq "maybe"} {
 ====
@@ -253,69 +261,54 @@
 >>>>
 
 @@ step-call-moves a resume consumes the handle: its owner is moved by the call
-## hir/coroutines.tcl
+## hir/affine.tcl
 <<<<
-    lassign [RefRole $hir $affineParent $e] what detail
-    if {$what eq "move"} {
+        # behind the same owner), never a move.
+        return {use resume}
 ====
-    lassign [RefRole $hir $affineParent $e] what detail
-    if {[NativeOf $hir [lindex [dict get $affineParent $e] 0]] eq [core::coroutines::resumeNative]} {
-        set what move
-        set detail [lindex [dict get $affineParent $e] 0]
-    }
-    if {$what eq "move"} {
+        # behind the same owner), never a move.
+        return [list move arg $p 0]
 >>>>
-## hir/coroutines.tcl
+## hir/affine.tcl
 <<<<
-proc hir::coroutines::MoveText {hir bind} {
+                        return [Temporary $hir $e "resume"]
+                    }
+                    return {use resume}
 ====
-proc hir::coroutines::MoveText {hir bind} {
-    if {[dict get $hir exprs $bind kind] ne "bind"} {
-        return "a consuming call ([Where $hir $bind])"
-    }
+                        return [Temporary $hir $e "resume"]
+                    }
+                    return [list move arg $p $index]
 >>>>
 
 @@ done-consumes coroutine::done? consumes the handle: its owner is moved by the query
-## hir/coroutines.tcl
+## hir/affine.tcl
 <<<<
-    lassign [RefRole $hir $affineParent $e] what detail
-    if {$what eq "move"} {
+            coroutine#start - coroutine::done? - coroutine#release {
 ====
-    lassign [RefRole $hir $affineParent $e] what detail
-    if {[NativeOf $hir [lindex [dict get $affineParent $e] 0]] eq [core::coroutines::doneNative]} {
-        set what move
-        set detail [lindex [dict get $affineParent $e] 0]
-    }
-    if {$what eq "move"} {
->>>>
-## hir/coroutines.tcl
-<<<<
-proc hir::coroutines::MoveText {hir bind} {
-====
-proc hir::coroutines::MoveText {hir bind} {
-    if {[dict get $hir exprs $bind kind] ne "bind"} {
-        return "a consuming call ([Where $hir $bind])"
-    }
+            coroutine::done? {
+                if {$index == 0} {
+                    return [list move arg $p $index]
+                }
+            }
+            coroutine#start - coroutine#release {
 >>>>
 
 @@ handle-as-fn a handle is accepted where a structural Fn value is expected
-## hir/coroutines.tcl
+## hir/types.tcl
 <<<<
-                if {[hir::types::IsFn $declared]} {
-                    return [list function "a function value of type [hir::types::show $declared]"]
-                }
+        set s [structuralOf $a]
+        return [expr {$s ne "" && [FnSubtype $s $b]}]
 ====
-                if {[hir::types::IsFn $declared]} {
-                    return use
-                }
+        set s [expr {[IsCoroutine $a] ? [list fn [lindex $a 1]] : [structuralOf $a]}]
+        return [expr {$s ne "" && [FnSubtype $s $b]}]
 >>>>
 
-@@ handle-erased-to-any a handle is accepted as an argument of an untyped (any) parameter
-## hir/coroutines.tcl
+@@ handle-erased-to-any a handle is accepted as an argument of a parameter declared any (it would be erased to a value another function could keep)
+## hir/affine.tcl
 <<<<
-            return [list storage "passed as an argument (it would be erased to a value another function could keep)"]
+        return [Erasure $hir $e "the argument of parameter \"$paramName\", declared [hir::types::show $declared]"]
 ====
-            return use
+        return {use arg}
 >>>>
 
 @@ context-reselected-per-resume every top-level resume selects the coroutine's context-trait providers again
@@ -464,15 +457,15 @@ proc hir::coroutines::MoveText {hir bind} {
 # Release at the last use (COROUTINES.md)
 
 @@ release-never no coroutine is released at its handle's last use: every one waits for a collection (Tcl: the program's end)
-## hir/coroutines.tcl
+## hir/affine.tcl
 <<<<
-    dict set hir coroutines releases [Releases $hir $scopes]
+    dict set hir affine releases [Releases $hir $parentMap $scopes $accepted]
 ====
-    dict set hir coroutines releases {}
+    dict set hir affine releases {}
 >>>>
 
 @@ release-moved-handle a handle moved away is released too: its new owner's coroutine is released while still in use
-## hir/coroutines.tcl
+## hir/affine.tcl
 <<<<
         && [lindex [dict get $state $b] 0] in {live maybe}}]
 ====
@@ -480,7 +473,7 @@ proc hir::coroutines::MoveText {hir bind} {
 >>>>
 
 @@ release-at-declaration a coroutine is released right after its handle's binding, before its uses
-## hir/coroutines.tcl
+## hir/affine.tcl
 <<<<
             set last [expr {max($last, $at)}]
 ====
@@ -510,8 +503,8 @@ proc hir::coroutines::MoveText {hir bind} {
 @@ compiler-release-missing the Tcl compiler compiling HIR (main.tcl's compile backend) emits no release
 ## compiler/compiler.tcl
 <<<<
-        foreach b [hir::coroutines::releasesAfter $hir $e] {
-            CompileRelease ctx $b
+        foreach item [hir::affine::releasesAfter $hir $e] {
+            CompileRelease ctx $item [expr {$item eq $e ? $result : ""}]
         }
 ====
 >>>>
@@ -556,15 +549,15 @@ proc hir::coroutines::MoveText {hir bind} {
 # Release on every early exit (COROUTINES.md)
 
 @@ exit-release-never no exit releases anything: a coroutine left by a return, fail, break, continue or failing call waits for a collection (Tcl: the program's end)
-## hir/coroutines.tcl
+## hir/affine.tcl
 <<<<
-    lassign [ExitReleases $hir $parent $scopes] exits errorExits
+    lassign [ExitReleases $hir $parentMap $scopes] exits errorExits
 ====
     lassign {{} {}} exits errorExits
 >>>>
 
 @@ exit-release-crosses-loop a break or continue releases every handle of its function, not only those of the loop body it leaves: a handle the function still uses after the loop is released
-## hir/coroutines.tcl
+## hir/affine.tcl
 <<<<
         if {[dict get $node kind] eq "block" || ($loop ne "" && $p eq $loop)} break
 ====
@@ -572,32 +565,32 @@ proc hir::coroutines::MoveText {hir bind} {
 >>>>
 
 @@ exit-release-handled-error a handled call releases on the errors its handlers handle too: the handler resumes a released coroutine
-## hir/coroutines.tcl
+## hir/affine.tcl
 <<<<
                         if {$name in [dict get $hir exprs $p handlerNames]} continue
 ====
 >>>>
 
 @@ exit-release-before-value an exit releases every handle before evaluating its value, also one the value resumes
-## hir/coroutines.tcl
+## hir/affine.tcl
 <<<<
-        if {$b in $used} {
-            lappend after $b
+        if {$item in $used} {
+            lappend after $item
 ====
         if {0} {
-            lappend after $b
+            lappend after $item
 >>>>
 
 @@ exit-release-after-last-use an exit after a handle's last use releases it again (it was released at that last use)
-## hir/coroutines.tcl
+## hir/affine.tcl
 <<<<
-            if {$at <= [dict get $scopes $b last] && [Owns $state $b] && ![Shadowed $hir $x $b]} {
+            if {$at <= [dict get $scopes $b last] && [Owns $state $b] && ![Shadowed $hir $x $b]
 ====
-            if {[Owns $state $b] && ![Shadowed $hir $x $b]} {
+            if {[Owns $state $b] && ![Shadowed $hir $x $b]
 >>>>
 
 @@ exit-release-shadowed an exit releases a handle whose name a nested binding rebinds: the release names the other binding
-## hir/coroutines.tcl
+## hir/affine.tcl
 <<<<
             if {$other ne $b && [dict get $hir bindings $other name] eq $name} {
                 return 1
@@ -622,12 +615,12 @@ proc hir::coroutines::MoveText {hir bind} {
 @@ compiler-exit-release-missing the Tcl compiler compiling HIR releases nothing before an exit statement
 ## compiler/compiler.tcl
 <<<<
+    lassign [hir::affine::releasesOnExit $hir $e] before after
     foreach b $before {
         CompileRelease ctx $b
     }
-    switch -- [Kind $e] {
 ====
-    switch -- [Kind $e] {
+    lassign [hir::affine::releasesOnExit $hir $e] before after
 >>>>
 
 @@ compiler-error-release-missing the Tcl compiler compiling HIR releases nothing on a call's propagated error
@@ -642,11 +635,11 @@ proc hir::coroutines::MoveText {hir bind} {
 @@ native-exit-release-missing native lowering releases nothing before a return
 ## native/lower.tcl
 <<<<
-            lassign [hir::coroutines::releasesOnExit $hir $e] before after
+            lassign [hir::affine::releasesOnExit $hir $e] before after
             ReleaseHandles fn $before $e
             set companion [dict get $fn companion]
 ====
-            lassign [hir::coroutines::releasesOnExit $hir $e] before after
+            lassign [hir::affine::releasesOnExit $hir $e] before after
             set companion [dict get $fn companion]
 >>>>
 

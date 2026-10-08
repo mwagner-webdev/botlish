@@ -530,16 +530,18 @@ proc hir::read::ParseType {text number} {
         return [hir::types::MakeFn $argTypes [ParseType $returnText $number] $errors]
     }
     if {[regexp {^Coroutine\{(.*)\}$} $text -> inner]} {
-        # hir::types::show's coroutine handle notation (COROUTINES.md).
+        # hir::types::show's coroutine handle type notation (AFFINE-
+        # VALUES.md): the callable contract, the three fields of Fn{...}.
         set fields [SplitTop $inner ", "]
         if {[llength $fields] != 3
-                || ![regexp {^resume: (.+)$} [lindex $fields 0] -> resumeText]
-                || ![regexp {^yield: (.+)$} [lindex $fields 1] -> yieldText]
+                || ![regexp {^args: \[(.*)\]$} [lindex $fields 0] -> argsText]
+                || ![regexp {^return: (.+)$} [lindex $fields 1] -> returnText]
                 || ![regexp {^errors: \[(.*)\]$} [lindex $fields 2] -> errorsText]} {
-            Fail $number "bad coroutine type \"$text\": expected \"Coroutine{resume: ..., yield: ..., errors: \[...\]}\""
+            Fail $number "bad coroutine type \"$text\": expected \"Coroutine{args: \[...\], return: ..., errors: \[...\]}\""
         }
+        set argTypes [expr {$argsText eq "" ? {} : [lmap t [SplitTop $argsText ", "] {ParseType $t $number}]}]
         set errors [expr {$errorsText eq "" ? {} : [SplitTop $errorsText ", "]}]
-        return [hir::types::MakeCoroutine [ParseType $resumeText $number] [ParseType $yieldText $number] $errors]
+        return [hir::types::MakeCoroutineType $argTypes [ParseType $returnText $number] $errors]
     }
     if {[regexp {^List\[(.+)\]$} $text -> inner]} {
         # hir::types::show's own applied-type notation (MINIMAL-APPLIED-
@@ -635,7 +637,8 @@ proc hir::read::TakeExprLine {hirVar level} {
     while {[llength $tail] > 1 && ([lindex $tail end] in $flags
             || [string match release=* [lindex $tail end]]
             || [string match exit-release=* [lindex $tail end]]
-            || [string match error-release=* [lindex $tail end]])} {
+            || [string match error-release=* [lindex $tail end]]
+            || [string match consumed=* [lindex $tail end]])} {
         set found [linsert $found 0 [lindex $tail end]]
         set tail [lrange $tail 0 end-1]
     }
@@ -729,30 +732,36 @@ proc hir::read::Expr {hirVar level s path block} {
         type [hir::types::intern hir [dict get $line type]] \
         reachable [expr {"unreachable" ni $flags}]]
     if {"move" in $flags} {
-        # A coroutine handle's move (COROUTINES.md), as printed.
-        dict set hir exprs $e coroutineMove 1
+        # A move of an affine value (AFFINE-VALUES.md), as printed.
+        dict set hir exprs $e affineMove 1
     }
     set release [lsearch -inline -glob $flags release=*]
     if {$release ne ""} {
-        # The coroutines released after this statement (COROUTINES.md), as
-        # printed.
-        dict set hir exprs $e coroutineRelease [split [string range $release 8 end] ,]
+        # The affine values released after this statement (AFFINE-VALUES.md),
+        # as printed.
+        dict set hir exprs $e affineRelease [split [string range $release 8 end] ,]
     }
     set release [lsearch -inline -glob $flags exit-release=*]
     if {$release ne ""} {
-        # The coroutines this exit releases as it leaves (COROUTINES.md).
-        dict set hir exprs $e coroutineExitRelease [split [string range $release 13 end] ,]
+        # The affine values this exit releases as it leaves.
+        dict set hir exprs $e affineExitRelease [split [string range $release 13 end] ,]
     }
     set release [lsearch -inline -glob $flags error-release=*]
     if {$release ne ""} {
-        # The coroutines released when this call propagates a declared
-        # error: NAME=B,B;... (COROUTINES.md).
+        # The affine values released when this call propagates a declared
+        # error: NAME=ITEM,ITEM;...
         set byName [dict create]
         foreach group [split [string range $release 14 end] {;}] {
             set at [string first = $group]
             dict set byName [string range $group 0 $at-1] [split [string range $group $at+1 end] ,]
         }
-        dict set hir exprs $e coroutineErrorRelease $byName
+        dict set hir exprs $e affineErrorRelease $byName
+    }
+    set consumed [lsearch -inline -glob $flags consumed=*]
+    if {$consumed ne ""} {
+        # A destructuring temporary's moved-out affine fields, recorded on
+        # its binding once the binding exists (TakeBind).
+        dict set hir exprs $e affineConsumed [split [string range $consumed 9 end] ,]
     }
     set inner [expr {$level + 1}]
 

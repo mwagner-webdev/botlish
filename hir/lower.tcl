@@ -67,8 +67,12 @@ proc hir::lower::expr {hir e} {
                 return [list call [list ref "trait-operation#[dict get $node traitCall requirement]"] \
                     {*}[Exprs $hir [dict get $node args]]]
             }
-            return [ReleasingOnError $hir $e \
-                [list call {*}[Exprs $hir [concat [list [dict get $node callee]] [dict get $node args]]]]]
+            set operands [concat [list [dict get $node callee]] [dict get $node args]]
+            set lowered [Pending $hir $e $operands {apply {{ops} {list call {*}$ops}}}]
+            if {$lowered eq ""} {
+                set lowered [list call {*}[Exprs $hir $operands]]
+            }
+            return [ReleasingOnError $hir $e $lowered]
         }
         if {
             return [list if [expr $hir [dict get $node condition]] \
@@ -137,6 +141,16 @@ proc hir::lower::expr {hir e} {
             if {[dict get $node named] && [dict get $node structId] ne ""} {
                 set head [linsert [dict get $node layout] 0 [dict get $node structId]]
             }
+            set lowered [Pending $hir $e [dict get $node fields] [list apply {{head names ops} {
+                set parts {}
+                foreach name $names op $ops {
+                    lappend parts $name $op
+                }
+                list struct $head {*}$parts
+            }} $head [dict get $node names]]]
+            if {$lowered ne ""} {
+                return $lowered
+            }
             set parts {}
             foreach name [dict get $node names] field [dict get $node fields] {
                 lappend parts $name [expr $hir $field]
@@ -176,37 +190,50 @@ proc hir::lower::body {hir e} {
 }
 
 # The core IR of the statement sequence IDS: each statement, followed by the
-# release of the coroutines whose handles are dead after it
-# (hir::coroutines::releasesAfter, COROUTINES.md "Release at the last use").
-# A release after the sequence's last statement keeps that statement's value
-# as the sequence's: `bind T STATEMENT; release...; T` (a binding statement
-# `bind N V` is followed by `ref N` instead). An exit statement (return,
-# break, continue, fail) releases the coroutines whose handles it takes out
-# of scope (hir::coroutines::releasesOnExit) before it, or, for those its
-# value refers to, between evaluating the value and leaving:
-# `bind T VALUE; release...; return T`.
+# release of the affine values dead after it (hir::affine::releasesAfter,
+# AFFINE-VALUES.md; COROUTINES.md "Release at the last use"). A release after
+# the sequence's last statement keeps that statement's value as the
+# sequence's: `bind T STATEMENT; release...; T` (a binding statement `bind N
+# V` is followed by `ref N` instead); so does the release of a statement's own
+# discarded value (an item naming the statement itself). An exit statement
+# (return, break, continue, fail) releases the values it takes out of scope
+# or abandons (hir::affine::releasesOnExit) before it, or, for those its
+# value refers to, between evaluating the value and leaving: `bind T VALUE;
+# release...; return T`.
 proc hir::lower::Seq {hir ids} {
     set result {}
     set n [llength $ids]
     set i 0
     foreach id $ids {
         incr i
-        lassign [hir::coroutines::releasesOnExit $hir $id] before after
+        lassign [hir::affine::releasesOnExit $hir $id] before after
         if {$before ne {} || $after ne {}} {
             lappend result {*}[Releases $hir $before]
             if {$after eq {}} {
                 lappend result [expr $hir $id]
             } else {
-                set kept "coroutine#kept#$id"
+                set kept "affine#kept#$id"
                 lappend result [list bind $kept [expr $hir [dict get $hir exprs $id value]]] \
                     {*}[Releases $hir $after] [list [dict get $hir exprs $id kind] [list ref $kept]]
             }
             continue
         }
         set lowered [expr $hir $id]
-        set releases [hir::coroutines::releasesAfter $hir $id]
+        set releases [hir::affine::releasesAfter $hir $id]
         if {$releases eq ""} {
             lappend result $lowered
+            continue
+        }
+        if {$id in $releases} {
+            # The statement's own value is released: kept by name.
+            set kept "affine#kept#$id"
+            lappend result [list bind $kept $lowered]
+            set lowered [list ref $kept]
+            set calls [Releases $hir $releases $kept]
+            lappend result {*}$calls
+            if {$i == $n} {
+                lappend result $lowered
+            }
             continue
         }
         set calls [Releases $hir $releases]
@@ -216,37 +243,93 @@ proc hir::lower::Seq {hir ids} {
             # A binding statement's value is its bound value: kept by name.
             lappend result $lowered {*}$calls [list ref [lindex $lowered 1]]
         } else {
-            set kept "coroutine#kept#$id"
+            set kept "affine#kept#$id"
             lappend result [list bind $kept $lowered] {*}$calls [list ref $kept]
         }
     }
     return $result
 }
 
-# The core IR releasing the coroutines of handle bindings BINDINGS.
-proc hir::lower::Releases {hir bindings} {
-    return [lmap b $bindings {
-        list call [list ref [core::coroutines::releaseNative]] [list ref [dict get $hir bindings $b name]]
-    }]
+# The core IR releasing the affine values of release items ITEMS
+# (hir::affine::DropPlan): a binding by its name, a pending temporary by the
+# name its construction gave it (TempName), a statement's own value by KEPT.
+proc hir::lower::Releases {hir items {kept ""}} {
+    set result {}
+    foreach item $items {
+        set plan [hir::affine::DropPlan $hir $item]
+        if {$plan eq ""} continue
+        if {[string match b* $item]} {
+            set value [list ref [dict get $hir bindings $item name]]
+        } elseif {$kept ne "" && $item eq [lindex [split $kept #] end]} {
+            set value [list ref $kept]
+        } else {
+            set value [list ref [TempName $item]]
+        }
+        if {[lindex $plan 0] eq "coroutine"} {
+            lappend result [list call [list ref [core::coroutines::releaseNative]] $value]
+        } else {
+            lappend result [list call [list ref [hir::affine::DropNative]] $value [list const str [lindex $plan 1]]]
+        }
+    }
+    return $result
 }
 
-# LOWERED, the core IR of call (or handle) E, releasing the coroutines whose
-# handles a declared error it propagates takes out of scope
-# (hir::coroutines::releasesOnError): a handler per such error that releases
+# The Core IR name of pending temporary E: a construction operand a release
+# may need by name (hir::affine::temporaries; Pending).
+proc hir::lower::TempName {e} {
+    return "affine#temp#$e"
+}
+
+# LOWERED, the core IR of call (or handle) E, releasing the affine values a
+# declared error it propagates takes out of scope or abandons
+# (hir::affine::releasesOnError): a handler per such error that releases
 # and fails with the same error again -- an error is its name, so the
 # propagation goes on unchanged.
 proc hir::lower::ReleasingOnError {hir e lowered} {
-    set byName [hir::coroutines::releasesOnError $hir $e]
+    set byName [hir::affine::releasesOnError $hir $e]
     if {$byName eq ""} {
         return $lowered
     }
     if {[lindex $lowered 0] ne "handle"} {
         set lowered [list handle $lowered]
     }
-    dict for {name bindings} $byName {
-        lappend lowered $name [list block {} {*}[Releases $hir $bindings] [list fail $name]]
+    dict for {name items} $byName {
+        lappend lowered $name [list block {} {*}[Releases $hir $items] [list fail $name]]
     }
     return $lowered
+}
+
+# The core IR of construction E (a call or struct, OPERANDS its callee and
+# arguments, or field values) when one of its operands is a pending
+# temporary a release names (hir::affine::temporaries): its operands are
+# evaluated first, in order, into named temporaries -- inside an always-taken
+# branch, which gives them a scope of their own while keeping the
+# construction an expression -- and BUILD (a command prefix, given the
+# operand list) builds the call or struct of those names. Evaluation order and
+# meaning are unchanged; only the names exist.
+proc hir::lower::Pending {hir e operands build} {
+    set temps [hir::affine::temporaries $hir]
+    set named 0
+    foreach o $operands {
+        if {[dict exists $temps $o]} {
+            set named 1
+        }
+    }
+    if {!$named} {
+        return ""
+    }
+    set binds {}
+    set ops {}
+    foreach o $operands {
+        set lowered [expr $hir $o]
+        if {[lindex $lowered 0] in {ref const}} {
+            lappend ops $lowered
+            continue
+        }
+        lappend binds [list bind [TempName $o] $lowered]
+        lappend ops [list ref [TempName $o]]
+    }
+    return [list if [list ref true] [list block {} {*}$binds [{*}$build $ops]] [list block {}]]
 }
 
 proc hir::lower::Exprs {hir ids} {

@@ -78,20 +78,26 @@
 #                                   (hir/callables.tcl audits every position
 #                                   that would). The bare atom `mutarray` is
 #                                   the raw, element-untyped substrate type.
-#   {coroutine RESUME OUTWARD ERRORS}
-#                                   a coroutine handle (COROUTINES.md): the
-#                                   affine, resumable computation one
-#                                   `coroutine {...} = CALL` construction
-#                                   started. RESUME is its protocol (unit:
-#                                   resumed with no message; a named struct
-#                                   type: with one message of it), OUTWARD
-#                                   the static type of every value a
-#                                   segment ends with (a yield's or the
-#                                   final return's), ERRORS the sorted
+#   {coroutine {args {M} return R errors {E1 ...}}}
+#                                   a coroutine handle (COROUTINES.md,
+#                                   AFFINE-VALUES.md): the affine, resumable
+#                                   computation one `coroutine {...} = CALL`
+#                                   construction started, described by the
+#                                   same *callable contract* a structural Fn
+#                                   has -- `args` the messages one call
+#                                   (resume) takes: none (the zero-message
+#                                   protocol) or one named struct type;
+#                                   `return` the static type of every value
+#                                   a segment ends with (a yield's or the
+#                                   final return's); `errors` the sorted
 #                                   declared errors a segment may end with.
-#                                   Never source-spellable, never erased:
-#                                   a handle lives only in local bindings
-#                                   (hir/coroutines.tcl's affine frontier)
+#                                   Source-spellable as Coroutine{args: [M],
+#                                   return: R, errors: [E]}, and printed so.
+#                                   Its callable *kind* differs from Fn's
+#                                   (calling resumes one evolving execution),
+#                                   so neither is a subtype of the other.
+#                                   Affine (Affinity, below): ordinary
+#                                   operations never duplicate one.
 #
 # The list and immutableSet forms are *aggregate facts*. Semantic inference
 # (infer) never produces a *shaped* (positional) one: a program's HIR types
@@ -260,6 +266,13 @@ proc hir::types::resolveApplication {ctor argTypes} {
             return -code error -errorcode {BOTLISH CONTEXT-TRAIT-POSITION} \
                 [ContextTraitPositionMessage $contextTrait "the element type of $ctor\[[show $t]\]"]
         }
+        if {$ctor ne "List" && [IsAffine $t]} {
+            # A MutableArray copies elements out on every read and an
+            # ImmutableSet compares and hashes its members: neither can own
+            # affine values (AFFINE-VALUES.md). A List can (whole-List moves).
+            return -code error -errorcode {BOTLISH AFFINE-CONTAINER-UNSUPPORTED} \
+                "$ctor\[[show $t]\] would hold affine values: a [expr {$ctor eq "MutableArray" ? "MutableArray copies its elements out on every read" : "ImmutableSet compares and hashes its members"}], so it cannot own them (a List of them can be moved whole)"
+        }
         if {[MentionsTrait $t]} {
             # A container of trait values would have to carry arbitrary
             # witnesses: there is no erased/heterogeneous trait
@@ -284,18 +297,169 @@ proc hir::types::IsSpecific {type} {
 # Coroutine handles (COROUTINES.md; the header's {coroutine ...} form)
 
 proc hir::types::IsCoroutine {type} {
-    return [expr {[lindex $type 0] eq "coroutine" && [llength $type] == 4}]
+    return [expr {[lindex $type 0] eq "coroutine" && [llength $type] == 2}]
 }
 
-# The handle type of a coroutine resumed with RESUME (unit or a named struct
-# type), whose segments end with values of OUTWARD or one of ERRORS.
+# The canonical coroutine handle type with the callable contract ARGTYPES
+# (the resume messages: {} or one named struct type), RESULT (what each
+# resume returns) and ERRORS (canonicalized here), nested DEPTH aggregate
+# forms deep. The parallel of MakeFn: the same three named fields in the same
+# canonical order, so that one contract text means the same thing for both
+# callable kinds. Unlike a Fn, a coroutine type is never cut by the aggregate
+# bound (an affine value must never be erased to an unrestricted one); only
+# its result is bounded, like a Fn's.
+proc hir::types::MakeCoroutineType {argTypes result errors {depth 0}} {
+    set argTypes [lmap a $argTypes {canonical $a}]
+    set result [Bound [canonical $result] [expr {$depth + 1}]]
+    return [list coroutine [dict create args $argTypes return $result errors [lsort -unique $errors]]]
+}
+
+# The handle type of a coroutine resumed with RESUME (unit: no message; a
+# named struct type: one message of it; any: a protocol conflict, already
+# diagnosed, whose resumes are not checked again), whose segments end with
+# values of OUTWARD or one of ERRORS.
 proc hir::types::MakeCoroutine {resume outward errors} {
-    return [list coroutine $resume $outward [lsort -unique $errors]]
+    return [MakeCoroutineType [expr {$resume eq "unit" ? {} : [list $resume]}] $outward $errors]
 }
 
-proc hir::types::CoroutineResume {type}  { return [lindex $type 1] }
-proc hir::types::CoroutineOutward {type} { return [lindex $type 2] }
-proc hir::types::CoroutineErrors {type}  { return [lindex $type 3] }
+# The resume protocol of coroutine type TYPE: unit, a named struct type, or
+# any (MakeCoroutine).
+proc hir::types::CoroutineResume {type} {
+    set args [dict get [lindex $type 1] args]
+    return [expr {[llength $args] == 0 ? "unit" : [lindex $args 0]}]
+}
+proc hir::types::CoroutineOutward {type} { return [dict get [lindex $type 1] return] }
+proc hir::types::CoroutineErrors {type}  { return [dict get [lindex $type 1] errors] }
+
+# ---------------------------------------------------------------------------
+# Callable contracts and kinds (AFFINE-VALUES.md)
+#
+# A *callable contract* is what calling a value is allowed to do: {args {T1
+# ...} return R errors {E1 ...}}. Every callable type has one: a structural
+# Fn and a coroutine handle carry theirs as their second element (one
+# representation, compared field by field by the same FnMismatch rules), an
+# exact native or block has its structuralOf contract. The *callable kind*
+# is what a call means -- independent of the contract:
+#
+#   exact      an exact native or block: a direct call of known code
+#   fn         a structural function value: an ordinary indirect call
+#   coroutine  a coroutine handle: a resume of its one evolving execution
+#
+# Call checking (arity, argument admissibility, result typing, declared-
+# error charging) reads the contract only; lowering dispatches by the kind.
+
+# The callable kind of TYPE (exact, fn, coroutine), or "" if it is not
+# statically known to be callable.
+proc hir::types::CallableKind {type} {
+    if {[IsCoroutine $type]} {
+        return coroutine
+    }
+    if {[IsFn $type]} {
+        return fn
+    }
+    if {[IsExactBlock $type] || [IsExactNative $type]} {
+        return exact
+    }
+    return ""
+}
+
+# The callable contract dict of TYPE, or "" (not callable, or a native of
+# variable arity).
+proc hir::types::Contract {type} {
+    if {[IsCoroutine $type] || [IsFn $type]} {
+        return [lindex $type 1]
+    }
+    set s [structuralOf $type]
+    return [expr {$s eq "" ? "" : [lindex $s 1]}]
+}
+
+# ---------------------------------------------------------------------------
+# Affinity (AFFINE-VALUES.md)
+#
+# Affinity is a property of a value's type, orthogonal to callability:
+#
+#   unrestricted  ordinary operations may duplicate or alias the value
+#   affine        ordinary operations preserve at most one usable owner:
+#                 binding, passing, returning, storing in an aggregate or a
+#                 container *move* it, never copy it
+#
+# It is compositional: a value that owns an affine value is affine. The one
+# primitive affine root today is the coroutine handle; a struct (named or
+# anonymous) is affine iff a field type is, a List (and, for completeness,
+# an ImmutableSet or MutableArray, which reject affine elements elsewhere)
+# iff its element type is, a trait view iff its concrete witness is.
+# Functions, scalars and `any` are unrestricted -- a closure cannot capture
+# an affine value (AFFINE-CAPTURE-UNSUPPORTED), and `any` never holds one
+# (AFFINE-ERASURE-UNSUPPORTED). A future affine root (a file, a socket, a
+# stateful closure) is one more case in AffineRoot; every ownership analysis
+# consumes only this query.
+
+# affine or unrestricted.
+proc hir::types::Affinity {type} {
+    return [expr {[IsAffine $type] ? "affine" : "unrestricted"}]
+}
+
+# 1 if TYPE is an intrinsically affine root type (no component makes it so).
+proc hir::types::AffineRoot {type} {
+    return [expr {[IsCoroutine $type] || $type eq "coroutine"}]
+}
+
+# 1 if any of TYPES is affine.
+proc hir::types::AnyAffine {types} {
+    foreach t $types {
+        if {[IsAffine $t]} {
+            return 1
+        }
+    }
+    return 0
+}
+
+# 1 if TYPE is affine (Affinity).
+proc hir::types::IsAffine {type {seen {}}} {
+    if {[llength $type] < 2} {
+        return [AffineRoot $type]
+    }
+    switch -- [lindex $type 0] {
+        coroutine {
+            return 1
+        }
+        list {
+            if {[IsAffine [lindex $type 1] $seen]} {
+                return 1
+            }
+            if {[llength $type] == 3} {
+                foreach p [lindex $type 2] {
+                    if {[IsAffine $p $seen]} {
+                        return 1
+                    }
+                }
+            }
+            return 0
+        }
+        immutableSet - mutarray {
+            return [IsAffine [lindex $type 1] $seen]
+        }
+        struct {
+            foreach {name t} [lindex $type 1] {
+                if {[IsAffine $t $seen]} {
+                    return 1
+                }
+            }
+            return 0
+        }
+        nstruct {
+            return [hir::structs::IsAffine [lindex $type 1] $seen]
+        }
+        trait {
+            set w [lindex $type 2]
+            if {$w eq "" || [IsAbstractWitness $w] || [IsJoinWitness $w]} {
+                return 0
+            }
+            return [IsAffine $w $seen]
+        }
+    }
+    return 0
+}
 
 # ---------------------------------------------------------------------------
 # Trait types (TRAITS.md; the header's {trait ID} and {trait ID WITNESS})
@@ -445,7 +609,8 @@ proc hir::types::IsStructLike {type} {
 # hir::types::Struct) is recorded as `any`.
 proc hir::types::MakeStruct {fields depth} {
     variable aggregateDepth
-    if {$depth >= $aggregateDepth} {
+    if {$depth >= $aggregateDepth && ![AnyAffine [dict values $fields]]} {
+        # (Never cut when a field is affine: AFFINE-VALUES.md.)
         return struct
     }
     set inner [expr {$depth + 1}]
@@ -701,7 +866,11 @@ proc hir::types::FnMismatch {a b} {
     }
     set i 0
     foreach x $aa y $ba {
-        if {![Admits $x $y]} {
+        if {![Admits $x $y] || ([IsAffine $y] && ![IsAffine $x])} {
+            # (An argument the contract may pass affine must be received by
+            # a parameter that owns it: an `any` or untyped parameter of a
+            # function value has no specialization to carry ownership,
+            # AFFINE-VALUES.md.)
             return [list arg $i]
         }
         incr i
@@ -719,6 +888,15 @@ proc hir::types::FnMismatch {a b} {
         return [list errors {*}$extra]
     }
     return ""
+}
+
+# Why coroutine handle type A is not usable where coroutine handle type B is
+# expected, or "": FnMismatch's answer for their callable contracts -- the
+# same arity, argument (contravariant), return (covariant) and error-subset
+# rules a structural Fn obeys. Coroutine lifecycle adds no variance rule: a
+# resume is a call with the contract's arguments, result and errors.
+proc hir::types::CoroutineMismatch {a b} {
+    return [FnMismatch [list fn [lindex $a 1]] [list fn [lindex $b 1]]]
 }
 
 # The greatest lower bound of argument types A and B in the representable
@@ -790,6 +968,37 @@ proc hir::types::explainMismatch {actual expected} {
         return ""
     }
     set s [structuralOf $actual]
+    if {[IsCoroutine $actual] && [IsFn $expected]} {
+        return "a coroutine handle is not a function value: Coroutine and Fn are distinct callable kinds, even with the same contract"
+    }
+    if {[IsCoroutine $expected]} {
+        if {![IsCoroutine $actual]} {
+            return "only a coroutine handle is a Coroutine: a function value is not one, even with the same contract (Fn and Coroutine are distinct callable kinds)"
+        }
+        # The same contract rules as a Fn's (CoroutineMismatch), worded for
+        # a resume.
+        set s [list fn [lindex $actual 1]]
+        set expected [list fn [lindex $expected 1]]
+        set why [FnMismatch $s $expected]
+        switch -- [lindex $why 0] {
+            arity {
+                return "resume protocol mismatch: the coroutine takes [lindex $why 1] message(s), the type [lindex $why 2]"
+            }
+            arg {
+                return [format {message type mismatch: the coroutine is resumed with %s, the type with %s} \
+                    [show [lindex [FnArgs $s] 0]] [show [lindex [FnArgs $expected] 0]]]
+            }
+            return {
+                return [format {return incompatible: each resume returns %s, not usable as %s} \
+                    [show [FnReturn $s]] [show [FnReturn $expected]]]
+            }
+            errors {
+                return [format {error set incompatible: a resume may raise %s, but the type allows only [%s]} \
+                    [join [lrange $why 1 end] {, }] [join [FnErrors $expected] {, }]]
+            }
+        }
+        return ""
+    }
     if {$s eq ""} {
         if {[IsExactNative $actual]} {
             return "native [lindex $actual 1] takes a variable number of arguments, so it has no function type"
@@ -894,7 +1103,9 @@ proc hir::types::canonical {type} {
 proc hir::types::MakeList {elem {positions {}} {shaped 0} {depth 0}} {
     variable aggregateDepth
     variable shapeLength
-    if {$depth >= $aggregateDepth} {
+    if {$depth >= $aggregateDepth && ![IsAffine $elem] && ![AnyAffine $positions]} {
+        # (An affine element is never cut: the bare kind would erase the
+        # ownership it carries -- AFFINE-VALUES.md.)
         return list
     }
     set inner [expr {$depth + 1}]
@@ -962,6 +1173,12 @@ proc hir::types::Bound {type depth} {
         # over-approximation, unlike cutting one of its (contravariant)
         # argument types would be (MakeFn).
         return [MakeFn [FnArgs $type] [FnReturn $type] [FnErrors $type] $depth]
+    }
+    if {[IsCoroutine $type]} {
+        # Never cut (an affine value is never erased): only its result is
+        # bounded (MakeCoroutineType).
+        return [MakeCoroutineType [dict get [lindex $type 1] args] [CoroutineOutward $type] \
+            [CoroutineErrors $type] $depth]
     }
     return $type
 }
@@ -1060,6 +1277,13 @@ proc hir::types::subtype {a b} {
         # unrelated types to a trait they happen to satisfy.
         return [expr {[IsView $a] && [ViewTrait $a] eq [lindex $b 1] && ![IsJoinWitness [ViewWitness $a]]}]
     }
+    if {[IsCoroutine $b]} {
+        # A coroutine handle type (AFFINE-VALUES.md): only another coroutine
+        # handle, whose callable contract is compatible by the very rules a
+        # Fn's is (CoroutineMismatch). Never a Fn or an exact function: the
+        # callable *kind* is part of the type, the contract is shared.
+        return [expr {[IsCoroutine $a] && [CoroutineMismatch $a $b] eq ""}]
+    }
     if {[IsFn $b]} {
         # A structural function type: any callable whose own call contract
         # is compatible with B's (an exact native/block through its
@@ -1146,6 +1370,16 @@ proc hir::types::lub {a b} {
         # invent element-lub for sets merely because List has one.
         return immutableSet
     }
+    if {[IsCoroutine $a] && [IsCoroutine $b]} {
+        # Two coroutine handle types: the narrowest common contract (the
+        # Fn rules, FnLub), still a coroutine; none representable is any --
+        # which no affine value may flow into (AFFINE-ERASURE-UNSUPPORTED).
+        set joined [FnLub [list fn [lindex $a 1]] [list fn [lindex $b 1]]]
+        if {$joined ne ""} {
+            return [canonical [list coroutine [lindex $joined 1]]]
+        }
+        return any
+    }
     if {[IsCallable $a] && [IsCallable $b]} {
         # Two different callables (exact or structural): their narrowest
         # common call contract -- forgetting only which code runs, never
@@ -1211,10 +1445,10 @@ proc hir::types::narrow {current fact} {
         # (legal callers already proved it).
         return [expr {[IsMutArray $current] ? $current : $fact}]
     }
-    if {[IsFn $fact] || [IsStructLike $fact]} {
-        # A structural contract fact (a function contract, a struct type): a
-        # value already known to satisfy it (a narrower contract, the same
-        # struct) says more.
+    if {[IsFn $fact] || [IsStructLike $fact] || [IsCoroutine $fact]} {
+        # A structural contract fact (a function contract, a struct type, a
+        # coroutine handle's contract): a value already known to satisfy it
+        # (a narrower contract, the same struct) says more.
         return [expr {[subtype $current $fact] ? $current : $fact}]
     }
     if {[IsFn $current] && $fact in {block native}} {
@@ -1363,10 +1597,12 @@ proc hir::types::show {type} {
                 return [lindex $type 1]
             }
             coroutine {
-                # Not a source type: a notation in the shape of Fn{...}, so
-                # HIR text can state and read back a handle's protocol.
-                return [format {Coroutine{resume: %s, yield: %s, errors: [%s]}} \
-                    [show [lindex $type 1]] [show [lindex $type 2]] [join [lindex $type 3] {, }]]
+                # The source notation of a coroutine handle type, field for
+                # field the one Fn{...} uses (AFFINE-VALUES.md).
+                set fields [lindex $type 1]
+                return [format {Coroutine{args: [%s], return: %s, errors: [%s]}} \
+                    [join [lmap t [dict get $fields args] {show $t}] {, }] \
+                    [show [dict get $fields return]] [join [dict get $fields errors] {, }]]
             }
             immutableSet {
                 # Same convention as List[T] above: the canonical applied-
@@ -2454,7 +2690,22 @@ proc hir::types::Call {hirVar ctxVar e} {
         } elseif {$spec} {
             set dead 1
         }
-    } elseif {$spec && [kindOf $calleeType] ni {"" block native}} {
+    } elseif {[IsCoroutine $calleeType]} {
+        # A call of a coroutine handle (AFFINE-VALUES.md): the coroutine
+        # callable kind -- a resume of its one execution -- typed from the
+        # same callable contract a structural Fn has: what each resume
+        # returns, and (calleeErrors below) which declared errors may cross
+        # it. Its messages are held to the contract's arguments by the same
+        # check (hir::range::VerifyStructuralCall), and it lowers to the
+        # coroutine resume (hir::coroutines::ElaborateResumes), never to a
+        # call of a function value.
+        set protocol [CoroutineResume $calleeType]
+        if {$protocol eq "any" || [llength [dict get [lindex $calleeType 1] args]] == [llength $argExprs]} {
+            set result [CoroutineOutward $calleeType]
+        } elseif {$spec} {
+            set dead 1
+        }
+    } elseif {$spec && [kindOf $calleeType] ni {"" block native coroutine}} {
         # Not callable: the call always raises NOT-CALLABLE.
         set dead 1
     }
@@ -2486,11 +2737,12 @@ proc hir::types::Call {hirVar ctxVar e} {
                 && [IsCoroutine [lindex $argTypes 0]]} {
             set calleeErrors [CoroutineErrors [lindex $argTypes 0]]
         }
-    } elseif {[IsFn $calleeType]} {
-        # A structural callee's declared error contract: every error it
-        # permits may escape this call, since which implementation runs
-        # (and so any narrower proof about it) is unknown here.
-        set calleeErrors [FnErrors $calleeType]
+    } elseif {[IsFn $calleeType] || [IsCoroutine $calleeType]} {
+        # A structural callee's declared error contract (a Fn's, or a
+        # coroutine handle's: the errors a segment may end with): every
+        # error it permits may escape this call, since which implementation
+        # runs (and so any narrower proof about it) is unknown here.
+        set calleeErrors [dict get [Contract $calleeType] errors]
     }
     dict set hir exprs $e calleeErrors $calleeErrors
     if {!$dead && [lindex $target 0] eq "block"} {

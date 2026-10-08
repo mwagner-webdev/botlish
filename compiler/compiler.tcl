@@ -90,6 +90,9 @@ namespace eval core::compiler {
     variable hir {}
     variable pending {}
     variable bindLog {}
+    # ExprId -> 1: the construction operands a release names as pending
+    # temporaries (hir::affine::temporaries, AFFINE-VALUES.md).
+    variable temps {}
     # Block ExprId -> proc name.
     variable blockProcs [dict create]
     # The currently executing unit's own program/module frame (its own
@@ -588,6 +591,9 @@ proc core::compiler::GenerateUnit {mode exprs {unitHir ""}} {
     variable envless
     variable selfTailCalls
     variable refining
+    variable temps
+    # The construction operands a release names (hir::affine::temporaries).
+    set temps [hir::affine::temporaries $hir]
     set envless {}
     set selfTailCalls {}
     set refining [RefiningConditions]
@@ -753,28 +759,62 @@ proc core::compiler::CompileSequence {ctxVar exprs} {
             # The rest of the sequence cannot run.
             break
         }
-        # The coroutines whose handles are dead after this statement
-        # (COROUTINES.md, "Release at the last use"). The statement's value
-        # is already computed: it stays the sequence's value.
-        foreach b [hir::coroutines::releasesAfter $hir $e] {
-            CompileRelease ctx $b
+        # The affine values dead after this statement (AFFINE-VALUES.md;
+        # COROUTINES.md, "Release at the last use"), its own discarded value
+        # included. The statement's value is already computed: it stays the
+        # sequence's value.
+        foreach item [hir::affine::releasesAfter $hir $e] {
+            CompileRelease ctx $item [expr {$item eq $e ? $result : ""}]
         }
     }
     return $result
 }
 
-# Releases the coroutine held by local handle binding B of the code being
-# compiled (core::coroutines::releaseImpl).
-proc core::compiler::CompileRelease {ctxVar b} {
+# Releases what release item ITEM of the code being compiled holds
+# (hir::affine::DropPlan): a local binding's value, a pending temporary's
+# (the operand its construction recorded, ctx `temps`), or -- OP given --
+# that operand's value (a statement's own discarded value).
+proc core::compiler::CompileRelease {ctxVar item {op ""}} {
     upvar 1 $ctxVar ctx
-    set name [B $b name]
-    set scope [dict get $ctx scopes [B $b scope]]
-    if {[dict get $scope materialized]} {
-        Emit ctx "core::coroutines::releaseImpl \[core::env::lookupLocal \$[dict get $scope frame] [Word $name]\]"
+    variable hir
+    set plan [hir::affine::DropPlan $hir $item]
+    if {$plan eq ""} {
         return
     }
-    lassign [dict get $scope locals $b] repr word
-    Emit ctx "core::coroutines::releaseImpl [BoxWord [Op $repr $word any]]"
+    if {$op ne ""} {
+        set word [BoxWord $op]
+    } elseif {[string match e* $item]} {
+        if {![dict exists $ctx temps $item]} {
+            # Not evaluated on this path: nothing to release.
+            return
+        }
+        set word [BoxWord [dict get $ctx temps $item]]
+    } else {
+        set b $item
+        set name [B $b name]
+        set scope [dict get $ctx scopes [B $b scope]]
+        if {[dict get $scope materialized]} {
+            set word "\[core::env::lookupLocal \$[dict get $scope frame] [Word $name]\]"
+        } else {
+            lassign [dict get $scope locals $b] repr local
+            set word [BoxWord [Op $repr $local any]]
+        }
+    }
+    if {[lindex $plan 0] eq "coroutine"} {
+        Emit ctx "core::coroutines::releaseImpl $word"
+    } else {
+        Emit ctx "core::affine::dropImpl $word [Word [core::value::str [lindex $plan 1]]]"
+    }
+}
+
+# Records OP, the operand of construction operand E, when a release names E
+# as a pending temporary (hir::affine::temporaries): CompileRelease reads it.
+proc core::compiler::NoteTemp {ctxVar e op} {
+    upvar 1 $ctxVar ctx
+    variable temps
+    if {[dict exists $temps $e]} {
+        dict set ctx temps $e $op
+    }
 }
 
 proc core::compiler::CompileExpr {ctxVar e} {
@@ -792,10 +832,11 @@ proc core::compiler::CompileForm {ctxVar e} {
     # The coroutines an exit statement takes out of scope (COROUTINES.md,
     # "Release on every early exit"): released before its value, or, those
     # the value refers to, after it.
-    lassign [hir::coroutines::releasesOnExit $hir $e] before after
+    lassign [hir::affine::releasesOnExit $hir $e] before after
     foreach b $before {
         CompileRelease ctx $b
     }
+
     switch -- [Kind $e] {
         const {
             set value [N $e value]
@@ -915,7 +956,7 @@ proc core::compiler::CompileForm {ctxVar e} {
 
 # The operand of call E compiled by COMPILE (a script evaluated in the
 # caller), releasing the coroutines whose handles a declared error the call
-# propagates takes out of scope (hir::coroutines::releasesOnError): the
+# propagates takes out of scope (hir::affine::releasesOnError): the
 # call's code runs in a `catch`; a propagate-error completion (code 5) of
 # such an error releases them, and every abrupt completion goes on unchanged
 # (`return -options`, CompileHandle's technique). The value is computed
@@ -923,7 +964,7 @@ proc core::compiler::CompileForm {ctxVar e} {
 proc core::compiler::ReleasingOnError {ctxVar e compile} {
     upvar 1 $ctxVar ctx
     variable hir
-    set byName [hir::coroutines::releasesOnError $hir $e]
+    set byName [hir::affine::releasesOnError $hir $e]
     if {$byName eq ""} {
         return [uplevel 1 $compile]
     }
@@ -957,7 +998,7 @@ proc core::compiler::ReleasingOnError {ctxVar e compile} {
 }
 
 # In code where the Tcl completion STVAR/RESVAR of a call is abrupt: releases
-# the coroutines of BYNAME (hir::coroutines::releasesOnError) when it is the
+# the coroutines of BYNAME (hir::affine::releasesOnError) when it is the
 # propagate-error of one of its names.
 proc core::compiler::ReleaseOnErrorCode {ctxVar byName stVar resVar} {
     upvar 1 $ctxVar ctx
@@ -992,6 +1033,7 @@ proc core::compiler::CompileStruct {ctxVar e} {
         if {[OpType $op] eq "never"} {
             return $op
         }
+        NoteTemp ctx $field $op
         lappend ops $op
     }
     set head {}
@@ -1128,6 +1170,7 @@ proc core::compiler::CompileCall {ctxVar e {calleeVar ""} {argsVar ""}} {
         if {[OpType $op] eq "never"} {
             return $op
         }
+        NoteTemp ctx $arg $op
         lappend argOps $op
     }
 
@@ -1845,7 +1888,7 @@ proc core::compiler::CompileHandle {ctxVar e} {
         Emit ctx "\}"
     }
     variable hir
-    dict for {name bindings} [hir::coroutines::releasesOnError $hir $e] {
+    dict for {name bindings} [hir::affine::releasesOnError $hir $e] {
         # A declared error the handlers do not handle, leaving the scope of
         # coroutine handles (COROUTINES.md): released on its way out.
         Emit ctx "[Word $name] \{"

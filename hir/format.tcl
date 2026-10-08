@@ -226,36 +226,50 @@ proc hir::format::Line {hir e text indent origins linesVar {typed 1}} {
                     lappend flags deferred
                 }
             }
+            if {[hir::affine::isMove $hir $e]} {
+                # A move of an affine value (AFFINE-VALUES.md): the
+                # referenced binding is dead from here, its value owned by
+                # whatever this reference flows into.
+                lappend flags move
+            }
         }
         bind {
             if {[dict get $node duplicate]} {
                 lappend flags duplicate
             }
-            if {[dict exists $hir coroutines moves $e] || [dict exists $node coroutineMove]} {
-                # The move of a coroutine handle to a new owner
-                # (COROUTINES.md): the bound-from binding is dead from here.
+            if {[hir::affine::isMoveBind $hir $e]} {
+                # The move of an affine value to a new binding: the
+                # bound-from binding is dead from here.
                 lappend flags move
+            }
+            set consumed [hir::affine::ConsumedFields $hir [dict get $node binding]]
+            if {$consumed ne {} && [dict get $node binding] ne ""} {
+                # A destructuring's temporary: the affine fields moved out of
+                # it (its release drops only the others).
+                lappend flags "consumed=[join [lsort $consumed] ,]"
             }
         }
     }
     if {![dict get $node reachable]} {
         lappend flags unreachable
     }
-    set releases [hir::coroutines::releasesAfter $hir $e]
+    set releases [hir::affine::releasesAfter $hir $e]
     if {$releases ne ""} {
-        # The coroutines released after this statement: their handles are
-        # dead from here (COROUTINES.md, "Release at the last use").
+        # The affine values released after this statement (AFFINE-VALUES.md,
+        # COROUTINES.md "Release at the last use"): bindings dead from here,
+        # or the statement's own discarded value (its ExprId).
         lappend flags "release=[join $releases ,]"
     }
-    set exiting [concat {*}[hir::coroutines::releasesOnExit $hir $e]]
+    set exiting [concat {*}[hir::affine::releasesOnExit $hir $e]]
     if {$exiting ne ""} {
-        # The coroutines this exit (return, break, continue, fail) releases
-        # as it leaves their handles' scope.
+        # The affine values this exit (return, break, continue, fail)
+        # releases as it leaves their owners' scope, or abandons as pending
+        # temporaries.
         lappend flags "exit-release=[join [lsort -dictionary $exiting] ,]"
     }
-    set failing [hir::coroutines::releasesOnError $hir $e]
+    set failing [hir::affine::releasesOnError $hir $e]
     if {$failing ne ""} {
-        # The coroutines released when this call propagates a declared
+        # The affine values released when this call propagates a declared
         # error, per error name.
         lappend flags "error-release=[join [lmap {name bs} $failing {string cat $name = [join $bs ,]}] {;}]"
     }
