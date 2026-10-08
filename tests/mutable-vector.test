@@ -331,6 +331,15 @@ test mv-affine-swap-failure {items 28, 59: a failed swap leaves the vector uncha
         [mvCode "${mvDecls}fn f() -> int:\n    q = mutable_vector::from_list(\[make(1)\])\n    coroutine {step} = worker(3)\n    old = q.swap(999, step):\n        on IndexNotFound:\n            make(4)\n    e = step(Command {value: 1})\n    1\nf()\n"]
 } -cleanup {unset -nocomplain text} -result {{value 52} {{value 52} 4 1 {3 4 1 2}} USE-AFTER-MOVE}
 
+test mv-affine-native-releases {items 28, 30, 60: natively too, a clear releases every element at once and a failed swap the replacement it was given: every coroutine created is released by the static drops, none left to the collector} -constraints linuxX86_64 -body {
+    set clear "${mvDecls}fn f() -> int:\n    q = mutable_vector::from_list(\[make(1), make(2), make(3)\])\n    q.clear()\n    keep = make(4)\n    q.push(keep)\n    q.length()\nf()\n"
+    set swap "${mvDecls}fn f() -> int:\n    q = mutable_vector::from_list(\[make(1), make(2)\])\n    coroutine {step} = worker(3)\n    old = q.swap(999, step):\n        on IndexNotFound:\n            make(4)\n    e = old(Command {value: 1})\n    e.value * 10 + q.length()\nf()\n"
+    lmap text [list $clear $swap] {
+        set co [lindex [mvNative $text] 0]
+        list [dict get $co released] [dict get $co sweptSuspended]
+    }
+} -cleanup {unset -nocomplain clear swap text co} -result {{4 0} {4 0}}
+
 test mv-affine-swap-discarded {item 29: a swap in statement position releases the displaced element right after the statement} -body {
     mvReleases "${mvDecls}fn f() -> int:\n    q = mutable_vector::from_list(\[make(1), make(2)\])\n    q.swap(0, make(3)):\n        on IndexNotFound:\n            make(4)\n    q.length()\nf()\n"
 } -result {{value 2} 3 1 {1 3 2}}
