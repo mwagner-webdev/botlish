@@ -113,6 +113,23 @@ test alloc-sites-1 {two source expressions of the same kind are distinct sites} 
     list [llength $lines] [expr {[lindex $lines 0] != [lindex $lines 1]}]
 } -result {2 1}
 
+test alloc-text-wide-1 {allocationText renders counters of 2^31 and more exactly, and ranks sites whose byte counts differ by more than 2^31 (the report's counters are 64-bit; Tcl's %d and an lsort -command difference are not)} -body {
+    set text "import str\nfn f():\n    a = str::concat(\"a\", \"b\")\n    b = str::concat(\"c\", \"d\")\n    \[a, b\]\n\nf()"
+    set report [native::allocationReport [sourceHir $text] sites 1 -virtual-construction-opt 0]
+    dict set report byKind String allocations 3000000000
+    set sites [lmap s [dict get $report sites] {
+        dict set s allocations 3000000001
+        dict set s allocatedBytes 10
+    }]
+    lset sites end [dict replace [lindex $sites end] allocatedBytes 6000000000]
+    dict set report sites $sites
+    set out [native::allocationText $report]
+    regexp -line {^\s+1\. .*$} $out first
+    list [regexp -line {^\s+String\s+3000000000\s} $out] [regexp {3000000001 allocations  6000\.0 MB$} $first] \
+        [expr {[regexp -all {3000000001 allocations} $out] == min(10, [llength $sites])}] \
+        [string first - [regexp -inline -all {\d+ allocations} $out]]
+} -result {1 1 1 -1}
+
 test alloc-sites-2 {sites resolve to the compiling file} -body {
     set report [native::allocationReport [sourceHir {import str
 str::concat("a", "b")}] sites]

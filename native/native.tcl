@@ -648,7 +648,8 @@ proc native::FormatBytes {n} {
 # result). The dict is the canonical representation (tests and tooling read
 # it); this text is derived from it, never the other way around. Shows the
 # top TOPSITES allocation sites by bytes when REPORT has a "sites" list
-# (sites mode).
+# (sites mode). Every counter is a 64-bit count: it is printed with %ld (Tcl's
+# %d truncates to 32 bits) or as a plain value.
 proc native::allocationText {report {topSites 10}} {
     set total [dict get $report total]
     set lines [list "Botlish managed heap allocation report" ""]
@@ -663,7 +664,7 @@ proc native::allocationText {report {topSites 10}} {
     foreach kind {String List MutableArray BigInt Result Block Native} {
         set k [dict get $report byKind $kind]
         if {[dict get $k allocations] == 0} continue
-        lappend lines [format "    %-8s %8d   %s" $kind [dict get $k allocations] [FormatBytes [dict get $k allocatedBytes]]]
+        lappend lines [format "    %-8s %8ld   %s" $kind [dict get $k allocations] [FormatBytes [dict get $k allocatedBytes]]]
     }
     set copies [dict get $report copies]
     lappend lines "" "copies:" "    String       [FormatBytes [dict get $copies stringBytes]]" \
@@ -677,8 +678,13 @@ proc native::allocationText {report {topSites 10}} {
         "    [dict get $static allocations] objects, [FormatBytes [dict get $static bytes]]"
     set sites [dict get $report sites]
     if {$sites ne ""} {
+        # The comparator returns a sign, never the difference: lsort
+        # -command needs a 32-bit integer, and two sites' byte counts can
+        # differ by 2 GB or more.
         set bySite [lsort -command {apply {{a b} {
-            expr {[dict get $b allocatedBytes] - [dict get $a allocatedBytes]}
+            set x [dict get $a allocatedBytes]
+            set y [dict get $b allocatedBytes]
+            expr {$y > $x ? 1 : $y < $x ? -1 : 0}
         }}} $sites]
         lappend lines "" "top allocation sites by bytes:"
         set n 0
@@ -686,7 +692,7 @@ proc native::allocationText {report {topSites 10}} {
             if {[incr n] > $topSites} break
             set loc [dict get $s location]
             set where [expr {[dict exists $loc file] ? "[dict get $loc file]:[dict get $loc line]" : "func [dict get $s func]"}]
-            lappend lines [format "    %2d. %-32s %-12s %8d allocations  %s" \
+            lappend lines [format "    %2d. %-32s %-12s %8ld allocations  %s" \
                 $n $where [dict get $s operation] [dict get $s allocations] [FormatBytes [dict get $s allocatedBytes]]]
         }
     }
