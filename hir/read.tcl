@@ -632,7 +632,8 @@ proc hir::read::TakeExprLine {hirVar level} {
         set tail [lrange $tail 0 $at-1]
     }
     set found {}
-    while {[llength $tail] > 1 && [lindex $tail end] in $flags} {
+    while {[llength $tail] > 1 && ([lindex $tail end] in $flags
+            || [string match release=* [lindex $tail end]])} {
         set found [linsert $found 0 [lindex $tail end]]
         set tail [lrange $tail 0 end-1]
     }
@@ -728,6 +729,12 @@ proc hir::read::Expr {hirVar level s path block} {
     if {"move" in $flags} {
         # A coroutine handle's move (COROUTINES.md), as printed.
         dict set hir exprs $e coroutineMove 1
+    }
+    set release [lsearch -inline -glob $flags release=*]
+    if {$release ne ""} {
+        # The coroutines released after this statement (COROUTINES.md), as
+        # printed.
+        dict set hir exprs $e coroutineRelease [split [string range $release 8 end] ,]
     }
     set inner [expr {$level + 1}]
 

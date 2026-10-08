@@ -30,6 +30,14 @@
 #                             value V; evaluates to the resume message
 #   coroutine::done?(H)       true once H is terminal (completed or failed);
 #                             observes H without moving it
+#   coroutine#release(H)      H's handle is dead (the affine analysis placed
+#                             this call right after its last use,
+#                             hir/coroutines.tcl's Releases): frees what H
+#                             still holds -- a suspended coroutine's Tcl
+#                             coroutine and its frames, a terminal one's
+#                             cached result or error. Unobservable: no code
+#                             can reach H again, and a suspended body never
+#                             runs again either way.
 #
 # start and resume return a *completion* (core::native's -completion): the
 # outward value as a normal completion, or the body's unhandled declared
@@ -46,6 +54,9 @@
 #               by every later resume without running anything
 #   failed      the body's segment ended with an error; `failure` reproduces
 #               it on every later resume without running anything
+#   released    the handle is dead and everything it held is freed; nothing
+#               can reach it (a resume or done? of it is a compiler bug,
+#               COROUTINE-STATE)
 #
 # Implementation: one Tcl coroutine per started Botlish coroutine, created in
 # this file's private namespace (never under a user-visible name). Tcl 9's
@@ -69,10 +80,12 @@ proc core::coroutines::startNative {} { return coroutine#start }
 proc core::coroutines::resumeNative {} { return coroutine#resume }
 proc core::coroutines::yieldNative {} { return coroutine#yield }
 proc core::coroutines::doneNative {} { return coroutine::done? }
+proc core::coroutines::releaseNative {} { return coroutine#release }
 
 # The coroutine natives, for the analyses that recognize them by identity.
 proc core::coroutines::natives {} {
-    return [list coroutine#create coroutine#start coroutine#resume coroutine#yield coroutine::done?]
+    return [list coroutine#create coroutine#start coroutine#resume coroutine#yield coroutine::done? \
+        coroutine#release]
 }
 
 proc core::coroutines::Entry {handle} {
@@ -141,6 +154,10 @@ proc core::coroutines::resumeImpl {handle args} {
             core::semanticError COROUTINE-RUNNING \
                 "coroutine $id is already running: a coroutine cannot resume itself"
         }
+        released {
+            core::semanticError COROUTINE-STATE \
+                "coroutine $id was released after its handle's last use: nothing can resume it (a compiler bug)"
+        }
         default {
             core::semanticError COROUTINE-STATE "coroutine $id was never started"
         }
@@ -197,13 +214,70 @@ proc core::coroutines::yieldImpl {value} {
         core::semanticError YIELD-OUTSIDE-COROUTINE \
             "yield outside a coroutine: no coroutine is running here"
     }
-    return [yield [list yielded $value]]
+    set message [yield [list yielded $value]]
+    if {$message eq [ReleaseMarker]} {
+        # Released while suspended here (releaseImpl): unwind the whole
+        # suspended stack. A Tcl error passes every Botlish handler (they
+        # handle declared errors, a propagate-error completion, only), and
+        # the frames' own `finally` clauses release their environments.
+        return -code error -errorcode {CORE COROUTINE RELEASED} "coroutine released"
+    }
+    return $message
+}
+
+# What a release resumes a suspended Tcl coroutine with: never a Botlish
+# value (every value is a kind-tagged list, and no kind is spelled so).
+proc core::coroutines::ReleaseMarker {} {
+    return {coroutine#released}
 }
 
 proc core::coroutines::doneImpl {handle} {
     variable store
     set id [Entry $handle]
-    return [core::value::bool [expr {[dict get $store $id state] in {completed failed}}]]
+    switch -- [dict get $store $id state] {
+        completed - failed { return [core::value::bool 1] }
+        released {
+            core::semanticError COROUTINE-STATE \
+                "coroutine $id was released after its handle's last use: nothing can observe it (a compiler bug)"
+        }
+    }
+    return [core::value::bool 0]
+}
+
+# Releases coroutine HANDLE, whose handle is dead (hir/coroutines.tcl's
+# Releases put this call after its last use): a suspended coroutine is
+# unwound -- its pending yield raises, so its Botlish frames end through their
+# `finally` clauses and its Tcl coroutine ends -- and every entry drops what
+# it holds. Nothing observable: no Botlish code runs on the way out (a
+# handler only handles declared errors), and nothing can reach the handle
+# again.
+proc core::coroutines::releaseImpl {handle} {
+    variable store
+    variable running
+    set id [Entry $handle]
+    switch -- [dict get $store $id state] {
+        suspended {
+            set continuation [dict get $store $id continuation]
+            dict set store $id state running
+            lappend running $id
+            try {
+                catch {$continuation [ReleaseMarker]}
+            } finally {
+                set running [lrange $running 0 end-1]
+            }
+            if {[info commands $continuation] ne ""} {
+                rename $continuation {}
+            }
+        }
+        running - released {
+            # Released already (by another owner, in a branch: the compiler's
+            # releases are idempotent), or -- defensive -- running: a dead
+            # handle is never one of the running chain.
+            return [core::value::unit]
+        }
+    }
+    dict set store $id [dict create state released thunk {}]
+    return [core::value::unit]
 }
 
 # Runs SCRIPT (in the caller's scope) with an empty coroutine store, then
@@ -239,3 +313,5 @@ core::native::register coroutine#yield -arity 1 -impl core::coroutines::yieldImp
     -result-shape {coroutine-yield}
 core::native::register coroutine::done? -arity 1 -impl core::coroutines::doneImpl \
     -param-types {coroutine} -result-type bool
+core::native::register coroutine#release -arity 1 -impl core::coroutines::releaseImpl \
+    -param-types {coroutine} -result-type unit

@@ -74,7 +74,7 @@
 //! | rt_stack_overflow      |                     | records NATIVE LIMIT STACK   | no        |
 
 use super::construct::{rt_construct, rt_plan_materialize};
-use super::coroutine::{rt_co_create, rt_co_done, rt_co_resume, rt_co_resume0, rt_co_start, rt_co_yield};
+use super::coroutine::{rt_co_create, rt_co_done, rt_co_release, rt_co_resume, rt_co_resume0, rt_co_start, rt_co_yield};
 use super::error::{semantic_kind, RtError};
 use super::syscall::rt_linux_x86_64_syscall;
 use super::value::*;
@@ -2014,6 +2014,7 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         CoResume0 => rt_co_resume0(p, a[0]),
         CoYield => rt_co_yield(p, a[0]),
         CoDone => rt_co_done(p, a[0]),
+        CoRelease => rt_co_release(p, a[0]),
         RegionCheck | RegionEq | RBox | RUnbox | RIAdd | RISub | RIMul | RILt | RILe | RIGt | RIGe | RIEq
         | RIShr | RIShl | StrToShort | ShortToStr | ShortLen | ShortEq | StrSliceShort | StrToAscii | AsciiToStr
         | AsciiLen | AsciiEq | AsciiToShort | AsciiShortEq
@@ -2128,6 +2129,7 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_co_resume0, 2),
         h!(rt_co_yield, 2),
         h!(rt_co_done, 2),
+        h!(rt_co_release, 2),
     ]
 }
 

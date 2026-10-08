@@ -148,7 +148,8 @@ namespace eval native::lower {
         coroutine#start  {op costart} \
         coroutine#resume {coroutine-resume} \
         coroutine#yield  {op coyield} \
-        coroutine::done? {op codone}]
+        coroutine::done? {op codone} \
+        coroutine#release {op corelease}]
     # State of the program being lowered. hir is the view of the instance
     # being lowered, baseHir the program's semantic HIR.
     variable hir {}
@@ -3240,6 +3241,7 @@ proc native::lower::ScalarLit {fnVar kind text e} {
 
 proc native::lower::Sequence {fnVar exprs} {
     upvar 1 $fnVar fn
+    variable hir
     if {$exprs eq ""} {
         return [Assign fn unit]
     }
@@ -3247,6 +3249,16 @@ proc native::lower::Sequence {fnVar exprs} {
         set result [Expr fn $e]
         if {$result eq "never"} {
             break
+        }
+        # The coroutines whose handles are dead after this statement
+        # (COROUTINES.md, "Release at the last use"); the statement's value
+        # register stays the sequence's value.
+        foreach b [hir::coroutines::releasesAfter $hir $e] {
+            lassign [Access fn $b] how where
+            if {$how ne "reg"} {
+                throw {NATIVE BUG} "native lowering: coroutine handle $b is not in a register"
+            }
+            Assign fn "op corelease $where" $e
         }
     }
     return $result

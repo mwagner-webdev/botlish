@@ -59,6 +59,13 @@
 # (COROUTINE-RESUME-CONFLICT); a root that cannot yield at all is
 # COROUTINE-RHS-NOT-YIELDING.
 #
+# For every accepted program the oracle also predicts where the final owner
+# of the driver's coroutine is released (COROUTINES.md, "Release at the last
+# use"): right after the statement of its last reference, and nowhere else
+# -- no handle it was moved from is released. A release placed too early, of
+# a moved-from handle, or of a handle still in use shows on every backend as
+# a resume of a released coroutine.
+#
 # The last line is "programs N disagreements D"; exit status 1 if D > 0.
 
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
@@ -434,6 +441,11 @@ proc generate {seed} {
         }
     }
     set current $stepName
+    # The statement after which the final owner's coroutine is released
+    # (COROUTINES.md, "Release at the last use"): the statement of its last
+    # reference -- the start, a resume, a done? check, or the move that made
+    # it the owner.
+    set releaseAfter [expr {$firstName ne "" ? "bind $firstName" : ($rootErrors ? "handle" : "call")}]
     set r 0
     set d 0
     set badArity [expr {$fault eq "arity" ? [rnd [expr {max($resumes, 1)}]] + 1 : -1}]
@@ -451,6 +463,7 @@ proc generate {seed} {
                 lappend driver "[lindex $op 1] = $current"
                 set moved $current
                 set current [lindex $op 1]
+                set releaseAfter "bind $current"
             }
             resume {
                 incr r
@@ -467,11 +480,13 @@ proc generate {seed} {
                 }
                 lappend driver "e$r = seen(log)"
                 lappend observed r$r e$r
+                set releaseAfter "bind r$r"
             }
             done {
                 incr d
                 lappend driver "d$d = coroutine::done?($current)"
                 lappend observed d$d
+                set releaseAfter "bind d$d"
             }
         }
     }
@@ -518,7 +533,7 @@ proc generate {seed} {
         set expect [list value [Observe $funcs $levels $arg $ops $resolved $firstName]]
     }
     return [dict create text [join $lines \n] expect $expect mayYield $mayYield \
-        protocol $resolved levels $levels fault $fault]
+        protocol $resolved levels $levels fault $fault owner $current release $releaseAfter]
 }
 
 # ---------------------------------------------------------------------------
@@ -703,6 +718,23 @@ for {set i 0} {$i < $n} {incr i} {
         set protocol [expr {$protocol eq "unit" ? "unit" : [hir::types::show $protocol]}]
         if {$protocol ne [dict get $p protocol]} {
             lappend problems "protocol: oracle [dict get $p protocol], compiler $protocol"
+        }
+        # The final owner is released once, right after its last reference;
+        # every earlier owner was moved, so is not released at all.
+        set released {}
+        dict for {e bs} [dict get $hir coroutines releases] {
+            foreach b $bs {
+                if {[regsub {#[0-9]+$} [dict get $hir bindings $b name] ""] ne [dict get $p owner]} continue
+                set node [dict get $hir exprs $e]
+                set label [dict get $node kind]
+                if {$label eq "bind"} {
+                    append label " [regsub {#[0-9]+$} [dict get $hir bindings [dict get $node binding] name] {}]"
+                }
+                lappend released $label
+            }
+        }
+        if {$released ne [list [dict get $p release]]} {
+            lappend problems "release of [dict get $p owner]: oracle after {[dict get $p release]}, compiler after {[join $released {, }]}"
         }
         foreach backend $backends {
             set outcome [outcomeUnderHir $backend $hir]

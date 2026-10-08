@@ -241,6 +241,12 @@ proc hir::format::Line {hir e text indent origins linesVar {typed 1}} {
     if {![dict get $node reachable]} {
         lappend flags unreachable
     }
+    set releases [hir::coroutines::releasesAfter $hir $e]
+    if {$releases ne ""} {
+        # The coroutines released after this statement: their handles are
+        # dead from here (COROUTINES.md, "Release at the last use").
+        lappend flags "release=[join $releases ,]"
+    }
     if {$flags ne ""} {
         append line " [join $flags { }]"
     }

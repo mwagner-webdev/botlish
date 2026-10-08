@@ -745,6 +745,7 @@ proc core::compiler::CompileBlockBody {outerVar e procName} {
 
 proc core::compiler::CompileSequence {ctxVar exprs} {
     upvar 1 $ctxVar ctx
+    variable hir
     set result [Op box unit unit]
     foreach e $exprs {
         set result [CompileExpr ctx $e]
@@ -752,8 +753,28 @@ proc core::compiler::CompileSequence {ctxVar exprs} {
             # The rest of the sequence cannot run.
             break
         }
+        # The coroutines whose handles are dead after this statement
+        # (COROUTINES.md, "Release at the last use"). The statement's value
+        # is already computed: it stays the sequence's value.
+        foreach b [hir::coroutines::releasesAfter $hir $e] {
+            CompileRelease ctx $b
+        }
     }
     return $result
+}
+
+# Releases the coroutine held by local handle binding B of the code being
+# compiled (core::coroutines::releaseImpl).
+proc core::compiler::CompileRelease {ctxVar b} {
+    upvar 1 $ctxVar ctx
+    set name [B $b name]
+    set scope [dict get $ctx scopes [B $b scope]]
+    if {[dict get $scope materialized]} {
+        Emit ctx "core::coroutines::releaseImpl \[core::env::lookupLocal \$[dict get $scope frame] [Word $name]\]"
+        return
+    }
+    lassign [dict get $scope locals $b] repr word
+    Emit ctx "core::coroutines::releaseImpl [BoxWord [Op $repr $word any]]"
 }
 
 proc core::compiler::CompileExpr {ctxVar e} {

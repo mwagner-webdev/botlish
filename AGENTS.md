@@ -375,10 +375,10 @@ rule). Changing `hir::traits::Plan` also means re-checking the trait mutants
 Coroutines (COROUTINES.md) are eagerly started, affine resumable
 computations: `yield` is a statically tracked deep control effect, and every
 coroutine operation is an internal root native (`coroutine#create`,
-`#start`, `#resume`, `#yield`, and `coroutine::done?`). Ownership is entirely
-static: there is no runtime moved state, no copy, fork or clone operation,
-no iterator protocol, no exhaustion error and no resumable error -- don't add
-any (`tests/coroutines.test`'s `co-source-*` tests pin this). A handle is a
+`#start`, `#resume`, `#yield`, `#release`, and `coroutine::done?`).
+Ownership is entirely static: there is no runtime moved state, no copy, fork
+or clone operation, no iterator protocol, no exhaustion error and no
+resumable error -- don't add any (`tests/coroutines.test`'s `co-source-*` tests pin this). A handle is a
 local binding only: a new place it may live (a List, a struct field, a
 closure capture, an erasing argument) is a deliberate extension of the
 storage frontier (`hir::coroutines::RefRole`), never a side effect.
@@ -386,12 +386,23 @@ Contexts and context traits stay static: a coroutine's providers are the
 ones selected at its construction, and suspension adds no context or trait
 machinery to either runtime.
 
+A coroutine is released right after its handle's last use
+(`hir::coroutines::Releases`, COROUTINES.md "Release at the last use"):
+every backend emits the release after that statement (`hir/lower.tcl`'s
+`Seq`, the Tcl compiler's `CompileSequence`, `native/lower.tcl`'s `Sequence`)
+and keeps the statement's value. A release must stay unobservable -- it
+never runs Botlish code (a released suspended Tcl coroutine is unwound by an
+error no handler catches) and never changes a value -- and must never
+release a coroutine some live binding still owns. Extending it (releases on
+early exits, other affine values) keeps both properties.
+
 If you change the coroutine grammar (`yield`, the coroutine binding, the
 resume clause), `hir/coroutines.tcl` (protocols, the yield effect, the
 affine analysis), how a construction lowers (`surface/lower.tcl`'s
 `CoroutineBind`) or resolves (`hir/resolve.tcl`'s `CoroutineResume`), a
-segment's error facts (`hir/completions.tcl`'s `NativeCallFacts`), the Tcl
-runtime (`core/coroutines.tcl`) or the native one
+segment's error facts (`hir/completions.tcl`'s `NativeCallFacts`), where
+releases go or how they lower, the Tcl runtime (`core/coroutines.tcl`) or the
+native one
 (`native/src/runtime/coroutine.rs`, the GC's walk of suspended and resumer
 stacks in `heap.rs`/`vm.rs`), run `tests/coroutines.test`,
 `audit/coroutines/tools/fuzz.tcl` (several seeds) and

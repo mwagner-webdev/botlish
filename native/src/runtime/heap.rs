@@ -199,6 +199,10 @@ impl Heap {
                     let k = &mut reclaimed_by_kind[header.kind as usize];
                     k.0 += 1;
                     k.1 += size as u64;
+                    if header.kind == KIND_COROUTINE && super::coroutine::coroutine_of(object as Value).stack.is_some() {
+                        // Abandoned suspended, not released at its last use.
+                        metrics.record_coroutine_swept();
+                    }
                 }
                 unsafe { free_object(object) };
                 false

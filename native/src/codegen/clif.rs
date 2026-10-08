@@ -1877,6 +1877,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         CoResume0 => ("rt_co_resume0", None, true, None),
                         CoYield => ("rt_co_yield", None, true, None),
                         CoDone => ("rt_co_done", None, false, None),
+                        CoRelease => ("rt_co_release", None, false, None),
                         // Never fallible (see ops.rs's rt_str_decode_char_at):
                         // a one-character String can never exceed
                         // MAX_COLLECTION_LENGTH. Still routed through

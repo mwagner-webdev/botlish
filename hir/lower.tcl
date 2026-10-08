@@ -38,7 +38,7 @@ namespace eval hir::lower {}
 
 # The core IR program of HIR: a list of expressions.
 proc hir::lower {hir} {
-    return [lmap e [dict get $hir roots] {hir::lower::expr $hir $e}]
+    return [hir::lower::Seq $hir [dict get $hir roots]]
 }
 
 # The core IR node of expression E.
@@ -71,21 +71,21 @@ proc hir::lower::expr {hir e} {
         }
         if {
             return [list if [expr $hir [dict get $node condition]] \
-                [list block {} {*}[Exprs $hir [dict get $node thenBody]]] \
-                [list block {} {*}[Exprs $hir [dict get $node elseBody]]]]
+                [list block {} {*}[Seq $hir [dict get $node thenBody]]] \
+                [list block {} {*}[Seq $hir [dict get $node elseBody]]]]
         }
         loop {
-            return [list loop [list block {} {*}[Exprs $hir [dict get $node body]]]]
+            return [list loop [list block {} {*}[Seq $hir [dict get $node body]]]]
         }
         listloop {
             set elemName [dict get $hir bindings [dict get $node elementBinding] name]
             return [list listloop [expr $hir [dict get $node iterable]] \
-                [list block [list $elemName] {*}[Exprs $hir [dict get $node body]]]]
+                [list block [list $elemName] {*}[Seq $hir [dict get $node body]]]]
         }
         countloop {
             set countName [dict get $hir bindings [dict get $node countBinding] name]
             set lowered [list countloop [expr $hir [dict get $node start]] [expr $hir [dict get $node end]] \
-                [list block [list $countName] {*}[Exprs $hir [dict get $node body]]]]
+                [list block [list $countName] {*}[Seq $hir [dict get $node body]]]]
             if {[dict get $node direction] ne "up" || [dict get $node endKind] ne "exclusive"} {
                 lappend lowered [dict get $node direction] \
                     [::expr {[dict get $node endKind] eq "inclusive" ? "through" : "to"}]
@@ -105,7 +105,7 @@ proc hir::lower::expr {hir e} {
                         [::expr {[dict get $domain endKind] eq "inclusive" ? "through" : "to"}]]
                 }
             }
-            set lowered [list lockloop $domains [list block $names {*}[Exprs $hir [dict get $node body]]]]
+            set lowered [list lockloop $domains [list block $names {*}[Seq $hir [dict get $node body]]]]
             if {[dict exists $node unproven]} {
                 # A -strict 0 program whose lockstep obligation was rejected:
                 # replay the diagnostic at run time instead of ever running
@@ -157,7 +157,7 @@ proc hir::lower::expr {hir e} {
         handle {
             set handlers {}
             foreach name [dict get $node handlerNames] body [dict get $node handlerBodies] {
-                lappend handlers $name [list block {} {*}[Exprs $hir $body]]
+                lappend handlers $name [list block {} {*}[Seq $hir $body]]
             }
             return [list handle [expr $hir [dict get $node call]] {*}$handlers]
         }
@@ -171,7 +171,41 @@ proc hir::lower::params {hir e} {
 
 # Core IR body expressions of block expression E.
 proc hir::lower::body {hir e} {
-    return [Exprs $hir [dict get $hir exprs $e body]]
+    return [Seq $hir [dict get $hir exprs $e body]]
+}
+
+# The core IR of the statement sequence IDS: each statement, followed by the
+# release of the coroutines whose handles are dead after it
+# (hir::coroutines::releasesAfter, COROUTINES.md "Release at the last use").
+# A release after the sequence's last statement keeps that statement's value
+# as the sequence's: `bind T STATEMENT; release...; T` (a binding statement
+# `bind N V` is followed by `ref N` instead).
+proc hir::lower::Seq {hir ids} {
+    set result {}
+    set n [llength $ids]
+    set i 0
+    foreach id $ids {
+        incr i
+        set lowered [expr $hir $id]
+        set releases [hir::coroutines::releasesAfter $hir $id]
+        if {$releases eq ""} {
+            lappend result $lowered
+            continue
+        }
+        set calls [lmap b $releases {
+            list call [list ref [core::coroutines::releaseNative]] [list ref [dict get $hir bindings $b name]]
+        }]
+        if {$i < $n} {
+            lappend result $lowered {*}$calls
+        } elseif {[lindex $lowered 0] eq "bind"} {
+            # A binding statement's value is its bound value: kept by name.
+            lappend result $lowered {*}$calls [list ref [lindex $lowered 1]]
+        } else {
+            set kept "coroutine#kept#$id"
+            lappend result [list bind $kept $lowered] {*}$calls [list ref $kept]
+        }
+    }
+    return $result
 }
 
 proc hir::lower::Exprs {hir ids} {

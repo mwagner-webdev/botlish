@@ -262,8 +262,12 @@ pub enum OpCode {
     /// unit) to the suspended yield; a terminal handle returns its cached
     /// result or raises its cached failure again. `coyield %v`: suspends the
     /// running coroutine with outward value %v; the result is the resume
-    /// message. `codone %h`: Bool, the handle is completed or failed. Every
-    /// one but `codone` is a GC safepoint (op_may_allocate): a segment runs
+    /// message. `codone %h`: Bool, the handle is completed or failed.
+    /// `corelease %h`: %h's handle is dead from here (native/lower.tcl emits
+    /// it after the last use the affine analysis found): frees what the
+    /// coroutine holds, its stack first; result unit, never fails or
+    /// allocates. Every one but `codone` and `corelease` is a GC safepoint
+    /// (op_may_allocate): a segment runs
     /// arbitrary code, and while a coroutine is suspended others run and may
     /// collect, so a call that may suspend must have its roots in a stack map.
     CoCreate,
@@ -272,6 +276,7 @@ pub enum OpCode {
     CoResume0,
     CoYield,
     CoDone,
+    CoRelease,
     /// Tcl 9-compatible Unicode alpha/alnum character classification
     /// (core/tclcompat.tcl's `is_tcl_alpha`/`is_tcl_alnum`): the operand is
     /// a one-Unicode-scalar String (RANGE if not). TEMPORARY compatibility
@@ -468,6 +473,7 @@ impl OpCode {
             "coresume0" => CoResume0,
             "coyield" => CoYield,
             "codone" => CoDone,
+            "corelease" => CoRelease,
             "mbytesnew" => MBytesNew,
             "mbytesfrom" => MBytesFrom,
             "mbyteslen" => MBytesLen,
@@ -519,7 +525,8 @@ impl OpCode {
             | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharCodepoint | SetFromList
             | SetFromListTotal | StrToShort | ShortToStr | ShortLen | StrToAscii | AsciiToStr | AsciiLen
             | AsciiToShort | BytesFromList | BytesLen | BytesAddr | KeepAlive | MBytesNew | MBytesFrom | MBytesLen
-            | MBytesClone | MBytesFreeze | MBytesAddr | CoCreate | CoStart | CoResume0 | CoYield | CoDone => Some(1),
+            | MBytesClone | MBytesFreeze | MBytesAddr | CoCreate | CoStart | CoResume0 | CoYield | CoDone
+            | CoRelease => Some(1),
             Substr | SubstrProven | MutArraySet | MutArraySetProven | MBytesSet | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum | StrSliceShort => Some(3),
             RegionEq => Some(4),
             MutArrayCopy | MutArrayCopyProven => Some(5),

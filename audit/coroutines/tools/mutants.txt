@@ -459,3 +459,95 @@ proc hir::coroutines::MoveText {hir bind} {
 ====
             let _ = (bounds, resumer_sp, suspended_rbp(0));
 >>>>
+
+# ---------------------------------------------------------------------------
+# Release at the last use (COROUTINES.md)
+
+@@ release-never no coroutine is released at its handle's last use: every one waits for a collection (Tcl: the program's end)
+## hir/coroutines.tcl
+<<<<
+    dict set hir coroutines releases [expr {[dict size $affineDiagnostics] ? {} : [Releases $hir $parent]}]
+====
+    dict set hir coroutines releases {}
+>>>>
+
+@@ release-moved-handle a handle moved away is released too: its new owner's coroutine is released while still in use
+## hir/coroutines.tcl
+<<<<
+                || [lindex [dict get $state $b] 0] ni {live maybe}} continue
+====
+                || [lindex [dict get $state $b] 0] ni {live maybe moved}} continue
+>>>>
+
+@@ release-at-declaration a coroutine is released right after its handle's binding, before its uses
+## hir/coroutines.tcl
+<<<<
+            set last [expr {max($last, $index)}]
+====
+            set last $last
+>>>>
+
+@@ release-before-statement the Tcl lowering releases before the statement of the last use instead of after it
+## hir/lower.tcl
+<<<<
+        if {$i < $n} {
+            lappend result $lowered {*}$calls
+        } elseif {[lindex $lowered 0] eq "bind"} {
+====
+        if {$i < $n} {
+            lappend result {*}$calls $lowered
+        } elseif {[lindex $lowered 0] eq "bind"} {
+>>>>
+
+@@ release-last-value-lost a release after a sequence's last statement makes the release's unit the sequence's value
+## hir/lower.tcl
+<<<<
+            lappend result [list bind $kept $lowered] {*}$calls [list ref $kept]
+====
+            lappend result $lowered {*}$calls
+>>>>
+
+@@ compiler-release-missing the Tcl compiler compiling HIR (main.tcl's compile backend) emits no release
+## compiler/compiler.tcl
+<<<<
+        foreach b [hir::coroutines::releasesAfter $hir $e] {
+            CompileRelease ctx $b
+        }
+====
+>>>>
+
+@@ release-leaves-frames the Tcl runtime deletes a released suspended coroutine without unwinding it: its frames stay until the run ends
+## core/coroutines.tcl
+<<<<
+                catch {$continuation [ReleaseMarker]}
+====
+                rename $continuation {}
+>>>>
+
+@@ release-resumes-body a released suspended Tcl coroutine is resumed (with unit) instead of unwound: its body runs on after the yield
+## core/coroutines.tcl
+<<<<
+    if {$message eq [ReleaseMarker]} {
+====
+    if {$message eq [ReleaseMarker]} {
+        return [core::value::unit]
+    }
+    if {0} {
+>>>>
+
+@@ native-release-not-emitted native lowering emits no corelease
+## native/lower.tcl
+<<<<
+            Assign fn "op corelease $where" $e
+====
+            list $where
+>>>>
+
+@@ native-release-keeps-stack a native release leaves a suspended coroutine's stack in place (a collection frees it later)
+## native/src/runtime/coroutine.rs
+<<<<
+    co.stack = None;
+    co.thunk = UNIT;
+====
+    co.thunk = UNIT;
+>>>>

@@ -249,6 +249,20 @@ pub struct Metrics {
     /// String instead of allocating (strobj.rs, `Vm::empty_string`).
     pub str_empty_reuses: u64,
     pub construction: ConstructionStats,
+    /// Coroutine stacks (COROUTINES.md): how each start got its stack (a
+    /// fresh mapping, or one from the pool), and how each suspended
+    /// coroutine's stack came back -- released at its handle's last use
+    /// (`corelease`), or swept with an unreachable coroutine by a collection.
+    pub coroutines: CoroutineStats,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CoroutineStats {
+    pub stacks_mapped: u64,
+    pub stacks_reused: u64,
+    pub released: u64,
+    pub released_suspended: u64,
+    pub swept_suspended: u64,
 }
 
 impl Metrics {
@@ -273,6 +287,7 @@ impl Metrics {
             utf8_seek_bytes: 0,
             str_empty_reuses: 0,
             construction: ConstructionStats::default(),
+            coroutines: CoroutineStats::default(),
         }
     }
 
@@ -342,6 +357,34 @@ impl Metrics {
     pub fn record_mutarray_copy(&mut self, elements: usize) {
         if self.enabled() {
             self.mutarray_elements_copied += elements as u64;
+        }
+    }
+
+    /// A coroutine start that took a stack: from the pool, or freshly mapped.
+    pub fn record_coroutine_stack(&mut self, reused: bool) {
+        if self.enabled() {
+            if reused {
+                self.coroutines.stacks_reused += 1;
+            } else {
+                self.coroutines.stacks_mapped += 1;
+            }
+        }
+    }
+
+    /// A `corelease` (of a coroutine that was suspended, holding its stack).
+    pub fn record_coroutine_release(&mut self, suspended: bool) {
+        if self.enabled() {
+            self.coroutines.released += 1;
+            if suspended {
+                self.coroutines.released_suspended += 1;
+            }
+        }
+    }
+
+    /// A collection swept an unreachable coroutine still holding its stack.
+    pub fn record_coroutine_swept(&mut self) {
+        if self.enabled() {
+            self.coroutines.swept_suspended += 1;
         }
     }
 
@@ -485,7 +528,7 @@ impl Metrics {
             ("materializedStringBytes", n(c.materialized_str_bytes)),
             ("materializedListElements", n(c.materialized_list_elements)),
         ]);
-        dict(&[
+        let mut sections = vec![
             ("total", total),
             ("byKind", by_kind),
             ("static", statics),
@@ -495,8 +538,23 @@ impl Metrics {
             ("traversal", traversal),
             ("strings", strings),
             ("construction", construction),
-            ("sites", sites_tcl.to_string()),
-        ])
+        ];
+        // Like the Coroutine kind above: only a program that started one.
+        let co = &self.coroutines;
+        if self.by_kind[KIND_COROUTINE as usize].allocations > 0 {
+            sections.push((
+                "coroutines",
+                dict(&[
+                    ("stacksMapped", n(co.stacks_mapped)),
+                    ("stacksReused", n(co.stacks_reused)),
+                    ("released", n(co.released)),
+                    ("releasedSuspended", n(co.released_suspended)),
+                    ("sweptSuspended", n(co.swept_suspended)),
+                ]),
+            ));
+        }
+        sections.push(("sites", sites_tcl.to_string()));
+        dict(&sections)
     }
 }
 

@@ -20,6 +20,7 @@
 //! | rt_co_resume0     | handle            | the same, zero-message protocol |
 //! | rt_co_yield       | outward value     | the resume message              |
 //! | rt_co_done        | handle            | Bool: completed or failed       |
+//! | rt_co_release     | handle            | unit: the handle is dead        |
 //!
 //! start/resume return 0 exactly when the segment ended with an unhandled
 //! error of the body: the error is pending in the Vm, as for any failed call,
@@ -33,7 +34,11 @@
 //! resume) or FAILED (the error is cached and raised again). A terminal
 //! coroutine runs no code and holds no stack. RUNNING is defensive: an
 //! affine handle cannot be resumed from inside its own segment
-//! (COROUTINE-RUNNING otherwise).
+//! (COROUTINE-RUNNING otherwise). RELEASED: the handle is dead
+//! (`rt_co_release`, placed by the compiler right after the handle's last
+//! use) and the coroutine holds nothing any more -- a suspended one's stack
+//! went straight back to the pool; nothing can reach it again (a resume of
+//! it is a compiler bug, COROUTINE-STATE).
 //!
 //! # Stacks and switching (x86-64 Linux)
 //!
@@ -73,6 +78,7 @@ pub const CO_RUNNING: u8 = 1;
 pub const CO_SUSPENDED: u8 = 2;
 pub const CO_COMPLETED: u8 = 3;
 pub const CO_FAILED: u8 = 4;
+pub const CO_RELEASED: u8 = 5;
 
 /// The bytes between a suspended stack's saved stack pointer and the frame
 /// record `bl_co_switch` opened: the control words (8) and five callee-saved
@@ -163,15 +169,17 @@ impl CoStack {
         self.base + self.size
     }
 
+    /// A stack, and whether it came from the pool (rather than a fresh
+    /// mapping).
     #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
-    fn new() -> Result<CoStack, RtError> {
+    fn new() -> Result<(CoStack, bool), RtError> {
         let usable = stack_bytes();
         if let Some(stack) = POOL.with(|pool| {
             let mut pool = pool.borrow_mut();
             let at = pool.iter().position(|s| s.size - s.guard == usable)?;
             Some(pool.swap_remove(at))
         }) {
-            return Ok(stack);
+            return Ok((stack, true));
         }
         let size = usable + GUARD_BYTES;
         // SAFETY: a fresh private anonymous mapping; nothing else refers to it.
@@ -194,12 +202,12 @@ impl CoStack {
                 libc::munmap(base, size);
                 return Err(RtError::Bug(format!("cannot protect a coroutine stack guard: {}", std::io::Error::last_os_error())));
             }
-            Ok(CoStack { base: base as usize, size, guard: GUARD_BYTES })
+            Ok((CoStack { base: base as usize, size, guard: GUARD_BYTES }, false))
         }
     }
 
     #[cfg(not(all(target_arch = "x86_64", target_os = "linux")))]
-    fn new() -> Result<CoStack, RtError> {
+    fn new() -> Result<(CoStack, bool), RtError> {
         Err(RtError::Unsupported(
             "native coroutines need stack switching, implemented for x86-64 Linux only (COROUTINES.md)".to_string(),
         ))
@@ -367,7 +375,10 @@ pub extern "C" fn rt_co_start(p: *mut Vm, handle: Value) -> Value {
             return vm(p).fail(RtError::Semantic { kind: "COROUTINE-STATE", message: "the coroutine was already started".to_string() });
         }
         let stack = match CoStack::new() {
-            Ok(stack) => stack,
+            Ok((stack, reused)) => {
+                vm(p).metrics.record_coroutine_stack(reused);
+                stack
+            }
             Err(error) => return vm(p).fail(error),
         };
         // Stacks are not heap bytes, but each started coroutine should pace
@@ -473,6 +484,11 @@ fn resume(p: *mut Vm, handle: Value, message: Value) -> Value {
                 kind: "COROUTINE-RUNNING",
                 message: "the coroutine is already running: a coroutine cannot resume itself".to_string(),
             }),
+            CO_RELEASED => vm(p).fail(RtError::Semantic {
+                kind: "COROUTINE-STATE",
+                message: "the coroutine was released after its handle's last use: nothing can resume it (a compiler bug)"
+                    .to_string(),
+            }),
             _ => vm(p).fail(RtError::Semantic { kind: "COROUTINE-STATE", message: "the coroutine was never started".to_string() }),
         }
     }
@@ -512,7 +528,34 @@ pub extern "C" fn rt_co_yield(p: *mut Vm, value: Value) -> Value {
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_co_done(_p: *mut Vm, handle: Value) -> Value {
     let co = coroutine_of(handle);
-    if matches!(co.state, CO_COMPLETED | CO_FAILED) { TRUE } else { FALSE }
+    // RELEASED is unreachable here (the handle is dead); it is terminal.
+    if matches!(co.state, CO_COMPLETED | CO_FAILED | CO_RELEASED) { TRUE } else { FALSE }
+}
+
+/// Releases coroutine HANDLE, whose handle is dead from here: native/lower.tcl
+/// emits `corelease` right after the handle's last use, which the affine
+/// analysis found (hir/coroutines.tcl's Releases). A suspended coroutine's
+/// stack goes back to the pool at once instead of when a collection finds
+/// the handle unreachable -- nothing on it runs again either way, and no
+/// frame on it owns a Rust value with a destructor (as when one is swept) --
+/// and every coroutine drops its thunk, cached result and cached failure.
+/// Never observable, never fails, never allocates.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_co_release(p: *mut Vm, handle: Value) -> Value {
+    let co = coroutine_of(handle);
+    if matches!(co.state, CO_RUNNING | CO_RELEASED) {
+        // Released already (by another owner, in a branch: the compiler's
+        // releases are idempotent), or -- defensive -- running: a dead
+        // handle is never one of the running chain.
+        return UNIT;
+    }
+    vm(p).metrics.record_coroutine_release(co.state == CO_SUSPENDED && co.stack.is_some());
+    co.stack = None;
+    co.thunk = UNIT;
+    co.value = UNIT;
+    co.failure = None;
+    co.state = CO_RELEASED;
+    UNIT
 }
 
 /// The stack frame record a suspended context's walk starts at: the frame

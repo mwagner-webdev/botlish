@@ -882,7 +882,7 @@ test co-hir-text {checked HIR states each yielding function's effect, the handle
         [expr {[hir::format [hir::parse $text]] eq $text}]
 } -cleanup {unset -nocomplain hir text} -result {2 1 1 1}
 
-test co-nir-operations {construction is cocreate then costart (eager); a resume is coresume of the one handle register; a move copies no state; done? is codone; a yield is coyield in the deep function, reached by an ordinary direct call} -constraints linuxX86_64 -body {
+test co-nir-operations {construction is cocreate then costart (eager); a resume is coresume of the one handle register; a move copies no state; done? is codone; the handle's last use is followed by corelease of that register; a yield is coyield in the deep function, reached by an ordinary direct call} -constraints linuxX86_64 -body {
     set nir [coNir "import coroutine\n${principal}other = step\nx = other(Message {value: 1})\ny = coroutine::done?(other)\nx.value\n"]
     set ops {}
     set handle ""
@@ -899,7 +899,7 @@ test co-nir-operations {construction is cocreate then costart (eager); a resume 
     list $ops \
         [llength [lsearch -all -regexp [coFunc $nir deep] {= op coyield}]] \
         [llength [lsearch -all -regexp [coFunc $nir worker] {= call [0-9]+ }]]
-} -cleanup {unset -nocomplain nir ops handle line target op regs} -result {{cocreate 1 costart 1 coresume 2 codone 1} 1 1}
+} -cleanup {unset -nocomplain nir ops handle line target op regs} -result {{cocreate 1 costart 1 coresume 2 codone 1 corelease 1} 1 1}
 
 # ---------------------------------------------------------------------------
 # GC (items 40-43)
@@ -964,6 +964,132 @@ test co-gc-many-coroutines {thousands of short coroutines: abandoned and finishe
 } -result {value 7997}
 
 # ---------------------------------------------------------------------------
+# Release at the last use (COROUTINES.md): the affine analysis releases a
+# coroutine right after the last statement of its handle's own sequence that
+# refers to it, when the handle still owns it on every path.
+
+# Test-only probes of the Tcl runtime: the Tcl coroutines alive, and the
+# evaluator's live frames.
+proc coLiveCoroutines {} {
+    return [core::value::int [llength [info commands {::core::coroutines::co[0-9]*}]]]
+}
+proc coLiveFrames {} {
+    return [core::value::int [core::env::liveCount]]
+}
+if {"test_live_coroutines" ni [core::native::names]} {
+    core::registerNative test_live_coroutines -arity 0 -impl coLiveCoroutines
+    core::registerNative test_live_frames -arity 0 -impl coLiveFrames
+}
+
+# The release table of TEXT, in statement order: {STATEMENT RELEASED...} with
+# STATEMENT "bind NAME" or the statement's kind, and a hygienic handle
+# temporary shown as <handle>.
+proc coReleases {text} {
+    set hir [surface::compile $text -warnings off]
+    set name {{hir b} {
+        set n [dict get $hir bindings $b name]
+        expr {[regexp {^coroutine#[0-9]+$} $n] ? "<handle>" : [regsub {#[0-9]+$} $n ""]}
+    }}
+    set rows {}
+    foreach e [lsort -dictionary [dict keys [dict get $hir coroutines releases]]] {
+        set node [dict get $hir exprs $e]
+        set label [dict get $node kind]
+        if {$label eq "bind"} {
+            set label "bind [apply $name $hir [dict get $node binding]]"
+        }
+        lappend rows [list $label {*}[lmap b [dict get $hir coroutines releases $e] {apply $name $hir $b}]]
+    }
+    return $rows
+}
+
+set releaseDecls {import coroutine
+import list
+import mutable_array
+struct V:
+    n: int
+fn w(k: int) -> V:
+    yield V {n: k}
+    return V {n: k + 1}
+}
+
+test co-release-placement {a release follows the last statement of the handle's own sequence that refers to it: after the last resume, per loop iteration, after a loop using it, after a function's last statement, after the branch that moved it on one path (its new owner is released inside); a moved-from handle is not released (its new owner is), nor one whose last use cannot complete} -body {
+    lmap body {
+        "coroutine {step, first} = w(1)\na = step()\nb = step()\n\[first.n, a.n, b.n\]\n"
+        "coroutine {step} = w(1)\nother = step\nx = other()\nx.n\n"
+        "coroutine {step} = w(1)\nif coroutine::done?(step):\n    gone = step\n1\n"
+        "fn f() -> int:\n    coroutine {step} = w(1)\n    step().n\nf()\n"
+        "xs = loop i from 0 to 3:\n    coroutine {first} = w(i)\n    first.n\nxs\n"
+        "coroutine {step} = w(1)\nxs = loop i from 0 to 3:\n    step().n\nxs\n"
+        "fn g(c: bool) -> int:\n    coroutine {step, first} = w(1)\n    if c:\n        return first.n\n    step().n\ng(true)\n"
+        "fn h() -> int:\n    coroutine {step} = w(1)\n    return step().n\nh()\n"
+    } {coReleases "${releaseDecls}$body"}
+} -cleanup {unset -nocomplain body} -result {{{{bind b} step}} {{{bind x} other}} {{if step} {{bind gone} gone}} {{project step}} {{{bind first} <handle>}} {{{bind xs} step}} {{project step}} {}}
+
+test co-release-values {a release changes no value: after a last statement whose value is a function's result, a loop element, an if's value or the program's result, the value is kept; a released suspended body runs no further code} -body {
+    coAgree "${releaseDecls}fn note(a: MutableArray\[int\], v: int) -> int:
+    mutable_array::set(a, 0, v):
+        on IndexNotFound:
+            unit
+    v
+fn seen(a: MutableArray\[int\]) -> int:
+    mutable_array::at(a, 0):
+        on IndexNotFound:
+            -1
+fn noisy(a: MutableArray\[int\]) -> V:
+    note(a, 1)
+    yield V {n: 10}
+    note(a, 2)
+    return V {n: 20}
+fn f(k: int) -> int:
+    coroutine {step} = w(k)
+    step().n
+log = mutable_array::create(1, 0)
+fn abandon(a: MutableArray\[int\]) -> int:
+    coroutine {first} = noisy(a)
+    first.n
+xs = loop i from 0 to 3:
+    coroutine {step} = w(i)
+    step().n
+y = if f(1) > 0:
+    coroutine {step} = w(7)
+    step().n
+else:
+    0
+z = abandon(log)
+coroutine {step} = w(5)
+\[f(3), xs, y, z, seen(log), step().n\]
+"
+} -result {value {[4, [1, 2, 3], 8, 10, 1, 6]}}
+
+test co-release-branch-move {a handle moved on one path only: its new owner is released inside the branch, the old binding after it, a no-op on the path that moved it -- the same values on every backend, on both paths} -body {
+    coAgree "${releaseDecls}fn pick(c: bool) -> int:\n    coroutine {step, first} = w(10)\n    if c:\n        other = step\n        x = other()\n    first.n\nfn keep(c: bool) -> int:\n    coroutine {step, first} = w(20)\n    y = if c:\n        other = step\n        other().n\n    else:\n        0\n    first.n + y\n\[pick(true), pick(false), keep(true), keep(false)\]\n"
+} -result {value {[10, 10, 41, 20]}}
+
+test co-release-tcl-runtime {on the Tcl backends a released suspended coroutine is unwound: its Tcl coroutine and its frames end with its handle (the interpreter's 9 frames of a coroutine suspended 5 calls deep are gone after the handle's last use; a loop of abandoned coroutines leaves exactly what a loop creating a closure does)} -body {
+    set pre "import coroutine\nstruct V:\n    n: int\nfn deep(d: int, k: int) -> int:\n    if d == 0:\n        yield V {n: k}\n        return 0\n    deep(d - 1, k) + 1\nfn holder(k: int) -> V:\n    return V {n: deep(5, k)}\nbefore = test_live_frames()\n"
+    set programs [list \
+        "coroutine {step: a} = holder(1)\nheld = test_live_frames() - before\nd = coroutine::done?(a)\ngone = test_live_frames() - before\n\[held, gone, test_live_coroutines()\]\n" \
+        "xs = loop i from 0 to 50:\n    coroutine {first} = holder(i)\n    first.n\n\[test_live_frames() - before, test_live_coroutines()\]\n" \
+        "xs = loop i from 0 to 50:\n    fn g() -> int:\n        i\n    g()\n\[test_live_frames() - before, test_live_coroutines()\]\n"]
+    set results [lmap backend {interp compile} {
+        lmap text $programs {
+            lindex [outcomeUnderHir $backend [surface::compile "$pre$text" -warnings off]] 1
+        }
+    }]
+    # The Tcl compiler's own entry from HIR (main.tcl's compile backend),
+    # which compiles the releases itself (core::compiler::CompileSequence).
+    lappend results [lmap text $programs {
+        core::value::show [core::compiler::evalHir [surface::compile "$pre$text" -warnings off]] 1 1
+    }]
+} -cleanup {unset -nocomplain pre programs results} -result {{{[9, 0, 0]} {[50, 0]} {[50, 0]}} {{[0, 0, 0]} {[50, 0]} {[50, 0]}} {{[0, 0, 0]} {[50, 0]} {[50, 0]}}}
+
+test co-release-native-stacks {natively a released suspended coroutine's stack goes back to the pool at once: 2000 constructions abandoned in a loop map one stack and reuse it 1999 times, and no collection sweeps a coroutine still holding one; the same under GC stress} -constraints linuxX86_64 -body {
+    set hir [surface::compile "${releaseDecls}xs = loop i from 0 to 2000:\n    coroutine {first} = w(i)\n    first.n\nlist::length(xs)\n" -warnings off]
+    set report [native::allocationReport $hir summary]
+    list [dict get $report coroutines] [withGcStress {lrange [outcomeUnderHir cranelift $hir] 0 1}]
+} -cleanup {unset -nocomplain hir report} -result {{stacksMapped 1 stacksReused 1999 released 2000 releasedSuspended 2000 sweptSuspended 0} {value 2000}}
+
+# ---------------------------------------------------------------------------
 # Source audit (item 66): what the milestone must not contain.
 
 proc coSource {path} {
@@ -1002,15 +1128,15 @@ test co-source-no-iterator-or-exhaustion {no iterator protocol, StopIteration-li
     set hits
 } -cleanup {unset -nocomplain hits path text pattern} -result {}
 
-test co-source-operations {the coroutine operations are exactly create, start, resume (at most one message), yield and done?, in the Tcl runtime and in NIR: no copy, fork or move operation exists at run time} -body {
+test co-source-operations {the coroutine operations are exactly create, start, resume (at most one message), yield, done? and release, in the Tcl runtime and in NIR: no copy, fork or move operation exists at run time} -body {
     set runtime [coSource core/coroutines.tcl]
     set registered [lmap {- name} [regexp -all -inline {core::native::register (coroutine\S+)} $runtime] {set name}]
     set nir [coSource native/src/nir.rs]
     set ops [lmap {- name} [regexp -all -inline {"(co[a-z0-9]+)" => Co} $nir] {set name}]
     list $registered [core::coroutines::natives] $ops [regexp {\[llength \$args\] > 1} $runtime]
-} -cleanup {unset -nocomplain runtime registered nir ops} -result {{coroutine#create coroutine#start coroutine#resume coroutine#yield coroutine::done?} {coroutine#create coroutine#start coroutine#resume coroutine#yield coroutine::done?} {cocreate costart coresume coresume0 coyield codone} 1}
+} -cleanup {unset -nocomplain runtime registered nir ops} -result {{coroutine#create coroutine#start coroutine#resume coroutine#yield coroutine::done? coroutine#release} {coroutine#create coroutine#start coroutine#resume coroutine#yield coroutine::done? coroutine#release} {cocreate costart coresume coresume0 coyield codone corelease} 1}
 
-test co-source-state-machine {the runtime states are exactly fresh, running, suspended, completed and failed: there is no moved sentinel (ownership is static), and a coroutine object is never cloned} -body {
+test co-source-state-machine {the runtime states are exactly fresh, running, suspended, completed, failed and released (the handle is dead): there is no moved sentinel (ownership is static), and a coroutine object is never cloned} -body {
     set runtime [coSource core/coroutines.tcl]
     set states [lsort -unique [concat \
         [lmap {- s} [regexp -all -inline {dict set store \$id state ([a-z]+)} $runtime] {set s}] \
@@ -1021,7 +1147,7 @@ test co-source-state-machine {the runtime states are exactly fresh, running, sus
     set before [string range $native [expr {[string first "pub struct CoroutineObj" $native] - 200}] [string first "pub struct CoroutineObj" $native]]
     list $states $constants [regexp -nocase {moved} "$runtime$native"] \
         [regexp {Clone} $before] [regexp {impl Clone for CoroutineObj} $native]
-} -cleanup {unset -nocomplain runtime states native constants object before} -result {{completed failed fresh running suspended} {CO_FRESH CO_RUNNING CO_SUSPENDED CO_COMPLETED CO_FAILED} 0 0 0}
+} -cleanup {unset -nocomplain runtime states native constants object before} -result {{completed failed fresh released running suspended} {CO_FRESH CO_RUNNING CO_SUSPENDED CO_COMPLETED CO_FAILED CO_RELEASED} 0 0 0}
 
 test co-source-no-context-dispatch {suspension adds no trait or context machinery: neither coroutine runtime refers to contexts or traits} -body {
     set hits {}

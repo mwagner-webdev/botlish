@@ -1705,7 +1705,9 @@ add10(32)          # 42 (add captures x)
   its error again; `coroutine::done?(step)` (`import coroutine`) is `true`
   once it has done either.
   A handle is moved by `other = step` and never copied or stored; a function
-  that may yield is called only inside a coroutine (`UNWRAPPED-YIELD`).
+  that may yield is called only inside a coroutine (`UNWRAPPED-YIELD`). A
+  coroutine is released as soon as its handle's last use is past (a
+  suspended one's stack and frames are freed at once).
   `coroutine` and `resume` stay ordinary names elsewhere; `yield` is a
   keyword. See COROUTINES.md.
 * Integers (decimal, arbitrary precision, no leading zeros), strings

@@ -99,9 +99,11 @@
 #
 # What HIR keeps (dict `coroutines`): blocks (yielding function -> protocol
 # and yield type), thunks (thunk -> its create call and root function),
-# boundaries (a thunk's boundary call -> the thunk),
-# yields (yield call -> its function), and, after verify, mayYield (the
-# functions that may yield) and moves (move bind -> moved binding).
+# boundaries (a thunk's boundary call -> the thunk), yields (yield call -> its
+# function), and, after verify, mayYield (the functions that may yield),
+# moves (move bind -> moved binding) and releases (a statement -> the handle
+# bindings whose coroutines are released after it: "Release at the last use"
+# below).
 
 namespace eval hir::coroutines {}
 
@@ -847,6 +849,8 @@ namespace eval hir::coroutines {
     variable affineDiagnostics {}
     variable affineParent {}
     variable loopExits {}
+    # Statement ExprId -> the liveness state after it (Seq; Releases).
+    variable afterStates {}
 }
 
 proc hir::coroutines::IsHandleBinding {hir b} {
@@ -865,9 +869,11 @@ proc hir::coroutines::Affine {hirVar parent blocks calls} {
     variable affineDiagnostics
     variable affineParent
     variable loopExits
+    variable afterStates
     set affineDiagnostics [dict create]
     set affineParent $parent
     set loopExits [dict create]
+    set afterStates [dict create]
     # Positions first: every reference to a handle, by its context.
     set moves [dict create]
     dict for {e node} [dict get $hir exprs] {
@@ -916,6 +922,128 @@ proc hir::coroutines::Affine {hirVar parent blocks calls} {
         lassign [dict get $affineDiagnostics $e] kind message at
         hir::Diagnose hir $kind $message $at
     }
+    # Releases: only for a program the discipline accepts (a rejected one
+    # that still runs, -strict 0, keeps every coroutine until collected).
+    dict set hir coroutines releases [expr {[dict size $affineDiagnostics] ? {} : [Releases $hir $parent]}]
+}
+
+# ---------------------------------------------------------------------------
+# Release at the last use
+#
+# A handle binding is dead after the last statement of its own sequence that
+# refers to it: nothing can resume or observe its coroutine through it again.
+# If it still owns the coroutine on some path there -- never moved, or moved
+# on some paths only (`maybe`) -- that coroutine is dead too: a move inside
+# that statement binds a new owner in a nested sequence (a branch, a loop
+# body, a handler), out of scope after it, and a `maybe` binding referred to
+# after its move is AFFINE-NOT-DEFINITELY-LIVE. Its coroutine is
+# released there (`coroutine#release`, core/coroutines.tcl): a suspended
+# coroutine's continuation and stack are freed at once instead of when a
+# collection finds the handle unreachable, and a terminal one drops its cached
+# result. Nothing observable changes -- a suspended body never runs again
+# either way, and Botlish has no finalizers -- so a release is purely a
+# resource decision, made where the affine analysis proves the handle dead.
+#
+# RELEASES maps a statement (an element of a sequence: a function or block
+# body, a branch, a loop body, a handler, the top level) to the handle
+# bindings to release right after it completes normally. The backends release
+# after evaluating the statement and keep its value as the sequence's value
+# when it is the last one (hir/lower.tcl, native/lower.tcl). A release is
+# idempotent: the new owner of a `maybe` binding may have released the same
+# coroutine already, inside the branch. Not released here (a collection still
+# reclaims them): a binding definitely moved (its new owner releases it), one
+# whose last statement cannot complete normally, and every path that leaves
+# the sequence early (return, break, continue, a failure) before the last
+# use.
+
+# The sequence (a list of ExprIds) of parent P that holds statement E: a body
+# of a block, branch, loop or handler, or the top level (P "").
+proc hir::coroutines::SequenceOf {hir p e} {
+    if {$p eq ""} {
+        return [dict get $hir roots]
+    }
+    set node [dict get $hir exprs $p]
+    set lists {}
+    switch -- [dict get $node kind] {
+        block - loop - listloop - countloop - lockloop { set lists [list [dict get $node body]] }
+        if { set lists [list [dict get $node thenBody] [dict get $node elseBody]] }
+        handle { set lists [dict get $node handlerBodies] }
+    }
+    foreach list $lists {
+        if {$e in $list} {
+            return $list
+        }
+    }
+    return ""
+}
+
+# The release table of HIR (above), by the parent map PARENT and the
+# post-statement states the liveness analysis recorded.
+proc hir::coroutines::Releases {hir parent} {
+    variable afterStates
+    set refs [dict create]
+    set released [dict create]
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "ref" && [IsHandleBinding $hir [dict get $node binding]]} {
+            dict lappend refs [dict get $node binding] $e
+            # A release already written out (HIR rebuilt from lowered Core
+            # IR, hir/lower.tcl): not released twice.
+            if {[dict exists $parent $e]
+                    && [NativeOf $hir [lindex [dict get $parent $e] 0]] eq [core::coroutines::releaseNative]} {
+                dict set released [dict get $node binding] 1
+            }
+        }
+    }
+    set releases [dict create]
+    foreach b [lsort -dictionary [dict keys [dict get $hir bindings]]] {
+        if {![IsHandleBinding $hir $b] || [hir::isModuleBinding $hir $b] || [dict exists $released $b]} continue
+        set by [dict get $hir bindings $b declaredBy]
+        if {$by eq "" || ![dict exists $hir exprs $by] || [dict get $hir exprs $by kind] ne "bind"
+                || ![dict get $hir exprs $by reachable] || ![dict exists $parent $by]} continue
+        set p [lindex [dict get $parent $by] 0]
+        set sequence [SequenceOf $hir $p $by]
+        set last [lsearch -exact $sequence $by]
+        if {$last < 0} continue
+        set found 1
+        foreach r [expr {[dict exists $refs $b] ? [dict get $refs $b] : {}}] {
+            # The statement of SEQUENCE the reference is in.
+            set x $r
+            set index -1
+            for {set i 0} {$i < 4096 && [dict exists $parent $x]} {incr i} {
+                set up [lindex [dict get $parent $x] 0]
+                if {$up eq $p && [set index [lsearch -exact $sequence $x]] >= 0} {
+                    break
+                }
+                if {$up eq ""} break
+                set x $up
+            }
+            if {$index < 0} {
+                set found 0
+                break
+            }
+            set last [expr {max($last, $index)}]
+        }
+        if {!$found} continue
+        set statement [lindex $sequence $last]
+        if {![dict exists $afterStates $statement]} continue
+        set state [dict get $afterStates $statement]
+        if {$state eq "dead" || ![dict exists $state $b]
+                || [lindex [dict get $state $b] 0] ni {live maybe}} continue
+        dict lappend releases $statement $b
+    }
+    return $releases
+}
+
+# The handle bindings to release after statement E: the analysis's table, or
+# what HIR text read back says (hir/read.tcl).
+proc hir::coroutines::releasesAfter {hir e} {
+    if {[dict exists $hir coroutines releases $e]} {
+        return [dict get $hir coroutines releases $e]
+    }
+    if {[dict exists $hir exprs $e coroutineRelease]} {
+        return [dict get $hir exprs $e coroutineRelease]
+    }
+    return {}
 }
 
 # The role of reference E to a handle (see the header above): {use}, {move
@@ -933,7 +1061,8 @@ proc hir::coroutines::RefRole {hir parent e} {
         call {
             set native [NativeOf $hir $p]
             set index [lsearch -exact [dict get $node args] $e]
-            if {$native in [list [core::coroutines::startNative] [core::coroutines::resumeNative] [core::coroutines::doneNative]]
+            if {$native in [list [core::coroutines::startNative] [core::coroutines::resumeNative] \
+                        [core::coroutines::doneNative] [core::coroutines::releaseNative]]
                     && $index == 0} {
                 return use
             }
@@ -1038,11 +1167,15 @@ proc hir::coroutines::Join {a b} {
 
 proc hir::coroutines::Seq {hirVar exprs state} {
     upvar 1 $hirVar hir
+    variable afterStates
     foreach e $exprs {
         if {$state eq "dead"} {
             return dead
         }
         set state [Flow hir $e $state]
+        # The state after each statement (a loop body's, at the fixed
+        # point): where a release may go (Releases).
+        dict set afterStates $e $state
     }
     return $state
 }
@@ -1183,6 +1316,12 @@ proc hir::coroutines::Use {hirVar e b state} {
     variable affineDiagnostics
     variable affineParent
     set name [dict get $hir exprs $e name]
+    if {[NativeOf $hir [lindex [dict get $affineParent $e] 0]] eq [core::coroutines::releaseNative]} {
+        # A release the compiler wrote out (HIR rebuilt from lowered Core IR):
+        # placed where the handle is dead, and of a binding possibly moved on
+        # some path (Releases) -- never a use to check.
+        return $state
+    }
     set status [expr {[dict exists $state $b] ? [dict get $state $b] : "live"}]
     if {![dict exists $affineDiagnostics $e] || [lindex [dict get $affineDiagnostics $e] 0] in {USE-AFTER-MOVE AFFINE-NOT-DEFINITELY-LIVE}} {
         switch -- [lindex $status 0] {
