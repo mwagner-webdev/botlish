@@ -158,7 +158,9 @@ virtual construction, not because the compiler recognized an accumulator
 idiom. No StringBuilder/ListBuilder surface or privileged lowering exists;
 the collecting `listloop`'s own internal accumulator (a compiler-generated
 `listappend` per iteration, e.g. in `byte::set`) is deliberately left eager
-(M8.b scope).
+(M8.b scope). (Since then the collecting-loop lowering keeps that
+accumulator in a List plan itself -- COLLECTING-LOOPS.md, "Native result
+List" -- still with no recognizer here: the accumulator is not a binding.)
 
 ## Why this is not a source type
 

@@ -1047,22 +1047,23 @@ compilation excluded; this sandbox, 4 cores, nothing else running). Each
 program repeats one operation; its baseline does the same work without a
 coroutine (an ordinary call building the same struct, the same recursion
 depth); the table shows (program - baseline) / n, and the whole program per
-operation in parentheses. These are the milestone's numbers, before [Release
-at the last use](#release-at-the-last-use), which changed the first row
-(see there):
+operation in parentheses. These numbers predate [Release at the last
+use](#release-at-the-last-use), which changed the first row (see there);
+they were re-measured once the benchmark could repeat each operation in a
+single collecting loop (last point below):
 
 | operation | Tcl interp | Tcl compile | Cranelift |
 |---|---:|---:|---:|
-| construction to the first yield, then abandoned | 332 us (569 us) | 176 us (185 us) | 6.9 us (7.1 us) |
-| construction + resume to completion + one cached call | 290 us (935 us) | 202 us (227 us) | 0.68 us (0.87 us) |
-| resume, yield in the root | 34 us (273 us) | 14 us (24 us) | 200 ns (372 ns) |
-| resume, yield 1 frame deep | 53 us (767 us) | 18 us (35 us) | 205 ns (393 ns) |
-| resume, yield 8 frames deep | noise (2.7 ms) | 18 us (62 us) | 185 ns (393 ns) |
-| resume, yield 32 frames deep | noise (9.8 ms) | 24 us (160 us) | 214 ns (678 ns) |
+| construction to the first yield, then abandoned | 239 us (325 us) | 117 us (125 us) | 5.2 us (5.2 us) |
+| construction + resume to completion + one cached call | 204 us (570 us) | 136 us (158 us) | 0.57 us (0.57 us) |
+| resume, yield in the root | 34 us (117 us) | 13 us (22 us) | 144 ns (146 ns) |
+| resume, yield 1 frame deep | noise (452 us) | 14 us (30 us) | 161 ns (167 ns) |
+| resume, yield 8 frames deep | noise (1.9 ms) | 14 us (51 us) | 158 ns (185 ns) |
+| resume, yield 32 frames deep | noise (7.3 ms) | 22 us (136 us) | 221 ns (470 ns) |
 
 ("noise": the interpreter's deep rows are dominated by the recursion itself,
 which the baseline repeats, and the difference is within run-to-run
-variation: -21 us and +480 us.)
+variation: -32 us, +42 us and -199 us.)
 
 Allocations per construction, natively: one `Coroutine` (96 B), one `Block`
 (48 B, the thunk capturing the loop variable; none for literal arguments),
@@ -1081,22 +1082,22 @@ coroutine is held by one frame of a recursion, which the figure includes):
 
 What this says about the architecture (no optimization was attempted):
 
-* **Deep yield costs nothing natively.** A resume is ~200 ns whatever the
-  depth (1, 8, 32 frames): nothing is copied or unwound, the frames stay on
-  their stack. The Tcl compiler's resume is likewise flat (14-24 us); the
+* **Deep yield costs nothing natively.** A resume is ~150-220 ns whatever
+  the depth (1, 8, 32 frames): nothing is copied or unwound, the frames stay
+  on their stack. The Tcl compiler's resume is likewise flat (13-22 us); the
   interpreter's is lost in its own call cost.
 * **A suspended native coroutine is one touched page** (4 KiB of its 8 MiB
   reservation, plus 96 bytes) -- also at 32 frames deep, since Botlish frames
   are small. A completed one is its object and its cached result (~0.1 KiB);
   its stack went back to the pool.
 * **The one native problem was stack reclamation for abandoned coroutines.**
-  Constructing coroutines that are abandoned while suspended cost ~10x more
-  (6.9 us vs 0.68 us) than running them to completion: an abandoned stack
-  was freed only when a collection proved its handle dead, the pool keeps
-  32 stacks, so about half of the constructions paid `mmap` + `mprotect` +
-  a page fault and the sweeps a `munmap`. [Release at the last
-  use](#release-at-the-last-use) fixed it: the same program now costs
-  0.45 us per construction.
+  Constructing coroutines that are abandoned while suspended cost ~9x more
+  (5.2 us vs 0.57 us above; 6.9 us vs 0.68 us in the first measurement)
+  than running them to completion: an abandoned stack was freed only when a
+  collection proved its handle dead, the pool keeps 32 stacks, so about half
+  of the constructions paid `mmap` + `mprotect` + a page fault and the
+  sweeps a `munmap`. [Release at the last use](#release-at-the-last-use)
+  fixed it: the same program now costs 0.45 us per construction.
 * **The Tcl backends are memory-heavy per coroutine** -- 50 KiB (interp) and
   20 KiB (compile) per suspended coroutine, ~9 KiB per interpreted frame
   below the yield (the completed row is mostly the holding recursion's own
@@ -1104,10 +1105,15 @@ What this says about the architecture (no optimization was attempted):
   cost hundreds of MiB: acceptable for a reference, worth knowing for the
   test framework (run it natively).
 * A pre-existing native cost unrelated to coroutines distorted the first
-  measurements: a single collecting loop of N iterations allocates N Lists
-  and copies O(N^2) elements (2000 iterations allocate 16 MB, on the base
-  commit too), so the benchmark repeats its operations in nested loops of
-  100.
+  measurements: a collecting loop of N iterations allocated N Lists and
+  copied O(N^2) elements (2000 iterations allocated 16 MB), so the benchmark
+  repeated its operations in nested loops of 100. Collecting loops now build
+  their List in one private List plan (native/lower.tcl's CollectStart; O(1)
+  Lists, O(N) copies), and the benchmark repeats each operation in a single
+  collecting loop whose List is discarded: a retained List of 200000
+  elements would still be marked by every collection the operation
+  triggers (it doubled the native construction row), a harness cost, not a
+  coroutine one. The numbers above are from that version.
 
 ### 59. Current limitations
 

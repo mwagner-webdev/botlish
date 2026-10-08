@@ -61,18 +61,17 @@ proc program {kind n {depth 1}} {
     return [surface::compile [programText $kind $n $depth] -warnings off]
 }
 
-# N repetitions of the statements LINES (the last one's value is kept; `i`
-# counts 0..N-1) as two nested collecting loops of at most 100 iterations
-# each: one List of N elements built by a single collecting loop costs time
-# quadratic in N natively (each iteration copies the List so far), which
-# would swamp the operation being measured.
+# N repetitions of the statements LINES (`i` counts 0..N-1) as one
+# collecting loop whose List nothing reads (the program's value is N), so no
+# List is built: a retained List of up to N elements would be live -- and
+# marked by every collection the measured operation triggers -- for the
+# whole run, a cost of the harness, not of the operation.
 proc Repeat {n lines} {
-    set outer [expr {($n + 99) / 100}]
-    set text "xs = loop o from 0 to $outer:\n    ys = loop j from 0 to 100:\n        i = o * 100 + j\n"
+    set text "loop i from 0 to $n:\n"
     foreach line $lines {
-        append text "        $line\n"
+        append text "    $line\n"
     }
-    append text "    list::length(ys)\nlist::length(xs)\n"
+    append text "$n\n"
     return $text
 }
 
@@ -129,9 +128,6 @@ proc programText {kind n {depth 1}} {
             append p "fn hold(k: int) -> int:\n    if k == 0:\n        return 0\n    coroutine {step, first} = w(k)\n    last = step()\n    x = hold(k - 1)\n    if coroutine::done?(step):\n        return x + last.n\n    x\n"
             append p "hold($n)\n"
         }
-    }
-    if {[string match *list::length* $p]} {
-        set p "import list\n$p"
     }
     return $p
 }

@@ -591,7 +591,12 @@ the three new files) = 2607.
   the existing elements" pin already documented this). For a 3-element
   fully-retained transform: 1 (input List) + 1 (empty accumulator) + 3
   (one append per element) = 5 List allocations total. Recorded as
-  compiler evidence (item 55), not fixed here.
+  compiler evidence (item 55), not fixed here. *Since fixed*: the
+  accumulator is now a private List plan materialized once
+  (COLLECTING-LOOPS.md, "Native result List"): 1 (input) + 1 (empty
+  accumulator) + 1 (materialization) = 3 Lists and 1 ListPlan, whatever
+  the element count; the allocation tables above record the original
+  lowering.
 - **The Tcl compile backend does not implement the discarded-result
   optimization.** `list::any?`/`all?`/`none?`/`find` (and any other
   discarded listloop) still build and discard a real Tcl-level

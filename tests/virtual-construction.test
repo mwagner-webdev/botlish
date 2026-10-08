@@ -485,6 +485,159 @@ test vc-str-toplevel-1 {plan locals at program top level} -body {
 } -result {value {"abcabc"}}
 
 # ---------------------------------------------------------------------------
+# Collecting loops (COLLECTING-LOOPS.md; native/lower.tcl's CollectStart/
+# CollectAppend/CollectFinish): a retained collecting loop keeps its result
+# in a private List plan extended in place each iteration and materialized
+# once where the loop yields its List (normal exit or a bare break), not one
+# copying listappend per iteration.
+
+testConstraint linuxX86_64 [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+
+set collectForms {import list
+import str
+fn forms(xs, n):
+    a = loop x in xs:
+        str::concat(x, "!")
+    b = loop i from 0 to n:
+        i * 2
+    c = loop i from 0 through n:
+        i
+    d = loop i down from n to 0:
+        i
+    e = loop i down from n through 0:
+        i
+    f = loop x in xs and i from 0 to list::length(xs):
+        [i, x]
+    [a, b, c, d, e, f]
+[forms(["p", "q", "r"], 3), forms([], 0)]
+}
+
+set collectControl {import list
+error TooBig
+fn check(n) -> int errors TooBig:
+    if n > 4:
+        fail TooBig
+    n
+fn ctl(n):
+    brk = loop i from 0 to n:
+        if i == 3:
+            break
+        i
+    first = loop i from 0 to n:
+        break
+    cont = loop i from 0 to n:
+        if mod(i, 2) == 0:
+            continue
+        i
+    nested = loop i from 0 to 4:
+        loop j from 0 to i:
+            if j == 2:
+                break
+            [i, j]
+    lock = loop x in ["a", "b", "c", "d"] and i from 0 to 4:
+        if i == 1:
+            continue
+        if i == 3:
+            break
+        x
+    [brk, first, cont, nested, lock]
+fn early(n):
+    xs = loop i from 0 to n:
+        if i == 4:
+            return [-1, i]
+        i
+    xs
+fn failing(n) -> List[int] errors TooBig:
+    loop i from 0 to n:
+        check(i)
+fn caught(n):
+    failing(n):
+        on TooBig:
+            [99]
+[ctl(10), early(3), early(10), caught(3), caught(10)]
+}
+
+# A coroutine whose collecting loop yields mid-body (suspending the loop's
+# plan on the coroutine's stack), resumed N times by a collecting loop.
+set collectCoroutine {import coroutine
+import list
+struct V:
+    n: int
+fn w(m: int) -> V:
+    xs = loop i from 0 to m:
+        yield V {n: i}
+        [i, i]
+    return V {n: list::length(xs) + list::at(list::at(xs, m - 1), 0)}
+coroutine {step, first} = w(%N%)
+ys = loop i from 0 to %N%:
+    step().n
+[first.n, list::length(ys), list::at(ys, %N% - 1), coroutine::done?(step)]
+}
+
+# {Lists ListPlans listElementCopies} of TEXT with virtual construction OPT.
+proc collectCounts {text opt} {
+    set r [vcReport $text $opt]
+    list [allocs $r List] [allocs $r ListPlan] [dict get $r copies listElements]
+}
+
+test vc-collect-forms-1 {every collecting loop form, empty and not: value parity} -body {
+    parity $collectForms
+} -result {value {[[["p!", "q!", "r!"], [0, 2, 4], [0, 1, 2, 3], [3, 2, 1], [3, 2, 1, 0], [[0, "p"], [1, "q"], [2, "r"]]], [[], [], [0], [], [0], []]]}}
+
+test vc-collect-control-1 {break (the prefix so far), continue, nesting, lockstep, return and a handled error leaving the loop mid-way: value parity} -body {
+    parity $collectControl
+} -result {value {[[[0, 1, 2], [], [1, 3, 5, 7, 9], [[], [[1, 0]], [[2, 0], [2, 1]], [[3, 0], [3, 1]]], ["a", "c"]], [0, 1, 2], [-1, 4], [0, 1, 2], [99]]}}
+
+test vc-collect-nir-1 {a retained collecting loop extends one plan per iteration and materializes it at the exit and at a break; virtual construction off keeps the eager listappend} -body {
+    set text "fn f(n):\n    loop i from 0 to n:\n        if i == 7:\n            break\n        i\nf(9)\n"
+    set on [funcBody [nirOf $text 1] f]
+    set off [funcBody [nirOf $text 0] f]
+    list [constructs $on {list plan}] [constructs $on {list flat}] [regexp -all {op listappend} $on] \
+        [constructs $off .*] [regexp -all {op listappend} $off]
+} -result {1 2 0 0 1}
+
+test vc-collect-linear-1 {N iterations of every collecting loop form allocate a constant number of Lists and copy O(N) elements (N(N-1)/2 with virtual construction off)} -body {
+    set templates {
+        "import list\nfn f(n: int) -> int:\n    xs = loop i from 0 to n:\n        i * 2\n    list::length(xs)\nf(%N%)\n"
+        "import list\nxs = loop i down from %N% through 1:\n    i\nlist::length(xs)\n"
+        "import list\nfn f(n: int) -> int:\n    src = loop i from 0 to n:\n        i\n    ys = loop x in src:\n        x + 1\n    list::length(ys)\nf(%N%)\n"
+        "import list\nfn f(n: int) -> int:\n    src = loop i from 0 to n:\n        i\n    ys = loop x in src and i from 0 to list::length(src):\n        x + i\n    list::length(ys)\nf(%N%)\n"
+        "import list\nxs = loop i from 0 to %N% * 2:\n    if i == %N%:\n        break\n    i\nlist::length(xs)\n"
+    }
+    set rows {}
+    foreach template $templates {
+        lassign [lmap n {1000 4000} {collectCounts [string map [list %N% $n] $template] 1}] small large
+        lassign [collectCounts [string map {%N% 1000} $template] 0] offLists - offCopies
+        lappend rows [list [lindex $small 0] [lindex $large 0] [lindex $large 1] \
+            [expr {[lindex $large 2] <= 3 * 4000 * [lindex $large 1]}] \
+            [expr {[lindex $large 2] <= 5 * [lindex $small 2]}] \
+            [expr {$offLists > 1000}] [expr {$offCopies >= 1000 * 999 / 2}]]
+    }
+    set rows
+} -result {{2 2 1 1 1 1 1} {2 2 1 1 1 1 1} {4 4 2 1 1 1 1} {4 4 2 1 1 1 1} {2 2 1 1 1 1 1}}
+
+test vc-collect-coroutine-1 {a collecting loop whose body yields inside a coroutine, resumed by another collecting loop: value parity, one ListPlan per loop, Lists only for the N collected elements} -constraints linuxX86_64 -body {
+    set text [string map {%N% 3} $collectCoroutine]
+    set rows [list [parity $text]]
+    foreach n {500 2000} {
+        lassign [collectCounts [string map [list %N% $n] $collectCoroutine] 1] lists plans copies
+        lappend rows [list [expr {$lists - $n}] $plans [expr {$copies <= 8 * $n}]]
+    }
+    set rows
+} -result {{value {[0, 3, 5, true]}} {5 2 1} {5 2 1}}
+
+test vc-gc-collect-1 {collecting-loop plans and their heap elements stay rooted under GC stress, including a plan suspended on a coroutine stack while the body allocates} -constraints linuxX86_64 -body {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        list [parity $collectControl] [parity [string map {%N% 40} $collectCoroutine]] \
+            [parity "import list\nimport str\nxs = loop i from 0 to 30:\n    if i == 25:\n        break\n    \[str::concat(\"s\", str::substring(\"0123456789\", mod(i, 10), mod(i, 10) + 1)), i\]\n\[list::length(xs), list::at(xs, 0), list::at(xs, 24)\]"]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+} -result {{value {[[[0, 1, 2], [], [1, 3, 5, 7, 9], [[], [[1, 0]], [[2, 0], [2, 1]], [[3, 0], [3, 1]]], ["a", "c"]], [0, 1, 2], [-1, 4], [0, 1, 2], [99]]}} {value {[0, 40, 79, true]}} {value {[25, ["s0", 0], ["s4", 24]]}}}
+
+# ---------------------------------------------------------------------------
 # GC stress: plans, their pieces and their materializations stay rooted
 
 test vc-gc-str-1 {String plans (append, prepend, regions, merges, plan results) under GC stress} -body {

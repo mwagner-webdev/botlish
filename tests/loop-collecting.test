@@ -669,10 +669,11 @@ foreach {name header} {
         list [regexp {listnew|listappend} $nir] [regexp {op r?(ilt|ile|igt|ige) } $nir] [regexp {\n    br } $nir]
     } -result {0 1 1}
 
-    test loop-collecting-native-retained-$name "a numeric loop whose value is used ($name) accumulates once per iteration" -body {
+    test loop-collecting-native-retained-$name "a numeric loop whose value is used ($name) extends one private List plan per iteration and materializes it once" -body {
         set nir [nirOf "fn f(n):\n    loop $header:\n        i * 2\nf(5)\n"]
-        list [regexp {op listnew} $nir] [regexp {op listappend} $nir]
-    } -result {1 1}
+        list [regexp {op listnew} $nir] [regexp -all {construct list plan} $nir] \
+            [regexp -all {construct list flat} $nir] [regexp {op listappend} $nir]
+    } -result {1 1 1 0}
 }
 
 test loop-collecting-native-compare-ops {the endpoint test is the matching comparison, never an adjusted bound: raw when both bounds are proven small (loss point 4 of GENERIC-PREDICATE-PROOF-LOSS.md; n is 5 here), tagged with its knob off} -body {

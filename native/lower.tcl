@@ -3361,7 +3361,9 @@ proc native::lower::Expr {fnVar e {want tagged}} {
                 # check below) has no real accumulator to move; accReg is
                 # then the sentinel "discard", and the placeholder result
                 # nothing downstream reads is filled with unit instead.
-                set prefix [expr {$accReg eq "discard" ? [Assign fn unit] : $accReg}]
+                # A retained accumulator is materialized here
+                # (CollectFinish): it may be a construction plan.
+                set prefix [expr {$accReg eq "discard" ? [Assign fn unit] : [CollectFinish fn $e $accReg]}]
                 Emit fn "$resultReg = move $prefix" $e
                 Emit fn "jump $exit" $e
                 dict set fn broken [dict get $node target] 1
@@ -7965,6 +7967,64 @@ proc native::lower::JoinKeepAddr {fnVar r v} {
     dict set fn keepAddr $r $storages
 }
 
+# The result accumulator of a retained collecting loop (ListLoop, CountLoop,
+# LockLoop; COLLECTING-LOOPS.md). The accumulator is not a Botlish binding
+# -- the loop's List is never observable until the loop ends, normally or by
+# a bare `break` -- so hir/construction.tcl, which only reasons about
+# bindings and `str::concat`/`list::append` calls, never sees it; the loop lowering
+# owns it outright and keeps it virtual itself (M8A-VIRTUAL-IMMUTABLE-
+# CONSTRUCTION.md's plan objects): a maybe-plan register that starts as the
+# flat empty List, is extended in place by one `construct list plan ACC elem
+# V` per contributing iteration (amortized growth: O(1) allocations and
+# O(N) element copies for N iterations, where an eager `listappend` per
+# iteration copies the whole List so far), and is materialized exactly once,
+# by `construct list flat ACC`, where the loop yields its List: normal
+# exhaustion and a bare `break` (CollectFinish). `continue` contributes
+# nothing and leaves the plan untouched; `return`/an error leaving the body
+# just drops it (the collector frees it). The register is a loop-carried
+# plan register: consumed once per iteration by the extension and redefined
+# by the back-edge move, which is exactly the linear discipline nir.rs's
+# validate_plans checks across the back edge; it is an ordinary GC root
+# like any other heap register (a ListPlan's items are traced, heap.rs),
+# including on a suspended coroutine stack. -virtual-construction-opt 0
+# keeps the eager per-iteration `listappend`, for differential testing.
+proc native::lower::CollectStart {fnVar e} {
+    upvar 1 $fnVar fn
+    variable constructionOpt
+    set acc0 [Assign fn "op listnew" $e]
+    set accReg [NewReg fn]
+    if {$constructionOpt} {
+        MarkPlan fn $accReg
+    }
+    Emit fn "$accReg = move $acc0" $e
+    return $accReg
+}
+
+# Appends the body value VALUE to collecting-loop accumulator ACCREG
+# (CollectStart) and rebinds ACCREG to the result.
+proc native::lower::CollectAppend {fnVar e accReg value} {
+    upvar 1 $fnVar fn
+    if {[IsPlanReg fn $accReg]} {
+        set accNext [Assign fn "construct list plan $accReg elem $value" $e]
+        MarkPlan fn $accNext
+    } else {
+        set accNext [Assign fn "op listappend $accReg $value" $e]
+    }
+    Emit fn "$accReg = move $accNext" $e
+}
+
+# The List collected so far in accumulator ACCREG (CollectStart), as an
+# ordinary flat register: its one materialization (a loop that never
+# contributed still holds the flat empty List, which `construct` passes
+# through unchanged).
+proc native::lower::CollectFinish {fnVar e accReg} {
+    upvar 1 $fnVar fn
+    if {[IsPlanReg fn $accReg]} {
+        return [Assign fn "construct list flat $accReg" $e]
+    }
+    return $accReg
+}
+
 # (listloop LIST-EXPR (block (ELEM) BODY...)): the returning iterable loop
 # (RETURNING-ITERABLE-LOOPS.md). Lowers directly to the shape item 50 of
 # BYTE-SET.md describes -- evaluate the list once, an index/accumulator
@@ -8019,9 +8079,7 @@ proc native::lower::ListLoop {fnVar e node} {
     Emit fn "$idxReg = move $idx0" $e
     set retained [expr {![dict exists $context discarded $e]}]
     if {$retained} {
-        set acc0 [Assign fn "op listnew" $e]
-        set accReg [NewReg fn]
-        Emit fn "$accReg = move $acc0" $e
+        set accReg [CollectStart fn $e]
     } else {
         set accReg ""
     }
@@ -8053,8 +8111,7 @@ proc native::lower::ListLoop {fnVar e node} {
     set usedContinue [dict exists $fn continued $e]
     if {$bodyValue ne "never"} {
         if {$retained} {
-            set accNext [Assign fn "op listappend $accReg $bodyValue" $e]
-            Emit fn "$accReg = move $accNext" $e
+            CollectAppend fn $e $accReg $bodyValue
         }
         Emit fn "jump $continueLabel" $e
     }
@@ -8070,7 +8127,7 @@ proc native::lower::ListLoop {fnVar e node} {
     }
     EmitLabel fn $normalExit
     if {$retained} {
-        Emit fn "$resultReg = move $accReg" $e
+        Emit fn "$resultReg = move [CollectFinish fn $e $accReg]" $e
     } else {
         set unitConst [Assign fn unit $e]
         Emit fn "$resultReg = move $unitConst" $e
@@ -8209,9 +8266,7 @@ proc native::lower::CountLoop {fnVar e node} {
     Emit fn "$idxReg = move $startReg" $e
     set retained [expr {![dict exists $context discarded $e]}]
     if {$retained} {
-        set acc0 [Assign fn "op listnew" $e]
-        set accReg [NewReg fn]
-        Emit fn "$accReg = move $acc0" $e
+        set accReg [CollectStart fn $e]
     } else {
         set accReg ""
     }
@@ -8240,8 +8295,7 @@ proc native::lower::CountLoop {fnVar e node} {
     set usedContinue [dict exists $fn continued $e]
     if {$bodyValue ne "never"} {
         if {$retained} {
-            set accNext [Assign fn "op listappend $accReg $bodyValue" $e]
-            Emit fn "$accReg = move $accNext" $e
+            CollectAppend fn $e $accReg $bodyValue
         }
         Emit fn "jump $continueLabel" $e
     }
@@ -8262,7 +8316,7 @@ proc native::lower::CountLoop {fnVar e node} {
     }
     EmitLabel fn $normalExit
     if {$retained} {
-        Emit fn "$resultReg = move $accReg" $e
+        Emit fn "$resultReg = move [CollectFinish fn $e $accReg]" $e
     } else {
         set unitConst [Assign fn unit $e]
         Emit fn "$resultReg = move $unitConst" $e
@@ -8379,9 +8433,7 @@ proc native::lower::LockLoop {fnVar e node} {
     set resultReg [NewReg fn]
     set retained [expr {![dict exists $context discarded $e]}]
     if {$retained} {
-        set acc0 [Assign fn "op listnew" $e]
-        set accReg [NewReg fn]
-        Emit fn "$accReg = move $acc0" $e
+        set accReg [CollectStart fn $e]
     } else {
         set accReg ""
     }
@@ -8419,8 +8471,7 @@ proc native::lower::LockLoop {fnVar e node} {
     set usedContinue [dict exists $fn continued $e]
     if {$bodyValue ne "never"} {
         if {$retained} {
-            set accNext [Assign fn "op listappend $accReg $bodyValue" $e]
-            Emit fn "$accReg = move $accNext" $e
+            CollectAppend fn $e $accReg $bodyValue
         }
         Emit fn "jump $continueLabel" $e
     }
@@ -8450,7 +8501,7 @@ proc native::lower::LockLoop {fnVar e node} {
     }
     EmitLabel fn $normalExit
     if {$retained} {
-        Emit fn "$resultReg = move $accReg" $e
+        Emit fn "$resultReg = move [CollectFinish fn $e $accReg]" $e
     } else {
         set unitConst [Assign fn unit $e]
         Emit fn "$resultReg = move $unitConst" $e

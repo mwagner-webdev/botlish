@@ -220,6 +220,18 @@ fuzzing, not language semantics.
   the `listget` at the shared position is in bounds by construction and no
   runtime cardinality check exists. No descending/inclusive loop becomes a
   recursive call; nothing here lowers HIR to core IR or back.
+* **Native result List** (all three loop forms; added after this milestone):
+  a retained loop's accumulator is a private List plan
+  (M8A-VIRTUAL-IMMUTABLE-CONSTRUCTION.md's `ListPlanObj`, a loop-carried
+  maybe-plan register; `native/lower.tcl`'s `CollectStart`/`CollectAppend`/
+  `CollectFinish`): it starts as the flat empty List, each contributing
+  iteration extends it in place (`construct list plan ACC elem V`, amortized
+  growth), and it is materialized once (`construct list flat ACC`) at the
+  normal exit or at a bare `break`. A loop of N iterations allocates two
+  Lists and one ListPlan and copies O(N) elements, where the original
+  per-iteration `listappend` allocated N + 1 Lists and copied N(N-1)/2
+  elements (`tests/virtual-construction.test`'s `vc-collect-*`).
+  `-virtual-construction-opt 0` keeps the eager `listappend`.
 * **Passes updated** (every one that knows loop kinds): `hir/types.tcl`
   (`List[R]`), `hir/range.tcl` (`InductionSeed`), `hir/completions.tcl`,
   `hir/callables.tcl`, `hir/signatures.tcl`, `hir/construction.tcl`,
