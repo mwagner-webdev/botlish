@@ -1,0 +1,1152 @@
+# many-boolean-arguments.test -- the MANY-BOOLEAN-ARGUMENTS compiler warning
+# (WARNINGS-MANY-BOOLEAN-ARGUMENTS.md) on the warning framework
+# WARNINGS-SAME-RETURN.md built (hir/warnings.tcl).
+#
+# The theorem: a call site is reported exactly when it is a written call
+# (`function` or `method` form) to a declared callee whose signature has at
+# least two ordinary parameters the checker proves `bool` and at least one
+# ordinary non-`bool` parameter, and the call passes two or more written
+# `true`/`false` literals at ordinary parameter positions. One diagnostic per
+# call site, anchored at the call, no secondary locations; everything else is
+# silent:
+#
+#   * a callee whose ordinary parameters are all bool (data bools: `xor`),
+#     one with fewer than two proven-bool ordinary parameters, and flags --
+#     which are the idiom and never counted, in the gate or the threshold;
+#   * a call through a function value (a parameter, a call result, a field);
+#   * computed or bound bools at the call, whatever their value (the
+#     anonymity principle: a name already says what the value means), and a
+#     call with fewer than two literals;
+#   * calls the frontend synthesizes (operators, list literals) and calls
+#     with no provenance marker (core IR, HIR text);
+#   * structurally unreachable calls (milestone 2's rule; no completion walk).
+#
+# The message states the literal count, names the callee and names the form;
+# it prints no flag spelling and prescribes no mapping: the warning is
+# deliberately not autofixable (a flag defaults to false, so a mis-mapped
+# rewrite would compile and be silently wrong).
+#
+# Like the other warning test files, every compile here passes its policy and
+# channel explicitly (`-warnings MODE`, `-warning-channel ""` to collect
+# without printing), so this file exercises default, off and error whatever
+# the harness's process default is.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+
+set ::allBackends {interp compile cranelift-generic cranelift}
+set ::mbCode MANY-BOOLEAN-ARGUMENTS
+
+# The HIR of SOURCE under policy MODE (default off error), collecting
+# warnings without printing them.
+proc compileWith {source {mode default}} {
+    return [surface::compile $source t.bot -warnings $mode -warning-channel ""]
+}
+
+# "LINE:COL" of ORIGIN in HIR, without the file name when it is t.bot.
+proc loc {hir origin} {
+    return [regsub {^t\.bot:} [hir::originLocation $hir $origin] {}]
+}
+
+# The MANY-BOOLEAN-ARGUMENTS warnings of HIR.
+proc manyOf {hir} {
+    return [lmap w [hir::warnings::of $hir] {
+        if {[dict get $w code] ne $::mbCode} continue
+        set w
+    }]
+}
+
+# Each MANY-BOOLEAN-ARGUMENTS warning of SOURCE as {PRIMARY LITERALS}.
+proc sites {source} {
+    set hir [compileWith $source]
+    return [lmap w [manyOf $hir] {
+        list [loc $hir [dict get $w primary]] [dict get $w data literals]
+    }]
+}
+
+# "LINE:COL" of each MANY-BOOLEAN-ARGUMENTS warning of SOURCE, in order.
+proc where {source} {
+    return [lmap s [sites $source] {lindex $s 0}]
+}
+
+# "MESSAGE @ PRIMARY" for each MANY-BOOLEAN-ARGUMENTS warning of SOURCE.
+proc shown {source} {
+    set hir [compileWith $source]
+    return [lmap w [manyOf $hir] {
+        string cat [dict get $w message] " @ " [loc $hir [dict get $w primary]]
+    }]
+}
+
+# 1 if SOURCE compiles with no MANY-BOOLEAN-ARGUMENTS warning.
+proc silent {source} {
+    return [expr {[manyOf [compileWith $source]] eq ""}]
+}
+
+# Every warning of SOURCE (all codes) as {CODE PRIMARY}.
+proc allWarnings {source} {
+    set hir [compileWith $source]
+    return [lmap w [hir::warnings::of $hir] {list [dict get $w code] [loc $hir [dict get $w primary]]}]
+}
+
+# The rejection of SOURCE under MODE: {errorcode message}, or "compiled".
+proc rejection {source mode} {
+    if {[catch {compileWith $source $mode} message options]} {
+        return [list [dict get $options -errorcode] $message]
+    }
+    return compiled
+}
+
+# What SOURCE does on the reference interpreter, compiled with warnings off:
+# {value V}, {runtime ERRORCODE} or {rejected ERRORCODE}.
+proc behavior {source} {
+    if {[catch {compileWith $source off} hir options]} {
+        return [list rejected [dict get $options -errorcode]]
+    }
+    set outcome [outcomeUnderHir interp $hir]
+    if {[lindex $outcome 0] eq "value"} {
+        return [list value [lindex $outcome 1]]
+    }
+    return [list runtime [lindex $outcome 1]]
+}
+
+# Runs SCRIPT with module files FILES ({NAME TEXT ...}) in a private library
+# directory (a per-process name in the tcltest temporary directory).
+proc withModules {files script} {
+    set saved $::core::libraryDir
+    set dir [makeDirectory mb-scratch-[pid]]
+    foreach entry [glob -nocomplain -directory $saved *] {
+        file copy -force $entry $dir
+    }
+    set ::core::libraryDir $dir
+    try {
+        foreach {name text} $files {
+            set channel [open [file join $dir $name] w]
+            fconfigure $channel -encoding utf-8
+            puts -nonewline $channel $text
+            close $channel
+        }
+        uplevel 1 $script
+    } finally {
+        set ::core::libraryDir $saved
+        removeDirectory mb-scratch-[pid]
+    }
+}
+
+# Runs SCRIPT with a probe native NAME registered with parameter types TYPES
+# (its value is its first argument), unregistered afterwards.
+proc withProbeNative {name types script} {
+    core::native::register $name -arity [llength $types] -param-types $types \
+        -impl {apply {{args} {return [list value [lindex $args 0]]}}} -result-type any
+    try {
+        uplevel 1 $script
+    } finally {
+        core::native::unregister $name
+    }
+}
+
+# The option-taking function the examples below call: a subject and three
+# proven-bool options.
+set ::openFile {fn open_file(path, append: bool, create: bool, sync: bool):
+    path}
+
+# ---------------------------------------------------------------------------
+# The theorem (item 3): the motivating call, the literal-count boundary,
+# false counting, per-site granularity, positions
+
+test mb-motivating-rendered {the motivating call: one warning at the call, rendered exactly, no notes} -body {
+    set hir [surface::compile {fn open_file(path, append: bool, create: bool, sync: bool):
+    path
+
+open_file("file.txt", true, false, true)} f.bot -warnings default -warning-channel ""]
+    lmap w [manyOf $hir] {hir::warnings::render $hir $w}
+} -result {{f.bot:4:1: warning: the call to `open_file` passes 3 boolean literals; flags name options (MANY-BOOLEAN-ARGUMENTS)}}
+
+test mb-literal-count-boundary {1 literal is silent, 2 fire, 3 fire; the count in the message is the literal count} -body {
+    shown "$::openFile
+fn f(x, a, b):
+    one = open_file(x, true, a, b)
+    two = open_file(x, true, false, b)
+    three = open_file(x, true, false, true)
+    \[one, two, three\]
+f(\"p\", 1 == 1, 2 == 3)"
+} -result {{the call to `open_file` passes 2 boolean literals; flags name options @ 5:11} {the call to `open_file` passes 3 boolean literals; flags name options @ 6:13}}
+
+test mb-mixed-literal-and-computed {f(true, compute(), false): two literals with a computed bool between them fire, with count 2; the computed argument is no evidence} -body {
+    set hir [compileWith "$::openFile
+fn compute() -> bool:
+    1 < 2
+open_file(\"p\", true, compute(), false)"]
+    lmap w [manyOf $hir] {list [loc $hir [dict get $w primary]] [dict get $w data literals] [dict get $w data positions]}
+} -result {{5:1 2 {2 4}}}
+
+test mb-false-counts {false is exactly as anonymous as true: two false literals fire, and a false beside a true counts} -body {
+    sites "$::openFile
+fn f(x, c):
+    a = open_file(x, false, false, c)
+    b = open_file(x, c, true, false)
+    \[a, b\]
+f(\"p\", 1 == 1)"
+} -result {{4:9 2} {5:9 2}}
+
+test mb-per-site {two identical calls are two warnings: per site, no grouping, no first-site-per-callee or per-value} -body {
+    where "$::openFile
+a = \"p\".open_file(true, false, true)
+b = \"p\".open_file(true, false, true)
+c = \"q\".open_file(true, false, true)
+\[a, b, c\]"
+} -result {3:5 4:5 5:5}
+
+test mb-positions {the literals' ordinary positions (1-based, the receiver of a method call is position 1): first, middle and last parameters} -body {
+    set hir [compileWith {fn first(a: bool, b: bool, x):
+    x
+fn middle(a: bool, x, b: bool):
+    x
+fn last(x, a: bool, b: bool):
+    x
+p = first(true, false, 1)
+q = middle(true, 1, false)
+r = last(1, true, false)
+[p, q, r]}]
+    lmap w [manyOf $hir] {list [dict get $w data calleeName] [dict get $w data positions]}
+} -result {{first {1 2}} {middle {1 3}} {last {2 3}}}
+
+test mb-method-sugar-receiver-position {DECIDED, pinned: method sugar is the call f(receiver, ...) (FLAGS.md: the receiver is the first ordinary argument), so a literal receiver is a literal at position 1 and counts; a non-literal receiver does not} -body {
+    set hir [compileWith {fn first(a: bool, b: bool, x):
+    x
+fn last(x, a: bool, b: bool):
+    x
+p = true.first(false, 1)
+q = "s".last(true, false)
+r = true.last(false, true)
+s = "t".last(true, 1 == 1)
+[p, q, r, s]}]
+    lmap w [manyOf $hir] {list [loc $hir [dict get $w primary]] [dict get $w data literals] [dict get $w data positions]}
+} -result {{5:5 2 {1 2}} {6:5 2 {2 3}} {7:5 3 {1 2 3}}}
+
+test mb-literal-at-a-subject-position-counts {a literal at any ordinary position counts, the subject's included: the evidence is the written token, and true carries no name wherever it is passed} -body {
+    sites {fn last(x, a: bool, b: bool):
+    x
+last(true, true, 1 == 1)}
+} -result {{3:1 2}}
+
+test mb-method-and-functional-spellings-agree {the functional and the method spelling of one call are the same call: the same count, positions and callee} -body {
+    set functional [compileWith "$::openFile
+open_file(\"p\", true, false, true)"]
+    set method [compileWith "$::openFile
+\"p\".open_file(true, false, true)"]
+    list [lmap w [manyOf $functional] {dict remove [dict get $w data] call}] \
+        [lmap w [manyOf $method] {dict remove [dict get $w data] call}]
+} -result {{{callee {block e2} calleeName open_file literals 3 positions {2 3 4}}} {{callee {block e2} calleeName open_file literals 3 positions {2 3 4}}}}
+
+# ---------------------------------------------------------------------------
+# The gate (item 4): two proven-bool ordinary parameters, a subject, flags
+# excluded, provable types, declared callees
+
+test mb-gate-subject-boundary {the subject gate, in one program: all-bool ordinary parameters are data bools (silent); one non-bool and two bool fire; two bool and one non-bool fire} -body {
+    set hir [compileWith {fn xor(a: bool, b: bool) -> bool:
+    a != b
+fn subject_first(x, a: bool, b: bool):
+    x
+fn subject_last(a: bool, b: bool, x):
+    x
+p = xor(true, false)
+q = subject_first(1, true, false)
+r = subject_last(true, false, 1)
+[p, q, r]}]
+    lmap w [manyOf $hir] {list [dict get $w data calleeName] [loc $hir [dict get $w primary]]}
+} -result {{subject_first 8:5} {subject_last 9:5}}
+
+test mb-all-bool-of-any-arity-silent {data-bool functions of two, three and four bool parameters are silent, whatever their calls pass} -body {
+    silent {fn and2(a: bool, b: bool) -> bool:
+    a and b
+fn and3(a: bool, b: bool, c: bool) -> bool:
+    a and b and c
+fn and4(a: bool, b: bool, c: bool, d: bool) -> bool:
+    a and b and c and d
+[and2(true, true), and3(true, false, true), and4(false, false, false, false)]}
+} -result 1
+
+test mb-flags-excluded {CRITICAL: flags are never counted. A function with two ordinary bools beside flags fires on its ordinary literals only; a flag-only signature never fires, whatever flags a call supplies (the resolver appends one bool constant per declared flag to the call's arguments)} -body {
+    set hir [compileWith {fn mixed(path, a: bool, b: bool, flags :x, :y):
+    path
+fn idiom(path, flags :append, :create, :sync):
+    path
+p = mixed("p", true, false, :x)
+q = mixed("q", true, false)
+r = idiom("r", :append, :create, :sync)
+s = idiom("s", :sync)
+[p, q, r, s]}]
+    list [lmap w [manyOf $hir] {list [loc $hir [dict get $w primary]] [dict get $w data literals] [dict get $w data positions]}] \
+        [llength [dict get $hir exprs [dict get [lindex [manyOf $hir] 0] data call] args]]
+} -result {{{5:5 2 {2 3}} {6:5 2 {2 3}}} 5}
+
+test mb-flags-never-make-the-gate {a function with ONE ordinary bool and flags is below the gate: flags never complete it, even when the call supplies them (the flag arguments are bool constants the resolver appended)} -body {
+    set hir [compileWith {fn one(path, a: bool, flags :x, :y):
+    path
+p = one(true, true, :x, :y)
+q = one("q", true, :x)
+[p, q]}]
+    list [manyOf $hir] [lmap e {} {}] [behavior {fn one(path, a: bool, flags :x, :y):
+    [path, a, x, y]
+one(true, true, :x, :y)}]
+} -result {{} {} {value {[true, true, true, true]}}}
+
+test mb-flags-never-make-the-threshold {flags never count toward the threshold: one ordinary literal and any supplied flags is one literal (silent)} -body {
+    silent {fn mixed(path, a: bool, b: bool, flags :x, :y):
+    path
+fn f(c):
+    mixed("p", true, c, :x, :y)
+f(1 == 1)}
+} -result 1
+
+test mb-one-bool-parameter-silent {a callee with one proven-bool ordinary parameter is below the gate, even when a call passes two literals (one at the untyped subject)} -body {
+    silent {fn one(x, a: bool):
+    x
+one(true, false)}
+} -result 1
+
+test mb-zero-and-one-parameter-callees-silent {callees of zero and one ordinary parameters are silent} -body {
+    silent {fn none():
+    1
+fn single(a: bool):
+    a
+[none(), single(true)]}
+} -result 1
+
+test mb-unprovable-parameter-types-silent {only a parameter the checker proves bool counts: untyped (polymorphic), `any`, and int parameters are not bool, so a call passing literals to them is below the gate} -body {
+    silent {fn untyped(x, a, b):
+    x
+fn anys(x, a: any, b: any):
+    x
+fn mixed(x, a: bool, b: any):
+    x
+fn ints(x, a: int, b: bool):
+    x
+[untyped(1, true, false), anys(1, true, false), mixed(1, true, false), ints(1, 2, true)]}
+} -result 1
+
+test mb-yield-caveat-condition-use-is-not-a-proof {THE YIELD CAVEAT, resolved: an untyped parameter the body only uses as a condition carries a CHECKED bool contract (validated at run time; the body is never typed with it), not a proven type -- silent. Forwarded to a declared bool parameter it carries a TRUSTED inferred bool (the body cannot be typed without it; every call must prove it) -- counted, and the call fires} -body {
+    set hir [compileWith {fn conditions(x, a, b):
+    if a and b:
+        x
+    else:
+        0
+fn sink(x, a: bool, b: bool):
+    x
+fn forwards(x, a, b):
+    sink(x, a, b)
+p = conditions(1, true, false)
+q = forwards(2, true, false)
+[p, q]}]
+    set contracts {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "bind" || [dict get $hir exprs [dict get $node value] kind] ne "block"} continue
+        set sig [hir::signatures::of $hir [dict get $node value]]
+        lappend contracts [dict get $node name] [lmap p [lrange [dict get $sig params] 1 2] {
+            list [dict get $p source] [dict get $p trusted] [dict get $p checked]
+        }]
+    }
+    list [lmap w [manyOf $hir] {list [dict get $w data calleeName] [loc $hir [dict get $w primary]]}] $contracts
+} -result {{{forwards 11:5}} {conditions {{inferred {} bool} {inferred {} bool}} sink {{declared bool {}} {declared bool {}}} forwards {{inferred bool {}} {inferred bool {}}}}}
+
+test mb-refined-bool-parameter-is-not-canonical-bool {a parameter's proven type must be exactly the canonical bool: no literal can be passed to a refinement of bool anyway (membership is a proof), and its gate count is the canonical bool's} -body {
+    set hir [compileWith {refined type On = bool
+fn on?(v: bool) -> bool proves v: On:
+    v
+fn f(x, a: On, b: bool):
+    x
+fn g(v: bool):
+    if on?(v):
+        f(1, v, true)
+    else:
+        0
+g(true)}]
+    list [manyOf $hir] [lrange [hir::signatures::entryTypes $hir [dict get [lindex [lmap {e n} [dict get $hir exprs] {if {[dict get $n kind] eq "bind" && [dict get $n name] eq "f"} {set n} else continue}] 0] value]] 1 2]
+} -result {{} {{refined bool On} bool}}
+
+test mb-native-callee-fires {DECIDED, pinned: a native callee is included, by its registry parameter types -- a probe native with a str subject and two bool parameters fires, functionally and through method sugar; one with only bool parameters is silent} -body {
+    withProbeNative str::probe_open {str bool bool} {
+        withProbeNative str::probe_xor {bool bool} {
+            set hir [compileWith {import str
+a = str::probe_open("p", true, false)
+b = "q".probe_open(false, false)
+c = str::probe_xor(true, false)
+[a, b, c]}]
+            lmap w [manyOf $hir] {list [loc $hir [dict get $w primary]] [dict get $w data callee] [dict get $w data calleeName] [dict get $w data positions]}
+        }
+    }
+} -result {{2:5 {native str::probe_open} str::probe_open {2 3}} {3:5 {native str::probe_open} str::probe_open {2 3}}}
+
+test mb-no-stdlib-native-takes-bool {the census's native half: no registered native declares a bool parameter, so no stdlib native call can fire today (the natives are included for the call site, and for the pressure list a future one would join)} -body {
+    set withBool {}
+    foreach name [core::native::names] {
+        if {"bool" in [dict get [core::native::metadata $name] paramTypes]} {
+            lappend withBool $name
+        }
+    }
+    set withBool
+} -result {}
+
+test mb-function-value-callees-silent {a call through a function value is silent: a parameter, a call result, a struct field, a binding of a branch's value -- the signature belongs to no declaration the warning can name} -body {
+    silent "$::openFile
+fn apply(g, x):
+    g(x, true, false, true)
+fn make():
+    open_file
+fn pick(c):
+    g = if c:
+        open_file
+    else:
+        open_file
+    g(\"p\", true, false, true)
+s = {h: open_file}
+\[apply(open_file, 1), make()(2, true, false, true), s.h(3, true, false, true), pick(1 == 1)\]"
+} -result 1
+
+test mb-alias-of-a-declared-function-warns {DECIDED, pinned: a name bound to a declared function (`g = open_file`, a chain of such) is that declaration, as the resolver's candidate identity and the flag interface resolve it (FLAGS.md, "Aliases and values"): the call warns and names the declaration} -body {
+    shown "$::openFile
+g = open_file
+h = g
+\[g(\"p\", true, false, true), h(\"q\", false, false, true)\]"
+} -result {{the call to `open_file` passes 3 boolean literals; flags name options @ 5:2} {the call to `open_file` passes 3 boolean literals; flags name options @ 5:29}}
+
+test mb-arity-mismatch-silent {a call whose argument count is not the declaration's cannot run (ARITY at run time) and is silent} -body {
+    silent "$::openFile
+fn f(x):
+    open_file(x, true, false, true, true)
+fn g(x):
+    open_file(x, true, false)
+1"
+} -result 1
+
+test mb-context-parameters-not-counted {context parameters are not parameters (not in the block's params): beside two bools and a subject the call fires; beside only bools it stays a data-bool function} -body {
+    set hir [compileWith {context struct C:
+    v: int
+fn with_subject(x, a: bool, b: bool, context c: C):
+    x + c.v
+fn only_bools(a: bool, b: bool, context c: C):
+    c.v
+with context C {v: 1}
+p = with_subject(1, true, false)
+q = only_bools(true, false)
+[p, q]}]
+    lmap w [manyOf $hir] {list [dict get $w data calleeName] [loc $hir [dict get $w primary]]}
+} -result {{with_subject 8:5}}
+
+test mb-errors-clause-irrelevant {an errors clause changes nothing: the call of a function that declares errors fires like any other} -body {
+    where {error Bad
+fn f(x, a: bool, b: bool) errors Bad:
+    if x < 0:
+        fail Bad
+    x
+r = f(1, true, false):
+    on Bad:
+        0
+r}
+} -result 6:5
+
+test mb-nested-and-recursive-callees {a nested function and a recursive call are declared callees} -body {
+    where {fn outer(n):
+    fn inner(x, a: bool, b: bool):
+        x
+    inner(n, true, false)
+fn rec(n, a: bool, b: bool):
+    if n <= 0:
+        return 0
+    rec(n - 1, true, true)
+[outer(1), rec(2, false, false)]}
+} -result {4:5 8:5 9:12}
+
+# ---------------------------------------------------------------------------
+# The evidence (item 5): written literals only -- anonymity as design
+
+test mb-bindings-silent {named bindings are silent by design, not conservatism: a binding provably holding true, an alias of one, and a literal beside one binding (one literal) never fire} -body {
+    silent "$::openFile
+append = true
+create = false
+sync = append
+a = open_file(\"p\", append, create, sync)
+b = open_file(\"q\", true, create, sync)
+\[a, b\]"
+} -result 1
+
+test mb-provably-constant-bindings-silent {the anti-heroic-proving pin: the exact value of a binding is known to the compiler (hir::exact), and still never evidence} -body {
+    set hir [compileWith "$::openFile
+yes = true
+no = false
+open_file(\"p\", yes, no, yes)"]
+    set facts {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "call" && [dict exists $node written] && [dict get $node written form] eq "function"} {
+            set facts [lmap a [lrange [dict get $node args] 1 end] {hir::exact::Of $hir $a}]
+        }
+    }
+    list [manyOf $hir] $facts
+} -result {{} {{val {bool true}} {val {bool false}} {val {bool true}}}}
+
+test mb-computed-bools-silent {computed bools are no evidence and do not count: f(1 == 1, 2 == 2) has zero literals, f(true, compute()) one} -body {
+    silent "$::openFile
+fn compute() -> bool:
+    1 < 2
+a = open_file(\"p\", 1 == 1, 2 == 2, 3 == 3)
+b = open_file(\"q\", true, compute(), 1 == 2)
+c = open_file(\"r\", not false, true and true, false or false)
+\[a, b, c\]"
+} -result 1
+
+test mb-synthesized-calls-silent {calls the frontend synthesizes are never candidates: `true != false` (an == call), `[true, false]` (a list call), `true == false`, and a struct literal of bool fields (no call at all)} -body {
+    set hir [compileWith {struct S:
+    a: bool
+    b: bool
+p = true != false
+q = [true, false]
+r = true == false
+s = S {a: true, b: false}
+[p, q, r, s]}]
+    set forms {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "call" && [dict exists $node written]} {
+            lappend forms [dict get $node written form]
+        }
+    }
+    list [manyOf $hir] [lsort -unique $forms]
+} -result {{} {list operator}}
+
+test mb-same-literals-in-a-written-call-fire {the same literals inside a written call fire, beside the synthesized ones that do not} -body {
+    where "$::openFile
+p = \[true, false\]
+q = true != false
+r = open_file(\"p\", true, false, true)
+\[p, q, r\]"
+} -result 5:5
+
+test mb-core-ir-input-silent {HIR built from core IR carries no written provenance: never a candidate} -body {
+    set hir [hir::build {{bind f {block {p a b} {ref p}}} {call {ref f} {const 1} {ref true} {ref false}}}]
+    lmap w [hir::warnings::collect $hir] {dict get $w code}
+} -result {}
+
+test mb-hir-text-input-silent {HIR read back from hir::format text keeps the declared bool parameters but no provenance marker: the source HIR warns, the parsed one never (provenance is the only thing that silences it)} -body {
+    set hir [compileWith "$::openFile
+\"path\".open_file(true, false, true)"]
+    set parsed [hir::parse [hir::format $hir]]
+    set block [lindex [lmap {e node} [dict get $parsed exprs] {if {[dict get $node kind] eq "block"} {set e} else continue}] 0]
+    list [llength [manyOf $hir]] [lmap w [hir::warnings::collect $parsed] {dict get $w code}] \
+        [lrange [hir::signatures::entryTypes $parsed $block] 1 end]
+} -result {1 {} {bool bool bool}}
+
+# ---------------------------------------------------------------------------
+# Reachability (item 7): milestone 2's structural rule, and the contrast with
+# milestones 5 and 6
+
+test mb-dead-branch-silent {a call in a statically decided-away branch is structurally unreachable: silent} -body {
+    silent "$::openFile
+fn f(x):
+    if 1 == 2:
+        return open_file(x, true, false, true)
+    x
+f(1)"
+} -result 1
+
+test mb-after-return-silent {a call after a completion is structurally unreachable: silent} -body {
+    silent "$::openFile
+fn f(x):
+    return x
+    open_file(x, true, false, true)
+f(1)"
+} -result 1
+
+test mb-contrast-with-one-char-string-literal {THE CONTRAST, pinned in one program: in one dead branch a one-character String literal warns (its fact is about written source, oc-dead-branch-literal-warns's shape) and a multi-bool-literal call is silent (its fact is about a call, and a call that cannot execute makes no call)} -body {
+    allWarnings "$::openFile
+fn f(x):
+    if 1 == 2:
+        return \"x\".open_file(true, false, true)
+    x
+f(1)"
+} -result {{ONE-CHAR-STRING-LITERAL 5:16}}
+
+test mb-range-infeasible-branch-warns {structural only: a branch the range facts prove infeasible is structurally reachable (only the completion walk prunes it), so its call warns -- the conservative direction, no completion walk} -body {
+    where "$::openFile
+fn f(x):
+    if x < 0:
+        if x > 5:
+            return \"p\".open_file(true, false, true)
+    x
+f(1)"
+} -result 6:20
+
+test mb-uncalled-function-warns {a reachable call in a function nobody calls still warns (no interprocedural unreachability), as does one in a function declared in a dead branch (its body is structurally reachable; milestone 2's METHOD-ELIGIBLE agrees)} -body {
+    allWarnings "$::openFile
+fn nobody(x):
+    \"path\".open_file(x, true, false)
+fn k(c):
+    if 1 == 2:
+        fn inner(x):
+            open_file(x, true, false, true)
+        inner(c)
+    c
+k(1)"
+} -result {{MANY-BOOLEAN-ARGUMENTS 4:5} {MANY-BOOLEAN-ARGUMENTS 8:13} {METHOD-ELIGIBLE 8:13}}
+
+test mb-no-completion-walk {the pass never asks the completion proof (hir::completions::reachedExprs traced at 0 calls)} -body {
+    set hir [compileWith "$::openFile
+fn f(x):
+    if x < 0:
+        if x > 5:
+            return \"p\".open_file(true, false, true)
+    \"q\".open_file(true, true, true)
+f(1)" off]
+    set ::walks 0
+    trace add execution hir::completions::reachedExprs enter {apply {{args} {incr ::walks}}}
+    try {
+        set warnings [hir::warnings::ManyBooleanArguments $hir]
+    } finally {
+        trace remove execution hir::completions::reachedExprs enter {apply {{args} {incr ::walks}}}
+    }
+    list [llength $warnings] $::walks
+} -result {2 0}
+
+# ---------------------------------------------------------------------------
+# Record, message, ordering (items 8, 9)
+
+set ::mbSource "$::openFile
+a = \"a.txt\".open_file(true, false, true)
+b = \"b.txt\".open_file(false, false, true)
+\[a, b\]"
+
+test mb-record-shape {the record is {code message primary secondary data}; secondary is empty (a single-location fact)} -body {
+    set w [lindex [manyOf [compileWith $::mbSource]] 0]
+    list [lsort [dict keys $w]] [dict get $w code] [dict get $w secondary]
+} -result {{code data message primary secondary} MANY-BOOLEAN-ARGUMENTS {}}
+
+test mb-record-data-fields {data: call (ExprId), callee (the call's target representation), calleeName, literals, positions -- nothing else, no rendered source text} -body {
+    set hir [compileWith $::mbSource]
+    set w [lindex [manyOf $hir] 0]
+    set call [dict get $hir exprs [dict get $w data call]]
+    list [lsort [dict keys [dict get $w data]]] [dict get $call kind] \
+        [expr {[dict get $w data callee] eq [dict get $call target]}] [dict get $w data calleeName] \
+        [dict get $w data literals] [dict get $w data positions]
+} -result {{call callee calleeName literals positions} call 1 open_file 3 {2 3 4}}
+
+test mb-primary-is-the-call {primary is the written call's own origin (its span)} -body {
+    set hir [compileWith $::mbSource]
+    lmap w [manyOf $hir] {expr {[dict get $w primary] eq [dict get $hir exprs [dict get $w data call] origin]}}
+} -result {1 1}
+
+test mb-render-has-no-notes {the rendered warning is one line: no note: lines} -body {
+    set hir [compileWith $::mbSource]
+    lmap w [manyOf $hir] {llength [split [hir::warnings::render $hir $w] \n]}
+} -result {1 1}
+
+test mb-message-template {the message states the count, names the callee and names the form, nothing else} -body {
+    shown $::mbSource
+} -result {{the call to `open_file` passes 3 boolean literals; flags name options @ 3:5} {the call to `open_file` passes 3 boolean literals; flags name options @ 4:5}}
+
+test mb-no-flag-spelling-anywhere {no flag spelling is printed -- not in a message, not in data, not in the rendered text -- and nothing is prescribed: no mapping, no rewrite, no arity or default advice} -body {
+    set source "fn open_file(path, append: bool, create: bool, sync: bool):
+    path
+fn tally(n: int, a: bool, b: bool) -> int:
+    n
+\[\"p\".open_file(true, false, true), tally(1, false, true)\]"
+    set hir [compileWith $source]
+    set seen {}
+    foreach w [manyOf $hir] {
+        set texts [list [dict get $w message] [dict get $w data] [regsub {^t\.bot:[0-9]+:[0-9]+:} [hir::warnings::render $hir $w] {}]]
+        foreach text $texts {
+            if {[regexp {(^|[^:A-Za-z0-9_]):[A-Za-z_]} $text spelling]} {
+                lappend seen $spelling
+            }
+            foreach word {:append :create :sync :a :b append create sync -> " use " instead prefer "did you mean" rename fix should consider replace rewrite suggest default arity mapping " flags :" "true means" "false means"} {
+                if {[string first $word $text] >= 0} {
+                    lappend seen $word
+                }
+            }
+        }
+    }
+    list [llength [manyOf $hir]] [lsort -unique $seen]
+} -result {2 {}}
+
+test mb-source-order-and-determinism {warnings in source order; compiling twice gives identical warnings} -body {
+    set source "$::openFile
+fn c(x):
+    open_file(x, true, true, true)
+fn a(x):
+    open_file(x, false, false, false)
+\[c(1), a(2), \"z\".open_file(true, true, false)\]"
+    list [where $source] [expr {[hir::warnings::of [compileWith $source]] eq [hir::warnings::of [compileWith $source]]}]
+} -result {{4:5 6:5 7:14} 1}
+
+test mb-module-call-located-in-the-module {a module's own call is located in the module file and reported once for the program that loads it; the program's call of the module function is located in the program and names the module function} -body {
+    withModules {opts.bot {fn open(path, append: bool, create: bool):
+    path
+fn reopen(path):
+    open(path, true, false)
+}} {
+        set hir [compileWith {import opts
+r = opts::open("x", true, false)
+[r, opts::reopen("y"), opts::reopen("z")]}]
+        lmap w [manyOf $hir] {list [file tail [hir::originLocation $hir [dict get $w primary]]] [dict get $w data calleeName]}
+    }
+} -result {{t.bot:2:5 opts::open} {opts.bot:4:5 opts::open}}
+
+test mb-instances-never-walked {the pass reads the generic source HIR once: a call in a polymorphic function with several semantic instances is one warning; collecting over HIR stripped of the semantic side table gives the identical warnings} -body {
+    set hir [compileWith "$::openFile
+fn poly(x):
+    open_file(x, true, false, true)
+\[poly(1), poly(\"ab\"), poly(true)\]"]
+    set call [dict get [lindex [manyOf $hir] 0] data call]
+    set covering [lmap {id instance} [dict get $hir semantic instances] {
+        if {![dict exists $instance snapshot exprs $call]} continue
+        set id
+    }]
+    list [expr {[llength $covering] >= 3}] [llength [manyOf $hir]] \
+        [expr {[hir::warnings::ManyBooleanArguments $hir] eq [hir::warnings::ManyBooleanArguments [dict remove $hir semantic]]}]
+} -result {1 1 1}
+
+test mb-trait-program-warned-as-written {a trait-polymorphic function's call is one warning: the program is warned as written (its checked source build), never as monomorphized, where the call exists once per witness} -body {
+    withModules {wa.bot {struct A:
+    v: int
+fn size(value: A) -> int:
+    value.v
+} wb.bot {struct B:
+    w: int
+fn size(value: B) -> int:
+    value.w
+}} {
+        set hir [compileWith {import wa
+import wb
+trait Sized:
+    fn size(value: Sized) -> int
+fn scale(n: int, double: bool, negate: bool) -> int:
+    if double:
+        return n * 2
+    if negate:
+        return 0 - n
+    n
+fn measure(value: Sized) -> int:
+    value.size().scale(true, false)
+[measure(wa::A {v: 2}), measure(wb::B {w: 3})]}]
+        set clones 0
+        dict for {e node} [dict get $hir exprs] {
+            if {[dict get $node kind] eq "call" && [dict exists $node written] && [dict get $node written form] eq "method"
+                    && [dict get $hir exprs [dict get $node callee] name] eq "scale"} {
+                incr clones
+            }
+        }
+        list $clones [lmap w [manyOf $hir] {loc $hir [dict get $w primary]}] [lindex [outcomeUnderHir interp $hir] 1]
+    }
+} -result {2 12:5 {[4, 6]}}
+
+# ---------------------------------------------------------------------------
+# Interleaving with the six existing codes (item 9)
+
+set ::sevenSource {refined type E = str
+error Bad
+fn dup(x):
+    if x < 0:
+        return 0
+    if x > 100:
+        return 0
+    return 1
+fn two(a, b):
+    a
+fn pair(a, b):
+    [a, b]
+fn t(x):
+    return two(x, 1)
+fn check(x) errors Bad:
+    if x < 0:
+        fail Bad
+    if x > 9:
+        fail Bad
+    x
+fn emailish(v: str) -> bool proves v: E:
+    v == "@"
+fn opts(x, a: bool, b: bool):
+    x
+fn use_opts(x):
+    x.opts(true, false)}
+
+test mb-interleaving-seven-codes {all seven codes in one program, in source order} -body {
+    allWarnings $::sevenSource
+} -result {{SAME-RETURN-VALUE 5:9} {FIXED-ARITY-LIST-RETURN 12:5} {METHOD-ELIGIBLE 14:12} {SAME-FAILURE 17:9} {PROVES-NAMING 21:1} {ONE-CHAR-STRING-LITERAL 22:10} {MANY-BOOLEAN-ARGUMENTS 26:5}}
+
+test mb-interleaving-seven-codes-other-order {the same seven warnings with the functions in the other order sort by location, not by code} -body {
+    allWarnings {refined type E = str
+error Bad
+fn opts(x, a: bool, b: bool):
+    x
+fn use_opts(x):
+    x.opts(true, false)
+fn emailish(v: str) -> bool proves v: E:
+    v == "@"
+fn check(x) errors Bad:
+    if x < 0:
+        fail Bad
+    if x > 9:
+        fail Bad
+    x
+fn two(a, b):
+    a
+fn t(x):
+    return two(x, 1)
+fn pair(a, b):
+    [a, b]
+fn dup(x):
+    if x < 0:
+        return 0
+    if x > 100:
+        return 0
+    return 1}
+} -result {{MANY-BOOLEAN-ARGUMENTS 6:5} {PROVES-NAMING 7:1} {ONE-CHAR-STRING-LITERAL 8:10} {SAME-FAILURE 11:9} {METHOD-ELIGIBLE 18:12} {FIXED-ARITY-LIST-RETURN 20:5} {SAME-RETURN-VALUE 23:9}}
+
+test mb-interleaving-deterministic {compiling the seven-code program twice yields the same warnings} -body {
+    expr {[hir::warnings::of [compileWith $::sevenSource]] eq [hir::warnings::of [compileWith $::sevenSource]]}
+} -result 1
+
+test mb-independent-of-other-codes {a multi-bool call inside a construct that trips other codes is an independent diagnostic: a list literal of one-character Strings returned from a function (FIXED-ARITY-LIST-RETURN, ONE-CHAR-STRING-LITERAL) beside a functional multi-bool call (METHOD-ELIGIBLE and this)} -body {
+    allWarnings "$::openFile
+fn row(x):
+    \[\"-\", \"+\", open_file(x, true, false, true)\]
+row(\"path\")"
+} -result {{FIXED-ARITY-LIST-RETURN 4:5} {ONE-CHAR-STRING-LITERAL 4:6} {ONE-CHAR-STRING-LITERAL 4:11} {MANY-BOOLEAN-ARGUMENTS 4:16} {METHOD-ELIGIBLE 4:16}}
+
+# ---------------------------------------------------------------------------
+# The policy matrix, inherited (item 10)
+
+test mb-mode-default {default: compiles, and the program carries the warnings} -body {
+    list [lmap w [manyOf [compileWith $::mbSource default]] {dict get $w code}] [rejection $::mbSource default]
+} -result {{MANY-BOOLEAN-ARGUMENTS MANY-BOOLEAN-ARGUMENTS} compiled}
+
+test mb-mode-off {off: compiles, and nothing is reported} -body {
+    set hir [compileWith $::mbSource off]
+    list [hir::warnings::of $hir] [dict exists $hir warnings]
+} -result {{} 0}
+
+test mb-mode-only-this-code {the policy program carries this warning only} -body {
+    lsort -unique [lmap w [hir::warnings::of [compileWith $::mbSource]] {dict get $w code}]
+} -result MANY-BOOLEAN-ARGUMENTS
+
+test mb-mode-error-only-this-code {error: a program with only this warning is rejected with the warning's own code and message (the sort-first call)} -body {
+    rejection $::mbSource error
+} -result {{CORE SEMANTIC MANY-BOOLEAN-ARGUMENTS} {t.bot:3:5: the call to `open_file` passes 3 boolean literals; flags name options}}
+
+test mb-mode-error-first-in-sort-order {error with seven codes: exactly one error, the sort-first, with its own code (both orders)} -body {
+    list [lindex [rejection $::sevenSource error] 0] [lindex [rejection {fn opts(x, a: bool, b: bool):
+    x
+fn use_opts(x):
+    x.opts(true, false)
+fn check(v: str) -> bool:
+    v == "@"
+fn two(a, b):
+    a
+two(1, 2)} error] 0]
+} -result {{CORE SEMANTIC SAME-RETURN-VALUE} {CORE SEMANTIC MANY-BOOLEAN-ARGUMENTS}}
+
+test mb-mode-error-clean-program {error mode accepts a program whose options are flags, whose bool arguments are named or computed, and whose data-bool calls pass literals} -body {
+    rejection {fn open_file(path, flags :append, :create, :sync):
+    path
+fn weight(n: int, double: bool, negate: bool) -> int:
+    n
+fn xor(a: bool, b: bool) -> bool:
+    a != b
+double = true
+a = "a.txt".open_file(:append, :sync)
+b = 3.weight(double, 1 == 2)
+c = true.xor(false)
+[a, b, c]} error
+} -result compiled
+
+test mb-mode-default-is-the-default {no option and no environment setting means warnings on, as warnings} -body {
+    set saved $::env(BOTLISH_WARNINGS)
+    unset ::env(BOTLISH_WARNINGS)
+    try {
+        set hir [surface::compile $::mbSource t.bot -warning-channel ""]
+        lmap w [hir::warnings::of $hir] {dict get $w code}
+    } finally {
+        set ::env(BOTLISH_WARNINGS) $saved
+    }
+} -result {MANY-BOOLEAN-ARGUMENTS MANY-BOOLEAN-ARGUMENTS}
+
+test mb-environment-default {BOTLISH_WARNINGS is only the default for a compilation given no -warnings, read fresh each time} -body {
+    set saved $::env(BOTLISH_WARNINGS)
+    try {
+        set results {}
+        foreach mode {default off error} {
+            set ::env(BOTLISH_WARNINGS) $mode
+            lappend results [catch {surface::compile $::mbSource t.bot -warning-channel ""}] \
+                [catch {surface::compile $::mbSource t.bot -warnings off -warning-channel ""}]
+        }
+        set results
+    } finally {
+        set ::env(BOTLISH_WARNINGS) $saved
+    }
+} -result {0 0 0 0 1 0}
+
+test mb-unknown-mode {a mode outside default/off/error is a plain usage error} -body {
+    surface::compile $::mbSource t.bot -warnings booleans -warning-channel ""
+} -returnCodes error -match glob -result {unknown warnings mode "booleans" (known: default, off, error)}
+
+test mb-no-fine-grained-options {there is no per-warning option: -Wno-many-boolean-arguments is not an option} -body {
+    surface::compile $::mbSource t.bot -Wno-many-boolean-arguments 1
+} -returnCodes error -match glob -result {*unknown option "-Wno-many-boolean-arguments"*}
+
+test mb-no-new-modes-or-options {the policy surface is still exactly default, off, error; the registry is static, one line per code, seven codes} -body {
+    list $hir::warnings::modes [dict keys $hir::warnings::passes] [dict get $hir::warnings::passes MANY-BOOLEAN-ARGUMENTS] \
+        [expr {[llength [info commands hir::warnings::enable]] + [llength [info commands hir::warnings::disable]]}]
+} -result {{default off error} {SAME-RETURN-VALUE METHOD-ELIGIBLE FIXED-ARITY-LIST-RETURN SAME-FAILURE PROVES-NAMING ONE-CHAR-STRING-LITERAL MANY-BOOLEAN-ARGUMENTS} hir::warnings::ManyBooleanArguments 0}
+
+test mb-error-promotion-identity {the promoted error keeps the code and the message the warning has} -body {
+    set w [lindex [manyOf [compileWith $::mbSource default]] 0]
+    lassign [rejection $::mbSource error] code message
+    list [lindex $code end] [dict get $w code] [expr {[string first [dict get $w message] $message] >= 0}]
+} -result {MANY-BOOLEAN-ARGUMENTS MANY-BOOLEAN-ARGUMENTS 1}
+
+test mb-off-runs-no-warning-pass {warnings off does not execute the pass at all (default does): the stats counter} -body {
+    hir::warnings::resetStats
+    compileWith $::mbSource off
+    set afterOff [hir::warnings::stats]
+    compileWith $::mbSource default
+    set afterDefault [hir::warnings::stats]
+    list $afterOff [dict exists $afterOff MANY-BOOLEAN-ARGUMENTS] [dict get $afterDefault MANY-BOOLEAN-ARGUMENTS]
+} -result {{} 0 1}
+
+test mb-off-runs-no-warning-pass-via-trace {an execution trace on the pass proves it is not invoked when off} -body {
+    set ::passCalls 0
+    trace add execution hir::warnings::ManyBooleanArguments enter {apply {{args} {incr ::passCalls}}}
+    try {
+        compileWith $::mbSource off
+        set off $::passCalls
+        compileWith $::mbSource default
+        set on $::passCalls
+    } finally {
+        trace remove execution hir::warnings::ManyBooleanArguments enter {apply {{args} {incr ::passCalls}}}
+    }
+    list $off $on
+} -result {0 1}
+
+test mb-compilation-with-errors-has-no-warnings {a program the compiler rejects is never warned about} -body {
+    set hir [surface::compile "$::mbSource\nnothing" t.bot -strict 0 -warnings default -warning-channel ""]
+    list [expr {[llength [hir::diagnostics $hir]] > 0}] [hir::warnings::of $hir]
+} -result {1 {}}
+
+test mb-policy-is-per-compilation {interleaved compilations under different modes never leak a mode} -body {
+    set a [compileWith $::mbSource off]
+    set b [compileWith $::mbSource default]
+    set c [catch {compileWith $::mbSource error}]
+    set d [compileWith $::mbSource off]
+    set e [compileWith $::mbSource default]
+    list [llength [manyOf $a]] [llength [manyOf $b]] $c [llength [manyOf $d]] [llength [manyOf $e]]
+} -result {0 2 1 0 2}
+
+test mb-warnings-attached-structurally {hir::warnings::of equals collect} -body {
+    set hir [compileWith $::sevenSource default]
+    list [expr {[hir::warnings::of $hir] eq [hir::warnings::collect $hir]}] [llength [hir::warnings::collect $hir]]
+} -result {1 7}
+
+test mb-error-stops-before-backend {error mode rejects before any backend lowers anything (traces on all four entry points)} -body {
+    set ::lowerCalls 0
+    foreach command {native::evalHir native::prepareHir hir::lower core::compiler::evalHir} {
+        trace add execution $command enter {apply {{args} {incr ::lowerCalls}}}
+    }
+    try {
+        set rejected [catch {compileWith $::mbSource error} message options]
+    } finally {
+        foreach command {native::evalHir native::prepareHir hir::lower core::compiler::evalHir} {
+            trace remove execution $command enter {apply {{args} {incr ::lowerCalls}}}
+        }
+    }
+    list $rejected [dict get $options -errorcode] $::lowerCalls
+} -result {1 {CORE SEMANTIC MANY-BOOLEAN-ARGUMENTS} 0}
+
+# ---------------------------------------------------------------------------
+# No semantics change (item 11)
+
+set ::runSource {fn weight(base: int, double: bool, negate: bool) -> int:
+    if double:
+        if negate:
+            return 0 - base * 2
+        return base * 2
+    if negate:
+        return 0 - base
+    base
+fn tally(n: int, flags :double, :negate) -> int:
+    n.weight(double, negate)
+a = 3.weight(true, false)
+b = 4.weight(false, false)
+c = 5.tally(:double)
+d = 6.weight(a > 5, true)
+[a, b, c, d]}
+
+test mb-hir-identical-across-modes {HIR (minus the side table), hir::format and hir::lower are identical under off and default} -body {
+    set off [compileWith $::runSource off]
+    set on [compileWith $::runSource default]
+    list [llength [manyOf $on]] [expr {$off eq [dict remove $on warnings]}] [expr {[hir::format $off] eq [hir::format $on]}] \
+        [expr {[hir::lower $off] eq [hir::lower $on]}] [dict exists $off warnings]
+} -result {2 1 1 1 0}
+
+test mb-no-new-hir-state {nothing new is recorded on HIR: default adds only the warnings side table; every node has the fields it has under off} -body {
+    set off [compileWith $::runSource off]
+    set on [compileWith $::runSource default]
+    set added [lmap key [dict keys $on] {if {[dict exists $off $key]} continue; set key}]
+    set changed 0
+    dict for {e node} [dict get $on exprs] {
+        if {[lsort [dict keys $node]] ne [lsort [dict keys [dict get $off exprs $e]]]} {
+            incr changed
+        }
+    }
+    list $added $changed [expr {[dict get $on bindings] eq [dict get $off bindings]}] \
+        [expr {[dict get $on scopes] eq [dict get $off scopes]}] [expr {[dict get $on exprs] eq [dict get $off exprs]}]
+} -result {warnings 0 1 1 1}
+
+test mb-call-nodes-unchanged {a warned call node has exactly the fields a written (method-spelled) call node has always had -- milestone 2's provenance marker `written` and method sugar's `method` among them -- and the same under off: nothing this pass reads was added for it} -body {
+    set hir [compileWith $::runSource]
+    set off [compileWith $::runSource off]
+    list [lsort -unique [lmap w [manyOf $hir] {lsort [dict keys [dict get $hir exprs [dict get $w data call]]]}]] \
+        [lsort -unique [lmap w [manyOf $hir] {expr {[dict get $hir exprs [dict get $w data call]] eq [dict get $off exprs [dict get $w data call]]}}]]
+} -result {{{args callee calleeErrors effectiveErrors id kind known mayReturnNormally method origin reachable resultRangeFact scope target type written}} 1}
+
+test mb-nir-identical-across-modes {native IR (specialized and generic) is identical with warnings off and on} -body {
+    set off [compileWith $::runSource off]
+    set on [compileWith $::runSource default]
+    list [expr {[native::nir $off] eq [native::nir $on]}] [expr {[native::nir $off -specialize 0] eq [native::nir $on -specialize 0]}]
+} -result {1 1}
+
+test mb-machine-readable-outputs-clean {native::report, NIR and CLIF are identical with and without the warnings side table} -body {
+    set on [compileWith $::runSource default]
+    set bare [dict remove $on warnings]
+    expr {[llength [manyOf $on]] == 2 && [native::report $on] eq [native::report $bare]
+        && [native::nir $on] eq [native::nir $bare] && [native::clif $on] eq [native::clif $bare]}
+} -result 1
+
+test mb-no-warning-text-in-machine-readable-outputs {neither NIR, CLIF, the report nor HIR text mention the warning} -body {
+    set hir [compileWith $::runSource default]
+    set seen 0
+    foreach text [list [native::nir $hir] [native::clif $hir] [native::report $hir] [hir::format $hir]] {
+        foreach word {MANY-BOOLEAN-ARGUMENTS warning "boolean literals" "flags name options"} {
+            if {[string first $word $text] >= 0} {
+                incr seen
+            }
+        }
+    }
+    set seen
+} -result 0
+
+# ---------------------------------------------------------------------------
+# Backend independence (item 12)
+
+test mb-backend-independent {every backend runs the program identically; the one warning set is the HIR's} -body {
+    set hir [compileWith $::runSource default]
+    set outcomes [lmap backend $::allBackends {outcomeUnderHir $backend $hir}]
+    list [llength [lsort -unique [lmap o $outcomes {lindex $o 1}]]] [lindex $outcomes 0 1] [llength [manyOf $hir]]
+} -result {1 {[6, 4, 10, -12]} 2}
+
+test mb-backend-independent-off {the same program runs identically on every backend with warnings off} -body {
+    set hir [compileWith $::runSource off]
+    lsort -unique [lmap backend $::allBackends {lindex [outcomeUnderHir $backend $hir] 1}]
+} -result {{[6, 4, 10, -12]}}
+
+# ---------------------------------------------------------------------------
+# The command line
+
+test mb-cli-modes {main.tcl: default prints the warnings on stderr and runs; off is silent; error rejects before running} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource mb-cli-[pid].bot]
+    set results {}
+    foreach mode {default off error} {
+        set status [catch {exec [info nameofexecutable] $main -warnings $mode $path 2>@1} out]
+        lappend results [list $mode $status \
+            [regexp -all {: warning: the call to `weight` passes [0-9]+ boolean literals; flags name options \(MANY-BOOLEAN-ARGUMENTS\)} $out] \
+            [regexp {note:} $out] \
+            [regexp {value: } $out] \
+            [regexp {CORE SEMANTIC MANY-BOOLEAN-ARGUMENTS} $out]]
+    }
+    removeFile mb-cli-[pid].bot
+    set results
+} -result {{default 0 2 0 1 0} {off 0 0 0 1 0} {error 1 0 0 0 1}}
+
+test mb-cli-no-wno-option {-Wno-many-boolean-arguments is an unknown option, not a file name} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource mb-cli-wno-[pid].bot]
+    catch {exec [info nameofexecutable] $main -Wno-many-boolean-arguments $path 2>@1} out
+    removeFile mb-cli-wno-[pid].bot
+    list [string match "*unknown option*-Wno-many-boolean-arguments*" $out] [string match "*value:*" $out]
+} -result {1 0}
+
+test mb-cli-unknown-mode {main.tcl rejects an unknown mode} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource mb-cli-mode-[pid].bot]
+    set status [catch {exec [info nameofexecutable] $main -warnings booleans $path 2>@1} out]
+    removeFile mb-cli-mode-[pid].bot
+    list $status [string match "*unknown warnings mode*" $out]
+} -result {1 1}
+
+test mb-cli-stdout-clean {the warnings go to stderr: program stdout carries no warning text} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource mb-cli-stdout-[pid].bot]
+    set stderrPath [makeFile {} mb-cli-stderr-[pid].txt]
+    set out [exec [info nameofexecutable] $main -warnings default $path 2> $stderrPath]
+    set err [viewFile mb-cli-stderr-[pid].txt]
+    removeFile mb-cli-stdout-[pid].bot
+    removeFile mb-cli-stderr-[pid].txt
+    list [string match *warning* $out] [string match "*boolean literals*" $out] [regexp -all {MANY-BOOLEAN-ARGUMENTS} $err] \
+        [string match {*value: *} $out]
+} -result {0 0 2 1}
+
+test mb-error-cli-stops-before-backend {main.tcl -backend cranelift -warnings error rejects without lowering or running anything} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set path [makeFile $::runSource mb-cli-error-[pid].bot]
+    catch {exec [info nameofexecutable] $main -backend cranelift -warnings error $path 2>@1} out
+    removeFile mb-cli-error-[pid].bot
+    list [string match "*value:*" $out] [regexp {\(CORE SEMANTIC MANY-BOOLEAN-ARGUMENTS\)} $out]
+} -result {0 1}
+
+# The warning lines (and their notes) of main.tcl's stderr for PATH on
+# BACKEND, with the file's directory stripped.
+proc cliWarningText {path backend} {
+    set main [file join $::projectRoot main.tcl]
+    set err [makeFile {} mb-cli-err-[pid].txt]
+    catch {exec [info nameofexecutable] $main -backend $backend -warnings default $path 2> $err}
+    set lines [lmap line [split [viewFile mb-cli-err-[pid].txt] \n] {
+        if {![string match "*: warning: *" $line] && ![string match "*: note: *" $line]} continue
+        set line
+    }]
+    removeFile mb-cli-err-[pid].txt
+    return $lines
+}
+
+test mb-cli-backend-independent {main.tcl prints the identical warning text, all seven codes, on every backend} -constraints executableAot -body {
+    set path [makeFile "$::sevenSource\ny = check(3):\n    on Bad:\n        0\n\[y, emailish(\"ab\"), use_opts(1)\]" mb-cli-seven-[pid].bot]
+    set texts [lmap backend $::allBackends {cliWarningText $path $backend}]
+    removeFile mb-cli-seven-[pid].bot
+    set first [lindex $texts 0]
+    list [llength [lsort -unique $texts]] [llength [lsearch -all $first *MANY-BOOLEAN-ARGUMENTS*]] [llength $first]
+} -result {1 1 9}
+
+test mb-cli-backend-independent-corpus {main.tcl prints the identical warning text (every code, notes included) on every backend over the stdlib corpus and the refinement example} -constraints executableAot -body {
+    set programs [lsort [glob -directory [file join $::projectRoot examples stdlib] *.bot]]
+    lappend programs [file join $::projectRoot examples refinement refined-strings.bot]
+    set mismatches {}
+    set total 0
+    foreach path $programs {
+        set texts [lmap backend $::allBackends {cliWarningText $path $backend}]
+        incr total [llength [lindex $texts 0]]
+        if {[llength [lsort -unique $texts]] != 1} {
+            lappend mismatches [file tail $path]
+        }
+    }
+    list $mismatches [expr {$total > 0}]
+} -result {{} 1}
+
+# ---------------------------------------------------------------------------
+# Fuzzing: constructed programs, an independent oracle, all three modes, and
+# the conversion law
+
+test mb-fuzz-smoke {60 generated programs: predicted warnings (anchor, count) and only them, off silent with identical HIR, error iff warned, HIR text silent, and the conversion law over every convert-now callee} -constraints executableAot -body {
+    set fuzz [file join $::projectRoot audit many-boolean-arguments tools fuzz.tcl]
+    lindex [split [string trim [exec [info nameofexecutable] $fuzz 60 1]] \n] end
+} -result {seeds 60 (from 1): * with warnings, * without; failures 0; extra warnings 0; conversion law * of * convert-now callees, failures 0*} -match glob
+
+cleanupTests
