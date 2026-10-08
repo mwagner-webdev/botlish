@@ -280,7 +280,8 @@ proc hir::affine::Erasure {hir e what} {
 <<<<
         return [expr {[IsCoroutine $a] && [CoroutineMismatch $a $b] eq ""}]
 ====
-        return [expr {([IsCoroutine $a] || [IsFn $a]) && [CoroutineMismatch $a $b] eq ""}]
+        set s [expr {[IsCoroutine $a] ? $a : [structuralOf $a]}]
+        return [expr {$s ne "" && [CoroutineMismatch $s $b] eq ""}]
 >>>>
 
 @@ generic-coerces-fn a generic function's semantic instance takes a coroutine argument at the parameter's inferred Fn contract, not at its own Coroutine type

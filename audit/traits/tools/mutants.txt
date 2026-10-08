@@ -229,8 +229,10 @@
 >>>>
 ## hir/resolve.tcl
 <<<<
+                    dict set hir bindings [lindex $params $i] view $view
                     lset declaredParamTypes $i $witness
 ====
+                    dict set hir bindings [lindex $params $i] view $view
                     lset declaredParamTypes $i {}
 >>>>
 
@@ -269,19 +271,21 @@ proc hir::traits::Plan {hir syntax} {
 >>>>
 ## hir/traits.tcl
 <<<<
-                set params [WitnessesOf $hir $h [dict get $inst args]]
+                set params [CloneWitnesses $hir $h [dict get $inst args]]
 ====
-                set params [WitnessesOf $hir $h [dict get $inst args]]
+                set params [CloneWitnesses $hir $h [dict get $inst args]]
                 if {![dict exists $::mutantFirst $h]} { dict set ::mutantFirst $h $params }
                 set params [dict get $::mutantFirst $h]
 >>>>
 ## hir/traits.tcl
 <<<<
-                            set witnesses [WitnessesOf $hir $tb [dict get $instances $j args]]
+                            set witnesses [CloneWitnesses $hir $tb [dict get $instances $j args]]
+                            if {$witnesses eq ""} {
 ====
-                            set witnesses [WitnessesOf $hir $tb [dict get $instances $j args]]
+                            set witnesses [CloneWitnesses $hir $tb [dict get $instances $j args]]
                             if {![dict exists $::mutantFirst $tb]} { dict set ::mutantFirst $tb $witnesses }
                             set witnesses [dict get $::mutantFirst $tb]
+                            if {$witnesses eq ""} {
 >>>>
 ## hir/traits.tcl
 <<<<

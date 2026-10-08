@@ -218,12 +218,23 @@ test af-exact-alias {item 63: an exact function aliased twice stays one unrestri
         [lsearch -all -inline -regexp [affFunc [native::nir $hir] <program>] {closure|callvalue}]
 } -cleanup {unset -nocomplain text hir} -result {{value {[true, true, true]}} {} 0 {}}
 
-test af-explicit-fn {item 64: an explicitly typed Fn HOF behaves as before for functions; a coroutine with the same contract is rejected (COROUTINE-NOT-FUNCTION), and a function is no Coroutine (TYPE)} -body {
+test af-explicit-fn {item 64: an explicitly typed Fn HOF behaves as before for functions; a coroutine with the same contract is rejected (COROUTINE-NOT-FUNCTION), and a function is no Coroutine (TYPE); a Fn-typed struct field or function result is no Coroutine either (TYPE, naming the callable kinds -- not merely an erasure)} -body {
     set apply "fn apply(\n    predicate: Fn{\n        args: \[str\],\n        return: bool,\n        errors: \[\]\n    },\n    value: str\n) -> bool:\n    predicate(value)\n\n"
     list [affAgree "import str\n${apply}fn long?(s: str) -> bool:\n    str::length(s) > 3\n\[apply(long?, \"abcd\"), apply(long?, \"ab\")\]\n"] \
         [affCode "${affDecls}struct S:\n    v: str\nfn w(resume S) -> bool:\n    yield true\n    false\nfn apply(f: Fn{args: \[S\], return: bool, errors: \[\]}, x: S) -> bool:\n    f(x)\ncoroutine {step} = w()\napply(step, S {v: \"a\"})\n"] \
-        [affCode "${affDecls}fn drive(s: Coroutine{args: \[Message\], return: Event}) -> Event:\n    s(Message {value: 1})\nfn h(m: Message) -> Event:\n    Event {value: m.value}\ndrive(h)\n"]
-} -cleanup {unset -nocomplain apply} -result {{value {[true, false]}} COROUTINE-NOT-FUNCTION TYPE}
+        [lmap tail [list \
+            "fn drive(s: Coroutine{args: \[Message\], return: Event}) -> Event:\n    s(Message {value: 1})\nfn h(m: Message) -> Event:\n    Event {value: m.value}\ndrive(h)\n" \
+            "fn drive(s: Coroutine{args: \[Message\], return: Event}) -> Event:\n    s(Message {value: 1})\nfn relay(f: Fn{args: \[Message\], return: Event, errors: \[\]}) -> Event:\n    drive(f)\n1\n"] {
+            list [affCode "${affDecls}$tail"] \
+                [string match {*only a coroutine handle is a Coroutine: a function value is not one*} [affMessage "${affDecls}$tail"]]
+        }] \
+        [lmap tail [list \
+            "struct Holder:\n    f: Fn{args: \[Message\], return: Event, errors: \[\]}\ncoroutine {step} = worker(1)\nh = Holder {f: step}\n1\n" \
+            "fn as_fn(n: int) -> Fn{args: \[Message\], return: Event, errors: \[\]}:\n    make(n)\n1\n"] {
+            list [affCode "${affDecls}$tail"] \
+                [string match {*a coroutine handle is not a function value: Coroutine and Fn are distinct callable kinds*} [affMessage "${affDecls}$tail"]]
+        }]
+} -cleanup {unset -nocomplain apply tail} -result {{value {[true, false]}} COROUTINE-NOT-FUNCTION {{TYPE 1} {TYPE 1}} {{TYPE 1} {TYPE 1}}}
 
 test af-generic-dual {item 65: one untyped HOF instantiated with an ordinary function and with a coroutine: the function's call stays the ordinary (natively direct) call and the function stays usable; the coroutine's specialization resumes it, owns it (releases it), and has no callable-kind branch} -constraints linuxX86_64 -body {
     set text "${affDecls}fn invoke(f, x):\n    f(x)\n\nfn positive(x: int) -> bool:\n    x > 0\n\ncoroutine {step, first} = worker(10)\na = invoke(positive, 5)\nb = invoke(step, Message {value: 20})\nc = positive(1)\n\[a, b.value, c\]\n"

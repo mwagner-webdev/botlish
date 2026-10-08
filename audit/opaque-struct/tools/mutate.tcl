@@ -75,8 +75,8 @@ set mutations {
 }
         {}}
     {instance-kind hir/semantic.tcl
-        {[dict get $first kind] eq "OPAQUE-REPRESENTATION" ? "OPAQUE-REPRESENTATION" : "TYPE"}
-        {"TYPE"}}
+        {$kind in {OPAQUE-REPRESENTATION USE-AFTER-MOVE UNHANDLED-ERROR}}
+        {$kind in {USE-AFTER-MOVE UNHANDLED-ERROR}}}
     {print-nominal core/value.tcl
         {!$reveal && [isOpaqueStruct [lindex $v 1 0]]}
         {0}}
