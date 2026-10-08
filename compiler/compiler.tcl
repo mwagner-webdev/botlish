@@ -956,7 +956,7 @@ proc core::compiler::CompileForm {ctxVar e} {
 
 # The operand of call E compiled by COMPILE (a script evaluated in the
 # caller), releasing the coroutines whose handles a declared error the call
-# propagates takes out of scope (hir::coroutines::releasesOnError): the
+# propagates takes out of scope (hir::affine::releasesOnError): the
 # call's code runs in a `catch`; a propagate-error completion (code 5) of
 # such an error releases them, and every abrupt completion goes on unchanged
 # (`return -options`, CompileHandle's technique). The value is computed
@@ -998,7 +998,7 @@ proc core::compiler::ReleasingOnError {ctxVar e compile} {
 }
 
 # In code where the Tcl completion STVAR/RESVAR of a call is abrupt: releases
-# the coroutines of BYNAME (hir::coroutines::releasesOnError) when it is the
+# the coroutines of BYNAME (hir::affine::releasesOnError) when it is the
 # propagate-error of one of its names.
 proc core::compiler::ReleaseOnErrorCode {ctxVar byName stVar resVar} {
     upvar 1 $ctxVar ctx

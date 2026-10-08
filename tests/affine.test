@@ -394,6 +394,19 @@ test af-generic-terminal {item 42: through a struct, a function return, a generi
     affAgree "${affDecls}fn w3(resume Message) -> Event errors Boom:\n    m = yield Event {value: 1}\n    fail Boom\nfn pass(c, m) errors Boom:\n    e = c(m)\n    {callable: c, event: e}\nfn run():\n    s = make(5)\n    r = Running {name: \"r\", step: s}\n    {step} = r\n    {callable: again, event: a} = pass(step, Message {value: 6}):\n        on Boom:\n            return \[0\]\n    b = again(Message {value: 7})\n    coroutine {step: f} = w3():\n        on Boom:\n            return \[0\]\n    x = f(Message {value: 1}):\n        on Boom:\n            Event {value: -1}\n    y = f(Message {value: 2}):\n        on Boom:\n            Event {value: -2}\n    \[a.value, b.value, x.value, y.value, coroutine::done?(again) == coroutine::done?(f)\]\nrun()\n"
 } -result {value {[6, 6, -1, -2, true]}}
 
+test af-generic-inferred-contract {an untyped parameter the body calls with concretely typed arguments has an inferred callable contract (here Fn{args: [], return: bool, errors: []}): a callable contract, not a callable kind -- a coroutine with a compatible contract satisfies it (specialized), and so does a function} -body {
+    set text "${affDecls}fn ask(f) -> bool:\n    if f():\n        true\n    else:\n        false\nfn flip() -> bool:\n    yield true\n    false\nfn yes() -> bool:\n    true\ncoroutine {step} = flip()\n\[ask(step), ask(yes)\]\n"
+    set hir [surface::compile $text -warnings off]
+    set block ""
+    dict for {b binding} [dict get $hir bindings] {
+        if {[dict get $binding name] eq "ask"} {
+            set block [dict get $hir exprs [dict get $binding declaredBy] value]
+        }
+    }
+    set trusted [dict get [lindex [dict get [hir::signatures::of $hir $block] params] 0] trusted]
+    list [affAgree $text] [hir::types::show $trusted]
+} -cleanup {unset -nocomplain text hir block trusted} -result {{value {[false, true]}} {Fn{args: [], return: bool, errors: []}}}
+
 test af-generic-nested {a generic function declared inside another one cannot be specialized for an affine argument (AFFINE-GENERIC-NESTED-UNSUPPORTED); a typed parameter can take it} -body {
     list \
         [affCode "${affDecls}fn outer() -> int:\n    fn inner(c):\n        c(Message {value: 1})\n    e = inner(make(1))\n    e.value\nouter()\n"] \
