@@ -69,8 +69,8 @@ set mutations {
         {v + BYTES_PAYLOAD_OFFSET as u64}
         {v + BYTES_PAYLOAD_OFFSET as u64 + 1}}
     {byte-masked-to-7-bits rust native/src/runtime/ops.rs
-        {Some(n) if (0..=255).contains(&n) => n as u8,}
-        {Some(n) if (0..=255).contains(&n) => (n as u8) & 0x7f,}}
+        {bytes.push(byte);}
+        {bytes.push(byte & 0x7f);}}
     {count-truncated tcl lib/linux.bot
         {fn write(fd: abi::I32, data: abi::bytes::Bytes) -> int:
     abi::x86_64::to_int(
@@ -132,9 +132,11 @@ fn write(fd: abi::I32, data: abi::bytes::Bytes) -> int:
         {Kind::ByteStore => bytes_of(a) == bytes_of(b),}
         {Kind::ByteStore => a == b,}}
     {hash-ignores-length rust native/src/runtime/ops.rs
-        {            let h = fnv1a(h, &(bytes.len() as u64).to_le_bytes());
+        {            let bytes = bytes_of(v);
+            let h = fnv1a(h, &(bytes.len() as u64).to_le_bytes());
             fnv1a(h, bytes)}
-        {            fnv1a(h, bytes)}}
+        {            let bytes = bytes_of(v);
+            fnv1a(h, bytes)}}
     {static-constant-ascii tcl native/lower.tcl
         {return [list [binary encode hex [encoding convertto utf-8 [core::value::strOf [lindex $fact 1]]]]]}
         {return [list [binary encode hex [encoding convertto ascii [core::value::strOf [lindex $fact 1]]]]]}}
