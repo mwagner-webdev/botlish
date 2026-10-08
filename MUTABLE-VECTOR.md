@@ -728,7 +728,25 @@ being launched from the repo root and were fixed the same way.
 
 ### 66. Full regression
 
-RESULTS-REGRESSION
+On this branch merged with main at `eb8e7a5` (the MANY-BOOLEAN-ARGUMENTS
+warning), each suite run with a private `-tmpdir`, `LANG=C.utf8`:
+
+| run | tests | passed | skipped | failed |
+|---|---:|---:|---:|---:|
+| `CORE_BACKEND=interp tests/all.tcl` | 6766 | 6766 | 0 | 0 |
+| `CORE_BACKEND=compile tests/all.tcl` | 6766 | 6762 | 4 (`coreScoping`, as on main) | 0 |
+| `BOTLISH_NATIVE_GC_STRESS=1 tests/all.tcl` | GC-STRESS-RESULT |
+| `cargo test --release` (native crate) | 236 | 236 | 0 | 0 |
+
+The Rust count is 205 library tests (7 of them this milestone's
+`runtime::mutvec` tests) and 31 integration tests. Existing tests whose
+expectation this milestone changed: `co-release-placement` (path releases),
+`ns-root-inventory` and `ns-qualified-inventory` (the new natives),
+`imports-*`'s namespace hint and `linux-syscall`'s namespace pattern (the
+new `mutable_vector` namespace), `oc-synthesized-string-consts-enumerated`
+(the descriptor constants). After the merge, AGENTS.md's checks for the new
+warning were run as well: `tests/many-boolean-arguments.test` (90/90) and
+its fuzzer (300 seeds, no failure).
 
 ### 67. Affine regression
 
@@ -770,7 +788,12 @@ NIR op spelled with the coroutine prefix (`contextroot`); it is `ctxroot`.
 
 ### 69. Native coverage
 
-RESULTS-COVERAGE
+`tests/native-coverage.tcl` (the suite on the Cranelift backend, merged
+tree): 6766 tests -- 2683 run natively, 3955 independent of the backend,
+68 partially native, 60 unsupported, **0 failed**. The 60 unsupported tests
+need constructs no native backend has (test-only natives such as
+`test-log`, block values at the program boundary, sequence mode): none is
+a MutableVector test (no `mv-*` test is unsupported or failed natively).
 
 ### 70. Scalar audit
 
