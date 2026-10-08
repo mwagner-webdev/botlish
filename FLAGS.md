@@ -136,6 +136,74 @@ escaped could be called through a path that cannot see its flags. The future
 rule is expected to make accepted flag names part of the callable signature;
 nothing here blocks it. Function values without flags are unchanged.
 
+## Boolean arguments
+
+Flags are the language's form for *options*. A call that passes boolean
+literals is unreadable: `true` carries no name, so
+
+```
+open_file("file.txt", true, false, true)
+```
+
+says nothing about what it asks for, and once a call passes two or more of
+them the signature cannot be used at the call site without reading the
+declaration. Declared with flags, the same function names each option where it
+is used, and an option that is not wanted is simply not written:
+
+```
+fn open_file(path, flags :append, :create, :sync):
+    ...
+open_file("file.txt", :append, :sync)
+```
+
+The idiom:
+
+* an **option** -- an optional choice the caller makes, absent means `false`
+  -- is a flag;
+* a boolean **parameter** remains right for *data* bools -- a function whose
+  ordinary parameters are all bools (`xor(a: bool, b: bool)`) has no subject
+  for options to qualify -- and for values callers compute:
+  `open_file(path, wants_append, ...)` and `open_file(path, n > 0, ...)`
+  already say what they mean;
+* where flags do not apply (a bool every caller computes, a function used as a
+  value -- a function with flags is not a first-class value, see "Aliases and
+  values" -- a native's interface), a **named binding** at the call
+  (`append = true` ... `open_file(path, append, create, sync)`) is the
+  readable alternative.
+
+The compiler warning `MANY-BOOLEAN-ARGUMENTS` (README.md §23,
+WARNINGS-MANY-BOOLEAN-ARGUMENTS.md) points at this statement: a written call
+that passes two or more boolean literals to a declared function whose
+signature has a subject and at least two parameters the checker proves bool.
+It states the count, names the callee and names the form; flags are never
+counted, and a named or computed bool is never evidence.
+
+**It is deliberately not autofixable.** Rewriting positional bools as flags
+needs a mapping from each literal to a flag name, and nothing catches a wrong
+one: a flag defaults to `false`, so a rewrite that drops or swaps an option
+still passes the right number of ordinary arguments and compiles. The arity
+check that catches a mis-mapped rewrite of positional arguments has no
+counterpart for flags; a wrong mapping compiles, runs and is silently wrong
+(the warning's fuzzer swaps two flags at every call of every convertible
+callee: every such rewrite compiles, and many change the program's value).
+And which `true` means which option is the author's intent, not a proof: the
+only names in sight are the parameter names, and the call is unreadable
+precisely because `true` carries no name -- recovering one from the
+declaration would be guessing, circularly.
+
+**Graduation criteria (future work, not implemented).** Revisit -- make it
+autofixable, or redesign it -- when either holds:
+
+1. the language makes the literal-to-flag mapping *declared and total* (for
+   example, call-site option syntax for positional bools, so that every
+   positional bool has a declared name a rewrite reads rather than guesses);
+2. **flag-variables land** -- a flag's value carried in a variable (today a
+   flag is not a value: `FLAG-NOT-A-VALUE`). That is the recorded revisit
+   trigger: the evidence rule and the per-site choice are then re-examined
+   together (a flag-variable passed to a `bool` parameter is named, hence
+   silent today, and may deserve to be evidence of its own; and grouping per
+   callee, or anchoring at the declaration, may become the better design).
+
 ## What each layer holds
 
 1. **AST** (`surface/ast.tcl`). `function` has `flags` ({name span} dicts in
@@ -208,7 +276,8 @@ instance: no per-flag-combination instances (no `2^N`), no flag-specific
 specialization engine, and no constant propagation of the flag values into the
 callee body (a constant `bool` argument is not specialized on). Dead-flag
 elimination (a flag no body reads) is not done; an unused flag is neither an
-error nor a warning (the only warning, `SAME-RETURN-VALUE`, is unrelated).
+error nor a warning (no warning reads a flag's use; `MANY-BOOLEAN-ARGUMENTS`,
+"Boolean arguments" above, never counts flags).
 
 ## Non-goals (not implemented)
 

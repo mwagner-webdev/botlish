@@ -1,0 +1,15 @@
+# MANY-BOOLEAN-ARGUMENTS fuzz results: tclsh9.0 audit/many-boolean-arguments/tools/fuzz.tcl 667 1, 667 668 and 666 1335
+# (at 1c59bf2: the pass, its tests and this fuzzer as committed; 2000 seeds in three concurrent runs of consecutive seeds, each in its own
+# working directory; FAIL and EXTRA lines would precede each run's catalog and summary -- there are none; every run exited 0)
+
+callee classes: convert-now 260, computed-caller 528, function-value 147, native 804, below-gate 935, no-sites 129; mis-mapped rewrites (two flags swapped at every call) 260, all compiled, value changed 106, value unchanged 154
+seeds 667 (from 1): 337 with warnings, 330 without; failures 0; extra warnings 0; conversion law 260 of 260 convert-now callees, failures 0; placements top 1591, nested 520, closure 512, dead 549, after 525, range 532, uncalled 589; spellings functional 3347, method 1310, alias 161; quiet programs 221, context programs 201, native programs 268; HIR text read 667, unreadable 0
+
+callee classes: convert-now 326, computed-caller 581, function-value 161, native 798, below-gate 800, no-sites 134; mis-mapped rewrites (two flags swapped at every call) 326, all compiled, value changed 147, value unchanged 179
+seeds 667 (from 668): 359 with warnings, 308 without; failures 0; extra warnings 0; conversion law 326 of 326 convert-now callees, failures 0; placements top 1646, nested 551, closure 515, dead 556, after 527, range 552, uncalled 495; spellings functional 3393, method 1281, alias 168; quiet programs 220, context programs 197, native programs 266; HIR text read 667, unreadable 0
+
+callee classes: convert-now 307, computed-caller 562, function-value 135, native 798, below-gate 859, no-sites 135; mis-mapped rewrites (two flags swapped at every call) 307, all compiled, value changed 121, value unchanged 186
+seeds 666 (from 1335): 334 with warnings, 332 without; failures 0; extra warnings 0; conversion law 307 of 307 convert-now callees, failures 0; placements top 1633, nested 498, closure 530, dead 528, after 511, range 553, uncalled 552; spellings functional 3366, method 1279, alias 160; quiet programs 219, context programs 201, native programs 266; HIR text read 666, unreadable 0
+
+# The three runs together:
+seeds 2000 (from 1): 1030 with warnings, 970 without; failures 0; extra warnings 0; conversion law 893 of 893 convert-now callees, failures 0; callee classes: convert-now 893, computed-caller 1671, function-value 443, native 2400, below-gate 2594, no-sites 398; mis-mapped rewrites (two flags swapped at every call) 893, all compiled, value changed 374, value unchanged 519; placements top 4870, nested 1569, closure 1557, dead 1633, after 1563, range 1637, uncalled 1636; spellings functional 10106, method 3870, alias 489; quiet programs 660, context programs 599, native programs 800; HIR text read 2000, unreadable 0

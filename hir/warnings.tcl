@@ -53,6 +53,7 @@ namespace eval hir::warnings {
         SAME-FAILURE      hir::warnings::SameFailure
         PROVES-NAMING     hir::warnings::ProvesNaming
         ONE-CHAR-STRING-LITERAL hir::warnings::OneCharStringLiteral
+        MANY-BOOLEAN-ARGUMENTS  hir::warnings::ManyBooleanArguments
     }
     variable modes {default off error}
     # CODE -> number of times its pass has run in this process: test
@@ -1359,4 +1360,171 @@ proc hir::warnings::ContextLoadKeys {hir} {
         }
     }
     return $keys
+}
+
+# ---------------------------------------------------------------------------
+# MANY-BOOLEAN-ARGUMENTS (WARNINGS-MANY-BOOLEAN-ARGUMENTS.md)
+#
+# A written call that passes two or more boolean literals to a declared
+# function whose signature takes a subject and boolean options. `true` carries
+# no name: at the call site a boolean literal is unreadable, and two of them
+# make the signature unusable there. Flags are the language's form for options
+# (FLAGS.md, "Boolean arguments"): the warning states the count, names the
+# callee and names the form, and nothing else. It is deliberately not
+# autofixable and prints no flag spelling: a flag defaults to false, so a
+# mis-mapped rewrite compiles and is silently wrong, and which `true` means
+# which option is the author's intent, not the compiler's proof.
+#
+# The theorem. A call site is reported exactly when
+#   * it is a written call: the frontend's `written` provenance (milestone 2)
+#     is {form function} or {form method}. The calls the frontend synthesizes
+#     -- an operator (`true == false`, the `==` of `a != b`), a list literal
+#     (`[true, false]`) -- carry another form, and a call with no marker
+#     (core IR, HIR text) is never a candidate. Written-ness is never derived
+#     any other way;
+#   * its callee is a declared function: a reference whose binding resolves,
+#     through plain aliases (`g = f`) by the resolver's own candidate identity
+#     (hir::resolve::CandidateIdentity), to a function declaration (`fn`, a
+#     nested or a module function: a non-duplicate `bind` of a block) or to a
+#     root native of fixed arity. A call through a function value -- a
+#     parameter, a projection, a call result, a binding of any other value --
+#     is silent: the signature that would have to change belongs to no
+#     declaration the warning can name. The call passes exactly the
+#     callee's parameters (a call that cannot match its declaration is
+#     silent);
+#   * the callee's signature takes options and a subject: among its ORDINARY
+#     parameters -- the block's `params` minus its `flags`, METHOD-ELIGIBLE's
+#     count (context parameters are not in `params` at all) -- at least two
+#     the checker proves `bool` and at least one it does not (the subject: a
+#     function whose ordinary parameters are all bool, `xor(a: bool, b:
+#     bool)`, takes data bools, not options). Flags are never counted, in the
+#     gate or the threshold: they are the idiom. A parameter is proven bool
+#     when its entry type is exactly the canonical `bool`: the declared
+#     annotation, else the TRUSTED inferred contract
+#     (hir::signatures::entryTypes, the one signature every call must prove
+#     and the body is typed with); for a native, its registry parameter type.
+#     An untyped parameter the body merely uses as a condition has only a
+#     CHECKED contract (validated at run time, never assumed by the body):
+#     not proven, not counted -- in practice the gate needs annotations;
+#   * it passes at least two written `true`/`false` literals at ordinary
+#     argument positions (a method call's receiver is position 1): an
+#     argument that is a reference to the root `true` or `false`, which is
+#     exactly how the frontend lowers those two keyword tokens. The flag
+#     arguments the resolver appends after the ordinary ones are never read.
+#     Nothing else is evidence, whatever its value: a binding that holds a
+#     constant, an alias, a comparison, a call (the anonymity principle: a
+#     name, or an expression, already says what the value means); no exact
+#     value, alias flow or constant is followed;
+#   * it is structurally reachable (HIR's `reachable` flag: statically
+#     decided branches, code after a completion): a call that cannot execute
+#     makes no call. Structural only: no completion walk.
+#
+# One warning per call site, anchored at the call, no secondary locations,
+# never grouped by callee. Scope: the generic source HIR, once per written
+# call; semantic instances are never visited.
+
+proc hir::warnings::ManyBooleanArguments {hir} {
+    set warnings {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "call" || ![dict exists $node written]
+                || [dict get $node written form] ni {function method} || ![dict get $node reachable]} {
+            continue
+        }
+        # Cheap first: two literals among all the arguments.
+        if {[llength [BoolLiteralPositions $hir [dict get $node args]]] < 2} {
+            continue
+        }
+        set callee [OptionCallee $hir $node]
+        if {$callee eq "" || [dict get $callee bools] < 2 || [dict get $callee subjects] < 1} {
+            continue
+        }
+        set positions [BoolLiteralPositions $hir \
+            [lrange [dict get $node args] 0 [expr {[dict get $callee ordinary] - 1}]]]
+        set count [llength $positions]
+        if {$count < 2} {
+            continue
+        }
+        set shown [dict get $callee shown]
+        lappend warnings [New MANY-BOOLEAN-ARGUMENTS \
+            "the call to `$shown` passes $count boolean literals; flags name options" \
+            [dict get $node origin] {} \
+            [dict create call $e callee [dict get $callee target] calleeName $shown \
+                literals $count positions $positions]]
+    }
+    return $warnings
+}
+
+# The argument positions (1-based, as diagnostics count arguments) of ARGUMENTS
+# that are a written `true` or `false`: a reference to the root binding of
+# that name.
+proc hir::warnings::BoolLiteralPositions {hir arguments} {
+    set positions {}
+    set i 0
+    foreach a $arguments {
+        incr i
+        set node [dict get $hir exprs $a]
+        if {[dict get $node kind] ne "ref" || [dict get $node binding] eq ""} {
+            continue
+        }
+        set binding [dict get $hir bindings [dict get $node binding]]
+        if {[dict get $binding kind] eq "root" && [dict get $binding name] in {true false}} {
+            lappend positions $i
+        }
+    }
+    return $positions
+}
+
+# The declared callee of the call NODE, as a dict {target T shown TEXT
+# ordinary N bools B subjects S}: TARGET like a call's `target` ({block
+# ExprId} / {native NAME}), SHOWN the callee as the diagnostic names it, N its
+# ordinary parameter count, B how many of those the checker proves bool, S
+# how many it does not. "" for a call through a function value, and for a
+# call whose argument count is not the declaration's.
+proc hir::warnings::OptionCallee {hir node} {
+    set callee [dict get $hir exprs [dict get $node callee]]
+    if {[dict get $callee kind] ne "ref" || [dict get $callee binding] eq ""} {
+        return ""
+    }
+    set argc [llength [dict get $node args]]
+    set identity [hir::resolve::CandidateIdentity hir [dict get $callee binding]]
+    set b [string range $identity [expr {[string first : $identity] + 1}] end]
+    if {[string match native:* $identity]} {
+        if {![core::native::exists $b]} {
+            return ""
+        }
+        set meta [core::native::metadata $b]
+        set arity [dict get $meta arity]
+        if {![string is digit -strict $arity] || $argc != $arity} {
+            return ""
+        }
+        set types [lrange [concat [dict get $meta paramTypes] [lrepeat $arity any]] 0 [expr {$arity - 1}]]
+        return [OptionShape [list native $b] $b $types]
+    }
+    set binding [dict get $hir bindings $b]
+    set d [dict get $binding declaredBy]
+    if {[dict get $binding kind] ne "local" || $d eq "" || ![dict exists $hir exprs $d]
+            || [dict get $hir exprs $d kind] ne "bind" || [dict get $hir exprs $d duplicate]} {
+        return ""
+    }
+    set block [dict get $hir exprs $d value]
+    set fn [dict get $hir exprs $block]
+    if {[dict get $fn kind] ne "block" || $argc != [llength [dict get $fn params]]} {
+        return ""
+    }
+    set flags [expr {[dict exists $fn flags] ? [dict get $fn flags] : {}}]
+    set ordinary [expr {[llength [dict get $fn params]] - [llength $flags]}]
+    set types [lrange [hir::signatures::entryTypes $hir $block] 0 [expr {$ordinary - 1}]]
+    set shown [expr {[dict exists $binding spelling] ? [dict get $binding spelling] : [dict get $binding name]}]
+    return [OptionShape [list block $block] $shown $types]
+}
+
+proc hir::warnings::OptionShape {target shown types} {
+    set bools 0
+    foreach type $types {
+        if {$type eq "bool"} {
+            incr bools
+        }
+    }
+    return [dict create target $target shown $shown ordinary [llength $types] \
+        bools $bools subjects [expr {[llength $types] - $bools}]]
 }
