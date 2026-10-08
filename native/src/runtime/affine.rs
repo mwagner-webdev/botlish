@@ -97,6 +97,105 @@ fn number(d: &[u8], pos: &mut usize) -> usize {
 mod tests {
     use super::*;
 
+    #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+    mod drops {
+        use super::super::*;
+        use crate::runtime::coroutine::{coroutine_of, rt_co_create, CO_FRESH, CO_RELEASED};
+        use crate::runtime::metrics::AllocMode;
+        use crate::runtime::ops::GenericEntry;
+        use crate::runtime::vm::ProgramInfo;
+
+        fn new_vm() -> Box<Vm> {
+            Vm::new(std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new() }), AllocMode::Summary)
+        }
+
+        extern "C" fn body(_p: *mut Vm, _closure: Value, _args: *const Value) -> Value {
+            make_small(0)
+        }
+
+        /// A fresh (never started) coroutine: its release records one
+        /// release and needs no stack.
+        fn coroutine(vm: &mut Vm) -> Value {
+            let caps: Box<[Value]> = Vec::new().into_boxed_slice();
+            let code: GenericEntry = body;
+            let t = vm.alloc(
+                ClosureObj {
+                    hdr: Header::new(KIND_CLOSURE, false),
+                    func: 0,
+                    arity: 0,
+                    code: code as *const () as usize,
+                    ncaps: 0,
+                    caps: Box::into_raw(caps) as *mut Value,
+                },
+                0,
+            );
+            vm.temp_roots.push(t);
+            let co = rt_co_create(vm, t);
+            vm.temp_roots.push(co);
+            co
+        }
+
+        fn drop_by(vm: &mut Vm, value: Value, descriptor: &str) {
+            let d = vm.new_str(descriptor);
+            vm.temp_roots.push(d);
+            assert_eq!(rt_affine_drop(vm, value, d), UNIT);
+        }
+
+        fn state(v: Value) -> u8 {
+            coroutine_of(v).state
+        }
+
+        #[test]
+        fn a_list_drop_releases_every_element_once() {
+            let mut vm = new_vm();
+            let cs: Vec<Value> = (0..3).map(|_| coroutine(&mut vm)).collect();
+            let list = vm.new_list(cs.clone());
+            vm.temp_roots.push(list);
+            drop_by(&mut vm, list, "lc");
+            assert!(cs.iter().all(|&c| state(c) == CO_RELEASED));
+            assert_eq!(vm.metrics.coroutines.released, 3);
+            // Idempotent: a second drop releases nothing more.
+            drop_by(&mut vm, list, "lc");
+            assert_eq!(vm.metrics.coroutines.released, 3);
+        }
+
+        #[test]
+        fn a_struct_drop_releases_only_the_slots_its_descriptor_names() {
+            let mut vm = new_vm();
+            let a = coroutine(&mut vm);
+            let b = coroutine(&mut vm);
+            let kept = coroutine(&mut vm);
+            // Slots 0 and 2 are affine; slot 1 is an unrestricted Int, slot 3
+            // a coroutine the descriptor excludes (moved out by a
+            // destructuring).
+            let s = vm.new_struct(0, vec![a, make_small(5), b, kept]);
+            vm.temp_roots.push(s);
+            drop_by(&mut vm, s, "s2.2.c0.c");
+            assert_eq!((state(a), state(b), state(kept)), (CO_RELEASED, CO_RELEASED, CO_FRESH));
+            assert_eq!(vm.metrics.coroutines.released, 2);
+        }
+
+        #[test]
+        fn nested_aggregates_and_an_empty_list() {
+            let mut vm = new_vm();
+            let a = coroutine(&mut vm);
+            let b = coroutine(&mut vm);
+            let p = vm.new_struct(0, vec![make_small(1), a]);
+            vm.temp_roots.push(p);
+            let q = vm.new_struct(0, vec![make_small(2), b]);
+            vm.temp_roots.push(q);
+            let empty = vm.new_list(Vec::new());
+            vm.temp_roots.push(empty);
+            let list = vm.new_list(vec![p, q]);
+            vm.temp_roots.push(list);
+            let outer = vm.new_struct(0, vec![empty, list]);
+            vm.temp_roots.push(outer);
+            drop_by(&mut vm, outer, "s2.1.ls1.1.c0.lc");
+            assert_eq!((state(a), state(b)), (CO_RELEASED, CO_RELEASED));
+            assert_eq!(vm.metrics.coroutines.released, 2);
+        }
+    }
+
     #[test]
     fn descriptors_parse_and_skip() {
         let d = b"s2.2.ls1.0.c0.c";
