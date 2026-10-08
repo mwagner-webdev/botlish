@@ -1895,7 +1895,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         MvTakeFront => ("rt_mv_take_front", None, false, None),
                         MvClearDrop => ("rt_mv_clear_drop", None, false, None),
                         MvSwapDrop => ("rt_mv_swap_drop", None, true, None),
-                        ContextRoot => ("rt_context_root", None, false, None),
+                        CtxRoot => ("rt_context_root", None, false, None),
                         // Never fallible (see ops.rs's rt_str_decode_char_at):
                         // a one-character String can never exceed
                         // MAX_COLLECTION_LENGTH. Still routed through

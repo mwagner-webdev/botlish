@@ -275,7 +275,7 @@ never the caller's (`mv-cow-calls`; the fuzzer's `push_len`/`bump`).
 
 `io.output.push(text)` mutates the installed context's member in place,
 visible to every function sharing the context; natively the installed
-header is a GC root (`contextroot`, `vm.context_roots`). A context
+header is a GC root (`ctxroot`, `vm.context_roots`). A context
 parameter is always a place root for read-outs, so a snapshot
 (`snapshot() -> MutableVector[str]: io.output`) is independent of later
 writes, in any function (`mv-context-member`); installing a context copies
@@ -583,7 +583,7 @@ elements, sizes the object, frees the header, dropping its `Rc`).
 `native/lower.tcl` maps each native to one NIR op (`mvfromlist`, `mvlen`,
 `mvempty`, `mvat`, `mvpush`, `mvpop`, `mvtake`, `mvswap`, `mvclear`,
 `mvshare`, `mvtolist`, `mvtakefront`, `mvcleardrop`, `mvswapdrop`);
-`contextroot` roots an installed context's vector header. Only
+`ctxroot` roots an installed context's vector header. Only
 `mvfromlist`, `mvshare` and `mvtolist` may allocate (safepoints); every
 mutation is no safepoint (`op_may_allocate`, `mv-runtime-source`). Native
 evidence (item 89):
@@ -610,7 +610,7 @@ single operations on the header register.
 The collector traces a header's live elements (`mutvec::elements`), and
 nothing else of it: the backing is not a Botlish object. A shared backing
 is traced once per header (marking is idempotent). An installed context's
-header is rooted (`contextroot`).
+header is rooted (`ctxroot`).
 
 ### 61. GC stress
 

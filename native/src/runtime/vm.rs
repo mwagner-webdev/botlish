@@ -161,7 +161,7 @@ pub struct Vm {
     argv_invalid: std::cell::OnceCell<Option<usize>>,
     pub temp_roots: Vec<Value>,
     /// The MutableVector headers installed in the context area this run
-    /// (`contextroot`, MUTABLE-VECTOR.md): roots for the rest of the run.
+    /// (`ctxroot`, MUTABLE-VECTOR.md): roots for the rest of the run.
     pub context_roots: Vec<Value>,
     pub info: Rc<ProgramInfo>,
     pub metrics: Metrics,

@@ -3957,7 +3957,7 @@ proc native::lower::ContextLeaves {id {seen {}}} {
                 # A MutableVector member (MUTABLE-VECTOR.md): its header,
                 # which the context owns for the whole run -- mutated in
                 # place, never replaced -- is registered as a permanent GC
-                # root when installed (`contextroot`), so the area itself
+                # root when installed (`ctxroot`), so the area itself
                 # needs no scanning and a loaded header is kept alive by
                 # that root.
                 lappend leaves [list [list $field] $type]
@@ -4123,7 +4123,7 @@ proc native::lower::ContextInstallCall {fnVar e node} {
     foreach r $leaves leaf [dict get $slot leaves] {
         Emit fn "contextstore $offset $r" $e
         if {[hir::types::kindOf [lindex $leaf 1]] eq "mutvec"} {
-            Assign fn "op contextroot $r" $e
+            Assign fn "op ctxroot $r" $e
         }
         incr offset 8
     }

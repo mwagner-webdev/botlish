@@ -316,10 +316,10 @@ pub enum OpCode {
     MvTakeFront,
     MvClearDrop,
     MvSwapDrop,
-    /// `contextroot %h`: %h (a MutableVector header just installed in the
+    /// `ctxroot %h`: %h (a MutableVector header just installed in the
     /// context area, MUTABLE-VECTOR.md) is a GC root for the rest of the
     /// run. Never fails or allocates; result unit.
-    ContextRoot,
+    CtxRoot,
     /// Tcl 9-compatible Unicode alpha/alnum character classification
     /// (core/tclcompat.tcl's `is_tcl_alpha`/`is_tcl_alnum`): the operand is
     /// a one-Unicode-scalar String (RANGE if not). TEMPORARY compatibility
@@ -532,7 +532,7 @@ impl OpCode {
             "mvtakefront" => MvTakeFront,
             "mvcleardrop" => MvClearDrop,
             "mvswapdrop" => MvSwapDrop,
-            "contextroot" => ContextRoot,
+            "ctxroot" => CtxRoot,
             "mbytesnew" => MBytesNew,
             "mbytesfrom" => MBytesFrom,
             "mbyteslen" => MBytesLen,
@@ -585,7 +585,7 @@ impl OpCode {
             | SetFromListTotal | StrToShort | ShortToStr | ShortLen | StrToAscii | AsciiToStr | AsciiLen
             | AsciiToShort | BytesFromList | BytesLen | BytesAddr | KeepAlive | MBytesNew | MBytesFrom | MBytesLen
             | MBytesClone | MBytesFreeze | MBytesAddr | CoCreate | CoStart | CoResume0 | CoYield | CoDone
-            | CoRelease | MvFromList | MvLen | MvEmpty | MvPop | MvClear | MvToList | MvTakeFront | ContextRoot => Some(1),
+            | CoRelease | MvFromList | MvLen | MvEmpty | MvPop | MvClear | MvToList | MvTakeFront | CtxRoot => Some(1),
             Substr | SubstrProven | MutArraySet | MutArraySetProven | MBytesSet | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum | StrSliceShort
             | MvSwap => Some(3),
             RegionEq | MvSwapDrop => Some(4),

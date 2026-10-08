@@ -1491,7 +1491,7 @@ fn index_not_found(p: *mut Vm) -> Value {
     fail_builtin(p, super::error::ERR_INDEX_NOT_FOUND, "IndexNotFound")
 }
 
-/// `contextroot %h`: the MutableVector header H, just installed in the context
+/// `ctxroot %h`: the MutableVector header H, just installed in the context
 /// area (MUTABLE-VECTOR.md), stays a GC root for the rest of the run (the
 /// context owns it; it is mutated in place, never replaced).
 #[unsafe(no_mangle)]
@@ -2026,7 +2026,7 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         MvTakeFront => rt_mv_take_front(p, a[0]),
         MvClearDrop => rt_mv_clear_drop(p, a[0], a[1]),
         MvSwapDrop => rt_mv_swap_drop(p, a[0], a[1], a[2], a[3]),
-        ContextRoot => rt_context_root(p, a[0]),
+        CtxRoot => rt_context_root(p, a[0]),
         IsInt => rt_is_kind(p, a[0], Kind::Int.code() as u64),
         IsStr => rt_is_kind(p, a[0], Kind::Str.code() as u64),
         IsList => rt_is_kind(p, a[0], Kind::List.code() as u64),
