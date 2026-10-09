@@ -395,10 +395,10 @@ test mv-loop-consumes {items 48, 58: `loop item in queue` over an affine vector 
         [mvCode "${mvLoopDecls}fn f() -> int:\n    queue = q4()\n    xs = loop step in queue:\n        1\n    queue.length()\nf()\n"]
 } -cleanup {unset -nocomplain text} -result {{value {[101, 102, 103, 104]}} {{value {[101, 102, 103, 104]}} 4 1 {1 2 3 4}} USE-AFTER-MOVE}
 
-test mv-loop-exits {items 50-53: continue releases the current element; break releases it and the remaining suffix; return and fail release the suffix too; a moved-on element is kept by its new owner -- every element exactly once, lowest index first} -body {
+test mv-loop-exits {items 50-53: continue releases the current element; break releases it and the remaining suffix; return and fail release the suffix too; a moved-on element is kept by its new owner -- every element exactly once, lowest index first (break also on the Tcl compiler, whose drain is its own code)} -body {
     set body "${mvLoopDecls}fn run(mode: int) -> int errors Boom:\n    queue = q4()\n    keep = empty_queue()\n    xs = loop step in queue:\n        e = step(Command {value: 0})\n        if e.value == 2 and mode == 1:\n            continue\n        if e.value == 2 and mode == 2:\n            break\n        if e.value == 2 and mode == 3:\n            return 0 - keep.length()\n        if e.value == 2 and mode == 4:\n            fail Boom\n        if e.value == 3 and mode == 5:\n            keep.push(step)\n            continue\n        e.value\n    list::length(xs) * 10 + keep.length()\nfn go(mode: int) -> int:\n    r = run(mode):\n        on Boom:\n            -1\n    r\n"
-    lmap mode {1 2 3 4 5} {mvReleases "${body}go($mode)\n"}
-} -cleanup {unset -nocomplain body} -result {{{value 30} 4 1 {1 2 3 4}} {{value 10} 4 1 {1 2 3 4}} {{value 0} 4 1 {1 2 3 4}} {{value -1} 4 1 {1 2 3 4}} {{value 31} 4 1 {1 2 4 3}}}
+    concat [lmap mode {1 2 3 4 5} {mvReleases "${body}go($mode)\n"}] [list [mvReleases "${body}go(2)\n" compile]]
+} -cleanup {unset -nocomplain body} -result {{{value 30} 4 1 {1 2 3 4}} {{value 10} 4 1 {1 2 3 4}} {{value 0} 4 1 {1 2 3 4}} {{value -1} 4 1 {1 2 3 4}} {{value 31} 4 1 {1 2 4 3}} {{value 10} 4 1 {1 2 3 4}}}
 
 test mv-loop-error-propagation {item 53: a declared error propagated out of a consuming loop's body releases the current element and the suffix} -body {
     mvReleases "${mvLoopDecls}fn run() -> int errors Boom:\n    xs = loop step in q4():\n        e = step(Command {value: 0})\n        n = boom(e.value - 2)\n        n\n    list::length(xs)\nfn go() -> int:\n    r = run():\n        on Boom:\n            -1\n    r\ngo()\n"
