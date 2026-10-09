@@ -701,14 +701,20 @@ and 1 under `affine-move-cow-fork`); a re-run killed all three by it.
 ### 60. Native coverage
 
 `tests/native-coverage.tcl` (the suite on the Cranelift backend, final
-tree): 6801 tests -- 2688 run natively, 3959 independent of the backend, 94
+tree): 6801 tests -- 2713 run natively, 3959 independent of the backend, 69
 partially native, 60 unsupported, **0 failed** (MUTABLE-VECTOR.md: 6766 --
 2683, 3955, 68, 60, 0). The 60 unsupported tests need exactly what
 README.md's coverage table lists, in the same numbers (a Block value at the
 program boundary 13, `test-log`/`test_log` 19, `test-tick`/`test_tick` 12,
 sequence mode 7, test validators and natives 7, a validator contract 2);
-none is an array or vector test.
-PARTIAL-RESULTS
+none is an array or vector test. 64 of the 69 partially native tests pass
+natively specialized and compare an unspecialized (`cranelift-generic`)
+build that a struct projection on an untyped receiver makes unsupported
+(`struct-shape`): the HashTable and csv_records programs -- generically
+unsupported before this milestone too -- and struct tests; no `ma-`, `mv-`
+or `mat-` test is among them. A run before `csv_chunked.bot`'s builder
+functions declared their parameter's type counted 94: its 26 corpus and
+growth tests had joined them (66).
 
 ### 61. Scalar audit
 
