@@ -1084,7 +1084,7 @@ proc AFault {stateVar} {
     if {[dict get $state pools] ne {}} { lappend kinds project }
     switch -- [Pick $kinds] {
         temporary {
-            Handled state late "spare().swap(0, make(1))" "make(2)"
+            Handled state late "mutable_array::swap(spare(), 0, make(1))" "make(2)"
             return MUTABLE-PLACE-RECEIVER
         }
         handleaftermove {

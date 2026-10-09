@@ -319,4 +319,214 @@ test ma-ops {items 16, 18, 25, 42: create, from_list, generate, capacity, at, se
 } -result {{value {[[[7, 10, 20, 8], [2, 1, -5, 3]], [[-3], [-1, -2, 1]]]}} {error {CORE SEMANTIC RANGE}}}
 
 
+# ---------------------------------------------------------------------------
+# Affine replacement, failed replacement, consuming iteration, drops (items
+# 9-12, 19-24, 48, 49)
+
+test ma-affine-swap {items 9, 10: swap moves the replacement into the slot and the displaced element out to its result; a discarded result is released right after its statement; every coroutine is released once, in the order its owner dies} -body {
+    set text "${maDecls}fn f() -> List\[int\] errors IndexNotFound:
+    a = mutable_array::generate(2, make)
+    c = make(10)
+    old = a.swap(1, c)
+    e = old(Command {value: 1})
+    a.swap(0, make(20)):
+        on IndexNotFound:
+            make(30)
+    xs = loop w in a:
+        w(Command {value: 100}).value
+    list::append(xs, e.value)
+r = f():
+    on IndexNotFound:
+        \[\]
+r
+"
+    list [maReleases $text] [maReleases $text compile] [maNativeReleases $text]
+} -cleanup {unset -nocomplain text} -result {{{value {[120, 110, 2]}} 4 1 {2 1 4 3}} {{value {[120, 110, 2]}} 4 1 {2 1 4 3}} {4 0}}
+
+test ma-affine-swap-failure {item 11: an out-of-range swap of an affine replacement leaves the array unchanged, releases the replacement it was given, and propagates IndexNotFound; the source binding stays moved (USE-AFTER-MOVE)} -body {
+    set text "${maDecls}fn put(a: MutableArray\[Coroutine{args: \[Command\], return: Event}\], i: int, c: Coroutine{args: \[Command\], return: Event}) -> int errors IndexNotFound:
+    old = a.swap(i, c)
+    old(Command {value: 1}).value
+fn f(zero: int) -> List\[int\]:
+    a = mutable_array::generate(2, make)
+    c = make(10)
+    x = put(a, 5 + zero, c):
+        on IndexNotFound:
+            -1
+    \[x\]
+f(0)
+"
+    list [maReleases $text] [maReleases $text compile] [maNativeReleases $text] \
+        [maCode "${maDecls}fn f(zero: int) -> int:\n    a = mutable_array::generate(2, make)\n    c = make(10)\n    old = a.swap(5 + zero, c):\n        on IndexNotFound:\n            make(77)\n    e = c(Command {value: 1})\n    e.value\nf(0)\n"]
+} -cleanup {unset -nocomplain text} -result {{{value {[-1]}} 3 1 {3 1 2}} {{value {[-1]}} 3 1 {3 1 2}} {3 0} USE-AFTER-MOVE}
+
+set maExits "fn over_return(a: MutableArray\[Coroutine{args: \[Command\], return: Event}\]) -> int:
+    loop w in a:
+        e = w(Command {value: 1})
+        if e.value == 2:
+            return e.value
+    0
+fn over_fail(a: MutableArray\[Coroutine{args: \[Command\], return: Event}\]) -> int errors Boom:
+    loop w in a:
+        e = w(Command {value: 1})
+        if e.value == 2:
+            fail Boom
+    0
+fn boom_if(v: int) -> int errors Boom:
+    if v == 2:
+        fail Boom
+    v
+fn over_propagate(a: MutableArray\[Coroutine{args: \[Command\], return: Event}\]) -> int errors Boom:
+    loop w in a:
+        e = w(Command {value: 1})
+        n = boom_if(e.value)
+        n
+    0
+fn over_break(a: MutableArray\[Coroutine{args: \[Command\], return: Event}\]) -> List\[int\]:
+    loop w in a:
+        e = w(Command {value: 1})
+        if e.value == 2:
+            break
+        e.value
+fn over_continue(a: MutableArray\[Coroutine{args: \[Command\], return: Event}\]) -> List\[int\]:
+    loop w in a:
+        e = w(Command {value: 1})
+        if e.value == 2:
+            continue
+        e.value
+"
+
+test ma-consuming-exits {items 12, 22, 23, 48: a loop over an affine array consumes it, moving each element out in index order; leaving it by return, fail, a propagated declared error, break or continue releases the current element and every element not yet taken, first to last -- on both Tcl backends and natively (none swept)} -body {
+    lmap call {"over_return(mutable_array::generate(4, make))" "over_fail(mutable_array::generate(4, make)):\n    on Boom:\n        -1" "over_propagate(mutable_array::generate(4, make)):\n    on Boom:\n        -1" "over_break(mutable_array::generate(4, make))" "over_continue(mutable_array::generate(4, make))"} {
+        set text "${maDecls}${::maExits}r = $call\nr\n"
+        list [maReleases $text] [lrange [maReleases $text compile] 0 1] [maNativeReleases $text]
+    }
+} -cleanup {unset -nocomplain call text} -result {{{{value 2} 4 1 {1 2 3 4}} {{value 2} 4} {4 0}} {{{value -1} 4 1 {1 2 3 4}} {{value -1} 4} {4 0}} {{{value -1} 4 1 {1 2 3 4}} {{value -1} 4} {4 0}} {{{value {[1]}} 4 1 {1 2 3 4}} {{value {[1]}} 4} {4 0}} {{{value {[1, 3, 4]}} 4 1 {1 2 3 4}} {{value {[1, 3, 4]}} 4} {4 0}}}
+
+test ma-drop-order {item 49: an affine array dying with its owner releases its elements lowest index first, also inside a struct; there is no clear (item 13: a fixed-size array has no empty state)} -body {
+    set text "${maDecls}struct Pool:\n    tag: int\n    workers: MutableArray\[Coroutine{args: \[Command\], return: Event}\]\nfn f() -> int:\n    a = mutable_array::generate(3, make)\n    p = Pool {tag: 1, workers: mutable_array::generate(2, make)}\n    1\nf()\n"
+    list [maReleases $text] [maReleases $text compile] [maNativeReleases $text] \
+        [maCode "import mutable_array\na = mutable_array::create(1, 0)\nmutable_array::clear(a)\n0\n"]
+} -cleanup {unset -nocomplain text} -result {{{value 1} 5 1 {1 2 3 4 5}} {{value 1} 5 1 {1 2 3 4 5}} {5 0} UNKNOWN-SYMBOL}
+
+# ---------------------------------------------------------------------------
+# Factory construction (items 16-20, 27-30, 64)
+
+test ma-generate-failure {items 17, 18, 30: a factory failing at slot 2 leaves no array: the two coroutines it already made are released, first to last, and its declared error propagates to the caller's handler -- on both Tcl backends, natively and under GC stress; an unhandled factory error is the caller's UNHANDLED-ERROR} -body {
+    set text "${maDecls}fn make_until(i: int) -> Coroutine{args: \[Command\], return: Event} errors Boom:\n    if i == 2:\n        fail Boom\n    make(i)\nfn f() -> int errors Boom:\n    a = mutable_array::generate(4, make_until)\n    mutable_array::capacity(a)\nr = f():\n    on Boom:\n        -1\nr\n"
+    list [maReleases $text] [maReleases $text compile] [maNativeReleases $text] [withGcStress {maNativeReleases $text}] \
+        [maCode "${maDecls}fn make_until(i: int) -> Coroutine{args: \[Command\], return: Event} errors Boom:\n    if i == 2:\n        fail Boom\n    make(i)\nfn f() -> int:\n    a = mutable_array::generate(4, make_until)\n    mutable_array::capacity(a)\nf()\n"]
+} -constraints linuxX86_64 -cleanup {unset -nocomplain text} -result {{{value -1} 2 1 {1 2}} {{value -1} 2 1 {1 2}} {2 0} {2 0} UNHANDLED-ERROR}
+
+test ma-generate-contract {item 19: a factory is an ordinary callable of the existing contract model, called with each slot's Int index: a narrower parameter (a refinement), a second parameter or a coroutine handle (whose contract takes its resume message) is TYPE} -body {
+    list [maCode "${maDecls}type Small = Int in 0..3\nfn mk(i: Small) -> int:\n    i\na = mutable_array::generate(5, mk)\n0\n"] \
+        [string match {the factory of mutable_array::generate is called with one Int argument (each slot's index, 0 to the count - 1), but its contract is block(e*)/1 -> int (contract Fn{args: \[int\[Small\]\], return: int, errors: \[\]})} \
+            [maMessage "${maDecls}type Small = Int in 0..3\nfn mk(i: Small) -> int:\n    i\na = mutable_array::generate(5, mk)\n0\n"]] \
+        [maCode "${maDecls}fn mk(i: int, j: int) -> int:\n    i\na = mutable_array::generate(5, mk)\n0\n"] \
+        [maCode "${maDecls}fn f() -> int:\n    c = make(1)\n    a = mutable_array::generate(2, c)\n    1\nf()\n"]
+} -result {TYPE 1 TYPE TYPE}
+
+test ma-duplication-generic {items 14, 15, 22: create repeats its value, so an affine value is rejected wherever it reaches create -- an affine struct, a vector of coroutines, and through a user's generic or typed wrapper (its semantic instance or its own body), never by name} -body {
+    list [maCode "${maDecls}struct Job:\n    step: Coroutine{args: \[Command\], return: Event}\nfn f() -> int:\n    a = mutable_array::create(2, Job {step: make(1)})\n    1\nf()\n"] \
+        [maCode "${maDecls}fn f() -> int:\n    a = mutable_array::create(2, mutable_vector::from_list(\[make(1)\]))\n    1\nf()\n"] \
+        [maCode "${maDecls}fn dup(x):\n    mutable_array::create(2, x)\nfn f() -> int:\n    a = dup(make(1))\n    1\nf()\n"] \
+        [maCode "${maDecls}fn dup(x: Coroutine{args: \[Command\], return: Event}) -> MutableArray\[Coroutine{args: \[Command\], return: Event}\]:\n    mutable_array::create(2, x)\n1\n"] \
+        [maCode "${maDecls}fn dup(x):\n    mutable_array::create(2, x)\nfn f() -> int errors IndexNotFound:\n    a = dup(5)\n    a.at(1)\nr = f():\n    on IndexNotFound:\n        0\nr\n"]
+} -result {AFFINE-DUPLICATION-UNSUPPORTED AFFINE-DUPLICATION-UNSUPPORTED AFFINE-DUPLICATION-UNSUPPORTED AFFINE-DUPLICATION-UNSUPPORTED ok}
+
+test ma-roles-audit {items 21, 23, 31-34, 53, 54: every collection primitive's ownership roles are registration metadata (core/native.tcl's -ownership), the one thing the ownership discipline reads: repeat for create's value, factory for generate's, move for what an operation stores, place for a receiver mutated in place, copy-out for a container read while it keeps its elements, equality for a set's members (byte stores take only Bytes: the default)} -body {
+    set rows {}
+    foreach n [lsort [core::native::names]] {
+        if {![regexp {^(mutable_array|mutable_vector|list|immutable_set)(::|#)|^list$} $n]} continue
+        lappend rows [list $n [dict get [core::native::metadata $n] ownership]]
+    }
+    set rows
+} -cleanup {unset -nocomplain rows n} -result {{immutable_set::contains {equality equality}} {immutable_set::from_list equality} {list element} {list::append {copy-out copy-out}} {list::at {copy-out observe}} {list::length observe} {mutable_array#consume move} {mutable_array#generate_drop {observe factory observe}} {mutable_array#set_drop {place observe move observe}} {mutable_array#swap_drop {place observe move observe}} {mutable_array#take_front place} {mutable_array#to_list copy-out} {mutable_array::allocate observe} {mutable_array::at {copy-out observe}} {mutable_array::capacity observe} {mutable_array::copy {place observe copy-out observe observe}} {mutable_array::create {observe repeat}} {mutable_array::freeze {copy-out observe}} {mutable_array::from_list move} {mutable_array::generate {observe factory}} {mutable_array::set {place observe move}} {mutable_array::swap {place observe move}} {mutable_vector#clear_drop {place observe}} {mutable_vector#consume move} {mutable_vector#share {}} {mutable_vector#swap_drop {place observe move observe}} {mutable_vector#take_front place} {mutable_vector#to_list copy-out} {mutable_vector::at {copy-out observe}} {mutable_vector::clear place} {mutable_vector::empty? observe} {mutable_vector::from_list move} {mutable_vector::length observe} {mutable_vector::pop place} {mutable_vector::push {place move}} {mutable_vector::swap {place observe move}} {mutable_vector::take {place observe}}}
+
+test ma-equality {item 41: == of two arrays is the EQUALITY error it always was (no identity or backing leaks into equality); of affine arrays, AFFINE-EQUALITY-UNSUPPORTED} -body {
+    list [lrange [maAgree "import mutable_array\na = mutable_array::create(2, 0)\nb = a\na == b\n"] 0 1] \
+        [maCode "${maDecls}fn f() -> bool:\n    a = mutable_array::generate(1, make)\n    b = mutable_array::generate(1, make)\n    a == b\nf()\n"]
+} -result {{error {CORE SEMANTIC EQUALITY}} AFFINE-EQUALITY-UNSUPPORTED}
+
+# ---------------------------------------------------------------------------
+# Nested collections (items 25-28, 36-39)
+
+test ma-nested-affine {items 25, 27, 38, 39: MutableArray[MutableVector[Coroutine]] and MutableVector[MutableArray[Coroutine]] are affine by composition; their factories, pops, swaps and consuming loops move whole collections; every coroutine is released once (an array right after its last use, a consumed one per iteration) on every backend and under GC stress} -constraints linuxX86_64 -body {
+    set text "${maDecls}fn pair(i: int) -> MutableVector\[Coroutine{args: \[Command\], return: Event}\]:
+    mutable_vector::from_list(\[make(i), make(i + 10)\])
+fn f() -> List\[int\] errors IndexNotFound:
+    a = mutable_array::generate(2, pair)
+    v = mutable_vector::from_list(\[mutable_array::generate(2, make)\])
+    w = v.pop()
+    old = a.swap(0, mutable_vector::from_list(\[make(50)\]))
+    xs = loop q in old:
+        q(Command {value: 1}).value
+    ys = loop q in w:
+        q(Command {value: 2}).value
+    list::append(xs, list::length(ys))
+r = f():
+    on IndexNotFound:
+        \[\]
+r
+"
+    set hir [surface::compile $text -warnings off]
+    list [maReleases $text] [maReleases $text compile] [maNativeReleases $text] [withGcStress {maNativeReleases $text}] \
+        [hir::types::Affinity [maBindingType $hir a]] [hir::types::Affinity [maBindingType $hir v]]
+} -cleanup {unset -nocomplain text hir} -result {{{value {[1, 11, 2]}} 7 1 {7 3 4 1 2 5 6}} {{value {[1, 11, 2]}} 7 1 {7 3 4 1 2 5 6}} {7 0} {7 0} affine affine}
+
+# ---------------------------------------------------------------------------
+# Evidence: copy-on-write counters, HIR, native code (items 43, 50, 51)
+
+test ma-cow-counters {item 50: a copy is O(1) -- one share whatever the length -- the first write after it detaches once, copying the elements, and later writes to the now unique backing never detach again (native counters); the Tcl runtime counts one array and one logical copy} -constraints linuxX86_64 -body {
+    lmap n {10 1000} {
+        set text "import mutable_array\nfn f() -> int errors IndexNotFound:\n    a = mutable_array::create($n, 0)\n    b = a\n    b.set(0, 1)\n    b.set(1, 2)\n    b.set(2, 3)\n    a.at(0) + b.at(0)\nr = f():\n    on IndexNotFound:\n        0\nr\n"
+        core::mutarray::resetCounters
+        outcomeUnderHir interp [surface::compile $text -warnings off]
+        list [lindex [maNative $text] 1] [core::mutarray::counters]
+    }
+} -cleanup {unset -nocomplain n text} -result {{{shares 1 detaches 1 detachElements 10} {created 1 shares 1}} {{shares 1 detaches 1 detachElements 1000} {created 1 shares 1}}}
+
+set maEvidence "${maDecls}fn affine() -> int errors IndexNotFound:
+    a = mutable_array::generate(2, make)
+    old = a.swap(0, make(5))
+    n = a.capacity()
+    xs = loop w in a:
+        w(Command {value: 1}).value
+    n
+fn copies() -> int errors IndexNotFound:
+    a = mutable_array::create(3, 0)
+    b = a
+    b.set(0, 9)
+    b.set(1, 8)
+    v = mutable_vector::from_list(\[a\])
+    c = v.at(0)
+    c.at(0) + b.at(0)
+a = affine():
+    on IndexNotFound:
+        0
+c = copies():
+    on IndexNotFound:
+        0
+\[a, c\]
+"
+
+test ma-hir-evidence {item 43: in HIR, an affine generate and swap are the dropping forms carrying the element's drop descriptor (`c`), the loop over the affine array is consuming, the unrestricted copy is one mutable_vector#share of descriptor `h`, mutations name their place, and an exit's releases are recorded} -body {
+    set hir [surface::compile [string map [list "import list\n" ""] $::maEvidence] -warnings off]
+    set flags {}
+    foreach line [split [hir::format $hir] \n] {
+        foreach pattern {{call native\(mutable_array::[a-z?_]+\)} {call native\(mutable_array#[a-z_]+\)} {call native\(mutable_vector#[a-z_]+\)} {place=[b0-9.a-z]+} {listloop s[0-9]+ \([^)]*\) : \S+ consuming} {const str h\M} {const str c\M} {release=[^ ]+}} {
+            if {[regexp $pattern $line match]} {
+                lappend flags [regsub -all {b[0-9]+} [regsub {s[0-9]+} $match {S}] B]
+            }
+        }
+    }
+    lsort -unique $flags
+} -cleanup {unset -nocomplain hir flags line pattern match} -result {{call native(mutable_array#generate_drop)} {call native(mutable_array#swap_drop)} {call native(mutable_array::at)} {call native(mutable_array::capacity)} {call native(mutable_array::create)} {call native(mutable_array::set)} {call native(mutable_vector#share)} {const str c} {const str h} {listloop S (B w) : List[int] consuming} place=B release=B release=IndexNotFound=B}
+
+test ma-native-evidence {item 51: natively an affine generate, swap and consuming loop are single runtime operations on the header register (mutarraygeneratedrop, mutarrayswapdrop, mutarraytakefront), the displaced element a corelease and the array's death one affinedrop by `ac`; an unrestricted copy is one mvshare whose first write detaches inside mutarrayset; a vector element read only for reading is not copied; no ownership object exists} -constraints linuxX86_64 -body {
+    set nir [maNir $::maEvidence]
+    list [maOps [maFunc $nir affine]] [lsearch -all -inline -regexp [maFunc $nir affine] {str "a}] [maOps [maFunc $nir copies]] [maAgree $::maEvidence]
+} -cleanup {unset -nocomplain nir} -result {{mutarraygeneratedrop call mutarrayswapdrop affinedrop corelease mutarraycapacity listnew mutarrayempty mutarraytakefront structnew coresume corelease} {{%13 = str "ac"}} {mutarraycreate mvshare mutarraysetproven mutarraysetproven listnew mvfromlist mvat mutarrayget mutarraygetproven iadd} {value {[2, 9]}}}
+
+
 cleanupTests

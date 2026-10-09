@@ -1,0 +1,415 @@
+# Mutants of MutableArray[T] as a value (audit/mutable-array/tools/mutate.tcl;
+# MUTABLE-ARRAY.md): the mutants the milestone brief names (item 57), each a
+# deliberate bug in the affinity query (hir/types.tcl), the specialization
+# key (hir/specialize.tcl), the ownership analysis (hir/affine.tcl), the
+# place and copy-on-write elaboration (hir/mutvec.tcl), the ownership roles
+# of the registrations (core/mutarray.tcl, core/native.tcl), the Tcl runtime
+# (core/mutarray.tcl, core/mutvec.tcl, core/affine.tcl) or the native
+# runtime (native/src/runtime/ops.rs, mutvec.rs, affine.rs, native/lower.tcl).
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant may have several edits. A mutant editing native/src/ or the
+# native crate's manifest is a native mutant: mutate.tcl rebuilds the native
+# backend for it. Lines starting with # outside an edit are comments.
+#
+# Brief mutants with no separate non-equivalent mutant in this
+# representation:
+#
+#   * "native repeated constructor bypasses affinity": the duplication
+#     check is static and backend-independent -- every backend compiles the
+#     one HIR the ownership discipline accepted (create of an affine value
+#     never reaches a native runtime). Its two mutants are
+#     create-accepts-affine (the registration's role) and
+#     signature-ignores-repeat (the discipline ignoring the role).
+#   * "copy becomes eager O(N)" on the Tcl backends: a Tcl list is itself a
+#     copy-on-write value, so an eager copy there is unobservable but for
+#     time; the native mutant (copy-eager-deep-native) is the one the
+#     copy-on-write counters observe.
+
+@@ copy-aliases-native an unrestricted copy aliases writes (native): a logical copy of an array is the same header
+## native/src/runtime/ops.rs
+<<<<
+    let backing = Rc::clone(&mutarray_of(arr).backing);
+    vm(p).metrics.record_mutarray_share();
+    new_mutarray_header(p, backing, 0)
+====
+    let backing = Rc::clone(&mutarray_of(arr).backing);
+    vm(p).metrics.record_mutarray_share();
+    drop(backing);
+    arr
+>>>>
+
+@@ copy-aliases-tcl an unrestricted copy aliases writes (Tcl runtimes): a logical copy of an array is the same header
+## core/mutarray.tcl
+<<<<
+    set copy [New $store($id)]
+    dict incr counters created -1
+    return $copy
+}
+
+# Drops every element of array V
+====
+    return $v
+}
+
+# Drops every element of array V
+>>>>
+
+@@ copy-eager-deep-native an unrestricted copy eagerly copies every element (native): no backing is ever shared, the first write never detaches
+## native/src/runtime/ops.rs
+<<<<
+    let backing = Rc::clone(&mutarray_of(arr).backing);
+    vm(p).metrics.record_mutarray_share();
+====
+    let backing = Rc::new((*mutarray_of(arr).backing).clone());
+    vm(p).metrics.record_mutarray_share();
+>>>>
+
+@@ param-mutation-leaks an array parameter is never copied for its callee (no entry copy, no caller-side copy of a consumed parameter's argument): the callee's mutations reach the caller's array
+## hir/mutvec.tcl
+<<<<
+        } elseif {![dict exists $convention consumed $b]} {
+            EntryRename hir $b $d
+====
+        } elseif {![dict exists $convention consumed $b] && [Kind [hir::affine::BindingType $hir $b]] ne "array"} {
+            EntryRename hir $b $d
+>>>>
+## hir/mutvec.tcl
+<<<<
+            if {$d ne ""} {
+                lappend wraps [list $arg [ShareNative] $d]
+            }
+====
+            if {$d ne "" && [Kind [hir::typeOf $hir $arg]] ne "array"} {
+                lappend wraps [list $arg [ShareNative] $d]
+            }
+>>>>
+
+@@ result-aliases-surviving every array read-out a function returns moves its header out uncopied, also while another copy of it survives
+## hir/mutvec.tcl
+<<<<
+        if {[OwnResult $hir $parent $e [lindex $path 0]]} {
+====
+        if {[OwnResult $hir $parent $e [lindex $path 0]]
+                || ([IsResult $hir $parent $e] && [Kind [hir::typeOf $hir $e]] eq "array")} {
+>>>>
+
+@@ generic-identity-aliases a dynamic copy (`d`, a generic function's parameter) of an array is the array itself (Tcl runtimes)
+## core/mutvec.tcl
+<<<<
+                mutvec - mutarray {
+                    return [Share $v {h}]
+                }
+====
+                mutvec {
+                    return [Share $v {h}]
+                }
+>>>>
+
+@@ generic-identity-aliases-native a dynamic copy (`d`, a generic function's parameter) of an array is the array itself (native)
+## native/src/runtime/mutvec.rs
+<<<<
+        KIND_MUTARRAY => super::ops::share_array(p, value),
+        KIND_MUTVEC => {
+====
+        KIND_MUTARRAY => value,
+        KIND_MUTVEC => {
+>>>>
+
+@@ list-extraction-aliases an array a binding takes out of a List (list::at) is not copied: the binding's mutations reach the List's element
+## hir/mutvec.tcl
+<<<<
+            if {![Fresh $hir $value] && ![Moved $hir $parent $value]} {
+                lappend wraps [list $value [ShareNative] $d]
+            }
+====
+            if {![Fresh $hir $value] && ![Moved $hir $parent $value]
+                    && !([hir::affine::NativeName $hir $value] eq "list::at" && [Kind [hir::affine::BindingType $hir $b]] eq "array")} {
+                lappend wraps [list $value [ShareNative] $d]
+            }
+>>>>
+
+@@ struct-extraction-aliases an array a binding takes out of a struct field (or a destructure) is not copied: the binding's mutations reach the struct's field
+## hir/mutvec.tcl
+<<<<
+            if {![Fresh $hir $value] && ![Moved $hir $parent $value]} {
+                lappend wraps [list $value [ShareNative] $d]
+            }
+====
+            if {![Fresh $hir $value] && ![Moved $hir $parent $value]
+                    && !([dict get $hir exprs $value kind] eq "project" && [Kind [hir::affine::BindingType $hir $b]] eq "array")} {
+                lappend wraps [list $value [ShareNative] $d]
+            }
+>>>>
+
+@@ context-snapshot-aliases an array read out of a context member is not copied: a snapshot of the member changes with later writes to it
+## hir/mutvec.tcl
+<<<<
+        if {[OwnResult $hir $parent $e [lindex $path 0]]} {
+====
+        if {[IsContextParam $hir [lindex $path 0]] && [Kind [hir::typeOf $hir $e]] eq "array"} {
+            continue
+        }
+        if {[OwnResult $hir $parent $e [lindex $path 0]]} {
+>>>>
+
+@@ array-always-affine MutableArray is always affine: a copy of an array of Ints moves it
+## hir/types.tcl
+<<<<
+        immutableSet - mutarray - mutvec {
+            # A MutableVector or MutableArray of affine elements is itself
+            # affine: it uniquely owns every element (MUTABLE-VECTOR.md,
+            # MUTABLE-ARRAY.md). Mutation alone never makes a type affine.
+            return [IsAffine [lindex $type 1] $seen]
+        }
+====
+        immutableSet - mutvec {
+            return [IsAffine [lindex $type 1] $seen]
+        }
+        mutarray {
+            return 1
+        }
+>>>>
+
+@@ affine-array-unrestricted MutableArray[affine] is unrestricted: an array of coroutines may be copied
+## hir/types.tcl
+<<<<
+        immutableSet - mutarray - mutvec {
+            # A MutableVector or MutableArray of affine elements is itself
+            # affine: it uniquely owns every element (MUTABLE-VECTOR.md,
+            # MUTABLE-ARRAY.md). Mutation alone never makes a type affine.
+            return [IsAffine [lindex $type 1] $seen]
+        }
+====
+        immutableSet - mutvec {
+            return [IsAffine [lindex $type 1] $seen]
+        }
+        mutarray {
+            return 0
+        }
+>>>>
+
+@@ nested-affinity-shallow an array is affine only when its element is itself a coroutine handle: MutableArray[MutableVector[Coroutine]] (or of an affine struct) is unrestricted
+## hir/types.tcl
+<<<<
+        immutableSet - mutarray - mutvec {
+            # A MutableVector or MutableArray of affine elements is itself
+            # affine: it uniquely owns every element (MUTABLE-VECTOR.md,
+            # MUTABLE-ARRAY.md). Mutation alone never makes a type affine.
+            return [IsAffine [lindex $type 1] $seen]
+        }
+====
+        immutableSet - mutvec {
+            return [IsAffine [lindex $type 1] $seen]
+        }
+        mutarray {
+            return [IsCoroutine [lindex $type 1]]
+        }
+>>>>
+
+@@ vector-of-arrays-rejected MutableVector[MutableArray[T]] is rejected as a type
+## hir/types.tcl
+<<<<
+        if {$ctor eq "ImmutableSet" && [IsAffine $t]} {
+====
+        if {$ctor eq "MutableVector" && [IsMutArray $t]} {
+            return -code error -errorcode {BOTLISH AFFINE-CONTAINER-UNSUPPORTED} \
+                "MutableVector\[[show $t]\] is not supported"
+        }
+        if {$ctor eq "ImmutableSet" && [IsAffine $t]} {
+>>>>
+
+@@ affine-at-accepted `at` of an affine element is accepted: a second owner of an element the array still owns (its role is observe instead of copy-out)
+## core/mutarray.tcl
+<<<<
+    -result-shape {mutarray-element 0} -errors IndexNotFound -bounds {index mutarray 0 1} \
+    -ownership {copy-out observe}
+====
+    -result-shape {mutarray-element 0} -errors IndexNotFound -bounds {index mutarray 0 1} \
+    -ownership {observe observe}
+>>>>
+
+@@ swap-duplicates-replacement swap does not take the replacement: its binding stays its owner (and is released) while the slot owns it too
+## core/mutarray.tcl
+<<<<
+    -drop-form {mutable_array#swap_drop 0} -ownership {place observe move}
+====
+    -drop-form {mutable_array#swap_drop 0} -ownership {place observe observe}
+>>>>
+## core/mutarray.tcl
+<<<<
+    -result-shape {mutarray-element 0} -errors IndexNotFound -ownership {place observe move observe}
+core::native::register mutable_array#set_drop
+====
+    -result-shape {mutarray-element 0} -errors IndexNotFound -ownership {place observe observe observe}
+core::native::register mutable_array#set_drop
+>>>>
+
+@@ failed-swap-keeps-replacement a failed affine swap does not release the replacement it was given (Tcl runtimes): it leaks
+## core/mutarray.tcl
+<<<<
+        # The replacement moved into this operation: it is released here,
+        # on the error path, and the array is unchanged.
+        core::affine::Drop $x [core::affine::Tree [core::value::strOf $descriptor] mutable_array#swap_drop]
+====
+        # (not released)
+>>>>
+
+@@ failed-swap-keeps-replacement-native a failed affine swap does not release the replacement it was given (native)
+## native/src/runtime/ops.rs
+<<<<
+        Some(i) => std::mem::replace(&mut array_owned(arr, "mutable_array#swap_drop")[i], value),
+        None => {
+            super::affine::drop_descriptor(p, value, str_of(d).as_str().as_bytes());
+            index_not_found(p)
+        }
+====
+        Some(i) => std::mem::replace(&mut array_owned(arr, "mutable_array#swap_drop")[i], value),
+        None => {
+            let _ = d;
+            index_not_found(p)
+        }
+>>>>
+
+@@ drop-leaks-elements an affine array's death releases none of its elements (Tcl runtimes)
+## core/affine.tcl
+<<<<
+        a {
+            core::mutarray::DropElements $value [lindex $tree 1]
+        }
+====
+        a {
+        }
+>>>>
+
+@@ drop-leaks-elements-native an affine array's death releases none of its elements (native)
+## native/src/runtime/ops.rs
+<<<<
+    for item in items {
+        *pos = start;
+        super::affine::drop_at(p, item, d, pos);
+    }
+}
+====
+    super::affine::skip(d, pos);
+    let _ = (start, items);
+}
+>>>>
+
+@@ drop-order-reversed an affine array's death releases its elements last to first (Tcl runtimes)
+## core/mutarray.tcl
+<<<<
+    set store($id) {}
+    foreach element $elements {
+        core::affine::Drop $element $tree
+    }
+====
+    set store($id) {}
+    foreach element [lreverse $elements] {
+        core::affine::Drop $element $tree
+    }
+>>>>
+
+@@ loop-aliases-element consuming iteration over an affine array iterates a snapshot instead: the loop variable owns each element while the array keeps it
+## hir/mutvec.tcl
+<<<<
+            if {$kind ne "" && ![hir::types::IsAffine $type]} {
+                lappend wraps [list $it [ToListNativeOf $kind] {}]
+            }
+====
+            if {$kind ne "" && (![hir::types::IsAffine $type] || $kind eq "array")} {
+                lappend wraps [list $it [ToListNativeOf $kind] {}]
+            }
+>>>>
+
+@@ loop-leaks-suffix leaving a consuming loop over an affine array early does not release the elements not yet taken
+## hir/affine.tcl
+<<<<
+        if {$role ne "operand" && $p ne $keep && [hir::mutvec::IsConsumingLoop $hir $p]} {
+====
+        if {$role ne "operand" && $p ne $keep && [hir::mutvec::IsConsumingLoop $hir $p]
+                && [hir::mutvec::ConsumedKind $hir $p] ne "array"} {
+>>>>
+
+@@ instance-key-erases-affine-array the specialization key erases an affine array's element (the raw kind): a specialized callee's early exit leaks what is left of an array it consumes (native)
+## hir/specialize.tcl
+<<<<
+    if {[hir::types::IsMutArray $type] && [hir::types::IsAffine $type]} {
+====
+    if {0 && [hir::types::IsMutArray $type] && [hir::types::IsAffine $type]} {
+>>>>
+
+@@ create-accepts-affine create takes its value once (its role is move instead of repeat): one coroutine is placed in every slot
+## core/mutarray.tcl
+<<<<
+    -result-shape {mutarray-create 1} -result-length {int 0} -ownership {observe repeat}
+====
+    -result-shape {mutarray-create 1} -result-length {int 0} -ownership {observe move}
+>>>>
+
+@@ signature-ignores-repeat the ownership discipline ignores the repeat role: an affine value repeated by create moves into it
+## hir/affine.tcl
+<<<<
+        repeat {
+            return [list reject AFFINE-DUPLICATION-UNSUPPORTED \
+====
+        repeat {
+            return [list move array $p $index]
+            return [list reject AFFINE-DUPLICATION-UNSUPPORTED \
+>>>>
+
+@@ factory-result-duplicated generate places the factory's first result in every slot (Tcl runtimes)
+## core/mutarray.tcl
+<<<<
+        lappend items [core::completion::payload $completion]
+====
+        lappend items [expr {$items eq {} ? [core::completion::payload $completion] : [lindex $items 0]}]
+>>>>
+
+@@ factory-failure-leaks a failing generate does not release the elements it already made (Tcl runtimes)
+## core/mutarray.tcl
+<<<<
+            if {$tree ne ""} {
+                foreach item $items {
+                    core::affine::Drop $item $tree
+                }
+            }
+            return $completion
+====
+            return $completion
+>>>>
+
+@@ factory-failure-leaks-native a failing generate does not release the elements it already made (native)
+## native/src/runtime/ops.rs
+<<<<
+                for item in items {
+                    super::affine::drop_descriptor(p, item, &text);
+                }
+====
+                let _ = (items, text);
+>>>>
+
+@@ factory-not-dropping-form an affine generate is not elaborated to its dropping form: a failing factory's earlier results leak
+## core/mutarray.tcl
+<<<<
+    -result-shape {mutarray-generate 1} -errors-from 1 -result-length {int 0} \
+    -drop-form {mutable_array#generate_drop result} -ownership {observe factory}
+====
+    -result-shape {mutarray-generate 1} -errors-from 1 -result-length {int 0} \
+    -ownership {observe factory}
+>>>>
+
+@@ virtual-struct-drop-truncated the native drop of a virtualized struct's affine array field truncates its descriptor (`a` alone): the array's drop reads past it
+## native/lower.tcl
+<<<<
+        l - v - a { DescriptorSkip $descriptor pos }
+====
+        l - v { DescriptorSkip $descriptor pos }
+>>>>

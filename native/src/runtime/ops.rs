@@ -3721,4 +3721,94 @@ mod tests {
         assert_eq!(bytes_of(f), &[1, 77, 3]);
         vm.temp_roots.clear();
     }
+
+    // -----------------------------------------------------------------------
+    // MutableArray as a value (MUTABLE-ARRAY.md): header over a copy-on-write
+    // backing.
+
+    /// A rooted array of the Ints XS.
+    fn mutarray_of_ints(vm: &mut Vm, xs: &[i64]) -> Value {
+        let list = rooted!(vm, vm.new_list(xs.iter().map(|&x| small(x)).collect()));
+        rooted!(vm, rt_mutarray_from_list(vm, list))
+    }
+
+    fn mutarray_contents(arr: Value) -> Vec<i64> {
+        array_elements(arr).map(small_of).collect()
+    }
+
+    #[test]
+    fn mutarray_copy_shares_and_only_the_first_write_detaches() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let a = mutarray_of_ints(&mut vm, &[1, 2, 3, 4]);
+        let b = rooted!(vm, share_array(p, a));
+        // A new header on the same backing: no element copied.
+        assert_ne!(a, b);
+        assert!(Rc::ptr_eq(&mutarray_of(a).backing, &mutarray_of(b).backing));
+        assert_eq!((vm.metrics.mutarray.shares, vm.metrics.mutarray.detaches), (1, 0));
+        // The first write through either detaches it, once.
+        rt_mutarray_set(p, b, small(0), small(9));
+        assert_eq!((vm.metrics.mutarray.detaches, vm.metrics.mutarray.detach_elements), (1, 4));
+        assert_eq!(mutarray_contents(a), vec![1, 2, 3, 4]);
+        assert_eq!(mutarray_contents(b), vec![9, 2, 3, 4]);
+        // Later writes to the now unique backings never detach again.
+        rt_mutarray_set(p, b, small(1), small(8));
+        rt_mutarray_set(p, a, small(3), small(7));
+        assert_eq!(vm.metrics.mutarray.detaches, 1);
+        assert_eq!(mutarray_contents(a), vec![1, 2, 3, 7]);
+        assert_eq!(mutarray_contents(b), vec![9, 8, 3, 4]);
+        vm.temp_roots.clear();
+    }
+
+    #[test]
+    fn mutarray_swap_and_take_front_move_elements_and_keep_copies_intact() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let a = mutarray_of_ints(&mut vm, &[1, 2, 3]);
+        let copy = rooted!(vm, share_array(p, a));
+        // swap installs the replacement and moves the old element out.
+        assert_eq!(small_of(rt_mutarray_swap(p, a, small(1), small(20))), 2);
+        // A consuming loop's drain takes elements first to last; the length
+        // shrinks, and a copy taken before is untouched.
+        assert_eq!(small_of(rt_mutarray_take_front(p, a)), 1);
+        assert_eq!(rt_mutarray_empty(p, a), FALSE);
+        assert_eq!(small_of(rt_mutarray_take_front(p, a)), 20);
+        assert_eq!(small_of(rt_mutarray_take_front(p, a)), 3);
+        assert_eq!(rt_mutarray_empty(p, a), TRUE);
+        assert_eq!(mutarray_contents(copy), vec![1, 2, 3]);
+        vm.temp_roots.clear();
+    }
+
+    #[test]
+    fn mutarray_out_of_range_changes_nothing() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let a = mutarray_of_ints(&mut vm, &[5, 6]);
+        let copy = rooted!(vm, share_array(p, a));
+        assert_eq!(rt_mutarray_set(p, a, small(2), small(9)), NO_VALUE);
+        assert_eq!(rt_mutarray_swap(p, a, small(-1), small(9)), NO_VALUE);
+        // A failed write neither changes the array nor detaches its backing.
+        assert_eq!(mutarray_contents(a), vec![5, 6]);
+        assert_eq!(vm.metrics.mutarray.detaches, 0);
+        assert!(Rc::ptr_eq(&mutarray_of(a).backing, &mutarray_of(copy).backing));
+        vm.temp_roots.clear();
+    }
+
+    #[test]
+    fn mutarray_operations_survive_a_collection_at_every_allocation() {
+        let mut vm = vm();
+        vm.heap.set_stress_for_test(true);
+        let p: *mut Vm = &mut *vm;
+        let inner = mutarray_of_ints(&mut vm, &[1, 2]);
+        let outer = rooted!(vm, rt_mutarray_create(p, small(3), inner));
+        let copy = rooted!(vm, share_array(p, outer));
+        let fresh = rooted!(vm, rt_mutarray_allocate(p, small(4)));
+        rt_mutarray_set(p, copy, small(0), fresh);
+        let frozen = rooted!(vm, rt_mutarray_to_list(p, outer));
+        assert_eq!(list_of(frozen).items().len(), 3);
+        assert_eq!(mutarray_contents(inner), vec![1, 2]);
+        assert_eq!(array_elements(copy).next(), Some(fresh));
+        assert_eq!(array_elements(outer).next(), Some(inner));
+        vm.temp_roots.clear();
+    }
 }
