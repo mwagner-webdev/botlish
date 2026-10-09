@@ -820,10 +820,14 @@ was added or removed.
   rule is documented for the day it does (see "The payload question").
 * Only the first warning is raised under `error`, as in milestones 1-3.
 * Successor note (REFACTOR-WARNINGS-CLEAN.md): the warning-driven refactor
-  adopted the merge check's form for `abi::bytes::replace` (one guard, `index
-  < 0 or index >= count`), so programs that load `abi::bytes` no longer print
-  this code; a gate (`audit/refactor/tools/gate.tcl`, CI) fails on any new
-  finding in the corpus.
+  merged `abi::bytes::replace`'s two failures into one `fail IndexNotFound`
+  after the nested in-range tests (`if index >= 0: if index < count: return
+  ...`), so programs that load `abi::bytes` no longer print this code. The
+  merge check's own form (one guard, `index < 0 or index >= count`) was
+  tried first and replaced: the native backend lowers an `or` condition as a
+  materialized bool, the nested tests branch directly. A gate
+  (`audit/refactor/tools/gate.tcl`, CI) fails on any new finding in the
+  corpus.
 
 ## Future warning candidates
 

@@ -133,23 +133,23 @@ program lib/web.bot
   ONE-CHAR-STRING-LITERAL 105:62 none -- classifier: the set's "+", as above
   ONE-CHAR-STRING-LITERAL 105:67 none -- classifier: the set's "-", as above
   ONE-CHAR-STRING-LITERAL 136:38 none -- classifier: label_char?(c) is str::is_tcl_alnum(c) or c == "-", over the one-character String the String classifier needs
-  ONE-CHAR-STRING-LITERAL 211:15 none -- char->text: hex_digits is the table of hexadecimal digits as text, concatenated into %XX escapes (hex_pair); a "0123456789ABCDEF" slice would keep each digit a one-character String
-  ONE-CHAR-STRING-LITERAL 211:20 none -- char->text: the digit "1", as above
-  ONE-CHAR-STRING-LITERAL 211:25 none -- char->text: the digit "2", as above
-  ONE-CHAR-STRING-LITERAL 211:30 none -- char->text: the digit "3", as above
-  ONE-CHAR-STRING-LITERAL 211:35 none -- char->text: the digit "4", as above
-  ONE-CHAR-STRING-LITERAL 211:40 none -- char->text: the digit "5", as above
-  ONE-CHAR-STRING-LITERAL 211:45 none -- char->text: the digit "6", as above
-  ONE-CHAR-STRING-LITERAL 211:50 none -- char->text: the digit "7", as above
-  ONE-CHAR-STRING-LITERAL 211:55 none -- char->text: the digit "8", as above
-  ONE-CHAR-STRING-LITERAL 211:60 none -- char->text: the digit "9", as above
-  ONE-CHAR-STRING-LITERAL 211:65 none -- char->text: the digit "A", as above
-  ONE-CHAR-STRING-LITERAL 211:70 none -- char->text: the digit "B", as above
-  ONE-CHAR-STRING-LITERAL 211:75 none -- char->text: the digit "C", as above
-  ONE-CHAR-STRING-LITERAL 211:80 none -- char->text: the digit "D", as above
-  ONE-CHAR-STRING-LITERAL 211:85 none -- char->text: the digit "E", as above
-  ONE-CHAR-STRING-LITERAL 211:90 none -- char->text: the digit "F", as above
-  ONE-CHAR-STRING-LITERAL 267:9 none -- char->text: pct's "%" begins every escape it writes as text
+  ONE-CHAR-STRING-LITERAL 219:15 none -- char->text: hex_digits is the table of hexadecimal digits as text, concatenated into %XX escapes (hex_pair); a "0123456789ABCDEF" slice would keep each digit a one-character String
+  ONE-CHAR-STRING-LITERAL 219:20 none -- char->text: the digit "1", as above
+  ONE-CHAR-STRING-LITERAL 219:25 none -- char->text: the digit "2", as above
+  ONE-CHAR-STRING-LITERAL 219:30 none -- char->text: the digit "3", as above
+  ONE-CHAR-STRING-LITERAL 219:35 none -- char->text: the digit "4", as above
+  ONE-CHAR-STRING-LITERAL 219:40 none -- char->text: the digit "5", as above
+  ONE-CHAR-STRING-LITERAL 219:45 none -- char->text: the digit "6", as above
+  ONE-CHAR-STRING-LITERAL 219:50 none -- char->text: the digit "7", as above
+  ONE-CHAR-STRING-LITERAL 219:55 none -- char->text: the digit "8", as above
+  ONE-CHAR-STRING-LITERAL 219:60 none -- char->text: the digit "9", as above
+  ONE-CHAR-STRING-LITERAL 219:65 none -- char->text: the digit "A", as above
+  ONE-CHAR-STRING-LITERAL 219:70 none -- char->text: the digit "B", as above
+  ONE-CHAR-STRING-LITERAL 219:75 none -- char->text: the digit "C", as above
+  ONE-CHAR-STRING-LITERAL 219:80 none -- char->text: the digit "D", as above
+  ONE-CHAR-STRING-LITERAL 219:85 none -- char->text: the digit "E", as above
+  ONE-CHAR-STRING-LITERAL 219:90 none -- char->text: the digit "F", as above
+  ONE-CHAR-STRING-LITERAL 275:9 none -- char->text: pct's "%" begins every escape it writes as text
 program lib/abi/bytes.bot
 program lib/abi/x86_64.bot
 fails lib/io/path.bot CORE SEMANTIC TRAIT-POLYMORPHIC-FUNCTION-VALUE -- entry-program value: as for lib/io.bot, the last declaration (text) is trait-polymorphic and cannot be a value (verified through `import io::path`)

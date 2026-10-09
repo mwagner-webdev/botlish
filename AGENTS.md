@@ -345,7 +345,8 @@ If you add or change a program in `examples/`, `bench/` or `lib/`, run
   the gate reports: update its line and column in the manifest.
 * A new corpus program must be listed (with its entries, if any).
 * Do not edit `audit/refactor/kickoff-corpus/`: it is the frozen,
-  warning-bearing fixture the backend-independence CLI tests read, not corpus.
+  warning-bearing fixture the backend-independence CLI tests (and one
+  String-region test of the `peek()` idiom) read, not corpus.
 
 ## Refinement values
 

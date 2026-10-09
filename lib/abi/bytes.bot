@@ -137,10 +137,11 @@ fn mutable_length(data: MutableBytes) -> abi::Usize:
 # unchanged. IndexNotFound unless 0 <= index < mutable_length(data) (the same
 # error list::at and mutable_array::set use).
 fn replace(data: MutableBytes, index: int, value: Byte) -> MutableBytes errors IndexNotFound:
-    if index < 0 or index >= mutable_byte_store::count(data.storage):
-        fail IndexNotFound
-    else:
-        MutableBytes {storage: mutable_byte_store::replace(data.storage, index, value)}
+    if index >= 0:
+        if index < mutable_byte_store::count(data.storage):
+            return MutableBytes {storage: mutable_byte_store::replace(data.storage, index, value)}
+
+    fail IndexNotFound
 
 # DATA itself, as a value (a logical copy is always the same value), but with
 # its own freshly allocated storage. The one operation that is semantically

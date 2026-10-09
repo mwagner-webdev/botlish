@@ -328,19 +328,22 @@ fn ht_find_get(table, key, index) errors IndexNotFound:
 # The slot to use for inserting/replacing KEY from INDEX on: an existing
 # equal key's own slot (replace), the first EMPTY slot (confirming the key
 # is not later in the chain first), or an earlier TOMBSTONE reused once
-# that confirmation is done (FIRST-TOMBSTONE is -1 until one is seen).
+# that confirmation is done (FIRST-TOMBSTONE is -1 until one is seen). The
+# two slots that end the search at INDEX -- an EMPTY one with no earlier
+# TOMBSTONE, and KEY's own -- fall through to the one answer, INDEX.
 fn ht_find_insert(table, key, index, first_tombstone) errors IndexNotFound:
     state = mutable_array::at(table.controls, index)
-    if state == ht_empty_state() and first_tombstone >= 0:
-        return first_tombstone
-
-    if state == ht_empty_state() or (state == ht_occupied_state() and mutable_array::at(table.keys, index) == key):
-        return index
-
-    if state == ht_tombstone_state() and first_tombstone < 0:
+    if state == ht_empty_state():
+        if first_tombstone >= 0:
+            return first_tombstone
+    elif state == ht_occupied_state() and mutable_array::at(table.keys, index) == key:
+        unit
+    elif state == ht_tombstone_state() and first_tombstone < 0:
         return table.ht_find_insert(key, table.ht_probe_next(index), index)
+    else:
+        return table.ht_find_insert(key, table.ht_probe_next(index), first_tombstone)
 
-    table.ht_find_insert(key, table.ht_probe_next(index), first_tombstone)
+    index
 
 # ---------------------------------------------------------------------------
 # Lookup

@@ -22,6 +22,12 @@ would make them vacuous (no `METHOD-ELIGIBLE` or `FIXED-ARITY-LIST-RETURN`
 line left to compare), so they read these copies instead. The live corpus's
 own warnings are the gate's job.
 
+One other test reads them for the same reason, a subject the refactor
+removed from the live program: `tests/native-string-region.test`'s
+`region-csv-corpus-1` measures the String-region optimization on `csv.bot`'s
+`peek()` comparisons, which the live `csv.bot` no longer makes (it reads
+characters with `str::char_at`).
+
 They import the live `lib/` modules, so a library's findings print here
 exactly as the manifest (`audit/refactor/manifest.txt`) says they print
 everywhere else.

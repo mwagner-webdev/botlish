@@ -468,12 +468,23 @@ f()
 # The CSV corpus this milestone targets: peek()'d characters purely for
 # comparison allocate no temporary Strings; the real, escaping fields still
 # do (documented in native-csv-records.test's csv-records-string-sharing-2).
+# The warning-driven refactor (REFACTOR-WARNINGS-CLEAN.md) made the live
+# csv.bot read those characters with str::char_at, which allocates nothing
+# with or without the optimization (14 Strings on this input either way), so
+# the test reads the frozen kickoff copy (audit/refactor/kickoff-corpus),
+# whose peek() comparisons are the idiom this optimization exists for.
 
 test region-csv-corpus-1 {csv.bot's own peek() sites: string-region-opt materially reduces String allocations, same value either way} -body {
     source [file join $::projectRoot examples stdlib corpus.tcl]
     set text [corpus::literal "id,name\n1,Alice\n2,Bob\n3,Carol\n"]
     set text "csv_parse($text)"
-    set hir [corpus::driven csv $text]
+    set home $corpus::home
+    set corpus::home [file join $::projectRoot audit refactor kickoff-corpus]
+    try {
+        set hir [corpus::driven csv $text]
+    } finally {
+        set corpus::home $home
+    }
     set on [dict get [native::allocationReport $hir summary 1 -string-region-opt 1 -short-string-opt 0] byKind String allocations]
     set off [dict get [native::allocationReport $hir summary 1 -string-region-opt 0 -short-string-opt 0] byKind String allocations]
     set onValue [native::evalHir $hir -string-region-opt 1 -short-string-opt 0]

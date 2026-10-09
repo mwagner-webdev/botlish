@@ -249,7 +249,7 @@ examples/stdlib/csv_records.bot:287:14 METHOD-ELIGIBLE converted P2 -- respelled
 examples/stdlib/csv_records.bot:305:5 METHOD-ELIGIBLE converted P2 -- respelled `.mod(...)`, verified by the round-trip law (method-sweep-log.txt)
 examples/stdlib/csv_records.bot:321:5 METHOD-ELIGIBLE converted P2 -- respelled `.ht_find_get(...)`, verified by the round-trip law (method-sweep-log.txt)
 examples/stdlib/csv_records.bot:321:29 METHOD-ELIGIBLE converted P2 -- respelled `.ht_probe_next(...)`, verified by the round-trip law (method-sweep-log.txt)
-examples/stdlib/csv_records.bot:333:9 SAME-RETURN-VALUE merged P4 -- ht_find_insert: the two `return index` are one condition (empty slot or the key's slot); probes hashtable.tcl
+examples/stdlib/csv_records.bot:333:9 SAME-RETURN-VALUE merged P4 -- ht_find_insert: the two slots that end the search (empty with no earlier tombstone, the key's own) fall through an if/elif chain over the slot's state to one `index`, the original conditions verbatim; probes hashtable.tcl
 examples/stdlib/csv_records.bot:339:16 METHOD-ELIGIBLE converted P2 -- respelled `.ht_find_insert(...)`, verified by the round-trip law (method-sweep-log.txt)
 examples/stdlib/csv_records.bot:339:43 METHOD-ELIGIBLE converted P2 -- respelled `.ht_probe_next(...)`, verified by the round-trip law (method-sweep-log.txt)
 examples/stdlib/csv_records.bot:341:5 METHOD-ELIGIBLE converted P2 -- respelled `.ht_find_insert(...)`, verified by the round-trip law (method-sweep-log.txt)
@@ -415,7 +415,7 @@ examples/surface/11-boolean-operators.bot:12:2 METHOD-ELIGIBLE converted P2 -- r
 examples/surface/11-boolean-operators.bot:12:21 METHOD-ELIGIBLE converted P2 -- respelled `.outside(...)`, verified by the round-trip law (method-sweep-log.txt)
 examples/surface/13-hygiene.bot:7:5 FIXED-ARITY-LIST-RETURN manifested P4 -- core-ir-roundtrip: `-> list` is a source fact core IR cannot carry, and the sample is a fixture of surface-samples.test's HIR/core-IR round trip; a struct would replace its subject (the list literal)
 examples/surface/13-hygiene.bot:10:2 METHOD-ELIGIBLE converted P2 -- respelled `.pair(...)`, verified by the round-trip law (method-sweep-log.txt)
-lib/abi/bytes.bot:141:9 SAME-FAILURE merged P4 -- one guard `index < 0 or index >= count` (milestone 4's verified merge); probe abi-bytes
+lib/abi/bytes.bot:141:9 SAME-FAILURE merged P4 -- one `fail IndexNotFound` after the nested in-range tests (`if index >= 0: if index < count: return ...`): milestone 4's merge without its `or` guard, which native lowers as a materialized bool; probe abi-bytes
 lib/byte.bot:114:5 METHOD-ELIGIBLE marked P1 -- `bit_and` is nomethod: the receiver form is NOMETHOD-CALL (pinned test me-nomethod-shipped-*)
 lib/byte.bot:117:5 METHOD-ELIGIBLE marked P1 -- `bit_and` is nomethod: the receiver form is NOMETHOD-CALL (pinned test me-nomethod-shipped-*)
 lib/byte.bot:120:5 METHOD-ELIGIBLE marked P1 -- `bit_and` is nomethod: the receiver form is NOMETHOD-CALL (pinned test me-nomethod-shipped-*)
@@ -447,7 +447,7 @@ lib/web.bot:188:30 ONE-CHAR-STRING-LITERAL converted P3 -- domain? tests the cha
 lib/web.bot:190:21 SAME-RETURN-VALUE merged P4 -- domain?: an on-sight rejection leaves the scan (`break`), so every rejection is the one `false` after it; probes web.tcl
 lib/web.bot:191:38 ONE-CHAR-STRING-LITERAL converted P3 -- domain? tests the character at a position through the guarded char_is? (str::char_at); probes web.tcl
 lib/web.bot:200:17 METHOD-ELIGIBLE converted P2 -- respelled `.scan_while(...)`, verified by the round-trip law (method-sweep-log.txt)
-lib/web.bot:202:9 SAME-RETURN-VALUE merged P4 -- emailish?: the nested `false` tree is one conjunction; probes web.tcl
+lib/web.bot:202:9 SAME-RETURN-VALUE merged P4 -- emailish?: the nested tests keep their `if`s and fall through to one `false` (an `and` chain would lose the range narrowing domain?'s raw parameter needs); probes web.tcl
 lib/web.bot:207:38 ONE-CHAR-STRING-LITERAL converted P3 -- emailish? tests the character at a position through the guarded char_is? (str::char_at); probes web.tcl
 lib/web.bot:212:15 ONE-CHAR-STRING-LITERAL manifested P3 -- char->text: hex_digits is the table of hexadecimal digits as text
 lib/web.bot:212:20 ONE-CHAR-STRING-LITERAL manifested P3 -- char->text: hex_digits is the table of hexadecimal digits as text

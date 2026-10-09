@@ -557,12 +557,12 @@ finding.
 |---|---|---|
 | `FIXED-ARITY-LIST-RETURN` x 5 | annotated | `-> list` on `ai_text_clean`, `string_replace`, `string_reverse`'s `sample`, `csv_records` and `hashtable`'s `sample_checks` (their results are the samples' lists of checks and values, printed and compared with `# expect:`, never destructured). The affine work had already turned `csv_chunked`'s two builder-state findings into the `ChunkedBuilder` struct, so no struct conversion remained |
 | `FIXED-ARITY-LIST-RETURN` `13-hygiene.bot`'s `pair` | manifested | the example is about the list literal, so `-> list` is its answer, not a struct; but the annotation is a source fact core IR cannot carry, and `tests/surface-samples.test` checks that this sample's HIR is what analysis of its core IR derives: annotated, the round trip re-types `pair` and the check fails. Obstruction `core-ir-roundtrip` (section 12) |
-| `SAME-RETURN-VALUE` `ht_find_insert` x 2 (`hashtable.bot`, `csv_records.bot`) | merged | the two `return index` exits are one condition, milestone 1's reading: the probed slot ends the search when it is empty with no earlier tombstone, or holds the key -- `if state == ht_empty_state() and first_tombstone >= 0: return first_tombstone` then `if state == ht_empty_state() or (state == ht_occupied_state() and ... == key): return index` |
+| `SAME-RETURN-VALUE` `ht_find_insert` x 2 (`hashtable.bot`, `csv_records.bot`) | merged | the two `return index` exits end the search for the same reason, the probed slot is the answer: the function becomes one `if`/`elif` chain over the slot's state, with the original conditions verbatim -- an empty slot returns an earlier tombstone if there is one, the key's own slot does nothing (`unit`), a tombstone or another key's slot probes on -- and both answers fall through to one final `index`. The first merge spelled the reading as conditions (`if state == ht_empty_state() and first_tombstone >= 0: return first_tombstone` then `if state == ht_empty_state() or (...): return index`); it tested `state == ht_empty_state()` twice and branched on two materialized bools, 245 machine instructions and 40 jumps for `ht_find_insert` against the unmerged 222 and 31; the chain has 213 and 32 (section 15, finding 12) |
 | `SAME-RETURN-VALUE` `ht_delete` | merged | its early `return table` is the guard inverted around the deletion: `if index >= 0:` deletes, and the one exit returns `table` |
 | `SAME-RETURN-VALUE` `domain?` | merged | an on-sight rejection (a leading or doubled `"."`, a character that is not a label character) leaves the scan with `break`, so every rejection is the one `false` after the loop; the comment says so |
-| `SAME-RETURN-VALUE` `emailish?` | merged | the nested `false` tree is the conjunction it spells: `local_end > 0 and local_end < n and local_end.char_is?('@') and domain?(local_end + 1)` |
+| `SAME-RETURN-VALUE` `emailish?` | merged | the three nested tests keep their `if`s, negated (`local_end > 0`, `local_end < n`, `local_end.char_is?('@')`), with `return domain?(local_end + 1)` innermost, and every rejection falls through to one `false`. The conjunction it spells (`local_end > 0 and local_end < n and ... and domain?(local_end + 1)`) was the first merge and was rejected by the tests that pin `refined-checks`' analysis: an `and` operand is not narrowed by the operands before it, so `domain?`'s entry range grew to 2^62 and its parameter lost its raw (untagged) ABI (section 15, finding 12). The nested form keeps every instance and raw-ABI decision of `refined-checks` and `uri-steady`, with four entry ranges one tighter at the bottom (`local_end > 0` narrows where the original `== 0` test's else-branch did not: `char_is?`, `domain?`, `tld?` and a `scan_while` instance each start one higher, `domain?` at 2); `local_end != 0`, the literal negation, lowers as a materialized bool |
 | `SAME-RETURN-VALUE` `valid_from?` (`uri_query_value?`) | merged | a valid escape or character continues by a returned tail call (`return valid_from?(i + 3)` / `(i + 1)`), and everything else falls through to one `false`. An `and` chain was rejected: it would take the self-call out of tail position (the probes include a 40,000-character value, unchanged on every backend) |
-| `SAME-FAILURE` `abi::bytes::replace` | merged | milestone 4's verified merge, adopted: `if index < 0 or index >= mutable_byte_store::count(data.storage): fail IndexNotFound` |
+| `SAME-FAILURE` `abi::bytes::replace` | merged | the in-range case returns from inside the two nested tests (`if index >= 0: if index < mutable_byte_store::count(data.storage): return ...`) and the one `fail IndexNotFound` follows them. Milestone 4's verified merge, `if index < 0 or index >= count: fail IndexNotFound`, was the first spelling; its `or` lowers to NIR as a materialized bool and a branch on it (10 -> 13 registers, two extra jumps), where the nested tests branch directly as the unmerged code did (section 15, finding 12) |
 
 Every restructure carries behavior probes (section 3); none needed a manifest
 entry.
@@ -818,6 +818,41 @@ fence).
       warning would steer code toward the rows of the table above that are
       not better.
 
+12. **Conjunctions cost what nested tests do not** (`hir/range.tcl`;
+    native lowering). The merge warnings (`SAME-RETURN-VALUE`,
+    `SAME-FAILURE`) point at exits a condition can join, and the natural
+    spelling of that condition is an `and`/`or`. Today both halves of the
+    compiler treat it worse than the nested tests it replaces:
+
+    * *Range narrowing does not flow through `and`.* A comparison narrows
+      the then-branch of an `if` it is the condition of, but neither the
+      later operands of an `and` nor the then-branch of an `if` whose
+      condition is an `and`. `emailish?`'s first merge, `local_end > 0 and
+      local_end < n and local_end.char_is?('@') and domain?(local_end + 1)`,
+      left `local_end < n` unused: `domain?`'s entry range became
+      [1, 2^62] instead of [1, 2^62 - 1], and its parameter lost its raw
+      (untagged) ABI in the default configuration
+      (`tests/closure-int-keys.test`'s RawInt plan; the same with the `and`
+      as an `if` condition).
+    * *Native lowers an `and`/`or` condition, and `!=` on raw Ints, as a
+      materialized bool* -- each operand's outcome moved into a register
+      and branched on again -- where nested `if`s branch directly.
+      `ht_find_insert`'s first merge (`state == ht_empty_state() and ...`,
+      `state == ht_empty_state() or (...)`) cost 245 machine instructions
+      and 40 jumps against the unmerged 222 and 31; `abi::bytes::replace`'s
+      `index < 0 or index >= count` 13 NIR registers against 10.
+
+    Every merge in the corpus now keeps nested tests or an `if`/`elif`
+    chain (section 9), and its analysis and machine code were checked
+    against the unmerged tree: `refined-checks`' and `uri-steady`'s
+    instances, entry ranges and raw-ABI decisions are those of P3 or
+    tighter (`emailish?`'s `local_end > 0` starts `domain?` at 2), and the
+    merged functions' instruction counts are within a few of P3's
+    (`ht_find_insert` 213, `ht_delete` 199 against 206, `domain?` 122
+    against 151). Narrowing through `and` and branch-lowering of `and`/`or`
+    conditions would let the merge warnings' natural answer be the cheap
+    one; until then, a merge that writes a conjunction should be measured.
+
 **Warning false positives** (required question 12): none. No conversion that
 would have been sound was rejected by a warning; the one new warning a
 conversion attempt produced (`SAME-RETURN-VALUE` on the handler form of
@@ -868,6 +903,23 @@ conversion attempt produced (`SAME-RETURN-VALUE` on the handler form of
   (the sweep) were committed back to back; the P2 regression covers both
   cumulatively. A separate P1-only run was started and stopped to free cores
   for the probes; the P2 run, which includes every P1 change, is the record.
+* **P3 and P4 were committed with stale pins, and P4 with three first
+  merges that cost more than the code they merged.** P3 was checked by its
+  probes, the expect check and the test files I chose for it (`stdlib`,
+  `native-csv-records`, `typed-mutarray-builder`, `native-escape`,
+  `hir-specialize`, `hir-aot`), not by a full regression; the targeted run
+  for P4 (every test file that names a touched program) found what that
+  choice missed. P3's new `char_is?` and `quote_at?` changed analysis facts
+  that five tests pin: the dormant instance set gains `char_is?<generic>`,
+  `char_at` has fewer callers, its two NIR variants are emitted in the other
+  order, the corpus guard accounting moves, and `region-csv-corpus-1`'s
+  fixture no longer makes the `peek()` comparisons it measures (it now reads
+  the frozen kickoff `csv.bot`; the live one allocates 14 Strings with or
+  without the optimization, the kickoff one 97 without it and 14 with). P4's
+  `emailish?`, `ht_find_insert` and `abi::bytes::replace` merges were
+  respelled (section 9; section 15, finding 12), which also moved one HIR
+  node id a contexts test pins. All of it is in {{FIX-COMMIT}}, verified by
+  the probes again and by a full regression ({{FIX-REG}}).
 * **The CSV scanners' error contract changed** (`IndexNotFound` for an index
   outside the String where `peek` raised `LowerUnderrun`): identical for every
   index the scan reaches, different for a negative one no caller passes,
@@ -979,4 +1031,7 @@ conversion attempt produced (`SAME-RETURN-VALUE` on the handler form of
     `mutable_array::generate`'s shape; mixed spellings from the ambiguity rule;
     and a candidate warning for constant Strings scanned as character tables
     (finding 11: not to be built yet, with its rule, proof, prerequisites and
-    the measurements behind that recommendation).
+    the measurements behind that recommendation); and what an `and`/`or` costs the range
+    analysis and native code that nested tests do not (finding 12), which
+    made three of the first merges more expensive than the code they
+    merged.

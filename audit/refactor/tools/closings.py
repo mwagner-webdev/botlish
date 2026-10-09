@@ -39,14 +39,14 @@ for f, l, c, code, msg in findings:
         else:
             add(loc, code, 'annotated', 'P4', '`-> list` (the result is the sample\'s list of checks/values, never destructured); expect line and probes identical')
     elif code == 'SAME-FAILURE':
-        add(loc, code, 'merged', 'P4', 'one guard `index < 0 or index >= count` (milestone 4\'s verified merge); probe abi-bytes')
+        add(loc, code, 'merged', 'P4', 'one `fail IndexNotFound` after the nested in-range tests (`if index >= 0: if index < count: return ...`): milestone 4\'s merge without its `or` guard, which native lowers as a materialized bool; probe abi-bytes')
     elif code == 'SAME-RETURN-VALUE':
         why = {
-            'examples/stdlib/csv_records.bot': 'ht_find_insert: the two `return index` are one condition (empty slot or the key\'s slot); probes hashtable.tcl',
+            'examples/stdlib/csv_records.bot': 'ht_find_insert: the two slots that end the search (empty with no earlier tombstone, the key\'s own) fall through an if/elif chain over the slot\'s state to one `index`, the original conditions verbatim; probes hashtable.tcl',
             'examples/stdlib/hashtable.bot:170': 'ht_find_insert: as in csv_records.bot; probes hashtable.tcl',
             'examples/stdlib/hashtable.bot:301': 'ht_delete: the early `return table` is the guard inverted around the deletion; probes hashtable.tcl',
             'lib/web.bot:190': 'domain?: an on-sight rejection leaves the scan (`break`), so every rejection is the one `false` after it; probes web.tcl',
-            'lib/web.bot:202': 'emailish?: the nested `false` tree is one conjunction; probes web.tcl',
+            'lib/web.bot:202': 'emailish?: the nested tests keep their `if`s and fall through to one `false` (an `and` chain would lose the range narrowing domain?\'s raw parameter needs); probes web.tcl',
             'lib/web.bot:251': 'uri_query_value?\'s valid_from?: a valid escape or character continues by a returned tail call, everything else falls through to one `false`; probes web.tcl (a 40,000-character value included)',
         }
         key = f if f == 'examples/stdlib/csv_records.bot' else '%s:%d' % (f, l)
