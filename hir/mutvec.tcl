@@ -573,7 +573,8 @@ namespace eval hir::mutvec {
 proc hir::mutvec::Convention {hir parent blocks rootSet} {
     variable convention
     set direct [DirectOnly $hir $parent $blocks]
-    set convention [dict create consumed {} demanded {} direct $direct uses [UseMap $hir $parent]]
+    set convention [dict create consumed {} demanded {} direct $direct uses [UseMap $hir $parent] \
+        captured [Captured $hir]]
     # Seeds: the place-root parameters of directly called functions own
     # their header by the caller's copy instead of an entry copy.
     dict for {b _} $rootSet {
@@ -711,14 +712,24 @@ proc hir::mutvec::Eligible {hir b} {
             return 0
         }
     }
-    set home [dict get $hir scopes [dict get $binding scope] invocation]
+    return [expr {![dict exists $convention captured $b]}]
+}
+
+# The set (dict) of the bindings of HIR referred to from another invocation
+# than their own (a nested function's reference: a capture). Computed once
+# per convention: Eligible asks it of every binding on every pass.
+proc hir::mutvec::Captured {hir} {
+    set captured [dict create]
     dict for {e node} [dict get $hir exprs] {
-        if {[dict get $node kind] eq "ref" && [dict get $node binding] eq $b
-                && [dict get $hir scopes [dict get $node scope] invocation] ne $home} {
-            return 0
+        if {[dict get $node kind] ne "ref"} continue
+        set b [dict get $node binding]
+        if {$b eq "" || [dict exists $captured $b] || ![dict exists $hir bindings $b]} continue
+        set home [dict get $hir scopes [dict get $hir bindings $b scope] invocation]
+        if {[dict get $hir scopes [dict get $node scope] invocation] ne $home} {
+            dict set captured $b 1
         }
     }
-    return 1
+    return $captured
 }
 
 # BindingId -> the set (dict) of the expressions of HIR (parent map PARENT)
