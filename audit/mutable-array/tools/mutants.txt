@@ -101,7 +101,7 @@
                 || ([IsResult $hir $parent $e] && [Kind [hir::typeOf $hir $e]] eq "array")} {
 >>>>
 
-@@ generic-identity-aliases a dynamic copy (`d`, a generic function's parameter) of an array is the array itself (Tcl runtimes)
+@@ generic-identity-aliases a dynamic copy (`d`, made inside a generic body) of an array is the array itself (Tcl runtimes)
 ## core/mutvec.tcl
 <<<<
                 mutvec - mutarray {
@@ -113,7 +113,7 @@
                 }
 >>>>
 
-@@ generic-identity-aliases-native a dynamic copy (`d`, a generic function's parameter) of an array is the array itself (native)
+@@ generic-identity-aliases-native a dynamic copy (`d`, made inside a generic body) of an array is the array itself (native)
 ## native/src/runtime/mutvec.rs
 <<<<
         KIND_MUTARRAY => super::ops::share_array(p, value),
