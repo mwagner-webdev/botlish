@@ -472,6 +472,11 @@ proc hir::traits::WitnessOwner {type} {
     if {[hir::types::IsNamedStruct $type]} {
         return [list [hir::structs::owner [lindex $type 1]] module]
     }
+    if {[hir::types::IsEnum $type]} {
+        # An enum (ENUMS.md) is an ordinary nominal type here: its owner is
+        # the module that declares it, exactly a named struct's.
+        return [list [hir::enums::owner [lindex $type 1]] module]
+    }
     if {$type in {any never}} {
         return [list "" none "its static type is $type, not a concrete type"]
     }
@@ -1653,7 +1658,7 @@ proc hir::traits::ImplIdent {impl} {
 
 # A short, symbol-safe spelling of witness type W for clone names.
 proc hir::traits::WitnessName {w} {
-    if {[hir::types::IsNamedStruct $w]} {
+    if {[hir::types::IsNamedStruct $w] || [hir::types::IsEnum $w]} {
         return [lindex $w 1]
     }
     if {[hir::types::IsAffine $w]} {

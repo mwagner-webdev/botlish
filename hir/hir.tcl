@@ -420,6 +420,12 @@ proc hir::BuildOnce {nodes options given choices halt checkedVar} {
         # of its own: no struct of an earlier compilation may stay visible.
         hir::structs::Reset
     }
+    if {[dict exists $given -type-decls]} {
+        # Likewise for enums (ENUMS.md), which ride in -type-decls: a
+        # program declaring none must not see an earlier compilation's
+        # (hir::sourcetypes::apply registers this program's own, if any).
+        hir::enums::Reset
+    }
     set traitDecls ""
     if {[dict exists $given -trait-decls]} {
         # Likewise for traits (TRAITS.md): their names first, so every other
@@ -1074,7 +1080,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {syntax imports resolve flags contexts coroutines affine mutvec refcheck hygiene sourcetypes structs traits syscall errordecls types exactvalue signatures modulebinding refine repeatable lower format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep warnings} {
+    foreach file {syntax imports resolve flags contexts coroutines affine mutvec refcheck hygiene sourcetypes structs enums traits syscall errordecls types exactvalue signatures modulebinding refine repeatable lower format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep warnings} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

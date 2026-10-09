@@ -51,7 +51,7 @@
 #     constants or byte encoding: hash is a runtime-internal derived value,
 #     never a value to persist or compare across program versions
 #
-# Supported key domain: int, str, bool, unit, list (of hashable values),
+# Supported key domain: int, str, bool, unit, enum (ENUMS.md), list (of hashable values),
 # result (of a hashable payload), UnicodeChar, bytestore and mutbytes (ABI-BYTES.md,
 # MUTABLE-BYTES.md: the byte count, then the bytes), immutableSet (of hashable
 # members, combined order-independently to match core::value::equal's own
@@ -76,7 +76,7 @@ namespace eval core::hashing {
     variable Mask61    0x1FFFFFFFFFFFFFFF
     # Kind tags mixed in before each value's payload, so e.g. int 1 and str
     # "1" never hash the same by coincidence of byte content.
-    variable KindTag [dict create int 0 str 1 bool 2 unit 3 list 4 result 5 UnicodeChar 6 immutableSet 7 struct 8 bytestore 9 mutbytes 10]
+    variable KindTag [dict create int 0 str 1 bool 2 unit 3 list 4 result 5 UnicodeChar 6 immutableSet 7 struct 8 bytestore 9 mutbytes 10 enum 11]
 }
 
 # H folded over one more byte (0..255), wrapped to 64 bits.
@@ -179,6 +179,17 @@ proc core::hashing::Mix {h v} {
                 set h [Bytes $h [LeBytes [Mix $FnvOffset $item]]]
             }
             return $h
+        }
+        enum {
+            # Consistent with core::value::equal's nominal enum equality
+            # (ENUMS.md): the enum's declaration identity text, a 0xFF
+            # separator (never a byte of UTF-8 text, so the pair is encoded
+            # unambiguously), then the case's declared name. Never the
+            # case's position in its declaration: reordering cases changes
+            # no hash, and no hash is an ordinal.
+            set h [Bytes $h [Utf8Bytes [core::value::enumId $v]]]
+            set h [Step $h 255]
+            return [Bytes $h [Utf8Bytes [core::value::enumCaseName $v]]]
         }
         bytestore - mutbytes {
             # The byte count (8 bytes, little-endian), then every byte in

@@ -198,6 +198,14 @@ namespace eval native::lower {
     # declared slot order).
     variable shapeIds [dict create]
     variable shapeList {}
+    # Enums (ENUMS.md), per program: declaration identity -> dense enum
+    # number, assigned on first use in deterministic lowering order, and the
+    # ordered identities, emitted as the NIR `enum` declarations. A case
+    # value lowers to the immediate word of (enum number, the case's position
+    # in the declaration): representation only, chosen after every semantic
+    # check -- printing and hashing read the declared names from the table.
+    variable enumIds [dict create]
+    variable enumList {}
     # Module-static storage (MODULE-STATIC-RETAINED-VALUES.md): BindingId ->
     # its slot index in the Vm's own `statics` table (runtime::vm::Vm),
     # assigned once per program, in first-reference order (StaticSlot),
@@ -1244,6 +1252,10 @@ proc native::lower::Program {hirProgram args} {
     variable shapeList
     set shapeIds [dict create]
     set shapeList {}
+    variable enumIds
+    variable enumList
+    set enumIds [dict create]
+    set enumList {}
 
     set default [expr {[info exists ::env(BOTLISH_NATIVE_SPECIALIZE)]
         && $::env(BOTLISH_NATIVE_SPECIALIZE) eq "0" ? 0 : 1}]
@@ -1557,6 +1569,10 @@ proc native::lower::Program {hirProgram args} {
             set opaque [expr {[hir::structs::isOpaque $id] ? " opaque=1" : ""}]
             lappend header "shape [dict get $shapeIds $key] named [Quote $id]$opaque fields=[Quote [join $layout { }]]"
         }
+    }
+    variable enumList
+    foreach id $enumList {
+        lappend header "enum [EnumIndex $id] [Quote $id] cases=[Quote [join [hir::enums::cases $id] { }]]"
     }
     set text "[join $header \n]\n\n[join $texts \n\n]\n"
     return [dict create text $text functions $infos statistics [Statistics $infos] \
@@ -3658,6 +3674,32 @@ proc native::lower::Expr {fnVar e {want tagged}} {
 # statically known struct type; a receiver whose shape is not statically
 # known is refused here -- native code never looks a field up by name.
 
+# The dense number of enum ID (see enumIds), assigned on first use.
+proc native::lower::EnumIndex {id} {
+    variable enumIds
+    variable enumList
+    if {![dict exists $enumIds $id]} {
+        if {![hir::enums::declared $id]} {
+            throw {NATIVE INVALID-HIR} "native lowering: enum \"$id\" is not declared in this program"
+        }
+        dict set enumIds $id [dict size $enumIds]
+        lappend enumList $id
+    }
+    return [dict get $enumIds $id]
+}
+
+# The NIR constant `enum E C` of the case value V ({enum ID CASE}): E the
+# enum's number, C the case's position in its declaration (ENUMS.md).
+proc native::lower::EnumConst {fnVar v e} {
+    upvar 1 $fnVar fn
+    set id [core::value::enumId $v]
+    set case [lsearch -exact [hir::enums::cases $id] [core::value::enumCaseName $v]]
+    if {$case < 0} {
+        throw {NATIVE INVALID-HIR} "native lowering: enum \"$id\" has no case \"[core::value::enumCaseName $v]\" ($e)"
+    }
+    return [Assign fn "enum [EnumIndex $id] $case" $e]
+}
+
 # The dense shape number of {ID LAYOUT} (see shapeIds), assigned on first use.
 proc native::lower::ShapeIndex {id layout} {
     variable shapeIds
@@ -3960,7 +4002,9 @@ proc native::lower::ContextLeaves {id {seen {}}} {
         }
         set kind [hir::types::kindOf $type]
         switch -- $kind {
-            bool - unit - UnicodeChar {
+            bool - unit - UnicodeChar - enum {
+                # (An enum case, ENUMS.md, is an immediate word: never a
+                # heap pointer.)
                 lappend leaves [list [list $field] $type]
             }
             mutvec - mutarray {
@@ -4758,6 +4802,7 @@ proc native::lower::Const {fnVar e node} {
             return $r
         }
         UnicodeChar { return [Assign fn "char [core::value::charOf $value]" $e] }
+        enum { return [EnumConst fn $value $e] }
         list {
             # (const list {...}): a list of literal elements.
             set items [lmap item [core::value::items $value] {
@@ -7269,6 +7314,12 @@ proc native::lower::NativeCallOp {e node} {
                 # Two UnicodeChar immediates: scalar equality is word
                 # equality, and it cannot fail (str::char_at(s, i) == '%').
                 set op chareq
+            } elseif {$ka eq $kb && $ka eq "enum"} {
+                # Two enum case immediates (ENUMS.md): nominal equality is
+                # word equality (one word per case of one declaration, so a
+                # same-spelled case of another enum is another word), and it
+                # cannot fail.
+                set op enumeq
             }
             return [list $name $op]
         }

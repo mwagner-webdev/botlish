@@ -70,7 +70,14 @@ namespace eval core::type {
     # mutvec is the kind of a MutableVector header (MUTABLE-VECTOR.md): the
     # source-spellable type is the applied MutableVector[T] ({mutvec T},
     # hir/types.tcl); the bare kind is what natives' -param-types say.
-    variable primitives {int str bool unit list result block native mutarray UnicodeChar immutableSet struct coroutine mutvec}
+    #
+    # enum is the broad kind of every enum case value (ENUMS.md), spelled
+    # like the runtime kind tag; the precise form -- one enum declaration --
+    # is the HIR static type {enum ID} (hir/types.tcl), exactly as {nstruct
+    # ID} refines `struct`. It is never source-spellable: an enum type is a
+    # named declaration, and the bare kind would be an anonymous one
+    # (hir::types::resolveNamed rejects it).
+    variable primitives {int str bool unit list result block native mutarray UnicodeChar immutableSet struct coroutine mutvec enum}
     # NAME -> {name NAME base KIND validator CMD parents {NAME...}
     # integerDomain DOMAIN source 0|1 refinement {} | {carrier TYPE owner NS
     # span SPAN}}

@@ -133,19 +133,37 @@ proc hir::sourcetypes::apply {decls {structDecls {}}} {
         # see this file's own header, "Compilation isolation".
         return {}
     }
-    # Any source type declaration -- an integer domain, a refinement or a
-    # struct -- makes this a program of its own, so it reclaims the registry
-    # even when it declares only structs: a previous compilation's
+    # Any source type declaration -- an integer domain, a refinement, an
+    # enum or a struct -- makes this a program of its own, so it reclaims the
+    # registry even when it declares only structs: a previous compilation's
     # `refined type Item` must not stay registered to collide with this
     # one's `struct Item` (hir::structs::apply rejects a struct name that is
     # already a declared type) or to stay resolvable under a name this
     # program does not declare.
     Reset
-    set order {}
+    # Enum declarations (ENUMS.md, hir/enums.tcl) ride in DECLS as `kind
+    # enum` entries. They are registered first: an enum names no other type,
+    # while a refinement's carrier, a struct's field or an applied type may
+    # name an enum. Their names are checked against the other type
+    # declarations of this batch below (one type namespace).
+    set enumDecls {}
+    set typeDecls {}
+    foreach decl $decls {
+        if {[dict exists $decl kind] && [dict get $decl kind] eq "enum"} {
+            lappend enumDecls $decl
+        } else {
+            lappend typeDecls $decl
+        }
+    }
+    set decls $typeDecls
+    set order [hir::enums::apply $enumDecls]
     if {$decls ne ""} {
         set byName [dict create]
         foreach decl $decls {
             set id [Identity $decl]
+            if {[hir::enums::declared $id]} {
+                Fail [dict get $decl nameSpan] "type \"$id\" is already declared (as an enum)"
+            }
             if {[dict exists $byName $id]} {
                 Fail [dict get $decl nameSpan] "type \"$id\" is already declared[ElsewhereClause [dict get $byName $id nameSpan] [dict get $decl nameSpan]]"
             }
@@ -394,6 +412,14 @@ proc hir::sourcetypes::RefinementCarrierEligible {type} {
     set stable [ValueStability $type]
     if {$stable ne ""} {
         return "[hir::types::show $type] $stable, so a proof about one value would not stay true; a refinement needs a carrier whose values never change"
+    }
+    if {[hir::types::IsEnum $type]} {
+        # ENUMS.md: an enum is a stable scalar value, but a refinement lives
+        # on the core type lattice -- a primitive kind refined by named facts
+        # -- where the carrier's nominal identity would be lost (a refined
+        # enum would be `enum`, any enum). Carrying it needs a refinement
+        # representation over nominal types this milestone does not add.
+        return "[hir::types::show $type] is an enum, a stable value type, but refinements of an enum are not supported yet: a refinement is represented over a primitive kind, which would lose the enum's nominal identity (this milestone's carriers are scalar value types: str, int, bool, UnicodeChar, and integer-domain or refinement types over them)"
     }
     if {[hir::types::IsSpecific $type] || $type eq "struct"} {
         return "[hir::types::show $type] is a stable value type, but refinements of aggregate, struct or callable values are not supported yet (this milestone's carriers are scalar value types: str, int, bool, UnicodeChar, and integer-domain or refinement types over them)"

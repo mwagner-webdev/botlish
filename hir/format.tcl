@@ -107,6 +107,14 @@ proc hir::format::TypeDecl {entry} {
         set owner [dict get $entry owner]
         return "refined type [dict get $entry name] carrier [hir::types::show [dict get $entry carrier]] owner [expr {$owner eq "" ? "-" : $owner}]"
     }
+    if {[dict exists $entry kind] && [dict get $entry kind] eq "enum"} {
+        # An enum declaration (hir/enums.tcl, ENUMS.md): "enum ID name NAME ns
+        # NS cases C1, C2, ..." (NS "-" for the entry program), the complete
+        # closed case set in declaration order. Read back by hir::read::
+        # EnumDeclLine.
+        set ns [dict get $entry namespace]
+        return "enum [dict get $entry id] name [dict get $entry name] ns [expr {$ns eq "" ? "-" : $ns}] cases [join [dict get $entry cases] {, }]"
+    }
     if {[dict exists $entry kind] && [dict get $entry kind] eq "struct"} {
         # A struct declaration (hir/structs.tcl): "struct ID name NAME ns NS
         # [opaque] fields F1: T1, F2: T2" (NS "-" for the entry program), the

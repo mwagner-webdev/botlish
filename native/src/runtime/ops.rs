@@ -454,6 +454,11 @@ fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
         // Immediate, canonical (one codepoint, one word): word equality is
         // exactly value equality, like Bool.
         Kind::UnicodeChar => a == b,
+        // An enum case word is canonical (ENUMS.md): the same enum
+        // declaration and the same case of it have one word, so word
+        // equality is exactly nominal equality -- another enum's
+        // same-spelled case is another word.
+        Kind::Enum => a == b,
         // Exact byte-sequence equality (core::value::equal's bytestore
         // case): length and every byte, never the storage's identity or
         // address -- a static constant, a heap buffer and a copy of either
@@ -594,6 +599,7 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
         Kind::Struct => 8,
         Kind::ByteStore => 9,
         Kind::MutByteStore => 10,
+        Kind::Enum => 11,
         Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine | Kind::MutVec => unreachable!(),
     };
     let h = fnv1a(h, &[tag]);
@@ -629,6 +635,19 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
         // Canonical decimal codepoint text, matching how Int's own text is
         // hashed above (core/hashing.tcl's identical choice).
         Kind::UnicodeChar => fnv1a(h, char_of(v).to_string().as_bytes()),
+        // core/hashing.tcl's enum case, byte for byte (ENUMS.md): the enum's
+        // declaration identity text, a 0xFF separator, the case's declared
+        // name -- never the numbers the word carries.
+        Kind::Enum => {
+            let (e, c) = enum_parts(v);
+            let (name, case) = current_program(|prog| {
+                let info = &prog.enums[e as usize];
+                (info.name.clone(), info.cases[c as usize].clone())
+            });
+            let h = fnv1a(h, name.as_bytes());
+            let h = fnv1a(h, &[0xFF]);
+            fnv1a(h, case.as_bytes())
+        }
         Kind::List => {
             let items = list_of(v).items();
             let mut h = fnv1a(h, &(items.len() as u64).to_le_bytes());
@@ -2215,7 +2234,7 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         IEq => cmp(|o| o == Ordering::Equal),
         VEq => rt_value_eq(p, a[0], a[1]),
         StrEq => rt_str_eq(p, a[0], a[1]),
-        CharEq => bool_value(a[0] == a[1]),
+        CharEq | EnumEq => bool_value(a[0] == a[1]),
         ListNew => rt_list_new(p, a.len() as u64, a.as_ptr()),
         StrLen => rt_str_len(p, a[0]),
         Substr => rt_substr(p, a[0], a[1], a[2]),
@@ -2476,7 +2495,7 @@ mod tests {
 
     fn vm() -> Box<Vm> {
         Vm::new(
-            std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new() }),
+            std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() }),
             AllocMode::Summary,
         )
     }
@@ -2496,6 +2515,7 @@ mod tests {
                         opaque: false,
                     })
                     .collect(),
+                enums: Vec::new(),
             }),
             AllocMode::Summary,
         )
@@ -2574,6 +2594,7 @@ mod tests {
                     ShapeInfo { name: Some("token::Token".into()), fields: vec!["secret".into()], opaque: true },
                     ShapeInfo { name: Some("Holder".into()), fields: vec!["token".into()], opaque: false },
                 ],
+                enums: Vec::new(),
             }),
             AllocMode::Summary,
         );

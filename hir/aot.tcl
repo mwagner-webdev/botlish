@@ -627,7 +627,7 @@ proc hir::aot::VisitCall {hir stateVar region e node tails statics} {
         set argKinds [lmap arg $args {hir::types::kindOf [hir::typeOf $hir $arg]}]
         if {"structural-equality" in $runtime && [llength $argKinds] == 2
                 && [lindex $argKinds 0] eq [lindex $argKinds 1]
-                && [lindex $argKinds 0] in {int str bool unit}} {
+                && [lindex $argKinds 0] in {int str bool unit enum}} {
             # Both kinds known and scalar: no structural walk is needed.
             set runtime [lsearch -all -inline -not -exact $runtime structural-equality]
             if {[lindex $argKinds 0] eq "int"} {

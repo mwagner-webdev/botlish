@@ -62,6 +62,19 @@
 #                             struct's kind is never `list`. The field names
 #                             live in the shape, never in the individual
 #                             value's own payload.
+#   {enum ID CASE}            a case value of an enum (ENUMS.md): ID is the
+#                             declaration identity of the enum ("Name",
+#                             "namespace::Name"), CASE the declared name of
+#                             one of its cases. The pair is the value's
+#                             whole identity: two values are equal iff both
+#                             parts are, so a same-spelled case of another
+#                             enum is a different value. No ordinal, no
+#                             integer and no String meaning is carried or
+#                             implied (the case's position in its
+#                             declaration is not part of the value).
+#                             Immutable, unrestricted, no heap state. A
+#                             future payload-bearing case extends this
+#                             form; it does not replace it.
 #   {bytestore HEX}           the owned byte storage behind abi::bytes::Bytes (ABI-
 #                             BYTES.md): an immutable, finite sequence of
 #                             bytes, HEX its lowercase hexadecimal text (two
@@ -127,7 +140,7 @@
 # procedures.
 
 namespace eval core::value {
-    variable kinds {int str bool unit list result block native mutarray UnicodeChar immutableSet errorId struct bytestore mutbytes coroutine mutvec}
+    variable kinds {int str bool unit list result block native mutarray UnicodeChar immutableSet errorId struct bytestore mutbytes coroutine mutvec enum}
 }
 
 proc core::value::isCanonicalInt {text} {
@@ -241,6 +254,15 @@ proc core::value::structOf {shape values} {
     return [list struct $shape $values]
 }
 
+# The case CASE of the enum declared as ID (ENUMS.md): its whole identity is
+# the pair. Neither may be empty: both come from a resolved declaration.
+proc core::value::enumValue {id case} {
+    if {$id eq "" || $case eq "" || [string first :: $case] >= 0} {
+        error "core::value::enumValue: not an enum case: \"$id\" \"$case\""
+    }
+    return [list enum $id $case]
+}
+
 proc core::value::ok {payload} {
     return [list result ok [check $payload]]
 }
@@ -344,6 +366,9 @@ proc core::value::structGet {v name} {
     return [lindex $v 2 $slot]
 }
 
+proc core::value::enumId {v}       { Require enum $v; return [lindex $v 1] }
+proc core::value::enumCaseName {v} { Require enum $v; return [lindex $v 2] }
+
 proc core::value::nativeName {v}  { Require native $v; return [lindex $v 1] }
 proc core::value::mutarrayId {v}  { Require mutarray $v; return [lindex $v 1] }
 proc core::value::coroutineId {v} { Require coroutine $v; return [lindex $v 1] }
@@ -425,6 +450,12 @@ proc core::value::equal {a b} {
         }
         unit {
             return 1
+        }
+        enum {
+            # Nominal (ENUMS.md): the same enum declaration and the same
+            # case of it. A same-spelled case of another enum is unequal,
+            # and no position or number of a case takes part.
+            return [expr {[lindex $a 1] eq [lindex $b 1] && [lindex $a 2] eq [lindex $b 2]}]
         }
         list {
             set xs [lindex $a 1]
@@ -552,6 +583,11 @@ proc core::value::show {v {debug 0} {reveal 0}} {
             return "\[[join $parts {, }]\]"
         }
         result { return "[lindex $v 1]([show [lindex $v 2] $debug $reveal])" }
+        enum {
+            # Debug rendering only (ENUMS.md): the qualified spelling of the
+            # case, never a String conversion or a serialization contract.
+            return "[lindex $v 1]::[lindex $v 2]"
+        }
         struct {
             # {name: "Grace", age: 45} / Person {name: "Ada", age: 36}: field
             # names in slot order (anonymous: canonical sorted order). An

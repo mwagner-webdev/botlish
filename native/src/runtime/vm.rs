@@ -72,12 +72,26 @@ pub struct ShapeInfo {
     pub opaque: bool,
 }
 
+/// One enum declaration of the program (ENUMS.md): its declaration identity
+/// and its declared case names, indexed by the case number an enum word
+/// carries (runtime::value's `make_enum`). Static, non-GC data, read only by
+/// printing, hashing and handing values back to the host: equality is word
+/// equality and never consults it. The numbers are representation only --
+/// a name is what every observable use reads.
+pub struct EnumInfo {
+    pub name: String,
+    pub cases: Vec<String>,
+}
+
 pub struct ProgramInfo {
     pub functions: Vec<FunctionInfo>,
     pub natives: Vec<NativeInfo>,
     /// The program's struct shapes, indexed by the shape number NIR's
     /// `structnew` carries and `StructObj::shape` stores.
     pub shapes: Vec<ShapeInfo>,
+    /// The program's enums, indexed by the enum number an enum word carries
+    /// (NIR's `enum` declarations, in order).
+    pub enums: Vec<EnumInfo>,
 }
 
 thread_local! {

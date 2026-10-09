@@ -48,6 +48,18 @@
 #                                   the identity is the declaration, never
 #                                   the fields, and the schema is the
 #                                   declaration's (hir::structs::fieldType).
+#   {enum ID}                       an *enum* (ENUMS.md): a value that is one
+#                                   case of the enum declared as ID
+#                                   (hir/enums.tcl). Nominal: the identity is
+#                                   the declaration, never the case list; a
+#                                   case expression has exactly this type
+#                                   (no per-case subtype). Closed: the
+#                                   declaration's case set is complete
+#                                   (hir::enums::cases). Never a subtype of
+#                                   Int or str, nor of another enum.
+#   enum                            the broad kind of every enum case value
+#                                   (the runtime kind's own name). Not
+#                                   source-spellable (an anonymous enum).
 #   struct                          the broad kind of every struct value (a
 #                                   depth-truncated struct type, and the
 #                                   runtime kind's own name); no field can
@@ -207,6 +219,18 @@ proc hir::types::resolveNamed {name {ns ""}} {
     if {$id ne ""} {
         return [list nstruct $id]
     }
+    # An enum (ENUMS.md): the same type namespace and visibility rules,
+    # `import type` included.
+    set id [hir::enums::lookup $name $ns]
+    if {$id ne ""} {
+        return [list enum $id]
+    }
+    if {$name eq "enum"} {
+        # The broad kind of every enum value would be an anonymous enum
+        # type: an enum's identity is its declaration, so only a declared
+        # enum's name is an enum type.
+        error "\"enum\" is not a type: there are no anonymous enum types (an enum is a named declaration, `enum Name:`; write its name)"
+    }
     # A trait (TRAITS.md): the same type namespace and visibility rules as a
     # struct or a source-defined type, `import type` included. A bare
     # annotation names the constraint; only a parameter or result position
@@ -303,7 +327,7 @@ proc hir::types::resolveApplication {ctor argTypes} {
 
 proc hir::types::IsSpecific {type} {
     return [expr {$type eq "never"
-                  || ([llength $type] > 1 && [lindex $type 0] in {native block list immutableSet mutarray mutvec fn struct nstruct trait coroutine})}]
+                  || ([llength $type] > 1 && [lindex $type 0] in {native block list immutableSet mutarray mutvec fn struct nstruct enum trait coroutine})}]
 }
 
 # ---------------------------------------------------------------------------
@@ -467,6 +491,12 @@ proc hir::types::IsAffine {type {seen {}}} {
         nstruct {
             return [hir::structs::IsAffine [lindex $type 1] $seen]
         }
+        enum {
+            # Derived from the enum's case payloads (hir::enums::IsAffine):
+            # no payload-free case owns anything, so every enum of today is
+            # unrestricted -- by that rule, not by being an enum.
+            return [hir::enums::IsAffine [lindex $type 1] $seen]
+        }
         trait {
             set w [lindex $type 2]
             if {$w eq "" || [IsAbstractWitness $w] || [IsJoinWitness $w]} {
@@ -593,6 +623,14 @@ proc hir::types::JoinWitness {a b} {
 # element.
 proc hir::types::Unviewed {type} {
     return [expr {[IsTrait $type] ? "any" : $type}]
+}
+
+# ---------------------------------------------------------------------------
+# Enum types (ENUMS.md; the header's {enum ID})
+
+# 1 if TYPE is an enum type ({enum ID}).
+proc hir::types::IsEnum {type} {
+    return [expr {[lindex $type 0] eq "enum" && [llength $type] == 2}]
 }
 
 # ---------------------------------------------------------------------------
@@ -1464,6 +1502,13 @@ proc hir::types::lub {a b} {
         # do.
         return [MakeMutArray [lub [lindex $a 1] [lindex $b 1]] 0]
     }
+    if {[IsEnum $a] || [IsEnum $b]} {
+        # Nominal (ENUMS.md): the same enum was decided above ($a eq $b).
+        # Two different enums -- or an enum and anything else -- have no
+        # useful join: never a union of the two case sets (there are no
+        # anonymous enums) and never the bare `enum` kind. The broad any.
+        return any
+    }
     if {[IsStructLike $a] || [IsStructLike $b]} {
         # Two anonymous structs with the same field names join fieldwise
         # (STRUCTS.md: {x: lub(A,C), y: lub(B,D)}); every other pair has no
@@ -1584,7 +1629,7 @@ proc hir::types::narrow {current fact} {
         }
         return $fact
     }
-    if {[IsFn $fact] || [IsStructLike $fact] || [IsCoroutine $fact]} {
+    if {[IsFn $fact] || [IsStructLike $fact] || [IsCoroutine $fact] || [IsEnum $fact]} {
         # A structural contract fact (a function contract, a struct type, a
         # coroutine handle's contract): a value already known to satisfy it
         # (a narrower contract, the same struct) says more.
@@ -1636,7 +1681,7 @@ proc hir::types::narrow {current fact} {
 # recursive list case would make it so -- sound but incomplete, never
 # unsound, and not needed by this milestone's own motivating call site.
 proc hir::types::IsEqualityTotal {type} {
-    return [expr {[kindOf $type] in {int str bool unit UnicodeChar}}]
+    return [expr {[kindOf $type] in {int str bool unit UnicodeChar enum}}]
 }
 
 # The runtime value kind every value of TYPE has, or "" if not fixed.
@@ -1673,6 +1718,10 @@ proc hir::types::semantic {type} {
 proc hir::types::ofValue {v} {
     if {[core::value::kind $v] eq "native"} {
         return [list native [core::value::nativeName $v]]
+    }
+    if {[core::value::kind $v] eq "enum"} {
+        # A case value has exactly its declaring enum's type (ENUMS.md).
+        return [list enum [core::value::enumId $v]]
     }
     return [core::type::ofValue $v]
 }
@@ -1737,6 +1786,10 @@ proc hir::types::show {type} {
             nstruct {
                 # A named struct, by its declared name.
                 return [hir::structs::display [lindex $type 1]]
+            }
+            enum {
+                # An enum, by its declared name (ENUMS.md).
+                return [hir::enums::display [lindex $type 1]]
             }
             trait {
                 # A trait constraint or view, by the trait's name only: the

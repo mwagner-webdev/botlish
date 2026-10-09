@@ -571,7 +571,7 @@ mod tests {
     use crate::runtime::vm::ProgramInfo;
 
     fn new_vm() -> Box<Vm> {
-        Vm::new(std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new() }), AllocMode::Summary)
+        Vm::new(std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() }), AllocMode::Summary)
     }
 
     /// A zero-argument Block whose code is the Rust function CODE (the

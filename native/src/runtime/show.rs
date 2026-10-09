@@ -51,6 +51,14 @@ fn show_into(v: Value, out: &mut String) {
             }
             out.push('\'');
         }
+        Kind::Enum => {
+            // Matches core::value::show's enum rendering exactly: the case's
+            // qualified spelling, debug output only (ENUMS.md).
+            let (name, case) = enum_names(v);
+            out.push_str(&name);
+            out.push_str("::");
+            out.push_str(&case);
+        }
         Kind::List => {
             out.push('[');
             for (i, item) in list_of(v).items().iter().enumerate() {
@@ -179,6 +187,15 @@ pub fn hex_of(bytes: &[u8]) -> String {
     out
 }
 
+/// The declaration identity and the case name of the enum case word V.
+pub fn enum_names(v: Value) -> (String, String) {
+    let (e, c) = enum_parts(v);
+    current_program(|prog| {
+        let info = &prog.enums[e as usize];
+        (info.name.clone(), info.cases[c as usize].clone())
+    })
+}
+
 pub fn int_text(v: Value) -> String {
     match int_small(v) {
         Some(n) => n.to_string(),
@@ -198,6 +215,12 @@ pub fn tcl_value(v: Value) -> Result<String, RtError> {
         // back to the Tcl host round-trips through core::ir::literalValue
         // unchanged.
         Kind::UnicodeChar => tcl_list(&["UnicodeChar".to_string(), char_of(v).to_string()]),
+        // Matches core::value::enumValue's own representation exactly
+        // ({enum ID CASE}, core/value.tcl): the names, never the numbers.
+        Kind::Enum => {
+            let (name, case) = enum_names(v);
+            tcl_list(&["enum".to_string(), name, case])
+        }
         Kind::List => {
             let items = list_of(v).items().iter().map(|item| tcl_value(*item)).collect::<Result<Vec<_>, _>>()?;
             tcl_list(&["list".to_string(), tcl_list(&items)])

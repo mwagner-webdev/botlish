@@ -292,9 +292,13 @@ proc hir::structs::apply {decls} {
         set name [dict get $decl name]
         set ns [dict get $decl namespace]
         set id [identity $name $ns]
-        if {$name in {Int any never Fn Coroutine} || [core::type::isBuiltinName $name] || [core::type::valid $id]
+        if {$name in {Int any never Fn Coroutine enum} || [core::type::isBuiltinName $name] || [core::type::valid $id]
                 || [dict exists $::hir::types::constructors $name]} {
             Fail [dict get $decl nameSpan] "\"$name\" cannot be declared as a struct: the name is already a built-in or declared type"
+        }
+        if {[hir::enums::declared $id]} {
+            # One type namespace (ENUMS.md): an enum of that name exists.
+            Fail [dict get $decl nameSpan] "type \"$name\" is already declared (as an enum)"
         }
         if {[dict exists $byId $id]} {
             Fail [dict get $decl nameSpan] "type \"$name\" is already declared"

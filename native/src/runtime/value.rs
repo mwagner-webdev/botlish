@@ -16,6 +16,19 @@
 //!                 fixed constants' exact values above) so a UnicodeChar can
 //!                 never be mistaken for an Int by kind, even through a
 //!                 dynamic/untyped path (see UNICODE-CHAR-LITERALS.md).
+//!   eee...ccc10010  an enum case (ENUMS.md), stored as (enum << 32) |
+//!                 (case << 5) | 0b10010: an immediate (never heap-allocated,
+//!                 never a GC root) carrying the program's dense number of
+//!                 the enum declaration (bits 32..63, `ProgramInfo::enums`)
+//!                 and the case's number within it (bits 5..31). Low five bits
+//!                 `0b10010` are disjoint from a small Int's `0b...1`, a
+//!                 UnicodeChar's `0b100`, a pointer's `0b000` and the fixed
+//!                 constants 2/6/10 (`0b00010`, `0b00110`, `0b01010`), so a case
+//!                 is never mistaken for any other kind. The numbers are
+//!                 representation only: canonical within one program (equal
+//!                 cases have equal words, so equality is word equality), never
+//!                 a value a program can observe -- printing and hashing go
+//!                 through the declared names.
 //!   pppp...p000   pointer to a heap object (non-null, 8-byte aligned)
 //!   0             no value: an error is pending (never a program value)
 //! ```
@@ -44,6 +57,12 @@ pub const SMALL_MAX: i64 = (1 << 62) - 1;
 /// which have low 3 bits `0b100`).
 pub const CHAR_TAG: u64 = 0b100;
 pub const CHAR_TAG_MASK: u64 = 0b111;
+
+/// Low-bits tag of an immediate enum case word (see this module's header).
+pub const ENUM_TAG: u64 = 0b10010;
+pub const ENUM_TAG_MASK: u64 = 0b11111;
+/// The largest case number an enum word carries (27 bits).
+pub const MAX_ENUM_CASE: u32 = (1 << 27) - 1;
 
 pub const MAX_SCALAR: u32 = 0x10FFFF;
 pub const SURROGATE_LO: u32 = 0xD800;
@@ -355,6 +374,26 @@ pub fn make_char(codepoint: u32) -> Value {
     ((codepoint as u64) << 3) | CHAR_TAG
 }
 
+/// 1 if V is an enum case word (ENUMS.md).
+#[inline]
+pub fn is_enum(v: Value) -> bool {
+    v & ENUM_TAG_MASK == ENUM_TAG
+}
+
+/// The enum case word of case CASE of the program's enum number ENUM.
+#[inline]
+pub fn make_enum(enum_index: u32, case: u32) -> Value {
+    debug_assert!(case <= MAX_ENUM_CASE);
+    ((enum_index as u64) << 32) | ((case as u64) << 5) | ENUM_TAG
+}
+
+/// (enum number, case number) of the enum case word V.
+#[inline]
+pub fn enum_parts(v: Value) -> (u32, u32) {
+    debug_assert!(is_enum(v));
+    ((v >> 32) as u32, ((v >> 5) as u32) & MAX_ENUM_CASE)
+}
+
 #[inline]
 pub fn bool_value(b: bool) -> Value {
     if b { TRUE } else { FALSE }
@@ -404,6 +443,9 @@ pub enum Kind {
     /// A MutableVector header (MUTABLE-VECTOR.md): like MutArray, no equality
     /// and no hash. Named as core/value.tcl's `mutvec` kind.
     MutVec,
+    /// An enum case (ENUMS.md): an immediate word, distinct from every other
+    /// kind. Named as core/value.tcl's `enum` kind.
+    Enum,
 }
 
 impl Kind {
@@ -425,6 +467,7 @@ impl Kind {
             "mutbytes" => Kind::MutByteStore,
             "coroutine" => Kind::Coroutine,
             "mutvec" => Kind::MutVec,
+            "enum" => Kind::Enum,
             _ => return None,
         })
     }
@@ -447,6 +490,7 @@ impl Kind {
             Kind::MutByteStore => "mutbytes",
             Kind::Coroutine => "coroutine",
             Kind::MutVec => "mutvec",
+            Kind::Enum => "enum",
         }
     }
 
@@ -458,7 +502,7 @@ impl Kind {
         [
             Kind::Int, Kind::Str, Kind::Bool, Kind::Unit, Kind::List, Kind::Result, Kind::Block, Kind::Native,
             Kind::MutArray, Kind::UnicodeChar, Kind::ImmutableSet, Kind::Struct, Kind::ByteStore, Kind::MutByteStore,
-            Kind::Coroutine, Kind::MutVec,
+            Kind::Coroutine, Kind::MutVec, Kind::Enum,
         ][code as usize]
     }
 }
@@ -475,6 +519,9 @@ pub fn kind_of(v: Value) -> Kind {
     }
     if is_char(v) {
         return Kind::UnicodeChar;
+    }
+    if is_enum(v) {
+        return Kind::Enum;
     }
     match heap_kind(v) {
         KIND_BIGINT => Kind::Int,

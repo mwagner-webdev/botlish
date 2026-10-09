@@ -495,7 +495,7 @@ mod context_area_tests {
         let clif = compiled.clif.clone().unwrap();
         assert!(clif.contains("symbol_value.i64"), "{clif}");
         let mut vm = Vm::new(
-            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new() }),
+            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() }),
             AllocMode::Summary,
         );
         compiled.install_constants(&mut vm);
@@ -543,7 +543,7 @@ mod short_string_generic_entry_tests {
         let options = CompileOptions { clif: false, vcode: false, alloc_sites: false };
         let compiled = CraneliftJit.compile(&program, &options).expect("compiles");
         let mut vm = Vm::new(
-            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new() }),
+            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() }),
             AllocMode::Summary,
         );
         compiled.install_constants(&mut vm);
@@ -622,7 +622,7 @@ mod packed_ascii_generic_entry_tests {
         let options = CompileOptions { clif: false, vcode: false, alloc_sites: false };
         let compiled = CraneliftJit.compile(&program, &options).expect("compiles");
         let mut vm = Vm::new(
-            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new() }),
+            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() }),
             AllocMode::Summary,
         );
         compiled.install_constants(&mut vm);

@@ -18,7 +18,7 @@
 #                     keyword: it starts an import only when immediately
 #                     followed by a name or by "type", which no other
 #                     construct allows, so `import` stays an ordinary name.
-#   topStatement = typeDecl | structDecl | errorDecl | traitDecl | statement
+#   topStatement = typeDecl | structDecl | enumDecl | errorDecl | traitDecl | statement
 #   statement    = simple NEWLINE | valued | function | if | loop
 #                | withDecl NEWLINE
 #   withDecl     = "with" "context" expression    -- CONTEXTS.md: installs
@@ -133,6 +133,17 @@
 #                  no proof clause) is checked here where it is grammar and
 #                  by hir/traits.tcl where it is meaning
 #
+#   enumDecl     = "enum" IDENT ":" NEWLINE INDENT enumCase { "," enumCase } [ "," ] DEDENT
+#   enumCase     = IDENT
+#                  -- ENUMS.md: a named, closed, nominal sum type and its
+#                  payload-free cases, one comma-separated list (a newline
+#                  may follow any comma; the trailing comma is optional).
+#                  "enum" is contextual, like "trait": a declaration only as
+#                  the first word of a top-level statement directly followed
+#                  by a name, an ordinary name everywhere else. A case has
+#                  no value, alias, payload or parameter list (each is a
+#                  located error), and there is no anonymous `enum {...}`
+#                  (ANONYMOUS-ENUM) and no empty enum (ENUM-EMPTY)
 #   structDecl   = { structModifier } "struct" IDENT ":" NEWLINE INDENT structField { structField } DEDENT
 #   structModifier = "opaque"       -- OPAQUE-STRUCTS.md; contextual (below)
 #                  | "context"      -- CONTEXTS.md; contextual (below). The
@@ -511,6 +522,118 @@ proc surface::parser::AtStructDecl {pVar} {
         incr i
     }
     return [expr {$i > 0 && [Kind p $i] eq "struct"}]
+}
+
+# 1 if the next tokens start an enum declaration (ENUMS.md): the contextual
+# word "enum" directly followed by a name, or by ":" (a declaration missing
+# its name, reported by EnumDecl). Neither is ever a valid expression, so an
+# ordinary variable called `enum` (`enum = 3`, `enum(x)`, `x.enum`) is
+# unaffected.
+proc surface::parser::AtEnumDecl {pVar} {
+    upvar 1 $pVar p
+    set token [Peek p]
+    return [expr {[dict get $token kind] eq "IDENT" && [dict get $token text] eq "enum"
+        && [Kind p 1] in {IDENT :}}]
+}
+
+# 1 if the next tokens are the word "enum" directly followed by "{": the
+# spelling an anonymous enum would have, which Botlish does not have.
+proc surface::parser::AtAnonymousEnum {pVar} {
+    upvar 1 $pVar p
+    set token [Peek p]
+    return [expr {[dict get $token kind] eq "IDENT" && [dict get $token text] eq "enum" && [Kind p 1] eq "\{"}]
+}
+
+# ANONYMOUS-ENUM at TOKEN (the word "enum" before "{").
+proc surface::parser::AnonymousEnumError {token} {
+    FailCode [dict get $token span] ANONYMOUS-ENUM \
+        "anonymous enum types do not exist: an enum's identity is its declaration, so an enum is always a named top-level declaration (\"enum Name:\" with its cases on indented lines), and a value of it is written Name::Case"
+}
+
+# "enum" IDENT ":" NEWLINE INDENT IDENT { "," IDENT } [ "," ] DEDENT -- a
+# top-level enum declaration (ENUMS.md): an `enumdecl` node {name nameSpan
+# cases}, CASES a list of {name nameSpan} dicts in declaration order. The
+# cases are one comma-separated list: a comma separates two cases (a newline
+# may follow it) and may end the list. A case is a bare name: no value
+# (`Foo = 17`), alias (`Foo = Bar`), payload (`Foo: T`, `Foo(T)`) or other
+# form exists, each a located error. Duplicate cases are left to HIR
+# (hir/enums.tcl), which owns case identity; an enum without a case is
+# ENUM-EMPTY here.
+proc surface::parser::EnumDecl {pVar} {
+    upvar 1 $pVar p
+    set start [dict get [Advance p] span]
+    set token [Peek p]
+    if {[dict get $token kind] ne "IDENT"} {
+        Fail $token "expected an enum name after \"enum\", found [Describe $token] (an enum is a named declaration: \"enum Name:\")"
+    }
+    set name [Advance p]
+    set token [Peek p]
+    if {[dict get $token kind] eq "\{"} {
+        Fail $token "an enum's cases are declared on indented lines after \"enum [dict get $name value]:\", not in braces"
+    }
+    if {[dict get $token kind] ne ":"} {
+        Fail $token "expected \":\" after the enum name \"[dict get $name value]\", found [Describe $token]"
+    }
+    Advance p
+    set token [Peek p]
+    if {[dict get $token kind] ne "NEWLINE"} {
+        Fail $token "expected a new line and an indented, comma-separated list of cases after \":\", found [Describe $token]"
+    }
+    Advance p
+    if {[Kind p] ne "INDENT"} {
+        FailCode [dict get $name span] ENUM-EMPTY \
+            "enum \"[dict get $name value]\" declares no case: an enum needs at least one case, written on the indented lines after \"enum [dict get $name value]:\" (\"Case,\")"
+    }
+    Advance p
+    set cases {}
+    set separated 1
+    while 1 {
+        while {[Kind p] eq "NEWLINE"} {
+            Advance p
+        }
+        if {[Kind p] in {DEDENT EOF}} {
+            break
+        }
+        set caseToken [Peek p]
+        if {[dict get $caseToken kind] ne "IDENT"} {
+            Fail $caseToken "expected an enum case name, found [Describe $caseToken]"
+        }
+        if {!$separated} {
+            Fail $caseToken "expected \",\" between the enum cases \"[dict get [lindex $cases end] name]\" and \"[dict get $caseToken value]\" (an enum's cases are one comma-separated list)"
+        }
+        Advance p
+        set caseName [dict get $caseToken value]
+        switch -- [Kind p] {
+            = {
+                Fail [Peek p] "enum case \"$caseName\" cannot be given a value or an alias: a case is a nominal value of its enum only, with no integer, String or other case behind it (write any mapping as ordinary code)"
+            }
+            : {
+                Fail [Peek p] "enum case \"$caseName\" cannot carry a payload: payload-bearing enum cases are not supported yet (every case is payload-free)"
+            }
+            ( {
+                Fail [Peek p] "enum case \"$caseName\" cannot take a parameter list: a case is written as a bare name (payload-bearing cases are not supported)"
+            }
+            \{ {
+                Fail [Peek p] "enum case \"$caseName\" cannot carry a payload: payload-bearing enum cases are not supported yet (every case is payload-free)"
+            }
+            . - :: {
+                Fail [Peek p] "an enum case is declared by its bare name, found [Describe [Peek p]] after \"$caseName\""
+            }
+        }
+        lappend cases [dict create name $caseName nameSpan [dict get $caseToken span]]
+        set separated 0
+        if {[Kind p] eq ","} {
+            Advance p
+            set separated 1
+        } elseif {[Kind p] ni {NEWLINE DEDENT EOF}} {
+            Fail [Peek p] "expected \",\" or the end of the line after the enum case \"$caseName\", found [Describe [Peek p]]"
+        }
+    }
+    if {[Kind p] eq "DEDENT"} {
+        Advance p
+    }
+    return [surface::ast::node enumdecl [SpanFrom p $start] \
+        name [dict get $name value] nameSpan [dict get $name span] cases $cases]
 }
 
 # 1 if the next tokens start a trait declaration (TRAITS.md): the contextual
@@ -903,6 +1026,16 @@ proc surface::parser::Statement {pVar} {
         else   { Fail $token "\"else\" without a matching \"if\"" }
         elif   { Fail $token "\"elif\" without a matching \"if\"" }
     }
+    if {[AtEnumDecl p]} {
+        # `enum NAME:` (ENUMS.md): a contextual top-level declaration.
+        if {![dict get $p topLevel]} {
+            Fail $token "an enum declaration is only allowed at the top level of a module, not nested in a function/if/loop"
+        }
+        return [EnumDecl p]
+    }
+    if {[AtAnonymousEnum p]} {
+        AnonymousEnumError $token
+    }
     if {[AtTraitDecl p]} {
         # `trait NAME:` (TRAITS.md): a contextual top-level declaration.
         if {![dict get $p topLevel]} {
@@ -1157,6 +1290,10 @@ proc surface::parser::TypeExpr {pVar what} {
     } else {
         set token [Expect p IDENT $what]
         set name [dict get $token value]
+    }
+    if {$name eq "enum" && [Kind p] eq "\{"} {
+        # `fn f(x: enum {A, B})` (ENUMS.md): there are no anonymous enums.
+        AnonymousEnumError $token
     }
     if {$name eq "Fn"} {
         return [FnType p $token]
@@ -2266,6 +2403,10 @@ proc surface::parser::Primary {pVar} {
                 return [surface::ast::node qualname [SpanFrom p $span] \
                     namespace $namespaceName namespaceSpan $namespaceSpan \
                     name [dict get $member value] nameSpan [dict get $member span]]
+            }
+            if {[Kind p] eq "\{" && [dict get $token value] eq "enum"} {
+                # `enum {A, B}` (ENUMS.md): there are no anonymous enums.
+                AnonymousEnumError $token
             }
             if {[Kind p] eq "\{"} {
                 # Struct { ... }: a named struct construction (STRUCTS.md).
