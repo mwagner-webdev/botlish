@@ -36,13 +36,13 @@
 @@ copy-aliases-native an unrestricted copy aliases writes (native): a logical copy of an array is the same header
 ## native/src/runtime/ops.rs
 <<<<
-    let backing = Rc::clone(&mutarray_of(arr).backing);
+    let (start, backing) = (obj.start, Rc::clone(&obj.backing));
     vm(p).metrics.record_mutarray_share();
-    new_mutarray_header(p, backing, 0)
+    new_mutarray_header(p, start, backing, 0)
 ====
-    let backing = Rc::clone(&mutarray_of(arr).backing);
+    let (start, backing) = (obj.start, Rc::clone(&obj.backing));
     vm(p).metrics.record_mutarray_share();
-    drop(backing);
+    drop((start, backing));
     arr
 >>>>
 
@@ -65,10 +65,10 @@
 @@ copy-eager-deep-native an unrestricted copy eagerly copies every element (native): no backing is ever shared, the first write never detaches
 ## native/src/runtime/ops.rs
 <<<<
-    let backing = Rc::clone(&mutarray_of(arr).backing);
+    let (start, backing) = (obj.start, Rc::clone(&obj.backing));
     vm(p).metrics.record_mutarray_share();
 ====
-    let backing = Rc::new((*mutarray_of(arr).backing).clone());
+    let (start, backing) = (obj.start, Rc::from(&obj.backing[..]));
     vm(p).metrics.record_mutarray_share();
 >>>>
 
@@ -292,7 +292,7 @@ core::native::register mutable_array#set_drop
 @@ drop-leaks-elements-native an affine array's death releases none of its elements (native)
 ## native/src/runtime/ops.rs
 <<<<
-    for item in items {
+    for &item in items {
         *pos = start;
         super::affine::drop_at(p, item, d, pos);
     }

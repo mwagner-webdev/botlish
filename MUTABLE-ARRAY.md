@@ -132,11 +132,13 @@ nothing affine. Pinned: `ma-type-affinity` (eleven types), `ma-nested-affine`.
 The MutableVector model, fixed length. A *header* is the identity of one
 logical array: on the Tcl backends `{mutarray ID}` over
 `core::mutarray::store(ID)`, a Tcl list (Tcl's own copy-on-write); natively
-`MutArrayObj { hdr, backing: Rc<VecDeque<Value>> }` (`runtime/value.rs`). A
-copy is a new header over the same backing; the first write through a
-header whose backing is shared detaches it. No runtime ownership state
-exists (no owner, moved bit or affine flag); the `Rc` count is copy-on-write
-bookkeeping only.
+`MutArrayObj { hdr, start, backing: Rc<[Value]> }` (`runtime/value.rs`): the
+length never changes, so the backing is one allocation (its count and its
+slots), and the array's elements are its slots from `start` on (0 but in an
+affine array a consuming loop drains, 22). A copy is a new header over the
+same backing; the first write through a header whose backing is shared
+detaches it. No runtime ownership state exists (no owner, moved bit or
+affine flag); the `Rc` count is copy-on-write bookkeeping only.
 
 ### 5. Copy path
 
@@ -152,11 +154,13 @@ and a new header, O(1), counted (`mutableArray shares`).
 
 ### 6. Detach path
 
-Native: `ops::array_writable` -- every write -- calls `Rc::make_mut` on the
-backing; when another header shares it, the elements are copied once
-(counted: `detaches`, `detachElements`). Tcl: `lset` on a shared Tcl list
-duplicates it (Tcl's copy-on-write). `ma-cow-counters`: one share whatever
-the length; the first write detaches once, copying 10 or 1000 elements.
+Native: `ops::array_writable` -- every write -- checks the backing's `Rc`
+count; when another header shares it, the header's elements are copied once
+into a new backing of their length (one allocation; counted: `detaches`,
+`detachElements`), and the old backing stays the other headers'. Tcl:
+`lset` on a shared Tcl list duplicates it (Tcl's copy-on-write).
+`ma-cow-counters`: one share whatever the length; the first write detaches
+once, copying 10 or 1000 elements.
 
 ### 7. Unique-write path
 
@@ -488,10 +492,15 @@ consuming loop (`core::forms::ConsumeVector`) drains a vector or an array
 
 ### 47. Native representation
 
-`MutArrayObj { hdr, backing: Rc<VecDeque<Value>> }`; `mutarray_of`,
+`MutArrayObj { hdr, start, backing: Rc<[Value]> }` (4); `mutarray_of`,
 `array_writable` (detaching), `array_owned` (an affine array's backing,
 never shared: a panic would be an ownership invariant violation, never
-reached), `share_array`, `drop_array_elements`, `array_elements` (trace).
+reached), `share_array` (the header's `start` with the backing),
+`drop_array_elements` (the elements leave the dying array by its `start`
+moving past them), `array_elements` (trace: the slots from `start`). The
+consuming loop's `mutarraytakefront` advances `start` past the element it
+moves out: it never writes the backing, so it never detaches; the drained
+slots are freed with the header.
 The host round trip carries an array as `mutarrayitems` (an array can be a
 program's result now) and show prints its elements (`<mutable-array [...]>`,
 as a vector's).
@@ -847,8 +856,16 @@ otherwise idle; native times are best of many runs and still vary by up to
   `Rc`-counted backing -- one more allocation per array, the
   representation MutableVector has had since its milestone -- plus the
   HashTable structs. A fixed-length array could keep its backing in one
-  allocation (`Rc<[Value]>`: it never grows); that is a runtime change for
-  a follow-up, not made here.
+  allocation (`Rc<[Value]>`: it never grows); that was left to a
+  follow-up, now made (next paragraph).
+
+**One-allocation backing** (the follow-up: `Rc<VecDeque<Value>>` became
+`Rc<[Value]>` and the header's `start`, 4 and 47). An array is now its
+header and one backing allocation, the backing's counts and slots together,
+for every constructor; a copy allocates its header only, the first write
+through it the detached backing only, and later writes, a bulk copy and a
+consuming loop's step nothing (`mutarray_is_a_header_and_one_backing_allocation`
+in `runtime/ops.rs` counts the allocator calls).
 
 ### 63. Backwards-compatibility findings
 

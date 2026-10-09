@@ -207,6 +207,27 @@ mod tests {
             assert_eq!((state(a), state(b)), (CO_RELEASED, CO_RELEASED));
             assert_eq!(vm.metrics.coroutines.released, 2);
         }
+
+        /// An affine MutableArray a consuming loop left early: its drop
+        /// releases the elements not taken yet, never the one the loop
+        /// took, and leaves the array with none (a second drop releases
+        /// nothing more).
+        #[test]
+        fn a_mutarray_drop_releases_the_elements_left_once() {
+            use crate::runtime::ops::{rt_mutarray_empty, rt_mutarray_from_list, rt_mutarray_take_front};
+            let mut vm = new_vm();
+            let cs: Vec<Value> = (0..3).map(|_| coroutine(&mut vm)).collect();
+            let list = vm.new_list(cs.clone());
+            vm.temp_roots.push(list);
+            let array = rt_mutarray_from_list(&mut *vm, list);
+            vm.temp_roots.push(array);
+            assert_eq!(rt_mutarray_take_front(&mut *vm, array), cs[0]);
+            drop_by(&mut vm, array, "ac");
+            assert_eq!((state(cs[0]), state(cs[1]), state(cs[2])), (CO_FRESH, CO_RELEASED, CO_RELEASED));
+            assert_eq!(rt_mutarray_empty(&mut *vm, array), TRUE);
+            drop_by(&mut vm, array, "ac");
+            assert_eq!(vm.metrics.coroutines.released, 2);
+        }
     }
 
     #[test]

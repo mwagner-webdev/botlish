@@ -263,11 +263,24 @@ impl SetObj {
 /// headers of its logical copies (ops.rs's MutableArray section: the same
 /// header/backing model runtime/mutvec.rs gives a MutableVector). Every slot
 /// is a program value (UNIT at a raw allocation), never uninitialized
-/// memory; the length never changes after construction.
+/// memory; the length never changes after construction, so the backing is
+/// one allocation (its count and its slots: `Rc<[Value]>`), never grown.
+/// The array's elements are the backing's slots from START on: START is 0
+/// but in an array a consuming loop drains (`rt_mutarray_take_front` moves
+/// its first element out by advancing it) or an affine drop emptied. Slots
+/// before START are no element: nothing reads or traces them again.
 #[repr(C)]
 pub struct MutArrayObj {
     pub hdr: Header,
-    pub backing: std::rc::Rc<std::collections::VecDeque<Value>>,
+    pub start: usize,
+    pub backing: std::rc::Rc<[Value]>,
+}
+
+impl MutArrayObj {
+    /// The array's elements, first to last.
+    pub fn items(&self) -> &[Value] {
+        &self.backing[self.start..]
+    }
 }
 
 #[repr(C)]

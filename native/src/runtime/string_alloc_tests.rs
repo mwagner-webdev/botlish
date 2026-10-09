@@ -3,7 +3,8 @@
 //! A counting global allocator (per-thread counters, so parallel tests do not
 //! disturb each other) proves the structural claims: a dynamic String is one
 //! heap allocation and one free, never a block plus a text buffer, for every
-//! producer in the runtime.
+//! producer in the runtime. ops.rs's MutableArray allocation pins measure
+//! with the same counters (`measure`, `counting_vm`).
 
 use super::metrics::{AllocMode, GcReason};
 use super::ops::*;
@@ -43,7 +44,7 @@ unsafe impl GlobalAlloc for Counting {
 static COUNTING: Counting = Counting;
 
 /// (allocator calls, frees, bytes requested) of F on this thread.
-fn measure<R>(f: impl FnOnce() -> R) -> (R, usize, usize, usize) {
+pub(super) fn measure<R>(f: impl FnOnce() -> R) -> (R, usize, usize, usize) {
     let (a0, f0, b0) = (ALLOCS.with(Cell::get), FREES.with(Cell::get), BYTES.with(Cell::get));
     let r = f();
     (r, ALLOCS.with(Cell::get) - a0, FREES.with(Cell::get) - f0, BYTES.with(Cell::get) - b0)
@@ -60,7 +61,7 @@ fn vm() -> Box<Vm> {
 /// attributes to the operation under test. Off before the warm-up, too: a
 /// warm-up whose Strings are collected as it goes never grows the heap's
 /// object list.
-fn counting_vm() -> Box<Vm> {
+pub(super) fn counting_vm() -> Box<Vm> {
     let mut vm = Vm::new(std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new() }), AllocMode::Off);
     vm.heap.set_stress_for_test(false);
     warmed(vm)
