@@ -600,6 +600,11 @@ parameter, an affine enum, a heap-allocated case, scalar replacement
 disabled by an enum field, and the HIR text losing the case set, the enum
 type's identity or a case's enum.
 
+After the last native change (the enum hash no longer copies its names, 47),
+the two native hash mutants were re-pointed at the new lines, keeping their
+rules, and re-run: both killed by the same tests and the same Rust unit test
+(`audit/enums/out/mutate-hash-rerun.txt`).
+
 ### 41. Full regression
 
 On the final tree (160 test files; `tests/enums.test` has 66 tests):
@@ -679,11 +684,68 @@ specialization; `enum-executable-parity` also builds standalone executables.
 
 ### 46. Scalar audit
 
-*Pending: the final run is in progress.*
+`tclsh9.0 native/generate-scalar-audit.tcl` regenerated the committed scalar
+machine-code corpus (`audit/native-scalar-asm/`: the canonical `bench/*.bot`
+programs and every `examples/stdlib/*.bot` program, 39 assembly listings) on
+the final tree: **every listing is byte-identical**. Only the README's
+revision lines (commit, rustc version) differed, and they were not
+committed. No corpus program declares an enum, and an enum-free program's
+NIR has no enum declaration and no enum instruction
+(`enum-free-programs-unchanged`): the feature adds nothing to programs that
+do not use it.
 
 ### 47. Performance
 
-*Pending: the final run is in progress.*
+`tclsh9.0 bench/enums.tcl` (n = 2000 operations per program on the Tcl
+backends, 200 000 natively; best of 5 runs per invocation; the machine
+otherwise idle). Every operation is measured beside the same operation on a
+small Int (and a Bool, for `==`). Single invocations are noisy -- the same
+native program measured 70 ns and 145 ns per operation in two invocations --
+so each cell below is the best over every invocation of the final code: two
+of the whole benchmark for the Tcl backends, three for Cranelift (the whole
+benchmark and two `-backends native` runs after the last native change).
+Whole program per operation, enum / Int; the per-invocation outputs, with
+the per-operation differences over each program's baseline, are in
+`audit/enums/out/bench.txt` and `bench-native-runs.txt`:
+
+| operation | Tcl interp | Tcl compile | Cranelift |
+|---|---:|---:|---:|
+| a case constant / an Int constant (collected) | 23.3 / 23.9 us | 1.55 / 1.55 us | 49.6 / 50.2 ns |
+| copy through two bindings | 478 / 490 us | 13.9 / 15.2 us | 69.4 / 69.7 ns |
+| `==` with a case / an Int / a Bool | 447 / 459 / 201 us | 16.6 / 14.4 / 7.5 us | 69.2 / 72.2 / 69.9 ns |
+| pass and return through a typed function | 471 / 432 us | 14.6 / 16.0 us | 72.3 / 70.3 ns |
+| iterate a List, comparing each element | 486 / 439 us | 17.1 / 16.1 us | 109.8 / 103.4 ns |
+| MutableArray `at` | 76.8 / 76.5 us | 7.65 / 7.45 us | 51.8 / 53.8 ns |
+| MutableArray `set` | 87.5 / 88.1 us | 7.91 / 8.11 us | 57.2 / 61.8 ns |
+| MutableArray `swap` | 86.8 / 85.5 us | 8.81 / 8.16 us | 60.2 / 56.4 ns |
+| MutableVector push then pop | 517 / 498 us | 30.4 / 31.3 us | 82.2 / 77.5 ns |
+| ImmutableSet `contains` (3 members) | 444 / 424 us | 22.8 / 21.4 us | 87.4 / 82.4 ns |
+
+(Every row except the constant and the MutableArray rows includes, per
+operation, a call of `pick`, which chooses a case from `mod(i, 4)` through
+an `if` chain, or of its Int twin: on the Tcl backends most of the cost is
+that call.)
+
+On every backend a case costs what a small Int costs, within the noise of
+the measurement: a case constant is a constant, a copy and a pass are a
+register move (natively) or a shared Tcl value, `==` is one inline compare
+natively (`enumeq`: the List iteration and the comparison both lower to it,
+never to the generic `veq`), and collections hold cases exactly as they hold
+Ints. The one consistent difference is hashing: natively an ImmutableSet
+membership test costs 17-27 ns over its baseline for an enum against 11-13
+ns for an Int (5 ns in the whole-program numbers above), because a case's
+hash reads its enum's identity text and its case name, about 15 bytes, where
+an Int hashes its one or two decimal digits. That is the price of a hash that
+never reads a number (37: reordering cases changes no hash) and that matches
+the Tcl runtime's byte for byte; a first version also copied both names out
+of the enum table on every hash, and was changed to hash them in place.
+
+**Allocations** (Cranelift's counters, N = 200 000): every enum program
+allocates exactly what its Int twin does -- the same number of allocations
+and the same bytes, program by program (the collecting loop's List, the
+array, the vector, the set). A case is never allocated: the programs that
+only make, copy, compare and pass cases allocate the same 3 objects as the
+loop that collects Ints.
 
 ### 48. Remaining limitations
 
@@ -782,8 +844,12 @@ payload-bearing cases.
   `native/src/main.rs` (and `enums: Vec::new()` in the test constructors).
 * Tests: `tests/enums.test`; Rust unit tests in `nir.rs` (`enums_and_enum_*`,
   `malformed_enums_are_rejected`) and `runtime/ops.rs` (`enum_*`).
-* Audit: `audit/enums/tools/{fuzz.tcl,mutate.tcl,mutants.txt}`.
-* Benchmark: `bench/enums.tcl`.
+* Audit: `audit/enums/tools/{fuzz.tcl,mutate.tcl,mutants.txt}`; the runs
+  this report cites in `audit/enums/out/` (the enum fuzzer and mutation
+  runs, `mutate-hash-rerun.txt`, the `regression-*` logs of the affine,
+  coroutine, MutableVector, MutableArray and trait harnesses,
+  `native-coverage.txt`, `bench.txt`, `bench-native-runs.txt`).
+* Benchmark: `bench/enums.tcl`; an example, `examples/surface/15-enums.bot`.
 * Docs: this file, README.md (Values, IR forms, Not implemented, Surface
   syntax, native Values), AGENTS.md (Enums).
 

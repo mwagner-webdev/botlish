@@ -1,0 +1,72 @@
+Enums: performance (n = 2000 operations per program on the Tcl backends, 200000 natively; best of 5 runs)
+
+Backends:
+  Tcl interp  semantic interpreter -- in-process execution
+  Tcl compile Tcl source/codegen backend (not Cranelift) -- in-process execution
+  Cranelift   Cranelift native machine-code backend -- in-process execution, JIT compile time excluded
+
+## Operations
+
+| operation | baseline | Tcl interp | Tcl compile | Cranelift |
+|---|---|---:|---:|---:|
+| case constant (Kind::Car) | loop-base | -5024.0 ns (23346.5 ns) | -298.5 ns (1552.0 ns) | -2.3 ns (49.6 ns) |
+| ... Int constant, for comparison | loop-base | -7999.0 ns (23927.5 ns) | -2338.0 ns (1547.5 ns) | 4.4 ns (55.5 ns) |
+| copy a value through two bindings | pick | 68849.5 ns (522162.5 ns) | 13044.0 ns (26796.5 ns) | -2.6 ns (69.4 ns) |
+| ... an Int, for comparison | ipick | 60840.0 ns (489961.5 ns) | -255.0 ns (15161.5 ns) | 74.2 ns (144.5 ns) |
+| compare with a case (==) | pick | 57314.0 ns (446839.0 ns) | 2890.0 ns (16981.5 ns) | -2.4 ns (73.1 ns) |
+| ... an Int with an Int | ipick | 90782.5 ns (487746.5 ns) | -1178.5 ns (14383.5 ns) | 55.8 ns (124.7 ns) |
+| ... a Bool with true | bpick | 68726.0 ns (230731.5 ns) | 551.5 ns (7849.0 ns) | -27.8 ns (76.2 ns) |
+| pass and return through a typed function | pick | 82911.5 ns (486467.5 ns) | -77.0 ns (14656.0 ns) | -1.5 ns (72.3 ns) |
+| ... an Int, for comparison | ipick | 89664.0 ns (473633.5 ns) | -1562.0 ns (15993.5 ns) | 0.5 ns (70.3 ns) |
+| iterate List[Kind] (compare each element) | list-base | 72312.5 ns (489627.5 ns) | 2926.5 ns (17586.5 ns) | 45.1 ns (114.7 ns) |
+| ... List[int], for comparison | int-list-base | 1550.0 ns (439103.5 ns) | 827.0 ns (16110.0 ns) | 34.4 ns (105.5 ns) |
+| MutableArray[Kind] at | array-base | 76971.0 ns (77696.5 ns) | 7056.5 ns (7647.5 ns) | 84.1 ns (84.6 ns) |
+| MutableArray[Kind] set | array-base | 86512.5 ns (87495.5 ns) | 7153.0 ns (7908.5 ns) | 65.2 ns (65.6 ns) |
+| MutableArray[Kind] swap | array-base | 85940.0 ns (86750.0 ns) | 15865.0 ns (16517.5 ns) | 60.7 ns (61.0 ns) |
+| ... MutableArray[int] at | int-array-base | 75701.5 ns (76480.5 ns) | 6608.5 ns (7453.0 ns) | 53.5 ns (53.8 ns) |
+| ... MutableArray[int] set | int-array-base | 88152.5 ns (89255.5 ns) | 7769.0 ns (8377.0 ns) | 63.1 ns (63.4 ns) |
+| ... MutableArray[int] swap | int-array-base | 86404.0 ns (88020.0 ns) | 9157.5 ns (9715.0 ns) | 56.1 ns (56.4 ns) |
+| MutableVector[Kind] push then pop | vector-base | 547028.0 ns (547833.5 ns) | 29720.0 ns (30390.5 ns) | 82.2 ns (82.2 ns) |
+| ... MutableVector[int] push then pop | int-vector-base | 497697.5 ns (498491.0 ns) | 30716.5 ns (31291.0 ns) | 77.5 ns (77.5 ns) |
+| ImmutableSet[Kind] contains (3 members) | set-base | 23255.0 ns (453807.0 ns) | 10592.0 ns (24763.5 ns) | 17.3 ns (87.4 ns) |
+| ... ImmutableSet[int] contains (3 members) | int-set-base | 49968.0 ns (466653.0 ns) | 5581.0 ns (21350.5 ns) | 10.8 ns (82.4 ns) |
+
+## Native allocations
+
+Heap allocations of each whole program (Cranelift's counters), N = 200000.
+
+| program | allocations | Lists | Structs | MutableArrays | bytes |
+|---|---:|---:|---:|---:|---:|
+| loop-base | 3 | 2 | 0 | 0 | 1600120 |
+| case | 3 | 2 | 0 | 0 | 1600120 |
+| int-const | 3 | 2 | 0 | 0 | 1600120 |
+| pick | 3 | 2 | 0 | 0 | 1600120 |
+| copy | 3 | 2 | 0 | 0 | 1600120 |
+| ipick | 3 | 2 | 0 | 0 | 1600120 |
+| int-copy | 3 | 2 | 0 | 0 | 1600120 |
+| compare | 3 | 2 | 0 | 0 | 1600120 |
+| int-compare | 3 | 2 | 0 | 0 | 1600120 |
+| bpick | 3 | 2 | 0 | 0 | 1600120 |
+| bool-compare | 3 | 2 | 0 | 0 | 1600120 |
+| pass | 3 | 2 | 0 | 0 | 1600120 |
+| int-pass | 3 | 2 | 0 | 0 | 1600120 |
+| list-base | 3 | 2 | 0 | 0 | 1600120 |
+| list-iterate | 6 | 4 | 0 | 0 | 3200240 |
+| int-list-base | 3 | 2 | 0 | 0 | 1600120 |
+| int-list-iterate | 6 | 4 | 0 | 0 | 3200240 |
+| array-base | 1 | 0 | 0 | 1 | 1600016 |
+| array-at | 4 | 2 | 0 | 1 | 3200136 |
+| array-set | 4 | 2 | 0 | 1 | 3200136 |
+| array-swap | 4 | 2 | 0 | 1 | 3200136 |
+| int-array-base | 1 | 0 | 0 | 1 | 1600016 |
+| int-array-at | 4 | 2 | 0 | 1 | 3200136 |
+| int-array-set | 4 | 2 | 0 | 1 | 3200136 |
+| int-array-swap | 4 | 2 | 0 | 1 | 3200136 |
+| vector-base | 2 | 1 | 0 | 0 | 40 |
+| vector-push-pop | 5 | 3 | 0 | 0 | 1600160 |
+| int-vector-base | 2 | 1 | 0 | 0 | 40 |
+| int-vector-push-pop | 5 | 3 | 0 | 0 | 1600160 |
+| set-base | 5 | 3 | 0 | 0 | 1600216 |
+| set-contains | 5 | 3 | 0 | 0 | 1600216 |
+| int-set-base | 5 | 3 | 0 | 0 | 1600216 |
+| int-set-contains | 5 | 3 | 0 | 0 | 1600216 |
