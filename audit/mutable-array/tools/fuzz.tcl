@@ -1140,7 +1140,7 @@ proc AFault {stateVar} {
     set bindings [AArrays $state "" 1]
     if {$arrays ne {}} { lappend kinds at wrongtype }
     if {$bindings ne {}} { lappend kinds erase capture }
-    if {[dict get $state handles] ne {}} { lappend kinds duplicate }
+    lappend kinds duplicate
     if {[dict get $state pools] ne {}} { lappend kinds project }
     switch -- [Pick $kinds] {
         temporary {
@@ -1162,7 +1162,14 @@ proc AFault {stateVar} {
             return AFFINE-ELEMENT-COPY-OUT
         }
         duplicate {
-            Emit state "late = mutable_array::create(2, [Pick [dict keys [dict get $state handles]]])"
+            # A live handle repeated by create (one is made when none is
+            # live: most handles have moved into arrays by now).
+            set handles [dict keys [dict get $state handles]]
+            if {$handles eq {}} {
+                Emit state "dup = make(1)"
+                set handles dup
+            }
+            Emit state "late = mutable_array::create(2, [Pick $handles])"
             return AFFINE-DUPLICATION-UNSUPPORTED
         }
         wrongtype {

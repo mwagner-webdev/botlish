@@ -558,13 +558,82 @@ release counters, optionally GC stress. See the file's header for the
 operation list (it covers every item of the brief's list, nested vectors
 included); every index is `I + zero` with `zero` unknown statically (an
 array's length often is known: a known failure is a compile-time error).
-Results: FUZZ-RESULTS.
+Results (every backend: interpreter, Tcl compiler, `cranelift-generic`,
+`cranelift`; native release counters on):
+
+| seed | programs | accepted | identities checked | disagreements |
+|---|---|---|---|---|
+| 1 | 40 | 25 | 175 | 0 |
+| 2 | 40 | 25 | 168 | 0 |
+| 3 | 40 | 26 | 168 | 0 |
+| 4, `-gc-stress 1` | 25 | 16 | 107 | 0 |
+
+The rejected programs are the injected faults, each with its predicted
+diagnostic (`MUTABLE-PLACE-CAPTURE`, `MUTABLE-PLACE-RECEIVER`,
+`AFFINE-ELEMENT-COPY-OUT`, `USE-AFTER-MOVE`, `AFFINE-CAPTURE-UNSUPPORTED`,
+`TYPE`). While it was being written the fuzzer found the two native drop
+bugs of 23 and 48. The mutation harness (55) then showed it missing four
+copy routes -- a List element read into the driver's own binding, a struct
+field projected out or returned from a struct parameter, and a generic
+body's dynamic copy -- which it now generates.
 
 ### 55. Mutation results
 
 `audit/mutable-array/tools/mutate.tcl` with `mutants.txt` (the brief's list,
 item 57, mapped to this representation; the two with no separate
-non-equivalent mutant are explained in the file). Results: MUTATION-RESULTS.
+non-equivalent mutant are explained in the file).
+
+**31 mutants, 31 killed.** The first run (against the tests of the time)
+killed 28; three survived (`generic-identity-aliases` and its native
+twin, `struct-extraction-aliases`: no test copied an array inside a
+generic body or out of a struct field into a mutated binding), and
+`vector-of-arrays-rejected` was killed by the fuzzer alone (no test wrote
+the nested type). `ma-cow-extraction` and the nested cases of
+`ma-type-syntax` were added; a re-run of those four killed all four by
+tests. Per mutant (first run, plus the re-run for those four):
+
+| mutant | tests failed | fuzz (seed 11) | Rust |
+|---|---|---|---|
+| `copy-aliases-tcl` | 7 (`ma-context-member`, ...) | 4/25 | -- |
+| `param-mutation-leaks` | 3 (`ma-cow-routes`, ...) | 2/25 | -- |
+| `result-aliases-surviving` | 1 (`ma-context-member`) | survived | -- |
+| `generic-identity-aliases` | 1 (`ma-cow-extraction`) | survived | -- |
+| `list-extraction-aliases` | 1 (`ma-cow-routes`) | survived | -- |
+| `struct-extraction-aliases` | 1 (`ma-cow-extraction`) | survived | -- |
+| `context-snapshot-aliases` | 1 (`ma-context-member`) | survived | -- |
+| `array-always-affine` | 16 (`ma-context-member`, ...) | 25/25 | -- |
+| `affine-array-unrestricted` | 13 (`ma-affine-at`, ...) | 12/25 | -- |
+| `nested-affinity-shallow` | 2 (`ma-nested-affine`, `ma-type-affinity`) | 5/25 | -- |
+| `vector-of-arrays-rejected` | 1 (`ma-type-syntax`) | 25/25 | -- |
+| `affine-at-accepted` | 2 (`ma-affine-at`, `ma-roles-audit`) | 2/25 | -- |
+| `swap-duplicates-replacement` | 8 (`ma-affine-swap`, ...) | 25/25 | -- |
+| `failed-swap-keeps-replacement` | 1 (`ma-affine-swap-failure`) | 2/25 | -- |
+| `drop-leaks-elements` | 5 (`ma-affine-swap-failure`, ...) | 8/25 | -- |
+| `drop-order-reversed` | 5 (`ma-affine-swap-failure`, ...) | 7/25 | -- |
+| `loop-aliases-element` | 3 (`ma-consuming-exits`, ...) | 2/25 | -- |
+| `loop-leaks-suffix` | 1 (`ma-consuming-exits`) | 2/25 | -- |
+| `instance-key-erases-affine-array` | 2 (`ma-affine-swap-failure`, `ma-consuming-exits`) | 1/25 | -- |
+| `create-accepts-affine` | 3 (`ma-duplication-generic`, ...) | survived | -- |
+| `signature-ignores-repeat` | 2 (`ma-duplication-generic`, `ma-principal-create-rejects`) | survived | -- |
+| `factory-result-duplicated` | 10 (`ma-affine-swap`, ...) | 10/25 | -- |
+| `factory-failure-leaks` | 1 (`ma-generate-failure`) | 3/25 | -- |
+| `factory-not-dropping-form` | 3 (`ma-generate-failure`, ...) | 3/25 | -- |
+| `virtual-struct-drop-truncated` | 1 (`ma-drop-order`) | 1/25 | -- |
+| `copy-aliases-native` | 8 (`ma-context-member`, ...) | 4/25 | 3 Rust tests |
+| `copy-eager-deep-native` | 2 (`ma-cow-counters`, `ma-principal-copy`) | survived | 2 Rust tests |
+| `generic-identity-aliases-native` | 1 (`ma-cow-extraction`) | survived | survived |
+| `failed-swap-keeps-replacement-native` | 1 (`ma-affine-swap-failure`) | 2/25 | survived |
+| `drop-leaks-elements-native` | 5 (`ma-affine-swap-failure`, ...) | 8/25 | survived |
+| `factory-failure-leaks-native` | 1 (`ma-generate-failure`) | 3/25 | survived |
+
+The fuzz column is the fuzzer as the first run had it (25 programs, seed
+11). What it missed it now generates: the copy routes of 54, and its
+`create`-repeats-a-handle fault (`AFFINE-DUPLICATION-UNSUPPORTED`, which
+kills `create-accepts-affine` and `signature-ignores-repeat`) used to need
+a live handle binding, rare by the time faults are drawn, so no run drew
+it; it makes one now. `copy-eager-deep-native` is a cost, not a value: the
+copy counters of the tests and the Rust tests see it, no program's result
+can.
 
 ### 56. Full regression
 
