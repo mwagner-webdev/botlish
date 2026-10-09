@@ -14,8 +14,9 @@
 # in bindings and in a struct field, Queue {tag, items}). Every operation the
 # milestone names is generated: from_list (and a typed empty constructor),
 # a copy of an unrestricted vector (by a binding, and through functions that
-# return their unmutated parameter, on some path or every path), a move of an
-# affine one, length, empty?,
+# return their unmutated parameter, on some path or every path, typed or
+# generic, bare or in an anonymous struct whose field becomes a place), a
+# move of an affine one, length, empty?,
 # unrestricted at, push, pop, take, swap (also with its affine result
 # discarded), clear, a pass through a function that mutates its parameter
 # and returns it, a function that mutates its parameter and returns only a
@@ -155,6 +156,12 @@ fn either(c: int, v: MutableVector[int]) -> MutableVector[int]:
         return w
     v
 
+fn same(x):
+    x
+
+fn wrap(x):
+    {data: x}
+
 fn find(v: MutableVector[int], t: int) -> int:
     loop x in v:
         if x == t:
@@ -274,7 +281,8 @@ proc Handled {stateVar name call fallback} {
 # ---------------------------------------------------------------------------
 # Unrestricted programs
 #
-# State: places (place -> its sequence), bags (live Bag bindings), mutated
+# State: places (place -> its sequence), frozen (copy sources no operation
+# mutates -> their sequence: USource), bags (live Bag bindings), mutated
 # (vector-owning bindings some operation mutates), lines, observed and
 # expected (the observation bindings and their model values), n.
 
@@ -294,6 +302,37 @@ proc UMutated {stateVar place} {
     dict set state mutated [lindex [split $place .] 0] 1
 }
 
+# Half the time, a push onto the copy PLACE just made (the final contents of
+# every place then show whether the copy shares anything with its source).
+proc UTouch {stateVar place} {
+    upvar 1 $stateVar state
+    if {[Rand 2]} {
+        set x [Rand 10]
+        Emit state "$place.push($x)"
+        dict set state places $place [concat [dict get $state places $place] [list $x]]
+        UMutated state $place
+    }
+}
+
+# The source of a copy operation on place P (sequence SEQ): P itself, or,
+# half the time, a new vector no operation ever mutates (a "frozen" binding,
+# observed at the end). Only an unmutated source can expose a copy the
+# compiler wrongly skipped: a mutated one is a place root, whose every value
+# use is already a copy. Returns {SOURCE SEQUENCE}.
+proc USource {stateVar p seq} {
+    upvar 1 $stateVar state
+    if {[Rand 2]} {
+        return [list $p $seq]
+    }
+    set values {}
+    set count [expr {1 + [Rand 4]}]
+    for {set i 0} {$i < $count} {incr i} { lappend values [Rand 10] }
+    set f [Fresh state f]
+    Emit state "$f = mutable_vector::from_list(\[[join $values {, }]\])"
+    dict set state frozen $f $values
+    return [list $f $values]
+}
+
 proc UOperation {stateVar} {
     upvar 1 $stateVar state
     set places [UPlaces $state]
@@ -301,7 +340,7 @@ proc UOperation {stateVar} {
     if {[llength $places] < 5} { lappend kinds new new }
     if {$places ne {}} {
         lappend kinds copy length empty at at push push push pop pop take take swap swap clear \
-            bump pushlen grow ident either bag loop loop find findfail contents
+            bump pushlen grow ident either same wrap bag loop loop find findfail contents
     }
     if {[dict get $state bags] ne {}} { lappend kinds bagcopy }
     set kind [Pick $kinds]
@@ -322,8 +361,10 @@ proc UOperation {stateVar} {
             }
         }
         copy {
+            lassign [USource state $p $seq] p seq
             set v [UNewVector state $seq]
             Emit state "$v = $p"
+            UTouch state $v
         }
         length { ObserveInt state "$p.length()" $len }
         empty { ObserveInt state "b2i($p.empty?())" [expr {$len == 0}] }
@@ -386,13 +427,32 @@ proc UOperation {stateVar} {
             Emit state "$v = bump($p, $x)"
         }
         ident {
+            lassign [USource state $p $seq] p seq
             set v [UNewVector state $seq]
             Emit state "$v = ident($p)"
+            UTouch state $v
         }
         either {
+            lassign [USource state $p $seq] p seq
             set c [expr {[Rand 3] - 1}]
             set v [UNewVector state [expr {$c > 0 ? {0 1} : $seq}]]
             Emit state "$v = either($c, $p)"
+            UTouch state $v
+        }
+        same {
+            lassign [USource state $p $seq] p seq
+            set v [UNewVector state $seq]
+            Emit state "$v = same($p)"
+            UTouch state $v
+        }
+        wrap {
+            # A generic function's anonymous struct around the vector: a new
+            # place (the struct's field), a copy of P.
+            lassign [USource state $p $seq] p seq
+            set w [Fresh state w]
+            Emit state "$w = wrap($p)"
+            dict set state places $w.data $seq
+            UTouch state $w.data
         }
         pushlen {
             set x [Rand 10]
@@ -491,7 +551,7 @@ proc UFault {stateVar} {
 }
 
 proc UGenerate {} {
-    set state [dict create places {} bags {} mutated {} lines {} observed {} expected {} n 0]
+    set state [dict create places {} frozen {} bags {} mutated {} lines {} observed {} expected {} n 0]
     set count [expr {5 + [Rand 14]}]
     for {set i 0} {$i < $count} {incr i} {
         UOperation state
@@ -500,9 +560,12 @@ proc UGenerate {} {
     if {[Rand 3] == 0} {
         set code [UFault state]
     } else {
-        # The final contents of every place.
+        # The final contents of every place, and of every frozen source.
         foreach p [UPlaces $state] {
             Observe state "contents($p)" [dict get $state places $p]
+        }
+        dict for {f values} [dict get $state frozen] {
+            Observe state "contents($f)" $values
         }
     }
     return [list $state $code]

@@ -21,6 +21,7 @@ primitive affine value the scheduler-shaped programs put in it.
 * [Terminology](#terminology)
 * [The principal program](#the-principal-program)
 * [Representation in one page](#representation-in-one-page)
+* [Relation to the other mutable types](#relation-to-the-other-mutable-types)
 * [Report](#report) -- the 74 points of the milestone report, in order
 * [Files](#files)
 * [What to run when changing this](#what-to-run-when-changing-this)
@@ -137,6 +138,70 @@ milestone), never after the join, where the vector now owns it.
   moves and drops the compiler wrote out; it has no owner, moved bit,
   borrow count, ownership table or affine flag (`mv-runtime-source`).
 
+## Relation to the other mutable types
+
+Botlish had two mutable types before this milestone. `MutableBytes`
+(MUTABLE-BYTES.md) is a value: no update writes published storage, every
+update returns a new value, and copies are independent through every route.
+`MutableArray` (PARAMETERIZED-MUTABLEARRAY.md) is the documented exception,
+with reference semantics: every alias sees a write. MutableVector follows
+MutableBytes' rule -- *mutable storage does not imply reference semantics*
+-- while mutating in place through places. Checked on all four backends
+(the copy routes are MUTABLE-BYTES.md's own list):
+
+| | MutableBytes | MutableArray | MutableVector |
+|---|---|---|---|
+| a copy, then a write to one copy: by binding, parameter, identity function, result beside a surviving copy, List element, struct and copied struct, generic function, generic struct, loop | independent | shared | independent |
+| closure capture | the captured value never changes | sees later writes | a nested function may not refer to a vector its function mutates (`MUTABLE-VECTOR-CAPTURE`); an unmutated one is captured as a value |
+| writing through a non-place (a call's result, a List element) | -- (functional updates) | writes the shared object | `MUTABLE-VECTOR-RECEIVER` |
+| `any` | erased value | erased handle | erased value; it never comes back as a vector (`TYPE`), so it is never written |
+| equality, hashing (`==`, ImmutableSet members) | by contents | `EQUALITY` at run time | `EQUALITY` at run time, MutableArray's rule (brief item 70); an affine vector `AFFINE-EQUALITY-UNSUPPORTED` |
+| element type at a declared boundary | -- | exact (invariant) | exact, as List and ImmutableSet (item 53) |
+| bounds | `IndexNotFound` | `IndexNotFound` | `IndexNotFound` |
+| shown as | -- | `<mutable-array capacity=3>` (an identity) | `<mutable-vector [1, 2, 3]>` (a value) |
+| affine elements | -- (bytes) | rejected: `MutableArray[T]` of an affine `T` is `AFFINE-CONTAINER-UNSUPPORTED` (reads copy elements out, and aliases share them) | owned, moved in and out only by explicit operations |
+
+An affine vector gets exactly the diagnostic an affine List or an affine
+struct gets for the same violation: `USE-AFTER-MOVE` (also for a generic
+function that duplicates it), `AFFINE-NOT-DEFINITELY-LIVE`,
+`AFFINE-CAPTURE-UNSUPPORTED`, `AFFINE-ERASURE-UNSUPPORTED` (also as the
+program's result), `AFFINE-EQUALITY-UNSUPPORTED`,
+`AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE`, and
+`AFFINE-LIST-OPERATION-UNSUPPORTED` for a loop collecting affine values. It
+differs only where the operation does: reading an element is
+`AFFINE-VECTOR-COPY-OUT` for a vector (naming `take`/`pop`/`swap`, which a
+List lacks) where a List says `AFFINE-LIST-OPERATION-UNSUPPORTED`, and a
+loop consumes an affine vector where it rejects an affine List. A
+MutableArray or ImmutableSet of affine vectors is rejected like one of
+coroutines (`AFFINE-CONTAINER-UNSUPPORTED`).
+
+The comparison found three things:
+
+* **Fixed: two copies the compiler skipped.** The generic-function routes
+  aliased: `b = same(a); b.push(9)` changed `a` (and so did
+  `s = wrap(a); s.data.push(9)`), because the fresh-result rule (item 11)
+  read a generic body's `any`-typed result as "holds no vector". Introduced
+  by that rule in this milestone; fixed (`MayHoldVector`), pinned by
+  `mv-cow-generic-results`, by the fuzzer's new generic routes over sources
+  nothing mutates, and by the mutants `fresh-result-imprecise` and
+  `fresh-struct-imprecise`.
+* **Open, predating this milestone: affine values reach a MutableArray
+  through the library's generic `mutable_array::create`.** The written type
+  is rejected, but `mutable_array::create(2, make(1))` compiles: one
+  coroutine stored in two slots, never released, while every later use of
+  the array is `AFFINE-ERASURE-UNSUPPORTED`. A library function is typed
+  from its module signature and gets no per-call semantic instance, so the
+  ownership discipline never checks a generic library body against an
+  affine argument -- the same body written in the program is rejected
+  (`AFFINE-ERASURE-UNSUPPORTED`). Identical on 23dbfd8, before this
+  milestone; it now also admits an affine vector (`create(1, queue)`).
+* **Open: `MutableVector[MutableArray[T]]` cannot be built.** MutableArray's
+  invariance check sees an array element cross `from_list`'s or `push`'s
+  untyped parameter and reports `TYPE` ("cannot erase element contract");
+  `List[MutableArray[T]]` works because the List natives declare where their
+  elements land (`hir::containers::NativeContexts`,
+  `hir::callables::ArgContexts`), which the vector natives do not yet.
+
 ## Report
 
 ### 1. `MutableVector[T]` source grammar
@@ -241,8 +306,9 @@ never on HIR rebuilt from Core IR) writes out:
   a local's bound value, a parameter on entry (renamed: `v#entry`, and `v`
   becomes a local bound by its share), a loop variable per iteration, a
   context installation's value. *Fresh* is a `from_list` result, a share, a
-  struct literal of fresh fields, or a call of a function whose every result
-  is fresh;
+  struct literal of fresh fields (a field whose type may hold a vector --
+  `any`, a generic position -- must be fresh too), or a call of a function
+  whose every result is fresh;
 * **results** -- a function's result (its final value, a `return`'s value,
   through `if` branches) that is a place path of its own (not a context
   parameter's) moves the header out instead of sharing it: the place dies
@@ -250,7 +316,11 @@ never on HIR rebuilt from Core IR) writes out:
   function that builds a vector in a local and returns it is fresh, and its
   caller's place takes the header without a copy (`mv-cow-fresh-results`);
   a function that may return a vector some other place holds (an unmutated
-  parameter, on any path) is not, and its caller copies.
+  parameter, on any path) is not, and its caller copies. Nor is one whose
+  result's own type is too imprecise to tell -- a generic function's body
+  is typed with `any`-like parameters, so `fn same(x): x` and
+  `fn wrap(x): {data: x}` may return the vector they were given
+  (`hir::mutvec::MayHoldVector`, `mv-cow-generic-results`).
 
 A nested function may not refer to a place root (`MUTABLE-VECTOR-CAPTURE`):
 it would observe a binding that changes. Bindings stay immutable names: no
@@ -522,9 +592,15 @@ us at 100 000).
 
 ### 53. HIR type
 
-`{mutvec ELEM}`; subtyping is covariant in the element (sound: a vector is
-a value, and an element pushed is checked against the receiver's *static*
-element type, item 20); `lub` of two vectors is the vector of the lub;
+`{mutvec ELEM}`. A vector crosses a declared boundary (a parameter, a
+field, a result) only with exactly the declared element type, the
+convention of List and ImmutableSet (`hir::range::AggregateAdmits`): only
+the proven-empty `MutableVector[never]` is admitted for any element type.
+So `MutableVector[int]` is not a `MutableVector[any]` argument -- in
+practice the vector is invariant, like MutableArray. (The internal
+`subtype` relation, used for joins and inference, relates element types
+covariantly; that is sound for a value, but no program can use it to widen
+a vector it then mutates.) `lub` of two vectors is the vector of the lub;
 narrowing keeps the declared element type (so a callee's instance keeps
 its `MutableVector[Coroutine{...}]` contract); `MutableVector[never]`'s
 element reads are typed `any` (HIR rebuilt from Core IR sees only
@@ -993,6 +1069,9 @@ front removal is O(1): the future test runner can keep either discipline.
   for a long queue); natively every queue operation is O(1) amortized
   except `take(i)`'s shift.
 * **Native coroutines** remain x86-64 Linux only (COROUTINES.md).
+* **No vector of MutableArrays**, and affine values can still reach a
+  MutableArray through the library's generic `create` (both under
+  "Relation to the other mutable types").
 * **What enums and the test framework still need**: a `TestEvent` with
   several cases (enums/tagged unions), payload-bearing failures, and
   `compiler::assert_compiles` -- all non-goals here (item 100).

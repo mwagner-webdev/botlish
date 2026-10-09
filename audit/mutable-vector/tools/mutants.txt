@@ -132,6 +132,22 @@
                 if {$path ne ""} continue
 >>>>
 
+@@ fresh-result-imprecise a function result of an imprecise type (a generic function's `any`-like parameter) counts as fresh: `same(a)` enters the caller's place without a copy
+## hir/mutvec.tcl
+<<<<
+                if {[Fresh $hir $x] || ([ShareDescriptor $type] eq "" && ![MayHoldVector $type])} continue
+====
+                if {[Fresh $hir $x] || [ShareDescriptor $type] eq ""} continue
+>>>>
+
+@@ fresh-struct-imprecise a struct literal whose field has an imprecise type counts as fresh: a generic `{data: x}` around a caller's vector enters the caller's place without a copy
+## hir/mutvec.tcl
+<<<<
+                if {([ShareDescriptor $type] ne "" || [MayHoldVector $type]) && ![Fresh $hir $f]} {
+====
+                if {[ShareDescriptor $type] ne "" && ![Fresh $hir $f]} {
+>>>>
+
 @@ result-move-context a function's result moves a context member's header out like its own place's: the snapshot it returns aliases the installed member
 ## hir/mutvec.tcl
 <<<<

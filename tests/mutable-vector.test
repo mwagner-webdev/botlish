@@ -493,6 +493,12 @@ test mv-cow-fresh-results {item 39: a function's result moves its own place's he
     }
 } -cleanup {unset -nocomplain pre text mv} -result {{{value 6} 0 0 0} {{value {[3, 4]}} 1 1 3} {{value {[3, 5]}} 1 1 3} {{value {[3, 4, 3]}} 2 2 5}}
 
+test mv-cow-generic-results {item 39: a generic function's own body is typed imprecisely (its parameter is any-like), so returning its argument -- bare, or in an anonymous struct -- may return a vector some other place holds: its result is never fresh, and the caller's place copies it on entry; the argument never changes} -body {
+    set pre "import mutable_vector\nfn v3() -> MutableVector\[int\]:\n    mutable_vector::from_list(\[1, 2, 3\])\nfn same(x):\n    x\nfn wrap(x):\n    {data: x}\n"
+    list [mvAgree "${pre}a = v3()\nb = same(a)\nb.push(9)\n\[a.length(), b.length()\]\n"] \
+        [mvAgree "${pre}fn f() -> List\[int\]:\n    a = v3()\n    s = wrap(a)\n    s.data.push(9)\n    \[a.length(), s.data.length()\]\nf()\n"]
+} -cleanup {unset -nocomplain pre} -result {{value {[3, 4]}} {value {[3, 4]}}}
+
 test mv-cow-gc-stress {items 64, 67, 94: heap values reachable only through vector elements survive collections at every allocation; copies stay valid and independent while either is mutated, collected and read} -constraints linuxX86_64 -body {
     set text "import mutable_vector\nimport str\nfn f() -> List\[str\] errors IndexNotFound:\n    a = mutable_vector::from_list(\[str::concat(\"x\", \"1\"), str::concat(\"y\", \"2\")\])\n    b = a\n    a.push(str::concat(\"z\", \"3\"))\n    junk = loop i from 0 to 50:\n        str::concat(\"j\", \"k\")\n    s = b.swap(0, str::concat(\"w\", \"4\"))\n    t = a.take(0)\n    \[a.at(0), a.at(1), b.at(0), b.at(1), s, t\]\nr = f():\n    on IndexNotFound:\n        \[\]\nr\n"
     list [mvAgree $text] [withGcStress {lrange [outcomeUnderHir cranelift [surface::compile $text -warnings off]] 0 1}]

@@ -392,7 +392,8 @@ proc hir::mutvec::Fresh {hir e} {
         }
         struct {
             foreach f [dict get $node fields] {
-                if {[ShareDescriptor [hir::typeOf $hir $f]] ne "" && ![Fresh $hir $f]} {
+                set type [hir::typeOf $hir $f]
+                if {([ShareDescriptor $type] ne "" || [MayHoldVector $type]) && ![Fresh $hir $f]} {
                     return 0
                 }
             }
@@ -494,10 +495,46 @@ proc hir::mutvec::Results {hir f} {
     return $results
 }
 
-# The function blocks of BLOCKS whose every result (Results) carries no
-# vector, or is fresh: a new vector, a share, a struct literal of fresh
-# fields, a call of such a function, or a place path from a place root
-# (ROOTSET) of the function's own -- moved out, not shared (OwnResult). The
+# 1 if a value of static TYPE may be, or hold in a struct field, a
+# MutableVector header: TYPE is one, or is imprecise where one could be --
+# `any`, an untyped (generic) position, a trait view, a struct field of such
+# a type. A generic function's own body is typed this way (its instances
+# are not), so `fn same(x): x` may return the vector it was given. A List,
+# set or array element, a Result payload or a callable is never a place
+# (extracting one into a place is an entry, which copies): those do not
+# count.
+proc hir::mutvec::MayHoldVector {type {seen {}}} {
+    if {[hir::types::IsStruct $type]} {
+        foreach {name t} [lindex $type 1] {
+            if {[MayHoldVector $t $seen]} {
+                return 1
+            }
+        }
+        return 0
+    }
+    if {[hir::types::IsNamedStruct $type]} {
+        set id [lindex $type 1]
+        if {$id in $seen} {
+            return 0
+        }
+        foreach {name t} [hir::structs::fieldTypes $id] {
+            if {[MayHoldVector $t [concat $seen [list $id]]]} {
+                return 1
+            }
+        }
+        return 0
+    }
+    if {[hir::types::IsMutVec $type]} {
+        return 1
+    }
+    return [expr {[lindex $type 0] ni {int str bool unit UnicodeChar never list immutableSet mutarray block native fn coroutine result}}]
+}
+
+# The function blocks of BLOCKS whose every result (Results) cannot hold a
+# vector (MayHoldVector), or is fresh: a new vector, a share, a struct
+# literal of fresh fields, a call of such a function, or a place path from a
+# place root (ROOTSET) of the function's own -- moved out, not shared
+# (OwnResult). The
 # greatest such set: a recursive call is fresh when every result of the
 # recursion is (each value it can return traces back to a fresh one).
 proc hir::mutvec::FreshFunctions {hir parent blocks rootSet} {
@@ -511,7 +548,8 @@ proc hir::mutvec::FreshFunctions {hir parent blocks rootSet} {
         set changed 0
         dict for {f results} $freshFunctions {
             foreach x $results {
-                if {[ShareDescriptor [hir::typeOf $hir $x]] eq "" || [Fresh $hir $x]} continue
+                set type [hir::typeOf $hir $x]
+                if {[Fresh $hir $x] || ([ShareDescriptor $type] eq "" && ![MayHoldVector $type])} continue
                 set path [expr {[dict get $hir exprs $x kind] in {ref project} ? [Path $hir $x] : ""}]
                 if {$path ne "" && [dict exists $rootSet [lindex $path 0]] && [OwnResult $hir $parent $x [lindex $path 0]]} continue
                 dict unset freshFunctions $f
