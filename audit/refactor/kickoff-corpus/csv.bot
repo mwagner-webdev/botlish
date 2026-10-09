@@ -1,0 +1,97 @@
+# CSV parsing, written in Botlish over the string and list primitives.
+#
+# csv_parse(text) returns a list of records, each a list of field strings.
+# The input is assumed to be valid CSV of this subset:
+#
+#   * records are separated by "\n"; a final "\n" ends the last record
+#     rather than starting an empty one
+#   * fields are separated by ","
+#   * a field that starts with a quote is quoted: it ends at the next single
+#     quote, "" inside it stands for one quote, and it may contain commas
+#     and newlines. A quoted field is followed by ",", "\n" or the end.
+#   * any other field is unquoted: it runs to the next "," or "\n"
+#   * an empty line is a record with one empty field
+#
+# Not supported: "\r\n" line endings (the "\r" stays in the last field),
+# whitespace trimming, other delimiters, and diagnostics for invalid input.
+#
+# Scanning a field is a recursive state machine over character positions;
+# a field scan hands back two things, the field and where scanning stopped,
+# as an anonymous struct {field, index}, and a record scan the record's fields
+# and where it stopped as {fields, stop}. Fields and records are built by appending to
+# immutable lists, and a quoted field grows one character at a time.
+#
+# expect: [["name", "age"], ["Alice", "30"], ["Bob", "40"]]
+
+import list
+import str
+
+# The character at index, or "" past the end.
+fn peek(text, index) errors LowerUnderrun:
+    if index >= str::length(text):
+        return ""
+
+    str::substring(text, index, index + 1)
+
+# An unquoted field that started at start, scanned up to index:
+# {field, index of the "," or "\n" that ends it, or the end}.
+fn scan_unquoted(text, start, index) errors LowerUnderrun, UpperOverrun:
+    character = peek(text, index)
+    if character == "" or character == "," or character == "\n":
+        return {field: str::substring(text, start, index), index: index}
+
+    scan_unquoted(text, start, index + 1)
+
+# A quoted field whose decoded content so far is field, scanned from index
+# (inside the quotes): {field, index just after the closing quote}.
+fn scan_quoted(text, index, field) errors LowerUnderrun:
+    character = peek(text, index)
+    if character == "\"":
+        if peek(text, index + 1) == "\"":
+            return scan_quoted(text, index + 2, str::concat(field, "\""))
+
+        return {field: field, index: index + 1}
+
+    scan_quoted(text, index + 1, str::concat(field, character))
+
+# The field starting at index: {field, index just after it}.
+fn scan_field(text, index) errors LowerUnderrun, UpperOverrun:
+    if peek(text, index) == "\"":
+        return scan_quoted(text, index + 1, "")
+
+    scan_unquoted(text, index, index)
+
+# The rest of the record whose fields so far are fields, from index:
+# {fields, stop: index just after the record's "\n", or the end}.
+fn scan_record(text, index, fields) errors LowerUnderrun, UpperOverrun:
+    scanned = scan_field(text, index)
+    more = list::append(fields, scanned.field)
+    stop = scanned.index
+    delimiter = peek(text, stop)
+    if delimiter == ",":
+        return scan_record(text, stop + 1, more)
+
+    if delimiter == "\n":
+        return {fields: more, stop: stop + 1}
+
+    {fields: more, stop: stop}
+
+# The records from index on, appended to records.
+fn scan_records(text, index, records) errors LowerUnderrun, UpperOverrun:
+    if index >= str::length(text):
+        return records
+
+    scanned = scan_record(text, index, [])
+    scan_records(text, scanned.stop, list::append(records, scanned.fields))
+
+fn csv_parse(text) errors LowerUnderrun, UpperOverrun:
+    scan_records(text, 0, [])
+
+# The sample's input is well formed, so none of its slices is ever out of
+# range; the handlers state what a malformed scan would mean.
+parsed = csv_parse("name,age\nAlice,30\nBob,40\n"):
+    on LowerUnderrun:
+        []
+    on UpperOverrun:
+        []
+parsed

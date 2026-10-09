@@ -1,0 +1,156 @@
+# CSV parsing, identical to csv.bot's algorithm and result, except that both
+# levels of list construction (fields within a record, records within the
+# result) use a ChunkedBuilder over MutableArray instead of repeated
+# list::append. See csv_geometric.bot for the GeometricBuilder comparison
+# point and bench/corpus.tcl's csv/csv_geometric/csv_chunked cases.
+#
+# ChunkedBuilder: fixed-size MutableArray chunks, appended into without ever
+# copying earlier chunks (unlike GeometricBuilder, which copies every prior
+# element on every growth step). A builder is a ChunkedBuilder struct value:
+# completed is an ordinary persistent List of full MutableArray chunks
+# (list::append there copies only the *chunk handles* seen so far, not their
+# elements -- see the file-level note below on why that is a deliberately
+# minor, not eliminated, quadratic term), current the chunk being filled, and
+# filled its count, a one-slot MutableArray so that an append updates the
+# builder's own arrays in place and returns the same builder (the HashTable's
+# counts, hashtable.bot) instead of rebuilding the struct. Finalization
+# flattens once: every chunk's elements are bulk-copied
+# (mutable_array::copy) into one exact-size MutableArray, then frozen to a
+# List, so total element movement is still O(n), just with different
+# constants than GeometricBuilder's.
+#
+# A MutableArray is a value (MUTABLE-ARRAY.md): every function below that
+# fills an array returns it, and a builder passed to chunked_append at its
+# last use is updated without a copy (hir/mutvec.tcl, "Last uses and consumed
+# parameters"). (Before MutableArray became a value, the state was a
+# positional List [completed, current, filled] whose current chunk every
+# alias wrote, and chunked_copy_chunks filled its caller's array through its
+# parameter.)
+#
+# expect: [["name", "age"], ["Alice", "30"], ["Bob", "40"]]
+
+import list
+import mutable_array
+import str
+
+fn chunk_size():
+    64
+
+# The builder is a struct whose arrays are field places (an append mutates
+# them in place; MUTABLE-ARRAY.md). Its functions declare the parameter's
+# type: native code compiles a field projection to a known slot, so an
+# untyped `builder.filled` would compile only specialized.
+struct ChunkedBuilder:
+    completed: list
+    current: mutarray
+    filled: MutableArray[int]
+
+fn chunked_new():
+    ChunkedBuilder {completed: [], current: mutable_array::allocate(chunk_size()), filled: mutable_array::create(1, 0)}
+
+# BUILDER with VALUE appended: writes into the current chunk's next free
+# slot, or -- when the current chunk is full -- files it away in completed
+# (persistent list::append: see the file-level note; this never copies a
+# chunk's *elements*, only prior chunk handles) and starts a fresh chunk.
+fn chunked_append(builder: ChunkedBuilder, value) errors IndexNotFound:
+    filled = mutable_array::at(builder.filled, 0)
+    if filled == chunk_size():
+        fresh = mutable_array::allocate(chunk_size())
+        mutable_array::set(fresh, 0, value)
+        return ChunkedBuilder {completed: list::append(builder.completed, builder.current), current: fresh, filled: mutable_array::create(1, 1)}
+
+    mutable_array::set(builder.current, filled, value)
+    mutable_array::set(builder.filled, 0, filled + 1)
+    builder
+
+# FINAL with each of CHUNKS[INDEX..) (all full, chunk_size() elements)
+# bulk-copied into it from OFFSET on.
+fn chunked_copy_chunks(chunks, index, final, offset) errors IndexNotFound, LowerUnderrun, UpperOverrun:
+    if index >= list::length(chunks):
+        return final
+
+    chunk = list::at(chunks, index)
+    mutable_array::copy(final, offset, chunk, 0, chunk_size())
+    chunked_copy_chunks(chunks, index + 1, final, offset + chunk_size())
+
+# BUILDER's elements as an ordinary immutable List: one exact-size
+# MutableArray, filled by bulk-copying every completed chunk followed by the
+# current chunk's filled prefix, then frozen.
+fn chunked_finish(builder: ChunkedBuilder) errors IndexNotFound, LowerUnderrun, UpperOverrun:
+    filled = mutable_array::at(builder.filled, 0)
+    offset = list::length(builder.completed) * chunk_size()
+    total = offset + filled
+    final = chunked_copy_chunks(builder.completed, 0, mutable_array::allocate(total), 0)
+    mutable_array::copy(final, offset, builder.current, 0, filled)
+    mutable_array::freeze(final, total)
+
+# ---------------------------------------------------------------------------
+# CSV parsing (see csv.bot for the algorithm's description; unchanged here
+# except that FIELDS and RECORDS are ChunkedBuilder states, finalized with
+# chunked_finish wherever the persistent version returned a completed List).
+
+fn peek(text, index) errors LowerUnderrun:
+    if index >= str::length(text):
+        return ""
+
+    str::substring(text, index, index + 1)
+
+fn scan_unquoted(text, start, index) errors LowerUnderrun, UpperOverrun:
+    character = peek(text, index)
+    if character == "" or character == "," or character == "\n":
+        return {field: str::substring(text, start, index), index: index}
+
+    scan_unquoted(text, start, index + 1)
+
+fn scan_quoted(text, index, field) errors LowerUnderrun:
+    character = peek(text, index)
+    if character == "\"":
+        if peek(text, index + 1) == "\"":
+            return scan_quoted(text, index + 2, str::concat(field, "\""))
+
+        return {field: field, index: index + 1}
+
+    scan_quoted(text, index + 1, str::concat(field, character))
+
+fn scan_field(text, index) errors LowerUnderrun, UpperOverrun:
+    if peek(text, index) == "\"":
+        return scan_quoted(text, index + 1, "")
+
+    scan_unquoted(text, index, index)
+
+fn scan_record(text, index, fields) errors IndexNotFound, LowerUnderrun, UpperOverrun:
+    scanned = scan_field(text, index)
+    more = chunked_append(fields, scanned.field)
+    stop = scanned.index
+    delimiter = peek(text, stop)
+    if delimiter == ",":
+        return scan_record(text, stop + 1, more)
+
+    if delimiter == "\n":
+        return {fields: chunked_finish(more), stop: stop + 1}
+
+    {fields: chunked_finish(more), stop: stop}
+
+fn scan_records(text, index, records) errors IndexNotFound, LowerUnderrun, UpperOverrun:
+    if index >= str::length(text):
+        return chunked_finish(records)
+
+    scanned = scan_record(text, index, chunked_new())
+    scan_records(text, scanned.stop, chunked_append(records, scanned.fields))
+
+fn csv_parse(text) errors IndexNotFound, LowerUnderrun, UpperOverrun:
+    scan_records(text, 0, chunked_new())
+
+# A ChunkedBuilder's count is read with mutable_array::at and its chunks with
+# list::at, so every builder function declares IndexNotFound (a malformed
+# state), and the scanners declare LowerUnderrun/UpperOverrun (a slice they
+# cannot prove in range); csv_parse's own states and slices are always well
+# formed, and its caller says what a broken one would mean.
+parsed = csv_parse("name,age\nAlice,30\nBob,40\n"):
+    on IndexNotFound:
+        []
+    on LowerUnderrun:
+        []
+    on UpperOverrun:
+        []
+parsed

@@ -1,0 +1,55 @@
+# Integer matrix multiplication, written in Botlish over the list
+# primitives.
+#
+# A matrix is a list of rows, each a list of Ints. matmul(a, b) multiplies
+# an n x m matrix a by an m x p matrix b and returns the n x p product. The
+# inputs are assumed to be rectangular with compatible, non-zero dimensions
+# (an empty a gives []). Entries are ordinary Ints: arbitrary precision,
+# never wrapped to a machine word.
+#
+# Each of the three loops is a recursive function that carries its index
+# and the part of the result built so far. Rows and matrices grow by
+# list::append, which copies, and every entry is read with list::at, whose
+# result has no static kind. list::at fails with IndexNotFound for an index
+# that designates no element, which is exactly what incompatible or ragged
+# dimensions produce, so every function here declares it and the caller
+# decides what a malformed input means.
+#
+# expect: [[58, 64], [139, 154]]
+
+import list
+
+# The sum of a_row[k] * b[k][column] for k from k to count - 1, plus total.
+fn dot(a_row, b, column, k, count, total) errors IndexNotFound:
+    if k == count:
+        return total
+
+    term = list::at(a_row, k) * list::at(list::at(b, k), column)
+    dot(a_row, b, column, k + 1, count, total + term)
+
+# The product row for a_row, from column on, appended to row.
+fn product_row(a_row, b, column, columns, row) errors IndexNotFound:
+    if column == columns:
+        return row
+
+    entry = dot(a_row, b, column, 0, list::length(a_row), 0)
+    product_row(a_row, b, column + 1, columns, list::append(row, entry))
+
+# The product rows for the rows of a from i on, appended to rows.
+fn product_rows(a, b, i, columns, rows) errors IndexNotFound:
+    if i == list::length(a):
+        return rows
+
+    row = product_row(list::at(a, i), b, 0, columns, [])
+    product_rows(a, b, i + 1, columns, list::append(rows, row))
+
+fn matmul(a, b) errors IndexNotFound:
+    if list::length(a) == 0:
+        return []
+
+    product_rows(a, b, 0, list::length(list::at(b, 0)), [])
+
+product = matmul([[1, 2, 3], [4, 5, 6]], [[7, 8], [9, 10], [11, 12]]):
+    on IndexNotFound:
+        []
+product

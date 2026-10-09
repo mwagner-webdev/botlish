@@ -1,0 +1,42 @@
+# SAME-FAILURE corpus audit: tclsh9.0 audit/same-failure/tools/corpus.tcl
+# commit 6e3f9f70e2e1c51fd28682b8f8ca349f836d4638 (corpus paths clean)
+
+compiled 35 of 40 programs
+  not compiled: examples/surface/09-mutual-recursion.bot (CORE SEMANTIC UNBOUND) -- a deliberate rejection
+  not compiled: examples/surface/10-duplicate-binding.bot (CORE SEMANTIC DUPLICATE) -- a deliberate rejection
+  not compiled: lib/io.bot (CORE SEMANTIC CONTEXT-FUNCTION-VALUE)
+  not compiled: lib/list.bot (SURFACE MODULE MISSING-IMPORT)
+  not compiled: lib/mutable_array.bot (SURFACE MODULE MISSING-IMPORT)
+
+## Findings: 1 distinct
+1. lib/abi/bytes.bot:141:9: `abi::bytes::replace`: failure `IndexNotFound` from 2 exits (first seen compiling lib/linux.bot)
+     lib/abi/bytes.bot:141:9: fail IndexNotFound
+     lib/abi/bytes.bot:143:9: fail IndexNotFound
+     HAND: combine -- the two halves of one bounds check (`index < 0`, `index >= count`), written as an if/elif pair that fails the same IndexNotFound; the failure itself is uniform by design (the header: "the same error list::at and mutable_array::set use"), so a split is not a candidate: the natural responses are merging the guards into one `or` condition or keeping the two-line form
+
+## Categories
+  combine: 1
+  uniform: 0
+  split: 0
+  false positives: 0 by construction of the table (an unclassified finding fails the tool: 0 unclassified)
+
+## Fail census (functions with at least one structurally reachable fail of a declared failure)
+  functions: 15 (2 with a single fail site); reachable fail sites: 28; re-raises: 0
+  near misses -- two or more fail sites, every one a DISTINCT failure (never a finding): 12
+     lib/abi.bot:193: `i8`: AbiIntegerAboveRange, AbiIntegerBelowRange
+     lib/abi.bot:201: `i16`: AbiIntegerAboveRange, AbiIntegerBelowRange
+     lib/abi.bot:209: `i32`: AbiIntegerAboveRange, AbiIntegerBelowRange
+     lib/abi.bot:217: `i64`: AbiIntegerAboveRange, AbiIntegerBelowRange
+     lib/abi.bot:225: `u8`: AbiIntegerAboveRange, AbiIntegerBelowRange
+     lib/abi.bot:233: `u16`: AbiIntegerAboveRange, AbiIntegerBelowRange
+     lib/abi.bot:241: `u32`: AbiIntegerAboveRange, AbiIntegerBelowRange
+     lib/abi.bot:249: `u64`: AbiIntegerAboveRange, AbiIntegerBelowRange
+     lib/abi.bot:258: `isize`: AbiIntegerAboveRange, AbiIntegerBelowRange
+     lib/abi.bot:266: `usize`: AbiIntegerAboveRange, AbiIntegerBelowRange
+     lib/abi/x86_64.bot:79: `abi::x86_64::register64`: Register64AboveRange, Register64BelowRange
+     lib/byte.bot:151: `byte::from_int`: AboveRange, BelowRange
+
+## Merge check (scratch copy of the library; the corpus is not edited)
+  lib/abi/bytes.bot: original probe: 1 SAME-FAILURE finding(s), value [[], [3, false], [3, false], [], [], [], [3, true]]
+  lib/abi/bytes.bot: merged copy:    0 SAME-FAILURE finding(s), value [[], [3, false], [3, false], [], [], [], [3, true]]
+  lib/abi/bytes.bot: merge holds (compiles, finding gone, same value)

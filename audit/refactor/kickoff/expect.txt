@@ -1,0 +1,32 @@
+# tclsh9.0 audit/refactor/tools/expect.tcl at 6e3f9f7
+ok    examples/stdlib/ai_text_clean.bot: ["hello", "hello  world", "AI-generated", "\"hello\"", "'hello'", "wait... what?"]
+ok    examples/stdlib/csv.bot: [["name", "age"], ["Alice", "30"], ["Bob", "40"]]
+ok    examples/stdlib/csv_chunked.bot: [["name", "age"], ["Alice", "30"], ["Bob", "40"]]
+ok    examples/stdlib/csv_geometric.bot: [["name", "age"], ["Alice", "30"], ["Bob", "40"]]
+ok    examples/stdlib/csv_records.bot: [2, "Alice", "31", "Berlin", "Bob", "Hamburg", true]
+ok    examples/stdlib/hashtable.bot: [true, true, false, false, true, 1]
+ok    examples/stdlib/matmul.bot: [[58, 64], [139, 154]]
+ok    examples/stdlib/string_replace.bot: ["abc", "aXc", "bb", "", ""]
+ok    examples/stdlib/string_reverse.bot: ["", "a", "cba", "dcba", "üöä"]
+ok    examples/surface/01-arithmetic.bot: 50
+ok    examples/surface/02-recursion.bot: 55
+ok    examples/surface/03-closure.bot: 42
+ok    examples/surface/04-branch-value.bot: 20
+ok    examples/surface/05-shadowing.bot: 1
+ok    examples/surface/06-list.bot: [1, 2, 3]
+ok    examples/surface/07-loop-break.bot: unit
+ok    examples/surface/08-return.bot: [7, 0, 3]
+ok    examples/surface/11-boolean-operators.bot: [true, false, true, true]
+ok    examples/surface/12-if-value.bot: ["negative", "zero", "positive"]
+ok    examples/surface/13-hygiene.bot: [[1, 2], 3]
+ok    examples/surface/14-modules.bot: [42, 2]
+ok    examples/refinement/refined-strings.bot: [12, "a%26b%3Dc", "a%2", true]
+ok    examples/abi/numeric-domains.bot: [255, "above", 256, [-1, -1], true, 18446744073709551615]
+ok    bench/fib.bot: 17711
+ok    bench/lex-strategy.bot: [58, 65, 1, "café"]
+ok    bench/loop-count.bot: 3500
+ok    bench/refined-checks.bot: [400, 0]
+ok    bench/source-checks.bot: [16, 5, "2fast", 11]
+ok    bench/sum-refined.bot: 80200
+ok    bench/test-selection.bot: [3, 1, "resolve-tests", true, true]
+programs with an expect line: 30; mismatches: 0

@@ -1,0 +1,26 @@
+# PROVES-NAMING corpus audit: tclsh9.0 audit/proves-naming/tools/corpus.tcl
+# commit 6e3f9f70e2e1c51fd28682b8f8ca349f836d4638 (corpus paths clean)
+
+compiled 36 of 41 programs
+  not compiled: examples/surface/09-mutual-recursion.bot (CORE SEMANTIC UNBOUND) -- a deliberate rejection
+  not compiled: examples/surface/10-duplicate-binding.bot (CORE SEMANTIC DUPLICATE) -- a deliberate rejection
+  not compiled: lib/io.bot (CORE SEMANTIC CONTEXT-FUNCTION-VALUE)
+  not compiled: lib/list.bot (SURFACE MODULE MISSING-IMPORT)
+  not compiled: lib/mutable_array.bot (SURFACE MODULE MISSING-IMPORT)
+
+## Findings: 0 distinct
+
+## Categories
+  rename: 0
+  bare-validate: 0
+  collision: 0
+  false positives: 0 by construction of the table (an unclassified finding fails the tool: 0 unclassified)
+
+## Census of proves-fitted functions (each declaration once; read from the HIR and its declaration line)
+  lib/web.bot:107:1: `emailish?`: 1 ordinary parameter(s), -> bool: predicate, name conforms (first seen compiling examples/refinement/refined-strings.bot)
+  lib/web.bot:230:1: `uri_query_value?`: 1 ordinary parameter(s), -> bool: predicate, name conforms (first seen compiling examples/refinement/refined-strings.bot)
+  total: 2 proves-fitted function(s): 2 predicate conforming
+  census and findings agree: yes
+
+## Rename check (scratch copy of the library; the corpus is not edited)
+  no finding to rename

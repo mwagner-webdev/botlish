@@ -1,0 +1,173 @@
+# CSV parsing, identical to csv.bot's algorithm and result, except that both
+# levels of list construction (fields within a record, records within the
+# result) use a GeometricBuilder over MutableArray instead of repeated
+# list::append. csv.bot's persistent-list version is kept unchanged as the
+# quadratic-copying baseline (see bench/corpus.tcl's csv/csv_geometric/
+# csv_chunked cases); this file exists to compare construction strategies on
+# the identical parsing algorithm.
+#
+# GeometricBuilder: a contiguous, geometrically-growing mutable array,
+# built entirely from the MutableArray substrate (mutable_array::create/
+# mutable_array::capacity/::set/::copy/::freeze) -- ordinary Botlish, not a
+# compiler or runtime primitive. A builder's state is two separate values,
+# STORAGE (a typed MutableArray[T], created from a real element) and LENGTH
+# (how many of its slots are in use), threaded through the parsing functions
+# side by side rather than packed into one List; growth policy (capacity
+# doubles, or length + 1 if that still isn't enough) lives entirely here,
+# not in the runtime. Every builder function is ordinary untyped source: the
+# element type T is recovered per call from the value appended.
+#
+# expect: [["name", "age"], ["Alice", "30"], ["Bob", "40"]]
+
+import mutable_array
+import str
+
+# A builder holding exactly FIRST: a capacity-1 array (every slot holds
+# FIRST, so slot 0 is already the first element) and, for the caller to keep,
+# length 1. Starting from a real element is what gives the storage its
+# element type without a placeholder value; a builder with no elements at
+# all does not exist (callers with a possibly empty result handle that case
+# themselves).
+fn geo_new(first):
+    mutable_array::create(1, first)
+
+# The capacity a builder holding LENGTH elements should grow CAPACITY to, to
+# fit one more: double, or exactly enough if doubling still isn't enough
+# (starting from capacity 0). This is the one place the growth policy is
+# decided; MutableArray itself has no notion of growing.
+fn geo_new_capacity(capacity, length):
+    doubled = capacity * 2
+    if doubled <= length:
+        return length + 1
+
+    doubled
+
+# STORAGE, grown if it has no room for one more element at LENGTH: a fresh,
+# larger MutableArray with STORAGE's first LENGTH elements copied in, or
+# STORAGE unchanged if it already has room. VALUE, the element about to be
+# appended, initializes every slot of the fresh array (mutable_array::create
+# fills all of them); the slots at LENGTH and beyond are overwritten by later
+# appends before freeze(LENGTH) can ever expose them.
+fn geo_grow(storage, length, value) errors UpperOverrun:
+    capacity = mutable_array::capacity(storage)
+    if length < capacity:
+        return storage
+
+    new_capacity = geo_new_capacity(capacity, length)
+    fresh = mutable_array::create(new_capacity, value)
+    mutable_array::copy(fresh, 0, storage, 0, length)
+    fresh
+
+# STORAGE with VALUE appended at index LENGTH, grown first when full. The
+# storage is mutated (or replaced by a grown copy, which is returned); the
+# caller's new length is LENGTH + 1.
+fn geo_append(storage, length, value) errors IndexNotFound, UpperOverrun:
+    grown = geo_grow(storage, length, value)
+    mutable_array::set(grown, length, value)
+    grown
+
+# STORAGE's first LENGTH elements as an ordinary immutable List
+# (finalization: a single exact-size copy, see mutable_array::freeze).
+fn geo_finish(storage, length) errors LowerUnderrun, UpperOverrun:
+    mutable_array::freeze(storage, length)
+
+# ---------------------------------------------------------------------------
+# CSV parsing (see csv.bot for the algorithm's description; unchanged here
+# except that FIELDS and RECORDS are GeometricBuilder states (storage and
+# count), finalized with geo_finish wherever the persistent version returned
+# a completed List, and that each builder starts from its first element: a
+# record always has a first field, and the empty text is the only input
+# without a first record).
+
+# Scanning hands back anonymous structs, not positional pairs: scan_field
+# returns {field, index} and scan_record(_rest) returns {fields, stop}
+# (STRUCTS.md), so what the scan appends is known to be a str / List[str].
+# That precision is what makes the two declared builder contracts below
+# necessary: scan_record_rest's `fields: MutableArray[str]` and
+# scan_records's `records: MutableArray[List[str]]`. An untyped function
+# that appends a value it computes itself (here scanned.field) to storage it
+# received as a parameter has no definition-level proof that the storage
+# holds that element type (TYPED-MUTARRAY-BUILDER-REFACTOR.md, "Definition-
+# level obstruction"); while the scanned values were `any`, the storage was
+# MutableArray[any] and needed none.
+
+fn peek(text, index) errors LowerUnderrun:
+    if index >= str::length(text):
+        return ""
+
+    str::substring(text, index, index + 1)
+
+fn scan_unquoted(text, start, index) errors LowerUnderrun, UpperOverrun:
+    character = peek(text, index)
+    if character == "" or character == "," or character == "\n":
+        return {field: str::substring(text, start, index), index: index}
+
+    scan_unquoted(text, start, index + 1)
+
+fn scan_quoted(text, index, field) errors LowerUnderrun:
+    character = peek(text, index)
+    if character == "\"":
+        if peek(text, index + 1) == "\"":
+            return scan_quoted(text, index + 2, str::concat(field, "\""))
+
+        return {field: field, index: index + 1}
+
+    scan_quoted(text, index + 1, str::concat(field, character))
+
+fn scan_field(text, index) errors LowerUnderrun, UpperOverrun:
+    if peek(text, index) == "\"":
+        return scan_quoted(text, index + 1, "")
+
+    scan_unquoted(text, index, index)
+
+# The rest of a record whose first COUNT fields are in FIELDS, the last field
+# ending at STOP. (Defined before scan_record, its only caller, like every
+# helper in this file: a binding is visible only after it is defined, so a
+# caller placed *before* its callee is rejected -- STRICT-REFERENCE-
+# DETERMINISM.md. It used to compile, with generic, guarded copies of the
+# whole call chain -- TYPED-MUTARRAY-BUILDER-REFACTOR.md, "Definition-order
+# sensitivity".)
+fn scan_record_rest(text, stop, fields: MutableArray[str], count) errors IndexNotFound, LowerUnderrun, UpperOverrun:
+    delimiter = peek(text, stop)
+    if delimiter == ",":
+        scanned = scan_field(text, stop + 1)
+        more = geo_append(fields, count, scanned.field)
+        return scan_record_rest(text, scanned.index, more, count + 1)
+
+    if delimiter == "\n":
+        return {fields: geo_finish(fields, count), stop: stop + 1}
+
+    {fields: geo_finish(fields, count), stop: stop}
+
+# The record starting at INDEX and the index where it stops: the first field
+# (a record always has one, possibly empty) starts the FIELDS builder.
+fn scan_record(text, index) errors IndexNotFound, LowerUnderrun, UpperOverrun:
+    scanned = scan_field(text, index)
+    scan_record_rest(text, scanned.index, geo_new(scanned.field), 1)
+
+# The records from INDEX on, the first COUNT records already in RECORDS.
+fn scan_records(text, index, records: MutableArray[List[str]], count) errors IndexNotFound, LowerUnderrun, UpperOverrun:
+    if index >= str::length(text):
+        return geo_finish(records, count)
+
+    scanned = scan_record(text, index)
+    more = geo_append(records, count, scanned.fields)
+    scan_records(text, scanned.stop, more, count + 1)
+
+fn csv_parse(text) errors IndexNotFound, LowerUnderrun, UpperOverrun:
+    if str::length(text) == 0:
+        return []
+
+    scanned = scan_record(text, 0)
+    scan_records(text, scanned.stop, geo_new(scanned.fields), 1)
+
+# The sample's input is well formed, so none of its slices or builder slots is
+# ever out of range; the handlers state what a malformed scan would mean.
+parsed = csv_parse("name,age\nAlice,30\nBob,40\n"):
+    on IndexNotFound:
+        []
+    on LowerUnderrun:
+        []
+    on UpperOverrun:
+        []
+parsed

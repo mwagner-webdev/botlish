@@ -1,0 +1,61 @@
+# MANY-BOOLEAN-ARGUMENTS corpus audit: tclsh9.0 audit/many-boolean-arguments/tools/corpus.tcl
+# commit 6e3f9f70e2e1c51fd28682b8f8ca349f836d4638 (corpus paths clean)
+
+## Programs
+
+49 corpus programs, 44 compiled with warnings on; 14 library modules loaded by a one-line program, 14 loaded.
+  did not compile: examples/surface/09-mutual-recursion.bot: deliberate rejection (UNBOUND)
+  did not compile: examples/surface/10-duplicate-binding.bot: deliberate rejection (DUPLICATE)
+  did not compile: lib/io.bot: CONTEXT-FUNCTION-VALUE
+  did not compile: lib/list.bot: MISSING-IMPORT
+  did not compile: lib/mutable_array.bot: MISSING-IMPORT
+
+## Census: functions with two or more ordinary parameters the checker proves bool (declared or trusted inferred)
+
+(none)
+
+## Census: functions with two or more ordinary parameters that are bool by declaration, trusted contract or CHECKED contract only (the yield caveat: what checked contracts would add)
+
+(none)
+
+## Census: functions that already declare flags (the idiom), with their call sites' flag vectors
+
+(none)
+
+## Census: functions with exactly one ordinary parameter that is bool by declaration, trusted or checked contract (below the gate)
+
+* `choose_classifier` at bench/lex-strategy.bot:46:1: ordinary parameters checked; subjects 0; flags none
+    - call at bench/lex-strategy.bot:58:18: parameter
+* `classify` at bench/lex-strategy.bot:57:1: ordinary parameters other, checked; subjects 1; flags none
+    - call at bench/lex-strategy.bot:72:16: parameter
+* `valid_chars` at bench/lex-strategy.bot:71:1: ordinary parameters other, checked; subjects 1; flags none
+    - call at bench/lex-strategy.bot:82:51: parameter
+* `total_valid` at bench/lex-strategy.bot:79:1: ordinary parameters other, checked, other, other; subjects 3; flags none
+    - call at bench/lex-strategy.bot:82:5: parameter
+    - call at bench/lex-strategy.bot:84:16: literal
+    - call at bench/lex-strategy.bot:87:17: literal
+* `row_new` at examples/stdlib/csv_records.bot:460:1: ordinary parameters checked, other; subjects 1; flags none
+    - call at examples/stdlib/csv_records.bot:482:13: parameter
+* `row_table` at examples/stdlib/csv_records.bot:481:1: ordinary parameters other, other, other, checked; subjects 3; flags none
+    - call at examples/stdlib/csv_records.bot:504:13: parameter
+    - call at examples/stdlib/csv_records.bot:519:13: parameter
+* `build_rows` at examples/stdlib/csv_records.bot:500:1: ordinary parameters other, other, other, other, other, other, checked; subjects 6; flags none
+    - call at examples/stdlib/csv_records.bot:505:5: parameter
+    - call at examples/stdlib/csv_records.bot:520:5: parameter
+* `csv_records_generic` at examples/stdlib/csv_records.bot:512:1: ordinary parameters other, checked; subjects 1; flags none
+    - call at examples/stdlib/csv_records.bot:525:5: literal
+    - call at examples/stdlib/csv_records.bot:530:5: literal
+* `choose` at examples/surface/04-branch-value.bot:5:1: ordinary parameters checked; subjects 0; flags none
+    - call at examples/surface/04-branch-value.bot:11:1: literal
+
+## Natives whose registry parameter types include bool (the stdlib-design pressure list)
+
+(none: no registered native declares a bool parameter; 96 natives)
+
+## Findings
+
+(none)
+
+## Summary
+
+findings 0 (convert-now 0, computed-caller 0, deliberate 0); false positives 0; census: 0 functions with 2+ proven-bool ordinary parameters, 0 with 2+ bool-ish (checked contracts included), 9 with exactly one bool-ish, 0 declaring flags; natives with a bool parameter 0

@@ -1,0 +1,62 @@
+# FIXED-ARITY-LIST-RETURN corpus audit: tclsh9.0 audit/fixed-arity-list-return/tools/corpus.tcl
+# commit 6e3f9f70e2e1c51fd28682b8f8ca349f836d4638 (corpus paths clean)
+
+1. examples/stdlib/ai_text_clean.bot:84:5: `sample`: a 6-element list from 1 exit(s) (0 self-call(s); first seen compiling examples/stdlib/ai_text_clean.bot)
+     examples/stdlib/ai_text_clean.bot:84:5: [clean_ai_text("hello"), clean_ai_text("hello 🙂 world"), clean_ai_text("AI—generated"), clean_ai_text("“hello”"), clean_ai_text("‘hello’"), clean_ai_text("wait… what?")]
+     element types (informational): same-element [str, str, str, str, str, str]
+     HAND: annotate -- the sample's list of check results: printed as the program's value and compared with the file's `# expect: [...]` list; never destructured or read positionally
+2. examples/stdlib/csv_records.bot:544:5: `sample_checks`: a 7-element list from 1 exit(s) (0 self-call(s); first seen compiling examples/stdlib/csv_records.bot)
+     examples/stdlib/csv_records.bot:544:5: [list::length(rows), ht_get(first, "name"), ht_get(first, "age"), ht_get(first, "city"), ht_get(second, "name"), ht_get(second, "city"), agree]
+     element types (informational): heterogeneous [int, any, any, any, any, any, bool]
+     HAND: annotate -- the sample's observation vector (`# expect: [2, "Alice", ...]`), heterogeneous by element type but a list of check outcomes, never read by position
+3. examples/stdlib/hashtable.bot:343:5: `sample_checks`: a 6-element list from 1 exit(s) (0 self-call(s); first seen compiling examples/stdlib/hashtable.bot)
+     examples/stdlib/hashtable.bot:343:5: [ht_get(t4, "name") == "Grace", had_age, ht_contains(t4, "age"), ht_contains(t4, "missing"), ht_get(t4, "missing") == unit, ht_size(t4)]
+     element types (informational): heterogeneous [bool, bool, bool, bool, bool, any]
+     HAND: annotate -- the sample's observation vector (`# expect: [true, true, ...]`), consumed whole
+4. examples/stdlib/string_replace.bot:49:5: `sample`: a 5-element list from 1 exit(s) (0 self-call(s); first seen compiling examples/stdlib/string_replace.bot)
+     examples/stdlib/string_replace.bot:49:5: [replace("abc", "x", "y"), replace("abc", "b", "X"), replace("aaaa", "aa", "b"), replace("abcabc", "abc", ""), replace("", "x", "y")]
+     element types (informational): same-element [str, str, str, str, str]
+     HAND: annotate -- the sample's list of results (`# expect: ["abc", ...]`)
+5. examples/stdlib/string_reverse.bot:31:5: `sample`: a 5-element list from 1 exit(s) (0 self-call(s); first seen compiling examples/stdlib/string_reverse.bot)
+     examples/stdlib/string_reverse.bot:31:5: [reverse_chars(""), reverse_chars("a"), reverse_chars("abc"), reverse_chars("abcd"), reverse_chars("äöü")]
+     element types (informational): same-element [str, str, str, str, str]
+     HAND: annotate -- the sample's list of results (`# expect: ["", "a", ...]`)
+6. examples/surface/13-hygiene.bot:7:5: `pair`: a 2-element list from 1 exit(s) (0 self-call(s); first seen compiling examples/surface/13-hygiene.bot)
+     examples/surface/13-hygiene.bot:7:5: [list, x]
+     element types (informational): same-element [any, any]
+     HAND: annotate -- the example is about the list-literal syntax itself (a parameter named `list` does not change what `[a, b]` means): its result is deliberately a list
+
+programs compiled: 35 of 40
+did not compile standalone: examples/surface/09-mutual-recursion.bot (CORE SEMANTIC UNBOUND)
+did not compile standalone: examples/surface/10-duplicate-binding.bot (CORE SEMANTIC DUPLICATE)
+did not compile standalone: lib/io.bot (CORE SEMANTIC CONTEXT-FUNCTION-VALUE)
+did not compile standalone: lib/list.bot (SURFACE MODULE MISSING-IMPORT)
+did not compile standalone: lib/mutable_array.bot (SURFACE MODULE MISSING-IMPORT)
+distinct FIXED-ARITY-LIST-RETURN findings: 6
+  convert: 0
+  annotate: 6
+  UNCLASSIFIED: 0
+  of which single-exit: 6
+  false positives (author would neither convert nor annotate): 0 by the hand review above
+
+list-annotated functions in the corpus (must be silent): 0
+
+near misses (silent, with a literal exit of arity >= 2): 1
+  bench/source-checks.bot:58:20 `classify_leading`: a non-literal exit
+
+annotation check (`-> list` added in a scratch copy):
+  examples/stdlib/ai_text_clean.bot:84:5: `fn sample() -> list errors LowerUnderrun:` compiles, finding gone, value identical
+  examples/stdlib/csv_records.bot:544:5: `fn sample_checks() -> list errors IndexNotFound, LowerUnderrun, UpperOverrun:` compiles, finding gone, value identical
+  examples/stdlib/hashtable.bot:343:5: `fn sample_checks() -> list errors IndexNotFound:` compiles, finding gone, value identical
+  examples/stdlib/string_replace.bot:49:5: `fn sample() -> list errors LowerUnderrun, UpperOverrun:` compiles, finding gone, value identical
+  examples/stdlib/string_reverse.bot:31:5: `fn sample() -> list errors LowerUnderrun, UpperOverrun:` compiles, finding gone, value identical
+  examples/surface/13-hygiene.bot:7:5: `fn pair(list, x) -> list:` compiles, finding gone, value identical
+
+conversion check (curated struct conversions in a scratch copy):
+  examples/stdlib/csv_chunked.bot: a conversion patch does not apply exactly once (the file changed?)
+
+supplementary: the historical list-form scanners (audit/strict-reference-determinism/experiment/csv_records-A-callee-first.bot, before the STRUCTS.md conversion):
+  `scan_unquoted`: a 2-element list from 2 exits (1 self-calls), anchored at historical.bot:18:9
+  `scan_quoted`: a 2-element list from 3 exits (2 self-calls), anchored at historical.bot:26:13
+  `scan_record_rest`: a 2-element list from 3 exits (1 self-calls), anchored at historical.bot:48:9
+  silent: peek, scan_field, scan_record (scan_field and scan_record return the result of another list-returning function: a helper chain, which v1 does not follow)
