@@ -627,7 +627,25 @@ backend). `tests/coroutines.test`: see 41.
 
 ### 44. Collection regression
 
-*Pending: the final run is in progress.*
+The collections changed in one place: `hir::mutvec::MayHoldVector` answers
+for an enum from its case payloads (none, so an enum never holds a vector and
+no logical copy is written for one). The traits changed in what a witness's
+owner and name are for an enum (`hir::traits::WitnessOwner`/`WitnessName`).
+The enum tests of collections are `enum-list`, `enum-mutable-array`,
+`enum-mutable-vector`, `enum-immutable-set` and
+`enum-collections-unrestricted` (an enum element never makes a collection
+affine); of traits, `enum-trait-witness`. Every harness ran on this tree with
+every mutant applying unchanged (`audit/enums/out/`):
+
+| harness | fuzz | mutation |
+|---|---|---|
+| MutableVector | seeds 1, 2: 40 programs each (25 accepted; 222 and 213 identities checked); seed 3 `-gc-stress 1`: 25 programs (19 accepted, 188 identities); **0 disagreements** | **45 mutants, 45 killed** |
+| MutableArray | seeds 1, 2: 40 programs each (25 accepted; 175 and 168 identities checked); seed 3 `-gc-stress 1`: 25 programs (17 accepted, 120 identities); **0 disagreements** | **31 mutants, 31 killed** |
+| Traits | seeds 1, 2: 100 programs each (79 and 77 accepted; 247 and 217 specializations); **0 failures** | **18 mutants, 18 killed** |
+
+`tests/mutable-vector.test`, `tests/mutable-array.test`,
+`tests/mutable-array-type.test`, `tests/immutable-set.test` and
+`tests/traits.test`: see 41.
 
 ### 45. Native coverage
 
