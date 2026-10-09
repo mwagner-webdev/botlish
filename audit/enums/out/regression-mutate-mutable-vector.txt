@@ -1,0 +1,145 @@
+KILLED vector-affine-unrestricted -- MutableVector[affine] is unrestricted: a vector of coroutines may be copied
+    tests: killed (26 failed: mv-affine-at, mv-affine-clear, mv-affine-drop-order, mv-affine-erasure, mv-affine-from-list, mv-affine-gc-stress, ...)
+    fuzz:  killed (12 of 25 programs disagree)
+KILLED descriptor-omits-vector -- the drop descriptor omits MutableVector: a dying vector releases nothing it owns
+    tests: killed (18 failed: mv-affine-clear, mv-affine-drop-order, mv-affine-from-list, mv-affine-gc-stress, mv-affine-growth, mv-affine-list-of-vectors, ...)
+    fuzz:  killed (6 of 25 programs disagree)
+KILLED vector-erased-any -- an affine vector passed to a parameter declared `any` is accepted (erased: its elements are never released)
+    tests: killed (1 failed: mv-affine-erasure)
+    fuzz:  killed (3 of 25 programs disagree)
+KILLED share-aliases-tcl -- an unrestricted copy aliases writes (Tcl): a logical copy is the same header
+    tests: killed (14 failed: mv-context-installed-copy, mv-context-member, mv-cow-calls, mv-cow-copies, mv-cow-evidence, mv-cow-fresh-results, ...)
+    fuzz:  killed (9 of 25 programs disagree)
+KILLED callee-mutation-leaks -- a function's mutation of its unrestricted vector parameter changes the caller's vector (no entry copy)
+    tests: killed (1 failed: mv-cow-indirect-callee)
+    fuzz:  survived
+KILLED fresh-result-unowned -- a function returning any place path counts as fresh: a call returning its unmutated parameter enters the caller's place without a copy (the caller's mutations change the argument)
+    tests: killed (1 failed: mv-cow-indirect-callee)
+    fuzz:  survived
+KILLED fresh-result-imprecise -- a function result of an imprecise type (a generic function's `any`-like parameter) counts as fresh: `same(a)` enters the caller's place without a copy
+    tests: killed (1 failed: mv-cow-generic-results)
+    fuzz:  killed (2 of 25 programs disagree)
+KILLED fresh-struct-imprecise -- a struct literal whose field has an imprecise type counts as fresh: a generic `{data: x}` around a caller's vector enters the caller's place without a copy
+    tests: killed (1 failed: mv-cow-generic-results)
+    fuzz:  killed (2 of 25 programs disagree)
+KILLED result-move-context -- a function's result moves a context member's header out like its own place's: the snapshot it returns aliases the installed member
+    tests: killed (1 failed: mv-context-member)
+    fuzz:  survived
+KILLED snapshot-aliasing -- a loop over an unrestricted vector iterates the vector itself, not a snapshot: it observes (and here drains) the vector
+    tests: killed (1 failed: mv-cow-loop)
+    fuzz:  killed (9 of 25 programs disagree)
+KILLED context-detached-local -- a context member's mutation updates a detached local copy instead of the installed field
+    tests: killed (2 failed: mv-context-installed-copy, mv-context-member)
+    fuzz:  survived
+KILLED context-read-aliases -- a vector read out of a context member aliases the member: later mutations of the member show through it
+    tests: killed (1 failed: mv-context-member)
+    fuzz:  survived
+KILLED affine-move-cow-fork -- an affine vector's move is a copy-on-write fork: affine vectors get logical copies (shares) like unrestricted ones
+    tests: killed (1 failed: mv-cow-indirect-callee)
+    fuzz:  survived
+KILLED push-no-invalidate -- push of an affine element does not invalidate its source: a later use of the binding is accepted
+    tests: killed (5 failed: mv-affine-from-list, mv-affine-push-moves, mv-affine-struct-elements, mv-affine-swap-failure, mv-principal-moves)
+    fuzz:  survived
+KILLED push-copies -- push copies the affine element: the binding stays its owner (and is released) while the vector owns it too
+    tests: killed (14 failed: mv-affine-at, mv-affine-clear, mv-affine-gc-stress, mv-affine-growth, mv-affine-push-moves, mv-affine-struct-elements, ...)
+    fuzz:  killed (25 of 25 programs disagree)
+KILLED from-list-no-consume -- from_list of affine elements does not consume the List: the List keeps (and releases) the elements the vector owns
+    tests: killed (23 failed: mv-affine-clear, mv-affine-drop-order, mv-affine-from-list, mv-affine-gc-stress, mv-affine-list-of-vectors, mv-affine-native-releases, ...)
+    fuzz:  killed (9 of 25 programs disagree)
+KILLED at-accepts-affine -- `at` of an affine element is accepted: a second owner of an element the vector still owns
+    tests: killed (1 failed: mv-affine-at)
+    fuzz:  survived
+KILLED pop-leaves-owner -- pop returns the last element but leaves its slot owning it (Tcl)
+    tests: killed (5 failed: mv-affine-pop-take-swap, mv-affine-struct-elements, mv-cow-copies, mv-ops, mv-principal-scheduler)
+    fuzz:  killed (4 of 25 programs disagree)
+KILLED take-duplicate-owner -- take shifts the later elements down but leaves a duplicate owner of the taken one (at the end)
+    tests: killed (6 failed: mv-affine-pop-take-swap, mv-affine-struct-field, mv-cow-nested, mv-ops, mv-principal-scheduler, mv-take-order)
+    fuzz:  killed (7 of 25 programs disagree)
+KILLED swap-copies-replacement -- swap copies the replacement: its binding stays its owner while the slot owns it too
+    tests: killed (4 failed: mv-affine-gc-stress, mv-affine-pop-take-swap, mv-affine-swap-discarded, mv-affine-swap-failure)
+    fuzz:  killed (4 of 25 programs disagree)
+KILLED swap-loses-old -- swap does not move the old element to the result: it returns the replacement (the old element is never released, the replacement twice)
+    tests: killed (6 failed: mv-affine-gc-stress, mv-affine-pop-take-swap, mv-affine-swap-discarded, mv-cow-copies, mv-cow-gc-stress, mv-ops)
+    fuzz:  killed (1 of 25 programs disagree)
+KILLED failed-swap-leaks -- a failed affine swap leaks its replacement (Tcl)
+    tests: killed (1 failed: mv-affine-swap-failure)
+    fuzz:  killed (3 of 25 programs disagree)
+KILLED failed-swap-restores-source -- a failed call restores its arguments' ownership: after a failed affine swap the replacement's binding owns it again (and releases it a second time)
+    tests: killed (1 failed: mv-affine-swap-failure)
+    fuzz:  killed (3 of 25 programs disagree)
+KILLED clear-not-elaborated -- an affine clear is not elaborated to clear_drop: the cleared elements leak
+    tests: killed (3 failed: mv-affine-clear, mv-affine-native-releases, mv-native-evidence)
+    fuzz:  killed (1 of 25 programs disagree)
+KILLED clear-leaks -- clear of affine elements empties the vector without releasing them (Tcl)
+    tests: killed (1 failed: mv-affine-clear)
+    fuzz:  killed (1 of 25 programs disagree)
+KILLED clear-releases-twice -- clear releases every affine element twice
+    tests: killed (1 failed: mv-affine-clear)
+    fuzz:  killed (1 of 25 programs disagree)
+KILLED drop-ignores-elements -- a dying vector ignores its affine elements (Tcl)
+    tests: killed (14 failed: mv-affine-clear, mv-affine-drop-order, mv-affine-from-list, mv-affine-growth, mv-affine-list-of-vectors, mv-affine-pop-take-swap, ...)
+    fuzz:  killed (6 of 25 programs disagree)
+KILLED drop-order-reversed -- clear and a vector's drop release its elements last to first
+    tests: killed (7 failed: mv-affine-clear, mv-affine-drop-order, mv-affine-growth, mv-affine-list-of-vectors, mv-affine-swap-discarded, mv-affine-swap-failure, ...)
+    fuzz:  killed (6 of 25 programs disagree)
+KILLED growth-forks -- growth copies the vector's elements into new slots while the old slots keep them (Tcl)
+    tests: killed (6 failed: mv-affine-gc-stress, mv-affine-growth, mv-cow-calls, mv-cow-evidence, mv-cow-fresh-results, mv-cow-loop)
+    fuzz:  killed (13 of 25 programs disagree)
+KILLED growth-drops-relocated -- growth releases the relocated elements while the vector keeps them
+    tests: killed (2 failed: mv-affine-gc-stress, mv-affine-growth)
+    fuzz:  killed (3 of 25 programs disagree)
+KILLED loop-no-move -- consuming iteration does not move the vector: it stays usable after the loop
+    tests: killed (3 failed: mv-loop-consumes, mv-loop-exits, mv-loop-native)
+    fuzz:  survived
+KILLED loop-aliases-element -- consuming iteration aliases each element: the loop variable owns it while the vector keeps it (interpreter)
+    tests: killed (3 failed: mv-affine-growth, mv-loop-error-propagation, mv-loop-exits)
+    fuzz:  killed (1 of 25 programs disagree)
+KILLED loop-aliases-element-compiled -- consuming iteration aliases each element: the loop variable owns it while the vector keeps it (Tcl compiler)
+    tests: killed (1 failed: mv-loop-exits)
+    fuzz:  killed (1 of 25 programs disagree)
+KILLED continue-leaks -- `continue` leaks the current affine element (no exit releases on continue)
+    tests: killed (1 failed: mv-loop-exits)
+    fuzz:  survived
+KILLED break-leaks-suffix -- `break` leaks the remaining suffix of a consuming loop
+    tests: killed (4 failed: mv-affine-gc-stress, mv-affine-growth, mv-loop-exits, mv-loop-native)
+    fuzz:  survived
+KILLED exit-leaks-suffix -- `return`, `fail` and a propagated error leak the remaining suffix of a consuming loop (only `break` releases it)
+    tests: killed (2 failed: mv-loop-error-propagation, mv-loop-exits)
+    fuzz:  killed (1 of 25 programs disagree)
+KILLED share-aliases-native -- an unrestricted copy aliases writes (native): a logical copy is the same header
+    tests: killed (14 failed: mv-context-installed-copy, mv-context-member, mv-cow-calls, mv-cow-copies, mv-cow-evidence, mv-cow-fresh-results, ...)
+    fuzz:  killed (9 of 25 programs disagree)
+    rust:  killed (runtime::mutvec::tests::a_copy_shares_and_only_the_first_write_detaches)
+KILLED copy-eager-deep -- an unrestricted copy eagerly copies every element (native): no backing is ever shared, the first write never detaches
+    tests: killed (2 failed: mv-cow-evidence, mv-cow-fresh-results)
+    fuzz:  survived
+    rust:  killed (runtime::mutvec::tests::a_copy_shares_and_only_the_first_write_detaches)
+KILLED from-list-duplicates -- from_list duplicates every element (native)
+    tests: killed (26 failed: mv-affine-pop-take-swap, mv-affine-struct-field, mv-affine-swap-failure, mv-affine-whole-moves, mv-construction, mv-context-installed-copy, ...)
+    fuzz:  killed (12 of 25 programs disagree)
+    rust:  killed (runtime::mutvec::tests::draining_the_last_element_frees_the_storage, runtime::mutvec::tests::a_copy_shares_and_only_the_first_write_detaches, runtime::mutvec::tests::pop_take_and_swap_move_elements_out)
+KILLED pop-leaves-owner-native -- pop returns the last element but leaves its slot owning it (native)
+    tests: killed (5 failed: mv-affine-pop-take-swap, mv-affine-struct-elements, mv-cow-copies, mv-ops, mv-principal-scheduler)
+    fuzz:  killed (3 of 25 programs disagree)
+    rust:  killed (runtime::mutvec::tests::a_copy_shares_and_only_the_first_write_detaches, runtime::mutvec::tests::affine::a_vector_drop_releases_only_its_live_elements, runtime::mutvec::tests::pop_take_and_swap_move_elements_out)
+KILLED failed-swap-leaks-native -- a failed affine swap leaks its replacement (native)
+    tests: killed (1 failed: mv-affine-native-releases)
+    fuzz:  killed (3 of 25 programs disagree)
+    rust:  killed (runtime::mutvec::tests::affine::a_failed_swap_drop_drops_the_replacement_and_keeps_the_vector)
+KILLED clear-leaks-native -- clear of affine elements empties the vector without releasing them (native)
+    tests: killed (1 failed: mv-affine-native-releases)
+    fuzz:  killed (1 of 25 programs disagree)
+    rust:  killed (runtime::mutvec::tests::affine::clear_drop_releases_every_element_once)
+KILLED drop-ignores-elements-native -- a dying vector ignores its affine elements (native)
+    tests: killed (5 failed: mv-affine-gc-stress, mv-affine-growth, mv-affine-native-releases, mv-generic, mv-loop-native)
+    fuzz:  killed (6 of 25 programs disagree)
+    rust:  killed (runtime::mutvec::tests::affine::a_vector_drop_releases_only_its_live_elements)
+KILLED growth-forks-native -- growth copies the vector's elements into new slots while the old slots keep them (native)
+    tests: killed (20 failed: mv-affine-gc-stress, mv-affine-growth, mv-affine-push-moves, mv-affine-struct-elements, mv-affine-struct-field, mv-construction, ...)
+    fuzz:  killed (10 of 25 programs disagree)
+    rust:  killed (runtime::mutvec::tests::a_copy_shares_and_only_the_first_write_detaches, runtime::mutvec::tests::affine::a_vector_drop_releases_only_its_live_elements, runtime::mutvec::tests::affine::a_failed_swap_drop_drops_the_replacement_and_keeps_the_vector, runtime::mutvec::tests::growth_keeps_every_element_once, runtime::mutvec::tests::draining_the_last_element_frees_the_storage)
+KILLED trace-omits-elements -- the collector does not trace a vector's elements: what only a vector holds is freed under it (native)
+    tests: killed (4 failed: mv-affine-gc-stress, mv-affine-growth, mv-cow-gc-stress, mv-loop-native)
+    fuzz:  killed (1 of 25 programs disagree)
+    rust:  survived
+45 mutants, 45 killed, 0 survived
