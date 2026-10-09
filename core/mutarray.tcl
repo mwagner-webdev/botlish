@@ -358,12 +358,19 @@ proc core::mutarray::resetCounters {} {
 # Ownership roles (-ownership, core/native.tcl): what each operation does with
 # each argument, which the ownership discipline (hir/affine.tcl) reads instead
 # of any operation's name.
+#
+# create and copy are `nomethod` (WARNINGS-METHOD-ELIGIBLE.md,
+# REFACTOR-WARNINGS-CLEAN.md): create's first argument is the new array's
+# length, not a receiver (`n.create(x)` would read as a method of N), and
+# copy's is the *destination* of the copy (`dst.copy(at, src, from, n)` would
+# read as copying DST). Both are called functionally.
 core::native::register mutable_array::allocate -arity 1 -impl core::mutarray::allocate \
     -param-types {int} -result-type mutarray -runtime mutarray-alloc -context-free 1 \
     -result-length {int 0} -ownership {observe}
 core::native::register mutable_array::create -arity 2 -impl core::mutarray::create \
     -param-types {int any} -result-type mutarray -runtime mutarray-alloc \
-    -result-shape {mutarray-create 1} -result-length {int 0} -ownership {observe repeat}
+    -result-shape {mutarray-create 1} -result-length {int 0} -ownership {observe repeat} \
+    -nomethod 1
 core::native::register mutable_array::from_list -arity 1 -impl core::mutarray::fromList \
     -param-types {list} -result-type mutarray -runtime mutarray-alloc \
     -result-shape {mutarray-from-list 0} -result-length {list 0} -ownership {move}
@@ -389,7 +396,7 @@ core::native::register mutable_array::copy -arity 5 -impl core::mutarray::copy \
     -param-types {mutarray int mutarray int int} -result-type unit -runtime {range-check mutarray-mutate} \
     -errors {LowerUnderrun UpperOverrun} \
     -bounds {slices {mutarray 0 1 {sum 1 4}} {mutarray 2 3 {sum 3 4}}} \
-    -ownership {place observe copy-out observe observe}
+    -ownership {place observe copy-out observe observe} -nomethod 1
 core::native::register mutable_array::freeze -arity 2 -impl core::mutarray::freeze \
     -param-types {mutarray int} -result-type list -runtime {range-check mutarray-alloc} \
     -result-shape {mutarray-freeze 0} -errors {LowerUnderrun UpperOverrun} \

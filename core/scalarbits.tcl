@@ -138,17 +138,22 @@ proc core::scalarbits::shiftRight {a b} {
     return [core::value::intFromNumber [expr {$x >> $k}]]
 }
 
-foreach {name impl} {
-    bit_and     core::scalarbits::bitAnd
-    bit_or      core::scalarbits::bitOr
-    bit_xor     core::scalarbits::bitXor
-    shift_left  core::scalarbits::shiftLeft
-    shift_right core::scalarbits::shiftRight
+# The three bitwise operations are `nomethod` (WARNINGS-METHOD-ELIGIBLE.md,
+# REFACTOR-WARNINGS-CLEAN.md): their operands are symmetric, so neither is a
+# receiver -- `a.bit_and(b)` would read as if A were the subject. A shift's
+# value is its subject (`v.shift_right(6)`), so the shifts take method syntax.
+foreach {name impl nomethod} {
+    bit_and     core::scalarbits::bitAnd     1
+    bit_or      core::scalarbits::bitOr      1
+    bit_xor     core::scalarbits::bitXor     1
+    shift_left  core::scalarbits::shiftLeft  0
+    shift_right core::scalarbits::shiftRight 0
 } {
     core::native::register $name -arity 2 -impl $impl \
-        -param-types {int int} -result-type int -runtime bigint -context-free 1
+        -param-types {int int} -result-type int -runtime bigint -context-free 1 \
+        -nomethod $nomethod
 }
-unset name impl
+unset name impl nomethod
 
 # The four scalar domains (Byte, Nibble, LowNibble, HighNibble) are no
 # longer registered here: they are ordinary Botlish source declarations in

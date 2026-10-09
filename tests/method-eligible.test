@@ -1221,15 +1221,54 @@ test me-nomethod-lowers-to-a-marked-block {the lowered syntax marks the block, n
 
 # The builtin registry carries the flag too.
 
-test me-nomethod-native-default-off {no shipped native is nomethod} -body {
+test me-nomethod-native-default-off {exactly the five natives the warning-driven refactor marked are nomethod (REFACTOR-WARNINGS-CLEAN.md, P1); every other shipped native takes method syntax} -body {
     set marked {}
     foreach name [core::native::names] {
         if {[dict get [core::native::metadata $name] nomethod]} {
             lappend marked $name
         }
     }
-    set marked
-} -result {}
+    lsort $marked
+} -result {bit_and bit_or bit_xor mutable_array::copy mutable_array::create}
+
+# The shipped markings (REFACTOR-WARNINGS-CLEAN.md, P1), one test per marked
+# function: the receiver form is NOMETHOD-CALL with the pinned message, the
+# functional call compiles and is never reported, and its value is the
+# function's own.
+
+proc shippedNomethod {functional sugared} {
+    set hir [compileWith $functional]
+    list [rejection $sugared off] [codes $functional] \
+        [core::formatValue [core::evalProgram [hir::lower $hir]]]
+}
+
+test me-nomethod-shipped-bit-and {bit_and is nomethod: its operands are symmetric, so neither reads as a receiver} -body {
+    shippedNomethod "fn t(a):\n    return bit_and(a, 3)\nt(6)" "fn t(a):\n    return a.bit_and(3)\nt(6)"
+} -result {{{CORE SEMANTIC NOMETHOD-CALL} {t.bot:2:14: `bit_and` is declared nomethod and cannot be called with method syntax; call it as bit_and(receiver, ...)}} {} 2}
+
+test me-nomethod-shipped-bit-or {bit_or is nomethod: its operands are symmetric} -body {
+    shippedNomethod "fn t(a):\n    return bit_or(a, 3)\nt(6)" "fn t(a):\n    return a.bit_or(3)\nt(6)"
+} -result {{{CORE SEMANTIC NOMETHOD-CALL} {t.bot:2:14: `bit_or` is declared nomethod and cannot be called with method syntax; call it as bit_or(receiver, ...)}} {} 7}
+
+test me-nomethod-shipped-bit-xor {bit_xor is nomethod: its operands are symmetric} -body {
+    shippedNomethod "fn t(a):\n    return bit_xor(a, 3)\nt(6)" "fn t(a):\n    return a.bit_xor(3)\nt(6)"
+} -result {{{CORE SEMANTIC NOMETHOD-CALL} {t.bot:2:14: `bit_xor` is declared nomethod and cannot be called with method syntax; call it as bit_xor(receiver, ...)}} {} 5}
+
+test me-nomethod-shipped-shifts-stay-eligible {the shifts are not marked: a shift's value is its subject, so the functional call is still reported} -body {
+    list [codes "fn t(v):\n    return shift_right(v, 6)\nt(640)"] [rejection "fn t(v):\n    return v.shift_left(1)\nt(640)" off]
+} -result {METHOD-ELIGIBLE compiled}
+
+test me-nomethod-shipped-mutable-array-create {mutable_array::create is nomethod: its first argument is the new array's length, not a receiver} -body {
+    shippedNomethod "import mutable_array\nfn t(n):\n    return mutable_array::create(n, 7).capacity()\nt(2)" \
+        "import mutable_array\nfn t(n):\n    return n.create(7).capacity()\nt(2)"
+} -result {{{CORE SEMANTIC NOMETHOD-CALL} {t.bot:3:14: `mutable_array::create` is declared nomethod and cannot be called with method syntax; call it as mutable_array::create(receiver, ...)}} {} 2}
+
+test me-nomethod-shipped-mutable-array-copy {mutable_array::copy is nomethod: its first argument is the copy's destination, so `dst.copy(...)` would read as copying it} -body {
+    set decls "import mutable_array\nfn t() errors LowerUnderrun, UpperOverrun:\n    a = mutable_array::from_list(\[1, 2, 3\])\n    b = mutable_array::from_list(\[8, 9\])\n"
+    set handled "\nr = t():\n    on LowerUnderrun:\n        \[\]\n    on UpperOverrun:\n        \[\]\nr"
+    shippedNomethod "${decls}    mutable_array::copy(a, 1, b, 0, 2)\n    a.freeze(3)$handled" \
+        "${decls}    a.copy(1, b, 0, 2)\n    a.freeze(3)$handled"
+} -result {{{CORE SEMANTIC NOMETHOD-CALL} {t.bot:5:7: `mutable_array::copy` is declared nomethod and cannot be called with method syntax; call it as mutable_array::copy(receiver, ...)}} {} {[1, 8, 9]}}
 
 test me-nomethod-native-flag-declarable {a native registered -nomethod 1 is skipped by sugar, callable functionally, and never reported} -body {
     core::native::register list::probe_nomethod -arity 2 -nomethod 1 \
