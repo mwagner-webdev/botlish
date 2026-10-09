@@ -1,0 +1,53 @@
+### affine seed 1
+accepted 23 rejected 7 (AFFINE-CAPTURE-UNSUPPORTED 2, AFFINE-NOT-DEFINITELY-LIVE 1, USE-AFTER-MOVE 4)
+identities whose releases were checked: 91
+programs 30 disagreements 0
+### affine seed 2
+accepted 23 rejected 7 (AFFINE-CAPTURE-UNSUPPORTED 2, AFFINE-NOT-DEFINITELY-LIVE 1, USE-AFTER-MOVE 4)
+identities whose releases were checked: 92
+programs 30 disagreements 0
+### coroutines seed 1
+accepted 36 rejected 14 (COROUTINE-RESULT-MISMATCH 2, YIELD-OUTSIDE-FUNCTION 3, COROUTINE-RHS-NOT-YIELDING 4, COROUTINE-RESUME-CONFLICT 1, AFFINE-NOT-DEFINITELY-LIVE 3, TYPE 1)
+early exits releasing coroutines: return 13, fail 23, call 5, break 18, continue 15
+programs 50 disagreements 0
+### coroutines seed 2
+accepted 36 rejected 14 (COROUTINE-RESULT-MISMATCH 2, YIELD-OUTSIDE-FUNCTION 3, COROUTINE-RHS-NOT-YIELDING 4, COROUTINE-RESUME-CONFLICT 1, AFFINE-NOT-DEFINITELY-LIVE 3, TYPE 1)
+early exits releasing coroutines: return 14, fail 21, call 5, break 16, continue 13
+programs 50 disagreements 0
+### mutable-vector seed 1
+families: affine 20, unrestricted 20
+accepted 25 rejected 15 (AFFINE-CAPTURE-UNSUPPORTED 1, AFFINE-ELEMENT-COPY-OUT 2, AFFINE-ERASURE-UNSUPPORTED 3, AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE 1, MUTABLE-PLACE-CAPTURE 3, MUTABLE-PLACE-RECEIVER 4, USE-AFTER-MOVE 1)
+identities whose releases were checked: 222
+programs 40 disagreements 0
+### mutable-vector seed 2
+families: affine 20, unrestricted 20
+accepted 25 rejected 15 (AFFINE-CAPTURE-UNSUPPORTED 1, AFFINE-ELEMENT-COPY-OUT 2, AFFINE-ERASURE-UNSUPPORTED 3, AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE 1, MUTABLE-PLACE-CAPTURE 3, MUTABLE-PLACE-RECEIVER 4, USE-AFTER-MOVE 1)
+identities whose releases were checked: 213
+programs 40 disagreements 0
+### mutable-vector seed 3 gc-stress
+families: affine 13, unrestricted 12
+accepted 19 rejected 6 (AFFINE-ELEMENT-COPY-OUT 1, AFFINE-ERASURE-UNSUPPORTED 2, AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE 1, MUTABLE-PLACE-CAPTURE 1, MUTABLE-PLACE-RECEIVER 1)
+identities whose releases were checked: 188
+programs 25 disagreements 0
+### mutable-array seed 1
+families: affine 20, unrestricted 20
+accepted 25 rejected 15 (AFFINE-DUPLICATION-UNSUPPORTED 2, AFFINE-ELEMENT-COPY-OUT 1, AFFINE-ERASURE-UNSUPPORTED 1, MUTABLE-PLACE-CAPTURE 5, MUTABLE-PLACE-RECEIVER 4, TYPE 2)
+identities whose releases were checked: 175
+programs 40 disagreements 0
+### mutable-array seed 2
+families: affine 20, unrestricted 20
+accepted 25 rejected 15 (AFFINE-DUPLICATION-UNSUPPORTED 2, AFFINE-ELEMENT-COPY-OUT 1, AFFINE-ERASURE-UNSUPPORTED 1, MUTABLE-PLACE-CAPTURE 5, MUTABLE-PLACE-RECEIVER 4, TYPE 2)
+identities whose releases were checked: 168
+programs 40 disagreements 0
+### mutable-array seed 3 gc-stress
+families: affine 13, unrestricted 12
+accepted 17 rejected 8 (AFFINE-DUPLICATION-UNSUPPORTED 1, AFFINE-ERASURE-UNSUPPORTED 1, MUTABLE-PLACE-CAPTURE 2, MUTABLE-PLACE-RECEIVER 2, TYPE 2)
+identities whose releases were checked: 120
+programs 25 disagreements 0
+### traits seed 1
+rejection kinds: TRAIT-NOT-SATISFIED 14 TRAIT-POLYMORPHIC-RECURSION 1 TRAIT-UNKNOWN-OPERATION 2 TRAIT-VIEW-MISUSE 3 TRAIT-WITNESS-JOIN 1
+seed 1: 100 programs, 79 accepted (247 specializations), 21 rejected, 0 failures
+### traits seed 2
+rejection kinds: TRAIT-NOT-SATISFIED 18 TRAIT-POLYMORPHIC-RECURSION 1 TYPE 4
+seed 2: 100 programs, 77 accepted (217 specializations), 23 rejected, 0 failures
+done
