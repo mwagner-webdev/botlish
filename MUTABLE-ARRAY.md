@@ -646,7 +646,9 @@ On the final tree (159 test files; `tests/mutable-array.test` has 32 tests,
 | `CORE_BACKEND=compile tclsh9.0 tests/all.tcl` | 6801 | 6797 | 4 (`coreScoping`) | 0 |
 | `BOTLISH_NATIVE_GC_STRESS=1 cargo test --release` (native) | 240 | 240 | 0 | 0 |
 
-The GC-stress run is the CI `gc-stress` job's (both its steps). The runs
+Both suite runs were repeated after the last code change (`Captured`,
+csv_chunked's typed builder parameters), with the same numbers. The
+GC-stress run is the CI `gc-stress` job's (both its steps). The runs
 before them, on an earlier tree, failed four tests -- two corpus counts
 already updated, `paramagg-chunked-2` and `mat-fence-1`, both pinning the
 old `csv_chunked.bot` (Compatibility) -- and are what those updates fixed.
