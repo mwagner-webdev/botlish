@@ -183,7 +183,7 @@ proc hir::traits::resolve {{sourceTypes {}}} {
     # registry keeps a previous compilation's until the next one that
     # declares types: hir/sourcetypes.tcl, "Compilation isolation").
     set types [lmap t $sourceTypes {
-        expr {[dict exists $t kind] && [dict get $t kind] eq "struct" ? [dict get $t id] : [dict get $t name]}
+        expr {[dict exists $t kind] && [dict get $t kind] in {struct enum} ? [dict get $t id] : [dict get $t name]}
     }]
     foreach id [dict keys $registry] {
         set entry [dict get $registry $id]
@@ -2376,6 +2376,8 @@ proc hir::traits::report {hir} {
         foreach t [dict get $hir sourceTypes] {
             if {[dict exists $t kind] && [dict get $t kind] eq "struct"} {
                 lappend declaredTypes [list nstruct [dict get $t id]]
+            } elseif {[dict exists $t kind] && [dict get $t kind] eq "enum"} {
+                lappend declaredTypes [list enum [dict get $t id]]
             } elseif {![catch {core::type::normalize [dict get $t name]} type]} {
                 lappend declaredTypes $type
             }

@@ -539,6 +539,10 @@ proc hir::sourcetypes::RegisterOne {decl parentId} {
 proc hir::sourcetypes::explain {hir} {
     set stanzas {}
     foreach entry [hir::sourceTypes $hir] {
+        if {![dict exists $entry domain]} {
+            # A struct, enum or refinement declaration: no integer domain.
+            continue
+        }
         set domain [dict get $entry domain]
         set lines [list "type [dict get $entry name]" "    parent: [dict get $entry parent]"]
         if {[lindex $domain 0] eq {interval}} {

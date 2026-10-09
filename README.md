@@ -120,6 +120,7 @@ Values are immutable. Every value has exactly one kind:
 | `unit`   | `unit`           | value of an empty sequence                         |
 | `list`   | `[1, "a"]`       | an ordered sequence of values                      |
 | `struct` | `{a: 1, b: 2}` / `Name {a: 1}` | fixed named fields (STRUCTS.md): anonymous (structural) or declared by `struct Name:` (nominal) |
+| `enum`   | `Name::Case`     | one case of an enum declared by `enum Name:` (ENUMS.md): nominal (its identity is the enum declaration and the case's name), no integer, String or ordinal meaning; payload-free, unrestricted, compared and hashed by identity |
 | `result` | `ok(v)` / `error(v)` | an application-level outcome                   |
 | `block`  | `<block (x y)>`  | a closure: parameters, body, captured environment  |
 | `native` | `<native +>`     | a primitive callable, possibly with refinement metadata |
@@ -250,6 +251,9 @@ Evaluates to a literal value.
 * `(const int 42)` and `(const str 42)` force the type.
 * `(const list {1 2 abc})` builds a list. Each element follows the untyped
   rule.
+* `(const enum {ID CASE})` is the case CASE of the enum declared as ID
+  (ENUMS.md): `(const enum {geo::VehicleType Car})`. A value, like any
+  literal; HIR resolution has already checked that ID declares CASE.
 
 ### `(bind NAME EXPR)`
 
@@ -719,7 +723,8 @@ Implementation notes (not part of the semantics):
 Surface syntax beyond the minimal language of §17, macros, objects (structs,
 STRUCTS.md, are immutable values: no mutable struct, update syntax, methods or
 inheritance), assignment, mutable
-variables, exceptions, `?` propagation, pattern matching, a type checker
+variables, exceptions, `?` propagation, pattern matching (enums, ENUMS.md, are
+payload-free closed sums with no `match`, exhaustiveness or payloads yet), a type checker
 beyond refinement tracking (struct destructuring, STRUCT-DESTRUCTURING.md, is
 irrefutable named projection, not pattern matching), async, coroutines, threads, or FFI. A small
 one-file/one-namespace module system *is* implemented (§17's
@@ -1558,6 +1563,15 @@ add10(32)          # 42 (add captures x)
   static projection; a receiver the compiler cannot prove is a struct with
   that field is rejected, never looked up at run time. Struct values are
   immutable.
+* An **enum** is a named, closed, nominal sum (ENUMS.md). `enum VehicleType:`
+  followed by an indented, comma-separated list of payload-free cases
+  (`Boat,` `Car,` ... ; a trailing comma optional) declares one nominal type;
+  `VehicleType::Car` is a case value of exactly that type (`geo::VehicleType::Car`
+  for a module's, or `VehicleType::Car` after `import type geo::VehicleType`).
+  Two enums are unrelated even with identical cases, a case is never visible
+  by its bare name, and there is no anonymous enum, case value or alias, no
+  ordinal, integer or String conversion and no ordering: `==`, `!=` and `hash`
+  compare the enum and the case. `enum` is a contextual word.
 * **Opaque structs.** `opaque struct Token:` declares an ordinary struct whose
   representation belongs to the module that declares it: only that module may
   construct it (`token::Token {...}`) or inspect it (`x.value`, `{value} = x`);
@@ -2236,6 +2250,7 @@ A `Value` is one 64-bit word (`runtime/value.rs`):
 |---|---|
 | `…1` | small Int `n` as `(n << 1) \| 1`, for `-2^62 <= n < 2^62` |
 | `0010`, `0110`, `1010` | `false`, `true`, `unit` |
+| `…10010` | an enum case: `(enum << 32) \| (case << 5) \| 0b10010`, both numbers private to the program (ENUMS.md) |
 | `1110` | an unbound cell (never a program value) |
 | `…000` | pointer to a heap object, whose header byte is its kind: big Int, Str, List, Result, Block (closure), native, cell |
 | `0` | no value: an error is pending |
@@ -2280,6 +2295,13 @@ Rust upgrade changes any mapping.
 **Lists** are immutable vectors of values. `list::append` copies, as the
 reference runtime does, so CSV's quadratic behavior is kept deliberately
 (§18).
+
+**Enum cases** are immediate words (ENUMS.md): the program's dense number of
+the enum declaration and the case's number within it, packed beside a tag of
+their own, so a case is never allocated, rooted or traced. A word is
+canonical, so equality is word equality (`enumeq`, one compare); printing and
+hashing read the declared names from the program's enum table (`enum N "ID"
+cases="..."` in NIR), never the numbers, which are representation only.
 
 **Structs** are immutable heap objects of an interned shape (STRUCTS.md), but a
 struct is a semantic value and a `StructObj` only one representation of it:
