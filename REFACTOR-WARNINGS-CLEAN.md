@@ -566,7 +566,17 @@ finding.
 | `SAME-FAILURE` `abi::bytes::replace` | merged | the in-range case returns from inside the two nested tests (`if index >= 0: if index < mutable_byte_store::count(data.storage): return ...`) and the one `fail IndexNotFound` follows them. Milestone 4's verified merge, `if index < 0 or index >= count: fail IndexNotFound`, was the first spelling; its `or` lowers to NIR as a materialized bool and a branch on it (10 -> 13 registers, two extra jumps), where the nested tests branch directly as the unmerged code did (section 15, finding 12) |
 
 Every restructure carries behavior probes (section 3); none needed a manifest
-entry.
+entry. The probes ran twice: on P4's first spellings, and on the final ones
+(108 probes over `hashtable`, `abi::bytes`, `web` and `csv_records`,
+identical on every backend). Each final merge was also compared with the
+unmerged tree below the source: the range analysis of `refined-checks` and
+`uri-steady` (every instance, entry range and raw-ABI decision: P3's, or one
+tighter at the bottom where `local_end > 0` narrows), their NIR (the same
+operations; joins of `false` become joins of `unit` before one final
+`false`), and the machine instructions of each merged function (`emailish?`
+83 against 77, `domain?` 122 against 151, `valid_from?` 187 against 184,
+`ht_find_insert` 213 against 222, `ht_delete` 199 against 206,
+`abi::bytes::replace` 61 against 60).
 
 ## 10. P5: H2
 
