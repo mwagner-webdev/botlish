@@ -2,12 +2,12 @@ source:  examples/stdlib/ai_text_clean.bot
 backend: Cranelift (specialize=1)
 asm:     ai_text_clean.asm
 vcode:   ai_text_clean.vcode
-machine-code bytes: 2547 (per function: 147 547 492 752 103 506)
+machine-code bytes: 2641 (per function: 147 509 624 752 103 506)
 
 functions:
   0 <program entry>: nir-regs=4
-  1 cleaner_emoji<str>: nir-regs=80
-  2 clean_char<str>: nir-regs=47
+  1 cleaner_emoji<UnicodeChar>: nir-regs=80
+  2 clean_char<str>: nir-regs=57
   3 clean_from<str, int, str>: nir-regs=25
   4 clean_ai_text<str>: nir-regs=7
   5 sample<generic>: nir-regs=13
@@ -28,8 +28,8 @@ GC roots (ai_text_clean.asm's NIR ids match roots.txt's "function N"):
   
   function 1 "cleaner_emoji"
     NIR regs: 80
-    raw regs: 13
-    managed-capable regs: 67
+    raw regs: 0
+    managed-capable regs: 80
     effects: may_error=false may_gc=false
     safepoints: 0
     root candidates: 0
@@ -40,11 +40,11 @@ GC roots (ai_text_clean.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 2 "clean_char"
-    NIR regs: 47
-    raw regs: 8
-    managed-capable regs: 39
+    NIR regs: 57
+    raw regs: 4
+    managed-capable regs: 53
     effects: may_error=false may_gc=true
-    safepoints: 1
+    safepoints: 2
     root candidates: 0
     max live roots: 0
     shadow slots: 0
@@ -93,4 +93,4 @@ GC roots (ai_text_clean.asm's NIR ids match roots.txt's "function N"):
 
 mechanical pattern counts (triage only; see report for interpretation):
   1 x calls to rt_int_add
-  13 x calls to other rt_* helpers
+  14 x calls to other rt_* helpers

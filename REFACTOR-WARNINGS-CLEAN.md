@@ -954,7 +954,13 @@ conversion attempt produced (`SAME-RETURN-VALUE` on the handler form of
   assigned a development branch and told not to push elsewhere without
   permission, so the work is pushed to that branch.
 * **The scalar assembly audit corpus** (`audit/native-scalar-asm/`) is derived
-  from the corpus; it was regenerated at the final tree ({{SCALAR}}).
+  from the corpus; it was regenerated at the final tree: 178 functions and
+  72,887 bytes of machine code, against 177 and 74,702 at kickoff. The four
+  CSV programs are 449-480 bytes smaller each (their scanners read
+  characters instead of `peek`ing one-character Strings), `ai_text_clean` 94
+  bytes larger (`clean_char` decodes its character, finding 3), `hashtable`
+  40 smaller, `refined-checks` one function (`char_is?`) and 1 byte more;
+  the other six programs are byte-identical.
 
 ## 19. Required questions
 

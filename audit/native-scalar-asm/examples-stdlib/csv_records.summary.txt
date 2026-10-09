@@ -2,7 +2,7 @@ source:  examples/stdlib/csv_records.bot
 backend: Cranelift (specialize=1)
 asm:     csv_records.asm
 vcode:   csv_records.vcode
-machine-code bytes: 20163 (per function: 45 89 89 89 357 420 420 420 202 202 202 81 365 430 584 1141 351 783 215 480 318 427 385 70 493 114 69 69 46 170 236 636 1064 333 380 402 616 654 809 673 928 684 107 433 259 629 515 78 78 1222 301)
+machine-code bytes: 19685 (per function: 45 89 89 89 357 420 420 420 202 202 202 81 365 309 526 932 310 758 215 480 318 427 385 70 493 114 69 69 46 170 236 636 1040 333 380 402 616 654 809 673 928 684 107 433 259 629 515 78 78 1222 301)
 
 functions:
   0 <program entry>: nir-regs=1
@@ -18,11 +18,11 @@ functions:
   10 geo_append<mutarray, int, HashTable>: nir-regs=5
   11 geo_finish<mutarray, int>: nir-regs=3
   12 peek<str, int>: nir-regs=11
-  13 peek<str, int>: nir-regs=15
-  14 scan_unquoted<str, int, int>: nir-regs=28
-  15 scan_quoted<str, int, str>: nir-regs=33
-  16 scan_field<str, int>: nir-regs=17
-  17 scan_record_rest<str, int, mutarray, int>: nir-regs=29
+  13 quote_at?<str, int>: nir-regs=12
+  14 scan_unquoted<str, int, int>: nir-regs=29
+  15 scan_quoted<str, int, str>: nir-regs=25
+  16 scan_field<str, int>: nir-regs=13
+  17 scan_record_rest<str, int, mutarray, int>: nir-regs=31
   18 scan_record<str, int>: nir-regs=9
   19 scan_records<str, int, mutarray, int>: nir-regs=15
   20 csv_parse<str>: nir-regs=17
@@ -37,7 +37,7 @@ functions:
   29 ht_probe_start<HashTable, str>: nir-regs=5
   30 ht_probe_next<HashTable, int>: nir-regs=7
   31 ht_find_get<HashTable, str, int>: nir-regs=30
-  32 ht_find_insert<HashTable, str, int, int>: nir-regs=44
+  32 ht_find_insert<HashTable, str, int, int>: nir-regs=42
   33 ht_get<HashTable, str>: nir-regs=12
   34 ht_rehash_probe<mutarray, int, int>: nir-regs=13
   35 ht_rehash_insert<HashTable, int, any, any>: nir-regs=16
@@ -227,25 +227,25 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 13 "peek"
-    NIR regs: 15
-    raw regs: 3
+  function 13 "quote_at?"
+    NIR regs: 12
+    raw regs: 0
     managed-capable regs: 12
-    effects: may_error=true may_gc=true
-    safepoints: 1
-    root candidates: 3
-    max live roots: 3
-    shadow slots: 3
+    effects: may_error=true may_gc=false
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
     entry zero slots: 0
     depth reservation: no
     storage: native frame
   
   function 14 "scan_unquoted"
-    NIR regs: 28
+    NIR regs: 29
     raw regs: 1
-    managed-capable regs: 27
+    managed-capable regs: 28
     effects: may_error=true may_gc=true
-    safepoints: 3
+    safepoints: 2
     root candidates: 4
     max live roots: 4
     shadow slots: 4
@@ -254,12 +254,12 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 15 "scan_quoted"
-    NIR regs: 33
-    raw regs: 7
-    managed-capable regs: 26
+    NIR regs: 25
+    raw regs: 4
+    managed-capable regs: 21
     effects: may_error=true may_gc=true
-    safepoints: 9
-    root candidates: 13
+    safepoints: 8
+    root candidates: 11
     max live roots: 5
     shadow slots: 5
     entry zero slots: 2
@@ -267,11 +267,11 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 16 "scan_field"
-    NIR regs: 17
+    NIR regs: 13
     raw regs: 1
-    managed-capable regs: 16
+    managed-capable regs: 12
     effects: may_error=true may_gc=true
-    safepoints: 4
+    safepoints: 3
     root candidates: 5
     max live roots: 3
     shadow slots: 3
@@ -280,11 +280,11 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 17 "scan_record_rest"
-    NIR regs: 29
+    NIR regs: 31
     raw regs: 3
-    managed-capable regs: 26
+    managed-capable regs: 28
     effects: may_error=true may_gc=true
-    safepoints: 8
+    safepoints: 7
     root candidates: 12
     max live roots: 5
     shadow slots: 5
@@ -475,9 +475,9 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 32 "ht_find_insert"
-    NIR regs: 44
+    NIR regs: 42
     raw regs: 5
-    managed-capable regs: 39
+    managed-capable regs: 37
     effects: may_error=true may_gc=true
     safepoints: 2
     root candidates: 4
@@ -722,9 +722,9 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
 
 mechanical pattern counts (triage only; see report for interpretation):
-  19 x calls to rt_int_add
+  18 x calls to rt_int_add
   1 x calls to rt_int_sub
   7 x calls to rt_int_mul
-  20 x calls to rt_int_cmp
-  109 x calls to other rt_* helpers
+  22 x calls to rt_int_cmp
+  103 x calls to other rt_* helpers
   6 x guard/guardbool instructions

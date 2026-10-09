@@ -2,7 +2,7 @@ source:  examples/stdlib/hashtable.bot
 backend: Cranelift (specialize=1)
 asm:     hashtable.asm
 vcode:   hashtable.vcode
-machine-code bytes: 10883 (per function: 45 427 385 70 69 69 46 170 236 636 1064 333 253 380 402 616 654 801 673 920 684 941 862 147)
+machine-code bytes: 10843 (per function: 45 427 385 70 69 69 46 170 236 636 1040 333 253 380 402 616 654 801 673 920 684 925 862 147)
 
 functions:
   0 <program entry>: nir-regs=1
@@ -15,7 +15,7 @@ functions:
   7 ht_probe_start<HashTable, str>: nir-regs=5
   8 ht_probe_next<HashTable, int>: nir-regs=7
   9 ht_find_get<HashTable, str, int>: nir-regs=30
-  10 ht_find_insert<HashTable, str, int, int>: nir-regs=44
+  10 ht_find_insert<HashTable, str, int, int>: nir-regs=42
   11 ht_get<HashTable, str>: nir-regs=12
   12 ht_contains<HashTable, str>: nir-regs=7
   13 ht_rehash_probe<mutarray, int, int>: nir-regs=13
@@ -162,9 +162,9 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 10 "ht_find_insert"
-    NIR regs: 44
+    NIR regs: 42
     raw regs: 5
-    managed-capable regs: 39
+    managed-capable regs: 37
     effects: may_error=true may_gc=true
     safepoints: 2
     root candidates: 4
