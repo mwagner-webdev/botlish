@@ -602,7 +602,22 @@ type's identity or a case's enum.
 
 ### 41. Full regression
 
-*Pending: the final run is in progress.*
+On the final tree (160 test files; `tests/enums.test` has 66 tests):
+
+| run | total | passed | skipped | failed |
+|---|---:|---:|---:|---:|
+| `BOTLISH_NATIVE_GC_STRESS=1 CORE_BACKEND=interp tclsh9.0 tests/all.tcl` | 6870 | 6870 | 0 | 0 |
+| `CORE_BACKEND=compile tclsh9.0 tests/all.tcl` | 6870 | 6866 | 4 (`coreScoping`) | 0 |
+| `BOTLISH_NATIVE_GC_STRESS=1 cargo test --release` (native) | 245 | 245 | 0 | 0 |
+
+The GC-stress run is the CI `gc-stress` job's. The runs before these, one
+change earlier, each failed one test: `mat-id-4`
+(`tests/mutable-array-type.test`), which fences `hir/`, `compiler/` and
+`surface/` against any mention of the `mutable_array` constructors, caught a
+comment in `surface/modules.tcl` that used `mutable_array::create` as its
+example of an ambiguous qualifier. The comment's example is `list::length`
+now; the suites above, repeated after that and after the last native change
+(the enum hash, 47), pass completely.
 
 ### 42. Affine regression
 
@@ -650,7 +665,17 @@ every mutant applying unchanged (`audit/enums/out/`):
 
 ### 45. Native coverage
 
-*Pending: the final run is in progress.*
+`tests/native-coverage.tcl` (the suite on the Cranelift backend, final
+tree): 6870 tests -- 2749 run natively, 3992 independent of the backend, 69
+partially native, 60 unsupported, **0 failed**
+(`audit/enums/out/native-coverage.txt`). The 60 unsupported tests need
+exactly what README.md's coverage table lists, in the same numbers as
+MUTABLE-ARRAY.md's report (a Block value at the program boundary 13,
+`test-log`/`test_log` 19, `test-tick`/`test_tick` 12, sequence mode 7, test
+validators and natives 7, a validator contract 2); none is an enum test.
+The enum tests run their programs through `enumRun`, which compares the
+Tcl interpreter, the Tcl compiler and Cranelift without and with
+specialization; `enum-executable-parity` also builds standalone executables.
 
 ### 46. Scalar audit
 
