@@ -44,9 +44,11 @@ fn replace(haystack, needle, replacement) errors LowerUnderrun, UpperOverrun:
     haystack.replace_from(needle, replacement, 0, 0, "")
 
 # The sample's inputs never take a slice out of range; the handlers
-# state what one would mean.
+# state what one would mean. The first and the last case never insert
+# their replacement (the needle is absent): only its being non-empty
+# matters, which makes a wrongly inserted one visible.
 fn sample() -> list errors LowerUnderrun, UpperOverrun:
-    ["abc".replace("x", "y"), "abc".replace("b", "X"), "aaaa".replace("aa", "b"), "abcabc".replace("abc", ""), "".replace("x", "y")]
+    ["abc".replace("x", "yz"), "abc".replace("b", "X"), "aaaa".replace("aa", "b"), "abcabc".replace("abc", ""), "".replace("x", "yz")]
 
 checks = sample():
     on LowerUnderrun:
