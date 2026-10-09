@@ -1,0 +1,170 @@
+KILLED construction-lazy -- construction does not run the body: the first resume starts it
+    tests: killed (43 failed: co-affine-done-does-not-move, co-affine-loop, co-affine-move-never-forks, co-affine-terminating-branch, co-binding-eager-order, co-binding-forms, ...)
+    fuzz:  killed (18 of 25 programs disagree)
+KILLED first-yield-discarded -- construction runs past the first yield: its value is lost
+    tests: killed (39 failed: co-affine-done-does-not-move, co-affine-loop, co-affine-move-never-forks, co-affine-terminating-branch, co-binding-eager-order, co-binding-forms, ...)
+    fuzz:  killed (18 of 25 programs disagree)
+KILLED return-before-yield-exhaustion -- a body that returns before yielding fails the construction as exhausted
+    tests: killed (2 failed: co-empty-loop, co-terminal-success)
+    fuzz:  survived
+KILLED completed-raises-exhaustion -- a call of a completed handle raises an exhaustion error
+    tests: killed (11 failed: co-affine-loop, co-affine-move-never-forks, co-deep-three-levels, co-effect-nested-coroutines, co-effect-recursive, co-empty-loop, ...)
+    fuzz:  killed (5 of 25 programs disagree)
+KILLED completed-reruns-body -- a call of a completed handle runs the body again from its beginning
+    tests: killed (10 failed: co-affine-loop, co-affine-move-never-forks, co-deep-three-levels, co-effect-nested-coroutines, co-effect-recursive, co-fuzz-bounded, ...)
+    fuzz:  killed (5 of 25 programs disagree)
+KILLED failed-resumes-body -- a call of a failed handle runs the body again
+    tests: killed (4 failed: co-context-portable-io, co-errors-last-segment-always-fails, co-errors-segment, co-fuzz-bounded)
+    fuzz:  killed (2 of 25 programs disagree)
+KILLED failed-loses-error -- a call of a failed handle completes normally with unit instead of raising the original error
+    tests: killed (5 failed: co-context-portable-io, co-errors-last-segment-always-fails, co-errors-segment, co-errors-startup, co-fuzz-bounded)
+    fuzz:  killed (2 of 25 programs disagree)
+KILLED message-wrong-yield -- each resume delivers the previous resume's message (the first, unit)
+    tests: killed (13 failed: co-affine-done-does-not-move, co-affine-terminating-branch, co-deep-three-levels, co-errors-declared-propagation, co-errors-internal, co-errors-segment, ...)
+    fuzz:  killed (8 of 25 programs disagree)
+KILLED effect-one-caller -- the yield effect reaches the direct callers of a yielding function and no further
+    tests: killed (7 failed: co-deep-three-levels, co-effect-function-value, co-effect-nested-isolation, co-effect-transitive-legal, co-fuzz-bounded, co-protocol-transitive, ...)
+    fuzz:  killed (2 of 25 programs disagree)
+KILLED call-crosses-yield -- an ordinary top-level call of a yielding function is allowed
+    tests: killed (1 failed: co-unwrapped-chain)
+    fuzz:  survived
+KILLED protocol-widened-any -- every coroutine accepts any resume message: the handle's protocol is any
+    tests: killed (3 failed: co-hir-text, co-protocol-arity, co-protocol-wrong-type)
+    fuzz:  survived
+KILLED two-protocols-accepted -- a second, different protocol reaching a function is ignored (the first wins)
+    tests: killed (2 failed: co-protocol-conflict, co-protocol-default-meets-struct)
+    fuzz:  killed (1 of 25 programs disagree)
+KILLED scalar-resume-accepted -- a declared resume type need not be a struct
+    tests: killed (1 failed: co-protocol-struct-only)
+    fuzz:  survived
+KILLED assignment-aliases -- binding a handle to another name is no move: both names stay usable
+    tests: killed (10 failed: co-affine-branch-join, co-affine-loop, co-affine-move-chain-use-after, co-affine-move-never-forks, co-exit-release-placement, co-fuzz-bounded, ...)
+    fuzz:  killed (9 of 25 programs disagree)
+KILLED assignment-forks -- binding a handle to another name starts a new coroutine of the same call: the new name runs a copy from the beginning
+    tests: killed (1 failed: co-source-no-iterator-or-exhaustion)
+    fuzz:  survived
+KILLED move-keeps-source -- a move does not invalidate the binding moved from
+    tests: killed (9 failed: co-affine-branch-join, co-affine-loop, co-affine-move-chain-use-after, co-affine-move-never-forks, co-exit-release-placement, co-fuzz-bounded, ...)
+    fuzz:  killed (9 of 25 programs disagree)
+KILLED join-keeps-live -- a handle moved on one branch only is live after the join
+    tests: killed (3 failed: co-affine-branch-join, co-affine-loop, co-release-placement)
+    fuzz:  killed (1 of 25 programs disagree)
+KILLED step-call-moves -- a resume consumes the handle: its owner is moved by the call
+    tests: killed (33 failed: co-affine-done-does-not-move, co-affine-loop, co-affine-move-never-forks, co-binding-forms, co-context-portable-io, co-deep-three-levels, ...)
+    fuzz:  killed (17 of 25 programs disagree)
+KILLED done-consumes -- coroutine::done? consumes the handle: its owner is moved by the query (its ownership role, core/native.tcl's -ownership, is `move` instead of `observe`)
+    tests: killed (8 failed: co-affine-done-does-not-move, co-deep-three-levels, co-empty-loop, co-fuzz-bounded, co-nir-operations, co-release-placement, ...)
+    fuzz:  killed (12 of 25 programs disagree)
+KILLED handle-as-fn -- a handle is accepted where a structural Fn value is expected
+    tests: killed (1 failed: co-storage-frontier)
+    fuzz:  survived
+KILLED handle-erased-to-any -- a handle is accepted as an argument of a parameter declared any (it would be erased to a value another function could keep)
+    tests: killed (1 failed: co-storage-frontier)
+    fuzz:  survived
+KILLED context-reselected-per-resume -- every top-level resume selects the coroutine's context-trait providers again
+    tests: killed (1 failed: co-context-fixed-at-construction)
+    fuzz:  survived
+KILLED release-never -- no coroutine is released at its handle's last use: every one waits for a collection (Tcl: the program's end)
+    tests: killed (7 failed: co-exit-release-native-stacks, co-exit-release-tcl-runtime, co-fuzz-bounded, co-nir-operations, co-release-native-stacks, co-release-placement, ...)
+    fuzz:  killed (19 of 25 programs disagree)
+KILLED release-moved-handle -- a handle moved away is released too: its new owner's coroutine is released while still in use
+    tests: killed (6 failed: co-affine-move-never-forks, co-exit-release-placement, co-fuzz-bounded, co-nir-operations, co-principal-move, co-release-placement)
+    fuzz:  killed (8 of 25 programs disagree)
+KILLED release-at-declaration -- a coroutine is released right after its handle's binding, before its uses
+    tests: killed (52 failed: co-affine-done-does-not-move, co-affine-loop, co-affine-move-never-forks, co-affine-terminating-branch, co-binding-eager-order, co-binding-forms, ...)
+    fuzz:  killed (19 of 25 programs disagree)
+KILLED release-before-statement -- the Tcl lowering releases before the statement of the last use instead of after it
+    tests: killed (36 failed: co-affine-done-does-not-move, co-affine-move-never-forks, co-affine-terminating-branch, co-binding-eager-order, co-binding-forms, co-context-fixed-at-construction, ...)
+    fuzz:  killed (19 of 25 programs disagree)
+KILLED release-last-value-lost -- a release after a sequence's last statement makes the release's unit the sequence's value
+    tests: killed (11 failed: co-affine-done-does-not-move, co-affine-loop, co-binding-forms, co-empty-loop, co-errors-segment, co-errors-startup, ...)
+    fuzz:  survived
+KILLED compiler-release-missing -- the Tcl compiler compiling HIR (main.tcl's compile backend) emits no release
+    tests: killed (2 failed: co-exit-release-tcl-runtime, co-release-tcl-runtime)
+    fuzz:  survived
+KILLED release-leaves-frames -- the Tcl runtime deletes a released suspended coroutine without unwinding it: its frames stay until the run ends
+    tests: killed (1 failed: co-release-tcl-runtime)
+    fuzz:  survived
+KILLED release-resumes-body -- a released suspended Tcl coroutine is resumed (with unit) instead of unwound: its body runs on after the yield
+    tests: killed (1 failed: co-release-values)
+    fuzz:  killed (2 of 25 programs disagree)
+KILLED exit-release-never -- no exit releases anything: a coroutine left by a return, fail, break, continue or failing call waits for a collection (Tcl: the program's end)
+    tests: killed (5 failed: co-exit-release-hir-text, co-exit-release-native-stacks, co-exit-release-placement, co-exit-release-tcl-runtime, co-fuzz-bounded)
+    fuzz:  killed (13 of 25 programs disagree)
+KILLED exit-release-crosses-loop -- a break or continue releases every handle of its function, not only those of the loop body it leaves: a handle the function still uses after the loop is released
+    tests: killed (4 failed: co-exit-release-native-stacks, co-exit-release-placement, co-exit-release-tcl-runtime, co-exit-release-values)
+    fuzz:  killed (5 of 25 programs disagree)
+KILLED exit-release-handled-error -- a handled call releases on the errors its handlers handle too: the handler resumes a released coroutine
+    tests: killed (10 failed: co-context-fixed-at-construction, co-context-portable-io, co-context-trait, co-errors-last-segment-always-fails, co-errors-segment, co-errors-startup, ...)
+    fuzz:  killed (9 of 25 programs disagree)
+KILLED exit-release-before-value -- an exit releases every handle before evaluating its value, also one the value resumes
+    tests: killed (4 failed: co-exit-release-native-stacks, co-exit-release-placement, co-exit-release-tcl-runtime, co-exit-release-values)
+    fuzz:  survived
+KILLED exit-release-after-last-use -- an exit after a handle's last use releases it again (it was released at that last use)
+    tests: killed (2 failed: co-exit-release-placement, co-fuzz-bounded)
+    fuzz:  killed (14 of 25 programs disagree)
+KILLED exit-release-shadowed -- an exit releases a handle whose name a nested binding rebinds: the release names the other binding
+    tests: killed (1 failed: co-exit-release-placement)
+    fuzz:  survived
+KILLED core-ir-error-release-missing -- the Core IR lowering releases nothing on a call's propagated error
+    tests: killed (1 failed: co-exit-release-tcl-runtime)
+    fuzz:  survived
+KILLED compiler-exit-release-missing -- the Tcl compiler compiling HIR releases nothing before an exit statement
+    tests: killed (1 failed: co-exit-release-tcl-runtime)
+    fuzz:  survived
+KILLED compiler-error-release-missing -- the Tcl compiler compiling HIR releases nothing on a call's propagated error
+    tests: killed (1 failed: co-exit-release-tcl-runtime)
+    fuzz:  survived
+KILLED native-construction-lazy -- construction does not run the body natively: the first resume starts it
+    tests: killed (46 failed: co-affine-done-does-not-move, co-affine-loop, co-affine-move-never-forks, co-affine-terminating-branch, co-binding-eager-order, co-binding-forms, ...)
+    fuzz:  killed (18 of 25 programs disagree)
+    rust:  killed (runtime::coroutine::tests::an_abandoned_suspended_coroutine_is_collected_and_its_stack_pooled, runtime::coroutine::tests::a_failure_is_terminal_and_raised_again, runtime::coroutine::tests::nested_coroutines_run_on_their_own_stacks, runtime::coroutine::tests::collections_inside_and_between_segments_keep_live_values, runtime::coroutine::tests::yields_resumes_and_keeps_its_final_result, runtime::coroutine::tests::return_before_any_yield_completes_at_the_start)
+KILLED native-first-yield-discarded -- native construction runs past the first yield
+    tests: killed (43 failed: co-affine-done-does-not-move, co-affine-loop, co-affine-move-never-forks, co-affine-terminating-branch, co-binding-eager-order, co-binding-forms, ...)
+    fuzz:  killed (18 of 25 programs disagree)
+    rust:  killed (runtime::coroutine::tests::an_abandoned_suspended_coroutine_is_collected_and_its_stack_pooled, runtime::coroutine::tests::collections_inside_and_between_segments_keep_live_values, runtime::coroutine::tests::nested_coroutines_run_on_their_own_stacks, runtime::coroutine::tests::yields_resumes_and_keeps_its_final_result)
+KILLED native-completed-raises-exhaustion -- a call of a completed handle raises an exhaustion error natively
+    tests: killed (12 failed: co-affine-loop, co-affine-move-never-forks, co-deep-three-levels, co-effect-nested-coroutines, co-effect-recursive, co-empty-loop, ...)
+    fuzz:  killed (5 of 25 programs disagree)
+    rust:  killed (runtime::coroutine::tests::return_before_any_yield_completes_at_the_start, runtime::coroutine::tests::yields_resumes_and_keeps_its_final_result)
+KILLED native-completed-reruns-body -- a call of a completed handle runs the body again natively
+    tests: killed (11 failed: co-affine-loop, co-affine-move-never-forks, co-deep-three-levels, co-effect-nested-coroutines, co-effect-recursive, co-fuzz-bounded, ...)
+    fuzz:  killed (5 of 25 programs disagree)
+    rust:  killed (runtime::coroutine::tests::yields_resumes_and_keeps_its_final_result)
+KILLED native-failed-loses-error -- a call of a failed handle completes normally with unit natively
+    tests: killed (5 failed: co-context-portable-io, co-errors-last-segment-always-fails, co-errors-segment, co-errors-startup, co-fuzz-bounded)
+    fuzz:  killed (2 of 25 programs disagree)
+    rust:  killed (runtime::coroutine::tests::a_failure_is_terminal_and_raised_again)
+KILLED native-message-wrong-yield -- a native resume does not deliver its message: the yield evaluates to its own outward value
+    tests: killed (14 failed: co-affine-done-does-not-move, co-affine-terminating-branch, co-deep-three-levels, co-errors-declared-propagation, co-errors-internal, co-errors-segment, ...)
+    fuzz:  killed (4 of 25 programs disagree)
+    rust:  killed (runtime::coroutine::tests::nested_coroutines_run_on_their_own_stacks, runtime::coroutine::tests::collections_inside_and_between_segments_keep_live_values, runtime::coroutine::tests::yields_resumes_and_keeps_its_final_result)
+KILLED native-deep-stack-not-preserved -- a suspended coroutine's stack is released (pooled for reuse) while its frames are suspended on it
+    tests: killed (10 failed: co-binding-eager-order, co-binding-forms, co-exit-release-native-stacks, co-exit-release-values, co-fuzz-bounded, co-gc-many-coroutines, ...)
+    fuzz:  killed (10 of 25 programs disagree)
+    rust:  survived
+KILLED gc-suspended-frames-untraced -- the collector does not trace the frames of a suspended coroutine's stack
+    tests: killed (1 failed: co-gc-stress)
+    fuzz:  survived
+    rust:  survived
+KILLED gc-resumer-frames-untraced -- the collector does not trace the frames suspended below a running coroutine (its resumers' stacks)
+    tests: killed (6 failed: co-executable-linux-io, co-exit-release-native-stacks, co-exit-release-values, co-gc-many-coroutines, co-gc-stress, co-release-native-stacks)
+    fuzz:  survived
+    rust:  survived
+KILLED native-release-not-emitted -- native lowering emits no corelease
+    tests: killed (3 failed: co-exit-release-native-stacks, co-nir-operations, co-release-native-stacks)
+    fuzz:  survived
+    rust:  survived
+KILLED native-release-keeps-stack -- a native release leaves a suspended coroutine's stack in place (a collection frees it later)
+    tests: killed (2 failed: co-exit-release-native-stacks, co-release-native-stacks)
+    fuzz:  survived
+    rust:  survived
+KILLED native-exit-release-missing -- native lowering releases nothing before a return
+    tests: killed (1 failed: co-exit-release-native-stacks)
+    fuzz:  survived
+    rust:  survived
+KILLED native-error-release-missing -- native lowering's failure pad of a call releases nothing
+    tests: killed (1 failed: co-exit-release-native-stacks)
+    fuzz:  survived
+    rust:  survived
+52 mutants, 52 killed, 0 survived

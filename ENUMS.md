@@ -605,11 +605,25 @@ type's identity or a case's enum.
 
 ### 42. Affine regression
 
-*Pending: the final run is in progress.*
+No affine code changed beyond one new case of the affinity query (an enum
+is affine exactly when a case's payload is, so never in this milestone).
+`audit/affine/tools/fuzz.tcl`: seeds 1 and 2, 30 programs each (23 accepted;
+91 and 92 identities whose releases were checked), **0 disagreements**.
+`audit/affine/tools/mutate.tcl`: **29 mutants, 29 killed**, every mutant
+applying unchanged (`audit/enums/out/regression-fuzz.txt`,
+`regression-mutate-affine.txt`). `tests/affine.test`: see 41.
 
 ### 43. Coroutine regression
 
-*Pending: the final run is in progress.*
+No coroutine code changed (the native runtime's unit tests only gained the
+empty enum table in their `ProgramInfo`). `audit/coroutines/tools/fuzz.tcl`: seeds 1 and 2,
+50 programs each (36 accepted; early exits releasing coroutines: 74 and 69),
+**0 disagreements**. `audit/coroutines/tools/mutate.tcl`: **52 mutants, 52
+killed**, every mutant applying unchanged
+(`audit/enums/out/regression-mutate-coroutines.txt`). An enum case crosses a
+suspension like any immediate value (`enum-coroutine-events`: a coroutine
+yields cases and returns one; the resumer receives each unchanged, on every
+backend). `tests/coroutines.test`: see 41.
 
 ### 44. Collection regression
 
