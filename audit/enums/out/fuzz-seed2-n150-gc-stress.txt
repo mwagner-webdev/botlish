@@ -1,0 +1,2 @@
+accepted 99 rejected 49 run-time-rejected 2 (ANONYMOUS-ENUM 4, ENUM-EMPTY 4, NOT-AN-ENUM 9, TYPE 18, UNBOUND 5, UNKNOWN-ENUM-CASE 5, UNKNOWN-NAMESPACE 4, run-time TYPE 2)
+programs 150 disagreements 0

@@ -543,6 +543,7 @@ Results (final tree; `audit/enums/out/`):
 |---|---:|---:|---:|---:|---:|
 | `-seed 1000 -n 300` | 300 | 204 | 83 | 13 | **0** |
 | `-seed 1 -n 80 -gc-stress 1` | 80 | 53 | 25 | 2 | **0** |
+| `-seed 2 -n 150 -gc-stress 1` (after the last native change) | 150 | 99 | 49 | 2 | **0** |
 
 The rejections of the seed-1000 run by code: `ANONYMOUS-ENUM` 8, `ENUM-EMPTY`
 13, `NOT-AN-ENUM` 9, `TYPE` 38 (wrong enum as an argument, result, field or
