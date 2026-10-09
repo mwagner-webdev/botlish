@@ -186,35 +186,27 @@ fn emailish?(v: str) -> bool proves v: Emailish:
     # try the next dot, exactly the greedy left-to-right behavior
     # domain_loop's own recursion had. A "." is additionally rejected on
     # sight if it starts the domain or immediately follows another "."
-    # (an empty label); every non-"." position must be an ordinary
-    # label_char?. Reaching END with no accepting "." ever found (no ".",
-    # a trailing ".", or a TLD too short) is the one remaining rejection,
-    # via natural loop exhaustion.
+    # (an empty label), and so is a non-"." position that is not an
+    # ordinary label_char?: a rejection on sight ends the scan (`break`).
+    # Every rejection is therefore the one `false` after the loop: reaching
+    # END with no accepting "." ever found (no ".", a trailing ".", or a TLD
+    # too short), or leaving it early.
     fn domain?(start):
         loop j from start to n:
             if j.char_is?('.'):
                 if j == start:
-                    return false
+                    break
                 if (j - 1).char_is?('.'):
-                    return false
+                    break
                 if tld?(j + 1):
                     return true
             else:
                 if not label_char?(char_at(j)):
-                    return false
+                    break
         false
 
     local_end = 0.scan_while(local_char?)
-    if local_end == 0:
-        false
-    else:
-        if local_end >= n:
-            false
-        else:
-            if local_end.char_is?('@'):
-                domain?(local_end + 1)
-            else:
-                false
+    local_end > 0 and local_end < n and local_end.char_is?('@') and domain?(local_end + 1)
 
 hex_digits = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F"]
 
@@ -248,20 +240,18 @@ fn uri_query_value?(value: str) -> bool proves value: UriQueryValue:
 
     fn valid_from?(i):
         if i < 0 or i >= str::length(value):
-            true
+            return true
+
+        c = value.char_at(i)
+        if c == '%':
+            if upper_hex?(i + 1) and upper_hex?(i + 2):
+                return valid_from?(i + 3)
         else:
-            c = value.char_at(i)
-            if c == '%':
-                if upper_hex?(i + 1) and upper_hex?(i + 2):
-                    valid_from?(i + 3)
-                else:
-                    false
-            else:
-                v = char::scalar_value(c)
-                if v <= 127 and is_unreserved(v):
-                    valid_from?(i + 1)
-                else:
-                    false
+            v = char::scalar_value(c)
+            if v <= 127 and is_unreserved(v):
+                return valid_from?(i + 1)
+
+        false
 
     valid_from?(0)
 

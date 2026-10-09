@@ -45,7 +45,7 @@ fn replace(haystack, needle, replacement) errors LowerUnderrun, UpperOverrun:
 
 # The sample's inputs never take a slice out of range; the handlers
 # state what one would mean.
-fn sample() errors LowerUnderrun, UpperOverrun:
+fn sample() -> list errors LowerUnderrun, UpperOverrun:
     ["abc".replace("x", "y"), "abc".replace("b", "X"), "aaaa".replace("aa", "b"), "abcabc".replace("abc", ""), "".replace("x", "y")]
 
 checks = sample():

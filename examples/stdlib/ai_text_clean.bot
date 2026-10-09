@@ -83,7 +83,7 @@ fn clean_ai_text(text) errors LowerUnderrun:
 
 # The sample's inputs never take a slice out of range; the handler
 # states what one would mean.
-fn sample() errors LowerUnderrun:
+fn sample() -> list errors LowerUnderrun:
     [clean_ai_text("hello"), clean_ai_text("hello 🙂 world"), clean_ai_text("AI—generated"), clean_ai_text("“hello”"), clean_ai_text("‘hello’"), clean_ai_text("wait… what?")]
 
 checks = sample():

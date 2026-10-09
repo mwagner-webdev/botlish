@@ -163,13 +163,10 @@ fn ht_find_get(table, key, index) errors IndexNotFound:
 # that confirmation is done (FIRST-TOMBSTONE is -1 until one is seen).
 fn ht_find_insert(table, key, index, first_tombstone) errors IndexNotFound:
     state = mutable_array::at(table.controls, index)
-    if state == ht_empty_state():
-        if first_tombstone >= 0:
-            return first_tombstone
+    if state == ht_empty_state() and first_tombstone >= 0:
+        return first_tombstone
 
-        return index
-
-    if state == ht_occupied_state() and mutable_array::at(table.keys, index) == key:
+    if state == ht_empty_state() or (state == ht_occupied_state() and mutable_array::at(table.keys, index) == key):
         return index
 
     if state == ht_tombstone_state() and first_tombstone < 0:
@@ -297,14 +294,13 @@ fn ht_set(table, key, value) errors IndexNotFound:
 # TABLE without a mapping of KEY.
 fn ht_delete(table, key) errors IndexNotFound:
     index = table.ht_find_get(key, table.ht_probe_start(key))
-    if index < 0:
-        return table
+    if index >= 0:
+        table.controls.set(index, ht_tombstone_state())
+        table.keys.set(index, unit)
+        table.values.set(index, unit)
+        table.counts.set(0, ht_size(table) - 1)
+        table.counts.set(1, ht_tombstones(table) + 1)
 
-    table.controls.set(index, ht_tombstone_state())
-    table.keys.set(index, unit)
-    table.values.set(index, unit)
-    table.counts.set(0, ht_size(table) - 1)
-    table.counts.set(1, ht_tombstones(table) + 1)
     table
 
 # ---------------------------------------------------------------------------
@@ -333,7 +329,7 @@ fn ht_to_list(table) errors IndexNotFound:
 # gives the table its own name: Botlish has no assignment, and a table is a
 # value (t3 is still the table with "age" after t4 deleted it).
 
-fn sample_checks() errors IndexNotFound:
+fn sample_checks() -> list errors IndexNotFound:
     t0 = ht_new()
     t1 = t0.ht_set("name", "Ada")
     t2 = t1.ht_set("age", "36")

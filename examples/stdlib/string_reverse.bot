@@ -27,7 +27,7 @@ fn reverse_chars(text) errors LowerUnderrun, UpperOverrun:
 
 # The sample's inputs never take a slice out of range; the handlers
 # state what one would mean.
-fn sample() errors LowerUnderrun, UpperOverrun:
+fn sample() -> list errors LowerUnderrun, UpperOverrun:
     [reverse_chars(""), reverse_chars("a"), reverse_chars("abc"), reverse_chars("abcd"), reverse_chars("äöü")]
 
 checks = sample():

@@ -331,13 +331,10 @@ fn ht_find_get(table, key, index) errors IndexNotFound:
 # that confirmation is done (FIRST-TOMBSTONE is -1 until one is seen).
 fn ht_find_insert(table, key, index, first_tombstone) errors IndexNotFound:
     state = mutable_array::at(table.controls, index)
-    if state == ht_empty_state():
-        if first_tombstone >= 0:
-            return first_tombstone
+    if state == ht_empty_state() and first_tombstone >= 0:
+        return first_tombstone
 
-        return index
-
-    if state == ht_occupied_state() and mutable_array::at(table.keys, index) == key:
+    if state == ht_empty_state() or (state == ht_occupied_state() and mutable_array::at(table.keys, index) == key):
         return index
 
     if state == ht_tombstone_state() and first_tombstone < 0:
@@ -539,7 +536,7 @@ fn csv_records_presized(text) errors IndexNotFound, LowerUnderrun, UpperOverrun:
 # (checked directly, alongside the differential/property tests in
 # tests/native-csv-records.test).
 
-fn sample_checks() errors IndexNotFound, LowerUnderrun, UpperOverrun:
+fn sample_checks() -> list errors IndexNotFound, LowerUnderrun, UpperOverrun:
     rows = csv_records("name,age,city\nAlice,31,Berlin\nBob,42,Hamburg\n")
     presized_rows = csv_records_presized("name,age,city\nAlice,31,Berlin\nBob,42,Hamburg\n")
     first = list::at(rows, 0)
