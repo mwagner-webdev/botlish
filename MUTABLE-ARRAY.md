@@ -832,10 +832,15 @@ were added.
 * ImmutableSet admits no affine members (by element-operation
   requirements).
 * An array has no clear/take/pop: by shape (no empty slot), not history.
-* Natively, a program that uses a typed array through untyped helpers
-  (the HashTable, the ChunkedBuilder) compiles only specialized (a struct
-  projection on an untyped parameter: `-specialize 0` is unsupported), as
-  before for the HashTable.
+* Natively, a struct of arrays projected through untyped parameters
+  compiles only specialized (native code needs a projection's slot
+  statically: `-specialize 0` is unsupported) -- the HashTable, as before
+  this milestone (hashtable and csv_records were unsupported generically
+  then too). `csv_chunked.bot`'s ChunkedBuilder functions declare their
+  parameter's type, so its generic build works as it did (30 blockers and
+  20 guards, against 38 and 26 before); left untyped, its 26 corpus and
+  growth tests ran natively only specialized (`native-coverage.tcl`'s
+  passed-partial class).
 
 ### 67. Limitations before enums/test framework
 
@@ -908,7 +913,8 @@ reference semantics:
   `examples/stdlib/hashtable.bot` (the table is a `HashTable` struct of four
   arrays every update returns: `t2 = ht_set(t1, k, v)`; `t1` is unchanged),
   `csv_records.bot` (its copy of the table; `build_rows` threads its outer
-  array), `csv_chunked.bot` (a `ChunkedBuilder` struct; `chunked_copy_chunks`
+  array), `csv_chunked.bot` (a `ChunkedBuilder` struct, its functions declaring the
+  builder parameter's type; `chunked_copy_chunks`
   returns the array it fills -- with aliasing it filled the caller's through
   its parameter, and its 100-row case lost every completed chunk under value
   semantics until rewritten). Tests that observed evaluation order or effects

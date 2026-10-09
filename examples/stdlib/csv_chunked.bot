@@ -36,6 +36,10 @@ import str
 fn chunk_size():
     64
 
+# The builder is a struct whose arrays are field places (an append mutates
+# them in place; MUTABLE-ARRAY.md). Its functions declare the parameter's
+# type: native code compiles a field projection to a known slot, so an
+# untyped `builder.filled` would compile only specialized.
 struct ChunkedBuilder:
     completed: list
     current: mutarray
@@ -48,7 +52,7 @@ fn chunked_new():
 # slot, or -- when the current chunk is full -- files it away in completed
 # (persistent list::append: see the file-level note; this never copies a
 # chunk's *elements*, only prior chunk handles) and starts a fresh chunk.
-fn chunked_append(builder, value) errors IndexNotFound:
+fn chunked_append(builder: ChunkedBuilder, value) errors IndexNotFound:
     filled = mutable_array::at(builder.filled, 0)
     if filled == chunk_size():
         fresh = mutable_array::allocate(chunk_size())
@@ -72,7 +76,7 @@ fn chunked_copy_chunks(chunks, index, final, offset) errors IndexNotFound, Lower
 # BUILDER's elements as an ordinary immutable List: one exact-size
 # MutableArray, filled by bulk-copying every completed chunk followed by the
 # current chunk's filled prefix, then frozen.
-fn chunked_finish(builder) errors IndexNotFound, LowerUnderrun, UpperOverrun:
+fn chunked_finish(builder: ChunkedBuilder) errors IndexNotFound, LowerUnderrun, UpperOverrun:
     filled = mutable_array::at(builder.filled, 0)
     offset = list::length(builder.completed) * chunk_size()
     total = offset + filled

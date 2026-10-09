@@ -689,11 +689,13 @@ test native-spec-14 {guard accounting: blockers and emitted guards agree} -body 
 # constructors are registered natives, and lib/mutable_array.bot no longer
 # loads lib/list.bot), hashtable 79 -> 99 blockers / 25 -> 8 specialized
 # guards and csv_records 101 -> 112 / 23 -> 6 (the table is a HashTable
-# struct value every update returns); csv_chunked 38 -> 48 blockers, its
-# generic build now unsupported (a ChunkedBuilder's untyped field
-# projections, like the HashTable's) and 0 -> 1 specialized guards (a chunk
-# read out of the untyped `completed` List).
-} -result {{ai_text_clean 5 5 0 0} {csv 25 17 0 0} {csv_chunked 48 unsupported 1 1} {csv_geometric 27 27 0 0} {csv_records 112 unsupported 6 6} {hashtable 99 unsupported 8 8} {matmul 27 17 0 0} {string_replace 12 12 0 0} {string_reverse 4 4 0 0}}
+# struct value every update returns); csv_chunked 38 -> 30 blockers and
+# 26 -> 20 generic guards (a ChunkedBuilder struct, its functions declaring
+# the builder parameter's type: without the declaration its field
+# projections would make the generic build unsupported, as the HashTable's
+# do) and 0 -> 1 specialized guards (a chunk read out of the untyped
+# `completed` List).
+} -result {{ai_text_clean 5 5 0 0} {csv 25 17 0 0} {csv_chunked 30 20 1 1} {csv_geometric 27 27 0 0} {csv_records 112 unsupported 6 6} {hashtable 99 unsupported 8 8} {matmul 27 17 0 0} {string_replace 12 12 0 0} {string_reverse 4 4 0 0}}
 
 # ---------------------------------------------------------------------------
 # Closures
