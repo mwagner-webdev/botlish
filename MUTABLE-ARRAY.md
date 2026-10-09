@@ -799,6 +799,49 @@ a slot cannot be empty, so the step creates and releases one coroutine --
 the 15 999 reused stacks). With an `Option` element (67) a step would swap
 `None` in instead.
 
+**The corpus, before and after** (the commit before this milestone, its
+native backend built from that tree, against this one; the same machine,
+otherwise idle; native times are best of many runs and still vary by up to
++-40% at the largest sizes, so only differences that repeat are stated):
+
+* *Compile time* (frontend and native lowering of every corpus program, best
+  of 3, second of two rounds): within -19 % .. +9 % of before, most
+  programs faster; `csv_chunked` +9 % (its source changed). A generated
+  800-statement function compiled 3x slower at first -- the convention's
+  `Eligible` rescanned the program for every binding on every pass -- and
+  is now within 15 % of before (8.7 s against 7.6 s; `Captured` computes the
+  set once).
+* *HashTable* (`bench/hashtable.tcl`, which had stopped running before this
+  milestone: a quoting slip, and programs that discarded every update's
+  result; fixed). Operations still allocate nothing (alloc/op 0 for hit,
+  miss, replace at every size). A presized table is 5 objects instead of 4
+  (the struct replaces the outer array; the counts get their own array); a
+  resize allocates 5 instead of 3 (four arrays and the struct). Creating
+  1000 tables: 287 us against 265 us; filling 1000 presized 7-entry tables:
+  1.10 ms against 1.18 ms; 1000 default tables (one resize each): 2.03 ms
+  against 1.86 ms. Operation times on small and medium tables are equal or
+  lower in both rounds; at 100 000 entries the runs vary more than the
+  trees differ (identical GC cycles and peak).
+* *csv_geometric*: the same allocations (2.7 % fewer bytes), 2 fewer
+  guards; times within the noise.
+* *csv_chunked*: one more allocation per builder (its `filled` counter is a
+  one-slot array, where the List-shaped builder kept an Int its native
+  lowering scalar-replaced): 319 564 against 299 240 objects at 10 000
+  rows, 7-24 % slower at 1 000 and 10 000 rows. An Int field rebuilt by
+  every append was tried and is worse (a struct per append: 359 260
+  objects, no faster).
+* *csv_records* (realistic schema, 1000 rows, best of 28 runs each):
+  parsing alone 3.73-3.82 ms against 3.51-3.66 (+5 %), default row tables
+  6.62-6.68 against 5.73-5.78 (+16 %), presized 5.78-5.82 against
+  5.23-5.26 (+11 %). It executes fewer instructions (callgrind: 182.9 M
+  against 192.9 M, compilation included) but 13 500 more `malloc` calls
+  (103 017 against 89 492): every array is now a header and an
+  `Rc`-counted backing -- one more allocation per array, the
+  representation MutableVector has had since its milestone -- plus the
+  HashTable structs. A fixed-length array could keep its backing in one
+  allocation (`Rc<[Value]>`: it never grows); that is a runtime change for
+  a follow-up, not made here.
+
 ### 63. Backwards-compatibility findings
 
 See [Compatibility](#compatibility).
