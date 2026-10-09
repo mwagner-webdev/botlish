@@ -72,18 +72,24 @@ proc paramGuards {hir analysis id} {
 
 # ---------------------------------------------------------------------------
 # refined-checks: the keys, and nothing lost
+#
+# The warning-driven refactor (REFACTOR-WARNINGS-CLEAN.md) merged emailish?'s
+# rejections behind `if local_end > 0:`, which narrows where the old
+# `if local_end == 0:` else-branch did not: domain?, tld? and the
+# str::is_tcl_alpha scan_while each start one higher (2, 3, 3), keyed and
+# generic alike.
 
 test closure-int-keys-refined-checks {tld?, domain?, char_at and scan_while's start are Int-keyed; each generic instance is a dormant Block-value entry; the keyed instances keep every entry Range the generic ones had} -body {
     lassign [refinedChecks] hir spec analysis
     lmap name {tld? domain? char_at scan_while} {rowsOf $spec $analysis $name}
-} -result {{{tld?<generic> 1 {{[-∞, +∞]}}} {tld?<int> 0 {{[2, 4611686018427387903]}}}} {{domain?<generic> 1 {{[-∞, +∞]}}} {domain?<int> 0 {{[1, 4611686018427387903]}}}} {{char_at<generic> 1 {{[-∞, +∞]}}} {char_at<int> 0 {{[0, 4611686018427387902]}}}} {{scan_while<generic> 1 {{[-∞, +∞]} {[-∞, +∞]}}} {{scan_while<any, native(str::is_tcl_alpha)>} 1 {{[-∞, +∞]} {[-∞, +∞]}}} {{scan_while<int, block(eN)>} 0 {{[0, 0]} {[-∞, +∞]}}} {{scan_while<int, native(str::is_tcl_alpha)>} 0 {{[2, 4611686018427387903]} {[-∞, +∞]}}}}}
+} -result {{{tld?<generic> 1 {{[-∞, +∞]}}} {tld?<int> 0 {{[3, 4611686018427387903]}}}} {{domain?<generic> 1 {{[-∞, +∞]}}} {domain?<int> 0 {{[2, 4611686018427387903]}}}} {{char_at<generic> 1 {{[-∞, +∞]}}} {char_at<int> 0 {{[0, 4611686018427387902]}}}} {{scan_while<generic> 1 {{[-∞, +∞]} {[-∞, +∞]}}} {{scan_while<any, native(str::is_tcl_alpha)>} 1 {{[-∞, +∞]} {[-∞, +∞]}}} {{scan_while<int, block(eN)>} 0 {{[0, 0]} {[-∞, +∞]}}} {{scan_while<int, native(str::is_tcl_alpha)>} 0 {{[3, 4611686018427387903]} {[-∞, +∞]}}}}}
 
 test closure-int-keys-refined-checks-knob-off {with the knob off the same functions are <generic> (or <any, …>) with the same entry Ranges} -body {
     withIntKeys 0 {
         lassign [refinedChecks] hir spec analysis
         lmap name {tld? domain? char_at} {rowsOf $spec $analysis $name}
     }
-} -result {{{tld?<generic> 0 {{[2, 4611686018427387903]}}}} {{domain?<generic> 0 {{[1, 4611686018427387903]}}}} {{char_at<generic> 0 {{[0, 4611686018427387902]}}}}}
+} -result {{{tld?<generic> 0 {{[3, 4611686018427387903]}}}} {{domain?<generic> 0 {{[2, 4611686018427387903]}}}} {{char_at<generic> 0 {{[0, 4611686018427387902]}}}}}
 
 test closure-int-keys-refined-checks-nir-unchanged {the payoff of the keys alone, pinned honestly: with de-closured functions tagged (loss point 5's knob off) refined-checks' NIR is identical apart from instance labels, with the RawInt demand filter on and off (counted loops are raw with or without the keys since loss point 4, which reads Ranges, not keys); with loss point 5 the Int keys are what lets the internal variants take raw positions, so the NIR differs} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot]]

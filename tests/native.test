@@ -695,7 +695,14 @@ test native-spec-14 {guard accounting: blockers and emitted guards agree} -body 
 # projections would make the generic build unsupported, as the HashTable's
 # do) and 0 -> 1 specialized guards (a chunk read out of the untyped
 # `completed` List).
-} -result {{ai_text_clean 5 5 0 0} {csv 25 17 0 0} {csv_chunked 30 20 1 1} {csv_geometric 27 27 0 0} {csv_records 112 unsupported 6 6} {hashtable 99 unsupported 8 8} {matmul 27 17 0 0} {string_replace 12 12 0 0} {string_reverse 4 4 0 0}}
+#
+# REFACTOR-WARNINGS-CLEAN.md (P3: the CSV scanners read characters with
+# str::char_at through a new quote_at?, ai_text_clean's clean_char reads the
+# character its text holds; hir-specialize-corpus-1 attributes the same
+# blockers): ai_text_clean 5 -> 6 blockers and generic guards, csv 25 -> 27
+# blockers, csv_chunked 30 -> 32, csv_geometric 27 -> 28 blockers and
+# 27 -> 26 generic guards, csv_records 112 -> 113.
+} -result {{ai_text_clean 6 6 0 0} {csv 27 17 0 0} {csv_chunked 32 20 1 1} {csv_geometric 28 26 0 0} {csv_records 113 unsupported 6 6} {hashtable 99 unsupported 8 8} {matmul 27 17 0 0} {string_replace 12 12 0 0} {string_reverse 4 4 0 0}}
 
 # ---------------------------------------------------------------------------
 # Closures

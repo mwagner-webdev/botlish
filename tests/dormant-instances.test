@@ -210,10 +210,12 @@ set escapeShape {
 # ---------------------------------------------------------------------------
 # Which instances are dormant
 
-test dormant-refined-checks-set {refined-checks: the dormant instances are the generic Block-value entries of the de-closured closures whose calls are Int-keyed (emailish?'s char_at, scan_while, tld?, domain?; uri_query_value?'s upper_hex?, valid_from?) and the scan_while instance only tld?<generic> calls} -body {
+# emailish?'s char_is? (REFACTOR-WARNINGS-CLEAN.md: its character tests read
+# str::char_at behind char_at's own guard) is one more such closure.
+test dormant-refined-checks-set {refined-checks: the dormant instances are the generic Block-value entries of the de-closured closures whose calls are Int-keyed (emailish?'s char_at, char_is?, scan_while, tld?, domain?; uri_query_value?'s upper_hex?, valid_from?) and the scan_while instance only tld?<generic> calls} -body {
     lassign [refinedChecks] hir spec analysis
     dormantLabels $spec
-} -result {char_at<generic> domain?<generic> {scan_while<any, native(str::is_tcl_alpha)>} scan_while<generic> tld?<generic> upper_hex?<generic> valid_from?<generic>}
+} -result {char_at<generic> char_is?<generic> domain?<generic> {scan_while<any, native(str::is_tcl_alpha)>} scan_while<generic> tld?<generic> upper_hex?<generic> valid_from?<generic>}
 
 test dormant-transitive {an instance reachable only through a dormant entry is dormant too (apply<any, str, int>); the live, exact apply instance is not; get's generic entry is dormant (its calls are Int-keyed)} -body {
     lassign [dormantOf $transitiveShape] hir spec analysis
@@ -242,11 +244,13 @@ test dormant-used-set-unchanged {the dormant set changes no instance: keys and u
     set same
 } -result {1 1 1 1}
 
+# char_at's callers: 6 since emailish?'s "." and "@" tests moved to char_is?
+# (REFACTOR-WARNINGS-CLEAN.md).
 test dormant-closed-audit {closedAudit states the dormant entry: open to hir::range, never entered} -body {
     lassign [refinedChecks] hir spec analysis
     set audit [hir::specialize::closedAudit $hir $spec]
     list [regexp {scan_while<generic> +closed=0 range-open=1 callers=0 exact=\[\] dormant=1  \(closure de-closure-converted via its specialized instances; this generic Block-value entry is never entered\)} $audit] \
-        [regexp {char_at<int> +closed=1 range-open=0 callers=7 exact=\[\] dormant=0  \(specialized: selected only by exact calls\)} $audit] \
+        [regexp {char_at<int> +closed=1 range-open=0 callers=6 exact=\[\] dormant=0  \(specialized: selected only by exact calls\)} $audit] \
         [regexp {ok<generic> +closed=1 range-open=0 callers=2 exact=\[\] dormant=0  \(closure, blockescape: every reference is an exact call\)} \
             [lassign [dormantOf $::theoremShape] th ts ta; hir::specialize::closedAudit $th $ts]]
 } -result {1 1 1}
@@ -276,11 +280,13 @@ test dormant-refined-checks-char-at-entry {refined-checks: char_at.i loses the -
 # The guard also makes the slice's bounds a completion proof, so its checks are
 # gone from the NIR: no `regioncheck` before the region, `substrproven` (no
 # check, no error exit) where the String is materialized (PROOF-FACT-REPAIRS.md).
+# Since the warning-driven refactor (REFACTOR-WARNINGS-CLEAN.md) the
+# materializing variant is emitted first.
 test dormant-refined-checks-char-at-nir {refined-checks: char_at's i + 1 is a raw riadd (no tag test, no overflow check) in both of its emitted variants, instead of a tagged iadd} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot]]
     set off [withDormant 0 {nirOpsOf [native::nir $hir] char_at}]
     list $off [nirOpsOf [native::nir $hir] char_at]
-} -result {{{ilt runbox runbox rige iadd} {ilt runbox runbox rige iadd substrproven}} {{runbox runbox rige runbox riadd rbox} {runbox runbox rige runbox riadd rbox substrproven}}}
+} -result {{{ilt runbox runbox rige iadd substrproven} {ilt runbox runbox rige iadd}} {{runbox runbox rige runbox riadd rbox substrproven} {runbox runbox rige runbox riadd rbox}}}
 
 test dormant-scan-shape-entry {the emailish? scanner shape: get.i is [0, …] once scan<generic>'s unbounded loop counter no longer reaches it} -body {
     set off [withDormant 0 {
