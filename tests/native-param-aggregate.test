@@ -361,10 +361,15 @@ test paramagg-chunked-1 {ChunkedBuilder's csv_parse value is unaffected} -body {
     assertParity [corpus::text csv_chunked]
 } -result {list {{list {{str name} {str age}}} {list {{str Alice} {str 30}}} {list {{str Bob} {str 40}}}}}
 
-test paramagg-chunked-2 {chunked_append's own input unpack call sites drop out} -body {
+# csv_chunked's builder is a ChunkedBuilder struct (MUTABLE-ARRAY.md: with
+# value semantics a List-shaped builder's arrays are copies once extracted,
+# so the program keeps them in struct fields, which are places): there is no
+# List to unpack, and an append that fills no chunk mutates the builder's
+# arrays in place and returns the builder parameter itself -- no copy.
+test paramagg-chunked-2 {chunked_append mutates its builder's arrays in place: no List unpacking, no copy, and the common path returns the builder it was given} -body {
     set match [funcNir [nirOf [corpus::text csv_chunked]] chunked_append]
-    list [regexp {listget} $match] [regexp {results=3} $match]
-} -result {0 1}
+    list [regexp {listget} $match] [regexp {mvshare} $match] [regexp -line {^\s*ret %0$} $match]
+} -result {0 0 1}
 
 test paramagg-records-1 {csv_records composes both builder and HashTable virtualization successfully} -body {
     assertParity [corpus::text csv_records]
