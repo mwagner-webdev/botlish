@@ -729,7 +729,75 @@ statics precede it), plus the constant pool's alignment padding.
 
 ### 62. Performance
 
-PERFORMANCE-RESULTS.
+`tclsh9.0 bench/mutable-array.tcl` (n = 2000 operations per program on the
+Tcl backends, 200 000 natively, coroutine programs natively at most 20 000;
+best of 5; the machine otherwise idle -- a first run beside a test suite
+measured the native affine construction at 57.6 us per slot, an artifact of
+the load). Per operation; in parentheses the whole program per operation;
+a baseline's own cost is subtracted, so a difference within the noise can
+come out negative.
+
+| operation | Tcl interp | Tcl compile | Cranelift |
+|---|---:|---:|---:|
+| List construction (collecting loop), per element, for comparison | 26167 ns | 1342 ns | 40 ns |
+| `create(n, 0)`, per slot | 644 ns | 482 ns | 0 ns |
+| `from_list`, per element over building the List | -942 ns | 193 ns | -5 ns |
+| `generate(n, tens)`, per slot (one factory call each) | 61634 ns | 9206 ns | 13 ns |
+| `at` | 62011 ns | 6122 ns | 40 ns |
+| `set` on a unique array (no detach) | 76344 ns | 6456 ns | 45 ns |
+| `swap` (unrestricted) | 73452 ns | 6659 ns | 41 ns |
+| iterate an unrestricted array (snapshot), per element | 22216 ns | 1268 ns | 51 ns |
+| MutableVector `at` / `swap`, for comparison | 68280 / 76592 ns | 13855 / 15324 ns | 73 / 38 ns |
+| MutableBytes `replace` on a unique store, for comparison | 257276 ns | 24084 ns | 94 ns |
+| create and release a coroutine (no array) | 417880 ns | 97912 ns | 935 ns |
+| `generate(n, make)`, per slot, the array dropped whole | 415566 ns | 148417 ns | 35814 ns |
+| swap a coroutine in, the displaced one released (over create and release) | 124747 ns | 28010 ns | -19 ns |
+| consume an affine array in a loop, per element (over generate and drop) | 127805 ns | 10314 ns | -74 ns |
+| `MutableVector[MutableArray[int]]`: push a 2-slot array, pop it | 227056 ns | 26112 ns | 194 ns |
+| `MutableVector[MutableArray[int]]`: copy an element out, write it | 246000 ns | 42814 ns | 254 ns |
+| `MutableVector[MutableArray[Coroutine]]`: push a generated 2-slot array, pop it | 1082606 ns | 267283 ns | 2079 ns |
+
+Natively every unrestricted operation is one runtime call with its bounds
+check (40-45 ns), of the order of the vector's; `create` fills its slots
+with one repeated value (no per-slot work worth measuring); `generate`
+costs a direct call per slot. For coroutines the array adds nothing
+measurable: swapping one in and consuming the array cost what creating,
+releasing and dropping them do, within the noise. What does cost is
+holding N coroutines suspended at once: about 36 us each natively, which is
+mapping N native stacks (the pool keeps 32), not the array -- a vector
+holding N coroutines measured 39.6 us each in a run right after
+(MUTABLE-VECTOR.md's 21 us was measured on another machine).
+
+**Copy-on-write complexity** (K = 200 copies of an S-element array per
+program; per copy, Cranelift):
+
+| S | copy | copy, then its first write | elements copied by detaches (counter) |
+|---:|---:|---:|---:|
+| 10 | 48 ns | 48 ns | 2 000 |
+| 1 000 | 96 ns | 2 073 ns | 200 000 |
+| 10 000 | 46 ns | 25 995 ns | 2 000 000 |
+
+Every program makes exactly 200 shares; the copy costs the same at every S
+(O(1): a new header over the shared backing); the first write through a
+copy detaches once, copying its S elements (about 2-2.6 ns per element);
+200 000 writes to one unique array make no share and no detach. The vector
+rows have the same shape (each copied vector also holds the element its
+program pushes: 2 200, 200 200, 2 000 200). On the Tcl backends a copy is
+O(1) as well (a shared Tcl list); the first write's O(S) shows on the Tcl
+compiler (20 us at S = 10, 75 us at S = 10 000); the interpreter's own cost
+per operation buries it.
+
+**Scheduler-shaped construction** (`sched-8`: N workers from
+`generate(n, worker)`, 8 rounds over the array -- swap a worker out, resume
+it, swap it back -- then a consuming loop): 8.9 us per resume step natively
+(185 us Tcl compile, 1.1 ms Tcl interp); N = 2000: 2001 stacks mapped,
+15 999 reused, 18 000 released, none swept; no array share or detach (an
+affine array is never shared). Of the 8.9 us, about 4.5 us is the 2000
+workers' stack mappings spread over the 16 000 steps, and about 0.9 us the
+placeholder each step swaps in to take a worker out (`q.swap(i, make(0))`:
+a slot cannot be empty, so the step creates and releases one coroutine --
+the 15 999 reused stacks). With an `Option` element (67) a step would swap
+`None` in instead.
 
 ### 63. Backwards-compatibility findings
 
