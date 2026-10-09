@@ -92,7 +92,9 @@ attempt showed came from where the table lived, untouched by the spelling;
 and the shipped corpus has no instance. The recommendation is to record it
 with graduation criteria, not to build it now.
 
-Full regression: {{REGRESSION-SUMMARY}}
+Full regression at the final tree (991c666): interp 6813/6813, compile 6809
+passed and the kickoff's 4 skipped, native coverage 0 failed with the same 60
+unsupported tests as at kickoff (section 17).
 
 ## Contents
 
@@ -344,7 +346,7 @@ Observable behavior is identical, verified mechanically per class:
 | P4 structural | 97e13ed | 44 | 5 annotated, 7 merged | targeted run (62 test files naming a touched program): found P3's stale pins and three costly merges |
 | P5 H2 | c412959 | 42 | 2 test data respelled | covered by the final run (the expect line pins the sample) |
 | P6 gate, docs | bad5b8d | 42 = manifest | gate, CI job, tests, documentation | covered by the final run |
-| P4 follow-up | aa4cb40, 47a328d, 991c666 | 42 = manifest | three merges respelled without conjunctions (section 15, finding 12); the pins the refactor moves, updated and attributed | at 47a328d: interp 6808/6813, compile 6804 + 4 skipped, 5 failed on both (five pins P3 had moved, fixed in 991c666); at 991c666: {{LAST-REG}} |
+| P4 follow-up | aa4cb40, 47a328d, 991c666 | 42 = manifest | three merges respelled without conjunctions (section 15, finding 12); the pins the refactor moves, updated and attributed | at 47a328d: interp 6808/6813, compile 6804 + 4 skipped, 5 failed on both (five pins P3 had moved, fixed in 991c666); at 991c666: interp 6813/6813, compile 6809 + 4 skipped, 0 failed; native coverage 0 failed |
 
 Every phase's edits were performed and verified on a scratch copy of
 `examples/`, `bench/` and `lib/` first (the consolidated sweep, the expected
@@ -897,7 +899,25 @@ conversion attempt produced (`SAME-RETURN-VALUE` on the handler form of
 
 ## 17. Full regression
 
-{{REGRESSION}}
+Each run is the whole suite (`tests/all.tcl`) in a worktree of the commit,
+interp and compile in parallel with private `-tmpdir`s; native coverage is
+`tests/native-coverage.tcl` (the whole suite on the cranelift backend,
+every test classified).
+
+| tree | interp | compile | native coverage (cranelift) |
+|---|---|---|---|
+| kickoff 6e3f9f7 | 6801/6801 | 6797 passed, 4 skipped, 0 failed | 2713 native, 3959 independent, 69 passed-partial, 60 unsupported, 0 failed |
+| P2 7697789 (P1 included) | 6807/6807 | 6803 passed, 4 skipped, 0 failed | -- |
+| 47a328d | 6808 of 6813, 5 failed | 6804 passed, 4 skipped, 5 failed | 2717 / 3962 / 69 / 60 / 5 failed |
+| **final 991c666** | **6813/6813** | **6809 passed, 4 skipped, 0 failed** | **2718 / 3966 / 69 / 60 / 0 failed** |
+
+The five failures at 47a328d were the same five tests on every backend, pins
+P3 had moved (section 18); 991c666 updates them and changes nothing else. The
+four compile skips are the kickoff's own (the `coreScoping` constraint). The
+twelve new tests are P1's six marking tests and `tests/warning-gate.test`'s
+six. The unsupported tests are the same 60 in the same construct groups
+before and after: the refactor added no native gap. Commits after 991c666
+change only this report.
 
 ## 18. Deviations and known limitations
 
@@ -1048,7 +1068,12 @@ conversion attempt produced (`SAME-RETURN-VALUE` on the handler form of
     Two design questions are routed to the warning milestones: literal
     receivers of position-first helpers (`0.scan_while(...)`), and
     `ONE-CHAR-STRING-LITERAL` on text by role (`clean_char`'s `"-"`).
-13. *Full regression?* {{REGRESSION-ANSWER}}
+13. *Full regression?* At the final tree (991c666): interp 6813/6813;
+    compile 6809 passed, the kickoff's 4 skipped, 0 failed; native coverage
+    2718 native, 3966 independent, 69 passed-partial, 60 unsupported (the
+    kickoff's 60, same groups), 0 failed. Kickoff: 6801/6801, 6797 + 4, and
+    2713 / 3959 / 69 / 60 / 0. P3 and P4 went in with stale pins that a
+    targeted run and then the 47a328d full run found (section 18).
 14. *Design findings for the language?* Section 15: an append of a character
     to text; character classifiers; `str::char_at` on String regions and short
     strings (native); traversal plans for `char_at` scans; the index proof's
