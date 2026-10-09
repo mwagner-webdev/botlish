@@ -6,7 +6,8 @@
 # Reports, per size, in the shape milestone req #60 asks for:
 #
 #   construction: allocations, bytes, MutableArray allocations (so resizes
-#                 = (mutarrayAllocs - 4) / 3), presized vs default, time
+#                 = (mutarrayAllocs - 4) / 4: a HashTable is four arrays,
+#                 and a resize allocates all four anew), presized vs default, time
 #   operations:   hit / miss / replace / delete -- allocations beyond a
 #                 table-already-built baseline (must be 0: req #19), time
 #
@@ -35,7 +36,8 @@ set hashtableSource [regsub {\nsample\(\)\n$} \
 
 proc hirOf {text} {
     global hashtableSource
-    return [surface::compile [surface::modules::ImportHeader "$hashtableSource\n$text\n"]"$hashtableSource\n$text\n" bench.bot -strict 0 -warnings off]
+    set source "$hashtableSource\n$text\n"
+    return [surface::compile "[surface::modules::ImportHeader $source]$source" bench.bot -strict 0 -warnings off]
 }
 
 proc measureBest {text runs} {
@@ -45,6 +47,15 @@ proc measureBest {text runs} {
 
 proc allocationsOf {text} {
     return [native::allocationReport [hirOf $text] summary]
+}
+
+# Stops the report when a program's value is not the table size it must
+# end with (a generator that dropped an update would otherwise go on
+# measuring an empty table).
+proc expectSize {value size what} {
+    if {$value ne [list int $size]} {
+        error "hashtable.tcl: $what ended with $value, not a table of $size entries"
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -66,21 +77,35 @@ proc keyExpr {kind i} {
 # loop counter is already a usable key), so they use ordinary Botlish tail
 # recursion and scale to much larger N here.
 
+# A table is a value (MUTABLE-ARRAY.md): every update returns the table, and
+# each program threads it -- unrolled String-key programs bind each version
+# to a new name (t0, t1, ...), the Int-key ones pass it down their tail
+# recursion. (Discarding ht_set's result, as these programs did when the
+# arrays were shared references, would leave the table empty.)
+
+# The unrolled String-key insertions of keys 0..N-1 into t0; returns
+# {LINES LAST}: the lines, and the name of the final table.
+proc strInserts {n {first 0}} {
+    set lines {}
+    set t $first
+    for {set i 0} {$i < $n} {incr i} {
+        lappend lines "    t[expr {$t + 1}] = ht_set(t$t, \"key$i\", $i)"
+        incr t
+    }
+    return [list $lines $t]
+}
+
 proc buildProgram {n kind {presize 0}} {
     set ctor [expr {$presize ? "ht_new_sized($n)" : "ht_new()"}]
     if {$kind eq "str"} {
-        set lines {}
-        for {set i 0} {$i < $n} {incr i} {
-            lappend lines "    ht_set(t, \"key$i\", $i)"
-        }
-        return "fn f():\n    t = $ctor\n[join $lines \n]\n    ht_size(t)\nf()\n"
+        lassign [strInserts $n] lines last
+        return "fn f():\n    t0 = $ctor\n[join $lines \n]\n    ht_size(t$last)\nf()\n"
     }
     return "
 fn build(t, i, n):
     if i >= n:
         return t
-    ht_set(t, i, i)
-    build(t, i + 1, n)
+    build(ht_set(t, i, i), i + 1, n)
 
 fn f():
     t = build($ctor, 0, $n)
@@ -93,77 +118,71 @@ f()
 # guaranteed absent (MISS, offset past N), or M replacements (REPLACE).
 proc opProgram {n kind op m} {
     if {$kind eq "str"} {
-        set lines {}
-        for {set i 0} {$i < $n} {incr i} {
-            lappend lines "    ht_set(t, \"key$i\", $i)"
-        }
+        lassign [strInserts $n] lines t
         set ops {}
         for {set i 0} {$i < $m} {incr i} {
             set j [expr {$i % $n}]
             switch -- $op {
-                hit     { lappend ops "    ht_get(t, \"key$j\")" }
-                miss    { lappend ops "    ht_get(t, \"key[expr {$i + $n}]\")" }
-                replace { lappend ops "    ht_set(t, \"key$j\", [expr {$i + $n}])" }
+                hit     { lappend ops "    ht_get(t$t, \"key$j\")" }
+                miss    { lappend ops "    ht_get(t$t, \"key[expr {$i + $n}]\")" }
+                replace {
+                    lappend ops "    t[expr {$t + 1}] = ht_set(t$t, \"key$j\", [expr {$i + $n}])"
+                    incr t
+                }
             }
         }
-        return "fn f():\n    t = ht_new_sized($n)\n[join $lines \n]\n[join $ops \n]\n    ht_size(t)\nf()\n"
+        return "fn f():\n    t0 = ht_new_sized($n)\n[join $lines \n]\n[join $ops \n]\n    ht_size(t$t)\nf()\n"
     }
     switch -- $op {
-        hit     { set loopBody "ht_get(t, j)" }
-        miss    { set loopBody "ht_get(t, i + n)" }
-        replace { set loopBody "ht_set(t, j, i + n)" }
+        hit     { set loopBody "ht_get(t, j)\n    doOps(t, i + 1, m, n)" }
+        miss    { set loopBody "ht_get(t, i + n)\n    doOps(t, i + 1, m, n)" }
+        replace { set loopBody "doOps(ht_set(t, j, i + n), i + 1, m, n)" }
     }
     return "
 fn build(t, i, n):
     if i >= n:
         return t
-    ht_set(t, i, i)
-    build(t, i + 1, n)
+    build(ht_set(t, i, i), i + 1, n)
 
 fn doOps(t, i, m, n):
     if i >= m:
-        return unit
+        return t
     j = mod(i, n)
     $loopBody
-    doOps(t, i + 1, m, n)
 
 fn f():
     t = build(ht_new_sized($n), 0, $n)
-    doOps(t, 0, $m, $n)
-    ht_size(t)
+    u = doOps(t, 0, $m, $n)
+    ht_size(u)
 f()
 "
 }
 
 proc deleteAllProgram {n kind} {
     if {$kind eq "str"} {
-        set lines {}
-        for {set i 0} {$i < $n} {incr i} {
-            lappend lines "    ht_set(t, \"key$i\", $i)"
-        }
+        lassign [strInserts $n] lines t
         set dels {}
         for {set i 0} {$i < $n} {incr i} {
-            lappend dels "    ht_delete(t, \"key$i\")"
+            lappend dels "    t[expr {$t + 1}] = ht_delete(t$t, \"key$i\")"
+            incr t
         }
-        return "fn f():\n    t = ht_new_sized($n)\n[join $lines \n]\n[join $dels \n]\n    ht_size(t)\nf()\n"
+        return "fn f():\n    t0 = ht_new_sized($n)\n[join $lines \n]\n[join $dels \n]\n    ht_size(t$t)\nf()\n"
     }
     return "
 fn build(t, i, n):
     if i >= n:
         return t
-    ht_set(t, i, i)
-    build(t, i + 1, n)
+    build(ht_set(t, i, i), i + 1, n)
 
 fn deleteAll(t, i, n):
     if i >= n:
-        return unit
-    ht_delete(t, i)
-    deleteAll(t, i + 1, n)
+        return t
+    deleteAll(ht_delete(t, i), i + 1, n)
 
 fn f():
     t = build(ht_new(), 0, $n)
-    deleteAll(t, 0, $n)
-    ht_size(t)
+    u = deleteAll(t, 0, $n)
+    ht_size(u)
 f()
 "
 }
@@ -249,7 +268,7 @@ proc modelBuild {n kind} {
 
 proc mutarrayResizes {report} {
     set allocs [dict get $report byKind MutableArray allocations]
-    return [expr {($allocs - 4) / 3}]
+    return [expr {($allocs - 4) / 4}]
 }
 
 proc row {args} {
@@ -280,6 +299,7 @@ proc report {sizes strSizes runs} {
         foreach presize {0 1} {
             set text [buildProgram $n $kind $presize]
             lassign [measureBest $text $runs] best value
+            expectSize $value $n "building $n $kind keys"
             set report [allocationsOf $text]
             row $n $kind $presize [dict get $report total allocations] \
                 [dict get $report total allocatedBytes] [mutarrayResizes $report] $best
@@ -296,11 +316,13 @@ proc report {sizes strSizes runs} {
             set baseAllocs [dict get [allocationsOf $built] total allocations]
             set opAllocs [dict get [allocationsOf $withOps] total allocations]
             lassign [measureBest $withOps $runs] best value
+            expectSize $value $n "$n $kind keys then $m ${op}s"
             set perOp [expr {double($best) / $m}]
             row $n $kind $op [expr {$opAllocs - $baseAllocs}] {} [format %.3f $perOp] {}
         }
         set delText [deleteAllProgram $n $kind]
         lassign [measureBest $delText $runs] best value
+        expectSize $value 0 "deleting all $n $kind keys"
         row $n $kind delete-all {} {} [format %.3f [expr {double($best) / $n}]] {}
     }
     puts ""
