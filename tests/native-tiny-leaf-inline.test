@@ -383,24 +383,32 @@ fn caller():
 # test-tick primitive (those are interp/compile-only Tcl-backed test
 # natives, not in native/lower.tcl's own op table -- see tests/helpers.tcl's
 # own header): a MutableArray slot is this file's own observable sequence,
-# using only ordinary, already-native-lowerable operations.
+# using only ordinary, already-native-lowerable operations. The array is a
+# member of an installed context (a MutableArray is a value since
+# MUTABLE-ARRAY.md: one passed as an argument is the callee's own copy, so
+# only a context member is a place every function shares).
 
 test tiny-leaf-argument-evaluated-once {a callee parameter referenced twice in its body still evaluates its one argument expression exactly once} -body {
     set text {import mutable_array
 fn double_use(x):
     x + x
 
-fn next(a):
-    v = mutable_array::at(a, 0)
-    mutable_array::set(a, 0, v + 1)
+context struct Counter:
+    a: MutableArray[int]
+
+fn next(context c: Counter):
+    v = mutable_array::at(c.a, 0)
+    mutable_array::set(c.a, 0, v + 1)
     v
 
-fn run():
-    a = mutable_array::allocate(1)
-    mutable_array::set(a, 0, 10)
-    r = double_use(next(a))
-    [r, mutable_array::at(a, 0)]
+fn current(context c: Counter):
+    mutable_array::at(c.a, 0)
 
+fn run():
+    r = double_use(next())
+    [r, current()]
+
+with context Counter {a: mutable_array::create(1, 10)}
 run()}
     list [native::evalHir [sourceHir $text] -tiny-leaf-inline-opt 1] \
         [native::evalHir [sourceHir $text] -tiny-leaf-inline-opt 0] \
@@ -412,17 +420,22 @@ test tiny-leaf-unused-argument-still-evaluated {a callee parameter the body neve
 fn ignore_second(x, y):
     x + 1
 
-fn next(a):
-    v = mutable_array::at(a, 0)
-    mutable_array::set(a, 0, v + 1)
+context struct Counter:
+    a: MutableArray[int]
+
+fn next(context c: Counter):
+    v = mutable_array::at(c.a, 0)
+    mutable_array::set(c.a, 0, v + 1)
     v
 
-fn run():
-    a = mutable_array::allocate(1)
-    mutable_array::set(a, 0, 0)
-    r = ignore_second(5, next(a))
-    [r, mutable_array::at(a, 0)]
+fn current(context c: Counter):
+    mutable_array::at(c.a, 0)
 
+fn run():
+    r = ignore_second(5, next())
+    [r, current()]
+
+with context Counter {a: mutable_array::create(1, 0)}
 run()}
     list [native::evalHir [sourceHir $text] -tiny-leaf-inline-opt 1] \
         [native::evalHir [sourceHir $text] -tiny-leaf-inline-opt 0]
@@ -433,16 +446,21 @@ test tiny-leaf-argument-order-preserved {two argument expressions with observabl
 fn combine(a, b):
     a - b
 
-fn next(arr):
-    v = mutable_array::at(arr, 0)
-    mutable_array::set(arr, 0, v + 1)
+context struct Counter:
+    a: MutableArray[int]
+
+fn next(context c: Counter):
+    v = mutable_array::at(c.a, 0)
+    mutable_array::set(c.a, 0, v + 1)
     v
 
-fn run():
-    arr = mutable_array::allocate(1)
-    mutable_array::set(arr, 0, 0)
-    combine(next(arr), next(arr))
+fn current(context c: Counter):
+    mutable_array::at(c.a, 0)
 
+fn run():
+    combine(next(), next())
+
+with context Counter {a: mutable_array::create(1, 0)}
 run()}
     list [native::evalHir [sourceHir $text] -tiny-leaf-inline-opt 1] \
         [native::evalHir [sourceHir $text] -tiny-leaf-inline-opt 0]

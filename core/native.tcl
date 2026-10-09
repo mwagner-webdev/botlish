@@ -62,6 +62,20 @@
 #                   never a native's name, to decide whether an affine
 #                   argument moves, stays owned, or is rejected; they are
 #                   compile-time semantics only (no runtime check exists).
+#   resultLength    "" or the length of the collection the native returns,
+#                   for static analyses that track lengths and capacities
+#                   (hir/cardinality.tcl), read by registration, never by
+#                   name:
+#                     int K           the Int argument K (allocate's capacity)
+#                     list K          the length of List argument K
+#   dropForm        "" or {NAME AT}: the operation's element-dropping variant
+#                   NAME, which takes the element drop descriptor as an extra
+#                   last argument, so that the elements the operation removes,
+#                   displaces or fails to place are released by the static
+#                   drop glue (hir/mutvec.tcl writes it for an operation whose
+#                   element type is affine). AT is the argument whose static
+#                   type holds the element type (a collection), or `result`
+#                   (the call's own type, a constructor's).
 #   bounds          "" or the bounds checks behind a native's argument-
 #                   dependent errors (STDLIB-NAMESPACES.md), stated once here
 #                   so static analyses (hir/completions.tcl) read them by
@@ -268,7 +282,8 @@ proc core::native::register {name args} {
     }
     set options [dict create -impl "" -arity "" -refines-true {} -refines-false {} \
         -param-types "" -result-type any -tests-type "" -runtime {} -result-shape {} -result-range {} \
-        -context-free 0 -errors {} -bounds {} -nomethod 0 -completion 0 -ownership {} -errors-from {}]
+        -context-free 0 -errors {} -bounds {} -nomethod 0 -completion 0 -ownership {} -errors-from {} \
+        -result-length {} -drop-form {}]
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "core::native::register: unknown option \"$option\""
@@ -376,6 +391,16 @@ proc core::native::register {name args} {
             || ![dict get $options -completion])} {
         error "core::native::register: -errors-from of \"$name\" must be the index of an argument of a -completion native"
     }
+    set length [dict get $options -result-length]
+    if {$length ne "" && ([llength $length] != 2 || [lindex $length 0] ni {int list}
+            || ![string is digit -strict [lindex $length 1]] || $arity eq "*" || [lindex $length 1] >= $arity)} {
+        error "core::native::register: bad -result-length \"$length\" for \"$name\""
+    }
+    set dropForm [dict get $options -drop-form]
+    if {$dropForm ne "" && ([llength $dropForm] != 2 || !([lindex $dropForm 1] eq "result"
+            || ([string is digit -strict [lindex $dropForm 1]] && $arity ne "*" && [lindex $dropForm 1] < $arity)))} {
+        error "core::native::register: bad -drop-form \"$dropForm\" for \"$name\""
+    }
     set bounds [dict get $options -bounds]
     if {$bounds ne "" && ![ValidBounds $bounds $arity $errors]} {
         error "core::native::register: bad -bounds \"$bounds\" for \"$name\" (with -errors {$errors})"
@@ -393,7 +418,7 @@ proc core::native::register {name args} {
         resultShape $shape resultRange $range \
         contextFree [dict get $options -context-free] errors $errors bounds $bounds \
         nomethod [dict get $options -nomethod] completion [dict get $options -completion] \
-        ownership $ownership errorsFrom $errorsFrom]
+        ownership $ownership errorsFrom $errorsFrom resultLength $length dropForm $dropForm]
     return [core::value::native $name]
 }
 

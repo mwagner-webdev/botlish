@@ -324,22 +324,24 @@ test paramagg-hashtable-1 {HashTable set/get/delete is unaffected by parameter v
     assertParity [corpus::text hashtable]
 } -result {list {{bool true} {bool true} {bool false} {bool false} {bool true} {int 1}}}
 
-# STRUCTS.md: the rehash now groups its three arrays as anonymous structs
-# {controls, keys, values}, not [..] List literals. The parameter-aggregate
-# optimization itself is about Lists, but the same machinery carries structs
-# now (STRUCT-SCALAR-REPLACEMENT.md): with parameter virtualization on, the
-# two grouping structs cross ht_rehash_scan/ht_rehash_insert as fields and no
-# Struct is allocated; with -param-aggregate-opt 0 they are built at the call
-# (src and dest stay virtual locals until their one non-projecting use).
-test paramagg-hashtable-2 {rehash's dest/src grouping is scalar-replaced across the closed calls (0 Structs), and built once each at the call with parameter virtualization off} -body {
+# STRUCTS.md made the rehash group its three arrays as anonymous structs
+# {controls, keys, values}, which parameter virtualization carried across
+# ht_rehash_scan/ht_rehash_insert as fields (STRUCT-SCALAR-REPLACEMENT.md: 0
+# Structs, 2 with -param-aggregate-opt 0). Since MUTABLE-ARRAY.md a table is
+# a value -- a HashTable struct every update returns -- and the rehash passes
+# the old table's arrays apart, so no grouping struct is left to
+# scalar-replace: the 2 Structs in either mode are the two tables (ht_new's
+# and the rehash's), and the run makes no copy of an array (no share).
+test paramagg-hashtable-2 {a table is built once per construction (ht_new's, the rehash's) in either parameter-virtualization mode, and no array is ever copied} -body {
     set src [regsub {\nsample\(\)\n$} [corpus::text hashtable] "\n"]
-    set hir [sourceHir "$src\nfn many():\n    t = ht_new()\n    ht_set(t, \"a\", 1)\n    ht_set(t, \"b\", 2)\n    ht_set(t, \"c\", 3)\n    ht_set(t, \"d\", 4)\n    ht_set(t, \"e\", 5)\n    ht_set(t, \"f\", 6)\n    ht_size(t)\n\nmany()\n"]
+    set hir [sourceHir "$src\nfn many():\n    t0 = ht_new()\n    t1 = ht_set(t0, \"a\", 1)\n    t2 = ht_set(t1, \"b\", 2)\n    t3 = ht_set(t2, \"c\", 3)\n    t4 = ht_set(t3, \"d\", 4)\n    t5 = ht_set(t4, \"e\", 5)\n    t6 = ht_set(t5, \"f\", 6)\n    ht_size(t6)\n\nmany()\n"]
     set modes [lmap mode {1 0} {
-        set byKind [dict get [native::allocationReport $hir summary 1 -param-aggregate-opt $mode] byKind]
-        list [dict get $byKind List allocations] [dict get $byKind Struct allocations]
+        set report [native::allocationReport $hir summary 1 -param-aggregate-opt $mode]
+        set byKind [dict get $report byKind]
+        list [dict get $byKind List allocations] [dict get $byKind Struct allocations] [dict get $report mutableArray shares]
     }]
     list [native::evalHir $hir] $modes
-} -result {{int 6} {{0 0} {0 2}}}
+} -result {{int 6} {{0 2 0} {0 2 0}}}
 
 test paramagg-geometric-1 {GeometricBuilder's csv_parse value is unaffected} -body {
     assertParity [corpus::text csv_geometric]

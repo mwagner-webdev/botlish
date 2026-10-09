@@ -29,8 +29,10 @@
 #                of functions: `plus = add`)
 #   receivers    parameters, literals, calls (method or free), parenthesized
 #                arithmetic; chains of up to five method calls
-#   effects      `tap(v, log, id)` records that it ran, so the evaluation
-#                order of receivers and arguments is part of the outcome
+#   effects      `tap(v, id)` records that it ran (in a context member's
+#                log: a MutableArray argument would be the callee's own
+#                copy), so the evaluation order of receivers and arguments
+#                is part of the outcome
 #
 # The run also generates NEGATIVE programs, each a valid program with exactly
 # one defect in one method call:
@@ -93,10 +95,20 @@ error TooSmall
 error TooBig
 type Small = Int in 0..10
 
-fn probe(log, id, result):
-    if mutable_array::capacity(log) == 1:
-        mutable_array::set(log, 0, mutable_array::at(log, 0) * 10 + id)
+context struct Log:
+    digits: MutableArray[int]
+fn probe(id, result, context log: Log):
+    mutable_array::set(log.digits, 0, mutable_array::get(log.digits, 0, 0) * 10 + id):
+        on IndexNotFound:
+            unit
     result
+fn logged(context log: Log):
+    mutable_array::get(log.digits, 0, 0)
+fn reset(context log: Log):
+    mutable_array::set(log.digits, 0, 0):
+        on IndexNotFound:
+            unit
+    unit
 fn inc(a):
     a + 1
 fn neg(a):
@@ -141,8 +153,8 @@ fn narrow(x: Small) -> int:
     x + 1
 fn widen(x, y):
     x + y
-fn tap(v, log, id):
-    probe(log, id, v)
+fn tap(v, id):
+    probe(id, v)
 fn check(n, limit) -> int errors TooSmall, TooBig:
     if n < 0:
         fail TooSmall
@@ -238,9 +250,9 @@ proc emit {expr style} {
         tap {
             lassign $expr _ inner id
             if {$style eq "method"} {
-                return "[Receiver $inner $style].tap(log, $id)"
+                return "[Receiver $inner $style].tap($id)"
             }
-            return "tap([emit $inner $style], log, $id)"
+            return "tap([emit $inner $style], $id)"
         }
         checked {
             lassign $expr _ inner limit h1 h2
@@ -278,10 +290,10 @@ proc program {expr style} {
     set ::hoisted {}
     set ::tempId 0
     set text [emit $expr $style]
-    set lines [list $::prelude "fn run(a, b, s):" \
-        "    log = mutable_array::allocate(1)" "    mutable_array::set(log, 0, 0)"]
+    set lines [list $::prelude "fn run(a, b, s):" "    reset()"]
     lappend lines {*}$::hoisted
-    lappend lines "    r = $text" "    \[r, mutable_array::at(log, 0)\]"
+    lappend lines "    r = $text" "    \[r, logged()\]"
+    lappend lines "with context Log {digits: mutable_array::create(1, 0)}"
     lappend lines {[run(3, 5, "xy"), run(0, 2, "abc"), run(7, 1, "q"), run(12, 4, "Hello")]}
     return [join [lflatten $lines] \n]
 }
@@ -348,10 +360,10 @@ set backendDisagreements 0
 # Negative programs: a valid base with one defective method call.
 
 set ::negativeBase {fn run(a, b, s):
-    log = mutable_array::allocate(1)
-    mutable_array::set(log, 0, 0)
+    reset()
     r = %s
-    [r, mutable_array::at(log, 0)]
+    [r, logged()]
+with context Log {digits: mutable_array::create(1, 0)}
 [run(3, 5, "xy"), run(0, 2, "abc")]}
 
 proc negative {kind} {

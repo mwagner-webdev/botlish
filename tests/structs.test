@@ -208,14 +208,19 @@ test struct-eq-hash-consistent {hash agrees with struct equality across source o
 
 test struct-eval-source-order {field expressions run in SOURCE order, not canonical layout order} -body {
     set path [tcltest::makeFile "import mutable_array
-counter = mutable_array::create(1, 0)
-fn ticket(m):
-    n = mutable_array::get(m, 0, 0)
-    if mutable_array::capacity(m) > 0:
-        mutable_array::set(m, 0, n + 1)
+context struct Counter:
+    slots: MutableArray\[int\]
+fn ticket(context c: Counter):
+    n = mutable_array::get(c.slots, 0, 0)
+    mutable_array::set(c.slots, 0, n + 1):
+        on IndexNotFound:
+            unit
     n
-r = \{z: ticket(counter), a: ticket(counter), m: ticket(counter)\}
-\[r, mutable_array::at(counter, 0)\]
+fn count(context c: Counter):
+    mutable_array::get(c.slots, 0, 0)
+with context Counter \{slots: mutable_array::create(1, 0)\}
+r = \{z: ticket(), a: ticket(), m: ticket()\}
+\[r, count()\]
 " eval-order.bot]
     structRunFile $path
 } -result {same: [{a: 1, m: 2, z: 0}, 3]}
@@ -488,28 +493,30 @@ test struct-field-mutarray-typed {a MutableArray field keeps its element contrac
 # ---------------------------------------------------------------------------
 # Bearing: contracts do not vanish inside structs
 
-test struct-bearing-recursive {a struct is bearing iff a field is, recursively} -body {
+test struct-bearing-recursive {a struct is bearing iff a field is, recursively; an array (a value) bears what its elements bear} -body {
     set hir [hir::build {} -strict 0]
-    set array [hir::types::resolveApplication MutableArray int]
-    set inner [hir::types::MakeStruct [list storage $array] 0]
+    set fn [hir::types::MakeFn {int} int {}]
+    set inner [hir::types::MakeStruct [list handler $fn] 0]
     set outer [hir::types::MakeStruct [list box $inner n int] 0]
     set plain [hir::types::MakeStruct {n int s str} 0]
     list [hir::callables::Bearing $hir $inner] [hir::callables::Bearing $hir $outer] [hir::callables::Bearing $hir $plain] \
-        [hir::callables::Bearing $hir [hir::types::resolveApplication List [list $inner]]]
-} -result {1 1 0 1}
+        [hir::callables::Bearing $hir [hir::types::resolveApplication List [list $inner]]] \
+        [hir::callables::Bearing $hir [hir::types::resolveApplication MutableArray [list $inner]]] \
+        [hir::callables::Bearing $hir [hir::types::resolveApplication MutableArray int]]
+} -result {1 1 0 1 1 0}
 
-test struct-bearing-attacks {a typed array cannot be erased through an untyped struct boundary} -body {
-    set m "m = mutable_array::create(2, \"x\")\n"
+test struct-bearing-attacks {a typed callable's contract cannot be erased through an untyped struct boundary (a typed MutableArray, the probe before MUTABLE-ARRAY.md, is a value now: erasing one holds a copy)} -body {
+    set m "fn typed(k: int) -> int:\n    k + 1\n"
     set attacks [list \
-        "import mutable_array\n${m}s = \{storage: m\}\nxs = \[s, 5\]\nxs" \
-        "import mutable_array\nstruct Box:\n    value: any\n${m}b = Box \{value: m\}\nb" \
-        "import mutable_array\n${m}s = \{storage: m\}\nfn f(v: any):\n    v\nf(s)" \
-        "import mutable_array\nstruct Holder:\n    arr: MutableArray\[int\]\n${m}h = Holder \{arr: m\}\nh.arr"]
+        "${m}s = \{handler: typed\}\nxs = \[s, 5\]\nxs" \
+        "struct Box:\n    value: any\n${m}b = Box \{value: typed\}\nb" \
+        "${m}s = \{handler: typed\}\nfn f(v: any):\n    v\nf(s)" \
+        "struct Holder:\n    handler: Fn\{args: \[str\], return: int, errors: \[\]\}\n${m}h = Holder \{handler: typed\}\nh.handler"]
     set needles [list \
-        "cannot erase element contract struct{storage: MutableArray\[str\]} passed as an ordinary call argument" \
-        "cannot erase element contract MutableArray\[str\] stored in field \"value\" of a struct" \
-        "cannot erase element contract struct{storage: MutableArray\[str\]} passed as an ordinary call argument" \
-        "field \"arr\" of struct Holder cannot be proven to satisfy its declared type MutableArray\[int\]"]
+        "this value of type struct\{handler: block(e2)/1 -> int\} has typed parameter requirements that cannot be preserved passed as an ordinary call argument" \
+        "\"typed\" has typed parameter requirements that cannot be preserved stored in field \"value\" of a struct" \
+        "this value of type struct\{handler: block(e2)/1 -> int\} has typed parameter requirements that cannot be preserved passed as an ordinary call argument" \
+        "field \"handler\" of struct Holder cannot be proven to satisfy its declared type Fn\{args: \[str\], return: int, errors: \[\]\}"]
     lmap attack $attacks needle $needles {
         set message [structErrorFile $attack]
         list [lindex [split $message :] 0] [expr {[string first $needle $message] >= 0}]

@@ -3409,7 +3409,7 @@ proc native::lower::DescriptorSkip {descriptor posVar} {
     set c [string index $descriptor $pos]
     incr pos
     switch -- $c {
-        l - v { DescriptorSkip $descriptor pos }
+        l - v - a { DescriptorSkip $descriptor pos }
         s {
             set n [DescriptorNumber $descriptor pos]
             for {set i 0} {$i < $n} {incr i} {
@@ -3922,7 +3922,8 @@ proc native::lower::Project {fnVar e node} {
 # Eligibility (StaticContextEligible, ContextLeaves): a leaf must be a value
 # whose tagged word is never a heap pointer -- an Int whose declared domain
 # fits the small-Int representation, a Bool, Unit or a UnicodeChar -- so the
-# area needs no GC root, no tracing and no dynamic layout. Any other context
+# area needs no GC root, no tracing and no dynamic layout -- or a MutableVector
+# or MutableArray header, which installation registers as a permanent root. Any other context
 # type is CONTEXT-NATIVE-LOWERING-UNSUPPORTED (native compilation fails,
 # naming the field and why); nothing is boxed, pointed to or looked up
 # instead.
@@ -3962,8 +3963,9 @@ proc native::lower::ContextLeaves {id {seen {}}} {
             bool - unit - UnicodeChar {
                 lappend leaves [list [list $field] $type]
             }
-            mutvec {
-                # A MutableVector member (MUTABLE-VECTOR.md): its header,
+            mutvec - mutarray {
+                # A MutableVector or MutableArray member (MUTABLE-VECTOR.md,
+                # MUTABLE-ARRAY.md): its header,
                 # which the context owns for the whole run -- mutated in
                 # place, never replaced -- is registered as a permanent GC
                 # root when installed (`ctxroot`), so the area itself
@@ -4131,7 +4133,7 @@ proc native::lower::ContextInstallCall {fnVar e node} {
     }
     foreach r $leaves leaf [dict get $slot leaves] {
         Emit fn "contextstore $offset $r" $e
-        if {[hir::types::kindOf [lindex $leaf 1]] eq "mutvec"} {
+        if {[hir::types::kindOf [lindex $leaf 1]] in {mutvec mutarray}} {
             Assign fn "op ctxroot $r" $e
         }
         incr offset 8

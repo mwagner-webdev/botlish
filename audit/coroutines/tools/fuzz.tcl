@@ -26,8 +26,10 @@
 #   scan       a counted loop whose body constructs a generator coroutine,
 #              `break`s or `continue`s on given iterations before its
 #              resume, and notes the resumed value
-#   effect     `note(log, T)`: an observable side effect, folding T into a
-#              checksum in a MutableArray every function is passed
+#   effect     `note(T)`: an observable side effect, folding T into a
+#              checksum in the installed Log context's MutableArray (a
+#              MutableArray is a value: one passed as an argument would be
+#              the callee's own copy)
 #
 # In a quarter of the programs ("deep" ones) only the deepest level yields:
 # every level above reaches the yields through calls alone.
@@ -229,7 +231,7 @@ proc Indent {lines prefix} {
 proc FunctionText {k f levels} {
     set root [expr {$k == 0}]
     set result [expr {$root ? "Ev" : "int"}]
-    set params "n: int, log: MutableArray\[int\]"
+    set params "n: int"
     if {[dict get $f declaresResume]} {
         append params ", resume Msg"
     }
@@ -258,9 +260,9 @@ proc FunctionText {k f levels} {
             call {
                 set callee w[expr {$k + 1}]
                 if {[dict get $s handled]} {
-                    lappend lines "    a[incr a] = ${callee}($acc, log):" "        on Boom:" "            1000"
+                    lappend lines "    a[incr a] = ${callee}($acc):" "        on Boom:" "            1000"
                 } else {
-                    lappend lines "    a[incr a] = $acc + ${callee}($acc, log)"
+                    lappend lines "    a[incr a] = $acc + ${callee}($acc)"
                 }
             }
             loop {
@@ -302,13 +304,13 @@ proc FunctionText {k f levels} {
                 if {[dict get $s continue] >= 0} {
                     lappend lines "        if i == [dict get $s continue]:" "            continue"
                 }
-                lappend lines "        note(log, s${m}().v + t$m.v)"
+                lappend lines "        note(s${m}().v + t$m.v)"
             }
             other {
                 lappend lines "    a[incr a] = $acc + other()"
             }
             effect {
-                lappend lines "    note(log, [dict get $s tag])"
+                lappend lines "    note([dict get $s tag])"
             }
         }
     }
@@ -497,11 +499,12 @@ proc generate {seed} {
         "struct Msg:" "    v: int" "" "struct Other:" "    w: int" "" \
         "struct Ev:" "    tag: int" "    v: int" "" \
         "fn take(m: Msg) -> int:" "    m.v" "" \
-        "fn seen(log: MutableArray\[int\]) -> int:" \
-        "    mutable_array::at(log, 0):" "        on IndexNotFound:" "            -1" "" \
-        "fn note(log: MutableArray\[int\], v: int) -> int:" \
-        "    old = seen(log)" \
-        "    mutable_array::set(log, 0, old * 3 + v):" "        on IndexNotFound:" "            unit" "    v" "" \
+        "context struct Log:" "    digits: MutableArray\[int\]" "" \
+        "fn seen(context log: Log) -> int:" \
+        "    mutable_array::at(log.digits, 0):" "        on IndexNotFound:" "            -1" "" \
+        "fn note(v: int, context log: Log) -> int:" \
+        "    old = seen()" \
+        "    mutable_array::set(log.digits, 0, old * 3 + v):" "        on IndexNotFound:" "            unit" "    v" "" \
         "fn gen(n: int) -> Ev:" "    yield Ev {tag: 50, v: n}" "    return Ev {tag: 51, v: n + 1}" ""]
     if {$fault eq "conflict"} {
         lappend lines "fn other(resume Other) -> int:" "    m = yield Ev {tag: 77, v: 0}" "    m.w" ""
@@ -517,12 +520,12 @@ proc generate {seed} {
         append fields [expr {$firstName eq "first" ? ", first" : ", first: $firstName"}]
         lappend observed $firstName
     }
-    lappend driver "log = mutable_array::create(1, 0)"
-    lappend driver "coroutine {$fields} = w0($arg, log)[expr {$rootErrors ? ":" : ""}]"
+    lappend lines "with context Log {digits: mutable_array::create(1, 0)}"
+    lappend driver "coroutine {$fields} = w0($arg)[expr {$rootErrors ? ":" : ""}]"
     if {$rootErrors} {
         lappend driver {*}$handler
     }
-    lappend driver "e0 = seen(log)"
+    lappend driver "e0 = seen()"
     lappend observed e0
     if {$fault eq "branchmove"} {
         # Moved on one path only: the next use of the handle is not
@@ -570,7 +573,7 @@ proc generate {seed} {
                 if {$rootErrors} {
                     lappend driver {*}$handler
                 }
-                lappend driver "e$r = seen(log)"
+                lappend driver "e$r = seen()"
                 lappend observed r$r e$r
                 set releaseAfter "bind r$r"
             }
@@ -592,7 +595,7 @@ proc generate {seed} {
             lappend driver "kept = $current == $current"
         }
         unwrapped {
-            lappend driver "direct = w0(1, log)[expr {$rootErrors ? ":" : ""}]"
+            lappend driver "direct = w0(1)[expr {$rootErrors ? ":" : ""}]"
             if {$rootErrors} {
                 lappend driver {*}$handler
             }

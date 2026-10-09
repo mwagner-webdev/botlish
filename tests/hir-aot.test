@@ -291,7 +291,7 @@ test hir-aot-corpus-1 {every corpus function has closed dispatch, except hashtab
         }
         list $name $open
     }
-} -result {{ai_text_clean {}} {csv {list::any? list::all? list::none? list::find}} {csv_chunked {list::any? list::all? list::none? list::find}} {csv_geometric {list::any? list::all? list::none? list::find}} {csv_records {list::any? list::all? list::none? list::find}} {hashtable {list::any? list::all? list::none? list::find ht_fold}} {matmul {list::any? list::all? list::none? list::find}} {string_replace {}} {string_reverse {}}}
+} -result {{ai_text_clean {}} {csv {list::any? list::all? list::none? list::find}} {csv_chunked {list::any? list::all? list::none? list::find}} {csv_geometric {}} {csv_records {list::any? list::all? list::none? list::find}} {hashtable {list::any? list::all? list::none? list::find ht_fold}} {matmul {list::any? list::all? list::none? list::find}} {string_replace {}} {string_reverse {}}}
 
 # string_reverse and string_replace slice positionally without a proof, so
 # their functions declare LowerUnderrun/UpperOverrun and a closed `sample`

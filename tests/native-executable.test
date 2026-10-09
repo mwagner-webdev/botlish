@@ -146,7 +146,7 @@ test native-executable-output-kinds {standalone rendering supports blocks, mutab
     } finally {
         removeDirectory {aot output test}
     }
-} -result {[ok(5), error("bad"), <block (x)>, <mutable-array capacity=2>]}
+} -result {[ok(5), error("bad"), <block (x)>, <mutable-array [unit, unit]>]}
 
 test native-executable-link-failure {a failed linker invocation preserves the old file and removes temporary artifacts} -constraints executableAot -body {
     set dir [makeDirectory {aot link failure test}]

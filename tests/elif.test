@@ -9,8 +9,8 @@
 # by value, by error, by the log of its own evaluation order, by its analyses
 # and by its native IR.
 #
-# Evaluation order is observed with a one-slot MutableArray read as a decimal
-# number: every probe appends its digit (the test-log native of helpers.tcl is
+# Evaluation order is observed with a one-slot MutableArray, a member of an
+# installed context, read as a decimal number: every probe appends its digit (the test-log native of helpers.tcl is
 # not nameable from source and is not available natively).
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
@@ -22,25 +22,29 @@ testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" &&
 
 set ::allBackends {interp compile cranelift-generic cranelift}
 
-# The preamble of the evaluation-order programs: probe(log, id, result) appends
-# the digit ID to the number in log[0] and returns RESULT.
-# The log is a one-slot MutableArray; the capacity guard is what proves
-# mutable_array::at's index (STDLIB-NAMESPACES.md), so neither helper needs
-# an IndexNotFound handler.
+# The preamble of the evaluation-order programs: probe(id, result) appends
+# the digit ID to the number in the installed Log context's one-slot array
+# and returns RESULT; fresh() resets it to 0. A MutableArray is a value, so
+# the log is not an argument (a callee would mutate its own copy): it is a
+# context member, a place every function sharing the context mutates
+# (MUTABLE-ARRAY.md).
 set ::probePreamble {import list
 import mutable_array
-fn current(log):
-    if mutable_array::capacity(log) == 1:
-        return mutable_array::at(log, 0)
-    -1
-fn probe(log, id, result):
-    if mutable_array::capacity(log) == 1:
-        mutable_array::set(log, 0, current(log) * 10 + id)
+context struct Log:
+    digits: MutableArray[int]
+fn current(context log: Log):
+    mutable_array::get(log.digits, 0, -1)
+fn probe(id, result, context log: Log):
+    mutable_array::set(log.digits, 0, current() * 10 + id):
+        on IndexNotFound:
+            unit
     result
-fn fresh():
-    log = mutable_array::allocate(1)
-    mutable_array::set(log, 0, 0)
-    log
+fn fresh(context log: Log):
+    mutable_array::set(log.digits, 0, 0):
+        on IndexNotFound:
+            unit
+    unit
+with context Log {digits: mutable_array::create(1, 0)}
 }
 
 # Error messages carry source locations, which differ between spellings.
@@ -229,43 +233,43 @@ test elif-top-level-value {a top-level elif chain is the program's value} -body 
 # Evaluation order: conditions in written order, each at most once, none after
 # the selected one; only the selected body runs.
 
-set ::orderElif {fn pick(log, a, b, c):
-    return if probe(log, 1, a):
-        probe(log, 5, true)
+set ::orderElif {fn pick(a, b, c):
+    return if probe(1, a):
+        probe(5, true)
         10
-    elif probe(log, 2, b):
-        probe(log, 6, true)
+    elif probe(2, b):
+        probe(6, true)
         20
-    elif probe(log, 3, c):
-        probe(log, 7, true)
+    elif probe(3, c):
+        probe(7, true)
         30
     else:
-        probe(log, 8, true)
+        probe(8, true)
         40
 fn run(a, b, c):
-    log = fresh()
-    v = pick(log, a, b, c)
-    [v, current(log)]
+    fresh()
+    v = pick(a, b, c)
+    [v, current()]
 }
-set ::orderNested {fn pick(log, a, b, c):
-    return if probe(log, 1, a):
-        probe(log, 5, true)
+set ::orderNested {fn pick(a, b, c):
+    return if probe(1, a):
+        probe(5, true)
         10
     else:
-        if probe(log, 2, b):
-            probe(log, 6, true)
+        if probe(2, b):
+            probe(6, true)
             20
         else:
-            if probe(log, 3, c):
-                probe(log, 7, true)
+            if probe(3, c):
+                probe(7, true)
                 30
             else:
-                probe(log, 8, true)
+                probe(8, true)
                 40
 fn run(a, b, c):
-    log = fresh()
-    v = pick(log, a, b, c)
-    [v, current(log)]
+    fresh()
+    v = pick(a, b, c)
+    [v, current()]
 }
 
 foreach {name call expected} {
@@ -281,26 +285,26 @@ foreach {name call expected} {
 
 test elif-order-without-else {with no final else and every condition false, all conditions run once, in order, and no body} -body {
     set elif {fn run():
-    log = fresh()
-    v = if probe(log, 1, false):
-        probe(log, 4, true)
-    elif probe(log, 2, false):
-        probe(log, 5, true)
-    elif probe(log, 3, false):
-        probe(log, 6, true)
-    [v, current(log)]
+    fresh()
+    v = if probe(1, false):
+        probe(4, true)
+    elif probe(2, false):
+        probe(5, true)
+    elif probe(3, false):
+        probe(6, true)
+    [v, current()]
 run()}
     set nested {fn run():
-    log = fresh()
-    v = if probe(log, 1, false):
-        probe(log, 4, true)
+    fresh()
+    v = if probe(1, false):
+        probe(4, true)
     else:
-        if probe(log, 2, false):
-            probe(log, 5, true)
+        if probe(2, false):
+            probe(5, true)
         else:
-            if probe(log, 3, false):
-                probe(log, 6, true)
-    [v, current(log)]
+            if probe(3, false):
+                probe(6, true)
+    [v, current()]
 run()}
     bothSpellings $::probePreamble$elif $::probePreamble$nested
 } -result {value {[unit, 123]}}
@@ -904,55 +908,62 @@ proc executableValue {text} {
     }
 }
 
-# Closed AOT needs typed code: a typed MutableArray[int] log (the untyped
-# mutable_array::at above has no static kind).
+# Closed AOT needs typed code: a typed log (the untyped mutable_array::get
+# above has no static kind).
 set ::typedPreamble {import mutable_array
-fn current(log: MutableArray[int]) -> int:
-    if mutable_array::capacity(log) == 1:
-        return mutable_array::at(log, 0)
-    -1
-fn probe(log: MutableArray[int], id: int, result: bool) -> bool:
-    if mutable_array::capacity(log) == 1:
-        mutable_array::set(log, 0, current(log) * 10 + id)
+context struct Log:
+    digits: MutableArray[int]
+fn current(context log: Log) -> int:
+    mutable_array::get(log.digits, 0, -1)
+fn probe(id: int, result: bool, context log: Log) -> bool:
+    mutable_array::set(log.digits, 0, current() * 10 + id):
+        on IndexNotFound:
+            unit
     result
+fn fresh(context log: Log) -> unit:
+    mutable_array::set(log.digits, 0, 0):
+        on IndexNotFound:
+            unit
+    unit
+with context Log {digits: mutable_array::create(1, 0)}
 }
-set ::typedElif {fn pick(log: MutableArray[int], a: bool, b: bool, c: bool) -> int:
-    return if probe(log, 1, a):
-        probe(log, 5, true)
+set ::typedElif {fn pick(a: bool, b: bool, c: bool) -> int:
+    return if probe(1, a):
+        probe(5, true)
         10
-    elif probe(log, 2, b):
-        probe(log, 6, true)
+    elif probe(2, b):
+        probe(6, true)
         20
-    elif probe(log, 3, c):
-        probe(log, 7, true)
+    elif probe(3, c):
+        probe(7, true)
         30
     else:
-        probe(log, 8, true)
+        probe(8, true)
         40
 fn run(a: bool, b: bool, c: bool):
-    log = mutable_array::create(1, 0)
-    v = pick(log, a, b, c)
-    [v, current(log)]
+    fresh()
+    v = pick(a, b, c)
+    [v, current()]
 }
-set ::typedNested {fn pick(log: MutableArray[int], a: bool, b: bool, c: bool) -> int:
-    return if probe(log, 1, a):
-        probe(log, 5, true)
+set ::typedNested {fn pick(a: bool, b: bool, c: bool) -> int:
+    return if probe(1, a):
+        probe(5, true)
         10
     else:
-        if probe(log, 2, b):
-            probe(log, 6, true)
+        if probe(2, b):
+            probe(6, true)
             20
         else:
-            if probe(log, 3, c):
-                probe(log, 7, true)
+            if probe(3, c):
+                probe(7, true)
                 30
             else:
-                probe(log, 8, true)
+                probe(8, true)
                 40
 fn run(a: bool, b: bool, c: bool):
-    log = mutable_array::create(1, 0)
-    v = pick(log, a, b, c)
-    [v, current(log)]
+    fresh()
+    v = pick(a, b, c)
+    [v, current()]
 }
 
 # The one value TEXT has on every in-process backend, for programs that use

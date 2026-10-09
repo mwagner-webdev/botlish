@@ -246,14 +246,14 @@ test escape-hashtable-1 {HashTable set/get/delete is unaffected by scalar replac
 test escape-hashtable-2 {rehash still evaluates correctly with escape-opt on or off} -body {
     set driver {
 fn many():
-    t = ht_new()
-    ht_set(t, "a", 1)
-    ht_set(t, "b", 2)
-    ht_set(t, "c", 3)
-    ht_set(t, "d", 4)
-    ht_set(t, "e", 5)
-    ht_set(t, "f", 6)
-    ht_size(t)
+    t0 = ht_new()
+    t1 = ht_set(t0, "a", 1)
+    t2 = ht_set(t1, "b", 2)
+    t3 = ht_set(t2, "c", 3)
+    t4 = ht_set(t3, "d", 4)
+    t5 = ht_set(t4, "e", 5)
+    t6 = ht_set(t5, "f", 6)
+    ht_size(t6)
 
 many()
 }

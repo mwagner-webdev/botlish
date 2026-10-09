@@ -337,9 +337,11 @@ core::native::register mutable_vector::take -arity 2 -impl core::mutvec::take \
     -result-shape {mutvec-element 0} -errors IndexNotFound -ownership {place observe}
 core::native::register mutable_vector::swap -arity 3 -impl core::mutvec::swap \
     -param-types {mutvec int any} -result-type any -runtime {range-check mutvec-mutate} \
-    -result-shape {mutvec-element 0} -errors IndexNotFound -ownership {place observe move}
+    -result-shape {mutvec-element 0} -errors IndexNotFound -drop-form {mutable_vector#swap_drop 0} \
+    -ownership {place observe move}
 core::native::register mutable_vector::clear -arity 1 -impl core::mutvec::clear \
-    -param-types {mutvec} -result-type unit -runtime mutvec-mutate -ownership {place}
+    -param-types {mutvec} -result-type unit -runtime mutvec-mutate \
+    -drop-form {mutable_vector#clear_drop 0} -ownership {place}
 
 core::native::register mutable_vector#share -arity 2 -impl core::mutvec::shareImpl \
     -param-types {any str} -result-type any -runtime mutvec-alloc -result-shape {same 0}

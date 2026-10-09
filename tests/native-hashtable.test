@@ -53,8 +53,8 @@ proc native {text} {
 test ht-empty-1 {a fresh table is empty} -body {
     native {
 fn f():
-    t = ht_new()
-    [ht_size(t), ht_contains(t, "x"), ht_get(t, "x")]
+    t0 = ht_new()
+    [ht_size(t0), ht_contains(t0, "x"), ht_get(t0, "x")]
 f()
     }
 } -result {value {[0, false, unit]}}
@@ -62,9 +62,9 @@ f()
 test ht-single-1 {insert then get} -body {
     parity {
 fn f():
-    t = ht_new()
-    ht_set(t, "a", 1)
-    ht_get(t, "a")
+    t0 = ht_new()
+    t1 = ht_set(t0, "a", 1)
+    ht_get(t1, "a")
 f()
     }
 } -result same
@@ -72,9 +72,9 @@ f()
 test ht-single-2 {insert then contains/size} -body {
     native {
 fn f():
-    t = ht_new()
-    ht_set(t, "a", 1)
-    [ht_contains(t, "a"), ht_size(t)]
+    t0 = ht_new()
+    t1 = ht_set(t0, "a", 1)
+    [ht_contains(t1, "a"), ht_size(t1)]
 f()
     }
 } -result {value {[true, 1]}}
@@ -82,21 +82,43 @@ f()
 test ht-replace-1 {inserting an existing key replaces the value, size unchanged} -body {
     native {
 fn f():
-    t = ht_new()
-    ht_set(t, "a", 1)
-    ht_set(t, "a", 2)
-    [ht_get(t, "a"), ht_size(t)]
+    t0 = ht_new()
+    t1 = ht_set(t0, "a", 1)
+    t2 = ht_set(t1, "a", 2)
+    [ht_get(t2, "a"), ht_size(t2)]
 f()
     }
 } -result {value {[2, 1]}}
 
+test ht-value-1 {a table is a value (MUTABLE-ARRAY.md): an update returns the updated table and leaves the one it was given unchanged, on every backend} -body {
+    list [parity {
+fn f():
+    t0 = ht_new()
+    t1 = ht_set(t0, "a", 1)
+    t2 = ht_set(t1, "a", 2)
+    t3 = ht_set(t2, "b", 3)
+    t4 = ht_delete(t3, "a")
+    [ht_get(t1, "a"), ht_get(t2, "a"), ht_size(t2), ht_get(t3, "b"), ht_contains(t4, "a"), ht_contains(t3, "a"), ht_size(t0)]
+f()
+    }] [native {
+fn f():
+    t0 = ht_new()
+    t1 = ht_set(t0, "a", 1)
+    t2 = ht_set(t1, "a", 2)
+    t3 = ht_set(t2, "b", 3)
+    t4 = ht_delete(t3, "a")
+    [ht_get(t1, "a"), ht_get(t2, "a"), ht_size(t2), ht_get(t3, "b"), ht_contains(t4, "a"), ht_contains(t3, "a"), ht_size(t0)]
+f()
+    }]
+} -result {same {value {[1, 2, 1, 3, false, true, 0]}}}
+
 test ht-equal-key-1 {two separately allocated but equal String keys are the same key (value equality, not identity)} -body {
     native {
 fn f():
-    t = ht_new()
-    ht_set(t, str::concat("a", "b"), 1)
-    ht_set(t, str::concat("a", "b"), 2)
-    [ht_get(t, "ab"), ht_size(t)]
+    t0 = ht_new()
+    t1 = ht_set(t0, str::concat("a", "b"), 1)
+    t2 = ht_set(t1, str::concat("a", "b"), 2)
+    [ht_get(t2, "ab"), ht_size(t2)]
 f()
     }
 } -result {value {[2, 1]}}
@@ -106,20 +128,20 @@ f()
 # key built from one across every backend, and str::length() sees one character,
 # never a surrogate pair (core/core.tcl requires Tcl 9 for exactly this).
 test ht-astral-key-1 {a supplementary-plane character key: hash/==/get/contains agree, and str::length() is one scalar value} -body {
-    parity "fn f():\n    t = ht_new()\n    ht_set(t, str::concat(\"x\", \"\U0001F642\"), 1)\n    \[ht_get(t, \"x\U0001F642\"), ht_contains(t, \"x\U0001F642\"), ht_contains(t, \"x\U0001F643\"), str::length(\"\U0001F642\")\]\nf()\n"
+    parity "fn f():\n    t0 = ht_new()\n    t1 = ht_set(t0, str::concat(\"x\", \"\U0001F642\"), 1)\n    \[ht_get(t1, \"x\U0001F642\"), ht_contains(t1, \"x\U0001F642\"), ht_contains(t1, \"x\U0001F643\"), str::length(\"\U0001F642\")\]\nf()\n"
 } -result same
 
 test ht-astral-key-2 {a supplementary-plane character key: the exact value on the native backend} -body {
-    native "fn f():\n    t = ht_new()\n    ht_set(t, str::concat(\"x\", \"\U0001F642\"), 1)\n    \[ht_get(t, \"x\U0001F642\"), ht_contains(t, \"x\U0001F642\"), ht_contains(t, \"x\U0001F643\"), str::length(\"\U0001F642\")\]\nf()\n"
+    native "fn f():\n    t0 = ht_new()\n    t1 = ht_set(t0, str::concat(\"x\", \"\U0001F642\"), 1)\n    \[ht_get(t1, \"x\U0001F642\"), ht_contains(t1, \"x\U0001F642\"), ht_contains(t1, \"x\U0001F643\"), str::length(\"\U0001F642\")\]\nf()\n"
 } -result {value {[1, true, false, 1]}}
 
 test ht-int-keys-1 {Int keys work, distinct from String keys of the same text} -body {
     native {
 fn f():
-    t = ht_new()
-    ht_set(t, 1, "int-one")
-    ht_set(t, "1", "str-one")
-    [ht_get(t, 1), ht_get(t, "1"), ht_size(t)]
+    t0 = ht_new()
+    t1 = ht_set(t0, 1, "int-one")
+    t2 = ht_set(t1, "1", "str-one")
+    [ht_get(t2, 1), ht_get(t2, "1"), ht_size(t2)]
 f()
     }
 } -result {value {["int-one", "str-one", 2]}}
@@ -127,9 +149,9 @@ f()
 test ht-failed-lookup-1 {get/contains of an absent key on an otherwise nonempty table} -body {
     native {
 fn f():
-    t = ht_new()
-    ht_set(t, "a", 1)
-    [ht_contains(t, "missing"), ht_get(t, "missing")]
+    t0 = ht_new()
+    t1 = ht_set(t0, "a", 1)
+    [ht_contains(t1, "missing"), ht_get(t1, "missing")]
 f()
     }
 } -result {value {[false, unit]}}
@@ -137,10 +159,10 @@ f()
 test ht-delete-1 {delete removes the key; a later get/contains reflects that} -body {
     native {
 fn f():
-    t = ht_new()
-    ht_set(t, "a", 1)
-    ht_delete(t, "a")
-    [ht_contains(t, "a"), ht_get(t, "a"), ht_size(t)]
+    t0 = ht_new()
+    t1 = ht_set(t0, "a", 1)
+    t2 = ht_delete(t1, "a")
+    [ht_contains(t2, "a"), ht_get(t2, "a"), ht_size(t2)]
 f()
     }
 } -result {value {[false, unit, 0]}}
@@ -148,10 +170,10 @@ f()
 test ht-delete-absent-1 {deleting an absent key is a no-op} -body {
     native {
 fn f():
-    t = ht_new()
-    ht_set(t, "a", 1)
-    ht_delete(t, "missing")
-    [ht_size(t), ht_get(t, "a")]
+    t0 = ht_new()
+    t1 = ht_set(t0, "a", 1)
+    t2 = ht_delete(t1, "missing")
+    [ht_size(t2), ht_get(t2, "a")]
 f()
     }
 } -result {value {[1, 1]}}
@@ -168,11 +190,11 @@ f()
 test ht-collision-chain-1 {three colliding keys all land, and all look up correctly} -body {
     native {
 fn f():
-    t = ht_new()
-    ht_set(t, "k2", "A")
-    ht_set(t, "k13", "B")
-    ht_set(t, "k22", "C")
-    [ht_capacity(t), ht_get(t, "k2"), ht_get(t, "k13"), ht_get(t, "k22")]
+    t0 = ht_new()
+    t1 = ht_set(t0, "k2", "A")
+    t2 = ht_set(t1, "k13", "B")
+    t3 = ht_set(t2, "k22", "C")
+    [ht_capacity(t3), ht_get(t3, "k2"), ht_get(t3, "k13"), ht_get(t3, "k22")]
 f()
     }
 } -result {value {[8, "A", "B", "C"]}}
@@ -180,11 +202,11 @@ f()
 test ht-collision-chain-2 {failed lookup for a fourth colliding, never-inserted key} -body {
     native {
 fn f():
-    t = ht_new()
-    ht_set(t, "k2", "A")
-    ht_set(t, "k13", "B")
-    ht_set(t, "k22", "C")
-    ht_contains(t, "k35")
+    t0 = ht_new()
+    t1 = ht_set(t0, "k2", "A")
+    t2 = ht_set(t1, "k13", "B")
+    t3 = ht_set(t2, "k22", "C")
+    ht_contains(t3, "k35")
 f()
     }
 } -result {value false}
@@ -192,12 +214,12 @@ f()
 test ht-collision-replace-1 {replacement inside a collision chain} -body {
     native {
 fn f():
-    t = ht_new()
-    ht_set(t, "k2", "A")
-    ht_set(t, "k13", "B")
-    ht_set(t, "k22", "C")
-    ht_set(t, "k22", "C2")
-    [ht_get(t, "k22"), ht_size(t), ht_capacity(t)]
+    t0 = ht_new()
+    t1 = ht_set(t0, "k2", "A")
+    t2 = ht_set(t1, "k13", "B")
+    t3 = ht_set(t2, "k22", "C")
+    t4 = ht_set(t3, "k22", "C2")
+    [ht_get(t4, "k22"), ht_size(t4), ht_capacity(t4)]
 f()
     }
 } -result {value {["C2", 3, 8]}}
@@ -205,12 +227,12 @@ f()
 test ht-tombstone-delete-1 {delete from the middle of a collision chain} -body {
     native {
 fn f():
-    t = ht_new()
-    ht_set(t, "k2", "A")
-    ht_set(t, "k13", "B")
-    ht_set(t, "k22", "C")
-    ht_delete(t, "k13")
-    [ht_contains(t, "k13"), ht_get(t, "k13"), ht_size(t), ht_tombstones(t)]
+    t0 = ht_new()
+    t1 = ht_set(t0, "k2", "A")
+    t2 = ht_set(t1, "k13", "B")
+    t3 = ht_set(t2, "k22", "C")
+    t4 = ht_delete(t3, "k13")
+    [ht_contains(t4, "k13"), ht_get(t4, "k13"), ht_size(t4), ht_tombstones(t4)]
 f()
     }
 } -result {value {[false, unit, 2, 1]}}
@@ -218,12 +240,12 @@ f()
 test ht-tombstone-lookup-past-1 {lookup for a key past a tombstone still succeeds} -body {
     native {
 fn f():
-    t = ht_new()
-    ht_set(t, "k2", "A")
-    ht_set(t, "k13", "B")
-    ht_set(t, "k22", "C")
-    ht_delete(t, "k13")
-    ht_get(t, "k22")
+    t0 = ht_new()
+    t1 = ht_set(t0, "k2", "A")
+    t2 = ht_set(t1, "k13", "B")
+    t3 = ht_set(t2, "k22", "C")
+    t4 = ht_delete(t3, "k13")
+    ht_get(t4, "k22")
 f()
     }
 } -result {value {"C"}}
@@ -231,12 +253,12 @@ f()
 test ht-tombstone-failed-lookup-1 {a failed lookup keeps probing through a tombstone until EMPTY} -body {
     native {
 fn f():
-    t = ht_new()
-    ht_set(t, "k2", "A")
-    ht_set(t, "k13", "B")
-    ht_set(t, "k22", "C")
-    ht_delete(t, "k13")
-    ht_contains(t, "k35")
+    t0 = ht_new()
+    t1 = ht_set(t0, "k2", "A")
+    t2 = ht_set(t1, "k13", "B")
+    t3 = ht_set(t2, "k22", "C")
+    t4 = ht_delete(t3, "k13")
+    ht_contains(t4, "k35")
 f()
     }
 } -result {value false}
@@ -244,13 +266,13 @@ f()
 test ht-tombstone-reuse-1 {inserting a new colliding key reuses the tombstone slot, not a fresh one} -body {
     native {
 fn f():
-    t = ht_new()
-    ht_set(t, "k2", "A")
-    ht_set(t, "k13", "B")
-    ht_set(t, "k22", "C")
-    ht_delete(t, "k13")
-    ht_set(t, "k44", "D")
-    [ht_capacity(t), ht_tombstones(t), ht_size(t), ht_get(t, "k44"), ht_get(t, "k22"), ht_contains(t, "k13")]
+    t0 = ht_new()
+    t1 = ht_set(t0, "k2", "A")
+    t2 = ht_set(t1, "k13", "B")
+    t3 = ht_set(t2, "k22", "C")
+    t4 = ht_delete(t3, "k13")
+    t5 = ht_set(t4, "k44", "D")
+    [ht_capacity(t5), ht_tombstones(t5), ht_size(t5), ht_get(t5, "k44"), ht_get(t5, "k22"), ht_contains(t5, "k13")]
 f()
     }
 } -result {value {[8, 0, 3, "D", "C", false]}}
@@ -258,13 +280,13 @@ f()
 test ht-collision-parity-1 {the whole collision/tombstone/reuse sequence agrees on every backend} -body {
     parity {
 fn f():
-    t = ht_new()
-    ht_set(t, "k2", "A")
-    ht_set(t, "k13", "B")
-    ht_set(t, "k22", "C")
-    ht_delete(t, "k13")
-    ht_set(t, "k44", "D")
-    [ht_get(t, "k2"), ht_get(t, "k44"), ht_get(t, "k22"), ht_contains(t, "k13"), ht_contains(t, "k35"), ht_size(t)]
+    t0 = ht_new()
+    t1 = ht_set(t0, "k2", "A")
+    t2 = ht_set(t1, "k13", "B")
+    t3 = ht_set(t2, "k22", "C")
+    t4 = ht_delete(t3, "k13")
+    t5 = ht_set(t4, "k44", "D")
+    [ht_get(t5, "k2"), ht_get(t5, "k44"), ht_get(t5, "k22"), ht_contains(t5, "k13"), ht_contains(t5, "k35"), ht_size(t5)]
 f()
     }
 } -result same
@@ -277,8 +299,7 @@ test ht-resize-1 {enough inserts to force growth: capacity increases, every key 
 fn build(t, i, n):
     if i >= n:
         return t
-    ht_set(t, i, i * 10)
-    build(t, i + 1, n)
+    build(ht_set(t, i, i * 10), i + 1, n)
 
 fn check(t, i, n):
     if i >= n:
@@ -298,18 +319,17 @@ test ht-resize-2 {resize with collided entries: the k2/k13/k22 chain survives gr
     native {
 fn build_more(t, i, n):
     if i >= n:
-        return unit
-    ht_set(t, i, i)
-    build_more(t, i + 1, n)
+        return t
+    build_more(ht_set(t, i, i), i + 1, n)
 
 fn f():
-    t = ht_new()
-    ht_set(t, "k2", "A")
-    ht_set(t, "k13", "B")
-    ht_set(t, "k22", "C")
-    ht_delete(t, "k13")
-    build_more(t, 0, 40)
-    [ht_capacity(t) > 8, ht_get(t, "k2"), ht_get(t, "k22"), ht_contains(t, "k13"), ht_size(t)]
+    t0 = ht_new()
+    t1 = ht_set(t0, "k2", "A")
+    t2 = ht_set(t1, "k13", "B")
+    t3 = ht_set(t2, "k22", "C")
+    t4 = ht_delete(t3, "k13")
+    t5 = build_more(t4, 0, 40)
+    [ht_capacity(t5) > 8, ht_get(t5, "k2"), ht_get(t5, "k22"), ht_contains(t5, "k13"), ht_size(t5)]
 f()
     }
 } -result {value {[true, "A", "C", false, 42]}}
@@ -318,9 +338,8 @@ test ht-multiple-resizes-1 {several resizes: all mappings present, size correct,
     native {
 fn build(t, i, n):
     if i >= n:
-        return unit
-    ht_set(t, i, i * 2)
-    build(t, i + 1, n)
+        return t
+    build(ht_set(t, i, i * 2), i + 1, n)
 
 fn check(t, i, n):
     if i >= n:
@@ -330,9 +349,9 @@ fn check(t, i, n):
     check(t, i + 1, n)
 
 fn f():
-    t = ht_new()
-    build(t, 0, 400)
-    [ht_size(t), ht_tombstones(t), check(t, 0, 400), ht_capacity(t)]
+    t0 = ht_new()
+    t1 = build(t0, 0, 400)
+    [ht_size(t1), ht_tombstones(t1), check(t1, 0, 400), ht_capacity(t1)]
 f()
     }
 } -result {value {[400, 0, true, 1024]}}
@@ -349,15 +368,14 @@ test ht-presize-2 {a table pre-sized for N entries never resizes while filling t
     native {
 fn build(t, i, n):
     if i >= n:
-        return unit
-    ht_set(t, i, i)
-    build(t, i + 1, n)
+        return t
+    build(ht_set(t, i, i), i + 1, n)
 
 fn f():
-    t = ht_new_sized(100)
-    capacityBefore = ht_capacity(t)
-    build(t, 0, 100)
-    [ht_capacity(t) == capacityBefore, ht_size(t)]
+    t0 = ht_new_sized(100)
+    capacityBefore = ht_capacity(t0)
+    t1 = build(t0, 0, 100)
+    [ht_capacity(t1) == capacityBefore, ht_size(t1)]
 f()
     }
 } -result {value {[true, 100]}}
@@ -368,8 +386,8 @@ f()
 # "the operation under test allocates zero objects" is checked as a delta
 # against an identical program that omits only that one operation -- not as
 # an absolute zero over the whole program, which would also have to count
-# setup. Both the base and the tested program end in `unit` (ht_set/
-# ht_delete's own return value), so neither program's *return* differs in a
+# setup. Both the base and the tested program end in `unit` (an update's
+# table is bound, not returned), so neither program's *return* differs in a
 # way that would itself cost an allocation.
 
 proc allocationsOf {text} {
@@ -390,11 +408,11 @@ proc assertNoExtraAllocation {label base after} {
 
 set ::htSetupSmall {
 fn setup():
-    t = ht_new()
-    ht_set(t, "a", 1)
-    ht_set(t, "b", 2)
-    ht_set(t, "c", 3)
-    t
+    t0 = ht_new()
+    t1 = ht_set(t0, "a", 1)
+    t2 = ht_set(t1, "b", 2)
+    t3 = ht_set(t2, "c", 3)
+    t3
 }
 
 set ::htBase "$::htSetupSmall\nfn f():\n    t = setup()\n    unit\nf()\n"
@@ -412,29 +430,28 @@ test ht-alloc-contains-1 {contains (hit and miss) allocates zero managed objects
 } -result {}
 
 test ht-alloc-replace-1 {replacing an existing key's value allocates zero managed objects beyond setup} -body {
-    assertNoExtraAllocation replace $::htBase "$::htSetupSmall\nfn f():\n    t = setup()\n    ht_set(t, \"b\", 99)\nf()"
+    assertNoExtraAllocation replace $::htBase "$::htSetupSmall\nfn f():\n    t = setup()\n    t1 = ht_set(t, \"b\", 99)\n    unit\nf()"
 } -result {}
 
 test ht-alloc-insert-1 {insert with spare capacity allocates zero managed objects beyond setup} -body {
-    assertNoExtraAllocation insert $::htBase "$::htSetupSmall\nfn f():\n    t = setup()\n    ht_set(t, \"d\", 4)\nf()"
+    assertNoExtraAllocation insert $::htBase "$::htSetupSmall\nfn f():\n    t = setup()\n    t1 = ht_set(t, \"d\", 4)\n    unit\nf()"
 } -result {}
 
 test ht-alloc-delete-1 {delete allocates zero managed objects beyond setup} -body {
-    assertNoExtraAllocation delete $::htBase "$::htSetupSmall\nfn f():\n    t = setup()\n    ht_delete(t, \"b\")\nf()"
+    assertNoExtraAllocation delete $::htBase "$::htSetupSmall\nfn f():\n    t = setup()\n    t1 = ht_delete(t, \"b\")\n    unit\nf()"
 } -result {}
 
-test ht-alloc-resize-1 {resize is expected to allocate: exactly 3 replacement MutableArrays per resize step} -body {
+test ht-alloc-resize-1 {a table allocates exactly its 4 MutableArrays (controls, keys, values, counts) while filling below its first resize} -body {
     set text {
 fn build(t, i, n):
     if i >= n:
-        return unit
-    ht_set(t, i, i)
-    build(t, i + 1, n)
+        return t
+    build(ht_set(t, i, i), i + 1, n)
 
 fn f():
-    t = ht_new()
-    build(t, 0, 5)
-    ht_size(t)
+    t0 = ht_new()
+    t1 = build(t0, 0, 5)
+    ht_size(t1)
 f()
     }
     set report [native::allocationReport [sourceHir $text] summary]
@@ -445,14 +462,13 @@ test ht-alloc-resize-2 {a resize causes no mutable_array::copy: every entry is r
     set text {
 fn build(t, i, n):
     if i >= n:
-        return unit
-    ht_set(t, i, i)
-    build(t, i + 1, n)
+        return t
+    build(ht_set(t, i, i), i + 1, n)
 
 fn f():
-    t = ht_new()
-    build(t, 0, 40)
-    ht_size(t)
+    t0 = ht_new()
+    t1 = build(t0, 0, 40)
+    ht_size(t1)
 f()
     }
     set report [native::allocationReport [sourceHir $text] summary]
@@ -463,19 +479,19 @@ f()
 # Specialization / representation-optimization flags (req #27, #28):
 # correctness is unchanged with either disabled.
 
-# The rehash groups its three arrays as an anonymous struct {controls, keys,
-# values} passed to untyped functions, whose projections are proven only by
-# their semantic instances (STRUCTS.md). Without specialization every function
-# is compiled once, with no slot for such a projection, so -specialize 0 is
-# unsupported for any program that reaches ht_rehash (every ht_set does).
-test ht-specialize-off-1 {-specialize 0 is unsupported: the rehash's struct projections are proven by instances only} -body {
+# Every operation takes its table untyped and projects the HashTable struct's
+# fields (`table.controls`), which only the functions' semantic instances
+# prove (STRUCTS.md). Without specialization every function is compiled once,
+# with no slot for such a projection, so -specialize 0 is unsupported for any
+# program that operates on a table.
+test ht-specialize-off-1 {-specialize 0 is unsupported: the table's field projections are proven by instances only} -body {
     set text {
 fn f():
-    t = ht_new()
-    ht_set(t, "a", 1)
-    ht_set(t, "b", 2)
-    ht_delete(t, "a")
-    [ht_get(t, "b"), ht_contains(t, "a"), ht_size(t)]
+    t0 = ht_new()
+    t1 = ht_set(t0, "a", 1)
+    t2 = ht_set(t1, "b", 2)
+    t3 = ht_delete(t2, "a")
+    [ht_get(t3, "b"), ht_contains(t3, "a"), ht_size(t3)]
 f()
     }
     set hir [sourceHir $text]
@@ -487,14 +503,13 @@ test ht-repr-opt-off-1 {-repr-opt 0 gives the same result as the default, includ
     set text {
 fn build(t, i, n):
     if i >= n:
-        return unit
-    ht_set(t, i, i)
-    build(t, i + 1, n)
+        return t
+    build(ht_set(t, i, i), i + 1, n)
 
 fn f():
-    t = ht_new()
-    build(t, 0, 60)
-    [ht_size(t), ht_capacity(t), ht_get(t, 59)]
+    t0 = ht_new()
+    t1 = build(t0, 0, 60)
+    [ht_size(t1), ht_capacity(t1), ht_get(t1, 59)]
 f()
     }
     set hir [sourceHir $text]
@@ -518,14 +533,13 @@ fn label(prefix, i):
 
 fn build(t, i, n):
     if i >= n:
-        return unit
-    ht_set(t, label("k", i), label("v", i))
-    build(t, i + 1, n)
+        return t
+    build(ht_set(t, label("k", i), label("v", i)), i + 1, n)
 
 fn f():
-    t = ht_new()
-    build(t, 0, 40)
-    [ht_size(t), ht_get(t, label("k", 39)), ht_get(t, label("k", 17)), ht_get(t, label("k", 0))]
+    t0 = ht_new()
+    t1 = build(t0, 0, 40)
+    [ht_size(t1), ht_get(t1, label("k", 39)), ht_get(t1, label("k", 17)), ht_get(t1, label("k", 0))]
 f()
     }
     native::evalHir [sourceHir $text] -specialize 1
@@ -536,22 +550,21 @@ test ht-gc-stress-2 {a deleted entry's value is not kept artificially live, and 
     set text {
 fn build(t, i, n):
     if i >= n:
-        return unit
-    ht_set(t, i, str::concat("val", "ue"))
-    build(t, i + 1, n)
+        return t
+    build(ht_set(t, i, str::concat("val", "ue")), i + 1, n)
 
 fn deleteEvens(t, i, n):
     if i >= n:
-        return unit
+        return t
     if mod(i, 2) == 0:
-        ht_delete(t, i)
+        return deleteEvens(ht_delete(t, i), i + 1, n)
     deleteEvens(t, i + 1, n)
 
 fn f():
-    t = ht_new()
-    build(t, 0, 60)
-    deleteEvens(t, 0, 60)
-    ht_size(t)
+    t0 = ht_new()
+    t1 = build(t0, 0, 60)
+    t2 = deleteEvens(t1, 0, 60)
+    ht_size(t2)
 f()
     }
     set report [native::allocationReport [sourceHir $text] summary]
@@ -604,19 +617,19 @@ proc referenceApply {ops} {
     return $ref
 }
 
-# OPS as Botlish ht_set/ht_delete calls against table T, followed by an
-# expression yielding ht_to_list(T).
+# OPS as Botlish ht_set/ht_delete calls, each update binding the next table
+# (t0, t1, ...: a table is a value), followed by ht_to_list of the last.
 proc opsToBotlish {ops} {
     set lines {}
     foreach op $ops {
         lassign $op kind key value
         if {$kind eq "delete"} {
-            lappend lines "    ht_delete(t, $key)"
+            lappend lines "    t[expr {[llength $lines] + 1}] = ht_delete(t[llength $lines], $key)"
         } else {
-            lappend lines "    ht_set(t, $key, $value)"
+            lappend lines "    t[expr {[llength $lines] + 1}] = ht_set(t[llength $lines], $key, $value)"
         }
     }
-    return "fn f():\n    t = ht_new()\n[join $lines \n]\n    ht_to_list(t)\nf()\n"
+    return "fn f():\n    t0 = ht_new()\n[join $lines \n]\n    ht_to_list(t[llength $lines])\nf()\n"
 }
 
 proc propertyCheck {seed n keyspace} {

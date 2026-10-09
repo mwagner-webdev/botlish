@@ -1501,8 +1501,8 @@ fn index_not_found(p: *mut Vm) -> Value {
     fail_builtin(p, super::error::ERR_INDEX_NOT_FOUND, "IndexNotFound")
 }
 
-/// `ctxroot %h`: the MutableVector header H, just installed in the context
-/// area (MUTABLE-VECTOR.md), stays a GC root for the rest of the run (the
+/// `ctxroot %h`: the MutableVector or MutableArray header H, just installed
+/// in the context area (MUTABLE-VECTOR.md, MUTABLE-ARRAY.md), stays a GC root for the rest of the run (the
 /// context owns it; it is mutated in place, never replaced).
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_context_root(p: *mut Vm, h: Value) -> Value {

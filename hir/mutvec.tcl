@@ -76,34 +76,10 @@
 # copy-on-write implementation detail of the native runtime).
 
 namespace eval hir::mutvec {
-    # The collection operations: receiver-taking natives and what they do to
-    # it (observe it, or mutate its header in place).
-    variable ops [dict create \
-        mutable_vector::length      observe \
-        mutable_vector::empty?      observe \
-        mutable_vector::at          observe \
-        mutable_vector#to_list      observe \
-        mutable_vector::push        mutate \
-        mutable_vector::pop         mutate \
-        mutable_vector::take        mutate \
-        mutable_vector::swap        mutate \
-        mutable_vector::clear       mutate \
-        mutable_vector#take_front   mutate \
-        mutable_vector#clear_drop   mutate \
-        mutable_vector#swap_drop    mutate \
-        mutable_array::capacity     observe \
-        mutable_array::at           observe \
-        mutable_array::freeze       observe \
-        mutable_array#to_list       observe \
-        mutable_array::set          mutate \
-        mutable_array::swap         mutate \
-        mutable_array::copy         mutate \
-        mutable_array#take_front    mutate \
-        mutable_array#swap_drop     mutate \
-        mutable_array#set_drop      mutate]
-    # The constructors whose result is a new header nothing else refers to.
-    variable constructors {mutable_vector::from_list mutable_array::allocate mutable_array::create
-        mutable_array::from_list mutable_array::generate mutable_array#generate_drop}
+    # The collection operations, by native: what each does to its receiver
+    # (observe it, or mutate its header in place) -- derived from the
+    # registry (OpKind), cached.
+    variable opKinds [dict create]
     # The function blocks whose every result is fresh (FreshFunctions), for
     # the elaboration under way.
     variable freshFunctions [dict create]
@@ -140,14 +116,46 @@ proc hir::mutvec::KindName {kind} {
     return [expr {$kind eq "array" ? "MutableArray" : "MutableVector"}]
 }
 
-# The collection operation call E is (observe | mutate), or "".
+# The collection operation call E is (observe | mutate), or "": a native
+# whose first parameter is a MutableVector or MutableArray receiver, read
+# from its registration (core/native.tcl), never its name -- its receiver's
+# ownership role `place` mutates the header in place, `observe` and
+# `copy-out` read it; a receiver it consumes (`move`, a consuming loop's
+# domain) is not an operation on a place.
 proc hir::mutvec::OpKind {hir e} {
-    variable ops
     set name [hir::affine::NativeName $hir $e]
-    if {$name ne "" && [dict exists $ops $name]} {
-        return [dict get $ops $name]
+    if {$name eq ""} {
+        return ""
     }
-    return ""
+    return [NativeOpKind $name]
+}
+
+proc hir::mutvec::NativeOpKind {name} {
+    variable opKinds
+    if {![dict exists $opKinds $name]} {
+        set kind ""
+        set receiver [lindex [dict get [core::native::metadata $name] paramTypes] 0]
+        if {$receiver ne "" && [core::type::base $receiver] in {mutvec mutarray}} {
+            switch -- [core::native::ownershipRole $name 0] {
+                place { set kind mutate }
+                observe - copy-out { set kind observe }
+            }
+        }
+        dict set opKinds $name $kind
+    }
+    return [dict get $opKinds $name]
+}
+
+# 1 if native NAME constructs a new collection header nothing else refers
+# to: its registration allocates one (-runtime mutvec-alloc or
+# mutarray-alloc) and its result is a MutableVector or MutableArray.
+proc hir::mutvec::Constructor {name} {
+    if {$name eq ""} {
+        return 0
+    }
+    set meta [core::native::metadata $name]
+    return [expr {[core::type::base [dict get $meta resultType]] in {mutvec mutarray}
+        && ("mutvec-alloc" in [dict get $meta runtime] || "mutarray-alloc" in [dict get $meta runtime])}]
 }
 
 # 1 if any interned type of HIR mentions a mutable collection: a program
@@ -278,7 +286,8 @@ proc hir::mutvec::ReceiverProblem {hir e r} {
     }
     set refScope [dict get $hir exprs $r scope]
     if {[dict get $hir scopes $refScope invocation] ne [dict get $hir scopes [dict get $binding scope] invocation]} {
-        return "$what is `[dict get $binding name]`, a binding of an enclosing function: a nested function cannot mutate a $kind it captured (a $kind is a value; pass it in and return the result)"
+        set a [expr {[string match {[aeiou]*} $kind] ? "an" : "a"}]
+        return "$what is `[dict get $binding name]`, a binding of an enclosing function: a nested function cannot mutate $a $kind it captured ($a $kind is a value; pass it in and return the result)"
     }
     return ""
 }
@@ -345,19 +354,14 @@ proc hir::mutvec::Elaborate {hirVar} {
     lassign [hir::contexts::Walk $hir] owner parent rootOf calls blocks
     set currentParent $parent
     # The operations that drop affine elements carry the element drop
-    # descriptor: OPERATION -> {its dropping form, the argument whose type
-    # holds the element type (a collection, or the call itself)}.
-    set dropping [dict create \
-        mutable_vector::clear   {mutable_vector#clear_drop 0} \
-        mutable_vector::swap    {mutable_vector#swap_drop 0} \
-        mutable_array::swap     {mutable_array#swap_drop 0} \
-        mutable_array::set      {mutable_array#set_drop 0} \
-        mutable_array::generate {mutable_array#generate_drop result}]
+    # descriptor: their registration's -drop-form (core/native.tcl) names the
+    # dropping form and the argument whose type holds the element type (a
+    # collection, or the call itself).
     dict for {e node} [dict get $hir exprs] {
         if {[dict get $node kind] ne "call"} continue
         set name [hir::affine::NativeName $hir $e]
-        if {![dict exists $dropping $name]} continue
-        lassign [dict get $dropping $name] form at
+        if {$name eq "" || [dict get [core::native::metadata $name] dropForm] eq ""} continue
+        lassign [dict get [core::native::metadata $name] dropForm] form at
         set collection [hir::typeOf $hir [expr {$at eq "result" ? $e : [lindex [dict get $node args] $at]}]]
         if {[Kind $collection] eq "" || [llength $collection] != 2 || ![hir::types::IsAffine $collection]} continue
         set d [hir::affine::Descriptor $hir [lindex $collection 1]]
@@ -1043,11 +1047,11 @@ proc hir::mutvec::Observed {hir p e} {
 # new vector or array, a logical copy, or a struct literal of such.
 proc hir::mutvec::Fresh {hir e} {
     variable freshFunctions
-    variable constructors
     set node [dict get $hir exprs $e]
     switch -- [dict get $node kind] {
         call {
-            if {[hir::affine::NativeName $hir $e] in [concat $constructors [list [ShareNative]]]} {
+            set name [hir::affine::NativeName $hir $e]
+            if {[Constructor $name] || $name eq [ShareNative]} {
                 return 1
             }
             set target [hir::contexts::Callee $hir $e]

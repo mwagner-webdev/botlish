@@ -417,6 +417,12 @@ proc hir::specialize::ElementKeyType {type} {
         # releases it by the element's descriptor -- MUTABLE-VECTOR.md).
         return [hir::types::MakeMutVec [ElementKeyType [lindex $type 1]] 0]
     }
+    if {[hir::types::IsMutArray $type] && [hir::types::IsAffine $type]} {
+        # An affine MutableArray keeps its element's key for the same
+        # reason (MUTABLE-ARRAY.md); an unrestricted one is the raw kind,
+        # whose code does not depend on its element type.
+        return [hir::types::MakeMutArray [ElementKeyType [lindex $type 1]] 0]
+    }
     if {[hir::types::IsList $type]} {
         set elem [ElementKeyType [lindex $type 1]]
         if {[llength $type] == 3} {
@@ -770,7 +776,8 @@ proc hir::specialize::Analyze {id} {
                         ? $declaredType : [hir::types::narrow $type $declaredType]}]
                 } elseif {([hir::types::IsList $type] && [hir::types::IsList $declaredType])
                         || ([hir::types::IsSet $type] && [hir::types::IsSet $declaredType])
-                        || ([hir::types::IsMutVec $type] && [hir::types::IsMutVec $declaredType])} {
+                        || ([hir::types::IsMutVec $type] && [hir::types::IsMutVec $declaredType])
+                        || ([hir::types::IsMutArray $type] && [hir::types::IsMutArray $declaredType])} {
                     # M7.b (M7B-CONJUNCTIVE-ENTRY-FACTS.md): TYPE is already
                     # "specific" here -- an aggregate KEY, the *observed*
                     # instance fact (a caller's shape, or M7.a.a's provably
@@ -1498,7 +1505,8 @@ proc hir::specialize::Reanalyze {id argTypes} {
                     ? $declaredType : [hir::types::narrow $type $declaredType]}]
             } elseif {([hir::types::IsList $type] && [hir::types::IsList $declaredType])
                     || ([hir::types::IsSet $type] && [hir::types::IsSet $declaredType])
-                        || ([hir::types::IsMutVec $type] && [hir::types::IsMutVec $declaredType])} {
+                        || ([hir::types::IsMutVec $type] && [hir::types::IsMutVec $declaredType])
+                        || ([hir::types::IsMutArray $type] && [hir::types::IsMutArray $declaredType])} {
                 set type [hir::types::narrow $type $declaredType]
             }
         }

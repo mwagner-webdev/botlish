@@ -345,8 +345,8 @@ pub enum OpCode {
     MutArrayToList,
     MutArrayEmpty,
     MutArrayTakeFront,
-    /// `ctxroot %h`: %h (a MutableVector header just installed in the
-    /// context area, MUTABLE-VECTOR.md) is a GC root for the rest of the
+    /// `ctxroot %h`: %h (a MutableVector or MutableArray header just
+    /// installed in the context area, MUTABLE-VECTOR.md) is a GC root for the rest of the
     /// run. Never fails or allocates; result unit.
     CtxRoot,
     /// Tcl 9-compatible Unicode alpha/alnum character classification

@@ -99,9 +99,9 @@
 @@ list-no-consume a List construction does not consume its affine elements: their bindings stay usable
 ## hir/affine.tcl
 <<<<
-                    return [list move element $p $index]
+                return [list move element $p $index]
 ====
-                    return {use element}
+                return {use element}
 >>>>
 
 @@ destructure-aliases a destructuring's moved-out affine field stays owned by the destructured struct too: its release drops the moved value

@@ -2,16 +2,22 @@
 # (PARAMETERIZED-MUTABLEARRAY.md).
 #
 # MutableArray[T] is a *static* contract: every slot value is a T and every
-# store preserves that. This file pins what must hold and, harder, what must
-# never: the runtime representation is unchanged (no element type in the
-# object), raw `mutarray` keeps its legacy semantics, MutableArray[T] is
-# invariant, and its element contract can never be erased into `any`, the
-# raw kind, an untyped aggregate or any other retaining position -- which
-# would let a `mutarray?` test recover a writable alias that corrupts the
-# typed one.
+# store preserves that. The runtime representation is unchanged by it (no
+# element type in the object). Since MUTABLE-ARRAY.md an array is a value:
+# a copy is a logical copy (copy-on-write), never an alias, so -- like
+# MutableVector[T] -- MutableArray[T] is covariant (an array of a subtype is
+# one of the supertype), the raw kind `mutarray` is MutableArray[any], and
+# a typed array may be erased into `any`, the raw kind or an untyped
+# aggregate: a write through the erased copy can never reach the typed
+# original. (Before, MutableArray had reference semantics, was invariant,
+# and every such erasure was rejected: an erased alias could have stored a
+# value the original's contract excluded. The tests below that pinned those
+# rejections now pin that the same programs are accepted and leave the
+# original intact -- MUTABLE-ARRAY.md, "Compatibility".) A typed parameter
+# still admits exactly its contract, like List[T] and MutableVector[T].
 #
 # Sections: surface/canonical type, construction (from_list, create), typed
-# get/set/freeze/capacity/copy, invariance, erasure attacks, refinement,
+# get/set/freeze/capacity/copy, variance, erasure, refinement,
 # specialization and propagation, exact-value separation, no-generics and
 # no-cast fences, runtime semantics on every backend (also under GC stress).
 
@@ -164,33 +170,34 @@ test mat-syn-7 {the runtime kind of a typed and a raw array is the same} -body {
 # ---------------------------------------------------------------------------
 # Type algebra (spec items 33-35)
 
-test mat-alg-1 {equality: identical element contracts; equivalent domains; invariance otherwise} -body {
+test mat-alg-1 {covariance: an array of a subtype is an array of the supertype (MUTABLE-ARRAY.md: a value, like MutableVector); never the other way} -body {
     list \
-        [hir::types::Equivalent int int] \
         [hir::types::subtype {mutarray int} {mutarray int}] \
         [hir::types::subtype {mutarray int} {mutarray str}] \
         [hir::types::subtype {mutarray str} {mutarray any}] \
         [hir::types::subtype {mutarray any} {mutarray str}] \
-        [hir::types::subtype {mutarray {list int}} {mutarray {list int}}]
-} -result {1 1 0 0 0 1}
+        [hir::types::subtype {mutarray {list int}} {mutarray {list int}}] \
+        [hir::types::subtype {mutvec str} {mutvec any}]
+} -result {1 0 1 0 1 1}
 
-test mat-alg-2 {a typed array is never a subtype of the raw kind; only the vacuous contract is} -body {
+test mat-alg-2 {every typed array is a subtype of the raw kind (MutableArray[any]); the raw kind only of MutableArray[any]} -body {
     list \
         [hir::types::subtype {mutarray str} mutarray] \
         [hir::types::subtype {mutarray any} mutarray] \
         [hir::types::subtype mutarray {mutarray str}] \
         [hir::types::subtype mutarray {mutarray any}]
-} -result {0 1 0 1}
+} -result {1 1 0 1}
 
-test mat-alg-3 {lub of equal contracts is that contract; different contracts have no typed join} -body {
+test mat-alg-3 {lub of equal contracts is that contract; different contracts join elementwise, as a MutableVector's do; with the raw kind, the raw kind} -body {
     list \
         [hir::types::show [hir::types::lub {mutarray int} {mutarray int}]] \
         [hir::types::show [hir::types::lub {mutarray int} {mutarray str}]] \
         [hir::types::show [hir::types::lub {mutarray int} mutarray]] \
         [hir::types::show [hir::types::lub {mutarray int} any]] \
         [hir::types::show [hir::types::lub {mutarray int} int]] \
-        [hir::types::show [hir::types::lub {mutarray any} mutarray]]
-} -result {{MutableArray[int]} any any any any mutarray}
+        [hir::types::show [hir::types::lub {mutarray any} mutarray]] \
+        [hir::types::show [hir::types::lub {mutvec int} {mutvec str}]]
+} -result {{MutableArray[int]} {MutableArray[any]} mutarray any any mutarray {MutableVector[any]}}
 
 test mat-alg-4 {glb (requirement meet): the same contract; a kind requirement adopts it; conflicts have no meet} -body {
     list \
@@ -308,9 +315,9 @@ test mat-fl-5 {from_list of an exact literal does not put exact-value facts into
         [maLast "import mutable_array\nxs = \[1, 2, 3\]\nmutable_array::from_list(xs)"]
 } -result {{MutableArray[int]} {MutableArray[int]}}
 
-test mat-fl-6 {the argument contract is unchanged: a non-List is rejected, never coerced} -body {
-    list [lindex [maRejects "import mutable_array\nmutable_array::from_list(123)" *] 0] [lindex [maRejects "import mutable_array\nmutable_array::from_list(\"abc\")" *] 0]
-} -result {{CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE}}
+test mat-fl-6 {the argument contract is unchanged: a non-List is rejected, never coerced -- at run time, like every intrinsic's (from_list is a registered native since MUTABLE-ARRAY.md)} -body {
+    list [maErrors "import mutable_array\nmutable_array::from_list(123)"] [maErrors "import mutable_array\nmutable_array::from_list(\"abc\")"]
+} -result {{{CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE}} {{CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE}}}
 
 # ---------------------------------------------------------------------------
 # create (spec items 7, 8, 50, 65, 66)
@@ -334,21 +341,20 @@ test mat-cr-3 {capacity 0 still establishes T from the default} -body {
     list [maLast "import mutable_array\nmutable_array::create(0, \"x\")"] [maLast "import mutable_array\nmutable_array::create(0, \[1\])"]
 } -result {{MutableArray[str]} {MutableArray[List[int]]}}
 
-test mat-cr-4 {create is an ordinary function: its capacity parameter is a declared Int} -body {
-    list [lindex [maRejects "import mutable_array\nmutable_array::create(\"a\", 1)" *] 0] [lindex [maRejects "mutable_array::create(1.5, 1)" *] 0] \
+test mat-cr-4 {create's capacity parameter is an Int: a non-Int is the TYPE error of every intrinsic, at run time (create is a registered native since MUTABLE-ARRAY.md)} -body {
+    list [maErrors "import mutable_array\nmutable_array::create(\"a\", 1)"] [lindex [maRejects "mutable_array::create(1.5, 1)" *] 0] \
         [lindex [maRejects "import mutable_array\nfn f(n):\n    mutable_array::create(n, 1)\nf(2)" "*"] 0]
-} -result {{CORE SEMANTIC TYPE} {SURFACE SYNTAX} accepted}
+} -result {{{CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE}} {SURFACE SYNTAX} accepted}
 
 test mat-cr-5 {positive control: create, capacity, get and a legal set} -body {
     set src "import mutable_array\nm = mutable_array::create(3, \"x\")\nmutable_array::set(m, 1, \"y\")\n\[mutable_array::capacity(m), mutable_array::at(m, 0), mutable_array::at(m, 1), mutable_array::at(m, 2)\]"
     list [maRejects $src *] [maLast "import mutable_array\nm = mutable_array::create(3, \"x\")\nmutable_array::at(m, 2)"]
 } -result {accepted str}
 
-test mat-cr-6 {create's declared result is the raw kind; the typed relation belongs to the call} -body {
-    set hir [maCompile "import mutable_array\nmutable_array::create(1, 0)"]
-    set block [maBlock $hir mutable_array::create]
-    regsub {block\(e[0-9]+\)} [hir::types::show [hir::typeOf $hir $block]] block(E)
-} -result {block(E)/2 -> mutarray}
+test mat-cr-6 {create's registered result is the raw kind; the typed relation belongs to the call (its -result-shape)} -body {
+    set meta [core::native::metadata mutable_array::create]
+    list [dict get $meta resultType] [dict get $meta resultShape] [maLast "import mutable_array\nmutable_array::create(1, 0)"]
+} -result {mutarray {mutarray-create 1} {MutableArray[int]}}
 
 # ---------------------------------------------------------------------------
 # Typed set: a proof, never a widening (spec items 21, 22, 64, 73)
@@ -464,11 +470,12 @@ test mat-cp-4 {raw <-> raw and typed -> raw (non-bearing elements) keep the lega
         [maRejects "import mutable_array\na = mutable_array::from_list(\[\"a\"\])\nb = mutable_array::allocate(2)\nmutable_array::copy(b, 0, a, 0, 1)" *]
 } -result {accepted accepted}
 
-test mat-cp-5 {copying contract-bearing elements into untyped storage would erase their contracts} -body {
+test mat-cp-5 {copying typed arrays into untyped storage is accepted (each copied element is a logical copy: no write through the untyped slot reaches the original); copying elements that carry a callable contract of their own would still lose it} -body {
     list \
         [maRejects "import mutable_array\na = mutable_array::from_list(\[mutable_array::from_list(\[\"a\"\])\])\nb = mutable_array::allocate(2)\nmutable_array::copy(b, 0, a, 0, 1)" *] \
-        [maRejects "import mutable_array\na = mutable_array::from_list(\[mutable_array::from_list(\[\"a\"\])\])\nb = mutable_array::create(2, mutable_array::from_list(\[\"z\"\]))\nmutable_array::copy(b, 0, a, 0, 1)" *]
-} -result {{{CORE SEMANTIC TYPE} 1} accepted}
+        [maRejects "import mutable_array\na = mutable_array::from_list(\[mutable_array::from_list(\[\"a\"\])\])\nb = mutable_array::create(2, mutable_array::from_list(\[\"z\"\]))\nmutable_array::copy(b, 0, a, 0, 1)" *] \
+        [maRejects "import mutable_array\nerror E\nfn g(x: int) -> int errors E:\n    fail E\na = mutable_array::from_list(\[g\])\nb = mutable_array::allocate(2)\nmutable_array::copy(b, 0, a, 0, 1)" "*cannot erase element contract of MutableArray\\\[Fn*"]
+} -result {accepted accepted {{CORE SEMANTIC TYPE} 1}}
 
 test mat-cp-6 {a narrower source domain may be copied into a wider destination, never the reverse} -body {
     set prelude "import mutable_array\ntype Byte = Int in 0..255\nfn mkb(b: Byte):\n    mutable_array::create(2, b)\nfn mki(i: int):\n    mutable_array::create(2, i)\nx = mkb(3)\ny = mki(3)\n"
@@ -477,20 +484,23 @@ test mat-cp-6 {a narrower source domain may be copied into a wider destination, 
 } -result {accepted {{CORE SEMANTIC TYPE} 1}}
 
 # ---------------------------------------------------------------------------
-# Invariance (spec items 10, 19, 20, 33, 56, 68, 72)
+# Variance (spec items 10, 19, 20, 33, 56, 68, 72). A typed parameter admits
+# exactly its contract, as List[T] and MutableVector[T] parameters do
+# (hir::range::AggregateAdmits); the subtype relation is covariant
+# (MUTABLE-ARRAY.md), which function types and results see.
 
-test mat-inv-1 {MutableArray[Byte] is not MutableArray[int], even though every Byte is an int} -body {
+test mat-inv-1 {a MutableArray[int] parameter does not admit a MutableArray[Byte], even though every Byte is an int (exact admission, as for List[int])} -body {
     set prelude "import mutable_array\ntype Byte = Int in 0..255\nfn mk(b: Byte):\n    mutable_array::create(2, b)\nfn take(xs: MutableArray\[int\]) -> int:\n    mutable_array::capacity(xs)\n"
     list [maRejects "${prelude}take(mk(3))" *] [maRejects "${prelude}take(mutable_array::create(2, 1))" *]
 } -result {{{CORE SEMANTIC TYPE} 1} accepted}
 
-test mat-inv-2 {MutableArray[str] is not MutableArray[any]; MutableArray[any] is not MutableArray[str]} -body {
+test mat-inv-2 {a MutableArray[any] parameter does not admit a MutableArray[str], nor a MutableArray[str] parameter a MutableArray[any] (exact admission)} -body {
     list \
         [maRejects "import mutable_array\nfn f(xs: MutableArray\[any\]) -> int:\n    mutable_array::capacity(xs)\nf(mutable_array::create(1, \"a\"))" *] \
         [maRejects "import mutable_array\nfn f(xs: MutableArray\[str\]) -> int:\n    mutable_array::capacity(xs)\nf(mutable_array::from_list(\[\"a\", 1\]))" *]
 } -result {{{CORE SEMANTIC TYPE} 1} {{CORE SEMANTIC TYPE} 1}}
 
-test mat-inv-3 {invariance is deep: List[MutableArray[str]] is not List[MutableArray[any]]} -body {
+test mat-inv-3 {admission is exact at depth: a List[MutableArray[any]] parameter does not admit a List[MutableArray[str]]} -body {
     list \
         [maRejects "import list\nimport mutable_array\nfn f(xs: List\[MutableArray\[any\]\]) -> int:\n    list::length(xs)\nf(\[mutable_array::create(1, \"a\")\])" *] \
         [maRejects "import mutable_array\nfn f(xs: MutableArray\[MutableArray\[any\]\]) -> int:\n    mutable_array::capacity(xs)\nf(mutable_array::create(1, mutable_array::create(1, \"a\")))" *]
@@ -505,22 +515,22 @@ test mat-inv-4 {a typed parameter admits exactly its contract; the raw and the w
         [maRejects "${decl}v = first(mutable_array::from_list(\[\"a\", 1\])):\n    on IndexNotFound:\n        \"z\"\nv" *]
 } -result {accepted {{CORE SEMANTIC TYPE} 1} {{CORE SEMANTIC TYPE} 1} {{CORE SEMANTIC TYPE} 1}}
 
-test mat-inv-5 {structural Fn: parameter contravariance may not turn into covariance of the array contract} -body {
+test mat-inv-5 {structural Fn: a parameter admits exactly its contract (a MutableArray[any] parameter is not a MutableArray[str] one), while the raw kind admits every array} -body {
     set cap "import mutable_array\nfn cap_str(m: MutableArray\[str\]) -> int:\n    mutable_array::capacity(m)\nfn cap_any(m: MutableArray\[any\]) -> int:\n    mutable_array::capacity(m)\nfn cap_raw(m: mutarray) -> int:\n    mutable_array::capacity(m)\n"
     set useStr "fn use(f: Fn{args: \[MutableArray\[str\]\], return: int, errors: \[\]}) -> int:\n    f(mutable_array::create(1, \"a\"))\n"
     list \
         [maRejects "${cap}${useStr}use(cap_str)" *] \
         [maRejects "${cap}${useStr}use(cap_any)" *] \
         [maRejects "${cap}${useStr}use(cap_raw)" *]
-} -result {accepted {{CORE SEMANTIC TYPE} 1} {{CORE SEMANTIC TYPE} 1}}
+} -result {accepted {{CORE SEMANTIC TYPE} 1} accepted}
 
-test mat-inv-6 {structural Fn: a MutableArray result is not covariantly widened either} -body {
+test mat-inv-6 {structural Fn: a MutableArray result is covariant, as a MutableVector's is (the caller gets a value, never an alias of the callee's)} -body {
     set defs "import mutable_array\nfn make() -> MutableArray\[str\]:\n    mutable_array::create(1, \"a\")\n"
     list \
         [maRejects "${defs}fn use(f: Fn{args: \[\], return: MutableArray\[str\], errors: \[\]}):\n    f()\nuse(make)" *] \
         [maRejects "${defs}fn use(f: Fn{args: \[\], return: MutableArray\[any\], errors: \[\]}):\n    f()\nuse(make)" *] \
         [maRejects "${defs}fn use(f: Fn{args: \[\], return: mutarray, errors: \[\]}):\n    f()\nuse(make)" *]
-} -result {accepted {{CORE SEMANTIC TYPE} 1} {{CORE SEMANTIC TYPE} 1}}
+} -result {accepted accepted accepted}
 
 test mat-inv-7 {aliases keep the type; a store through any alias is checked against it} -body {
     set src "import mutable_array\na = mutable_array::create(2, \"x\")\nb = a\n"
@@ -533,45 +543,52 @@ test mat-inv-8 {no program views one array as two element types: the second view
 } -result {accepted {{CORE SEMANTIC TYPE} 1}}
 
 # ---------------------------------------------------------------------------
-# Erasure attacks (spec items 11-14, 36-39, 57-59, 71). Every one of these must
-# be rejected at compile time.
+# Erasure (spec items 11-14, 36-39, 57-59, 71). Under the reference semantics
+# MutableArray had before MUTABLE-ARRAY.md, each of these was an attack -- an
+# erased alias that could write a value the typed original excluded -- and was
+# rejected at compile time. An array is a value now: each erasure holds a
+# logical copy, so the same programs are accepted and the original is never
+# changed by what is done to the copy. What still holds: a write is checked
+# against the static type of the place written (a semantic instance analyzes
+# an untyped parameter at its argument's type), and callable contracts are
+# still never erased.
 
-test mat-atk-1 {passing MutableArray[str] to a raw mutarray parameter that writes is rejected} -body {
-    set src "import mutable_array\nfn smash(x: mutarray):\n    mutable_array::set(x, 0, 123)\nm = mutable_array::from_list(\[\"hello\"\])\nsmash(m)"
-    list [maRejects $src *] [maHas $src "*would lose its element contract*"]
-} -result {{{CORE SEMANTIC TYPE} 1} 1}
+test mat-atk-1 {passing MutableArray[str] to a raw mutarray parameter that writes: the callee writes its own copy, the caller's array is unchanged, on every backend} -body {
+    set src "import mutable_array\nfn smash(x: mutarray) -> mutarray errors IndexNotFound:\n    mutable_array::set(x, 0, 123)\n    x\nfn f() -> list errors IndexNotFound:\n    m = mutable_array::from_list(\[\"hello\"\])\n    s = smash(m)\n    \[mutable_array::at(m, 0), mutable_array::at(s, 0)\]\nr = f():\n    on IndexNotFound:\n        \[\]\nr"
+    list [maRejects $src *] [maParity $src] [maValue $src]
+} -result {accepted same {["hello", 123]}}
 
-test mat-atk-2 {the attack through any: typed -> untyped parameter -> mutarray? -> write} -body {
+test mat-atk-2 {an untyped parameter is analyzed at its argument's type (a semantic instance), so a write of another element type into it is still rejected, kind test or not} -body {
     set src "import mutable_array\nfn f(x):\n    if mutarray?(x):\n        mutable_array::set(x, 0, 123)\n    else:\n        unit\nm = mutable_array::from_list(\[\"a\"\])\nf(m)\nmutable_array::at(m, 0)"
     list [maRejects $src *] [maHas $src "*call to f with x : MutableArray\\\[str\\\] is invalid: value of type int is not admissible to element type str*"]
 } -result {{{CORE SEMANTIC TYPE} 1} 1}
 
-test mat-atk-3 {an explicit any parameter is no different} -body {
+test mat-atk-3 {an explicit any parameter accepts a typed array (a logical copy)} -body {
     maRejects "import mutable_array\nfn f(x: any):\n    x\nf(mutable_array::create(1, \"a\"))" *
-} -result {{CORE SEMANTIC TYPE} 1}
+} -result accepted
 
-test mat-atk-4 {a declared any (or list) result may not hide a typed array} -body {
+test mat-atk-4 {a declared any (or raw) result may hold a typed array} -body {
     list [maRejects "import mutable_array\nfn f() -> any:\n    mutable_array::create(1, \"a\")\nf()" *] \
         [maRejects "import mutable_array\nfn f() -> mutarray:\n    mutable_array::create(1, \"a\")\nf()" *]
-} -result {{{CORE SEMANTIC TYPE} 1} {{CORE SEMANTIC TYPE} 1}}
+} -result {accepted accepted}
 
-test mat-atk-5 {a join that would lose the contract is rejected (no MutableArray[any], no raw, no any)} -body {
-    set src "import mutable_array\nfn f(c: bool):\n    if c:\n        mutable_array::from_list(\[1\])\n    else:\n        mutable_array::from_list(\[\"a\"\])\nf(true)"
-    list [maRejects $src *] [maHas $src "*cannot erase element contract MutableArray\\\[*"] \
-        [maRejects "import mutable_array\nfn f(c: bool):\n    if c:\n        mutable_array::from_list(\[1\])\n    else:\n        mutable_array::allocate(1)\nf(true)" *]
-} -result {{{CORE SEMANTIC TYPE} 1} 1 {{CORE SEMANTIC TYPE} 1}}
+test mat-atk-5 {a join of different contracts is the joined contract (MutableArray[int] and MutableArray[str] join in MutableArray[any]; with a raw array, the raw kind)} -body {
+    list \
+        [maResult "import mutable_array\nfn f(c: bool):\n    if c:\n        mutable_array::from_list(\[1\])\n    else:\n        mutable_array::from_list(\[\"a\"\])\nf(true)" f] \
+        [maResult "import mutable_array\nfn f(c: bool):\n    if c:\n        mutable_array::from_list(\[1\])\n    else:\n        mutable_array::allocate(1)\nf(true)" f]
+} -result {{MutableArray[any]} mutarray}
 
 test mat-atk-6 {a join of equal contracts is fine} -body {
     maResult "import mutable_array\nfn f(c: bool):\n    if c:\n        mutable_array::from_list(\[1\])\n    else:\n        mutable_array::from_list(\[2\])\nf(true)" f
 } -result {MutableArray[int]}
 
-test mat-atk-7 {a List construction that would join different contracts is rejected} -body {
-    list [maRejects "import mutable_array\n\[mutable_array::from_list(\[1\]), mutable_array::from_list(\[\"a\"\])\]" *] \
-        [maRejects "import mutable_array\n\[mutable_array::from_list(\[1\]), 5\]" *] \
-        [maRejects "import mutable_array\n\[mutable_array::from_list(\[1\]), mutable_array::from_list(\[2\])\]" *]
-} -result {{{CORE SEMANTIC TYPE} 1} {{CORE SEMANTIC TYPE} 1} accepted}
+test mat-atk-7 {a List of arrays of different contracts is a List of their join} -body {
+    list [maLast "import mutable_array\n\[mutable_array::from_list(\[1\]), mutable_array::from_list(\[\"a\"\])\]"] \
+        [maLast "import mutable_array\n\[mutable_array::from_list(\[1\]), 5\]"] \
+        [maLast "import mutable_array\n\[mutable_array::from_list(\[1\]), mutable_array::from_list(\[2\])\]"]
+} -result {{List[MutableArray[any]]} list {List[MutableArray[int]]}}
 
-test mat-atk-8 {aggregate erasure: List[MutableArray[str]] into a list/any parameter, List[any], list::append (an untyped identity keeps the contract: its semantic instance carries List[MutableArray[str]])} -body {
+test mat-atk-8 {aggregate erasure is a copy: List[MutableArray[str]] into an untyped, list or any parameter, and list::append of anything, are accepted} -body {
     set xs "xs = \[mutable_array::from_list(\[\"a\"\])\]\n"
     set ma "import mutable_array\n"
     set ml "import list\nimport mutable_array\n"
@@ -582,38 +599,40 @@ test mat-atk-8 {aggregate erasure: List[MutableArray[str]] into a list/any param
         [maRejects "${ml}${xs}list::append(xs, 5)" *] \
         [maRejects "${ml}${xs}list::append(xs, mutable_array::from_list(\[1\]))" *] \
         [maRejects "${ml}${xs}list::append(xs, mutable_array::from_list(\[\"b\"\]))" *]
-} -result {accepted {{CORE SEMANTIC TYPE} 1} {{CORE SEMANTIC TYPE} 1} {{CORE SEMANTIC TYPE} 1} {{CORE SEMANTIC TYPE} 1} accepted}
+} -result {accepted accepted accepted accepted accepted accepted}
 
-test mat-atk-9 {nested arrays: the whole contract chain is bearing, at any depth (an untyped identity keeps it through its semantic instance)} -body {
+test mat-atk-9 {nested arrays: an untyped or raw parameter takes them (a copy); a MutableArray[any] parameter admits exactly its contract} -body {
     set nest "b = mutable_array::from_list(\[mutable_array::from_list(\[mutable_array::from_list(\[\"a\"\])\])\])\n"
     list \
         [maRejects "import mutable_array\nfn f(x):\n    x\n${nest}f(b)" *] \
         [maRejects "import mutable_array\nfn f(x: mutarray):\n    x\n${nest}f(b)" *] \
         [maRejects "import mutable_array\nfn f(x: MutableArray\[any\]):\n    x\n${nest}f(b)" *]
-} -result {accepted {{CORE SEMANTIC TYPE} 1} {{CORE SEMANTIC TYPE} 1}}
+} -result {accepted accepted {{CORE SEMANTIC TYPE} 1}}
 
-test mat-atk-10 {storing a typed array into a raw array (or a MutableArray[any]) erases it} -body {
+test mat-atk-10 {storing a typed array into a raw array (or a MutableArray[any]) stores a logical copy: writing the stored copy leaves the original unchanged, on every backend} -body {
     set inner "import mutable_array\ninner = mutable_array::from_list(\[\"a\"\])\n"
+    set src "import mutable_array\nfn f() -> list errors IndexNotFound:\n    inner = mutable_array::from_list(\[\"a\"\])\n    raw = mutable_array::allocate(1)\n    mutable_array::set(raw, 0, inner)\n    copy = mutable_array::at(raw, 0)\n    mutable_array::set(copy, 0, 7)\n    \[mutable_array::at(inner, 0), mutable_array::at(copy, 0)\]\nr = f():\n    on IndexNotFound:\n        \[\]\nr"
     list \
         [maRejects "${inner}raw = mutable_array::allocate(1)\nmutable_array::set(raw, 0, inner)" *] \
         [maRejects "${inner}holder = mutable_array::from_list(\[1, \"x\"\])\nmutable_array::set(holder, 0, inner)" *] \
-        [maRejects "${inner}holder = mutable_array::create(1, inner)\nmutable_array::set(holder, 0, inner)" *]
-} -result {{{CORE SEMANTIC TYPE} 1} {{CORE SEMANTIC TYPE} 1} accepted}
+        [maRejects "${inner}holder = mutable_array::create(1, inner)\nmutable_array::set(holder, 0, inner)" *] \
+        [maParity $src] [maValue $src]
+} -result {accepted accepted accepted same {["a", 7]}}
 
-test mat-atk-11 {a callable value or a stored callable cannot launder the array either: a callee whose exact target is known is analyzed with the array's type (a native reader, an exact identity), one whose target is not known cannot be} -body {
+test mat-atk-11 {a callable value or a stored callable may take the array, known exactly or not: what it receives is a copy} -body {
     list \
         [maRejects "import mutable_array\nfn apply(f, x):\n    f(x)\napply(mutable_array::capacity, mutable_array::create(1, \"a\"))" *] \
         [maRejects "import list\nimport mutable_array\nfn keep(x):\n    x\nfs = \[keep\]\nlist::at(fs, 0)(mutable_array::create(1, \"a\"))" *] \
-        [maRejects "import list\nimport mutable_array\nfn keep(x):\n    x\nfn keep2(x):\n    unit\nfn pick(fs, i) errors IndexNotFound:\n    list::at(fs, i)\nfs = \[keep, keep2\]\npick(fs, 0)(mutable_array::create(1, \"a\"))" *] \
-        [maRejects "import list\nimport mutable_array\nfn apply(f, x):\n    f(x)\nfn keep(x):\n    x\nfn keep2(x):\n    unit\nfn pick(fs, i) errors IndexNotFound:\n    list::at(fs, i)\nfs = \[keep, keep2\]\napply(pick(fs, 0), mutable_array::create(1, \"a\"))" *]
-} -result {accepted accepted {{CORE SEMANTIC TYPE} 1} {{CORE SEMANTIC TYPE} 1}}
+        [maRejects "import list\nimport mutable_array\nfn keep(x):\n    x\nfn keep2(x):\n    unit\nfn pick(fs, i) errors IndexNotFound:\n    list::at(fs, i)\nfs = \[keep, keep2\]\ng = pick(fs, 0):\n    on IndexNotFound:\n        keep\ng(mutable_array::create(1, \"a\"))" *] \
+        [maRejects "import list\nimport mutable_array\nfn apply(f, x):\n    f(x)\nfn keep(x):\n    x\nfn keep2(x):\n    unit\nfn pick(fs, i) errors IndexNotFound:\n    list::at(fs, i)\nfs = \[keep, keep2\]\ng = pick(fs, 0):\n    on IndexNotFound:\n        keep\napply(g, mutable_array::create(1, \"a\"))" *]
+} -result {accepted accepted accepted accepted}
 
-test mat-atk-12 {the untyped function boundary is crossed by semantic instances (OPPORTUNISTIC-SEMANTIC-INSTANCES.md): an identity or a read-only wrapper accepts the typed array and keeps its contract, the same functions with a body that would erase it do not} -body {
+test mat-atk-12 {the untyped function boundary is crossed by semantic instances (OPPORTUNISTIC-SEMANTIC-INSTANCES.md): an identity, a read-only wrapper and a function storing the array into a raw one all accept it} -body {
     list \
         [maRejects "import mutable_array\nfn identity(x):\n    x\nidentity(mutable_array::create(1, \"a\"))" *] \
         [maRejects "import mutable_array\nfn cap(m):\n    mutable_array::capacity(m)\ncap(mutable_array::create(1, \"a\"))" *] \
-        [maRejects "import mutable_array\nfn erase(x):\n    raw = mutable_array::allocate(1)\n    mutable_array::set(raw, 0, x)\n    raw\nerase(mutable_array::create(1, \"a\"))" *]
-} -result {accepted accepted {{CORE SEMANTIC TYPE} 1}}
+        [maRejects "import mutable_array\nfn erase(x) errors IndexNotFound:\n    raw = mutable_array::allocate(1)\n    mutable_array::set(raw, 0, x)\n    raw\nr = erase(mutable_array::create(1, \"a\")):\n    on IndexNotFound:\n        mutable_array::allocate(0)\nr" *]
+} -result {accepted accepted accepted}
 
 test mat-atk-13 {a vacuous MutableArray[any] and raw arrays are freely interchangeable (no contract to lose)} -body {
     list \
@@ -645,12 +664,12 @@ test mat-atk-17 {forward references cannot launder the array: there is no forwar
         [maRejects "import mutable_array\nfn peek():\n    r\nr = mutable_array::allocate(1)\npeek()" *]
 } -result {{{CORE SEMANTIC UNBOUND} 1} {{CORE SEMANTIC UNBOUND} 1} 1 {{CORE SEMANTIC UNBOUND} 1} {{CORE SEMANTIC UNBOUND} 1}}
 
-test mat-atk-18 {a backward reference (binding first) and a typed parameter keep the contract} -body {
+test mat-atk-18 {a function cannot mutate an array it captures (MUTABLE-PLACE-RECEIVER: a captured binding is not its place), a store is checked against the element type first; a typed parameter is the callee's own place} -body {
     list \
         [maRejects "import mutable_array\nm = mutable_array::create(1, \"a\")\nfn poke():\n    mutable_array::set(m, 0, \"q\")\npoke()" *] \
         [maRejects "import mutable_array\nm = mutable_array::create(1, \"a\")\nfn poke():\n    mutable_array::set(m, 0, 5)\npoke()" *] \
         [maRejects "import mutable_array\nfn poke(m: MutableArray\[str\]):\n    if mutable_array::capacity(m) > 0:\n        mutable_array::set(m, 0, \"q\")\nm = mutable_array::create(1, \"a\")\npoke(m)" *]
-} -result {accepted {{CORE SEMANTIC TYPE} 1} accepted}
+} -result {{{CORE SEMANTIC MUTABLE-PLACE-RECEIVER} 1} {{CORE SEMANTIC TYPE} 1} accepted}
 
 test mat-atk-19 {a function returning a typed array cannot be reached through a forward reference at all; called after its definition it keeps its contract} -body {
     list \
@@ -660,9 +679,9 @@ test mat-atk-19 {a function returning a typed array cannot be reached through a 
         [maRejects "fn caller():\n    later()\nfn later():\n    5\ncaller()" *]
 } -result {{{CORE SEMANTIC UNBOUND} 1} {{CORE SEMANTIC UNBOUND} 1} accepted {{CORE SEMANTIC UNBOUND} 1}}
 
-test mat-atk-20 {passing a function that returns a typed array to an untyped parameter is an erasure of its result} -body {
+test mat-atk-20 {passing a function that returns a typed array to an untyped parameter is accepted (its results are values)} -body {
     maRejects "import mutable_array\nfn make():\n    mutable_array::create(1, \"a\")\nfn apply(f):\n    f()\napply(make)" *
-} -result {{CORE SEMANTIC TYPE} 1}
+} -result accepted
 
 test mat-atk-21 {the erasure attack matrix: every flow of a typed array through a sink and then a write of the wrong value is rejected} -body {
     set c [open [file join $::projectRoot audit parameterized-mutablearray tools probes-attack-matrix.txt]]
@@ -733,7 +752,7 @@ test mat-id-2 {the rule follows the exact function through an alias} -body {
         [maLast "import mutable_array\nf = mutable_array::from_list\ng = f\ng(\[1, 2\])"]
 } -result {{MutableArray[str]} {MutableArray[int]}}
 
-test mat-id-3 {viewed through a structural Fn (target unknown) the relation is lost: the result is the raw kind, never a typed lie; where the target is known exactly the semantic instance keeps the relation, and a declared raw result then rejects the erasure} -body {
+test mat-id-3 {viewed through a structural Fn (target unknown) the relation is lost: the result is the raw kind, never a typed lie; where the target is known exactly the semantic instance keeps the relation, and a declared raw result holds it as a copy} -body {
     set fnType "Fn{args: \[int, any\], return: mutarray, errors: \[\]}"
     set imp "import list\nimport mutable_array\n"
     set pick "fn other(n: int, d) -> mutarray:\n    mutable_array::allocate(n)\nfn pick(fs, i) errors IndexNotFound:\n    list::at(fs, i)\ng = pick(\[mutable_array::create, other\], 1):\n    on IndexNotFound:\n        other\n"
@@ -742,7 +761,7 @@ test mat-id-3 {viewed through a structural Fn (target unknown) the relation is l
         [maRejects "${imp}fn apply(f: $fnType) -> mutarray:\n    f(2, \"x\")\n${pick}m = apply(g)\nw = mutable_array::set(m, 0, 5):\n    on IndexNotFound:\n        unit\nw" *] \
         [maLast "import mutable_array\nfn apply(f: $fnType):\n    f(2, \"x\")\napply(mutable_array::create)"] \
         [maRejects "import mutable_array\nfn apply(f: $fnType) -> mutarray:\n    f(2, \"x\")\napply(mutable_array::create)" "*the declared result type mutarray would erase*"]
-} -result {mutarray accepted {MutableArray[str]} {{CORE SEMANTIC TYPE} 1}}
+} -result {mutarray accepted {MutableArray[str]} accepted}
 
 test mat-id-4 {only the registered names carry rules; passes stay free of name-keyed special cases} -body {
     set hits {}
@@ -778,12 +797,12 @@ test mat-sp-2 {a concrete forwarding function preserves the element contract} -b
     list [maResult $src fill] [maResult $src go]
 } -result {{MutableArray[int]} {MutableArray[int]}}
 
-test mat-sp-3 {the specialized instances keep the declared contract inside a typed function} -body {
+test mat-sp-3 {the specialized instances keep the declared contract inside a typed function (create is an intrinsic, with no instance of its own)} -body {
     set src "import mutable_array\nfn first(xs: MutableArray\[str\]) -> str errors IndexNotFound:\n    mutable_array::at(xs, 0)\nv = first(mutable_array::create(2, \"a\")):\n    on IndexNotFound:\n        \"z\"\nv"
     set hir [maCompile $src]
     set spec [hir::specialize::analyze $hir]
     lsort [lmap id [dict get $spec used] {hir::types::show [dict get $spec instances $id result]}]
-} -result {mutarray str str}
+} -result {str str}
 
 test mat-sp-4 {KeyType projects an array to the kind; the declared parameter restores the contract} -body {
     list [hir::specialize::KeyType {mutarray str}] [hir::specialize::KeyType {list {mutarray str}}] \
@@ -867,20 +886,20 @@ test mat-run-3 {a negative capacity is not clamped: RANGE, exactly like a raw al
     list [maErrors $typed] [maErrors $raw]
 } -result {{{CORE SEMANTIC RANGE} {CORE SEMANTIC RANGE} {CORE SEMANTIC RANGE} {CORE SEMANTIC RANGE}} {{CORE SEMANTIC RANGE} {CORE SEMANTIC RANGE} {CORE SEMANTIC RANGE} {CORE SEMANTIC RANGE}}}
 
-test mat-run-4 {managed defaults are shared, not copied: every slot is the same value; mutation through an alias is visible} -body {
-    set src "import mutable_array\nfn f() errors IndexNotFound:\n    shared = mutable_array::create(2, \"inner\")\n    outer = mutable_array::create(3, shared)\n    mutable_array::set(shared, 0, \"changed\")\n    \[mutable_array::at(mutable_array::at(outer, 0), 0), mutable_array::at(mutable_array::at(outer, 2), 0), mutable_array::freeze(mutable_array::at(outer, 1), 2)\]\nf()"
+test mat-run-4 {a repeated value is copied logically, never aliased: mutating the source afterwards changes no slot} -body {
+    set src "import mutable_array\nfn f() errors IndexNotFound:\n    shared = mutable_array::create(2, \"inner\")\n    outer = mutable_array::create(3, shared)\n    mutable_array::set(shared, 0, \"changed\")\n    \[mutable_array::at(mutable_array::at(outer, 0), 0), mutable_array::at(mutable_array::at(outer, 2), 0), mutable_array::freeze(mutable_array::at(outer, 1), 2), mutable_array::freeze(shared, 2)\]\nf()"
     list [maParity $src] [maValue $src]
-} -result {same {["changed", "changed", ["changed", "inner"]]}}
+} -result {same {["inner", "inner", ["inner", "inner"], ["changed", "inner"]]}}
 
 test mat-run-5 {nested Lists as default: one shared immutable List} -body {
     set src "import mutable_array\nfn f() errors IndexNotFound:\n    m = mutable_array::create(3, \[\[1\], \[2, 3\]\])\n    \[mutable_array::at(m, 0), mutable_array::at(m, 2) == mutable_array::at(m, 1)\]\nf()"
     list [maParity $src] [maValue $src]
 } -result {same {[[[1], [2, 3]], true]}}
 
-test mat-run-6 {typed get / set / freeze / copy / aliases behave as the raw operations at run time} -body {
-    set src "import mutable_array\nfn f() errors IndexNotFound:\n    a = mutable_array::create(4, 0)\n    b = a\n    mutable_array::set(b, 1, 10)\n    mutable_array::set(a, 2, 20)\n    c = mutable_array::from_list(\[7, 8, 9\])\n    mutable_array::copy(a, 0, c, 0, 2)\n    \[mutable_array::freeze(a, 4), mutable_array::freeze(b, 4) == mutable_array::freeze(a, 4), mutable_array::capacity(c)\]\nf()"
+test mat-run-6 {typed get / set / freeze / copy behave as the raw operations at run time; a copy (b = a) is independent} -body {
+    set src "import mutable_array\nfn f() errors IndexNotFound:\n    a = mutable_array::create(4, 0)\n    b = a\n    mutable_array::set(b, 1, 10)\n    mutable_array::set(a, 2, 20)\n    c = mutable_array::from_list(\[7, 8, 9\])\n    mutable_array::copy(a, 0, c, 0, 2)\n    \[mutable_array::freeze(a, 4), mutable_array::freeze(b, 4), mutable_array::capacity(c)\]\nf()"
     list [maParity $src] [maValue $src]
-} -result {same {[[7, 8, 20, 0], true, 3]}}
+} -result {same {[[7, 8, 20, 0], [0, 10, 0, 0], 3]}}
 
 test mat-run-7 {bounds behavior: a negative or out-of-range at or set is IndexNotFound; a freeze or copy past either end of the array is LowerUnderrun or UpperOverrun (STDLIB-NAMESPACES.md), handled by name on every backend} -body {
     lmap {body errors} {
@@ -897,10 +916,10 @@ test mat-run-7 {bounds behavior: a negative or out-of-range at or set is IndexNo
     }
 } -result {{same {"IndexNotFound"}} {same {"IndexNotFound"}} {same {"IndexNotFound"}} {same {"UpperOverrun"}} {same {"LowerUnderrun"}} {same {"UpperOverrun"}}}
 
-test mat-run-8 {from_list of nested typed arrays keeps identities; the inner array stays writable through its own type} -body {
-    set src "import list\nimport mutable_array\nfn f() errors IndexNotFound:\n    inner = mutable_array::from_list(\[\"a\"\])\n    outer = mutable_array::from_list(\[inner\])\n    mutable_array::set(inner, 0, \"z\")\n    \[mutable_array::at(mutable_array::at(outer, 0), 0), list::length(mutable_array::freeze(outer, 1))\]\nf()"
+test mat-run-8 {from_list of nested typed arrays holds copies: the inner array stays writable through its own type, and writing it changes no copy} -body {
+    set src "import list\nimport mutable_array\nfn f() errors IndexNotFound:\n    inner = mutable_array::from_list(\[\"a\"\])\n    outer = mutable_array::from_list(\[inner\])\n    mutable_array::set(inner, 0, \"z\")\n    \[mutable_array::at(mutable_array::at(outer, 0), 0), mutable_array::at(inner, 0), list::length(mutable_array::freeze(outer, 1))\]\nf()"
     list [maParity $src] [maValue $src]
-} -result {same {["z", 1]}}
+} -result {same {["a", "z", 1]}}
 
 test mat-run-9 {List[MutableArray[T]] read back with a dynamic index} -body {
     set src "import list\nimport mutable_array\nfn pick(rows, i) errors IndexNotFound:\n    list::at(rows, i)\nfn f(i: int) errors IndexNotFound:\n    a = mutable_array::create(2, 0)\n    b = mutable_array::create(3, 1)\n    m = list::at(\[a, b\], i)\n    mutable_array::capacity(m)\n\[f(0), f(1)\]"
@@ -943,9 +962,9 @@ proc maAotParity {text} {
     }
 }
 
-test mat-gc-1 {managed defaults, nested typed arrays, List[MutableArray[T]], aliases, freeze and copy: standalone AOT under GC stress agrees with every backend} -constraints executableAot -body {
-    maAotParity "import list\nimport mutable_array\nfn f() errors IndexNotFound, LowerUnderrun, UpperOverrun:\n    shared = mutable_array::create(3, \[\"managed\", \"list\"\])\n    inner = mutable_array::from_list(\[\"a\", \"b\"\])\n    outer = mutable_array::create(2, inner)\n    alias = outer\n    rows = \[mutable_array::create(2, \"r\"), mutable_array::create(1, \"s\")\]\n    mutable_array::set(inner, 1, \"z\")\n    dst = mutable_array::create(2, \"d\")\n    mutable_array::copy(dst, 0, list::at(rows, 0), 0, 2)\n    mutable_array::set(mutable_array::at(alias, 1), 0, \"y\")\n    \[mutable_array::freeze(shared, 3), mutable_array::freeze(mutable_array::at(outer, 0), 2), mutable_array::freeze(dst, 2), mutable_array::capacity(list::at(rows, 1)), mutable_array::capacity(mutable_array::create(0, inner))\]\nr = f():\n    on IndexNotFound:\n        \[\]\n    on LowerUnderrun:\n        \[\]\n    on UpperOverrun:\n        \[\]\nr"
-} -result {[[["managed", "list"], ["managed", "list"], ["managed", "list"]], ["y", "z"], ["r", "r"], 1, 0]}
+test mat-gc-1 {managed defaults, nested typed arrays, List[MutableArray[T]], copies, freeze and copy: standalone AOT under GC stress agrees with every backend} -constraints executableAot -body {
+    maAotParity "import list\nimport mutable_array\nfn f() errors IndexNotFound, LowerUnderrun, UpperOverrun:\n    shared = mutable_array::create(3, \[\"managed\", \"list\"\])\n    inner = mutable_array::from_list(\[\"a\", \"b\"\])\n    outer = mutable_array::create(2, inner)\n    alias = outer\n    rows = \[mutable_array::create(2, \"r\"), mutable_array::create(1, \"s\")\]\n    mutable_array::set(inner, 1, \"z\")\n    dst = mutable_array::create(2, \"d\")\n    mutable_array::copy(dst, 0, list::at(rows, 0), 0, 2)\n    slot = mutable_array::at(alias, 1)\n    mutable_array::set(slot, 0, \"y\")\n    mutable_array::set(alias, 1, slot)\n    \[mutable_array::freeze(shared, 3), mutable_array::freeze(mutable_array::at(outer, 1), 2), mutable_array::freeze(mutable_array::at(alias, 1), 2), mutable_array::freeze(inner, 2), mutable_array::freeze(dst, 2), mutable_array::capacity(list::at(rows, 1)), mutable_array::capacity(mutable_array::create(0, inner))\]\nr = f():\n    on IndexNotFound:\n        \[\]\n    on LowerUnderrun:\n        \[\]\n    on UpperOverrun:\n        \[\]\nr"
+} -result {[[["managed", "list"], ["managed", "list"], ["managed", "list"]], ["a", "b"], ["y", "b"], ["a", "z"], ["r", "r"], 1, 0]}
 
 # ---------------------------------------------------------------------------
 # Source fence (spec items 48, 49, 82)
@@ -955,7 +974,7 @@ test mat-gc-1 {managed defaults, nested typed arrays, List[MutableArray[T]], ali
 # and csv_records.bot (its two duplicated implementations) now uses
 # mutable_array::create. Nothing else may use the new API; tests/typed-mutarray-
 # builder.test pins the narrower new fence inside those two files.
-test mat-fence-1 {no canonical program or stdlib module other than lib/mutarray.bot and the two geometric-builder corpus programs uses the new API} -body {
+test mat-fence-1 {no canonical program or stdlib module other than the two geometric-builder corpus programs and the HashTable (a struct of typed arrays since MUTABLE-ARRAY.md) uses the typed API} -body {
     set hits {}
     foreach pattern {bench/*.bot examples/surface/*.bot examples/stdlib/*.bot lib/*.bot} {
         foreach file [glob -nocomplain -directory $::projectRoot {*}[list $pattern]] {
@@ -968,7 +987,7 @@ test mat-fence-1 {no canonical program or stdlib module other than lib/mutarray.
                 if {[string match "#*" [string trim $line]]} continue
                 set line
             }] \n]
-            if {[file tail $file] ni {mutarray.bot csv_geometric.bot csv_records.bot}
+            if {[file tail $file] ni {mutarray.bot csv_geometric.bot csv_records.bot hashtable.bot}
                     && ([string first mutable_array::create $code] >= 0 || [string first "MutableArray\[" $code] >= 0)} {
                 lappend hits [file tail $file]
             }
@@ -988,17 +1007,17 @@ test mat-bd-1 {an untyped forwarder to a typed function infers the typed contrac
         [maRejects "${defs}r = fwd(mutable_array::allocate(1))$handled" *]
 } -result {str {{CORE SEMANTIC TYPE} 1} {{CORE SEMANTIC TYPE} 1}}
 
-test mat-bd-2 {struct boundary: a typed array cannot ride in a positional pair; typed storage plus a separate length works} -body {
+test mat-bd-2 {struct boundary: a typed array may ride in a positional pair (a logical copy); typed storage plus a separate length works} -body {
     set defs "import mutable_array\nfn push(storage: MutableArray\[int\], length: int, v: int) -> MutableArray\[int\]:\n    if length >= 0 and length < mutable_array::capacity(storage):\n        mutable_array::set(storage, length, v)\n    storage\n"
     list \
         [lindex [maRejects "${defs}pair = \[push(mutable_array::create(2, 0), 0, 7), 1\]\npair" *] 0] \
         [maLast "${defs}s = push(mutable_array::create(2, 0), 0, 7)\nmutable_array::freeze(s, mutable_array::capacity(s))"]
-} -result {{CORE SEMANTIC TYPE} {List[int]}}
+} -result {accepted {List[int]}}
 
-test mat-bd-3 {nesting is bounded by the aggregate depth (3): deeper stacks are rejected as erasures, never widened} -body {
+test mat-bd-3 {nesting is bounded by the aggregate depth (3): a deeper stack's innermost contract is the raw kind (an erasure, which a value permits), never a widened lie} -body {
     set base "import mutable_array\nx1 = mutable_array::create(1, 0)\nx2 = mutable_array::create(1, x1)\nx3 = mutable_array::create(1, x2)\n"
-    list [maLast "${base}x3"] [maRejects "${base}x4 = mutable_array::create(1, x3)\nx4" *]
-} -result {{MutableArray[MutableArray[MutableArray[int]]]} {{CORE SEMANTIC TYPE} 1}}
+    list [maLast "${base}x3"] [maLast "${base}x4 = mutable_array::create(1, x3)\nx4"]
+} -result {{MutableArray[MutableArray[MutableArray[int]]]} {MutableArray[MutableArray[MutableArray[mutarray]]]}}
 
 test mat-bd-4 {mutual recursion is rejected at resolution; direct recursion keeps the typed result} -body {
     set src "import mutable_array\nfn a(n: int):\n    if n == 0:\n        return mutable_array::create(1, 0)\n    b(n - 1)\nfn b(n: int):\n    a(n)\na(2)"

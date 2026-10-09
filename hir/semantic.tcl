@@ -62,8 +62,9 @@
 #     always valid for it (and was already analyzed for it), and the narrower
 #     argument fact may only add precision -- it can never rescue a body that
 #     is invalid for the declared type. A contract that holds a
-#     MutableVector is kept as it is: the parameter is a place the body may
-#     push into at its declared element type (MUTABLE-VECTOR.md).
+#     MutableVector or a MutableArray is kept as it is: the parameter is a
+#     place the body may store into at its declared element type
+#     (MUTABLE-VECTOR.md, MUTABLE-ARRAY.md).
 #
 # Exact scalar values are not in the key (`0` and `1` are both `int`); only
 # types are. A request whose entry types equal the block's own generic entry
@@ -296,7 +297,7 @@ proc hir::semantic::Call {hir ctx e block argTypes blockResult} {
             set x [hir::traits::EntryView $t $d]
             set generic [hir::traits::AbstractView $d $block $index]
         } elseif {$d ne {}} {
-            set x [expr {[hir::types::subtype $t $d] && ![hir::types::MentionsMutVec $d] ? $t : $d}]
+            set x [expr {[hir::types::subtype $t $d] && ![hir::types::MentionsMutable $d] ? $t : $d}]
             if {[hir::signatures::inferredTrusted $hir $block $index]
                     && [hir::signatures::CallableAdmits $t $d]} {
                 # A coroutine handle supplied for an untyped parameter the

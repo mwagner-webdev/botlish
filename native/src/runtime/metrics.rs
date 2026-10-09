@@ -552,7 +552,17 @@ impl Metrics {
             ("listElements", n(self.list_elements_copied)),
             ("mutableArrayElements", n(self.mutarray_elements_copied)),
         ]);
-        let mutations = dict(&[("reads", n(self.mutarray_reads)), ("writes", n(self.mutarray_writes))]);
+        // MutableArray slot reads and writes, and its copy-on-write
+        // (MUTABLE-ARRAY.md): logical copies, the detaches a write of a
+        // shared backing made, and the element words those copied.
+        let ma = &self.mutarray;
+        let mutations = dict(&[
+            ("reads", n(self.mutarray_reads)),
+            ("writes", n(self.mutarray_writes)),
+            ("shares", n(ma.shares)),
+            ("detaches", n(ma.detaches)),
+            ("detachElements", n(ma.detach_elements)),
+        ]);
         let traversal = dict(&[("utf8SeekBytes", n(self.utf8_seek_bytes))]);
         // String storage census (STRING-ALLOCATION.md). A String is one heap
         // block (header + UTF-8 text), so `heapAllocations`/`frees` are its
@@ -623,18 +633,6 @@ impl Metrics {
                     ("detachElements", n(mv.detach_elements)),
                     ("growths", n(mv.growths)),
                     ("growthBytes", n(mv.growth_bytes)),
-                ]),
-            ));
-        }
-        // Likewise: only a program that made a MutableArray.
-        let ma = &self.mutarray;
-        if self.by_kind[KIND_MUTARRAY as usize].allocations > 0 {
-            sections.push((
-                "mutableArray",
-                dict(&[
-                    ("shares", n(ma.shares)),
-                    ("detaches", n(ma.detaches)),
-                    ("detachElements", n(ma.detach_elements)),
                 ]),
             ));
         }

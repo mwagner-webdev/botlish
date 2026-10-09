@@ -1132,18 +1132,18 @@ proc hir::types::MakeMutArray {elem depth} {
     return [list mutarray [Unviewed [Unshaped [Bound $elem [expr {$depth + 1}]]]]]
 }
 
-# 1 if TYPE is or holds a MutableVector (an element, a field, a function
-# type's argument or result): a type some place of which may be mutated.
-proc hir::types::MentionsMutVec {type {seen {}}} {
-    if {[IsMutVec $type] || $type eq "mutvec"} {
+# 1 if TYPE is or holds a MutableVector or a MutableArray (an element, a
+# field): a type some place of which may be mutated.
+proc hir::types::MentionsMutable {type {seen {}}} {
+    if {[IsMutVec $type] || [IsMutArray $type] || $type in {mutvec mutarray}} {
         return 1
     }
-    if {[IsList $type] || [IsSet $type] || [IsMutArray $type]} {
-        return [MentionsMutVec [lindex $type 1] $seen]
+    if {[IsList $type] || [IsSet $type]} {
+        return [MentionsMutable [lindex $type 1] $seen]
     }
     if {[IsStruct $type]} {
         foreach {name t} [lindex $type 1] {
-            if {[MentionsMutVec $t $seen]} { return 1 }
+            if {[MentionsMutable $t $seen]} { return 1 }
         }
     }
     if {[IsNamedStruct $type]} {
@@ -1152,7 +1152,7 @@ proc hir::types::MentionsMutVec {type {seen {}}} {
             return 0
         }
         foreach {name t} [hir::structs::fieldTypes $id] {
-            if {[MentionsMutVec $t [concat $seen [list $id]]]} { return 1 }
+            if {[MentionsMutable $t [concat $seen [list $id]]]} { return 1 }
         }
     }
     return 0
@@ -1176,17 +1176,6 @@ proc hir::types::MakeMutVec {elem depth} {
         return mutvec
     }
     return [list mutvec [Unviewed [Unshaped [Bound $elem [expr {$depth + 1}]]]]]
-}
-
-# 1 if element contracts A and B are the same contract: identical, or each
-# admissible for the other (two spellings of one value domain). MutableArray
-# is invariant, so this -- not subtype -- relates two MutableArray element
-# types.
-proc hir::types::Equivalent {a b} {
-    if {$a eq $b} {
-        return 1
-    }
-    return [expr {[Admits $a $b] && [Admits $b $a]}]
 }
 
 # TYPE in canonical form (core types are normalized by core::type).
@@ -1356,11 +1345,14 @@ proc hir::types::subtype {a b} {
         return 1
     }
     if {[IsMutArray $b]} {
-        # MutableArray[E] is invariant: only a MutableArray with an
-        # equivalent element contract (or the raw kind when E is the whole
-        # `any` domain, which promises nothing) may be viewed as it.
+        # MutableArray[E] is a value (MUTABLE-ARRAY.md), like MutableVector:
+        # an array of a subtype is one of the supertype, since a copy never
+        # writes through to another logical value. The raw kind is
+        # MutableArray[any]. (Under the reference semantics MutableArray had
+        # before, it was invariant: a wider view was an alias that could
+        # store values the original's element type excluded.)
         if {[IsMutArray $a]} {
-            return [Equivalent [lindex $a 1] [lindex $b 1]]
+            return [subtype [lindex $a 1] [lindex $b 1]]
         }
         return [expr {$a eq "mutarray" && [lindex $b 1] eq "any"}]
     }
@@ -1375,19 +1367,13 @@ proc hir::types::subtype {a b} {
         return [expr {$a eq "mutvec" && [lindex $b 1] eq "any"}]
     }
     if {$b eq "mutarray" && [IsMutArray $a]} {
-        # The raw kind is an untyped view of an array -- of a logical copy of
-        # it, wherever it is written through (MUTABLE-ARRAY.md: an array is
-        # a value) -- so every MutableArray[T] is one. (Under the reference
-        # semantics MutableArray had before, a typed array viewed as the raw
-        # kind could be written with anything through that alias, and only
-        # MutableArray[any] qualified.)
+        # The raw kind, MutableArray[any]: every MutableArray[T] is one.
         return 1
     }
     if {[IsStruct $b]} {
         # An anonymous struct is compatible with another only when the field
         # sets are equal (no width subtyping, no optional fields) and every
-        # field type is compatible -- fields are immutable, so covariant;
-        # a MutableArray field stays invariant through its own rule above.
+        # field type is compatible -- fields are immutable, so covariant.
         if {![IsStruct $a]} {
             return 0
         }
@@ -1473,20 +1459,10 @@ proc hir::types::lub {a b} {
         # Two MutableVector values: their elements join, as a List's do.
         return [MakeMutVec [lub [lindex $a 1] [lindex $b 1]] 0]
     }
-    if {[IsMutArray $a] || [IsMutArray $b]} {
-        # Two MutableArrays of one contract join in it. Otherwise
-        # (MutableArray[int] and MutableArray[str] have no common typed
-        # supertype: MutableArray[T] is invariant) they join in the raw kind,
-        # the untyped view of an array, when both are arrays; anything else
-        # joins in `any`.
-        if {[subtype $a $b] && [subtype $b $a]} {
-            return [expr {$a eq "mutarray" || $b eq "mutarray" ? "mutarray" : [lindex [lsort [list $a $b]] 0]}]
-        }
-        if {([IsMutArray $a] || $a eq "mutarray") && ([IsMutArray $b] || $b eq "mutarray")
-                && ![IsAffine $a] && ![IsAffine $b]} {
-            return mutarray
-        }
-        return any
+    if {[IsMutArray $a] && [IsMutArray $b]} {
+        # Two MutableArray values: their elements join, as a MutableVector's
+        # do.
+        return [MakeMutArray [lub [lindex $a 1] [lindex $b 1]] 0]
     }
     if {[IsStructLike $a] || [IsStructLike $b]} {
         # Two anonymous structs with the same field names join fieldwise
@@ -1599,11 +1575,14 @@ proc hir::types::narrow {current fact} {
         return $fact
     }
     if {[IsMutArray $fact]} {
-        # A MutableArray[T] contract fact is a static property of the
-        # object, never derivable from a kind test: an already typed value
-        # keeps its contract; a raw/unknown one adopts the declared one
-        # (legal callers already proved it).
-        return [expr {[IsMutArray $current] ? $current : $fact}]
+        # A declared MutableArray[T] theorem, like a MutableVector's: the
+        # element facts combine (an instance key's kind-only element, a
+        # coroutine, adopts the declared contract); a raw or unknown array
+        # adopts the declared one (legal callers already proved it).
+        if {[IsMutArray $current] && [lindex $current 1] ne "never"} {
+            return [MakeMutArray [narrow [lindex $current 1] [lindex $fact 1]] 0]
+        }
+        return $fact
     }
     if {[IsFn $fact] || [IsStructLike $fact] || [IsCoroutine $fact]} {
         # A structural contract fact (a function contract, a struct type, a

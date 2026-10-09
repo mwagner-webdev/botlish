@@ -92,12 +92,16 @@ proc maReleases {text {backend interp}} {
 }
 
 # The native report of TEXT (native::allocationReport): {COROUTINES
-# MUTABLEARRAY}, the coroutine counters and the array copy-on-write ones.
+# MUTABLEARRAY}, the coroutine counters and the array copy-on-write ones
+# (shares, detaches, detachElements).
 proc maNative {text} {
     set hir [surface::compile $text -warnings off]
     set report [native::allocationReport $hir summary]
-    return [list [expr {[dict exists $report coroutines] ? [dict get $report coroutines] : {}}] \
-        [expr {[dict exists $report mutableArray] ? [dict get $report mutableArray] : {}}]]
+    set cow {}
+    foreach key {shares detaches detachElements} {
+        lappend cow $key [dict get $report mutableArray $key]
+    }
+    return [list [expr {[dict exists $report coroutines] ? [dict get $report coroutines] : {}}] $cow]
 }
 
 # The released/swept native coroutine counters of TEXT.
@@ -231,7 +235,7 @@ test ma-cow-routes {items 6, 36, 43-45: every route a copy can take -- binding, 
         [maRoute "struct Box:\n    values: MutableArray\[int\]\n" "    b = Box {values: a}\n    b.values.swap(0, 9)\n    \[a.at(0), b.values.at(0)\]\n"] \
         [maRoute "" "    xs = \[a\]\n    b = list::at(xs, 0)\n    b.swap(0, 9)\n    \[a.at(0), list::at(xs, 0).at(0), b.at(0)\]\n"] \
         [maRoute "" "    v = mutable_vector::from_list(\[a\])\n    b = v.at(0)\n    b.swap(0, 9)\n    \[a.at(0), v.at(0).at(0), b.at(0)\]\n"] \
-        [maRoute "" "    n = {inner: {xs: \[a\]}}\n    b = list::at(n.inner.xs, 0)\n    b.set(1, 7)\n    \[a.at(1), b.at(1)\]\n"]
+        [maRoute "" "    n = {xs: \[a\]}\n    b = list::at(n.xs, 0)\n    b.set(1, 7)\n    \[a.at(1), b.at(1)\]\n"]
 } -result {{value {[0, 9]}} {value {[0, 9]}} {value {[0, 9]}} {value {[0, 9]}} {value {[0, 9]}} {value {[0, 9]}} {value {[0, 0, 9]}} {value {[0, 0, 9]}} {value {[0, 7]}}}
 
 test ma-cow-surviving-result {item 35: a function result returned while another copy survives is independent of it, also when the caller mutates the result first} -body {
@@ -247,7 +251,7 @@ test ma-cow-repeated-copy {item 30: create(3, x) of an unrestricted MutableVecto
 } -result {value {[1, 2, 1, 1, 0]}}
 
 test ma-context-member {item 46: a context struct's array member is a place every function sharing the context mutates in place; a snapshot read out of it is independent of later writes} -body {
-    maAgree "import mutable_array\ncontext struct Counts:\n    values: MutableArray\[int\]\nfn bump(i: int, context c: Counts) -> unit errors IndexNotFound:\n    c.values.set(i, c.values.at(i) + 1)\nfn snapshot(context c: Counts) -> MutableArray\[int\]:\n    c.values\nfn f() -> List\[int\] errors IndexNotFound:\n    with context Counts {values: mutable_array::create(2, 0)}\n    bump(0)\n    s1 = snapshot()\n    bump(0)\n    bump(1)\n    s2 = snapshot()\n    \[s1.at(0), s1.at(1), s2.at(0), s2.at(1)\]\nr = f():\n    on IndexNotFound:\n        \[\]\nr\n"
+    maAgree "import mutable_array\ncontext struct Counts:\n    values: MutableArray\[int\]\nfn bump(i: int, context c: Counts) -> unit errors IndexNotFound:\n    c.values.set(i, c.values.at(i) + 1)\nfn snapshot(context c: Counts) -> MutableArray\[int\]:\n    c.values\nfn f() -> List\[int\] errors IndexNotFound:\n    bump(0)\n    s1 = snapshot()\n    bump(0)\n    bump(1)\n    s2 = snapshot()\n    \[s1.at(0), s1.at(1), s2.at(0), s2.at(1)\]\nwith context Counts {values: mutable_array::create(2, 0)}\nr = f():\n    on IndexNotFound:\n        \[\]\nr\n"
 } -result {value {[1, 0, 2, 1]}}
 
 test ma-place-receiver {item 33: a temporary receiver (a call's result, a List element) and a value of a known non-array type are MUTABLE-PLACE-RECEIVER; a nested function may neither mutate nor capture an array its function mutates (MUTABLE-PLACE-CAPTURE)} -body {
@@ -260,7 +264,7 @@ test ma-place-receiver {item 33: a temporary receiver (a call's result, a List e
 } -result {MUTABLE-PLACE-RECEIVER {the receiver of mutable_array::set is not a place: it is a temporary value, so the updated array would be lost (a MutableArray is a value; bind it to a name, mutate the name, and use the name afterwards)} MUTABLE-PLACE-RECEIVER MUTABLE-PLACE-RECEIVER MUTABLE-PLACE-RECEIVER MUTABLE-PLACE-CAPTURE}
 
 test ma-generic-place {item 33: a generic function's untyped parameter is a place its body may mutate (a dynamic copy on entry, `d`): the caller's array never changes} -body {
-    maRoute "fn fill(x, v):\n    mutable_array::set(x, 0, v)\n    x\n" "    b = fill(a, 4)\n    c = fill(b, 5)\n    \[a.at(0), b.at(0), c.at(0)\]\n"
+    maRoute "fn fill(x, v) errors IndexNotFound:\n    mutable_array::set(x, 0, v)\n    x\n" "    b = fill(a, 4)\n    c = fill(b, 5)\n    \[a.at(0), b.at(0), c.at(0)\]\n"
 } -result {value {[0, 4, 5]}}
 
 # ---------------------------------------------------------------------------
@@ -295,24 +299,24 @@ test ma-affine-whole-moves {item 7: an affine array moves whole -- through a bin
 test ma-affine-whole-releases {items 7, 32: an affine array moved through bindings, calls, results, structs, Lists and vectors releases every coroutine exactly once, where its last owner dies, on both Tcl backends and natively} -body {
     set text "${maDecls}struct Pool:\n    workers: MutableArray\[Coroutine{args: \[Command\], return: Event}\]\nfn pass(a: MutableArray\[Coroutine{args: \[Command\], return: Event}\]) -> MutableArray\[Coroutine{args: \[Command\], return: Event}\]:\n    a\nfn f() -> int errors IndexNotFound:\n    a = mutable_array::generate(2, make)\n    b = pass(a)\n    p = Pool {workers: b}\n    {workers} = p\n    xs = \[workers, mutable_array::generate(1, make)\]\n    v = mutable_vector::from_list(xs)\n    last = v.pop()\n    mutable_array::capacity(last)\nr = f():\n    on IndexNotFound:\n        0\nr\n"
     list [maReleases $text] [maReleases $text compile] [maNativeReleases $text]
-} -cleanup {unset -nocomplain text} -result {{{value 1} 3 1 {3 1 2}} {{value 1} 3 1 {3 1 2}} {3 0}}
+} -cleanup {unset -nocomplain text} -result {{{value 1} 3 1 {1 2 3}} {{value 1} 3 1 {1 2 3}} {3 0}}
 
 # ---------------------------------------------------------------------------
 # Indexed reads, swap, set (items 8-11, 16-19)
 
 test ma-affine-at {item 8: an indexed read that would leave the array owning the same affine element is AFFINE-ELEMENT-COPY-OUT -- also through a struct field path, and through the library's get, freeze and a copy's source} -body {
     set pre "${maDecls}struct Pool:\n    workers: MutableArray\[Coroutine{args: \[Command\], return: Event}\]\nfn f() -> int errors IndexNotFound, LowerUnderrun, UpperOverrun:\n    a = mutable_array::generate(2, make)\n"
-    list [maCode "${pre}    c = a.at(0)\n    1\n"] [maMessage "${pre}    c = a.at(0)\n    1\n"] \
+    list [maCode "${pre}    c = mutable_array::at(a, 0)\n    1\n"] [maMessage "${pre}    c = mutable_array::at(a, 0)\n    1\n"] \
         [maCode "${pre}    p = Pool {workers: a}\n    c = mutable_array::at(p.workers, 0)\n    1\n"] \
-        [maCode "${pre}    xs = a.freeze(1)\n    1\n"] \
-        [maCode "${pre}    b = mutable_array::generate(2, make)\n    a.copy(0, b, 0, 1)\n    1\n"] \
+        [maCode "${pre}    xs = mutable_array::freeze(a, 1)\n    1\n"] \
+        [maCode "${pre}    b = mutable_array::generate(2, make)\n    mutable_array::copy(a, 0, b, 0, 1)\n    1\n"] \
         [maCode "${pre}    c = mutable_array::get(a, 0, make(9))\n    1\n"]
 } -cleanup {unset -nocomplain pre} -result {AFFINE-ELEMENT-COPY-OUT {mutable_array::at would copy an affine element out of `a` (MutableArray[Coroutine{args: [Command], return: Event, errors: []}]) while the array still owns it, making a second owner: move it out instead -- `swap(i, replacement)` exchanges it for another, and a loop over the array consumes it, moving each element out in order (there are no references to elements)} AFFINE-ELEMENT-COPY-OUT AFFINE-ELEMENT-COPY-OUT AFFINE-ELEMENT-COPY-OUT AFFINE-ELEMENT-COPY-OUT}
 
 test ma-ops {items 16, 18, 25, 42: create, from_list, generate, capacity, at, set, swap, copy, freeze and get on unrestricted elements; a bad index is the handleable IndexNotFound and changes nothing; a bad slice LowerUnderrun or UpperOverrun; a negative capacity RANGE} -body {
-    list [maAgree "import mutable_array\nfn f() -> List\[int\] errors IndexNotFound, LowerUnderrun, UpperOverrun:\n    a = mutable_array::from_list(\[1, 2, 3, 4\])\n    b = mutable_array::generate(3, fn_tens)\n    x = a.at(1)\n    s = a.swap(0, 7)\n    a.set(3, 8)\n    a.copy(1, b, 1, 2)\n    g = mutable_array::get(a, 9, -5)\n    list::append(a.freeze(4), \[x, s, g, b.capacity()\])\nfn fn_tens(i: int) -> int:\n    i * 10\nfn bad() -> List\[int\] errors LowerUnderrun, UpperOverrun:\n    a = mutable_array::create(2, 1)\n    x = a.at(2):\n        on IndexNotFound:\n            -1\n    y = a.swap(-1, 9):\n        on IndexNotFound:\n            -2\n    a.set(5, 9):\n        on IndexNotFound:\n            unit\n    z = a.freeze(3):\n        on UpperOverrun:\n            \[-3\]\n    list::append(z, \[x, y, a.at(0)\])\nr = f():\n    on IndexNotFound:\n        \[\]\n    on LowerUnderrun:\n        \[\]\n    on UpperOverrun:\n        \[\]\nimport list\n\[r, bad()\]\n"] \
+    list [maAgree "import list\nimport mutable_array\nfn fn_tens(i: int) -> int:\n    i * 10\nfn f() -> List\[List\[int\]\] errors IndexNotFound, LowerUnderrun, UpperOverrun:\n    a = mutable_array::from_list(\[1, 2, 3, 4\])\n    b = mutable_array::generate(3, fn_tens)\n    x = a.at(1)\n    s = a.swap(0, 7)\n    a.set(3, 8)\n    a.copy(1, b, 1, 2)\n    g = mutable_array::get(a, 9, -5)\n    \[a.freeze(4), \[x, s, g, b.capacity()\]\]\nfn bad(n: int) -> List\[List\[int\]\] errors LowerUnderrun, UpperOverrun:\n    a = mutable_array::create(2, 1)\n    x = a.at(n):\n        on IndexNotFound:\n            -1\n    y = a.swap(n - 3, 9):\n        on IndexNotFound:\n            -2\n    a.set(n + 3, 9):\n        on IndexNotFound:\n            unit\n    z = a.freeze(n + 1):\n        on UpperOverrun:\n            \[-3\]\n    \[z, \[x, y, a.at(0)\]\]\nr = f():\n    on IndexNotFound:\n        \[\]\n    on LowerUnderrun:\n        \[\]\n    on UpperOverrun:\n        \[\]\n\[r, bad(2)\]\n"] \
         [lrange [maAgree "import mutable_array\na = mutable_array::create(-1, 0)\n0\n"] 0 1]
-} -result {{value {[[7, 10, 20, 8, 2, 1, -5, 3], [-3, -1, -2, 1]]}} {error {CORE SEMANTIC RANGE}}}
+} -result {{value {[[[7, 10, 20, 8], [2, 1, -5, 3]], [[-3], [-1, -2, 1]]]}} {error {CORE SEMANTIC RANGE}}}
 
 
 cleanupTests

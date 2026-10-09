@@ -347,26 +347,18 @@ proc hir::cardinality::Capacity {hir e stepsVar} {
         return [FormAtom [list cap [list b $id]]]
     }
     set node [dict get $hir exprs $id]
-    # The MutableArray constructors (core/mutarray.tcl): allocate, create and
-    # generate make as many slots as their Int capacity argument says,
-    # from_list as many as its List has elements. A logical copy
-    # (mutable_vector#share) keeps its array's length.
-    set args [expr {[dict get $node kind] eq "call" ? [dict get $node args] : {}}]
-    switch -- [NativeName $hir $node] {
-        mutable_array::allocate {
-            if {[llength $args] == 1} {
-                return [IntForm $hir [lindex $args 0] steps]
-            }
-        }
-        mutable_array::create - mutable_array::generate - mutable_array#generate_drop {
-            if {[llength $args] >= 2} {
-                return [IntForm $hir [lindex $args 0] steps]
-            }
-        }
-        mutable_array::from_list {
-            if {[llength $args] == 1} {
-                return [ListLength $hir [lindex $args 0] steps]
-            }
+    # An array constructor makes as many slots as its registration's
+    # -result-length says (core/native.tcl): its Int capacity argument
+    # (allocate, create, generate) or the length of its List argument
+    # (from_list).
+    set name [NativeName $hir $node]
+    if {$name ne ""} {
+        set length [dict get [core::native::metadata $name] resultLength]
+        set args [dict get $node args]
+        if {$length ne "" && [lindex $length 1] < [llength $args]} {
+            lassign $length how index
+            set arg [lindex $args $index]
+            return [expr {$how eq "int" ? [IntForm $hir $arg steps] : [ListLength $hir $arg steps]}]
         }
     }
     return [FormAtom [list cap [list e $id]]]

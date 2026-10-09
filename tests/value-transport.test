@@ -710,13 +710,13 @@ test vt-corpus-identical-nir {the whole canonical corpus lowers to the same NIR 
     set same
 } -result {}
 
-test vt-corpus-hashtable-rehash {the 3-field rehash groupings still cross their exact calls as fields} -body {
+test vt-corpus-hashtable-rehash {the rehash passes the old table's three arrays apart and the destination HashTable whole: since MUTABLE-ARRAY.md a table is a struct value, built (structnew) by ht_alloc for ht_new and for the rehash, so there is no 3-field grouping left to cross calls as fields} -body {
     set hir [native::prepareHir [surface::readProgramFile [file join $::projectRoot examples stdlib hashtable.bot]]]
     set text [dict get [native::lowered $hir] text]
     regexp {func \d+ "ht_rehash_scan" params=(\d+) env=0 regs=\d+ pnames="([^"]*)"} $text -> params pnames
     set metrics [dict get [native::transportCensus $hir] metrics]
     list $params $pnames [dict get $metrics structnew] [dict get $metrics deniedParams]
-} -result {9 {src.0 src.1 src.2 i oldCapacity dest.0 dest.1 dest.2 newCapacity} 0 0}
+} -result {7 {controls keys values i oldCapacity dest newCapacity} 2 0}
 
 test vt-corpus-test-selection-control {stored Test values stay physical: storage is a hard boundary, whatever the policy} -body {
     set hir [native::prepareHir [surface::readProgramFile [file join $::projectRoot bench test-selection.bot]]]

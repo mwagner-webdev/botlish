@@ -30,7 +30,9 @@
 #                      `elif` chains
 #   position           statement, `v = chain`, `return chain`
 #
-# The log is a one-slot MutableArray read as a decimal number: every probe
+# The log is a one-slot MutableArray, a member of an installed context (a
+# MutableArray is a value, so an argument would be the callee's own copy), read
+# as a decimal number: every probe
 # appends its own digit, so the number records which conditions and bodies ran
 # and in which order -- the only evaluation-order observation the language has
 # that every backend (native included) can run.
@@ -88,8 +90,8 @@ proc genCond {ctx} {
         lappend choices {i < 2} {i == 1}
     }
     switch -- [rnd 0 4] {
-        0 { return "probe(log, [nextProbe], [pick {p q r}])" }
-        1 { return "probe(log, [nextProbe], x [pick {< ==  >}] [rnd 2 6])" }
+        0 { return "probe([nextProbe], [pick {p q r}])" }
+        1 { return "probe([nextProbe], x [pick {< ==  >}] [rnd 2 6])" }
         default { return [pick $choices] }
     }
 }
@@ -108,12 +110,12 @@ proc genBody {depth ctx scope} {
     set count [rnd 0 2]
     for {set i 0} {$i < $count} {incr i} {
         switch -- [rnd 0 3] {
-            0 { lappend body [list text "probe(log, [nextProbe], true)"] }
+            0 { lappend body [list text "probe([nextProbe], true)"] }
             1 {
                 if {$depth < 3} {
                     lappend body [list chain [genChain [expr {$depth + 1}] $ctx $scope] stmt ""]
                 } else {
-                    lappend body [list text "probe(log, [nextProbe], true)"]
+                    lappend body [list text "probe([nextProbe], true)"]
                 }
             }
             2 {
@@ -229,10 +231,20 @@ proc emitChain {chain style indent prefix} {
 proc program {kind chain position style} {
     set head {
         error Boom
-        fn probe(log, id, result):
-            if mutable_array::capacity(log) == 1:
-                mutable_array::set(log, 0, mutable_array::at(log, 0) * 10 + id)
+        context struct Log:
+            digits: MutableArray[int]
+        fn probe(id, result, context log: Log):
+            mutable_array::set(log.digits, 0, mutable_array::get(log.digits, 0, 0) * 10 + id):
+                on IndexNotFound:
+                    unit
             result
+        fn logged(context log: Log):
+            mutable_array::get(log.digits, 0, 0)
+        fn reset(context log: Log):
+            mutable_array::set(log.digits, 0, 0):
+                on IndexNotFound:
+                    unit
+            unit
     }
     set lines {}
     foreach line [split [string trim $head] \n] {
@@ -240,13 +252,13 @@ proc program {kind chain position style} {
     }
     set prefix [dict get {stmt {} bind "v = " return "return "} $position]
     if {$kind eq "loop"} {
-        lappend lines "fn work(log, p, q, r, x) errors Boom:"
+        lappend lines "fn work(p, q, r, x) errors Boom:"
         lappend lines "    loop i from 0 to 3:"
         lappend lines {*}[emitChain $chain $style 2 ""]
-        lappend lines "    probe(log, 9, true)"
+        lappend lines "    probe(9, true)"
         lappend lines "    x"
     } else {
-        lappend lines "fn work(log, p, q, r, x) errors Boom:"
+        lappend lines "fn work(p, q, r, x) errors Boom:"
         if {$position eq "bind"} {
             lappend lines {*}[emitChain $chain $style 1 "v = "]
             lappend lines "    v"
@@ -255,12 +267,12 @@ proc program {kind chain position style} {
         }
     }
     lappend lines {fn driver(p, q, r, x):}
-    lappend lines {    log = mutable_array::allocate(1)}
-    lappend lines {    mutable_array::set(log, 0, 0)}
-    lappend lines {    v = work(log, p, q, r, x):}
+    lappend lines {    reset()}
+    lappend lines {    v = work(p, q, r, x):}
     lappend lines {        on Boom:}
     lappend lines {            -7}
-    lappend lines {    [v, mutable_array::at(log, 0)]}
+    lappend lines {    [v, logged()]}
+    lappend lines {with context Log {digits: mutable_array::create(1, 0)}}
     lappend lines {[driver(true, false, true, 3), driver(false, true, false, 7), driver(false, false, true, 5),}
     lappend lines { driver(false, false, false, 1), driver(true, true, true, 9), driver(false, true, true, 4)]}
     return [join $lines \n]

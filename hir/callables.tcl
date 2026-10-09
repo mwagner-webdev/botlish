@@ -205,10 +205,6 @@ proc hir::callables::Preserves {hir type final} {
         return [expr {$s ne "" && [hir::types::subtype $type $final]
             && [Preserves $hir [hir::types::FnReturn $s] [hir::types::FnReturn $final]]}]
     }
-    if {[hir::types::IsMutArray $type] && [hir::types::IsMutArray $final]} {
-        # Invariant: the same element contract, nothing narrower or wider.
-        return [hir::types::Equivalent [lindex $type 1] [lindex $final 1]]
-    }
     if {[hir::types::IsList $type] && [hir::types::IsList $final]} {
         set finalElem [lindex $final 1]
         foreach t [concat [list [lindex $type 1]] [hir::types::shapeOf $type]] {
@@ -221,7 +217,8 @@ proc hir::callables::Preserves {hir type final} {
     if {[hir::types::IsSet $type] && [hir::types::IsSet $final]} {
         return [Preserves $hir [lindex $type 1] [lindex $final 1]]
     }
-    if {[hir::types::IsMutVec $type] && [hir::types::IsMutVec $final]} {
+    if {([hir::types::IsMutVec $type] && [hir::types::IsMutVec $final])
+            || ([hir::types::IsMutArray $type] && [hir::types::IsMutArray $final])} {
         return [Preserves $hir [lindex $type 1] [lindex $final 1]]
     }
     if {[hir::types::IsStruct $type] && [hir::types::IsStruct $final]} {

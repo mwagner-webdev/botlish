@@ -50,9 +50,9 @@
 ## hir/types.tcl
 <<<<
         immutableSet - mutarray - mutvec {
-            # A MutableVector of affine elements is itself affine: it
-            # uniquely owns every element (MUTABLE-VECTOR.md). Mutation
-            # alone never makes a type affine.
+            # A MutableVector or MutableArray of affine elements is itself
+            # affine: it uniquely owns every element (MUTABLE-VECTOR.md,
+            # MUTABLE-ARRAY.md). Mutation alone never makes a type affine.
             return [IsAffine [lindex $type 1] $seen]
         }
 ====
@@ -63,6 +63,7 @@
             return 0
         }
 >>>>
+
 
 @@ descriptor-omits-vector the drop descriptor omits MutableVector: a dying vector releases nothing it owns
 ## hir/affine.tcl
@@ -100,21 +101,29 @@
 @@ share-aliases-native an unrestricted copy aliases writes (native): a logical copy is the same header
 ## native/src/runtime/mutvec.rs
 <<<<
+        b'h' => {
+            let backing = Rc::clone(&mutvec_of(value).backing);
             vm(p).metrics.record_mutvec_share();
             new_header(p, backing, 0)
 ====
+        b'h' => {
+            let backing = Rc::clone(&mutvec_of(value).backing);
             vm(p).metrics.record_mutvec_share();
             drop(backing);
             value
 >>>>
 
+
 @@ copy-eager-deep an unrestricted copy eagerly copies every element (native): no backing is ever shared, the first write never detaches
 ## native/src/runtime/mutvec.rs
 <<<<
+        b'h' => {
             let backing = Rc::clone(&mutvec_of(value).backing);
 ====
+        b'h' => {
             let backing = Rc::new((*mutvec_of(value).backing).clone());
 >>>>
+
 
 @@ callee-mutation-leaks a function's mutation of its unrestricted vector parameter changes the caller's vector (no entry copy)
 ## hir/mutvec.tcl
@@ -143,10 +152,11 @@
 @@ fresh-struct-imprecise a struct literal whose field has an imprecise type counts as fresh: a generic `{data: x}` around a caller's vector enters the caller's place without a copy
 ## hir/mutvec.tcl
 <<<<
-                if {([ShareDescriptor $type] ne "" || [MayHoldVector $type]) && ![Fresh $hir $f]} {
+                if {([ShareDescriptor $type] ne "" || [MayHoldVector $type]) && ![Fresh $hir $f]
 ====
-                if {[ShareDescriptor $type] ne "" && ![Fresh $hir $f]} {
+                if {[ShareDescriptor $type] ne "" && ![Fresh $hir $f]
 >>>>
+
 
 @@ result-move-context a function's result moves a context member's header out like its own place's: the snapshot it returns aliases the installed member
 ## hir/mutvec.tcl
@@ -159,10 +169,11 @@
 @@ snapshot-aliasing a loop over an unrestricted vector iterates the vector itself, not a snapshot: it observes (and here drains) the vector
 ## hir/mutvec.tcl
 <<<<
-                lappend wraps [list $it [ToListNative] {}]
+                lappend wraps [list $it [ToListNativeOf $kind] {}]
 ====
                 # (no snapshot)
 >>>>
+
 
 @@ context-detached-local a context member's mutation updates a detached local copy instead of the installed field
 ## hir/mutvec.tcl
@@ -211,30 +222,24 @@ proc hir::mutvec::ShareDescriptor {type} {
 >>>>
 
 @@ push-copies push copies the affine element: the binding stays its owner (and is released) while the vector owns it too
-## hir/affine.tcl
+## core/mutvec.tcl
 <<<<
-                    return {use place}
-                }
-                return [list move vector $p $index]
-            }
-            mutable_vector::swap - mutable_vector#swap_drop {
+    -param-types {mutvec any} -result-type unit -runtime mutvec-mutate -ownership {place move}
 ====
-                    return {use place}
-                }
-                return {use place}
-            }
-            mutable_vector::swap - mutable_vector#swap_drop {
+    -param-types {mutvec any} -result-type unit -runtime mutvec-mutate -ownership {place observe}
 >>>>
 
+
 @@ from-list-no-consume from_list of affine elements does not consume the List: the List keeps (and releases) the elements the vector owns
-## hir/affine.tcl
+## core/mutvec.tcl
 <<<<
-                # one owner of every element.
-                return [list move vector $p $index]
+    -param-types {list} -result-type mutvec -runtime mutvec-alloc -result-shape {mutvec-from-list 0} \
+    -ownership {move}
 ====
-                # one owner of every element.
-                return {use observe}
+    -param-types {list} -result-type mutvec -runtime mutvec-alloc -result-shape {mutvec-from-list 0} \
+    -ownership {observe}
 >>>>
+
 
 @@ from-list-duplicates from_list duplicates every element (native)
 ## native/src/runtime/mutvec.rs
@@ -245,17 +250,13 @@ proc hir::mutvec::ShareDescriptor {type} {
 >>>>
 
 @@ at-accepts-affine `at` of an affine element is accepted: a second owner of an element the vector still owns
-## hir/affine.tcl
+## core/mutvec.tcl
 <<<<
-            mutable_vector::at {
-                if {$index == 0} {
-                    return [list reject AFFINE-VECTOR-COPY-OUT \
+    -result-shape {mutvec-element 0} -errors IndexNotFound -ownership {copy-out observe}
 ====
-            mutable_vector::at {
-                if {$index == 0} {
-                    return {use observe}
-                    return [list reject AFFINE-VECTOR-COPY-OUT \
+    -result-shape {mutvec-element 0} -errors IndexNotFound -ownership {observe observe}
 >>>>
+
 
 @@ pop-leaves-owner pop returns the last element but leaves its slot owning it (Tcl)
 ## core/mutvec.tcl
@@ -286,20 +287,21 @@ proc hir::mutvec::ShareDescriptor {type} {
 >>>>
 
 @@ swap-copies-replacement swap copies the replacement: its binding stays its owner while the slot owns it too
-## hir/affine.tcl
+## core/mutvec.tcl
 <<<<
-            mutable_vector::swap - mutable_vector#swap_drop {
-                if {$index == 0} {
-                    return {use place}
-                }
-                return [list move vector $p $index]
+    -ownership {place observe move}
+core::native::register mutable_vector::clear
 ====
-            mutable_vector::swap - mutable_vector#swap_drop {
-                if {$index == 0} {
-                    return {use place}
-                }
-                return {use place}
+    -ownership {place observe observe}
+core::native::register mutable_vector::clear
 >>>>
+## core/mutvec.tcl
+<<<<
+    -result-shape {mutvec-element 0} -errors IndexNotFound -ownership {place observe move observe}
+====
+    -result-shape {mutvec-element 0} -errors IndexNotFound -ownership {place observe observe observe}
+>>>>
+
 
 @@ swap-loses-old swap does not move the old element to the result: it returns the replacement (the old element is never released, the replacement twice)
 ## core/mutvec.tcl
@@ -340,12 +342,13 @@ proc hir::mutvec::ShareDescriptor {type} {
 # Clear and drop
 
 @@ clear-not-elaborated an affine clear is not elaborated to clear_drop: the cleared elements leak
-## hir/mutvec.tcl
+## core/mutvec.tcl
 <<<<
-        if {$name ni {mutable_vector::clear mutable_vector::swap}} continue
+    -drop-form {mutable_vector#clear_drop 0} -ownership {place}
 ====
-        if {$name ni {mutable_vector::swap}} continue
+    -ownership {place}
 >>>>
+
 
 @@ clear-leaks clear of affine elements empties the vector without releasing them (Tcl)
 ## core/mutvec.tcl
@@ -463,30 +466,33 @@ proc hir::mutvec::ShareDescriptor {type} {
 @@ loop-no-move consuming iteration does not move the vector: it stays usable after the loop
 ## hir/affine.tcl
 <<<<
-                # releases what is left when it is left early.
+                # early.
                 return [list move loop $p]
 ====
-                # releases what is left when it is left early.
+                # early.
                 return {use observe}
 >>>>
+
 
 @@ loop-aliases-element consuming iteration aliases each element: the loop variable owns it while the vector keeps it (interpreter)
 ## core/evaluator.tcl
 <<<<
-    while {[llength [core::mutvec::items $vector]] > 0} {
-        set item [core::mutvec::takeFront $vector]
+    while {[core::mutvec::remaining $vector] > 0} {
+        set item [core::mutvec::drainFront $vector]
 ====
     foreach item [core::mutvec::items $vector] {
 >>>>
 
+
 @@ loop-aliases-element-compiled consuming iteration aliases each element: the loop variable owns it while the vector keeps it (Tcl compiler)
 ## compiler/compiler.tcl
 <<<<
-        Emit ctx "while \{\[llength \[core::mutvec::items \$$items\]\] > 0\} \{"
-        Emit ctx "    set $item \[core::mutvec::takeFront \$$items\]"
+        Emit ctx "while \{\[core::mutvec::remaining \$$items\] > 0\} \{"
+        Emit ctx "    set $item \[core::mutvec::drainFront \$$items\]"
 ====
         Emit ctx "foreach $item \[core::mutvec::items \$$items\] \{"
 >>>>
+
 
 @@ continue-leaks `continue` leaks the current affine element (no exit releases on continue)
 ## hir/affine.tcl

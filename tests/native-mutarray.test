@@ -441,11 +441,17 @@ test mutarray-mutation-metric-1 {optional read/write counters} -body {
     list [dict get $report mutableArray writes] [dict get $report mutableArray reads]
 } -result {2 2}
 
+# The geometric builder threads its storage and length separately, as the
+# corpus's does (TYPED-MUTARRAY-BUILDER-REFACTOR.md): a MutableArray is a
+# value (MUTABLE-ARRAY.md), so storage kept inside a `[storage, length]`
+# List would be copied by every extraction (`list::at`), and every append's
+# first write would then detach it -- a quadratic build. Threaded, each
+# append mutates the one array it was handed (its caller's last use).
 proc geoScalingProgram {n} {
-    return "import list\nimport mutable_array\nfn geo_new():\n    \[mutable_array::allocate(0), 0\]\n\nfn geo_new_capacity(capacity, length):\n    doubled = capacity * 2\n    if doubled <= length:\n        return length + 1\n\n    doubled\n\nfn geo_grow(storage, length):\n    capacity = mutable_array::capacity(storage)\n    if length < capacity:\n        return storage\n\n    new_capacity = geo_new_capacity(capacity, length)\n    fresh = mutable_array::allocate(new_capacity)\n    mutable_array::copy(fresh, 0, storage, 0, length)\n    fresh\n\nfn geo_append(builder, value):\n    storage = list::at(builder, 0)\n    length = list::at(builder, 1)\n    grown = geo_grow(storage, length)\n    mutable_array::set(grown, length, value)\n    \[grown, length + 1\]\n\nfn geo_finish(builder):\n    storage = list::at(builder, 0)\n    length = list::at(builder, 1)\n    mutable_array::freeze(storage, length)\n\nfn fill(b, i, n):\n    if i >= n:\n        return geo_finish(b)\n    fill(geo_append(b, i), i + 1, n)\n\nlist::length(fill(geo_new(), 0, $n))\n"
+    return "import list\nimport mutable_array\nfn geo_new_capacity(capacity, length):\n    doubled = capacity * 2\n    if doubled <= length:\n        return length + 1\n\n    doubled\n\nfn geo_grow(storage, length):\n    capacity = mutable_array::capacity(storage)\n    if length < capacity:\n        return storage\n\n    new_capacity = geo_new_capacity(capacity, length)\n    fresh = mutable_array::allocate(new_capacity)\n    mutable_array::copy(fresh, 0, storage, 0, length)\n    fresh\n\nfn geo_append(storage, length, value):\n    grown = geo_grow(storage, length)\n    mutable_array::set(grown, length, value)\n    grown\n\nfn fill(storage, i, n):\n    if i >= n:\n        return mutable_array::freeze(storage, n)\n    fill(geo_append(storage, i, i), i + 1, n)\n\nlist::length(fill(mutable_array::allocate(0), 0, $n))\n"
 }
 
-test mutarray-builder-scaling-1 {geometric construction: O(log N) allocations, O(N) elements copied (never quadratic)} -body {
+test mutarray-builder-scaling-1 {geometric construction: O(log N) allocations, O(N) elements copied (never quadratic), and no copy-on-write detach} -body {
     set small [native::allocationReport [sourceHir [geoScalingProgram 100]] summary]
     set large [native::allocationReport [sourceHir [geoScalingProgram 1000]] summary]
     set smallAllocs [dict get $small byKind MutableArray allocations]
@@ -454,8 +460,9 @@ test mutarray-builder-scaling-1 {geometric construction: O(log N) allocations, O
     set largeCopied [dict get $large copies mutableArrayElements]
     # 10x the elements: allocation count barely moves (log growth), copied
     # elements scale much closer to 10x than 100x (never quadratic).
+    set largeDetached [dict get $large mutableArray detachElements]
     list [expr {$largeAllocs < $smallAllocs * 3}] \
-        [expr {$largeCopied < $smallCopied * 20}]
-} -result {1 1}
+        [expr {$largeCopied < $smallCopied * 20}] $largeDetached
+} -result {1 1 0}
 
 cleanupTests

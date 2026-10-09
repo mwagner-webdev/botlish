@@ -120,16 +120,16 @@ proc freshNatives {} {
     return [exec [info nameofexecutable] << $script]
 }
 
-test ns-root-inventory {the unqualified root natives are exactly the language primitives (beside the internal operations source cannot spell, whose names contain "#": the two execution-environment context operations, CONTEXTS.md, and the placeholder of code no installed context reaches, CONTEXT-TRAITS.md, the five internal coroutine operations, COROUTINES.md, the drop of an affine aggregate, AFFINE-VALUES.md, and the six internal MutableVector operations the compiler writes out, MUTABLE-VECTOR.md)} -body {
+test ns-root-inventory {the unqualified root natives are exactly the language primitives (beside the internal operations source cannot spell, whose names contain "#": the two execution-environment context operations, CONTEXTS.md, and the placeholder of code no installed context reaches, CONTEXT-TRAITS.md, the five internal coroutine operations, COROUTINES.md, the drop of an affine aggregate, AFFINE-VALUES.md, the six internal MutableVector operations the compiler writes out, MUTABLE-VECTOR.md, and the six internal MutableArray ones, MUTABLE-ARRAY.md)} -body {
     list [lsort [lmap name [freshNatives] {if {[string first :: $name] >= 0 || [string first # $name] >= 0} continue; set name}]] \
         [lsort [lmap name [freshNatives] {if {[string first # $name] < 0} continue; set name}]]
-} -result {{* + - < <= == > >= argv bit_and bit_or bit_xor error? hash integer? list list? mod mutarray? ok? result-error result-value shift_left shift_right string?} {affine#drop context#install context#load context#unreachable coroutine#create coroutine#release coroutine#resume coroutine#start coroutine#yield mutable_vector#clear_drop mutable_vector#consume mutable_vector#share mutable_vector#swap_drop mutable_vector#take_front mutable_vector#to_list}}
+} -result {{* + - < <= == > >= argv bit_and bit_or bit_xor error? hash integer? list list? mod mutarray? ok? result-error result-value shift_left shift_right string?} {affine#drop context#install context#load context#unreachable coroutine#create coroutine#release coroutine#resume coroutine#start coroutine#yield mutable_array#consume mutable_array#generate_drop mutable_array#set_drop mutable_array#swap_drop mutable_array#take_front mutable_array#to_list mutable_vector#clear_drop mutable_vector#consume mutable_vector#share mutable_vector#swap_drop mutable_vector#take_front mutable_vector#to_list}}
 
 test ns-qualified-inventory {every standard intrinsic lives in its value family's flat namespace} -body {
     lmap ns {list str char mutable_array mutable_vector immutable_set byte_store mutable_byte_store linux::abi abi::x86_64} {
         list $ns [core::native::qualifiedMembers $ns]
     }
-} -result {{list {append at length}} {str {char_at concat encode_utf8 is_tcl_alnum is_tcl_alpha length lowercase substring}} {char scalar_value} {mutable_array {allocate at capacity copy freeze set}} {mutable_vector {at clear empty? from_list length pop push swap take}} {immutable_set {contains from_list}} {byte_store {byte_count from_list}} {mutable_byte_store {count detach freeze freeze_prefix from_storage replace zeroed}} {linux::abi syscall} {abi::x86_64 {from_bytes from_mutable_bytes}}}
+} -result {{list {append at length}} {str {char_at concat encode_utf8 is_tcl_alnum is_tcl_alpha length lowercase substring}} {char scalar_value} {mutable_array {allocate at capacity copy create freeze from_list generate set swap}} {mutable_vector {at clear empty? from_list length pop push swap take}} {immutable_set {contains from_list}} {byte_store {byte_count from_list}} {mutable_byte_store {count detach freeze freeze_prefix from_storage replace zeroed}} {linux::abi syscall} {abi::x86_64 {from_bytes from_mutable_bytes}}}
 
 test ns-no-nested-stdlib {no std::/stdlib::/core:: hierarchy: every qualified intrinsic but the platform's (linux::abi::syscall, abi::x86_64::from_bytes) is NAMESPACE::MEMBER, one level} -body {
     lsort [lmap name [core::native::names] {
@@ -301,9 +301,9 @@ test ns-mutable-array-at {mutable_array::at has the same contract over a Mutable
     agree "import mutable_array\nfn pick(a, i) errors IndexNotFound:\n    mutable_array::at(a, i)\nfn safe(a, i):\n    r = pick(a, i):\n        on IndexNotFound:\n            -1\n    r\na = mutable_array::from_list(\[5, 6\])\n\[safe(a, 0), safe(a, 1), safe(a, 2), safe(a, -1), safe(mutable_array::allocate(0), 0)\]"
 } -result {[5, 6, -1, -1, -1]}
 
-test ns-mutable-array-set-is-index-not-found {mutable_array::set at an index that designates no slot fails with IndexNotFound and writes nothing, on every backend} -body {
-    agree "import mutable_array\nfn put(a, i, v) errors IndexNotFound:\n    mutable_array::set(a, i, v)\nfn safe(a, i, v):\n    r = put(a, i, v):\n        on IndexNotFound:\n            return \"missing\"\n    mutable_array::freeze(a, mutable_array::capacity(a))\na = mutable_array::from_list(\[5, 6\])\n\[safe(a, 1, 9), safe(a, 2, 9), safe(a, -1, 9), safe(a, 100000000000000000000, 9), safe(mutable_array::allocate(0), 0, 1), mutable_array::freeze(a, 2)\]"
-} -result {[[5, 9], "missing", "missing", "missing", "missing", [5, 9]]}
+test ns-mutable-array-set-is-index-not-found {mutable_array::set at an index that designates no slot fails with IndexNotFound, on every backend; each call writes its own copy (MUTABLE-ARRAY.md), never the caller's array} -body {
+    agree "import mutable_array\nfn put(a, i, v) errors IndexNotFound:\n    mutable_array::set(a, i, v)\n    a\nfn safe(a, i, v):\n    r = put(a, i, v):\n        on IndexNotFound:\n            return \"missing\"\n    mutable_array::freeze(r, mutable_array::capacity(r))\na = mutable_array::from_list(\[5, 6\])\n\[safe(a, 1, 9), safe(a, 2, 9), safe(a, -1, 9), safe(a, 100000000000000000000, 9), safe(mutable_array::allocate(0), 0, 1), mutable_array::freeze(a, 2)\]"
+} -result {[[5, 9], "missing", "missing", "missing", "missing", [5, 6]]}
 
 test ns-error-signatures {the indexed natives declare exactly IndexNotFound, the slicing natives exactly LowerUnderrun and UpperOverrun: builtin errors every program sees, with fixed native ids} -body {
     list [lmap n {list::at mutable_array::at mutable_array::set str::substring mutable_array::freeze mutable_array::copy} {
@@ -578,16 +578,21 @@ test ns-get-default-is-eager {the default is an ordinary argument: evaluated bef
     agree {import list
 import mutable_array
 import str
-log = mutable_array::allocate(1)
-mutable_array::set(log, 0, 0)
-fn mark(v):
-    mutable_array::set(log, 0, mutable_array::at(log, 0) + 1)
+context struct Log:
+    marks: MutableArray[int]
+fn marks(context log: Log):
+    mutable_array::get(log.marks, 0, -1)
+fn mark(v, context log: Log):
+    mutable_array::set(log.marks, 0, marks() + 1):
+        on IndexNotFound:
+            unit
     v
+with context Log {marks: mutable_array::create(1, 0)}
 a = list::get([10, 20], 0, mark(-1))
 b = list::get([10, 20], 5, mark(-2))
-c = mutable_array::get(log, 0, mark(-3))
-[a, b, c, mutable_array::at(log, 0)]}
-} -result {[10, -2, 3, 3]}
+c = mutable_array::get(mutable_array::create(1, 7), 0, mark(-3))
+[a, b, c, marks()]}
+} -result {[10, -2, 7, 3]}
 
 # get against the explicit handling it is defined as: same value on every
 # backend for every container/index pair, including missing indices.

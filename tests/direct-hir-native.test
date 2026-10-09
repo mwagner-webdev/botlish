@@ -334,7 +334,7 @@ import web
 # ---------------------------------------------------------------------------
 # Module and container identity reach native lowering by resolved identity.
 
-test direct-hir-module-identity-in-native-hir {a module-qualified call and the container intrinsics keep their module identity in the HIR native lowers} -body {
+test direct-hir-module-identity-in-native-hir {a module-qualified call keeps its module identity in the HIR native lowers, and the container intrinsics are registered natives} -body {
     set hir [srcHir {
         import mathish
         import mutable_array
@@ -347,7 +347,9 @@ test direct-hir-module-identity-in-native-hir {a module-qualified call and the c
     dict for {b binding} [dict get $prepared bindings] {
         if {[hir::isModuleBinding $prepared $b]} { incr moduleBindings }
     }
-    list [expr {$moduleBindings > 0}] [expr {[dict size [dict get $prepared intrinsicBlocks]] == 2}] \
+    # The container intrinsics are registered natives (MUTABLE-ARRAY.md):
+    # no program block stands for one, so HIR keeps no table of them.
+    list [expr {$moduleBindings > 0}] [expr {![dict exists $prepared intrinsicBlocks]}] \
         [nativeValue $hir]
 } -result {1 1 {[42, 7]}}
 

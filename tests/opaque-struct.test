@@ -980,21 +980,19 @@ test opaque-leak-sweep {no diagnostic of any unauthorized program, in any phase,
     }
 } -result {{} 1}
 
-test opaque-construct-bearing-erasure-is-not-reported {a forged construction whose value would lose a typed array's contract in a hidden `any` field is still only OPAQUE-CONSTRUCTION: the erasure diagnostic ("stored in field ...") would confirm that a guessed field exists} -body {
+test opaque-construct-bearing-erasure-is-not-reported {a forged construction whose value would lose a typed function's contract in a hidden `any` field is still only OPAQUE-CONSTRUCTION: the erasure diagnostic ("stored in field ...") would confirm that a guessed field exists} -body {
     withScratchLibrary {
         writeModule $dir leaky $::leakModule
-        useStandardModule $dir mutable_array
-        set forged "import leaky\nimport mutable_array\nm = mutable_array::create(2, \"x\")\n"
-        list [diagKinds "${forged}leaky::Leaky {slot_any: m}\n"] \
-            [diagKinds "${forged}leaky::Leaky {guess_any: m}\n"]
+        set forged "import leaky\nfn typed(k: int) -> int:\n    k\n"
+        list [diagKinds "${forged}leaky::Leaky {slot_any: typed}\n"] \
+            [diagKinds "${forged}leaky::Leaky {guess_any: typed}\n"]
     }
 } -result {OPAQUE-CONSTRUCTION OPAQUE-CONSTRUCTION}
 
 test opaque-construct-bearing-erasure-twin {the ordinary struct reports the erasure, naming the field: the control for the test above} -body {
     withScratchLibrary {
         writeModule $dir leaky [string map {{opaque struct Leaky} {struct Leaky}} $::leakModule]
-        useStandardModule $dir mutable_array
-        diagKinds "import leaky\nimport mutable_array\nm = mutable_array::create(2, \"x\")\nleaky::Leaky {zeta_secret: 5, hidden_tag: \"t\", lurk_inner: leaky::Lurker {shade: 1}, slot_any: m, hook_fn: leaky::twice}\n"
+        diagKinds "import leaky\nfn typed(k: int) -> int:\n    k\nleaky::Leaky {zeta_secret: 5, hidden_tag: \"t\", lurk_inner: leaky::Lurker {shade: 1}, slot_any: typed, hook_fn: leaky::twice}\n"
     }
 } -result TYPE
 

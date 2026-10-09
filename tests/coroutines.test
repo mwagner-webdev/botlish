@@ -369,30 +369,33 @@ test co-binding-eager-order {the call's arguments are evaluated before the corou
 struct V:
     n: int
 
-fn note(a: MutableArray[int], i: int, v: int) -> int:
-    mutable_array::set(a, i, v):
+context struct Log:
+    a: MutableArray[int]
+
+fn note(i: int, v: int, context log: Log) -> int:
+    mutable_array::set(log.a, i, v):
         on IndexNotFound:
             unit
     v
 
-fn get(a: MutableArray[int], i: int) -> int:
-    mutable_array::at(a, i):
+fn get(i: int, context log: Log) -> int:
+    mutable_array::at(log.a, i):
         on IndexNotFound:
             -1
 
-fn run(base: int, a: MutableArray[int], flags :twice) -> V:
-    note(a, 2, get(a, 0) * 10 + get(a, 1))
+fn run(base: int, flags :twice) -> V:
+    note(2, get(0) * 10 + get(1))
     if twice:
         yield V {n: base * 2}
     yield V {n: base}
     return V {n: 0}
 
-a = mutable_array::create(4, 0)
-coroutine {step: s, first: f} = note(a, 0, 7).run(a, :twice)
-seen = get(a, 2)
-coroutine {first: only} = run(note(a, 1, 9), a)
+with context Log {a: mutable_array::create(4, 0)}
+coroutine {step: s, first: f} = note(0, 7).run(:twice)
+seen = get(2)
+coroutine {first: only} = run(note(1, 9))
 x = s()
-[f.n, seen, x.n, only.n, get(a, 2)]
+[f.n, seen, x.n, only.n, get(2)]
 }
 } -result {value {[14, 70, 7, 9, 79]}}
 
@@ -582,27 +585,35 @@ import mutable_array
 struct V:
     n: int
 
-fn bump(a: MutableArray[int]) -> int:
-    v = mutable_array::at(a, 0):
+context struct Counter:
+    a: MutableArray[int]
+
+fn bump(context c: Counter) -> int:
+    v = mutable_array::at(c.a, 0):
         on IndexNotFound:
             0
-    mutable_array::set(a, 0, v + 1):
+    mutable_array::set(c.a, 0, v + 1):
         on IndexNotFound:
             unit
     v + 1
 
-fn w(a: MutableArray[int], k: int) -> V:
-    if k == 0:
-        return V {n: bump(a)}
-    yield V {n: bump(a)}
-    yield V {n: bump(a)}
-    return V {n: bump(a) * 100}
+fn count(context c: Counter) -> int:
+    mutable_array::at(c.a, 0):
+        on IndexNotFound:
+            -1
 
-a = mutable_array::create(1, 0)
-coroutine {step: z, first: zf} = w(a, 0)
+fn w(k: int) -> V:
+    if k == 0:
+        return V {n: bump()}
+    yield V {n: bump()}
+    yield V {n: bump()}
+    return V {n: bump() * 100}
+
+with context Counter {a: mutable_array::create(1, 0)}
+coroutine {step: z, first: zf} = w(0)
 zd = coroutine::done?(z)
 zagain = z()
-coroutine {step, first} = w(a, 1)
+coroutine {step, first} = w(1)
 d0 = coroutine::done?(step)
 x = step()
 d1 = coroutine::done?(step)
@@ -610,10 +621,7 @@ y = step()
 d2 = coroutine::done?(step)
 r1 = step()
 r2 = step()
-count = mutable_array::at(a, 0):
-    on IndexNotFound:
-        -1
-[zf.n, zd, zagain.n, first.n, d0, x.n, d1, y.n, d2, r1.n, r2.n, count]
+[zf.n, zd, zagain.n, first.n, d0, x.n, d1, y.n, d2, r1.n, r2.n, count()]
 }
 } -result {value {[1, true, 1, 2, false, 3, false, 400, true, 400, 400, 4]}}
 
@@ -1028,26 +1036,28 @@ test co-release-placement {a release follows the last statement of the handle's 
 } -cleanup {unset -nocomplain body} -result {{{{bind b} step}} {{{bind x} other}} {{{bind gone} gone} {ref step}} {{project step}} {{{bind first} <handle>}} {{{bind xs} step}} {{project step}} {}}
 
 test co-release-values {a release changes no value: after a last statement whose value is a function's result, a loop element, an if's value or the program's result, the value is kept; a released suspended body runs no further code} -body {
-    coAgree "${releaseDecls}fn note(a: MutableArray\[int\], v: int) -> int:
-    mutable_array::set(a, 0, v):
+    coAgree "${releaseDecls}context struct Log:
+    a: MutableArray\[int\]
+fn note(v: int, context log: Log) -> int:
+    mutable_array::set(log.a, 0, v):
         on IndexNotFound:
             unit
     v
-fn seen(a: MutableArray\[int\]) -> int:
-    mutable_array::at(a, 0):
+fn seen(context log: Log) -> int:
+    mutable_array::at(log.a, 0):
         on IndexNotFound:
             -1
-fn noisy(a: MutableArray\[int\]) -> V:
-    note(a, 1)
+fn noisy() -> V:
+    note(1)
     yield V {n: 10}
-    note(a, 2)
+    note(2)
     return V {n: 20}
 fn f(k: int) -> int:
     coroutine {step} = w(k)
     step().n
-log = mutable_array::create(1, 0)
-fn abandon(a: MutableArray\[int\]) -> int:
-    coroutine {first} = noisy(a)
+with context Log {a: mutable_array::create(1, 0)}
+fn abandon() -> int:
+    coroutine {first} = noisy()
     first.n
 xs = loop i from 0 to 3:
     coroutine {step} = w(i)
@@ -1057,9 +1067,9 @@ y = if f(1) > 0:
     step().n
 else:
     0
-z = abandon(log)
+z = abandon()
 coroutine {step} = w(5)
-\[f(3), xs, y, z, seen(log), step().n\]
+\[f(3), xs, y, z, seen(), step().n\]
 "
 } -result {value {[4, [1, 2, 3], 8, 10, 1, 6]}}
 

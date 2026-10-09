@@ -29,7 +29,7 @@
 #   alias       g(...) / a.g(...) for a name bound to a function (`g = f`)
 #   nested      an argument is `head(CALL)` or `CALL.head()` (head: the
 #               first element via a proven list::at, STDLIB-NAMESPACES.md)
-#   probed      an argument is `probe(log, ID, ARG)`, so evaluation order is
+#   probed      an argument is `probe(ID, ARG)`, so evaluation order is
 #               part of the outcome; flags contribute no event
 #
 # with a random subset of the callee's flags in a random written order.
@@ -256,7 +256,7 @@ proc genArg {depth} {
 proc renderArg {arg mutation} {
     switch -- [lindex $arg 0] {
         int { return [lindex $arg 1] }
-        probe { return "probe(log, [lindex $arg 1], [renderArg [lindex $arg 2] $mutation])" }
+        probe { return "probe([lindex $arg 1], [renderArg [lindex $arg 2] $mutation])" }
         call {
             set text [renderCall [lindex $arg 1] $mutation]
             if {[lindex $arg 2] eq "method"} {
@@ -340,10 +340,12 @@ proc indexCall {call counterVar} {
 }
 
 proc renderProgram {functions calls mutation} {
-    set text "fn current(log):\n    if mutable_array::capacity(log) == 1:\n        return mutable_array::at(log, 0)\n    -1\n"
-    append text "fn probe(log, id, result):\n    if mutable_array::capacity(log) == 1:\n        mutable_array::set(log, 0, current(log) * 10 + id)\n    result\n"
+    # The log is a context member (a MutableArray is a value: a callee given
+    # it as an argument would mutate its own copy).
+    set text "context struct Log:\n    digits: MutableArray\[int\]\n"
+    append text "fn current(context log: Log):\n    mutable_array::get(log.digits, 0, -1)\n"
+    append text "fn probe(id, result, context log: Log):\n    mutable_array::set(log.digits, 0, current() * 10 + id):\n        on IndexNotFound:\n            unit\n    result\n"
     append text "fn head(xs):\n    loop i from 0 to list::length(xs):\n        return list::at(xs, i)\n    0\n"
-    append text "fn fresh():\n    log = mutable_array::allocate(1)\n    mutable_array::set(log, 0, 0)\n    log\n"
     for {set i 0} {$i <= 4} {incr i} {
         set ps [lmap j [lseq $i] {string cat a $j}]
         append text "fn fwd${i}([join [concat s $ps] {, }]):\n    \[[join [concat s $ps] {, }]\]\n"
@@ -354,7 +356,7 @@ proc renderProgram {functions calls mutation} {
     dict for {name alias} $::aliases {
         append text "$alias = $name\n"
     }
-    append text "log = fresh()\n"
+    append text "with context Log {digits: mutable_array::create(1, 0)}\n"
     set results {}
     set i 0
     foreach call $calls {
@@ -365,7 +367,7 @@ proc renderProgram {functions calls mutation} {
     if {[dict exists $mutation extra]} {
         append text "[dict get $mutation extra]\n"
     }
-    append text "\[[join [concat $results [list "current(log)"]] {, }]\]"
+    append text "\[[join [concat $results [list "current()"]] {, }]\]"
     return $text
 }
 

@@ -45,7 +45,7 @@
 #                collecting loop's iteration, a nested function -- so that its
 #                value is observable and must be unit (the oracle's final
 #                `unit`); the body's value is then returned beside the log
-#   effects      field values are `probe(log, id, v)` calls, so the source's
+#   effects      field values are `probe(id, v)` calls, so the source's
 #                evaluation (once, in the written order) is part of the outcome
 #
 # The run also generates NEGATIVE programs, each a valid program with exactly
@@ -175,7 +175,7 @@ proc valueText {s} {
         switch -- $kind {
             int {
                 if {[chance 0.7]} {
-                    set v "probe(log, [rnd 1 9], n + [rnd 0 9])"
+                    set v "probe([rnd 1 9], n + [rnd 0 9])"
                 } else {
                     set v [rnd 0 30]
                 }
@@ -262,7 +262,7 @@ proc blockLines {case style} {
     set source [dict get $case sourceText]
     switch -- $form {
         direct { set expr $source }
-        call { set expr "make(log, n)" }
+        call { set expr "make(n)" }
         bound {
             lappend lines "s = $source"
             set expr s
@@ -286,7 +286,7 @@ proc resultText {case} {
     if {$form eq "bound"} {
         lappend items "s.[lindex [lindex [schemaFields $schema] 0] 0]"
     }
-    lappend items "mutable_array::get(log, 0, 0)"
+    lappend items "logged()"
     return "\[[join $items {, }]\]"
 }
 
@@ -295,17 +295,25 @@ proc indent {lines n} {
     return [lmap line $lines {expr {$line eq "" ? "" : "$pad$line"}}]
 }
 
+# The evaluation log: a one-slot MutableArray, a member of an installed
+# context (a MutableArray is a value since MUTABLE-ARRAY.md: one passed as an
+# argument would be the callee's own copy), reset at the start of every run.
+set ::logDecls [list "context struct Log:" "    digits: MutableArray\[int\]" \
+    "fn logged(context log: Log) -> int:" "    mutable_array::get(log.digits, 0, 0)" \
+    "fn reset(context log: Log) -> unit:" "    mutable_array::set(log.digits, 0, 0):" \
+    "        on IndexNotFound:" "            unit" "    unit" \
+    "fn probe(id: int, v: int, context log: Log) -> int:" "    k = logged()" \
+    "    mutable_array::set(log.digits, 0, k * 10 + id):" "        on IndexNotFound:" "            unit"]
+set ::logInstall "with context Log {digits: mutable_array::create(1, 0)}"
+
 proc program {case style} {
     dict with case {}
     set lines [declarations $schema]
-    lappend lines "fn probe(log: MutableArray\[int\], id: int, v: int) -> int:"
-    lappend lines "    if mutable_array::capacity(log) > 0:"
-    lappend lines "        k = mutable_array::at(log, 0)"
-    lappend lines "        mutable_array::set(log, 0, k * 10 + id)"
+    lappend lines {*}$::logDecls
     lappend lines "    v"
     set rootType [expr {[schemaNamed $schema] ? " -> [schemaName $schema]" : ""}]
     if {$form eq "call"} {
-        lappend lines "fn make(log: MutableArray\[int\], n: int)$rootType:"
+        lappend lines "fn make(n: int)$rootType:"
         lappend lines "    [dict get $case sourceText]"
     }
     set block [blockLines $case $style]
@@ -314,37 +322,37 @@ proc program {case style} {
         # The destructure is the last statement of its body: the body's value
         # (unit) is returned beside the log, which keeps the evaluation order
         # observable.
-        set evidence "mutable_array::get(log, 0, 0)"
+        set evidence "logged()"
         switch -- $context {
             plain {
-                lappend lines "fn body(log: MutableArray\[int\], n: int):"
+                lappend lines "fn body(n: int):"
                 lappend lines {*}[indent $block 1]
-                set run [list "log = mutable_array::create(1, 0)" "r = body(log, n)" "\[r, $evidence\]"]
+                set run [list "reset()" "r = body(n)" "\[r, $evidence\]"]
             }
             branch {
-                set run [list "log = mutable_array::create(1, 0)" \
+                set run [list "reset()" \
                     "r = if n > 2:" {*}[indent $block 1] \
                     "else:" "    unit" "\[r, $evidence\]"]
             }
             elif {
-                set run [list "log = mutable_array::create(1, 0)" \
+                set run [list "reset()" \
                     "r = if n == 0:" "    unit" \
                     "elif n > 2:" {*}[indent $block 1] \
                     "else:" "    unit" "\[r, $evidence\]"]
             }
             loop {
-                set run [list "log = mutable_array::create(1, 0)" \
+                set run [list "reset()" \
                     "xs = loop i from 0 to 2:" {*}[indent $block 1] \
                     "\[xs, $evidence\]"]
             }
             closure {
-                set run [list "log = mutable_array::create(1, 0)" \
+                set run [list "reset()" \
                     "fn inner():" {*}[indent $block 1] \
                     "\[inner(), $evidence\]"]
             }
             helper {
                 # A destructure last in a branch last in a collecting loop.
-                set run [list "log = mutable_array::create(1, 0)" \
+                set run [list "reset()" \
                     "xs = loop i from 0 to 3:" \
                     "    if i > 0:" {*}[indent $block 2] \
                     "    else:" "        unit" \
@@ -353,42 +361,42 @@ proc program {case style} {
         }
         lappend lines "fn run(n: int):"
         lappend lines {*}[indent $run 1]
-        lappend lines "\[run(3), run(0), run(7)\]"
+        lappend lines $::logInstall "\[run(3), run(0), run(7)\]"
         return [join $lines \n]
     }
     switch -- $context {
         plain {
-            set run [list "log = mutable_array::create(1, 0)" {*}$block $result]
+            set run [list "reset()" {*}$block $result]
         }
         branch {
-            set run [list "log = mutable_array::create(1, 0)" \
+            set run [list "reset()" \
                 "r = if n > 2:" {*}[indent [concat $block [list $result]] 1] \
                 "else:" "    \[0\]" "r"]
         }
         elif {
-            set run [list "log = mutable_array::create(1, 0)" \
+            set run [list "reset()" \
                 "r = if n == 0:" "    \[100\]" \
                 "elif n > 2:" {*}[indent [concat $block [list $result]] 1] \
                 "else:" "    \[0\]" "r"]
         }
         loop {
-            set run [list "log = mutable_array::create(1, 0)" \
+            set run [list "reset()" \
                 "xs = loop i from 0 to 2:" {*}[indent [concat $block [list "\[i, [string range $result 1 end-1]\]"]] 1] \
                 "xs"]
         }
         closure {
-            set run [list "log = mutable_array::create(1, 0)" {*}$block \
+            set run [list "reset()" {*}$block \
                 "fn grab():" "    $result" "grab()"]
         }
         helper {
-            lappend lines "fn helper(log: MutableArray\[int\], n: int):"
+            lappend lines "fn helper(n: int):"
             lappend lines {*}[indent [concat $block [list $result]] 1]
-            set run [list "log = mutable_array::create(1, 0)" "helper(log, n)"]
+            set run [list "reset()" "helper(n)"]
         }
     }
     lappend lines "fn run(n: int):"
     lappend lines {*}[indent $run 1]
-    lappend lines "\[run(3), run(0), run(7)\]"
+    lappend lines $::logInstall "\[run(3), run(0), run(7)\]"
     return [join $lines \n]
 }
 
@@ -470,10 +478,7 @@ set backendDisagreements 0
 # overridden.
 proc defective {case patternText explicitLines sourceText} {
     set lines [declarations [dict get $case schema]]
-    lappend lines "fn probe(log: MutableArray\[int\], id: int, v: int) -> int:"
-    lappend lines "    if mutable_array::capacity(log) > 0:"
-    lappend lines "        k = mutable_array::at(log, 0)"
-    lappend lines "        mutable_array::set(log, 0, k * 10 + id)"
+    lappend lines {*}$::logDecls
     lappend lines "    v"
     set d [lines $lines "$patternText = $sourceText" $case]
     set e ""
@@ -484,11 +489,11 @@ proc defective {case patternText explicitLines sourceText} {
 }
 
 proc lines {declLines statements case} {
-    set run [list "log = mutable_array::create(1, 0)" {*}[split $statements \n] "mutable_array::get(log, 0, 0)"]
+    set run [list "reset()" {*}[split $statements \n] "logged()"]
     set all $declLines
     lappend all "fn run(n: int):"
     lappend all {*}[indent $run 1]
-    lappend all "\[run(3), run(0)\]"
+    lappend all $::logInstall "\[run(3), run(0)\]"
     return [join $all \n]
 }
 
@@ -577,14 +582,14 @@ proc negative {kind case} {
         }
         unproven-shape {
             set lines [declarations $schema]
-            lappend lines "fn probe(log: MutableArray\[int\], id: int, v: int) -> int:"
+            lappend lines "fn probe(id: int, v: int) -> int:"
             lappend lines "    v"
             lappend lines "fn first(x):"
             lappend lines "    [patternText $pattern] = x"
             lappend lines "    [lindex [dict get $case bound] 0]"
             lappend lines "first(7)"
             set e [declarations $schema]
-            lappend e "fn probe(log: MutableArray\[int\], id: int, v: int) -> int:"
+            lappend e "fn probe(id: int, v: int) -> int:"
             lappend e "    v"
             lappend e "fn first(x):"
             lappend e "    t_1 = x"

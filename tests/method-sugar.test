@@ -669,15 +669,17 @@ test method-no-bound-method-values {x.f is a field projection, never a bound fun
 # Evaluation: the receiver is the first argument, evaluated once
 
 set ::logFns {import mutable_array
-fn probe(log, id, result):
-    if mutable_array::capacity(log) > 0:
-        n = mutable_array::at(log, 0)
-        mutable_array::set(log, 0, n * 10 + id)
+context struct Log:
+    digits: MutableArray[int]
+fn probe(id, result, context log: Log):
+    n = mutable_array::get(log.digits, 0, 0)
+    mutable_array::set(log.digits, 0, n * 10 + id):
+        on IndexNotFound:
+            unit
     result
-fn fresh():
-    log = mutable_array::allocate(1)
-    mutable_array::set(log, 0, 0)
-    log
+fn logged(context log: Log):
+    mutable_array::get(log.digits, 0, 0)
+with context Log {digits: mutable_array::create(1, 0)}
 fn add(a, b):
     a + b
 fn add3(a, b, c):
@@ -687,36 +689,24 @@ fn first(a, b):
 }
 
 foreach {name method free expected} {
-    receiver-once {log = fresh()
-v = probe(log, 1, 10).add(probe(log, 2, 5))
-[v, mutable_array::get(log, 0, 0)]}  {log = fresh()
-v = add(probe(log, 1, 10), probe(log, 2, 5))
-[v, mutable_array::get(log, 0, 0)]}  {value {[15, 12]}}
-    receiver-before-arguments {log = fresh()
-v = probe(log, 1, 1).add3(probe(log, 2, 2), probe(log, 3, 3))
-[v, mutable_array::get(log, 0, 0)]}  {log = fresh()
-v = add3(probe(log, 1, 1), probe(log, 2, 2), probe(log, 3, 3))
-[v, mutable_array::get(log, 0, 0)]}  {value {[6, 123]}}
-    receiver-is-a-method-call {log = fresh()
-v = probe(log, 1, 1).add(probe(log, 2, 2)).add(probe(log, 3, 3))
-[v, mutable_array::get(log, 0, 0)]}  {log = fresh()
-v = add(add(probe(log, 1, 1), probe(log, 2, 2)), probe(log, 3, 3))
-[v, mutable_array::get(log, 0, 0)]}  {value {[6, 123]}}
-    argument-is-a-method-call {log = fresh()
-v = probe(log, 1, 1).add(probe(log, 2, 2).add(probe(log, 3, 3)))
-[v, mutable_array::get(log, 0, 0)]}  {log = fresh()
-v = add(probe(log, 1, 1), add(probe(log, 2, 2), probe(log, 3, 3)))
-[v, mutable_array::get(log, 0, 0)]}  {value {[6, 123]}}
-    receiver-effect-not-duplicated {log = fresh()
-v = probe(log, 4, 7).first(0)
-[v, mutable_array::get(log, 0, 0)]}  {log = fresh()
-v = first(probe(log, 4, 7), 0)
-[v, mutable_array::get(log, 0, 0)]}  {value {[7, 4]}}
-    result-ignored {log = fresh()
-probe(log, 1, 1).first(probe(log, 2, 2))
-mutable_array::get(log, 0, 0)}  {log = fresh()
-first(probe(log, 1, 1), probe(log, 2, 2))
-mutable_array::get(log, 0, 0)}  {value 12}
+    receiver-once {v = probe(1, 10).add(probe(2, 5))
+[v, logged()]}  {v = add(probe(1, 10), probe(2, 5))
+[v, logged()]}  {value {[15, 12]}}
+    receiver-before-arguments {v = probe(1, 1).add3(probe(2, 2), probe(3, 3))
+[v, logged()]}  {v = add3(probe(1, 1), probe(2, 2), probe(3, 3))
+[v, logged()]}  {value {[6, 123]}}
+    receiver-is-a-method-call {v = probe(1, 1).add(probe(2, 2)).add(probe(3, 3))
+[v, logged()]}  {v = add(add(probe(1, 1), probe(2, 2)), probe(3, 3))
+[v, logged()]}  {value {[6, 123]}}
+    argument-is-a-method-call {v = probe(1, 1).add(probe(2, 2).add(probe(3, 3)))
+[v, logged()]}  {v = add(probe(1, 1), add(probe(2, 2), probe(3, 3)))
+[v, logged()]}  {value {[6, 123]}}
+    receiver-effect-not-duplicated {v = probe(4, 7).first(0)
+[v, logged()]}  {v = first(probe(4, 7), 0)
+[v, logged()]}  {value {[7, 4]}}
+    result-ignored {probe(1, 1).first(probe(2, 2))
+logged()}  {first(probe(1, 1), probe(2, 2))
+logged()}  {value 12}
 } {
     test method-evaluation-$name "$name: receiver and argument evaluation order and counts equal the free call's" -body {
         bothSpellings $::logFns$method $::logFns$free
@@ -965,34 +955,56 @@ proc executableValue {text} {
 }
 
 set ::typedMethod {import mutable_array
-fn probe(log: MutableArray[int], id: int, result: int) -> int:
-    if mutable_array::capacity(log) > 0:
-        n = mutable_array::at(log, 0)
-        mutable_array::set(log, 0, n * 10 + id)
+context struct Log:
+    digits: MutableArray[int]
+fn probe(id: int, result: int, context log: Log) -> int:
+    n = mutable_array::get(log.digits, 0, 0)
+    mutable_array::set(log.digits, 0, n * 10 + id):
+        on IndexNotFound:
+            unit
     result
+fn logged(context log: Log) -> int:
+    mutable_array::get(log.digits, 0, 0)
+fn reset(context log: Log) -> unit:
+    mutable_array::set(log.digits, 0, 0):
+        on IndexNotFound:
+            unit
+    unit
 fn add(a: int, b: int) -> int:
     a + b
 fn twice(a: int) -> int:
     a * 2
 fn run(n: int) -> int:
-    log = mutable_array::create(1, 0)
-    v = probe(log, 1, n).add(probe(log, 2, 5)).twice()
-    v * 1000 + mutable_array::get(log, 0, 0)
+    reset()
+    v = probe(1, n).add(probe(2, 5)).twice()
+    v * 1000 + logged()
+with context Log {digits: mutable_array::create(1, 0)}
 [run(1), run(20)]}
 set ::typedFree {import mutable_array
-fn probe(log: MutableArray[int], id: int, result: int) -> int:
-    if mutable_array::capacity(log) > 0:
-        n = mutable_array::at(log, 0)
-        mutable_array::set(log, 0, n * 10 + id)
+context struct Log:
+    digits: MutableArray[int]
+fn probe(id: int, result: int, context log: Log) -> int:
+    n = mutable_array::get(log.digits, 0, 0)
+    mutable_array::set(log.digits, 0, n * 10 + id):
+        on IndexNotFound:
+            unit
     result
+fn logged(context log: Log) -> int:
+    mutable_array::get(log.digits, 0, 0)
+fn reset(context log: Log) -> unit:
+    mutable_array::set(log.digits, 0, 0):
+        on IndexNotFound:
+            unit
+    unit
 fn add(a: int, b: int) -> int:
     a + b
 fn twice(a: int) -> int:
     a * 2
 fn run(n: int) -> int:
-    log = mutable_array::create(1, 0)
-    v = twice(add(probe(log, 1, n), probe(log, 2, 5)))
-    v * 1000 + mutable_array::get(log, 0, 0)
+    reset()
+    v = twice(add(probe(1, n), probe(2, 5)))
+    v * 1000 + logged()
+with context Log {digits: mutable_array::create(1, 0)}
 [run(1), run(20)]}
 
 test method-standalone-executable {the standalone executables of the method and free spellings print the value (and evaluation log) every in-process backend computes} -constraints executableAot -body {

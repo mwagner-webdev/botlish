@@ -1325,6 +1325,10 @@ proc hir::range::ProvesType {range type} {
 # alone does not license covariance without a variance system this
 # milestone deliberately does not build.
 #
+# MutableVector[T] and MutableArray[T] DECLARED take the identical path too
+# (MUTABLE-VECTOR.md, MUTABLE-ARRAY.md): both are values, so their subtype
+# relation is covariant like List's, and their admission exact like List's.
+#
 # M7.a.a exception (EMPTY-COLLECTION-AND-APPLIED-TYPE-SEMANTICS.md): a
 # statically *provably empty* List/ImmutableSet is admissible for any
 # element type, at any nesting depth. This is not covariance -- a non-empty
@@ -1345,11 +1349,11 @@ proc hir::range::ProvesValueAcceptedBy {argType argRange declared} {
         # concrete type that satisfies it structurally (hir::traits).
         return [hir::traits::Accept $argType $declared]
     }
-    if {[hir::types::IsList $declared] || [hir::types::IsSet $declared] || [hir::types::IsMutVec $declared]} {
+    if {[hir::types::IsList $declared] || [hir::types::IsSet $declared] || [hir::types::IsMutVec $declared]
+            || [hir::types::IsMutArray $declared]} {
         return [AggregateAdmits [hir::types::Unshaped $argType] $declared]
     }
-    if {[hir::types::IsFn $declared] || [hir::types::IsMutArray $declared]
-            || [hir::types::IsStructLike $declared] || [hir::types::IsCoroutine $declared]} {
+    if {[hir::types::IsFn $declared] || [hir::types::IsStructLike $declared] || [hir::types::IsCoroutine $declared]} {
         # A struct type (STRUCTS.md) is admitted by hir::types::subtype
         # alone: a named struct only ever by the same declaration, an
         # anonymous one by the same field set with admissible field types.
@@ -1358,11 +1362,6 @@ proc hir::range::ProvesValueAcceptedBy {argType argRange declared} {
         # argument must be a callable whose own call contract is
         # compatible (hir::types::subtype's contravariant/covariant/subset
         # rule) -- no Range fact bears on that.
-        #
-        # A MutableArray[T] (PARAMETERIZED-MUTABLEARRAY.md) is admitted the
-        # same way, by hir::types::subtype's invariant rule: only a
-        # MutableArray with an equivalent element contract (never a raw
-        # `mutarray`, never `any`, never a differently typed array).
         return [hir::types::subtype $argType $declared]
     }
     return [expr {[hir::types::subtype $argType $declared] || [ProvesType $argRange $declared]}]
@@ -1393,6 +1392,18 @@ proc hir::range::AggregateAdmits {arg declared} {
         # every place that mutates a vector owns its own header.
         set elem [lindex $arg 1]
         return [expr {$elem eq "never" || [AggregateAdmits $elem [lindex $declared 1]]}]
+    }
+    if {[hir::types::IsMutArray $declared] && [hir::types::IsMutArray $arg]} {
+        # A MutableArray, its fixed-length sibling (MUTABLE-ARRAY.md), the
+        # same way. (A MutableArray[never] has no slot: from_list([]).)
+        set elem [lindex $arg 1]
+        return [expr {$elem eq "never" || [AggregateAdmits $elem [lindex $declared 1]]}]
+    }
+    if {($arg eq "mutarray" && [hir::types::IsMutArray $declared])
+            || ($arg eq "mutvec" && [hir::types::IsMutVec $declared])} {
+        # The bare kind is the element type `any` (an untyped array or
+        # vector, allocate's result).
+        return [expr {[lindex $declared 1] eq "any"}]
     }
     return 0
 }
@@ -1789,15 +1800,6 @@ proc hir::range::MismatchClause {argType declared} {
     if {[hir::types::IsNamedStruct $argType] && [hir::types::IsNamedStruct $declared]
             && $argType ne $declared} {
         return [format {; %s and %s are distinct named struct types: a named struct type is nominal, and no value is ever converted from one to another implicitly} \
-            [hir::types::show $argType] [hir::types::show $declared]]
-    }
-    if {[hir::types::IsMutArray $argType]
-            && ([hir::types::IsMutArray $declared] || $declared eq {mutarray})} {
-        if {$declared eq {mutarray}} {
-            return [format {; %s would lose its element contract as the raw mutarray type, permitting writes of values that are not %s} \
-                [hir::types::show $argType] [hir::types::show [lindex $argType 1]]]
-        }
-        return [format {; MutableArray is invariant in its element type: %s cannot be viewed as %s, because writes through that view could store values the original element type does not admit} \
             [hir::types::show $argType] [hir::types::show $declared]]
     }
     if {[hir::types::IsMutArray $declared] && !([hir::types::IsMutArray $argType])} {

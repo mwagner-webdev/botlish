@@ -474,7 +474,7 @@ test af-coroutine-affine-protocol {a coroutine's result and message stay unrestr
 # ---------------------------------------------------------------------------
 # Restrictions (items 44, 46, 47)
 
-test af-restrictions {closure capture, equality of a handle or an affine struct, erasure into any (parameter, List of mixed elements, program result), a module-free MutableArray or ImmutableSet of affine elements} -body {
+test af-restrictions {closure capture, equality of a handle or an affine struct, erasure into any (parameter, List of mixed elements, program result), an ImmutableSet of affine elements; a MutableArray of affine elements is legal since MUTABLE-ARRAY.md (an affine array)} -body {
     list \
         [affCode "${affDecls}s = make(1)\nfn g() -> Event:\n    s(Message {value: 1})\n1\n"] \
         [affCode "${affDecls}a = make(1)\nb = make(2)\na == b\n"] \
@@ -483,7 +483,7 @@ test af-restrictions {closure capture, equality of a handle or an affine struct,
         [affCode "${affDecls}make(1)\n"] \
         [affCode "${affDecls}fn f(m: MutableArray\[Coroutine{args: \[Message\], return: Event}\]) -> int:\n    1\n1\n"] \
         [affCode "${affDecls}fn f(m: ImmutableSet\[Running\]) -> int:\n    1\n1\n"]
-} -result {AFFINE-CAPTURE-UNSUPPORTED AFFINE-EQUALITY-UNSUPPORTED AFFINE-EQUALITY-UNSUPPORTED AFFINE-ERASURE-UNSUPPORTED AFFINE-ERASURE-UNSUPPORTED AFFINE-CONTAINER-UNSUPPORTED AFFINE-CONTAINER-UNSUPPORTED}
+} -result {AFFINE-CAPTURE-UNSUPPORTED AFFINE-EQUALITY-UNSUPPORTED AFFINE-EQUALITY-UNSUPPORTED AFFINE-ERASURE-UNSUPPORTED AFFINE-ERASURE-UNSUPPORTED ok AFFINE-CONTAINER-UNSUPPORTED}
 
 test af-join {item 49: an if whose branches each produce a coroutine joins into one owner; a discarded affine value is released right after its statement} -body {
     list \

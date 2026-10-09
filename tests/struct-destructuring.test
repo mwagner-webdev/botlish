@@ -706,116 +706,127 @@ struct Rec:
     a: int
     b: str
     c: int
-fn bump(log: MutableArray[int], id: int, v: int) -> int:
-    if mutable_array::capacity(log) > 0:
-        n = mutable_array::at(log, 0)
-        mutable_array::set(log, 0, n * 10 + id)
+context struct Log:
+    digits: MutableArray[int]
+fn bump(id: int, v: int, context log: Log) -> int:
+    n = mutable_array::get(log.digits, 0, 0)
+    mutable_array::set(log.digits, 0, n * 10 + id):
+        on IndexNotFound:
+            unit
     v
-fn mk_named(log: MutableArray[int]) -> Rec:
-    Rec {a: bump(log, 1, 1), b: "x", c: bump(log, 2, 3)}
-fn mk_anon(log: MutableArray[int]):
-    {a: bump(log, 1, 1), b: "x", c: bump(log, 2, 3)}
+fn logged(context log: Log) -> int:
+    mutable_array::get(log.digits, 0, 0)
+fn reset(context log: Log) -> unit:
+    mutable_array::set(log.digits, 0, 0):
+        on IndexNotFound:
+            unit
+    unit
+fn mk_named() -> Rec:
+    Rec {a: bump(1, 1), b: "x", c: bump(2, 3)}
+fn mk_anon():
+    {a: bump(1, 1), b: "x", c: bump(2, 3)}
+with context Log {digits: mutable_array::create(1, 0)}
 }
 
 foreach {name destructured explicit expected} {
     named-once   {fn run():
-    log = mutable_array::create(1, 0)
-    {a, c} = mk_named(log)
-    [a, c, mutable_array::get(log, 0, 0)]
+    reset()
+    {a, c} = mk_named()
+    [a, c, logged()]
 run()}
                  {fn run():
-    log = mutable_array::create(1, 0)
-    tmp = mk_named(log)
+    reset()
+    tmp = mk_named()
     a = tmp.a
     c = tmp.c
-    [a, c, mutable_array::get(log, 0, 0)]
+    [a, c, logged()]
 run()}
                  {value {[1, 3, 12]}}
     anon-once    {fn run():
-    log = mutable_array::create(1, 0)
-    {a, c} = mk_anon(log)
-    [a, c, mutable_array::get(log, 0, 0)]
+    reset()
+    {a, c} = mk_anon()
+    [a, c, logged()]
 run()}
                  {fn run():
-    log = mutable_array::create(1, 0)
-    tmp = mk_anon(log)
+    reset()
+    tmp = mk_anon()
     a = tmp.a
     c = tmp.c
-    [a, c, mutable_array::get(log, 0, 0)]
+    [a, c, logged()]
 run()}
                  {value {[1, 3, 12]}}
     one-field-once {fn run():
-    log = mutable_array::create(1, 0)
-    {c} = mk_named(log)
-    [c, mutable_array::get(log, 0, 0)]
+    reset()
+    {c} = mk_named()
+    [c, logged()]
 run()}
                  {fn run():
-    log = mutable_array::create(1, 0)
-    tmp = mk_named(log)
+    reset()
+    tmp = mk_named()
     c = tmp.c
-    [c, mutable_array::get(log, 0, 0)]
+    [c, logged()]
 run()}
                  {value {[3, 12]}}
     repeated-field-name-in-source-fields {fn run():
-    log = mutable_array::create(1, 0)
-    {a: x, c: y} = mk_named(log)
-    [x, y, mutable_array::get(log, 0, 0)]
+    reset()
+    {a: x, c: y} = mk_named()
+    [x, y, logged()]
 run()}
                  {fn run():
-    log = mutable_array::create(1, 0)
-    tmp = mk_named(log)
+    reset()
+    tmp = mk_named()
     x = tmp.a
     y = tmp.c
-    [x, y, mutable_array::get(log, 0, 0)]
+    [x, y, logged()]
 run()}
                  {value {[1, 3, 12]}}
-    nested-once  {fn nested(log: MutableArray[int]):
-    {u: mk_named(log), w: bump(log, 3, 7)}
+    nested-once  {fn nested():
+    {u: mk_named(), w: bump(3, 7)}
 fn run():
-    log = mutable_array::create(1, 0)
-    {u: {a, c}, w} = nested(log)
-    [a, c, w, mutable_array::get(log, 0, 0)]
+    reset()
+    {u: {a, c}, w} = nested()
+    [a, c, w, logged()]
 run()}
-                 {fn nested(log: MutableArray[int]):
-    {u: mk_named(log), w: bump(log, 3, 7)}
+                 {fn nested():
+    {u: mk_named(), w: bump(3, 7)}
 fn run():
-    log = mutable_array::create(1, 0)
-    tmp = nested(log)
+    reset()
+    tmp = nested()
     tmp2 = tmp.u
     a = tmp2.a
     c = tmp2.c
     w = tmp.w
-    [a, c, w, mutable_array::get(log, 0, 0)]
+    [a, c, w, logged()]
 run()}
                  {value {[1, 3, 7, 123]}}
     direct-source-struct-literal {fn run():
-    log = mutable_array::create(1, 0)
-    {a, c} = {a: bump(log, 1, 1), b: bump(log, 4, 0), c: bump(log, 2, 3)}
-    [a, c, mutable_array::get(log, 0, 0)]
+    reset()
+    {a, c} = {a: bump(1, 1), b: bump(4, 0), c: bump(2, 3)}
+    [a, c, logged()]
 run()}
                  {fn run():
-    log = mutable_array::create(1, 0)
-    tmp = {a: bump(log, 1, 1), b: bump(log, 4, 0), c: bump(log, 2, 3)}
+    reset()
+    tmp = {a: bump(1, 1), b: bump(4, 0), c: bump(2, 3)}
     a = tmp.a
     c = tmp.c
-    [a, c, mutable_array::get(log, 0, 0)]
+    [a, c, logged()]
 run()}
                  {value {[1, 3, 142]}}
     in-loop-body {fn run():
-    log = mutable_array::create(1, 0)
+    reset()
     xs = loop i from 0 to 3:
-        {a, c} = mk_named(log)
+        {a, c} = mk_named()
         a + c + i
-    [xs, mutable_array::get(log, 0, 0)]
+    [xs, logged()]
 run()}
                  {fn run():
-    log = mutable_array::create(1, 0)
+    reset()
     xs = loop i from 0 to 3:
-        tmp = mk_named(log)
+        tmp = mk_named()
         a = tmp.a
         c = tmp.c
         a + c + i
-    [xs, mutable_array::get(log, 0, 0)]
+    [xs, logged()]
 run()}
                  {value {[[4, 5, 6], 121212]}}
 } {
@@ -825,17 +836,17 @@ run()}
 }
 
 test destructure-once-not-per-field {destructuring is not a.f; b.f with the source repeated: a source that counts its calls shows one call, never one per field} -body {
-    set program "${::countDecls}fn run():\n    log = mutable_array::create(1, 0)\n    \{a, b, c\} = mk_named(log)\n    mutable_array::get(log, 0, 0)\nrun()"
+    set program "${::countDecls}fn run():\n    reset()\n    \{a, b, c\} = mk_named()\n    logged()\nrun()"
     parity $program
 } -result {value 12}
 
 # ---------------------------------------------------------------------------
 # Bindings are values, not references into the source struct
 
-test destructure-bound-mutable-value-is-the-same-value {a field holding a MutableArray: the binding denotes that array (its ordinary semantics), so writes through either name are seen through the other} -body {
-    set program "import mutable_array\nstruct Holder:\n    items: MutableArray\[int\]\n    n: int\nfn run():\n    h = Holder \{items: mutable_array::create(2, 0), n: 1\}\n    \{items\} = h\n    a = mutable_array::set(items, 0, 5):\n        on IndexNotFound:\n            unit\n    b = mutable_array::set(h.items, 1, 6):\n        on IndexNotFound:\n            unit\n    \[mutable_array::get(h.items, 0, -1), mutable_array::get(items, 1, -1)\]\nrun()"
+test destructure-bound-mutable-value-is-the-same-value {a field holding a MutableArray: the binding is a logical copy of the field's array (MUTABLE-ARRAY.md: an array is a value), so a write through either name is never seen through the other} -body {
+    set program "import mutable_array\nstruct Holder:\n    items: MutableArray\[int\]\n    n: int\nfn run():\n    h = Holder \{items: mutable_array::create(2, 0), n: 1\}\n    \{items\} = h\n    a = mutable_array::set(items, 0, 5):\n        on IndexNotFound:\n            unit\n    b = mutable_array::set(h.items, 1, 6):\n        on IndexNotFound:\n            unit\n    \[mutable_array::get(h.items, 0, -1), mutable_array::get(items, 0, -1), mutable_array::get(h.items, 1, -1), mutable_array::get(items, 1, -1)\]\nrun()"
     parity $program
-} -result {value {[5, 6]}}
+} -result {value {[0, 5, 6, 0]}}
 
 test destructure-bound-name-is-not-a-field-slot {the bound name is an ordinary binding: it cannot be assigned through, and it does not name the field} -body {
     list [rejection "\{a\} = \{a: 1\}\na = 2"] [rejection "s = \{a: 1\}\n\{a\} = s\ns.a = 2"]
@@ -1700,7 +1711,7 @@ test destructure-value-bindings-still-work {a destructure followed by more state
 } -result {value 3}
 
 test destructure-value-statement-order {the unit comes after the bindings and before the next statement: the statements around it keep their order} -body {
-    parity "import mutable_array\nfn bump(log: MutableArray\[int\], id: int, v: int) -> int:\n    if mutable_array::capacity(log) > 0:\n        n = mutable_array::at(log, 0)\n        mutable_array::set(log, 0, n * 10 + id)\n    v\nfn run():\n    log = mutable_array::create(1, 0)\n    x = bump(log, 1, 5)\n    \{a, b\} = \{a: bump(log, 2, 1), b: bump(log, 3, 2)\}\n    y = bump(log, 4, 7)\n    \[x, a, b, y, mutable_array::get(log, 0, 0)\]\nrun()"
+    parity "import mutable_array\ncontext struct Log:\n    digits: MutableArray\[int\]\nfn bump(id: int, v: int, context log: Log) -> int:\n    n = mutable_array::get(log.digits, 0, 0)\n    mutable_array::set(log.digits, 0, n * 10 + id):\n        on IndexNotFound:\n            unit\n    v\nfn logged(context log: Log) -> int:\n    mutable_array::get(log.digits, 0, 0)\nfn reset(context log: Log) -> unit:\n    mutable_array::set(log.digits, 0, 0):\n        on IndexNotFound:\n            unit\n    unit\nwith context Log \{digits: mutable_array::create(1, 0)\}\nfn run():\n    reset()\n    x = bump(1, 5)\n    \{a, b\} = \{a: bump(2, 1), b: bump(3, 2)\}\n    y = bump(4, 7)\n    \[x, a, b, y, logged()\]\nrun()"
 } -result {value {[5, 1, 2, 7, 1234]}}
 
 test destructure-value-ordinary-binding-unchanged {an ordinary binding is not changed to unit to match the destructure: as the last statement it still yields its value} -body {
@@ -1775,15 +1786,15 @@ test destructure-value-handled-bindings-and-order {the handled destructure still
 # Evaluate once, mutable values, bindings: the same as before, with the last statement a destructure.
 
 test destructure-value-evaluate-once {the source of a destructure that is the last statement is still evaluated once} -body {
-    list [parity "${::countDecls}fn run():\n    log = mutable_array::create(1, 0)\n    \{a, b, c\} = mk_named(log)\n    r = mutable_array::get(log, 0, 0)\n    \{a: a2\} = mk_anon(log)\n    unit\n    r\nrun()"] \
-        [parity "${::countDecls}fn run():\n    log = mutable_array::create(1, 0)\n    \{a, c\} = mk_named(log)\n    \[mutable_array::get(log, 0, 0)\]\nrun()"]
+    list [parity "${::countDecls}fn run():\n    reset()\n    \{a, b, c\} = mk_named()\n    r = logged()\n    \{a: a2\} = mk_anon()\n    unit\n    r\nrun()"] \
+        [parity "${::countDecls}fn run():\n    reset()\n    \{a, c\} = mk_named()\n    \[logged()\]\nrun()"]
 } -result {{value 12} {value {[12]}}}
 
-test destructure-value-mutable-field-still-same-value {a MutableArray field: the binding is the same array, and a destructure that ends the body is unit} -body {
+test destructure-value-mutable-field-still-same-value {a MutableArray field: the binding is a logical copy (a write to it leaves the field unchanged), and a destructure that ends the body is unit} -body {
     set decls "import mutable_array\nstruct Holder:\n    items: MutableArray\[int\]\n    n: int\n"
     list [parity "${decls}fn run():\n    h = Holder \{items: mutable_array::create(2, 0), n: 1\}\n    \{items\} = h\nrun()"] \
-        [parity "${decls}fn run():\n    h = Holder \{items: mutable_array::create(2, 0), n: 1\}\n    \{items\} = h\n    a = mutable_array::set(items, 0, 5):\n        on IndexNotFound:\n            unit\n    mutable_array::get(h.items, 0, -1)\nrun()"]
-} -result {{value unit} {value 5}}
+        [parity "${decls}fn run():\n    h = Holder \{items: mutable_array::create(2, 0), n: 1\}\n    \{items\} = h\n    a = mutable_array::set(items, 0, 5):\n        on IndexNotFound:\n            unit\n    \[mutable_array::get(h.items, 0, -1), mutable_array::get(items, 0, -1)\]\nrun()"]
+} -result {{value unit} {value {[0, 5]}}}
 
 test destructure-value-bindings-are-values {the result being unit does not turn the bindings into references: a binding keeps its value when a later struct is destructured} -body {
     parity "fn run():\n    s = \{a: 1\}\n    \{a\} = s\n    t = \{a: 2\}\n    \{a: other\} = t\n    \[a, other, s.a, t.a\]\nrun()"
@@ -1941,36 +1952,56 @@ struct Acc:
     total: int
     count: int
     last: int
-fn probe(log: MutableArray[int], id: int, result: int) -> int:
-    if mutable_array::capacity(log) > 0:
-        n = mutable_array::at(log, 0)
-        mutable_array::set(log, 0, n * 10 + id)
+context struct Log:
+    digits: MutableArray[int]
+fn logged(context log: Log) -> int:
+    mutable_array::get(log.digits, 0, 0)
+fn reset(context log: Log) -> unit:
+    mutable_array::set(log.digits, 0, 0):
+        on IndexNotFound:
+            unit
+    unit
+fn probe(id: int, result: int, context log: Log) -> int:
+    mutable_array::set(log.digits, 0, logged() * 10 + id):
+        on IndexNotFound:
+            unit
     result
-fn step(log: MutableArray[int], n: int) -> Acc:
-    Acc {total: probe(log, 1, n * 2), count: probe(log, 2, n), last: n}
+fn step(n: int) -> Acc:
+    Acc {total: probe(1, n * 2), count: probe(2, n), last: n}
 fn run(n: int) -> int:
-    log = mutable_array::create(1, 0)
-    {total, last: l} = step(log, n)
-    total * 1000 + l * 100 + mutable_array::get(log, 0, 0)
+    reset()
+    {total, last: l} = step(n)
+    total * 1000 + l * 100 + logged()
+with context Log {digits: mutable_array::create(1, 0)}
 [run(1), run(20)]}
 set ::typedExplicit {import mutable_array
 struct Acc:
     total: int
     count: int
     last: int
-fn probe(log: MutableArray[int], id: int, result: int) -> int:
-    if mutable_array::capacity(log) > 0:
-        n = mutable_array::at(log, 0)
-        mutable_array::set(log, 0, n * 10 + id)
+context struct Log:
+    digits: MutableArray[int]
+fn logged(context log: Log) -> int:
+    mutable_array::get(log.digits, 0, 0)
+fn reset(context log: Log) -> unit:
+    mutable_array::set(log.digits, 0, 0):
+        on IndexNotFound:
+            unit
+    unit
+fn probe(id: int, result: int, context log: Log) -> int:
+    mutable_array::set(log.digits, 0, logged() * 10 + id):
+        on IndexNotFound:
+            unit
     result
-fn step(log: MutableArray[int], n: int) -> Acc:
-    Acc {total: probe(log, 1, n * 2), count: probe(log, 2, n), last: n}
+fn step(n: int) -> Acc:
+    Acc {total: probe(1, n * 2), count: probe(2, n), last: n}
 fn run(n: int) -> int:
-    log = mutable_array::create(1, 0)
-    tmp = step(log, n)
+    reset()
+    tmp = step(n)
     total = tmp.total
     l = tmp.last
-    total * 1000 + l * 100 + mutable_array::get(log, 0, 0)
+    total * 1000 + l * 100 + logged()
+with context Log {digits: mutable_array::create(1, 0)}
 [run(1), run(20)]}
 
 test destructure-standalone-executable {the standalone executables of both spellings print the value every in-process backend computes} -constraints executableAot -body {

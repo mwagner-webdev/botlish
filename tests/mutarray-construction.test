@@ -1,6 +1,7 @@
 # mutarray-construction.test -- MutableArray construction and refinement
-# (MUTABLEARRAY-CONSTRUCTION-REFINEMENT.md): mutable_array::from_list
-# (lib/mutarray.bot) and the mutarray? type test (core/predicates.tcl).
+# (MUTABLEARRAY-CONSTRUCTION-REFINEMENT.md): mutable_array::from_list (a
+# registered native since MUTABLE-ARRAY.md, core/mutarray.tcl) and the
+# mutarray? type test (core/predicates.tcl).
 #
 # `mutarray` is Botlish's one static/runtime kind for a MutableArray. This
 # milestone makes it an ordinary first-class construction/refinement fact:
@@ -123,11 +124,13 @@ test mutarray-meta-2 {every operation that needs a MutableArray says so in its p
     }
 } -result {{mutable_array::capacity {mutarray int}} {mutable_array::at {{mutarray int} any}} {mutable_array::set {{mutarray int any} unit}} {mutable_array::copy {{mutarray int mutarray int int} unit}} {mutable_array::freeze {{mutarray int} list}}}
 
-test mutarray-meta-3 {no operation other than allocate returns mutarray unconditionally} -body {
+test mutarray-meta-3 {the operations registered to return the raw kind: allocate (raw), the consuming identity, and the constructors, which a -result-shape types at each call (MUTABLE-ARRAY.md)} -body {
     lmap n [lsort [core::native::names]] {
-        if {[dict get [core::native::metadata $n] resultType] eq "mutarray"} {set n} else continue
+        if {[dict get [core::native::metadata $n] resultType] eq "mutarray"} {
+            list $n [dict get [core::native::metadata $n] resultShape]
+        } else continue
     }
-} -result mutable_array::allocate
+} -result {{mutable_array#consume {same 0}} {mutable_array#generate_drop {mutarray-generate 1}} {mutable_array::allocate {}} {mutable_array::create {mutarray-create 1}} {mutable_array::from_list {mutarray-from-list 0}} {mutable_array::generate {mutarray-generate 1}}}
 
 test mutarray-meta-4 {mutable_array::set returns unit and get returns any: results unchanged} -body {
     list [lindex [mcMeta mutable_array::set] 1] [lindex [mcMeta mutable_array::at] 1]
@@ -187,17 +190,16 @@ test mutarray-type-8 {only the applied spelling exists: bare MutableArray and hy
     } {expr {[mcRejects $src *] eq "accepted" ? "accepted" : "rejected"}}
 } -result {rejected rejected rejected}
 
-test mutarray-type-9 {a mutarray parameter annotation accepts the raw constructor result, not a typed array} -body {
+test mutarray-type-9 {a mutarray parameter annotation accepts the raw constructor result and a typed array (the raw kind is MutableArray[any]; the parameter holds a copy)} -body {
     list [mcLast "import mutable_array\nfn cap(m: mutarray) -> int:\n    mutable_array::capacity(m)\ncap(mutable_array::allocate(2))"] \
-        [lindex [mcRejects "import mutable_array\nfn cap(m: mutarray) -> int:\n    mutable_array::capacity(m)\ncap(mutable_array::from_list(\[1, 2\]))" *] 0]
-} -result {int {CORE SEMANTIC TYPE}}
+        [mcLast "import mutable_array\nfn cap(m: mutarray) -> int:\n    mutable_array::capacity(m)\ncap(mutable_array::from_list(\[1, 2\]))"]
+} -result {int int}
 
-test mutarray-type-10 {mutable_array::from_list declares a list parameter and the raw mutarray substrate result (call sites are typed by its intrinsic rule)} -body {
-    set hir [mcCompile "import mutable_array\nmutable_array::from_list(\[1\])"]
-    set block [mcBlock $hir mutable_array::from_list]
-    list [mcSig "import mutable_array\nmutable_array::from_list(\[1\])" mutable_array::from_list] \
-        [regsub {block\(e[0-9]+\)} [hir::types::show [hir::typeOf $hir $block]] block(E)]
-} -result {{{xs: list (declared)}} {block(E)/1 -> mutarray}}
+test mutarray-type-10 {mutable_array::from_list is a registered native: a list parameter, the raw mutarray substrate result, and the -result-shape that types its call sites} -body {
+    set meta [core::native::metadata mutable_array::from_list]
+    list [dict get $meta paramTypes] [dict get $meta resultType] [dict get $meta resultShape] \
+        [mcLast "import mutable_array\nmutable_array::from_list(\[1\])"]
+} -result {list mutarray {mutarray-from-list 0} {MutableArray[int]}}
 
 # ---------------------------------------------------------------------------
 # Function result propagation, forwarding, joins (spec items 55-58)
@@ -383,13 +385,16 @@ test mutarray-neg-7 {an unknown value is never silently a mutarray (no cast exis
 # ---------------------------------------------------------------------------
 # Constructor argument contract (spec items 65-66)
 
-test mutarray-arg-1 {a statically non-List argument is rejected at compile time} -body {
-    mcRejects "import mutable_array\nmutable_array::from_list(123)" "*cannot be proven to satisfy list*"
-} -result {{CORE SEMANTIC TYPE} 1}
+test mutarray-arg-1 {a statically non-List argument is the TYPE error of every intrinsic, at run time (from_list is a registered native since MUTABLE-ARRAY.md)} -body {
+    set exprs [hir::lower [mcCompile "import mutable_array\nmutable_array::from_list(123)" 0]]
+    list [mcRejects "import mutable_array\nmutable_array::from_list(123)" *] \
+        [lmap backend $::parityBackends {lindex [outcomeUnder $backend $exprs] 1}]
+} -result {accepted {{CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE}}}
 
-test mutarray-arg-2 {a string argument is rejected at compile time} -body {
-    lindex [mcRejects "import mutable_array\nmutable_array::from_list(\"abc\")" *] 0
-} -result {CORE SEMANTIC TYPE}
+test mutarray-arg-2 {a string argument is a run-time TYPE error too} -body {
+    set exprs [hir::lower [mcCompile "import mutable_array\nmutable_array::from_list(\"abc\")" 0]]
+    lsort -unique [lmap backend $::parityBackends {lindex [outcomeUnder $backend $exprs] 1}]
+} -result {{CORE SEMANTIC TYPE}}
 
 test mutarray-arg-3 {an untyped parameter reaching from_list infers a checked list requirement} -body {
     mcSig "import mutable_array\nfn f(x) errors IndexNotFound:\n    mutable_array::from_list(x)\nf(\[1\])" f
@@ -417,10 +422,10 @@ test mutarray-sem-3 {two constructions from one List are independent arrays} -bo
     list [mcParity $src] [mcValue $src]
 } -result {same {[7, 1]}}
 
-test mutarray-sem-4 {an alias shares storage (existing MutableArray aliasing is unchanged)} -body {
+test mutarray-sem-4 {a copy is independent: MutableArray is a value since MUTABLE-ARRAY.md (it used to share storage with every alias)} -body {
     set src "import mutable_array\nfn f() errors IndexNotFound:\n    m = mutable_array::from_list(\[1, 2\])\n    n = m\n    mutable_array::set(m, 1, 5)\n    mutable_array::at(n, 1)\nf()"
     list [mcParity $src] [mcValue $src]
-} -result {same 5}
+} -result {same 2}
 
 test mutarray-sem-5 {the empty List: capacity 0, predicate true, any index is IndexNotFound -- statically known here, so a compile-time KNOWN-ERROR, and (run anyway) the declared error} -body {
     set ok "import mutable_array\nfn f():\n    m = mutable_array::from_list(\[\])\n    \[mutable_array::capacity(m), mutarray?(m)\]\nf()"
@@ -434,10 +439,10 @@ test mutarray-sem-6 {a heterogeneous source List is accepted and kept as is} -bo
     list [mcParity $src] [mcValue $src]
 } -result {same {["x", 1, true]}}
 
-test mutarray-sem-7 {a nested MutableArray element keeps its identity (shallow, no deep copy)} -body {
+test mutarray-sem-7 {a nested MutableArray element is a logical copy (copy-on-write, no deep copy): writing the original afterwards does not reach it} -body {
     set src "import mutable_array\nfn f() errors IndexNotFound:\n    inner = mutable_array::from_list(\[1\])\n    outer = mutable_array::from_list(\[inner\])\n    mutable_array::set(inner, 0, 42)\n    mutable_array::at(mutable_array::at(outer, 0), 0)\nf()"
     list [mcParity $src] [mcValue $src]
-} -result {same 42}
+} -result {same 1}
 
 test mutarray-sem-8 {freezing a from_list array gives back an equal immutable List} -body {
     set src "import mutable_array\nfn f() errors IndexNotFound:\n    xs = \[3, 1, 2\]\n    mutable_array::freeze(mutable_array::from_list(xs), 3) == xs\nf()"
@@ -449,12 +454,12 @@ test mutarray-sem-9 {a larger List round-trips} -body {
     list [mcParity $src] [mcValue $src]
 } -result {same {[1000, 0, 1998]}}
 
-test mutarray-sem-10 {a dynamic non-List value reaching from_list is a TYPE error on every backend} -body {
+test mutarray-sem-10 {a dynamic non-List value reaching from_list is a TYPE error on every backend (at run time, as for every intrinsic)} -body {
     set src "import mutable_array\nfn mixed(c):\n    if c:\n        1\n    else:\n        \[\]\nfn f() errors IndexNotFound:\n    mutable_array::capacity(mutable_array::from_list(mixed(true)))\nf()"
     set exprs [hir::lower [mcCompile $src 0]]
     list [lindex [mcRejects $src *] 0] [mcParity $src] \
         [lmap backend $::parityBackends {lindex [outcomeUnder $backend $exprs] 1}]
-} -result {{CORE SEMANTIC TYPE} same {{CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE}}}
+} -result {accepted same {{CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE}}}
 
 # ---------------------------------------------------------------------------
 # mutarray? on every backend (spec items 13, 19, 20, 32, 33, 59)

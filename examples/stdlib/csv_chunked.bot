@@ -6,15 +6,26 @@
 #
 # ChunkedBuilder: fixed-size MutableArray chunks, appended into without ever
 # copying earlier chunks (unlike GeometricBuilder, which copies every prior
-# element on every growth step). A builder's state is
-# [completedChunks, currentChunk, filled]: completedChunks is an ordinary
-# persistent List of full MutableArray chunks (list::append there copies only
-# the *chunk handles* seen so far, not their elements -- see the file-level
-# note below on why that is a deliberately minor, not eliminated, quadratic
-# term). Finalization flattens once: every chunk's elements are bulk-copied
+# element on every growth step). A builder is a ChunkedBuilder struct value:
+# completed is an ordinary persistent List of full MutableArray chunks
+# (list::append there copies only the *chunk handles* seen so far, not their
+# elements -- see the file-level note below on why that is a deliberately
+# minor, not eliminated, quadratic term), current the chunk being filled, and
+# filled its count, a one-slot MutableArray so that an append updates the
+# builder's own arrays in place and returns the same builder (the HashTable's
+# counts, hashtable.bot) instead of rebuilding the struct. Finalization
+# flattens once: every chunk's elements are bulk-copied
 # (mutable_array::copy) into one exact-size MutableArray, then frozen to a
 # List, so total element movement is still O(n), just with different
 # constants than GeometricBuilder's.
+#
+# A MutableArray is a value (MUTABLE-ARRAY.md): every function below that
+# fills an array returns it, and a builder passed to chunked_append at its
+# last use is updated without a copy (hir/mutvec.tcl, "Last uses and consumed
+# parameters"). (Before MutableArray became a value, the state was a
+# positional List [completed, current, filled] whose current chunk every
+# alias wrote, and chunked_copy_chunks filled its caller's array through its
+# parameter.)
 #
 # expect: [["name", "age"], ["Alice", "30"], ["Bob", "40"]]
 
@@ -25,32 +36,34 @@ import str
 fn chunk_size():
     64
 
+struct ChunkedBuilder:
+    completed: list
+    current: mutarray
+    filled: MutableArray[int]
+
 fn chunked_new():
-    [[], mutable_array::allocate(chunk_size()), 0]
+    ChunkedBuilder {completed: [], current: mutable_array::allocate(chunk_size()), filled: mutable_array::create(1, 0)}
 
 # BUILDER with VALUE appended: writes into the current chunk's next free
-# slot, or -- when the current chunk is full -- files it away in
-# completedChunks (persistent list::append: see the file-level note; this
-# never copies a chunk's *elements*, only prior chunk handles) and starts a
-# fresh chunk.
+# slot, or -- when the current chunk is full -- files it away in completed
+# (persistent list::append: see the file-level note; this never copies a
+# chunk's *elements*, only prior chunk handles) and starts a fresh chunk.
 fn chunked_append(builder, value) errors IndexNotFound:
-    completed = list::at(builder, 0)
-    current = list::at(builder, 1)
-    filled = list::at(builder, 2)
+    filled = mutable_array::at(builder.filled, 0)
     if filled == chunk_size():
-        more = list::append(completed, current)
         fresh = mutable_array::allocate(chunk_size())
         mutable_array::set(fresh, 0, value)
-        return [more, fresh, 1]
+        return ChunkedBuilder {completed: list::append(builder.completed, builder.current), current: fresh, filled: mutable_array::create(1, 1)}
 
-    mutable_array::set(current, filled, value)
-    [completed, current, filled + 1]
+    mutable_array::set(builder.current, filled, value)
+    mutable_array::set(builder.filled, 0, filled + 1)
+    builder
 
-# The offset just past CHUNKS[0..) once each of them (all full,
-# chunk_size() elements) has been bulk-copied into FINAL starting at OFFSET.
+# FINAL with each of CHUNKS[INDEX..) (all full, chunk_size() elements)
+# bulk-copied into it from OFFSET on.
 fn chunked_copy_chunks(chunks, index, final, offset) errors IndexNotFound, LowerUnderrun, UpperOverrun:
     if index >= list::length(chunks):
-        return offset
+        return final
 
     chunk = list::at(chunks, index)
     mutable_array::copy(final, offset, chunk, 0, chunk_size())
@@ -60,13 +73,11 @@ fn chunked_copy_chunks(chunks, index, final, offset) errors IndexNotFound, Lower
 # MutableArray, filled by bulk-copying every completed chunk followed by the
 # current chunk's filled prefix, then frozen.
 fn chunked_finish(builder) errors IndexNotFound, LowerUnderrun, UpperOverrun:
-    completed = list::at(builder, 0)
-    current = list::at(builder, 1)
-    filled = list::at(builder, 2)
-    total = list::length(completed) * chunk_size() + filled
-    final = mutable_array::allocate(total)
-    offset = chunked_copy_chunks(completed, 0, final, 0)
-    mutable_array::copy(final, offset, current, 0, filled)
+    filled = mutable_array::at(builder.filled, 0)
+    offset = list::length(builder.completed) * chunk_size()
+    total = offset + filled
+    final = chunked_copy_chunks(builder.completed, 0, mutable_array::allocate(total), 0)
+    mutable_array::copy(final, offset, builder.current, 0, filled)
     mutable_array::freeze(final, total)
 
 # ---------------------------------------------------------------------------
@@ -126,11 +137,11 @@ fn scan_records(text, index, records) errors IndexNotFound, LowerUnderrun, Upper
 fn csv_parse(text) errors IndexNotFound, LowerUnderrun, UpperOverrun:
     scan_records(text, 0, chunked_new())
 
-# A ChunkedBuilder state is a positional List read with list::at, so every
-# builder function declares IndexNotFound (a malformed state), and the
-# scanners declare LowerUnderrun/UpperOverrun (a slice they cannot prove in
-# range); csv_parse's own states and slices are always well formed, and its
-# caller says what a broken one would mean.
+# A ChunkedBuilder's count is read with mutable_array::at and its chunks with
+# list::at, so every builder function declares IndexNotFound (a malformed
+# state), and the scanners declare LowerUnderrun/UpperOverrun (a slice they
+# cannot prove in range); csv_parse's own states and slices are always well
+# formed, and its caller says what a broken one would mean.
 parsed = csv_parse("name,age\nAlice,30\nBob,40\n"):
     on IndexNotFound:
         []

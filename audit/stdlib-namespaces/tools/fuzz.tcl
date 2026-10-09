@@ -25,8 +25,10 @@
 #              mutable_array` both present, a receiver's kind picks the
 #              namespace: IMPORTS.md)
 #   eager      list::get(XS, I, mark(D)): mark counts its own evaluations in
-#              a one-slot MutableArray, read back at the end -- the default
-#              is evaluated exactly once per call, present index or not
+#              a one-slot MutableArray, a member of an installed context (an
+#              array is a value: only a context member is a place every
+#              function shares), read back at the end -- the default is
+#              evaluated exactly once per call, present index or not
 #   strings    str::concat/str::length/list::append/list::length, free and
 #              method spelling
 #   slice      str::substring(S, A, B), free and by method, over Strings with
@@ -130,11 +132,16 @@ set ::prelude {import list
 import str
 import mutable_array
 
-log = mutable_array::allocate(1)
-mutable_array::set(log, 0, 0)
-fn mark(v):
-    mutable_array::set(log, 0, mutable_array::at(log, 0) + 1)
+context struct Log:
+    marks: MutableArray[int]
+fn marks(context log: Log):
+    mutable_array::get(log.marks, 0, -1)
+fn mark(v, context log: Log):
+    mutable_array::set(log.marks, 0, marks() + 1):
+        on IndexNotFound:
+            unit
     v
+with context Log {marks: mutable_array::create(1, 0)}
 fn explicit(xs, i, d):
     v = list::at(xs, i):
         on IndexNotFound:
@@ -323,7 +330,7 @@ proc genCheck {} {
 
 proc program {checks} {
     set exprs [lmap c $checks {lindex $c 0}]
-    lappend exprs "mutable_array::at(log, 0)"
+    lappend exprs "marks()"
     return "$::prelude\[[join $exprs ",\n"]\]"
 }
 

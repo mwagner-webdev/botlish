@@ -564,43 +564,37 @@ test flags-method-same-hir {a method call with flags and its free spelling resol
 
 set ::logFns {import list
 import mutable_array
-fn probe(log, id, result):
-    if mutable_array::capacity(log) > 0:
-        n = mutable_array::at(log, 0)
-        mutable_array::set(log, 0, n * 10 + id)
+context struct Log:
+    digits: MutableArray[int]
+fn probe(id, result, context log: Log):
+    n = mutable_array::get(log.digits, 0, 0)
+    mutable_array::set(log.digits, 0, n * 10 + id):
+        on IndexNotFound:
+            unit
     result
-fn fresh():
-    log = mutable_array::allocate(1)
-    mutable_array::set(log, 0, 0)
-    log
+fn logged(context log: Log):
+    mutable_array::get(log.digits, 0, 0)
+with context Log {digits: mutable_array::create(1, 0)}
 fn f(a, b, flags :x, :y):
     [a, b, x, y]
 }
 
 foreach {name method free expected} {
-    receiver-and-args {log = fresh()
-v = probe(log, 1, 10).f(probe(log, 2, 5), :y)
-[v, mutable_array::get(log, 0, 0)]}  {log = fresh()
-v = f(probe(log, 1, 10), probe(log, 2, 5), :y)
-[v, mutable_array::get(log, 0, 0)]}  {[[10, 5, false, true], 12]}
-    flags-add-no-events {log = fresh()
-v = f(probe(log, 3, 1), probe(log, 4, 2), :y, :x)
-[v, mutable_array::get(log, 0, 0)]}  {log = fresh()
-v = f(probe(log, 3, 1), probe(log, 4, 2))
-w = [v, mutable_array::get(log, 0, 0)]
+    receiver-and-args {v = probe(1, 10).f(probe(2, 5), :y)
+[v, logged()]}  {v = f(probe(1, 10), probe(2, 5), :y)
+[v, logged()]}  {[[10, 5, false, true], 12]}
+    flags-add-no-events {v = f(probe(3, 1), probe(4, 2), :y, :x)
+[v, logged()]}  {v = f(probe(3, 1), probe(4, 2))
+w = [v, logged()]
 w}  {[[1, 2, false, false], 34]}
-    flag-order-irrelevant-to-events {log = fresh()
-v = probe(log, 1, 1).f(probe(log, 2, 2), :x, :y)
-[v, mutable_array::get(log, 0, 0)]}  {log = fresh()
-v = probe(log, 1, 1).f(probe(log, 2, 2), :y, :x)
-[v, mutable_array::get(log, 0, 0)]}  {[[1, 2, true, true], 12]}
-    receiver-chain {log = fresh()
-v = probe(log, 1, 1).f(2, :x).get(0, -1)
-w = probe(log, 3, v).f(probe(log, 4, 4), :y)
-[w, mutable_array::get(log, 0, 0)]}  {log = fresh()
-v = list::get(f(probe(log, 1, 1), 2, :x), 0, -1)
-w = f(probe(log, 3, v), probe(log, 4, 4), :y)
-[w, mutable_array::get(log, 0, 0)]}  {[[1, 4, false, true], 134]}
+    flag-order-irrelevant-to-events {v = probe(1, 1).f(probe(2, 2), :x, :y)
+[v, logged()]}  {v = probe(1, 1).f(probe(2, 2), :y, :x)
+[v, logged()]}  {[[1, 2, true, true], 12]}
+    receiver-chain {v = probe(1, 1).f(2, :x).get(0, -1)
+w = probe(3, v).f(probe(4, 4), :y)
+[w, logged()]}  {v = list::get(f(probe(1, 1), 2, :x), 0, -1)
+w = f(probe(3, v), probe(4, 4), :y)
+[w, logged()]}  {[[1, 4, false, true], 134]}
 } {
     test flags-evaluation-$name "evaluation: $name" -body {
         set a [valueOf $::logFns$method]

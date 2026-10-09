@@ -123,11 +123,12 @@ test csv-records-string-sharing-2 {the pinned base count itself (documents what 
 # does. 10 headers: ht_new() starts at capacity 8 (load factor forces a
 # resize on the 6th distinct key, since (5+1)*3 = 18 > 8*2 = 16); ht_new_sized(10)
 # starts at capacity 16 (10*3 = 30 <= 16*2 = 32), enough for all 10 without
-# resizing. Each resize allocates exactly 3 replacement MutableArrays
-# (ht_rehash: new controls/keys/values -- see hashtable.bot); a table's own
-# construction (ht_alloc) always allocates 4 (controls, keys, values, the
-# outer record). So one row of 10 distinct headers costs the default variant
-# 4 + 3*resizes MutableArray allocations and the presized variant exactly 4.
+# resizing. A table's construction (ht_alloc) allocates 4 MutableArrays
+# (controls, keys, values, counts), and so does each resize, which builds the
+# replacement table with ht_alloc (ht_rehash -- see hashtable.bot; before
+# MutableArray became a value, a resize replaced 3 arrays inside a shared
+# 5-slot record). So one row of 10 distinct headers costs the default variant
+# 4 + 4*resizes MutableArray allocations and the presized variant exactly 4.
 
 proc wideHeaders {} { return {h0 h1 h2 h3 h4 h5 h6 h7 h8 h9} }
 
@@ -142,7 +143,7 @@ test csv-records-presize-1 {a 10-column row forces the default table to resize a
     # around the one row table; the difference isolates the table's own
     # resize cost.
     list [expr {$defaultMutarrays > $presizedMutarrays}] [expr {$defaultMutarrays - $presizedMutarrays}]
-} -result {1 3}
+} -result {1 4}
 
 test csv-records-presize-2 {presized and default row tables agree on content even when the default variant resized} -body {
     native {
@@ -324,9 +325,10 @@ test csv-records-sites-1 {sites mode reports CSV scanning and MutableArray-alloc
 # Specialization / representation-optimization flags (req #64): correctness
 # is unchanged with either disabled, like native-hashtable.test's own pair.
 
-# csv_records embeds the same struct-grouped rehash as hashtable.bot, so
-# -specialize 0 is unsupported here too (see tests/native-hashtable.test).
-test csv-records-specialize-off-1 {-specialize 0 is unsupported: the embedded rehash's struct projections are proven by instances only} -body {
+# csv_records embeds hashtable.bot's HashTable, whose untyped operations
+# project its struct fields, so -specialize 0 is unsupported here too (see
+# tests/native-hashtable.test).
+test csv-records-specialize-off-1 {-specialize 0 is unsupported: the embedded table's field projections are proven by instances only} -body {
     set text {
 fn f():
     rows = csv_records("h0,h1\na,b\nc,d\n")

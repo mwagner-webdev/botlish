@@ -360,16 +360,17 @@ proc core::mutarray::resetCounters {} {
 # of any operation's name.
 core::native::register mutable_array::allocate -arity 1 -impl core::mutarray::allocate \
     -param-types {int} -result-type mutarray -runtime mutarray-alloc -context-free 1 \
-    -ownership {observe}
+    -result-length {int 0} -ownership {observe}
 core::native::register mutable_array::create -arity 2 -impl core::mutarray::create \
     -param-types {int any} -result-type mutarray -runtime mutarray-alloc \
-    -result-shape {mutarray-create 1} -ownership {observe repeat}
+    -result-shape {mutarray-create 1} -result-length {int 0} -ownership {observe repeat}
 core::native::register mutable_array::from_list -arity 1 -impl core::mutarray::fromList \
     -param-types {list} -result-type mutarray -runtime mutarray-alloc \
-    -result-shape {mutarray-from-list 0} -ownership {move}
+    -result-shape {mutarray-from-list 0} -result-length {list 0} -ownership {move}
 core::native::register mutable_array::generate -arity 2 -impl core::mutarray::generate \
     -param-types {int any} -result-type mutarray -runtime mutarray-alloc -completion 1 \
-    -result-shape {mutarray-generate 1} -errors-from 1 -ownership {observe factory}
+    -result-shape {mutarray-generate 1} -errors-from 1 -result-length {int 0} \
+    -drop-form {mutable_array#generate_drop result} -ownership {observe factory}
 core::native::register mutable_array::capacity -arity 1 -impl core::mutarray::capacity \
     -param-types {mutarray} -result-type int -result-range collection-length -ownership {observe}
 core::native::register mutable_array::at -arity 2 -impl core::mutarray::at \
@@ -378,11 +379,12 @@ core::native::register mutable_array::at -arity 2 -impl core::mutarray::at \
     -ownership {copy-out observe}
 core::native::register mutable_array::set -arity 3 -impl core::mutarray::set_ \
     -param-types {mutarray int any} -result-type unit -runtime {range-check mutarray-mutate} \
-    -errors IndexNotFound -bounds {index mutarray 0 1} -ownership {place observe move}
+    -errors IndexNotFound -bounds {index mutarray 0 1} -drop-form {mutable_array#set_drop 0} \
+    -ownership {place observe move}
 core::native::register mutable_array::swap -arity 3 -impl core::mutarray::swap \
     -param-types {mutarray int any} -result-type any -runtime {range-check mutarray-mutate} \
     -result-shape {mutarray-element 0} -errors IndexNotFound -bounds {index mutarray 0 1} \
-    -ownership {place observe move}
+    -drop-form {mutable_array#swap_drop 0} -ownership {place observe move}
 core::native::register mutable_array::copy -arity 5 -impl core::mutarray::copy \
     -param-types {mutarray int mutarray int int} -result-type unit -runtime {range-check mutarray-mutate} \
     -errors {LowerUnderrun UpperOverrun} \
@@ -409,4 +411,5 @@ core::native::register mutable_array#set_drop -arity 4 -impl core::mutarray::set
     -errors IndexNotFound -ownership {place observe move observe}
 core::native::register mutable_array#generate_drop -arity 3 -impl core::mutarray::generateDrop \
     -param-types {int any str} -result-type mutarray -runtime mutarray-alloc -completion 1 \
-    -result-shape {mutarray-generate 1} -errors-from 1 -ownership {observe factory observe}
+    -result-shape {mutarray-generate 1} -errors-from 1 -result-length {int 0} \
+    -ownership {observe factory observe}

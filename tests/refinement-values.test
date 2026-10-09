@@ -983,11 +983,14 @@ import str
 
 refined type M = str
 
-fn bump?(s: str, a: MutableArray[int]) -> bool proves s: M:
-    n = mutable_array::at(a, 0):
+context struct Counter:
+    a: MutableArray[int]
+
+fn bump?(s: str, context c: Counter) -> bool proves s: M:
+    n = mutable_array::at(c.a, 0):
         on IndexNotFound:
             return false
-    mutable_array::set(a, 0, n + 1):
+    mutable_array::set(c.a, 0, n + 1):
         on IndexNotFound:
             return false
     n == 0
@@ -996,15 +999,15 @@ fn take(m: M) -> str:
     m
 
 fn f(s: str) -> List[str]:
-    a = mutable_array::create(1, 0)
-    if bump?(s, a):
-        if bump?(s, a):
+    if bump?(s):
+        if bump?(s):
             [take(s), "again"]
         else:
             [take(s), "changed"]
     else:
         []
 
+with context Counter {a: mutable_array::create(1, 0)}
 f("x")
 }
     set hir [surface::compile $source -warnings off]

@@ -156,26 +156,29 @@ test sr-local-four-fields {a four-field struct of mixed field types} -body {
     list [srValue $source] [srOps $source]
 } -result {{[1, "s", [1], 4]} {structnew 0 structget 0 callmulti 0 retmulti 0}}
 
-test sr-local-discarded {a struct literal in statement position builds nothing but still evaluates its fields} -body {
-    set source "import mutable_array\ncounter = mutable_array::create(1, 0)\nfn tick(m):\n    n = mutable_array::get(m, 0, 0)\n    if mutable_array::capacity(m) > 0:\n        mutable_array::set(m, 0, n + 1)\n    n\nfn f(m):\n    \{a: tick(m), b: tick(m)\}\n    \{\}\n    mutable_array::get(m, 0, 0)\nf(counter)\n"
+test sr-local-discarded {a struct literal in statement position builds nothing but still evaluates its fields (the one structnew and structget are the top level's context installation, whose array member is the program's counter)} -body {
+    set source "import mutable_array\ncontext struct Counter:\n    slots: MutableArray\[int\]\nfn tick(context c: Counter):\n    n = mutable_array::get(c.slots, 0, 0)\n    mutable_array::set(c.slots, 0, n + 1):\n        on IndexNotFound:\n            unit\n    n\nfn count(context c: Counter):\n    mutable_array::get(c.slots, 0, 0)\nfn f():\n    \{a: tick(), b: tick()\}\n    \{\}\n    count()\nwith context Counter \{slots: mutable_array::create(1, 0)\}\nf()\n"
     list [srValue $source] [srOps $source]
-} -result {2 {structnew 0 structget 0 callmulti 0 retmulti 0}}
+} -result {2 {structnew 1 structget 1 callmulti 0 retmulti 0}}
 
-test sr-local-evaluation-order {fields run in written order, not slot order, exactly as before} -body {
+test sr-local-evaluation-order {fields run in written order, not slot order, exactly as before (the one structnew and structget are the context installation's)} -body {
     set source "import mutable_array
-counter = mutable_array::create(1, 0)
-fn ticket(m):
-    n = mutable_array::get(m, 0, 0)
-    if mutable_array::capacity(m) > 0:
-        mutable_array::set(m, 0, n + 1)
+context struct Counter:
+    slots: MutableArray\[int\]
+fn ticket(context c: Counter):
+    n = mutable_array::get(c.slots, 0, 0)
+    mutable_array::set(c.slots, 0, n + 1):
+        on IndexNotFound:
+            unit
     n
-fn build(m):
-    x = \{z: ticket(m), a: ticket(m), m: ticket(m)\}
+fn build():
+    x = \{z: ticket(), a: ticket(), m: ticket()\}
     \[x.a, x.m, x.z\]
-build(counter)
+with context Counter \{slots: mutable_array::create(1, 0)\}
+build()
 "
     list [srValue $source] [srOps $source]
-} -result {{[1, 2, 0]} {structnew 0 structget 0 callmulti 0 retmulti 0}}
+} -result {{[1, 2, 0]} {structnew 1 structget 1 callmulti 0 retmulti 0}}
 
 test sr-local-field-error {an erroring field leaves no struct and reaches the handler} -body {
     set source "error Boom
@@ -547,6 +550,17 @@ test sr-generic-baseline-unchanged {the unspecialized baseline keeps its limitat
 
 # ---------------------------------------------------------------------------
 # Census and the stdlib (the acceptance cases)
+#
+# MUTABLE-ARRAY.md changed three of these programs' shapes (measured): a
+# MutableArray is a value, so hashtable.bot's table (and csv_records.bot's
+# copy) is a HashTable struct of four arrays that every update returns --
+# a struct materialized where a table is built (ht_alloc) and crossing
+# returns as fields elsewhere -- and its rehash passes the old table's three
+# arrays apart instead of grouping them: there is no src/dest grouping
+# struct left to cross calls as fields. csv_chunked.bot's builder became a
+# ChunkedBuilder struct (completed, current, filled) threaded through the
+# scanners: materialized where a builder is made and where a full chunk
+# makes a new one.
 
 proc stdlibCensus {name} {
     set hir [native::prepareHir [surface::readProgramFile [file join $::projectRoot examples stdlib $name.bot]]]
@@ -567,24 +581,24 @@ test sr-stdlib-csv-geometric {csv_geometric scan results and records are virtual
     stdlibCensus csv_geometric
 } -result {{on 0 0 11} {off 4 8 4} return}
 
-test sr-stdlib-csv-chunked {csv_chunked's scan results are virtual too} -body {
+test sr-stdlib-csv-chunked {csv_chunked's scan results are virtual too; its ChunkedBuilder is a materialized struct} -body {
     stdlibCensus csv_chunked
-} -result {{on 0 0 19} {off 6 8 12} return}
+} -result {{on 3 14 8} {off 7 18 4} {materialized return}}
 
-test sr-stdlib-csv-records {csv_records: scan results cross returns as fields, the rehash groupings cross calls as fields} -body {
+test sr-stdlib-csv-records {csv_records: scan results and its HashTable values cross returns as fields} -body {
     stdlibCensus csv_records
-} -result {{on 0 0 11} {off 6 17 4} {call return}}
+} -result {{on 2 23 12} {off 5 32 4} return}
 
-test sr-stdlib-hashtable-rehash {the rehash src and dest groupings cross their calls as fields} -body {
+test sr-stdlib-hashtable-rehash {a HashTable value crosses returns as fields; it is materialized where it is built} -body {
     stdlibCensus hashtable
-} -result {{on 0 0 0} {off 2 9 0} call}
+} -result {{on 2 28 1} {off 1 29 0} return}
 
-test sr-stdlib-rehash-signature {ht_rehash_scan receives src and dest as three fields each} -body {
+test sr-stdlib-rehash-signature {ht_rehash_scan receives the old table's three arrays apart and the destination HashTable} -body {
     set hir [native::prepareHir [surface::readProgramFile [file join $::projectRoot examples stdlib hashtable.bot]]]
     set text [dict get [srLowered $hir] text]
     regexp {func \d+ "ht_rehash_scan" params=(\d+) env=0 regs=\d+ pnames="([^"]*)"} $text -> params pnames
     list $params $pnames
-} -result {9 {src.0 src.1 src.2 i oldCapacity dest.0 dest.1 dest.2 newCapacity}}
+} -result {7 {controls keys values i oldCapacity dest newCapacity}}
 
 test sr-control-test-selection {genuine stored Test values stay physical: the optimization is use-sensitive} -body {
     set hir [native::prepareHir [surface::readProgramFile [file join $::projectRoot bench test-selection.bot]]]

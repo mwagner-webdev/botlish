@@ -271,26 +271,21 @@
 >>>>
 ## hir/affine.tcl
 <<<<
-                        return [Temporary $hir $e "resume"]
-                    }
-                    return {use resume}
+                return [Temporary $hir $e "resume"]
+            }
+            return {use resume}
 ====
-                        return [Temporary $hir $e "resume"]
-                    }
-                    return [list move arg $p $index]
+                return [Temporary $hir $e "resume"]
+            }
+            return [list move arg $p $index]
 >>>>
 
-@@ done-consumes coroutine::done? consumes the handle: its owner is moved by the query
-## hir/affine.tcl
+@@ done-consumes coroutine::done? consumes the handle: its owner is moved by the query (its ownership role, core/native.tcl's -ownership, is `move` instead of `observe`)
+## core/coroutines.tcl
 <<<<
-            coroutine#start - coroutine::done? - coroutine#release {
+    -param-types {coroutine} -result-type bool -ownership {observe}
 ====
-            coroutine::done? {
-                if {$index == 0} {
-                    return [list move arg $p $index]
-                }
-            }
-            coroutine#start - coroutine#release {
+    -param-types {coroutine} -result-type bool -ownership {move}
 >>>>
 
 @@ handle-as-fn a handle is accepted where a structural Fn value is expected

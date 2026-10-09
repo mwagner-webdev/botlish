@@ -683,7 +683,14 @@ test native-spec-14 {guard accounting: blockers and emitted guards agree} -body 
 # csv_chunked 1 -> 0 specialized guards: the one was the kind guard on
 # `chunk` in chunked_copy_chunks<List[never], ...>, dead now that a read of
 # an empty List is typed never (hir-specialize-corpus-1).
-} -result {{ai_text_clean 5 5 0 0} {csv 25 17 0 0} {csv_chunked 38 26 0 0} {csv_geometric 37 27 2 2} {csv_records 101 unsupported 23 23} {hashtable 79 unsupported 25 25} {matmul 27 17 0 0} {string_replace 12 12 0 0} {string_reverse 4 4 0 0}}
+#
+# MUTABLE-ARRAY.md (measured; hir-specialize-corpus-1 attributes it):
+# csv_geometric 37 -> 27 blockers and 2 -> 0 specialized guards (the array
+# constructors are registered natives, and lib/mutable_array.bot no longer
+# loads lib/list.bot), hashtable 79 -> 99 blockers / 25 -> 8 specialized
+# guards and csv_records 101 -> 112 / 23 -> 6 (the table is a HashTable
+# struct value every update returns).
+} -result {{ai_text_clean 5 5 0 0} {csv 25 17 0 0} {csv_chunked 38 26 0 0} {csv_geometric 27 27 0 0} {csv_records 112 unsupported 6 6} {hashtable 99 unsupported 8 8} {matmul 27 17 0 0} {string_replace 12 12 0 0} {string_reverse 4 4 0 0}}
 
 # ---------------------------------------------------------------------------
 # Closures
