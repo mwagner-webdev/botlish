@@ -74,6 +74,7 @@ proc core::immutableset::contains {s v} {
 # no source-level generic function.
 core::native::register immutable_set::from_list -arity 1 -impl core::immutableset::fromList \
     -param-types {list} -result-type immutableSet -runtime {set-alloc structural-equality} \
-    -result-shape {immutable-set 0} -context-free 1
+    -result-shape {immutable-set 0} -context-free 1 -ownership {equality}
 core::native::register immutable_set::contains -arity 2 -impl core::immutableset::contains \
-    -param-types {immutableSet any} -result-type bool -runtime structural-equality -context-free 1
+    -param-types {immutableSet any} -result-type bool -runtime structural-equality -context-free 1 \
+    -ownership {equality equality}

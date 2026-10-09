@@ -1,87 +1,68 @@
 # containers.tcl -- intrinsic container type rules: the static relations
-# between a container's element contract and the operations that build,
-# read, write and freeze it (PARAMETERIZED-MUTABLEARRAY.md).
+# between a container's element contract and the natives that build, write,
+# read and freeze it (PARAMETERIZED-MUTABLEARRAY.md, MUTABLE-VECTOR.md,
+# MUTABLE-ARRAY.md).
 #
 # Botlish has no general type variables (`fn f[T](...)` does not exist and
 # this file adds none). Some operations are nevertheless *intrinsically*
 # relational -- `list::at(List[T], i)` is a `T`, `from_list(List[T])` is a
-# `MutableArray[T]` -- and the compiler has always known such relations
-# through per-operation rules rather than through function types:
-# core/lists.tcl's -result-shape (element/append/elements), consumed by
-# hir::types::ShapeResult, is the existing mechanism for natives. This file
-# is the one central place for the rest:
+# `MutableArray[T]` -- and the compiler knows such relations through
+# per-native rules rather than through function types: a native's
+# -result-shape (core/native.tcl), consumed by hir::types::ShapeResult, types
+# its result. This file is the one central place for the rest:
 #
-#   * result rules for ordinary Botlish *module functions* whose result
-#     type depends on their argument types: mutable_array::from_list and
-#     mutable_array::create. They are keyed by the function's resolved identity
-#     (the module binding "mutable_array::from_list" -- lib/mutable_array.bot; a user
-#     function that happens to be called from_list, or a local alias of the
-#     library function, cannot acquire or lose the rule), never by the
-#     spelling of a call;
 #   * static element-contract checks for the natives that write into a
-#     MutableArray[T] (mutable_array::set, mutable_array::copy): a store must
-#     be *proven* admissible for T, and a copy must not move values into a
-#     typed destination without the same proof. There is no implicit guard
-#     and no widening -- an unproven store is a compile-time TYPE error;
+#     MutableArray[T] or a MutableVector[T] (set, swap, copy, push, ...): a
+#     stored value must be *proven* admissible for T, and a copy must not
+#     move values into a typed destination without the same proof. There is
+#     no implicit guard and no widening -- an unproven store is a
+#     compile-time TYPE error;
+#   * the factory check of mutable_array::generate: the factory is called
+#     with every Int index 0..n-1, so its contract must accept an Int;
 #   * the argument "contexts" the typed-contract escape audit
 #     (hir/callables.tcl) needs to tell a call that merely *uses* a typed
-#     array from one that would erase its element contract.
+#     array -- or stores it, with its contract, in a typed container (a
+#     MutableVector[MutableArray[T]]'s push) -- from one that would erase
+#     its element contract.
 #
-# The rules only ever read static types. The runtime MutableArray carries no
-# element type (core/mutarray.tcl, native MutArrayObj): `MutableArray[T]` is
-# a compile-time contract, so no backend needs to know any of this.
+# MutableArray's constructors used to be ordinary Botlish functions of
+# lib/mutable_array.bot that a "module rule" here typed at every call from
+# their argument types -- in place of their bodies, which the ownership
+# discipline therefore never saw: `create(2, make_coroutine())` stored one
+# coroutine in two slots. They are intrinsics now, each with a result shape
+# for its type and an ownership role per argument for what it does with the
+# value (core/native.tcl's -ownership, MUTABLE-ARRAY.md "Library
+# ownership"), so no call is typed by a rule that hides a body.
 #
-# Result rules for natives that project the element type (`mutable_array::at`
-# -> T, `mutable_array::freeze` -> List[T]) are ordinary -result-shape entries
-# (core/mutarray.tcl, hir::types::ShapeResult), exactly like list::at.
+# The rules only ever read static types. The runtime carries no element type
+# (core/mutarray.tcl, core/mutvec.tcl, the native MutArrayObj/MutVecObj).
 
 namespace eval hir::containers {
-    # Qualified module function name -> rule.
-    variable moduleRules [dict create \
-        mutable_array::from_list from-list \
-        mutable_array::create    create]
-    # Native name -> rule for the natives that write a MutableArray's slots.
+    # Native name -> rule:
+    #   {store I}        a MutableArray store: argument I lands in a slot of
+    #                    argument 0's array
+    #   {vector I}       a MutableVector store: argument I lands in an
+    #                    element of argument 0's vector
+    #   copy             mutable_array::copy(dst, ds, src, ss, n)
+    #   {fill I}         argument I lands in every slot of the result array
+    #   {list I}         List argument I lands, element by element, in the
+    #                    result collection
+    #   {factory I}      argument I is a factory: called once per slot with
+    #                    the slot's Int index, its results land in the slots
     variable nativeRules [dict create \
-        mutable_array::set  set \
-        mutable_array::copy copy \
-        mutable_vector::push        {vector 1} \
-        mutable_vector::swap        {vector 2} \
-        mutable_vector#swap_drop    {vector 2}]
-}
-
-# Records, as HIR's `intrinsicBlocks` field (block ExprId -> rule), which
-# block expressions are the library functions that carry a result rule.
-# Called once per build, after module qualification (hir::hygiene::apply) has
-# given every module binding its "namespace::name" spelling -- a name no
-# user binding can have -- and before any type inference.
-proc hir::containers::index {hirVar} {
-    upvar 1 $hirVar hir
-    variable moduleRules
-    set index [dict create]
-    dict for {b binding} [dict get $hir bindings] {
-        set name [dict get $binding name]
-        if {![dict exists $moduleRules $name] || ![hir::isModuleBinding $hir $b]} {
-            continue
-        }
-        set declaredBy [dict get $binding declaredBy]
-        if {$declaredBy eq "" || ![dict exists $hir exprs $declaredBy]} {
-            continue
-        }
-        set value [dict get $hir exprs $declaredBy value]
-        if {[dict get $hir exprs $value kind] ne "block"} {
-            continue
-        }
-        dict set index $value [dict get $moduleRules $name]
-    }
-    dict set hir intrinsicBlocks $index
-}
-
-# The result rule of block expression BLOCK, or "".
-proc hir::containers::RuleOf {hir block} {
-    if {![dict exists $hir intrinsicBlocks $block]} {
-        return ""
-    }
-    return [dict get $hir intrinsicBlocks $block]
+        mutable_array::set             {store 2} \
+        mutable_array::swap            {store 2} \
+        mutable_array#swap_drop        {store 2} \
+        mutable_array#set_drop         {store 2} \
+        mutable_array::copy            copy \
+        mutable_array::create          {fill 1} \
+        mutable_array::from_list       {list 0} \
+        mutable_array::generate        {factory 1} \
+        mutable_array#generate_drop    {factory 1} \
+        mutable_vector::push           {vector 1} \
+        mutable_vector::swap           {vector 2} \
+        mutable_vector#swap_drop       {vector 2} \
+        mutable_vector::from_list      {list 0}]
 }
 
 # The element contract a value of static type T is stored under: its own
@@ -99,59 +80,6 @@ proc hir::containers::ElementContract {t} {
     return [hir::types::Unshaped $t]
 }
 
-# The result type of a call of a rule-carrying module function with
-# argument types ARGTYPES, whose ordinary (block) result is RESULT.
-#
-#   from-list   xs : List[T]  ->  MutableArray[T]; a broad `list` (no
-#               element type) or List[any] gives MutableArray[any] -- a
-#               fresh, fully initialized array whose element contract is
-#               the whole `any` domain, never the raw substrate type.
-#   create      (capacity, default : T)  ->  MutableArray[T], T the static
-#               type of `default`, also for capacity 0.
-proc hir::containers::CallResult {rule argTypes result} {
-    switch -- $rule {
-        from-list {
-            set list [hir::types::Unshaped [lindex $argTypes 0]]
-            set elem any
-            if {[hir::types::IsList $list]} {
-                set elem [ElementContract [lindex $list 1]]
-            }
-            return [hir::types::MakeMutArray $elem 0]
-        }
-        create {
-            return [hir::types::MakeMutArray [ElementContract [lindex $argTypes 1]] 0]
-        }
-    }
-    return $result
-}
-
-# The static type each argument of a call E of rule-carrying block BLOCK
-# flows into inside the call's own result type (for the escape audit): the
-# List handed to from_list lands, element by element, in the MutableArray;
-# `default` lands in every slot of create's array.
-proc hir::containers::BlockContexts {hir e rule} {
-    set node [dict get $hir exprs $e]
-    set args [dict get $node args]
-    set none [lrepeat [llength $args] ""]
-    set result [hir::typeOf $hir $e]
-    if {![hir::types::IsMutArray $result]} {
-        return $none
-    }
-    switch -- $rule {
-        from-list {
-            if {[llength $args] == 1} {
-                return [list [hir::types::MakeList [lindex $result 1]]]
-            }
-        }
-        create {
-            if {[llength $args] == 2} {
-                return [list "" [lindex $result 1]]
-            }
-        }
-    }
-    return $none
-}
-
 # 1 if native NAME cannot retain any of its arguments where a later reader
 # could find them: it returns a plain scalar and does not mutate a
 # MutableArray. Such a call merely *uses* its arguments (list::length,
@@ -165,39 +93,85 @@ proc hir::containers::NonRetaining {name} {
         || [dict get $meta testsType] ne ""}]
 }
 
+# The element type of the collection type T (a MutableArray's or a
+# MutableVector's), or "" when T is not an applied one.
+proc hir::containers::Elem {t} {
+    if {[hir::types::IsMutArray $t] || [hir::types::IsMutVec $t]} {
+        return [lindex $t 1]
+    }
+    return ""
+}
+
 # The argument contexts of a call E of native NAME for the escape audit, or
 # "" when the native has no container rule (the caller then applies its
-# generic policy). One context per argument.
+# generic policy). One context per argument: the static type the argument
+# provably lands in, "" where it lands in no typed position.
 proc hir::containers::NativeContexts {hir e name} {
     variable nativeRules
+    if {![dict exists $nativeRules $name]} {
+        return ""
+    }
     set node [dict get $hir exprs $e]
     set args [dict get $node args]
     set n [llength $args]
-    if {[dict exists $nativeRules $name]} {
-        set contexts [lmap arg $args {hir::typeOf $hir $arg}]
-        switch -- [dict get $nativeRules $name] {
-            set {
-                if {$n == 3} {
-                    # The value lands in a slot of the array: its context
-                    # is the array's element contract (a raw array has no
-                    # contract to keep, so a bearing value cannot be
-                    # stored in one).
-                    set array [lindex $contexts 0]
-                    lset contexts 1 ""
-                    lset contexts 2 [expr {[hir::types::IsMutArray $array] ? [lindex $array 1] : ""}]
-                    return $contexts
+    # The receiver and every other argument keep their own types (they are
+    # used through the typed API); an index or count lands nowhere.
+    set contexts [lmap arg $args {hir::typeOf $hir $arg}]
+    set result [hir::typeOf $hir $e]
+    set rule [dict get $nativeRules $name]
+    switch -- [lindex $rule 0] {
+        store - vector {
+            set i [lindex $rule 1]
+            if {$n > $i} {
+                # The value lands in an element of the receiver: its context
+                # is the receiver's element contract (a raw array has no
+                # contract to keep, so a bearing value cannot be stored in
+                # one).
+                set elem [Elem [lindex $contexts 0]]
+                for {set k 1} {$k < $n} {incr k} {
+                    lset contexts $k [expr {$k == $i ? $elem : ""}]
                 }
-            }
-            copy {
-                if {$n == 5} {
-                    lset contexts 1 ""
-                    lset contexts 3 ""
-                    lset contexts 4 ""
-                    return $contexts
-                }
+                return $contexts
             }
         }
-        return ""
+        copy {
+            if {$n == 5} {
+                lset contexts 1 ""
+                lset contexts 3 ""
+                lset contexts 4 ""
+                return $contexts
+            }
+        }
+        fill {
+            set i [lindex $rule 1]
+            if {$n > $i} {
+                set contexts [lrepeat $n ""]
+                lset contexts $i [Elem $result]
+                return $contexts
+            }
+        }
+        list {
+            set i [lindex $rule 1]
+            if {$n > $i} {
+                set contexts [lrepeat $n ""]
+                set elem [Elem $result]
+                lset contexts $i [expr {$elem eq "" ? "" : [hir::types::MakeList $elem]}]
+                return $contexts
+            }
+        }
+        factory {
+            set i [lindex $rule 1]
+            if {$n > $i} {
+                # The factory is only called (VerifyFactory proves it can be
+                # called with every index), never stored: it keeps its own
+                # type, obligations included. A count lands nowhere.
+                lset contexts 0 ""
+                for {set k 2} {$k < $n} {incr k} {
+                    lset contexts $k ""
+                }
+                return $contexts
+            }
+        }
     }
     return ""
 }
@@ -215,20 +189,20 @@ proc hir::containers::VerifyNative {hirVar ranges e node name} {
     }
     set args [dict get $node args]
     set rule [dict get $nativeRules $name]
-    if {[lindex $rule 0] eq "vector"} {
-        # A MutableVector[T] (MUTABLE-VECTOR.md): an element pushed or
-        # swapped in must be proven admissible for T, exactly as a
-        # MutableArray store.
-        set i [lindex $rule 1]
-        if {[llength $args] > $i} {
-            VerifyElement hir $ranges [lindex $args 0] [lindex $args $i]
+    switch -- [lindex $rule 0] {
+        vector {
+            # A MutableVector[T] (MUTABLE-VECTOR.md): an element pushed or
+            # swapped in must be proven admissible for T, exactly as a
+            # MutableArray store.
+            set i [lindex $rule 1]
+            if {[llength $args] > $i} {
+                VerifyElement hir $ranges [lindex $args 0] [lindex $args $i]
+            }
         }
-        return
-    }
-    switch -- $rule {
-        set {
-            if {[llength $args] == 3} {
-                VerifyStore hir $ranges [lindex $args 0] [lindex $args 2]
+        store {
+            set i [lindex $rule 1]
+            if {[llength $args] > $i} {
+                VerifyStore hir $ranges [lindex $args 0] [lindex $args $i]
             }
         }
         copy {
@@ -236,12 +210,18 @@ proc hir::containers::VerifyNative {hirVar ranges e node name} {
                 VerifyCopy hir [lindex $args 0] [lindex $args 2]
             }
         }
+        factory {
+            set i [lindex $rule 1]
+            if {[llength $args] > $i} {
+                VerifyFactory hir $name [lindex $args $i]
+            }
+        }
     }
 }
 
-# mutable_array::set(ARRAY, i, VALUE): when ARRAY is a MutableArray[T], VALUE
-# must be proven admissible for T. The element contract belongs to the
-# object; a store never widens it.
+# mutable_array::set(ARRAY, i, VALUE) / swap: when ARRAY is a
+# MutableArray[T], VALUE must be proven admissible for T. The element
+# contract belongs to the array's type; a store never widens it.
 proc hir::containers::VerifyStore {hirVar ranges array value} {
     upvar 1 $hirVar hir
     set arrayType [hir::typeOf $hir $array]
@@ -325,5 +305,43 @@ proc hir::containers::VerifyCopy {hirVar dst src} {
         hir::Diagnose hir TYPE [format \
             {cannot erase element contract of %s by copying its elements into %s: the copied values would lose their own contracts in untyped mutable storage} \
             [hir::types::show $srcType] [hir::types::show $dstType]] $src
+    }
+}
+
+# A factory argument F of native NAME (mutable_array::generate): the native
+# calls it with each slot's Int index, so its callable contract must take
+# exactly one argument that admits every Int (an untyped or `int`
+# parameter): a factory declaring a narrower parameter (`i: Byte`) could be
+# called with an index outside it, which no check would catch. A factory of
+# unknown contract is checked when it is called (its own body is analyzed
+# for the Int it gets: hir/semantic.tcl).
+proc hir::containers::VerifyFactory {hirVar name f} {
+    upvar 1 $hirVar hir
+    set type [hir::typeOf $hir $f]
+    if {$type eq "never"} {
+        return
+    }
+    set known 0
+    set params {}
+    if {[hir::types::IsExactBlock $type]} {
+        set block [lindex $type 1]
+        if {[dict exists $hir exprs $block]} {
+            set known 1
+            set params [lmap t [hir::signatures::entryTypes $hir $block] {expr {$t eq {} ? "any" : $t}}]
+        }
+    } elseif {[hir::types::IsCoroutine $type]} {
+        set known 1
+        set params [dict get [lindex $type 1] args]
+    } elseif {[hir::types::structuralOf $type] ne ""} {
+        set known 1
+        set params [hir::types::FnArgs [hir::types::structuralOf $type]]
+    }
+    if {!$known} {
+        return
+    }
+    if {[llength $params] != 1 || ([lindex $params 0] ne "any" && ![hir::types::Admits [lindex $params 0] int])} {
+        hir::Diagnose hir TYPE [format \
+            {the factory of %s is called with one Int argument (each slot's index, 0 to the count - 1), but its contract is %s} \
+            $name [hir::types::showContract $type]] $f
     }
 }

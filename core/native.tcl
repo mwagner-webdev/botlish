@@ -46,6 +46,22 @@
 #                   (they are the program's): static typing charges them to
 #                   the call (hir/coroutines.tcl), and compiled code always
 #                   calls such a native through the generic call boundary.
+#   errorsFrom      "" or the index K of a callable argument whose contract's
+#                   declared errors a call of the native may complete with:
+#                   the native calls it (mutable_array::generate's factory),
+#                   and the first failing call's propagate-error is the
+#                   native's own completion. Static typing charges the
+#                   callable's contract errors to the call (hir/types.tcl's
+#                   calleeErrors); such a native is a -completion native.
+#   ownership       what the operation does, statically, with each argument
+#                   it is given (OWNERSHIP ROLES below), one role per
+#                   parameter (for a native of arity *, the roles of its
+#                   leading arguments, the last one repeating for every
+#                   further argument), or "" (every argument is `erase`). The
+#                   ownership discipline (hir/affine.tcl) reads these roles,
+#                   never a native's name, to decide whether an affine
+#                   argument moves, stays owned, or is rejected; they are
+#                   compile-time semantics only (no runtime check exists).
 #   bounds          "" or the bounds checks behind a native's argument-
 #                   dependent errors (STDLIB-NAMESPACES.md), stated once here
 #                   so static analyses (hir/completions.tcl) read them by
@@ -92,6 +108,13 @@
 #                                     the result is a List[T]
 #                     same A          the result has argument A's own
 #                                     static type (mutable_vector#share)
+#                     mutarray-create V   argument V is a T: the result
+#                                     is a MutableArray[T] (MUTABLE-ARRAY.md)
+#                     mutarray-from-list L  argument L is a List[T]: the
+#                                     result is a MutableArray[T]
+#                     mutarray-generate F argument F is a callable whose
+#                                     contract returns T: the result is a
+#                                     MutableArray[T]
 #                     mutarray-freeze A   argument A is a MutableArray[T]:
 #                                     the result is a List[T]; a raw
 #                                     `mutarray` argument keeps the declared
@@ -130,6 +153,44 @@
 #                                     hir::range's small-Int maximum -- never
 #                                     merely assumed (see MAX_COLLECTION_LENGTH
 #                                     there)
+#
+# OWNERSHIP ROLES (-ownership; AFFINE-VALUES.md, MUTABLE-ARRAY.md). Each role
+# says what the operation does with the argument's value, so the one question
+# the ownership discipline asks of an affine argument -- does it move, stay
+# owned, or would it be duplicated or lost? -- is answered from metadata:
+#
+#   observe    read only; nothing of it is retained. An affine argument stays
+#              owned by its source, which must be an owner (a binding or a
+#              place path): a temporary is AFFINE-TEMPORARY-UNSUPPORTED.
+#   place      the receiver place, mutated in place (push, set, swap, a
+#              copy's destination, a drain step); its owner keeps owning it.
+#   move       moved once into the operation: stored in its result or in its
+#              receiver (push's element, swap's replacement, from_list's
+#              List, a consuming loop's domain).
+#   element    a List literal's element (`list`): moved into the List when
+#              the List's type is affine, else an erasure.
+#   repeat     logically duplicated: the operation places one value in many
+#              slots (create's value). An affine argument is rejected
+#              (AFFINE-DUPLICATION-UNSUPPORTED): there would be several
+#              owners. An unrestricted one is copied logically, never deeply.
+#   factory    a callable invoked once per element the operation makes
+#              (generate's factory): each call's result moves into its own
+#              slot. The callable itself is only called, never stored; an
+#              affine callable (which could be called only once) is rejected.
+#   copy-out   a container whose elements the operation reads out while it
+#              keeps owning them (at, freeze, a copy's source, a snapshot):
+#              an affine container is rejected (AFFINE-ELEMENT-COPY-OUT, or
+#              AFFINE-LIST-OPERATION-UNSUPPORTED for a List).
+#   equality   compared or hashed: an affine argument is rejected
+#              (AFFINE-EQUALITY-UNSUPPORTED).
+#   resume     a coroutine handle resumed behind its owner (consume and
+#              replace: the owner keeps owning it).
+#   message    a resume message: moved into the coroutine.
+#   release    a release the compiler wrote (coroutine#release, affine#drop):
+#              never a use to check.
+#   erase      (the default) the argument becomes an untyped value the
+#              operation may keep or copy: an affine argument is rejected
+#              (AFFINE-ERASURE-UNSUPPORTED).
 #
 # Refinement rules are flat lists of ARG-INDEX TYPE pairs, e.g. {0 int}
 # ("argument 0 is an int") or {0 {refined int {Byte}}}. The evaluator never
@@ -185,6 +246,8 @@ namespace eval core::native {
     variable runtimeTags {bigint string-alloc list-alloc result-alloc char-index
         range-check structural-equality mutarray-alloc mutarray-mutate hash set-alloc
         process-argv raw-syscall bytestore-alloc raw-address mutvec-alloc mutvec-mutate}
+    # The -ownership roles (OWNERSHIP ROLES above).
+    variable ownershipRoles {observe place move element repeat factory copy-out equality resume message release erase}
     # NAME -> 1: the errors the runtime itself declares, visible in every
     # program like a root native and never part of a program's own `error`
     # declarations (hir/errordecls.tcl). Only a native's -errors may name one;
@@ -205,7 +268,7 @@ proc core::native::register {name args} {
     }
     set options [dict create -impl "" -arity "" -refines-true {} -refines-false {} \
         -param-types "" -result-type any -tests-type "" -runtime {} -result-shape {} -result-range {} \
-        -context-free 0 -errors {} -bounds {} -nomethod 0 -completion 0]
+        -context-free 0 -errors {} -bounds {} -nomethod 0 -completion 0 -ownership {} -errors-from {}]
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "core::native::register: unknown option \"$option\""
@@ -298,6 +361,21 @@ proc core::native::register {name args} {
             error "core::native::register: -errors of \"$name\" names \"$error\", which is not a declared builtin error"
         }
     }
+    variable ownershipRoles
+    set ownership [dict get $options -ownership]
+    foreach role $ownership {
+        if {$role ni $ownershipRoles} {
+            error "core::native::register: unknown -ownership role \"$role\" for \"$name\" (known: $ownershipRoles)"
+        }
+    }
+    if {$ownership ne "" && ($arity eq "*" ? [llength $ownership] == 0 : [llength $ownership] != $arity)} {
+        error "core::native::register: -ownership of \"$name\" must list [expr {$arity eq "*" ? "its leading" : $arity}] role(s)"
+    }
+    set errorsFrom [dict get $options -errors-from]
+    if {$errorsFrom ne "" && (![string is digit -strict $errorsFrom] || $arity eq "*" || $errorsFrom >= $arity
+            || ![dict get $options -completion])} {
+        error "core::native::register: -errors-from of \"$name\" must be the index of an argument of a -completion native"
+    }
     set bounds [dict get $options -bounds]
     if {$bounds ne "" && ![ValidBounds $bounds $arity $errors]} {
         error "core::native::register: bad -bounds \"$bounds\" for \"$name\" (with -errors {$errors})"
@@ -314,7 +392,8 @@ proc core::native::register {name args} {
         runtime [lsort -unique [dict get $options -runtime]] \
         resultShape $shape resultRange $range \
         contextFree [dict get $options -context-free] errors $errors bounds $bounds \
-        nomethod [dict get $options -nomethod] completion [dict get $options -completion]]
+        nomethod [dict get $options -nomethod] completion [dict get $options -completion] \
+        ownership $ownership errorsFrom $errorsFrom]
     return [core::value::native $name]
 }
 
@@ -442,7 +521,9 @@ proc core::native::ValidShape {shape count} {
         elements { return [expr {$length == 1}] }
         element - append { return [expr {$length == 3 && $count ne ""}] }
         immutable-set { return [expr {$length == 2}] }
-        mutarray-element - mutarray-freeze { return [expr {$length == 2 && $count ne ""}] }
+        mutarray-element - mutarray-freeze - mutarray-create - mutarray-from-list - mutarray-generate {
+            return [expr {$length == 2 && $count ne ""}]
+        }
         mutvec-from-list - mutvec-element - mutvec-to-list - same {
             # MUTABLE-VECTOR.md (hir::types::ShapeResult): from_list's
             # List[T] -> MutableVector[T]; an element read or removal's
@@ -596,6 +677,22 @@ proc core::native::metadata {name} {
         error "core::native: no native named \"$name\""
     }
     return [dict get $registry $name]
+}
+
+# The ownership role (OWNERSHIP ROLES) native NAME's argument INDEX has:
+# its -ownership entry (for a native of arity *, the last entry repeats),
+# else erase.
+proc core::native::ownershipRole {name index} {
+    set meta [metadata $name]
+    set roles [dict get $meta ownership]
+    if {$roles eq ""} {
+        return erase
+    }
+    if {[dict get $meta arity] eq "*" && $index >= [llength $roles]} {
+        return [lindex $roles end]
+    }
+    set role [lindex $roles $index]
+    return [expr {$role eq "" ? "erase" : $role}]
 }
 
 # OUTCOME is host 1 (predicate returned true) or 0 (returned false).

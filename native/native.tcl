@@ -194,9 +194,10 @@ proc native::Outcome {lines} {
         switch -- $tag {
             value {
                 set value [lindex $line 1]
-                if {[string first mutvecitems $value] >= 0} {
-                    # A MutableVector in the result (MUTABLE-VECTOR.md): the
-                    # host's own vector value of those elements.
+                if {[string first mutvecitems $value] >= 0 || [string first mutarrayitems $value] >= 0} {
+                    # A MutableVector or MutableArray in the result
+                    # (MUTABLE-VECTOR.md, MUTABLE-ARRAY.md): the host's own
+                    # collection value of those elements.
                     set value [HostVectors $value]
                 }
                 return $value
@@ -215,12 +216,16 @@ proc native::Outcome {lines} {
 }
 
 # VALUE (a host runtime value as the native runtime renders it) with every
-# `mutvecitems ITEMS` (runtime/show.rs's rendering of a MutableVector) made a
-# vector of the host runtime (core/mutvec.tcl).
+# `mutvecitems ITEMS` / `mutarrayitems ITEMS` (runtime/show.rs's rendering of
+# a MutableVector / MutableArray) made a vector / array of the host runtime
+# (core/mutvec.tcl, core/mutarray.tcl).
 proc native::HostVectors {value} {
     switch -- [lindex $value 0] {
         mutvecitems {
             return [core::mutvec::New [lmap item [lindex $value 1] {HostVectors $item}]]
+        }
+        mutarrayitems {
+            return [core::mutarray::New [lmap item [lindex $value 1] {HostVectors $item}]]
         }
         list - immutableSet {
             return [list [lindex $value 0] [lmap item [lindex $value 1] {HostVectors $item}]]

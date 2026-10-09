@@ -284,6 +284,10 @@ fn share_by(p: *mut Vm, value: Value, d: &[u8], pos: &mut usize) -> Value {
     let c = d[*pos];
     *pos += 1;
     match c {
+        b'h' if heap_kind(value) == KIND_MUTARRAY => {
+            // A MutableArray header (MUTABLE-ARRAY.md): the same COW.
+            super::ops::share_array(p, value)
+        }
         b'h' => {
             let backing = Rc::clone(&mutvec_of(value).backing);
             vm(p).metrics.record_mutvec_share();
@@ -308,7 +312,43 @@ fn share_by(p: *mut Vm, value: Value, d: &[u8], pos: &mut usize) -> Value {
             let shape = struct_of(value).shape;
             vm(p).new_struct(shape, fields)
         }
+        b'd' => share_dynamic(p, value),
         _ => panic!("bad share descriptor {:?}", std::str::from_utf8(d)),
+    }
+}
+
+/// The `d` share: a logical copy of VALUE, whose static type the compiler
+/// did not know (a generic function's parameter, MUTABLE-ARRAY.md): a
+/// collection header is copied, a struct field by field (a new struct only
+/// if some field changed), anything else is a value already. VALUE is the
+/// caller's operand (rooted); the copies made so far are rooted while the
+/// next ones (and the struct) are allocated.
+fn share_dynamic(p: *mut Vm, value: Value) -> Value {
+    match heap_kind(value) {
+        KIND_MUTARRAY => super::ops::share_array(p, value),
+        KIND_MUTVEC => {
+            let backing = Rc::clone(&mutvec_of(value).backing);
+            vm(p).metrics.record_mutvec_share();
+            new_header(p, backing, 0)
+        }
+        KIND_STRUCT => {
+            let n = struct_of(value).fields().len();
+            let mut copies = Vec::with_capacity(n);
+            let mut changed = false;
+            for slot in 0..n {
+                let field = struct_of(value).fields()[slot];
+                let copy = share_dynamic(p, field);
+                changed |= copy != field;
+                vm(p).temp_roots.push(copy);
+                copies.push(copy);
+            }
+            if !changed {
+                return value;
+            }
+            let shape = struct_of(value).shape;
+            vm(p).new_struct(shape, copies)
+        }
+        _ => value,
     }
 }
 

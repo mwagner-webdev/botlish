@@ -258,16 +258,16 @@ impl SetObj {
     }
 }
 
-/// A MutableArray: fixed-capacity, explicitly mutable indexed storage. Every
-/// slot is a program value (initialized to UNIT at allocation: see
-/// Vm::new_mutarray), never uninitialized memory. Unlike ListObj, SLOTS is
-/// mutated in place by mutable_array::set/mutable_array::copy; its length
-/// (`slots.len()`) is its fixed capacity and never changes after allocation
-/// (see the module-level "no hidden resizing" invariant in ops.rs).
+/// A MutableArray header (MUTABLE-ARRAY.md): the identity of one logical
+/// fixed-length array VALUE over a copy-on-write BACKING shared between the
+/// headers of its logical copies (ops.rs's MutableArray section: the same
+/// header/backing model runtime/mutvec.rs gives a MutableVector). Every slot
+/// is a program value (UNIT at a raw allocation), never uninitialized
+/// memory; the length never changes after construction.
 #[repr(C)]
 pub struct MutArrayObj {
     pub hdr: Header,
-    pub slots: Box<[Value]>,
+    pub backing: std::rc::Rc<std::collections::VecDeque<Value>>,
 }
 
 #[repr(C)]

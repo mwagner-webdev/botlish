@@ -11,6 +11,8 @@
 #                                "l"D each List element by D, "v"D each
 #                                element of a MutableVector by D, first to
 #                                last, leaving it empty (core/mutvec.tcl),
+#                                "a"D each element of a MutableArray by D,
+#                                first to last (core/mutarray.tcl),
 #                                "s"N"."(SLOT"."D)*N the struct fields at
 #                                those layout slots, in the descriptor's
 #                                order
@@ -56,9 +58,16 @@ proc core::affine::Parse {text posVar} {
     switch -- $c {
         c { return {c} }
         v { return [list v [Parse $text pos]] }
+        a { return [list a [Parse $text pos]] }
+        d {
+            # A share descriptor's dynamic copy (mutable_vector#share,
+            # core/mutvec.tcl): a value of a statically unknown type.
+            return {d}
+        }
         h {
-            # A share descriptor's vector header (mutable_vector#share,
-            # core/mutvec.tcl); never part of a drop descriptor.
+            # A share descriptor's collection header -- a MutableVector's or
+            # a MutableArray's (mutable_vector#share, core/mutvec.tcl);
+            # never part of a drop descriptor.
             return {h}
         }
         l { return [list l [Parse $text pos]] }
@@ -99,6 +108,9 @@ proc core::affine::Drop {value tree} {
         v {
             core::mutvec::DropElements $value [lindex $tree 1]
         }
+        a {
+            core::mutarray::DropElements $value [lindex $tree 1]
+        }
         s {
             set values [core::value::structValues $value]
             foreach part [lrange $tree 1 end] {
@@ -110,4 +122,4 @@ proc core::affine::Drop {value tree} {
 }
 
 core::native::register affine#drop -arity 2 -impl core::affine::dropImpl \
-    -param-types {any str} -result-type unit
+    -param-types {any str} -result-type unit -ownership {release observe}

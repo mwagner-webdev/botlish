@@ -260,6 +260,16 @@ pub struct Metrics {
     /// a write) and the element words they copied, and capacity growth of a
     /// unique backing (and its bytes).
     pub mutvec: MutVecStats,
+    /// MutableArray copy-on-write (MUTABLE-ARRAY.md): logical copies and
+    /// detaches (and the element words they copied), as for a vector.
+    pub mutarray: MutArrayStats,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct MutArrayStats {
+    pub shares: u64,
+    pub detaches: u64,
+    pub detach_elements: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -304,7 +314,19 @@ impl Metrics {
             construction: ConstructionStats::default(),
             coroutines: CoroutineStats::default(),
             mutvec: MutVecStats::default(),
+            mutarray: MutArrayStats::default(),
         }
+    }
+
+    /// A logical copy of an array (ops.rs). Counted in every mode.
+    pub fn record_mutarray_share(&mut self) {
+        self.mutarray.shares += 1;
+    }
+
+    /// A write that detached an array's shared backing of N elements.
+    pub fn record_mutarray_detach(&mut self, n: usize) {
+        self.mutarray.detaches += 1;
+        self.mutarray.detach_elements += n as u64;
     }
 
     /// A logical copy of a vector (runtime/mutvec.rs). Counted in every
@@ -601,6 +623,18 @@ impl Metrics {
                     ("detachElements", n(mv.detach_elements)),
                     ("growths", n(mv.growths)),
                     ("growthBytes", n(mv.growth_bytes)),
+                ]),
+            ));
+        }
+        // Likewise: only a program that made a MutableArray.
+        let ma = &self.mutarray;
+        if self.by_kind[KIND_MUTARRAY as usize].allocations > 0 {
+            sections.push((
+                "mutableArray",
+                dict(&[
+                    ("shares", n(ma.shares)),
+                    ("detaches", n(ma.detaches)),
+                    ("detachElements", n(ma.detach_elements)),
                 ]),
             ));
         }

@@ -1217,6 +1217,12 @@ proc hir::completions::NativeDeclaredErrors {hir e name} {
 # A handle whose construction is not found keeps the declared errors.
 proc hir::completions::NativeCallFacts {hirVar ctxVar guard e name argExprs argRanges} {
     upvar 1 $hirVar hir $ctxVar ctx
+    if {[dict get [core::native::metadata $name] errorsFrom] ne ""} {
+        # A native calling a callable argument (mutable_array::generate's
+        # factory): it may complete normally, or with what the callable's
+        # contract permits (the call's calleeErrors, hir/types.tcl's Call).
+        return [list 1 [NativeDeclaredErrors $hir $e $name] {}]
+    }
     if {[dict get [core::native::metadata $name] completion]} {
         set thunk [hir::coroutines::thunkOfHandle $hir [lindex $argExprs 0]]
         if {$thunk eq ""} {

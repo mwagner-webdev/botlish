@@ -189,19 +189,20 @@ proc core::forms::op-loop {node env} {
 # the loop with the prefix. Exhausting the list without a `break` completes
 # normally with the List of every contributed value, in order.
 #
-# A MutableVector iterable (MUTABLE-VECTOR.md) is *consumed*: the compiler
-# hands a loop a vector only when its elements are affine (an unrestricted
-# vector's loop iterates its mutable_vector#to_list snapshot), and the loop
-# then moves each element out of it, first to last, into the loop variable
-# (mutable_vector#take_front). Whatever is left when the loop is left early is
-# still the vector's: the compiler releases it on that exit.
+# A MutableVector or MutableArray iterable (MUTABLE-VECTOR.md, MUTABLE-
+# ARRAY.md) is *consumed*: the compiler hands a loop one only when its
+# elements are affine (an unrestricted one's loop iterates its #to_list
+# snapshot), and the loop then moves each element out of it, first to last,
+# into the loop variable (#take_front). Whatever is left when the loop is
+# left early is still the collection's: the compiler releases it on that
+# exit.
 proc core::forms::op-listloop {node env} {
     set listExpr [lindex $node 1]
     set elementBlock [lindex $node 2]
     set param [lindex [core::ir::blockParams $elementBlock] 0]
     set body [core::ir::blockBody $elementBlock]
     set listValue [core::interp::valueOf [core::interp::evalIn $listExpr $env]]
-    if {[core::value::kind $listValue] eq "mutvec"} {
+    if {[core::value::kind $listValue] in {mutvec mutarray}} {
         return [ConsumeVector $listValue $param $body $env]
     }
     set items [core::value::items [core::value::expect list $listValue "loop iterable"]]
@@ -233,11 +234,12 @@ proc core::forms::op-listloop {node env} {
     return [core::completion::normal [core::value::listOf $results]]
 }
 
-# The consuming iteration of op-listloop over VECTOR.
+# The consuming iteration of op-listloop over VECTOR (a MutableVector, or a
+# MutableArray: MUTABLE-ARRAY.md).
 proc core::forms::ConsumeVector {vector param body env} {
     set results {}
-    while {[llength [core::mutvec::items $vector]] > 0} {
-        set item [core::mutvec::takeFront $vector]
+    while {[core::mutvec::remaining $vector] > 0} {
+        set item [core::mutvec::drainFront $vector]
         set iterationEnv [core::env::child $env]
         core::env::define $iterationEnv $param $item
         core::env::declare $iterationEnv [core::ir::scopeBindNames $body]

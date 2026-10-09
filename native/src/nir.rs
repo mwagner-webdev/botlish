@@ -316,6 +316,35 @@ pub enum OpCode {
     MvTakeFront,
     MvClearDrop,
     MvSwapDrop,
+    /// MutableArray (MUTABLE-ARRAY.md, runtime/ops.rs): a header over a
+    /// copy-on-write backing, like a vector's (its logical copy is `mvshare`
+    /// with `h`), whose length never changes after construction.
+    ///   `mutarraycreate %n %x`     %n slots of the one value %x (allocates)
+    ///   `mutarrayfromlist %xs`     a fresh array of a List's elements
+    ///   `mutarraygenerate %n %f`   slot i holds %f(i); runs code (allocates;
+    ///                              a failing call is the result's failure)
+    ///   `mutarraygeneratedrop %n %f %d`  the same for affine elements: on a
+    ///                              failure the elements made are dropped by %d
+    ///   `mutarrayswap %a %i %x`    %x installed at %i, the old element out;
+    ///                              IndexNotFound
+    ///   `mutarrayswapdrop %a %i %x %d`  swap of affine elements; on
+    ///                              IndexNotFound %x is dropped by %d
+    ///   `mutarraysetdrop %a %i %x %d`  set of affine elements: the displaced
+    ///                              element (or, on IndexNotFound, %x) is
+    ///                              dropped by %d
+    ///   `mutarraytolist %a`        an immutable List snapshot (allocates)
+    ///   `mutarrayempty %a`         a consumed array has no element left
+    ///   `mutarraytakefront %a`     a consuming loop's step (non-empty)
+    MutArrayCreate,
+    MutArrayFromList,
+    MutArrayGenerate,
+    MutArrayGenerateDrop,
+    MutArraySwap,
+    MutArraySwapDrop,
+    MutArraySetDrop,
+    MutArrayToList,
+    MutArrayEmpty,
+    MutArrayTakeFront,
     /// `ctxroot %h`: %h (a MutableVector header just installed in the
     /// context area, MUTABLE-VECTOR.md) is a GC root for the rest of the
     /// run. Never fails or allocates; result unit.
@@ -479,6 +508,16 @@ impl OpCode {
             "mutarrayset" => MutArraySet,
             "mutarraycopy" => MutArrayCopy,
             "mutarrayfreeze" => MutArrayFreeze,
+            "mutarraycreate" => MutArrayCreate,
+            "mutarrayfromlist" => MutArrayFromList,
+            "mutarraygenerate" => MutArrayGenerate,
+            "mutarraygeneratedrop" => MutArrayGenerateDrop,
+            "mutarrayswap" => MutArraySwap,
+            "mutarrayswapdrop" => MutArraySwapDrop,
+            "mutarraysetdrop" => MutArraySetDrop,
+            "mutarraytolist" => MutArrayToList,
+            "mutarrayempty" => MutArrayEmpty,
+            "mutarraytakefront" => MutArrayTakeFront,
             "listgetproven" => ListGetProven,
             "mutarraygetproven" => MutArrayGetProven,
             "mutarraysetproven" => MutArraySetProven,
@@ -585,10 +624,11 @@ impl OpCode {
             | SetFromListTotal | StrToShort | ShortToStr | ShortLen | StrToAscii | AsciiToStr | AsciiLen
             | AsciiToShort | BytesFromList | BytesLen | BytesAddr | KeepAlive | MBytesNew | MBytesFrom | MBytesLen
             | MBytesClone | MBytesFreeze | MBytesAddr | CoCreate | CoStart | CoResume0 | CoYield | CoDone
-            | CoRelease | MvFromList | MvLen | MvEmpty | MvPop | MvClear | MvToList | MvTakeFront | CtxRoot => Some(1),
+            | CoRelease | MvFromList | MvLen | MvEmpty | MvPop | MvClear | MvToList | MvTakeFront | CtxRoot
+            | MutArrayFromList | MutArrayToList | MutArrayEmpty | MutArrayTakeFront => Some(1),
             Substr | SubstrProven | MutArraySet | MutArraySetProven | MBytesSet | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum | StrSliceShort
-            | MvSwap => Some(3),
-            RegionEq | MvSwapDrop => Some(4),
+            | MvSwap | MutArraySwap | MutArrayGenerateDrop => Some(3),
+            RegionEq | MvSwapDrop | MutArraySwapDrop | MutArraySetDrop => Some(4),
             MutArrayCopy | MutArrayCopyProven => Some(5),
             _ => Some(2),
         }

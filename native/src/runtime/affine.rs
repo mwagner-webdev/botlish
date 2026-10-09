@@ -13,6 +13,7 @@
 //! | `c`                   | a coroutine handle (`rt_co_release`)           |
 //! | `l` D                 | every element of a List by D, first to last    |
 //! | `v` D                 | every live element of a MutableVector by D, first to last, leaving it empty (runtime/mutvec.rs) |
+//! | `a` D                 | every element of a MutableArray by D, first to last (ops.rs; MUTABLE-ARRAY.md) |
 //! | `s` N `.` (SLOT `.` D)* | the struct fields at those slots by their D, in the descriptor's order |
 //!
 //! The descriptor is type-directed: only positions the static type says are
@@ -71,6 +72,7 @@ fn drop_by(p: *mut Vm, value: Value, d: &[u8], pos: &mut usize) {
             }
         }
         b'v' => super::mutvec::drop_elements(p, value, d, pos),
+        b'a' => super::ops::drop_array_elements(p, value, d, pos),
         _ => panic!("bad affine drop descriptor {:?}", std::str::from_utf8(d)),
     }
 }
@@ -81,7 +83,7 @@ pub fn skip(d: &[u8], pos: &mut usize) {
     *pos += 1;
     match c {
         b'c' => {}
-        b'l' | b'v' => skip(d, pos),
+        b'l' | b'v' | b'a' => skip(d, pos),
         b's' => {
             let n = number(d, pos);
             for _ in 0..n {

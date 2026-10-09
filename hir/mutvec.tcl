@@ -1,37 +1,46 @@
-# mutvec.tcl -- MutableVector[T] places and logical copies (MUTABLE-VECTOR.md).
+# mutvec.tcl -- the places and logical copies of the mutable collections:
+# MutableVector[T] (MUTABLE-VECTOR.md) and MutableArray[T] (MUTABLE-ARRAY.md).
 #
-# A MutableVector is a growable mutable VALUE. Its runtime representation
-# (core/mutvec.tcl, native MutVecObj) is a *header* -- the identity of one
-# logical vector value, mutated in place by push/pop/take/swap/clear -- over
-# a copy-on-write *backing*. A mutation therefore never stores a new value
-# back into its receiver: the receiver must be a *place* (a binding, or a
-# struct field reached from one) that owns its header, and the compiler keeps
-# every place's header owned by that place alone:
+# Both are mutable VALUES -- a growable one and its fixed-length sibling --
+# with one runtime representation (core/mutvec.tcl and core/mutarray.tcl;
+# natively MutVecObj and MutArrayObj): a *header* -- the identity of one
+# logical value, mutated in place by push/pop/take/swap/clear or set/swap/
+# copy -- over a copy-on-write *backing*. A mutation therefore never stores a
+# new value back into its receiver: the receiver must be a *place* (a
+# binding, or a struct field reached from one) that owns its header, and the
+# compiler keeps every place's header owned by that place alone. Everything
+# below is the same for the two kinds; only the operations differ (the `ops`
+# table), and "collection" means either:
 #
 #   receivers   the first argument of a mutating operation must be a place
 #               path: a reference to a local, parameter or context parameter
 #               of the same function, or a chain of field projections from
 #               one (`v.push(x)`, `state.queue.pop()`, `io.output.push(t)`),
-#               of static type MutableVector[T]. Anything else -- a call's
-#               result, a List element, a captured binding, a module
-#               binding -- would mutate a header nothing keeps (a lost
-#               update) or one some other place owns:
-#               MUTABLE-VECTOR-RECEIVER. The bindings at the root of a
-#               receiver path are the *place roots*.
+#               whose binding's own static type makes the path a
+#               MutableVector[T] or MutableArray[T] (a binding of type `any`
+#               narrowed by a kind test is not a place: bind the narrowed
+#               value to a name). Anything else -- a call's result, a List
+#               element, a captured binding, a module binding -- would mutate
+#               a header nothing keeps (a lost update) or one some other
+#               place owns: MUTABLE-PLACE-RECEIVER. The bindings at the root
+#               of a receiver path are the *place roots*.
 #   captures    a nested function may not refer to a place root: it would
 #               observe (and could not mutate) a binding its enclosing
-#               function changes (MUTABLE-VECTOR-CAPTURE). Bindings stay
+#               function changes (MUTABLE-PLACE-CAPTURE). Bindings stay
 #               bindings: no source construct rebinds one.
 #
-# and, for vector-bearing values of *unrestricted* type (an affine vector is
-# never copied -- ordinary affinity moves it, hir/affine.tcl), the
-# elaboration (Elaborate, after hir::check, before every backend) writes out
-# the logical copies as `mutable_vector#share(VALUE, "DESCRIPTOR")` -- a new
-# header over the same backing (core/mutvec.tcl), O(1):
+# and, for collection-bearing values of *unrestricted* type (an affine
+# collection is never copied -- ordinary affinity moves it, hir/affine.tcl),
+# the elaboration (Elaborate, after hir::check, before every backend) writes
+# out the logical copies as `mutable_vector#share(VALUE, "DESCRIPTOR")` -- a
+# new header over the same backing (core/mutvec.tcl, core/mutarray.tcl),
+# O(1):
 #
-#   read-out    a value use of a place path (anything but a vector
-#               operation's receiver, a field projection continuing the path,
-#               a discarded statement, or the function's result) is shared:
+#   read-out    a value use of a place path (anything but a collection
+#               operation's receiver, an argument a native only observes --
+#               its ownership role says so, core/native.tcl -- a field
+#               projection continuing the path, a discarded statement, or
+#               the function's result) is shared:
 #               what leaves the place is a logical copy, so the place may
 #               later mutate its own header. A function's result (its final
 #               value, a `return`'s value) moves its own place's header out
@@ -39,32 +48,36 @@
 #               place ever got that header (every other value use is a
 #               read-out, and no nested function may refer to a place root);
 #   entry       a place root's initial value is shared unless it is fresh (a
-#               from_list result, a share, a struct literal of fresh fields,
+#               constructor's result, a share, a struct literal of fresh fields,
 #               a call of a function whose every result is fresh -- one of
 #               these, or a place root of its own: FreshFunctions): a local
 #               binding's value, a parameter on entry, a loop variable per
 #               iteration, a context installation's value.
 #
-# A share descriptor ("h" a vector header; "s"N"."(SLOT"."D)*N a struct whose
-# listed slots are shared) is type-directed through struct fields only: a
-# vector inside a List is never a place (List elements are immutable), so it
-# is never mutated in place and needs no copy until something extracts it
-# into a place -- whose entry shares it.
+# A share descriptor ("h" a collection header; "s"N"."(SLOT"."D)*N a struct
+# whose listed slots are shared) is type-directed through struct fields only:
+# a collection inside a List, an array or a vector is never a place (an
+# element is never mutated in place), so it needs no copy until something
+# extracts it into a place -- whose entry shares it.
 #
-# The other elaborations: a loop over an unrestricted vector iterates an
-# immutable snapshot (`mutable_vector#to_list`), while a loop over an affine
-# vector consumes it (hir/affine.tcl: the domain moves into the loop and each
-# iteration takes the first element out); `clear` and `swap` of an affine
-# vector carry the element drop descriptor (`mutable_vector#clear_drop`,
-# `#swap_drop`), so that the elements a clear removes, and the replacement a
-# failed swap was given, are released by the static drop glue.
+# The other elaborations: a loop over an unrestricted collection iterates an
+# immutable snapshot (`#to_list`), while a loop over an affine one consumes
+# it (hir/affine.tcl: the domain moves into the loop and each iteration takes
+# the first element out); the operations that drop affine elements carry the
+# element drop descriptor -- a vector's `clear` and `swap`
+# (`mutable_vector#clear_drop`, `#swap_drop`), an array's `swap`, `set` and
+# `generate` (`mutable_array#swap_drop`, `#set_drop`, `#generate_drop`) -- so
+# that the elements a clear removes or a set displaces, the replacement a
+# failed operation was given and the elements a failed construction made are
+# released by the static drop glue.
 #
 # Nothing of this exists at run time beyond the headers themselves: no owner,
 # no moved flag, no ownership count (the backing's shared count is the
 # copy-on-write implementation detail of the native runtime).
 
 namespace eval hir::mutvec {
-    # The vector operations: receiver-taking natives and what they do to it.
+    # The collection operations: receiver-taking natives and what they do to
+    # it (observe it, or mutate its header in place).
     variable ops [dict create \
         mutable_vector::length      observe \
         mutable_vector::empty?      observe \
@@ -77,17 +90,57 @@ namespace eval hir::mutvec {
         mutable_vector::clear       mutate \
         mutable_vector#take_front   mutate \
         mutable_vector#clear_drop   mutate \
-        mutable_vector#swap_drop    mutate]
+        mutable_vector#swap_drop    mutate \
+        mutable_array::capacity     observe \
+        mutable_array::at           observe \
+        mutable_array::freeze       observe \
+        mutable_array#to_list       observe \
+        mutable_array::set          mutate \
+        mutable_array::swap         mutate \
+        mutable_array::copy         mutate \
+        mutable_array#take_front    mutate \
+        mutable_array#swap_drop     mutate \
+        mutable_array#set_drop      mutate]
+    # The constructors whose result is a new header nothing else refers to.
+    variable constructors {mutable_vector::from_list mutable_array::allocate mutable_array::create
+        mutable_array::from_list mutable_array::generate mutable_array#generate_drop}
     # The function blocks whose every result is fresh (FreshFunctions), for
     # the elaboration under way.
     variable freshFunctions [dict create]
+    # The parent map of the elaboration under way's current HIR.
+    variable currentParent {}
 }
 
 proc hir::mutvec::ShareNative {} { return mutable_vector#share }
 proc hir::mutvec::ConsumeNative {} { return mutable_vector#consume }
 proc hir::mutvec::ToListNative {} { return mutable_vector#to_list }
+# The Core IR consume mark and the snapshot of a collection of KIND (vector,
+# array).
+proc hir::mutvec::ConsumeNativeOf {kind} {
+    return [expr {$kind eq "array" ? "mutable_array#consume" : "mutable_vector#consume"}]
+}
+proc hir::mutvec::ToListNativeOf {kind} {
+    return [expr {$kind eq "array" ? "mutable_array#to_list" : "mutable_vector#to_list"}]
+}
 
-# The vector operation call E is (observe | mutate), or "".
+# The collection kind of static TYPE: vector (MutableVector[T] or the bare
+# kind), array (MutableArray[T] or the raw kind), or "".
+proc hir::mutvec::Kind {type} {
+    if {[hir::types::IsMutVec $type] || $type eq "mutvec"} {
+        return vector
+    }
+    if {[hir::types::IsMutArray $type] || $type eq "mutarray"} {
+        return array
+    }
+    return ""
+}
+
+# The source-level name of collection KIND, for diagnostics.
+proc hir::mutvec::KindName {kind} {
+    return [expr {$kind eq "array" ? "MutableArray" : "MutableVector"}]
+}
+
+# The collection operation call E is (observe | mutate), or "".
 proc hir::mutvec::OpKind {hir e} {
     variable ops
     set name [hir::affine::NativeName $hir $e]
@@ -97,11 +150,12 @@ proc hir::mutvec::OpKind {hir e} {
     return ""
 }
 
-# 1 if any interned type of HIR mentions a MutableVector: a program without
-# one pays nothing for this file.
+# 1 if any interned type of HIR mentions a mutable collection: a program
+# without one pays nothing for this file.
 proc hir::mutvec::Used {hir} {
     dict for {t type} [dict get $hir types] {
-        if {[string first mutvec $type] >= 0 || [string first mutable_vector $type] >= 0} {
+        if {[string first mutvec $type] >= 0 || [string first mutable_vector $type] >= 0
+                || [string first mutarray $type] >= 0 || [string first mutable_array $type] >= 0} {
             return 1
         }
     }
@@ -160,10 +214,10 @@ proc hir::mutvec::verify {hirVar} {
         if {$receiver eq ""} continue
         set problem [ReceiverProblem $hir $e $receiver]
         if {$problem ne ""} {
-            hir::Diagnose hir MUTABLE-VECTOR-RECEIVER $problem $receiver
+            hir::Diagnose hir MUTABLE-PLACE-RECEIVER $problem $receiver
             continue
         }
-        dict set roots [lindex [Path $hir $receiver] 0] 1
+        dict set roots [lindex [Path $hir $receiver] 0] [Kind [hir::typeOf $hir $receiver]]
     }
     # A nested function may not refer to a place root.
     dict for {e node} [dict get $hir exprs] {
@@ -172,8 +226,10 @@ proc hir::mutvec::verify {hirVar} {
         set refScope [dict get $node scope]
         set bindingScope [dict get $hir bindings $b scope]
         if {[dict get $hir scopes $refScope invocation] ne [dict get $hir scopes $bindingScope invocation]} {
-            hir::Diagnose hir MUTABLE-VECTOR-CAPTURE \
-                "`[dict get $node name]` is a MutableVector place (its function mutates it in place), which a nested function cannot capture: the nested function would observe a binding that changes, and a vector is a value, not a shared reference (pass it as an argument: the callee gets its own logical copy)" $e
+            set kind [dict get $roots $b]
+            set what [KindName $kind]
+            hir::Diagnose hir MUTABLE-PLACE-CAPTURE \
+                "`[dict get $node name]` is a $what place (its function mutates it in place), which a nested function cannot capture: the nested function would observe a binding that changes, and a $kind is a value, not a shared reference (pass it as an argument: the callee gets its own logical copy)" $e
         }
     }
     dict set hir mutvec roots [lsort -dictionary [dict keys $roots]]
@@ -183,18 +239,35 @@ proc hir::mutvec::verify {hirVar} {
 proc hir::mutvec::ReceiverProblem {hir e r} {
     set op [hir::affine::NativeName $hir $e]
     set what "the receiver of $op"
+    set kind [expr {[string match mutable_array* $op] ? "array" : "vector"}]
+    set name [KindName $kind]
     set path [Path $hir $r]
     if {$path eq ""} {
-        return "$what is not a place: it is a temporary value, so the updated vector would be lost (a MutableVector is a value; bind it to a name, mutate the name, and use the name afterwards)"
+        return "$what is not a place: it is a temporary value, so the updated $kind would be lost (a $name is a value; bind it to a name, mutate the name, and use the name afterwards)"
     }
     set type [hir::typeOf $hir $r]
-    if {![hir::types::IsMutVec $type] && $type ne "mutvec"} {
-        return "$what must be statically a MutableVector\[T\] place, not a value of type [hir::types::show $type] (a mutation needs the element type and the place it updates)"
+    if {[Kind $type] ne $kind && ([Kind $type] ne "" || ![MayHoldVector $type])} {
+        return "$what must be statically a $name\[T\] place, not a value of type [hir::types::show $type] (a mutation needs the element type and the place it updates)"
     }
     lassign $path b fields
     set binding [dict get $hir bindings $b]
     if {[dict get $binding kind] ni {local param} || [hir::isModuleBinding $hir $b]} {
-        return "$what is `[dict get $binding name]`, which is not a local binding, a parameter or a context parameter of this function: only those are places a vector can be mutated in (a module binding is shared by every user of the module)"
+        return "$what is `[dict get $binding name]`, which is not a local binding, a parameter or a context parameter of this function: only those are places a $kind can be mutated in (a module binding is shared by every user of the module)"
+    }
+    set pathType [hir::affine::BindingType $hir $b]
+    foreach field $fields {
+        if {![hir::types::IsStructLike $pathType]} {
+            set pathType ""
+            break
+        }
+        set pathType [hir::types::StructField $pathType $field]
+    }
+    if {[Kind $pathType] ne $kind && ([Kind $pathType] ne "" || ![MayHoldVector $pathType])} {
+        # The place is what its binding statically holds: a binding of
+        # another known type cannot be one. (A binding of a type too
+        # imprecise to say -- a generic function's parameter -- is a place
+        # whose entry copy is dynamic: HeldDescriptor.)
+        return "$what is `[join [concat [list [dict get $binding name]] $fields] .]`, whose binding is not statically a $name\[T\] place (its type is [hir::types::show [expr {$pathType eq "" ? "any" : $pathType}]]): only a binding of a collection type owns a header it may mutate (bind the narrowed value to a name first -- `copy = [dict get $binding name]` -- and mutate that)"
     }
     if {[hir::affine::IsDestructureTemp $hir $b]} {
         return "$what is not a place"
@@ -205,7 +278,7 @@ proc hir::mutvec::ReceiverProblem {hir e r} {
     }
     set refScope [dict get $hir exprs $r scope]
     if {[dict get $hir scopes $refScope invocation] ne [dict get $hir scopes [dict get $binding scope] invocation]} {
-        return "$what is `[dict get $binding name]`, a binding of an enclosing function: a nested function cannot mutate a vector it captured (a vector is a value; pass it in and return the result)"
+        return "$what is `[dict get $binding name]`, a binding of an enclosing function: a nested function cannot mutate a $kind it captured (a $kind is a value; pass it in and return the result)"
     }
     return ""
 }
@@ -214,14 +287,14 @@ proc hir::mutvec::ReceiverProblem {hir e r} {
 # Share descriptors
 
 # The share descriptor of a value of static TYPE, or "" when a logical copy
-# of it shares no header: "h" an unrestricted vector, "s"N"."(SLOT"."D)*N a
-# struct whose listed layout slots hold vector-bearing values. An affine
-# type is never copied (it moves).
+# of it shares no header: "h" an unrestricted collection (a vector or an
+# array header), "s"N"."(SLOT"."D)*N a struct whose listed layout slots hold
+# collection-bearing values. An affine type is never copied (it moves).
 proc hir::mutvec::ShareDescriptor {type} {
     if {[hir::types::IsAffine $type]} {
         return ""
     }
-    if {[hir::types::IsMutVec $type] || $type eq "mutvec"} {
+    if {[Kind $type] ne ""} {
         return h
     }
     if {[hir::types::IsStructLike $type]} {
@@ -244,30 +317,54 @@ proc hir::mutvec::ShareDescriptor {type} {
     return ""
 }
 
+# The share descriptor of a value of static TYPE held under the copy
+# convention (below): ShareDescriptor's, or "d" -- a copy of whatever the
+# value is at run time -- when TYPE is too imprecise to say but may hold a
+# collection header (MayHoldVector: a generic function's parameter); "" when
+# no copy is ever needed.
+proc hir::mutvec::HeldDescriptor {type} {
+    set d [ShareDescriptor $type]
+    if {$d eq "" && ![hir::types::IsAffine $type] && [MayHoldVector $type]} {
+        return d
+    }
+    return $d
+}
+
 # ---------------------------------------------------------------------------
 # Elaboration (after hir::check; hir::buildSyntax)
 
 proc hir::mutvec::Elaborate {hirVar} {
     upvar 1 $hirVar hir
     variable freshFunctions
+    variable currentParent
     set freshFunctions [dict create]
     if {[hir::mode $hir] ne "program" || ![Used $hir]} {
         return
     }
     set roots [expr {[dict exists $hir mutvec roots] ? [dict get $hir mutvec roots] : {}}]
     lassign [hir::contexts::Walk $hir] owner parent rootOf calls blocks
-    # Affine clear/swap carry the element drop descriptor.
+    set currentParent $parent
+    # The operations that drop affine elements carry the element drop
+    # descriptor: OPERATION -> {its dropping form, the argument whose type
+    # holds the element type (a collection, or the call itself)}.
+    set dropping [dict create \
+        mutable_vector::clear   {mutable_vector#clear_drop 0} \
+        mutable_vector::swap    {mutable_vector#swap_drop 0} \
+        mutable_array::swap     {mutable_array#swap_drop 0} \
+        mutable_array::set      {mutable_array#set_drop 0} \
+        mutable_array::generate {mutable_array#generate_drop result}]
     dict for {e node} [dict get $hir exprs] {
         if {[dict get $node kind] ne "call"} continue
         set name [hir::affine::NativeName $hir $e]
-        if {$name ni {mutable_vector::clear mutable_vector::swap}} continue
-        set vector [hir::typeOf $hir [lindex [dict get $node args] 0]]
-        if {![hir::types::IsMutVec $vector] || ![hir::types::IsAffine $vector]} continue
-        set d [hir::affine::Descriptor $hir [lindex $vector 1]]
-        Retarget hir $e [expr {$name eq "mutable_vector::clear" ? "mutable_vector#clear_drop" : "mutable_vector#swap_drop"}]
+        if {![dict exists $dropping $name]} continue
+        lassign [dict get $dropping $name] form at
+        set collection [hir::typeOf $hir [expr {$at eq "result" ? $e : [lindex [dict get $node args] $at]}]]
+        if {[Kind $collection] eq "" || [llength $collection] != 2 || ![hir::types::IsAffine $collection]} continue
+        set d [hir::affine::Descriptor $hir [lindex $collection 1]]
+        Retarget hir $e $form
         dict set hir exprs $e args [concat [dict get $hir exprs $e args] [list [NewConst hir $d $e]]]
     }
-    # A loop over an unrestricted vector iterates a snapshot.
+    # A loop over an unrestricted collection iterates a snapshot.
     set wraps {}
     dict for {e node} [dict get $hir exprs] {
         switch -- [dict get $node kind] {
@@ -284,8 +381,9 @@ proc hir::mutvec::Elaborate {hirVar} {
         }
         foreach it $operands {
             set type [hir::typeOf $hir $it]
-            if {([hir::types::IsMutVec $type] || $type eq "mutvec") && ![hir::types::IsAffine $type]} {
-                lappend wraps [list $it [ToListNative] {}]
+            set kind [Kind $type]
+            if {$kind ne "" && ![hir::types::IsAffine $type]} {
+                lappend wraps [list $it [ToListNativeOf $kind] {}]
             }
         }
     }
@@ -300,14 +398,31 @@ proc hir::mutvec::Elaborate {hirVar} {
         }
     }
     lassign [hir::contexts::Walk $hir] owner parent rootOf calls blocks
+    set currentParent $parent
     set rootSet [dict create]
     foreach b $roots {
         dict set rootSet $b 1
     }
+    # The copy convention (below, "Last uses and consumed parameters"): the
+    # bindings that own their header as exclusively as a place root does --
+    # the consumed parameters of directly called functions and the locals
+    # whose last use hands their header on -- join the roots.
+    variable convention
+    set convention [Convention $hir $parent $blocks $rootSet]
+    foreach b [concat [dict keys [dict get $convention consumed]] [dict keys [dict get $convention demanded]]] {
+        if {![dict exists $rootSet $b]} {
+            dict set rootSet $b 1
+            lappend roots $b
+        }
+    }
+    dict set convention held $rootSet
+    dict set convention observed [ObservedOnly $hir $parent $rootSet]
     set freshFunctions [FreshFunctions $hir $parent $blocks $rootSet]
     if {$roots eq {}} {
         Installations hir
         set freshFunctions [dict create]
+        set convention [dict create]
+        set currentParent {}
         return
     }
     # Read-outs.
@@ -316,7 +431,7 @@ proc hir::mutvec::Elaborate {hirVar} {
         if {[dict get $node kind] ni {ref project} || ![dict get $node reachable]} continue
         set path [Path $hir $e]
         if {$path eq "" || ![dict exists $rootSet [lindex $path 0]]} continue
-        set d [ShareDescriptor [hir::typeOf $hir $e]]
+        set d [HeldDescriptor [hir::typeOf $hir $e]]
         if {$d eq "" || ![dict exists $parent $e]} continue
         lassign [dict get $parent $e] p role
         if {$role eq "seq 0" || $role eq "callee"} continue
@@ -324,11 +439,22 @@ proc hir::mutvec::Elaborate {hirVar} {
             # The function's result moves its own place's header out.
             continue
         }
+        if {[Moved $hir $parent $e]} {
+            # The root's last use: nothing reads its header after this, so
+            # the value moves on uncopied.
+            continue
+        }
         if {$p ne ""} {
             set pnode [dict get $hir exprs $p]
             if {[dict get $pnode kind] eq "project"} continue
+            if {[dict get $pnode kind] eq "call" && ![IsContextParam $hir [lindex $path 0]]
+                    && [ObservedArgument $hir $p $e]} {
+                # The callee only reads it, while this function waits.
+                continue
+            }
             if {[dict get $pnode kind] eq "call" && [OpKind $hir $p] ne ""
                     && [lindex [dict get $pnode args] 0] eq $e} continue
+            if {[dict get $pnode kind] eq "call" && [Observed $hir $p $e]} continue
             if {[dict get $pnode kind] eq "bind" && [dict get $pnode binding] in $roots} {
                 # The entry share below covers it.
                 continue
@@ -338,26 +464,549 @@ proc hir::mutvec::Elaborate {hirVar} {
     }
     Apply hir $wraps
     # Entries.
+    lassign [hir::contexts::Walk $hir] owner parent rootOf calls blocks
+    set currentParent $parent
+    dict set convention uses [UseMap $hir $parent]
     set wraps {}
     foreach b $roots {
         set binding [dict get $hir bindings $b]
-        set d [ShareDescriptor [hir::affine::BindingType $hir $b]]
+        set d [HeldDescriptor [hir::affine::BindingType $hir $b]]
         if {$d eq ""} continue
         if {[dict get $binding kind] eq "local"} {
             if {[IsContextParam $hir $b]} continue
             set by [dict get $binding declaredBy]
             if {$by eq "" || ![dict exists $hir exprs $by]} continue
             set value [dict get $hir exprs $by value]
-            if {![Fresh $hir $value]} {
+            if {![Fresh $hir $value] && ![Moved $hir $parent $value]} {
                 lappend wraps [list $value [ShareNative] $d]
             }
-        } else {
+        } elseif {![dict exists $convention consumed $b]} {
             EntryRename hir $b $d
+        }
+    }
+    Apply hir $wraps
+    # The arguments of consumed parameters: each call hands the callee a
+    # header no one else holds -- a new one, the last use of a binding that
+    # owns its own, or a copy.
+    lassign [hir::contexts::Walk $hir] owner parent rootOf calls blocks
+    set currentParent $parent
+    dict set convention uses [UseMap $hir $parent]
+    set wraps {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "call" || ![dict get $node reachable]} continue
+        set target [ConventionTarget $hir $e]
+        if {$target eq ""} continue
+        foreach arg [dict get $node args] param [dict get $hir exprs $target params] {
+            if {$arg eq "" || $param eq "" || ![dict exists $convention consumed $param]} continue
+            if {[Fresh $hir $arg] || [Moved $hir $parent $arg]} continue
+            set d [ShareDescriptor [hir::typeOf $hir $arg]]
+            if {$d eq ""} {
+                set d [HeldDescriptor [hir::affine::BindingType $hir $param]]
+            }
+            if {$d ne ""} {
+                lappend wraps [list $arg [ShareNative] $d]
+            }
         }
     }
     Apply hir $wraps
     Installations hir
     set freshFunctions [dict create]
+    set convention [dict create]
+    set currentParent {}
+}
+
+# ---------------------------------------------------------------------------
+# Last uses and consumed parameters
+#
+# The logical copies above keep every place's header its own. Two refinements
+# keep that guarantee with fewer copies -- an optimization only: no copy they
+# omit could have been observed.
+#
+#   last use    a read-out of a place root that is its root's *last use* --
+#               no reference to the root can run after it, on any path
+#               (NoLaterUse) -- moves the header on uncopied: nothing reads
+#               the root again. So does an entry whose value is such a last
+#               use. (A context parameter is never moved: the installed
+#               context outlives the function.)
+#   consumed    a parameter of a function every call of which is a direct
+#               call (DirectOnly: its binding is only ever a callee) is
+#               *consumed* when the function needs to own its header: the
+#               parameter is a place root (it mutates it), or its last use
+#               hands the header to a position that needs an exclusive one.
+#               The *caller* then hands it an exclusive header -- a new one,
+#               the last use of a binding that owns its own, or a copy --
+#               and the callee makes no entry copy. A builder threaded
+#               through calls (`grown = grow(storage, n)`, `append(storage,
+#               n, x)`) is then mutated in place, never detached per call.
+#   demanded    a local whose last use hands its header to such a position
+#               is held like a place root (its entry is exclusive, its other
+#               value uses copy), so that last use needs no copy either.
+#   observed    a parameter of a directly called function that only reads
+#               its collection (ObservedOnly: never stores, returns, captures
+#               or mutates it) is given a place's header uncopied: the callee
+#               reads it while the caller -- the one function that could
+#               mutate the place -- waits. (Not a context parameter's: other
+#               functions sharing the context may mutate it meanwhile.)
+#
+# The positions needing an exclusive header are a place root's entry, a
+# consumed parameter's argument, and the result of a function whose call
+# sits in one of them (its result is *demanded*: a parameter it returns is
+# then consumed, which makes the function's result fresh). The three sets
+# grow together to their least fixed point (Convention).
+
+namespace eval hir::mutvec {
+    # The convention of the elaboration under way: consumed (parameter
+    # BindingId -> 1), demanded (local BindingId -> 1), direct (function
+    # block -> 1), uses (BindingId -> {ExprId -> 1}: every expression
+    # containing a reference to the binding), held (BindingId -> 1: the
+    # place roots, consumed parameters and demanded locals), observed
+    # (BindingId -> 1: ObservedOnly).
+    variable convention [dict create]
+}
+
+# The convention of HIR (parent map PARENT, function blocks BLOCKS) whose
+# place roots are ROOTSET.
+proc hir::mutvec::Convention {hir parent blocks rootSet} {
+    variable convention
+    set direct [DirectOnly $hir $parent $blocks]
+    set convention [dict create consumed {} demanded {} direct $direct uses [UseMap $hir $parent]]
+    # Seeds: the place-root parameters of directly called functions own
+    # their header by the caller's copy instead of an entry copy.
+    dict for {b _} $rootSet {
+        if {[dict get $hir bindings $b kind] eq "param" && [Eligible $hir $b]} {
+            dict set convention consumed $b 1
+        }
+    }
+    set demandedResults [dict create]
+    for {set pass 0} {$pass < 256} {incr pass} {
+        set changed 0
+        foreach v [ExclusivePositions $hir $rootSet $demandedResults] {
+            set node [dict get $hir exprs $v]
+            if {[dict get $node kind] eq "call"} {
+                set target [ConventionTarget $hir $v]
+                if {$target ne "" && ![dict exists $demandedResults $target]} {
+                    dict set demandedResults $target 1
+                    set changed 1
+                }
+                continue
+            }
+            set path [expr {[dict get $node kind] in {ref project} ? [Path $hir $v] : ""}]
+            if {$path eq ""} continue
+            set b [lindex $path 0]
+            if {[dict exists $rootSet $b] || [dict exists $convention consumed $b]
+                    || [dict exists $convention demanded $b]} continue
+            if {![Eligible $hir $b] || ![NoLaterUse $hir $parent $v $b]} continue
+            if {[dict get $hir bindings $b kind] eq "param"} {
+                dict set convention consumed $b 1
+            } else {
+                dict set convention demanded $b 1
+            }
+            set changed 1
+        }
+        if {!$changed} break
+    }
+    return $convention
+}
+
+# The value expressions of HIR that need an exclusive header (Convention):
+# the entry values of the place roots of ROOTSET and of the demanded locals,
+# the arguments of consumed parameters, and the results of the functions of
+# DEMANDEDRESULTS.
+proc hir::mutvec::ExclusivePositions {hir rootSet demandedResults} {
+    variable convention
+    set result {}
+    foreach b [concat [dict keys $rootSet] [dict keys [dict get $convention demanded]]] {
+        set binding [dict get $hir bindings $b]
+        if {[dict get $binding kind] ne "local" || [IsContextParam $hir $b]} continue
+        set by [dict get $binding declaredBy]
+        if {$by ne "" && [dict exists $hir exprs $by] && [dict get $hir exprs $by kind] eq "bind"} {
+            lappend result [dict get $hir exprs $by value]
+        }
+    }
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "call" || ![dict get $node reachable]} continue
+        set target [ConventionTarget $hir $e]
+        if {$target eq ""} continue
+        foreach arg [dict get $node args] param [dict get $hir exprs $target params] {
+            if {$arg ne "" && $param ne "" && [dict exists $convention consumed $param]} {
+                lappend result $arg
+            }
+        }
+    }
+    dict for {f _} $demandedResults {
+        lappend result {*}[Results $hir $f]
+    }
+    return $result
+}
+
+# The function block call E calls directly when that function is one every
+# call of which is direct (DirectOnly), or "".
+proc hir::mutvec::ConventionTarget {hir e} {
+    variable convention
+    lassign [dict get $hir exprs $e target] kind block
+    if {$kind ne "block" || ![dict exists $convention direct $block]} {
+        return ""
+    }
+    return $block
+}
+
+# The function blocks of BLOCKS every reference to whose binding is the
+# callee of a direct call of the block: each call site is known, so the
+# callers can take over its parameters' copies.
+proc hir::mutvec::DirectOnly {hir parent blocks} {
+    set binders [dict create]
+    foreach f $blocks {
+        if {![dict exists $parent $f]} continue
+        set p [lindex [dict get $parent $f] 0]
+        if {$p ne "" && [dict get $hir exprs $p kind] eq "bind" && [dict get $hir exprs $p value] eq $f
+                && ![dict get $hir exprs $p duplicate]} {
+            dict set binders [dict get $hir exprs $p binding] $f
+        }
+    }
+    set direct $binders
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "ref"} continue
+        set b [dict get $node binding]
+        if {$b eq "" || ![dict exists $direct $b]} continue
+        set f [dict get $direct $b]
+        set ok 0
+        if {[dict exists $parent $e]} {
+            lassign [dict get $parent $e] p role
+            set ok [expr {$p ne "" && $role eq "callee" && [dict get $hir exprs $p target] eq [list block $f]}]
+        }
+        if {!$ok} {
+            dict unset direct $b
+        }
+    }
+    set result [dict create]
+    dict for {b f} $direct {
+        dict set result $f 1
+    }
+    return $result
+}
+
+# 1 if binding B may be held under the convention: a local or a parameter
+# (of a directly called function) of a collection-bearing unrestricted type,
+# never a module binding, a context parameter or a destructuring temporary,
+# referred to only from its own function (a closure that captures it reads
+# it whenever it runs).
+proc hir::mutvec::Eligible {hir b} {
+    variable convention
+    set binding [dict get $hir bindings $b]
+    if {[dict get $binding kind] ni {local param} || [hir::isModuleBinding $hir $b]
+            || [IsContextParam $hir $b] || [hir::affine::IsDestructureTemp $hir $b]} {
+        return 0
+    }
+    if {[HeldDescriptor [hir::affine::BindingType $hir $b]] eq ""} {
+        return 0
+    }
+    if {[dict get $binding kind] eq "param"} {
+        set f [dict get $hir scopes [dict get $binding scope] owner]
+        if {$f eq "" || ![dict exists $hir exprs $f] || [dict get $hir exprs $f kind] ne "block"
+                || ![dict exists $convention direct $f]} {
+            return 0
+        }
+    }
+    set home [dict get $hir scopes [dict get $binding scope] invocation]
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "ref" && [dict get $node binding] eq $b
+                && [dict get $hir scopes [dict get $node scope] invocation] ne $home} {
+            return 0
+        }
+    }
+    return 1
+}
+
+# BindingId -> the set (dict) of the expressions of HIR (parent map PARENT)
+# that contain a reference to it, the reference included.
+proc hir::mutvec::UseMap {hir parent} {
+    set uses [dict create]
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "ref" || [dict get $node binding] eq ""} continue
+        set b [dict get $node binding]
+        set x $e
+        for {set i 0} {$i < 4096} {incr i} {
+            dict set uses $b $x 1
+            if {![dict exists $parent $x]} break
+            set x [lindex [dict get $parent $x] 0]
+            if {$x eq ""} break
+        }
+    }
+    return $uses
+}
+
+# 1 if expression S (evaluated) may read binding B.
+proc hir::mutvec::Reads {s b} {
+    variable convention
+    return [dict exists $convention uses $b $s]
+}
+
+# 1 if path expression E (a reference to binding B, or a projection chain
+# from one) is B's last use: no reference to B can run after E, on any path
+# -- the statements after E in each enclosing sequence up to B's own, the
+# operands after E's in each enclosing expression, the branches after a
+# condition, the handlers after a handled call, and every iteration after
+# this one of a loop B is not bound inside. A statement that never completes
+# (a `return`, a `fail`, a `break`) ends the walk: nothing after it runs. A
+# reference from a nested function is never a last use.
+proc hir::mutvec::NoLaterUse {hir parent e b} {
+    set home [dict get $hir scopes [dict get $hir bindings $b scope] invocation]
+    if {[dict get $hir scopes [dict get $hir exprs $e scope] invocation] ne $home} {
+        return 0
+    }
+    set x $e
+    for {set i 0} {$i < 4096} {incr i} {
+        if {![dict exists $parent $x]} {
+            return 0
+        }
+        set p [lindex [dict get $parent $x] 0]
+        if {$p eq ""} {
+            return [expr {[LaterIn $hir [dict get $hir roots] $x $b] != 0}]
+        }
+        set node [dict get $hir exprs $p]
+        set kind [dict get $node kind]
+        set sequence [hir::coroutines::SequenceOf $hir $p $x]
+        if {$sequence ne ""} {
+            switch -- [LaterIn $hir $sequence $x $b] {
+                0 { return 0 }
+                2 { return 1 }
+            }
+            switch -- $kind {
+                block {
+                    # The end of B's function body: the function returns.
+                    return 1
+                }
+                loop - listloop - countloop - lockloop {
+                    # The next iteration runs the body again: only a binding
+                    # of this iteration is done with.
+                    return [BoundInside $hir $parent $b $p]
+                }
+            }
+            # (An if's branch or a handler body: what follows the if or the
+            # handle runs next.)
+            set x $p
+            continue
+        }
+        # X is an operand of P.
+        switch -- $kind {
+            return {
+                return 1
+            }
+            break - continue - block {
+                return 0
+            }
+            if {
+                foreach s [concat [dict get $node thenBody] [dict get $node elseBody]] {
+                    if {[Reads $s $b]} {
+                        return 0
+                    }
+                }
+            }
+            handle {
+                foreach body [dict get $node handlerBodies] {
+                    foreach s $body {
+                        if {[Reads $s $b]} {
+                            return 0
+                        }
+                    }
+                }
+            }
+            default {
+                set children [hir::children $hir $p]
+                set at [lsearch -exact $children $x]
+                foreach c [lrange $children [expr {$at + 1}] end] {
+                    if {[Reads $c $b]} {
+                        return 0
+                    }
+                }
+                if {$kind in {loop listloop countloop lockloop}} {
+                    # (The body ran after the operand only once it was
+                    # checked above: an operand runs once.)
+                }
+            }
+        }
+        set x $p
+    }
+    return 0
+}
+
+# What may read binding B after statement X of SEQUENCE: 0 a later statement
+# may; 2 none can, because a later statement never completes before any
+# does; 1 none does.
+proc hir::mutvec::LaterIn {hir sequence x b} {
+    set at [lsearch -exact $sequence $x]
+    if {$at < 0} {
+        return 0
+    }
+    if {[hir::typeOf $hir $x] eq "never"} {
+        return 2
+    }
+    foreach s [lrange $sequence [expr {$at + 1}] end] {
+        if {[Reads $s $b]} {
+            return 0
+        }
+        if {[hir::typeOf $hir $s] eq "never"} {
+            return 2
+        }
+    }
+    return 1
+}
+
+# 1 if binding B is bound inside loop P's body (a binding of one iteration:
+# the loop's own element or count binding, or a binding statement in its
+# body).
+proc hir::mutvec::BoundInside {hir parent b p} {
+    set binding [dict get $hir bindings $b]
+    if {[dict get $binding kind] eq "param"} {
+        return [expr {[dict get $hir scopes [dict get $binding scope] owner] eq $p}]
+    }
+    set x [dict get $binding declaredBy]
+    for {set i 0} {$i < 4096 && $x ne "" && [dict exists $parent $x]} {incr i} {
+        set x [lindex [dict get $parent $x] 0]
+        if {$x eq $p} {
+            return 1
+        }
+    }
+    return 0
+}
+
+# 1 if E is a place path from a binding the elaboration holds exclusively
+# (a place root, a consumed parameter, a demanded local; never a context
+# parameter) at that binding's last use: E's value moves on uncopied.
+proc hir::mutvec::Moved {hir parent e} {
+    variable convention
+    if {$convention eq {} || [dict get $hir exprs $e kind] ni {ref project}} {
+        return 0
+    }
+    set path [Path $hir $e]
+    if {$path eq ""} {
+        return 0
+    }
+    set b [lindex $path 0]
+    if {[IsContextParam $hir $b] || ![dict exists $convention held $b]} {
+        return 0
+    }
+    return [NoLaterUse $hir $parent $e $b]
+}
+
+# 1 if E is an argument of call P whose parameter only observes it
+# (ObservedOnly): the callee reads the header during the call, while the
+# caller -- the one function that could mutate its place -- waits.
+proc hir::mutvec::ObservedArgument {hir p e} {
+    variable convention
+    set target [ConventionTarget $hir $p]
+    if {$target eq "" || ![dict exists $convention observed]} {
+        return 0
+    }
+    set index [lsearch -exact [dict get $hir exprs $p args] $e]
+    set param [lindex [dict get $hir exprs $target params] $index]
+    return [expr {$index >= 0 && $param ne "" && [dict exists $convention observed $param]}]
+}
+
+# The bindings (dict) that only observe the collection header they hold: the
+# parameters of directly called functions (and the locals of any function)
+# of a collection-bearing type, mutated nowhere (not in ROOTSET), referred
+# to only from their own function, and whose every value use is an
+# observation -- a native argument whose ownership role reads it, a
+# collection operation's receiver, a projection whose own uses observe, an
+# argument of a parameter that only observes, the value of a binding that
+# copies it (a place root's entry) or only observes it, a discarded
+# statement. Never returned, stored, captured or passed anywhere that could
+# keep it: the greatest such set.
+proc hir::mutvec::ObservedOnly {hir parent rootSet} {
+    variable convention
+    set candidates [dict create]
+    dict for {b binding} [dict get $hir bindings] {
+        if {[dict get $binding kind] ni {local param} || [dict exists $rootSet $b]} continue
+        if {[hir::isModuleBinding $hir $b] || [IsContextParam $hir $b]} continue
+        if {[HeldDescriptor [hir::affine::BindingType $hir $b]] eq ""} continue
+        if {[dict get $binding kind] eq "param"} {
+            set f [dict get $hir scopes [dict get $binding scope] owner]
+            if {$f eq "" || ![dict exists $convention direct $f]} continue
+        }
+        dict set candidates $b {}
+    }
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "ref" || ![dict exists $candidates [dict get $node binding]]} continue
+        set b [dict get $node binding]
+        if {[dict get $hir scopes [dict get $node scope] invocation]
+                ne [dict get $hir scopes [dict get $hir bindings $b scope] invocation]} {
+            # (Captured: a closure reads it whenever it runs.)
+            dict set candidates $b escapes
+            continue
+        }
+        dict lappend candidates $b $e
+    }
+    set observed [dict create]
+    dict for {b refs} $candidates {
+        if {$refs ne "escapes"} {
+            dict set observed $b $refs
+        }
+    }
+    for {set pass 0} {$pass < 256} {incr pass} {
+        set changed 0
+        dict for {b refs} $observed {
+            foreach r $refs {
+                if {[Escapes $hir $parent $r $observed $rootSet]} {
+                    dict unset observed $b
+                    set changed 1
+                    break
+                }
+            }
+        }
+        if {!$changed} break
+    }
+    set result [dict create]
+    dict for {b refs} $observed {
+        dict set result $b 1
+    }
+    return $result
+}
+
+# 1 if the value of path expression E may be kept beyond an observation
+# (ObservedOnly, given the bindings OBSERVED still assumed to observe only).
+proc hir::mutvec::Escapes {hir parent e observed rootSet} {
+    if {![dict exists $parent $e]} {
+        return 1
+    }
+    lassign [dict get $parent $e] p role
+    if {$role eq "seq 0"} {
+        return 0
+    }
+    if {$p eq ""} {
+        return 1
+    }
+    set node [dict get $hir exprs $p]
+    switch -- [dict get $node kind] {
+        project {
+            if {[HeldDescriptor [hir::typeOf $hir $p]] eq ""} {
+                # (A field that holds no collection header.)
+                return 0
+            }
+            return [Escapes $hir $parent $p $observed $rootSet]
+        }
+        call {
+            if {$role eq "callee"} {
+                return 1
+            }
+            if {[hir::affine::NativeName $hir $p] ne ""} {
+                return [expr {!([Observed $hir $p $e]
+                    || ([OpKind $hir $p] ne "" && [lindex [dict get $node args] 0] eq $e))}]
+            }
+            set target [ConventionTarget $hir $p]
+            if {$target eq ""} {
+                return 1
+            }
+            set index [lsearch -exact [dict get $node args] $e]
+            set param [lindex [dict get $hir exprs $target params] $index]
+            return [expr {$param eq "" || ![dict exists $observed $param]}]
+        }
+        bind {
+            set l [dict get $node binding]
+            return [expr {![dict exists $observed $l] && ![dict exists $rootSet $l]}]
+        }
+    }
+    return 1
 }
 
 # Context installations: the installed value is the entry of the context's
@@ -377,23 +1026,41 @@ proc hir::mutvec::Installations {hirVar} {
     Apply hir $wraps
 }
 
-# 1 if the value of E is a vector-bearing value nothing else refers to: a
-# new vector, a logical copy, or a struct literal of such.
+# 1 if argument E of native call P is one the native only reads -- its
+# ownership role (core/native.tcl's -ownership) is observe, copy-out (its
+# elements are read out, the collection itself is kept by nothing), place,
+# equality or release: such an argument needs no logical copy of its own.
+proc hir::mutvec::Observed {hir p e} {
+    set name [hir::affine::NativeName $hir $p]
+    if {$name eq ""} {
+        return 0
+    }
+    set index [lsearch -exact [dict get $hir exprs $p args] $e]
+    return [expr {$index >= 0 && [core::native::ownershipRole $name $index] in {observe copy-out place equality release}}]
+}
+
+# 1 if the value of E is a collection-bearing value nothing else refers to: a
+# new vector or array, a logical copy, or a struct literal of such.
 proc hir::mutvec::Fresh {hir e} {
     variable freshFunctions
+    variable constructors
     set node [dict get $hir exprs $e]
     switch -- [dict get $node kind] {
         call {
-            if {[hir::affine::NativeName $hir $e] in [list mutable_vector::from_list [ShareNative]]} {
+            if {[hir::affine::NativeName $hir $e] in [concat $constructors [list [ShareNative]]]} {
                 return 1
             }
             set target [hir::contexts::Callee $hir $e]
             return [expr {$target ne "" && [dict exists $freshFunctions $target]}]
         }
         struct {
+            variable currentParent
             foreach f [dict get $node fields] {
                 set type [hir::typeOf $hir $f]
-                if {([ShareDescriptor $type] ne "" || [MayHoldVector $type]) && ![Fresh $hir $f]} {
+                if {([ShareDescriptor $type] ne "" || [MayHoldVector $type]) && ![Fresh $hir $f]
+                        && !($currentParent ne {} && [Moved $hir $currentParent $f])} {
+                    # (A field that is the last use of a binding holding its
+                    # own header moves that header into the struct.)
                     return 0
                 }
             }
@@ -496,13 +1163,13 @@ proc hir::mutvec::Results {hir f} {
 }
 
 # 1 if a value of static TYPE may be, or hold in a struct field, a
-# MutableVector header: TYPE is one, or is imprecise where one could be --
-# `any`, an untyped (generic) position, a trait view, a struct field of such
-# a type. A generic function's own body is typed this way (its instances
-# are not), so `fn same(x): x` may return the vector it was given. A List,
-# set or array element, a Result payload or a callable is never a place
-# (extracting one into a place is an entry, which copies): those do not
-# count.
+# collection header (a MutableVector's or a MutableArray's): TYPE is one, or
+# is imprecise where one could be -- `any`, an untyped (generic) position, a
+# trait view, a struct field of such a type. A generic function's own body
+# is typed this way (its instances are not), so `fn same(x): x` may return
+# the collection it was given. A List, set, array or vector element, a
+# Result payload or a callable is never a place (extracting one into a place
+# is an entry, which copies): those do not count.
 proc hir::mutvec::MayHoldVector {type {seen {}}} {
     if {[hir::types::IsStruct $type]} {
         foreach {name t} [lindex $type 1] {
@@ -524,10 +1191,10 @@ proc hir::mutvec::MayHoldVector {type {seen {}}} {
         }
         return 0
     }
-    if {[hir::types::IsMutVec $type]} {
+    if {[Kind $type] ne ""} {
         return 1
     }
-    return [expr {[lindex $type 0] ni {int str bool unit UnicodeChar never list immutableSet mutarray block native fn coroutine result}}]
+    return [expr {[lindex $type 0] ni {int str bool unit UnicodeChar never list immutableSet block native fn coroutine result}}]
 }
 
 # The function blocks of BLOCKS whose every result (Results) cannot hold a
@@ -576,8 +1243,8 @@ proc hir::mutvec::Apply {hirVar wraps} {
             lappend args [NewConst hir $d $e]
         }
         set type [hir::typeOf $hir $e]
-        if {$native eq [ToListNative]} {
-            set type [expr {[hir::types::IsMutVec $type] ? [hir::types::MakeList [lindex $type 1]] : "list"}]
+        if {$native in [list [ToListNativeOf vector] [ToListNativeOf array]]} {
+            set type [expr {[llength $type] == 2 && [Kind $type] ne "" ? [hir::types::MakeList [lindex $type 1]] : "list"}]
         }
         set call [NewCall hir $native $args $type $e]
         set p [lindex [dict get $parent $e] 0]
@@ -765,9 +1432,10 @@ proc hir::mutvec::EntryRename {hirVar b d} {
     dict set hir exprs $e body [linsert $body 0 $n]
 }
 
-# 1 if projection P (in parent map PARENT) is a step of a vector operation's
-# receiver place path: its chain of enclosing projections ends at the first
-# argument of a MutableVector operation (hir/affine.tcl's Consumer).
+# 1 if projection P (in parent map PARENT) is a step of a collection
+# operation's receiver place path: its chain of enclosing projections ends at
+# the first argument of a MutableVector or MutableArray operation
+# (hir/affine.tcl's Consumer).
 proc hir::mutvec::InReceiverPath {hir parent p} {
     set x $p
     for {set i 0} {$i < 4096} {incr i} {
@@ -789,20 +1457,35 @@ proc hir::mutvec::InReceiverPath {hir parent p} {
     return 0
 }
 
-# 1 if E is a listloop consuming an affine MutableVector (hir/affine.tcl).
+# 1 if E is a listloop consuming an affine MutableVector or MutableArray
+# (hir/affine.tcl).
 proc hir::mutvec::IsConsumingLoop {hir e} {
+    return [expr {[ConsumedKind $hir $e] ne ""}]
+}
+
+# The kind (vector, array) of the collection listloop E consumes, or "" when
+# it consumes none.
+proc hir::mutvec::ConsumedKind {hir e} {
     set node [dict get $hir exprs $e]
     if {[dict get $node kind] ne "listloop"} {
-        return 0
+        return ""
     }
     set iterable [dict get $node iterable]
-    if {[hir::affine::NativeName $hir $iterable] eq [ConsumeNative]} {
-        # Marked in Core IR (hir/lower.tcl): HIR built from it lost the
-        # element type that made the loop consuming.
-        return 1
+    switch -- [hir::affine::NativeName $hir $iterable] {
+        mutable_vector#consume {
+            # Marked in Core IR (hir/lower.tcl): HIR built from it lost the
+            # element type that made the loop consuming.
+            return vector
+        }
+        mutable_array#consume {
+            return array
+        }
     }
     set type [hir::typeOf $hir $iterable]
-    return [expr {[hir::types::IsMutVec $type] && [hir::types::IsAffine $type]}]
+    if {[llength $type] == 2 && [Kind $type] ne "" && [hir::types::IsAffine $type]} {
+        return [Kind $type]
+    }
+    return ""
 }
 
 # The descriptor String argument of call E if E is an internal operation the
@@ -816,8 +1499,11 @@ proc hir::mutvec::DescriptorArgs {hir e} {
         mutable_vector#share - mutable_vector#clear_drop {
             return [lrange [dict get $hir exprs $e args] 1 1]
         }
-        mutable_vector#swap_drop {
+        mutable_vector#swap_drop - mutable_array#swap_drop - mutable_array#set_drop {
             return [lrange [dict get $hir exprs $e args] 3 3]
+        }
+        mutable_array#generate_drop {
+            return [lrange [dict get $hir exprs $e args] 2 2]
         }
     }
     return {}
@@ -830,9 +1516,10 @@ proc hir::mutvec::DescriptorArgs {hir e} {
 #                             empty?, at, the snapshot of a loop)
 #   vector=mutate place=PATH  a mutation of the receiver place PATH (its root
 #                             binding, then its fields: b17.events)
+#   array=observe|mutate      the same for a MutableArray operation
 #   move-out                  the operation moves an affine element out of
-#                             the vector (pop, take, swap's displaced one)
-#   consuming                 a loop consuming an affine vector
+#                             the collection (pop, take, swap's displaced one)
+#   consuming                 a loop consuming an affine collection
 #
 # An affine element moved in is its argument's `move` flag; a drop is the
 # `release=`/`exit-release=`/`error-release=` of the owner.
@@ -844,13 +1531,15 @@ proc hir::mutvec::Evidence {hir e} {
             if {$kind eq ""} {
                 return {}
             }
-            set flags [list vector=$kind]
+            set name [hir::affine::NativeName $hir $e]
+            set flags [list [expr {[string match mutable_array* $name] ? "array" : "vector"}]=$kind]
             set place [PlaceText $hir $e]
             if {$place ne ""} {
                 lappend flags place=$place
             }
-            if {[hir::affine::NativeName $hir $e] in {mutable_vector::pop mutable_vector::take mutable_vector::swap
-                    mutable_vector#swap_drop mutable_vector#take_front}
+            if {$name in {mutable_vector::pop mutable_vector::take mutable_vector::swap
+                    mutable_vector#swap_drop mutable_vector#take_front mutable_array::swap
+                    mutable_array#swap_drop mutable_array#take_front}
                     && [hir::types::IsAffine [hir::typeOf $hir $e]]} {
                 lappend flags move-out
             }

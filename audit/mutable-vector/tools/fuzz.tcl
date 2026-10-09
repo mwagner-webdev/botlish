@@ -64,10 +64,10 @@
 # A third of the programs carry one fault, with the diagnostic the model
 # predicts: a use of a handle after push/from_list/swap moved it, or of an
 # affine vector after a whole move, a pass, a consuming loop or a store into
-# a struct (USE-AFTER-MOVE); an affine `at` (AFFINE-VECTOR-COPY-OUT); a
+# a struct (USE-AFTER-MOVE); an affine `at` (AFFINE-ELEMENT-COPY-OUT); a
 # mutation of a temporary, or of an enclosing function's vector from a nested
-# function (MUTABLE-VECTOR-RECEIVER); a nested function reading a vector its
-# enclosing function mutates (MUTABLE-VECTOR-CAPTURE); an affine vector
+# function (MUTABLE-PLACE-RECEIVER); a nested function reading a vector its
+# enclosing function mutates (MUTABLE-PLACE-CAPTURE); an affine vector
 # erased to `any` (AFFINE-ERASURE-UNSUPPORTED) or captured
 # (AFFINE-CAPTURE-UNSUPPORTED); a projection of a Queue's vector field
 # (AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE); an element of the wrong type
@@ -529,7 +529,7 @@ proc UFault {stateVar} {
     switch -- [Pick $kinds] {
         temporary {
             Emit state "ints().push(1)"
-            return MUTABLE-VECTOR-RECEIVER
+            return MUTABLE-PLACE-RECEIVER
         }
         wrongtype {
             if {$places eq {}} {
@@ -541,11 +541,11 @@ proc UFault {stateVar} {
         }
         nestedmutation {
             Emit state "fn nested() -> int:" "    [Pick $places].push(1)" "    1"
-            return MUTABLE-VECTOR-RECEIVER
+            return MUTABLE-PLACE-RECEIVER
         }
         capture {
             Emit state "fn nested() -> int:" "    [Pick $mutatedBindings].length()"
-            return MUTABLE-VECTOR-CAPTURE
+            return MUTABLE-PLACE-CAPTURE
         }
     }
 }
@@ -949,7 +949,7 @@ proc AFault {stateVar} {
     switch -- [Pick $kinds] {
         temporary {
             Emit state "empty_queue().push(make(1))"
-            return MUTABLE-VECTOR-RECEIVER
+            return MUTABLE-PLACE-RECEIVER
         }
         handleaftermove {
             Emit state "late = coroutine::done?([Pick $movedHandles])"
@@ -963,7 +963,7 @@ proc AFault {stateVar} {
             set p [Pick $vectors]
             set fallback [expr {[lindex [dict get $state vecs $p] 0] eq "co" ? "make(1)" : "Job {id: 0, step: make(1)}"}]
             Handled state late "mutable_vector::at($p, 0)" $fallback
-            return AFFINE-VECTOR-COPY-OUT
+            return AFFINE-ELEMENT-COPY-OUT
         }
         wrongtype {
             Emit state "[Pick $vectors].push(5)"

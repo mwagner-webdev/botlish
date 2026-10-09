@@ -83,8 +83,10 @@
 #                             `bytestore` (so a MutableBytes is never
 #                             accepted where an immutable byte storage is
 #                             required, nor the reverse). It is a VALUE, not
-#                             a reference: like every kind but mutarray it
-#                             is an immutable Tcl value, and an update
+#                             a reference: like every other kind it
+#                             is an immutable Tcl value (a mutarray or mutvec
+#                             header is a value too, by a different route:
+#                             see below), and an update
 #                             (core/bytestore.tcl's mutableSet) returns a
 #                             new one, so two logical copies can never
 #                             influence each other here. Equality is exact
@@ -108,17 +110,21 @@
 #                             (every logical copy is a new header,
 #                             mutable_vector#share), so no alias of a header
 #                             can observe it. No equality, no hash.
-#   {mutarray ID}             MutableArray handle; ID indexes
-#                             core::mutarray's mutable store (mutarray.tcl).
-#                             The only value kind that is NOT treated as
-#                             immutable: two {mutarray ID} values with the
-#                             same ID are the same storage, and mutating one
-#                             is observable through the other.
+#   {mutarray ID}             a MutableArray header (MUTABLE-ARRAY.md); ID
+#                             indexes core::mutarray's store (mutarray.tcl),
+#                             the array's current elements. Like a mutvec, a
+#                             VALUE with a mutable header: a mutation changes
+#                             the header it is applied to, and the compiler
+#                             proves only the one place owning a header ever
+#                             mutates it (every logical copy is a new header,
+#                             mutable_vector#share), so no alias of a header
+#                             can observe it. No equality, no hash.
 #
-# Values other than {mutarray ID} are treated as immutable (a {mutbytes HEX}
-# included: its mutability is a property of the language-level MutableBytes
-# VALUE, which the backends realize by producing a new storage per update). Code outside this
-# file should construct and inspect values only through these procedures.
+# Every value is treated as a value: a {mutbytes HEX} because the backends
+# realize each update as a new storage, a {mutarray ID}/{mutvec ID} header
+# because only its one owning place ever mutates it (above). Code outside
+# this file should construct and inspect values only through these
+# procedures.
 
 namespace eval core::value {
     variable kinds {int str bool unit list result block native mutarray UnicodeChar immutableSet errorId struct bytestore mutbytes coroutine mutvec}
@@ -369,6 +375,13 @@ proc core::value::containsBlock {v} {
                 }
             }
         }
+        mutarray {
+            foreach item [core::mutarray::items $v] {
+                if {[containsBlock $item]} {
+                    return 1
+                }
+            }
+        }
     }
     return 0
 }
@@ -385,11 +398,9 @@ proc core::value::containsBlock {v} {
 proc core::value::equal {a b} {
     set ka [kind $a]
     set kb [kind $b]
-    # MutableArray, like Block/Native, has no structural equality (its
-    # identity/equality semantics are a separate design question: see
-    # mutarray.tcl).
-    # A MutableVector, like a MutableArray, has no equality (MUTABLE-
-    # VECTOR.md: none was added for it).
+    # MutableArray and MutableVector, like Block/Native, have no equality
+    # (MUTABLE-ARRAY.md, MUTABLE-VECTOR.md: none was added for either; a
+    # header's identity is never a value's).
     if {$ka in {block native mutarray coroutine mutvec} || $kb in {block native mutarray coroutine mutvec}} {
         core::semanticError EQUALITY \
             "== is not defined for callables: [show $a] == [show $b]"
@@ -578,7 +589,14 @@ proc core::value::show {v {debug 0} {reveal 0}} {
         block  { return "<block ([join [lindex $v 1] { }])>" }
         native { return "<native [lindex $v 1]>" }
         errorId { return "<error [lindex $v 1]>" }
-        mutarray { return "<mutable-array capacity=[core::value::intOf [core::mutarray::capacity $v]]>" }
+        mutarray {
+            # The current elements (a value's contents, never its header).
+            set parts {}
+            foreach item [core::mutarray::items $v] {
+                lappend parts [show $item $debug $reveal]
+            }
+            return "<mutable-array \[[join $parts {, }]\]>"
+        }
         coroutine { return "<coroutine>" }
         mutvec {
             # The current elements (a value's contents, never its header).

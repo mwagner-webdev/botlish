@@ -125,6 +125,15 @@ namespace eval native::lower {
         mutable_array::set      {op mutarrayset} \
         mutable_array::copy     {op mutarraycopy} \
         mutable_array::freeze   {op mutarrayfreeze} \
+        mutable_array::create   {op mutarraycreate} \
+        mutable_array::from_list {op mutarrayfromlist} \
+        mutable_array::generate {op mutarraygenerate} \
+        mutable_array::swap     {op mutarrayswap} \
+        mutable_array#to_list   {op mutarraytolist} \
+        mutable_array#take_front {op mutarraytakefront} \
+        mutable_array#swap_drop {op mutarrayswapdrop} \
+        mutable_array#set_drop  {op mutarraysetdrop} \
+        mutable_array#generate_drop {op mutarraygeneratedrop} \
         integer?     {op isint} \
         string?      {op isstr} \
         list?        {op islist} \
@@ -8313,6 +8322,8 @@ proc native::lower::ListLoop {fnVar e node} {
     # what an early exit leaves in it is released by that exit's own release
     # items (hir::affine's loop domain), the register %iter.
     set consuming [hir::mutvec::IsConsumingLoop $hir $e]
+    # (An affine MutableArray is drained like a vector, MUTABLE-ARRAY.md.)
+    set drain [expr {$consuming && [hir::mutvec::ConsumedKind $hir $e] eq "array" ? "mutarray" : "mv"}]
     if {!$consuming} {
         EmitArgGuards fn $e [list $iterExpr] [list $iterReg] {list} "loop"
         set lenReg [Assign fn "op listlen $iterReg" $e]
@@ -8343,7 +8354,7 @@ proc native::lower::ListLoop {fnVar e node} {
     Emit fn "jump $head" $e
     EmitLabel fn $head
     if {$consuming} {
-        set empty [Assign fn "op mvempty $iterReg" $e]
+        set empty [Assign fn "op ${drain}empty $iterReg" $e]
         Emit fn "br $empty $normalExit $bodyLabel" $e
     } else {
         set cmp [Assign fn "op ilt $idxReg $lenReg" $e]
@@ -8355,7 +8366,7 @@ proc native::lower::ListLoop {fnVar e node} {
     dict set fn loops $e [list $continueLabel $exit $resultReg \
         [expr {$retained ? $accReg : "discard"}]]
     if {$consuming} {
-        set elemReg [Assign fn "op mvtakefront $iterReg" $e]
+        set elemReg [Assign fn "op ${drain}takefront $iterReg" $e]
     } else {
         set elemReg [Assign fn "op listget $iterReg $idxReg" $e]
     }

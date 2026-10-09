@@ -49,11 +49,16 @@
 #
 # and the internal operations (no source can spell `#`):
 #
-#   mutable_vector#share(v, D)        a logical copy of v (a vector-bearing
-#                                     value) by share descriptor D: "h" a
-#                                     vector (a new header on the same
-#                                     backing), "s"N"."(SLOT"."D)*N a struct
-#                                     whose listed slots are shared
+#   mutable_vector#share(v, D)        a logical copy of v (a value bearing a
+#                                     collection header) by share descriptor
+#                                     D: "h" a MutableVector or MutableArray
+#                                     (a new header on the same backing:
+#                                     core/mutarray.tcl's for an array),
+#                                     "s"N"."(SLOT"."D)*N a struct whose
+#                                     listed slots are shared, "d" a value of
+#                                     a statically unknown type (whatever
+#                                     collection header or struct it is at
+#                                     run time, copied as such)
 #   mutable_vector#to_list(v)         an immutable List snapshot of v (the
 #                                     domain of a loop over an unrestricted
 #                                     vector)
@@ -190,6 +195,10 @@ proc core::mutvec::Share {v tree} {
     variable counters
     switch -- [lindex $tree 0] {
         h {
+            if {[core::value::kind $v] eq "mutarray"} {
+                # A MutableArray header (core/mutarray.tcl): the same COW.
+                return [core::mutarray::Share $v]
+            }
             set id [Id $v mutable_vector#share]
             dict incr counters shares
             # The same Tcl list object: Tcl duplicates it at the first
@@ -206,6 +215,25 @@ proc core::mutvec::Share {v tree} {
             }
             return [core::value::structOf [core::value::structShape $v] $values]
         }
+        d {
+            # A value whose static type is not known (a generic function's
+            # parameter, MUTABLE-ARRAY.md): a collection header is copied, a
+            # struct field by field, anything else is a value already.
+            switch -- [core::value::kind $v] {
+                mutvec - mutarray {
+                    return [Share $v {h}]
+                }
+                struct {
+                    set values [core::value::structValues $v]
+                    set copies [lmap value $values {Share $value {d}}]
+                    if {$copies eq $values} {
+                        return $v
+                    }
+                    return [core::value::structOf [core::value::structShape $v] $copies]
+                }
+            }
+            return $v
+        }
     }
     error "mutable_vector#share: bad descriptor tree $tree"
 }
@@ -221,6 +249,23 @@ proc core::mutvec::consume {v} {
 proc core::mutvec::toList {v} {
     variable store
     return [core::value::listOf $store([Id $v mutable_vector#to_list])]
+}
+
+# The consuming iteration's two steps over the domain V of a loop that
+# consumes it -- an affine MutableVector, or an affine MutableArray
+# (core/mutarray.tcl), the one collection a consuming loop drains besides a
+# vector: how many elements are left, and the first of them moved out.
+proc core::mutvec::remaining {v} {
+    if {[core::value::kind $v] eq "mutarray"} {
+        return [llength [core::mutarray::items $v]]
+    }
+    return [llength [items $v]]
+}
+proc core::mutvec::drainFront {v} {
+    if {[core::value::kind $v] eq "mutarray"} {
+        return [core::mutarray::takeFront $v]
+    }
+    return [takeFront $v]
 }
 
 proc core::mutvec::takeFront {v} {
@@ -273,38 +318,41 @@ proc core::mutvec::resetCounters {} {
 }
 
 core::native::register mutable_vector::from_list -arity 1 -impl core::mutvec::fromList \
-    -param-types {list} -result-type mutvec -runtime mutvec-alloc -result-shape {mutvec-from-list 0}
+    -param-types {list} -result-type mutvec -runtime mutvec-alloc -result-shape {mutvec-from-list 0} \
+    -ownership {move}
 core::native::register mutable_vector::length -arity 1 -impl core::mutvec::length \
-    -param-types {mutvec} -result-type int -result-range collection-length
+    -param-types {mutvec} -result-type int -result-range collection-length -ownership {observe}
 core::native::register mutable_vector::empty? -arity 1 -impl core::mutvec::empty \
-    -param-types {mutvec} -result-type bool
+    -param-types {mutvec} -result-type bool -ownership {observe}
 core::native::register mutable_vector::at -arity 2 -impl core::mutvec::at \
     -param-types {mutvec int} -result-type any -runtime range-check \
-    -result-shape {mutvec-element 0} -errors IndexNotFound
+    -result-shape {mutvec-element 0} -errors IndexNotFound -ownership {copy-out observe}
 core::native::register mutable_vector::push -arity 2 -impl core::mutvec::push \
-    -param-types {mutvec any} -result-type unit -runtime mutvec-mutate
+    -param-types {mutvec any} -result-type unit -runtime mutvec-mutate -ownership {place move}
 core::native::register mutable_vector::pop -arity 1 -impl core::mutvec::pop \
     -param-types {mutvec} -result-type any -runtime {range-check mutvec-mutate} \
-    -result-shape {mutvec-element 0} -errors IndexNotFound
+    -result-shape {mutvec-element 0} -errors IndexNotFound -ownership {place}
 core::native::register mutable_vector::take -arity 2 -impl core::mutvec::take \
     -param-types {mutvec int} -result-type any -runtime {range-check mutvec-mutate} \
-    -result-shape {mutvec-element 0} -errors IndexNotFound
+    -result-shape {mutvec-element 0} -errors IndexNotFound -ownership {place observe}
 core::native::register mutable_vector::swap -arity 3 -impl core::mutvec::swap \
     -param-types {mutvec int any} -result-type any -runtime {range-check mutvec-mutate} \
-    -result-shape {mutvec-element 0} -errors IndexNotFound
+    -result-shape {mutvec-element 0} -errors IndexNotFound -ownership {place observe move}
 core::native::register mutable_vector::clear -arity 1 -impl core::mutvec::clear \
-    -param-types {mutvec} -result-type unit -runtime mutvec-mutate
+    -param-types {mutvec} -result-type unit -runtime mutvec-mutate -ownership {place}
 
 core::native::register mutable_vector#share -arity 2 -impl core::mutvec::shareImpl \
     -param-types {any str} -result-type any -runtime mutvec-alloc -result-shape {same 0}
 core::native::register mutable_vector#consume -arity 1 -impl core::mutvec::consume \
-    -param-types {mutvec} -result-type mutvec -result-shape {same 0}
+    -param-types {mutvec} -result-type mutvec -result-shape {same 0} -ownership {move}
 core::native::register mutable_vector#to_list -arity 1 -impl core::mutvec::toList \
-    -param-types {mutvec} -result-type list -runtime list-alloc -result-shape {mutvec-to-list 0}
+    -param-types {mutvec} -result-type list -runtime list-alloc -result-shape {mutvec-to-list 0} \
+    -ownership {copy-out}
 core::native::register mutable_vector#take_front -arity 1 -impl core::mutvec::takeFront \
-    -param-types {mutvec} -result-type any -runtime mutvec-mutate -result-shape {mutvec-element 0}
+    -param-types {mutvec} -result-type any -runtime mutvec-mutate -result-shape {mutvec-element 0} \
+    -ownership {place}
 core::native::register mutable_vector#clear_drop -arity 2 -impl core::mutvec::clearDrop \
-    -param-types {mutvec str} -result-type unit -runtime mutvec-mutate
+    -param-types {mutvec str} -result-type unit -runtime mutvec-mutate -ownership {place observe}
 core::native::register mutable_vector#swap_drop -arity 4 -impl core::mutvec::swapDrop \
     -param-types {mutvec int any str} -result-type any -runtime {range-check mutvec-mutate} \
-    -result-shape {mutvec-element 0} -errors IndexNotFound
+    -result-shape {mutvec-element 0} -errors IndexNotFound -ownership {place observe move observe}

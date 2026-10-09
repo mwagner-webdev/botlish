@@ -87,19 +87,22 @@ proc hir::lower::expr {hir e} {
             set iterable [dict get $node iterable]
             set body [list block [list $elemName] {*}[Seq $hir [dict get $node body]]]
             set domain [expr $hir $iterable]
-            set consuming [hir::mutvec::IsConsumingLoop $hir $e]
+            set consumed [hir::mutvec::ConsumedKind $hir $e]
+            set consuming [::expr {$consumed ne ""}]
             if {$consuming} {
-                # A loop consuming an affine MutableVector (MUTABLE-VECTOR.md):
-                # marked as such in Core IR, which has no types to say so
+                # A loop consuming an affine MutableVector or MutableArray
+                # (MUTABLE-VECTOR.md, MUTABLE-ARRAY.md): marked as such in
+                # Core IR, which has no types to say so
                 # (hir::mutvec::IsConsumingLoop reads the mark back).
-                set marked [list call [list ref [hir::mutvec::ConsumeNative]] $domain]
+                set mark [hir::mutvec::ConsumeNativeOf $consumed]
+                set marked [list call [list ref $mark] $domain]
             }
             if {[dict exists [hir::affine::temporaries $hir] $iterable]} {
                 # A consuming loop whose remaining elements an early exit
                 # releases by the domain's own name (hir::affine::LoopDomain).
                 set temp [TempName $iterable]
                 return [list if [list ref true] [list block {} [list bind $temp $domain] \
-                    [list listloop [list call [list ref [hir::mutvec::ConsumeNative]] [list ref $temp]] $body]] [list block {}]]
+                    [list listloop [list call [list ref [hir::mutvec::ConsumeNativeOf $consumed]] [list ref $temp]] $body]] [list block {}]]
             }
             if {$consuming} {
                 return [list listloop $marked $body]

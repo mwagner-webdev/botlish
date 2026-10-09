@@ -1,85 +1,46 @@
 # mutable_array.bot -- the "mutable_array" namespace: the ordinary Botlish
-# members of the MutableArray family (core/mutarray.tcl).
+# members of the MutableArray family (core/mutarray.tcl; MUTABLE-ARRAY.md).
 #
 # The namespace's intrinsics are root natives registered under their
-# qualified names -- mutable_array::allocate, ::capacity, ::at, ::set,
-# ::copy, ::freeze (core/mutarray.tcl) -- and this module may never define
-# a member of the same name (surface/modules.tcl, DUPLICATE-NATIVE). The
-# members below are ordinary functions over those intrinsics
-# (STDLIB-NAMESPACES.md):
+# qualified names -- mutable_array::allocate, ::create, ::from_list,
+# ::generate, ::capacity, ::at, ::set, ::swap, ::copy, ::freeze
+# (core/mutarray.tcl) -- and this module may never define a member of the
+# same name (surface/modules.tcl, DUPLICATE-NATIVE). The one member below is
+# an ordinary function over those intrinsics (STDLIB-NAMESPACES.md):
 #
-#   mutable_array::from_list(xs)        a fresh MutableArray whose capacity
-#                                       is list::length(xs) and whose slot i
-#                                       holds list::at(xs, i), for every i
-#                                       in order.
-#   mutable_array::create(capacity, d)  a fresh MutableArray of CAPACITY
-#                                       slots, every slot holding D.
 #   mutable_array::get(array, i, d)     the element at i, or D when i does
 #                                       not designate an element: exactly
 #                                       mutable_array::at(array, i) with its
 #                                       IndexNotFound -- and nothing else --
 #                                       handled by returning D.
 #
-# No new runtime operation backs any of them: from_list and create are the
-# allocate-then-fill sequence the stdlib builders (examples/stdlib) write by
-# hand, so the runtime construction path (allocation, rooting, bounds
-# checks) is the existing one, unchanged; get is ordinary error handling
-# over mutable_array::at.
+# The constructors are intrinsics, each with a static ownership role for
+# what it does with the value it is given (core/native.tcl's -ownership):
 #
-# Semantics of from_list/create, all inherited from that substrate rather
-# than defined here:
-#   * the result is a new, distinct MutableArray (mutable_array::allocate's
-#     own fresh identity); XS is only read, so it stays the same immutable
-#     List and later mutation of the result never reaches it;
-#   * slots hold the given values as-is (the same immutable values, and the
-#     same handle for a nested MutableArray -- values are shared, never
-#     copied deeply); for `create` every slot holds the same value D;
-#   * element order is preserved; the empty List / capacity 0 give a
-#     capacity-0 array;
-#   * a negative or impossible capacity is rejected by
-#     mutable_array::allocate itself (RANGE), exactly like a raw allocation;
-#   * a non-List XS / non-Int CAPACITY is rejected by the declared parameter
-#     contract under Botlish's ordinary typed-parameter rule, never coerced.
-#   * from_list's `list::at(xs, i)` needs no handler: i runs from 0 to
-#     list::length(xs), which the completion proof (hir/completions.tcl)
-#     recognizes as always designating an element.
+#   mutable_array::create(n, x)      x is *repeated*: one value placed in n
+#                                    slots, so x must be unrestricted (an
+#                                    affine x is AFFINE-DUPLICATION-
+#                                    UNSUPPORTED)
+#   mutable_array::from_list(xs)     xs *moves* into the array, which owns
+#                                    every element it had
+#   mutable_array::generate(n, f)    f is a *factory*: called once per slot,
+#                                    in index order, each result owned by
+#                                    its slot (affine results included)
+#
+# They used to be ordinary functions here, typed at their calls by a
+# precomputed container rule (hir/containers.tcl) that hid their bodies from
+# the ownership discipline: `create(2, make_coroutine())` compiled and stored
+# one coroutine in two slots. An intrinsic's roles are what the discipline
+# reads, so no library body can do what the same body written in a program
+# could not (MUTABLE-ARRAY.md, "Library ownership").
 #
 # get's DEFAULT is an ordinary argument, evaluated before the call like any
 # other (no lazy default), and it is not an optional/null result: a present
 # index gives the element, IndexNotFound gives DEFAULT, and every other
 # failure of mutable_array::at (a non-MutableArray or non-Int argument)
-# propagates unchanged.
-#
-# Static typing (PARAMETERIZED-MUTABLEARRAY.md). The declared result of
-# from_list/create below is the raw kind -- what the bodies themselves
-# produce -- but both functions are *intrinsic container operations*: the
-# compiler types a call of either from its argument types, keyed to this
-# resolved library function (hir/containers.tcl), not to its spelling:
-#
-#   from_list(xs : List[T])       -> MutableArray[T]   (list -> MutableArray[any])
-#   create(capacity, d : T)       -> MutableArray[T]
-#
-# MutableArray[T] is a compile-time contract only: every slot holds a T and
-# every store must preserve that. `create` initializes every slot, so the
-# contract holds from the first instant; for capacity 0 there is no slot,
-# and T is still the static type of D. Botlish has no general type variables,
-# so this relation cannot be written as a function type; a callable *value*
-# of either function (viewed through a structural Fn) exposes only the raw
-# `mutarray` result.
-import list
-
-fn from_list(xs: list) -> mutarray:
-    count = list::length(xs)
-    storage = mutable_array::allocate(count)
-    loop i from 0 to count:
-        mutable_array::set(storage, i, list::at(xs, i))
-    storage
-
-fn create(capacity: int, default) -> mutarray:
-    storage = mutable_array::allocate(capacity)
-    loop i from 0 to capacity:
-        mutable_array::set(storage, i, default)
-    storage
+# propagates unchanged. get copies the element out, so an array of affine
+# elements cannot use it (its at is AFFINE-ELEMENT-COPY-OUT): swap the
+# element out instead.
 
 fn get(array, index, default):
     value = mutable_array::at(array, index):

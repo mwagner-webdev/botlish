@@ -559,6 +559,11 @@ proc hir::DecideMethodCalls {nodes options given hir} {
         }
         set validity [dict create]
         set problemsOf [dict create]
+        # Key -> the receiver types the call had in the trial builds: a call
+        # whose receiver another undecided call can change (a candidate's
+        # parameter kind narrows the receiver's binding for what follows)
+        # is decided only once its receiver is the same in every build.
+        set receivers [dict create]
         for {set t 0} {$t < $rounds} {incr t} {
             set choices $decided
             foreach key $undecided {
@@ -574,8 +579,12 @@ proc hir::DecideMethodCalls {nodes options given hir} {
             foreach key $undecided {
                 set candidates [dict get $calls $key candidates]
                 if {$t >= [llength $candidates] || ![dict exists $trial methodCalls $key]} continue
-                dict set problemsOf $key [lindex $candidates $t] \
-                    [MethodCallProblems $trial [dict get $trial methodCalls $key expr]]
+                set callExpr [dict get $trial methodCalls $key expr]
+                dict set problemsOf $key [lindex $candidates $t] [MethodCallProblems $trial $callExpr]
+                set callArgs [dict get $trial exprs $callExpr args]
+                if {$callArgs ne ""} {
+                    dict lappend receivers $key [hir::typeOf $trial [lindex $callArgs 0]]
+                }
             }
             TraitCallsDecided $trial $calls decided
         }
@@ -612,9 +621,21 @@ proc hir::DecideMethodCalls {nodes options given hir} {
         set progress 0
         foreach key $undecided {
             set valid [dict keys [dict filter [dict get $validity $key] value 1]]
-            if {[llength $valid] == 1} {
+            set stable [expr {![dict exists $receivers $key] || [llength [lsort -unique [dict get $receivers $key]]] <= 1}]
+            if {[llength $valid] == 1 && $stable} {
                 dict set decided $key [lindex $valid 0]
                 set progress 1
+            }
+        }
+        if {!$progress} {
+            # Every call's receiver depends on another undecided call: the
+            # unique valid candidates decide, as before.
+            foreach key $undecided {
+                set valid [dict keys [dict filter [dict get $validity $key] value 1]]
+                if {[llength $valid] == 1} {
+                    dict set decided $key [lindex $valid 0]
+                    set progress 1
+                }
             }
         }
         if {!$progress} break
@@ -719,7 +740,6 @@ proc hir::TraitCallsDecided {hir calls decidedVar} {
 # assumption of a broken contract can recover: native::prepareHir does.
 proc hir::check {hirVar} {
     upvar 1 $hirVar hir
-    hir::containers::index hir
     set pre $hir
     CheckOnce hir {}
     if {![dict exists $hir violatedContracts]} {

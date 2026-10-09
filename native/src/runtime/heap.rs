@@ -138,11 +138,11 @@ impl Heap {
                 // Every field of a struct is an ordinary program value.
                 KIND_STRUCT => stack.extend_from_slice(struct_of(v).fields()),
                 KIND_SET => stack.extend_from_slice(set_of(v).items()),
-                // Every slot is traced, initialized or not: allocation fills
-                // unused capacity with UNIT (Vm::new_mutarray), never
-                // uninitialized memory, so there is nothing here that could
-                // be mistaken for an arbitrary root.
-                KIND_MUTARRAY => stack.extend_from_slice(&mutarray_of(v).slots),
+                // A MutableArray (MUTABLE-ARRAY.md): every slot of its
+                // backing (a raw allocation's are UNIT, never uninitialized
+                // memory). A backing shared by several headers is traced
+                // once per header (marking is idempotent).
+                KIND_MUTARRAY => stack.extend(super::ops::array_elements(v)),
                 KIND_RESULT => stack.push(result_of(v).payload),
                 // A MutableVector (MUTABLE-VECTOR.md): exactly its live
                 // elements, never spare capacity or removed slots.
@@ -266,7 +266,7 @@ pub unsafe fn object_size(object: *mut Header) -> usize {
             KIND_LIST => size_of::<ListObj>() + list_of(v).len * 8,
             KIND_STRUCT => size_of::<StructObj>() + struct_of(v).len * 8,
             KIND_SET => size_of::<SetObj>() + set_of(v).len * 8,
-            KIND_MUTARRAY => size_of::<MutArrayObj>() + mutarray_of(v).slots.len() * 8,
+            KIND_MUTARRAY => super::ops::array_object_size(v),
             KIND_RESULT => size_of::<ResultObj>(),
             KIND_CLOSURE => size_of::<ClosureObj>() + closure_of(v).ncaps * 8,
             KIND_NATIVE => size_of::<NativeObj>(),

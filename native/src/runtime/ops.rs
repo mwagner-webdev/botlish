@@ -88,6 +88,8 @@ use crate::nir::OpCode;
 use num_bigint::BigInt;
 use num_traits::Signed;
 use std::cmp::Ordering;
+use std::collections::VecDeque;
+use std::rc::Rc;
 use unicode_general_category::{get_general_category, GeneralCategory};
 
 /// Whether OP's runtime implementation may allocate (and so may trigger a
@@ -136,6 +138,10 @@ pub fn op_may_allocate(op: OpCode) -> bool {
             // share) or a List (the snapshot); the mutations allocate no
             // Botlish object (runtime/mutvec.rs).
             | MvFromList | MvShare | MvToList
+            // MutableArray (MUTABLE-ARRAY.md): a new header (and backing),
+            // or a List; generate runs the factory's code for every slot.
+            // The writes allocate no Botlish object.
+            | MutArrayCreate | MutArrayFromList | MutArrayGenerate | MutArrayGenerateDrop | MutArrayToList
     )
 }
 
@@ -161,6 +167,10 @@ pub fn op_may_error(op: OpCode) -> bool {
         | ListNew | ListGet | ListAppend | MutArrayAllocate | MutArrayGet | MutArraySet | MutArrayCopy | MutArrayFreeze
         // MutableVector: the declared IndexNotFound (runtime/mutvec.rs).
         | MvAt | MvPop | MvTake | MvSwap | MvSwapDrop
+        // MutableArray: a capacity outside the limit (RANGE), the declared
+        // IndexNotFound, and whatever a factory call fails with.
+        | MutArrayCreate | MutArrayGenerate | MutArrayGenerateDrop | MutArraySwap | MutArraySwapDrop
+        | MutArraySetDrop
         | ResultValue | ResultError | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum
         // Construction (dedup) and membership (a linear equal-scan) can
         // both raise EQUALITY through the same pre-existing
@@ -1682,51 +1692,175 @@ pub extern "C" fn rt_set_contains(p: *mut Vm, s: Value, v: Value) -> Value {
 }
 
 // ---------------------------------------------------------------------------
-// MutableArrays: fixed-capacity, explicitly mutable indexed storage
-// (value.rs's MutArrayObj). Every constructor/mutator here is the runtime
-// substrate only -- growth policy, chunking and finalization strategy are
-// ordinary Botlish (see examples/stdlib), never decided in this file.
+// MutableArrays (MUTABLE-ARRAY.md): fixed-length mutable VALUES. A
+// MutableArray is a header (value.rs's MutArrayObj: the identity of one
+// logical array) over a copy-on-write backing (`Rc<VecDeque<Value>>`, the
+// representation runtime/mutvec.rs gives a MutableVector): a logical copy
+// (`mvshare` with `h`, inserted by the compiler, hir/mutvec.tcl) is a new
+// header on the same backing, and the first write through a header whose
+// backing is shared detaches it (`array_writable`: one shallow copy of the
+// element words, counted). Growth policy, chunking and finalization strategy
+// stay ordinary Botlish (see examples/stdlib): the array's length never
+// changes after construction -- only a consuming loop drains an affine array
+// it owns, which is dead to the program by then.
 //
-// rt_mutarray_set and rt_mutarray_copy are the two places a slot's value
-// ever changes after allocation: a future write barrier (e.g. for a
-// generational collector) has exactly these two call sites to instrument,
-// never arbitrary code that pokes at a MutableArray's memory directly.
+// The writes (set, swap, copy, and their affine `_drop` forms) are the only
+// places a slot's value ever changes after construction: a future write
+// barrier (e.g. for a generational collector) has exactly these call sites
+// to instrument.
 //
-// "No misleading copy accounting" (milestone req #43): record_mutarray_copy
-// is called only for movement of *existing* values -- bulk copy and
-// finalization -- never for an ordinary append's single fresh write of a
-// caller-supplied value into unused capacity (that is charged, optionally,
-// as a mutarray write via record_mutarray_write instead).
+// "No misleading copy accounting": record_mutarray_copy is called only for
+// movement of *existing* values -- bulk copy and finalization -- never for a
+// single fresh write of a caller-supplied value (that is charged, optionally,
+// as a mutarray write via record_mutarray_write instead); a detach is
+// counted apart (record_mutarray_detach).
 
-#[unsafe(no_mangle)]
-pub extern "C" fn rt_mutarray_allocate(p: *mut Vm, capacity: Value) -> Value {
+/// A new MutableArray header on BACKING (allocates; may collect first),
+/// registering BYTES of element storage with the heap: a new backing's, or 0
+/// for a share (counted when it was made; a detach counts its own copy).
+pub fn new_mutarray_header(p: *mut Vm, backing: Rc<VecDeque<Value>>, bytes: usize) -> Value {
+    vm(p).alloc(MutArrayObj { hdr: Header::new(KIND_MUTARRAY, false), backing }, bytes)
+}
+
+/// The slots of array ARR, unique to its header: a shared backing is
+/// detached first (one shallow copy, counted), a unique one returned as is.
+fn array_writable<'a>(p: *mut Vm, arr: Value) -> &'a mut VecDeque<Value> {
+    let obj = mutarray_of_mut(arr);
+    if Rc::strong_count(&obj.backing) > 1 {
+        let n = obj.backing.len();
+        let vm = vm(p);
+        vm.metrics.record_mutarray_detach(n);
+        vm.heap.note_growth(n * 8);
+    }
+    Rc::make_mut(&mut obj.backing)
+}
+
+/// The slots of affine array ARR: its backing is never shared (an affine
+/// array is moved, never copied), so this never copies an element.
+pub fn array_owned<'a>(arr: Value, what: &str) -> &'a mut VecDeque<Value> {
+    let obj = mutarray_of_mut(arr);
+    match Rc::get_mut(&mut obj.backing) {
+        Some(items) => items,
+        None => panic!("{what}: an affine MutableArray's backing is shared (an ownership invariant violation)"),
+    }
+}
+
+/// The checked capacity of a new array for operation NAME: an Int in
+/// 0..=MAX_COLLECTION_LENGTH, else RANGE (Err: the failure, recorded).
+fn array_capacity(p: *mut Vm, capacity: Value, name: &str) -> Result<usize, Value> {
     match int_small(capacity) {
-        Some(n) if n >= 0 => vm(p).new_mutarray(n as usize),
+        Some(n) if n >= 0 && (n as u64) <= MAX_COLLECTION_LENGTH as u64 => Ok(n as usize),
         _ => {
-            let message = format!(
-                "mutable_array::allocate: capacity must be 0..{MAX_COLLECTION_LENGTH}, got {}",
-                int_to_big(capacity)
-            );
-            vm(p).fail(RtError::Semantic { kind: "RANGE", message })
+            let message = format!("{name}: capacity must be 0..{MAX_COLLECTION_LENGTH}, got {}", int_to_big(capacity));
+            Err(vm(p).fail(RtError::Semantic { kind: "RANGE", message }))
         }
     }
 }
 
+/// A fresh array of ITEMS (a new, unique backing).
+fn new_array_of(p: *mut Vm, items: VecDeque<Value>) -> Value {
+    let bytes = items.capacity() * 8;
+    new_mutarray_header(p, Rc::new(items), bytes)
+}
+
+/// The index Int I of an array of N slots, if it designates one.
+fn array_index(i: Value, n: usize) -> Option<usize> {
+    match int_small(i) {
+        Some(i) if i >= 0 && (i as usize) < n => Some(i as usize),
+        _ => None,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_mutarray_allocate(p: *mut Vm, capacity: Value) -> Value {
+    match array_capacity(p, capacity, "mutable_array::allocate") {
+        Ok(n) => new_array_of(p, std::iter::repeat_n(UNIT, n).collect()),
+        Err(failed) => failed,
+    }
+}
+
+/// `mutable_array::create(n, x)`: N slots, each holding X (one unrestricted
+/// value placed N times: the compiler rejects an affine X).
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_mutarray_create(p: *mut Vm, capacity: Value, x: Value) -> Value {
+    match array_capacity(p, capacity, "mutable_array::create") {
+        Ok(n) => new_array_of(p, std::iter::repeat_n(x, n).collect()),
+        Err(failed) => failed,
+    }
+}
+
+/// `mutable_array::from_list(xs)`: the List's elements, in order.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_mutarray_from_list(p: *mut Vm, list: Value) -> Value {
+    new_array_of(p, list_of(list).items().iter().copied().collect())
+}
+
+/// `mutable_array::generate(n, f)` (D = None) and `#generate_drop(n, f, D)`:
+/// slot I holds FACTORY(I), for I from 0 to N - 1, in order. The first call
+/// that fails ends the construction: its failure is the result (NO_VALUE,
+/// already recorded by the call), after the elements already made were
+/// dropped by D, first to last (affine elements; unrestricted ones are left
+/// to the collector). The array under construction, the factory and the
+/// descriptor are rooted across every call (each may collect).
+fn generate(p: *mut Vm, capacity: Value, factory: Value, d: Option<Value>, name: &str) -> Value {
+    let n = match array_capacity(p, capacity, name) {
+        Ok(n) => n,
+        Err(failed) => return failed,
+    };
+    let rooted = vm(p).temp_roots.len();
+    vm(p).temp_roots.push(factory);
+    if let Some(d) = d {
+        vm(p).temp_roots.push(d);
+    }
+    let arr = new_array_of(p, VecDeque::with_capacity(n));
+    vm(p).temp_roots.push(arr);
+    for i in 0..n {
+        let arg = make_small(i as i64);
+        let x = rt_call_value(p, factory, 1, &arg);
+        if x == NO_VALUE {
+            if let Some(d) = d {
+                let items = std::mem::take(array_owned(arr, name));
+                let text = str_of(d).as_str().as_bytes().to_vec();
+                for item in items {
+                    super::affine::drop_descriptor(p, item, &text);
+                }
+            }
+            vm(p).temp_roots.truncate(rooted);
+            return NO_VALUE;
+        }
+        // No safepoint between the call's return and the store: X is in
+        // the (rooted) array before anything can collect again.
+        Rc::get_mut(&mut mutarray_of_mut(arr).backing).expect("a unique backing under construction").push_back(x);
+    }
+    vm(p).temp_roots.truncate(rooted);
+    arr
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_mutarray_generate(p: *mut Vm, capacity: Value, factory: Value) -> Value {
+    generate(p, capacity, factory, None, "mutable_array::generate")
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_mutarray_generate_drop(p: *mut Vm, capacity: Value, factory: Value, d: Value) -> Value {
+    generate(p, capacity, factory, Some(d), "mutable_array#generate_drop")
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_mutarray_capacity(p: *mut Vm, arr: Value) -> Value {
-    vm(p).new_int(mutarray_of(arr).slots.len() as i64)
+    vm(p).new_int(mutarray_of(arr).backing.len() as i64)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_mutarray_get(p: *mut Vm, arr: Value, index: Value) -> Value {
-    let slots = &mutarray_of(arr).slots;
-    match int_small(index) {
-        Some(i) if i >= 0 && (i as usize) < slots.len() => {
-            let v = slots[i as usize];
+    let slots = &mutarray_of(arr).backing;
+    match array_index(index, slots.len()) {
+        Some(i) => {
+            let v = slots[i];
             vm(p).metrics.record_mutarray_read();
             v
         }
-        _ => index_not_found(p),
+        None => index_not_found(p),
     }
 }
 
@@ -1734,7 +1868,7 @@ pub extern "C" fn rt_mutarray_get(p: *mut Vm, arr: Value, index: Value) -> Value
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_mutarray_get_proven(p: *mut Vm, arr: Value, index: Value) -> Value {
     let i = int_small(index).expect("proven index is a small Int") as usize;
-    let v = mutarray_of(arr).slots[i];
+    let v = mutarray_of(arr).backing[i];
     vm(p).metrics.record_mutarray_read();
     v
 }
@@ -1743,34 +1877,79 @@ pub extern "C" fn rt_mutarray_get_proven(p: *mut Vm, arr: Value, index: Value) -
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_mutarray_set_proven(p: *mut Vm, arr: Value, index: Value, value: Value) -> Value {
     let i = int_small(index).expect("proven index is a small Int") as usize;
-    mutarray_of_mut(arr).slots[i] = value;
+    array_writable(p, arr)[i] = value;
     vm(p).metrics.record_mutarray_write();
     UNIT
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_mutarray_set(p: *mut Vm, arr: Value, index: Value, value: Value) -> Value {
-    let obj = mutarray_of_mut(arr);
-    match int_small(index) {
-        Some(i) if i >= 0 && (i as usize) < obj.slots.len() => {
-            obj.slots[i as usize] = value;
+    match array_index(index, mutarray_of(arr).backing.len()) {
+        Some(i) => {
+            array_writable(p, arr)[i] = value;
             vm(p).metrics.record_mutarray_write();
             UNIT
         }
-        _ => index_not_found(p),
+        None => index_not_found(p),
+    }
+}
+
+/// `mutable_array::swap(a, i, x)`: X installed at I, the old element moved
+/// out; IndexNotFound and nothing changes when I is no slot.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_mutarray_swap(p: *mut Vm, arr: Value, index: Value, value: Value) -> Value {
+    match array_index(index, mutarray_of(arr).backing.len()) {
+        Some(i) => {
+            vm(p).metrics.record_mutarray_write();
+            std::mem::replace(&mut array_writable(p, arr)[i], value)
+        }
+        None => index_not_found(p),
+    }
+}
+
+/// `mutable_array#swap_drop(a, i, x, d)`: swap of affine elements. When I is
+/// no slot the replacement X -- already owned by this operation -- is
+/// dropped by D before IndexNotFound; the array is unchanged.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_mutarray_swap_drop(p: *mut Vm, arr: Value, index: Value, value: Value, d: Value) -> Value {
+    match array_index(index, mutarray_of(arr).backing.len()) {
+        Some(i) => std::mem::replace(&mut array_owned(arr, "mutable_array#swap_drop")[i], value),
+        None => {
+            super::affine::drop_descriptor(p, value, str_of(d).as_str().as_bytes());
+            index_not_found(p)
+        }
+    }
+}
+
+/// `mutable_array#set_drop(a, i, x, d)`: set of affine elements. The
+/// displaced element leaves the array, then is dropped by D; when I is no
+/// slot, X is dropped by D instead before IndexNotFound.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_mutarray_set_drop(p: *mut Vm, arr: Value, index: Value, value: Value, d: Value) -> Value {
+    let text = str_of(d).as_str().as_bytes();
+    match array_index(index, mutarray_of(arr).backing.len()) {
+        Some(i) => {
+            let old = std::mem::replace(&mut array_owned(arr, "mutable_array#set_drop")[i], value);
+            super::affine::drop_descriptor(p, old, text);
+            UNIT
+        }
+        None => {
+            super::affine::drop_descriptor(p, value, text);
+            index_not_found(p)
+        }
     }
 }
 
 /// Bulk copy: COUNT elements of SRC starting at SRC_START into DST starting
-/// at DST_START. Uses `ptr::copy` (memmove semantics), so DST and SRC may be
-/// the same MutableArray with overlapping ranges: the result is always as if
-/// SRC's elements were read before any of DST's were written. Both ranges
+/// at DST_START, with memmove semantics: DST and SRC may be the same array
+/// (or share a backing) with overlapping ranges, and the result is always as
+/// if SRC's elements were read before any of DST's were written. Both ranges
 /// are slices (`check_slice`), the destination's checked first; an invalid
 /// one fails with LowerUnderrun/UpperOverrun and copies nothing.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_mutarray_copy(p: *mut Vm, dst: Value, dst_start: Value, src: Value, src_start: Value, count: Value) -> Value {
-    let dst_len = mutarray_of(dst).slots.len();
-    let src_len = mutarray_of(src).slots.len();
+    let dst_len = mutarray_of(dst).backing.len();
+    let src_len = mutarray_of(src).backing.len();
     let (ds, end) = match check_slice(p, bound_of(dst_start), SliceEnd::Count(bound_of(count)), dst_len) {
         Ok(slice) => slice,
         Err(failed) => return failed,
@@ -1789,11 +1968,10 @@ pub extern "C" fn rt_mutarray_copy_proven(p: *mut Vm, dst: Value, dst_start: Val
     let n = int_small(count).expect("proven count is a small Int") as usize;
     let ds = int_small(dst_start).expect("proven start is a small Int") as usize;
     let ss = int_small(src_start).expect("proven start is a small Int") as usize;
-    // The one proven helper that would otherwise be a raw memmove: an internal
-    // invariant check (an abort, never a Botlish error), so a proof bug
-    // cannot become memory corruption. One comparison beside a bulk copy.
+    // An internal invariant check (an abort, never a Botlish error), so a
+    // proof bug cannot become a wrong copy. One comparison beside a bulk copy.
     assert!(
-        ds + n <= mutarray_of(dst).slots.len() && ss + n <= mutarray_of(src).slots.len(),
+        ds + n <= mutarray_of(dst).backing.len() && ss + n <= mutarray_of(src).backing.len(),
         "proven mutable_array::copy out of bounds"
     );
     mutarray_copy_range(p, dst, ds, src, ss, n)
@@ -1802,24 +1980,30 @@ pub extern "C" fn rt_mutarray_copy_proven(p: *mut Vm, dst: Value, dst_start: Val
 /// Copies N slots of SRC from SS into DST at DS (both ranges already valid).
 fn mutarray_copy_range(p: *mut Vm, dst: Value, ds: usize, src: Value, ss: usize, n: usize) -> Value {
     if n > 0 {
-        let dst_ptr = mutarray_of_mut(dst).slots.as_mut_ptr();
-        let src_ptr = mutarray_of(src).slots.as_ptr();
-        unsafe { std::ptr::copy(src_ptr.add(ss), dst_ptr.add(ds), n) };
+        if dst == src {
+            let items = array_writable(p, dst);
+            items.make_contiguous().copy_within(ss..ss + n, ds);
+        } else {
+            // The source's words first: SRC may share DST's backing (a
+            // logical copy), which DST's detach would otherwise leave behind.
+            let moved: Vec<Value> = mutarray_of(src).backing.range(ss..ss + n).copied().collect();
+            let items = array_writable(p, dst);
+            for (k, v) in moved.into_iter().enumerate() {
+                items[ds + k] = v;
+            }
+        }
         vm(p).metrics.record_mutarray_copy(n);
     }
     UNIT
 }
 
-/// Final immutable storage creation (milestone architecture item #2): a new
-/// List of ARR's first COUNT elements. This is substrate, not policy -- it
-/// is the one way a MutableArray's contents become an ordinary immutable
-/// List; growth/chunking policy is entirely the caller's (ordinary Botlish).
-/// Always copies (req #18): a future zero-copy freeze (req #19), proving ARR
-/// is uniquely owned and never mutated again, is left open, not implemented.
+/// Final immutable storage creation: a new List of ARR's first COUNT
+/// elements -- the one way an array's contents become an ordinary immutable
+/// List. Always copies.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_mutarray_freeze(p: *mut Vm, arr: Value, count: Value) -> Value {
-    let slots = &mutarray_of(arr).slots;
-    match check_slice(p, Bound::At(0), SliceEnd::End(bound_of(count)), slots.len()) {
+    let n = mutarray_of(arr).backing.len();
+    match check_slice(p, Bound::At(0), SliceEnd::End(bound_of(count)), n) {
         Ok((_, n)) => freeze_prefix(p, arr, n),
         Err(failed) => failed,
     }
@@ -1830,17 +2014,79 @@ pub extern "C" fn rt_mutarray_freeze(p: *mut Vm, arr: Value, count: Value) -> Va
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_mutarray_freeze_proven(p: *mut Vm, arr: Value, count: Value) -> Value {
     let n = int_small(count).expect("proven count is a small Int") as usize;
-    debug_assert!(n <= mutarray_of(arr).slots.len());
+    debug_assert!(n <= mutarray_of(arr).backing.len());
     freeze_prefix(p, arr, n)
 }
 
 /// A new List of ARR's first N slots (N already known valid).
 fn freeze_prefix(p: *mut Vm, arr: Value, n: usize) -> Value {
-    let items = mutarray_of(arr).slots[..n].to_vec();
+    let items: Vec<Value> = mutarray_of(arr).backing.range(..n).copied().collect();
     let elements = items.len();
     let r = vm(p).new_list(items);
     vm(p).metrics.record_mutarray_copy(elements);
     r
+}
+
+/// `mutable_array#to_list(a)`: an immutable List snapshot of every element
+/// (the domain a loop over an unrestricted array iterates).
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_mutarray_to_list(p: *mut Vm, arr: Value) -> Value {
+    let items: Vec<Value> = mutarray_of(arr).backing.iter().copied().collect();
+    vm(p).new_list(items)
+}
+
+/// Whether a consumed array has no element left (a consuming loop's test).
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_mutarray_empty(_p: *mut Vm, arr: Value) -> Value {
+    bool_value(mutarray_of(arr).backing.is_empty())
+}
+
+/// `mutable_array#take_front(a)`: the first element of a consumed array,
+/// moved out (one step of a consuming loop, O(1)). Taking the last one
+/// frees the drained storage at once.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_mutarray_take_front(p: *mut Vm, arr: Value) -> Value {
+    let items = array_writable(p, arr);
+    let x = items.pop_front().expect("mutable_array#take_front: no element left");
+    if items.is_empty() {
+        *items = VecDeque::new();
+    }
+    x
+}
+
+/// The `a` drop of affine.rs: every element of array ARR by the element
+/// descriptor at POS of D, first to last. The elements leave the (dying)
+/// array before any is dropped. Returns with POS past the element descriptor.
+pub fn drop_array_elements(p: *mut Vm, arr: Value, d: &[u8], pos: &mut usize) {
+    let start = *pos;
+    let items = std::mem::take(array_owned(arr, "affine#drop"));
+    if items.is_empty() {
+        super::affine::skip(d, pos);
+    }
+    for item in items {
+        *pos = start;
+        super::affine::drop_at(p, item, d, pos);
+    }
+}
+
+/// A logical copy of array ARR (`mvshare`'s `h` of an array header): a new
+/// header on the same backing, O(1).
+pub fn share_array(p: *mut Vm, arr: Value) -> Value {
+    let backing = Rc::clone(&mutarray_of(arr).backing);
+    vm(p).metrics.record_mutarray_share();
+    new_mutarray_header(p, backing, 0)
+}
+
+/// The live elements of array ARR, first to last (the collector's trace).
+pub fn array_elements(arr: Value) -> impl Iterator<Item = Value> {
+    mutarray_of(arr).backing.iter().copied()
+}
+
+/// Approximate bytes array ARR owns (heap.rs's object_size): its header and
+/// its share of the backing.
+pub fn array_object_size(arr: Value) -> usize {
+    let obj = mutarray_of(arr);
+    std::mem::size_of::<MutArrayObj>() + obj.backing.capacity() * 8 / Rc::strong_count(&obj.backing)
 }
 
 // ---------------------------------------------------------------------------
@@ -2012,6 +2258,16 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         MutArraySet => rt_mutarray_set(p, a[0], a[1], a[2]),
         MutArrayCopy => rt_mutarray_copy(p, a[0], a[1], a[2], a[3], a[4]),
         MutArrayFreeze => rt_mutarray_freeze(p, a[0], a[1]),
+        MutArrayCreate => rt_mutarray_create(p, a[0], a[1]),
+        MutArrayFromList => rt_mutarray_from_list(p, a[0]),
+        MutArrayGenerate => rt_mutarray_generate(p, a[0], a[1]),
+        MutArrayGenerateDrop => rt_mutarray_generate_drop(p, a[0], a[1], a[2]),
+        MutArraySwap => rt_mutarray_swap(p, a[0], a[1], a[2]),
+        MutArraySwapDrop => rt_mutarray_swap_drop(p, a[0], a[1], a[2], a[3]),
+        MutArraySetDrop => rt_mutarray_set_drop(p, a[0], a[1], a[2], a[3]),
+        MutArrayToList => rt_mutarray_to_list(p, a[0]),
+        MutArrayEmpty => rt_mutarray_empty(p, a[0]),
+        MutArrayTakeFront => rt_mutarray_take_front(p, a[0]),
         MvFromList => rt_mv_from_list(p, a[0]),
         MvLen => rt_mv_len(p, a[0]),
         MvEmpty => rt_mv_empty(p, a[0]),
@@ -2157,6 +2413,16 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_mutarray_copy_proven, 6),
         h!(rt_mutarray_freeze, 3),
         h!(rt_mutarray_freeze_proven, 3),
+        h!(rt_mutarray_create, 3),
+        h!(rt_mutarray_from_list, 2),
+        h!(rt_mutarray_generate, 3),
+        h!(rt_mutarray_generate_drop, 4),
+        h!(rt_mutarray_swap, 4),
+        h!(rt_mutarray_swap_drop, 5),
+        h!(rt_mutarray_set_drop, 5),
+        h!(rt_mutarray_to_list, 2),
+        h!(rt_mutarray_empty, 2),
+        h!(rt_mutarray_take_front, 2),
         h!(rt_is_kind, 3),
         h!(rt_is_result, 3),
         h!(rt_result_payload, 3),

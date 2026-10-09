@@ -347,26 +347,25 @@ proc hir::cardinality::Capacity {hir e stepsVar} {
         return [FormAtom [list cap [list b $id]]]
     }
     set node [dict get $hir exprs $id]
-    if {[NativeName $hir $node] eq "mutable_array::allocate" && [llength [dict get $node args]] == 1} {
-        return [IntForm $hir [lindex [dict get $node args] 0] steps]
-    }
-    if {[dict get $node kind] eq "call" && [lindex [dict get $node target] 0] eq "block"} {
-        # lib/mutable_array.bot's intrinsic container operations, recognized
-        # by resolved identity exactly as hir/containers.tcl types them
-        # (RuleOf, never by spelling): the `create` rule's function
-        # allocates its CAPACITY argument's slots, the `from-list` rule's
-        # function the length of its List argument.
-        set args [dict get $node args]
-        switch -- [hir::containers::RuleOf $hir [lindex [dict get $node target] 1]] {
-            create {
-                if {[llength $args] == 2} {
-                    return [IntForm $hir [lindex $args 0] steps]
-                }
+    # The MutableArray constructors (core/mutarray.tcl): allocate, create and
+    # generate make as many slots as their Int capacity argument says,
+    # from_list as many as its List has elements. A logical copy
+    # (mutable_vector#share) keeps its array's length.
+    set args [expr {[dict get $node kind] eq "call" ? [dict get $node args] : {}}]
+    switch -- [NativeName $hir $node] {
+        mutable_array::allocate {
+            if {[llength $args] == 1} {
+                return [IntForm $hir [lindex $args 0] steps]
             }
-            from-list {
-                if {[llength $args] == 1} {
-                    return [ListLength $hir [lindex $args 0] steps]
-                }
+        }
+        mutable_array::create - mutable_array::generate - mutable_array#generate_drop {
+            if {[llength $args] >= 2} {
+                return [IntForm $hir [lindex $args 0] steps]
+            }
+        }
+        mutable_array::from_list {
+            if {[llength $args] == 1} {
+                return [ListLength $hir [lindex $args 0] steps]
             }
         }
     }

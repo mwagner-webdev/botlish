@@ -277,12 +277,13 @@ proc hir::types::resolveApplication {ctor argTypes} {
             return -code error -errorcode {BOTLISH CONTEXT-TRAIT-POSITION} \
                 [ContextTraitPositionMessage $contextTrait "the element type of $ctor\[[show $t]\]"]
         }
-        if {$ctor ni {List MutableVector} && [IsAffine $t]} {
-            # A MutableArray copies elements out on every read and an
-            # ImmutableSet compares and hashes its members: neither can own
-            # affine values (AFFINE-VALUES.md). A List can (whole-List moves).
+        if {$ctor eq "ImmutableSet" && [IsAffine $t]} {
+            # An ImmutableSet compares and hashes its members, which an
+            # affine value does not support (AFFINE-EQUALITY-UNSUPPORTED):
+            # it cannot own one. A List, a MutableVector and a MutableArray
+            # can (their affinity is their element's: MUTABLE-ARRAY.md).
             return -code error -errorcode {BOTLISH AFFINE-CONTAINER-UNSUPPORTED} \
-                "$ctor\[[show $t]\] would hold affine values: a [expr {$ctor eq "MutableArray" ? "MutableArray copies its elements out on every read" : "ImmutableSet compares and hashes its members"}], so it cannot own them (a List of them can be moved whole)"
+                "$ctor\[[show $t]\] would hold affine values: an ImmutableSet compares and hashes its members, so it cannot own them (a List, MutableVector or MutableArray of them can)"
         }
         if {[MentionsTrait $t]} {
             # A container of trait values would have to carry arbitrary
@@ -397,9 +398,10 @@ proc hir::types::Contract {type} {
 #
 # It is compositional: a value that owns an affine value is affine. The one
 # primitive affine root today is the coroutine handle; a struct (named or
-# anonymous) is affine iff a field type is, a List (and, for completeness,
-# an ImmutableSet or MutableArray, which reject affine elements elsewhere)
-# iff its element type is, a trait view iff its concrete witness is.
+# anonymous) is affine iff a field type is, a List, a MutableVector and a
+# MutableArray (and, for completeness, an ImmutableSet, which rejects affine
+# members elsewhere) iff its element type is, a trait view iff its concrete
+# witness is.
 # Functions, scalars and `any` are unrestricted -- a closure cannot capture
 # an affine value (AFFINE-CAPTURE-UNSUPPORTED), and `any` never holds one
 # (AFFINE-ERASURE-UNSUPPORTED). A future affine root (a file, a socket, a
@@ -449,9 +451,9 @@ proc hir::types::IsAffine {type {seen {}}} {
             return 0
         }
         immutableSet - mutarray - mutvec {
-            # A MutableVector of affine elements is itself affine: it
-            # uniquely owns every element (MUTABLE-VECTOR.md). Mutation
-            # alone never makes a type affine.
+            # A MutableVector or MutableArray of affine elements is itself
+            # affine: it uniquely owns every element (MUTABLE-VECTOR.md,
+            # MUTABLE-ARRAY.md). Mutation alone never makes a type affine.
             return [IsAffine [lindex $type 1] $seen]
         }
         struct {
@@ -818,6 +820,45 @@ proc hir::types::FnGlb {a b} {
 # TYPE is not a callable type, or is a native of variable arity (`list`: no
 # fixed-arity contract exists, and this milestone invents no variadic
 # function typing).
+# What a call of a value of callable TYPE returns: an exact block's result,
+# a structural Fn's or an exact native's contract result, a coroutine's
+# outward type; any when TYPE is not statically callable.
+proc hir::types::CallableResult {type} {
+    if {[IsExactBlock $type]} {
+        return [lindex $type 3]
+    }
+    if {[IsCoroutine $type]} {
+        return [CoroutineOutward $type]
+    }
+    set s [structuralOf $type]
+    if {$s ne ""} {
+        return [FnReturn $s]
+    }
+    return any
+}
+
+# The declared errors a call of a value of callable TYPE may complete with:
+# an exact block's declared errors, a structural Fn's or coroutine's
+# contract errors, an exact native's -errors; none otherwise (an untyped
+# value: hir/callables.tcl keeps an error-bearing callable from being
+# erased to one).
+proc hir::types::CallableErrors {hir type} {
+    if {[IsExactBlock $type]} {
+        set block [lindex $type 1]
+        if {[dict exists $hir exprs $block]} {
+            return [dict get $hir exprs $block declaredErrors]
+        }
+    }
+    if {[IsCoroutine $type]} {
+        return [CoroutineErrors $type]
+    }
+    set s [structuralOf $type]
+    if {$s ne ""} {
+        return [dict get [lindex $s 1] errors]
+    }
+    return {}
+}
+
 proc hir::types::structuralOf {type} {
     if {[IsFn $type]} {
         return $type
@@ -1081,7 +1122,8 @@ proc hir::types::IsMutArray {type} {
 # can ever be read or written: it is recorded as `any`.
 proc hir::types::MakeMutArray {elem depth} {
     variable aggregateDepth
-    if {$depth >= $aggregateDepth} {
+    if {$depth >= $aggregateDepth && ![IsAffine $elem]} {
+        # (An affine element type is never erased: AFFINE-VALUES.md.)
         return mutarray
     }
     if {$elem eq "never"} {
@@ -1266,6 +1308,11 @@ proc hir::types::elementOf {type} {
 # loop over an unrestricted vector iterates its snapshot, over an affine one
 # consumes it); "" if not known.
 proc hir::types::IterationElementOf {type} {
+    if {[IsMutArray $type]} {
+        # A MutableArray's element type (MUTABLE-ARRAY.md: snapshot or
+        # consuming iteration, as a vector's).
+        return [lindex $type 1]
+    }
     if {[IsMutVec $type]} {
         # (MutableVector[never] promises no element type for its contents:
         # it is empty only while held at that type, and a value read back
@@ -1328,9 +1375,13 @@ proc hir::types::subtype {a b} {
         return [expr {$a eq "mutvec" && [lindex $b 1] eq "any"}]
     }
     if {$b eq "mutarray" && [IsMutArray $a]} {
-        # A typed array viewed as the raw kind could be written with
-        # anything: only the vacuous contract MutableArray[any] qualifies.
-        return [expr {[lindex $a 1] eq "any"}]
+        # The raw kind is an untyped view of an array -- of a logical copy of
+        # it, wherever it is written through (MUTABLE-ARRAY.md: an array is
+        # a value) -- so every MutableArray[T] is one. (Under the reference
+        # semantics MutableArray had before, a typed array viewed as the raw
+        # kind could be written with anything through that alias, and only
+        # MutableArray[any] qualified.)
+        return 1
     }
     if {[IsStruct $b]} {
         # An anonymous struct is compatible with another only when the field
@@ -1423,14 +1474,17 @@ proc hir::types::lub {a b} {
         return [MakeMutVec [lub [lindex $a 1] [lindex $b 1]] 0]
     }
     if {[IsMutArray $a] || [IsMutArray $b]} {
-        # Two MutableArrays join only when they are one contract. Otherwise
-        # there is no join that keeps the element contract (MutableArray[int]
-        # and MutableArray[str] have no common typed supertype; the raw kind
-        # would allow writes the original contract forbids): `any`, which
-        # hir/callables.tcl rejects as an erasure wherever a typed array
-        # would flow into it.
+        # Two MutableArrays of one contract join in it. Otherwise
+        # (MutableArray[int] and MutableArray[str] have no common typed
+        # supertype: MutableArray[T] is invariant) they join in the raw kind,
+        # the untyped view of an array, when both are arrays; anything else
+        # joins in `any`.
         if {[subtype $a $b] && [subtype $b $a]} {
             return [expr {$a eq "mutarray" || $b eq "mutarray" ? "mutarray" : [lindex [lsort [list $a $b]] 0]}]
+        }
+        if {([IsMutArray $a] || $a eq "mutarray") && ([IsMutArray $b] || $b eq "mutarray")
+                && ![IsAffine $a] && ![IsAffine $b]} {
+            return mutarray
         }
         return any
     }
@@ -1566,6 +1620,12 @@ proc hir::types::narrow {current fact} {
         # A precise callable type already implies a bare kind fact.
         if {$fact eq [kindOf $current]} {
             return $current
+        }
+        if {$fact in {list immutableSet mutarray mutvec} && [kindOf $current] in {list immutableSet mutarray mutvec}} {
+            # Two different collection kinds: no value is both (a native's
+            # parameter kind after a call that can only fail, a kind test
+            # that cannot hold), so nothing follows.
+            return never
         }
         return $fact
     }
@@ -2000,6 +2060,34 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result} {
                 return [lindex $array 1]
             }
             return $result
+        }
+        mutarray-create {
+            # (n, x : T) -> MutableArray[T] (MUTABLE-ARRAY.md): T the static
+            # type of the repeated value, also for capacity 0 -- its
+            # ordinary type, never an exact-value fact
+            # (hir::containers::ElementContract).
+            lassign $shape _ v
+            return [MakeMutArray [hir::containers::ElementContract [lindex $argTypes $v]] 0]
+        }
+        mutarray-from-list {
+            # List[T] -> MutableArray[T]; a broad `list` (no element type),
+            # List[any] and the empty literal give MutableArray[any] -- a
+            # fully initialized array whose contract is the whole `any`
+            # domain, never the raw substrate type.
+            lassign $shape _ l
+            set list [Unshaped [lindex $argTypes $l]]
+            set elem any
+            if {[IsList $list]} {
+                set elem [hir::containers::ElementContract [lindex $list 1]]
+            }
+            return [MakeMutArray $elem 0]
+        }
+        mutarray-generate {
+            # (n, factory) -> MutableArray[T], T what the factory's callable
+            # contract returns (each slot holds one call's result); a
+            # factory of unknown contract gives MutableArray[any].
+            lassign $shape _ f
+            return [MakeMutArray [hir::containers::ElementContract [CallableResult [lindex $argTypes $f]]] 0]
         }
         mutvec-from-list {
             # List[T] -> MutableVector[T] (MUTABLE-VECTOR.md); the empty
@@ -2803,14 +2891,10 @@ proc hir::types::Call {hirVar ctxVar e} {
                 set result [{*}[dict get $ctx spec] call $e $block $argTypes]
             }
             if {!$dead} {
-                # An intrinsic container rule of the resolved callee
-                # (hir/containers.tcl): the mutarray library's from_list and create
-                # relate their result to their argument types, which the
-                # non-generic function type cannot say.
-                set rule [hir::containers::RuleOf $hir $block]
-                if {$rule ne ""} {
-                    set result [hir::containers::CallResult $rule $argTypes $result]
-                } elseif {!$spec && ([dict get $ctx reachable] || [hir::traits::IsPolymorphic $hir $block])} {
+                # (No call of a Botlish function is typed by a precomputed
+                # rule instead of its body: MutableArray's relational
+                # constructors are intrinsics, MUTABLE-ARRAY.md.)
+                if {!$spec && ([dict get $ctx reachable] || [hir::traits::IsPolymorphic $hir $block])} {
                     # (A call of a trait-polymorphic function always gets its
                     # instance, reachable or not: its witnesses decide which
                     # specialization the call is, TRAITS.md.)
@@ -2881,10 +2965,17 @@ proc hir::types::Call {hirVar ctxVar e} {
         # (-errors: `argv`'s InvalidArgumentEncoding) -- except a coroutine
         # segment (start, resume: COROUTINES.md), which ends with whatever
         # declared error its body lets escape, as the handle's type says.
-        set calleeErrors [dict get [core::native::metadata [dict get [hir::symbol $hir [lindex $target 1]] name]] errors]
-        if {[dict get [core::native::metadata [dict get [hir::symbol $hir [lindex $target 1]] name]] completion]
-                && [IsCoroutine [lindex $argTypes 0]]} {
+        set meta [core::native::metadata [dict get [hir::symbol $hir [lindex $target 1]] name]]
+        set calleeErrors [dict get $meta errors]
+        if {[dict get $meta completion] && [IsCoroutine [lindex $argTypes 0]]} {
             set calleeErrors [CoroutineErrors [lindex $argTypes 0]]
+        }
+        if {[dict get $meta errorsFrom] ne ""} {
+            # A native that calls a callable argument (-errors-from:
+            # mutable_array::generate's factory) completes with whatever
+            # declared error that callable's contract permits.
+            set calleeErrors [lsort -unique [concat $calleeErrors \
+                [CallableErrors $hir [lindex $argTypes [dict get $meta errorsFrom]]]]]
         }
     } elseif {[IsFn $calleeType] || [IsCoroutine $calleeType]} {
         # A structural callee's declared error contract (a Fn's, or a

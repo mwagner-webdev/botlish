@@ -327,11 +327,12 @@ proc hir::affine::Consumer {hir parent e} {
             return [Into $hir $e [list move break $p] $dest "the value of a loop of type"]
         }
         loop - listloop - countloop - lockloop {
-            if {$role eq "operand" && [dict get $node kind] eq "listloop" && [hir::types::IsMutVec $type]} {
-                # A consuming loop over an affine MutableVector
-                # (MUTABLE-VECTOR.md): the vector moves into the loop, which
-                # moves each element, in order, into the loop variable, and
-                # releases what is left when it is left early.
+            if {$role eq "operand" && [dict get $node kind] eq "listloop" && [hir::mutvec::Kind $type] ne ""} {
+                # A consuming loop over an affine MutableVector or MutableArray
+                # (MUTABLE-VECTOR.md, MUTABLE-ARRAY.md): the collection moves
+                # into the loop, which moves each element, in order, into the
+                # loop variable, and releases what is left when it is left
+                # early.
                 return [list move loop $p]
             }
             if {$role eq "operand"} {
@@ -356,87 +357,7 @@ proc hir::affine::CallConsumer {hir p e role type} {
     set index [lsearch -exact [dict get $node args] $e]
     set native [NativeName $hir $p]
     if {$native ne ""} {
-        switch -- $native {
-            coroutine#start - coroutine::done? - coroutine#release {
-                if {$index == 0} {
-                    if {[dict get $hir exprs $e kind] ne "ref"} {
-                        return [Temporary $hir $e "observe"]
-                    }
-                    return {use observe}
-                }
-            }
-            coroutine#resume {
-                if {$index == 0} {
-                    if {[dict get $hir exprs $e kind] ne "ref"} {
-                        return [Temporary $hir $e "resume"]
-                    }
-                    return {use resume}
-                }
-                return [list move message $p $index]
-            }
-            list {
-                set dest [hir::typeOf $hir $p]
-                if {[hir::types::IsAffine $dest]} {
-                    return [list move element $p $index]
-                }
-                return [Erasure $hir $e "an element of a List of type [hir::types::show $dest]"]
-            }
-            list::length {
-                if {[dict get $hir exprs $e kind] ne "ref"} {
-                    return [Temporary $hir $e "measure"]
-                }
-                return {use length}
-            }
-            mutable_vector::length - mutable_vector::empty? {
-                # A non-consuming observation of the vector (MUTABLE-
-                # VECTOR.md), like coroutine::done?: it needs an owner.
-                if {$index == 0} {
-                    if {[dict get $hir exprs $e kind] ni {ref project}} {
-                        return [Temporary $hir $e "measure"]
-                    }
-                    return {use observe}
-                }
-            }
-            mutable_vector::at {
-                if {$index == 0} {
-                    return [list reject AFFINE-VECTOR-COPY-OUT \
-                        "mutable_vector::at would copy an affine element out of [Named $hir $e] ([TypeText $hir $e]) while the vector still owns it, making a second owner: move it out instead -- `take(i)` removes it, `pop()` removes the last one, `swap(i, replacement)` exchanges it for another (there are no references to elements)"]
-                }
-            }
-            mutable_vector::push - mutable_vector::pop - mutable_vector::take - mutable_vector::clear
-            - mutable_vector#take_front - mutable_vector#clear_drop {
-                if {$index == 0} {
-                    # The receiver place: updated in place, still the owner
-                    # (a temporary receiver is MUTABLE-VECTOR-RECEIVER).
-                    return {use place}
-                }
-                return [list move vector $p $index]
-            }
-            mutable_vector::swap - mutable_vector#swap_drop {
-                if {$index == 0} {
-                    return {use place}
-                }
-                return [list move vector $p $index]
-            }
-            mutable_vector::from_list {
-                # The List moves into the conversion: the vector becomes the
-                # one owner of every element.
-                return [list move vector $p $index]
-            }
-            == - hash - immutable_set::from_list - immutable_set::contains {
-                return [list reject AFFINE-EQUALITY-UNSUPPORTED \
-                    "[Named $hir $e] is an affine [TypeText $hir $e], which has no equality and no hash: comparing or hashing it would observe the identity of what it owns (compare unrestricted fields instead)"]
-            }
-            list::at - list::append {
-                return [list reject AFFINE-LIST-OPERATION-UNSUPPORTED \
-                    "$native would copy affine elements out of [Named $hir $e] ([TypeText $hir $e]) while the List still owns them (whole-List moves are supported; element-wise access waits for ownership-moving operations)"]
-            }
-        }
-        if {[hir::types::IsList $type]} {
-            return [list reject AFFINE-LIST-OPERATION-UNSUPPORTED \
-                "$native is not an ownership-moving List operation: it cannot take [Named $hir $e], a List of affine values ([TypeText $hir $e])"]
-        }
-        return [Erasure $hir $e "an argument of the native $native, which takes any value"]
+        return [NativeConsumer $hir $p $e $index $native $type]
     }
     set calleeType [hir::typeOf $hir [dict get $node callee]]
     set target [hir::contexts::Callee $hir $p]
@@ -451,6 +372,15 @@ proc hir::affine::CallConsumer {hir p e role type} {
             # instance owns the argument with its own type (verifyInstance).
             if {$entry eq {} || [hir::types::IsAffine $entry] || [hir::signatures::CallableAdmits $type $entry]
                     || ![hir::types::subtype $type $entry]} {
+                if {[Unanalyzed $hir $p]} {
+                    # No instance means no analysis of the body for this
+                    # argument: whatever the body does with it -- duplicate
+                    # it, erase it -- would go unseen (MUTABLE-ARRAY.md,
+                    # "Library ownership").
+                    set paramName [dict get $hir bindings [lindex [dict get $hir exprs $target params] $index] name]
+                    return [list reject AFFINE-ERASURE-UNSUPPORTED \
+                        "[Named $hir $e] is an affine [TypeText $hir $e], passed to the untyped parameter \"$paramName\" of a function whose body was not analyzed for it (its semantic instance was declined): the body could duplicate or lose it unseen (declare the parameter's type)"]
+                }
                 return [list move arg $p $index]
             }
             return [Erasure $hir $e "the argument of a parameter whose inferred contract is [hir::types::show $entry]"]
@@ -469,6 +399,120 @@ proc hir::affine::CallConsumer {hir p e role type} {
         return [Erasure $hir $e "an argument of type [hir::types::show $declared] of a callable of type [hir::types::show $calleeType]"]
     }
     return [Erasure $hir $e "an argument of a function value whose parameters are not known"]
+}
+
+# The consumer of affine value E (of static TYPE), argument INDEX of call P of
+# the root native NATIVE: what the native's ownership role for that argument
+# (core/native.tcl's -ownership) says it does with the value -- never the
+# native's name. A native without a role for it erases the value (`erase`).
+proc hir::affine::NativeConsumer {hir p e index native type} {
+    set role [core::native::ownershipRole $native $index]
+    # The receiver of a collection operation may be a place path (a field
+    # projection of a binding), which the operation reaches in place.
+    set collection [expr {[hir::mutvec::OpKind $hir $p] ne "" && $index == 0}]
+    set kind [dict get $hir exprs $e kind]
+    switch -- $role {
+        observe - release {
+            # A non-consuming observation (a length, a coroutine's done?, a
+            # start): the value needs an owner, which keeps owning it.
+            if {$kind ne "ref" && !($collection && $kind eq "project")} {
+                return [Temporary $hir $e "observe"]
+            }
+            return {use observe}
+        }
+        place {
+            # The receiver place: updated in place, still the owner (a
+            # temporary receiver is MUTABLE-PLACE-RECEIVER).
+            return {use place}
+        }
+        resume {
+            # A resume of a coroutine handle (consume-and-replace behind the
+            # same owner), never a move.
+            if {$kind ne "ref"} {
+                return [Temporary $hir $e "resume"]
+            }
+            return {use resume}
+        }
+        message {
+            return [list move message $p $index]
+        }
+        move {
+            # Moved once into the operation: stored in its result or in its
+            # receiver collection.
+            return [list move [MoveInto $native] $p $index]
+        }
+        element {
+            set dest [hir::typeOf $hir $p]
+            if {[hir::types::IsAffine $dest]} {
+                return [list move element $p $index]
+            }
+            return [Erasure $hir $e "an element of a List of type [hir::types::show $dest]"]
+        }
+        repeat {
+            return [list reject AFFINE-DUPLICATION-UNSUPPORTED \
+                "$native would place [Named $hir $e], an affine [TypeText $hir $e], in every slot it makes -- one value with several owners: an affine value has exactly one (make one value per slot with a factory instead -- mutable_array::generate(n, make) calls `make(i)` once for each slot -- or repeat an unrestricted value)"]
+        }
+        factory {
+            return [list reject AFFINE-ERASURE-UNSUPPORTED \
+                "[Named $hir $e] is an affine [TypeText $hir $e], which cannot be the factory of $native: a factory is called once per element, and an affine callable could be called once at most"]
+        }
+        copy-out {
+            set what [hir::mutvec::Kind $type]
+            if {$what ne ""} {
+                return [list reject AFFINE-ELEMENT-COPY-OUT [CopyOutMessage $hir $e $native $what]]
+            }
+            if {[hir::types::IsList $type] || $native in {list::at list::append}} {
+                return [list reject AFFINE-LIST-OPERATION-UNSUPPORTED \
+                    "$native would copy affine elements out of [Named $hir $e] ([TypeText $hir $e]) while the List still owns them (whole-List moves are supported; element-wise access waits for ownership-moving operations)"]
+            }
+            return [Erasure $hir $e "an argument of the native $native, which copies elements out of it"]
+        }
+        equality {
+            return [list reject AFFINE-EQUALITY-UNSUPPORTED \
+                "[Named $hir $e] is an affine [TypeText $hir $e], which has no equality and no hash: comparing or hashing it would observe the identity of what it owns (compare unrestricted fields instead)"]
+        }
+    }
+    if {[hir::types::IsList $type]} {
+        return [list reject AFFINE-LIST-OPERATION-UNSUPPORTED \
+            "$native is not an ownership-moving List operation: it cannot take [Named $hir $e], a List of affine values ([TypeText $hir $e])"]
+    }
+    return [Erasure $hir $e "an argument of the native $native, which takes any value"]
+}
+
+# The diagnostic of NATIVE copying an affine element out of collection E (of
+# KIND vector or array) while the collection keeps owning it.
+proc hir::affine::CopyOutMessage {hir e native kind} {
+    if {$kind eq "array"} {
+        set alternatives "`swap(i, replacement)` exchanges it for another, and a loop over the array consumes it, moving each element out in order"
+        set what "the array"
+    } else {
+        set alternatives "`take(i)` removes it, `pop()` removes the last one, `swap(i, replacement)` exchanges it for another"
+        set what "the vector"
+    }
+    return "$native would copy an affine element out of [Named $hir $e] ([TypeText $hir $e]) while $what still owns it, making a second owner: move it out instead -- $alternatives (there are no references to elements)"
+}
+
+# Where the `move` role of NATIVE moves a value: into a vector, an array, or
+# (any other native) its argument position.
+proc hir::affine::MoveInto {native} {
+    if {[string match mutable_vector* $native]} {
+        return vector
+    }
+    if {[string match mutable_array* $native]} {
+        return array
+    }
+    return arg
+}
+
+# 1 if call P of a block had its semantic instance declined (hir/semantic.tcl:
+# a budget, or no creation environment yet): the only way an affine argument
+# of an untyped parameter would reach a body no analysis saw with it.
+proc hir::affine::Unanalyzed {hir p} {
+    if {![hir::semantic::Enabled] || ![dict exists $hir semantic declined]} {
+        return 0
+    }
+    set ctx [expr {[dict exists $hir semanticContext] ? [dict get $hir semanticContext] : "generic"}]
+    return [expr {[dict exists $hir semantic declined [list $ctx $p]] && [hir::semantic::InstanceOf $hir $p] eq ""}]
 }
 
 # MOVE if DEST (the type E's value flows into) is affine; else the erasure
@@ -970,7 +1014,8 @@ proc hir::affine::Use {hirVar e b state} {
     variable consumed
     set name [dict get $hir exprs $e name]
     set p [lindex [dict get $parent $e] 0]
-    if {[NativeName $hir $p] in [list [core::coroutines::releaseNative] [DropNative]]} {
+    if {[NativeName $hir $p] ne "" && [core::native::ownershipRole [NativeName $hir $p] \
+            [lsearch -exact [dict get $hir exprs $p args] $e]] eq "release"} {
         # A release the compiler wrote out (HIR rebuilt from lowered Core IR):
         # placed where the value is dead, and of a binding possibly moved on
         # some path (Releases) -- never a use to check.
@@ -1046,6 +1091,9 @@ proc hir::affine::MoveText {hir move} {
         }
         vector {
             return "$source moved into a MutableVector  ([Where $hir $move])"
+        }
+        array {
+            return "$source moved into a MutableArray  ([Where $hir $move])"
         }
         loop {
             return "$source consumed by a loop  ([Where $hir $move])"
@@ -1711,6 +1759,8 @@ proc hir::affine::temporaries {hir} {
 #   l D                    a List: drop every element by D, in index order
 #   v D                    a MutableVector: drop every live element by D,
 #                          lowest index first, leaving it empty
+#   a D                    a MutableArray: drop every element by D, lowest
+#                          index first
 #   s N . (SLOT . D)*N     a struct: drop field SLOT (its index in the
 #                          struct's layout) by D, for each of its N affine
 #                          fields, in reverse layout (declaration) order
@@ -1740,6 +1790,15 @@ proc hir::affine::Descriptor {hir type {exclude {}}} {
             return ""
         }
         return "v$inner"
+    }
+    if {[hir::types::IsMutArray $type]} {
+        # A MutableArray drops every element, first to last (MUTABLE-
+        # ARRAY.md).
+        set inner [Descriptor $hir [lindex $type 1]]
+        if {$inner eq ""} {
+            return ""
+        }
+        return "a$inner"
     }
     if {[hir::types::IsStructLike $type]} {
         set layout [hir::types::StructLayout $type]

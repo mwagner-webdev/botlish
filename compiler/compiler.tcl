@@ -1587,9 +1587,10 @@ proc core::compiler::CompileListLoop {ctxVar e} {
     set parentFrame [CurrentFrameExpr $ctx]
     set consuming [hir::mutvec::IsConsumingLoop $hir $e]
     if {$consuming} {
-        # A loop consuming an affine MutableVector (MUTABLE-VECTOR.md): each
-        # iteration moves the vector's first element out into the loop
-        # variable; what an early exit leaves is released by that exit.
+        # A loop consuming an affine MutableVector or MutableArray
+        # (MUTABLE-VECTOR.md, MUTABLE-ARRAY.md): each iteration moves the
+        # collection's first element out into the loop variable; what an
+        # early exit leaves is released by that exit.
         Emit ctx "set $items [BoxWord $iterable]"
         NoteTemp ctx [N $e iterable] [Op box "\$$items" any]
     } else {
@@ -1603,8 +1604,8 @@ proc core::compiler::CompileListLoop {ctxVar e} {
     # proc activation, where a once-set Tcl variable otherwise stays set.
     Emit ctx "unset -nocomplain $result"
     if {$consuming} {
-        Emit ctx "while \{\[llength \[core::mutvec::items \$$items\]\] > 0\} \{"
-        Emit ctx "    set $item \[core::mutvec::takeFront \$$items\]"
+        Emit ctx "while \{\[core::mutvec::remaining \$$items\] > 0\} \{"
+        Emit ctx "    set $item \[core::mutvec::drainFront \$$items\]"
     } else {
         Emit ctx "foreach $item \$$items \{"
     }

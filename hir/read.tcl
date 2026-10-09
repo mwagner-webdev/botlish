@@ -644,6 +644,7 @@ proc hir::read::TakeExprLine {hirVar level} {
             || [string match error-release=* [lindex $tail end]]
             || [string match consumed=* [lindex $tail end]]
             || [string match vector=* [lindex $tail end]]
+            || [string match array=* [lindex $tail end]]
             || [string match place=* [lindex $tail end]])} {
         set found [linsert $found 0 [lindex $tail end]]
         set tail [lrange $tail 0 end-1]

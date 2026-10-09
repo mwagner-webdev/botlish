@@ -124,7 +124,16 @@ fn show_into(v: Value, out: &mut String) {
             out.push_str(&format!("<native {name}>"));
         }
         Kind::MutArray => {
-            out.push_str(&format!("<mutable-array capacity={}>", mutarray_of(v).slots.len()));
+            // Matches core::value::show's mutarray rendering: the current
+            // elements, never the header or its backing.
+            out.push_str("<mutable-array [");
+            for (i, item) in super::ops::array_elements(v).enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                show_into(item, out);
+            }
+            out.push_str("]>");
         }
         Kind::Coroutine => {
             out.push_str("<coroutine>");
@@ -236,11 +245,12 @@ pub fn tcl_value(v: Value) -> Result<String, RtError> {
                 show(v)
             )));
         }
+        // An array's current elements, under a tag of their own: the host
+        // (native::Outcome) makes them an array value of its own runtime
+        // (core/mutarray.tcl), exactly as a vector's (below).
         Kind::MutArray => {
-            return Err(RtError::Unsupported(format!(
-                "the native backend cannot return a MutableArray to the host (finalize it to a List first): {}",
-                show(v)
-            )));
+            let items = super::ops::array_elements(v).map(tcl_value).collect::<Result<Vec<_>, _>>()?;
+            tcl_list(&["mutarrayitems".to_string(), tcl_list(&items)])
         }
         Kind::Coroutine => {
             return Err(RtError::Unsupported(format!(

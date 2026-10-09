@@ -225,4 +225,4 @@ proc core::hashing::hash {v} {
 }
 
 core::native::register hash -arity 1 -impl core::hashing::hash \
-    -param-types any -result-type int -result-range nonneg -runtime hash
+    -param-types any -result-type int -result-range nonneg -runtime hash -ownership {equality}

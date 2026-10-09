@@ -97,6 +97,7 @@ core::native::register mod  -arity 2 -impl core::primitives::modulo \
     -param-types {int int} -result-type int -result-range nonneg -runtime bigint -context-free 1
 
 core::native::register ==   -arity 2 -impl core::primitives::valueEqual \
-    -param-types {any any} -result-type bool -runtime structural-equality -context-free 1
+    -param-types {any any} -result-type bool -runtime structural-equality -context-free 1 \
+    -ownership {equality equality}
 core::native::register list -arity * -impl core::primitives::makeList \
-    -result-type list -runtime list-alloc -result-shape elements -context-free 1
+    -result-type list -runtime list-alloc -result-shape elements -context-free 1 -ownership {element}

@@ -314,11 +314,11 @@ test mv-affine-from-list {item 12: from_list of an affine List consumes the List
         [lrange [mvReleases "${mvDecls}fn f() -> int:\n    xs = \[make(1), make(2)\]\n    v = mutable_vector::from_list(xs)\n    v.length()\nf()\n"] 0 2]
 } -result {USE-AFTER-MOVE {{value 2} 2 1}}
 
-test mv-affine-at {item 19: `at` of an affine element is AFFINE-VECTOR-COPY-OUT, naming the moving alternatives -- also through a struct field path, whose receiver is a place, not a field read} -body {
+test mv-affine-at {item 19: `at` of an affine element is AFFINE-ELEMENT-COPY-OUT, naming the moving alternatives -- also through a struct field path, whose receiver is a place, not a field read} -body {
     list [mvCode "${mvDecls}fn f() -> int:\n    q = empty_queue()\n    s = mutable_vector::at(q, 0):\n        on IndexNotFound:\n            make(1)\n    1\nf()\n"] \
         [mvCode "${mvDecls}struct Sched:\n    queue: MutableVector\[Coroutine{args: \[Command\], return: Event}\]\nfn f() -> int:\n    s = Sched {queue: empty_queue()}\n    s.queue.push(make(1))\n    x = mutable_vector::at(s.queue, 0):\n        on IndexNotFound:\n            make(1)\n    1\nf()\n"] \
         [mvMessage "${mvDecls}fn f() -> int:\n    q = empty_queue()\n    s = mutable_vector::at(q, 0):\n        on IndexNotFound:\n            make(1)\n    1\nf()\n"]
-} -result {AFFINE-VECTOR-COPY-OUT AFFINE-VECTOR-COPY-OUT {mutable_vector::at would copy an affine element out of `q` (MutableVector[Coroutine{args: [Command], return: Event, errors: []}]) while the vector still owns it, making a second owner: move it out instead -- `take(i)` removes it, `pop()` removes the last one, `swap(i, replacement)` exchanges it for another (there are no references to elements)}}
+} -result {AFFINE-ELEMENT-COPY-OUT AFFINE-ELEMENT-COPY-OUT {mutable_vector::at would copy an affine element out of `q` (MutableVector[Coroutine{args: [Command], return: Event, errors: []}]) while the vector still owns it, making a second owner: move it out instead -- `take(i)` removes it, `pop()` removes the last one, `swap(i, replacement)` exchanges it for another (there are no references to elements)}}
 
 test mv-affine-pop-take-swap {items 22-27: pop and take move exactly one element out (the vector owns the rest), swap moves the replacement in and the old element out; a resumed element is the same execution; every coroutine is released exactly once} -body {
     set text "${mvDecls}fn f() -> List\[int\] errors IndexNotFound:\n    q = mutable_vector::from_list(\[make(1), make(2), make(3)\])\n    a = q.pop()\n    b = q.take(0)\n    e1 = b(Command {value: 10})\n    old = q.swap(0, b)\n    e2 = old(Command {value: 20})\n    \[e1.value, e2.value, q.length()\]\nr = f():\n    on IndexNotFound:\n        \[\]\nr\n"
@@ -423,18 +423,18 @@ test mv-receiver-places {items 13, 14: locals, parameters, struct field paths an
     mvAgree "import mutable_vector\nstruct Inner:\n    v: MutableVector\[int\]\nstruct Outer:\n    inner: Inner\nfn param(v: MutableVector\[int\]) -> int:\n    v.push(1)\n    v.push(2)\n    v.length()\no = Outer {inner: Inner {v: mutable_vector::from_list(\[\])}}\no.inner.v.push(5)\no.inner.v.push(6)\nlocal = mutable_vector::from_list(\[9\])\nlocal.push(8)\n\[param(local), o.inner.v.length(), local.length()\]\n"
 } -result {value {[4, 2, 2]}}
 
-test mv-receiver-temporary {item 15: a mutation of a temporary (a call's result, a List element) or of a non-vector is MUTABLE-VECTOR-RECEIVER: the updated vector would be lost} -body {
+test mv-receiver-temporary {item 15: a mutation of a temporary (a call's result, a List element) or of a non-vector is MUTABLE-PLACE-RECEIVER: the updated vector would be lost} -body {
     list [mvCode "import mutable_vector\nfn make() -> MutableVector\[int\]:\n    mutable_vector::from_list(\[1\])\nmake().push(2)\n1\n"] \
         [mvMessage "import mutable_vector\nfn make() -> MutableVector\[int\]:\n    mutable_vector::from_list(\[1\])\nmake().push(2)\n1\n"] \
         [mvCode "import mutable_vector\nimport list\nxs = \[mutable_vector::from_list(\[1\])\]\nx = list::at(xs, 0).pop():\n    on IndexNotFound:\n        0\n1\n"] \
         [mvCode "import mutable_vector\nfn f(x: str) -> int:\n    y = x\n    mutable_vector::push(y, 1)\n    1\nf(\"s0\")\n"]
-} -result {MUTABLE-VECTOR-RECEIVER {the receiver of mutable_vector::push is not a place: it is a temporary value, so the updated vector would be lost (a MutableVector is a value; bind it to a name, mutate the name, and use the name afterwards)} MUTABLE-VECTOR-RECEIVER MUTABLE-VECTOR-RECEIVER}
+} -result {MUTABLE-PLACE-RECEIVER {the receiver of mutable_vector::push is not a place: it is a temporary value, so the updated vector would be lost (a MutableVector is a value; bind it to a name, mutate the name, and use the name afterwards)} MUTABLE-PLACE-RECEIVER MUTABLE-PLACE-RECEIVER}
 
 test mv-receiver-captured {items 14, 76: a nested function may neither mutate a vector of its enclosing function nor capture one its enclosing function mutates (bindings never change underneath a closure)} -body {
     list [mvCode "import mutable_vector\nfn f() -> int:\n    v = mutable_vector::from_list(\[1\])\n    fn g() -> int:\n        v.push(3)\n        1\n    g()\nf()\n"] \
         [mvCode "import mutable_vector\nfn f() -> int:\n    v = mutable_vector::from_list(\[1\])\n    fn g() -> int:\n        v.length()\n    v.push(2)\n    g()\nf()\n"] \
         [mvAgree "import mutable_vector\nfn f() -> int:\n    v = mutable_vector::from_list(\[1\])\n    fn g() -> int:\n        v.length()\n    g()\nf()\n"]
-} -result {MUTABLE-VECTOR-RECEIVER MUTABLE-VECTOR-CAPTURE {value 1}}
+} -result {MUTABLE-PLACE-RECEIVER MUTABLE-PLACE-CAPTURE {value 1}}
 
 test mv-path-release {an affine binding moved on some paths only is released on each path that still owns it -- never after the join, where a moved path's new owner (a vector place, a join's value) lives on; a path no statement ends is AFFINE-PATH-RELEASE-UNSUPPORTED} -body {
     list [mvReleases "${mvDecls}fn f(c: bool) -> int:\n    queue = empty_queue()\n    coroutine {step} = worker(1)\n    if c:\n        queue.push(step)\n    queue.length()\n\[f(true), f(false)\]\n"] \
@@ -447,7 +447,7 @@ test mv-path-release {an affine binding moved on some paths only is released on 
 # HIR evidence (items 53, 54, 75)
 
 test mv-hir-evidence {item 75: HIR text distinguishes an observation, a mutation of a place (its root binding and field path), an affine element moved in (`move`), moved out (`move-out`), a consuming loop, a logical copy (mutable_vector#share), and the drops (`release=`); it reads back to the same text} -body {
-    set text "${mvPlainDecls}struct State:\n    queue: MutableVector\[Coroutine{args: \[Command\], return: Event}\]\nfn f() -> int errors IndexNotFound:\n    s = State {queue: empty_queue()}\n    s.queue.push(make(1))\n    q = mutable_vector::from_list(\[make(2)\])\n    coroutine {step} = worker(3)\n    q.push(step)\n    a = q.pop()\n    n = q.length()\n    xs = loop t in q:\n        1\n    v = mutable_vector::from_list(\[1\])\n    w = v\n    w.push(2)\n    n\nr = f():\n    on IndexNotFound:\n        0\nr\n"
+    set text "${mvPlainDecls}struct State:\n    queue: MutableVector\[Coroutine{args: \[Command\], return: Event}\]\nfn f() -> int errors IndexNotFound:\n    s = State {queue: empty_queue()}\n    s.queue.push(make(1))\n    q = mutable_vector::from_list(\[make(2)\])\n    coroutine {step} = worker(3)\n    q.push(step)\n    a = q.pop()\n    n = q.length()\n    xs = loop t in q:\n        1\n    v = mutable_vector::from_list(\[1\])\n    w = v\n    w.push(2)\n    n + v.length() - 1\nr = f():\n    on IndexNotFound:\n        0\nr\n"
     set hir [surface::compile $text -warnings off]
     set formatted [hir::format $hir]
     set flags {}
@@ -479,7 +479,7 @@ test mv-cow-evidence {items 61, 87, 93: natively a logical copy shares the backi
         [dict get $u shares] [dict get $u detaches] [dict get $u detachElements] [expr {[dict get $u growths] < 20}]
 } -cleanup {unset -nocomplain copy unique c u} -result {{value 2003} 1 1 1000 0 0 0 1}
 
-test mv-cow-fresh-results {item 39: a function's result moves its own place's header out (a mutated local or parameter dies with the call), so a call of a function whose every result is fresh enters the caller's place without a copy; a function that may return a vector some other place holds (an unmutated parameter, on one path) is copied on entry, and the caller's vector never changes} -constraints linuxX86_64 -body {
+test mv-cow-fresh-results {item 39: a function's result moves its own place's header out (a mutated local or parameter dies with the call), so a call of a function whose every result is fresh enters the caller's place without a copy; a function that may return a vector some other place holds (an unmutated parameter, on one path) is copied, and the caller's vector never changes -- unless the caller passes the vector's last use, which moves it (MUTABLE-ARRAY.md, "Last uses and consumed parameters": the last `pick(true, a)` copies nothing)} -constraints linuxX86_64 -body {
     set pre "import mutable_vector\nfn ints() -> MutableVector\[int\]:\n    mutable_vector::from_list(\[\])\nfn build(n: int) -> MutableVector\[int\]:\n    v = ints()\n    loop i from 0 to n:\n        v.push(i)\n    v\nfn id(v: MutableVector\[int\]) -> MutableVector\[int\]:\n    v\nfn keep(v: MutableVector\[int\]) -> MutableVector\[int\]:\n    v.push(1)\n    v\nfn pick(c: bool, v: MutableVector\[int\]) -> MutableVector\[int\]:\n    w = build(2)\n    if c:\n        return w\n    v\n"
     lmap body {
         "w = build(5)\nw.push(9)\nw.length()\n"
@@ -491,7 +491,7 @@ test mv-cow-fresh-results {item 39: a function's result moves its own place's he
         set mv [lindex [mvNative $text] 1]
         list [mvAgree $text] [dict get $mv shares] [dict get $mv detaches] [dict get $mv detachElements]
     }
-} -cleanup {unset -nocomplain pre text mv} -result {{{value 6} 0 0 0} {{value {[3, 4]}} 1 1 3} {{value {[3, 5]}} 1 1 3} {{value {[3, 4, 3]}} 2 2 5}}
+} -cleanup {unset -nocomplain pre text mv} -result {{{value 6} 0 0 0} {{value {[3, 4]}} 1 1 3} {{value {[3, 5]}} 1 1 3} {{value {[3, 4, 3]}} 2 1 3}}
 
 test mv-cow-generic-results {item 39: a generic function's own body is typed imprecisely (its parameter is any-like), so returning its argument -- bare, or in an anonymous struct -- may return a vector some other place holds: its result is never fresh, and the caller's place copies it on entry; the argument never changes} -body {
     set pre "import mutable_vector\nfn v3() -> MutableVector\[int\]:\n    mutable_vector::from_list(\[1, 2, 3\])\nfn same(x):\n    x\nfn wrap(x):\n    {data: x}\n"

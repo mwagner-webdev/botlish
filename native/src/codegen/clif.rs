@@ -1896,6 +1896,17 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         MvClearDrop => ("rt_mv_clear_drop", None, false, None),
                         MvSwapDrop => ("rt_mv_swap_drop", None, true, None),
                         CtxRoot => ("rt_context_root", None, false, None),
+                        // MutableArray (MUTABLE-ARRAY.md, runtime/ops.rs).
+                        MutArrayCreate => ("rt_mutarray_create", None, true, Some(("mutarraycreate", KIND_MUTARRAY))),
+                        MutArrayFromList => ("rt_mutarray_from_list", None, false, Some(("mutarrayfromlist", KIND_MUTARRAY))),
+                        MutArrayGenerate => ("rt_mutarray_generate", None, true, None),
+                        MutArrayGenerateDrop => ("rt_mutarray_generate_drop", None, true, None),
+                        MutArraySwap => ("rt_mutarray_swap", None, true, None),
+                        MutArraySwapDrop => ("rt_mutarray_swap_drop", None, true, None),
+                        MutArraySetDrop => ("rt_mutarray_set_drop", None, true, None),
+                        MutArrayToList => ("rt_mutarray_to_list", None, false, Some(("mutarraytolist", KIND_LIST))),
+                        MutArrayEmpty => ("rt_mutarray_empty", None, false, None),
+                        MutArrayTakeFront => ("rt_mutarray_take_front", None, false, None),
                         // Never fallible (see ops.rs's rt_str_decode_char_at):
                         // a one-character String can never exceed
                         // MAX_COLLECTION_LENGTH. Still routed through

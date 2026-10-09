@@ -88,12 +88,13 @@ namespace eval hir::callables {}
 # elements are.
 proc hir::callables::Bearing {hir type {mutable 1}} {
     if {[hir::types::IsMutArray $type]} {
-        # MUTABLE 0 asks only about *callable* obligations (for the
-        # native-argument policy in ArgContexts), so it looks through the
-        # array's own contract to what its elements bear.
-        if {$mutable && [lindex $type 1] ne "any"} {
-            return 1
-        }
+        # A MutableArray is a value (MUTABLE-ARRAY.md): a position that
+        # forgets its element contract holds a logical copy, which no write
+        # through it can make the original break, so the array bears only
+        # what its elements bear -- as a List or a MutableVector does. (Under
+        # the reference semantics MutableArray had before, an erased alias
+        # could write a value the original's contract excluded, and every
+        # typed array was bearing: PARAMETERIZED-MUTABLEARRAY.md.)
         return [Bearing $hir [lindex $type 1] $mutable]
     }
     if {[hir::types::IsExactBlock $type]} {
@@ -281,13 +282,6 @@ proc hir::callables::CheckPreserved {hirVar arg finalType contextText} {
             }
             incr i
         }
-    }
-    if {[Bearing $hir $type 1] && ![Bearing $hir $type 0]} {
-        # The obligation lost is a MutableArray element contract.
-        hir::Diagnose hir TYPE [format \
-            {cannot erase element contract %s %s: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])} \
-            [hir::types::show $type] $contextText] $arg
-        return
     }
     set name [expr {[hir::types::IsExactBlock $type] ? [Name $hir [lindex $type 1]] : ""}]
     set label [expr {$name ne "" ? "\"$name\""
@@ -529,14 +523,6 @@ proc hir::callables::ArgContexts {hir e} {
     set none [lrepeat [llength $args] ""]
     lassign [dict get $node target] targetKind target
     if {$targetKind eq "block"} {
-        set rule [hir::containers::RuleOf $hir $target]
-        if {$rule ne ""} {
-            # A library function with an intrinsic container rule
-            # (the mutarray library's from_list and create, hir/containers.tcl): its
-            # arguments land inside the typed result, which keeps their
-            # contracts.
-            return [hir::containers::BlockContexts $hir $e $rule]
-        }
         set declared [hir::signatures::entryTypes $hir $target]
         if {[llength $declared] != [llength $args]} {
             return $none

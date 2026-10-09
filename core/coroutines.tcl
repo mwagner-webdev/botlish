@@ -320,12 +320,12 @@ proc core::coroutines::fresh {script} {
 core::native::register coroutine#create -arity 1 -impl core::coroutines::createImpl \
     -result-type coroutine -result-shape {coroutine-create}
 core::native::register coroutine#start -arity 1 -impl core::coroutines::startImpl \
-    -param-types {coroutine} -completion 1 -result-shape {coroutine-outward}
+    -param-types {coroutine} -completion 1 -result-shape {coroutine-outward} -ownership {observe}
 core::native::register coroutine#resume -arity * -impl core::coroutines::resumeImpl \
-    -completion 1 -result-shape {coroutine-outward}
+    -completion 1 -result-shape {coroutine-outward} -ownership {resume message}
 core::native::register coroutine#yield -arity 1 -impl core::coroutines::yieldImpl \
     -result-shape {coroutine-yield}
 core::native::register coroutine::done? -arity 1 -impl core::coroutines::doneImpl \
-    -param-types {coroutine} -result-type bool
+    -param-types {coroutine} -result-type bool -ownership {observe}
 core::native::register coroutine#release -arity 1 -impl core::coroutines::releaseImpl \
-    -param-types {coroutine} -result-type unit
+    -param-types {coroutine} -result-type unit -ownership {release}
