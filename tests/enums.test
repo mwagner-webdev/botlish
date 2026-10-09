@@ -318,6 +318,12 @@ test enum-case-and-function-same-spelling {a case and a module-level definition 
     enumRun "fn Car():\n    7\n${vehicle}enum Other:\n    Car,\n\[Car(), VehicleType::Car, Other::Car, VehicleType::Car == Other::Car\]\n"
 } -result {same: [7, VehicleType::Car, Other::Car, false]}
 
+test enum-declaration-order {an enum is a type declaration: usable before its declaration, and a type name never collides with a function of that name} -body {
+    list \
+        [enumRun "x = E::A\nenum E:\n    A,\n    B,\n\[x, E::B\]\n"] \
+        [enumRun "fn Color():\n    1\nenum Color:\n    Red,\n\[Color(), Color::Red\]\n"]
+} -result {{same: [E::A, E::B]} {same: [1, Color::Red]}}
+
 test enum-case-is-not-a-constructor {a payload-free case is written without parentheses or braces} -body {
     list \
         [enumRun "${vehicle}VehicleType::Car()\n"] \
@@ -535,6 +541,7 @@ test enum-module-diagnostics {a module's enum follows the import rules of its na
             ambiguous "import geo\nenum geo:\n    A,\ngeo::A\n"
             collision "import type geo::VehicleType\nenum VehicleType:\n    A,\n1\n"
             struct-qualifier "import shapes\nshapes::Point::Car\n"
+            intrinsic-namespace "enum mutable_array:\n    create,\nmutable_array::create(2, 0)\n"
         } {
             writeFile [file join $lib $name.bot] $text
             catch {surface::readProgramFile [file join $lib $name.bot]} message options
@@ -542,7 +549,7 @@ test enum-module-diagnostics {a module's enum follows the import rules of its na
         }
         set results
     }
-} -result {MISSING-IMPORT UNKNOWN-NAMESPACE UNKNOWN-ENUM-CASE AMBIGUOUS-QUALIFIER TYPE-IMPORT-COLLISION NOT-AN-ENUM}
+} -result {MISSING-IMPORT UNKNOWN-NAMESPACE UNKNOWN-ENUM-CASE AMBIGUOUS-QUALIFIER TYPE-IMPORT-COLLISION NOT-AN-ENUM AMBIGUOUS-QUALIFIER}
 
 # ---------------------------------------------------------------------------
 # Refinements, traits, contexts, coroutines

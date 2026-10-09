@@ -693,9 +693,12 @@ proc surface::modules::CollectAndLoad {stateVar ast {key ""}} {
             # member, and never a reason to load anything.
             set enum [EnumQualifier state $ast $own $env $namespaceName]
             if {$enum ne ""} {
-                if {$namespaceName in $imported} {
+                if {$namespaceName in $imported || [NamespaceExists $namespaceName]} {
+                    # (Imported or not: `mutable_array::create` must never
+                    # mean an intrinsic in one file and a case in another
+                    # because of an enum's name.)
                     Error AMBIGUOUS-QUALIFIER $span \
-                        "\"${namespaceName}::$symbolName\" is ambiguous: \"$namespaceName\" names both an imported namespace and the enum type $enum visible in this file (a qualifier is never resolved by precedence; rename the enum)"
+                        "\"${namespaceName}::$symbolName\" is ambiguous: \"$namespaceName\" names both a namespace and the enum type $enum visible in this file (a qualifier is never resolved by precedence; rename the enum)"
                 }
                 continue
             }
