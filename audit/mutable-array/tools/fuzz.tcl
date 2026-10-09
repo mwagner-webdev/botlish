@@ -20,7 +20,11 @@
 #                 route MUTABLE-ARRAY.md names -- a typed identity, a function
 #                 returning its unmutated parameter on some path, a generic
 #                 identity and a generic wrapper ({data: x}, whose field
-#                 becomes a place), a struct field, a List element and a
+#                 becomes a place), a generic body copying its parameter
+#                 into a local or a struct field it mutates (the dynamic
+#                 copy), a struct field (put in, projected out, and returned
+#                 by a function from its struct parameter), a List element
+#                 (read out in a callee and in the driver itself) and a
 #                 MutableVector element -- where the source is, half the
 #                 time, a fresh array no operation ever mutates (the route
 #                 that let a skipped copy go unnoticed, MUTABLE-VECTOR.md),
@@ -217,6 +221,23 @@ fn same(x):
 
 fn wrap(x):
     {data: x}
+
+fn gpoke(x, i, v):
+    y = x
+    mutable_array::set(y, i, v):
+        on IndexNotFound:
+            unit
+    y
+
+fn gwrapset(x, i, v):
+    s = {data: x}
+    mutable_array::set(s.data, i, v):
+        on IndexNotFound:
+            unit
+    s.data
+
+fn box_values(b: Box) -> MutableArray[int]:
+    b.values
 
 fn first_of(xs: List[MutableArray[int]]) -> MutableArray[int]:
     a = list::at(xs, 0):
@@ -432,9 +453,10 @@ proc UOperation {stateVar} {
     if {[llength $places] < 5} { lappend kinds create fromlist generate }
     if {$places ne {}} {
         lappend kinds copy capacity at at set set swap swap copyop copyop \
-            ident either same wrap box listget vecget bump setcount loop loop find findfail contents
+            ident either same wrap box box listget listat vecget bump setcount loop loop find findfail contents \
+            gpoke gwrapset
     }
-    if {[dict get $state boxes] ne {}} { lappend kinds boxcopy }
+    if {[dict get $state boxes] ne {}} { lappend kinds boxcopy boxget boxget boxread boxread }
     if {[dict size [dict get $state nests]] < 2} { lappend kinds nest }
     if {[dict get $state nests] ne {}} { lappend kinds nestpush nestcopy }
     set kind [Pick $kinds]
@@ -562,6 +584,44 @@ proc UOperation {stateVar} {
             Emit state "$xs = \[$p\]" "$a = first_of($xs)"
             UTouch state $a
             Observe state "contents(first_of($xs))" $seq
+        }
+        listat {
+            # A List element read into a binding of the driver itself: a
+            # copy (the List's element never changes).
+            lassign [USource state $p $seq] p seq
+            set xs [Fresh state xs]
+            set a [UNew state $seq]
+            Emit state "$xs = \[$p\]"
+            Handled state $a "list::at($xs, 0 + zero)" "mutable_array::create(0, 0)"
+            UTouch state $a
+            Observe state "contents(first_of($xs))" $seq
+        }
+        boxget {
+            # A struct field projected into a binding: a copy (the Box's
+            # field, a place of its own, never changes through it).
+            set from [Pick [dict get $state boxes]]
+            set a [UNew state [dict get $state places $from.values]]
+            Emit state "$a = $from.values"
+            UTouch state $a
+        }
+        boxread {
+            # A function returning its struct parameter's field: the caller
+            # still holds the struct, so the result is a copy.
+            set from [Pick [dict get $state boxes]]
+            set a [UNew state [dict get $state places $from.values]]
+            Emit state "$a = box_values($from)"
+            UTouch state $a
+        }
+        gpoke - gwrapset {
+            # A generic body binding its untyped parameter into a local (or
+            # an anonymous struct's field) it then mutates: a dynamic copy
+            # (`d`); the argument never changes.
+            lassign [USource state $p $seq] p seq
+            set i [Rand [expr {$len + 1}]]
+            set x [expr {60 + [Rand 10]}]
+            set a [UNew state [expr {$i < [llength $seq] ? [lreplace $seq $i $i $x] : $seq}]]
+            Emit state "$a = $kind\($p, $i + zero, $x)"
+            UTouch state $a
         }
         vecget {
             # A MutableVector element read out: a copy of the array the
