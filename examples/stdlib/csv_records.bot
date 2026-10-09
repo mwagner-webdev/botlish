@@ -173,25 +173,29 @@ fn peek(text, index) errors LowerUnderrun:
 
     text.substring(index, index + 1)
 
-fn scan_unquoted(text, start, index) errors LowerUnderrun, UpperOverrun:
-    character = text.peek(index)
-    if character == "" or character == "," or character == "\n":
-        return {field: text.substring(start, index), index: index}
+fn quote_at?(text, index) errors IndexNotFound:
+    index < str::length(text) and text.char_at(index) == '"'
 
-    text.scan_unquoted(start, index + 1)
+fn scan_unquoted(text, start, index) errors IndexNotFound, LowerUnderrun, UpperOverrun:
+    if index < str::length(text):
+        character = text.char_at(index)
+        if character != ',' and character != '\n':
+            return text.scan_unquoted(start, index + 1)
 
-fn scan_quoted(text, index, field) errors LowerUnderrun:
+    {field: text.substring(start, index), index: index}
+
+fn scan_quoted(text, index, field) errors IndexNotFound, LowerUnderrun:
     character = text.peek(index)
-    if character == "\"":
-        if text.peek(index + 1) == "\"":
-            return text.scan_quoted(index + 2, field.concat("\""))
+    if text.quote_at?(index):
+        if text.quote_at?(index + 1):
+            return text.scan_quoted(index + 2, field.concat(character))
 
         return {field: field, index: index + 1}
 
     text.scan_quoted(index + 1, field.concat(character))
 
-fn scan_field(text, index) errors LowerUnderrun, UpperOverrun:
-    if text.peek(index) == "\"":
+fn scan_field(text, index) errors IndexNotFound, LowerUnderrun, UpperOverrun:
+    if text.quote_at?(index):
         return text.scan_quoted(index + 1, "")
 
     text.scan_unquoted(index, index)
@@ -204,14 +208,15 @@ fn scan_field(text, index) errors LowerUnderrun, UpperOverrun:
 # whole call chain -- TYPED-MUTARRAY-BUILDER-REFACTOR.md, "Definition-order
 # sensitivity".)
 fn scan_record_rest(text, stop, fields: MutableArray[str], count) errors IndexNotFound, LowerUnderrun, UpperOverrun:
-    delimiter = text.peek(stop)
-    if delimiter == ",":
-        scanned = text.scan_field(stop + 1)
-        more = fields.geo_append(count, scanned.field)
-        return text.scan_record_rest(scanned.index, more, count + 1)
+    if stop < str::length(text):
+        delimiter = text.char_at(stop)
+        if delimiter == ',':
+            scanned = text.scan_field(stop + 1)
+            more = fields.geo_append(count, scanned.field)
+            return text.scan_record_rest(scanned.index, more, count + 1)
 
-    if delimiter == "\n":
-        return {fields: fields.geo_finish(count), stop: stop + 1}
+        if delimiter == '\n':
+            return {fields: fields.geo_finish(count), stop: stop + 1}
 
     {fields: fields.geo_finish(count), stop: stop}
 

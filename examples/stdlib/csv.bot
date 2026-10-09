@@ -26,70 +26,79 @@
 import list
 import str
 
-# The character at index, or "" past the end.
+# The character at index as text, or "" past the end.
 fn peek(text, index) errors LowerUnderrun:
     if index >= str::length(text):
         return ""
 
     text.substring(index, index + 1)
 
+# true if the character at index is a double quote (false past the end).
+fn quote_at?(text, index) errors IndexNotFound:
+    index < str::length(text) and text.char_at(index) == '"'
+
 # An unquoted field that started at start, scanned up to index:
 # {field, index of the "," or "\n" that ends it, or the end}.
-fn scan_unquoted(text, start, index) errors LowerUnderrun, UpperOverrun:
-    character = text.peek(index)
-    if character == "" or character == "," or character == "\n":
-        return {field: text.substring(start, index), index: index}
+fn scan_unquoted(text, start, index) errors IndexNotFound, LowerUnderrun, UpperOverrun:
+    if index < str::length(text):
+        character = text.char_at(index)
+        if character != ',' and character != '\n':
+            return text.scan_unquoted(start, index + 1)
 
-    text.scan_unquoted(start, index + 1)
+    {field: text.substring(start, index), index: index}
 
 # A quoted field whose decoded content so far is field, scanned from index
-# (inside the quotes): {field, index just after the closing quote}.
-fn scan_quoted(text, index, field) errors LowerUnderrun:
+# (inside the quotes): {field, index just after the closing quote}. A
+# doubled quote stands for one: the first quote's own text is kept.
+fn scan_quoted(text, index, field) errors IndexNotFound, LowerUnderrun:
     character = text.peek(index)
-    if character == "\"":
-        if text.peek(index + 1) == "\"":
-            return text.scan_quoted(index + 2, field.concat("\""))
+    if text.quote_at?(index):
+        if text.quote_at?(index + 1):
+            return text.scan_quoted(index + 2, field.concat(character))
 
         return {field: field, index: index + 1}
 
     text.scan_quoted(index + 1, field.concat(character))
 
 # The field starting at index: {field, index just after it}.
-fn scan_field(text, index) errors LowerUnderrun, UpperOverrun:
-    if text.peek(index) == "\"":
+fn scan_field(text, index) errors IndexNotFound, LowerUnderrun, UpperOverrun:
+    if text.quote_at?(index):
         return text.scan_quoted(index + 1, "")
 
     text.scan_unquoted(index, index)
 
 # The rest of the record whose fields so far are fields, from index:
 # {fields, stop: index just after the record's "\n", or the end}.
-fn scan_record(text, index, fields) errors LowerUnderrun, UpperOverrun:
+fn scan_record(text, index, fields) errors IndexNotFound, LowerUnderrun, UpperOverrun:
     scanned = text.scan_field(index)
     more = fields.append(scanned.field)
     stop = scanned.index
-    delimiter = text.peek(stop)
-    if delimiter == ",":
-        return text.scan_record(stop + 1, more)
+    if stop < str::length(text):
+        delimiter = text.char_at(stop)
+        if delimiter == ',':
+            return text.scan_record(stop + 1, more)
 
-    if delimiter == "\n":
-        return {fields: more, stop: stop + 1}
+        if delimiter == '\n':
+            return {fields: more, stop: stop + 1}
 
     {fields: more, stop: stop}
 
 # The records from index on, appended to records.
-fn scan_records(text, index, records) errors LowerUnderrun, UpperOverrun:
+fn scan_records(text, index, records) errors IndexNotFound, LowerUnderrun, UpperOverrun:
     if index >= str::length(text):
         return records
 
     scanned = text.scan_record(index, [])
     text.scan_records(scanned.stop, records.append(scanned.fields))
 
-fn csv_parse(text) errors LowerUnderrun, UpperOverrun:
+fn csv_parse(text) errors IndexNotFound, LowerUnderrun, UpperOverrun:
     text.scan_records(0, [])
 
 # The sample's input is well formed, so none of its slices is ever out of
 # range; the handlers state what a malformed scan would mean.
 parsed = csv_parse("name,age\nAlice,30\nBob,40\n"):
+    on IndexNotFound:
+        []
     on LowerUnderrun:
         []
     on UpperOverrun:

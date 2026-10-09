@@ -177,11 +177,13 @@ test escape-off-2 {BOTLISH_NATIVE_ESCAPE_OPT=0 has the same effect as -escape-op
 # without any change to csv.bot itself.
 
 # csv.bot without its handled sample (the trailing `parsed = csv_parse(...):`
-# block); csvHir appends TEXT, a csv_parse call, handled the same way.
+# block); csvHir appends TEXT, a csv_parse call, handled the same way (its
+# scanners read characters with str::char_at, whose IndexNotFound joins the
+# slices' errors: REFACTOR-WARNINGS-CLEAN.md).
 set ::csvSource [regsub {\n# The sample's input is well formed.*$} [corpus::text csv] "\n"]
 
 proc csvHir {text} {
-    return [sourceHir "$::csvSource\nparsed = $text:\n    on LowerUnderrun:\n        \[\]\n    on UpperOverrun:\n        \[\]\nparsed\n"]
+    return [sourceHir "$::csvSource\nparsed = $text:\n    on IndexNotFound:\n        \[\]\n    on LowerUnderrun:\n        \[\]\n    on UpperOverrun:\n        \[\]\nparsed\n"]
 }
 
 test escape-csv-1 {csv_parse's value is unaffected by scalar replacement} -body {

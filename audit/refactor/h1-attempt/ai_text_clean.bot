@@ -47,6 +47,11 @@ fn cleaner_emoji(c):
         or c == '🔥' or c == '🚀' or c == '✅' or c == '❌'
         or c == '🎉' or c == '🤖' or c == '👍' or c == '💡')
 
+# The punctuation marks normalized to ASCII and, at the same position, the
+# ASCII character each becomes: a translation table (tr(1)'s two sets).
+marks = "–—‘’“”"
+normalized = "--''\"\""
+
 # character (one peek()'d character, or "" past the end), cleaned in
 # isolation: "" for a removed emoji, the ASCII normalization of a targeted
 # punctuation mark, or character itself unchanged. The tests read the
@@ -57,14 +62,9 @@ fn clean_char(character):
         if cleaner_emoji(c):
             return ""
 
-        if c == '–' or c == '—':
-            return "-"
-
-        if c == '‘' or c == '’':
-            return "'"
-
-        if c == '“' or c == '”':
-            return "\""
+        loop i from 0 to str::length(marks):
+            if marks.char_at(i) == c:
+                return normalized.substring(i, i + 1)
 
         if c == '…':
             return "..."

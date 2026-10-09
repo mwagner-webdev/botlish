@@ -17,8 +17,9 @@
 # Sourced by gate.tcl (which defines ::refactorSweepLibrary first), it only
 # defines the refactor::sweep namespace and runs nothing.
 #
-# -root audits another checkout (a worktree of an earlier commit) with this
-# checkout's tool.
+# -root audits another checkout (a worktree of an earlier commit: swept with
+# its own compiler) or a corpus-only tree (a scratch copy of examples/,
+# bench/ and lib/: swept with this checkout's compiler).
 
 namespace eval refactor::sweep {
     # Entry programs that are deliberate rejections: compiled, they must
@@ -243,6 +244,13 @@ if {![info exists ::refactorSweepLibrary]} {
             default { error "unknown option $option" }
         }
     }
-    source [file join $root surface surface.tcl]
+    # A full checkout is swept with its own compiler; a corpus-only tree
+    # (examples/, bench/, lib/: a scratch copy) with this checkout's.
+    if {[file exists [file join $root surface surface.tcl]]} {
+        source [file join $root surface surface.tcl]
+    } else {
+        source [file join [file dirname [file dirname [file dirname $here]]] surface surface.tcl]
+        set ::core::libraryDir [file join $root lib]
+    }
     refactor::sweep::report $root
 }

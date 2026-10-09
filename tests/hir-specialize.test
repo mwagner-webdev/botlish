@@ -230,7 +230,13 @@ test hir-specialize-17 {aggregate types are bounded} -body {
 # chunk, count), threaded through the scanners, its functions declaring the
 # builder parameter's type: 38 -> 30 generic / 0 -> 1 specialized blockers
 # (a guarded region: a completed chunk is read out of the untyped
-# `completed` List) and 17 -> 11 specialized instances.
+# `completed` List) and 17 -> 11 specialized instances. The warning-driven
+# refactor (REFACTOR-WARNINGS-CLEAN.md) made the four CSV programs read
+# characters with str::char_at and test quotes through a new quote_at?, and
+# ai_text_clean's clean_char read the character its text holds: csv 25 -> 27
+# generic blockers and 9 -> 10 specialized instances, csv_chunked 30 -> 32 /
+# 11 -> 12, csv_geometric 27 -> 28 / 16 -> 17, csv_records 112 -> 113 / 45 ->
+# 46 (each the new quote_at? instance), ai_text_clean 5 -> 6 generic blockers.
 test hir-specialize-corpus-1 {every used corpus instance is closed; the generic analysis is unchanged} -body {
     lmap name [corpus::names] {
         set hir [surface::readProgramFile [corpus::path $name]]
@@ -240,12 +246,12 @@ test hir-specialize-corpus-1 {every used corpus instance is closed; the generic 
         list $name [dict get $summary generic] [dict get $summary specialized] $statuses \
             [dict get $summary genericInstances] [dict get $summary specializedInstances]
     }
-} -result {{ai_text_clean 5 0 closed 1 5} {csv 25 0 closed 0 9} {csv_chunked 30 1 {closed guarded} 2 11} {csv_geometric 27 0 closed 0 16} {csv_records 112 6 {closed guarded} 7 45} {hashtable 99 8 {closed guarded} 7 19} {matmul 27 0 closed 0 6} {string_replace 12 0 closed 1 3} {string_reverse 4 0 closed 1 2}}
+} -result {{ai_text_clean 6 0 closed 1 5} {csv 27 0 closed 0 10} {csv_chunked 32 1 {closed guarded} 2 12} {csv_geometric 28 0 closed 0 17} {csv_records 113 6 {closed guarded} 7 46} {hashtable 99 8 {closed guarded} 7 19} {matmul 27 0 closed 0 6} {string_replace 12 0 closed 1 3} {string_reverse 4 0 closed 1 2}}
 
 test hir-specialize-corpus-2 {specialized instances per corpus function} -body {
     set hir [surface::readProgramFile [corpus::path csv]]
     dict get [hir::specialize::summary $hir [hir::specialize::analyze $hir]] perFunction
-} -result {peek {generic 0 specializations 1} scan_unquoted {generic 0 specializations 1} scan_quoted {generic 0 specializations 1} scan_field {generic 0 specializations 1} scan_record {generic 0 specializations 2} scan_records {generic 0 specializations 2} csv_parse {generic 0 specializations 1}}
+} -result {peek {generic 0 specializations 1} quote_at? {generic 0 specializations 1} scan_unquoted {generic 0 specializations 1} scan_quoted {generic 0 specializations 1} scan_field {generic 0 specializations 1} scan_record {generic 0 specializations 2} scan_records {generic 0 specializations 2} csv_parse {generic 0 specializations 1}}
 
 test hir-specialize-all-programs {every example and benchmark program can be specialized and explained} -body {
     set failures {}
