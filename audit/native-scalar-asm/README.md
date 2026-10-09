@@ -12,9 +12,9 @@ are complete.
 
 ## Compiler revision
 
-- git commit: f49c00cfeebfdfca84316abc37af8bfc36ea9959
+- git commit: ca68a53eb66dc3f53b4595a6a7d8743e45bc87e0
 - Tcl: 9.0.1
-- rustc 1.97.0 (2d8144b78 2026-07-07)
+- rustc 1.99.0 (b940084d7 2026-09-28)
 - cranelift-codegen: 0.135.2
 - target: x86_64 (System V ABI, Linux ELF64)
 - backend flags: cranelift, -specialize 1 (default), -repr-opt 1 (default)
