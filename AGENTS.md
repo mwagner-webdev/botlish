@@ -537,8 +537,9 @@ backing (Tcl: a `{mutarray ID}` over the shared Tcl list in
 `core::mutarray::store`; native: `MutArrayObj` over an `Rc<VecDeque>`), its
 mutations made through places (`MUTABLE-PLACE-RECEIVER`,
 `MUTABLE-PLACE-CAPTURE`), its logical copies written out by
-`hir::mutvec::Elaborate` (`mutable_vector#share`, descriptor `h`; `d` for a
-generic function's parameter). It used to have reference semantics: never
+`hir::mutvec::Elaborate` (`mutable_vector#share`, descriptor `h`; `d`, a
+copy of whatever the value is at run time, inside a generic body whose
+static type is too imprecise to say). It used to have reference semantics: never
 reintroduce an alias between two arrays, a reference, or runtime ownership
 state. Like a vector it is covariant (MutableArray[S] <: MutableArray[T]
 when S <: T; the raw kind `mutarray` is MutableArray[any]) while a typed

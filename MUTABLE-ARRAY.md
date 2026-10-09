@@ -143,9 +143,9 @@ bookkeeping only.
 The compiler writes every logical copy out (`hir::mutvec::Elaborate`, the
 MutableVector pass, now kind-generic): a read-out of a place, the entry of a
 value into a place, a consumed parameter's argument -- each
-`mutable_vector#share(value, "h")` (`d` for a generic function's
-parameter, whose type is not known: a copy of whatever the value is at run
-time). Tcl: `core::mutvec::Share` hands an array header to
+`mutable_vector#share(value, "h")` (`d` inside a generic body, whose
+static types are too imprecise to say: a copy of whatever the value is at
+run time). Tcl: `core::mutvec::Share` hands an array header to
 `core::mutarray::Share` (a new ID over the same Tcl list object). Native:
 `mvshare` -> `share_by` -> `ops::share_array`: `Rc::clone` of the backing
 and a new header, O(1), counted (`mutableArray shares`).
