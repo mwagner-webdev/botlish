@@ -953,6 +953,11 @@ results in place; no `test` line is added or removed outside the new file
 * **The literal's parentheses are invisible**: `(true)` is the same node as
   `true` and counts; it is the same anonymous token.
 * Only the first warning is raised under `error`, as in milestones 1-6.
+* Successor note (REFACTOR-WARNINGS-CLEAN.md): the corpus still has no finding
+  of this code, and is now held there: a gate
+  (`audit/refactor/tools/gate.tcl`, CI) fails on any new one in `examples/`,
+  `bench/` or `lib/`. The nine single-option bools of the census stay
+  recorded, not converted.
 
 ## Future warning candidates
 

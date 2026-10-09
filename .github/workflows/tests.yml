@@ -87,6 +87,28 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+  warning-gate:
+    name: warning gate (manifest)
+    # The shipped stdlib, libraries, examples and benchmarks compile with
+    # exactly the warnings audit/refactor/manifest.txt lists, each with its
+    # named obstruction, and every program without a manifest entry compiles
+    # under -warnings error (REFACTOR-WARNINGS-CLEAN.md). A new warning, a
+    # closed finding still listed, or a location that drifted fails the job.
+    # Warnings are discovered before any backend runs, so no native build is
+    # needed.
+    runs-on: ubuntu-latest
+    env:
+      LANG: C.utf8
+      LC_ALL: C.utf8
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install project prerequisites
+        run: bash .devcontainer/setup.sh
+
+      - name: Warning gate
+        run: tclsh9.0 audit/refactor/tools/gate.tcl
+
   gc-stress:
     name: tests (native GC-stress)
     # GC-stress forces a GC attempt at every allocation site, which is the

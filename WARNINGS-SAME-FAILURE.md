@@ -819,6 +819,11 @@ was added or removed.
 * **No payload rule exercised.** `fail` has no payload today; the conservative
   rule is documented for the day it does (see "The payload question").
 * Only the first warning is raised under `error`, as in milestones 1-3.
+* Successor note (REFACTOR-WARNINGS-CLEAN.md): the warning-driven refactor
+  adopted the merge check's form for `abi::bytes::replace` (one guard, `index
+  < 0 or index >= count`), so programs that load `abi::bytes` no longer print
+  this code; a gate (`audit/refactor/tools/gate.tcl`, CI) fails on any new
+  finding in the corpus.
 
 ## Future warning candidates
 

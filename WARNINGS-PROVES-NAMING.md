@@ -792,6 +792,10 @@ other test was added or removed.
   is recovered by dropping its `#N` suffix, which is exact because source can
   never spell `#`.
 * Only the first warning is raised under `error`, as in milestones 1-4.
+* Successor note (REFACTOR-WARNINGS-CLEAN.md): the corpus still has no finding
+  of this code, and is now held there: a gate
+  (`audit/refactor/tools/gate.tcl`, CI) fails on any new one in `examples/`,
+  `bench/` or `lib/`.
 
 ## Future warning candidates
 

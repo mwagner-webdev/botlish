@@ -416,6 +416,11 @@ no analysis reads them.
 * A body's synthesized boolean `if` is recognized by its origins (all branches
   carry the operator's origin); core-IR-built HIR has distinct origins and never
   contains `and`/`or`.
+* Successor note (REFACTOR-WARNINGS-CLEAN.md): the warning-driven refactor
+  merged all six corpus findings (the two slot searches, `ht_delete`, and
+  `web.bot`'s `domain?`, `emailish?` and `valid_from?`), so no library carries
+  a `SAME-RETURN-VALUE` finding and `uri-steady` prints none; a gate
+  (`audit/refactor/tools/gate.tcl`, CI) fails on any new one.
 
 ## Future warning candidates
 

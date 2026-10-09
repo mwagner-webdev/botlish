@@ -1,0 +1,106 @@
+# warning-gate.test -- the warning gate (REFACTOR-WARNINGS-CLEAN.md, item 12):
+# audit/refactor/tools/gate.tcl asserts that the corpus's warnings are
+# exactly audit/refactor/manifest.txt. Its CI step is the `warning-gate` job
+# of .github/workflows/tests.yml; these tests pin that it passes on the tree
+# and that it is a ratchet -- it fails on a planted new warning, on a closed
+# finding the manifest still lists, on a drifted location, on a program the
+# manifest does not list, and on a manifest-empty program that `-warnings
+# error` would reject.
+#
+# Each ratchet case runs the gate (this checkout's compiler) over a private
+# scratch copy of examples/, bench/, lib/ and the manifest in the tcltest
+# temporary directory, edited for the case.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+set ::gate [file join $::projectRoot audit refactor tools gate.tcl]
+
+proc gateRun {args} {
+    set code [catch {exec [info nameofexecutable] $::gate {*}$args 2>@1} out]
+    return [list $code $out]
+}
+
+proc readUtf8 {path} {
+    set channel [open $path]
+    fconfigure $channel -encoding utf-8
+    set text [read $channel]
+    close $channel
+    return $text
+}
+
+proc writeUtf8 {path text} {
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8
+    puts -nonewline $channel $text
+    close $channel
+}
+
+# A scratch copy of the corpus and the manifest; returns its root.
+proc scratchTree {} {
+    set dir [file join [temporaryDirectory] warning-gate-[pid]]
+    file delete -force $dir
+    file mkdir [file join $dir audit refactor]
+    foreach sub {examples bench lib} {
+        file copy [file join $::projectRoot $sub] [file join $dir $sub]
+    }
+    file copy [file join $::projectRoot audit refactor manifest.txt] [file join $dir audit refactor manifest.txt]
+    return $dir
+}
+
+proc editFile {root relative script} {
+    set path [file join $root $relative]
+    set text [readUtf8 $path]
+    writeUtf8 $path [apply [list {text} $script] $text]
+}
+
+test warning-gate-passes {the gate passes on the tree: the observed warnings are exactly the manifest} -body {
+    lassign [gateRun] code out
+    list $code [string match "*gate passed*" $out]
+} -result {0 1}
+
+test warning-gate-ratchet-new-warning {a planted new warning in a clean library module fails the gate, naming the warning and its location} -body {
+    set root [scratchTree]
+    editFile $root lib/mathish.bot {string cat $text "\nfn planted_sep():\n    \",\"\n"}
+    lassign [gateRun -root $root] code out
+    file delete -force $root
+    list $code [regexp {unexpected warning ONE-CHAR-STRING-LITERAL at lib/mathish\.bot:\d+:\d+} $out] \
+        [string match "*GATE FAILED*" $out]
+} -result {1 1 1}
+
+test warning-gate-ratchet-closed-finding {a finding that closes while the manifest still lists it fails the gate (the manifest only shrinks on proof)} -body {
+    set root [scratchTree]
+    # string_reverse.bot's one manifested finding, the length-1 test datum "a".
+    editFile $root examples/stdlib/string_reverse.bot {string map {{reverse_chars("a")} {reverse_chars("ab")}} $text}
+    lassign [gateRun -root $root] code out
+    file delete -force $root
+    list $code [regexp {expected warning ONE-CHAR-STRING-LITERAL at examples/stdlib/string_reverse\.bot:\d+:\d+ not observed} $out] \
+        [string match "*manifest entry not observed by any unit*" $out]
+} -result {1 1 1}
+
+test warning-gate-ratchet-location-drift {a manifested finding whose location moves (a line inserted above it) fails the gate} -body {
+    set root [scratchTree]
+    editFile $root examples/stdlib/string_reverse.bot {string cat "# a planted comment line\n" $text}
+    lassign [gateRun -root $root] code out
+    file delete -force $root
+    list $code [string match "*unexpected warning ONE-CHAR-STRING-LITERAL at examples/stdlib/string_reverse.bot*" $out] \
+        [string match "*not observed*" $out]
+} -result {1 1 1}
+
+test warning-gate-ratchet-unlisted-program {a new corpus program the manifest does not list fails the gate} -body {
+    set root [scratchTree]
+    writeUtf8 [file join $root examples surface 99-planted.bot] "1 + 1\n"
+    lassign [gateRun -root $root] code out
+    file delete -force $root
+    list $code [string match "*corpus program not in the manifest: examples/surface/99-planted.bot*" $out]
+} -result {1 1}
+
+test warning-gate-ratchet-strict-mode {a program with an empty manifest entry is compiled under -warnings error: a planted warning there is reported as a strict-mode failure too} -body {
+    set root [scratchTree]
+    editFile $root examples/surface/01-arithmetic.bot {string cat "fn planted(a, b):\n    a\n\nfn use_planted(x):\n    planted(x, 1)\n\n" $text}
+    lassign [gateRun -root $root] code out
+    file delete -force $root
+    list $code [string match "*unexpected warning METHOD-ELIGIBLE at examples/surface/01-arithmetic.bot:5:5*" $out] \
+        [string match "*examples/surface/01-arithmetic.bot fails under -warnings error: CORE SEMANTIC METHOD-ELIGIBLE*" $out]
+} -result {1 1 1}
+
+cleanupTests

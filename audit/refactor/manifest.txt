@@ -1,0 +1,159 @@
+# The warning manifest (REFACTOR-WARNINGS-CLEAN.md): every warning the corpus
+# is expected to carry after the warning-driven refactor, each with the
+# obstruction that keeps it from closing on today's surface. The gate
+# (audit/refactor/tools/gate.tcl, CI job `warning-gate`) asserts that the
+# observed warnings are exactly these: a new warning anywhere, an entry that
+# no longer fires, or a drifted location fails it. Every other program
+# compiles under -warnings error.
+#
+# The manifest only shrinks on proof: an entry leaves when its finding is
+# closed (converted, annotated, merged or marked) and the closing is verified
+# (behavior probes or expected outputs; audit/refactor/tools/probe.tcl,
+# expect.tcl). It grows only by a re-audit that finds something new.
+#
+# Format (gate.tcl's header has it in full):
+#
+#   program PATH | rejected PATH CODE | fails PATH CODE -- OBSTRUCTION
+#     CODE LINE:COL TAG -- OBSTRUCTION      (an expected finding in PATH)
+#
+# TAG is H1 or H2 (the milestone's two hypotheses) or none.
+#
+# The obstructions, by name (the report has the evidence for each):
+#
+#   char->text   the value is a single character that must become text
+#                (an operand of str::concat, a String result, a table of
+#                text): Botlish has no character-to-text construction
+#                (no str::of_char, no append of a UnicodeChar to a String),
+#                and the only literal-free spelling slices it out of a longer
+#                literal, which keeps the one-character String at run time
+#                and only hides it from a literals-only check.
+#   classifier   the character is also consumed by a String-taking
+#                classifier (str::is_tcl_alnum / str::is_tcl_alpha) in the
+#                same predicate or uniform predicate contract
+#                (Fn{args: [str]}), so it is a one-character String there;
+#                comparing it as a character means decoding that String
+#                again (str::length(c) == 1 and c.char_at(0) == '_').
+#   index-proof  the natural character spelling's str::char_at index is not
+#                proven in range by today's completion proof.
+#   test-datum   a test datum whose length 1 is the case's subject.
+#   core-ir-roundtrip
+#                the closing (a `-> list` result annotation) is a source fact
+#                core IR cannot carry, and the program is a fixture of the
+#                check that its HIR is what analysis of its core IR derives.
+
+# ---------------------------------------------------------------------------
+# examples/stdlib
+
+program examples/stdlib/ai_text_clean.bot
+  ONE-CHAR-STRING-LITERAL 61:20 H1 -- char->text: clean_char returns the ASCII normalization of an en/em dash as text (its siblings are "" and "..."); the translation-table restructure (audit/refactor/h1-attempt) is warning-clean but keeps "-" a one-character String sliced from "--''\"\"" (and, as a program-level table, costs clean_from's traversal plan)
+  ONE-CHAR-STRING-LITERAL 64:20 H1 -- char->text: the normalization of a curly single quote, as above
+  ONE-CHAR-STRING-LITERAL 67:20 H1 -- char->text: the normalization of a curly double quote, as above
+program examples/stdlib/csv.bot
+program examples/stdlib/csv_chunked.bot
+program examples/stdlib/csv_geometric.bot
+program examples/stdlib/csv_records.bot
+program examples/stdlib/hashtable.bot
+program examples/stdlib/matmul.bot
+program examples/stdlib/string_replace.bot
+  ONE-CHAR-STRING-LITERAL 51:20 H2 -- test-datum: the absent needle "x" of length 1 is the needle whose scan visits every position of the haystack, the last included (a longer needle stops earlier); a sliced or computed spelling would hide the datum
+  ONE-CHAR-STRING-LITERAL 51:46 H2 -- test-datum: the found needle "b" of length 1 is the single-character substitution case ("aXc"), the length-1 boundary of a needle that occurs
+  ONE-CHAR-STRING-LITERAL 51:51 H2 -- test-datum: the replacement "X" of length 1 makes the substitution length-preserving, and it is the pinned output "aXc"
+  ONE-CHAR-STRING-LITERAL 51:78 H2 -- test-datum: the replacement "b" of length 1 shrinks each 2-character match to 1, visibly in the pinned output "bb" (two non-overlapping matches, not three)
+  ONE-CHAR-STRING-LITERAL 51:124 H2 -- test-datum: the needle "x" of length 1 against the empty haystack is the needle that exceeds the haystack by exactly one character, the boundary of the scan's end guard
+program examples/stdlib/string_reverse.bot
+  ONE-CHAR-STRING-LITERAL 31:39 H2 -- test-datum: "a" is the length-1 boundary of String reversal (one character reverses to itself), between the pinned "" and "abc" cases
+
+# ---------------------------------------------------------------------------
+# examples/surface (09 and 10 are deliberate rejections, never edited)
+
+program examples/surface/01-arithmetic.bot
+program examples/surface/02-recursion.bot
+program examples/surface/03-closure.bot
+program examples/surface/04-branch-value.bot
+program examples/surface/05-shadowing.bot
+program examples/surface/06-list.bot
+program examples/surface/07-loop-break.bot
+program examples/surface/08-return.bot
+rejected examples/surface/09-mutual-recursion.bot CORE SEMANTIC UNBOUND
+rejected examples/surface/10-duplicate-binding.bot CORE SEMANTIC DUPLICATE
+program examples/surface/11-boolean-operators.bot
+program examples/surface/12-if-value.bot
+program examples/surface/13-hygiene.bot
+  FIXED-ARITY-LIST-RETURN 7:5 none -- core-ir-roundtrip: pair's [list, x] is the sample's subject (a parameter named list does not change what [a, b] means), so a struct result would replace it; `-> list` is the answer, but it is a source fact core IR cannot carry (it re-types the call list instead of List[int]), and surface-samples.test checks that this sample's HIR is what analysis of its core IR derives
+program examples/surface/14-modules.bot
+
+# ---------------------------------------------------------------------------
+# examples/refinement, examples/io, examples/abi, examples/linux
+
+program examples/refinement/refined-strings.bot
+program examples/io/child-path.bot
+  ONE-CHAR-STRING-LITERAL 19:59 none -- char->text: the " " that separates the two printed paths is a single character appended as text (str::concat)
+program examples/io/hello.bot
+program examples/io/show-path.bot
+program examples/abi/numeric-domains.bot
+program examples/linux/context-hello.bot
+program examples/linux/getpid.bot
+program examples/linux/read-stdin.bot
+program examples/linux/write.bot
+
+# ---------------------------------------------------------------------------
+# bench
+
+program bench/fib.bot
+program bench/lex-strategy.bot
+  ONE-CHAR-STRING-LITERAL 44:34 none -- classifier: lenient_ident_char?(c) joins str::is_tcl_alnum (String-taking) and is chosen against it at a callable join (Fn{args: [str]}), so c is a one-character String; c == '_' would need c decoded again
+  ONE-CHAR-STRING-LITERAL 44:46 none -- classifier: the "-" beside it, as above
+program bench/loop-count.bot
+program bench/refined-checks.bot
+program bench/source-checks.bot
+  ONE-CHAR-STRING-LITERAL 51:10 none -- classifier: is_underscore? is one of a List of classifiers applied to the same value with str::is_tcl_alpha and str::is_tcl_alnum (Fn{args: [str]}), so its argument is a one-character String
+  ONE-CHAR-STRING-LITERAL 54:10 none -- classifier: is_hyphen?, as above
+program bench/sum-refined.bot
+program bench/test-selection.bot
+program bench/uri-steady.bot
+
+# ---------------------------------------------------------------------------
+# lib (standalone compiles; every module also loads through `import NS`,
+# whose expected warnings are the module's entries below)
+
+program lib/abi.bot
+program lib/ascii.bot
+program lib/byte.bot
+fails lib/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: compiled as an entry program, a module's last declaration is the program's value, and io's last function requires a context, so it cannot be a value; no module member could end the file without adding to its API (verified through `import io`)
+  ONE-CHAR-STRING-LITERAL 59:31 none -- char->text: print_line appends the newline to TEXT as text, so its one write request carries it
+  ONE-CHAR-STRING-LITERAL 67:37 none -- char->text: write_error_line's newline, as above
+program lib/linux.bot
+fails lib/list.bot SURFACE MODULE MISSING-IMPORT -- own-namespace intrinsics: list.bot calls its namespace's intrinsic list::at, which needs no import as module `list` and may not be imported there (SELF-IMPORT), while an entry program needs `import list`; xs.at(i) compiles both ways but is a field projection when instantiated (verified through `import list`)
+program lib/mathish.bot
+fails lib/mutable_array.bot SURFACE MODULE MISSING-IMPORT -- own-namespace intrinsics: mutable_array.bot calls mutable_array::at, as for lib/list.bot (verified through `import mutable_array`)
+program lib/web.bot
+  ONE-CHAR-STRING-LITERAL 105:47 none -- classifier: local_extra_chars is queried by local_char?(c: str), which also classifies c with str::is_tcl_alnum and is passed to scan_while beside str::is_tcl_alpha (Fn{args: [str]}): a set of characters would need c decoded again
+  ONE-CHAR-STRING-LITERAL 105:52 none -- classifier: the set's "_", as above
+  ONE-CHAR-STRING-LITERAL 105:57 none -- classifier: the set's "%", as above
+  ONE-CHAR-STRING-LITERAL 105:62 none -- classifier: the set's "+", as above
+  ONE-CHAR-STRING-LITERAL 105:67 none -- classifier: the set's "-", as above
+  ONE-CHAR-STRING-LITERAL 136:38 none -- classifier: label_char?(c) is str::is_tcl_alnum(c) or c == "-", over the one-character String the String classifier needs
+  ONE-CHAR-STRING-LITERAL 211:15 none -- char->text: hex_digits is the table of hexadecimal digits as text, concatenated into %XX escapes (hex_pair); a "0123456789ABCDEF" slice would keep each digit a one-character String
+  ONE-CHAR-STRING-LITERAL 211:20 none -- char->text: the digit "1", as above
+  ONE-CHAR-STRING-LITERAL 211:25 none -- char->text: the digit "2", as above
+  ONE-CHAR-STRING-LITERAL 211:30 none -- char->text: the digit "3", as above
+  ONE-CHAR-STRING-LITERAL 211:35 none -- char->text: the digit "4", as above
+  ONE-CHAR-STRING-LITERAL 211:40 none -- char->text: the digit "5", as above
+  ONE-CHAR-STRING-LITERAL 211:45 none -- char->text: the digit "6", as above
+  ONE-CHAR-STRING-LITERAL 211:50 none -- char->text: the digit "7", as above
+  ONE-CHAR-STRING-LITERAL 211:55 none -- char->text: the digit "8", as above
+  ONE-CHAR-STRING-LITERAL 211:60 none -- char->text: the digit "9", as above
+  ONE-CHAR-STRING-LITERAL 211:65 none -- char->text: the digit "A", as above
+  ONE-CHAR-STRING-LITERAL 211:70 none -- char->text: the digit "B", as above
+  ONE-CHAR-STRING-LITERAL 211:75 none -- char->text: the digit "C", as above
+  ONE-CHAR-STRING-LITERAL 211:80 none -- char->text: the digit "D", as above
+  ONE-CHAR-STRING-LITERAL 211:85 none -- char->text: the digit "E", as above
+  ONE-CHAR-STRING-LITERAL 211:90 none -- char->text: the digit "F", as above
+  ONE-CHAR-STRING-LITERAL 267:9 none -- char->text: pct's "%" begins every escape it writes as text
+program lib/abi/bytes.bot
+program lib/abi/x86_64.bot
+fails lib/io/path.bot CORE SEMANTIC TRAIT-POLYMORPHIC-FUNCTION-VALUE -- entry-program value: as for lib/io.bot, the last declaration (text) is trait-polymorphic and cannot be a value (verified through `import io::path`)
+fails lib/linux/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for lib/io.bot, the last declaration (write_error_text) requires a context; only reordering create() last would compile it, an invariant nothing states (verified through `import linux::io`)
+program lib/linux/path.bot
+  ONE-CHAR-STRING-LITERAL 81:55 none -- index-proof: the natural path.char_at(n - 1) == '/' is not proven in range (the index proof relates only a guarded name to the length, not n - 1 to n; the slice proof does), and concat's errors are fixed by io::path::Path; the provable path.substring(n - 1, n).char_at(0) decodes a slice made only to be decoded (two allocations a call)
+  ONE-CHAR-STRING-LITERAL 84:39 none -- char->text: the "/" joining PATH and COMPONENT is a single character appended as text

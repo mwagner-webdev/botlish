@@ -902,6 +902,14 @@ this milestone**: 5957 minus the 149 new ones, since no other test file changed.
   builds and returns one list literal is reported. This is by design (item 14),
   and the annotation answers the genuine-list cases.
 * Only the first warning is raised under `error`, as in milestones 1-2.
+* Successor note (REFACTOR-WARNINGS-CLEAN.md): the warning-driven refactor
+  annotated five of the six findings of the post-affine corpus `-> list` (the
+  five sample functions; the `csv_chunked` builder had already become a
+  struct value). The sixth, `examples/surface/13-hygiene.bot`'s `pair`, is
+  manifested: its `-> list` is a source fact core IR cannot carry, and
+  `tests/surface-samples.test` checks that the sample's HIR is what analysis
+  of its core IR derives. A gate (`audit/refactor/tools/gate.tcl`, CI) fails
+  on any new finding.
 
 ## Future warning candidates
 

@@ -253,14 +253,13 @@ lowers, run `tests/fixed-arity-list-return.test` and
 `audit/fixed-arity-list-return/tools/fuzz.tcl`. A list-typed result annotation
 (`-> list`, `-> List[T]`) is a real type the checker proves, not a suppression;
 do not add another opt-out (MULTI-VALUE-RESULTS.md). Library
-modules' own findings print for every program that loads them (the corpus is
-frozen), so tests that import `lib/*.bot` and assert on a complete warning set
-filter by code or file. `lib/abi/bytes.bot`'s `replace` carries a
-`SAME-FAILURE` finding, so every program that loads `abi::bytes` (`lib/linux.bot`
-and the `examples/linux` programs among them) prints it. `lib/web.bot` carries
-26 `ONE-CHAR-STRING-LITERAL` findings (its one-character Strings: `"."`, the
-hex digits, ...), `lib/io.bot` 2 (`"\n"`) and `lib/linux/path.bot` 2 (`"/"`),
-so every program that loads one of them prints them.
+modules' own findings print for every program that loads them, so tests that
+import `lib/*.bot` and assert on a complete warning set filter by code or file.
+Since the warning-driven refactor (next section) only three modules carry any,
+all `ONE-CHAR-STRING-LITERAL` and all listed in `audit/refactor/manifest.txt`:
+`lib/web.bot` 23 (its hex-digit table, `"%"`, and the local-part and label
+classes), `lib/io.bot` 2 (`"\n"`) and `lib/linux/path.bot` 2 (`"/"`). Every
+other module is warning-clean.
 
 `SAME-FAILURE` (WARNINGS-SAME-FAILURE.md) reads the `fail` sites of a function's
 own body (milestone 1's `BodyExprs`, which never enters a nested function), each
@@ -317,6 +316,36 @@ only and is not autofixable on purpose: do not count flags, bindings or
 computed bools, follow exact values, group per callee, warn on a declaration
 without call evidence, print a flag spelling, or add a fixit or an opt-out
 (FLAGS.md, "Boolean arguments", records the graduation criteria).
+
+## The warning gate
+
+The shipped stdlib, libraries, examples and benchmarks compile clean under
+Botlish's own warnings, except exactly the findings `audit/refactor/manifest.txt`
+lists, each with the obstruction that keeps it open (REFACTOR-WARNINGS-CLEAN.md).
+`audit/refactor/tools/gate.tcl` checks it -- every corpus program and a one-line
+loader per library module, the observed warnings equal to the manifest (code
+and location), and every program and loader without an entry compiling under
+`-warnings error` -- and the `warning-gate` job of `.github/workflows/tests.yml`
+runs it on every push and pull request (`tests/warning-gate.test` pins that it
+passes and that it fails on a planted warning).
+
+If you add or change a program in `examples/`, `bench/` or `lib/`, run
+`tclsh9.0 audit/refactor/tools/gate.tcl`:
+
+* A new warning is answered in the code -- convert it, annotate the result
+  type, merge the exits or guards, or mark the callee `nomethod` for a stated
+  reason -- never by adding a manifest entry. The manifest grows only at a
+  re-audit that names an obstruction no mechanism of the language closes, per
+  finding.
+* An entry leaves the manifest when its finding closes, with the closing
+  verified: `audit/refactor/tools/probe.tcl` (behavior probes against the tree
+  before the change, every backend) and `audit/refactor/tools/expect.tcl`
+  (every `# expect:` value, every backend).
+* A manifested literal that moves (a line added above it) is a location drift
+  the gate reports: update its line and column in the manifest.
+* A new corpus program must be listed (with its entries, if any).
+* Do not edit `audit/refactor/kickoff-corpus/`: it is the frozen,
+  warning-bearing fixture the backend-independence CLI tests read, not corpus.
 
 ## Refinement values
 

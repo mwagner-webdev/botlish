@@ -90,7 +90,9 @@ The annotation is an ordinary declared result type: the checker must prove
 the function's result satisfies it (`hir::range::verifyDeclaredResults`;
 `function result does not prove declared type ...` otherwise; applied List
 types are MINIMAL-APPLIED-LIST-TYPES.md's), and every caller sees it. `-> list` is `List[any]`, always provable for a function whose
-exits are lists; `-> List[T]` needs the elements proven to be `T`.
+exits are lists; `-> List[T]` needs the elements proven to be `T`. The
+corpus's own sample functions (`examples/stdlib/*.bot`'s `sample` and
+`sample_checks`) are declared this way (REFACTOR-WARNINGS-CLEAN.md).
 
 ## The warning that points here
 

@@ -969,6 +969,16 @@ the new file (`git diff e7f715c -- tests/`), so the kickoff base `e7f715c` had
   (the fuzzer's `str-compare` "same" rows); the audit's convert-now rule
   therefore also requires the consumer to take a UnicodeChar statically.
 * Only the first warning is raised under `error`, as in milestones 1-5.
+* **Successor note (REFACTOR-WARNINGS-CLEAN.md).** The warning-driven refactor
+  converted 56 of the 97 corpus findings (the comparisons of the CSV
+  scanners, `ai_text_clean.bot` and `emailish?` read characters; a CSV
+  doubled quote appends the input's own quote) and manifested 41, each with
+  its obstruction (`audit/refactor/manifest.txt`): character-to-text
+  construction (24), a String-taking classifier (10), the index proof (1)
+  and test data whose length 1 is the case's subject (6, hypothesis H2; two
+  more closed). Library findings still print for every program that loads
+  the module, now only for `lib/web.bot` (23), `lib/io.bot` (2) and
+  `lib/linux/path.bot` (2); a gate fails on any new one.
 
 ## Future warning candidates
 

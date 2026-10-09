@@ -142,7 +142,15 @@ one-character String literal is therefore a String spelling of what the
 language writes as a character; the `ONE-CHAR-STRING-LITERAL` warning (§23)
 reports each one. Where an API takes a String for what is one character, that
 String spelling is what the API requires today, and the finding is about the
-API.
+API. The corpus's scanners are written this way: the CSV programs of
+`examples/stdlib` read each character with `str::char_at` under a
+`str::length` bound and compare it with `','`, `'\n'` and `'"'`;
+`ai_text_clean.bot`'s `clean_char` reads the character its one-character text
+holds; `lib/web.bot`'s `emailish?` tests `'.'` and `'@'` at a position
+(REFACTOR-WARNINGS-CLEAN.md). What still needs a one-character String --
+appending a character to text, a table of characters as text, a character
+handed to a String-taking classifier such as `str::is_tcl_alnum` -- is listed,
+with its reason, in the warning manifest (§23).
 
 **Equality (`==`)** compares structure. Values of different kinds are never
 equal. Integers compare numerically, strings compare exact characters, lists
@@ -1624,8 +1632,12 @@ add10(32)          # 42 (add captures x)
   where the call stays the call of a field value and fails at run time too.
   An alias (`g = atan2`) is the same function. The flag is carried by
   imports (a `nomethod` function of a module behaves identically) and by the
-  builtin registry (`core::native::register -nomethod 1`); no shipped function
-  is marked. `nomethod` is a contextual word (an ordinary name everywhere but
+  builtin registry (`core::native::register -nomethod 1`). Five shipped
+  natives are marked, each for a stated reason (REFACTOR-WARNINGS-CLEAN.md):
+  `bit_and`, `bit_or` and `bit_xor` (symmetric operands: neither is a
+  receiver), `mutable_array::copy` (its first argument is the copy's
+  destination) and `mutable_array::create` (its first argument is the new
+  array's length). `nomethod` is a contextual word (an ordinary name everywhere but
   before `fn`). It is not a suppression pragma: it changes what call forms are
   *legal*, not what the compiler *reports* about a call. See
   WARNINGS-METHOD-ELIGIBLE.md.
@@ -3029,6 +3041,24 @@ set hir [surface::compile $source file.bot -warnings default -warning-channel ""
 hir::warnings::of $hir      ;# {code message primary secondary data} records
 ```
 
+**The shipped code is held to these warnings.** The stdlib, the libraries,
+the examples and the benchmarks compile clean under them, except exactly the
+findings `audit/refactor/manifest.txt` lists, each with the obstruction that
+keeps it open on today's surface (REFACTOR-WARNINGS-CLEAN.md). A gate
+(`audit/refactor/tools/gate.tcl`, the `warning-gate` CI job) compiles every
+corpus program and a one-line loader of every library module, asserts that the
+observed warnings are exactly the manifest -- a new warning anywhere, an entry
+that no longer fires, or a drifted location fails it -- and compiles every
+program and loader without a manifest entry under `-warnings error`. A
+library's findings print for every program that loads it (there is no "system
+header" notion); since the refactor only three modules carry any, all
+`ONE-CHAR-STRING-LITERAL`: `lib/web.bot` (23: its hexadecimal digit table,
+`"%"`, and the local-part and label classes beside `str::is_tcl_alnum`),
+`lib/io.bot` (2: the newline `print_line` and `write_error_line` append) and `lib/linux/path.bot` (2:
+the joining `"/"`, and an index the completion proof does not cover). A program
+that loads none of them compiles under `-warnings error` whenever its own code
+is clean.
+
 **Botlish does not currently provide GCC/Clang-style `-Wfoo` controls** (no
 `-Wno-foo`, `-Werror=foo`, `-Wall`, warning groups or levels), and no source
 annotation or comment suppresses a warning. This is intentional, not forgotten
@@ -3039,7 +3069,8 @@ enough to be, and uncertainty means no warning. Codes (`SAME-RETURN-VALUE`,
 tooling and documentation, but they are not switches. Adding
 `METHOD-ELIGIBLE`, `FIXED-ARITY-LIST-RETURN`, `SAME-FAILURE`, `PROVES-NAMING`,
 `ONE-CHAR-STRING-LITERAL` and `MANY-BOOLEAN-ARGUMENTS` gave `BOTLISH_WARNINGS`
-and the command line nothing: three modes, one option.
+and the command line nothing: three modes, one option. The warning-driven
+refactor and its gate added nothing to either.
 
 `SAME-RETURN-VALUE`: several distinct, reachable exits of one function are
 proven to return the same value.

@@ -584,6 +584,16 @@ means every call, in the whole program, has the target it had.
   the alias cannot be used to obtain method syntax (intended).
 * The message names a module function's qualified spelling even when the call
   wrote the bare sibling name inside the module (hygiene's canonical spelling).
+* **Successor note (REFACTOR-WARNINGS-CLEAN.md).** The warning-driven refactor
+  respelled all 355 remaining `METHOD-ELIGIBLE` calls of the corpus with this
+  milestone's rewrite machinery, each verified by the round-trip law, and
+  marked the `nomethod` candidates above -- `bit_and`, `bit_or`, `bit_xor`,
+  `mutable_array::copy`, plus `mutable_array::create` (its receiver would be
+  the new array's length) -- 26 findings. No library carries a
+  `METHOD-ELIGIBLE` finding any more, so the "library findings are shown"
+  limitation no longer applies to this code: a gate
+  (`audit/refactor/tools/gate.tcl`, CI) fails on any new one in `examples/`,
+  `bench/` or `lib/`.
 
 ## Deviations from the brief
 
