@@ -251,9 +251,9 @@ proc core::primitives::add {a b} {
 @@ hash-ignores-enum-native the hash ignores the enum's identity (native runtime)
 ## native/src/runtime/ops.rs
 <<<<
-            let h = fnv1a(h, name.as_bytes());
+                let h = fnv1a(h, name.as_bytes());
 ====
-            let h = { let _ = &name; h };
+                let h = { let _ = name; h };
 >>>>
 
 @@ hash-uses-position-tcl the hash reads a case's position instead of its name (Tcl runtimes): reordering changes it
@@ -267,9 +267,9 @@ proc core::primitives::add {a b} {
 @@ hash-uses-position-native the hash reads a case's number instead of its name (native runtime): reordering changes it
 ## native/src/runtime/ops.rs
 <<<<
-            fnv1a(h, case.as_bytes())
+                fnv1a(h, case.as_bytes())
 ====
-            { let _ = &case; fnv1a(h, c.to_string().as_bytes()) }
+                { let _ = case; fnv1a(h, c.to_string().as_bytes()) }
 >>>>
 
 @@ enum-affine an enum is accidentally affine

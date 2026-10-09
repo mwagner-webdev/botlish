@@ -640,13 +640,13 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
         // name -- never the numbers the word carries.
         Kind::Enum => {
             let (e, c) = enum_parts(v);
-            let (name, case) = current_program(|prog| {
+            current_program(|prog| {
                 let info = &prog.enums[e as usize];
-                (info.name.clone(), info.cases[c as usize].clone())
-            });
-            let h = fnv1a(h, name.as_bytes());
-            let h = fnv1a(h, &[0xFF]);
-            fnv1a(h, case.as_bytes())
+                let (name, case) = (&info.name, &info.cases[c as usize]);
+                let h = fnv1a(h, name.as_bytes());
+                let h = fnv1a(h, &[0xFF]);
+                fnv1a(h, case.as_bytes())
+            })
         }
         Kind::List => {
             let items = list_of(v).items();
