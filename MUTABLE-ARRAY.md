@@ -644,7 +644,10 @@ REGRESSION-RESULTS.
 `tests/affine.test` (one expectation changed: a MutableArray of affine
 elements is legal now), `audit/affine/tools/fuzz.tcl`,
 `audit/affine/tools/mutate.tcl` (one mutant re-pointed: `list-no-consume`).
-AFFINE-RESULTS.
+Fuzzer: seeds 1 and 2, 30 programs each (23 accepted, 91 and 92 identities
+whose releases were checked), 0 disagreements. Mutation: **29 mutants, 29
+killed** (`list-no-consume` by 4 tests and 3 of 25 fuzz programs).
+`tests/affine.test`: see 56.
 
 ### 58. Coroutine regression
 
@@ -653,7 +656,10 @@ array argument; they use a context member now),
 `audit/coroutines/tools/fuzz.tcl` (its checksum log likewise),
 `audit/coroutines/tools/mutate.tcl` (two mutants re-pointed:
 `step-call-moves`, `done-consumes` -- the latter is a role change now).
-COROUTINE-RESULTS.
+Fuzzer: seeds 1 and 2, 50 programs each (36 accepted; early exits releasing
+coroutines: 74 and 69), 0 disagreements. Mutation: **52 mutants, 52
+killed** (`step-call-moves` by 33 tests, `done-consumes` -- `observe`
+turned into `move` -- by 8). `tests/coroutines.test`: see 56.
 
 ### 59. Mutable-vector regression
 
@@ -661,7 +667,24 @@ COROUTINE-RESULTS.
 expected copy counts), `audit/mutable-vector/tools/fuzz.tcl`,
 `audit/mutable-vector/tools/mutate.tcl` (thirteen mutants re-pointed at the
 metadata-driven code: roles, drop forms, the kind-generic snapshot and
-drain). VECTOR-RESULTS.
+drain). Fuzzer: seeds 1 and 2, 40 programs each (25 accepted, 222 and 213
+identities checked), and seed 3 with `-gc-stress 1` (25 programs, 188
+identities), 0 disagreements.
+
+Mutation: **45 mutants, 45 killed** -- after one fix. The first run killed
+42; `callee-mutation-leaks`, `fresh-result-unowned` and
+`affine-move-cow-fork` survived, all three killed by tests before this
+milestone. The cause is this milestone's copy convention ("Last uses and
+consumed parameters" in hir/mutvec.tcl): a directly called function's
+parameter is now copied (or moved) by its caller, so the callee's entry
+copy, the fresh-result rule and the affine check of a share are reached
+only by a function that is also used as a value and called indirectly --
+and no test did that. `mv-cow-indirect-callee` does it for each (a
+mutating callee passed to a higher-order function, a function returning
+its unmutated parameter also passed as a value, an affine vector entering
+an indirectly called function: natively 0 shares and 0 detaches, against 1
+and 1 under `affine-move-cow-fork`); a re-run killed all three by it.
+`ma-cow-routes` gained the array route.
 
 ### 60. Native coverage
 
