@@ -2819,6 +2819,36 @@ mod struct_tests {
         assert!(message(text(SHAPES, "    %0 = int 1\n    %1 = structnew 0 %0\n    ret %1")).contains("field register"));
     }
 
+    // Enums (ENUMS.md): the enum table and the immediate case constants.
+
+    const ENUMS: &str = "enum 0 \"VehicleType\" cases=\"Boat Car Truck\"\nenum 1 \"geo::VehicleType\" cases=\"Boat Car\"\n";
+
+    #[test]
+    fn enums_and_enum_constants_parse() {
+        let p = parse(&text(ENUMS, "    %0 = enum 0 1
+    %1 = enum 1 1
+    %2 = op enumeq %0 %1
+    ret %2")).unwrap();
+        assert_eq!(p.enums.len(), 2);
+        assert_eq!(p.enums[1].name, "geo::VehicleType");
+        assert_eq!(p.enums[0].cases, vec!["Boat".to_string(), "Car".to_string(), "Truck".to_string()]);
+        assert!(matches!(&p.functions[0].body[0], Inst::Enum { index: 0, case: 1, .. }));
+        assert!(matches!(&p.functions[0].body[2], Inst::Op { op: OpCode::EnumEq, .. }));
+    }
+
+    #[test]
+    fn malformed_enums_are_rejected() {
+        let body = "    %0 = unit
+    ret %0";
+        assert!(message(text("enum 1 \"E\" cases=\"A\"\n", body)).contains("dense"));
+        assert!(message(text("enum 0 \"E\" cases=\"\"\n", body)).contains("no case"));
+        assert!(message(text("enum 0 \"E\" cases=\"A A\"\n", body)).contains("twice"));
+        assert!(message(text("enum 0 E cases=\"A\"\n", body)).contains("quoted"));
+        assert!(message(text("enum 0 \"E\"\n", body)).contains("cases="));
+        assert!(message(text(ENUMS, "    %0 = enum 2 0\n    ret %0")).contains("undeclared enum"));
+        assert!(message(text(ENUMS, "    %0 = enum 1 2\n    ret %0")).contains("no case number"));
+    }
+
     #[test]
     fn the_empty_struct_is_a_zero_field_shape() {
         let p = parse(&text(

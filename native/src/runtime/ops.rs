@@ -2521,6 +2521,77 @@ mod tests {
         )
     }
 
+    /// A VM whose program has these enums (runtime::vm::EnumInfo).
+    fn vm_with_enums(enums: &[(&str, &[&str])]) -> Box<Vm> {
+        use crate::runtime::vm::EnumInfo;
+        Vm::new(
+            std::rc::Rc::new(ProgramInfo {
+                functions: Vec::new(),
+                natives: Vec::new(),
+                shapes: Vec::new(),
+                enums: enums
+                    .iter()
+                    .map(|(name, cases)| EnumInfo {
+                        name: name.to_string(),
+                        cases: cases.iter().map(|c| c.to_string()).collect(),
+                    })
+                    .collect(),
+            }),
+            AllocMode::Summary,
+        )
+    }
+
+    // -----------------------------------------------------------------------
+    // Enums (ENUMS.md): immediate words, nominal equality, hashing and
+    // printing by name.
+
+    #[test]
+    fn enum_words_are_immediates_of_their_own_kind() {
+        let v = make_enum(3, 5);
+        assert!(is_enum(v));
+        assert_eq!(enum_parts(v), (3, 5));
+        assert_eq!(kind_of(v), Kind::Enum);
+        assert!(!is_pointer(v) && !is_small(v) && !is_char(v));
+        for other in [FALSE, TRUE, UNIT, make_small(0), make_small(-1), make_char(65)] {
+            assert!(!is_enum(other), "{other:#x} is not an enum word");
+        }
+        assert_eq!(enum_parts(make_enum(u32::MAX, MAX_ENUM_CASE)), (u32::MAX, MAX_ENUM_CASE));
+        assert_eq!(Kind::parse("enum"), Some(Kind::Enum));
+        assert_eq!(Kind::from_code(Kind::Enum.code()), Kind::Enum);
+    }
+
+    #[test]
+    fn enum_equality_is_nominal_word_equality() {
+        let mut vm = vm_with_enums(&[("A", &["X", "Y"]), ("B", &["X"])]);
+        let eq = |vm: &mut Vm, a, b| rt_value_eq(vm, a, b);
+        assert_eq!(eq(&mut vm, make_enum(0, 0), make_enum(0, 0)), TRUE);
+        assert_eq!(eq(&mut vm, make_enum(0, 0), make_enum(0, 1)), FALSE);
+        // The same spelling in another enum is another value.
+        assert_eq!(eq(&mut vm, make_enum(0, 0), make_enum(1, 0)), FALSE);
+        // Never an Int, whatever the word.
+        assert_eq!(eq(&mut vm, make_enum(0, 0), make_small(0)), FALSE);
+    }
+
+    #[test]
+    fn enum_hash_and_show_read_names_never_numbers() {
+        use crate::runtime::show::{show, tcl_value};
+        let mut vm = vm_with_enums(&[
+            ("VehicleType", &["Boat", "Car", "Truck", "Tank", "Tractor", "Airplane"]),
+            ("Other", &["Car"]),
+        ]);
+        let car = make_enum(0, 1);
+        // core/hashing.tcl's value for VehicleType::Car (tests/enums.test's
+        // enum-hash), byte for byte.
+        assert_eq!(rt_hash(&mut *vm, car), small(632455997673246507));
+        assert_ne!(rt_hash(&mut *vm, car), rt_hash(&mut *vm, make_enum(1, 0)));
+        assert_eq!(show(car), "VehicleType::Car");
+        assert_eq!(tcl_value(car).unwrap(), "enum VehicleType Car");
+        // Reordered cases: another number, the same name, the same hash.
+        let mut reordered = vm_with_enums(&[("VehicleType", &["Airplane", "Tank", "Car"])]);
+        assert_eq!(rt_hash(&mut *reordered, make_enum(0, 2)), small(632455997673246507));
+        assert_eq!(show(make_enum(0, 2)), "VehicleType::Car");
+    }
+
     // -----------------------------------------------------------------------
     // Structs (STRUCTS.md): equality, hashing and printing by shape.
 

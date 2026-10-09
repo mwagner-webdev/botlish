@@ -287,12 +287,12 @@ test enum-cases-query {EnumCases(E): the compiler keeps the complete closed case
         [lmap entry [dict get $hir sourceTypes] {dict get $entry cases}]
 } -result {{Boat Car Truck Tank Tractor Airplane} Car Car 3 {} {} 1 0 {{Boat Car Truck Tank Tractor Airplane} Car}}
 
-test enum-unknown-case {an unknown case is UNKNOWN-ENUM-CASE, suggesting the nearest declared spellings} -body {
+test enum-unknown-case {an unknown case is UNKNOWN-ENUM-CASE, suggesting the nearest declared spellings, even where a binding of that name is visible} -body {
     list \
         [enumError "${vehicle}VehicleType::Carr\n"] \
         [enumError "${vehicle}VehicleType::tank\n"] \
-        [enumError "${vehicle}VehicleType::Submarine\n"]
-} -result {{UNKNOWN-ENUM-CASE: enum.bot:8:1: enum VehicleType has no case "Carr" (its cases: Boat, Car, Truck, Tank, Tractor, Airplane); did you mean VehicleType::Car?} {UNKNOWN-ENUM-CASE: enum.bot:8:1: enum VehicleType has no case "tank" (its cases: Boat, Car, Truck, Tank, Tractor, Airplane); did you mean VehicleType::Tank?} {UNKNOWN-ENUM-CASE: enum.bot:8:1: enum VehicleType has no case "Submarine" (its cases: Boat, Car, Truck, Tank, Tractor, Airplane)}}
+        [enumError "${vehicle}fn Submarine():\n    1\nVehicleType::Submarine\n"]
+} -result {{UNKNOWN-ENUM-CASE: enum.bot:8:1: enum VehicleType has no case "Carr" (its cases: Boat, Car, Truck, Tank, Tractor, Airplane); did you mean VehicleType::Car?} {UNKNOWN-ENUM-CASE: enum.bot:8:1: enum VehicleType has no case "tank" (its cases: Boat, Car, Truck, Tank, Tractor, Airplane); did you mean VehicleType::Tank?} {UNKNOWN-ENUM-CASE: enum.bot:10:1: enum VehicleType has no case "Submarine" (its cases: Boat, Car, Truck, Tank, Tractor, Airplane)}}
 
 test enum-qualifier-not-an-enum {a case qualified by a type that is not an enum is NOT-AN-ENUM: a type is not a namespace} -body {
     list \
@@ -400,8 +400,8 @@ test enum-module-binding {a module-level binding may hold a case: it is an immut
 # Equality, ordering, arithmetic, hashing
 
 test enum-equality {equality is nominal: the same enum and the same case} -body {
-    enumRun "${vehicle}enum Other:\n    Car,\n    Boat,\nfn same(x):\n    x\n\[VehicleType::Car == VehicleType::Car, VehicleType::Car == VehicleType::Truck, VehicleType::Car != VehicleType::Truck, VehicleType::Car != VehicleType::Car, same(VehicleType::Car) == same(Other::Car), VehicleType::Car == Other::Car, VehicleType::Car == 1, VehicleType::Car == \"Car\"\]\n"
-} -result {same: [true, false, true, false, false, false, false, false]}
+    enumRun "${vehicle}enum Other:\n    Car,\n    Boat,\nfn same(x):\n    x\n\[VehicleType::Car == VehicleType::Car, VehicleType::Car == VehicleType::Truck, VehicleType::Car != VehicleType::Truck, VehicleType::Car != VehicleType::Car, same(VehicleType::Car) == same(Other::Car), same(VehicleType::Boat) == same(Other::Car), VehicleType::Car == Other::Car, VehicleType::Car == 1, VehicleType::Car == \"Car\"\]\n"
+} -result {same: [true, false, true, false, false, false, false, false, false]}
 
 test enum-equality-constant-folded {the compiler decides a comparison of two known cases: true for the same case, false otherwise} -body {
     set hir [surface::compile "${vehicle}enum Other:\n    Car,\na = VehicleType::Car\n\[a == VehicleType::Car, a == VehicleType::Boat, a == Other::Car\]\n" enum.bot]
@@ -612,11 +612,34 @@ test enum-native-representation {native code: an enum table, immediate case word
 } -result {{{enum 0 "VehicleType" cases="Boat Car Truck Tank Tractor Airplane"} {enum 1 "Other" cases="Car"}} {{= enum 0 1} {= enum 0 1} {= enum 1 0}} 1 0}
 
 test enum-native-no-allocation {ordinary enum operations allocate nothing, and an enum struct field is scalar-replaced} -body {
-    set hir [surface::compile [withImports "${vehicle}struct Item:\n    kind: VehicleType\n    weight: int\nfn next(k: VehicleType) -> VehicleType:\n    if k == VehicleType::Car:\n        VehicleType::Truck\n    else:\n        VehicleType::Car\nfn step(item: Item) -> Item:\n    Item \{kind: next(item.kind), weight: item.weight + 1\}\nfn run(n: int) -> int:\n    hits = loop i from 0 to n:\n        item = step(Item \{kind: VehicleType::Car, weight: i\})\n        if item.kind != VehicleType::Truck:\n            continue\n        unit\n    list::length(hits)\nrun(100)\n"] enum.bot]
+    set hir [surface::compile "${vehicle}struct Item:
+    kind: VehicleType
+    weight: int
+
+fn next(k: VehicleType) -> VehicleType:
+    if k == VehicleType::Car:
+        VehicleType::Truck
+    else:
+        VehicleType::Car
+
+fn step(item: Item) -> Item:
+    Item \{kind: next(item.kind), weight: item.weight + 1\}
+
+fn run(n: int, k: VehicleType, acc: int) -> int:
+    if n == 0:
+        return acc
+    item = step(Item \{kind: k, weight: n\})
+    if item.kind == VehicleType::Truck:
+        run(n - 1, item.kind, acc + 1)
+    else:
+        run(n - 1, item.kind, acc)
+
+run(100, VehicleType::Car, 0)
+" enum.bot]
     set report [native::allocationReport $hir summary]
-    list [enumOutcomes $hir] [dict get $report byKind Struct allocations] \
+    list [enumOutcomes $hir] [dict get $report total allocations] [dict get $report byKind Struct allocations] \
         [lsort -unique [lmap c [native::structCensus $hir] {dict get $c class}]]
-} -result {{same: 100} 0 {call return}}
+} -result {{same: 50} 0 0 {call return}}
 
 test enum-native-gc-stress {case values survive collection at every allocation} -body {
     set source [withImports "${vehicle}struct Vehicle:\n    kind: VehicleType\n    name: str\nfn build(n: int) -> List\[Vehicle\]:\n    loop i from 0 to n:\n        k = if i == 0:\n            VehicleType::Boat\n        else:\n            VehicleType::Car\n        Vehicle \{kind: k, name: str::concat(\"v\", \"x\")\}\nxs = build(30)\nkinds = loop v in xs:\n    v.kind\n\[list::length(xs), kinds == kinds, immutable_set::from_list(kinds)\]\n"]
