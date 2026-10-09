@@ -1,5 +1,10 @@
 # MutableArray construction and refinement
 
+> **Note (MUTABLE-ARRAY.md).** `mutable_array::from_list` is a registered
+> native now (its argument kind is checked at run time, like every
+> intrinsic's), and a MutableArray is a value: the aliasing this report
+> describes (`n = m` sharing one array) is gone.
+
 ## Outcome
 
 **Delivered:** `mutarray?(v)` (a genuine, non-throwing, allocation-free type

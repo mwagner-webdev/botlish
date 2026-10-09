@@ -1,5 +1,17 @@
 # Parameterized MutableArray[T]
 
+> **Superseded in part (MUTABLE-ARRAY.md).** This milestone made
+> MutableArray[T] invariant and rejected every erasure of a typed array
+> (into `any`, the raw kind, an untyped aggregate), because MutableArray had
+> reference semantics: an erased alias could store a value the original's
+> contract excluded. MutableArray is a value now -- an erasure holds a
+> logical copy -- so it is covariant like MutableVector (a typed parameter
+> still admits exactly its contract), the raw kind is MutableArray[any], and
+> a typed array bears only what its elements bear. The constructors
+> `create`/`from_list` are registered natives with ownership roles, not
+> library functions with container rules. The element-type checks of
+> stores, typed reads and specialization described here are unchanged.
+
 ## Outcome
 
 **Delivered:** `MutableArray[T]`, a real one-argument applied type

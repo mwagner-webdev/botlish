@@ -1,5 +1,13 @@
 # MUTABLE-VECTOR.md
 
+> **Diagnostic names (MUTABLE-ARRAY.md).** `MutableArray` became a value with
+> the same place model, so the three vector-named diagnostics below were
+> renamed for both collections: `MUTABLE-VECTOR-RECEIVER` is now
+> `MUTABLE-PLACE-RECEIVER`, `MUTABLE-VECTOR-CAPTURE` is
+> `MUTABLE-PLACE-CAPTURE` and `AFFINE-VECTOR-COPY-OUT` is
+> `AFFINE-ELEMENT-COPY-OUT`. This report keeps the names it was written
+> with.
+
 `MutableVector[T]`: a growable mutable value, affine exactly when its
 elements are.
 

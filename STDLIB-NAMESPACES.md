@@ -1,5 +1,9 @@
 # Standard namespaces: `eq` removed, intrinsics namespaced, `at`/`get`
 
+> **Note (MUTABLE-ARRAY.md).** `mutable_array::create` and `from_list` are
+> registered intrinsics now (with the new `generate` and `swap`), each with
+> ownership roles; `lib/mutable_array.bot` keeps only `get`.
+
 A language/library cleanup milestone with four parts:
 
 1. the obsolete `eq` string-equality native is gone (String equality is `==`);

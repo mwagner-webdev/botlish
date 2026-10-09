@@ -499,7 +499,7 @@ runtime *header* (the identity of one logical value, mutated in place) over
 a copy-on-write *backing*. A mutation never rebinds anything: its receiver
 must be a *place* (a local, parameter or context parameter of the same
 function, or a field path from one), checked by `hir::mutvec::verify`
-(`MUTABLE-VECTOR-RECEIVER`, `MUTABLE-VECTOR-CAPTURE`). Value semantics come
+(`MUTABLE-PLACE-RECEIVER`, `MUTABLE-PLACE-CAPTURE`). Value semantics come
 from the logical copies `hir::mutvec::Elaborate` writes out
 (`mutable_vector#share`: read-outs of a place, entries into one; a
 function's own place returned moves its header out instead). Never add a
@@ -510,7 +510,7 @@ pins this); the backing's `Rc` count is copy-on-write bookkeeping only.
 Affinity is the element's (`hir::types::IsAffine`): an affine vector is
 never shared, moves whole, and moves elements only through push/swap in and
 pop/take/swap/consuming iteration out; `at` of an affine element is
-`AFFINE-VECTOR-COPY-OUT`; clear, a failed swap and a dying vector release
+`AFFINE-ELEMENT-COPY-OUT`; clear, a failed swap and a dying vector release
 by the static descriptor (`v`D), first to last.
 
 If you change the vector type, `hir/mutvec.tcl`, the vector cases of
@@ -528,3 +528,56 @@ coroutine harnesses for any change to `hir/affine.tcl` (above). A change to
 native tracing, growth or drops also needs a `BOTLISH_NATIVE_GC_STRESS=1`
 run of `tests/mutable-vector.test`. `bench/mutable-vector.tcl` regenerates
 the performance report.
+
+## MutableArray
+
+`MutableArray[T]` (MUTABLE-ARRAY.md) is MutableVector's fixed-length
+sibling and follows the same model: a VALUE, a header over a copy-on-write
+backing (Tcl: a `{mutarray ID}` over the shared Tcl list in
+`core::mutarray::store`; native: `MutArrayObj` over an `Rc<VecDeque>`), its
+mutations made through places (`MUTABLE-PLACE-RECEIVER`,
+`MUTABLE-PLACE-CAPTURE`), its logical copies written out by
+`hir::mutvec::Elaborate` (`mutable_vector#share`, descriptor `h`; `d` for a
+generic function's parameter). It used to have reference semantics: never
+reintroduce an alias between two arrays, a reference, or runtime ownership
+state. Like a vector it is covariant (MutableArray[S] <: MutableArray[T]
+when S <: T; the raw kind `mutarray` is MutableArray[any]) while a typed
+parameter admits exactly its contract (`hir::range::AggregateAdmits`); an
+erased array holds a copy, so no erasure check guards it (only the
+callable contracts of its elements, `hir::callables::Bearing`).
+
+Affinity is the element's: an affine array moves whole, is never shared,
+and moves elements only through swap/set in and swap/consuming iteration
+out (there is no take, pop or clear: a fixed-size array has no empty slot);
+`at`, `freeze` and a copy's source of an affine element are
+`AFFINE-ELEMENT-COPY-OUT`; a failed swap, a displaced `set` element, a
+failing factory's earlier results and a dying array release by the static
+descriptor (`a`D), first to last. The specialization key keeps an affine
+array's element (`hir::specialize::ElementKeyType`): erased, an instance
+would see an unrestricted array and drop nothing.
+
+Every collection operation's ownership behavior is registration metadata,
+never a name: `-ownership` roles (core/native.tcl: `repeat` for create's
+value -- an affine one is `AFFINE-DUPLICATION-UNSUPPORTED` --, `factory`
+for generate's, `move`, `place`, `copy-out`, ...), `-drop-form` (the
+dropping variant hir/mutvec.tcl retargets an affine operation to),
+`-result-length` (hir/cardinality.tcl) and the receiver role
+(`hir::mutvec::OpKind`). Do not add a check keyed on a native's name
+(`mat-id-4` fences `hir/`, `compiler/` and `surface/`); register a role.
+`mutable_array::generate(n, f)` calls F once per slot, in index order, under
+the callable-contract model (`hir::containers::VerifyFactory`, `-errors-from`).
+
+If you change the array runtime (`core/mutarray.tcl`, the array section of
+`native/src/runtime/ops.rs`), its registrations or roles, the array cases of
+`hir/types.tcl` (affinity, subtype, lub, narrow), `hir/range.tcl`'s
+admission, `hir/containers.tcl`, `hir/mutvec.tcl`, `hir/affine.tcl`'s
+`NativeConsumer`, consuming-loop lowering or `hir/specialize.tcl`'s key, run
+`tests/mutable-array.test`, `tests/mutable-vector.test`,
+`tests/mutable-array-type.test`, `audit/mutable-array/tools/fuzz.tcl`
+(several seeds, once with `-gc-stress 1`), `audit/mutable-array/tools/mutate.tcl`
+(every mutant in `audit/mutable-array/tools/mutants.txt` must still apply
+and be killed) and `cargo test --release --manifest-path native/Cargo.toml
+--lib mutarray`, plus the vector, affine and coroutine harnesses above for
+any change they name. A change to native tracing or drops also needs a
+`BOTLISH_NATIVE_GC_STRESS=1` run of `tests/mutable-array.test`.
+`bench/mutable-array.tcl` regenerates the performance report.

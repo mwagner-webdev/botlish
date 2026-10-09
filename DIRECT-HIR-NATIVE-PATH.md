@@ -205,7 +205,8 @@ boundary API of items 36/37).
 
 Carried by the HIR dict itself, so no copy exists: `semantic` (instances,
 keys, calls, envs, census counters), `intrinsicBlocks` (container rule per
-block), `modules`/`moduleScopeIds` (module identity), `moduleNativeTargets`,
+block; gone since MUTABLE-ARRAY.md made the array constructors registered
+natives), `modules`/`moduleScopeIds` (module identity), `moduleNativeTargets`,
 `errorDecls`, `sourceTypes`, per-expression `nativeResultOverride`, per-block
 `declaredParamTypes`/`inferredParamTypes`/`checkedParamTypes`, `violatedDeclared`,
 `demotedContracts`, per-node `origin` (source spans), `known`,

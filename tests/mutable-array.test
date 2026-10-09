@@ -267,6 +267,17 @@ test ma-generic-place {item 33: a generic function's untyped parameter is a plac
     maRoute "fn fill(x, v) errors IndexNotFound:\n    mutable_array::set(x, 0, v)\n    x\n" "    b = fill(a, 4)\n    c = fill(b, 5)\n    \[a.at(0), b.at(0), c.at(0)\]\n"
 } -result {value {[0, 4, 5]}}
 
+test ma-cow-extraction {items 33, 36: an array taken out of a struct field -- a projection, a destructure, an anonymous struct's field, a struct parameter's field -- is a copy, and inside a generic body (where the static type is too imprecise to say, a dynamic copy `d`) so is a local or struct field bound to the untyped parameter: mutating the copy never changes the struct or the argument} -body {
+    set box "struct Box:\n    data: MutableArray\[int\]\n    n: int\n"
+    list \
+        [maRoute $box "    p = Box {data: a, n: 1}\n    d = p.data\n    d.set(0, 9)\n    \[p.data.at(0), d.at(0)\]\n"] \
+        [maRoute $box "    p = Box {data: a, n: 1}\n    {data} = p\n    data.set(0, 9)\n    \[p.data.at(0), data.at(0)\]\n"] \
+        [maRoute "" "    s = {data: a, n: 1}\n    d = s.data\n    d.set(0, 9)\n    \[s.data.at(0), d.at(0)\]\n"] \
+        [maRoute "${box}fn g(p: Box) -> List\[int\] errors IndexNotFound:\n    d = p.data\n    d.set(0, 9)\n    \[p.data.at(0), d.at(0)\]\n" "    g(Box {data: a, n: 1})\n"] \
+        [maRoute "fn g(x, v) errors IndexNotFound:\n    y = x\n    mutable_array::set(y, 0, v)\n    \[mutable_array::at(x, 0), mutable_array::at(y, 0)\]\n" "    g(a, 7)\n"] \
+        [maRoute "fn g(x, v) errors IndexNotFound:\n    s = {data: x}\n    mutable_array::set(s.data, 0, v)\n    \[mutable_array::at(x, 0), mutable_array::at(s.data, 0)\]\n" "    g(a, 7)\n"]
+} -cleanup {unset -nocomplain box} -result {{value {[0, 9]}} {value {[0, 9]}} {value {[0, 9]}} {value {[0, 9]}} {value {[0, 7]}} {value {[0, 7]}}}
+
 # ---------------------------------------------------------------------------
 # Affinity (items 2, 4, 7, 27, 39)
 

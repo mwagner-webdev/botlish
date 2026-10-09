@@ -1,5 +1,10 @@
 # Typed MutableArray builder source refactor
 
+> **Note (MUTABLE-ARRAY.md).** A MutableArray is a value now: the
+> builder's grown storage is a logical copy of what it is given, and the
+> HashTable this report mentions is a struct of four arrays every update
+> returns.
+
 ## Outcome
 
 The geometric mutable builder (the shared implementation in
