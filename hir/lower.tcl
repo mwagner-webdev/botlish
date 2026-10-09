@@ -84,8 +84,27 @@ proc hir::lower::expr {hir e} {
         }
         listloop {
             set elemName [dict get $hir bindings [dict get $node elementBinding] name]
-            return [list listloop [expr $hir [dict get $node iterable]] \
-                [list block [list $elemName] {*}[Seq $hir [dict get $node body]]]]
+            set iterable [dict get $node iterable]
+            set body [list block [list $elemName] {*}[Seq $hir [dict get $node body]]]
+            set domain [expr $hir $iterable]
+            set consuming [hir::mutvec::IsConsumingLoop $hir $e]
+            if {$consuming} {
+                # A loop consuming an affine MutableVector (MUTABLE-VECTOR.md):
+                # marked as such in Core IR, which has no types to say so
+                # (hir::mutvec::IsConsumingLoop reads the mark back).
+                set marked [list call [list ref [hir::mutvec::ConsumeNative]] $domain]
+            }
+            if {[dict exists [hir::affine::temporaries $hir] $iterable]} {
+                # A consuming loop whose remaining elements an early exit
+                # releases by the domain's own name (hir::affine::LoopDomain).
+                set temp [TempName $iterable]
+                return [list if [list ref true] [list block {} [list bind $temp $domain] \
+                    [list listloop [list call [list ref [hir::mutvec::ConsumeNative]] [list ref $temp]] $body]] [list block {}]]
+            }
+            if {$consuming} {
+                return [list listloop $marked $body]
+            }
+            return [list listloop $domain $body]
         }
         countloop {
             set countName [dict get $hir bindings [dict get $node countBinding] name]

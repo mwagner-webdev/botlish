@@ -498,12 +498,30 @@ produces affine values (its List would own them across abrupt exits)
 ### 32. Generalized last-use release
 
 Every affine binding -- a coroutine, an affine struct, an affine List, a
-local or a parameter -- that still owns its value (live or maybe moved)
-after the last statement of its own sequence referring to it is released
-right after that statement (`releases`), and a discarded fresh affine value
-right after its statement (`af-join`: a discarded `make(1)`, a discarded
-`Running {...}` and a discarded `[make(3)]` leave no coroutine alive). How
-it is released is the type's business (point 34), not the analysis's.
+local or a parameter -- that still owns its value after the last statement
+of its own sequence referring to it is released right after that statement
+(`releases`), and a discarded fresh affine value right after its statement
+(`af-join`: a discarded `make(1)`, a discarded `Running {...}` and a
+discarded `[make(3)]` leave no coroutine alive). How it is released is the
+type's business (point 34), not the analysis's.
+
+**Path releases** (MUTABLE-VECTOR.md). A binding *maybe moved* by its last
+statement -- moved on some paths through it only -- is released on each
+path that still owns it, at the end of that path inside the statement: an
+`if` branch's last statement (an empty `else` is given a `unit` statement
+to hold it), a handler body's last statement, an infinite `loop`'s
+`break` (`hir::affine::PathReleases`). It is never released after the
+join: there a path that moved it may have given it to an owner that lives
+on -- a vector (`if not coroutine::done?(step): queue.push(step)`), or the
+join's own value (`x = if c: step else: make(2)` -- which the earlier
+after-the-join release got wrong: it released the coroutine `x` owned). A
+path no statement ends cannot hold a release: a handled call completing
+normally while a handler moved the binding, or a counting or iterating loop
+running to its end while a `break` path moved it, is
+`AFFINE-PATH-RELEASE-UNSUPPORTED` (move the value on every path, or on
+none). `tests/mutable-vector.test`'s `mv-path-release`;
+`tests/coroutines.test`'s `co-release-placement` now expects the release
+inside the branch.
 
 ### 33. Generalized early-exit release
 

@@ -411,6 +411,12 @@ proc hir::specialize::KeyType {type} {
 # callable keys: an exact callable's identity is erased to its kind, a
 # structural function type to any.
 proc hir::specialize::ElementKeyType {type} {
+    if {[hir::types::IsMutVec $type]} {
+        # A MutableVector keeps its element's key, like a List: an affine
+        # element must never be erased from an instance's key (its owner
+        # releases it by the element's descriptor -- MUTABLE-VECTOR.md).
+        return [hir::types::MakeMutVec [ElementKeyType [lindex $type 1]] 0]
+    }
     if {[hir::types::IsList $type]} {
         set elem [ElementKeyType [lindex $type 1]]
         if {[llength $type] == 3} {
@@ -763,7 +769,8 @@ proc hir::specialize::Analyze {id} {
                     set type [expr {[hir::types::IsSpecific $declaredType]
                         ? $declaredType : [hir::types::narrow $type $declaredType]}]
                 } elseif {([hir::types::IsList $type] && [hir::types::IsList $declaredType])
-                        || ([hir::types::IsSet $type] && [hir::types::IsSet $declaredType])} {
+                        || ([hir::types::IsSet $type] && [hir::types::IsSet $declaredType])
+                        || ([hir::types::IsMutVec $type] && [hir::types::IsMutVec $declaredType])} {
                     # M7.b (M7B-CONJUNCTIVE-ENTRY-FACTS.md): TYPE is already
                     # "specific" here -- an aggregate KEY, the *observed*
                     # instance fact (a caller's shape, or M7.a.a's provably
@@ -1490,7 +1497,8 @@ proc hir::specialize::Reanalyze {id argTypes} {
                 set type [expr {[hir::types::IsSpecific $declaredType]
                     ? $declaredType : [hir::types::narrow $type $declaredType]}]
             } elseif {([hir::types::IsList $type] && [hir::types::IsList $declaredType])
-                    || ([hir::types::IsSet $type] && [hir::types::IsSet $declaredType])} {
+                    || ([hir::types::IsSet $type] && [hir::types::IsSet $declaredType])
+                        || ([hir::types::IsMutVec $type] && [hir::types::IsMutVec $declaredType])} {
                 set type [hir::types::narrow $type $declaredType]
             }
         }

@@ -8,9 +8,12 @@
 #   affine#drop(V, DESCRIPTOR)   releases every affine value V owns, by the
 #                                static DESCRIPTOR of V's type
 #                                (hir::affine::Descriptor): "c" a coroutine,
-#                                "l"D each List element by D, "s"N"."
-#                                (SLOT"."D)*N the struct fields at those
-#                                layout slots, in the descriptor's order
+#                                "l"D each List element by D, "v"D each
+#                                element of a MutableVector by D, first to
+#                                last, leaving it empty (core/mutvec.tcl),
+#                                "s"N"."(SLOT"."D)*N the struct fields at
+#                                those layout slots, in the descriptor's
+#                                order
 #
 # The descriptor is type-directed: only the positions the type says are
 # affine are visited, never an unrestricted field or a List of unrestricted
@@ -25,18 +28,24 @@ namespace eval core::affine {
 proc core::affine::dropNative {} { return affine#drop }
 
 proc core::affine::dropImpl {value descriptor} {
+    Drop $value [Tree [core::value::strOf $descriptor] affine#drop]
+    return [core::value::unit]
+}
+
+# The parsed tree of descriptor TEXT (cached); WHO names the operation in an
+# error. The same grammar serves the drop descriptors and the share
+# descriptors of mutable_vector#share (core/mutvec.tcl).
+proc core::affine::Tree {text who} {
     variable trees
-    set text [core::value::strOf $descriptor]
     if {![dict exists $trees $text]} {
         set pos 0
         set tree [Parse $text pos]
         if {$pos != [string length $text]} {
-            error "affine#drop: bad descriptor \"$text\""
+            error "$who: bad descriptor \"$text\""
         }
         dict set trees $text $tree
     }
-    Drop $value [dict get $trees $text]
-    return [core::value::unit]
+    return [dict get $trees $text]
 }
 
 # The descriptor tree at POS of TEXT, advancing POS past it.
@@ -46,6 +55,12 @@ proc core::affine::Parse {text posVar} {
     incr pos
     switch -- $c {
         c { return {c} }
+        v { return [list v [Parse $text pos]] }
+        h {
+            # A share descriptor's vector header (mutable_vector#share,
+            # core/mutvec.tcl); never part of a drop descriptor.
+            return {h}
+        }
         l { return [list l [Parse $text pos]] }
         s {
             set n [Number $text pos]
@@ -80,6 +95,9 @@ proc core::affine::Drop {value tree} {
             foreach element [core::value::items $value] {
                 Drop $element [lindex $tree 1]
             }
+        }
+        v {
+            core::mutvec::DropElements $value [lindex $tree 1]
         }
         s {
             set values [core::value::structValues $value]

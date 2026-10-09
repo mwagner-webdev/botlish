@@ -491,3 +491,40 @@ lowering also needs a `BOTLISH_NATIVE_GC_STRESS=1` run of
 `tests/affine.test` and `cargo test --release --manifest-path
 native/Cargo.toml --lib affine`. `bench/affine.tcl` regenerates the
 performance report.
+
+## MutableVector
+
+`MutableVector[T]` (MUTABLE-VECTOR.md) is a growable mutable VALUE: a
+runtime *header* (the identity of one logical value, mutated in place) over
+a copy-on-write *backing*. A mutation never rebinds anything: its receiver
+must be a *place* (a local, parameter or context parameter of the same
+function, or a field path from one), checked by `hir::mutvec::verify`
+(`MUTABLE-VECTOR-RECEIVER`, `MUTABLE-VECTOR-CAPTURE`). Value semantics come
+from the logical copies `hir::mutvec::Elaborate` writes out
+(`mutable_vector#share`: read-outs of a place, entries into one; a
+function's own place returned moves its header out instead). Never add a
+reference, an alias between places, a rebinding, an assignment, or runtime
+ownership state (an owner, a moved bit, an affine flag: `mv-runtime-source`
+pins this); the backing's `Rc` count is copy-on-write bookkeeping only.
+
+Affinity is the element's (`hir::types::IsAffine`): an affine vector is
+never shared, moves whole, and moves elements only through push/swap in and
+pop/take/swap/consuming iteration out; `at` of an affine element is
+`AFFINE-VECTOR-COPY-OUT`; clear, a failed swap and a dying vector release
+by the static descriptor (`v`D), first to last.
+
+If you change the vector type, `hir/mutvec.tcl`, the vector cases of
+`hir/affine.tcl` (consumers, consuming loops, `LoopDomain`, path releases),
+consuming-loop lowering (`hir/lower.tcl`, `core/evaluator.tcl`,
+`compiler/compiler.tcl`, `native/lower.tcl`) or either runtime
+(`core/mutvec.tcl`, `native/src/runtime/mutvec.rs`), run
+`tests/mutable-vector.test`, `audit/mutable-vector/tools/fuzz.tcl` (several
+seeds, once with `-gc-stress 1`), `audit/mutable-vector/tools/mutate.tcl`
+(every mutant in `audit/mutable-vector/tools/mutants.txt` must still apply
+and be killed: update a mutant's text when you change the code it mutates,
+keeping it a mutant of the same rule) and `cargo test --release
+--manifest-path native/Cargo.toml --lib mutvec`, plus the affine and
+coroutine harnesses for any change to `hir/affine.tcl` (above). A change to
+native tracing, growth or drops also needs a `BOTLISH_NATIVE_GC_STRESS=1`
+run of `tests/mutable-vector.test`. `bench/mutable-vector.tcl` regenerates
+the performance report.

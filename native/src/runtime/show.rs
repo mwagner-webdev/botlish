@@ -129,6 +129,18 @@ fn show_into(v: Value, out: &mut String) {
         Kind::Coroutine => {
             out.push_str("<coroutine>");
         }
+        Kind::MutVec => {
+            // Matches core::value::show's mutvec rendering: the current
+            // elements, never the header or its backing.
+            out.push_str("<mutable-vector [");
+            for (i, item) in super::mutvec::elements(v).enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                show_into(item, out);
+            }
+            out.push_str("]>");
+        }
         Kind::ByteStore => {
             // Matches core::value::show's bytestore rendering exactly: the
             // byte count and the bytes in lowercase hex. Reached only for a
@@ -235,6 +247,13 @@ pub fn tcl_value(v: Value) -> Result<String, RtError> {
                 "the native backend cannot return a coroutine handle to the host: {}",
                 show(v)
             )));
+        }
+        // A vector's current elements, under a tag of their own: the host
+        // (native::Outcome) makes them a vector value of its own runtime
+        // (core/mutvec.tcl), exactly as it would hold one.
+        Kind::MutVec => {
+            let items = super::mutvec::elements(v).map(tcl_value).collect::<Result<Vec<_>, _>>()?;
+            tcl_list(&["mutvecitems".to_string(), tcl_list(&items)])
         }
     })
 }

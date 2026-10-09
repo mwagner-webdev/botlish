@@ -1,7 +1,9 @@
-# mutate.tcl -- mutation testing of the coroutine milestone (COROUTINES.md).
+# mutate.tcl -- mutation testing of MutableVector[T] (MUTABLE-VECTOR.md).
 #
-#   tclsh9.0 audit/coroutines/tools/mutate.tcl ?-only NAME,...? ?-fuzz-count N?
-#                                              ?-fuzz-seed N? ?-timeout SECONDS?
+#   tclsh9.0 audit/mutable-vector/tools/mutate.tcl ?-only NAME,...?
+#                                                  ?-tests FILES?
+#                                                  ?-fuzz-count N? ?-fuzz-seed N?
+#                                                  ?-timeout SECONDS?
 #
 # Each mutant is a deliberate bug, written in mutants.txt (beside this
 # script) as exact source replacements, each replaced text occurring exactly
@@ -9,25 +11,27 @@
 # (a temporary directory) gets the replacements, and the detectors run
 # against it:
 #
-#   * tests/coroutines.test (with a private -tmpdir): killed if any test fails
-#     or the file does not complete;
-#   * audit/coroutines/tools/fuzz.tcl -n N -seed S (every backend): killed if
-#     it reports a disagreement or does not complete;
-#   * for a native mutant (one that edits native/), first a release build of
-#     the copy's native backend (a mutant that does not build is reported
-#     NOT-BUILT, never counted as killed), then also the Rust runtime tests
-#     of the coroutine module (`cargo test --release --lib coroutine`).
+#   * the test files FILES (default tests/mutable-vector.test; each with a
+#     private -tmpdir): killed if any test fails or a file does not complete;
+#   * audit/mutable-vector/tools/fuzz.tcl -n N -seed S (every backend, the
+#     independent model): killed if it reports a disagreement or does not
+#     complete;
+#   * for a native mutant (one that edits native/src/ or the crate's
+#     manifest), first a release build of the copy's native backend (a mutant
+#     that does not build is reported NOT-BUILT, never counted as killed),
+#     then also the Rust runtime tests of the vector module (`cargo test
+#     --release --lib mutvec`).
 #
 # Mutants that edit only Tcl run first, against the copy's unmodified native
-# build; native mutants follow, each rebuilding the copy. A mutant every
-# detector misses SURVIVES; the report lists each mutant, what killed it
-# (failed test names, fuzz disagreements, Rust test failures) and the
-# survivors. The real checkout, including its native/target, is never
-# modified.
+# build (native/lower.tcl is Tcl: every native test run reads the copy's);
+# native mutants follow, each rebuilding the copy. A mutant every detector
+# misses SURVIVES; the report lists each mutant, what killed it (failed test
+# names, fuzz disagreements, Rust test failures) and the survivors. The real
+# checkout, including its native/target, is never modified.
 
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
 
-set options [dict create -only "" -fuzz-count 25 -fuzz-seed 11 -timeout 1800]
+set options [dict create -only "" -tests tests/mutable-vector.test -fuzz-count 25 -fuzz-seed 11 -timeout 1800]
 foreach {option value} $argv {
     if {![dict exists $options $option]} { error "unknown option $option" }
     dict set options $option $value
@@ -97,7 +101,7 @@ proc writeFile {path text} {
 
 proc isNative {edits} {
     foreach {file old new} $edits {
-        if {[string match native/* $file]} {
+        if {[string match native/src/* $file] || [string match native/Cargo.* $file]} {
             return 1
         }
     }
@@ -118,11 +122,11 @@ foreach {name description edits} [readMutants [file join [file dirname [file nor
 }
 set selected [concat $selected $nativeSelected]
 
-# A private copy of the compiler sources, tests, library, the coroutine audit
+# A private copy of the compiler sources, tests, library, the vector audit
 # tools and the native backend. Its native/target is a real copy when a
 # native mutant is selected (it is rebuilt), else a link to this checkout's.
-set tree [file tempdir botlish-coroutine-mutants]
-foreach dir {compiler core hir surface lib tests examples audit/coroutines .cargo} {
+set tree [file tempdir botlish-mv-mutants]
+foreach dir {compiler core hir surface lib tests examples audit/mutable-vector .cargo} {
     if {![file exists [file join $root $dir]]} continue
     file mkdir [file dirname [file join $tree $dir]]
     file copy [file join $root $dir] [file join $tree $dir]
@@ -200,7 +204,7 @@ try {
                 }
                 continue
             }
-            lassign [run [dict get $options -timeout] cargo test --release --manifest-path $manifest --lib coroutine] status output
+            lassign [run [dict get $options -timeout] cargo test --release --manifest-path $manifest --lib mutvec] status output
             cd $here
             if {$status != 0} {
                 set failing [regexp -all -inline -line {^test (\S+) \.\.\. FAILED$} $output]
@@ -210,21 +214,29 @@ try {
                 set rust survived
             }
         }
-        set tmp [file tempdir botlish-coroutine-mutant-run]
-        lassign [run [dict get $options -timeout] tclsh9.0 [file join $tree tests coroutines.test] -tmpdir $tmp] status output
-        file delete -force $tmp
-        set failedTests [lsort -unique [lmap {- n} [regexp -all -inline -line {^==== (\S+) .*FAILED$} $output] {set n}]]
-        if {![regexp {Total\s+\d+\s+Passed\s+\d+\s+Skipped\s+\d+\s+Failed\s+(\d+)} $output]} {
-            set tests "killed (did not complete: [lastLine $output])"
+        set failedTests {}
+        set incomplete ""
+        foreach testFile [dict get $options -tests] {
+            set tmp [file tempdir botlish-mv-mutant-run]
+            lassign [run [dict get $options -timeout] tclsh9.0 [file join $tree $testFile] -tmpdir $tmp] status output
+            file delete -force $tmp
+            lappend failedTests {*}[lmap {- n} [regexp -all -inline -line {^==== (\S+) .*FAILED$} $output] {set n}]
+            if {$incomplete eq "" && ![regexp {Total\s+\d+\s+Passed\s+\d+\s+Skipped\s+\d+\s+Failed\s+(\d+)} $output]} {
+                set incomplete "[file tail $testFile]: [lastLine $output]"
+            }
+        }
+        set failedTests [lsort -unique $failedTests]
+        if {$incomplete ne ""} {
+            set tests "killed (did not complete: $incomplete)"
         } elseif {$failedTests ne {}} {
             set tests "killed ([llength $failedTests] failed: [join [lrange $failedTests 0 5] {, }][expr {[llength $failedTests] > 6 ? ", ..." : ""}])"
         } else {
             set tests survived
         }
-        set scratch [file tempdir botlish-coroutine-mutant-fuzz]
+        set scratch [file tempdir botlish-mv-mutant-fuzz]
         set here [pwd]
         cd $scratch
-        lassign [run [dict get $options -timeout] tclsh9.0 [file join $tree audit coroutines tools fuzz.tcl] \
+        lassign [run [dict get $options -timeout] tclsh9.0 [file join $tree audit mutable-vector tools fuzz.tcl] \
             -n [dict get $options -fuzz-count] -seed [dict get $options -fuzz-seed]] status output
         cd $here
         file delete -force $scratch

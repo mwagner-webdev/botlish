@@ -120,16 +120,16 @@ proc freshNatives {} {
     return [exec [info nameofexecutable] << $script]
 }
 
-test ns-root-inventory {the unqualified root natives are exactly the language primitives (beside the internal operations source cannot spell, whose names contain "#": the two execution-environment context operations, CONTEXTS.md, and the placeholder of code no installed context reaches, CONTEXT-TRAITS.md, the five internal coroutine operations, COROUTINES.md, and the drop of an affine aggregate, AFFINE-VALUES.md)} -body {
+test ns-root-inventory {the unqualified root natives are exactly the language primitives (beside the internal operations source cannot spell, whose names contain "#": the two execution-environment context operations, CONTEXTS.md, and the placeholder of code no installed context reaches, CONTEXT-TRAITS.md, the five internal coroutine operations, COROUTINES.md, the drop of an affine aggregate, AFFINE-VALUES.md, and the six internal MutableVector operations the compiler writes out, MUTABLE-VECTOR.md)} -body {
     list [lsort [lmap name [freshNatives] {if {[string first :: $name] >= 0 || [string first # $name] >= 0} continue; set name}]] \
         [lsort [lmap name [freshNatives] {if {[string first # $name] < 0} continue; set name}]]
-} -result {{* + - < <= == > >= argv bit_and bit_or bit_xor error? hash integer? list list? mod mutarray? ok? result-error result-value shift_left shift_right string?} {affine#drop context#install context#load context#unreachable coroutine#create coroutine#release coroutine#resume coroutine#start coroutine#yield}}
+} -result {{* + - < <= == > >= argv bit_and bit_or bit_xor error? hash integer? list list? mod mutarray? ok? result-error result-value shift_left shift_right string?} {affine#drop context#install context#load context#unreachable coroutine#create coroutine#release coroutine#resume coroutine#start coroutine#yield mutable_vector#clear_drop mutable_vector#consume mutable_vector#share mutable_vector#swap_drop mutable_vector#take_front mutable_vector#to_list}}
 
 test ns-qualified-inventory {every standard intrinsic lives in its value family's flat namespace} -body {
-    lmap ns {list str char mutable_array immutable_set byte_store mutable_byte_store linux::abi abi::x86_64} {
+    lmap ns {list str char mutable_array mutable_vector immutable_set byte_store mutable_byte_store linux::abi abi::x86_64} {
         list $ns [core::native::qualifiedMembers $ns]
     }
-} -result {{list {append at length}} {str {char_at concat encode_utf8 is_tcl_alnum is_tcl_alpha length lowercase substring}} {char scalar_value} {mutable_array {allocate at capacity copy freeze set}} {immutable_set {contains from_list}} {byte_store {byte_count from_list}} {mutable_byte_store {count detach freeze freeze_prefix from_storage replace zeroed}} {linux::abi syscall} {abi::x86_64 {from_bytes from_mutable_bytes}}}
+} -result {{list {append at length}} {str {char_at concat encode_utf8 is_tcl_alnum is_tcl_alpha length lowercase substring}} {char scalar_value} {mutable_array {allocate at capacity copy freeze set}} {mutable_vector {at clear empty? from_list length pop push swap take}} {immutable_set {contains from_list}} {byte_store {byte_count from_list}} {mutable_byte_store {count detach freeze freeze_prefix from_storage replace zeroed}} {linux::abi syscall} {abi::x86_64 {from_bytes from_mutable_bytes}}}
 
 test ns-no-nested-stdlib {no std::/stdlib::/core:: hierarchy: every qualified intrinsic but the platform's (linux::abi::syscall, abi::x86_64::from_bytes) is NAMESPACE::MEMBER, one level} -body {
     lsort [lmap name [core::native::names] {

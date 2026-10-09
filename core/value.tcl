@@ -99,6 +99,15 @@
 #                             (an affine binding), so the store's mutation
 #                             is never observable as aliasing. No equality,
 #                             no hash, no storage in another value.
+#   {mutvec ID}               a MutableVector header (MUTABLE-VECTOR.md); ID
+#                             indexes core::mutvec's store (mutvec.tcl), the
+#                             vector's current elements. A VALUE with a
+#                             mutable header: a mutation changes the header
+#                             it is applied to, and the compiler proves only
+#                             the one place owning a header ever mutates it
+#                             (every logical copy is a new header,
+#                             mutable_vector#share), so no alias of a header
+#                             can observe it. No equality, no hash.
 #   {mutarray ID}             MutableArray handle; ID indexes
 #                             core::mutarray's mutable store (mutarray.tcl).
 #                             The only value kind that is NOT treated as
@@ -112,7 +121,7 @@
 # file should construct and inspect values only through these procedures.
 
 namespace eval core::value {
-    variable kinds {int str bool unit list result block native mutarray UnicodeChar immutableSet errorId struct bytestore mutbytes coroutine}
+    variable kinds {int str bool unit list result block native mutarray UnicodeChar immutableSet errorId struct bytestore mutbytes coroutine mutvec}
 }
 
 proc core::value::isCanonicalInt {text} {
@@ -332,6 +341,7 @@ proc core::value::structGet {v name} {
 proc core::value::nativeName {v}  { Require native $v; return [lindex $v 1] }
 proc core::value::mutarrayId {v}  { Require mutarray $v; return [lindex $v 1] }
 proc core::value::coroutineId {v} { Require coroutine $v; return [lindex $v 1] }
+proc core::value::mutvecId {v}    { Require mutvec $v; return [lindex $v 1] }
 
 # 1 if V is a Block or contains one (in a list or Result).
 proc core::value::containsBlock {v} {
@@ -352,6 +362,13 @@ proc core::value::containsBlock {v} {
             }
         }
         result { return [containsBlock [lindex $v 2]] }
+        mutvec {
+            foreach item [core::mutvec::items $v] {
+                if {[containsBlock $item]} {
+                    return 1
+                }
+            }
+        }
     }
     return 0
 }
@@ -371,7 +388,9 @@ proc core::value::equal {a b} {
     # MutableArray, like Block/Native, has no structural equality (its
     # identity/equality semantics are a separate design question: see
     # mutarray.tcl).
-    if {$ka in {block native mutarray coroutine} || $kb in {block native mutarray coroutine}} {
+    # A MutableVector, like a MutableArray, has no equality (MUTABLE-
+    # VECTOR.md: none was added for it).
+    if {$ka in {block native mutarray coroutine mutvec} || $kb in {block native mutarray coroutine mutvec}} {
         core::semanticError EQUALITY \
             "== is not defined for callables: [show $a] == [show $b]"
     }
@@ -561,5 +580,13 @@ proc core::value::show {v {debug 0} {reveal 0}} {
         errorId { return "<error [lindex $v 1]>" }
         mutarray { return "<mutable-array capacity=[core::value::intOf [core::mutarray::capacity $v]]>" }
         coroutine { return "<coroutine>" }
+        mutvec {
+            # The current elements (a value's contents, never its header).
+            set parts {}
+            foreach item [core::mutvec::items $v] {
+                lappend parts [show $item $debug $reveal]
+            }
+            return "<mutable-vector \[[join $parts {, }]\]>"
+        }
     }
 }

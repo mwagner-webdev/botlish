@@ -150,7 +150,21 @@ namespace eval native::lower {
         coroutine#yield  {op coyield} \
         coroutine::done? {op codone} \
         coroutine#release {op corelease} \
-        affine#drop {op affinedrop}]
+        affine#drop {op affinedrop} \
+        mutable_vector::from_list {op mvfromlist} \
+        mutable_vector::length    {op mvlen} \
+        mutable_vector::empty?    {op mvempty} \
+        mutable_vector::at        {op mvat} \
+        mutable_vector::push      {op mvpush} \
+        mutable_vector::pop       {op mvpop} \
+        mutable_vector::take      {op mvtake} \
+        mutable_vector::swap      {op mvswap} \
+        mutable_vector::clear     {op mvclear} \
+        mutable_vector#share      {op mvshare} \
+        mutable_vector#to_list    {op mvtolist} \
+        mutable_vector#take_front {op mvtakefront} \
+        mutable_vector#clear_drop {op mvcleardrop} \
+        mutable_vector#swap_drop  {op mvswapdrop}]
     # State of the program being lowered. hir is the view of the instance
     # being lowered, baseHir the program's semantic HIR.
     variable hir {}
@@ -3386,7 +3400,7 @@ proc native::lower::DescriptorSkip {descriptor posVar} {
     set c [string index $descriptor $pos]
     incr pos
     switch -- $c {
-        l { DescriptorSkip $descriptor pos }
+        l - v { DescriptorSkip $descriptor pos }
         s {
             set n [DescriptorNumber $descriptor pos]
             for {set i 0} {$i < $n} {incr i} {
@@ -3939,6 +3953,15 @@ proc native::lower::ContextLeaves {id {seen {}}} {
             bool - unit - UnicodeChar {
                 lappend leaves [list [list $field] $type]
             }
+            mutvec {
+                # A MutableVector member (MUTABLE-VECTOR.md): its header,
+                # which the context owns for the whole run -- mutated in
+                # place, never replaced -- is registered as a permanent GC
+                # root when installed (`ctxroot`), so the area itself
+                # needs no scanning and a loaded header is kept alive by
+                # that root.
+                lappend leaves [list [list $field] $type]
+            }
             int {
                 if {![hir::range::fitsSmall [hir::range::TypeFact $type]]} {
                     return [list no "field \"$field\" is an Int ([hir::types::show $type]) whose declared domain does not fit the small-Int representation, so its value may be a heap-allocated big integer that fixed program data could not keep alive (no GC root)"]
@@ -4097,8 +4120,11 @@ proc native::lower::ContextInstallCall {fnVar e node} {
     if {[llength $leaves] != [llength [dict get $slot leaves]]} {
         throw {NATIVE BUG} "native lowering: context installation $e yields [llength $leaves] words for a [llength [dict get $slot leaves]]-word slot"
     }
-    foreach r $leaves {
+    foreach r $leaves leaf [dict get $slot leaves] {
         Emit fn "contextstore $offset $r" $e
+        if {[hir::types::kindOf [lindex $leaf 1]] eq "mutvec"} {
+            Assign fn "op ctxroot $r" $e
+        }
         incr offset 8
     }
     dict lappend fn calls [list native [core::contexts::installNative]]
@@ -8282,12 +8308,19 @@ proc native::lower::ListLoop {fnVar e node} {
     if {$iterReg eq "never"} {
         return never
     }
-    EmitArgGuards fn $e [list $iterExpr] [list $iterReg] {list} "loop"
-    set lenReg [Assign fn "op listlen $iterReg" $e]
-    set idx0 [IntConst fn 0 $e]
-    set idxReg [NewReg fn]
+    # A loop consuming an affine MutableVector (MUTABLE-VECTOR.md): each
+    # iteration moves the vector's first element out (`mvtakefront`, O(1));
+    # what an early exit leaves in it is released by that exit's own release
+    # items (hir::affine's loop domain), the register %iter.
+    set consuming [hir::mutvec::IsConsumingLoop $hir $e]
+    if {!$consuming} {
+        EmitArgGuards fn $e [list $iterExpr] [list $iterReg] {list} "loop"
+        set lenReg [Assign fn "op listlen $iterReg" $e]
+        set idx0 [IntConst fn 0 $e]
+        set idxReg [NewReg fn]
+        Emit fn "$idxReg = move $idx0" $e
+    }
     set resultReg [NewReg fn]
-    Emit fn "$idxReg = move $idx0" $e
     set retained [expr {![dict exists $context discarded $e]}]
     if {$retained} {
         set accReg [CollectStart fn $e]
@@ -8309,14 +8342,23 @@ proc native::lower::ListLoop {fnVar e node} {
     set exit [NewLabel fn]
     Emit fn "jump $head" $e
     EmitLabel fn $head
-    set cmp [Assign fn "op ilt $idxReg $lenReg" $e]
-    Emit fn "br $cmp $bodyLabel $normalExit" $e
+    if {$consuming} {
+        set empty [Assign fn "op mvempty $iterReg" $e]
+        Emit fn "br $empty $normalExit $bodyLabel" $e
+    } else {
+        set cmp [Assign fn "op ilt $idxReg $lenReg" $e]
+        Emit fn "br $cmp $bodyLabel $normalExit" $e
+    }
     EmitLabel fn $bodyLabel
     set saved [dict get $fn locals]
     set savedRaw [dict get $fn rawCache]
     dict set fn loops $e [list $continueLabel $exit $resultReg \
         [expr {$retained ? $accReg : "discard"}]]
-    set elemReg [Assign fn "op listget $iterReg $idxReg" $e]
+    if {$consuming} {
+        set elemReg [Assign fn "op mvtakefront $iterReg" $e]
+    } else {
+        set elemReg [Assign fn "op listget $iterReg $idxReg" $e]
+    }
     dict set fn locals [dict get $node elementBinding] [list reg $elemReg]
     set bodyValue [Sequence fn [dict get $node body]]
     set usedContinue [dict exists $fn continued $e]
@@ -8332,8 +8374,10 @@ proc native::lower::ListLoop {fnVar e node} {
     dict unset fn loops $e
     if {$bodyValue ne "never" || $usedContinue} {
         EmitLabel fn $continueLabel
-        set idxNext [Assign fn "op iadd $idxReg [IntConst fn 1 $e]" $e]
-        Emit fn "$idxReg = move $idxNext" $e
+        if {!$consuming} {
+            set idxNext [Assign fn "op iadd $idxReg [IntConst fn 1 $e]" $e]
+            Emit fn "$idxReg = move $idxNext" $e
+        }
         Emit fn "jump $head" $e
     }
     EmitLabel fn $normalExit

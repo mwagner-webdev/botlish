@@ -250,6 +250,7 @@ proc hir::format::Line {hir e text indent origins linesVar {typed 1}} {
             }
         }
     }
+    lappend flags {*}[hir::mutvec::Evidence $hir $e]
     if {![dict get $node reachable]} {
         lappend flags unreachable
     }

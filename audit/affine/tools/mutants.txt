@@ -207,20 +207,16 @@ proc hir::affine::Erasure {hir e what} {
 ## hir/affine.tcl
 <<<<
         if {[Descriptor $hir [BindingType $hir $b] [ConsumedFields $hir $b]] eq ""} continue
-        dict lappend releases $statement $b
 ====
         if {[IsDestructureTemp $hir $b] || [Descriptor $hir [BindingType $hir $b] [ConsumedFields $hir $b]] eq ""} continue
-        dict lappend releases $statement $b
 >>>>
 
 @@ last-use-raw-only the release at an owner's last use (and of a discarded value) recognizes only a raw Coroutine: a struct or List owning one is never dropped
 ## hir/affine.tcl
 <<<<
         if {[Descriptor $hir [BindingType $hir $b] [ConsumedFields $hir $b]] eq ""} continue
-        dict lappend releases $statement $b
 ====
         if {![hir::types::IsCoroutine [BindingType $hir $b]]} continue
-        dict lappend releases $statement $b
 >>>>
 ## hir/affine.tcl
 <<<<

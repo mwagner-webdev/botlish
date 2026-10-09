@@ -413,6 +413,9 @@ proc hir::sourcetypes::ValueStability {type {visiting {}}} {
     if {[hir::types::IsMutArray $type] || $type eq "mutarray"} {
         return "has reference semantics (a MutableArray's slots change in place)"
     }
+    if {[hir::types::IsMutVec $type] || $type eq "mutvec"} {
+        return "is a MutableVector, whose contents its owning place changes in place"
+    }
     if {[hir::types::IsFn $type] || [hir::types::IsExactBlock $type] || [hir::types::IsExactNative $type]
             || $type in {block native}} {
         return "is a callable, which has no stable value to refine"

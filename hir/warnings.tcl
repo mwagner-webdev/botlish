@@ -1298,13 +1298,16 @@ proc hir::warnings::ConventionalName {kind name} {
 # The empty String and every String of two or more characters are silent; a
 # character literal (const UnicodeChar) is never a String.
 #
-# The one String const the frontend synthesizes is not a written literal and
-# is never reported: a context parameter is bound to `context#load("ID")`
+# The String consts the frontend synthesizes are not written literals and
+# are never reported: a context parameter is bound to `context#load("ID")`
 # (hir/contexts.tcl's DeclareParams), whose key is the identity of the context
-# struct or context trait -- one character for one named `C`. It is
-# recognized by the compiler's own predicate for that construct
-# (hir::contexts::isLoad); no source can spell `context#load`, so no written
-# literal is ever such a key.
+# struct or context trait -- one character for one named `C` -- and the
+# MutableVector elaboration (hir/mutvec.tcl) passes a static descriptor
+# String to the internal operations that need one (`mutable_vector#share(v,
+# "h")`, `#clear_drop`, `#swap_drop`; MUTABLE-VECTOR.md). They are recognized
+# by the compiler's own predicates for those constructs (hir::contexts::isLoad,
+# hir::mutvec::DescriptorArgs); no source can spell `context#load` or
+# `mutable_vector#...`, so no written literal is ever such a key.
 #
 # Literals only. Nothing else is looked at: not a binding read at a use site
 # (`sep = ","` is reported at its initializer, once, never where `sep` is
@@ -1340,8 +1343,10 @@ proc hir::warnings::OneCharStringLiteral {hir} {
     return $warnings
 }
 
-# The const ExprIds that are context identity keys: the argument of every
-# context load (`context#load("ID")`, hir::contexts::isLoad) in HIR.
+# The const ExprIds that are synthesized keys: the argument of every context
+# load (`context#load("ID")`, hir::contexts::isLoad) in HIR, and the
+# descriptor argument of every internal MutableVector operation
+# (hir::mutvec::DescriptorArgs).
 proc hir::warnings::ContextLoadKeys {hir} {
     set keys [dict create]
     dict for {e node} [dict get $hir exprs] {
@@ -1349,6 +1354,9 @@ proc hir::warnings::ContextLoadKeys {hir} {
             foreach arg [dict get $node args] {
                 dict set keys $arg 1
             }
+        }
+        foreach arg [hir::mutvec::DescriptorArgs $hir $e] {
+            dict set keys $arg 1
         }
     }
     return $keys

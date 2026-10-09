@@ -1575,6 +1575,7 @@ proc core::compiler::CompileLoop {ctxVar e} {
 # from every iteration's own (non-`never`) body value, in order.
 proc core::compiler::CompileListLoop {ctxVar e} {
     upvar 1 $ctxVar ctx
+    variable hir
     set iterable [CompileExpr ctx [N $e iterable]]
     if {[OpType $iterable] eq "never"} {
         return $iterable
@@ -1584,7 +1585,16 @@ proc core::compiler::CompileListLoop {ctxVar e} {
     set items [NewTemp]
     set item [NewTemp]
     set parentFrame [CurrentFrameExpr $ctx]
-    Emit ctx "set $items \[core::value::items \[core::value::expect list [BoxWord $iterable] {loop iterable}\]\]"
+    set consuming [hir::mutvec::IsConsumingLoop $hir $e]
+    if {$consuming} {
+        # A loop consuming an affine MutableVector (MUTABLE-VECTOR.md): each
+        # iteration moves the vector's first element out into the loop
+        # variable; what an early exit leaves is released by that exit.
+        Emit ctx "set $items [BoxWord $iterable]"
+        NoteTemp ctx [N $e iterable] [Op box "\$$items" any]
+    } else {
+        Emit ctx "set $items \[core::value::items \[core::value::expect list [BoxWord $iterable] {loop iterable}\]\]"
+    }
     Emit ctx "set $acc \{\}"
     # $result must start unset on every logical execution of this listloop,
     # not merely once per compiled proc: when this listloop is itself
@@ -1592,7 +1602,12 @@ proc core::compiler::CompileListLoop {ctxVar e} {
     # line) is re-executed once per outer iteration within the *same* Tcl
     # proc activation, where a once-set Tcl variable otherwise stays set.
     Emit ctx "unset -nocomplain $result"
-    Emit ctx "foreach $item \$$items \{"
+    if {$consuming} {
+        Emit ctx "while \{\[llength \[core::mutvec::items \$$items\]\] > 0\} \{"
+        Emit ctx "    set $item \[core::mutvec::takeFront \$$items\]"
+    } else {
+        Emit ctx "foreach $item \$$items \{"
+    }
     Indent ctx 1
     set scopeId [N $e bodyScope]
     OpenScope ctx $scopeId $parentFrame

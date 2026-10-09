@@ -194,7 +194,7 @@ set ran 0
 # for a Tcl-only one (it is only read).
 proc copyTree {destination copyTarget} {
     file mkdir $destination
-    foreach entry {core hir surface compiler lib native tests examples main.tcl audit} {
+    foreach entry {core hir surface compiler lib native tests examples main.tcl audit .cargo} {
         set source [file join $::root $entry]
         if {$entry eq "native"} {
             file mkdir [file join $destination native]
@@ -261,7 +261,11 @@ foreach m $mutations {
     }
     if {$kind eq "rust"} {
         puts "== $name: rebuilding the native backend"
-        set status [catch {exec cargo build --release --manifest-path [file join $dir native Cargo.toml] 2>@1} output]
+        # Cargo finds the copy's .cargo/config.toml (frame pointers: the
+        # collector's stack walk needs them) from the working directory.
+        inDir $dir {
+            set status [catch {exec cargo build --release --manifest-path [file join $dir native Cargo.toml] 2>@1} output]
+        }
         if {$status} {
             puts "   BUILD FAILED: [string range $output end-600 end]"
             lappend survivors "$name (build failed)"

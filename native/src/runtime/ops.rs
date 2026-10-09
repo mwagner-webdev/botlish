@@ -75,6 +75,10 @@
 
 use super::construct::{rt_construct, rt_plan_materialize};
 use super::affine::rt_affine_drop;
+use super::mutvec::{
+    rt_mv_at, rt_mv_clear, rt_mv_clear_drop, rt_mv_empty, rt_mv_from_list, rt_mv_len, rt_mv_pop, rt_mv_push, rt_mv_share,
+    rt_mv_swap, rt_mv_swap_drop, rt_mv_take, rt_mv_take_front, rt_mv_to_list,
+};
 use super::coroutine::{rt_co_create, rt_co_done, rt_co_release, rt_co_resume, rt_co_resume0, rt_co_start, rt_co_yield};
 use super::error::{semantic_kind, RtError};
 use super::syscall::rt_linux_x86_64_syscall;
@@ -128,6 +132,10 @@ pub fn op_may_allocate(op: OpCode) -> bool {
             // in particular must be a safepoint -- a suspended frame's roots
             // are found only through its stack map.
             | CoCreate | CoStart | CoResume | CoResume0 | CoYield
+            // MutableVector (MUTABLE-VECTOR.md): a new header (from_list, a
+            // share) or a List (the snapshot); the mutations allocate no
+            // Botlish object (runtime/mutvec.rs).
+            | MvFromList | MvShare | MvToList
     )
 }
 
@@ -151,6 +159,8 @@ pub fn op_may_error(op: OpCode) -> bool {
         // produce. The kernel's own result is never an error here.
         | SyscallLinuxX86_64
         | ListNew | ListGet | ListAppend | MutArrayAllocate | MutArrayGet | MutArraySet | MutArrayCopy | MutArrayFreeze
+        // MutableVector: the declared IndexNotFound (runtime/mutvec.rs).
+        | MvAt | MvPop | MvTake | MvSwap | MvSwapDrop
         | ResultValue | ResultError | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum
         // Construction (dedup) and membership (a linear equal-scan) can
         // both raise EQUALITY through the same pre-existing
@@ -416,8 +426,8 @@ fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
     let (ka, kb) = (kind_of(a), kind_of(b));
     // MutableArray, like Block/Native, has no structural equality (req #31:
     // its identity/equality semantics are a separate design question).
-    if matches!(ka, Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine)
-        || matches!(kb, Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine)
+    if matches!(ka, Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine | Kind::MutVec)
+        || matches!(kb, Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine | Kind::MutVec)
     {
         vm(p).fail(RtError::Equality { a, b });
         return Err(());
@@ -476,7 +486,7 @@ fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
             }
             true
         }
-        Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine => unreachable!(),
+        Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine | Kind::MutVec => unreachable!(),
     })
 }
 
@@ -554,7 +564,7 @@ fn fnv1a(h: u64, bytes: &[u8]) -> u64 {
 /// a Result payload exactly as `equal` recurses (see ops.rs's `equal`).
 fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
     let kind = kind_of(v);
-    if matches!(kind, Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine) {
+    if matches!(kind, Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine | Kind::MutVec) {
         vm(p).fail(RtError::Unhashable { value: v });
         return Err(());
     }
@@ -574,7 +584,7 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
         Kind::Struct => 8,
         Kind::ByteStore => 9,
         Kind::MutByteStore => 10,
-        Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine => unreachable!(),
+        Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine | Kind::MutVec => unreachable!(),
     };
     let h = fnv1a(h, &[tag]);
     Ok(match kind {
@@ -659,7 +669,7 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
             h = fnv1a(h, &combined.to_le_bytes());
             h
         }
-        Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine => unreachable!(),
+        Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine | Kind::MutVec => unreachable!(),
     })
 }
 
@@ -1481,6 +1491,20 @@ fn index_not_found(p: *mut Vm) -> Value {
     fail_builtin(p, super::error::ERR_INDEX_NOT_FOUND, "IndexNotFound")
 }
 
+/// `ctxroot %h`: the MutableVector header H, just installed in the context
+/// area (MUTABLE-VECTOR.md), stays a GC root for the rest of the run (the
+/// context owns it; it is mutated in place, never replaced).
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_context_root(p: *mut Vm, h: Value) -> Value {
+    vm(p).context_roots.push(h);
+    UNIT
+}
+
+/// `index_not_found` for the other runtime modules (runtime/mutvec.rs).
+pub fn fail_index_not_found(p: *mut Vm) -> Value {
+    index_not_found(p)
+}
+
 /// Records the builtin declared error ID (named NAME) as pending and fails:
 /// what a handler's `declarederroreq` reads, with an UNCAUGHT-ERROR fallback
 /// for the program boundary. Returns NO_VALUE.
@@ -1988,6 +2012,21 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         MutArraySet => rt_mutarray_set(p, a[0], a[1], a[2]),
         MutArrayCopy => rt_mutarray_copy(p, a[0], a[1], a[2], a[3], a[4]),
         MutArrayFreeze => rt_mutarray_freeze(p, a[0], a[1]),
+        MvFromList => rt_mv_from_list(p, a[0]),
+        MvLen => rt_mv_len(p, a[0]),
+        MvEmpty => rt_mv_empty(p, a[0]),
+        MvAt => rt_mv_at(p, a[0], a[1]),
+        MvPush => rt_mv_push(p, a[0], a[1]),
+        MvPop => rt_mv_pop(p, a[0]),
+        MvTake => rt_mv_take(p, a[0], a[1]),
+        MvSwap => rt_mv_swap(p, a[0], a[1], a[2]),
+        MvClear => rt_mv_clear(p, a[0]),
+        MvShare => rt_mv_share(p, a[0], a[1]),
+        MvToList => rt_mv_to_list(p, a[0]),
+        MvTakeFront => rt_mv_take_front(p, a[0]),
+        MvClearDrop => rt_mv_clear_drop(p, a[0], a[1]),
+        MvSwapDrop => rt_mv_swap_drop(p, a[0], a[1], a[2], a[3]),
+        CtxRoot => rt_context_root(p, a[0]),
         IsInt => rt_is_kind(p, a[0], Kind::Int.code() as u64),
         IsStr => rt_is_kind(p, a[0], Kind::Str.code() as u64),
         IsList => rt_is_kind(p, a[0], Kind::List.code() as u64),
@@ -2133,6 +2172,21 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_co_done, 2),
         h!(rt_co_release, 2),
         h!(rt_affine_drop, 3),
+        h!(rt_mv_from_list, 2),
+        h!(rt_mv_len, 2),
+        h!(rt_mv_empty, 2),
+        h!(rt_mv_at, 3),
+        h!(rt_mv_push, 3),
+        h!(rt_mv_pop, 2),
+        h!(rt_mv_take, 3),
+        h!(rt_mv_swap, 4),
+        h!(rt_mv_clear, 2),
+        h!(rt_mv_share, 3),
+        h!(rt_mv_to_list, 2),
+        h!(rt_mv_take_front, 2),
+        h!(rt_mv_clear_drop, 3),
+        h!(rt_mv_swap_drop, 5),
+        h!(rt_context_root, 2),
     ]
 }
 

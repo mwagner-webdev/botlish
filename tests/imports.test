@@ -403,7 +403,7 @@ test imports-method-requires-the-import {without the import, xs.at(i) does not f
     list [diagKinds "xs = \[1, 2\]\nxs.at(0)\n"] [diagKinds "s = \"ab\"\ns.length()\n"] \
         [expr {[string first {no function named "length" is visible here either} $message] >= 0}] \
         [expr {[string first {define it here, or import the namespace that defines it with `import NAMESPACE`} $message] >= 0}] \
-        [expr {[string first {`list::length`, `str::length` exist: add `import list` or `import str`} $message] >= 0}]
+        [expr {[string first {`list::length`, `mutable_vector::length`, `str::length` exist: add `import list` or `import mutable_vector` or `import str`} $message] >= 0}]
 } -result {NOT-A-STRUCT NOT-A-STRUCT 1 1 1}
 
 test imports-method-does-not-need-an-alias {an alias binding for method visibility is not needed, and where present is the same candidate (not an ambiguity)} -body {

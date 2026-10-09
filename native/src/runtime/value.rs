@@ -103,6 +103,9 @@ pub const KIND_MUTBYTES: u8 = 14;
 /// the lifecycle state of one started computation and, while it is
 /// suspended, the native stack its frames live on.
 pub const KIND_COROUTINE: u8 = 15;
+/// A MutableVector header (MUTABLE-VECTOR.md, runtime/mutvec.rs's MutVecObj):
+/// one logical vector value over a copy-on-write backing of elements.
+pub const KIND_MUTVEC: u8 = 16;
 
 #[repr(C)]
 pub struct Header {
@@ -398,6 +401,9 @@ pub enum Kind {
     /// A coroutine handle (COROUTINES.md). Like Block/Native/MutArray it has
     /// no equality and no hash; the compiler keeps it in local bindings only.
     Coroutine,
+    /// A MutableVector header (MUTABLE-VECTOR.md): like MutArray, no equality
+    /// and no hash. Named as core/value.tcl's `mutvec` kind.
+    MutVec,
 }
 
 impl Kind {
@@ -418,6 +424,7 @@ impl Kind {
             "bytestore" => Kind::ByteStore,
             "mutbytes" => Kind::MutByteStore,
             "coroutine" => Kind::Coroutine,
+            "mutvec" => Kind::MutVec,
             _ => return None,
         })
     }
@@ -439,6 +446,7 @@ impl Kind {
             Kind::ByteStore => "bytestore",
             Kind::MutByteStore => "mutbytes",
             Kind::Coroutine => "coroutine",
+            Kind::MutVec => "mutvec",
         }
     }
 
@@ -450,7 +458,7 @@ impl Kind {
         [
             Kind::Int, Kind::Str, Kind::Bool, Kind::Unit, Kind::List, Kind::Result, Kind::Block, Kind::Native,
             Kind::MutArray, Kind::UnicodeChar, Kind::ImmutableSet, Kind::Struct, Kind::ByteStore, Kind::MutByteStore,
-            Kind::Coroutine,
+            Kind::Coroutine, Kind::MutVec,
         ][code as usize]
     }
 }
@@ -481,6 +489,7 @@ pub fn kind_of(v: Value) -> Kind {
         KIND_BYTES => Kind::ByteStore,
         KIND_MUTBYTES => Kind::MutByteStore,
         KIND_COROUTINE => Kind::Coroutine,
+        KIND_MUTVEC => Kind::MutVec,
         _ => panic!("not a program value: {v:#x}"),
     }
 }

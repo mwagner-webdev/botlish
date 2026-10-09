@@ -458,7 +458,7 @@ x = "T"
         [lmap w [hir::warnings::collect $parsed] {core::value::show [dict get $w data value]}] [lindex [outcomeUnderHir interp $hir] 1]
 } -result {{{str T} {str W}} 10:5 {{"T"}} {[4, "T"]}}
 
-test oc-synthesized-string-consts-enumerated {SOURCE AUDIT: the frontend builds a String const in exactly three places -- the written literal (surface/lower.tcl) and the context load key of a context struct and of a context trait (hir/contexts.tcl) -- and every const node is built by hir::syntax::constNode or read from core IR (hir::syntax::fromIR); a new synthesized String const fails here} -body {
+test oc-synthesized-string-consts-enumerated {SOURCE AUDIT: the frontend builds a String const in exactly four places -- the written literal (surface/lower.tcl), the context load key of a context struct and of a context trait (hir/contexts.tcl), and the descriptor argument of a MutableVector share, affine clear or affine swap the elaboration writes out (hir/mutvec.tcl, after every warning check) -- and every const node is built by hir::syntax::constNode or read from core IR (hir::syntax::fromIR); a new synthesized String const fails here} -body {
     set found {}
     foreach path [lsort [concat [glob [file join $::projectRoot hir *.tcl]] [glob [file join $::projectRoot surface *.tcl]]]] {
         set channel [open $path]
@@ -474,7 +474,7 @@ test oc-synthesized-string-consts-enumerated {SOURCE AUDIT: the frontend builds 
         }
     }
     set found
-} -result {{hir/contexts.tcl {[hir::syntax::constNode $origin str $trait]]]}} {hir/contexts.tcl {[hir::syntax::constNode $origin str $id]]]}} {hir/syntax.tcl {return [Node const $origin literal $args]}} {hir/syntax.tcl {return [Node const $origin literal [lrange $node 1 end]]}} {surface/lower.tcl {return [hir::syntax::constNode $origin str [dict get $node value]]}}}
+} -result {{hir/contexts.tcl {[hir::syntax::constNode $origin str $trait]]]}} {hir/contexts.tcl {[hir::syntax::constNode $origin str $id]]]}} {hir/mutvec.tcl {set literal [hir::syntax::constNode $origin str $text]}} {hir/syntax.tcl {return [Node const $origin literal $args]}} {hir/syntax.tcl {return [Node const $origin literal [lrange $node 1 end]]}} {surface/lower.tcl {return [hir::syntax::constNode $origin str [dict get $node value]]}}}
 
 test oc-desugarings-build-no-string-const {every construct the frontend desugars -- unary minus, !=, not, and, or, elif, struct destructuring, flags, with context, collecting and lockstep loops, method sugar -- builds no String const: a program using them all without a written String literal has none but the context load key, and no warning} -body {
     set hir [compileWith {context struct Box:

@@ -78,6 +78,17 @@
 #                                   (hir/callables.tcl audits every position
 #                                   that would). The bare atom `mutarray` is
 #                                   the raw, element-untyped substrate type.
+#   {mutvec ELEM}                   a MutableVector[ELEM] (MUTABLE-VECTOR.md):
+#                                   a growable mutable VALUE whose every
+#                                   element has static type ELEM. Logical
+#                                   copies are independent (copy-on-write);
+#                                   its affinity is ELEM's (Affinity). Like
+#                                   List: covariant as a subtype, admissible
+#                                   at a declared boundary only with the
+#                                   same element type or as the proven-empty
+#                                   MutableVector[never] (range.tcl's
+#                                   AggregateAdmits). The bare atom `mutvec`
+#                                   is the runtime kind (MutableVector[any]).
 #   {coroutine {args {M} return R errors {E1 ...}}}
 #                                   a coroutine handle (COROUTINES.md,
 #                                   AFFINE-VALUES.md): the affine, resumable
@@ -171,7 +182,7 @@ namespace eval hir::types {
     # resolution-mechanism change -- confirming the List[T] milestone's own
     # claim that a future unary container needs only another entry here
     # (plus a case in resolveApplication/MakeSet below), never new syntax.
-    variable constructors [dict create List 1 ImmutableSet 1 MutableArray 1]
+    variable constructors [dict create List 1 ImmutableSet 1 MutableArray 1 MutableVector 1]
 }
 
 # The canonical resolved type for a bare (unapplied) type name NAME -- an
@@ -266,7 +277,7 @@ proc hir::types::resolveApplication {ctor argTypes} {
             return -code error -errorcode {BOTLISH CONTEXT-TRAIT-POSITION} \
                 [ContextTraitPositionMessage $contextTrait "the element type of $ctor\[[show $t]\]"]
         }
-        if {$ctor ne "List" && [IsAffine $t]} {
+        if {$ctor ni {List MutableVector} && [IsAffine $t]} {
             # A MutableArray copies elements out on every read and an
             # ImmutableSet compares and hashes its members: neither can own
             # affine values (AFFINE-VALUES.md). A List can (whole-List moves).
@@ -285,12 +296,13 @@ proc hir::types::resolveApplication {ctor argTypes} {
         List { return [MakeList [lindex $argTypes 0] {} 0 0] }
         ImmutableSet { return [MakeSet [lindex $argTypes 0] 0] }
         MutableArray { return [MakeMutArray [lindex $argTypes 0] 0] }
+        MutableVector { return [MakeMutVec [lindex $argTypes 0] 0] }
     }
 }
 
 proc hir::types::IsSpecific {type} {
     return [expr {$type eq "never"
-                  || ([llength $type] > 1 && [lindex $type 0] in {native block list immutableSet mutarray fn struct nstruct trait coroutine})}]
+                  || ([llength $type] > 1 && [lindex $type 0] in {native block list immutableSet mutarray mutvec fn struct nstruct trait coroutine})}]
 }
 
 # ---------------------------------------------------------------------------
@@ -436,7 +448,10 @@ proc hir::types::IsAffine {type {seen {}}} {
             }
             return 0
         }
-        immutableSet - mutarray {
+        immutableSet - mutarray - mutvec {
+            # A MutableVector of affine elements is itself affine: it
+            # uniquely owns every element (MUTABLE-VECTOR.md). Mutation
+            # alone never makes a type affine.
             return [IsAffine [lindex $type 1] $seen]
         }
         struct {
@@ -503,7 +518,7 @@ proc hir::types::MentionsTrait {type} {
     if {[IsTrait $type]} {
         return 1
     }
-    if {[IsList $type] || [IsSet $type] || [IsMutArray $type]} {
+    if {[IsList $type] || [IsSet $type] || [IsMutArray $type] || [IsMutVec $type]} {
         return [MentionsTrait [lindex $type 1]]
     }
     if {[IsFn $type]} {
@@ -530,7 +545,7 @@ proc hir::types::MentionedContextTrait {type} {
         return [expr {[hir::traits::isContext [lindex $type 1]] ? [lindex $type 1] : ""}]
     }
     set inner {}
-    if {[IsList $type] || [IsSet $type] || [IsMutArray $type]} {
+    if {[IsList $type] || [IsSet $type] || [IsMutArray $type] || [IsMutVec $type]} {
         set inner [list [lindex $type 1]]
     } elseif {[IsFn $type]} {
         set inner [concat [FnArgs $type] [list [FnReturn $type]]]
@@ -1075,6 +1090,52 @@ proc hir::types::MakeMutArray {elem depth} {
     return [list mutarray [Unviewed [Unshaped [Bound $elem [expr {$depth + 1}]]]]]
 }
 
+# 1 if TYPE is or holds a MutableVector (an element, a field, a function
+# type's argument or result): a type some place of which may be mutated.
+proc hir::types::MentionsMutVec {type {seen {}}} {
+    if {[IsMutVec $type] || $type eq "mutvec"} {
+        return 1
+    }
+    if {[IsList $type] || [IsSet $type] || [IsMutArray $type]} {
+        return [MentionsMutVec [lindex $type 1] $seen]
+    }
+    if {[IsStruct $type]} {
+        foreach {name t} [lindex $type 1] {
+            if {[MentionsMutVec $t $seen]} { return 1 }
+        }
+    }
+    if {[IsNamedStruct $type]} {
+        set id [lindex $type 1]
+        if {$id in $seen} {
+            return 0
+        }
+        foreach {name t} [hir::structs::fieldTypes $id] {
+            if {[MentionsMutVec $t [concat $seen [list $id]]]} { return 1 }
+        }
+    }
+    return 0
+}
+
+# 1 if TYPE is an applied MutableVector form ({mutvec ELEM}). The bare atom
+# `mutvec` (the runtime kind) is not one.
+proc hir::types::IsMutVec {type} {
+    return [expr {[lindex $type 0] eq "mutvec" && [llength $type] == 2}]
+}
+
+# The canonical MutableVector[ELEM], nested DEPTH aggregate forms deep. A
+# `never` element is kept: MutableVector[never] is the proven-empty vector
+# (`from_list([])`), admissible wherever a MutableVector[T] is declared
+# (hir::range::AggregateAdmits), into which nothing can ever be pushed.
+# Past the aggregate bound the bare kind, unless the element is affine (an
+# affine element type is never erased: AFFINE-VALUES.md).
+proc hir::types::MakeMutVec {elem depth} {
+    variable aggregateDepth
+    if {$depth >= $aggregateDepth && ![IsAffine $elem]} {
+        return mutvec
+    }
+    return [list mutvec [Unviewed [Unshaped [Bound $elem [expr {$depth + 1}]]]]]
+}
+
 # 1 if element contracts A and B are the same contract: identical, or each
 # admissible for the other (two spellings of one value domain). MutableArray
 # is invariant, so this -- not subtype -- relates two MutableArray element
@@ -1161,6 +1222,9 @@ proc hir::types::Bound {type depth} {
     if {[IsMutArray $type]} {
         return [MakeMutArray [lindex $type 1] $depth]
     }
+    if {[IsMutVec $type]} {
+        return [MakeMutVec [lindex $type 1] $depth]
+    }
     if {[IsStruct $type]} {
         return [MakeStruct [lindex $type 1] $depth]
     }
@@ -1195,6 +1259,21 @@ proc hir::types::Unshaped {type} {
 # is a list form; otherwise "".
 proc hir::types::elementOf {type} {
     return [expr {[IsList $type] ? [lindex $type 1] : ""}]
+}
+
+# The static type of the loop variable of a loop over a value of static type
+# TYPE: a List's element type, or a MutableVector's (MUTABLE-VECTOR.md: a
+# loop over an unrestricted vector iterates its snapshot, over an affine one
+# consumes it); "" if not known.
+proc hir::types::IterationElementOf {type} {
+    if {[IsMutVec $type]} {
+        # (MutableVector[never] promises no element type for its contents:
+        # it is empty only while held at that type, and a value read back
+        # from HIR text or Core IR may have lost the declared type it was
+        # filled under -- never a reason to call a loop body dead.)
+        return [expr {[lindex $type 1] eq "never" ? "" : [lindex $type 1]}]
+    }
+    return [elementOf $type]
 }
 
 # The positional shape {P0 ...} of static type TYPE, or "" if not known.
@@ -1237,6 +1316,16 @@ proc hir::types::subtype {a b} {
             return [Equivalent [lindex $a 1] [lindex $b 1]]
         }
         return [expr {$a eq "mutarray" && [lindex $b 1] eq "any"}]
+    }
+    if {[IsMutVec $b]} {
+        # MutableVector[E] is a value (MUTABLE-VECTOR.md): like List, a
+        # vector of a subtype is one of the supertype (a copy never writes
+        # through to another logical value). The bare kind is
+        # MutableVector[any].
+        if {[IsMutVec $a]} {
+            return [subtype [lindex $a 1] [lindex $b 1]]
+        }
+        return [expr {$a eq "mutvec" && [lindex $b 1] eq "any"}]
     }
     if {$b eq "mutarray" && [IsMutArray $a]} {
         # A typed array viewed as the raw kind could be written with
@@ -1328,6 +1417,10 @@ proc hir::types::lub {a b} {
             return [MakeList $elem [lmap pa $sa pb $sb {lub $pa $pb}] 1]
         }
         return [MakeList $elem]
+    }
+    if {[IsMutVec $a] && [IsMutVec $b]} {
+        # Two MutableVector values: their elements join, as a List's do.
+        return [MakeMutVec [lub [lindex $a 1] [lindex $b 1]] 0]
     }
     if {[IsMutArray $a] || [IsMutArray $b]} {
         # Two MutableArrays join only when they are one contract. Otherwise
@@ -1437,6 +1530,19 @@ proc hir::types::narrow {current fact} {
     }
     if {[IsSet $current] && [IsSet $fact]} {
         return [MakeSet [narrow [lindex $current 1] [lindex $fact 1]] 0]
+    }
+    if {[IsMutVec $fact]} {
+        # A declared MutableVector[T] theorem: the element facts combine,
+        # as a List's do (an instance key's kind-only element, a coroutine,
+        # adopts the declared contract); a bare or unknown vector adopts the
+        # declared one.
+        if {[IsMutVec $current] && [lindex $current 1] ne "never"} {
+            return [MakeMutVec [narrow [lindex $current 1] [lindex $fact 1]] 0]
+        }
+        # (A proven-empty MutableVector[never] stays empty only while nothing
+        # is pushed into it: a place of the declared type may push, so the
+        # declared element type is the fact.)
+        return $fact
     }
     if {[IsMutArray $fact]} {
         # A MutableArray[T] contract fact is a static property of the
@@ -1578,6 +1684,9 @@ proc hir::types::show {type} {
             }
             mutarray {
                 return "MutableArray\[[show [lindex $type 1]]\]"
+            }
+            mutvec {
+                return "MutableVector\[[show [lindex $type 1]]\]"
             }
             struct {
                 # An anonymous struct type, fields in canonical order:
@@ -1892,6 +2001,46 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result} {
             }
             return $result
         }
+        mutvec-from-list {
+            # List[T] -> MutableVector[T] (MUTABLE-VECTOR.md); the empty
+            # literal's List[never] gives the proven-empty MutableVector[never].
+            lassign $shape _ l
+            set list [lindex $argTypes $l]
+            if {[IsList $list]} {
+                return [MakeMutVec [lindex $list 1] 0]
+            }
+            if {$list eq "never"} {
+                return never
+            }
+            return [MakeMutVec any 0]
+        }
+        mutvec-element {
+            # MutableVector[T] -> T: an element read (at) or removal (pop,
+            # take, swap's displaced element).
+            lassign $shape _ v
+            set vector [lindex $argTypes $v]
+            if {[IsMutVec $vector] && [lindex $vector 1] ne "never"} {
+                return [lindex $vector 1]
+            }
+            # (An element read of MutableVector[never]: see
+            # IterationElementOf.)
+            return $result
+        }
+        mutvec-to-list {
+            # MutableVector[T] -> List[T]: a snapshot of the elements.
+            lassign $shape _ v
+            set vector [lindex $argTypes $v]
+            if {[IsMutVec $vector] && [lindex $vector 1] ne "never"} {
+                return [MakeList [lindex $vector 1]]
+            }
+            return $result
+        }
+        same {
+            # The result is argument A's own value, logically copied
+            # (mutable_vector#share): its type.
+            lassign $shape _ a
+            return [lindex $argTypes $a]
+        }
         mutarray-freeze {
             # MutableArray[T] -> List[T]: a frozen copy of slots that all
             # satisfy T. The count affects the length only, never the
@@ -2093,7 +2242,7 @@ proc hir::types::Expr {hirVar ctxVar e} {
         }
         listloop {
             Expr hir ctx [dict get $node iterable]
-            set elemType [elementOf [hir::typeOf $hir [dict get $node iterable]]]
+            set elemType [IterationElementOf [hir::typeOf $hir [dict get $node iterable]]]
             if {$elemType eq ""} {
                 set elemType any
             }
@@ -2157,7 +2306,7 @@ proc hir::types::Expr {hirVar ctxVar e} {
             foreach domain [dict get $node domains] {
                 if {[dict get $domain kind] eq "list"} {
                     Expr hir ctx [dict get $domain iterable]
-                    set elemType [elementOf [hir::typeOf $hir [dict get $domain iterable]]]
+                    set elemType [IterationElementOf [hir::typeOf $hir [dict get $domain iterable]]]
                     lappend facts [dict get $domain binding] [expr {$elemType eq "" ? "any" : $elemType}]
                 } else {
                     Expr hir ctx [dict get $domain start]

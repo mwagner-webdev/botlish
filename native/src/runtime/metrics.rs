@@ -36,7 +36,7 @@
 
 use super::show::tcl_list;
 use super::value::{
-    KIND_BIGINT, KIND_BYTES, KIND_CLOSURE, KIND_COROUTINE, KIND_LIST, KIND_LISTPLAN, KIND_MUTARRAY, KIND_MUTBYTES, KIND_NATIVE,
+    KIND_BIGINT, KIND_BYTES, KIND_CLOSURE, KIND_COROUTINE, KIND_LIST, KIND_LISTPLAN, KIND_MUTARRAY, KIND_MUTBYTES, KIND_MUTVEC, KIND_NATIVE,
     KIND_RESULT, KIND_SET, KIND_STR, KIND_STRPLAN, KIND_STRUCT,
 };
 use std::collections::HashMap;
@@ -44,7 +44,7 @@ use std::time::Duration;
 
 /// One more than the largest `Header::kind` value: `by_kind`/`static_by_kind`
 /// are indexed directly by kind byte (index 0 unused).
-pub const KIND_COUNT: usize = 16;
+pub const KIND_COUNT: usize = 17;
 
 pub fn kind_name(kind: u8) -> &'static str {
     match kind {
@@ -62,6 +62,7 @@ pub fn kind_name(kind: u8) -> &'static str {
         KIND_STRPLAN => "StringPlan",
         KIND_LISTPLAN => "ListPlan",
         KIND_COROUTINE => "Coroutine",
+        KIND_MUTVEC => "MutableVector",
         _ => "?",
     }
 }
@@ -254,6 +255,20 @@ pub struct Metrics {
     /// coroutine's stack came back -- released at its handle's last use
     /// (`corelease`), or swept with an unreachable coroutine by a collection.
     pub coroutines: CoroutineStats,
+    /// MutableVector copy-on-write (MUTABLE-VECTOR.md): logical copies (a
+    /// new header sharing a backing), detaches (a shared backing copied on
+    /// a write) and the element words they copied, and capacity growth of a
+    /// unique backing (and its bytes).
+    pub mutvec: MutVecStats,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct MutVecStats {
+    pub shares: u64,
+    pub detaches: u64,
+    pub detach_elements: u64,
+    pub growths: u64,
+    pub growth_bytes: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -288,7 +303,26 @@ impl Metrics {
             str_empty_reuses: 0,
             construction: ConstructionStats::default(),
             coroutines: CoroutineStats::default(),
+            mutvec: MutVecStats::default(),
         }
+    }
+
+    /// A logical copy of a vector (runtime/mutvec.rs). Counted in every
+    /// mode, like the coroutine counters: COW evidence is cheap.
+    pub fn record_mutvec_share(&mut self) {
+        self.mutvec.shares += 1;
+    }
+
+    /// A write that detached a shared backing of N elements.
+    pub fn record_mutvec_detach(&mut self, n: usize) {
+        self.mutvec.detaches += 1;
+        self.mutvec.detach_elements += n as u64;
+    }
+
+    /// A unique backing's capacity grew by BYTES.
+    pub fn record_mutvec_growth(&mut self, bytes: usize) {
+        self.mutvec.growths += 1;
+        self.mutvec.growth_bytes += bytes as u64;
     }
 
     pub fn enabled(&self) -> bool {
@@ -456,6 +490,9 @@ impl Metrics {
         if self.by_kind[KIND_COROUTINE as usize].allocations > 0 {
             kinds.push(KIND_COROUTINE);
         }
+        if self.by_kind[KIND_MUTVEC as usize].allocations > 0 {
+            kinds.push(KIND_MUTVEC);
+        }
         let by_kind = dict(&kinds.iter().map(|&k| (kind_name(k), kind_dict(&self.by_kind[k as usize], &n))).collect::<Vec<_>>());
         let static_by_kind =
             dict(&KINDS.iter().map(|&k| (kind_name(k), static_kind_dict(&self.static_by_kind[k as usize], &n))).collect::<Vec<_>>());
@@ -550,6 +587,20 @@ impl Metrics {
                     ("released", n(co.released)),
                     ("releasedSuspended", n(co.released_suspended)),
                     ("sweptSuspended", n(co.swept_suspended)),
+                ]),
+            ));
+        }
+        // Likewise: only a program that made a MutableVector.
+        let mv = &self.mutvec;
+        if self.by_kind[KIND_MUTVEC as usize].allocations > 0 {
+            sections.push((
+                "mutableVector",
+                dict(&[
+                    ("shares", n(mv.shares)),
+                    ("detaches", n(mv.detaches)),
+                    ("detachElements", n(mv.detach_elements)),
+                    ("growths", n(mv.growths)),
+                    ("growthBytes", n(mv.growth_bytes)),
                 ]),
             ));
         }

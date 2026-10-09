@@ -383,6 +383,16 @@ proc hir::buildSyntax {nodes args} {
         # Calls of coroutine handles typed as resumes, written out as the
         # resume operation (AFFINE-VALUES.md): what every backend compiles.
         hir::coroutines::ElaborateResumes hir
+        # MutableVector places (MUTABLE-VECTOR.md): the logical copies a
+        # vector-bearing value makes leaving or entering a place, the
+        # snapshot an unrestricted vector's loop iterates, and the drop
+        # descriptors affine clear/swap carry. Never for HIR built from core
+        # IR (hir::build): core IR is what an elaboration lowers to -- it
+        # already says all of this, and it has lost the static types (an
+        # affine element type, a declared vector type) the elaboration reads.
+        if {[lindex [dict get $options -origin] 0] ne "ir"} {
+            hir::mutvec::Elaborate hir
+        }
     }
     if {[dict get $options -strict] && [dict get $hir diagnostics] ne ""} {
         # Resolution failed, or a static check did: the first diagnostic.
@@ -738,6 +748,7 @@ proc hir::CheckOnce {hirVar demote} {
     hir::contexts::verify hir
     hir::coroutines::verify hir
     hir::affine::verify hir
+    hir::mutvec::verify hir
     hir::syscall::verify hir
     hir::semantic::verify hir
     hir::errorsets::verify hir
@@ -1043,7 +1054,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {syntax imports resolve flags contexts coroutines affine refcheck hygiene sourcetypes structs traits syscall errordecls types exactvalue signatures modulebinding refine repeatable lower format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep warnings} {
+    foreach file {syntax imports resolve flags contexts coroutines affine mutvec refcheck hygiene sourcetypes structs traits syscall errordecls types exactvalue signatures modulebinding refine repeatable lower format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep warnings} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home
