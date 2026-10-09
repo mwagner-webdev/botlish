@@ -225,7 +225,7 @@ proc maRoute {decls body} {
     return [maAgree "import list\nimport mutable_array\nimport mutable_vector\n${decls}fn f() -> List\[int\] errors IndexNotFound:\n    a = mutable_array::create(2, 0)\n${body}r = f():\n    on IndexNotFound:\n        \[\]\nr\n"]
 }
 
-test ma-cow-routes {items 6, 36, 43-45: every route a copy can take -- binding, parameter, result, identity function, generic identity and wrapper, struct field, List element, MutableVector element, nested aggregate -- gives an independent value: mutating the copy never changes the never-mutated original} -body {
+test ma-cow-routes {items 6, 36, 43-45: every route a copy can take -- binding, parameter, result, identity function, generic identity and wrapper, struct field, List element, MutableVector element, nested aggregate, a function called indirectly (passed as a value, so only its own entry copy protects the caller) -- gives an independent value: mutating the copy never changes the never-mutated original} -body {
     list \
         [maRoute "" "    b = a\n    b.swap(0, 9)\n    \[a.at(0), b.at(0)\]\n"] \
         [maRoute "fn modify(x: MutableArray\[int\]) -> int errors IndexNotFound:\n    x.swap(0, 9)\n    x.at(0)\n" "    m = modify(a)\n    \[a.at(0), m\]\n"] \
@@ -235,8 +235,9 @@ test ma-cow-routes {items 6, 36, 43-45: every route a copy can take -- binding, 
         [maRoute "struct Box:\n    values: MutableArray\[int\]\n" "    b = Box {values: a}\n    b.values.swap(0, 9)\n    \[a.at(0), b.values.at(0)\]\n"] \
         [maRoute "" "    xs = \[a\]\n    b = list::at(xs, 0)\n    b.swap(0, 9)\n    \[a.at(0), list::at(xs, 0).at(0), b.at(0)\]\n"] \
         [maRoute "" "    v = mutable_vector::from_list(\[a\])\n    b = v.at(0)\n    b.swap(0, 9)\n    \[a.at(0), v.at(0).at(0), b.at(0)\]\n"] \
-        [maRoute "" "    n = {xs: \[a\]}\n    b = list::at(n.xs, 0)\n    b.set(1, 7)\n    \[a.at(1), b.at(1)\]\n"]
-} -result {{value {[0, 9]}} {value {[0, 9]}} {value {[0, 9]}} {value {[0, 9]}} {value {[0, 9]}} {value {[0, 9]}} {value {[0, 0, 9]}} {value {[0, 0, 9]}} {value {[0, 7]}}}
+        [maRoute "" "    n = {xs: \[a\]}\n    b = list::at(n.xs, 0)\n    b.set(1, 7)\n    \[a.at(1), b.at(1)\]\n"] \
+        [maRoute "fn poke(x: MutableArray\[int\]) -> int:\n    x.set(0, 9):\n        on IndexNotFound:\n            unit\n    x.capacity()\nfn apply(g: Fn{args: \[MutableArray\[int\]\], return: int}, v: MutableArray\[int\]) -> int:\n    g(v)\n" "    m = apply(poke, a)\n    \[a.at(0), m\]\n"]
+} -result {{value {[0, 9]}} {value {[0, 9]}} {value {[0, 9]}} {value {[0, 9]}} {value {[0, 9]}} {value {[0, 9]}} {value {[0, 0, 9]}} {value {[0, 0, 9]}} {value {[0, 7]}} {value {[0, 2]}}}
 
 test ma-cow-surviving-result {item 35: a function result returned while another copy survives is independent of it, also when the caller mutates the result first} -body {
     maRoute "fn keep_and_return(x: MutableArray\[int\]) -> MutableArray\[int\] errors IndexNotFound:\n    y = x\n    y.set(0, 5)\n    x\n" "    b = keep_and_return(a)\n    b.set(1, 9)\n    \[a.at(0), a.at(1), b.at(0), b.at(1)\]\n"

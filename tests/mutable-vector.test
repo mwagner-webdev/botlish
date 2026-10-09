@@ -499,6 +499,21 @@ test mv-cow-generic-results {item 39: a generic function's own body is typed imp
         [mvAgree "${pre}fn f() -> List\[int\]:\n    a = v3()\n    s = wrap(a)\n    s.data.push(9)\n    \[a.length(), s.data.length()\]\nf()\n"]
 } -cleanup {unset -nocomplain pre} -result {{value {[3, 4]}} {value {[3, 4]}}}
 
+# MUTABLE-ARRAY.md, "Last uses and consumed parameters": a directly called
+# function's parameter is copied by its caller (or moved, at a last use), so
+# the callee's own entry copy, the fresh-result rule and the affine check of
+# a share now only matter for a function that is also used as a value and
+# called indirectly -- which this test does for each.
+test mv-cow-indirect-callee {items 39, 41: a function also passed as a value (so its caller cannot copy for it) copies its mutated parameter on entry, a result it may return unmutated is copied by the caller, and an affine vector entering it moves -- the caller's vector never changes, and no affine vector is ever shared or detached} -constraints linuxX86_64 -body {
+    set pre "${mvDecls}fn v3() -> MutableVector\[int\]:\n    mutable_vector::from_list(\[1, 2, 3\])\n"
+    set q "MutableVector\[Coroutine{args: \[Command\], return: Event}\]"
+    set grow "${pre}fn grow(xs: MutableVector\[int\]) -> int:\n    xs.push(9)\n    xs.length()\nfn apply(g: Fn{args: \[MutableVector\[int\]\], return: int}, v: MutableVector\[int\]) -> int:\n    g(v)\nfn f() -> List\[int\]:\n    a = v3()\n    n = apply(grow, a)\n    m = grow(a)\n    \[a.length(), n, m\]\nf()\n"
+    set pick "${pre}fn pick(c: bool, x: MutableVector\[int\]) -> MutableVector\[int\]:\n    if c:\n        return v3()\n    x\nfn via(g: Fn{args: \[bool, MutableVector\[int\]\], return: MutableVector\[int\]}, v: MutableVector\[int\]) -> int:\n    g(true, v).length()\nfn f() -> List\[int\]:\n    a = v3()\n    b = pick(false, a)\n    b.push(7)\n    n = via(pick, a)\n    \[a.length(), b.length(), n\]\nf()\n"
+    set hire "${pre}fn hire(q: $q) -> $q:\n    q.push(make(5))\n    q\nfn via(g: Fn{args: \[$q\], return: $q}, q: $q) -> $q:\n    g(q)\nfn f() -> int:\n    q = mutable_vector::from_list(\[make(1), make(2)\])\n    r = via(hire, q)\n    r.length()\nf()\n"
+    set mv [lindex [mvNative $hire] 1]
+    list [mvAgree $grow] [mvAgree $pick] [mvAgree $hire] [dict get $mv shares] [dict get $mv detaches]
+} -cleanup {unset -nocomplain pre q grow pick hire mv} -result {{value {[3, 4, 4]}} {value {[3, 4, 3]}} {value 3} 0 0}
+
 test mv-cow-gc-stress {items 64, 67, 94: heap values reachable only through vector elements survive collections at every allocation; copies stay valid and independent while either is mutated, collected and read} -constraints linuxX86_64 -body {
     set text "import mutable_vector\nimport str\nfn f() -> List\[str\] errors IndexNotFound:\n    a = mutable_vector::from_list(\[str::concat(\"x\", \"1\"), str::concat(\"y\", \"2\")\])\n    b = a\n    a.push(str::concat(\"z\", \"3\"))\n    junk = loop i from 0 to 50:\n        str::concat(\"j\", \"k\")\n    s = b.swap(0, str::concat(\"w\", \"4\"))\n    t = a.take(0)\n    \[a.at(0), a.at(1), b.at(0), b.at(1), s, t\]\nr = f():\n    on IndexNotFound:\n        \[\]\nr\n"
     list [mvAgree $text] [withGcStress {lrange [outcomeUnderHir cranelift [surface::compile $text -warnings off]] 0 1}]
