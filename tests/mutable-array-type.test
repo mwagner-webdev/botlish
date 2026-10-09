@@ -974,7 +974,12 @@ test mat-gc-1 {managed defaults, nested typed arrays, List[MutableArray[T]], cop
 # and csv_records.bot (its two duplicated implementations) now uses
 # mutable_array::create. Nothing else may use the new API; tests/typed-mutarray-
 # builder.test pins the narrower new fence inside those two files.
-test mat-fence-1 {no canonical program or stdlib module other than the two geometric-builder corpus programs and the HashTable (a struct of typed arrays since MUTABLE-ARRAY.md) uses the typed API} -body {
+#
+# MUTABLE-ARRAY.md widened it by two programs whose builders became structs
+# of typed arrays when arrays became values (a builder's arrays must be
+# struct fields -- places -- to be mutated in place): hashtable.bot's
+# HashTable and csv_chunked.bot's ChunkedBuilder (its `filled` counter).
+test mat-fence-1 {no canonical program or stdlib module other than the two geometric-builder corpus programs, the HashTable and the ChunkedBuilder (structs of typed arrays since MUTABLE-ARRAY.md) uses the typed API} -body {
     set hits {}
     foreach pattern {bench/*.bot examples/surface/*.bot examples/stdlib/*.bot lib/*.bot} {
         foreach file [glob -nocomplain -directory $::projectRoot {*}[list $pattern]] {
@@ -987,7 +992,7 @@ test mat-fence-1 {no canonical program or stdlib module other than the two geome
                 if {[string match "#*" [string trim $line]]} continue
                 set line
             }] \n]
-            if {[file tail $file] ni {mutarray.bot csv_geometric.bot csv_records.bot hashtable.bot}
+            if {[file tail $file] ni {mutarray.bot csv_geometric.bot csv_records.bot hashtable.bot csv_chunked.bot}
                     && ([string first mutable_array::create $code] >= 0 || [string first "MutableArray\[" $code] >= 0)} {
                 lappend hits [file tail $file]
             }

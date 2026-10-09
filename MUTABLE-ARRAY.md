@@ -770,6 +770,9 @@ reference semantics:
   with their rewrites and the intrinsics (each test's comment attributes
   them); `lib/mutable_array.bot` no longer imports `list`, so a program
   importing only `mutable_array` no longer loads `lib/list.bot`.
+  `mat-fence-1` (the typed-API fence of TYPED-MUTARRAY-BUILDER-REFACTOR.md)
+  admits `hashtable.bot` and `csv_chunked.bot`: their builders became
+  structs of typed arrays.
   `paramagg-chunked-2` pinned the List-shaped builder's three-result unpack;
   it pins the struct builder's in-place append now (no copy, the builder
   parameter returned as is).
