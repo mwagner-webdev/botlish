@@ -48,4 +48,4 @@ fn check(n, acc, s, q):
         0
     check(n - 1, acc + hit, s, q)
 
-[check(400, 0, "café@例え.テスト", q), check(400, 0, "not-an-email", q)]
+[400.check(0, "café@例え.テスト", q), 400.check(0, "not-an-email", q)]

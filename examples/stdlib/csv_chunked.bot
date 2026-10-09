@@ -56,11 +56,11 @@ fn chunked_append(builder: ChunkedBuilder, value) errors IndexNotFound:
     filled = mutable_array::at(builder.filled, 0)
     if filled == chunk_size():
         fresh = mutable_array::allocate(chunk_size())
-        mutable_array::set(fresh, 0, value)
-        return ChunkedBuilder {completed: list::append(builder.completed, builder.current), current: fresh, filled: mutable_array::create(1, 1)}
+        fresh.set(0, value)
+        return ChunkedBuilder {completed: builder.completed.append(builder.current), current: fresh, filled: mutable_array::create(1, 1)}
 
-    mutable_array::set(builder.current, filled, value)
-    mutable_array::set(builder.filled, 0, filled + 1)
+    builder.current.set(filled, value)
+    builder.filled.set(0, filled + 1)
     builder
 
 # FINAL with each of CHUNKS[INDEX..) (all full, chunk_size() elements)
@@ -71,7 +71,7 @@ fn chunked_copy_chunks(chunks, index, final, offset) errors IndexNotFound, Lower
 
     chunk = list::at(chunks, index)
     mutable_array::copy(final, offset, chunk, 0, chunk_size())
-    chunked_copy_chunks(chunks, index + 1, final, offset + chunk_size())
+    chunks.chunked_copy_chunks(index + 1, final, offset + chunk_size())
 
 # BUILDER's elements as an ordinary immutable List: one exact-size
 # MutableArray, filled by bulk-copying every completed chunk followed by the
@@ -80,9 +80,9 @@ fn chunked_finish(builder: ChunkedBuilder) errors IndexNotFound, LowerUnderrun, 
     filled = mutable_array::at(builder.filled, 0)
     offset = list::length(builder.completed) * chunk_size()
     total = offset + filled
-    final = chunked_copy_chunks(builder.completed, 0, mutable_array::allocate(total), 0)
+    final = builder.completed.chunked_copy_chunks(0, mutable_array::allocate(total), 0)
     mutable_array::copy(final, offset, builder.current, 0, filled)
-    mutable_array::freeze(final, total)
+    final.freeze(total)
 
 # ---------------------------------------------------------------------------
 # CSV parsing (see csv.bot for the algorithm's description; unchanged here
@@ -93,38 +93,38 @@ fn peek(text, index) errors LowerUnderrun:
     if index >= str::length(text):
         return ""
 
-    str::substring(text, index, index + 1)
+    text.substring(index, index + 1)
 
 fn scan_unquoted(text, start, index) errors LowerUnderrun, UpperOverrun:
-    character = peek(text, index)
+    character = text.peek(index)
     if character == "" or character == "," or character == "\n":
-        return {field: str::substring(text, start, index), index: index}
+        return {field: text.substring(start, index), index: index}
 
-    scan_unquoted(text, start, index + 1)
+    text.scan_unquoted(start, index + 1)
 
 fn scan_quoted(text, index, field) errors LowerUnderrun:
-    character = peek(text, index)
+    character = text.peek(index)
     if character == "\"":
-        if peek(text, index + 1) == "\"":
-            return scan_quoted(text, index + 2, str::concat(field, "\""))
+        if text.peek(index + 1) == "\"":
+            return text.scan_quoted(index + 2, field.concat("\""))
 
         return {field: field, index: index + 1}
 
-    scan_quoted(text, index + 1, str::concat(field, character))
+    text.scan_quoted(index + 1, field.concat(character))
 
 fn scan_field(text, index) errors LowerUnderrun, UpperOverrun:
-    if peek(text, index) == "\"":
-        return scan_quoted(text, index + 1, "")
+    if text.peek(index) == "\"":
+        return text.scan_quoted(index + 1, "")
 
-    scan_unquoted(text, index, index)
+    text.scan_unquoted(index, index)
 
 fn scan_record(text, index, fields) errors IndexNotFound, LowerUnderrun, UpperOverrun:
-    scanned = scan_field(text, index)
-    more = chunked_append(fields, scanned.field)
+    scanned = text.scan_field(index)
+    more = fields.chunked_append(scanned.field)
     stop = scanned.index
-    delimiter = peek(text, stop)
+    delimiter = text.peek(stop)
     if delimiter == ",":
-        return scan_record(text, stop + 1, more)
+        return text.scan_record(stop + 1, more)
 
     if delimiter == "\n":
         return {fields: chunked_finish(more), stop: stop + 1}
@@ -135,11 +135,11 @@ fn scan_records(text, index, records) errors IndexNotFound, LowerUnderrun, Upper
     if index >= str::length(text):
         return chunked_finish(records)
 
-    scanned = scan_record(text, index, chunked_new())
-    scan_records(text, scanned.stop, chunked_append(records, scanned.fields))
+    scanned = text.scan_record(index, chunked_new())
+    text.scan_records(scanned.stop, records.chunked_append(scanned.fields))
 
 fn csv_parse(text) errors IndexNotFound, LowerUnderrun, UpperOverrun:
-    scan_records(text, 0, chunked_new())
+    text.scan_records(0, chunked_new())
 
 # A ChunkedBuilder's count is read with mutable_array::at and its chunks with
 # list::at, so every builder function declares IndexNotFound (a malformed

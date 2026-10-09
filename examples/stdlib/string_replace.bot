@@ -22,31 +22,31 @@ fn matches_at(haystack, needle, index) errors LowerUnderrun, UpperOverrun:
     if end > str::length(haystack):
         return false
 
-    str::substring(haystack, index, end) == needle
+    haystack.substring(index, end) == needle
 
 # haystack from index on with its matches replaced, appended to done;
 # unmatched text from run_start up to index has not been copied yet.
 fn replace_from(haystack, needle, replacement, index, run_start, done) errors LowerUnderrun, UpperOverrun:
     if index + str::length(needle) > str::length(haystack):
-        return str::concat(done, str::substring(haystack, run_start, str::length(haystack)))
+        return done.concat(haystack.substring(run_start, str::length(haystack)))
 
-    if matches_at(haystack, needle, index):
-        copied = str::concat(done, str::substring(haystack, run_start, index))
+    if haystack.matches_at(needle, index):
+        copied = done.concat(haystack.substring(run_start, index))
         after = index + str::length(needle)
-        return replace_from(haystack, needle, replacement, after, after, str::concat(copied, replacement))
+        return haystack.replace_from(needle, replacement, after, after, copied.concat(replacement))
 
-    replace_from(haystack, needle, replacement, index + 1, run_start, done)
+    haystack.replace_from(needle, replacement, index + 1, run_start, done)
 
 fn replace(haystack, needle, replacement) errors LowerUnderrun, UpperOverrun:
     if str::length(needle) == 0:
         return haystack
 
-    replace_from(haystack, needle, replacement, 0, 0, "")
+    haystack.replace_from(needle, replacement, 0, 0, "")
 
 # The sample's inputs never take a slice out of range; the handlers
 # state what one would mean.
 fn sample() errors LowerUnderrun, UpperOverrun:
-    [replace("abc", "x", "y"), replace("abc", "b", "X"), replace("aaaa", "aa", "b"), replace("abcabc", "abc", ""), replace("", "x", "y")]
+    ["abc".replace("x", "y"), "abc".replace("b", "X"), "aaaa".replace("aa", "b"), "abcabc".replace("abc", ""), "".replace("x", "y")]
 
 checks = sample():
     on LowerUnderrun:

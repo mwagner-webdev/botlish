@@ -1020,11 +1020,15 @@ test oc-cli-backend-independent {main.tcl prints the identical warning text, all
     list [llength [lsort -unique $texts]] [llength [lsearch -all $first *ONE-CHAR-STRING-LITERAL*]] [llength $first]
 } -result {1 1 8}
 
-test oc-cli-backend-independent-corpus {main.tcl prints the identical warning text (every code, notes included) on every backend over the stdlib corpus, the refinement example and the string-heavy surface and bench programs; this warning's lines are there} -constraints executableAot -body {
-    set programs [lsort [glob -directory [file join $::projectRoot examples stdlib] *.bot]]
-    lappend programs [file join $::projectRoot examples refinement refined-strings.bot] \
-        [file join $::projectRoot examples surface 06-csv-records.bot] \
-        [file join $::projectRoot bench lex-strategy.bot]
+test oc-cli-backend-independent-corpus {main.tcl prints the identical warning text (every code, notes included) on every backend over the kickoff stdlib corpus, refinement example and lex-strategy benchmark (audit/refactor/kickoff-corpus); this warning's lines are there} -constraints executableAot -body {
+    # The stdlib corpus as it was at the warning-driven refactor's kickoff
+    # (audit/refactor/kickoff-corpus/README.md): real programs carrying real
+    # warnings of every code; the live corpus is the warning gate's.
+    set programs [lmap name {ai_text_clean csv csv_chunked csv_geometric csv_records hashtable matmul string_replace string_reverse} {
+        file join $::projectRoot audit refactor kickoff-corpus $name.bot
+    }]
+    lappend programs [file join $::projectRoot audit refactor kickoff-corpus refined-strings.bot] \
+        [file join $::projectRoot audit refactor kickoff-corpus lex-strategy.bot]
     set mismatches {}
     set total 0
     set literals 0

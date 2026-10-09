@@ -58,13 +58,13 @@ checks = [str::is_tcl_alpha, str::is_tcl_alnum, is_underscore?, is_hyphen?]
 fn classify_leading(name):
     if str::length(name) == 0:
         return [false, false, false, false]
-    c = str::substring(name, 0, 1)
+    c = name.substring(0, 1)
     loop check in checks:
         check(c)
 
 fn valid_start?(name):
     flags = classify_leading(name)
-    list::get(flags, 0, false) or list::get(flags, 2, false)
+    flags.get(0, false) or flags.get(2, false)
 
 fn invalid_name?(name):
     not valid_start?(name)
@@ -93,7 +93,7 @@ invalid_names = loop name in candidates:
         continue
     name
 
-first_invalid = list::find(candidates, invalid_name?):
+first_invalid = candidates.find(invalid_name?):
     on NotFound:
         "<none>"
 

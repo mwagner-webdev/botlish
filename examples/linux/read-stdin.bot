@@ -30,7 +30,7 @@ import abi::bytes
 import linux
 
 buffer = abi::bytes::zeroed(abi::usize(4096))
-result = linux::read(abi::i32(0), buffer)
+result = abi::i32(0).read(buffer)
 
 n = result.result
 if n > 0:
@@ -41,9 +41,9 @@ if n > 0:
     count = abi::usize(n):
         on AbiIntegerAboveRange:
             abi::usize(0)
-    data = abi::bytes::freeze_prefix(result.data, count):
+    data = result.data.freeze_prefix(count):
         on UpperOverrun:
             abi::bytes::from_list([])
-    linux::write(abi::i32(1), data)
+    abi::i32(1).write(data)
 else:
     n

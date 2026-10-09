@@ -1075,9 +1075,14 @@ test pn-cli-backend-independent {main.tcl prints the identical warning text, all
         [llength [lsearch -all -not $first *ONE-CHAR-STRING-LITERAL*]]
 } -result {1 1 7}
 
-test pn-cli-backend-independent-stdlib-and-refinement {main.tcl prints the identical warning text (every code, notes included) on every backend over the whole stdlib corpus and the refinement example} -constraints executableAot -body {
-    set programs [lsort [glob -directory [file join $::projectRoot examples stdlib] *.bot]]
-    lappend programs [file join $::projectRoot examples refinement refined-strings.bot]
+test pn-cli-backend-independent-stdlib-and-refinement {main.tcl prints the identical warning text (every code, notes included) on every backend over the kickoff stdlib corpus and refinement example (audit/refactor/kickoff-corpus)} -constraints executableAot -body {
+    # The stdlib corpus as it was at the warning-driven refactor's kickoff
+    # (audit/refactor/kickoff-corpus/README.md): real programs carrying real
+    # warnings of every code; the live corpus is the warning gate's.
+    set programs [lmap name {ai_text_clean csv csv_chunked csv_geometric csv_records hashtable matmul string_replace string_reverse} {
+        file join $::projectRoot audit refactor kickoff-corpus $name.bot
+    }]
+    lappend programs [file join $::projectRoot audit refactor kickoff-corpus refined-strings.bot]
     set mismatches {}
     set total 0
     set naming 0

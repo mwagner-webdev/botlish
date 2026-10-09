@@ -41,4 +41,4 @@ fn drive(i, total):
         return total
     drive(i - 1, total + work(i))
 
-drive(500, 0)
+500.drive(0)

@@ -32,4 +32,4 @@ import linux
 import str
 
 data = abi::bytes::from_list(str::encode_utf8("Hello from Botlish!\n"))
-linux::write(abi::i32(1), data)
+abi::i32(1).write(data)

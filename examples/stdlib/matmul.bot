@@ -24,32 +24,32 @@ fn dot(a_row, b, column, k, count, total) errors IndexNotFound:
     if k == count:
         return total
 
-    term = list::at(a_row, k) * list::at(list::at(b, k), column)
-    dot(a_row, b, column, k + 1, count, total + term)
+    term = a_row.at(k) * b.at(k).at(column)
+    a_row.dot(b, column, k + 1, count, total + term)
 
 # The product row for a_row, from column on, appended to row.
 fn product_row(a_row, b, column, columns, row) errors IndexNotFound:
     if column == columns:
         return row
 
-    entry = dot(a_row, b, column, 0, list::length(a_row), 0)
-    product_row(a_row, b, column + 1, columns, list::append(row, entry))
+    entry = a_row.dot(b, column, 0, list::length(a_row), 0)
+    a_row.product_row(b, column + 1, columns, row.append(entry))
 
 # The product rows for the rows of a from i on, appended to rows.
 fn product_rows(a, b, i, columns, rows) errors IndexNotFound:
     if i == list::length(a):
         return rows
 
-    row = product_row(list::at(a, i), b, 0, columns, [])
-    product_rows(a, b, i + 1, columns, list::append(rows, row))
+    row = a.at(i).product_row(b, 0, columns, [])
+    a.product_rows(b, i + 1, columns, rows.append(row))
 
 fn matmul(a, b) errors IndexNotFound:
     if list::length(a) == 0:
         return []
 
-    product_rows(a, b, 0, list::length(list::at(b, 0)), [])
+    a.product_rows(b, 0, list::length(b.at(0)), [])
 
-product = matmul([[1, 2, 3], [4, 5, 6]], [[7, 8], [9, 10], [11, 12]]):
+product = [[1, 2, 3], [4, 5, 6]].matmul([[7, 8], [9, 10], [11, 12]]):
     on IndexNotFound:
         []
 product

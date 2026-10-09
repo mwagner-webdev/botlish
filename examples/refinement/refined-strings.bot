@@ -46,6 +46,6 @@ else:
 prefix = if str::length(query) < 3:
     ""
 else:
-    str::substring(query, 0, 3)
+    query.substring(0, 3)
 
 [n, query, prefix, query == "a%26b%3Dc"]

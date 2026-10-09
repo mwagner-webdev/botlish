@@ -1158,9 +1158,14 @@ test mb-cli-backend-independent {main.tcl prints the identical warning text, all
     list [llength [lsort -unique $texts]] [llength [lsearch -all $first *MANY-BOOLEAN-ARGUMENTS*]] [llength $first]
 } -result {1 1 9}
 
-test mb-cli-backend-independent-corpus {main.tcl prints the identical warning text (every code, notes included) on every backend over the stdlib corpus and the refinement example} -constraints executableAot -body {
-    set programs [lsort [glob -directory [file join $::projectRoot examples stdlib] *.bot]]
-    lappend programs [file join $::projectRoot examples refinement refined-strings.bot]
+test mb-cli-backend-independent-corpus {main.tcl prints the identical warning text (every code, notes included) on every backend over the kickoff stdlib corpus and refinement example (audit/refactor/kickoff-corpus)} -constraints executableAot -body {
+    # The stdlib corpus as it was at the warning-driven refactor's kickoff
+    # (audit/refactor/kickoff-corpus/README.md): real programs carrying real
+    # warnings of every code; the live corpus is the warning gate's.
+    set programs [lmap name {ai_text_clean csv csv_chunked csv_geometric csv_records hashtable matmul string_replace string_reverse} {
+        file join $::projectRoot audit refactor kickoff-corpus $name.bot
+    }]
+    lappend programs [file join $::projectRoot audit refactor kickoff-corpus refined-strings.bot]
     set mismatches {}
     set total 0
     foreach path $programs {

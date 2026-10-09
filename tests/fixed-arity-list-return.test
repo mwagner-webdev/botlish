@@ -1468,9 +1468,14 @@ test fa-error-cli-stops-before-backend {main.tcl -backend cranelift -warnings er
     list [string match "*value:*" $out] [regexp {\(CORE SEMANTIC FIXED-ARITY-LIST-RETURN\)} $out]
 } -result {0 1}
 
-test fa-cli-backend-independent-stdlib {main.tcl prints the same FIXED-ARITY-LIST-RETURN text on every backend over the whole stdlib corpus} -constraints executableAot -body {
+test fa-cli-backend-independent-stdlib {main.tcl prints the same FIXED-ARITY-LIST-RETURN text on every backend over the kickoff stdlib corpus (audit/refactor/kickoff-corpus)} -constraints executableAot -body {
     set main [file join $::projectRoot main.tcl]
-    set programs [lsort [glob -directory [file join $::projectRoot examples stdlib] *.bot]]
+    # The stdlib corpus as it was at the warning-driven refactor's kickoff
+    # (audit/refactor/kickoff-corpus/README.md): real programs carrying real
+    # warnings of every code; the live corpus is the warning gate's.
+    set programs [lmap name {ai_text_clean csv csv_chunked csv_geometric csv_records hashtable matmul string_replace string_reverse} {
+        file join $::projectRoot audit refactor kickoff-corpus $name.bot
+    }]
     set mismatches {}
     set total 0
     foreach path $programs {

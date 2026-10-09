@@ -37,7 +37,7 @@ fn peek(text, index) errors LowerUnderrun:
     if index >= str::length(text):
         return ""
 
-    str::substring(text, index, index + 1)
+    text.substring(index, index + 1)
 
 # 1 if character (one peek()'d character) is in this benchmark's explicit
 # emoji set -- see the file header for why this is not general Unicode
@@ -73,10 +73,10 @@ fn clean_from(text, index, done) errors LowerUnderrun:
     if index >= str::length(text):
         return done
 
-    clean_from(text, index + 1, str::concat(done, clean_char(peek(text, index))))
+    text.clean_from(index + 1, done.concat(clean_char(text.peek(index))))
 
 fn clean_ai_text(text) errors LowerUnderrun:
-    clean_from(text, 0, "")
+    text.clean_from(0, "")
 
 # The sample's inputs never take a slice out of range; the handler
 # states what one would mean.

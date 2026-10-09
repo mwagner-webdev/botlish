@@ -1,0 +1,458 @@
+# METHOD-ELIGIBLE sweep (REFACTOR-WARNINGS-CLEAN.md, P2): every call respelled and verified
+# tree 3f8c0fc5d764f353bd8c38d1da5153ed0a89514b (corpus paths clean)
+
+files with findings: 24; findings: 355
+
+## bench/lex-strategy.bot (16 findings, through `bench/lex-strategy.bot`)
+  ok   bench/lex-strategy.bot:96:15 `list::at`
+  ok   bench/lex-strategy.bot:87:17 `total_valid`
+  ok   bench/lex-strategy.bot:84:16 `total_valid`
+  ok   bench/lex-strategy.bot:82:63 `list::at`
+  ok   bench/lex-strategy.bot:82:51 `valid_chars`
+  ok   bench/lex-strategy.bot:82:5 `total_valid`
+  ok   bench/lex-strategy.bot:75:16 `chars_of`
+  ok   bench/lex-strategy.bot:75:5 `list::all?`
+  ok   bench/lex-strategy.bot:72:16 `classify`
+  ok   bench/lex-strategy.bot:72:5 `count_true`
+  ok   bench/lex-strategy.bot:69:5 `count_true`
+  ok   bench/lex-strategy.bot:65:15 `list::at`
+  ok   bench/lex-strategy.bot:59:15 `chars_of`
+  ok   bench/lex-strategy.bot:55:42 `str::substring`
+  ok   bench/lex-strategy.bot:55:24 `list::append`
+  ok   bench/lex-strategy.bot:55:5 `chars_of`
+## bench/loop-count.bot (1 findings, through `bench/loop-count.bot`)
+  ok   bench/loop-count.bot:44:1 `drive`
+## bench/refined-checks.bot (2 findings, through `bench/refined-checks.bot`)
+  ok   bench/refined-checks.bot:51:35 `check`
+  ok   bench/refined-checks.bot:51:2 `check`
+## bench/source-checks.bot (4 findings, through `bench/source-checks.bot`)
+  ok   bench/source-checks.bot:96:17 `list::find`
+  ok   bench/source-checks.bot:67:35 `list::get`
+  ok   bench/source-checks.bot:67:5 `list::get`
+  ok   bench/source-checks.bot:61:9 `str::substring`
+## bench/sum-refined.bot (1 findings, through `bench/sum-refined.bot`)
+  ok   bench/sum-refined.bot:35:1 `refined_sum`
+## bench/test-selection.bot (9 findings, through `bench/test-selection.bot`)
+  ok   bench/test-selection.bot:118:54 `first_affected`
+  ok   bench/test-selection.bot:116:19 `list::none?`
+  ok   bench/test-selection.bot:113:14 `select_affected`
+  ok   bench/test-selection.bot:112:14 `select_affected`
+  ok   bench/test-selection.bot:82:13 `list::find`
+  ok   bench/test-selection.bot:81:9 `affected?`
+  ok   bench/test-selection.bot:75:16 `affected?`
+  ok   bench/test-selection.bot:71:5 `list::any?`
+  ok   bench/test-selection.bot:61:9 `immutable_set::contains`
+## bench/uri-steady.bot (3 findings, through `bench/uri-steady.bot`)
+  ok   bench/uri-steady.bot:43:1 `repeat_uri`
+  ok   bench/uri-steady.bot:39:29 `mod`
+  ok   bench/uri-steady.bot:39:12 `list::at`
+## examples/linux/read-stdin.bot (3 findings, through `examples/linux/read-stdin.bot`)
+  ok   examples/linux/read-stdin.bot:47:5 `linux::write`
+  ok   examples/linux/read-stdin.bot:44:12 `abi::bytes::freeze_prefix`
+  ok   examples/linux/read-stdin.bot:33:10 `linux::read`
+## examples/linux/write.bot (1 findings, through `examples/linux/write.bot`)
+  ok   examples/linux/write.bot:35:1 `linux::write`
+## examples/refinement/refined-strings.bot (1 findings, through `examples/refinement/refined-strings.bot`)
+  ok   examples/refinement/refined-strings.bot:49:5 `str::substring`
+## examples/stdlib/ai_text_clean.bot (5 findings, through `examples/stdlib/ai_text_clean.bot`)
+  ok   examples/stdlib/ai_text_clean.bot:79:5 `clean_from`
+  ok   examples/stdlib/ai_text_clean.bot:76:62 `peek`
+  ok   examples/stdlib/ai_text_clean.bot:76:33 `str::concat`
+  ok   examples/stdlib/ai_text_clean.bot:76:5 `clean_from`
+  ok   examples/stdlib/ai_text_clean.bot:40:5 `str::substring`
+## examples/stdlib/csv.bot (21 findings, through `examples/stdlib/csv.bot`)
+  ok   examples/stdlib/csv.bot:88:5 `scan_records`
+  ok   examples/stdlib/csv.bot:85:38 `list::append`
+  ok   examples/stdlib/csv.bot:85:5 `scan_records`
+  ok   examples/stdlib/csv.bot:84:15 `scan_record`
+  ok   examples/stdlib/csv.bot:72:16 `scan_record`
+  ok   examples/stdlib/csv.bot:70:17 `peek`
+  ok   examples/stdlib/csv.bot:68:12 `list::append`
+  ok   examples/stdlib/csv.bot:67:15 `scan_field`
+  ok   examples/stdlib/csv.bot:62:5 `scan_unquoted`
+  ok   examples/stdlib/csv.bot:60:16 `scan_quoted`
+  ok   examples/stdlib/csv.bot:59:8 `peek`
+  ok   examples/stdlib/csv.bot:55:34 `str::concat`
+  ok   examples/stdlib/csv.bot:55:5 `scan_quoted`
+  ok   examples/stdlib/csv.bot:51:49 `str::concat`
+  ok   examples/stdlib/csv.bot:51:20 `scan_quoted`
+  ok   examples/stdlib/csv.bot:50:12 `peek`
+  ok   examples/stdlib/csv.bot:48:17 `peek`
+  ok   examples/stdlib/csv.bot:43:5 `scan_unquoted`
+  ok   examples/stdlib/csv.bot:41:24 `str::substring`
+  ok   examples/stdlib/csv.bot:39:17 `peek`
+  ok   examples/stdlib/csv.bot:34:5 `str::substring`
+## examples/stdlib/csv_chunked.bot (28 findings, through `examples/stdlib/csv_chunked.bot`)
+  ok   examples/stdlib/csv_chunked.bot:142:5 `scan_records`
+  ok   examples/stdlib/csv_chunked.bot:139:38 `chunked_append`
+  ok   examples/stdlib/csv_chunked.bot:139:5 `scan_records`
+  ok   examples/stdlib/csv_chunked.bot:138:15 `scan_record`
+  ok   examples/stdlib/csv_chunked.bot:127:16 `scan_record`
+  ok   examples/stdlib/csv_chunked.bot:125:17 `peek`
+  ok   examples/stdlib/csv_chunked.bot:123:12 `chunked_append`
+  ok   examples/stdlib/csv_chunked.bot:122:15 `scan_field`
+  ok   examples/stdlib/csv_chunked.bot:119:5 `scan_unquoted`
+  ok   examples/stdlib/csv_chunked.bot:117:16 `scan_quoted`
+  ok   examples/stdlib/csv_chunked.bot:116:8 `peek`
+  ok   examples/stdlib/csv_chunked.bot:113:34 `str::concat`
+  ok   examples/stdlib/csv_chunked.bot:113:5 `scan_quoted`
+  ok   examples/stdlib/csv_chunked.bot:109:49 `str::concat`
+  ok   examples/stdlib/csv_chunked.bot:109:20 `scan_quoted`
+  ok   examples/stdlib/csv_chunked.bot:108:12 `peek`
+  ok   examples/stdlib/csv_chunked.bot:106:17 `peek`
+  ok   examples/stdlib/csv_chunked.bot:103:5 `scan_unquoted`
+  ok   examples/stdlib/csv_chunked.bot:101:24 `str::substring`
+  ok   examples/stdlib/csv_chunked.bot:99:17 `peek`
+  ok   examples/stdlib/csv_chunked.bot:96:5 `str::substring`
+  ok   examples/stdlib/csv_chunked.bot:85:5 `mutable_array::freeze`
+  ok   examples/stdlib/csv_chunked.bot:83:13 `chunked_copy_chunks`
+  ok   examples/stdlib/csv_chunked.bot:74:5 `chunked_copy_chunks`
+  ok   examples/stdlib/csv_chunked.bot:63:5 `mutable_array::set`
+  ok   examples/stdlib/csv_chunked.bot:62:5 `mutable_array::set`
+  ok   examples/stdlib/csv_chunked.bot:60:43 `list::append`
+  ok   examples/stdlib/csv_chunked.bot:59:9 `mutable_array::set`
+## examples/stdlib/csv_geometric.bot (31 findings, through `examples/stdlib/csv_geometric.bot`)
+  ok   examples/stdlib/csv_geometric.bot:162:5 `scan_records`
+  ok   examples/stdlib/csv_geometric.bot:161:15 `scan_record`
+  ok   examples/stdlib/csv_geometric.bot:155:5 `scan_records`
+  ok   examples/stdlib/csv_geometric.bot:154:12 `geo_append`
+  ok   examples/stdlib/csv_geometric.bot:153:15 `scan_record`
+  ok   examples/stdlib/csv_geometric.bot:151:16 `geo_finish`
+  ok   examples/stdlib/csv_geometric.bot:146:5 `scan_record_rest`
+  ok   examples/stdlib/csv_geometric.bot:145:15 `scan_field`
+  ok   examples/stdlib/csv_geometric.bot:140:14 `geo_finish`
+  ok   examples/stdlib/csv_geometric.bot:138:25 `geo_finish`
+  ok   examples/stdlib/csv_geometric.bot:135:16 `scan_record_rest`
+  ok   examples/stdlib/csv_geometric.bot:134:16 `geo_append`
+  ok   examples/stdlib/csv_geometric.bot:133:19 `scan_field`
+  ok   examples/stdlib/csv_geometric.bot:131:17 `peek`
+  ok   examples/stdlib/csv_geometric.bot:121:5 `scan_unquoted`
+  ok   examples/stdlib/csv_geometric.bot:119:16 `scan_quoted`
+  ok   examples/stdlib/csv_geometric.bot:118:8 `peek`
+  ok   examples/stdlib/csv_geometric.bot:115:34 `str::concat`
+  ok   examples/stdlib/csv_geometric.bot:115:5 `scan_quoted`
+  ok   examples/stdlib/csv_geometric.bot:111:49 `str::concat`
+  ok   examples/stdlib/csv_geometric.bot:111:20 `scan_quoted`
+  ok   examples/stdlib/csv_geometric.bot:110:12 `peek`
+  ok   examples/stdlib/csv_geometric.bot:108:17 `peek`
+  ok   examples/stdlib/csv_geometric.bot:105:5 `scan_unquoted`
+  ok   examples/stdlib/csv_geometric.bot:103:24 `str::substring`
+  ok   examples/stdlib/csv_geometric.bot:101:17 `peek`
+  ok   examples/stdlib/csv_geometric.bot:98:5 `str::substring`
+  ok   examples/stdlib/csv_geometric.bot:72:5 `mutable_array::freeze`
+  ok   examples/stdlib/csv_geometric.bot:66:5 `mutable_array::set`
+  ok   examples/stdlib/csv_geometric.bot:65:13 `geo_grow`
+  ok   examples/stdlib/csv_geometric.bot:56:20 `geo_new_capacity`
+## examples/stdlib/csv_records.bot (90 findings, through `examples/stdlib/csv_records.bot`)
+  ok   examples/stdlib/csv_records.bot:544:118 `ht_get`
+  ok   examples/stdlib/csv_records.bot:544:94 `ht_get`
+  ok   examples/stdlib/csv_records.bot:544:71 `ht_get`
+  ok   examples/stdlib/csv_records.bot:544:49 `ht_get`
+  ok   examples/stdlib/csv_records.bot:544:26 `ht_get`
+  ok   examples/stdlib/csv_records.bot:543:38 `ht_get`
+  ok   examples/stdlib/csv_records.bot:543:13 `ht_get`
+  ok   examples/stdlib/csv_records.bot:530:5 `csv_records_generic`
+  ok   examples/stdlib/csv_records.bot:525:5 `csv_records_generic`
+  ok   examples/stdlib/csv_records.bot:520:5 `build_rows`
+  ok   examples/stdlib/csv_records.bot:519:13 `row_table`
+  ok   examples/stdlib/csv_records.bot:505:55 `geo_append`
+  ok   examples/stdlib/csv_records.bot:505:5 `build_rows`
+  ok   examples/stdlib/csv_records.bot:504:13 `row_table`
+  ok   examples/stdlib/csv_records.bot:502:16 `geo_finish`
+  ok   examples/stdlib/csv_records.bot:483:5 `row_fill`
+  ok   examples/stdlib/csv_records.bot:482:13 `row_new`
+  ok   examples/stdlib/csv_records.bot:477:5 `row_fill`
+  ok   examples/stdlib/csv_records.bot:476:14 `ht_set`
+  ok   examples/stdlib/csv_records.bot:452:5 `ht_place`
+  ok   examples/stdlib/csv_records.bot:450:16 `ht_place`
+  ok   examples/stdlib/csv_records.bot:449:43 `ht_probe_start`
+  ok   examples/stdlib/csv_records.bot:449:16 `ht_find_insert`
+  ok   examples/stdlib/csv_records.bot:444:9 `mutable_array::set`
+  ok   examples/stdlib/csv_records.bot:442:40 `ht_probe_start`
+  ok   examples/stdlib/csv_records.bot:442:13 `ht_find_insert`
+  ok   examples/stdlib/csv_records.bot:436:9 `mutable_array::set`
+  ok   examples/stdlib/csv_records.bot:434:5 `mutable_array::set`
+  ok   examples/stdlib/csv_records.bot:433:5 `mutable_array::set`
+  ok   examples/stdlib/csv_records.bot:432:5 `mutable_array::set`
+  ok   examples/stdlib/csv_records.bot:431:5 `mutable_array::set`
+  ok   examples/stdlib/csv_records.bot:412:5 `ht_rehash`
+  ok   examples/stdlib/csv_records.bot:410:16 `ht_rehash`
+  ok   examples/stdlib/csv_records.bot:400:5 `ht_rehash_scan`
+  ok   examples/stdlib/csv_records.bot:399:5 `mutable_array::set`
+  ok   examples/stdlib/csv_records.bot:392:5 `ht_rehash_scan`
+  ok   examples/stdlib/csv_records.bot:390:16 `ht_rehash_scan`
+  ok   examples/stdlib/csv_records.bot:389:18 `ht_rehash_insert`
+  ok   examples/stdlib/csv_records.bot:375:5 `mutable_array::set`
+  ok   examples/stdlib/csv_records.bot:374:5 `mutable_array::set`
+  ok   examples/stdlib/csv_records.bot:373:5 `mutable_array::set`
+  ok   examples/stdlib/csv_records.bot:372:44 `mod`
+  ok   examples/stdlib/csv_records.bot:372:13 `ht_rehash_probe`
+  ok   examples/stdlib/csv_records.bot:367:5 `ht_rehash_probe`
+  ok   examples/stdlib/csv_records.bot:355:29 `ht_probe_start`
+  ok   examples/stdlib/csv_records.bot:355:5 `ht_find_get`
+  ok   examples/stdlib/csv_records.bot:348:37 `ht_probe_start`
+  ok   examples/stdlib/csv_records.bot:348:13 `ht_find_get`
+  ok   examples/stdlib/csv_records.bot:341:32 `ht_probe_next`
+  ok   examples/stdlib/csv_records.bot:341:5 `ht_find_insert`
+  ok   examples/stdlib/csv_records.bot:339:43 `ht_probe_next`
+  ok   examples/stdlib/csv_records.bot:339:16 `ht_find_insert`
+  ok   examples/stdlib/csv_records.bot:321:29 `ht_probe_next`
+  ok   examples/stdlib/csv_records.bot:321:5 `ht_find_get`
+  ok   examples/stdlib/csv_records.bot:305:5 `mod`
+  ok   examples/stdlib/csv_records.bot:287:14 `ht_capacity_for`
+  ok   examples/stdlib/csv_records.bot:284:5 `ht_capacity_for`
+  ok   examples/stdlib/csv_records.bot:270:5 `mutable_array::set`
+  ok   examples/stdlib/csv_records.bot:269:5 `mutable_array::set`
+  ok   examples/stdlib/csv_records.bot:238:5 `scan_records`
+  ok   examples/stdlib/csv_records.bot:237:15 `scan_record`
+  ok   examples/stdlib/csv_records.bot:231:5 `scan_records`
+  ok   examples/stdlib/csv_records.bot:230:12 `geo_append`
+  ok   examples/stdlib/csv_records.bot:229:15 `scan_record`
+  ok   examples/stdlib/csv_records.bot:227:16 `geo_finish`
+  ok   examples/stdlib/csv_records.bot:222:5 `scan_record_rest`
+  ok   examples/stdlib/csv_records.bot:221:15 `scan_field`
+  ok   examples/stdlib/csv_records.bot:216:14 `geo_finish`
+  ok   examples/stdlib/csv_records.bot:214:25 `geo_finish`
+  ok   examples/stdlib/csv_records.bot:211:16 `scan_record_rest`
+  ok   examples/stdlib/csv_records.bot:210:16 `geo_append`
+  ok   examples/stdlib/csv_records.bot:209:19 `scan_field`
+  ok   examples/stdlib/csv_records.bot:207:17 `peek`
+  ok   examples/stdlib/csv_records.bot:197:5 `scan_unquoted`
+  ok   examples/stdlib/csv_records.bot:195:16 `scan_quoted`
+  ok   examples/stdlib/csv_records.bot:194:8 `peek`
+  ok   examples/stdlib/csv_records.bot:191:34 `str::concat`
+  ok   examples/stdlib/csv_records.bot:191:5 `scan_quoted`
+  ok   examples/stdlib/csv_records.bot:187:49 `str::concat`
+  ok   examples/stdlib/csv_records.bot:187:20 `scan_quoted`
+  ok   examples/stdlib/csv_records.bot:186:12 `peek`
+  ok   examples/stdlib/csv_records.bot:184:17 `peek`
+  ok   examples/stdlib/csv_records.bot:181:5 `scan_unquoted`
+  ok   examples/stdlib/csv_records.bot:179:24 `str::substring`
+  ok   examples/stdlib/csv_records.bot:177:17 `peek`
+  ok   examples/stdlib/csv_records.bot:174:5 `str::substring`
+  ok   examples/stdlib/csv_records.bot:152:5 `mutable_array::freeze`
+  ok   examples/stdlib/csv_records.bot:146:5 `mutable_array::set`
+  ok   examples/stdlib/csv_records.bot:145:13 `geo_grow`
+  ok   examples/stdlib/csv_records.bot:136:20 `geo_new_capacity`
+## examples/stdlib/hashtable.bot (60 findings, through `examples/stdlib/hashtable.bot`)
+  ok   examples/stdlib/hashtable.bot:343:98 `ht_get`
+  ok   examples/stdlib/hashtable.bot:343:70 `ht_contains`
+  ok   examples/stdlib/hashtable.bot:343:46 `ht_contains`
+  ok   examples/stdlib/hashtable.bot:343:6 `ht_get`
+  ok   examples/stdlib/hashtable.bot:342:10 `ht_delete`
+  ok   examples/stdlib/hashtable.bot:341:15 `ht_contains`
+  ok   examples/stdlib/hashtable.bot:340:10 `ht_set`
+  ok   examples/stdlib/hashtable.bot:339:10 `ht_set`
+  ok   examples/stdlib/hashtable.bot:338:10 `ht_set`
+  ok   examples/stdlib/hashtable.bot:329:5 `ht_fold`
+  ok   examples/stdlib/hashtable.bot:325:5 `list::append`
+  ok   examples/stdlib/hashtable.bot:322:5 `ht_fold`
+  ok   examples/stdlib/hashtable.bot:320:16 `ht_fold`
+  ok   examples/stdlib/hashtable.bot:307:5 `mutable_array::set`
+  ok   examples/stdlib/hashtable.bot:306:5 `mutable_array::set`
+  ok   examples/stdlib/hashtable.bot:305:5 `mutable_array::set`
+  ok   examples/stdlib/hashtable.bot:304:5 `mutable_array::set`
+  ok   examples/stdlib/hashtable.bot:303:5 `mutable_array::set`
+  ok   examples/stdlib/hashtable.bot:299:37 `ht_probe_start`
+  ok   examples/stdlib/hashtable.bot:299:13 `ht_find_get`
+  ok   examples/stdlib/hashtable.bot:289:5 `ht_place`
+  ok   examples/stdlib/hashtable.bot:287:16 `ht_place`
+  ok   examples/stdlib/hashtable.bot:286:43 `ht_probe_start`
+  ok   examples/stdlib/hashtable.bot:286:16 `ht_find_insert`
+  ok   examples/stdlib/hashtable.bot:281:9 `mutable_array::set`
+  ok   examples/stdlib/hashtable.bot:279:40 `ht_probe_start`
+  ok   examples/stdlib/hashtable.bot:279:13 `ht_find_insert`
+  ok   examples/stdlib/hashtable.bot:273:9 `mutable_array::set`
+  ok   examples/stdlib/hashtable.bot:271:5 `mutable_array::set`
+  ok   examples/stdlib/hashtable.bot:270:5 `mutable_array::set`
+  ok   examples/stdlib/hashtable.bot:269:5 `mutable_array::set`
+  ok   examples/stdlib/hashtable.bot:268:5 `mutable_array::set`
+  ok   examples/stdlib/hashtable.bot:249:5 `ht_rehash`
+  ok   examples/stdlib/hashtable.bot:247:16 `ht_rehash`
+  ok   examples/stdlib/hashtable.bot:237:5 `ht_rehash_scan`
+  ok   examples/stdlib/hashtable.bot:236:5 `mutable_array::set`
+  ok   examples/stdlib/hashtable.bot:229:5 `ht_rehash_scan`
+  ok   examples/stdlib/hashtable.bot:227:16 `ht_rehash_scan`
+  ok   examples/stdlib/hashtable.bot:226:18 `ht_rehash_insert`
+  ok   examples/stdlib/hashtable.bot:212:5 `mutable_array::set`
+  ok   examples/stdlib/hashtable.bot:211:5 `mutable_array::set`
+  ok   examples/stdlib/hashtable.bot:210:5 `mutable_array::set`
+  ok   examples/stdlib/hashtable.bot:209:44 `mod`
+  ok   examples/stdlib/hashtable.bot:209:13 `ht_rehash_probe`
+  ok   examples/stdlib/hashtable.bot:204:5 `ht_rehash_probe`
+  ok   examples/stdlib/hashtable.bot:192:29 `ht_probe_start`
+  ok   examples/stdlib/hashtable.bot:192:5 `ht_find_get`
+  ok   examples/stdlib/hashtable.bot:185:37 `ht_probe_start`
+  ok   examples/stdlib/hashtable.bot:185:13 `ht_find_get`
+  ok   examples/stdlib/hashtable.bot:178:32 `ht_probe_next`
+  ok   examples/stdlib/hashtable.bot:178:5 `ht_find_insert`
+  ok   examples/stdlib/hashtable.bot:176:43 `ht_probe_next`
+  ok   examples/stdlib/hashtable.bot:176:16 `ht_find_insert`
+  ok   examples/stdlib/hashtable.bot:158:29 `ht_probe_next`
+  ok   examples/stdlib/hashtable.bot:158:5 `ht_find_get`
+  ok   examples/stdlib/hashtable.bot:142:5 `mod`
+  ok   examples/stdlib/hashtable.bot:124:14 `ht_capacity_for`
+  ok   examples/stdlib/hashtable.bot:121:5 `ht_capacity_for`
+  ok   examples/stdlib/hashtable.bot:107:5 `mutable_array::set`
+  ok   examples/stdlib/hashtable.bot:106:5 `mutable_array::set`
+## examples/stdlib/matmul.bot (14 findings, through `examples/stdlib/matmul.bot`)
+  ok   examples/stdlib/matmul.bot:52:11 `matmul`
+  ok   examples/stdlib/matmul.bot:50:40 `list::at`
+  ok   examples/stdlib/matmul.bot:50:5 `product_rows`
+  ok   examples/stdlib/matmul.bot:44:40 `list::append`
+  ok   examples/stdlib/matmul.bot:44:5 `product_rows`
+  ok   examples/stdlib/matmul.bot:43:23 `list::at`
+  ok   examples/stdlib/matmul.bot:43:11 `product_row`
+  ok   examples/stdlib/matmul.bot:36:48 `list::append`
+  ok   examples/stdlib/matmul.bot:36:5 `product_row`
+  ok   examples/stdlib/matmul.bot:35:13 `dot`
+  ok   examples/stdlib/matmul.bot:28:5 `dot`
+  ok   examples/stdlib/matmul.bot:27:42 `list::at`
+  ok   examples/stdlib/matmul.bot:27:33 `list::at`
+  ok   examples/stdlib/matmul.bot:27:12 `list::at`
+## examples/stdlib/string_replace.bot (15 findings, through `examples/stdlib/string_replace.bot`)
+  ok   examples/stdlib/string_replace.bot:49:116 `replace`
+  ok   examples/stdlib/string_replace.bot:49:86 `replace`
+  ok   examples/stdlib/string_replace.bot:49:58 `replace`
+  ok   examples/stdlib/string_replace.bot:49:32 `replace`
+  ok   examples/stdlib/string_replace.bot:49:6 `replace`
+  ok   examples/stdlib/string_replace.bot:44:5 `replace_from`
+  ok   examples/stdlib/string_replace.bot:38:5 `replace_from`
+  ok   examples/stdlib/string_replace.bot:36:74 `str::concat`
+  ok   examples/stdlib/string_replace.bot:36:16 `replace_from`
+  ok   examples/stdlib/string_replace.bot:34:36 `str::substring`
+  ok   examples/stdlib/string_replace.bot:34:18 `str::concat`
+  ok   examples/stdlib/string_replace.bot:33:8 `matches_at`
+  ok   examples/stdlib/string_replace.bot:31:34 `str::substring`
+  ok   examples/stdlib/string_replace.bot:31:16 `str::concat`
+  ok   examples/stdlib/string_replace.bot:25:5 `str::substring`
+## examples/stdlib/string_reverse.bot (4 findings, through `examples/stdlib/string_reverse.bot`)
+  ok   examples/stdlib/string_reverse.bot:26:5 `reverse_from`
+  ok   examples/stdlib/string_reverse.bot:23:35 `str::concat`
+  ok   examples/stdlib/string_reverse.bot:23:5 `reverse_from`
+  ok   examples/stdlib/string_reverse.bot:22:17 `str::substring`
+## examples/surface/11-boolean-operators.bot (3 findings, through `examples/surface/11-boolean-operators.bot`)
+  ok   examples/surface/11-boolean-operators.bot:12:21 `outside`
+  ok   examples/surface/11-boolean-operators.bot:12:2 `between`
+  ok   examples/surface/11-boolean-operators.bot:10:9 `between`
+## examples/surface/13-hygiene.bot (1 findings, through `examples/surface/13-hygiene.bot`)
+  ok   examples/surface/13-hygiene.bot:10:2 `pair`
+## lib/byte.bot (2 findings, through `import byte`)
+  ok   lib/byte.bot:129:13 `shift_left`
+  ok   lib/byte.bot:120:36 `shift_right`
+## lib/linux/io.bot (3 findings, through `import linux::io`)
+  ok   lib/linux/io.bot:101:5 `linux::read`
+  ok   lib/linux/io.bot:94:5 `linux::write`
+  ok   lib/linux/io.bot:90:5 `linux::write`
+## lib/web.bot (37 findings, through `import web`)
+  ok   lib/web.bot:298:5 `esc_from`
+  ok   lib/web.bot:296:43 `str::concat`
+  ok   lib/web.bot:296:21 `esc_from`
+  ok   lib/web.bot:294:60 `str::substring`
+  ok   lib/web.bot:294:43 `str::concat`
+  ok   lib/web.bot:294:21 `esc_from`
+  ok   lib/web.bot:291:39 `str::concat`
+  ok   lib/web.bot:291:17 `esc_from`
+  ok   lib/web.bot:289:36 `str::char_at`
+  ok   lib/web.bot:283:116 `cont`
+  ok   lib/web.bot:283:104 `cont`
+  ok   lib/web.bot:283:92 `str::concat`
+  ok   lib/web.bot:283:79 `cont`
+  ok   lib/web.bot:283:67 `str::concat`
+  ok   lib/web.bot:283:45 `shift_right`
+  ok   lib/web.bot:283:17 `str::concat`
+  ok   lib/web.bot:281:91 `cont`
+  ok   lib/web.bot:281:79 `cont`
+  ok   lib/web.bot:281:67 `str::concat`
+  ok   lib/web.bot:281:45 `shift_right`
+  ok   lib/web.bot:281:17 `str::concat`
+  ok   lib/web.bot:278:62 `cont`
+  ok   lib/web.bot:278:41 `shift_right`
+  ok   lib/web.bot:278:13 `str::concat`
+  ok   lib/web.bot:273:33 `shift_right`
+  ok   lib/web.bot:270:9 `str::concat`
+  ok   lib/web.bot:267:80 `mod`
+  ok   lib/web.bot:267:59 `list::at`
+  ok   lib/web.bot:267:21 `list::at`
+  ok   lib/web.bot:267:9 `str::concat`
+  ok   lib/web.bot:246:17 `str::char_at`
+  ok   lib/web.bot:239:36 `str::char_at`
+  ok   lib/web.bot:217:34 `immutable_set::contains`
+  ok   lib/web.bot:200:17 `scan_while`
+  ok   lib/web.bot:161:13 `scan_while`
+  ok   lib/web.bot:121:33 `immutable_set::contains`
+  ok   lib/web.bot:118:9 `str::substring`
+
+## Every unit, original against respelled
+  same program: examples/stdlib/ai_text_clean.bot (5 findings before, 0 after)
+  same program: examples/stdlib/csv.bot (21 findings before, 0 after)
+  same program: examples/stdlib/csv_chunked.bot (28 findings before, 0 after)
+  same program: examples/stdlib/csv_geometric.bot (31 findings before, 0 after)
+  same program: examples/stdlib/csv_records.bot (90 findings before, 0 after)
+  same program: examples/stdlib/hashtable.bot (60 findings before, 0 after)
+  same program: examples/stdlib/matmul.bot (14 findings before, 0 after)
+  same program: examples/stdlib/string_replace.bot (15 findings before, 0 after)
+  same program: examples/stdlib/string_reverse.bot (4 findings before, 0 after)
+  same program: examples/surface/01-arithmetic.bot (0 findings before, 0 after)
+  same program: examples/surface/02-recursion.bot (0 findings before, 0 after)
+  same program: examples/surface/03-closure.bot (0 findings before, 0 after)
+  same program: examples/surface/04-branch-value.bot (0 findings before, 0 after)
+  same program: examples/surface/05-shadowing.bot (0 findings before, 0 after)
+  same program: examples/surface/06-list.bot (0 findings before, 0 after)
+  same program: examples/surface/07-loop-break.bot (0 findings before, 0 after)
+  same program: examples/surface/08-return.bot (0 findings before, 0 after)
+  same rejection: examples/surface/09-mutual-recursion.bot
+  same rejection: examples/surface/10-duplicate-binding.bot
+  same program: examples/surface/11-boolean-operators.bot (3 findings before, 0 after)
+  same program: examples/surface/12-if-value.bot (0 findings before, 0 after)
+  same program: examples/surface/13-hygiene.bot (1 findings before, 0 after)
+  same program: examples/surface/14-modules.bot (0 findings before, 0 after)
+  same program: examples/refinement/refined-strings.bot (40 findings before, 0 after)
+  same program: examples/io/child-path.bot (0 findings before, 0 after)
+  same program: examples/io/hello.bot (5 findings before, 0 after)
+  same program: examples/io/show-path.bot (5 findings before, 0 after)
+  same program: examples/abi/numeric-domains.bot (0 findings before, 0 after)
+  same program: examples/linux/context-hello.bot (5 findings before, 0 after)
+  same program: examples/linux/getpid.bot (0 findings before, 0 after)
+  same program: examples/linux/read-stdin.bot (5 findings before, 0 after)
+  same program: examples/linux/write.bot (3 findings before, 0 after)
+  same program: bench/fib.bot (0 findings before, 0 after)
+  same program: bench/lex-strategy.bot (16 findings before, 0 after)
+  same program: bench/loop-count.bot (1 findings before, 0 after)
+  same program: bench/refined-checks.bot (41 findings before, 0 after)
+  same program: bench/source-checks.bot (4 findings before, 0 after)
+  same program: bench/sum-refined.bot (1 findings before, 0 after)
+  same program: bench/test-selection.bot (9 findings before, 0 after)
+  same program: bench/uri-steady.bot (42 findings before, 0 after)
+  same program: lib/abi.bot (0 findings before, 0 after)
+  same program: lib/ascii.bot (2 findings before, 0 after)
+  same program: lib/byte.bot (2 findings before, 0 after)
+  same rejection: lib/io.bot
+  same program: lib/linux.bot (2 findings before, 0 after)
+  same rejection: lib/list.bot
+  same program: lib/mathish.bot (0 findings before, 0 after)
+  same rejection: lib/mutable_array.bot
+  same program: lib/web.bot (39 findings before, 0 after)
+  same program: lib/abi/bytes.bot (2 findings before, 0 after)
+  same program: lib/abi/x86_64.bot (0 findings before, 0 after)
+  same rejection: lib/io/path.bot
+  same rejection: lib/linux/io.bot
+  same program: lib/linux/path.bot (0 findings before, 0 after)
+  same program: import abi (0 findings before, 0 after)
+  same program: import abi::bytes (2 findings before, 0 after)
+  same program: import abi::x86_64 (0 findings before, 0 after)
+  same program: import ascii (2 findings before, 0 after)
+  same program: import byte (2 findings before, 0 after)
+  same program: import io (0 findings before, 0 after)
+  same program: import io::path (0 findings before, 0 after)
+  same program: import linux (2 findings before, 0 after)
+  same program: import linux::io (5 findings before, 0 after)
+  same program: import linux::path (0 findings before, 0 after)
+  same program: import list (0 findings before, 0 after)
+  same program: import mathish (0 findings before, 0 after)
+  same program: import mutable_array (0 findings before, 0 after)
+  same program: import web (39 findings before, 0 after)
+
+calls respelled and verified: 355 of 355; call failures: 0; unit failures: 0
+applied to 24 files
+exit=0

@@ -58,7 +58,7 @@ struct Test:
 fn make_changed?(changed):
     changed_set = immutable_set::from_list(changed)
     fn changed?(path):
-        immutable_set::contains(changed_set, path)
+        changed_set.contains(path)
     changed?
 
 fn test_name(test):
@@ -68,18 +68,18 @@ fn test_deps(test):
     test.dependencies
 
 fn affected?(test, changed?):
-    list::any?(test_deps(test), changed?)
+    test_deps(test).any?(changed?)
 
 fn select_affected(tests, changed?):
     loop test in tests:
-        if not affected?(test, changed?):
+        if not test.affected?(changed?):
             continue
         test
 
 fn first_affected(tests: List[Test], changed?):
     fn is_affected?(test: Test):
-        affected?(test, changed?)
-    found = list::find(tests, is_affected?):
+        test.affected?(changed?)
+    found = tests.find(is_affected?):
         on NotFound:
             Test {name: "<none>", dependencies: []}
     test_name(found)
@@ -109,10 +109,10 @@ changed_b? = make_changed?(changed_b)
 
 probe = changed_a?("lib/web.bot")
 
-selected_a = select_affected(tests, changed_a?)
-selected_b = select_affected(tests, changed_b?)
+selected_a = tests.select_affected(changed_a?)
+selected_b = tests.select_affected(changed_b?)
 
 docs_deps = ["README.md", "AGENTS.md"]
-untouched_by_a? = list::none?(docs_deps, changed_a?)
+untouched_by_a? = docs_deps.none?(changed_a?)
 
-[list::length(selected_a), list::length(selected_b), first_affected(tests, changed_a?), probe, untouched_by_a?]
+[list::length(selected_a), list::length(selected_b), tests.first_affected(changed_a?), probe, untouched_by_a?]

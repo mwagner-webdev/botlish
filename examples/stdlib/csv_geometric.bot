@@ -53,7 +53,7 @@ fn geo_grow(storage, length, value) errors UpperOverrun:
     if length < capacity:
         return storage
 
-    new_capacity = geo_new_capacity(capacity, length)
+    new_capacity = capacity.geo_new_capacity(length)
     fresh = mutable_array::create(new_capacity, value)
     mutable_array::copy(fresh, 0, storage, 0, length)
     fresh
@@ -62,14 +62,14 @@ fn geo_grow(storage, length, value) errors UpperOverrun:
 # storage is mutated (or replaced by a grown copy, which is returned); the
 # caller's new length is LENGTH + 1.
 fn geo_append(storage, length, value) errors IndexNotFound, UpperOverrun:
-    grown = geo_grow(storage, length, value)
-    mutable_array::set(grown, length, value)
+    grown = storage.geo_grow(length, value)
+    grown.set(length, value)
     grown
 
 # STORAGE's first LENGTH elements as an ordinary immutable List
 # (finalization: a single exact-size copy, see mutable_array::freeze).
 fn geo_finish(storage, length) errors LowerUnderrun, UpperOverrun:
-    mutable_array::freeze(storage, length)
+    storage.freeze(length)
 
 # ---------------------------------------------------------------------------
 # CSV parsing (see csv.bot for the algorithm's description; unchanged here
@@ -95,30 +95,30 @@ fn peek(text, index) errors LowerUnderrun:
     if index >= str::length(text):
         return ""
 
-    str::substring(text, index, index + 1)
+    text.substring(index, index + 1)
 
 fn scan_unquoted(text, start, index) errors LowerUnderrun, UpperOverrun:
-    character = peek(text, index)
+    character = text.peek(index)
     if character == "" or character == "," or character == "\n":
-        return {field: str::substring(text, start, index), index: index}
+        return {field: text.substring(start, index), index: index}
 
-    scan_unquoted(text, start, index + 1)
+    text.scan_unquoted(start, index + 1)
 
 fn scan_quoted(text, index, field) errors LowerUnderrun:
-    character = peek(text, index)
+    character = text.peek(index)
     if character == "\"":
-        if peek(text, index + 1) == "\"":
-            return scan_quoted(text, index + 2, str::concat(field, "\""))
+        if text.peek(index + 1) == "\"":
+            return text.scan_quoted(index + 2, field.concat("\""))
 
         return {field: field, index: index + 1}
 
-    scan_quoted(text, index + 1, str::concat(field, character))
+    text.scan_quoted(index + 1, field.concat(character))
 
 fn scan_field(text, index) errors LowerUnderrun, UpperOverrun:
-    if peek(text, index) == "\"":
-        return scan_quoted(text, index + 1, "")
+    if text.peek(index) == "\"":
+        return text.scan_quoted(index + 1, "")
 
-    scan_unquoted(text, index, index)
+    text.scan_unquoted(index, index)
 
 # The rest of a record whose first COUNT fields are in FIELDS, the last field
 # ending at STOP. (Defined before scan_record, its only caller, like every
@@ -128,38 +128,38 @@ fn scan_field(text, index) errors LowerUnderrun, UpperOverrun:
 # whole call chain -- TYPED-MUTARRAY-BUILDER-REFACTOR.md, "Definition-order
 # sensitivity".)
 fn scan_record_rest(text, stop, fields: MutableArray[str], count) errors IndexNotFound, LowerUnderrun, UpperOverrun:
-    delimiter = peek(text, stop)
+    delimiter = text.peek(stop)
     if delimiter == ",":
-        scanned = scan_field(text, stop + 1)
-        more = geo_append(fields, count, scanned.field)
-        return scan_record_rest(text, scanned.index, more, count + 1)
+        scanned = text.scan_field(stop + 1)
+        more = fields.geo_append(count, scanned.field)
+        return text.scan_record_rest(scanned.index, more, count + 1)
 
     if delimiter == "\n":
-        return {fields: geo_finish(fields, count), stop: stop + 1}
+        return {fields: fields.geo_finish(count), stop: stop + 1}
 
-    {fields: geo_finish(fields, count), stop: stop}
+    {fields: fields.geo_finish(count), stop: stop}
 
 # The record starting at INDEX and the index where it stops: the first field
 # (a record always has one, possibly empty) starts the FIELDS builder.
 fn scan_record(text, index) errors IndexNotFound, LowerUnderrun, UpperOverrun:
-    scanned = scan_field(text, index)
-    scan_record_rest(text, scanned.index, geo_new(scanned.field), 1)
+    scanned = text.scan_field(index)
+    text.scan_record_rest(scanned.index, geo_new(scanned.field), 1)
 
 # The records from INDEX on, the first COUNT records already in RECORDS.
 fn scan_records(text, index, records: MutableArray[List[str]], count) errors IndexNotFound, LowerUnderrun, UpperOverrun:
     if index >= str::length(text):
-        return geo_finish(records, count)
+        return records.geo_finish(count)
 
-    scanned = scan_record(text, index)
-    more = geo_append(records, count, scanned.fields)
-    scan_records(text, scanned.stop, more, count + 1)
+    scanned = text.scan_record(index)
+    more = records.geo_append(count, scanned.fields)
+    text.scan_records(scanned.stop, more, count + 1)
 
 fn csv_parse(text) errors IndexNotFound, LowerUnderrun, UpperOverrun:
     if str::length(text) == 0:
         return []
 
-    scanned = scan_record(text, 0)
-    scan_records(text, scanned.stop, geo_new(scanned.fields), 1)
+    scanned = text.scan_record(0)
+    text.scan_records(scanned.stop, geo_new(scanned.fields), 1)
 
 # The sample's input is well formed, so none of its slices or builder slots is
 # ever out of range; the handlers state what a malformed scan would mean.

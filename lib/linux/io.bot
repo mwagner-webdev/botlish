@@ -87,18 +87,18 @@ fn create() -> LinuxIO:
 # raw signed result unchanged (bytes written, or -errno). linux::write's
 # semantics exactly (lib/linux.bot).
 fn write(data: abi::bytes::Bytes, context io: LinuxIO) -> int:
-    linux::write(io.stdout.raw, data)
+    io.stdout.raw.write(data)
 
 # write(2) of DATA to the context's standard error.
 fn write_error(data: abi::bytes::Bytes, context io: LinuxIO) -> int:
-    linux::write(io.stderr.raw, data)
+    io.stderr.raw.write(data)
 
 # read(2) from the context's standard input into a logical copy of DATA:
 # linux::read's semantics exactly (one syscall; the caller's buffer is
 # unchanged; the kernel's raw result and the updated buffer come back in a
 # linux::ReadResult).
 fn read(data: abi::bytes::MutableBytes, context io: LinuxIO) -> linux::ReadResult:
-    linux::read(io.stdin.raw, data)
+    io.stdin.raw.read(data)
 
 # ---------------------------------------------------------------------------
 # io::IO (CONTEXT-TRAITS.md)

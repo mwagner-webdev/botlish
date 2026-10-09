@@ -32,4 +32,4 @@ fn refined_sum(n, acc):
     else:
         -1
 
-refined_sum(400, 0)
+400.refined_sum(0)

@@ -52,39 +52,39 @@ fn choose_classifier(strict_mode):
 fn chars_of(s, i, acc):
     if i < 0 or i >= str::length(s):
         return acc
-    chars_of(s, i + 1, list::append(acc, str::substring(s, i, i + 1)))
+    s.chars_of(i + 1, acc.append(s.substring(i, i + 1)))
 
 fn classify(token, strict_mode):
     classifier = choose_classifier(strict_mode)
-    loop c in chars_of(token, 0, []):
+    loop c in token.chars_of(0, []):
         classifier(c)
 
 fn count_true(flags, i, acc) errors IndexNotFound:
     if i >= list::length(flags):
         return acc
-    step = if list::at(flags, i):
+    step = if flags.at(i):
         1
     else:
         0
-    count_true(flags, i + 1, acc + step)
+    flags.count_true(i + 1, acc + step)
 
 fn valid_chars(token, strict_mode) errors IndexNotFound:
-    count_true(classify(token, strict_mode), 0, 0)
+    token.classify(strict_mode).count_true(0, 0)
 
 fn fully_alnum?(token):
-    list::all?(chars_of(token, 0, []), str::is_tcl_alnum)
+    token.chars_of(0, []).all?(str::is_tcl_alnum)
 
 tokens = ["emailish?", "scan_while", "local-part", "tld-check", "x_1", "9bad-name", "café", "is_tcl_alpha"]
 
 fn total_valid(tokens, strict_mode, i, acc) errors IndexNotFound:
     if i >= list::length(tokens):
         return acc
-    total_valid(tokens, strict_mode, i + 1, acc + valid_chars(list::at(tokens, i), strict_mode))
+    tokens.total_valid(strict_mode, i + 1, acc + tokens.at(i).valid_chars(strict_mode))
 
-strict_total = total_valid(tokens, true, 0, 0):
+strict_total = tokens.total_valid(true, 0, 0):
     on IndexNotFound:
         -1
-relaxed_total = total_valid(tokens, false, 0, 0):
+relaxed_total = tokens.total_valid(false, 0, 0):
     on IndexNotFound:
         -1
 
@@ -93,7 +93,7 @@ alnum_only_tokens = loop token in tokens:
         continue
     token
 
-first_alnum = list::at(alnum_only_tokens, 0):
+first_alnum = alnum_only_tokens.at(0):
     on IndexNotFound:
         ""
 

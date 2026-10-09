@@ -36,8 +36,8 @@ corpus = ["abcXYZ012", "a b+c?", "café", "hello 世界?"]
 fn repeat_uri(i, total, acc):
     if i >= total:
         return acc
-    text = list::at(corpus, mod(i, list::length(corpus)))
+    text = corpus.at(i.mod(list::length(corpus)))
     escaped = web::uri_escape_text(text)
     repeat_uri(i + 1, total, acc + str::length(escaped))
 
-repeat_uri(0, 2000, 0)
+0.repeat_uri(2000, 0)

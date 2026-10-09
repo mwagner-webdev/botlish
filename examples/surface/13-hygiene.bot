@@ -7,4 +7,4 @@ fn pair(list, x):
     [list, x]
 
 list = 3
-[pair(1, 2), list]
+[1.pair(2), list]

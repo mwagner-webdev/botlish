@@ -7,6 +7,6 @@ fn between(x, low, high):
     low <= x and x <= high
 
 fn outside(x, low, high):
-    not between(x, low, high)
+    not x.between(low, high)
 
-[between(5, 1, 10), outside(5, 1, 10), 3 != 4, false or 1 == 1]
+[5.between(1, 10), 5.outside(1, 10), 3 != 4, false or 1 == 1]
