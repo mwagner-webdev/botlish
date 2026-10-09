@@ -313,7 +313,7 @@ Observable behavior is identical, verified mechanically per class:
   commit with `git archive`) and the tree after it, with this checkout's
   compiler, runs it on all four backends, and requires identical outcomes
   (value or error code). The probe files (`audit/refactor/tools/probes/*.tcl`)
-  are part of the deliverable: {{PROBE-INVENTORY}}. A probe whose outcome a
+  are part of the deliverable: 285 probes over nine programs and modules -- `ai_text_clean` 42 (`clean_char` over its whole documented domain, `clean_ai_text` over texts mixing every class), `csv` 44, `csv_chunked` 43, `csv_geometric` 46 and `csv_records` 54 (each scanner at every boundary: quotes, doubled quotes, delimiters, the end of the text, out-of-range indices; `csv_records` also runs the hash-table probes), `hashtable` 4 (insert, replace, growth, delete and reinsert over tombstones), `web` 49 (`emailish?`, `uri_query_value?` and `uri_escape_text`, Unicode inputs, and 40,000-character inputs that would overflow a non-tail recursion), `linux::path` 2 and `abi::bytes` 1 (`replace` at and past both ends) -- each run before and after on all four backends. A probe whose outcome a
   conversion changes on purpose is declared (`differs`) and must differ: the
   four CSV programs' scanners now fail with `IndexNotFound` where they failed
   with `LowerUnderrun` for a negative index -- an index no caller passes --
@@ -339,11 +339,12 @@ Observable behavior is identical, verified mechanically per class:
 | kickoff | 6e3f9f7 | 491 | -- | interp 6801/6801, compile 6797 + 4 skipped |
 | P0 library repair | -- | 491 | no tree edit: five standalone failures named (section 5) | -- |
 | P1 markings | 3f8c0fc | 465 | 5 natives `nomethod`, 26 findings | covered by P2's run (section 17) |
-| P2 method sweep | 7697789 | 110 | 355 calls respelled, 24 files | {{P2-REG}} |
-| P3 one-character | {{P3-COMMIT}} | 56 | 54 literals converted in 6 files (`ai_text_clean`, the four CSV programs, `lib/web.bot`) | {{P3-REG}} |
-| P4 structural | {{P4-COMMIT}} | 44 | 5 annotated, 7 merged | {{P4-REG}} |
-| P5 H2 | {{P5-COMMIT}} | 42 | 2 test data respelled | {{P5-REG}} |
-| P6 gate, docs | {{P6-COMMIT}} | 42 = manifest | gate, CI job, tests, documentation | {{P6-REG}} |
+| P2 method sweep | 7697789 | 110 | 355 calls respelled, 24 files | interp 6807/6807, compile 6803 + 4 skipped (the kickoff's four), 0 failed |
+| P3 one-character | 316731d | 56 | 54 literals converted in 6 files (`ai_text_clean`, the four CSV programs, `lib/web.bot`) | targeted test files only; five stale pins found later (section 18), covered by the final run |
+| P4 structural | 97e13ed | 44 | 5 annotated, 7 merged | targeted run (62 test files naming a touched program): found P3's stale pins and three costly merges |
+| P5 H2 | c412959 | 42 | 2 test data respelled | covered by the final run (the expect line pins the sample) |
+| P6 gate, docs | bad5b8d | 42 = manifest | gate, CI job, tests, documentation | covered by the final run |
+| P4 follow-up | aa4cb40, 47a328d | 42 = manifest | three merges respelled without conjunctions (section 15, finding 12); the pins the refactor moves, updated and attributed | final run at 47a328d: {{FINAL-REG}} |
 
 Every phase's edits were performed and verified on a scratch copy of
 `examples/`, `bench/` and `lib/` first (the consolidated sweep, the expected
@@ -918,8 +919,8 @@ conversion attempt produced (`SAME-RETURN-VALUE` on the handler form of
   without the optimization, the kickoff one 97 without it and 14 with). P4's
   `emailish?`, `ht_find_insert` and `abi::bytes::replace` merges were
   respelled (section 9; section 15, finding 12), which also moved one HIR
-  node id a contexts test pins. All of it is in {{FIX-COMMIT}}, verified by
-  the probes again and by a full regression ({{FIX-REG}}).
+  node id a contexts test pins. All of it is in aa4cb40 (the merges) and 47a328d (the pins),
+  verified by the probes again and by the final full regression (section 17).
 * **The CSV scanners' error contract changed** (`IndexNotFound` for an index
   outside the String where `peek` raised `LowerUnderrun`): identical for every
   index the scan reaches, different for a negative one no caller passes,
@@ -982,7 +983,7 @@ conversion attempt produced (`SAME-RETURN-VALUE` on the handler form of
 6. *Behavior identity: how proven per program class?* Expected outputs: all
    30 programs with an `# expect:` line, on four backends, at kickoff and after
    every phase (`expect.tcl`), plus `tests/stdlib.test`'s cases. Probes:
-   {{PROBE-COUNT}} probes over 9 programs and modules
+   285 probes over 9 programs and modules
    (`audit/refactor/tools/probes/`: ai_text_clean, the four CSV programs,
    hashtable, `web`, `linux::path`, `abi::bytes`), before and after on four
    backends, identical except four declared contract changes (the CSV
