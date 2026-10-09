@@ -111,12 +111,14 @@ test raw-internal-abi-refined-checks-callers {the calls agree: domain? hands tld
         [regexp {rawint 0 @e\d+\n\s+%\d+ = fnvalue \d+ @e\d+\n\s+%\d+ = call} [functionsNamed $nir web::emailish?]]
 } -result {1 0 1 1}
 
-test raw-internal-abi-refined-checks-demand-off {with the demand filter off (-raw-demand-opt 0) the internal variants take every eligible raw position (char_at's i; its region companion, listed first, stays tagged), and refined-checks still returns [400, 0]} -body {
+# Since the warning-driven refactor (REFACTOR-WARNINGS-CLEAN.md) char_at's
+# region companion is emitted second (dormant-refined-checks-char-at-nir).
+test raw-internal-abi-refined-checks-demand-off {with the demand filter off (-raw-demand-opt 0) the internal variants take every eligible raw position (char_at's i; its region companion, listed second, stays tagged), and refined-checks still returns [400, 0]} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot]]
     set nir [native::nir $hir -raw-demand-opt 0]
     list [signatures $nir char_at] [core::value::show [native::evalHir $hir -raw-demand-opt 0] 1] \
         [core::value::show [native::evalHir $hir] 1] [core::value::show [native::evalHir $hir -block-escape-opt 0] 1]
-} -result {{- rawparams=0} {[400, 0]} {[400, 0]} {[400, 0]}}
+} -result {{rawparams=0 -} {[400, 0]} {[400, 0]} {[400, 0]}}
 
 test raw-internal-abi-refined-checks-region-companion-tagged {char_at's internal region companion keeps the tagged ABI even when its i is planned raw (demand filter off): its callers box the argument} -body {
     set nir [refinedChecksNir -raw-demand-opt 0]

@@ -561,6 +561,14 @@ test sr-generic-baseline-unchanged {the unspecialized baseline keeps its limitat
 # ChunkedBuilder struct (completed, current, filled) threaded through the
 # scanners: materialized where a builder is made and where a full chunk
 # makes a new one.
+#
+# The warning-driven refactor (REFACTOR-WARNINGS-CLEAN.md) made the four CSV
+# programs read their delimiters with str::char_at, so peek() no longer
+# feeds a comparison and is no longer a String-region producer: its
+# region-companion calls, multi-value returns counted with the scan results'
+# own, are gone (callmulti 12 -> 7 in csv, 11 -> 7 in csv_geometric, 8 -> 4
+# in csv_chunked, 12 -> 8 in csv_records; 4 or 5 fewer with struct-opt off,
+# where they were the only ones). No structnew or structget count moved.
 
 proc stdlibCensus {name} {
     set hir [native::prepareHir [surface::readProgramFile [file join $::projectRoot examples stdlib $name.bot]]]
@@ -575,19 +583,19 @@ proc stdlibCensus {name} {
 
 test sr-stdlib-csv-scan-results {every csv scan result is a virtual multi-value return: no StructObj at all} -body {
     stdlibCensus csv
-} -result {{on 0 0 12} {off 6 8 5} return}
+} -result {{on 0 0 7} {off 6 8 0} return}
 
 test sr-stdlib-csv-geometric {csv_geometric scan results and records are virtual} -body {
     stdlibCensus csv_geometric
-} -result {{on 0 0 11} {off 4 8 4} return}
+} -result {{on 0 0 7} {off 4 8 0} return}
 
 test sr-stdlib-csv-chunked {csv_chunked's scan results are virtual too; its ChunkedBuilder is a materialized struct} -body {
     stdlibCensus csv_chunked
-} -result {{on 3 14 8} {off 7 18 4} {materialized return}}
+} -result {{on 3 14 4} {off 7 18 0} {materialized return}}
 
 test sr-stdlib-csv-records {csv_records: scan results and its HashTable values cross returns as fields} -body {
     stdlibCensus csv_records
-} -result {{on 2 23 12} {off 5 32 4} return}
+} -result {{on 2 23 8} {off 5 32 0} return}
 
 test sr-stdlib-hashtable-rehash {a HashTable value crosses returns as fields; it is materialized where it is built} -body {
     stdlibCensus hashtable
