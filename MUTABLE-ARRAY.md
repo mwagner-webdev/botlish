@@ -700,7 +700,15 @@ and 1 under `affine-move-cow-fork`); a re-run killed all three by it.
 
 ### 60. Native coverage
 
-NATIVE-COVERAGE-RESULTS.
+`tests/native-coverage.tcl` (the suite on the Cranelift backend, final
+tree): 6801 tests -- 2688 run natively, 3959 independent of the backend, 94
+partially native, 60 unsupported, **0 failed** (MUTABLE-VECTOR.md: 6766 --
+2683, 3955, 68, 60, 0). The 60 unsupported tests need exactly what
+README.md's coverage table lists, in the same numbers (a Block value at the
+program boundary 13, `test-log`/`test_log` 19, `test-tick`/`test_tick` 12,
+sequence mode 7, test validators and natives 7, a validator contract 2);
+none is an array or vector test.
+PARTIAL-RESULTS
 
 ### 61. Scalar audit
 
