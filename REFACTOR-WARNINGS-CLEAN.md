@@ -344,7 +344,7 @@ Observable behavior is identical, verified mechanically per class:
 | P4 structural | 97e13ed | 44 | 5 annotated, 7 merged | targeted run (62 test files naming a touched program): found P3's stale pins and three costly merges |
 | P5 H2 | c412959 | 42 | 2 test data respelled | covered by the final run (the expect line pins the sample) |
 | P6 gate, docs | bad5b8d | 42 = manifest | gate, CI job, tests, documentation | covered by the final run |
-| P4 follow-up | aa4cb40, 47a328d | 42 = manifest | three merges respelled without conjunctions (section 15, finding 12); the pins the refactor moves, updated and attributed | final run at 47a328d: {{FINAL-REG}} |
+| P4 follow-up | aa4cb40, 47a328d, 991c666 | 42 = manifest | three merges respelled without conjunctions (section 15, finding 12); the pins the refactor moves, updated and attributed | at 47a328d: interp 6808/6813, compile 6804 + 4 skipped, 5 failed on both (five pins P3 had moved, fixed in 991c666); at 991c666: {{LAST-REG}} |
 
 Every phase's edits were performed and verified on a scratch copy of
 `examples/`, `bench/` and `lib/` first (the consolidated sweep, the expected
@@ -930,7 +930,16 @@ conversion attempt produced (`SAME-RETURN-VALUE` on the handler form of
   `emailish?`, `ht_find_insert` and `abi::bytes::replace` merges were
   respelled (section 9; section 15, finding 12), which also moved one HIR
   node id a contexts test pins. All of it is in aa4cb40 (the merges) and 47a328d (the pins),
-  verified by the probes again and by the final full regression (section 17).
+  verified by the probes again. The full regression of 47a328d (and its
+  native coverage run) then found five more pins P3 had moved, in files the
+  targeted runs had not selected: `tests/struct-scalar-replacement.test`'s
+  census of the four CSV programs counts multi-value calls, and `peek()`'s
+  String-region companion calls, gone with its comparisons, were among them
+  (no `structnew` or `structget` count moved), and
+  `raw-internal-abi-refined-checks-demand-off` lists `char_at`'s two
+  variants in the order that changed. Fixed in 991c666, whose full
+  regression is the record (section 17). The lesson is the obvious one: a
+  corpus edit is checked by the full suite, not by a selection of it.
 * **The CSV scanners' error contract changed** (`IndexNotFound` for an index
   outside the String where `peek` raised `LowerUnderrun`): identical for every
   index the scan reaches, different for a negative one no caller passes,
