@@ -174,8 +174,13 @@ temporary or a value of a known non-array type is
 `MUTABLE-PLACE-RECEIVER`; a nested function mutating or capturing an array
 its function mutates is `MUTABLE-PLACE-RECEIVER` / `MUTABLE-PLACE-CAPTURE`
 (the diagnostics were `MUTABLE-VECTOR-*` and are shared now). An untyped
-generic parameter may be a place (its entry copy is the dynamic `d`).
-`ma-place-receiver`, `ma-generic-place`.
+generic parameter may be a place: its argument is copied for it (by the
+caller when the parameter is consumed); inside a generic body, where the
+static type is too imprecise to say, a binding or struct field taking the
+parameter copies it dynamically (`d`). `ma-place-receiver`,
+`ma-generic-place`, `ma-cow-extraction` (its last two routes are the ones
+that reach `d`; the mutation harness's `generic-identity-aliases` needs
+them).
 
 ### 9. Parameter semantics
 
@@ -197,8 +202,9 @@ last use. Affine: the result moves to the caller. `ma-cow-routes` (route 3),
 
 ### 11. Generic-call semantics
 
-A generic (untyped) parameter's entry copy is dynamic (`d`); a semantic
-instance analyzes the body at the argument's type; an affine argument
+A copy inside a generic (untyped) body is dynamic (`d`: whatever the value
+is at run time); a semantic instance analyzes the body at the argument's
+type; an affine argument
 specializes the function (AFFINE-VALUES.md's monomorphization). The
 identity and wrapper regressions MUTABLE-VECTOR.md found are pinned for
 arrays from a fresh, never-mutated source: `ma-cow-routes` routes 4 and 5
@@ -211,7 +217,9 @@ A struct literal holds a copy of the array put in (descriptor `s`N...); a
 field path (`b.values`) is a place; a projection read out of it is a copy;
 a destructured binding is a copy (`destructure-bound-mutable-value-is-the-same-value`
 now pins independence). An affine array makes its struct affine.
-`ma-cow-routes` route 6 (`Box {values: a}`).
+`ma-cow-routes` route 6 (`Box {values: a}`); `ma-cow-extraction` (a
+projection, a destructure, an anonymous struct's field and a struct
+parameter's field, each mutated while the struct is read afterwards).
 
 ### 13. List-element semantics
 
@@ -403,7 +411,9 @@ See [Ownership roles: the audit](#ownership-roles-the-audit) (pinned by
 `MutableVector[MutableArray[T]]`: unrestricted when T is; an extracted
 array is an independent value (`ma-principal-vector-of-arrays`, route 8);
 affine when T is, with push/pop/take/swap moving whole arrays
-(`ma-nested-affine`).
+(`ma-nested-affine`). Written as a type, either nesting is legal
+(`ma-type-syntax`, which the mutant `vector-of-arrays-rejected` needs: the
+other tests only build the nesting by inference).
 
 ### 37. MutableArray in List
 
@@ -526,8 +536,8 @@ Tcl: `core::mutarray::counters` (`created`, `shares`). `ma-cow-counters`,
 
 `ma-cow-routes` (binding, parameter, result, identity, generic identity and
 wrapper, struct field, List element, vector element, nested aggregate),
-`ma-cow-surviving-result`, `ma-cow-loop`, `ma-cow-repeated-copy`,
-`ma-context-member`, `mat-run-4/6/8`, `mutarray-sem-4/7`,
+`ma-cow-surviving-result`, `ma-cow-extraction`, `ma-cow-loop`,
+`ma-cow-repeated-copy`, `ma-context-member`, `mat-run-4/6/8`, `mutarray-sem-4/7`,
 `tmb-alias-2`, `destructure-bound-mutable-value-is-the-same-value`: each
 used to pin aliasing (or would have observed it) and now pins independence.
 
@@ -590,7 +600,20 @@ NATIVE-COVERAGE-RESULTS.
 
 ### 61. Scalar audit
 
-SCALAR-RESULTS.
+`native/generate-scalar-audit.tcl` regenerated `audit/native-scalar-asm/`
+(committed). Every program that uses no array is byte-identical to the
+previous corpus (the four `bench/` programs, `ai_text_clean`, `csv`,
+`matmul`, `string_replace`, `string_reverse`: `.asm`, `.vcode` and summary
+unchanged). The four that use arrays changed because their sources did
+(`csv_chunked`, `csv_records`, `hashtable` were rewritten to stop relying on
+aliasing; `csv_geometric` lost the generic `mutable_array::create` wrapper
+instances): 194 → 177 functions, 83843 → 74702 machine-code bytes in total
+(`csv_chunked` 10219 → 7334, `csv_geometric` 7877 → 6849, `csv_records`
+23429 → 20163, `hashtable` 12845 → 10883). Their scalar helpers (`peek`,
+`scan_quoted`, `scan_unquoted`, `scan_field`, ...) compile to the same
+instruction streams; with addresses normalized the only difference is one
+load's static-table offset in `csv_records` (`[rax+X]` → `[rax]`: fewer
+statics precede it), plus the constant pool's alignment padding.
 
 ### 62. Performance
 

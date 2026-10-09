@@ -291,10 +291,13 @@ test ma-type-affinity {items 2, 39: Affinity(MutableArray[T]) = Affinity(T), com
     }
 } -cleanup {unset -nocomplain hir c} -result {unrestricted unrestricted unrestricted unrestricted unrestricted affine affine affine affine affine unrestricted}
 
-test ma-type-syntax {items 2, 42: MutableArray[T] of an affine T is a legal type now (it used to be AFFINE-CONTAINER-UNSUPPORTED); an ImmutableSet of affine members still is not (it compares and hashes them)} -body {
+test ma-type-syntax {items 2, 21, 42: MutableArray[T] of an affine T is a legal type now (it used to be AFFINE-CONTAINER-UNSUPPORTED), and so are written nestings of the two mutable collections, either way round; an ImmutableSet of affine members still is not (it compares and hashes them)} -body {
     list [maCode "${maDecls}fn f(a: MutableArray\[Coroutine{args: \[Command\], return: Event}\]) -> int:\n    mutable_array::capacity(a)\n1\n"] \
+        [maCode "${maDecls}fn f(v: MutableVector\[MutableArray\[int\]\]) -> int:\n    v.length()\n1\n"] \
+        [maCode "${maDecls}fn f(a: MutableArray\[MutableVector\[int\]\]) -> int:\n    mutable_array::capacity(a)\n1\n"] \
+        [maCode "${maDecls}fn f(v: MutableVector\[MutableArray\[Coroutine{args: \[Command\], return: Event}\]\]) -> int:\n    v.length()\n1\n"] \
         [maCode "${maDecls}fn f(s: ImmutableSet\[Coroutine{args: \[Command\], return: Event}\]) -> int:\n    1\n1\n"]
-} -result {ok AFFINE-CONTAINER-UNSUPPORTED}
+} -result {ok ok ok ok AFFINE-CONTAINER-UNSUPPORTED}
 
 test ma-affine-whole-moves {item 7: an affine array moves whole -- through a binding, an argument, a result, a struct field, a List element, a vector element, a branch join and a handler; a later use of the source is USE-AFTER-MOVE} -body {
     set pre "${maDecls}struct Pool:\n    workers: MutableArray\[Coroutine{args: \[Command\], return: Event}\]\nfn take_all(a: MutableArray\[Coroutine{args: \[Command\], return: Event}\]) -> int:\n    mutable_array::capacity(a)\nfn f(c: bool) -> int errors IndexNotFound:\n    a = mutable_array::generate(2, make)\n"

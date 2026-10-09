@@ -2,29 +2,27 @@ source:  examples/stdlib/csv_geometric.bot
 backend: Cranelift (specialize=1)
 asm:     csv_geometric.asm
 vcode:   csv_geometric.vcode
-machine-code bytes: 7877 (per function: 312 453 453 81 81 357 412 412 279 279 81 365 438 585 1141 352 783 215 480 318)
+machine-code bytes: 6849 (per function: 312 89 89 357 420 420 202 202 81 365 438 585 1141 352 783 215 480 318)
 
 functions:
   0 <program entry>: nir-regs=9
-  1 mutable_array::create<int, str>: nir-regs=13
-  2 mutable_array::create<int, List[str]>: nir-regs=13
-  3 geo_new<str>: nir-regs=4
-  4 geo_new<List[str]>: nir-regs=4
-  5 geo_new_capacity<int, int>: nir-regs=11
-  6 geo_grow<mutarray, int, str>: nir-regs=14
-  7 geo_grow<mutarray, int, List[str]>: nir-regs=14
-  8 geo_append<mutarray, int, str>: nir-regs=5
-  9 geo_append<mutarray, int, List[str]>: nir-regs=5
-  10 geo_finish<mutarray, int>: nir-regs=3
-  11 peek<str, int>: nir-regs=11
-  12 peek<str, int>: nir-regs=15
-  13 scan_unquoted<str, int, int>: nir-regs=28
-  14 scan_quoted<str, int, str>: nir-regs=33
-  15 scan_field<str, int>: nir-regs=17
-  16 scan_record_rest<str, int, mutarray, int>: nir-regs=29
-  17 scan_record<str, int>: nir-regs=9
-  18 scan_records<str, int, mutarray, int>: nir-regs=15
-  19 csv_parse<str>: nir-regs=17
+  1 geo_new<str>: nir-regs=4
+  2 geo_new<List[str]>: nir-regs=4
+  3 geo_new_capacity<int, int>: nir-regs=11
+  4 geo_grow<mutarray, int, str>: nir-regs=14
+  5 geo_grow<mutarray, int, List[str]>: nir-regs=14
+  6 geo_append<mutarray, int, str>: nir-regs=5
+  7 geo_append<mutarray, int, List[str]>: nir-regs=5
+  8 geo_finish<mutarray, int>: nir-regs=3
+  9 peek<str, int>: nir-regs=11
+  10 peek<str, int>: nir-regs=15
+  11 scan_unquoted<str, int, int>: nir-regs=28
+  12 scan_quoted<str, int, str>: nir-regs=33
+  13 scan_field<str, int>: nir-regs=17
+  14 scan_record_rest<str, int, mutarray, int>: nir-regs=29
+  15 scan_record<str, int>: nir-regs=9
+  16 scan_records<str, int, mutarray, int>: nir-regs=15
+  17 csv_parse<str>: nir-regs=17
 
 GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
   function 0 "<program>"
@@ -40,33 +38,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 1 "mutable_array::create"
-    NIR regs: 13
-    raw regs: 2
-    managed-capable regs: 11
-    effects: may_error=true may_gc=true
-    safepoints: 2
-    root candidates: 5
-    max live roots: 5
-    shadow slots: 5
-    entry zero slots: 3
-    depth reservation: no
-    storage: native frame
-  
-  function 2 "mutable_array::create"
-    NIR regs: 13
-    raw regs: 2
-    managed-capable regs: 11
-    effects: may_error=true may_gc=true
-    safepoints: 2
-    root candidates: 5
-    max live roots: 5
-    shadow slots: 5
-    entry zero slots: 3
-    depth reservation: no
-    storage: native frame
-  
-  function 3 "geo_new"
+  function 1 "geo_new"
     NIR regs: 4
     raw regs: 1
     managed-capable regs: 3
@@ -79,7 +51,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 4 "geo_new"
+  function 2 "geo_new"
     NIR regs: 4
     raw regs: 1
     managed-capable regs: 3
@@ -92,7 +64,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 5 "geo_new_capacity"
+  function 3 "geo_new_capacity"
     NIR regs: 11
     raw regs: 2
     managed-capable regs: 9
@@ -105,7 +77,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 6 "geo_grow"
+  function 4 "geo_grow"
     NIR regs: 14
     raw regs: 2
     managed-capable regs: 12
@@ -118,7 +90,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 7 "geo_grow"
+  function 5 "geo_grow"
     NIR regs: 14
     raw regs: 2
     managed-capable regs: 12
@@ -131,7 +103,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 8 "geo_append"
+  function 6 "geo_append"
     NIR regs: 5
     raw regs: 0
     managed-capable regs: 5
@@ -144,7 +116,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 9 "geo_append"
+  function 7 "geo_append"
     NIR regs: 5
     raw regs: 0
     managed-capable regs: 5
@@ -157,7 +129,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 10 "geo_finish"
+  function 8 "geo_finish"
     NIR regs: 3
     raw regs: 0
     managed-capable regs: 3
@@ -170,7 +142,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 11 "peek"
+  function 9 "peek"
     NIR regs: 11
     raw regs: 1
     managed-capable regs: 10
@@ -183,7 +155,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 12 "peek"
+  function 10 "peek"
     NIR regs: 15
     raw regs: 3
     managed-capable regs: 12
@@ -196,7 +168,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 13 "scan_unquoted"
+  function 11 "scan_unquoted"
     NIR regs: 28
     raw regs: 1
     managed-capable regs: 27
@@ -209,7 +181,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 14 "scan_quoted"
+  function 12 "scan_quoted"
     NIR regs: 33
     raw regs: 7
     managed-capable regs: 26
@@ -222,7 +194,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 15 "scan_field"
+  function 13 "scan_field"
     NIR regs: 17
     raw regs: 1
     managed-capable regs: 16
@@ -235,7 +207,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 16 "scan_record_rest"
+  function 14 "scan_record_rest"
     NIR regs: 29
     raw regs: 3
     managed-capable regs: 26
@@ -248,7 +220,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 17 "scan_record"
+  function 15 "scan_record"
     NIR regs: 9
     raw regs: 1
     managed-capable regs: 8
@@ -261,7 +233,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 18 "scan_records"
+  function 16 "scan_records"
     NIR regs: 15
     raw regs: 1
     managed-capable regs: 14
@@ -274,7 +246,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 19 "csv_parse"
+  function 17 "csv_parse"
     NIR regs: 17
     raw regs: 4
     managed-capable regs: 13
@@ -288,8 +260,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
 
 mechanical pattern counts (triage only; see report for interpretation):
-  15 x calls to rt_int_add
+  13 x calls to rt_int_add
   1 x calls to rt_int_mul
-  8 x calls to rt_int_cmp
-  37 x calls to other rt_* helpers
-  2 x guard/guardbool instructions
+  6 x calls to rt_int_cmp
+  35 x calls to other rt_* helpers

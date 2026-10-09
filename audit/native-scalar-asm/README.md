@@ -12,9 +12,9 @@ are complete.
 
 ## Compiler revision
 
-- git commit: 63f9f3d281c3c1971c79f9c17e932677c4b07f1f
+- git commit: 7133e0bca150b80b60cd5964073e6acc5f5cf373
 - Tcl: 9.0.1
-- rustc 1.99.0 (b940084d7 2026-09-28)
+- rustc 1.97.0 (2d8144b78 2026-07-07)
 - cranelift-codegen: 0.135.2
 - target: x86_64 (System V ABI, Linux ELF64)
 - backend flags: cranelift, -specialize 1 (default), -repr-opt 1 (default)
@@ -28,8 +28,8 @@ are complete.
 - examples/stdlib/ files attempted: 9
 - native-compilable programs: 13
 - unsupported/failed programs: 0
-- total native functions inspected: 194
-- total committed disassembly bytes of machine code: 83843
+- total native functions inspected: 177
+- total committed disassembly bytes of machine code: 74702
 
 ## Status
 
@@ -41,10 +41,10 @@ are complete.
 | bench/refined-checks.bot | compiled / inspected | [bench/refined-checks.asm](bench/refined-checks.asm) / [bench/refined-checks.vcode](bench/refined-checks.vcode) | 29 functions, 11262 bytes |
 | examples/stdlib/ai_text_clean.bot | compiled / inspected | [examples-stdlib/ai_text_clean.asm](examples-stdlib/ai_text_clean.asm) / [examples-stdlib/ai_text_clean.vcode](examples-stdlib/ai_text_clean.vcode) | 6 functions, 2547 bytes |
 | examples/stdlib/csv.bot | compiled / inspected | [examples-stdlib/csv.asm](examples-stdlib/csv.asm) / [examples-stdlib/csv.vcode](examples-stdlib/csv.vcode) | 11 functions, 5958 bytes |
-| examples/stdlib/csv_chunked.bot | compiled / inspected | [examples-stdlib/csv_chunked.asm](examples-stdlib/csv_chunked.asm) / [examples-stdlib/csv_chunked.vcode](examples-stdlib/csv_chunked.vcode) | 20 functions, 10219 bytes |
-| examples/stdlib/csv_geometric.bot | compiled / inspected | [examples-stdlib/csv_geometric.asm](examples-stdlib/csv_geometric.asm) / [examples-stdlib/csv_geometric.vcode](examples-stdlib/csv_geometric.vcode) | 20 functions, 7877 bytes |
-| examples/stdlib/csv_records.bot | compiled / inspected | [examples-stdlib/csv_records.asm](examples-stdlib/csv_records.asm) / [examples-stdlib/csv_records.vcode](examples-stdlib/csv_records.vcode) | 57 functions, 23429 bytes |
-| examples/stdlib/hashtable.bot | compiled / inspected | [examples-stdlib/hashtable.asm](examples-stdlib/hashtable.asm) / [examples-stdlib/hashtable.vcode](examples-stdlib/hashtable.vcode) | 27 functions, 12845 bytes |
+| examples/stdlib/csv_chunked.bot | compiled / inspected | [examples-stdlib/csv_chunked.asm](examples-stdlib/csv_chunked.asm) / [examples-stdlib/csv_chunked.vcode](examples-stdlib/csv_chunked.vcode) | 14 functions, 7334 bytes |
+| examples/stdlib/csv_geometric.bot | compiled / inspected | [examples-stdlib/csv_geometric.asm](examples-stdlib/csv_geometric.asm) / [examples-stdlib/csv_geometric.vcode](examples-stdlib/csv_geometric.vcode) | 18 functions, 6849 bytes |
+| examples/stdlib/csv_records.bot | compiled / inspected | [examples-stdlib/csv_records.asm](examples-stdlib/csv_records.asm) / [examples-stdlib/csv_records.vcode](examples-stdlib/csv_records.vcode) | 51 functions, 20163 bytes |
+| examples/stdlib/hashtable.bot | compiled / inspected | [examples-stdlib/hashtable.asm](examples-stdlib/hashtable.asm) / [examples-stdlib/hashtable.vcode](examples-stdlib/hashtable.vcode) | 24 functions, 10883 bytes |
 | examples/stdlib/matmul.bot | compiled / inspected | [examples-stdlib/matmul.asm](examples-stdlib/matmul.asm) / [examples-stdlib/matmul.vcode](examples-stdlib/matmul.vcode) | 7 functions, 4755 bytes |
 | examples/stdlib/string_replace.bot | compiled / inspected | [examples-stdlib/string_replace.asm](examples-stdlib/string_replace.asm) / [examples-stdlib/string_replace.vcode](examples-stdlib/string_replace.vcode) | 5 functions, 3011 bytes |
 | examples/stdlib/string_reverse.bot | compiled / inspected | [examples-stdlib/string_reverse.asm](examples-stdlib/string_reverse.asm) / [examples-stdlib/string_reverse.vcode](examples-stdlib/string_reverse.vcode) | 4 functions, 1208 bytes |
