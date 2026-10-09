@@ -865,7 +865,55 @@ header and one backing allocation, the backing's counts and slots together,
 for every constructor; a copy allocates its header only, the first write
 through it the detached backing only, and later writes, a bulk copy and a
 consuming loop's step nothing (`mutarray_is_a_header_and_one_backing_allocation`
-in `runtime/ops.rs` counts the allocator calls).
+in `runtime/ops.rs` counts the allocator calls). Measured against the
+commit before it, both native builds on the same machine, otherwise idle:
+
+* *csv_records* (realistic schema, 1000 rows; callgrind, compilation
+  included):
+
+  | program | arrays | `malloc` calls | instructions |
+  |---|---:|---:|---:|
+  | parsing alone | 4 015 | 37 093 against 44 121 | 87.2 M against 89.7 M |
+  | default row tables | 12 026 | 87 955 against 103 004 | 177.6 M against 182.9 M |
+  | presized row tables | 8 026 | 77 955 against 89 004 | 167.3 M against 171.6 M |
+
+  The difference is exactly one call per array and one per
+  `mutable_array::copy` between two arrays (3 013, 3 023 and 3 023 of
+  them: the copy no longer gathers the source's words into a scratch
+  `Vec` -- once the destination is writable its backing is its own, so
+  the source's is read in place). The default row tables now make fewer
+  `malloc` calls than before this milestone (87 955 against 89 492; this
+  machine measured 103 004 where the list above says 103 017). Times,
+  best of 28 in-process runs, ten rounds alternating the two builds
+  (range of the rounds, median in parentheses): parsing alone 3.47-3.73 ms
+  (3.60) against 3.74-3.97 (3.77), -5 %; default row tables 6.05-6.61
+  (6.16) against 6.44-7.54 (7.08), -13 %; presized 4.75-5.18 (4.89)
+  against 5.72-6.24 (5.82), -16 %. Before this milestone the list above
+  has 3.51-3.66, 5.73-5.78 and 5.23-5.26 (measured in an earlier session,
+  so only roughly comparable): parsing and the presized tables are back,
+  the default tables still about 6 % slower.
+* *Copy-on-write* (`bench/mutable-array.tcl`): every counter of the table
+  above is unchanged (200 shares per program; 200 detaches copying 2 000,
+  200 000 and 2 000 000 elements; none for 200 000 writes to a unique array;
+  `sched-8`: no share or detach). A detach is one allocation where it was
+  two: the copy-then-write program (K = 200, best of 50 runs, eight rounds)
+  takes 21.5-22.3 us against 27.4-27.8 at S = 10 (-22 %), 390-407 us against
+  400-414 at S = 1000 (each build also had a few rounds near 650 us), and
+  4.84-4.93 ms against 4.88-5.07 at S = 10 000. A first version copied the
+  detached elements with one `memcpy` (`Rc::from`) and was 12 % slower at
+  S = 10 000 (5.39-5.54 ms): on this x86-64 (ERMS without FSRM) glibc copies
+  an 80 KB block with `rep movsb`, slower than the element loop the old
+  `VecDeque` clone compiled to (with
+  `GLIBC_TUNABLES=glibc.cpu.x86_rep_movsb_threshold` set above it, 4.65-4.77
+  ms). A backing is therefore built by collecting an exact-length iterator
+  (`ops::backing_of`), which is still one allocation and compiles to that
+  loop.
+* *Mutation*: `drop-leaks-elements-native`, which only the Tcl-level tests
+  and the fuzzer killed before (55), is now also killed by a Rust test
+  (`a_mutarray_drop_releases_the_elements_left_once`, `runtime/affine.rs`).
+  The three native mutants that edit the changed code
+  (`copy-aliases-native`, `copy-eager-deep-native`,
+  `drop-leaks-elements-native`) were re-pointed at it; all 31 are killed.
 
 ### 63. Backwards-compatibility findings
 
