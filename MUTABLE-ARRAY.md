@@ -569,9 +569,9 @@ Results (every backend: interpreter, Tcl compiler, `cranelift-generic`,
 | 4, `-gc-stress 1` | 25 | 16 | 107 | 0 |
 
 The rejected programs are the injected faults, each with its predicted
-diagnostic (`MUTABLE-PLACE-CAPTURE`, `MUTABLE-PLACE-RECEIVER`,
-`AFFINE-ELEMENT-COPY-OUT`, `USE-AFTER-MOVE`, `AFFINE-CAPTURE-UNSUPPORTED`,
-`TYPE`). While it was being written the fuzzer found the two native drop
+diagnostic (seeds 1-4: `MUTABLE-PLACE-CAPTURE` 16, `MUTABLE-PLACE-RECEIVER`
+15, `TYPE` 8, `AFFINE-DUPLICATION-UNSUPPORTED` 7,
+`AFFINE-ERASURE-UNSUPPORTED` 4, `AFFINE-ELEMENT-COPY-OUT` 3). While it was being written the fuzzer found the two native drop
 bugs of 23 and 48. The mutation harness (55) then showed it missing four
 copy routes -- a List element read into the driver's own binding, a struct
 field projected out or returned from a struct parameter, and a generic
