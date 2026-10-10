@@ -36,6 +36,7 @@ named-field payloads and add exhaustive matching on the same construct.
 * [What changed, in one page](#what-changed-in-one-page)
 * [Report](#report) -- the 49 points of the milestone report, in order
 * [Extensibility audit](#extensibility-audit) -- the ten questions
+* [Deferred: equality of unrelated types](#deferred-equality-of-unrelated-types)
 * [Files](#files)
 * [What to run when changing this](#what-to-run-when-changing-this)
 
@@ -383,12 +384,16 @@ Every *use* of a case of one enum where another enum is declared is a static
 of a declared `List[A]` (`enum-wrong-enum-call-result-field`). Equality is
 different: Botlish's ordinary typing has no static error for `==` of
 operands of unrelated types (`Person == Account` is `false`, as is `1 ==
-"1"`; STRUCTS.md's `struct-eq-nominal` pins it), and making `==` reject them
-would be a new general rule for every type, not an enum feature. So
+"1"`; `tests/structs.test`'s `struct-eq-nominal` pins it). So
 `VehicleType::Car == TransportKind::Car` is `false` -- because the enum
 identities differ, never because of a tag compared by spelling or
 discriminant -- on every backend, and the compiler decides it statically when
-both sides are known cases (33). Recorded as a limitation (48).
+both sides are known cases (33). The brief preferred a static error here; it
+is deferred to its own milestone, because an enum-only error would make enums
+the one type whose unrelated comparisons are rejected, and a general one
+changes how `==` is checked for every type. [Deferred: equality of unrelated
+types](#deferred-equality-of-unrelated-types) records the options and the
+preferred direction: a proof-backed "always evaluates to false" diagnostic.
 
 ### 24. Ordering rejection
 
@@ -750,10 +755,9 @@ loop that collects Ints.
 ### 48. Remaining limitations
 
 * **Cross-enum equality is `false`, not a static error** (23): Botlish has
-  no static rule rejecting `==` of operands of unrelated types; adding one is
-  a general typing change for every type (it would change, e.g., struct
-  `Person == Account`), left to a later milestone. A provably-false
-  comparison of two different enums would be a natural proof-backed warning.
+  no static rule rejecting `==` of operands of unrelated types, for any type.
+  Deferred to its own milestone; see [Deferred: equality of unrelated
+  types](#deferred-equality-of-unrelated-types).
 * **Arithmetic and ordering on a case are run-time `TYPE` errors** (24, 25):
   that is how Botlish's ordinary typing treats a native applied to a
   statically known other kind (`"a" + 1`); natively they are known-error
@@ -825,6 +829,77 @@ payload-bearing cases.
     being replaced: the type `{enum ID}`, the registry and descriptors, the
     qualified `Name::Case` spelling of a payload-free case and the nominal
     equality rule all stay.
+
+## Deferred: equality of unrelated types
+
+The brief (15) prefers "the normal static type error for incompatible
+equality operands" for `VehicleType::Car == TransportKind::Car`. Botlish has
+no such error for any type: `==` accepts every pair of operands and is total,
+so values of unrelated types simply compare unequal. Measured on the final
+tree, on all four backends:
+
+| expression | today |
+|---|---|
+| `1 == "1"` | `false` |
+| `true == 1` | `false` |
+| `Person == Account` (two struct declarations with the same fields) | `false` (`struct-eq-nominal`) |
+| a named struct `==` an anonymous one with the same fields | `false` (`struct-eq-named-vs-anonymous`) |
+| `A::X == B::X` (two enum declarations) | `false` (`enum-equality`) |
+
+This milestone kept that rule for enums and defers the question to a
+milestone of its own, since every answer is about `==` in general, not about
+enums. The options:
+
+1. **A general static type error** when the operands' types are unrelated.
+   Every row above becomes a compile error: it changes how `==` is checked
+   for every type and rejects programs whose meaning is defined today (the
+   struct tests above pin `false`, not an error).
+2. **An enum-only static error** when both operands are statically cases of
+   different enums. It changes nothing else, but it makes enums the one type
+   whose unrelated comparisons are rejected (`Person == Account` stays
+   `false`), and it cannot see a case erased to `any`, which still compares
+   `false` at run time.
+3. **A diagnostic about the consequence (preferred).** A compiler diagnostic
+   saying the comparison *always evaluates to `false`* (a `!=`, always
+   `true`), whose stated cause is the operands' type incompatibility,
+   generalized to every type. `==` keeps its total semantics, so no program
+   changes meaning; the diagnostic follows the warning policy (backed by a
+   proof, one global `-warnings default|off|error` policy, no opt-outs), so
+   `-warnings error` rejects such a comparison for whoever wants the
+   brief's static error. Framed on the consequence rather than on typing,
+   the same diagnostic can later take other proven causes (two different
+   exact values, such as `A::X == A::Y`, which constant folding already
+   decides, 33) without becoming a second rule.
+
+What the proof behind option 3 must establish is that *no value of the left
+operand's static type equals any value of the right's* -- not that the two
+types differ. That distinction decides several cases:
+
+* **Disjoint:** two different enums (a case belongs to exactly one enum, and
+  equality is the pair (enum, case)); two different named struct
+  declarations; a named struct and an anonymous one; different primitive
+  kinds (Int, String, Bool, ...).
+* **Not disjoint by their element types:** containers. `List[A]` and
+  `List[B]` share the empty List: `[] == []` is `true` across them, on all
+  four backends, even for two different enums `A` and `B`. A container
+  comparison is provably false only with more than its element types (a
+  proven length, a known element).
+* **Never disjoint from anything:** `any`, an untyped (generic) position, a
+  trait view, and a join that widened to `any`. A refinement shares its
+  carrier's values, so it is disjoint only from what its carrier is disjoint
+  from.
+* **Generic functions are judged as written, never per instance.** In
+  `fn same(x, y): x == y`, `same(A::X, B::X)` is `false` and `same(A::X,
+  A::X)` is `true` in one program: a specialized instance comparing two
+  enums must not report, because the function's own comparison is not always
+  false.
+* **Only reachable comparisons** report (the call's `reachable` flag, as
+  `MANY-BOOLEAN-ARGUMENTS` reads it).
+
+Nothing in this milestone has to change for it: the run-time result stays
+`false`, and the enum tests and the fuzzer's model (cross-enum `==` is
+`false`) stay valid. The milestone that adds it would bring its own
+`WARNINGS-*.md` document, tests and fuzzer, as the existing warnings do.
 
 ## Files
 
