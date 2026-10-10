@@ -23,8 +23,9 @@
 #   project    (project VALUE NAME)
 #   ok         (ok VALUE)
 #   error      (error-value VALUE)
-#   fail       (fail NAME)
-#   handle     (handle CALL NAME1 (block {} HANDLER1...) ...)
+#   fail       (fail NAME) / (fail NAME PAYLOAD) -- ERROR-PAYLOADS.md
+#   handle     (handle CALL NAME1 (block {} HANDLER1...) ...), a handler with
+#              a payload binding P as (block {P} HANDLER...)
 #
 # Static errors recorded as diagnostics (unbound names, duplicates, ...) are
 # lowered as the operations that raise them at run time, so a program built
@@ -189,12 +190,23 @@ proc hir::lower::expr {hir e} {
             return [list error-value [expr $hir [dict get $node value]]]
         }
         fail {
+            if {[dict exists $node value] && [dict get $node value] ne ""} {
+                # (fail NAME PAYLOAD-EXPR): ERROR-PAYLOADS.md.
+                return [list fail [dict get $node name] [expr $hir [dict get $node value]]]
+            }
             return [list fail [dict get $node name]]
         }
         handle {
             set handlers {}
+            set payloads [::expr {[dict exists $node handlerPayloads] ? [dict get $node handlerPayloads] : {}}]
+            set index 0
             foreach name [dict get $node handlerNames] body [dict get $node handlerBodies] {
-                lappend handlers $name [list block {} {*}[Seq $hir $body]]
+                # A handler with a payload binding (ERROR-PAYLOADS.md) is a
+                # one-parameter block: the parameter is that binding.
+                set payload [lindex $payloads $index]
+                incr index
+                set params [::expr {$payload eq "" ? {} : [list [dict get $hir bindings $payload name]]}]
+                lappend handlers $name [list block $params {*}[Seq $hir $body]]
             }
             return [ReleasingOnError $hir $e [list handle [expr $hir [dict get $node call]] {*}$handlers]]
         }
@@ -235,8 +247,13 @@ proc hir::lower::Seq {hir ids} {
                 lappend result [expr $hir $id]
             } else {
                 set kept "affine#kept#$id"
+                set exit [list [dict get $hir exprs $id kind] [list ref $kept]]
+                if {[dict get $hir exprs $id kind] eq "fail"} {
+                    # (fail NAME PAYLOAD): the payload is the value kept.
+                    set exit [list fail [dict get $hir exprs $id name] [list ref $kept]]
+                }
                 lappend result [list bind $kept [expr $hir [dict get $hir exprs $id value]]] \
-                    {*}[Releases $hir $after] [list [dict get $hir exprs $id kind] [list ref $kept]]
+                    {*}[Releases $hir $after] $exit
             }
             continue
         }
@@ -305,8 +322,9 @@ proc hir::lower::TempName {e} {
 # LOWERED, the core IR of call (or handle) E, releasing the affine values a
 # declared error it propagates takes out of scope or abandons
 # (hir::affine::releasesOnError): a handler per such error that releases
-# and fails with the same error again -- an error is its name, so the
-# propagation goes on unchanged.
+# and fails with the same error again -- an error is its name and the
+# payload it carries (ERROR-PAYLOADS.md), which the handler receives and
+# raises again unchanged, so the propagation goes on unchanged.
 proc hir::lower::ReleasingOnError {hir e lowered} {
     set byName [hir::affine::releasesOnError $hir $e]
     if {$byName eq ""} {
@@ -316,7 +334,13 @@ proc hir::lower::ReleasingOnError {hir e lowered} {
         set lowered [list handle $lowered]
     }
     dict for {name items} $byName {
-        lappend lowered $name [list block {} {*}[Releases $hir $items] [list fail $name]]
+        if {[hir::errordecls::hasPayload $name]} {
+            set raised "affine#raised#$e"
+            lappend lowered $name [list block [list $raised] {*}[Releases $hir $items] \
+                [list fail $name [list ref $raised]]]
+        } else {
+            lappend lowered $name [list block {} {*}[Releases $hir $items] [list fail $name]]
+        }
     }
     return $lowered
 }

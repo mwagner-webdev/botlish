@@ -440,7 +440,7 @@ fn execute(command: &str, program: &nir::Program, runs: usize, alloc_mode: Alloc
         let error = vm.error.take().unwrap_or(runtime::error::RtError::Bug(
             "native code failed without recording an error".to_string(),
         ));
-        emit_error(&error.error_code(), &error.message());
+        emit_error(&error.error_code(), &vm.describe_error(&error));
         return 0;
     }
     match tcl_value(result) {

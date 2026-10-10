@@ -470,7 +470,14 @@ proc hir::signatures::Value {hir AVar e sink ctx} {
     set handled [dict get $ctx handled]
     dict set ctx handled {}
     switch -- [dict get $node kind] {
-        const - continue - fail {
+        const - continue {
+        }
+        fail {
+            # A payload (ERROR-PAYLOADS.md) is a struct construction: its
+            # field values flow where this analysis does not follow.
+            if {[dict exists $node value] && [dict get $node value] ne ""} {
+                Value $hir A [dict get $node value] flow $ctx
+            }
         }
         ref {
             Use $hir A $e $sink $ctx

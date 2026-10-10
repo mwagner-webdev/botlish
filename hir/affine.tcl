@@ -326,6 +326,12 @@ proc hir::affine::Consumer {hir parent e} {
             set dest [expr {$loop eq "" ? "any" : [hir::typeOf $hir $loop]}]
             return [Into $hir $e [list move break $p] $dest "the value of a loop of type"]
         }
+        fail {
+            # An error's payload (ERROR-PAYLOADS.md): the raised error owns it
+            # -- its ownership moves along the error edge to the handler that
+            # receives it, or on outward with the error.
+            return [list move error $p]
+        }
         loop - listloop - countloop - lockloop {
             if {$role eq "operand" && [dict get $node kind] eq "listloop" && [hir::mutvec::Kind $type] ne ""} {
                 # A consuming loop over an affine MutableVector or MutableArray
@@ -870,6 +876,14 @@ proc hir::affine::Flow {hirVar e state} {
         const {
         }
         fail {
+            if {[dict exists $node value] && [dict get $node value] ne ""} {
+                # The payload is evaluated (its affine values moved into it)
+                # before the error leaves (ERROR-PAYLOADS.md).
+                set state [Flow hir [dict get $node value] $state]
+                if {$state eq "dead"} {
+                    return dead
+                }
+            }
             dict set exitStates $e $state
             return dead
         }
@@ -974,8 +988,19 @@ proc hir::affine::Flow {hirVar e state} {
             set entry [expr {$state eq "dead" ? $before : $state}]
             set result $state
             set paths [list $state]
+            set payloads [expr {[dict exists $node handlerPayloads] ? [dict get $node handlerPayloads] : {}}]
+            set index 0
             foreach body [dict get $node handlerBodies] {
-                set out [Seq hir $body $entry]
+                # A handler's payload binding (ERROR-PAYLOADS.md) owns the
+                # payload the selected error carried: it starts live, like a
+                # parameter.
+                set start $entry
+                set payload [lindex $payloads $index]
+                incr index
+                if {$payload ne "" && [IsAffineBinding $hir $payload]} {
+                    dict set start $payload live
+                }
+                set out [Seq hir $body $start]
                 set result [Join $result $out]
                 lappend paths $out
             }
@@ -1110,6 +1135,9 @@ proc hir::affine::MoveText {hir move} {
         capture {
             return "$source captured by a coroutine construction  ([Where $hir $move])"
         }
+        error {
+            return "$source moved into the payload of a failure  ([Where $hir $move])"
+        }
     }
     return "$source  ([Where $hir $move])"
 }
@@ -1153,10 +1181,18 @@ proc hir::affine::Scopes {hir parent} {
         set binding [dict get $hir bindings $b]
         if {[dict get $binding kind] eq "param"} {
             set block [dict get $hir scopes [dict get $binding scope] owner]
-            if {$block eq "" || ![dict exists $hir exprs $block] || [dict get $hir exprs $block kind] ni {block listloop}
+            if {$block eq "" || ![dict exists $hir exprs $block] || [dict get $hir exprs $block kind] ni {block listloop handle}
                     || ![dict get $hir exprs $block reachable]} continue
             set p $block
-            set sequence [dict get $hir exprs $block body]
+            if {[dict get $hir exprs $block kind] eq "handle"} {
+                # A handler's payload binding (ERROR-PAYLOADS.md): its
+                # sequence is that handler's body.
+                set at [lsearch -exact [dict get $hir exprs $block handlerScopes] [dict get $binding scope]]
+                if {$at < 0} continue
+                set sequence [lindex [dict get $hir exprs $block handlerBodies] $at]
+            } else {
+                set sequence [dict get $hir exprs $block body]
+            }
             if {$sequence eq {}} continue
             set index 0
         } else {
@@ -1359,6 +1395,10 @@ proc hir::affine::ConsumedFields {hir b} {
     if {$by ne "" && [dict exists $hir exprs $by affineConsumed]} {
         # HIR read back from text (hir/read.tcl): as printed.
         return [dict get $hir exprs $by affineConsumed]
+    }
+    if {[dict exists $hir bindings $b affineConsumed]} {
+        # A handler's payload binding read back from text (ERROR-PAYLOADS.md).
+        return [dict get $hir bindings $b affineConsumed]
     }
     return {}
 }

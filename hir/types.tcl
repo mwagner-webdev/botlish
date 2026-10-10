@@ -2476,6 +2476,10 @@ proc hir::types::Expr {hirVar ctxVar e} {
             return [SetType hir $e [expr {$value eq "never" ? "never" : "result"}]]
         }
         fail {
+            if {[dict exists $node value] && [dict get $node value] ne ""} {
+                # The payload (ERROR-PAYLOADS.md): evaluated, then raised.
+                Expr hir ctx [dict get $node value]
+            }
             return [SetType hir $e never]
         }
         handle {
@@ -2515,6 +2519,13 @@ proc hir::types::Struct {hirVar ctxVar e} {
     if {[dict get $node named]} {
         set id [dict get $node structId]
         return [expr {$id eq "" ? "any" : [list nstruct $id]}]
+    }
+    if {[dict exists $node payloadOf] && [hir::errordecls::hasPayload [dict get $node payloadOf]]} {
+        # An error's payload (ERROR-PAYLOADS.md) has its declared type,
+        # whatever its values are -- the declaration is the contract, as a
+        # named construction's (hir::range::VerifyStruct proves each value
+        # admissible) -- the anonymous struct type of the declared fields.
+        return [hir::errordecls::payloadType [dict get $node payloadOf]]
     }
     return [MakeStruct $fieldTypes 0]
 }
@@ -2613,7 +2624,19 @@ proc hir::types::Handle {hirVar ctxVar e} {
 
     set handlerTypes {}
     set ends [expr {$callType ne "never" ? [list $completed] : {}}]
-    foreach body [dict get $node handlerBodies] {
+    set payloads [expr {[dict exists $node handlerPayloads] ? [dict get $node handlerPayloads] : {}}]
+    set index 0
+    foreach body [dict get $node handlerBodies] name [dict get $node handlerNames] {
+        set payload [lindex $payloads $index]
+        incr index
+        if {$payload ne "" && [hir::errordecls::hasPayload $name]} {
+            # The handler's payload binding (ERROR-PAYLOADS.md) holds the
+            # selected error's payload: its declared type, known statically
+            # from the error's identity alone.
+            set payloadType [hir::errordecls::payloadType $name]
+            dict set ctx types $payload $payloadType
+            dict set hir bindings $payload type [intern hir $payloadType]
+        }
         dict set ctx reachable $entry
         dict set ctx facts $handlerEntry
         set handlerType [Sequence hir ctx $body]

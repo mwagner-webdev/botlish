@@ -96,12 +96,18 @@
 #   continue
 #   ok        value
 #   error     value
-#   fail      name (a declared error's name)
+#   fail      name (a declared error's name), value (the payload the error
+#             carries, a node, or "" -- ERROR-PAYLOADS.md: a source payload
+#             is a `struct` node with `payloadOf NAME`, the field
+#             initializers of `fail NAME {...}`, checked like a named
+#             construction against the error's declared payload)
 #   handle    call (a `call` node), handlers (a list of {name nameSpan
-#             origin body} dicts, one per "on NAME:" clause, in written
-#             order -- name/nameSpan for diagnostics, origin for the
+#             origin body payload} dicts, one per "on NAME:" clause, in
+#             written order -- name/nameSpan for diagnostics, origin for the
 #             handler body's own branch scope, body a list of nodes,
-#             exactly like an `if` branch's body)
+#             exactly like an `if` branch's body, payload "" or {name NAME
+#             origin ORIGIN}: the binding the selected error's payload is
+#             bound to in the handler's scope, ERROR-PAYLOADS.md)
 #
 # `block`'s own node also takes an optional `declaredErrors` field: a list
 # of {name nameSpan} pairs, one per name of a function's own "errors E1,
@@ -363,13 +369,17 @@ proc hir::syntax::errorNode {origin value} {
     return [Node error $origin value $value]
 }
 
-proc hir::syntax::failNode {origin name} {
+# `fail NAME`, or with VALUE (a node, "" for none) the payload the error
+# carries (ERROR-PAYLOADS.md): a source payload is a `struct` node marked
+# `payloadOf NAME` (surface/lower.tcl), any node is accepted from core IR
+# (`(fail NAME (ref P))`, a re-raise that releases on its way out).
+proc hir::syntax::failNode {origin name {value ""}} {
     core::ir::checkShape [list fail $name]
-    return [Node fail $origin name $name]
+    return [Node fail $origin name $name value $value]
 }
 
-# HANDLERS: a list of {name nameSpan origin body} dicts, as this file's own
-# header describes. CALL must itself be a `call` node (checked by
+# HANDLERS: a list of {name nameSpan origin body payload} dicts, as this
+# file's own header describes (`payload` optional). CALL must itself be a `call` node (checked by
 # hir::resolve::Expr, which needs the resolved ExprId to check the kind of
 # -- this constructor only checks the unresolved syntax shape, mirroring
 # core::ir::checkShape's own (call ...) requirement for core IR's `handle`).
@@ -502,14 +512,26 @@ proc hir::syntax::fromIR {node path} {
             return [Node continue $origin]
         }
         fail {
-            return [Node fail $origin name [lindex $node 1]]
+            set value ""
+            if {[llength $node] == 3} {
+                set value [fromIR [lindex $node 2] [concat $path 2]]
+            }
+            return [Node fail $origin name [lindex $node 1] value $value]
         }
         handle {
             set handlers {}
             set index 2
             foreach {name handlerBlock} [lrange $node 2 end] {
+                set payload ""
+                set params [core::ir::blockParams $handlerBlock]
+                if {$params ne {}} {
+                    # (block {P} ...): the handler binds the error's payload
+                    # to P (ERROR-PAYLOADS.md).
+                    set payload [dict create name [lindex $params 0] \
+                        origin [list ir [concat $path [expr {$index + 1}] 1 0]]]
+                }
                 lappend handlers [dict create name $name nameSpan "" \
-                    origin [list ir [concat $path $index]] \
+                    origin [list ir [concat $path $index]] payload $payload \
                     body [Sequence [core::ir::blockBody $handlerBlock] [concat $path $index] 2]]
                 incr index 2
             }
@@ -584,8 +606,8 @@ proc hir::syntax::CollectBindNames {node namesVar} {
         return - ok - error {
             CollectBindNames [dict get $node value] names
         }
-        break {
-            if {[dict get $node value] ne ""} {
+        break - fail {
+            if {[dict exists $node value] && [dict get $node value] ne ""} {
                 CollectBindNames [dict get $node value] names
             }
         }

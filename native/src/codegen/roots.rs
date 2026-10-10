@@ -204,9 +204,12 @@ fn is_safepoint(inst: &Inst) -> bool {
 fn def_use(inst: &Inst, params: u32) -> (Vec<Reg>, Vec<Reg>) {
     match inst {
         Inst::Label(_) | Inst::Unreachable | Inst::Raise { .. }
-        | Inst::Fail { .. } | Inst::ClearDeclaredError
+        | Inst::ClearDeclaredError
         | Inst::PushErrorExit(_) | Inst::PopErrorExit | Inst::Reraise => (vec![], vec![]),
-        Inst::DeclaredErrorEq { dst, .. } => (vec![*dst], vec![]),
+        // A payload's field values are copied into the Vm's payload slots
+        // (a GC root of their own, ERROR-PAYLOADS.md) by the failing helper.
+        Inst::Fail { payload, .. } => (vec![], payload.clone()),
+        Inst::DeclaredErrorEq { dst, .. } | Inst::DeclaredPayload { dst, .. } => (vec![*dst], vec![]),
         Inst::Int { dst, .. }
         | Inst::RawInt { dst, .. }
         | Inst::ShortLit { dst, .. }

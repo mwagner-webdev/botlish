@@ -129,6 +129,13 @@ proc hir::modulebinding::ContextExpr {hir e stateVar} {
             }
         }
         fail {
+            if {[dict exists $node value] && [dict get $node value] ne ""} {
+                # The payload (ERROR-PAYLOADS.md) is evaluated here.
+                set result [ContextExpr $hir [dict get $node value] state]
+                if {[lindex $result 0] ne "ok"} {
+                    return $result
+                }
+            }
             return {ok}
         }
         handle {

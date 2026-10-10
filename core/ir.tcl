@@ -38,7 +38,7 @@
 #   (struct HEAD NAME EXPR ...)   (project EXPR NAME)
 #   (ok EXPR)
 #   (error-value EXPR)
-#   (fail NAME)
+#   (fail NAME)   (fail NAME PAYLOAD-EXPR)
 #   (handle CALL-EXPR NAME1 HANDLER-BLOCK1 NAME2 HANDLER-BLOCK2 ...)
 #
 # THEN-BLOCK, ELSE-BLOCK and BODY-BLOCK must be syntactic (block {} ...) nodes:
@@ -46,7 +46,11 @@
 #
 # (fail NAME): completes with `propagate-error(errorId(NAME))` (core/
 # completion.tcl) -- an alternate, named completion edge of the enclosing
-# function, never an ordinary value (EXPLICIT-ERROR-COMPLETIONS.md). Whether
+# function, never an ordinary value (EXPLICIT-ERROR-COMPLETIONS.md).
+# (fail NAME PAYLOAD-EXPR) evaluates PAYLOAD-EXPR first and completes with
+# `propagate-error(errorId(NAME, PAYLOAD))`: the error identity and the
+# payload value it carries (ERROR-PAYLOADS.md); a PAYLOAD-EXPR that does not
+# complete normally completes the fail the same way, and no error is raised. Whether
 # NAME is a declared error the enclosing function may actually produce is a
 # HIR-level static obligation (hir/errorsets.tcl), not something this file
 # checks: exactly like `return`/`break`/`continue`, this file only checks
@@ -59,7 +63,10 @@
 # (block {} ...) node, lexically part of the enclosing code exactly like an
 # `if` branch or a loop body -- so a `return`/`break`/`continue` inside it
 # affects the surrounding callable/loop, not a new one) runs instead, and
-# `handle` completes however that block's body does. Any other completion
+# `handle` completes however that block's body does. A HANDLER-BLOCK may have
+# one parameter, (block {P} ...): P is bound, in the handler's own scope, to
+# the payload the error carries (ERROR-PAYLOADS.md). Selection compares the
+# error's name only, never its payload. Any other completion
 # (including a propagate-error whose name matches none of NAME1, NAME2, ...)
 # passes through unchanged.
 #
@@ -197,6 +204,19 @@ proc core::ir::CheckInlineBlock {blockNode owner role} {
     CheckShape $blockNode
     if {[llength [blockParams $blockNode]] != 0} {
         core::malformed "$role of [lindex $owner 0] must be a block without parameters" $owner
+    }
+}
+
+# Like CheckInlineBlock, for a handler's HANDLER-BLOCK: no parameter, or
+# exactly one -- the binding the selected error's payload is bound to
+# (ERROR-PAYLOADS.md).
+proc core::ir::CheckHandlerBlock {blockNode owner role} {
+    if {[catch {llength $blockNode} n] || $n == 0 || [lindex $blockNode 0] ne "block"} {
+        core::malformed "$role of [lindex $owner 0] must be a (block {} ...) node" $owner
+    }
+    CheckShape $blockNode
+    if {[llength [blockParams $blockNode]] > 1} {
+        core::malformed "$role of [lindex $owner 0] must be a block with no parameter or one (its payload)" $owner
     }
 }
 
@@ -388,8 +408,11 @@ proc core::ir::CheckShape {node} {
             ExpectLength $node 2 2 "(error-value EXPR)"
         }
         fail {
-            ExpectLength $node 2 2 "(fail NAME)"
+            ExpectLength $node 2 3 "(fail NAME) or (fail NAME PAYLOAD-EXPR)"
             CheckName [lindex $node 1] $node
+            if {[llength $node] == 3} {
+                CheckShape [lindex $node 2]
+            }
         }
         handle {
             ExpectLength $node 3 * "(handle CALL-EXPR NAME HANDLER-BLOCK ...)"
@@ -409,7 +432,7 @@ proc core::ir::CheckShape {node} {
                         "duplicate \"on $name\" handler in the same handled call"
                 }
                 lappend seen $name
-                CheckInlineBlock $handlerBlock $node "handler body for \"$name\""
+                CheckHandlerBlock $handlerBlock $node "handler body for \"$name\""
             }
         }
         default {
@@ -580,7 +603,11 @@ proc core::ir::containsBlock {exprs} {
                     return 1
                 }
             }
-            fail {}
+            fail {
+                if {[llength $expr] == 3 && [containsBlock [list [lindex $expr 2]]]} {
+                    return 1
+                }
+            }
             struct {
                 foreach {name value} [lrange $expr 2 end] {
                     if {[containsBlock [list $value]]} {
@@ -700,7 +727,11 @@ proc core::ir::check {node {context {callable 0 loop 0}}} {
                 check $expr $inner
             }
         }
-        fail {}
+        fail {
+            if {[llength $node] == 3} {
+                check [lindex $node 2] $context
+            }
+        }
         struct {
             foreach {name value} [lrange $node 2 end] {
                 check $value $context

@@ -3607,8 +3607,22 @@ proc native::lower::Expr {fnVar e {want tagged}} {
             }
         }
         fail {
-            ReleaseHandles fn [lindex [hir::affine::releasesOnExit $hir $e] 0] $e
-            Emit fn "faildeclared [ErrorId [dict get $node name]] [Quote [dict get $node name]]" $e
+            lassign [hir::affine::releasesOnExit $hir $e] before after
+            ReleaseHandles fn $before $e
+            set name [dict get $node name]
+            if {[dict exists $node value] && [dict get $node value] ne ""} {
+                # ERROR-PAYLOADS.md: the payload's fields, evaluated in
+                # written order, travel the error edge field-wise (the Vm's
+                # payload slots): no struct object is built for them.
+                set fields [PayloadFields fn [dict get $node value] $name $e]
+                if {$fields ne "never"} {
+                    ReleaseHandles fn $after $e
+                    set layout [hir::types::StructLayout [hir::errordecls::payloadType $name]]
+                    Emit fn "faildeclared [ErrorId $name] [Quote $name] [ShapeIndex {} $layout] [join $fields { }]" $e
+                }
+            } else {
+                Emit fn "faildeclared [ErrorId $name] [Quote $name]" $e
+            }
             set result never
         }
         handle {
@@ -3847,6 +3861,11 @@ proc native::lower::MaterializeVirtual {fnVar b e} {
         throw {NATIVE BUG} "native lowering: virtual binding $b has no struct shape to materialize ($e)"
     }
     set rootLocal [dict get $fn locals $root]
+    if {[lindex $rootLocal 6] eq "partial"} {
+        # A handler payload whose unread fields were never read
+        # (PayloadNeeded): it has no object to build.
+        throw {NATIVE BUG} "native lowering: the payload binding $root is used whole, but only some fields were read ($e)"
+    }
     set mat [lindex $rootLocal 4]
     if {$mat ne ""} {
         return $mat
@@ -8830,6 +8849,82 @@ proc native::lower::LockLoop {fnVar e node} {
     return $resultReg
 }
 
+# The field registers of the payload VALUE of `fail NAME` (ERROR-PAYLOADS.md),
+# in the slot order of error NAME's payload struct (its fields sorted by
+# name), or "never": the fields of a payload construction (a struct literal)
+# evaluated in written order, never built into an object; a virtual struct's
+# own field registers; any other value's fields read out of the object.
+proc native::lower::PayloadFields {fnVar value name e} {
+    upvar 1 $fnVar fn
+    variable hir
+    set layout [hir::types::StructLayout [hir::errordecls::payloadType $name]]
+    if {[hir::kind $hir $value] eq "struct"} {
+        set node [hir::node $hir $value]
+        if {[dict get $node layout] ne $layout} {
+            throw {NATIVE BUG} "native lowering: the payload of fail $name has fields ([dict get $node layout]), not ($layout) ($e)"
+        }
+        return [StructFields fn $value $node]
+    }
+    if {[hir::kind $hir $value] eq "ref"} {
+        set b [hir::get $hir $value binding]
+        if {$b ne "" && [dict exists $fn locals $b]} {
+            set local [dict get $fn locals $b]
+            if {[lindex $local 0] eq "virtual" && [lindex $local 2] ne "" && [lindex $local 5] eq ""
+                    && [lindex $local 2 1] eq $layout} {
+                return [lindex $local 1]
+            }
+        }
+    }
+    set r [Expr fn $value]
+    if {$r eq "never"} {
+        return never
+    }
+    set fields {}
+    set slot 0
+    foreach field $layout {
+        lappend fields [Assign fn "structget $slot $r" $e]
+        incr slot
+    }
+    return $fields
+}
+
+# The payload fields handler BODY reads through its payload binding B of
+# error NAME (ERROR-PAYLOADS.md): the names projected out of B, plus every
+# field whose type is affine (a release of B drops those) -- or "all" when
+# some reference uses B whole (a materialization), so every field is read.
+proc native::lower::PayloadNeeded {b body name} {
+    variable hir
+    set parent [dict create]
+    set refs {}
+    set work $body
+    while {$work ne {}} {
+        set x [lindex $work end]
+        set work [lrange $work 0 end-1]
+        set node [hir::node $hir $x]
+        if {[dict get $node kind] eq "ref" && [dict get $node binding] eq $b} {
+            lappend refs $x
+        }
+        foreach child [hir::children $hir $x] {
+            dict set parent $child $x
+            lappend work $child
+        }
+    }
+    set needed {}
+    foreach r $refs {
+        set p [expr {[dict exists $parent $r] ? [dict get $parent $r] : ""}]
+        if {$p eq "" || [hir::kind $hir $p] ne "project" || [hir::get $hir $p receiver] ne $r} {
+            return all
+        }
+        lappend needed [hir::get $hir $p name]
+    }
+    foreach {field type} [hir::errordecls::fields $name] {
+        if {[hir::types::IsAffine $type]} {
+            lappend needed $field
+        }
+    }
+    return [lsort -unique $needed]
+}
+
 # `handle CALL NAME1 HANDLER1 ...` (EXPLICIT-ERROR-COMPLETIONS.md): lowers
 # CALL as an ordinary expression (no lowering change of its own -- still
 # whatever Call would otherwise emit, `may_error` included), bracketed in
@@ -8872,15 +8967,43 @@ proc native::lower::Handle {fnVar e node} {
     }
 
     EmitLabel fn $catchLabel
+    set payloads [expr {[dict exists $node handlerPayloads] ? [dict get $node handlerPayloads] : {}}]
+    set index 0
     foreach name $names scopeId $scopes body $bodies {
+        set payload [lindex $payloads $index]
+        incr index
         set eqReg [Assign fn "declarederroreq [ErrorId $name]" $e]
         set matchLabel [NewLabel fn]
         set nextLabel [NewLabel fn]
         Emit fn "br $eqReg $matchLabel $nextLabel" $e
         EmitLabel fn $matchLabel
-        Emit fn "cleardeclarederror" $e
         set saved [dict get $fn locals]
         set savedRaw [dict get $fn rawCache]
+        if {$payload ne "" && [hir::errordecls::hasPayload $name]} {
+            # The handler's payload binding (ERROR-PAYLOADS.md): the payload's
+            # fields, read out of the Vm's payload slots before they are
+            # cleared, held as a virtual struct of the payload's anonymous
+            # shape -- a projection or destructuring reads a field register,
+            # and only a use that needs the object itself builds it, once
+            # (MaterializeVirtual).
+            set layout [hir::types::StructLayout [hir::errordecls::payloadType $name]]
+            set needed [PayloadNeeded $payload $body $name]
+            set fieldRegs {}
+            set k 0
+            foreach field $layout {
+                if {$needed eq "all" || $field in $needed} {
+                    lappend fieldRegs [Assign fn "declaredpayload $k" $e]
+                } else {
+                    # A field the handler never reads: no read at all (the
+                    # entry is marked partial, so it is never materialized).
+                    lappend fieldRegs ""
+                }
+                incr k
+            }
+            dict set fn locals $payload [list virtual $fieldRegs [list "" $layout] $payload "" "" \
+                [expr {$needed eq "all" ? "" : "partial"}]]
+        }
+        Emit fn "cleardeclarederror" $e
         set value [Sequence fn $body]
         dict set fn locals $saved
         dict set fn rawCache $savedRaw

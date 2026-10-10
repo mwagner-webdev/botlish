@@ -1124,7 +1124,13 @@ proc hir::warnings::SameFailureIn {hir block name} {
 
 # BLOCK's fail exits as {SITE FAILURE} pairs in source order: each
 # structurally reachable `fail` of its own body (BodyExprs) that fails one
-# of the function's declared errors.
+# of the function's declared errors. FAILURE is what makes two exits the same
+# failure: the error's name -- and for a failure that carries a payload
+# (ERROR-PAYLOADS.md), {NAME IDENTITY}, the payload's proven identity
+# (hir::exact::Identity) beside it: a payload nothing proves identical to
+# another is its own failure ({NAME {unproven SITE}}), so it never groups
+# (the conservative payload rule WARNINGS-SAME-FAILURE.md reserved for this).
+# The error's name is always the first word.
 proc hir::warnings::FailSites {hir block} {
     set node [dict get $hir exprs $block]
     set declared [expr {[dict exists $node declaredErrors] ? [dict get $node declaredErrors] : {}}]
@@ -1134,6 +1140,11 @@ proc hir::warnings::FailSites {hir block} {
         if {[dict get $node kind] eq "fail" && [dict get $node reachable]
                 && [dict get $node name] in $declared} {
             lappend sites [list $e [dict get $node name]]
+            if {[dict exists $node value] && [dict get $node value] ne ""} {
+                set identity [hir::exact::Identity $hir [dict get $node value]]
+                lset sites end 1 [list [dict get $node name] \
+                    [expr {$identity eq "" ? [list unproven $e] : $identity}]]
+            }
         }
     }
     return $sites
@@ -1153,6 +1164,9 @@ proc hir::warnings::FailureGroups {sites} {
 # The one warning for SITES (source order) failing FAILURE.
 proc hir::warnings::FailureWarning {hir block name failure sites} {
     set count [llength $sites]
+    # (FAILURE is the error's name, or {NAME IDENTITY} for a payload: the
+    # name is what the warning says.)
+    set failure [lindex $failure 0]
     set origins [lmap site $sites {hir::get $hir $site origin}]
     return [New SAME-FAILURE \
         "failure `$failure` is raised from $count distinct exits" \

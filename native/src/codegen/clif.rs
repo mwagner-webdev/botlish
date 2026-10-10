@@ -1591,11 +1591,24 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 self.fail_with("rt_raise", &[self.vm, kind, message]);
                 self.terminated = true;
             }
-            Inst::Fail { id, name } => {
+            Inst::Fail { id, name, shape, payload } => {
                 let id_val = self.iconst(*id as u64);
                 let name_val = self.string(name);
-                self.fail_with("rt_fail_declared", &[self.vm, id_val, name_val]);
+                if payload.is_empty() {
+                    self.fail_with("rt_fail_declared", &[self.vm, id_val, name_val]);
+                } else {
+                    // ERROR-PAYLOADS.md: the payload's field values, from a
+                    // stack array, into the Vm's payload slots.
+                    let (n, ptr) = self.array(payload);
+                    let shape_val = self.iconst(*shape as u64);
+                    self.fail_with("rt_fail_declared_payload", &[self.vm, id_val, name_val, shape_val, n, ptr]);
+                }
                 self.terminated = true;
+            }
+            Inst::DeclaredPayload { dst, index } => {
+                let index_val = self.iconst(*index as u64);
+                let v = self.call_helper("rt_declared_payload", &[self.vm, index_val]);
+                self.def(*dst, v);
             }
             Inst::DeclaredErrorEq { dst, id } => {
                 let raw = self.call_helper("rt_declared_error", &[self.vm]);

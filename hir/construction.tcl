@@ -190,7 +190,15 @@ proc hir::construction::Uses {view b loops e} {
         ref {
             return [list [expr {[hir::get $view $e binding] eq $b ? 1 : 0}] -1]
         }
-        continue - fail { return {-1 0} }
+        continue { return {-1 0} }
+        fail {
+            set v [hir::get $view $e value]
+            if {$v eq ""} {
+                return {-1 0}
+            }
+            lassign [Uses $view $b $loops $v] n a
+            return [list -1 [Max $n $a]]
+        }
         bind - ok - error {
             return [Uses $view $b $loops [hir::get $view $e value]]
         }

@@ -49,7 +49,14 @@
 #   eN ok / eN error
 #   eN struct (anon|ID) (FIELD, ...)     a struct value/construction; one
 #                                        child line per field value, in
-#                                        written order (STRUCTS.md)
+#                                        written order (STRUCTS.md);
+#                                        payload(NAME) for the payload of
+#                                        `fail NAME {...}` (ERROR-PAYLOADS.md)
+#   eN fail NAME                         the payload, if any, its child
+#   eN handle                            children: the call, then one "on
+#                                        NAME SCOPE ?payload (B NAME)?
+#                                        ?consumed=F,...? ?binds ...?" line
+#                                        per handler, its body indented below
 #   eN project FIELD                     a field projection; the child is
 #                                        the receiver
 #
@@ -81,7 +88,7 @@ proc hir::format {hir args} {
         }
     }
     foreach name [hir::errorDecls $hir] {
-        lappend lines "error $name"
+        lappend lines [hir::format::ErrorDecl $hir $name]
     }
     set top [dict get $hir top]
     lappend lines [string trimright "[dict get $hir scopes $top kind] $top [hir::format::Binds $hir $top]"]
@@ -139,6 +146,23 @@ proc hir::format::TypeDecl {entry} {
         set domainText "exact [lindex $domain 1]"
     }
     return "type [dict get $entry name] parent [dict get $entry parent] domain $domainText"
+}
+
+# One line for error declaration NAME: "error NAME", or for an error with a
+# payload (ERROR-PAYLOADS.md, HIR's `errorPayloads`) "error NAME ns NS
+# payload F1: T1, F2: T2" -- the declared fields in declaration order with
+# their resolved types (NS "-" for the entry program). Read back by
+# hir::read::ErrorDecls.
+proc hir::format::ErrorDecl {hir name} {
+    if {![dict exists $hir errorPayloads $name]} {
+        return "error $name"
+    }
+    set entry [dict get $hir errorPayloads $name]
+    set fields [lmap {field type} [dict get $entry fields] {
+        format {%s: %s} $field [hir::types::show $type]
+    }]
+    set ns [dict get $entry namespace]
+    return "error $name ns [expr {$ns eq "" ? "-" : $ns}] payload [join $fields {, }]"
 }
 
 # One line for a trait declaration (TRAITS.md, HIR's `traits`): "trait ID
@@ -510,9 +534,15 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             # struct's declaration identity or `anon`, then the field names
             # in WRITTEN order (their evaluation order); one child line per
             # field value, in that order.
+            # An error's payload construction (ERROR-PAYLOADS.md) is
+            # "struct payload(NAME) (...)": anonymous, checked against error
+            # NAME's declared payload.
             set id [dict get $node structId]
-            Line $hir $e "struct [expr {[dict get $node named] && $id ne "" ? $id : "anon"}]\
-                ([join [dict get $node names] {, }])" $indent $origins lines
+            set who [expr {[dict get $node named] && $id ne "" ? $id : "anon"}]
+            if {[dict exists $node payloadOf]} {
+                set who "payload([dict get $node payloadOf])"
+            }
+            Line $hir $e "struct $who ([join [dict get $node names] {, }])" $indent $origins lines
             foreach field [dict get $node fields] {
                 Expr $hir $field $inner $origins lines
             }
@@ -522,14 +552,33 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             Expr $hir [dict get $node receiver] $inner $origins lines
         }
         fail {
+            # "fail NAME", and the payload (ERROR-PAYLOADS.md) as its one
+            # child line, like return's value.
             Line $hir $e "fail [dict get $node name]" $indent $origins lines
+            if {[dict exists $node value] && [dict get $node value] ne ""} {
+                Expr $hir [dict get $node value] $inner $origins lines
+            }
         }
         handle {
             Line $hir $e handle $indent $origins lines
             Expr $hir [dict get $node call] $inner $origins lines
+            set payloads [expr {[dict exists $node handlerPayloads] ? [dict get $node handlerPayloads] : {}}]
+            set index -1
             foreach name [dict get $node handlerNames] s [dict get $node handlerScopes] \
                     body [dict get $node handlerBodies] {
+                incr index
                 set header "[string repeat {    } $inner]on $name $s"
+                set payload [lindex $payloads $index]
+                if {$payload ne ""} {
+                    # The handler's payload binding (ERROR-PAYLOADS.md): nominal
+                    # selection (on NAME), then the binding the payload is
+                    # bound to, then the body's ordinary binds.
+                    append header " payload ([BindingLabel $hir $payload])"
+                    set consumed [hir::affine::ConsumedFields $hir $payload]
+                    if {$consumed ne {}} {
+                        append header " consumed=[join [lsort $consumed] ,]"
+                    }
+                }
                 set binds [Binds $hir $s]
                 if {$binds ne ""} {
                     append header " $binds"

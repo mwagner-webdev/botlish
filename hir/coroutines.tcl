@@ -732,7 +732,8 @@ proc hir::coroutines::verify {hirVar} {
 }
 
 # COROUTINE-CONTRACT at construction CREATE of root ROOT when the coroutine's
-# outward type or its resume message is affine (AFFINE-VALUES.md): a
+# outward type, its resume message or the payload of an error it may fail
+# with (ERROR-PAYLOADS.md) is affine (AFFINE-VALUES.md): a
 # completed coroutine returns its cached final result again on every later
 # resume, which would make several owners of one affine result; and a message
 # sent to a coroutine that has already completed is never received, so
@@ -753,6 +754,19 @@ proc hir::coroutines::AffineProtocol {hirVar create root} {
         hir::Diagnose hir COROUTINE-CONTRACT [format \
             {%s's coroutine is resumed with the affine message %s: a message sent to a coroutine that has already completed is never received, so nothing would own or release it (resume with an unrestricted message; pass affine values in at construction)} \
             [Name $hir $root] [hir::types::show $protocol]] $create
+    }
+    foreach name [hir::types::CoroutineErrors $type] {
+        # ERROR-PAYLOADS.md: a failed coroutine raises its cached error again
+        # on every later resume -- for the same reason as a cached final
+        # result, the payload of an error a coroutine can fail with stays
+        # unrestricted (one affine payload raised twice would have two
+        # owners).
+        set payload [hir::errordecls::payloadType $name]
+        if {$payload ne "" && [hir::types::IsAffine $payload]} {
+            hir::Diagnose hir COROUTINE-CONTRACT [format \
+                {%s's coroutine may fail with %s, whose payload %s is affine: a failed coroutine raises its cached error again on every later resume, which would give the one affine payload several owners (fail a coroutine only with errors whose payload is unrestricted; handle %s inside the coroutine)} \
+                [Name $hir $root] $name [hir::types::show $payload] $name] $create
+        }
     }
 }
 

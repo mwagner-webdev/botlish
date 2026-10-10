@@ -437,10 +437,21 @@ proc hir::BuildOnce {nodes options given choices halt checkedVar} {
     if {[dict exists $given -trait-decls]} {
         set traitDecls [hir::traits::resolve $sourceTypes]
     }
+    if {[dict get $options -error-decls] ne {}} {
+        # The payload field types (ERROR-PAYLOADS.md) name the program's
+        # own types: resolved once those are registered.
+        hir::errordecls::resolvePayloads
+    }
     set hir [hir::resolve::program $nodes [dict get $options -mode] [dict get $options -origin] \
         [dict get $options -modules] $choices]
     dict set hir sourceTypes $sourceTypes
     dict set hir errorDecls $errorDecls
+    set payloads [hir::errordecls::entries]
+    if {[dict size $payloads]} {
+        # The payload descriptors of the payload-bearing errors
+        # (ERROR-PAYLOADS.md); absent when the program declares none.
+        dict set hir errorPayloads $payloads
+    }
     if {$traitDecls ne ""} {
         dict set hir traits $traitDecls
     }
@@ -929,7 +940,9 @@ proc hir::children {hir e} {
         }
         struct  { return [dict get $node fields] }
         project { return [list [dict get $node receiver]] }
-        fail  { return {} }
+        fail  {
+            return [expr {[dict exists $node value] && [dict get $node value] ne "" ? [list [dict get $node value]] : {}}]
+        }
         handle {
             set result [list [dict get $node call]]
             foreach body [dict get $node handlerBodies] {

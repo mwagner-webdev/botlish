@@ -252,7 +252,35 @@ pub extern "C" fn rt_fail_declared(p: *mut Vm, id: u64, name: Value) -> Value {
     let name_text = str_of(name).as_str().to_string();
     let vm = vm(p);
     vm.declared_error = id as u32;
+    vm.declared_payload.clear();
     vm.fail(RtError::Semantic { kind: "UNCAUGHT-ERROR", message: format!("uncaught propagated error: <error {name_text}>") })
+}
+
+/// `fail NAME {field: value, ...}` (ERROR-PAYLOADS.md; Inst::Fail with
+/// payload registers): `rt_fail_declared`, plus the payload's N field values
+/// at FIELDS, in the slot order of its anonymous struct SHAPE, copied into
+/// the Vm's payload slots (`Vm::declared_payload`, a GC root) -- the field
+/// values are transported as they are, no struct object is built for them.
+/// The slots reuse their capacity: a payload-bearing failure allocates no
+/// heap object. Only an uncaught one is ever rendered (`Vm::describe_error`).
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_fail_declared_payload(p: *mut Vm, id: u64, name: Value, shape: u64, n: u64, fields: *const Value) -> Value {
+    let fields = unsafe { std::slice::from_raw_parts(fields, n as usize) };
+    let name_text = str_of(name).as_str().to_string();
+    let vm = vm(p);
+    vm.declared_error = id as u32;
+    vm.declared_payload.clear();
+    vm.declared_payload.extend_from_slice(fields);
+    vm.declared_payload_shape = shape as u32;
+    vm.fail(RtError::Semantic { kind: "UNCAUGHT-ERROR", message: format!("uncaught propagated error: <error {name_text}>") })
+}
+
+/// Field INDEX (slot order) of the pending declared error's payload: what a
+/// handler that matched it receives (codegen::clif's DeclaredPayload),
+/// before `rt_clear_declared_error` releases the slots. No allocation.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_declared_payload(p: *mut Vm, index: u64) -> Value {
+    vm(p).declared_payload[index as usize]
 }
 
 /// The pending declared-error id (0 = none), for a `handle`'s own dispatch
@@ -277,6 +305,7 @@ pub extern "C" fn rt_declared_error(p: *mut Vm) -> u64 {
 pub extern "C" fn rt_clear_declared_error(p: *mut Vm) -> u64 {
     let vm = vm(p);
     vm.declared_error = 0;
+    vm.declared_payload.clear();
     vm.error = None;
     0
 }
@@ -1321,6 +1350,7 @@ pub extern "C" fn rt_argv(p: *mut Vm) -> Value {
     let vm = vm(p);
     if let Some(index) = vm.argv_status() {
         vm.declared_error = super::error::ERR_INVALID_ARGUMENT_ENCODING;
+        vm.declared_payload.clear();
         // Same text `rt_fail_declared` records, so an unhandled argv failure
         // reads identically to every other backend's (the offending
         // argument's index is deliberately not part of the error).
@@ -1539,6 +1569,7 @@ pub fn fail_index_not_found(p: *mut Vm) -> Value {
 fn fail_builtin(p: *mut Vm, id: u32, name: &str) -> Value {
     let vm = vm(p);
     vm.declared_error = id;
+    vm.declared_payload.clear();
     let message = format!("uncaught propagated error: <error {name}>");
     vm.fail(RtError::Semantic { kind: "UNCAUGHT-ERROR", message })
 }
@@ -2392,6 +2423,8 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_raise, 3),
         h!(rt_stack_overflow, 1),
         h!(rt_fail_declared, 3),
+        h!(rt_fail_declared_payload, 6),
+        h!(rt_declared_payload, 2),
         h!(rt_declared_error, 1),
         h!(rt_clear_declared_error, 1),
         h!(rt_int_add, 3),

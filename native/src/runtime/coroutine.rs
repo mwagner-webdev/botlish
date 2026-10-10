@@ -95,9 +95,13 @@ pub struct CoroutineObj {
     /// The transport slot: the outward value of the last segment (a yield's,
     /// or the final result), and the resume message on its way in.
     pub value: Value,
-    /// A terminal failure: the error and its declared-error id (0: not a
-    /// declared error), raised again by every later resume.
-    pub failure: Option<Box<(RtError, u32)>>,
+    /// A terminal failure: the error, its declared-error id (0: not a
+    /// declared error) and its payload's field values with their shape
+    /// (ERROR-PAYLOADS.md; empty for a payload-free error), raised again by
+    /// every later resume. A payload a coroutine can fail with is
+    /// unrestricted (hir/coroutines.tcl), so raising it again copies values
+    /// that may be shared.
+    pub failure: Option<Box<(RtError, u32, Vec<Value>, u32)>>,
     /// The coroutine's stack, from its start until it is terminal.
     pub stack: Option<CoStack>,
     /// The coroutine's own stack pointer while it is suspended (or fresh).
@@ -119,6 +123,7 @@ pub fn fields(co: &CoroutineObj) -> Vec<Value> {
     let mut values = vec![co.thunk, co.value];
     if let Some(failure) = &co.failure {
         values.extend(failure.0.values());
+        values.extend(failure.2.iter().copied());
     }
     values
 }
@@ -327,7 +332,9 @@ extern "C" fn co_body(p: *mut Vm, co: *mut CoroutineObj) -> ! {
                 .unwrap_or_else(|| RtError::Bug("a coroutine body failed without recording an error".to_string()));
             let id = (*p).declared_error;
             (*p).declared_error = 0;
-            (*co).failure = Some(Box::new((error, id)));
+            let payload = std::mem::take(&mut (*p).declared_payload);
+            let shape = (*p).declared_payload_shape;
+            (*co).failure = Some(Box::new((error, id, payload, shape)));
             (*co).state = CO_FAILED;
         } else {
             (*co).value = result;
@@ -462,6 +469,9 @@ unsafe fn reraise(p: *mut Vm, co: *mut CoroutineObj) -> Value {
         };
         let (error, id) = (failure.0.clone(), failure.1);
         (*p).declared_error = id;
+        (*p).declared_payload.clear();
+        (*p).declared_payload.extend_from_slice(&failure.2);
+        (*p).declared_payload_shape = failure.3;
         (*p).error = Some(error);
         NO_VALUE
     }

@@ -493,6 +493,12 @@ proc core::forms::op-error-value {node env} {
 # NAME is admissible here (declared/handled) is a HIR-level static
 # obligation (hir/errorsets.tcl), not something the evaluator enforces.
 proc core::forms::op-fail {node env} {
+    if {[llength $node] == 3} {
+        # (fail NAME PAYLOAD-EXPR): the error carries the payload value
+        # (ERROR-PAYLOADS.md) -- the identity and the payload, two components.
+        set payload [core::interp::valueOf [core::interp::evalIn [lindex $node 2] $env]]
+        return [core::completion::propagatingError [core::value::errorId [lindex $node 1] $payload]]
+    }
     return [core::completion::propagatingError [core::value::errorId [lindex $node 1]]]
 }
 
@@ -508,11 +514,20 @@ proc core::forms::op-handle {node env} {
     if {[core::completion::kind $callCompletion] ne "propagate-error"} {
         return $callCompletion
     }
-    set errorName [core::value::errorIdName [core::completion::payload $callCompletion]]
+    set raised [core::completion::payload $callCompletion]
+    set errorName [core::value::errorIdName $raised]
     foreach {name handlerBlock} [lrange $node 2 end] {
         if {$name eq $errorName} {
+            # Selection is by the error's identity alone; the payload is then
+            # bound to the handler's parameter, if it has one
+            # (ERROR-PAYLOADS.md).
             set body [core::ir::blockBody $handlerBlock]
-            set branchEnv [core::interp::enterScope $env $body]
+            set params [core::ir::blockParams $handlerBlock]
+            set branchEnv [core::env::child $env]
+            if {$params ne {}} {
+                core::env::define $branchEnv [lindex $params 0] [core::value::errorIdPayload $raised]
+            }
+            core::env::declare $branchEnv [core::ir::scopeBindNames $body]
             try {
                 return [core::interp::evalSequence $body $branchEnv]
             } finally {

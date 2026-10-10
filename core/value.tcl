@@ -37,7 +37,7 @@
 #                             operation. Immutable: there is no in-place
 #                             insertion/removal operation.
 #   {result ok|error VALUE}   Result
-#   {errorId NAME}            identity of a declared application error
+#   {errorId NAME ?PAYLOAD?}  identity of a declared application error
 #                             completion (EXPLICIT-ERROR-COMPLETIONS.md): the
 #                             payload of a `propagate-error` completion
 #                             (core/completion.tcl), never an ordinary
@@ -45,7 +45,13 @@
 #                             inspect -- it exists only to let `handle`
 #                             (core/ir.tcl) tell declared errors apart by
 #                             identity, never by message text. NAME is the
-#                             error's own declared (program-unique) name.
+#                             error's own declared (program-unique) name;
+#                             PAYLOAD, present exactly for an error that
+#                             declares one, the payload value it carries (an
+#                             anonymous struct value, ERROR-PAYLOADS.md):
+#                             the identity and the payload stay two
+#                             components, and a payload-free error is the
+#                             one-word form it always was.
 #   {block PARAMS BODY ENV CODE}
 #                             Block: parameters, body expressions (IR),
 #                             captured env, and the compiled code for the
@@ -271,14 +277,29 @@ proc core::value::ok {payload} {
 # hir/errordecls.tcl): the payload `core::completion::propagatingError`
 # carries. NAME must not be empty: it always comes from a validated `error`
 # declaration, never from unchecked input.
-proc core::value::errorId {name} {
+proc core::value::errorId {name args} {
     if {$name eq ""} {
         error "core::value::errorId: name must not be empty"
     }
-    return [list errorId $name]
+    if {[llength $args] > 1} {
+        error "core::value::errorId: at most one payload"
+    }
+    return [list errorId $name {*}$args]
 }
 
 proc core::value::errorIdName {v} { Require errorId $v; return [lindex $v 1] }
+
+# 1 if error identity V carries a payload (ERROR-PAYLOADS.md).
+proc core::value::errorIdHasPayload {v} { Require errorId $v; return [expr {[llength $v] == 3}] }
+
+# The payload error identity V carries (it must carry one).
+proc core::value::errorIdPayload {v} {
+    Require errorId $v
+    if {[llength $v] != 3} {
+        error "core::value::errorIdPayload: error [lindex $v 1] carries no payload"
+    }
+    return [lindex $v 2]
+}
 
 proc core::value::err {payload} {
     return [list result error [check $payload]]
@@ -624,7 +645,14 @@ proc core::value::show {v {debug 0} {reveal 0}} {
         }
         block  { return "<block ([join [lindex $v 1] { }])>" }
         native { return "<native [lindex $v 1]>" }
-        errorId { return "<error [lindex $v 1]>" }
+        errorId {
+            # Diagnostic rendering only (ERROR-PAYLOADS.md): the identity,
+            # then the payload's ordinary rendering -- not a serialization.
+            if {[llength $v] == 3} {
+                return "<error [lindex $v 1] [show [lindex $v 2] $debug $reveal]>"
+            }
+            return "<error [lindex $v 1]>"
+        }
         mutarray {
             # The current elements (a value's contents, never its header).
             set parts {}

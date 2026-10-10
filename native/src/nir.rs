@@ -780,7 +780,18 @@ pub enum Inst {
     /// every ordinary call site's own `may_error` check already propagates
     /// that with no change of its own. NAME is kept only for the fallback
     /// RtError message if this ever reaches the program boundary uncaught.
-    Fail { id: u32, name: String },
+    /// `faildeclared ID "NAME" SHAPE %f0 %f1 ...` raises an error with a
+    /// payload (ERROR-PAYLOADS.md): its field values, one register per field
+    /// of the anonymous payload struct SHAPE in slot order, copied into the
+    /// Vm's payload slots (`Vm::declared_payload`) -- the error edge carries
+    /// the fields themselves, no struct object is built. SHAPE only renders
+    /// an uncaught payload. PAYLOAD is empty (and SHAPE 0) for a
+    /// payload-free error, whose text and code are what they always were.
+    Fail { id: u32, name: String, shape: u32, payload: Vec<Reg> },
+    /// `%d = declaredpayload K`: field K (slot order) of the pending declared
+    /// error's payload, read by a handler that matched it before its
+    /// ClearDeclaredError (ERROR-PAYLOADS.md). Never allocates, never fails.
+    DeclaredPayload { dst: Reg, index: u32 },
     /// True iff the pending declared-error id (runtime/vm.rs's
     /// `Vm::declared_error`) equals ID: a `handle`'s own per-handler
     /// dispatch test, evaluated only inside a PushErrorExit/PopErrorExit
@@ -1831,6 +1842,7 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
                 Inst::CallEnvMulti { dsts, func: num(i)?, closure: reg(i + 1)?, args: regs_from(i + 2)?, may_error: true, may_gc: true }
             }
             "declarederroreq" => Inst::DeclaredErrorEq { dst, id: num(3)? },
+            "declaredpayload" => Inst::DeclaredPayload { dst, index: num(3)? },
             "construct" => {
                 let list = match tokens.get(3).and_then(word) {
                     Some("str") => false,
@@ -1903,7 +1915,25 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
             message: quoted(2)?,
         },
         "unreachable" => Inst::Unreachable,
-        "faildeclared" => Inst::Fail { id: num(1)?, name: quoted(2)? },
+        "faildeclared" => {
+            if tokens.len() > 3 {
+                let shape = num(3)?;
+                let Some(decl) = program.shapes.get(shape as usize) else {
+                    return p.err(format!("faildeclared with a payload of undeclared shape {shape}"));
+                };
+                let payload = regs_from(4)?;
+                if payload.len() != decl.fields.len() {
+                    return p.err(format!(
+                        "faildeclared with a payload of shape {shape} needs {} field register(s), got {}",
+                        decl.fields.len(),
+                        payload.len()
+                    ));
+                }
+                Inst::Fail { id: num(1)?, name: quoted(2)?, shape, payload }
+            } else {
+                Inst::Fail { id: num(1)?, name: quoted(2)?, shape: 0, payload: Vec::new() }
+            }
+        }
         "cleardeclarederror" => Inst::ClearDeclaredError,
         "pusherrorexit" => Inst::PushErrorExit(label(1)?),
         "poperrorexit" => Inst::PopErrorExit,
@@ -2023,9 +2053,10 @@ fn validate(program: &Program) -> Result<(), NirError> {
             let mut targets: Vec<Label> = Vec::new();
             match inst {
                 Inst::Label(_) | Inst::Unreachable | Inst::Raise { .. }
-                | Inst::Fail { .. } | Inst::ClearDeclaredError | Inst::PopErrorExit
+                | Inst::ClearDeclaredError | Inst::PopErrorExit
                 | Inst::Reraise => {}
-                Inst::DeclaredErrorEq { dst, .. } => used.push(*dst),
+                Inst::Fail { payload, .. } => used.extend(payload),
+                Inst::DeclaredErrorEq { dst, .. } | Inst::DeclaredPayload { dst, .. } => used.push(*dst),
                 Inst::PushErrorExit(l) => targets.push(*l),
                 Inst::Int { dst, .. }
                 | Inst::RawInt { dst, .. }
@@ -2423,9 +2454,9 @@ fn validate_plans(program: &Program) -> Result<(), NirError> {
                         consumed.push(*r);
                     }
                 }
-                Inst::Label(_) | Inst::Unreachable | Inst::Raise { .. } | Inst::Fail { .. }
+                Inst::Label(_) | Inst::Unreachable | Inst::Raise { .. }
                 | Inst::ClearDeclaredError | Inst::PushErrorExit(_) | Inst::PopErrorExit | Inst::Reraise
-                | Inst::Jump(_) | Inst::DeclaredErrorEq { .. } | Inst::Int { .. } | Inst::RawInt { .. } | Inst::ShortLit { .. }
+                | Inst::Jump(_) | Inst::DeclaredErrorEq { .. } | Inst::DeclaredPayload { .. } | Inst::Int { .. } | Inst::RawInt { .. } | Inst::ShortLit { .. }
                 | Inst::AsciiLit { .. }
                 | Inst::Str { .. } | Inst::Bytes { .. } | Inst::Char { .. } | Inst::Enum { .. } | Inst::Bool { .. } | Inst::Unit { .. }
                 | Inst::Native { .. } | Inst::FnValue { .. } | Inst::SelfClosure { .. } | Inst::Capture { .. }
@@ -2436,6 +2467,7 @@ fn validate_plans(program: &Program) -> Result<(), NirError> {
                 Inst::Guard { value, .. } | Inst::GuardBool { value } => used.push(*value),
                 Inst::Op { args, .. } => used.extend(args),
                 Inst::StructNew { fields, .. } => used.extend(fields),
+                Inst::Fail { payload, .. } => used.extend(payload),
                 Inst::StructGet { value, .. } => used.push(*value),
                 Inst::CallValue { callee, args, .. } => {
                     used.push(*callee);
@@ -2605,7 +2637,7 @@ fn def_of(inst: &Inst) -> Option<Reg> {
         | Inst::SelfClosure { dst } | Inst::Capture { dst, .. } | Inst::Move { dst, .. }
         | Inst::Closure { dst, .. }
         | Inst::Op { dst, .. } | Inst::Call { dst, .. } | Inst::CallEnv { dst, .. } | Inst::CallValue { dst, .. }
-        | Inst::DeclaredErrorEq { dst, .. } | Inst::Construct { dst, .. } => Some(*dst),
+        | Inst::DeclaredErrorEq { dst, .. } | Inst::DeclaredPayload { dst, .. } | Inst::Construct { dst, .. } => Some(*dst),
         _ => None,
     }
 }

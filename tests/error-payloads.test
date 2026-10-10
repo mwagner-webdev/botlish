@@ -1,0 +1,631 @@
+# error-payloads.test -- payload-bearing errors (ERROR-PAYLOADS.md).
+#
+# An error has a nominal identity and may carry a statically known
+# named-field payload. `on NAME` discriminates the identity only; the payload
+# is then ignored, bound whole (`on NAME details:`), or destructured by the
+# ordinary irrefutable struct destructuring (`on NAME {a, b: c}:`). Nothing
+# in a handler tests a payload's shape or value: handlers are not pattern
+# matching. The payload is an ordinary value: the anonymous struct of the
+# error's declared fields, constructed exactly like a named struct literal
+# (`fail NAME {field: value, ...}`), owning what it holds (affine fields move
+# along the error edge), on every backend.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+# The principal declarations (the brief's item 78, with a String standing in
+# for the payload stream: a Bytes value, `abi::bytes::empty()`-style, appears
+# in ep-principal-bytes below).
+set epDecls {import str
+import list
+
+struct Response:
+    payloadStream: str
+    length: int
+
+error PageNotFound:
+    uri: str
+    statusCode: int
+    response: Response
+
+error ObjectNotFound:
+    uri: str
+
+error ConnectionLost
+
+fn fetch(uri: str) -> str errors PageNotFound:
+    if uri == "":
+        return "home"
+    fail PageNotFound {
+        uri: uri,
+        statusCode: 404,
+        response: Response {
+            payloadStream: "",
+            length: 0,
+        },
+    }
+
+}
+
+# The outcome of TEXT on every backend (they must agree).
+proc epAgree {text} {
+    return [sourceAgree $text]
+}
+
+# The error code (last word) of the first diagnostic of TEXT, or "ok".
+proc epCode {text} {
+    if {[catch {surface::compile $text -warnings off} message options]} {
+        set code [dict get $options -errorcode]
+        if {[lrange $code 0 1] eq {SURFACE SYNTAX}} {
+            return SYNTAX
+        }
+        return [lindex $code end]
+    }
+    return ok
+}
+
+# The first diagnostic's message of TEXT without its location, or "ok".
+proc epMessage {text} {
+    if {[catch {surface::compile $text -warnings off} message options]} {
+        regsub {^[^:]*:[0-9]+:[0-9]+: } $message {} message
+        return $message
+    }
+    return ok
+}
+
+# The sorted diagnostic kinds of TEXT compiled with -strict 0.
+proc epKinds {text} {
+    set hir [surface::compile $text -strict 0 -warnings off]
+    return [lsort -unique [lmap d [hir::diagnostics $hir] {dict get $d kind}]]
+}
+
+proc epHir {text} {
+    return [surface::compile $text -warnings off]
+}
+
+# The HIR text lines of TEXT matching PATTERN (glob), trimmed, with ids
+# (`#`) and hygienic temporaries' numbers (`destructure#*`) masked first.
+proc epHirLines {text pattern} {
+    set lines {}
+    foreach line [split [hir::format [epHir $text]] \n] {
+        set line [regsub -all {\m[ebs][0-9]+\M} [string trim $line] {#}]
+        set line [regsub -all {(destructure|payload)#[#0-9]+} $line {\1#*}]
+        if {[string match $pattern $line]} {
+            lappend lines $line
+        }
+    }
+    return $lines
+}
+
+# The instruction lines of function NAME in the NIR of TEXT.
+proc epFunc {text name args} {
+    set nir [native::nir [epHir $text] {*}$args]
+    set lines {}
+    set inside 0
+    foreach line [split $nir \n] {
+        if {[regexp {^func [0-9]+ "([^"]*)"} $line -> fname]} {
+            set inside [expr {$fname eq $name}]
+            continue
+        }
+        if {$line eq "end"} {
+            set inside 0
+            continue
+        }
+        if {$inside} {
+            lappend lines [regsub { @e[0-9]+$} [string trim $line] {}]
+        }
+    }
+    return $lines
+}
+
+# The NIR instruction words (after any "%r = ") of LINES.
+proc epWords {lines} {
+    return [lmap line $lines {
+        if {[regexp {^%[0-9]+ = (\S+)( (\S+))?} $line -> word _ op]} {
+            expr {$word eq "op" ? "op:$op" : $word}
+        } else {
+            lindex [split $line] 0
+        }
+    }]
+}
+
+# The native allocation counts of TEXT: {total STRUCTS}.
+proc epAllocs {text args} {
+    set report [native::allocationReport [epHir $text] summary 1 {*}$args]
+    return [list [dict get $report total allocations] [dict get $report byKind Struct allocations]]
+}
+
+# The native coroutine counters of TEXT (native::allocationReport).
+proc epCoroutines {text} {
+    return [dict get [native::allocationReport [epHir $text] summary] coroutines]
+}
+
+proc epWithGcStress {script} {
+    set had [info exists ::env(BOTLISH_NATIVE_GC_STRESS)]
+    set saved [expr {$had ? $::env(BOTLISH_NATIVE_GC_STRESS) : ""}]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        return [uplevel 1 $script]
+    } finally {
+        if {$had} {
+            set ::env(BOTLISH_NATIVE_GC_STRESS) $saved
+        } else {
+            unset ::env(BOTLISH_NATIVE_GC_STRESS)
+        }
+    }
+}
+
+# Test-only probe of the Tcl runtime: the Tcl coroutines alive (suspended and
+# not released yet). An ownership leak on the Tcl backends shows here.
+proc epLiveCoroutines {} {
+    return [core::value::int [llength [info commands {::core::coroutines::co[0-9]*}]]]
+}
+if {"test_ep_live" ni [core::native::names]} {
+    core::registerNative test_ep_live -arity 0 -impl epLiveCoroutines
+}
+
+# {TCL-BACKENDS EVERY-BACKEND}: TEXT once with the live-coroutine probe on
+# the two Tcl backends (which share the runtime), and on every backend with
+# the probe replaced by 0.
+proc epReleased {text} {
+    set tcl [sourceAgree $text {interp compile}]
+    set all [sourceAgree [string map {test_ep_live() 0} $text]]
+    return [list $tcl $all]
+}
+
+testConstraint linuxX86_64 [expr {$::tcl_platform(os) eq "Linux"
+    && $::tcl_platform(machine) in {x86_64 amd64}}]
+
+# Declarations of the affine cases: a payload that owns a coroutine.
+set epAffine {import coroutine
+import list
+
+struct Message:
+    value: int
+
+struct Event:
+    value: int
+
+error ReadFailed:
+    stream: Coroutine{args: [Message], return: Event}
+    bytesRead: int
+
+error Plain:
+    code: int
+
+error Boom
+
+fn worker(seed: int, resume Message) -> Event:
+    message = yield Event {value: seed}
+    return Event {value: message.value}
+
+fn make(seed: int) -> Coroutine{args: [Message], return: Event}:
+    coroutine {step} = worker(seed)
+    step
+
+fn read(n: int) -> int errors ReadFailed:
+    s = make(n)
+    if n > 0:
+        fail ReadFailed {stream: s, bytesRead: n}
+    0
+
+fn consume(s: Coroutine{args: [Message], return: Event}) -> int:
+    e = s(Message {value: 2})
+    e.value
+
+fn might_fail(x: int) -> int errors Boom:
+    if x > 1:
+        fail Boom
+    x
+
+}
+
+# ---------------------------------------------------------------------------
+# Declarations (items 1-5, 44)
+
+test ep-declaration-grammar {a payload is an indented block of `field: Type` lines after `error NAME:`, the struct field grammar; the payload-free spelling is unchanged and is the zero-field case} -body {
+    set hir [epHir "${::epDecls}1\n"]
+    list [hir::errorDecls $hir] [dict get $hir errorPayloads] \
+        [hir::errordecls::fields ConnectionLost] [hir::errordecls::hasPayload ConnectionLost]
+} -cleanup {unset -nocomplain hir} -result {{NotFound PageNotFound ObjectNotFound ConnectionLost} {PageNotFound {fields {uri str statusCode int response {nstruct Response}} namespace {}} ObjectNotFound {fields {uri str} namespace {}}} {} 0}
+
+test ep-declaration-payload-type {the payload's static type is the anonymous struct of the declared fields (no source-nameable type, no identity field); declaration order is kept for the descriptor} -body {
+    epHir "${::epDecls}1\n"
+    list [hir::types::show [hir::errordecls::payloadType PageNotFound]] \
+        [hir::errordecls::fieldNames PageNotFound] [hir::errordecls::payloadType ConnectionLost]
+} -result {{struct{response: Response, statusCode: int, uri: str}} {uri statusCode response} {}}
+
+test ep-declaration-rejections {duplicate field, default value, positional payload, anonymous payload type, rest field, an empty colon block and an unknown or trait field type are rejected at the declaration} -body {
+    list [epCode "error E:\n    a: int\n    a: str\n1\n"] \
+        [epCode "error E:\n    a: int = 3\n1\n"] \
+        [epCode "error E(str, int)\n1\n"] \
+        [epCode "error E: {a: int}\n1\n"] \
+        [epCode "error E:\n    ...rest\n1\n"] \
+        [epCode "error E:\n1\n"] \
+        [epCode "error E:\n    a: Nope\n1\n"] \
+        [epMessage "error E(str, int)\n1\n"]
+} -result {DUPLICATE-FIELD SYNTAX SYNTAX SYNTAX SYNTAX SYNTAX TYPE {an error payload has named fields, never positional ones: declare "error E:" followed by an indented block of "field: Type" lines}}
+
+test ep-declaration-nominal {two errors with identical payload fields are distinct identities: each has its own descriptor, and a name stays declared once program-wide} -body {
+    epHir "error A:\n    x: int\nerror B:\n    x: int\n1\n"
+    list [hir::errordecls::fields A] [hir::errordecls::fields B] \
+        [epCode "error A:\n    x: int\nerror A:\n    x: int\n1\n"]
+} -result {{x int} {x int} UNDECLARED-ERROR}
+
+test ep-declaration-field-types {payload fields take every declarable type: structs (declared later too), enums, Lists, ImmutableSets and function types} -body {
+    set text "import list\nenum Kind:\n    Missing,\n    Gone,\nerror Rich:\n    kind: Kind\n    tags: List\[str\]\n    later: Later\n    cb: Fn{args: \[int\], return: int, errors: \[\]}\nstruct Later:\n    n: int\n1\n"
+    epHir $text
+    hir::types::show [hir::errordecls::payloadType Rich]
+} -cleanup {unset -nocomplain text} -result {struct{cb: Fn{args: [int], return: int, errors: []}, kind: Kind, later: Later, tags: List[str]}}
+
+# ---------------------------------------------------------------------------
+# Failure construction (items 6-9, 45)
+
+test ep-fail-missing-payload {item 8: `fail NAME` of an error that declares a payload is MISSING-ERROR-PAYLOAD} -body {
+    list [epCode "${::epDecls}fn f(x: int) errors ObjectNotFound:\n    fail ObjectNotFound\n1\n"] \
+        [epMessage "${::epDecls}fn f(x: int) errors ObjectNotFound:\n    fail ObjectNotFound\n1\n"]
+} -result {MISSING-ERROR-PAYLOAD {error "ObjectNotFound" carries a payload, which "fail ObjectNotFound" must construct: write "fail ObjectNotFound {uri: ...}" (the error's name alone is not its payload)}}
+
+test ep-fail-unexpected-payload {item 9: a payload given to a payload-free error is UNEXPECTED-ERROR-PAYLOAD, including the empty `{}` (no anonymous payload is ever created)} -body {
+    list [epCode "${::epDecls}fn f(x: int) errors ConnectionLost:\n    fail ConnectionLost {message: \"lost\"}\n1\n"] \
+        [epCode "${::epDecls}fn f(x: int) errors ConnectionLost:\n    fail ConnectionLost {}\n1\n"] \
+        [epCode "${::epDecls}fn f(x: int) -> int errors ConnectionLost:\n    if x > 1:\n        fail ConnectionLost\n    x\n1\n"]
+} -result {UNEXPECTED-ERROR-PAYLOAD UNEXPECTED-ERROR-PAYLOAD ok}
+
+test ep-fail-fields-like-a-struct-literal {item 6: every declared field once (MISSING-FIELD), none undeclared (UNKNOWN-FIELD), no duplicate (DUPLICATE-FIELD), each value proven admissible for its declared type (TYPE) -- no implicit runtime guard for an untyped value} -body {
+    set pre "${::epDecls}fn f(x: int, y) errors ObjectNotFound:\n    fail ObjectNotFound "
+    list [epCode "${pre}{}\n1\n"] \
+        [epCode "${pre}{uri: \"a\", extra: 1}\n1\n"] \
+        [epCode "${pre}{uri: \"a\", uri: \"b\"}\n1\n"] \
+        [epCode "${pre}{uri: x}\n1\n"] \
+        [epCode "${pre}{uri: y}\n1\n"] \
+        [epMessage "${pre}{uri: x}\n1\n"]
+} -cleanup {unset -nocomplain pre} -result {MISSING-FIELD UNKNOWN-FIELD DUPLICATE-FIELD TYPE TYPE {payload field "uri" of error ObjectNotFound cannot be proven to satisfy its declared type str (value type: int)}}
+
+test ep-fail-positional-rejected {item 6: no positional construction} -body {
+    list [epCode "${::epDecls}fn f(x: int) errors ObjectNotFound:\n    fail ObjectNotFound(\"a\")\n1\n"] \
+        [epMessage "${::epDecls}fn f(x: int) errors ObjectNotFound:\n    fail ObjectNotFound(\"a\")\n1\n"]
+} -result {SYNTAX {an error payload is constructed by named fields, never positionally: write "fail ObjectNotFound {field: value, ...}"}}
+
+test ep-fail-written-order {the payload's fields evaluate in written order (any order may be written), then the error is raised; a field that fails first raises that error instead} -body {
+    epAgree "${::epDecls}error Boom\nfn inner(b: int) -> str errors Boom:\n    if b > 5:\n        fail Boom\n    \"x\"\nfn g(a: int, b: int) -> int errors ObjectNotFound, Boom:\n    if a == b:\n        fail ObjectNotFound {uri: str::concat(\"a\", inner(b))}\n    a\nfn f(a: int, b: int) -> str:\n    v = g(a, b):\n        on ObjectNotFound {uri}:\n            return uri\n        on Boom:\n            return \"boom\"\n    \"none\"\n\[f(1, 1), f(7, 7), f(1, 2)\]\n"
+} -result {value {["ax", "boom", "none"]}}
+
+# ---------------------------------------------------------------------------
+# The principal program (item 78) and its forms (items 14-20, 42)
+
+set epPrincipal "${epDecls}fn whole(uri: str) -> str:
+    fetch(uri):
+        on PageNotFound details:
+            details.uri
+
+fn fields(uri: str) -> int:
+    page = fetch(uri):
+        on PageNotFound {statusCode}:
+            return statusCode
+    str::length(page)
+
+fn rename(uri: str) -> str:
+    fetch(uri):
+        on PageNotFound {uri: pageUri}:
+            pageUri
+
+fn nested(uri: str) -> int:
+    page = fetch(uri):
+        on PageNotFound {
+            response: {
+                payloadStream,
+                length,
+            }
+        }:
+            return length + str::length(payloadStream)
+    -1
+
+fn ignored(uri: str) -> str:
+    fetch(uri):
+        on PageNotFound:
+            \"fallback\"
+
+"
+
+test ep-principal {item 78: whole binding, field destructuring, renaming, nested destructuring and an ignored payload, on every backend} -body {
+    epAgree "${::epPrincipal}\[whole(\"/x\"), rename(\"/z\"), ignored(\"/v\"), whole(\"\")\]\n"
+} -result {value {["/x", "/z", "fallback", "home"]}}
+
+test ep-principal-ints {item 78: the Int-valued forms, failing and succeeding} -body {
+    epAgree "${::epPrincipal}\[fields(\"/y\"), nested(\"/w\"), fields(\"\"), nested(\"\")\]\n"
+} -result {value {[404, 0, 4, -1]}}
+
+test ep-principal-hir {item 76: nominal selection and ordinary payload binding are visibly separate in HIR -- `fail NAME` with its payload construction, `on NAME ... payload (B NAME)`, and the destructuring's ordinary projection binds} -body {
+    list [epHirLines "${::epPrincipal}1\n" "*fail PageNotFound*"] \
+        [epHirLines "${::epPrincipal}1\n" "*struct payload(PageNotFound)*"] \
+        [epHirLines "${::epPrincipal}1\n" "on PageNotFound*"] \
+        [epHirLines "${::epPrincipal}1\n" "# project statusCode*"]
+} -result {{{# fail PageNotFound : never}} {{# struct payload(PageNotFound) (uri, statusCode, response) : struct{response: Response, statusCode: int, uri: str}}} {{on PageNotFound # payload (# details)} {on PageNotFound # payload (# destructure#*) binds # statusCode} {on PageNotFound # payload (# destructure#*) binds # pageUri} {on PageNotFound # payload (# destructure#*) binds # destructure#*, # payloadStream, # length} {on PageNotFound #}} {{# project statusCode : int}}}
+
+test ep-principal-hir-text-round-trip {HIR text states the payload descriptors, the payload construction and the handler payload bindings, and reads back to the same text, which runs (the program without imports: HIR text of a program with modules does not read back)} -body {
+    set hir [epHir [string map [list "import str\nimport list\n" "" "str::length(" "length_of(" "error ConnectionLost\n" "error ConnectionLost\n\nfn length_of(s: str) -> int:\n    7\n"] "${::epPrincipal}\[whole(\"/x\"), fields(\"/y\"), rename(\"/z\"), nested(\"/w\")\]\n"]]
+    set text [hir::format $hir]
+    set back [hir::parse $text]
+    list [expr {[hir::format $back] eq $text}] [lindex [outcomeUnderHir compile $back] 1] \
+        [lsearch -inline [split $text \n] "error PageNotFound *"]
+} -cleanup {unset -nocomplain hir text back} -result {1 {["/x", 404, "/z", 7]} {error PageNotFound ns - payload uri: str, statusCode: int, response: Response}}
+
+test ep-principal-core-ir {Core IR: `(fail NAME PAYLOAD)`, and a handler with a payload binding is a one-parameter block; lowering and rebuilding HIR from it round-trips and runs} -body {
+    set hir [epHir "${::epPrincipal}\[whole(\"/x\"), rename(\"/z\")\]\n"]
+    set ir [hir::lower $hir]
+    set fails {}
+    set handlers {}
+    set work $ir
+    while {$work ne {}} {
+        set node [lindex $work end]
+        set work [lrange $work 0 end-1]
+        if {[catch {llength $node} n] || $n == 0} continue
+        switch -- [lindex $node 0] {
+            fail { lappend fails [list [lindex $node 1] [llength $node] [lindex $node 2 0]] }
+            handle {
+                foreach {name block} [lrange $node 2 end] {
+                    lappend handlers [list $name [llength [lindex $block 1]]]
+                }
+            }
+        }
+        foreach child [lrange $node 1 end] {
+            lappend work $child
+        }
+    }
+    set rebuilt [hir::build $ir -strict 0]
+    list [lsearch -all -inline [lsort -unique $fails] PageNotFound*] \
+        [lsearch -all -inline [lsort -unique $handlers] PageNotFound*] [expr {[hir::lower $rebuilt] eq $ir}] \
+        [lindex [outcomeUnderHir interp $rebuilt] 1]
+} -cleanup {unset -nocomplain hir ir fails handlers work node rebuilt} -result {{{PageNotFound 3 struct}} {{PageNotFound 0} {PageNotFound 1}} 1 {["/x", "/z"]}}
+
+test ep-whole-binding-is-the-payload {item 15/16/42: the whole binding is the payload value: an anonymous struct of the declared fields (no identity field), projected by ordinary field projection, equal by structure, displayed as a struct} -body {
+    list [epAgree "${::epDecls}fn g(x: int) -> int errors ObjectNotFound:\n    if x > 1:\n        fail ObjectNotFound {uri: \"o\"}\n    x\nfn f(x: int) -> bool:\n    v = g(x):\n        on ObjectNotFound d:\n            return d == {uri: \"o\"}\n    false\n\[f(1), f(2)\]\n"] \
+        [epAgree "${::epDecls}fn g(uri: str):\n    v = fetch(uri):\n        on PageNotFound details:\n            return \[details\]\n    \[\]\ng(\"/p\")\n"] \
+        [epKinds "${::epDecls}fn g(uri: str) -> str:\n    v = fetch(uri):\n        on PageNotFound details:\n            return details.kind\n    \"\"\n1\n"]
+} -result {{value {[false, true]}} {value {[{response: Response {payloadStream: "", length: 0}, statusCode: 404, uri: "/p"}]}} {TYPE UNKNOWN-FIELD}}
+
+test ep-partial-destructuring {items 18, 64: a handler names only the fields it uses; a later field added to the declaration does not affect it} -body {
+    set v1 "error E:\n    uri: str\nfn g(x: int) -> int errors E:\n    if x > 1:\n        fail E {uri: \"u\"}\n    x\nfn f(x: int) -> str:\n    v = g(x):\n        on E {uri}:\n            return uri\n    \"ok\"\n\[f(1), f(2)\]\n"
+    set v2 [string map [list "    uri: str\n" "    uri: str\n    statusCode: int\n" "{uri: \"u\"}" "{uri: \"u\", statusCode: 3}"] $v1]
+    list [epAgree $v1] [epAgree $v2]
+} -cleanup {unset -nocomplain v1 v2} -result {{value {["ok", "u"]}} {value {["ok", "u"]}}}
+
+test ep-destructuring-diagnostics {item 63: unknown field, a non-struct field destructured as a struct, a duplicate binding -- the ordinary destructuring diagnostics; the binding needs no handler-specific name rules} -body {
+    set pre "${::epDecls}fn f(uri: str) -> int:\n    v = fetch(uri):\n        on PageNotFound "
+    list [epCode "${pre}{nope}:\n            return 1\n    0\n1\n"] \
+        [epCode "${pre}{statusCode: {a}}:\n            return 1\n    0\n1\n"] \
+        [epCode "${pre}{uri: a, statusCode: a}:\n            return 1\n    0\n1\n"] \
+        [epCode "${pre}{uri: \[a\]}:\n            return 1\n    0\n1\n"] \
+        [epCode "${pre}{uri, ...rest}:\n            return 1\n    0\n1\n"] \
+        [epCode "${pre}{uri: x}:\n            x = 1\n            return 1\n    0\n1\n"]
+} -cleanup {unset -nocomplain pre} -result {UNKNOWN-FIELD NOT-A-STRUCT DUPLICATE SYNTAX SYNTAX DUPLICATE}
+
+test ep-handler-scope {item 61: payload bindings exist only in their handler: they never leak into the rejoined continuation, and may shadow an outer name like any nested scope} -body {
+    list [epCode "${::epDecls}fn f(uri: str) -> int:\n    v = fetch(uri):\n        on PageNotFound {statusCode}:\n            \"x\"\n    statusCode\n1\n"] \
+        [epAgree "${::epDecls}fn f(uri: str) -> int:\n    statusCode = 7\n    v = fetch(uri):\n        on PageNotFound {statusCode}:\n            return statusCode\n    statusCode\n\[f(\"\"), f(\"/a\")\]\n"]
+} -result {UNBOUND {value {[7, 404]}}}
+
+test ep-bind-payload-free {binding or destructuring the payload of a payload-free error is UNEXPECTED-ERROR-PAYLOAD (there is nothing to bind); an ignoring handler is unchanged} -body {
+    set g "${::epDecls}fn g(x: int) -> int errors ConnectionLost:\n    if x > 1:\n        fail ConnectionLost\n    x\n"
+    list [epCode "${g}fn f(x: int) -> int:\n    g(x):\n        on ConnectionLost details:\n            1\n1\n"] \
+        [epCode "${g}fn f(x: int) -> int:\n    g(x):\n        on ConnectionLost {a}:\n            1\n1\n"] \
+        [epAgree "${g}fn f(x: int) -> int:\n    g(x):\n        on ConnectionLost:\n            -1\n\[f(1), f(2)\]\n"]
+} -cleanup {unset -nocomplain g} -result {UNEXPECTED-ERROR-PAYLOAD UNEXPECTED-ERROR-PAYLOAD {value {[1, -1]}}}
+
+# ---------------------------------------------------------------------------
+# No pattern matching (items 21, 22, 69)
+
+test ep-no-value-patterns {item 21: a destructuring position binds, it never compares: a literal or a range is a syntax error, never a test} -body {
+    set pre "${::epDecls}fn f(uri: str) -> int:\n    v = fetch(uri):\n        on PageNotFound "
+    list [epCode "${pre}{statusCode: 404}:\n            return 1\n    0\n1\n"] \
+        [epCode "${pre}{statusCode: 400..499}:\n            return 1\n    0\n1\n"] \
+        [epCode "${pre}{uri: \"/x\"}:\n            return 1\n    0\n1\n"]
+} -cleanup {unset -nocomplain pre} -result {SYNTAX SYNTAX SYNTAX}
+
+test ep-no-guards {items 21-22: no `if`/`where` guard, no several errors in one handler, no positional payload; a second handler for the same error stays DUPLICATE (no payload-driven selection)} -body {
+    set pre "${::epDecls}fn f(uri: str) -> int:\n    v = fetch(uri):\n        on PageNotFound"
+    list [epCode "${pre} if uri == \"a\":\n            return 1\n    0\n1\n"] \
+        [epCode "${pre} where uri == \"a\":\n            return 1\n    0\n1\n"] \
+        [epCode "${pre} details if details.statusCode == 404:\n            return 1\n    0\n1\n"] \
+        [epCode "${pre}, ObjectNotFound:\n            return 1\n    0\n1\n"] \
+        [epCode "${pre}(u, s):\n            return 1\n    0\n1\n"] \
+        [epCode "${pre} {statusCode}:\n            return 1\n        on PageNotFound {uri}:\n            return 2\n    0\n1\n"] \
+        [epMessage "${pre} if uri == \"a\":\n            return 1\n    0\n1\n"]
+} -cleanup {unset -nocomplain pre} -result {SYNTAX SYNTAX SYNTAX SYNTAX SYNTAX DUPLICATE {a handler selects only by the error's identity ("on PageNotFound:"): there are no handler guards; test the payload with an ordinary "if" inside the handler}}
+
+# ---------------------------------------------------------------------------
+# Nominal dispatch (items 4, 24, 25, 54, 55, 65)
+
+test ep-same-shape-distinct {items 4, 24, 55, 65: errors with identical payload fields are handled by their own handlers only -- selection compares identities, never payload shapes} -body {
+    epAgree "${::epDecls}error A:\n    uri: str\nfn g(x: int) -> int errors A, ObjectNotFound:\n    if x == 1:\n        fail A {uri: \"a\"}\n    if x == 2:\n        fail ObjectNotFound {uri: \"o\"}\n    x\nfn f(x: int) -> str:\n    v = g(x):\n        on ObjectNotFound {uri}:\n            return str::concat(\"object \", uri)\n        on A {uri}:\n            return str::concat(\"a \", uri)\n    \"none\"\n\[f(1), f(2), f(3)\]\n"
+} -result {value {["a a", "object o", "none"]}}
+
+test ep-same-shape-not-interchangeable {item 65: a handler for one error does not handle a same-shaped other error: it still has to be handled or declared} -body {
+    epCode "${::epDecls}error A:\n    uri: str\nfn g(x: int) -> int errors A:\n    if x == 1:\n        fail A {uri: \"a\"}\n    x\nfn f(x: int) -> int:\n    g(x):\n        on ObjectNotFound {uri}:\n            1\n1\n"
+} -result UNHANDLED-ERROR
+
+test ep-multiple-payload-errors {item 54: a function may fail with several payload-bearing errors; each handler statically knows its own error's payload type (no union of payloads)} -body {
+    list [epAgree "${::epDecls}fn g(x: int) -> int errors PageNotFound, ObjectNotFound, ConnectionLost:\n    if x == 1:\n        fail ObjectNotFound {uri: \"o\"}\n    if x == 2:\n        fail ConnectionLost\n    str::length(fetch(\"/p\"))\nfn f(x: int) -> int:\n    g(x):\n        on PageNotFound {statusCode, response}:\n            statusCode + response.length\n        on ObjectNotFound {uri}:\n            str::length(uri)\n        on ConnectionLost:\n            -1\n\[f(1), f(2), f(3)\]\n"] \
+        [epKinds "${::epDecls}fn g(x: int) -> int errors PageNotFound, ObjectNotFound:\n    if x == 1:\n        fail ObjectNotFound {uri: \"o\"}\n    str::length(fetch(\"/p\"))\nfn f(x: int) -> int:\n    g(x):\n        on ObjectNotFound {statusCode}:\n            statusCode\n        on PageNotFound:\n            0\n1\n"]
+} -result {{value {[1, -1, 404]}} {TYPE UNKNOWN-FIELD}}
+
+# ---------------------------------------------------------------------------
+# Contracts and propagation (items 10-12, 35, 56-58)
+
+test ep-contracts-name-identities {items 10, 57: `errors` clauses and Fn contracts name identities only; payload field lists there are syntax errors} -body {
+    list [epCode "${::epDecls}fn g(x: int) -> int errors PageNotFound{uri}:\n    x\n1\n"] \
+        [epCode "${::epDecls}fn h(f: Fn{args: \[int\], return: int, errors: \[ObjectNotFound{uri}\]}) -> int:\n    1\n1\n"]
+} -result {SYNTAX SYNTAX}
+
+test ep-propagation {items 12, 35: a payload propagates unchanged through declaring intermediate functions (no reconstruction, no field lost)} -body {
+    epAgree "${::epDecls}fn mid(uri: str) -> int errors PageNotFound:\n    str::length(fetch(uri)) + 1\nfn outer(uri: str) -> int errors PageNotFound:\n    mid(uri) * 2\nfn f(uri: str) -> str:\n    v = outer(uri):\n        on PageNotFound details:\n            return details.uri\n    \"ok\"\n\[f(\"/deep\"), f(\"\")\]\n"
+} -result {value {["/deep", "ok"]}}
+
+test ep-generic-propagation {item 56: a generic `fn call(f, x): f(x)` propagates the payload exactly (specialized, no runtime dispatch)} -body {
+    epAgree "${::epDecls}fn call(f, x):\n    f(x)\nfn g(x: int) -> int errors PageNotFound:\n    if x > 1:\n        fetch(\"/g\")\n    x\nfn h(x: int) -> int errors PageNotFound:\n    call(g, x)\nfn k(x: int) -> int:\n    h(x):\n        on PageNotFound {statusCode, uri}:\n            statusCode + str::length(uri)\n\[k(1), k(7)\]\n"
+} -result {value {[1, 406]}}
+
+test ep-function-values {items 57-58: a typed Fn value's error contract names the identity; its call carries the payload; the subset rule is unchanged} -body {
+    list [epAgree "${::epDecls}fn g(x: int) -> int errors ObjectNotFound:\n    if x > 1:\n        fail ObjectNotFound {uri: \"g\"}\n    x\nfn apply(f: Fn{args: \[int\], return: int, errors: \[ObjectNotFound\]}, x: int) -> str:\n    v = f(x):\n        on ObjectNotFound details:\n            return details.uri\n    \"ok\"\n\[apply(g, 1), apply(g, 5)\]\n"] \
+        [epCode "${::epDecls}fn g(x: int) -> int errors ObjectNotFound:\n    if x > 1:\n        fail ObjectNotFound {uri: \"g\"}\n    x\nfn apply(f: Fn{args: \[int\], return: int, errors: \[\]}, x: int) -> int:\n    f(x)\napply(g, 1)\n"]
+} -result {{value {["ok", "g"]}} TYPE}
+
+test ep-translate {item 36: a handler may fail another error built from the payload it received; no automatic cause chain} -body {
+    epAgree "${::epDecls}error PageLoadFailed:\n    uri: str\n    causeText: str\nfn load(uri: str) -> str errors PageLoadFailed:\n    fetch(uri):\n        on PageNotFound details:\n            fail PageLoadFailed {uri: uri, causeText: str::concat(\"status \", \"404\")}\nfn f(uri: str) -> str:\n    load(uri):\n        on PageLoadFailed {causeText, uri: u}:\n            str::concat(u, causeText)\n\[f(\"/a\"), f(\"\")\]\n"
+} -result {value {["/astatus 404", "home"]}}
+
+test ep-rejoin-unchanged {item 26: a handled payload error rejoins where a payload-free one does: the handle's type is the call's, handler admissibility is unchanged} -body {
+    list [epAgree "${::epDecls}fn f(uri: str) -> int:\n    page = fetch(uri):\n        on PageNotFound {uri}:\n            str::concat(uri, \"!\")\n    str::length(page)\n\[f(\"\"), f(\"/x\")\]\n"] \
+        [epCode "${::epDecls}fn f(uri: str) -> int:\n    page = fetch(uri):\n        on PageNotFound {statusCode}:\n            statusCode\n    str::length(page)\n1\n"]
+} -result {{value {[4, 3]}} TYPE}
+
+test ep-validator {item 27: a validator whose error carries a payload proves its refinement on success; the error edge does not, and handling it rejoins as before} -body {
+    set text "import str\nerror Invalid:\n    reason: str\n    at: int\nrefined type Short = str\nfn validate_short(value: str) -> unit proves value: Short errors Invalid:\n    if str::length(value) > 3:\n        fail Invalid {reason: \"too long\", at: str::length(value)}\nfn use(s: Short) -> int:\n    str::length(s)\nfn f(text: str) -> int:\n    validate_short(text):\n        on Invalid {at}:\n            return -at\n    use(text)\n\[f(\"ab\"), f(\"abcdef\")\]\n"
+    list [epAgree $text] \
+        [epCode [string map [list "            return -at\n" "            -1\n"] $text]]
+} -cleanup {unset -nocomplain text} -result {{value {[2, -6]}} TYPE}
+
+# ---------------------------------------------------------------------------
+# Enum and collection payload fields (items 49, 68)
+
+test ep-enum-and-list-fields {item 68: an enum field is an ordinary value branched on with `if` after selection; List fields are ordinary values} -body {
+    epAgree "import list\nenum ParseErrorKind:\n    UnexpectedEnd,\n    BadDigit,\nerror ParseFailed:\n    kind: ParseErrorKind\n    offset: int\n    expected: List\[str\]\nfn parse(n: int) -> int errors ParseFailed:\n    if n == 0:\n        fail ParseFailed {kind: ParseErrorKind::UnexpectedEnd, offset: 0, expected: \[\"digit\"\]}\n    if n < 0:\n        fail ParseFailed {kind: ParseErrorKind::BadDigit, offset: 3, expected: \[\"0\", \"1\"\]}\n    n\nfn f(n: int) -> int:\n    parse(n):\n        on ParseFailed {kind, offset, expected}:\n            if kind == ParseErrorKind::BadDigit:\n                offset * 10 + list::length(expected)\n            else:\n                -1\n\[f(0), f(-1), f(5)\]\n"
+} -result {value {[-1, 32, 5]}}
+
+# ---------------------------------------------------------------------------
+# Affine payloads (items 28-35, 72-75)
+
+test ep-affine-payload-type {item 29: payload affinity is the ordinary aggregate rule: affine iff a field is} -body {
+    epHir "${::epAffine}1\n"
+    list [hir::types::IsAffine [hir::errordecls::payloadType ReadFailed]] \
+        [hir::types::IsAffine [hir::errordecls::payloadType Plain]]
+} -result {1 0}
+
+test ep-affine-fail-moves {item 30: failing with an affine field moves it into the payload: a later use is USE-AFTER-MOVE} -body {
+    list [epCode "${::epAffine}fn g(n: int) -> int errors ReadFailed:\n    s = make(n)\n    if n > 0:\n        fail ReadFailed {stream: s, bytesRead: consume(s)}\n    0\n1\n"] \
+        [epCode "${::epAffine}fn g(n: int) -> int errors ReadFailed:\n    s = make(n)\n    t = s\n    if n > 0:\n        fail ReadFailed {stream: s, bytesRead: 1}\n    0\n1\n"]
+} -result {USE-AFTER-MOVE USE-AFTER-MOVE}
+
+test ep-affine-handlers {items 32-34: an ignored payload releases its coroutine; a whole binding owns it; a destructured stream is used and released; a partial destructuring releases the unbound affine field -- no coroutine is left alive on the Tcl backends} -body {
+    set pre "${::epAffine}fn f(n: int) -> int:\n    read(n):\n"
+    list [epReleased "${pre}        on ReadFailed:\n            7\n\[f(3), f(0), test_ep_live()\]\n"] \
+        [epReleased "${pre}        on ReadFailed details:\n            details.bytesRead\n\[f(3), f(0), test_ep_live()\]\n"] \
+        [epReleased "${pre}        on ReadFailed {stream, bytesRead}:\n            e = stream(Message {value: 40})\n            e.value + bytesRead\n\[f(3), f(0), test_ep_live()\]\n"] \
+        [epReleased "${pre}        on ReadFailed {bytesRead}:\n            bytesRead\n\[f(3), f(0), test_ep_live()\]\n"]
+} -cleanup {unset -nocomplain pre} -result {{{value {[7, 0, 0]}} {value {[7, 0, 0]}}} {{value {[3, 0, 0]}} {value {[3, 0, 0]}}} {{value {[43, 0, 0]}} {value {[43, 0, 0]}}} {{value {[3, 0, 0]}} {value {[3, 0, 0]}}}}
+
+test ep-affine-native-releases {items 34, 77: natively, every coroutine a payload owned is released by the drop the static descriptor names (none swept)} -constraints linuxX86_64 -body {
+    set pre "${::epAffine}fn f(n: int) -> int:\n    read(n):\n"
+    lmap text [list "${pre}        on ReadFailed:\n            7\n\[f(3), f(0)\]\n" \
+            "${pre}        on ReadFailed {bytesRead}:\n            bytesRead\n\[f(3), f(0)\]\n" \
+            "${pre}        on ReadFailed details:\n            details.bytesRead\n\[f(3), f(0)\]\n"] {
+        set c [epCoroutines $text]
+        list [dict get $c released] [dict get $c sweptSuspended]
+    }
+} -cleanup {unset -nocomplain pre text c} -result {{2 0} {2 0} {2 0}}
+
+test ep-affine-propagation {item 35: an affine payload propagates through a declaring function to the handler that takes it; nothing is copied, nothing left alive} -body {
+    epReleased "${::epAffine}fn mid(n: int) -> int errors ReadFailed:\n    read(n) + 1\nfn f(n: int) -> int:\n    mid(n):\n        on ReadFailed {stream: s, bytesRead: b}:\n            e = s(Message {value: 5})\n            e.value * 100 + b\n\[f(3), f(0), test_ep_live()\]\n"
+} -result {{value {[503, 1, 0]}} {value {[503, 1, 0]}}}
+
+test ep-affine-partial-construction {item 31: a later payload field that fails abandons the payload: the affine field already moved into it is released (pending temporary)} -body {
+    epReleased "${::epAffine}fn g(n: int) -> int errors ReadFailed, Boom:\n    s = make(n)\n    if n > 0:\n        fail ReadFailed {stream: s, bytesRead: might_fail(n)}\n    0\nfn f(n: int) -> int:\n    g(n):\n        on ReadFailed {bytesRead}:\n            bytesRead\n        on Boom:\n            -1\n\[f(3), f(1), f(0), test_ep_live()\]\n"
+} -result {{value {[-1, 1, 0, 0]}} {value {[-1, 1, 0, 0]}}}
+
+test ep-affine-handler-exits {items 74-75: a handler that returns, fails, breaks or continues releases the payload bindings it still owns} -body {
+    list [epReleased "${::epAffine}fn f(n: int) -> int:\n    x = read(n):\n        on ReadFailed {stream, bytesRead}:\n            if bytesRead > 2:\n                return 99\n            consume(stream)\n    x + 1\n\[f(3), f(2), f(0), test_ep_live()\]\n"] \
+        [epReleased "${::epAffine}fn f(n: int) -> int errors Boom:\n    x = read(n):\n        on ReadFailed details:\n            might_fail(n)\n    x + 1\nfn h(n: int) -> int:\n    f(n):\n        on Boom:\n            -5\n\[h(3), h(1), h(0), test_ep_live()\]\n"] \
+        [epReleased "${::epAffine}fn f(k: int) -> int:\n    total = loop i from 0 to k:\n        x = read(i):\n            on ReadFailed {stream, bytesRead}:\n                if bytesRead == 2:\n                    continue\n                if bytesRead == 4:\n                    break\n                consume(stream)\n        x\n    list::length(total)\n\[f(6), test_ep_live()\]\n"]
+} -result {{{value {[99, 3, 1, 0]}} {value {[99, 3, 1, 0]}}} {{value {[-5, 2, 1, 0]}} {value {[-5, 2, 1, 0]}}} {{value {[3, 0]}} {value {[3, 0]}}}}
+
+test ep-affine-refail {item 36: a handler destructures an affine payload and fails another error built from an unrestricted field; the stream it does not bind is released} -body {
+    epReleased "${::epAffine}fn mid(n: int) -> int errors Plain:\n    read(n):\n        on ReadFailed {bytesRead}:\n            fail Plain {code: bytesRead}\nfn f(n: int) -> int:\n    mid(n):\n        on Plain {code}:\n            code\n\[f(3), f(0), test_ep_live()\]\n"
+} -result {{value {[3, 0, 0]}} {value {[3, 0, 0]}}}
+
+test ep-affine-pending-arguments {item 73: a call abandoned by a payload error releases the caller's pending affine argument; the payload's own ownership tree is separate} -body {
+    epReleased "${::epAffine}fn use2(c: Coroutine{args: \[Message\], return: Event}, n: int) -> int:\n    consume(c) + n\nfn g(n: int) -> int errors ReadFailed:\n    use2(make(1), read(n))\nfn f(n: int) -> int:\n    g(n):\n        on ReadFailed {bytesRead}:\n            bytesRead * 10\n\[f(3), f(0), test_ep_live()\]\n"
+} -result {{value {[30, 2, 0]}} {value {[30, 2, 0]}}}
+
+test ep-affine-hir-evidence {item 76: HIR shows the move into the payload, the hidden binding of an ignored affine payload and its release, and a destructuring temporary's consumed field} -body {
+    set text "${::epAffine}fn ign(n: int) -> int:\n    read(n):\n        on ReadFailed:\n            7\nfn des(n: int) -> int:\n    read(n):\n        on ReadFailed {stream, bytesRead}:\n            consume(stream) + bytesRead\n\[ign(1), des(2)\]\n"
+    list [epHirLines $text "*ref # s : Coroutine*move*"] \
+        [epHirLines $text "on ReadFailed*"] \
+        [epHirLines $text "*const 7 : int release=#"]
+} -cleanup {unset -nocomplain text} -result {{{# ref # s : Coroutine{args: [Message], return: Event, errors: []} move}} {{on ReadFailed # payload (# payload#*)} {on ReadFailed # payload (# destructure#*) consumed=stream binds # stream, # bytesRead}} {{# const 7 : int release=#}}}
+
+test ep-coroutine-affine-payload-rejected {items 83-84: a coroutine may not fail with an error whose payload is affine -- its cached failure is raised again on every later resume (COROUTINE-CONTRACT), as its cached result must be unrestricted} -body {
+    list [epCode "${::epAffine}fn gen(resume Message) -> Event errors ReadFailed:\n    m = yield Event {value: 1}\n    if m.value > 1:\n        s = make(1)\n        fail ReadFailed {stream: s, bytesRead: 1}\n    Event {value: 2}\ncoroutine {step} = gen():\n    on ReadFailed:\n        Event {value: 0}\n1\n"] \
+        [epCode "${::epAffine}fn gen(resume Message) -> Event errors Plain:\n    m = yield Event {value: 1}\n    if m.value > 1:\n        fail Plain {code: m.value}\n    Event {value: 2}\ncoroutine {step} = gen():\n    on Plain:\n        Event {value: 0}\n1\n"]
+} -result {COROUTINE-CONTRACT ok}
+
+test ep-coroutine-cached-payload {items 82-83: a coroutine that fails with an (unrestricted) payload raises the same payload again on a later resume, never running its body again} -body {
+    epAgree "import coroutine\nstruct Message:\n    value: int\nerror Overflow:\n    limit: int\n    seen: int\nfn counter(limit: int, resume Message) -> int errors Overflow:\n    m = yield 0\n    if m.value > limit:\n        fail Overflow {limit: limit, seen: m.value}\n    m.value\nfn go(n: int) -> int:\n    coroutine {step} = counter(3):\n        on Overflow:\n            return -1\n    a = step(Message {value: n}):\n        on Overflow {seen}:\n            seen * 10\n    b = step(Message {value: 1}):\n        on Overflow details:\n            details.limit * 100 + details.seen\n    a + b\n\[go(2), go(9)\]\n"
+} -result {value {[4, 399]}}
+
+# ---------------------------------------------------------------------------
+# Debug rendering and the program boundary (items 66, 72)
+
+test ep-uncaught-rendering {item 66: an uncaught payload error (reachable only with -strict 0: a strict program handles or declares every error) renders its identity and payload identically on every backend -- a diagnostic, not a serialization} -body {
+    set hir [surface::compile "${::epDecls}fn h(uri: str) -> int errors PageNotFound:\n    str::length(fetch(uri))\nh(\"/q\")\n" -strict 0 -warnings off]
+    set exprs [hir::lower $hir]
+    lsort -unique [lmap b {interp compile cranelift-generic cranelift} {lrange [outcomeUnder $b $exprs] 0 2}]
+} -cleanup {unset -nocomplain hir exprs} -result {{error {CORE SEMANTIC UNCAUGHT-ERROR} {uncaught propagated error: <error PageNotFound {response: Response {payloadStream: "", length: 0}, statusCode: 404, uri: "/q"}>}}}
+
+test ep-uncaught-strict {item 72: under -strict 1 a payload error never reaches the program boundary: an unhandled one is UNHANDLED-ERROR at compile time} -body {
+    epCode "${::epAffine}fn top(n: int) -> int:\n    read(n)\n1\n"
+} -result UNHANDLED-ERROR
+
+# ---------------------------------------------------------------------------
+# Representation (items 47-53, 77, 91)
+
+test ep-native-payload-free-unchanged {items 52, 91: a payload-free error's NIR is what it always was: `faildeclared ID NAME`, no payload operand, no payload reads in its handler} -body {
+    set text "error Lost\nfn g(x: int) -> int errors Lost:\n    if x > 1:\n        fail Lost\n    x\nfn f(x: int) -> int:\n    g(x):\n        on Lost:\n            -1\n\[f(1), f(5)\]\n"
+    list [lsearch -all -inline [epFunc $text g] faildeclared*] [epWords [epFunc $text f]]
+} -cleanup {unset -nocomplain text} -result {{{faildeclared 1 "Lost"}} {pusherrorexit call int rawint poperrorexit move jump label declarederroreq br label cleardeclarederror int rawint int rawint op:risub op:rbox move jump label reraise label ret}}
+
+test ep-native-payload-field-wise {items 50-51, 77: a payload travels the error edge field-wise -- `faildeclared ID NAME SHAPE FIELDS...`, no struct object for the payload -- and a handler reads only the fields it uses (`declaredpayload K`)} -body {
+    set text "${::epDecls}fn f(uri: str) -> int:\n    page = fetch(uri):\n        on PageNotFound {statusCode}:\n            return statusCode\n    0\n\[f(\"/a\")\]\n"
+    list [lsearch -all -inline [epFunc $text fetch] faildeclared*] \
+        [lsearch -all -inline [epFunc $text f] *declaredpayload*]
+} -cleanup {unset -nocomplain text} -result {{{faildeclared 2 "PageNotFound" 1 %12 %7 %6}} {{%4 = declaredpayload 1}}}
+
+test ep-native-no-payload-allocation {items 50, 53, 90: a small payload allocates nothing natively (a one-Int payload fails and is handled with zero heap objects); declaring a payload error costs nothing on the success path} -body {
+    set text "error Small:\n    code: int\nfn g(x: int) -> int errors Small:\n    if x > 1:\n        fail Small {code: x}\n    x\nfn f(x: int) -> int:\n    g(x):\n        on Small {code}:\n            code\n"
+    list [epAllocs "${text}f(5) + f(9)\n"] [epAllocs "${text}f(1) + f(0)\n"]
+} -cleanup {unset -nocomplain text} -result {{0 0} {0 0}}
+
+test ep-native-whole-binding-materializes-once {item 50: a whole binding used as a value builds the payload struct once, at the handler; projections of it read fields} -body {
+    set text "${::epDecls}fn f(uri: str):\n    v = fetch(uri):\n        on PageNotFound details:\n            return \[details.statusCode, details\]\n    \[\]\nf(\"/a\")\n"
+    list [llength [lsearch -all [epFunc $text f] *structnew*]] [lindex [epAgree $text] 1]
+} -cleanup {unset -nocomplain text} -result {1 {[404, {response: Response {payloadStream: "", length: 0}, statusCode: 404, uri: "/a"}]}}
+
+test ep-gc-stress {item 89: with a collection at every allocation, nested heap payloads crossing several frames, handled after allocations, re-failed and released stay intact on every native backend} -constraints linuxX86_64 -body {
+    epWithGcStress {
+        list [epAgree "${::epDecls}fn mid(uri: str) -> int errors PageNotFound:\n    str::length(fetch(str::concat(uri, \"/x\")))\nfn outer(uri: str) -> int errors PageNotFound:\n    junk = \[str::concat(uri, \"a\"), str::concat(uri, \"b\")\]\n    mid(uri) + list::length(junk)\nfn f(uri: str) -> str:\n    v = outer(uri):\n        on PageNotFound {uri: u, response}:\n            more = \[str::concat(u, \"!\"), str::concat(u, \"?\")\]\n            return str::concat(list::at(more, 1), response.payloadStream):\n                on IndexNotFound:\n                    \"\"\n    \"none\"\n\[f(\"/p\"), f(\"/q\")\]\n"] \
+            [epReleased "${::epAffine}fn mid(n: int) -> int errors Plain:\n    read(n):\n        on ReadFailed {bytesRead}:\n            junk = \[make(1), make(2)\]\n            fail Plain {code: bytesRead + list::length(junk)}\nfn f(n: int) -> int:\n    mid(n):\n        on Plain {code}:\n            code\n\[f(3), f(0), test_ep_live()\]\n"]
+    }
+} -result {{value {["/p/x?", "/q/x?"]}} {{value {[5, 0, 0]}} {value {[5, 0, 0]}}}}
+
+# ---------------------------------------------------------------------------
+# Modules (items 59-60)
+
+test ep-cross-module {items 59-60: a module's payload error, whose field type is the module's own struct, is failed in the module and handled in the importing program by its name; the fields enter scope only through the handler's binding} -body {
+    withPrivateLibrary {
+        set ch [open [file join $::core::libraryDir eppage.bot] w]
+        fconfigure $ch -encoding utf-8
+        puts -nonewline $ch "struct Meta:\n    status: int\n\nerror NotThere:\n    uri: str\n    meta: Meta\n\nfn get(uri: str) -> int errors NotThere:\n    if uri == \"\":\n        return 0\n    fail NotThere {uri: uri, meta: Meta {status: 404}}\n"
+        close $ch
+        set main "import eppage\nfn f(uri: str) -> int:\n    eppage::get(uri):\n        on NotThere {meta}:\n            meta.status\n\[f(\"\"), f(\"/a\")\]\n"
+        list [epAgree $main] [hir::types::show [hir::errordecls::payloadType NotThere]] \
+            [epCode "import eppage\nerror NotThere:\n    uri: str\n1\n"]
+    }
+} -cleanup {unset -nocomplain ch main} -result {{value {[0, 404]}} {struct{meta: eppage::Meta, uri: str}} UNDECLARED-ERROR}
+
+# ---------------------------------------------------------------------------
+# Extensibility (items 67, 93)
+
+test ep-compile-error-shape {items 67, 93: a CompileError-shaped error -- an enum code, a struct location, a List of them, a message -- is ordinary: failed and handled with `on CompileError {code, primary}` and no new mechanism} -body {
+    epAgree "import list\nenum DiagnosticCode:\n    Type,\n    Unbound,\n    UseAfterMove,\nstruct SourceLocation:\n    line: int\n    column: int\nerror CompileError:\n    code: DiagnosticCode\n    primary: SourceLocation\n    related: List\[SourceLocation\]\n    message: str\nfn check(n: int) -> int errors CompileError:\n    if n < 0:\n        fail CompileError {code: DiagnosticCode::Unbound, primary: SourceLocation {line: 3, column: 7}, related: \[\], message: \"unbound\"}\n    n\nfn assert_compiles(n: int) -> int:\n    check(n):\n        on CompileError {code, primary}:\n            if code == DiagnosticCode::Unbound:\n                primary.line * 100 + primary.column\n            else:\n                -1\n\[assert_compiles(-1), assert_compiles(5)\]\n"
+} -result {value {[307, 5]}}
+
+cleanupTests

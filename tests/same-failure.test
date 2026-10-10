@@ -882,7 +882,7 @@ fn f(x) errors E:
 # ---------------------------------------------------------------------------
 # Payload (item 7): `fail` carries no payload, so identity is the name
 
-test sf-fail-carries-no-payload {the grammar is `fail NAME`: a payload is a syntax error, and the HIR fail node has no value child} -body {
+test sf-fail-carries-no-payload {a payload-free `fail NAME`: a positional or bare payload is a syntax error, and the HIR fail node's value is empty (no child) -- ERROR-PAYLOADS.md gives `fail NAME {...}` a payload only for an error that declares one} -body {
     set hir [compileWith {error E
 fn f(x) errors E:
     if x == 1:
@@ -890,14 +890,34 @@ fn f(x) errors E:
     x} off]
     set fails [lmap {e node} [dict get $hir exprs] {
         if {[dict get $node kind] ne "fail"} continue
-        list [dict exists $node value] [hir::children $hir $e] [dict get $node name]
+        list [expr {[dict get $node value] eq ""}] [hir::children $hir $e] [dict get $node name]
     }]
     list [lrange [lindex [rejection {error E
 fn f(x) errors E:
     fail E(x)} default] 0] 0 1] [lrange [lindex [rejection {error E
 fn f(x) errors E:
     fail E x} default] 0] 0 1] $fails
-} -result {{SURFACE SYNTAX} {SURFACE SYNTAX} {{0 {} E}}}
+} -result {{SURFACE SYNTAX} {SURFACE SYNTAX} {{1 {} E}}}
+
+test sf-payload-rule {ERROR-PAYLOADS.md: a failure carrying a payload groups only with one whose payload is proven identical (hir::exact::Identity); payloads nothing proves identical never group, payload-free fails of the same error still do} -body {
+    set payloadSource {error Bad:
+    code: int
+fn f(x: int) errors Bad:
+    if x == 1:
+        fail Bad {code: x}
+    if x == 2:
+        fail Bad {code: x + 1}
+    x}
+    set plainSource {error Bad
+fn f(x: int) errors Bad:
+    if x == 1:
+        fail Bad
+    if x == 2:
+        fail Bad
+    x}
+    list [llength [failuresOf [compileWith $payloadSource]]] \
+        [lmap w [failuresOf [compileWith $plainSource]] {dict get $w data failureName}]
+} -cleanup {unset -nocomplain payloadSource plainSource} -result {0 Bad}
 
 test sf-identity-is-the-name {the record's failure is the declared name; failureName is the same name} -body {
     set w [lindex [failuresOf [compileWith {error Invalid

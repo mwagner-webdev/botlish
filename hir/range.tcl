@@ -1071,6 +1071,10 @@ proc hir::range::Expr {hirVar ctxVar e} {
             return never
         }
         fail {
+            if {[dict exists $node value] && [dict get $node value] ne ""} {
+                # The payload (ERROR-PAYLOADS.md), evaluated before raising.
+                Expr hir ctx [dict get $node value]
+            }
             # A propagate-error completion, exactly like return/break: never
             # completes normally, so JoinBindings correctly treats this
             # branch as dead and keeps only the surviving branch's own
@@ -1732,9 +1736,16 @@ proc hir::range::VerifyCall {hirVar ranges e node} {
 # Range within the declared integer domain). No runtime guard is ever
 # inserted because a field type is declared: an unproven value is a
 # compile-time TYPE error at that field, exactly as an unproven argument of a
-# declared parameter is. An anonymous struct declares nothing to check.
+# declared parameter is. An anonymous struct declares nothing to check --
+# except an error's payload (`fail NAME {...}`, ERROR-PAYLOADS.md), whose
+# fields are held to the error's declared payload field types by the same
+# proof.
 proc hir::range::VerifyStruct {hirVar ranges e node} {
     upvar 1 $hirVar hir
+    if {[dict exists $node payloadOf]} {
+        VerifyPayload hir $ranges $e $node
+        return
+    }
     if {![dict get $node named] || [dict get $node structId] eq ""} {
         return
     }
@@ -1762,6 +1773,32 @@ proc hir::range::VerifyStruct {hirVar ranges e node} {
         hir::DiagnoseAt hir TYPE [format \
             {field "%s" of struct %s cannot be proven to satisfy its declared type %s (value type: %s%s)%s} \
             $name [hir::structs::display $id] [hir::types::show $declared] \
+            [hir::types::show $valueType] [FactsClause $valueType $declared $valueRange] [MismatchClause $valueType $declared]] $field $origin
+    }
+}
+
+# The payload construction E of `fail NAME {...}` (ERROR-PAYLOADS.md): each
+# field value proven admissible for the declared type of that payload field
+# of error NAME, exactly as a named construction's (VerifyStruct).
+proc hir::range::VerifyPayload {hirVar ranges e node} {
+    upvar 1 $hirVar hir
+    set errorName [dict get $node payloadOf]
+    foreach name [dict get $node names] field [dict get $node fields] origin [dict get $node fieldOrigins] {
+        set declared [hir::errordecls::fieldType $errorName $name]
+        if {$declared eq ""} {
+            continue
+        }
+        set valueType [hir::typeOf $hir $field]
+        if {$valueType eq "never" || ![hir::get $hir $field reachable]} {
+            continue
+        }
+        set valueRange [expr {[dict exists $ranges $field] ? [dict get $ranges $field] : [unknown]}]
+        if {[ProvesValueAcceptedBy $valueType $valueRange $declared]} {
+            continue
+        }
+        hir::DiagnoseAt hir TYPE [format \
+            {payload field "%s" of error %s cannot be proven to satisfy its declared type %s (value type: %s%s)%s} \
+            $name $errorName [hir::types::show $declared] \
             [hir::types::show $valueType] [FactsClause $valueType $declared $valueRange] [MismatchClause $valueType $declared]] $field $origin
     }
 }

@@ -163,6 +163,20 @@ pub struct Vm {
     /// Never itself a GC root: an id is a small compile-time constant, not
     /// a heap value.
     pub declared_error: u32,
+    /// The payload of the pending declared error (ERROR-PAYLOADS.md): its
+    /// field values in the anonymous payload struct's slot order (fields
+    /// sorted by name), transported field-wise -- no struct object is built
+    /// to carry them along the error edge. Empty for a payload-free error
+    /// (and whenever no declared error is pending). Set by
+    /// `rt_fail_declared_payload`, read by a handler's `declaredpayload K`,
+    /// cleared with `declared_error` by `rt_clear_declared_error` (and by
+    /// every payload-free `fail`). A GC root while pending: the payload
+    /// lives only here between the `fail` and the handler that receives it.
+    pub declared_payload: Vec<Value>,
+    /// The shape number of the pending payload's anonymous struct (only
+    /// meaningful while `declared_payload` is non-empty): what renders an
+    /// uncaught payload at the program boundary (`Vm::describe_error`).
+    pub declared_payload_shape: u32,
     /// The process argument snapshot of this run, as raw bytes exactly as
     /// the launching process supplied them (ARGV.md): copied here once, at
     /// startup or by the harness, and never decoded until `argv()` runs.
@@ -247,6 +261,8 @@ impl Vm {
             heap: Heap::new(),
             error: None,
             declared_error: 0,
+            declared_payload: Vec::new(),
+            declared_payload_shape: 0,
             argv: DEFAULT_ARGV.iter().map(|a| a.as_bytes().to_vec()).collect(),
             argv_invalid: std::cell::OnceCell::new(),
             temp_roots: Vec::new(),
@@ -435,6 +451,7 @@ impl Vm {
             .chain(native.iter().copied())
             .chain(native_frame_roots)
             .chain(error_values)
+            .chain(self.declared_payload.iter().copied())
             .chain(self.temp_roots.iter().copied())
             .chain(self.context_roots.iter().copied())
             .chain(self.statics_table.iter().copied());
@@ -456,12 +473,34 @@ impl Vm {
     /// anything in that run reads it -- so a stale previous-run value is
     /// simply retained as an ordinary (harmless) GC root a little longer,
     /// exactly like this same collection call's other roots.
+    /// The message of ERROR as the program boundary reports it: its own
+    /// message, with the payload of an uncaught declared error rendered into
+    /// it (ERROR-PAYLOADS.md: `<error NAME {field: value, ...}>`, as the Tcl
+    /// backends' errorId renders) -- lazily, here, never on a failure path
+    /// a handler catches.
+    pub fn describe_error(&self, error: &RtError) -> String {
+        let message = error.message();
+        if self.declared_error == 0 || self.declared_payload.is_empty() {
+            return message;
+        }
+        if let RtError::Semantic { kind: "UNCAUGHT-ERROR", .. } = error {
+            if let Some(stripped) = message.strip_suffix('>') {
+                return format!(
+                    "{stripped} {}>",
+                    super::show::show_fields(self.declared_payload_shape, &self.declared_payload)
+                );
+            }
+        }
+        message
+    }
+
     pub fn reset(&mut self) {
         self.ss_top = self.ss_base;
         self.native_roots_ptr = std::ptr::null_mut();
         self.native_roots_len = 0;
         self.error = None;
         self.declared_error = 0;
+        self.declared_payload.clear();
         self.temp_roots.clear();
         self.context_roots.clear();
         self.metrics.reset();

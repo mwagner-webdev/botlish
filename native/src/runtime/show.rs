@@ -13,6 +13,33 @@ pub fn show(v: Value) -> String {
     out
 }
 
+/// The rendering of a struct of shape SHAPE whose field values are FIELDS
+/// (slot order), as `show` renders such a struct object: what an uncaught
+/// error's payload (ERROR-PAYLOADS.md), transported field-wise and never
+/// built as an object, looks like at the program boundary.
+pub fn show_fields(shape: u32, fields: &[Value]) -> String {
+    let (name, names) = current_program(|prog| {
+        let shape = &prog.shapes[shape as usize];
+        (shape.name.clone(), shape.fields.clone())
+    });
+    let mut out = String::new();
+    if let Some(name) = name {
+        out.push_str(&name);
+        out.push(' ');
+    }
+    out.push('{');
+    for (i, (field, item)) in names.iter().zip(fields.iter()).enumerate() {
+        if i > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(field);
+        out.push_str(": ");
+        show_into(*item, &mut out);
+    }
+    out.push('}');
+    out
+}
+
 fn show_into(v: Value, out: &mut String) {
     match kind_of(v) {
         Kind::Int => out.push_str(&int_text(v)),

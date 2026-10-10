@@ -300,6 +300,13 @@ proc hir::completions::Eval {hirVar ctxVar diagnose enclosing guard e} {
             return never
         }
         fail {
+            if {[dict exists $node value] && [dict get $node value] ne ""} {
+                # The payload (ERROR-PAYLOADS.md) is evaluated first: one
+                # that never completes raises nothing.
+                if {[Eval hir ctx $diagnose $enclosing $guard [dict get $node value]] eq {never}} {
+                    return never
+                }
+            }
             dict set ctx errors [dict get $node name] 1
             return never
         }

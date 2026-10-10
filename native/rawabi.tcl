@@ -668,7 +668,13 @@ proc native::rawabi::Walk {e sink why} {
     }
     set node [hir::node $h $e]
     switch -- [dict get $node kind] {
-        const - continue - fail { }
+        const - continue { }
+        fail {
+            # A payload's fields (ERROR-PAYLOADS.md) are transported tagged.
+            if {[dict exists $node value] && [dict get $node value] ne ""} {
+                Walk [dict get $node value] "" "error payload"
+            }
+        }
         ref {
             set b [dict get $node binding]
             if {$b ne "" && [dict get [hir::binding $h $b] kind] in {local param}} {

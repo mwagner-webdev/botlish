@@ -1201,12 +1201,28 @@ proc hir::resolve::Expr {hirVar node ctx} {
         fail {
             set name [dict get $node name]
             SetField hir $e name $name
+            # The payload (ERROR-PAYLOADS.md) is evaluated before the error is
+            # raised: resolved first, in the enclosing scope.
+            set value ""
+            if {[dict exists $node value] && [dict get $node value] ne ""} {
+                set value [Expr hir [dict get $node value] $ctx]
+            }
+            SetField hir $e value $value
             if {![hir::errordecls::isDeclared $name]} {
                 hir::Diagnose hir UNDECLARED-ERROR \
                     "unknown error \"$name\": no \"error $name\" declaration is visible" $e
             } elseif {$name ni [dict get $ctx errors]} {
                 hir::Diagnose hir UNHANDLED-ERROR \
                     "\"fail $name\" is not admitted here: the enclosing function does not declare \"errors $name\"" $e
+            }
+            if {[hir::errordecls::isDeclared $name]} {
+                if {[hir::errordecls::hasPayload $name] && $value eq ""} {
+                    hir::Diagnose hir MISSING-ERROR-PAYLOAD \
+                        "error \"$name\" carries a payload, which \"fail $name\" must construct: write \"fail $name \{[join [lmap f [hir::errordecls::fieldNames $name] {string cat $f {: ...}}] {, }]\}\" (the error's name alone is not its payload)" $e
+                } elseif {![hir::errordecls::hasPayload $name] && $value ne ""} {
+                    hir::Diagnose hir UNEXPECTED-ERROR-PAYLOAD \
+                        "error \"$name\" declares no payload: write \"fail $name\" (to give it one, declare its fields: \"error $name:\" followed by \"field: Type\" lines)" $e
+                }
             }
         }
         handle {
@@ -1218,8 +1234,11 @@ proc hir::resolve::Expr {hirVar node ctx} {
             set names {}
             set scopes {}
             set bodies {}
+            set payloads {}
             set seen [dict create]
+            set index 0
             foreach handler [dict get $node handlers] {
+                incr index
                 set name [dict get $handler name]
                 set body [dict get $handler body]
                 if {[dict exists $seen $name]} {
@@ -1235,13 +1254,36 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 set branch [NewScope hir branch $scope \
                     [dict get $hir scopes $scope invocation] $e [dict get $handler origin]]
                 NoteBody hir $branch $body
+                # What the handler receives of the selected error's payload
+                # (ERROR-PAYLOADS.md): a binding of the handler's own scope,
+                # established before its body -- the name written, or a
+                # destructuring's hygienic temporary (whose projection binds
+                # open the body). Selection is the error name alone. An
+                # ignored payload that owns affine values gets a hidden
+                # binding, so it is released by the ordinary rules
+                # (hir/affine.tcl) -- never left to a collector.
+                set payload [expr {[dict exists $handler payload] ? [dict get $handler payload] : ""}]
+                set binding ""
+                if {$payload ne ""} {
+                    set binding [NewBinding hir [dict get $payload name] param $branch [dict get $payload origin]]
+                    if {[hir::errordecls::isDeclared $name] && ![hir::errordecls::hasPayload $name]} {
+                        hir::DiagnoseAt hir UNEXPECTED-ERROR-PAYLOAD \
+                            "error \"$name\" declares no payload: there is nothing to bind (write \"on $name:\")" \
+                            $e [dict get $payload origin]
+                    }
+                } elseif {[hir::errordecls::hasPayload $name]
+                        && [hir::types::IsAffine [hir::errordecls::payloadType $name]]} {
+                    set binding [NewBinding hir "payload#$e#$index" param $branch [dict get $handler origin]]
+                }
                 lappend names $name
                 lappend scopes $branch
+                lappend payloads $binding
                 lappend bodies [Sequence hir $body [dict replace $ctx scope $branch]]
             }
             SetField hir $e handlerNames $names
             SetField hir $e handlerScopes $scopes
             SetField hir $e handlerBodies $bodies
+            SetField hir $e handlerPayloads $payloads
         }
         default {
             core::malformed "unknown syntax node kind \"$kind\"" $node
@@ -1423,6 +1465,33 @@ proc hir::resolve::ResolveStruct {hirVar e node ctx} {
             if {$declared ni $names} {
                 hir::Diagnose hir MISSING-FIELD \
                     "$what is missing field \"$declared\" (every declared field must be given exactly once; there are no defaults)" $e
+            }
+        }
+    }
+    if {[dict exists $node payloadOf]} {
+        # The payload of `fail NAME {...}` (ERROR-PAYLOADS.md): an anonymous
+        # struct value checked exactly as a named construction is, against
+        # the error's declared payload fields -- every field once, none
+        # undeclared (hir::range::VerifyStruct proves each value admissible
+        # for its declared type). A payload-free or unknown error has no
+        # fields to check against (the fail itself is diagnosed).
+        set errorName [dict get $node payloadOf]
+        SetField hir $e payloadOf $errorName
+        if {[hir::errordecls::hasPayload $errorName]} {
+            set declaredNames [hir::errordecls::fieldNames $errorName]
+            set reported {}
+            foreach name $names origin $fieldOrigins {
+                if {$name ni $declaredNames && $name ni $reported} {
+                    lappend reported $name
+                    hir::DiagnoseAt hir UNKNOWN-FIELD \
+                        "the payload of error $errorName has no field \"$name\" (declared fields: [join $declaredNames {, }])" $e $origin
+                }
+            }
+            foreach declared $declaredNames {
+                if {$declared ni $names} {
+                    hir::Diagnose hir MISSING-FIELD \
+                        "the payload of error $errorName is missing field \"$declared\" (every declared field must be given exactly once; there are no defaults)" $e
+                }
             }
         }
     }

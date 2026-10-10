@@ -945,6 +945,19 @@ proc core::compiler::CompileForm {ctxVar e} {
             return [Op box "\$$t" result]
         }
         fail {
+            if {[N $e value] ne ""} {
+                # ERROR-PAYLOADS.md: the payload is evaluated, then carried by
+                # the error identity -- errorId(NAME, PAYLOAD), never text.
+                set value [CompileExpr ctx [N $e value]]
+                if {[OpType $value] eq "never"} {
+                    return $value
+                }
+                foreach b $after {
+                    CompileRelease ctx $b
+                }
+                Emit ctx "return -code 5 \[core::value::errorId [Word [N $e name]] [BoxWord $value]\]"
+                return [Never]
+            }
             Emit ctx "return -code 5 [Word [core::value::errorId [N $e name]]]"
             return [Never]
         }
@@ -1850,10 +1863,12 @@ proc core::compiler::CompileLockLoop {ctxVar e} {
 # fromTclCode case 1 already uses for an ordinary Tcl error.
 proc core::compiler::CompileHandle {ctxVar e} {
     upvar 1 $ctxVar ctx
+    variable hir
     set callExpr [N $e call]
     set names [N $e handlerNames]
     set scopes [N $e handlerScopes]
     set bodies [N $e handlerBodies]
+    set payloads [expr {[dict exists [dict get $hir exprs $e] handlerPayloads] ? [N $e handlerPayloads] : {}}]
     set parentFrame [CurrentFrameExpr $ctx]
 
     set stVar [NewTemp]
@@ -1889,10 +1904,26 @@ proc core::compiler::CompileHandle {ctxVar e} {
     Indent ctx 1
     Emit ctx "switch -exact -- \[lindex \$$resVar 1\] \{"
     Indent ctx 1
+    set index 0
     foreach name $names scopeId $scopes body $bodies {
+        set payload [lindex $payloads $index]
+        incr index
         Emit ctx "[Word $name] \{"
         Indent ctx 1
         OpenScope ctx $scopeId $parentFrame
+        if {$payload ne ""} {
+            # The handler's payload binding (ERROR-PAYLOADS.md): the payload
+            # the selected error identity carries, bound like a loop's
+            # element binding.
+            set item [NewTemp]
+            Emit ctx "set $item \[core::value::errorIdPayload \$$resVar\]"
+            if {[dict get $ctx scopes $scopeId materialized]} {
+                set frame [dict get $ctx scopes $scopeId frame]
+                Emit ctx "core::env::define \$$frame [Word [B $payload name]] \$$item"
+            } else {
+                dict set ctx scopes $scopeId locals $payload [list box "\$$item"]
+            }
+        }
         DeclareScope ctx $scopeId
         set hValue [CompileSequence ctx $body]
         PopScope ctx

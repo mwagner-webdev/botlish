@@ -1470,8 +1470,8 @@ proc hir::traits::StampNode {node counterVar indexVar} {
                 dict set index [dict get $node sid] $node
             }
         }
-        break {
-            if {[dict get $node value] ne ""} {
+        break - fail {
+            if {[dict exists $node value] && [dict get $node value] ne ""} {
                 dict set node value [StampNode [dict get $node value] counter index]
             }
         }

@@ -184,7 +184,7 @@ proc surface::lower::SplitTypeDecls {statements {namespace ""}} {
         switch -- [dict get $statement kind] {
             typedecl   { lappend decls [TypeDeclOf $statement $namespace] }
             enumdecl   { lappend decls [EnumDeclOf $statement $namespace] }
-            errordecl  { lappend errorDecls [ErrorDeclOf $statement] }
+            errordecl  { lappend errorDecls [ErrorDeclOf $statement $namespace] }
             structdecl { lappend structDecls [StructDeclOf $statement $namespace] }
             traitdecl  { lappend traitDecls [TraitDeclOf $statement $namespace] }
             default    { lappend executable $statement }
@@ -245,8 +245,16 @@ proc surface::lower::TypeDeclOf {node {namespace ""}} {
         domain [dict get $node domain] domainSpan [dict get $node domain span]]
 }
 
-proc surface::lower::ErrorDeclOf {node} {
-    return [dict create name [dict get $node name] nameSpan [dict get $node nameSpan]]
+# The declaration dict of an `errordecl` node declared in module NAMESPACE
+# ("" for the entry program): its name, and its payload FIELDS
+# (ERROR-PAYLOADS.md; {name nameSpan type typeSpan} dicts, empty for a
+# payload-free error) with the namespace their type names resolve in. The
+# error's name stays program-global (hir/errordecls.tcl); NAMESPACE only
+# scopes the payload's field types, exactly as a struct's.
+proc surface::lower::ErrorDeclOf {node {namespace ""}} {
+    return [dict create name [dict get $node name] nameSpan [dict get $node nameSpan] \
+        namespace $namespace span [dict get $node span] \
+        fields [expr {[dict exists $node fields] ? [dict get $node fields] : {}}]]
 }
 
 # The tail both surface::lowerToHir and surface::modules::compileProgramFile
@@ -375,6 +383,33 @@ proc surface::lower::Destructure {node} {
     return [concat [list $source] [Projections $pattern $temp] [list $result]]
 }
 
+# The handler syntax dicts of handled call NODE (hir/syntax.tcl's handleNode):
+# what each "on NAME" receives of the error's payload is its `payload`
+# binding (ERROR-PAYLOADS.md) -- the name written in `on NAME details:`, or
+# for `on NAME {a, b: c}:` the pattern's hygienic temporary, whose ordinary
+# projection binds (Projections, exactly a destructuring statement's) open
+# the handler body. Nothing else of a handler is payload-specific: selection
+# stays the error name alone.
+proc surface::lower::Handlers {node} {
+    return [lmap handler [dict get $node handlers] {
+        set suite [dict get $handler body]
+        set body [Sequence [dict get $suite body]]
+        set payload ""
+        if {[dict exists $handler binding] && [dict get $handler binding] ne ""} {
+            set payload [dict create name [dict get $handler binding] \
+                origin [Origin [dict get $handler bindingSpan] [dict get $suite id]/payload]]
+        } elseif {[dict exists $handler pattern] && [dict get $handler pattern] ne ""} {
+            set pattern [dict get $handler pattern]
+            set temp [TempName $pattern]
+            set payload [dict create name $temp \
+                origin [Origin [dict get $pattern span] [dict get $suite id]/payload]]
+            set body [concat [Projections $pattern $temp] $body]
+        }
+        dict create name [dict get $handler name] nameSpan [dict get $handler nameSpan] \
+            origin [OriginOf $suite] body $body payload $payload
+    }]
+}
+
 # The hygienic temporary of the pattern PATTERN: unique per pattern in a file.
 proc surface::lower::TempName {pattern} {
     return "destructure#[dict get $pattern span start]"
@@ -431,11 +466,7 @@ proc surface::lower::CoroutineBind {node} {
     set call $value
     if {[dict get $value kind] eq "handledcall"} {
         set call [dict get $value call]
-        set handlers [lmap handler [dict get $value handlers] {
-            dict create name [dict get $handler name] nameSpan [dict get $handler nameSpan] \
-                origin [OriginOf [dict get $handler body]] \
-                body [Sequence [dict get [dict get $handler body] body]]
-        }]
+        set handlers [Handlers $value]
     }
     set n [dict get $node span start]
     set pre {}
@@ -743,19 +774,24 @@ proc surface::lower::Node {node} {
             return [hir::syntax::continueNode $origin]
         }
         fail {
-            return [hir::syntax::failNode $origin [dict get $node name]]
+            # ERROR-PAYLOADS.md: a payload is the struct construction of its
+            # field initializers, checked (hir/resolve.tcl, hir/range.tcl)
+            # against the error's declared payload -- PAYLOADOF -- exactly as
+            # a named construction is against its declaration.
+            set payload ""
+            if {[dict exists $node payload] && [dict get $node payload] ne ""} {
+                set init [dict get $node payload]
+                set payload [hir::syntax::structNode [OriginOf $init] "" [FieldInits $init]]
+                dict set payload payloadOf [dict get $node name]
+            }
+            return [hir::syntax::failNode $origin [dict get $node name] $payload]
         }
         yield {
             return [hir::syntax::callNode $origin \
                 [hir::syntax::rootRef $origin [core::coroutines::yieldNative]] [Node [dict get $node value]]]
         }
         handledcall {
-            set handlers [lmap handler [dict get $node handlers] {
-                dict create name [dict get $handler name] nameSpan [dict get $handler nameSpan] \
-                    origin [OriginOf [dict get $handler body]] \
-                    body [Sequence [dict get [dict get $handler body] body]]
-            }]
-            return [hir::syntax::handleNode $origin [Node [dict get $node call]] $handlers]
+            return [hir::syntax::handleNode $origin [Node [dict get $node call]] [Handlers $node]]
         }
     }
     error "surface::lowerToHir: cannot lower a \"[dict get $node kind]\" node"

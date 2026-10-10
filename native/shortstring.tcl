@@ -668,7 +668,7 @@ proc native::shortstr::DemandWalk {id e ctx} {
     set h [View $id]
     set node [hir::node $h $e]
     switch -- [dict get $node kind] {
-        const - continue - fail - block { }
+        const - continue - block { }
         ref {
             set b [dict get $node binding]
             if {$b eq ""} return
@@ -846,7 +846,7 @@ proc native::shortstr::LiveWalk {id h e liveVar} {
     dict set live $e 1
     set node [hir::node $h $e]
     switch -- [dict get $node kind] {
-        const - ref - continue - fail - block { }
+        const - ref - continue - block { }
         bind {
             set value [dict get $node value]
             if {[hir::kind $h $value] ne "block"} {

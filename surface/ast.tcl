@@ -160,17 +160,22 @@
 #              `context` (0|1) and `contextSpan`: the `context` modifier
 #              (`context trait IO:`, CONTEXT-TRAITS.md), a property of the
 #              one declaration kind, never a separate kind.
-#   errordecl  name, nameSpan -- a top-level named-error declaration
+#   errordecl  name, nameSpan, fields -- a top-level named-error declaration
 #              ("error NAME", surface/parser.tcl's ErrorDecl; see
-#              hir/errordecls.tcl for what it means). No runtime meaning,
-#              exactly like typedecl.
+#              hir/errordecls.tcl for what it means). FIELDS is its payload
+#              (ERROR-PAYLOADS.md): one {name nameSpan type typeSpan} dict per
+#              declared payload field, in written order, exactly a
+#              structdecl's; empty for a payload-free error. No runtime
+#              meaning, exactly like typedecl.
 #   with       form (context), formSpan, value -- "with context EXPR": a
 #              declaration-like statement installing EXPR's value as the
 #              execution-environment context of its type for the rest of
 #              the scope (CONTEXTS.md); `form` leaves room for later `with`
 #              declarations
-#   fail       name, nameSpan -- "fail NAME": produces the named error's
-#              completion (EXPLICIT-ERROR-COMPLETIONS.md).
+#   fail       name, nameSpan, payload -- "fail NAME": produces the named
+#              error's completion (EXPLICIT-ERROR-COMPLETIONS.md). PAYLOAD is
+#              "" or, for "fail NAME {field: value, ...}", the anonstruct
+#              node of its field initializers (ERROR-PAYLOADS.md).
 #   yield      value -- "yield VALUE" (COROUTINES.md): sends VALUE outward,
 #              suspends the coroutine, evaluates to the resume message
 #   coroutinebind  pattern, value -- "coroutine {step: s, first: f} = CALL"
@@ -182,9 +187,12 @@
 #              printer know it by this name: lowering turns it into the
 #              construction and the eager start (surface/lower.tcl)
 #   handledcall  call (a `call` or `methodcall` node), handlers (a list of {name nameSpan
-#              body} dicts, one per "on NAME:" clause in written order;
-#              body a suite) -- "CALL: on NAME: ... on NAME: ...". Only a
-#              bare call expression may be handled this way (item 9).
+#              body binding bindingSpan pattern} dicts, one per "on NAME:"
+#              clause in written order; body a suite; binding the name the
+#              whole payload is bound to in "on NAME details:", else "";
+#              pattern the destructuring pattern of "on NAME {a, b: c}:", else
+#              "" -- ERROR-PAYLOADS.md) -- "CALL: on NAME: ... on NAME: ...".
+#              Only a bare call expression may be handled this way (item 9).
 #   error      a statement that could not be parsed (recovering parses only)
 #
 # Node ids
@@ -417,10 +425,18 @@ proc surface::ast::Ids {node id} {
             set index 1
             foreach handler [dict get $node handlers] {
                 dict set handler body [Suite [dict get $handler body] $id/on$index]
+                if {[dict exists $handler pattern] && [dict get $handler pattern] ne ""} {
+                    dict set handler pattern [PatternIds [dict get $handler pattern] $id/on$index/payload]
+                }
                 lappend handlers $handler
                 incr index
             }
             dict set node handlers $handlers
+        }
+        fail {
+            if {[dict exists $node payload] && [dict get $node payload] ne ""} {
+                dict set node payload [Ids [dict get $node payload] $id/payload]
+            }
         }
     }
     return $node
@@ -508,6 +524,11 @@ proc surface::ast::Children {node} {
                 lappend children [dict get $handler body]
             }
             return $children
+        }
+        fail {
+            if {[dict exists $node payload] && [dict get $node payload] ne ""} {
+                return [list [dict get $node payload]]
+            }
         }
     }
     return {}
@@ -747,6 +768,13 @@ proc surface::ast::Statement {node indent show linesVar} {
             return
         }
         errordecl {
+            if {[dict exists $node fields] && [dict get $node fields] ne {}} {
+                lappend lines "${pad}error [dict get $node name]:$at"
+                foreach field [dict get $node fields] {
+                    lappend lines "${pad}    [dict get $field name]: [showType [dict get $field type]]"
+                }
+                return
+            }
             lappend lines "${pad}error [dict get $node name]$at"
             return
         }
@@ -788,7 +816,11 @@ proc surface::ast::Statement {node indent show linesVar} {
             return
         }
         fail {
-            lappend lines "${pad}fail [dict get $node name]$at"
+            if {[dict exists $node payload] && [dict get $node payload] ne ""} {
+                lappend lines "${pad}fail [dict get $node name] [Expr [dict get $node payload] $show]$at"
+            } else {
+                lappend lines "${pad}fail [dict get $node name]$at"
+            }
             return
         }
         function {
@@ -904,7 +936,13 @@ proc surface::ast::HandledCall {node indent show linesVar {prefix ""}} {
     set pad [string repeat {    } $indent]
     lappend lines "$pad${prefix}[Expr [dict get $node call] $show]:[At $node $show]"
     foreach handler [dict get $node handlers] {
-        lappend lines "[string repeat {    } [expr {$indent + 1}]]on [dict get $handler name]:"
+        set receive ""
+        if {[dict exists $handler binding] && [dict get $handler binding] ne ""} {
+            set receive " [dict get $handler binding]"
+        } elseif {[dict exists $handler pattern] && [dict get $handler pattern] ne ""} {
+            set receive " [PatternText [dict get $handler pattern] $show]"
+        }
+        lappend lines "[string repeat {    } [expr {$indent + 1}]]on [dict get $handler name]$receive:"
         Body [dict get $handler body] [expr {$indent + 2}] $show lines
     }
 }

@@ -43,7 +43,12 @@
 #                | "return" (if|loop|handledExpr)
 #   handledExpr  = expression [ handlers ]     -- handlers only after a bare
 #                                                  call expression (item 9)
-#   handlers     = ":" NEWLINE INDENT { "on" IDENT ":" suite } DEDENT
+#   handlers     = ":" NEWLINE INDENT { handler } DEDENT
+#   handler      = "on" IDENT [ IDENT | pattern ] ":" suite
+#                  -- ERROR-PAYLOADS.md: the error name selects the handler;
+#                  the optional IDENT binds the error's whole payload, the
+#                  optional pattern destructures it (STRUCT-DESTRUCTURING.md's
+#                  pattern, irrefutable). No guard, no value pattern
 #   function     = { functionModifier } "fn" IDENT "(" [ paramList ] ")"
 #                  [ "->" typeExpr ] [ proofClause ]
 #                  [ "errors" IDENT { "," IDENT } ] ":" suite
@@ -101,7 +106,9 @@
 #                                       level ("break EXPR" is a syntax
 #                                       error, not merely rejected later)
 #   continue     = "continue"
-#   fail         = "fail" IDENT
+#   fail         = "fail" IDENT [ fieldInits ]
+#                  -- ERROR-PAYLOADS.md: the payload of an error that
+#                  declares one, as a struct's named field initializers
 #
 #   typeDecl     = "type" IDENT "=" IDENT "in" domain NEWLINE
 #                | "refined" "type" IDENT "=" typeExpr NEWLINE
@@ -115,6 +122,10 @@
 #   signedInt    = [ "-" ] INT
 #
 #   errorDecl    = "error" IDENT NEWLINE
+#                | "error" IDENT ":" NEWLINE INDENT
+#                  { IDENT ":" typeExpr NEWLINE } DEDENT
+#                  -- ERROR-PAYLOADS.md: a named-field payload, a struct
+#                  declaration's field grammar exactly
 #
 #   traitDecl    = [ "context" ] "trait" IDENT ":" NEWLINE INDENT
 #                  traitRequirement { traitRequirement } DEDENT
@@ -1180,10 +1191,25 @@ proc surface::parser::Simple {pVar} {
             return [surface::ast::node continue $start]
         }
         fail {
+            # `fail NAME` or, for an error that declares a payload,
+            # `fail NAME {field: value, ...}` (ERROR-PAYLOADS.md): the one
+            # field-initializer payload of struct construction, checked
+            # against the error's declared payload fields by HIR.
             Advance p
             set name [Expect p IDENT "an error name after \"fail\""]
+            set payload ""
+            switch -- [Kind p] {
+                \{ {
+                    set payloadStart [dict get [Peek p] span]
+                    set init [FieldInits p]
+                    set payload [surface::ast::node anonstruct [SpanFrom p $payloadStart] init $init]
+                }
+                ( {
+                    Fail [Peek p] "an error payload is constructed by named fields, never positionally: write \"fail [dict get $name value] \{field: value, ...\}\""
+                }
+            }
             return [surface::ast::node fail [SpanFrom p $start] \
-                name [dict get $name value] nameSpan [dict get $name span]]
+                name [dict get $name value] nameSpan [dict get $name span] payload $payload]
         }
     }
     return [ValueOrHandled p]
@@ -1234,14 +1260,69 @@ proc surface::parser::HandledCall {pVar call} {
         }
         Advance p
         set name [Expect p IDENT "an error name after \"on\""]
-        set body [Suite p "the error name"]
-        lappend handlers [dict create name [dict get $name value] nameSpan [dict get $name span] body $body]
+        # What the handler receives of the selected error's payload
+        # (ERROR-PAYLOADS.md): nothing (`on NAME:`), the whole payload as one
+        # binding (`on NAME details:`), or an irrefutable struct
+        # destructuring of it (`on NAME {a, b: c}:`, the destructuring
+        # pattern grammar exactly). The error name alone selects the handler.
+        set binding ""
+        set bindingSpan ""
+        set pattern ""
+        switch -- [Kind p] {
+            IDENT {
+                if {[dict get [Peek p] value] eq "where" && [Kind p 1] ne ":"} {
+                    HandlerGuardError p [dict get $name value]
+                }
+                set token [Advance p]
+                set binding [dict get $token value]
+                set bindingSpan [dict get $token span]
+            }
+            \{ {
+                set pattern [Pattern p]
+            }
+        }
+        if {[Kind p] ne ":"} {
+            HandlerGuardError p [dict get $name value]
+        }
+        set body [Suite p [expr {$binding ne "" || $pattern ne "" ? "the handler's payload binding" : "the error name"}]]
+        lappend handlers [dict create name [dict get $name value] nameSpan [dict get $name span] body $body \
+            binding $binding bindingSpan $bindingSpan pattern $pattern]
     }
     Advance p
     if {$handlers eq {}} {
         Fail [Peek p] "a handled call needs at least one \"on\" handler"
     }
     return [surface::ast::node handledcall [SpanFrom p $start] call $call handlers $handlers]
+}
+
+# Rejects what would make a handler more than nominal selection plus an
+# irrefutable binding (ERROR-PAYLOADS.md): a guard (`on E if ...`, `on E
+# where ...`), several errors in one handler (`on E, F:`, `on E | F:`), a
+# positional payload (`on E(a, b):`) or a second binding form.
+proc surface::parser::HandlerGuardError {pVar name} {
+    upvar 1 $pVar p
+    set token [Peek p]
+    switch -- [dict get $token kind] {
+        : { return }
+        if {
+            Fail $token "a handler selects only by the error's identity (\"on $name:\"): there are no handler guards; test the payload with an ordinary \"if\" inside the handler"
+        }
+        , {
+            Fail $token "a handler names exactly one error: write one \"on NAME:\" handler per error"
+        }
+        ( {
+            Fail $token "an error payload is received by name, never positionally: bind it whole (\"on $name details:\") or destructure its fields (\"on $name \{field, other: name\}:\")"
+        }
+        IDENT {
+            if {[dict get $token value] eq "where"} {
+                Fail $token "a handler selects only by the error's identity (\"on $name:\"): there are no handler guards; test the payload with an ordinary \"if\" inside the handler"
+            }
+        }
+    }
+    if {[dict get $token text] eq "|"} {
+        Fail $token "a handler names exactly one error: write one \"on NAME:\" handler per error"
+    }
+    Fail $token "expected \":\" after the handler's error name and its optional payload binding (\"on $name:\", \"on $name details:\" or \"on $name \{field, ...\}:\"), found [Describe $token]"
 }
 
 # A statement's value: an if, a loop, or an expression.
@@ -1712,15 +1793,84 @@ proc surface::parser::FlagEntry {pVar} {
 }
 
 # "error" IDENT NEWLINE -- a top-level named-error declaration (see this
-# file's own header, and hir/errordecls.tcl for what it means). Only legal
-# directly at a program's or module's own top level, exactly like a
-# typeDecl (Statement rejects it elsewhere, using the same `topLevel` flag).
+# file's own header, and hir/errordecls.tcl for what it means) -- or
+# "error" IDENT ":" NEWLINE INDENT { IDENT ":" typeExpr NEWLINE } DEDENT, the
+# same declaration with a named-field payload (ERROR-PAYLOADS.md): every
+# payload field is `name: Type` with exactly a struct field's grammar (an
+# explicit type, no default), in written order. The payload-free spelling
+# stays the zero-field case: `error NAME:` with no field is not another
+# spelling of it. Only legal directly at a program's or module's own top
+# level, exactly like a typeDecl (Statement rejects it elsewhere, using the
+# same `topLevel` flag). The node carries `fields`, one {name nameSpan type
+# typeSpan} dict per declared payload field (empty for a payload-free error).
 proc surface::parser::ErrorDecl {pVar} {
     upvar 1 $pVar p
     set start [dict get [Advance p] span]
     set name [Expect p IDENT "an error name after \"error\""]
+    set errorName [dict get $name value]
+    set fields {}
+    switch -- [Kind p] {
+        ( {
+            Fail [Peek p] "an error payload has named fields, never positional ones: declare \"error $errorName:\" followed by an indented block of \"field: Type\" lines"
+        }
+        = {
+            Fail [Peek p] "an error declaration is not a binding: declare a payload as \"error $errorName:\" followed by an indented block of \"field: Type\" lines"
+        }
+        : {
+            Advance p
+            set token [Peek p]
+            if {[dict get $token kind] ne "NEWLINE"} {
+                if {[dict get $token kind] eq "\{"} {
+                    Fail $token "an error payload is declared by its fields, not by an anonymous struct type: write \"error $errorName:\" followed by an indented block of \"field: Type\" lines"
+                }
+                Fail $token "expected a new line and an indented block of payload fields after \":\", found [Describe $token]"
+            }
+            Advance p
+            set token [Peek p]
+            if {[dict get $token kind] ne "INDENT"} {
+                Fail $token "an error declared with \":\" needs at least one \"field: Type\" line in an indented block (a payload-free error is declared \"error $errorName\", without the colon), found [Describe $token]"
+            }
+            Advance p
+            while {[Kind p] ne "DEDENT" && [Kind p] ne "EOF"} {
+                if {[Kind p] eq "NEWLINE"} {
+                    Advance p
+                    continue
+                }
+                set fieldToken [Peek p]
+                if {[dict get $fieldToken kind] in {.. .}} {
+                    Fail $fieldToken "an error payload has no rest field: declare every payload field by name"
+                }
+                if {[dict get $fieldToken kind] ne "IDENT"} {
+                    Fail $fieldToken "expected a payload field declaration \"name: Type\", found [Describe $fieldToken]"
+                }
+                Advance p
+                if {[Kind p] ne ":"} {
+                    Fail [Peek p] "expected \":\" and a type after the payload field name \"[dict get $fieldToken value]\" (a payload field always has an explicit type), found [Describe [Peek p]]"
+                }
+                Advance p
+                set typeStart [dict get [Peek p] span]
+                set type [TypeExpr p "a payload field type after \":\""]
+                set typeSpan [SpanFrom p $typeStart]
+                if {[Kind p] eq "="} {
+                    Fail [Peek p] "an error payload field cannot have a default value (every payload field is given explicitly by each \"fail $errorName \{...\}\")"
+                }
+                set next [Peek p]
+                if {[dict get $next kind] ne "NEWLINE"} {
+                    Fail $next "expected end of line after the payload field declaration, found [Describe $next]"
+                }
+                Advance p
+                lappend fields [dict create name [dict get $fieldToken value] nameSpan [dict get $fieldToken span] \
+                    type $type typeSpan $typeSpan]
+            }
+            if {[Kind p] eq "DEDENT"} {
+                Advance p
+            }
+            return [surface::ast::node errordecl [SpanFrom p $start] \
+                name $errorName nameSpan [dict get $name span] fields $fields]
+        }
+    }
     set node [surface::ast::node errordecl [SpanFrom p $start] \
-        name [dict get $name value] nameSpan [dict get $name span]]
+        name $errorName nameSpan [dict get $name span] fields {}]
     set next [Peek p]
     if {[dict get $next kind] ne "NEWLINE"} {
         Fail $next "expected end of line, found [Describe $next]"

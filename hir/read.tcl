@@ -27,6 +27,9 @@ namespace eval hir::read {
     # ErrorDecls' own result from the current Program call, for Program to
     # store as the returned HIR's `errorDecls` field.
     variable lastErrorDecls {}
+    # NAME -> {fields {F T ...} namespace NS}: the payload descriptors of the
+    # last ErrorDecls call (ERROR-PAYLOADS.md), HIR's `errorPayloads`.
+    variable lastErrorPayloads {}
 }
 
 # The HIR program described by TEXT.
@@ -312,10 +315,24 @@ proc hir::read::TypeDeclLine {content number} {
 proc hir::read::ErrorDecls {lines} {
     set decls {}
     set rest $lines
+    set payloads [dict create]
     foreach entry $lines {
         lassign $entry indent content number
         if {$indent != 0} { break }
-        if {![regexp {^error (\S+)$} $content -> name]} { break }
+        if {[regexp {^error (\S+) ns (\S+) payload (.+)$} $content -> name ns fieldsText]} {
+            # A payload-bearing error (ERROR-PAYLOADS.md): its declared fields
+            # with their resolved types, in declaration order.
+            set fields {}
+            foreach item [SplitTop $fieldsText ", "] {
+                if {![regexp {^(\S+): (.+)$} $item -> fname ftype]} {
+                    Fail $number "expected \"FIELD: TYPE\" in an error payload, got \"$item\""
+                }
+                lappend fields $fname [ParseType $ftype $number]
+            }
+            dict set payloads $name [dict create fields $fields namespace [expr {$ns eq "-" ? "" : $ns}]]
+        } elseif {![regexp {^error (\S+)$} $content -> name]} {
+            break
+        }
         lappend decls [dict create name $name \
             nameSpan [dict create file <hir-text> line $number column 1]]
         set rest [lrange $rest 1 end]
@@ -323,9 +340,12 @@ proc hir::read::ErrorDecls {lines} {
     set registered {}
     if {$decls ne ""} {
         set registered [hir::errordecls::apply $decls]
+        hir::errordecls::applyEntries $registered $payloads
     }
     variable lastErrorDecls
     set lastErrorDecls $registered
+    variable lastErrorPayloads
+    set lastErrorPayloads $payloads
     return $rest
 }
 
@@ -370,6 +390,10 @@ proc hir::read::Program {text} {
     dict set hir sourceTypes $lastTypeDecls
     variable lastErrorDecls
     dict set hir errorDecls $lastErrorDecls
+    variable lastErrorPayloads
+    if {[dict size $lastErrorPayloads]} {
+        dict set hir errorPayloads $lastErrorPayloads
+    }
     variable lastTraits
     variable lastTraitFunctions
     if {$lastTraits ne {}} {
@@ -731,14 +755,15 @@ proc hir::read::TakeHandlerLine {hirVar level} {
     set line [Peek $hir]
     lassign $line indent content number
     if {$line eq "" || $indent != $level
-            || ![regexp {^on (\S+) (s[0-9]+)(?: binds (.*))?$} $content -> name s binds]} {
-        Fail [expr {$line eq "" ? "end" : $number}] "expected \"on NAME SCOPE ...\" at indentation level $level"
+            || ![regexp {^on (\S+) (s[0-9]+)(?: payload \((b[0-9]+) (\S+)\))?(?: consumed=(\S+))?(?: binds (.*))?$} \
+                $content -> name s payloadId payloadName consumed binds]} {
+        Fail [expr {$line eq "" ? "end" : $number}] "expected \"on NAME SCOPE ?payload (BINDING NAME)? ...\" at indentation level $level"
     }
     dict incr hir pos
     if {![hir::errordecls::isDeclared $name]} {
         Fail $number "unknown error \"$name\": no \"error $name\" declaration is visible"
     }
-    return [list $name $s $binds $number]
+    return [list $name $s $binds $number $payloadId $payloadName $consumed]
 }
 
 # True if the next line is at indentation LEVEL.
@@ -1154,6 +1179,11 @@ proc hir::read::Expr {hirVar level s path block} {
                 Fail $number "expected \"struct (anon|ID) (FIELD, ...)\""
             }
             set names [expr {$namesText eq "" ? {} : [split [string map {", " \x01} $namesText] \x01]}]
+            if {[regexp {^payload\((\S+)\)$} $who -> errorName]} {
+                # An error's payload construction (ERROR-PAYLOADS.md).
+                SetField hir $e payloadOf $errorName
+                set who anon
+            }
             set named [expr {$who ne "anon"}]
             set id ""
             if {$named} {
@@ -1197,6 +1227,12 @@ proc hir::read::Expr {hirVar level s path block} {
                 Fail $number "unknown error \"$head\": no \"error $head\" declaration is visible"
             }
             SetField hir $e name $head
+            # The payload (ERROR-PAYLOADS.md), if any: the one child line.
+            set value ""
+            if {[AtLevel $hir $inner]} {
+                set value [Expr hir $inner $s [concat $path 2] $block]
+            }
+            SetField hir $e value $value
         }
         handle {
             if {$head ne ""} {
@@ -1206,11 +1242,21 @@ proc hir::read::Expr {hirVar level s path block} {
             set names {}
             set scopes {}
             set bodies {}
+            set payloads {}
             set index 2
             while {[AtLevel $hir $inner]} {
-                lassign [TakeHandlerLine hir $inner] name branch binds headerNumber
+                lassign [TakeHandlerLine hir $inner] name branch binds headerNumber payloadId payloadName consumed
                 NewScope hir $branch branch $s [dict get $hir scopes $s invocation] $e \
                     [list ir [concat $path $index]] $headerNumber
+                if {$payloadId ne ""} {
+                    # The handler's payload binding (ERROR-PAYLOADS.md): a
+                    # parameter of the handler's scope.
+                    NewBinding hir $payloadId $payloadName param $branch [list ir [concat $path $index 1 0]] $headerNumber
+                    if {$consumed ne ""} {
+                        dict set hir bindings $payloadId affineConsumed [split $consumed ,]
+                    }
+                }
+                lappend payloads $payloadId
                 Declare hir $branch $binds local $headerNumber
                 lappend names $name
                 lappend scopes $branch
@@ -1226,6 +1272,7 @@ proc hir::read::Expr {hirVar level s path block} {
             SetField hir $e handlerNames $names
             SetField hir $e handlerScopes $scopes
             SetField hir $e handlerBodies $bodies
+            SetField hir $e handlerPayloads $payloads
             # Not re-derived either (see the `calleeErrors` comment above).
             SetField hir $e handlerTypes [lrepeat [llength $names] any]
         }
@@ -1405,6 +1452,15 @@ proc hir::read::Finish {hirVar} {
     CanonicalBlockTypes hir
     foreach e [hir::walk $hir] {
         set node [dict get $hir exprs $e]
+        if {[dict get $node kind] eq "handle" && [dict exists $node handlerPayloads]} {
+            # A handler's payload binding has its error's declared payload
+            # type (ERROR-PAYLOADS.md).
+            foreach name [dict get $node handlerNames] b [dict get $node handlerPayloads] {
+                if {$b ne "" && [hir::errordecls::hasPayload $name]} {
+                    dict set hir bindings $b type [hir::types::intern hir [hir::errordecls::payloadType $name]]
+                }
+            }
+        }
         if {[dict get $node kind] ne "bind" || [dict get $node duplicate]} {
             continue
         }

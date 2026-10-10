@@ -485,6 +485,9 @@ proc hir::callables::WalkExpr {hirVar e} {
             WalkExpr hir [dict get $node receiver]
         }
         fail {
+            if {[dict exists $node value] && [dict get $node value] ne ""} {
+                WalkExpr hir [dict get $node value]
+            }
         }
         handle {
             WalkExpr hir [dict get $node call]

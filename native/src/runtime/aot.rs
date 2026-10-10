@@ -43,7 +43,7 @@ pub fn run(argv: Vec<Vec<u8>>, init: impl FnOnce() -> (Box<Vm>, ProgramEntry) + 
                 .error
                 .take()
                 .unwrap_or_else(|| RtError::Bug("native code failed without recording an error".to_string()));
-            eprintln!("{} ({})", error.message(), error.error_code().join(" "));
+            eprintln!("{} ({})", vm.describe_error(&error), error.error_code().join(" "));
             return 1;
         }
         match writeln!(std::io::stdout().lock(), "{}", show(result)) {
