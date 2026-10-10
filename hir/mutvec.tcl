@@ -1206,6 +1206,20 @@ proc hir::mutvec::MayHoldVector {type {seen {}}} {
         }
         return 0
     }
+    if {[hir::types::IsEnum $type]} {
+        # An enum (ENUMS.md) holds what its case payloads hold: nothing,
+        # for the payload-free cases of today.
+        set id [lindex $type 1]
+        if {$id in $seen} {
+            return 0
+        }
+        foreach t [hir::enums::payloadTypes $id] {
+            if {[MayHoldVector $t [concat $seen [list $id]]]} {
+                return 1
+            }
+        }
+        return 0
+    }
     if {[Kind $type] ne ""} {
         return 1
     }

@@ -1,0 +1,688 @@
+# enums.test -- enums: named, closed, nominal sums of payload-free cases
+# (ENUMS.md). `enum Name:` declares one nominal type and its cases;
+# `Name::Case` is a case value of exactly that type.
+#
+# Every program below runs on all four executable paths -- the Tcl
+# interpreter and the Tcl compiler (both from the core IR the HIR lowers to)
+# and native code, with and without specialization (both directly from the
+# HIR) -- and the outcomes must agree. Static errors are pinned by kind and
+# message.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+set enumBackends {interp compile cranelift-generic cranelift}
+
+# Runs SOURCE (a program) on every backend: "same: VALUE" if they all agree
+# (VALUE the shown value), otherwise every outcome.
+proc enumRun {source {backends ""}} {
+    set hir [surface::compile $source enum.bot]
+    return [enumOutcomes $hir $backends]
+}
+
+proc enumOutcomes {hir {backends ""}} {
+    if {$backends eq ""} {
+        set backends $::enumBackends
+    }
+    set outcomes [lmap backend $backends {lrange [outcomeUnderHir $backend $hir] 0 2}]
+    if {[llength [lsort -unique $outcomes]] == 1} {
+        set first [lindex $outcomes 0]
+        if {[lindex $first 0] eq "value"} {
+            return "same: [lindex $first 1]"
+        }
+        return "same error: [lindex $first 1]: [lindex $first 2]"
+    }
+    return [join [lmap backend $backends outcome $outcomes {list $backend $outcome}] " / "]
+}
+
+# The static error (KIND: MESSAGE) compiling SOURCE raises.
+proc enumError {source} {
+    if {[catch {surface::compile $source enum.bot} message options]} {
+        return "[lindex [dict get $options -errorcode] end]: $message"
+    }
+    return "no error"
+}
+
+# The syntax error parsing SOURCE raises (its message).
+proc enumSyntax {source} {
+    if {[catch {surface::parse $source enum.bot} message options]} {
+        return $message
+    }
+    return "no error"
+}
+
+# Shown types of the top-level bindings of SOURCE, as "name:type ...".
+proc enumTypes {source} {
+    set hir [surface::compile $source enum.bot]
+    set result {}
+    foreach e [hir::roots $hir] {
+        if {[dict get $hir exprs $e origin file] ne "f1"} continue
+        if {[hir::kind $hir $e] eq "bind"} {
+            lappend result "[hir::get $hir $e name]:[hir::types::show [hir::typeOf $hir $e]]"
+        }
+    }
+    return [join $result " | "]
+}
+
+proc writeFile {path content} {
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $content
+    close $channel
+}
+
+# Runs SCRIPT with a private library (tests/helpers.tcl's withPrivateLibrary)
+# holding the module fixtures every module test below uses:
+#   geo          an enum VehicleType {Boat, Car}, a module binding, functions
+#   fleet::kinds an enum VehicleType {Boat, Car}: the same text, another type
+#   shapes       a struct, a refined type and a trait (not enums)
+proc withEnumModules {script} {
+    uplevel 1 [list withPrivateLibrary [string cat {
+        set lib $::core::libraryDir
+        writeFile [file join $lib geo.bot] "enum VehicleType:\n    Boat,\n    Car,\n\ndefault_kind = VehicleType::Car\n\nfn default_vehicle() -> VehicleType:\n    VehicleType::Boat\n\nfn is_car(v: VehicleType) -> bool:\n    v == VehicleType::Car\n"
+        file mkdir [file join $lib fleet]
+        writeFile [file join $lib fleet kinds.bot] "enum VehicleType:\n    Boat,\n    Car,\n"
+        writeFile [file join $lib shapes.bot] "struct Point:\n    x: int\n\nrefined type Label = str\n"
+    } \n $script]]
+}
+
+set vehicle {enum VehicleType:
+    Boat,
+    Car,
+    Truck,
+    Tank,
+    Tractor,
+    Airplane,
+}
+
+# ---------------------------------------------------------------------------
+# The principal acceptance program (ENUMS.md, "Acceptance"). Two adaptations,
+# both unrelated to enums and both existing Botlish rules: the multi-line
+# `or` condition is parenthesized (Botlish has no line continuation outside
+# brackets), and `example` declares the IndexNotFound its MutableVector reads
+# may raise (a vector's length is not tracked statically).
+
+set principal [string cat {import mutable_array
+import mutable_vector
+
+} $vehicle {
+struct Vehicle:
+    name: str
+    kind: VehicleType
+
+fn same(value):
+    value
+
+fn is_land_vehicle(kind: VehicleType) -> bool:
+    (kind == VehicleType::Car or
+        kind == VehicleType::Truck or
+        kind == VehicleType::Tank or
+        kind == VehicleType::Tractor)
+
+fn example() -> List[VehicleType] errors IndexNotFound:
+    a = VehicleType::Car
+    b = same(a)
+
+    vehicle = Vehicle {
+        name: "example",
+        kind: b,
+    }
+
+    array = mutable_array::create(2, vehicle.kind)
+    vector = mutable_vector::from_list([
+        array.at(0),
+        VehicleType::Boat,
+    ])
+
+    [
+        vector.at(0),
+        vector.at(1),
+        a,
+    ]
+}]
+
+test enum-principal-acceptance {the principal acceptance program runs on every backend} -body {
+    enumRun [string cat $principal {
+xs = example():
+    on IndexNotFound:
+        []
+cars = loop x in xs:
+    x == VehicleType::Car
+[xs, cars, is_land_vehicle(VehicleType::Car), is_land_vehicle(VehicleType::Boat), is_land_vehicle(VehicleType::Airplane)]
+}]
+} -result {same: [[VehicleType::Car, VehicleType::Boat, VehicleType::Car], [true, false, true], true, false, false]}
+
+test enum-principal-types {in the acceptance program a case has its enum's type, and the collections stay unrestricted} -body {
+    set hir [surface::compile [string cat $principal "xs = example():\n    on IndexNotFound:\n        \[\]\n"] enum.bot]
+    set found {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "bind" && [dict get $node name] in {a b vehicle array vector}} {
+            set type [hir::typeOf $hir $e]
+            lappend found [dict get $node name] [hir::types::show $type] [hir::types::Affinity $type]
+        }
+    }
+    lsort -stride 3 $found
+} -result {a VehicleType unrestricted array {MutableArray[VehicleType]} unrestricted b VehicleType unrestricted vector {MutableVector[VehicleType]} unrestricted vehicle Vehicle unrestricted}
+
+test enum-principal-rejections {the acceptance program's five rejected programs are rejected} -body {
+    list \
+        [enumSyntax "enum Empty:\n"] \
+        [enumError "enum Bad:\n    A,\n    A,\n"] \
+        [enumError "enum A:\n    Same,\n\nenum B:\n    Same,\n\nfn wants_a(x: A):\n    x\n\nwants_a(B::Same)\n"] \
+        [enumError "${vehicle}VehicleType::Unknown\n"] \
+        [enumRun "${vehicle}VehicleType::Car + 1\n"]
+} -result {{enum.bot:1:6: ENUM-EMPTY: enum "Empty" declares no case: an enum needs at least one case, written on the indented lines after "enum Empty:" ("Case,")} {TYPE: enum.bot:3:5: duplicate case "A" in enum "Bad": every case of an enum is a distinct nominal case, declared once (there are no case aliases)} {TYPE: enum.bot:10:9: argument for parameter "x" cannot be proven to satisfy A (argument type: B); A is a nominal enum type: only its own cases (A::Same) are its values, never a case of another enum, an Int or a String} {UNKNOWN-ENUM-CASE: enum.bot:8:1: enum VehicleType has no case "Unknown" (its cases: Boat, Car, Truck, Tank, Tractor, Airplane)} {same error: CORE SEMANTIC TYPE: +: expected int, got VehicleType::Car}}
+
+# ---------------------------------------------------------------------------
+# Grammar
+
+test enum-syntax-ast {an enum declaration is one enumdecl node: its name and its cases in order} -body {
+    surface::formatAst [surface::parse "enum VehicleType:\n    Boat,\n    Car,\n    Truck,\nx = VehicleType::Car\n"]
+} -result {enum VehicleType
+    Boat,
+    Car,
+    Truck,
+(bind x (qualname VehicleType::Car))}
+
+test enum-syntax-comma-list {the cases are one comma-separated list: a trailing comma is optional, newlines may follow any comma} -body {
+    list \
+        [enumRun "enum E:\n    A,\n    B\nE::B\n"] \
+        [enumRun "enum E:\n    A, B, C,\nE::C\n"] \
+        [enumRun "enum E:\n    A,\n\n    B,\nE::A\n"] \
+        [enumRun "enum E:\n    A\nE::A\n"]
+} -result {{same: E::B} {same: E::C} {same: E::A} {same: E::A}}
+
+test enum-syntax-missing-comma {two cases need a comma between them} -body {
+    enumSyntax "enum E:\n    A\n    B,\n"
+} -result {enum.bot:3:5: expected "," between the enum cases "A" and "B" (an enum's cases are one comma-separated list)}
+
+test enum-syntax-no-values-or-aliases {a case has no value, alias, payload or parameter list} -body {
+    list \
+        [enumSyntax "enum E:\n    Foo = 17,\n"] \
+        [enumSyntax "enum E:\n    Foo = Bar,\n"] \
+        [enumSyntax "enum E:\n    Foo: int,\n"] \
+        [enumSyntax "enum E:\n    Car(int, bool),\n"] \
+        [enumSyntax "enum E:\n    Car {seats: int},\n"]
+} -result {{enum.bot:2:9: enum case "Foo" cannot be given a value or an alias: a case is a nominal value of its enum only, with no integer, String or other case behind it (write any mapping as ordinary code)} {enum.bot:2:9: enum case "Foo" cannot be given a value or an alias: a case is a nominal value of its enum only, with no integer, String or other case behind it (write any mapping as ordinary code)} {enum.bot:2:8: enum case "Foo" cannot carry a payload: payload-bearing enum cases are not supported yet (every case is payload-free)} {enum.bot:2:8: enum case "Car" cannot take a parameter list: a case is written as a bare name (payload-bearing cases are not supported)} {enum.bot:2:9: enum case "Car" cannot carry a payload: payload-bearing enum cases are not supported yet (every case is payload-free)}}
+
+test enum-syntax-empty {an enum with no case is ENUM-EMPTY} -body {
+    list [enumSyntax "enum Empty:\n"] [enumSyntax "enum Empty:\nx = 1\n"]
+} -result {{enum.bot:1:6: ENUM-EMPTY: enum "Empty" declares no case: an enum needs at least one case, written on the indented lines after "enum Empty:" ("Case,")} {enum.bot:1:6: ENUM-EMPTY: enum "Empty" declares no case: an enum needs at least one case, written on the indented lines after "enum Empty:" ("Case,")}}
+
+test enum-syntax-anonymous {there is no anonymous enum, as a statement, an expression or a type} -body {
+    set message {ANONYMOUS-ENUM: anonymous enum types do not exist: an enum's identity is its declaration, so an enum is always a named top-level declaration ("enum Name:" with its cases on indented lines), and a value of it is written Name::Case}
+    list \
+        [expr {[enumSyntax "enum {A, B}\n"] eq "enum.bot:1:1: $message"}] \
+        [expr {[enumSyntax "x = enum {A, B}\n"] eq "enum.bot:1:5: $message"}] \
+        [expr {[enumSyntax "fn f(x: enum {A, B}):\n    x\n"] eq "enum.bot:1:9: $message"}] \
+        [enumSyntax "enum E {A, B}\n"] \
+        [enumSyntax "enum:\n    A,\n"]
+} -result {1 1 1 {enum.bot:1:8: an enum's cases are declared on indented lines after "enum E:", not in braces} {enum.bot:1:5: expected an enum name after "enum", found ":" (an enum is a named declaration: "enum Name:")}}
+
+test enum-syntax-bare-kind-not-a-type {the bare word enum is not a type: an enum type is a declaration's name} -body {
+    enumError "fn f(x: enum):\n    x\nf(1)\n"
+} -result {TYPE: enum.bot:1:5: unknown or invalid type enum for parameter "x": "enum" is not a type: there are no anonymous enum types (an enum is a named declaration, `enum Name:`; write its name)}
+
+test enum-syntax-top-level-only {an enum is declared at the top level of a file only} -body {
+    enumSyntax "fn f():\n    enum E:\n        A,\n    1\n"
+} -result {enum.bot:2:5: an enum declaration is only allowed at the top level of a module, not nested in a function/if/loop}
+
+test enum-syntax-contextual-word {"enum" is contextual: an ordinary name everywhere but a declaration's first word} -body {
+    enumRun "enum = 3\nfn f(enum):\n    enum + 1\nx = \{enum: 2\}\n\[f(enum), x.enum\]\n"
+} -result {same: [4, 2]}
+
+test enum-syntax-mutation-robustness {deleting, duplicating or replacing any token of an enum program never crashes the lexer or parser} -body {
+    set source "enum E:\n    A,\n    B,\nx = E::A\ny = \[E::B, x\]\n"
+    set tokens [surface::lex $source]
+    set texts [lmap t $tokens {dict get $t text}]
+    set replacements {enum E :: , : \{ \} = A ( ) 1}
+    set crashes 0
+    set variants 0
+    for {set i 0} {$i < [llength $tokens]} {incr i} {
+        set token [lindex $tokens $i]
+        if {[dict get $token kind] in {NEWLINE INDENT DEDENT EOF}} continue
+        set start [dict get $token span start]
+        set end [dict get $token span end]
+        set candidates [list [string replace $source $start [expr {$end - 1}] ""] \
+            [string replace $source $start [expr {$end - 1}] "[dict get $token text] [dict get $token text]"]]
+        foreach r $replacements {
+            lappend candidates [string replace $source $start [expr {$end - 1}] $r]
+        }
+        foreach candidate $candidates {
+            incr variants
+            if {[catch {surface::parse $candidate enum.bot -recover 1} result options]} {
+                if {[lrange [dict get $options -errorcode] 0 1] ne {SURFACE SYNTAX}} {
+                    incr crashes
+                }
+            }
+        }
+    }
+    list [expr {$variants > 100}] $crashes
+} -result {1 0}
+
+# ---------------------------------------------------------------------------
+# Declarations, identity and the closed case set
+
+test enum-duplicate-case {a duplicate case is rejected at its second declaration} -body {
+    enumError "enum E:\n    A,\n    B,\n    A,\nE::A\n"
+} -result {TYPE: enum.bot:4:5: duplicate case "A" in enum "E": every case of an enum is a distinct nominal case, declared once (there are no case aliases)}
+
+test enum-duplicate-declaration {an enum shares the one type namespace: a repeated name is rejected like any type's} -body {
+    list \
+        [enumError "enum E:\n    A,\nenum E:\n    B,\n"] \
+        [enumError "struct E:\n    a: int\nenum E:\n    A,\n"] \
+        [enumError "enum E:\n    A,\nstruct E:\n    a: int\n"] \
+        [enumError "type E = Int in 0..3\nenum E:\n    A,\n"] \
+        [enumError "trait E:\n    fn f(x: E) -> int\nenum E:\n    A,\n"] \
+        [enumError "enum int:\n    A,\n"] \
+        [enumError "enum List:\n    A,\n"]
+} -result {{TYPE: enum.bot:3:6: type "E" is already declared} {TYPE: enum.bot:1:8: type "E" is already declared (as an enum)} {TYPE: enum.bot:3:8: type "E" is already declared (as an enum)} {TYPE: enum.bot:1:6: type "E" is already declared (as an enum)} {TYPE: enum.bot:3:6: type "E" is already declared (as a trait)} {TYPE: enum.bot:1:6: "int" cannot be declared as an enum: the name is already a built-in or declared type} {TYPE: enum.bot:1:6: "List" cannot be declared as an enum: the name is already a built-in or declared type}}
+
+test enum-cases-query {EnumCases(E): the compiler keeps the complete closed case set, in declaration order} -body {
+    set hir [surface::compile "${vehicle}enum Other:\n    Car,\n1\n" enum.bot]
+    set descriptor [hir::enums::caseDescriptor VehicleType Car]
+    list [hir::enums::cases VehicleType] [hir::enums::cases Other] \
+        [dict get $descriptor name] [dict get $descriptor span line] [dict get $descriptor payload] \
+        [hir::enums::payloadTypes VehicleType] [hir::enums::hasCase VehicleType Car] [hir::enums::hasCase Other Boat] \
+        [lmap entry [dict get $hir sourceTypes] {dict get $entry cases}]
+} -result {{Boat Car Truck Tank Tractor Airplane} Car Car 3 {} {} 1 0 {{Boat Car Truck Tank Tractor Airplane} Car}}
+
+test enum-unknown-case {an unknown case is UNKNOWN-ENUM-CASE, suggesting the nearest declared spellings, even where a binding of that name is visible} -body {
+    list \
+        [enumError "${vehicle}VehicleType::Carr\n"] \
+        [enumError "${vehicle}VehicleType::tank\n"] \
+        [enumError "${vehicle}fn Submarine():\n    1\nVehicleType::Submarine\n"]
+} -result {{UNKNOWN-ENUM-CASE: enum.bot:8:1: enum VehicleType has no case "Carr" (its cases: Boat, Car, Truck, Tank, Tractor, Airplane); did you mean VehicleType::Car?} {UNKNOWN-ENUM-CASE: enum.bot:8:1: enum VehicleType has no case "tank" (its cases: Boat, Car, Truck, Tank, Tractor, Airplane); did you mean VehicleType::Tank?} {UNKNOWN-ENUM-CASE: enum.bot:10:1: enum VehicleType has no case "Submarine" (its cases: Boat, Car, Truck, Tank, Tractor, Airplane)}}
+
+test enum-qualifier-not-an-enum {a case qualified by a type that is not an enum is NOT-AN-ENUM: a type is not a namespace} -body {
+    list \
+        [enumError "struct P:\n    a: int\nP::Car\n"] \
+        [enumError "type Small = Int in 0..3\nSmall::Car\n"] \
+        [enumError "trait T:\n    fn f(x: T) -> int\nT::Car\n"] \
+        [enumError "int::Car\n"] \
+        [enumError "Fn::Car\n"]
+} -result {{NOT-AN-ENUM: enum.bot:3:1: "P" is a struct, not an enum: only an enum type qualifies a case ("Enum::Case"), and a type is not a namespace, so "P::Car" names nothing} {NOT-AN-ENUM: enum.bot:2:1: "Small" is a type, not an enum: only an enum type qualifies a case ("Enum::Case"), and a type is not a namespace, so "Small::Car" names nothing} {NOT-AN-ENUM: enum.bot:3:1: "T" is a trait, not an enum: only an enum type qualifies a case ("Enum::Case"), and a type is not a namespace, so "T::Car" names nothing} {NOT-AN-ENUM: enum.bot:1:1: "int" is a built-in type, not an enum: only an enum type qualifies a case ("Enum::Case"), and a type is not a namespace, so "int::Car" names nothing} {NOT-AN-ENUM: enum.bot:1:1: "Fn" is a built-in type, not an enum: only an enum type qualifies a case ("Enum::Case"), and a type is not a namespace, so "Fn::Car" names nothing}}
+
+test enum-qualifier-unknown {a qualifier that names nothing is an unknown namespace, and says no enum of that name is visible} -body {
+    enumError "Vehicle::Car\n"
+} -match glob -result {UNKNOWN-NAMESPACE: enum.bot:1:1: unknown namespace "Vehicle": no such module file * and no intrinsics of that namespace (nor is "Vehicle" an enum type visible in this file: a case is written Enum::Case)}
+
+test enum-cases-not-injected {a case is never visible by its bare name, and an enum type is not a value} -body {
+    list \
+        [enumError "${vehicle}Car\n"] \
+        [enumError "${vehicle}VehicleType\n"] \
+        [enumError "${vehicle}VehicleType.Car\n"]
+} -result {{UNBOUND: enum.bot:8:1: unbound name "Car": an enum case is never visible by its bare name; write it qualified by its enum's type, e.g. VehicleType::Car} {UNBOUND: enum.bot:8:1: unbound name "VehicleType": "VehicleType" is an enum type, not a value; a case of it is written VehicleType::CASE (its cases: Boat, Car, Truck, Tank, Tractor, Airplane)} {UNBOUND: enum.bot:8:1: unbound name "VehicleType": "VehicleType" is an enum type, not a value; a case of it is written VehicleType::CASE (its cases: Boat, Car, Truck, Tank, Tractor, Airplane)}}
+
+test enum-case-and-function-same-spelling {a case and a module-level definition of the same spelling are different lookups} -body {
+    enumRun "fn Car():\n    7\n${vehicle}enum Other:\n    Car,\n\[Car(), VehicleType::Car, Other::Car, VehicleType::Car == Other::Car\]\n"
+} -result {same: [7, VehicleType::Car, Other::Car, false]}
+
+test enum-declaration-order {an enum is a type declaration: usable before its declaration, and a type name never collides with a function of that name} -body {
+    list \
+        [enumRun "x = E::A\nenum E:\n    A,\n    B,\n\[x, E::B\]\n"] \
+        [enumRun "fn Color():\n    1\nenum Color:\n    Red,\n\[Color(), Color::Red\]\n"]
+} -result {{same: [E::A, E::B]} {same: [1, Color::Red]}}
+
+test enum-case-is-not-a-constructor {a payload-free case is written without parentheses or braces} -body {
+    list \
+        [enumRun "${vehicle}VehicleType::Car()\n"] \
+        [enumError "${vehicle}VehicleType::Car {}\n"]
+} -result {{same error: CORE SEMANTIC NOT-CALLABLE: cannot call non-callable value VehicleType::Car} {NOT-A-STRUCT: enum.bot:8:1: "VehicleType::Car" names a case of the enum VehicleType, not a struct: a payload-free case is written VehicleType::Car, without braces (payload-bearing cases are not supported)}}
+
+test enum-rename-case {renaming a case is an API rename: a reference to the old name fails resolution} -body {
+    enumError "enum E:\n    Automobile,\n    Boat,\nE::Car\n"
+} -result {UNKNOWN-ENUM-CASE: enum.bot:4:1: enum E has no case "Car" (its cases: Automobile, Boat)}
+
+# ---------------------------------------------------------------------------
+# Typing
+
+test enum-case-type {a case expression has exactly its declaring enum's type: no per-case subtype} -body {
+    enumTypes "${vehicle}a = VehicleType::Car\nb = a\nc = VehicleType::Boat\nd = \[a, c\]\n"
+} -result {a:VehicleType | b:VehicleType | c:VehicleType | d:List[VehicleType]}
+
+test enum-type-algebra {nominal: a type is a subtype only of itself (and any); two enums join to any, never to an anonymous union} -body {
+    surface::compile "enum A:\n    X,\nenum B:\n    X,\n1\n" enum.bot
+    list \
+        [hir::types::subtype {enum A} {enum A}] [hir::types::subtype {enum A} {enum B}] \
+        [hir::types::subtype {enum A} any] [hir::types::subtype {enum A} int] [hir::types::subtype int {enum A}] \
+        [hir::types::lub {enum A} {enum A}] [hir::types::lub {enum A} {enum B}] [hir::types::lub {enum A} int] \
+        [hir::types::kindOf {enum A}] [hir::types::show {enum A}] [hir::types::IsEqualityTotal {enum A}] \
+        [hir::types::IsAffine {enum A}] [hir::types::Affinity [list list {enum A}]] \
+        [hir::types::Affinity [list mutarray {enum A}]] [hir::types::Affinity [list mutvec {enum A}]]
+} -result {1 0 1 0 0 {enum A} any any enum A 1 0 unrestricted unrestricted unrestricted}
+
+test enum-branch-join {branches returning cases of one enum have that enum's type; of two enums, any} -body {
+    enumTypes "enum A:\n    X,\n    Y,\nenum B:\n    X,\nfn c():\n    unit\nflag = c() == unit\na = if flag:\n    A::X\nelse:\n    A::Y\nb = if flag:\n    A::X\nelse:\n    B::X\n"
+} -result {c:block(e2)/0 -> unit | flag:bool | a:A | b:any}
+
+test enum-wrong-enum-call-result-field {a case of another enum is rejected at a call, a result and a struct field} -body {
+    set decls "enum A:\n    Same,\nenum B:\n    Same,\n"
+    list \
+        [enumError "${decls}fn f(x: A):\n    x\nf(B::Same)\n"] \
+        [enumError "${decls}fn g() -> A:\n    B::Same\ng()\n"] \
+        [enumError "${decls}struct S:\n    a: A\nS \{a: B::Same\}\n"] \
+        [enumError "${decls}fn f(x: A):\n    x\nf(1)\n"] \
+        [enumError "${decls}fn h(x: int):\n    x\nh(A::Same)\n"] \
+        [enumError "${decls}fn f(x: List\[A\]):\n    x\nf(\[B::Same\])\n"]
+} -result {{TYPE: enum.bot:7:3: argument for parameter "x" cannot be proven to satisfy A (argument type: B); A is a nominal enum type: only its own cases (A::Same) are its values, never a case of another enum, an Int or a String} {TYPE: enum.bot:5:5: function result does not prove declared type A; A is a nominal enum type: only its own cases (A::Same) are its values, never a case of another enum, an Int or a String} {TYPE: enum.bot:7:4: field "a" of struct S cannot be proven to satisfy its declared type A (value type: B); A is a nominal enum type: only its own cases (A::Same) are its values, never a case of another enum, an Int or a String} {TYPE: enum.bot:7:3: argument for parameter "x" cannot be proven to satisfy A (argument type: int); A is a nominal enum type: only its own cases (A::Same) are its values, never a case of another enum, an Int or a String} {TYPE: enum.bot:7:3: argument for parameter "x" cannot be proven to satisfy int (argument type: A)} {TYPE: enum.bot:7:3: argument for parameter "x" cannot be proven to satisfy List[A] (argument type: List[B])}}
+
+# ---------------------------------------------------------------------------
+# Values: copies, calls, returns, generic functions, structs
+
+test enum-copies {a case value is an ordinary unrestricted value: every copy stays usable} -body {
+    enumRun "${vehicle}a = VehicleType::Car\nb = a\nc = b\n\[a, b, c, a == c\]\n"
+} -result {same: [VehicleType::Car, VehicleType::Car, VehicleType::Car, true]}
+
+test enum-calls-returns {enums are ordinary parameter and result types} -body {
+    enumRun "${vehicle}fn is_car(value: VehicleType) -> bool:\n    value == VehicleType::Car\n\nfn default_vehicle() -> VehicleType:\n    VehicleType::Truck\n\n\[is_car(VehicleType::Car), is_car(default_vehicle()), default_vehicle()\]\n"
+} -result {same: [true, false, VehicleType::Truck]}
+
+test enum-generic-identity {a generic function passes a case through; its instance keeps the nominal enum type} -body {
+    set source "${vehicle}enum Other:\n    Car,\nfn same(x):\n    x\na = VehicleType::Car\nb = same(a)\nc = same(Other::Car)\n\[a, b, c, a == b, b == c\]\n"
+    list [enumRun $source] [enumTypes $source]
+} -result {{same: [VehicleType::Car, VehicleType::Car, Other::Car, true, false]} {same:block(e2)/1 -> any | a:VehicleType | b:VehicleType | c:Other}}
+
+test enum-erasure {a case may enter any (an untyped position, a heterogeneous List) and keeps its identity} -body {
+    enumRun "${vehicle}enum Other:\n    Car,\nfn erase(x: any) -> any:\n    x\nxs = \[VehicleType::Car, 1, \"s\", Other::Car\]\n\[erase(VehicleType::Car) == VehicleType::Car, erase(Other::Car) == VehicleType::Car, xs\]\n"
+} -result {same: [true, false, [VehicleType::Car, 1, "s", Other::Car]]}
+
+test enum-struct-fields {an enum is an ordinary struct field; destructuring exposes an ordinary case value} -body {
+    enumRun "${vehicle}struct Vehicle:\n    kind: VehicleType\n    name: str\nv = Vehicle \{kind: VehicleType::Tank, name: \"t\"\}\n\{kind: k\} = v\nw = Vehicle \{name: \"t\", kind: k\}\n\[v.kind, k, v == w, k == VehicleType::Tank, \{kind: VehicleType::Boat\}\]\n"
+} -result {same: [VehicleType::Tank, VehicleType::Tank, true, true, {kind: VehicleType::Boat}]}
+
+test enum-closures {a closure captures a case value like any other value} -body {
+    enumRun "${vehicle}fn matcher(target: VehicleType):\n    fn matches(v: VehicleType) -> bool:\n        v == target\n    matches\nis_tank = matcher(VehicleType::Tank)\n\[is_tank(VehicleType::Tank), is_tank(VehicleType::Car)\]\n"
+} -result {same: [true, false]}
+
+test enum-module-binding {a module-level binding may hold a case: it is an immutable scalar value} -body {
+    withEnumModules {
+        writeFile [file join $lib main.bot] "import geo\n\[geo::default_kind, geo::default_kind == geo::VehicleType::Car\]\n"
+        enumOutcomes [surface::readProgramFile [file join $lib main.bot]]
+    }
+} -result {same: [geo::VehicleType::Car, true]}
+
+# ---------------------------------------------------------------------------
+# Equality, ordering, arithmetic, hashing
+
+test enum-equality {equality is nominal: the same enum and the same case} -body {
+    enumRun "${vehicle}enum Other:\n    Car,\n    Boat,\nfn same(x):\n    x\n\[VehicleType::Car == VehicleType::Car, VehicleType::Car == VehicleType::Truck, VehicleType::Car != VehicleType::Truck, VehicleType::Car != VehicleType::Car, same(VehicleType::Car) == same(Other::Car), same(VehicleType::Boat) == same(Other::Car), VehicleType::Car == Other::Car, VehicleType::Car == 1, VehicleType::Car == \"Car\"\]\n"
+} -result {same: [true, false, true, false, false, false, false, false, false]}
+
+test enum-equality-constant-folded {the compiler decides a comparison of two known cases: true for the same case, false otherwise} -body {
+    set hir [surface::compile "${vehicle}enum Other:\n    Car,\na = VehicleType::Car\n\[a == VehicleType::Car, a == VehicleType::Boat, a == Other::Car\]\n" enum.bot]
+    set known {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "call" && [dict exists $node known] && [dict get $node known] ne ""} {
+            lappend known [dict get $node known]
+        }
+    }
+    set nir [dict get [native::lowered $hir] text]
+    list $known [regexp -all {bool true} $nir] [regexp -all {bool false} $nir] [regexp -all {enumeq|veq} $nir]
+} -result {{1 0 0} 1 2 0}
+
+test enum-ordering-rejected {declaration order is not an ordering: < and friends reject a case through ordinary typing} -body {
+    list \
+        [enumRun "${vehicle}VehicleType::Boat < VehicleType::Car\n"] \
+        [enumRun "${vehicle}VehicleType::Boat >= VehicleType::Car\n"]
+} -result {{same error: CORE SEMANTIC TYPE: <: expected int, got VehicleType::Boat} {same error: CORE SEMANTIC TYPE: >=: expected int, got VehicleType::Boat}}
+
+test enum-arithmetic-rejected {an enum is not an Int: arithmetic rejects a case through ordinary typing} -body {
+    list \
+        [enumRun "${vehicle}VehicleType::Car + 1\n"] \
+        [enumRun "${vehicle}VehicleType::Truck - VehicleType::Boat\n"] \
+        [enumRun "${vehicle}2 * VehicleType::Truck\n"]
+} -result {{same error: CORE SEMANTIC TYPE: +: expected int, got VehicleType::Car} {same error: CORE SEMANTIC TYPE: -: expected int, got VehicleType::Truck} {same error: CORE SEMANTIC TYPE: *: expected int, got VehicleType::Truck}}
+
+test enum-hash {hashing is nominal and agrees with equality on every backend} -body {
+    enumRun "${vehicle}enum Other:\n    Car,\nfn same(x):\n    x\nh = hash(VehicleType::Car)\n\[h == hash(same(VehicleType::Car)), h == hash(VehicleType::Boat), h == hash(Other::Car), h == hash(\"VehicleType::Car\"), h\]\n"
+} -result {same: [true, false, false, false, 632455997673246507]}
+
+test enum-hash-reorder-invariant {a case's hash depends on its enum's identity and its own name, never its position} -body {
+    set a [enumRun "enum E:\n    A,\n    B,\n    C,\n\[hash(E::A), hash(E::C)\]\n"]
+    set b [enumRun "enum E:\n    C,\n    B,\n    A,\n    D,\n\[hash(E::A), hash(E::C)\]\n"]
+    list [expr {$a eq $b}] [expr {[lindex $a 1] ne [lindex $a 2]}]
+} -result {1 1}
+
+test enum-reorder-invariant {reordering or adding cases changes no program-visible behavior} -body {
+    set program "x = E::B\ny = E::A\n\[x, y, x == y, x == E::B, hash(x) == hash(E::B), immutable_set::contains(immutable_set::from_list(\[x, y, x\]), E::B)\]\n"
+    set a [enumRun [withImports "enum E:\n    A,\n    B,\n$program"]]
+    set b [enumRun [withImports "enum E:\n    B,\n    A,\n$program"]]
+    set c [enumRun [withImports "enum E:\n    C,\n    B,\n    D,\n    A,\n$program"]]
+    list [expr {$a eq $b && $b eq $c}] $a
+} -result {1 {same: [E::B, E::A, false, true, true, true]}}
+
+test enum-no-intrinsic-mappings {no ordinal, integer, String or reflection operation exists for an enum} -body {
+    set results {}
+    foreach call {
+        {VehicleType::Car.ordinal()} {VehicleType::Car.name()} {VehicleType::Car.to_string()}
+        {VehicleType::Car.raw_value()} {VehicleType::Car.case_name()}
+    } {
+        lappend results [regexp -inline {^[A-Z-]+:} [enumError "${vehicle}$call\n"]]
+    }
+    foreach call {{enum::cases(VehicleType)} {VehicleType::from_string("Car")} {VehicleType::from_int(1)}} {
+        lappend results [regexp -inline {^[A-Z-]+:} [enumError "${vehicle}$call\n"]]
+    }
+    set results
+} -result {NOT-A-STRUCT: NOT-A-STRUCT: NOT-A-STRUCT: NOT-A-STRUCT: NOT-A-STRUCT: UNKNOWN-NAMESPACE: UNKNOWN-ENUM-CASE: UNKNOWN-ENUM-CASE:}
+
+test enum-debug-rendering {a case renders as its qualified spelling (debug output only), a module's with its namespace} -body {
+    withEnumModules {
+        writeFile [file join $lib main.bot] "import geo\nenum Local:\n    A,\n\[Local::A, geo::VehicleType::Boat, \{k: Local::A\}\]\n"
+        enumOutcomes [surface::readProgramFile [file join $lib main.bot]]
+    }
+} -result {same: [Local::A, geo::VehicleType::Boat, {k: Local::A}]}
+
+# ---------------------------------------------------------------------------
+# Collections
+
+test enum-list {List[Enum]: construction, iteration, membership by equality} -body {
+    enumRun [withImports "${vehicle}fn has(xs: List\[VehicleType\], v: VehicleType) -> bool:\n    loop x in xs:\n        if x == v:\n            return true\n    false\nxs = \[VehicleType::Car, VehicleType::Boat, VehicleType::Car\]\nland = loop x in xs:\n    if x == VehicleType::Boat:\n        continue\n    x\n\[xs, land, list::length(land), has(xs, VehicleType::Boat), has(xs, VehicleType::Tank)\]\n"]
+} -result {same: [[VehicleType::Car, VehicleType::Boat, VehicleType::Car], [VehicleType::Car, VehicleType::Car], 2, true, false]}
+
+test enum-mutable-array {MutableArray[Enum]: repeated and factory construction, at, set, swap} -body {
+    enumRun [withImports "${vehicle}fn vehicle_for_index(i: int) -> VehicleType:\n    if i == 0:\n        VehicleType::Boat\n    else:\n        VehicleType::Car\n\nfn run() -> List\[VehicleType\] errors IndexNotFound:\n    a = mutable_array::create(3, VehicleType::Car)\n    g = mutable_array::generate(3, vehicle_for_index)\n    a.set(1, VehicleType::Tank)\n    old = g.swap(2, VehicleType::Truck)\n    \[a.at(0), a.at(1), a.at(2), g.at(0), g.at(2), old\]\n\nrun():\n    on IndexNotFound:\n        \[\]\n"]
+} -result {same: [VehicleType::Car, VehicleType::Tank, VehicleType::Car, VehicleType::Boat, VehicleType::Truck, VehicleType::Car]}
+
+test enum-mutable-vector {MutableVector[Enum]: push, pop, swap, at, iteration} -body {
+    enumRun [withImports "import mutable_vector\n${vehicle}fn run() -> List\[VehicleType\] errors IndexNotFound:\n    v = mutable_vector::from_list(\[VehicleType::Boat\])\n    v.push(VehicleType::Car)\n    v.push(VehicleType::Tank)\n    top = v.pop()\n    old = v.swap(0, VehicleType::Tractor)\n    seen = loop x in v:\n        x\n    \[top, old, v.at(0), v.length() == 2\] == \[top, old, v.at(0), true\]\n    list::append(seen, top)\n\nrun():\n    on IndexNotFound:\n        \[\]\n"]
+} -result {same: [VehicleType::Tractor, VehicleType::Car, VehicleType::Tank]}
+
+test enum-immutable-set {ImmutableSet[Enum]: deduplication and membership by nominal equality} -body {
+    enumRun [withImports "${vehicle}enum Other:\n    Car,\nfn same(x):\n    x\ns = immutable_set::from_list(\[VehicleType::Car, VehicleType::Boat, VehicleType::Car\])\n\[s, immutable_set::contains(s, VehicleType::Car), immutable_set::contains(s, VehicleType::Tank), immutable_set::contains(s, same(Other::Car)), s == immutable_set::from_list(\[VehicleType::Boat, VehicleType::Car\])\]\n"]
+} -result {same: [{VehicleType::Car, VehicleType::Boat}, true, false, false, true]}
+
+test enum-collections-unrestricted {collections of cases stay unrestricted: create repeats the value, copies stay usable} -body {
+    set source [withImports "import mutable_vector\n${vehicle}a = mutable_array::create(2, VehicleType::Car)\nb = a\nv = mutable_vector::from_list(\[VehicleType::Car\])\nw = v\nxs = \[VehicleType::Car\]\nys = xs\n\[mutable_array::get(a, 0, VehicleType::Boat), mutable_array::get(b, 1, VehicleType::Boat), xs == ys\]\n"]
+    set hir [surface::compile $source enum.bot]
+    set affinities {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "bind" && [dict get $node name] in {a v xs}} {
+            lappend affinities [dict get $node name] [hir::types::Affinity [hir::typeOf $hir $e]]
+        }
+    }
+    list [enumOutcomes $hir] [lsort -stride 2 $affinities]
+} -result {{same: [VehicleType::Car, VehicleType::Car, true]} {a unrestricted v unrestricted xs unrestricted}}
+
+# ---------------------------------------------------------------------------
+# Modules and imports
+
+test enum-module-qualified {a module's enum is NS::Enum, and its case NS::Enum::Case} -body {
+    withEnumModules {
+        writeFile [file join $lib main.bot] "import geo\na = geo::VehicleType::Car\n\[a, geo::is_car(a), geo::default_vehicle(), geo::is_car(geo::default_vehicle())\]\n"
+        enumOutcomes [surface::readProgramFile [file join $lib main.bot]]
+    }
+} -result {same: [geo::VehicleType::Car, true, geo::VehicleType::Boat, false]}
+
+test enum-module-type-import {`import type` binds an enum's short name; its cases are then Short::Case} -body {
+    withEnumModules {
+        writeFile [file join $lib main.bot] "import geo\nimport type geo::VehicleType\nfn wants(v: VehicleType) -> bool:\n    v == geo::VehicleType::Car\n\[VehicleType::Car, wants(VehicleType::Car), VehicleType::Boat == geo::VehicleType::Boat\]\n"
+        enumOutcomes [surface::readProgramFile [file join $lib main.bot]]
+    }
+} -result {same: [geo::VehicleType::Car, true, true]}
+
+test enum-module-nominal {two modules' textually identical enums are unrelated types with unrelated cases} -body {
+    withEnumModules {
+        writeFile [file join $lib main.bot] "import geo\nimport fleet::kinds\nfn same(x):\n    x\n\[same(geo::VehicleType::Car) == same(fleet::kinds::VehicleType::Car), hash(geo::VehicleType::Car) == hash(fleet::kinds::VehicleType::Car), fleet::kinds::VehicleType::Car\]\n"
+        set run [enumOutcomes [surface::readProgramFile [file join $lib main.bot]]]
+        writeFile [file join $lib bad.bot] "import geo\nimport fleet::kinds\ngeo::is_car(fleet::kinds::VehicleType::Car)\n"
+        catch {surface::readProgramFile [file join $lib bad.bot]} message
+        list $run [regsub {^.*bad\.bot:} $message {bad.bot:}]
+    }
+} -result {{same: [false, false, fleet::kinds::VehicleType::Car]} {bad.bot:3:13: argument for parameter "v" cannot be proven to satisfy geo::VehicleType (argument type: fleet::kinds::VehicleType); geo::VehicleType is a nominal enum type: only its own cases (geo::VehicleType::Boat, geo::VehicleType::Car) are its values, never a case of another enum, an Int or a String}}
+
+test enum-module-diagnostics {a module's enum follows the import rules of its namespace} -body {
+    withEnumModules {
+        set results {}
+        foreach {name text} {
+            missing "geo::VehicleType::Car\n"
+            unqualified "import geo\nVehicleType::Car\n"
+            unknown-case "import geo\ngeo::VehicleType::Truck\n"
+            ambiguous "import geo\nenum geo:\n    A,\ngeo::A\n"
+            collision "import type geo::VehicleType\nenum VehicleType:\n    A,\n1\n"
+            struct-qualifier "import shapes\nshapes::Point::Car\n"
+            intrinsic-namespace "enum mutable_array:\n    create,\nmutable_array::create(2, 0)\n"
+        } {
+            writeFile [file join $lib $name.bot] $text
+            catch {surface::readProgramFile [file join $lib $name.bot]} message options
+            lappend results [lindex [dict get $options -errorcode] end]
+        }
+        set results
+    }
+} -result {MISSING-IMPORT UNKNOWN-NAMESPACE UNKNOWN-ENUM-CASE AMBIGUOUS-QUALIFIER TYPE-IMPORT-COLLISION NOT-AN-ENUM AMBIGUOUS-QUALIFIER}
+
+# ---------------------------------------------------------------------------
+# Refinements, traits, contexts, coroutines
+
+test enum-refinement-unsupported {a refinement over an enum carrier is not supported (it would lose the nominal identity)} -body {
+    enumError "${vehicle}refined type Land = VehicleType\n1\n"
+} -result {REFINEMENT-CARRIER: enum.bot:8:21: invalid refinement carrier VehicleType for "Land": VehicleType is an enum, a stable value type, but refinements of an enum are not supported yet: a refinement is represented over a primitive kind, which would lose the enum's nominal identity (this milestone's carriers are scalar value types: str, int, bool, UnicodeChar, and integer-domain or refinement types over them)}
+
+test enum-trait-witness {an enum is an ordinary nominal witness of a trait: its operations live in its declaring namespace} -body {
+    enumRun "${vehicle}trait Labeled:\n    fn label(value: Labeled) -> str\nfn label(value: VehicleType) -> str:\n    if value == VehicleType::Boat:\n        \"boat\"\n    else:\n        \"other\"\nfn describe(x: Labeled) -> str:\n    x.label()\n\[describe(VehicleType::Boat), describe(VehicleType::Car)\]\n"
+} -result {same: ["boat", "other"]}
+
+test enum-context-field {an enum is an ordinary context member, an immediate native context leaf} -body {
+    set source "${vehicle}context struct Settings:\n    mode: VehicleType\n    verbose: bool\nfn mode(context s: Settings) -> VehicleType:\n    s.mode\nwith context Settings \{mode: VehicleType::Tank, verbose: false\}\n\[mode(), mode() == VehicleType::Tank\]\n"
+    set hir [surface::compile $source enum.bot]
+    list [enumOutcomes $hir] [regexp -inline {context 0 "Settings"[^\n]*} [dict get [native::lowered $hir] text]]
+} -result {{same: [VehicleType::Tank, true]} {{context 0 "Settings" offset=0 words=2 fields="mode verbose"}}}
+
+test enum-coroutine-events {a coroutine yields and returns cases; enums add nothing to coroutine semantics} -body {
+    enumRun "import coroutine\nenum Event:\n    Start,\n    Tick,\n    Stop,\nfn events(n: int) -> Event:\n    yield Event::Start\n    loop i from 0 to n:\n        yield Event::Tick\n    Event::Stop\ncoroutine \{step: s, first: first\} = events(2)\nsecond = s()\nthird = s()\nfourth = s()\n\[first, second, third, fourth, coroutine::done?(s)\]\n"
+} -result {same: [Event::Start, Event::Tick, Event::Tick, Event::Stop, true]}
+
+# ---------------------------------------------------------------------------
+# HIR, core IR and representation
+
+test enum-hir-case-node {a case is a const node carrying the enum and case identities, typed by its enum} -body {
+    set hir [surface::compile "${vehicle}enum Other:\n    Car,\nx = VehicleType::Car\ny = Other::Car\n" enum.bot]
+    set found {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "const" && [core::value::kind [dict get $node value]] eq "enum"} {
+            lappend found [list [dict get $node literal] [dict get $node value] [hir::typeOf $hir $e]]
+        }
+    }
+    set found
+} -result {{{enum {VehicleType Car}} {enum VehicleType Car} {enum VehicleType}} {{enum {Other Car}} {enum Other Car} {enum Other}}}
+
+test enum-hir-roundtrip {HIR text round-trips the declarations, the case values and the enum types} -body {
+    set hir [surface::compile "${vehicle}enum Other:\n    Car,\nstruct Holder:\n    kind: VehicleType\nfn pick(x: VehicleType) -> Other:\n    Other::Car\nh = Holder \{kind: VehicleType::Truck\}\n\[pick(h.kind), h\]\n" enum.bot]
+    set text [hir::format $hir]
+    set back [hir::parse $text]
+    list [expr {[hir::format $back] eq $text}] \
+        [lsearch -all -inline -glob [split $text \n] enum*] \
+        [regexp {e[0-9]+ const enum \{VehicleType Truck\} : VehicleType} $text] \
+        [hir::enums::cases VehicleType] \
+        [lrange [outcomeUnderHir compile $back] 0 1] [lrange [outcomeUnderHir cranelift $back] 0 1]
+} -result {1 {{enum VehicleType name VehicleType ns - cases Boat, Car, Truck, Tank, Tractor, Airplane} {enum Other name Other ns - cases Car}} 1 {Boat Car Truck Tank Tractor Airplane} {value {[Other::Car, Holder {kind: VehicleType::Truck}]}} {value {[Other::Car, Holder {kind: VehicleType::Truck}]}}}
+
+test enum-core-ir {core IR spells a case as (const enum {ID CASE}): a value, never a lookup} -body {
+    set hir [surface::compile "${vehicle}VehicleType::Car\n" enum.bot]
+    set ir [hir::lower $hir]
+    list [lindex $ir end] [core::formatValue [core::ir::literalValue {const enum {geo::VehicleType Boat}}]] \
+        [catch {core::ir::checkShape {const enum {VehicleType}}}] [catch {core::ir::checkShape {const enum {VehicleType A::B}}}]
+} -result {{const enum {VehicleType Car}} geo::VehicleType::Boat 1 1}
+
+test enum-runtime-value {the Tcl runtime value is {enum ID CASE}: both identities, no number} -body {
+    set a [core::value::enumValue VehicleType Car]
+    list $a [core::value::kind $a] [core::value::equal $a [core::value::enumValue VehicleType Car]] \
+        [core::value::equal $a [core::value::enumValue Other Car]] [core::value::show $a] \
+        [catch {core::value::enumValue VehicleType ""}]
+} -result {{enum VehicleType Car} enum 1 0 VehicleType::Car 1}
+
+test enum-native-representation {native code: an enum table, immediate case words, and word equality} -body {
+    set hir [surface::compile "${vehicle}enum Other:\n    Car,\nfn is_car(v: VehicleType) -> bool:\n    v == VehicleType::Car\n\[is_car(VehicleType::Car), Other::Car\]\n" enum.bot]
+    set nir [dict get [native::lowered $hir -specialize 0] text]
+    list [regexp -all -inline {enum [0-9]+ "[A-Za-z]+" cases="[A-Za-z ]+"} $nir] \
+        [lsort [regexp -all -inline {= enum [0-9]+ [0-9]+} $nir]] [regexp -all {op enumeq} $nir] [regexp -all {op veq} $nir]
+} -result {{{enum 0 "VehicleType" cases="Boat Car Truck Tank Tractor Airplane"} {enum 1 "Other" cases="Car"}} {{= enum 0 1} {= enum 0 1} {= enum 1 0}} 1 0}
+
+test enum-native-no-allocation {ordinary enum operations allocate nothing, and an enum struct field is scalar-replaced} -body {
+    set hir [surface::compile "${vehicle}struct Item:
+    kind: VehicleType
+    weight: int
+
+fn next(k: VehicleType) -> VehicleType:
+    if k == VehicleType::Car:
+        VehicleType::Truck
+    else:
+        VehicleType::Car
+
+fn step(item: Item) -> Item:
+    Item \{kind: next(item.kind), weight: item.weight + 1\}
+
+fn run(n: int, k: VehicleType, acc: int) -> int:
+    if n == 0:
+        return acc
+    item = step(Item \{kind: k, weight: n\})
+    if item.kind == VehicleType::Truck:
+        run(n - 1, item.kind, acc + 1)
+    else:
+        run(n - 1, item.kind, acc)
+
+run(100, VehicleType::Car, 0)
+" enum.bot]
+    set report [native::allocationReport $hir summary]
+    list [enumOutcomes $hir] [dict get $report total allocations] [dict get $report byKind Struct allocations] \
+        [lsort -unique [lmap c [native::structCensus $hir] {dict get $c class}]]
+} -result {{same: 50} 0 0 {call return}}
+
+test enum-native-gc-stress {case values survive collection at every allocation} -body {
+    set source [withImports "${vehicle}struct Vehicle:\n    kind: VehicleType\n    name: str\nfn build(n: int) -> List\[Vehicle\]:\n    loop i from 0 to n:\n        k = if i == 0:\n            VehicleType::Boat\n        else:\n            VehicleType::Car\n        Vehicle \{kind: k, name: str::concat(\"v\", \"x\")\}\nxs = build(30)\nkinds = loop v in xs:\n    v.kind\n\[list::length(xs), kinds == kinds, immutable_set::from_list(kinds)\]\n"]
+    set hir [surface::compile $source enum.bot]
+    set plain [outcomeUnderHir cranelift $hir]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        set stressed [outcomeUnderHir cranelift $hir]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+    list [expr {$plain eq $stressed}] [enumOutcomes $hir]
+} -result {1 {same: [30, true, {VehicleType::Boat, VehicleType::Car}]}}
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" && $::tcl_platform(machine) in {x86_64 amd64}}]
+
+test enum-executable-parity {a standalone executable carries the enum table and prints, compares and hashes cases identically} -constraints executableAot -body {
+    withEnumModules {
+        set path [file join $lib program.bot]
+        writeFile $path "import geo\nimport immutable_set\nenum Local:\n    A,\n    B,\nfn same(x):\n    x\n\[Local::B, geo::VehicleType::Car, same(Local::A) == Local::A, same(Local::A) == same(Local::B), hash(Local::A), immutable_set::from_list(\[Local::A, Local::A\])\]\n"
+        set hir [surface::readProgramFile $path]
+        set expected [lindex [outcomeUnderHir interp $hir] 1]
+        native::executable $hir [file rootname $path]
+        set plain [exec env PATH= [file rootname $path]]
+        set stressed [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 [file rootname $path]]
+        list [expr {$plain eq $stressed}] [expr {$plain eq $expected}] $plain
+    }
+} -result {1 1 {[Local::B, geo::VehicleType::Car, true, false, 816411275445553281, {Local::A}]}}
+
+# ---------------------------------------------------------------------------
+# Programs without enums are unchanged
+
+test enum-free-programs-unchanged {a program that declares no enum emits no enum declaration or instruction} -body {
+    set hir [surface::compile "struct P:\n    a: int\nfn f(x):\n    x\n\[f(P \{a: 1\}), 1 == 1\]\n" enum.bot]
+    set nir [dict get [native::lowered $hir] text]
+    list [regexp -all {enum} $nir] [lmap entry [dict get $hir sourceTypes] {dict get $entry kind}]
+} -result {0 struct}
+
+cleanupTests

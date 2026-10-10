@@ -183,7 +183,7 @@ proc hir::traits::resolve {{sourceTypes {}}} {
     # registry keeps a previous compilation's until the next one that
     # declares types: hir/sourcetypes.tcl, "Compilation isolation").
     set types [lmap t $sourceTypes {
-        expr {[dict exists $t kind] && [dict get $t kind] eq "struct" ? [dict get $t id] : [dict get $t name]}
+        expr {[dict exists $t kind] && [dict get $t kind] in {struct enum} ? [dict get $t id] : [dict get $t name]}
     }]
     foreach id [dict keys $registry] {
         set entry [dict get $registry $id]
@@ -471,6 +471,11 @@ proc hir::traits::ImplInfo {unit name} {
 proc hir::traits::WitnessOwner {type} {
     if {[hir::types::IsNamedStruct $type]} {
         return [list [hir::structs::owner [lindex $type 1]] module]
+    }
+    if {[hir::types::IsEnum $type]} {
+        # An enum (ENUMS.md) is an ordinary nominal type here: its owner is
+        # the module that declares it, exactly a named struct's.
+        return [list [hir::enums::owner [lindex $type 1]] module]
     }
     if {$type in {any never}} {
         return [list "" none "its static type is $type, not a concrete type"]
@@ -1653,7 +1658,7 @@ proc hir::traits::ImplIdent {impl} {
 
 # A short, symbol-safe spelling of witness type W for clone names.
 proc hir::traits::WitnessName {w} {
-    if {[hir::types::IsNamedStruct $w]} {
+    if {[hir::types::IsNamedStruct $w] || [hir::types::IsEnum $w]} {
         return [lindex $w 1]
     }
     if {[hir::types::IsAffine $w]} {
@@ -2371,6 +2376,8 @@ proc hir::traits::report {hir} {
         foreach t [dict get $hir sourceTypes] {
             if {[dict exists $t kind] && [dict get $t kind] eq "struct"} {
                 lappend declaredTypes [list nstruct [dict get $t id]]
+            } elseif {[dict exists $t kind] && [dict get $t kind] eq "enum"} {
+                lappend declaredTypes [list enum [dict get $t id]]
             } elseif {![catch {core::type::normalize [dict get $t name]} type]} {
                 lappend declaredTypes $type
             }

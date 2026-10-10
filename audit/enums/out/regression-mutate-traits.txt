@@ -1,0 +1,55 @@
+KILLED every-type-satisfies
+    tests: killed (13 failed: trait-any-erasure, trait-applied-witness-unsupported, trait-context-orthogonal, trait-error-contracts, trait-explain-api, trait-impl-declares-result, ...)
+    fuzz:  killed (31 of 40 programs fail)
+KILLED caller-namespace-implements
+    tests: killed (3 failed: trait-imports-do-not-affect-satisfaction, trait-missing-requirement, trait-refinement-forgetting-not-satisfaction)
+    fuzz:  killed (3 of 40 programs fail)
+KILLED search-imported-namespaces
+    tests: killed (1 failed: trait-imports-do-not-affect-satisfaction)
+    fuzz:  killed (7 of 40 programs fail)
+KILLED ignore-one-missing
+    tests: killed (3 failed: trait-imports-do-not-affect-satisfaction, trait-missing-requirement, trait-refinement-forgetting-not-satisfaction)
+    fuzz:  killed (22 of 40 programs fail)
+KILLED ignore-result-mismatch
+    tests: killed (2 failed: trait-explain-api, trait-wrong-signature)
+    fuzz:  killed (15 of 40 programs fail)
+KILLED collapse-refinement-witnesses
+    tests: killed (2 failed: trait-refinement-forgetting-not-satisfaction, trait-refinement-witness-identity)
+    fuzz:  killed (12 of 40 programs fail)
+KILLED witness-leaks-into-applicability
+    tests: killed (1 failed: trait-provenance-identity)
+    fuzz:  killed (1 of 40 programs fail)
+KILLED strengthen-view
+    tests: killed (1 failed: trait-view-never-narrowed)
+    fuzz:  survived
+KILLED concrete-method-search
+    tests: killed (44 failed: trait-alias-direct-call, trait-allocation-free, trait-any-erasure, trait-builtin-scalar-witness, trait-closure-capture, trait-code-quality-identical, ...)
+    fuzz:  killed (40 of 40 programs fail)
+KILLED forget-witness-onward
+    tests: killed (5 failed: trait-hir-round-trip, trait-mono-hir-trait-free, trait-passing-onward, trait-recursion-two-witnesses, trait-returns-from-requirements)
+    fuzz:  killed (14 of 40 programs fail)
+KILLED mix-witnesses-at-join
+    tests: killed (1 failed: trait-witness-join-rejected)
+    fuzz:  killed (1 of 40 programs fail)
+KILLED trait-storage-as-any
+    tests: killed (1 failed: trait-storage-unsupported)
+    fuzz:  survived
+KILLED runtime-wrapper
+    tests: killed (7 failed: trait-allocation-free, trait-code-quality-identical, trait-hir-round-trip, trait-hir-text, trait-passing-onward, trait-principal-nir, ...)
+    fuzz:  killed (15 of 40 programs fail)
+KILLED indirect-trait-calls
+    tests: killed (7 failed: trait-allocation-free, trait-code-quality-identical, trait-hir-text, trait-machine-code-direct, trait-principal-hir, trait-principal-nir, ...)
+    fuzz:  survived
+KILLED omit-witness-from-key
+    tests: killed (13 failed: trait-error-contracts, trait-future-path-shape, trait-hir-round-trip, trait-machine-code-direct, trait-mono-hir-trait-free, trait-passing-onward, ...)
+    fuzz:  killed (23 of 40 programs fail)
+KILLED one-codegen-instance
+    tests: killed (11 failed: trait-error-contracts, trait-future-path-shape, trait-machine-code-direct, trait-mono-hir-trait-free, trait-polymorphic-recursion-rejected, trait-principal-hir, ...)
+    fuzz:  killed (15 of 40 programs fail)
+KILLED break-opacity
+    tests: killed (1 failed: trait-opaque-witness)
+    fuzz:  survived
+KILLED function-value-escape
+    tests: killed (1 failed: trait-function-value-escape)
+    fuzz:  survived
+18 mutants, 18 killed, 0 survived

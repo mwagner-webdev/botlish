@@ -24,6 +24,11 @@
 #   x                     ref x
 #   mod::x                ref "mod::x"          module-qualified; see
 #                         surface/modules.tcl for how "mod::x" is bound
+#   E::C                  the same `ref "E::C"` (qualified {E C}): when E
+#                         names an enum type visible here, hir::resolve makes
+#                         it the case C of that enum, the constant
+#                         `const enum {ID C}` (ENUMS.md); nothing here knows
+#                         which qualifier is a type
 #   [a, b]                call ^list a b
 #   {x: a, y: b}          struct {} (x a) (y b)      written order is evaluation
 #                         order; an anonymous struct value (STRUCTS.md)
@@ -158,7 +163,7 @@ proc surface::lowerToHir {ast args} {
 # STATEMENTS split into {EXECUTABLE DECLS ERRORDECLS STRUCTDECLS TRAITDECLS}: EXECUTABLE keeps
 # every statement with runtime meaning, in order (ready for Sequence);
 # DECLS is the type declarations among them (surface/parser.tcl's
-# `typedecl` nodes), converted to the plain dicts hir::buildSyntax's
+# `typedecl` nodes, and `enumdecl` nodes as `kind enum` entries), converted to the plain dicts hir::buildSyntax's
 # -type-decls option takes (see hir/sourcetypes.tcl); ERRORDECLS likewise
 # for named-error declarations (`errordecl` nodes, hir/errordecls.tcl's
 # -error-decls); STRUCTDECLS likewise for struct declarations (`structdecl`
@@ -178,6 +183,7 @@ proc surface::lower::SplitTypeDecls {statements {namespace ""}} {
     foreach statement $statements {
         switch -- [dict get $statement kind] {
             typedecl   { lappend decls [TypeDeclOf $statement $namespace] }
+            enumdecl   { lappend decls [EnumDeclOf $statement $namespace] }
             errordecl  { lappend errorDecls [ErrorDeclOf $statement] }
             structdecl { lappend structDecls [StructDeclOf $statement $namespace] }
             traitdecl  { lappend traitDecls [TraitDeclOf $statement $namespace] }
@@ -185,6 +191,17 @@ proc surface::lower::SplitTypeDecls {statements {namespace ""}} {
         }
     }
     return [list $executable $decls $errorDecls $structDecls $traitDecls]
+}
+
+# The declaration dict of an `enumdecl` node declared in module NAMESPACE (""
+# for the entry program): a `kind enum` entry of hir::buildSyntax's
+# -type-decls (ENUMS.md; hir::sourcetypes::apply hands it to hir/enums.tcl).
+# `namespace` is the loader's canonical module identity, never read from the
+# (cached, importer-neutral) AST: it makes the enum's identity
+# `NAMESPACE::Name`.
+proc surface::lower::EnumDeclOf {node namespace} {
+    return [dict create kind enum name [dict get $node name] nameSpan [dict get $node nameSpan] \
+        namespace $namespace cases [dict get $node cases] span [dict get $node span]]
 }
 
 # The declaration dict of a `traitdecl` node declared in module NAMESPACE (""

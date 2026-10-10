@@ -77,6 +77,18 @@ proc hir::read::Lines {text} {
 proc hir::read::TypeDecls {lines} {
     set decls {}
     set rest $lines
+    # Enum declarations (hir::format::TypeDecl's "enum ..." lines) come
+    # first: a refinement's carrier and a struct's field may name an enum.
+    # They join the type declarations as `kind enum` entries, registered by
+    # the same hir::sourcetypes::apply pass a source compile uses.
+    hir::enums::Reset
+    foreach entry $lines {
+        lassign $entry indent content number
+        if {$indent != 0 || [string range $content 0 4] ne "enum "} { break }
+        lappend decls [EnumDeclLine $content $number]
+        set rest [lrange $rest 1 end]
+    }
+    set lines $rest
     foreach entry $lines {
         lassign $entry indent content number
         if {$indent != 0} { break }
@@ -218,6 +230,23 @@ proc hir::read::TraitLine {content number} {
     return [dict create id $id name [lindex [split [string map {:: \x01} $id] \x01] end] \
         namespace [expr {$owner eq "-" ? "" : $owner}] requirements $requirements \
         context [expr {$context ne ""}]]
+}
+
+# The `kind enum` declaration (hir::enums::apply's input) of the enum line
+# "enum ID name NAME ns NS cases C1, C2, ..." (hir::format::TypeDecl).
+proc hir::read::EnumDeclLine {content number} {
+    if {![regexp {^enum (\S+) name (\S+) ns (\S+) cases (.+)$} $content -> id name ns casesText]} {
+        Fail $number "expected \"enum ID name NAME ns NS cases CASE, ...\""
+    }
+    set span [dict create file <hir-text> line $number column 1]
+    set cases [lmap c [split [string map {", " \x01} $casesText] \x01] {
+        if {![regexp {^[A-Za-z_][A-Za-z0-9_]*$} $c]} {
+            Fail $number "bad enum case \"$c\""
+        }
+        dict create name $c nameSpan $span
+    }]
+    return [dict create kind enum resolved 1 name $id namespace [expr {$ns eq "-" ? "" : $ns}] \
+        nameSpan $span cases $cases span $span]
 }
 
 # The struct sourceTypes entry "struct ID name NAME ns NS fields F: T, ..."
@@ -582,6 +611,10 @@ proc hir::read::ParseType {text number} {
     }
     if {[hir::structs::declared $text]} {
         return [list nstruct $text]
+    }
+    if {[hir::enums::declared $text]} {
+        # An enum type (ENUMS.md): hir::types::show prints its identity.
+        return [list enum $text]
     }
     if {[hir::traits::declared $text]} {
         # A trait constraint (TRAITS.md): only a trait declaration or a

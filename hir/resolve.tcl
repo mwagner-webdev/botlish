@@ -750,6 +750,11 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 # its function, resolved to the binding the source function's
                 # own resolution found (TRAITS.md, "Monomorphization").
                 ResolveIdent hir $e $ident $ctx
+            } elseif {[dict exists $node qualified]
+                    && [set enumId [hir::enums::lookup [lindex [dict get $node qualified] 0] [CtxNamespace $ctx]]] ne ""} {
+                # `Enum::Case` (ENUMS.md): the qualifier names an enum type,
+                # so this is a case of it, never a namespace member.
+                ResolveEnumCase hir $e $enumId [lindex [dict get $node qualified] 1] $ctx
             } elseif {[dict exists $node qualified]} {
                 ResolveQualifiedRef hir $e [dict get $node qualified] $ctx
             } else {
@@ -1668,6 +1673,56 @@ proc hir::resolve::ResolveQualifiedRef {hirVar e pair ctx} {
     Capture hir $ctx [dict get $hir bindings $b scope] $b
 }
 
+# Resolves E, written `QUALIFIER::CASE` where QUALIFIER denotes the enum ID
+# (hir::enums::lookup, from the code's own namespace: the visibility of any
+# nominal type), to the case CASE of ID (ENUMS.md). Type-qualified case
+# resolution is not a namespace lookup: QUALIFIER was resolved as a type,
+# and CASE is looked up among ID's declared cases only -- never in a module,
+# a lexical scope or another enum. A case value is a constant: E becomes the
+# `const` node of the value {enum ID CASE}, whose type is exactly {enum ID}
+# and which keeps both identities through every check and into each
+# backend. An unknown case is UNKNOWN-ENUM-CASE, with the closest declared
+# spellings suggested.
+proc hir::resolve::ResolveEnumCase {hirVar e id case ctx} {
+    upvar 1 $hirVar hir
+    if {![hir::enums::hasCase $id $case]} {
+        # Typed as never (an unbound name is too): nothing downstream
+        # reasons about a value that does not exist.
+        SetField hir $e name "${id}::$case"
+        SetField hir $e binding ""
+        SetField hir $e init yes
+        hir::Diagnose hir UNKNOWN-ENUM-CASE [hir::enums::UnknownCaseMessage $id $case] $e
+        return
+    }
+    dict set hir exprs $e kind const
+    set literal [list enum [list $id $case]]
+    SetField hir $e literal $literal
+    SetField hir $e value [core::ir::literalValue [list const {*}$literal]]
+}
+
+# The hint an UNBOUND diagnostic for the bare NAME adds when NAME is the
+# spelling of an enum type or of an enum's case (ENUMS.md): a case is never
+# injected into its surroundings, so it is written through its enum's type
+# name; and a type name is not a value.
+proc hir::resolve::EnumHint {name ns} {
+    set id [hir::enums::lookup $name $ns]
+    if {$id ne ""} {
+        return [format {: "%s" is an enum type, not a value; a case of it is written %s::CASE (its cases: %s)} \
+            $name $name [join [hir::enums::cases $id] {, }]]
+    }
+    set owners {}
+    foreach id [lsort [dict keys $::hir::enums::registry]] {
+        if {[hir::enums::hasCase $id $name]} {
+            lappend owners "${id}::$name"
+        }
+    }
+    if {$owners ne ""} {
+        return [format {: an enum case is never visible by its bare name; write it qualified by its enum's type, e.g. %s} \
+            [join $owners { or }]]
+    }
+    return ""
+}
+
 # 1 if NAME is a registered native (a root native of this compilation).
 proc hir::resolve::NativeNamed {name} {
     return [core::native::exists $name]
@@ -1703,6 +1758,8 @@ proc hir::resolve::ResolveRef {hirVar e name root ctx} {
         set message "unbound name \"$name\""
         if {!$root && [DeclaredLater hir $scope $name]} {
             append message ": \"$name\" is declared later; forward references are not allowed (a binding is visible only after it is established)"
+        } elseif {!$root} {
+            append message [EnumHint $name [CtxNamespace $ctx]]
         }
         hir::Diagnose hir UNBOUND $message $e
         return

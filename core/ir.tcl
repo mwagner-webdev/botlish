@@ -3,7 +3,7 @@
 # IR nodes are Tcl lists whose first element is the operation name:
 #
 #   (const LITERAL)             (const TYPE LITERAL)   TYPE: int str list
-#                                                        UnicodeChar
+#                                                        UnicodeChar enum
 #   (bind NAME EXPR)
 #   (ref NAME)
 #   (block PARAMS BODY...)
@@ -256,6 +256,15 @@ proc core::ir::CheckShape {node} {
                             core::malformed "not a Unicode scalar value" $node
                         }
                     }
+                    enum {
+                        # {ID CASE}: an enum case value (ENUMS.md), its
+                        # declaration identity and its case's name.
+                        if {[catch {llength $text} n] || $n != 2
+                                || ![regexp {^[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*$} [lindex $text 0]]
+                                || ![regexp {^[A-Za-z_][A-Za-z0-9_]*$} [lindex $text 1]]} {
+                            core::malformed "an enum literal is {ENUM-ID CASE}" $node
+                        }
+                    }
                     default {
                         core::malformed "unknown literal type \"$type\"" $node
                     }
@@ -420,6 +429,10 @@ proc core::ir::checkShape {node} {
 # leading zeros, no "+", no "-0") is an int; anything else is a str.
 # (const int LITERAL), (const str LITERAL) force the type.
 # (const list {E...}) builds a list; each element follows the untyped rule.
+# (const enum {ID CASE}) is the case CASE of the enum declared as ID
+# (ENUMS.md): a value, like a literal, never a lookup.  Core IR does not
+# check that ID declares CASE -- HIR resolution did (hir/enums.tcl).
+
 
 proc core::ir::InferLiteral {text} {
     if {[core::value::isCanonicalInt $text]} {
@@ -437,6 +450,7 @@ proc core::ir::literalValue {node} {
         int  { return [core::value::int $text] }
         str  { return [core::value::str $text] }
         UnicodeChar { return [core::value::char $text] }
+        enum { return [core::value::enumValue [lindex $text 0] [lindex $text 1]] }
         list {
             set items {}
             foreach element $text {

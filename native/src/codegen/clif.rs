@@ -1180,6 +1180,10 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 let x = self.b.ins().band_imm_s(v, CHAR_TAG_MASK as i64);
                 return self.b.ins().icmp_imm_s(IntCC::Equal, x, CHAR_TAG as i64);
             }
+            Kind::Enum => {
+                let x = self.b.ins().band_imm_s(v, ENUM_TAG_MASK as i64);
+                return self.b.ins().icmp_imm_s(IntCC::Equal, x, ENUM_TAG as i64);
+            }
             _ => {}
         }
         let done = self.b.create_block();
@@ -1206,7 +1210,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             Kind::MutByteStore => KIND_MUTBYTES,
             Kind::Coroutine => KIND_COROUTINE,
             Kind::MutVec => KIND_MUTVEC,
-            Kind::Bool | Kind::Unit | Kind::UnicodeChar => unreachable!(),
+            Kind::Bool | Kind::Unit | Kind::UnicodeChar | Kind::Enum => unreachable!(),
         };
         let low3 = self.b.ins().band_imm_s(v, 7);
         let pointer = self.b.ins().icmp_imm_s(IntCC::Equal, low3, 0);
@@ -1282,6 +1286,13 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 // allocation, no GC root.
                 let codepoint: u32 = digits.parse().expect("validated char literal");
                 let v = self.iconst(make_char(codepoint));
+                self.def(*dst, v);
+            }
+            Inst::Enum { dst, index, case } => {
+                // An immediate constant (ENUMS.md), like a Char: validated
+                // against the program's enum table when parsed (nir.rs). No
+                // allocation, no GC root.
+                let v = self.iconst(make_enum(*index, *case));
                 self.def(*dst, v);
             }
             Inst::Bool { dst, value } => {
@@ -1661,7 +1672,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 self.b.switch_to_block(done);
                 result
             }
-            CharEq => {
+            CharEq | EnumEq => {
                 let eq = self.b.ins().icmp(IntCC::Equal, a[0], a[1]);
                 self.bool_of(eq)
             }

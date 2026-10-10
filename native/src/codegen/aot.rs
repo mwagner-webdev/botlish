@@ -22,7 +22,7 @@ fn startup(program: &Program, object: &ObjectProgram) -> String {
         "#![allow(unused_imports)]\n\
          use botlish_native::{nir::OpCode, runtime::{aot, constants::{self, Const},\n\
          framemap::{FunctionMap, ProgramMap}, metrics::AllocMode, value::{Kind, Value},\n\
-         vm::{FunctionInfo, NativeInfo, ProgramInfo, ShapeInfo, Vm}}};\n\
+         vm::{EnumInfo, FunctionInfo, NativeInfo, ProgramInfo, ShapeInfo, Vm}}};\n\
          use std::rc::Rc;\n\
          unsafe extern \"C\" {\n",
     );
@@ -76,6 +76,15 @@ fn startup(program: &Program, object: &ObjectProgram) -> String {
             s,
             "ShapeInfo {{ name: {name}, fields: vec!{:?}.into_iter().map(String::from).collect(), opaque: {} }},",
             shape.fields, shape.opaque
+        )
+        .unwrap();
+    }
+    s.push_str("], enums: vec![\n");
+    for e in &program.enums {
+        writeln!(
+            s,
+            "EnumInfo {{ name: {:?}.to_string(), cases: vec!{:?}.into_iter().map(String::from).collect() }},",
+            e.name, e.cases
         )
         .unwrap();
     }

@@ -1,0 +1,29 @@
+# An enum is a closed, nominal set of named cases (ENUMS.md): each case is a
+# value of exactly its enum's type, written through the enum's name, and has
+# no integer or String meaning. Two enums are unrelated even when their cases
+# are spelled alike.
+#
+# expect: [Light::Green, Light::Yellow, true, false, false]
+
+enum Light:
+    Red,
+    Yellow,
+    Green,
+
+enum Signal:
+    Red,
+    Green,
+
+fn next(light: Light) -> Light:
+    if light == Light::Red:
+        Light::Green
+    elif light == Light::Green:
+        Light::Yellow
+    else:
+        Light::Red
+
+fn same(x):
+    x
+
+start = Light::Red
+[next(start), next(next(start)), next(Light::Yellow) == start, same(Light::Red) == same(Signal::Red), Light::Red == Light::Green]

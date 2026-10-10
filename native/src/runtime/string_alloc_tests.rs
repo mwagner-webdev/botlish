@@ -51,7 +51,7 @@ pub(super) fn measure<R>(f: impl FnOnce() -> R) -> (R, usize, usize, usize) {
 }
 
 fn vm() -> Box<Vm> {
-    warmed(Vm::new(std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new() }), AllocMode::Off))
+    warmed(Vm::new(std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() }), AllocMode::Off))
 }
 
 /// `vm()` for a test that counts allocator calls in a `measure` window: it
@@ -62,7 +62,7 @@ fn vm() -> Box<Vm> {
 /// warm-up whose Strings are collected as it goes never grows the heap's
 /// object list.
 pub(super) fn counting_vm() -> Box<Vm> {
-    let mut vm = Vm::new(std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new() }), AllocMode::Off);
+    let mut vm = Vm::new(std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() }), AllocMode::Off);
     vm.heap.set_stress_for_test(false);
     warmed(vm)
 }
@@ -277,7 +277,7 @@ fn text_is_inline_at_a_constant_offset() {
 
 #[test]
 fn string_census_counts_objects_frees_and_reused_empties() {
-    let mut vm = Vm::new(std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new() }), AllocMode::Summary);
+    let mut vm = Vm::new(std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() }), AllocMode::Summary);
     vm.new_str("abc");
     vm.new_str("");
     vm.new_str_scalar('x');

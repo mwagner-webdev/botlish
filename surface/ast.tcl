@@ -144,6 +144,11 @@
 #              owner is not in the AST (the cached AST is importer- and
 #              path-neutral): the loader supplies the module's namespace when
 #              it lowers the declaration (surface/lower.tcl's StructDeclOf).
+#   enumdecl   name, nameSpan, cases ({name nameSpan} dicts in declaration
+#              order) -- a top-level enum declaration ("enum NAME:" followed
+#              by its indented, comma-separated payload-free cases; ENUMS.md).
+#              A declaration like structdecl: no runtime meaning, no binding;
+#              the owner (the declaring module) is supplied by the loader.
 #   traitdecl  name, nameSpan, requirements ({name nameSpan params paramsSpan
 #              resultType resultTypeSpan errors span} dicts in written order;
 #              params are the function node's {NAME SPAN TYPE TYPESPAN}
@@ -743,6 +748,13 @@ proc surface::ast::Statement {node indent show linesVar} {
         }
         errordecl {
             lappend lines "${pad}error [dict get $node name]$at"
+            return
+        }
+        enumdecl {
+            lappend lines "${pad}enum [dict get $node name]$at"
+            foreach case [dict get $node cases] {
+                lappend lines "${pad}    [dict get $case name],"
+            }
             return
         }
         traitdecl {

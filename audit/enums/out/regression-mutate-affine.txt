@@ -1,0 +1,90 @@
+KILLED struct-affine-unrestricted -- a named struct with an affine field is unrestricted
+    tests: killed (15 failed: af-aggregate-branch, af-aggregate-destructure, af-aggregate-field-read, af-aggregate-move, af-aggregate-return-fail, af-call-pending, ...)
+    fuzz:  killed (8 of 25 programs disagree)
+KILLED list-affine-unrestricted -- a List of affine elements is unrestricted
+    tests: killed (12 failed: af-call-pending, af-contract-compat, af-drop-native, af-drop-order, af-fuzz-bounded, af-generic-ownership, ...)
+    fuzz:  killed (3 of 25 programs disagree)
+KILLED alias-becomes-move -- an exact function value is affine: binding it to another name moves it, so the original name is dead
+    tests: killed (43 failed: af-aggregate-branch, af-aggregate-destructure, af-aggregate-field-read, af-aggregate-move, af-aggregate-return-fail, af-call-construction-argument, ...)
+    fuzz:  killed (25 of 25 programs disagree)
+KILLED assignment-copies -- binding an affine value to another name copies it: both names stay usable
+    tests: killed (13 failed: af-aggregate-branch, af-aggregate-destructure, af-aggregate-field-read, af-aggregate-move, af-aggregate-return-fail, af-done-generalized, ...)
+    fuzz:  killed (11 of 25 programs disagree)
+KILLED arg-no-invalidate -- passing an affine value as a call argument does not invalidate the caller's binding
+    tests: killed (7 failed: af-call-transfer, af-done-generalized, af-fuzz-bounded, af-generic-terminal, af-generic-transitive, af-principal-callable, ...)
+    fuzz:  killed (21 of 25 programs disagree)
+KILLED list-no-consume -- a List construction does not consume its affine elements: their bindings stay usable
+    tests: killed (4 failed: af-call-pending, af-fuzz-bounded, af-generic-ownership, af-principal-list)
+    fuzz:  killed (3 of 25 programs disagree)
+KILLED destructure-aliases -- a destructuring's moved-out affine field stays owned by the destructured struct too: its release drops the moved value
+    tests: killed (13 failed: af-aggregate-branch, af-aggregate-destructure, af-aggregate-field-read, af-aggregate-move, af-aggregate-return-fail, af-done-generalized, ...)
+    fuzz:  killed (6 of 25 programs disagree)
+KILLED projection-aliases -- a projection of an affine field outside a destructuring is accepted: the field gets a second owner
+    tests: killed (1 failed: af-aggregate-field-read)
+    fuzz:  survived
+KILLED any-erasure-hides -- erasing an affine value into an unrestricted position (any, an unrestricted field or argument) is accepted
+    tests: killed (2 failed: af-list-operations, af-restrictions)
+    fuzz:  survived
+KILLED closure-capture-hides -- a closure capturing an affine binding is accepted
+    tests: killed (1 failed: af-restrictions)
+    fuzz:  killed (1 of 25 programs disagree)
+KILLED return-releases-before-transfer -- a return releases the affine value it returns (its exit state is the one before the value moved): the caller receives a released value
+    tests: killed (3 failed: af-call-return, af-generic-return, af-generic-transitive)
+    fuzz:  survived
+KILLED callee-fail-no-drop -- a function that fails (by fail, or a call propagating a declared error) does not release its affine parameters
+    tests: killed (2 failed: af-call-release, af-fuzz-bounded)
+    fuzz:  killed (4 of 25 programs disagree)
+KILLED pending-arg-leak -- a call argument that fails leaks the affine arguments evaluated (and moved) before it
+    tests: killed (2 failed: af-call-pending, af-call-pending-hir)
+    fuzz:  killed (1 of 25 programs disagree)
+KILLED aggregate-field-leak -- a struct field whose evaluation fails leaks the affine fields evaluated (and moved) before it
+    tests: killed (2 failed: af-call-pending, af-fuzz-bounded)
+    fuzz:  killed (3 of 25 programs disagree)
+KILLED partial-destructure-leak -- a destructuring that does not name every affine field never drops the fields it omits
+    tests: killed (3 failed: af-aggregate-destructure, af-call-pending, af-drop-native)
+    fuzz:  killed (2 of 25 programs disagree)
+KILLED last-use-raw-only -- the release at an owner's last use (and of a discarded value) recognizes only a raw Coroutine: a struct or List owning one is never dropped
+    tests: killed (8 failed: af-aggregate-destructure, af-call-pending, af-drop-native, af-drop-order, af-join, af-list-ownership, ...)
+    fuzz:  killed (4 of 25 programs disagree)
+KILLED exit-raw-only -- an early exit releases only raw Coroutine bindings: a struct or List owning one is left to the collector
+    tests: killed (3 failed: af-aggregate-return-fail, af-fuzz-bounded, af-list-ownership)
+    fuzz:  killed (6 of 25 programs disagree)
+KILLED list-drop-no-elements -- (Tcl runtime) dropping a List of affine values releases none of its elements
+    tests: killed (5 failed: af-call-pending, af-drop-order, af-join, af-list-ownership, af-principal-list)
+    fuzz:  killed (2 of 25 programs disagree)
+KILLED list-drop-twice -- (Tcl runtime) dropping a List of affine values releases each element twice
+    tests: survived
+    fuzz:  killed (2 of 25 programs disagree)
+KILLED struct-drop-no-fields -- (Tcl runtime) dropping a struct releases none of its affine fields
+    tests: killed (6 failed: af-aggregate-destructure, af-aggregate-return-fail, af-call-pending, af-drop-order, af-fuzz-bounded, af-join)
+    fuzz:  killed (8 of 25 programs disagree)
+KILLED explicit-fn-accepts-coroutine -- a coroutine handle is accepted where an explicit Fn{...} with the same contract is expected
+    tests: killed (1 failed: af-explicit-fn)
+    fuzz:  survived
+KILLED explicit-coroutine-accepts-fn -- a function value is accepted where an explicit Coroutine{...} with the same contract is expected
+    tests: killed (1 failed: af-explicit-fn)
+    fuzz:  survived
+KILLED generic-coerces-fn -- a generic function's semantic instance takes a coroutine argument at the parameter's inferred Fn contract, not at its own Coroutine type
+    tests: killed (1 failed: af-generic-inferred-contract)
+    fuzz:  survived
+KILLED generic-runtime-dispatch -- a generic function given a coroutine is not specialized: its calls dispatch on the callee's runtime kind (a coroutine handle is resumed)
+    tests: killed (12 failed: af-fuzz-bounded, af-generic-dual, af-generic-errors, af-generic-inferred-contract, af-generic-module, af-generic-nested, ...)
+    fuzz:  killed (8 of 25 programs disagree)
+KILLED hof-restarts -- a coroutine resumed through a parameter (a HOF's, typed or specialized) restarts from its construction instead of continuing
+    tests: killed (22 failed: af-call-construction-argument, af-call-pending, af-call-return, af-call-tail, af-call-transfer, af-contract-compat, ...)
+    fuzz:  killed (17 of 25 programs disagree)
+KILLED struct-move-changes-identity -- a coroutine moved into a struct field is replaced by a fresh coroutine of the same construction (a fork): the struct owns another identity
+    tests: killed (7 failed: af-aggregate-destructure, af-aggregate-return-fail, af-call-pending, af-fuzz-bounded, af-generic-terminal, af-join, ...)
+    fuzz:  killed (11 of 25 programs disagree)
+KILLED native-affinedrop-not-emitted -- native lowering emits no affinedrop: an aggregate owning coroutines is never dropped (only raw handles are released)
+    tests: killed (2 failed: af-drop-native, af-native-evidence)
+    fuzz:  killed (2 of 25 programs disagree)
+KILLED native-list-drop-no-elements -- the native drop of a List of affine values releases none of its elements
+    tests: killed (2 failed: af-drop-native, af-native-evidence)
+    fuzz:  killed (2 of 25 programs disagree)
+    rust:  killed (runtime::affine::tests::drops::a_list_drop_releases_every_element_once, runtime::affine::tests::drops::nested_aggregates_and_an_empty_list)
+KILLED native-struct-drop-no-fields -- the native drop of a struct releases none of its affine fields
+    tests: survived
+    fuzz:  survived
+    rust:  killed (runtime::affine::tests::drops::a_struct_drop_releases_only_the_slots_its_descriptor_names, runtime::affine::tests::drops::nested_aggregates_and_an_empty_list)
+29 mutants, 29 killed, 0 survived

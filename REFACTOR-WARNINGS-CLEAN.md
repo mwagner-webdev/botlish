@@ -672,7 +672,9 @@ mechanisms tried do not close it.
 5. every unit whose expected set is empty compiles under `-warnings error`.
 
 It reports 42 strict units (32 programs, 10 loaders) and 19 carrying
-entries, in about 20 seconds; CI runs it as the `warning-gate` job of
+entries (43 and 33 programs since the merge into `main` brought the enum
+milestone's `examples/surface/15-enums.bot`, listed with no entries: it
+compiles under `-warnings error`), in about 20 seconds; CI runs it as the `warning-gate` job of
 `.github/workflows/tests.yml` on every push and pull request (no native build
 needed: warnings are discovered before any backend). `-root DIR` gates another
 tree's corpus with this checkout's compiler, which is how

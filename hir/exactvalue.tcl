@@ -26,7 +26,8 @@
 # Facts
 # -----
 #   {int N}        the expression is exactly the Int N
-#   {val V}        exactly the scalar core value V (str, bool, unit, UnicodeChar)
+#   {val V}        exactly the scalar core value V (str, bool, unit, UnicodeChar,
+#                  an enum case: ENUMS.md)
 #   {list LEVEL SRC...}
 #                  exactly an immutable List with these elements, in order.
 #                  LEVEL is how deep this List sits inside the outermost
@@ -85,7 +86,7 @@ namespace eval hir::exact {
     variable maxDepth 3
     variable maxSteps 64
     variable maxMagnitude [expr {1 << 63}]
-    variable scalarKinds {str bool unit UnicodeChar}
+    variable scalarKinds {str bool unit UnicodeChar enum}
 }
 
 # The exact-value fact of expression E (one of the forms above), or "".

@@ -522,6 +522,37 @@ lowering also needs a `BOTLISH_NATIVE_GC_STRESS=1` run of
 native/Cargo.toml --lib affine`. `bench/affine.tcl` regenerates the
 performance report.
 
+## Enums
+
+Enums (ENUMS.md) are named, closed, nominal sums of payload-free cases:
+`enum Name:` declares one type `{enum ID}` (ID the declaration identity, a
+module's `ns::Name`) and its cases; `Name::Case` resolves, as a *type*
+qualifier (never a namespace), to a `const` node of the value `{enum ID
+CASE}`. A case's identity is (enum identity, case name): never a spelling
+alone, never a position. Never add an ordinal, integer or String conversion,
+an ordering, a reflection operation (`cases`, `case_count`, `case_name`), an
+anonymous enum, a case alias or value, or a global case namespace (a bare
+case name must stay unbound); no semantic check may read a case's position
+(`hir::enums::cases` keeps declaration order for diagnostics and future
+exhaustiveness only). Native case words carry an enum number and a case
+number that are representation only: printing and hashing read the names from
+the program's enum table. Affinity is derived from the case descriptors'
+payloads (`hir::enums::IsAffine`), never decided by being an enum.
+
+If you change the enum grammar (`surface/parser.tcl`'s `EnumDecl`),
+`hir/enums.tcl`, the `{enum ID}` cases of `hir/types.tcl`, case resolution
+(`hir/resolve.tcl`'s `ResolveEnumCase`, `surface/modules.tcl`'s
+`EnumQualifier`), the HIR text of enums (`hir/format.tcl`, `hir/read.tcl`), the
+Tcl runtime's enum value, equality or hashing (`core/value.tcl`,
+`core/hashing.tcl`), or the native word, enum table, `enumeq` or `rt_hash`
+case (`native/lower.tcl`, `native/src/runtime/{value,ops,show}.rs`), run
+`tests/enums.test`, `audit/enums/tools/fuzz.tcl` (several seeds, once with
+`-gc-stress 1`), `audit/enums/tools/mutate.tcl` (every mutant in
+`audit/enums/tools/mutants.txt` must still apply and be killed: update a
+mutant's text when you change the code it mutates, keeping it a mutant of the
+same rule) and `cargo test --release --manifest-path native/Cargo.toml --lib
+enum`. `bench/enums.tcl` regenerates the performance report.
+
 ## MutableVector
 
 `MutableVector[T]` (MUTABLE-VECTOR.md) is a growable mutable VALUE: a

@@ -58,7 +58,7 @@ use codegen::{Backend, CompileOptions, CraneliftJit, Site};
 use runtime::metrics::{kind_name, AllocMode, SiteStats};
 use runtime::show::{tcl_list, tcl_value};
 use runtime::value::NO_VALUE;
-use runtime::vm::{FunctionInfo, NativeInfo, ProgramInfo, ShapeInfo, Vm};
+use runtime::vm::{EnumInfo, FunctionInfo, NativeInfo, ProgramInfo, ShapeInfo, Vm};
 use std::io::{Read, Write};
 use std::rc::Rc;
 use std::time::Instant;
@@ -309,6 +309,11 @@ fn program_info(program: &nir::Program) -> ProgramInfo {
             .shapes
             .iter()
             .map(|s| ShapeInfo { name: s.name.clone(), fields: s.fields.clone(), opaque: s.opaque })
+            .collect(),
+        enums: program
+            .enums
+            .iter()
+            .map(|e| EnumInfo { name: e.name.clone(), cases: e.cases.clone() })
             .collect(),
     }
 }

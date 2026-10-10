@@ -81,6 +81,7 @@ program examples/surface/12-if-value.bot
 program examples/surface/13-hygiene.bot
   FIXED-ARITY-LIST-RETURN 7:5 none -- core-ir-roundtrip: pair's [list, x] is the sample's subject (a parameter named list does not change what [a, b] means), so a struct result would replace it; `-> list` is the answer, but it is a source fact core IR cannot carry (it re-types the call list instead of List[int]), and surface-samples.test checks that this sample's HIR is what analysis of its core IR derives
 program examples/surface/14-modules.bot
+program examples/surface/15-enums.bot
 
 # ---------------------------------------------------------------------------
 # examples/refinement, examples/io, examples/abi, examples/linux

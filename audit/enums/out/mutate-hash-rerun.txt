@@ -1,0 +1,9 @@
+KILLED hash-ignores-enum-native -- the hash ignores the enum's identity (native runtime)
+    tests: killed (3 failed: enum-executable-parity, enum-hash, enum-module-nominal)
+    fuzz:  survived
+    rust:  killed (runtime::ops::tests::enum_hash_and_show_read_names_never_numbers)
+KILLED hash-uses-position-native -- the hash reads a case's number instead of its name (native runtime): reordering changes it
+    tests: killed (3 failed: enum-executable-parity, enum-hash, enum-hash-reorder-invariant)
+    fuzz:  survived
+    rust:  killed (runtime::ops::tests::enum_hash_and_show_read_names_never_numbers)
+2 mutants, 2 killed, 0 survived

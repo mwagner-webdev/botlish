@@ -1,0 +1,83 @@
+KILLED structural-compat -- enum compatibility is structural: an enum is a subtype of another with the same case list
+    tests: killed (4 failed: enum-module-nominal, enum-principal-rejections, enum-type-algebra, enum-wrong-enum-call-result-field)
+    fuzz:  survived
+KILLED equal-ignores-enum-tcl -- case equality ignores the enum's identity (Tcl runtimes, and the compiler's decided comparisons)
+    tests: killed (8 failed: enum-case-and-function-same-spelling, enum-equality, enum-equality-constant-folded, enum-erasure, enum-generic-identity, enum-immutable-set, ...)
+    fuzz:  killed (2 of 25 programs disagree)
+KILLED same-spelled-enums-equal-tcl -- same-spelled cases of same-spelled enums of different modules compare equal (Tcl runtimes)
+    tests: killed (1 failed: enum-module-nominal)
+    fuzz:  survived
+KILLED same-spelled-enums-share-number-native -- same-spelled enums of different modules share one native enum number
+    tests: killed (1 failed: enum-module-nominal)
+    fuzz:  survived
+KILLED equal-by-ordinal-tcl -- case equality compares declaration positions, not identities (Tcl runtimes)
+    tests: killed (4 failed: enum-equality, enum-immutable-set, enum-module-nominal, enum-runtime-value)
+    fuzz:  killed (5 of 25 programs disagree)
+KILLED resolution-searches-scope -- an unknown case falls back to an ordinary lookup of its name in the surrounding scope
+    tests: killed (1 failed: enum-unknown-case)
+    fuzz:  survived
+KILLED bare-case-accepted -- a bare case name resolves to the one enum that declares it (cases injected into the scope)
+    tests: killed (1 failed: enum-cases-not-injected)
+    fuzz:  survived
+KILLED duplicate-case-accepted -- a duplicate case is accepted
+    tests: killed (2 failed: enum-duplicate-case, enum-principal-rejections)
+    fuzz:  killed (1 of 25 programs disagree)
+KILLED unknown-case-string -- an unknown case falls back to a String of its spelling
+    tests: killed (5 failed: enum-module-diagnostics, enum-no-intrinsic-mappings, enum-principal-rejections, enum-rename-case, enum-unknown-case)
+    fuzz:  survived
+KILLED unknown-case-int -- an unknown case falls back to an Int (0)
+    tests: killed (5 failed: enum-module-diagnostics, enum-no-intrinsic-mappings, enum-principal-rejections, enum-rename-case, enum-unknown-case)
+    fuzz:  survived
+KILLED order-comparison -- declaration order exposed as ordering: < and friends compare cases by position (Tcl runtimes)
+    tests: killed (1 failed: enum-ordering-rejected)
+    fuzz:  killed (2 of 25 programs disagree)
+KILLED enum-as-int -- a case value is typed as an Int by the type checker
+    tests: killed (31 failed: enum-arithmetic-rejected, enum-branch-join, enum-calls-returns, enum-case-type, enum-closures, enum-context-field, ...)
+    fuzz:  killed (12 of 25 programs disagree)
+KILLED arithmetic-accepted -- enum arithmetic is accepted: + uses a case's position (Tcl runtimes)
+    tests: killed (2 failed: enum-arithmetic-rejected, enum-principal-rejections)
+    fuzz:  survived
+KILLED cross-enum-parameter -- a case of any enum is accepted for a parameter of another enum
+    tests: killed (3 failed: enum-module-nominal, enum-principal-rejections, enum-wrong-enum-call-result-field)
+    fuzz:  killed (4 of 25 programs disagree)
+KILLED hash-ignores-enum-tcl -- the hash ignores the enum's identity (Tcl runtimes)
+    tests: killed (3 failed: enum-executable-parity, enum-hash, enum-module-nominal)
+    fuzz:  survived
+KILLED hash-uses-position-tcl -- the hash reads a case's position instead of its name (Tcl runtimes): reordering changes it
+    tests: killed (3 failed: enum-executable-parity, enum-hash, enum-hash-reorder-invariant)
+    fuzz:  survived
+KILLED enum-affine -- an enum is accidentally affine
+    tests: killed (41 failed: enum-arithmetic-rejected, enum-branch-join, enum-calls-returns, enum-case-and-function-same-spelling, enum-case-type, enum-closures, ...)
+    fuzz:  killed (15 of 25 programs disagree)
+KILLED enum-field-forces-boxing -- a struct with an enum field is never scalar-replaced
+    tests: killed (1 failed: enum-native-no-allocation)
+    fuzz:  survived
+KILLED enum-heap-allocated -- a case value is heap-allocated (a List built beside every case constant, native)
+    tests: killed (1 failed: enum-native-no-allocation)
+    fuzz:  survived
+KILLED case-set-lost-format -- the closed case set is lost in HIR text: only the first case is printed
+    tests: killed (1 failed: enum-hir-roundtrip)
+    fuzz:  survived
+KILLED enum-type-roundtrip-loses-identity -- an enum type read back from HIR text is the bare enum kind
+    tests: killed (1 failed: enum-hir-roundtrip)
+    fuzz:  survived
+KILLED case-roundtrip-loses-identity -- a case printed in HIR text loses its enum's identity
+    tests: killed (1 failed: enum-hir-roundtrip)
+    fuzz:  survived
+KILLED equal-ignores-enum-native -- case equality ignores the enum's identity (native runtime equality)
+    tests: killed (1 failed: enum-immutable-set)
+    fuzz:  killed (4 of 25 programs disagree)
+    rust:  killed (runtime::ops::tests::enum_equality_is_nominal_word_equality)
+KILLED enumeq-ignores-enum-native -- the inline enum comparison ignores the enum's number (native code)
+    tests: killed (2 failed: enum-equality, enum-module-nominal)
+    fuzz:  killed (1 of 25 programs disagree)
+    rust:  survived
+KILLED hash-ignores-enum-native -- the hash ignores the enum's identity (native runtime)
+    tests: killed (3 failed: enum-executable-parity, enum-hash, enum-module-nominal)
+    fuzz:  survived
+    rust:  killed (runtime::ops::tests::enum_hash_and_show_read_names_never_numbers)
+KILLED hash-uses-position-native -- the hash reads a case's number instead of its name (native runtime): reordering changes it
+    tests: killed (3 failed: enum-executable-parity, enum-hash, enum-hash-reorder-invariant)
+    fuzz:  survived
+    rust:  killed (runtime::ops::tests::enum_hash_and_show_read_names_never_numbers)
+26 mutants, 26 killed, 0 survived

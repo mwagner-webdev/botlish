@@ -1,0 +1,19 @@
+Cranelift backend coverage of the test suite (6870 tests)
+
+  native           2749
+  independent      3992
+  passed-partial     69
+  unsupported        60
+  failed              0
+
+Unsupported tests by needed construct (a test may need several):
+  value                                     13  acceptance-4 block-2 closure-4 set-construction-block-member-single-ok refine-1 refine-2 refine-3 refine-4 refine-5 refine-6 refine-7 refine-8 refine-9
+  {native test-log}                         18  scope-5 block-1 call-1 call-2 if-2 return-2 return-3 loop-collecting-bounds-order-up-to loop-collecting-bounds-order-up-through loop-collecting-bounds-order-down-to loop-collecting-bounds-order-down-through loop-collecting-lockstep-empty-body-never-runs loop-collecting-lockstep-one-body-run-per-position loop-collecting-lockstep-continue-one-run loop-counted-bounds-left-to-right loop-counted-continue-count typed-param-no-runtime-check-2 web-unreserved-or-short-circuits
+  sequence-mode                              7  malformed-6 return-7 completion-1 completion-2 hir-lower-2 boundary-2 boundary-4
+  {native test-tick}                        11  loop-collecting-bounds-once-up-to loop-collecting-bounds-once-up-through loop-collecting-bounds-once-down-to loop-collecting-bounds-once-down-through loop-counted-bounds-evaluated-once loop-in-iterable-evaluated-once loop-1 loop-2 continue-1 break-1 loop-return-1
+  {native NonEmpty?}                         5  refined-1 refined-3 refined-4 refined-5 refined-6
+  {native test-fake-nonempty}                1  refined-13
+  {validator contract}                       2  refined-14 refined-15
+  {native test-both-ints?}                   1  refine-10
+  {native test_tick}                         1  surface-run-continue
+  {native test_log}                          1  surface-run-evaluation-order

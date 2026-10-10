@@ -439,9 +439,9 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan} {
             Error CONTEXT-INSTALLATION-UNSUPPORTED [dict get $statement span] \
                 "context installation is currently supported only in the entry program's top-level scope, as a statement (this one is inside a module: \"$name\", $path)"
         }
-        if {[dict get $statement kind] ni {function bind typedecl errordecl structdecl traitdecl}} {
+        if {[dict get $statement kind] ni {function bind typedecl errordecl structdecl enumdecl traitdecl}} {
             Error INVALID-TOPLEVEL [dict get $statement span] \
-                "module \"$name\" ($path): only function definitions, immutable bindings, type declarations, struct declarations, trait declarations and error declarations are allowed at module top level, found a \"[dict get $statement kind]\" statement"
+                "module \"$name\" ($path): only function definitions, immutable bindings, type declarations, struct declarations, enum declarations, trait declarations and error declarations are allowed at module top level, found a \"[dict get $statement kind]\" statement"
         }
     }
     CheckNativeMembers $ast $name "module \"$name\" ($path)"
@@ -451,7 +451,7 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan} {
     dict incr state nextFile
     CollectAndLoad state $ast $name
     set functionNames [lmap statement [dict get $ast body] {
-        if {[dict get $statement kind] in {typedecl errordecl structdecl traitdecl}} continue
+        if {[dict get $statement kind] in {typedecl errordecl structdecl enumdecl traitdecl}} continue
         dict get $statement name
     }]
     dict set state loaded $name $functionNames
@@ -466,6 +466,13 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan} {
     # `import type NAME::Type` names; errors stay program-global names.
     dict set state loadedTypes $name [lmap statement [dict get $ast body] {
         if {[dict get $statement kind] ne "typedecl"} continue
+        dict get $statement name
+    }]
+    # The enums it declares (ENUMS.md): nominal types of the namespace like
+    # its structs, named `NAME::Enum`, importable with `import type` like its
+    # types; a case is `NAME::Enum::Case` (EnumQualifier).
+    dict set state loadedEnums $name [lmap statement [dict get $ast body] {
+        if {[dict get $statement kind] ne "enumdecl"} continue
         dict get $statement name
     }]
     dict set state loadedErrors $name [lmap statement [dict get $ast body] {
@@ -585,7 +592,7 @@ proc surface::modules::CheckImports {stateVar ast own} {
     set typeSpans [dict create]
     set local [dict create]
     foreach statement [dict get $ast body] {
-        if {[dict get $statement kind] in {typedecl structdecl traitdecl} && ![dict exists $local [dict get $statement name]]} {
+        if {[dict get $statement kind] in {typedecl structdecl enumdecl traitdecl} && ![dict exists $local [dict get $statement name]]} {
             dict set local [dict get $statement name] [dict get $statement nameSpan]
         }
     }
@@ -626,7 +633,7 @@ proc surface::modules::CheckImports {stateVar ast own} {
         if {$hasFile} {
             LoadNamespace state $ns $span
         }
-        set typeNames [expr {$hasFile ? [concat [dict get $state loadedTypes $ns] [dict get $state loadedTraits $ns]] : {}}]
+        set typeNames [expr {$hasFile ? [concat [dict get $state loadedTypes $ns] [dict get $state loadedTraits $ns] [dict get $state loadedEnums $ns]] : {}}]
         if {$name ni $typeNames} {
             set functions [expr {$hasFile ? [dict get $state loaded $ns] : {}}]
             set structs [expr {$hasFile ? [dict get $state loadedStructs $ns] : {}}]
@@ -679,6 +686,23 @@ proc surface::modules::CollectAndLoad {stateVar ast {key ""}} {
     set imported [dict get $env namespaces]
     foreach ref [QualifiedRefs $ast] {
         lassign $ref namespaceName symbolName span refKind
+        if {$refKind eq "value"} {
+            # `Enum::Case` (ENUMS.md): a qualifier that names an enum type
+            # visible in this file makes the reference a case of it, decided
+            # (and the case checked) by HIR resolution -- never a namespace
+            # member, and never a reason to load anything.
+            set enum [EnumQualifier state $ast $own $env $namespaceName]
+            if {$enum ne ""} {
+                if {$namespaceName in $imported || [NamespaceExists $namespaceName]} {
+                    # (Imported or not: `list::length` must never mean an
+                    # intrinsic in one file and a case in another because
+                    # of an enum's name.)
+                    Error AMBIGUOUS-QUALIFIER $span \
+                        "\"${namespaceName}::$symbolName\" is ambiguous: \"$namespaceName\" names both a namespace and the enum type $enum visible in this file (a qualifier is never resolved by precedence; rename the enum)"
+                }
+                continue
+            }
+        }
         if {$namespaceName eq $own && $own ne ""
                 && $refKind in {value} && [core::native::isQualifiedNative "${namespaceName}::$symbolName"]} {
             # A reference to an intrinsic of the file's own namespace
@@ -690,9 +714,34 @@ proc surface::modules::CollectAndLoad {stateVar ast {key ""}} {
             # import (the HIR resolver checks the member is established).
             continue
         }
+        if {$refKind eq "struct" && [EnumQualifier state $ast $own $env $namespaceName] ne ""} {
+            # `Enum::Case { ... }` (ENUMS.md): a payload-free case is a
+            # value, written without an initializer.
+            Error NOT-A-STRUCT $span \
+                "\"${namespaceName}::$symbolName\" names a case of the enum $namespaceName, not a struct: a payload-free case is written ${namespaceName}::$symbolName, without braces (payload-bearing cases are not supported)"
+        }
         if {$namespaceName ni $imported} {
+            if {$refKind eq "value" && ![NamespaceExists $namespaceName]} {
+                # `Struct::Case`, `int::Case`: a case qualified by a type that
+                # is not an enum (ENUMS.md). Types are not namespaces.
+                set other [OtherTypeQualifier state $ast $own $env $namespaceName]
+                if {$other ne ""} {
+                    Error NOT-AN-ENUM $span \
+                        "\"$namespaceName\" is $other, not an enum: only an enum type qualifies a case (\"Enum::Case\"), and a type is not a namespace, so \"${namespaceName}::$symbolName\" names nothing"
+                }
+            }
             if {![NamespaceExists $namespaceName]} {
-                Error UNKNOWN-NAMESPACE $span "unknown namespace \"$namespaceName\": no such module file [ModulePath $namespaceName] and no intrinsics of that namespace"
+                set cut [string last :: $namespaceName]
+                if {$refKind eq "value" && $cut > 0} {
+                    # `ns::Enum::Case` (ENUMS.md) whose module is not
+                    # imported: the import is what is missing, as for any
+                    # member of that module.
+                    set prefix [string range $namespaceName 0 [expr {$cut - 1}]]
+                    if {$prefix ni $imported && $prefix ne $own && [NamespaceExists $prefix]} {
+                        Error MISSING-IMPORT $span "namespace \"$prefix\" is not imported; add `import $prefix` to use `${namespaceName}::$symbolName`"
+                    }
+                }
+                Error UNKNOWN-NAMESPACE $span "unknown namespace \"$namespaceName\": no such module file [ModulePath $namespaceName] and no intrinsics of that namespace[expr {$refKind eq "value" ? " (nor is \"$namespaceName\" an enum type visible in this file: a case is written Enum::Case)" : ""}]"
             }
             set note ""
             set related [RelatedImport $namespaceName $imported]
@@ -719,7 +768,7 @@ proc surface::modules::CollectAndLoad {stateVar ast {key ""}} {
         # The import loaded the module.
         if {$refKind in {struct type}} {
             set structNames [dict get $state loadedStructs $namespaceName]
-            set typeNames [expr {$refKind eq "type" ? [concat [dict get $state loadedTypes $namespaceName] [dict get $state loadedTraits $namespaceName]] : {}}]
+            set typeNames [expr {$refKind eq "type" ? [concat [dict get $state loadedTypes $namespaceName] [dict get $state loadedTraits $namespaceName] [dict get $state loadedEnums $namespaceName]] : {}}]
             if {$symbolName ni $structNames && $symbolName ni $typeNames} {
                 set declared [lsort [concat $structNames $typeNames]]
                 Error UNKNOWN-SYMBOL $span \
@@ -737,6 +786,89 @@ proc surface::modules::CollectAndLoad {stateVar ast {key ""}} {
     }
 }
 
+# The canonical identity of the enum the type spelling QUALIFIER (the part of
+# a value reference `QUALIFIER::NAME` before its last `::`) denotes in the
+# file AST of module OWN ("" for the entry program), whose import
+# environment is ENV, or "" if it denotes none (ENUMS.md). The visibility of
+# any nominal type: a bare name the file declares itself or binds with
+# `import type`, or `NS::Enum` where NS is the file's own namespace or one it
+# imports exactly and NS declares Enum.
+proc surface::modules::EnumQualifier {stateVar ast own env qualifier} {
+    upvar 1 $stateVar state
+    if {[string first :: $qualifier] < 0} {
+        foreach statement [dict get $ast body] {
+            if {[dict get $statement kind] eq "enumdecl" && [dict get $statement name] eq $qualifier} {
+                return [expr {$own eq "" ? $qualifier : "${own}::$qualifier"}]
+            }
+        }
+        set types [dict get $env types]
+        if {[dict exists $types $qualifier]} {
+            set canonical [dict get $types $qualifier]
+            set i [string last :: $canonical]
+            set ns [string range $canonical 0 [expr {$i - 1}]]
+            set name [string range $canonical [expr {$i + 2}] end]
+            if {[dict exists $state loadedEnums $ns] && $name in [dict get $state loadedEnums $ns]} {
+                return $canonical
+            }
+        }
+        return ""
+    }
+    set i [string last :: $qualifier]
+    set ns [string range $qualifier 0 [expr {$i - 1}]]
+    set name [string range $qualifier [expr {$i + 2}] end]
+    if {$ns ne "" && $ns eq $own} {
+        foreach statement [dict get $ast body] {
+            if {[dict get $statement kind] eq "enumdecl" && [dict get $statement name] eq $name} {
+                return $qualifier
+            }
+        }
+        return ""
+    }
+    if {$ns in [dict get $env namespaces] && [dict exists $state loadedEnums $ns]
+            && $name in [dict get $state loadedEnums $ns]} {
+        return $qualifier
+    }
+    return ""
+}
+
+# "a struct", "a trait", "a type" or "a built-in type" when the type
+# spelling QUALIFIER names a visible type of that kind that is not an enum
+# (in the file AST of module OWN with import environment ENV), else "": the
+# qualifier of a `QUALIFIER::NAME` value reference that is a type but cannot
+# qualify a case (NOT-AN-ENUM).
+proc surface::modules::OtherTypeQualifier {stateVar ast own env qualifier} {
+    upvar 1 $stateVar state
+    if {[string first :: $qualifier] < 0} {
+        foreach statement [dict get $ast body] {
+            if {[dict exists $statement name] && [dict get $statement name] eq $qualifier} {
+                switch -- [dict get $statement kind] {
+                    structdecl { return "a struct" }
+                    traitdecl  { return "a trait" }
+                    typedecl   { return "a type" }
+                }
+            }
+        }
+        if {[dict exists $env types $qualifier]} {
+            return "an imported type"
+        }
+        if {$qualifier ne "enum" && ([IsBuiltinTypeName $qualifier] || $qualifier in {int str bool unit})} {
+            # (`enum` is the internal kind of every enum value, never a
+            # type a program can name: no namespace of it either.)
+            return "a built-in type"
+        }
+        return ""
+    }
+    set i [string last :: $qualifier]
+    set ns [string range $qualifier 0 [expr {$i - 1}]]
+    set name [string range $qualifier [expr {$i + 2}] end]
+    if {$ns in [dict get $env namespaces] && [dict exists $state loadedStructs $ns]} {
+        if {$name in [dict get $state loadedStructs $ns]} { return "a struct" }
+        if {$name in [dict get $state loadedTraits $ns]} { return "a trait" }
+        if {$name in [dict get $state loadedTypes $ns]} { return "a type" }
+    }
+    return ""
+}
+
 # The initial loader state of a program whose own root file is FILES (a dict
 # FileId -> path; {} for a caller with no file of its own) and whose module
 # files start at FileId f(NEXTFILE): the one constructor of the state
@@ -749,7 +881,8 @@ proc surface::modules::CollectAndLoad {stateVar ast {key ""}} {
 proc surface::modules::NewState {files nextFile} {
     return [dict create files $files nextFile $nextFile \
         loaded [dict create] loadedStructs [dict create] loadedTypes [dict create] \
-        loadedErrors [dict create] loadedTraits [dict create] imports [dict create] stack {} sections {} \
+        loadedErrors [dict create] loadedTraits [dict create] loadedEnums [dict create] \
+        imports [dict create] stack {} sections {} \
         typeDecls {} errorDecls {} structDecls {} traitDecls {}]
 }
 

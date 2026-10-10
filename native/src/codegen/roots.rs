@@ -214,6 +214,7 @@ fn def_use(inst: &Inst, params: u32) -> (Vec<Reg>, Vec<Reg>) {
         | Inst::Str { dst, .. }
         | Inst::Bytes { dst, .. }
         | Inst::Char { dst, .. }
+        | Inst::Enum { dst, .. }
         | Inst::Bool { dst, .. }
         | Inst::Unit { dst }
         | Inst::Native { dst, .. }

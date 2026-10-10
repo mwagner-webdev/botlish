@@ -1353,7 +1353,10 @@ proc hir::range::ProvesValueAcceptedBy {argType argRange declared} {
             || [hir::types::IsMutArray $declared]} {
         return [AggregateAdmits [hir::types::Unshaped $argType] $declared]
     }
-    if {[hir::types::IsFn $declared] || [hir::types::IsStructLike $declared] || [hir::types::IsCoroutine $declared]} {
+    if {[hir::types::IsFn $declared] || [hir::types::IsStructLike $declared] || [hir::types::IsCoroutine $declared]
+            || [hir::types::IsEnum $declared]} {
+        # An enum type (ENUMS.md) likewise, by its declaration only.
+        #
         # A struct type (STRUCTS.md) is admitted by hir::types::subtype
         # alone: a named struct only ever by the same declaration, an
         # anonymous one by the same field set with admissible field types.
@@ -1456,7 +1459,7 @@ proc hir::range::FactsSatisfiable {observedType observedRange declared} {
         return [AggregateAdmits [hir::types::Unshaped $observedType] $declared]
     }
     if {[hir::types::IsFn $declared] || [hir::types::IsMutArray $declared]
-            || [hir::types::IsStructLike $declared]
+            || [hir::types::IsStructLike $declared] || [hir::types::IsEnum $declared]
             || [core::type::base $declared] ne "int"} {
         return 1
     }
@@ -1801,6 +1804,13 @@ proc hir::range::MismatchClause {argType declared} {
             && $argType ne $declared} {
         return [format {; %s and %s are distinct named struct types: a named struct type is nominal, and no value is ever converted from one to another implicitly} \
             [hir::types::show $argType] [hir::types::show $declared]]
+    }
+    if {[hir::types::IsEnum $declared] && $argType ne $declared && $argType ni {any never}} {
+        # ENUMS.md: identity is the declaration, so a case of another enum
+        # -- even a same-spelled one -- is never a value of this one.
+        return [format {; %s is a nominal enum type: only its own cases (%s) are its values, never a case of another enum, an Int or a String} \
+            [hir::types::show $declared] \
+            [::join [lmap c [hir::enums::cases [lindex $declared 1]] {string cat [hir::types::show $declared] :: $c}] {, }]]
     }
     if {[hir::types::IsMutArray $declared] && !([hir::types::IsMutArray $argType])} {
         return [format {; only a value already known to be a %s satisfies this contract: a kind test proves the kind, never the element type, and no element check is inserted} \

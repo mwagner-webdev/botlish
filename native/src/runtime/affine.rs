@@ -119,7 +119,7 @@ mod tests {
         use crate::runtime::vm::ProgramInfo;
 
         fn new_vm() -> Box<Vm> {
-            Vm::new(std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new() }), AllocMode::Summary)
+            Vm::new(std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() }), AllocMode::Summary)
         }
 
         extern "C" fn body(_p: *mut Vm, _closure: Value, _args: *const Value) -> Value {

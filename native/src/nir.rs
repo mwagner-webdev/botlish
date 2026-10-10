@@ -38,6 +38,10 @@ pub enum OpCode {
     /// `==` of two operands statically UnicodeChar (native/lower.tcl's
     /// NativeCallOp): word equality of the two immediates; never fails.
     CharEq,
+    /// `==` of two operands statically enum cases (ENUMS.md, native/
+    /// lower.tcl's NativeCallOp): word equality of the two immediate case
+    /// words, which is nominal equality (same enum, same case); never fails.
+    EnumEq,
     ListNew,
     StrLen,
     Substr,
@@ -490,6 +494,7 @@ impl OpCode {
             "veq" => VEq,
             "streq" => StrEq,
             "chareq" => CharEq,
+            "enumeq" => EnumEq,
             "listnew" => ListNew,
             "strlen" => StrLen,
             "substr" => Substr,
@@ -705,6 +710,10 @@ pub enum Inst {
     /// UNICODE-CHAR-LITERALS.md); codegen packs it as the immediate
     /// `make_char` word directly, no allocation and no runtime call.
     Char { dst: Reg, digits: String },
+    /// `%d = enum E C`: the case number C of the program's enum number E (an
+    /// `enum` declaration, ENUMS.md); codegen packs it as the immediate
+    /// `make_enum` word directly, no allocation and no runtime call.
+    Enum { dst: Reg, index: u32, case: u32 },
     Bool { dst: Reg, value: bool },
     Unit { dst: Reg },
     Native { dst: Reg, native: u32 },
@@ -1093,9 +1102,19 @@ pub struct ContextDecl {
     pub fields: Vec<String>,
 }
 
+/// An enum declaration (`enum N "ID" cases="A B ..."`, ENUMS.md): static
+/// program metadata the runtime keeps once per enum (runtime::vm::EnumInfo),
+/// for printing and hashing by name. Enum numbers are dense, in order; a
+/// case's number is its position in CASES. Both are representation only.
+pub struct EnumDecl {
+    pub name: String,
+    pub cases: Vec<String>,
+}
+
 pub struct Program {
     pub natives: Vec<NativeDecl>,
     pub shapes: Vec<ShapeDecl>,
+    pub enums: Vec<EnumDecl>,
     pub functions: Vec<Function>,
     /// The size in bytes of the program's context area (the header's
     /// `contexts=N`, CONTEXTS.md): one zero-initialized, 8-byte-aligned,
@@ -1255,6 +1274,7 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
     let mut program = Program {
         natives: Vec::new(),
         shapes: Vec::new(),
+        enums: Vec::new(),
         functions: Vec::new(),
         statics: 0,
         context_bytes: 0,
@@ -1299,6 +1319,13 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
                         return p.err(format!("shape numbers must be dense and in order, got {}", shape.0));
                     }
                     program.shapes.push(shape.1);
+                }
+                "enum" => {
+                    let decl = parse_enum(&p, &tokens)?;
+                    if decl.0 as usize != program.enums.len() {
+                        return p.err(format!("enum numbers must be dense and in order, got {}", decl.0));
+                    }
+                    program.enums.push(decl.1);
                 }
                 "context" => {
                     let decl = parse_context(&p, &tokens)?;
@@ -1450,6 +1477,33 @@ fn parse_context(p: &Parser, tokens: &[Token]) -> Result<(u32, ContextDecl), Nir
         return p.err(format!("context {name} needs one field path per word ({words} words)"));
     }
     Ok((slot, ContextDecl { name, offset, words, fields }))
+}
+
+/// `enum N "ID" cases="A B ..."` (ENUMS.md).
+fn parse_enum(p: &Parser, tokens: &[Token]) -> Result<(u32, EnumDecl), NirError> {
+    let Some(index) = tokens.get(1).and_then(word).and_then(|w| w.parse::<u32>().ok()) else {
+        return p.err("enum needs a number");
+    };
+    let name = match tokens.get(2) {
+        Some(Token::Quoted(name)) if !name.is_empty() => name.clone(),
+        _ => return p.err("enum needs a quoted declaration identity"),
+    };
+    let kv = pairs(tokens);
+    let Some(cases) = kv.get("cases") else { return p.err("enum needs cases=") };
+    let cases: Vec<String> = cases.split_whitespace().map(str::to_string).collect();
+    if cases.is_empty() {
+        return p.err(format!("enum {name} declares no case"));
+    }
+    if cases.len() > crate::runtime::value::MAX_ENUM_CASE as usize + 1 {
+        return p.err(format!("enum {name} has too many cases"));
+    }
+    let mut seen = HashSet::new();
+    for c in &cases {
+        if !seen.insert(c) {
+            return p.err(format!("enum case {c} is declared twice"));
+        }
+    }
+    Ok((index, EnumDecl { name, cases }))
 }
 
 fn parse_shape(p: &Parser, tokens: &[Token]) -> Result<(u32, ShapeDecl), NirError> {
@@ -1704,6 +1758,17 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
                     return p.err("char literal is not a Unicode scalar value");
                 }
                 Inst::Char { dst, digits }
+            }
+            "enum" => {
+                let index = num(3)?;
+                let case = num(4)?;
+                let Some(decl) = program.enums.get(index as usize) else {
+                    return p.err(format!("enum constant of undeclared enum {index}"));
+                };
+                if case as usize >= decl.cases.len() {
+                    return p.err(format!("enum {} has no case number {case}", decl.name));
+                }
+                Inst::Enum { dst, index, case }
             }
             "bool" => match tokens.get(3).and_then(word) {
                 Some("true") => Inst::Bool { dst, value: true },
@@ -1969,6 +2034,7 @@ fn validate(program: &Program) -> Result<(), NirError> {
                 | Inst::Str { dst, .. }
                 | Inst::Bytes { dst, .. }
                 | Inst::Char { dst, .. }
+                | Inst::Enum { dst, .. }
                 | Inst::Bool { dst, .. }
                 | Inst::Unit { dst }
                 | Inst::Native { dst, .. } => used.push(*dst),
@@ -2361,7 +2427,7 @@ fn validate_plans(program: &Program) -> Result<(), NirError> {
                 | Inst::ClearDeclaredError | Inst::PushErrorExit(_) | Inst::PopErrorExit | Inst::Reraise
                 | Inst::Jump(_) | Inst::DeclaredErrorEq { .. } | Inst::Int { .. } | Inst::RawInt { .. } | Inst::ShortLit { .. }
                 | Inst::AsciiLit { .. }
-                | Inst::Str { .. } | Inst::Bytes { .. } | Inst::Char { .. } | Inst::Bool { .. } | Inst::Unit { .. }
+                | Inst::Str { .. } | Inst::Bytes { .. } | Inst::Char { .. } | Inst::Enum { .. } | Inst::Bool { .. } | Inst::Unit { .. }
                 | Inst::Native { .. } | Inst::FnValue { .. } | Inst::SelfClosure { .. } | Inst::Capture { .. }
                 | Inst::StaticGet { .. } | Inst::ContextLoad { .. } => {}
                 Inst::StaticSet { value, .. } => used.push(*value),
@@ -2535,7 +2601,7 @@ fn check_plan_linearity(f: &Function, consumes: &[Vec<Reg>]) -> Result<(), Strin
 fn def_of(inst: &Inst) -> Option<Reg> {
     match inst {
         Inst::Int { dst, .. } | Inst::RawInt { dst, .. } | Inst::ShortLit { dst, .. } | Inst::AsciiLit { dst, .. } | Inst::Str { dst, .. } | Inst::Bytes { dst, .. } | Inst::Char { dst, .. }
-        | Inst::Bool { dst, .. } | Inst::Unit { dst } | Inst::Native { dst, .. } | Inst::FnValue { dst, .. }
+        | Inst::Enum { dst, .. } | Inst::Bool { dst, .. } | Inst::Unit { dst } | Inst::Native { dst, .. } | Inst::FnValue { dst, .. }
         | Inst::SelfClosure { dst } | Inst::Capture { dst, .. } | Inst::Move { dst, .. }
         | Inst::Closure { dst, .. }
         | Inst::Op { dst, .. } | Inst::Call { dst, .. } | Inst::CallEnv { dst, .. } | Inst::CallValue { dst, .. }
@@ -2751,6 +2817,36 @@ mod struct_tests {
     fn structnew_checks_shape_and_arity() {
         assert!(message(text(SHAPES, "    %0 = int 1\n    %1 = structnew 7 %0 %0\n    ret %1")).contains("undeclared"));
         assert!(message(text(SHAPES, "    %0 = int 1\n    %1 = structnew 0 %0\n    ret %1")).contains("field register"));
+    }
+
+    // Enums (ENUMS.md): the enum table and the immediate case constants.
+
+    const ENUMS: &str = "enum 0 \"VehicleType\" cases=\"Boat Car Truck\"\nenum 1 \"geo::VehicleType\" cases=\"Boat Car\"\n";
+
+    #[test]
+    fn enums_and_enum_constants_parse() {
+        let p = parse(&text(ENUMS, "    %0 = enum 0 1
+    %1 = enum 1 1
+    %2 = op enumeq %0 %1
+    ret %2")).unwrap();
+        assert_eq!(p.enums.len(), 2);
+        assert_eq!(p.enums[1].name, "geo::VehicleType");
+        assert_eq!(p.enums[0].cases, vec!["Boat".to_string(), "Car".to_string(), "Truck".to_string()]);
+        assert!(matches!(&p.functions[0].body[0], Inst::Enum { index: 0, case: 1, .. }));
+        assert!(matches!(&p.functions[0].body[2], Inst::Op { op: OpCode::EnumEq, .. }));
+    }
+
+    #[test]
+    fn malformed_enums_are_rejected() {
+        let body = "    %0 = unit
+    ret %0";
+        assert!(message(text("enum 1 \"E\" cases=\"A\"\n", body)).contains("dense"));
+        assert!(message(text("enum 0 \"E\" cases=\"\"\n", body)).contains("no case"));
+        assert!(message(text("enum 0 \"E\" cases=\"A A\"\n", body)).contains("twice"));
+        assert!(message(text("enum 0 E cases=\"A\"\n", body)).contains("quoted"));
+        assert!(message(text("enum 0 \"E\"\n", body)).contains("cases="));
+        assert!(message(text(ENUMS, "    %0 = enum 2 0\n    ret %0")).contains("undeclared enum"));
+        assert!(message(text(ENUMS, "    %0 = enum 1 2\n    ret %0")).contains("no case number"));
     }
 
     #[test]

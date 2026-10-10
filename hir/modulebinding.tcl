@@ -190,7 +190,8 @@ proc hir::modulebinding::ImmutableExpr {hir e factsVar activeVar} {
     switch -- [dict get $node kind] {
         const {
             set kind [core::value::kind [dict get $node value]]
-            if {$kind in {int str bool unit UnicodeChar}} {
+            if {$kind in {int str bool unit UnicodeChar enum}} {
+                # (An enum case, ENUMS.md, is an immutable scalar value.)
                 return [list ok [list scalar $kind]]
             }
             return [list bad unknown "literal value kind $kind"]

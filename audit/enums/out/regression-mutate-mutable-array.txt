@@ -1,0 +1,100 @@
+KILLED copy-aliases-tcl -- an unrestricted copy aliases writes (Tcl runtimes): a logical copy of an array is the same header
+    tests: killed (8 failed: ma-context-member, ma-cow-extraction, ma-cow-routes, ma-cow-surviving-result, ma-generic-place, ma-native-evidence, ...)
+    fuzz:  killed (6 of 25 programs disagree)
+KILLED param-mutation-leaks -- an array parameter is never copied for its callee (no entry copy, no caller-side copy of a consumed parameter's argument): the callee's mutations reach the caller's array
+    tests: killed (3 failed: ma-cow-routes, ma-cow-surviving-result, ma-generic-place)
+    fuzz:  killed (5 of 25 programs disagree)
+KILLED result-aliases-surviving -- every array read-out a function returns moves its header out uncopied, also while another copy of it survives
+    tests: killed (1 failed: ma-context-member)
+    fuzz:  survived
+KILLED generic-identity-aliases -- a dynamic copy (`d`, made inside a generic body) of an array is the array itself (Tcl runtimes)
+    tests: killed (1 failed: ma-cow-extraction)
+    fuzz:  killed (1 of 25 programs disagree)
+KILLED list-extraction-aliases -- an array a binding takes out of a List (list::at) is not copied: the binding's mutations reach the List's element
+    tests: killed (1 failed: ma-cow-routes)
+    fuzz:  survived
+KILLED struct-extraction-aliases -- an array a binding takes out of a struct field (or a destructure) is not copied: the binding's mutations reach the struct's field
+    tests: killed (1 failed: ma-cow-extraction)
+    fuzz:  survived
+KILLED context-snapshot-aliases -- an array read out of a context member is not copied: a snapshot of the member changes with later writes to it
+    tests: killed (1 failed: ma-context-member)
+    fuzz:  survived
+KILLED array-always-affine -- MutableArray is always affine: a copy of an array of Ints moves it
+    tests: killed (17 failed: ma-context-member, ma-cow-counters, ma-cow-extraction, ma-cow-loop, ma-cow-repeated-copy, ma-cow-routes, ...)
+    fuzz:  killed (25 of 25 programs disagree)
+KILLED affine-array-unrestricted -- MutableArray[affine] is unrestricted: an array of coroutines may be copied
+    tests: killed (13 failed: ma-affine-at, ma-affine-swap-failure, ma-affine-whole-moves, ma-affine-whole-releases, ma-consuming-exits, ma-drop-order, ...)
+    fuzz:  killed (10 of 25 programs disagree)
+KILLED nested-affinity-shallow -- an array is affine only when its element is itself a coroutine handle: MutableArray[MutableVector[Coroutine]] (or of an affine struct) is unrestricted
+    tests: killed (2 failed: ma-nested-affine, ma-type-affinity)
+    fuzz:  killed (3 of 25 programs disagree)
+KILLED vector-of-arrays-rejected -- MutableVector[MutableArray[T]] is rejected as a type
+    tests: killed (1 failed: ma-type-syntax)
+    fuzz:  killed (25 of 25 programs disagree)
+KILLED affine-at-accepted -- `at` of an affine element is accepted: a second owner of an element the array still owns (its role is observe instead of copy-out)
+    tests: killed (2 failed: ma-affine-at, ma-roles-audit)
+    fuzz:  killed (1 of 25 programs disagree)
+KILLED swap-duplicates-replacement -- swap does not take the replacement: its binding stays its owner (and is released) while the slot owns it too
+    tests: killed (8 failed: ma-affine-swap, ma-affine-swap-failure, ma-hir-evidence, ma-native-evidence, ma-nested-affine, ma-principal-generate, ...)
+    fuzz:  killed (25 of 25 programs disagree)
+KILLED failed-swap-keeps-replacement -- a failed affine swap does not release the replacement it was given (Tcl runtimes): it leaks
+    tests: killed (1 failed: ma-affine-swap-failure)
+    fuzz:  killed (2 of 25 programs disagree)
+KILLED drop-leaks-elements -- an affine array's death releases none of its elements (Tcl runtimes)
+    tests: killed (5 failed: ma-affine-swap-failure, ma-affine-whole-releases, ma-consuming-exits, ma-drop-order, ma-nested-affine)
+    fuzz:  killed (8 of 25 programs disagree)
+KILLED drop-order-reversed -- an affine array's death releases its elements last to first (Tcl runtimes)
+    tests: killed (5 failed: ma-affine-swap-failure, ma-affine-whole-releases, ma-consuming-exits, ma-drop-order, ma-nested-affine)
+    fuzz:  killed (7 of 25 programs disagree)
+KILLED loop-aliases-element -- consuming iteration over an affine array iterates a snapshot instead: the loop variable owns each element while the array keeps it
+    tests: killed (3 failed: ma-consuming-exits, ma-hir-evidence, ma-native-evidence)
+    fuzz:  killed (2 of 25 programs disagree)
+KILLED loop-leaks-suffix -- leaving a consuming loop over an affine array early does not release the elements not yet taken
+    tests: killed (1 failed: ma-consuming-exits)
+    fuzz:  killed (2 of 25 programs disagree)
+KILLED instance-key-erases-affine-array -- the specialization key erases an affine array's element (the raw kind): a specialized callee's early exit leaks what is left of an array it consumes (native)
+    tests: killed (2 failed: ma-affine-swap-failure, ma-consuming-exits)
+    fuzz:  killed (1 of 25 programs disagree)
+KILLED create-accepts-affine -- create takes its value once (its role is move instead of repeat): one coroutine is placed in every slot
+    tests: killed (3 failed: ma-duplication-generic, ma-principal-create-rejects, ma-roles-audit)
+    fuzz:  killed (2 of 25 programs disagree)
+KILLED signature-ignores-repeat -- the ownership discipline ignores the repeat role: an affine value repeated by create moves into it
+    tests: killed (2 failed: ma-duplication-generic, ma-principal-create-rejects)
+    fuzz:  killed (2 of 25 programs disagree)
+KILLED factory-result-duplicated -- generate places the factory's first result in every slot (Tcl runtimes)
+    tests: killed (10 failed: ma-affine-swap, ma-affine-swap-failure, ma-affine-whole-releases, ma-consuming-exits, ma-drop-order, ma-generate-failure, ...)
+    fuzz:  killed (11 of 25 programs disagree)
+KILLED factory-failure-leaks -- a failing generate does not release the elements it already made (Tcl runtimes)
+    tests: killed (1 failed: ma-generate-failure)
+    fuzz:  killed (3 of 25 programs disagree)
+KILLED factory-not-dropping-form -- an affine generate is not elaborated to its dropping form: a failing factory's earlier results leak
+    tests: killed (3 failed: ma-generate-failure, ma-hir-evidence, ma-native-evidence)
+    fuzz:  killed (3 of 25 programs disagree)
+KILLED virtual-struct-drop-truncated -- the native drop of a virtualized struct's affine array field truncates its descriptor (`a` alone): the array's drop reads past it
+    tests: killed (1 failed: ma-drop-order)
+    fuzz:  killed (1 of 25 programs disagree)
+KILLED copy-aliases-native -- an unrestricted copy aliases writes (native): a logical copy of an array is the same header
+    tests: killed (9 failed: ma-context-member, ma-cow-counters, ma-cow-extraction, ma-cow-routes, ma-cow-surviving-result, ma-generic-place, ...)
+    fuzz:  killed (6 of 25 programs disagree)
+    rust:  killed (runtime::ops::tests::mutarray_operations_survive_a_collection_at_every_allocation, runtime::ops::tests::mutarray_swap_and_take_front_move_elements_and_keep_copies_intact, runtime::ops::tests::mutarray_copy_shares_and_only_the_first_write_detaches)
+KILLED copy-eager-deep-native -- an unrestricted copy eagerly copies every element (native): no backing is ever shared, the first write never detaches
+    tests: killed (2 failed: ma-cow-counters, ma-principal-copy)
+    fuzz:  survived
+    rust:  killed (runtime::ops::tests::mutarray_copy_shares_and_only_the_first_write_detaches, runtime::ops::tests::mutarray_out_of_range_changes_nothing)
+KILLED generic-identity-aliases-native -- a dynamic copy (`d`, made inside a generic body) of an array is the array itself (native)
+    tests: killed (1 failed: ma-cow-extraction)
+    fuzz:  killed (1 of 25 programs disagree)
+    rust:  survived
+KILLED failed-swap-keeps-replacement-native -- a failed affine swap does not release the replacement it was given (native)
+    tests: killed (1 failed: ma-affine-swap-failure)
+    fuzz:  killed (2 of 25 programs disagree)
+    rust:  survived
+KILLED drop-leaks-elements-native -- an affine array's death releases none of its elements (native)
+    tests: killed (5 failed: ma-affine-swap-failure, ma-affine-whole-releases, ma-consuming-exits, ma-drop-order, ma-nested-affine)
+    fuzz:  killed (8 of 25 programs disagree)
+    rust:  survived
+KILLED factory-failure-leaks-native -- a failing generate does not release the elements it already made (native)
+    tests: killed (1 failed: ma-generate-failure)
+    fuzz:  killed (3 of 25 programs disagree)
+    rust:  survived
+31 mutants, 31 killed, 0 survived
