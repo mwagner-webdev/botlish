@@ -565,7 +565,7 @@ the performance report.
 `MutableArray[T]` (MUTABLE-ARRAY.md) is MutableVector's fixed-length
 sibling and follows the same model: a VALUE, a header over a copy-on-write
 backing (Tcl: a `{mutarray ID}` over the shared Tcl list in
-`core::mutarray::store`; native: `MutArrayObj` over an `Rc<VecDeque>`), its
+`core::mutarray::store`; native: `MutArrayObj` over an `Rc<[Value]>`), its
 mutations made through places (`MUTABLE-PLACE-RECEIVER`,
 `MUTABLE-PLACE-CAPTURE`), its logical copies written out by
 `hir::mutvec::Elaborate` (`mutable_vector#share`, descriptor `h`; `d`, a

@@ -138,10 +138,12 @@ impl Heap {
                 // Every field of a struct is an ordinary program value.
                 KIND_STRUCT => stack.extend_from_slice(struct_of(v).fields()),
                 KIND_SET => stack.extend_from_slice(set_of(v).items()),
-                // A MutableArray (MUTABLE-ARRAY.md): every slot of its
-                // backing (a raw allocation's are UNIT, never uninitialized
-                // memory). A backing shared by several headers is traced
-                // once per header (marking is idempotent).
+                // A MutableArray (MUTABLE-ARRAY.md): every element of its
+                // backing, the slots from its header's start (a raw
+                // allocation's are UNIT, never uninitialized memory; a
+                // drained slot is no element and is not traced). A backing
+                // shared by several headers is traced once per header
+                // (marking is idempotent).
                 KIND_MUTARRAY => stack.extend(super::ops::array_elements(v)),
                 KIND_RESULT => stack.push(result_of(v).payload),
                 // A MutableVector (MUTABLE-VECTOR.md): exactly its live

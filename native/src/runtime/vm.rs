@@ -763,9 +763,10 @@ impl Vm {
         if let Some(v) = self.reject_oversized_collection(capacity) {
             return v;
         }
-        let slots: std::collections::VecDeque<Value> = std::iter::repeat_n(UNIT, capacity).collect();
-        let bytes = slots.capacity() * 8;
-        self.alloc(MutArrayObj { hdr: Header::new(KIND_MUTARRAY, false), backing: std::rc::Rc::new(slots) }, bytes)
+        // One allocation: the iterator's exact length lets the Rc be
+        // allocated at its final size and filled in place.
+        let slots: std::rc::Rc<[Value]> = std::iter::repeat_n(UNIT, capacity).collect();
+        self.alloc(MutArrayObj { hdr: Header::new(KIND_MUTARRAY, false), start: 0, backing: slots }, capacity * 8)
     }
 }
 

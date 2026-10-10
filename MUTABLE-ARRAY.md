@@ -132,11 +132,13 @@ nothing affine. Pinned: `ma-type-affinity` (eleven types), `ma-nested-affine`.
 The MutableVector model, fixed length. A *header* is the identity of one
 logical array: on the Tcl backends `{mutarray ID}` over
 `core::mutarray::store(ID)`, a Tcl list (Tcl's own copy-on-write); natively
-`MutArrayObj { hdr, backing: Rc<VecDeque<Value>> }` (`runtime/value.rs`). A
-copy is a new header over the same backing; the first write through a
-header whose backing is shared detaches it. No runtime ownership state
-exists (no owner, moved bit or affine flag); the `Rc` count is copy-on-write
-bookkeeping only.
+`MutArrayObj { hdr, start, backing: Rc<[Value]> }` (`runtime/value.rs`): the
+length never changes, so the backing is one allocation (its count and its
+slots), and the array's elements are its slots from `start` on (0 but in an
+affine array a consuming loop drains, 22). A copy is a new header over the
+same backing; the first write through a header whose backing is shared
+detaches it. No runtime ownership state exists (no owner, moved bit or
+affine flag); the `Rc` count is copy-on-write bookkeeping only.
 
 ### 5. Copy path
 
@@ -152,11 +154,13 @@ and a new header, O(1), counted (`mutableArray shares`).
 
 ### 6. Detach path
 
-Native: `ops::array_writable` -- every write -- calls `Rc::make_mut` on the
-backing; when another header shares it, the elements are copied once
-(counted: `detaches`, `detachElements`). Tcl: `lset` on a shared Tcl list
-duplicates it (Tcl's copy-on-write). `ma-cow-counters`: one share whatever
-the length; the first write detaches once, copying 10 or 1000 elements.
+Native: `ops::array_writable` -- every write -- checks the backing's `Rc`
+count; when another header shares it, the header's elements are copied once
+into a new backing of their length (one allocation; counted: `detaches`,
+`detachElements`), and the old backing stays the other headers'. Tcl:
+`lset` on a shared Tcl list duplicates it (Tcl's copy-on-write).
+`ma-cow-counters`: one share whatever the length; the first write detaches
+once, copying 10 or 1000 elements.
 
 ### 7. Unique-write path
 
@@ -488,10 +492,15 @@ consuming loop (`core::forms::ConsumeVector`) drains a vector or an array
 
 ### 47. Native representation
 
-`MutArrayObj { hdr, backing: Rc<VecDeque<Value>> }`; `mutarray_of`,
+`MutArrayObj { hdr, start, backing: Rc<[Value]> }` (4); `mutarray_of`,
 `array_writable` (detaching), `array_owned` (an affine array's backing,
 never shared: a panic would be an ownership invariant violation, never
-reached), `share_array`, `drop_array_elements`, `array_elements` (trace).
+reached), `share_array` (the header's `start` with the backing),
+`drop_array_elements` (the elements leave the dying array by its `start`
+moving past them), `array_elements` (trace: the slots from `start`). The
+consuming loop's `mutarraytakefront` advances `start` past the element it
+moves out: it never writes the backing, so it never detaches; the drained
+slots are freed with the header.
 The host round trip carries an array as `mutarrayitems` (an array can be a
 program's result now) and show prints its elements (`<mutable-array [...]>`,
 as a vector's).
@@ -847,8 +856,64 @@ otherwise idle; native times are best of many runs and still vary by up to
   `Rc`-counted backing -- one more allocation per array, the
   representation MutableVector has had since its milestone -- plus the
   HashTable structs. A fixed-length array could keep its backing in one
-  allocation (`Rc<[Value]>`: it never grows); that is a runtime change for
-  a follow-up, not made here.
+  allocation (`Rc<[Value]>`: it never grows); that was left to a
+  follow-up, now made (next paragraph).
+
+**One-allocation backing** (the follow-up: `Rc<VecDeque<Value>>` became
+`Rc<[Value]>` and the header's `start`, 4 and 47). An array is now its
+header and one backing allocation, the backing's counts and slots together,
+for every constructor; a copy allocates its header only, the first write
+through it the detached backing only, and later writes, a bulk copy and a
+consuming loop's step nothing (`mutarray_is_a_header_and_one_backing_allocation`
+in `runtime/ops.rs` counts the allocator calls). Measured against the
+commit before it, both native builds on the same machine, otherwise idle:
+
+* *csv_records* (realistic schema, 1000 rows; callgrind, compilation
+  included):
+
+  | program | arrays | `malloc` calls | instructions |
+  |---|---:|---:|---:|
+  | parsing alone | 4 015 | 37 093 against 44 121 | 87.2 M against 89.7 M |
+  | default row tables | 12 026 | 87 955 against 103 004 | 177.6 M against 182.9 M |
+  | presized row tables | 8 026 | 77 955 against 89 004 | 167.3 M against 171.6 M |
+
+  The difference is exactly one call per array and one per
+  `mutable_array::copy` between two arrays (3 013, 3 023 and 3 023 of
+  them: the copy no longer gathers the source's words into a scratch
+  `Vec` -- once the destination is writable its backing is its own, so
+  the source's is read in place). The default row tables now make fewer
+  `malloc` calls than before this milestone (87 955 against 89 492; this
+  machine measured 103 004 where the list above says 103 017). Times,
+  best of 28 in-process runs, ten rounds alternating the two builds
+  (range of the rounds, median in parentheses): parsing alone 3.47-3.73 ms
+  (3.60) against 3.74-3.97 (3.77), -5 %; default row tables 6.05-6.61
+  (6.16) against 6.44-7.54 (7.08), -13 %; presized 4.75-5.18 (4.89)
+  against 5.72-6.24 (5.82), -16 %. Before this milestone the list above
+  has 3.51-3.66, 5.73-5.78 and 5.23-5.26 (measured in an earlier session,
+  so only roughly comparable): parsing and the presized tables are back,
+  the default tables still about 6 % slower.
+* *Copy-on-write* (`bench/mutable-array.tcl`): every counter of the table
+  above is unchanged (200 shares per program; 200 detaches copying 2 000,
+  200 000 and 2 000 000 elements; none for 200 000 writes to a unique array;
+  `sched-8`: no share or detach). A detach is one allocation where it was
+  two: the copy-then-write program (K = 200, best of 50 runs, eight rounds)
+  takes 21.5-22.3 us against 27.4-27.8 at S = 10 (-22 %), 390-407 us against
+  400-414 at S = 1000 (each build also had a few rounds near 650 us), and
+  4.84-4.93 ms against 4.88-5.07 at S = 10 000. A first version copied the
+  detached elements with one `memcpy` (`Rc::from`) and was 12 % slower at
+  S = 10 000 (5.39-5.54 ms): on this x86-64 (ERMS without FSRM) glibc copies
+  an 80 KB block with `rep movsb`, slower than the element loop the old
+  `VecDeque` clone compiled to (with
+  `GLIBC_TUNABLES=glibc.cpu.x86_rep_movsb_threshold` set above it, 4.65-4.77
+  ms). A backing is therefore built by collecting an exact-length iterator
+  (`ops::backing_of`), which is still one allocation and compiles to that
+  loop.
+* *Mutation*: `drop-leaks-elements-native`, which only the Tcl-level tests
+  and the fuzzer killed before (55), is now also killed by a Rust test
+  (`a_mutarray_drop_releases_the_elements_left_once`, `runtime/affine.rs`).
+  The three native mutants that edit the changed code
+  (`copy-aliases-native`, `copy-eager-deep-native`,
+  `drop-leaks-elements-native`) were re-pointed at it; all 31 are killed.
 
 ### 63. Backwards-compatibility findings
 
