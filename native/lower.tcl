@@ -3610,7 +3610,15 @@ proc native::lower::Expr {fnVar e {want tagged}} {
             lassign [hir::affine::releasesOnExit $hir $e] before after
             ReleaseHandles fn $before $e
             set name [dict get $node name]
-            if {[dict exists $node value] && [dict get $node value] ne ""} {
+            if {[dict exists $node value] && [dict get $node value] ne "" && ![hir::errordecls::hasPayload $name]} {
+                # A payload on a payload-free error (UNEXPECTED-ERROR-PAYLOAD,
+                # a program run despite its diagnostics): evaluated for its
+                # effects, then the payload-free error.
+                if {[Expr fn [dict get $node value]] ne "never"} {
+                    ReleaseHandles fn $after $e
+                    Emit fn "faildeclared [ErrorId $name] [Quote $name]" $e
+                }
+            } elseif {[dict exists $node value] && [dict get $node value] ne ""} {
                 # ERROR-PAYLOADS.md: the payload's fields, evaluated in
                 # written order, travel the error edge field-wise (the Vm's
                 # payload slots): no struct object is built for them.

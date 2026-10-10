@@ -224,7 +224,7 @@
         if {$fields eq {} || ([dict exists $decl namespace] && [dict get $decl namespace] ne "")} continue
 >>>>
 
-@@ generic-propagation-loses-identity a propagating error that crosses a call with no handler of its own leaves under the first error the call declares (Tcl compiler)
+@@ generic-propagation-loses-identity an error passing through a handled call none of whose handlers names it leaves under the first handled error's identity (Tcl compiler)
 ## compiler/compiler.tcl
 <<<<
     Emit ctx "default \{ return -options \$$optsVar \$$resVar \}"

@@ -335,6 +335,10 @@ test ep-principal-ints {item 78: the Int-valued forms, failing and succeeding} -
     epAgree "${::epPrincipal}\[fields(\"/y\"), nested(\"/w\"), fields(\"\"), nested(\"\")\]\n"
 } -result {value {[404, 0, 4, -1]}}
 
+test ep-principal-bytes {item 78 with the stdlib's Bytes as the payload stream (abi::bytes::from_list builds an empty one): the nested destructuring reads it, on every backend} -body {
+    epAgree "import abi::bytes\nimport abi\nimport str\n\nstruct Response:\n    payloadStream: abi::bytes::Bytes\n    length: int\n\nerror PageNotFound:\n    uri: str\n    statusCode: int\n    response: Response\n\nfn fetch(uri: str) -> str errors PageNotFound:\n    if uri == \"\":\n        return \"home\"\n    fail PageNotFound {\n        uri: uri,\n        statusCode: 404,\n        response: Response {\n            payloadStream: abi::bytes::from_list(\[\]),\n            length: 0,\n        },\n    }\n\nfn nested(uri: str) -> int:\n    page = fetch(uri):\n        on PageNotFound {\n            response: {\n                payloadStream,\n                length,\n            }\n        }:\n            return length + abi::bytes::length(payloadStream).value\n    -1\n\n\[nested(\"/w\"), nested(\"\")\]\n"
+} -result {value {[0, -1]}}
+
 test ep-principal-hir {item 76: nominal selection and ordinary payload binding are visibly separate in HIR -- `fail NAME` with its payload construction, `on NAME ... payload (B NAME)`, and the destructuring's ordinary projection binds} -body {
     list [epHirLines "${::epPrincipal}1\n" "*fail PageNotFound*"] \
         [epHirLines "${::epPrincipal}1\n" "*struct payload(PageNotFound)*"] \
@@ -465,6 +469,10 @@ test ep-propagation {items 12, 35: a payload propagates unchanged through declar
     epAgree "${::epDecls}fn mid(uri: str) -> int errors PageNotFound:\n    str::length(fetch(uri)) + 1\nfn outer(uri: str) -> int errors PageNotFound:\n    mid(uri) * 2\nfn f(uri: str) -> str:\n    v = outer(uri):\n        on PageNotFound details:\n            return details.uri\n    \"ok\"\n\[f(\"/deep\"), f(\"\")\]\n"
 } -result {value {["/deep", "ok"]}}
 
+test ep-propagation-through-handled-call {items 12, 30: an error the handlers of a handled call do not name passes through it unchanged -- identity and payload -- while the one it names is handled there} -body {
+    epAgree "error E1:\n    code: int\nerror E2:\n    code: int\nerror E3:\n    uri: str\nfn raise(k: int, v: int) -> int errors E1, E2, E3:\n    if k == 1:\n        fail E1 {code: v}\n    if k == 2:\n        fail E2 {code: v + 1}\n    if k == 3:\n        fail E3 {uri: \"/x\"}\n    v\nfn partial(k: int, v: int) -> int errors E1, E2, E3:\n    raise(k, v):\n        on E3:\n            v + 100\nfn op(k: int, v: int):\n    r = partial(k, v):\n        on E2 {code}:\n            return \[\"E2\", code\]\n        on E1 d:\n            return \[\"E1\", d\]\n        on E3 {uri}:\n            return \[\"E3\", uri\]\n    r\n\[op(1, 5), op(2, 5), op(3, 5), op(0, 5)\]\n"
+} -result {value {[["E1", {code: 5}], ["E2", 6], 105, 5]}}
+
 test ep-generic-propagation {item 56: a generic `fn call(f, x): f(x)` propagates the payload exactly (specialized, no runtime dispatch)} -body {
     epAgree "${::epDecls}fn call(f, x):\n    f(x)\nfn g(x: int) -> int errors PageNotFound:\n    if x > 1:\n        fetch(\"/g\")\n    x\nfn h(x: int) -> int errors PageNotFound:\n    call(g, x)\nfn k(x: int) -> int:\n    h(x):\n        on PageNotFound {statusCode, uri}:\n            statusCode + str::length(uri)\n\[k(1), k(7)\]\n"
 } -result {value {[1, 406]}}
@@ -562,6 +570,11 @@ test ep-affine-hir-evidence {item 76: HIR shows the move into the payload, the h
         [epHirLines $text "on ReadFailed*"] \
         [epHirLines $text "*const 7 : int release=#"]
 } -cleanup {unset -nocomplain text} -result {{{# ref # s : Coroutine{args: [Message], return: Event, errors: []} move}} {{on ReadFailed # payload (# payload#*)} {on ReadFailed # payload (# destructure#*) consumed=stream binds # stream, # bytesRead}} {{# const 7 : int release=#}}}
+
+test ep-affine-exit-after-payload {a fail whose payload reads an unrestricted field of an affine owner releases that owner as it leaves, after the payload is evaluated} -body {
+    set text "${::epAffine}struct Holder:\n    tag: int\n    step: Coroutine{args: \[Message\], return: Event}\nerror Tagged:\n    tag: int\nfn g(n: int) -> int errors Tagged:\n    h = Holder {tag: n, step: make(n)}\n    if n > 1:\n        fail Tagged {tag: h.tag * 2}\n    {step} = h\n    e = step(Message {value: 5})\n    e.value\nfn f(n: int) -> int:\n    g(n):\n        on Tagged {tag}:\n            tag\n\[f(3), f(1), test_ep_live()\]\n"
+    list [epReleased $text] [epHirLines $text "*fail Tagged*"]
+} -cleanup {unset -nocomplain text} -result {{{value {[6, 5, 0]}} {value {[6, 5, 0]}}} {{# fail Tagged : never exit-release=#}}}
 
 test ep-coroutine-affine-payload-rejected {items 83-84: a coroutine may not fail with an error whose payload is affine -- its cached failure is raised again on every later resume (COROUTINE-CONTRACT), as its cached result must be unrestricted} -body {
     list [epCode "${::epAffine}fn gen(resume Message) -> Event errors ReadFailed:\n    m = yield Event {value: 1}\n    if m.value > 1:\n        s = make(1)\n        fail ReadFailed {stream: s, bytesRead: 1}\n    Event {value: 2}\ncoroutine {step} = gen():\n    on ReadFailed:\n        Event {value: 0}\n1\n"] \

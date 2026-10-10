@@ -26,6 +26,10 @@
 #                        the box still owning it (the exit releases it)
 #   pending_box(c, k)    builds Box {step: c, tag: might_fail(k)}: the field
 #                        after the handle fails when k > 0
+#   carry(s, k)          fails Carry {step: s, tag: k} when k > 0 (the
+#                        handle moves into the error's payload,
+#                        ERROR-PAYLOADS.md), else returns s
+#   carry_value(s, k)    the same failure, else consume(s, 3)
 #   Box {tag, step}, Two {a, b}   structs owning one or two handles
 #
 # The operations: construct a coroutine; resume one (the event folds into a
@@ -35,7 +39,10 @@
 # dropped); build a List of two (and move the List); build a Two and
 # destructure one or both fields; consume it on one branch of an `if` only;
 # discard `pass(c)`'s result; try_consume and guarded under a handler
-# (failing or not, as K decides); resume it in a loop.
+# (failing or not, as K decides); resume it in a loop; and move it into an
+# error payload (carry, carry_value) and receive it back from the handler by
+# a destructuring or a whole binding, or have the handler ignore it or bind
+# only the unrestricted field (the payload's handle is released).
 #
 # The oracle shares no code with the compiler. It is the generator's own
 # record of every affine runtime identity: its accumulator, and the one owner
@@ -148,6 +155,20 @@ fn pending_box(c: Coroutine{args: [Msg], return: Ev}, k: int) -> int errors Boom
     {step} = b
     consume(step, 2)
 
+error Carry:
+    step: Coroutine{args: [Msg], return: Ev}
+    tag: int
+
+fn carry(s: Coroutine{args: [Msg], return: Ev}, k: int) -> Coroutine{args: [Msg], return: Ev} errors Carry:
+    if k > 0:
+        fail Carry {step: s, tag: k}
+    s
+
+fn carry_value(s: Coroutine{args: [Msg], return: Ev}, k: int) -> int errors Carry:
+    if k > 0:
+        fail Carry {tag: k, step: s}
+    consume(s, 3)
+
 fn any_take(x: any) -> int:
     1
 
@@ -248,7 +269,8 @@ proc Operation {stateVar k} {
     set cs [Owners $state handles]
     set ops {new}
     if {[llength $cs] >= 1} {
-        lappend ops resume resume move pass consume invoke keep box branch discard try guarded loop early pendingbox
+        lappend ops resume resume move pass consume invoke keep box branch discard try guarded loop early pendingbox \
+            carry carrywhole carryignore carrytag
     }
     if {[llength $cs] >= 2} {
         lappend ops list two
@@ -494,6 +516,48 @@ proc Operation {stateVar k} {
             Fold state $r [expr {$k > 0 ? -1 : [Advance state [lindex $ids 0] 2]}]
             Drop state $ids
             dict lappend state moved $c [list call pending_box]
+        }
+        carry - carrywhole {
+            # The handle moves into an error payload (when the call fails)
+            # and comes back out of the handler: a destructuring of the
+            # payload, or of its whole binding.
+            set c [Pick $cs]
+            set ids [Take state handles $c]
+            set useK [Rand 2]
+            set d [Fresh state c]
+            Emit state "$d = carry($c, [expr {$useK ? "k" : "0"}]):"
+            if {$op eq "carry"} {
+                Emit state "    on Carry {step}:"
+                Emit state "        step"
+            } else {
+                Emit state "    on Carry details:"
+                Emit state "        {step: back} = details"
+                Emit state "        back"
+            }
+            Own state handles $d $ids
+            dict lappend state moved $c [list call carry]
+        }
+        carryignore - carrytag {
+            # The handler ignores the payload, or binds only its tag: the
+            # handle the payload owns is released.
+            set c [Pick $cs]
+            set ids [Take state handles $c]
+            set useK [Rand 2]
+            set f [expr {$useK ? $k : 0}]
+            set r [Fresh state r]
+            Emit state "$r = carry_value($c, [expr {$useK ? "k" : "0"}]):"
+            if {$op eq "carryignore"} {
+                Emit state "    on Carry:"
+                Emit state "        -1"
+                set failed -1
+            } else {
+                Emit state "    on Carry {tag}:"
+                Emit state "        tag * 10"
+                set failed [expr {$f * 10}]
+            }
+            Fold state $r [expr {$f > 0 ? $failed : [Advance state [lindex $ids 0] 3]}]
+            Drop state $ids
+            dict lappend state moved $c [list call carry_value]
         }
         loop {
             set c [Pick $cs]

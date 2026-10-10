@@ -280,7 +280,10 @@ pub extern "C" fn rt_fail_declared_payload(p: *mut Vm, id: u64, name: Value, sha
 /// before `rt_clear_declared_error` releases the slots. No allocation.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_declared_payload(p: *mut Vm, index: u64) -> Value {
-    vm(p).declared_payload[index as usize]
+    // (Out of range only in a program run despite its diagnostics -- a
+    // payload-bearing error raised without one, MISSING-ERROR-PAYLOAD,
+    // -strict 0: unit, never a read past the slots.)
+    vm(p).declared_payload.get(index as usize).copied().unwrap_or(UNIT)
 }
 
 /// The pending declared-error id (0 = none), for a `handle`'s own dispatch

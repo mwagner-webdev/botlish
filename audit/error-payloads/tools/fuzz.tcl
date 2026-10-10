@@ -12,7 +12,8 @@
 # other program an affine error whose payload owns a coroutine. One raiser
 # fails each error for one value of its selector `k` with a payload computed
 # from `v`; errors reach a handler directly, through one or two declaring
-# functions, through a generic `call(f, k, v)` (specialized), or translated
+# functions, through a generic `call(f, k, v)` (specialized), through a
+# handled call that handles one other error itself, or translated
 # by a handler that fails another payload error built from what it
 # received. The driver is a List of 4..10 operations, each a function that
 # makes one such call and observes what its handler received:
@@ -285,6 +286,9 @@ proc Declarations {stateVar} {
     append text "fn mid2(k: int, v: int) -> int errors $all:\n    mid(k, v) * 2\n\n"
     append text "fn call(f, k, v):\n    f(k, v)\n\n"
     append text "fn generic(k: int, v: int) -> int errors $all:\n    call(raise, k, v)\n\n"
+    # A handled call that handles one error itself and lets every other one
+    # pass through it, identity and payload unchanged.
+    append text "fn partial(k: int, v: int) -> int errors $all:\n    raise(k, v):\n        on [dict get $state local]:\n            v + 100\n\n"
     append text "fn only1(k: int, v: int) -> int errors E1:\n    if k == 1:\n        [Construction E1 [dict get $errors E1] [dict get $errors E1]]\n    v\n\n"
     # A translation: every error of raise becomes T.
     append text "fn translate(k: int, v: int) -> int errors T:\n    raise(k, v):\n"
@@ -378,7 +382,7 @@ proc Operation {stateVar} {
         return [AffineOperation state $name $v]
     }
     set k [Rand [expr {[llength $names] + 1}]]
-    set path [Pick {raise raise mid mid2 generic translate}]
+    set path [Pick {raise raise mid mid2 generic partial translate}]
     if {[dict get $state fault] eq "wrong-nominal" && ![dict exists $state faultDone]} {
         set path only1
     }
@@ -390,6 +394,12 @@ proc Operation {stateVar} {
     }
     if {$path eq "only1" && $raised ne "E1"} {
         set raised ""
+    }
+    set local 0
+    if {$path eq "partial" && $raised eq [dict get $state local]} {
+        # Handled inside `partial`: its value.
+        set raised ""
+        set local 1
     }
     set result ""
     if {$path eq "translate"} {
@@ -405,7 +415,14 @@ proc Operation {stateVar} {
         dict set state faultDone 1
     } else {
         set handled [Shuffle $names]
-        if {[dict get $state fault] eq "unhandled" && ![dict exists $state faultDone]} {
+        # Not through `generic`: a call through an untyped callable
+        # parameter contributes no errors to the completion analysis's
+        # effective set (hir/completions.tcl's EvalCall, a pre-existing
+        # hole with payload-free errors too; ERROR-PAYLOADS.md, "Findings"),
+        # so an unhandled error there is not diagnosed.
+        # Nor through `partial`: the error it handles itself is no fault.
+        if {[dict get $state fault] eq "unhandled" && ![dict exists $state faultDone]
+                && $path ni {generic partial}} {
             set handled [lrange $handled 1 end]
             dict set state faultDone 1
         }
@@ -425,6 +442,7 @@ proc Operation {stateVar} {
         switch -- $path {
             mid { incr value }
             mid2 { set value [expr {($v + 1) * 2}] }
+            partial { if {$local} { set value [expr {$v + 100}] } }
         }
         set result [list int $value]
     }
@@ -489,6 +507,7 @@ set ::faults {
 proc Program {number} {
     set state [dict create errors [Errors] affine [expr {$number % 2}] fault "" \
         lines {} ops {} expected {}]
+    dict set state local [Pick [dict keys [dict get $state errors]]]
     if {[Rand 3] == 0} {
         set fault [Pick [dict keys $::faults]]
         set fields [dict get $state errors E1]

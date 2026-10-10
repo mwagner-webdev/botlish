@@ -92,8 +92,10 @@ proc Canonical {nir errors} {
         set text {}
         foreach line $block {
             set line [regsub -all { @e[0-9]+} $line {}]
-            if {[regexp {^(\s+)faildeclared ([0-9]+) (".*")$} $line -> ws id name]} {
-                set line "${ws}faildeclared $name"
+            if {[regexp {^(\s+)faildeclared ([0-9]+) ("[^"]*")(.*)$} $line -> ws id name payload]} {
+                # (PAYLOAD: a payload's shape and field registers,
+                # ERROR-PAYLOADS.md.)
+                set line "${ws}faildeclared $name$payload"
             } elseif {[regexp {^(.*declarederroreq) ([0-9]+)$} $line -> pre id]} {
                 set line "$pre [lindex $errors [expr {$id - 1}]]"
             }
