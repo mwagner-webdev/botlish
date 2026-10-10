@@ -160,6 +160,75 @@ proc hir::callables::Bearing {hir type {mutable 1}} {
     return 0
 }
 
+# The declared errors a value of TYPE carries: what calling it -- or any
+# callable reachable through it, by the structure Bearing walks (a
+# callable's result, a List/set/vector/array element, a struct field) -- may
+# raise according to its type: an exact block's declared errors, an exact
+# native's registered ones, a structural function type's or a coroutine
+# handle's contract errors. The error part of Bearing: what an erased value
+# of TYPE may raise once its type is forgotten (hir::completions::
+# ErasedErrors, the erased-callable contract).
+proc hir::callables::CarriedErrors {hir type} {
+    set errors {}
+    CarriedInto $hir $type errors
+    return [lsort -unique $errors]
+}
+
+proc hir::callables::CarriedInto {hir type errorsVar} {
+    upvar 1 $errorsVar errors
+    variable carriedVisiting
+    if {[hir::types::IsMutArray $type] || [hir::types::IsSet $type] || [hir::types::IsMutVec $type]} {
+        CarriedInto $hir [lindex $type 1] errors
+        return
+    }
+    if {[hir::types::IsExactBlock $type]} {
+        set block [lindex $type 1]
+        if {[dict exists $hir exprs $block]} {
+            lappend errors {*}[dict get $hir exprs $block declaredErrors]
+        }
+        CarriedInto $hir [lindex $type 3] errors
+        return
+    }
+    if {[hir::types::IsExactNative $type]} {
+        if {![catch {core::native::metadata [lindex $type 1]} meta]} {
+            lappend errors {*}[dict get $meta errors]
+        }
+        return
+    }
+    if {[hir::types::IsFn $type] || [hir::types::IsCoroutine $type]} {
+        set contract [hir::types::Contract $type]
+        lappend errors {*}[dict get $contract errors]
+        CarriedInto $hir [dict get $contract return] errors
+        return
+    }
+    if {[hir::types::IsList $type]} {
+        foreach t [concat [list [lindex $type 1]] [hir::types::shapeOf $type]] {
+            CarriedInto $hir $t errors
+        }
+        return
+    }
+    if {[hir::types::IsStruct $type]} {
+        foreach {name t} [lindex $type 1] {
+            CarriedInto $hir $t errors
+        }
+        return
+    }
+    if {[hir::types::IsNamedStruct $type]} {
+        set id [lindex $type 1]
+        if {[info exists carriedVisiting] && $id in $carriedVisiting} {
+            return
+        }
+        lappend carriedVisiting $id
+        try {
+            foreach {name t} [hir::structs::fieldTypes $id] {
+                CarriedInto $hir $t errors
+            }
+        } finally {
+            set carriedVisiting [lrange $carriedVisiting 0 end-1]
+        }
+    }
+}
+
 # Bearing of named struct ID: any declared field type bears. A struct may
 # name itself (directly or through others), so a declaration being examined
 # contributes nothing further (a cycle adds no obligation its first visit did

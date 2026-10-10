@@ -104,7 +104,7 @@ proc bothOf {hir seeds {probe probe}} {
     set params [hir::get $hir $block params]
     set outcome [hir::range::AnalyzeInstance $hir verify {} $block $params $seeds {} {}]
     hir::completions::resetCache
-    set sub [hir::completions::analyzeBlock $hir $block $seeds {} {} [dict create $block 1]]
+    set sub [hir::completions::analyzeBlock $hir $block $seeds {} {} {} [dict create $block 1]]
     return [list [dict get $outcome exprs] [hir::completions::exprRangesOf $hir $block $seeds] \
         [dict get $outcome result] [dict get $sub result]]
 }

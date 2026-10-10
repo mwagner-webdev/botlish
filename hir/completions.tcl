@@ -60,6 +60,41 @@
 # either (there is no one body to analyze), but is charged its contract's
 # whole declared error set (CheckStructuralCallLegality): the contract is
 # the upper bound every implementation reaching it was proven to fit.
+#
+# Precision and the erased-callable contract
+# ------------------------------------------
+# Failure to prove an error absent never becomes proof that it is absent.
+# The one way an error can leave a function that does not declare it is a
+# call this walk cannot see through: a callable that reaches an untyped
+# parameter through a semantic instance (hir/semantic.tcl; the only erasure
+# hir/callables.tcl accepts), called there as `f(x)` with `f : any` -- or a
+# closure that captured one and is called later. The generic body says
+# nothing about such a call's errors, so the walk tracks where each callable
+# value comes from (CallableFact):
+#
+#   {block B} / {native N}  exactly that callable (an argument of exact
+#                           type): the call is analyzed as an exact call of
+#                           it -- its effective errors, never a must-fact
+#   clean                   a parameter or capture of the body being
+#                           checked: whatever an erased argument carries is
+#                           charged at the call that passed it (it reaches
+#                           this body only through that call's analysis);
+#                           a closure the walk saw created in the same
+#                           activation sees its captures' facts
+#   unknown                 anything else: the call may be any callable the
+#                           program erases, so it is charged the program's
+#                           erased-callable contract (ErasedErrors: every
+#                           declared error of every callable the program
+#                           passes into an untyped parameter) and the walk
+#                           becomes *incomplete*
+#
+# An incomplete summary falls back to the callee's declared contract at the
+# function-instance boundary (EffectiveFacts): exact narrowing is kept only
+# while the whole walk is complete, and incompleteness propagates to every
+# enclosing summary. A fallback is a may-set: it never turns a call into a
+# known failure (`normal` is what the walk proved, and the fallbacks never
+# lower it). A program that erases no error-bearing callable has an empty
+# erased-callable contract, and nothing here changes its analysis.
 
 namespace eval hir::completions {
     # Recursive nested-call analysis budget (item 35/108-16): once this many
@@ -95,11 +130,261 @@ namespace eval hir::completions {
     # never even offered to the cache (EffectiveFacts checks that first),
     # so a genuine cycle is never short-circuited by a stale hit either.
     variable cache [dict create]
+    # The erased-callable contract of the program this pass checks
+    # (ErasedErrors), and the transparent blocks (Transparent): computed on
+    # first use, cleared with the cache.
+    variable erased ""
+    variable erasedKnown 0
+    variable transparent ""
 }
 
 proc hir::completions::resetCache {} {
     variable cache
+    variable erasedKnown
+    variable transparent
     set cache [dict create]
+    set erasedKnown 0
+    set transparent ""
+}
+
+# ---------------------------------------------------------------------------
+# Callable facts and the erased-callable contract (header, "Precision and the
+# erased-callable contract")
+
+# The erased-callable contract of HIR: every declared error a callable the
+# program passes into an untyped parameter can raise. Such a value reaches
+# the parameter only through a semantic instance (hir/semantic.tcl: the
+# instance's entry type at a parameter without a declared or trusted
+# contract is the argument's own type), so the instances' entry types at
+# untyped parameters are every erased value; what each one carries is
+# hir::callables::CarriedErrors of its type. An untyped call whose callee
+# this walk cannot identify can only be one of those values, or a closure
+# whose own untyped calls reach one of them: this set bounds what it raises.
+proc hir::completions::ErasedErrors {hir} {
+    variable erased
+    variable erasedKnown
+    if {!$erasedKnown} {
+        set erased [erasedErrorsOf $hir]
+        set erasedKnown 1
+    }
+    return $erased
+}
+
+# ErasedErrors of HIR, computed afresh (for a pass other than this file's:
+# hir/affine.tcl's error edges).
+proc hir::completions::erasedErrorsOf {hir} {
+    set errors {}
+    if {[dict exists $hir semantic instances]} {
+        dict for {id inst} [dict get $hir semantic instances] {
+            set block [dict get $inst block]
+            if {![dict exists $hir exprs $block]} {
+                continue
+            }
+            foreach contract [hir::signatures::entryTypes $hir $block] type [dict get $inst args] {
+                if {$contract eq ""} {
+                    lappend errors {*}[hir::callables::CarriedErrors $hir $type]
+                }
+            }
+        }
+    }
+    return [lsort -unique $errors]
+}
+
+# 1 if a value of static TYPE may be a callable this walk cannot identify
+# from TYPE alone: `any`, a bare block or native kind, or a structural Fn
+# (whose value may be a closure). An exact callable type identifies its
+# value; a coroutine handle's resume is bounded by its contract (its thunk
+# is checked against it); any other type is not callable at all.
+proc hir::completions::MayHoldCallable {type} {
+    if {$type eq "never" || [hir::types::IsCoroutine $type]} {
+        return 0
+    }
+    return [expr {[hir::types::kindOf $type] in {"" block native}}]
+}
+
+# The callable fact of expression E's value (header): {block B} or {native N}
+# when its static type is that exact callable, else the fact this walk
+# recorded for the binding a `ref` reads (a parameter seeded from its
+# argument, a local from its value, a checked body's parameters and captures
+# `clean`), else `clean` for a value that cannot be a callable, else
+# `unknown`.
+proc hir::completions::CallableFact {hir ctx e} {
+    set type [hir::typeOf $hir $e]
+    if {[hir::types::IsExactBlock $type]} {
+        return [list block [lindex $type 1]]
+    }
+    if {[hir::types::IsExactNative $type]} {
+        return [list native [lindex $type 1]]
+    }
+    if {[hir::kind $hir $e] eq "ref"} {
+        set b [hir::get $hir $e binding]
+        if {$b ne "" && [dict exists $ctx callables $b]} {
+            return [dict get $ctx callables $b]
+        }
+    }
+    return [expr {[MayHoldCallable $type] ? "unknown" : "clean"}]
+}
+
+# The callable facts of ARGEXPRS, one per argument, for the parameters of the
+# callee they are passed to -- or {} when the program erases no error-bearing
+# callable (no fact can matter then; keeping the cache key unchanged).
+proc hir::completions::ArgCallables {hir ctx argExprs} {
+    if {[ErasedErrors $hir] eq {}} {
+        return {}
+    }
+    return [lmap a $argExprs {CallableFact $hir $ctx $a}]
+}
+
+# 1 if the root native NAME calls a callable argument (-errors-from) in a
+# program that erases an error-bearing callable: what it raises then depends
+# on that argument's callable fact (NativeCallFacts).
+proc hir::completions::CallsCallable {hir name} {
+    return [expr {[ErasedErrors $hir] ne {} && [dict get [core::native::metadata $name] errorsFrom] ne ""}]
+}
+
+# The callable fact of binding B in CTX: by B's type when it is an exact
+# callable, else the one recorded, else by B's type (CallableFact's rule for
+# a `ref`).
+proc hir::completions::BindingFact {hir ctx b} {
+    set type [hir::bindingType $hir $b]
+    if {[hir::types::IsExactBlock $type]} {
+        return [list block [lindex $type 1]]
+    }
+    if {[hir::types::IsExactNative $type]} {
+        return [list native [lindex $type 1]]
+    }
+    if {[dict exists $ctx callables $b]} {
+        return [dict get $ctx callables $b]
+    }
+    return [expr {[MayHoldCallable $type] ? "unknown" : "clean"}]
+}
+
+# 1 if binding B is one a body's own check takes as `clean` and may hold a
+# callable (SeedClean): a parameter or capture of a type that is neither an
+# exact callable (whose calls that check analyzes) nor uncallable.
+proc hir::completions::CleanInput {hir b} {
+    set type [hir::bindingType $hir $b]
+    return [expr {![hir::types::IsExactBlock $type] && ![hir::types::IsExactNative $type]
+        && [MayHoldCallable $type]}]
+}
+
+# The callable facts of the captures of closure TARGET, a dict binding ->
+# fact, when call CALLEE (the callee expression) calls the closure this
+# activation created (a `ref` to the local CTX recorded it in): its captures
+# are this walk's own bindings. {} otherwise -- a closure from elsewhere
+# (another activation's) has captures this walk knows nothing about.
+proc hir::completions::CaptureFacts {hir ctx callee target} {
+    if {[ErasedErrors $hir] eq {} || [hir::kind $hir $callee] ne "ref"} {
+        return {}
+    }
+    set b [hir::get $hir $callee binding]
+    if {$b eq "" || ![dict exists $ctx closures $b] || [dict get $ctx closures $b] ne $target} {
+        return {}
+    }
+    set facts [dict create]
+    foreach c [hir::get $hir $target captures] {
+        dict set facts $c [BindingFact $hir $ctx $c]
+    }
+    return $facts
+}
+
+# 1 if an activation of block B may complete with a declared error B does
+# not declare itself: B's own body (not the bodies of the closures it
+# creates) makes a call this walk cannot see through -- through a value of
+# untyped or structural function type, or a native that calls a callable
+# argument (-errors-from) -- or an exact call of a transparent block.
+# Everything else B's activation raises is a `fail` of B (which B must
+# declare) or an exact call checkBlock holds to B's declared errors. Static
+# (no facts), so it can answer for a call the walk does not enter: a
+# recursion cycle, an exhausted budget, an arity mismatch (Fallback).
+# One least fixpoint over the program's exact call edges, per pass.
+proc hir::completions::Transparent {hir b} {
+    variable transparent
+    if {$transparent eq ""} {
+        set transparent [transparentBlocks $hir]
+    }
+    return [dict exists $transparent $b]
+}
+
+# 1 if call E of HIR may complete with an error its type-level calleeErrors
+# do not name (hir/types.tcl's Call): an exact call of a block in TRANSPARENT
+# (transparentBlocks), a call through an untyped or structural callee, a
+# native calling a callable argument -- the calls the erased-callable
+# contract reaches. For hir/affine.tcl's error edges, which use the
+# type-level errors and this, never the completion proofs.
+proc hir::completions::mayLetErasedThrough {hir e transparent} {
+    lassign [hir::get $hir $e target] targetKind target
+    switch -- $targetKind {
+        block {
+            return [dict exists $transparent $target]
+        }
+        native {
+            set name [dict get [hir::symbol $hir $target] name]
+            return [expr {[dict get [core::native::metadata $name] errorsFrom] ne ""}]
+        }
+    }
+    return [MayHoldCallable [hir::typeOf $hir [hir::get $hir $e callee]]]
+}
+
+# The transparent blocks of HIR (Transparent), as a dict BLOCK -> 1.
+proc hir::completions::transparentBlocks {hir} {
+    set callers [dict create]
+    set work {}
+    set result [dict create]
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "block"} {
+            continue
+        }
+        set opaque 0
+        foreach child [dict get $node body] {
+            TransparentEdges $hir $e $child callers opaque
+        }
+        if {$opaque} {
+            dict set result $e 1
+            lappend work $e
+        }
+    }
+    while {$work ne {}} {
+        set b [lindex $work 0]
+        set work [lrange $work 1 end]
+        if {![dict exists $callers $b]} {
+            continue
+        }
+        foreach caller [dict get $callers $b] {
+            if {![dict exists $result $caller]} {
+                dict set result $caller 1
+                lappend work $caller
+            }
+        }
+    }
+    return $result
+}
+
+# Records, for block B, the exact call edges of expression E (in CALLERSVAR:
+# callee -> {caller ...}) and sets OPAQUEVAR when E makes a call
+# Transparent's header names; never enters a nested block's body.
+proc hir::completions::TransparentEdges {hir b e callersVar opaqueVar} {
+    upvar 1 $callersVar callers $opaqueVar opaque
+    set node [dict get $hir exprs $e]
+    switch -- [dict get $node kind] {
+        block { return }
+        call {
+            lassign [dict get $node target] targetKind target
+            if {$targetKind eq "block"} {
+                dict lappend callers $target $b
+            } elseif {$targetKind eq "native"} {
+                set name [dict get [hir::symbol $hir $target] name]
+                if {[dict get [core::native::metadata $name] errorsFrom] ne ""} {
+                    set opaque 1
+                }
+            } elseif {[MayHoldCallable [hir::typeOf $hir [dict get $node callee]]]} {
+                set opaque 1
+            }
+        }
+    }
+    foreach child [hir::children $hir $e] {
+        TransparentEdges $hir $b $child callers opaque
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -187,12 +472,37 @@ proc hir::completions::SeedParam {} {
 #                                        for)
 #   analyses  a scalar counter cell (a one-element list, mutated in place)
 #             counting nested analyzeBlock calls against maxAnalyses
+#   callables bindingId -> callable fact (CallableFact: {block B},
+#                                        {native N} or clean; a binding
+#                                        with none is read by its static
+#                                        type), only while the program
+#                                        erases an error-bearing callable
+#   closures  bindingId -> block        a local bound to a closure created
+#                                        by this activation (its captures
+#                                        are this walk's bindings)
+#   incomplete 0|1                      this walk charged a call the
+#                                        erased-callable contract, or used
+#                                        an incomplete summary (header)
 
 proc hir::completions::NewCtx {} {
     return [dict create bindings [dict create] exact [dict create] exactList [dict create] \
         indexBounds [dict create] upperBounds [dict create] sizes [dict create] minSizes [dict create] \
         exprs [dict create] errors [dict create] analyses 0 returned 0 returnRange never \
-        record 0 visited [dict create] bounds [dict create]]
+        record 0 visited [dict create] bounds [dict create] callables [dict create] closures [dict create] \
+        incomplete 0]
+}
+
+# Seeds CTX for a walk of BLOCK's own body by its own check (checkBlock,
+# reachedExprs): every parameter and capture is `clean` -- a callable an
+# erased argument puts there is charged at the call that passed it.
+proc hir::completions::SeedClean {hir ctxVar block} {
+    upvar 1 $ctxVar ctx
+    if {[ErasedErrors $hir] eq {}} {
+        return
+    }
+    foreach b [concat [hir::get $hir $block params] [hir::get $hir $block captures]] {
+        dict set ctx callables $b clean
+    }
 }
 
 # Walks EXPRS (a block body / branch body) in order; a "never" expression
@@ -239,6 +549,18 @@ proc hir::completions::Eval {hirVar ctxVar diagnose enclosing guard e} {
             if {$r ne {never} && ![dict get $node duplicate]
                     && [dict get [hir::binding $hir $b] kind] eq {local}} {
                 dict set ctx bindings $b $r
+                if {[ErasedErrors $hir] ne {}} {
+                    # A local is the value it is bound to (an alias of a
+                    # clean parameter stays clean, header).
+                    set value [dict get $node value]
+                    set fact [CallableFact $hir $ctx $value]
+                    if {$fact ne "unknown"} {
+                        dict set ctx callables $b $fact
+                    }
+                    if {[hir::kind $hir $value] eq "block"} {
+                        dict set ctx closures $b $value
+                    }
+                }
             }
             return $r
         }
@@ -928,8 +1250,9 @@ proc hir::completions::EvalCall {hirVar ctxVar diagnose enclosing guard e node} 
         # A native that declares errors (-errors, core/native.tcl: `argv`,
         # `list::at`) is held to the same legality rule as any other
         # fallible call, under its own call-specific facts
-        # (NativeEffectiveFacts).
-        if {[NativeDeclaredErrors $hir $e $name] ne {}} {
+        # (NativeEffectiveFacts). So is one that calls a callable argument
+        # while the program erases an error-bearing callable (IndirectFacts).
+        if {[NativeDeclaredErrors $hir $e $name] ne {} || [CallsCallable $hir $name]} {
             lassign [NativeCallFacts hir ctx $guard $e $name $argExprs $argRanges] normal errors verdicts
             if {$diagnose} {
                 CheckNativeCallLegality hir $e $name $normal $errors {} $enclosing
@@ -949,9 +1272,6 @@ proc hir::completions::EvalCall {hirVar ctxVar diagnose enclosing guard e node} 
     }
     if {$targetKind ne {block}} {
         set calleeType [hir::typeOf $hir [dict get $node callee]]
-        if {![hir::types::IsFn $calleeType] && ![hir::types::IsCoroutine $calleeType]} {
-            return [hir::range::unknown]
-        }
         # A call through a structural function type (STRUCTURAL-FUNCTION-
         # TYPES.md): which implementation runs is unknown, so no narrower
         # proof exists here -- every error the contract declares may escape,
@@ -960,9 +1280,14 @@ proc hir::completions::EvalCall {hirVar ctxVar diagnose enclosing guard e node} 
         # result is what the contract promises.
         # (A coroutine handle's resume, AFFINE-VALUES.md: the same contract,
         # the errors any one segment may end with.)
-        set errors [dict get [hir::types::Contract $calleeType] errors]
+        # A call through an untyped value is charged what its callable fact
+        # says (IndirectFacts): nothing for a clean one, as before.
+        lassign [IndirectFacts hir ctx $guard [dict get $node callee] $calleeType $argExprs $argRanges] how errors
+        if {$how eq "none"} {
+            return [hir::range::unknown]
+        }
         if {$diagnose} {
-            CheckStructuralCallLegality hir $e $calleeType $errors {} $enclosing
+            CheckIndirectCallLegality hir $e $calleeType $errors {} $enclosing
         }
         MergeErrors ctx $errors
         set result [hir::range::ConstrainType $hir $e [hir::range::unknown]]
@@ -974,7 +1299,9 @@ proc hir::completions::EvalCall {hirVar ctxVar diagnose enclosing guard e node} 
     }
     set argExact [ArgExactValues $hir $ctx $argExprs]
     set argExactLists [ArgExactLists $hir $ctx $argExprs]
-    lassign [EffectiveFacts hir ctx $target $argRanges $argExact $argExactLists $guard] normal errors resultRange
+    lassign [EffectiveFacts hir ctx $target $argRanges $argExact $argExactLists \
+        [ArgCallables $hir $ctx $argExprs] $guard [CaptureFacts $hir $ctx [dict get $node callee] $target]] \
+        normal errors resultRange incomplete
     if {!$normal && [hir::coroutines::isBoundaryCall $hir $e]} {
         # A coroutine's root call (COROUTINES.md): its segments may complete
         # normally by yielding even when its last one always fails.
@@ -985,8 +1312,10 @@ proc hir::completions::EvalCall {hirVar ctxVar diagnose enclosing guard e node} 
         # legality is its requirement's error contract, exactly as the
         # source function was checked against it -- never a diagnostic only
         # one witness's implementation would give (no instantiation-time
-        # errors). The implementation's own facts still give the result.
-        set errors [hir::types::FnErrors [dict get $node traitImpl contract]]
+        # errors). The implementation's own facts still give the result --
+        # and, when they are incomplete, what an erased callable may raise
+        # through it (header).
+        set errors [TraitCallErrors [dict get $node traitImpl contract] $errors $incomplete]
         if {$diagnose} {
             CheckStructuralCallLegality hir $e [dict get $node traitImpl contract] $errors {} $enclosing
         }
@@ -1000,6 +1329,9 @@ proc hir::completions::EvalCall {hirVar ctxVar diagnose enclosing guard e node} 
     # it is itself analyzed as an exact callee under analyzeBlock) sees them
     # as part of ITS own possible completions too.
     MergeErrors ctx $errors
+    if {$incomplete} {
+        dict set ctx incomplete 1
+    }
     if {!$normal} {
         return never
     }
@@ -1044,10 +1376,12 @@ proc hir::completions::ArgExactLists {hir ctx argExprs} {
 }
 
 # The effective completion facts of a call to TARGET (an exact block) under
-# ARGRANGES/ARGEXACT/ARGEXACTLISTS: {normal 0|1 errors NAME-LIST resultRange
-# Range}. Recurses via analyzeBlock (item 33), guarded against cycles (item
-# 34) and bounded by hir::completions::maxAnalyses (item 35).
-proc hir::completions::EffectiveFacts {hirVar ctxVar target argRanges argExact argExactLists guard} {
+# ARGRANGES/ARGEXACT/ARGEXACTLISTS/ARGCALLABLES: {normal 0|1 errors NAME-LIST
+# resultRange Range incomplete 0|1}. Recurses via analyzeBlock (item 33),
+# guarded against cycles (item 34) and bounded by hir::completions::
+# maxAnalyses (item 35). This is the function-instance boundary of the
+# header: an incomplete analysis keeps every error TARGET declares.
+proc hir::completions::EffectiveFacts {hirVar ctxVar target argRanges argExact argExactLists argCallables guard {captureFacts {}}} {
     upvar 1 $hirVar hir $ctxVar ctx
     variable maxAnalyses
     variable cache
@@ -1061,7 +1395,7 @@ proc hir::completions::EffectiveFacts {hirVar ctxVar target argRanges argExact a
         # Self/mutual recursion: never assume an error impossible because
         # analysis recursed (item 34) -- the conservative, always-sound
         # fallback is the callee's own full declared contract.
-        return [list 1 $declared [hir::range::unknown]]
+        return [Fallback $hir $target $declared $argCallables $captureFacts]
     }
     if {[llength $argRanges] != [llength [hir::get $hir $target params]]} {
         # An arity mismatch (only reachable through raw core IR that
@@ -1076,24 +1410,158 @@ proc hir::completions::EffectiveFacts {hirVar ctxVar target argRanges argExact a
         # shorter list with "", which is not a valid Range and would
         # corrupt every downstream ConstrainType/intersect call) -- fall
         # back to the same conservative contract a cycle/budget hit uses.
-        return [list 1 $declared [hir::range::unknown]]
+        return [Fallback $hir $target $declared $argCallables $captureFacts]
     }
-    set key [list $target $argRanges $argExact $argExactLists]
+    set key [list $target $argRanges $argExact $argExactLists $argCallables $captureFacts]
     if {[dict exists $cache $key]} {
         set sub [dict get $cache $key]
-        return [list [dict get $sub normal] [dict get $sub errors] [dict get $sub result]]
+        return [list [dict get $sub normal] [dict get $sub errors] [dict get $sub result] [dict get $sub incomplete]]
     }
     set analyses [dict get $ctx analyses]
     if {$analyses >= $maxAnalyses} {
         # Proof budget exhausted (item 35): fall back conservatively, same
         # as a recursion cycle -- never reject a correct program merely
         # because precision ran out.
-        return [list 1 $declared [hir::range::unknown]]
+        return [Fallback $hir $target $declared $argCallables $captureFacts]
     }
     dict set ctx analyses [expr {$analyses + 1}]
-    set sub [analyzeBlock $hir $target $argRanges $argExact $argExactLists [dict merge $guard [dict create $target 1]]]
+    set sub [analyzeBlock $hir $target $argRanges $argExact $argExactLists $argCallables \
+        [dict merge $guard [dict create $target 1]] $captureFacts]
+    if {[dict get $sub incomplete]} {
+        # The declared-contract fallback (header): the walk lost track of
+        # some call, so what it proved impossible elsewhere in the body is
+        # no longer a proof about the whole body -- every declared error
+        # stays possible, beside what the lost call was charged. May-facts
+        # only: `normal` stays what the walk proved.
+        dict set sub errors [lsort -unique [concat [dict get $sub errors] $declared]]
+    }
     dict set cache $key $sub
-    return [list [dict get $sub normal] [dict get $sub errors] [dict get $sub result]]
+    return [list [dict get $sub normal] [dict get $sub errors] [dict get $sub result] [dict get $sub incomplete]]
+}
+
+# The facts of a call to TARGET (declaring DECLARED) that EffectiveFacts does
+# not analyze -- a recursion cycle, an arity mismatch, an exhausted budget:
+# the declared contract, which bounds a call that may complete normally.
+# A Transparent target may also let through what its callable inputs carry:
+# TARGET's own check (checkBlock) holds every other source of its body to
+# its declared errors and charges its parameters and captures where they
+# were passed, so what passes through beyond DECLARED is carried by the
+# values its parameters (ARGCALLABLES) and captures (CAPTUREFACTS, else
+# unknown) hold here (Carried). Charging the erased-callable contract makes
+# it incomplete; a contract is a bound, as DECLARED is.
+proc hir::completions::Fallback {hir target declared argCallables captureFacts} {
+    set erased [ErasedErrors $hir]
+    if {$erased eq {} || ![Transparent $hir $target]} {
+        return [list 1 $declared [hir::range::unknown] 0]
+    }
+    set errors $declared
+    set incomplete 0
+    set facts {}
+    foreach b [hir::get $hir $target params] f $argCallables {
+        if {$b eq ""} break
+        if {[CleanInput $hir $b]} {
+            lappend facts [expr {$f eq "" ? "unknown" : $f}]
+        }
+    }
+    foreach c [hir::get $hir $target captures] {
+        if {[CleanInput $hir $c]} {
+            lappend facts [expr {[dict exists $captureFacts $c] ? [dict get $captureFacts $c] : "unknown"}]
+        }
+    }
+    foreach f $facts {
+        lassign [Carried $hir $f] carried lost
+        set errors [concat $errors $carried]
+        set incomplete [expr {$incomplete || $lost}]
+    }
+    return [list 1 [lsort -unique $errors] [hir::range::unknown] $incomplete]
+}
+
+# What a value with callable fact FACT may raise when a callee calls it:
+# {ERRORS LOST}, LOST 1 when that is the erased-callable contract.
+proc hir::completions::Carried {hir fact} {
+    switch -- [lindex $fact 0] {
+        clean { return {{} 0} }
+        block {
+            set b [lindex $fact 1]
+            set errors [hir::get $hir $b declaredErrors]
+            if {[Transparent $hir $b]} {
+                return [list [concat $errors [ErasedErrors $hir]] 1]
+            }
+            return [list $errors 0]
+        }
+        native {
+            if {[catch {core::native::metadata [lindex $fact 1]} meta]} {
+                return {{} 0}
+            }
+            return [list [dict get $meta errors] 0]
+        }
+    }
+    return [list [ErasedErrors $hir] 1]
+}
+
+# The errors of a trait operation's call (EvalCall): its requirement
+# CONTRACT's, plus -- when the implementation's facts are INCOMPLETE -- the
+# effective ERRORS that include what an erased callable may raise through it.
+proc hir::completions::TraitCallErrors {contract errors incomplete} {
+    set result [hir::types::FnErrors $contract]
+    if {$incomplete} {
+        set result [lsort -unique [concat $result $errors]]
+    }
+    return $result
+}
+
+# The completion facts of call node NODE whose callee CALLEE (static type
+# CALLEETYPE) is not an exact target -- a structural function type, a
+# coroutine handle, or an untyped value -- under ARGEXPRS/ARGRANGES:
+# {HOW ERRORS}, HOW `structural` (its contract's errors, ERRORS) or `opaque`
+# (an untyped callee charged ERRORS), or `none` (an untyped callee charged
+# nothing: no fact says it may raise). A structural callee always may
+# complete normally, an opaque one is never charged a must-fact.
+#
+# With an erased-callable contract (header), CALLEE's callable fact adds to
+# it: an exact closure's effective errors (its body analyzed under these
+# arguments: the recovery a structural type or `any` hides), an exact
+# native's declared errors, or -- for an unknown value -- the erased-callable
+# contract itself, which makes the walk incomplete.
+proc hir::completions::IndirectFacts {hirVar ctxVar guard callee calleeType argExprs argRanges {argFacts ""}} {
+    upvar 1 $hirVar hir $ctxVar ctx
+    set structural [expr {[hir::types::IsFn $calleeType] || [hir::types::IsCoroutine $calleeType]}]
+    set errors [expr {$structural ? [dict get [hir::types::Contract $calleeType] errors] : {}}]
+    set erased [ErasedErrors $hir]
+    if {$erased ne {} && ![hir::types::IsCoroutine $calleeType]} {
+        set fact [CallableFact $hir $ctx $callee]
+        switch -- [lindex $fact 0] {
+            block {
+                if {$argFacts eq ""} {
+                    set argFacts [ArgCallables $hir $ctx $argExprs]
+                }
+                set target [lindex $fact 1]
+                lassign [EffectiveFacts hir ctx $target $argRanges \
+                    [ArgExactValues $hir $ctx $argExprs] [ArgExactLists $hir $ctx $argExprs] \
+                    $argFacts $guard [CaptureFacts $hir $ctx $callee $target]] normal sub _ incomplete
+                set errors [lsort -unique [concat $errors $sub]]
+                if {$incomplete} {
+                    dict set ctx incomplete 1
+                }
+            }
+            native {
+                if {![catch {core::native::metadata [lindex $fact 1]} meta]} {
+                    set errors [lsort -unique [concat $errors [dict get $meta errors]]]
+                }
+            }
+            unknown {
+                set extra [lmap name $erased {expr {$name in $errors ? [continue] : $name}}]
+                if {$extra ne {}} {
+                    set errors [lsort -unique [concat $errors $extra]]
+                    dict set ctx incomplete 1
+                }
+            }
+        }
+    }
+    if {$structural} {
+        return [list structural $errors]
+    }
+    return [list [expr {$errors eq {} ? "none" : "opaque"}] $errors]
 }
 
 # Diagnoses call E (target TARGET, an exact block) under its own computed
@@ -1147,6 +1615,31 @@ proc hir::completions::CheckStructuralCallLegality {hirVar e calleeType errors h
             hir::Diagnose hir UNHANDLED-ERROR [format \
                 {this call through a callable of function type %s may produce the declared error "%s", which is neither handled here nor admitted by the enclosing function's own "errors" declaration} \
                 [hir::types::show $calleeType] $name] $e
+        }
+    }
+}
+
+# The legality of call E whose callee (static type CALLEETYPE) is not an
+# exact target, charged ERRORS (IndirectFacts): a structural callee's
+# contract errors are CheckStructuralCallLegality's; an error a structural
+# contract does not declare, or any error of an untyped callee, is what the
+# callable fact added -- an erased callable that may reach this call.
+proc hir::completions::CheckIndirectCallLegality {hirVar e calleeType errors handled enclosing} {
+    upvar 1 $hirVar hir
+    set contract {}
+    if {[hir::types::IsFn $calleeType] || [hir::types::IsCoroutine $calleeType]} {
+        set contract [dict get [hir::types::Contract $calleeType] errors]
+        CheckStructuralCallLegality hir $e $calleeType [lmap name $errors {
+            expr {$name in $contract ? $name : [continue]}
+        }] $handled $enclosing
+    }
+    dict set hir exprs $e effectiveErrors [lsort -unique $errors]
+    dict set hir exprs $e mayReturnNormally 1
+    foreach name $errors {
+        if {$name ni $contract && $name ni $handled && $name ni $enclosing} {
+            hir::Diagnose hir UNHANDLED-ERROR [format \
+                {this call through a callable value the completion analysis cannot identify may produce the declared error "%s" (this program passes a callable that declares it through an untyped parameter, and such a callable may reach this call), which is neither handled here nor admitted by the enclosing function's own "errors" declaration} \
+                $name] $e
         }
     }
 }
@@ -1224,18 +1717,39 @@ proc hir::completions::NativeDeclaredErrors {hir e name} {
 # A handle whose construction is not found keeps the declared errors.
 proc hir::completions::NativeCallFacts {hirVar ctxVar guard e name argExprs argRanges} {
     upvar 1 $hirVar hir $ctxVar ctx
-    if {[dict get [core::native::metadata $name] errorsFrom] ne ""} {
+    set from [dict get [core::native::metadata $name] errorsFrom]
+    if {$from ne ""} {
         # A native calling a callable argument (mutable_array::generate's
         # factory): it may complete normally, or with what the callable's
-        # contract permits (the call's calleeErrors, hir/types.tcl's Call).
-        return [list 1 [NativeDeclaredErrors $hir $e $name] {}]
+        # contract permits (the call's calleeErrors, hir/types.tcl's Call)
+        # -- and with an erased-callable contract, with what the callable's
+        # fact adds (IndirectFacts: a closure analyzed, an unknown value
+        # charged the erased-callable contract).
+        set errors [NativeDeclaredErrors $hir $e $name]
+        if {[ErasedErrors $hir] ne {} && $from < [llength $argExprs]} {
+            set factory [lindex $argExprs $from]
+            set fact [CallableFact $hir $ctx $factory]
+            if {[lindex $fact 0] eq "block"} {
+                set block [lindex $fact 1]
+                set n [llength [hir::get $hir $block params]]
+                lassign [IndirectFacts hir ctx $guard $factory [hir::typeOf $hir $factory] \
+                    {} [lrepeat $n [hir::range::unknown]] [lrepeat $n clean]] how extra
+            } else {
+                lassign [IndirectFacts hir ctx $guard $factory any {} {}] how extra
+            }
+            set errors [lsort -unique [concat $errors $extra]]
+        }
+        return [list 1 $errors {}]
     }
     if {[dict get [core::native::metadata $name] completion]} {
         set thunk [hir::coroutines::thunkOfHandle $hir [lindex $argExprs 0]]
         if {$thunk eq ""} {
             return [list 1 [NativeDeclaredErrors $hir $e $name] {}]
         }
-        lassign [EffectiveFacts hir ctx $thunk {} {} {} $guard] normal errors
+        lassign [EffectiveFacts hir ctx $thunk {} {} {} {} $guard] normal errors _ incomplete
+        if {$incomplete} {
+            dict set ctx incomplete 1
+        }
         return [list 1 $errors {}]
     }
     return [NativeEffectiveFacts $hir $ctx $name $argExprs $argRanges]
@@ -1706,29 +2220,37 @@ proc hir::completions::EvalHandle {hirVar ctxVar diagnose enclosing guard e node
         if {$targetKind eq {block}} {
             set argExact [ArgExactValues $hir $ctx $argExprs]
             set argExactLists [ArgExactLists $hir $ctx $argExprs]
-            lassign [EffectiveFacts hir ctx $target $argRanges $argExact $argExactLists $guard] normal errors callResult
+            lassign [EffectiveFacts hir ctx $target $argRanges $argExact $argExactLists \
+                [ArgCallables $hir $ctx $argExprs] $guard \
+                [CaptureFacts $hir $ctx [dict get $callNode callee] $target]] normal errors callResult incomplete
+            if {$incomplete} {
+                dict set ctx incomplete 1
+            }
             if {[dict exists $callNode traitImpl]} {
                 # A trait operation of a clone: its requirement's contract
                 # (EvalCall's own case).
-                set errors [hir::types::FnErrors [dict get $callNode traitImpl contract]]
+                set errors [TraitCallErrors [dict get $callNode traitImpl contract] $errors $incomplete]
                 if {$diagnose} {
                     CheckStructuralCallLegality hir $e [dict get $callNode traitImpl contract] $errors $handled $enclosing
                 }
             } elseif {$diagnose} {
                 CheckCallLegality hir $e $target $normal $errors $handled $enclosing
             }
-        } elseif {$targetKind eq {} && ([hir::types::IsFn $calleeType] || [hir::types::IsCoroutine $calleeType])} {
+        } elseif {$targetKind eq {} && [lindex [set indirect [IndirectFacts hir ctx $guard \
+                [dict get $callNode callee] $calleeType $argExprs $argRanges]] 0] ne "none"} {
             # A handled call through a structural function type (or a
             # coroutine handle's resume): its contract's whole declared error
-            # set (EvalCall's own case).
+            # set (EvalCall's own case) -- or through an untyped value that
+            # its callable fact charges (IndirectFacts).
             set normal 1
-            set errors [dict get [hir::types::Contract $calleeType] errors]
+            set errors [lindex $indirect 1]
             set callResult [hir::range::ConstrainType $hir $call [hir::range::unknown]]
             if {$diagnose} {
-                CheckStructuralCallLegality hir $e $calleeType $errors $handled $enclosing
+                CheckIndirectCallLegality hir $e $calleeType $errors $handled $enclosing
             }
         } elseif {$targetKind eq {native}
-                && [NativeDeclaredErrors $hir $call [dict get [hir::symbol $hir $target] name]] ne {}} {
+                && ([NativeDeclaredErrors $hir $call [dict get [hir::symbol $hir $target] name]] ne {}
+                    || [CallsCallable $hir [dict get [hir::symbol $hir $target] name]])} {
             # A handled call of a native with declared errors (`argv`,
             # `list::at`), or of a coroutine segment (start, resume).
             set name [dict get [hir::symbol $hir $target] name]
@@ -1808,11 +2330,11 @@ proc hir::completions::EvalHandle {hirVar ctxVar diagnose enclosing guard e node
 # Entry points
 
 # Pure fact computation for a call to BLOCK under concrete per-parameter
-# Range facts ARGRANGES, scalar exact-value facts ARGEXACT, and List-typed
-# exact-element facts ARGEXACTLISTS (never diagnoses): {normal 0|1 errors
-# NAME-LIST result Range}.
-proc hir::completions::analyzeBlock {hir block argRanges argExact argExactLists guard} {
-    lassign [WalkBlock $hir $block $argRanges $argExact $argExactLists $guard] ctx result
+# Range facts ARGRANGES, scalar exact-value facts ARGEXACT, List-typed
+# exact-element facts ARGEXACTLISTS and callable facts ARGCALLABLES (never
+# diagnoses): {normal 0|1 errors NAME-LIST result Range incomplete 0|1}.
+proc hir::completions::analyzeBlock {hir block argRanges argExact argExactLists argCallables guard {captureFacts {}}} {
+    lassign [WalkBlock $hir $block $argRanges $argExact $argExactLists $argCallables $guard $captureFacts] ctx result
     # Normal completion is possible either by falling off the end of the
     # body (RESULT ne never) or through any reachable `return` (ctx.returned
     # -- see Eval's own `return` case): both are ordinary successful
@@ -1823,16 +2345,30 @@ proc hir::completions::analyzeBlock {hir block argRanges argExact argExactLists 
     set result [hir::range::join $result [dict get $ctx returnRange]]
     return [dict create normal $normal \
         errors [lsort -unique [dict keys [dict get $ctx errors]]] \
-        result [expr {$result eq {never} ? [hir::range::unknown] : $result}]]
+        result [expr {$result eq {never} ? [hir::range::unknown] : $result}] \
+        incomplete [dict get $ctx incomplete]]
 }
 
 # analyzeBlock's walk: {CTX FALLTHROUGH-RESULT}, the final walk context
-# (never diagnosing) and the body's fall-through value.
-proc hir::completions::WalkBlock {hir block argRanges argExact argExactLists guard} {
+# (never diagnosing) and the body's fall-through value. A parameter's
+# callable fact is its argument's; a capture's is CAPTUREFACTS's (the
+# closure the caller's own activation created: CaptureFacts), else it has
+# none (the closure may have been created by any activation).
+proc hir::completions::WalkBlock {hir block argRanges argExact argExactLists argCallables guard {captureFacts {}}} {
     set ctx [NewCtx]
     set params [hir::get $hir $block params]
     foreach b $params r $argRanges {
         dict set ctx bindings $b $r
+    }
+    foreach b $params f $argCallables {
+        if {$f ne "" && $f ne "unknown"} {
+            dict set ctx callables $b $f
+        }
+    }
+    dict for {b f} $captureFacts {
+        if {$f ne "unknown"} {
+            dict set ctx callables $b $f
+        }
     }
     foreach b $params v $argExact {
         if {$v ne {}} {
@@ -1855,7 +2391,7 @@ proc hir::completions::WalkBlock {hir block argRanges argExact argExactLists gua
 # with hir::range's (AnalyzeInstance's `exprs`), which are meant to agree.
 proc hir::completions::exprRangesOf {hir block argRanges} {
     resetCache
-    lassign [WalkBlock $hir $block $argRanges {} {} [dict create $block 1]] ctx result
+    lassign [WalkBlock $hir $block $argRanges {} {} {} [dict create $block 1]] ctx result
     return [dict get $ctx exprs]
 }
 
@@ -1877,6 +2413,7 @@ proc hir::completions::checkBlock {hirVar block enclosingErrors} {
         foreach b $params {
             dict set ctx bindings $b [SeedParam]
         }
+        SeedClean $hir ctx $block
         set body [hir::get $hir $block body]
         set guard [dict create $block 1]
     }
@@ -1925,6 +2462,7 @@ proc hir::completions::reachedExprs {hir block} {
     foreach b [hir::get $hir $block params] {
         dict set ctx bindings $b [SeedParam]
     }
+    SeedClean $hir ctx $block
     Seq hir ctx 0 {} [dict create $block 1] [hir::get $hir $block body]
     return [dict get $ctx visited]
 }

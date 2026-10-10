@@ -1572,6 +1572,12 @@ proc hir::affine::ExitReleases {hir parent scopes} {
     }} $kinds] [lmap x [dict keys $exitStates] {list $x [dict get $hir exprs $x kind]}]]
     set already [dict create]
     set tails [hir::aot::selfTailCalls $hir]
+    # What a call may let through from a callable the program erases into
+    # an untyped parameter (hir/completions.tcl, "Precision and the
+    # erased-callable contract"): its type-level errors do not name it, yet
+    # it leaves through the call's error edge like any other.
+    set erased [hir::completions::erasedErrorsOf $hir]
+    set transparent [expr {$erased eq {} ? {} : [hir::completions::transparentBlocks $hir]}]
     foreach entry $order {
         set x [lindex $entry 0]
         set state [dict get $exitStates $x]
@@ -1607,6 +1613,9 @@ proc hir::affine::ExitReleases {hir parent scopes} {
                 }
                 set at $x
                 set names [expr {[dict exists $node calleeErrors] ? [dict get $node calleeErrors] : {}}]
+                if {$erased ne {} && [hir::completions::mayLetErasedThrough $hir $x $transparent]} {
+                    set names [lsort -unique [concat $names $erased]]
+                }
                 lassign [dict get $parent $x] p
                 if {$p ne "" && [dict get $hir exprs $p kind] eq "handle" && [dict get $hir exprs $p call] eq $x} {
                     # A handled call: what its handlers do not handle leaves

@@ -415,16 +415,16 @@ proc Operation {stateVar} {
         dict set state faultDone 1
     } else {
         set handled [Shuffle $names]
-        # Not through `generic`: a call through an untyped callable
-        # parameter contributes no errors to the completion analysis's
-        # effective set (hir/completions.tcl's EvalCall, a pre-existing
-        # hole with payload-free errors too; ERROR-PAYLOADS.md, "Findings"),
-        # so an unhandled error there is not diagnosed.
-        # Nor through `partial`: the error it handles itself is no fault.
+        # Any path, `generic`'s untyped callable parameter included (the
+        # completion analysis charges what the callable passed through it
+        # may raise: STATIC-COMPLETION-PROOFS.md, "Precision and the
+        # erased-callable contract") -- except `partial`, where the error it
+        # handles itself is no fault.
         if {[dict get $state fault] eq "unhandled" && ![dict exists $state faultDone]
-                && $path ni {generic partial}} {
+                && !($path eq "partial" && [lindex $handled 0] eq [dict get $state local])} {
             set handled [lrange $handled 1 end]
             dict set state faultDone 1
+            dict set state faultPath $path
         }
         foreach err $handled {
             set fields [dict get $errors $err]
@@ -536,11 +536,12 @@ proc Program {number} {
     append text [join [dict get $state lines] ""]
     set observed [lmap op [dict get $state ops] {string cat $op "(zero)"}]
     append text "fn drive(zero: int):\n    \[[join $observed {, }], test_fz_live()\]\n\ndrive(0)\n"
+    set where [expr {[dict exists $state faultPath] ? "[dict get $state fault]/[dict get $state faultPath]" : ""}]
     if {[dict get $state fault] ne ""} {
-        return [list $text [list error [dict get $::faults [dict get $state fault]]] [dict get $state affine]]
+        return [list $text [list error [dict get $::faults [dict get $state fault]]] [dict get $state affine] $where]
     }
     set expected [concat [dict get $state expected] [list {int 0}]]
-    return [list $text [list value [Render [list list $expected]]] [dict get $state affine]]
+    return [list $text [list value [Render [list list $expected]]] [dict get $state affine] $where]
 }
 
 # ---------------------------------------------------------------------------
@@ -553,11 +554,15 @@ proc Run {} {
     set codes [dict create]
     set disagreements 0
     set observations 0
+    set faultPaths [dict create]
     set nativeOk [expr {$::tcl_platform(os) eq "Linux" && $::tcl_platform(machine) in {x86_64 amd64}}]
     for {set p 0} {$p < [dict get $options -n]} {incr p} {
         set number [expr {[dict get $options -seed] + $p}]
         set ::seedState [expr {$number * 7919 + 17}]
-        lassign [Program $number] text expect affine
+        lassign [Program $number] text expect affine where
+        if {$where ne ""} {
+            dict incr faultPaths $where
+        }
         if {[dict get $options -dump]} {
             puts "--- program $number\n$text--- expect $expect"
         }
@@ -631,6 +636,7 @@ proc Run {} {
         }
     }
     puts "accepted $accepted rejected $rejected ([join [lmap {c n} [lsort -stride 2 [dict get $codes]] {string cat "$c $n"}] {, }])"
+    puts "unhandled faults by path: [join [lmap {c n} [lsort -stride 2 $faultPaths] {string cat "[lindex [split $c /] 1] $n"}] {, }]"
     puts "programs [dict get $options -n] disagreements $disagreements"
     return $disagreements
 }

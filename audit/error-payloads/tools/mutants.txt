@@ -283,3 +283,114 @@
 ====
         if {0 && $payload ne "" && [hir::types::IsAffine $payload]} {
 >>>>
+
+# ---------------------------------------------------------------------------
+# Completion soundness through untyped callables (hir/completions.tcl,
+# STATIC-COMPLETION-PROOFS.md "Precision and the erased-callable contract"):
+# a loss of precision never becomes a proof that an error is absent.
+
+@@ untyped-callable-reports-no-errors an untyped call whose callee the walk cannot identify contributes no errors and stays precise (the original hole)
+## hir/completions.tcl
+<<<<
+                set extra [lmap name $erased {expr {$name in $errors ? [continue] : $name}}]
+                if {$extra ne {}} {
+====
+                set extra [lmap name $erased {expr {$name in $errors ? [continue] : $name}}]
+                if {0 && $extra ne {}} {
+>>>>
+
+@@ precision-flag-dropped-on-return a summary never reports that its walk lost precision (the flag is discarded on return)
+## hir/completions.tcl
+<<<<
+        result [expr {$result eq {never} ? [hir::range::unknown] : $result}] \
+        incomplete [dict get $ctx incomplete]]
+====
+        result [expr {$result eq {never} ? [hir::range::unknown] : $result}] \
+        incomplete 0]
+>>>>
+
+@@ nested-incompleteness-not-propagated-call an exact call's incomplete summary does not make the calling walk incomplete
+## hir/completions.tcl
+<<<<
+    MergeErrors ctx $errors
+    if {$incomplete} {
+        dict set ctx incomplete 1
+    }
+    if {!$normal} {
+        return never
+    }
+====
+    MergeErrors ctx $errors
+    if {!$normal} {
+        return never
+    }
+>>>>
+
+@@ nested-incompleteness-not-propagated-handle a handled exact call's incomplete summary does not make the calling walk incomplete
+## hir/completions.tcl
+<<<<
+                [CaptureFacts $hir $ctx [dict get $callNode callee] $target]] normal errors callResult incomplete
+            if {$incomplete} {
+                dict set ctx incomplete 1
+            }
+====
+                [CaptureFacts $hir $ctx [dict get $callNode callee] $target]] normal errors callResult incomplete
+>>>>
+
+@@ fallback-empty-effective-set an incomplete summary falls back to the empty set instead of the declared contract
+## hir/completions.tcl
+<<<<
+        dict set sub errors [lsort -unique [concat [dict get $sub errors] $declared]]
+====
+        dict set sub errors {}
+>>>>
+
+@@ fallback-omits-declared-error the declared-contract fallback omits one declared error
+## hir/completions.tcl
+<<<<
+        dict set sub errors [lsort -unique [concat [dict get $sub errors] $declared]]
+====
+        dict set sub errors [lsort -unique [concat [dict get $sub errors] [lrange $declared 1 end]]]
+>>>>
+
+@@ fallback-definite-failure the declared-contract fallback marks the declared errors as a definite failure (the call cannot complete normally)
+## hir/completions.tcl
+<<<<
+        dict set sub errors [lsort -unique [concat [dict get $sub errors] $declared]]
+====
+        dict set sub errors [lsort -unique [concat [dict get $sub errors] $declared]]
+        dict set sub normal 0
+>>>>
+
+@@ recursion-fallback-ignores-carried a recursion cycle's fallback is the declared contract alone, though the callable passed in lets its errors through
+## hir/completions.tcl
+<<<<
+    if {$erased eq {} || ![Transparent $hir $target]} {
+        return [list 1 $declared [hir::range::unknown] 0]
+    }
+====
+    if {1 || $erased eq {} || ![Transparent $hir $target]} {
+        return [list 1 $declared [hir::range::unknown] 0]
+    }
+>>>>
+
+@@ affine-error-edge-ignores-erased an affine value live across a call an erased callable fails through is not released on that error edge
+## hir/affine.tcl
+<<<<
+                if {$erased ne {} && [hir::completions::mayLetErasedThrough $hir $x $transparent]} {
+====
+                if {0 && $erased ne {} && [hir::completions::mayLetErasedThrough $hir $x $transparent]} {
+>>>>
+
+@@ recovery-reports-no-errors an exact callable reaching an untyped parameter is recognized but its errors are dropped (the untyped call stays charged nothing)
+## hir/completions.tcl
+<<<<
+                set errors [lsort -unique [concat $errors $sub]]
+                if {$incomplete} {
+                    dict set ctx incomplete 1
+                }
+====
+                if {$incomplete} {
+                    dict set ctx incomplete 1
+                }
+>>>>
