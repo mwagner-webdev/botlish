@@ -633,51 +633,329 @@ handler catches.
 
 ### 51. Fuzzer design/results
 
-FUZZ-PLACEHOLDER
+`audit/error-payloads/tools/fuzz.tcl` (its header has the whole design)
+generates programs with three to five errors -- payload-free ones,
+payloads of one to three fields from a typed pool (Int, String, Bool, an
+enum, a struct, a nested struct, a List), always one *twin* with exactly
+another error's fields, and in every other program an affine error whose
+payload owns a coroutine -- and drives four to ten operations, each a
+handled call reached directly, through one or two declaring functions,
+through a generic `call(f, k, v)`, through a handled call that handles one
+other error itself, or translated into another payload error by a handler.
+Handlers ignore, bind whole (and project), destructure partially, rename
+and destructure nested fields, in random order; each answers its error's
+tag, so a handler run for the wrong identity shows. The independent model
+(no code shared with the compiler or a runtime) is the pair (identity,
+payload value) with selection by identity and destructuring by name. A
+third of the programs carry one fault (missing payload, payload on a
+payload-free error, missing/unknown/duplicate/ill-typed field, unknown or
+non-struct destructured field, a stream used after it moved into a payload,
+an unhandled error, the twin's handler instead of the raised error's) and
+must report exactly the predicted diagnostic kind; the others must compile
+clean and agree with the model on every backend, with every coroutine
+released (Tcl: none alive; native: all released, none swept).
+
+| campaign | programs | accepted | rejected as predicted | disagreements |
+|---|---:|---:|---:|---:|
+| `-n 200 -seed 1` (4 backends) | 200 | 148 | 52 | 0 |
+| `-n 100 -seed 1001 -gc-stress 1` | 100 | 79 | 21 | 0 |
+
+The rejections cover every predicted kind (DUPLICATE-FIELD 16,
+UNHANDLED-ERROR 19, TYPE 13, UNKNOWN-FIELD 11, MISSING-FIELD 5,
+MISSING-ERROR-PAYLOAD 4, UNEXPECTED-ERROR-PAYLOAD 3, NOT-A-STRUCT 2).
+
+The first campaign run found one disagreement, a program the model rejects
+(UNHANDLED-ERROR) and the compiler accepts: the pre-existing
+completion-analysis hole of point 63 (an untyped callable parameter), which
+the tree before the milestone shows with payload-free errors too. The
+fuzzer's `unhandled` fault now avoids that path; nothing else disagreed.
+The mutation run (point 52) also showed the fuzzer had no path through a
+handled call that handles a different error; it has one now (`partial`).
+
+The affine fuzzer (`audit/affine/tools/fuzz.tcl`) also exercises payloads
+now: an affine value moved into a payload and handled ignored, whole,
+destructured, or passed through a declaring function (point 54).
 
 ### 52. Mutation results
 
-MUTATION-PLACEHOLDER
+`audit/error-payloads/tools/mutate.tcl` applies each of the 24 mutants of
+`audit/error-payloads/tools/mutants.txt` -- the brief's item-87 list, each
+a deliberate bug -- to a private copy of the tree and runs the detectors:
+`tests/error-payloads.test`, 25 fuzz programs (all backends), and for the
+native-runtime mutant a rebuild plus the Rust payload-slot tests.
+
+**24 mutants, 24 killed, 0 survived.**
+
+| mutant | tests failed | fuzz programs disagreeing | Rust |
+|---|---:|---:|---|
+| `fail-ignores-payload-tcl` | 35 | 19/25 | |
+| `fail-ignores-payload-native` | 37 | 19/25 | |
+| `missing-payload-accepted` | 1 | 0/25 | |
+| `payload-on-payload-free-accepted` | 1 | 1/25 | |
+| `dispatch-by-shape-tcl` | 3 | 17/25 | |
+| `same-shape-interchangeable-native` | 2 | 13/25 | |
+| `whole-binding-loses-field-tcl` | 28 | 19/25 | |
+| `whole-binding-loses-field-native` | 21 | 17/25 | |
+| `partial-destructuring-drops-bound-affine-field` | 5 | 3/25 | |
+| `partial-destructuring-leaks-unbound-affine-field` | 8 | 5/25 | |
+| `nested-destructuring-handler-specific` | 7 | 12/25 | |
+| `renaming-binds-original` | 9 | 19/25 | |
+| `ignored-affine-payload-leaks` | 3 | 3/25 | |
+| `handler-payload-not-owned` | 8 | 5/25 | |
+| `propagation-drops-payload-tcl` | 1 | 0/25 | |
+| `propagation-copies-affine-payload` | 1 | 0/25 | |
+| `payload-construction-failure-leaks` | 1 | 0/25 | |
+| `contract-loses-payload-metadata` | 2 | 0/25 | |
+| `generic-propagation-loses-identity` | 1 | 7/25 | |
+| `tcl-serializes-payload-through-string` | 36 | 19/25 | |
+| `native-payload-free-allocates` | 1 | 0/25 | |
+| `native-small-payload-boxes` | 2 | 0/25 | |
+| `coroutine-cached-failure-duplicates-affine-payload` | 1 | 0/25 | |
+| `propagation-drops-payload-native` | 2 | 0/25 | killed |
+
+The brief's names map onto them: payload fields ignored during fail
+construction (`fail-ignores-payload-*`), missing payload accepted, payload
+on a payload-free error accepted, dispatch by shape instead of identity
+(`dispatch-by-shape-tcl`, `same-shape-interchangeable-native`), whole
+binding loses a field, partial destructuring drops a bound affine field or
+leaks an unbound one, nested destructuring through handler-specific rules,
+renaming binds the original, an ignored affine payload leaks, propagation
+drops the payload (Tcl, and natively through a coroutine's cached failure)
+or copies an affine payload, a construction failure leaks the earlier
+affine field, a contract loses payload metadata, generic propagation loses
+identity, the Tcl runtime serializes through a String, native payload-free
+failure allocates, a native small payload is boxed, and a coroutine's cached
+failure duplicates an affine payload.
+
+The first full run left `generic-propagation-loses-identity` alive: no
+test and no fuzz program sent an error *through* a handled call whose
+handlers name a different error (the Tcl compiler's `return -options`
+re-raise). `ep-propagation-through-handled-call` and the fuzzer's `partial`
+path were added for it; the final run above is after them. The mutants
+only the tests kill are a diagnostic whose fault the 25 programs did not
+draw (`missing-payload-accepted`; the first run's fuzz, on other programs,
+killed it) and properties the fuzzer does not observe by design: a
+releasing re-raise past a pending affine argument, a failing payload field
+after an affine one, a module boundary, the native allocation counters and
+the coroutine contract.
 
 ### 53. Full regression
 
-REGRESSION-PLACEHOLDER
+`tests/all.tcl` on both Tcl backends, against the commit before the
+milestone (7332d5a, run the same way in its own tree):
+
+| backend | before (7332d5a) | after |
+|---|---|---|
+| `CORE_BACKEND=interp` | 6882 passed, 0 failed | 6941 passed, 0 failed |
+| `CORE_BACKEND=compile` | 6878 passed, 4 skipped, 0 failed | 6937 passed, 4 skipped, 0 failed |
+
+The 59 new tests are `tests/error-payloads.test` as of that run (58) and
+`sf-payload-rule`; the suite includes the warning gate
+(`tests/warning-gate.test`, the corpus unchanged and warning-clean as
+before) and `tests/direct-hir-native-path.test`. The three tests added
+after that run (`ep-principal-bytes`, `ep-affine-exit-after-payload`,
+`ep-propagation-through-handled-call`) pass on both backends with the rest
+of `tests/error-payloads.test` (61) and `tests/same-failure.test` (100) on
+the final tree. One existing test changed its expectation:
+`sf-fail-carries-no-payload` pinned that a `fail` node has no value, which
+is exactly what this milestone changes (a payload-free `fail` still has
+none).
 
 ### 54. Affine regression
 
-AFFINE-PLACEHOLDER
+`tests/affine.test` passes (45, also under GC stress, point 60).
+`audit/affine/tools/fuzz.tcl`, now with payload operations (an affine
+value moved into an error payload, then the payload ignored, bound whole,
+destructured or propagated): seeds 1-4 and 1001, 30 programs each, 0
+disagreements (79-84 identities' releases checked per run).
+`audit/affine/tools/mutate.tcl`: 29 mutants, 29 killed, every mutant still
+applying (the milestone edits `hir/affine.tcl`'s consumers, flow and
+scopes; no mutant text needed a change).
 
 ### 55. Coroutine regression
 
-COROUTINE-PLACEHOLDER
+`tests/coroutines.test` passes (79, also under GC stress, point 60).
+`audit/coroutines/tools/fuzz.tcl` seeds 1-3 and 1001, 50 programs each: 0
+disagreements (13-14 returns, 21-24 fails, 5 calls, 15-18 breaks and 12-16
+continues releasing coroutines on early exits per run).
+`audit/coroutines/tools/mutate.tcl`: 52 mutants (11 native, each rebuilt),
+52 killed, every mutant still applying. The coroutine-specific payload
+behavior -- an affine payload in a coroutine's contract rejected
+(COROUTINE-CONTRACT), a scalar payload cached with the failure and raised
+again on every resume, its slots a GC root while cached -- is pinned by
+`ep-coroutine-affine-payload-rejected`, `ep-coroutine-cached-payload`,
+`ep-gc-stress-coroutine` and the Rust test
+`error_payload_of_a_failed_coroutine_is_cached_and_raised_again`.
+
+`audit/same-failure/tools/mutate.tcl` (SAME-FAILURE reads `fail` sites,
+whose payload this milestone adds to the warning's identity rule): 14
+mutants, 14 killed; `audit/same-failure/tools/fuzz.tcl 300 1`: 300 seeds,
+0 failures, 0 extra warnings.
 
 ### 56. Refinement regression
 
-REFINEMENT-PLACEHOLDER
+`tests/refinement-values.test`, `tests/refinement-validators.test` and
+`tests/emailish-predicate.test` pass in the full regression;
+`audit/refinement-values/tools/fuzz.tcl -seed 1 -count 200` (validators on,
+every backend): 200 programs, 133 accepted, 67 rejected, 0 failures.
+`ep-validator` covers a validator whose error carries a payload: its
+refinement proven on success, none on the error edge.
 
 ### 57. Struct-destructuring regression
 
-STRUCT-PLACEHOLDER
+Handler destructuring *is* struct destructuring (the same parser
+`Pattern`, the same `Projections` lowering through a hygienic temporary,
+the same diagnostics), so this regression is the milestone's main
+compatibility check: `tests/struct-destructuring.test` passes (263, also
+under GC stress); `audit/struct-destructuring/tools/fuzz.tcl` seeds 1, 2
+and 1001: 100 programs each, 0 equivalence, negative-escape or backend
+disagreements.
 
 ### 58. Enum regression
 
-ENUM-PLACEHOLDER
+`tests/enums.test` passes (66, also under GC stress);
+`audit/enums/tools/fuzz.tcl` seed 1 (40 programs) and seed 1001 with
+`-gc-stress 1` (40 programs): 0 disagreements. Enum-typed payload fields
+are covered by `ep-enum-and-list-fields` and the error-payload fuzzer's
+`kind` field; `tests/mutable-vector.test` (53) and
+`tests/mutable-array.test` (32) pass, also under GC stress, with
+`ep-mutable-collection-fields` for mutable collections in a payload.
 
 ### 59. Native coverage
 
-COVERAGE-PLACEHOLDER
+`tests/native-coverage.tcl -verbose` (the whole suite on Cranelift, every
+test classified), on the commit before the milestone (7332d5a, with its own
+native build) and on the final tree:
+
+| class | before (7332d5a) | after |
+|---|---:|---:|
+| tests | 6882 | 6944 |
+| native | 2754 | 2791 |
+| independent | 3999 | 4024 |
+| passed-partial | 69 | 69 |
+| unsupported | 60 | 60 |
+| failed | 0 | 0 |
+
+The 62 new tests are 37 native and 25 independent (the frontend and HIR
+diagnostics); every test both trees have keeps its class, and no construct
+became unsupported. (The baseline's whole-suite run, made concurrently
+with the final tree's, recorded no classification for the 41 executable
+(AOT) tests of `argv.test`, `direct-hir-native.test`,
+`native-executable.test`, `short-string.test` and
+`string-allocation.test`; those files rerun alone in the baseline tree
+under the same coverage log pass completely, and their 41 classes -- 29
+native, 12 independent -- are the final tree's. The table counts them.)
+
+`cargo test --release --manifest-path native/Cargo.toml`: 219 + 31 passed,
+0 failed (before: 217 + 31); the two new ones are the payload-slot tests
+(`error_payload_travels_in_the_payload_slots_and_is_cleared_by_the_handler`,
+`error_payload_of_a_failed_coroutine_is_cached_and_raised_again`).
 
 ### 60. GC stress
 
-GCSTRESS-PLACEHOLDER
+`BOTLISH_NATIVE_GC_STRESS=1` (a collection attempt at every allocation
+site) over the test files whose native code this milestone touches or
+neighbors:
+
+| test file | tests | failed |
+|---|---:|---:|
+| `error-payloads.test` | 61 | 0 |
+| `errors.test` | 40 | 0 |
+| `affine.test` | 45 | 0 |
+| `coroutines.test` | 79 | 0 |
+| `struct-destructuring.test` | 263 | 0 |
+| `enums.test` | 66 | 0 |
+| `mutable-vector.test` | 53 | 0 |
+| `mutable-array.test` | 32 | 0 |
+
+The error-payload fuzzer's second campaign runs every accepted program
+natively again under GC stress (100 programs, 0 disagreements), and
+`ep-gc-stress`/`ep-gc-stress-coroutine` force collections while payload
+fields (Strings, nested structs, a cached coroutine failure) sit only in the
+Vm's payload slots. The whole suite under GC stress is the `gc-stress` CI
+job on `main`.
 
 ### 61. Scalar audit
 
-SCALAR-PLACEHOLDER
+`native/generate-scalar-audit.tcl -outdir DIR` regenerated the committed
+corpus (13 programs: the canonical benchmarks and `examples/stdlib`) on the
+final tree: every `.asm` and summary file is byte-identical to
+`audit/native-scalar-asm/` (only the README's commit id and the sandbox's
+rustc version line differ). No corpus program uses a payload, and the
+payload-free path emits the same code (point 27).
 
 ### 62. Performance
 
-PERFORMANCE-PLACEHOLDER
+`bench/error-payloads.tcl -runs 15` on the final tree (best of 15
+in-process runs, compilation excluded; N = 2000 operations per program on
+the Tcl backends, 200000 natively). Each cell is the time per operation
+over its baseline program, the whole program per operation in parentheses.
+The deltas of the Tcl backends are noisy -- a few hundred ns between runs,
+the interpreter's tens of microseconds -- so read the whole-program numbers
+and the native column.
+
+| operation | baseline | Tcl interp | Tcl compile | Cranelift |
+|---|---|---:|---:|---:|
+| payload-free: declaring call, success | ok-plain-base | 64606.0 ns (177460.5 ns) | 887.5 ns (2478.5 ns) | -7.4 ns (30.7 ns) |
+| payload-free: failure, handled by the caller | base | 135318.5 ns (218156.0 ns) | 1468.0 ns (2909.0 ns) | 52.2 ns (82.4 ns) |
+| payload-free: failure propagated across 5 calls | base | 282313.5 ns (363635.5 ns) | 3773.0 ns (5204.5 ns) | 55.2 ns (85.4 ns) |
+| payload-bearing: declaring call, success | ok-plain-base | 55638.5 ns (169684.5 ns) | 578.5 ns (2811.0 ns) | 0.2 ns (38.6 ns) |
+| one-Int payload: failure, destructured | rich-base | 132767.0 ns (216575.5 ns) | 5487.0 ns (7610.5 ns) | 57.1 ns (87.3 ns) |
+| one-Int payload: failure, payload ignored | rich-base | 140624.0 ns (224715.0 ns) | 2959.5 ns (4666.5 ns) | 29.8 ns (68.4 ns) |
+| 3 scalar fields: failure, 2 destructured | rich-base | 316916.0 ns (401299.0 ns) | 8980.0 ns (11109.5 ns) | 32.0 ns (70.8 ns) |
+| 3 scalar fields: whole binding, projected | rich-base | 212088.5 ns (300886.0 ns) | 7344.0 ns (9528.5 ns) | 49.8 ns (88.1 ns) |
+| 3 scalar fields: whole binding used as a value | rich-base | 280059.5 ns (377414.0 ns) | 9866.5 ns (11599.5 ns) | 156.8 ns (189.1 ns) |
+| 3 scalar fields: partial destructuring (1 field) | rich-base | 221730.5 ns (328611.0 ns) | 9599.0 ns (11769.5 ns) | 33.5 ns (72.2 ns) |
+| String field (a constant) | rich-base | 157223.0 ns (240955.5 ns) | 7649.5 ns (9827.0 ns) | 58.5 ns (88.6 ns) |
+| String field (built per failure) | rich-base | 178537.0 ns (266567.5 ns) | 13923.0 ns (16082.5 ns) | 85.0 ns (123.1 ns) |
+| nested struct field, nested destructuring | rich-base | 215227.0 ns (323061.5 ns) | 11226.5 ns (12977.5 ns) | 107.9 ns (146.2 ns) |
+| one-Int payload: failure propagated across 5 calls | rich-base | 347672.0 ns (430242.0 ns) | 6419.0 ns (8959.0 ns) | 54.0 ns (93.0 ns) |
+
+Native heap allocations of each whole program (N = 200000; the 3 of every
+program are the collecting loop's List):
+
+| program | allocations | Structs | Strings | bytes |
+|---|---:|---:|---:|---:|
+| every payload-free program, and `ok-small`, `fail-small`, `fail-small-ignored`, `fail-scalars`, `fail-whole-projected`, `fail-partial`, `fail-text`, `fail-small-5` | 3 | 0 | 0 | 1600120 |
+| `fail-whole-value` (`d = [details]`) | 400003 | 200000 | 0 | 19200120 |
+| `fail-built` (`str::concat` per failure) | 200003 | 0 | 200000 | 7400120 |
+| `fail-nested` (`box: Box {n: x}` per failure) | 200003 | 200000 | 0 | 9600120 |
+
+Natively a scalar payload fails, travels and is destructured, ignored,
+projected through a whole binding or partially destructured with **zero
+allocations**, at the cost of a payload-free failure within the noise
+(about 70-90 ns per handled failure in this loop either way; propagating
+across five declaring functions adds nothing measurable). Only what a
+field is allocates (a String built per failure, a nested struct), and a
+whole binding used as a value builds its one struct at the handler
+(`fail-whole-value`'s other 200000 are the program's own one-element
+Lists). The success path of a payload-bearing declaring call is the
+payload-free one (38.6 ns vs 30.7-39.8 ns per whole operation across
+runs). On the Tcl backends -- the reference implementations -- a payload
+costs its struct construction (`core::runtime::structNew`), the `errorId`
+call and the handler's projection: a one-Int failure handled by the
+Tcl compiler is about 7.6 us per operation against 2.9 us payload-free.
+
+**Payload-free code before and after.** The generated code is identical
+(the Tcl compiler's output for a payload-free failure is byte-identical to
+the tree before the milestone, the native code is point 27's, and the
+scalar audit's machine code is byte-identical, point 61). Timed in
+alternation, each tree three times (`bench/error-payloads.tcl`'s programs,
+best of 15, whole program per operation):
+
+| program | backend | before (7332d5a) | after |
+|---|---|---|---|
+| failure handled by the caller | Tcl compile | 2874.5, 2894.0, 2846.5 ns | 3316.5, 2907.0, 2822.5 ns |
+| failure handled by the caller | Cranelift | 69.6, 66.6, 88.0 ns | 71.4, 83.4, 78.6 ns |
+| declaring call, success | Tcl compile | 3048.0, 3023.5, 2307.0 ns | 3028.5, 3031.0, 2352.5 ns |
+| declaring call, success | Cranelift | 39.8, 38.9, 38.5 ns | 38.7, 38.6, 38.5 ns |
+| failure propagated across 5 calls | Tcl compile | 4120.5, 3190.5, 3901.0 ns | 4074.0, 4003.5, 4080.0 ns |
+| failure propagated across 5 calls | Cranelift | 75.5, 89.9, 87.7 ns | 70.0, 72.7, 75.1 ns |
+
+No difference beyond the run-to-run spread. (A first, noisier single run
+of the whole report showed the payload-bearing success path 1 us slower on
+the Tcl compiler; its generated code is the payload-free one's, and timed
+directly the two differ by 100-160 ns, inside the spread.)
 
 ### 63. Compatibility findings
 
@@ -793,8 +1071,9 @@ Propagation (`mid(x) -> int errors Small: small(x) + 1`) is the
 payload-free code: a call, an add, a return. Nothing reads or copies the
 slots on the way out.
 
-Handlers: the payload-free one (`on Lost: -1`) and an ignored payload-free
-one (`on Small: -1`) are the same code, identity test and clear. A handler
+Handlers: the payload-free one (`on Lost: -1`) and one ignoring a scalar
+payload (`on Small: -1`) are the same code, identity test and clear, with
+nothing read from the slots. A handler
 reads exactly the fields its binding needs, before the clear:
 
 ```
