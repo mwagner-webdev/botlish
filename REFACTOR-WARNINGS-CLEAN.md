@@ -745,7 +745,9 @@ with each tree's compiler and library, the same configuration ranged from
 ## 15. Design findings
 
 Recorded for the language's next milestones; none was acted on here (the
-fence).
+fence). LANGUAGE-LIBRARY-DEFICIENCIES.md collects the language, library,
+analysis and backend deficiencies among them, with their measurements and
+what each one forces on code, in one place.
 
 1. **Append a character to text** -- 21 findings in 6 functions (section 8):
    a `str::concat` (or builder) that takes a UnicodeChar. This, more than
@@ -855,9 +857,17 @@ fence).
     would fire on shipped code), and its advice is not a measured improvement
     on today's backends: it trades a small linear decode for a per-call
     rebuild, or, hoisted, keeps the dominant cost. "Exhaustively" also needs
-    care: a List makes each read cheap, not the search shorter; for
-    membership the right spellings are the `or` chain (compiled to
-    comparisons) or a set, and a List only for positional tables. If a
+    care: a List makes each read cheap, not the search shorter, and for
+    membership it costs more than the `or` chain today. Measured on
+    `ai_text_clean`'s 12-way emoji chain (`audit/refactor/ripple/`, 100K
+    characters, native): the chain 16.7-28.0 ms; a loop over a List built in
+    the function 27.9-30.7 ms and one more object per character; an
+    `ImmutableSet` built per call 81-90 ms; an `ImmutableSet` bound at
+    program level 3.4-3.7 s, because reading it makes the function a generic
+    closure and the scan loses its traversal plan (6-7 GB re-decoded). A
+    "prefer a List (or set) over an `or` chain" warning, the converse
+    candidate, would steer code to the slower spellings for the same reasons,
+    and there is no `list::contains` for it to suggest. If a
     re-audit finds the shape in shipped code, the version that would meet this
     repository's rule for warnings (backed by a compiler proof, no opt-out,
     no fixit unless proven) is narrower than the phrase:
@@ -918,6 +928,66 @@ fence).
     against 151). Narrowing through `and` and branch-lowering of `and`/`or`
     conditions would let the merge warnings' natural answer be the cheap
     one; until then, a merge that writes a conjunction should be measured.
+
+13. **The character type does not ripple to the read.** P3 converted the
+    sites the warning reports -- literals compared with a character -- and
+    the values reaching them stayed one-character Strings: `ai_text_clean`
+    reads each character with `peek` (a slice) and decodes it
+    (`char_at(0)`); the CSV scanners still `peek` the character `scan_quoted`
+    appends to a field. A computed one-character String is never a finding
+    (the warning is literals-only), so nothing in the refactor's mechanism
+    reached the producers. Carrying the character up to the read is the
+    better program and, today, a pathological one (`audit/refactor/ripple/`,
+    `ai_text_clean` at 100K characters, native): `clean_from` reading
+    `text.char_at(index)` allocates 7 Strings where the merged program
+    allocates 290,328 -- every unchanged character is output as a slice of
+    the input -- but takes 7.2-8.4 s instead of 17-28 ms, re-decoding 11-13 GB
+    of UTF-8, because a traversal plan exists only for `peek`-shaped reads
+    (finding 4). Two obstructions remain past that one: the output is text,
+    and a character cannot become text (finding 1: the three normalizations,
+    the hex digits, `"\n"`, `"/"`, the CSV fields built a character at a
+    time); and `str::is_tcl_alnum`/`is_tcl_alpha` take Strings (finding 2).
+    Possible today and not done, because no finding pointed there:
+    `scan_quoted` could build a field from the slices between doubled
+    quotes instead of a character at a time.
+14. **`METHOD-ELIGIBLE` is blind to receiver types.** Its candidate rule
+    counts the functions of the name visible to the call, not the ones
+    whose parameter types admit the receiver. `hashtable.bot`,
+    `csv_records.bot` and `csv_chunked.bot` import `list` (for
+    `list::append`) and `mutable_array`, and both define `at`, so their 28
+    `mutable_array::at(...)` calls stay functional beside sugared
+    `.set(...)` calls in the same functions. Where the receiver is an
+    untyped parameter (`ht_rehash_scan`'s `controls`) that is right:
+    `controls.at(i)` is `AMBIGUOUS-METHOD-CALL (list::at, mutable_array::at)`.
+    Where it is typed (`a: MutableArray[int]`), `a.at(i)` compiles and
+    resolves to `mutable_array::at`, and the warning is still silent. Two
+    language facts compound it: an import brings in every member of the
+    namespace (there is no selective import, by design: IMPORTS.md), and
+    the method resolver decides between same-named members only by receiver
+    type.
+15. **Where a warning consistently cannot be applied.** Three kinds, all
+    seen in this corpus:
+    * *It fires and no closing exists today*: the 42 manifested findings --
+      character to text (24), String-typed classifiers (10), test data whose
+      length is the subject (6), the index proof (1), a `-> list` that core
+      IR cannot carry (1). Every program that imports `web`, `io` or
+      `linux::path` inherits their findings, and with one warning policy per
+      compilation (by design) it can never compile under `-warnings error`
+      until they close.
+    * *It should fire and structurally cannot*: `METHOD-ELIGIBLE` under name
+      ambiguity even when the receiver's type decides it (finding 14), on a
+      module's own intrinsics inside the module, and on a native shadowed by
+      a module member (finding 10); `ONE-CHAR-STRING-LITERAL` on any computed
+      one-character String -- a slice, a table entry -- including the H1
+      table that evades it (finding 13).
+    * *Its closing costs more than the finding, or raises another*: the
+      merges' natural conjunctions (finding 12); the handler form of a
+      `ONE-CHAR-STRING-LITERAL` conversion, which raised `SAME-RETURN-VALUE`
+      (section 8); literal receivers of position-first helpers, which only
+      `nomethod` on the callee can stop (finding 6); `ai_text_clean`'s
+      character idiom on native (finding 3).
+    `PROVES-NAMING` and `MANY-BOOLEAN-ARGUMENTS` never fired in the corpus,
+    so this refactor exercised neither.
 
 **Warning false positives** (required question 12): none. No conversion that
 would have been sound was rejected by a warning; the one new warning a
@@ -1154,4 +1224,7 @@ change only this report.
     the measurements behind that recommendation); and what an `and`/`or` costs the range
     analysis and native code that nested tests do not (finding 12), which
     made three of the first merges more expensive than the code they
-    merged.
+    merged; why the character type stops short of the read (finding 13);
+    `METHOD-ELIGIBLE`'s blindness to receiver types (finding 14); and where a
+    warning consistently cannot be applied (finding 15).
+    LANGUAGE-LIBRARY-DEFICIENCIES.md gathers the deficiencies among them.
