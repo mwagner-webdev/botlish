@@ -130,8 +130,13 @@ proc hir::modulebinding::ContextExpr {hir e stateVar} {
         }
         fail {
             if {[dict exists $node value] && [dict get $node value] ne ""} {
-                # The payload (ERROR-PAYLOADS.md) is evaluated here.
-                set result [ContextExpr $hir [dict get $node value] state]
+                # The payload (ERROR-PAYLOADS.md) is evaluated here: a payload
+                # construction is context-free exactly when its field values
+                # are (building the payload itself reads no context).
+                set value [dict get $node value]
+                set parts [expr {[hir::kind $hir $value] eq "struct" && [dict exists [hir::node $hir $value] payloadOf]
+                    ? [dict get [hir::node $hir $value] fields] : [list $value]}]
+                set result [ContextSequence $hir $parts state]
                 if {[lindex $result 0] ne "ok"} {
                     return $result
                 }

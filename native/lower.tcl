@@ -8891,22 +8891,28 @@ proc native::lower::PayloadFields {fnVar value name e} {
 # The payload fields handler BODY reads through its payload binding B of
 # error NAME (ERROR-PAYLOADS.md): the names projected out of B, plus every
 # field whose type is affine (a release of B drops those) -- or "all" when
-# some reference uses B whole (a materialization), so every field is read.
+# some reference uses B whole (a materialization), so every field is read;
+# "captured" when a nested function refers to B (it captures the object).
 proc native::lower::PayloadNeeded {b body name} {
     variable hir
     set parent [dict create]
     set refs {}
-    set work $body
+    set work [lmap x $body {list $x 0}]
     while {$work ne {}} {
-        set x [lindex $work end]
+        lassign [lindex $work end] x nested
         set work [lrange $work 0 end-1]
         set node [hir::node $hir $x]
         if {[dict get $node kind] eq "ref" && [dict get $node binding] eq $b} {
+            if {$nested} {
+                # Captured by a nested function: it needs the object.
+                return captured
+            }
             lappend refs $x
         }
+        set inner [expr {$nested || [dict get $node kind] eq "block"}]
         foreach child [hir::children $hir $x] {
             dict set parent $child $x
-            lappend work $child
+            lappend work [list $child $inner]
         }
     }
     set needed {}
@@ -8991,7 +8997,7 @@ proc native::lower::Handle {fnVar e node} {
             set fieldRegs {}
             set k 0
             foreach field $layout {
-                if {$needed eq "all" || $field in $needed} {
+                if {$needed in {all captured} || $field in $needed} {
                     lappend fieldRegs [Assign fn "declaredpayload $k" $e]
                 } else {
                     # A field the handler never reads: no read at all (the
@@ -9000,8 +9006,14 @@ proc native::lower::Handle {fnVar e node} {
                 }
                 incr k
             }
-            dict set fn locals $payload [list virtual $fieldRegs [list "" $layout] $payload "" "" \
-                [expr {$needed eq "all" ? "" : "partial"}]]
+            if {$needed eq "captured"} {
+                # A nested function captures the payload binding: a capture
+                # is an ordinary value, so the object is built here, once.
+                dict set fn locals $payload [list reg [BuildStruct fn [list "" $layout] "" $fieldRegs $e]]
+            } else {
+                dict set fn locals $payload [list virtual $fieldRegs [list "" $layout] $payload "" "" \
+                    [expr {$needed eq "all" ? "" : "partial"}]]
+            }
         }
         Emit fn "cleardeclarederror" $e
         set value [Sequence fn $body]

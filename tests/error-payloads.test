@@ -384,6 +384,10 @@ test ep-whole-binding-is-the-payload {item 15/16/42: the whole binding is the pa
         [epKinds "${::epDecls}fn g(uri: str) -> str:\n    v = fetch(uri):\n        on PageNotFound details:\n            return details.kind\n    \"\"\n1\n"]
 } -result {{value {[false, true]}} {value {[{response: Response {payloadStream: "", length: 0}, statusCode: 404, uri: "/p"}]}} {TYPE UNKNOWN-FIELD}}
 
+test ep-captured-payload-binding {a nested function may capture a payload binding like any binding (unrestricted payload): natively the payload object is built once, at the handler} -body {
+    epAgree "${::epDecls}fn f(uri: str) -> str:\n    v = fetch(uri):\n        on PageNotFound details:\n            fn show() -> str:\n                str::concat(details.uri, \"?\")\n            return show()\n    \"ok\"\n\[f(\"\"), f(\"/c\")\]\n"
+} -result {value {["ok", "/c?"]}}
+
 test ep-partial-destructuring {items 18, 64: a handler names only the fields it uses; a later field added to the declaration does not affect it} -body {
     set v1 "error E:\n    uri: str\nfn g(x: int) -> int errors E:\n    if x > 1:\n        fail E {uri: \"u\"}\n    x\nfn f(x: int) -> str:\n    v = g(x):\n        on E {uri}:\n            return uri\n    \"ok\"\n\[f(1), f(2)\]\n"
     set v2 [string map [list "    uri: str\n" "    uri: str\n    statusCode: int\n" "{uri: \"u\"}" "{uri: \"u\", statusCode: 3}"] $v1]
@@ -491,6 +495,12 @@ test ep-validator {item 27: a validator whose error carries a payload proves its
 test ep-enum-and-list-fields {item 68: an enum field is an ordinary value branched on with `if` after selection; List fields are ordinary values} -body {
     epAgree "import list\nenum ParseErrorKind:\n    UnexpectedEnd,\n    BadDigit,\nerror ParseFailed:\n    kind: ParseErrorKind\n    offset: int\n    expected: List\[str\]\nfn parse(n: int) -> int errors ParseFailed:\n    if n == 0:\n        fail ParseFailed {kind: ParseErrorKind::UnexpectedEnd, offset: 0, expected: \[\"digit\"\]}\n    if n < 0:\n        fail ParseFailed {kind: ParseErrorKind::BadDigit, offset: 3, expected: \[\"0\", \"1\"\]}\n    n\nfn f(n: int) -> int:\n    parse(n):\n        on ParseFailed {kind, offset, expected}:\n            if kind == ParseErrorKind::BadDigit:\n                offset * 10 + list::length(expected)\n            else:\n                -1\n\[f(0), f(-1), f(5)\]\n"
 } -result {value {[-1, 32, 5]}}
+
+test ep-mutable-collection-fields {item 49: a MutableVector or MutableArray field is an ordinary value of the payload: moved in as a logical copy, mutated through the handler's bindings (a payload binding is a place like a parameter)} -body {
+    list [epAgree "import mutable_vector\nimport list\nerror Full:\n    items: MutableVector\[int\]\n    size: int\nfn fill(n: int) -> int errors Full:\n    v = mutable_vector::from_list(\[1, 2\])\n    v.push(n)\n    if n > 2:\n        fail Full {items: v, size: v.length()}\n    v.length()\nfn f(n: int):\n    r = fill(n):\n        on Full {items, size}:\n            items.push(99)\n            return \[items.length(), size\]\n    \[r\]\n\[f(1), f(5)\]\n"] \
+        [epAgree "import mutable_vector\nimport list\nerror Full:\n    items: MutableVector\[int\]\nfn fill(n: int) -> int errors Full:\n    v = mutable_vector::from_list(\[1, 2\])\n    if n > 2:\n        fail Full {items: v}\n    v.length()\nfn f(n: int):\n    r = fill(n):\n        on Full details:\n            details.items.push(7)\n            return \[details.items.length()\]\n    \[r\]\n\[f(1), f(5)\]\n"] \
+        [epAgree "import mutable_array\nerror Bad:\n    cells: MutableArray\[int\]\nfn g(n: int) -> int errors Bad:\n    a = mutable_array::create(3, 0)\n    a.set(0, n):\n        on IndexNotFound:\n            unit\n    if n > 2:\n        fail Bad {cells: a}\n    n\nfn f(n: int) -> int:\n    g(n):\n        on Bad {cells}:\n            cells.at(0):\n                on IndexNotFound:\n                    -1\n\[f(1), f(5)\]\n"]
+} -result {{value {[[3], [4, 3]]}} {value {[[2], [3]]}} {value {[1, 5]}}}
 
 # ---------------------------------------------------------------------------
 # Affine payloads (items 28-35, 72-75)
@@ -607,6 +617,12 @@ test ep-gc-stress {item 89: with a collection at every allocation, nested heap p
     }
 } -result {{value {["/p/x?", "/q/x?"]}} {{value {[5, 0, 0]}} {value {[5, 0, 0]}}}}
 
+test ep-gc-stress-coroutine {item 89: a coroutine's cached failure keeps its payload alive across collections at every allocation, raised again on a later resume} -constraints linuxX86_64 -body {
+    epWithGcStress {
+        epAgree "import coroutine\nimport str\nstruct Message:\n    value: int\nerror Overflow:\n    limit: int\n    note: str\nfn counter(limit: int, resume Message) -> int errors Overflow:\n    m = yield 0\n    if m.value > limit:\n        fail Overflow {limit: limit, note: str::concat(\"over\", \"flow\")}\n    m.value\nfn go(n: int) -> str:\n    coroutine {step} = counter(3):\n        on Overflow:\n            return \"start\"\n    a = step(Message {value: n}):\n        on Overflow {note}:\n            junk = \[str::concat(note, \"1\"), str::concat(note, \"2\")\]\n            -1\n    b = step(Message {value: 1}):\n        on Overflow details:\n            return str::concat(details.note, \"!\")\n    \"done\"\n\[go(2), go(9)\]\n"
+    }
+} -result {value {["done", "overflow!"]}}
+
 # ---------------------------------------------------------------------------
 # Modules (items 59-60)
 
@@ -621,6 +637,20 @@ test ep-cross-module {items 59-60: a module's payload error, whose field type is
             [epCode "import eppage\nerror NotThere:\n    uri: str\n1\n"]
     }
 } -cleanup {unset -nocomplain ch main} -result {{value {[0, 404]}} {struct{meta: eppage::Meta, uri: str}} UNDECLARED-ERROR}
+
+test ep-module-initializer {a module binding initialized through a function that fails with a payload error and ignores it stays a retained, context-free module value (the payload's fields are evaluated where it is raised); reading payload fields there is a projection, which module initializers do not support for any struct yet} -body {
+    withPrivateLibrary {
+        set ch [open [file join $::core::libraryDir epmodinit.bot] w]
+        fconfigure $ch -encoding utf-8
+        puts -nonewline $ch "import str\nerror Bad:\n    code: int\n    note: str\n\nfn g(x: int) -> int errors Bad:\n    if x > 1:\n        fail Bad {code: x, note: str::concat(\"a\", \"b\")}\n    x\n\nfn pick(x: int) -> int:\n    g(x):\n        on Bad:\n            -1\n\nfn read_code(x: int) -> int:\n    g(x):\n        on Bad {code}:\n            code\n\nseed = pick(4)\n"
+        close $ch
+        set first [epAgree "import epmodinit\n\[epmodinit::seed, epmodinit::pick(1), epmodinit::read_code(5)\]\n"]
+        set ch [open [file join $::core::libraryDir epmodinit.bot] a]
+        puts -nonewline $ch "other = read_code(4)\n"
+        close $ch
+        list $first [epCode "import epmodinit\n1\n"]
+    }
+} -cleanup {unset -nocomplain ch first} -result {{value {[-1, 1, 5]}} MODULE-CONTEXT}
 
 # ---------------------------------------------------------------------------
 # Extensibility (items 67, 93)

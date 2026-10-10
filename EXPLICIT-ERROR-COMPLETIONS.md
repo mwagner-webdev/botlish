@@ -1,5 +1,11 @@
 # Explicit error completions: `error`, `errors`, `fail`, `handle`
 
+> **Extended by ERROR-PAYLOADS.md:** an error may now declare a named-field
+> payload (`error NAME:` and `field: Type` lines), constructed by `fail NAME
+> {field: value}` and received by `on NAME details:` or `on NAME {field}:`.
+> Everything below about payload-free errors is unchanged; the "never a
+> payload" statements below describe the milestone as it shipped.
+
 ## Outcome
 
 Botlish had a semantic hole: a source-defined refinement type (e.g. `Byte`)

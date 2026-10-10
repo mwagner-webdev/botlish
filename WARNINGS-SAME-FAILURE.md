@@ -195,6 +195,17 @@ gives `fail` a payload, this pass must adopt that rule (group only when
 `hir::exact::Identity` proves the payloads equal, silence otherwise) before the
 payload can reach it.
 
+**Since ERROR-PAYLOADS.md** an error may declare a payload, and `fail NAME
+{field: value, ...}` carries one. The rule above is in effect:
+`hir::warnings::FailSites` keys a payload-bearing site by the error's name and
+the payload's `hir::exact::Identity` (an unproven identity is unique to its
+site), so two sites group only when their payloads are proven identical, and
+payload-free sites group by name exactly as before. Pinned by
+`sf-payload-rule` (two `fail Bad {code: ...}` sites with values nothing proves
+equal stay silent; the payload-free twin still warns) and the updated
+`sf-fail-carries-no-payload` (a payload-free `fail` has an empty `value`, no
+child).
+
 ## Declared failures only
 
 A `fail` of an undeclared failure is an error diagnostic (`UNDECLARED-ERROR`),

@@ -221,7 +221,7 @@ Each evaluation step ends in a **completion**:
 | `return(v)`          | leave the current callable invocation with `v`   |
 | `break(v)`           | leave the nearest lexical loop with `v`          |
 | `continue`           | start the nearest lexical loop's next iteration  |
-| `propagate-error(e)` | reserved for future structured error propagation (no form produces it yet) |
+| `propagate-error(e)` | a declared error leaving: `e` is its identity and, for an error that declares one, the payload it carries (`fail`, EXPLICIT-ERROR-COMPLETIONS.md, ERROR-PAYLOADS.md) |
 
 When a sub-expression completes abruptly (anything other than `value`), the
 enclosing expression stops and completes the same way. Sequences stop at the
@@ -335,6 +335,16 @@ Completes with `break(v)`. `v` is `unit` when no expression is given.
 ### `(continue)`
 
 Completes with `continue`.
+
+### `(fail NAME)` / `(fail NAME PAYLOAD)` / `(handle CALL NAME BLOCK ...)`
+
+`(fail NAME)` completes with `propagate-error` of the declared error NAME;
+`(fail NAME PAYLOAD)` evaluates PAYLOAD first and completes with the
+identity and that payload value (ERROR-PAYLOADS.md). `(handle CALL NAME1
+BLOCK1 ...)` runs the block of the name the call's error has (selection is
+the name alone, never the payload), as part of the enclosing code; a block
+with one parameter, `(block {P} ...)`, binds P to the payload. Any other
+completion passes through. See EXPLICIT-ERROR-COMPLETIONS.md.
 
 ### `(ok EXPR)` / `(error-value EXPR)`
 
@@ -814,7 +824,10 @@ the same for programs built to expose unsound type facts (§13). The
 through compiled code as Tcl completion code 5, out of a direct call of a
 compiled block and -- since STRUCTURAL-FUNCTION-TYPES.md, where a callable
 with a declared error set may be called through a structural function type
--- out of a generic call (`core::runtime::callValue`) alike.
+-- out of a generic call (`core::runtime::callValue`) alike. The completion's
+value is the error identity, `{errorId NAME}`, or `{errorId NAME PAYLOAD}` for
+an error with a payload (ERROR-PAYLOADS.md): a handler binds the payload
+straight from it, and a re-raise passes it on unchanged.
 
 ## 13. Type inference
 
@@ -1594,6 +1607,24 @@ add10(32)          # 42 (add captures x)
   `context` (below) composes with it as an independent modifier
   (`opaque context struct`), and a later `resource` will too.
   See OPAQUE-STRUCTS.md.
+* **Declared errors and their payloads.** `error NAME` declares an error, a
+  nominal identity (EXPLICIT-ERROR-COMPLETIONS.md); `fn f(x) -> T errors E1,
+  E2:` declares what a call may raise, `fail NAME` raises it, and `r = f(x):`
+  followed by `on E1:` handlers handles it. An error may carry a named-field
+  payload (ERROR-PAYLOADS.md): `error PageNotFound:` followed by `uri: str`,
+  `statusCode: int` lines (a struct declaration's field grammar), raised by
+  `fail PageNotFound {uri: u, statusCode: 404}` (a struct literal's checks:
+  every field once, none unknown, each value proven admissible), and received
+  by `on PageNotFound:` (ignored), `on PageNotFound details:` (bound whole, an
+  anonymous struct of the declared fields) or `on PageNotFound {uri,
+  statusCode: s}:` (the ordinary irrefutable struct destructuring, nested
+  patterns included). `on` selects by the error's identity only: there are no
+  value patterns, guards or payload-driven selection, and two errors with the
+  same fields are unrelated. `errors` clauses and `Fn{...}` contracts name
+  identities only. A payload owns what it holds: an affine field moves into
+  it and along the error edge, and is released where its owner dies; a
+  coroutine may not fail with an error whose payload is affine (its cached
+  failure is raised again on every later resume).
 * A result annotation `-> unit` declares the unit result (`fn log(x) ->
   unit:`): `unit` is the unit value's keyword everywhere else, and the unit
   type's name in a type position (results, parameters, `List[unit]`, `Fn{...}`
@@ -2383,7 +2414,11 @@ The helper ABI is listed with its failure and allocation behavior at the top
 of `native/src/runtime/ops.rs`. Every helper takes the VM pointer and 64-bit
 words. Operands already have the kinds the operation requires. A helper that
 fails records a structured `RtError` (the offending values stay GC roots)
-and returns 0. The error is formatted only at the program boundary, as the
+and returns 0. A declared error (`fail`) also records its id in the VM, and
+its payload's field values, if it has one, in the VM's payload slots, a GC
+root: the payload travels field-wise, no struct object is built for it, and a
+handler reads the fields it uses (ERROR-PAYLOADS.md). The error is formatted
+only at the program boundary, as the
 reference runtime's error code (`CORE SEMANTIC TYPE`, `RANGE`, `ARITY`,
 `NOT-BOOLEAN`, `NOT-CALLABLE`, `EQUALITY`, `UNBOUND`, `DUPLICATE`) and its
 exact message. The native backend's own failures are `NATIVE UNSUPPORTED`,
@@ -3221,12 +3256,13 @@ every loop form, on-handler bodies; a re-raise `on E: fail E` is a written
 `fail` and counts). Nothing else is a failure exit: the final expression and a
 fall-through are normal completions, and a call that fails (an unhandled call
 of a fallible function, a final bare call included) propagates its callee's
-failure and is an ordinary call. Identity is nominal: `fail` carries a declared
-error's name and no payload, and a declared error's name is its identity across
-the whole program (a second declaration of a name is rejected), so two sites
-fail the same failure exactly when they fail the same name the function's
-`errors` clause admits -- similarly named failures (`A`, `A2`) are different
-failures. It is silent for a single exit, for different declared failures, for
+failure and is an ordinary call. Identity is nominal: a declared error's name
+is its identity across the whole program (a second declaration of a name is
+rejected), so two sites fail the same failure exactly when they fail the same
+name the function's `errors` clause admits -- similarly named failures (`A`,
+`A2`) are different failures. A failure that carries a payload
+(ERROR-PAYLOADS.md) also needs its payload proven identical
+(`hir::exact::Identity`): payloads nothing proves identical never group. It is silent for a single exit, for different declared failures, for
 unreachable sites (statically decided branches, code after a completion, and
 branches the completion proof's range facts prove infeasible), for propagated
 failures, and for a nested function's or closure's fails, which belong to that

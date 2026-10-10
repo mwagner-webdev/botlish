@@ -553,6 +553,42 @@ mutant's text when you change the code it mutates, keeping it a mutant of the
 same rule) and `cargo test --release --manifest-path native/Cargo.toml --lib
 enum`. `bench/enums.tcl` regenerates the performance report.
 
+## Error payloads
+
+An error is a nominal identity that may carry a statically known named-field
+payload (ERROR-PAYLOADS.md): `error NAME:` and `field: Type` lines, `fail NAME
+{field: value}`, `on NAME:` / `on NAME details:` / `on NAME {a, b: c}:`. `on`
+discriminates the identity only: never add value patterns, guards, payload-
+or shape-driven handler selection, a handler-specific destructuring rule, an
+implicit `message`/`code` field, a key/value payload access or a
+`Result`/`Error[E]` encoding. The payload is the anonymous struct of the
+declared fields (`hir::errordecls::payloadType`), checked like a named
+construction (`hir/resolve.tcl`'s `ResolveStruct` with `payloadOf`,
+`hir::range::VerifyPayload`); handler destructuring is the ordinary
+destructuring expansion over the handler's payload binding
+(`surface/lower.tcl`'s `Handlers`). A payload-free error keeps its
+one-word representation everywhere (Tcl `{errorId NAME}`, native
+`faildeclared ID NAME` with no payload slots): never make every error carry a
+payload object. Natively a payload travels field-wise in the Vm's payload
+slots (`Vm::declared_payload`, a GC root) -- never box it to transport it.
+A coroutine may not fail with an error whose payload is affine
+(`hir::coroutines::AffineProtocol`): its cached failure is raised again.
+
+If you change the error declaration or payload grammar, `hir/errordecls.tcl`,
+the `fail`/`handle` resolution, typing, affine flow or lowering in any
+backend, `errorId` (`core/value.tcl`), the native payload slots
+(`native/src/runtime/{vm,ops,coroutine}.rs`, `Inst::Fail`/`DeclaredPayload`)
+or `hir::warnings::FailSites`, run `tests/error-payloads.test`,
+`tests/errors.test`, `tests/same-failure.test`, `tests/affine.test`,
+`tests/coroutines.test`, `audit/error-payloads/tools/fuzz.tcl` (several
+seeds, once with `-gc-stress 1`), `audit/error-payloads/tools/mutate.tcl`
+(every mutant in `audit/error-payloads/tools/mutants.txt` must still apply
+and be killed: update a mutant's text when you change the code it mutates,
+keeping it a mutant of the same rule), `audit/same-failure/tools/mutate.tcl`
+and `cargo test --release --manifest-path native/Cargo.toml --lib
+error_payload`. `bench/error-payloads.tcl` regenerates the performance
+report.
+
 ## MutableVector
 
 `MutableVector[T]` (MUTABLE-VECTOR.md) is a growable mutable VALUE: a
