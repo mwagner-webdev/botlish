@@ -589,10 +589,11 @@ test ep-native-payload-field-wise {items 50-51, 77: a payload travels the error 
         [lsearch -all -inline [epFunc $text f] *declaredpayload*]
 } -cleanup {unset -nocomplain text} -result {{{faildeclared 2 "PageNotFound" 1 %12 %7 %6}} {{%4 = declaredpayload 1}}}
 
-test ep-native-no-payload-allocation {items 50, 53, 90: a small payload allocates nothing natively (a one-Int payload fails and is handled with zero heap objects); declaring a payload error costs nothing on the success path} -body {
+test ep-native-no-payload-allocation {items 50, 52, 53, 90: a small payload allocates nothing natively (a one-Int payload fails and is handled with zero heap objects); declaring a payload error costs nothing on the success path; a payload-free failure allocates nothing either} -body {
     set text "error Small:\n    code: int\nfn g(x: int) -> int errors Small:\n    if x > 1:\n        fail Small {code: x}\n    x\nfn f(x: int) -> int:\n    g(x):\n        on Small {code}:\n            code\n"
-    list [epAllocs "${text}f(5) + f(9)\n"] [epAllocs "${text}f(1) + f(0)\n"]
-} -cleanup {unset -nocomplain text} -result {{0 0} {0 0}}
+    set plain "error Lost\nfn g(x: int) -> int errors Lost:\n    if x > 1:\n        fail Lost\n    x\nfn f(x: int) -> int:\n    g(x):\n        on Lost:\n            -1\n"
+    list [epAllocs "${text}f(5) + f(9)\n"] [epAllocs "${text}f(1) + f(0)\n"] [epAllocs "${plain}f(5) + f(9)\n"]
+} -cleanup {unset -nocomplain text plain} -result {{0 0} {0 0} {0 0}}
 
 test ep-native-whole-binding-materializes-once {item 50: a whole binding used as a value builds the payload struct once, at the handler; projections of it read fields} -body {
     set text "${::epDecls}fn f(uri: str):\n    v = fetch(uri):\n        on PageNotFound details:\n            return \[details.statusCode, details\]\n    \[\]\nf(\"/a\")\n"

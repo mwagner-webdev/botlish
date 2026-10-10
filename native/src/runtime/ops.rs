@@ -3334,6 +3334,42 @@ mod tests {
     // 0..N first, then END against START..N; below is LowerUnderrun, above
     // is UpperOverrun. Writes through an index are IndexNotFound.
 
+    #[test]
+    fn error_payload_travels_in_the_payload_slots_and_is_cleared_by_the_handler() {
+        // ERROR-PAYLOADS.md: `faildeclared` with payload registers copies the
+        // field values into the Vm's payload slots (a GC root: nothing else
+        // holds them while the error propagates), `declaredpayload K` reads
+        // field K, and the handler's clear empties the slots; a payload-free
+        // failure or a builtin error never leaves a stale payload behind.
+        let mut vm = vm();
+        vm.heap.set_stress_for_test(true);
+        let text = rooted!(vm, vm.new_str("detail"));
+        let big = rooted!(vm, vm.new_big(num_bigint::BigInt::from(7u8) << 70u32));
+        let name = rooted!(vm, vm.new_str("E"));
+        let fields = [text, big];
+        assert_eq!(rt_fail_declared_payload(&mut *vm, 4, name, 0, 2, fields.as_ptr()), NO_VALUE);
+        while vm.temp_roots.len() > 0 {
+            vm.temp_roots.pop();
+        }
+        for _ in 0..3 {
+            vm.collect_for_test(crate::runtime::metrics::GcReason::Explicit);
+        }
+        assert_eq!(vm.declared_error, 4);
+        assert_eq!(str_of(rt_declared_payload(&mut *vm, 0)).as_str(), "detail");
+        assert_eq!(super::super::show::show(rt_declared_payload(&mut *vm, 1)), (num_bigint::BigInt::from(7u8) << 70u32).to_string());
+        assert_eq!(rt_clear_declared_error(&mut *vm), 0);
+        assert!(vm.declared_payload.is_empty() && vm.declared_error == 0 && vm.error.is_none());
+        let name = rooted!(vm, vm.new_str("E"));
+        let fields = [small(1)];
+        rt_fail_declared_payload(&mut *vm, 4, name, 0, 1, fields.as_ptr());
+        rt_fail_declared(&mut *vm, 5, name);
+        assert!(vm.declared_payload.is_empty());
+        rt_fail_declared_payload(&mut *vm, 4, name, 0, 1, fields.as_ptr());
+        index_not_found(&mut *vm);
+        assert!(vm.declared_payload.is_empty());
+        assert_eq!(pending(&mut vm), crate::runtime::error::ERR_INDEX_NOT_FOUND);
+    }
+
     fn pending(vm: &mut Vm) -> u32 {
         let id = vm.declared_error;
         vm.error = None;

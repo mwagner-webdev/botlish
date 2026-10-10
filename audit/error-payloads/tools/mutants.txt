@@ -1,0 +1,285 @@
+# Mutants of payload-bearing errors (audit/error-payloads/tools/mutate.tcl;
+# ERROR-PAYLOADS.md): the mutants the milestone brief names (item 87), each
+# a deliberate bug in the frontend (surface/lower.tcl), resolution
+# (hir/resolve.tcl), the error descriptors (hir/errordecls.tcl), ownership
+# (hir/affine.tcl), the coroutine contract (hir/coroutines.tcl), Core IR
+# lowering (hir/lower.tcl), the Tcl runtime and compiler (core/value.tcl,
+# core/evaluator.tcl, compiler/compiler.tcl), native lowering
+# (native/lower.tcl) or the native runtime (native/src/runtime/).
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant may have several edits. A mutant editing native/src/ or the
+# native crate's manifest is a native mutant: mutate.tcl rebuilds the native
+# backend for it. Lines starting with # outside an edit are comments.
+
+@@ fail-ignores-payload-tcl payload fields ignored during fail construction (the interpreter raises the bare identity)
+## core/evaluator.tcl
+<<<<
+        set payload [core::interp::valueOf [core::interp::evalIn [lindex $node 2] $env]]
+        return [core::completion::propagatingError [core::value::errorId [lindex $node 1] $payload]]
+====
+        set payload [core::interp::valueOf [core::interp::evalIn [lindex $node 2] $env]]
+        return [core::completion::propagatingError [core::value::errorId [lindex $node 1] [core::value::unit]]]
+>>>>
+
+@@ fail-ignores-payload-native payload fields ignored during fail construction (native lowering raises the payload-free form)
+## native/lower.tcl
+<<<<
+                    Emit fn "faildeclared [ErrorId $name] [Quote $name] [ShapeIndex {} $layout] [join $fields { }]" $e
+====
+                    Emit fn "faildeclared [ErrorId $name] [Quote $name]" $e
+>>>>
+
+@@ missing-payload-accepted `fail NAME` of a payload-bearing error is accepted
+## hir/resolve.tcl
+<<<<
+                if {[hir::errordecls::hasPayload $name] && $value eq ""} {
+====
+                if {0 && [hir::errordecls::hasPayload $name] && $value eq ""} {
+>>>>
+
+@@ payload-on-payload-free-accepted a payload supplied to a payload-free error is accepted
+## hir/resolve.tcl
+<<<<
+                } elseif {![hir::errordecls::hasPayload $name] && $value ne ""} {
+====
+                } elseif {0 && ![hir::errordecls::hasPayload $name] && $value ne ""} {
+>>>>
+
+@@ dispatch-by-shape-tcl handler dispatch accepts any payload-bearing error for a handler that receives a payload (shape, not identity)
+## core/evaluator.tcl
+<<<<
+        if {$name eq $errorName} {
+====
+        if {$name eq $errorName || ([core::value::errorIdHasPayload $raised] && [core::ir::blockParams $handlerBlock] ne {})} {
+>>>>
+
+@@ same-shape-interchangeable-native same-shaped errors are handled interchangeably natively (one id per payload shape)
+## native/lower.tcl
+<<<<
+    if {![dict exists $errorIds $name]} {
+        throw {NATIVE BUG} "native lowering: undeclared error \"$name\" has no assigned id"
+    }
+    return [dict get $errorIds $name]
+====
+    if {![dict exists $errorIds $name]} {
+        throw {NATIVE BUG} "native lowering: undeclared error \"$name\" has no assigned id"
+    }
+    if {[hir::errordecls::hasPayload $name]} {
+        foreach other [dict keys $errorIds] {
+            if {[hir::errordecls::payloadType $other] eq [hir::errordecls::payloadType $name]} {
+                return [dict get $errorIds $other]
+            }
+        }
+    }
+    return [dict get $errorIds $name]
+>>>>
+
+@@ whole-binding-loses-field-tcl the payload a handler receives loses its last field (Tcl runtimes)
+## core/value.tcl
+<<<<
+        error "core::value::errorIdPayload: error [lindex $v 1] carries no payload"
+    }
+    return [lindex $v 2]
+====
+        error "core::value::errorIdPayload: error [lindex $v 1] carries no payload"
+    }
+    set p [lindex $v 2]
+    return [list struct [lrange [lindex $p 1] 0 end-1] [lrange [lindex $p 2] 0 end-1]]
+>>>>
+
+@@ whole-binding-loses-field-native a handler's payload binding reads field 0 for its last field (native)
+## native/lower.tcl
+<<<<
+                    lappend fieldRegs [Assign fn "declaredpayload $k" $e]
+====
+                    lappend fieldRegs [Assign fn "declaredpayload [expr {$k == [llength $layout] - 1 ? 0 : $k}]" $e]
+>>>>
+
+@@ partial-destructuring-drops-bound-affine-field a destructured affine field is not recorded as moved out: the payload's release drops it too
+## hir/affine.tcl
+<<<<
+            dict set consumed $b [lindex $consumer 3] 1
+====
+            set consumed $consumed
+>>>>
+
+@@ partial-destructuring-leaks-unbound-affine-field a handler's payload binding is never a release scope: unbound affine fields leak
+## hir/affine.tcl
+<<<<
+            if {$block eq "" || ![dict exists $hir exprs $block] || [dict get $hir exprs $block kind] ni {block listloop handle}
+====
+            if {$block eq "" || ![dict exists $hir exprs $block] || [dict get $hir exprs $block kind] ni {block listloop}
+>>>>
+
+@@ nested-destructuring-handler-specific a handler's nested pattern reads the inner fields from the payload itself (handler-specific rules)
+## surface/lower.tcl
+<<<<
+            set body [concat [Projections $pattern $temp] $body]
+====
+            set flat {}
+            foreach field [dict get $pattern fields] {
+                if {[dict get $field nested] ne ""} {
+                    foreach inner [dict get $field nested fields] {
+                        if {[dict get $inner nested] eq ""} {
+                            dict set inner id [dict get $field id]/x
+                            lappend flat $inner
+                        }
+                    }
+                } else {
+                    lappend flat $field
+                }
+            }
+            set body [concat [Projections [dict replace $pattern fields $flat] $temp] $body]
+>>>>
+
+@@ renaming-binds-original a handler's renaming binds the field's own name instead
+## surface/lower.tcl
+<<<<
+            set pattern [dict get $handler pattern]
+            set temp [TempName $pattern]
+====
+            set pattern [dict get $handler pattern]
+            dict set pattern fields [lmap f [dict get $pattern fields] {
+                if {[dict get $f nested] eq ""} { dict set f local [dict get $f name] }
+                set f
+            }]
+            set temp [TempName $pattern]
+>>>>
+
+@@ ignored-affine-payload-leaks an ignored affine payload gets no binding, so nothing releases it
+## hir/resolve.tcl
+<<<<
+                } elseif {[hir::errordecls::hasPayload $name]
+                        && [hir::types::IsAffine [hir::errordecls::payloadType $name]]} {
+====
+                } elseif {0 && [hir::errordecls::hasPayload $name]
+                        && [hir::types::IsAffine [hir::errordecls::payloadType $name]]} {
+>>>>
+
+@@ handler-payload-not-owned a handler's payload binding does not start live: no release on its last use or on any exit of the handler (return, fail, break, continue leak it)
+## hir/affine.tcl
+<<<<
+                if {$payload ne "" && [IsAffineBinding $hir $payload]} {
+                    dict set start $payload live
+                }
+====
+>>>>
+
+@@ propagation-drops-payload-tcl a releasing re-raise on the way out raises the error without its payload (Tcl backends)
+## hir/lower.tcl
+<<<<
+            lappend lowered $name [list block [list $raised] {*}[Releases $hir $items] \
+                [list fail $name [list ref $raised]]]
+====
+            lappend lowered $name [list block [list $raised] {*}[Releases $hir $items] \
+                [list fail $name [list const 0]]]
+>>>>
+
+@@ propagation-copies-affine-payload a releasing re-raise also releases the payload it propagates: one owner released, a copy propagated
+## hir/lower.tcl
+<<<<
+            lappend lowered $name [list block [list $raised] {*}[Releases $hir $items] \
+                [list fail $name [list ref $raised]]]
+====
+            set d [hir::affine::Descriptor $hir [hir::errordecls::payloadType $name]]
+            set drop [expr {$d eq "" ? {} : [list [list call [list ref [hir::affine::DropNative]] [list ref $raised] [list const str $d]]]}]
+            lappend lowered $name [list block [list $raised] {*}[Releases $hir $items] {*}$drop \
+                [list fail $name [list ref $raised]]]
+>>>>
+
+@@ propagation-drops-payload-native a cached coroutine failure is raised again without its payload (native)
+## native/src/runtime/coroutine.rs
+<<<<
+        (*p).declared_payload.extend_from_slice(&failure.2);
+====
+>>>>
+
+@@ payload-construction-failure-leaks a struct being constructed is no pending owner: a later payload field that fails leaks the earlier affine field
+## hir/affine.tcl
+<<<<
+        if {[dict get $node kind] in {call struct} && $role eq "operand"} {
+            lappend pending {*}[PendingBefore $hir $p $x]
+        }
+====
+        if {[dict get $node kind] in {call} && $role eq "operand"} {
+            lappend pending {*}[PendingBefore $hir $p $x]
+        }
+>>>>
+
+@@ contract-loses-payload-metadata a module's error declaration loses its payload descriptor
+## hir/errordecls.tcl
+<<<<
+        set fields [expr {[dict exists $decl fields] ? [dict get $decl fields] : {}}]
+        if {$fields eq {}} continue
+====
+        set fields [expr {[dict exists $decl fields] ? [dict get $decl fields] : {}}]
+        if {$fields eq {} || ([dict exists $decl namespace] && [dict get $decl namespace] ne "")} continue
+>>>>
+
+@@ generic-propagation-loses-identity a propagating error that crosses a call with no handler of its own leaves under the first error the call declares (Tcl compiler)
+## compiler/compiler.tcl
+<<<<
+    Emit ctx "default \{ return -options \$$optsVar \$$resVar \}"
+====
+    Emit ctx "default \{ return -code 5 \[lreplace \$$resVar 1 1 [Word [lindex $names 0]]\] \}"
+>>>>
+
+@@ tcl-serializes-payload-through-string the Tcl runtime carries the payload as its display String
+## core/value.tcl
+<<<<
+    return [list errorId $name {*}$args]
+====
+    return [list errorId $name {*}[lmap a $args {core::value::str [show $a]}]]
+>>>>
+
+@@ native-payload-free-allocates a native payload-free failure builds a payload object
+## native/lower.tcl
+<<<<
+                Emit fn "faildeclared [ErrorId $name] [Quote $name]" $e
+            }
+            set result never
+====
+                Assign fn "op listnew" $e
+                Emit fn "faildeclared [ErrorId $name] [Quote $name]" $e
+            }
+            set result never
+>>>>
+
+@@ native-small-payload-boxes a native payload is built as a struct object and read back for transport
+## native/lower.tcl
+<<<<
+    if {[hir::kind $hir $value] eq "struct"} {
+        set node [hir::node $hir $value]
+        if {[dict get $node layout] ne $layout} {
+            throw {NATIVE BUG} "native lowering: the payload of fail $name has fields ([dict get $node layout]), not ($layout) ($e)"
+        }
+        return [StructFields fn $value $node]
+    }
+====
+    if {[hir::kind $hir $value] eq "struct"} {
+        set node [hir::node $hir $value]
+        set ordered [StructFields fn $value $node]
+        if {$ordered eq "never"} {
+            return never
+        }
+        set object [Assign fn "structnew [ShapeIndex {} $layout] [join $ordered { }]" $e]
+        set slot -1
+        return [lmap f $layout {Assign fn "structget [incr slot] $object" $e}]
+    }
+>>>>
+
+@@ coroutine-cached-failure-duplicates-affine-payload a coroutine may fail with an affine payload, which its cached failure raises again
+## hir/coroutines.tcl
+<<<<
+        if {$payload ne "" && [hir::types::IsAffine $payload]} {
+====
+        if {0 && $payload ne "" && [hir::types::IsAffine $payload]} {
+>>>>

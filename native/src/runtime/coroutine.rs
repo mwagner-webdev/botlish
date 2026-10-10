@@ -613,6 +613,24 @@ mod tests {
         unsafe { (*p).fail(RtError::Semantic { kind: "RANGE", message: "boom".to_string() }) }
     }
 
+    /// Fails with declared error 3 carrying a two-field payload: a heap Int
+    /// and a String (ERROR-PAYLOADS.md), allocating with collections forced
+    /// on the way.
+    extern "C" fn failing_payload(p: *mut Vm, _closure: Value, _args: *const Value) -> Value {
+        unsafe {
+            let big = (*p).new_big(num_bigint::BigInt::from(5u8) << 90u32);
+            (*p).temp_roots.push(big);
+            let text = (*p).new_str("payload");
+            (*p).temp_roots.push(text);
+            let name = (*p).new_str("Overflow");
+            let fields = [big, text];
+            let r = super::super::ops::rt_fail_declared_payload(p, 3, name, 0, 2, fields.as_ptr());
+            (*p).temp_roots.pop();
+            (*p).temp_roots.pop();
+            r
+        }
+    }
+
     /// Returns at once: a coroutine need not reach a yield.
     extern "C" fn immediate(_p: *mut Vm, _closure: Value, _args: *const Value) -> Value {
         make_small(7)
@@ -686,6 +704,36 @@ mod tests {
         assert_eq!(rt_co_done(&mut *vm, co), TRUE);
         assert_eq!(rt_co_resume0(&mut *vm, co), NO_VALUE);
         assert_eq!(vm.error.take().map(|e| e.error_code()), Some(vec!["CORE", "SEMANTIC", "RANGE"]));
+    }
+
+    #[test]
+    fn error_payload_of_a_failed_coroutine_is_cached_and_raised_again() {
+        // ERROR-PAYLOADS.md: a failed coroutine keeps its declared error's
+        // payload with the failure (a GC root while cached) and raises the
+        // same payload again on every later resume.
+        let mut vm = new_vm();
+        vm.heap.set_stress_for_test(true);
+        let t = thunk(&mut vm, failing_payload);
+        vm.temp_roots.push(t);
+        let co = rt_co_create(&mut *vm, t);
+        vm.temp_roots.push(co);
+        assert_eq!(rt_co_start(&mut *vm, co), NO_VALUE);
+        assert_eq!(vm.declared_error, 3);
+        assert_eq!(vm.declared_payload.len(), 2);
+        assert_eq!(str_of(vm.declared_payload[1]).as_str(), "payload");
+        vm.declared_error = 0;
+        vm.declared_payload.clear();
+        vm.error = None;
+        for _ in 0..3 {
+            vm.collect_for_test(GcReason::Explicit);
+            assert_eq!(rt_co_resume0(&mut *vm, co), NO_VALUE);
+            assert_eq!(vm.declared_error, 3);
+            assert_eq!(vm.declared_payload.len(), 2);
+            assert_eq!(super::super::show::show(vm.declared_payload[0]), (num_bigint::BigInt::from(5u8) << 90u32).to_string());
+            assert_eq!(str_of(vm.declared_payload[1]).as_str(), "payload");
+            assert_eq!(crate::runtime::ops::rt_clear_declared_error(&mut *vm), 0);
+            assert!(vm.declared_payload.is_empty());
+        }
     }
 
     #[test]
