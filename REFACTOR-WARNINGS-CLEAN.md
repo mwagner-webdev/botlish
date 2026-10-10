@@ -688,7 +688,59 @@ it makes the cleanup a ratchet.
 
 ## 14. Bench before and after
 
-{{BENCH}}
+Both trees -- the kickoff (6e3f9f7) and the final one (991c666) -- ran every
+benchmark script that measures a touched program, back to back on one
+machine with nothing else running: `bench/bench.tcl` (the `bench/*.bot`
+programs on every backend, with the Python, Rust and Go reference
+implementations), `bench/corpus.tcl` (the stdlib corpus on every backend),
+`bench/ai_text_clean.tcl`, `bench/csv_records.tcl`, `bench/hashtable.tcl` and
+`bench/uri-steady.tcl`, in two rounds. The session's container restarted
+twice during the runs and came back on a different machine, so only a
+before/after pair measured on the same host is compared: round 1 for
+`bench.tcl`, `corpus.tcl`, `ai_text_clean` and `csv_records`; round 2 for
+everything except `bench.tcl`. A timing delta counts as real only when it
+has the same sign and a similar size in both same-host rounds, or, where one
+round is all there is, lies far outside the swing of code that did not
+change: at microsecond scale the unchanged reference implementations moved
+-49% to +116% between the two sides, and P2's NIR-identical `lex-strategy`
+and `test-selection` +51% and +100%. Allocation counts and code bytes are
+deterministic and need no noise floor.
+
+| program | backend | before -> after (round 1 / round 2) | verdict |
+|---|---|---|---|
+| `ai_text_clean`, 100K characters | cranelift | ascii +22% / +33%, punctuation +31% / +54%, emoji +29% / +20%; Strings allocated +50-54% (ascii 200,110 -> 300,165), deterministic | **slower**: one materialized String per character (finding 3) |
+| `csv`, `csv_geometric`, `csv_chunked`, 10,000 rows | cranelift | -16% / -14%, -16% / -16%, -24% / -22% | **faster**; each 449-480 B less machine code (section 18) |
+| `csv_records` (`csv_records.tcl`) | cranelift | csv-only parse -46% to -75%, the realistic schema -17% to -52%, both rounds; allocations identical | **faster** |
+| the four CSV programs | Tcl interp | +10% to +22%, both rounds | **slower** |
+| the four CSV programs | Tcl compile | +22% to +44%, both rounds | **slower** (below) |
+| `hashtable` | cranelift | construction and operations: deltas of either sign within the round's own swing; allocations and probe metrics identical | unchanged |
+| `uri-steady` | cranelift | median 2,822 -> 2,830 us (spreads 3.4%, 1.5%); allocations 10,509 and machine code 7,100 B identical | unchanged |
+| `string_reverse`, `string_replace`, `matmul` | every backend | within noise | unchanged (P2 respellings only: identical NIR) |
+| `bench/*.bot` | Tcl interp, compile | within +-6% | unchanged |
+| `bench/*.bot` | cranelift | within the reference implementations' swing | unchanged |
+
+**The Tcl backends' CSV slowdown, attributed** (`csv`, 1,000 rows, compile
+backend, best of 3): the P2 program 970 ms, the P3 program 1,098 ms; P3 with
+`quote_at?` inlined into `scan_field` 987 ms, P3 with `scan_unquoted`'s test
+spelled `==`/`or` instead of `!=`/`and` 1,028 ms. The character reads are not
+the cost: over 20,000 characters, `str::char_at` and a character comparison
+take 8.3 s on interp and 413 ms on compile, `peek` and a String comparison
+12.5 s and 415 ms. So it is the helper call, which the Tcl backends do not
+inline, and the conjunction (finding 12's shape again); native inlines both
+and got faster. The Tcl backends are the reference implementations, not the
+production path, so the source was not reshaped for them.
+
+**`ai_text_clean` is the one native regression**, and the language offers no
+cheaper spelling: `str::char_at` is the only character reader, and reading
+the character from the text itself (`text.char_at(index)`) would leave the
+traversal plan, a quadratic seek (finding 4). The fix is the runtime's:
+`str::char_at` on a short String or a region without materializing it
+(finding 3).
+
+An observation that did not survive: `uri-steady`'s lowering time looked
+halved in round 1 (about 200 -> 107 ms per session); re-measured directly
+with each tree's compiler and library, the same configuration ranged from
+148 to 255 ms between runs, so it is noise, not an effect.
 
 ## 15. Design findings
 
@@ -705,9 +757,10 @@ fence).
 3. **`str::char_at` and the String-region / short-string representations**
    (native): `str::char_at` of a one-character slice materializes it (a
    substring, then a heap String), where `==` with a literal and `str::length`
-   allocate nothing. The char idiom in `ai_text_clean` costs +52% String
-   allocations on its benchmark for that reason alone; a region form of
-   `char_at` (`decodecharat` exists for the traversal) would make it free.
+   allocate nothing. The char idiom in `ai_text_clean` costs one String per
+   character for that reason alone: +50-54% Strings and +20-54% time at 100K
+   characters (section 14); a region form of `char_at` (`decodecharat` exists
+   for the traversal) would make it free.
 4. **Traversal plans for `str::char_at` scans** (native): `hir/traversal.tcl`
    recognizes only `peek`-shaped (width-1 substring) accessors at a zero
    start. A `char_at`-indexed scan has no byte cursor: the CSV scanners' UTF-8
@@ -965,9 +1018,16 @@ change only this report.
   index the scan reaches, different for a negative one no caller passes,
   shown by the `differs` probes. Tests that hand-write handlers around a
   CSV driver (`native-escape.test`'s `csvHir`) handle the new error too.
-* **`ai_text_clean`'s character idiom costs allocations on native** (+52%
-  Strings on its punctuation benchmark), a runtime representation gap, not
-  the source's (section 15, finding 3).
+* **`ai_text_clean` is slower on native** (+50-54% Strings, +20-54% time at
+  100K characters), and the CSV programs are slower on the Tcl backends
+  (interp +10-22%, compile +22-44%) while faster on native (section 14). The
+  first is a runtime representation gap with no cheaper source spelling
+  (finding 3); the second is a helper call and a conjunction the Tcl backends
+  do not optimize. Neither was traded away: the refactor's law is observable
+  behavior, and these are its measured costs.
+* **The bench ran on two hosts.** Two container restarts moved the session
+  between machines mid-bench; only same-host before/after pairs are compared
+  (section 14).
 * **The CLI backend-independence tests read a frozen fixture.** Six tests
   whose subject is real warning-bearing programs read
   `audit/refactor/kickoff-corpus/` (the stdlib corpus, `refined-strings` and
@@ -1049,7 +1109,16 @@ change only this report.
    program's value (context-requiring or trait-polymorphic), and a module has
    no other kind of last statement to give. `io.bot` is warning-clean except
    its two manifested newlines. 11 of 14 modules are warning-clean.
-9. *Bench deltas?* Section 14: {{BENCH-SUMMARY}}
+9. *Bench deltas?* Section 14, two rounds of same-host before/after pairs:
+   `ai_text_clean` is slower on native (+20-54% time and +50-54% Strings at
+   100K characters: one materialized String per character, finding 3); the
+   CSV programs are faster on native (-14% to -24% at 10,000 rows,
+   `csv_records`' parse -46% to -75%, allocations identical) and slower on
+   the Tcl backends (interp +10-22%, compile +22-44%: an uninlined helper
+   call and a conjunction); `hashtable`, `uri-steady`, `string_reverse`,
+   `string_replace`, `matmul` and the `bench/*.bot` programs are unchanged
+   within noise, which on this machine reaches -49%/+116% for unchanged code
+   at microsecond scale.
 10. *The quantified API case?* 24 findings in 7 functions need a character as
     text, in five shapes (section 8); 21 of them, in 6 functions, are appends
     -- the demand is an append of a UnicodeChar to a String more than
