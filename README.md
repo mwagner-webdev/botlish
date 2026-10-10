@@ -826,7 +826,8 @@ compiled block and -- since STRUCTURAL-FUNCTION-TYPES.md, where a callable
 with a declared error set may be called through a structural function type
 -- out of a generic call (`core::runtime::callValue`) alike. The completion's
 value is the error identity, `{errorId NAME}`, or `{errorId NAME PAYLOAD}` for
-an error with a payload (ERROR-PAYLOADS.md): a handler binds the payload
+an error with a payload (ERROR-PAYLOADS.md), NAME the canonical identity
+(`ns::Name` for a module's error): a handler binds the payload
 straight from it, and a re-raise passes it on unchanged.
 
 ## 13. Type inference
@@ -1624,7 +1625,13 @@ add10(32)          # 42 (add captures x)
   identities only. A payload owns what it holds: an affine field moves into
   it and along the error edge, and is released where its owner dies; a
   coroutine may not fail with an error whose payload is affine (its cached
-  failure is raised again on every later resume).
+  failure is raised again on every later resume). An error's identity is
+  module-qualified (ERROR-PAYLOADS.md, "Module-qualified error identity"):
+  module `http`'s `error NotFound` is `http::NotFound`, named by its short
+  name inside the module and qualified outside it (through the ordinary
+  exact imports), so two modules' same-named errors -- even with identical
+  payloads -- are two identities; the entry program's and the runtime's
+  builtin errors keep bare names.
 * A result annotation `-> unit` declares the unit result (`fn log(x) ->
   unit:`): `unit` is the unit value's keyword everywhere else, and the unit
   type's name in a type position (results, parameters, `List[unit]`, `Fn{...}`

@@ -94,16 +94,15 @@ proc hir::sourcetypes::Fail {span message {kind TYPE}} {
 }
 
 # "" when the earlier declaration (span FIRST) of a name redeclared at SPAN
-# is in the same file; otherwise where it is, and why it counts: error names
-# are one flat, program-wide namespace, so a module the program loads --
-# possibly only through another module (abi, through abi::x86_64) -- takes
-# its error names for the whole program. (Types are namespace members,
-# IMPORTS.md.) Used by hir/errordecls.tcl.
+# is in the same file; otherwise where it is. Declarations are namespace
+# members -- types (IMPORTS.md) and, since ERROR-PAYLOADS.md's
+# "Module-qualified error identity", errors too -- so a clash is normally
+# within one file. Used by hir/errordecls.tcl.
 proc hir::sourcetypes::ElsewhereClause {first span} {
     if {$first eq "" || $span eq "" || [dict get $first file] eq [dict get $span file]} {
         return ""
     }
-    return [format { at %s:%s:%s (error names are global: every module the program loads, including one it reaches only through another module, declares its error names for the whole program)} \
+    return [format { at %s:%s:%s} \
         [dict get $first file] [dict get $first line] [dict get $first column]]
 }
 

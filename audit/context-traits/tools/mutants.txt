@@ -221,17 +221,17 @@ fn print_line(text: str, context io: IO) -> unit errors WriteFailed:
 <<<<
         return fd.write_all(remaining)
 ====
-        fail WriteFailed
+        fail io::WriteFailed
 >>>>
 
 @@ zero-progress-retried a write that makes no progress is retried instead of failing
 ## lib/linux/io.bot
 <<<<
     if written <= 0:
-        fail WriteFailed
+        fail io::WriteFailed
 ====
     if written < 0:
-        fail WriteFailed
+        fail io::WriteFailed
     if written == 0:
         return fd.write_all(bytes)
 >>>>

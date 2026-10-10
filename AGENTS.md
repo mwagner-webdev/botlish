@@ -605,8 +605,13 @@ compatibility spelling, and never let a module see the entry program's
 errors. If you change error-name resolution or authorization
 (`hir/errordecls.tcl`, `surface/modules.tcl`'s error references,
 `surface::parser::ErrorName`), run `tests/namespaced-errors.test`,
-`tests/imports.test`, `tests/same-failure.test` and
-`audit/error-payloads/tools/fuzz.tcl` (its namespaced programs).
+`tests/imports.test`, `tests/same-failure.test`,
+`audit/error-payloads/tools/fuzz.tcl` (its namespaced programs; once with
+`-fault wrong-namespace`), `audit/error-payloads/tools/mutate.tcl` (its
+identity mutants) and `audit/same-failure/tools/mutate.tcl`
+(`same-short-name-grouped`). A stdlib error moved into its module is spelled
+qualified by every user outside it, the audit tools, probes and mutant texts
+included.
 
 ### Completion precision through untyped callables
 
@@ -620,8 +625,12 @@ may-sets only (never a KNOWN-ERROR). If you change the walker's call, handle
 or bind cases, `EffectiveFacts`/`Fallback`/`IndirectFacts`, the erased-callable
 contract (`erasedErrorsOf`, `hir::callables::CarriedErrors`) or
 `hir/affine.tcl`'s error edges, run `tests/higher-order-completions.test`,
-`tests/error-payloads.test` and `audit/error-payloads/tools/mutate.tcl` (its
-completion mutants).
+`tests/error-payloads.test`, `audit/error-payloads/tools/fuzz.tcl -fault
+unhandled` (the unhandled error on every path, the untyped `generic` one
+included) and `audit/error-payloads/tools/mutate.tcl` (its completion
+mutants); a change to the affine error edges also needs the affine and
+coroutine harnesses above.
+
 ## MutableVector
 
 `MutableVector[T]` (MUTABLE-VECTOR.md) is a growable mutable VALUE: a

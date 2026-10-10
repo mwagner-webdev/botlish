@@ -4,6 +4,7 @@
 #
 #   tclsh9.0 audit/error-payloads/tools/fuzz.tcl ?-n N? ?-seed S? ?-dump 1?
 #                                                ?-backends LIST? ?-gc-stress 0|1?
+#                                                ?-fault KIND?
 #
 # Each program declares three to five errors: payload-free ones, payloads of
 # one to three fields drawn from a pool whose names have fixed types (Ints, a
@@ -50,7 +51,12 @@
 # moved into a payload (USE-AFTER-MOVE), an unhandled declared error and a
 # handler for the twin instead of the error raised (UNHANDLED-ERROR). A
 # faulty program is compiled with -strict 0 and must report the predicted
-# kind; a sound one must compile with no diagnostic at all.
+# kind; a sound one must compile with no diagnostic at all. With -fault KIND
+# (a key of `faults` below) every program carries that fault where it
+# applies, for a campaign aimed at one of them: `-fault unhandled` leaves
+# an error unhandled on every operation path, the untyped `generic` one
+# included (unaimed, about one program in 300 draws that combination);
+# `-fault wrong-namespace` on every namespaced path, `combined` included.
 #
 # Every third program is *namespaced* (ERROR-PAYLOADS.md, "Module-qualified
 # error identity"): modules alpha, beta and gamma -- written to a private copy
@@ -74,7 +80,7 @@
 # collection at every allocation site.
 
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
-set options [dict create -n 40 -seed 1 -dump 0 -backends {interp compile cranelift-generic cranelift} -gc-stress 0]
+set options [dict create -n 40 -seed 1 -dump 0 -backends {interp compile cranelift-generic cranelift} -gc-stress 0 -fault ""]
 foreach {option value} $argv {
     if {![dict exists $options $option]} {
         error "fuzz.tcl: unknown option $option"
@@ -662,6 +668,9 @@ set ::faults {
     wrong-nominal UNHANDLED-ERROR
     wrong-namespace UNHANDLED-ERROR
 }
+if {[dict get $options -fault] ne "" && ![dict exists $::faults [dict get $options -fault]]} {
+    error "fuzz.tcl: unknown fault [dict get $options -fault] (one of: [join [dict keys $::faults] {, }])"
+}
 
 # The program text of generation NUMBER and the model's expectation: {value
 # RENDERED} or {error KIND}.
@@ -672,8 +681,9 @@ proc Program {number} {
     if {[dict get $state ns]} {
         dict set state modules [NsModules [dict get $state affine]]
     }
-    if {[Rand 3] == 0} {
-        set fault [Pick [dict keys $::faults]]
+    set forced [dict get $::options -fault]
+    if {$forced ne "" || [Rand 3] == 0} {
+        set fault [expr {$forced ne "" ? $forced : [Pick [dict keys $::faults]]}]
         set fields [dict get $state errors E1]
         # A fault applies only where its subject exists.
         set applicable [switch -- $fault {

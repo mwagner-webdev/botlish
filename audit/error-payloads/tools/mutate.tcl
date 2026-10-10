@@ -2,6 +2,7 @@
 #
 #   tclsh9.0 audit/error-payloads/tools/mutate.tcl ?-only NAME,...? ?-tests FILES?
 #                                         ?-fuzz-count N? ?-fuzz-seed N?
+#                                         ?-fuzz-fault KIND?
 #                                         ?-timeout SECONDS?
 #
 # Each mutant is a deliberate bug, written in mutants.txt (beside this
@@ -15,8 +16,11 @@
 #     each with a private -tmpdir):
 #     killed if any test fails or a file does not complete;
 #   * audit/error-payloads/tools/fuzz.tcl -n N -seed S (every backend, the
-#     independent model): killed if it reports a disagreement or does not
-#     complete;
+#     independent model), and again aimed at one fault with -fault KIND
+#     (default `unhandled`: an error left unhandled on every operation path,
+#     the untyped `generic` one included, which the unaimed programs rarely
+#     draw; "" skips the aimed run): killed if either reports a disagreement
+#     or does not complete;
 #   * for a native mutant (one that edits native/src/ or the crate's
 #     manifest), first a release build of the copy's native backend (a mutant
 #     that does not build is reported NOT-BUILT, never counted as killed),
@@ -32,7 +36,7 @@
 
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
 
-set options [dict create -only "" -tests {tests/error-payloads.test tests/higher-order-completions.test tests/namespaced-errors.test} -fuzz-count 25 -fuzz-seed 11 -timeout 1800]
+set options [dict create -only "" -tests {tests/error-payloads.test tests/higher-order-completions.test tests/namespaced-errors.test} -fuzz-count 25 -fuzz-seed 11 -fuzz-fault unhandled -timeout 1800]
 foreach {option value} $argv {
     if {![dict exists $options $option]} { error "unknown option $option" }
     dict set options $option $value
@@ -234,18 +238,32 @@ try {
         } else {
             set tests survived
         }
-        set scratch [file tempdir botlish-error-payload-mutant-fuzz]
-        set here [pwd]
-        cd $scratch
-        lassign [run [dict get $options -timeout] tclsh9.0 [file join $tree audit error-payloads tools fuzz.tcl] \
-            -n [dict get $options -fuzz-count] -seed [dict get $options -fuzz-seed]] status output
-        cd $here
-        file delete -force $scratch
-        if {[regexp {programs \d+ disagreements (\d+)} [lindex [split [string trim $output] \n] end] -> n]} {
-            set fuzz [expr {$n > 0 ? "killed ($n of [dict get $options -fuzz-count] programs disagree)" : "survived"}]
-        } else {
-            set fuzz "killed (did not complete: [lastLine $output])"
+        set runs [list {}]
+        if {[dict get $options -fuzz-fault] ne ""} {
+            lappend runs [list -fault [dict get $options -fuzz-fault]]
         }
+        set parts {}
+        set fuzzKilled 0
+        foreach extra $runs {
+            set scratch [file tempdir botlish-error-payload-mutant-fuzz]
+            set here [pwd]
+            cd $scratch
+            lassign [run [dict get $options -timeout] tclsh9.0 [file join $tree audit error-payloads tools fuzz.tcl] \
+                -n [dict get $options -fuzz-count] -seed [dict get $options -fuzz-seed] {*}$extra] status output
+            cd $here
+            file delete -force $scratch
+            set label [expr {$extra eq {} ? "" : "$extra: "}]
+            if {[regexp {programs \d+ disagreements (\d+)} [lindex [split [string trim $output] \n] end] -> n]} {
+                lappend parts "$label$n of [dict get $options -fuzz-count] programs disagree"
+                if {$n > 0} {
+                    set fuzzKilled 1
+                }
+            } else {
+                lappend parts "${label}did not complete: [lastLine $output]"
+                set fuzzKilled 1
+            }
+        }
+        set fuzz [expr {$fuzzKilled ? "killed ([join $parts {; }])" : "survived"}]
         set verdict [expr {[string match killed* $tests] || [string match killed* $fuzz]
             || [string match killed* $rust] ? "KILLED" : "SURVIVED"}]
         lappend results [list $name $description $verdict $tests $fuzz $rust]

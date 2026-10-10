@@ -756,9 +756,34 @@ The first campaign run found one disagreement, a program the model rejects
 untyped callable parameter) that the tree before this milestone showed with
 payload-free errors too. It is fixed (STATIC-COMPLETION-PROOFS.md, "Precision
 and the erased-callable contract"), and the `unhandled` fault covers the
-`generic` path again; see the campaigns below the table.
+`generic` path again; see the campaigns below.
 The mutation run (point 52) also showed the fuzzer had no path through a
 handled call that handles a different error; it has one now (`partial`).
+
+Since ERROR-IDENTITY-AND-COMPLETION-SOUNDNESS.md the fuzzer also generates
+*namespaced* programs (every third: modules `alpha`, `beta`, `gamma` and the
+entry program each declaring an error `E`, reached directly, through a
+declaring function, through `call` and through the combined path, with the
+`wrong-namespace` fault), counts handler faults by path, and takes
+`-fault KIND` to aim a campaign at one fault. On the final tree:
+
+| campaign | programs | accepted | rejected as predicted | namespaced | disagreements |
+|---|---:|---:|---:|---:|---:|
+| `-n 200 -seed 1` (4 backends) | 200 | 152 | 48 | 67 | 0 |
+| `-n 200 -seed 1001` | 200 | 150 | 50 | 67 | 0 |
+| `-n 60 -seed 5001 -gc-stress 1` | 60 | 42 | 18 | 20 | 0 |
+| `-n 150 -seed 3001 -fault unhandled` | 150 | 7 | 143 | 50 | 0 |
+| `-n 40 -seed 6001 -fault unhandled -gc-stress 1` | 40 | 0 | 40 | 13 | 0 |
+| `-n 90 -seed 4001 -fault wrong-namespace` | 90 | 60 | 30 | 30 | 0 |
+
+The `unhandled` fault on the restored `generic` path: 33 and 5 programs of
+the two aimed campaigns (beside `raise` 46/15, `mid` 26/9, `mid2` 26/4,
+`partial` 12/7), each rejected UNHANDLED-ERROR as the model predicts --
+the shape the compiler accepted before the fix
+(ERROR-IDENTITY-AND-COMPLETION-SOUNDNESS.md, points 7 and 8). `wrong-namespace`: 30
+programs, through `combined` 13, `declaring` 10, `generic` 5 and `direct`
+2, each UNHANDLED-ERROR. (Unaimed, the `unhandled` fault lands on `generic`
+about once per 300 programs, hence the aimed campaigns.)
 
 The affine fuzzer (`audit/affine/tools/fuzz.tcl`) also exercises payloads
 now: an affine value moved into a payload and handled ignored, whole,
@@ -766,40 +791,51 @@ destructured, or passed through a declaring function (point 54).
 
 ### 52. Mutation results
 
-`audit/error-payloads/tools/mutate.tcl` applies each of the 24 mutants of
+`audit/error-payloads/tools/mutate.tcl` applies each mutant of
 `audit/error-payloads/tools/mutants.txt` -- the brief's item-87 list, each
 a deliberate bug -- to a private copy of the tree and runs the detectors:
-`tests/error-payloads.test`, 25 fuzz programs (all backends), and for the
-native-runtime mutant a rebuild plus the Rust payload-slot tests.
+the test files, the fuzzer's programs (all backends), and for the
+native-runtime mutant a rebuild plus the Rust payload-slot tests. Since
+ERROR-IDENTITY-AND-COMPLETION-SOUNDNESS.md the catalog also holds that
+milestone's 20 mutants (its point 30 has their table), the test files are
+`tests/error-payloads.test`, `tests/higher-order-completions.test` and
+`tests/namespaced-errors.test`, and the fuzzer runs twice: 25 programs
+unaimed and 25 aimed with `-fault unhandled`.
 
-**24 mutants, 24 killed, 0 survived.**
+**44 mutants, 44 killed, 0 survived** (the final run, after
+ERROR-IDENTITY-AND-COMPLETION-SOUNDNESS.md; a first run there, before the
+aimed detector existed, also killed all 44). This milestone's 24:
 
-| mutant | tests failed | fuzz programs disagreeing | Rust |
-|---|---:|---:|---|
-| `fail-ignores-payload-tcl` | 35 | 19/25 | |
-| `fail-ignores-payload-native` | 37 | 19/25 | |
-| `missing-payload-accepted` | 1 | 0/25 | |
-| `payload-on-payload-free-accepted` | 1 | 1/25 | |
-| `dispatch-by-shape-tcl` | 3 | 17/25 | |
-| `same-shape-interchangeable-native` | 2 | 13/25 | |
-| `whole-binding-loses-field-tcl` | 28 | 19/25 | |
-| `whole-binding-loses-field-native` | 21 | 17/25 | |
-| `partial-destructuring-drops-bound-affine-field` | 5 | 3/25 | |
-| `partial-destructuring-leaks-unbound-affine-field` | 8 | 5/25 | |
-| `nested-destructuring-handler-specific` | 7 | 12/25 | |
-| `renaming-binds-original` | 9 | 19/25 | |
-| `ignored-affine-payload-leaks` | 3 | 3/25 | |
-| `handler-payload-not-owned` | 8 | 5/25 | |
-| `propagation-drops-payload-tcl` | 1 | 0/25 | |
-| `propagation-copies-affine-payload` | 1 | 0/25 | |
-| `payload-construction-failure-leaks` | 1 | 0/25 | |
-| `contract-loses-payload-metadata` | 2 | 0/25 | |
-| `generic-propagation-loses-identity` | 1 | 7/25 | |
-| `tcl-serializes-payload-through-string` | 36 | 19/25 | |
-| `native-payload-free-allocates` | 1 | 0/25 | |
-| `native-small-payload-boxes` | 2 | 0/25 | |
-| `coroutine-cached-failure-duplicates-affine-payload` | 1 | 0/25 | |
-| `propagation-drops-payload-native` | 2 | 0/25 | killed |
+| mutant | tests failed | fuzz programs disagreeing | aimed | Rust |
+|---|---:|---:|---:|---|
+| `fail-ignores-payload-tcl` | 69 | 19/25 | 1/25 | |
+| `fail-ignores-payload-native` | 71 | 19/25 | 1/25 | |
+| `missing-payload-accepted` | 2 | 1/25 | 0/25 | |
+| `payload-on-payload-free-accepted` | 2 | 0/25 | 0/25 | |
+| `dispatch-by-shape-tcl` | 24 | 18/25 | 1/25 | |
+| `same-shape-interchangeable-native` | 25 | 10/25 | 1/25 | |
+| `whole-binding-loses-field-tcl` | 60 | 18/25 | 1/25 | |
+| `whole-binding-loses-field-native` | 23 | 15/25 | 1/25 | |
+| `partial-destructuring-drops-bound-affine-field` | 6 | 1/25 | 0/25 | |
+| `partial-destructuring-leaks-unbound-affine-field` | 9 | 5/25 | 1/25 | |
+| `nested-destructuring-handler-specific` | 7 | 9/25 | 0/25 | |
+| `renaming-binds-original` | 9 | 18/25 | 0/25 | |
+| `ignored-affine-payload-leaks` | 4 | 3/25 | 0/25 | |
+| `handler-payload-not-owned` | 9 | 5/25 | 1/25 | |
+| `propagation-drops-payload-tcl` | 1 | 0/25 | 0/25 | |
+| `propagation-copies-affine-payload` | 1 | 0/25 | 0/25 | |
+| `payload-construction-failure-leaks` | 1 | 0/25 | 0/25 | |
+| `contract-loses-payload-metadata` | 26 | 7/25 | 0/25 | |
+| `generic-propagation-loses-identity` | 3 | 6/25 | 0/25 | |
+| `tcl-serializes-payload-through-string` | 70 | 19/25 | 1/25 | |
+| `native-payload-free-allocates` | 1 | 0/25 | 0/25 | |
+| `native-small-payload-boxes` | 2 | 0/25 | 0/25 | |
+| `coroutine-cached-failure-duplicates-affine-payload` | 1 | 0/25 | 0/25 | |
+| `propagation-drops-payload-native` | 3 | 0/25 | 0/25 | killed |
+
+(The counts grew with the two new test files, which also exercise payloads
+through generic helpers and modules; the aimed programs are mostly
+rejected, so they observe few run-time payloads.)
 
 The brief's names map onto them: payload fields ignored during fail
 construction (`fail-ignores-payload-*`), missing payload accepted, payload
@@ -821,8 +857,9 @@ handlers name a different error (the Tcl compiler's `return -options`
 re-raise). `ep-propagation-through-handled-call` and the fuzzer's `partial`
 path were added for it; the final run above is after them. The mutants
 only the tests kill are a diagnostic whose fault the 25 programs did not
-draw (`missing-payload-accepted`; the first run's fuzz, on other programs,
-killed it) and properties the fuzzer does not observe by design: a
+draw (`payload-on-payload-free-accepted` in the final run, which an earlier
+run's fuzz killed; `missing-payload-accepted` the other way round) and
+properties the fuzzer does not observe by design: a
 releasing re-raise past a pending affine argument, a failing payload field
 after an affine one, a module boundary, the native allocation counters and
 the coroutine contract.
