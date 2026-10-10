@@ -95,9 +95,9 @@ scenario S03b-from-int-plus-legal-open-caller {byte::from_int(45) + a legal (han
 byte::from_int(45)
 fn dyn(m):
     r = byte::from_int(m + 0):
-        on BelowRange:
+        on byte::BelowRange:
             0
-        on AboveRange:
+        on byte::AboveRange:
             255
     r
 fn caller(g, v):
@@ -107,9 +107,9 @@ caller(dyn, 45)
 scenario S03c-from-int-m6-fixture-as-written {the M6 condition-outcome-12 / M5 shared-instance fixture, compiled as written (non-strict): note its diagnostics} \
     {import byte
 byte::from_int(45)
-fn dyn(m: int) -> Byte errors BelowRange, AboveRange:
+fn dyn(m: int) -> Byte errors byte::BelowRange, byte::AboveRange:
     byte::from_int(m)
-fn caller(g, v) -> Byte errors BelowRange, AboveRange:
+fn caller(g, v) -> Byte errors byte::BelowRange, byte::AboveRange:
     g(v)
 caller(dyn, 45)
 } {byte::from_int dyn caller}
@@ -317,9 +317,9 @@ scenario S09-completion-per-call-shared-instance {different per-call effectiveEr
 byte::from_int(45)
 fn dyn(m):
     r = byte::from_int(m + 0):
-        on BelowRange:
+        on byte::BelowRange:
             0
-        on AboveRange:
+        on byte::AboveRange:
             255
     r
 dyn(1000)
@@ -332,7 +332,7 @@ scenario S10-byte-set-literal-and-dynamic {byte::set punctuation literal + a dyn
     {p = byte::set(['-', '.', '_', '~'])
 fn dyn(chars):
     r = byte::set(chars):
-        on AboveRange:
+        on byte::AboveRange:
             p
     r
 dyn(['A'])
@@ -440,7 +440,7 @@ fb(byte::from_int(7))
 scenario S14-native-result-range {char::scalar_value's -result-range nonneg reaches a shared from_int instance} \
     {fn conv(c: UnicodeChar):
     r = byte::from_int(char::scalar_value(c)):
-        on AboveRange:
+        on byte::AboveRange:
             0
     r
 conv('a')

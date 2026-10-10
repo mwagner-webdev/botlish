@@ -350,9 +350,9 @@ fn sentinel() -> abi::bytes::Bytes:
 
 fn pre(m: abi::bytes::MutableBytes, n: int) -> abi::bytes::Bytes:
     c = abi::usize(n):
-        on AbiIntegerBelowRange:
+        on abi::AbiIntegerBelowRange:
             abi::usize(0)
-        on AbiIntegerAboveRange:
+        on abi::AbiIntegerAboveRange:
             abi::usize(0)
     abi::bytes::freeze_prefix(m, c):
         on UpperOverrun:
@@ -512,10 +512,10 @@ import str
 fn mbs(s: str) -> abi::bytes::MutableBytes:
     abi::bytes::from_bytes(abi::bytes::from_list(str::encode_utf8(s)))
 
-fn out(fd: int, data: abi::bytes::Bytes) -> int errors AbiIntegerBelowRange, AbiIntegerAboveRange:
+fn out(fd: int, data: abi::bytes::Bytes) -> int errors abi::AbiIntegerBelowRange, abi::AbiIntegerAboveRange:
     linux::write(abi::i32(fd), data)
 
-fn rd(fd: int, data: abi::bytes::MutableBytes) -> linux::ReadResult errors AbiIntegerBelowRange, AbiIntegerAboveRange:
+fn rd(fd: int, data: abi::bytes::MutableBytes) -> linux::ReadResult errors abi::AbiIntegerBelowRange, abi::AbiIntegerAboveRange:
     linux::read(abi::i32(fd), data)
 
 }

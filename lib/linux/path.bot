@@ -1,7 +1,7 @@
 # path.bot -- the "linux::path" namespace: textual Linux paths
 # (CONTEXT-TRAITS.md, "Paths").
 #
-#   linux::path::validate(value)       proves VALUE a LinuxPath, or NotAPath
+#   linux::path::validate(value)       proves VALUE a LinuxPath, or io::path::NotAPath
 #   linux::path::valid?(value)         true proves VALUE a LinuxPath
 #   linux::path::concat(path, part)    PATH joined with PART: a LinuxPath
 #   linux::path::text(path)            PATH's String form (the carrier)
@@ -14,7 +14,7 @@
 #
 #   fn show(value: str):
 #       linux::path::validate(value):
-#           on NotAPath:
+#           on io::path::NotAPath:
 #               return
 #       io::print_line(str::concat("Reading config at ", value))   # a str
 #       open_config(value)                                # and a LinuxPath
@@ -54,12 +54,12 @@ fn valid?(value: str) -> bool proves value: LinuxPath:
 
 # Completes normally only when VALUE is a valid textual Linux path, which
 # proves it a LinuxPath for the rest of the caller's path; fails with
-# NotAPath otherwise.
-fn validate(value: str) -> unit proves value: LinuxPath errors NotAPath:
+# io::path::NotAPath otherwise.
+fn validate(value: str) -> unit proves value: LinuxPath errors io::path::NotAPath:
     if valid?(value):
         unit
     else:
-        fail NotAPath
+        fail io::path::NotAPath
 
 # The path's canonical String form: exactly the carrier String (lossless; no
 # escaping, quoting or display conversion).
@@ -70,13 +70,13 @@ fn text(path: LinuxPath) -> str:
 # with one. COMPONENT is a relative path fragment -- non-empty, without
 # U+0000, not starting with "/" (an absolute component would replace PATH,
 # which joining never does) -- and may itself contain "/", "." or "..";
-# nothing is normalized and no filesystem is observed. Fails with NotAPath
+# nothing is normalized and no filesystem is observed. Fails with io::path::NotAPath
 # for any other COMPONENT. The result is a LinuxPath by validation, the
 # ordinary owner proof.
-fn concat(path: LinuxPath, component: str) -> LinuxPath errors NotAPath:
+fn concat(path: LinuxPath, component: str) -> LinuxPath errors io::path::NotAPath:
     m = component.length()
     if m == 0 or component.char_at(0) == '/' or not valid?(component):
-        fail NotAPath
+        fail io::path::NotAPath
     n = path.length()
     joined = if n > 0 and path.substring(n - 1, n) == "/":
         str::concat(path, component)

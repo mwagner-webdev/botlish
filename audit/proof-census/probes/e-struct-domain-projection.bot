@@ -14,9 +14,9 @@ fn plus_one(x: abi::U8):
 
 fn dynamic(n):
     a = abi::u8(n):
-        on AbiIntegerBelowRange:
+        on abi::AbiIntegerBelowRange:
             abi::u8(0)
-        on AbiIntegerAboveRange:
+        on abi::AbiIntegerAboveRange:
             abi::u8(255)
     direct(a)
 

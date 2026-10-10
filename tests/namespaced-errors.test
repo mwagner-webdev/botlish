@@ -1,0 +1,578 @@
+# namespaced-errors.test -- module-qualified error identity (ERROR-PAYLOADS.md,
+# "Module-qualified error identity"; hir/errordecls.tcl).
+#
+# A source-defined error is nominally identified by its declaring module and
+# its declared name: `error Failed` in module a is a::Failed, in module b
+# b::Failed, in the entry program the bare Failed. Two modules may declare the
+# same short name -- with identical payloads, even -- and remain two identities:
+# a handler for a::Failed never handles b::Failed, on any backend. Inside its
+# module an error is named by its short name; outside, qualified, through the
+# ordinary exact namespace imports. Payloads, handlers, ownership and the
+# native payload transport are unchanged: only the identity is qualified.
+#
+# Also the interaction with the completion analysis' conservative fallback
+# (tests/higher-order-completions.test): a fallback keeps canonical identities,
+# never short names.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+testConstraint linuxX86_64 [expr {$::tcl_platform(os) eq "Linux"
+    && $::tcl_platform(machine) in {x86_64 amd64}}]
+
+# Two modules declaring the same short names with the same payload shapes, a
+# nested module of the first, and a module of a coroutine and an affine
+# payload.
+set nsLib {
+a.bot {error Failed:
+    code: int
+
+error Plain
+
+fn run(x: int) -> int errors Failed:
+    if x < 0:
+        fail Failed {code: x}
+    x
+
+fn plain(x: int) -> int errors Plain:
+    if x < 0:
+        fail Plain
+    x
+
+fn own(x: int) -> int:
+    run(x):
+        on Failed {code}:
+            code * 1000
+
+fn loose(x) -> int errors Failed:
+    if x == 1:
+        fail Failed {code: 1}
+    0
+}
+b.bot {error Failed:
+    code: int
+
+error Plain
+
+fn run(x: int) -> int errors Failed:
+    if x < 0:
+        fail Failed {code: x * 10}
+    x
+
+fn plain(x: int) -> int errors Plain:
+    if x < 0:
+        fail Plain
+    x
+
+fn loose(x) -> int errors Failed:
+    if x == 1:
+        fail Failed {code: 10}
+    0
+}
+a/sub.bot {fn id(x):
+    x
+}
+c.bot {import a
+
+fn relay(x: int) -> int errors a::Failed:
+    a::run(x)
+
+fn absorb(x: int) -> int:
+    a::run(x):
+        on a::Failed {code}:
+            code + 1
+}
+}
+
+# Runs SCRIPT (in the caller's frame) with the module files FILES ({PATH TEXT
+# ...}) in a private copy of the library.
+proc nsWith {files script} {
+    withPrivateLibrary {
+        foreach {path text} $files {
+            set full [file join $::core::libraryDir $path]
+            file mkdir [file dirname $full]
+            set ch [open $full w]
+            fconfigure $ch -encoding utf-8
+            puts -nonewline $ch $text
+            close $ch
+        }
+        uplevel 1 $script
+    }
+}
+
+# The error code (last word) of compiling TEXT, SYNTAX for a syntax error, or
+# "ok".
+proc nsCode {text} {
+    if {[catch {surface::compile $text -warnings off} message options]} {
+        set code [dict get $options -errorcode]
+        if {[lrange $code 0 1] eq {SURFACE SYNTAX}} {
+            return SYNTAX
+        }
+        return [lindex $code end]
+    }
+    return ok
+}
+
+# The message of compiling TEXT, without its location, or "ok".
+proc nsMessage {text} {
+    if {[catch {surface::compile $text -warnings off} message]} {
+        regsub {^[^:]*:[0-9]+:[0-9]+: } $message {} message
+        return $message
+    }
+    return ok
+}
+
+# {KIND MESSAGE-NAMING} for the diagnostics of TEXT (-strict 0), the message
+# reduced to the declared error it names, sorted.
+proc nsDiagnostics {text} {
+    set hir [surface::compile $text -strict 0 -warnings off]
+    return [lsort -unique [lmap d [hir::diagnostics $hir] {
+        set message [dict get $d message]
+        if {[regexp {declared error "([^"]+)"} $message -> name]} {
+            set message $name
+        }
+        list [dict get $d kind] $message
+    }]]
+}
+
+# The outcome of the -strict 0 program TEXT on every backend: {error CODE
+# MESSAGE} or {value V}, the same on every backend or a Tcl error.
+proc nsLoose {text} {
+    set hir [surface::compile $text -strict 0 -warnings off]
+    set exprs [hir::lower $hir]
+    set outcomes [lsort -unique [lmap b {interp compile cranelift-generic cranelift} {
+        lrange [outcomeUnder $b $exprs] 0 2
+    }]]
+    if {[llength $outcomes] != 1} {
+        error "backends disagree: $outcomes"
+    }
+    return [lindex $outcomes 0]
+}
+
+# The instruction lines of function NAME in the NIR of HIR.
+proc nsFunc {hir name} {
+    set lines {}
+    set inside 0
+    foreach line [split [native::nir $hir] \n] {
+        if {[regexp {^func [0-9]+ "([^"]*)"} $line -> fname]} {
+            set inside [expr {$fname eq $name}]
+            continue
+        }
+        if {$line eq "end"} {
+            set inside 0
+            continue
+        }
+        if {$inside} {
+            lappend lines [regsub { @e[0-9]+$} [string trim $line] {}]
+        }
+    }
+    return $lines
+}
+
+# ---------------------------------------------------------------------------
+# B1, B25, B26: two modules, one short name, two identities
+
+test nerr-coexist {two modules declaring the same short error names, with identical payloads, both load: four identities, each canonically owned by its module} -body {
+    nsWith $nsLib {
+        set hir [surface::compile "import a\nimport b\n\[a::run(1), b::run(2)\]\n" -warnings off]
+        list [lsearch -all -inline -glob [hir::errorDecls $hir] {[ab]::*}] [lindex [sourceAgree "import a\nimport b\n\[a::run(1), b::run(2)\]\n"] 1]
+    }
+} -result {{a::Failed a::Plain b::Failed b::Plain} {[1, 2]}}
+
+test nerr-distinguishable {calls raising a::Failed and b::Failed are distinguishable: one handler each, the same destructuring, on every backend (specialized and not)} -body {
+    nsWith $nsLib {
+        sourceAgree "import a\nimport b\nfn both(x: int):\n    r = a::run(x):\n        on a::Failed {code}:\n            return \[\"a\", code\]\n    s = b::run(x - 1):\n        on b::Failed d:\n            return \[\"b\", d.code\]\n    \[r, s\]\n\[both(5), both(-2), both(0)\]\n"
+    }
+} -result {value {[[5, 4], ["a", -2], ["b", -10]]}}
+
+test nerr-wrong-namespace-rejected {a handler for a::Failed does not handle b::Failed, nor the reverse: UNHANDLED-ERROR names the canonical identity} -body {
+    nsWith $nsLib {
+        list [nsDiagnostics "import a\nimport b\nfn f(x: int) -> int:\n    b::run(x):\n        on a::Failed {code}:\n            code\n0\n"] \
+            [nsDiagnostics "import a\nimport b\nfn f(x: int) -> int:\n    a::run(x):\n        on b::Failed {code}:\n            code\n0\n"]
+    }
+} -result {{{UNHANDLED-ERROR b::Failed}} {{UNHANDLED-ERROR a::Failed}}}
+
+test nerr-wrong-namespace-runtime {B10: dispatch is nominal at run time on every backend: with -strict 0, b::Failed passes a handler for a::Failed and escapes, rendered with its canonical identity} -body {
+    nsWith $nsLib {
+        nsLoose "import a\nimport b\nfn f(x: int) -> int:\n    b::run(x):\n        on a::Failed {code}:\n            code\nf(-3)\n"
+    }
+} -result {error {CORE SEMANTIC UNCAUGHT-ERROR} {uncaught propagated error: <error b::Failed {code: -30}>}}
+
+test nerr-both-handlers {one call that may raise both: a handler for each identity, never a duplicate; each runs for its own identity only} -body {
+    nsWith $nsLib {
+        sourceAgree "import a\nimport b\nfn mix(x: int, which: int) -> int errors a::Failed, b::Failed:\n    if which == 0:\n        return a::run(x)\n    b::run(x)\nfn f(x: int, which: int):\n    r = mix(x, which):\n        on b::Failed {code}:\n            return \[\"b\", code\]\n        on a::Failed {code}:\n            return \[\"a\", code\]\n    r\n\[f(-9, 0), f(-1, 1), f(3, 1)\]\n"
+    }
+} -result {value {[["a", -9], ["b", -10], 3]}}
+
+test nerr-same-module-duplicate {a short name declared twice in one module, or in the entry program, is still rejected} -body {
+    nsWith [concat $nsLib {dup.bot {error Twice
+error Twice
+fn f(x):
+    x
+}}] {
+        list [nsCode "import dup\n1\n"] [nsCode "error Failed\nerror Failed\n1\n"] [nsMessage "import dup\n1\n"]
+    }
+} -match glob -result {UNDECLARED-ERROR UNDECLARED-ERROR {error "Twice" is already declared in module "dup"*}}
+
+test nerr-entry-beside-module {B3: the entry program's own Failed is the bare identity beside a::Failed: both declared, both handled, never confused} -body {
+    nsWith $nsLib {
+        list [sourceAgree "import a\nerror Failed:\n    code: int\nfn mine(x: int) -> int errors Failed:\n    if x < 0:\n        fail Failed {code: 100}\n    x\nfn f(x: int):\n    r = mine(x):\n        on Failed {code}:\n            return \[\"mine\", code\]\n    s = a::run(x - 10):\n        on a::Failed {code}:\n            return \[\"a\", code\]\n    s\n\[f(-1), f(3), f(20)\]\n"] \
+            [nsDiagnostics "import a\nerror Failed:\n    code: int\nfn f(x: int) -> int:\n    a::run(x):\n        on Failed {code}:\n            code\n0\n"]
+    }
+} -result {{value {[["mine", 100], ["a", -7], 10]}} {{UNHANDLED-ERROR a::Failed}}}
+
+# ---------------------------------------------------------------------------
+# B4, B5, B12: naming inside and outside the owner
+
+test nerr-own-short-name {B4: inside its module an error is its short name -- declared, failed and handled bare -- and is the canonical a::Failed} -body {
+    nsWith $nsLib {
+        set hir [surface::compile "import a\na::own(-3)\n" -warnings off]
+        list [lindex [sourceAgree "import a\n\[a::own(-3), a::own(4)\]\n"] 1] \
+            [lsearch -all -inline -regexp [split [hir::format $hir] \n] {fail a::|on a::|errors a::}]
+    }
+} -match glob -result {{\[-3000, 4\]} {*errors a::Failed*fail a::Failed*on a::Failed*}}
+
+test nerr-fail-outside-owner {B12: outside the owner, `fail a::Failed {...}` constructs its payload under exactly the ordinary checks} -body {
+    nsWith $nsLib {
+        set decl "import a\nfn mk(x: int) -> int errors a::Failed, a::Plain:\n"
+        list [lindex [sourceAgree "${decl}    if x < 0:\n        fail a::Failed {code: 7}\n    x\nfn f(x: int) -> int:\n    mk(x):\n        on a::Failed {code}:\n            code\n        on a::Plain:\n            0\n\[f(-1), f(2)\]\n"] 1] \
+            [lmap body {
+                {fail a::Failed}
+                {fail a::Plain {code: 1}}
+                {fail a::Failed {}}
+                {fail a::Failed {code: 1, x: 2}}
+                {fail a::Failed {code: 1, code: 2}}
+                {fail a::Failed {code: "s"}}
+            } {nsCode "${decl}    if x < 0:\n        $body\n    x\n0\n"}]
+    }
+} -result {{[7, 2]} {MISSING-ERROR-PAYLOAD UNEXPECTED-ERROR-PAYLOAD MISSING-FIELD UNKNOWN-FIELD DUPLICATE-FIELD TYPE}}
+
+test nerr-module-relays {a module that imports another names its errors qualified, relays them and handles them; its importer handles the relayed identity} -body {
+    nsWith $nsLib {
+        sourceAgree "import a\nimport c\nfn f(x: int):\n    r = c::relay(x):\n        on a::Failed {code}:\n            return \[\"relayed\", code\]\n    r\n\[f(-4), f(4), c::absorb(-4)\]\n"
+    }
+} -result {value {[["relayed", -4], 4, -3]}}
+
+# ---------------------------------------------------------------------------
+# B5, B6, B15: authorization and diagnostics
+
+test nerr-import-authorization {B5/B15: a qualified error is authorized exactly like any qualified member -- its namespace imported exactly (MISSING-IMPORT otherwise: no import, a child import, another namespace), an existing namespace (UNKNOWN-NAMESPACE), a declared error of it (UNKNOWN-SYMBOL)} -body {
+    nsWith $nsLib {
+        list \
+            [nsCode "fn f(x: int) -> int:\n    x\nf(1):\n    on a::Failed:\n        0\n"] \
+            [nsCode "import a::sub\nfn f(x: int) -> int:\n    x\nf(1):\n    on a::Failed:\n        0\n"] \
+            [nsCode "import b\nfn f(x: int) -> int:\n    x\nf(1):\n    on a::Failed:\n        0\n"] \
+            [nsCode "fn f(x: int) -> int:\n    x\nf(1):\n    on nonexistent::E:\n        0\n"] \
+            [nsCode "import a\nfn f(x: int) -> int:\n    x\nf(1):\n    on a::DoesNotExist:\n        0\n"] \
+            [nsCode "fn f(x: int) -> int errors a::Failed:\n    x\n1\n"] \
+            [nsCode "fn f(g: Fn{args: \[int\], return: int, errors: \[a::Failed\]}) -> int:\n    1\n1\n"] \
+            [nsCode "fn f(x: int) -> int errors a::Failed:\n    fail a::Failed {code: 1}\n1\n"]
+    }
+} -result {MISSING-IMPORT MISSING-IMPORT MISSING-IMPORT UNKNOWN-NAMESPACE UNKNOWN-SYMBOL MISSING-IMPORT MISSING-IMPORT MISSING-IMPORT}
+
+test nerr-diagnostic-messages {the diagnostics say which namespace, which import and which errors exist; a bare spelling of a module's error outside it names the qualified spelling} -body {
+    nsWith $nsLib {
+        list [nsMessage "import a::sub\nfn f(x: int) -> int:\n    x\nf(1):\n    on a::Failed:\n        0\n"] \
+            [nsMessage "import a\nfn f(x: int) -> int:\n    x\nf(1):\n    on a::DoesNotExist:\n        0\n"] \
+            [nsMessage "import a\nfn f(x: int) -> int:\n    x\nf(1):\n    on Failed:\n        0\n"]
+    }
+} -result {{namespace "a" is not imported; add `import a` to use `a::Failed` (imports are exact: `import a::sub` does not import "a")} {namespace "a" has no error "DoesNotExist" (it declares: Failed, Plain)} {unknown error "Failed": no "error Failed" declaration is visible here (a module's error is named qualified outside its module: a::Failed)}}
+
+test nerr-no-import-error {B6: there is no `import error` form: outside its module an error is named qualified} -body {
+    nsWith $nsLib {
+        nsCode "import error a::Failed\n1\n"
+    }
+} -result SYNTAX
+
+test nerr-duplicate-handlers {B14: two handlers of one canonical identity are DUPLICATE, whatever the spelling (inside the owner, `on Failed` and `on a::Failed` are one); one handler per same-short-name identity is not} -body {
+    nsWith [concat $nsLib {dupon.bot {error E
+fn g(x: int) -> int errors E:
+    if x < 0:
+        fail E
+    x
+fn f(x: int) -> int:
+    g(x):
+        on E:
+            0
+        on dupon::E:
+            1
+}}] {
+        list [nsCode "import a\nfn f(x: int) -> int:\n    a::run(x):\n        on a::Failed:\n            0\n        on a::Failed:\n            1\n0\n"] \
+            [nsCode "import dupon\n1\n"] \
+            [nsCode "import a\nimport b\nfn f(x: int) -> int errors b::Failed:\n    a::run(x):\n        on a::Failed:\n            0\n        on b::Failed:\n            1\n0\n"]
+    }
+} -result {DUPLICATE DUPLICATE ok}
+
+# ---------------------------------------------------------------------------
+# B7, B8: builtin and stdlib identities
+
+test nerr-builtin-root {B7: a builtin error of the runtime stays a root identity, named bare everywhere (in the entry program and in a module); a module may not declare its short name} -body {
+    nsWith [concat $nsLib {usesat.bot {import list
+fn first(xs: List[int]) -> int:
+    list::at(xs, 0):
+        on IndexNotFound:
+            -1
+} shadow.bot {error IndexNotFound
+fn f(x):
+    x
+}}] {
+        list [lindex [sourceAgree "import list\nimport usesat\nfn g(xs: List\[int\]) -> int:\n    list::at(xs, 1):\n        on IndexNotFound:\n            -2\n\[usesat::first(\[\]), g(\[7\]), usesat::first(\[4\])\]\n"] 1] \
+            [nsCode "import shadow\n1\n"]
+    }
+} -result {{[-1, -2, 4]} UNDECLARED-ERROR}
+
+test nerr-stdlib-identities {B8: the shipped modules' errors are owned by their modules} -body {
+    set hir [surface::compile "import abi\nimport abi::x86_64\nimport byte\nimport io\nimport io::path\nimport list\n1\n" -warnings off]
+    lsort [hir::errorDecls $hir]
+} -result {abi::AbiIntegerAboveRange abi::AbiIntegerBelowRange abi::x86_64::Register64AboveRange abi::x86_64::Register64BelowRange byte::AboveRange byte::BelowRange io::WriteFailed io::path::NotAPath list::NotFound}
+
+test nerr-stdlib-qualified-use {B8: outside its module a stdlib error is spelled qualified (list::find's NotFound is list::NotFound), the bare short name is unknown there} -body {
+    list [lindex [sourceAgree "import list\nfn big(x):\n    x > 5\nr = list::find(\[1, 2\], big):\n    on list::NotFound:\n        0\nr\n"] 1] \
+        [nsCode "import list\nfn big(x):\n    x > 5\nr = list::find(\[1, 2\], big):\n    on NotFound:\n        0\nr\n"]
+} -result {0 UNDECLARED-ERROR}
+
+# ---------------------------------------------------------------------------
+# B9, B13, B24: descriptors, contracts, completion sets
+
+test nerr-descriptors {B9: one descriptor per canonical identity -- the same payload shape twice is two descriptors, each with its short name and namespace} -body {
+    nsWith $nsLib {
+        surface::compile "import a\nimport b\n1\n" -warnings off
+        set entries [hir::errordecls::entries]
+        list [lsearch -all -inline -glob [dict keys $entries] {[ab]::*}] \
+            [dict get $entries a::Failed namespace] [dict get $entries b::Failed namespace] \
+            [expr {[hir::errordecls::payloadType a::Failed] eq [hir::errordecls::payloadType b::Failed]}] \
+            [hir::errordecls::shortName a::Failed] [hir::errordecls::namespaceOf a::Failed] \
+            [hir::errordecls::shortName abi::x86_64::Register64BelowRange] [hir::errordecls::namespaceOf abi::x86_64::Register64BelowRange]
+    }
+} -result {{a::Failed b::Failed} a b 1 Failed a Register64BelowRange abi::x86_64}
+
+test nerr-contracts {B13: errors clauses and function types name canonical identities; contract subset checks compare identities, never short names} -body {
+    nsWith $nsLib {
+        set apply "import a\nimport b\nfn apply(k: Fn{args: \[int\], return: int, errors: \[a::Failed\]}, x: int) -> int errors a::Failed:\n    k(x)\n"
+        list [lindex [sourceAgree "${apply}fn f(x: int) -> int:\n    apply(a::run, x):\n        on a::Failed {code}:\n            code\n\[f(-6), f(6)\]\n"] 1] \
+            [nsMessage "${apply}fn f(x: int) -> int:\n    apply(b::run, x):\n        on a::Failed {code}:\n            code\n0\n"] \
+            [regexp -inline {k:Fn\{[^\}]*\}} [hir::format [surface::compile "${apply}0\n" -warnings off]]]
+    }
+} -match glob -result {{\[-6, 6\]} {*error set incompatible: the callable may raise b::Failed, but the function type allows only \[a::Failed\]*} {{k:Fn\{args: \[int\], return: int, errors: \[a::Failed\]\}}}}
+
+test nerr-completion-sets {B24: completion sets hold canonical identities -- a call that may raise both keeps both, exact narrowing removes one by identity} -body {
+    nsWith $nsLib {
+        set text "import a\nimport b\nfn pick(x: int) -> int errors a::Failed, b::Failed:\n    if x < 0:\n        fail a::Failed {code: x}\n    if x > 100:\n        fail b::Failed {code: x}\n    x\nfn both(k: int):\n    pick(k):\n        on a::Failed:\n            0\n        on b::Failed:\n            1\nfn low(k: int):\n    if k > 50:\n        return 0\n    pick(k):\n        on a::Failed {code}:\n            code\n\[both(-1), both(200), low(-7), low(60)\]\n"
+        set hir [surface::compile $text -warnings off]
+        list [lrange [lmap e [hirFind $hir handle] {hir::completions::effectiveErrorsOf $hir $e}] end-1 end] [lindex [sourceAgree $text] 1]
+    }
+} -result {{{a::Failed b::Failed} a::Failed} {[0, 1, -7, 0]}}
+
+# ---------------------------------------------------------------------------
+# B16, B17: the module cache and HIR text
+
+test nerr-cache-importer-independent {B16: a cached module AST is importer-neutral -- a's declaration stays its short name in the AST, and a::Failed is its identity whoever loads it, directly or through another module} -body {
+    nsWith $nsLib {
+        set one [surface::compile "import a\n1\n" -warnings off]
+        set two [surface::compile "import c\nimport b\nc::absorb(-1)\n" -warnings off]
+        set three [surface::compile "import a\n1\n" -warnings off]
+        set ast [surface::modules::ParseModule [file join $::core::libraryDir a.bot]]
+        list [lsearch -all -inline -glob [hir::errorDecls $one] a::*] [lsearch -all -inline -glob [hir::errorDecls $two] a::*] \
+            [lsearch -all -inline -glob [hir::errorDecls $three] a::*] \
+            [lmap s [dict get $ast body] {expr {[dict get $s kind] eq "errordecl" ? [dict get $s name] : [continue]}}]
+    }
+} -result {{a::Failed a::Plain} {a::Failed a::Plain} {a::Failed a::Plain} {Failed Plain}}
+
+test nerr-hir-text-round-trip {B17: HIR text states canonical identities; write -> read -> write is stable with two same-short-name errors, which still dispatch apart on every backend} -body {
+    # HIR text of a program with modules does not read back (its module
+    # bindings), so the two identities are given to an entry program's HIR
+    # text: the same declarations, fails, handlers and contracts.
+    set src "error AFailed:\n    code: int\nerror BFailed:\n    code: int\nfn runA(x: int) -> int errors AFailed:\n    if x < 0:\n        fail AFailed {code: x}\n    x\nfn runB(x: int) -> int errors BFailed:\n    if x < 0:\n        fail BFailed {code: x * 10}\n    x\nfn via(k: Fn{args: \[int\], return: int, errors: \[AFailed\]}, x: int) -> int errors AFailed:\n    k(x)\nfn top(x: int):\n    r = via(runA, x):\n        on AFailed {code}:\n            return \[\"a\", code\]\n    s = runB(x - 1):\n        on BFailed d:\n            return \[\"b\", d.code\]\n    \[r + s\]\n\[top(1), top(-1), top(0)\]\n"
+    set text [string map {AFailed aa::Failed BFailed bb::Failed} [hir::format [surface::compile $src -warnings off]]]
+    regsub {error aa::Failed ns -} $text {error aa::Failed ns aa} text
+    regsub {error bb::Failed ns -} $text {error bb::Failed ns bb} text
+    set hir [hir::parse $text]
+    list [expr {[hir::format $hir] eq $text}] \
+        [lsearch -all -inline -regexp [split $text \n] {^error }] \
+        [lsort -unique [lmap b {interp compile cranelift-generic cranelift} {lrange [outcomeUnderHir $b $hir] 0 1}]]
+} -result {1 {{error aa::Failed ns aa payload code: int} {error bb::Failed ns bb payload code: int}} {{value {[[1], ["a", -1], ["b", -10]]}}}}
+
+# ---------------------------------------------------------------------------
+# B18, B19, B20: runtime and native representation
+
+test nerr-tcl-errorid {B18: the Tcl runtime's errorId carries the canonical identity, so a handler's comparison is never a short-name match} -body {
+    nsWith $nsLib {
+        set hir [surface::compile "import a\nimport b\nfn f(x: int) -> int:\n    a::run(x):\n        on a::Failed {code}:\n            code\nf(-2)\n" -warnings off]
+        set exprs [hir::lower $hir]
+        list [regexp {fail a::Failed} $exprs] [regexp {handle .* a::Failed} $exprs] [lindex [outcomeUnderHir interp $hir] 1] \
+            [core::value::errorIdName [core::value::errorId a::Failed]]
+    }
+} -result {1 1 -2 a::Failed}
+
+test nerr-native-ids {B19: natively each canonical identity has its own compact id -- a::Failed and b::Failed, same short name and shape, never share one -- and dispatch compares ids} -constraints linuxX86_64 -body {
+    nsWith $nsLib {
+        # Propagating wrappers keep each fail an error edge (a fail whose
+        # handler is in the same function after inlining is a branch).
+        set hir [surface::compile "import a\nimport b\nfn pa(x: int) -> int errors a::Failed:\n    a::run(x) + 1\nfn pb(x: int) -> int errors b::Failed:\n    b::run(x) + 1\nfn f(x: int) -> int:\n    r = pa(x):\n        on a::Failed {code}:\n            return code\n    pb(r):\n        on b::Failed {code}:\n            code\n\[f(1), f(-1), f(-2)\]\n" -warnings off]
+        set nir [native::nir $hir]
+        set ids [dict create]
+        foreach {- id name} [regexp -all -inline {faildeclared (\d+) "([^"]*)"} $nir] {
+            dict set ids $name $id
+        }
+        set eqs [lsort -unique -integer [lmap {- id} [regexp -all -inline {declarederroreq (\d+)} $nir] {set id}]]
+        list [lsort [dict keys $ids]] [expr {[dict get $ids a::Failed] != [dict get $ids b::Failed]}] \
+            [expr {[lsort -integer [dict values $ids]] eq $eqs}]
+    }
+} -result {{a::Failed b::Failed} 1 1}
+
+test nerr-rendering {B20: an uncaught error (only with -strict 0) renders its canonical identity on every backend; an entry-program error stays bare} -body {
+    nsWith $nsLib {
+        list [nsLoose "import a\na::run(-5)\n"] [nsLoose "import a\na::plain(-5)\n"] \
+            [nsLoose "error Failed:\n    code: int\nfn g(x: int) -> int errors Failed:\n    fail Failed {code: x}\ng(1)\n"]
+    }
+} -result {{error {CORE SEMANTIC UNCAUGHT-ERROR} {uncaught propagated error: <error a::Failed {code: -5}>}} {error {CORE SEMANTIC UNCAUGHT-ERROR} {uncaught propagated error: <error a::Plain>}} {error {CORE SEMANTIC UNCAUGHT-ERROR} {uncaught propagated error: <error Failed {code: 1}>}}}
+
+# ---------------------------------------------------------------------------
+# B22, B23: ownership and coroutine caching
+
+set nsAffineLib {
+nsaf.bot {import coroutine
+
+struct Message:
+    value: int
+
+struct Event:
+    value: int
+
+error ReadFailed:
+    stream: Coroutine{args: [Message], return: Event}
+    bytesRead: int
+
+fn worker(seed: int, resume Message) -> Event:
+    message = yield Event {value: seed}
+    return Event {value: message.value}
+
+fn make(seed: int) -> Coroutine{args: [Message], return: Event}:
+    coroutine {step} = worker(seed)
+    step
+
+fn read(n: int) -> int errors ReadFailed:
+    s = make(n)
+    if n > 0:
+        fail ReadFailed {stream: s, bytesRead: n}
+    0
+
+fn consume(s: Coroutine{args: [Message], return: Event}) -> int:
+    e = s(Message {value: 2})
+    e.value
+}
+}
+
+proc nsLiveCoroutines {} {
+    return [core::value::int [llength [info commands {::core::coroutines::co[0-9]*}]]]
+}
+if {"test_ns_live" ni [core::native::names]} {
+    core::registerNative test_ns_live -arity 0 -impl nsLiveCoroutines
+}
+
+test nerr-affine-payload {B22: an affine payload of a module's error moves, is destructured, ignored or bound whole exactly as before -- the namespace has no ownership effect: no coroutine left alive} -body {
+    nsWith $nsAffineLib {
+        set text "import nsaf\nfn des(n: int) -> int:\n    nsaf::read(n):\n        on nsaf::ReadFailed {stream, bytesRead}:\n            nsaf::consume(stream) + bytesRead\nfn ign(n: int) -> int:\n    nsaf::read(n):\n        on nsaf::ReadFailed:\n            7\nfn whole(n: int) -> int:\n    nsaf::read(n):\n        on nsaf::ReadFailed d:\n            d.bytesRead\n\[des(3), ign(2), whole(4), des(0), test_ns_live()\]\n"
+        list [sourceAgree $text {interp compile}] [sourceAgree [string map {test_ns_live() 0} $text]]
+    }
+} -result {{value {[5, 7, 4, 0, 0]}} {value {[5, 7, 4, 0, 0]}}}
+
+test nerr-coroutine-cached-identity {B23: a coroutine that fails with a module's error raises the same canonical identity and payload again on a later resume -- never the entry program's same-short-name error} -body {
+    nsWith [list nsco.bot {error Overflow:
+    limit: int
+    seen: int
+}] {
+        set decls "import coroutine\nimport nsco\nstruct Message:\n    value: int\nerror Overflow:\n    limit: int\n    seen: int\nfn counter(limit: int, resume Message) -> int errors nsco::Overflow:\n    m = yield 0\n    if m.value > limit:\n        fail nsco::Overflow {limit: limit, seen: m.value}\n    m.value\n"
+        list [sourceAgree "${decls}fn go(n: int) -> int:\n    coroutine {step} = counter(3):\n        on nsco::Overflow:\n            return -1\n    a = step(Message {value: n}):\n        on nsco::Overflow {seen}:\n            seen * 10\n    b = step(Message {value: 1}):\n        on nsco::Overflow details:\n            details.limit * 100 + details.seen\n    a + b\n\[go(2), go(9)\]\n"] \
+            [nsDiagnostics "${decls}fn go(n: int) -> int:\n    coroutine {step} = counter(3):\n        on nsco::Overflow:\n            return -1\n    a = step(Message {value: n}):\n        on Overflow {seen}:\n            seen\n    a\n0\n"]
+    }
+} -result {{value {[4, 399]}} {{UNHANDLED-ERROR nsco::Overflow}}}
+
+# ---------------------------------------------------------------------------
+# B27: the compiler namespace fixture
+
+# A fixture anticipating compiler-facing errors (no compiler diagnostics are
+# implemented): compiler_fixture::Type and compiler_fixture::Unbound beside
+# another module's Type and Unbound of the very same shapes.
+set nsCompilerLib {
+compiler_fixture.bot {error CompilerError
+
+error Unbound:
+    name: str
+
+error Type:
+    message: str
+
+fn check(n: int) -> int errors CompilerError, Unbound, Type:
+    if n < 0:
+        fail Unbound {name: "x"}
+    if n > 100:
+        fail Type {message: "too big"}
+    if n == 50:
+        fail CompilerError
+    n
+}
+typesys.bot {error Type:
+    message: str
+
+error Unbound:
+    name: str
+
+fn infer(n: int) -> int errors Type, Unbound:
+    if n < 0:
+        fail Type {message: "negative"}
+    if n > 100:
+        fail Unbound {name: "y"}
+    n
+}
+}
+
+test nerr-compiler-fixture {B27: compiler_fixture::Type and typesys::Type (and both Unbounds) coexist; each is handled qualified, by its own handler only} -body {
+    nsWith $nsCompilerLib {
+        set text "import compiler_fixture\nimport typesys\nimport str\nfn run(n: int):\n    r = compiler_fixture::check(n):\n        on compiler_fixture::Type {message}:\n            return \[\"compiler Type\", message\]\n        on compiler_fixture::Unbound {name}:\n            return \[\"compiler Unbound\", name\]\n        on compiler_fixture::CompilerError:\n            return \[\"compiler error\"\]\n    s = typesys::infer(n - 200):\n        on typesys::Type {message}:\n            return \[\"typesys Type\", message\]\n        on typesys::Unbound {name}:\n            return \[\"typesys Unbound\", name\]\n    \[r, s\]\n\[run(-1), run(101), run(50), run(10)\]\n"
+        list [sourceAgree $text] \
+            [nsDiagnostics "import compiler_fixture\nimport typesys\nfn f(n: int) -> int:\n    compiler_fixture::check(n):\n        on typesys::Type:\n            0\n        on typesys::Unbound:\n            1\n        on compiler_fixture::CompilerError:\n            2\n0\n"]
+    }
+} -result {{value {[["compiler Unbound", "x"], ["compiler Type", "too big"], ["compiler error"], ["typesys Type", "negative"]]}} {{UNHANDLED-ERROR compiler_fixture::Type} {UNHANDLED-ERROR compiler_fixture::Unbound}}}
+
+# ---------------------------------------------------------------------------
+# Part C: the completion fallback keeps canonical identities
+
+# The closure returned by make calls an erased callable through its capture:
+# the analysis of its calls is incomplete, so a declaring function's summary
+# falls back to its declared contract -- a contract of canonical identities.
+set nsCombined {import a
+import b
+
+fn call(f, x):
+    f(x)
+
+fn make(f):
+    fn inner(y):
+        f(y)
+    inner
+
+}
+
+test nerr-combined-fallback {the declared-contract fallback keeps a::Failed: a handler for b::Failed only is UNHANDLED-ERROR for a::Failed, and the reverse} -body {
+    nsWith $nsLib {
+        list [nsDiagnostics "${nsCombined}h = make(a::loose)\nfn viaA(x: int) errors a::Failed:\n    h(x)\nfn top(x: int):\n    viaA(x):\n        on b::Failed {code}:\n            code\n0\n"] \
+            [nsDiagnostics "${nsCombined}h = make(b::loose)\nfn viaB(x: int) errors b::Failed:\n    h(x)\nfn top(x: int):\n    viaB(x):\n        on a::Failed {code}:\n            code\n0\n"]
+    }
+} -result {{{UNHANDLED-ERROR a::Failed}} {{UNHANDLED-ERROR b::Failed}}}
+
+test nerr-combined-generic {through the untyped helper directly and through a declaring function: the identity passed in is the one charged, never its same-short-name twin} -body {
+    nsWith $nsLib {
+        list [nsDiagnostics "${nsCombined}fn top(x: int):\n    call(a::loose, x):\n        on b::Failed {code}:\n            code\n0\n"] \
+            [nsDiagnostics "${nsCombined}fn generic(x: int) errors b::Failed:\n    call(b::loose, x)\nfn top(x: int):\n    generic(x):\n        on a::Failed {code}:\n            code\n0\n"]
+    }
+} -result {{{UNHANDLED-ERROR a::Failed}} {{UNHANDLED-ERROR b::Failed}}}
+
+test nerr-combined-accepted {with both identities erased, a closure that captured one of them is charged both (its capture is not tracked through the top-level binding: the conservative cost of the fallback); admitting and handling both, the higher-order paths run and dispatch by canonical identity on every backend} -body {
+    nsWith $nsLib {
+        set narrow "${nsCombined}h = make(a::loose)\nfn viaA(x: int) errors a::Failed:\n    h(x)\nfn other(x: int):\n    call(b::loose, x):\n        on b::Failed {code}:\n            code\n0\n"
+        list [nsDiagnostics $narrow] \
+            [sourceAgree "${nsCombined}h = make(a::loose)\nfn viaA(x: int) errors a::Failed, b::Failed:\n    h(x)\nfn f(x: int):\n    r = viaA(x):\n        on a::Failed {code}:\n            return \[\"a\", code\]\n        on b::Failed {code}:\n            return \[\"never\", code\]\n    s = call(b::loose, x - 1):\n        on b::Failed {code}:\n            return \[\"b\", code\]\n    \[r, s\]\n\[f(1), f(2), f(5)\]\n"]
+    }
+} -result {{{UNHANDLED-ERROR b::Failed}} {value {[["a", 1], ["b", 10], [0, 0]]}}}
+
+cleanupTests

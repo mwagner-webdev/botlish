@@ -44,14 +44,14 @@
 #   handledExpr  = expression [ handlers ]     -- handlers only after a bare
 #                                                  call expression (item 9)
 #   handlers     = ":" NEWLINE INDENT { handler } DEDENT
-#   handler      = "on" IDENT [ IDENT | pattern ] ":" suite
+#   handler      = "on" errorName [ IDENT | pattern ] ":" suite
 #                  -- ERROR-PAYLOADS.md: the error name selects the handler;
 #                  the optional IDENT binds the error's whole payload, the
 #                  optional pattern destructures it (STRUCT-DESTRUCTURING.md's
 #                  pattern, irrefutable). No guard, no value pattern
 #   function     = { functionModifier } "fn" IDENT "(" [ paramList ] ")"
 #                  [ "->" typeExpr ] [ proofClause ]
-#                  [ "errors" IDENT { "," IDENT } ] ":" suite
+#                  [ "errors" errorName { "," errorName } ] ":" suite
 #                  -- typeExpr (TypeExpr) is a type name, a qualified or
 #                  applied one, a structural Fn type, or the keyword "unit"
 #                  as the unit type's name (`-> unit`)
@@ -106,7 +106,8 @@
 #                                       level ("break EXPR" is a syntax
 #                                       error, not merely rejected later)
 #   continue     = "continue"
-#   fail         = "fail" IDENT [ fieldInits ]
+#   fail         = "fail" errorName [ fieldInits ]
+#   errorName    = IDENT { "::" IDENT }    -- a module-qualified error
 #                  -- ERROR-PAYLOADS.md: the payload of an error that
 #                  declares one, as a struct's named field initializers
 #
@@ -134,7 +135,7 @@
 #                  whose requirements have no receiver parameter).
 #                  `context` is contextual here exactly as before `struct`
 #   traitRequirement = "fn" IDENT "(" [ paramList ] ")" [ "->" typeExpr ]
-#                  [ "errors" IDENT { "," IDENT } ] NEWLINE
+#                  [ "errors" errorName { "," errorName } ] NEWLINE
 #                  -- a signature only: no body and no trailing ":". "trait"
 #                  is contextual: a declaration only as the first word of a
 #                  top-level statement directly followed by a name (`trait
@@ -396,6 +397,26 @@ proc surface::parser::Expect {pVar kind what} {
         Fail $token "expected $what, found [Describe $token]"
     }
     return [Advance p]
+}
+
+# An error reference: IDENT { "::" IDENT } (ERROR-PAYLOADS.md, "Module-
+# qualified error identity"). A bare name is an error of the file's own
+# module (or the entry program's, or a builtin one); `ns::Name`, `a::b::Name`
+# names the error Name of module ns, a::b -- the qualified-name rule of
+# every other module member. Returns a token-shaped dict {kind IDENT value
+# SPELLING span SPAN}; WHAT describes what is expected, for the diagnostic.
+proc surface::parser::ErrorName {pVar what} {
+    upvar 1 $pVar p
+    set first [Expect p IDENT $what]
+    set value [dict get $first value]
+    set span [dict get $first span]
+    while {[Kind p] eq "::"} {
+        Advance p
+        set member [Expect p IDENT "an error name after \"::\""]
+        append value "::[dict get $member value]"
+        set span [surface::ast::cover $span [dict get $member span]]
+    }
+    return [dict create kind IDENT value $value span $span text $value]
 }
 
 # The span from START (a span) to the last consumed token.
@@ -750,7 +771,7 @@ proc surface::parser::TraitDecl {pVar} {
 }
 
 # One requirement line of trait TRAIT (a context trait when CONTEXT): "fn"
-# IDENT "(" params ")" [ "->" typeExpr ] [ "errors" IDENT { "," IDENT } ]
+# IDENT "(" params ")" [ "->" typeExpr ] [ "errors" errorName { "," errorName } ]
 # NEWLINE.
 proc surface::parser::TraitRequirement {pVar trait {context 0}} {
     variable functionModifiers
@@ -801,7 +822,7 @@ proc surface::parser::TraitRequirement {pVar trait {context 0}} {
     if {[Kind p] eq "errors"} {
         Advance p
         while 1 {
-            set nameToken [Expect p IDENT "an error name after \"errors\""]
+            set nameToken [ErrorName p "an error name after \"errors\""]
             lappend errors [list [dict get $nameToken value] [dict get $nameToken span]]
             if {[Kind p] ne ","} {
                 break
@@ -1196,7 +1217,7 @@ proc surface::parser::Simple {pVar} {
             # field-initializer payload of struct construction, checked
             # against the error's declared payload fields by HIR.
             Advance p
-            set name [Expect p IDENT "an error name after \"fail\""]
+            set name [ErrorName p "an error name after \"fail\""]
             set payload ""
             switch -- [Kind p] {
                 \{ {
@@ -1259,7 +1280,7 @@ proc surface::parser::HandledCall {pVar call} {
             Fail $onToken "expected \"on\" (a handler for a declared error), found [Describe $onToken]"
         }
         Advance p
-        set name [Expect p IDENT "an error name after \"on\""]
+        set name [ErrorName p "an error name after \"on\""]
         # What the handler receives of the selected error's payload
         # (ERROR-PAYLOADS.md): nothing (`on NAME:`), the whole payload as one
         # binding (`on NAME details:`), or an irrefutable struct
@@ -1406,7 +1427,7 @@ proc surface::parser::TypeExpr {pVar what} {
 #
 #   fnField = "args" ":" "[" [ TypeExpr { "," TypeExpr } [ "," ] ] "]"
 #           | "return" ":" TypeExpr
-#           | "errors" ":" "[" [ IDENT { "," IDENT } [ "," ] ] "]"
+#           | "errors" ":" "[" [ errorName { "," errorName } [ "," ] ] "]"
 #
 # A structural function type's call contract (STRUCTURAL-FUNCTION-TYPES.md).
 # Fields are named, so they may come in any order; each at most once.
@@ -1474,7 +1495,7 @@ proc surface::parser::FnType {pVar fn {kind fn}} {
             }
             errors {
                 set names [FnList p errors $what {
-                    set name [Expect p IDENT "an error name in the \"errors\" list"]
+                    set name [ErrorName p "an error name in the \"errors\" list"]
                     if {[Kind p] eq "\["} {
                         Fail [Peek p] "the \"errors\" list names declared errors, not types: expected \",\" or \"\]\" after the error name \"[dict get $name value]\""
                     }
@@ -2268,7 +2289,7 @@ proc surface::parser::Suite {pVar after} {
     if {$allowResult && [Kind p] eq {errors}} {
         Advance p
         while 1 {
-            set nameToken [Expect p IDENT "an error name after \"errors\""]
+            set nameToken [ErrorName p "an error name after \"errors\""]
             lappend errors [list [dict get $nameToken value] [dict get $nameToken span]]
             if {[Kind p] ne ","} {
                 break

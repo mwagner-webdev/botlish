@@ -6,6 +6,6 @@ import byte
 cs = loop c in ['A', 'Ā', 'B']:
     c
 s = byte::set(cs):
-    on AboveRange:
+    on byte::AboveRange:
         byte::set(['A'])
 s

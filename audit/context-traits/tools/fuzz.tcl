@@ -133,8 +133,8 @@ proc generate {seed} {
             switch -- $kind {
                 ok { lappend lines "fn ${op}(n: int, context c: C$c) -> int:" "    n * $m + c.k" "" }
                 okfail {
-                    lappend lines "fn ${op}(n: int, context c: C$c) -> int errors Fail:" \
-                        "    if n > 100000:" "        fail Fail" "    n * $m + c.k" ""
+                    lappend lines "fn ${op}(n: int, context c: C$c) -> int errors fz::tr::Fail:" \
+                        "    if n > 100000:" "        fail fz::tr::Fail" "    n * $m + c.k" ""
                 }
                 missing {}
                 badparam { lappend lines "fn ${op}(n: str, context c: C$c) -> int:" "    c.k" "" }
@@ -220,7 +220,7 @@ proc generate {seed} {
                     lappend terms "$local.${op}(n)"
                     lappend value [list op $t $op n]
                 }
-                lappend lines "fn ${name}(n: int, context [join $params {, }]) -> int errors Fail:" \
+                lappend lines "fn ${name}(n: int, context [join $params {, }]) -> int errors fz::tr::Fail:" \
                     "    [join $terms { + }] + $constant" ""
                 lappend value [list const $constant]
                 dict set funcs $name [dict create traits $chosen exact {} calls {} value $value arity 1]
@@ -229,8 +229,8 @@ proc generate {seed} {
                 set name w$j
                 set t [pick $traitPool]
                 set op [pick [dict keys [dict get $traits $t]]]
-                lappend lines "fn ${name}(n: int, context io: $t) -> int errors Fail:" \
-                    "    fn step(m: int) -> int errors Fail:" "        io.${op}(m)" \
+                lappend lines "fn ${name}(n: int, context io: $t) -> int errors fz::tr::Fail:" \
+                    "    fn step(m: int) -> int errors fz::tr::Fail:" "        io.${op}(m)" \
                     "    step(n) + step(n + 1) + $constant" ""
                 dict set funcs $name [dict create traits [list $t] exact {} calls {} arity 1 \
                     value [list [list op $t $op n] [list op $t $op n+1] [list const $constant]]]
@@ -239,7 +239,7 @@ proc generate {seed} {
                 set name r$j
                 set t [pick $traitPool]
                 set op [pick [dict keys [dict get $traits $t]]]
-                lappend lines "fn ${name}(n: int, context io: $t) -> int errors Fail:" \
+                lappend lines "fn ${name}(n: int, context io: $t) -> int errors fz::tr::Fail:" \
                     "    if n <= 0:" "        return io.${op}(0) + $constant" "    ${name}(n - 1) + 1" ""
                 dict set funcs $name [dict create traits [list $t] exact {} calls {} arity 1 \
                     value [list [list rec $t $op $constant]]]
@@ -247,7 +247,7 @@ proc generate {seed} {
             exact {
                 set name e$j
                 set c [pick [dict keys $contexts]]
-                lappend lines "fn ${name}(n: int, context c: fz::[string tolower $c]::$c) -> int errors Fail:" \
+                lappend lines "fn ${name}(n: int, context c: fz::[string tolower $c]::$c) -> int errors fz::tr::Fail:" \
                     "    n + $constant" ""
                 dict set funcs $name [dict create traits {} exact [list $c] calls {} arity 1 \
                     value [list [list arg] [list const $constant]]]
@@ -256,7 +256,7 @@ proc generate {seed} {
                 set name m$j
                 set callees [lsort -unique [lmap _ [lrepeat [expr {1 + [rnd 2]}] x] {pick $order}]]
                 set terms [lmap f $callees {string cat [dict get $funcs $f callname] "(n + 1)"}]
-                lappend lines "fn ${name}(n: int) -> int errors Fail:" "    [join $terms { + }] + $constant" ""
+                lappend lines "fn ${name}(n: int) -> int errors fz::tr::Fail:" "    [join $terms { + }] + $constant" ""
                 dict set funcs $name [dict create traits {} exact {} calls $callees arity 1 \
                     value [concat [lmap f $callees {list call $f n+1}] [list [list const $constant]]]]
             }
@@ -340,7 +340,7 @@ proc generate {seed} {
         }
         lassign $event - f arg
         set res res[incr r]
-        lappend lines "$res = [dict get $funcs $f callname]($arg):" "    on Fail:" "        -1"
+        lappend lines "$res = [dict get $funcs $f callname]($arg):" "    on fz::tr::Fail:" "        -1"
         lappend results $res
         set selection [dict create]
         lassign [Requirement $funcs $f] traitsNeeded exactNeeded

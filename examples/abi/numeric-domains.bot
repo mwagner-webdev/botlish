@@ -21,7 +21,7 @@ import abi::x86_64
 # declared domain.
 fn next_u8(x: abi::U8):
     r = abi::u8(x.value + 1):
-        on AbiIntegerAboveRange:
+        on abi::AbiIntegerAboveRange:
             return "above"
     r.value
 

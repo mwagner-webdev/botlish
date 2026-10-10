@@ -252,7 +252,7 @@ error AError
     x"]
 } -result {1 {{7:9 A 2 11:9}}}
 
-test sf-one-name-is-one-declaration-program-wide {two declarations of one name (two modules, a module and the program, a builtin) are rejected: identical text never names two failures} -body {
+test sf-one-identity-is-one-declaration {one short name in two modules, or in a module and the program, is two identities (m::Invalid, n::Invalid, Invalid) and compiles; one identity declared twice, or a builtin's name, is rejected: identical text in one scope never names two failures} -body {
     withModules {m.bot {error Invalid
 fn g(x):
     x
@@ -262,11 +262,12 @@ fn h(x):
 }} {
         list [lindex [rejection "import m\nimport n\nn::h(1)" default] 0] \
             [lindex [rejection "import m\nerror Invalid\nm::g(1)" default] 0] \
+            [lindex [rejection "error Invalid\nerror Invalid\n1" default] 0] \
             [lindex [rejection "error IndexNotFound\n1" default] 0]
     }
-} -result {{CORE SEMANTIC UNDECLARED-ERROR} {CORE SEMANTIC UNDECLARED-ERROR} {CORE SEMANTIC UNDECLARED-ERROR}}
+} -result {compiled compiled {CORE SEMANTIC UNDECLARED-ERROR} {CORE SEMANTIC UNDECLARED-ERROR}}
 
-test sf-module-failure-is-the-same-failure {a fail of a module's declared error and the program's own fail of it are one identity: the name the resolver admits} -body {
+test sf-module-failure-is-the-same-failure {a fail of a module's declared error and the program's own fail of it are one identity: m::Invalid, the canonical identity the resolver admits} -body {
     withModules {m.bot {error Invalid
 fn g(x) errors Invalid:
     if x == 0:
@@ -274,14 +275,46 @@ fn g(x) errors Invalid:
     x
 }} {
         failures {import m
-fn f(x) errors Invalid:
+fn f(x) errors m::Invalid:
+    if x < 0:
+        fail m::Invalid
+    if x > 9:
+        fail m::Invalid
+    m::g(x)}
+    }
+} -result {{4:9 m::Invalid 2 6:9}}
+
+test sf-same-short-name-never-grouped {two errors of one short name -- the program's Invalid and module m's m::Invalid, payload-free or with identical payloads -- are two identities: their failures are never one group} -body {
+    withModules {m.bot {error Invalid
+error Coded:
+    code: int
+fn g(x):
+    x
+}} {
+        list [failures {import m
+error Invalid
+fn f(x) errors Invalid, m::Invalid:
     if x < 0:
         fail Invalid
     if x > 9:
-        fail Invalid
-    m::g(x)}
+        fail m::Invalid
+    x}] [failures {import m
+error Coded:
+    code: int
+fn f(x) errors Coded, m::Coded:
+    if x < 0:
+        fail Coded {code: 1}
+    if x > 9:
+        fail m::Coded {code: 1}
+    x}] [failures {import m
+fn f(x) errors m::Invalid:
+    if x < 0:
+        fail m::Invalid
+    if x > 9:
+        fail m::Invalid
+    x}]
     }
-} -result {{4:9 Invalid 2 6:9}}
+} -result {{} {} {{4:9 m::Invalid 2 6:9}}}
 
 test sf-builtin-error-groups {a builtin error of the runtime (IndexNotFound) is a declared failure like any other} -body {
     failures {fn f(x) errors IndexNotFound:
@@ -818,7 +851,7 @@ fn parse(xs, a) errors Invalid:
 }} {
         set hir [surface::compile {import m
 y = m::parse([1, 2], 3):
-    on Invalid:
+    on m::Invalid:
         0
 y} t.bot -warnings default -warning-channel ""]
         lmap w [failuresOf $hir] {

@@ -553,11 +553,21 @@ proc hir::resolve::ResolveTypeExpr {typeExpr {ns ""}} {
         }
         set coroutine [expr {[dict exists $arg kind] && [dict get $arg kind] eq "coroutine"}]
         set what [expr {$coroutine ? "coroutine type" : "function type"}]
+        # Each error spelling is the canonical identity it denotes here
+        # (hir::errordecls::resolve: ns's own errors bare, other modules'
+        # qualified); the contract holds identities only.
+        set errorIds {}
         foreach errName [dict get $arg errors] {
-            if {![hir::errordecls::isDeclared $errName]} {
-                error "unknown error \"$errName\" in the $what's \"errors\" list: no \"error $errName\" declaration is visible"
+            set id [hir::errordecls::resolve $errName $ns]
+            if {$id eq ""} {
+                error "unknown error \"$errName\" in the $what's \"errors\" list: [hir::errordecls::unknownReason $errName $ns]"
             }
+            if {$id in $errorIds} {
+                error "duplicate error \"$id\" in the $what's \"errors\" list"
+            }
+            lappend errorIds $id
         }
+        dict set arg errors $errorIds
         if {$coroutine} {
             # A coroutine handle type (AFFINE-VALUES.md): the resume
             # protocol is its args -- no message, or exactly one of a named
@@ -912,18 +922,22 @@ proc hir::resolve::Expr {hirVar node ctx} {
             set errorNames {}
             set seenErrors [dict create]
             foreach pair $declaredErrorPairs {
-                lassign $pair errName errSpan
+                lassign $pair spelling errSpan
+                # The canonical identity the spelling denotes in this code's
+                # namespace (hir::errordecls::resolve): identities, never
+                # short names, are what a contract holds and compares.
+                set errName [hir::errordecls::resolve $spelling [CtxNamespace $ctx]]
+                if {$errName eq ""} {
+                    hir::Diagnose hir UNDECLARED-ERROR \
+                        [hir::errordecls::unknownMessage $spelling [CtxNamespace $ctx]] $e
+                    continue
+                }
                 if {[dict exists $seenErrors $errName]} {
                     hir::Diagnose hir DUPLICATE \
                         "duplicate error \"$errName\" in the same function's \"errors\" declaration" $e
                     continue
                 }
                 dict set seenErrors $errName 1
-                if {![hir::errordecls::isDeclared $errName]} {
-                    hir::Diagnose hir UNDECLARED-ERROR \
-                        "unknown error \"$errName\": no \"error $errName\" declaration is visible" $e
-                    continue
-                }
                 lappend errorNames $errName
             }
             set errorNames [lsort -unique $errorNames]
@@ -1199,7 +1213,15 @@ proc hir::resolve::Expr {hirVar node ctx} {
             SetField hir $e value [Expr hir [dict get $node value] $ctx]
         }
         fail {
-            set name [dict get $node name]
+            # The error's canonical identity in this code's namespace
+            # (hir::errordecls::resolve); an unknown spelling stays as
+            # written, diagnosed below.
+            set spelling [dict get $node name]
+            set name [hir::errordecls::resolve $spelling [CtxNamespace $ctx]]
+            set known [expr {$name ne ""}]
+            if {!$known} {
+                set name $spelling
+            }
             SetField hir $e name $name
             # The payload (ERROR-PAYLOADS.md) is evaluated before the error is
             # raised: resolved first, in the enclosing scope.
@@ -1208,20 +1230,20 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 set value [Expr hir [dict get $node value] $ctx]
             }
             SetField hir $e value $value
-            if {![hir::errordecls::isDeclared $name]} {
+            if {!$known} {
                 hir::Diagnose hir UNDECLARED-ERROR \
-                    "unknown error \"$name\": no \"error $name\" declaration is visible" $e
+                    [hir::errordecls::unknownMessage $spelling [CtxNamespace $ctx]] $e
             } elseif {$name ni [dict get $ctx errors]} {
                 hir::Diagnose hir UNHANDLED-ERROR \
-                    "\"fail $name\" is not admitted here: the enclosing function does not declare \"errors $name\"" $e
+                    "\"fail $spelling\" is not admitted here: the enclosing function does not declare \"errors $spelling\"" $e
             }
-            if {[hir::errordecls::isDeclared $name]} {
+            if {$known} {
                 if {[hir::errordecls::hasPayload $name] && $value eq ""} {
                     hir::Diagnose hir MISSING-ERROR-PAYLOAD \
-                        "error \"$name\" carries a payload, which \"fail $name\" must construct: write \"fail $name \{[join [lmap f [hir::errordecls::fieldNames $name] {string cat $f {: ...}}] {, }]\}\" (the error's name alone is not its payload)" $e
+                        "error \"$name\" carries a payload, which \"fail $spelling\" must construct: write \"fail $spelling \{[join [lmap f [hir::errordecls::fieldNames $name] {string cat $f {: ...}}] {, }]\}\" (the error's name alone is not its payload)" $e
                 } elseif {![hir::errordecls::hasPayload $name] && $value ne ""} {
                     hir::Diagnose hir UNEXPECTED-ERROR-PAYLOAD \
-                        "error \"$name\" declares no payload: write \"fail $name\" (to give it one, declare its fields: \"error $name:\" followed by \"field: Type\" lines)" $e
+                        "error \"$name\" declares no payload: write \"fail $spelling\" (to give it one, declare its fields: \"error [hir::errordecls::shortName $name]:\" followed by \"field: Type\" lines)" $e
                 }
             }
         }
@@ -1239,17 +1261,26 @@ proc hir::resolve::Expr {hirVar node ctx} {
             set index 0
             foreach handler [dict get $node handlers] {
                 incr index
-                set name [dict get $handler name]
+                # Selection is by canonical identity (hir::errordecls::
+                # resolve): `on NotFound` inside module http and `on
+                # http::NotFound` outside it are one handler of one error,
+                # `on cache::NotFound` another.
+                set spelling [dict get $handler name]
+                set name [hir::errordecls::resolve $spelling [CtxNamespace $ctx]]
+                set known [expr {$name ne ""}]
+                if {!$known} {
+                    set name $spelling
+                }
                 set body [dict get $handler body]
                 if {[dict exists $seen $name]} {
                     hir::Diagnose hir DUPLICATE \
-                        "duplicate \"on $name\" handler in the same handled call" $e
+                        "duplicate \"on $spelling\" handler in the same handled call (error \"$name\" is already handled)" $e
                     continue
                 }
                 dict set seen $name 1
-                if {![hir::errordecls::isDeclared $name]} {
+                if {!$known} {
                     hir::Diagnose hir UNDECLARED-ERROR \
-                        "unknown error \"$name\": no \"error $name\" declaration is visible" $e
+                        [hir::errordecls::unknownMessage $spelling [CtxNamespace $ctx]] $e
                 }
                 set branch [NewScope hir branch $scope \
                     [dict get $hir scopes $scope invocation] $e [dict get $handler origin]]
@@ -1266,9 +1297,9 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 set binding ""
                 if {$payload ne ""} {
                     set binding [NewBinding hir [dict get $payload name] param $branch [dict get $payload origin]]
-                    if {[hir::errordecls::isDeclared $name] && ![hir::errordecls::hasPayload $name]} {
+                    if {$known && ![hir::errordecls::hasPayload $name]} {
                         hir::DiagnoseAt hir UNEXPECTED-ERROR-PAYLOAD \
-                            "error \"$name\" declares no payload: there is nothing to bind (write \"on $name:\")" \
+                            "error \"$name\" declares no payload: there is nothing to bind (write \"on $spelling:\")" \
                             $e [dict get $payload origin]
                     }
                 } elseif {[hir::errordecls::hasPayload $name]
@@ -1475,7 +1506,12 @@ proc hir::resolve::ResolveStruct {hirVar e node ctx} {
         # undeclared (hir::range::VerifyStruct proves each value admissible
         # for its declared type). A payload-free or unknown error has no
         # fields to check against (the fail itself is diagnosed).
-        set errorName [dict get $node payloadOf]
+        # The canonical identity the `fail` spelling denotes here (the fail
+        # node resolves it the same way); an unknown one has no fields.
+        set errorName [hir::errordecls::resolve [dict get $node payloadOf] $ns]
+        if {$errorName eq ""} {
+            set errorName [dict get $node payloadOf]
+        }
         SetField hir $e payloadOf $errorName
         if {[hir::errordecls::hasPayload $errorName]} {
             set declaredNames [hir::errordecls::fieldNames $errorName]

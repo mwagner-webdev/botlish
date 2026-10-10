@@ -226,7 +226,7 @@ test ep-declaration-grammar {a payload is an indented block of `field: Type` lin
     set hir [epHir "${::epDecls}1\n"]
     list [hir::errorDecls $hir] [dict get $hir errorPayloads] \
         [hir::errordecls::fields ConnectionLost] [hir::errordecls::hasPayload ConnectionLost]
-} -cleanup {unset -nocomplain hir} -result {{NotFound PageNotFound ObjectNotFound ConnectionLost} {PageNotFound {fields {uri str statusCode int response {nstruct Response}} namespace {}} ObjectNotFound {fields {uri str} namespace {}}} {} 0}
+} -cleanup {unset -nocomplain hir} -result {{list::NotFound PageNotFound ObjectNotFound ConnectionLost} {PageNotFound {fields {uri str statusCode int response {nstruct Response}} namespace {}} ObjectNotFound {fields {uri str} namespace {}}} {} 0}
 
 test ep-declaration-payload-type {the payload's static type is the anonymous struct of the declared fields (no source-nameable type, no identity field); declaration order is kept for the descriptor} -body {
     epHir "${::epDecls}1\n"
@@ -639,17 +639,17 @@ test ep-gc-stress-coroutine {item 89: a coroutine's cached failure keeps its pay
 # ---------------------------------------------------------------------------
 # Modules (items 59-60)
 
-test ep-cross-module {items 59-60: a module's payload error, whose field type is the module's own struct, is failed in the module and handled in the importing program by its name; the fields enter scope only through the handler's binding} -body {
+test ep-cross-module {items 59-60: a module's payload error, whose field type is the module's own struct, is failed in the module and handled in the importing program by its canonical name eppage::NotThere; the fields enter scope only through the handler's binding; the program may declare its own NotThere beside it (module-qualified identity)} -body {
     withPrivateLibrary {
         set ch [open [file join $::core::libraryDir eppage.bot] w]
         fconfigure $ch -encoding utf-8
         puts -nonewline $ch "struct Meta:\n    status: int\n\nerror NotThere:\n    uri: str\n    meta: Meta\n\nfn get(uri: str) -> int errors NotThere:\n    if uri == \"\":\n        return 0\n    fail NotThere {uri: uri, meta: Meta {status: 404}}\n"
         close $ch
-        set main "import eppage\nfn f(uri: str) -> int:\n    eppage::get(uri):\n        on NotThere {meta}:\n            meta.status\n\[f(\"\"), f(\"/a\")\]\n"
-        list [epAgree $main] [hir::types::show [hir::errordecls::payloadType NotThere]] \
+        set main "import eppage\nfn f(uri: str) -> int:\n    eppage::get(uri):\n        on eppage::NotThere {meta}:\n            meta.status\n\[f(\"\"), f(\"/a\")\]\n"
+        list [epAgree $main] [hir::types::show [hir::errordecls::payloadType eppage::NotThere]] \
             [epCode "import eppage\nerror NotThere:\n    uri: str\n1\n"]
     }
-} -cleanup {unset -nocomplain ch main} -result {{value {[0, 404]}} {struct{meta: eppage::Meta, uri: str}} UNDECLARED-ERROR}
+} -cleanup {unset -nocomplain ch main} -result {{value {[0, 404]}} {struct{meta: eppage::Meta, uri: str}} ok}
 
 test ep-module-initializer {a module binding initialized through a function that fails with a payload error and ignores it stays a retained, context-free module value (the payload's fields are evaluated where it is raised); reading payload fields there is a projection, which module initializers do not support for any struct yet} -body {
     withPrivateLibrary {

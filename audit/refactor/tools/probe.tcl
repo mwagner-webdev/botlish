@@ -89,6 +89,10 @@ proc probeHir {tree program driver} {
     } else {
         set prefix "[readText [file join $tree $program]]\n"
     }
+    # The driver's own imports stay at top level, ahead of any wrapper.
+    while {[regexp {^(import [^\n]*\n)(.*)$} $driver -> line driver]} {
+        append prefix $line
+    }
     set errors {}
     set ::core::libraryDir [file join $tree lib]
     try {
@@ -98,7 +102,7 @@ proc probeHir {tree program driver} {
                 return $hir
             }
             if {[dict get $options -errorcode] ne {CORE SEMANTIC UNHANDLED-ERROR}
-                    || ![regexp {declared error "([A-Za-z_][A-Za-z0-9_]*)"} $hir -> error]
+                    || ![regexp {declared error "([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*)"} $hir -> error]
                     || $error in $errors} {
                 return -options $options $hir
             }

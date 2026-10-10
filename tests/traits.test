@@ -350,7 +350,7 @@ fn name(value: Thing) -> str errors Bad:
 }}
     set r2 [moduleRejection $lib2 "import model\ntrait Named:\n    fn name(value: Named) -> str\nfn d(v: Named) -> str:\n    v.name()\nd(model::Thing {v: 1})\n"]
     list [lindex $r1 0] [lrange [split [lindex $r1 1] \n] 4 end] [lindex [split [lindex $r2 1] \n] end]
-} -match glob -result {TRAIT-NOT-SATISFIED {found: {    fn model::name(model::Thing) -> int   (at *model.bot:6:1)} {return type int does not satisfy required str}} {it may fail with Bad, which the requirement's error contract \[\] does not admit}}
+} -match glob -result {TRAIT-NOT-SATISFIED {found: {    fn model::name(model::Thing) -> int   (at *model.bot:6:1)} {return type int does not satisfy required str}} {it may fail with model::Bad, which the requirement's error contract \[\] does not admit}}
 
 test trait-wrong-parameter {an implementation whose receiver parameter does not admit the witness is not one} -body {
     set r [moduleRejection {model.bot {struct Thing:
@@ -836,13 +836,15 @@ struct Quiet:
 fn normalize(value: Quiet) -> Quiet:
     value
 }
-loud.bot {struct Loud:
+loud.bot {import quiet
+
+struct Loud:
     v: int
 
-fn normalize(value: Loud) -> Loud errors Invalid, Other:
+fn normalize(value: Loud) -> Loud errors quiet::Invalid, quiet::Other:
     value
 }}
-    set common "import quiet\nimport loud\ntrait Parseable:\n    fn normalize(value: Parseable) -> Parseable errors Invalid\nstruct Good:\n    v: int\nfn normalize(value: Good) -> Good errors Invalid:\n    fail Invalid\nfn clean(value: Parseable) -> int:\n    x = value.normalize():\n        on Invalid:\n            value\n    1\n"
+    set common "import quiet\nimport loud\ntrait Parseable:\n    fn normalize(value: Parseable) -> Parseable errors quiet::Invalid\nstruct Good:\n    v: int\nfn normalize(value: Good) -> Good errors quiet::Invalid:\n    fail quiet::Invalid\nfn clean(value: Parseable) -> int:\n    x = value.normalize():\n        on quiet::Invalid:\n            value\n    1\n"
     list [moduleAgree $lib "${common}\[clean(Good {v: 1}), clean(quiet::Quiet {v: 2})\]\n"] \
          [lindex [moduleRejection $lib "${common}clean(loud::Loud {v: 2})\n"] 0] \
          [lindex [moduleRejection $lib "${common}fn bad(value: Parseable) -> int:\n    value.normalize()\n    1\nbad(Good {v: 1})\n"] 0]

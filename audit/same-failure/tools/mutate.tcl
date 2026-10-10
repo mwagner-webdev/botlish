@@ -84,6 +84,9 @@ set mutants [list \
     [list unresolved-name-accepted hir/warnings.tcl \
         $siteTest \
         [string map {"\n                && \[dict get \$node name\] in \$declared" ""} $siteTest]] \
+    [list same-short-name-grouped hir/warnings.tcl \
+        {        dict lappend groups $failure $e} \
+        {        dict lappend groups [list [namespace tail [lindex $failure 0]] {*}[lrange $failure 1 end]] $e}] \
     [list unreachable-functions-walked hir/warnings.tcl \
         "        if \{\[dict get \$node kind\] ne \"block\" || !\[dict get \$node reachable\]\} \{\n            continue\n        \}\n        lappend warnings \{*\}\[SameFailureIn" \
         "        if \{\[dict get \$node kind\] ne \"block\"\} \{\n            continue\n        \}\n        lappend warnings \{*\}\[SameFailureIn"] \

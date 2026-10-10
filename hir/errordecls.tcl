@@ -4,14 +4,33 @@
 #   error AboveRange
 #
 # (surface/parser.tcl's ErrorDecl grammar; surface/lower.tcl turns each into
-# a plain DECL dict {name .. nameSpan ..}, never an hir/syntax.tcl node: an
-# error declaration has no runtime meaning, exactly like a `type`
+# a plain DECL dict {name .. nameSpan .. namespace ..}, never an hir/syntax.tcl
+# node: an error declaration has no runtime meaning, exactly like a `type`
 # declaration -- hir/sourcetypes.tcl.) EXPLICIT-ERROR-COMPLETIONS.md: two
 # declared errors are different semantic identities even if their names
-# happen to resemble each other (spec item 6). This file keeps that
+# happen to resemble each other (spec item 6).
+#
+# Canonical identity (ERROR-PAYLOADS.md, "Module-qualified error identity")
+# --------------------------------------------------------------------------
+# A source-defined error is nominally identified by its declaring module and
+# its declared name: the canonical identity of `error NotFound` in module
+# `http` (lib/http.bot) is the string `http::NotFound`, of one in
+# `abi::x86_64` `abi::x86_64::NotFound`, and of one the entry program
+# declares the bare `NotFound` (the entry program is no namespace). A
+# builtin error of the runtime keeps its bare name (core::native::
+# declareError). Two modules may declare the same short name: two
+# identities, whatever their payloads. The canonical string is the identity
+# everywhere after resolution -- HIR, Core IR, `errorId`, native ids,
+# rendering -- and encodes its owner unambiguously (namespace segments and
+# names never contain "::"), so the short name and namespace are recovered
+# from it (shortName, namespaceOf), never from load order. A spelling is
+# resolved in the namespace of the code that writes it (resolve): inside
+# module NS a bare name is NS's own error (or a builtin), outside it a module
+# error is spelled qualified, NS::Name, authorized by `import NS` exactly as
+# every qualified member is (surface/modules.tcl). This file keeps that
 # identity mechanism exactly as simple as source-defined *type* identity
-# already is: NAME is the identity, valid and unique across one whole
-# compiled program (every module section plus the top level), never
+# already is: the canonical name is the identity, valid and unique across one
+# whole compiled program (every module section plus the top level), never
 # compared by message text. Unlike a source type, no other part of the
 # system (no runtime registry, no native registration) ever needs to look
 # an error up outside of resolving *this* program's own HIR, so -- unlike
@@ -49,15 +68,86 @@
 # never contains. Two errors with the same fields remain unrelated errors.
 
 namespace eval hir::errordecls {
-    # The ordered list of names the most recent non-empty `apply` call
-    # registered (HIR's own `errorDecls` field mirrors this).
+    # The ordered list of canonical identities the most recent non-empty
+    # `apply` call registered (HIR's own `errorDecls` field mirrors this).
     variable current {}
-    # NAME -> the payload descriptor of each payload-bearing error of that
-    # registration: {names {F...} types {F T ...} raw {F TYPEEXPR ...}
+    # CANONICAL -> the payload descriptor of each payload-bearing error of
+    # that registration: {names {F...} types {F T ...} raw {F TYPEEXPR ...}
     # spans {F SPAN ...} typeSpans {F SPAN ...} span DECLSPAN namespace NS}.
     # TYPES (declaration order) is filled by resolvePayloads, once the
     # program's types are registered. A payload-free error has no entry.
     variable payloads [dict create]
+}
+
+# The canonical identity of the error NAME declared by module NS ("" for the
+# entry program): NS::NAME, or NAME.
+proc hir::errordecls::canonical {ns name} {
+    return [expr {$ns eq "" ? $name : "${ns}::$name"}]
+}
+
+# The declared (short) name of the error with canonical identity ID.
+proc hir::errordecls::shortName {id} {
+    set cut [string last :: $id]
+    return [expr {$cut < 0 ? $id : [string range $id [expr {$cut + 2}] end]}]
+}
+
+# The declaring module of the error with canonical identity ID ("" for the
+# entry program's and the runtime's builtin errors).
+proc hir::errordecls::namespaceOf {id} {
+    set cut [string last :: $id]
+    return [expr {$cut < 0 ? "" : [string range $id 0 [expr {$cut - 1}]]}]
+}
+
+# The canonical identity the error spelling SPELLING denotes in code of
+# module NS ("" for the entry program), or "" if it denotes none:
+#
+#   NS2::Name   the error Name declared by module NS2 (its authorization by
+#               the file's imports is surface/modules.tcl's, as for every
+#               qualified member)
+#   Name        inside module NS, NS's own error Name; else a builtin error
+#               of the runtime; in the entry program, its own error Name
+#
+# Never a short-name match across modules: an entry program names a module's
+# error qualified, and a module never sees the entry program's.
+proc hir::errordecls::resolve {spelling ns} {
+    variable current
+    if {[string first :: $spelling] >= 0} {
+        return [expr {$spelling in $current ? $spelling : ""}]
+    }
+    if {$ns ne "" && "${ns}::$spelling" in $current} {
+        return "${ns}::$spelling"
+    }
+    if {[core::native::isBuiltinError $spelling]} {
+        return $spelling
+    }
+    if {$ns eq "" && $spelling in $current} {
+        return $spelling
+    }
+    return ""
+}
+
+# The diagnostic of an error spelling SPELLING that denotes nothing in code of
+# module NS (resolve): "unknown error ...: REASON" (unknownReason).
+proc hir::errordecls::unknownMessage {spelling ns} {
+    return "unknown error \"$spelling\": [unknownReason $spelling $ns]"
+}
+
+# Why the error spelling SPELLING denotes nothing in code of module NS: no
+# visible declaration -- naming the modules that declare that short name,
+# spelled the way this code would have to write it.
+proc hir::errordecls::unknownReason {spelling ns} {
+    variable current
+    if {[string first :: $spelling] >= 0} {
+        return "module \"[namespaceOf $spelling]\" declares no error \"[shortName $spelling]\""
+    }
+    set reason "no \"error $spelling\" declaration is visible"
+    set owners [lmap id $current {
+        expr {[shortName $id] eq $spelling && [namespaceOf $id] ne $ns ? $id : [continue]}
+    }]
+    if {$owners ne {}} {
+        append reason " here (a module's error is named qualified outside its module: [join $owners {, }])"
+    }
+    return $reason
 }
 
 proc hir::errordecls::Fail {span message} {
@@ -71,9 +161,11 @@ proc hir::errordecls::Fail {span message} {
 # Validates DECLS (surface/lower.tcl's ErrorDeclOf dicts -- one per `error
 # NAME` declaration found, across every module section a program loads plus
 # its own top level, see surface/modules.tcl), returning the ordered list
-# of declared names. Duplicate names, even across module sections, are
-# rejected: exactly hir::sourcetypes.tcl's own single-flat-namespace rule
-# for source-defined types.
+# of declared canonical identities. A canonical identity declared twice --
+# the same short name twice in one module, or in the entry program -- is
+# rejected; the same short name in two modules is two identities. A short
+# name of a builtin error is rejected in every module too: a bare spelling
+# in that module would otherwise name two errors.
 proc hir::errordecls::apply {decls} {
     variable current
     variable payloads
@@ -84,12 +176,14 @@ proc hir::errordecls::apply {decls} {
     set order {}
     set described [dict create]
     foreach decl $decls {
-        set name [dict get $decl name]
-        if {[core::native::isBuiltinError $name]} {
-            Fail [dict get $decl nameSpan] "error \"$name\" is already declared (a builtin error of the runtime)"
+        set short [dict get $decl name]
+        set ns [expr {[dict exists $decl namespace] ? [dict get $decl namespace] : ""}]
+        set name [canonical $ns $short]
+        if {[core::native::isBuiltinError $short]} {
+            Fail [dict get $decl nameSpan] "error \"$short\" is already declared (a builtin error of the runtime)"
         }
         if {[dict exists $seen $name]} {
-            Fail [dict get $decl nameSpan] "error \"$name\" is already declared[hir::sourcetypes::ElsewhereClause [dict get $seen $name] [dict get $decl nameSpan]]"
+            Fail [dict get $decl nameSpan] "error \"$short\" is already declared[expr {$ns eq "" ? "" : " in module \"$ns\""}][hir::sourcetypes::ElsewhereClause [dict get $seen $name] [dict get $decl nameSpan]]"
         }
         dict set seen $name [dict get $decl nameSpan]
         lappend order $name
@@ -103,7 +197,7 @@ proc hir::errordecls::apply {decls} {
             set fieldName [dict get $field name]
             if {$fieldName in $names} {
                 core::semanticError DUPLICATE-FIELD \
-                    "[Location [dict get $field nameSpan]]duplicate field \"$fieldName\" in the payload of error \"$name\": each payload field is declared once"
+                    "[Location [dict get $field nameSpan]]duplicate field \"$fieldName\" in the payload of error \"$short\": each payload field is declared once"
             }
             lappend names $fieldName
             lappend raw $fieldName [dict get $field type]
@@ -111,8 +205,7 @@ proc hir::errordecls::apply {decls} {
             lappend typeSpans $fieldName [dict get $field typeSpan]
         }
         dict set described $name [dict create names $names types {} raw $raw spans $spans \
-            typeSpans $typeSpans span [dict get $decl nameSpan] \
-            namespace [expr {[dict exists $decl namespace] ? [dict get $decl namespace] : ""}]]
+            typeSpans $typeSpans span [dict get $decl nameSpan] namespace $ns]
     }
     set current $order
     set payloads $described
@@ -161,8 +254,8 @@ proc hir::errordecls::resolvePayloads {} {
 }
 
 # Re-registers the payload descriptors ENTRIES of a HIR's own
-# `errorPayloads` (NAME -> {fields {F T ...} namespace NS}, resolved types:
-# hir/read.tcl, a serialized HIR), for the error names NAMES.
+# `errorPayloads` (CANONICAL -> {fields {F T ...} namespace NS}, resolved
+# types: hir/read.tcl, a serialized HIR), for the canonical identities NAMES.
 proc hir::errordecls::applyEntries {names entries} {
     variable current
     variable payloads
@@ -228,7 +321,7 @@ proc hir::errordecls::payloadType {name} {
     return [list struct $canonical]
 }
 
-# HIR's `errorPayloads` entries of the current registration: NAME ->
+# HIR's `errorPayloads` entries of the current registration: CANONICAL ->
 # {fields {F T ...} namespace NS}, for every payload-bearing error, in
 # declaration order (hir/format.tcl prints them, hir/read.tcl re-registers).
 proc hir::errordecls::entries {} {
@@ -240,11 +333,12 @@ proc hir::errordecls::entries {} {
     return $result
 }
 
-# 1 if NAME is a declared error identity of the program currently being
-# built (the most recent non-empty `apply` call), or a builtin error the
+# 1 if NAME is a declared canonical error identity of the program currently
+# being built (the most recent non-empty `apply` call), or a builtin error the
 # runtime declares (core::native::declareError: InvalidArgumentEncoding, the
 # error of `argv`) -- those are visible in every program, are never part of
-# its own `errorDecls`, and cannot be redeclared.
+# its own `errorDecls`, and cannot be redeclared. A spelling is resolved to
+# its canonical identity first (resolve).
 proc hir::errordecls::isDeclared {name} {
     variable current
     return [expr {$name in $current || [core::native::isBuiltinError $name]}]

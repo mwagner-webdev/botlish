@@ -386,7 +386,7 @@ something unproven:
 - **Memoization** (a plain performance fix, not a semantic one --
   `hir::completions::cache`, reset once per whole-program `errorsets::
   verify` pass): `analyzeBlock`'s own result is cached by `{target
-  argRanges argExact argExactLists}`, since the overwhelmingly common case
+  argRanges argExact argExactLists argCallables captureFacts}`, since the overwhelmingly common case
   is many call sites to the same helper sharing identical (often fully
   unconstrained) argument facts, and re-walking the same callee body from
   scratch at every one of them compounds multiplicatively with program
@@ -579,15 +579,76 @@ reconstruction` (`tests/byte-set.test`'s own `byte-set-module-retained-
 value`, updated for the clean initializer, still checks exactly one
 `setfromlist` allocation site).
 
+### Precision and the erased-callable contract
+
+> Effective completion analysis may narrow a declared error contract when it
+> can prove a smaller set. If that analysis loses precision, it conservatively
+> falls back to the declared contract; inability to prove an error impossible
+> never means the error is absent.
+
+A callable that declares errors may reach an untyped parameter through a
+semantic instance (OPPORTUNISTIC-SEMANTIC-INSTANCES.md: the instance keeps the
+argument's exact type, so hir/callables.tcl accepts the erasure), and from
+there an untyped call `f(x)` the generic body says nothing about. The walk
+used to return an unknown range with *no* errors for such a call, turning
+"analysis lost precision" into "this call raises nothing": a handled call
+could omit a possible error and the error escaped at run time
+(ERROR-PAYLOADS.md recorded it; `tests/higher-order-completions.test` pins the
+reproducers). The walk now tracks each value's *callable fact*
+(`hir::completions::CallableFact`) and charges an untyped or structural call
+by it:
+
+| callable fact | where it comes from | the call is charged |
+|---|---|---|
+| `{block B}` / `{native N}` | an argument of exact callable type (seeded into the callee's parameter), a local bound to one | B's effective errors under the call's argument facts (the call analyzed as an exact call of B: *recovery*); N's declared errors |
+| `clean` | a parameter or capture of the body being checked (`checkBlock`, `reachedExprs`), a closure created by the same activation passing its captures' facts | nothing beyond its static contract: whatever an erased argument carries is charged at the call that passed it |
+| `unknown` | anything else that may hold a callable (a closure's capture in an analyzed callee, a call result, a list element) | its static contract plus the *erased-callable contract*, and the walk becomes *incomplete* |
+
+The erased-callable contract (`hir::completions::erasedErrorsOf`) is the
+union of `hir::callables::CarriedErrors` over every semantic instance's entry
+type at an untyped parameter: every declared error a callable the program
+passes into an untyped parameter can raise -- the only callables an untyped
+call can reach, directly or through a closure that captured one. It is not
+"every error of the program": an error no erased callable carries is never
+charged. A program that erases no error-bearing callable has an empty
+contract, and nothing here changes its analysis (every new path is gated on
+it).
+
+At the **function-instance boundary** (`EffectiveFacts`) an incomplete
+summary keeps every error the callee declares, beside what the lost call was
+charged: exact narrowing survives only while the whole walk is complete, and
+incompleteness propagates to every enclosing summary. The lattice is
+*proven subset < declared contract (plus what the lost calls were charged)*,
+never *unknown -> {}*. The recursion guard, the budget and the arity fallback
+return the declared contract as before, plus -- for a *transparent* callee
+(`Transparent`: one whose body makes such a call, directly or through an
+exact callee) -- what the callable inputs of that call carry (`Fallback`,
+`Carried`): a body's own check holds every other source to its declared
+errors, so what passes through beyond them is carried by its parameters and
+captures.
+
+**May versus must.** A fallback is a may-set: it never lowers `normal`, so it
+never creates a `KNOWN-ERROR`, and recovery contributes the callee's possible
+errors only, never a must-fact (an untyped call always may complete
+normally). A known failure of an exact call is diagnosed exactly as before.
+
+The same hole reached ownership: `hir/affine.tcl`'s error edges use a call's
+type-level `calleeErrors`, empty for an untyped call or an exact call of a
+transparent function, so a coroutine live across such a call was never
+released when an erased callable failed through it. Those error edges now
+include the erased-callable contract for such calls
+(`hir::completions::mayLetErasedThrough`).
+
 ## Conservative fallback / proof budget
 
-Documented above (recursion guard, proof budget, memoization). The
+Documented above (recursion guard, proof budget, memoization, precision). The
 governing soundness rule throughout (item 82-83): a branch is pruned as
 infeasible only when `ComparisonNarrowing`'s own narrowed `Range` for a
 touched binding is provably empty (`min > max`, both bounds finite); a call
 is diagnosed `KNOWN-ERROR` only when `mayReturnNormally` computed `false`;
-every fallback path (guard hit, budget exhausted) widens toward the
-callee's full declared contract, never narrows. False negatives (an error
+every fallback path (guard hit, budget exhausted, lost precision) widens
+toward the callee's full declared contract -- plus, through an untyped
+callable, the erased-callable contract -- never narrows. False negatives (an error
 this proof *could* in principle rule out but does not) are acceptable and
 expected outside this milestone's own corpus (item 82); a false claim of
 impossibility is not, and none of the mechanisms above can produce one by

@@ -328,7 +328,7 @@ proc hir::contexts::ShowImplementation {qualified info} {
 #
 #   linux::io::BrokenIO does not satisfy io::IO
 #   required:
-#       fn write_text(str) -> unit errors WriteFailed   (declared at io.bot:4:8)
+#       fn write_text(str) -> unit errors io::WriteFailed   (declared at io.bot:4:8)
 #   found:
 #       fn linux::io::write_text(int, context linux::io::BrokenIO) -> unit   (at io.bot:30:4)
 #   parameter 1 requires int, which does not admit the required str

@@ -130,7 +130,7 @@ set helloText [readFile [file join $::projectRoot examples io hello.bot]]
 set routingText {import io
 import linux::io
 
-fn emit_all() -> str errors WriteFailed:
+fn emit_all() -> str errors io::WriteFailed:
     io::print("out:")
     io::print_line(" é 𝄞")
     io::write_error("err:")
@@ -140,7 +140,7 @@ fn emit_all() -> str errors WriteFailed:
 with context linux::io::create()
 
 emit_all():
-    on WriteFailed:
+    on io::WriteFailed:
         "failed"
 }
 
@@ -148,21 +148,21 @@ emit_all():
 set statusText {import io
 import linux::io
 
-fn hello() -> str errors WriteFailed:
+fn hello() -> str errors io::WriteFailed:
     io::print_line("Hello, world!")
     "ok"
 
 with context linux::io::create()
 
 hello():
-    on WriteFailed:
+    on io::WriteFailed:
         "failed"
 }
 
 # ---------------------------------------------------------------------------
 # The portable surface
 
-test io-portable-surface {io exports exactly print, print_line, write_error and write_error_line, each over one str and nothing else (no descriptor, buffer or count), all requiring the io::IO context trait whose operations are write_text and write_error_text; WriteFailed is the one error} -body {
+test io-portable-surface {io exports exactly print, print_line, write_error and write_error_line, each over one str and nothing else (no descriptor, buffer or count), all requiring the io::IO context trait whose operations are write_text and write_error_text; io::WriteFailed is the one error} -body {
     set hir [ioHir "import io\n1\n"]
     set source [dict get $hir traitSource]
     set names [lsort [lmap b [dict get $source scopes [dict get $source modules io] bindings] {dict get $source bindings $b name}]]
@@ -174,8 +174,8 @@ test io-portable-surface {io exports exactly print, print_line, write_error and 
     }]
     list $names [dict get $io context] [lmap r [dict get $io requirements] {
         list [dict get $r name] [lmap p [dict get $r params] {dict get $p type}] [dict get $r result type] [dict get $r errors]
-    }] [lsort -unique $shapes] [lsearch -inline [hir::errorDecls $hir] WriteFailed]
-} -result {{io::print io::print_line io::write_error io::write_error_line} 1 {{write_text str unit WriteFailed} {write_error_text str unit WriteFailed}} {{str unit WriteFailed io::IO}} WriteFailed}
+    }] [lsort -unique $shapes] [lsearch -inline [hir::errorDecls $hir] io::WriteFailed]
+} -result {{io::print io::print_line io::write_error io::write_error_line} 1 {{write_text str unit io::WriteFailed} {write_error_text str unit io::WriteFailed}} {{str unit io::WriteFailed io::IO}} io::WriteFailed}
 
 test io-linux-implements {linux::io::LinuxIO implements io::IO through linux::io::write_text and linux::io::write_error_text, from its own module only} -body {
     ioHir "import io\nimport linux::io\n1\n"
@@ -226,23 +226,23 @@ context struct Limited:
 fn create(max: Limit) -> Limited:
     Limited {max: max}
 
-fn write_text(text: str, context c: Limited) -> unit errors WriteFailed:
+fn write_text(text: str, context c: Limited) -> unit errors io::WriteFailed:
     if str::length(text) > c.max:
-        fail WriteFailed
+        fail io::WriteFailed
     unit
 
-fn write_error_text(text: str, context c: Limited) -> unit errors WriteFailed:
-    fail WriteFailed
+fn write_error_text(text: str, context c: Limited) -> unit errors io::WriteFailed:
+    fail io::WriteFailed
 }
 }
 
-test io-substitute-context {a test context implementing io::IO is selected like LinuxIO: io::print_line succeeds or fails with WriteFailed by what its implementation does, the same on every backend} -body {
+test io-substitute-context {a test context implementing io::IO is selected like LinuxIO: io::print_line succeeds or fails with io::WriteFailed by what its implementation does, the same on every backend} -body {
     withPrivateLibrary {
         set f [open [file join $::core::libraryDir limited.bot] w]
         puts -nonewline $f [lindex $::limitedLib 1]
         close $f
         set result [lmap max {20 3} {
-            sourceAgree "import io\nimport limited\nfn greet() -> List\[str\] errors WriteFailed:\n    io::print_line(\"hi\")\n    io::print(\"there\")\n    \[\"ok\"\]\nwith context limited::create($max)\nr = greet():\n    on WriteFailed:\n        \[\"failed\"\]\nr\n"
+            sourceAgree "import io\nimport limited\nfn greet() -> List\[str\] errors io::WriteFailed:\n    io::print_line(\"hi\")\n    io::print(\"there\")\n    \[\"ok\"\]\nwith context limited::create($max)\nr = greet():\n    on io::WriteFailed:\n        \[\"failed\"\]\nr\n"
         }]
     }
     set result
@@ -318,7 +318,7 @@ test io-short-write-completed {a short write is completed: when the kernel accep
 "ok"
 }}
 
-test io-write-failed {a negative write result (the kernel's -errno, here an injected EBADF) and a write that makes no progress (0 bytes) are WriteFailed: the portable caller's handler runs; the errno never reaches it} -constraints {linuxX86_64 straceInject posixShell} -body {
+test io-write-failed {a negative write result (the kernel's -errno, here an injected EBADF) and a write that makes no progress (0 bytes) are io::WriteFailed: the portable caller's handler runs; the errno never reaches it} -constraints {linuxX86_64 straceInject posixShell} -body {
     set exe [buildExecutable status $::statusText]
     lmap inject {write:error=EBADF:when=1 write:retval=0:when=1} {
         set log [file join $::scratch strace.fail]
@@ -332,7 +332,7 @@ test io-write-failed {a negative write result (the kernel's -errno, here an inje
 test io-allocations {allocation evidence: the context-trait path adds nothing -- io::print_line(text) allocates exactly what the direct linux::io::write_text(str::concat(text, "\n")) does: the line String, the UTF-8 byte List and the Bytes (the operation's own), plus linux::io::create's 7 structs and the one struct linux::write builds} -constraints {linuxX86_64} -body {
     set pre "import io\nimport linux::io\nimport str\nwith context linux::io::create()\n"
     lmap call {{io::print_line("Hello, world!")} {linux::io::write_text(str::concat("Hello, world!", "\n"))}} {
-        set report [native::allocationReport [ioHir "${pre}r = $call:\n    on WriteFailed:\n        unit\nr\n"] summary]
+        set report [native::allocationReport [ioHir "${pre}r = $call:\n    on io::WriteFailed:\n        unit\nr\n"] summary]
         list [dict get $report total allocations] [dict get $report total allocatedBytes] \
             [lmap {k v} [dict get $report byKind] {expr {[dict get $v allocations] ? "$k=[dict get $v allocations]" : [continue]}}]
     }

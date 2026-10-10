@@ -167,8 +167,8 @@ byte::from_int(45)} q1-byte-from-int-45-nir.bot]
     try {
         set body [nirFuncBody [nirOfFile $path] "byte::from_int"]
         list [regexp -all {op rilt} $body] [regexp -all {op rigt} $body] \
-                [regexp -all {faildeclared 1 "BelowRange"} $body] \
-                [regexp -all {faildeclared 2 "AboveRange"} $body]
+                [regexp -all {faildeclared 1 "byte::BelowRange"} $body] \
+                [regexp -all {faildeclared 2 "byte::AboveRange"} $body]
     } finally {
         removeFile q1-byte-from-int-45-nir.bot
     }
@@ -281,7 +281,7 @@ additional_unreserved_chars = byte::set(['-', '.', '_', '~'])} q3-module-init.bo
     }
 } -result {}
 
-test checked-domain-q3-inner-call-keeps-only-the-generic-fact {byte::set's own inner from_int(char::scalar_value(c)) call -- inside the SAME program above -- still carries only the generic, unseeded facts (from_int's own effectiveErrors=AboveRange; char::scalar_value's own result range the full Unicode scalar domain [0, 0x10FFFF]), never the module-init call's own narrower literal-derived proof: the exact first-loss location. Both calls share lib/byte.bot:177 (from_int(char::scalar_value(c)) -- one nested inside the other), so both facts are read together and matched by their own distinct resultRangeFact shape} -body {
+test checked-domain-q3-inner-call-keeps-only-the-generic-fact {byte::set's own inner from_int(char::scalar_value(c)) call -- inside the SAME program above -- still carries only the generic, unseeded facts (from_int's own effectiveErrors=byte::AboveRange; char::scalar_value's own result range the full Unicode scalar domain [0, 0x10FFFF]), never the module-init call's own narrower literal-derived proof: the exact first-loss location. Both calls share lib/byte.bot:177 (from_int(char::scalar_value(c)) -- one nested inside the other), so both facts are read together and matched by their own distinct resultRangeFact shape} -body {
     set path [makeFile {import byte
 additional_unreserved_chars = byte::set(['-', '.', '_', '~'])} q3-inner-call.bot]
     try {
@@ -309,16 +309,16 @@ additional_unreserved_chars = byte::set(['-', '.', '_', '~'])} q3-inner-call.bot
     } finally {
         removeFile q3-inner-call.bot
     }
-} -result {AboveRange {[0, 1114111]}}
+} -result {byte::AboveRange {[0, 1114111]}}
 
-test checked-domain-q3-real-nir-retains-above-range-check {UPDATED BY M6, then LINUX-X86-64-SYSCALL (the decided `value < 0` comparison is no longer computed either: native/lower.tcl's PureDecidedCondition): byte::set's real generated NIR for its inner byte::from_int<int> instance loses its BelowRange check -- generically, because char::scalar_value's own declared result range floor (core/native.tcl's "-result-range nonneg" metadata for a Unicode scalar value, [0, 1114111]) already proves value>=0 for EVERY caller of this shared instance, independent of the punctuation literal's own four values and independent of hir/completions.tcl's call-specific silo entirely -- but AboveRange remains: char::scalar_value's upper bound (1114111) is nowhere near 255, so value>255 stays genuinely Unknown for this shared instance. This is the real production improvement M6 actually delivers here; it is not M5's own Q3 question (whether the outer call's *literal* facts reach the inner construction) -- that remains Outcome B, confirmed unchanged: no container-content propagation, no completions-proof import, was added} -body {
+test checked-domain-q3-real-nir-retains-above-range-check {UPDATED BY M6, then LINUX-X86-64-SYSCALL (the decided `value < 0` comparison is no longer computed either: native/lower.tcl's PureDecidedCondition): byte::set's real generated NIR for its inner byte::from_int<int> instance loses its byte::BelowRange check -- generically, because char::scalar_value's own declared result range floor (core/native.tcl's "-result-range nonneg" metadata for a Unicode scalar value, [0, 1114111]) already proves value>=0 for EVERY caller of this shared instance, independent of the punctuation literal's own four values and independent of hir/completions.tcl's call-specific silo entirely -- but byte::AboveRange remains: char::scalar_value's upper bound (1114111) is nowhere near 255, so value>255 stays genuinely Unknown for this shared instance. This is the real production improvement M6 actually delivers here; it is not M5's own Q3 question (whether the outer call's *literal* facts reach the inner construction) -- that remains Outcome B, confirmed unchanged: no container-content propagation, no completions-proof import, was added} -body {
     set path [makeFile {import byte
 additional_unreserved_chars = byte::set(['-', '.', '_', '~'])} q3-nir.bot]
     try {
         set body [nirFuncBody [nirOfFile $path] "byte::from_int"]
         list [regexp -all {op rilt|op ilt} $body] [regexp -all {op rigt|op igt} $body] \
-                [regexp -all {faildeclared 1 "BelowRange"} $body] \
-                [regexp -all {faildeclared 2 "AboveRange"} $body]
+                [regexp -all {faildeclared 1 "byte::BelowRange"} $body] \
+                [regexp -all {faildeclared 2 "byte::AboveRange"} $body]
     } finally {
         removeFile q3-nir.bot
     }
@@ -355,7 +355,7 @@ import type byte::Byte
 additional_unreserved_chars = byte::set(['-', '.', '_', '~'])
 fn dyn(chars: List[UnicodeChar]) -> ImmutableSet[Byte]:
     result = byte::set(chars):
-        on AboveRange:
+        on byte::AboveRange:
             additional_unreserved_chars
     result
 dyn(['A'])} q-shared-byteset.bot]
@@ -370,7 +370,7 @@ test checked-domain-shared-instance-from-int {byte::from_int(45) (a literal) and
     set path [makeFile {import byte
 import type byte::Byte
 byte::from_int(45)
-fn dyn(m: int) -> Byte errors BelowRange, AboveRange:
+fn dyn(m: int) -> Byte errors byte::BelowRange, byte::AboveRange:
     byte::from_int(m)
 dyn(45)} q-shared-fromint.bot]
     try {

@@ -10,8 +10,9 @@
 # (a temporary directory) gets the replacements, and the detectors run
 # against it:
 #
-#   * the test files FILES (default tests/error-payloads.test and
-#     tests/higher-order-completions.test; each with a private -tmpdir):
+#   * the test files FILES (default tests/error-payloads.test,
+#     tests/higher-order-completions.test and tests/namespaced-errors.test;
+#     each with a private -tmpdir):
 #     killed if any test fails or a file does not complete;
 #   * audit/error-payloads/tools/fuzz.tcl -n N -seed S (every backend, the
 #     independent model): killed if it reports a disagreement or does not
@@ -31,7 +32,7 @@
 
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
 
-set options [dict create -only "" -tests {tests/error-payloads.test tests/higher-order-completions.test} -fuzz-count 25 -fuzz-seed 11 -timeout 1800]
+set options [dict create -only "" -tests {tests/error-payloads.test tests/higher-order-completions.test tests/namespaced-errors.test} -fuzz-count 25 -fuzz-seed 11 -timeout 1800]
 foreach {option value} $argv {
     if {![dict exists $options $option]} { error "unknown option $option" }
     dict set options $option $value

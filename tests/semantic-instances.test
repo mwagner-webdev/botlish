@@ -277,8 +277,8 @@ test si-list-4 {a recursive accumulator recovers its element type} -body {
 
 set isB "import list\nfn is_b(s):\n    s == \"b\"\n"
 set big "import list\nfn big(n):\n    n > 5\n"
-set findStr "r = list::find(\[\"a\", \"b\"\], is_b):\n    on NotFound:\n        \"none\"\nr"
-set findInt "r = list::find(\[1, 9\], big):\n    on NotFound:\n        0\nr"
+set findStr "r = list::find(\[\"a\", \"b\"\], is_b):\n    on list::NotFound:\n        \"none\"\nr"
+set findInt "r = list::find(\[1, 9\], big):\n    on list::NotFound:\n        0\nr"
 
 test si-hof-1 {list::find(List[str], predicate) is str without a source type variable} -body {
     siLast "${isB}${findStr}"
@@ -293,16 +293,16 @@ test si-hof-3 {a typed predicate now passes through the untyped helper parameter
 } -result {str int}
 
 test si-hof-4 {List[str] with an int predicate is rejected, untyped or typed, through ordinary body analysis} -body {
-    set call "r = list::find(\[\"a\", \"b\"\], big):\n    on NotFound:\n        \"x\"\nr"
+    set call "r = list::find(\[\"a\", \"b\"\], big):\n    on list::NotFound:\n        \"x\"\nr"
     list [siRejects "import list\nfn big(n):\n    n > 5\n${call}" "*call to list::find with xs : List\\\[str\\\], predicate : big/1 -> bool is invalid*"] \
         [siRejects "import list\nfn big(n: int):\n    n > 5\n${call}" "*call to list::find with xs : List\\\[str\\\]*"]
 } -result {1 1}
 
-test si-hof-5 {the instance's successful result and the declared NotFound error} -body {
+test si-hof-5 {the instance's successful result and the declared list::NotFound error} -body {
     set hir [siCompile "${isB}${findStr}"]
     set find [lsearch -inline -glob [lmap row [hir::semantic::census $hir] {dict get $row name}] list::find]
     list $find [dict get [hir::signatures::of $hir [siBlock $hir list::find]] errors]
-} -result {list::find NotFound}
+} -result {list::find list::NotFound}
 
 test si-hof-6 {any?/all?/none? type their loop element and predicate call and stay bool} -body {
     list [siLast "${isB}list::any?(\[\"a\", \"b\"\], is_b)"] [siLast "import list\nfn pos(n):\n    n > 0\nlist::all?(\[1, 2\], pos)"] \
@@ -316,11 +316,11 @@ test si-hof-7 {a callable of the wrong argument type is rejected for any?/all?/n
 } -result {1 1 1}
 
 test si-hof-8 {a handler whose value does not fit the now-precise find result is the ordinary handled-result rule} -body {
-    siRejects "${isB}r = list::find(\[\"a\"\], is_b):\n    on NotFound:\n        0\nr" "*not admissible as str*"
+    siRejects "${isB}r = list::find(\[\"a\"\], is_b):\n    on list::NotFound:\n        0\nr" "*not admissible as str*"
 } -result 1
 
 test si-hof-9 {a helper of typed arrays: find over List[MutableArray[str]] keeps the contract} -body {
-    siLast "import list\nimport mutable_array\nfn nonempty(m):\n    mutable_array::capacity(m) > 0\nr = list::find(\[mutable_array::create(1, \"x\")\], nonempty):\n    on NotFound:\n        mutable_array::create(0, \"x\")\nr"
+    siLast "import list\nimport mutable_array\nfn nonempty(m):\n    mutable_array::capacity(m) > 0\nr = list::find(\[mutable_array::create(1, \"x\")\], nonempty):\n    on list::NotFound:\n        mutable_array::create(0, \"x\")\nr"
 } -result {MutableArray[str]}
 
 # ---------------------------------------------------------------------------
@@ -573,7 +573,7 @@ test si-run-1 {identity/first/find/writer run identically on every backend; a wr
 } -result {value {["p", 1, "y", "x", 2]} {}}
 
 test si-run-2 {list::find with instances runs identically on every backend} -body {
-    siParity "import list\nfn is_b(s):\n    s == \"b\"\nr = list::find(\[\"a\", \"b\"\], is_b):\n    on NotFound:\n        \"none\"\nr"
+    siParity "import list\nfn is_b(s):\n    s == \"b\"\nr = list::find(\[\"a\", \"b\"\], is_b):\n    on list::NotFound:\n        \"none\"\nr"
 } -result {value {"b"} {}}
 
 cleanupTests

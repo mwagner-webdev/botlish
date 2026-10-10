@@ -180,9 +180,9 @@ for {set p 0} {$p < $n} {incr p} {
         lappend expected "\[[join $want {, }]\]"
         append functions "fn c$index\(n: int):
     x = abi::${ctor}(n):
-        on AbiIntegerBelowRange:
+        on abi::AbiIntegerBelowRange:
             return \"below\"
-        on AbiIntegerAboveRange:
+        on abi::AbiIntegerAboveRange:
             return \"above\"
     \[x.value, abi::x86_64::${enc}(x).word\]
 
@@ -191,9 +191,9 @@ fn again$index\(x: abi::$s) -> abi::$s:
 
 fn rt$index\(n: int):
     x = abi::${ctor}(n):
-        on AbiIntegerBelowRange:
+        on abi::AbiIntegerBelowRange:
             return \"below\"
-        on AbiIntegerAboveRange:
+        on abi::AbiIntegerAboveRange:
             return \"above\"
     y = again$index\(again$index\(x))
     \[y.value, abi::x86_64::${enc}(y).word\]
@@ -234,7 +234,7 @@ fn rt$index\(n: int):
         expr {$v >= $fmin && $v <= $fmax ? $v : $fmin}
     }]
     incr values [llength $xs]
-    set text "fn narrow(x: abi::$fs):\n    y = abi::${tctor}(x.value):\n        on AbiIntegerBelowRange:\n            return \"below\"\n        on AbiIntegerAboveRange:\n            return \"above\"\n    \[y.value, abi::x86_64::${tenc}(y).word\]\nfn entry(n: int):\n    x = abi::${fctor}(n):\n        on AbiIntegerBelowRange:\n            return \"unreachable\"\n        on AbiIntegerAboveRange:\n            return \"unreachable\"\n    narrow(x)\nloop v in \[[join [lmap v $xs {lit $v}] {, }]\]:\n    entry(v)\n"
+    set text "fn narrow(x: abi::$fs):\n    y = abi::${tctor}(x.value):\n        on abi::AbiIntegerBelowRange:\n            return \"below\"\n        on abi::AbiIntegerAboveRange:\n            return \"above\"\n    \[y.value, abi::x86_64::${tenc}(y).word\]\nfn entry(n: int):\n    x = abi::${fctor}(n):\n        on abi::AbiIntegerBelowRange:\n            return \"unreachable\"\n        on abi::AbiIntegerAboveRange:\n            return \"unreachable\"\n    narrow(x)\nloop v in \[[join [lmap v $xs {lit $v}] {, }]\]:\n    entry(v)\n"
     set narrowed [lmap v $xs {oracle $tmin $tmax $tsigned $v}]
     set want [list value "\[[join $narrowed {, }]\]" {}]
     if {[catch {outcomes [hirOfText $text]} got]} {
@@ -265,7 +265,7 @@ fn rt$index\(n: int):
             puts "FAIL seed $seed constant abi::${ctor}($v): diagnostics {$kinds}, expected {$want}"
         } elseif {$want eq "KNOWN-ERROR"} {
             set message [dict get [lindex [hir::diagnostics $hir] 0] message]
-            set error [expr {$v < $min ? "AbiIntegerBelowRange" : "AbiIntegerAboveRange"}]
+            set error [expr {$v < $min ? "abi::AbiIntegerBelowRange" : "abi::AbiIntegerAboveRange"}]
             # The complete list of errors named, up to its ";".
             if {![string match "*declared error(s) $error;*" $message]} {
                 incr failures

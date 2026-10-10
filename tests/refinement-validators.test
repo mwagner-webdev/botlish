@@ -652,17 +652,17 @@ fn measure(p: Path) -> int:
 
 fn use(p: str) -> int:
     path::validate(p):
-        on ContainsReservedCharacters:
+        on path::ContainsReservedCharacters:
             return -1
-        on TooLong:
+        on path::TooLong:
             return -2
     measure(p) + path::open(p)
 
 fn sugar(p: str) -> int:
     p.validate():
-        on ContainsReservedCharacters:
+        on path::ContainsReservedCharacters:
             return -1
-        on TooLong:
+        on path::TooLong:
             return -2
     measure(p)
 

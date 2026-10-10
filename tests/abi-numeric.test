@@ -157,9 +157,9 @@ proc classifyProgram {ctor enc values} {
 import abi::x86_64
 fn classify(n: int):
     x = abi::${ctor}(n):
-        on AbiIntegerBelowRange:
+        on abi::AbiIntegerBelowRange:
             return \"below\"
-        on AbiIntegerAboveRange:
+        on abi::AbiIntegerAboveRange:
             return \"above\"
     \[x.value, abi::x86_64::${enc}(x).word\]
 
@@ -254,13 +254,13 @@ test abi-numeric-no-compiler-knowledge {the compiler knows no ABI numeric type: 
         [llength [lsearch -all -regexp $natives {^abi::(I|U)(8|16|32|64|size)Value\?$}]]
 } -result {1 {} {linux::abi::syscall abi::x86_64::from_bytes abi::x86_64::from_mutable_bytes} 10}
 
-test abi-numeric-namespaced-types {abi::x86_64 loads lib/abi.bot, whose domain types are members of namespace abi (abi::U8Value): a program's own U8Value or I32Value beside the raw transport -- and beside abi::U8Value -- compiles, and a program may even declare a type named like the module's (AbiU8Value); only the two errors are still global names, so a real collision names the module declaration} -body {
+test abi-numeric-namespaced-types {abi::x86_64 loads lib/abi.bot, whose domain types are members of namespace abi (abi::U8Value): a program's own U8Value or I32Value beside the raw transport -- and beside abi::U8Value -- compiles, and a program may even declare a type named like the module's (AbiU8Value) -- or an error named like the module's (AbiIntegerAboveRange, beside abi::AbiIntegerAboveRange: errors are module-qualified too); a real collision is one module or program declaring a name twice} -body {
     list [agree "import abi::x86_64\ntype U8Value = Int in 0..255\ntype I32Value = Int in 0..9\nfn f(x: U8Value) -> int:\n    x\nabi::x86_64::to_int(abi::x86_64::register64(f(39)))"] \
         [agree "import abi::x86_64\ntype AbiU8Value = Int in 0..255\nfn f(x: AbiU8Value) -> int:\n    x\nabi::x86_64::to_int(abi::x86_64::register64(f(39)))"] \
         [agree "import abi\ntype U8Value = Int in 0..5\nfn f(x: U8Value, y: abi::U8Value) -> int:\n    x + y\nf(3, 200)"] \
-        [string map [list $::projectRoot ROOT] [lrange [strictError "import abi::x86_64\nerror AbiIntegerAboveRange\nabi::x86_64::to_int(abi::x86_64::register64(39))"] 0 2]] \
+        [agree "import abi::x86_64\nerror AbiIntegerAboveRange\nabi::x86_64::to_int(abi::x86_64::register64(39))"] \
         [lrange [strictError "type Small = Int in 0..3\ntype Small = Int in 0..4\n1"] 0 2]
-} -match glob -result {39 39 203 {UNDECLARED-ERROR 2:7 {error "AbiIntegerAboveRange" is already declared at ROOT/lib/abi.bot:*:7 (*names are global*)}} {TYPE 2:6 {type "Small" is already declared}}}
+} -match glob -result {39 39 203 39 {TYPE 2:6 {type "Small" is already declared}}}
 
 # ---------------------------------------------------------------------------
 # Checked creation and the way back to Int: every boundary, every type,
@@ -292,9 +292,9 @@ test abi-numeric-no-wrapping {an ABI value is not fixed-width arithmetic: its In
     agree {import abi
 fn back_to_u8(n: int):
     r = abi::u8(n):
-        on AbiIntegerBelowRange:
+        on abi::AbiIntegerBelowRange:
             return "below"
-        on AbiIntegerAboveRange:
+        on abi::AbiIntegerAboveRange:
             return "above"
     r.value
 
@@ -329,32 +329,32 @@ test abi-numeric-constant-proofs {a provably in-range constant needs no handler 
     list [diagKinds "import abi\n[join $inRange \n]"] [lsort -unique $below] [lsort -unique $above] \
         [dict map {errors ctors} $named {llength $ctors}] \
         [diagKinds "import abi\nfn f(n: int):\n    abi::u32(n)\nf(3)"] \
-        [diagKinds "import abi\nfn f(n: int) -> abi::U32 errors AbiIntegerBelowRange, AbiIntegerAboveRange:\n    abi::u32(n)\n1"]
-} -result {{} KNOWN-ERROR KNOWN-ERROR {AbiIntegerBelowRange 10 AbiIntegerAboveRange 10} UNHANDLED-ERROR {}}
+        [diagKinds "import abi\nfn f(n: int) -> abi::U32 errors abi::AbiIntegerBelowRange, abi::AbiIntegerAboveRange:\n    abi::u32(n)\n1"]
+} -result {{} KNOWN-ERROR KNOWN-ERROR {abi::AbiIntegerBelowRange 10 abi::AbiIntegerAboveRange 10} UNHANDLED-ERROR {}}
 
-test abi-numeric-known-error-below {the below-range compile-time rejection names AbiIntegerBelowRange} -body {
+test abi-numeric-known-error-below {the below-range compile-time rejection names abi::AbiIntegerBelowRange} -body {
     list [lindex [strictError "import abi
 abi::u8(0 - 1)"] 2] [lindex [strictError "import abi
 abi::i8(0 - 129)"] 2]
-} -match glob -result {{*always produces the declared error(s) AbiIntegerBelowRange*} {*always produces the declared error(s) AbiIntegerBelowRange*}}
+} -match glob -result {{*always produces the declared error(s) abi::AbiIntegerBelowRange*} {*always produces the declared error(s) abi::AbiIntegerBelowRange*}}
 
 test abi-numeric-conversion-failure-points-at-the-call {a conversion that may fail is an obligation at the creator call itself (an unhandled one is reported there); a dynamic failure is the declared error of the violated bound, which a handler receives -- on every backend} -body {
     list [strictError "import abi\nfn f(n: int):\n    abi::u8(n)\nf(3)"] \
-        [agree "import abi\nfn f(n: int) -> int errors AbiIntegerBelowRange, AbiIntegerAboveRange:\n    abi::u8(n).value\nloop n in \[1, 256, 0 - 1\]:\n    f(n):\n        on AbiIntegerBelowRange:\n            0 - 100\n        on AbiIntegerAboveRange:\n            100"]
-} -match glob -result {{UNHANDLED-ERROR 3:5 {this call may produce the declared error "AbiInteger*Range", which is neither handled here nor admitted by the enclosing function's own "errors" declaration}} {\[1, 100, -100\]}}
+        [agree "import abi\nfn f(n: int) -> int errors abi::AbiIntegerBelowRange, abi::AbiIntegerAboveRange:\n    abi::u8(n).value\nloop n in \[1, 256, 0 - 1\]:\n    f(n):\n        on abi::AbiIntegerBelowRange:\n            0 - 100\n        on abi::AbiIntegerAboveRange:\n            100"]
+} -match glob -result {{UNHANDLED-ERROR 3:5 {this call may produce the declared error "abi::AbiInteger*Range", which is neither handled here nor admitted by the enclosing function's own "errors" declaration}} {\[1, 100, -100\]}}
 
 test abi-numeric-field-domain-survives {inside fn f(x: abi::U8) the compiler knows 0 <= x.value <= 255 from the field's declared domain: byte::from_int(x.value) needs no handler (also as a direct argument), widening to U16 needs none, and narrowing to I8 can only fail above} -body {
     list [diagKinds "import abi\nimport byte\nfn f(x: abi::U8) -> int:\n    byte::from_int(x.value)\nf(abi::u8(3))"] \
         [diagKinds "import abi\nimport byte\nfn f(x: abi::U8) -> int:\n    v = x.value\n    byte::from_int(v)\nf(abi::u8(3))"] \
         [diagKinds "import abi\nfn f(x: abi::U8) -> abi::U16:\n    abi::u16(x.value)\nf(abi::u8(3)).value"] \
-        [diagKinds "import abi\nfn f(x: abi::U8) -> abi::I8 errors AbiIntegerAboveRange:\n    abi::i8(x.value)\nr = f(abi::u8(3)):\n    on AbiIntegerAboveRange:\n        abi::i8(0)\nr.value"] \
+        [diagKinds "import abi\nfn f(x: abi::U8) -> abi::I8 errors abi::AbiIntegerAboveRange:\n    abi::i8(x.value)\nr = f(abi::u8(3)):\n    on abi::AbiIntegerAboveRange:\n        abi::i8(0)\nr.value"] \
         [lindex [strictError "import abi\nfn f(x: abi::U8) -> abi::I8:\n    abi::i8(x.value)\n1"] 2] \
         [diagKinds "import abi\nimport byte\nfn f(x: abi::I8) -> int:\n    byte::from_int(x.value + 128)\nf(abi::i8(3))"]
-} -match glob -result {{} {} {} {} {*may produce the declared error "AbiIntegerAboveRange"*} {}}
+} -match glob -result {{} {} {} {} {*may produce the declared error "abi::AbiIntegerAboveRange"*} {}}
 
 test abi-numeric-explicit-conversion-through-int {the explicit route between domains is through Int: abi::usize(u.value) for u: abi::U64 needs no handler and keeps the value; I64 -> U64 can only fail below} -body {
     list [diagKinds "import abi\nfn f(u: abi::U64) -> abi::Usize:\n    abi::usize(u.value)\nf(abi::u64(7)).value"] \
-        [diagKinds "import abi\nfn f(i: abi::I64) -> abi::U64 errors AbiIntegerBelowRange:\n    abi::u64(i.value)\nr = f(abi::i64(7)):\n    on AbiIntegerBelowRange:\n        abi::u64(0)\nr.value"] \
+        [diagKinds "import abi\nfn f(i: abi::I64) -> abi::U64 errors abi::AbiIntegerBelowRange:\n    abi::u64(i.value)\nr = f(abi::i64(7)):\n    on abi::AbiIntegerBelowRange:\n        abi::u64(0)\nr.value"] \
         [agree "import abi\nfn f(u: abi::U64) -> abi::Usize:\n    abi::usize(u.value)\nf(abi::u64(18446744073709551615)).value"]
 } -result {{} {} 18446744073709551615}
 
@@ -492,14 +492,14 @@ test abi-numeric-constant-creators-are-free {natively, a proven-valid constant c
 } -result {{i32 2 1 0 0 0} {u32 2 1 0 0 0} {i64 2 1 0 0 0} {u64 2 1 0 0 0}}
 
 test abi-numeric-dynamic-creator-checks {a dynamic creation keeps exactly its two bound checks and two declared-error paths; U64's upper bound 2^64-1 is a static constant (no run-time arithmetic), and a valid U64 is passed on without allocating} -constraints linuxX86_64 -body {
-    lassign [nativeEvidence "import abi\nfn conv(n: int) -> int errors AbiIntegerBelowRange, AbiIntegerAboveRange:\n    abi::u64(n).value\nxs = \[1, 2, 9223372036854775807\]\nloop x in xs:\n    conv(x):\n        on AbiIntegerBelowRange:\n            0\n        on AbiIntegerAboveRange:\n            0"] nir total structs bigints
+    lassign [nativeEvidence "import abi\nfn conv(n: int) -> int errors abi::AbiIntegerBelowRange, abi::AbiIntegerAboveRange:\n    abi::u64(n).value\nxs = \[1, 2, 9223372036854775807\]\nloop x in xs:\n    conv(x):\n        on abi::AbiIntegerBelowRange:\n            0\n        on abi::AbiIntegerAboveRange:\n            0"] nir total structs bigints
     set body [nirFunction $nir abi::u64]
     list [regexp -all {op i(lt|gt)} $body] [regexp -all {faildeclared} $body] \
         [regexp {int 18446744073709551615} $body] [regexp -all {op isub} $body] $structs $bigints
 } -result {2 2 1 0 0 0}
 
 test abi-numeric-typed-parameter-is-raw {a function taking an abi::U8 receives its one field in a register (no struct), and x.value + 1 is raw machine arithmetic because 0..255 survived into native lowering} -constraints linuxX86_64 -body {
-    lassign [nativeEvidence "import abi\nfn bump(x: abi::U8) -> int:\n    x.value + 1\nfn conv(n: int) -> int errors AbiIntegerBelowRange, AbiIntegerAboveRange:\n    bump(abi::u8(n))\nloop i from 0 to 256:\n    conv(i):\n        on AbiIntegerBelowRange:\n            0\n        on AbiIntegerAboveRange:\n            0\nbump(abi::u8(255))"] nir total structs bigints
+    lassign [nativeEvidence "import abi\nfn bump(x: abi::U8) -> int:\n    x.value + 1\nfn conv(n: int) -> int errors abi::AbiIntegerBelowRange, abi::AbiIntegerAboveRange:\n    bump(abi::u8(n))\nloop i from 0 to 256:\n    conv(i):\n        on abi::AbiIntegerBelowRange:\n            0\n        on abi::AbiIntegerAboveRange:\n            0\nbump(abi::u8(255))"] nir total structs bigints
     set body [nirFunction $nir bump]
     list [regexp {pnames="x\.0"} $body] [regexp -all {op riadd} $body] [regexp -all {op iadd} $body] $structs
 } -result {1 1 0 0}
@@ -542,7 +542,7 @@ test abi-numeric-syscall-operands-are-the-encoded-words {natively, an ABI value 
 } -result {{abi::x86_64::register64 abi::x86_64::from_u64 abi::x86_64::from_i8 abi::x86_64::from_u32 abi::x86_64::from_usize other other} {[true, true]} 0 0}
 
 test abi-numeric-gc-stress {GC stress changes nothing: ABI values in Lists, upper-half U64 BigInt words, virtual and materialized values} -constraints linuxX86_64 -body {
-    set text "import abi\nimport abi::x86_64\nimport list\nfn big(n: int) errors AbiIntegerBelowRange, AbiIntegerAboveRange:\n    abi::x86_64::from_u64(abi::u64(n + 9223372036854775808))\nfn top(i: int) -> abi::U64 errors AbiIntegerBelowRange, AbiIntegerAboveRange:\n    abi::u64(18446744073709551615 - i)\nxs = loop i from 0 to 50:\n    top(i):\n        on AbiIntegerBelowRange:\n            abi::u64(0)\n        on AbiIntegerAboveRange:\n            abi::u64(0)\nws = loop i from 0 to 50:\n    r = big(i):\n        on AbiIntegerBelowRange:\n            abi::x86_64::register64(0)\n        on AbiIntegerAboveRange:\n            abi::x86_64::register64(0)\n    abi::x86_64::to_int(r)\n\[list::at(xs, 49).value, list::at(ws, 49), abi::x86_64::to_int(abi::x86_64::from_usize(abi::usize(list::at(xs, 0).value)))\]"
+    set text "import abi\nimport abi::x86_64\nimport list\nfn big(n: int) errors abi::AbiIntegerBelowRange, abi::AbiIntegerAboveRange:\n    abi::x86_64::from_u64(abi::u64(n + 9223372036854775808))\nfn top(i: int) -> abi::U64 errors abi::AbiIntegerBelowRange, abi::AbiIntegerAboveRange:\n    abi::u64(18446744073709551615 - i)\nxs = loop i from 0 to 50:\n    top(i):\n        on abi::AbiIntegerBelowRange:\n            abi::u64(0)\n        on abi::AbiIntegerAboveRange:\n            abi::u64(0)\nws = loop i from 0 to 50:\n    r = big(i):\n        on abi::AbiIntegerBelowRange:\n            abi::x86_64::register64(0)\n        on abi::AbiIntegerAboveRange:\n            abi::x86_64::register64(0)\n    abi::x86_64::to_int(r)\n\[list::at(xs, 49).value, list::at(ws, 49), abi::x86_64::to_int(abi::x86_64::from_usize(abi::usize(list::at(xs, 0).value)))\]"
     set plain [agree $text]
     underGcStress {set stressed [agree $text $::nativeBackends]}
     list $plain [expr {$plain eq $stressed}]
@@ -606,7 +606,7 @@ test abi-numeric-fuzz {seeded fuzz of every creator and encoder: for all ten dom
         set index 0
         foreach {s ctor enc min max signed} $::family {
             set values [domainValues $min $max 24]
-            append functions "fn c$index\(n: int):\n    x = abi::${ctor}(n):\n        on AbiIntegerBelowRange:\n            return \"below\"\n        on AbiIntegerAboveRange:\n            return \"above\"\n    \[x.value, abi::x86_64::${enc}(x).word\]\n\n"
+            append functions "fn c$index\(n: int):\n    x = abi::${ctor}(n):\n        on abi::AbiIntegerBelowRange:\n            return \"below\"\n        on abi::AbiIntegerAboveRange:\n            return \"above\"\n    \[x.value, abi::x86_64::${enc}(x).word\]\n\n"
             append bindings "r$index = loop v in \[[join [lmap v $values {intExpr $v}] {, }]\]:\n    c$index\(v)\n"
             lappend expected "\[[join [lmap v $values {abiOracle $min $max $signed $v}] {, }]\]"
             incr index

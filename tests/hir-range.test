@@ -641,9 +641,9 @@ test condition-outcome-12 {shared-instance adversarial control (legal twin, S03b
 byte::from_int(45)
 fn dyn(m):
     r = byte::from_int(m + 0):
-        on BelowRange:
+        on byte::BelowRange:
             0
-        on AboveRange:
+        on byte::AboveRange:
             255
     r
 fn caller(g, v):

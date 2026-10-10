@@ -113,7 +113,7 @@ test ascii-rejects-string {ascii::is_digit("7") (str) is a static type error} -b
 } -result {CORE SEMANTIC TYPE}
 
 test ascii-accepts-byte {ascii::is_digit(b) where b came from byte::from_int(...): on ... -- an explicitly established Byte, via the checked fallible conversion -- has no static diagnostic} -body {
-    set path [makeFile [withImports {ascii byte} "b = byte::from_int(55):\n    on BelowRange:\n        0\n    on AboveRange:\n        0\nascii::is_digit(b)"] ascii-accept-byte.bot]
+    set path [makeFile [withImports {ascii byte} "b = byte::from_int(55):\n    on byte::BelowRange:\n        0\n    on byte::AboveRange:\n        0\nascii::is_digit(b)"] ascii-accept-byte.bot]
     try {
         llength [hir::diagnostics [surface::readProgramFile $path -strict 0]]
     } finally {
@@ -188,7 +188,7 @@ test ascii-acceptance-table {the item-78 acceptance table, evaluated directly} -
 
 test ascii-high-bit-bytes-all-false {every predicate is false for every byte in 128..255} -body {
     set nums [lseq 128 255]
-    set src [withImports {ascii byte} "ns = \[[join $nums {, }]\]\nloop n in ns:\n    b = byte::from_int(n):\n        on BelowRange:\n            0\n        on AboveRange:\n            0\n    \[ascii::is_digit(b), ascii::is_upper(b), ascii::is_lower(b), ascii::is_alphabetic(b), ascii::is_alphanumeric(b)\]"]
+    set src [withImports {ascii byte} "ns = \[[join $nums {, }]\]\nloop n in ns:\n    b = byte::from_int(n):\n        on byte::BelowRange:\n            0\n        on byte::AboveRange:\n            0\n    \[ascii::is_digit(b), ascii::is_upper(b), ascii::is_lower(b), ascii::is_alphabetic(b), ascii::is_alphanumeric(b)\]"]
     set path [makeFile $src ascii-highbit.bot]
     try {
         set hir [surface::readProgramFile $path -strict 0]
@@ -206,7 +206,7 @@ test ascii-high-bit-bytes-all-false {every predicate is false for every byte in 
 
 test ascii-exhaustive-truth-table {every predicate matches an obviously-correct reference over 0..255; cardinalities 10/26/26/52/62; composition and disjointness identities hold everywhere} -body {
     set nums [lseq 0 255]
-    set src [withImports {ascii byte} "ns = \[[join $nums {, }]\]\nloop n in ns:\n    b = byte::from_int(n):\n        on BelowRange:\n            0\n        on AboveRange:\n            0\n    \[ascii::is_digit(b), ascii::is_upper(b), ascii::is_lower(b), ascii::is_alphabetic(b), ascii::is_alphanumeric(b)\]"]
+    set src [withImports {ascii byte} "ns = \[[join $nums {, }]\]\nloop n in ns:\n    b = byte::from_int(n):\n        on byte::BelowRange:\n            0\n        on byte::AboveRange:\n            0\n    \[ascii::is_digit(b), ascii::is_upper(b), ascii::is_lower(b), ascii::is_alphabetic(b), ascii::is_alphanumeric(b)\]"]
     set path [makeFile $src ascii-exhaustive.bot]
     try {
         set hir [surface::readProgramFile $path -strict 0]
@@ -252,7 +252,7 @@ test ascii-exhaustive-truth-table {every predicate matches an obviously-correct 
 
 test ascii-backend-parity-256 {ascii predicates agree across interp/compile/cranelift-generic/cranelift over the entire 0..255 domain} -body {
     set nums [lseq 0 255]
-    set src [withImports {ascii byte} "ns = \[[join $nums {, }]\]\nloop n in ns:\n    b = byte::from_int(n):\n        on BelowRange:\n            0\n        on AboveRange:\n            0\n    \[ascii::is_digit(b), ascii::is_upper(b), ascii::is_lower(b), ascii::is_alphabetic(b), ascii::is_alphanumeric(b)\]"]
+    set src [withImports {ascii byte} "ns = \[[join $nums {, }]\]\nloop n in ns:\n    b = byte::from_int(n):\n        on byte::BelowRange:\n            0\n        on byte::AboveRange:\n            0\n    \[ascii::is_digit(b), ascii::is_upper(b), ascii::is_lower(b), ascii::is_alphabetic(b), ascii::is_alphanumeric(b)\]"]
     set path [makeFile $src ascii-parity256.bot]
     try {
         moduleParity $path

@@ -366,7 +366,7 @@ import linux
 import str
 
 $::genFunctions
-fn out(fd: int, data: abi::bytes::Bytes) -> int errors AbiIntegerBelowRange, AbiIntegerAboveRange:
+fn out(fd: int, data: abi::bytes::Bytes) -> int errors abi::AbiIntegerBelowRange, abi::AbiIntegerAboveRange:
     linux::write(abi::i32(fd), data)
 
 ${lets}\[[join $results {, }]\]\n"

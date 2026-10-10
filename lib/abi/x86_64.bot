@@ -60,9 +60,10 @@
 import abi
 
 # The two declared errors of the Int -> Register64 conversion, named after
-# their domain (error names are global, and byte.bot's BelowRange/AboveRange
-# are already the Byte conversion's): the same two-error granularity as
-# byte::from_int.
+# their domain (abi::x86_64::Register64BelowRange beside byte::BelowRange: an
+# error's identity is its module and its name, so the short names need not
+# differ, but these say what they are about): the same two-error granularity
+# as byte::from_int.
 error Register64BelowRange
 error Register64AboveRange
 

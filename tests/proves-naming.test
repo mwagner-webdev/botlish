@@ -474,10 +474,10 @@ fn check_path(v: str) -> unit proves v: Path errors Bad:
 a = pth::check("a")
 b = pth::ok?("b")
 c = pth::validate("c"):
-    on Bad:
+    on pth::Bad:
         unit
 d = pth::check_path("d"):
-    on Bad:
+    on pth::Bad:
         unit
 [a, b]} t.bot -warnings default -warning-channel ""]
         list [lmap w [namingOf $hir] {

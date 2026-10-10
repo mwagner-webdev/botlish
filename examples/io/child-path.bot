@@ -7,17 +7,17 @@ import linux::path
 import str
 import type io::path::Path
 
-fn child(path: Path) -> Path errors NotAPath:
+fn child(path: Path) -> Path errors io::path::NotAPath:
     path.concat("child")
 
-fn add_config(path: Path) -> Path errors NotAPath:
+fn add_config(path: Path) -> Path errors io::path::NotAPath:
     path.concat(".config").concat("awesome_tool")
 
-fn run(value: str) -> str errors NotAPath:
+fn run(value: str) -> str errors io::path::NotAPath:
     linux::path::validate(value)
     home = add_config(value)
     str::concat(str::concat(io::path::text(child(value)), " "), io::path::text(home))
 
 run("/home/me"):
-    on NotAPath:
+    on io::path::NotAPath:
         "not a path"

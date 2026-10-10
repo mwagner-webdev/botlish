@@ -197,6 +197,9 @@ proc generate {seed} {
         set N "%N$i%"
         set R [expr {$placement eq "module" ? "M" : "E"}]
         set err [expr {$placement eq "module" ? "MBad" : "Bad"}]
+        # A module's error is named qualified outside the module (its uses are
+        # in the program: ERROR-PAYLOADS.md, "Module-qualified error identity").
+        set useErr [expr {$placement eq "module" ? "pnm::MBad" : "Bad"}]
         set need [expr {$placement eq "module" ? "pnm::needM" : "needE"}]
         set callee [expr {$placement eq "module" ? "pnm::$N" : $N}]
         set flags [expr {$role eq "proves" && $shape eq "predicate" && [chance 0.25]}]
@@ -255,14 +258,14 @@ proc generate {seed} {
         switch -- $role/$shape {
             proves/predicate {
                 if {$fallible} {
-                    lappend use "r = $call:" "    on $err:" "        false" "if r:" "    $need\(s)" "else:" "    0"
+                    lappend use "r = $call:" "    on $useErr:" "        false" "if r:" "    $need\(s)" "else:" "    0"
                 } else {
                     lappend use "if $call:" "    $need\(s)" "else:" "    0"
                 }
             }
             proves/validator {
                 if {$fallible} {
-                    lappend use "$call:" "    on $err:" "        return 0" "$need\(s)"
+                    lappend use "$call:" "    on $useErr:" "        return 0" "$need\(s)"
                 } else {
                     lappend use "$call" "$need\(s)"
                 }

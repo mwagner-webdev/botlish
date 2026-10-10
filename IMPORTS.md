@@ -312,11 +312,15 @@ subtree imports, implicit imports, import-driven initialization,
 transitive visibility, nested-namespace *creation* or inheritance, overload
 resolution, namespaced `error` declarations.
 
-Remaining global declaration category: **errors** (`error NAME`) are still
-one flat, program-wide namespace (`hir::errordecls`, `UNDECLARED-ERROR`,
-`AbiIntegerBelowRange`); a later milestone can give them the same
-`NAMESPACE::Name` identity and an `import error` form on the same mechanism
-(the loader already records `loadedErrors` per module).
+Errors (`error NAME`) were the remaining global declaration category; they
+now have the same `NAMESPACE::Name` identity (ERROR-PAYLOADS.md,
+"Module-qualified error identity"): a module's error is named by its short
+name inside the module and qualified outside it -- in `fail`, `on`, an
+`errors` clause and a function type's `errors` list -- authorized exactly as
+every qualified member is (`import NS` exactly; MISSING-IMPORT,
+UNKNOWN-NAMESPACE, UNKNOWN-SYMBOL from `surface::modules::CollectAndLoad`).
+There is no `import error` form (yet): outside its module an error is
+spelled qualified.
 
 ## Tests and fuzzing
 

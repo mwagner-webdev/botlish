@@ -20,11 +20,12 @@
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
 
-# `import list` loads lib/list.bot, which declares the (global) error
-# NotFound, so it is not declared here. Tests that inspect "the first call /
-# loop in the program", or round-trip the HIR text (hir::parse cannot read a
-# loaded module's namespaced bindings), use a prelude that loads no module.
-set ::fnDecls "import list\nimport str\ntype Byte = Int in 0..255\ntype Nibble = Int in 0..15\nerror PermissionDenied\n"
+# `import list` loads lib/list.bot, whose own error NotFound is the identity
+# list::NotFound: the program declares its own NotFound beside it. Tests that
+# inspect "the first call / loop in the program", or round-trip the HIR text
+# (hir::parse cannot read a loaded module's namespaced bindings), use a
+# prelude that loads no module.
+set ::fnDecls "import list\nimport str\ntype Byte = Int in 0..255\ntype Nibble = Int in 0..15\nerror NotFound\nerror PermissionDenied\n"
 
 set ::fnDeclsNoList "import str\ntype Byte = Int in 0..255\ntype Nibble = Int in 0..15\nerror NotFound\nerror PermissionDenied\n"
 set ::fnDeclsPlain "type Byte = Int in 0..255\ntype Nibble = Int in 0..15\nerror NotFound\nerror PermissionDenied\n"

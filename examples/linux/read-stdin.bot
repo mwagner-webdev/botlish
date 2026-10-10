@@ -39,7 +39,7 @@ if n > 0:
     # ordinary Int the compiler cannot bound, and the language asks for both
     # declared errors to be handled; the fallback (write nothing) is harmless.
     count = abi::usize(n):
-        on AbiIntegerAboveRange:
+        on abi::AbiIntegerAboveRange:
             abi::usize(0)
     data = result.data.freeze_prefix(count):
         on UpperOverrun:

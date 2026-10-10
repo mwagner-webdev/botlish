@@ -5,20 +5,22 @@
 # rejected component.
 program lib/linux/path.bot
 
-probe concat {fn j(a: str, b: str) -> str errors NotAPath:
+probe concat {import io::path
+fn j(a: str, b: str) -> str errors io::path::NotAPath:
     linux::path::validate(a)
     linux::path::concat(a, b)
 [j("/tmp/", "x"), j("/tmp", "x/y"), j("/", "etc"), j("a", "b"), j("a/", "b/"), j("é/", "ü"), j("/x//", "y")]}
-probe concat-rejects {fn j(a: str, b: str) -> str errors NotAPath:
+probe concat-rejects {import io::path
+fn j(a: str, b: str) -> str errors io::path::NotAPath:
     linux::path::validate(a)
     linux::path::concat(a, b)
 r1 = j("/tmp", "/x"):
-    on NotAPath:
+    on io::path::NotAPath:
         "NotAPath"
 r2 = j("/tmp", ""):
-    on NotAPath:
+    on io::path::NotAPath:
         "NotAPath"
 r3 = j("", "x"):
-    on NotAPath:
+    on io::path::NotAPath:
         "NotAPath"
 [r1, r2, r3]}

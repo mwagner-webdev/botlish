@@ -19,9 +19,10 @@ proven statically safe. That violates this project's own invariant:
 This milestone closes that hole by making runtime-checkable failure a
 first-class part of the language, not a native's own implicit side channel:
 
-- `error NAME` -- a top-level error declaration, in a single flat,
-  program-global namespace (mirroring `hir/sourcetypes.tcl`'s own
-  precedent for source-defined types).
+- `error NAME` -- a top-level error declaration. (Originally one flat,
+  program-global namespace; since ERROR-PAYLOADS.md's "Module-qualified error
+  identity", a module's error is the identity `NAMESPACE::NAME`, an entry
+  program's the bare `NAME`.)
 - `fn f(...) -> T errors E1, E2:` -- a function signature declares which
   named errors a call to it may produce, in addition to its ordinary
   parameter/result types.
@@ -100,11 +101,14 @@ An error is a **completion**, never a value:
 ## Syntax choices
 
 - **Flat, program-global error namespace** (`hir/errordecls.tcl`, mirroring
-  `hir/sourcetypes.tcl`): an `error NAME` declaration is visible everywhere
-  in the compiled program, not scoped per-module or per-function. This
-  matches how source-defined *types* already work in this codebase, and
-  keeps a function's own `errors E1, E2` clause a simple name list rather
-  than a set of qualified references.
+  `hir/sourcetypes.tcl`): an `error NAME` declaration was visible everywhere
+  in the compiled program, not scoped per-module or per-function. *Superseded*
+  by ERROR-PAYLOADS.md's "Module-qualified error identity": a source-defined
+  error is identified by its declaring module and its name (`http::NotFound`),
+  named by its short name inside its module and qualified outside it, through
+  the ordinary exact imports; an entry program's errors keep their bare names
+  and builtin runtime errors stay root identities. An `errors E1, E2` clause
+  is still a name list -- of canonical identities, once resolved.
 - **Single-line `errors E1, E2` clause** on the function signature line,
   parsed the same way `-> T` already is (both gated by the same
   `allowResult` parser flag), rather than a separate declaration block --
@@ -150,12 +154,16 @@ admitted it.
 `calleeErrors` (`hir/types.tcl`'s `Call`) is populated only when a call's
 target resolves to an exact `{block ExprId}` -- i.e. only for a call whose
 callee is statically known to be a specific function body, never an erased/
-unknown target. This is sound because `hir/callables.tcl`'s own `Bearing`
+unknown target. This was argued sound because `hir/callables.tcl`'s own `Bearing`
 check (widened by this milestone to also flag a non-empty `declaredErrors`)
-already rejects erasing an error-bearing function to an opaque callable
-value; a function that declares errors can never become a value whose
-static target is unknown, so `calleeErrors` is never silently lost through
-indirection.
+rejects erasing an error-bearing function to an opaque callable value. The
+semantic instances that came later (OPPORTUNISTIC-SEMANTIC-INSTANCES.md)
+accept exactly that erasure into an untyped parameter whose instance keeps
+the argument's exact type, so an untyped call `f(x)` can raise a declared
+error after all: the completion analysis (hir/completions.tcl,
+STATIC-COMPLETION-PROOFS.md "Precision and the erased-callable contract")
+charges such calls what the callable passed in may raise, and never treats
+an untyped call it cannot identify as raising nothing.
 
 This is a **flow-insensitive, signature-based** check: it never narrows a
 callee's declared error set based on a specific call site's own argument
@@ -222,8 +230,9 @@ A library module's own `error` declarations and `errors`-bearing function
 signatures are visible from a separate calling file through the ordinary
 module system (`surface/modules.tcl`): `LoadNamespace`/`LoadNamespaces`/
 `compileProgramFile` all thread `errorDecls` alongside the pre-existing
-`typeDecls`, merged into the same flat, program-global namespace
-`hir::errordecls::apply` maintains. The static legality check therefore
+`typeDecls`, registered by `hir::errordecls::apply` under their canonical
+module-qualified identities (ERROR-PAYLOADS.md, "Module-qualified error
+identity"). The static legality check therefore
 applies identically to a cross-module call as to an intra-file one --
 confirmed directly in `tests/errors.test`'s own
 `errors-cross-module-signature`/`errors-cross-module-unhandled-rejected`.

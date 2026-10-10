@@ -318,12 +318,15 @@ proc hir::traits::ResolveRequirement {id ns r} {
     }
     set errors {}
     foreach pair [dict get $r errors] {
-        lassign $pair err errSpan
+        lassign $pair spelling errSpan
+        # The canonical identity in the trait's own namespace
+        # (hir::errordecls::resolve), as for a function's `errors` clause.
+        set err [hir::errordecls::resolve $spelling $ns]
+        if {$err eq ""} {
+            Fail $errSpan UNDECLARED-ERROR "unknown error \"$spelling\" in $what: [hir::errordecls::unknownReason $spelling $ns]"
+        }
         if {$err in $errors} {
             Fail $errSpan DUPLICATE "duplicate error \"$err\" in the \"errors\" declaration of $what"
-        }
-        if {![hir::errordecls::isDeclared $err]} {
-            Fail $errSpan UNDECLARED-ERROR "unknown error \"$err\" in $what: no \"error $err\" declaration is visible"
         }
         lappend errors $err
     }
@@ -375,12 +378,15 @@ proc hir::traits::ResolveContextRequirement {id ns r} {
     }
     set errors {}
     foreach pair [dict get $r errors] {
-        lassign $pair err errSpan
+        lassign $pair spelling errSpan
+        # The canonical identity in the trait's own namespace
+        # (hir::errordecls::resolve), as for a function's `errors` clause.
+        set err [hir::errordecls::resolve $spelling $ns]
+        if {$err eq ""} {
+            Fail $errSpan UNDECLARED-ERROR "unknown error \"$spelling\" in $what: [hir::errordecls::unknownReason $spelling $ns]"
+        }
         if {$err in $errors} {
             Fail $errSpan DUPLICATE "duplicate error \"$err\" in the \"errors\" declaration of $what"
-        }
-        if {![hir::errordecls::isDeclared $err]} {
-            Fail $errSpan UNDECLARED-ERROR "unknown error \"$err\" in $what: no \"error $err\" declaration is visible"
         }
         lappend errors $err
     }

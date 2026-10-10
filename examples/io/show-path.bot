@@ -5,12 +5,13 @@
 # installed linux::io::LinuxIO provides it.
 import io
 import linux::io
+import io::path
 import linux::path
 import str
 
-fn show_path(value: str) -> str errors WriteFailed:
+fn show_path(value: str) -> str errors io::WriteFailed:
     linux::path::validate(value):
-        on NotAPath:
+        on io::path::NotAPath:
             io::write_error_line(str::concat(value, " is not a valid path"))
             return "rejected"
     # value is a linux::path::LinuxPath here, and still a str.
@@ -20,9 +21,9 @@ fn show_path(value: str) -> str errors WriteFailed:
 with context linux::io::create()
 
 shown = show_path("/tmp/example"):
-    on WriteFailed:
+    on io::WriteFailed:
         "failed"
 rejected = show_path(""):
-    on WriteFailed:
+    on io::WriteFailed:
         "failed"
 [shown, rejected]

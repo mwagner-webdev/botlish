@@ -161,9 +161,9 @@ test linux-syscall-register64-boundaries {register64 accepts exactly -2^63..2^63
     agree {import abi::x86_64
 fn classify(n: int):
     r = abi::x86_64::register64(n):
-        on Register64BelowRange:
+        on abi::x86_64::Register64BelowRange:
             return "below"
-        on Register64AboveRange:
+        on abi::x86_64::Register64AboveRange:
             return "above"
     abi::x86_64::to_int(r)
 
@@ -173,13 +173,13 @@ loop x in xs:
 }
 } -result {[0, 1, 39, -1, 9223372036854775807, -9223372036854775808, 4611686018427387903, 4611686018427387904, -4611686018427387904, -4611686018427387905]}
 
-test linux-syscall-register64-rejects-out-of-range {a value outside the register domain is the declared error, never truncated: 2^63 is Register64AboveRange, -2^63-1 Register64BelowRange, and so is anything further out} -body {
+test linux-syscall-register64-rejects-out-of-range {a value outside the register domain is the declared error, never truncated: 2^63 is abi::x86_64::Register64AboveRange, -2^63-1 abi::x86_64::Register64BelowRange, and so is anything further out} -body {
     agree {import abi::x86_64
 fn classify(n: int):
     r = abi::x86_64::register64(n):
-        on Register64BelowRange:
+        on abi::x86_64::Register64BelowRange:
             return "below"
-        on Register64AboveRange:
+        on abi::x86_64::Register64AboveRange:
             return "above"
     abi::x86_64::to_int(r)
 
@@ -194,9 +194,9 @@ test linux-syscall-register64-constant-proofs {a provably in-range constant need
 abi::x86_64::register64(9223372036854775808)"] \
         [diagKinds "import abi::x86_64
 abi::x86_64::register64(-9223372036854775809)"] \
-        [diagKinds "import abi::x86_64\nr = abi::x86_64::register64(9223372036854775808):\n    on Register64AboveRange:\n        abi::x86_64::register64(0)\nr"] \
+        [diagKinds "import abi::x86_64\nr = abi::x86_64::register64(9223372036854775808):\n    on abi::x86_64::Register64AboveRange:\n        abi::x86_64::register64(0)\nr"] \
         [diagKinds "import abi::x86_64\nfn f(n: int):\n    abi::x86_64::register64(n)\nf(3)"] \
-        [diagKinds "import abi::x86_64\nfn f(n: int) -> abi::x86_64::Register64 errors Register64BelowRange, Register64AboveRange:\n    abi::x86_64::register64(n)\n1"]
+        [diagKinds "import abi::x86_64\nfn f(n: int) -> abi::x86_64::Register64 errors abi::x86_64::Register64BelowRange, abi::x86_64::Register64AboveRange:\n    abi::x86_64::register64(n)\n1"]
 } -result {{} KNOWN-ERROR KNOWN-ERROR KNOWN-ERROR UNHANDLED-ERROR {}}
 
 test linux-syscall-register64-known-error-names-the-bound {the compile-time rejection names the error of the violated bound} -body {
@@ -204,7 +204,7 @@ test linux-syscall-register64-known-error-names-the-bound {the compile-time reje
 abi::x86_64::register64(9223372036854775808)"] 2] \
         [lindex [strictError "import abi::x86_64
 abi::x86_64::register64(-9223372036854775809)"] 2]
-} -match glob -result {{*always produces the declared error(s) Register64AboveRange*} {*always produces the declared error(s) Register64BelowRange*}}
+} -match glob -result {{*always produces the declared error(s) abi::x86_64::Register64AboveRange*} {*always produces the declared error(s) abi::x86_64::Register64BelowRange*}}
 
 test linux-syscall-round-trip-needs-no-handler {to_int's result is statically a Register64Word, so register64(to_int(r)) needs no handler} -body {
     list [diagKinds "import abi::x86_64\nfn again(r: abi::x86_64::Register64) -> abi::x86_64::Register64:\n    abi::x86_64::register64(abi::x86_64::to_int(r))\nabi::x86_64::to_int(again(abi::x86_64::register64(-5)))"] \
@@ -245,7 +245,7 @@ test linux-syscall-conversions-allocate-nothing {natively, the conversions are n
 } -result {0 0 2 0}
 
 test linux-syscall-dynamic-bounds-are-static-constants {for a dynamic Int, the -2^63 bound is a static BigInt constant, not a run-time negation that allocates on every call} -constraints linuxX86_64 -body {
-    set hir [syscallHir "import abi::x86_64\nfn conv(n: int) -> int errors Register64BelowRange, Register64AboveRange:\n    abi::x86_64::to_int(abi::x86_64::register64(n))\nxs = \[1, 2, 3\]\nloop x in xs:\n    conv(x):\n        on Register64BelowRange:\n            0\n        on Register64AboveRange:\n            0"]
+    set hir [syscallHir "import abi::x86_64\nfn conv(n: int) -> int errors abi::x86_64::Register64BelowRange, abi::x86_64::Register64AboveRange:\n    abi::x86_64::to_int(abi::x86_64::register64(n))\nxs = \[1, 2, 3\]\nloop x in xs:\n    conv(x):\n        on abi::x86_64::Register64BelowRange:\n            0\n        on abi::x86_64::Register64AboveRange:\n            0"]
     set body [nirFunction [native::nir $hir] abi::x86_64::register64]
     list [regexp {int -9223372036854775808} $body] [regexp -all {op isub} $body] \
         [regexp -all {faildeclared} $body]
@@ -660,7 +660,7 @@ test linux-syscall-conversion-fuzz {seeded fuzz of the pure round trip to_int(re
     set failures {}
     foreach seed {20261003 424242 7777} {
         set values [fuzzValues $seed 120]
-        set text "import abi::x86_64\nfn classify(n: int):\n    r = abi::x86_64::register64(n):\n        on Register64BelowRange:\n            return \"below\"\n        on Register64AboveRange:\n            return \"above\"\n    abi::x86_64::to_int(r)\n\nxs = \[[join [lmap v $values {intExpr $v}] {, }]\]\nloop x in xs:\n    classify(x)\n"
+        set text "import abi::x86_64\nfn classify(n: int):\n    r = abi::x86_64::register64(n):\n        on abi::x86_64::Register64BelowRange:\n            return \"below\"\n        on abi::x86_64::Register64AboveRange:\n            return \"above\"\n    abi::x86_64::to_int(r)\n\nxs = \[[join [lmap v $values {intExpr $v}] {, }]\]\nloop x in xs:\n    classify(x)\n"
         set expected "\[[join [lmap v $values {registerOracle $v}] {, }]\]"
         set got [agree $text]
         if {$got ne $expected} {

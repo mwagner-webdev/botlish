@@ -332,9 +332,17 @@ The instance walk computes `calleeErrors`, reachability and `known` outcomes wit
 the ordinary machinery, so a concrete instance may have more precise reachability
 (`describe(41)` proves the `string?` arm unreachable: `int`, and `describe("hi")`
 is `str`). Declared error contracts stay authoritative and are not changed
-(`list::find` still `errors NotFound`, `si-hof-5`). Completion/error-set legality
+(`list::find` still `errors NotFound` -- the identity `list::NotFound` --,
+`si-hof-5`). Completion/error-set legality
 (`hir::errorsets`) is a definition-level check on the generic body and is not
-re-run per instance: instance types add no new completion diagnostic. One
+re-run per instance: instance types add no new completion diagnostic. The
+completion analysis does account for what an instance lets through, though:
+a callable that declares errors passed into an untyped parameter (the erasure
+an instance makes legal) is charged to the call that passed it -- recovered
+as an exact call where its argument's type is exact, else bounded by the
+program's erased-callable contract (STATIC-COMPLETION-PROOFS.md, "Precision
+and the erased-callable contract"), so `list::find(xs, p)` with a `p` that
+may fail `E` makes that call charge `E` beside `list::NotFound`. One
 consequence of precision reaches it: `handle list::find(strs, p) NotFound: 0` now
 has the call's own type `str`, and the ordinary "handled result is the call's
 type, no implicit union widening" rule rejects the `0` (`si-hof-8`); with an `any`

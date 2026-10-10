@@ -149,17 +149,21 @@ Two `fail Invalid` sites are the same failure because the compiler resolves
 both to the same declared failure of this function. In Botlish that
 resolution is by name, and the name is a complete identity:
 
-* **One name, one declaration, program-wide.** `hir/errordecls.tcl` keeps a
-  flat, program-global error namespace ("NAME is the identity, valid and unique
-  across one whole compiled program ... never compared by message text"): a
-  second `error Invalid` in another module, at the top level, or the name of a
-  builtin runtime error is rejected (`UNDECLARED-ERROR`, "error names are
-  global"). So *textually identical fails of different declarations* -- the
-  anti-text-matching case the brief asks to pin -- cannot occur in a program
-  that compiles; that impossibility is what is pinned
-  (`sf-one-name-is-one-declaration-program-wide`: two modules, a module and the
-  program, a builtin name), and a module's declared failure failed by the
-  program is that one identity (`sf-module-failure-is-the-same-failure`).
+* **One identity, one declaration.** `hir/errordecls.tcl` identifies a
+  source-defined error by its declaring module and its name (ERROR-PAYLOADS.md,
+  "Module-qualified error identity"): `error Invalid` in module m is the
+  canonical identity `m::Invalid`, in module n `n::Invalid`, in the entry
+  program the bare `Invalid`. Every `fail` resolves to a canonical identity
+  before this warning reads it, so two fails group only when they name the
+  same declaration -- never because their short names (or payloads) match:
+  `fail Invalid` and `fail m::Invalid` in one function are two failures
+  (`sf-same-short-name-never-grouped`, with identical payloads too). An
+  identity declared twice, or a builtin runtime error's name, is still
+  rejected (`UNDECLARED-ERROR`), and the same short name in two modules, or a
+  module and the program, now compiles
+  (`sf-one-identity-is-one-declaration`). A module's declared failure failed
+  by the program -- spelled `m::Invalid` there -- is that one identity
+  (`sf-module-failure-is-the-same-failure`).
 * **Admitted by the function.** The resolver admits a `fail` only when the
   function declares its name in its own `errors` clause, and normalizes that
   clause into the block's `declaredErrors` (validated names, `hir/resolve.tcl`).

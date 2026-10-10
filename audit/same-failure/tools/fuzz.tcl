@@ -26,6 +26,13 @@
 #               fails of one of the enclosing function's failures: predicted on
 #               its own, never grouped with the enclosing function's fails
 #
+# Every third seed is *namespaced*: the program imports module sfm (written
+# to a private copy of the library), whose `error Bad` is the identity
+# sfm::Bad beside the program's own Bad -- the same short name, another
+# failure. Functions may declare and raise both; the oracle groups by the
+# exact name written (Bad, sfm::Bad), so it predicts they never group
+# (ERROR-PAYLOADS.md, "Module-qualified error identity").
+#
 # Each failure is raised from 1 to 4 reachable exits of a function. About a
 # third of the programs contain only silent functions (no failure raised from
 # two reachable exits of one function). Every call is written so that no other
@@ -73,6 +80,24 @@ set seeds [expr {[llength $argv] > 0 ? [lindex $argv 0] : 300}]
 set first [expr {[llength $argv] > 1 ? [lindex $argv 1] : 1}]
 
 set ::failureNames {Bad Bad2 Other}
+# The failures of the program being generated (generate).
+set ::names $::failureNames
+
+# A private copy of the library holding module sfm, removed at exit.
+set ::fuzzLib [file tempdir same-failure-fuzz-lib]
+foreach entry [glob -directory $::core::libraryDir *] {
+    file copy $entry $::fuzzLib
+}
+set ::core::libraryDir $::fuzzLib
+set channel [open [file join $::fuzzLib sfm.bot] w]
+puts -nonewline $channel "error Bad\n\nfn id(x):\n    x\n"
+close $channel
+unset channel
+
+# The helper suffix of failure N: its name with "::" spelled "_".
+proc helper {n} {
+    return [string map {:: _} $n]
+}
 
 proc pick {list} {
     return [lindex $list [expr {int(rand() * [llength $list])}]]
@@ -116,7 +141,7 @@ proc genFunction {f quiet} {
     set want [expr {[chance 0.6] ? 1 : 2}]
     set declared {}
     while {[llength $declared] < $want} {
-        set n [pick $::failureNames]
+        set n [pick $::names]
         if {$n ni $declared} {
             lappend declared $n
         }
@@ -188,13 +213,13 @@ proc genFunction {f quiet} {
             handler {
                 # A handler of one of the program's failures whose body raises
                 # N: a re-raise when it handles N itself.
-                set m [expr {[chance 0.5] ? $n : [pick $::failureNames]}]
-                lappend body "    r[incr bindings] = raise_$m\(x):" "        on $m:" "            fail $n"
+                set m [expr {[chance 0.5] ? $n : [pick $::names]}]
+                lappend body "    r[incr bindings] = raise_[helper $m]\(x):" "        on $m:" "            fail $n"
                 lappend sites [list [expr {[llength $body] - 1}] 13 $n]
                 census [expr {$m eq $n ? "reraise" : "handler"}]
             }
             propagate {
-                lappend body "    r[incr bindings] = raise_[pick $declared](x)"
+                lappend body "    r[incr bindings] = raise_[helper [pick $declared]](x)"
                 census propagate
             }
             nested {
@@ -251,7 +276,7 @@ proc genFunction {f quiet} {
             census finalfail
         }
         barecall {
-            lappend body "    raise_[pick $declared](x)"
+            lappend body "    raise_[helper [pick $declared]](x)"
             census barecall
         }
     }
@@ -290,11 +315,19 @@ proc generate {seed} {
     expr {srand($seed)}
     set quiet [expr {rand() < 0.33}]
     set lines {}
-    foreach n $::failureNames {
-        lappend lines "error $n"
+    set ::names $::failureNames
+    if {$seed % 3 == 0} {
+        lappend ::names sfm::Bad
+        lappend lines "import sfm"
+        census namespaced
     }
-    foreach n $::failureNames {
-        lappend lines "fn raise_$n\(x) errors $n:" "    if x == 3:" "        fail $n" "    x"
+    foreach n $::names {
+        if {[string first :: $n] < 0} {
+            lappend lines "error $n"
+        }
+    }
+    foreach n $::names {
+        lappend lines "fn raise_[helper $n]\(x) errors $n:" "    if x == 3:" "        fail $n" "    x"
     }
     set predicted {}
     set drivers {}
@@ -379,6 +412,7 @@ proc failuresOf {hir} {
 if {$show ne ""} {
     lassign [generate $show] source predicted literals
     puts "$source\n--- predicted (line col notes failure function exits):\n[join $predicted \n]\n--- predicted ONE-CHAR-STRING-LITERAL sites (line col):\n[join $literals \n]"
+    file delete -force $::fuzzLib
     exit 0
 }
 
@@ -466,5 +500,6 @@ set c $::census
 proc get {c key} {
     return [expr {[dict exists $c $key] ? [dict get $c $key] : 0}]
 }
-puts "seeds $seeds (from $first): $warned with warnings, $clean without; failures $failures; extra warnings $extras; groups $groups; functions [get $c functions], reachable fail sites [get $c sites] (guards [get $c guard], elif pairs [get $c elif], list loops [get $c loop], counted loops [get $c countloop], handlers [get $c handler], re-raises [get $c reraise], final [get $c finalfail]), dead [get $c dead], range-unreachable [get $c range], propagating calls [get $c propagate], bare final calls [get $c barecall], returns [get $c return], nested functions [get $c nested], only-silent programs [get $c silentPrograms]"
+puts "seeds $seeds (from $first): $warned with warnings, $clean without; failures $failures; extra warnings $extras; groups $groups; functions [get $c functions], reachable fail sites [get $c sites] (guards [get $c guard], elif pairs [get $c elif], list loops [get $c loop], counted loops [get $c countloop], handlers [get $c handler], re-raises [get $c reraise], final [get $c finalfail]), dead [get $c dead], range-unreachable [get $c range], propagating calls [get $c propagate], bare final calls [get $c barecall], returns [get $c return], nested functions [get $c nested], only-silent programs [get $c silentPrograms], namespaced programs [get $c namespaced]"
+file delete -force $::fuzzLib
 exit [expr {$failures > 0 || $extras > 0}]

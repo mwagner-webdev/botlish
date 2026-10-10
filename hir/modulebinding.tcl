@@ -356,7 +356,7 @@ proc hir::modulebinding::ImmutableExpr {hir e factsVar activeVar} {
             # diverges (its own body ends in a `fail`, e.g. re-raising a
             # partially-handled error) contributes no value of its own and
             # is dropped from the fold (MergeDivergentProofs) -- e.g. what
-            # lets `byte::set([...]): on BelowRange: {} on AboveRange: {}`
+            # lets `byte::set([...]): on byte::BelowRange: {} on byte::AboveRange: {}`
             # retain as a module binding (BYTE-SET.md's own listloop case
             # above is the identical idea one level up: prove every
             # reachable possibility, never pick one arbitrarily).

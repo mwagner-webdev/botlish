@@ -169,8 +169,11 @@ proc surface::modules::Error {kind span message} {
 # {NAMESPACE NAME SPAN KIND} of every mod::name reference in AST (a program
 # node, or any node -- used both for a whole file and, recursively, isn't
 # needed below this), in source order. KIND is value (an expression
-# `ns::name`), struct (a construction `ns::Name {...}`) or type (a qualified
-# type annotation `ns::Name`: a struct or a source-defined `type`).
+# `ns::name`), struct (a construction `ns::Name {...}`), type (a qualified
+# type annotation `ns::Name`: a struct or a source-defined `type`) or error
+# (a qualified error `ns::Name` in a `fail`, an `on` handler, an `errors`
+# clause or a function type's `errors` list: ERROR-PAYLOADS.md, "Module-
+# qualified error identity").
 proc surface::modules::QualifiedRefs {ast} {
     set found {}
     QualifiedRefsWalk $ast found
@@ -184,6 +187,14 @@ proc surface::modules::QualifiedRefsWalk {node foundVar} {
             lappend found [list [dict get $node namespace] [dict get $node name] [dict get $node span] value]
             return
         }
+        fail {
+            ErrorRef [dict get $node name] [dict get $node nameSpan] found
+        }
+        handledcall {
+            foreach handler [dict get $node handlers] {
+                ErrorRef [dict get $handler name] [dict get $handler nameSpan] found
+            }
+        }
         namedstruct {
             # NAMESPACE::Struct { ... }: a reference to the struct type
             # (STRUCTS.md); its field values may hold more references.
@@ -193,7 +204,11 @@ proc surface::modules::QualifiedRefsWalk {node foundVar} {
             }
         }
         function {
-            # Qualified struct types in parameter and result annotations.
+            # Qualified struct types in parameter and result annotations,
+            # qualified errors in the `errors` clause.
+            foreach pair [dict get $node errors] {
+                ErrorRef {*}$pair found
+            }
             foreach param [dict get $node params] {
                 TypeRefs [lindex $param 2] [lindex $param 3] found
             }
@@ -223,6 +238,9 @@ proc surface::modules::QualifiedRefsWalk {node foundVar} {
                     TypeRefs [lindex $param 2] [lindex $param 3] found
                 }
                 TypeRefs [dict get $r resultType] [dict get $r resultTypeSpan] found
+                foreach pair [dict get $r errors] {
+                    ErrorRef {*}$pair found
+                }
             }
         }
     }
@@ -258,8 +276,20 @@ proc surface::modules::ImportHeader {source} {
     return [join [lmap ns [lsort $needed] {string cat "import " $ns "\n"}] ""]
 }
 
+# Appends the reference {NAMESPACE NAME SPAN error} of the error spelling
+# SPELLING (located at SPAN) when it is qualified: `ns::Name`, `a::b::Name`.
+proc surface::modules::ErrorRef {spelling span foundVar} {
+    upvar 1 $foundVar found
+    set cut [string last :: $spelling]
+    if {$cut > 0} {
+        lappend found [list [string range $spelling 0 [expr {$cut - 1}]] \
+            [string range $spelling [expr {$cut + 2}] end] $span error]
+    }
+}
+
 # Appends the qualified type names ("ns::Name") TYPE (a surface::
-# parser::TypeExpr result) mentions, each located at SPAN.
+# parser::TypeExpr result) mentions, each located at SPAN -- and the
+# qualified errors of a function type's `errors` list.
 proc surface::modules::TypeRefs {type span foundVar} {
     upvar 1 $foundVar found
     if {$type eq ""} {
@@ -277,6 +307,7 @@ proc surface::modules::TypeRefs {type span foundVar} {
     if {$head eq "fn"} {
         foreach t [dict get $arg args] { TypeRefs $t $span found }
         TypeRefs [dict get $arg return] $span found
+        foreach error [dict get $arg errors] { ErrorRef $error $span found }
         return
     }
     TypeRefs $arg $span found
@@ -463,7 +494,8 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan} {
     }]
     # The source-defined types (`type`) and errors it declares: a type is a
     # member of the namespace, `NAME::Type` (hir/sourcetypes.tcl), what
-    # `import type NAME::Type` names; errors stay program-global names.
+    # `import type NAME::Type` names; so is an error, `NAME::Error`
+    # (hir/errordecls.tcl), named qualified from outside the module.
     dict set state loadedTypes $name [lmap statement [dict get $ast body] {
         if {[dict get $statement kind] ne "typedecl"} continue
         dict get $statement name
@@ -763,9 +795,19 @@ proc surface::modules::CollectAndLoad {stateVar ast {key ""}} {
             # no module file, so an unknown member is reported against the
             # intrinsics, not as a missing file.
             Error UNKNOWN-SYMBOL $span \
-                "namespace \"$namespaceName\" has no [expr {$refKind eq "value" ? "definition" : "type"}] \"$symbolName\" (its members are the intrinsics: [join $natives {, }])"
+                "namespace \"$namespaceName\" has no [dict get {value definition type type struct type error error} $refKind] \"$symbolName\" (its members are the intrinsics: [join $natives {, }])"
         }
         # The import loaded the module.
+        if {$refKind eq "error"} {
+            # A module-qualified error (ERROR-PAYLOADS.md): one the module
+            # declares itself, canonically `NAMESPACE::Name`.
+            set errorNames [dict get $state loadedErrors $namespaceName]
+            if {$symbolName ni $errorNames} {
+                Error UNKNOWN-SYMBOL $span \
+                    "namespace \"$namespaceName\" has no error \"$symbolName\" (it declares: [expr {$errorNames eq "" ? "no errors" : [join [lsort $errorNames] {, }]}])"
+            }
+            continue
+        }
         if {$refKind in {struct type}} {
             set structNames [dict get $state loadedStructs $namespaceName]
             set typeNames [expr {$refKind eq "type" ? [concat [dict get $state loadedTypes $namespaceName] [dict get $state loadedTraits $namespaceName] [dict get $state loadedEnums $namespaceName]] : {}}]

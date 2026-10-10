@@ -8,11 +8,11 @@ fn nonneg(m) -> int:
         0 - m
     else:
         m
-fn g(m) -> int errors AboveRange:
+fn g(m) -> int errors byte::AboveRange:
     byte::from_int(nonneg(m))
 ns = [0 - 7, 45, 300]
 loop n in ns:
     r = g(n):
-        on AboveRange:
+        on byte::AboveRange:
             0
     r

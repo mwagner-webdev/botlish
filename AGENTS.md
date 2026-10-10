@@ -264,7 +264,7 @@ other module is warning-clean.
 `SAME-FAILURE` (WARNINGS-SAME-FAILURE.md) reads the `fail` sites of a function's
 own body (milestone 1's `BodyExprs`, which never enters a nested function), each
 `fail` node's `name` and `reachable` flag, the block's resolved `declaredErrors`,
-the program-wide uniqueness of error names (`hir/errordecls.tcl`) and the
+the canonical module-qualified error identities (`hir/errordecls.tcl`) and the
 completion walk (`hir::completions::reachedExprs`, which records `fail` sites
 and never enters a nested function either). If you change any of those, or how
 `fail`, `errors` or an on-handler body lowers or resolves, run
@@ -589,6 +589,39 @@ and `cargo test --release --manifest-path native/Cargo.toml --lib
 error_payload`. `bench/error-payloads.tcl` regenerates the performance
 report.
 
+
+### Error identity
+
+A source-defined error's identity is canonical and module-qualified
+(ERROR-PAYLOADS.md, "Module-qualified error identity"): `NS::Name` for module
+NS's `error Name`, the bare `Name` for the entry program's and for the
+runtime's builtin errors. Every spelling (`fail`, `on`, `errors` clauses, a
+function type's `errors` list) is resolved once, in the namespace of the code
+that writes it (`hir::errordecls::resolve`), and everything downstream --
+HIR, contracts, completion sets, Core IR, `errorId`, native ids, rendering,
+`SAME-FAILURE` -- holds the canonical string. Never key, compare or dispatch
+by a short name, never add an `import error` form, an alias or a
+compatibility spelling, and never let a module see the entry program's
+errors. If you change error-name resolution or authorization
+(`hir/errordecls.tcl`, `surface/modules.tcl`'s error references,
+`surface::parser::ErrorName`), run `tests/namespaced-errors.test`,
+`tests/imports.test`, `tests/same-failure.test` and
+`audit/error-payloads/tools/fuzz.tcl` (its namespaced programs).
+
+### Completion precision through untyped callables
+
+The completion analysis never turns lost precision into "no errors"
+(STATIC-COMPLETION-PROOFS.md, "Precision and the erased-callable contract"):
+an untyped or structural call is charged by its callee's callable fact
+(`hir::completions::CallableFact`: exact, clean or unknown), an unknown one
+the erased-callable contract, and an incomplete summary falls back to the
+callee's declared contract (`EffectiveFacts`, `Fallback`). Fallbacks are
+may-sets only (never a KNOWN-ERROR). If you change the walker's call, handle
+or bind cases, `EffectiveFacts`/`Fallback`/`IndirectFacts`, the erased-callable
+contract (`erasedErrorsOf`, `hir::callables::CarriedErrors`) or
+`hir/affine.tcl`'s error edges, run `tests/higher-order-completions.test`,
+`tests/error-payloads.test` and `audit/error-payloads/tools/mutate.tcl` (its
+completion mutants).
 ## MutableVector
 
 `MutableVector[T]` (MUTABLE-VECTOR.md) is a growable mutable VALUE: a

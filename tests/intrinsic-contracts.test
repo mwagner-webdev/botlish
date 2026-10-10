@@ -19,8 +19,9 @@
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
 
-# `import list` loads lib/list.bot, which declares the (global) error NotFound.
-set ::icDecls "import immutable_set\nimport list\nimport str\ntype Byte = Int in 0..255\nerror PermissionDenied\n"
+# `import list` loads lib/list.bot, whose own error NotFound is the identity
+# list::NotFound: the program declares its own NotFound beside it.
+set ::icDecls "import immutable_set\nimport list\nimport str\ntype Byte = Int in 0..255\nerror NotFound\nerror PermissionDenied\n"
 
 # For tests that rebuild the lowered program from core IR (-strict 0): they
 # must not load lib/list.bot, whose `find ... errors NotFound` is itself
@@ -397,7 +398,7 @@ test ic-native-direct-unchanged {a direct native call with a statically wrong ar
 
 test ic-native-wrapper-static {wrapper(123) was a run-time TYPE error inside the native; it is now a compile-time error at the call, naming the inferred contract and where it came from} -body {
     icRejects "${::icWrapper}wrapper(123)" \
-        {*:8:9: argument for parameter "x" is statically incompatible with str, the parameter type inferred from the function body (argument type: int*inferred from the function body: argument 1 of native str::length requires str (at 7:17)*}
+        {*:9:9: argument for parameter "x" is statically incompatible with str, the parameter type inferred from the function body (argument type: int*inferred from the function body: argument 1 of native str::length requires str (at 8:17)*}
 } -result {{CORE SEMANTIC TYPE} 1}
 
 test ic-native-wrapper-before {what that call used to do, and still does where no strict HIR build runs (core IR on interp; the compile backend keeps -strict 0 diagnostics as AOT blockers): enter the wrapper and raise the native's own run-time TYPE error} -body {

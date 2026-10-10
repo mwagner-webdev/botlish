@@ -94,7 +94,7 @@ invalid_names = loop name in candidates:
     name
 
 first_invalid = candidates.find(invalid_name?):
-    on NotFound:
+    on list::NotFound:
         "<none>"
 
 [list::length(candidates), list::length(invalid_names), first_invalid, list::length(candidates) - list::length(invalid_names)]

@@ -6,11 +6,11 @@
 import io
 import linux::io
 
-fn hello() errors WriteFailed:
+fn hello() errors io::WriteFailed:
     io::print_line("Hello, world!")
 
 with context linux::io::create()
 
 hello():
-    on WriteFailed:
+    on io::WriteFailed:
         unit

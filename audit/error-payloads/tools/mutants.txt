@@ -394,3 +394,146 @@
                     dict set ctx incomplete 1
                 }
 >>>>
+
+# ---------------------------------------------------------------------------
+# Module-qualified error identity (hir/errordecls.tcl, ERROR-PAYLOADS.md
+# "Module-qualified error identity"): never a short name where an identity is
+# meant.
+
+@@ descriptor-keyed-by-short-name the error registry keys a module's error by its short name, as the flat namespace did
+## hir/errordecls.tcl
+<<<<
+        set name [canonical $ns $short]
+====
+        set name $short
+>>>>
+
+@@ handler-dispatch-short-name-tcl the interpreter selects a handler by the error's short name
+## core/evaluator.tcl
+<<<<
+        if {$name eq $errorName} {
+====
+        if {[namespace tail $name] eq [namespace tail $errorName]} {
+>>>>
+
+@@ handler-dispatch-short-name-compile the Tcl compiler's handler switch compares short names
+## compiler/compiler.tcl
+<<<<
+    Emit ctx "switch -exact -- \[lindex \$$resVar 1\] \{"
+    Indent ctx 1
+    set index 0
+    foreach name $names scopeId $scopes body $bodies {
+        set payload [lindex $payloads $index]
+        incr index
+        Emit ctx "[Word $name] \{"
+====
+    Emit ctx "switch -glob -- \[lindex \$$resVar 1\] \{"
+    Indent ctx 1
+    set index 0
+    foreach name $names scopeId $scopes body $bodies {
+        set payload [lindex $payloads $index]
+        incr index
+        Emit ctx "[Word *[namespace tail $name]] \{"
+>>>>
+
+@@ contract-subset-short-name a function type's error contract admits an error whose short name it lists
+## hir/types.tcl
+<<<<
+    foreach e [FnErrors $a] {
+        if {$e ni [FnErrors $b]} {
+            lappend extra $e
+        }
+    }
+====
+    foreach e [FnErrors $a] {
+        if {[namespace tail $e] ni [lmap x [FnErrors $b] {namespace tail $x}]} {
+            lappend extra $e
+        }
+    }
+>>>>
+
+@@ tcl-errorid-strips-namespace the Tcl runtime's error identity value keeps only the short name
+## core/value.tcl
+<<<<
+    return [list errorId $name {*}$args]
+====
+    return [list errorId [namespace tail $name] {*}$args]
+>>>>
+
+@@ native-id-aliases-short-name natively, errors of one short name share one id
+## native/lower.tcl
+<<<<
+    if {![dict exists $errorIds $name]} {
+        throw {NATIVE BUG} "native lowering: undeclared error \"$name\" has no assigned id"
+    }
+    return [dict get $errorIds $name]
+====
+    if {![dict exists $errorIds $name]} {
+        throw {NATIVE BUG} "native lowering: undeclared error \"$name\" has no assigned id"
+    }
+    foreach other [dict keys $errorIds] {
+        if {[namespace tail $other] eq [namespace tail $name]} {
+            return [dict get $errorIds $other]
+        }
+    }
+    return [dict get $errorIds $name]
+>>>>
+
+@@ coroutine-cache-short-name a failed coroutine caches its error with the short name only (a later resume raises another identity)
+## core/coroutines.tcl
+<<<<
+                dict set store $id state failed
+                dict set store $id failure [list completion $completion]
+====
+                dict set store $id state failed
+                set raised [core::completion::payload $completion]
+                if {[core::value::kind $raised] eq "errorId"} {
+                    set raised [lreplace $raised 1 1 [namespace tail [lindex $raised 1]]]
+                    set completion [core::completion::propagatingError $raised]
+                }
+                dict set store $id failure [list completion $completion]
+>>>>
+
+@@ hir-text-drops-namespace HIR text prints an error declaration by its short name
+## hir/format.tcl
+<<<<
+    if {![dict exists $hir errorPayloads $name]} {
+        return "error $name"
+    }
+====
+    if {![dict exists $hir errorPayloads $name]} {
+        return "error $name"
+    }
+    set name [namespace tail $name]
+>>>>
+
+@@ module-sees-short-name-everywhere a bare spelling resolves to any module's error of that short name (the flat namespace's lookup)
+## hir/errordecls.tcl
+<<<<
+    if {$ns eq "" && $spelling in $current} {
+        return $spelling
+    }
+====
+    if {$ns eq "" && $spelling in $current} {
+        return $spelling
+    }
+    foreach id $current {
+        if {[shortName $id] eq $spelling} {
+            return $id
+        }
+    }
+>>>>
+
+@@ qualified-error-unauthorized a qualified error is accepted without its namespace's import
+## surface/modules.tcl
+<<<<
+        ErrorRef [dict get $node name] [dict get $node nameSpan] found
+====
+        list
+>>>>
+## surface/modules.tcl
+<<<<
+                ErrorRef [dict get $handler name] [dict get $handler nameSpan] found
+====
+                list
+>>>>

@@ -120,7 +120,7 @@ web::is_unreserved(65)} web-unreserved-restype.bot]
 
 test web-unreserved-exhaustive {web::is_unreserved matches the reference definition over all 256 Byte values; cardinality exactly 66; equals ascii::is_alphanumeric(b) or membership in the punctuation set, everywhere} -body {
     set nums [lseq 0 255]
-    set src "import ascii\nimport byte\nimport immutable_set\nimport web\n\nns = \[[join $nums {, }]\]\nloop n in ns:\n    b = byte::from_int(n):\n        on BelowRange:\n            0\n        on AboveRange:\n            0\n    \[web::is_unreserved(b), ascii::is_alphanumeric(b), immutable_set::contains(web::additional_unreserved_chars, b)\]"
+    set src "import ascii\nimport byte\nimport immutable_set\nimport web\n\nns = \[[join $nums {, }]\]\nloop n in ns:\n    b = byte::from_int(n):\n        on byte::BelowRange:\n            0\n        on byte::AboveRange:\n            0\n    \[web::is_unreserved(b), ascii::is_alphanumeric(b), immutable_set::contains(web::additional_unreserved_chars, b)\]"
     set path [makeFile $src web-unreserved-exhaustive.bot]
     try {
         set hir [surface::readProgramFile $path -strict 0]
@@ -152,7 +152,7 @@ test web-unreserved-exhaustive {web::is_unreserved matches the reference definit
 
 test web-unreserved-backend-parity-256 {web::is_unreserved agrees across interp/compile/cranelift-generic/cranelift over the entire 0..255 domain} -body {
     set nums [lseq 0 255]
-    set src "import byte\nimport web\n\nns = \[[join $nums {, }]\]\nloop n in ns:\n    b = byte::from_int(n):\n        on BelowRange:\n            0\n        on AboveRange:\n            0\n    web::is_unreserved(b)"
+    set src "import byte\nimport web\n\nns = \[[join $nums {, }]\]\nloop n in ns:\n    b = byte::from_int(n):\n        on byte::BelowRange:\n            0\n        on byte::AboveRange:\n            0\n    web::is_unreserved(b)"
     set path [makeFile $src web-unreserved-parity256.bot]
     try {
         moduleParity $path

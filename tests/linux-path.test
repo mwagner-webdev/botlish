@@ -93,7 +93,7 @@ proc nirId {nir name} {
     return ""
 }
 
-set pathHeader "import linux::path\nimport str\nimport type linux::path::LinuxPath\n\n"
+set pathHeader "import io::path\nimport linux::path\nimport str\nimport type linux::path::LinuxPath\n\n"
 
 # ---------------------------------------------------------------------------
 # The refinement and its validity rule
@@ -119,7 +119,7 @@ test path-validity {valid? accepts a non-empty String without U+0000 -- relative
 } -result {value {[false, true, true, true, true, true, true, true, true, true, true, true, false, false, false]}}
 
 test path-no-filesystem {validation observes no filesystem: valid? is a repeatable value check (no effect, no syscall, no context); a path that exists nowhere is valid, and nothing is normalized} -body {
-    set hir [pathHir "${::pathHeader}fn f(s: str) -> str errors NotAPath:\n    linux::path::validate(s)\n    s\nr = f(\"/no/such/dir/../x//y\"):\n    on NotAPath:\n        \"invalid\"\nr\n"]
+    set hir [pathHir "${::pathHeader}fn f(s: str) -> str errors io::path::NotAPath:\n    linux::path::validate(s)\n    s\nr = f(\"/no/such/dir/../x//y\"):\n    on io::path::NotAPath:\n        \"invalid\"\nr\n"]
     set valid ""
     foreach e [hirFind $hir bind] {
         if {[dict get $hir bindings [hir::get $hir $e binding] name] eq "linux::path::valid?"} {
@@ -140,43 +140,43 @@ test path-predicate-proof {valid? true proves the argument a LinuxPath on the tr
 } -result {{value {[4, -1]}} TYPE}
 
 test path-validator-proof {validate's normal completion proves the argument a LinuxPath for the rest of the path; the error edge proves nothing} -body {
-    list [pathAgree "${::needer}fn f(s: str) -> int errors NotAPath:\n    linux::path::validate(s)\n    need(s)\nr = f(\"/etc\"):\n    on NotAPath:\n        -1\ns = f(\"\"):\n    on NotAPath:\n        -1\n\[r, s\]\n"] \
-        [pathRejection "${::needer}fn f(s: str) -> int:\n    linux::path::validate(s):\n        on NotAPath:\n            return need(s)\n    0\nf(\"x\")\n"]
+    list [pathAgree "${::needer}fn f(s: str) -> int errors io::path::NotAPath:\n    linux::path::validate(s)\n    need(s)\nr = f(\"/etc\"):\n    on io::path::NotAPath:\n        -1\ns = f(\"\"):\n    on io::path::NotAPath:\n        -1\n\[r, s\]\n"] \
+        [pathRejection "${::needer}fn f(s: str) -> int:\n    linux::path::validate(s):\n        on io::path::NotAPath:\n            return need(s)\n    0\nf(\"x\")\n"]
 } -result {{value {[4, -1]}} TYPE}
 
 test path-validator-terminating-handler {a handler that leaves (return) contributes no normal path: after the handled validate, the argument is a LinuxPath} -body {
-    pathAgree "${::needer}fn f(s: str) -> int:\n    linux::path::validate(s):\n        on NotAPath:\n            return -1\n    need(s)\n\[f(\"/a\"), f(\"\")\]\n"
+    pathAgree "${::needer}fn f(s: str) -> int:\n    linux::path::validate(s):\n        on io::path::NotAPath:\n            return -1\n    need(s)\n\[f(\"/a\"), f(\"\")\]\n"
 } -result {value {[2, -1]}}
 
 test path-validator-rejoining-handler {a handler that completes normally rejoins without the proof: after the handled validate the argument is not a LinuxPath (TYPE); proving it again in the handler keeps it} -body {
-    list [pathRejection "${::needer}fn f(s: str) -> int:\n    linux::path::validate(s):\n        on NotAPath:\n            unit\n    need(s)\nf(\"x\")\n"] \
-        [pathAgree "${::needer}fn f(s: str, fallback: str) -> int:\n    linux::path::validate(s):\n        on NotAPath:\n            if not linux::path::valid?(s):\n                return -1\n    need(s)\nf(\"/ab\", \"x\")\n"]
+    list [pathRejection "${::needer}fn f(s: str) -> int:\n    linux::path::validate(s):\n        on io::path::NotAPath:\n            unit\n    need(s)\nf(\"x\")\n"] \
+        [pathAgree "${::needer}fn f(s: str, fallback: str) -> int:\n    linux::path::validate(s):\n        on io::path::NotAPath:\n            if not linux::path::valid?(s):\n                return -1\n    need(s)\nf(\"/ab\", \"x\")\n"]
 } -result {TYPE {value 3}}
 
 test path-validator-identity {facts are about values: an alias made after validation keeps the proof, validating an alias proves the value it aliases, a shadowing binding of the same name is a different value, and validating one value proves nothing about another} -body {
-    list [pathAgree "${::needer}fn f(s: str) -> int errors NotAPath:\n    linux::path::validate(s)\n    t = s\n    need(t)\nr = f(\"/x\"):\n    on NotAPath:\n        -1\nr\n"] \
-        [pathAgree "${::needer}fn f(s: str) -> int errors NotAPath:\n    t = s\n    linux::path::validate(t)\n    need(s)\nr = f(\"/xy\"):\n    on NotAPath:\n        -1\nr\n"] \
-        [pathRejection "${::needer}fn f(s: str) -> int errors NotAPath:\n    linux::path::validate(s)\n    fn g(s: str) -> int:\n        need(s)\n    g(s)\nf(\"x\")\n"] \
-        [pathRejection "${::needer}fn f(s: str, t: str) -> int errors NotAPath:\n    linux::path::validate(s)\n    need(t)\nf(\"x\", \"y\")\n"]
+    list [pathAgree "${::needer}fn f(s: str) -> int errors io::path::NotAPath:\n    linux::path::validate(s)\n    t = s\n    need(t)\nr = f(\"/x\"):\n    on io::path::NotAPath:\n        -1\nr\n"] \
+        [pathAgree "${::needer}fn f(s: str) -> int errors io::path::NotAPath:\n    t = s\n    linux::path::validate(t)\n    need(s)\nr = f(\"/xy\"):\n    on io::path::NotAPath:\n        -1\nr\n"] \
+        [pathRejection "${::needer}fn f(s: str) -> int errors io::path::NotAPath:\n    linux::path::validate(s)\n    fn g(s: str) -> int:\n        need(s)\n    g(s)\nf(\"x\")\n"] \
+        [pathRejection "${::needer}fn f(s: str, t: str) -> int errors io::path::NotAPath:\n    linux::path::validate(s)\n    need(t)\nf(\"x\", \"y\")\n"]
 } -result {{value 2} {value 3} TYPE TYPE}
 
 test path-string-forgetting {a validated value is still the same String: it is passed to a str parameter, concatenated and measured with no conversion} -body {
-    pathAgree "${::pathHeader}fn plain(s: str) -> str:\n    str::concat(\"<\", str::concat(s, \">\"))\nfn show(value: str) -> str errors NotAPath:\n    linux::path::validate(value)\n    str::concat(plain(value), str::concat(\" \", str::concat(\"Reading config at \", value)))\nr = show(\"config/tool.json\"):\n    on NotAPath:\n        \"invalid\"\nr\n"
+    pathAgree "${::pathHeader}fn plain(s: str) -> str:\n    str::concat(\"<\", str::concat(s, \">\"))\nfn show(value: str) -> str errors io::path::NotAPath:\n    linux::path::validate(value)\n    str::concat(plain(value), str::concat(\" \", str::concat(\"Reading config at \", value)))\nr = show(\"config/tool.json\"):\n    on io::path::NotAPath:\n        \"invalid\"\nr\n"
 } -result {value {"<config/tool.json> Reading config at config/tool.json"}}
 
 # ---------------------------------------------------------------------------
 # concat and text
 
-test path-concat-semantics {concat joins with one "/" unless the path already ends with one, keeps ".", ".." and repeated slashes, accepts a relative fragment with "/", and rejects an empty, absolute or NUL-containing component (NotAPath)} -body {
+test path-concat-semantics {concat joins with one "/" unless the path already ends with one, keeps ".", ".." and repeated slashes, accepts a relative fragment with "/", and rejects an empty, absolute or NUL-containing component (io::path::NotAPath)} -body {
     set pairs [list /a b / b a/ b a b/c a .. . x a//b c /a ./b /a "" /a /b /a "b\x00"]
     set calls [lmap {p c} $pairs {
         string cat "try(\"" $p "\", \"" $c "\")"
     }]
-    pathAgree "${::pathHeader}fn join(p: LinuxPath, c: str) -> str errors NotAPath:\n    linux::path::concat(p, c)\nfn try(p: str, c: str) -> str:\n    linux::path::validate(p):\n        on NotAPath:\n            return \"bad base\"\n    r = join(p, c):\n        on NotAPath:\n            \"NotAPath\"\n    r\n\[[join $calls {, }]\]\n"
+    pathAgree "${::pathHeader}fn join(p: LinuxPath, c: str) -> str errors io::path::NotAPath:\n    linux::path::concat(p, c)\nfn try(p: str, c: str) -> str:\n    linux::path::validate(p):\n        on io::path::NotAPath:\n            return \"bad base\"\n    r = join(p, c):\n        on io::path::NotAPath:\n            \"NotAPath\"\n    r\n\[[join $calls {, }]\]\n"
 } -result {value {["/a/b", "/b", "a/b", "a/b/c", "a/..", "./x", "a//b/c", "/a/./b", "NotAPath", "NotAPath", "NotAPath"]}}
 
 test path-concat-result-refined {linux::path::concat returns a real LinuxPath (accepted where LinuxPath is required) without an unsafe constructor; text is the carrier String itself (lossless)} -body {
-    pathAgree "${::needer}fn f(s: str) -> List\[str\] errors NotAPath:\n    linux::path::validate(s)\n    c = linux::path::concat(s, \"child\")\n    \[linux::path::text(c), linux::path::text(s)\]\nfn n(s: str) -> int errors NotAPath:\n    linux::path::validate(s)\n    need(linux::path::concat(s, \"x\"))\nr = f(\"/home\"):\n    on NotAPath:\n        \[\]\nm = n(\"/h\"):\n    on NotAPath:\n        -1\n\[r, m\]\n"
+    pathAgree "${::needer}fn f(s: str) -> List\[str\] errors io::path::NotAPath:\n    linux::path::validate(s)\n    c = linux::path::concat(s, \"child\")\n    \[linux::path::text(c), linux::path::text(s)\]\nfn n(s: str) -> int errors io::path::NotAPath:\n    linux::path::validate(s)\n    need(linux::path::concat(s, \"x\"))\nr = f(\"/home\"):\n    on io::path::NotAPath:\n        \[\]\nm = n(\"/h\"):\n    on io::path::NotAPath:\n        -1\n\[r, m\]\n"
 } -result {value {[["/home/child", "/home"], 4]}}
 
 # ---------------------------------------------------------------------------
@@ -195,18 +195,18 @@ import linux::path
 import str
 import type io::path::Path
 
-fn child(path: Path) -> Path errors NotAPath:
+fn child(path: Path) -> Path errors io::path::NotAPath:
     path.concat("child")
 
-fn add_config(path: Path) -> Path errors NotAPath:
+fn add_config(path: Path) -> Path errors io::path::NotAPath:
     path.concat(".config").concat("awesome_tool")
 
-fn run(value: str) -> str errors NotAPath:
+fn run(value: str) -> str errors io::path::NotAPath:
     linux::path::validate(value)
     str::concat(str::concat(io::path::text(child(value)), " "), io::path::text(add_config(value)))
 
 run("/home/me"):
-    on NotAPath:
+    on io::path::NotAPath:
         "not a path"
 }
 
@@ -230,7 +230,7 @@ test path-generic-specialization {one specialization per function for LinuxPath;
 } -result {{add_config<linux::path::LinuxPath> child<linux::path::LinuxPath> io::path::text<linux::path::LinuxPath>} {{linux::path::concat block} {linux::path::text block}} 2 0}
 
 test path-generic-result-one-way {a generic result is source-visible as io::path::Path only: its own witness keeps specializing later operations, but it is not accepted where a LinuxPath is required} -body {
-    pathRejection "import io::path\nimport type io::path::Path\n${::needer}fn child(path: Path) -> Path errors NotAPath:\n    path.concat(\"c\")\nfn f(s: str) -> int errors NotAPath:\n    linux::path::validate(s)\n    need(child(s))\nf(\"x\")\n"
+    pathRejection "import type io::path::Path\n${::needer}fn child(path: Path) -> Path errors io::path::NotAPath:\n    path.concat(\"c\")\nfn f(s: str) -> int errors io::path::NotAPath:\n    linux::path::validate(s)\n    need(child(s))\nf(\"x\")\n"
 } -result {TYPE}
 
 # A test-only second Path witness with different joining (a Windows-shaped
@@ -243,16 +243,16 @@ refined type WinPath = str
 fn valid?(value: str) -> bool proves value: WinPath:
     str::length(value) > 0
 
-fn validate(value: str) -> unit proves value: WinPath errors NotAPath:
+fn validate(value: str) -> unit proves value: WinPath errors io::path::NotAPath:
     if valid?(value):
         unit
     else:
-        fail NotAPath
+        fail io::path::NotAPath
 
 fn text(path: WinPath) -> str:
     path
 
-fn concat(path: WinPath, component: str) -> WinPath errors NotAPath:
+fn concat(path: WinPath, component: str) -> WinPath errors io::path::NotAPath:
     joined = str::concat(str::concat(path, "\\"), component)
     validate(joined)
     joined
@@ -266,16 +266,16 @@ import winpath
 import str
 import type io::path::Path
 
-fn child(path: Path) -> Path errors NotAPath:
+fn child(path: Path) -> Path errors io::path::NotAPath:
     path.concat("child")
 
-fn both(l: str, w: str) -> List[str] errors NotAPath:
+fn both(l: str, w: str) -> List[str] errors io::path::NotAPath:
     linux::path::validate(l)
     winpath::validate(w)
     [io::path::text(child(l)), io::path::text(child(w))]
 
 both("/home", "C:\\Users"):
-    on NotAPath:
+    on io::path::NotAPath:
         []
 }
     withPrivateLibrary {
@@ -289,7 +289,7 @@ both("/home", "C:\\Users"):
 } -result {{value {["/home/child", "C:\\Users\\child"]}} {child<linux::path::LinuxPath> child<winpath::WinPath>}}
 
 test path-specialization-code-quality {child<LinuxPath> compiles to the same NIR as a hand-written concrete function over LinuxPath, and allocates exactly as much (the refinement and the trait cost nothing)} -constraints {linuxX86_64} -body {
-    set text "${::pathHeader}import io::path\nimport type io::path::Path\nfn child(path: Path) -> Path errors NotAPath:\n    path.concat(\"child\")\nfn child_l(path: LinuxPath) -> LinuxPath errors NotAPath:\n    linux::path::concat(path, \"child\")\nfn f(s: str) -> List\[str\] errors NotAPath:\n    linux::path::validate(s)\n    \[io::path::text(child(s)), linux::path::text(child_l(s))\]\nr = f(\"/a\"):\n    on NotAPath:\n        \[\]\nr\n"
+    set text "${::pathHeader}import type io::path::Path\nfn child(path: Path) -> Path errors io::path::NotAPath:\n    path.concat(\"child\")\nfn child_l(path: LinuxPath) -> LinuxPath errors io::path::NotAPath:\n    linux::path::concat(path, \"child\")\nfn f(s: str) -> List\[str\] errors io::path::NotAPath:\n    linux::path::validate(s)\n    \[io::path::text(child(s)), linux::path::text(child_l(s))\]\nr = f(\"/a\"):\n    on io::path::NotAPath:\n        \[\]\nr\n"
     set nir [native::nir [pathHir $text]]
     set allocations [lmap last {{io::path::text(child(s))} {linux::path::text(child_l(s))}} {
         set one [string map [list {[io::path::text(child(s)), linux::path::text(child_l(s))]} "\[$last\]"] $text]
@@ -302,7 +302,7 @@ test path-specialization-code-quality {child<LinuxPath> compiles to the same NIR
 # ---------------------------------------------------------------------------
 # Path + I/O
 
-test path-io-vertical {examples/io/show-path.bot as a standalone executable: a valid path is printed on stdout (still a String after validation), an invalid one reported on stderr by the NotAPath handler} -constraints {linuxX86_64 posixShell} -body {
+test path-io-vertical {examples/io/show-path.bot as a standalone executable: a valid path is printed on stdout (still a String after validation), an invalid one reported on stderr by the io::path::NotAPath handler} -constraints {linuxX86_64 posixShell} -body {
     set exe [file join $::scratch show-path]
     native::executable [pathHir [readFile [file join $::projectRoot examples io show-path.bot]]] $exe
     set out [file join $::scratch show.out]

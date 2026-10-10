@@ -39,6 +39,7 @@ payload's shape is known from the error's identity.
 
 * [The principal program](#the-principal-program)
 * [What changed, in one page](#what-changed-in-one-page)
+* [Module-qualified error identity](#module-qualified-error-identity) -- an error's identity is its module and its name (a later milestone)
 * [Report](#report) -- the 65 points of the milestone report, in order
 * [Native evidence](#native-evidence) -- the NIR of a failure and of each handler form
 * [Payload-bearing enums are not this](#payload-bearing-enums-are-not-this)
@@ -156,6 +157,85 @@ nested("")]` is `[404, 0, 4, -1]` on every backend.
   whose payload is proven identical (the rule WARNINGS-SAME-FAILURE.md
   reserved).
 
+## Module-qualified error identity
+
+> A source-defined error is nominally identified by its declaring module and
+> declared name. Two modules may declare errors with the same short name;
+> they remain distinct identities even when their payloads have identical
+> structure.
+
+```botlish
+# lib/http.bot                         # lib/cache.bot
+error NotFound:                        error NotFound:
+    key: str                               key: str
+
+fn get(key: str) -> str errors NotFound:   # inside its module: the short name
+    fail NotFound {key: key}
+```
+
+`http::NotFound` and `cache::NotFound` are two identities. Inside its module
+an error is named by its short name; outside, it is named qualified, through
+the ordinary exact namespace imports (`import http` authorizes
+`http::NotFound`; `import foo`, `import http::sub` do not -- MISSING-IMPORT,
+UNKNOWN-NAMESPACE and UNKNOWN-SYMBOL exactly as for every qualified member):
+
+```botlish
+import http
+import cache
+
+fn lookup(key: str) -> str errors http::NotFound, cache::NotFound:
+    ...
+
+lookup("/x"):
+    on http::NotFound {key}:          # one handler per identity
+        ...
+    on cache::NotFound {key}:
+        ...
+```
+
+A handler for `http::NotFound` never handles `cache::NotFound`, on any
+backend. Everything else is unchanged: the payload is the same anonymous
+struct (the identity is not in it), handlers destructure it the same way,
+ownership, coroutine caching and the native payload transport are the same.
+
+* **Canonical identity** (`hir/errordecls.tcl`): the string `NS::Name` for a
+  module's error (`abi::x86_64::Register64BelowRange` for a nested module),
+  the bare `Name` for one the entry program declares (the entry program is no
+  namespace), the bare name for the runtime's builtin errors
+  (`InvalidArgumentEncoding`, `IndexNotFound`, `LowerUnderrun`,
+  `UpperOverrun`: root identities, not migrated into a fake module). The
+  canonical string encodes its owner unambiguously -- the short name and
+  namespace are recovered from it (`shortName`, `namespaceOf`), never from
+  load order -- and it is what HIR, Core IR, `errorId`, the native id table,
+  `SAME-FAILURE`, contracts and completion sets hold after resolution.
+* **Resolution** (`hir::errordecls::resolve`): a spelling resolves in the
+  namespace of the code that writes it -- inside module NS a bare name is
+  NS's own error (else a builtin), in the entry program its own error (else
+  a builtin), `NS2::Name` is module NS2's. A bare spelling of a module's error
+  outside it is UNDECLARED-ERROR naming the qualified spelling. The same
+  short name twice in one module (or the entry program) is still rejected,
+  and so is a source error named like a builtin one (its bare spelling would
+  name two errors). There is no `import error` form.
+* **Sites**: `fail`, `on`, a function's `errors` clause, a trait
+  requirement's, and a function or coroutine type's `errors` list all take
+  `IDENT { "::" IDENT }` (`surface::parser::ErrorName`); qualified ones are
+  authorized by `surface::modules::CollectAndLoad` before any body resolves.
+  The module AST stays importer-neutral (its declarations keep their short
+  names; the loader supplies the namespace).
+* **Migration**: the shipped modules' errors are now `io::WriteFailed`,
+  `byte::BelowRange`, `byte::AboveRange`, `list::NotFound`,
+  `abi::AbiIntegerBelowRange`, `abi::AbiIntegerAboveRange`,
+  `abi::x86_64::Register64BelowRange`, `abi::x86_64::Register64AboveRange`
+  and `io::path::NotAPath`. Their owners are unchanged; external users
+  (`lib/linux/io.bot`, `lib/linux/path.bot`, examples, benchmarks, tests)
+  spell them qualified. No compatibility alias.
+
+`tests/namespaced-errors.test` pins it on every backend (same-shaped
+cross-module errors, the wrong-namespace handler at compile and at run time,
+authorization, HIR text, the Tcl `errorId`, native ids, rendering, affine
+payloads, coroutine caching, a compiler-shaped fixture), and the fuzzer's
+namespaced programs generate same-short-name identities (point 51).
+
 ## Report
 
 ### 1. Declaration grammar
@@ -197,8 +277,9 @@ payloads.
 
 ### 4. Nominal error identity
 
-The name is the identity, as before: program-global, declared once
-(`hir/errordecls.tcl`). Two errors with identical fields are two descriptors
+The name is the identity, as before -- since "Module-qualified error identity"
+above, the canonical module-qualified name (`hir/errordecls.tcl`), declared
+once per module. Two errors with identical fields are two descriptors
 (`ep-declaration-nominal`), handled by their own handlers only
 (`ep-same-shape-distinct`), never interchangeably (`ep-same-shape-not-
 interchangeable`: handling the twin leaves the raised error unhandled,
@@ -339,10 +420,12 @@ the body (`ep-handler-scope`, `ep-destructuring-diagnostics`).
 
 ### 19. HIR error descriptor
 
-HIR's `errorDecls` (the names, as before) and, for payload-bearing errors,
-`errorPayloads`: NAME -> `{fields {FIELD TYPE ...} namespace NS}`. HIR text
-prints `error NAME` or `error NAME ns NS payload F1: T1, F2: T2`, and reads
-it back (`ep-principal-hir-text-round-trip`):
+HIR's `errorDecls` (the canonical identities) and, for payload-bearing
+errors, `errorPayloads`: NAME -> `{fields {FIELD TYPE ...} namespace NS}`.
+HIR text prints `error NAME` or `error NAME ns NS payload F1: T1, F2: T2`
+with NAME canonical (`error http::NotFound ns http payload key: str`), and
+reads it back (`ep-principal-hir-text-round-trip`, `nerr-hir-text-round-trip`
+with two same-short-name identities):
 
 ```
 error PageNotFound ns - payload uri: str, statusCode: int, response: Response
@@ -398,8 +481,9 @@ IR (`ep-principal-core-ir`).
 
 The completion `propagate-error` carries the error identity value
 `{errorId NAME PAYLOAD}` -- two components, the name and the payload value
-(an anonymous struct value) -- or `{errorId NAME}` as before. `op-handle`
-compares names only and defines the handler's parameter from
+(an anonymous struct value) -- or `{errorId NAME}` as before, NAME the
+canonical identity (`a::Failed`). `op-handle` compares those names only --
+never a short name -- and defines the handler's parameter from
 `core::value::errorIdPayload`: no debug string is ever parsed.
 
 ### 24. Tcl compiler lowering
@@ -419,7 +503,10 @@ in the anonymous payload struct's slot order, beside the existing
 `declared_error` id; `declared_payload_shape` names the shape for rendering an
 uncaught one. A payload-free error leaves the slots empty. A failed
 coroutine caches `(RtError, id, payload, shape)` and restores the slots on
-every re-raise.
+every re-raise. The id is per canonical identity (`native::lower::ErrorId`
+over HIR's `errorDecls`): `a::Failed` and `b::Failed` have two ids whatever
+their shapes (`nerr-native-ids`), and an uncaught one renders its canonical
+name.
 
 ### 26. Native lowering
 
@@ -665,10 +752,11 @@ UNHANDLED-ERROR 19, TYPE 13, UNKNOWN-FIELD 11, MISSING-FIELD 5,
 MISSING-ERROR-PAYLOAD 4, UNEXPECTED-ERROR-PAYLOAD 3, NOT-A-STRUCT 2).
 
 The first campaign run found one disagreement, a program the model rejects
-(UNHANDLED-ERROR) and the compiler accepts: the pre-existing
-completion-analysis hole of point 63 (an untyped callable parameter), which
-the tree before the milestone shows with payload-free errors too. The
-fuzzer's `unhandled` fault now avoids that path; nothing else disagreed.
+(UNHANDLED-ERROR) and the compiler accepts: a completion-analysis hole (an
+untyped callable parameter) that the tree before this milestone showed with
+payload-free errors too. It is fixed (STATIC-COMPLETION-PROOFS.md, "Precision
+and the erased-callable contract"), and the `unhandled` fault covers the
+`generic` path again; see the campaigns below the table.
 The mutation run (point 52) also showed the fuzzer had no path through a
 handled call that handles a different error; it has one now (`partial`).
 
@@ -969,14 +1057,11 @@ unchanged: `lib/io.bot` `WriteFailed`; `lib/byte.bot` `BelowRange`,
 acceptance cases are the tests' own declarations); no API behavior and no
 existing diagnostic changed. Findings:
 
-* **Cross-module identity (item 59).** Error names are program-global
-  (EXPLICIT-ERROR-COMPLETIONS.md, "Flat, program-global error namespace"):
-  `http::PageNotFound` and `cache::PageNotFound` cannot both be declared; the
-  second declaration is rejected ("error "PageNotFound" is already declared
-  ..."). Nominal distinctness therefore holds by rejection, never by merging:
-  no two declarations ever share an identity, with or without payloads
-  (`ep-cross-module`). Module-qualified error names are a separate change of
-  the error namespace, not made here. A module's payload field types are
+* **Cross-module identity (item 59).** Error names were program-global when
+  this milestone landed: `http::PageNotFound` and `cache::PageNotFound`
+  could not both be declared. They can now ("Module-qualified error
+  identity" above): two identities, never merged, never interchangeable
+  (`ep-cross-module`, `tests/namespaced-errors.test`). A module's payload field types are
   qualified like its struct fields (`eppage::Meta`).
 * **Module initializers.** A module binding whose initializer reaches a
   payload-bearing `fail` stays retainable and context-free (the payload's
@@ -986,24 +1071,15 @@ existing diagnostic changed. Findings:
   initializer`).
 * **The brief's principal program** needed the two existing-rule adjustments
   of "The principal program" above.
-* **A pre-existing hole the fuzzer found: errors through an untyped callable
-  parameter.** A call through a parameter with no function type (`fn
-  call(f, k, v): f(k, v)`) contributes no errors to the completion
-  analysis's effective set (`hir/completions.tcl`'s `EvalCall` returns an
-  unknown range and merges nothing when the callee type is neither `Fn` nor
-  `Coroutine`). An exact callee analyzed under its arguments' facts
-  (`generic(k, v) -> int errors E1, E2: call(raise, k, v)`) therefore
-  reports no effective error, and a handled call of it that omits a handler
-  for `E1` is accepted instead of diagnosed UNHANDLED-ERROR; at run time the
-  error escapes as `uncaught propagated error: <error E1>`. The tree before
-  this milestone behaves identically with payload-free errors (the same
-  program, checked on both trees), so it is not a payload property and is
-  not changed here: identity dispatch still holds (no handler ever runs for
-  an error it does not name), only the static coverage check is incomplete.
-  The fix belongs to the completion analysis (fall back to the declared
-  contract once a body calls an untyped callable, as `EffectiveFacts` does
-  when its precision runs out). The fuzzer's `unhandled` fault avoids the
-  `generic` path until then.
+* **A hole the fuzzer found: errors through an untyped callable parameter
+  (fixed since).** A call through a parameter with no function type (`fn
+  call(f, k, v): f(k, v)`) contributed no errors to the completion
+  analysis's effective set, so a handled call omitting a possible error was
+  accepted and the error escaped at run time; payload-free errors behaved
+  the same. The completion analysis now charges such a call what the
+  callable passed in may raise and falls back to the declared contract when
+  it cannot tell (STATIC-COMPLETION-PROOFS.md, "Precision and the
+  erased-callable contract"; `tests/higher-order-completions.test`).
 
 ### 64. Future "CompileError" audit
 
@@ -1031,8 +1107,9 @@ needed; `compiler::assert_compiles` itself is not implemented.
 
 ### 65. Limitations before `compiler::assert_compiles`
 
-* Error names stay program-global (point 63): a `compiler` module declaring
-  `CompileError` reserves the name for every program that loads it.
+* (Resolved since: error names are module-qualified, so a `compiler` module
+  declaring `CompileError` no longer reserves the name for every program
+  that loads it -- `nerr-compiler-fixture`.)
 * A payload type cannot be spelled in a source annotation (the anonymous
   struct rule): a helper that takes a whole payload is untyped (specialized)
   or takes the fields it needs.
@@ -1138,6 +1215,7 @@ select an enum case.
 | `native/lower.tcl` | `PayloadFields`, `PayloadNeeded`, the handler's virtual payload |
 | `native/src/{nir.rs,codegen/clif.rs,codegen/roots.rs}`, `native/src/runtime/{vm,ops,coroutine,show,aot}.rs`, `native/src/main.rs` | NIR, code generation, payload slots, rendering |
 | `tests/error-payloads.test` | the milestone's tests |
+| `tests/namespaced-errors.test`, `tests/higher-order-completions.test` | module-qualified identity; completion soundness through untyped callables |
 | `audit/error-payloads/tools/fuzz.tcl` | the fuzzer and its independent model |
 | `audit/error-payloads/tools/mutate.tcl`, `mutants.txt` | mutation testing |
 | `bench/error-payloads.tcl` | the performance report |
@@ -1148,7 +1226,8 @@ If you change the error declaration or payload grammar, `hir/errordecls.tcl`,
 the `fail`/`handle` resolution, typing, affine flow or lowering in any
 backend, `errorId`, the native payload slots or `hir::warnings::FailSites`:
 `tests/error-payloads.test`, `tests/errors.test`, `tests/same-failure.test`,
-`tests/affine.test`, `tests/coroutines.test`,
+`tests/affine.test`, `tests/coroutines.test`, `tests/namespaced-errors.test`,
+`tests/higher-order-completions.test`,
 `audit/error-payloads/tools/fuzz.tcl` (several seeds, once with `-gc-stress
 1`), `audit/error-payloads/tools/mutate.tcl` (every mutant must still apply
 and be killed; update a mutant's text when you change the code it mutates,

@@ -209,7 +209,7 @@ context struct A:
 fn create() -> A:
     A {k: 1}
 
-fn emit(n: int, context c: A) -> int errors WriteFailed:
+fn emit(n: int, context c: A) -> int errors ct::out::WriteFailed:
     n + c.k
 }
 ct/b.bot {import ct::out
@@ -221,12 +221,12 @@ context struct B:
 fn create() -> B:
     B {k: 100}
 
-fn emit(n: int, context c: B) -> int errors WriteFailed:
+fn emit(n: int, context c: B) -> int errors ct::out::WriteFailed:
     n * c.k
 }
 ct/app.bot {import ct::out
 
-fn run(n: int) -> int errors WriteFailed:
+fn run(n: int) -> int errors ct::out::WriteFailed:
     ct::out::twice(n) + 1
 }
 ct/clock.bot {type Tick = Int in 0..1000
@@ -250,7 +250,7 @@ context struct Timed:
 fn create() -> Timed:
     Timed {k: 2}
 
-fn emit(n: int, context c: Timed) -> int errors WriteFailed:
+fn emit(n: int, context c: Timed) -> int errors ct::out::WriteFailed:
     n * c.k + ct::clock::now()
 }
 }
@@ -277,11 +277,11 @@ fn twice(n: int, context out: Out) -> int errors WriteFailed:
 # The program calling ct::app::run(5) after the installations INSTALLS
 # (lines), every ct module imported.
 proc selectionProgram {installs} {
-    set text "import ct::app\nimport ct::a\nimport ct::b\nimport ct::clock\nimport ct::timed\n\n"
+    set text "import ct::out\nimport ct::app\nimport ct::a\nimport ct::b\nimport ct::clock\nimport ct::timed\n\n"
     foreach line $installs {
         append text "with context $line\n"
     }
-    append text "r = ct::app::run(5):\n    on WriteFailed:\n        0\nr\n"
+    append text "r = ct::app::run(5):\n    on ct::out::WriteFailed:\n        0\nr\n"
     return $text
 }
 
@@ -361,7 +361,7 @@ context trait Out:
 cx/param.bot {import cx::out
 context struct C:
     k: bool
-fn emit(n: str, context c: C) -> int errors WriteFailed:
+fn emit(n: str, context c: C) -> int errors cx::out::WriteFailed:
     1
 }
 cx/result.bot {import cx::out
@@ -373,7 +373,7 @@ fn emit(n: int, context c: C) -> str:
 cx/errs.bot {import cx::out
 context struct C:
     k: bool
-fn emit(n: int, context c: C) -> int errors WriteFailed, Other:
+fn emit(n: int, context c: C) -> int errors cx::out::WriteFailed, cx::out::Other:
     1
 }
 cx/ctx.bot {import cx::out
@@ -439,25 +439,25 @@ test ct-explain-mismatches {why a context does not satisfy a context trait: a wr
         set s [hir::contexts::satisfiesTrait cx::${m}::C cx::out::Out]
         list $m [dict get $s ok] [dict get $s reason]
     }
-} -result {{param 0 {parameter 1 requires str, which does not admit the required int}} {result 0 {return type str does not satisfy required int}} {errs 0 {it may fail with Other, which the requirement's error contract [WriteFailed] does not admit}} {ctx 0 {the context parameter of cx::ctx::emit is cx::ctx::D, not cx::ctx::C: an implementation receives exactly the concrete context it implements}} {none 0 {cx::none::emit declares no context parameter: an implementation of a context-trait operation receives the context it implements as its one context parameter ("context NAME: C")}} {two 0 {cx::two::emit declares 2 context parameters (cx::two::C, cx::two::D): an implementation takes exactly one, the context cx::two::C it implements}} {missing 0 {no function cx::missing::emit exists: "emit" is not defined by module "cx::missing" (only the namespace that owns cx::missing::C implements its context-trait operations)}} {arity 0 {it takes 2 parameter(s), the requirement 1}} {undeclared 0 {cx::undeclared::emit declares no result type: satisfaction is decided from declarations, so an implementation of a requirement with a result must declare it ("-> int")}} {value 0 {cx::value::emit is not a function declaration (a value binding cannot implement a requirement)}} {flags 0 {cx::flags::emit declares flags (:loud): implementations with flags are not supported yet}} {fewer 1 {}}}
+} -result {{param 0 {parameter 1 requires str, which does not admit the required int}} {result 0 {return type str does not satisfy required int}} {errs 0 {it may fail with cx::out::Other, which the requirement's error contract [cx::out::WriteFailed] does not admit}} {ctx 0 {the context parameter of cx::ctx::emit is cx::ctx::D, not cx::ctx::C: an implementation receives exactly the concrete context it implements}} {none 0 {cx::none::emit declares no context parameter: an implementation of a context-trait operation receives the context it implements as its one context parameter ("context NAME: C")}} {two 0 {cx::two::emit declares 2 context parameters (cx::two::C, cx::two::D): an implementation takes exactly one, the context cx::two::C it implements}} {missing 0 {no function cx::missing::emit exists: "emit" is not defined by module "cx::missing" (only the namespace that owns cx::missing::C implements its context-trait operations)}} {arity 0 {it takes 2 parameter(s), the requirement 1}} {undeclared 0 {cx::undeclared::emit declares no result type: satisfaction is decided from declarations, so an implementation of a requirement with a result must declare it ("-> int")}} {value 0 {cx::value::emit is not a function declaration (a value binding cannot implement a requirement)}} {flags 0 {cx::flags::emit declares flags (:loud): implementations with flags are not supported yet}} {fewer 1 {}}}
 
 test ct-explain-text {explainTrait: the required and found signatures (the context section included) and the reason} -body {
     set hir [moduleHir $::brokenLib "import cx::param\n1\n"]
     regsub -all {\(declared at [^)]*\)|\(at [^)]*\)} [hir::contexts::explainTrait cx::param::C cx::out::Out $hir] {(at ...)}
 } -result {cx::param::C does not satisfy cx::out::Out
 required:
-    fn emit(int) -> int errors WriteFailed   (at ...)
+    fn emit(int) -> int errors cx::out::WriteFailed   (at ...)
 found:
-    fn cx::param::emit(str, context cx::param::C) -> int errors WriteFailed   (at ...)
+    fn cx::param::emit(str, context cx::param::C) -> int errors cx::out::WriteFailed   (at ...)
 parameter 1 requires str, which does not admit the required int}
 
 test ct-owner-only {only the context's owner implements: a function of the operation's name with the right signature in the calling program, or in an imported module, does not make a context satisfy the trait} -body {
     set files [concat $::brokenLib {cx/helper.bot {import cx::out
 import cx::missing
-fn emit(n: int, context c: cx::missing::C) -> int errors WriteFailed:
+fn emit(n: int, context c: cx::missing::C) -> int errors cx::out::WriteFailed:
     n
 }}]
-    list [moduleRejection $files "import cx::out\nimport cx::missing\nimport cx::helper\nimport type cx::out::Out\n\nfn emit(n: int, context c: cx::missing::C) -> int errors WriteFailed:\n    n\n\nfn use(context o: Out) -> int errors WriteFailed:\n    o.emit(1)\n\nwith context cx::missing::C {k: true}\nr = use():\n    on WriteFailed:\n        0\nr\n"]
+    list [moduleRejection $files "import cx::out\nimport cx::missing\nimport cx::helper\nimport type cx::out::Out\n\nfn emit(n: int, context c: cx::missing::C) -> int errors cx::out::WriteFailed:\n    n\n\nfn use(context o: Out) -> int errors cx::out::WriteFailed:\n    o.emit(1)\n\nwith context cx::missing::C {k: true}\nr = use():\n    on cx::out::WriteFailed:\n        0\nr\n"]
 } -result {{MISSING-CONTEXT {cx::out::Out is required by this call, but no installed context implements it (install one with "with context EXPR" before the call):
     use
         directly requires cx::out::Out
@@ -475,14 +475,14 @@ test ct-import-independence {adding imports to the calling program changes neith
 test ct-two-importers {two modules that import the same context and context trait get one satisfaction answer and one mapping (cached per compilation, owner-only); neither acquires implementation authority} -body {
     set files [concat $::ctLib {ct/m1.bot {import ct::out
 import ct::a
-fn one(n: int) -> int errors WriteFailed:
+fn one(n: int) -> int errors ct::out::WriteFailed:
     ct::out::twice(n)
 } ct/m2.bot {import ct::out
 import ct::a
-fn two(n: int) -> int errors WriteFailed:
+fn two(n: int) -> int errors ct::out::WriteFailed:
     ct::out::twice(n) * 10
 }}]
-    set value [moduleAgree $files "import ct::m1\nimport ct::m2\nimport ct::a\nfn both() -> List\[int\] errors WriteFailed:\n    \[ct::m1::one(1), ct::m2::two(1)\]\nwith context ct::a::create()\nr = both():\n    on WriteFailed:\n        \[\]\nr\n"]
+    set value [moduleAgree $files "import ct::out\nimport ct::m1\nimport ct::m2\nimport ct::a\nfn both() -> List\[int\] errors ct::out::WriteFailed:\n    \[ct::m1::one(1), ct::m2::two(1)\]\nwith context ct::a::create()\nr = both():\n    on ct::out::WriteFailed:\n        \[\]\nr\n"]
     set hir [moduleHir $files "import ct::m1\nimport ct::m2\nimport ct::a\n1\n"]
     set s [hir::contexts::satisfiesTrait ct::a::A ct::out::Out]
     list $value [lmap {r impl} [dict get $s impls] {list $r [dict get $impl unit] [dict get $impl name]}]
@@ -569,8 +569,8 @@ installed contexts:
     ct::clock::Clock (does not implement ct::out::Out: no function ct::clock::emit exists: "emit" is not defined by module "ct::clock" (only the namespace that owns ct::clock::Clock implements its context-trait operations))}
 
 test ct-source-position {selection reads the contexts installed at the call: a call before the installation is missing; a context installed after a call does not make that call ambiguous} -body {
-    set before "import ct::app\nimport ct::a\nimport ct::b\nr = ct::app::run(1):\n    on WriteFailed:\n        0\nwith context ct::a::create()\nr\n"
-    set after "import ct::app\nimport ct::a\nimport ct::b\nwith context ct::a::create()\nr = ct::app::run(1):\n    on WriteFailed:\n        0\nwith context ct::b::create()\nr\n"
+    set before "import ct::out\nimport ct::app\nimport ct::a\nimport ct::b\nr = ct::app::run(1):\n    on ct::out::WriteFailed:\n        0\nwith context ct::a::create()\nr\n"
+    set after "import ct::out\nimport ct::app\nimport ct::a\nimport ct::b\nwith context ct::a::create()\nr = ct::app::run(1):\n    on ct::out::WriteFailed:\n        0\nwith context ct::b::create()\nr\n"
     list [lindex [moduleRejection $::ctLib $before] 0] [moduleAgree $::ctLib $after]
 } -result {MISSING-CONTEXT {value 5}}
 
@@ -647,33 +647,33 @@ import ct::a
 import ct::named
 import type ct::out::Out
 
-fn countdown(n: int, context out: Out) -> int errors WriteFailed:
+fn countdown(n: int, context out: Out) -> int errors ct::out::WriteFailed:
     if n <= 0:
         return 0
-    fn step(m: int) -> int errors WriteFailed:
+    fn step(m: int) -> int errors ct::out::WriteFailed:
         out.emit(m)
     step(n) + countdown(n - 1)
 
-fn both(v: ct::named::Named, context out: Out) -> int errors WriteFailed:
+fn both(v: ct::named::Named, context out: Out) -> int errors ct::out::WriteFailed:
     out.emit(v.name())
 
-fn by_method(n: int) -> int errors WriteFailed:
+fn by_method(n: int) -> int errors ct::out::WriteFailed:
     n.countdown()
 
-fn all() -> List[int] errors WriteFailed:
+fn all() -> List[int] errors ct::out::WriteFailed:
     [countdown(3), both(ct::named::P {v: 40}), by_method(2)]
 
 with context ct::a::create()
 r = all():
-    on WriteFailed:
+    on ct::out::WriteFailed:
         []
 r
 }
 } -result {value {[9, 41, 5]}}
 
 test ct-exact-contexts-unchanged {an exact context parameter still requires exactly its nominal context: a function needing A is MISSING-CONTEXT under B even though B implements Out, and Out never satisfies an exact requirement} -body {
-    list [lindex [moduleRejection $::ctLib "import ct::a\nimport ct::b\nwith context ct::b::create()\nr = ct::a::emit(1):\n    on WriteFailed:\n        0\nr\n"] 1] \
-        [moduleAgree $::ctLib "import ct::a\nimport ct::b\nwith context ct::a::create()\nr = ct::a::emit(1):\n    on WriteFailed:\n        0\nr\n"]
+    list [lindex [moduleRejection $::ctLib "import ct::out\nimport ct::a\nimport ct::b\nwith context ct::b::create()\nr = ct::a::emit(1):\n    on ct::out::WriteFailed:\n        0\nr\n"] 1] \
+        [moduleAgree $::ctLib "import ct::out\nimport ct::a\nimport ct::b\nwith context ct::a::create()\nr = ct::a::emit(1):\n    on ct::out::WriteFailed:\n        0\nr\n"]
 } -result {{ct::a::A is required by this call but is not installed here (install it with "with context EXPR" before the call):
     ct::a::emit
         directly requires ct::a::A} {value 2}}
@@ -794,7 +794,7 @@ test ct-tooling {-contexts names the context trait, its bindings, the source fun
     list [lsearch -all -inline -regexp $summary {^(contexttrait|    emit|contextselect|    emit ->|contextclone)}] \
         [lsearch -all -inline -glob $summary {source-function ct::app::run *}] \
         [lsearch -all -inline -glob [split [hir::traits::report $hir] \n] {*context ct::* implement*}]
-} -match glob -result {{{contexttrait ct::out::Out} {    emit(n: int) -> int errors WriteFailed} {contexttraitparam e* out ct::out::Out} {contextselect e* ct::out::Out ct::a::A} {    emit -> ct::a::emit} {contextclone ct::out::twice<ct::out::Out=ct::a::A> ct::out::Out=ct::a::A} {contextclone ct::app::run<ct::out::Out=ct::a::A> ct::out::Out=ct::a::A}} {{source-function ct::app::run e* direct-contexts () required-contexts (ct::out::Out)}} {{    context ct::a::A implements ct::out::Out (emit -> ct::a::emit)} {    context ct::b::B implements ct::out::Out (emit -> ct::b::emit)} {    context ct::clock::Clock does not implement ct::out::Out: *} {    context ct::timed::Timed implements ct::out::Out (emit -> ct::timed::emit)}}}
+} -match glob -result {{{contexttrait ct::out::Out} {    emit(n: int) -> int errors ct::out::WriteFailed} {contexttraitparam e* out ct::out::Out} {contextselect e* ct::out::Out ct::a::A} {    emit -> ct::a::emit} {contextclone ct::out::twice<ct::out::Out=ct::a::A> ct::out::Out=ct::a::A} {contextclone ct::app::run<ct::out::Out=ct::a::A> ct::out::Out=ct::a::A}} {{source-function ct::app::run e* direct-contexts () required-contexts (ct::out::Out)}} {{    context ct::a::A implements ct::out::Out (emit -> ct::a::emit)} {    context ct::b::B implements ct::out::Out (emit -> ct::b::emit)} {    context ct::clock::Clock does not implement ct::out::Out: *} {    context ct::timed::Timed implements ct::out::Out (emit -> ct::timed::emit)}}}
 
 test ct-no-traits-unchanged {a program that declares no trait or context trait is built once, with no trait metadata} -body {
     set hir [surface::compile "fn f(n: int) -> int:\n    n + 1\nf(2)\n" -warnings off]

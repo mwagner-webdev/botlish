@@ -80,7 +80,7 @@ fn first_affected(tests: List[Test], changed?):
     fn is_affected?(test: Test):
         test.affected?(changed?)
     found = tests.find(is_affected?):
-        on NotFound:
+        on list::NotFound:
             Test {name: "<none>", dependencies: []}
     test_name(found)
 

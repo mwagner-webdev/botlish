@@ -52,6 +52,21 @@
 # faulty program is compiled with -strict 0 and must report the predicted
 # kind; a sound one must compile with no diagnostic at all.
 #
+# Every third program is *namespaced* (ERROR-PAYLOADS.md, "Module-qualified
+# error identity"): modules alpha, beta and gamma -- written to a private copy
+# of the library -- and the entry program each declare an error of the same
+# short name E: alpha's and beta's often with identical payloads, others with
+# different fields or none, and in every other such program gamma's payload
+# owns a coroutine. The identities are alpha::E, beta::E, gamma::E and the
+# entry program's bare E. Operations reach one of them directly, through a
+# declaring function, through the generic `call` (an untyped callable
+# parameter), or through the combined path -- a typed declaring function
+# passed through `call` into another declaring function -- and handle it with
+# its own handler beside handlers of same-short-name errors of other
+# namespaces, each answering its canonical name, so a handler run for the
+# wrong namespace shows. The fault `wrong-namespace` handles only other
+# namespaces' E (UNHANDLED-ERROR). The model keys by canonical identity.
+#
 # Every accepted program's value is compared on every backend of BACKENDS
 # with the model's; the Tcl backends also report how many coroutines are
 # still alive (0), and the native one how many it released (all of them)
@@ -68,6 +83,14 @@ foreach {option value} $argv {
 }
 set argv {}
 source [file join $root tests helpers.tcl]
+
+# A private copy of the library for the namespaced programs' modules (never
+# the real lib/), removed at exit.
+set ::fuzzLib [file tempdir botlish-ep-fuzz-lib]
+foreach entry [glob -directory $::core::libraryDir *] {
+    file copy $entry $::fuzzLib
+}
+set ::core::libraryDir $::fuzzLib
 
 proc LiveCoroutines {} {
     return [core::value::int [llength [info commands {::core::coroutines::co[0-9]*}]]]
@@ -149,6 +172,10 @@ proc FieldValue {name v} {
     }
 }
 
+# The fields a module's payload may have: the pool's fields of a type every
+# module sees (the entry program's enum and structs are not visible there).
+set ::moduleFields {code at uri flag items}
+
 proc FieldType {name} {
     return [lindex [dict get $::fieldPool $name] 0]
 }
@@ -213,6 +240,129 @@ proc Construction {name fields order} {
     return "fail $name {[join [lmap f $order {string cat $f ": " [FieldSource $f]}] {, }]}"
 }
 
+# ---------------------------------------------------------------------------
+# Namespaced programs: the modules and the entry program's own E
+
+# The namespaces of a namespaced program, "" for the entry program, each
+# declaring E: NS -> its fields ({} payload-free) or "affine".
+proc NsModules {affine} {
+    set modules [dict create]
+    set base [lrange [Shuffle $::moduleFields] 0 [Rand 2]]
+    dict set modules alpha $base
+    switch -- [Rand 3] {
+        0 - 1 { dict set modules beta $base }
+        2 { dict set modules beta [lrange [Shuffle $::moduleFields] 0 [Rand 3]] }
+    }
+    if {$affine && [Rand 2]} {
+        dict set modules gamma affine
+    } else {
+        dict set modules gamma [expr {[Rand 2] ? {} : [lrange [Shuffle $::moduleFields] 0 0]}]
+    }
+    dict set modules "" [expr {[Rand 2] ? {} : $base}]
+    return $modules
+}
+
+# The canonical identity of namespace NS's E.
+proc NsId {ns} {
+    return [expr {$ns eq "" ? "E" : "${ns}::E"}]
+}
+
+# The module file text of namespace NS (FIELDS its E's fields or "affine").
+proc ModuleText {ns fields} {
+    if {$fields eq "affine"} {
+        return "import coroutine\n\nstruct Message:\n    value: int\n\nstruct Event:\n    value: int\n\nerror E:\n    stream: Coroutine{args: \[Message\], return: Event}\n    bytesRead: int\n\nfn worker(seed: int, resume Message) -> Event:\n    message = yield Event {value: seed}\n    Event {value: message.value}\n\nfn make(seed: int) -> Coroutine{args: \[Message\], return: Event}:\n    coroutine {step} = worker(seed)\n    step\n\nfn use(s: Coroutine{args: \[Message\], return: Event}) -> int:\n    e = s(Message {value: 2})\n    e.value\n\nfn raise(k: int, v: int) -> int errors E:\n    s = make(v)\n    if k == 1:\n        fail E {stream: s, bytesRead: v}\n    e = s(Message {value: v})\n    e.value\n"
+    }
+    set text [ErrorDecl E $fields]
+    append text "fn raise(k: int, v: int) -> int errors E:\n    if k == 1:\n        [Construction E $fields [Shuffle $fields]]\n    v\n"
+    return $text
+}
+
+# The entry program's part of a namespaced program: its own E and raiser, and
+# per namespace a declaring function, a generic one through `call`, and the
+# combined one (the declaring function passed through `call`).
+proc NsDeclarations {state} {
+    set modules [dict get $state modules]
+    set text [ErrorDecl E [dict get $modules ""]]
+    set fields [dict get $modules ""]
+    append text "fn raise_own(k: int, v: int) -> int errors E:\n    if k == 1:\n        [Construction E $fields [Shuffle $fields]]\n    v\n\n"
+    foreach ns [dict keys $modules] {
+        set raiser [expr {$ns eq "" ? "raise_own" : "${ns}::raise"}]
+        set id [NsId $ns]
+        set tag [expr {$ns eq "" ? "own" : $ns}]
+        append text "fn via_$tag\(k: int, v: int) -> int errors $id:\n    $raiser\(k, v)\n\n"
+        append text "fn gen_$tag\(k: int, v: int) -> int errors $id:\n    call($raiser, k, v)\n\n"
+        append text "fn rejoin_$tag\(k: int, v: int) -> int errors $id:\n    call(via_$tag, k, v)\n\n"
+    }
+    return $text
+}
+
+# A namespaced operation NAME: the E of one namespace raised (k == 1) or not,
+# reached on one of four paths, handled by its own handler and by handlers of
+# other namespaces' E -- or, for the wrong-namespace fault, only by those.
+proc NsOperation {stateVar name v} {
+    upvar 1 $stateVar state
+    set modules [dict get $state modules]
+    set ns [Pick [dict keys $modules]]
+    set tag [expr {$ns eq "" ? "own" : $ns}]
+    set k [Rand 2]
+    set path [Pick {direct declaring generic combined}]
+    set callee [switch -- $path {
+        direct { expr {$ns eq "" ? "raise_own" : "${ns}::raise"} }
+        declaring { string cat via_ $tag }
+        generic { string cat gen_ $tag }
+        combined { string cat rejoin_ $tag }
+    }]
+    set text "fn $name\(zero: int):\n    r = $callee\(zero + $k, zero + $v):\n"
+    set others [lmap o [dict keys $modules] {expr {$o eq $ns ? [continue] : $o}}]
+    set handled [list $ns]
+    foreach o $others {
+        if {[Rand 2]} {
+            lappend handled $o
+        }
+    }
+    if {[dict get $state fault] eq "wrong-namespace" && ![dict exists $state faultDone]} {
+        set handled [lrange [Shuffle $others] 0 [Rand [llength $others]]]
+        dict set state faultDone 1
+        dict set state faultPath $path
+    }
+    set result [list int $v]
+    foreach h [Shuffle $handled] {
+        set id [NsId $h]
+        set fields [dict get $modules $h]
+        if {$fields eq "affine"} {
+            set t [list tag $id]
+            switch -- [Rand 3] {
+                0 {
+                    append text "        on $id:\n            return \[\"$id\"\]\n"
+                    set model [list list [list $t]]
+                }
+                1 {
+                    append text "        on $id d:\n            return \[\"$id\", d.bytesRead\]\n"
+                    set model [list list [list $t [list int $v]]]
+                }
+                2 {
+                    append text "        on $id {stream, bytesRead: b}:\n            return \[\"$id\", ${h}::use(stream) + b\]\n"
+                    set model [list list [list $t [list int [expr {2 + $v}]]]]
+                }
+            }
+        } else {
+            set payload [dict create]
+            foreach f $fields {
+                dict set payload $f [FieldValue $f $v]
+            }
+            lassign [Receive state $id $fields $payload] receive body model
+            append text "        on $id$receive:\n            $body\n"
+        }
+        if {$h eq $ns && $k == 1} {
+            set result $model
+        }
+    }
+    append text "    r\n\n"
+    dict lappend state lines $text
+    dict lappend state ops $name
+    dict lappend state expected $result
+}
+
 proc Declarations {stateVar} {
     upvar 1 $stateVar state
     set errors [dict get $state errors]
@@ -220,6 +370,9 @@ proc Declarations {stateVar} {
     set text "import list\nimport str\n"
     if {[dict get $state affine]} {
         append text "import coroutine\n"
+    }
+    if {[dict get $state ns]} {
+        append text "import alpha\nimport beta\nimport gamma\n"
     }
     append text "\nenum Kind:\n    A,\n    B,\n\nstruct Box:\n    n: int\n\nstruct Pair:\n    a: int\n    b: Box\n\n"
     foreach name [Shuffle $names] {
@@ -289,6 +442,9 @@ proc Declarations {stateVar} {
     # A handled call that handles one error itself and lets every other one
     # pass through it, identity and payload unchanged.
     append text "fn partial(k: int, v: int) -> int errors $all:\n    raise(k, v):\n        on [dict get $state local]:\n            v + 100\n\n"
+    if {[dict get $state ns]} {
+        append text [NsDeclarations $state]
+    }
     append text "fn only1(k: int, v: int) -> int errors E1:\n    if k == 1:\n        [Construction E1 [dict get $errors E1] [dict get $errors E1]]\n    v\n\n"
     # A translation: every error of raise becomes T.
     append text "fn translate(k: int, v: int) -> int errors T:\n    raise(k, v):\n"
@@ -378,6 +534,10 @@ proc Operation {stateVar} {
     set errors [dict get $state errors]
     set names [dict keys $errors]
     set v [Rand 10]
+    if {[dict get $state ns] && ([Rand 2] == 0
+            || ([dict get $state fault] eq "wrong-namespace" && ![dict exists $state faultDone]))} {
+        return [NsOperation state $name $v]
+    }
     if {[dict get $state affine] && [Rand 3] == 0} {
         return [AffineOperation state $name $v]
     }
@@ -500,14 +660,18 @@ set ::faults {
     use-after-move USE-AFTER-MOVE
     unhandled UNHANDLED-ERROR
     wrong-nominal UNHANDLED-ERROR
+    wrong-namespace UNHANDLED-ERROR
 }
 
 # The program text of generation NUMBER and the model's expectation: {value
 # RENDERED} or {error KIND}.
 proc Program {number} {
     set state [dict create errors [Errors] affine [expr {$number % 2}] fault "" \
-        lines {} ops {} expected {}]
+        lines {} ops {} expected {} ns [expr {$number % 3 == 2}] modules {}]
     dict set state local [Pick [dict keys [dict get $state errors]]]
+    if {[dict get $state ns]} {
+        dict set state modules [NsModules [dict get $state affine]]
+    }
     if {[Rand 3] == 0} {
         set fault [Pick [dict keys $::faults]]
         set fields [dict get $state errors E1]
@@ -516,6 +680,7 @@ proc Program {number} {
             unexpected-payload { expr {{} in [dict values [dict get $state errors]]} }
             missing-field - duplicate-field { expr {[llength $fields] >= 2 || $fault eq "duplicate-field"} }
             use-after-move { dict get $state affine }
+            wrong-namespace { dict get $state ns }
             nested-shape { expr {[lsearch -exact [lmap f [dict keys $::fieldPool] {FieldType $f}] int] >= 0} }
             default { expr 1 }
         }]
@@ -527,7 +692,7 @@ proc Program {number} {
     for {set i 0} {$i < $count} {incr i} {
         Operation state
     }
-    if {[dict get $state fault] in {unknown-destructured nested-shape unhandled wrong-nominal}
+    if {[dict get $state fault] in {unknown-destructured nested-shape unhandled wrong-nominal wrong-namespace}
             && ![dict exists $state faultDone]} {
         # The operations offered no place for it: a sound program after all.
         dict set state fault ""
@@ -537,11 +702,17 @@ proc Program {number} {
     set observed [lmap op [dict get $state ops] {string cat $op "(zero)"}]
     append text "fn drive(zero: int):\n    \[[join $observed {, }], test_fz_live()\]\n\ndrive(0)\n"
     set where [expr {[dict exists $state faultPath] ? "[dict get $state fault]/[dict get $state faultPath]" : ""}]
+    set files [dict create]
+    dict for {ns fields} [dict get $state modules] {
+        if {$ns ne ""} {
+            dict set files $ns.bot [ModuleText $ns $fields]
+        }
+    }
     if {[dict get $state fault] ne ""} {
-        return [list $text [list error [dict get $::faults [dict get $state fault]]] [dict get $state affine] $where]
+        return [list $text [list error [dict get $::faults [dict get $state fault]]] [dict get $state affine] $where $files]
     }
     set expected [concat [dict get $state expected] [list {int 0}]]
-    return [list $text [list value [Render [list list $expected]]] [dict get $state affine] $where]
+    return [list $text [list value [Render [list list $expected]]] [dict get $state affine] $where $files]
 }
 
 # ---------------------------------------------------------------------------
@@ -555,15 +726,26 @@ proc Run {} {
     set disagreements 0
     set observations 0
     set faultPaths [dict create]
+    set namespaced 0
     set nativeOk [expr {$::tcl_platform(os) eq "Linux" && $::tcl_platform(machine) in {x86_64 amd64}}]
     for {set p 0} {$p < [dict get $options -n]} {incr p} {
         set number [expr {[dict get $options -seed] + $p}]
         set ::seedState [expr {$number * 7919 + 17}]
-        lassign [Program $number] text expect affine where
+        lassign [Program $number] text expect affine where files
         if {$where ne ""} {
             dict incr faultPaths $where
         }
+        dict for {file content} $files {
+            set ch [open [file join $::core::libraryDir $file] w]
+            fconfigure $ch -encoding utf-8
+            puts -nonewline $ch $content
+            close $ch
+            incr namespaced
+        }
         if {[dict get $options -dump]} {
+            dict for {file content} $files {
+                puts "--- module $file\n$content"
+            }
             puts "--- program $number\n$text--- expect $expect"
         }
         set problem ""
@@ -636,10 +818,15 @@ proc Run {} {
         }
     }
     puts "accepted $accepted rejected $rejected ([join [lmap {c n} [lsort -stride 2 [dict get $codes]] {string cat "$c $n"}] {, }])"
-    puts "unhandled faults by path: [join [lmap {c n} [lsort -stride 2 $faultPaths] {string cat "[lindex [split $c /] 1] $n"}] {, }]"
+    puts "handler faults by path: [join [lmap {c n} [lsort -stride 2 $faultPaths] {string cat "$c $n"}] {, }]"
+    puts "namespaced programs: [expr {$namespaced / 3}] (modules alpha, beta, gamma)"
     puts "programs [dict get $options -n] disagreements $disagreements"
     return $disagreements
 }
 
-set status [Run]
+try {
+    set status [Run]
+} finally {
+    file delete -force $::fuzzLib
+}
 exit [expr {$status > 0 ? 1 : 0}]

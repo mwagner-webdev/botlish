@@ -6,8 +6,8 @@ import byte
 ns = [0 - 1, 45, 300]
 loop n in ns:
     b = byte::from_int(n):
-        on BelowRange:
+        on byte::BelowRange:
             0
-        on AboveRange:
+        on byte::AboveRange:
             0
     b

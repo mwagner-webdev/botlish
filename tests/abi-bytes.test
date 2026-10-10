@@ -425,7 +425,7 @@ fn doubled(s: str, k: int) -> str:
     else:
         doubled(str::concat(s, s), k - 1)
 
-fn out(fd: int, data: abi::bytes::Bytes) -> int errors AbiIntegerBelowRange, AbiIntegerAboveRange:
+fn out(fd: int, data: abi::bytes::Bytes) -> int errors abi::AbiIntegerBelowRange, abi::AbiIntegerAboveRange:
     linux::write(abi::i32(fd), data)
 }
 

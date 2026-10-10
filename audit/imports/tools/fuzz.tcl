@@ -209,9 +209,9 @@ fn twice_qualified(x: abi::U8):
     x.value * 2
 fn twice_free(n):
     x = abi::u8(n):
-        on AbiIntegerBelowRange:
+        on abi::AbiIntegerBelowRange:
             return -1
-        on AbiIntegerAboveRange:
+        on abi::AbiIntegerAboveRange:
             return -1
     twice_qualified(x)
 }

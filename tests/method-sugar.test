@@ -293,31 +293,31 @@ foreach {name method free expected} {
     imported-chain            {200.complement().high_nibble()}  {byte::high_nibble(byte::complement(200))}  {value 48}
     imported-error-capable   {fn conv(n):
     b = n.from_int():
-        on AboveRange:
+        on byte::AboveRange:
             0
-        on BelowRange:
+        on byte::BelowRange:
             1
     b
 [conv(200), conv(300), conv(0 - 5)]}  {fn conv(n):
     b = byte::from_int(n):
-        on AboveRange:
+        on byte::AboveRange:
             0
-        on BelowRange:
+        on byte::BelowRange:
             1
     b
 [conv(200), conv(300), conv(0 - 5)]}  {value {[200, 0, 1]}}
     higher-order             {d = [1, 2, 3].find(big):
-    on NotFound:
+    on list::NotFound:
         0
 d}  {d = list::find([1, 2, 3], big):
-    on NotFound:
+    on list::NotFound:
         0
 d}  {value 2}
     higher-order-not-found   {d = [0, 1].find(big):
-    on NotFound:
+    on list::NotFound:
         99
 d}  {d = list::find([0, 1], big):
-    on NotFound:
+    on list::NotFound:
         99
 d}  {value 99}
     aliased-module-function  {complement = byte::complement
@@ -325,11 +325,11 @@ d}  {value 99}
 complement(200)}  {value 55}
     aliased-higher-order     {find = list::find
 d = [1, 2, 3].find(big):
-    on NotFound:
+    on list::NotFound:
         0
 d}  {find = list::find
 d = find([1, 2, 3], big):
-    on NotFound:
+    on list::NotFound:
         0
 d}  {value 2}
 } {

@@ -3003,15 +3003,15 @@ proc hir::types::Call {hirVar ctxVar e} {
     # COMPLETIONS.md), for hir/errorsets.tcl. Only an exact, directly-known
     # callee (target {block ExprId}, or a root native whose registry entry
     # declares -errors: `argv`) or a structural one (its contract's declared
-    # errors) can ever be charged with a nonempty set here, and any other
-    # callee (an unresolved
-    # dynamic dispatch through any/a bare kind) is sound to treat as
-    # producing none, because hir/callables.tcl's escape audit (widened to
-    # cover an error-bearing block exactly like a typed-parameter-bearing
-    # one) already rejects every position that would let an error-bearing
-    # callable reach such a call erased of both its exact identity and its
-    # structural contract -- so a callee that reaches here with neither can
-    # never actually be one.
+    # errors) is charged with a nonempty set here; any other callee (an
+    # unresolved dynamic dispatch through any/a bare kind) is charged none at
+    # this type level. That is not a proof it raises nothing:
+    # hir/callables.tcl's escape audit rejects every erasure of an
+    # error-bearing callable except into an untyped parameter of a semantic
+    # instance (hir/semantic.tcl), so such a callee may be one after all.
+    # The completion analysis (hir/completions.tcl, "Precision and the
+    # erased-callable contract") and hir/affine.tcl's error edges charge what
+    # it may raise.
     set calleeErrors {}
     if {[lindex $target 0] eq "block"} {
         set calleeErrors [dict get $hir exprs [lindex $target 1] declaredErrors]
