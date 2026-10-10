@@ -669,6 +669,7 @@ set ::faults {
     wrong-namespace UNHANDLED-ERROR
 }
 if {[dict get $options -fault] ne "" && ![dict exists $::faults [dict get $options -fault]]} {
+    file delete -force $::fuzzLib
     error "fuzz.tcl: unknown fault [dict get $options -fault] (one of: [join [dict keys $::faults] {, }])"
 }
 
