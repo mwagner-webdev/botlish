@@ -48,9 +48,9 @@ where it lowered to `foreigncall`, `keepalive` (a runtime call), `structnew`
 call's return to the load of errno now executes 57 instructions -- the
 wrapper's comparison and branch, `errno()`'s entry, glibc's
 `__errno_location` and `errno()` again up to the load -- where it executed
-917, 545 of them in glibc's `malloc` (section 13). With an allocator that sets
-errno to 77 on every allocation, the old lowering's `read` reports errno 77;
-the new one reports the call's own (section 22).
+917, 545 of them in glibc, its `malloc` (sections 4 and 13). With an allocator
+that sets errno to 77 on every allocation, the old lowering's `read` reports
+errno 77; the new one reports the call's own (sections 15 to 17).
 
 What changed:
 
@@ -76,7 +76,7 @@ What changed:
   NIR and machine-code window detectors), tests/cffi/window-trace.c (a
   ptrace single-stepper), tests/cffi/errno-clobber.c (an allocator that
   changes errno), four errno functions in tests/cffi/fixture.c,
-  `cb-write-back-allocations`, `di-errno-allocator`, eleven mutants (ten
+  `cb-write-back-allocations`, `di-errno-allocator`, fourteen mutants (thirteen
   of the borrowing harness, one of Darwin IO's),
   bench/c-ffi-error-capture.tcl.
 
@@ -269,7 +269,7 @@ structs were out of scope by the brief and not needed.
 | `native/src/codegen/clif.rs`, `native/src/runtime/ops.rs`, `native/src/nir.rs` | `KeepAlive` emits nothing; `rt_keepalive` removed; the op's documentation |
 | `tests/c-ffi-error-capture.test`, `tests/cffi/window.tcl`, `tests/cffi/window-trace.c`, `tests/cffi/errno-clobber.c`, `tests/cffi/fixture.c` | the evidence (section 14) |
 | `tests/c-pointer-borrowing.test`, `tests/abi-bytes.test`, `tests/abi-mutable-bytes.test`, `tests/darwin-io.test` | the expectations that pinned the old window (`cb-nir-write`, `cb-exposure-after-arguments-nir`, `cb-allocations`, the four `*-keepalive-*` and machine-code tests, `di-errno-read-first`), `cb-write-back-allocations`, `di-errno-allocator` |
-| `audit/c-pointer-borrowing/tools/` | ten mutants, the new test file as a detector |
+| `audit/c-pointer-borrowing/tools/` | thirteen mutants, the new test file as a detector |
 | `audit/context-traits/tools/mutants.txt` | `darwin-errno-before-call` |
 | `audit/golden/migration/`, `tests/golden/manifest.tsv` | census rows of the new tests |
 | `bench/c-ffi-error-capture.tcl` | section 24 |
@@ -299,8 +299,9 @@ is exposed, kept alive by the keepalive, and is the write-back value's
 copy back. C's writes stay in it whatever the C result says: a failure
 after a partial write keeps the partial write (`ec-fixture-shapes`'s
 `fill(m, 2, 13, 0)`: errno 13, the four bytes written). Each written
-parameter has its own copy, also of one owner passed twice (`two(m, m, 6)`:
-seeds 1 and 2 in two buffers; mutant `write-back-shared-copy`); a read and a
+parameter has its own copy, also of one value passed twice (`two(m, m, 6)`:
+seeds 1 and 2 in two buffers; one binding passed twice, `bb-write-two-outputs`,
+kills mutant `write-back-shared-copy`); a read and a
 write exposure of one owner see the original and write the copy
 (`alias`); the caller's MutableBytes never changes (the shapes' last
 value: `00000000`).
@@ -345,15 +346,17 @@ keepalive -- the C call's own included -- and its slot is not reused before.
 that stack map entry in the CLIF of the syscall path (`ss0+8` in the
 syscall helper's `call`, on nativeFrameRoots hosts), and the borrow
 fixture's `read_reentrant`, which collects during the call, still reads its
-storage intact (`cb-liveness-reentrant`); the mutant
-`keepalive-not-a-use` (the root plan ignoring the keepalive's operand) is
-killed by them.
+storage intact (`cb-liveness-reentrant`, which kills the mutant
+`keepalive-not-a-use`: the root plan ignoring the keepalive's operand).
 
 A virtual write-back value is no object and no root; its fields are
 ordinary tagged registers, rooted by the same liveness as every register:
 the copy's storage stays a root while `r.buf` may still be read, exactly as
 the MutableBytes object holding it did. Nothing pins, nothing is
-registered, no write barrier exists or was added.
+registered, no write barrier exists or was added. (Mutant
+`write-back-copy-not-a-root`, the root plan never counting a write
+exposure's copy as a managed register, is killed by seven GC-stress tests,
+`ec-fixture-executable` among them.)
 
 ## 12. Before and after: NIR
 
@@ -493,20 +496,73 @@ under GC stress and with the errno-changing allocator, also both at once.
 
 ## 16. macOS C fixture results
 
-«macOS run»
+tests/c-ffi-error-capture.test on GitHub's macos-15 runners (Apple
+Silicon; macOS arm64 CI, section 27): the fixture built by Apple clang, the
+binding reading errno through libSystem's `__error()` (`ecErrnoSymbol`),
+EBADF and EISDIR the SDK's own (`ecErrnoFacts`' C probe). Every test runs
+there but `ec-trace` (ptrace: Linux only, constraint `ecTrace`):
+
+* `ec-fixture-shapes`, `ec-arguments-once`: the values of section 15, on
+  both native backends -- the same buffers, the same errnos in succession,
+  0 after a success that left a stale errno;
+* `ec-nir-windows`, `ec-nir-no-hazard`, `ec-nir-no-write-back-object`,
+  `ec-darwin-read-window`, and their positive control: `keepalive ilt`;
+* `ec-machine-window` on the Mach-O object (`objdump -dr`: each call named
+  by its Mach-O ARM64 relocation, the `_` prefix dropped): the windows hold
+  the BigInt paths at most, and
+  `errno()` calls only `__error` and then `rt_native_load`;
+  `ec-machine-positive-control` finds `rt_struct_new` in the `-struct-opt 0`
+  object;
+* `ec-fixture-executable`, `ec-real-read`, `ec-clobber-positive-control`:
+  the standalone executable with tests/cffi/errno-clobber.c inserted by
+  `DYLD_INSERT_LIBRARIES` (libSystem's allocator interposed through
+  `__DATA,__interpose`, setting errno to 77 after every allocation) prints
+  every errno right, also under GC stress; the `-struct-opt 0` executable
+  reads 77.
+
+Run 39690463966 (87e5d87, Tier C under `BOTLISH_NATIVE_GC_STRESS=1`, the
+test file hosted by interp and by compile): 14 passed, 1 skipped
+(`ecTrace`), 0 failed, both times. «macOS acceptance»
 
 ## 17. Darwin read errno results
 
-«macOS run»
+`darwin::read` is lib/darwin.bot's own code (section 2's reproducer),
+called through libSystem's `read(2)` on macOS. darwin-io.test:
+
+* `di-errno-read-first` (any host: macos-aarch64 NIR compiled on Linux, and
+  on macOS): the windows from each wrapper's `foreigncall` to its call of
+  `errno()` -- `darwin::write`, `read`, `open_with`, `open_mode` (behind
+  `create`, the variadic call) and `close` -- are `{keepalive ilt}
+  {keepalive ilt} {keepalive runbox rilt} {keepalive runbox rilt} {runbox
+  rilt}`; only read's changed (it held `structnew structnew structget`
+  before); `errno()` is one `foreigncall` of `__error` and one `op
+  nativeload`;
+* `di-errno` (Milestone 8's): ENOENT 2, EBADF 9, EEXIST 17, EISDIR 21 in
+  succession, successes between them reporting 0, twenty rounds, inside a
+  coroutine before and after a suspension, under GC stress, in the
+  executable and on both native backends -- `read(9999, ...)`'s errno is
+  `9`;
+* `di-errno-allocator` (new, macOS): the same program with the
+  errno-changing allocator interposed prints the same, also under GC
+  stress; the `-struct-opt 0` executable -- read's write-back value built
+  right after the call, the lowering before this milestone -- prints
+  `-1, 77` for that read, and only for read (`write`, `open` and `close`
+  never allocated there).
+
+Run 39690463966: darwin-io.test passed under GC stress on interp and
+compile (both its Tcl-hosted halves). «macOS acceptance darwin»
 
 ## 18. Multiple writable parameters and aliasing
 
 `two(m, m, 6)`: one owner passed to both written parameters of
 `bcf_fill2_errno` is two private copies -- C fills one from seed 1 and the
 other from seed 2 (`01264b70`, `02274c71`), and the call fails with errno 6
-after writing both; the window holds two keepalives and the comparison. With
-one copy shared (mutant `write-back-shared-copy`) both buffers read
-`02274c71` and the test fails. `alias(...)`: `bcf_reverse_errno(freeze(m),
+after writing both; the window holds two keepalives and the comparison.
+(`two` receives one value as two parameters, two registers. One binding
+passed twice -- one register -- is c-byte-borrowing.test's
+`bb-write-two-outputs`, `split(d, 8, m, m)`: two copies, neither seeing the
+other's writes; it kills the mutant that shares one copy per register,
+`write-back-shared-copy`.) `alias(...)`: `bcf_reverse_errno(freeze(m),
 n, m, 7)` reads the original `abcd` and writes the reversal into the copy:
 `dcba` in the write-back value, `abcd` still in `m`, errno 7. Write exposures
 are made after every argument, each with its own `mbytesclone`, and the
@@ -530,7 +586,39 @@ native backends, the executable, GC stress):
 
 ## 20. Coroutines and GC stress
 
-«GC stress results»
+Coroutines: the `suspended` shape holds a write-back value's fields in a
+coroutine frame across a `yield` and reads its buffer after the resume
+(`[33, 4034]`); c-byte-borrowing.test's `bb-coroutines` and
+c-pointer-borrowing.test's coroutine programs make exposures inside
+coroutine bodies. Root plans are NIR liveness and unchanged: a suspended frame's
+fields are roots like any register's.
+
+`BOTLISH_NATIVE_GC_STRESS=1` (a collection attempt at every allocation
+site), Linux x86-64, each file on its own (`-tmpdir` private):
+
+| test file | total | passed | skipped | failed |
+|---|---:|---:|---:|---:|
+| c-ffi-error-capture.test | 15 | 15 | 0 | 0 |
+| c-pointer-borrowing.test | 62 | 62 | 0 | 0 |
+| c-byte-borrowing.test | 20 | 19 | 1 (`guardMalloc`, macOS) | 0 |
+| c-ffi.test | 112 | 109 | 3 (`boringssl` 2, `appleAvailability` 1) | 0 |
+| coroutines.test | 81 | 81 | 0 | 0 |
+| affine.test | 48 | 48 | 0 | 0 |
+| abi-bytes.test | 73 | 73 | 0 | 0 |
+| abi-mutable-bytes.test | 76 | 76 | 0 | 0 |
+| value-transport.test | 64 | 64 | 0 | 0 |
+| struct-scalar-replacement.test | 84 | 84 | 0 | 0 |
+
+`cargo test --release --manifest-path native/Cargo.toml --lib`: 278 passed, 0
+failed, also under GC stress. The executables
+under GC stress: `ec-fixture-executable` (also with the errno-changing
+allocator at once), `di-errno`, `di-errno-allocator`, `bb-gc-stress`,
+`bb-system-library-gc-stress`. On macOS, run 39690463966 ran
+c-ffi-error-capture, darwin-io, c-byte-borrowing, c-pointer-borrowing,
+c-ffi, coroutines, affine, abi-mutable-bytes and workload-2048 under GC
+stress, hosted by interp and by compile: 452 tests each, 418 passed, 34
+skipped (host constraints: `linuxX86_64` 15, `nativeLinux` 15, `boringssl`
+2, `ecTrace` 1, `tclLibrary` 1), 0 failed.
 
 ## 21. HIR interchange and native backend regression
 
@@ -567,24 +655,61 @@ semantic and GC-stress ones for values and lifetimes:
 
 | the brief's mutation | mutant | kind | killed by |
 |---|---|---|---|
-| eager outer write-back `structnew` | `write-back-not-a-construction` | window | «k1» |
-| eager inner MutableBytes wrapper | `write-back-buffer-eager` | window | «k2» |
-| an allocator or runtime helper after the C call, before the capture | `allocation-after-c-call`, `keepalive-is-a-call` | window | «k3» |
-| only the success path materialized lazily, the failure path eager | `write-back-failure-path-eager` (new) | window | «k4» |
-| a detached buffer dropped from the scalar result | `opened-buffer-not-built` (handed on as storage, never built) | value | «k5» |
-| the original owner returned instead of the detached one | `copy-back-omitted` (existing) | value | «k6» |
-| one detached owner reused for two written parameters | `write-back-shared-copy` | value | «k7» |
-| a required keepalive dropped | `owner-liveness-dropped`, `keepalive-first-only` (existing), `keepalive-not-a-use` | lifetime | «k8» |
-| a managed root lost when the aggregate is scalarized | `write-back-copy-not-a-root` (new) | lifetime | «k9» |
-| materialization omitted where the value escapes | `opened-buffer-not-built` | value | «k5» |
-| the raw C failure result changed while unboxing | `write-back-result-changed` | value | «k10» |
+| eager outer write-back `structnew` | `write-back-not-a-construction` | window | 13 tests, among them `ec-darwin-read-window`, `ec-clobber-positive-control` (the allocator), `cb-nir-write`, `cb-allocations`, `cb-write-back-allocations`, `cb-exposure-after-arguments-nir` |
+| eager inner MutableBytes wrapper | `write-back-buffer-eager` | window | 10 tests, among them `ec-nir-no-hazard`, `ec-darwin-read-window`, `ec-machine-window`, `ec-fixture-executable`, `ec-clobber-positive-control`, `cb-write-back-allocations` |
+| an allocator or runtime helper after the C call, before the capture | `allocation-after-c-call`, `keepalive-is-a-call` | window | 15 tests, among them `cb-nir-read`, `cb-nir-write`, `cb-allocations`, `cb-exposure-after-arguments-nir`; and 2 (`ec-machine-window`, `ec-trace`: the call is invisible in NIR, where `keepalive` is unchanged) |
+| only the success path materialized lazily, the failure path eager | `write-back-failure-path-eager` (new) | window | 9 tests, among them `ec-nir-no-hazard`, `ec-nir-no-write-back-object`, `ec-darwin-read-window`, `ec-machine-window`, `ec-fixture-executable`, `ec-clobber-positive-control` |
+| a detached buffer dropped from the scalar result | `opened-buffer-not-built` (handed on as storage, never built) | value | 21 tests, among them `bb-read-write-one-owner`, `bb-write-chain`, `bb-write-failure-sentinel`, `bb-gc-stress` |
+| the original owner returned instead of the detached one | `copy-back-omitted` (existing) | value | 28 tests |
+| one detached owner reused for two written parameters | `write-back-shared-copy` | value | 1 test: `bb-write-two-outputs` (one binding passed twice) |
+| a required keepalive dropped | `owner-liveness-dropped`, `keepalive-first-only` (existing), `keepalive-not-a-use` | lifetime | 10, 3 (`ec-nir-windows`, `ec-nir-positive-control`, `cb-exposure-after-arguments-nir`) and 1 (`cb-liveness-reentrant`) tests |
+| a managed root lost when the aggregate is scalarized | `write-back-copy-not-a-root` (new) | lifetime | 7 tests, among them the GC-stress ones: `bb-gc-stress`, `bb-system-library-gc-stress`, `cb-failure-gc-stress`, `cb-gc-stress-programs`, `ec-fixture-executable` |
+| materialization omitted where the value escapes | `opened-buffer-not-built` | value | 21 tests, among them `bb-read-write-one-owner`, `bb-write-chain`, `bb-write-failure-sentinel`, `bb-gc-stress` |
+| the raw C failure result changed while unboxing | `write-back-result-changed` | value | 43 tests |
 | errno read before the C call | `darwin-errno-before-call` (context-traits) | value (macOS) | «k11» |
-| errno read after an unrelated call | `darwin-errno-after-another-call` (existing), `allocation-after-c-call` | value, window | «k12» |
-| an argument evaluated twice | `write-back-argument-twice` | value | «k13» |
-| the foreign call reordered with the program's own operations | `detach-before-later-arguments` (new) | order | «k14» |
-| (performance) a buffer built once per iteration | `write-back-buffer-built-per-iteration` | allocation | «k15» |
+| errno read after an unrelated call | `darwin-errno-after-another-call` (existing), `allocation-after-c-call` | value, window | «k12» (macOS); 15 tests |
+| an argument evaluated twice | `write-back-argument-twice` | value | 3 tests: `ec-arguments-once`, `cb-exposure-after-arguments`, `cb-exposure-after-arguments-nir` |
+| the foreign call reordered with the program's own operations | `detach-before-later-arguments` (new) | order | 1 test: `cb-exposure-after-arguments-nir` (no value changes: arguments cannot reach the owner, a value) |
+| (performance) a buffer built once per iteration | `write-back-buffer-built-per-iteration` | allocation | 1 test: `cb-write-back-allocations` (no value changes) |
 
-«mutation run»
+The runs (Linux x86-64, this container, d152dfe's tree):
+
+| harness | mutants | killed | survived | skipped |
+|---|---:|---:|---:|---:|
+| `audit/c-pointer-borrowing/tools/mutate.tcl` (all) | 43 | 42 | 0 | 1 (`apple-exposure-tagged`: macos-aarch64 only, section 27) |
+| `audit/c-ffi/tools/mutate.tcl`, the six of `native/lower.tcl`'s foreign-call lowering (`argument-after-exposure`, `keepalive-dropped`, `original-mutablebytes-mutated`, `read-bytes-copied`, `botlish-name-as-symbol`, `va-trailing-classes-reversed`) | 6 | 6 | 0 | 0 |
+| `audit/abi-bytes/tools/mutate.tcl -only no-keepalive` | 1 | 1 (10 liveness tests) | 0 | 0 |
+| `audit/mutable-bytes/tools/mutate.tcl -only no-keepalive` | 1 | 1 (10 liveness tests) | 0 | 0 |
+| `audit/context-traits/tools/mutate.tcl -only darwin-*` (macOS, tier item `darwin-io-mutants`) | «darwin mutants» | | | |
+
+The borrowing harness's 30 earlier mutants still apply to the changed code;
+the 29 this host runs are still killed (the 30th is `apple-exposure-tagged`).
+(The harness names at most six of a mutant's failing tests; "among them"
+lists those.) No native mutant failed to build. The
+borrowing fuzzer (15 programs of every owner, contract and pointee kind on
+every backend) killed none of the new mutants: its programs read no errno
+and compare values, which every window mutant keeps; the structural
+detectors kill them.
+
+The fuzzers on their own, against the changed lowering:
+`audit/c-pointer-borrowing/tools/fuzz.tcl` -n 20, seeds 1, 2 and 3 (160
+cases each; 72, 85 and 84 refused by the model and the compiler alike), and
+-n 15 -seed 9 under GC stress: 0 disagreements;
+`audit/c-ffi/tools/fuzz.tcl` -n 10, seeds 1 and 2 (120 functions each, 43
+and 32 variadic), and -n 8 -seed 5 under GC stress: 0 disagreements.
+
+Correctness and optimization mutants are kept apart. The window mutants
+(`write-back-not-a-construction`, `write-back-buffer-eager`,
+`allocation-after-c-call`, `keepalive-is-a-call`,
+`write-back-failure-path-eager`) change no value: only the structural
+detectors -- NIR, machine code, the single-step trace -- and the
+errno-changing allocator see them, and the allocator turns each into a
+wrong errno, a correctness failure. `write-back-buffer-built-per-iteration`
+is an optimization mutant (an allocation per iteration, no value or window
+change); `cb-write-back-allocations` kills it. `detach-before-later-
+arguments` is an ordering mutant with no value change either (arguments
+cannot reach an owner, which is a value); `cb-exposure-after-arguments-nir`
+kills it. No mutant was found equivalent.
 
 ## 23. Allocation counts
 
@@ -608,7 +733,51 @@ lowering built two objects whenever the value was used (`cb-allocations`:
 
 ## 24. Performance
 
-«bench»
+The milestone is about correctness; this is what the representation change
+costs or saves. `bench/c-ffi-error-capture.tcl` (tier item
+`c-capture-bench` on macOS), run on this tree (87e5d87) and, with `-root`,
+on a checkout of 8c29f7e (the commit before the milestone) with its own
+native build; the same programs, one after the other on an otherwise idle
+4-core Linux x86-64 container. Times are the best of 5 runs (in-process:
+20000 calls; executables: 5 processes of 100000 iterations), minus the same
+loop without the call.
+
+In process, cranelift, the borrow fixture's write exposure of a 64-byte
+buffer:
+
+| shape | before, ns | after, ns | heap objects per call before {MutableBytes Struct} | after |
+|---|---:|---:|---|---|
+| discarded (a statement) | 49.4 | 56.9 | 1 0 | 1 0 |
+| the C result alone (`mixed(...).result`) | 218.3 | 37.5 | 1 2 | 1 0 |
+| the result and the buffer read whole | 293.8 | 135.7 | 1 2 | 1 1 |
+| returned from a function, the buffer read by the caller | 207.5 | 130.2 | 1 2 | 1 1 |
+| detach of a 64 KiB buffer, discarded | 2334.5 | 2258.6 | 1 0 | 1 0 |
+
+The MutableBytes column is the detach, the private copy value semantics
+requires; it stays, and dominates a large buffer (the last row: the copy is
+the cost, before and after). The Struct column is the write-back struct and
+the MutableBytes wrapper of the written copy: two objects before whenever
+the value was used, now none for the status alone and one -- the wrapper,
+at the use that reads the buffer whole -- otherwise. The discarded call
+built nothing before either (`discarded` lowering); its difference is
+noise.
+
+A standalone executable looping over the C library's `read(2)` through a
+write exposure and an errno read on failure (`darwin::read`'s shape over
+glibc), per iteration:
+
+| | before, ns | after, ns |
+|---|---:|---:|
+| 64 bytes from /dev/zero | 516.0 | 312.6 |
+| EBADF (a closed descriptor), 64-byte buffer | 464.0 | 262.2 |
+| 64 KiB from /dev/zero | 7285.3 | 7004.2 |
+
+About 200 ns per call less wherever the value was used: two allocations
+(each a `malloc`, a GC accounting step and a safepoint) and the
+`rt_keepalive` call. (Compile time was not measured separately; the
+analysis adds one construction kind to escape analysis's existing classes.)
+
+«macOS bench»
 
 ## 25. Linux x86-64 CI
 
