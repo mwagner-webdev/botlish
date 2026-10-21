@@ -475,7 +475,11 @@ Admission failures name what is missing, with the refined spelling:
 The same clause (`hir::range::LengthClause`) follows argument, field,
 payload, result, structural-call and layout-write messages, which show the
 argument's type with its refinement (`ShownArgType`) whenever the expected
-type mentions one. Parameter problems are REFINEMENT-PARAMETER (`List[T]'s
+type mentions one. Any other message that shows a value's type shows it
+without the lengths inference minted (`hir::types::showValue`): a List is
+no struct, and no C scalar, whatever its length, and `cannot project field
+"a" from a value of type List[int]` reads as it always did. Parameter
+problems are REFINEMENT-PARAMETER (`List[T]'s
 "length" must be at least 0, not -1`; `"size" is not a parameter of
 List[T] (its parameters: length)`; `"MutableVector" has no scalar
 refinements`). A misused validator is TYPE (`list::with_length checks a
@@ -654,7 +658,11 @@ and 3 report two layout pairs taking different rounds (no failure).
 **CI.** The batched-against-sequential comparison of the golden suites'
 static decisions runs in CI only (`static-decisions.yml`, dispatched on
 this branch), as do the Linux arm64 workflow, the full Tcl and golden
-suites with duplicates (`tests.yml`) and the macOS tiers: CI-STATUS.
+suites with duplicates (`tests.yml`) and the macOS tiers. `tests.yml`,
+`tests-arm64.yml` and `static-decisions.yml`, dispatched on the branch,
+passed (no batched/sequential disagreement); the commits after the one
+they ran change only tests, audits and documents. The macOS arm64
+workflow (Tier A smoke, Tier B acceptance) passed on the branch's pushes.
 
 ## 19. Performance
 
