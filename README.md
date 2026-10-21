@@ -6,7 +6,7 @@
 
 <br />
 
-<img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=600&size=20&pause=1400&color=0891b2&center=true&vCenter=true&width=900&lines=Reads+like+a+scripting+language.;The+compiler+explains+the language.;Every+error+is+explicitly+handled+unless+proven+not+to+occur.;Every+dependency+is+explicit,+including+I/O+and+time.;Compiles+to+fast+native+code.;Actor-like+concurrency+model,+no+borrow+checker.;Runs+everywhere,+but+adopts+to+local+conventions." alt="Reads like a scripting language. The compiler explains the language. Every error is explicitly handled unless proven not to occur. Every dependency is explicit, including I/O and time. Compiles to fast native code. Actor-like concurrency model, no borrow checker. Runs everywhere, but adopts to local conventions." />
+<img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=600&size=20&pause=1400&color=0891b2&center=true&vCenter=true&width=900&lines=Reads+like+a+scripting+language.;The+compiler+explains+the+language.;Every+error+is+explicitly+handled+unless+proven+not+to+occur.;Every+dependency+is+explicit,+including+I/O+and+time.;Compiles+to+fast+native+code.;Actor-like+concurrency+model,+no+borrow+checker.;Runs+everywhere,+but+adopts+to+local+conventions." alt="Reads like a scripting language. The compiler explains the language. Every error is explicitly handled unless proven not to occur. Every dependency is explicit, including I/O and time. Compiles to fast native code. Actor-like concurrency model, no borrow checker. Runs everywhere, but adopts to local conventions." />
 
 <br />
 
