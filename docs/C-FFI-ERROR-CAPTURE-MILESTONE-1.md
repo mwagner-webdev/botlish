@@ -793,7 +793,20 @@ analysis adds one construction kind to escape analysis's existing classes.)
 
 ## 28. Windows
 
-«windows-x86_64.yml»
+C calls are refused on Windows (`C_CALLS`, WINDOWS-X86-64-MILESTONE-1.md),
+so the fixture tests skip there (`ecFixture`, `bbFixture` need
+`nativeCCalls`); every test file still runs in Windows' acceptance tier
+(its `notYetByHost` list is empty). What this milestone changes on Windows
+is shared code: the escape analysis and lowering of every write exposure,
+`op keepalive`'s codegen, and the root plan's use of it under Windows'
+fallback root plan (shadow stack, no frame walk).
+
+[39690455043](https://github.com/mwagner-webdev/botlish/actions/runs/39690455043)
+(87e5d87, push; windows-2025, MSVC): every job passed -- smoke (the native
+Rust unit tests, native-status, the COFF/PE checks, the GC workloads and
+the census's programs under GC stress, the 2048 executable, dumpbin, the
+smoke tier and the Windows-relevant test files) and the acceptance tier in
+four shards.
 
 ## 29. Known limits of the guarantee
 

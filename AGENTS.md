@@ -2051,14 +2051,18 @@ call's result conversion or what errno() lowers to, run
 `tests/c-ffi-error-capture.test` (its machine-code tests read the object
 file with `objdump`; its trace needs Linux and ptrace),
 `tests/c-pointer-borrowing.test`, `tests/c-byte-borrowing.test`,
-`tests/darwin-io.test` (its `di-errno-allocator` on macOS: a branch push
-with `CI-Tests: darwin-io.test c-ffi-error-capture.test`), all also under
-`BOTLISH_NATIVE_GC_STRESS=1`, the struct and transport tests
-(`tests/struct-scalar-replacement.test`, `tests/value-transport.test`) and
-`audit/c-pointer-borrowing/tools/mutate.tcl` (its error-capture mutants are
-killed by tests/c-ffi-error-capture.test, which it runs).
-`bench/c-ffi-error-capture.tcl` (`-root DIR` for a baseline checkout) is
-the performance report.
+`tests/darwin-io.test` (its `di-errno-allocator` runs on macOS: the
+acceptance tier of every branch push, and under GC stress a `[ci-full]`
+push with `CI-Tests: darwin-io.test c-ffi-error-capture.test`), all also
+under `BOTLISH_NATIVE_GC_STRESS=1`, the struct and transport tests
+(`tests/struct-scalar-replacement.test`, `tests/value-transport.test`),
+`audit/c-pointer-borrowing/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed: update a mutant's text when
+you change the code it mutates, keeping it a mutant of the same rule; its
+error-capture mutants are killed by tests/c-ffi-error-capture.test, which
+it runs) and the `native/lower.tcl` mutants of `audit/c-ffi/tools/mutate.tcl`.
+`bench/c-ffi-error-capture.tcl` (`-root DIR` for a baseline checkout; the
+tier item `c-capture-bench` on macOS) is the performance report.
 
 ## C floating types (ffi::c::Float, ffi::c::Double)
 
