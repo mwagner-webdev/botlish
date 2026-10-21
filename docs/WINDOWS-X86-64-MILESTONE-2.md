@@ -205,8 +205,9 @@ prototype), and compare both with the model:
 | `cf-scalar-values`, `cf-abi-classes-follow-the-target`, `cf-pointer-width` | every C integer scalar at its bounds both ways, with LLP64's widths (`long` 32 bits); a pointer crosses with all 64 bits |
 | `cf-va-win64-refused` (new) | a variadic C call is a codegen error, from the CLIF listing, a linked run and an executable alike; the front end takes the program |
 
-**Real Windows** (run 39614972492, smoke job 119273457148): every `cf-abi-*`
-test passed against the MSVC-built fixture on both Tcl backends' runs.
+**Real Windows** (runs 39614972492 and 39620727769): every `cf-abi-*` test
+passed against the MSVC-built fixture, in the smoke tier's interp and
+compile passes and the acceptance tier.
 
 ## 3. MSVC linking, the C runtime, diagnostics
 
@@ -366,7 +367,7 @@ Windows splitter: every vector comes back. `launch_refuses_...` checks the
 refusals; `argv_windows_wtf8_decodes_back_to_its_units` the encoding's
 round trip.
 
-**Real Windows** (argv.test, run 39614972492):
+**Real Windows** (argv.test, runs 39614972492 and 39620727769):
 
 | test | shows |
 |---|---|
@@ -586,7 +587,51 @@ cargo test --release --manifest-path native/Cargo.toml --lib --bins
 
 ### 7.3 Results on Windows
 
-PENDING
+Two runs of the workflow on this branch (`windows-2025`, MSVC 14.51,
+`x86_64-pc-windows-msvc`):
+
+**Run [39614972492](https://github.com/mwagner-webdev/botlish/actions/runs/39614972492)
+(cba59cb), the first.** Native status, the Windows I/O step, GC
+workloads, dumpbin: green on the first run. It found what Linux could not:
+
+| found | cause | fix |
+|---|---|---|
+| aot-facts `crt-library-md`: LNK2019 `__imp_strtol` | a `/MD` static library does not link into a static-runtime executable (section 3.3) | the policy states it; NATIVE LINK explains `__imp_` (`link_hint`); the check expects the refusal |
+| five `wi-*` injector tests: `{14 5 0\r}` | the injector's log was opened in text mode (CRLF) | `fopen(log, "wb")`; every value, output and WriteFile sequence was already as predicted |
+| `cf-undefined-symbol` | link.exe reports an undefined C symbol as LNK2001 | accept LNK2001 or LNK2019 |
+| `cf-stub-linker` | the plan names `botlish_cffi_fixture.lib`, not `-l...` | the host's spelling (`linkedName`) |
+| `cf-wrong-architecture` | the message's own first line names `NAME.lib` too | search the linker's lines only |
+| `cfl-c-register-exhaustion` | a `long` argument of -1234567890123: no 32-bit `long` holds it | a value every target's `long` holds; `long long` carries the 64-bit one |
+| `cfl-c-variadic-fixed-floats` | a variadic C call | `nativeCVariadics` |
+| `bb-refusals` | message trimming stopped at the drive letter's colon | trim to the location's `:LINE:COLUMN:` |
+| `tm-os-named-module-is-no-platform` | its scratch module `windows` is now a platform's | `win32` |
+| c-bindgen.test's generated-fixture runs | the fixture has no MSVC binding (out of scope) | `fixtureHostBinding` |
+| `ht-coroutine-protocols` (from main) | native coroutines | `nativeCoroutines` |
+
+(The last two were found by the acceptance shards; `traits.test`'s
+`windows` scratch module, renamed `winpath`, by the Linux suite.)
+
+**Run [39620727769](https://github.com/mwagner-webdev/botlish/actions/runs/39620727769)
+(b6f5e86): every job green.**
+
+| job | result |
+|---|---|
+| Rust unit tests | lib 253 passed, driver 63 passed (the host-specific ones of Linux and macOS excluded by cfg) |
+| C ABI facts | core::cabi's windows-x86_64 row agrees with clang's MSVC target |
+| native status | every probe as recorded (section 7.1) |
+| aot-facts | every check ok: the COFF object, the PE executable, C calls, link.exe's command line, LNK1181, LNK2001/LNK1120, `crt-library-mt`, `crt-library-md` (refused, LNK4217 for 3 symbols, LNK2019 for the rest, the explanation), `crt-dll-mt`, `crt-dll-md` |
+| GC workloads | 133 runs, 0 failed |
+| Windows I/O step | hello: file, pipe, cmd, PowerShell byte-identical to `Hello, world!\nunit\n`; the demo 851 bytes, 37 lines, GC stress identical |
+| smoke tier and the Windows-relevant files | 880 tests on interp: 830 passed, 50 skipped, 0 failed; on compile: 826, 54, 0 |
+| acceptance, 4 shards | 208 Tcl test files on interp: 8795 tests, 8356 passed, 439 skipped, 0 failed; 101 golden suites (on interp and compile; the native backends excluded by the golden runner, a coroutine) |
+
+The smoke tier's skips, by constraint: `nativeCVariadics` 15,
+`bashLauncher` 13, `nativeCoroutines` 5, `boringssl` 2,
+`dynamicSystemCLibrary` 2, `nativeLinux` 2, `nativeStackGuard` 2, and one
+each `appleAvailability`, `darwinIO`, `guardMalloc`, `linuxX86_64`,
+`pythonLauncher`, `tclLibrary`, `unix`, `unixShell`, `x86_64Host`: every one
+a capability Windows does not have or a host-specific tool, none a
+Windows I/O or C FFI test that could run.
 
 ### 7.4 Linux and macOS
 
