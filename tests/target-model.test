@@ -268,19 +268,19 @@ test tm-architecture-specific-module-on-macos {an architecture-specific namespac
     }
 } -cleanup {unset -nocomplain arch name channel target hir} -result {{macos-aarch64 {"AArch64"}} {macos-x86_64 {"x86-64"}}}
 
-test tm-os-named-module-is-no-platform {only designated namespace trees are a platform's (core/cabi.tcl's platforms: linux and darwin): a standard module that happens to be named like an operating system (a private library's windows and macos) is no platform's, and compiles for every target} -body {
+test tm-os-named-module-is-no-platform {only designated namespace trees are a platform's (core/cabi.tcl's platforms: linux, darwin and windows): a standard module that happens to be named like an operating system (a private library's win32 and macos) is no platform's, and compiles for every target} -body {
     withPrivateLibrary {
-        foreach name {windows macos} {
+        foreach name {win32 macos} {
             set channel [open [file join $::core::libraryDir $name.bot] w]
             puts -nonewline $channel "fn name() -> str:\n    \"$name\"\n"
             close $channel
         }
         lmap target {linux-x86_64 macos-aarch64 windows-x86_64} {
-            set hir [tmHir "import windows\nimport macos\n\[windows::name(), macos::name()\]\n" $target]
+            set hir [tmHir "import win32\nimport macos\n\[win32::name(), macos::name()\]\n" $target]
             list [hir::cabi::targetOf $hir] [lindex [outcomeUnderHir interp $hir] 1]
         }
     }
-} -cleanup {unset -nocomplain name channel target hir} -result {{{} {["windows", "macos"]}} {{} {["windows", "macos"]}} {{} {["windows", "macos"]}}}
+} -cleanup {unset -nocomplain name channel target hir} -result {{{} {["win32", "macos"]}} {{} {["win32", "macos"]}} {{} {["win32", "macos"]}}}
 
 test tm-application-module-named-linux {an application module is the application's whatever its name: an application file linux/tool.bot (namespace linux::tool, no standard one) compiles for macos-aarch64; only standard namespaces are a platform's} -body {
     set main [tmFile main.bot "import linux::tool\nlinux::tool::value()\n"]
