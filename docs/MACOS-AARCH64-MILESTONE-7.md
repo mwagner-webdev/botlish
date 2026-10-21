@@ -248,6 +248,20 @@ tests run on every host as before.
   after every argument, so an argument's allocation or yield never runs
   while an exposure is open (`cb-exposure-after-arguments`, now on macOS).
 
+Whole files under GC stress on macOS: Tier C of macOS run
+[39585147611](https://github.com/mwagner-webdev/botlish/actions/runs/39585147611)
+(at b08ac4c, before the last test fixes) ran fourteen files with
+`BOTLISH_NATIVE_GC_STRESS=1` for the whole process, on interp and compile --
+darwin-io, c-byte-borrowing, c-pointer-borrowing, workload-2048,
+context-traits, portable-io, target-model, c-ffi, native-view, native-edit,
+layout-arrays, layout-unions, binary-layout and abi-mutable-bytes -- and the
+borrowing fuzzer's seeds 1, 2 and 9 (no disagreement). Each pass: 626
+tests, 584 passed, 40 skipped (2 boringssl, 16 linuxX86_64, 21 nativeLinux,
+1 tclLibrary) and 2 failed, both test defects fixed since and neither a
+matter of the collector: bb-guard-malloc's control (section 8) and
+di-stderr-failure, which compared the streams' undecoded bytes with text
+(7bdd5e2).
+
 ## 8. Real-library acceptance
 
 **libSystem.** bb-system-library calls the system C library's own `memcmp`,
