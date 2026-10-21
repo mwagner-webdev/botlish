@@ -11,7 +11,7 @@
 <br />
 
 <p>
-  <a href="#download-the-single-file-compiler"><img src="https://img.shields.io/badge/download-0e7490?style=for-the-badge" alt="Download" /></a>
+  <a href="#download-the-single-file-compiler"><img src="./docs/assets/download-badge.svg" alt="Download" /></a>
   <a href="#why-botlish"><img src="https://img.shields.io/badge/why_botlish-0e7490?style=for-the-badge" alt="Why Botlish" /></a>
   <a href="#a-tour"><img src="https://img.shields.io/badge/a_tour-0e7490?style=for-the-badge" alt="A tour" /></a>
   <a href="#getting-started"><img src="https://img.shields.io/badge/getting_started-0e7490?style=for-the-badge" alt="Getting started" /></a>
