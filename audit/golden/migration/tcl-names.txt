@@ -2615,6 +2615,7 @@ tests/hir-text.test ht-control-characters pass
 tests/hir-text.test ht-control-characters-native pass
 tests/hir-text.test ht-parameterless-clone pass
 tests/hir-text.test ht-coroutine-protocols pass
+tests/hir-text.test ht-coroutine-protocols-native pass
 tests/hir-types.test hir-call-1 pass
 tests/hir-types.test hir-call-2 pass
 tests/hir-types.test hir-call-3 pass
