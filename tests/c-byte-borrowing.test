@@ -110,8 +110,13 @@ proc appValue {dir} {
 # writes to its standard error (Guard Malloc's banner) is kept in DIR's
 # `stderr`, never taken for a failure.
 proc appExecutable {dir {environment {}}} {
-    set exe [file join $dir program]
-    native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $dir] $exe}
+    set exe [native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $dir] [file join $dir program]}]
+    # env(1) gives the variables to the executable alone. How they reach it
+    # does not decide what Guard Malloc catches: bb-guard-malloc's former
+    # control, a one-byte over-read of a 4080-byte storage, did not fault
+    # through env(1) either (macOS run 39603310734) -- the page after that
+    # storage's 4096-byte block was mapped (MACOS-AARCH64-MILESTONE-7.md,
+    # section 8), which is why the test now exposes 16-byte storages.
     return [string trim [exec env {*}[lmap {k v} $environment {string cat $k=$v}] $exe 2> [file join $dir stderr]]]
 }
 
