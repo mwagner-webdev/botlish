@@ -70,7 +70,10 @@ proc cffi::SdlBuild {} {
         return $dir
     }
     set root [SdlRoot]
-    set source [exec [info nameofexecutable] [file join $root tools c-bindgen.tcl] fetch sdl3]
+    # The fetch prints the checkout's directory last; a first fetch prints
+    # its progress line before it.
+    set fetched [exec [info nameofexecutable] [file join $root tools c-bindgen.tcl] fetch sdl3]
+    set source [lindex [split [string trim $fetched] \n] end]
     file mkdir $dir
     puts "sdl3: building libSDL3.so in $dir"
     set flags {-DSDL_UNIX_CONSOLE_BUILD=ON -DSDL_X11=OFF -DSDL_WAYLAND=OFF}

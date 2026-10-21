@@ -1239,19 +1239,22 @@ fn safe(x: Float64) -> DecimalRounded{minDecimalsPreserved: 2}:
 
 @topic stdlib.module.float64
 title: -
-summary: The explicit conversions of Float64: from and to Int (float64::from_int, float64::truncate) and from DecimalRounded (float64::from_decimal_rounded).
+summary: Float64's explicit conversions (float64::from_int, float64::truncate, float64::from_decimal_rounded) and its bounds (float64::min, max, abs, clamp).
 index: stdlib
-keywords: float functions; float conversion; int to float; float to int; decimal to float
+keywords: float functions; float conversion; int to float; float to int; decimal to float; float min; float max; float abs; clamp
 related: concept.floats stdlib./ concept.decimal-rounded
 
 == NOTES
-`float64` has no module file: its members are intrinsics, reached with
-`import float64`. They are the only conversions between Float64 and the
-other number types: Botlish never converts implicitly, so an expression
-mixing an Int and a Float64 is rejected until one side is converted (and
-so is one mixing a Float64 and a DecimalRounded value). There is no
+The conversions are intrinsics and the bounds (min, max, abs, clamp) the
+ordinary Botlish of lib/float64.bot, all reached with `import float64`.
+The conversions are the only ones between Float64 and the other number
+types: Botlish never converts implicitly, so an expression mixing an Int
+and a Float64 is rejected until one side is converted (and so is one
+mixing a Float64 and a DecimalRounded value). The bounds never fail: they
+compare and at most negate, so no NonFiniteFloat can arise. There is no
 rounding mode, no Float64-to-String conversion beyond a program's printed
-result, and no bit-level access to a Float64.
+result, no math library beyond these, and no bit-level access to a
+Float64.
 
 @topic stdlib.float64::from_decimal_rounded
 title: -

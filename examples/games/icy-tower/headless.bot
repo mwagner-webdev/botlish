@@ -1,0 +1,19 @@
+# headless.bot -- the deterministic simulation of the Icy Tower vertical
+# slice (ICY-TOWER-VERTICAL-SLICE-1.md) with no SDL at all, on any backend:
+# the autopilot plays 600 fixed 60 Hz frames (10 seconds) of the tower of
+# seed 7, and the program's value is the summary line. The SDL program's
+# `--headless --seed 7 --frames 600` and its dummy-driver run with
+# `--autopilot --fixed-step` print the same line (tests/workload-icy-tower.test).
+#
+#   tclsh9.0 main.tcl -backend cranelift examples/games/icy-tower/headless.bot
+import hud
+import tower
+
+fn run() -> str errors NonFiniteFloat:
+    world = tower::new_world(7, 1).simulate(600)
+    hud::summary(world, 600)
+
+summary = run():
+    on NonFiniteFloat:
+        "error: a non-finite number"
+summary

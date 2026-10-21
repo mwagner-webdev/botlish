@@ -5288,6 +5288,60 @@ nothing, is never dereferenced, and has no arithmetic, ordering,
 equality or conversion to or from an Int. Calling C itself is
 `extern c fn` (concept.c-ffi), which runs only on the native backends.
 
+@topic stdlib.float64::min
+title: float64::min -- Function (nomethod) of module float64
+summary: The function (nomethod) float64::min of the standard module float64.
+index: stdlib
+symbol: float64::min
+related: stdlib.module.float64
+
+== DECLARATION
+    nomethod fn min(a: Float64, b: Float64) -> Float64:
+
+== MODULE
+lib/float64.bot: import float64, then write float64::min.
+
+@topic stdlib.float64::max
+title: float64::max -- Function (nomethod) of module float64
+summary: The function (nomethod) float64::max of the standard module float64.
+index: stdlib
+symbol: float64::max
+related: stdlib.module.float64
+
+== DECLARATION
+    nomethod fn max(a: Float64, b: Float64) -> Float64:
+
+== MODULE
+lib/float64.bot: import float64, then write float64::max.
+
+@topic stdlib.float64::abs
+title: float64::abs -- Function of module float64
+summary: The function float64::abs of the standard module float64.
+index: stdlib
+symbol: float64::abs
+related: stdlib.module.float64
+
+== DECLARATION
+    fn abs(x: Float64) -> Float64:
+
+== MODULE
+lib/float64.bot: import float64, then write float64::abs or, as a method,
+receiver.abs(...).
+
+@topic stdlib.float64::clamp
+title: float64::clamp -- Function of module float64
+summary: The function float64::clamp of the standard module float64.
+index: stdlib
+symbol: float64::clamp
+related: stdlib.module.float64
+
+== DECLARATION
+    fn clamp(x: Float64, low: Float64, high: Float64) -> Float64:
+
+== MODULE
+lib/float64.bot: import float64, then write float64::clamp or, as a
+method, receiver.clamp(...).
+
 @topic stdlib.float64::from_decimal_rounded
 title: float64::from_decimal_rounded -- intrinsic of namespace float64
 summary: The Float64 nearest round(x, N), N the places the DecimalRounded x's type guarantees, after `import float64`: the visible decay of a guarantee; it never fails.
@@ -5401,31 +5455,60 @@ big = 1.0e20
 
 @topic stdlib.module.float64
 title: float64 -- standard namespace
-summary: The explicit conversions of Float64: from and to Int (float64::from_int, float64::truncate) and from DecimalRounded (float64::from_decimal_rounded).
+summary: Float64's explicit conversions (float64::from_int, float64::truncate, float64::from_decimal_rounded) and its bounds (float64::min, max, abs, clamp).
 index: stdlib
 symbol: float64
-keywords: float functions; float conversion; int to float; float to int; decimal to float
+keywords: float functions; float conversion; int to float; float to int; decimal to float; float min; float max; float abs; clamp
 related: concept.floats stdlib./ concept.decimal-rounded
 
+== DESCRIPTION
+The namespace's intrinsics are root natives registered under their qualified
+names -- float64::from_int, float64::truncate, float64::from_decimal_rounded
+(core/float.tcl, FLOAT64-MILESTONE-1.md) -- and this module may never define
+a member of the same name (surface/modules.tcl, DUPLICATE-NATIVE;
+STDLIB-NAMESPACES.md). Below are the comparisons every program that bounds a
+Float64 writes, added by the Icy Tower workload
+(ICY-TOWER-VERTICAL-SLICE-1.md, "Stdlib additions"):
+
+  float64::min(a, b)          the smaller of A and B (A when they are
+                               equal)
+  float64::max(a, b)          the larger of A and B (A when they are
+                               equal)
+  float64::abs(x)             X without its sign
+  float64::clamp(x, low, high) X bounded to LOW..HIGH: LOW when X is below
+                               it, else HIGH when X is above that, else X
+
+Each is a comparison and at most a negation, so none can fail: there is no
+arithmetic that could leave the finite Float64s (no NonFiniteFloat), and a
+Float64 has no NaN for a comparison to be unordered with. min and max are
+`nomethod`: their operands are symmetric, and neither is a receiver (the
+bit_and precedent, REFACTOR-WARNINGS-CLEAN.md).
+
 == SOURCE
-Compiler intrinsics only, no module file (import float64).
+lib/float64.bot (import float64).
 
 == MEMBERS
+    float64::abs                   function
+    float64::clamp                 function
     float64::from_decimal_rounded  intrinsic -- The Float64 nearest round(x...
     float64::from_int              intrinsic -- The Float64 nearest the Int...
+    float64::max                   function (nomethod)
+    float64::min                   function (nomethod)
     float64::truncate              intrinsic -- The Int part of the Float64...
 
-Each member is a topic: -help NAME (e.g. -help
-float64::from_decimal_rounded).
+Each member is a topic: -help NAME (e.g. -help float64::abs).
 
 == NOTES
-`float64` has no module file: its members are intrinsics, reached with
-`import float64`. They are the only conversions between Float64 and the
-other number types: Botlish never converts implicitly, so an expression
-mixing an Int and a Float64 is rejected until one side is converted (and
-so is one mixing a Float64 and a DecimalRounded value). There is no
+The conversions are intrinsics and the bounds (min, max, abs, clamp) the
+ordinary Botlish of lib/float64.bot, all reached with `import float64`.
+The conversions are the only ones between Float64 and the other number
+types: Botlish never converts implicitly, so an expression mixing an Int
+and a Float64 is rejected until one side is converted (and so is one
+mixing a Float64 and a DecimalRounded value). The bounds never fail: they
+compare and at most negate, so no NonFiniteFloat can arise. There is no
 rounding mode, no Float64-to-String conversion beyond a program's printed
-result, and no bit-level access to a Float64.
+result, no math library beyond these, and no bit-level access to a
+Float64.
 
 @topic stdlib.immutable_set::contains
 title: immutable_set::contains -- intrinsic of namespace immutable_set

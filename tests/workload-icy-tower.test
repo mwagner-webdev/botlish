@@ -1,0 +1,236 @@
+# workload-icy-tower.test -- the Icy Tower vertical slice
+# (examples/games/icy-tower/, ICY-TOWER-VERTICAL-SLICE-1.md) as part of the
+# Tcl suite: its golden suite on the backends of this pass, its modules
+# warning-clean (the SDL ones staged with the generated SDL3 binding), the
+# headless simulation's summary on every backend, and -- where the
+# package-owned libSDL3.so is built (tests/cffi/sdl3.tcl; CI's icy-tower
+# workflow) -- the Linux executable: built by build.sh, run headless, run
+# through the real SDL loop on SDL's dummy video driver (also under GC
+# stress), its failure and usage paths, its link, and the independent
+# oracle (audit/icy-tower/oracle.py) over a grid of seeds.
+#
+# The pure modules (tower.bot, hud.bot, options.bot) and their programs
+# (headless.bot, golden.bot) need no SDL and run on every backend; main.bot,
+# sdl.bot and render.bot import the generated binding, which build.sh (and
+# the warning test here) stage beside them.
+#
+# Backends, as tests/workload-2048.test's: the outer pass's own (CORE_BACKEND
+# interp or compile) plus cranelift in the interp pass and
+# cranelift-generic in the compile pass; all four when run directly.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot examples games icy-tower run.tcl]
+source [file join $::projectRoot tests cffi sdl3.tcl]
+
+interp recursionlimit {} 100000
+
+if {![info exists ::env(CORE_BACKEND)]} {
+    set workloadBackends {interp compile cranelift-generic cranelift}
+} elseif {$::env(CORE_BACKEND) eq "interp"} {
+    set workloadBackends {interp cranelift}
+} elseif {$::env(CORE_BACKEND) eq "compile"} {
+    set workloadBackends {compile cranelift-generic}
+} else {
+    set workloadBackends [list $::env(CORE_BACKEND)]
+}
+# lib/test.bot's runner is a coroutine: natively, Linux x86-64 and AArch64
+# only (COROUTINES.md), as tests/golden.test.
+set nativeSuite [expr {$::tcl_platform(os) eq "Linux" && $::tcl_platform(machine) in {x86_64 amd64 aarch64}}]
+set suiteBackends [expr {$nativeSuite ? $workloadBackends : [lsearch -all -inline -not -glob $workloadBackends cranelift*]}]
+testConstraint suiteBackends [expr {[llength $suiteBackends] > 0}]
+set nativeBackends [lsearch -all -inline -glob $workloadBackends cranelift*]
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+# The executable: Linux x86-64 (the slice's one target), a built native
+# backend, rustc-linked executables, and the package-owned libSDL3.so.
+testConstraint icyTowerExecutable [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64} && [testConstraint nativeBuilt] &&
+    [testConstraint executableAot] && [testConstraint rustcLinker] && [cffi::sdl3Dir] ne ""}]
+testConstraint python3 [expr {[auto_execok python3] ne ""}]
+
+set gameDir [file join $::projectRoot examples games icy-tower]
+
+# The summary of seed 7's 600-frame autopilot run (audit/icy-tower/oracle.py
+# summary 7 600).
+set seed7 {frames=600 round=1 floor=26 score=260 best=29.1 time=10.0 over=no x=263 y=2947 camera=2551 platforms=11 rng=3699965314}
+
+test workload-icy-tower-golden-suite "golden.bot: compiles once, all 65 tests pass on [join $suiteBackends {, }], the same report on each" -constraints suiteBackends -body {
+    set result [golden::suite [file join $gameDir golden.bot] $suiteBackends]
+    set status [dict get $result status]
+    if {$status eq "compile-error"} {
+        return "compile error: [lindex [dict get $result compile] 1]"
+    }
+    set problems {}
+    foreach {backend outcome} [dict get $result outcomes] {
+        if {[lindex $outcome 0] eq "abort"} {
+            lappend problems "$backend aborted: [lindex $outcome 1]"
+            continue
+        }
+        set lines [lindex $outcome 1]
+        foreach line $lines {
+            if {[string match "FAIL *" $line]} { lappend problems "$backend: $line" }
+        }
+        set names [lmap line [golden::verdicts $lines] {string range $line 5 end}]
+        if {[llength $names] != 65 || [llength [lsort -unique $names]] != 65} {
+            lappend problems "$backend: [llength $names] verdicts, [llength [lsort -unique $names]] distinct, expected 65"
+        }
+        if {[lindex $lines end] ne "65 passed, 0 failed"} {
+            lappend problems "$backend: [lindex $lines end]"
+        }
+    }
+    if {$status eq "disagree"} {
+        lappend problems "the backends' reports differ"
+    }
+    expr {$problems eq {} ? "ok" : [join $problems \n]}
+} -result ok
+
+test workload-icy-tower-headless "headless.bot's summary of seed 7 after 600 frames is the same on [join $workloadBackends {, }] and equals the independent oracle's" -body {
+    set hir [icytower::compile [file join $gameDir headless.bot]]
+    lmap backend $workloadBackends {
+        core::value::strOf [icytower::run $hir $backend]
+    }
+} -result [lrepeat [llength $workloadBackends] $seed7]
+
+test workload-icy-tower-warning-clean {the pure modules and their programs have no warnings, and compile under -warnings error} -body {
+    set found {}
+    foreach name {headless.bot golden.bot} {
+        if {[catch {surface::readProgramFile [file join $gameDir $name] -warnings error -warning-channel ""} message]} {
+            lappend found "$name: [lindex [split $message \n] 0]"
+        }
+    }
+    join $found \n
+} -result {}
+
+test workload-icy-tower-sdl-modules-warning-clean {main.bot, sdl.bot and render.bot, staged with the committed generated SDL3 binding (tools/c-bindgen.tcl stage), compile under -warnings error for linux-x86_64: no warning of the game's own, none of the binding's -- and no module of the game is direct: sdl.bot's raw calls (retaining C calls, native views and edits) are all mediated by its own Sdl context (DIRECT-MODULES.md), so render.bot and the entry program stay ordinary} -body {
+    set stage [file join [tcltest::temporaryDirectory] icy-tower-stage]
+    file delete -force $stage
+    exec [info nameofexecutable] [file join $::projectRoot tools c-bindgen.tcl] stage sdl3 -target linux-x86_64 -app $gameDir -into $stage
+    try {
+        set hir [surface::readProgramFile [file join $stage main.bot] -warnings error -warning-channel "" -target linux-x86_64]
+        set statuses {}
+        foreach line [split [hir::direct::summary $hir] \n] {
+            if {[regexp {^module (tower|hud|options|sdl|render): (\S+)} $line -> module status]
+                    || [regexp {^(entry program): (\S+)} $line -> module status]} {
+                lappend statuses $module $status
+            }
+        }
+        list ok [lsort -stride 2 $statuses]
+    } finally {
+        file delete -force $stage
+    }
+} -result {ok {{entry program} ordinary hud ordinary options ordinary render ordinary sdl contextualized tower ordinary}}
+
+test workload-icy-tower-dt-tests-use-exact-steps {the golden suite's motion tests step by exact binary fractions, so its written Float64 expectations are exact results (a guard on the suite itself)} -body {
+    set text [core::ReadFile [file join $gameDir golden.bot]]
+    lsort -unique [regexp -all -inline {motion\([a-z]+\(\), [0-9.]+\)} $text]
+} -result {{motion(both(), 0.125)} {motion(idle(), 0.125)} {motion(idle(), 0.25)} {motion(left(), 0.125)} {motion(right(), 0.125)}}
+
+# ---------------------------------------------------------------------------
+# The executable
+
+set executable [file join [tcltest::temporaryDirectory] icy-tower-aot icy-tower]
+
+# Runs SCRIPT (in the caller's scope) with the environment variables of
+# the dict ENV set, then restores each: unsetting the whole ::env array
+# would unlink it from the process environment.
+proc withEnv {env script} {
+    set saved {}
+    dict for {k v} $env {
+        dict set saved $k [expr {[info exists ::env($k)] ? [list $::env($k)] : {}}]
+        set ::env($k) $v
+    }
+    try {
+        uplevel 1 $script
+    } finally {
+        dict for {k old} $saved {
+            if {[llength $old]} { set ::env($k) [lindex $old 0] } else { unset ::env($k) }
+        }
+    }
+}
+
+# Runs the executable with ARGS, on SDL's dummy video driver and the
+# package-owned libSDL3.so, with the environment variables of ENV (a dict)
+# added: {exit-status stdout stderr}.
+proc icyRun {env args} {
+    set out [file join [tcltest::temporaryDirectory] icy-tower-out]
+    set err [file join [tcltest::temporaryDirectory] icy-tower-err]
+    set env [dict merge [dict create LD_LIBRARY_PATH [cffi::sdl3Dir] SDL_VIDEO_DRIVER dummy] $env]
+    try {
+        withEnv $env {
+            set status [catch {exec $::executable {*}$args >$out 2>$err}]
+        }
+        set code 0
+        if {$status} {
+            set code [lindex $::errorCode 2]
+            if {[lindex $::errorCode 0] ne "CHILDSTATUS"} { set code $::errorCode }
+        }
+        list $code [string trim [core::ReadFile $out]] [string trim [core::ReadFile $err]]
+    } finally {
+        file delete -force $out $err
+    }
+}
+
+test workload-icy-tower-executable-builds {build.sh stages the game with the generated SDL3 binding, compiles it under -warnings error and links it with -lSDL3: a stripped PIE x86-64 executable that needs libSDL3.so.0 and nothing beyond glibc and libgcc} -constraints icyTowerExecutable -body {
+    file delete -force [file dirname $executable]
+    exec sh [file join $gameDir build.sh] $executable 2>@1
+    set needed [regexp -all -inline {NEEDED\s+(\S+)} [exec objdump -p $executable]]
+    list [file executable $executable] [string match "*ELF 64-bit LSB pie executable, x86-64*stripped*" [exec file $executable]] \
+        [lsort [lmap {- lib} $needed {set lib}]]
+} -result {1 1 {ld-linux-x86-64.so.2 libSDL3.so.0 libc.so.6 libgcc_s.so.1 libm.so.6}}
+
+test workload-icy-tower-executable-headless {the executable's --headless run prints seed 7's summary, the oracle's, and exits 0} -constraints icyTowerExecutable -body {
+    icyRun {} --headless --frames 600 --seed 7
+} -result [list 0 "\"$seed7\"" {}]
+
+test workload-icy-tower-executable-dummy-driver {the real SDL loop on SDL's dummy video driver -- SDL_Init, a window, a renderer, events, the keyboard state, every frame drawn (rectangles, lines, debug text through C floats) and presented, then everything released -- plays the same 600 frames as the headless run, with the autopilot and fixed steps} -constraints icyTowerExecutable -body {
+    icyRun {} --autopilot --fixed-step --frames 600 --seed 7
+} -result [list 0 "\"$seed7\"" {}]
+
+test workload-icy-tower-executable-gc-stress {the dummy-driver run under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every allocation): 120 frames, the same state as without} -constraints icyTowerExecutable -body {
+    set plain [icyRun {} --autopilot --fixed-step --frames 120 --seed 11]
+    set stressed [icyRun {BOTLISH_NATIVE_GC_STRESS 1} --autopilot --fixed-step --frames 120 --seed 11]
+    list [lindex $plain 0] [expr {$plain eq $stressed}]
+} -result {0 1}
+
+test workload-icy-tower-executable-restarts {a long autopilot run on the dummy driver loses and restarts games (the round counts them) and ends cleanly} -constraints icyTowerExecutable -body {
+    lassign [icyRun {} --autopilot --fixed-step --frames 2400 --seed 7] code out err
+    list $code [regexp {round=([2-9]|\d\d)} $out] $err
+} -result {0 1 {}}
+
+test workload-icy-tower-executable-sdl-failure {when SDL cannot start (an unknown video driver), the run logs SDL's own error through the variadic SDL_Log, releases what it made and exits 1} -constraints icyTowerExecutable -body {
+    icyRun {SDL_VIDEO_DRIVER nosuch} --frames 10
+} -result {1 {} {Icy Tower: SDL_Init failed: nosuch not available}}
+
+test workload-icy-tower-executable-renderer-failure {when the renderer cannot be made (an unknown render driver), the window and SDL made before it are released again, SDL's error is logged and the run exits 1} -constraints icyTowerExecutable -body {
+    icyRun {SDL_RENDER_DRIVER nosuch} --frames 10
+} -result {1 {} {Icy Tower: SDL_CreateRenderer failed: nosuch not available}}
+
+testConstraint valgrind [expr {[auto_execok valgrind] ne ""}]
+
+test workload-icy-tower-executable-no-leaks {valgrind's memcheck over a whole dummy-driver run (SDL_Init to SDL_Quit, 30 frames): no invalid access and nothing lost -- the window, the renderer and the native scratch memory (SDL_malloc'd, written through layouts) are all released} -constraints {icyTowerExecutable valgrind} -body {
+    lassign [icyRun {} --autopilot --fixed-step --frames 30 --seed 7] code out
+    set log [file join [tcltest::temporaryDirectory] icy-tower-memcheck]
+    withEnv [dict create LD_LIBRARY_PATH [cffi::sdl3Dir] SDL_VIDEO_DRIVER dummy] {
+        catch {exec valgrind --leak-check=full --error-exitcode=9 --log-file=$log $::executable --autopilot --fixed-step --frames 30 --seed 7} output
+    }
+    set text [core::ReadFile $log]
+    file delete $log
+    list $code [string trim $output] [regexp {definitely lost: 0 bytes} $text] [regexp {indirectly lost: 0 bytes} $text] [regexp {ERROR SUMMARY: 0 errors} $text]
+} -result [list 0 "\"frames=30 round=1 floor=0 score=0 best=1.9 time=0.5 over=no x=375 y=222 camera=0 platforms=10 rng=768150900\"" 1 1 1]
+
+test workload-icy-tower-executable-usage {an unknown option is a usage error, status 2; --help prints the usage, status 0} -constraints icyTowerExecutable -body {
+    lassign [icyRun {} --fly] code1 out1 err1
+    lassign [icyRun {} --help] code2 out2 err2
+    list $code1 [lindex [split $err1 \n] 0] $code2 [lindex [split $out2 \n] 0]
+} -result {2 {icy-tower: unknown option: --fly} 0 {usage: icy-tower [--seed N] [--frames N] [--headless] [--autopilot] [--fixed-step] [--help]}}
+
+test workload-icy-tower-oracle {the executable's headless summaries equal the independent oracle's (audit/icy-tower/oracle.py) for 8 seeds and 1, 60, 600 and 3600 frames} -constraints {icyTowerExecutable python3} -body {
+    withEnv [dict create LD_LIBRARY_PATH [cffi::sdl3Dir]] {
+        set status [catch {exec python3 [file join $::projectRoot audit icy-tower oracle.py] compare $::executable} output]
+    }
+    list $status [lindex [split $output \n] end]
+} -result {0 {0 differences}}
+
+file delete -force [file dirname $executable]
+
+cleanupTests

@@ -392,6 +392,8 @@ with the declared error NonFiniteFloat. There is no negative zero either:
     < <= > >= == !=     comparisons
     float64::from_int(n)    Int -> nearest Float64 (import float64)
     float64::truncate(x)    Float64 -> Int, toward zero
+    float64::min(a, b)  float64::max(a, b)  x.abs()  x.clamp(low, high)
+                        bounds (lib/float64.bot); they never fail
 
 == RULES
   * A literal with a decimal point is a Float64, except where a

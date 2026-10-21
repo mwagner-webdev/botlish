@@ -2396,6 +2396,43 @@ workarounds for what Botlish lacks (no Int-to-String, division, fold, typed
 empty vector, List length facts, ...): they are its evidence
 (POST-2048-PRODUCT-FIXES.md); do not rewrite them with a new convenience.
 
+## Workloads (examples/games/icy-tower)
+
+`examples/games/icy-tower/` is the real-time workload (ICY-TOWER-VERTICAL-
+SLICE-1.md): a playable Icy Tower-style game on Linux x86-64 over the
+generated SDL3 binding. Keep its layering:
+
+* `tower.bot` (the rules: a frame is `step(world, input, dt)`), `hud.bot`
+  (text) and `options.bot` (the command line) are pure: no SDL, no clock,
+  no input device. They run, and `golden.bot` and `headless.bot` test them,
+  on every backend. Never import SDL or `sdl` into them.
+* `sdl.bot` is the one module with raw authority: every function of it
+  that makes a retaining C call or a native view or edit requires its own
+  `Sdl` context, so `render.bot` and `main.bot` stay ordinary modules
+  (`workload-icy-tower-sdl-modules-warning-clean` checks
+  `hir::direct::summary`). Do not mark a game module `direct module`.
+* The SDL binding is the committed generated one (generated/c/sdl3/), staged
+  beside the game by `build.sh` (tools/c-bindgen.tcl stage): never copy it
+  into the example directory or hand-write a parallel SDL declaration.
+* `build.sh` builds the stripped executable at
+  `audit/icy-tower/artifacts/icy-tower`, which is committed: rebuild and
+  commit it in the same change as anything it is built from.
+* `audit/icy-tower/oracle.py` is an independent implementation of the
+  rules, written from the report's rules section: a rule change changes
+  the report, the oracle and the golden suite's expectations together.
+
+If you change the game, `lib/float64.bot` or what it relies on, run
+`tests/workload-icy-tower.test` (its executable tests need the
+package-owned libSDL3.so, `tclsh9.0 tests/cffi/sdl3.tcl`, and are skipped
+without it), `audit/icy-tower/mutate.tcl` (every mutant in
+`audit/icy-tower/mutants.txt` must still apply and be killed: update a
+mutant's text when you change the code it mutates, keeping it a mutant of
+the same rule) and `python3 audit/icy-tower/oracle.py compare EXECUTABLE`;
+`audit/icy-tower/tools/xvfb-session.py` plays the executable in a real X11
+window (an SDL3 built with the x11 driver: build.sh says how) and
+`audit/icy-tower/tools/perf.tcl` is the performance report. CI's
+`icy-tower` workflow (`.github/workflows/icy-tower.yml`) runs all of it.
+
 ## Application modules, native program output, the recursion limit
 
 Three product rules (POST-2048-PRODUCT-FIXES.md):
