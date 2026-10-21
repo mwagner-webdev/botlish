@@ -13,8 +13,8 @@
 #      is headless (the dummy and offscreen drivers); for a window, build it
 #      with your desktop's backends:
 #        BOTLISH_SDL3_DIR=DIR BOTLISH_SDL3_CMAKE_FLAGS="" tclsh9.0 tests/cffi/sdl3.tcl
-#      Any SDL 3.x libSDL3.so.0 does at run time (the binding uses no
-#      function newer than 3.2's API).
+#      At run time an installed SDL 3 (libSDL3.so.0) should do too -- the
+#      game calls only functions SDL 3.2.0 has -- but only 3.4.18 is tested.
 #   2. The application: the .bot files beside this script and the committed
 #      generated SDL3 binding (generated/c/sdl3/linux-x86_64/sdl3/, the
 #      host's target's) staged

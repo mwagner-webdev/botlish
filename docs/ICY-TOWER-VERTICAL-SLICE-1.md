@@ -37,8 +37,13 @@ autopilot at floor 26, and a game after a restart.*
   session drives the X11 window with XTest key presses and checks the
   player moves right and left, Escape quits and a window-manager close
   ends the run cleanly.
-* **No compiler or runtime correctness bug was found.** The four backends,
-  the oracle, GC stress and memcheck agree everywhere. Fixed: one tooling
+* **One compiler bug found and fixed.** Once main's List length
+  refinements (LIST-CARDINALITY-REFINEMENTS.md) were merged in, the front
+  end crashed on the game (`TCL LOOKUP DICT` in
+  `hir::completions::ExactCopy`): a field read of a struct bound from a
+  handled call whose handler has two statements. Fixed in two lines, with a
+  regression test that fails without it. Otherwise the four backends, the
+  oracle, GC stress and memcheck agree everywhere. Also fixed: one tooling
   bug (`tests/cffi/sdl3.tcl` could not build SDL on a fresh machine), and
   two application bugs the tests found (section "Bugs found and fixed").
 * **One stdlib addition:** `float64::min`, `max`, `abs`, `clamp`
@@ -265,7 +270,7 @@ run(video, world, frames, last, options):          (self-tail-recursive: a loop 
   (semi-implicit Euler). There is no fixed-step interpolation: the
   collision test cannot tunnel (next section), so nothing needed one.
 * **Pacing.** The renderer asks for vertical sync; with it,
-  `SDL_RenderPresent` waits for the display (measured: 1517-1520 frames in
+  `SDL_RenderPresent` waits for the display (measured: 1517-1525 frames in
   25 s under Xvfb, 60 Hz). Without it the loop sleeps out the rest of a
   60 Hz frame (`SDL_DelayNS`). `--fixed-step` (the smoke runs) asks for no
   vsync and does not sleep: the run goes as fast as it can, every frame
@@ -450,7 +455,8 @@ linked against it.
 **Running it.**
 
 ```sh
-# with SDL 3 installed system-wide (Ubuntu 25.04+: libsdl3-0, Fedora 41+: SDL3)
+# with SDL 3 installed system-wide (a distribution's libSDL3.so.0; the game
+# calls only functions SDL 3.2.0 has, but only 3.4.18 has been tested)
 audit/icy-tower/artifacts/icy-tower
 # or with an SDL 3 built for your desktop (above)
 LD_LIBRARY_PATH=DIR audit/icy-tower/artifacts/icy-tower --seed 7
@@ -482,8 +488,8 @@ $ icy-tower --headless --frames 600 --seed 7
 The same line from `headless.bot` on interp, compile, cranelift-generic and
 cranelift, from `oracle.py summary 7 600`, and from the real SDL loop on the
 dummy driver (`--autopilot --fixed-step --frames 600 --seed 7`), also under
-`BOTLISH_NATIVE_GC_STRESS=1`. 6000 headless frames take 222 ms (37 us a
-frame); 3000 dummy-driver frames 1.8 s (0.60 ms a frame, SDL's software
+`BOTLISH_NATIVE_GC_STRESS=1`. 6000 headless frames take 187 ms (31 us a
+frame); 3000 dummy-driver frames 1.78 s (0.59 ms a frame, SDL's software
 renderer included).
 
 ### The graphical run
@@ -494,7 +500,7 @@ built with its x11 driver (`audit/icy-tower/tools/xvfb-session.py`):
 * **keyboard**: Right held 0.45 s moved the player from x = 320 to 482,
   Left held 0.9 s back to 162 (the player found in screenshots by its
   color); Escape ended the run, exit 0;
-* **real time**: the autopilot played 1517-1520 frames in 25 s, the
+* **real time**: the autopilot played 1517-1525 frames in 25 s, the
   display's 60 Hz through vertical sync, losing and restarting a game on
   the way;
 * **window close**: `WM_DELETE_WINDOW` sent as a window manager would
@@ -595,7 +601,7 @@ Read:
 * **SDL's software renderer dominates** a dummy-driver frame (68 %); on
   the x11 driver vsync paces the loop at 60 Hz with the CPU mostly idle.
 
-**3. Time**: 37 us a headless frame, 0.60 ms a dummy-driver frame.
+**3. Time**: 31 us a headless frame, 0.59 ms a dummy-driver frame.
 
 ## Stdlib
 
@@ -688,10 +694,11 @@ What was awkward:
 | tower.bot (application) | `pruned` could drop every platform when the camera moved far up in one frame, and `grown` then rebuilt the tower from the sentinel at y = -1,000,000 (10,000 platforms) | a golden test (`icy-the-tower-grows-and-sheds-as-the-camera-climbs`) | always keep the highest platform; the `prune-drops-highest` mutant pins it |
 | tower.bot (application) | 16 sentinel structs allocated a frame by `get`'s eagerly evaluated default | the allocation report | `at` with the impossible miss handled |
 | the test harness (my own) | `array unset ::env` unlinks Tcl's `env` from the process environment, so later overrides never reached a child process | a test passing where it should fail | restore each variable separately (`withEnv`) |
+| `hir/completions.tcl` (compiler) | `ExactCopy`'s `handle` case asked `hir::typeOf` for a handler *body* -- a list of statement ids -- as if it were one expression: a front-end crash (`key "e21 e23" not known in dictionary`, TCL LOOKUP DICT) for any program that reads a field, in a condition, of a struct bound from a handled call whose handler has more than one statement. The code predates this milestone; main's List length refinements made type inference reach it from every projection, and main.bot's `o = options::parse(...)` / `if o.help:` is exactly that shape | building the executable after merging main | read the body's last statement, as the same file's other `handle` walk does; `tests/list-length-refinement.test`'s `llr-projection-of-a-handled-call` (a 20-line reproducer, fails without the fix) |
 
-No compiler or runtime bug: every backend agreed with every other and
-with the oracle, the executable was clean under GC stress and memcheck,
-and the AOT, dummy-driver and X11 runs behaved identically.
+No other compiler or runtime bug: every backend agreed with every other
+and with the oracle, the executable was clean under GC stress and
+memcheck, and the AOT, dummy-driver and X11 runs behaved identically.
 
 ## What Icy Tower taught us about Botlish
 
@@ -723,7 +730,12 @@ repository; it should be next.
 3. **Names for types and values**: no type aliases (DecimalRounded spelled
    out ten times), no struct values at module level (the sentinel had to be
    a function), no struct update syntax (`World` rebuilt with all nine
-   fields in `step`, and in every test helper that changes one).
+   fields in `step`, and in every test helper that changes one). And a
+   List of an integer domain's values does not prove a `List[int]`
+   result: `fn codes() -> List[int]: [one(), one()]` with `one() ->
+   ffi::c::UInt` (or any `type Small = Int in 0..9`) is "function result
+   does not prove declared type List[int]", though `-> int` of one such
+   value is accepted, so `scancodes()` is declared `List[ffi::c::UInt]`.
 4. **Method sugar and its warnings**: a helper named like a module
    function makes method calls ambiguous (`moved`, `landing`, `step`,
    `summary` had to be renamed in the suite); `METHOD-ELIGIBLE` pushes
@@ -738,6 +750,11 @@ What did *not* hurt: immutable values in a real-time loop (a new World a
 frame, a self-tail-recursive loop compiled to a loop); structs and lists
 for game state; deterministic floating point across backends; error
 handling at the loop's edge; contexts for capabilities.
+
+**Compiler correctness**: one front-end crash, reachable only after
+main's List length refinements and fixed here (`ExactCopy`); a real
+application found it within an hour of the merge, which no test of the
+refinements had.
 
 **Compiler and runtime performance**: boxed Float64s (fine at this
 scale, ~200 a frame); DecimalRounded quantization through big-integer
@@ -757,7 +774,7 @@ direct-module accounting -- held up under a real library with no change.
 |---|---|
 | builds from Botlish source with the generated SDL3 binding | `build.sh`; `workload-icy-tower-executable-builds`; CI |
 | a Linux executable artifact | `audit/icy-tower/artifacts/icy-tower` |
-| starts and runs its loop | the X11 session (1517-1520 frames in 25 s); dummy-driver tests |
+| starts and runs its loop | the X11 session (1517-1525 frames in 25 s); dummy-driver tests |
 | left/right movement | `icy-run-*`, `icy-*-wall-*`; X11 keyboard session |
 | gravity | `icy-gravity-*` |
 | landing and bouncing | the 18 collision tests (`icy-lands-*`, `icy-bounce-*`, ...) |

@@ -3271,9 +3271,11 @@ proc hir::completions::ExactCopy {hir e} {
         }
         handle {
             # A handled call whose handlers all leave (return, fail, ...)
-            # completes only with the call's own value.
+            # completes only with the call's own value. A handler body is a
+            # sequence: its last expression is the one that completes it.
             foreach body [dict get $node handlerBodies] {
-                if {![hir::types::Halts $hir $body [hir::typeOf $hir $body]]} {
+                set last [lindex $body end]
+                if {![hir::types::Halts $hir $last [hir::typeOf $hir $last]]} {
                     return ""
                 }
             }

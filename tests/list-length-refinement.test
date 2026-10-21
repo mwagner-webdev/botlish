@@ -769,4 +769,29 @@ fn code(f) -> int:
     llrOutcome $hir {interp compile}
 } -result {value {[1, 1]}}
 
+test llr-projection-of-a-handled-call {a field read, in a condition, of a struct bound from a handled call whose handler has several statements types and runs: the exact-copy chase reads a handler body's last statement, never the body's statement list as one expression (a TCL LOOKUP DICT crash once List length inference reached the chase from every projection; the Icy Tower slice's command line found it, ICY-TOWER-VERTICAL-SLICE-1.md)} -body {
+    llrValue {
+error Bad
+
+struct Settings:
+    help: bool
+
+fn parse(n: int) -> Settings errors Bad:
+    if n < 0:
+        fail Bad
+    Settings {help: n > 3}
+
+fn main(n: int) -> int:
+    o = parse(n):
+        on Bad:
+            x = 7
+            return x
+    if o.help:
+        return 1
+    0
+
+[main(5), main(1), main(-1)]
+}
+} -result {[1, 0, 7]}
+
 cleanupTests

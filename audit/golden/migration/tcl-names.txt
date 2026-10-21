@@ -8665,3 +8665,4 @@ tests/workload-icy-tower.test workload-icy-tower-executable-usage pass
 tests/workload-icy-tower.test workload-icy-tower-oracle pass
 tests/workload-icy-tower.test workload-icy-tower-executable-renderer-failure pass
 tests/workload-icy-tower.test workload-icy-tower-executable-no-leaks pass
+tests/list-length-refinement.test llr-projection-of-a-handled-call pass
