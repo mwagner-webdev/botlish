@@ -523,7 +523,26 @@ PENDING-RUNS
 
 ## 15. Linux regressions
 
-PENDING-LINUX
+**Linux x86-64.** tests.yml on milestone 7's own commit (3587425,
+dispatched on the branch), run [39577813683](https://github.com/mwagner-webdev/botlish/actions/runs/39577813683): every job passed (its
+native GC-stress job runs on pushes to main only). tests.yml on main at d598dba, run [39603310748](https://github.com/mwagner-webdev/botlish/actions/runs/39603310748): PENDING-X86-D598DBA
+
+**Linux AArch64.** tests-arm64.yml at 3587425, run [39577817112](https://github.com/mwagner-webdev/botlish/actions/runs/39577817112): all
+ten jobs passed, the whole suite under GC stress among them (1 h 37 min).
+tests-arm64.yml on main at d598dba (milestones 7 and 8 merged), run
+[39603310756](https://github.com/mwagner-webdev/botlish/actions/runs/39603310756): all ten jobs passed -- the Tcl suite on interp (8747
+tests: 8637 passed, 110 skipped, 0 failed) and on compile (8632 passed, 115
+skipped, 0 failed), cranelift and cranelift-generic coverage, the four
+golden shards, the native Rust unit tests (also under GC stress) and the
+whole suite under GC stress (1 h 49 min).
+
+static-decisions at d598dba (the front end changed: core/cabi.tcl and
+lib/), run [39603310752](https://github.com/mwagner-webdev/botlish/actions/runs/39603310752): the batched and the sequential scheduler
+agree on every golden suite (no DISAGREE, no DOES NOT COMPILE;
+`mutable-array.bot: batched 5/7 35.2s sequential 69/205 1229.9s`), as they
+did on the branch at b08ac4c ([39585334356](https://github.com/mwagner-webdev/botlish/actions/runs/39585334356)). windows-x86_64.yml at
+d598dba, run [39603310730](https://github.com/mwagner-webdev/botlish/actions/runs/39603310730): the smoke job and the four acceptance
+shards passed (Tcl 9.0.1 from the workflow's cache).
 
 ## 16. Remaining limitations
 
