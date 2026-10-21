@@ -1327,6 +1327,13 @@ proc hir::range::Call {hirVar ctxVar e node} {
             if {$exact ne ""} {
                 set result $exact
             }
+            # A fact the argument's static type states (core/native.tcl's
+            # -measures: the length of a List[T]{length: N} is N,
+            # LIST-CARDINALITY-REFINEMENTS.md).
+            set measured [hir::types::MeasuredValue $hir $name [dict get $node args]]
+            if {$measured ne ""} {
+                set result [point $measured]
+            }
         }
         set result [ConstrainType $hir $e $result]
         dict set ctx exprs $e $result
@@ -1482,7 +1489,7 @@ proc hir::range::ProvesValueAcceptedBy {argType argRange declared} {
         return [hir::types::subtype $argType $declared]
     }
     if {[hir::types::IsList $declared] || [hir::types::IsSet $declared] || [hir::types::IsMutVec $declared]
-            || [hir::types::IsMutArray $declared]} {
+            || [hir::types::IsMutArray $declared] || [hir::types::IsRefinedApplied $declared]} {
         return [AggregateAdmits [hir::types::Unshaped $argType] $declared]
     }
     if {[hir::types::IsCallable $declared] || [hir::types::IsStructLike $declared] || [hir::types::IsCoroutine $declared]
@@ -1530,7 +1537,30 @@ proc hir::range::ProvesValueAcceptedBy {argType argRange declared} {
 # aggregate constructor with a statically proven-empty (`never`) element,
 # which is admissible for any DECLARED element, checked the same way one
 # level deeper for a nested aggregate element (spec item 14's `[[]]` case).
+#
+# A scalar refinement of a List (LIST-CARDINALITY-REFINEMENTS.md), at any
+# depth: DECLARED's facts must be implied by ARG's own (its refinement, or
+# what its form states: the empty List[never] has length 0) -- a fact is
+# never minted by admission, and no length check is inserted -- and the
+# bases are admitted as above; an ARG fact DECLARED does not state is
+# forgotten, which is always valid (the same List, the same
+# representation).
 proc hir::range::AggregateAdmits {arg declared} {
+    if {$arg eq $declared || $arg eq "never"} {
+        # (No value has type never -- code no execution reaches, a guard's
+        # contradiction -- so nothing is admitted that could break a
+        # contract.)
+        return 1
+    }
+    if {[hir::types::IsRefinedApplied $declared]} {
+        set family [hir::refinements::Family $declared]
+        set facts [hir::types::FactsOf $family $arg]
+        if {$facts eq {} || ![hir::refinements::ImpliesFacts $family $facts [hir::refinements::Facts $declared]]} {
+            return 0
+        }
+        return [AggregateAdmits [hir::types::Unrefined $arg] [hir::refinements::Base $declared]]
+    }
+    set arg [hir::types::Unrefined $arg]
     if {$arg eq $declared} {
         return 1
     }
@@ -1608,6 +1638,17 @@ proc hir::range::AggregateAdmits {arg declared} {
 proc hir::range::FactsSatisfiable {observedType observedRange declared} {
     if {$observedType eq "never"} {
         return 0
+    }
+    if {[hir::types::IsRefinedApplied $declared]} {
+        # A List length (LIST-CARDINALITY-REFINEMENTS.md): unsatisfiable
+        # only when a length OBSERVED states contradicts DECLARED's; the
+        # bases as for an unrefined List.
+        set family [hir::refinements::Family $declared]
+        if {[hir::refinements::GlbFacts $family [hir::types::FactsOf $family $observedType] \
+                [hir::refinements::Facts $declared]] eq "none"} {
+            return 0
+        }
+        return [FactsSatisfiable [hir::types::Unrefined $observedType] $observedRange [hir::refinements::Base $declared]]
     }
     if {[hir::types::IsList $declared] || [hir::types::IsSet $declared] || [hir::types::IsMutVec $declared]} {
         return [AggregateAdmits [hir::types::Unshaped $observedType] $declared]
@@ -1889,7 +1930,7 @@ proc hir::range::VerifyCall {hirVar ranges e node} {
                 {argument for parameter "%s" cannot be proven to satisfy %s%s (argument type: %s%s)%s%s} \
                 [hir::semantic::SourceName $hir $paramBinding] [hir::types::show $declaredType] \
                 [expr {$inferred ? ", the parameter type inferred from the function body" : ""}] \
-                [hir::semantic::ShowType $hir $argType] [FactsClause $argType $declaredType $argRange] [MismatchClause $argType $declaredType] \
+                [hir::semantic::ShowType $hir [ShownArgType $argType $declaredType]] [FactsClause $argType $declaredType $argRange] [MismatchClause $argType $declaredType] \
                 [if {$inferred} {hir::signatures::because $hir $targetBlock $i} else {string cat ""}]] $arg
             continue
         }
@@ -1916,7 +1957,7 @@ proc hir::range::VerifyCall {hirVar ranges e node} {
         hir::Diagnose hir TYPE [format \
             {argument for parameter "%s" is statically incompatible with %s, the parameter type inferred from the function body (argument type: %s%s)%s} \
             [hir::semantic::SourceName $hir $paramBinding] [hir::types::show $checkedType] \
-            [hir::semantic::ShowType $hir $argType] [FactsClause $argType $checkedType $argRange] \
+            [hir::semantic::ShowType $hir [ShownArgType $argType $checkedType]] [FactsClause $argType $checkedType $argRange] \
             [hir::signatures::because $hir $targetBlock $i]] $arg
     }
 }
@@ -1948,7 +1989,7 @@ proc hir::range::VerifyImprintedNative {hirVar ranges e node name} {
             set hint ": data and function pointers are distinct, and nothing converts one into the other"
         }
         hir::Diagnose hir TYPE [format {argument %d of %s cannot be proven to satisfy %s (argument type: %s)%s} \
-            $index $name [hir::types::show $declared] [hir::semantic::ShowType $hir $argType] $hint] $arg
+            $index $name [hir::types::show $declared] [hir::semantic::ShowType $hir [ShownArgType $argType $declared]] $hint] $arg
     }
 }
 
@@ -1996,7 +2037,7 @@ proc hir::range::VerifyStruct {hirVar ranges e node} {
         hir::DiagnoseAt hir TYPE [format \
             {field "%s" of struct %s cannot be proven to satisfy its declared type %s (value type: %s%s)%s} \
             $name [hir::structs::display $id] [hir::types::show $declared] \
-            [hir::types::show $valueType] [FactsClause $valueType $declared $valueRange] [MismatchClause $valueType $declared]] $field $origin
+            [hir::types::show [ShownArgType $valueType $declared]] [FactsClause $valueType $declared $valueRange] [MismatchClause $valueType $declared]] $field $origin
     }
 }
 
@@ -2022,7 +2063,7 @@ proc hir::range::VerifyPayload {hirVar ranges e node} {
         hir::DiagnoseAt hir TYPE [format \
             {payload field "%s" of error %s cannot be proven to satisfy its declared type %s (value type: %s%s)%s} \
             $name $errorName [hir::types::show $declared] \
-            [hir::types::show $valueType] [FactsClause $valueType $declared $valueRange] [MismatchClause $valueType $declared]] $field $origin
+            [hir::types::show [ShownArgType $valueType $declared]] [FactsClause $valueType $declared $valueRange] [MismatchClause $valueType $declared]] $field $origin
     }
 }
 
@@ -2060,6 +2101,10 @@ proc hir::range::MismatchClause {argType declared} {
     if {$refinement ne ""} {
         return $refinement
     }
+    set length [LengthClause $argType $declared]
+    if {$length ne ""} {
+        return $length
+    }
     set decimal [hir::decimal::MismatchClause $argType $declared]
     if {$decimal ne ""} {
         # DecimalRounded (DECIMAL-ROUNDED-MILESTONE-1.md): a guarantee not
@@ -2096,6 +2141,51 @@ proc hir::range::MismatchClause {argType declared} {
         return ""
     }
     return "; $why"
+}
+
+# The explanation, when DECLARED requires an exact List length
+# (LIST-CARDINALITY-REFINEMENTS.md) a value of static type ARGTYPE is not
+# known to have: a List of another known length, or of none -- a length is
+# known only where a type states it (a literal, a declared parameter, field
+# or result, a guard `list::length(xs) == N`, list::with_length), and no
+# check is inserted to make it so; or "" when that is not why ARGTYPE is not
+# admissible (an element type, another kind).
+proc hir::range::LengthClause {argType declared} {
+    set want [hir::types::LengthOf $declared]
+    if {$want eq "" || ![hir::types::IsRefinedApplied $declared]} {
+        return ""
+    }
+    set arg [hir::types::Unshaped $argType]
+    if {[hir::types::kindOf $arg] ne "list"} {
+        return ""
+    }
+    set have [hir::types::LengthOf $arg]
+    if {$have eq $want} {
+        return ""
+    }
+    if {$have ne ""} {
+        return [format {; a List of exactly %s element(s) is never one of %s: an exact length is an equality fact, implied by no other length} \
+            $have $want]
+    }
+    return [format {; %s states no exact length: a List's length is known only where its type states it (a List literal, a declared parameter, field or result, a guard such as `list::length(xs) == %s`, or list::with_length), and admission inserts no length check} \
+        [hir::types::show $arg] $want]
+}
+
+# ARGTYPE as an admission diagnostic shows a value's type where DECLARED is
+# required: every exact List length inference minted forgotten unless
+# DECLARED states one (LIST-CARDINALITY-REFINEMENTS.md: an ordinary List
+# error is not about lengths, and a literal's length would only distract).
+proc hir::range::ShownArgType {argType declared} {
+    if {[MentionsAppliedRefinement $declared]} {
+        return $argType
+    }
+    return [hir::types::ForgetInferred $argType]
+}
+
+# 1 if TYPE is or holds (at any depth hir::types::ForgetInferred walks) a
+# refinement of an applied type.
+proc hir::range::MentionsAppliedRefinement {type} {
+    return [expr {[hir::types::ForgetInferred $type] ne $type}]
 }
 
 # The explanation, when DECLARED requires a refinement (REFINEMENT-VALUES.md)
@@ -2184,7 +2274,7 @@ proc hir::range::VerifyStructuralCall {hirVar ranges e node calleeType callee ar
         hir::Diagnose hir TYPE [format \
             {argument %d cannot be proven to satisfy %s, the parameter type the callee's function type %s requires (argument type: %s%s)%s} \
             $index [hir::types::show $declaredType] [hir::types::show $calleeType] \
-            [hir::semantic::ShowType $hir $argType] [FactsClause $argType $declaredType $argRange] [MismatchClause $argType $declaredType]] $arg
+            [hir::semantic::ShowType $hir [ShownArgType $argType $declaredType]] [FactsClause $argType $declaredType $argRange] [MismatchClause $argType $declaredType]] $arg
     }
 }
 

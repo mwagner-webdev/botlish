@@ -740,6 +740,8 @@ proc hir::completions::ResultFinal {hir b} {
 # callable returns. A value of `any` never acquires a Fn type (the type
 # checker rejects it).
 proc hir::completions::Align {type final {depth 0}} {
+    set type [hir::types::Unrefined $type]
+    set final [hir::types::Unrefined $final]
     if {$depth > 8 || $type eq $final || $type in {never any ""} || $final in {"" any}} {
         return {}
     }
@@ -2252,6 +2254,11 @@ proc hir::completions::NativeResultRange {hir ctx name argExprs argRanges} {
     if {$exact ne {}} {
         return $exact
     }
+    # (A fact the argument's static type states: hir::range::Call.)
+    set measured [hir::types::MeasuredValue $hir $name $argExprs]
+    if {$measured ne {}} {
+        return [hir::range::point $measured]
+    }
     return [hir::range::RegisteredRange $name]
 }
 
@@ -3180,6 +3187,11 @@ proc hir::completions::ReprValueVerdict {hir ctx repr e} {
                 set n [lindex $form 0]
             } elseif {[dict exists $ctx sizes $form]} {
                 set n [dict get $ctx sizes $form]
+            } else {
+                # The length the value's own static type states (a refined
+                # List, a guard's refinement: LIST-CARDINALITY-
+                # REFINEMENTS.md).
+                set n [hir::cardinality::TypedLength $hir $e]
             }
             if {$n eq ""} {
                 return ""
@@ -3399,6 +3411,12 @@ proc hir::completions::SizesOf {hir ctx family container} {
         set literal [LiteralListOf $hir $ctx $container]
         if {$literal ne {}} {
             lappend forms [hir::cardinality::FormConst [llength [LiteralElements $literal]]]
+        }
+        # The length the read's own static type states (a guard's
+        # refinement of it: hir/cardinality.tcl's TypedLength).
+        set typed [hir::cardinality::TypedLength $hir $container]
+        if {$typed ne {}} {
+            lappend forms [hir::cardinality::FormConst $typed]
         }
     } elseif {$family eq "str"} {
         set v [ExactValueOf $hir $ctx $container]
@@ -3670,6 +3688,12 @@ proc hir::completions::IndexBounds {hir ctx family container index indexRange} {
         if {$literal ne {}} {
             lappend sizes [hir::cardinality::FormConst [llength [LiteralElements $literal]]]
         }
+        # The length the read's own static type states (a refined List,
+        # a guard's refinement of it: LIST-CARDINALITY-REFINEMENTS.md).
+        set typed [hir::cardinality::TypedLength $hir $container]
+        if {$typed ne {}} {
+            lappend sizes [hir::cardinality::FormConst $typed]
+        }
     }
     set known {}
     foreach form $sizes {
@@ -3913,13 +3937,20 @@ proc hir::completions::EvalHandle {hirVar ctxVar diagnose enclosing guard e node
     if {!$dead && $normal} {
         lappend liveResults [hir::range::ConstrainType $hir $call $callResult]
     }
+    # The call's type with every List length forgotten (hir::types::
+    # ForgetInferred): forgetting a length is always valid, so a handler's
+    # List of another length (or of none) is admissible, and the handled
+    # value's type is then their join (hir::types::Handle: a List of no
+    # known length) -- a length inference minted never makes a handler
+    # inadmissible (LIST-CARDINALITY-REFINEMENTS.md).
+    set admitted [hir::types::ForgetInferred $callType]
     foreach name $handled body $handlerBodies type $handlerTypes {
         if {$type ne {never} && $callType ne {never}} {
             set range [hir::range::analyzeSequence $hir $body]
-            if {![hir::range::ProvesValueAcceptedBy $type $range $callType]} {
+            if {![hir::range::ProvesValueAcceptedBy $type $range $admitted]} {
                 hir::Diagnose hir TYPE [format \
                     {handler "on %s" completes with type %s, not admissible as %s (the call's own normal result type)} \
-                    $name [hir::types::show $type] [hir::types::show $callType]] $e
+                    $name [hir::types::show [hir::types::ForgetInferred $type]] [hir::types::show $admitted]] $e
             }
         }
         set saved [dict get $ctx bindings]

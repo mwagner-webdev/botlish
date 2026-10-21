@@ -196,6 +196,23 @@
 #                                   ever established by a proof
 #                                   (hir/decimal.tcl). Its runtime kind is
 #                                   the base's; the facts are static only.
+#   {srefined FAMILY FACTS BASE}    a scalar refinement of an applied type
+#                                   (LIST-CARDINALITY-REFINEMENTS.md): the
+#                                   values of BASE (a List form, {list
+#                                   ELEM} or the bare `list`) of which the
+#                                   compiler knows FACTS, e.g. {srefined
+#                                   List {length 4} {list int}}, source-
+#                                   spelled List[int]{length: 4}: an
+#                                   ordinary List of exactly four elements.
+#                                   A subtype of B' when its facts imply
+#                                   B''s and BASE is a subtype of B''s base
+#                                   (List[A]{length: 4} <: List[B]{length:
+#                                   4} for A <: B), and of BASE itself
+#                                   (forgetting the facts); a type that
+#                                   states the same facts by its own form
+#                                   ({list never}, only ever empty: length
+#                                   0) is one too. Built only by Refine,
+#                                   which keeps the form canonical.
 #   {imprint T}                     an imprint variable (hir/imprint.tcl):
 #                                   in a function's declared signature, the
 #                                   type a call imprints as T. Rigid in the
@@ -660,6 +677,11 @@ proc hir::types::IsAffine {type {seen {}}} {
             # (hir::imprint::Bind): its function's body may copy it.
             return 0
         }
+        srefined {
+            # A refinement is knowledge about a value, never ownership: a
+            # refined value is affine exactly when its base is.
+            return [IsAffine [hir::refinements::Base $type] $seen]
+        }
         list {
             if {[IsAffine [lindex $type 1] $seen]} {
                 return 1
@@ -749,6 +771,9 @@ proc hir::types::MentionsTrait {type} {
     if {[IsTrait $type]} {
         return 1
     }
+    if {[IsRefinedApplied $type]} {
+        return [MentionsTrait [hir::refinements::Base $type]]
+    }
     if {[IsList $type] || [IsSet $type] || [IsMutArray $type] || [IsMutVec $type]} {
         return [MentionsTrait [lindex $type 1]]
     }
@@ -779,7 +804,9 @@ proc hir::types::MentionedContextTrait {type} {
         return ""
     }
     set inner {}
-    if {[IsList $type] || [IsSet $type] || [IsMutArray $type] || [IsMutVec $type]} {
+    if {[IsRefinedApplied $type]} {
+        set inner [list [hir::refinements::Base $type]]
+    } elseif {[IsList $type] || [IsSet $type] || [IsMutArray $type] || [IsMutVec $type]} {
         set inner [list [lindex $type 1]]
     } elseif {[IsFn $type]} {
         set inner [concat [FnArgs $type] [list [FnReturn $type]]]
@@ -831,6 +858,245 @@ proc hir::types::Unviewed {type} {
         return "any"
     }
     return $type
+}
+
+# ---------------------------------------------------------------------------
+# Refinements of applied types (LIST-CARDINALITY-REFINEMENTS.md; the
+# header's {srefined FAMILY FACTS BASE})
+#
+# One fact theory today: the List family's exact `length`. Everything here
+# is generic over the family (hir/refinements.tcl's schema decides what a
+# fact means and how two of them combine); what this section adds is the
+# base -- the applied type a member refines -- and the types whose own form
+# already states a fact (FactsOf).
+
+# 1 if TYPE is a refinement of an applied type.
+proc hir::types::IsRefinedApplied {type} {
+    return [expr {[llength $type] == 4 && [lindex $type 0] eq "srefined"}]
+}
+
+# TYPE with its outermost refinement forgotten (its base); TYPE itself when
+# it is no refinement of an applied type. Forgetting is always valid: every
+# member is a value of its base, with the same representation.
+proc hir::types::Unrefined {type} {
+    if {[IsRefinedApplied $type]} {
+        return [hir::refinements::Base $type]
+    }
+    return $type
+}
+
+# The family over a type constructor that A or B is a refinement of (A's,
+# when both are), else "": the operation combining A and B (lub, glb,
+# narrow) then combines their bases and their facts of that family.
+proc hir::types::AppliedFamily {a b} {
+    foreach t [list $a $b] {
+        if {[IsRefinedApplied $t]} {
+            return [hir::refinements::Family $t]
+        }
+    }
+    return ""
+}
+
+# The facts of FAMILY the base type TYPE states by its own form, without a
+# refinement: an empty List[never] (no value has type never, so the List
+# has no element) states length 0, a positional shape its length; {} for
+# any other type.
+proc hir::types::BaseFacts {family type} {
+    if {$family ne "List" || ![IsList $type]} {
+        return {}
+    }
+    if {[llength $type] == 3} {
+        return [list length [llength [lindex $type 2]]]
+    }
+    if {[lindex $type 1] eq "never"} {
+        return [list length 0]
+    }
+    return {}
+}
+
+# The facts of FAMILY known of every value of TYPE: a member's own, else
+# what its form states (BaseFacts); {} for none.
+proc hir::types::FactsOf {family type} {
+    if {[IsRefinedApplied $type]} {
+        if {[hir::refinements::Family $type] eq $family} {
+            return [hir::refinements::Facts $type]
+        }
+        return {}
+    }
+    return [BaseFacts $family $type]
+}
+
+# The canonical type of the values of BASE of which the FAMILY facts FACTS
+# are known (a dict; {} for none): BASE itself when FACTS is empty or BASE
+# states them by its own form (BaseFacts: List[never] is length 0 already),
+# never when BASE states other facts (an empty List of length 3) or is
+# never, and BASE (forgetting FACTS) when it is not of FAMILY's base kind
+# (a List fact joined with an Int: any) -- else {srefined FAMILY FACTS
+# BASE}, the facts in canonical order and BASE unshaped (a shape's length
+# is the refinement's).
+proc hir::types::Refine {base family facts} {
+    if {$base eq "never"} {
+        return never
+    }
+    set facts [hir::refinements::CanonicalFacts $family $facts]
+    if {$facts eq {}} {
+        return $base
+    }
+    if {[IsRefinedApplied $base]} {
+        set merged [hir::refinements::GlbFacts $family [FactsOf $family $base] $facts]
+        if {$merged eq "none"} {
+            return never
+        }
+        return [Refine [Unrefined $base] $family $merged]
+    }
+    if {![RefinableBase $family $base]} {
+        return $base
+    }
+    set stated [BaseFacts $family $base]
+    if {$stated ne {}} {
+        set merged [hir::refinements::GlbFacts $family $stated $facts]
+        if {$merged eq "none"} {
+            return never
+        }
+        if {$merged eq $stated && [llength $base] == 2} {
+            return $base
+        }
+        set facts $merged
+    }
+    return [list srefined $family $facts [Unshaped $base]]
+}
+
+# 1 if BASE is a type FAMILY may refine: a List form or the bare `list` kind
+# (List[any]) for the List family -- the family's base kind, applied.
+proc hir::types::RefinableBase {family base} {
+    if {$base eq [hir::refinements::base $family]} {
+        return 1
+    }
+    return [expr {$family eq "List" && [IsList $base]}]
+}
+
+# The exact length of every value of TYPE (a List the type refines, or
+# states by its form), or "".
+proc hir::types::LengthOf {type} {
+    set facts [FactsOf List $type]
+    if {[dict exists $facts length]} {
+        return [dict get $facts length]
+    }
+    return ""
+}
+
+# The value of parameter PARAM of the FAMILY facts known of every value of
+# TYPE (FactsOf), or "".
+proc hir::types::FactValue {family param type} {
+    return [dict getdef [FactsOf $family $type] $param ""]
+}
+
+# {ARG FAMILY PARAM} when E is a call of a native that measures a fact
+# (core/native.tcl's -measures {FAMILY PARAM K}: list::length measures a
+# List's length), ARG its argument K; else "".
+proc hir::types::Measure {hir e} {
+    set node [dict get $hir exprs $e]
+    if {[dict get $node kind] ne "call"} {
+        return ""
+    }
+    lassign [dict get $node target] kind symbol
+    if {$kind ne "native"} {
+        return ""
+    }
+    set measures [MeasuresOf [dict get [hir::symbol $hir $symbol] name]]
+    if {$measures eq ""} {
+        return ""
+    }
+    lassign $measures family param k
+    set args [dict get $node args]
+    if {$k >= [llength $args]} {
+        return ""
+    }
+    return [list [lindex $args $k] $family $param]
+}
+
+# The -measures registration of native NAME, or "".
+proc hir::types::MeasuresOf {name} {
+    if {[catch {core::native::metadata $name} meta]} {
+        return ""
+    }
+    return [dict getdef $meta measures ""]
+}
+
+# The exact Int a call of native NAME on ARGEXPRS returns because its
+# argument's static type states the fact it measures (MeasuresOf: the length
+# of a List whose type is List[T]{length: N} is N), or "".
+proc hir::types::MeasuredValue {hir name argExprs} {
+    set measures [MeasuresOf $name]
+    if {$measures eq ""} {
+        return ""
+    }
+    lassign $measures family param k
+    if {$k >= [llength $argExprs]} {
+        return ""
+    }
+    return [FactValue $family $param [hir::typeOf $hir [lindex $argExprs $k]]]
+}
+
+# TYPE with every fact of a family whose interface is `declared` forgotten,
+# at every depth (elements, fields, function types): what an undeclared
+# function result and a semantic instance's entry types keep
+# (hir/refinements.tcl, "interface"; LIST-CARDINALITY-REFINEMENTS.md,
+# "Function contracts"). Every other fact (a DecimalRounded guarantee) is
+# kept.
+proc hir::types::ForgetInferred {type} {
+    if {[llength $type] < 2} {
+        return $type
+    }
+    if {[hir::refinements::IsRefined $type]} {
+        set family [hir::refinements::Family $type]
+        if {[hir::refinements::IsApplied $family]} {
+            set base [ForgetInferred [hir::refinements::Base $type]]
+            if {[hir::refinements::Interface $family] eq "declared"} {
+                return $base
+            }
+            return [Refine $base $family [hir::refinements::Facts $type]]
+        }
+        return $type
+    }
+    switch -- [lindex $type 0] {
+        list {
+            if {[llength $type] == 3} {
+                return [list list [ForgetInferred [lindex $type 1]] [lmap p [lindex $type 2] {ForgetInferred $p}]]
+            }
+            return [list list [ForgetInferred [lindex $type 1]]]
+        }
+        immutableSet - mutarray - mutvec {
+            return [list [lindex $type 0] [ForgetInferred [lindex $type 1]]]
+        }
+        struct {
+            set fields {}
+            foreach {name t} [lindex $type 1] {
+                lappend fields $name [ForgetInferred $t]
+            }
+            return [list struct $fields]
+        }
+        fn - coroutine {
+            set fields [lindex $type 1]
+            dict set fields args [lmap t [dict get $fields args] {ForgetInferred $t}]
+            dict set fields return [ForgetInferred [dict get $fields return]]
+            return [list [lindex $type 0] $fields]
+        }
+        block {
+            return [lreplace $type 3 3 [ForgetInferred [lindex $type 3]]]
+        }
+    }
+    return $type
+}
+
+# TYPE as a diagnostic shows a value's type when the diagnostic is not about
+# a List's length: every length inference minted forgotten (ForgetInferred;
+# LIST-CARDINALITY-REFINEMENTS.md, "Diagnostics"). A projection of a List or
+# a List passed where C wants a scalar is wrong whatever its length, which
+# would only distract; a message about a length shows the type itself
+# (hir::range::ShownArgType keeps it where the expected type states one).
+proc hir::types::showValue {type} {
+    return [show [ForgetInferred $type]]
 }
 
 # ---------------------------------------------------------------------------
@@ -1215,6 +1481,18 @@ proc hir::types::glb {a b} {
     if {$a eq $b} {
         return $a
     }
+    set family [AppliedFamily $a $b]
+    if {$family ne ""} {
+        # A refinement of an applied type (a List of a known length): the
+        # meet of the bases, each fact the stronger -- none when the facts
+        # contradict each other (two different lengths: no value has both).
+        set base [glb [Unrefined $a] [Unrefined $b]]
+        set facts [hir::refinements::GlbFacts $family [FactsOf $family $a] [FactsOf $family $b]]
+        if {$base eq "" || $facts eq "none"} {
+            return ""
+        }
+        return [Refine $base $family $facts]
+    }
     if {[hir::refinements::IsRefined $a] && [hir::refinements::IsRefined $b]} {
         # Two scalar refinements of one family: each fact the stronger.
         if {[hir::refinements::Family $a] ne [hir::refinements::Family $b]} {
@@ -1394,6 +1672,9 @@ proc hir::types::MentionsMutable {type {seen {}}} {
     if {[IsMutVec $type] || [IsMutArray $type] || $type in {mutvec mutarray}} {
         return 1
     }
+    if {[IsRefinedApplied $type]} {
+        return [MentionsMutable [hir::refinements::Base $type] $seen]
+    }
     if {[IsList $type] || [IsSet $type]} {
         return [MentionsMutable [lindex $type 1] $seen]
     }
@@ -1497,6 +1778,11 @@ proc hir::types::MakeSet {elem depth} {
 # TYPE with the aggregate bounds applied, nested DEPTH list forms deep.
 proc hir::types::Bound {type depth} {
     variable aggregateDepth
+    if {[IsRefinedApplied $type]} {
+        # (The facts are a few integers: only the base is bounded.)
+        return [Refine [Bound [hir::refinements::Base $type] $depth] \
+            [hir::refinements::Family $type] [hir::refinements::Facts $type]]
+    }
     if {[IsList $type]} {
         if {[llength $type] == 3} {
             return [MakeList [lindex $type 1] [lindex $type 2] 1 $depth]
@@ -1552,6 +1838,9 @@ proc hir::types::Unshaped {type} {
 # The static type of every element of a value of static type TYPE, if TYPE
 # is a list form; otherwise "".
 proc hir::types::elementOf {type} {
+    if {[IsRefinedApplied $type]} {
+        return [elementOf [hir::refinements::Base $type]]
+    }
     if {[IsList $type]} {
         return [lindex $type 1]
     }
@@ -1610,12 +1899,22 @@ proc hir::types::subtype {a b} {
         # A scalar refinement (hir/refinements.tcl): only a member of the
         # same family whose facts imply B's -- never a value of its base,
         # which states no fact (a fact is minted by a proof, never by
-        # subtyping).
-        return [expr {[hir::refinements::IsRefined $a] && [hir::refinements::Implies $a $b]}]
+        # subtyping). A refinement of an applied type relates the bases
+        # too, and a type whose own form states the facts (FactsOf: an
+        # empty List[never]) implies them as a member would.
+        set family [hir::refinements::Family $b]
+        if {![hir::refinements::IsApplied $family]} {
+            return [expr {[hir::refinements::IsRefined $a] && [hir::refinements::Implies $a $b]}]
+        }
+        set facts [FactsOf $family $a]
+        if {$facts eq {} || ![hir::refinements::ImpliesFacts $family $facts [hir::refinements::Facts $b]]} {
+            return 0
+        }
+        return [subtype [Unrefined $a] [hir::refinements::Base $b]]
     }
     if {[hir::refinements::IsRefined $a]} {
-        # Forgetting every fact: a member is a value of its family's base.
-        return [subtype [hir::refinements::base [hir::refinements::Family $a]] $b]
+        # Forgetting every fact: a member is a value of its base.
+        return [subtype [hir::refinements::Base $a] $b]
     }
     if {[IsList $b]} {
         if {![IsList $a] || ![subtype [lindex $a 1] [lindex $b 1]]} {
@@ -1738,6 +2037,15 @@ proc hir::types::lub {a b} {
         }
         return [MakeView [lindex $a 1] [JoinWitness [ViewWitness $a] [ViewWitness $b]]]
     }
+    set family [AppliedFamily $a $b]
+    if {$family ne ""} {
+        # A refinement of an applied type: the join of the bases, each fact
+        # the weaker -- a List of length 4 and one of length 5 join to a
+        # List of no known length (hir::refinements::LubFacts: an exact
+        # fact holds of the join only when both sides state the same one).
+        return [Refine [lub [Unrefined $a] [Unrefined $b]] $family \
+            [hir::refinements::LubFacts $family [FactsOf $family $a] [FactsOf $family $b]]]
+    }
     if {[IsList $a] && [IsList $b]} {
         set elem [lub [lindex $a 1] [lindex $b 1]]
         set sa [shapeOf $a]
@@ -1772,7 +2080,7 @@ proc hir::types::lub {a b} {
         if {$joined ne ""} {
             return $joined
         }
-        return [hir::refinements::base [hir::refinements::Family $a]]
+        return [hir::refinements::Base $a]
     }
     if {[IsEnum $a] || [IsEnum $b]} {
         # Nominal (ENUMS.md): the same enum was decided above ($a eq $b).
@@ -1872,6 +2180,18 @@ proc hir::types::narrow {current fact} {
         # kind test, a native's parameter type): its source-visible type is
         # its trait, whatever runs underneath (TRAITS.md, "One-way").
         return $current
+    }
+    set family [AppliedFamily $current $fact]
+    if {$family ne ""} {
+        # A refinement of an applied type, on either side: a fact about a
+        # List's length (a guard's, hir/refine.tcl) narrows what is known of
+        # its elements not at all, and an element fact keeps the length.
+        # Contradicting facts (two lengths) hold of no value: never.
+        set facts [hir::refinements::GlbFacts $family [FactsOf $family $current] [FactsOf $family $fact]]
+        if {$facts eq "none"} {
+            return never
+        }
+        return [Refine [narrow [Unrefined $current] [Unrefined $fact]] $family $facts]
     }
     if {[IsList $current] && [IsList $fact]} {
         set elem [narrow [lindex $current 1] [lindex $fact 1]]
@@ -1989,6 +2309,9 @@ proc hir::types::kindOf {type} {
     }
     if {[hir::refinements::IsRefined $type]} {
         # (The facts are static: the runtime kind is the base's.)
+        if {[hir::refinements::IsApplied [hir::refinements::Family $type]]} {
+            return [kindOf [hir::refinements::Base $type]]
+        }
         return [hir::refinements::base [hir::refinements::Family $type]]
     }
     if {[IsSpecific $type]} {
@@ -2012,6 +2335,9 @@ proc hir::types::semantic {type} {
         return struct
     }
     if {[hir::refinements::IsRefined $type]} {
+        if {[hir::refinements::IsApplied [hir::refinements::Family $type]]} {
+            return [semantic [hir::refinements::Base $type]]
+        }
         return [hir::refinements::base [hir::refinements::Family $type]]
     }
     if {[IsSpecific $type]} {
@@ -2537,7 +2863,9 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result} {
             if {$arg ne "" && [hir::kind $hir $arg] eq "const"} {
                 set repr [hir::layouts::PathField [lindex [hir::get $hir $arg literal] end]]
                 if {$repr ne ""} {
-                    return [dict get $repr type]
+                    # (A copy: a List states its array's extent,
+                    # hir::layouts::CopyType.)
+                    return [hir::layouts::CopyType $repr]
                 }
             }
             return $result
@@ -2612,7 +2940,7 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result} {
         }
         append {
             lassign $shape _ l v
-            set list [lindex $argTypes $l]
+            set list [Unrefined [lindex $argTypes $l]]
             if {[IsList $list]} {
                 return [MakeList [lub [lindex $list 1] [lindex $argTypes $v]]]
             }
@@ -2663,7 +2991,7 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result} {
             # fully initialized array whose contract is the whole `any`
             # domain, never the raw substrate type.
             lassign $shape _ l
-            set list [Unshaped [lindex $argTypes $l]]
+            set list [Unrefined [Unshaped [lindex $argTypes $l]]]
             set elem any
             if {[IsList $list]} {
                 set elem [hir::containers::ElementContract [lindex $list 1]]
@@ -2681,9 +3009,12 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result} {
             # List[T] -> MutableVector[T] (MUTABLE-VECTOR.md); the empty
             # literal's List[never] gives the proven-empty MutableVector[never].
             lassign $shape _ l
-            set list [lindex $argTypes $l]
+            set list [Unrefined [lindex $argTypes $l]]
             if {[IsList $list]} {
-                return [MakeMutVec [lindex $list 1] 0]
+                # (The element contract a MutableVector's pushes are held to
+                # forgets what inference minted about its first elements:
+                # a vector of [[1, 2]] takes any List[int].)
+                return [MakeMutVec [ForgetInferred [lindex $list 1]] 0]
             }
             if {$list eq "never"} {
                 return never
@@ -2987,7 +3318,8 @@ proc hir::types::Expr {hirVar ctxVar e} {
             if {$poison} {
                 return [SetType hir $e [Poison hir $e]]
             }
-            return [SetType hir $e [MakeList [if {$elemType eq "never"} {string cat "never"} else {set bodyType}]]]
+            return [SetType hir $e [LoopResult $hir $ctx $e [MakeList [if {$elemType eq "never"} {string cat "never"} else {set bodyType}]] \
+                [list [list list [hir::typeOf $hir [dict get $node iterable]]]]]]
         }
         countloop {
             Expr hir ctx [dict get $node start]
@@ -3013,7 +3345,8 @@ proc hir::types::Expr {hirVar ctxVar e} {
             set bodyType [Sequence hir ctx [dict get $node body]]
             dict unset ctx breakTypes $e
             dict set ctx facts $saved
-            return [SetType hir $e [MakeList $bodyType]]
+            return [SetType hir $e [LoopResult $hir $ctx $e [MakeList $bodyType] \
+                [list [list count [lindex [hir::cardinality::domains $hir $e] 0]]]]]
         }
         lockloop {
             # Every domain's operands are typed in written order in the
@@ -3061,7 +3394,15 @@ proc hir::types::Expr {hirVar ctxVar e} {
             if {$poison} {
                 return [SetType hir $e [Poison hir $e]]
             }
-            return [SetType hir $e [MakeList [if {$empty} {string cat "never"} else {set bodyType}]]]
+            set clauses {}
+            foreach domain [dict get $node domains] {
+                if {[dict get $domain kind] eq "list"} {
+                    lappend clauses [list list [hir::typeOf $hir [dict get $domain iterable]]]
+                } else {
+                    lappend clauses [list count $domain]
+                }
+            }
+            return [SetType hir $e [LoopResult $hir $ctx $e [MakeList [if {$empty} {string cat "never"} else {set bodyType}]] $clauses]]
         }
         return {
             set value [Expr hir ctx [dict get $node value]]
@@ -3108,6 +3449,40 @@ proc hir::types::Expr {hirVar ctxVar e} {
             return [SetType hir $e [Handle hir ctx $e]]
         }
     }
+}
+
+# RESULT, the List a collecting loop E (listloop, countloop, lockloop)
+# completes with, refined by its exact length (Refine) when that is known:
+# no break or continue targets E (hir::cardinality::Exact: every normal
+# completion collects one element per iteration), and one of its domains
+# CLAUSES -- {list TYPE}, an iterable of static TYPE; {count DOMAIN}, a
+# numeric domain (hir::cardinality::domains) -- has an exact cardinality:
+# the length TYPE states, or a numeric domain whose cardinality form is a
+# constant (hir::cardinality::of_domain: exactly known bounds). A lockstep
+# loop's domains have one cardinality, proven (hir/lockstep.tcl), so any
+# one decides. The existing proven cases only (COLLECTING-LOOPS.md); no new
+# loop reasoning. Region inference (CTX's `spec`) keeps the List it always
+# had, as a call of a native does (MintLength).
+proc hir::types::LoopResult {hir ctx e result clauses} {
+    if {[dict exists $ctx spec] || ![hir::cardinality::Exact $hir $e]} {
+        return $result
+    }
+    foreach clause $clauses {
+        lassign $clause kind what
+        if {$kind eq "list"} {
+            set n [LengthOf $what]
+        } else {
+            set form [hir::cardinality::of_domain $hir $what]
+            set n ""
+            if {[hir::cardinality::IsConst $form]} {
+                set n [lindex $form 0]
+            }
+        }
+        if {$n ne ""} {
+            return [Refine $result List [list length $n]]
+        }
+    }
+    return $result
 }
 
 # Types struct construction E (STRUCTS.md). The field expressions are typed
@@ -3202,6 +3577,19 @@ proc hir::types::Project {hirVar ctxVar e} {
     if {[IsStructLike $receiver]} {
         set t [StructField $receiver $name]
         if {$t ne ""} {
+            # A field of an exact copy of a layout -- what binary::parse or
+            # binary::load made, or a field of one (hir::completions::
+            # ExactCopy) -- holds a copy of the field's representation: its
+            # arrays' Lists have exactly their extents (hir::layouts::
+            # CopyType, LIST-CARDINALITY-REFINEMENTS.md). A LayoutStruct
+            # constructed by the program may hold any List there.
+            set copy [hir::completions::ExactCopy $hir [dict get $node receiver]]
+            if {$copy ne "" && [dict get $copy kind] eq "layout"} {
+                set copied [hir::layouts::CopiedFieldType [dict get $copy layout] $name]
+                if {$copied ne ""} {
+                    return $copied
+                }
+            }
             return $t
         }
         return [ProjectionFailed hir $ctx $e]
@@ -3530,7 +3918,17 @@ proc hir::types::Block {hirVar outerVar e self} {
         dict unset hir poisoned $e
     }
     dict set hir exprs $e inferredResultType [intern hir $result]
-    if {$declared ne {}} { set result [hir::traits::ViewResult $declared $result] }
+    if {$declared ne {}} {
+        set result [hir::traits::ViewResult $declared $result]
+    } else {
+        # An undeclared result is the function's contract only in what a
+        # declaration could have said: a fact inference minted (a List
+        # literal's length) is the implementation's, never its callers'
+        # (ForgetInferred; LIST-CARDINALITY-REFINEMENTS.md, "Function
+        # contracts"). The inferred result keeps it: verifyDeclaredResults
+        # and the body's own analyses read that one.
+        set result [ForgetInferred $result]
+    }
     dict set hir exprs $e resultType [intern hir $result]
     return [blockType $hir $e $arity $result]
 }
@@ -3669,6 +4067,17 @@ proc hir::types::Call {hirVar ctxVar e} {
                     # compare the two structurally.
                     set result [Unshaped $result]
                 }
+            }
+            if {!$dead && !$spec && [dict get $meta resultLength] ne ""} {
+                # The exact length of a returned List, stated by the
+                # native's registration (core/native.tcl's -result-length):
+                # a List literal's argument count, list::append's one more
+                # than its List's, a live fixed array's copy -- minted as
+                # the refinement List[T]{length: N} (LIST-CARDINALITY-
+                # REFINEMENTS.md), the one representation of exact List
+                # cardinality. Region inference keeps its positional
+                # shapes, which state their length themselves.
+                set result [MintLength $hir [dict get $meta resultLength] $argExprs $argTypes $result]
             }
             set foreign [dict get $meta foreign]
             if {[dict get $meta imprint] ne ""} {
@@ -3875,6 +4284,57 @@ proc hir::types::Call {hirVar ctxVar e} {
         return [CallResult hir $e [expr {$halts || $spec}]]
     }
     return $result
+}
+
+# RESULT, the type of a call of a native whose registration states the
+# length of the List it returns (core/native.tcl's -result-length LENGTH)
+# on the arguments ARGEXPRS of types ARGTYPES, refined by that length when
+# it is known exactly here (hir::types::Refine; RESULT itself when it is
+# not, or when RESULT is no List).
+proc hir::types::MintLength {hir length argExprs argTypes result} {
+    set n [ResultLength $hir $length $argExprs $argTypes]
+    if {$n eq ""} {
+        return $result
+    }
+    return [Refine $result List [list length $n]]
+}
+
+# The exact length the registration LENGTH (-result-length) states for a
+# call on ARGEXPRS of types ARGTYPES, or "": `args` the argument count,
+# `list K D` the length argument K's type states plus D, `extent K` the
+# extent of argument K's live fixed array type, `path K` the extent of the
+# array designator constant argument K names. (`int K`, a MutableArray's
+# capacity, is no List length.)
+proc hir::types::ResultLength {hir length argExprs argTypes} {
+    if {$length eq "args"} {
+        return [llength $argExprs]
+    }
+    lassign $length how k d
+    if {$k eq "" || $k >= [llength $argExprs]} {
+        return ""
+    }
+    switch -- $how {
+        list {
+            set n [LengthOf [lindex $argTypes $k]]
+            if {$n eq ""} {
+                return ""
+            }
+            return [expr {$n + ($d eq "" ? 0 : $d)}]
+        }
+        extent {
+            set term [hir::layouts::OfArrayType [lindex $argTypes $k]]
+            if {$term ne "" && [string is entier -strict [lindex $term 1]]} {
+                return [lindex $term 1]
+            }
+        }
+        path {
+            set repr [hir::layouts::PathField [hir::layouts::ConstText $hir [lindex $argExprs $k]]]
+            if {$repr ne "" && [dict get $repr kind] eq "array"} {
+                return [dict get $repr extent]
+            }
+        }
+    }
+    return ""
 }
 
 # The type of call E when it is dead (Call): never -- poison unless HALTS.

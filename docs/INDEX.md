@@ -25,6 +25,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 - [UNICODE-CHAR-LITERALS.md](UNICODE-CHAR-LITERALS.md) -- `UnicodeChar`: a scalar type distinct from Int and String
 - [FLOAT64-MILESTONE-1.md](FLOAT64-MILESTONE-1.md) -- `Float64`: finite binary64 numbers, decimal literals, `/`, `NonFiniteFloat`, C `double` (completion report)
 - [DECIMAL-ROUNDED-MILESTONE-1.md](DECIMAL-ROUNDED-MILESTONE-1.md) -- `DecimalRounded{minDecimalsPreserved: N}`: the first scalar refinement, a decimal-rounding guarantee proven for constants, observed at its precision, independent of its binary64 representation (completion report)
+- [LIST-CARDINALITY-REFINEMENTS.md](LIST-CARDINALITY-REFINEMENTS.md) -- `List[T]{length: N}`: the second scalar refinement, an exact List length as an ordinary List's type fact (the `exactly` order, applied bases, declared-only contracts); minted by literals, loops, guards, layout copies and `list::with_length`, consumed by the bounds, extent and range proofs; the migration of every exact-cardinality source, fuzzer, mutants, benchmark (completion report)
 - [ELIF.md](ELIF.md) -- `elif`
 - [METHOD-SUGAR.md](METHOD-SUGAR.md) -- method-call sugar
 - [FLAGS.md](FLAGS.md) -- flag parameters

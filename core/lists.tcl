@@ -55,10 +55,11 @@ proc core::lists::append {l v} {
 }
 
 core::native::register list::length -arity 1 -impl core::lists::length \
-    -param-types {list} -result-type int -result-range collection-length -context-free 1 -ownership {observe}
+    -param-types {list} -result-type int -result-range collection-length -context-free 1 -ownership {observe} \
+    -measures {List length 0}
 core::native::register list::at     -arity 2 -impl core::lists::at \
     -param-types {list int} -result-type any -runtime range-check     -result-shape {element 0 1} \
     -context-free 1 -errors IndexNotFound -bounds {index list 0 1} -ownership {copy-out observe}
 core::native::register list::append -arity 2 -impl core::lists::append \
     -param-types {list any} -result-type list -runtime list-alloc     -result-shape {append 0 1} -context-free 1 \
-    -ownership {copy-out copy-out}
+    -result-length {list 0 1} -ownership {copy-out copy-out}

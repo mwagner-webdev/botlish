@@ -64,10 +64,16 @@
 #                   compile-time semantics only (no runtime check exists).
 #   resultLength    "" or the length of the collection the native returns,
 #                   for static analyses that track lengths and capacities
-#                   (hir/cardinality.tcl), read by registration, never by
-#                   name:
+#                   (hir/cardinality.tcl) and for the exact List length a
+#                   returned List's type states (hir/types.tcl's Call mints
+#                   List[T]{length: N} from it, LIST-CARDINALITY-
+#                   REFINEMENTS.md), read by registration, never by name:
+#                     args            the number of arguments (the List
+#                                     literal's constructor, `list`)
 #                     int K           the Int argument K (allocate's capacity)
 #                     list K          the length of List argument K
+#                     list K D        the length of List argument K plus D
+#                                     (list::append: one more)
 #                     extent K        the extent N of argument K's static
 #                                     type when it is a live fixed array,
 #                                     NativeView[array N of E] or
@@ -80,6 +86,16 @@
 #                                     names (binary::read of an array:
 #                                     LAYOUT-UNIONS.md); nothing for any
 #                                     other designator
+#   measures        "" or {FAMILY PARAM K}: the Int the native returns is
+#                   exactly the value of parameter PARAM of the scalar-
+#                   refinement family FAMILY (hir/refinements.tcl) of its
+#                   argument K -- list::length measures {List length 0}
+#                   (LIST-CARDINALITY-REFINEMENTS.md). Read by registration,
+#                   never by name: the Range of a call whose argument's
+#                   static type states the fact is that one value
+#                   (hir/range.tcl, hir/completions.tcl), and an equality
+#                   of the call with an exactly known Int refines the
+#                   argument on the branch where it holds (hir/refine.tcl).
 #   keepsLength     0 | 1 (default 0): the operation mutates its receiver
 #                   (ownership role `place`) without changing its length --
 #                   it replaces elements in place (a swap, a set, a copy into
@@ -446,7 +462,7 @@ proc core::native::register {name args} {
         -param-types "" -result-type any -tests-type "" -runtime {} -result-shape {} -result-range {} \
         -context-free 0 -errors {} -bounds {} -nomethod 0 -completion 0 -ownership {} -errors-from {} \
         -result-length {} -keeps-length 0 -drop-form {} -layout {} -imprint {} -foreign {} -extern {} \
-        -mutation-stable 0 -fold {}]
+        -mutation-stable 0 -fold {} -measures {}]
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "core::native::register: unknown option \"$option\""
@@ -572,9 +588,15 @@ proc core::native::register {name args} {
             || ![dict get $options -completion])} {
         error "core::native::register: -errors-from of \"$name\" must be the index of an argument of a -completion native"
     }
+    set measures [dict get $options -measures]
+    if {$measures ne "" && ([llength $measures] != 3 || ![string is digit -strict [lindex $measures 2]]
+            || $arity eq "*" || [lindex $measures 2] >= $arity || [dict get $options -result-type] ne "int")} {
+        error "core::native::register: bad -measures \"$measures\" for \"$name\" (FAMILY PARAM K, an Int result)"
+    }
     set length [dict get $options -result-length]
-    if {$length ne "" && ([llength $length] != 2 || [lindex $length 0] ni {int list extent path}
-            || ![string is digit -strict [lindex $length 1]] || $arity eq "*" || [lindex $length 1] >= $arity)} {
+    if {$length ne "" && $length ne "args" && ([llength $length] ni {2 3} || [lindex $length 0] ni {int list extent path}
+            || ![string is digit -strict [lindex $length 1]] || $arity eq "*" || [lindex $length 1] >= $arity
+            || ([llength $length] == 3 && ([lindex $length 0] ne "list" || ![string is digit -strict [lindex $length 2]])))} {
         error "core::native::register: bad -result-length \"$length\" for \"$name\""
     }
     set dropForm [dict get $options -drop-form]
@@ -628,7 +650,8 @@ proc core::native::register {name args} {
         ownership $ownership errorsFrom $errorsFrom resultLength $length \
         keepsLength [dict get $options -keeps-length] dropForm $dropForm \
         layout $layout imprint $imprint foreign $foreign extern [dict get $options -extern] \
-        mutationStable [dict get $options -mutation-stable] fold [dict get $options -fold]]
+        mutationStable [dict get $options -mutation-stable] fold [dict get $options -fold] \
+        measures $measures]
     return [core::value::native $name]
 }
 
@@ -1238,7 +1261,9 @@ proc core::native::invoke {nativeValue argValues} {
 #                            non-finite C double entering Botlish (C-FFI.md)
 # The binary errors follow (core/binary.tcl), then UnrepresentableDecimal
 # (core/decimal.tcl, which core/core.tcl loads after binary.tcl so that the
-# ids existing programs and documents show stay what they were).
+# ids existing programs and documents show stay what they were), then
+# LengthMismatch (core/listlength.tcl, loaded after decimal.tcl: builtin
+# error 10, LIST-CARDINALITY-REFINEMENTS.md).
 core::native::declareError InvalidArgumentEncoding
 core::native::declareError IndexNotFound
 core::native::declareError LowerUnderrun

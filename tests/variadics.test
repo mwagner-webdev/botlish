@@ -251,7 +251,7 @@ test va-imprinted-bare-list {a bare List is the element type each call imprints,
         }
     }
     join $lists
-} -cleanup {unset -nocomplain hir lists} -result {List[int] List[str] List[never]}
+} -cleanup {unset -nocomplain hir lists} -result {List[int]{length: 3} List[str]{length: 2} List[never]}
 
 test va-imprinted-values {bare List and List[T] run like the same function given the list literal} -body {
     valueOf "import list\nfn inspect(variadic values: List) -> int:\n    list::length(values)\nfn firsts(variadic values: List\[T\]) -> List\[T\]:\n    values\n\[inspect(), inspect\[int\](), inspect(1, 2), firsts(1, 2), firsts\[str\](\"x\"), firsts()\]\n"

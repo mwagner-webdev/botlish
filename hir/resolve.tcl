@@ -588,7 +588,20 @@ proc hir::resolve::ResolveTypeExpr {typeExpr {ns ""} {imprints 0}} {
     if {[hir::refinements::IsRefinementExpr $typeExpr]} {
         # NAME{param: N ...} (surface::parser::ScalarRefinement): a scalar
         # refinement, validated against its family's schema
-        # (hir/refinements.tcl, DECIMAL-ROUNDED-MILESTONE-1.md).
+        # (hir/refinements.tcl, DECIMAL-ROUNDED-MILESTONE-1.md). Of an
+        # applied type, NAME[ARG]{...} (LIST-CARDINALITY-REFINEMENTS.md):
+        # the base resolves like any type, and the facts refine it.
+        if {[llength $typeExpr] == 4} {
+            set family [lindex $typeExpr 1]
+            set facts [hir::refinements::ResolveFacts $family [lindex $typeExpr 2] 1]
+            set base [ResolveTypeExpr [lindex $typeExpr 3] $ns $imprints]
+            set type [hir::types::Refine $base $family $facts]
+            if {$type eq "never"} {
+                return -code error -errorcode {BOTLISH REFINEMENT-PARAMETER} \
+                    "[ShowTypeExpr $typeExpr] describes no value: [hir::types::show $base] has no element, so its only length is 0"
+            }
+            return $type
+        }
         return [hir::refinements::Resolve [lindex $typeExpr 1] [lindex $typeExpr 2]]
     }
     lassign $typeExpr name arg
@@ -813,7 +826,11 @@ proc hir::resolve::ShowTypeExpr {typeExpr} {
         return "array [lindex $typeExpr 1] of [ShowTypeExpr [lindex $typeExpr 2]]"
     }
     if {[hir::refinements::IsRefinementExpr $typeExpr]} {
-        return "[lindex $typeExpr 1]{[join [lmap field [lindex $typeExpr 2] {join $field {: }}] {, }]}"
+        set head [lindex $typeExpr 1]
+        if {[llength $typeExpr] == 4} {
+            set head [ShowTypeExpr [lindex $typeExpr 3]]
+        }
+        return "$head{[join [lmap field [lindex $typeExpr 2] {join $field {: }}] {, }]}"
     }
     lassign $typeExpr name arg
     if {$name eq "fn"} {

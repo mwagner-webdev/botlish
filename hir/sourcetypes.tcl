@@ -345,7 +345,11 @@ proc hir::sourcetypes::TypeExprNames {typeExpr} {
         return [TypeExprNames [lindex $typeExpr 2]]
     }
     if {[hir::refinements::IsRefinementExpr $typeExpr]} {
-        # A scalar refinement (DECIMAL-ROUNDED-MILESTONE-1.md): its name.
+        # A scalar refinement (DECIMAL-ROUNDED-MILESTONE-1.md): its name --
+        # of an applied type, its base's names.
+        if {[llength $typeExpr] == 4} {
+            return [TypeExprNames [lindex $typeExpr 3]]
+        }
         return [list [lindex $typeExpr 1]]
     }
     lassign $typeExpr head arg
@@ -486,6 +490,7 @@ proc hir::sourcetypes::RefinementCarrierEligible {type} {
 # "" if every value of static type TYPE is transitively immutable (no
 # operation can change it after it exists), else why not, as a clause.
 proc hir::sourcetypes::ValueStability {type {visiting {}}} {
+    set type [hir::types::Unrefined $type]
     if {$type eq "any"} {
         return "may be any value, including a mutable one"
     }

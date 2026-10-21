@@ -695,7 +695,9 @@ proc hir::traits::Mismatch {actual required req} {
 # the canonical type and the trait identity.
 proc hir::traits::satisfies {type id} {
     variable cache
-    set type [hir::types::canonical $type]
+    # (A witness is a monomorphization key: a List's known length selects
+    # no specialization, LIST-CARDINALITY-REFINEMENTS.md.)
+    set type [hir::types::canonical [hir::types::ForgetInferred $type]]
     set key [list $type $id]
     if {[dict exists $cache $key]} {
         return [dict get $cache $key]
@@ -814,7 +816,7 @@ proc hir::traits::EntryView {type constraint} {
         return $type
     }
     if {![hir::types::IsTrait $type] && $type ne "never" && [dict get [satisfies $type $id] ok]} {
-        return [hir::types::MakeView $id [hir::types::canonical $type]]
+        return [hir::types::MakeView $id [hir::types::canonical [hir::types::ForgetInferred $type]]]
     }
     return $constraint
 }
@@ -844,7 +846,7 @@ proc hir::traits::ViewResult {declared body} {
         return $body
     }
     if {![hir::types::IsTrait $body] && [dict get [satisfies $body $id] ok]} {
-        return [hir::types::MakeView $id [hir::types::canonical $body]]
+        return [hir::types::MakeView $id [hir::types::canonical [hir::types::ForgetInferred $body]]]
     }
     return $declared
 }

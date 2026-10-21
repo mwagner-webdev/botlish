@@ -621,11 +621,12 @@ title: -
 summary: Immutable List operations: length, indexed access (at, get), append, and the search helpers any?, all?, none? and find.
 index: stdlib
 keywords: list functions; array functions; sequence operations
-related: concept.lists task.list-element capability.map-filter
+related: concept.lists concept.list-length task.list-element capability.map-filter
 
 == NOTES
-Three intrinsics (list::length, list::at, list::append) and the ordinary
-Botlish functions of lib/list.bot built on them. `import list` makes both
+Four intrinsics (list::length, list::at, list::append and the length
+validator list::with_length) and the ordinary Botlish functions of
+lib/list.bot built on them. `import list` makes both
 callable, qualified (list::at(xs, 0)) or as methods (xs.at(0)). A List
 is immutable: append returns a new List and nothing changes one in place
 (a MutableVector is the growable mutable alternative).
@@ -722,6 +723,42 @@ xs = [1, 2]
 ys = xs.append(3)
 [xs, ys, xs.append([4])]
 @value [[1, 2], [1, 2, 3], [1, 2, [4]]]
+@end
+
+@topic stdlib.list::with_length
+title: -
+summary: list::with_length[List[T]{length: N}](xs): xs itself, now known to have exactly N elements, when it has; otherwise the declared error LengthMismatch, after `import list`.
+index: stdlib
+keywords: check length; validate length; exact length; assert length; fixed length; LengthMismatch
+related: concept.list-length concept.scalar-refinements stdlib.list::length stdlib.decimal_rounded::round rule.unhandled-errors
+
+== NOTES
+The explicit way to mint a List length refinement (concept.list-length)
+from a List whose length is not known statically. It compares the length
+once and returns its argument unchanged -- no copy, no new List -- with the
+type of its imprint; any other length completes with the builtin declared
+error LengthMismatch. The imprint is explicit and must be a refined List
+type (list::with_length[List[int]](xs) is a TYPE error, and without [T]
+it is IMPRINT); the argument must already be a List of the imprint's
+element type, since the check proves a length, never elements. Where a
+guard reads better, `if xs.length() == N:` refines xs in its branch
+without a call. Runs on every backend.
+
+== EXAMPLES
+@example accept
+import list
+
+fn triple(xs: List[int]) -> List[int]{length: 3} errors LengthMismatch:
+    list::with_length[List[int]{length: 3}](xs)
+
+fn middle(xs: List[int]) -> int:
+    t = xs.triple():
+        on LengthMismatch:
+            return -1
+    t.at(1)
+
+[middle([4, 5, 6]), middle([4, 5])]
+@value [5, -1]
 @end
 
 @topic stdlib.list::get

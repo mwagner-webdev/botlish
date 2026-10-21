@@ -356,7 +356,7 @@ proc hir::cabi::ValueTypeProblem {type} {
     if {[IsValueType $type]} {
         return ""
     }
-    return "[hir::types::show $type] is not a C ABI value type (a C integer scalar such as [hir::cabi::ScalarExample], [BoolName], [FloatName], [DoubleName], [PtrName]\[...\] or [FnPtrName]\[...\])[NotCTypeClause $type]"
+    return "[hir::types::showValue $type] is not a C ABI value type (a C integer scalar such as [hir::cabi::ScalarExample], [BoolName], [FloatName], [DoubleName], [PtrName]\[...\] or [FnPtrName]\[...\])[NotCTypeClause $type]"
 }
 
 # A clause for the Botlish type TYPE that names the C type it is often
@@ -366,7 +366,9 @@ proc hir::cabi::NotCTypeClause {type} {
     if {$type eq "Float64"} {
         return ": Float64 is Botlish's number type, not a C representation; C's double is [DoubleName] and C's float [FloatName], whose values are Float64s"
     }
-    if {[hir::refinements::IsRefined $type]} {
+    # (A numeric refinement, DecimalRounded: a refined List is a List,
+    # which no C scalar is mistaken for.)
+    if {[hir::refinements::IsRefined $type] && ![hir::types::IsRefinedApplied $type]} {
         return ": a scalar refinement is a Botlish guarantee about values, not a C representation; C's double is [DoubleName] and C's float [FloatName], whose values are Float64s (float64::from_decimal_rounded decays a DecimalRounded value to one)"
     }
     return ""
@@ -589,5 +591,5 @@ proc hir::cabi::VariadicArgument {type} {
     }
     return [dict create problem TYPE message [format \
         {%s is not a C ABI value type: a trailing argument of a variadic C function is a C integer scalar (such as %s), %s, %s, a %s[...] or a %s[...]} \
-        [hir::types::show $type] [ScalarExample] [BoolName] [DoubleName] [PtrName] [FnPtrName]]]
+        [hir::types::showValue $type] [ScalarExample] [BoolName] [DoubleName] [PtrName] [FnPtrName]]]
 }

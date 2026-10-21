@@ -3156,20 +3156,21 @@ the missing architecture's module file to the library.
 title: REFINEMENT-PARAMETER: a scalar refinement with wrong parameters
 summary: A type NAME{PARAM: N, ...} names no refinement family, or misses a required parameter, names an unknown one, or gives values out of range or contradicting each other.
 index: errors
-alias: refinement parameter; scalar refinement parameter; minDecimalsPreserved missing; maxDecimalsPreserved below minDecimalsPreserved; bare DecimalRounded
-keywords: DecimalRounded, minDecimalsPreserved, maxDecimalsPreserved, braces, parameter, refinement, annotation, type
-related: concept.decimal-rounded rule.type-annotation error.type error.decimal-precision
-docs: DECIMAL-ROUNDED-MILESTONE-1.md
+alias: refinement parameter; scalar refinement parameter; minDecimalsPreserved missing; maxDecimalsPreserved below minDecimalsPreserved; bare DecimalRounded; negative list length
+keywords: DecimalRounded, minDecimalsPreserved, maxDecimalsPreserved, List, length, braces, parameter, refinement, annotation, type
+related: concept.scalar-refinements concept.decimal-rounded concept.list-length rule.type-annotation error.type error.decimal-precision
+docs: DECIMAL-ROUNDED-MILESTONE-1.md LIST-CARDINALITY-REFINEMENTS.md
 code: CORE SEMANTIC REFINEMENT-PARAMETER
 
 == MEANING
 A scalar refinement is a type of a compiler-known family with integer
-parameters, written in braces after the family's name; the parameters are
-part of the type. DecimalRounded is the one family today
-(concept.decimal-rounded): minDecimalsPreserved is required,
-maxDecimalsPreserved optional, both from 0 to 1000, and an upper bound is
-at least the guaranteed precision. The message names every problem of the
-annotation:
+parameters, written in braces after the type it refines; the parameters
+are part of the type (concept.scalar-refinements). The families:
+DecimalRounded (concept.decimal-rounded): minDecimalsPreserved is
+required, maxDecimalsPreserved optional, both from 0 to 1000, and an upper
+bound is at least the guaranteed precision; and List[T]
+(concept.list-length): length is required, a non-negative integer. The
+message names every problem of the annotation:
 
     DecimalRounded requires "minDecimalsPreserved" (write
     DecimalRounded{minDecimalsPreserved: N})
@@ -3179,8 +3180,10 @@ annotation:
     "decimals" is not a parameter of DecimalRounded (its parameters: ...)
     DecimalRounded is written with its refinement parameters, which are
     part of the type: DecimalRounded{minDecimalsPreserved: N}
+    List[T]'s "length" must be at least 0, not -1
+    "size" is not a parameter of List[T] (its parameters: length)
     "Float64" has no scalar refinements: NAME{...} refines one of
-    DecimalRounded
+    DecimalRounded, List[T]
 
 A malformed field (no colon, a value that is not an integer literal, a
 field written twice) is a syntax error where it is written instead.
@@ -3188,8 +3191,9 @@ field written twice) is a syntax error where it is written instead.
 == WHAT TO DO
 Write the parameters the family requires, with values in range:
 DecimalRounded{minDecimalsPreserved: 2}, or with a ceiling
-DecimalRounded{minDecimalsPreserved: 2, maxDecimalsPreserved: 4}. A bare
-DecimalRounded has no precision and is no annotation.
+DecimalRounded{minDecimalsPreserved: 2, maxDecimalsPreserved: 4};
+List[int]{length: 4}. A bare DecimalRounded has no precision and is no
+annotation.
 
 @example reject
 fn price(x: DecimalRounded{minDecimalsPreserved: 4, maxDecimalsPreserved: 2}) -> int:

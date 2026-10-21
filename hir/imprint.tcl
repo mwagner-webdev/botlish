@@ -72,6 +72,13 @@ proc hir::imprint::Occurrences {type {establishing 0} {position value}} {
         return {}
     }
     switch -- [lindex $type 0] {
+        srefined {
+            # A refinement of an applied type (LIST-CARDINALITY-
+            # REFINEMENTS.md): its base's occurrences.
+            if {[hir::types::IsRefinedApplied $type]} {
+                return [Occurrences [hir::refinements::Base $type] $establishing $position]
+            }
+        }
         list - immutableSet - mutarray - mutvec {
             lappend result {*}[Occurrences [lindex $type 1] 1 value]
         }
@@ -340,6 +347,11 @@ proc hir::imprint::BindingProblem {sig name type} {
 # have PARAM's form.
 proc hir::imprint::Match {param arg bindingVar index} {
     upvar 1 $bindingVar binding
+    # A List length is no part of a form a variable is established from: a
+    # refined List[T]{length: N} parameter has List[T]'s form, and a refined
+    # argument is matched as its List (LIST-CARDINALITY-REFINEMENTS.md).
+    set param [hir::types::Unrefined $param]
+    set arg [hir::types::Unrefined $arg]
     if {[hir::types::IsImprint $param]} {
         # Only reached inside an applied type: a bare top-level variable
         # is a use (Bind's caller skips nothing, but Occurrences decided).
@@ -403,6 +415,10 @@ proc hir::imprint::Match {param arg bindingVar index} {
 proc hir::imprint::MatchInner {param arg bindingVar index} {
     upvar 1 $bindingVar binding
     if {[hir::types::IsImprint $param]} {
+        # (A variable an argument establishes is the type a declaration
+        # could state of its elements: the lengths inference minted for
+        # them are forgotten, so Lists of two lengths establish one T.)
+        set arg [hir::types::ForgetInferred $arg]
         set name [lindex $param 1]
         if {![dict exists $binding $name] || [dict get $binding $name] eq "never"} {
             # (`never` -- an empty List's element -- says nothing a later
@@ -440,6 +456,12 @@ proc hir::imprint::Substitute {type binding} {
         return $type
     }
     switch -- [lindex $type 0] {
+        srefined {
+            if {[hir::types::IsRefinedApplied $type]} {
+                return [hir::types::Refine [Substitute [hir::refinements::Base $type] $binding] \
+                    [hir::refinements::Family $type] [hir::refinements::Facts $type]]
+            }
+        }
         list {
             if {[llength $type] == 3} {
                 return [hir::types::MakeList [Substitute [lindex $type 1] $binding] \

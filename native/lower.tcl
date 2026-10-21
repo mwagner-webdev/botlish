@@ -144,6 +144,7 @@ namespace eval native::lower {
         list::length {op listlen} \
         list::at     {op listget} \
         list::append {op listappend} \
+        list#with_length {op listwithlen} \
         immutable_set::from_list {equality-list} \
         immutable_set::contains  {equality-set} \
         mutable_array::allocate {op mutarrayallocate} \
@@ -8994,7 +8995,7 @@ proc native::lower::NativeCallOp {e node} {
             # before this milestone (M4-EQUALITY-TOTAL-SETFROMLIST-EFFECT.md).
             set op setfromlist
             if {[llength $argExprs] == 1} {
-                set listType [hir::typeOf $hir [lindex $argExprs 0]]
+                set listType [hir::types::Unrefined [hir::typeOf $hir [lindex $argExprs 0]]]
                 if {[hir::types::IsList $listType]
                         && [hir::types::IsEqualityTotal [lindex $listType 1]]} {
                     set op setfromlisttotal

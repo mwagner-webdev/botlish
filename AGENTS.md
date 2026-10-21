@@ -1324,6 +1324,56 @@ must still apply and be killed: update a mutant's text when you change the
 code it mutates, keeping it a mutant of the same rule) and `cargo test
 --release --manifest-path native/Cargo.toml --lib decimal`.
 
+## List length refinements
+
+`List[T]{length: N}` (LIST-CARDINALITY-REFINEMENTS.md) is the scalar-refinement
+schema's second family (`hir/refinements.tcl`): an ordinary immutable List
+whose exact length the compiler knows. Keep it so:
+
+* A refinement is knowledge, never representation: no tag, header, wrapper,
+  check or allocation for a refined List on any backend, no conversion at
+  decay, and no specialization or instance keyed by a length. Its one
+  run-time operation is the explicit validator `list::with_length[T](xs)`
+  (`list#with_length`, `listwithlen`), which returns its operand.
+* One canonical representation: a constant List length is stated by the
+  type (`{srefined List {length N} BASE}`) and read from it
+  (`hir::cardinality::DefinedLength`, `TypedLength`,
+  `hir::types::MeasuredValue`); never add a second constant-length fact
+  beside it. A new source mints through `-result-length` (core/native.tcl)
+  or the type rules, never by a native's name, and the schema names no
+  parameter outside its table (`llr-schema-generic`).
+* Exact length is an equality fact: never order it like a bound, invent a
+  range in a join, or mint it from an inequality. Admission never inserts a
+  length check: recovering a length takes a proof or the validator.
+* A minted length is an implementation fact: it crosses a function boundary
+  only as a declaration (the family's `declared` interface,
+  `hir::types::ForgetInferred`): undeclared results, semantic instances,
+  imprint bindings, trait witnesses, callable contracts, mutable element
+  contracts and handler admission forget it.
+* No MutableVector or MutableArray length refinement, no symbolic or
+  relational length, no user-defined key. FIXED-ARITY-LIST-RETURN reads no
+  refinement: a declared `List[T]{length: N}` result is a list result type
+  like `List[T]`, and an undeclared literal exit warns as before.
+
+If you change the List row or the schema's `exactly`, applied-base or
+interface machinery, the refined-List cases of `hir/types.tcl`, the length
+guard (`hir/refine.tcl`'s `MeasuredEquality`), admission and its messages
+(`hir/range.tcl`), the size forms (`hir/cardinality.tcl`), the proofs that
+read them (`hir/completions.tcl`), the copy types (`hir/layouts.tcl`'s
+`CopyType`, `CopiedFieldType`), a forgetting boundary, the validator
+(`hir/listlength.tcl`, `core/listlength.tcl`, `listwithlen`) or a
+`-result-length`/`-measures` registration, run
+`tests/list-length-refinement.test`,
+`audit/list-length-refinement/tools/fuzz.tcl` (several seeds, once with
+`-gc-stress 1`), `audit/list-length-refinement/tools/mutate.tcl` (every
+mutant in its `mutants.txt` must still apply and be killed: update a
+mutant's text when you change the code it mutates, keeping it a mutant of
+the same rule) and `cargo test --release --manifest-path native/Cargo.toml
+--lib list_with_length`, plus `tests/decimal-rounded.test` with its fuzzer
+and mutants for a schema change, `tests/fixed-arity-list-return.test`, and
+the layout harnesses (above) for a change to copy types or extent proofs.
+`bench/list-length-refinement.tcl` regenerates the performance report.
+
 ## Enums
 
 Enums (ENUMS.md) are named, closed, nominal sums of payload-free cases:

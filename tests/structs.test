@@ -309,7 +309,7 @@ test struct-named-field-authoritative {a named struct field has its declared typ
 
 test struct-named-in-containers {named structs are ordinary element types} -body {
     structTypes "import list\n${person}ps = \[Person \{name: \"a\", age: 1\}\]\np0 = list::at(ps, 0)\nn = p0.name"
-} -result {ps:List[Person] | p0:Person | n:str}
+} -result {ps:List[Person]{length: 1} | p0:Person | n:str}
 
 test struct-named-recursive-declaration {a struct may name itself: the type exists though no finite value constructs it} -body {
     structRun "struct Node:\n    next: Node\n    label: str\nfn follow(n: Node) -> Node:\n    n.next\n1"
@@ -462,7 +462,7 @@ test struct-type-nominal-lub {named structs join only with themselves; shape coi
 
 test struct-list-of-anonymous {anonymous structs of one field set infer List[struct]} -body {
     structTypes "import list\nxs = \[\{name: \"a\", age: 1\}, \{age: 2, name: \"b\"\}\]\nsecond = list::at(xs, 1)\nn = second.name"
-} -result {xs:List[struct{age: int, name: str}] | second:struct{age: int, name: str} | n:str}
+} -result {xs:List[struct{age: int, name: str}]{length: 2} | second:struct{age: int, name: str} | n:str}
 
 test struct-list-of-anonymous-run {list::at of List[struct] keeps the struct type for a dynamic index} -body {
     structRun "import list\nxs = \[\{name: \"a\", age: 1\}, \{age: 2, name: \"b\"\}\]\nfn at(i) errors IndexNotFound:\n    list::at(xs, i).name\n\[at(0), at(1)\]"

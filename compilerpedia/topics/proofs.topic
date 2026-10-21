@@ -66,7 +66,7 @@ summary: list::at, mutable_array::at, mutable_array::set and str::char_at fail w
 index: proofs stdlib
 alias: bounds proof; bounds; bounds check; IndexNotFound; index proof; range proof; indexed access; list index; index out of range; out of bounds; IndexNotFound proof; array index
 keywords: list::at, at, index, length, guard, loop, descending, field, local binding, mod, bit_and, mask, hash, capacity
-related: proof.slices proof.completions proof.ranges concept.lists concept.errors rule.unhandled-errors rule.known-error stdlib.list::at stdlib.list::get principle.restate-in-proven-form
+related: proof.slices proof.completions proof.ranges concept.lists concept.list-length concept.errors rule.unhandled-errors rule.known-error stdlib.list::at stdlib.list::get principle.restate-in-proven-form
 docs: STDLIB-NAMESPACES.md STATIC-COMPLETION-PROOFS.md REFACTOR-WARNINGS-CLEAN.md
 match: CORE SEMANTIC UNHANDLED-ERROR | this call of "list::at" may produce*
 match: CORE SEMANTIC UNHANDLED-ERROR | this call of "mutable_array::at" may produce*
@@ -114,7 +114,11 @@ forms:
     name the same value through it, or through an alias of it.
   * a length guard and a constant index:  if xs.length() > 0: xs.at(0)
   * a container of statically known size with an index of known range:
-    a list literal (or an immutable binding of one) and a constant index.
+    a list literal (or an immutable binding of one) and a constant index,
+    or any List whose type states its length, List[T]{length: N}
+    (concept.list-length): a declared parameter, field or result, a guard
+    `if xs.length() == N:`, the copy of a fixed layout array, or
+    list::with_length. An index proven outside 0..N-1 is KNOWN-ERROR.
   * a container reached through a field, written as the same field path in
     the loop, guard or reduction and in the access (`s.items.length()` ...
     `s.items.at(i)`), or bound to a local name first (`xs = s.items`). A
@@ -167,6 +171,17 @@ fn pick(xs: List[int], t: int) -> int:
 [10, 20, 30].pick(1)
 @caption A guard on a parameter dominates the read
 @value 20
+@end
+
+@example accept
+import list
+
+fn corners(xs: List[int]{length: 4}) -> int:
+    xs.at(0) + xs.at(3)
+
+[1, 2, 3, 4].corners()
+@caption A declared exact length and constant indices
+@value 5
 @end
 
 @example accept
@@ -298,7 +313,8 @@ to the length, so the call must handle or admit IndexNotFound:
   * a descending loop: `loop i down from xs.length() - 1 through 0:`
     xs.at(i), including as a lockstep clause.
   * an index or length that crosses a function boundary: facts about a
-    caller's arguments are not carried into the callee's analysis.
+    caller's arguments are not carried into the callee's analysis, unless
+    the callee declares them (a parameter of type List[T]{length: N}).
   * an index reduced by another container's size, even one of equal size:
     `keys.at(h.mod(slots.capacity()))` (equal capacities of two arrays are
     not recorded), an offset of a reduced index (`h.mod(n) + 1`), or a mask

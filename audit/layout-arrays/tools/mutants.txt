@@ -129,12 +129,16 @@
     if {$copy ne ""} {
 >>>>
 
-@@ loaded-length-one-more a List binary::load copied from an array of N is taken to have N + 1 elements
-## hir/cardinality.tcl
+@@ loaded-length-one-more a List binary::load copied from an array of N is taken to have N + 1 elements (the length its type states, which the size forms read: LIST-CARDINALITY-REFINEMENTS.md)
+## hir/types.tcl
 <<<<
-                return [FormConst [lindex $term 1]]
+            if {$term ne "" && [string is entier -strict [lindex $term 1]]} {
+                return [lindex $term 1]
+            }
 ====
-                return [FormConst [expr {[lindex $term 1] + 1}]]
+            if {$term ne "" && [string is entier -strict [lindex $term 1]]} {
+                return [expr {[lindex $term 1] + 1}]
+            }
 >>>>
 
 @@ reference-extent-short-accepted the reference implementation accepts a List shorter than the extent (writing fewer elements)

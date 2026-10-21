@@ -38,7 +38,7 @@ e19 bind b7 known : str
             e24 const yes : str
         else s9
             e25 const no : str unreachable
-e26 call native(list) : list
+e26 call native(list) : list{length: 4}
     e27 ref b8 list : native list
     e28 call block(e2) : int
         e29 ref b1 describe : block(e2)/1 -> any

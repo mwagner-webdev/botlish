@@ -298,6 +298,12 @@ proc hir::semantic::Call {hir ctx e block argTypes blockResult} {
     set trivial 1
     set index 0
     foreach t $argTypes d $declared {
+        # A List length a caller's argument happens to have selects no
+        # instance: a fact inference minted crosses a function boundary
+        # only as a declared contract (hir::types::ForgetInferred,
+        # LIST-CARDINALITY-REFINEMENTS.md), so calls with Lists of three and
+        # of four elements share one instance.
+        set t [hir::types::ForgetInferred $t]
         if {$d ne {} && [hir::types::IsTraitConstraint $d]} {
             # A trait-typed parameter (TRAITS.md): the instance is entered
             # with the argument's view -- its hidden witness is the instance's
@@ -427,6 +433,11 @@ proc hir::semantic::Call {hir ctx e block argTypes blockResult} {
         }
     }
     set result [dict get $state instances $id result]
+    if {[dict get $node declaredResult] eq {}} {
+        # (An undeclared result forgets what inference minted, as the
+        # generic one does: hir::types::Block.)
+        set result [hir::types::ForgetInferred $result]
+    }
     # The generic result is sound for every argument: an instance result that
     # is not at least as precise never replaces it.
     if {![Refines $result $blockResult]} {
@@ -473,6 +484,10 @@ proc hir::semantic::Refines {type generic} {
 
 # TYPE with every MutableArray[T] contract replaced by the raw kind.
 proc hir::semantic::EraseArrays {type} {
+    if {[hir::types::IsRefinedApplied $type]} {
+        return [hir::types::Refine [EraseArrays [hir::refinements::Base $type]] \
+            [hir::refinements::Family $type] [hir::refinements::Facts $type]]
+    }
     if {[hir::types::IsMutArray $type]} {
         return mutarray
     }

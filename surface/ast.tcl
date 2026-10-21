@@ -836,10 +836,15 @@ proc surface::ast::showType {type} {
         # FIXED-LAYOUT-ARRAYS.md).
         return "array [lindex $type 1] of [showType [lindex $type 2]]"
     }
-    if {[llength $type] == 3 && [lindex $type 0] eq "refine"} {
+    if {[llength $type] in {3 4} && [lindex $type 0] eq "refine"} {
         # A scalar refinement (surface::parser::ScalarRefinement,
-        # DECIMAL-ROUNDED-MILESTONE-1.md), its parameters as written.
-        return "[lindex $type 1]{[join [lmap field [lindex $type 2] {join $field {: }}] {, }]}"
+        # DECIMAL-ROUNDED-MILESTONE-1.md), its parameters as written -- of
+        # an applied type, after it (LIST-CARDINALITY-REFINEMENTS.md).
+        set head [lindex $type 1]
+        if {[llength $type] == 4} {
+            set head [showType [lindex $type 3]]
+        }
+        return "$head{[join [lmap field [lindex $type 2] {join $field {: }}] {, }]}"
     }
     lassign $type name arg
     if {$name eq "fn"} {

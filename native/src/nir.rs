@@ -55,6 +55,11 @@ pub enum OpCode {
     ListLen,
     ListGet,
     ListAppend,
+    /// `list#with_length(L, N)` (core/listlength.tcl, LIST-CARDINALITY-
+    /// REFINEMENTS.md): L itself when it has exactly N elements, else the
+    /// declared LengthMismatch -- the explicit validator of the List
+    /// length refinement; never a copy.
+    ListWithLength,
     /// List -> ImmutableSet, deduplicating by VEq's own rule (MINIMAL-
     /// IMMUTABLE-SET.md's `immutable_set::from_list`): O(n^2), the
     /// deliberately simple first representation -- no inline fast path
@@ -729,6 +734,7 @@ op_spellings! {
     "listlen" => ListLen,
     "listget" => ListGet,
     "listappend" => ListAppend,
+    "listwithlen" => ListWithLength,
     "setfromlist" => SetFromList,
     "setfromlisttotal" => SetFromListTotal,
     "setcontains" => SetContains,

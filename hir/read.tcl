@@ -743,6 +743,18 @@ proc hir::read::ParseType {text number} {
         }
         return [hir::types::MakeFn $argTypes [ParseType $returnText $number] $errors]
     }
+    set applied [hir::refinements::ParseApplied $text]
+    if {$applied ne ""} {
+        # A scalar refinement of an applied type (LIST-CARDINALITY-
+        # REFINEMENTS.md): hir::types::show's spelling, the base read back
+        # like any type, then refined.
+        lassign $applied family baseText facts
+        set type [hir::types::Refine [ParseType $baseText $number] $family $facts]
+        if {![hir::types::IsRefinedApplied $type]} {
+            Fail $number "bad scalar refinement \"$text\": the base states other facts, or none can be refined"
+        }
+        return $type
+    }
     if {[hir::refinements::isFamily [lindex [split $text "\{"] 0]] && [string index $text end] eq "\}"} {
         # A scalar refinement (hir/refinements.tcl, DECIMAL-ROUNDED-
         # MILESTONE-1.md): hir::types::show's source spelling.
@@ -1675,6 +1687,10 @@ proc hir::read::CanonicalType {hir type} {
             return [hir::types::blockType $hir $e $arity $result]
         }
         return [lreplace $type 3 3 $result]
+    }
+    if {[hir::types::IsRefinedApplied $type]} {
+        return [hir::types::Refine [CanonicalType $hir [hir::refinements::Base $type]] \
+            [hir::refinements::Family $type] [hir::refinements::Facts $type]]
     }
     if {[hir::types::IsList $type]} {
         set out [lreplace $type 1 1 [CanonicalType $hir [lindex $type 1]]]

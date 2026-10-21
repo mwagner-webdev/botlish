@@ -53,6 +53,8 @@
 //! | rt_list_get_proven     | List, Int           | element (index proven valid  | no        |
 //! |                        |                     | by hir/completions.tcl)      |           |
 //! | rt_list_append         | List, any           | new List (copy)              | yes       |
+//! | rt_list_with_length    | List, Int           | the same List; declared      | no        |
+//! |                        |                     | LengthMismatch               |           |
 //! | rt_set_from_list       | List                | ImmutableSet; EQUALITY       | yes       |
 //! | rt_set_contains        | ImmutableSet, any   | Bool; EQUALITY               | no        |
 //! | rt_mutarray_allocate   | count                | MutableArray (slots = UNIT)  | yes       |
@@ -247,7 +249,7 @@ pub fn op_may_error(op: OpCode) -> bool {
         // another architecture's target the transport is NATIVE
         // UNSUPPORTED, also through NO_VALUE.)
         | SyscallLinuxX86_64 | SyscallLinuxAarch64
-        | ListNew | ListGet | ListAppend | MutArrayAllocate | MutArrayGet | MutArraySet | MutArrayCopy | MutArrayFreeze
+        | ListNew | ListGet | ListAppend | ListWithLength | MutArrayAllocate | MutArrayGet | MutArraySet | MutArrayCopy | MutArrayFreeze
         // MutableVector: the declared IndexNotFound (runtime/mutvec.rs).
         | MvAt | MvPop | MvTake | MvSwap | MvSwapDrop
         // MutableArray: a capacity outside the limit (RANGE), the declared
@@ -2094,6 +2096,18 @@ pub extern "C" fn rt_list_get(p: *mut Vm, l: Value, index: Value) -> Value {
     }
 }
 
+/// `list#with_length(L, N)` (`listwithlen`, LIST-CARDINALITY-REFINEMENTS.md):
+/// L itself -- the same List, never a copy -- when it has exactly N
+/// elements, else the declared LengthMismatch.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_list_with_length(p: *mut Vm, l: Value, n: Value) -> Value {
+    let len = list_of(l).items().len();
+    match int_small(n) {
+        Some(want) if want >= 0 && want as usize == len => l,
+        _ => fail_builtin(p, super::error::ERR_LENGTH_MISMATCH, "LengthMismatch"),
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_list_append(p: *mut Vm, l: Value, v: Value) -> Value {
     let old = list_of(l).items();
@@ -2879,6 +2893,7 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         ListLen => rt_list_len(p, a[0]),
         ListGet => rt_list_get(p, a[0], a[1]),
         ListAppend => rt_list_append(p, a[0], a[1]),
+        ListWithLength => rt_list_with_length(p, a[0], a[1]),
         SetFromList => rt_set_from_list(p, a[0]),
         // Same runtime helper as SetFromList: the distinction is purely an
         // op_may_error classification (see OpCode::SetFromListTotal's own
@@ -3129,6 +3144,7 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_struct_new, 4),
         h!(rt_list_len, 2),
         h!(rt_list_get, 3),
+        h!(rt_list_with_length, 3),
         h!(rt_list_get_proven, 3),
         h!(rt_list_append, 3),
         h!(rt_construct, 4),
@@ -4164,6 +4180,34 @@ mod tests {
                 vm.declared_error = 0;
             }
         }
+    }
+
+    // list#with_length (LIST-CARDINALITY-REFINEMENTS.md): the List itself
+    // (the same object, never a copy) when it has exactly the length, else
+    // the builtin declared error LengthMismatch -- also for a negative or
+    // BigInt length, which no List has.
+
+    #[test]
+    fn list_with_length_returns_its_operand_or_length_mismatch() {
+        let mut vm = vm();
+        let list = rooted!(vm, vm.new_list(vec![small(10), small(20), small(30)]));
+        let lists = vm.metrics.by_kind[KIND_LIST as usize].allocations;
+        assert_eq!(rt_list_with_length(&mut *vm, list, small(3)), list);
+        assert_eq!(vm.declared_error, 0);
+        assert_eq!(vm.metrics.by_kind[KIND_LIST as usize].allocations, lists);
+        let big = rooted!(vm, vm.new_big(num_bigint::BigInt::from(1u8) << 80));
+        for n in [small(2), small(4), small(0), small(-3), big] {
+            assert_eq!(rt_list_with_length(&mut *vm, list, n), NO_VALUE);
+            assert_eq!(vm.declared_error, crate::runtime::error::ERR_LENGTH_MISMATCH);
+            assert_eq!(
+                vm.error.as_ref().map(|e| (e.error_code(), e.message())),
+                Some((vec!["CORE", "SEMANTIC", "UNCAUGHT-ERROR"], "uncaught propagated error: <error LengthMismatch>".to_string()))
+            );
+            vm.error = None;
+            vm.declared_error = 0;
+        }
+        let empty = rooted!(vm, vm.new_list(vec![]));
+        assert_eq!(rt_list_with_length(&mut *vm, empty, small(0)), empty);
     }
 
     // The *proven helpers (hir/completions.tcl's bounds proof, PROOF-FACT-
