@@ -680,10 +680,13 @@ every further argument in its own 8-byte stack slot, LLP64's 32-bit
 is `NAME.lib` (a static library or a DLL's import library), `-L DIR` is
 `/LIBPATH:DIR`, and there is no archive group (link.exe searches every
 library until nothing more resolves). Every executable links the static
-release C runtime and excludes every other Microsoft runtime, so a C
-library compiled for `/MT` shares it and one compiled for `/MD` has its
-runtime references resolved against it (section "The C runtime" of the
-milestone report). The machine state each call arrives in is checked
+release C runtime and excludes every other Microsoft runtime, so a static
+C library compiled for `/MT` (cl's default) shares it, and one compiled for
+`/MD` does not link: its calls of the runtime are `__imp_` imports, which
+link.exe resolves against the static runtime only for a function something
+else linked anyway (LNK4217) and otherwise refuses (LNK2019, NATIVE LINK
+with the driver's explanation). A DLL keeps its own runtime, `/MT` or `/MD`
+(section "The C runtime" of the milestone report). The machine state each call arrives in is checked
 against MSVC-built callees (tests/cffi/fixture.c with
 tests/cffi/fixture-win64.asm's capture). A variadic C call is a codegen
 error on Windows (no Win64 variadic lowering yet). Windows I/O is a binding

@@ -167,7 +167,7 @@ int bcfw_install(void) {
     }
     const char *log = getenv("BCFW_LOG");
     if (log != NULL) {
-        bcfw_log = fopen(log, "w");
+        bcfw_log = fopen(log, "wb");
     }
     HMODULE self = GetModuleHandleW(NULL);
     bcfw_patch(self, "CloseHandle", (void *)inject_close_handle, (void **)&bcfw_real_close_handle);

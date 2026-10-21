@@ -777,7 +777,8 @@ proc windowsChecks {} {
 # static library and a DLL, each compiled for the static runtime (/MT) and
 # for the dynamic one (/MD), every one calling the C runtime (snprintf,
 # malloc, strlen, strtol, free), linked into an executable that links the
-# static runtime and nothing else.
+# static runtime and nothing else: the /MT library and both DLLs link and
+# run, the /MD library is refused by link.exe (its __imp_ imports).
 proc windowsCCalls {runDir cwdDir} {
     global work
     if {![ctool::available]} {
@@ -876,6 +877,19 @@ proc windowsCCalls {runDir cwdDir} {
         }
         set text "import ffi::c\n\nextern c library \"$name\"\n\nextern c fn f named \"$name\"(x: ffi::c::Long) -> ffi::c::Long\n\nf(1234)\n"
         set failed [catch {native::withLinkDirs [list $dir] {native::executable [surface::compile $text $name.bot -warnings off] [file join $runDir $name]}} exe options]
+        if {$kind eq "static" && $crt eq "dynamic"} {
+            # A /MD library calls the C runtime through __imp_ imports, which
+            # the static runtime does not define: link.exe resolves the ones
+            # something else already linked (LNK4217) and refuses the rest
+            # (LNK2019), with the driver's explanation (codegen/aot.rs's
+            # link_hint). Never a second runtime linked silently.
+            set said [join [lrange [split $exe \n] 1 end] \n]
+            check $check [expr {$failed && [lrange [dict get $options -errorcode] 0 1] eq {NATIVE LINK}
+                    && [regexp {LNK20(19|01): unresolved external symbol __imp_} $said]
+                    && [string match "*compile the library with /MT*" $said]}] \
+                "[expr {$failed ? [lrange [dict get $options -errorcode] 0 1] : "linked"}]: link.exe refuses the /MD library's unresolved __imp_ imports (LNK2019) and the driver says why; resolved against the static runtime (LNK4217): [regexp -all {LNK4217} $said]" $exe
+            continue
+        }
         if {$failed} {
             check $check 0 "[lrange [dict get $options -errorcode] 0 1]: [lindex [split $exe \n] 0]" $exe
             continue

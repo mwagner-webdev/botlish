@@ -887,7 +887,7 @@ test cf-undefined-symbol {a symbol no library defines is the linker's undefined 
     set used [bcfApp "import ffi::c\nimport m\n\nm::nope(1)\n" [list m.bot "import ffi::c\n\nextern c fn nope named \"botlish_no_such_symbol\"(x: ffi::c::Int) -> ffi::c::Int\n"]]
     set unused [bcfApp "import ffi::c\nimport m\nimport bcf\n\nbcf::add(1, 2)\n" [list m.bot "import ffi::c\n\nextern c fn nope named \"botlish_no_such_symbol\"(x: ffi::c::Int) -> ffi::c::Int\n"]]
     lassign [lindex [appValues $used {cranelift}] 0] code message
-    list $code [regexp -nocase {undefined (symbol|reference)[^\n]*botlish_no_such_symbol|LNK2019: unresolved external symbol botlish_no_such_symbol} $message] [appValues $unused {cranelift}]
+    list $code [regexp -nocase {undefined (symbol|reference)[^\n]*botlish_no_such_symbol|LNK20(19|01): unresolved external symbol botlish_no_such_symbol} $message] [appValues $unused {cranelift}]
 } -cleanup removeApps -result {{NATIVE LINK} 1 3}
 
 test cf-named-symbol {`named` changes exactly the link symbol: the Botlish name stays the declaration's; without it the symbol is the name} -constraints cfFixture -body {
@@ -926,7 +926,7 @@ test cf-stub-linker {the stub linker links no native library: it refuses a progr
     } finally {
         if {$saved eq ""} { unset ::env(BOTLISH_NATIVE_LINKER) } else { set ::env(BOTLISH_NATIVE_LINKER) $saved }
     }
-} -cleanup removeApps -result {{{NATIVE LINK} {native link failed: this program calls C or declares a C library (symbols bcf_add; libraries -lbotlish_cffi_fixture), which only the system linker resolves, and the stub linker (BOTLISH_NATIVE_LINKER=stub, the single executable's) links no native library: link it with the rustc linker of a Botlish checkout whose native backend is built (BOTLISH_NATIVE_LINKER=rustc; C-FFI.md)}} {{NATIVE LINK} {native link failed: this program calls C or declares a C library (libraries -lbotlish_cffi_fixture), which only the system linker resolves, and the stub linker (BOTLISH_NATIVE_LINKER=stub, the single executable's) links no native library: link it with the rustc linker of a Botlish checkout whose native backend is built (BOTLISH_NATIVE_LINKER=rustc; C-FFI.md)}}}
+} -cleanup removeApps -result [list [list {NATIVE LINK} "native link failed: this program calls C or declares a C library (symbols bcf_add; libraries [linkedName botlish_cffi_fixture]), which only the system linker resolves, and the stub linker (BOTLISH_NATIVE_LINKER=stub, the single executable's) links no native library: link it with the rustc linker of a Botlish checkout whose native backend is built (BOTLISH_NATIVE_LINKER=rustc; C-FFI.md)"] [list {NATIVE LINK} "native link failed: this program calls C or declares a C library (libraries [linkedName botlish_cffi_fixture]), which only the system linker resolves, and the stub linker (BOTLISH_NATIVE_LINKER=stub, the single executable's) links no native library: link it with the rustc linker of a Botlish checkout whose native backend is built (BOTLISH_NATIVE_LINKER=rustc; C-FFI.md)"]]
 
 test cf-main-tcl {main.tcl -backend cranelift -L DIR compiles, links with the declared libraries, runs and reports the value, the program's own output in its place (native program output is main.tcl's own)} -constraints cfFixture -body {
     set dir [bcfApp "import ffi::c\nimport bcf\n\nbcf::add(40, 2)\n"]
@@ -1478,7 +1478,9 @@ testConstraint foreignArchive [expr {$::foreignArchiveDir ne ""}]
 test cf-wrong-architecture {a library of another architecture is the linker's to refuse: NATIVE LINK with the linker's own words about it -- a line naming the library's file and what is wrong with it (lld's "is incompatible with", GNU ld's "skipping incompatible" or "Relocations in generic ELF", Apple ld's architecture it found, link.exe's conflicting machine type) -- never a run of anything} -constraints {cfFixture foreignArchive} -body {
     set dir [app [list main.bot "import ffi::c\n\nextern c library \"botlish_cffi_foreign\"\n\nextern c fn add named \"bcfx_add\"(a: ffi::c::Int, b: ffi::c::Int) -> ffi::c::Int\n\nadd(40, 2)\n"]]
     lassign [native::withLinkDirs [list $::foreignArchiveDir] {outcomeUnderHir cranelift [appHir $dir]}] tag code message
-    set named [lsearch -inline -regexp [split $message \n] [string map {. \\.} [ctool::staticName botlish_cffi_foreign]]]
+    # The linker's lines, after the message's own first line (which names
+    # the library as the link plan spells it: NAME.lib on Windows).
+    set named [lsearch -inline -regexp [lrange [split $message \n] 1 end] [string map {. \\.} [ctool::staticName botlish_cffi_foreign]]]
     list $tag $code [regexp -nocase {incompatible|architecture|wrong format|file format not recognized|Relocations in generic ELF|machine type} $named] \
         [string match "native link failed: the system linker could not link this program*" $message]
 } -cleanup removeApps -result {error {NATIVE LINK} 1 1}

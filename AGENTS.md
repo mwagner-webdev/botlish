@@ -999,7 +999,10 @@ WINDOWS-TOOLCHAIN-CENSUS.md): the driver and runtime built for
   system's DLLs: never let it import `VCRUNTIME140.dll` or the UCRT, never
   link a second runtime beside the static one, and never impose the
   executable's runtime on anything else (the driver; a DLL keeps its own)
-  (WINDOWS-X86-64-MILESTONE-2.md, "The C runtime").
+  (WINDOWS-X86-64-MILESTONE-2.md, "The C runtime"). A static C library must
+  be `/MT`: a `/MD` one's `__imp_` imports of the runtime fail to link
+  (LNK2019; `link_hint` explains them), and that is the policy's answer,
+  never a reason to link the dynamic runtime.
 * C calls run on Windows (`C_CALLS`; WINDOWS-X86-64-MILESTONE-2.md): the
   Win64 convention is Cranelift's `windows_fastcall`, checked against
   MSVC-built callees (tests/cffi/fixture.c with fixture-win64.asm's

@@ -1143,10 +1143,12 @@ a symbol is its C name, never Mach-O's `_`-prefixed spelling, which the
 toolchain adds. On Windows `extern c library "NAME"` is the file NAME.lib
 -- a static library, or a DLL's import library (the DLL itself must then
 be beside the executable or on PATH when it runs) -- and every executable
-links the static release C runtime (/MT, cl's default), so build a C
-library with /MT; a /MD one's references to the C runtime are resolved
-against the static runtime (WINDOWS-X86-64-MILESTONE-2.md, "The C
-runtime"). The Tcl backends never call C. For NATIVE AOT:
+links the static release C runtime (/MT, cl's default), so build a static
+C library with /MT: a /MD one calls the C runtime through `__imp_` imports
+the static runtime does not define, and link.exe reports them unresolved
+("error LNK2019: unresolved external symbol __imp_NAME"; the message then
+says so). A DLL may use either runtime (WINDOWS-X86-64-MILESTONE-2.md, "The
+C runtime"). The Tcl backends never call C. For NATIVE AOT:
 the default (rustc) linker needs rustc and a built native backend in the
 checkout, and on macOS the Xcode command line tools (the system linker);
 the stub linker needs neither but is Linux x86-64 only and links no C.

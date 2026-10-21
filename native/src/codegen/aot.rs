@@ -338,6 +338,25 @@ fn linker_diagnostics(stderr: &str) -> String {
     if lines.is_empty() { stderr.to_string() } else { lines.join("\n") }
 }
 
+/// What a FLAVOR linker's DIAGNOSTICS mean when they are about the C runtime
+/// rather than the program, said once after them. link.exe's unresolved
+/// `__imp_NAME` is a reference compiled to be imported from a DLL: a C
+/// library compiled for the dynamic C runtime (cl's `/MD`) refers to the
+/// runtime's functions so, and a Botlish executable links the static release
+/// C runtime and no other (`crt_args`), which defines NAME but no `__imp_NAME`
+/// -- link.exe resolves such a reference itself (LNK4217) only when the
+/// static runtime's NAME is linked anyway, so a `/MD` library links or not
+/// by what else the program happens to pull in (WINDOWS-X86-64-MILESTONE-2.md,
+/// "The C runtime"). Nothing for any other failure or linker.
+fn link_hint(flavor: LinkerFlavor, diagnostics: &str) -> Option<&'static str> {
+    if flavor == LinkerFlavor::Msvc && diagnostics.contains("unresolved external symbol __imp_") {
+        return Some(
+            "an unresolved __imp_ symbol is a reference compiled to be imported from a DLL: a C library compiled for the dynamic C runtime (cl /MD) refers to the runtime's functions so, and a Botlish executable links the static C runtime (/MT, cl's default) and no other: compile the library with /MT, or, for a function a DLL exports, link the DLL's import library",
+        );
+    }
+    None
+}
+
 /// The `rustc` linker: a generated startup crate, compiled and linked
 /// against this build's runtime library.
 fn link_rustc(program: &Program, destination: &Path, link_dirs: &[String]) -> Result<(), String> {
@@ -391,10 +410,13 @@ fn link_rustc(program: &Program, destination: &Path, link_dirs: &[String]) -> Re
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         if calls_c(program) {
+            let diagnostics = linker_diagnostics(&stderr);
+            let hint = link_hint(LINKER, &diagnostics).map(|hint| format!("\n{hint}")).unwrap_or_default();
             return Err(format!(
-                "native link failed: the system linker could not link this program with the C functions and libraries it declares ({}):\n{}",
+                "native link failed: the system linker could not link this program with the C functions and libraries it declares ({}):\n{}{}",
                 describe_link_plan(program),
-                linker_diagnostics(&stderr)
+                diagnostics,
+                hint
             ));
         }
         return Err(format!("executable link failed ({}):\n{}", output.status, stderr));
@@ -464,12 +486,16 @@ const OTHER_MSVC_RUNTIMES: [&str; 12] = [
 ///     both, warn (LNK4098) and give the library a second heap, a second
 ///     errno and a second set of stdio streams. So every other runtime's
 ///     library is excluded (`/NODEFAULTLIB:`, `OTHER_MSVC_RUNTIMES`): a
-///     library compiled with `/MT` (cl's default) shares the executable's
-///     runtime, one compiled with `/MD` that calls the runtime is resolved
-///     against the static one or fails to link with link.exe's own words
-///     (NATIVE LINK), never silently linked with a second runtime; a DLL
-///     keeps the runtime it was linked with, behind its own exports, as
-///     every Windows DLL does.
+///     static library compiled with `/MT` (cl's default) shares the
+///     executable's runtime; one compiled with `/MD` that calls the runtime
+///     refers to it through `__imp_` imports, which link.exe resolves
+///     against the static runtime only for a function something else
+///     already linked (LNK4217), and otherwise fails to link (LNK2019,
+///     NATIVE LINK, with `link_hint`'s explanation) -- never silently
+///     linked with a second runtime. A DLL keeps the runtime it was linked
+///     with, behind its own exports, as every Windows DLL does: one built
+///     with `/MD` needs the Visual C++ redistributable where it runs, the
+///     executable still does not.
 ///
 /// Nothing elsewhere: Linux and macOS executables use the system's C
 /// library as they always have.
@@ -999,6 +1025,20 @@ mod tests {
     /// program, one that calls C included, and every other Microsoft runtime
     /// excluded from the link, so that a C library's default-library
     /// directive never brings a second one; nothing anywhere else.
+    #[test]
+    fn link_hint_explains_imports_of_the_dynamic_c_runtime() {
+        // link.exe's words for a /MD library's runtime call in a static-CRT
+        // executable (WINDOWS-X86-64-MILESTONE-2.md, "The C runtime").
+        let md = "LINK : warning LNK4217: symbol 'malloc' defined in 'libucrt.lib(malloc.obj)' is imported by 'lib.lib(lib.obj)' in function 'f'\n\
+                  lib.lib(lib.obj) : error LNK2019: unresolved external symbol __imp_strtol referenced in function f";
+        let hint = link_hint(LinkerFlavor::Msvc, md).expect("a hint for __imp_");
+        assert!(hint.contains("/MD") && hint.contains("/MT"), "{hint}");
+        // Only for that: an ordinary unresolved symbol, another linker.
+        assert_eq!(link_hint(LinkerFlavor::Msvc, "program.o : error LNK2019: unresolved external symbol botlish_nope referenced in function botlish_fn_0"), None);
+        assert_eq!(link_hint(LinkerFlavor::Gnu, md), None);
+        assert_eq!(link_hint(LinkerFlavor::Apple, md), None);
+    }
+
     #[test]
     fn crt_is_static_and_alone_for_msvc_executables() {
         let ffi = crate::nir::parse(FFI_PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));

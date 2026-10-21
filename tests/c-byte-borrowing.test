@@ -425,7 +425,7 @@ proc bbRefusal {decls statement target} {
         surface::readProgramFile [file join $dir main.bot] -warnings off -cache "" -target $target
         return accepted
     } on error {message options} {
-        regsub {^[^:]*:[0-9]+:[0-9]+: } [lindex [split $message \n] 0] {} message
+        regsub {^.*?:[0-9]+:[0-9]+: } [lindex [split $message \n] 0] {} message
         return [list [lindex [dict get $options -errorcode] end] $message]
     } finally {
         file delete -force $dir

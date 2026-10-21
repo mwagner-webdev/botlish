@@ -248,3 +248,11 @@ fn crt_args_for(flavor: LinkerFlavor, _program: &Program) -> Vec<String> {
     for library in OTHER_MSVC_RUNTIMES.iter().take(0) {
         args.extend(["-C".to_string(), format!("link-arg=/NODEFAULTLIB:{library}")]);
 >>>>
+
+@@ msvc-link-hint-silent link.exe's unresolved __imp_ imports (a /MD library in a static-runtime executable) come with no explanation of the C runtime policy
+## native/src/codegen/aot.rs
+<<<<
+    if flavor == LinkerFlavor::Msvc && diagnostics.contains("unresolved external symbol __imp_") {
+====
+    if flavor == LinkerFlavor::Msvc && diagnostics.contains("unresolved external symbol __imp__") {
+>>>>
