@@ -2275,6 +2275,15 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 self.bool_of(eq)
             }
             CPtrSame => a[0],
+            // `keepalive %b` (C-FFI-ERROR-CAPTURE-MILESTONE-1.md): no machine
+            // operation at all. What keeps %b a GC root up to here is the NIR
+            // use itself: codegen::roots's liveness counts it, so %b's slot
+            // is in the stack map of every safepoint before it -- the
+            // exposing syscall's or C call's own included -- and is not
+            // reused before it. Emitting nothing also means nothing runs
+            // between a C call and the code that reads its result: a call
+            // there could disturb the C error state (errno).
+            KeepAlive => self.iconst(UNIT),
             VEq => {
                 // Two small Ints compare as words; everything else structurally.
                 let (fast, slow, done, result) = self.both_small_split(a[0], a[1]);
@@ -2483,13 +2492,11 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         // allocates one object (or returns the static empty
                         // one) and is fallible (a non-byte element is TYPE);
                         // length/address read the header of a value that must
-                        // be a storage (TYPE otherwise) and never allocate;
-                        // keepalive is a real call so it is never removed
-                        // and its operand is live across everything before it.
+                        // be a storage (TYPE otherwise) and never allocate
+                        // (keepalive is no call: above).
                         BytesFromList => ("rt_bytes_from_list", None, true, Some(("bytesfromlist", KIND_BYTES))),
                         BytesLen => ("rt_bytes_len", None, true, None),
                         BytesAddr => ("rt_bytes_addr", None, true, None),
-                        KeepAlive => ("rt_keepalive", None, false, None),
                         // Fixed binary layouts (BINARY-LAYOUT.md): one helper
                         // call per field; all fallible only on operands a
                         // checked program never produces. A load may build a

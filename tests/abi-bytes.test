@@ -805,7 +805,7 @@ test abi-bytes-nir-dynamic-payload-precedes-the-syscall {a payload built dynamic
         [orderOf $names [nirFunction $nir out]] [regexp -all {op bytesfromlist} [nirFunction $nir abi::bytes::from_list]]
 } -result {{mk out} {strutf8bytes abi::bytes::from_list} {abi::i32 linux::write} 1}
 
-test abi-bytes-clif-keepalive-and-stack-map {CLIF of linux::sys::write (linux::write's x86-64 transport): rt_bytes_addr, then the syscall helper, then rt_keepalive, in that order, with the keepalive's operand the very value rt_bytes_addr took (the storage), and the syscall call's stack map names the stack slot that holds that storage -- so the collector sees it as a root at the syscall's own safepoint (nativeFrameRoots: elsewhere it is a shadow-stack root and no stack map is emitted)} -body {
+test abi-bytes-clif-keepalive-and-stack-map {CLIF of linux::sys::write (linux::write's x86-64 transport): rt_bytes_addr, then the syscall helper, and no call after it -- the NIR keepalive is no machine code (C-FFI-ERROR-CAPTURE-MILESTONE-1.md); what it guarantees is the syscall call's stack map, which names the stack slot that holds the very value rt_bytes_addr took (the storage) -- so the collector sees it as a root at the syscall's own safepoint (nativeFrameRoots: elsewhere it is a shadow-stack root and no stack map is emitted)} -body {
     set clif [native::clif [bytesHir "${::linuxPrelude}\nout(3, mk(\"hi\"))" 1 linux-x86_64]]
     set helperOf [dict create]
     foreach {- ref name} [regexp -all -inline -line {^; (u0:[0-9]+) = (rt_[a-z0-9_]+)} $clif] { dict set helperOf $ref $name }
@@ -836,9 +836,9 @@ test abi-bytes-clif-keepalive-and-stack-map {CLIF of linux::sys::write (linux::w
     set offset 0
     regexp "store \[a-z.0-9 \]*$root, v3(?:\\+(\[0-9\]+))?\n" "$block\n" -> offset
     if {$offset eq ""} { set offset 0 }
-    list $names [expr {[lindex $addr 1] eq [lindex $keep 1]}] \
+    list $names [expr {$keep eq ""}] \
         [regexp "ss0\\+$offset\[,\\]\]" [lindex $syscall 2]]
-} -result [list {rt_bytes_addr rt_linux_x86_64_syscall rt_keepalive} 1 [testConstraint nativeFrameRoots]]
+} -result [list {rt_bytes_addr rt_linux_x86_64_syscall} 1 [testConstraint nativeFrameRoots]]
 
 test abi-bytes-nir-static-constant {NIR of a small constant: abi::bytes::from_list(str::encode_utf8("hello\n")) is one static byte-storage constant (`bytes "HEX"`): no abi::bytes::from_list call, no op bytesfromlist, no List, no String -- and it goes through the very same linux::write (whose transport linux::sys::write has one bytesaddr, one syscall, one keepalive), so there are not two source semantics for the two physical forms} -body {
     set nir [native::nir [bytesHir "${::linuxPrelude}\nout(3, abi::bytes::from_list(str::encode_utf8(\"hello\\n\")))" 1 linux-x86_64]]
@@ -931,18 +931,15 @@ proc machineCalls {exe function} {
     return $calls
 }
 
-test abi-bytes-machine-code-write-function {the machine code of linux::sys::write (linux::write's x86-64 transport) in a standalone executable: it calls the runtime helper that takes the payload address, then the one syscall helper, then the keepalive helper, then to_int; the address helper and the keepalive helper are given the SAME register (the storage) as their operand, so the storage is live across the syscall; and there is no call to libc's write, send or syscall anywhere in it} -constraints {linuxX86_64 objdump rustcLinker} -body {
+test abi-bytes-machine-code-write-function {the machine code of linux::sys::write (linux::write's x86-64 transport) in a standalone executable: it calls the runtime helper that takes the payload address, then the one syscall helper, and no runtime helper after it (the keepalive is no machine code: the storage stays live across the syscall through its stack map, abi-bytes-clif-keepalive-and-stack-map); and there is no call to libc's write, send or syscall anywhere in it} -constraints {linuxX86_64 objdump rustcLinker} -body {
     set text "${::linuxPrelude}\nout(3, mk(\"hi\"))"
     set exe [buildExecutable machine $text]
     set id [nirFunctionId [native::nir [bytesHir $text]] linux::sys::write]
     set calls [machineCalls $exe botlish_fn_$id]
     set targets [lmap c $calls {lindex $c 0}]
     set helpers [lsearch -all -inline -regexp $targets {^rt_}]
-    set addressSource [lindex [lsearch -inline -index 0 $calls rt_bytes_addr] 1]
-    set keepSource [lindex [lsearch -inline -index 0 $calls rt_keepalive] 1]
-    list $helpers [expr {$addressSource ne "" && $addressSource eq $keepSource}] \
-        [llength [lsearch -all -regexp $targets {^(write|send|sendto|syscall|pwrite)(@plt)?$}]]
-} -result {{rt_bytes_addr rt_linux_x86_64_syscall rt_keepalive} 1 0}
+    list $helpers [llength [lsearch -all -regexp $targets {^(write|send|sendto|syscall|pwrite)(@plt)?$}]]
+} -result {{rt_bytes_addr rt_linux_x86_64_syscall} 0}
 
 # strace is optional corroboration (a ptrace-capable environment): the kernel
 # itself reports the arguments of the write it received. It decodes the

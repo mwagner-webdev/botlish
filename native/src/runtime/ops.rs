@@ -1032,17 +1032,6 @@ pub extern "C" fn rt_cptr_fixture_address(p: *mut Vm, v: Value) -> Value {
     vm(p).new_int(cptr_address(v))
 }
 
-/// `op keepalive %b`: a use of V that the optimizer cannot remove and that
-/// does nothing. native/lower.tcl emits it *after* every syscall whose
-/// address operands came from `bytesaddr %b`, so V is live (a GC root at
-/// every safepoint, including the syscall's own) from its definition until the
-/// kernel has returned. `black_box` keeps the value observed.
-#[unsafe(no_mangle)]
-pub extern "C" fn rt_keepalive(_p: *mut Vm, v: Value) -> Value {
-    std::hint::black_box(v);
-    UNIT
-}
-
 // ---------------------------------------------------------------------------
 // Fixed binary layouts (BINARY-LAYOUT.md; core/binary.tcl is the reference).
 //
@@ -3110,7 +3099,6 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_bytes_from_list, 2),
         h!(rt_bytes_len, 2),
         h!(rt_bytes_addr, 2),
-        h!(rt_keepalive, 2),
         h!(rt_mbytes_new, 2),
         h!(rt_mbytes_from, 2),
         h!(rt_mbytes_len, 2),

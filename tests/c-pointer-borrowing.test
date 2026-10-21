@@ -503,11 +503,11 @@ test cb-exposure-after-arguments {every argument is evaluated before any exposur
     cbAgree "struct Count:\n    n: ffi::c::ULong\n\nfn ask(resume Count) -> ffi::c::ULong:\n    c = yield \[0\]\n    c.n\n\nfn worker(data: abi::bytes::Bytes, resume Count) -> List\[int\]:\n    ffi_fixture::read\[ffi::c::UChar\](data, ask())\n\nfn f() -> List\[int\]:\n    coroutine {step} = worker(mk(5, 21))\n    step(Count {n: 3})\n\nf()"
 } -result [list value [cbList [lrange [cbPattern 5 21] 0 2]]]
 
-test cb-exposure-after-arguments-nir {NIR: the exposures follow the code of every argument (the count's call, len(...), here), the private copy of a write exposure precedes every address, and the operation follows every address} -body {
+test cb-exposure-after-arguments-nir {NIR: the exposures follow the code of every argument (the count's call, len(...), here), the private copy of a write exposure precedes every address, and the operation follows every address; the write-back value is never built as a struct (read straight off the call), only the MutableBytes the function returns, after the keepalives (C-FFI-ERROR-CAPTURE-MILESTONE-1.md)} -body {
     set read [cbNirFunction "fn f(d: abi::bytes::Bytes) -> List\[int\]:\n    ffi_fixture::read\[ffi::c::UChar\](d, len(d))\n\nf(mk(3, 1))" f]
     set copy [cbNirFunction "fn f(src: abi::bytes::Bytes, dst: abi::bytes::MutableBytes) -> abi::bytes::MutableBytes:\n    ffi_fixture::copy(dst, src, len(src)).dst\n\nf(mk(3, 1), abi::bytes::zeroed(abi::usize(3)))" f]
     list [lsearch -all -inline -not -exact [cbOps $read] structget] [lsearch -all -inline -not -exact [cbOps $copy] structget]
-} -cleanup {unset -nocomplain read copy} -result {{call bytesaddr ffifixtureread keepalive} {call mbytesclone mbytesaddr bytesaddr ffifixturecopy keepalive keepalive structnew structnew}}
+} -cleanup {unset -nocomplain read copy} -result {{call bytesaddr ffifixtureread keepalive} {call mbytesclone mbytesaddr bytesaddr ffifixturecopy keepalive keepalive structnew}}
 
 # The Tcl model of an exposure: a handle of one call, gone when it returns.
 core::native::register cbtest::stash -arity 1 -impl [list apply {{p} {
@@ -604,7 +604,7 @@ test cb-nir-read-mutable {NIR of a read exposure of a MutableBytes: its own stor
     lsearch -all -inline -not -exact [cbOps [cbNirFunction "fn f(m: abi::bytes::MutableBytes) -> List\[int\]:\n    ffi_fixture::read\[ffi::c::UChar\](m, 4)\n\nf(abi::bytes::zeroed(abi::usize(4)))" f]] structget
 } -result {mbytesaddr ffifixtureread keepalive}
 
-test cb-nir-write {NIR of a write exposure: a private copy of the owner's storage (mbytesclone, the detach), ITS address, the operation, a keepalive of the copy, and the write-back struct over the copy -- the operand of the copy is the owner's storage, and the owner is never exposed itself} -body {
+test cb-nir-write {NIR of a write exposure: a private copy of the owner's storage (mbytesclone, the detach), ITS address, the operation, a keepalive of the copy, and -- the write-back value read straight off the call, never built as a struct -- the MutableBytes over the copy the function returns, built after the keepalive; the operand of the copy is the owner's storage, and the owner is never exposed itself} -body {
     set fn [cbNirFunction "fn f(m: abi::bytes::MutableBytes) -> abi::bytes::MutableBytes:\n    ffi_fixture::fill\[ffi::c::UChar\](m, 4, 1).out\n\nf(abi::bytes::zeroed(abi::usize(4)))" f]
     regexp {(%[0-9]+) = op mbytesclone (%[0-9]+)} $fn -> copy owner
     regexp {(%[0-9]+) = op mbytesaddr (%[0-9]+)} $fn -> address exposed
@@ -612,7 +612,7 @@ test cb-nir-write {NIR of a write exposure: a private copy of the owner's storag
     regexp {op keepalive (%[0-9]+)} $fn -> kept
     list [lsearch -all -inline -not -exact [cbOps $fn] structget] [expr {$exposed eq $copy}] [expr {$operand eq $address}] \
         [expr {$kept eq $copy}] [expr {$owner ne $copy}]
-} -cleanup {unset -nocomplain fn copy owner address exposed operand kept} -result {{mbytesclone mbytesaddr ffifixturefill keepalive structnew structnew} 1 1 1 1}
+} -cleanup {unset -nocomplain fn copy owner address exposed operand kept} -result {{mbytesclone mbytesaddr ffifixturefill keepalive structnew} 1 1 1 1}
 
 proc cbAllocations {body} {
     set report [native::allocationReport [cbHir $body] summary]
@@ -627,7 +627,7 @@ proc cbAllocationCost {without with} {
     lmap a [cbAllocations $without] b [cbAllocations $with] {expr {$b - $a}}
 }
 
-test cb-allocations {allocation evidence, natively -- what the exposure itself costs beside the same program without the call {Bytes MutableBytes Struct List}: a read exposure of a Bytes or of a MutableBytes held in a binding allocates nothing (the List is the operation's own result), while an owner written inline as the argument is built as its one-field wrapper first (1 Struct: the address bridge's StorageOf has the same frontier); a write exposure costs exactly the private copy of the storage (MutableBytes' eager detach, MUTABLE-BYTES.md) and, when the result is used, its write-back struct and the copy's MutableBytes wrapper; measured, none hidden} -constraints nativeCoroutines -body {
+test cb-allocations {allocation evidence, natively -- what the exposure itself costs beside the same program without the call {Bytes MutableBytes Struct List}: a read exposure of a Bytes or of a MutableBytes held in a binding allocates nothing (the List is the operation's own result), while an owner written inline as the argument is built as its one-field wrapper first (1 Struct: the address bridge's StorageOf has the same frontier); a write exposure costs exactly the private copy of the storage (MutableBytes' eager detach, MUTABLE-BYTES.md) and, when the updated buffer is used whole, the copy's MutableBytes wrapper -- the write-back struct itself is never built (C-FFI-ERROR-CAPTURE-MILESTONE-1.md); measured, none hidden} -constraints nativeCoroutines -body {
     set fn "fn f(n: ffi::c::ULong) -> int:\n    m = abi::bytes::zeroed(abi::usize(n))\n"
     list [cbAllocationCost "${fn}    abi::bytes::mutable_length(m).value\n\nf(64)" \
             "${fn}    list::length(ffi_fixture::read\[ffi::c::UChar\](m, n))\n\nf(64)"] \
@@ -639,7 +639,7 @@ test cb-allocations {allocation evidence, natively -- what the exposure itself c
             "${fn}    r = ffi_fixture::fill\[ffi::c::UChar\](m, n, 1)\n    abi::bytes::mutable_length(r.out).value\n\nf(64)"] \
         [cbAllocationCost "${fn}    abi::bytes::mutable_length(m).value\n\nf(64)" \
             "${fn}    ffi_fixture::fill\[ffi::c::UChar\](m, n, 1)\n    abi::bytes::mutable_length(m).value\n\nf(64)"]
-} -cleanup {unset -nocomplain fn} -result {{0 0 0 1} {0 0 0 1} {0 0 1 1} {0 1 2 0} {0 1 0 0}}
+} -cleanup {unset -nocomplain fn} -result {{0 0 0 1} {0 0 0 1} {0 0 1 1} {0 1 1 0} {0 1 0 0}}
 
 # ---------------------------------------------------------------------------
 # The Linux syscall machinery: shared, and unchanged

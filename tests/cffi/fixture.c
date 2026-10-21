@@ -17,6 +17,7 @@
  * for the object format through BCF_FUNCTION (ELF's bare symbol and `.type`,
  * Mach-O's `_` user label prefix).
  */
+#include <errno.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -102,6 +103,49 @@ void bcf_fill(unsigned char *out, unsigned long count, unsigned char seed) {
     for (unsigned long i = 0; i < count; i++) {
         out[i] = (unsigned char)(seed + 37 * i);
     }
+}
+
+/* C error state (C-FFI-ERROR-CAPTURE-MILESTONE-1.md): POSIX's convention, as
+ * read(2) has it. Each writes its buffers first, then -- when ERR is not 0 --
+ * fails: errno ERR (the standard errno, the calling thread's) and the result
+ * -1, the bytes written before the failure left in place. ERR 0 succeeds with
+ * the count, leaving errno at STALE when that is not 0 (a successful call may
+ * change errno: its value means nothing then). Nothing in Botlish reads errno
+ * for them: tests/c-ffi-error-capture.test's binding reads it through
+ * __errno_location() (glibc) or __error() (Darwin) and a native view. */
+long bcf_fill_errno(unsigned char *out, unsigned long count, unsigned char seed, int err, int stale) {
+    bcf_fill(out, count, seed);
+    if (err != 0) {
+        errno = err;
+        return -1;
+    }
+    if (stale != 0) {
+        errno = stale;
+    }
+    return (long)count;
+}
+
+/* Two written buffers: A filled from seed 1, B from seed 2. */
+long bcf_fill2_errno(unsigned char *a, unsigned long na, unsigned char *b, unsigned long nb, int err) {
+    bcf_fill(a, na, 1);
+    bcf_fill(b, nb, 2);
+    if (err != 0) {
+        errno = err;
+        return -1;
+    }
+    return (long)(na + nb);
+}
+
+/* Reads SRC (COUNT bytes), writes them reversed into DST. */
+long bcf_reverse_errno(const unsigned char *src, unsigned long count, unsigned char *dst, int err) {
+    for (unsigned long i = 0; i < count; i++) {
+        dst[i] = src[count - 1 - i];
+    }
+    if (err != 0) {
+        errno = err;
+        return -1;
+    }
+    return (long)count;
 }
 
 /* SHA256's shape: reads DATA, writes OUT, returns OUT. */

@@ -806,7 +806,7 @@ test abi-mutable-bytes-nir-update-and-freeze {NIR of the pure operations: set is
     }
 } -match glob -result {{abi::bytes::zeroed 1} {abi::bytes::from_bytes 1} {abi::bytes::replace 1} {abi::bytes::detach missing} {abi::bytes::freeze 1} {abi::bytes::mutable_length 1}}
 
-test abi-mutable-bytes-clif-keepalive-and-stack-map {CLIF of linux::read: the writable address helper, then the syscall helper, then the keepalive helper, in that order, the keepalive's operand being the very value the address helper took (the detached storage), and the syscall call's stack map naming the stack slot that holds that storage -- so the collector sees it as a root at the syscall's own safepoint (nativeFrameRoots: elsewhere it is a shadow-stack root and no stack map is emitted)} -body {
+test abi-mutable-bytes-clif-keepalive-and-stack-map {CLIF of linux::read: the writable address helper, then the syscall helper, and no keepalive call -- the NIR keepalive is no machine code (C-FFI-ERROR-CAPTURE-MILESTONE-1.md); what it guarantees is the syscall call's stack map, which names the stack slot that holds the very value the address helper took (the detached storage) -- so the collector sees it as a root at the syscall's own safepoint (nativeFrameRoots: elsewhere it is a shadow-stack root and no stack map is emitted)} -body {
     set clif [native::clif [bytesHir [readProgram 8] 1 linux-x86_64]]
     set helperOf [dict create]
     foreach {- ref name} [regexp -all -inline -line {^; (u0:[0-9]+) = (rt_[a-z0-9_]+)} $clif] { dict set helperOf $ref $name }
@@ -835,8 +835,8 @@ test abi-mutable-bytes-clif-keepalive-and-stack-map {CLIF of linux::read: the wr
     regexp "store \[a-z.0-9 \]*$root, v3(?:\\+(\[0-9\]+))?\n" "$block\n" -> offset
     if {$offset eq ""} { set offset 0 }
     list [lsearch -all -inline -regexp $names {^rt_(mbytes_addr|keepalive|linux_x86_64_syscall)$}] \
-        [expr {[lindex $addr 1] eq [lindex $keep 1]}] [regexp "ss0\\+$offset\[,\\]\]" [lindex $syscall 2]]
-} -result [list {rt_mbytes_addr rt_linux_x86_64_syscall rt_keepalive} 1 [testConstraint nativeFrameRoots]]
+        [expr {$keep eq ""}] [regexp "ss0\\+$offset\[,\\]\]" [lindex $syscall 2]]
+} -result [list {rt_mbytes_addr rt_linux_x86_64_syscall} 1 [testConstraint nativeFrameRoots]]
 
 proc machineCalls {exe function} {
     set disassembly [exec objdump -d --no-show-raw-insn -M intel --disassemble=$function $exe]
@@ -853,19 +853,17 @@ proc machineCalls {exe function} {
     return $calls
 }
 
-test abi-mutable-bytes-machine-code-read-function {the machine code of linux::read in a standalone executable: a call to the detach function, the runtime helper taking the WRITABLE payload address, the one syscall helper, then the keepalive helper, then to_int; the address and keepalive helpers are given the SAME register (the storage) so it is live across the syscall; and there is no call to libc's read, recv, pread or syscall(3) anywhere in it -- libc exists elsewhere in the executable (the runner's own machinery), the Botlish read path never reaches it} -constraints {linuxX86_64 objdump rustcLinker} -body {
+test abi-mutable-bytes-machine-code-read-function {the machine code of linux::read in a standalone executable: a call to the detach function, the runtime helper taking the WRITABLE payload address, the one syscall helper, then to_int, and the result struct built after it (the keepalive is no machine code: the detached storage stays live across the syscall through its stack map, abi-mutable-bytes-clif-keepalive-and-stack-map); and there is no call to libc's read, recv, pread or syscall(3) anywhere in it -- libc exists elsewhere in the executable (the runner's own machinery), the Botlish read path never reaches it} -constraints {linuxX86_64 objdump rustcLinker} -body {
     set text [readProgram 8]
     set exe [buildExecutable machine $text]
     set id [nirFunctionId [native::nir [bytesHir $text]] linux::sys::read]
     set calls [machineCalls $exe botlish_fn_$id]
     set targets [lmap c $calls {lindex $c 0}]
     set helpers [lsearch -all -inline -regexp $targets {^rt_}]
-    set addressSource [lindex [lsearch -inline -index 0 $calls rt_mbytes_addr] 1]
-    set keepSource [lindex [lsearch -inline -index 0 $calls rt_keepalive] 1]
-    list $helpers [expr {$addressSource ne "" && $addressSource eq $keepSource}] \
+    list $helpers \
         [llength [lsearch -all -regexp $targets {^(read|recv|recvfrom|pread|pread64|readv|syscall)(@plt)?$}]] \
         [expr {[lsearch -regexp $targets {^botlish_fn_[0-9]+$}] >= 0}]
-} -result {{rt_mbytes_addr rt_linux_x86_64_syscall rt_keepalive rt_struct_new} 1 0 1}
+} -result {{rt_mbytes_addr rt_linux_x86_64_syscall rt_struct_new} 0 1}
 
 test abi-mutable-bytes-detach-function-machine-code {the detach (abi::bytes::detach) is the runtime's clone helper and nothing else: one call, to rt_mbytes_clone} -constraints {linuxX86_64 objdump rustcLinker} -body {
     set text [readProgram 8]

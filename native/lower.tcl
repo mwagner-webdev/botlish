@@ -4035,12 +4035,16 @@ proc native::lower::StructFields {fnVar e node {cut ""}} {
         if {$cut ne "" && [dict exists [CutDict $cut] $name]} {
             # An opened inner literal: evaluated here, at the position the
             # field is written, its own fields in written order; they join
-            # the outer's physical fields.
-            if {[hir::kind $hir $field] ne "struct"} {
-                throw {NATIVE BUG} "native lowering: field \"$name\" opened but not an inline literal ($field)"
-            }
+            # the outer's physical fields. A foreign call's write-back value
+            # opens the same way (hir::escape::LiteralTree): its fields.
             lassign [dict get [CutDict $cut] $name] sub subcut
-            set r [StructFields fn $field [hir::node $hir $field] $subcut]
+            if {[hir::kind $hir $field] eq "call"} {
+                set r [VirtualValue fn $field [hir::escape::CutFields $sub $subcut] $subcut]
+            } elseif {[hir::kind $hir $field] ne "struct"} {
+                throw {NATIVE BUG} "native lowering: field \"$name\" opened but not an inline literal ($field)"
+            } else {
+                set r [StructFields fn $field [hir::node $hir $field] $subcut]
+            }
             if {$r ne "never" && [hir::typeOf $hir $field] eq "never"} {
                 Emit fn unreachable $field
                 return never
@@ -4097,8 +4101,10 @@ proc native::lower::FieldOffset {shape cut name} {
 
 # The object of a struct of SHAPE opened as CUT whose physical fields are the
 # registers FIELDS: inner objects of opened fields first, then the outer,
-# each `structnew` of its exact shape. Source expression E.
-proc native::lower::BuildStruct {fnVar shape cut fields e} {
+# each `structnew` of its exact shape. Source expression E. BUILT maps an
+# opened field to its object when one already exists (OpenedFieldObject):
+# that object is used, not built again.
+proc native::lower::BuildStruct {fnVar shape cut fields e {built {}}} {
     upvar 1 $fnVar fn
     lassign $shape id layout
     set cuts [CutDict $cut]
@@ -4108,7 +4114,11 @@ proc native::lower::BuildStruct {fnVar shape cut fields e} {
         if {[dict exists $cuts $field]} {
             lassign [dict get $cuts $field] sub subcut
             set w [hir::escape::CutFields $sub $subcut]
-            lappend regs [BuildStruct fn $sub $subcut [lrange $fields $pos [expr {$pos + $w - 1}]] $e]
+            if {[dict exists $built $field]} {
+                lappend regs [dict get $built $field]
+            } else {
+                lappend regs [BuildStruct fn $sub $subcut [lrange $fields $pos [expr {$pos + $w - 1}]] $e]
+            }
             incr pos $w
         } else {
             lappend regs [lindex $fields $pos]
@@ -4165,9 +4175,56 @@ proc native::lower::MaterializeVirtual {fnVar b e} {
     if {$mat ne ""} {
         return $mat
     }
-    set mat [BuildStruct fn $shape [lindex $rootLocal 5] [lindex $rootLocal 1] $e]
+    set mat [BuildStruct fn $shape [lindex $rootLocal 5] [lindex $rootLocal 1] $e [lindex $rootLocal 7]]
     dict set fn locals $root [lreplace $rootLocal 4 4 $mat]
     return $mat
+}
+
+# The value of field NAME of a struct of SHAPE opened as CUT whose physical
+# fields are FIELDS: a closed field's register; an opened field's object,
+# built here from its own fields (BuildStruct). An opened field is read whole
+# only where hir/escape.tcl's NestingPlan let a write-back's MutableBytes stay
+# open past an independent use (building it at that use is no more often than
+# at the foreign call, and nothing runs at the call).
+proc native::lower::FieldValue {fnVar shape cut fields name e} {
+    upvar 1 $fnVar fn
+    set offset [FieldOffset $shape $cut $name]
+    set cuts [CutDict $cut]
+    if {![dict exists $cuts $name]} {
+        return [lindex $fields $offset]
+    }
+    lassign [dict get $cuts $name] sub subcut
+    set width [hir::escape::CutFields $sub $subcut]
+    return [BuildStruct fn $sub $subcut [lrange $fields $offset [expr {$offset + $width - 1}]] $e]
+}
+
+# The object of the opened field NAME of virtual binding B, read whole at E:
+# the field of the whole object when that exists already, else built here
+# (FieldValue) and kept in the root binding's entry (index 7: field ->
+# object), so every later use this scope dominates -- and a later
+# materialization of the whole value (MaterializeVirtual) -- reads the same
+# object. Branches and loops restore `fn locals`, dropping one that does not
+# dominate what follows.
+proc native::lower::OpenedFieldObject {fnVar b name e} {
+    upvar 1 $fnVar fn
+    lassign [dict get $fn locals $b] - fields shape root - cut
+    set rootLocal [dict get $fn locals $root]
+    set mat [lindex $rootLocal 4]
+    if {$mat ne ""} {
+        return [Assign fn "structget [lsearch -exact [lindex $shape 1] $name] $mat" $e]
+    }
+    while {[llength $rootLocal] < 8} {
+        lappend rootLocal ""
+    }
+    set built [lindex $rootLocal 7]
+    if {[dict exists $built $name]} {
+        return [dict get $built $name]
+    }
+    set object [FieldValue fn $shape $cut $fields $name $e]
+    dict set built $name $object
+    lset rootLocal 7 $built
+    dict set fn locals $root $rootLocal
+    return $object
 }
 
 proc native::lower::Project {fnVar e node} {
@@ -4207,6 +4264,11 @@ proc native::lower::Project {fnVar e node} {
                 if {$slot < 0} {
                     throw {NATIVE BUG} "native lowering: virtual binding $b has no field \"$name\" ($e)"
                 }
+                if {[dict exists [CutDict [lindex $local 5]] $name]} {
+                    # An opened field read whole (a write-back's
+                    # MutableBytes): its object, built at its first such use.
+                    return [OpenedFieldObject fn $b $name $e]
+                }
                 return [lindex [lindex $local 1] [FieldOffset [lindex $local 2] [lindex $local 5] $name]]
             }
         }
@@ -4222,7 +4284,7 @@ proc native::lower::Project {fnVar e node} {
         if {$fields eq "never"} {
             return never
         }
-        return [lindex $fields [FieldOffset $shape $cut $name]]
+        return [FieldValue fn $shape $cut $fields $name $e]
     }
     if {$type eq "never"} {
         # HIR proved the receiver never completes normally (an element of a
@@ -5077,11 +5139,22 @@ proc native::lower::KeepExposedAlive {fnVar operands e} {
 #     {result: R, NAME: MutableBytes} (sorted fields), each NAME the
 #     MutableBytes over the private copy C wrote.
 #
+# The write-back value is a construction like a struct literal (hir/escape.
+# tcl's WriteBackResult): wanted virtual (WANTVIRTUAL fields, cut WANTCUT) it
+# is handed back as fields -- the C result's register and, for each written
+# NAME the cut opens, the private copy's storage register -- and nothing is
+# built after the call; a MutableBytes is made only where a use reads it whole
+# (native::lower::FieldValue, MaterializeVirtual), and the struct only where
+# a use needs the object. So the code after the operation runs no allocation,
+# no collection and no runtime call before the program reads the result (the
+# C error state, errno, is still intact: C-FFI-ERROR-CAPTURE-MILESTONE-1.md).
+# Only a field a representation class keeps closed is built here, eagerly.
+#
 # An unchecked (-strict 0) program's call that hir/borrow.tcl refused
 # (`borrowRefused`) evaluates its arguments and replays the refusal at run
 # time, as every backend does: no address of storage is ever handed to an
 # operation that may keep it.
-proc native::lower::BorrowCall {fnVar e node} {
+proc native::lower::BorrowCall {fnVar e node {wantVirtual ""} {wantCut ""}} {
     upvar 1 $fnVar fn
     variable hir
     variable natives
@@ -5172,12 +5245,14 @@ proc native::lower::BorrowCall {fnVar e node} {
     if {[dict size $written] == 0} {
         return [list $result tagged]
     }
-    if {$structOpt && [dict exists $context discarded $e]} {
+    if {$wantVirtual eq "" && $structOpt && [dict exists $context discarded $e]} {
         return [list [Assign fn unit] tagged]
     }
     set type [hir::typeOf $hir $e]
     set layout [hir::types::StructLayout $type]
     set mutableType [core::bytestore::mutableBytesType]
+    set mutableLayout [hir::structs::names $mutableType]
+    set opened [expr {$wantVirtual ne "" ? [CutDict $wantCut] : [dict create]}]
     set fields {}
     foreach field $layout {
         if {$field eq "result"} {
@@ -5188,7 +5263,27 @@ proc native::lower::BorrowCall {fnVar e node} {
         if {$i < 0 || ![dict exists $written $i]} {
             throw {NATIVE BUG} "native lowering: write-back field $field of $name has no written argument ($e)"
         }
-        lappend fields [Assign fn "structnew [ShapeIndex $mutableType [hir::structs::names $mutableType]] [dict get $written $i]" $e]
+        if {[dict exists $opened $field]} {
+            # Opened: the MutableBytes' own fields, its storage the private
+            # copy C wrote -- no object.
+            if {[lindex [dict get $opened $field] 0] ne [list $mutableType $mutableLayout]} {
+                throw {NATIVE BUG} "native lowering: write-back field $field of $name opened as [lindex [dict get $opened $field] 0] ($e)"
+            }
+            foreach slot $mutableLayout {
+                if {$slot ne [core::bytestore::storageField]} {
+                    throw {NATIVE BUG} "native lowering: $mutableType has a field $slot beside its storage ($e)"
+                }
+                lappend fields [dict get $written $i]
+            }
+            continue
+        }
+        lappend fields [Assign fn "structnew [ShapeIndex $mutableType $mutableLayout] [dict get $written $i]" $e]
+    }
+    if {$wantVirtual ne ""} {
+        if {[llength $fields] != $wantVirtual} {
+            throw {NATIVE BUG} "native lowering: expected a $wantVirtual-field write-back of $name at $e"
+        }
+        return [list $fields virtual]
     }
     return [list [Assign fn "structnew [ShapeIndex {} $layout] [join $fields { }]" $e] tagged]
 }
@@ -6076,11 +6171,49 @@ proc native::lower::StorageOf {fnVar arg {structType ""}} {
             }
         }
     }
+    if {[hir::kind $hir $arg] eq "project"} {
+        set storage [OpenedOwnerStorage fn $arg $structType $slot]
+        if {$storage ne ""} {
+            return $storage
+        }
+    }
     set object [Expr fn $arg]
     if {$object eq "never"} {
         return never
     }
     return [Assign fn "structget $slot $object" $arg]
+}
+
+# The storage register of byte owner ARG (of opaque struct STRUCTTYPE, its
+# storage at SLOT) when ARG is `r.NAME`, r a virtual struct whose cut opened
+# NAME (a write-back's MutableBytes handed on to another foreign call): read
+# from the opened fields, no object built. "" otherwise.
+proc native::lower::OpenedOwnerStorage {fnVar arg structType slot} {
+    upvar 1 $fnVar fn
+    variable hir
+    set receiver [hir::get $hir $arg receiver]
+    if {[hir::kind $hir $receiver] ne "ref"} {
+        return ""
+    }
+    set b [hir::get $hir $receiver binding]
+    if {$b eq "" || ![dict exists $fn locals $b]} {
+        return ""
+    }
+    set local [dict get $fn locals $b]
+    if {[lindex $local 0] ne "virtual" || [lindex $local 2] eq ""} {
+        return ""
+    }
+    lassign $local - fields shape - - cut
+    set name [hir::get $hir $arg name]
+    set cuts [CutDict $cut]
+    if {![dict exists $cuts $name]} {
+        return ""
+    }
+    lassign [dict get $cuts $name] sub subcut
+    if {[lindex $sub 0] ne $structType || $subcut ne ""} {
+        return ""
+    }
+    return [lindex $fields [expr {[FieldOffset $shape $cut $name] + $slot}]]
 }
 
 # The register of the projection chain ending at project node E when its root
@@ -6131,7 +6264,8 @@ proc native::lower::ProjectChain {fnVar e node} {
         if {[dict exists $cuts $name]} {
             lassign [dict get $cuts $name] sub subcut
             if {$i == [llength $names] - 1} {
-                throw {NATIVE BUG} "native lowering: opened field \"$name\" read as a whole at $e"
+                # An opened field read whole: built here (FieldValue).
+                return [FieldValue fn $shape $cut $fields $name $e]
             }
             set fields [lrange $fields $offset [expr {$offset + [hir::escape::CutFields $sub $subcut] - 1}]]
             set shape $sub
@@ -6693,7 +6827,7 @@ proc native::lower::VirtualValue {fnVar e arity {cut ""}} {
     if {[dict get $node kind] ne "call"} {
         throw {NATIVE BUG} "native lowering: expected a recognized construction at $e"
     }
-    lassign [Call fn $e $node tagged $arity] result repr
+    lassign [Call fn $e $node tagged $arity 0 $cut] result repr
     if {$result eq "never"} {
         return [Never fn $e]
     }
@@ -6873,7 +7007,7 @@ proc native::lower::TryFields {fnVar e n {cut ""}} {
         }
         call {
             set node [hir::node $hir $e]
-            lassign [Call fn $e $node tagged $n] result repr
+            lassign [Call fn $e $node tagged $n 0 $cut] result repr
             if {$result eq "never"} {
                 return [Never fn $e]
             }
@@ -7217,7 +7351,7 @@ proc native::lower::ClosedResult {fnVar e result} {
 #     keepalive after it).
 # Calls with neither (every call of a program that never takes an address) pay
 # one dict-exists test.
-proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
+proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0} {wantCut ""}} {
     upvar 1 $fnVar fn
     variable hir
     # A declared error this call propagates out of the scope of affine
@@ -7229,7 +7363,7 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
         set pad [NewLabel fn]
         Emit fn "pusherrorexit $pad" $e
     }
-    set result [CallInner fn $e $node $want $wantVirtual $wantRegion]
+    set result [CallInner fn $e $node $want $wantVirtual $wantRegion $wantCut]
     if {[lindex [dict get $node target] 0] eq "block" && [BytesFlowCandidate fn $e $node]} {
         AddressFlowAcrossCall fn $e $node $result
     }
@@ -7353,7 +7487,7 @@ proc native::lower::AddressFlowAcrossCall {fnVar e node result} {
     KeepExposedAlive fn $operands $e
 }
 
-proc native::lower::CallInner {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
+proc native::lower::CallInner {fnVar e node want {wantVirtual ""} {wantRegion 0} {wantCut ""}} {
     upvar 1 $fnVar fn
     variable hir
     variable selfTail
@@ -7420,8 +7554,9 @@ proc native::lower::CallInner {fnVar e node want {wantVirtual ""} {wantRegion 0}
     }
     if {$targetKind eq "native" && [dict exists $node borrows]} {
         # A foreign call (hir/borrow.tcl): its byte exposures, from the
-        # call node.
-        return [BorrowCall fn $e $node]
+        # call node; a write-back value as fields when wanted virtual (cut
+        # WANTCUT).
+        return [BorrowCall fn $e $node $wantVirtual $wantCut]
     }
     if {$targetKind eq "native" && [core::bytestore::isBridge [dict get [hir::symbol $hir $target] name]]} {
         # The raw address bridge (core/bytestore.tcl, ABI-BYTES.md): reads the

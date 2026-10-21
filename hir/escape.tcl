@@ -224,6 +224,14 @@ proc hir::escape::Classify {hir instance arity e {structOpts {}}} {
             # LayoutWrite hands back the storage register as the field).
             return [SyscallResult $hir $e [core::bytestore::mutableBytesType] $structOpts]
         }
+        if {[dict exists $node borrows]} {
+            # A foreign call with a write exposure (C-POINTER-BORROWING.md)
+            # builds its write-back struct {result: R, NAME: MutableBytes}
+            # from the C result and the private copies C wrote: a local
+            # construction, as a struct literal is (native/lower.tcl's
+            # BorrowCall hands them back as the fields).
+            return [WriteBackResult $hir $e $structOpts]
+        }
         if {$name ne "list"} {
             return ""
         }
@@ -328,6 +336,80 @@ proc hir::escape::LayoutParseResult {hir e structOpts} {
     }
     set layout [hir::types::StructLayout $type]
     return [list local [list [llength $layout] [list [lindex $type 1] $layout]] {}]
+}
+
+# Foreign call E's write-back value (C-POINTER-BORROWING.md; C-FFI-ERROR-
+# CAPTURE-MILESTONE-1.md) as a recognized construction: {local {N {"" LAYOUT}}
+# {}} for its anonymous struct {result: R, NAME: MutableBytes, ...} (one
+# field per written parameter), "" for a call with no write exposure or one
+# hir/borrow.tcl refused. Its fields are the C result and the MutableBytes
+# over each private copy; each MutableBytes is a nested value whose one
+# field, the storage, exists the moment C returns, so the representation
+# classes it reaches open it (WriteBackTree): nothing is built at the call.
+proc hir::escape::WriteBackResult {hir e structOpts} {
+    if {![StructEnabled $structOpts] || [hir::borrow::refused $hir $e] ne ""} {
+        return ""
+    }
+    set written [WrittenNames $hir $e]
+    if {$written eq ""} {
+        return ""
+    }
+    set type [hir::typeOf $hir $e]
+    if {![hir::types::IsStruct $type]} {
+        return ""
+    }
+    set layout [hir::types::StructLayout $type]
+    if {[lsort $layout] ne [lsort [concat result $written]]} {
+        return ""
+    }
+    return [list local [list [llength $layout] [list "" $layout]] {}]
+}
+
+# The parameter names of foreign call E's write exposures (its write-back
+# fields beside `result`), in argument order; "" when it has none.
+proc hir::escape::WrittenNames {hir e} {
+    set names {}
+    foreach borrow [hir::borrow::transports $hir $e] {
+        lassign $borrow i how name
+        if {$how eq "write"} {
+            lappend names $name
+        }
+    }
+    return $names
+}
+
+# 1 if call E (VIEW) is a foreign call whose value is a write-back
+# construction (WriteBackResult).
+proc hir::escape::IsWriteBack {view e structOpts} {
+    return [expr {[hir::kind $view $e] eq "call" && [dict exists $view exprs $e borrows]
+        && [WriteBackResult $view $e $structOpts] ne ""}]
+}
+
+# {SHAPE CHILDREN} of write-back call E (WriteBackResult), like a
+# LiteralTree: every written field's MutableBytes is a child of no children
+# of its own.
+proc hir::escape::WriteBackTree {view e} {
+    set layout [hir::types::StructLayout [hir::typeOf $view $e]]
+    set mutable [core::bytestore::mutableBytesType]
+    set children [dict create]
+    foreach name [WrittenNames $view $e] {
+        dict set children $name [list [list $mutable [hir::structs::names $mutable]] {}]
+    }
+    return [list [list "" $layout] $children]
+}
+
+# The cut of write-back call E (VIEW) that opens every written field
+# (WriteBackTree's children, in layout order): the representation of a
+# write-back value no class constrains (one read straight off its call).
+proc hir::escape::WriteBackCut {view e} {
+    lassign [WriteBackTree $view $e] shape children
+    set cut {}
+    foreach name [lindex $shape 1] {
+        if {[dict exists $children $name]} {
+            lappend cut $name [lindex [dict get $children $name] 0] {}
+        }
+    }
+    return $cut
 }
 
 # The syscall transport native (core/linuxabi.tcl) call E (VIEW) calls, or
@@ -1712,7 +1794,8 @@ proc hir::escape::WellFormedStruct {view e} {
 
 # {SHAPE CHILDREN}: struct literal E as a tree; CHILDREN maps a field name to
 # the tree of that field's value when it is itself an inline well-formed
-# literal.
+# literal, or a foreign call's write-back value (WriteBackTree: a
+# construction too).
 proc hir::escape::LiteralTree {view e} {
     set node [hir::node $view $e]
     set shape [list [if {[dict get $node named]} {dict get $node structId} else {string cat ""}] [dict get $node layout]]
@@ -1720,9 +1803,29 @@ proc hir::escape::LiteralTree {view e} {
     foreach name [dict get $node names] f [dict get $node fields] {
         if {[hir::kind $view $f] eq "struct" && [WellFormedStruct $view $f]} {
             dict set children $name [LiteralTree $view $f]
+        } elseif {[IsWriteBack $view $f {}]} {
+            dict set children $name [WriteBackTree $view $f]
         }
     }
     return [list $shape $children]
+}
+
+# The paths (lists of field names, from E's value down) of the MutableBytes
+# fields of every write-back value construction E is made of: E's own when E
+# is a write-back call, those of the write-back calls an inline literal E
+# holds in its fields (LiteralTree's children) otherwise. These are the
+# nested values NestingPlan may open past an independent use.
+proc hir::escape::WriteBackPaths {view e {prefix {}}} {
+    if {[IsWriteBack $view $e {}]} {
+        return [lmap name [WrittenNames $view $e] {concat $prefix [list $name]}]
+    }
+    set paths {}
+    if {[hir::kind $view $e] eq "struct" && [WellFormedStruct $view $e]} {
+        foreach name [hir::get $view $e names] f [hir::get $view $e fields] {
+            lappend paths {*}[WriteBackPaths $view $f [concat $prefix [list $name]]]
+        }
+    }
+    return $paths
 }
 
 # The intersection of two LiteralTrees of one root shape: a child survives
@@ -1740,9 +1843,10 @@ proc hir::escape::IntersectTrees {a b} {
 }
 
 # The constructions expression E (of instance ID, VIEW) is made of when it is
-# a recognized aggregate value: {lit ID E} for a struct literal, {res CALLEE}
-# for an exact call to an instance with a recognized result, through `if`
-# branches. "" if E is anything else.
+# a recognized aggregate value: {lit ID E} for a struct literal, {wb ID E}
+# for a foreign call's write-back value (WriteBackResult), {res CALLEE} for an
+# exact call to an instance with a recognized result, through `if` branches.
+# "" if E is anything else.
 proc hir::escape::Origins {view instance arity id e structOpts} {
     switch -- [hir::kind $view $e] {
         struct {
@@ -1753,6 +1857,9 @@ proc hir::escape::Origins {view instance arity id e structOpts} {
         }
         call {
             set c [Classify $view $instance $arity $e $structOpts]
+            if {[lindex $c 0] eq "local" && [IsWriteBack $view $e $structOpts]} {
+                return [list [list wb $id $e]]
+            }
             if {[lindex $c 0] ne "remote"} {
                 return ""
             }
@@ -1784,8 +1891,8 @@ proc hir::escape::Origins {view instance arity id e structOpts} {
     return ""
 }
 
-# Unions MEMBER with every construction in ORIGINS ({lit ID E} always; {res
-# ID} only if that result is itself a member).
+# Unions MEMBER with every construction in ORIGINS ({lit ID E} and {wb ID E}
+# always; {res ID} only if that result is itself a member).
 proc hir::escape::UnionOrigins {ufVar member origins} {
     upvar 1 $ufVar uf
     foreach o $origins {
@@ -1833,8 +1940,20 @@ proc hir::escape::UfUnion {ufVar a b} {
 # path statistics (hir::transport::Plan); RETDEPTH each result's return
 # depth. Returns {CUTS CLASSES}: CUTS maps a member key ({loc ID B}, {par ID
 # B} or {res ID}) to its non-empty cut; CLASSES is one record per class that
-# has an inline nested literal: {members shape width0 width cut opened closed
-# argEdges retEdges cyclic budget score}, closed being {PATH REASON} pairs.
+# has an inline nested literal or a write-back construction: {members shape
+# width0 width cut opened closed argEdges retEdges cyclic budget score
+# literals writebacks lazy}, closed being {PATH REASON} pairs.
+#
+# A foreign call's write-back value (WriteBackResult) is a value tree too: its
+# MutableBytes fields are children whose one field, the private copy's
+# storage, already exists when C returns (WriteBackTree). Such a child is
+# opened even where an independent use reads it whole (`r.buf`), as long as
+# that use runs as often as the binding itself (the same innermost loop; a
+# parameter's never, a recognized call's always): the lowering builds the
+# MutableBytes there, at the use (LAZY), instead of at the call -- so nothing
+# is allocated between the foreign function's return and the code that reads
+# its result (C-FFI-ERROR-CAPTURE-MILESTONE-1.md). A child of an ordinary
+# literal keeps the rule that an independent use closes it.
 proc hir::escape::NestingPlan {hir spec regions callSites arity retDepth eligible rawParam transport structOpts} {
     set uf [dict create]
     set context [dict get $spec context]
@@ -1854,6 +1973,7 @@ proc hir::escape::NestingPlan {hir spec regions callSites arity retDepth eligibl
         }
     }
     set bindValues [dict create]
+    set bindExprs [dict create]
     foreach id [dict get $spec used] {
         set info [dict get $regions $id]
         set view [dict get $info view]
@@ -1862,6 +1982,7 @@ proc hir::escape::NestingPlan {hir spec regions callSites arity retDepth eligibl
                 set node [hir::node $view $e]
                 if {![dict get $node duplicate]} {
                     dict set bindValues [list $id [dict get $node binding]] [dict get $node value]
+                    dict set bindExprs [list $id [dict get $node binding]] $e
                 }
             }
         }
@@ -1927,6 +2048,7 @@ proc hir::escape::NestingPlan {hir spec regions callSites arity retDepth eligibl
     }
     # --- independent-use constraints: the outermost projection chains
     set blocked [dict create]
+    set unlazy [dict create]
     foreach id [dict get $spec used] {
         set info [dict get $regions $id]
         set view [dict get $info view]
@@ -1960,7 +2082,18 @@ proc hir::escape::NestingPlan {hir spec regions callSites arity retDepth eligibl
                 }
             }
             if {$member ne ""} {
-                dict lappend blocked [UfFind uf $member] $names
+                set root [UfFind uf $member]
+                dict lappend blocked $root $names
+                # Whether a write-back child may still be built here, at
+                # this use, rather than at the call: only where the use runs
+                # as often as the binding (a parameter's use would build it
+                # once per call of its function).
+                set loopOf [dict get $info loopOf]
+                set bindExpr [dict getdef $bindExprs [lrange $member 1 2] ""]
+                if {[lindex $member 0] eq "par" || $bindExpr eq ""
+                        || [dict getdef $loopOf $pe "?"] ne [dict getdef $loopOf $bindExpr "?"]} {
+                    dict lappend unlazy $root $names
+                }
             }
         }
     }
@@ -1975,10 +2108,16 @@ proc hir::escape::NestingPlan {hir spec regions callSites arity retDepth eligibl
         set members [lsort [dict get $classes $root]]
         set tree ""
         set shape ""
+        set lazyCapable {}
         foreach k $members {
-            if {[lindex $k 0] eq "lit"} {
-                lassign $k - id e
-                set t [LiteralTree [dict get $regions $id view] $e]
+            if {[lindex $k 0] in {lit wb}} {
+                lassign $k kind id e
+                if {$kind eq "lit"} {
+                    set t [LiteralTree [dict get $regions $id view] $e]
+                } else {
+                    set t [WriteBackTree [dict get $regions $id view] $e]
+                }
+                lappend lazyCapable {*}[WriteBackPaths [dict get $regions $id view] $e]
                 if {$tree eq ""} {
                     set tree $t
                 } else {
@@ -2021,17 +2160,36 @@ proc hir::escape::NestingPlan {hir spec regions callSites arity retDepth eligibl
             }
         }
         set blockedPaths [dict getdef $blocked $root {}]
+        set lazy {}
+        if {$lazyCapable ne ""} {
+            # A write-back's MutableBytes read whole only where it may be
+            # built at the use stays open (see above); the rest stay blocked.
+            set unlazyPaths [dict getdef $unlazy $root {}]
+            set kept {}
+            foreach path $blockedPaths {
+                if {[lsearch -exact $lazyCapable $path] >= 0 && [lsearch -exact $unlazyPaths $path] < 0} {
+                    if {$path ni $lazy} {
+                        lappend lazy $path
+                    }
+                } else {
+                    lappend kept $path
+                }
+            }
+            set blockedPaths $kept
+        }
         lassign [ChooseCut $structOpts $tree $blockedPaths $ceiling $ea $er $cyc] cut width0 width opened closed score budget
+        set lazy [lmap path $lazy {expr {$path in $opened ? $path : [continue]}}]
         if {$opened eq "" && $closed eq ""} {
             continue
         }
         foreach k $members {
-            if {[lindex $k 0] ne "lit" && $cut ne ""} {
+            if {[lindex $k 0] ni {lit wb} && $cut ne ""} {
                 dict set cuts $k $cut
             }
         }
-        lappend records [dict create members [lmap k $members {if {[lindex $k 0] eq "lit"} continue; set k}] \
+        lappend records [dict create members [lmap k $members {if {[lindex $k 0] in {lit wb}} continue; set k}] \
             literals [lmap k $members {if {[lindex $k 0] ne "lit"} continue; set k}] \
+            writebacks [lmap k $members {if {[lindex $k 0] ne "wb"} continue; set k}] lazy $lazy \
             shape [lindex $tree 0] width0 $width0 width $width cut $cut opened $opened closed $closed \
             argEdges $ea retEdges $er cyclic $cyc score $score budget $budget]
     }
@@ -2279,6 +2437,12 @@ proc hir::escape::DirectProjections {regions arity structOpts} {
             }
             if {$kind eq "local" && ![WidthOk $structOpts $desc local]} {
                 continue
+            }
+            if {$kind eq "local" && [IsWriteBack $view $recv $structOpts]} {
+                # A write-back value read straight off its call: its
+                # MutableBytes stay open (built only if the projection reads
+                # one whole), so the call builds nothing.
+                set desc [list $n $shape [WriteBackCut $view $recv]]
             }
             dict set direct $id $pe $desc
         }
