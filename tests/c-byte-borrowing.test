@@ -605,12 +605,17 @@ test bb-system-symbols {the executable imports memcmp, memcpy, memmove and memse
 } -cleanup removeApps -result {1 1 1 1}
 
 # Guard Malloc (libgmalloc, macOS's own malloc debugging library): every
-# allocation on pages of its own, its end against an inaccessible page, so a
-# read one byte past a storage whose size is a multiple of 16 faults. A
-# probe C program shows the detector works on this host: its one-byte
-# over-read of a 16-byte block faults under libgmalloc and not without. A
-# run is judged by its exit status alone: libgmalloc writes a banner to
-# standard error, which goes to a file (exec would take it for a failure).
+# allocation on pages of its own, its end against the page after it, so a
+# read one byte past a block whose size is a multiple of 16 faults -- when
+# that page is unmapped, which libgmalloc does not guarantee for every block
+# (MACOS-AARCH64-MILESTONE-7.md, section 8: a one-byte overrun of a 4096-byte
+# storage read the next page's zero instead). So the test claims no more than
+# its own controls show: the storages it exposes are of the size whose
+# one-byte overruns it shows faulting. A probe C program shows the detector
+# works on this host: its one-byte over-read of a 16-byte block faults under
+# libgmalloc and not without. A run is judged by its exit status alone:
+# libgmalloc writes a banner to standard error, which goes to a file (exec
+# would take it for a failure).
 proc guardMallocWorks {} {
     if {$::tcl_platform(os) ne "Darwin" || ![testConstraint cCompiler]} {
         return 0
@@ -641,15 +646,19 @@ proc appFaults {dir {environment {}}} {
     return 0
 }
 
-test bb-guard-malloc {(macOS) under Guard Malloc, a standalone executable making read and write exposures of storages whose sizes are multiples of 16 -- the fixture's and the system library's -- runs to the same value: no C call reads or writes past an exposed storage; the same executable with one count one byte too long faults, so the detector sees what it is meant to} -constraints {bbFixture guardMalloc} -body {
-    set main "d = mk(4080, 7)\nm = abi::bytes::zeroed(abi::usize(4080))\nw = bb::fill(m, mlen(m), 3)\nc = sys::memcpy(abi::bytes::zeroed(abi::usize(4080)), d, len(d))\n\[bb::checksum(d, len(d)), bb::checksum(w.out, mlen(w.out)), sys::memcmp(c.dst, d, len(d))\]\n"
-    set good [bbApp $main]
-    # The over-read: a literal count one past D's 4080 bytes (len(d) + 1 is
-    # not provably a size_t, and a program that does not compile must never
-    # pass for a fault: appFaults counts only a kill by a signal).
-    set bad [bbApp "[string map {{bb::checksum(d, len(d)), } {bb::checksum(d, 4081), }} $main]"]
+test bb-guard-malloc {(macOS) under Guard Malloc, a standalone executable making read and write exposures of 16-byte storages (32-byte blocks) -- the fixture's and the system library's -- runs to the same value: no C call reads or writes past an exposed storage; and each kind of exposure one byte too long (a fixture read, a fixture write into the detach copy, libSystem's memcpy) is killed by a signal there, and the read not without it, so the detector sees an overrun of exactly such storages} -constraints {bbFixture guardMalloc} -body {
+    set main "d = mk(16, 7)\nm = abi::bytes::zeroed(abi::usize(16))\nw = bb::fill(m, mlen(m), 3)\nc = sys::memcpy(abi::bytes::zeroed(abi::usize(16)), d, len(d))\n\[bb::checksum(d, len(d)), bb::checksum(w.out, mlen(w.out)), sys::memcmp(c.dst, d, len(d))\]\n"
+    # The positive controls, one exposure each with a literal count one past
+    # its 16 bytes (len(d) + 1 is not provably a size_t, and a program that
+    # does not compile must never pass for a fault: appFaults counts only a
+    # kill by a signal), made right after its storage.
+    set overruns [list \
+        "d = mk(16, 7)\n\[bb::checksum(d, 17)\]\n" \
+        "m = abi::bytes::zeroed(abi::usize(16))\nw = bb::fill(m, 17, 3)\n\[mlen(w.out)\]\n" \
+        "d = mk(16, 7)\nc = sys::memcpy(abi::bytes::zeroed(abi::usize(16)), d, 17)\n\[mlen(c.dst)\]\n"]
     set gmalloc {DYLD_INSERT_LIBRARIES /usr/lib/libgmalloc.dylib}
-    list [appExecutable $good $gmalloc] [appFaults $bad $gmalloc] [appFaults $bad]
-} -cleanup removeApps -result [list [bbList [list [bbPatternChecksum 4080 7] [bbChecksum [bbFill 4080 3]] 0]] 1 0]
+    list [appExecutable [bbApp $main] $gmalloc] [lmap overrun $overruns {appFaults [bbApp $overrun] $gmalloc}] \
+        [appFaults [bbApp [lindex $overruns 0]]]
+} -cleanup removeApps -result [list [bbList [list [bbPatternChecksum 16 7] [bbChecksum [bbFill 16 3]] 0]] {1 1 1} 0]
 
 cleanupTests
