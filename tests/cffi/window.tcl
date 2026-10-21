@@ -381,7 +381,11 @@ proc window::machineWindow {functions function foreign target} {
     set callees {}
     for {set i 0} {$i < $n} {incr i} {
         dict set index [dict get [lindex $instrs $i] address] $i
-        lappend callees [expr {[Kind [lindex $instrs $i]] eq "call" ? [CallTarget $instrs $i] : ""}]
+        if {[Kind [lindex $instrs $i]] eq "call"} {
+            lappend callees [CallTarget $instrs $i]
+        } else {
+            lappend callees ""
+        }
     }
     if {"?" in $callees} {
         error "window::machineWindow: a call of $function whose target is not known"

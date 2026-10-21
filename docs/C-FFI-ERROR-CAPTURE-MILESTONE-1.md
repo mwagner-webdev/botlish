@@ -72,11 +72,12 @@ What changed:
 * **native/src/codegen/clif.rs**: `op keepalive` emits nothing; the root
   plan's liveness (unchanged: the NIR use) keeps the storage a root. The
   helper `rt_keepalive` is gone.
-* **tests/c-ffi-error-capture.test** (16 tests), tests/cffi/window.tcl (the
+* **tests/c-ffi-error-capture.test** (15 tests), tests/cffi/window.tcl (the
   NIR and machine-code window detectors), tests/cffi/window-trace.c (a
   ptrace single-stepper), tests/cffi/errno-clobber.c (an allocator that
   changes errno), four errno functions in tests/cffi/fixture.c,
-  `cb-write-back-allocations`, `di-errno-allocator`, ten mutants,
+  `cb-write-back-allocations`, `di-errno-allocator`, eleven mutants (ten
+  of the borrowing harness, one of Darwin IO's),
   bench/c-ffi-error-capture.tcl.
 
 ## 1. Initial compiler behavior
@@ -264,6 +265,7 @@ structs were out of scope by the brief and not needed.
 |---|---|
 | `hir/escape.tcl` | `WriteBackResult`, `WrittenNames`, `IsWriteBack`, `WriteBackTree`, `WriteBackPaths`, `WriteBackCut`; `Classify`'s borrow case; `LiteralTree`'s write-back children; `Origins`' `{wb ID E}`; `NestingPlan`'s lazy paths and its `writebacks`/`lazy` record fields; `DirectProjections`' write-back cut |
 | `native/lower.tcl` | `BorrowCall` (fields per cut), `FieldValue`, `OpenedFieldObject`, `OpenedOwnerStorage`, `BuildStruct`'s reuse of built inner objects, `Project`/`ProjectChain` (an opened field read whole), `StorageOf` (an opened owner), `StructFields` (an opened write-back call), `Call`/`CallInner`/`VirtualValue`/`TryFields` (the cut) |
+| `native/native.tcl` | the transport census prints a class's paths built at their use |
 | `native/src/codegen/clif.rs`, `native/src/runtime/ops.rs`, `native/src/nir.rs` | `KeepAlive` emits nothing; `rt_keepalive` removed; the op's documentation |
 | `tests/c-ffi-error-capture.test`, `tests/cffi/window.tcl`, `tests/cffi/window-trace.c`, `tests/cffi/errno-clobber.c`, `tests/cffi/fixture.c` | the evidence (section 14) |
 | `tests/c-pointer-borrowing.test`, `tests/abi-bytes.test`, `tests/abi-mutable-bytes.test`, `tests/darwin-io.test` | the expectations that pinned the old window (`cb-nir-write`, `cb-exposure-after-arguments-nir`, `cb-allocations`, the four `*-keepalive-*` and machine-code tests, `di-errno-read-first`), `cb-write-back-allocations`, `di-errno-allocator` |
@@ -355,28 +357,33 @@ registered, no write barrier exists or was added.
 
 ## 12. Before and after: NIR
 
-(`tests/c-ffi-error-capture.test`'s shapes; every function's window from its
-C call to its call of `errno()`, `window::nirWindows`, as op words)
+(`tests/c-ffi-error-capture.test`'s shapes compiled for linux-x86_64; every
+function's window from its C call to its call of `errno()`,
+`window::nirWindows`, as op words; "before" is the commit before this
+milestone, 8c29f7e, the same source through its compiler)
 
-| shape | before (`-struct-opt 0` reproduces it) | after |
+| shape | before | after |
 |---|---|---|
 | `ec::fill` (darwin::read's shape) | `keepalive structnew structnew structget ilt` | `keepalive ilt` |
 | status only (`r.result`, buffer unused) | `keepalive structnew structnew structget ilt` | `keepalive ilt` |
 | straight off the call (`f(...).result < 0`) | `keepalive structnew structnew structget ilt` | `keepalive ilt` |
 | two written parameters | `keepalive keepalive structnew structnew structnew structget ilt` | `keepalive keepalive ilt` |
 | read and write exposure of one owner | `keepalive keepalive structnew structnew structget ilt` | `keepalive keepalive ilt` |
-| held in a struct (`w = {r: f(...), tag: 1}`) | `keepalive structnew structnew structnew structget structget ilt` | `keepalive ilt` |
+| held in a struct (`w = {r: f(...), tag: 1}`) | `keepalive structnew structnew structget ilt` | `keepalive ilt` |
 | `if` of two calls | `keepalive structnew structnew structget ilt` (each) | `keepalive ilt` (each) |
-| in a loop | `keepalive structnew structnew structget ilt` | `keepalive ilt` |
-| in a coroutine, before and after a `yield` | the same | `keepalive ilt` (each) |
+| in a loop | `keepalive structnew structnew structget ilt structget` | `keepalive ilt` |
+| in a coroutine, before and after a `yield` | `keepalive structnew structnew structget ilt` (each) | `keepalive ilt` (each) |
 | returned from `raw`: callee / caller | `keepalive structnew structnew` / `structget ilt` | `keepalive` / `ilt` |
 | `darwin::read` (macos-aarch64) | `keepalive structnew structnew structget ilt` | `keepalive ilt` |
 
-The same on the specializing and the generic lowering, for linux-x86_64 and
-macos-aarch64 -- except the returned value on the generic lowering, which
-carries no struct across a call as fields (section 29). `window::nirHazards`
-(anything that may allocate, call or collect) finds nothing in any window
-after, three to five per window before.
+Before, the generic lowering (`-specialize 0`) had the same windows; after,
+it has the "after" column too -- except the returned value, which the
+generic lowering carries across no call as fields (section 29): there `raw`
+builds it before its return, `keepalive structnew structnew`.
+`window::nirHazards` (anything that may allocate, call or collect) finds
+nothing in any window after, two to three per window before. `-struct-opt
+0` (struct scalar replacement off) reproduces the old windows and is the
+detectors' positive control.
 
 ## 13. Before and after: machine code
 
@@ -387,11 +394,12 @@ entry, every runtime helper's on AArch64 -- through the register its GOT
 load wrote; Mach-O's `_` dropped). `window::machineWindow` builds the
 function's control-flow graph (every branch's successors) and lists the
 calls on any path from the C call's return to the call of `errno()`,
-through no other call of the same C function:
+through no other call of the same C function ("before": the same detector
+on the object file of 8c29f7e's compiler, the calls in program order):
 
 | shape | before | after |
 |---|---|---|
-| every shape (Linux x86-64 and AArch64) | `rt_ffi_box_i64 rt_struct_new rt_struct_new rt_int_cmp` (one more `rt_struct_new` per further object) | `rt_ffi_box_i64 rt_int_cmp` |
+| every shape (Linux x86-64; after: also AArch64, section 26) | `rt_ffi_box_i64 rt_keepalive rt_struct_new rt_struct_new rt_int_cmp` (one more `rt_keepalive` per further exposure, one more `rt_struct_new` per further object) | `rt_ffi_box_i64 rt_int_cmp` |
 | `errno()`: entry to `__errno_location` / `__error` | -- | none |
 | `errno()`: `__errno_location` to the load (`rt_native_load`) | -- | none |
 
@@ -459,3 +467,218 @@ The evidence, at three levels, each with its positive control:
 The behavioral evidence alone would not prove the property (an allocator
 that leaves errno alone hides the window); the structural detectors do, and
 each detector is shown to see what it is meant to.
+
+## 15. Linux C fixture results
+
+tests/cffi/fixture.c's errno functions -- `bcf_fill_errno` (fill a buffer
+from a seed; fail with errno ERR, -1, after writing; or succeed, optionally
+leaving a stale errno), `bcf_fill2_errno` (two buffers), `bcf_reverse_errno`
+(read one buffer, write another), `bcf_tick` (a counter) -- set the standard
+`errno` of the calling thread. The test's binding (`ec`) reads it through
+glibc's `__errno_location()` and a native view of a one-field layout
+(`__error()` on macOS): no new primitive.
+
+`ec-fixture-shapes`, on cranelift and cranelift-generic (each a linked run
+of the program), Linux x86-64 (this container): every shape's value is
+the oracle's -- `fill(m, 1, 0, 0)` `{4, 0, 01264b70}`; `fill(m, 2, 13, 0)`
+`{-1, 13, 02274c71}` (the failure after the write keeps the write);
+`fill(m, 3, 0, 99)` `{4, 0, ...}` (a success reporting 0 although C left
+errno 99); `ec::read(-1, m)` `{-1, EBADF, 00000000}`; then 4, 5, 6, 7, 8, 10,
+11, 22, 33, 34 from the other shapes in succession, and the caller's buffer
+`00000000` at the end. `ec-arguments-once`: the seed argument `tick()` is 1
+and the next `tick()` after the call 2 -- one evaluation, in order.
+`ec-fixture-executable`: the standalone executable prints the same, also
+under GC stress and with the errno-changing allocator, also both at once.
+«linux-arm64: CI»
+
+## 16. macOS C fixture results
+
+«macOS run»
+
+## 17. Darwin read errno results
+
+«macOS run»
+
+## 18. Multiple writable parameters and aliasing
+
+`two(m, m, 6)`: one owner passed to both written parameters of
+`bcf_fill2_errno` is two private copies -- C fills one from seed 1 and the
+other from seed 2 (`01264b70`, `02274c71`), and the call fails with errno 6
+after writing both; the window holds two keepalives and the comparison. With
+one copy shared (mutant `write-back-shared-copy`) both buffers read
+`02274c71` and the test fails. `alias(...)`: `bcf_reverse_errno(freeze(m),
+n, m, 7)` reads the original `abcd` and writes the reversal into the copy:
+`dcba` in the write-back value, `abcd` still in `m`, errno 7. Write exposures
+are made after every argument, each with its own `mbytesclone`, and the
+read exposure of the same owner is its own storage (C-POINTER-BORROWING.md,
+`cb-read-write-one-owner`).
+
+## 19. Escaping write-back values
+
+Each of these keeps its value and its errno (`ec-fixture-shapes`, both
+native backends, the executable, GC stress):
+
+| the write-back value | how it is represented | result |
+|---|---|---|
+| returned from a function (`raw`) and read by its caller | fields across the return (`retmulti`/`callmulti`) | `[-1, 8, 092e5378]` |
+| held in a struct (`w = {r: ..., tag: 1}`) | opened into `w`'s fields | `[-1, 10, 072c5176, 1]` |
+| its buffer stored in a List | the MutableBytes built at the List's construction, after errno() | every list above |
+| its buffer captured by a closure (`captured`) | the binding is captured, so not virtual: the value is built at the call (as before), the closure returns `03284d72` | `f()` |
+| held across a coroutine suspension (`suspended`) | fields in the coroutine's frame, live across the `yield` | `[33, 4034]`: errno 33 before the yield, 34 after, and the first buffer's length (4) read after the resume |
+| in a loop | fields per iteration | `[[4, 0, ...], [-1, 22, ...], [4, 0, ...]]` |
+| passed to another foreign call (`fill(r.out, ...)`) | the storage register, nothing built | c-pointer-borrowing.test's `cb-write-owner-usable-again` |
+
+## 20. Coroutines and GC stress
+
+«GC stress results»
+
+## 21. HIR interchange and native backend regression
+
+`ec-interchange`: the shapes program written as HIR interchange text and
+read back after another compilation lowers to the identical NIR -- the
+representation is a lowering decision over the call's existing `borrows`,
+no HIR fact; the interchange format and the front-end cache are unchanged.
+`ec-tcl-backends`: the Tcl backends run the binding to its first C call and
+refuse it (NATIVE-ONLY), as before.
+
+`tests/local.tcl` (every Tcl test file on interp and compile, minus the
+golden duplicates; every golden suite on interp, compile, cranelift-generic
+and cranelift), Linux x86-64, 4 jobs, 1936 s: Tcl tests 6601 passed on
+interp and 6596 on compile, 0 failed; golden suites 101 run, 0 failed --
+interp 4977/4977, compile 4977/4977, cranelift-generic 4885/4885, cranelift
+4987/4987. The Tcl backends' code is untouched (no file of `core/` or
+`compiler/` changed); the struct scalar-replacement and value-transport
+suites (struct-scalar-replacement.test, value-transport.test,
+virtual-construction.test, struct-destructuring.test, the golden
+struct-representation.bot and compiled-values.bot) pass unchanged: the new
+construction is a new member of the existing machinery, and every other
+construction's plan is the same.
+
+## 22. Mutation results
+
+`audit/c-pointer-borrowing/tools/mutate.tcl` (its detectors: c-pointer-
+borrowing.test, c-byte-borrowing.test, c-ffi-error-capture.test, each with a
+private `-tmpdir`, and the borrowing fuzzer; a native mutant rebuilds a
+private copy of the backend, and one that does not build counts as
+NOT-BUILT, never as killed) and `audit/context-traits/tools/mutate.tcl` for
+lib/darwin.bot. The brief's mutant list, each as the mutant that realizes
+it and the detector that kills it -- structural detectors for the window,
+semantic and GC-stress ones for values and lifetimes:
+
+| the brief's mutation | mutant | kind | killed by |
+|---|---|---|---|
+| eager outer write-back `structnew` | `write-back-not-a-construction` | window | «k1» |
+| eager inner MutableBytes wrapper | `write-back-buffer-eager` | window | «k2» |
+| an allocator or runtime helper after the C call, before the capture | `allocation-after-c-call`, `keepalive-is-a-call` | window | «k3» |
+| only the success path materialized lazily, the failure path eager | `write-back-failure-path-eager` (new) | window | «k4» |
+| a detached buffer dropped from the scalar result | `opened-buffer-not-built` (handed on as storage, never built) | value | «k5» |
+| the original owner returned instead of the detached one | `copy-back-omitted` (existing) | value | «k6» |
+| one detached owner reused for two written parameters | `write-back-shared-copy` | value | «k7» |
+| a required keepalive dropped | `owner-liveness-dropped`, `keepalive-first-only` (existing), `keepalive-not-a-use` | lifetime | «k8» |
+| a managed root lost when the aggregate is scalarized | `write-back-copy-not-a-root` (new) | lifetime | «k9» |
+| materialization omitted where the value escapes | `opened-buffer-not-built` | value | «k5» |
+| the raw C failure result changed while unboxing | `write-back-result-changed` | value | «k10» |
+| errno read before the C call | `darwin-errno-before-call` (context-traits) | value (macOS) | «k11» |
+| errno read after an unrelated call | `darwin-errno-after-another-call` (existing), `allocation-after-c-call` | value, window | «k12» |
+| an argument evaluated twice | `write-back-argument-twice` | value | «k13» |
+| the foreign call reordered with the program's own operations | `detach-before-later-arguments` (new) | order | «k14» |
+| (performance) a buffer built once per iteration | `write-back-buffer-built-per-iteration` | allocation | «k15» |
+
+«mutation run»
+
+## 23. Allocation counts
+
+`cb-write-back-allocations` (the borrow fixture's `fill`, natively, the heap
+objects beside the same program without the call, {MutableBytes Struct}):
+
+| shape | before (`-struct-opt 0`) | after |
+|---|---|---|
+| bound, never read | 1 2 | 1 0 |
+| discarded (a statement) | 1 2 | 1 0 |
+| its buffer read whole once | 1 2 | 1 1 |
+| its buffer read whole twice | 1 3 | 1 1 |
+| its buffer read whole in a 10-iteration loop | 1 11 | 1 1 |
+
+The MutableBytes column is the detach (the private copy), the one allocation
+value semantics requires. (With struct scalar replacement off, every
+`abi::bytes::mutable_length` call also builds its `abi::Usize` result: the
+last two rows' extra objects.) Before this milestone the specialized
+lowering built two objects whenever the value was used (`cb-allocations`:
+`0 1 2 0`, now `0 1 1 0`).
+
+## 24. Performance
+
+«bench»
+
+## 25. Linux x86-64 CI
+
+«tests.yml»
+
+## 26. Linux AArch64 CI
+
+«tests-arm64.yml»
+
+## 27. macOS AArch64 CI
+
+«macos-arm64.yml»
+
+## 28. Windows
+
+«windows-x86_64.yml»
+
+## 29. Known limits of the guarantee
+
+* **A 64-bit result outside the small-Int range is boxed first.** A C
+  `long` or `unsigned long` result that does not fit a tagged small Int
+  (|v| >= 2^62) is boxed by `rt_ffi_box_i64`/`_u64` -- an allocation -- as
+  part of the call, before the comparison. Every small sentinel (-1, 0, a
+  count, a null pointer) takes the inline path; a sentinel like
+  `(size_t)-1` of `iconv(3)` or `mbstowcs(3)`, declared `ffi::c::ULong`, does
+  not. Keeping the result raw until a tagged use would close it, but raw
+  registers never live in virtual fields today (every consumer of virtual
+  fields relies on that); section 30.
+* **The generic lowering returns objects.** `-specialize 0`
+  (cranelift-generic) carries no struct across a call boundary as fields
+  (STRUCTS.md's known limitation), so a write-back value *returned from a
+  function* is built before that function returns. Locals, `if` joins,
+  direct projections and literals are fields there too.
+* **Closed buffers are built at the call.** A buffer read whole inside a
+  loop deeper than its binding, a parameter that receives the value and
+  reads its buffer whole, a class shared with a literal whose field is no
+  inline MutableBytes, and a binding a closure captures keep the
+  MutableBytes (or the whole value) closed: it is built at the call, once,
+  as before -- the trade the analysis makes against an allocation per
+  iteration or per call. The rule for a binding stays MACOS-AARCH64-
+  MILESTONE-8.md's: read the error state in the function that made the
+  call, before handing the value on.
+* **The comparative policies.** `-struct-opt 0`, the legacy width policy and
+  `nesting 0` (the differential-testing oracles) build the write-back as
+  before.
+* **errno() itself.** The errno function is a Botlish function call (its
+  prologue stores nothing but its own frame), and the load is
+  `rt_native_load`, a runtime helper whose code before the read checks its
+  operands and calls nothing; on the error paths of a null or unrepresentable
+  address it raises instead of loading.
+* **The program's own code is the program's.** An allocation, a call or a
+  `yield` the program writes between the C call and its errno read runs
+  there: the guarantee covers the compiler's work.
+* **Evidence per host.** The single-step trace runs on Linux (ptrace); on
+  macOS the evidence is the NIR and object-file detectors and the
+  errno-changing allocator.
+* **One thread** (MACOS-AARCH64-MILESTONE-8.md, section 7): errno is the
+  program's one native thread's.
+
+## 30. Follow-on issues
+
+* A raw C integer result kept unboxed until its first tagged use (and a raw
+  comparison of it), closing the BigInt boxing of large sentinels and
+  removing the BigInt paths from the window.
+* `NativeView` loads of a fixed-width integer field inlined (a machine load,
+  no helper) -- not needed for errno, a smaller window.
+* Callee-side lazy materialization for parameters, with an interprocedural
+  account of the loops that call them.
+* The generic lowering's return transport for structs.
+* Windows: `GetLastError()` read through an `extern c fn` right after the
+  call will have the same window once C calls run on Windows (`C_CALLS`); the
+  representation needs nothing more.
+* A macOS dynamic trace (an lldb script) beside the Linux one.

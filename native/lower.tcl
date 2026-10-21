@@ -5252,7 +5252,10 @@ proc native::lower::BorrowCall {fnVar e node {wantVirtual ""} {wantCut ""}} {
     set layout [hir::types::StructLayout $type]
     set mutableType [core::bytestore::mutableBytesType]
     set mutableLayout [hir::structs::names $mutableType]
-    set opened [expr {$wantVirtual ne "" ? [CutDict $wantCut] : [dict create]}]
+    set opened [dict create]
+    if {$wantVirtual ne ""} {
+        set opened [CutDict $wantCut]
+    }
     set fields {}
     foreach field $layout {
         if {$field eq "result"} {

@@ -492,3 +492,64 @@ proc hir::borrow::Decide {param argType} {
 ====
                 if {[lindex $member 0] eq "par" || $bindExpr eq ""} {
 >>>>
+
+@@ write-back-failure-path-eager only the success path stays lazy: entering an if's then-branch (the failure branch that reads errno) builds every opened write-back MutableBytes first
+## native/lower.tcl
+<<<<
+        set savedRaw [dict get $fn rawCache]
+        set body [dict get $node ${role}Body]
+        if {$body ne "" && ![hir::get $hir [lindex $body 0] reachable]} {
+====
+        set savedRaw [dict get $fn rawCache]
+        set body [dict get $node ${role}Body]
+        if {$role eq "then"} {
+            dict for {b local} [dict get $fn locals] {
+                if {[lindex $local 0] eq "virtual" && [lindex $local 3] eq $b} {
+                    foreach {field sub} [CutDict [lindex $local 5]] {
+                        if {[lindex $sub 0 1] eq "storage"} {
+                            OpenedFieldObject fn $b $field $e
+                        }
+                    }
+                }
+            }
+        }
+        if {$body ne "" && ![hir::get $hir [lindex $body 0] reachable]} {
+>>>>
+
+@@ detach-before-later-arguments a write exposure's private copy is made as soon as its own argument is evaluated, before the arguments after it (the foreign call's work reordered with the program's)
+## native/lower.tcl
+<<<<
+        if {[dict exists $access $index]} {
+            set register [StorageOf fn $arg [lindex [hir::typeOf $hir $arg] 1]]
+        } else {
+====
+        if {[dict exists $access $index]} {
+            set register [StorageOf fn $arg [lindex [hir::typeOf $hir $arg] 1]]
+            if {[dict get $access $index] eq "write" && $register ne "never"} {
+                set register [Assign fn "op mbytesclone $register" $e]
+                dict set access $index early
+            }
+        } else {
+>>>>
+<<<<
+    dict for {i how} $access {
+        if {$how eq "write"} {
+            set private [Assign fn "op mbytesclone [lindex $operands $i]" $e]
+====
+    dict for {i how} $access {
+        if {$how eq "early"} {
+            dict set access $i write
+            dict set written $i [lindex $operands $i]
+        }
+        if {$how eq "write"} {
+            set private [Assign fn "op mbytesclone [lindex $operands $i]" $e]
+>>>>
+
+@@ write-back-copy-not-a-root the root plan never counts a write exposure's private copy as a managed register (like a context leaf): a write-back value's opened storage field is no GC root at a later safepoint
+## native/src/codegen/roots.rs
+<<<<
+        let is_context = matches!(inst, Inst::ContextLoad { .. });
+====
+        let is_context = matches!(inst, Inst::ContextLoad { .. })
+            || matches!(inst, Inst::Op { op: crate::nir::OpCode::MBytesClone, .. });
+>>>>

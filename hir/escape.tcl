@@ -2178,7 +2178,7 @@ proc hir::escape::NestingPlan {hir spec regions callSites arity retDepth eligibl
             set blockedPaths $kept
         }
         lassign [ChooseCut $structOpts $tree $blockedPaths $ceiling $ea $er $cyc] cut width0 width opened closed score budget
-        set lazy [lmap path $lazy {expr {$path in $opened ? $path : [continue]}}]
+        set lazy [lmap path $lazy {if {$path in $opened} {set path} else {continue}}]
         if {$opened eq "" && $closed eq ""} {
             continue
         }
