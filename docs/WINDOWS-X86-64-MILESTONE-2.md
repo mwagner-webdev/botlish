@@ -587,7 +587,7 @@ cargo test --release --manifest-path native/Cargo.toml --lib --bins
 
 ### 7.3 Results on Windows
 
-Two runs of the workflow on this branch (`windows-2025`, MSVC 14.51,
+The workflow's runs on this branch (`windows-2025`, MSVC 14.51,
 `x86_64-pc-windows-msvc`):
 
 **Run [39614972492](https://github.com/mwagner-webdev/botlish/actions/runs/39614972492)
@@ -632,6 +632,10 @@ each `appleAvailability`, `darwinIO`, `guardMalloc`, `linuxX86_64`,
 `pythonLauncher`, `tclLibrary`, `unix`, `unixShell`, `x86_64Host`: every one
 a capability Windows does not have or a host-specific tool, none a
 Windows I/O or C FFI test that could run.
+
+**Run [39636219872](https://github.com/mwagner-webdev/botlish/actions/runs/39636219872)
+(04e0136, the macOS fixes of section 7.4): every job green again**
+(smoke and the Windows-relevant files, acceptance's four shards).
 
 ### 7.4 Linux and macOS
 
