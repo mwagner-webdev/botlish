@@ -635,7 +635,7 @@ killed):
 | bounds proofs: fuzzer seeds 1-3 and 4 under GC stress; mutants | 0 failures; 57/57 killed |
 | fixed layout arrays, layout unions, binary layouts, native views, native edits: fuzzers seeds 1-3 and 4 under GC stress | 0 disagreements each |
 | binary-layout, native-view, native-edit mutants | 39/39, 29/29, 40/40 killed |
-| layout-arrays, layout-unions mutants | LAYOUT-MUTANTS |
+| layout-arrays, layout-unions mutants | 24/24 killed each (layout arrays: 23 in the run, `loaded-length-one-more` after its retargeting, below) |
 | MutableVector, MutableArray: suites; fuzzers seeds 1-2 and 3 under GC stress; MutableArray mutants | 0 disagreements; 36/36 killed |
 | affine values, coroutines: suites; affine fuzzer seeds 1-2; mutants | 0 disagreements; 29/29 and 52/52 killed |
 | refinement values, traits, structural contracts: fuzzers seeds 1-2 | 0 failures each; structural-contracts mutants 18/18 killed |
