@@ -268,7 +268,7 @@ test tm-architecture-specific-module-on-macos {an architecture-specific namespac
     }
 } -cleanup {unset -nocomplain arch name channel target hir} -result {{macos-aarch64 {"AArch64"}} {macos-x86_64 {"x86-64"}}}
 
-test tm-os-named-module-is-no-platform {only designated namespace trees are a platform's (core/cabi.tcl's platforms: linux): a standard module that happens to be named like an operating system (a private library's windows and macos) is no platform's, and compiles for every target} -body {
+test tm-os-named-module-is-no-platform {only designated namespace trees are a platform's (core/cabi.tcl's platforms: linux and darwin): a standard module that happens to be named like an operating system (a private library's windows and macos) is no platform's, and compiles for every target} -body {
     withPrivateLibrary {
         foreach name {windows macos} {
             set channel [open [file join $::core::libraryDir $name.bot] w]

@@ -42,8 +42,9 @@
 # leaf: a selected one against the value C stored, any other -- another
 # interpretation of the same bytes -- against C's own reading of its bytes
 # (memcpy from the member's address into a value of its type: the physical
-# model, not C's union punning), except a pointer, which arbitrary bits
-# need not be. C checks an edited record and a built image against an image
+# model, not C's union punning), except a pointer or a C float or double
+# (C-FLOAT-FFI-MILESTONE-1.md), which arbitrary bits need not be (a NaN is
+# no Float64). C checks an edited record and a built image against an image
 # of its own (0xA5, or 0, then every written leaf's bytes copied in at its
 # offsetof), byte by byte, and every written leaf with a typed read: a
 # write that strays outside its alternative, or loses one written earlier
@@ -130,6 +131,38 @@ proc ::cbind::oracle::Value {bits signed i phase seed} {
     return [list $pattern $value]
 }
 
+# A deterministic value of the C floating type NAME (Float, Double) on
+# TARGET for leaf I in PHASE: {BITS TEXT}, BITS its bit pattern (the C side
+# writes and compares those bytes, exactly) and TEXT the Botlish literal of
+# the Float64 it is (exactly: every value is one of the format's). Every
+# fourth leaf is the largest finite value of the format, every fourth after
+# it the smallest positive subnormal (C-FLOAT-FFI-MILESTONE-1.md: both cross
+# the boundary unchanged); the others are exact multiples of 1/64.
+proc ::cbind::oracle::FloatValue {name target i phase seed} {
+    set format [dict get [core::cabi::floatingInfo $name $target] format]
+    set info [core::cabi::formatInfo $format]
+    switch -- [expr {($i + $phase) % 4}] {
+        0 {
+            set p [dict get $info precision]
+            set x [expr {(2.0 - 2.0 ** (1 - $p)) * 2.0 ** [dict get $info maxExponent]}]
+        }
+        1 {
+            set x [expr {2.0 ** (2 - [dict get $info maxExponent] - [dict get $info precision])}]
+        }
+        default {
+            set n [expr {(($i + 1) * 0x9E3779B97F4A7C15 + ($phase + 1) * 0x632BE59BD9B4E019 + $seed * 0x2545F4914F6CDD1D) % 2097152}]
+            set x [expr {($n - 1048576) / 64.0}]
+        }
+    }
+    return [list [core::cabi::NarrowBits $format $x] [core::float::text [core::value::float Float64 $x]]]
+}
+
+# C statements copying the bit pattern BITS of a value of the C type CT
+# into the lvalue DST's bytes (TO an expression of its address).
+proc ::cbind::oracle::FloatStore {ct bits to} {
+    return "    { $ct t; unsigned long long u = ${bits}ULL; __builtin_memcpy(&t, &u, sizeof t); __builtin_memcpy($to, &t, sizeof t); }\n"
+}
+
 proc ::cbind::oracle::Ident {s} { regsub -all {[^A-Za-z0-9_]} $s _ }
 
 # The prelude of LAYOUTS-CHECK (layouts-check.c's text): its defines,
@@ -169,9 +202,11 @@ proc ::cbind::oracle::build {ns dir names {seed 1} {target ""}} {
         set parses {}
         set pointerFree 1
         set unionFree 1
+        set floating 0
         foreach leaf $leaves {
             if {[regexp {^ffi::c::(Ptr|FnPtr)\[} [lindex $leaf 2]]} { set pointerFree 0 }
             if {[llength [lindex $leaf 5]]} { set unionFree 0 }
+            if {[regexp {^ffi::c::(Float|Double)$} [lindex $leaf 2]]} { set floating 1 }
         }
         # C.
         append c "\n/* $name: $T */\n"
@@ -223,6 +258,38 @@ proc ::cbind::oracle::build {ns dir names {seed 1} {target ""}} {
                     append checkBytes "    if (r.$cp != ORC_ANCHOR($ct, $kc)) return [expr {$i + 1}];\n"
                     append botWrite "    b$i = orc::orc_${id}_anchor_$i\($kc)\n    d[expr {$written + 1}] = binary::write_foreign(d$written, $L.$bp, b$i)\n"
                     incr written
+                }
+            } elseif {[regexp {^ffi::c::(Float|Double)$} $type -> scalar]} {
+                # A C float or double (C-FLOAT-FFI-MILESTONE-1.md): C writes
+                # and checks exact bit patterns; Botlish reads, stores and
+                # writes the Float64 each one is. Another interpretation of
+                # bytes C wrote may be NaN, which is no value: not read.
+                lassign [FloatValue $scalar $target $i 0 $seed] pa va
+                lassign [FloatValue $scalar $target $i 1 $seed] pb vb
+                lassign [FloatValue $scalar $target $i 2 $seed] pc vc
+                if {$on0} {
+                    append init [FloatStore $ct $pa "(void *)&r->$cp"]
+                    append image0 [FloatStore $ct $pa "img + $at"]
+                    append botRead "    r$i = if $read == $va:\n        0\n    else:\n        1\n"
+                    lappend reads r$i
+                }
+                if {$on1} {
+                    append image1 [FloatStore $ct $pb "img + $at"]
+                    append checkEdit "    { $ct t; unsigned long long u = ${pb}ULL; __builtin_memcpy(&t, &u, sizeof t); if (__builtin_memcmp(&t, (const void *)&r->$cp, sizeof t)) return [expr {$i + 1}]; }\n"
+                    append botStore "    binary::store(e, $L.$bp, $vb)\n"
+                }
+                if {$on2} {
+                    append image2 [FloatStore $ct $pc "img + $at"]
+                    append checkBytes "    { $ct t; unsigned long long u = ${pc}ULL; __builtin_memcpy(&t, &u, sizeof t); if (__builtin_memcmp(&t, (const void *)&r.$cp, sizeof t)) return [expr {$i + 1}]; }\n"
+                    append botWrite "    d[expr {$written + 1}] = binary::write(d$written, $L.$bp, $vc)\n"
+                    incr written
+                    if {$pointerFree && $unionFree} {
+                        append botParse "    s$i = if $parse == $vc:\n        0\n    else:\n        1\n"
+                        lappend parses s$i
+                    } elseif {!$unionFree} {
+                        append botParse "    s$i = if binary::read(frozen, $L.$bp) == $vc:\n        0\n    else:\n        1\n"
+                        lappend parses s$i
+                    }
                 }
             } else {
                 regexp {^ffi::c::([A-Za-z]+)$} $type -> scalar
@@ -276,7 +343,8 @@ proc ::cbind::oracle::build {ns dir names {seed 1} {target ""}} {
         append ext "extern c fn orc_${id}_check_edit(p: ffi::c::Ptr\[ffi::c::Void\]) -> ffi::c::Int\n"
         append ext "extern c fn orc_${id}_check_bytes(\n    b: ffi::c::Ptr\[ffi::c::UChar\] read noescape,\n    n: ffi::c::ULong\n) -> ffi::c::Int\n"
         # Botlish.
-        set fn "\n# $name ($T)\nfn check_$id\() -> List\[int\] errors NativeViewNull, NativeEditNull, LayoutLengthMismatch, IndexNotFound:\n"
+        set errors "NativeViewNull, NativeEditNull, LayoutLengthMismatch, IndexNotFound[expr {$floating ? ", NonFiniteFloat" : ""}]"
+        set fn "\n# $name ($T)\nfn check_$id\() -> List\[int\] errors $errors:\n"
         append fn "    size = if orc::orc_${id}_size() == binary::layout_length($L):\n        0\n    else:\n        1\n"
         append fn "    align = if orc::orc_${id}_align() == binary::layout_alignment($L):\n        0\n    else:\n        1\n"
         append fn "    p = orc::orc_${id}_init()\n    v = binary::native::view($L, p)\n$botRead"
@@ -300,7 +368,8 @@ proc ::cbind::oracle::build {ns dir names {seed 1} {target ""}} {
         foreach leaf $leaves {
             lassign $leaf bp cp type read parse choices
             set pointer [regexp {^ffi::c::(Ptr|FnPtr)\[} $type]
-            if {!$pointer || [Selected $choices 0 $seed]} {
+            set notRead [expr {$pointer || [regexp {^ffi::c::(Float|Double)$} $type]}]
+            if {!$notRead || [Selected $choices 0 $seed]} {
                 lappend readLabels [string cat $name "." $bp [expr {[Selected $choices 0 $seed] ? ": view read of C's store" : ": view read of another interpretation of C's bytes"}]]
             }
             if {!$pointer && [Selected $choices 2 $seed] && (($pointerFree && $unionFree) || !$unionFree)} {
@@ -314,8 +383,8 @@ proc ::cbind::oracle::build {ns dir names {seed 1} {target ""}} {
                 "$name: C reads every leaf Botlish wrote in byte storage, every other byte zero"] \
             $parseLabels]
     }
-    append bot "\nfn run() -> List\[any\] errors NativeViewNull, NativeEditNull, LayoutLengthMismatch, IndexNotFound:\n    \[[join [lmap k $calls {string cat $k "()"}] {, }]\]\n"
-    append bot "\nr = run():\n    on NativeViewNull:\n        \[\"view of null\"\]\n    on NativeEditNull:\n        \[\"edit of null\"\]\n    on LayoutLengthMismatch:\n        \[\"length mismatch\"\]\n    on IndexNotFound:\n        \[\"index not found\"\]\nr\n"
+    append bot "\nfn run() -> List\[any\] errors NativeViewNull, NativeEditNull, LayoutLengthMismatch, IndexNotFound, NonFiniteFloat:\n    \[[join [lmap k $calls {string cat $k "()"}] {, }]\]\n"
+    append bot "\nr = run():\n    on NativeViewNull:\n        \[\"view of null\"\]\n    on NativeEditNull:\n        \[\"edit of null\"\]\n    on LayoutLengthMismatch:\n        \[\"length mismatch\"\]\n    on IndexNotFound:\n        \[\"index not found\"\]\n    on NonFiniteFloat:\n        \[\"non-finite float\"\]\nr\n"
     return [dict create c $c ext $ext bot $bot expected $expected labels $checkLabels names $names]
 }
 

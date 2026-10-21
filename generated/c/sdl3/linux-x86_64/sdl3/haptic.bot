@@ -162,5 +162,12 @@ extern c fn SDL_HapticRumbleSupported(
 # C: _Bool SDL_InitHapticRumble(SDL_Haptic *haptic)
 extern c fn SDL_InitHapticRumble(haptic: ffi::c::Ptr[sdl3::ctypes::SDL_Haptic]) -> ffi::c::Bool
 
+# C: _Bool SDL_PlayHapticRumble(SDL_Haptic *haptic, float strength, Uint32 length)
+extern c fn SDL_PlayHapticRumble(
+    haptic: ffi::c::Ptr[sdl3::ctypes::SDL_Haptic],
+    strength: ffi::c::Float,
+    length: ffi::c::UInt
+) -> ffi::c::Bool
+
 # C: _Bool SDL_StopHapticRumble(SDL_Haptic *haptic)
 extern c fn SDL_StopHapticRumble(haptic: ffi::c::Ptr[sdl3::ctypes::SDL_Haptic]) -> ffi::c::Bool

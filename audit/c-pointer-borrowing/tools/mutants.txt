@@ -259,3 +259,102 @@ proc hir::borrow::Decide {param argType} {
         return $result
     }
 >>>>
+
+# --- the macOS acceptance's mutants (MACOS-AARCH64-MILESTONE-7.md) -----------
+#
+# Bugs where the exposure meets the machine: the address the runtime
+# computes, the transport into a real C call, the detach's copy, which
+# storages a call keeps alive or exposes. Real C (tests/c-byte-borrowing.test)
+# kills them by what C read or wrote and by the address it was given; the
+# borrow fixture's NIR and allocation tests by structure.
+
+@@ exposure-is-object-word a read exposure of a Bytes hands C the storage object's own address (its header), not its payload's
+## native/src/runtime/ops.rs
+<<<<
+    let address = BytesObj::payload_address(v) as i64;
+====
+    let address = v as i64;
+>>>>
+
+@@ exposure-address-truncated a C call receives only the low 32 bits of an exposure's address
+## native/src/codegen/clif.rs
+<<<<
+            let word = if exposed[i] {
+                self.b.ins().sshr_imm_s(v, 1)
+            } else if class == nir::CAbi::Ptr {
+====
+            let word = if exposed[i] {
+                let address = self.b.ins().sshr_imm_s(v, 1);
+                self.b.ins().band_imm_s(address, 0xffff_ffff)
+            } else if class == nir::CAbi::Ptr {
+>>>>
+
+@@ apple-exposure-tagged under Apple's C convention an exposure's address is passed as its tagged small-Int word (2a + 1), not the address
+%% macos-aarch64
+## native/src/codegen/clif.rs
+<<<<
+            let word = if exposed[i] {
+                self.b.ins().sshr_imm_s(v, 1)
+            } else if class == nir::CAbi::Ptr {
+====
+            let word = if exposed[i] && apple {
+                v
+            } else if exposed[i] {
+                self.b.ins().sshr_imm_s(v, 1)
+            } else if class == nir::CAbi::Ptr {
+>>>>
+
+@@ keepalive-first-only a call with several exposures keeps only the first exposed storage alive
+## native/lower.tcl
+<<<<
+    foreach storage $kept {
+        Assign fn "op keepalive $storage" $e
+    }
+====
+    foreach storage [lrange $kept 0 0] {
+        Assign fn "op keepalive $storage" $e
+    }
+>>>>
+
+@@ detach-copy-short the write exposure's private copy (the detach) holds one byte fewer than its owner
+## native/src/runtime/ops.rs
+<<<<
+    vm(p).new_mutbytes_with(mutbytes_of(m).len(), |init| init.push_slice(mutbytes_of(m)))
+====
+    let short = mutbytes_of(m).len().saturating_sub(1);
+    vm(p).new_mutbytes_with(short, |init| init.push_slice(&mutbytes_of(m)[..short]))
+>>>>
+
+@@ read-exposure-copied a MutableBytes exposed for reading is copied first (a size-linear copy no read needs)
+## native/lower.tcl
+<<<<
+        set owner [hir::typeOf $hir [lindex [dict get $node args] $i]]
+        lset operands $i [ExposeStorage fn [lindex $operands $i] [hir::borrow::IsMutableOwner $owner] $e]
+====
+        set owner [hir::typeOf $hir [lindex [dict get $node args] $i]]
+        if {$how eq "read" && [hir::borrow::IsMutableOwner $owner]} {
+            lset operands $i [Assign fn "op mbytesclone [lindex $operands $i]" $e]
+        }
+        lset operands $i [ExposeStorage fn [lindex $operands $i] [hir::borrow::IsMutableOwner $owner] $e]
+>>>>
+
+@@ exposure-wrong-owner every exposure of a call is the storage of its first exposed argument
+## native/lower.tcl
+<<<<
+        set owner [hir::typeOf $hir [lindex [dict get $node args] $i]]
+        lset operands $i [ExposeStorage fn [lindex $operands $i] [hir::borrow::IsMutableOwner $owner] $e]
+====
+        set owner [hir::typeOf $hir [lindex [dict get $node args] $i]]
+        lset operands $i [ExposeStorage fn [lindex $operands [lindex [dict keys $access] 0]] [hir::borrow::IsMutableOwner $owner] $e]
+>>>>
+
+@@ variadic-byte-argument-admitted byte storage is accepted as a trailing argument of a variadic C call, as if it were a pointer
+## hir/cabi.tcl
+<<<<
+    if {[hir::borrow::IsOwner $type]} {
+        return [dict create problem FOREIGN-BORROW message [format \
+====
+    if {[hir::borrow::IsOwner $type]} {
+        return [dict create c [hir::types::show $type] class ptr promoted ptr]
+        return [dict create problem FOREIGN-BORROW message [format \
+>>>>

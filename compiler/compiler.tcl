@@ -1337,6 +1337,10 @@ proc core::compiler::CompileNativeCall {ctxVar e callee name argOps} {
             return $result
         }
     }
+    # (A layout operation's NonFiniteFloat counts only where its layout
+    # holds a C floating field it reads or a binary32 one it writes:
+    # hir::layouts::CallErrors, C-FLOAT-FFI-MILESTONE-1.md.)
+    dict set meta errors [hir::completions::LayoutCallErrors $hir $name [N $e args] [dict get $meta errors]]
     if {[dict get $meta errors] ne "" && (![hir::completions::BoundsProven $hir $e]
             || [core::native::unboundedErrors $meta] ne {})} {
         # A native with declared errors (`argv`, `list::at`) completes with
@@ -1509,6 +1513,13 @@ proc core::compiler::CompileLayoutOperation {ctxVar e name role argOps} {
     }
     if {[ArrayOfRecords $descriptor]} {
         # (FIXED-LAYOUT-ARRAYS.md: the reference implementation's loop.)
+        return ""
+    }
+    if {[hir::layouts::DescriptorFormats $descriptor] ne {}} {
+        # A C floating field (C-FLOAT-FFI-MILESTONE-1.md) is admitted or
+        # narrowed, and may fail with NonFiniteFloat: the reference
+        # implementation's boundary rules (core::cabi), never a second copy
+        # of them in a format string.
         return ""
     }
     set leaves [LayoutLeaves $descriptor 0 {}]

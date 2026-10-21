@@ -90,6 +90,12 @@ proc generatable {target} {
 # requires that no test is skipped).
 testConstraint crossLinux [expr {[testConstraint linuxNative] && [generatable $::linuxOther]}]
 testConstraint stubsTarget [generatable linux-x86_64]
+# The fixture is generated, and has a committed binding, for this host's
+# target: none for windows-x86_64, MSVC's (the fixture's Windows target is
+# windows-x86_64-gnu; an MSVC binding is the Windows SDK milestone's,
+# WINDOWS-X86-64-MILESTONE-1.md). A test that generates or compiles the
+# fixture for the host's target carries it.
+testConstraint fixtureHostBinding [expr {$::hostTarget ne "" && [file isdirectory [file join $::projectRoot tools c-bindgen fixture expected $::hostTarget]]}]
 
 # The files of the committed bindings of PAIRS ({PROFILE TARGET ...}) that
 # generation does not reproduce: {PROFILE TARGET PATH STATUS ...}.
@@ -354,12 +360,22 @@ test cb-fixture-mapping {the declaration mapping: integer typedefs resolve to th
     }
 } -result {{extern c fn bgf_mix( a: ffi::c::UChar, b: ffi::c::Short, c: ffi::c::UInt, d: ffi::c::ULong, e: ffi::c::Long, f: ffi::c::ULongLong) -> ffi::c::UInt} {extern c fn bgf_next_color(c: ffi::c::UInt) -> ffi::c::UInt} {extern c fn bgf_window_of( handle: ffi::c::Ptr[bgf::ctypes::bgf_handle] noescape) -> ffi::c::Ptr[bgf::ctypes::bgf_window]} {extern c fn bgf_handles() -> ffi::c::Ptr[ffi::c::Ptr[bgf::ctypes::bgf_handle]]} {extern c fn bgf_point_sum(point: ffi::c::Ptr[bgf::ctypes::bgf_point]) -> ffi::c::Int} {extern c fn bgf_walk( handle: ffi::c::Ptr[bgf::ctypes::bgf_handle] noescape, visit: ffi::c::FnPtr[Fn{args: [ffi::c::Ptr[ffi::c::Void], ffi::c::Ptr[bgf::ctypes::bgf_handle], ffi::c::Int], return: ffi::c::Int}], userdata: ffi::c::Ptr[ffi::c::Void]) -> ffi::c::Int} {extern c fn bgf_set_free( free_fn: ffi::c::FnPtr[Fn{args: [ffi::c::Ptr[ffi::c::Void]], return: unit}]) -> unit} {extern c fn bgf_digest( data: ffi::c::Ptr[ffi::c::UChar] read noescape, len: ffi::c::ULong, out: ffi::c::Ptr[ffi::c::UChar] write noescape) -> ffi::c::Ptr[ffi::c::UChar] alias out} {extern c fn bgf_keywords( fn_: ffi::c::Int, type_: ffi::c::Int, in: ffi::c::Int, loop_: ffi::c::Int, str: ffi::c::Int) -> ffi::c::Int} {extern c fn bgf_unnamed( arg1: ffi::c::Int, arg2: ffi::c::Ptr[ffi::c::Char]) -> ffi::c::Int} {extern c fn bgf_is_even(n: ffi::c::Int) -> ffi::c::Bool} {extern c fn bgf_twins( a: ffi::c::Ptr[bgf::ctypes::bgf_twin], b: ffi::c::Ptr[bgf::ctypes::bgf_twin_struct]) -> ffi::c::Int}}
 
-test cb-fixture-unsupported {every declaration outside the C ABI universe is reported with its precise blocker and never approximated: floats, a struct by value, a va_list, a callback with a double, an explicit calling convention, a typedef an attribute widens to 128 bits, a declaration without prototype, a pointer to float} -constraints clang -body {
+test cb-fixture-unsupported {every declaration outside the C ABI universe is reported with its precise blocker and never approximated: a long double (C float and double are bound since C-FLOAT-FFI-MILESTONE-1.md), a struct by value, a va_list, a callback with a long double, an explicit calling convention, a typedef an attribute widens to 128 bits, a declaration without prototype, a pointer to long double} -constraints clang -body {
     set rows [::cbind::generate::readTsv [dict get [generation $::fixture linux-x86_64] files report.tsv]]
-    lmap name {bgf_scale bgf_swap bgf_vprintf bgf_set_measure bgf_ms bgf_wide_set bgf_noproto bgf_float_out bgf_half} {
+    lmap name {bgf_long_scale bgf_swap bgf_vprintf bgf_set_measure bgf_ms bgf_wide_set bgf_noproto bgf_long_ptr} {
         lrange [dict get $rows "function $name"] 2 5
     }
-} -result {{unsupported {} double,float {parameter 1 (x): double; parameter 2 (y): float; result: double}} {unsupported {} by-value-aggregate {parameter 1 (p): struct bgf_pair by value; result: struct bgf_pair by value}} {unsupported {} va-list {parameter 2 (args): __builtin_va_list}} {unsupported {} unsupported-callback-signature {parameter 1 (measure): callback argument 1: double (double); parameter 1 (measure): callback result: double (double)}} {unsupported {} unsupported-calling-convention {an explicit calling convention: ms_abi}} {unsupported {} typedef-abi-mismatch {parameter 1 (w): typedef bgf_wide is unsigned long by its declaration, but the compiler gives it no C integer type of the table (16 bytes): an attribute or extension changes it}} {unsupported {} no-prototype {declared without a prototype: ()}} {unsupported {} float {parameter 1 (out): a pointer to float}} {unsupported {} double {parameter 1 (x): double; result: double}}}
+} -result {{unsupported {} long-double {parameter 1 (x): long double: its representation is the target's (binary64, x87 extended precision or binary128), and neither the FFI nor Botlish has a type of it; result: long double: its representation is the target's (binary64, x87 extended precision or binary128), and neither the FFI nor Botlish has a type of it}} {unsupported {} by-value-aggregate {parameter 1 (p): struct bgf_pair by value; result: struct bgf_pair by value}} {unsupported {} va-list {parameter 2 (args): __builtin_va_list}} {unsupported {} unsupported-callback-signature {parameter 1 (measure): callback argument 1: long double: its representation is the target's (binary64, x87 extended precision or binary128), and neither the FFI nor Botlish has a type of it (long-double); parameter 1 (measure): callback result: long double: its representation is the target's (binary64, x87 extended precision or binary128), and neither the FFI nor Botlish has a type of it (long-double)}} {unsupported {} unsupported-calling-convention {an explicit calling convention: ms_abi}} {unsupported {} typedef-abi-mismatch {parameter 1 (w): typedef bgf_wide is unsigned long by its declaration, but the compiler gives it no C integer type of the table (16 bytes): an attribute or extension changes it}} {unsupported {} no-prototype {declared without a prototype: ()}} {unsupported {} long-double {parameter 1 (x): a pointer to long double: its representation is the target's (binary64, x87 extended precision or binary128), and neither the FFI nor Botlish has a type of it}}}
+
+test cb-fixture-floats {C float and C double are bound as ffi::c::Float and ffi::c::Double (C-FLOAT-FFI-MILESTONE-1.md), never Float64 and never one another: parameters and results, a pointer to each, a function pointer of a float signature (a callback typedef), a record pointer, an inline function's thunk, and typedef chains the compiler confirms as the floating type they name; a floating macro constant is reported, not emitted (the generator binds integer constants only)} -constraints clang -body {
+    set rows [::cbind::generate::readTsv [dict get [generation $::fixture linux-x86_64] files report.tsv]]
+    list {*}[lmap key {{function bgf_scale} {function bgf_scale32} {function bgf_float_out} {function bgf_dot} {function bgf_apply_float} {function bgf_halver} {function bgf_half} {typedef bgf_scalar32} {typedef bgf_real32} {typedef bgf_scalar64} {typedef bgf_float_fn} {macro BGF_HALF}} {
+        lrange [dict get $rows $key] 2 5
+    }] [lindex [regexp -inline {extern c fn bgf_scale32\([^)]*\) -> [^\n]*} [dict get [generation $::fixture linux-x86_64] files bgf/bgf.bot]] 0]
+} -result {{direct bgf::bgf direct {symbol bgf_scale; (ffi::c::Double, ffi::c::Float) -> ffi::c::Double}} {direct bgf::bgf direct {symbol bgf_scale32; (ffi::c::Float, ffi::c::Double) -> ffi::c::Float}} {direct bgf::bgf direct {symbol bgf_float_out; (ffi::c::Ptr[ffi::c::Float]) -> unit}} {direct bgf::bgf direct {symbol bgf_dot; (ffi::c::Ptr[ffi::c::Float], ffi::c::Ptr[ffi::c::Double], ffi::c::ULong) -> ffi::c::Double}} {direct bgf::bgf direct {symbol bgf_apply_float; (ffi::c::FnPtr[Fn{args: [ffi::c::Float], return: ffi::c::Float}], ffi::c::Float) -> ffi::c::Float}} {direct bgf::bgf direct {symbol bgf_halver; () -> ffi::c::FnPtr[Fn{args: [ffi::c::Float], return: ffi::c::Float}]}} {thunk bgf::thunks::bgf {thunk (inline)} {symbol botlish_bgf_bgf_half; (ffi::c::Double) -> ffi::c::Double}} {other {} ffi::c::Float float} {other {} ffi::c::Float float} {other {} ffi::c::Double double} {callback {} {ffi::c::FnPtr[Fn{args: [ffi::c::Float], return: ffi::c::Float}]} {float (*)(float x)}} {unsupported {} floating-constant {a double constant: the generator binds integer constants only}} {extern c fn bgf_scale32(
+    x: ffi::c::Float,
+    k: ffi::c::Double
+) -> ffi::c::Float}}
 
 test cb-fixture-variadic {a C prototype ending in `...` (read from the parser's prototype, never from a name, a format attribute or a va_list) is bound as its fixed parameters and the bare `variadic`, its symbol and contract kept; a va_list parameter is a fixed one, never variadic; a variadic function only a C thunk could call stays unsupported (C cannot forward `...`), and so does one with no fixed parameter} -constraints clang -body {
     set result [generation $::fixture linux-x86_64]
@@ -418,7 +434,7 @@ test cb-fixture-constants {constants are the compiler's values of their C types:
     lmap key {{macro BGF_FLAG_A} {macro BGF_FLAG_ALL} {macro BGF_BIG} {macro BGF_SIZE_NONE} {macro BGF_NEGATIVE} {macro BGF_CHAR} {enumerator BGF_BLUE} {enumerator BGF_ANON_MINUS} {macro BGF_HALF} {macro BGF_NAME} {macro BGF_NULL_HANDLE} {macro BGF_EXPORT}} {
         lrange [dict get $rows $key] 2 5
     }
-} -result {{constant bgf::bgf ffi::c::UInt {unsigned int 1}} {constant bgf::bgf ffi::c::UInt {unsigned int 3}} {constant bgf::bgf ffi::c::ULong {unsigned long 18446744073709551615}} {constant bgf::bgf ffi::c::Long {long -1}} {constant bgf::bgf ffi::c::Int {int -42}} {constant bgf::bgf ffi::c::Int {int 120}} {constant bgf::bgf ffi::c::UInt {unsigned int 6}} {constant bgf::bgf ffi::c::Int {int -1}} {unsupported {} double {a double constant}} {not-constant {} string-literal {constant: string literal}} {unsupported {} not-integer-constant {its type is no C integer type (a pointer or another type)}} {not-constant {} empty empty}}
+} -result {{constant bgf::bgf ffi::c::UInt {unsigned int 1}} {constant bgf::bgf ffi::c::UInt {unsigned int 3}} {constant bgf::bgf ffi::c::ULong {unsigned long 18446744073709551615}} {constant bgf::bgf ffi::c::Long {long -1}} {constant bgf::bgf ffi::c::Int {int -42}} {constant bgf::bgf ffi::c::Int {int 120}} {constant bgf::bgf ffi::c::UInt {unsigned int 6}} {constant bgf::bgf ffi::c::Int {int -1}} {unsupported {} floating-constant {a double constant: the generator binds integer constants only}} {not-constant {} string-literal {constant: string literal}} {unsupported {} not-integer-constant {its type is no C integer type (a pointer or another type)}} {not-constant {} empty empty}}
 
 test cb-fixture-contracts {contracts default to unknown; a favorable fact comes from the profile (manual, `noescape`: declared) or from the compiler's IR of the shim (proven: `proven noescape`), each with its source in the manifest; const is no fact} -constraints clang -body {
     set result [generation $::fixture linux-x86_64]
@@ -494,7 +510,7 @@ test cb-fixture-only-reached-externs {a program's foreign table holds only the C
     lsearch -all -inline -regexp [split $nir \n] {^(foreign|link) }
 } -cleanup removeScratch -match glob -result {{link "bgf"} {link "botlish_shim_bgf_*"} {foreign 0 "bgf_count" params="" result=i32 name="bgf::bgf::bgf_count"}}
 
-test cb-fixture-no-c-at-compile-time {compiling a program over a generated binding needs no header, no preprocessor and no C compiler: a child process with no compiler on its PATH and no header sources compiles it, with every foreign declaration of the host target's binding (bgf_arm_only is declared on AArch64 only)} -constraints clang -body {
+test cb-fixture-no-c-at-compile-time {compiling a program over a generated binding needs no header, no preprocessor and no C compiler: a child process with no compiler on its PATH and no header sources compiles it, with every foreign declaration of the host target's binding (bgf_arm_only is declared on AArch64 only)} -constraints {clang fixtureHostBinding} -body {
     set dir [scratch]
     ::cbind::generate::stage $::fixture $::hostTarget [file join $::fixtureDir demo demo.bot] $dir [generatedDir $::fixture $::hostTarget]
     set script [file join $dir compile.tcl]
@@ -509,7 +525,7 @@ test cb-fixture-no-c-at-compile-time {compiling a program over a generated bindi
         array unset ::env
         array set ::env $savedEnv
     }
-} -cleanup removeScratch -result [dict get {linux-x86_64 35 linux-aarch64 36 macos-aarch64 36} $::hostTarget]
+} -cleanup removeScratch -result [dict getdef {linux-x86_64 43 linux-aarch64 44 macos-aarch64 44} $::hostTarget {}]
 
 test cb-fixture-interchange {a program over a generated binding written as HIR interchange and run in a fresh process, with no header, generator input or binding module left, behaves identically} -constraints nativeRun -body {
     set dir [staged $::fixture $::hostTarget [file join $::fixtureDir demo demo.bot]]
@@ -522,7 +538,7 @@ test cb-fixture-interchange {a program over a generated binding written as HIR i
     lindex [split [string trim $out] \n] end
 } -cleanup removeScratch -result "   value: $::demoValues"
 
-test cb-fixture-isolation {two generated bindings with the same Botlish declaration names but other link symbols, compiled one after the other: each HIR keeps its own foreign declarations (the registry is compilation-local)} -constraints clang -body {
+test cb-fixture-isolation {two generated bindings with the same Botlish declaration names but other link symbols, compiled one after the other: each HIR keeps its own foreign declarations (the registry is compilation-local)} -constraints {clang fixtureHostBinding} -body {
     set a [scratch]
     ::cbind::generate::stage $::fixture $::hostTarget "" $a [generatedDir $::fixture $::hostTarget]
     writeText [file join $a main.bot] "import bgf::bgf\n\n1.bgf_add(2)\n"
@@ -541,7 +557,7 @@ test cb-fixture-isolation {two generated bindings with the same Botlish declarat
         [lindex [regexp -inline {foreign 0 "[^"]*"} $nirA] 0]
 } -cleanup removeScratch -result {bgf_add other_add {foreign 0 "bgf_add"}}
 
-test cb-fixture-static-compile {a static compile: block over a generated extern is decided like any block: a wrong arity is compiler::DiagnosticCode::Arity, an argument out of its C type's range Type, an accepted block the ordinary call (NATIVE-ONLY on the Tcl backends)} -constraints clang -body {
+test cb-fixture-static-compile {a static compile: block over a generated extern is decided like any block: a wrong arity is compiler::DiagnosticCode::Arity, an argument out of its C type's range Type, an accepted block the ordinary call (NATIVE-ONLY on the Tcl backends)} -constraints {clang fixtureHostBinding} -body {
     lmap {body code} {
         "bgf::bgf::bgf_add(1)" Arity
         "bgf::bgf::bgf_add(x, 2)" Type
@@ -557,34 +573,33 @@ test cb-fixture-static-compile {a static compile: block over a generated extern 
 
 test cb-fixture-why {`report -why NAME` names why a declaration was or was not generated: every blocker of an unsupported one, the module and signature of a generated one} -constraints clang -match glob -body {
     set out {}
-    foreach name {bgf_scale bgf_add BGF_HALF no_such_name} {
+    foreach name {bgf_long_scale bgf_add BGF_HALF no_such_name} {
         lappend out [exec [info nameofexecutable] [file join $::projectRoot tools c-bindgen.tcl] report fixture -target linux-x86_64 -why $name]
     }
     set out
-} -result {{function bgf_scale: not generated (unsupported): double,float
-  parameter 1 (x): double
-  parameter 2 (y): float
-  result: double} {function bgf_add: generated (direct in bgf::bgf): direct; symbol bgf_add; (ffi::c::Int, ffi::c::Int) -> ffi::c::Int} {macro BGF_HALF: not generated (unsupported): double
-  a double constant} {no_such_name: not a public name of bgf on linux-x86_64 (no row in */tools/c-bindgen/fixture/expected/linux-x86_64/report.tsv)}}
+} -result {{function bgf_long_scale: not generated (unsupported): long-double
+  parameter 1 (x): long double: its representation is the target's (binary64, x87 extended precision or binary128), and neither the FFI nor Botlish has a type of it
+  result: long double: its representation is the target's (binary64, x87 extended precision or binary128), and neither the FFI nor Botlish has a type of it} {function bgf_add: generated (direct in bgf::bgf): direct; symbol bgf_add; (ffi::c::Int, ffi::c::Int) -> ffi::c::Int} {macro BGF_HALF: not generated (unsupported): floating-constant
+  a double constant: the generator binds integer constants only} {no_such_name: not a public name of bgf on linux-x86_64 (no row in */tools/c-bindgen/fixture/expected/linux-x86_64/report.tsv)}}
 
 # ---------------------------------------------------------------------------
 # Policy: explicit, checked, never a guess
 
-test cb-policy-stale {a policy that matches nothing is an error, never a silent no-op: a contract naming a function the headers do not declare, a parameter it does not have, a group naming a missing function, a thunk signature of no macro or of a declared function; a contract on a declared function the target cannot bind (bgf_scale: a double) is checked against its declaration and kept, listed unused in the manifest} -constraints clang -body {
+test cb-policy-stale {a policy that matches nothing is an error, never a silent no-op: a contract naming a function the headers do not declare, a parameter it does not have, a group naming a missing function, a thunk signature of no macro or of a declared function; a contract on a declared function the target cannot bind (bgf_long_ptr: a pointer to long double) is checked against its declaration and kept, listed unused in the manifest} -constraints clang -body {
     set out [lmap changes [list \
         [dict create contracts {bgf_gone {p noescape}}] \
         [dict create contracts {bgf_open {nosuch {read noescape}}}] \
         [dict create groups {{name g functions {bgf_close bgf_gone} facts {handle noescape}}}] \
         [dict create thunks {BGF_NOT_A_MACRO {int BGF_NOT_A_MACRO(int x)}}] \
         [dict create thunks {bgf_get {int bgf_get(int x)}}] \
-        [dict create contracts {bgf_scale {nosuch noescape}}]] {
+        [dict create contracts {bgf_long_ptr {nosuch noescape}}]] {
         catch {::cbind::generate::run [fixtureWith $changes] linux-x86_64} message
         string trim [lindex [split $message \n] end]
     }]
-    set unbindable [::cbind::generate::run [fixtureWith [dict create contracts [dict merge [dict get $::fixture contracts] {bgf_scale {x noescape}}]]] linux-x86_64]
+    set unbindable [::cbind::generate::run [fixtureWith [dict create contracts [dict merge [dict get $::fixture contracts] {bgf_long_ptr {x noescape}}]]] linux-x86_64]
     lappend out [regexp -all -inline -line {^contract-unused .*$} [dict get $unbindable files manifest.txt]] \
-        [lindex [dict get [::cbind::generate::readTsv [dict get $unbindable files report.tsv]] "function bgf_scale"] 2]
-} -result {{contract bgf_gone names bgf_gone, which this target's headers do not declare as a function} {contract bgf_open: bgf_open has no parameter "nosuch" (its parameters: name, flags)} {group g names bgf_gone, which this target's headers do not declare as a function} {c-bindgen: the profile's thunk signature of "BGF_NOT_A_MACRO" names no public macro of this target's headers (a stale policy)} {c-bindgen: the profile's thunk signature of "bgf_get" names a declared function, which is bound by its own declaration: remove the policy} {contract bgf_scale: bgf_scale has no parameter "nosuch" (its parameters: x, y)} {{contract-unused bgf_scale {{contract bgf_scale}} (not bound on this target)}} unsupported}
+        [lindex [dict get [::cbind::generate::readTsv [dict get $unbindable files report.tsv]] "function bgf_long_ptr"] 2]
+} -result {{contract bgf_gone names bgf_gone, which this target's headers do not declare as a function} {contract bgf_open: bgf_open has no parameter "nosuch" (its parameters: name, flags)} {group g names bgf_gone, which this target's headers do not declare as a function} {c-bindgen: the profile's thunk signature of "BGF_NOT_A_MACRO" names no public macro of this target's headers (a stale policy)} {c-bindgen: the profile's thunk signature of "bgf_get" names a declared function, which is bound by its own declaration: remove the policy} {contract bgf_long_ptr: bgf_long_ptr has no parameter "nosuch" (its parameters: x)} {{contract-unused bgf_long_ptr {{contract bgf_long_ptr}} (not bound on this target)}} unsupported}
 
 test cb-policy-conflict {two positive sources that disagree are a conflict, never a silent choice: the profile's write where the compiler proves readonly, the profile's captures where it proves nocapture} -constraints clang -body {
     lmap facts {{p {write noescape}} {p captures}} {
@@ -606,7 +621,7 @@ test cb-version-drift {a changed header is a generated diff the check reports wi
     set h [file join $copy include bgf bgf.h]
     set text [::chdr::readFile $h]
     set text [string map [list \
-        "extern BGF_EXPORT int bgf_count(void);" "extern BGF_EXPORT int bgf_count(void);\nextern BGF_EXPORT int bgf_added(int x);\nextern BGF_EXPORT float bgf_floaty(void);" \
+        "extern BGF_EXPORT int bgf_count(void);" "extern BGF_EXPORT int bgf_count(void);\nextern BGF_EXPORT int bgf_added(int x);\nextern BGF_EXPORT long double bgf_floaty(void);" \
         "extern BGF_EXPORT char bgf_plain_char(char c);\n" "" \
         "extern BGF_EXPORT int bgf_add(int a, int b);" "extern BGF_EXPORT long bgf_add(long a, long b);" \
         "#define BGF_VERSION_MAJOR 3" "#define BGF_VERSION_MAJOR 4"] $text]
@@ -616,7 +631,7 @@ test cb-version-drift {a changed header is a generated diff the check reports wi
     set dir [::cbind::profile::outputDir $::fixture linux-x86_64]
     list [lsort [lmap d [::cbind::generate::compare [dict get $result files] $dir bgf] {lindex $d 0}]] \
         [lsort [::cbind::generate::coverageChange $dir $result]]
-} -cleanup removeScratch -result {{bgf/bgf.bot bgf/layouts.bot layouts.tsv manifest.txt report.tsv report.txt} {{+ function bgf_added: direct direct} {+ function bgf_floaty: unsupported float} {- function bgf_plain_char: was direct direct} {~ function bgf_add: direct direct -> direct direct} {~ macro BGF_VERSION_MAJOR: constant ffi::c::Int -> constant ffi::c::Int} {~ macro bgf_call_add: alias alias of bgf_add -> alias alias of bgf_add}}}
+} -cleanup removeScratch -result {{bgf/bgf.bot bgf/layouts.bot layouts.tsv manifest.txt report.tsv report.txt} {{+ function bgf_added: direct direct} {+ function bgf_floaty: unsupported long-double} {- function bgf_plain_char: was direct direct} {~ function bgf_add: direct direct -> direct direct} {~ macro BGF_VERSION_MAJOR: constant ffi::c::Int -> constant ffi::c::Int} {~ macro bgf_call_add: alias alias of bgf_add -> alias alias of bgf_add}}}
 
 # ---------------------------------------------------------------------------
 # Records and layouts (C-BINDGEN-LAYOUTS.md)
@@ -712,14 +727,53 @@ test cb-layout-pointers {pointer fields keep their nominal pointee identities (n
         [regexp -inline -line {^# struct bgf_node .*$} $ctypes]
 } -result {{{next {ffi::c::Ptr[bgf::ctypes::bgf_node]}} {handle {ffi::c::Ptr[bgf::ctypes::bgf_handle]}} {data {ffi::c::Ptr[ffi::c::Void]}} {name {ffi::c::Ptr[ffi::c::Char]}} {slot {ffi::c::Ptr[ffi::c::Ptr[bgf::ctypes::bgf_node]]}} {visit {ffi::c::FnPtr[Fn{args: [ffi::c::Ptr[ffi::c::Void], ffi::c::Ptr[bgf::ctypes::bgf_handle], ffi::c::Int], return: ffi::c::Int}]}} {compare {ffi::c::FnPtr[Fn{args: [ffi::c::Ptr[bgf::ctypes::bgf_node], ffi::c::Ptr[bgf::ctypes::bgf_node]], return: ffi::c::Int}]}} {label {ffi::c::Ptr[bgf::ctypes::bgf_chars]}} {id ffi::c::UInt}} layout-direct 3 {{# struct bgf_node (include/bgf/bgf_records.h), a complete C type: its layout is bgf::layouts::bgf_node}}}
 
-test cb-layout-blockers {every representation the layout language lacks is a blocker, never approximated: flexible array members (a fixed array of representable elements is no blocker since FIXED-LAYOUT-ARRAYS.md: bgf_chars, bgf_wide_text, bgf_points4, bgf_ptrs3 and bgf_matrix are layouts; nor a union or an anonymous union member since LAYOUT-UNIONS.md: bgf_value, bgf_tagged, bgf_overlay and bgf_mixed are layouts), bitfields, float, double, long double, C _Bool, volatile, a typedef an attribute widens, a pointer to float, a callback with a double, an explicit calling convention; a record holding a blocked one by value is nested-layout-blocked with the chain to its first direct blocker} -constraints clang -body {
+test cb-layout-blockers {every representation the layout language lacks is a blocker, never approximated: flexible array members (a fixed array of representable elements is no blocker since FIXED-LAYOUT-ARRAYS.md: bgf_chars, bgf_wide_text, bgf_points4, bgf_ptrs3 and bgf_matrix are layouts; nor a union or an anonymous union member since LAYOUT-UNIONS.md: bgf_value, bgf_tagged, bgf_overlay and bgf_mixed are layouts), bitfields, long double (C float and double fields are layout fields since C-FLOAT-FFI-MILESTONE-1.md: bgf_real and bgf_float_ptr are layouts), C _Bool, volatile, a typedef an attribute widens, a callback with a long double, an explicit calling convention; a record holding a blocked one by value is nested-layout-blocked with the chain to its first direct blocker} -constraints clang -body {
     set recs [dict get [generation $::fixture linux-x86_64] model layouts]
     lmap key {{struct bgf_chars} {struct bgf_wide_text} {struct bgf_points4} {struct bgf_ptrs3} {struct bgf_matrix} {struct bgf_flex} {union bgf_value} {struct bgf_tagged} {struct bgf_overlay} {struct bgf_bits} {struct bgf_real} {struct bgf_ld} {struct bgf_flag} {struct bgf_vol} {struct bgf_wide_field} {struct bgf_float_ptr} {struct bgf_bad_callback} {struct bgf_ms_field} {struct bgf_outer_blocked} {struct bgf_chain2} {struct bgf_mixed} {struct bgf_flagged_rect}} {
         set r [dict get $recs $key]
         list $key [lsort -unique [lmap b [dict get $r direct] {lindex $b 0}]] [lmap b [dict get $r transitive] {lindex $b 1}] \
             [::cbind::records::RootReasons $recs $key]
     }
-} -result {{{struct bgf_chars} {} {} {}} {{struct bgf_wide_text} {} {} {}} {{struct bgf_points4} {} {} {}} {{struct bgf_ptrs3} {} {} {}} {{struct bgf_matrix} {} {} {}} {{struct bgf_flex} flexible-array {} flexible-array} {{union bgf_value} {} {} {}} {{struct bgf_tagged} {} {} {}} {{struct bgf_overlay} {} {} {}} {{struct bgf_bits} bitfield {} bitfield} {{struct bgf_real} {double float} {} {double float}} {{struct bgf_ld} long-double {} long-double} {{struct bgf_flag} c-bool {} c-bool} {{struct bgf_vol} volatile {} volatile} {{struct bgf_wide_field} typedef-abi-mismatch {} typedef-abi-mismatch} {{struct bgf_float_ptr} unsupported-pointer {} unsupported-pointer} {{struct bgf_bad_callback} unsupported-pointer {} unsupported-pointer} {{struct bgf_ms_field} unsupported-calling-convention {} unsupported-calling-convention} {{struct bgf_outer_blocked} {} {} {}} {{struct bgf_chain2} {} {} {}} {{struct bgf_mixed} {} {} {}} {{struct bgf_flagged_rect} {} {{field flag (struct bgf_flag, field) -> c-bool}} c-bool}}
+} -result {{{struct bgf_chars} {} {} {}} {{struct bgf_wide_text} {} {} {}} {{struct bgf_points4} {} {} {}} {{struct bgf_ptrs3} {} {} {}} {{struct bgf_matrix} {} {} {}} {{struct bgf_flex} flexible-array {} flexible-array} {{union bgf_value} {} {} {}} {{struct bgf_tagged} {} {} {}} {{struct bgf_overlay} {} {} {}} {{struct bgf_bits} bitfield {} bitfield} {{struct bgf_real} {} {} {}} {{struct bgf_ld} long-double {} long-double} {{struct bgf_flag} c-bool {} c-bool} {{struct bgf_vol} volatile {} volatile} {{struct bgf_wide_field} typedef-abi-mismatch {} typedef-abi-mismatch} {{struct bgf_float_ptr} {} {} {}} {{struct bgf_bad_callback} unsupported-pointer {} unsupported-pointer} {{struct bgf_ms_field} unsupported-calling-convention {} unsupported-calling-convention} {{struct bgf_outer_blocked} {} {} {}} {{struct bgf_chain2} {} {} {}} {{struct bgf_mixed} {} {} {}} {{struct bgf_flagged_rect} {} {{field flag (struct bgf_flag, field) -> c-bool}} c-bool}}
+
+test cb-layout-floats {C float and C double fields are layout fields of their own C types (C-FLOAT-FFI-MILESTONE-1.md), at the compiler's offsets, never Float64 and never one another: beside other scalars (a float aligned to 4, a double to 8), through typedef chains the compiler confirms, as fixed array elements (a float array strides 4 bytes, a two-dimensional double array 8), as union alternatives and in an anonymous union} -constraints clang -body {
+    set text [dict get [generation $::fixture linux-x86_64] files bgf/layouts.bot]
+    lmap name {bgf_mixed_floats bgf_mixed_real bgf_samples bgf_fnum bgf_anon_fnum_member2} {
+        lindex [regexp -line -inline "^(?:union )?layout $name:\n(?:    .*\n)*" $text] 0
+    }
+} -result {{layout bgf_mixed_floats:
+    size 24
+    align 8
+    field tag: ffi::c::UChar at 0  # uint8_t tag
+    field a: ffi::c::Float at 4    # float a
+    field b: ffi::c::Double at 8   # double b
+    field c: ffi::c::Float at 16   # float c
+} {layout bgf_mixed_real:
+    size 32
+    align 8
+    field x: ffi::c::Float at 0    # float x
+    field y: ffi::c::Double at 8   # double y
+    field z: ffi::c::Float at 16   # bgf_scalar32 z
+    field w: ffi::c::Float at 20   # bgf_real32 w
+    field v: ffi::c::Double at 24  # bgf_scalar64 v
+} {layout bgf_samples:
+    size 56
+    align 8
+    field xs: array 4 of ffi::c::Float at 0               # float xs[4]
+    field ys: array 2 of array 2 of ffi::c::Double at 16  # double ys[2][2]
+    field n: ffi::c::Int at 48                            # int n
+} {union layout bgf_fnum:
+    size 8
+    align 8
+    alternative i: ffi::c::Int     # int i
+    alternative f: ffi::c::Float   # float f
+    alternative d: ffi::c::Double  # double d
+} {union layout bgf_anon_fnum_member2:
+    size 4
+    align 4
+    alternative u: ffi::c::UInt   # unsigned int u
+    alternative f: ffi::c::Float  # float f
+}}
 
 test cb-layout-arrays {an array field is recorded, never flattened: its element type and category, its bounds and the compiler's element count (a fixed array of representable elements is a layout field, FIXED-LAYOUT-ARRAYS.md; a flexible array member stays blocked); a bitfield its declared type and width} -constraints clang -body {
     set recs [dict get [generation $::fixture linux-x86_64] model layouts]
@@ -776,7 +830,7 @@ test cb-layout-naming {layout names are stable and collision-safe, read from the
     }}
     set same [expr {[apply $namesOf $recs] eq [apply $namesOf $moved]}]
     list $names $anon $kw $same
-} -cleanup removeScratch -result {{{{struct bgf_coll_a} bgf_coll bgf_coll} {{struct bgf_coll} bgf_coll_struct {}} {{struct bgf_kw} loop_ loop} {{struct List} List_ {}} {{struct bgf_multi} bgf_multi {bgf_multi bgf_multi_alias bgf_multi2}}} {bgf_anon_point bgf_anon_tail_member2 bgf_deep_member2_member2 bgf_deep_member3 bgf_deep_member3_member1 bgf_deep_member3_member1_member3 bgf_large_member1 bgf_large_u bgf_member_anon_range bgf_overlapped_member3_member1 bgf_overlapped_member3_union bgf_overlay_member2 bgf_two_anon_member1 bgf_two_anon_member2} {fn_ type_ loop_} 1}
+} -cleanup removeScratch -result {{{{struct bgf_coll_a} bgf_coll bgf_coll} {{struct bgf_coll} bgf_coll_struct {}} {{struct bgf_kw} loop_ loop} {{struct List} List_ {}} {{struct bgf_multi} bgf_multi {bgf_multi bgf_multi_alias bgf_multi2}}} {bgf_anon_fnum_member2 bgf_anon_point bgf_anon_tail_member2 bgf_deep_member2_member2 bgf_deep_member3 bgf_deep_member3_member1 bgf_deep_member3_member1_member3 bgf_large_member1 bgf_large_u bgf_member_anon_range bgf_overlapped_member3_member1 bgf_overlapped_member3_union bgf_overlay_member2 bgf_two_anon_member1 bgf_two_anon_member2} {fn_ type_ loop_} 1}
 
 test cb-layout-verified {every emitted layout is the compiler's: layouts-check.c, read back from the generated Botlish text, compiles for every committed target, and a layout corrupted in any number -- a size, an alignment, an offset off by one, a field's scalar width or class -- fails it, naming the layout and the field} -constraints clang -body {
     set ok [lmap target [dict get $::fixture targets] {
@@ -820,7 +874,7 @@ test cb-layout-oracle-fixture {every emitted fixture layout agrees with C at run
     list [expr {$checks > 250}] $a $b
 } -cleanup removeScratch -result {1 {} {}}
 
-test cb-layout-ordinary {a generated layout is an ordinary layout: a program over one (bytes in, a LayoutStruct out, bytes back) runs on all four backends, through HIR interchange in a fresh process, and through the front-end cache, with no C compiler at compile time} -constraints clang -body {
+test cb-layout-ordinary {a generated layout is an ordinary layout: a program over one (bytes in, a LayoutStruct out, bytes back) runs on all four backends, through HIR interchange in a fresh process, and through the front-end cache, with no C compiler at compile time} -constraints {clang fixtureHostBinding} -body {
     set dir [scratch]
     ::cbind::generate::stage $::fixture $::hostTarget "" $dir [generatedDir $::fixture $::hostTarget]
     writeText [file join $dir main.bot] "import abi\nimport abi::bytes\nimport binary\nimport bgf::layouts\n\nfn run() -> List\[int\] errors LayoutLengthMismatch:\n    d0 = abi::bytes::zeroed(abi::usize(binary::layout_length(bgf::layouts::bgf_packed_outer)))\n    d1 = binary::write(d0, bgf::layouts::bgf_packed_outer.inner.y, -9)\n    d2 = binary::write(d1, bgf::layouts::bgf_packed_outer.tail, 513)\n    v = binary::parse(bgf::layouts::bgf_packed_outer, abi::bytes::freeze(d2))\n    \[binary::layout_length(bgf::layouts::bgf_packed_outer), binary::layout_alignment(bgf::layouts::bgf_packed_outer), v.inner.y, v.tail, v.lead\]\n\nr = run():\n    on LayoutLengthMismatch:\n        \[\]\nr\n"
@@ -836,50 +890,44 @@ test cb-layout-ordinary {a generated layout is an ordinary layout: a program ove
     list [lsort -unique $values] $fresh [expr {[hir::interchange::encode $first] eq [hir::interchange::encode $second]}]
 } -cleanup removeScratch -result {{{[11, 1, -9, 513, 0]}} {[11, 1, -9, 513, 0]} 1}
 
-test cb-layout-pressure {the report weighs every missing feature on the dependency graph, transitively: a record is recovered only when every direct blocker is lifted and everything it holds by value is recovered (unions and fixed arrays are no missing feature: what remains are floating fields, C _Bool, bitfields, flexible arrays and explicit calling conventions -- also inside unions: bgf_num waits for float, bgf_holds_bitsu for bitfields); the API pressure counts bound functions pointing to records with layouts, blocked ones and opaque ones by pointer shape} -constraints clang -body {
+test cb-layout-pressure {the report weighs every missing feature on the dependency graph, transitively: a record is recovered only when every direct blocker is lifted and everything it holds by value is recovered (unions and fixed arrays are no missing feature: neither are C float and double fields since C-FLOAT-FFI-MILESTONE-1.md: what remains are long double and the other floating fields, C _Bool, bitfields, flexible arrays and explicit calling conventions -- also inside unions: bgf_num waits for long double, bgf_holds_bitsu for bitfields); the API pressure counts bound functions pointing to records with layouts, blocked ones and opaque ones by pointer shape} -constraints clang -body {
     set text [dict get [generation $::fixture linux-x86_64] files report.txt]
     set a [string first "Layout pressure" $text]
     set b [string first "Macro APIs" $text]
     string trim [string range $text $a [expr {$b - 1}]]
 } -result {Layout pressure (blocked records a missing feature would make layouts: directly + transitively)
-  ffi::c::Bool fields                                                          3     3.5%  2 + 1
-  float fields                                                                 4     4.7%  2 + 2
-  double fields                                                                0     0.0%  0 + 0
-  float and double fields                                                      5     5.9%  3 + 2
-  long double fields                                                           1     1.2%  1 + 0
-  bitfields                                                                    4     4.7%  2 + 2
-  flexible array members                                                       1     1.2%  1 + 0
-  explicit calling conventions                                                 1     1.2%  1 + 0
-  float, double and Bool                                                       8     9.4%  5 + 3
-  all of the above                                                            15    17.6%  10 + 5
+  ffi::c::Bool fields                                                          3     3.3%  2 + 1
+  long double fields                                                           5     5.5%  3 + 2
+  other floating fields (_Float16, __float128, ...)                            0     0.0%  0 + 0
+  bitfields                                                                    4     4.4%  2 + 2
+  flexible array members                                                       1     1.1%  1 + 0
+  explicit calling conventions                                                 1     1.1%  1 + 0
+  all of the above                                                            14    15.4%  9 + 5
 
 API pressure (bound APIs pointing to C records)
-  bound APIs with a pointer to a C record (parameter or result)               15    27.8%
-    to a record with an emitted layout                                         7    46.7%
+  bound APIs with a pointer to a C record (parameter or result)               16    26.2%
+    to a record with an emitted layout                                         8    50.0%
     to a complete record whose layout is blocked                               0     0.0%
-    only to incomplete records (or complete ones outside the headers)          8    53.3%
+    only to incomplete records (or complete ones outside the headers)          8    50.0%
   pointers by shape and record (layout / blocked / incomplete / outside):
     param T *                2 / 0 / 6 / 0
-    param const T *          4 / 0 / 0 / 0
+    param const T *          5 / 0 / 0 / 0
     param T **               1 / 0 / 0 / 0
     result T *               1 / 0 / 3 / 0
     result T **              0 / 0 / 1 / 0
-  records bound signatures point to                                           10
-    complete                                                                   5    50.0%
-      with an emitted layout                                                   5    50.0%
+  records bound signatures point to                                           11
+    complete                                                                   6    54.5%
+      with an emitted layout                                                   6    54.5%
       whose layout is blocked                                                  0     0.0%
       outside the profile's records (a system header's)                        0     0.0%
-    incomplete (opaque only)                                                   5    50.0%
+    incomplete (opaque only)                                                   5    45.5%
   bound APIs a missing feature would give a layout of a record they point to:
       ffi::c::Bool fields                                                      0     0.0%  0 records
-      float fields                                                             0     0.0%  0 records
-      double fields                                                            0     0.0%  0 records
-      float and double fields                                                  0     0.0%  0 records
       long double fields                                                       0     0.0%  0 records
+      other floating fields (_Float16, __float128, ...)                        0     0.0%  0 records
       bitfields                                                                0     0.0%  0 records
       flexible array members                                                   0     0.0%  0 records
       explicit calling conventions                                             0     0.0%  0 records
-      float, double and Bool                                                   0     0.0%  0 records
       all of the above                                                         0     0.0%  0 records}
 
 test cb-layout-manifest {the layout manifest (layouts.tsv) holds every record and every member for later pressure analysis, with sizes, offsets, C types, categories, element counts and blockers; the manifest names the ABI identity of the layouts (target and toolchain) and counts them; report.tsv has a row per record and `report -why` explains one, by its key or by a typedef naming it} -constraints clang -body {
@@ -891,7 +939,7 @@ test cb-layout-manifest {the layout manifest (layouts.tsv) holds every record an
         [regsub -all {\{[^{}]*clang version[^{}]*\}} [regexp -all -inline -line {^layout_(?:abi|count emitted|count blocked) .*$} [dict get $files manifest.txt]] VERSION] \
         [exec [info nameofexecutable] [file join $::projectRoot tools c-bindgen.tcl] report fixture -target linux-x86_64 -why {struct bgf_chain2}] \
         [exec [info nameofexecutable] [file join $::projectRoot tools c-bindgen.tcl] report fixture -target linux-x86_64 -why bgf_rect]
-} -result {1 {kind | record | index | name | status | offset | size | align | c | type | detail} {{record | struct bgf_chars | - | bgf_chars | layout-direct | - | 20 | 4 | struct bgf_chars | - | typedefs=bgf_chars; identity=bgf::ctypes::bgf_chars; header=include/bgf/bgf_records.h:181; pointed-by=1} {field | struct bgf_chars | 0 | len | scalar | 0 | 4 | - | int len | ffi::c::Int | c=len} {field | struct bgf_chars | 1 | name | array | 4 | 16 | - | char name[16] | array 16 of ffi::c::Char | c=name; element=char char; bounds=16; extent=16}} {{layout_abi linux-x86_64 clang x86_64-linux-gnu VERSION} {layout_count blocked 19} {layout_count emitted 65}} {tag struct bgf_chain2: not generated (unused): complete
+} -result {1 {kind | record | index | name | status | offset | size | align | c | type | detail} {{record | struct bgf_chars | - | bgf_chars | layout-direct | - | 20 | 4 | struct bgf_chars | - | typedefs=bgf_chars; identity=bgf::ctypes::bgf_chars; header=include/bgf/bgf_records.h:181; pointed-by=1} {field | struct bgf_chars | 0 | len | scalar | 0 | 4 | - | int len | ffi::c::Int | c=len} {field | struct bgf_chars | 1 | name | array | 4 | 16 | - | char name[16] | array 16 of ffi::c::Char | c=name; element=char char; bounds=16; extent=16}} {{layout_abi linux-x86_64 clang x86_64-linux-gnu VERSION} {layout_count blocked 17} {layout_count emitted 73}} {tag struct bgf_chain2: not generated (unused): complete
   no bound signature points to it
 record struct bgf_chain2: generated (layout-direct in bgf::layouts): bgf_chain2; sizeof 32, _Alignof 8, 2 fields} {typedef bgf_rect: generated (opaque in bgf::ctypes): identity bgf_rect; struct bgf_rect
 record struct bgf_rect: generated (layout-direct in bgf::layouts): bgf_rect; sizeof 16, _Alignof 4, 2 fields}}
@@ -929,7 +977,7 @@ test cb-layout-anonymous-members {an anonymous member is represented truthfully,
     list $out $promoted
 } -result {{{bgf_overlay 16 8 {{kind ffi::c::Int 0} {member2 bgf_overlay_member2 8}} 0} {bgf_overlay_member2 8 8 {{i ffi::c::Int 0} {p {ffi::c::Ptr[ffi::c::Void]} 0}} 1} {bgf_overlapped 32 8 {{internal ffi::c::ULong 0} {internal_high ffi::c::ULong 8} {member3 bgf_overlapped_member3_union 16} {event {ffi::c::Ptr[ffi::c::Void]} 24}} 0} {bgf_overlapped_member3_union 8 8 {{member1 bgf_overlapped_member3_member1 0} {pointer {ffi::c::Ptr[ffi::c::Void]} 0}} 1} {bgf_overlapped_member3_member1 8 4 {{offset ffi::c::UInt 0} {offset_high ffi::c::UInt 4}} 0} {bgf_large 8 8 {{member1 bgf_large_member1 0} {u bgf_large_u 0} {quad ffi::c::LongLong 0}} 1} {bgf_large_member1 8 4 {{low ffi::c::UInt 0} {high ffi::c::Int 4}} 0} {bgf_deep 20 4 {{tag ffi::c::Char 0} {a ffi::c::Short 4} {member2_member2 bgf_deep_member2_member2 8} {member3 bgf_deep_member3 12}} 0} {bgf_deep_member2_member2 4 4 {{b ffi::c::Int 0} {c {array 3 of ffi::c::Char} 0}} 1} {bgf_deep_member3 8 4 {{member1 bgf_deep_member3_member1 0} {w bgf_word 0}} 1} {bgf_deep_member3_member1 6 2 {{x ffi::c::UShort 0} {y ffi::c::UShort 2} {member3 bgf_deep_member3_member1_member3 4}} 0} {bgf_deep_member3_member1_member3 2 2 {{z ffi::c::UChar 0} {zz ffi::c::UShort 0}} 1} {bgf_anon_tail 16 4 {{k ffi::c::Char 0} {member2 bgf_anon_tail_member2 4} {after ffi::c::Char 12}} 0} {bgf_anon_tail_member2 8 4 {{c {array 5 of ffi::c::Char} 0} {i ffi::c::Int 0}} 1} {bgf_two_anon 16 8 {{member1 bgf_two_anon_member1 0} {member2 bgf_two_anon_member2 8}} 0} {bgf_two_anon_member1 4 4 {{a ffi::c::Char 0} {b ffi::c::Int 0}} 1} {bgf_two_anon_member2 8 8 {{c ffi::c::Short 0} {d ffi::c::LongLong 0}} 1}} {{{struct bgf_overlapped} pointer member3.pointer 16 8} {{struct bgf_overlapped} offset member3.member1.offset 16 4} {{struct bgf_overlapped} offset_high member3.member1.offset_high 20 4} {{struct bgf_deep} b member2_member2.b 8 4} {{struct bgf_deep} c member2_member2.c 8 3} {{struct bgf_deep} w member3.w 12 4} {{struct bgf_deep} x member3.member1.x 12 2} {{struct bgf_deep} y member3.member1.y 14 2} {{struct bgf_deep} z member3.member1.member3.z 16 1} {{struct bgf_deep} zz member3.member1.member3.zz 16 2}}}
 
-test cb-layout-union-blockers {a union is blocked only by what an alternative cannot represent, and that root reason is what the report and the pressure analysis see -- never "union" or "anonymous-overlay": a float (bgf_num), a C _Bool (bgf_flagu), a bitfield record (bgf_bitsu, nested-layout-blocked through its alternative), held by a record (bgf_holds_bitsu), as an array element (bgf_nums2), as an anonymous member (bgf_anon_float, through its synthetic union); a representable anonymous union held by a record a bitfield blocks (bgf_bits_overlay) is no layout either: nothing reaches it, nothing C checks verifies it (unheld)} -constraints clang -body {
+test cb-layout-union-blockers {a union is blocked only by what an alternative cannot represent, and that root reason is what the report and the pressure analysis see -- never "union" or "anonymous-overlay": a long double (bgf_num; a union of a C float and a C double, bgf_fnum, is a layout), a C _Bool (bgf_flagu), a bitfield record (bgf_bitsu, nested-layout-blocked through its alternative), held by a record (bgf_holds_bitsu), as an array element (bgf_nums2), as an anonymous member (bgf_anon_float, through its synthetic union, beside bgf_anon_fnum's representable one); a representable anonymous union held by a record a bitfield blocks (bgf_bits_overlay) is no layout either: nothing reaches it, nothing C checks verifies it (unheld)} -constraints clang -body {
     set recs [dict get [generation $::fixture linux-x86_64] model layouts]
     set anon [lmap {k r} $recs {expr {[dict exists $r owner] && [dict get $r owner] eq "struct bgf_anon_float" ? $k : [continue]}}]
     set out [lmap key [concat {{union bgf_num} {union bgf_flagu} {union bgf_bitsu} {struct bgf_holds_bitsu} {struct bgf_nums2} {struct bgf_anon_float}} $anon] {
@@ -943,7 +991,7 @@ test cb-layout-union-blockers {a union is blocked only by what an alternative ca
     }]
     set unheld [lmap {k r} $recs {expr {[dict exists $r owner] && [dict get $r owner] eq "struct bgf_bits_overlay" ? [list [dict get $r status] [dict get $r unheld] [dict get $r layoutName] [string match "*\nunion layout [dict get $r layoutName]:*" [dict get [generation $::fixture linux-x86_64] files bgf/layouts.bot]]] : [continue]}}]
     list $out $stale [dict get $recs {struct bgf_bits_overlay} status] $unheld
-} -result {{{{union bgf_num} layout-blocked float {} float} {{union bgf_flagu} layout-blocked c-bool {} c-bool} {{union bgf_bitsu} layout-blocked {} {{field bits (struct bgf_bits, union-member) -> bitfield}} bitfield} {{struct bgf_holds_bitsu} layout-blocked {} {{field u (union bgf_bitsu, field) -> struct bgf_bits -> bitfield}} bitfield} {{struct bgf_nums2} layout-blocked {} {{field nums (union bgf_num, array-element) -> float}} float} {{struct bgf_anon_float} layout-blocked {} {{member2 (union anon@bgf_records.h:281, anonymous-member) -> float}} float} {{union anon@bgf_records.h:281} layout-blocked float {} float}} {} layout-blocked {{layout-direct 1 bgf_bits_overlay_member2 0}}}
+} -result {{{{union bgf_num} layout-blocked long-double {} long-double} {{union bgf_flagu} layout-blocked c-bool {} c-bool} {{union bgf_bitsu} layout-blocked {} {{field bits (struct bgf_bits, union-member) -> bitfield}} bitfield} {{struct bgf_holds_bitsu} layout-blocked {} {{field u (union bgf_bitsu, field) -> struct bgf_bits -> bitfield}} bitfield} {{struct bgf_nums2} layout-blocked {} {{field nums (union bgf_num, array-element) -> long-double}} long-double} {{struct bgf_anon_float} layout-blocked {} {{member2 (union anon@bgf_records.h:281, anonymous-member) -> long-double}} long-double} {{union anon@bgf_records.h:281} layout-blocked long-double {} long-double}} {} layout-blocked {{layout-direct 1 bgf_bits_overlay_member2 0}}}
 
 test cb-layout-union-member-offset {a member is an alternative only where the compiler places it, at the union's start: the generator never assumes offset 0 -- were the compiler's offsetof of bgf_word's halves 2, bgf_word would be blocked (union-member-offset) and everything holding it with it, never moved or approximated} -constraints clang -body {
     rename ::cbind::probe::values ::cbind::probe::values.real
@@ -1017,7 +1065,7 @@ test cb-layout-union-verified {layouts-check.c holds every union layout to the c
     list $clean $caught $anonymous
 } -result {{1 {}} {bgf_tail_u bgf_aligned_u bgf_tail_u.i bgf_word.bytes bgf_overlapped_member3_member1.offset_high bgf_overlapped_member3_member1.offset} {1 {{bgf_anon_tail_member2: size 5, align 4; clang's record layout of the anonymous member at bgf_records.h:269:40: sizeof 8, align 4}} 1 {{bgf_deep_member3: size 8, align 2; clang's record layout of the anonymous member at bgf_records.h:260:5: sizeof 8, align 4}}}}
 
-test cb-layout-union-program {a generated union layout is an ordinary one: a program writes bgf_large's two 32-bit halves through its anonymous struct and reads its 64-bit quad and its named struct's high half from the same bytes, writes bgf_overlapped's offset_high through its anonymous union and struct and reads it back, writes one interpretation of an element of an array of unions (bgf_words3) and reads two others, and reaches bgf_deep's deepest anonymous level through overlapping alternatives -- on all four backends} -constraints clang -body {
+test cb-layout-union-program {a generated union layout is an ordinary one: a program writes bgf_large's two 32-bit halves through its anonymous struct and reads its 64-bit quad and its named struct's high half from the same bytes, writes bgf_overlapped's offset_high through its anonymous union and struct and reads it back, writes one interpretation of an element of an array of unions (bgf_words3) and reads two others, and reaches bgf_deep's deepest anonymous level through overlapping alternatives -- on all four backends} -constraints {clang fixtureHostBinding} -body {
     set dir [scratch]
     ::cbind::generate::stage $::fixture $::hostTarget "" $dir [generatedDir $::fixture $::hostTarget]
     writeText [file join $dir main.bot] [join {
@@ -1245,7 +1293,7 @@ test cb-sdl3-current-cross {the committed SDL3 binding of the other Linux target
     list [expr {[llength $pairs] > 0}] [staleBindings $pairs]
 } -result {1 {}}
 
-test cb-sdl3-breadth {SDL3 is generated from the whole public header set by the normal rules: over a thousand functions bound, most of them only because of ffi::c::Bool, every blocker counted (floats, aggregates, varargs, macros without a signature), opaque handles distinct (SDL_Window, SDL_Renderer, SDL_Surface, SDL_AudioStream), flags of their typedefs' C types} -constraints {sdl3Sources linuxNative} -body {
+test cb-sdl3-breadth {SDL3 is generated from the whole public header set by the normal rules: over a thousand functions bound, most of them only because of ffi::c::Bool, those of C float signatures too since C-FLOAT-FFI-MILESTONE-1.md (SDL_RenderPoint), every blocker counted (aggregates, varargs, macros without a signature, floating macro constants), opaque handles distinct (SDL_Window, SDL_Renderer, SDL_Surface, SDL_AudioStream), flags of their typedefs' C types} -constraints {sdl3Sources linuxNative} -body {
     set result [generation [::cbind::profile::load sdl3] $::linuxHost]
     set c [::cbind::report::counts [dict get $result model]]
     set ctypes [dict get $result files sdl3/ctypes.bot]
@@ -1254,7 +1302,7 @@ test cb-sdl3-breadth {SDL3 is generated from the whole public header set by the 
         [lmap n {SDL_Window SDL_Renderer SDL_Surface SDL_AudioStream} {regexp "opaque struct $n:" $ctypes}] \
         [lrange [dict get $rows "macro SDL_INIT_VIDEO"] 2 4] [lrange [dict get $rows "macro SDL_WINDOW_RESIZABLE"] 2 4] \
         [lrange [dict get $rows "function SDL_RenderPoint"] 2 4]
-} -result {1 1 1 {1 1 1 1} {constant sdl3::init ffi::c::UInt} {constant sdl3::video ffi::c::ULong} {unsupported {} float}}
+} -result {1 1 1 {1 1 1 1} {constant sdl3::init ffi::c::UInt} {constant sdl3::video ffi::c::ULong} {direct sdl3::render direct}}
 
 test cb-sdl3-symbols {every SDL3 function the binding links directly is one libSDL3.so exports, or, for SDL's aliases of C library functions (SDL_memcpy is memcpy), one the C library does} -constraints sdl3Library -body {
     set profile [::cbind::profile::load sdl3]
@@ -1308,14 +1356,14 @@ int main(void) {
     list [expr {$botlish eq [cCaller $profile $c]}] $botlish
 } -cleanup removeScratch -result {1 {[-1, false, 0, true, 1, true, 1, false, 5, true, 10, true, 10, false, 31, true, 31, false]}}
 
-test cb-tcl-layouts {every layout the Tcl binding emits agrees with C at run time on both native backends (the runtime oracle: view reads of C's stores, native edit stores and byte-storage writes C reads back, padding, sizes and alignments): Tcl_Time, Tcl_ObjType, Tcl_Token, the channel and filesystem type tables of function pointers, ...; Tcl_Obj stays blocked, by its internalRep union's double alternative alone now that a union is a layout (LAYOUT-UNIONS.md); Tcl_DString, whose static buffer is a fixed array, is a layout (FIXED-LAYOUT-ARRAYS.md)} -constraints {tclSources nativeRun} -body {
+test cb-tcl-layouts {every layout the Tcl binding emits agrees with C at run time on both native backends (the runtime oracle: view reads of C's stores, native edit stores and byte-storage writes C reads back, padding, sizes and alignments): Tcl_Time, Tcl_ObjType, Tcl_Token, the channel and filesystem type tables of function pointers, ...; Tcl_Obj, whose internalRep union has a double alternative, is a layout (a union since LAYOUT-UNIONS.md, a C double field since C-FLOAT-FFI-MILESTONE-1.md); Tcl_DString, whose static buffer is a fixed array, is a layout (FIXED-LAYOUT-ARRAYS.md)} -constraints {tclSources nativeRun} -body {
     set profile [::cbind::profile::load tcl]
     set recs [dict get [generation $profile $::hostTarget] model layouts]
     lassign [layoutOracle $profile all] checks a b
     list [expr {$checks > 300}] $a $b [lmap key {{struct Tcl_Time} {struct Tcl_ObjType} {struct Tcl_Token} {struct Tcl_ChannelType} {struct Tcl_Obj} {struct Tcl_DString}} {
         list $key [dict get $recs $key status] [::cbind::records::RootReasons $recs $key]
     }]
-} -cleanup removeScratch -result {1 {} {} {{{struct Tcl_Time} layout-direct {}} {{struct Tcl_ObjType} layout-direct {}} {{struct Tcl_Token} layout-direct {}} {{struct Tcl_ChannelType} layout-direct {}} {{struct Tcl_Obj} layout-blocked double} {{struct Tcl_DString} layout-direct {}}}}
+} -cleanup removeScratch -result {1 {} {} {{{struct Tcl_Time} layout-direct {}} {{struct Tcl_ObjType} layout-direct {}} {{struct Tcl_Token} layout-direct {}} {{struct Tcl_ChannelType} layout-direct {}} {{struct Tcl_Obj} layout-direct {}} {{struct Tcl_DString} layout-direct {}}}}
 
 test cb-boringssl-layouts {every layout the BoringSSL binding emits agrees with C at run time on both native backends (the runtime oracle); CBS and the method tables are layouts, CBB is blocked through a union's bitfield record alternative (the bitfield its root, LAYOUT-UNIONS.md), SHA256_CTX is a layout of fixed arrays (FIXED-LAYOUT-ARRAYS.md); the records arrays and unions held -- SHA_CTX, GENERAL_NAME, ASN1_TYPE, EVP_MD_CTX, HMAC_CTX, EVP_AEAD_CTX -- are layouts} -constraints {boringsslSources nativeRun} -body {
     set profile [::cbind::profile::load boringssl]
@@ -1326,14 +1374,14 @@ test cb-boringssl-layouts {every layout the BoringSSL binding emits agrees with 
     }]
 } -cleanup removeScratch -result {1 {} {} {{{struct cbs_st} layout-direct {}} {{struct ssl_quic_method_st} layout-direct {}} {{struct cbb_st} layout-blocked bitfield} {{struct sha256_state_st} layout-direct {}} {{struct sha_state_st} layout-direct {}} {{struct GENERAL_NAME_st} layout-direct {}} {{struct asn1_type_st} layout-direct {}} {{struct env_md_ctx_st} layout-direct {}} {{struct hmac_ctx_st} layout-direct {}} {{struct evp_aead_ctx_st} layout-direct {}}}}
 
-test cb-sdl3-layouts {every layout the SDL3 binding emits agrees with C at run time on both native backends (the runtime oracle): SDL_Rect, SDL_Point, SDL_Color, SDL_Surface, SDL_AudioSpec, the SDL_IOStreamInterface table, ...; SDL_FRect waits for floats; SDL_Event, a union whose alternatives hold floats and Bool fields, for those alone (its arrays are layout fields: FIXED-LAYOUT-ARRAYS.md; unions are layouts: LAYOUT-UNIONS.md); SDL_HapticEffect, a union, and SDL_GamepadBinding, with two anonymous unions, are layouts} -constraints {sdl3Sources nativeRun} -body {
+test cb-sdl3-layouts {every layout the SDL3 binding emits agrees with C at run time on both native backends (the runtime oracle): SDL_Rect, SDL_Point, SDL_Color, SDL_Surface, SDL_AudioSpec, the SDL_IOStreamInterface table, ...; SDL_FRect, of C floats, is a layout (C-FLOAT-FFI-MILESTONE-1.md); SDL_Event, a union whose alternatives hold Bool fields, waits for those alone (its arrays are layout fields: FIXED-LAYOUT-ARRAYS.md; unions are layouts: LAYOUT-UNIONS.md); SDL_HapticEffect, a union, and SDL_GamepadBinding, with two anonymous unions, are layouts} -constraints {sdl3Sources nativeRun} -body {
     set profile [::cbind::profile::load sdl3]
     set recs [dict get [generation $profile $::hostTarget] model layouts]
     lassign [layoutOracle $profile all] checks a b
     list [expr {$checks > 700}] $a $b [lmap key {{struct SDL_Rect} {struct SDL_Surface} {struct SDL_IOStreamInterface} {struct SDL_FRect} {union SDL_Event} {struct SDL_KeyboardEvent} {union SDL_HapticEffect} {struct SDL_GamepadBinding}} {
         list $key [dict get $recs $key status] [::cbind::records::RootReasons $recs $key]
     }]
-} -cleanup removeScratch -result {1 {} {} {{{struct SDL_Rect} layout-direct {}} {{struct SDL_Surface} layout-direct {}} {{struct SDL_IOStreamInterface} layout-direct {}} {{struct SDL_FRect} layout-blocked float} {{union SDL_Event} layout-blocked {c-bool float}} {{struct SDL_KeyboardEvent} layout-blocked c-bool} {{union SDL_HapticEffect} layout-direct {}} {{struct SDL_GamepadBinding} layout-direct {}}}}
+} -cleanup removeScratch -result {1 {} {} {{{struct SDL_Rect} layout-direct {}} {{struct SDL_Surface} layout-direct {}} {{struct SDL_IOStreamInterface} layout-direct {}} {{struct SDL_FRect} layout-direct {}} {{union SDL_Event} layout-blocked c-bool} {{struct SDL_KeyboardEvent} layout-blocked c-bool} {{union SDL_HapticEffect} layout-direct {}} {{struct SDL_GamepadBinding} layout-direct {}}}}
 
 test cb-layout-gcc-bindings {GCC agrees with clang on every layout of the Tcl, Tcl stubs, SDL3 and BoringSSL bindings for the host: each committed layouts-check.c compiles with the host's cc, the profile's include directories, defines and flags} -constraints {tclSources sdl3Sources boringsslSources linuxNative} -body {
     lmap p {tcl tclstubs sdl3 boringssl} {
@@ -1354,10 +1402,30 @@ test cb-layout-gcc-bindings {GCC agrees with clang on every layout of the Tcl, T
 # ---------------------------------------------------------------------------
 # Win32: MinGW-w64's headers for Windows x86-64 with the GNU ABI, from Linux
 
-# 1 when clang can preprocess for windows-x86_64-gnu with MinGW-w64's headers.
+# 1 when clang can preprocess for windows-x86_64-gnu with MinGW-w64's headers
+# of the version the profile pins (its version macros). Other MinGW-w64
+# headers -- a Windows runner's own, say -- are not the profile's source, and
+# generation refuses them (cb-win32-version-pinned), so the Win32 tests do
+# not run there; the c-bindgen workflow installs the pinned ones.
 proc mingwReady {} {
     if {[auto_execok clang] eq ""} { return 0 }
-    return [expr {![catch {::cbind::profile::sourceRoot [::cbind::profile::load win32] 0 windows-x86_64-gnu}]}]
+    set profile [::cbind::profile::load win32]
+    if {[catch {::cbind::profile::sourceRoot $profile 0 windows-x86_64-gnu} sourceRoot]} { return 0 }
+    set source [dict get $profile headers source]
+    set tool [::cbind::generate::ToolProfile [::cbind::profile::headersFor $profile windows-x86_64-gnu] $sourceRoot]
+    set channel [file tempfile entry .c]
+    puts $channel "#include <[dict get $source toolchain]>"
+    close $channel
+    try {
+        lassign [::chdr::toolchain::macros [::chdr::toolchain::configFor windows-x86_64-gnu] $tool $entry] ok text
+    } finally {
+        file delete $entry
+    }
+    if {!$ok} { return 1 }
+    dict for {macro value} [dict get $source version] {
+        if {![regexp -line "^#define $macro (.*)\$" $text -> body] || [string trim $body] ne $value} { return 0 }
+    }
+    return 1
 }
 testConstraint mingw [mingwReady]
 testConstraint mingwGcc [expr {[testConstraint mingw] && [auto_execok x86_64-w64-mingw32-gcc] ne ""}]

@@ -485,10 +485,10 @@ proc aotParity {text {extra {}}} {
         }
         native::executable $hir [file rootname $path] {*}$extra
         set relocated [file join $dir relocated]
-        file rename [file rootname $path] $relocated
+        file rename [native::executableFile [file rootname $path]] [native::executableFile $relocated]
         file delete $path
-        lappend expected [exec env PATH= $relocated]
-        lappend expected [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 $relocated]
+        lappend expected [runStandalone $relocated]
+        lappend expected [runStandalone $relocated BOTLISH_NATIVE_GC_STRESS 1]
         if {[llength [lsort -unique $expected]] != 1} { error "values disagree: $expected" }
         return [lindex $expected 0]
     } finally {

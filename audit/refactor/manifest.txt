@@ -100,6 +100,7 @@ program examples/refinement/refined-strings.bot
 program examples/io/child-path.bot
   ONE-CHAR-STRING-LITERAL 19:59 none -- char->text: the " " that separates the two printed paths is a single character appended as text (str::concat)
 program examples/io/hello.bot
+program examples/io/hello-darwin.bot
 program examples/io/show-path.bot
 program examples/abi/numeric-domains.bot
 program examples/binary/c-structs.bot
@@ -133,6 +134,7 @@ program lib/ascii.bot
 program lib/binary.bot
 program lib/byte.bot
 program lib/compiler.bot
+program lib/darwin.bot
 fails lib/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: compiled as an entry program, a module's last declaration is the program's value, and io's last function requires a context, so it cannot be a value; no module member could end the file without adding to its API (verified through `import io`)
 program lib/linux.bot
 fails lib/list.bot SURFACE MODULE MISSING-IMPORT -- own-namespace intrinsics: list.bot calls its namespace's intrinsic list::at, which needs no import as module `list` and may not be imported there (SELF-IMPORT), while an entry program needs `import list`; xs.at(i) compiles both ways but is a field projection when instantiated (verified through `import list`)
@@ -166,6 +168,8 @@ program lib/web.bot
 program lib/abi/aarch64.bot
 program lib/abi/bytes.bot
 program lib/abi/x86_64.bot
+fails lib/darwin/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for lib/linux/io.bot, the last declaration (write_error_text) requires a context (verified through `import darwin::io`)
+program lib/darwin/path.bot
 program lib/ffi/c.bot
 fails lib/io/path.bot CORE SEMANTIC TRAIT-POLYMORPHIC-FUNCTION-VALUE -- entry-program value: as for lib/io.bot, the last declaration (text) is trait-polymorphic and cannot be a value (verified through `import io::path`)
 fails lib/linux/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for lib/io.bot, the last declaration (write_error_text) requires a context; only reordering create() last would compile it, an invariant nothing states (verified through `import linux::io`)

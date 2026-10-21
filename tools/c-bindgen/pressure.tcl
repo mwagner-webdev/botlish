@@ -19,20 +19,20 @@
 
 namespace eval ::cbind::pressure {
     # Feature -> the blocker reasons it lifts, in report order.
-    # (Fixed arrays are no missing feature since FIXED-LAYOUT-ARRAYS.md, and
-    # unions and anonymous members none since LAYOUT-UNIONS.md: a union of
-    # representable alternatives is a union layout.)
+    # (Fixed arrays are no missing feature since FIXED-LAYOUT-ARRAYS.md,
+    # unions and anonymous members none since LAYOUT-UNIONS.md -- a union of
+    # representable alternatives is a union layout -- and C float and double
+    # fields none since C-FLOAT-FFI-MILESTONE-1.md: they are ffi::c::Float
+    # and ffi::c::Double fields. long double and the extended floating
+    # types still are.)
     variable features {
         {ffi::c::Bool fields} {c-bool}
-        {float fields} {float}
-        {double fields} {double}
-        {float and double fields} {float double}
         {long double fields} {long-double}
+        {other floating fields (_Float16, __float128, ...)} {unsupported-floating}
         {bitfields} {bitfield}
         {flexible array members} {flexible-array}
         {explicit calling conventions} {unsupported-calling-convention}
-        {float, double and Bool} {float double c-bool}
-        {all of the above} {c-bool float double long-double bitfield flexible-array unsupported-calling-convention}
+        {all of the above} {c-bool long-double unsupported-floating bitfield flexible-array unsupported-calling-convention}
     }
 }
 

@@ -1,5 +1,12 @@
 # C-FFI.md
 
+> Partially superseded by C-FLOAT-FFI-MILESTONE-1.md: C `float` is
+> `ffi::c::Float` (binary32, its values Float64s: a Float64 passed to one is
+> rounded to nearest, ties to even, and an overflow is `NonFiniteFloat`
+> before C runs), and `ffi::c::Float` and `ffi::c::Double` are C types of
+> pointees, function pointer signatures and layout fields too; `long double`
+> stays out (sections 3 and 26).
+
 `extern c library` and `extern c fn`: Botlish's first real C calls. A
 program declares the C functions it calls, by their C signatures and the
 contract of each pointer parameter, and the libraries it links; the native
@@ -659,6 +666,11 @@ the fixture compiled by Apple clang, and the machine state each call
 arrives in matches Apple clang's own calls of the same prototypes
 (`cf-abi-*`). Symbols are their C names: the object crate writes Mach-O's
 `_` user label prefix, for a C function's symbol as for Botlish's own.
+macOS's IO is a binding of this kind (MACOS-AARCH64-MILESTONE-8.md):
+lib/darwin.bot declares libSystem's `write`, `read`, `open` (variadic),
+`close` and `__error` as `extern c fn` with byte-borrowing contracts, and
+lib/darwin/io.bot puts them behind `io::IO`; no extern c library is needed,
+libSystem being in every macOS executable's link.
 
 Elsewhere the native backends already refuse executables (Linux glibc
 and macOS AArch64 only), so they refuse a program that calls C the same

@@ -53,7 +53,7 @@ proc executableValue {hir {options {}}} {
     set dir [makeDirectory {direct hir executable}]
     try {
         native::executable $hir [file join $dir program] {*}$options
-        return [exec env PATH= [file join $dir program]]
+        return [runStandalone [file join $dir program]]
     } finally {
         removeDirectory {direct hir executable}
     }

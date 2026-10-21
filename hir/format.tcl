@@ -64,6 +64,20 @@
 #   eN project FIELD                     a field projection; the child is
 #                                        the receiver
 #
+# A program that loads modules (IMPORTS.md) has a section per module: a
+# "module NAMESPACE SCOPE ?binds ...?" line after the program's header, the
+# module's statements one level below it, dependencies first; the program's
+# own statements follow, unindented (hir::format::Sections):
+#
+#   program s2 binds b24 r
+#   module abi s3 binds b1 abi::i8, ...
+#       e1 bind b1 abi::i8 : block(e2)/1 -> abi::I8
+#           ...
+#   e176 bind b24 r : abi::U8
+#
+# A String constant holding a control character is one double-quoted word
+# with backslash escapes (hir::format::Literal), so every line stays a line.
+#
 # Flags: unbound, deferred (an ambient binding: the host's value when a
 # closure runs), duplicate, unreachable. With -origins 1 each line ends with @ORIGIN.
 
@@ -99,10 +113,56 @@ proc hir::format {hir args} {
     }
     set top [dict get $hir top]
     lappend lines [string trimright "[dict get $hir scopes $top kind] $top [hir::format::Binds $hir $top]"]
-    foreach e [dict get $hir roots] {
-        hir::format::Expr $hir $e 0 [dict get $options -origins] lines
+    foreach {ns s roots} [hir::format::Sections $hir] {
+        set indent 0
+        if {$s ne $top} {
+            lappend lines [string trimright "module $ns $s [hir::format::Binds $hir $s]"]
+            set indent 1
+        }
+        foreach e $roots {
+            hir::format::Expr $hir $e $indent [dict get $options -origins] lines
+        }
     }
     return [join $lines \n]
+}
+
+# HIR's statements by section, {NAMESPACE SCOPE ROOTS ...}: each module
+# section (hir::resolve::ProgramSection, the `modules` table) in the order
+# resolution appended them -- dependencies first -- then the program's own
+# (namespace ""). A module's section is printed as a "module NAMESPACE SCOPE
+# ?binds ...?" line with its statements one level below it, the program's
+# own statements after every module's, unindented. That is the order of
+# `roots`, which is evaluation order: a HIR whose roots are in any other
+# order has no text.
+proc hir::format::Sections {hir} {
+    set top [dict get $hir top]
+    set order {}
+    set rootsOf [dict create]
+    if {[dict exists $hir modules]} {
+        dict for {ns s} [dict get $hir modules] {
+            lappend order $ns $s
+            dict set rootsOf $s {}
+        }
+    }
+    lappend order "" $top
+    dict set rootsOf $top {}
+    foreach e [dict get $hir roots] {
+        set s [dict get $hir exprs $e scope]
+        if {![dict exists $rootsOf $s]} {
+            error "hir::format: statement $e is in scope $s, which is neither the program's nor a module section's"
+        }
+        dict lappend rootsOf $s $e
+    }
+    set sections {}
+    set inOrder {}
+    foreach {ns s} $order {
+        lappend sections $ns $s [dict get $rootsOf $s]
+        lappend inOrder {*}[dict get $rootsOf $s]
+    }
+    if {$inOrder ne [dict get $hir roots]} {
+        error "hir::format: the statements are not grouped by section, module sections first"
+    }
+    return $sections
 }
 
 # One line for a source-defined type (hir::sourceTypes's own {name .. parent
@@ -269,6 +329,43 @@ proc hir::format::ParamList {hir params declaredTypes} {
     return [join $items {, }]
 }
 
+# A constant's LITERAL (a Tcl list: {str TEXT}, {int N}, ...) as one line's
+# words. Every line is one Tcl list (hir::read), so a word holding a control
+# character -- a String's newline or tab -- is written double-quoted with
+# backslash escapes, which Tcl's list parsing undoes: the reader's literal
+# is the HIR's. Any other literal is printed as it is.
+proc hir::format::Literal {literal} {
+    if {![regexp {[\x00-\x1f\x7f]} $literal]} {
+        return $literal
+    }
+    set words {}
+    foreach word $literal {
+        if {![regexp {[\x00-\x1f\x7f]} $word]} {
+            lappend words [list $word]
+            continue
+        }
+        set escaped ""
+        foreach c [split $word ""] {
+            switch -- $c {
+                \\ { append escaped {\\} }
+                \" { append escaped {\"} }
+                \n { append escaped {\n} }
+                \t { append escaped {\t} }
+                \r { append escaped {\r} }
+                default {
+                    if {[regexp {[\x00-\x1f\x7f]} $c]} {
+                        append escaped [format {\u%04x} [scan $c %c]]
+                    } else {
+                        append escaped $c
+                    }
+                }
+            }
+        }
+        lappend words "\"$escaped\""
+    }
+    return [join $words " "]
+}
+
 proc hir::format::Binds {hir s} {
     set locals [lmap b [dict get $hir scopes $s bindings] {
         if {[dict get $hir bindings $b kind] ne "local"} continue
@@ -380,7 +477,7 @@ proc hir::format::Expr {hir e indent origins linesVar} {
     set inner [expr {$indent + 1}]
     switch -- [dict get $node kind] {
         const {
-            Line $hir $e "const [dict get $node literal]" $indent $origins lines
+            Line $hir $e "const [hir::format::Literal [dict get $node literal]]" $indent $origins lines
         }
         ref {
             set b [dict get $node binding]

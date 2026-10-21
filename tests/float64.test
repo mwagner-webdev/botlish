@@ -16,8 +16,6 @@ source [file join $::projectRoot surface surface.tcl]
 source [file join $::projectRoot native native.tcl]
 
 testConstraint nativeBuilt [expr {![catch {native::binary}]}]
-testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" &&
-    $::tcl_platform(machine) in {x86_64 amd64 aarch64}}]
 testConstraint cCompiler [expr {[auto_execok cc] ne ""}]
 testConstraint nativeLinux [expr {$::tcl_platform(os) eq "Linux"
     && $::tcl_platform(machine) in {x86_64 amd64 aarch64 arm64}}]

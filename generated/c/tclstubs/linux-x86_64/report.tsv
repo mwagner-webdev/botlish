@@ -36,7 +36,7 @@ macro	Tcl_DbDecrRefCount	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botli
 macro	Tcl_DbIncrRefCount	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_DbIncrRefCount; (ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Char], ffi::c::Int) -> unit
 macro	Tcl_DbIsShared	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_DbIsShared; (ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Char], ffi::c::Int) -> ffi::c::Int
 macro	Tcl_DbNewByteArrayObj	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_DbNewByteArrayObj; (ffi::c::Ptr[ffi::c::UChar], ffi::c::Long, ffi::c::Ptr[ffi::c::Char], ffi::c::Int) -> ffi::c::Ptr[Tcl_Obj]
-macro	Tcl_DbNewDoubleObj	unsupported		double	parameter 1 (doubleValue): double
+macro	Tcl_DbNewDoubleObj	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_DbNewDoubleObj; (ffi::c::Double, ffi::c::Ptr[ffi::c::Char], ffi::c::Int) -> ffi::c::Ptr[Tcl_Obj]
 macro	Tcl_DbNewListObj	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_DbNewListObj; (ffi::c::Long, ffi::c::Ptr[ffi::c::Ptr[Tcl_Obj]], ffi::c::Ptr[ffi::c::Char], ffi::c::Int) -> ffi::c::Ptr[Tcl_Obj]
 macro	Tcl_DbNewObj	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_DbNewObj; (ffi::c::Ptr[ffi::c::Char], ffi::c::Int) -> ffi::c::Ptr[Tcl_Obj]
 macro	Tcl_DbNewStringObj	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_DbNewStringObj; (ffi::c::Ptr[ffi::c::Char], ffi::c::Long, ffi::c::Ptr[ffi::c::Char], ffi::c::Int) -> ffi::c::Ptr[Tcl_Obj]
@@ -45,8 +45,8 @@ macro	TclFreeObj	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclst
 function	Tcl_GetBoolean	thunk	tclstubs::thunks::decls	thunk (macro-shadow: expression: member access)	symbol botlish_tclstubs_Tcl_GetBoolean; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[ffi::c::Char], ffi::c::Ptr[ffi::c::Int]) -> ffi::c::Int
 function	Tcl_GetBooleanFromObj	thunk	tclstubs::thunks::decls	thunk (macro-shadow: expression: member access)	symbol botlish_tclstubs_Tcl_GetBooleanFromObj; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Int]) -> ffi::c::Int
 function	Tcl_GetByteArrayFromObj	thunk	tclstubs::thunks::decls	thunk (macro-shadow: expression: member access)	symbol botlish_tclstubs_Tcl_GetByteArrayFromObj; (ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Long]) -> ffi::c::Ptr[ffi::c::UChar]
-macro	Tcl_GetDouble	unsupported		double	parameter 3 (doublePtr): a pointer to double
-macro	Tcl_GetDoubleFromObj	unsupported		double	parameter 3 (doublePtr): a pointer to double
+macro	Tcl_GetDouble	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_GetDouble; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[ffi::c::Char], ffi::c::Ptr[ffi::c::Double]) -> ffi::c::Int
+macro	Tcl_GetDoubleFromObj	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_GetDoubleFromObj; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Double]) -> ffi::c::Int
 macro	Tcl_GetInt	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_GetInt; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[ffi::c::Char], ffi::c::Ptr[ffi::c::Int]) -> ffi::c::Int
 macro	Tcl_GetIntFromObj	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_GetIntFromObj; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Int]) -> ffi::c::Int
 macro	Tcl_GetLongFromObj	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_GetLongFromObj; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Long]) -> ffi::c::Int
@@ -60,13 +60,13 @@ macro	Tcl_ListObjIndex	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish
 function	TclListObjLength	direct	tclstubs::decls	direct	symbol TclListObjLength; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Void]) -> ffi::c::Int
 macro	Tcl_ListObjReplace	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_ListObjReplace; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[Tcl_Obj], ffi::c::Long, ffi::c::Long, ffi::c::Long, ffi::c::Ptr[ffi::c::Ptr[Tcl_Obj]]) -> ffi::c::Int
 macro	Tcl_NewByteArrayObj	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_NewByteArrayObj; (ffi::c::Ptr[ffi::c::UChar], ffi::c::Long) -> ffi::c::Ptr[Tcl_Obj]
-macro	Tcl_NewDoubleObj	unsupported		double	parameter 1 (doubleValue): double
+macro	Tcl_NewDoubleObj	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_NewDoubleObj; (ffi::c::Double) -> ffi::c::Ptr[Tcl_Obj]
 macro	Tcl_NewListObj	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_NewListObj; (ffi::c::Long, ffi::c::Ptr[ffi::c::Ptr[Tcl_Obj]]) -> ffi::c::Ptr[Tcl_Obj]
 macro	Tcl_NewObj	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_NewObj; () -> ffi::c::Ptr[Tcl_Obj]
 macro	Tcl_NewStringObj	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_NewStringObj; (ffi::c::Ptr[ffi::c::Char], ffi::c::Long) -> ffi::c::Ptr[Tcl_Obj]
 macro	Tcl_SetByteArrayLength	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_SetByteArrayLength; (ffi::c::Ptr[Tcl_Obj], ffi::c::Long) -> ffi::c::Ptr[ffi::c::UChar]
 macro	Tcl_SetByteArrayObj	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_SetByteArrayObj; (ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::UChar], ffi::c::Long) -> unit
-macro	Tcl_SetDoubleObj	unsupported		double	parameter 2 (doubleValue): double
+macro	Tcl_SetDoubleObj	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_SetDoubleObj; (ffi::c::Ptr[Tcl_Obj], ffi::c::Double) -> unit
 macro	Tcl_SetListObj	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_SetListObj; (ffi::c::Ptr[Tcl_Obj], ffi::c::Long, ffi::c::Ptr[ffi::c::Ptr[Tcl_Obj]]) -> unit
 macro	Tcl_SetObjLength	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_SetObjLength; (ffi::c::Ptr[Tcl_Obj], ffi::c::Long) -> unit
 macro	Tcl_SetStringObj	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_SetStringObj; (ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Char], ffi::c::Long) -> unit
@@ -134,8 +134,8 @@ macro	Tcl_Exit	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstub
 macro	Tcl_ExposeCommand	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_ExposeCommand; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[ffi::c::Char], ffi::c::Ptr[ffi::c::Char]) -> ffi::c::Int
 macro	Tcl_ExprBoolean	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_ExprBoolean; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[ffi::c::Char], ffi::c::Ptr[ffi::c::Int]) -> ffi::c::Int
 macro	Tcl_ExprBooleanObj	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_ExprBooleanObj; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Int]) -> ffi::c::Int
-macro	Tcl_ExprDouble	unsupported		double	parameter 3 (ptr): a pointer to double
-macro	Tcl_ExprDoubleObj	unsupported		double	parameter 3 (ptr): a pointer to double
+macro	Tcl_ExprDouble	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_ExprDouble; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[ffi::c::Char], ffi::c::Ptr[ffi::c::Double]) -> ffi::c::Int
+macro	Tcl_ExprDoubleObj	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_ExprDoubleObj; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Double]) -> ffi::c::Int
 macro	Tcl_ExprLong	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_ExprLong; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[ffi::c::Char], ffi::c::Ptr[ffi::c::Long]) -> ffi::c::Int
 macro	Tcl_ExprLongObj	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_ExprLongObj; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Long]) -> ffi::c::Int
 macro	Tcl_ExprObj	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_ExprObj; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Ptr[Tcl_Obj]]) -> ffi::c::Int
@@ -190,7 +190,7 @@ macro	Tcl_OpenFileChannel	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botl
 macro	Tcl_OpenTcpClient	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_OpenTcpClient; (ffi::c::Ptr[Tcl_Interp], ffi::c::Int, ffi::c::Ptr[ffi::c::Char], ffi::c::Ptr[ffi::c::Char], ffi::c::Int, ffi::c::Int) -> ffi::c::Ptr[Tcl_Channel_]
 macro	Tcl_OpenTcpServer	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_OpenTcpServer; (ffi::c::Ptr[Tcl_Interp], ffi::c::Int, ffi::c::Ptr[ffi::c::Char], ffi::c::FnPtr[Fn{args: [ffi::c::Ptr[ffi::c::Void], ffi::c::Ptr[Tcl_Channel_], ffi::c::Ptr[ffi::c::Char], ffi::c::Int], return: unit}], ffi::c::Ptr[ffi::c::Void]) -> ffi::c::Ptr[Tcl_Channel_]
 macro	Tcl_Preserve	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_Preserve; (ffi::c::Ptr[ffi::c::Void]) -> unit
-macro	Tcl_PrintDouble	unsupported		double	parameter 2 (value): double
+macro	Tcl_PrintDouble	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_PrintDouble; (ffi::c::Ptr[Tcl_Interp], ffi::c::Double, ffi::c::Ptr[ffi::c::Char]) -> unit
 macro	Tcl_PutEnv	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_PutEnv; (ffi::c::Ptr[ffi::c::Char]) -> ffi::c::Int
 macro	Tcl_PosixError	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_PosixError; (ffi::c::Ptr[Tcl_Interp]) -> ffi::c::Ptr[ffi::c::Char]
 macro	Tcl_QueueEvent	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_QueueEvent; (ffi::c::Ptr[Tcl_Event], ffi::c::Int) -> unit
@@ -517,7 +517,7 @@ macro	Tcl_SetChannelErrorInterp	thunk	tclstubs::thunks::decls	thunk (stub)	symbo
 macro	Tcl_GetChannelErrorInterp	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_GetChannelErrorInterp; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[ffi::c::Ptr[Tcl_Obj]]) -> unit
 macro	Tcl_SetChannelError	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_SetChannelError; (ffi::c::Ptr[Tcl_Channel_], ffi::c::Ptr[Tcl_Obj]) -> unit
 macro	Tcl_GetChannelError	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_GetChannelError; (ffi::c::Ptr[Tcl_Channel_], ffi::c::Ptr[ffi::c::Ptr[Tcl_Obj]]) -> unit
-macro	Tcl_InitBignumFromDouble	unsupported		double	parameter 2 (initval): double
+macro	Tcl_InitBignumFromDouble	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_InitBignumFromDouble; (ffi::c::Ptr[Tcl_Interp], ffi::c::Double, ffi::c::Ptr[ffi::c::Void]) -> ffi::c::Int
 macro	Tcl_GetNamespaceUnknownHandler	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_GetNamespaceUnknownHandler; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[Tcl_Namespace]) -> ffi::c::Ptr[Tcl_Obj]
 macro	Tcl_SetNamespaceUnknownHandler	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_SetNamespaceUnknownHandler; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[Tcl_Namespace], ffi::c::Ptr[Tcl_Obj]) -> ffi::c::Int
 macro	Tcl_GetEncodingFromObj	thunk	tclstubs::thunks::decls	thunk (stub)	symbol botlish_tclstubs_Tcl_GetEncodingFromObj; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Ptr[Tcl_Encoding_]]) -> ffi::c::Int
@@ -1438,8 +1438,8 @@ record	struct Tcl_ObjType	layout-direct	tclstubs::layouts	Tcl_ObjType	sizeof 112
 record	struct anon@tcl.h:723	layout-direct	tclstubs::layouts	Tcl_ObjInternalRep_twoPtrValue	sizeof 16, _Alignof 8, 2 fields
 record	struct anon@tcl.h:727	layout-direct	tclstubs::layouts	Tcl_ObjInternalRep_ptrAndLongRep	sizeof 16, _Alignof 8, 2 fields
 record	struct anon@tcl.h:731	layout-direct	tclstubs::layouts	Tcl_ObjInternalRep_ptrAndSize	sizeof 16, _Alignof 8, 2 fields
-record	union Tcl_ObjInternalRep	layout-blocked		double	field doubleValue: double (double)
-record	struct Tcl_Obj	layout-blocked		nested-layout-blocked	field internalRep (union Tcl_ObjInternalRep, field) -> double
+record	union Tcl_ObjInternalRep	layout-direct	tclstubs::layouts	Tcl_ObjInternalRep	sizeof 16, _Alignof 8, 7 fields
+record	struct Tcl_Obj	layout-direct	tclstubs::layouts	Tcl_Obj	sizeof 48, _Alignof 8, 5 fields
 record	struct Tcl_Namespace	layout-direct	tclstubs::layouts	Tcl_Namespace	sizeof 40, _Alignof 8, 5 fields
 record	struct Tcl_CallFrame	layout-direct	tclstubs::layouts	Tcl_CallFrame	sizeof 112, _Alignof 8, 14 fields
 record	struct anon@tcl.h:846	layout-direct	tclstubs::layouts	Tcl_CmdInfo	sizeof 80, _Alignof 8, 10 fields
@@ -1462,7 +1462,7 @@ record	struct Tcl_EncodingType	layout-direct	tclstubs::layouts	Tcl_EncodingType	
 record	struct Tcl_Config	layout-direct	tclstubs::layouts	Tcl_Config	sizeof 16, _Alignof 8, 2 fields
 record	struct anon@tcl.h:2175	layout-direct	tclstubs::layouts	Tcl_ArgvInfo	sizeof 48, _Alignof 8, 6 fields
 record	struct anon@tclDecls.h:1879	layout-direct	tclstubs::layouts	TclStubHooks	sizeof 24, _Alignof 8, 3 fields
-record	struct TclStubs	layout-blocked		unsupported-pointer	field tcl_Panic: a variadic callback (void (const char *format, ...)) (unsupported-callback-signature); field tcl_AppendStringsToObj: a variadic callback (void (Tcl_Obj *objPtr, ...)) (unsupported-callback-signature); field tcl_DbNewDoubleObj: callback argument 1: double (double) (unsupported-callback-signature); field tcl_GetDouble: callback argument 3: a pointer to double (double) (unsupported-callback-signature); field tcl_GetDoubleFromObj: callback argument 3: a pointer to double (double) (unsupported-callback-signature); field tcl_NewDoubleObj: callback argument 1: double (double) (unsupported-callback-signature); field tcl_SetDoubleObj: callback argument 2: double (double) (unsupported-callback-signature); field tcl_AppendResult: a variadic callback (void (Tcl_Interp *interp, ...)) (unsupported-callback-signature); field tcl_ExprDouble: callback argument 3: a pointer to double (double) (unsupported-callback-signature); field tcl_ExprDoubleObj: callback argument 3: a pointer to double (double) (unsupported-callback-signature); field tcl_PrintDouble: callback argument 2: double (double) (unsupported-callback-signature); field tcl_SetErrorCode: a variadic callback (void (Tcl_Interp *interp, ...)) (unsupported-callback-signature); field tcl_VarEval: a variadic callback (int (Tcl_Interp *interp, ...)) (unsupported-callback-signature); field tcl_InitBignumFromDouble: callback argument 2: double (double) (unsupported-callback-signature); field tcl_ObjPrintf: a variadic callback (Tcl_Obj *(const char *format, ...)) (unsupported-callback-signature); field tcl_AppendPrintfToObj: a variadic callback (void (Tcl_Obj *objPtr, const char *format, ...)) (unsupported-callback-signature)
+record	struct TclStubs	layout-blocked		unsupported-pointer	field tcl_Panic: a variadic callback (void (const char *format, ...)) (unsupported-callback-signature); field tcl_AppendStringsToObj: a variadic callback (void (Tcl_Obj *objPtr, ...)) (unsupported-callback-signature); field tcl_AppendResult: a variadic callback (void (Tcl_Interp *interp, ...)) (unsupported-callback-signature); field tcl_SetErrorCode: a variadic callback (void (Tcl_Interp *interp, ...)) (unsupported-callback-signature); field tcl_VarEval: a variadic callback (int (Tcl_Interp *interp, ...)) (unsupported-callback-signature); field tcl_ObjPrintf: a variadic callback (Tcl_Obj *(const char *format, ...)) (unsupported-callback-signature); field tcl_AppendPrintfToObj: a variadic callback (void (Tcl_Obj *objPtr, const char *format, ...)) (unsupported-callback-signature)
 record	struct TclPlatStubs	layout-direct	tclstubs::layouts	TclPlatStubs	sizeof 48, _Alignof 8, 6 fields
 record	struct Tcl_MethodType	layout-direct	tclstubs::layouts	Tcl_MethodType	sizeof 40, _Alignof 8, 5 fields
 record	struct Tcl_MethodType2	layout-direct	tclstubs::layouts	Tcl_MethodType2	sizeof 40, _Alignof 8, 5 fields

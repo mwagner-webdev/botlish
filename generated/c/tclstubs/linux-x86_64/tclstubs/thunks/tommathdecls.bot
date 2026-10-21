@@ -6,7 +6,7 @@
 import ffi::c
 import tclstubs::ctypes
 
-extern c library "botlish_shim_tclstubs_2627031d"
+extern c library "botlish_shim_tclstubs_629eba3e"
 extern c library "tclstub9.0"
 
 # C: int TclBN_epoch(void) (called through (tclTomMathStubsPtr -> tclBN_epoch))

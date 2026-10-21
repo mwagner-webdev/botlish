@@ -6,7 +6,7 @@
 import ffi::c
 import tclstubs::ctypes
 
-extern c library "botlish_shim_tclstubs_2627031d"
+extern c library "botlish_shim_tclstubs_629eba3e"
 extern c library "tclstub9.0"
 
 # C: int Tcl_PkgProvideEx(Tcl_Interp *interp, const char *name, const char *version, const void *clientData) (called through (tclStubsPtr -> tcl_PkgProvideEx))
@@ -143,6 +143,13 @@ extern c fn Tcl_DbNewByteArrayObj named "botlish_tclstubs_Tcl_DbNewByteArrayObj"
     line: ffi::c::Int
 ) -> ffi::c::Ptr[tclstubs::ctypes::Tcl_Obj]
 
+# C: Tcl_Obj *Tcl_DbNewDoubleObj(double doubleValue, const char *file, int line) (called through (tclStubsPtr -> tcl_DbNewDoubleObj))
+extern c fn Tcl_DbNewDoubleObj named "botlish_tclstubs_Tcl_DbNewDoubleObj"(
+    doubleValue: ffi::c::Double,
+    file: ffi::c::Ptr[ffi::c::Char],
+    line: ffi::c::Int
+) -> ffi::c::Ptr[tclstubs::ctypes::Tcl_Obj]
+
 # C: Tcl_Obj *Tcl_DbNewListObj(Tcl_Size objc, Tcl_Obj *const *objv, const char *file, int line) (called through (tclStubsPtr -> tcl_DbNewListObj))
 extern c fn Tcl_DbNewListObj named "botlish_tclstubs_Tcl_DbNewListObj"(
     objc: ffi::c::Long,
@@ -194,6 +201,20 @@ extern c fn Tcl_GetByteArrayFromObj named "botlish_tclstubs_Tcl_GetByteArrayFrom
     objPtr: ffi::c::Ptr[tclstubs::ctypes::Tcl_Obj],
     numBytesPtr: ffi::c::Ptr[ffi::c::Long]
 ) -> ffi::c::Ptr[ffi::c::UChar]
+
+# C: int Tcl_GetDouble(Tcl_Interp *interp, const char *src, double *doublePtr) (called through (tclStubsPtr -> tcl_GetDouble))
+extern c fn Tcl_GetDouble named "botlish_tclstubs_Tcl_GetDouble"(
+    interp: ffi::c::Ptr[tclstubs::ctypes::Tcl_Interp],
+    src: ffi::c::Ptr[ffi::c::Char],
+    doublePtr: ffi::c::Ptr[ffi::c::Double]
+) -> ffi::c::Int
+
+# C: int Tcl_GetDoubleFromObj(Tcl_Interp *interp, Tcl_Obj *objPtr, double *doublePtr) (called through (tclStubsPtr -> tcl_GetDoubleFromObj))
+extern c fn Tcl_GetDoubleFromObj named "botlish_tclstubs_Tcl_GetDoubleFromObj"(
+    interp: ffi::c::Ptr[tclstubs::ctypes::Tcl_Interp],
+    objPtr: ffi::c::Ptr[tclstubs::ctypes::Tcl_Obj],
+    doublePtr: ffi::c::Ptr[ffi::c::Double]
+) -> ffi::c::Int
 
 # C: int Tcl_GetInt(Tcl_Interp *interp, const char *src, int *intPtr) (called through (tclStubsPtr -> tcl_GetInt))
 extern c fn Tcl_GetInt named "botlish_tclstubs_Tcl_GetInt"(
@@ -264,6 +285,11 @@ extern c fn Tcl_NewByteArrayObj named "botlish_tclstubs_Tcl_NewByteArrayObj"(
     numBytes: ffi::c::Long
 ) -> ffi::c::Ptr[tclstubs::ctypes::Tcl_Obj]
 
+# C: Tcl_Obj *Tcl_NewDoubleObj(double doubleValue) (called through (tclStubsPtr -> tcl_NewDoubleObj))
+extern c fn Tcl_NewDoubleObj named "botlish_tclstubs_Tcl_NewDoubleObj"(
+    doubleValue: ffi::c::Double
+) -> ffi::c::Ptr[tclstubs::ctypes::Tcl_Obj]
+
 # C: Tcl_Obj *Tcl_NewListObj(Tcl_Size objc, Tcl_Obj *const objv[]) (called through (tclStubsPtr -> tcl_NewListObj))
 extern c fn Tcl_NewListObj named "botlish_tclstubs_Tcl_NewListObj"(
     objc: ffi::c::Long,
@@ -292,6 +318,12 @@ extern c fn Tcl_SetByteArrayObj named "botlish_tclstubs_Tcl_SetByteArrayObj"(
     objPtr: ffi::c::Ptr[tclstubs::ctypes::Tcl_Obj],
     bytes: ffi::c::Ptr[ffi::c::UChar],
     numBytes: ffi::c::Long
+) -> unit
+
+# C: void Tcl_SetDoubleObj(Tcl_Obj *objPtr, double doubleValue) (called through (tclStubsPtr -> tcl_SetDoubleObj))
+extern c fn Tcl_SetDoubleObj named "botlish_tclstubs_Tcl_SetDoubleObj"(
+    objPtr: ffi::c::Ptr[tclstubs::ctypes::Tcl_Obj],
+    doubleValue: ffi::c::Double
 ) -> unit
 
 # C: void Tcl_SetListObj(Tcl_Obj *objPtr, Tcl_Size objc, Tcl_Obj *const objv[]) (called through (tclStubsPtr -> tcl_SetListObj))
@@ -704,6 +736,20 @@ extern c fn Tcl_ExprBooleanObj named "botlish_tclstubs_Tcl_ExprBooleanObj"(
     ptr: ffi::c::Ptr[ffi::c::Int]
 ) -> ffi::c::Int
 
+# C: int Tcl_ExprDouble(Tcl_Interp *interp, const char *expr, double *ptr) (called through (tclStubsPtr -> tcl_ExprDouble))
+extern c fn Tcl_ExprDouble named "botlish_tclstubs_Tcl_ExprDouble"(
+    interp: ffi::c::Ptr[tclstubs::ctypes::Tcl_Interp],
+    expr: ffi::c::Ptr[ffi::c::Char],
+    ptr: ffi::c::Ptr[ffi::c::Double]
+) -> ffi::c::Int
+
+# C: int Tcl_ExprDoubleObj(Tcl_Interp *interp, Tcl_Obj *objPtr, double *ptr) (called through (tclStubsPtr -> tcl_ExprDoubleObj))
+extern c fn Tcl_ExprDoubleObj named "botlish_tclstubs_Tcl_ExprDoubleObj"(
+    interp: ffi::c::Ptr[tclstubs::ctypes::Tcl_Interp],
+    objPtr: ffi::c::Ptr[tclstubs::ctypes::Tcl_Obj],
+    ptr: ffi::c::Ptr[ffi::c::Double]
+) -> ffi::c::Int
+
 # C: int Tcl_ExprLong(Tcl_Interp *interp, const char *expr, long *ptr) (called through (tclStubsPtr -> tcl_ExprLong))
 extern c fn Tcl_ExprLong named "botlish_tclstubs_Tcl_ExprLong"(
     interp: ffi::c::Ptr[tclstubs::ctypes::Tcl_Interp],
@@ -1025,6 +1071,13 @@ extern c fn Tcl_OpenTcpServer named "botlish_tclstubs_Tcl_OpenTcpServer"(
 # C: void Tcl_Preserve(void *data) (called through (tclStubsPtr -> tcl_Preserve))
 extern c fn Tcl_Preserve named "botlish_tclstubs_Tcl_Preserve"(
     data: ffi::c::Ptr[ffi::c::Void]
+) -> unit
+
+# C: void Tcl_PrintDouble(Tcl_Interp *interp, double value, char *dst) (called through (tclStubsPtr -> tcl_PrintDouble))
+extern c fn Tcl_PrintDouble named "botlish_tclstubs_Tcl_PrintDouble"(
+    interp: ffi::c::Ptr[tclstubs::ctypes::Tcl_Interp],
+    value: ffi::c::Double,
+    dst: ffi::c::Ptr[ffi::c::Char]
 ) -> unit
 
 # C: int Tcl_PutEnv(const char *assignment) (called through (tclStubsPtr -> tcl_PutEnv))
@@ -3023,6 +3076,13 @@ extern c fn Tcl_GetChannelError named "botlish_tclstubs_Tcl_GetChannelError"(
     chan: ffi::c::Ptr[tclstubs::ctypes::Tcl_Channel_],
     msg: ffi::c::Ptr[ffi::c::Ptr[tclstubs::ctypes::Tcl_Obj]]
 ) -> unit
+
+# C: int Tcl_InitBignumFromDouble(Tcl_Interp *interp, double initval, void *toInit) (called through (tclStubsPtr -> tcl_InitBignumFromDouble))
+extern c fn Tcl_InitBignumFromDouble named "botlish_tclstubs_Tcl_InitBignumFromDouble"(
+    interp: ffi::c::Ptr[tclstubs::ctypes::Tcl_Interp],
+    initval: ffi::c::Double,
+    toInit: ffi::c::Ptr[ffi::c::Void]
+) -> ffi::c::Int
 
 # C: Tcl_Obj *Tcl_GetNamespaceUnknownHandler(Tcl_Interp *interp, Tcl_Namespace *nsPtr) (called through (tclStubsPtr -> tcl_GetNamespaceUnknownHandler))
 extern c fn Tcl_GetNamespaceUnknownHandler named "botlish_tclstubs_Tcl_GetNamespaceUnknownHandler"(

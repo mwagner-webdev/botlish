@@ -239,7 +239,10 @@ and benchmarks report `{error {NATIVE NOT-BUILT}}` instead of running.
 zipkit holding main.tcl, the compiler stack and both native executables,
 needing only glibc. The workflow `.github/workflows/single-executable.yml`
 builds it on every push to `main` and smoke-tests it in stock Ubuntu
-containers (`single/smoke-test.sh`). Its base kit is a static tclsh that the
+containers (`single/smoke-test.sh`), then publishes it as the
+`botlish-linux-x86_64` asset of the rolling `single-latest` prerelease. The
+README's download button links to that tag and asset name: rename either
+only together with the button. Its base kit is a static tclsh that the
 script builds once from the pinned Tcl 9.0.1 source release. That build is
 the one exception to "do not build Tcl 9 from source" above: no package ships
 a static zipfs tclsh. `--basekit PATH` uses a prebuilt zipkit instead. To run
@@ -484,8 +487,9 @@ tclsh9.0 tests/all.tcl
 ```
 
 From Windows, run the same thing inside WSL for Linux GC-stress results
-when validating native stack walking (Windows-native execution exercises a
-different stack/guard implementation):
+when validating native stack walking: Windows-native execution walks no
+native frame at all (the fallback root plan: "Windows x86-64 (MSVC)",
+below) and has no stack guard, so it cannot validate either:
 
 ```powershell
 wsl.exe -d Ubuntu-24.04 -- bash -lc 'cd /mnt/c/Users/MarkusWagner/dev/botlish && export LANG=C.utf8 LC_ALL=C.utf8 BOTLISH_NATIVE_GC_STRESS=1 && cargo build --release --manifest-path native/Cargo.toml && tclsh9.0 tests/all.tcl'
@@ -970,6 +974,96 @@ and no acceptance depends on one.
   the branch with workflow_dispatch before a port change merges. A
   macOS-motivated test constraint names a capability, never the OS.
 
+## Windows x86-64 (MSVC)
+
+The native backend runs on Windows x86-64 with Microsoft's toolchain
+(WINDOWS-X86-64-MILESTONE-1.md; the census and the toolchain decision are
+WINDOWS-TOOLCHAIN-CENSUS.md): the driver and runtime built for
+`x86_64-pc-windows-msvc`, executables linked by rustc with `link.exe`,
+`windows-x86_64` the one native Windows target. Keep it so:
+
+* MSVC is the supported Windows toolchain. Never add a second native
+  Windows backend for MinGW: `windows-x86_64-gnu` stays a target row of the
+  binding generator (its committed Win32 binding), and the driver refuses a
+  program built for it (`same_target` compares the triple's environment:
+  NATIVE TARGET). The startup crate is compiled with the driver's own
+  `--target`, never whatever rustc's host is.
+* Code generation, the object writer and the link stay Cranelift's, the
+  `object` crate's and rustc's: no Windows assembler, object rewrite,
+  linker, CRT startup or Visual Studio discovery of Botlish's (rustc finds
+  link.exe and the SDK without a Developer Command Prompt). The object is
+  the same COFF for both Windows environments; never add a target-specific
+  object transformation.
+* The link plan is `LinkerFlavor::Msvc`'s (`/LIBPATH:DIR`, `NAME.lib`, no
+  group): never a GNU flag to link.exe. An executable of a program that
+  calls no C links the C runtime statically (`crt_args`, `+crt-static`), so
+  it imports only the system's DLLs: never let it import `VCRUNTIME140.dll`
+  or the UCRT, and never impose that runtime on anything else (the driver,
+  C libraries). C calls stay refused on Windows (`C_CALLS`) until their
+  milestone validates the Win64 C ABI against real callees.
+* An executable's name ends in `.exe` (`codegen::aot::executable_path`: a
+  name without an extension gets it); `native::executable` returns the
+  file, and a test runs that file, never the name it passed.
+* GC roots: one capability, `runtime::framewalk::NATIVE_FRAME_ROOTS`,
+  decides stack-map emission (`clif.rs`'s `stack_maps`), the root plan,
+  the shadow stack (`Vm::new`), the root report and the walk itself. It is
+  false on Windows: LLVM's Win64 prologue puts the frame pointer inside the
+  frame, so the frame walk cannot climb Rust frames there, forced frame
+  pointers or not. Never re-enable the walk on Windows by forcing frame
+  pointers or by a second, diverging check; native-frame roots there need
+  unwind metadata (`.pdata`/`.xdata`, `RtlVirtualUnwind`), a milestone of
+  their own. Where the shadow stack's depth check bounds recursion
+  (`runtime::native_stack::depth_checked`), every function with a Botlish
+  call can fail with NATIVE LIMIT STACK from its prologue: the depth
+  reservation and nir's call effects read that one predicate, so no call
+  site skips the check (WINDOWS-X86-64-MILESTONE-1.md, section 3.4). The
+  fallback plan does not support coroutines (a suspended coroutine's
+  shadow slots break the shadow stack's order). The `fallback-roots` cargo
+  feature builds Windows' root plan on any host, to run the suite with it
+  (a test build, never shipped; its coroutine tests fail under GC stress).
+* Stack probes are on on Windows (`codegen::stack_probes`): Windows
+  commits a thread's stack a page at a time. They are not a stack guard:
+  there is none on Windows yet, and the shadow stack's depth check is the
+  only clean NATIVE LIMIT STACK there.
+* Arguments: a Windows process's command line, split by the Microsoft C
+  runtime's rules (Rust's `args_os`), each argument's UTF-16 as WTF-8
+  (`runtime::aot::wtf8_from_utf16`): never `OsString`'s internal encoding,
+  never a lossy conversion (ARGV.md, "Windows").
+* What each native capability does on Windows is recorded in
+  `tests/platform/native-status.tcl` (its windows-x86_64 row) and
+  `native/native.tcl`'s `capabilities` table (which tests/helpers.tcl's
+  `executableAot`, `nativeCCalls`, `nativeCoroutines`, `nativeStackGuard`,
+  `nativeFrameRoots` (and from the last two `nativeDepthChecked`) and the
+  golden runner read); the test files that do not pass on Windows yet,
+  with their causes, in `tests/platform/tier.tcl`'s `notYetByHost`. A
+  milestone that changes one updates it in the same change; never weaken a
+  test to make Windows green. A test that needs a capability carries its
+  constraint; a test of the root plan or of call effects expects the
+  host's by `nativeFrameRoots`/`nativeDepthChecked`; a test of C scalar
+  widths reads the target's row (`long` is 32 bits on Windows); one that
+  reads main.tcl's output untranslated expects CRLF from main.tcl's own
+  lines on Windows.
+* CI: `.github/workflows/windows-x86_64.yml` on every push (windows-2025,
+  production code, Tcl 9.0.1 built by `tests/platform/setup-windows.ps1`):
+  the smoke job (the Rust tests, `native-status.tcl`, `aot-facts.tcl`'s
+  COFF/PE checks, `tests/platform/gc-workloads.tcl` under GC stress, the
+  2048 executable, dumpbin, the smoke tier and the Windows-relevant test
+  files) and the acceptance tier in four shards; `[ci-full]` or a manual
+  run adds the GC-stress tier. Neither Wine nor WSL is an authority for
+  Windows; a `-gnu` cross build under Wine is a development aid only.
+
+If you change the Windows link plan, the CRT policy, executable naming,
+`EXECUTABLES`/`C_CALLS`, `same_target`, `NATIVE_FRAME_ROOTS` or what reads
+it, the stack probes or the Windows argument encoding, run the Rust tests,
+`tests/native-executable.test`, `tests/target-model.test`,
+`tests/argv.test`, `tests/platform/native-status.tcl`,
+`tests/platform/aot-facts.tcl`, `tests/platform/gc-workloads.tcl` (also
+with a `fallback-roots` driver: `cargo build --release --features
+fallback-roots` into another target directory, `BOTLISH_NATIVE_BIN`
+pointing at it), `audit/native-aot/tools/mutate.tcl` and
+`audit/target-model/tools/mutate.tcl` on Linux, and the Windows workflow on
+the branch.
+
 ## Compilation targets
 
 A compilation target (core/cabi.tcl's table; MACOS-AARCH64-MILESTONE-2.md)
@@ -985,11 +1079,13 @@ C-BINDGEN-LAYOUTS.md) have equal rows and are two targets. Keep it so:
   execution). The table is the one target representation: a new fact goes
   in its row, never a second table (the driver reads the triple; Cranelift
   derives the C convention and the object format from it).
-* The `linux` namespace and everything under it are the Linux platform's
-  (core/cabi.tcl's `platforms`, surface/modules.tcl's `PlatformCheck`):
-  UNSUPPORTED-PLATFORM for a target of another operating system. A platform
-  is designated in that table, never read from a namespace's spelling. Never map a Linux module to
-  another system's, and add no Darwin syscall transport. An
+* The `linux` namespace and everything under it are the Linux platform's,
+  `darwin` and everything under it the macOS platform's (core/cabi.tcl's
+  `platforms`, surface/modules.tcl's `PlatformCheck`): UNSUPPORTED-PLATFORM
+  for a target of another operating system. A platform is designated in
+  that table, never read from a namespace's spelling. Never map one
+  platform's module to another system's, and add no Darwin syscall
+  transport (Darwin IO is libSystem's, below). An
   architecture-specific namespace that is no platform's stays every
   system's.
 * A build reads the target in three places (ModuleFile's architecture file,
@@ -1082,6 +1178,59 @@ that runs it through `qemu-aarch64 -L /usr/aarch64-linux-gnu`, and set
 `::tcl_platform(machine)` to `aarch64` before sourcing a test file (its
 executable tests need a native arm64 host); CI's arm64 workflow
 (`workflow_dispatch` on a branch) runs everything natively.
+
+## Darwin IO (libSystem)
+
+macOS's IO is libSystem's C functions, never a syscall
+(MACOS-AARCH64-MILESTONE-8.md): Darwin's kernel interface is private, its C
+library the stable one. `darwin` (lib/darwin.bot, a designated direct
+module) declares `write`, `read`, `open`, `close` and `__error` as
+`extern c fn` by their SDK prototypes and wraps each in one C call;
+`darwin::io` (lib/darwin/io.bot) is the opaque `DarwinIO` context
+implementing `io::IO` with linux::io's completion policy; `darwin::path`
+(lib/darwin/path.bot) is `DarwinPath`. `darwin` is the macOS platform's in
+core/cabi.tcl's `platforms` (Compilation targets, below). Keep it so:
+
+* No Darwin syscall, syscall number, `svc #0x80`, x16 or transport, and no
+  compiler, runtime or Tcl knowledge of IO: every effect is an ordinary C
+  call through the C FFI and byte borrowing (write's buffer `read noescape`,
+  read's `write noescape`, open's path `read noescape`), every constant the
+  SDK's (`di-sdk-facts` compares them on macOS), never Linux's.
+* Darwin reports failure as C does (-1, the reason in errno), never as
+  Linux's `-errno`: a result holds the C result and, separately, the errno,
+  read only after a failure and right after the call, before anything that
+  could call C (`di-errno-read-first` pins the NIR). errno is read through
+  `__error()` and a native view of a one-field layout: no pointer
+  dereference operator, no stored or cached errno pointer, no global errno.
+  `darwin::read`'s write-back value is built between its call and the errno
+  read (two allocations; MACOS-AARCH64-MILESTONE-8.md, section 7): do not
+  add a third thing there.
+* `open` is declared with its genuine variadic prototype; the creation mode
+  is its one trailing argument, an `ffi::c::UShort` (macOS's `mode_t`).
+  Never declare a variadic C function with a fixed trailing parameter: on
+  Apple arm64 the two travel in different places.
+* io::IO stays platform-free: DarwinIO satisfies it structurally from its
+  own module; never add a runtime dispatch, a registration or an OS check to
+  lib/io.bot. The completion policy is LinuxIO's (no retry of EINTR or
+  EAGAIN); change both or neither.
+* A test that runs Darwin IO carries `darwinIO` (tests/helpers.tcl: a
+  capability -- the host's target is the darwin platform's and C calls
+  link), never an OS check. Faults are injected with tests/cffi/write-
+  inject.c (a dyld interposer of libSystem's `write`), never by a test
+  hook in the library.
+
+If you change lib/darwin.bot, lib/darwin/io.bot, lib/darwin/path.bot, the
+platform row, or what they rely on (the C FFI's contracts, byte borrowing,
+native views, variadic calls, context-trait satisfaction), run
+`tests/darwin-io.test` (its front-end half runs on every host),
+`tests/context-traits.test`, `tests/portable-io.test`,
+`tests/target-model.test`, `tests/workload-2048.test` and
+`audit/context-traits/tools/mutate.tcl` (its `darwin-*` mutants run on
+macOS through the tier item `darwin-io-mutants`; every mutant that applies
+to the host must still apply and be killed), and on macOS (a branch push
+with `CI-Tests: darwin-io.test ...`) the darwin-io tests themselves.
+`bench/darwin-io.tcl` (tier item `darwin-io-bench`) is the performance
+report.
 
 ## Affine values
 
@@ -1803,12 +1952,15 @@ and a byte-sized pointee (Char, SChar, UChar by registry metadata, or Void).
   a test process's own; nothing else may call it.
 
 If you change any of that (the files are C-POINTER-BORROWING.md's "What to
-run when changing this" list), run `tests/c-pointer-borrowing.test` (also
-under `BOTLISH_NATIVE_GC_STRESS=1`), `audit/c-pointer-borrowing/tools/fuzz.tcl`
-(several seeds, once with `-gc-stress 1`) and
-`audit/c-pointer-borrowing/tools/mutate.tcl` (every mutant in its
-`mutants.txt` must still apply and be killed: update a mutant's text when you
-change the code it mutates, keeping it a mutant of the same rule), plus
+run when changing this" list), run `tests/c-pointer-borrowing.test` and
+`tests/c-byte-borrowing.test` (real C: the host compiler's fixture and the
+system C library; both also under `BOTLISH_NATIVE_GC_STRESS=1`),
+`audit/c-pointer-borrowing/tools/fuzz.tcl` (several seeds, once with
+`-gc-stress 1`) and `audit/c-pointer-borrowing/tools/mutate.tcl` (every
+mutant in its `mutants.txt` that applies to the host must still apply and be
+killed: update a mutant's text when you change the code it mutates, keeping
+it a mutant of the same rule; a `%% macos-aarch64` mutant runs on macOS
+only: the tier item `c-borrow-mutants`, MACOS-AARCH64-MILESTONE-7.md), plus
 `tests/abi-bytes.test`, `tests/abi-mutable-bytes.test`,
 `tests/linux-syscall.test` and the abi-bytes and mutable-bytes mutation tools
 for a change to the shared exposure mechanism. `bench/c-pointer-borrowing.tcl`
@@ -1864,6 +2016,59 @@ what they cover. The BoringSSL acceptance tests need the package-owned
 static BoringSSL: `tclsh9.0 tests/cffi/boringssl.tcl` builds it once into
 Botlish's cache (never the repository); without it they are skipped.
 `bench/c-ffi.tcl` regenerates the performance report.
+
+## C floating types (ffi::c::Float, ffi::c::Double)
+
+C `float` and `double` are C representations whose values are Float64s
+(C-FLOAT-FFI-MILESTONE-1.md): `{cfloat Float}` (binary32) and `{cfloat
+Double}` (binary64), written only where a C type is -- an extern's
+parameters and result, a function pointer's signature, a pointee, a layout
+field or element -- with `hir::cabi::Carrier` their values' type. Keep it so:
+
+* Never add a Botlish Float32 (or Float80, Float128) to support them, and
+  never let `ffi::c::Float` name a type of values: there it is a TYPE error;
+  `ffi::c::Double` there is Float64.
+* Every fact is the C type's, never the carrier's: format, size,
+  alignment, ABI class, layout width, element stride and the outbound rule
+  come from core/cabi.tcl's `floatings`, `floatingModels` and
+  `floatingFormats` (a target row's `floating` model). The two types never
+  collapse into one, and neither is Float64.
+* The boundary is one rule, written once per implementation: Admit (NaN and
+  the infinities are NonFiniteFloat with their NonFiniteResult, negative zero
+  zero, a binary32 widened exactly) and Narrow (binary32 rounded to nearest,
+  ties to even, an overflow NonFiniteFloat before C runs or a byte is
+  written -- never clamped, never decimal text -- a zero +0). core/cabi.tcl
+  (`Narrow`, `AdmitBits`, the codec) for the Tcl backends and the static
+  decisions, runtime/value.rs (`narrow_c_float`, `admit_c_float`) natively,
+  codegen::clif's foreign call with the same checks inline. Never add a path
+  of its own, a fast-math or flush-to-zero mode, or a different rule at
+  compile time (`ExternNarrowing`, `WrittenFloatFormat` call `Narrow`).
+* A call is charged NonFiniteFloat only where it can fail through a C
+  floating value (`hir::layouts::CallErrors`; an extern with a float
+  parameter or a floating result): a float-free program's calls keep exactly
+  their errors.
+* A DecimalRounded value is never a C float or double: no implicit decay,
+  and a C result never acquires a guarantee. `long double` has no type (the
+  binding generator reports `long-double`); never map it to Float64.
+* A C float takes a floating-point register wherever a convention counts
+  them (System V's `%al`, Apple's variadic padding: `vector_registers`,
+  `c_call_signature`): count `CAbi::floating()`, never F64 alone. A
+  trailing variadic argument is never a float (NIR's `varargs=` rejects
+  `f32`).
+
+If you change any of that (the report's section 18 lists the files), run
+`tests/c-float-ffi.test` (its fixture needs `cc`), its golden suite
+(`tclsh9.0 tests/local.tcl tests/golden/c-float-ffi.bot`), `tests/c-ffi.test`,
+`tests/c-abi-types.test`, `tests/float64.test`, the layout test files
+(binary-layout, native-view, native-edit, layout-arrays, layout-unions),
+`audit/c-float-ffi/tools/fuzz.tcl` (several seeds, once with `-gc-stress
+1`), `audit/c-float-ffi/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed: update a mutant's text when
+you change the code it mutates, keeping it a mutant of the same rule) and
+`cargo test --release --manifest-path native/Cargo.toml --lib c_float` and
+`--bin botlish-native c_float` (the AArch64 lowering tests run on an AArch64
+host, or under qemu-user from an `aarch64-unknown-linux-gnu` build); for the
+generator's float and double, its checks (the C binding generator, below).
 
 ## Variadics
 
@@ -1984,7 +2189,7 @@ fixture's `tools/c-bindgen/fixture/expected/TARGET/`. Keep it so:
   _Alignof, offsetof and each member's type, probed -- never a layout rule
   computed in Tcl or Botlish: no padding, alignment, packing or bitfield
   rule anywhere in the generator. A field a layout cannot represent (a
-  flexible array member, a bitfield, float, double, `_Bool`, an array of
+  flexible array member, a bitfield, `long double`, `_Bool`, an array of
   one of those) blocks its record and every record holding it by value,
   with its reason in the manifest: never flatten, approximate or
   reinterpret it, and never extend the layout language from the generator.
@@ -2220,9 +2425,15 @@ in the single executable): it is an application module, the file beside its
 programs, which every entry point compiles as they are (`tclsh9.0 main.tcl
 -backend cranelift examples/games/2048/demo.bot`; `examples/games/2048/run.tcl`
 adds `-suite`, `-hirx OUT FILE.bot` and `-backend B FILE.bot`).
+The demo is the application module `demo_play.bot` (the game's presentation
+and play loop, requiring `io::IO`) and one entry per platform, `demo.bot`
+(Linux, `linux::io`) and `demo-darwin.bot` (macOS, `darwin::io`): keep
+everything but the context's installation in demo_play.bot
+(MACOS-AARCH64-MILESTONE-8.md, section 22).
 `tests/workload-2048.test` runs the suite, the warning check, the benchmark
-checksum, the demo executable (also under GC stress) and the demo under
-main.tcl's native backends in the ordinary suite; `bench/2048.tcl` is the
+checksum, the demo executable (also under GC stress), the demo under
+main.tcl's native backends and, on macOS, the Darwin demo's executable in
+the ordinary suite; `bench/2048.tcl` is the
 performance report. If you change the engine or the suite, also run
 `audit/2048/mutate.tcl` (every mutant in `audit/2048/mutants.txt` must
 still apply and be killed; each mutant is a private application directory,

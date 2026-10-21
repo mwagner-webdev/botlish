@@ -153,11 +153,24 @@ extern c fn SDL_GetNaturalDisplayOrientation(displayID: ffi::c::UInt) -> ffi::c:
 # C: SDL_DisplayOrientation SDL_GetCurrentDisplayOrientation(SDL_DisplayID displayID)
 extern c fn SDL_GetCurrentDisplayOrientation(displayID: ffi::c::UInt) -> ffi::c::UInt
 
+# C: float SDL_GetDisplayContentScale(SDL_DisplayID displayID)
+extern c fn SDL_GetDisplayContentScale(displayID: ffi::c::UInt) -> ffi::c::Float
+
 # C: SDL_DisplayMode **SDL_GetFullscreenDisplayModes(SDL_DisplayID displayID, int *count)
 extern c fn SDL_GetFullscreenDisplayModes(
     displayID: ffi::c::UInt,
     count: ffi::c::Ptr[ffi::c::Int]
 ) -> ffi::c::Ptr[ffi::c::Ptr[sdl3::ctypes::SDL_DisplayMode]]
+
+# C: _Bool SDL_GetClosestFullscreenDisplayMode(SDL_DisplayID displayID, int w, int h, float refresh_rate, _Bool include_high_density_modes, SDL_DisplayMode *closest)
+extern c fn SDL_GetClosestFullscreenDisplayMode(
+    displayID: ffi::c::UInt,
+    w: ffi::c::Int,
+    h: ffi::c::Int,
+    refresh_rate: ffi::c::Float,
+    include_high_density_modes: ffi::c::Bool,
+    closest: ffi::c::Ptr[sdl3::ctypes::SDL_DisplayMode]
+) -> ffi::c::Bool
 
 # C: const SDL_DisplayMode *SDL_GetDesktopDisplayMode(SDL_DisplayID displayID)
 extern c fn SDL_GetDesktopDisplayMode(
@@ -179,6 +192,16 @@ extern c fn SDL_GetDisplayForRect(rect: ffi::c::Ptr[sdl3::ctypes::SDL_Rect]) -> 
 extern c fn SDL_GetDisplayForWindow(
     window: ffi::c::Ptr[sdl3::ctypes::SDL_Window]
 ) -> ffi::c::UInt
+
+# C: float SDL_GetWindowPixelDensity(SDL_Window *window)
+extern c fn SDL_GetWindowPixelDensity(
+    window: ffi::c::Ptr[sdl3::ctypes::SDL_Window]
+) -> ffi::c::Float
+
+# C: float SDL_GetWindowDisplayScale(SDL_Window *window)
+extern c fn SDL_GetWindowDisplayScale(
+    window: ffi::c::Ptr[sdl3::ctypes::SDL_Window]
+) -> ffi::c::Float
 
 # C: _Bool SDL_SetWindowFullscreenMode(SDL_Window *window, const SDL_DisplayMode *mode)
 extern c fn SDL_SetWindowFullscreenMode(
@@ -298,6 +321,20 @@ extern c fn SDL_GetWindowSize(
 extern c fn SDL_GetWindowSafeArea(
     window: ffi::c::Ptr[sdl3::ctypes::SDL_Window],
     rect: ffi::c::Ptr[sdl3::ctypes::SDL_Rect]
+) -> ffi::c::Bool
+
+# C: _Bool SDL_SetWindowAspectRatio(SDL_Window *window, float min_aspect, float max_aspect)
+extern c fn SDL_SetWindowAspectRatio(
+    window: ffi::c::Ptr[sdl3::ctypes::SDL_Window],
+    min_aspect: ffi::c::Float,
+    max_aspect: ffi::c::Float
+) -> ffi::c::Bool
+
+# C: _Bool SDL_GetWindowAspectRatio(SDL_Window *window, float *min_aspect, float *max_aspect)
+extern c fn SDL_GetWindowAspectRatio(
+    window: ffi::c::Ptr[sdl3::ctypes::SDL_Window],
+    min_aspect: ffi::c::Ptr[ffi::c::Float],
+    max_aspect: ffi::c::Ptr[ffi::c::Float]
 ) -> ffi::c::Bool
 
 # C: _Bool SDL_GetWindowBordersSize(SDL_Window *window, int *top, int *left, int *bottom, int *right)
@@ -468,6 +505,15 @@ extern c fn SDL_GetWindowMouseRect(
     window: ffi::c::Ptr[sdl3::ctypes::SDL_Window]
 ) -> ffi::c::Ptr[sdl3::ctypes::SDL_Rect]
 
+# C: _Bool SDL_SetWindowOpacity(SDL_Window *window, float opacity)
+extern c fn SDL_SetWindowOpacity(
+    window: ffi::c::Ptr[sdl3::ctypes::SDL_Window],
+    opacity: ffi::c::Float
+) -> ffi::c::Bool
+
+# C: float SDL_GetWindowOpacity(SDL_Window *window)
+extern c fn SDL_GetWindowOpacity(window: ffi::c::Ptr[sdl3::ctypes::SDL_Window]) -> ffi::c::Float
+
 # C: _Bool SDL_SetWindowParent(SDL_Window *window, SDL_Window *parent)
 extern c fn SDL_SetWindowParent(
     window: ffi::c::Ptr[sdl3::ctypes::SDL_Window],
@@ -522,6 +568,17 @@ extern c fn SDL_SetWindowProgressState(
 extern c fn SDL_GetWindowProgressState(
     window: ffi::c::Ptr[sdl3::ctypes::SDL_Window]
 ) -> ffi::c::Int
+
+# C: _Bool SDL_SetWindowProgressValue(SDL_Window *window, float value)
+extern c fn SDL_SetWindowProgressValue(
+    window: ffi::c::Ptr[sdl3::ctypes::SDL_Window],
+    value: ffi::c::Float
+) -> ffi::c::Bool
+
+# C: float SDL_GetWindowProgressValue(SDL_Window *window)
+extern c fn SDL_GetWindowProgressValue(
+    window: ffi::c::Ptr[sdl3::ctypes::SDL_Window]
+) -> ffi::c::Float
 
 # C: void SDL_DestroyWindow(SDL_Window *window)
 extern c fn SDL_DestroyWindow(window: ffi::c::Ptr[sdl3::ctypes::SDL_Window]) -> unit

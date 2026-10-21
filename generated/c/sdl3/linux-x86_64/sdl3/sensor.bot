@@ -58,6 +58,13 @@ extern c fn SDL_GetSensorNonPortableType(
 # C: SDL_SensorID SDL_GetSensorID(SDL_Sensor *sensor)
 extern c fn SDL_GetSensorID(sensor: ffi::c::Ptr[sdl3::ctypes::SDL_Sensor]) -> ffi::c::UInt
 
+# C: _Bool SDL_GetSensorData(SDL_Sensor *sensor, float *data, int num_values)
+extern c fn SDL_GetSensorData(
+    sensor: ffi::c::Ptr[sdl3::ctypes::SDL_Sensor],
+    data: ffi::c::Ptr[ffi::c::Float],
+    num_values: ffi::c::Int
+) -> ffi::c::Bool
+
 # C: void SDL_CloseSensor(SDL_Sensor *sensor)
 extern c fn SDL_CloseSensor(sensor: ffi::c::Ptr[sdl3::ctypes::SDL_Sensor]) -> unit
 

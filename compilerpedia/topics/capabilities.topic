@@ -174,7 +174,7 @@ went wrong.
 
 @topic capability.input
 title: Reading input: raw bytes of standard input only
-summary: There is no line-reading or text input API; on the native backends linux::io::read(buffer) reads standard input into a MutableBytes, one read(2) call at a time, through the linux::io context.
+summary: There is no line or text input API; natively linux::io::read and darwin::io::read read standard input into a MutableBytes, one read(2) at a time, through the platform's I/O context.
 index: concepts stdlib
 alias: read input; stdin; read line; user input; keyboard input; standard input
 keywords: input, read, stdin, line, console, bytes
@@ -197,7 +197,11 @@ itself, as bytes:
     with context linux::io::create()
     first_bytes()
 
-r.data is the buffer with the bytes read. The call needs no direct module
+r.data is the buffer with the bytes read. On macOS the same is
+darwin::io::read through `with context darwin::io::create()`: its
+result holds the count (0 at end of file, -1 on failure) and the errno
+of a failure as separate fields, libSystem's convention. The call needs
+no direct module
 (the context mediates it), but it runs only on cranelift,
 cranelift-generic and native executables: interp and compile refuse it
 (NATIVE-ONLY). There is no line splitting or end-of-file helper (read
@@ -209,17 +213,24 @@ For small, fixed inputs pass them in the program text or through argv()
 (concept.argv), which works on every backend.
 
 @topic capability.files
-title: Files and directories: absent
-summary: There is no file, directory or path-opening API in the portable standard library; io::path and linux::path handle path text only.
+title: Files and directories: absent from the portable library
+summary: There is no portable file or directory API; the path modules handle path text, and only macOS's low-level darwin module opens files (open, create, close through libSystem).
 index: concepts stdlib
 alias: open file; read file; write file; file system; filesystem
-keywords: file, open, read, write, directory, path
-related: capability.input backend.io stdlib.module.io::path stdlib.module.linux
+keywords: file, open, read, write, close, directory, path, darwin
+related: capability.input backend.io stdlib.module.io::path stdlib.module.linux stdlib.module.darwin
+docs: MACOS-AARCH64-MILESTONE-8.md
 
 == STATUS
-No open/read/write of named files. io::path and linux::path are textual
-path utilities. On the native backends, lib/linux.bot's raw system calls
-are the only route, and they are low-level.
+No portable open/read/write of named files. io::path, linux::path and
+darwin::path are textual path utilities. On macOS, lib/darwin.bot's
+low-level operations open (darwin::open), create (darwin::create,
+darwin::create_new: open(2)'s variadic creation mode), read, write and
+close a descriptor through libSystem, each one C call returning its count
+or descriptor and the errno of a failure; they are a direct module's raw
+authority, run on the native backends only, and own nothing (closing is
+the caller's). On Linux, lib/linux.bot's raw read and write system calls
+are the only route, and no open exists.
 
 @topic capability.string-formatting
 title: String formatting and interpolation: absent

@@ -665,7 +665,12 @@ test argv-large-vector {thousands of arguments and hundreds of KB of text: all b
 # Standalone executables: the real process argument vector, one build, many
 # runs
 
-testConstraint bashLauncher [expr {[auto_execok bash] ne ""}]
+# A Unix process's argument vector is bytes and its argument zero the
+# launcher's choice (bash's `exec -a`): the standalone tests below that need
+# either are Unix's. A Windows process has one UTF-16 command line instead
+# (ARGV.md, "Windows"; the argv-windows-* tests).
+testConstraint bashLauncher [expr {[auto_execok bash] ne "" && $::tcl_platform(platform) eq "unix"}]
+testConstraint windowsProcess [expr {$::tcl_platform(platform) eq "windows"}]
 
 set aotDir [makeDirectory argv-aot]
 
@@ -695,7 +700,9 @@ done
 exec -a "$argv0" "$prog" "${args[@]}"
 }
 close $channel
-file attributes $launcher -permissions 0755
+if {$::tcl_platform(platform) eq "unix"} {
+    file attributes $launcher -permissions 0755
+}
 
 proc hexArgs {vec} {
     return [lmap a $vec {expr {$a eq "" ? "-" : [binary encode hex $a]}}]
@@ -707,14 +714,14 @@ proc launch {executable vec {environment {}}} {
     return [exec env {*}$environment bash $::launcher $executable {*}[hexArgs $vec]]
 }
 
-# Builds source TEXT once into the shared directory (rustc links it).
+# Builds source TEXT once into the shared directory (rustc links it): the
+# executable's path (NAME, NAME.exe on Windows).
+set aotBuilt [dict create]
 proc buildOnce {name text} {
-    set path [file join $::aotDir $name]
-    if {![file exists $path]} {
-        set hir [argvHir $text]
-        native::executable $hir $path
+    if {![dict exists $::aotBuilt $name]} {
+        dict set ::aotBuilt $name [native::executable [argvHir $text] [file join $::aotDir $name]]
     }
-    return $path
+    return [dict get $::aotBuilt $name]
 }
 
 set aotHandled "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\nargs"
@@ -815,7 +822,7 @@ test argv-standalone-gc-stress-invalid {the error path under GC stress in a stan
     launch $exe $vec {BOTLISH_NATIVE_GC_STRESS=1}
 } -result {["fallback"]}
 
-testConstraint pythonLauncher [expr {[auto_execok python3] ne ""}]
+testConstraint pythonLauncher [expr {[auto_execok python3] ne "" && $::tcl_platform(platform) eq "unix"}]
 
 test argv-standalone-argc-zero {a process started with argc == 0 sees argv() == [] -- or [""] on a kernel that substitutes an empty argument zero} -constraints {executableAot pythonLauncher} -body {
     # Linux >= 5.18 never starts a program with argc == 0: execve rewrites
@@ -866,6 +873,82 @@ test argv-standalone-fuzz {random valid and invalid vectors: the standalone exec
     }
     set failures
 } -result {}
+
+# ---------------------------------------------------------------------------
+# Windows (ARGV.md, "Windows"): a process has one UTF-16 command line, which
+# the program's runtime splits by the Microsoft C runtime's rules; each
+# argument reaches argv() as the UTF-8 of its UTF-16 (runtime/aot.rs's
+# wtf8_from_utf16), an unpaired surrogate as the declared error. Tcl's exec
+# writes the command line by the same rules (its BuildCommandLine quotes and
+# escapes every argument), so what it is given is what the program reads,
+# argument zero the executable's path as Tcl wrote it.
+
+# The arguments a Windows command line carries through the C runtime's
+# splitting rules: the empty argument, spaces and tabs inside one, quotes,
+# backslashes before a quote and at the end, a UNC-like path, environment
+# syntax (never expanded), NFC and NFD, BMP and astral scalars.
+set windowsTexts [list "" "a b" " lead" "trail " "tab\there" "q\"uote" "back\\" "a\\\"b" "\\\\server\\share\\" \
+    "%PATH%" "\u00e9" "e\u0301" "\u20ac" "\U0001F600" "\u4e2d\u6587"]
+
+# ARGS run through EXE by Tcl's exec: {ARG0 REST}, ARG0 the executable's
+# argument zero, REST the shown List of the others (the program shows its
+# argv() List; ARG0 is the first element).
+proc windowsRun {exe args} {
+    set shown [exec $exe {*}$args]
+    if {![regexp {^\["((?:[^"\\]|\\.)*)"(?:, |\])} $shown -> arg0]} {
+        return [list "" $shown]
+    }
+    set arg0 [subst -nocommands -novariables $arg0]
+    return [list $arg0 $shown]
+}
+
+test argv-windows-command-line-round-trips {on Windows every argument Tcl's exec writes into the command line reaches argv() exactly: spaces, tabs, quotes, backslashes, the empty argument, non-ASCII and astral scalars, no normalization or expansion} -constraints {executableAot windowsProcess} -body {
+    set exe [buildOnce argv-handled $::aotHandled]
+    lassign [windowsRun $exe {*}$::windowsTexts] arg0 shown
+    list [expr {$shown eq [shownStrings [concat [list $arg0] $::windowsTexts]]}] \
+        [string equal -nocase [file tail [file normalize $arg0]] [file tail $exe]]
+} -result {1 1}
+
+test argv-windows-argument-zero-is-the-command-lines {argument zero is the command line's first argument, the executable as the launcher named it, never reconstructed: one build, several runs, and different arguments per run} -constraints {executableAot windowsProcess} -body {
+    set exe [buildOnce argv-handled $::aotHandled]
+    set mtime [file mtime $exe]
+    set runs [lmap vector {{} {one} {two three}} {
+        lassign [windowsRun $exe {*}$vector] arg0 shown
+        list [expr {$shown eq [shownStrings [concat [list $arg0] $vector]]}] [expr {[file normalize $arg0] eq [file normalize $exe]}]
+    }]
+    list $runs [expr {[file mtime $exe] == $mtime}]
+} -result {{{1 1} {1 1} {1 1}} 1}
+
+test argv-windows-unpaired-surrogate-is-the-declared-error {an argument with an unpaired surrogate -- UTF-16 a command line may hold, no Unicode scalar -- fails argv() with InvalidArgumentEncoding, handled by the program, never replaced; a program that never calls argv() runs} -constraints {executableAot windowsProcess} -body {
+    set exe [buildOnce argv-handled $::aotHandled]
+    set ignoring [buildOnce argv-ignoring "1 + 1"]
+    list [exec $exe ok "a\ud800b"] [exec $exe "\udc00"] [exec $ignoring "\ud800"]
+} -result {{["fallback"]} {["fallback"]} 2}
+
+test argv-windows-same-values-as-in-process {the same program and arguments give identical text in-process and standalone: the in-process snapshot is the UTF-8 of the arguments the executable reads} -constraints {executableAot windowsProcess} -body {
+    set exe [buildOnce argv-transform $::transformProgram]
+    set texts [list "\u00c4B" x "" "q\"uote" "tab\there" "\U0001F600\u4e2d" "a b\\"]
+    set standalone [exec $exe {*}$texts]
+    regexp {^\[\["((?:[^"\\]|\\.)*)"} $standalone -> arg0
+    set arg0 [subst -nocommands -novariables $arg0]
+    set inProcess [lindex [lindex [outcomesOf [argvHir $::transformProgram] [lmap t [concat [list $arg0] $texts] {T $t}]] 0] 1]
+    list [expr {$standalone eq $inProcess}] [string equal -nocase [file tail [file normalize $arg0]] [file tail $exe]]
+} -result {1 1}
+
+test argv-windows-large-vector {hundreds of arguments through one Windows command line, under GC stress too} -constraints {executableAot windowsProcess} -body {
+    set exe [buildOnce argv-handled $::aotHandled]
+    set texts {}
+    for {set i 0} {$i < 300} {incr i} { lappend texts "argument $i [string repeat \u00e9 [expr {$i % 20}]]\U0001F600" }
+    lassign [windowsRun $exe {*}$texts] arg0 shown
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        lassign [windowsRun $exe {*}$texts] - stressed
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+    set expected [shownStrings [concat [list $arg0] $texts]]
+    list [expr {$shown eq $expected}] [expr {$stressed eq $expected}]
+} -result {1 1}
 
 removeDirectory argv-aot
 cleanupTests

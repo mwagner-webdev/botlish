@@ -1,35 +1,50 @@
 # mutate.tcl -- mutation testing of context traits, validator proofs, the
-# Linux path library and the portable io library (CONTEXT-TRAITS.md).
+# Linux and Darwin I/O and path libraries and the portable io library
+# (CONTEXT-TRAITS.md, MACOS-AARCH64-MILESTONE-8.md).
 #
-#   tclsh9.0 audit/context-traits/tools/mutate.tcl ?-only NAME,...? ?-fuzz-count N? ?-fuzz-seed N? ?-timeout SECONDS?
+#   tclsh9.0 audit/context-traits/tools/mutate.tcl ?-only PATTERN,...?
+#        ?-tests FILES? ?-fuzz-count N? ?-fuzz-seed N? ?-timeout SECONDS?
 #
 # Each mutant is a deliberate bug, written in mutants.txt (beside this
 # script) as exact source replacements, each replaced text occurring exactly
-# once. For each, a private copy of the compiler and library (a temporary
-# directory; native/target is a symlink to this checkout's, so the native
-# backend is the built one) gets the replacements, and two detectors run
-# against it:
+# once. A mutant whose killing tests run only on some hosts (a `%% TARGET
+# ...` line after its header: linux-x86_64, linux-aarch64, macos-aarch64 --
+# Darwin I/O runs on macos-aarch64 only) is SKIPPED elsewhere, never counted
+# as killed. -only selects mutants by name or glob pattern (`darwin-*`). For
+# each, a private copy of the compiler and library (a temporary directory;
+# native/target is a symlink to this checkout's, so the native backend is
+# the built one) gets the replacements, and two detectors run against it:
 #
-#   * tests/context-traits.test, tests/portable-io.test and
-#     tests/linux-path.test (each with a private -tmpdir): killed if any test
+#   * the test files FILES (default tests/context-traits.test,
+#     tests/portable-io.test, tests/linux-path.test and
+#     tests/darwin-io.test; each with a private -tmpdir): killed if any test
 #     fails or a file does not complete;
 #   * audit/context-traits/tools/fuzz.tcl -n N -seed S: killed if it reports
 #     a disagreement or does not complete.
 #
-# A mutant both detectors miss SURVIVES; the report lists each mutant, what
-# killed it (failed test names, fuzz failures) and the survivors. The real
-# checkout is never modified.
+# A mutant both detectors miss SURVIVES; one whose text no longer occurs
+# exactly once is NOT-APPLIED (never killed; it fails the run). The report
+# lists each mutant, what killed it (failed test names, fuzz failures) and
+# the survivors. Every command runs under this script's own timeout (no
+# timeout(1): macOS has none). The real checkout is never modified.
 
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
 
-set options [dict create -only "" -fuzz-count 25 -fuzz-seed 11 -timeout 1800]
+set options [dict create -only "" -tests {context-traits.test portable-io.test linux-path.test darwin-io.test} \
+    -fuzz-count 25 -fuzz-seed 11 -timeout 1800]
 foreach {option value} $argv {
     if {![dict exists $options $option]} { error "unknown option $option" }
     dict set options $option $value
 }
 
+# This host's target, named as core::cabi names it (linux-x86_64,
+# linux-aarch64, macos-aarch64).
+set host [string cat [expr {$::tcl_platform(os) eq "Darwin" ? "macos" : [string tolower $::tcl_platform(os)]}] - \
+    [expr {$::tcl_platform(machine) in {arm64 aarch64} ? "aarch64" : ($::tcl_platform(machine) in {amd64 x86_64} ? "x86_64" : $::tcl_platform(machine))}]]
+
 # The mutants of mutants.txt (its header has the format), as
-# {NAME DESCRIPTION {FILE OLD NEW ...} ...}.
+# {NAME DESCRIPTION HOSTS {FILE OLD NEW ...} ...}, HOSTS empty for every
+# host.
 proc readMutants {path} {
     set f [open $path r]
     fconfigure $f -encoding utf-8 -translation lf
@@ -42,10 +57,13 @@ proc readMutants {path} {
         switch -- $state {
             outside {
                 if {[regexp {^@@ (\S+) (.*)$} $line -> n d]} {
-                    if {$name ne ""} { lappend mutants $name $description $edits }
+                    if {$name ne ""} { lappend mutants $name $description $hosts $edits }
                     set name $n
                     set description $d
+                    set hosts {}
                     set edits {}
+                } elseif {[regexp {^%% (.*)$} $line -> h]} {
+                    set hosts $h
                 } elseif {[regexp {^## (\S+)$} $line -> file]} {
                     set current $file
                 } elseif {$line eq "<<<<"} {
@@ -71,7 +89,7 @@ proc readMutants {path} {
             }
         }
     }
-    if {$name ne ""} { lappend mutants $name $description $edits }
+    if {$name ne ""} { lappend mutants $name $description $hosts $edits }
     return $mutants
 }
 set mutants [readMutants [file join [file dirname [file normalize [info script]]] mutants.txt]]
@@ -109,21 +127,58 @@ foreach entry [glob -directory $root -types f *.tcl] {
     file copy $entry $tree
 }
 
+# {STATUS OUTPUT} of ARGS, its standard error merged into its output;
+# STATUS is "timeout" (the process killed) when it runs longer than TIMEOUT
+# seconds (audit/c-ffi/tools/mutate.tcl's run).
 proc run {timeout args} {
+    set pipe [open |[concat $args [list 2>@1]] r]
+    fconfigure $pipe -blocking 0 -translation lf -encoding utf-8
+    set ::runOutput ""
+    set ::runDone 0
+    fileevent $pipe readable [list apply {{pipe} {
+        append ::runOutput [read $pipe]
+        if {[eof $pipe]} { set ::runDone 1 }
+    }} $pipe]
+    set timer [after [expr {$timeout * 1000}] {set ::runDone timeout}]
+    vwait ::runDone
+    after cancel $timer
+    if {$::runDone eq "timeout"} {
+        catch {exec kill -9 {*}[pid $pipe]}
+        catch {close $pipe}
+        return [list timeout $::runOutput]
+    }
+    fconfigure $pipe -blocking 1
     set status 0
-    if {[catch {exec timeout $timeout {*}$args 2>@1} output options]} {
+    if {[catch {close $pipe} message options]} {
         set status [lindex [dict get $options -errorcode] end]
         if {![string is integer -strict $status]} { set status 1 }
-        regsub {\n?child process exited abnormally$} $output "" output
     }
-    return [list $status $output]
+    return [list $status $::runOutput]
 }
 
-set only [split [dict get $options -only] ,]
+# 1 if mutant NAME is one -only selects (every one when -only is empty).
+proc selected {name} {
+    set only [split [dict get $::options -only] ,]
+    if {$only eq {}} {
+        return 1
+    }
+    foreach pattern $only {
+        if {[string match $pattern $name]} {
+            return 1
+        }
+    }
+    return 0
+}
+
 set results {}
 try {
-    foreach {name description edits} $mutants {
-        if {$only ne {} && $name ni $only} continue
+    foreach {name description hosts edits} $mutants {
+        if {![selected $name]} continue
+        if {$hosts ne {} && $host ni $hosts} {
+            lappend results [list $name $description SKIPPED "" ""]
+            puts "SKIPPED $name: its killing tests do not run on $host"
+            continue
+        }
         set touched [dict create]
         set applied 1
         foreach {file old new} $edits {
@@ -150,7 +205,7 @@ try {
         }
         set failedTests {}
         set incomplete ""
-        foreach testFile {context-traits.test portable-io.test linux-path.test} {
+        foreach testFile [dict get $options -tests] {
             set tmp [file tempdir botlish-context-trait-mutant-run]
             lassign [run [dict get $options -timeout] tclsh9.0 [file join $tree tests $testFile] -tmpdir $tmp] status output
             file delete -force $tmp
@@ -191,5 +246,6 @@ try {
 set survivors [lmap r $results {if {[lindex $r 2] ne "SURVIVED"} continue; lindex $r 0}]
 set unapplied [lmap r $results {if {[lindex $r 2] ne "NOT-APPLIED"} continue; lindex $r 0}]
 set killed [llength [lsearch -all -index 2 $results KILLED]]
-puts "[llength $results] mutants, $killed killed, [llength $survivors] survived[expr {$survivors eq {} ? "" : ": [join $survivors {, }]"}][expr {$unapplied eq {} ? "" : ", [llength $unapplied] not applied: [join $unapplied {, }]"}]"
+set skipped [llength [lsearch -all -index 2 $results SKIPPED]]
+puts "[llength $results] mutants, $killed killed, [llength $survivors] survived[expr {$survivors eq {} ? "" : ": [join $survivors {, }]"}], $skipped skipped (on $host)[expr {$unapplied eq {} ? "" : ", [llength $unapplied] not applied: [join $unapplied {, }]"}]"
 exit [expr {$survivors ne {} || $unapplied ne {}}]

@@ -3,17 +3,22 @@
 //! already machine code in the linked object.
 //!
 //! Process arguments (ARGV.md): the generated `main` collects the real
-//! argument vector -- the `argc`/`argv` the C runtime hands the process
-//! (glibc's on Linux, libSystem's on macOS), which Rust's runtime keeps and
-//! `std::env::args_os` returns as raw `OsString`s, i.e. the exact bytes,
-//! never decoded -- into one owned `Vec<Vec<u8>>` copy (it does not borrow
-//! the C startup array) and passes
-//! it to `run`, which installs it in the Vm as the run's argument snapshot
-//! before the program's entry function executes. Nothing is validated here:
-//! UTF-8 validation belongs to the `argv()` operation (`ops.rs`'s
-//! `rt_argv`), so malformed arguments cannot fail a program that never
-//! asks for them. `argc == 0` yields an empty snapshot, and `argv()` an
-//! empty List.
+//! argument vector (`process_argv`) into one owned `Vec<Vec<u8>>` copy (it
+//! does not borrow the C startup array) and passes it to `run`, which
+//! installs it in the Vm as the run's argument snapshot before the program's
+//! entry function executes. On Linux and macOS the vector is the
+//! `argc`/`argv` the C runtime hands the process (glibc's, libSystem's),
+//! which Rust's runtime keeps and `std::env::args_os` returns as raw
+//! `OsString`s, i.e. the exact bytes, never decoded. On Windows a process
+//! has one UTF-16 command line, which Rust's runtime splits into arguments
+//! by the Microsoft C runtime's rules; each argument's UTF-16 code units are
+//! encoded here as WTF-8 (`wtf8_from_utf16`), losslessly: valid UTF-16 is
+//! its UTF-8, an unpaired surrogate the three bytes no valid UTF-8 holds.
+//! Nothing is validated here: UTF-8 validation belongs to the `argv()`
+//! operation (`ops.rs`'s `rt_argv`), so malformed arguments -- invalid UTF-8
+//! on Linux, an unpaired surrogate on Windows -- cannot fail a program that
+//! never asks for them. `argc == 0` yields an empty snapshot, and `argv()`
+//! an empty List.
 //!
 //! The driver protocol (C-FFI.md, "Running a program that calls C"). The
 //! driver runs a program that calls C by linking it as an executable -- the
@@ -35,6 +40,45 @@ use super::vm::Vm;
 use std::io::Write;
 
 pub type ProgramEntry = extern "C" fn(*mut Vm) -> Value;
+
+/// This process's own argument vector, argument zero first, as the run's
+/// argument snapshot: the raw bytes of every argument on Unix, the WTF-8 of
+/// every argument's UTF-16 on Windows (the module doc).
+pub fn process_argv() -> Vec<Vec<u8>> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        std::env::args_os().map(|a| a.into_vec()).collect()
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        std::env::args_os().map(|a| wtf8_from_utf16(a.encode_wide())).collect()
+    }
+}
+
+/// The WTF-8 encoding of the UTF-16 code units UNITS (an argument of a
+/// Windows command line): every surrogate pair and every other scalar value
+/// as its UTF-8, and an unpaired surrogate -- which UTF-16 text may hold and
+/// no Unicode scalar is -- as the three-byte form of its code unit
+/// (U+D800-U+DFFF: `ED A0 80`..`ED BF BF`), which strict UTF-8 rejects. So
+/// the encoding is lossless, a valid argument's bytes are exactly its UTF-8,
+/// and `argv()` refuses an invalid one with the same declared error as
+/// invalid UTF-8 on Linux. Written here rather than read from `OsString`'s
+/// internal encoding, which Rust leaves unspecified.
+pub fn wtf8_from_utf16(units: impl IntoIterator<Item = u16>) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for decoded in char::decode_utf16(units) {
+        match decoded {
+            Ok(c) => bytes.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes()),
+            Err(e) => {
+                let unit = e.unpaired_surrogate();
+                bytes.extend_from_slice(&[0xE0 | (unit >> 12) as u8, 0x80 | ((unit >> 6) & 0x3F) as u8, 0x80 | (unit & 0x3F) as u8]);
+            }
+        }
+    }
+    bytes
+}
 
 pub fn run(argv: Vec<Vec<u8>>, init: impl FnOnce() -> (Box<Vm>, ProgramEntry) + Send + 'static) -> i32 {
     let stack_size = std::env::var("BOTLISH_NATIVE_STACK_BYTES")

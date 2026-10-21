@@ -61,6 +61,11 @@ proc printingProgram {name lines} {
 
 set nativeBackends {cranelift cranelift-generic}
 
+# main.tcl's own lines (the file header, the value) end in its standard
+# output's line ending, Tcl's default: "\r\n" on Windows. A program's own
+# output is its bytes.
+set mainEol [if {$::tcl_platform(platform) eq "windows"} {string cat \r\n} else {string cat \n}]
+
 test native-output-one-line {S15: hello.bot's line is printed, then its value, on both native backends} -constraints {nativeLinux nativeBuilt} -body {
     set path [file join $::projectRoot examples io hello.bot]
     lmap backend $nativeBackends {
@@ -97,7 +102,7 @@ test native-output-empty {a program that prints nothing shows only its value, as
 } -body {
     lmap backend $nativeBackends {
         string equal [mainRun -backend $backend $path] \
-            [list "== native-output-empty.bot ($backend)\n   value: 42\n" "" 0]
+            [list [string map [list \n $::mainEol] "== native-output-empty.bot ($backend)\n   value: 42\n"] "" 0]
     }
 } -cleanup {
     removeFile native-output-empty.bot

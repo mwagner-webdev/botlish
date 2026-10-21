@@ -6,7 +6,7 @@
 import ffi::c
 import bgf::ctypes
 
-extern c library "botlish_shim_bgf_1ca27e51"
+extern c library "botlish_shim_bgf_8f634d14"
 extern c library "bgf"
 
 # C: static inline int bgf_square(int x)
@@ -16,6 +16,9 @@ extern c fn bgf_square named "botlish_bgf_bgf_square"(x: ffi::c::Int) -> ffi::c:
 extern c fn bgf_point_x named "botlish_bgf_bgf_point_x"(
     p: ffi::c::Ptr[bgf::ctypes::bgf_point] read proven noescape
 ) -> ffi::c::Int
+
+# C: static inline double bgf_half(double x)
+extern c fn bgf_half named "botlish_bgf_bgf_half"(x: ffi::c::Double) -> ffi::c::Double
 
 # C: int bgf_get(int x) (called through (bgf_table_ptr -> get))
 extern c fn bgf_get named "botlish_bgf_bgf_get"(x: ffi::c::Int) -> ffi::c::Int

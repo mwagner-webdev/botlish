@@ -1386,6 +1386,30 @@ impl Function {
         }
     }
 
+    /// Whether this function contains a Botlish call (`Call`/`CallEnv`/
+    /// `CallMulti`/`CallEnvMulti`/`CallValue` -- a dynamically dispatched
+    /// call is folded into `CallValue`). `Tail`/`TailEnv` (a self back-edge,
+    /// codegen::clif's own doc) is deliberately not one of these: it is a
+    /// CFG jump to this same frame's entry block, never a machine `call`, so
+    /// it neither grows the native call stack nor creates a second frame.
+    ///
+    /// It decides codegen::roots's fallback RuntimeStack storage and, where
+    /// the shadow stack bounds recursion (`runtime::native_stack::
+    /// depth_checked`), the depth reservation -- and so whether the function
+    /// can fail (`summarize_call_effects`).
+    pub fn has_botlish_call(&self) -> bool {
+        self.body.iter().any(|inst| {
+            matches!(
+                inst,
+                Inst::Call { .. }
+                    | Inst::CallEnv { .. }
+                    | Inst::CallMulti { .. }
+                    | Inst::CallEnvMulti { .. }
+                    | Inst::CallValue { .. }
+            )
+        })
+    }
+
     /// Whether this function uses the packed-ASCII ABI anywhere.
     pub fn has_ascii_abi(&self) -> bool {
         self.ascii_result || self.ascii_params.iter().any(|b| *b)
@@ -1498,8 +1522,16 @@ pub struct EnumDecl {
 
 /// The C ABI transport class of a C function's parameter or result
 /// (C-FFI.md; hir/foreign.tcl's AbiClass): an integer of its exact width and
-/// signedness, C `_Bool` (a Botlish bool: one byte holding 0 or 1), a data
-/// or function pointer, or void (a result only).
+/// signedness, C `_Bool` (a Botlish bool: one byte holding 0 or 1), an IEEE
+/// 754 binary32 or binary64 in the target's floating-point register class,
+/// a data or function pointer, or void (a result only).
+///
+/// The floating classes are representations, not Botlish types
+/// (C-FLOAT-FFI-MILESTONE-1.md): both carry a Float64 value on the Botlish
+/// side, and they differ in width, register use and conversion -- an F32
+/// argument is the Float64 narrowed (checked: an overflow is NonFiniteFloat
+/// before the call), an F32 result is widened exactly, and either result is
+/// admitted only when finite.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CAbi {
     I8,
@@ -1511,8 +1543,9 @@ pub enum CAbi {
     I64,
     U64,
     Bool,
-    /// C double, an IEEE 754 binary64 in the target's floating-point
-    /// register class: a Float64 value's number (FLOAT64-MILESTONE-1.md).
+    /// C float, an IEEE 754 binary32 (C-FLOAT-FFI-MILESTONE-1.md).
+    F32,
+    /// C double, an IEEE 754 binary64 (FLOAT64-MILESTONE-1.md).
     F64,
     Ptr,
     Void,
@@ -1532,16 +1565,18 @@ pub struct VarArg {
 }
 
 impl VarArg {
-    /// `CLASS:PROMOTED`, when it is a promotion C performs: a floating-point
-    /// or pointer class unchanged, an integer or `_Bool` to an integer class
-    /// of at least 32 bits that holds every value of CLASS.
+    /// `CLASS:PROMOTED`, when it is a promotion C performs: a double or
+    /// pointer class unchanged, an integer or `_Bool` to an integer class of
+    /// at least 32 bits that holds every value of CLASS. Never a C float: no
+    /// Botlish value is one (a Float64 is passed as a double), and C
+    /// promotes a float to a double anyway.
     pub fn parse(text: &str) -> Option<VarArg> {
         let (class, promoted) = text.split_once(':')?;
         let class = CAbi::parse(class)?;
         let promoted = CAbi::parse(promoted)?;
-        let integer = |c: CAbi| !matches!(c, CAbi::Bool | CAbi::F64 | CAbi::Ptr | CAbi::Void);
+        let integer = |c: CAbi| !matches!(c, CAbi::Bool | CAbi::F32 | CAbi::F64 | CAbi::Ptr | CAbi::Void);
         let valid = match class {
-            CAbi::Void => false,
+            CAbi::Void | CAbi::F32 => false,
             CAbi::F64 | CAbi::Ptr => promoted == class,
             CAbi::Bool => integer(promoted) && promoted.bits() >= 32,
             _ => {
@@ -1567,6 +1602,7 @@ impl CAbi {
             "i64" => CAbi::I64,
             "u64" => CAbi::U64,
             "bool" => CAbi::Bool,
+            "f32" => CAbi::F32,
             "f64" => CAbi::F64,
             "ptr" => CAbi::Ptr,
             "void" => CAbi::Void,
@@ -1574,12 +1610,12 @@ impl CAbi {
         })
     }
 
-    /// The width in bits of an integer class (64 for a pointer), 0 for void.
+    /// The width in bits of the class (64 for a pointer), 0 for void.
     pub fn bits(self) -> u32 {
         match self {
             CAbi::I8 | CAbi::U8 | CAbi::Bool => 8,
             CAbi::I16 | CAbi::U16 => 16,
-            CAbi::I32 | CAbi::U32 => 32,
+            CAbi::I32 | CAbi::U32 | CAbi::F32 => 32,
             CAbi::I64 | CAbi::U64 | CAbi::Ptr | CAbi::F64 => 64,
             CAbi::Void => 0,
         }
@@ -1587,6 +1623,12 @@ impl CAbi {
 
     pub fn signed(self) -> bool {
         matches!(self, CAbi::I8 | CAbi::I16 | CAbi::I32 | CAbi::I64)
+    }
+
+    /// 1 for a floating-point class (F32, F64): it travels in the
+    /// floating-point registers, never extended.
+    pub fn floating(self) -> bool {
+        matches!(self, CAbi::F32 | CAbi::F64)
     }
 }
 
@@ -1912,7 +1954,13 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
 fn summarize_call_effects(program: &mut Program, enabled: bool) {
     let n = program.functions.len();
     let mut local = vec![(false, false); n];
+    // Where the shadow stack's depth check bounds recursion (Windows), a
+    // function making a Botlish call fails with NATIVE LIMIT STACK from its
+    // own prologue (codegen::roots's `depth_reservation`), so its callers
+    // must check: elsewhere the stack guard ends an exhausted run instead.
+    let depth_checked = crate::runtime::native_stack::depth_checked(crate::runtime::framewalk::NATIVE_FRAME_ROOTS);
     for (i, f) in program.functions.iter().enumerate() {
+        local[i].0 = depth_checked && f.has_botlish_call();
         for inst in &f.body {
             match inst {
                 Inst::Guard { .. } | Inst::GuardBool { .. }
@@ -1927,11 +1975,14 @@ fn summarize_call_effects(program: &mut Program, enabled: bool) {
                 Inst::CallValue { .. } => local[i] = (true, true),
                 // A C call (C-FFI.md) is a safepoint; it fails only on a
                 // result it cannot represent (an address, a _Bool byte, a
-                // double that is no finite number) or a violated alias
-                // contract.
+                // floating value that is no finite number), an argument it
+                // cannot pass (a Float64 no finite C float holds) or a
+                // violated alias contract.
                 Inst::ForeignCall { foreign, .. } => {
                     let decl = &program.foreigns[*foreign as usize];
-                    local[i].0 |= matches!(decl.result, CAbi::Ptr | CAbi::Bool | CAbi::F64) || decl.alias.is_some();
+                    local[i].0 |= matches!(decl.result, CAbi::Ptr | CAbi::Bool | CAbi::F32 | CAbi::F64)
+                        || decl.params.contains(&CAbi::F32)
+                        || decl.alias.is_some();
                     local[i].1 = true;
                 }
                 _ => {}
@@ -3351,7 +3402,40 @@ mod effect_tests {
         );
         let p = parse(text).unwrap();
         assert!(p.functions.iter().all(|f| f.may_gc));
-        assert!(p.functions.iter().all(|f| !f.may_error));
+        // Every function here makes a Botlish call, so it fails exactly
+        // where the shadow stack's depth check bounds recursion.
+        let depth_checked = crate::runtime::native_stack::depth_checked(crate::runtime::framewalk::NATIVE_FRAME_ROOTS);
+        assert!(p.functions.iter().all(|f| f.may_error == depth_checked));
+    }
+
+    /// WINDOWS-X86-64-MILESTONE-1.md, section 3: where the depth check
+    /// bounds recursion, a function that cannot otherwise fail still fails
+    /// with NATIVE LIMIT STACK from its prologue once it makes a Botlish
+    /// call, so its raw result carries a status word and its callers check
+    /// it (a caller that did not added the error sentinel as an Int). A
+    /// function without one has no reservation and stays infallible.
+    #[test]
+    fn a_botlish_call_fails_exactly_where_depth_is_checked() {
+        let text = concat!(
+            "nir 1 call-effects=1\n\n",
+            "func 0 \"<program>\" params=0 env=0 regs=2 pnames=\"\" captures=0 rawregs=\"\"\n",
+            "    %0 = int 3\n    %1 = call 1 %0\n    ret %1\nend\n",
+            "func 1 \"down\" params=1 env=0 regs=4 pnames=\"n\" captures=0 rawregs=\"\"\n",
+            "    %1 = int 1\n    %2 = call 2 %0\n    %3 = call 1 %2\n    ret %3\nend\n",
+            "func 2 \"leaf\" params=1 env=0 regs=1 pnames=\"n\" captures=0 rawregs=\"\"\n",
+            "    ret %0\nend\n"
+        );
+        let p = parse(text).unwrap();
+        let depth_checked = crate::runtime::native_stack::depth_checked(crate::runtime::framewalk::NATIVE_FRAME_ROOTS);
+        let effects: Vec<bool> = p.functions.iter().map(|f| f.may_error).collect();
+        assert_eq!(effects, vec![depth_checked, depth_checked, false]);
+        let checked: Vec<bool> = p.functions[1]
+            .body
+            .iter()
+            .filter_map(|inst| if let Inst::Call { may_error, .. } = inst { Some(*may_error) } else { None })
+            .collect();
+        assert_eq!(checked, vec![false, depth_checked]);
+        assert_eq!(depth_checked, cfg!(any(target_os = "windows", feature = "fallback-roots")));
     }
 
     #[test]
@@ -4141,5 +4225,24 @@ mod packed_ascii_tests {
             "func 1 \"f\" params=1 env=0 regs=2 pnames=\"s\" captures=0 asciiregs=\"0\" asciiparams=\"0\" asciiresult=1\n    %1 = op strtoascii %0\n    tail %1\nend\n",
         );
         assert!(!m.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod c_float_vararg_tests {
+    use super::*;
+
+    /// A trailing argument of a variadic C call is never a C float
+    /// (C-FLOAT-FFI-MILESTONE-1.md): no Botlish value is one, and C promotes
+    /// a float to a double; nor is a float any integer's promotion. A double
+    /// stays a double.
+    #[test]
+    fn ffi_c_float_never_a_vararg_class() {
+        for text in ["f32:f32", "f32:f64", "i8:f32", "u8:f32", "bool:f32", "i32:f32"] {
+            assert!(VarArg::parse(text).is_none(), "{text} parsed");
+        }
+        let double = VarArg::parse("f64:f64").unwrap();
+        assert_eq!((double.class, double.promoted), (CAbi::F64, CAbi::F64));
+        assert!(VarArg::parse("u8:i32").is_some());
     }
 }

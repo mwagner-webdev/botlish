@@ -25,33 +25,33 @@ header generic/tclOO.h 3d4b81fb
 header generic/tclOODecls.h 112ed1e0
 header generic/tclPlatDecls.h c8603094
 header generic/tclTomMathDecls.h 1ebc0288
-shim_library botlish_shim_tclstubs_2627031d
-file layouts-check.c 366 b614b884
-file layouts.tsv 1103 458445ae
-file report.tsv 1499 cef74114
-file report.txt 171 3ef1c1ce
-file shim.c 2795 2627031d
-file tclstubs/ctypes.bot 255 23b72cf2
+shim_library botlish_shim_tclstubs_629eba3e
+file layouts-check.c 387 fa5a3080
+file layouts.tsv 1103 42f32056
+file report.tsv 1499 99bbb391
+file report.txt 161 784828d7
+file shim.c 2831 629eba3e
+file tclstubs/ctypes.bot 255 ff652b69
 file tclstubs/decls.bot 106 ba6822ce
-file tclstubs/layouts.bot 427 7fc06d8c
+file tclstubs/layouts.bot 449 68a48d35
 file tclstubs/oo.bot 25 0840a4df
 file tclstubs/platdecls.bot 20 9d929de9
 file tclstubs/tcl.bot 250 78d31bd5
-file tclstubs/thunks/decls.bot 3832 ab75a01f
-file tclstubs/thunks/oodecls.bot 236 f975a5a1
-file tclstubs/thunks/platdecls.bot 14 3ea31bb1
-file tclstubs/thunks/tcl.bot 62 e63e3c90
-file tclstubs/thunks/tommathdecls.bot 358 d79fc011
+file tclstubs/thunks/decls.bot 3892 8733803f
+file tclstubs/thunks/oodecls.bot 236 d75c0bdc
+file tclstubs/thunks/platdecls.bot 14 3ea3b31c
+file tclstubs/thunks/tcl.bot 62 ec4ac51b
+file tclstubs/thunks/tommathdecls.bot 358 f50fad4a
 file tclstubs/tommathdecls.bot 198 6906c0ad
 libraries tclstubs/decls.bot tclstub9.0
 libraries tclstubs/oo.bot tclstub9.0
 libraries tclstubs/platdecls.bot tclstub9.0
 libraries tclstubs/tcl.bot tclstub9.0
-libraries tclstubs/thunks/decls.bot {botlish_shim_tclstubs_2627031d tclstub9.0}
-libraries tclstubs/thunks/oodecls.bot {botlish_shim_tclstubs_2627031d tclstub9.0}
-libraries tclstubs/thunks/platdecls.bot {botlish_shim_tclstubs_2627031d tclstub9.0}
-libraries tclstubs/thunks/tcl.bot {botlish_shim_tclstubs_2627031d tclstub9.0}
-libraries tclstubs/thunks/tommathdecls.bot {botlish_shim_tclstubs_2627031d tclstub9.0}
+libraries tclstubs/thunks/decls.bot {botlish_shim_tclstubs_629eba3e tclstub9.0}
+libraries tclstubs/thunks/oodecls.bot {botlish_shim_tclstubs_629eba3e tclstub9.0}
+libraries tclstubs/thunks/platdecls.bot {botlish_shim_tclstubs_629eba3e tclstub9.0}
+libraries tclstubs/thunks/tcl.bot {botlish_shim_tclstubs_629eba3e tclstub9.0}
+libraries tclstubs/thunks/tommathdecls.bot {botlish_shim_tclstubs_629eba3e tclstub9.0}
 libraries tclstubs/tommathdecls.bot tclstub9.0
 count alias 14
 count aliases 708
@@ -71,18 +71,17 @@ count inline 1
 count manual 0
 count opaque 27
 count proven 0
-count ptrParams 1462
-count ptrResults 198
+count ptrParams 1480
+count ptrResults 200
 count resultAlias 0
 count resultIndependent 0
-count resultUnknown 198
+count resultUnknown 200
 count tablestubs 694
-count thunk 696
-count unknownParams 1462
-count unknownRetention 691
-count unsupported 100
-count views 391
-blocked double 9
+count thunk 705
+count unknownParams 1480
+count unknownRetention 699
+count unsupported 91
+count views 396
 blocked macro-needs-signature 72
 blocked thunk-rejected 2
 blocked unsupported-callback-signature 1
@@ -90,14 +89,14 @@ blocked unsupported-macro 7
 blocked variadic 9
 layout_abi linux-x86_64 clang x86_64-linux-gnu {Ubuntu clang version 18.1.3 (1ubuntu1)}
 layout_count anonymous 9
-layout_count blocked 4
-layout_count blockedDirect 3
-layout_count blockedStructs 3
-layout_count blockedTransitive 1
-layout_count blockedUnions 1
-layout_count emitted 34
+layout_count blocked 2
+layout_count blockedDirect 2
+layout_count blockedStructs 2
+layout_count blockedTransitive 0
+layout_count blockedUnions 0
+layout_count emitted 36
 layout_count emittedSynthetic 0
-layout_count emittedUnions 1
+layout_count emittedUnions 2
 layout_count incomplete 27
 layout_count promoted 0
 layout_count public 38
@@ -106,6 +105,4 @@ layout_count synthetic 0
 layout_count system 0
 layout_count unheld 0
 layout_count unions 2
-layout_blocked double 1
-layout_blocked nested-layout-blocked 1
 layout_blocked unsupported-pointer 2

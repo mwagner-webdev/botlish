@@ -24,15 +24,15 @@ proc aotParity {text {options {}}} {
         } else {
             native::executable $hir [file rootname $path] {*}$options
         }
-        set header [binaryHeader [file rootname $path]]
+        set header [binaryHeader [native::executableFile [file rootname $path]]]
         if {$header ne [hostBinaryHeader executable]} { error "output is $header, not [hostBinaryHeader executable]" }
         # Moving the executable and removing the input leaves a runnable
         # binary. Empty PATH also excludes compiler/interpreter launchers.
         set relocated [file join $dir relocated]
-        file rename [file rootname $path] $relocated
+        file rename [native::executableFile [file rootname $path]] [native::executableFile $relocated]
         file delete $path
-        lappend expected [exec env PATH= $relocated]
-        lappend expected [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 $relocated]
+        lappend expected [runStandalone $relocated]
+        lappend expected [runStandalone $relocated BOTLISH_NATIVE_GC_STRESS 1]
         if {[llength [lsort -unique $expected]] != 1} { error "values disagree: $expected" }
         return [lindex $expected 0]
     } finally {
@@ -144,7 +144,7 @@ test native-executable-output-kinds {standalone rendering supports blocks, mutab
                 {block {x} {ref x}} {call {ref mutable_array::allocate} {const 2}}}
         }]
         set binary [native::executable $hir [file join $dir program]]
-        exec env BOTLISH_NATIVE_GC_STRESS=1 $binary
+        runStandalone $binary BOTLISH_NATIVE_GC_STRESS 1
     } finally {
         removeDirectory {aot output test}
     }
@@ -153,11 +153,11 @@ test native-executable-output-kinds {standalone rendering supports blocks, mutab
 test native-executable-link-failure {a failed linker invocation preserves the old file and removes temporary artifacts} -constraints {executableAot rustcLinker} -body {
     set dir [makeDirectory {aot link failure test}]
     set saved [expr {[info exists ::env(RUSTC)] ? [list $::env(RUSTC)] : {}}]
-    set channel [open [file join $dir program] w]; puts -nonewline $channel previous; close $channel
+    set channel [open [native::executableFile [file join $dir program]] w]; puts -nonewline $channel previous; close $channel
     try {
         set ::env(RUSTC) /no/such/rustc
         set failed [catch {native::executable [surface::compile 42 t.bot] [file join $dir program]} message options]
-        set channel [open [file join $dir program] r]; set old [read $channel]; close $channel
+        set channel [open [native::executableFile [file join $dir program]] r]; set old [read $channel]; close $channel
         list $failed [dict get $options -errorcode] $old [glob -nocomplain -directory $dir .botlish-aot-*]
     } finally {
         unset ::env(RUSTC)
@@ -169,7 +169,7 @@ test native-executable-link-failure {a failed linker invocation preserves the ol
 test native-executable-reject {guarded and open workloads fail before writing an executable} -constraints executableAot -body {
     set dir [makeDirectory {aot reject test}]
     set output [file join $dir program]
-    set ch [open $output w]; puts -nonewline $ch previous; close $ch
+    set ch [open [native::executableFile $output] w]; puts -nonewline $ch previous; close $ch
     try {
         set results {}
         foreach input {examples/surface/03-closure.bot lib/mathish.bot} {
@@ -177,7 +177,7 @@ test native-executable-reject {guarded and open workloads fail before writing an
             lappend results [catch {native::executable $hir $output} message options]
             lappend results [dict get $options -errorcode]
         }
-        set ch [open $output r]; lappend results [read $ch]; close $ch
+        set ch [open [native::executableFile $output] r]; lappend results [read $ch]; close $ch
         set results
     } finally {
         removeDirectory {aot reject test}
@@ -188,8 +188,7 @@ test native-executable-no-evaluation {compilation terminates even when running t
     set dir [makeDirectory {aot loop test}]
     try {
         set hir [surface::compile "loop:\n    continue" loop.bot]
-        native::executable $hir [file join $dir program]
-        file executable [file join $dir program]
+        file executable [native::executable $hir [file join $dir program]]
     } finally {
         removeDirectory {aot loop test}
     }
@@ -242,8 +241,10 @@ proc processOutcome {dir args} {
 # and exactly the guard's NATIVE LIMIT STACK line on standard error, nothing
 # on standard output and no signal (NATIVE-STACK-OVERFLOW.md,
 # MACOS-AARCH64-MILESTONE-4.md); a deep recursion that fits returns its
-# value.
-test native-executable-stack-overflow {standalone stack exhaustion, of the thread's stack or a coroutine's, is the NATIVE LIMIT STACK line on standard error and exit status 1, never a signal; a deep finite recursion returns its value} -constraints executableAot -body {
+# value. On a host with the guard and native coroutines only (on Windows
+# there is neither yet: tests/platform/aot-facts.tcl records what a Windows
+# executable's exhausted stack does).
+test native-executable-stack-overflow {standalone stack exhaustion, of the thread's stack or a coroutine's, is the NATIVE LIMIT STACK line on standard error and exit status 1, never a signal; a deep finite recursion returns its value} -constraints {executableAot nativeStackGuard nativeCoroutines} -body {
     set dir [makeDirectory {aot stack test}]
     try {
         set binary [file join $dir program]
@@ -264,22 +265,23 @@ test native-executable-stack-overflow {standalone stack exhaustion, of the threa
 } -result [join [list {*}[lrepeat 4 [list 1 {} "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}\n"]] [list 0 "100000\n" {}]] \n]
 
 # The format, architecture and kind of a program object and of an executable
-# are the host target's (ELF on Linux, Mach-O on macOS), read from their
-# headers; tests/platform/aot-facts.tcl checks the same files with the host's
-# own tools.
+# are the host target's (ELF on Linux, Mach-O on macOS, COFF and PE on
+# Windows), read from their headers; tests/platform/aot-facts.tcl checks the
+# same files with the host's own tools. The executable is the file
+# native::executable returns (program.exe on Windows).
 test native-executable-format {a program object and a standalone executable are the host target's object format and architecture} -constraints executableAot -body {
     set dir [makeDirectory {aot format test}]
     try {
         set hir [surface::compile "fn twice(n: int) -> int:\n    n * 2\n\ntwice(21)" format.bot]
         native::object $hir [file join $dir program.o]
-        native::executable $hir [file join $dir program]
+        set binary [native::executable $hir [file join $dir program]]
         list [expr {[binaryHeader [file join $dir program.o]] eq [hostBinaryHeader object]}] \
-            [expr {[binaryHeader [file join $dir program]] eq [hostBinaryHeader executable]}] \
-            [file executable [file join $dir program]] [exec [file join $dir program]]
+            [expr {[binaryHeader $binary] eq [hostBinaryHeader executable]}] \
+            [file executable $binary] [exec $binary] [expr {$binary eq [native::executableFile [file join $dir program]]}]
     } finally {
         removeDirectory {aot format test}
     }
-} -result {1 1 1 42}
+} -result {1 1 1 42 1}
 
 # Coroutines in a standalone executable: a yield three calls deep resumed
 # with a message, a String made before the first yield and used after the
@@ -287,7 +289,7 @@ test native-executable-format {a program object and a standalone executable are 
 # resume that ran the failing segment, and many short coroutines each
 # holding a fresh String across its yield -- the values every in-process
 # backend computes, under GC stress too (aotParity).
-test native-executable-coroutines {coroutines -- nested suspension, messages, values held across yields, a coroutine driving another, an error out of a resume, many short ones -- run in an executable as in every in-process backend, under GC stress too} -constraints executableAot -body {
+test native-executable-coroutines {coroutines -- nested suspension, messages, values held across yields, a coroutine driving another, an error out of a resume, many short ones -- run in an executable as in every in-process backend, under GC stress too} -constraints {executableAot nativeCoroutines} -body {
     aotParity {
         import list
         import str
@@ -369,26 +371,32 @@ test native-executable-cli-paths {main.tcl writes the executable beside its inpu
         set host [core::cabi::hostTarget]
         set other [expr {[string match linux-* $host] ? "macos" : "linux"}]-[core::cabi::hostArchitecture]
         set main [list [info nameofexecutable] [file join $::projectRoot main.tcl] -warnings off]
-        set in {apply {{cwd args} {exec /bin/sh -c {cd "$1" && shift && exec "$@"} sh $cwd {*}$args 2>@1}}}
+        # ARGS run in the directory CWD (this process's own, restored: no
+        # shell, so on any host).
+        set in {apply {{cwd args} {
+            set here [pwd]
+            cd $cwd
+            try { exec {*}$args 2>@1 } finally { cd $here }
+        }}}
         set results {}
         lappend results [{*}$in $elsewhere {*}$main -emit-native-executable "../app dir/relative.bot"]
         lappend results [{*}$in $elsewhere {*}$main -emit-native-executable [file join $app absolute.bot]]
         lappend results [{*}$in $elsewhere {*}$main -target $host -emit-native-executable [file join $app explicit.bot]]
         lappend results [{*}$in $elsewhere {*}$main -backend cranelift-generic -emit-native-executable [file join $app generic.bot]]
         foreach name {relative absolute explicit generic} {
-            set binary [file join $app $name]
+            set binary [native::executableFile [file join $app $name]]
             lappend results [file executable $binary] [expr {[binaryHeader $binary] eq [hostBinaryHeader executable]}] [exec $binary]
         }
         set refused [catch {{*}$in $elsewhere {*}$main -target $other -emit-native-executable [file join $app other.bot]} message]
-        lappend results $refused [string match "*(NATIVE TARGET)*" $message] [file exists [file join $app other]]
+        lappend results $refused [string match "*(NATIVE TARGET)*" $message] [file exists [native::executableFile [file join $app other]]]
         string map [list $app APP] [join $results \n]
     } finally {
         removeDirectory {aot cli test}
     }
-} -result {executable: ../app dir/relative
-executable: APP/absolute
-executable: APP/explicit
-executable: APP/generic
+} -result "executable: [native::executableFile {../app dir/relative}]
+executable: [native::executableFile APP/absolute]
+executable: [native::executableFile APP/explicit]
+executable: [native::executableFile APP/generic]
 1
 1
 42
@@ -403,13 +411,15 @@ executable: APP/generic
 42
 1
 1
-0}
+0"
 
 # A link the platform linker rejects (rustc made to pass it an object file
 # that does not exist) fails with the linker's own words -- a line naming the
 # missing file that is not rustc's echo of the command line -- keeps the
-# previous executable and leaves no temporary directory.
-test native-executable-linker-diagnostics {a link the platform linker rejects reports the linker's own words, keeps the previous file and removes the temporary directory} -constraints {executableAot rustcLinker} -body {
+# previous executable and leaves no temporary directory. The wrapper is a
+# shell script (unixShell); the Windows linker's words are the driver's unit
+# test's (codegen/aot.rs, ffi_linker_diagnostics_keep_the_linkers_words).
+test native-executable-linker-diagnostics {a link the platform linker rejects reports the linker's own words, keeps the previous file and removes the temporary directory} -constraints {executableAot rustcLinker unixShell} -body {
     set dir [makeDirectory {aot linker test}]
     set saved [expr {[info exists ::env(RUSTC)] ? [list $::env(RUSTC)] : {}}]
     set wrapper [file join $dir rustc-wrapper]

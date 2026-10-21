@@ -18,7 +18,10 @@
 #                   policy) or unsupported (a precise blocker)
 #   a type          a C integer scalar (an ABI alias, resolved through the
 #                   target's typedef chain and confirmed by the compiler),
-#                   ffi::c::Bool, an opaque pointee identity (one per C
+#                   ffi::c::Bool, a C floating type (ffi::c::Float for C
+#                   float, ffi::c::Double for C double, through a typedef
+#                   chain the compiler confirms the same way: C-FLOAT-FFI-
+#                   MILESTONE-1.md), an opaque pointee identity (one per C
 #                   tag, owned by the binding's ctypes module), a function
 #                   pointer type, or unsupported
 #   a constant      an exact integer of the C type the compiler gives it, or
@@ -215,6 +218,27 @@ proc ::cbind::model::ScalarOf {spelling} {
     return ""
 }
 
+# The mapping of the C floating type of the parser's spelling SPELLING, for
+# WHAT (a use, "a pointer to", ...) in a blocker: {ok TEXT {float}} for C's
+# float and double -- ffi::c::Float and ffi::c::Double, the C floating
+# representations of the FFI (C-FLOAT-FFI-MILESTONE-1.md) -- or {no
+# BLOCKERS}. C long double is unsupported: its representation is the
+# target's (binary64, x87 extended precision, binary128), and no C type of
+# the FFI and no Botlish number is it. So is every extended floating type
+# (_Float16, _Float32x, __float128, __bf16, the decimal types, ...): a type
+# of its own -- C23's _Float32 is not float even where it is binary32 --
+# that only a probe of its own could ever map.
+proc ::cbind::model::Floating {spelling {what ""}} {
+    switch -- $spelling {
+        float { return [list ok ffi::c::Float {float}] }
+        double { return [list ok ffi::c::Double {float}] }
+        {long double} {
+            return [Blocked long-double "${what}long double: its representation is the target's (binary64, x87 extended precision or binary128), and neither the FFI nor Botlish has a type of it"]
+        }
+    }
+    return [Blocked unsupported-floating "${what}$spelling: a floating type other than C float and C double, which the FFI does not represent"]
+}
+
 # Checks the typedef NAME against the compiler: the C type a _Generic
 # selection gives it must be the one its declaration chain ends in. ""
 # when it agrees, else a blocker detail.
@@ -274,9 +298,7 @@ proc ::cbind::model::Value {type role {via ""}} {
             return [list ok $s {}]
         }
         float {
-            set sp [lindex $t 1]
-            set reason [expr {$sp eq "float" ? "float" : ($sp eq "double" ? "double" : ($sp eq "long double" ? "long-double" : "float"))}]
-            return [Blocked $reason $sp]
+            return [Floating [lindex $t 1]]
         }
         complex { return [Blocked complex "_Complex [lindex $t 1]"] }
         builtin {
@@ -291,7 +313,7 @@ proc ::cbind::model::Value {type role {via ""}} {
             set problem [TypedefConventionProblem $t]
             if {$problem ne ""} { return [Blocked unsupported-calling-convention $problem] }
             lassign [Resolve $t] chain final
-            if {[lindex $final 0] eq "int"} {
+            if {[lindex $final 0] in {int float}} {
                 set problem [TypedefAbiProblem $name [lindex $final 1]]
                 if {$problem ne ""} { return [Blocked typedef-abi-mismatch $problem] }
             }
@@ -338,7 +360,7 @@ proc ::cbind::model::Pointer {pointee} {
         set problem [TypedefConventionProblem $t]
         if {$problem ne ""} { return [Blocked unsupported-calling-convention $problem] }
         lassign [Resolve $t] chain final
-        if {[lindex $final 0] eq "int"} {
+        if {[lindex $final 0] in {int float}} {
             set problem [TypedefAbiProblem $name [lindex $final 1]]
             if {$problem ne ""} { return [Blocked typedef-abi-mismatch $problem] }
         }
@@ -387,7 +409,9 @@ proc ::cbind::model::Pointer {pointee} {
         }
         fn { return [FnPtr $t] }
         float {
-            return [Blocked [expr {[lindex $t 1] eq "float" ? "float" : "double"}] "a pointer to [lindex $t 1]"]
+            set m [Floating [lindex $t 1] "a pointer to "]
+            if {[lindex $m 0] ne "ok"} { return $m }
+            return [list ok "ffi::c::Ptr\[[lindex $m 1]\]" {pointer float}]
         }
         array { return [Blocked unsupported-type "a pointer to an array ([Spell $t])"] }
         builtin { return [Blocked va-list "a pointer to [lindex $t 1]"] }
@@ -419,15 +443,15 @@ proc ::cbind::model::FnPtr {fn} {
             continue
         }
         lappend args [lindex $m 1]
-        lappend features {*}[lmap f [lindex $m 2] {expr {$f in {bool} ? $f : [continue]}}]
+        lappend features {*}[lmap f [lindex $m 2] {expr {$f in {bool float} ? $f : [continue]}}]
     }
     set r [Value $result fnresult]
     if {[lindex $r 0] ne "ok"} {
         foreach b [lindex $r 1] {
             lappend blockers [list unsupported-callback-signature "callback result: [lindex $b 1] ([lindex $b 0])"]
         }
-    } elseif {"bool" in [lindex $r 2]} {
-        lappend features bool
+    } else {
+        lappend features {*}[lmap f [lindex $r 2] {expr {$f in {bool float} ? $f : [continue]}}]
     }
     if {$blockers ne ""} { return [list no $blockers] }
     return [list ok "ffi::c::FnPtr\[Fn\{args: \[[join $args {, }]\], return: [lindex $r 1]\}\]" [lsort -unique $features]]
@@ -942,7 +966,7 @@ proc ::cbind::model::ProbeRequests {model} {
     }
     foreach name $typedefs {
         lassign [Resolve [list typedef $name]] chain final
-        if {[lindex $final 0] in {int bool enum}} {
+        if {[lindex $final 0] in {int bool enum float}} {
             lappend values [list td:$name [list "sizeof($name)" [::cbind::probe::typeCodeOf $name]]]
         }
     }
@@ -1373,9 +1397,12 @@ proc ::cbind::model::Constants {model} {
                     dict set c ctype $ctype
                     dict set c value $v
                 } elseif {$ctype in {float double {long double}}} {
+                    # (The value probe reads integer data directives: a
+                    # floating constant's bits are no integer constant
+                    # expression C evaluates, so it is not read.)
                     dict set c status unsupported
-                    dict set c reason [expr {$ctype eq "float" ? "float" : "double"}]
-                    dict set c detail "a $ctype constant"
+                    dict set c reason floating-constant
+                    dict set c detail "a $ctype constant: the generator binds integer constants only"
                 } else {
                     dict set c status unsupported
                     dict set c reason not-integer-constant

@@ -36,8 +36,6 @@ source [file join $::projectRoot native native.tcl]
 core::cabi::installTestFixture
 
 testConstraint nativeBuilt [expr {![catch {native::binary}]}]
-testConstraint nativeLinux [expr {$::tcl_platform(os) eq "Linux" &&
-    $::tcl_platform(machine) in {x86_64 amd64 aarch64} && [testConstraint nativeBuilt]}]
 testConstraint executableAot [expr {[testConstraint executableAot] && [testConstraint nativeBuilt]}]
 testConstraint cCompiler [expr {[auto_execok cc] ne ""}]
 
@@ -162,6 +160,13 @@ layout CScalars:
     field ulong: ffi::c::ULong at 16
 
 }
+
+# A C long's width on this compilation's target (the host's): 64 bits on
+# Linux and macOS (LP64), 32 on Windows (LLP64; C-ABI-TYPES.md). The C scalar
+# tests store the extremes of the target's own domains.
+set neLongBits [dict get [core::cabi::target [core::cabi::hostTarget]] long]
+set neLongMin [expr {-(2 ** ($neLongBits - 1))}]
+set neULongMax [expr {2 ** $neLongBits - 1}]
 
 # A program's value as text: an abi::bytes::Bytes as bytes(HEX ...), a List
 # element-wise, anything else as core::value::show does.
@@ -512,7 +517,7 @@ test ne-view-is-read-only {a NativeView[L] gains no write: binary::store through
 
 test ne-store-value-types {the value a store writes is held to its field's type by the proof a construction's field values are (no conversion, truncation or run-time guard): a U16 field admits a value proven in 0..65535 -- a literal, a U16, an Int a comparison bounded -- and rejects -1, 65536 and an unbounded Int (TYPE); a C scalar field admits exactly the target's domain; a data pointer field exactly its pointer type (no Int, no other pointee, no implicit erasure, no function pointer); a function pointer field exactly its signature} -body {
     set f "fn f(e: NativeEdit\[Linked\], o: NativeEdit\[Outer\], c: NativeEdit\[CScalars\], n: int, u: binary::U16, p: ffi::c::Ptr\[Node\], q: ffi::c::Ptr\[Other\], z: ffi::c::Ptr\[ffi::c::Void\], g: ffi::c::FnPtr\[Fn\{args: \[ffi::c::Int\], return: ffi::c::Int\}\], h: ffi::c::FnPtr\[Fn\{args: \[\], return: ffi::c::Int\}\]) -> unit:\n"
-    lmap stmt {
+    lmap stmt [string map [list LONG_MIN $::neLongMin ULONG_MAX $::neULongMax] {
         {binary::store(e, Linked.inner.y, 65535)}
         {binary::store(e, Linked.inner.y, u)}
         {binary::store(e, Linked.inner.y, -1)}
@@ -521,8 +526,8 @@ test ne-store-value-types {the value a store writes is held to its field's type 
         "if n >= 0 and n <= 65535:\n        binary::store(e, Linked.inner.y, n)"
         {binary::store(c, CScalars.uint, 4294967295)}
         {binary::store(c, CScalars.uint, 4294967296)}
-        {binary::store(c, CScalars.lng, -9223372036854775808)}
-        {binary::store(c, CScalars.ulong, 18446744073709551615)}
+        {binary::store(c, CScalars.lng, LONG_MIN)}
+        {binary::store(c, CScalars.ulong, ULONG_MAX)}
         {binary::store(c, CScalars.ulong, -1)}
         {binary::store(e, Linked.next, p)}
         {binary::store(e, Linked.next, 0)}
@@ -533,7 +538,7 @@ test ne-store-value-types {the value a store writes is held to its field's type 
         {binary::store(e, Linked.cb, g)}
         {binary::store(e, Linked.cb, h)}
         {binary::store(e, Linked.cb, p)}
-    } {
+    }] {
         neKinds "$f    $stmt\n0\n"
     }
 } -cleanup {unset -nocomplain f} -result {accepted accepted TYPE TYPE TYPE accepted accepted TYPE accepted accepted TYPE accepted TYPE TYPE TYPE TYPE TYPE accepted TYPE TYPE}
@@ -561,12 +566,12 @@ test ne-write-diagnostics {the byte writes: binary::write writes an ordinary fie
         [neFirst "fn f(d: abi::bytes::MutableBytes) -> abi::bytes::MutableBytes:\n    binary::write(d, Linked.tag, 1)\n0\n"]
 } -cleanup {unset -nocomplain f} -result {accepted {BINARY-OPERAND {binary::write writes a field into the bytes of an abi::bytes::MutableBytes (a record built in byte storage the program owns: abi::bytes::zeroed); this argument's type here is abi::bytes::Bytes}} BINARY-OPERAND {LAYOUT-NATIVE-ONLY {binary::write cannot write the field Linked.next: it is a C pointer, and an ordinary byte write never encodes one; encoding a pointer the program already has into a pointer field is the explicit foreign write binary::write_foreign(data, Linked.next, p)}} {LAYOUT-FOREIGN-WRITE {binary::write_foreign encodes an existing foreign value (an ffi::c::Ptr or ffi::c::FnPtr) into a C pointer field; Linked.tag is an ordinary field of type int[binary::U8], written by binary::write}} {LAYOUT-FOREIGN-WRITE {binary::write_foreign encodes an existing foreign value (an ffi::c::Ptr or ffi::c::FnPtr) into a C pointer field; Linked.inner.x is an ordinary field of type int[binary::I16], written by binary::write}} accepted {TYPE {the value written to field Linked.next by binary::write_foreign cannot be proven to satisfy the field's type ffi::c::Ptr[Node] (value type: int): a pointer field holds only a pointer the program already has, never an Int or any other value}} TYPE {UNHANDLED-ERROR {this call of "binary::write" may produce the declared error "LayoutLengthMismatch", which is neither handled here nor admitted by the enclosing function's own "errors" declaration}}}
 
-test ne-store-declares-nothing {a store of a scalar or pointer field can fail with no error -- its edit is never null, its field inside its layout and its value admitted statically -- and returns unit; the byte writes return the new MutableBytes. (The one error a store registers, LayoutExtentMismatch, is a whole fixed array's, FIXED-LAYOUT-ARRAYS.md, gated by its `extents` check: a call writing no array never produces it.)} -body {
+test ne-store-declares-nothing {a store of a scalar or pointer field can fail with no error -- its edit is never null, its field inside its layout and its value admitted statically -- and returns unit; the byte writes return the new MutableBytes. (The errors a store registers are a whole fixed array's LayoutExtentMismatch, FIXED-LAYOUT-ARRAYS.md, gated by its `extents` check -- a call writing no array never produces it -- and a C float field's NonFiniteFloat, C-FLOAT-FFI-MILESTONE-1.md, which a call writing no binary32 is never charged.)} -body {
     list [dict get [core::native::metadata binary::store] errors] [dict get [core::native::metadata binary::store] resultType] \
         [dict get [core::native::metadata binary::write] errors] [dict get [core::native::metadata binary::write_foreign] errors] \
         [dict get [core::native::metadata binary::native::edit] errors] \
         [neKinds "fn f(e: NativeEdit\[Outer\]) -> unit:\n    binary::store(e, Outer.count, 1)\n0\n"]
-} -result {LayoutExtentMismatch unit {LayoutExtentMismatch LayoutLengthMismatch} {LayoutExtentMismatch LayoutLengthMismatch} NativeEditNull accepted}
+} -result {{LayoutExtentMismatch NonFiniteFloat} unit {LayoutExtentMismatch LayoutLengthMismatch NonFiniteFloat} {LayoutExtentMismatch LayoutLengthMismatch} NativeEditNull accepted}
 
 # ---------------------------------------------------------------------------
 # Native stores (the fixture's memory; its byte copy is the oracle)
@@ -617,9 +622,14 @@ test ne-nested-stores {a nested layout of an edit is the writable subrecord Nati
     neRun "fn set_inner(i: NativeEdit\[Inner\], x: binary::I16) -> unit:\n    binary::store(i, Inner.x, x)\n\nfn run() -> List\[any\] errors NativeEditNull:\n    p = memory(\[[join [lrepeat 24 165] {, }]\])\n    e = binary::native::edit(Deep, p)\n    binary::store(e, Deep.head, 1)\n    o = e.outer\n    binary::store(o, Outer.count, 4000000000)\n    set_inner(e.outer.inner, -300)\n    binary::store(e, Deep.outer.inner.y, 513)\n    binary::store(e.outer, Outer.last, 9)\n    binary::store(e, Deep.tail, -128)\n    \[dump(p, 24), e.outer.inner.x, e.outer.inner.y, o.inner.x\]\n\nr = run():\n    on NativeEditNull:\n        \[\]\nr\n"
 } -result {same: [[1, 165, 165, 165, 0, 40, 107, 238, 212, 254, 1, 2, 165, 165, 165, 165, 9, 165, 165, 165, 165, 165, 165, 128], -300, 513, -300]}
 
-test ne-c-scalar-stores {C scalar fields are written in the compilation target's widths and domains (an ffi::c::UInt is 4 bytes, an ffi::c::Long and an ffi::c::ULong 8 on linux-x86_64 and linux-aarch64): each extreme lands at its offset, little-endian, in exactly its width; the 4 bytes after the UInt keep the sentinel} -constraints nativeBuilt -body {
-    neValue [neStoreProgram CScalars 24 165 {uint 4294967295 lng -9223372036854775808 ulong 18446744073709551615}]
-} -result {{255 255 255 255 165 165 165 165 0 0 0 0 0 0 0 128 255 255 255 255 255 255 255 255} {4294967295 -9223372036854775808 18446744073709551615} {4294967295 -9223372036854775808 18446744073709551615}}
+test ne-c-scalar-stores {C scalar fields are written in the compilation target's widths and domains (an ffi::c::UInt is 4 bytes, an ffi::c::Long and an ffi::c::ULong 8 on Linux and macOS, LP64, and 4 on Windows, LLP64, the rest of their 8-byte slots untouched): each extreme lands at its offset, little-endian, in exactly its width; the 4 bytes after the UInt keep the sentinel} -constraints nativeBuilt -body {
+    neValue [neStoreProgram CScalars 24 165 [list uint 4294967295 lng $::neLongMin ulong $::neULongMax]]
+} -result [apply {{bits} {
+    set w [expr {$bits / 8}]
+    set rest [lrepeat [expr {8 - $w}] 165]
+    set bytes [concat {255 255 255 255 165 165 165 165} [lrepeat [expr {$w - 1}] 0] 128 $rest [lrepeat $w 255] $rest]
+    list $bytes [list 4294967295 $::neLongMin $::neULongMax] [list 4294967295 $::neLongMin $::neULongMax]
+}} $neLongBits]
 
 # The pointer fields' program: P a fresh sentinel Linked record, TARGET a
 # fixture record (the data pointer stored), CB a fixture function address;
@@ -782,7 +792,7 @@ test ne-no-caching {a native store and the reads around it are each one runtime 
     neOps [neNir "fn f(e: NativeEdit\[Inner\]) -> int:\n    binary::store(e, Inner.x, 1)\n    binary::store(e, Inner.x, 1)\n    a = e.x\n    binary::store(e, Inner.x, 2)\n    a + e.x\n\nfn g() -> int errors NativeEditNull:\n    p = memory(\[0, 0, 0, 0\])\n    f(binary::native::edit(Inner, p))\n\nr = g():\n    on NativeEditNull:\n        0\nr\n" f]
 } -result {nativestore nativestore nativeload nativestore runbox nativeload runbox riadd rbox}
 
-test ne-allocations {natively a store allocates nothing -- a scalar, a u64 above i64::MAX, a pointer, through a nested subrecord -- and neither does an edit; a layout write into byte storage allocates exactly its fresh storage (the MutableBytes rule: published storage is never written), its MutableBytes wrapper only where the value leaves the function (1000 operations each)} -constraints nativeLinux -body {
+test ne-allocations {natively a store allocates nothing -- a scalar, a u64 above i64::MAX, a pointer, through a nested subrecord -- and neither does an edit; a layout write into byte storage allocates exactly its fresh storage (the MutableBytes rule: published storage is never written), its MutableBytes wrapper only where the value leaves the function (1000 operations each)} -constraints {nativeBuilt nativeCoroutines} -body {
     set reports {}
     foreach program [list \
         "fn f(e: NativeEdit\[Deep\], i: binary::U8) -> unit:\n    binary::store(e, Deep.head, i)\n    binary::store(e.outer.inner, Inner.y, 513)\n    binary::store(e, Deep.outer.count, 4000000000)\nfn run(n: int) -> int errors NativeEditNull:\n    p = memory(\[[join [lrepeat 24 0] {, }]\])\n    e = binary::native::edit(Deep, p)\n    k = loop i from 0 to n:\n        if i >= 0 and i <= 255:\n            f(e, i)\n    0\nr = run(1000):\n    on NativeEditNull:\n        0\nr\n" \
@@ -803,7 +813,7 @@ test ne-allocations {natively a store allocates nothing -- a scalar, a u64 above
 # ---------------------------------------------------------------------------
 # HIR, interchange, isolation, cache, specialization
 
-test ne-hir-text-roundtrip {HIR text carries NativeEdit[L] types, an edit's construction and its elaborated reads (binary#view_field, a nested layout's an edit): formatting, reading back and formatting again gives the same text, and the read HIR runs to the same outcome (HIR text of a program that imports a library module -- binary's, for binary::store -- does not round trip in general, so the writes' HIR is carried by interchange: ne-interchange)} -constraints nativeBuilt -body {
+test ne-hir-text-roundtrip {HIR text carries NativeEdit[L] types, an edit's construction and its elaborated reads (binary#view_field, a nested layout's an edit): formatting, reading back and formatting again gives the same text, and the read HIR runs to the same outcome (the writes' HIR is carried by interchange: ne-interchange)} -constraints nativeBuilt -body {
     set source "direct module\n\nimport binary::native\nimport ffi::c\n\ntype I16 = Int in -32768..32767\ntype U16 = Int in 0..65535\n\nopaque struct Node:\n    tag: unit\n\nlayout In:\n    size 4\n    align 2\n    field x: I16 at 0\n    field y: U16 at 2\n\nlayout Out:\n    size 16\n    align 8\n    field a: In at 4\n    field p: ffi::c::Ptr\[Node\] at 8\n\nfn a_of(o: NativeEdit\[Out\]) -> NativeEdit\[In\]:\n    o.a\n\nfn run() -> int errors NativeEditNull:\n    p = ffi::c::null\[Node\]()\n    a_of(binary::native::edit(Out, p)).y\n\nr = run():\n    on NativeEditNull:\n        -1\nr\n"
     set hir [surface::compile $source edit.bot -warnings off]
     set text [hir::format $hir]
@@ -935,7 +945,7 @@ test ne-executable {a standalone executable (whichever linker BOTLISH_NATIVE_LIN
     list [expr {"value {[exec $path]}" eq $direct}] $direct
 } -cleanup {unset -nocomplain source hir path direct} -result {1 {value {[[255, 128, 255, 255, 0, 0, 0, 128, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 128, 255, 255, 165, 165, 1, 0, 0, 128], true]}}}
 
-test ne-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every allocation site) the writes stay exact: stores of 64-bit values that are BigInts, a chain of byte writes each allocating a fresh storage while the previous one is live, the record read back through binary::load -- an edit is an immediate word, never a root to lose, and a write's operands stay rooted while its storage is made} -constraints nativeLinux -body {
+test ne-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every allocation site) the writes stay exact: stores of 64-bit values that are BigInts, a chain of byte writes each allocating a fresh storage while the previous one is live, the record read back through binary::load -- an edit is an immediate word, never a root to lose, and a write's operands stay rooted while its storage is made} -constraints {nativeBuilt nativeCoroutines} -body {
     set source [neProgram "fn many(k: int) -> List\[any\] errors NativeEditNull, LayoutLengthMismatch:\n    p = memory(\[[join [lrepeat 32 0] {, }]\])\n    e = binary::native::edit(Scalars, p)\n    rs = loop i from 0 to k:\n        binary::store(e, Scalars.u64, 18446744073709551615)\n        binary::store(e, Scalars.i64, -9223372036854775808)\n        a = binary::write(abi::bytes::zeroed(abi::usize(32)), Scalars.u64, 18446744073709551614)\n        b = binary::write(a, Scalars.i64, -9223372036854775807)\n        c = binary::write(b, Scalars.u32, 4294967295)\n        \[binary::load(e), frozen(c), e.u64\]\n    list::at(rs, k - 1):\n        on IndexNotFound:\n            \[\]\nr = many(50):\n    on NativeEditNull:\n        \[\]\n    on LayoutLengthMismatch:\n        \[\]\nr\n"]
     set hir [surface::compile $source edit.bot -warnings off]
     set plain [neOutcome cranelift $hir]

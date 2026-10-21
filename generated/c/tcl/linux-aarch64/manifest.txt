@@ -26,14 +26,14 @@ header generic/tclOODecls.h 112ed1e0
 header generic/tclPlatDecls.h c8603094
 header generic/tclTomMathDecls.h 1ebc0288
 shim_library botlish_shim_tcl_47be8309
-file layouts-check.c 363 7cb833ad
-file layouts.tsv 1103 e6858e0d
-file report.tsv 1497 ada7d55d
-file report.txt 169 aa18c934
+file layouts-check.c 384 301ffa2e
+file layouts.tsv 1103 c6f6fdb7
+file report.tsv 1497 e9fe3654
+file report.txt 159 aa6e7eba
 file shim.c 72 47be8309
-file tcl/ctypes.bot 255 cdf17a80
-file tcl/decls.bot 3681 f542d703
-file tcl/layouts.bot 427 6d20d719
+file tcl/ctypes.bot 255 df906f6f
+file tcl/decls.bot 3739 e5b52347
+file tcl/layouts.bot 449 09474fdf
 file tcl/oo.bot 14 87752fc2
 file tcl/oodecls.bot 227 43c573ea
 file tcl/platdecls.bot 23 a575194a
@@ -59,7 +59,7 @@ count complete 29
 count constants 219
 count constantsSeen 221
 count declared 753
-count direct 729
+count direct 738
 count enumerators 13
 count excluded 0
 count fnmacros 78
@@ -68,32 +68,31 @@ count inline 1
 count manual 5
 count opaque 27
 count proven 8
-count ptrParams 1602
-count ptrResults 207
+count ptrParams 1620
+count ptrResults 209
 count resultAlias 0
 count resultIndependent 1
-count resultUnknown 206
+count resultUnknown 208
 count tablestubs 0
 count thunk 16
-count unknownParams 1589
-count unknownRetention 763
-count unsupported 82
-count views 461
-blocked double 9
+count unknownParams 1607
+count unknownRetention 771
+count unsupported 73
+count views 466
 blocked macro-needs-signature 63
 blocked thunk-rejected 2
 blocked unsupported-callback-signature 1
 blocked unsupported-macro 7
 layout_abi linux-aarch64 clang aarch64-linux-gnu {Ubuntu clang version 18.1.3 (1ubuntu1)}
 layout_count anonymous 9
-layout_count blocked 4
-layout_count blockedDirect 3
-layout_count blockedStructs 3
-layout_count blockedTransitive 1
-layout_count blockedUnions 1
-layout_count emitted 34
+layout_count blocked 2
+layout_count blockedDirect 2
+layout_count blockedStructs 2
+layout_count blockedTransitive 0
+layout_count blockedUnions 0
+layout_count emitted 36
 layout_count emittedSynthetic 0
-layout_count emittedUnions 1
+layout_count emittedUnions 2
 layout_count incomplete 27
 layout_count promoted 0
 layout_count public 38
@@ -102,8 +101,6 @@ layout_count synthetic 0
 layout_count system 0
 layout_count unheld 0
 layout_count unions 2
-layout_blocked double 1
-layout_blocked nested-layout-blocked 1
 layout_blocked unsupported-pointer 2
 contract Tcl_CreateInterp result independent manual {contract Tcl_CreateInterp}
 contract Tcl_DeleteInterp interp {escape declared-noescape} manual {contract Tcl_DeleteInterp}

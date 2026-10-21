@@ -23,24 +23,31 @@ in-process backends (`cranelift`, `cranelift-generic`) and standalone AOT
 executables. The pipeline, and the whole contract, is:
 
 ```
-Linux argument bytes
+Linux argument bytes                Windows UTF-16 arguments
+                                        -> their WTF-8 bytes, at startup
     -> explicit strict-UTF-8 validation, at the call to argv()
     -> canonical Botlish Strings (the ordinary one-allocation constructor)
     -> ordinary immutable List[String]
 
-invalid UTF-8 in any argument -> the declared error InvalidArgumentEncoding
+invalid UTF-8 in any argument (on Windows: an unpaired surrogate)
+    -> the declared error InvalidArgumentEncoding
 ```
 
 Nothing about process startup bypasses normal language semantics: `argv()` is
-an ordinary function whose input happens to come from the Linux process
-boundary.
+an ordinary function whose input happens to come from the process
+boundary. The Windows column is section "Windows" below
+(WINDOWS-X86-64-MILESTONE-1.md).
 
 ## Language-level contract (source-visible documentation)
 
 > `argv()` returns the process argument vector, including element zero.
 >
-> On Linux each argument must be valid UTF-8. If any argument is invalid
-> UTF-8, the call fails with the declared error `InvalidArgumentEncoding`.
+> On Linux (and macOS) each argument must be valid UTF-8. If any argument is
+> invalid UTF-8, the call fails with the declared error
+> `InvalidArgumentEncoding`. On Windows the arguments are the process's
+> command line split by the Microsoft C runtime's rules, and each must be
+> valid UTF-16: an argument holding an unpaired surrogate fails the call
+> with the same declared error.
 >
 > `argv()[0]` is the invocation name supplied by the launching process. It is
 > **not** guaranteed to be a canonical or actual executable path.
@@ -49,9 +56,9 @@ boundary.
 > observe the same arguments. Object identity of the returned List is not
 > promised.
 >
-> The current implementation is Linux-only and validates Linux argv bytes as
-> UTF-8. It does not claim that arbitrary POSIX byte strings become valid
-> Botlish Strings.
+> The implementation validates Unix argv bytes, and on Windows the UTF-16
+> of each argument (as WTF-8), as UTF-8. It does not claim that arbitrary
+> POSIX byte strings, or arbitrary UTF-16, become valid Botlish Strings.
 
 ### Surface and error signature
 
@@ -182,6 +189,71 @@ argument (the pwnkit mitigation), so on such a kernel a standalone executable
 launched with no arguments legitimately sees `[""]`
 (`argv-standalone-argc-zero` accepts either).
 
+## Windows
+
+A Windows process has no argument vector: it has one command line, a UTF-16
+string the launching process wrote (`CreateProcessW`'s `lpCommandLine`), and
+splitting it into arguments is the program's own C runtime's convention, not
+the operating system's. Botlish adopts that convention and Windows' encoding
+without changing the language's semantics: `argv()` is still `List[String]
+errors InvalidArgumentEncoding`, the snapshot is still bytes, validation still
+happens at the call (WINDOWS-X86-64-MILESTONE-1.md, section 4).
+
+* **Splitting.** A standalone executable's arguments are what Rust's runtime
+  splits `GetCommandLineW()` into (`std::env::args_os`), by the modern
+  (2008 and later) Microsoft C runtime rules: whitespace separates arguments
+  outside quotes, `"` toggles quoting, `2n` backslashes before a quote are
+  `n` backslashes and `2n+1` an escaped quote, backslashes elsewhere are
+  literal, and argument zero is read by its own simpler rule (quotes only,
+  no escapes). It is what a C program built with MSVC sees in `argv`. A
+  launcher that quotes by the same rules -- Rust's `std::process`, Tcl's
+  `exec`, PowerShell -- delivers every argument it is given exactly:
+  spaces, tabs, quotes, backslashes, the empty argument.
+* **Encoding.** Each argument's UTF-16 code units are encoded as WTF-8
+  (`runtime/aot.rs`'s `wtf8_from_utf16`, written explicitly rather than read
+  from `OsString`'s unspecified internal form): valid UTF-16 is exactly its
+  UTF-8, so a valid argument reaches `argv()` as the String of the same
+  scalars, with no normalization (NFC and NFD stay distinct); an unpaired
+  surrogate -- which a command line may hold and no Unicode scalar is --
+  becomes the three-byte form of its code unit (`ED A0 80`..`ED BF BF`),
+  lossless and distinct for every unit, which strict UTF-8 rejects. So the
+  snapshot represents every Windows argument, and `argv()` fails on exactly
+  the arguments no Botlish String can hold, with the declared error, never a
+  replacement character. No new string type: the bytes are the same
+  `Vec<Vec<u8>>` snapshot Linux's are.
+* **Argument zero** is the command line's first argument as the launcher
+  wrote it: an executable started by Tcl's `exec` sees the path Tcl
+  resolved, one started from `cmd.exe` the name typed. Botlish does not
+  reconstruct it. An empty command line (possible through `CreateProcessW`)
+  gives argument zero the executable's own path -- Rust's runtime's rule, so
+  `argv()` is never empty in a standalone Windows executable.
+* **Impossible cases.** A Windows argument cannot contain NUL (the command
+  line is NUL-terminated), and there is no `argc == 0`.
+* **In-process runs** (the driver's JIT, the Tcl backends) read the injected
+  snapshot, bytes, as everywhere: a vector of valid UTF-8 there is the
+  WTF-8 a standalone executable would read for the same UTF-16 arguments, so
+  the two agree (`argv-windows-same-values-as-in-process`). An injected
+  snapshot may hold bytes no Windows argument has (invalid UTF-8 that is not
+  a surrogate's form): `argv()` refuses it the same way.
+* **Linked runs.** The driver runs a program that calls C as a linked
+  executable (C-FFI.md). On Windows, `std::process` writes the command line
+  with the executable's path as argument zero, so passing the snapshot's own
+  argument zero would need a `CreateProcessW` of a command line written by
+  the driver; since no program that calls C links on Windows yet, a linked
+  run is refused (`NATIVE UNSUPPORTED foreign`, main.rs's `linked_command`)
+  rather than run with another argument zero. The C call milestone owns it.
+
+Tested on a real Windows host (`tests/argv.test`'s `argv-windows-*`, the
+Windows workflow): every argument of a set of spaces, tabs, quotes,
+backslashes before a quote and at the end, a UNC-like path, `%PATH%`
+(never expanded), the empty argument, NFC and NFD, BMP and astral scalars
+round-trips through one executable built once; argument zero is the path
+Tcl's `exec` wrote, run after run; an unpaired surrogate is handled as the
+declared error, and a program that never calls `argv()` runs with one; three
+hundred arguments, also under GC stress; and the same text in-process and
+standalone. The encoding itself is unit-tested on every host
+(`argv_windows_utf16_is_its_utf8`, `argv_windows_unpaired_surrogate_is_the_declared_error`).
+
 ## Runtime snapshot
 
 One run has one argument snapshot, captured as raw bytes and never decoded
@@ -242,20 +314,20 @@ differ only in where the bytes came from.
 
 ## Standalone AOT startup path
 
-`native::executable` links a standalone ELF (`native/src/codegen/aot.rs`
-generates a small Rust `startup.rs`). The generated `main` now does:
+`native::executable` links a standalone ELF, Mach-O or PE executable
+(`native/src/codegen/aot.rs` generates a small Rust `startup.rs`). The
+generated `main` does:
 
 ```rust
-use std::os::unix::ffi::OsStringExt;
-let argv: Vec<Vec<u8>> = std::env::args_os().map(|a| a.into_vec()).collect();
-std::process::exit(aot::run(argv, || { ... }))
+std::process::exit(aot::run(aot::process_argv(), || { ... }))
 ```
 
-* Source of the bytes: Rust's runtime keeps the `argc`/`argv` glibc passes at
-  process start and `args_os()` returns them as raw `OsString`s -- the exact
-  bytes, never decoded and never panicking on invalid UTF-8 (unlike
-  `std::env::args()`, which is not used). `into_vec` is the lossless Linux
-  conversion.
+* Source of the bytes: `runtime::aot::process_argv`. On Unix Rust's runtime
+  keeps the `argc`/`argv` glibc passes at process start and `args_os()`
+  returns them as raw `OsString`s -- the exact bytes, never decoded and never
+  panicking on invalid UTF-8 (unlike `std::env::args()`, which is not used);
+  `into_vec` is the lossless Unix conversion. On Windows each argument's
+  UTF-16 (`encode_wide`) becomes its WTF-8 (section "Windows").
 * Ownership: the bytes are copied into one owned `Vec<Vec<u8>>` that moves
   into the worker thread and into the `Vm` (`aot::run` calls
   `vm.set_argv`) before the program entry runs; nothing points at the C
@@ -425,9 +497,11 @@ Measured on the sandbox (Linux x86_64, Tcl 9.0.1, rustc 1.97):
 
 ## Known limitations
 
-* Linux only: no Windows UTF-16 argv, no macOS APIs, no OS-string type, no
-  portable byte-string abstraction. Future ports adapt the intrinsic behind
-  the same Botlish semantics.
+* No OS-string type and no portable byte-string abstraction: a Windows
+  argument that is no valid UTF-16 (an unpaired surrogate) is refused by
+  `argv()`, as invalid UTF-8 is on Linux, and its code units are not
+  observable. On Windows a linked run of a program that calls C cannot pass
+  the snapshot's argument zero yet (section "Windows").
 * `argv()[0]` is not an executable-path API. A separate intrinsic would be
   needed; deliberately not added.
 * No environment variables, working directory, stdin/stdout, process id,
@@ -438,5 +512,7 @@ Measured on the sandbox (Linux x86_64, Tcl 9.0.1, rustc 1.97):
   cached).
 * The standalone `argc == 0` case cannot be exercised on kernels >= 5.18 (see
   above); it is covered by unit and in-process tests.
-* `tests/argv.test`'s standalone tests need `bash` (for `exec -a`) and, for the
-  `argc == 0` check, `python3`; they are constraint-guarded.
+* `tests/argv.test`'s Unix standalone tests need `bash` (for `exec -a`) and,
+  for the `argc == 0` check, `python3`, on a Unix host; the Windows ones a
+  Windows host. They are constraint-guarded (`bashLauncher`,
+  `pythonLauncher`, `windowsProcess`).

@@ -27,16 +27,16 @@ function	bgf_printf	direct	bgf::bgf	direct	symbol bgf_printf; (ffi::c::Ptr[ffi::
 function	bgf_vprintf	unsupported		va-list	parameter 2 (args): __builtin_va_list
 function	bgf_vshadow	unsupported		variadic	a variadic function (...) reached through a C thunk, which cannot forward its trailing arguments
 function	bgf_vother	direct	bgf::bgf	direct	symbol bgf_vother; (ffi::c::Int, variadic) -> ffi::c::Int
-function	bgf_scale	unsupported		double,float	parameter 1 (x): double; parameter 2 (y): float; result: double
+function	bgf_scale	direct	bgf::bgf	direct	symbol bgf_scale; (ffi::c::Double, ffi::c::Float) -> ffi::c::Double
 function	bgf_swap	unsupported		by-value-aggregate	parameter 1 (p): struct bgf_pair by value; result: struct bgf_pair by value
-function	bgf_set_measure	unsupported		unsupported-callback-signature	parameter 1 (measure): callback argument 1: double (double); parameter 1 (measure): callback result: double (double)
+function	bgf_set_measure	unsupported		unsupported-callback-signature	parameter 1 (measure): callback argument 1: long double: its representation is the target's (binary64, x87 extended precision or binary128), and neither the FFI nor Botlish has a type of it (long-double); parameter 1 (measure): callback result: long double: its representation is the target's (binary64, x87 extended precision or binary128), and neither the FFI nor Botlish has a type of it (long-double)
 function	bgf_ms	unsupported		unsupported-calling-convention	an explicit calling convention: ms_abi
 function	bgf_wide_set	unsupported		typedef-abi-mismatch	parameter 1 (w): typedef bgf_wide is unsigned long by its declaration, but the compiler gives it no C integer type of the table (16 bytes): an attribute or extension changes it
 function	bgf_noproto	unsupported		no-prototype	declared without a prototype: ()
-function	bgf_float_out	unsupported		float	parameter 1 (out): a pointer to float
+function	bgf_float_out	direct	bgf::bgf	direct	symbol bgf_float_out; (ffi::c::Ptr[ffi::c::Float]) -> unit
 function	bgf_square	thunk	bgf::thunks::bgf	thunk (inline)	symbol botlish_bgf_bgf_square; (ffi::c::Int) -> ffi::c::Int
 function	bgf_point_x	thunk	bgf::thunks::bgf	thunk (inline)	symbol botlish_bgf_bgf_point_x; (ffi::c::Ptr[bgf_point]) -> ffi::c::Int
-function	bgf_half	unsupported		double	parameter 1 (x): double; result: double
+function	bgf_half	thunk	bgf::thunks::bgf	thunk (inline)	symbol botlish_bgf_bgf_half; (ffi::c::Double) -> ffi::c::Double
 macro	bgf_get	thunk	bgf::thunks::bgf	thunk (stub)	symbol botlish_bgf_bgf_get; (ffi::c::Int) -> ffi::c::Int
 function	bgf_shadowed	thunk	bgf::thunks::bgf	thunk (macro-shadow: call wrapper: computed arguments)	symbol botlish_bgf_bgf_shadowed; (ffi::c::Int) -> ffi::c::Int
 function	bgf_linux_only	direct	bgf::bgf	direct	symbol bgf_linux_only; () -> ffi::c::Int
@@ -48,6 +48,13 @@ function	bgf_frames	direct	bgf::records	direct	symbol bgf_frames; (ffi::c::Ptr[f
 function	bgf_node_first	direct	bgf::records	direct	symbol bgf_node_first; () -> ffi::c::Ptr[bgf_node]
 function	bgf_chars_length	direct	bgf::records	direct	symbol bgf_chars_length; (ffi::c::Ptr[bgf_chars]) -> ffi::c::Int
 function	bgf_secret_open	direct	bgf::records	direct	symbol bgf_secret_open; () -> ffi::c::Ptr[bgf_secret]
+function	bgf_scale32	direct	bgf::bgf	direct	symbol bgf_scale32; (ffi::c::Float, ffi::c::Double) -> ffi::c::Float
+function	bgf_dot	direct	bgf::bgf	direct	symbol bgf_dot; (ffi::c::Ptr[ffi::c::Float], ffi::c::Ptr[ffi::c::Double], ffi::c::ULong) -> ffi::c::Double
+function	bgf_apply_float	direct	bgf::bgf	direct	symbol bgf_apply_float; (ffi::c::FnPtr[Fn{args: [ffi::c::Float], return: ffi::c::Float}], ffi::c::Float) -> ffi::c::Float
+function	bgf_halver	direct	bgf::bgf	direct	symbol bgf_halver; () -> ffi::c::FnPtr[Fn{args: [ffi::c::Float], return: ffi::c::Float}]
+function	bgf_sum_mixed	direct	bgf::bgf	direct	symbol bgf_sum_mixed; (ffi::c::Ptr[bgf_mixed_floats]) -> ffi::c::Double
+function	bgf_long_scale	unsupported		long-double	parameter 1 (x): long double: its representation is the target's (binary64, x87 extended precision or binary128), and neither the FFI nor Botlish has a type of it; result: long double: its representation is the target's (binary64, x87 extended precision or binary128), and neither the FFI nor Botlish has a type of it
+function	bgf_long_ptr	unsupported		long-double	parameter 1 (x): a pointer to long double: its representation is the target's (binary64, x87 extended precision or binary128), and neither the FFI nor Botlish has a type of it
 macro	BGF_UINT64_C	unsupported		macro-needs-signature	a function-like macro (expression; paste): no signature of its own
 macro	BGF_TWICE	thunk	bgf::thunks::bgf	thunk (macro)	symbol botlish_bgf_BGF_TWICE; (ffi::c::Int) -> ffi::c::Int
 macro	bgf_legacy	alias	bgf::bgf	alias of bgf_current	symbol bgf_current; (ffi::c::Int) -> ffi::c::Int
@@ -71,7 +78,7 @@ macro	BGF_FLAG_ALL	constant	bgf::bgf	ffi::c::UInt	unsigned int 3
 macro	BGF_BIG	constant	bgf::bgf	ffi::c::ULong	unsigned long 18446744073709551615
 macro	BGF_NEGATIVE	constant	bgf::bgf	ffi::c::Int	int -42
 macro	BGF_SIZE_NONE	constant	bgf::bgf	ffi::c::Long	long -1
-macro	BGF_HALF	unsupported		double	a double constant
+macro	BGF_HALF	unsupported		floating-constant	a double constant: the generator binds integer constants only
 macro	BGF_NAME	not-constant		string-literal	constant: string literal
 macro	BGF_NULL_HANDLE	unsupported		not-integer-constant	its type is no C integer type (a pointer or another type)
 macro	BGF_CHAR	constant	bgf::bgf	ffi::c::Int	int 120
@@ -87,10 +94,13 @@ typedef	bgf_flags	scalar		ffi::c::UInt	an ABI alias of C unsigned int
 typedef	bgf_handle	opaque	bgf::ctypes	identity bgf_handle	struct bgf_handle
 typedef	bgf_window_ref	pointer		ffi::c::Ptr[bgf_window]	struct bgf_window_ *
 typedef	bgf_window	opaque	bgf::ctypes	identity bgf_window	struct bgf_window_
+typedef	bgf_scalar32	other		ffi::c::Float	float
+typedef	bgf_real32	other		ffi::c::Float	float
+typedef	bgf_scalar64	other		ffi::c::Double	double
 typedef	bgf_color	scalar		ffi::c::UInt	enum bgf_color, C unsigned int on this target
 typedef	bgf_visit	callback		ffi::c::FnPtr[Fn{args: [ffi::c::Ptr[ffi::c::Void], ffi::c::Ptr[bgf_handle], ffi::c::Int], return: ffi::c::Int}]	int (*)(void *userdata, bgf_handle *handle, int depth)
 typedef	bgf_free_fn	callback		ffi::c::FnPtr[Fn{args: [ffi::c::Ptr[ffi::c::Void]], return: unit}]	void (void *pointer)
-typedef	bgf_measure	unsupported		unsupported-callback-signature	callback argument 1: double (double); callback result: double (double)
+typedef	bgf_measure	unsupported		unsupported-callback-signature	callback argument 1: long double: its representation is the target's (binary64, x87 extended precision or binary128), and neither the FFI nor Botlish has a type of it (long-double); callback result: long double: its representation is the target's (binary64, x87 extended precision or binary128), and neither the FFI nor Botlish has a type of it (long-double)
 typedef	bgf_point	opaque	bgf::ctypes	identity bgf_point	struct bgf_point
 typedef	bgf_pair	unused		struct bgf_pair	no bound signature points to it
 typedef	bgf_twin	opaque	bgf::ctypes	identity bgf_twin	struct bgf_other
@@ -166,10 +176,17 @@ typedef	bgf_holds_bitsu	unused		struct bgf_holds_bitsu	no bound signature points
 typedef	bgf_nums2	unused		struct bgf_nums2	no bound signature points to it
 typedef	bgf_anon_float	unused		struct bgf_anon_float	no bound signature points to it
 typedef	bgf_bits_overlay	unused		struct bgf_bits_overlay	no bound signature points to it
+typedef	bgf_mixed_floats	opaque	bgf::ctypes	identity bgf_mixed_floats	struct bgf_mixed_floats
+typedef	bgf_mixed_real	unused		struct bgf_mixed_real	no bound signature points to it
+typedef	bgf_samples	unused		struct bgf_samples	no bound signature points to it
+typedef	bgf_fnum	unused		union bgf_fnum	no bound signature points to it
+typedef	bgf_anon_fnum	unused		struct bgf_anon_fnum	no bound signature points to it
+typedef	bgf_float_fn	callback		ffi::c::FnPtr[Fn{args: [ffi::c::Float], return: ffi::c::Float}]	float (*)(float x)
 tag	struct List	unused		complete	no bound signature points to it
 tag	struct bgf_aligned	unused		complete	no bound signature points to it
 tag	struct bgf_aligned_field	unused		complete	no bound signature points to it
 tag	struct bgf_anon_float	unused		complete	no bound signature points to it
+tag	struct bgf_anon_fnum	unused		complete	no bound signature points to it
 tag	struct bgf_anon_tail	unused		complete	no bound signature points to it
 tag	struct bgf_bad_callback	unused		complete	no bound signature points to it
 tag	struct bgf_bits	unused		complete	no bound signature points to it
@@ -194,6 +211,8 @@ tag	struct bgf_longs	unused		complete	no bound signature points to it
 tag	struct bgf_matrix	unused		complete	no bound signature points to it
 tag	struct bgf_member_anon	unused		complete	no bound signature points to it
 tag	struct bgf_mixed	unused		complete	no bound signature points to it
+tag	struct bgf_mixed_floats	opaque	bgf::ctypes	complete, behind pointers	identity bgf_mixed_floats
+tag	struct bgf_mixed_real	unused		complete	no bound signature points to it
 tag	struct bgf_ms_field	unused		complete	no bound signature points to it
 tag	struct bgf_multi	unused		complete	no bound signature points to it
 tag	struct bgf_nested_packed	unused		complete	no bound signature points to it
@@ -216,6 +235,7 @@ tag	struct bgf_promoted	unused		complete	no bound signature points to it
 tag	struct bgf_ptrs3	unused		complete	no bound signature points to it
 tag	struct bgf_real	unused		complete	no bound signature points to it
 tag	struct bgf_rect	opaque	bgf::ctypes	complete, behind pointers	identity bgf_rect
+tag	struct bgf_samples	unused		complete	no bound signature points to it
 tag	struct bgf_scalars	unused		complete	no bound signature points to it
 tag	struct bgf_secret	opaque	bgf::ctypes	incomplete	identity bgf_secret
 tag	struct bgf_table	unused		complete	no bound signature points to it
@@ -232,6 +252,7 @@ tag	struct bgf_words3	unused		complete	no bound signature points to it
 tag	union bgf_aligned_u	unused		complete	no bound signature points to it
 tag	union bgf_bitsu	unused		complete	no bound signature points to it
 tag	union bgf_flagu	unused		complete	no bound signature points to it
+tag	union bgf_fnum	unused		complete	no bound signature points to it
 tag	union bgf_kwu	unused		complete	no bound signature points to it
 tag	union bgf_large	unused		complete	no bound signature points to it
 tag	union bgf_num	unused		complete	no bound signature points to it
@@ -278,13 +299,13 @@ record	struct bgf_tagged	layout-direct	bgf::layouts	bgf_tagged	sizeof 16, _Align
 record	union anon@bgf_records.h:189	layout-direct	bgf::layouts	bgf_overlay_member2	sizeof 8, _Alignof 8, 2 fields
 record	struct bgf_overlay	layout-direct	bgf::layouts	bgf_overlay	sizeof 16, _Alignof 8, 2 fields
 record	struct bgf_bits	layout-blocked		bitfield	field a: bitfield a: unsigned int : 3; field b: bitfield b: unsigned int : 5
-record	struct bgf_real	layout-blocked		double,float	field f: float (float); field d: double (double)
-record	struct bgf_ld	layout-blocked		long-double	field x: long double (long double)
+record	struct bgf_real	layout-direct	bgf::layouts	bgf_real	sizeof 16, _Alignof 8, 2 fields
+record	struct bgf_ld	layout-blocked		long-double	field x: long double: its representation is the target's (binary64, x87 extended precision or binary128), and neither the FFI nor Botlish has a type of it
 record	struct bgf_flag	layout-blocked		c-bool	field ok: C _Bool (_Bool)
 record	struct bgf_vol	layout-blocked		volatile	field counter: a volatile field: volatile int
 record	struct bgf_wide_field	layout-blocked		typedef-abi-mismatch	field w: typedef bgf_wide is unsigned long by its declaration, but the compiler gives it no C integer type of the table (16 bytes): an attribute or extension changes it
-record	struct bgf_float_ptr	layout-blocked		unsupported-pointer	field values: a pointer to float (float)
-record	struct bgf_bad_callback	layout-blocked		unsupported-pointer	field measure: callback argument 1: double (double) (unsupported-callback-signature); callback result: double (double) (unsupported-callback-signature)
+record	struct bgf_float_ptr	layout-direct	bgf::layouts	bgf_float_ptr	sizeof 16, _Alignof 8, 2 fields
+record	struct bgf_bad_callback	layout-blocked		unsupported-pointer	field measure: callback argument 1: long double: its representation is the target's (binary64, x87 extended precision or binary128), and neither the FFI nor Botlish has a type of it (long-double) (unsupported-callback-signature); callback result: long double: its representation is the target's (binary64, x87 extended precision or binary128), and neither the FFI nor Botlish has a type of it (long-double) (unsupported-callback-signature)
 record	struct bgf_ms_field	layout-blocked		unsupported-calling-convention	field cb: an explicit calling convention: ms_abi
 record	struct bgf_outer_blocked	layout-direct	bgf::layouts	bgf_outer_blocked	sizeof 24, _Alignof 4, 2 fields
 record	struct bgf_chain2	layout-direct	bgf::layouts	bgf_chain2	sizeof 32, _Alignof 8, 2 fields
@@ -316,15 +337,21 @@ record	struct bgf_anon_tail	layout-direct	bgf::layouts	bgf_anon_tail	sizeof 16, 
 record	union anon@bgf_records.h:270	layout-direct	bgf::layouts	bgf_two_anon_member1	sizeof 4, _Alignof 4, 2 fields
 record	union anon@bgf_records.h:270#2	layout-direct	bgf::layouts	bgf_two_anon_member2	sizeof 8, _Alignof 8, 2 fields
 record	struct bgf_two_anon	layout-direct	bgf::layouts	bgf_two_anon	sizeof 16, _Alignof 8, 2 fields
-record	union bgf_num	layout-blocked		float	field f: float (float)
+record	union bgf_num	layout-blocked		long-double	field f: long double: its representation is the target's (binary64, x87 extended precision or binary128), and neither the FFI nor Botlish has a type of it
 record	union bgf_flagu	layout-blocked		c-bool	field b: C _Bool (_Bool)
 record	union bgf_bitsu	layout-blocked		nested-layout-blocked	field bits (struct bgf_bits, union-member) -> bitfield
 record	struct bgf_holds_bitsu	layout-blocked		nested-layout-blocked	field u (union bgf_bitsu, field) -> struct bgf_bits -> bitfield
-record	struct bgf_nums2	layout-blocked		nested-layout-blocked	field nums (union bgf_num, array-element) -> float
-record	union anon@bgf_records.h:281	layout-blocked		float	field f: float (float)
-record	struct bgf_anon_float	layout-blocked		nested-layout-blocked	member2 (union anon@bgf_records.h:281, anonymous-member) -> float
+record	struct bgf_nums2	layout-blocked		nested-layout-blocked	field nums (union bgf_num, array-element) -> long-double
+record	union anon@bgf_records.h:281	layout-blocked		long-double	field f: long double: its representation is the target's (binary64, x87 extended precision or binary128), and neither the FFI nor Botlish has a type of it
+record	struct bgf_anon_float	layout-blocked		nested-layout-blocked	member2 (union anon@bgf_records.h:281, anonymous-member) -> long-double
 record	union anon@bgf_records.h:282	layout-unheld		bgf_bits_overlay_member2	an anonymous member of struct bgf_bits_overlay, whose layout is blocked: representable, not emitted
 record	struct bgf_bits_overlay	layout-blocked		bitfield	field flag: bitfield flag: unsigned int : 1
+record	struct bgf_mixed_floats	layout-direct	bgf::layouts	bgf_mixed_floats	sizeof 24, _Alignof 8, 4 fields
+record	struct bgf_mixed_real	layout-direct	bgf::layouts	bgf_mixed_real	sizeof 32, _Alignof 8, 5 fields
+record	struct bgf_samples	layout-direct	bgf::layouts	bgf_samples	sizeof 56, _Alignof 8, 3 fields
+record	union bgf_fnum	layout-direct	bgf::layouts	bgf_fnum	sizeof 8, _Alignof 8, 3 fields
+record	union anon@bgf_records.h:301	layout-direct	bgf::layouts	bgf_anon_fnum_member2	sizeof 4, _Alignof 4, 2 fields
+record	struct bgf_anon_fnum	layout-direct	bgf::layouts	bgf_anon_fnum	sizeof 8, _Alignof 4, 2 fields
 record	struct bgf_handle	opaque-only		incomplete	no definition: a pointee identity only
 record	struct bgf_other	opaque-only		incomplete	no definition: a pointee identity only
 record	struct bgf_secret	opaque-only		incomplete	no definition: a pointee identity only

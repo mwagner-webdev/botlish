@@ -484,6 +484,18 @@ linux::io program (`io-tcl-backends`). A substitute context implementing
 `io::IO` without Linux runs the portable API on every backend
 (`io-substitute-context`).
 
+**macOS** (lib/darwin/io.bot, MACOS-AARCH64-MILESTONE-8.md): `DarwinIO`,
+the opaque context of the three standard descriptors, implements `IO` with
+the same two functions over `darwin::write`, which calls libSystem's
+`write(2)` through the C FFI (no syscall), and the same `write_all` policy:
+short writes completed, -1 (EINTR and EAGAIN included) and no progress
+`WriteFailed`. Nothing in lib/io.bot changed: satisfaction reads DarwinIO's
+own module, and a program selects whichever context it installs
+(examples/io/hello-darwin.bot is hello.bot with `darwin::io::create()`;
+`hello` compiles to `hello<io::IO=darwin::io::DarwinIO>`). Its short-write
+and failure evidence comes from a dyld interposer of libSystem's `write`
+(tests/cffi/write-inject.c), macOS's stand-in for strace's injection.
+
 **`write_file_text` is deliberately not here.** Its implementation would have
 to be chosen jointly by the context witness and the `Path` witness (a Linux
 context must not accept a `WindowsPath` merely because both are textual
@@ -495,7 +507,10 @@ the likely next I/O extension (multi-witness applicability).
 ## 9. Paths
 
 **`linux::path::LinuxPath`** (lib/linux/path.bot) is an ordinary source
-refinement:
+refinement (its macOS sibling, `darwin::path::DarwinPath` in
+lib/darwin/path.bot, is the same proposition for libSystem's pathnames, with
+the same functions, and satisfies `io::path::Path` the same way; it is a
+type of its own, never LinuxPath: MACOS-AARCH64-MILESTONE-8.md, section 9):
 
 ```botlish
 refined type LinuxPath = str
@@ -790,7 +805,8 @@ See §16 items 56-60.
   rather than removed.
 * **No format strings**: `$"..."` does not exist in Botlish; examples use
   `str::concat`. A refined String is a String wherever one is accepted.
-* **The Tcl backends cannot run Linux output** (NATIVE-ONLY), as before.
+* **The Tcl backends cannot run Linux or Darwin output** (NATIVE-ONLY), as
+  before: a C call, like a syscall, needs the native backends.
 * **Pre-existing METHOD-ELIGIBLE warnings** of lib/linux/io.bot's original
   `write`, `write_error` and `read` (frozen corpus) still print for programs
   loading `linux::io`; the new library code is warning-free.

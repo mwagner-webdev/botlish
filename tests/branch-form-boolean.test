@@ -304,7 +304,7 @@ test bf-nir-range-decided-operand {an operand the instance's Ranges decide is no
     list [bfBools $body] [llength [bfBranches $body]] [lsearch -all -inline -regexp $body {^jump L[0-9]+$}]
 } -result {{0 0} 1 {{jump L2} {jump L2}}}
 
-test bf-nir-affine-rhs {a right operand that moves an affine value moves it only where it runs: the other path releases it, then jumps to its target} -body {
+test bf-nir-affine-rhs {a right operand that moves an affine value moves it only where it runs: the other path releases it, then jumps to its target} -constraints nativeCoroutines -body {
     set source "import coroutine\n\nfn ticker() -> int:\n    loop i from 0 to 1000:\n        yield i\n    return -1\n\nfn take(c: Coroutine{args: \[\], return: int}) -> bool:\n    c() > 0\n\nfn f(flag: bool) -> int:\n    coroutine {step: h} = ticker()\n    if flag and take(h):\n        1\n    else:\n        2\n\nfn g(flag: bool) -> int:\n    coroutine {step: h} = ticker()\n    if flag or take(h):\n        3\n    else:\n        4\n\n\[f(true), f(false), g(true), g(false)\]\n"
     set nir [native::nir [bfHir $source]]
     set f [bfNirBody $nir f]
@@ -406,7 +406,7 @@ fn drive(k: int):
 [drive(1), drive(5)]
 }
 
-test bf-order {left to right, each operand at most once, the right operand only when the left one does not decide: `false and _`, `true or _` skip it, `true and _`, `false or _` run it once; nested trees, not, != and a value-position `and` alike, with yields inside the operands} -body {
+test bf-order {left to right, each operand at most once, the right operand only when the left one does not decide: `false and _`, `true or _` skip it, `true and _`, `false or _` run it once; nested trees, not, != and a value-position `and` alike, with yields inside the operands} -constraints nativeCoroutines -body {
     bfValue $::bfOrderSource
 } -result {[[[1], [[3], [5], [6], [7], [8], [9], [10], [11], [12], [13], [14], [15], [16], [17], [19], [20], [21], [11, 12, 15, 17, 19, 20, 22, 25, 27, 29]]], [[1], [[3], [5], [6], [7], [8], [9], [10], [11], [12], [13], [14], [15], [16], [17], [18], [20], [21], [11, 12, 15, 17, 19, 20, 22, 25, 26, 29]]]]}
 
@@ -550,7 +550,7 @@ test bf-lowering-work-linear {the work of lowering a conjunction grows linearly 
         [expr {([lindex $b 1] - [lindex $a 1]) / 60 <= 8}]
 } -result {1 1 1}
 
-test bf-beyond-proof-budget {a condition far past the proof's node budget still evaluates exactly, each operand once and in order (log yields), and short-circuits at the first false operand} -body {
+test bf-beyond-proof-budget {a condition far past the proof's node budget still evaluates exactly, each operand once and in order (log yields), and short-circuits at the first false operand} -constraints nativeCoroutines -body {
     set ops {}
     for {set i 1} {$i <= 120} {incr i} {
         lappend ops "log($i, $i != k)"

@@ -5,7 +5,9 @@ name: single executable
 # backend, -emit-native-executable included. Built on every push to main
 # (merges included), smoke-tested in stock Ubuntu containers -- no Tcl, Rust,
 # C compiler or linker installed -- and uploaded as the workflow run's
-# `botlish-linux-x86_64` artifact.
+# `botlish-linux-x86_64` artifact. A build of main that passes every smoke
+# test is then published as the `single-latest` release's
+# `botlish-linux-x86_64` asset, which the README's download button links to.
 
 on:
   push:
@@ -82,3 +84,64 @@ jobs:
         run: |
           chmod +x dist/botlish
           single/smoke-test.sh dist/botlish
+
+  # The README's download button: a rolling prerelease whose tag and asset
+  # follow main. Run artifacts need a GitHub login to download and expire;
+  # a release asset has a stable URL anyone can fetch:
+  #   https://github.com/OWNER/REPO/releases/download/single-latest/botlish-linux-x86_64
+  release:
+    name: publish the latest build
+    needs: [build, smoke]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # One publication at a time, never cancelled, so two pushes in quick
+    # succession cannot interleave their tag move and upload.
+    concurrency:
+      group: single-executable-release
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: single-latest
+      ASSET: botlish-linux-x86_64
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: botlish-linux-x86_64
+          path: dist
+
+      - name: Publish to the single-latest release
+        run: |
+          set -euo pipefail
+          # Builds of main can finish out of order: never replace the build
+          # of a later commit with an earlier one. (A tag left on a commit
+          # main no longer holds, after a force push, is "diverged" and is
+          # replaced.)
+          if old=$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq .object.sha 2>/dev/null); then
+            if [ "$(gh api "repos/$GH_REPO/compare/$old...$GITHUB_SHA" --jq .status)" = behind ]; then
+              echo "$TAG already holds $old, a later commit than $GITHUB_SHA: left as it is."
+              exit 0
+            fi
+            gh api --method PATCH "repos/$GH_REPO/git/refs/tags/$TAG" \
+              -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          fi
+
+          cd dist
+          mv botlish "$ASSET"
+          sha256sum "$ASSET" >"$ASSET.sha256"
+          notes="The single-file Botlish compiler (docs/SINGLE-EXECUTABLE.md): one Linux x86-64 executable that needs nothing but glibc 2.39 or newer -- no Tcl, Rust, C compiler or linker. Built from main at $GITHUB_SHA by $GITHUB_SERVER_URL/$GH_REPO/actions/runs/$GITHUB_RUN_ID and replaced on every push to main whose build passes the smoke tests.
+
+          Programs that call C (extern c fn) are refused at the native link for now: the single-file compiler links with the stub linker, which links no C library.
+
+              curl -fLo botlish $GITHUB_SERVER_URL/$GH_REPO/releases/download/$TAG/$ASSET
+              chmod +x botlish
+              ./botlish -help"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ASSET" "$ASSET.sha256" --clobber
+            gh release edit "$TAG" --notes "$notes"
+          else
+            gh release create "$TAG" "$ASSET" "$ASSET.sha256" --target "$GITHUB_SHA" \
+              --prerelease --title "Botlish single-file compiler (latest main)" --notes "$notes"
+          fi

@@ -925,9 +925,12 @@ proc hir::affine::Flow {hirVar e state} {
                     return dead
                 }
             }
-            if {[dict get $node kind] eq "call"} {
+            if {[dict get $node kind] eq "call" || [FloatRead $hir $e]} {
                 # Where a declared error this call propagates leaves
                 # (ExitReleases): the call itself runs after its operands.
+                # (So does a C floating field read through a native view,
+                # which may fail with NonFiniteFloat: C-FLOAT-FFI-
+                # MILESTONE-1.md.)
                 dict set exitStates $e $state
             }
         }
@@ -1647,7 +1650,7 @@ proc hir::affine::ExitReleases {hir parent scopes} {
     }
     # Explicit exits first: a call in an exit's value runs after the exit
     # released what the value does not refer to.
-    set kinds [dict create return 0 fail 0 break 0 continue 0 call 1]
+    set kinds [dict create return 0 fail 0 break 0 continue 0 call 1 project 1]
     set order [lsort -command [list apply {{kinds a b} {
         expr {[dict get $kinds [lindex $a 1]] - [dict get $kinds [lindex $b 1]]}
     }} $kinds] [lmap x [dict keys $exitStates] {list $x [dict get $hir exprs $x kind]}]]
@@ -1696,7 +1699,7 @@ proc hir::affine::ExitReleases {hir parent scopes} {
                     }
                 }
             }
-            call {
+            call - project {
                 if {[dict exists $tails $x]} {
                     # A self tail call: the backends that restart the
                     # function for it cannot catch around it (its exit
@@ -1704,8 +1707,16 @@ proc hir::affine::ExitReleases {hir parent scopes} {
                     continue
                 }
                 set at $x
-                set names [dict getdef $node calleeErrors {}]
-                if {$erased ne {} && [hir::completions::mayLetErasedThrough $hir $x $transparent]} {
+                if {[dict get $node kind] eq "project"} {
+                    # A C floating field read (FloatRead): it becomes the
+                    # call binary#view_field of the same expression after the
+                    # checks, whose error edge this is.
+                    set names {NonFiniteFloat}
+                } else {
+                    set names [dict getdef $node calleeErrors {}]
+                }
+                if {$erased ne {} && [dict get $node kind] eq "call"
+                        && [hir::completions::mayLetErasedThrough $hir $x $transparent]} {
                     set names [lsort -unique [concat $names $erased]]
                 }
                 lassign [dict get $parent $x] p
@@ -1739,6 +1750,15 @@ proc hir::affine::ExitReleases {hir parent scopes} {
     return [list $exits $errorExits]
 }
 
+# 1 if expression E is a projection that reads a C floating field through
+# a native view or edit (hir::layouts::ProjectionReadsFloat): the one
+# projection with an error edge, NonFiniteFloat (C-FLOAT-FFI-MILESTONE-1.md).
+proc hir::affine::FloatRead {hir e} {
+    set node [dict get $hir exprs $e]
+    return [expr {[dict get $node kind] eq "project"
+        && [hir::layouts::ProjectionReadsFloat [hir::typeOf $hir [dict get $node receiver]] [dict get $node name]]}]
+}
+
 # 1 if the analysis may still owe releases with no binding scope: pending
 # temporaries exist only in an accepted program whose releases are not
 # written out already.
@@ -1762,14 +1782,15 @@ proc hir::affine::RefsIn {hir e} {
     return $result
 }
 
-# The call ExprIds in the subtree of expression E.
+# The call ExprIds in the subtree of expression E (and the C floating
+# field reads, which have an error edge like a call's: FloatRead).
 proc hir::affine::CallsIn {hir e} {
     set result {}
     set work [list $e]
     while {$work ne {}} {
         set x [lindex $work end]
         set work [lrange $work 0 end-1]
-        if {[dict get $hir exprs $x kind] eq "call"} {
+        if {[dict get $hir exprs $x kind] eq "call" || [FloatRead $hir $x]} {
             lappend result $x
         }
         lappend work {*}[hir::children $hir $x]

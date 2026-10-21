@@ -448,6 +448,51 @@ int bcf_available(void) {
 #endif
 
 /* ---------------------------------------------------------------------------
+ * Byte borrowing through real C (tests/c-byte-borrowing.test,
+ * MACOS-AARCH64-MILESTONE-7.md): what C reads and writes through a
+ * temporary exposure of Botlish byte storage, and the address it is given. */
+
+/* Two sums of DATA's COUNT bytes in one word: the plain sum (low 32 bits)
+ * and the position-weighted sum of (i + 1) * byte i (high 32 bits), each
+ * mod 2^32 -- a byte read wrong, skipped, read twice or out of order
+ * changes it. */
+unsigned long long bcf_checksum(const unsigned char *data, unsigned long count) {
+    uint32_t plain = 0, weighted = 0;
+    for (unsigned long i = 0; i < count; i++) {
+        plain += data[i];
+        weighted += (uint32_t)(i + 1) * data[i];
+    }
+    return ((unsigned long long)weighted << 32) | plain;
+}
+
+/* The address C was given, as an integer: never dereferenced. */
+unsigned long long bcf_address_of(const void *p) { return (unsigned long long)(uintptr_t)p; }
+
+/* BYTE at offsets [FROM, TO) of OUT; every other byte as it was. */
+void bcf_fill_range(unsigned char *out, unsigned long from, unsigned long to, unsigned char byte) {
+    for (unsigned long i = from; i < to; i++) {
+        out[i] = byte;
+    }
+}
+
+/* Two outputs of one call: A gets DATA's COUNT bytes, B their complements. */
+void bcf_split(const unsigned char *data, unsigned long count, unsigned char *a, unsigned char *b) {
+    for (unsigned long i = 0; i < count; i++) {
+        a[i] = data[i];
+        b[i] = (unsigned char)~data[i];
+    }
+}
+
+/* A C failure sentinel after a partial write: bcf_fill's pattern into the
+ * first min(COUNT, LIMIT) bytes of OUT, then -1 when COUNT exceeds LIMIT
+ * (some bytes written, the request refused), else COUNT. */
+long bcf_fill_upto(unsigned char *out, unsigned long count, unsigned long limit, unsigned char seed) {
+    unsigned long n = count < limit ? count : limit;
+    bcf_fill(out, n, seed);
+    return count > limit ? -1 : (long)count;
+}
+
+/* ---------------------------------------------------------------------------
  * Variadic C functions (VARIADICS-VERTICAL-SLICE-1.md): genuine variadic
  * callees, compiled by the host's own C compiler, reading every trailing
  * argument with va_arg as the type their fixed arguments say -- the

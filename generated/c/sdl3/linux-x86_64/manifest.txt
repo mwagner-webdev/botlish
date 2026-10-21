@@ -73,44 +73,44 @@ header include/SDL3/SDL_touch.h 99f027fa
 header include/SDL3/SDL_tray.h 380205fe
 header include/SDL3/SDL_version.h 19dc7d48
 header include/SDL3/SDL_video.h 8c3dde2c
-shim_library botlish_shim_sdl3_92412515
-file layouts-check.c 716 3b993478
-file layouts.tsv 1030 64085056
-file report.tsv 5001 c042fc98
-file report.txt 167 652d582c
+shim_library botlish_shim_sdl3_6de904a8
+file layouts-check.c 883 1090abc6
+file layouts.tsv 1030 24d4bf49
+file report.tsv 5001 38a409be
+file report.txt 156 ecf64b7c
 file sdl3/assert.bot 47 8b377971
 file sdl3/asyncio.bot 82 cab0c358
 file sdl3/atomic.bot 84 43b3ce0b
-file sdl3/audio.bot 298 580b4f1c
+file sdl3/audio.bot 345 6e5d7447
 file sdl3/blendmode.bot 43 680bb10c
 file sdl3/camera.bot 80 ce376155
 file sdl3/clipboard.bot 50 cdcd69c7
 file sdl3/cpuinfo.bot 66 960b0897
-file sdl3/ctypes.bot 451 2bdce235
+file sdl3/ctypes.bot 459 7cc0fea2
 file sdl3/dialog.bot 50 cfc0a4b5
 file sdl3/dlopennote.bot 6 be902072
 file sdl3/endian.bot 9 af32c796
 file sdl3/error_h.bot 21 8eea67fc
 file sdl3/events.bot 236 cf5ed863
 file sdl3/filesystem.bot 85 6ad6056d
-file sdl3/gamepad.bot 389 38400035
+file sdl3/gamepad.bot 414 3eaf8064
 file sdl3/gpu.bot 892 b890e558
-file sdl3/haptic.bot 166 5f78569f
+file sdl3/haptic.bot 173 a0644a22
 file sdl3/hidapi.bot 147 ec3b90dc
 file sdl3/hints.bot 54 96cd595e
 file sdl3/init.bot 63 e68b3b9d
 file sdl3/iostream.bot 290 88784dce
-file sdl3/joystick.bot 295 0473a3c0
+file sdl3/joystick.bot 315 00ab9c38
 file sdl3/keyboard.bot 118 32c0e37d
 file sdl3/keycode.bot 282 66027dc2
-file sdl3/layouts.bot 921 695fdbfa
+file sdl3/layouts.bot 1133 01c54f1a
 file sdl3/loadso.bot 21 523cb8e2
 file sdl3/locale.bot 12 4c662830
 file sdl3/log.bot 140 87196bb7
 file sdl3/messagebox.bot 36 4c1fc565
 file sdl3/metal.bot 18 e51f4f36
 file sdl3/misc.bot 9 07771609
-file sdl3/mouse.bot 118 4acdd3f0
+file sdl3/mouse.bot 155 e108c4ca
 file sdl3/mutex.bot 116 5eb6390e
 file sdl3/pen.bot 35 92ca84dd
 file sdl3/pixels.bot 289 58f85e53
@@ -118,26 +118,27 @@ file sdl3/platform.bot 9 c909da66
 file sdl3/platform_defines.bot 7 1823489a
 file sdl3/power.bot 21 02e47325
 file sdl3/process.bot 62 41fe196b
-file sdl3/properties.bot 126 eb7c2f8d
-file sdl3/rect.bot 72 f9349e4d
-file sdl3/render.bot 524 ff3b1155
+file sdl3/properties.bot 140 b0894775
+file sdl3/rect.bot 81 4e54630f
+file sdl3/render.bot 717 e4ab6025
 file sdl3/scancode.bot 256 dfc00c19
-file sdl3/sensor.bot 65 7e081d8f
-file sdl3/stdinc.bot 641 0ab6b227
+file sdl3/sensor.bot 72 3c88ff1a
+file sdl3/stdinc.bot 836 a6c0783c
 file sdl3/storage.bot 115 1e6b73cd
-file sdl3/surface.bot 425 572fc7f7
+file sdl3/surface.bot 486 dbe5af95
 file sdl3/system.bot 60 8cf70020
 file sdl3/thread.bot 75 e39779e2
-file sdl3/thunks/bits.bot 19 e69e7a8f
-file sdl3/thunks/rect.bot 50 a93858fb
-file sdl3/thunks/stdinc.bot 37 67462378
+file sdl3/thunks/bits.bot 19 94ee0d57
+file sdl3/thunks/endian.bot 12 8b6ecf84
+file sdl3/thunks/rect.bot 57 e6ef7732
+file sdl3/thunks/stdinc.bot 37 93534ab3
 file sdl3/time.bot 70 3a764923
 file sdl3/timer.bot 51 19dad3d3
 file sdl3/touch.bot 30 eb39044d
 file sdl3/tray.bot 132 617ea286
 file sdl3/version.bot 18 8e096f74
-file sdl3/video.bot 620 0b9ea033
-file shim.c 58 92412515
+file sdl3/video.bot 677 72e3e558
+file shim.c 66 6de904a8
 libraries sdl3/assert.bot SDL3
 libraries sdl3/asyncio.bot SDL3
 libraries sdl3/atomic.bot SDL3
@@ -181,9 +182,10 @@ libraries sdl3/storage.bot SDL3
 libraries sdl3/surface.bot SDL3
 libraries sdl3/system.bot SDL3
 libraries sdl3/thread.bot SDL3
-libraries sdl3/thunks/bits.bot {botlish_shim_sdl3_92412515 SDL3}
-libraries sdl3/thunks/rect.bot {botlish_shim_sdl3_92412515 SDL3}
-libraries sdl3/thunks/stdinc.bot {botlish_shim_sdl3_92412515 SDL3}
+libraries sdl3/thunks/bits.bot {botlish_shim_sdl3_6de904a8 SDL3}
+libraries sdl3/thunks/endian.bot {botlish_shim_sdl3_6de904a8 SDL3}
+libraries sdl3/thunks/rect.bot {botlish_shim_sdl3_6de904a8 SDL3}
+libraries sdl3/thunks/stdinc.bot {botlish_shim_sdl3_6de904a8 SDL3}
 libraries sdl3/time.bot SDL3
 libraries sdl3/timer.bot SDL3
 libraries sdl3/touch.bot SDL3
@@ -193,13 +195,13 @@ libraries sdl3/video.bot SDL3
 count alias 3
 count aliases 0
 count bool 506
-count boolOnly 457
-count callbacks 36
+count boolOnly 505
+count callbacks 38
 count complete 122
 count constants 1656
 count constantsSeen 1071
 count declared 1233
-count direct 1101
+count direct 1215
 count enumerators 1166
 count excluded 0
 count fnmacros 157
@@ -207,33 +209,30 @@ count fnptrTypedefs 35
 count inline 15
 count manual 2
 count opaque 43
-count proven 16
-count ptrParams 1388
-count ptrResults 261
+count proven 18
+count ptrParams 1520
+count ptrResults 262
 count resultAlias 0
 count resultIndependent 1
-count resultUnknown 260
+count resultUnknown 261
 count tablestubs 0
-count thunk 13
-count unknownParams 1370
-count unknownRetention 849
-count unsupported 288
-count views 225
+count thunk 15
+count unknownParams 1500
+count unknownRetention 913
+count unsupported 172
+count views 244
 blocked by-value-aggregate 8
-blocked double 27
-blocked float 87
 blocked macro-needs-signature 113
-blocked unsupported-callback-signature 2
 blocked unsupported-macro 44
 blocked va-list 7
 layout_abi linux-x86_64 clang x86_64-linux-gnu {Ubuntu clang version 18.1.3 (1ubuntu1)}
 layout_count anonymous 5
-layout_count blocked 42
-layout_count blockedDirect 38
-layout_count blockedStructs 41
-layout_count blockedTransitive 4
+layout_count blocked 24
+layout_count blockedDirect 21
+layout_count blockedStructs 23
+layout_count blockedTransitive 3
 layout_count blockedUnions 1
-layout_count emitted 85
+layout_count emitted 103
 layout_count emittedSynthetic 0
 layout_count emittedUnions 3
 layout_count incomplete 43
@@ -245,8 +244,7 @@ layout_count system 0
 layout_count unheld 0
 layout_count unions 4
 layout_blocked c-bool 21
-layout_blocked float 23
-layout_blocked nested-layout-blocked 6
+layout_blocked nested-layout-blocked 3
 contract SDL_size_mul_check_overflow ret {escape proven-noescape access write} compiler {nocapture writeonly}
 contract SDL_size_mul_check_overflow_builtin ret {escape proven-noescape access write} compiler {nocapture writeonly}
 contract SDL_size_add_check_overflow ret {escape proven-noescape access write} compiler {nocapture writeonly}
@@ -261,6 +259,8 @@ contract SDL_RectsEqual b {access read} compiler readonly
 contract SDL_PointInRectFloat p {access read} compiler readonly
 contract SDL_PointInRectFloat r {access read} compiler readonly
 contract SDL_RectEmptyFloat r {access read} compiler readonly
+contract SDL_RectsEqualEpsilon a {access read} compiler readonly
+contract SDL_RectsEqualEpsilon b {access read} compiler readonly
 contract SDL_RectsEqualFloat a {access read} compiler readonly
 contract SDL_RectsEqualFloat b {access read} compiler readonly
 contract SDL_CreateWindow title {access read escape declared-noescape} manual {contract SDL_CreateWindow}

@@ -1,0 +1,745 @@
+# darwin-io.test -- Darwin I/O through libSystem: the macOS platform
+# namespace `darwin` (lib/darwin.bot, lib/darwin/io.bot, lib/darwin/path.bot)
+# and the portable io::IO through its DarwinIO context
+# (MACOS-AARCH64-MILESTONE-8.md):
+#
+#   import io
+#   import darwin::io
+#
+#   fn hello() errors io::WriteFailed:
+#       io::print_line("Hello, world!")
+#
+#   with context darwin::io::create()
+#   hello()
+#
+# hello is examples/io/hello.bot's function, unchanged; only the installed
+# context differs. io::print_line requires io::IO, DarwinIO is the one
+# installed context implementing it, and the call compiles to a direct call
+# of darwin::io::write_text, whose writes are C calls of libSystem's write --
+# no syscall, no compiler knowledge of I/O. Failures come back as C reports
+# them: -1 and the thread's errno, read through a native view of the int
+# __error() points to.
+#
+# Two kinds of test:
+#
+#   * the front end, on every host (programs compiled for macos-aarch64):
+#     the platform rule, the C contracts, the static context selection, the
+#     authority boundary, the Tcl backends' NATIVE-ONLY;
+#   * execution, where the darwin platform is the host's and C calls link
+#     (darwinIO: macOS arm64 today): standalone Mach-O executables and the
+#     native backends' linked runs, against the host's own headers, real
+#     descriptors, files of a private directory and a write(2) interposer
+#     (tests/cffi/write-inject.c) where the operating system would not fail
+#     on demand.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+
+interp recursionlimit {} 100000
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+testConstraint cCompiler [expr {[auto_execok cc] ne ""}]
+testConstraint posixShell [expr {[auto_execok sh] ne ""}]
+set ::hostTarget [core::cabi::hostTarget]
+# Darwin I/O runs (tests/helpers.tcl's darwinIO), with the native backend
+# built and its executables linked by rustc.
+testConstraint darwinIO [expr {[testConstraint darwinIO] && [testConstraint nativeBuilt] && [testConstraint rustcLinker]}]
+# The interposer library, where the darwin platform runs and a C compiler
+# builds dynamic libraries.
+testConstraint writeInject [expr {[testConstraint darwinIO] && [testConstraint cCompiler]}]
+
+set scratch [makeDirectory darwin-io-[pid]]
+set programCounter 0
+
+proc readBinary {path} {
+    set channel [open $path rb]
+    set data [read $channel]
+    close $channel
+    return $data
+}
+
+proc writeText {path text} {
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $text
+    close $channel
+}
+
+# The HIR of program TEXT, written as a program file in its own directory
+# (so library modules load, and application modules FILES beside it:
+# {NAME TEXT ...}), compiled for TARGET (macos-aarch64: the darwin platform's
+# target on every host).
+proc diHir {text {target macos-aarch64} {files {}}} {
+    set dir [file join $::scratch app[incr ::programCounter]]
+    file mkdir $dir
+    foreach {name body} $files {
+        writeText [file join $dir $name] $body
+    }
+    writeText [file join $dir main.bot] $text
+    return [surface::readProgramFile [file join $dir main.bot] -warnings off -cache "" -target $target]
+}
+
+# {KIND MESSAGE} of the first diagnostic compiling TEXT for TARGET (its
+# location removed), or accepted.
+proc diRejection {text {target macos-aarch64} {files {}}} {
+    if {[catch {diHir $text $target $files} message options]} {
+        regsub {^.*?:[0-9]+:[0-9]+: } [lindex [split $message \n] 0] {} message
+        return [list [lindex [dict get $options -errorcode] end] $message]
+    }
+    return accepted
+}
+
+# The standalone executable of TEXT (with application modules FILES): its
+# path.
+proc diExecutable {text {files {}}} {
+    set hir [diHir $text $::hostTarget $files]
+    set path [file join $::scratch exe[incr ::programCounter]]
+    return [native::executable $hir $path]
+}
+
+# {STDOUT STDERR STATUS} (bytes as binary strings; STATUS the exit status)
+# of one run of COMMAND, standard input from INPUT (a path; /dev/null by
+# default).
+proc diRun {command {input /dev/null}} {
+    set n [incr ::runCounter]
+    set out [file join $::scratch out.$n]
+    set err [file join $::scratch err.$n]
+    set status 0
+    if {[catch {exec {*}$command <$input >$out 2>$err} message options]} {
+        set code [dict get $options -errorcode]
+        set status [expr {[lindex $code 0] eq "CHILDSTATUS" ? [lindex $code end] : $message}]
+    }
+    return [list [readBinary $out] [readBinary $err] $status]
+}
+set runCounter 0
+
+# A file of BYTES (a binary string) in the scratch directory: its path.
+proc diInput {bytes} {
+    set path [file join $::scratch in[incr ::runCounter]]
+    set channel [open $path wb]
+    puts -nonewline $channel $bytes
+    close $channel
+    return $path
+}
+
+# Text as UTF-8 bytes, for comparing with diRun's output.
+proc utf8 {text} {
+    return [encoding convertto utf-8 $text]
+}
+
+# The NIR body of function NAME (instruction lines, origins removed).
+proc nirBody {nir name} {
+    set lines {}
+    set inside 0
+    foreach line [split $nir \n] {
+        if {[string match "func *" $line]} {
+            set inside [string match "func * \"$name\" *" $line]
+            continue
+        }
+        if {$line eq "end"} {
+            set inside 0
+            continue
+        }
+        if {$inside} {
+            lappend lines [string trim [regsub -all {@e[0-9]+} $line ""]]
+        }
+    }
+    return $lines
+}
+
+proc nirId {nir name} {
+    foreach line [split $nir \n] {
+        if {[string match "func * \"$name\" *" $line]} {
+            return [lindex $line 1]
+        }
+    }
+    return ""
+}
+
+set helloLinux [core::ReadFile [file join $::projectRoot examples io hello.bot]]
+set helloDarwin [core::ReadFile [file join $::projectRoot examples io hello-darwin.bot]]
+
+# Every portable operation, UTF-8 beyond ASCII, routed to stdout and stderr;
+# the program's value says whether a WriteFailed reached it.
+set routingText {import io
+import darwin::io
+
+fn emit_all() -> str errors io::WriteFailed:
+    io::print("out:")
+    io::print_line(" é 𝄞")
+    io::write_error("err:")
+    io::write_error_line(" done")
+    "ok"
+
+with context darwin::io::create()
+
+emit_all():
+    on io::WriteFailed:
+        "failed"
+}
+
+# The Hello World whose value says whether the write failed.
+set statusText {import io
+import darwin::io
+
+fn hello() -> str errors io::WriteFailed:
+    io::print_line("Hello, world!")
+    "ok"
+
+with context darwin::io::create()
+
+hello():
+    on io::WriteFailed:
+        "failed"
+}
+
+# ---------------------------------------------------------------------------
+# The platform namespace (core/cabi.tcl's platforms, surface/modules.tcl's
+# PlatformCheck)
+
+test di-platform-rule {darwin and every namespace under it are the macOS platform's, by the target table's designation: they compile for macos-aarch64 (and macos-x86_64, a macOS target), and are UNSUPPORTED-PLATFORM for every Linux and Windows target, naming the namespace root; the Linux platform's namespaces stay refused for macOS, and a namespace only named like a system is no platform's} -body {
+    set results {}
+    foreach import {darwin darwin::io darwin::path} {
+        foreach target {macos-aarch64 macos-x86_64 linux-x86_64 linux-aarch64 windows-x86_64} {
+            lappend results $import $target [lindex [diRejection "import $import\n1\n" $target] 0]
+        }
+    }
+    foreach import {linux linux::io linux::path} {
+        lappend results $import macos-aarch64 [lindex [diRejection "import $import\n1\n" macos-aarch64] 0]
+    }
+    list [core::cabi::platformOf darwin::io] [core::cabi::platformOf linux::io] [core::cabi::platformOf macos] $results \
+        [lindex [diRejection "import darwin::io\n1\n" linux-x86_64] 1]
+} -result [list macos linux "" {darwin macos-aarch64 accepted darwin macos-x86_64 accepted darwin linux-x86_64 UNSUPPORTED-PLATFORM darwin linux-aarch64 UNSUPPORTED-PLATFORM darwin windows-x86_64 UNSUPPORTED-PLATFORM darwin::io macos-aarch64 accepted darwin::io macos-x86_64 accepted darwin::io linux-x86_64 UNSUPPORTED-PLATFORM darwin::io linux-aarch64 UNSUPPORTED-PLATFORM darwin::io windows-x86_64 UNSUPPORTED-PLATFORM darwin::path macos-aarch64 accepted darwin::path macos-x86_64 accepted darwin::path linux-x86_64 UNSUPPORTED-PLATFORM darwin::path linux-aarch64 UNSUPPORTED-PLATFORM darwin::path windows-x86_64 UNSUPPORTED-PLATFORM linux macos-aarch64 UNSUPPORTED-PLATFORM linux::io macos-aarch64 UNSUPPORTED-PLATFORM linux::path macos-aarch64 UNSUPPORTED-PLATFORM} {namespace "darwin::io" belongs to the macOS platform (the standard namespace darwin and every namespace under it), which is unavailable for target linux-x86_64 (Linux on x86_64): a macOS module is never chosen for, mapped to or substituted on another operating system, whatever the architecture; compile for a macOS target (-target macos-x86_64) or import no macOS namespace}]
+
+test di-platform-no-way-around {a Darwin namespace reaches no other target by another route: a type import of it is refused like an import, the HIR of a Darwin program records its target and its interchange text is refused for any other (HIR INTERCHANGE TARGET), and a native backend refuses to run it on a host of another target (NATIVE TARGET) -- here, unless the host is macOS arm64} -body {
+    set typeImport [lindex [diRejection "import type darwin::io::DarwinIO\n1\n" linux-x86_64] 0]
+    set hir [diHir $::helloDarwin]
+    set text [hir::interchange::encode $hir]
+    set refused [lmap target {linux-x86_64 linux-aarch64 macos-x86_64} {
+        catch {hir::interchange::decode $text -target $target} message options
+        lindex [dict get $options -errorcode] end
+    }]
+    set own [hir::cabi::targetOf [hir::interchange::decode $text -target macos-aarch64]]
+    set native [expr {$::hostTarget eq "macos-aarch64" || ![testConstraint nativeBuilt] ? "TARGET" :
+        [lindex [lindex [outcomeUnderHir cranelift $hir] 1] end]}]
+    list $typeImport [hir::cabi::targetOf $hir] $refused $own $native
+} -result {UNSUPPORTED-PLATFORM macos-aarch64 {TARGET TARGET TARGET} macos-aarch64 TARGET}
+
+# ---------------------------------------------------------------------------
+# The libSystem declarations (lib/darwin.bot)
+
+test di-c-declarations {lib/darwin.bot declares libSystem's write, read, open, close and __error by their C prototypes for macOS (LP64: int i32, size_t u64, ssize_t i64, a pointer 64 bits): write's buffer read noescape, read's write noescape, open's path read noescape and open itself variadic (its creation mode the one trailing argument), every link symbol the C name} -body {
+    set nir [native::nir [diHir "direct module\nimport abi\nimport abi::bytes\nimport darwin\nimport darwin::path\nimport io::path\nfn f(p: str) -> List\[int\] errors io::path::NotAPath:\n    darwin::path::validate(p)\n    w = darwin::write(1, abi::bytes::from_list(\[\]))\n    r = darwin::read(0, abi::bytes::zeroed(abi::usize(1)))\n    o = darwin::create(p, darwin::Access::WriteOnly, 420)\n    c = darwin::close(o.fd)\n    \[w.count, r.count, o.fd, c.status\]\nf(\"x\"):\n    on io::path::NotAPath:\n        \[\]\n"]]
+    set foreign [lsort [lmap line [split $nir \n] {
+        if {![regexp {^foreign \d+ "(\S+)" params="([^"]*)" result=(\S+)( variadic=1)?} $line -> symbol params result variadic]} continue
+        list $symbol $params $result [expr {$variadic ne ""}]
+    }]]
+    set contracts [lmap name {darwin::c_write darwin::c_read darwin::c_open darwin::c_close darwin::c_errno_location} {
+        set c [dict get [core::native::metadata extern#$name] foreign]
+        list $name [lmap p [dict get $c params] {
+            expr {[dict exists $p access] ? [list [dict get $p name] [dict get $p access] [dict get $p escape]] : [dict get $p name]}
+        }] [dict getdef $c variadic 0] [dict getdef $c provenance -]
+    }]
+    list $foreign $contracts [regexp -inline {varargs=\S+} $nir]
+} -result {{{__error {} ptr 0} {close i32 i32 0} {open {ptr i32} i32 1} {read {i32 ptr u64} i64 0} {write {i32 ptr u64} i64 0}} {{darwin::c_write {fd {buf read declared-noescape} nbyte} 0 unknown} {darwin::c_read {fd {buf write declared-noescape} nbyte} 0 unknown} {darwin::c_open {{path read declared-noescape} oflag} 1 unknown} {darwin::c_close fd 0 unknown} {darwin::c_errno_location {} 0 independent}} varargs=u16:i32}
+
+test di-errno-read-first {a failed call's errno is read before anything else runs: in darwin::write, open (both forms: open_with, and open_mode behind create and create_new) and close nothing comes between the C call and errno() (no allocation, no other call); in darwin::read only the write-back value of the exposure, two small objects built right after the call; and errno() is one C call of __error and one load through the native view} -body {
+    set nir [native::nir [diHir "direct module\nimport abi\nimport abi::bytes\nimport darwin\nimport darwin::path\nimport io::path\nfn f(p: str) -> List\[int\] errors io::path::NotAPath:\n    darwin::path::validate(p)\n    w = darwin::write(1, abi::bytes::from_list(\[\]))\n    r = darwin::read(0, abi::bytes::zeroed(abi::usize(1)))\n    o = darwin::open(p, darwin::Access::ReadOnly)\n    m = darwin::create(p, darwin::Access::WriteOnly, 384)\n    c = darwin::close(o.fd)\n    \[w.count, w.errno, r.count, r.errno, o.fd, o.errno, m.fd, m.errno, c.status, c.errno\]\nf(\"x\"):\n    on io::path::NotAPath:\n        \[\]\n"]]
+    set errno [nirId $nir darwin::errno]
+    set between [lmap name {darwin::write darwin::read darwin::open_with darwin::open_mode darwin::close} {
+        set body [nirBody $nir $name]
+        set from [lsearch -glob $body "*foreigncall*"]
+        set to [lsearch -glob $body "* = call $errno"]
+        lmap line [lrange $body [expr {$from + 1}] [expr {$to - 1}]] {
+            if {[regexp {= (op (\S+)|(structnew|call|callmulti|structget|foreigncall))} $line -> - op word]} {
+                expr {$op ne "" ? $op : $word}
+            } else {
+                continue
+            }
+        }
+    }]
+    list $between [lmap line [nirBody $nir darwin::errno] {
+        expr {[regexp {= (foreigncall|op nativeload)} $line -> what] ? $what : [continue]}
+    }]
+} -result {{{keepalive ilt} {keepalive structnew structnew structget ilt} {keepalive runbox rilt} {keepalive runbox rilt} {runbox rilt}} {foreigncall {op nativeload}}}
+
+# ---------------------------------------------------------------------------
+# io::IO through DarwinIO: static selection, no dispatch
+
+test di-implements {darwin::io::DarwinIO implements io::IO through darwin::io::write_text and darwin::io::write_error_text, from its own module only (structural satisfaction: nothing registers it)} -body {
+    diHir "import io\nimport darwin::io\n1\n"
+    set s [hir::contexts::satisfiesTrait darwin::io::DarwinIO io::IO]
+    list [dict get $s ok] [lmap {r impl} [dict get $s impls] {list $r [hir::traits::QualifiedName [dict get $impl unit] [dict get $impl name]]}]
+} -result {1 {{write_text darwin::io::write_text} {write_error_text darwin::io::write_error_text}}}
+
+test di-same-function-two-platforms {examples/io/hello.bot's hello and its macOS twin's are one function: the two programs differ only in the platform import and the installed context, and each compiles hello to a clone calling print_line's clone, which calls the installed context's own write_text directly (one operand, no context operand, no callvalue)} -body {
+    set mac [native::nir [diHir $::helloDarwin]]
+    set linux [native::nir [diHir $::helloLinux [core::cabi::systemTarget linux]]]
+    set code [lmap text [list $::helloLinux $::helloDarwin] {
+        join [lmap line [split $text \n] {expr {[string match #* $line] || [string match *linux::io* $line] || [string match *darwin::io* $line] ? [continue] : $line}}] \n
+    }]
+    list [expr {[lindex $code 0] eq [lindex $code 1]}] [lmap {nir context} [list $linux linux::io::LinuxIO $mac darwin::io::DarwinIO] {
+        set write [nirId $nir [expr {$context eq "linux::io::LinuxIO" ? "linux::io::write_text" : "darwin::io::write_text"}]]
+        set print [nirBody $nir "io::print_line<io::IO=$context>"]
+        list [regexp -all -line "= call $write %\[0-9\]+\$" [join $print \n]] [regexp -all {callvalue} $nir] \
+            [llength [lsearch -all -inline -glob [nirBody $nir "hello<io::IO=$context>"] "*call [nirId $nir "io::print_line<io::IO=$context>"] *"]]
+    }]
+} -result {1 {{1 0 1} {1 0 1}}}
+
+test di-transitive-selection {hello declares no context: it requires io::IO through io::print_line, and the one top-level call selects DarwinIO} -body {
+    set hir [diHir $::helloDarwin]
+    set source [dict get $hir traitSource]
+    dict values [dict get $source contexts selections]
+} -result {{io::IO darwin::io::DarwinIO}}
+
+# A second io::IO implementation, declared by the program itself.
+set otherContext {
+context struct Other:
+    tag: Tag
+
+fn write_text(text: str, context c: Other) -> unit errors io::WriteFailed:
+    unit
+
+fn write_error_text(text: str, context c: Other) -> unit errors io::WriteFailed:
+    unit
+}
+
+test di-selection-diagnostics {context selection stays static and exact with DarwinIO: no installed context is MISSING-CONTEXT, DarwinIO beside another implementation of io::IO is AMBIGUOUS-CONTEXT-IMPLEMENTATION (never ranked), and a context whose operations do not match io::IO's requirements implements nothing (MISSING-CONTEXT again)} -body {
+    set call "fn hi() errors io::WriteFailed:\n    io::print_line(\"hi\")\n\n"
+    set handled "hi():\n    on io::WriteFailed:\n        unit\n"
+    list [lindex [diRejection "import io\nimport darwin::io\n\n${call}$handled"] 0] \
+        [lindex [diRejection "import io\nimport darwin::io\nimport str\ntype Tag = Int in 0..0\n$::otherContext\n${call}with context darwin::io::create()\nwith context Other {tag: 0}\n$handled"] 0] \
+        [lindex [diRejection "import io\nimport str\ntype Tag = Int in 0..0\n[string map {{text: str} {text: int}} $::otherContext]\n${call}with context Other {tag: 0}\n$handled"] 0]
+} -result {MISSING-CONTEXT AMBIGUOUS-CONTEXT-IMPLEMENTATION MISSING-CONTEXT}
+
+test di-authority {the raw layer is direct, the context layer is not: lib/darwin.bot is a designated direct module, darwin::io is contextualized (each of its direct calls mediated by its own DarwinIO), io and a program using io and darwin::io ordinary; a program calling darwin::write itself must be marked direct (DIRECT), and is accepted marked; a module that only uses DarwinIO marked direct is STALE-DIRECT-MODULE} -body {
+    set hir [diHir "import io\nimport darwin::io\nwith context darwin::io::create()\nio::print(\"x\"):\n    on io::WriteFailed:\n        unit\n"]
+    set statuses [dict create]
+    dict for {unit u} [dict get $hir direct units] {
+        if {$unit in {darwin darwin::io io}} {
+            dict set statuses $unit [dict get $u status]
+        }
+    }
+    set raw "import abi\nimport abi::bytes\nimport darwin\ndarwin::write(1, abi::bytes::from_list(\[\])).count\n"
+    list [lsort -stride 2 [dict get $statuses]] [lindex [diRejection $raw] 0] [diRejection "direct module\n$raw"] \
+        [lindex [diRejection "direct module\nimport io\nimport darwin::io\nwith context darwin::io::create()\nio::print(\"x\"):\n    on io::WriteFailed:\n        unit\n"] 0]
+} -result {{darwin direct darwin::io contextualized io ordinary} DIRECT accepted STALE-DIRECT-MODULE}
+
+test di-tcl-backends {the Tcl backends verify a Darwin program and run it up to its first C call, which they refuse (NATIVE-ONLY): no Tcl channel imitates libSystem} -body {
+    set hir [diHir $::helloDarwin]
+    lmap backend {interp compile} {lrange [outcomeUnderHir $backend $hir] 0 1}
+} -result {{error {CORE SEMANTIC NATIVE-ONLY}} {error {CORE SEMANTIC NATIVE-ONLY}}}
+
+test di-warning-clean {programs importing darwin, darwin::io and darwin::path collect no warning from the library and compile under -warnings error} -body {
+    lmap text [list "import darwin\n1\n" "import darwin::io\n1\n" "import darwin::path\n1\n" $::helloDarwin] {
+        set dir [file join $::scratch warn[incr ::programCounter]]
+        file mkdir $dir
+        writeText [file join $dir main.bot] $text
+        set hir [surface::readProgramFile [file join $dir main.bot] -warnings default -warning-channel "" -cache "" -target macos-aarch64]
+        list [llength [hir::warnings::of $hir]] \
+            [catch {surface::readProgramFile [file join $dir main.bot] -warnings error -warning-channel "" -cache "" -target macos-aarch64}]
+    }
+} -result {{0 0} {0 0} {0 0} {0 0}}
+
+# ---------------------------------------------------------------------------
+# darwin::path (pure: every backend runs it)
+
+test di-path-validity {DarwinPath: a non-empty String without U+0000 -- relative, absolute, ".", "..", repeated and trailing slashes, spaces, non-ASCII -- and nothing else; concat joins with one "/" unless the path ends in one and refuses an empty, absolute or NUL-containing component; a NUL is refused before any C call, statically (a String literal holding one is no DarwinPath: TYPE)} -body {
+    set cases [list "" "a" "/" "/a/b" "." ".." "a//b" "a/" "with space" "é/𝄞" "a\x00b" "\x00"]
+    set list [join [lmap c $cases {string cat "\"" $c "\""}] ", "]
+    set hir [diHir "import darwin::path\nimport io::path\nfn j(p: str, c: str) -> str:\n    if not darwin::path::valid?(p):\n        return \"!\"\n    joined = darwin::path::concat(p, c):\n        on io::path::NotAPath:\n            return \"!\"\n    darwin::path::text(joined)\nxs = \[$list\]\nvalid = loop x in xs:\n    darwin::path::valid?(x)\n\[valid, j(\"/a\", \"b\"), j(\"/a/\", \"b\"), j(\"/\", \"b\"), j(\"a\", \"/b\"), j(\"a\", \"\"), j(\"a\", \"b\x00\"), j(\"dïr with space\", \"fïlé 🙂.txt\")\]\n"]
+    set static [lindex [diRejection "direct module\nimport darwin\nimport darwin::path\ndarwin::open(\"a\x00b\", darwin::Access::ReadOnly).fd\n"] 0]
+    list [lmap backend {interp compile} {lindex [outcomeUnderHir $backend $hir] 1}] $static
+} -result [list [lrepeat 2 {[[false, true, true, true, true, true, true, true, true, true, false, false], "/a/b", "/a/b", "/b", "!", "!", "!", "dïr with space/fïlé 🙂.txt"]}] TYPE]
+
+test di-c-string {open(2)'s path is the DarwinPath's UTF-8 bytes and one terminating NUL, built in Botlish before the call (pure: every backend computes it) and exposed for that call alone: a Unicode name with spaces, the bytes beyond ASCII as UTF-8, exactly one 0 at the end} -body {
+    set hir [diHir "direct module\nimport abi\nimport abi::bytes\nimport byte\nimport darwin\nimport darwin::path\nimport io::path\nimport list\nimport str\n\nfn c(p: str) -> List\[bool\] errors io::path::NotAPath:\n    darwin::path::validate(p)\n    s = darwin::c_string(p)\n    \[abi::bytes::length(s).value == str::length(p) + 0, s == abi::bytes::from_list(str::encode_utf8(p).append(byte::from_int(0))), abi::bytes::length(s).value == list::length(str::encode_utf8(p)) + 1\]\n\nc(\"dïr with space/f🙂\"):\n    on io::path::NotAPath:\n        \[\]\n"]
+    lmap backend {interp compile} {lindex [outcomeUnderHir $backend $hir] 1}
+} -result [lrepeat 2 {[false, true, true]}]
+
+# ---------------------------------------------------------------------------
+# On the host: the SDK's own facts
+
+# A C program printing what the host's SDK headers say, built and run with
+# the host's C compiler.
+proc diHeaderFacts {} {
+    set dir [file join $::scratch headers]
+    file mkdir $dir
+    writeText [file join $dir facts.c] {#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <sys/types.h>
+#include <unistd.h>
+#define KIND(T) _Generic((T)0, unsigned short: "u16", unsigned int: "u32", int: "i32", long: "i64", unsigned long: "u64", default: "other")
+int main(void) {
+    printf("O_RDONLY %d O_WRONLY %d O_RDWR %d O_CREAT %d O_TRUNC %d O_EXCL %d O_CLOEXEC %d\n",
+           O_RDONLY, O_WRONLY, O_RDWR, O_CREAT, O_TRUNC, O_EXCL, O_CLOEXEC);
+    printf("EBADF %d ENOENT %d EEXIST %d EISDIR %d ENOTDIR %d EINTR %d EAGAIN %d\n",
+           EBADF, ENOENT, EEXIST, EISDIR, ENOTDIR, EINTR, EAGAIN);
+    printf("F_GETFD %d F_SETFD %d FD_CLOEXEC %d\n", F_GETFD, F_SETFD, FD_CLOEXEC);
+    printf("int %s size_t %s ssize_t %s mode_t %s\n", KIND(int), KIND(size_t), KIND(ssize_t), KIND(mode_t));
+    return 0;
+}
+int symbols(void) {
+    char b[1];
+    return (int)write(1, b, 0) + (int)read(0, b, 0) + open("x", O_RDONLY) + open("x", O_CREAT, 0644) + close(-1) + errno;
+}
+}
+    exec cc -O0 [file join $dir facts.c] -o [file join $dir facts]
+    exec cc -O0 -S [file join $dir facts.c] -o [file join $dir facts.s]
+    set calls [lsort -unique [regexp -all -inline {bl\s+_(?:write|read|open|close|__error)\M} [readBinary [file join $dir facts.s]]]]
+    return [list [split [string trim [exec [file join $dir facts]]] \n] [lmap c $calls {lindex $c 1}]]
+}
+
+test di-sdk-facts {the constants and types lib/darwin.bot states are the host SDK's: the open flags (fcntl.h), the errno values the tests expect, mode_t unsigned 16 bits (so the creation mode is an ffi::c::UShort, promoted to int as a trailing argument), size_t unsigned long and ssize_t long (ULong and Long), and the C compiler's own calls use exactly the link symbols the declarations name (_write, _read, _open, _close, ___error)} -constraints {darwinIO cCompiler} -body {
+    lassign [diHeaderFacts] lines calls
+    set module [lindex [outcomeUnderHir interp [diHir "import darwin\n\[darwin::o_rdonly, darwin::o_wronly, darwin::o_rdwr, darwin::o_creat, darwin::o_trunc, darwin::o_excl, darwin::o_cloexec\]\n"]] 1]
+    list $lines $calls $module
+} -result {{{O_RDONLY 0 O_WRONLY 1 O_RDWR 2 O_CREAT 512 O_TRUNC 1024 O_EXCL 2048 O_CLOEXEC 16777216} {EBADF 9 ENOENT 2 EEXIST 17 EISDIR 21 ENOTDIR 20 EINTR 4 EAGAIN 35} {F_GETFD 1 F_SETFD 2 FD_CLOEXEC 1} {int i32 size_t u64 ssize_t i64 mode_t u16}} {___error _close _open _read _write} {[0, 1, 2, 512, 1024, 2048, 16777216]}}
+
+# ---------------------------------------------------------------------------
+# Real output: standalone Mach-O executables
+
+test di-hello-executable {examples/io/hello-darwin.bot as a standalone executable, moved out of the source tree, the source deleted, run with an empty environment (no Tcl, no compiler, no source): descriptor 1 receives exactly "Hello, world!\n", then the executable's own result line (the program's value, unit: printed by the runner after the program, not by io::print_line); nothing on descriptor 2; the same under GC stress; it loads only system libraries, libSystem among them} -constraints {darwinIO posixShell} -body {
+    set exe [diExecutable $::helloDarwin]
+    set elsewhere [makeDirectory darwin-io-moved-[pid]]
+    file rename $exe [file join $elsewhere hello]
+    set exe [file join $elsewhere hello]
+    set plain [diRun [list env -i PATH=/nonexistent $exe]]
+    set stressed [diRun [list env -i PATH=/nonexistent BOTLISH_NATIVE_GC_STRESS=1 $exe]]
+    set libraries [lmap line [lrange [split [string trim [exec otool -L $exe]] \n] 1 end] {lindex [string trim $line] 0}]
+    list $plain [expr {$plain eq $stressed}] [expr {[lsearch -glob $libraries /usr/lib/libSystem*] >= 0}] \
+        [lsearch -all -inline -not -glob $libraries /usr/lib/*] [binaryHeader $exe]
+} -cleanup {file delete -force [file join [temporaryDirectory] darwin-io-moved-[pid]]} -result [list [list "Hello, world!\nunit\n" {} 0] 1 1 {} [hostBinaryHeader executable]]
+
+test di-routing-utf8 {print and print_line write to descriptor 1, write_error and write_error_line to descriptor 2, as UTF-8 (a two-byte and a four-byte scalar), each line ending in exactly one newline} -constraints {darwinIO posixShell} -body {
+    lassign [diRun [diExecutable $::routingText]] out err status
+    list [encoding convertfrom utf-8 $out] [encoding convertfrom utf-8 $err] [string length $out] $status
+} -result {{out: é 𝄞
+"ok"
+} {err: done
+} 18 0}
+
+test di-text-edges {the empty String writes nothing (no write call), a String holding U+0000 writes its NUL byte like any other (bytes, not a C string), several writes in order, line endings exactly one newline each -- on both streams} -constraints {darwinIO posixShell} -body {
+    set text "import io\nimport darwin::io\n\nfn emit() -> str errors io::WriteFailed:\n    io::print(\"\")\n    io::print(\"a\x00b\")\n    io::print_line(\"\")\n    io::print_line(\"line\")\n    io::write_error(\"\")\n    io::write_error_line(\"e\x00\")\n    \"ok\"\n\nwith context darwin::io::create()\n\nemit():\n    on io::WriteFailed:\n        \"failed\"\n"
+    diRun [diExecutable $text]
+} -result [list "a\x00b\nline\n\"ok\"\n" "e\x00\n" 0]
+
+test di-deep-and-modules {DarwinIO selected through application modules and deep call chains: an application module's functions require io::IO (declaring no context), the entry program installs DarwinIO, and output from forty levels down arrives in order} -constraints {darwinIO posixShell} -body {
+    set report "import io\nimport str\n\nfn line(text: str, depth: int) -> unit errors io::WriteFailed:\n    if depth == 0:\n        io::print_line(text)\n        return unit\n    line(text, depth - 1)\n\nfn both(text: str) -> unit errors io::WriteFailed:\n    line(text, 40)\n    io::write_error_line(str::concat(text, \"!\"))\n"
+    set main "import io\nimport darwin::io\nimport report\n\nwith context darwin::io::create()\n\nreport::both(\"first\"):\n    on io::WriteFailed:\n        unit\nreport::both(\"second\"):\n    on io::WriteFailed:\n        unit\n"
+    diRun [diExecutable $main [list report.bot $report]]
+} -result [list "first\nsecond\nunit\n" "first!\nsecond!\n" 0]
+
+set coroutineText {import coroutine
+import io
+import darwin::io
+import list
+import str
+
+struct Event:
+    value: int
+
+fn say(word: str, depth: int) -> unit errors io::WriteFailed:
+    if depth == 0:
+        io::print_line(word)
+        return unit
+    say(word, depth - 1)
+
+fn worker(name: str) -> Event errors io::WriteFailed:
+    held = [name, name]
+    say(name.concat(" starts"), 20)
+    yield Event {value: 1}
+    say(list::get(held, 1, "").concat(" resumes"), 5)
+    yield Event {value: 2}
+    io::write_error_line(name.concat(" ends"))
+    return Event {value: 3}
+
+fn run() -> List[int] errors io::WriteFailed:
+    coroutine {step: a, first: a1} = worker("ant")
+    coroutine {step: b, first: b1} = worker("bee")
+    b2 = b()
+    a2 = a()
+    a3 = a()
+    b3 = b()
+    [a1.value, a2.value, a3.value, b1.value, b2.value, b3.value]
+
+with context darwin::io::create()
+
+run():
+    on io::WriteFailed:
+        []
+}
+
+test di-coroutines-gc-stress {output from coroutine bodies -- before the first yield, after resumes, with two coroutines suspended at once holding managed values -- through the portable API and DarwinIO, in a standalone executable, and the same under GC stress} -constraints {darwinIO posixShell nativeCoroutines} -body {
+    set exe [diExecutable $::coroutineText]
+    set plain [diRun $exe]
+    set stressed [diRun [list env BOTLISH_NATIVE_GC_STRESS=1 $exe]]
+    list $plain [expr {$plain eq $stressed}]
+} -result [list [list "ant starts\nbee starts\nbee resumes\nant resumes\n\[1, 2, 3, 1, 2, 3\]\n" "ant ends\nbee ends\n" 0] 1]
+
+test di-native-backends {the native backends run a Darwin program as an executable linked for the run (C-FFI.md: no dlopen, no in-process symbol resolution): its value on cranelift and cranelift-generic, and main.tcl -backend cranelift passes the program's own output through to its standard output} -constraints {darwinIO} -body {
+    set hir [diHir $::statusText $::hostTarget]
+    set values [lmap backend {cranelift cranelift-generic} {lrange [outcomeUnderHir $backend $hir] 0 1}]
+    set main [exec [info nameofexecutable] [file join $::projectRoot main.tcl] -backend cranelift -warnings off \
+        [file join $::projectRoot examples io hello-darwin.bot] 2>@1]
+    list $values [lrange [split $main \n] 1 2]
+} -result {{{value {"ok"}} {value {"ok"}}} {{Hello, world!} {   value: unit}}}
+
+# ---------------------------------------------------------------------------
+# Short writes and failures (the write(2) interposer)
+
+set ::injectLibrary ""
+proc injectLibrary {} {
+    if {$::injectLibrary eq ""} {
+        set path [file join $::scratch libbcf_write_inject.dylib]
+        exec cc -dynamiclib -O2 [file join $::projectRoot tests cffi write-inject.c] -o $path
+        set ::injectLibrary $path
+    }
+    return $::injectLibrary
+}
+
+# {STDOUT STDERR STATUS LOG} of EXE run with the interposer's PLAN on
+# descriptor FD; LOG the planned calls, {ASKED RESULT ERRNO} each.
+proc injected {exe plan {fd 1} {stress 0}} {
+    set log [file join $::scratch inject[incr ::runCounter].log]
+    set run [diRun [list env DYLD_INSERT_LIBRARIES=[injectLibrary] BCF_WRITE_FD=$fd BCF_WRITE_PLAN=$plan BCF_WRITE_LOG=$log \
+        BOTLISH_NATIVE_GC_STRESS=$stress $exe]]
+    set calls [expr {[file exists $log] ? [lmap line [split [string trim [readBinary $log]] \n] {set line}] : {}}]
+    return [concat $run [list $calls]]
+}
+
+# INJECTED with its log cut to its first N calls.
+proc firstCalls {injected n} {
+    lset injected 3 [lrange [lindex $injected 3] 0 [expr {$n - 1}]]
+    return $injected
+}
+
+test di-short-write-completed {a short write is completed: when libSystem's write accepts 5 of the 14 bytes, the remaining 9 are written next, and the portable caller sees success, never a count; three short writes in a row complete the same way, also under GC stress} -constraints {writeInject posixShell} -body {
+    set exe [diExecutable $::statusText]
+    list [firstCalls [injected $exe 5] 2] [firstCalls [injected $exe 3,4,2] 4] [lrange [injected $exe 5 1 1] 0 2]
+} -result [list [list "Hello, world!\n\"ok\"\n" {} 0 {{14 5 0} {9 9 0}}] \
+    [list "Hello, world!\n\"ok\"\n" {} 0 {{14 3 0} {11 4 0} {7 2 0} {5 5 0}}] [list "Hello, world!\n\"ok\"\n" {} 0]]
+
+test di-write-failures {a failed write (-1 with EBADF, EINTR or EAGAIN: no retry, the Linux contract's), a write that makes no progress (0), and a failure after some bytes were written are io::WriteFailed: the portable caller's handler runs, the errno never reaches it, nothing is written again} -constraints {writeInject posixShell} -body {
+    set exe [diExecutable $::statusText]
+    lmap {plan n} {-9 1 -4 1 -35 1 0 1 5,-9 2 5,0 2} {
+        lassign [injected $exe $plan] out err status calls
+        list $plan $out [lrange $calls 0 [expr {$n - 1}]]
+    }
+} -result [list {-9 {"failed"
+} {{14 -1 9}}} {-4 {"failed"
+} {{14 -1 4}}} {-35 {"failed"
+} {{14 -1 35}}} {0 {"failed"
+} {{14 0 0}}} {5,-9 {Hello"failed"
+} {{14 5 0} {9 -1 9}}} {5,0 {Hello"failed"
+} {{14 5 0} {9 0 0}}}]
+
+test di-stderr-failure {the standard error stream's completion is the same policy on descriptor 2} -constraints {writeInject posixShell} -body {
+    set exe [diExecutable $::routingText]
+    lmap {plan n} {3 3 -9 1} {
+        lassign [injected $exe $plan 2] out err status calls
+        list [encoding convertfrom utf-8 $out] [encoding convertfrom utf-8 $err] [lrange $calls 0 [expr {$n - 1}]]
+    }
+} -result [list [list "out: é 𝄞\n\"ok\"\n" "err: done\n" {{4 3 0} {1 1 0} {6 6 0}}] [list "out: é 𝄞\n\"failed\"\n" {} {{4 -1 9}}]]
+
+# ---------------------------------------------------------------------------
+# errno
+
+set errnoText {direct module
+import abi
+import abi::bytes
+import coroutine
+import darwin
+import darwin::path
+import io::path
+import list
+import str
+
+struct Event:
+    value: int
+
+fn bytes_of(s: str) -> abi::bytes::Bytes:
+    abi::bytes::from_list(str::encode_utf8(s))
+
+fn every(xs: List[bool]) -> bool:
+    loop x in xs:
+        if not x:
+            return false
+    true
+
+# Failures with distinct errnos, each followed by a success: the errno a
+# result reports is its own call's, never a stale one.
+fn round(dir: str) -> List[int] errors io::path::NotAPath:
+    darwin::path::validate(dir)
+    missing = darwin::open(darwin::path::concat(dir, "missing.txt"), darwin::Access::ReadOnly)
+    bad = darwin::write(-1, bytes_of("x"))
+    file = darwin::create(darwin::path::concat(dir, "present.txt"), darwin::Access::WriteOnly, 420)
+    ok = darwin::write(file.fd, bytes_of("present\n"))
+    exists = darwin::create_new(darwin::path::concat(dir, "present.txt"), darwin::Access::WriteOnly, 420)
+    isdir = darwin::open(dir, darwin::Access::WriteOnly)
+    closed = darwin::close(file.fd)
+    again = darwin::close(file.fd)
+    readbad = darwin::read(9999, abi::bytes::zeroed(abi::usize(4)))
+    [missing.fd, missing.errno, bad.count, bad.errno, ok.count, ok.errno, exists.fd, exists.errno,
+     isdir.fd, isdir.errno, closed.status, closed.errno, again.status, again.errno, readbad.count, readbad.errno]
+
+fn worker(dir: str) -> Event errors io::path::NotAPath:
+    first = round(dir)
+    yield Event {value: list::get(first, 1, 0)}
+    second = round(dir)
+    return Event {value: list::get(second, 7, 0)}
+
+fn all(dir: str) -> List[any] errors io::path::NotAPath:
+    coroutine {step, first} = worker(dir)
+    one = round(dir)
+    rounds = loop i from 0 to 20:
+        round(dir)
+    same = loop r in rounds:
+        r == one
+    [one, list::length(rounds), every(same), first.value, step().value]
+}
+
+test di-errno {a failed libSystem call reports the errno it left, read right after it on the same thread: ENOENT (2) for a missing file, EBADF (9) for a bad descriptor (write, close of a closed one, read), EEXIST (17) for create_new of an existing file, EISDIR (21) for a directory opened for writing -- distinct errnos in succession, each followed by successes reporting 0, never a stale value; the same twenty times, inside a coroutine before and after a suspension, under GC stress, in the executable and on both native backends} -constraints {darwinIO posixShell nativeCoroutines} -body {
+    set dir [makeDirectory darwin-io-errno-[pid]]
+    set text $::errnoText
+    append text "\nall(\"$dir\"):\n    on io::path::NotAPath:\n        \[\]\n"
+    set exe [diExecutable $text]
+    set plain [lindex [diRun $exe] 0]
+    set stressed [lindex [diRun [list env BOTLISH_NATIVE_GC_STRESS=1 $exe]] 0]
+    set hir [diHir $text $::hostTarget]
+    set backends [lmap backend {cranelift cranelift-generic} {lindex [outcomeUnderHir $backend $hir] 1}]
+    list $plain [expr {$stressed eq $plain}] [expr {"[lindex $backends 0]\n" eq $plain && [lindex $backends 0] eq [lindex $backends 1]}]
+} -cleanup {file delete -force [file join [temporaryDirectory] darwin-io-errno-[pid]]} -result [list "\[\[-1, 2, -1, 9, 8, 0, -1, 17, -1, 21, 0, 0, -1, 9, -1, 9\], 20, true, 2, 17\]\n" 1 1]
+
+# ---------------------------------------------------------------------------
+# Standard input (darwin::io::read)
+
+set stdinText {import abi
+import abi::bytes
+import darwin
+import darwin::io
+import str
+
+fn as(s: str) -> abi::bytes::MutableBytes:
+    abi::bytes::from_bytes(abi::bytes::from_list(str::encode_utf8(s)))
+
+with context darwin::io::create()
+
+original = as("AAAAAAAAAAAAAAAA")
+none = darwin::io::read(abi::bytes::zeroed(abi::usize(0)))
+r = darwin::io::read(original)
+shown = darwin::io::write(abi::bytes::freeze(r.data))
+kept = darwin::io::write_error(abi::bytes::freeze(original))
+[none.count, none.errno, r.count, r.errno, shown.count, kept.count]
+}
+
+test di-stdin {darwin::io::read from the process's standard input into a 16-byte buffer of A's: the empty request reads nothing (0, the input left), a short read (5 bytes) fills only its prefix, an exact read all 16, end of file is 0 (not an error), non-UTF-8 and zero bytes arrive as they are, and a descriptor that cannot be read (standard input opened write-only) is -1 with EBADF, the empty request too (the kernel checks the descriptor first); the caller's own buffer is unchanged every time (what goes to descriptor 2)} -constraints {darwinIO posixShell} -body {
+    set exe [diExecutable $::stdinText]
+    set a [string repeat A 16]
+    set result {}
+    foreach input [list [diInput hello] [diInput 0123456789abcdef] /dev/null [diInput "\x00\xff\x80\xc3\x28"]] {
+        lassign [diRun $exe $input] out err status
+        lappend result [list $out [expr {$err eq $a}]]
+    }
+    set writeOnly [diInput ""]
+    lassign [diRun [list sh -c "\"\$0\" 0>\"\$1\"" $exe $writeOnly]] out err status
+    lappend result [list $out [expr {$err eq $a}]]
+} -result [list [list "helloAAAAAAAAAAA\[0, 0, 5, 0, 16, 16\]\n" 1] [list "0123456789abcdef\[0, 0, 16, 0, 16, 16\]\n" 1] \
+    [list "AAAAAAAAAAAAAAAA\[0, 0, 0, 0, 16, 16\]\n" 1] [list "\x00\xff\x80\xc3\x28AAAAAAAAAAA\[0, 0, 5, 0, 16, 16\]\n" 1] \
+    [list "AAAAAAAAAAAAAAAA\[-1, 9, -1, 9, 16, 16\]\n" 1]]
+
+# ---------------------------------------------------------------------------
+# Files: open (variadic), create, read, close
+
+# The program over the private directory DIR: a file of a Unicode name in a
+# directory whose name has spaces, created with mode 0640 (the variadic
+# argument), written, read back (a short read, then end of file), closed,
+# and the relative path RELATIVE, opened from the run's working directory.
+proc fileText {dir relative} {
+    return [string map [list @DIR@ $dir @REL@ $relative] {direct module
+import abi
+import abi::bytes
+import darwin
+import darwin::path
+import ffi::c
+import io::path
+import str
+
+extern c fn fcntl(fd: ffi::c::Int, cmd: ffi::c::Int, variadic) -> ffi::c::Int
+
+fn bytes_of(s: str) -> abi::bytes::Bytes:
+    abi::bytes::from_list(str::encode_utf8(s))
+
+# X as a C int: a variadic argument is passed as exactly one C type.
+fn c_int(x: ffi::c::Int) -> ffi::c::Int:
+    x
+
+# The bytes R read: the first R.count bytes of its buffer.
+fn read_bytes(r: darwin::ReadResult) -> abi::bytes::Bytes:
+    count = abi::usize(r.count):
+        on abi::AbiIntegerBelowRange:
+            return abi::bytes::from_list([])
+        on abi::AbiIntegerAboveRange:
+            return abi::bytes::from_list([])
+    prefix = abi::bytes::freeze_prefix(r.data, count):
+        on UpperOverrun:
+            return abi::bytes::from_list([])
+    prefix
+
+fn run(base: str, relative: str) -> List[any] errors io::path::NotAPath:
+    darwin::path::validate(base)
+    darwin::path::validate(relative)
+    path = darwin::path::concat(base, "fïlé 🙂.txt")
+    made = darwin::create(path, darwin::Access::WriteOnly, 416)
+    written = darwin::write(made.fd, bytes_of("first line\n"))
+    cloexec = fcntl(made.fd, 1)
+    cleared = fcntl(made.fd, 2, c_int(0))
+    after = fcntl(made.fd, 1)
+    shut = darwin::close(made.fd)
+    opened = darwin::open(path, darwin::Access::ReadOnly)
+    first = darwin::read(opened.fd, abi::bytes::zeroed(abi::usize(64)))
+    end = darwin::read(opened.fd, abi::bytes::zeroed(abi::usize(64)))
+    shown = darwin::write(1, read_bytes(first))
+    closed = darwin::close(opened.fd)
+    rel = darwin::open(relative, darwin::Access::ReadOnly)
+    relread = darwin::read(rel.fd, abi::bytes::zeroed(abi::usize(8)))
+    relclosed = darwin::close(rel.fd)
+    [made.fd >= 3, made.errno, written.count, cloexec, cleared, after, shut.status, opened.fd >= 3, first.count, end.count, end.errno,
+     shown.count, closed.status, rel.fd >= 3, relread.count, relclosed.status]
+
+run("@DIR@", "@REL@"):
+    on io::path::NotAPath:
+        []
+}]
+}
+
+test di-files {open(2)'s genuine variadic prototype through darwin::create and darwin::open: a file of a Unicode name created in a directory whose name has spaces, its creation mode 0640 the one trailing argument (an ffi::c::UShort promoted to int) -- the file's permissions are 0640 --, close-on-exec set (fcntl's fixed-argument F_GETFD) and cleared (fcntl's variadic F_SETFD), the content written and read back exactly (a short read of a 64-byte buffer, then end of file), both descriptors closed, and a relative path resolved from the run's working directory; an absolute path elsewhere} -constraints {darwinIO posixShell} -body {
+    set dir [makeDirectory darwin-io-files-[pid]]
+    set base [file join $dir "dïr with spaces"]
+    file mkdir $base
+    writeText [file join $dir "relative.txt"] "rel"
+    set exe [diExecutable [fileText $base relative.txt]]
+    set here [pwd]
+    cd $dir
+    try {
+        # Under a known umask (022, which leaves 0640 as it is): the mode
+        # checked is the one open(2) received, not the runner's umask.
+        lassign [diRun [list sh -c {umask 022; exec "$0"} $exe]] out err status
+    } finally {
+        cd $here
+    }
+    set made [file join $base "fïlé 🙂.txt"]
+    list [encoding convertfrom utf-8 $out] $err $status [file attributes $made -permissions] [readBinary $made]
+} -cleanup {file delete -force [file join [temporaryDirectory] darwin-io-files-[pid]]} -result [list "first line\n\[true, 0, 11, 1, 0, 0, 0, true, 11, 0, 0, 11, 0, true, 3, 0\]\n" {} 0 0o640 "first line\n"]
+
+test di-file-errors {the file operations' failures, each its own errno: a missing file (ENOENT), a path through a file (ENOTDIR), a directory opened for writing (EISDIR), an existing file created exclusively (EEXIST), a closed descriptor closed again and an invalid one (EBADF)} -constraints {darwinIO posixShell} -body {
+    set dir [makeDirectory darwin-io-file-errors-[pid]]
+    writeText [file join $dir present.txt] "x"
+    set text "direct module\nimport darwin\nimport darwin::path\nimport io::path\n\nfn run(d: str) -> List\[int\] errors io::path::NotAPath:\n    darwin::path::validate(d)\n    a = darwin::open(darwin::path::concat(d, \"absent.txt\"), darwin::Access::ReadOnly)\n    b = darwin::open(darwin::path::concat(d, \"present.txt/x\"), darwin::Access::ReadOnly)\n    c = darwin::open(d, darwin::Access::ReadWrite)\n    e = darwin::create_new(darwin::path::concat(d, \"present.txt\"), darwin::Access::WriteOnly, 384)\n    f = darwin::open(darwin::path::concat(d, \"present.txt\"), darwin::Access::ReadOnly)\n    g = darwin::close(f.fd)\n    h = darwin::close(f.fd)\n    i = darwin::close(-1)\n    \[a.fd, a.errno, b.fd, b.errno, c.fd, c.errno, e.fd, e.errno, g.status, g.errno, h.status, h.errno, i.status, i.errno\]\n\nrun(\"$dir\"):\n    on io::path::NotAPath:\n        \[\]\n"
+    lindex [diRun [diExecutable $text]] 0
+} -cleanup {file delete -force [file join [temporaryDirectory] darwin-io-file-errors-[pid]]} -result "\[-1, 2, -1, 20, -1, 21, -1, 17, 0, 0, -1, 9, -1, 9\]\n"
+
+removeDirectory darwin-io-[pid]
+cleanupTests

@@ -336,7 +336,8 @@ proc surface::modules::PlatformCheck {stateVar name span} {
     }
     set meta [core::cabi::target $target]
     if {[dict get $meta os] ne $os} {
-        Error UNSUPPORTED-PLATFORM $span "namespace \"$name\" belongs to the $system platform (the standard namespace $os and every namespace under it), which is unavailable for target $target ([core::cabi::systemName [dict get $meta os]] on [dict get $meta arch]): a $system module is never chosen for, mapped to or substituted on another operating system, whatever the architecture; compile for a $system target (-target $os-[dict get $meta arch]) or import no $system namespace"
+        set root [lindex [split [string map {:: \x00} $name] \x00] 0]
+        Error UNSUPPORTED-PLATFORM $span "namespace \"$name\" belongs to the $system platform (the standard namespace $root and every namespace under it), which is unavailable for target $target ([core::cabi::systemName [dict get $meta os]] on [dict get $meta arch]): a $system module is never chosen for, mapped to or substituted on another operating system, whatever the architecture; compile for a $system target (-target $os-[dict get $meta arch]) or import no $system namespace"
     }
     dict set state targetRead 1
 }

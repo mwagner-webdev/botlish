@@ -1326,8 +1326,8 @@ function	GetCharWidthA	direct	win32::wingdi	direct	symbol GetCharWidthA; library
 function	GetCharWidthW	direct	win32::wingdi	direct	symbol GetCharWidthW; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::UInt, ffi::c::UInt, ffi::c::Ptr[ffi::c::Int]) -> ffi::c::Int
 function	GetCharWidth32A	direct	win32::wingdi	direct	symbol GetCharWidth32A; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::UInt, ffi::c::UInt, ffi::c::Ptr[ffi::c::Int]) -> ffi::c::Int
 function	GetCharWidth32W	direct	win32::wingdi	direct	symbol GetCharWidth32W; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::UInt, ffi::c::UInt, ffi::c::Ptr[ffi::c::Int]) -> ffi::c::Int
-function	GetCharWidthFloatA	unsupported		float	parameter 4 (lpBuffer): a pointer to float
-function	GetCharWidthFloatW	unsupported		float	parameter 4 (lpBuffer): a pointer to float
+function	GetCharWidthFloatA	direct	win32::wingdi	direct	symbol GetCharWidthFloatA; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::UInt, ffi::c::UInt, ffi::c::Ptr[ffi::c::Float]) -> ffi::c::Int
+function	GetCharWidthFloatW	direct	win32::wingdi	direct	symbol GetCharWidthFloatW; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::UInt, ffi::c::UInt, ffi::c::Ptr[ffi::c::Float]) -> ffi::c::Int
 function	GetCharABCWidthsA	direct	win32::wingdi	direct	symbol GetCharABCWidthsA; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::UInt, ffi::c::UInt, ffi::c::Ptr[ABC]) -> ffi::c::Int
 function	GetCharABCWidthsW	direct	win32::wingdi	direct	symbol GetCharABCWidthsW; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::UInt, ffi::c::UInt, ffi::c::Ptr[ABC]) -> ffi::c::Int
 function	GetCharABCWidthsFloatA	direct	win32::wingdi	direct	symbol GetCharABCWidthsFloatA; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::UInt, ffi::c::UInt, ffi::c::Ptr[ABCFLOAT]) -> ffi::c::Int
@@ -1491,7 +1491,7 @@ function	SetWinMetaFileBits	direct	win32::wingdi	direct	symbol SetWinMetaFileBit
 function	GdiComment	direct	win32::wingdi	direct	symbol GdiComment; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::UInt, ffi::c::Ptr[ffi::c::UChar]) -> ffi::c::Int
 function	GetTextMetricsA	direct	win32::wingdi	direct	symbol GetTextMetricsA; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::Ptr[TEXTMETRICA]) -> ffi::c::Int
 function	GetTextMetricsW	direct	win32::wingdi	direct	symbol GetTextMetricsW; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::Ptr[TEXTMETRICW]) -> ffi::c::Int
-function	AngleArc	unsupported		float	parameter 5 (StartAngle): float; parameter 6 (SweepAngle): float
+function	AngleArc	direct	win32::wingdi	direct	symbol AngleArc; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::Int, ffi::c::Int, ffi::c::ULong, ffi::c::Float, ffi::c::Float) -> ffi::c::Int
 function	PolyPolyline	direct	win32::wingdi	direct	symbol PolyPolyline; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::Ptr[POINT], ffi::c::Ptr[ffi::c::ULong], ffi::c::ULong) -> ffi::c::Int
 function	GetWorldTransform	direct	win32::wingdi	direct	symbol GetWorldTransform; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::Ptr[XFORM]) -> ffi::c::Int
 function	SetWorldTransform	direct	win32::wingdi	direct	symbol SetWorldTransform; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::Ptr[XFORM]) -> ffi::c::Int
@@ -1522,12 +1522,12 @@ function	PathToRegion	direct	win32::wingdi	direct	symbol PathToRegion; library g
 function	PolyDraw	direct	win32::wingdi	direct	symbol PolyDraw; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::Ptr[POINT], ffi::c::Ptr[ffi::c::UChar], ffi::c::Int) -> ffi::c::Int
 function	SelectClipPath	direct	win32::wingdi	direct	symbol SelectClipPath; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::Int) -> ffi::c::Int
 function	SetArcDirection	direct	win32::wingdi	direct	symbol SetArcDirection; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::Int) -> ffi::c::Int
-function	SetMiterLimit	unsupported		float	parameter 2 (limit): float; parameter 3 (old): a pointer to float
+function	SetMiterLimit	direct	win32::wingdi	direct	symbol SetMiterLimit; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::Float, ffi::c::Ptr[ffi::c::Float]) -> ffi::c::Int
 function	StrokeAndFillPath	direct	win32::wingdi	direct	symbol StrokeAndFillPath; library gdi32; (ffi::c::Ptr[HDC__]) -> ffi::c::Int
 function	StrokePath	direct	win32::wingdi	direct	symbol StrokePath; library gdi32; (ffi::c::Ptr[HDC__]) -> ffi::c::Int
 function	WidenPath	direct	win32::wingdi	direct	symbol WidenPath; library gdi32; (ffi::c::Ptr[HDC__]) -> ffi::c::Int
 function	ExtCreatePen	direct	win32::wingdi	direct	symbol ExtCreatePen; library gdi32; (ffi::c::ULong, ffi::c::ULong, ffi::c::Ptr[LOGBRUSH], ffi::c::ULong, ffi::c::Ptr[ffi::c::ULong]) -> ffi::c::Ptr[HPEN__]
-function	GetMiterLimit	unsupported		float	parameter 2 (plimit): a pointer to float
+function	GetMiterLimit	direct	win32::wingdi	direct	symbol GetMiterLimit; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::Ptr[ffi::c::Float]) -> ffi::c::Int
 function	GetArcDirection	direct	win32::wingdi	direct	symbol GetArcDirection; library gdi32; (ffi::c::Ptr[HDC__]) -> ffi::c::Int
 function	GetObjectA	direct	win32::wingdi	direct	symbol GetObjectA; library gdi32; (ffi::c::Ptr[ffi::c::Void], ffi::c::Int, ffi::c::Ptr[ffi::c::Void]) -> ffi::c::Int
 function	GetObjectW	direct	win32::wingdi	direct	symbol GetObjectW; library gdi32; (ffi::c::Ptr[ffi::c::Void], ffi::c::Int, ffi::c::Ptr[ffi::c::Void]) -> ffi::c::Int
@@ -1599,8 +1599,8 @@ function	wglShareLists	direct	win32::wingdi	direct	symbol wglShareLists; library
 function	wglUseFontBitmapsA	direct	win32::wingdi	direct	symbol wglUseFontBitmapsA; library opengl32; (ffi::c::Ptr[HDC__], ffi::c::ULong, ffi::c::ULong, ffi::c::ULong) -> ffi::c::Int
 function	wglUseFontBitmapsW	direct	win32::wingdi	direct	symbol wglUseFontBitmapsW; library opengl32; (ffi::c::Ptr[HDC__], ffi::c::ULong, ffi::c::ULong, ffi::c::ULong) -> ffi::c::Int
 function	SwapBuffers	direct	win32::wingdi	direct	symbol SwapBuffers; library gdi32; (ffi::c::Ptr[HDC__]) -> ffi::c::Int
-function	wglUseFontOutlinesA	unsupported		float	parameter 5: float; parameter 6: float
-function	wglUseFontOutlinesW	unsupported		float	parameter 5: float; parameter 6: float
+function	wglUseFontOutlinesA	direct	win32::wingdi	direct	symbol wglUseFontOutlinesA; library opengl32; (ffi::c::Ptr[HDC__], ffi::c::ULong, ffi::c::ULong, ffi::c::ULong, ffi::c::Float, ffi::c::Float, ffi::c::Int, ffi::c::Ptr[GLYPHMETRICSFLOAT]) -> ffi::c::Int
+function	wglUseFontOutlinesW	direct	win32::wingdi	direct	symbol wglUseFontOutlinesW; library opengl32; (ffi::c::Ptr[HDC__], ffi::c::ULong, ffi::c::ULong, ffi::c::ULong, ffi::c::Float, ffi::c::Float, ffi::c::Int, ffi::c::Ptr[GLYPHMETRICSFLOAT]) -> ffi::c::Int
 function	wglDescribeLayerPlane	direct	win32::wingdi	direct	symbol wglDescribeLayerPlane; library opengl32; (ffi::c::Ptr[HDC__], ffi::c::Int, ffi::c::Int, ffi::c::UInt, ffi::c::Ptr[LAYERPLANEDESCRIPTOR]) -> ffi::c::Int
 function	wglSetLayerPaletteEntries	direct	win32::wingdi	direct	symbol wglSetLayerPaletteEntries; library opengl32; (ffi::c::Ptr[HDC__], ffi::c::Int, ffi::c::Int, ffi::c::Int, ffi::c::Ptr[ffi::c::ULong]) -> ffi::c::Int
 function	wglGetLayerPaletteEntries	direct	win32::wingdi	direct	symbol wglGetLayerPaletteEntries; library opengl32; (ffi::c::Ptr[HDC__], ffi::c::Int, ffi::c::Int, ffi::c::Int, ffi::c::Ptr[ffi::c::ULong]) -> ffi::c::Int
@@ -3317,7 +3317,7 @@ macro	EnumFontFamilies	alias	win32::wingdi	alias of EnumFontFamiliesW	symbol Enu
 macro	EnumFonts	alias	win32::wingdi	alias of EnumFontsW	symbol EnumFontsW; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::Ptr[ffi::c::UShort], ffi::c::FnPtr[Fn{args: [ffi::c::Ptr[LOGFONTW], ffi::c::Ptr[TEXTMETRICW], ffi::c::ULong, ffi::c::LongLong], return: ffi::c::Int}], ffi::c::LongLong) -> ffi::c::Int
 macro	GetCharWidth	alias	win32::wingdi	alias of GetCharWidthW	symbol GetCharWidthW; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::UInt, ffi::c::UInt, ffi::c::Ptr[ffi::c::Int]) -> ffi::c::Int
 macro	GetCharWidth32	alias	win32::wingdi	alias of GetCharWidth32W	symbol GetCharWidth32W; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::UInt, ffi::c::UInt, ffi::c::Ptr[ffi::c::Int]) -> ffi::c::Int
-macro	GetCharWidthFloat	unsupported		float	parameter 4 (lpBuffer): a pointer to float
+macro	GetCharWidthFloat	alias	win32::wingdi	alias of GetCharWidthFloatW	symbol GetCharWidthFloatW; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::UInt, ffi::c::UInt, ffi::c::Ptr[ffi::c::Float]) -> ffi::c::Int
 macro	GetCharABCWidths	alias	win32::wingdi	alias of GetCharABCWidthsW	symbol GetCharABCWidthsW; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::UInt, ffi::c::UInt, ffi::c::Ptr[ABC]) -> ffi::c::Int
 macro	GetCharABCWidthsFloat	alias	win32::wingdi	alias of GetCharABCWidthsFloatW	symbol GetCharABCWidthsFloatW; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::UInt, ffi::c::UInt, ffi::c::Ptr[ABCFLOAT]) -> ffi::c::Int
 macro	GetGlyphOutline	alias	win32::wingdi	alias of GetGlyphOutlineW	symbol GetGlyphOutlineW; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::UInt, ffi::c::UInt, ffi::c::Ptr[GLYPHMETRICS], ffi::c::ULong, ffi::c::Ptr[ffi::c::Void], ffi::c::Ptr[MAT2]) -> ffi::c::ULong
@@ -3356,7 +3356,7 @@ macro	CreateColorSpace	alias	win32::wingdi	alias of CreateColorSpaceW	symbol Cre
 macro	GetICMProfile	alias	win32::wingdi	alias of GetICMProfileW	symbol GetICMProfileW; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::Ptr[ffi::c::ULong], ffi::c::Ptr[ffi::c::UShort]) -> ffi::c::Int
 macro	SetICMProfile	alias	win32::wingdi	alias of SetICMProfileW	symbol SetICMProfileW; library gdi32; (ffi::c::Ptr[HDC__], ffi::c::Ptr[ffi::c::UShort]) -> ffi::c::Int
 macro	wglUseFontBitmaps	alias	win32::wingdi	alias of wglUseFontBitmapsW	symbol wglUseFontBitmapsW; library opengl32; (ffi::c::Ptr[HDC__], ffi::c::ULong, ffi::c::ULong, ffi::c::ULong) -> ffi::c::Int
-macro	wglUseFontOutlines	unsupported		float	parameter 5: float; parameter 6: float
+macro	wglUseFontOutlines	alias	win32::wingdi	alias of wglUseFontOutlinesW	symbol wglUseFontOutlinesW; library opengl32; (ffi::c::Ptr[HDC__], ffi::c::ULong, ffi::c::ULong, ffi::c::ULong, ffi::c::Float, ffi::c::Float, ffi::c::Int, ffi::c::Ptr[GLYPHMETRICSFLOAT]) -> ffi::c::Int
 macro	IS_INTRESOURCE	unsupported		macro-needs-signature	a function-like macro (expression): no signature of its own
 macro	MAKEINTRESOURCEA	unsupported		macro-needs-signature	a function-like macro (expression): no signature of its own
 macro	MAKEINTRESOURCEW	unsupported		macro-needs-signature	a function-like macro (expression): no signature of its own
@@ -17475,11 +17475,11 @@ macro	MAX_TOUCH_PREDICTION_FILTER_TAPS	constant	win32::winuser	ffi::c::Int	int 3
 macro	TOUCHPREDICTIONPARAMETERS_DEFAULT_LATENCY	constant	win32::winuser	ffi::c::Int	int 8
 macro	TOUCHPREDICTIONPARAMETERS_DEFAULT_SAMPLETIME	constant	win32::winuser	ffi::c::Int	int 8
 macro	TOUCHPREDICTIONPARAMETERS_DEFAULT_USE_HW_TIMESTAMP	constant	win32::winuser	ffi::c::Int	int 1
-macro	TOUCHPREDICTIONPARAMETERS_DEFAULT_RLS_DELTA	unsupported		float	a float constant
-macro	TOUCHPREDICTIONPARAMETERS_DEFAULT_RLS_LAMBDA_MIN	unsupported		float	a float constant
-macro	TOUCHPREDICTIONPARAMETERS_DEFAULT_RLS_LAMBDA_MAX	unsupported		float	a float constant
-macro	TOUCHPREDICTIONPARAMETERS_DEFAULT_RLS_LAMBDA_LEARNING_RATE	unsupported		float	a float constant
-macro	TOUCHPREDICTIONPARAMETERS_DEFAULT_RLS_EXPO_SMOOTH_ALPHA	unsupported		float	a float constant
+macro	TOUCHPREDICTIONPARAMETERS_DEFAULT_RLS_DELTA	unsupported		floating-constant	a float constant: the generator binds integer constants only
+macro	TOUCHPREDICTIONPARAMETERS_DEFAULT_RLS_LAMBDA_MIN	unsupported		floating-constant	a float constant: the generator binds integer constants only
+macro	TOUCHPREDICTIONPARAMETERS_DEFAULT_RLS_LAMBDA_MAX	unsupported		floating-constant	a float constant: the generator binds integer constants only
+macro	TOUCHPREDICTIONPARAMETERS_DEFAULT_RLS_LAMBDA_LEARNING_RATE	unsupported		floating-constant	a float constant: the generator binds integer constants only
+macro	TOUCHPREDICTIONPARAMETERS_DEFAULT_RLS_EXPO_SMOOTH_ALPHA	unsupported		floating-constant	a float constant: the generator binds integer constants only
 macro	MAX_LOGICALDPIOVERRIDE	constant	win32::winuser	ffi::c::Int	int 2
 macro	MIN_LOGICALDPIOVERRIDE	constant	win32::winuser	ffi::c::Int	int -2
 macro	FE_FONTSMOOTHINGORIENTATIONBGR	constant	win32::winuser	ffi::c::Int	int 0
@@ -19534,8 +19534,8 @@ typedef	LPBOOL	pointer		ffi::c::Ptr[ffi::c::Int]	WINBOOL *
 typedef	BYTE	scalar		ffi::c::UChar	an ABI alias of C unsigned char
 typedef	WORD	scalar		ffi::c::UShort	an ABI alias of C unsigned short
 typedef	DWORD	scalar		ffi::c::ULong	an ABI alias of C unsigned long
-typedef	FLOAT	unsupported		float	float
-typedef	PFLOAT	unsupported		float	a pointer to float
+typedef	FLOAT	other		ffi::c::Float	float
+typedef	PFLOAT	pointer		ffi::c::Ptr[ffi::c::Float]	FLOAT *
 typedef	PBYTE	pointer		ffi::c::Ptr[ffi::c::UChar]	BYTE *
 typedef	LPBYTE	pointer		ffi::c::Ptr[ffi::c::UChar]	BYTE *
 typedef	PINT	pointer		ffi::c::Ptr[ffi::c::Int]	int *
@@ -24102,7 +24102,7 @@ record	struct _DRAWPATRECT	layout-direct	win32::layouts	DRAWPATRECT	sizeof 20, _
 record	struct _PSINJECTDATA	layout-direct	win32::layouts	PSINJECTDATA	sizeof 8, _Alignof 4, 3 fields
 record	struct _PSFEATURE_OUTPUT	layout-direct	win32::layouts	PSFEATURE_OUTPUT	sizeof 8, _Alignof 4, 2 fields
 record	struct _PSFEATURE_CUSTPAPER	layout-direct	win32::layouts	PSFEATURE_CUSTPAPER	sizeof 20, _Alignof 4, 5 fields
-record	struct tagXFORM	layout-blocked		float	field eM11: float (FLOAT); field eM12: float (FLOAT); field eM21: float (FLOAT); field eM22: float (FLOAT); field eDx: float (FLOAT); field eDy: float (FLOAT)
+record	struct tagXFORM	layout-direct	win32::layouts	XFORM	sizeof 24, _Alignof 4, 6 fields
 record	struct tagBITMAP	layout-direct	win32::layouts	BITMAP	sizeof 32, _Alignof 8, 7 fields
 record	struct tagRGBTRIPLE	layout-direct	win32::layouts	RGBTRIPLE	sizeof 3, _Alignof 1, 3 fields
 record	struct tagRGBQUAD	layout-direct	win32::layouts	RGBQUAD	sizeof 4, _Alignof 1, 4 fields
@@ -24203,7 +24203,7 @@ record	struct _DISPLAYCONFIG_SDR_WHITE_LEVEL	layout-direct	win32::layouts	DISPLA
 record	struct _RGNDATAHEADER	layout-direct	win32::layouts	RGNDATAHEADER	sizeof 32, _Alignof 4, 5 fields
 record	struct _RGNDATA	layout-direct	win32::layouts	RGNDATA	sizeof 36, _Alignof 4, 2 fields
 record	struct _ABC	layout-direct	win32::layouts	ABC	sizeof 12, _Alignof 4, 3 fields
-record	struct _ABCFLOAT	layout-blocked		float	field abcfA: float (FLOAT); field abcfB: float (FLOAT); field abcfC: float (FLOAT)
+record	struct _ABCFLOAT	layout-direct	win32::layouts	ABCFLOAT	sizeof 12, _Alignof 4, 3 fields
 record	struct _OUTLINETEXTMETRICA	layout-direct	win32::layouts	OUTLINETEXTMETRICA	sizeof 232, _Alignof 8, 32 fields
 record	struct _OUTLINETEXTMETRICW	layout-direct	win32::layouts	OUTLINETEXTMETRICW	sizeof 232, _Alignof 8, 32 fields
 record	struct tagPOLYTEXTA	layout-direct	win32::layouts	POLYTEXTA	sizeof 56, _Alignof 8, 7 fields
@@ -24242,7 +24242,7 @@ record	struct tagEMR	layout-direct	win32::layouts	EMR	sizeof 8, _Alignof 4, 2 fi
 record	struct tagEMRTEXT	layout-direct	win32::layouts	EMRTEXT	sizeof 40, _Alignof 4, 6 fields
 record	struct tagABORTPATH	layout-direct	win32::layouts	EMRABORTPATH	sizeof 8, _Alignof 4, 1 fields
 record	struct tagEMRSELECTCLIPPATH	layout-direct	win32::layouts	EMRSELECTCLIPPATH	sizeof 12, _Alignof 4, 2 fields
-record	struct tagEMRSETMITERLIMIT	layout-blocked		float	field eMiterLimit: float (FLOAT)
+record	struct tagEMRSETMITERLIMIT	layout-direct	win32::layouts	EMRSETMITERLIMIT	sizeof 12, _Alignof 4, 2 fields
 record	struct tagEMRRESTOREDC	layout-direct	win32::layouts	EMRRESTOREDC	sizeof 12, _Alignof 4, 2 fields
 record	struct tagEMRSETARCDIRECTION	layout-direct	win32::layouts	EMRSETARCDIRECTION	sizeof 12, _Alignof 4, 2 fields
 record	struct tagEMRSETMAPPERFLAGS	layout-direct	win32::layouts	EMRSETMAPPERFLAGS	sizeof 12, _Alignof 4, 2 fields
@@ -24261,14 +24261,14 @@ record	struct tagEMREXCLUDECLIPRECT	layout-direct	win32::layouts	EMREXCLUDECLIPR
 record	struct tagEMRSETVIEWPORTORGEX	layout-direct	win32::layouts	EMRSETVIEWPORTORGEX	sizeof 16, _Alignof 4, 2 fields
 record	struct tagEMRSETVIEWPORTEXTEX	layout-direct	win32::layouts	EMRSETVIEWPORTEXTEX	sizeof 16, _Alignof 4, 2 fields
 record	struct tagEMRSCALEVIEWPORTEXTEX	layout-direct	win32::layouts	EMRSCALEVIEWPORTEXTEX	sizeof 24, _Alignof 4, 5 fields
-record	struct tagEMRSETWORLDTRANSFORM	layout-blocked		nested-layout-blocked	field xform (struct tagXFORM, field) -> float
-record	struct tagEMRMODIFYWORLDTRANSFORM	layout-blocked		nested-layout-blocked	field xform (struct tagXFORM, field) -> float
+record	struct tagEMRSETWORLDTRANSFORM	layout-direct	win32::layouts	EMRSETWORLDTRANSFORM	sizeof 32, _Alignof 4, 2 fields
+record	struct tagEMRMODIFYWORLDTRANSFORM	layout-direct	win32::layouts	EMRMODIFYWORLDTRANSFORM	sizeof 36, _Alignof 4, 3 fields
 record	struct tagEMRSETPIXELV	layout-direct	win32::layouts	EMRSETPIXELV	sizeof 20, _Alignof 4, 3 fields
 record	struct tagEMREXTFLOODFILL	layout-direct	win32::layouts	EMREXTFLOODFILL	sizeof 24, _Alignof 4, 4 fields
 record	struct tagEMRELLIPSE	layout-direct	win32::layouts	EMRELLIPSE	sizeof 24, _Alignof 4, 2 fields
 record	struct tagEMRROUNDRECT	layout-direct	win32::layouts	EMRROUNDRECT	sizeof 32, _Alignof 4, 3 fields
 record	struct tagEMRARC	layout-direct	win32::layouts	EMRARC	sizeof 40, _Alignof 4, 4 fields
-record	struct tagEMRANGLEARC	layout-blocked		float	field eStartAngle: float (FLOAT); field eSweepAngle: float (FLOAT)
+record	struct tagEMRANGLEARC	layout-direct	win32::layouts	EMRANGLEARC	sizeof 28, _Alignof 4, 5 fields
 record	struct tagEMRPOLYLINE	layout-direct	win32::layouts	EMRPOLYLINE	sizeof 36, _Alignof 4, 4 fields
 record	struct tagEMRPOLYLINE16	layout-direct	win32::layouts	EMRPOLYLINE16	sizeof 32, _Alignof 4, 4 fields
 record	struct tagEMRPOLYDRAW	layout-direct	win32::layouts	EMRPOLYDRAW	sizeof 40, _Alignof 4, 5 fields
@@ -24279,12 +24279,12 @@ record	struct tagEMRINVERTRGN	layout-direct	win32::layouts	EMRINVERTRGN	sizeof 3
 record	struct tagEMRFILLRGN	layout-direct	win32::layouts	EMRFILLRGN	sizeof 36, _Alignof 4, 5 fields
 record	struct tagEMRFRAMERGN	layout-direct	win32::layouts	EMRFRAMERGN	sizeof 44, _Alignof 4, 6 fields
 record	struct tagEMREXTSELECTCLIPRGN	layout-direct	win32::layouts	EMREXTSELECTCLIPRGN	sizeof 20, _Alignof 4, 4 fields
-record	struct tagEMREXTTEXTOUTA	layout-blocked		float	field exScale: float (FLOAT); field eyScale: float (FLOAT)
-record	struct tagEMRPOLYTEXTOUTA	layout-blocked		float	field exScale: float (FLOAT); field eyScale: float (FLOAT)
-record	struct tagEMRBITBLT	layout-blocked		nested-layout-blocked	field xformSrc (struct tagXFORM, field) -> float
-record	struct tagEMRSTRETCHBLT	layout-blocked		nested-layout-blocked	field xformSrc (struct tagXFORM, field) -> float
-record	struct tagEMRMASKBLT	layout-blocked		nested-layout-blocked	field xformSrc (struct tagXFORM, field) -> float
-record	struct tagEMRPLGBLT	layout-blocked		nested-layout-blocked	field xformSrc (struct tagXFORM, field) -> float
+record	struct tagEMREXTTEXTOUTA	layout-direct	win32::layouts	EMREXTTEXTOUTA	sizeof 76, _Alignof 4, 6 fields
+record	struct tagEMRPOLYTEXTOUTA	layout-direct	win32::layouts	EMRPOLYTEXTOUTA	sizeof 80, _Alignof 4, 7 fields
+record	struct tagEMRBITBLT	layout-direct	win32::layouts	EMRBITBLT	sizeof 100, _Alignof 4, 16 fields
+record	struct tagEMRSTRETCHBLT	layout-direct	win32::layouts	EMRSTRETCHBLT	sizeof 108, _Alignof 4, 18 fields
+record	struct tagEMRMASKBLT	layout-direct	win32::layouts	EMRMASKBLT	sizeof 128, _Alignof 4, 23 fields
+record	struct tagEMRPLGBLT	layout-direct	win32::layouts	EMRPLGBLT	sizeof 140, _Alignof 4, 21 fields
 record	struct tagEMRSETDIBITSTODEVICE	layout-direct	win32::layouts	EMRSETDIBITSTODEVICE	sizeof 76, _Alignof 4, 15 fields
 record	struct tagEMRSTRETCHDIBITS	layout-direct	win32::layouts	EMRSTRETCHDIBITS	sizeof 80, _Alignof 4, 16 fields
 record	struct tagEMREXTCREATEFONTINDIRECTW	layout-direct	win32::layouts	EMREXTCREATEFONTINDIRECTW	sizeof 332, _Alignof 4, 3 fields
@@ -24306,11 +24306,11 @@ record	struct tagEMRSETICMPROFILE	layout-direct	win32::layouts	EMRSETICMPROFILE	
 record	struct tagEMRCREATECOLORSPACEW	layout-direct	win32::layouts	EMRCREATECOLORSPACEW	sizeof 612, _Alignof 4, 6 fields
 record	struct tagCOLORMATCHTOTARGET	layout-direct	win32::layouts	EMRCOLORMATCHTOTARGET	sizeof 28, _Alignof 4, 6 fields
 record	struct tagCOLORCORRECTPALETTE	layout-direct	win32::layouts	EMRCOLORCORRECTPALETTE	sizeof 24, _Alignof 4, 5 fields
-record	struct tagEMRALPHABLEND	layout-blocked		nested-layout-blocked	field xformSrc (struct tagXFORM, field) -> float
+record	struct tagEMRALPHABLEND	layout-direct	win32::layouts	EMRALPHABLEND	sizeof 108, _Alignof 4, 18 fields
 record	struct tagEMRGRADIENTFILL	layout-direct	win32::layouts	EMRGRADIENTFILL	sizeof 52, _Alignof 4, 6 fields
-record	struct tagEMRTRANSPARENTBLT	layout-blocked		nested-layout-blocked	field xformSrc (struct tagXFORM, field) -> float
-record	struct _POINTFLOAT	layout-blocked		float	field x: float (FLOAT); field y: float (FLOAT)
-record	struct _GLYPHMETRICSFLOAT	layout-blocked		float,nested-layout-blocked	field gmfBlackBoxX: float (FLOAT); field gmfBlackBoxY: float (FLOAT); field gmfCellIncX: float (FLOAT); field gmfCellIncY: float (FLOAT); field gmfptGlyphOrigin (struct _POINTFLOAT, field) -> float
+record	struct tagEMRTRANSPARENTBLT	layout-direct	win32::layouts	EMRTRANSPARENTBLT	sizeof 108, _Alignof 4, 18 fields
+record	struct _POINTFLOAT	layout-direct	win32::layouts	POINTFLOAT	sizeof 8, _Alignof 4, 2 fields
+record	struct _GLYPHMETRICSFLOAT	layout-direct	win32::layouts	GLYPHMETRICSFLOAT	sizeof 24, _Alignof 4, 5 fields
 record	struct tagLAYERPLANEDESCRIPTOR	layout-direct	win32::layouts	LAYERPLANEDESCRIPTOR	sizeof 32, _Alignof 4, 24 fields
 record	struct _WGLSWAP	layout-direct	win32::layouts	WGLSWAP	sizeof 16, _Alignof 8, 2 fields
 record	struct tagCBT_CREATEWNDA	layout-direct	win32::layouts	CBT_CREATEWNDA	sizeof 16, _Alignof 8, 2 fields
@@ -24455,9 +24455,9 @@ record	struct tagGESTUREINFO	layout-direct	win32::layouts	GESTUREINFO	sizeof 56,
 record	struct tagGESTURENOTIFYSTRUCT	layout-direct	win32::layouts	GESTURENOTIFYSTRUCT	sizeof 24, _Alignof 8, 5 fields
 record	struct tagGESTURECONFIG	layout-direct	win32::layouts	GESTURECONFIG	sizeof 12, _Alignof 4, 3 fields
 record	struct tagINPUT_MESSAGE_SOURCE	layout-direct	win32::layouts	INPUT_MESSAGE_SOURCE	sizeof 8, _Alignof 4, 2 fields
-record	struct anon@winuser.h:6771	layout-blocked		float	field _11: float (float); field _12: float (float); field _13: float (float); field _14: float (float); field _21: float (float); field _22: float (float); field _23: float (float); field _24: float (float); field _31: float (float); field _32: float (float); field _33: float (float); field _34: float (float); field _41: float (float); field _42: float (float); field _43: float (float); field _44: float (float)
-record	union anon@winuser.h:6770	layout-blocked		float,nested-layout-blocked	field m: array element: float (float); member1 (struct anon@winuser.h:6771, anonymous-member) -> float
-record	struct tagINPUT_TRANSFORM	layout-blocked		nested-layout-blocked	member1 (union anon@winuser.h:6770, anonymous-member) -> float
+record	struct anon@winuser.h:6771	layout-direct	win32::layouts	INPUT_TRANSFORM_member1_member1	sizeof 64, _Alignof 4, 16 fields
+record	union anon@winuser.h:6770	layout-direct	win32::layouts	INPUT_TRANSFORM_member1	sizeof 64, _Alignof 4, 2 fields
+record	struct tagINPUT_TRANSFORM	layout-direct	win32::layouts	INPUT_TRANSFORM	sizeof 64, _Alignof 4, 1 fields
 record	struct _cpinfo	layout-direct	win32::layouts	CPINFO	sizeof 20, _Alignof 4, 3 fields
 record	struct _cpinfoexA	layout-direct	win32::layouts	CPINFOEXA	sizeof 284, _Alignof 4, 6 fields
 record	struct _cpinfoexW	layout-direct	win32::layouts	CPINFOEXW	sizeof 544, _Alignof 4, 6 fields

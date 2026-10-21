@@ -24,8 +24,9 @@
 //! Where those physical slots actually live depends on `RootPlan::storage`
 //! (codegen::roots's `RootStorage`, see its own doc), and, for
 //! `NativeFrame`, on `self.stack_maps` (this function's own copy of
-//! `roots::plan`'s `native_frame_supported` argument -- true when
-//! `module.isa().name()` is `"x64"` or `"aarch64"`):
+//! `roots::plan`'s `native_frame_supported` argument --
+//! runtime::framewalk's `NATIVE_FRAME_ROOTS`: x86-64 and AArch64 Linux and
+//! macOS, never Windows):
 //!
 //!   * `RuntimeStack`: the shared shadow-stack array, indexed via
 //!     `vm.ss_top`/`ss_limit`; at least one slot always, so the shared
@@ -40,10 +41,10 @@
 //!     attached to each safepoint's own `call` instruction
 //!     (`mark_safepoint`, runtime/framewalk.rs). Eligible for every
 //!     function, called or not, recursive or not.
-//!   * `NativeFrame`, fallback (`!self.stack_maps`, any other ISA):
-//!     the original, narrower mechanism -- only eligible for a function
-//!     with no Botlish call, published to `vm.native_roots_ptr`/`_len`
-//!     (`prologue_native_frame`).
+//!   * `NativeFrame`, fallback (`!self.stack_maps`, any other host:
+//!     Windows): the original, narrower mechanism -- only eligible for a
+//!     function with no Botlish call, published to `vm.native_roots_ptr`/
+//!     `_len` (`prologue_native_frame`).
 //!
 //! On Linux x86-64 and AArch64 the pthread guard handles native overflow,
 //! so a calling function has no Botlish-specific depth-token instructions.
@@ -200,9 +201,13 @@ fn signature_n<M: Module>(module: &M, params: usize, results: usize) -> Signatur
     sig
 }
 
-/// The Cranelift type of C ABI class C (a pointer is a 64-bit word, a
-/// double the floating-point class's F64).
+/// The Cranelift type of C ABI class C (a pointer is a 64-bit word, a C
+/// float and a C double the floating-point classes' F32 and F64: the C
+/// type's own width, never its Float64 carrier's, C-FLOAT-FFI-MILESTONE-1.md).
 fn c_type(c: nir::CAbi) -> ir::Type {
+    if c == nir::CAbi::F32 {
+        return types::F32;
+    }
     if c == nir::CAbi::F64 {
         return types::F64;
     }
@@ -231,9 +236,9 @@ fn c_signature<M: Module>(module: &M, decl: &nir::ForeignDecl) -> Signature {
     let mut integers = 0;
     for c in &decl.params {
         let param = AbiParam::new(c_type(*c));
-        if *c == nir::CAbi::F64 {
-            // A double takes a floating-point register: it has no extension
-            // and leaves the integer registers' count alone.
+        if c.floating() {
+            // A float or a double takes a floating-point register: it has
+            // no extension and leaves the integer registers' count alone.
             sig.params.push(param);
             continue;
         }
@@ -296,13 +301,13 @@ fn c_call_signature<M: Module>(
     }
     let mut padding = vec![];
     if apple {
-        let fixed_doubles = decl.params.iter().filter(|c| **c == nir::CAbi::F64).count();
-        let fixed_integers = decl.params.len() - fixed_doubles;
+        let fixed_floatings = decl.params.iter().filter(|c| c.floating()).count();
+        let fixed_integers = decl.params.len() - fixed_floatings;
         if varargs.iter().any(|a| a.promoted != nir::CAbi::F64) {
             padding.extend((fixed_integers..8).map(|_| I64));
         }
         if varargs.iter().any(|a| a.promoted == nir::CAbi::F64) {
-            padding.extend((fixed_doubles..8).map(|_| types::F64));
+            padding.extend((fixed_floatings..8).map(|_| types::F64));
         }
     }
     for t in &padding {
@@ -322,10 +327,10 @@ fn c_call_signature<M: Module>(
 }
 
 /// The number of vector registers a call of signature SIG uses on x86-64
-/// System V (its F64 parameters, at most xmm0-xmm7): what the caller of a
-/// variadic function states in %al.
+/// System V (its F64 and F32 parameters -- a fixed C float takes one too --
+/// at most xmm0-xmm7): what the caller of a variadic function states in %al.
 fn vector_registers(sig: &Signature) -> u32 {
-    sig.params.iter().filter(|p| p.value_type == types::F64).count().min(8) as u32
+    sig.params.iter().filter(|p| p.value_type == types::F64 || p.value_type == types::F32).count().min(8) as u32
 }
 
 /// 1 if a variadic C call needs an `%al` stub on the module's target:
@@ -808,11 +813,16 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         // implemented for x86-64 and AArch64, verified against this repo's
         // pinned Cranelift and its own generated assembly (see this file's
         // header, and `define`'s safepoint extraction for AArch64's
-        // frame-pointer-relative roots). Every other host keeps the
-        // original, narrower RootStorage::NativeFrame rule (roots::plan's
-        // own doc). Must agree with roots::report's
-        // `native_frame_supported` and framewalk's own target gates.
-        let stack_maps = matches!(module.isa().name(), "x64" | "aarch64");
+        // frame-pointer-relative roots), and runs on the hosts whose Rust
+        // frames it can climb: runtime::framewalk's NATIVE_FRAME_ROOTS, the
+        // one capability roots::report, the walk and Vm::new's shadow stack
+        // read too. Every other host -- Windows -- keeps the original,
+        // narrower RootStorage::NativeFrame rule (roots::plan's own doc).
+        let stack_maps = crate::runtime::framewalk::NATIVE_FRAME_ROOTS;
+        assert!(
+            !stack_maps || matches!(module.isa().name(), "x64" | "aarch64"),
+            "native-frame roots on an ISA the frame walk does not know"
+        );
         let plan = roots::plan(f, stack_maps);
         let listget_fast = std::env::var("BOTLISH_NATIVE_LISTGET_FAST_OPT").ok().as_deref() != Some("0");
         let mutarray_inline = std::env::var("BOTLISH_NATIVE_MUTARRAY_INLINE_OPT").ok().as_deref() != Some("0");
@@ -1198,11 +1208,16 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
     /// `_Bool` a Botlish bool (its truth bit, `ushr 2` and 1: 0 or 1), a C
     /// integer an Int -- small for every class narrower than 64 bits (its
     /// proven range), else small or a BigInt (`rt_ffi_int_word`) -- then
-    /// reduced to its width. Results: a narrow integer extended by its own
+    /// reduced to its width; a C double a Float64's number as it is, a C
+    /// float the Float64 narrowed (`foreign_float_argument`: an overflow
+    /// fails before the call). Results: a narrow integer extended by its own
     /// signedness and tagged; a `_Bool` byte the bool it is when 0 or 1, else
     /// `rt_ffi_bad_bool`; a 64-bit one tagged when it fits the small range,
     /// else boxed (`rt_ffi_box_i64`/`_u64`); a pointer tagged when the C
-    /// address word holds it, else `rt_ffi_bad_address`; void unit.
+    /// address word holds it, else `rt_ffi_bad_address`; a C float widened
+    /// exactly and, like a C double, admitted only when finite
+    /// (`rt_float_nonfinite` otherwise), its negative zero made zero, then
+    /// boxed; void unit.
     ///
     /// A variadic call (VARIADICS-VERTICAL-SLICE-1.md) passes its trailing
     /// operands after the fixed ones, each decoded by its own class and
@@ -1239,6 +1254,12 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 // A Float64's number, as it is: every Float64 is a double.
                 words.push(v);
                 values.push(self.float_number(FloatType::Float64, v));
+                continue;
+            }
+            if class == nir::CAbi::F32 {
+                words.push(v);
+                let x = self.float_number(FloatType::Float64, v);
+                values.push(self.foreign_float_argument(x));
                 continue;
             }
             let word = if exposed[i] {
@@ -1333,12 +1354,16 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
     /// `foreign_call`).
     fn foreign_result(&mut self, decl: &nir::ForeignDecl, returned: ir::Value) -> ir::Value {
         let class = decl.result;
-        if class == nir::CAbi::F64 {
+        if class.floating() {
             // A double is a Float64 only when it is a finite number
             // (FLOAT64-MILESTONE-1.md): NaN or an infinity is the call's
-            // NonFiniteFloat, negative zero is zero (`r + 0.0`).
+            // NonFiniteFloat, negative zero is zero (`r + 0.0`). A float is
+            // first widened to the double it exactly is (`fpromote` never
+            // rounds; NaN stays NaN, an infinity an infinity), then admitted
+            // the same way (C-FLOAT-FFI-MILESTONE-1.md).
+            let wide = if class == nir::CAbi::F32 { self.b.ins().fpromote(types::F64, returned) } else { returned };
             let zero = self.b.ins().f64const(0.0);
-            let r = self.b.ins().fadd(returned, zero);
+            let r = self.b.ins().fadd(wide, zero);
             let magnitude = self.b.ins().fabs(r);
             let largest = self.b.ins().f64const(f64::MAX);
             let finite = self.b.ins().fcmp(FloatCC::LessThanOrEqual, magnitude, largest);
@@ -2468,14 +2493,18 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         // Fixed binary layouts (BINARY-LAYOUT.md): one helper
                         // call per field; all fallible only on operands a
                         // checked program never produces. A load may build a
-                        // BigInt (a 64-bit field), so it is a safepoint.
+                        // BigInt (a 64-bit field) or a Float64 (a C floating
+                        // field: C-FLOAT-FFI-MILESTONE-1.md), so it is a
+                        // safepoint; its site report names the BigInt kind
+                        // either way (instrumentation only).
                         BytesZeroed => ("rt_bytes_zeroed", None, true, Some(("byteszeroed", KIND_BYTES))),
                         BinLoad => ("rt_bin_load", None, true, Some(("binload", KIND_BIGINT))),
                         BinStore => ("rt_bin_store", None, true, None),
                         // Native layout views (NATIVE-LAYOUT-VIEWS.md,
                         // runtime/nview.rs): one helper call per field read
                         // through the view's address, like binload's; a
-                        // 64-bit scalar may build a BigInt (a safepoint).
+                        // 64-bit scalar may build a BigInt, a C floating one
+                        // a Float64 (a safepoint).
                         NativeLoad => ("rt_native_load", None, true, Some(("nativeload", KIND_BIGINT))),
                         NativeLoadPtr => ("rt_native_load_ptr", None, true, None),
                         CPtrOffset => ("rt_cptr_offset", None, true, None),
@@ -2927,6 +2956,33 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         self.b.ins().select(nan, not_a_number, infinity)
     }
 
+    /// A C float argument (C-FLOAT-FFI-MILESTONE-1.md): the Float64 number X
+    /// narrowed to binary32 by `fdemote`, IEEE 754's round to nearest, ties
+    /// to even (the target's default rounding: Cranelift never changes it or
+    /// flushes subnormals), its negative zero made zero (`n + 0.0`: a tiny
+    /// negative number rounds to -0.0), and checked finite: a magnitude that
+    /// rounded to an infinity fails the call before C runs, with the
+    /// infinity's NonFiniteResult (rt_float_nonfinite), never clamped. X is
+    /// finite, so the narrowed number is never NaN. runtime::value's
+    /// narrow_binary32 computes the same in Rust.
+    fn foreign_float_argument(&mut self, x: ir::Value) -> ir::Value {
+        let narrowed = self.b.ins().fdemote(types::F32, x);
+        let zero = self.b.ins().f32const(0.0);
+        let n = self.b.ins().fadd(narrowed, zero);
+        let magnitude = self.b.ins().fabs(n);
+        let largest = self.b.ins().f32const(f32::MAX);
+        let finite = self.b.ins().fcmp(FloatCC::LessThanOrEqual, magnitude, largest);
+        let ok = self.b.create_block();
+        let bad = self.b.create_block();
+        self.b.ins().brif(finite, ok, &[], bad, &[]);
+        self.b.switch_to_block(bad);
+        let wide = self.b.ins().fpromote(types::F64, n);
+        let result = self.non_finite_code(wide);
+        self.fail_with("rt_float_nonfinite", &[self.vm, result]);
+        self.b.switch_to_block(ok);
+        n
+    }
+
     /// The floating-point operation OP of type TY on the values A
     /// (runtime::ops's float_apply computes the same): a comparison is one
     /// `fcmp` (ordered: no operand is ever NaN); an arithmetic result has its
@@ -3245,69 +3301,89 @@ pub fn legend(symbols: &Symbols) -> String {
     ids.iter().map(|(id, name)| format!("; u0:{id} = {name}\n")).collect()
 }
 
+/// The disassembly of a function calling, with literal arguments, the
+/// foreign function `callee` of ABI classes PARAMS (result RESULT) through the
+/// signature SIGNATURE makes for it, compiled for TRIPLE; a 16-byte explicit
+/// stack slot written before the call and read after it sits right above the
+/// outgoing argument area. Argument i is the integer -(i + 2) or the float
+/// i + 0.5. TRIPLE's architecture must be the host's: a build's Cranelift has
+/// its host's backend only (Cranelift's `host-arch`), so the Apple and
+/// AAPCS64 checks run on AArch64 hosts and the SysV and Win64 ones on x86-64.
+#[cfg(test)]
+fn call_disassembly(
+    triple: &str,
+    params: &[nir::CAbi],
+    result: nir::CAbi,
+    signature: impl Fn(&cranelift_object::ObjectModule, &nir::ForeignDecl) -> Signature,
+) -> String {
+    use cranelift_codegen::settings::{self, Configurable};
+    use std::str::FromStr;
+    let triple = target_lexicon::Triple::from_str(triple).unwrap();
+    let mut flags = settings::builder();
+    flags.set("opt_level", "speed").unwrap();
+    flags.set("is_pic", "true").unwrap();
+    let isa = cranelift_codegen::isa::lookup(triple).unwrap().finish(settings::Flags::new(flags)).unwrap();
+    let mut module = cranelift_object::ObjectModule::new(
+        cranelift_object::ObjectBuilder::new(isa, "probe", cranelift_module::default_libcall_names()).unwrap(),
+    );
+    let decl = nir::ForeignDecl {
+        symbol: "callee".into(),
+        name: "callee".into(),
+        params: params.to_vec(),
+        result,
+        alias: None,
+        variadic: false,
+    };
+    let callee = module.declare_function("callee", Linkage::Import, &signature(&module, &decl)).unwrap();
+    let mut sig = module.make_signature();
+    sig.returns.push(AbiParam::new(types::I64));
+    let mut func = ir::Function::with_name_signature(ir::UserFuncName::user(0, 0), sig);
+    let mut context = FunctionBuilderContext::new();
+    let mut b = FunctionBuilder::new(&mut func, &mut context);
+    let block = b.create_block();
+    b.switch_to_block(block);
+    let slot = b.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 16, 3));
+    let sentinel = b.ins().iconst(types::I64, 0x1111_2222_3333_4444);
+    b.ins().stack_store(types::I64, sentinel, slot, 0);
+    let callee = module.declare_func_in_func(callee, b.func);
+    let args: Vec<ir::Value> = params
+        .iter()
+        .enumerate()
+        .map(|(i, c)| match c {
+            nir::CAbi::F64 => b.ins().f64const(i as f64 + 0.5),
+            nir::CAbi::F32 => b.ins().f32const(i as f32 + 0.5),
+            _ => b.ins().iconst(c_type(*c), -(i as i64) - 2),
+        })
+        .collect();
+    let call = b.ins().call(callee, &args);
+    let returned = b.inst_results(call)[0];
+    let word = match result {
+        nir::CAbi::F64 => b.ins().bitcast(types::I64, MemFlagsData::new(), returned),
+        nir::CAbi::F32 => {
+            let wide = b.ins().fpromote(types::F64, returned);
+            b.ins().bitcast(types::I64, MemFlagsData::new(), wide)
+        }
+        _ => returned,
+    };
+    let kept = b.ins().stack_load(types::I64, types::I64, slot, 0);
+    let sum = b.ins().iadd(word, kept);
+    b.ins().return_(&[sum]);
+    b.seal_all_blocks();
+    b.finalize(module.isa().frontend_config());
+    let mut ctx = cranelift_codegen::Context::for_function(func);
+    ctx.set_disasm(true);
+    ctx.compile(module.isa(), &mut Default::default()).unwrap().vcode.clone().unwrap()
+}
+
 /// The foreign C signature compiled for Apple AArch64, read from Cranelift's
-/// own disassembly of a call. Runs on an AArch64 host, whose Cranelift has
-/// the AArch64 backend (the macOS smoke job's and Linux arm64 CI's driver
-/// tests); an x86-64 build has no AArch64 backend to ask.
+/// own disassembly of a call (call_disassembly). Runs on an AArch64 host,
+/// whose Cranelift has the AArch64 backend (the macOS smoke job's and Linux
+/// arm64 CI's driver tests); an x86-64 build has no AArch64 backend to ask.
 #[cfg(all(test, target_arch = "aarch64"))]
 mod apple_tests {
     use super::*;
     use cranelift_codegen::settings::{self, Configurable};
     use std::str::FromStr;
-
-    /// The disassembly of a function calling, with literal arguments, the
-    /// foreign function `callee` of ABI classes PARAMS through the signature
-    /// SIGNATURE makes for it, compiled for TRIPLE; a 16-byte explicit stack
-    /// slot written before the call and read after it sits right above the
-    /// outgoing argument area.
-    fn call_disassembly(triple: &str, params: &[nir::CAbi], signature: impl Fn(&cranelift_object::ObjectModule, &nir::ForeignDecl) -> Signature) -> String {
-        let triple = target_lexicon::Triple::from_str(triple).unwrap();
-        let mut flags = settings::builder();
-        flags.set("opt_level", "speed").unwrap();
-        flags.set("is_pic", "true").unwrap();
-        let isa = cranelift_codegen::isa::lookup(triple).unwrap().finish(settings::Flags::new(flags)).unwrap();
-        let mut module = cranelift_object::ObjectModule::new(
-            cranelift_object::ObjectBuilder::new(isa, "probe", cranelift_module::default_libcall_names()).unwrap(),
-        );
-        let decl = nir::ForeignDecl {
-            symbol: "callee".into(),
-            name: "callee".into(),
-            params: params.to_vec(),
-            result: nir::CAbi::I64,
-            alias: None,
-            variadic: false,
-        };
-        let callee = module.declare_function("callee", Linkage::Import, &signature(&module, &decl)).unwrap();
-        let mut sig = module.make_signature();
-        sig.returns.push(AbiParam::new(types::I64));
-        let mut func = ir::Function::with_name_signature(ir::UserFuncName::user(0, 0), sig);
-        let mut context = FunctionBuilderContext::new();
-        let mut b = FunctionBuilder::new(&mut func, &mut context);
-        let block = b.create_block();
-        b.switch_to_block(block);
-        let slot = b.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 16, 3));
-        let sentinel = b.ins().iconst(types::I64, 0x1111_2222_3333_4444);
-        b.ins().stack_store(types::I64, sentinel, slot, 0);
-        let callee = module.declare_func_in_func(callee, b.func);
-        let args: Vec<ir::Value> = params
-            .iter()
-            .enumerate()
-            .map(|(i, c)| match c {
-                nir::CAbi::F64 => b.ins().f64const(i as f64 + 0.5),
-                _ => b.ins().iconst(c_type(*c), -(i as i64) - 2),
-            })
-            .collect();
-        let call = b.ins().call(callee, &args);
-        let result = b.inst_results(call)[0];
-        let kept = b.ins().stack_load(types::I64, types::I64, slot, 0);
-        let sum = b.ins().iadd(result, kept);
-        b.ins().return_(&[sum]);
-        b.seal_all_blocks();
-        b.finalize(module.isa().frontend_config());
-        let mut ctx = cranelift_codegen::Context::for_function(func);
-        ctx.set_disasm(true);
-        ctx.compile(module.isa(), &mut Default::default()).unwrap().vcode.clone().unwrap()
-    }
 
     /// Eight 64-bit register arguments, then stack arguments that Apple
     /// packs at their natural size and alignment -- a 64-bit one at 0, an
@@ -3324,7 +3400,7 @@ mod apple_tests {
     /// register arguments are extended by the caller, as Apple requires.
     #[test]
     fn ffi_apple_stack_arguments_stored_at_their_width() {
-        let code = call_disassembly("aarch64-apple-darwin", &STACK_TAIL, c_signature);
+        let code = call_disassembly("aarch64-apple-darwin", &STACK_TAIL, nir::CAbi::I64, c_signature);
         for store in [", [sp, #8]", ", [sp, #12]", ", [sp, #14]"] {
             let line = code.lines().find(|l| l.contains(store)).unwrap_or_else(|| panic!("no store {store} in\n{code}"));
             let expected = match store {
@@ -3335,7 +3411,7 @@ mod apple_tests {
             assert!(line.trim_start().starts_with(expected), "{line:?}, not {expected}, in\n{code}");
         }
         use nir::CAbi::*;
-        let narrow = call_disassembly("aarch64-apple-darwin", &[I8, U8, I16, U16, I32, U32, Bool, I8], c_signature);
+        let narrow = call_disassembly("aarch64-apple-darwin", &[I8, U8, I16, U16, I32, U32, Bool, I8], nir::CAbi::I64, c_signature);
         for extension in ["sxtb x0, w0", "uxtb w1, w1", "sxth x2, w2", "uxth w3, w3", "sxtw x4, w4", "mov w5, w5", "uxtb w6, w6", "sxtb x7, w7"] {
             assert!(narrow.contains(extension), "no {extension:?} in\n{narrow}");
         }
@@ -3350,7 +3426,7 @@ mod apple_tests {
     fn ffi_apple_doubles_leave_the_integer_registers() {
         use nir::CAbi::*;
         let params = [F64, F64, F64, F64, F64, F64, F64, F64, I8, U8, I16, U16, I32, U32, Bool, I8];
-        let code = call_disassembly("aarch64-apple-darwin", &params, c_signature);
+        let code = call_disassembly("aarch64-apple-darwin", &params, nir::CAbi::I64, c_signature);
         for extension in ["sxtb x0, w0", "uxtb w1, w1", "sxth x2, w2", "uxth w3, w3", "sxtw x4, w4", "mov w5, w5", "uxtb w6, w6", "sxtb x7, w7"] {
             assert!(code.contains(extension), "no {extension:?} in\n{code}");
         }
@@ -3375,7 +3451,7 @@ mod apple_tests {
             }
             sig
         };
-        let code = call_disassembly("aarch64-apple-darwin", &STACK_TAIL, every_parameter_extended);
+        let code = call_disassembly("aarch64-apple-darwin", &STACK_TAIL, nir::CAbi::I64, every_parameter_extended);
         assert!(
             code.lines().any(|l| l.trim_start().starts_with("str x") && l.contains(", [sp, #14]")),
             "Cranelift no longer stores an extended narrow stack argument at full width:\n{code}"
@@ -3505,6 +3581,37 @@ mod apple_tests {
         assert_eq!(both.len(), 14);
     }
 
+    /// A fixed C float takes a floating-point register as a double does
+    /// (SDL_RenderDebugTextFormat's renderer, x, y, fmt, ...): two fixed
+    /// floats leave v2-v7 to pad, two fixed pointers x2-x7, so every
+    /// trailing argument still lands on the stack.
+    #[test]
+    fn ffi_apple_variadic_padding_after_fixed_floats() {
+        let module = cranelift_object::ObjectModule::new(
+            cranelift_object::ObjectBuilder::new(
+                cranelift_codegen::isa::lookup(target_lexicon::Triple::from_str("aarch64-apple-darwin").unwrap())
+                    .unwrap()
+                    .finish(settings::Flags::new(settings::builder()))
+                    .unwrap(),
+                "probe",
+                cranelift_module::default_libcall_names(),
+            )
+            .unwrap(),
+        );
+        let decl = nir::ForeignDecl {
+            symbol: "f".into(),
+            name: "f".into(),
+            params: vec![nir::CAbi::Ptr, nir::CAbi::F32, nir::CAbi::F32, nir::CAbi::Ptr],
+            result: nir::CAbi::Bool,
+            alias: None,
+            variadic: true,
+        };
+        let (_, padding) = c_call_signature(&module, &decl, &[INT, DOUBLE]).unwrap();
+        let mut expected = vec![I64; 6];
+        expected.extend(vec![types::F64; 6]);
+        assert_eq!(padding, expected);
+    }
+
     /// AAPCS64 (Linux AArch64) passes trailing arguments as named ones: the
     /// int in w1, the double in d0, the long in x2 -- nothing on the stack --
     /// never Apple's stack-only rule.
@@ -3572,6 +3679,28 @@ mod x86_64_variadic_tests {
         assert!(needs_va_stub(&module));
     }
 
+    /// A fixed C float is passed in a vector register too, and %al counts
+    /// it (C-FLOAT-FFI-MILESTONE-1.md): two fixed floats and a trailing
+    /// double are three.
+    #[test]
+    fn ffi_sysv_variadic_vector_count_includes_fixed_floats() {
+        let module = module();
+        let decl = nir::ForeignDecl {
+            symbol: "f".into(),
+            name: "f".into(),
+            params: vec![nir::CAbi::Ptr, nir::CAbi::F32, nir::CAbi::F32, nir::CAbi::Ptr],
+            result: nir::CAbi::Bool,
+            alias: None,
+            variadic: true,
+        };
+        let double = nir::VarArg { class: nir::CAbi::F64, promoted: nir::CAbi::F64 };
+        let (sig, _) = c_call_signature(&module, &decl, &[]).unwrap();
+        assert_eq!(vector_registers(&sig), 2);
+        let (sig, padding) = c_call_signature(&module, &decl, &[double]).unwrap();
+        assert!(padding.is_empty());
+        assert_eq!(vector_registers(&sig), 3);
+    }
+
     /// The %al stub is exactly `mov $AL, %eax` and a PLT-relative jump to
     /// the C function in a PIC object: the bytes of the object's stub
     /// symbol.
@@ -3605,3 +3734,133 @@ mod x86_64_variadic_tests {
         assert_eq!((kind, addend), (cranelift_codegen::binemit::Reloc::Abs8, 0));
     }
 }
+
+/// C float and C double in the platform C conventions of the x86-64 targets
+/// (C-FLOAT-FFI-MILESTONE-1.md), read from Cranelift's disassembly of a
+/// call (call_disassembly): SysV's eight XMM registers taken by floats and
+/// doubles alike before the stack, and Win64's four positional registers
+/// shared by every kind. Windows has no runner; this is the lowering its
+/// machine code would have.
+#[cfg(all(test, target_arch = "x86_64"))]
+mod x86_64_float_tests {
+    use super::*;
+
+    /// The stack stores of CODE: each `OP %REG, N(%rsp)` line's (OP, N).
+    fn stack_stores(code: &str) -> Vec<(String, i64)> {
+        code.lines()
+            .filter_map(|l| {
+                let l = l.trim();
+                let (op, rest) = l.split_once(' ')?;
+                let at = rest.rfind(", ")?;
+                let target = rest[at + 2..].trim();
+                let n = target.strip_suffix("(%rsp)")?;
+                // (`(%rsp)` is offset 0; an offset may be hexadecimal.)
+                let offset = if n.is_empty() {
+                    0
+                } else if let Some(hex) = n.strip_prefix("0x") {
+                    i64::from_str_radix(hex, 16).ok()?
+                } else {
+                    n.parse().ok()?
+                };
+                Some((op.to_string(), offset))
+            })
+            .collect()
+    }
+
+    /// SysV: a float or a double takes the next of xmm0-xmm7 whatever the
+    /// integers between them, and the ninth and tenth floating arguments go
+    /// to the stack, each in its own 8-byte slot -- a float stored with
+    /// movss (4 bytes), never widened to a double.
+    #[test]
+    fn c_float_sysv_xmm_exhaustion() {
+        use nir::CAbi::*;
+        let params = [F32, I32, F64, F32, I64, F32, F64, F32, F32, F64, F32, F32];
+        let code = call_disassembly("x86_64-unknown-linux-gnu", &params, F32, c_signature);
+        let stores = stack_stores(&code);
+        assert!(stores.contains(&("movss".to_string(), 0)), "the ninth floating argument (a float) at 0(%rsp) by movss in\n{code}");
+        assert!(stores.contains(&("movss".to_string(), 8)), "the tenth (a float) at 8(%rsp) by movss in\n{code}");
+        assert!(!stores.iter().any(|(op, _)| op == "movsd"), "no float stored as a double in\n{code}");
+        for register in ["%xmm0", "%xmm1", "%xmm2", "%xmm3", "%xmm4", "%xmm5", "%xmm6", "%xmm7"] {
+            assert!(code.contains(register), "{register} unused in\n{code}");
+        }
+        // The float result comes back in xmm0 and is widened exactly.
+        assert!(code.contains("cvtss2sd"), "no widening of the float result in\n{code}");
+    }
+
+    /// Win64: four positional argument registers shared by every kind -- a
+    /// float in the first position is xmm0, an int in the second edx/rdx, a
+    /// double in the third xmm2, a long long in the fourth r9 -- and the
+    /// fifth argument, a float, on the stack past the 32-byte shadow space,
+    /// stored as 4 bytes.
+    #[test]
+    fn c_float_win64_positions() {
+        use nir::CAbi::*;
+        let params = [F32, I32, F64, I64, F32, F64];
+        let code = call_disassembly("x86_64-pc-windows-msvc", &params, F64, c_signature);
+        let stores = stack_stores(&code);
+        assert!(stores.contains(&("movss".to_string(), 32)), "the fifth argument (a float) at 32(%rsp) by movss in\n{code}");
+        assert!(stores.contains(&("movsd".to_string(), 40)), "the sixth (a double) at 40(%rsp) by movsd in\n{code}");
+        // The first four by position: xmm0, rdx (the int, extended), xmm2,
+        // r9.
+        for register in ["%xmm0", ", %rdx", "%xmm2", ", %r9"] {
+            assert!(code.contains(register), "{register} unused in\n{code}");
+        }
+    }
+}
+
+/// C float and C double in the AArch64 C conventions (C-FLOAT-FFI-MILESTONE-1.md),
+/// read from Cranelift's disassembly of a call (call_disassembly): AAPCS64
+/// and Apple both give floating arguments v0-v7, counted apart from the
+/// integers; past them Linux gives each stack argument an 8-byte slot and
+/// Apple packs a float into 4 bytes. Runs on an AArch64 host.
+#[cfg(all(test, target_arch = "aarch64"))]
+mod aarch64_float_tests {
+    use super::*;
+
+    /// The (instruction, stack offset) of each `str`-family store to sp in
+    /// CODE: `str s1, [sp]` is ("str s", 0), `str d2, [sp, #8]` ("str d", 8).
+    fn stack_stores(code: &str) -> Vec<(String, i64)> {
+        code.lines()
+            .filter_map(|l| {
+                let l = l.trim();
+                if !l.starts_with("str") {
+                    return None;
+                }
+                let at = l.find("[sp")?;
+                let inside = l[at + 3..].split(']').next()?;
+                let offset = match inside.trim_start_matches(',').trim().strip_prefix('#') {
+                    Some(n) => n.parse().ok()?,
+                    None => 0,
+                };
+                let (op, rest) = l.split_once(' ')?;
+                Some((format!("{op} {}", &rest[..1]), offset))
+            })
+            .collect()
+    }
+
+    /// Ten floating arguments among integers: the first eight in v0-v7
+    /// (s for a float, d for a double), the integers still x0.. in order,
+    /// the ninth and tenth -- floats -- on the stack, stored as 4 bytes.
+    const MIXED: [nir::CAbi; 13] = {
+        use nir::CAbi::*;
+        [F32, I32, F64, F32, I64, F32, F64, F32, F32, F64, I8, F32, F32]
+    };
+
+    #[test]
+    fn c_float_aapcs64_stack_slots() {
+        let code = call_disassembly("aarch64-unknown-linux-gnu", &MIXED, nir::CAbi::F32, c_signature);
+        let stores = stack_stores(&code);
+        assert!(stores.contains(&("str s".to_string(), 0)), "the ninth floating argument (a float) at [sp] in\n{code}");
+        assert!(stores.contains(&("str s".to_string(), 8)), "the tenth at [sp, #8] (an 8-byte slot) in\n{code}");
+        assert!(code.contains("fcvt d"), "no widening of the float result in\n{code}");
+    }
+
+    #[test]
+    fn c_float_apple_floats_packed() {
+        let code = call_disassembly("aarch64-apple-darwin", &MIXED, nir::CAbi::F32, c_signature);
+        let stores = stack_stores(&code);
+        assert!(stores.contains(&("str s".to_string(), 0)), "the ninth floating argument (a float) at [sp] in\n{code}");
+        assert!(stores.contains(&("str s".to_string(), 4)), "the tenth packed at [sp, #4] in\n{code}");
+    }
+}
+

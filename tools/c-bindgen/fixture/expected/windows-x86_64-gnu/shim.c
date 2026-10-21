@@ -13,6 +13,10 @@ int botlish_bgf_bgf_point_x(const bgf_point *botlish_p) {
     return bgf_point_x(botlish_p);
 }
 
+double botlish_bgf_bgf_half(double botlish_x) {
+    return bgf_half(botlish_x);
+}
+
 int botlish_bgf_bgf_get(int botlish_x) {
     return bgf_get(botlish_x);
 }

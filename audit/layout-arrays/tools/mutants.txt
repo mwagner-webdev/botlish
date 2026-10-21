@@ -234,7 +234,7 @@
 @@ native-store-row-written-while-encoding the native runtime writes a row's elements one at a time as it encodes them, so a value outside the encoding leaves the elements before it written
 ## native/src/runtime/nview.rs
 <<<<
-    let bytes = match encoded_row(p, l, width, signed, big, "binary::store") {
+    let bytes = match encoded_row(p, l, encoding, "binary::store") {
         Ok(bytes) => bytes,
         Err(failed) => return failed,
     };
@@ -246,8 +246,8 @@
     }
     let items = list_of(l).items().to_vec();
     for (i, item) in items.into_iter().enumerate() {
-        match super::ops::bin_encode(p, item, width, signed, big, "binary::store") {
-            Ok(encoded) => store_at(address + i * width, &encoded[..width]),
+        match super::ops::bin_encode(p, item, encoding, "binary::store") {
+            Ok(encoded) => store_at(address + i * encoding.width, &encoded[..encoding.width]),
             Err(failed) => return failed,
         }
     }
@@ -257,7 +257,7 @@
 @@ native-row-past-storage the native runtime accepts a row that ends one byte past its storage
 ## native/src/runtime/nview.rs
 <<<<
-        Some(end) if end <= size => Ok((at, width, signed, big)),
+        Some(end) if end <= size => Ok((at, encoding)),
 ====
-        Some(end) if end <= size + 1 => Ok((at, width, signed, big)),
+        Some(end) if end <= size + 1 => Ok((at, encoding)),
 >>>>

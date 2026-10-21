@@ -737,8 +737,8 @@ q = \{team: t, names: \[\"a\", \"b\"\], anon: \{z: 1, a: 2\}\}
         set hir [surface::readProgramFile $path]
         set expected [lindex [outcomeUnderHir interp $hir] 1]
         native::executable $hir [file rootname $path]
-        set plain [exec env PATH= [file rootname $path]]
-        set stressed [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 [file rootname $path]]
+        set plain [runStandalone [file rootname $path]]
+        set stressed [runStandalone [file rootname $path] BOTLISH_NATIVE_GC_STRESS 1]
         list [expr {$plain eq $stressed}] [expr {$plain eq $expected}] $plain
     } finally {
         removeDirectory struct-exe
@@ -751,7 +751,7 @@ test struct-executable-module {a module-declared struct works in a standalone ex
         writeFile [file join $dir main.bot] "import geo\np = geo::Point \{x: 3, y: 4\}\n\[p, geo::origin(), p.x + p.y\]\n"
         set hir [surface::readProgramFile [file join $dir main.bot]]
         native::executable $hir [file join $dir main]
-        list [exec env PATH= [file join $dir main]] [lindex [outcomeUnderHir interp $hir] 1]
+        list [runStandalone [file join $dir main]] [lindex [outcomeUnderHir interp $hir] 1]
     }
 } -result {{[geo::Point {x: 3, y: 4}, geo::Point {x: 0, y: 0}, 7]} {[geo::Point {x: 3, y: 4}, geo::Point {x: 0, y: 0}, 7]}}
 

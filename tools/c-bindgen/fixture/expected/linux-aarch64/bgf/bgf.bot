@@ -144,11 +144,45 @@ extern c fn bgf_vother(
     variadic
 ) -> ffi::c::Int
 
+# C: double bgf_scale(double x, float y)
+extern c fn bgf_scale(
+    x: ffi::c::Double,
+    y: ffi::c::Float
+) -> ffi::c::Double
+
+# C: void bgf_float_out(float *out)
+extern c fn bgf_float_out(out: ffi::c::Ptr[ffi::c::Float]) -> unit
+
 # C: int bgf_linux_only(void)
 extern c fn bgf_linux_only() -> ffi::c::Int
 
 # C: int bgf_arm_only(void)
 extern c fn bgf_arm_only() -> ffi::c::Int
+
+# C: bgf_real32 bgf_scale32(bgf_scalar32 x, bgf_scalar64 k)
+extern c fn bgf_scale32(
+    x: ffi::c::Float,
+    k: ffi::c::Double
+) -> ffi::c::Float
+
+# C: double bgf_dot(const float *xs, const double *ys, size_t n)
+extern c fn bgf_dot(
+    xs: ffi::c::Ptr[ffi::c::Float],
+    ys: ffi::c::Ptr[ffi::c::Double],
+    n: ffi::c::ULong
+) -> ffi::c::Double
+
+# C: float bgf_apply_float(bgf_float_fn f, float x)
+extern c fn bgf_apply_float(
+    f: ffi::c::FnPtr[Fn{args: [ffi::c::Float], return: ffi::c::Float}],
+    x: ffi::c::Float
+) -> ffi::c::Float
+
+# C: bgf_float_fn bgf_halver(void)
+extern c fn bgf_halver() -> ffi::c::FnPtr[Fn{args: [ffi::c::Float], return: ffi::c::Float}]
+
+# C: double bgf_sum_mixed(const bgf_mixed_floats *m)
+extern c fn bgf_sum_mixed(m: ffi::c::Ptr[bgf::ctypes::bgf_mixed_floats]) -> ffi::c::Double
 
 # C: bgf_legacy: an alias of bgf_current, int bgf_current(int x)
 extern c fn bgf_legacy named "bgf_current"(x: ffi::c::Int) -> ffi::c::Int

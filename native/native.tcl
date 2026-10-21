@@ -46,9 +46,12 @@
 #   native::targetFacts TRIPLE          how the driver reads a target triple
 #   native::executable HIR PATH ?OPTIONS?  links a standalone executable: Linux
 #                                         glibc (x86_64; aarch64 with the
-#                                         rustc linker) or macOS aarch64
-#                                         (Mach-O, the rustc linker); rejects
-#                                         non-closed HIR.
+#                                         rustc linker), macOS aarch64
+#                                         (Mach-O, the rustc linker) or
+#                                         Windows x86_64 (PE, MSVC, the rustc
+#                                         linker; PATH.exe for a PATH without
+#                                         an extension); returns its path;
+#                                         rejects non-closed HIR.
 #                                         BOTLISH_NATIVE_LINKER picks the
 #                                         linker: rustc (default) or stub
 #                                         (no toolchain, SINGLE-EXECUTABLE.md)
@@ -119,6 +122,46 @@ namespace eval native {
     # program: the libraries themselves are its `extern c library`
     # declarations.
     variable linkDirs {}
+}
+
+# What the native backend does on each host target (core::cabi::hostTarget):
+# CAPABILITY -> the host targets where it works. The one statement the test
+# harness's capability constraints (tests/helpers.tcl) and the golden
+# runner's choice of backends (tests/golden/run.tcl) read; the driver's own
+# gates (codegen/aot.rs's EXECUTABLES and C_CALLS, runtime/coroutine.rs, the
+# stack guard of runtime/platform/) are what it records, and
+# tests/platform/native-status.tcl checks it against them on each host.
+#
+#   jit          the in-process native backends (cranelift, cranelift-generic)
+#   executables  standalone executables (codegen/aot.rs's EXECUTABLES)
+#   cCalls       programs that call C (C_CALLS)
+#   coroutines   native coroutines (stack switching, runtime/coroutine.rs)
+#   stackGuard   NATIVE LIMIT STACK for any exhausted native stack
+#   frameRoots   GC roots in native frames, found by the frame walk
+#                (runtime/framewalk.rs's NATIVE_FRAME_ROOTS); elsewhere the
+#                fallback plan's shadow stack. A `fallback-roots` test build
+#                of the driver has none on any host: the tests of the
+#                native-frame plan then fail, by design.
+#
+# Windows x86-64 (MSVC) runs native code and links executables since
+# WINDOWS-X86-64-MILESTONE-1.md; its C calls, coroutines and stack guard are
+# later milestones'; its GC roots are on the shadow stack (the frame walk
+# cannot climb Win64 frames).
+namespace eval native {
+    variable capabilities [dict create \
+        jit {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
+        executables {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
+        cCalls {linux-x86_64 linux-aarch64 macos-aarch64} \
+        coroutines {linux-x86_64 linux-aarch64 macos-aarch64} \
+        stackGuard {linux-x86_64 linux-aarch64 macos-aarch64} \
+        frameRoots {linux-x86_64 linux-aarch64 macos-aarch64}]
+}
+
+# Whether the native backend has CAPABILITY (native::capabilities) on this
+# host.
+proc native::hostSupports {capability} {
+    variable capabilities
+    return [expr {[core::cabi::hostTarget] in [dict get $capabilities $capability]}]
 }
 
 # Evaluates SCRIPT in the caller's scope with DIRS the linker search
@@ -334,11 +377,25 @@ proc native::evalHir {hir args} {
 }
 
 # Compile closed, specialized HIR to a standalone executable: a Linux glibc
-# ELF (x86_64, or aarch64 with the rustc linker) or a macOS aarch64 Mach-O
-# (the rustc linker), for the host's own target.
+# ELF (x86_64, or aarch64 with the rustc linker), a macOS aarch64 Mach-O or a
+# Windows x86_64 PE (the rustc linker), for the host's own target. The
+# executable is the file PATH, except on Windows, where a PATH without an
+# extension gets .exe (the driver's codegen/aot.rs executable_path): returns
+# the file it wrote, PATH spelled as given with that suffix.
 # Readiness is the public -aot-spec contract, checked before expanding native
 # implementations (which are runtime support, like the Rust helpers). Never
 # run the program while compiling it, and never fall back to another backend.
+# The file a standalone executable linked for PATH is (native::executable's
+# result): PATH, except on a Windows host, where a PATH without an extension
+# gets .exe -- the driver's rule (codegen/aot.rs's executable_path), for
+# callers that name the file before or without linking it.
+proc native::executableFile {path} {
+    if {[string match windows-* [core::cabi::hostTarget]] && [file extension $path] eq ""} {
+        return $path.exe
+    }
+    return $path
+}
+
 proc native::executable {hir path args} {
     set analysisOptions [dict create -specialize 1]
     foreach {option variable} {
@@ -379,7 +436,10 @@ proc native::executable {hir path args} {
     if {[llength $lines] != 1 || [lindex [lindex $lines 0] 0] ne "executable"} {
         throw {NATIVE BUG} "native backend produced no executable result:\n[join $lines \n]"
     }
-    return [lindex [lindex $lines 0] 1]
+    # PATH as the caller spelled it, with the suffix the driver gave the file
+    # (.exe on Windows).
+    set written [file tail [lindex [lindex $lines 0] 1]]
+    return $path[string range $written [string length [file tail $path]] end]
 }
 
 proc native::clif {hir args} {

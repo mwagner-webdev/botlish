@@ -2238,7 +2238,7 @@ related: stdlib.module.binary stdlib.binary::store_element stdlib.binary::load s
     binary::element(any, int) -> any
 
 == ERRORS
-    IndexNotFound
+    IndexNotFound, NonFiniteFloat
 
 A call must handle each (on NAME:), admit it in its function's errors
 clause, or be proven unable to raise it (rule.unhandled-errors).
@@ -2302,7 +2302,7 @@ related: stdlib.module.binary concept.binary-layouts stdlib.binary::parse
     binary::emit(struct) -> struct
 
 == ERRORS
-    LayoutExtentMismatch
+    LayoutExtentMismatch, NonFiniteFloat
 
 A call must handle each (on NAME:), admit it in its function's errors
 clause, or be proven unable to raise it (rule.unhandled-errors).
@@ -2430,6 +2430,12 @@ related: stdlib.module.binary concept.binary-layouts stdlib.binary::native::view
 == SIGNATURE
     binary::load(any) -> any
 
+== ERRORS
+    NonFiniteFloat
+
+A call must handle each (on NAME:), admit it in its function's errors
+clause, or be proven unable to raise it (rule.unhandled-errors).
+
 == USE
 An intrinsic of namespace binary: import binary, then write binary::load.
 Method syntax: receiver.load(...) is the same call.
@@ -2461,7 +2467,7 @@ related: stdlib.module.binary concept.binary-layouts stdlib.binary::emit stdlib.
     binary::parse(str, struct) -> struct
 
 == ERRORS
-    LayoutLengthMismatch
+    LayoutLengthMismatch, NonFiniteFloat
 
 A call must handle each (on NAME:), admit it in its function's errors
 clause, or be proven unable to raise it (rule.unhandled-errors).
@@ -2524,7 +2530,7 @@ related: stdlib.module.binary stdlib.binary::write stdlib.binary::parse concept.
     binary::read(struct, str) -> any
 
 == ERRORS
-    LayoutLengthMismatch
+    LayoutLengthMismatch, NonFiniteFloat
 
 A call must handle each (on NAME:), admit it in its function's errors
 clause, or be proven unable to raise it (rule.unhandled-errors).
@@ -2586,7 +2592,7 @@ related: stdlib.module.binary stdlib.binary::native::edit stdlib.binary::write c
     binary::store(any, str, any) -> unit
 
 == ERRORS
-    LayoutExtentMismatch
+    LayoutExtentMismatch, NonFiniteFloat
 
 A call must handle each (on NAME:), admit it in its function's errors
 clause, or be proven unable to raise it (rule.unhandled-errors).
@@ -2629,7 +2635,7 @@ related: stdlib.module.binary stdlib.binary::element stdlib.binary::store stdlib
     binary::store_element(any, int, any) -> unit
 
 == ERRORS
-    IndexNotFound
+    IndexNotFound, NonFiniteFloat
 
 A call must handle each (on NAME:), admit it in its function's errors
 clause, or be proven unable to raise it (rule.unhandled-errors).
@@ -2664,7 +2670,7 @@ related: stdlib.module.binary stdlib.binary::write_foreign stdlib.binary::store 
     binary::write(struct, str, any) -> struct
 
 == ERRORS
-    LayoutExtentMismatch, LayoutLengthMismatch
+    LayoutExtentMismatch, LayoutLengthMismatch, NonFiniteFloat
 
 A call must handle each (on NAME:), admit it in its function's errors
 clause, or be proven unable to raise it (rule.unhandled-errors).
@@ -2853,8 +2859,18 @@ fixed array, `field name: array 16 of ffi::c::Char at 8`: N elements of
 any representation (a scalar, a pointer, a nested layout, another array),
 element i at the field's offset plus i times the element's width; its
 copied value is a List of exactly N elements (FIXED-LAYOUT-ARRAYS.md).
-There are no unions, bitfields, variable-length tails, zero-length arrays
-or floats in a layout.
+There are no bitfields, variable-length tails or zero-length arrays in a
+layout; overlapping interpretations are a union layout's (LAYOUT-UNIONS.md).
+
+A field may be C's float or double (ffi::c::Float, 4 bytes; ffi::c::Double,
+8), its value a Float64. A read of one -- binary::parse, binary::read,
+binary::load, binary::element, a view's field -- fails with the declared
+NonFiniteFloat when its bits are a NaN or an infinity (negative zero reads
+as 0.0); a write, store or emit of a float rounds the Float64 to nearest,
+ties to even, and fails with NonFiniteFloat when it overflows the float,
+before a byte is written. A call is charged NonFiniteFloat only when it
+reads a float or a double or writes a float: the errors listed below
+include it for those calls alone (concept.c-floats).
 
 A field may be a C pointer (ffi::c::Ptr[T] or ffi::c::FnPtr[F], of the
 target's pointer width). Such a layout is native-only: bytes never become
@@ -3839,6 +3855,1071 @@ binding, suspends at `yield`, and is resumed by calling its handle
 (concept.coroutines); the operations behind them are internal
 coroutine#... natives no source can name.
 
+@topic stdlib.darwin::c_errno_location
+title: darwin::c_errno_location -- Externfn of module darwin
+summary: int *__error(void)
+index: stdlib
+symbol: darwin::c_errno_location
+related: stdlib.module.darwin
+
+== DECLARATION
+    extern c fn c_errno_location named "__error"() -> ffi::c::Ptr[ffi::c::Int] independent
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::c_errno_location.
+
+== DESCRIPTION
+int *__error(void): the address of the calling thread's errno.
+
+@topic stdlib.darwin::c_write
+title: darwin::c_write -- Externfn of module darwin
+summary: ssize_t write(int fd, const void *buf, size_t nbyte)
+index: stdlib
+symbol: darwin::c_write
+related: stdlib.module.darwin
+
+== DECLARATION
+    extern c fn c_write named "write"(fd: ffi::c::Int, buf: ffi::c::Ptr[ffi::c::Void] read noescape, nbyte: ffi::c::ULong) -> ffi::c::Long
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::c_write.
+
+== DESCRIPTION
+ssize_t write(int fd, const void *buf, size_t nbyte)
+
+@topic stdlib.darwin::c_read
+title: darwin::c_read -- Externfn of module darwin
+summary: ssize_t read(int fd, void *buf, size_t nbyte)
+index: stdlib
+symbol: darwin::c_read
+related: stdlib.module.darwin
+
+== DECLARATION
+    extern c fn c_read named "read"(fd: ffi::c::Int, buf: ffi::c::Ptr[ffi::c::Void] write noescape, nbyte: ffi::c::ULong) -> ffi::c::Long
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::c_read.
+
+== DESCRIPTION
+ssize_t read(int fd, void *buf, size_t nbyte)
+
+@topic stdlib.darwin::c_open
+title: darwin::c_open -- Externfn of module darwin
+summary: int open(const char *path, int oflag, ...)
+index: stdlib
+symbol: darwin::c_open
+related: stdlib.module.darwin
+
+== DECLARATION
+    extern c fn c_open named "open"(path: ffi::c::Ptr[ffi::c::Char] read noescape, oflag: ffi::c::Int, variadic) -> ffi::c::Int
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::c_open.
+
+== DESCRIPTION
+int open(const char *path, int oflag, ...)
+
+@topic stdlib.darwin::c_close
+title: darwin::c_close -- Externfn of module darwin
+summary: int close(int fd)
+index: stdlib
+symbol: darwin::c_close
+related: stdlib.module.darwin
+
+== DECLARATION
+    extern c fn c_close named "close"(fd: ffi::c::Int) -> ffi::c::Int
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::c_close.
+
+== DESCRIPTION
+int close(int fd)
+
+@topic stdlib.darwin::ErrnoCell
+title: darwin::ErrnoCell -- Layout of module darwin
+summary: The int errno is
+index: stdlib
+symbol: darwin::ErrnoCell
+related: stdlib.module.darwin
+
+== DECLARATION
+    layout ErrnoCell:
+        size 4
+        align 4
+        field value: ffi::c::Int at 0
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::ErrnoCell.
+
+== DESCRIPTION
+The int errno is: what __error() points to.
+
+@topic stdlib.darwin::o_rdonly
+title: darwin::o_rdonly -- Value of module darwin
+summary: <fcntl.h>'s open flags on macOS.
+index: stdlib
+symbol: darwin::o_rdonly
+related: stdlib.module.darwin
+
+== DECLARATION
+    o_rdonly = 0
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::o_rdonly.
+
+== DESCRIPTION
+<fcntl.h>'s open flags on macOS.
+
+@topic stdlib.darwin::o_wronly
+title: darwin::o_wronly -- Value of module darwin
+summary: The value darwin::o_wronly of the standard module darwin.
+index: stdlib
+symbol: darwin::o_wronly
+related: stdlib.module.darwin
+
+== DECLARATION
+    o_wronly = 1
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::o_wronly.
+
+@topic stdlib.darwin::o_rdwr
+title: darwin::o_rdwr -- Value of module darwin
+summary: The value darwin::o_rdwr of the standard module darwin.
+index: stdlib
+symbol: darwin::o_rdwr
+related: stdlib.module.darwin
+
+== DECLARATION
+    o_rdwr = 2
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::o_rdwr.
+
+@topic stdlib.darwin::o_creat
+title: darwin::o_creat -- Value of module darwin
+summary: The value darwin::o_creat of the standard module darwin.
+index: stdlib
+symbol: darwin::o_creat
+related: stdlib.module.darwin
+
+== DECLARATION
+    o_creat = 512
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::o_creat.
+
+@topic stdlib.darwin::o_trunc
+title: darwin::o_trunc -- Value of module darwin
+summary: The value darwin::o_trunc of the standard module darwin.
+index: stdlib
+symbol: darwin::o_trunc
+related: stdlib.module.darwin
+
+== DECLARATION
+    o_trunc = 1024
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::o_trunc.
+
+@topic stdlib.darwin::o_excl
+title: darwin::o_excl -- Value of module darwin
+summary: The value darwin::o_excl of the standard module darwin.
+index: stdlib
+symbol: darwin::o_excl
+related: stdlib.module.darwin
+
+== DECLARATION
+    o_excl = 2048
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::o_excl.
+
+@topic stdlib.darwin::o_cloexec
+title: darwin::o_cloexec -- Value of module darwin
+summary: The value darwin::o_cloexec of the standard module darwin.
+index: stdlib
+symbol: darwin::o_cloexec
+related: stdlib.module.darwin
+
+== DECLARATION
+    o_cloexec = 16777216
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::o_cloexec.
+
+@topic stdlib.darwin::AccessBits
+title: darwin::AccessBits -- Type of module darwin
+summary: The access bits of open(2)'s flags (O_ACCMODE's values).
+index: stdlib
+symbol: darwin::AccessBits
+related: stdlib.module.darwin
+
+== DECLARATION
+    type AccessBits = Int in 0..2
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::AccessBits.
+
+== DESCRIPTION
+The access bits of open(2)'s flags (O_ACCMODE's values).
+
+@topic stdlib.darwin::Access
+title: darwin::Access -- Enum of module darwin
+summary: How a descriptor open(2) makes may be used
+index: stdlib
+symbol: darwin::Access
+related: stdlib.module.darwin
+
+== DECLARATION
+    enum Access:
+        ReadOnly,
+        WriteOnly,
+        ReadWrite,
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::Access.
+
+== DESCRIPTION
+How a descriptor open(2) makes may be used: O_RDONLY, O_WRONLY or O_RDWR.
+
+@topic stdlib.darwin::WriteResult
+title: darwin::WriteResult -- Struct of module darwin
+summary: What one write(2) did
+index: stdlib
+symbol: darwin::WriteResult
+related: stdlib.module.darwin
+
+== DECLARATION
+    struct WriteResult:
+        count: int
+        errno: int
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::WriteResult.
+
+== DESCRIPTION
+What one write(2) did: COUNT bytes written (>= 0; fewer than asked is a
+short write, not an error), or COUNT -1 when it failed, ERRNO the errno it
+left. ERRNO is 0 exactly when COUNT >= 0.
+
+@topic stdlib.darwin::ReadResult
+title: darwin::ReadResult -- Struct of module darwin
+summary: What one read(2) did
+index: stdlib
+symbol: darwin::ReadResult
+related: stdlib.module.darwin
+
+== DECLARATION
+    struct ReadResult:
+        count: int
+        errno: int
+        data: abi::bytes::MutableBytes
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::ReadResult.
+
+== DESCRIPTION
+What one read(2) did: COUNT bytes read (> 0), 0 at end of file, or -1 when
+it failed (ERRNO the errno it left; 0 otherwise), and DATA, the buffer as C
+left it: its first COUNT bytes read, the rest as they were.
+
+@topic stdlib.darwin::OpenResult
+title: darwin::OpenResult -- Struct of module darwin
+summary: What one open(2) did
+index: stdlib
+symbol: darwin::OpenResult
+related: stdlib.module.darwin
+
+== DECLARATION
+    struct OpenResult:
+        fd: ffi::c::Int
+        errno: int
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::OpenResult.
+
+== DESCRIPTION
+What one open(2) did: the new descriptor (>= 0), or -1 when it failed, ERRNO
+the errno it left (0 otherwise).
+
+@topic stdlib.darwin::CloseResult
+title: darwin::CloseResult -- Struct of module darwin
+summary: What one close(2) did
+index: stdlib
+symbol: darwin::CloseResult
+related: stdlib.module.darwin
+
+== DECLARATION
+    struct CloseResult:
+        status: int
+        errno: int
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::CloseResult.
+
+== DESCRIPTION
+What one close(2) did: 0, or -1 when it failed, ERRNO the errno it left (0
+otherwise).
+
+@topic stdlib.darwin::errno
+title: darwin::errno -- Function of module darwin
+summary: The calling thread's errno, as it is now
+index: stdlib
+symbol: darwin::errno
+related: stdlib.module.darwin
+
+== DECLARATION
+    fn errno() -> int:
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::errno or, as a method,
+receiver.errno(...).
+
+== DESCRIPTION
+The calling thread's errno, as it is now: the int *__error() points to.
+Meaningful only right after a C call that reported a failure.
+
+@topic stdlib.darwin::write
+title: darwin::write -- Function of module darwin
+summary: write(2)
+index: stdlib
+symbol: darwin::write
+related: stdlib.module.darwin
+
+== DECLARATION
+    fn write(fd: ffi::c::Int, data: abi::bytes::Bytes) -> WriteResult:
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::write or, as a method,
+receiver.write(...).
+
+== DESCRIPTION
+write(2): DATA's bytes to descriptor FD, by one libSystem call.
+
+@topic stdlib.darwin::read
+title: darwin::read -- Function of module darwin
+summary: read(2) from descriptor FD into a logical copy of DATA, by one libSystem call
+index: stdlib
+symbol: darwin::read
+related: stdlib.module.darwin
+
+== DECLARATION
+    fn read(fd: ffi::c::Int, data: abi::bytes::MutableBytes) -> ReadResult:
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::read or, as a method,
+receiver.read(...).
+
+== DESCRIPTION
+read(2) from descriptor FD into a logical copy of DATA, by one libSystem
+call: DATA itself never changes (MUTABLE-BYTES.md); the bytes read are in
+the result's `data`, which keeps DATA's length. Take the bytes read with
+abi::bytes::freeze_prefix(result.data, abi::usize(result.count)).
+
+@topic stdlib.darwin::terminator
+title: darwin::terminator -- Function of module darwin
+summary: The byte that terminates a C string.
+index: stdlib
+symbol: darwin::terminator
+related: stdlib.module.darwin
+
+== DECLARATION
+    fn terminator() -> byte::Byte:
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::terminator or, as a
+method, receiver.terminator(...).
+
+== DESCRIPTION
+The byte that terminates a C string.
+
+@topic stdlib.darwin::c_string
+title: darwin::c_string -- Function of module darwin
+summary: PATH as the C string open(2) reads
+index: stdlib
+symbol: darwin::c_string
+related: stdlib.module.darwin
+
+== DECLARATION
+    fn c_string(path: darwin::path::DarwinPath) -> abi::bytes::Bytes:
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::c_string or, as a
+method, receiver.c_string(...).
+
+== DESCRIPTION
+PATH as the C string open(2) reads: its UTF-8 bytes and a terminating NUL
+(PATH holds no U+0000, so the NUL is the only one and ends it).
+
+@topic stdlib.darwin::access_flags
+title: darwin::access_flags -- Function of module darwin
+summary: The O_RDONLY / O_WRONLY / O_RDWR bits of ACCESS.
+index: stdlib
+symbol: darwin::access_flags
+related: stdlib.module.darwin
+
+== DECLARATION
+    fn access_flags(access: Access) -> AccessBits:
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::access_flags or, as a
+method, receiver.access_flags(...).
+
+== DESCRIPTION
+The O_RDONLY / O_WRONLY / O_RDWR bits of ACCESS.
+
+@topic stdlib.darwin::open_with
+title: darwin::open_with -- Function of module darwin
+summary: One open(2) with OFLAG and no creation mode, read as an OpenResult.
+index: stdlib
+symbol: darwin::open_with
+related: stdlib.module.darwin
+
+== DECLARATION
+    fn open_with(path: darwin::path::DarwinPath, oflag: ffi::c::Int) -> OpenResult:
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::open_with or, as a
+method, receiver.open_with(...).
+
+== DESCRIPTION
+One open(2) with OFLAG and no creation mode, read as an OpenResult.
+
+@topic stdlib.darwin::open_mode
+title: darwin::open_mode -- Function of module darwin
+summary: One open(2) with OFLAG and the creation mode MODE, its variadic argument.
+index: stdlib
+symbol: darwin::open_mode
+related: stdlib.module.darwin
+
+== DECLARATION
+    fn open_mode(path: darwin::path::DarwinPath, oflag: ffi::c::Int, mode: ffi::c::UShort) -> OpenResult:
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::open_mode or, as a
+method, receiver.open_mode(...).
+
+== DESCRIPTION
+One open(2) with OFLAG and the creation mode MODE, its variadic argument.
+
+@topic stdlib.darwin::open
+title: darwin::open -- Function of module darwin
+summary: open(2) of the existing file PATH for ACCESS
+index: stdlib
+symbol: darwin::open
+related: stdlib.module.darwin
+
+== DECLARATION
+    fn open(path: darwin::path::DarwinPath, access: Access) -> OpenResult:
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::open or, as a method,
+receiver.open(...).
+
+== DESCRIPTION
+open(2) of the existing file PATH for ACCESS: no O_CREAT, so no mode.
+
+@topic stdlib.darwin::create
+title: darwin::create -- Function of module darwin
+summary: open(2) of PATH for ACCESS, creating it with permissions MODE (before the process's umask) when it does not exist and truncating it when it does.
+index: stdlib
+symbol: darwin::create
+related: stdlib.module.darwin
+
+== DECLARATION
+    fn create(path: darwin::path::DarwinPath, access: Access, mode: ffi::c::UShort) -> OpenResult:
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::create or, as a method,
+receiver.create(...).
+
+== DESCRIPTION
+open(2) of PATH for ACCESS, creating it with permissions MODE (before the
+process's umask) when it does not exist and truncating it when it does.
+
+@topic stdlib.darwin::create_new
+title: darwin::create_new -- Function of module darwin
+summary: open(2) of PATH for ACCESS, creating it with permissions MODE
+index: stdlib
+symbol: darwin::create_new
+related: stdlib.module.darwin
+
+== DECLARATION
+    fn create_new(path: darwin::path::DarwinPath, access: Access, mode: ffi::c::UShort) -> OpenResult:
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::create_new or, as a
+method, receiver.create_new(...).
+
+== DESCRIPTION
+open(2) of PATH for ACCESS, creating it with permissions MODE; it fails with
+EEXIST when PATH exists (O_EXCL).
+
+@topic stdlib.darwin::close
+title: darwin::close -- Function of module darwin
+summary: close(2) of descriptor FD.
+index: stdlib
+symbol: darwin::close
+related: stdlib.module.darwin
+
+== DECLARATION
+    fn close(fd: ffi::c::Int) -> CloseResult:
+
+== MODULE
+lib/darwin.bot: import darwin, then write darwin::close or, as a method,
+receiver.close(...).
+
+== DESCRIPTION
+close(2) of descriptor FD.
+
+@topic stdlib.module.darwin
+title: darwin -- standard namespace
+summary: The macOS (Darwin) platform's low-level I/O operations, thin ordinary-Botlish wrappers over Apple's public C library, libSystem (MACOS-AARCH64-MILE.
+index: stdlib
+symbol: darwin
+
+== DESCRIPTION
+  darwin::write(fd, data)        write(2): ONE libSystem call; a WriteResult
+  darwin::read(fd, data)         read(2): ONE call into a logical copy of
+                                 DATA; a ReadResult holding the copy
+  darwin::open(path, access)     open(2) of an existing file; an OpenResult
+  darwin::create(path, access, mode)
+                                 open(2) with O_CREAT and O_TRUNC, MODE the
+                                 new file's permissions; an OpenResult
+  darwin::create_new(path, access, mode)
+                                 the same with O_EXCL instead of O_TRUNC: it
+                                 fails (EEXIST) when the file exists
+  darwin::close(fd)              close(2); a CloseResult
+  darwin::errno()                the calling thread's errno, as it is now
+
+libSystem is the boundary. Darwin's kernel interface is private and changes
+between releases; its stable interface is the C library, so this module
+calls the C functions -- write, read, open, close and __error -- through
+ordinary `extern c fn` declarations of their prototypes (C-FFI.md), linked
+from the system library every macOS executable links: no syscall number, no
+`svc #0x80`, no transport of its own, and no compiler knowledge of I/O. It
+is the Linux module's sibling in shape (lib/linux.bot: one call, the raw
+outcome, a logical copy for read) but not in convention:
+
+* Darwin reports a failure as C does -- the call returns -1 and the reason
+  is in errno -- where Linux's raw syscall returns -errno in the result
+  register. A result here never encodes an errno: each one holds the C
+  result (count, descriptor or status, -1 on failure) and, separately, the
+  errno a failed call left (0 when it succeeded: errno is never read after a
+  success, where its value means nothing).
+* errno is per thread: the C macro is `(*__error())`, a function returning
+  the address of the calling thread's int. errno() reads it through a
+  native view of a one-field layout (NATIVE-LAYOUT-VIEWS.md) of that
+  address: no pointer arithmetic, no dereference operator, the pointer
+  never kept. A wrapper reads it right after the failed call returns,
+  before it calls anything else (a later C call could change it), on the
+  same thread (a Botlish program runs on one native thread: coroutines
+  switch stacks, never threads) and with no possible suspension between
+  (a yield is a statement of the coroutine's own body, never inside these
+  functions). For write, open and close nothing at all runs between the
+  call and the read; read's write exposure has its write-back value built
+  right after the call (C-POINTER-BORROWING.md: two small allocations,
+  before any Botlish code runs), which allocates and may collect but calls
+  no libSystem function that reports through errno.
+
+Byte storage reaches C only through the borrowing contract
+(C-POINTER-BORROWING.md): write's buffer is `read noescape` (exposed as it
+is, no copy), read's `write noescape` (a private copy C writes, returned as
+the result's `data`; the caller's MutableBytes never changes). Address and
+count come from the ONE value -- there is no count parameter -- and the
+count is proven a size_t (an abi::Usize's value is an ffi::c::ULong on
+macOS, LP64) with no run-time check. A path is a darwin::path::DarwinPath
+(non-empty, no U+0000), given to open(2) as its UTF-8 bytes and a
+terminating NUL, built for the call and exposed for it alone.
+
+open(2) is a genuine C variadic function, `int open(const char *, int,
+...)`, and is declared so (VARIADICS-VERTICAL-SLICE-1.md: on Apple arm64 a
+variadic call's trailing arguments travel on the stack, so a fixed
+three-parameter declaration would pass the mode where open never reads it).
+The creation mode is its one trailing argument, an ffi::c::UShort -- macOS's
+mode_t is unsigned 16 bits -- which C's default argument promotion passes as
+an int (what open's va_arg reads). Only create and create_new pass it, and
+they always do: a creation (O_CREAT) can never omit its mode, and open
+passes no flag that would need one. Every descriptor is opened close-on-exec
+(O_CLOEXEC).
+
+Thin by design: ONE C call per operation, no loop, no retry (EINTR is a
+failure like any other: io::IO's completion policy, darwin::io, decides), no
+buffering, no descriptor ownership (closing is the caller's; nothing is
+closed for it), no text. The standard streams as a context and the portable
+io::IO implementation are darwin::io's.
+
+A direct module (DIRECT-MODULES.md): its operations take any descriptor and
+any path -- raw process authority -- with no context, and errno() makes a
+native view (binary::native, designated direct). Code that calls them is
+calling into a direct module and either mediates them through a context of
+its own (darwin::io's DarwinIO does) or is declared direct itself. The
+constants below are the macOS SDK's (<fcntl.h>), never Linux's:
+tests/darwin-io.test compares each with the host's headers on macOS.
+
+== SOURCE
+lib/darwin.bot (import darwin). A direct module (DIRECT-MODULES.md): it
+exercises raw authority.
+
+== MEMBERS
+    darwin::Access                 enum -- How a descriptor open(2) makes m...
+    darwin::AccessBits             type -- The access bits of open(2)'s fla...
+    darwin::CloseResult            struct -- What one close(2) did
+    darwin::ErrnoCell              layout -- The int errno is
+    darwin::OpenResult             struct -- What one open(2) did
+    darwin::ReadResult             struct -- What one read(2) did
+    darwin::WriteResult            struct -- What one write(2) did
+    darwin::access_flags           function -- The O_RDONLY / O_WRONLY / O_...
+    darwin::c_close                externfn -- int close(int fd)
+    darwin::c_errno_location       externfn -- int *__error(void)
+    darwin::c_open                 externfn -- int open(const char *path, i...
+    darwin::c_read                 externfn -- ssize_t read(int fd, void *b...
+    darwin::c_string               function -- PATH as the C string open(2)...
+    darwin::c_write                externfn -- ssize_t write(int fd, const ...
+    darwin::close                  function -- close(2) of descriptor FD.
+    darwin::create                 function -- open(2) of PATH for ACCESS, ...
+    darwin::create_new             function -- open(2) of PATH for ACCESS, ...
+    darwin::errno                  function -- The calling thread's errno, ...
+    darwin::o_cloexec              value
+    darwin::o_creat                value
+    darwin::o_excl                 value
+    darwin::o_rdonly               value -- <fcntl.h>'s open flags on macOS.
+    darwin::o_rdwr                 value
+    darwin::o_trunc                value
+    darwin::o_wronly               value
+    darwin::open                   function -- open(2) of the existing file...
+    darwin::open_mode              function -- One open(2) with OFLAG and t...
+    darwin::open_with              function -- One open(2) with OFLAG and n...
+    darwin::read                   function -- read(2) from descriptor FD i...
+    darwin::terminator             function -- The byte that terminates a C...
+    darwin::write                  function -- write(2)
+
+Each member is a topic: -help NAME (e.g. -help darwin::Access).
+
+@topic stdlib.darwin::io::FileDescriptor
+title: darwin::io::FileDescriptor -- Opaque struct of module darwin::io
+summary: A Darwin file-descriptor token minted by this module.
+index: stdlib
+symbol: darwin::io::FileDescriptor
+related: stdlib.module.darwin::io
+
+== DECLARATION
+    opaque struct FileDescriptor:
+        raw: ffi::c::Int
+
+== MODULE
+lib/darwin/io.bot: import darwin::io, then write
+darwin::io::FileDescriptor.
+
+== DESCRIPTION
+A Darwin file-descriptor token minted by this module.
+
+@topic stdlib.darwin::io::DarwinIO
+title: darwin::io::DarwinIO -- Opaque context struct of module darwin::io
+summary: The process I/O environment
+index: stdlib
+symbol: darwin::io::DarwinIO
+related: stdlib.module.darwin::io
+
+== DECLARATION
+    opaque context struct DarwinIO:
+        stdin: FileDescriptor
+        stdout: FileDescriptor
+        stderr: FileDescriptor
+
+== MODULE
+lib/darwin/io.bot: import darwin::io, then write darwin::io::DarwinIO.
+
+== DESCRIPTION
+The process I/O environment: the standard input, output and error
+descriptors of the process. One context.
+
+@topic stdlib.darwin::io::create
+title: darwin::io::create -- Function of module darwin::io
+summary: The standard process I/O environment
+index: stdlib
+symbol: darwin::io::create
+related: stdlib.module.darwin::io
+
+== DECLARATION
+    fn create() -> DarwinIO:
+
+== MODULE
+lib/darwin/io.bot: import darwin::io, then write darwin::io::create or, as
+a method, receiver.create(...).
+
+== DESCRIPTION
+The standard process I/O environment: descriptors 0, 1 and 2. An ordinary
+constructor; `with context darwin::io::create()` installs its value.
+
+@topic stdlib.darwin::io::write
+title: darwin::io::write -- Function of module darwin::io
+summary: write(2) of DATA to the context's standard output
+index: stdlib
+symbol: darwin::io::write
+related: stdlib.module.darwin::io
+
+== DECLARATION
+    fn write(data: abi::bytes::Bytes, context io: DarwinIO) -> darwin::WriteResult:
+
+== MODULE
+lib/darwin/io.bot: import darwin::io, then write darwin::io::write or, as
+a method, receiver.write(...).
+
+== DESCRIPTION
+write(2) of DATA to the context's standard output: ONE libSystem call,
+darwin::write's result unchanged (lib/darwin.bot).
+
+@topic stdlib.darwin::io::write_error
+title: darwin::io::write_error -- Function of module darwin::io
+summary: write(2) of DATA to the context's standard error.
+index: stdlib
+symbol: darwin::io::write_error
+related: stdlib.module.darwin::io
+
+== DECLARATION
+    fn write_error(data: abi::bytes::Bytes, context io: DarwinIO) -> darwin::WriteResult:
+
+== MODULE
+lib/darwin/io.bot: import darwin::io, then write darwin::io::write_error
+or, as a method, receiver.write_error(...).
+
+== DESCRIPTION
+write(2) of DATA to the context's standard error.
+
+@topic stdlib.darwin::io::read
+title: darwin::io::read -- Function of module darwin::io
+summary: read(2) from the context's standard input into a logical copy of DATA
+index: stdlib
+symbol: darwin::io::read
+related: stdlib.module.darwin::io
+
+== DECLARATION
+    fn read(data: abi::bytes::MutableBytes, context io: DarwinIO) -> darwin::ReadResult:
+
+== MODULE
+lib/darwin/io.bot: import darwin::io, then write darwin::io::read or, as a
+method, receiver.read(...).
+
+== DESCRIPTION
+read(2) from the context's standard input into a logical copy of DATA:
+darwin::read's semantics exactly (one call; the caller's buffer is
+unchanged; the count -- 0 at end of file, -1 on failure with its errno --
+and the buffer as C left it come back in a darwin::ReadResult).
+
+@topic stdlib.darwin::io::write_all
+title: darwin::io::write_all -- Function of module darwin::io
+summary: Writes every byte of BYTES to FD.
+index: stdlib
+symbol: darwin::io::write_all
+related: stdlib.module.darwin::io
+
+== DECLARATION
+    fn write_all(fd: FileDescriptor, bytes: List[Byte], context io: DarwinIO) -> unit errors io::WriteFailed:
+
+== MODULE
+lib/darwin/io.bot: import darwin::io, then write darwin::io::write_all or,
+as a method, receiver.write_all(...).
+
+== DESCRIPTION
+Writes every byte of BYTES to FD. One write(2) of the whole text in the
+common case; a short write (fewer bytes than asked, but some) is completed
+by writing the rest, again and again, so the caller only ever sees all or
+io::WriteFailed. A failed write and one that makes no progress are
+io::WriteFailed; no count or errno escapes.
+
+It requires DarwinIO although it reads only FD: it makes the direct call
+(darwin::write, a callable of the direct module darwin), and a direct call
+is mediated by a context of this module in the function that makes it
+(DIRECT-MODULES.md), never by its callers' contexts. Its callers have it.
+
+@topic stdlib.darwin::io::write_text
+title: darwin::io::write_text -- Function of module darwin::io
+summary: All of TEXT, UTF-8 encoded, on the context's standard output
+index: stdlib
+symbol: darwin::io::write_text
+related: stdlib.module.darwin::io
+
+== DECLARATION
+    fn write_text(text: str, context io: DarwinIO) -> unit errors io::WriteFailed:
+
+== MODULE
+lib/darwin/io.bot: import darwin::io, then write darwin::io::write_text
+or, as a method, receiver.write_text(...).
+
+== DESCRIPTION
+All of TEXT, UTF-8 encoded, on the context's standard output;
+io::WriteFailed when libSystem reports an error or the write stops making
+progress. Never a byte count.
+
+@topic stdlib.darwin::io::write_error_text
+title: darwin::io::write_error_text -- Function of module darwin::io
+summary: All of TEXT, UTF-8 encoded, on the context's standard error.
+index: stdlib
+symbol: darwin::io::write_error_text
+related: stdlib.module.darwin::io
+
+== DECLARATION
+    fn write_error_text(text: str, context io: DarwinIO) -> unit errors io::WriteFailed:
+
+== MODULE
+lib/darwin/io.bot: import darwin::io, then write
+darwin::io::write_error_text or, as a method,
+receiver.write_error_text(...).
+
+== DESCRIPTION
+All of TEXT, UTF-8 encoded, on the context's standard error.
+
+@topic stdlib.module.darwin::io
+title: darwin::io -- standard namespace
+summary: The process's standard I/O on macOS as one execution-environment context (CONTEXTS.md.
+index: stdlib
+symbol: darwin::io
+
+== DESCRIPTION
+  with context darwin::io::create()       install it (entry program)
+  darwin::io::write(data)                 write(2) to the context's stdout
+  darwin::io::write_error(data)           write(2) to the context's stderr
+  darwin::io::read(buffer)                read(2) from the context's stdin
+
+DarwinIO is linux::io::LinuxIO's macOS sibling: ONE context, the process I/O
+environment, holding the three standard descriptors. A function that uses it
+says so once (`context io: DarwinIO`) and is called with its ordinary
+arguments; code between the entry program and it declares nothing (the
+compiler derives the requirement), and a call before `with context
+darwin::io::create()` is MISSING-CONTEXT at compile time.
+
+Capability boundary (DIRECT-MODULES.md). `darwin` is a direct module: its
+write and read take any descriptor. This module is not: every function here
+that calls into `darwin` requires DarwinIO, the context it defines itself,
+so the raw authority reaches its callers only as that capability -- and
+nothing above darwin::io is direct for using it. Every external effect flows
+
+  darwin::io::write --> darwin::write --> libSystem's write(3)
+
+through ordinary C calls (C-FFI.md): no syscall, no compiler knowledge of
+I/O. The low-level layer stays as it is: code that wants an explicit
+descriptor calls darwin::write(fd, data) / darwin::read(fd, buffer).
+
+Representation authority. FileDescriptor and DarwinIO are opaque
+(OPAQUE-STRUCTS.md): only this module may construct them or look inside; a
+DarwinIO a function receives as its context can be held and passed but not
+taken apart. The descriptor token is an ffi::c::Int, the C int every
+libSystem descriptor is; create() mints the three standard ones, 0, 1 and 2.
+The token does not claim the descriptor is open or stays open.
+
+DarwinIO implements the portable io::IO context trait (CONTEXT-TRAITS.md)
+with write_text and write_error_text below: ordinary functions of this
+module whose one context parameter is a DarwinIO and whose signatures match
+io::IO's requirements. Nothing registers them: where a call needs io::IO and
+DarwinIO is the one installed context that implements it, the compiler binds
+`io.write_text(...)` to a direct call of darwin::io::write_text -- no
+dispatch, no hidden argument, no provider table at run time.
+
+The completion policy is LinuxIO's, so io::IO means the same on both
+platforms: all of the text, or io::WriteFailed. A short positive write is
+completed by writing the rest; a failed write (-1, whatever the errno --
+EINTR and EAGAIN included: no retry) and a write that makes no progress are
+io::WriteFailed; no count, descriptor or errno escapes.
+
+Not here (deliberately): errno mapping beyond io::WriteFailed (the raw
+darwin::write/read keep it), buffering, text input, close/ownership (the
+standard descriptors need no application cleanup), other descriptors.
+
+== SOURCE
+lib/darwin/io.bot (import darwin::io).
+
+== MEMBERS
+    darwin::io::DarwinIO           opaque context struct -- The process I/O...
+    darwin::io::FileDescriptor     opaque struct -- A Darwin file-descripto...
+    darwin::io::create             function -- The standard process I/O env...
+    darwin::io::read               function -- read(2) from the context's s...
+    darwin::io::write              function -- write(2) of DATA to the cont...
+    darwin::io::write_all          function -- Writes every byte of BYTES t...
+    darwin::io::write_error        function -- write(2) of DATA to the cont...
+    darwin::io::write_error_text   function -- All of TEXT, UTF-8 encoded, ...
+    darwin::io::write_text         function -- All of TEXT, UTF-8 encoded, ...
+
+Each member is a topic: -help NAME (e.g. -help darwin::io::DarwinIO).
+
+@topic stdlib.darwin::path::DarwinPath
+title: darwin::path::DarwinPath -- Type of module darwin::path
+summary: The type darwin::path::DarwinPath of the standard module darwin::path.
+index: stdlib
+symbol: darwin::path::DarwinPath
+related: stdlib.module.darwin::path
+
+== DECLARATION
+    refined type DarwinPath = str
+
+== MODULE
+lib/darwin/path.bot: import darwin::path, then write
+darwin::path::DarwinPath.
+
+@topic stdlib.darwin::path::nul_free?
+title: darwin::path::nul_free? -- Function of module darwin::path
+summary: true when no character of VALUE is U+0000.
+index: stdlib
+symbol: darwin::path::nul_free?
+related: stdlib.module.darwin::path
+
+== DECLARATION
+    fn nul_free?(value: str) -> bool:
+
+== MODULE
+lib/darwin/path.bot: import darwin::path, then write
+darwin::path::nul_free? or, as a method, receiver.nul_free?(...).
+
+== DESCRIPTION
+true when no character of VALUE is U+0000.
+
+@topic stdlib.darwin::path::valid?
+title: darwin::path::valid? -- Function of module darwin::path
+summary: true when VALUE is a valid textual Darwin path (non-empty, no U+0000), which proves it a DarwinPath
+index: stdlib
+symbol: darwin::path::valid?
+related: stdlib.module.darwin::path
+
+== DECLARATION
+    fn valid?(value: str) -> bool proves value: DarwinPath:
+
+== MODULE
+lib/darwin/path.bot: import darwin::path, then write darwin::path::valid?
+or, as a method, receiver.valid?(...).
+
+== DESCRIPTION
+true when VALUE is a valid textual Darwin path (non-empty, no U+0000), which
+proves it a DarwinPath; false proves nothing.
+
+@topic stdlib.darwin::path::validate
+title: darwin::path::validate -- Function of module darwin::path
+summary: Completes normally only when VALUE is a valid textual Darwin path, which proves it a DarwinPath for the rest of the caller's path
+index: stdlib
+symbol: darwin::path::validate
+related: stdlib.module.darwin::path
+
+== DECLARATION
+    fn validate(value: str) -> unit proves value: DarwinPath errors io::path::NotAPath:
+
+== MODULE
+lib/darwin/path.bot: import darwin::path, then write
+darwin::path::validate or, as a method, receiver.validate(...).
+
+== DESCRIPTION
+Completes normally only when VALUE is a valid textual Darwin path, which
+proves it a DarwinPath for the rest of the caller's path; fails with
+io::path::NotAPath otherwise.
+
+@topic stdlib.darwin::path::text
+title: darwin::path::text -- Function of module darwin::path
+summary: The path's canonical String form
+index: stdlib
+symbol: darwin::path::text
+related: stdlib.module.darwin::path
+
+== DECLARATION
+    fn text(path: DarwinPath) -> str:
+
+== MODULE
+lib/darwin/path.bot: import darwin::path, then write darwin::path::text
+or, as a method, receiver.text(...).
+
+== DESCRIPTION
+The path's canonical String form: exactly the carrier String (lossless; no
+escaping, quoting or display conversion).
+
+@topic stdlib.darwin::path::ends_with_slash?
+title: darwin::path::ends_with_slash? -- Function of module darwin::path
+summary: true when TEXT's last character is "/".
+index: stdlib
+symbol: darwin::path::ends_with_slash?
+related: stdlib.module.darwin::path
+
+== DECLARATION
+    fn ends_with_slash?(text: str) -> bool:
+
+== MODULE
+lib/darwin/path.bot: import darwin::path, then write
+darwin::path::ends_with_slash? or, as a method,
+receiver.ends_with_slash?(...).
+
+== DESCRIPTION
+true when TEXT's last character is "/".
+
+@topic stdlib.darwin::path::concat
+title: darwin::path::concat -- Function of module darwin::path
+summary: PATH joined with COMPONENT
+index: stdlib
+symbol: darwin::path::concat
+related: stdlib.module.darwin::path
+
+== DECLARATION
+    fn concat(path: DarwinPath, component: str) -> DarwinPath errors io::path::NotAPath:
+
+== MODULE
+lib/darwin/path.bot: import darwin::path, then write darwin::path::concat
+or, as a method, receiver.concat(...).
+
+== DESCRIPTION
+PATH joined with COMPONENT: one "/" between them unless PATH already ends
+with one. COMPONENT is a relative path fragment -- non-empty, without
+U+0000, not starting with "/" (an absolute component would replace PATH,
+which joining never does) -- and may itself contain "/", "." or "..";
+nothing is normalized and no filesystem is observed. Fails with
+io::path::NotAPath for any other COMPONENT. The result is a DarwinPath by
+validation, the ordinary owner proof.
+
+@topic stdlib.module.darwin::path
+title: darwin::path -- standard namespace
+summary: Textual macOS (Darwin) paths (CONTEXT-TRAITS.md, "Paths".
+index: stdlib
+symbol: darwin::path
+
+== DESCRIPTION
+  darwin::path::validate(value)       proves VALUE a DarwinPath, or io::path::NotAPath
+  darwin::path::valid?(value)         true proves VALUE a DarwinPath
+  darwin::path::concat(path, part)    PATH joined with PART: a DarwinPath
+  darwin::path::text(path)            PATH's String form (the carrier)
+
+DarwinPath is a refinement of str (REFINEMENT-VALUES.md): a value proven to
+be a non-empty String without U+0000 -- text that may be handed to libSystem
+as an ordinary C pathname once it is encoded as UTF-8 and given its
+terminating NUL (darwin::open and darwin::create do that, for the one call).
+It is the same String, with the String's representation, so a validated
+value keeps being used as text with no conversion. It is
+linux::path::LinuxPath's sibling, not a shared type: each platform owns its
+textual path, and io::path::Path is what portable code names.
+
+The proposition is textual eligibility and nothing more. It does NOT claim
+that the path exists, is readable or writable, is a file or a directory,
+resolves through symlinks, is canonical, is shorter than PATH_MAX or a
+filesystem's name limit, is normalized the way APFS compares names, or is
+meaningful relative to the current working directory: those are facts about
+the environment at some moment, never about the String, and validation
+observes no filesystem. Nor does it claim to represent every Darwin
+directory entry: Darwin names are bytes, and arbitrary-byte paths belong to
+a lower-level abstraction. Validation does not normalize: ".", "..", "./a",
+"../a", "a//b" and "/a/b" are valid exactly as written.
+
+DarwinPath satisfies the portable io::path::Path trait through this module's
+own `concat` and `text` (TRAITS.md: the owner's declarations, nothing else),
+so a function over io::path::Path specializes to direct calls of them.
+
+== SOURCE
+lib/darwin/path.bot (import darwin::path).
+
+== MEMBERS
+    darwin::path::DarwinPath       type
+    darwin::path::concat           function -- PATH joined with COMPONENT
+    darwin::path::ends_with_slash? function -- true when TEXT's last charac...
+    darwin::path::nul_free?        function -- true when no character of VA...
+    darwin::path::text             function -- The path's canonical String ...
+    darwin::path::valid?           function -- true when VALUE is a valid t...
+    darwin::path::validate         function -- Completes normally only when...
+
+Each member is a topic: -help NAME (e.g. -help darwin::path::DarwinPath).
+
 @topic stdlib.decimal_rounded::round
 title: decimal_rounded::round -- intrinsic of namespace decimal_rounded
 summary: decimal_rounded::round[T](x): the value of the DecimalRounded type T whose decimal is the Float64 x rounded half to even to T's places, after `import decimal_rounded`.
@@ -4119,22 +5200,32 @@ target's plain char is). Arithmetic on them is Botlish arithmetic (no C
 promotion, no wrapping); an Int becomes one only where its range proves it
 fits. ffi::c::Int and ffi::c::Long stay two types where their ranges agree.
 
-C double (an intrinsic type of this namespace, FLOAT64-MILESTONE-1.md):
+C floating types (intrinsic types of this namespace,
+C-FLOAT-FFI-MILESTONE-1.md): C representations whose values are Float64s.
 
-  ffi::c::Double            Botlish's Float64 under its C ABI name: the
-                            same values, carried as the target's IEEE 754
-                            binary64 in its floating-point register class.
-                            Every Float64 is a double; a double C returns
-                            is a Float64 only when it is finite -- a NaN or
-                            an infinity is the call's NonFiniteFloat (an
-                            extern c fn returning one declares it), and
-                            negative zero is zero.
+  ffi::c::Double            C's double, IEEE 754 binary64 (8 bytes): every
+                            Float64 is one, exactly
+  ffi::c::Float             C's float, IEEE 754 binary32 (4 bytes): a
+                            Float64 leaving for one is rounded to nearest,
+                            ties to even, and one that rounds to an
+                            infinity is NonFiniteFloat before C runs (never
+                            clamped); a float entering widens exactly
+
+They name C types only -- an extern c fn's parameters and result, a function
+pointer's signature, a pointee, a layout field -- and stay two types
+(Ptr[ffi::c::Float] is no Ptr[ffi::c::Double]). A float or double entering
+Botlish is a Float64 only when it is finite: a NaN or an infinity is
+NonFiniteFloat (the call, or the layout read, declares it), and negative
+zero is zero. Where a value type is written, ffi::c::Double means Float64
+and ffi::c::Float is an error: Botlish has no binary32 number. C long double
+has no type.
 
 Pointers (intrinsic types and operations of this namespace):
 
   ffi::c::Void              the C void: an incomplete pointee, no values
   ffi::c::Ptr[T]            a C data pointer whose pointee identity is T:
-                            ffi::c::Void, a C integer scalar, an opaque
+                            ffi::c::Void, a C integer scalar, ffi::c::Bool,
+                            ffi::c::Float or ffi::c::Double, an opaque
                             struct (an incomplete C tag's identity), or
                             another pointer
   ffi::c::FnPtr[Fn{args: [A, ...], return: R}]

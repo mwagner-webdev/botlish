@@ -36,6 +36,11 @@
 # platform's target of the host's architecture, and runs on the Tcl backends
 # only, its native backends excluded with the reason (golden::target).
 #
+# The golden runner (lib/test.bot) is a coroutine: on a host where the native
+# backend runs no coroutines (native::hostSupports coroutines: Windows, for
+# now) every suite's native backends are excluded, with the reason
+# (golden::suite), never run to a NATIVE UNSUPPORTED abort.
+#
 # -lib DIR compiles against the library directory DIR instead of lib/ (a
 # private, mutated copy: audit/golden/tools/). -names prints only the test
 # names with their verdicts ("PASS name"/"FAIL name"), one per line, for
@@ -230,6 +235,13 @@ proc golden::onHost {host} {
 # compiled, not run, golden::host).
 proc golden::suite {path backends} {
     set excluded [exclusions $path]
+    if {![native::hostSupports coroutines]} {
+        foreach backend {cranelift-generic cranelift} {
+            if {![dict exists $excluded $backend]} {
+                dict set excluded $backend "the golden runner (lib/test.bot) is a coroutine, and the native backend runs no coroutines on this host ([expr {[core::cabi::hostTarget] eq "" ? "no known target" : [core::cabi::hostTarget]}]; COROUTINES.md)"
+            }
+        }
+    }
     set target [target $path]
     if {$target ne ""} {
         foreach backend {cranelift-generic cranelift} {

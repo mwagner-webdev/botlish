@@ -52,7 +52,7 @@ proc coCode {text} {
 # The message of that diagnostic (without its location).
 proc coMessage {text} {
     if {[catch {surface::compile $text -warnings off} message options]} {
-        regsub {^[^:]*:[0-9]+:[0-9]+: } $message {} message
+        regsub {^.*?:[0-9]+:[0-9]+: } $message {} message
         return $message
     }
     return ok
@@ -192,11 +192,11 @@ test co-syntax-yield {yield: the lowest-precedence expression form; an operand n
 # ---------------------------------------------------------------------------
 # The principal success theorem (COROUTINES.md item 69)
 
-test co-principal {construction enters worker and deep, deep yields Event(10); the first resume finishes deep and yields Event(20) from worker; the second completes with Event(30); later calls return the cached Event(30)} -body {
+test co-principal {construction enters worker and deep, deep yields Event(10); the first resume finishes deep and yields Event(20) from worker; the second completes with Event(30); later calls return the cached Event(30)} -constraints nativeCoroutines -body {
     coAgree "import coroutine\n${principal}second = step(Message {value: 20})\nfinal = step(Message {value: 30})\nagain = step(Message {value: 999})\n\[first.value, second.value, final.value, again.value, coroutine::done?(step)\]\n"
 } -result {value {[10, 20, 30, 30, true]}}
 
-test co-principal-move {`other = step` moves the handle: using step afterwards is USE-AFTER-MOVE, naming the move and the use; using other is valid and continues the same coroutine} -body {
+test co-principal-move {`other = step` moves the handle: using step afterwards is USE-AFTER-MOVE, naming the move and the use; using other is valid and continues the same coroutine} -constraints nativeCoroutines -body {
     list [coCode "${principal}other = step\nstep(Message {value: 1})\n"] \
         [coMessage "${principal}other = step\nstep(Message {value: 1})\n"] \
         [coAgree "${principal}other = step\nx = other(Message {value: 1})\nx.value\n"]
@@ -211,7 +211,7 @@ used here:
 # ---------------------------------------------------------------------------
 # Deep yield and the empty loop (items 50, 51)
 
-test co-deep-three-levels {a yield three frames deep suspends the whole stack; the message becomes the yield's value; deepest, middle and worker return in turn; the handle is then completed and keeps its final result} -body {
+test co-deep-three-levels {a yield three frames deep suspends the whole stack; the message becomes the yield's value; deepest, middle and worker return in turn; the handle is then completed and keeps its final result} -constraints nativeCoroutines -body {
     coAgree {import coroutine
 
 struct Message:
@@ -243,7 +243,7 @@ again = step(Message {value: 5})
 }
 } -result {value {[Event {kind: "progress", value: 1}, false, Event {kind: "finished", value: 41}, true, Event {kind: "finished", value: 41}]}}
 
-test co-empty-loop {a loop that runs zero times: construction succeeds, first is the final Finished, the handle is done, and calling it again returns Finished -- no exhaustion, no failure} -body {
+test co-empty-loop {a loop that runs zero times: construction succeeds, first is the final Finished, the handle is done, and calling it again returns Finished -- no exhaustion, no failure} -constraints nativeCoroutines -body {
     coAgree {import coroutine
 
 struct Item:
@@ -279,21 +279,21 @@ fn consume(m: In) -> int:
 
 }
 
-test co-protocol-explicit {an explicit struct resume type: each yield evaluates to the message} -body {
+test co-protocol-explicit {an explicit struct resume type: each yield evaluates to the message} -constraints nativeCoroutines -body {
     coAgree "${protocolDecls}fn w(resume In) -> Out:\n    m = yield Out {v: 1}\n    return Out {v: m.v}\ncoroutine {step, first} = w()\nx = step(In {v: 9})\n\[first.v, x.v\]\n"
 } -result {value {[1, 9]}}
 
-test co-protocol-inferred {inferred from a use of the yield's value as a struct-typed argument; one yield ignores its message, another uses it} -body {
+test co-protocol-inferred {inferred from a use of the yield's value as a struct-typed argument; one yield ignores its message, another uses it} -constraints nativeCoroutines -body {
     list [coAgree "${protocolDecls}fn w() -> Out:\n    yield Out {v: 1}\n    m = yield Out {v: 2}\n    return Out {v: consume(m)}\ncoroutine {step, first} = w()\na = step(In {v: 100})\nb = step(In {v: 21})\n\[first.v, a.v, b.v\]\n"] \
         [hir::coroutines::EffectText [set h [surface::compile "${protocolDecls}fn w() -> Out:\n    m = yield Out {v: 2}\n    return Out {v: consume(m)}\ncoroutine {step} = w()\n" -warnings off]] \
             [hir::get $h [lindex [hirFind $h bind w] 0] value]]
 } -cleanup {unset -nocomplain h} -result {{value {[1, 2, 42]}} {yields Out, resume In}}
 
-test co-protocol-transitive {a function without its own constraint inherits its yielding callee's protocol} -body {
+test co-protocol-transitive {a function without its own constraint inherits its yielding callee's protocol} -constraints nativeCoroutines -body {
     coAgree "${protocolDecls}fn ask(resume In) -> int:\n    m = yield Out {v: 0}\n    m.v\nfn middle() -> int:\n    ask() + ask()\nfn w() -> Out:\n    return Out {v: middle()}\ncoroutine {step, first} = w()\na = step(In {v: 3})\nb = step(In {v: 4})\n\[first.v, a.v, b.v\]\n"
 } -result {value {[0, 0, 7]}}
 
-test co-protocol-zero-message {no constraint: the zero-message protocol, step() with no argument, and every yield evaluates to unit} -body {
+test co-protocol-zero-message {no constraint: the zero-message protocol, step() with no argument, and every yield evaluates to unit} -constraints nativeCoroutines -body {
     list [coAgree "struct Tick:\n    n: int\nfn ticker() -> Tick:\n    x = yield Tick {n: 1}\n    y = yield Tick {n: 2}\n    return Tick {n: 3}\ncoroutine {step, first} = ticker()\na = step()\nb = step()\n\[first.n, a.n, b.n\]\n"] \
         [coAgree "struct Tick:\n    n: int\nfn ticker() -> Tick:\n    x = yield Tick {n: 1}\n    if x == unit:\n        return Tick {n: 2}\n    Tick {n: 3}\ncoroutine {step, first} = ticker()\nstep().n\n"]
 } -result {{value {[1, 2, 3]}} {value 2}}
@@ -329,18 +329,18 @@ test co-protocol-default-meets-struct {an unconstrained helper whose yield value
     coCode "${protocolDecls}fn helper() -> int:\n    x = yield Out {v: 0}\n    if x == unit:\n        return 1\n    2\nfn w(resume In) -> Out:\n    m = yield Out {v: helper()}\n    return Out {v: m.v}\ncoroutine {step} = w()\n"
 } -result {CORE SEMANTIC COROUTINE-RESUME-CONFLICT}
 
-test co-protocol-unconstrained-helper {a helper whose yields all discard their value adapts to any protocol} -body {
+test co-protocol-unconstrained-helper {a helper whose yields all discard their value adapts to any protocol} -constraints nativeCoroutines -body {
     coAgree "${protocolDecls}fn progress(n: int) -> int:\n    yield Out {v: n}\n    n\nfn w(resume In) -> Out:\n    a = progress(1)\n    m = yield Out {v: a + 1}\n    b = progress(m.v)\n    return Out {v: b * 10}\nfn t() -> Out:\n    return Out {v: progress(7)}\ncoroutine {step, first} = w()\nx = step(In {v: 0})\ny = step(In {v: 5})\nz = step(In {v: 0})\ncoroutine {step: s2, first: f2} = t()\nlast = s2()\n\[first.v, x.v, y.v, z.v, f2.v, last.v\]\n"
 } -result {value {[1, 2, 5, 50, 7, 7]}}
 
-test co-protocol-discarded-collections {a yield that is the last statement of a collecting loop or an if whose own value is discarded discards its value too: the helper still adapts} -body {
+test co-protocol-discarded-collections {a yield that is the last statement of a collecting loop or an if whose own value is discarded discards its value too: the helper still adapts} -constraints nativeCoroutines -body {
     coAgree "${protocolDecls}fn helper(n: int) -> int:\n    loop i from 0 to 2:\n        yield Out {v: i}\n    if n > 3:\n        yield Out {v: n}\n    else:\n        yield Out {v: 0 - n}\n    n\nfn w(resume In) -> Out:\n    m = yield Out {v: 100}\n    return Out {v: helper(m.v)}\ncoroutine {step, first} = w()\na = step(In {v: 4})\nb = step(In {v: 0})\nc = step(In {v: 0})\nd = step(In {v: 0})\n\[first.v, a.v, b.v, c.v, d.v\]\n"
 } -result {value {[100, 0, 1, 4, 4]}}
 
 # ---------------------------------------------------------------------------
 # Binding forms (items 2, 4, 53)
 
-test co-binding-forms {{step, first}, {step: next}, {first: initial}, {step: next, first: initial}: each binds what it names} -body {
+test co-binding-forms {{step, first}, {step: next}, {first: initial}, {step: next, first: initial}: each binds what it names} -constraints nativeCoroutines -body {
     coAgree {import coroutine
 
 struct T:
@@ -367,7 +367,7 @@ test co-binding-no-aggregate {the binding form builds no two-field value: the co
         [dict get $report byKind List allocations] [dict get $report byKind Block allocations]
 } -cleanup {unset -nocomplain hir report} -result {1 1 0 0}
 
-test co-binding-eager-order {the call's arguments are evaluated before the coroutine exists, in order (a method call's receiver first); the body has run when the binding completes} -body {
+test co-binding-eager-order {the call's arguments are evaluated before the coroutine exists, in order (a method call's receiver first); the body has run when the binding completes} -constraints nativeCoroutines -body {
     coAgree {import mutable_array
 
 struct V:
@@ -429,16 +429,16 @@ test co-unwrapped-chain {an ordinary top-level call of a yielding root is UNWRAP
      -> middle, which calls deepest at <input>:9:5
      -> deepest, which yields directly at <input>:5:5}}
 
-test co-effect-transitive-legal {a helper calling a yielding function is itself yielding (legal inside a coroutine); an unused yielding function is legal; a construction captures its call's effect} -body {
+test co-effect-transitive-legal {a helper calling a yielding function is itself yielding (legal inside a coroutine); an unused yielding function is legal; a construction captures its call's effect} -constraints nativeCoroutines -body {
     list [coAgree "${effectDecls}coroutine {step, first} = worker()\nlast = step()\n\[first.n, last.n\]\n"] \
         [coAgree "${effectDecls}fn unused() -> int:\n    middle()\n5\n"]
 } -result {{value {[1, 4]}} {value 5}}
 
-test co-effect-nested-isolation {a function that constructs a coroutine is not yielding itself: it may be called anywhere} -body {
+test co-effect-nested-isolation {a function that constructs a coroutine is not yielding itself: it may be called anywhere} -constraints nativeCoroutines -body {
     coAgree "${effectDecls}fn plain() -> int:\n    coroutine {step, first} = worker()\n    last = step()\n    first.n + last.n\nplain() + plain()\n"
 } -result {value 10}
 
-test co-effect-nested-coroutines {a coroutine body starts and resumes another coroutine between its own yields} -body {
+test co-effect-nested-coroutines {a coroutine body starts and resumes another coroutine between its own yields} -constraints nativeCoroutines -body {
     coAgree {struct V:
     n: int
 
@@ -463,15 +463,15 @@ c = step()
 }
 } -result {value {[10, 11, 1200, 1200]}}
 
-test co-effect-recursive {a self-recursive yielding function: each level yields, the stack unwinds level by level} -body {
+test co-effect-recursive {a self-recursive yielding function: each level yields, the stack unwinds level by level} -constraints nativeCoroutines -body {
     coAgree "struct V:\n    n: int\nfn countdown(n: int) -> V:\n    if n == 0:\n        return V {n: 0}\n    yield V {n: n}\n    countdown(n - 1)\ncoroutine {step, first} = countdown(3)\na = step()\nb = step()\nc = step()\nd = step()\n\[first.n, a.n, b.n, c.n, d.n\]\n"
 } -result {value {[3, 2, 1, 0, 0]}}
 
-test co-effect-loop-branch {yields in a counted loop and in a branch} -body {
+test co-effect-loop-branch {yields in a counted loop and in a branch} -constraints nativeCoroutines -body {
     coAgree "struct V:\n    n: int\nfn w(n: int) -> V:\n    loop i from 0 to n:\n        if i == 1:\n            yield V {n: 100}\n        else:\n            yield V {n: i}\n    return V {n: -1}\ncoroutine {step, first} = w(3)\na = step()\nb = step()\nc = step()\n\[first.n, a.n, b.n, c.n\]\n"
 } -result {value {[0, 100, 2, -1]}}
 
-test co-effect-handler {a yield inside an on-handler: resuming continues the handler, which then returns} -body {
+test co-effect-handler {a yield inside an on-handler: resuming continues the handler, which then returns} -constraints nativeCoroutines -body {
     coAgree {error X
 
 struct Ev:
@@ -515,7 +515,7 @@ test co-rhs-not-yielding {the right side must be an exact call of a function tha
         [coCode "${effectDecls}f = 3\ncoroutine {step} = f\n"]
 } -result {{CORE SEMANTIC COROUTINE-RHS-NOT-YIELDING} {CORE SEMANTIC COROUTINE-RHS-NOT-YIELDING}}
 
-test co-result-mismatch {the root's yields and return need one outward type: its declared result, else one all others fit} -body {
+test co-result-mismatch {the root's yields and return need one outward type: its declared result, else one all others fit} -constraints nativeCoroutines -body {
     list [coCode "struct Ev:\n    n: int\nstruct Res:\n    r: int\nfn w():\n    yield Ev {n: 1}\n    Res {r: 2}\ncoroutine {step} = w()\n"] \
         [coCode "struct Ev:\n    n: int\nstruct Res:\n    r: int\nfn w() -> Res:\n    yield Ev {n: 1}\n    Res {r: 2}\ncoroutine {step} = w()\n"] \
         [coAgree "struct Ev:\n    n: int\nstruct Res:\n    r: int\nfn helper() -> Res:\n    yield Ev {n: 1}\n    Res {r: 5}\nfn w() -> Ev:\n    x = helper()\n    return Ev {n: x.r}\ncoroutine {step, first} = w()\nl = step()\n\[first.n, l.n\]\n"]
@@ -549,19 +549,19 @@ fn worker(v: int, resume Msg) -> Ev errors Broken:
 
 }
 
-test co-errors-startup {an unhandled fail before the first yield crosses the construction: its handler runs, the handle is failed} -body {
+test co-errors-startup {an unhandled fail before the first yield crosses the construction: its handler runs, the handle is failed} -constraints nativeCoroutines -body {
     coAgree "${errorDecls}fn early(n: int) -> list:\n    coroutine {step, first} = worker(n):\n        on Broken:\n            Ev {v: -1}\n    again = step(Msg {v: 1}):\n        on Broken:\n            Ev {v: -2}\n    \[first.v, coroutine::done?(step), again.v\]\nearly(0 - 1)\n"
 } -result {value {[-1, true, -2]}}
 
-test co-errors-segment {a deep fail after resumes crosses the resume call; the failed handle raises the same error again and never resumes} -body {
+test co-errors-segment {a deep fail after resumes crosses the resume call; the failed handle raises the same error again and never resumes} -constraints nativeCoroutines -body {
     coAgree "${errorDecls}fn later() -> list errors Broken:\n    coroutine {step, first} = worker(1)\n    a = step(Msg {v: 5})\n    b = step(Msg {v: -1}):\n        on Broken:\n            Ev {v: 999}\n    c = step(Msg {v: 7}):\n        on Broken:\n            Ev {v: 1000}\n    \[first.v, a.v, b.v, c.v, coroutine::done?(step)\]\nlater():\n    on Broken:\n        \[\]\n"
 } -result {value {[1, 6, 999, 1000, true]}}
 
-test co-errors-last-segment-always-fails {a root that always fails after yielding is no statically known failure: construction yields, the last resume fails} -body {
+test co-errors-last-segment-always-fails {a root that always fails after yielding is no statically known failure: construction yields, the last resume fails} -constraints nativeCoroutines -body {
     coAgree "error Boom\nstruct Ev:\n    v: int\nfn w() -> Ev errors Boom:\n    yield Ev {v: 1}\n    fail Boom\nfn g() -> list:\n    coroutine {step, first} = w():\n        on Boom:\n            Ev {v: 0}\n    last = step():\n        on Boom:\n            Ev {v: -1}\n    again = step():\n        on Boom:\n            Ev {v: -2}\n    \[first, last, again\]\ng()\n"
 } -result {value {[Ev {v: 1}, Ev {v: -1}, Ev {v: -2}]}}
 
-test co-errors-declared-propagation {an unhandled segment error propagates through a function that declares it; uncaught at the top it is an ordinary UNHANDLED-ERROR} -body {
+test co-errors-declared-propagation {an unhandled segment error propagates through a function that declares it; uncaught at the top it is an ordinary UNHANDLED-ERROR} -constraints nativeCoroutines -body {
     list [coAgree "${errorDecls}fn inner() -> int errors Broken:\n    coroutine {step, first} = worker(2)\n    a = step(Msg {v: -5})\n    a.v\nfn outer() -> int:\n    inner():\n        on Broken:\n            42\nouter()\n"] \
         [coCode "${errorDecls}coroutine {step} = worker(2)\n"] \
         [lmap d [hir::diagnostics [surface::compile "${errorDecls}coroutine {step} = worker(2)\nstep(Msg {v: 1}):\n    on Broken:\n        Ev {v: 0}\nstep(Msg {v: 1})\n" -warnings off -strict 0]] {
@@ -569,7 +569,7 @@ test co-errors-declared-propagation {an unhandled segment error propagates throu
         }]
 } -result {{value 42} {CORE SEMANTIC UNHANDLED-ERROR} {{this coroutine construction may produce the declared error "Broken", which is neither handled here nor admitted by the enclosing function's own "errors" declaration} {this coroutine resume may produce the declared error "Broken", which is neither handled here nor admitted by the enclosing function's own "errors" declaration}}}
 
-test co-errors-internal {a failure handled inside the coroutine never reaches the step call} -body {
+test co-errors-internal {a failure handled inside the coroutine never reaches the step call} -constraints nativeCoroutines -body {
     coAgree "${errorDecls}fn handled(n: int, resume Msg) -> Ev:\n    v = deep(n):\n        on Broken:\n            42\n    m = yield Ev {v: v}\n    return Ev {v: m.v + 1}\ncoroutine {step, first} = handled(0 - 5)\nsecond = step(Msg {v: 10})\n\[first.v, second.v\]\n"
 } -result {value {[42, 11]}}
 
@@ -582,7 +582,7 @@ test co-errors-uncaught-native-limit {a native stack overflow on a coroutine's o
 # ---------------------------------------------------------------------------
 # Stable terminal states (items 21-24, 57)
 
-test co-terminal-success {return before any yield completes at construction; done? is false while suspended and true after; repeated calls return the cached result and run no body code} -body {
+test co-terminal-success {return before any yield completes at construction; done? is false while suspended and true after; repeated calls return the cached result and run no body code} -constraints nativeCoroutines -body {
     coAgree {import coroutine
 import mutable_array
 
@@ -629,7 +629,7 @@ r2 = step()
 }
 } -result {value {[1, true, 1, 2, false, 3, false, 400, true, 400, 400, 4]}}
 
-test co-terminal-identity {the cached final result is the very value the body returned (a nested aggregate kept whole)} -body {
+test co-terminal-identity {the cached final result is the very value the body returned (a nested aggregate kept whole)} -constraints nativeCoroutines -body {
     coAgree "struct V:\n    n: List\[int\]\nfn w() -> V:\n    yield V {n: \[\]}\n    return V {n: \[1, 2, 3\]}\ncoroutine {step} = w()\na = step()\nb = step()\n\[a == b, a, b\]\n"
 } -result {value {[true, V {n: [1, 2, 3]}, V {n: [1, 2, 3]}]}}
 
@@ -641,20 +641,20 @@ test co-affine-branch-join {a move in one branch leaves the handle not definitel
         [lindex [split [coMessage "${principalDecls}fn f(c: bool) -> int:\n    coroutine {step, first} = worker(10)\n    if c:\n        other = step\n    x = step(Message {value: 1})\n    x.value\nf(true)\n"] \n] 0]
 } -result {{CORE SEMANTIC AFFINE-NOT-DEFINITELY-LIVE} {`step` is not definitely live here: its coroutine value was moved on some path reaching this use}}
 
-test co-affine-terminating-branch {a move in a branch that returns leaves the handle live on the remaining path} -body {
+test co-affine-terminating-branch {a move in a branch that returns leaves the handle live on the remaining path} -constraints nativeCoroutines -body {
     coAgree "${principalDecls}fn f(c: bool) -> int:\n    coroutine {step, first} = worker(10)\n    if c:\n        other = step\n        x = other(Message {value: 5})\n        return x.value\n    y = step(Message {value: 6})\n    y.value\n\[f(true), f(false)\]\n"
 } -result {value {[5, 6]}}
 
-test co-affine-loop {a move inside a loop body reaches its next iteration: rejected; resumes in a loop keep ownership, past completion too} -body {
+test co-affine-loop {a move inside a loop body reaches its next iteration: rejected; resumes in a loop keep ownership, past completion too} -constraints nativeCoroutines -body {
     list [coCode "${principalDecls}fn f(n: int) -> int:\n    coroutine {step, first} = worker(10)\n    loop i from 0 to n:\n        other = step\n        i\n    1\n"] \
         [coAgree "import coroutine\nstruct T:\n    n: int\nfn t() -> T:\n    loop i from 0 to 3:\n        yield T {n: i}\n    return T {n: 99}\ncoroutine {step, first} = t()\nseen = loop i from 0 to 5:\n    x = step()\n    x.n\n\[first.n, seen, coroutine::done?(step)\]\n"]
 } -result {{CORE SEMANTIC AFFINE-NOT-DEFINITELY-LIVE} {value {[0, [1, 2, 99, 99, 99], true]}}}
 
-test co-affine-done-does-not-move {coroutine::done? observes the handle; sequential resumes keep ownership; dropping a handle is allowed} -body {
+test co-affine-done-does-not-move {coroutine::done? observes the handle; sequential resumes keep ownership; dropping a handle is allowed} -constraints nativeCoroutines -body {
     coAgree "import coroutine\n${principalDecls}coroutine {step, first} = worker(1)\na = coroutine::done?(step)\nb = coroutine::done?(step)\nx = step(Message {value: 2})\ny = step(Message {value: 3})\ncoroutine {step: dropped} = worker(5)\n\[a, b, x.value, y.value, coroutine::done?(step)\]\n"
 } -result {value {[false, false, 2, 3, true]}}
 
-test co-affine-move-never-forks {a moved handle continues the one coroutine: resuming the new owner picks up where the old one stopped, and a second move chain still has one continuation} -body {
+test co-affine-move-never-forks {a moved handle continues the one coroutine: resuming the new owner picks up where the old one stopped, and a second move chain still has one continuation} -constraints nativeCoroutines -body {
     coAgree "struct T:\n    n: int\nfn t() -> T:\n    yield T {n: 1}\n    yield T {n: 2}\n    yield T {n: 3}\n    return T {n: 4}\ncoroutine {step, first} = t()\na = step()\nnext = step\nb = next()\nthird = next\nc = third()\nd = third()\n\[first.n, a.n, b.n, c.n, d.n\]\n"
 } -result {value {[1, 2, 3, 4, 4]}}
 
@@ -744,7 +744,7 @@ second = step():
 [first.n, second.n]
 }
 
-test co-context-trait {a deep context-trait operation inside a coroutine: the provider is selected statically at construction and the same implementation runs after a resume} -body {
+test co-context-trait {a deep context-trait operation inside a coroutine: the provider is selected statically at construction and the same implementation runs after a resume} -constraints nativeCoroutines -body {
     coAgree $contextProgram
 } -result {value {[15, 20]}}
 
@@ -795,7 +795,7 @@ fn emit(n: int, context c: B) -> int errors co::out::WriteFailed:
 }
 }
 
-test co-context-fixed-at-construction {the provider is the one selected at construction: a context implementing the same trait installed before a resume changes nothing (no re-selection per resume), while a new construction there is ambiguous} -body {
+test co-context-fixed-at-construction {the provider is the one selected at construction: a context implementing the same trait installed before a resume changes nothing (no re-selection per resume), while a new construction there is ambiguous} -constraints nativeCoroutines -body {
     set program "import co::out\nimport co::a\nimport co::b\nwith context co::a::create()\ncoroutine {step, first} = co::out::worker(10):\n    on co::out::WriteFailed:\n        co::out::Ev {n: -1}\nwith context co::b::create()\nsecond = step():\n    on co::out::WriteFailed:\n        co::out::Ev {n: -2}\n"
     coWithModules $::coContextLib {
         list [coAgree "${program}\[first.n, second.n\]\n"] \
@@ -826,7 +826,7 @@ fn write_error_text(text: str, context c: Limited) -> unit errors io::WriteFaile
 }
 }
 
-test co-context-portable-io {io::print_line deep inside a coroutine, through the real io::IO context trait and a substitute context: each segment writes through the provider selected at construction, and a write failure after a resume crosses that resume and stays the coroutine's terminal error} -body {
+test co-context-portable-io {io::print_line deep inside a coroutine, through the real io::IO context trait and a substitute context: each segment writes through the provider selected at construction, and a write failure after a resume crosses that resume and stays the coroutine's terminal error} -constraints nativeCoroutines -body {
     set program "import io\nimport limited\nstruct Ev:\n    n: int\nfn say(text: str) -> int errors io::WriteFailed:\n    io::print_line(text)\n    yield Ev {n: 10}\n    1\nfn worker() -> Ev errors io::WriteFailed:\n    a = say(\"hi\")\n    b = say(\"a much longer line\")\n    return Ev {n: a + b}\n"
     set driver "coroutine {step, first} = worker():\n    on io::WriteFailed:\n        Ev {n: -1}\nsecond = step():\n    on io::WriteFailed:\n        Ev {n: -2}\nthird = step():\n    on io::WriteFailed:\n        Ev {n: -3}\n\[first.n, second.n, third.n\]\n"
     coWithModules $::coLimitedLib {
@@ -859,7 +859,7 @@ test co-context-trait-native {native evidence: the yielding clone of deep takes 
         [regexp {callvalue} $nir]
 } -cleanup {unset -nocomplain nir deep} -result {1 1 1 0}
 
-test co-trait-polymorphic {a trait-polymorphic yielding function is monomorphized into an ordinary yielding clone} -body {
+test co-trait-polymorphic {a trait-polymorphic yielding function is monomorphized into an ordinary yielding clone} -constraints nativeCoroutines -body {
     coAgree {import str
 
 trait Named:
@@ -962,7 +962,7 @@ run(2, "L")
 
 set gcExpected {value {["bottom:L--", "bottom:LB----", [["after:L--!", "after:LB----!"], ["L--L-", "LB----LB---"], ["L-L", "LB---LB--"], ["done L", "LB--LB-"], ["done L", "LB-LB"], ["done L", "done LB"]]]}}
 
-test co-gc-suspended-stacks {values held only by suspended frames at several depths survive collections run by other coroutines and by the main program} -body {
+test co-gc-suspended-stacks {values held only by suspended frames at several depths survive collections run by other coroutines and by the main program} -constraints nativeCoroutines -body {
     coAgree $gcProgram
 } -result $gcExpected
 
@@ -1040,7 +1040,7 @@ run()
 
 set gcNestedExpected {value {["out1:in1:Ai", "out1:in1:Bi", "out2:in2:Ai?", "out2:in2:Bi?", "end:handled:A#", "end:handled:B#", true, true]}}
 
-test co-gc-nested-suspended-roots {nested suspended coroutines, a failing inner one and heap values held only by their suspended frames survive collections run by every party, on every backend} -body {
+test co-gc-nested-suspended-roots {nested suspended coroutines, a failing inner one and heap values held only by their suspended frames survive collections run by every party, on every backend} -constraints nativeCoroutines -body {
     coAgree $gcNestedProgram
 } -result $gcNestedExpected
 
@@ -1051,7 +1051,7 @@ test co-gc-nested-suspended-roots-stress {the same program with a collection bef
     }
 } -cleanup {unset -nocomplain hir} -result [list [concat $gcNestedExpected {{}}] [concat $gcNestedExpected {{}}]]
 
-test co-gc-many-coroutines {thousands of short coroutines: abandoned and finished ones are reclaimed (their stacks pooled), the program stays correct} -body {
+test co-gc-many-coroutines {thousands of short coroutines: abandoned and finished ones are reclaimed (their stacks pooled), the program stays correct} -constraints nativeCoroutines -body {
     coAgree "import list\nstruct V:\n    n: int\nfn w(k: int) -> V:\n    yield V {n: k}\n    return V {n: k * 2}\nfn one(k: int) -> int:\n    coroutine {step, first} = w(k)\n    coroutine {step: abandoned} = w(k + 1)\n    last = step()\n    first.n + last.n\nxs = loop i from 0 to 2000:\n    one(i)\nlast = list::at(xs, 1999):\n    on IndexNotFound:\n        0\nlist::length(xs) + last\n"
 } -result {value 7997}
 
@@ -1117,7 +1117,7 @@ test co-release-placement {a release follows the last statement of the handle's 
     } {coReleases "${releaseDecls}$body"}
 } -cleanup {unset -nocomplain body} -result {{{{bind b} step}} {{{bind x} other}} {{{bind gone} gone} {ref step}} {{project step}} {{{bind first} <handle>}} {{{bind xs} step}} {{project step}} {}}
 
-test co-release-values {a release changes no value: after a last statement whose value is a function's result, a loop element, an if's value or the program's result, the value is kept; a released suspended body runs no further code} -body {
+test co-release-values {a release changes no value: after a last statement whose value is a function's result, a loop element, an if's value or the program's result, the value is kept; a released suspended body runs no further code} -constraints nativeCoroutines -body {
     coAgree "${releaseDecls}context struct Log:
     a: MutableArray\[int\]
 fn note(v: int, context log: Log) -> int:
@@ -1155,7 +1155,7 @@ coroutine {step} = w(5)
 "
 } -result {value {[4, [1, 2, 3], 8, 10, 1, 6]}}
 
-test co-release-branch-move {a handle moved on one path only: its new owner is released inside the branch, the old binding after it, a no-op on the path that moved it -- the same values on every backend, on both paths} -body {
+test co-release-branch-move {a handle moved on one path only: its new owner is released inside the branch, the old binding after it, a no-op on the path that moved it -- the same values on every backend, on both paths} -constraints nativeCoroutines -body {
     coAgree "${releaseDecls}fn pick(c: bool) -> int:\n    coroutine {step, first} = w(10)\n    if c:\n        other = step\n        x = other()\n    first.n\nfn keep(c: bool) -> int:\n    coroutine {step, first} = w(20)\n    y = if c:\n        other = step\n        other().n\n    else:\n        0\n    first.n + y\n\[pick(true), pick(false), keep(true), keep(false)\]\n"
 } -result {value {[10, 10, 41, 20]}}
 
@@ -1308,7 +1308,7 @@ test co-exit-release-placement {an exit releases what it takes out of scope befo
     } {coExits "${exitDecls}$body"}
 } -cleanup {unset -nocomplain body} -result {{{return step {}}} {{return {} step}} {{fail step {}}} {{call Boom step}} {{handle Late step}} {{break inner {}} {continue inner {}}} {} {{return step {}}} {{return {} step} {call Boom step}} {{return other {}}} {} {}}
 
-test co-exit-release-values {a release on an exit changes no value: every exit kind, a handler resuming the handle after a handled error, a loop's break and continue leaving the function's own handle live, a self tail call -- the same values on every backend} -body {
+test co-exit-release-values {a release on an exit changes no value: every exit kind, a handler resuming the handle after a handled error, a loop's break and continue leaving the function's own handle live, a self tail call -- the same values on every backend} -constraints nativeCoroutines -body {
     coAgree "${exitDecls}${exitProgram}xs = loop k from 0 to 7:\n    row(k)\nxs\n"
 } -result {value {[[1, 1, 1, 1, 100, 10, 1, 1], [2, 2, 2, 3, 101, 21, 3, 2], [2, 3, -1, 5, 102, 32, 3, 3], [3, 4, -1, -1, 104, 43, 3, 0], [4, 5, -1, -1, 105, 54, 3, 0], [5, 6, -1, -1, -1, 65, 3, 0], [6, 7, -1, -1, -1, 76, 3, 0]]}}
 

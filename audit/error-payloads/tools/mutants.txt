@@ -383,9 +383,11 @@
 @@ affine-error-edge-ignores-erased an affine value live across a call an erased callable fails through is not released on that error edge
 ## hir/affine.tcl
 <<<<
-                if {$erased ne {} && [hir::completions::mayLetErasedThrough $hir $x $transparent]} {
+                if {$erased ne {} && [dict get $node kind] eq "call"
+                        && [hir::completions::mayLetErasedThrough $hir $x $transparent]} {
 ====
-                if {0 && $erased ne {} && [hir::completions::mayLetErasedThrough $hir $x $transparent]} {
+                if {0 && $erased ne {} && [dict get $node kind] eq "call"
+                        && [hir::completions::mayLetErasedThrough $hir $x $transparent]} {
 >>>>
 
 @@ recovery-reports-no-errors an exact callable reaching an untyped parameter is recognized but its errors are dropped (the untyped call stays charged nothing)

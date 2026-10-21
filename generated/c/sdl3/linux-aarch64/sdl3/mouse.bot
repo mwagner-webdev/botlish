@@ -54,6 +54,43 @@ extern c fn SDL_GetMouseNameForID(instance_id: ffi::c::UInt) -> ffi::c::Ptr[ffi:
 # C: SDL_Window *SDL_GetMouseFocus(void)
 extern c fn SDL_GetMouseFocus() -> ffi::c::Ptr[sdl3::ctypes::SDL_Window]
 
+# C: SDL_MouseButtonFlags SDL_GetMouseState(float *x, float *y)
+extern c fn SDL_GetMouseState(
+    x: ffi::c::Ptr[ffi::c::Float],
+    y: ffi::c::Ptr[ffi::c::Float]
+) -> ffi::c::UInt
+
+# C: SDL_MouseButtonFlags SDL_GetGlobalMouseState(float *x, float *y)
+extern c fn SDL_GetGlobalMouseState(
+    x: ffi::c::Ptr[ffi::c::Float],
+    y: ffi::c::Ptr[ffi::c::Float]
+) -> ffi::c::UInt
+
+# C: SDL_MouseButtonFlags SDL_GetRelativeMouseState(float *x, float *y)
+extern c fn SDL_GetRelativeMouseState(
+    x: ffi::c::Ptr[ffi::c::Float],
+    y: ffi::c::Ptr[ffi::c::Float]
+) -> ffi::c::UInt
+
+# C: void SDL_WarpMouseInWindow(SDL_Window *window, float x, float y)
+extern c fn SDL_WarpMouseInWindow(
+    window: ffi::c::Ptr[sdl3::ctypes::SDL_Window],
+    x: ffi::c::Float,
+    y: ffi::c::Float
+) -> unit
+
+# C: _Bool SDL_WarpMouseGlobal(float x, float y)
+extern c fn SDL_WarpMouseGlobal(
+    x: ffi::c::Float,
+    y: ffi::c::Float
+) -> ffi::c::Bool
+
+# C: _Bool SDL_SetRelativeMouseTransform(SDL_MouseMotionTransformCallback callback, void *userdata)
+extern c fn SDL_SetRelativeMouseTransform(
+    callback: ffi::c::FnPtr[Fn{args: [ffi::c::Ptr[ffi::c::Void], ffi::c::ULong, ffi::c::Ptr[sdl3::ctypes::SDL_Window], ffi::c::UInt, ffi::c::Ptr[ffi::c::Float], ffi::c::Ptr[ffi::c::Float]], return: unit}],
+    userdata: ffi::c::Ptr[ffi::c::Void]
+) -> ffi::c::Bool
+
 # C: _Bool SDL_SetWindowRelativeMouseMode(SDL_Window *window, _Bool enabled)
 extern c fn SDL_SetWindowRelativeMouseMode(
     window: ffi::c::Ptr[sdl3::ctypes::SDL_Window],

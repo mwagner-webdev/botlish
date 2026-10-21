@@ -5207,9 +5207,17 @@ proc native::lower::BorrowCall {fnVar e node} {
 # because their offsets differ, exactly as two struct types' projections do.
 
 # The encoding word of `binload`/`binstore` (native/src/runtime/ops.rs's
-# bin_encoding) of the descriptor scalar SIGN WIDTH ENDIAN.
+# bin_encoding) of the descriptor scalar SIGN WIDTH ENDIAN: SIGN u or i an
+# integer's, f the IEEE 754 format of WIDTH bytes (C-FLOAT-FFI-
+# MILESTONE-1.md: 64 set), whose loads admit (NaN and the infinities are
+# NonFiniteFloat, negative zero zero) and whose stores narrow (a binary32
+# overflow is NonFiniteFloat) in the runtime's one implementation of the
+# boundary rules -- so a program with one may raise NonFiniteFloat there.
 proc native::lower::LayoutEncoding {sign width endian} {
-    return [expr {$width + ($sign eq "i" ? 16 : 0) + ($endian eq "big" ? 32 : 0)}]
+    if {$sign eq "f"} {
+        RuntimeRaises NonFiniteFloat
+    }
+    return [expr {$width + ($sign eq "i" ? 16 : 0) + ($endian eq "big" ? 32 : 0) + ($sign eq "f" ? 64 : 0)}]
 }
 
 # Call E (NODE) of a binary operation: {REGISTER tagged} or {never tagged}.
@@ -5802,9 +5810,10 @@ proc native::lower::DecodeAt {fnVar e mode source descriptor base {fieldsOnly 0}
 }
 
 # The List the fixed array REPR ({array N STRIDE ELEMENT}) holds at BASE of
-# SOURCE (MODE as ReprRead's), copied: a row of scalars by one helper call
-# (`binloadarray` / `nativeloadarray`: N contiguous scalars, STRIDE their
-# width); any other element read element by element, element I at BASE + I
+# SOURCE (MODE as ReprRead's), copied: a row of scalars -- integers or C
+# floating values -- by one helper call (`binloadarray` / `nativeloadarray`:
+# N contiguous scalars, STRIDE their width, the C type's: 4 for a float);
+# any other element read element by element, element I at BASE + I
 # * STRIDE -- unrolled into one `listnew` of the N values up to
 # UnrollExtent elements (so the List is the one allocation), past it in a
 # counted loop appending each -- O(N), straight from the descriptor's
@@ -5813,7 +5822,7 @@ proc native::lower::ArrayRead {fnVar e mode source repr base} {
     upvar 1 $fnVar fn
     variable unrollExtent
     lassign $repr - extent stride element
-    if {[lindex $element 0] in {u i}} {
+    if {[lindex $element 0] in {u i f}} {
         lassign $element sign width endian
         set at [At fn $e $base 0]
         set code [Assign fn "int [LayoutEncoding $sign $width $endian]" $e]
@@ -5961,7 +5970,7 @@ proc native::lower::ReprWrite {fnVar e mode target repr base value} {
         }
         array {
             lassign $repr - extent stride element
-            if {[lindex $element 0] in {u i}} {
+            if {[lindex $element 0] in {u i f}} {
                 lassign $element sign width endian
                 set at [At fn $e $base 0]
                 set code [Assign fn "int [LayoutEncoding $sign $width $endian]" $e]

@@ -489,11 +489,11 @@ field	struct v3_ext_ctx	5	db	pointer	40	8	-	const CONF *db	ffi::c::Ptr[CONF]	c=d
 record	struct X509_algor_st	-	X509_ALGOR	layout-direct	-	16	8	struct X509_algor_st	-	typedefs=X509_ALGOR; identity=boringssl::ctypes::X509_ALGOR; header=include/openssl/x509.h:5296; pointed-by=34
 field	struct X509_algor_st	0	algorithm	pointer	0	8	-	ASN1_OBJECT *algorithm	ffi::c::Ptr[ASN1_OBJECT]	c=algorithm
 field	struct X509_algor_st	1	parameter	pointer	8	8	-	ASN1_TYPE *parameter	ffi::c::Ptr[ASN1_TYPE]	c=parameter
-record	struct rand_meth_st	-	-	layout-blocked	-	48	8	struct rand_meth_st	-	typedefs=RAND_METHOD; identity=boringssl::ctypes::RAND_METHOD; header=include/openssl/rand.h:112; blockers=unsupported-pointer: field add: callback argument 3: double (double) (unsupported-callback-signature); roots=unsupported-pointer; pointed-by=4
+record	struct rand_meth_st	-	RAND_METHOD	layout-direct	-	48	8	struct rand_meth_st	-	typedefs=RAND_METHOD; identity=boringssl::ctypes::RAND_METHOD; header=include/openssl/rand.h:112; pointed-by=4
 field	struct rand_meth_st	0	seed	function-pointer	0	8	-	void (*seed)(const void *buf, int num)	ffi::c::FnPtr[Fn{args: [ffi::c::Ptr[ffi::c::Void], ffi::c::Int], return: unit}]	c=seed
 field	struct rand_meth_st	1	bytes	function-pointer	8	8	-	int (*bytes)(uint8_t *buf, size_t num)	ffi::c::FnPtr[Fn{args: [ffi::c::Ptr[ffi::c::UChar], ffi::c::ULong], return: ffi::c::Int}]	c=bytes
 field	struct rand_meth_st	2	cleanup	function-pointer	16	8	-	void (*cleanup)(void)	ffi::c::FnPtr[Fn{args: [], return: unit}]	c=cleanup
-field	struct rand_meth_st	3	add	unsupported-pointer	24	8	-	void (*add)(const void *buf, int num, double entropy)	-	c=add; blockers=unsupported-pointer: callback argument 3: double (double) (unsupported-callback-signature)
+field	struct rand_meth_st	3	add	function-pointer	24	8	-	void (*add)(const void *buf, int num, double entropy)	ffi::c::FnPtr[Fn{args: [ffi::c::Ptr[ffi::c::Void], ffi::c::Int, ffi::c::Double], return: unit}]	c=add
 field	struct rand_meth_st	4	pseudorand	function-pointer	32	8	-	int (*pseudorand)(uint8_t *buf, size_t num)	ffi::c::FnPtr[Fn{args: [ffi::c::Ptr[ffi::c::UChar], ffi::c::ULong], return: ffi::c::Int}]	c=pseudorand
 field	struct rand_meth_st	5	status	function-pointer	40	8	-	int (*status)(void)	ffi::c::FnPtr[Fn{args: [], return: ffi::c::Int}]	c=status
 record	struct rc4_key_st	-	RC4_KEY	layout-direct	-	1032	4	struct rc4_key_st	-	typedefs=RC4_KEY; identity=boringssl::ctypes::RC4_KEY; header=include/openssl/rc4.h:28; pointed-by=2

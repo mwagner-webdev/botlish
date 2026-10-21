@@ -42,7 +42,22 @@
 # The checks are host-independent but for the tools and the expected formats
 # (ELF on Linux, Mach-O on macOS); the programs' values and statuses are the
 # same everywhere. The executable checks do not run where executable
-# emission is refused. Prints one line per check, the tools' own output with
+# emission is refused.
+#
+# On Windows (windows-x86_64, MSVC's toolchain: WINDOWS-X86-64-MILESTONE-1.md)
+# the same program is checked by `windowsChecks`, which reads the COFF object
+# and the PE executable itself (tests/binary-header.tcl's coffFacts and
+# peFacts: no MSVC tool needed): the object's sections, symbols (undecorated
+# on x64) and relocation types; the executable's format, console subsystem
+# and imported DLLs -- every one the system's (System32's, or an API set),
+# none of the Visual C++ runtime or the UCRT's (the C runtime is linked
+# statically); its name (NAME.exe); and the standalone runs, from another
+# directory with only the system directory on PATH, where the outcomes
+# differ from Unix's exactly as recorded: native coroutines and C calls are
+# refused, the depth check's NATIVE LIMIT STACK is reported as any run-time
+# error is (MESSAGE (CODE)), and a native stack exhausted before the shadow
+# stack's depth check fires ends the process (no stack guard yet). Prints
+# one line per check, the tools' own output with
 # -verbose 1 (and always for a failed check), the object and link times, and
 # exits 1 on any failure. Needs the native backend built (cargo build
 # --release --manifest-path native/Cargo.toml). Its scratch files are in a
@@ -89,6 +104,10 @@ set expected [dict create \
         prefix _ contextReloc {ARM64_RELOC_GOT_LOAD_PAGE21 ARM64_RELOC_GOT_LOAD_PAGEOFF12}
         helperReloc {ARM64_RELOC_GOT_LOAD_PAGE21 ARM64_RELOC_GOT_LOAD_PAGEOFF12}
         foreignRelocs {R_X86_64_* R_AARCH64_*}
+    } \
+    windows-x86_64 {
+        object {coff x86_64 object} executable {pe x86_64 executable}
+        prefix "" relocTypes {ADDR64 ADDR32NB REL32}
     }]
 
 set host [core::cabi::hostTarget]
@@ -608,9 +627,176 @@ proc checks {} {
         [format "a trivial executable's whole process: median %.1f ms of five (%s)" $median [join [lmap w $walls {format %.1f $w}] {, }]]
 }
 
+# The checks on Windows (this file's header). The system directory, read
+# once (System32 of the Windows directory).
+if {$::tcl_platform(platform) eq "windows"} {
+    set systemDir [file join [if {[info exists ::env(SystemRoot)]} {set ::env(SystemRoot)} else {set ::env(WINDIR)}] System32]
+}
+proc windowsChecks {} {
+    global work facts program programValue coroutineProgram downProgram errorProgram overflowLine root
+    set sourceDir [file join $work "source dir"]
+    set buildDir [file join $work "build dir"]
+    set runDir [file join $work "run dir"]
+    set cwdDir [file join $work "elsewhere"]
+    file mkdir $sourceDir $buildDir $runDir $cwdDir
+    set source [file join $sourceDir probe.bot]
+    writeText $source $program
+    set hir [surface::readProgramFile $source -warnings off]
+
+    # ---- The object.
+    set object [file join $buildDir probe.obj]
+    set started [clock microseconds]
+    native::object $hir $object
+    set objectMs [expr {([clock microseconds] - $started) / 1000}]
+    set header [binaryHeader $object]
+    check object-header [expr {$header eq [dict get $facts object] && $header eq [hostBinaryHeader object]}] "$header ([file size $object] bytes, $objectMs ms)"
+    set coff [coffFacts $object]
+    set defined {}
+    set undefined {}
+    foreach symbol [dict get $coff symbols] {
+        lassign $symbol name section class
+        if {$class != 2} continue
+        if {$section == 0} { lappend undefined $name } elseif {$section > 0} { lappend defined $name }
+    }
+    set functions [lsearch -all -inline -regexp $defined {^botlish_(fn|entry)_[0-9]+$}]
+    set helpers [lsearch -all -inline -regexp $undefined {^rt_}]
+    set misdecorated [lsearch -all -inline -regexp [concat $defined $undefined] {^_+(botlish|rt)_}]
+    set context [lsearch -all -inline -exact [lmap s [dict get $coff symbols] {lindex $s 0}] botlish_context_area]
+    check object-symbols [expr {[llength $functions] >= 8 && [llength $functions] % 2 == 0 && [llength $helpers] > 0
+            && "botlish_fn_0" in $defined && $misdecorated eq "" && [llength $context] == 1}] \
+        "[expr {[llength $functions] / 2}] functions defined (botlish_fn_N, botlish_entry_N), [llength $helpers] runtime helpers undefined (rt_*), context area: [llength $context], decorated: [expr {$misdecorated eq {} ? "none" : $misdecorated}]" \
+        [join [dict get $coff symbols] \n]
+    set types [lsort -unique [lmap r [dict get $coff relocations] {lindex $r 1}]]
+    set foreign [lmap t $types {expr {$t in [dict get $facts relocTypes] ? [continue] : $t}}]
+    check object-relocations [expr {$types ne "" && $foreign eq ""}] \
+        "sections [dict get $coff sections]; relocation types $types" [join [dict get $coff relocations] \n]
+
+    # ---- The executable: NAME.exe for NAME.
+    set started [clock microseconds]
+    set linked [catch {native::executable $hir [file join $buildDir "probe program"]} executable options]
+    set linkMs [expr {([clock microseconds] - $started) / 1000}]
+    if {$linked} {
+        check executable-link 0 "[dict get $options -errorcode]: [lindex [split $executable \n] 0]" $executable
+        return
+    }
+    check executable-link [expr {[file tail $executable] eq "probe program.exe" && [file isfile $executable]}] \
+        "linked in $linkMs ms: [file tail $executable] ([file size $executable] bytes)"
+    set header [binaryHeader $executable]
+    check executable-header [expr {$header eq [dict get $facts executable] && $header eq [hostBinaryHeader executable]}] $header
+    set pe [peFacts $executable]
+    check executable-subsystem [expr {[dict get $pe subsystem] == 3}] "subsystem [dict get $pe subsystem] (3: the Windows console)"
+    # Every imported DLL the system's: an API set (resolved by the loader,
+    # no file) or a file of the system directory; none of the Visual C++
+    # runtime's (vcruntime, msvcp, concrt) or the UCRT's (ucrtbase,
+    # api-ms-win-crt-*): the C runtime is linked statically (codegen/aot.rs's
+    # crt_args).
+    set system $::systemDir
+    set imports [lsort -unique -nocase [dict get $pe imports]]
+    set crt [lsearch -all -inline -regexp -nocase $imports {^(vcruntime|msvcp|concrt|ucrtbase|api-ms-win-crt-)}]
+    set foreign [lmap dll $imports {
+        expr {[string match -nocase api-ms-win-* $dll] || [string match -nocase ext-ms-* $dll] || [file isfile [file join $system $dll]] ? [continue] : $dll}
+    }]
+    check executable-imports [expr {$imports ne "" && $crt eq "" && $foreign eq ""}] \
+        "[llength $imports] DLLs: [join $imports {, }]; C runtime DLLs: [expr {$crt eq "" ? "none" : $crt}]; not the system's: [expr {$foreign eq "" ? "none" : $foreign}]"
+
+    # ---- Standalone: moved, source deleted, run from another directory
+    # with only the system directory on PATH.
+    set moved [file join $runDir "moved program.exe"]
+    file rename $executable $moved
+    file delete -force $sourceDir
+    set started [clock microseconds]
+    set outcome [windowsRun $cwdDir $moved {}]
+    set runMs [expr {([clock microseconds] - $started) / 1000}]
+    check standalone-run [expr {$outcome eq [list 0 "$programValue\n" ""]}] "[shown $outcome] ($runMs ms)"
+    set outcome [windowsRun $cwdDir $moved {BOTLISH_NATIVE_GC_STRESS 1}]
+    check standalone-gc-stress [expr {$outcome eq [list 0 "$programValue\n" ""]}] [shown $outcome]
+    set standalone {apply {{runDir cwdDir name text environment} {
+        set path [native::executable [surface::compile $text $name.bot -warnings off] [file join $runDir $name]]
+        return [windowsRun $cwdDir $path $environment]
+    }}}
+    set outcome [{*}$standalone $runDir $cwdDir error $errorProgram {}]
+    check standalone-error [expr {[lindex $outcome 0] eq "1" && [lindex $outcome 1] eq ""
+        && [string match "*(CORE SEMANTIC RANGE)\n" [lindex $outcome 2]]}] [shown $outcome]
+    set outcome [{*}$standalone $runDir $cwdDir down [string map {DEPTH 100000} $downProgram] {}]
+    check standalone-deep-finite [expr {$outcome eq [list 0 "100000\n" ""]}] [shown $outcome]
+    # The shadow stack's depth check (codegen::roots's depth_reservation)
+    # bounds Botlish recursion on the default 1 GiB stack: NATIVE LIMIT
+    # STACK, exit status 1, as everywhere -- an ordinary run-time error
+    # here, which the executable reports as it reports every one (MESSAGE
+    # (CODE), like standalone-error), where the guard of the other hosts
+    # writes its own fixed line ($overflowLine). A smaller stack is
+    # exhausted first, and with no stack guard yet the process ends in
+    # Rust's own stack overflow report, a failure status.
+    set outcome [{*}$standalone $runDir $cwdDir overflow [string map {DEPTH 100000000} $downProgram] {}]
+    check standalone-depth-limit [expr {$outcome eq [list 1 "" "native stack exhausted: too many nested calls (NATIVE LIMIT STACK)\n"]}] "1 GiB stack: [shown $outcome]"
+    set outcome [windowsRun $cwdDir [file join $runDir overflow.exe] {BOTLISH_NATIVE_STACK_BYTES 16777216}]
+    check standalone-stack-overflow [expr {[lindex $outcome 0] ni {0 1} && [lindex $outcome 1] eq ""
+        && [string match "*has overflowed its stack*" [lindex $outcome 2]]}] "16 MiB stack, no guard: [shown $outcome]"
+    set outcome [{*}$standalone $runDir $cwdDir coroutine $coroutineProgram {}]
+    check standalone-coroutine-refused [expr {[lindex $outcome 0] eq "1" && [lindex $outcome 1] eq ""
+        && [string match "native coroutines need stack switching*(NATIVE UNSUPPORTED value)\n" [lindex $outcome 2]]}] [shown $outcome]
+    set failed [catch {native::executable [surface::compile "import ffi::c\n\nextern c fn labs(x: ffi::c::Long) -> ffi::c::Long\n\nlabs(-5)\n" c-call.bot -warnings off] [file join $runDir c-call]} message options]
+    check c-call-refused [expr {$failed && [lrange [dict get $options -errorcode] 0 1] eq {NATIVE LINK}
+        && [string match "*C calls are linked on Linux glibc (x86_64, aarch64) and macOS (aarch64) only*" $message]
+        && ![file exists [file join $runDir c-call.exe]]}] \
+        "[expr {$failed ? [lrange [dict get $options -errorcode] 0 1] : "linked"}]: refused before the linker runs" $message
+
+    # ---- Observations, not limits (as checks' own).
+    global benchProgram benchValue
+    set runs 20
+    set hir [surface::compile $benchProgram bench.bot -warnings off]
+    lassign [native::measure $hir $runs] - - jitBest - jitValue
+    set path [native::executable $hir [file join $runDir bench]]
+    set result [file join $work result.txt]
+    lassign [windowsRun $cwdDir $path [list BOTLISH_NATIVE_RESULT $result BOTLISH_NATIVE_RUNS $runs]] status
+    set lines [split [string trim [readText $result]] \n]
+    set times [lrange [lsearch -inline $lines {times *}] 1 end]
+    set aotBest [expr {[llength $times] ? [tcl::mathfunc::min {*}$times] / 1000.0 : 0}]
+    set aotValue [lindex [lsearch -inline $lines {value *}] 1]
+    check performance-compute [expr {$status eq "0" && [core::formatValue $jitValue] eq $benchValue && $aotValue ne "" && [core::formatValue $aotValue] eq $benchValue && $aotBest > 0}] \
+        [format "best of %d runs: JIT %.0f us, executable %.0f us (ratio %.2f)" $runs $jitBest $aotBest [expr {$aotBest / max($jitBest, 1)}]]
+    set trivial [native::executable [surface::compile 42 trivial.bot] [file join $runDir trivial]]
+    set walls {}
+    for {set i 0} {$i < 5} {incr i} {
+        set started [clock microseconds]
+        lassign [windowsRun $cwdDir $trivial {}] status stdout
+        lappend walls [expr {([clock microseconds] - $started) / 1000.0}]
+    }
+    set median [lindex [lsort -real $walls] 2]
+    check performance-startup [expr {$status eq "0" && $stdout eq "42\n"}] \
+        [format "a trivial executable's whole process: median %.1f ms of five (%s)" $median [join [lmap w $walls {format %.1f $w}] {, }]]
+}
+
+# Runs the executable PATH in the directory CWD with only the system
+# directory on PATH and the environment ENVIRONMENT ({NAME VALUE ...}) added:
+# run's {STATUS STDOUT STDERR}. (Windows: no `env -i`; the C runtime and the
+# loader need SystemRoot, which stays.)
+proc windowsRun {cwd path environment} {
+    set names [concat PATH [dict keys $environment]]
+    set saved [dict create]
+    foreach name $names {
+        if {[info exists ::env($name)]} { dict set saved $name $::env($name) }
+    }
+    set here [pwd]
+    try {
+        set ::env(PATH) [file nativename $::systemDir]
+        foreach {name value} $environment { set ::env($name) $value }
+        cd $cwd
+        return [run $path]
+    } finally {
+        cd $here
+        foreach name $names { unset -nocomplain ::env($name) }
+        dict for {name value} $saved { set ::env($name) $value }
+    }
+}
+
 puts "aot facts on $host ($::tcl_platform(os) $::tcl_platform(machine)), driver [native::binary]"
 try {
-    checks
+    if {[string match windows-* $host]} {
+        windowsChecks
+    } else {
+        checks
+    }
 } finally {
     file delete -force $work
 }

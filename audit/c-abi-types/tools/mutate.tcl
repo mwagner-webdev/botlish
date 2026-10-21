@@ -15,8 +15,8 @@
 #     private -tmpdir): killed if any test fails or a file does not complete;
 #   * audit/c-abi-types/tools/fuzz.tcl -n N -seed S (pointer types, chains
 #     of the operations and scalar boundaries on several targets, every
-#     backend, against its own model): killed if it reports a disagreement
-#     or does not complete;
+#     backend that runs the program's target, against its own model): killed
+#     if it reports a disagreement or does not complete;
 #   * for a native mutant (one that edits native/src/), first a release
 #     build of the copy's native backend (a mutant that does not build is
 #     reported NOT-BUILT, never counted as killed).

@@ -5,14 +5,17 @@
 #
 # Runs one small probe per native capability -- the JIT, the GC's frame walk
 # under stress, a native stack overflow (of the thread's stack and of a
-# coroutine's), coroutines, a Linux syscall, a C call, a program object and
+# coroutine's), coroutines, a Linux syscall, a C call, byte storage exposed
+# to the system C library, Darwin I/O (libSystem's read and write, errno,
+# the portable io::IO through DarwinIO, an executable), a program object and
 # a standalone executable -- and of the target boundary (the
 # driver's reading of the host target's triple, the C calling convention of
 # a foreign signature, a program built for the other operating system of the
 # host's architecture) and compares each outcome with the expectation
 # recorded below for the host target (core::cabi::hostTarget).
-# On Linux every capability is supported. On macOS arm64 some are not yet,
-# and the expectation is the explicit refusal they fail with today: a
+# On Linux every capability is supported. On macOS arm64 and Windows x86-64
+# some are not yet, and the expectation is the explicit refusal they fail
+# with today: a
 # capability that starts working (or fails differently) after a port
 # milestone fails this check until its expectation is updated here, in the
 # same change. A probe that kills the driver is recorded as such, never
@@ -49,7 +52,9 @@ foreach {option value} $argv {
 # reports the calling convention of each foreign C signature; other-target
 # runs the program built for the other operating system's target of this
 # host's architecture (macos-aarch64 on linux-aarch64, linux-aarch64 on
-# macos-aarch64).
+# macos-aarch64, linux-x86_64 on windows-x86_64); other-environment the
+# program built for the other environment of this host's operating system
+# and architecture (windows-x86_64-gnu, MinGW's, on windows-x86_64).
 set fixtures [file join $root native tests fixtures]
 set probes [dict create \
     jit [list program {fn fib(n):
@@ -62,6 +67,15 @@ fib(20)
 } {}] \
     gc-frame-walk [list driver build400.nir {BOTLISH_NATIVE_GC_STRESS 1}] \
     stack-overflow [list driver stack_overflow.ir {BOTLISH_NATIVE_STACK_BYTES 4194304}] \
+    stack-depth-limit [list driver stack_overflow.ir {}] \
+    recursion-limit [list program {fn down(n: int) -> int:
+    if n == 0:
+        return 0
+
+    1 + down(n - 1)
+
+down(100000000)
+} {}] \
     coroutine-stack-overflow [list program {struct Event:
     value: int
 
@@ -107,6 +121,74 @@ extern c fn labs(x: ffi::c::Long) -> ffi::c::Long
 
 labs(-5)
 } {}] \
+    c-byte-borrow [list program {import abi
+import abi::bytes
+import byte
+import ffi::c
+
+extern c fn memcmp(a: ffi::c::Ptr[ffi::c::Void] read noescape, b: ffi::c::Ptr[ffi::c::Void] read noescape, n: ffi::c::ULong) -> ffi::c::Int
+extern c fn memset(dst: ffi::c::Ptr[ffi::c::Void] write noescape, c: ffi::c::Int, n: ffi::c::ULong) -> ffi::c::Ptr[ffi::c::Void] alias dst
+
+# Bytes and MutableBytes exposed to the system C library's memcmp (read
+# noescape) and memset (write noescape: a private copy, the write-back
+# value): [1, 200] sorts before the [200, 200] memset wrote, and the
+# zeroed owner stays zeroed.
+a = abi::bytes::from_list([byte::from_int(1), byte::from_int(200)])
+z = abi::bytes::zeroed(abi::usize(2))
+c = abi::bytes::freeze(memset(z, 200, 2).dst)
+[memcmp(a, c, 2) < 0, memcmp(c, a, 2) > 0, memcmp(a, a, 2), c == abi::bytes::from_list([byte::from_int(200), byte::from_int(200)]), memcmp(z, abi::bytes::from_list([byte::from_int(0), byte::from_int(0)]), 2)]
+} {}] \
+    darwin-read-write [list program {direct module
+import abi
+import abi::bytes
+import darwin
+
+# libSystem's write(2) of nothing to descriptor 1 (0 bytes, no errno) and
+# read(2) of descriptor -1 (-1, EBADF = 9), through lib/darwin.bot.
+w = darwin::write(1, abi::bytes::from_list([]))
+r = darwin::read(-1, abi::bytes::zeroed(abi::usize(1)))
+[w.count, w.errno, r.count, r.errno]
+} {}] \
+    darwin-errno [list program {direct module
+import abi
+import abi::bytes
+import darwin
+
+# Two failures in succession, each with its own errno read through __error():
+# close of descriptor -1 (EBADF = 9), then of 9999 (EBADF again), and a
+# success between them reporting 0.
+a = darwin::close(-1)
+b = darwin::write(2, abi::bytes::from_list([]))
+c = darwin::close(9999)
+[a.status, a.errno, b.count, b.errno, c.status, c.errno]
+} {}] \
+    darwin-io [list program {import io
+import darwin::io
+
+# The portable io::IO through the installed DarwinIO context: an empty print
+# (no write at all) and the value saying it succeeded.
+fn quiet() -> str errors io::WriteFailed:
+    io::print("")
+    "ok"
+
+with context darwin::io::create()
+
+quiet():
+    on io::WriteFailed:
+        "failed"
+} {}] \
+    darwin-executable [list executable {import io
+import darwin::io
+
+fn hello() errors io::WriteFailed:
+    io::print_line("Hello, world!")
+
+with context darwin::io::create()
+
+hello():
+    on io::WriteFailed:
+        unit
+} {}] \
     object [list object {fn fib(n):
     if n <= 1:
         return n
@@ -137,6 +219,13 @@ fn f(x: ffi::c::Char) -> int:
     x
 
 f(1)
+} {}] \
+    other-environment [list other-environment {import ffi::c
+
+fn f(x: ffi::c::Long) -> int:
+    x
+
+f(1)
 } {}]]
 
 # The recorded outcomes: HOST-TARGET -> NAME -> {value TEXT} (exactly) or
@@ -148,12 +237,36 @@ f(1)
 # AOT)`). A C call (libc's labs, through the platform linker) is linked and
 # runs, returning 5, on every host: on macos-aarch64 since milestone 6
 # (MACOS-AARCH64-MILESTONE-6.md), where until then it was refused before the
-# linker ran (NATIVE LINK, "C calls are linked on Linux glibc only"). A
+# linker ran (NATIVE LINK, "C calls are linked on Linux glibc only"). Byte
+# storage exposed to the system C library (memcmp reading two buffers,
+# memset writing a private copy) gives the same values everywhere: on
+# macos-aarch64 checked since milestone 7 (MACOS-AARCH64-MILESTONE-7.md).
+# Darwin I/O (lib/darwin.bot, lib/darwin/io.bot: libSystem's write, read,
+# close and the thread's errno; the portable io::IO through DarwinIO; a
+# Mach-O executable printing through it) runs on macos-aarch64 since
+# milestone 8 (MACOS-AARCH64-MILESTONE-8.md), and is refused everywhere else
+# before anything runs: `darwin` is the macOS platform's namespace
+# (UNSUPPORTED-PLATFORM), as `linux` is Linux's. A
 # native stack overflow is NATIVE LIMIT STACK on
 # every host, the thread's stack and a coroutine's alike: on macos-aarch64
 # since milestone 4 (MACOS-AARCH64-MILESTONE-4.md), where until then the
 # driver died in Rust's stack-overflow abort (the thread's stack) or of
 # SIGBUS (a coroutine's).
+#
+# On windows-x86_64 (WINDOWS-X86-64-MILESTONE-1.md, MSVC's toolchain) the
+# JIT, the collector -- with the fallback root plan, no frame walk -- program
+# objects (COFF) and standalone executables (PE) work; a program built for
+# Linux or for windows-x86_64-gnu (MinGW's environment) is NATIVE TARGET; a
+# C call is refused before the linker runs (C calls are the next
+# milestone's), and so are coroutines (NATIVE UNSUPPORTED); there is no
+# stack guard: a native stack exhausted before the shadow stack's depth
+# check fires kills the driver (Rust's own stack overflow report, recorded
+# as the probe's NATIVE BUG), while the default 1 GiB stack outlasts the
+# depth check, whose NATIVE LIMIT STACK is the stack-depth-limit probe's.
+# The recursion-limit probe is the same limit reached by a compiled program
+# whose functions cannot otherwise fail: the depth check's failure is a
+# call's error there (nir's call effects), and until this milestone a
+# caller that did not check for it crashed in rt_int_add.
 #
 # Since milestone 2 (MACOS-AARCH64-MILESTONE-2.md) a program importing a
 # Linux namespace does not compile for macos-aarch64 at all
@@ -164,10 +277,16 @@ set linux [dict create \
     jit {value 6765} \
     gc-frame-walk [list value [list str [string repeat xy 400]]] \
     stack-overflow {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
+    recursion-limit {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
     coroutine-stack-overflow {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
     coroutine {value {[10, 7]}} \
     linux-syscall {value 0} \
     c-call {value 5} \
+    c-byte-borrow {value {[true, true, 0, true, 0]}} \
+    darwin-read-write {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "darwin" belongs to the macOS platform (the standard namespace darwin*unavailable for target linux-*}} \
+    darwin-errno {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "darwin" belongs to the macOS platform*unavailable for target linux-*}} \
+    darwin-io {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "darwin::io" belongs to the macOS platform*unavailable for target linux-*}} \
+    darwin-executable {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "darwin::io" belongs to the macOS platform*unavailable for target linux-*}} \
     target {value {format elf c-call-conv system_v runs 1}} \
     c-convention {value {labs system_v abs system_v}} \
     other-target {error {NATIVE TARGET} {this program was built for target macos-* and native code runs only on its own target's host*matching architecture is not a matching target*}}]
@@ -184,15 +303,43 @@ set expected [dict create \
         jit {value 6765} \
         gc-frame-walk [list value [list str [string repeat xy 400]]] \
         stack-overflow {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
+        recursion-limit {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
         coroutine-stack-overflow {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
         coroutine {value {[10, 7]}} \
         linux-syscall {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "linux" belongs to the Linux platform*unavailable for target macos-aarch64 (macOS on aarch64)*}} \
         c-call {value 5} \
+        c-byte-borrow {value {[true, true, 0, true, 0]}} \
+        darwin-read-write {value {[0, 0, -1, 9]}} \
+        darwin-errno {value {[-1, 9, 0, 0, -1, 9]}} \
+        darwin-io {value {"ok"}} \
+        darwin-executable {value {{macho arm64 execute} {Hello, world!
+unit}}} \
         object {value {macho arm64 object}} \
         executable {value {{macho arm64 execute} 6765}} \
         target {value {format macho c-call-conv apple_aarch64 runs 1}} \
         c-convention {value {labs apple_aarch64 abs apple_aarch64}} \
-        other-target {error {NATIVE TARGET} {this program was built for target linux-aarch64 (aarch64-unknown-linux-gnu)*Both are aarch64, but a matching architecture is not a matching target*}}]]
+        other-target {error {NATIVE TARGET} {this program was built for target linux-aarch64 (aarch64-unknown-linux-gnu)*Both are aarch64, but a matching architecture is not a matching target*}}] \
+    windows-x86_64 [dict create \
+        jit {value 6765} \
+        gc-frame-walk [list value [list str [string repeat xy 400]]] \
+        stack-overflow {error {NATIVE BUG} {native backend failed:*has overflowed its stack*}} \
+        stack-depth-limit {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
+        recursion-limit {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
+        coroutine-stack-overflow {error {NATIVE UNSUPPORTED value} {native coroutines need stack switching, implemented for Linux x86-64 and AArch64 and macOS AArch64 only*}} \
+        coroutine {error {NATIVE UNSUPPORTED value} {native coroutines need stack switching, implemented for Linux x86-64 and AArch64 and macOS AArch64 only*}} \
+        linux-syscall {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "linux" belongs to the Linux platform*unavailable for target windows-x86_64 (Windows on x86_64)*}} \
+        c-call {error {NATIVE LINK} {native link failed: this program calls C*C calls are linked on Linux glibc (x86_64, aarch64) and macOS (aarch64) only*}} \
+        c-byte-borrow {error {NATIVE LINK} {native link failed: this program calls C*C calls are linked on Linux glibc (x86_64, aarch64) and macOS (aarch64) only*}} \
+        darwin-read-write {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "darwin" belongs to the macOS platform*unavailable for target windows-x86_64 (Windows on x86_64)*}} \
+        darwin-errno {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "darwin" belongs to the macOS platform*unavailable for target windows-x86_64 (Windows on x86_64)*}} \
+        darwin-io {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "darwin::io" belongs to the macOS platform*unavailable for target windows-x86_64 (Windows on x86_64)*}} \
+        darwin-executable {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "darwin::io" belongs to the macOS platform*unavailable for target windows-x86_64 (Windows on x86_64)*}} \
+        object {value {coff x86_64 object}} \
+        executable {value {{pe x86_64 executable} 6765}} \
+        target {value {format coff c-call-conv windows_fastcall runs 1}} \
+        c-convention {value {labs windows_fastcall abs windows_fastcall}} \
+        other-target {error {NATIVE TARGET} {this program was built for target linux-x86_64 (x86_64-unknown-linux-gnu)*Both are x86_64, but a matching architecture is not a matching target*}} \
+        other-environment {error {NATIVE TARGET} {this program was built for target windows-x86_64-gnu (x86_64-pc-windows-gnu)*Both are x86_64 windows, but the C toolchain environment is part of the target: gnu for this program, msvc here*}}]]
 
 # The outcome of running SCRIPT with ENVIRONMENT ({NAME VALUE ...}) set:
 # {value TEXT} or {error CODE MESSAGE}.
@@ -243,6 +390,11 @@ proc observe {name} {
         convention {
             return [outcome $environment {
                 foreignConventions [native::clif [surface::compile $argument -warnings off]]
+            }]
+        }
+        other-environment {
+            return [outcome $environment {
+                core::formatValue [native::evalHir [surface::compile $argument -warnings off -target windows-x86_64-gnu]]
             }]
         }
         other-target {

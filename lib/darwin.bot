@@ -1,0 +1,242 @@
+# darwin.bot -- the "darwin" namespace: the macOS (Darwin) platform's
+# low-level I/O operations, thin ordinary-Botlish wrappers over Apple's
+# public C library, libSystem (MACOS-AARCH64-MILESTONE-8.md).
+#
+#   darwin::write(fd, data)        write(2): ONE libSystem call; a WriteResult
+#   darwin::read(fd, data)         read(2): ONE call into a logical copy of
+#                                  DATA; a ReadResult holding the copy
+#   darwin::open(path, access)     open(2) of an existing file; an OpenResult
+#   darwin::create(path, access, mode)
+#                                  open(2) with O_CREAT and O_TRUNC, MODE the
+#                                  new file's permissions; an OpenResult
+#   darwin::create_new(path, access, mode)
+#                                  the same with O_EXCL instead of O_TRUNC: it
+#                                  fails (EEXIST) when the file exists
+#   darwin::close(fd)              close(2); a CloseResult
+#   darwin::errno()                the calling thread's errno, as it is now
+#
+# libSystem is the boundary. Darwin's kernel interface is private and
+# changes between releases; its stable interface is the C library, so this
+# module calls the C functions -- write, read, open, close and __error --
+# through ordinary `extern c fn` declarations of their prototypes (C-FFI.md),
+# linked from the system library every macOS executable links: no syscall
+# number, no `svc #0x80`, no transport of its own, and no compiler knowledge
+# of I/O. It is the Linux module's sibling in shape (lib/linux.bot: one call,
+# the raw outcome, a logical copy for read) but not in convention:
+#
+# * Darwin reports a failure as C does -- the call returns -1 and the reason
+#   is in errno -- where Linux's raw syscall returns -errno in the result
+#   register. A result here never encodes an errno: each one holds the C
+#   result (count, descriptor or status, -1 on failure) and, separately, the
+#   errno a failed call left (0 when it succeeded: errno is never read after a
+#   success, where its value means nothing).
+# * errno is per thread: the C macro is `(*__error())`, a function returning
+#   the address of the calling thread's int. errno() reads it through a
+#   native view of a one-field layout (NATIVE-LAYOUT-VIEWS.md) of that
+#   address: no pointer arithmetic, no dereference operator, the pointer
+#   never kept. A wrapper reads it right after the failed call returns,
+#   before it calls anything else (a later C call could change it), on the
+#   same thread (a Botlish program runs on one native thread: coroutines
+#   switch stacks, never threads) and with no possible suspension between
+#   (a yield is a statement of the coroutine's own body, never inside these
+#   functions). For write, open and close nothing at all runs between the
+#   call and the read; read's write exposure has its write-back value built
+#   right after the call (C-POINTER-BORROWING.md: two small allocations,
+#   before any Botlish code runs), which allocates and may collect but calls
+#   no libSystem function that reports through errno.
+#
+# Byte storage reaches C only through the borrowing contract
+# (C-POINTER-BORROWING.md): write's buffer is `read noescape` (exposed as it
+# is, no copy), read's `write noescape` (a private copy C writes, returned as
+# the result's `data`; the caller's MutableBytes never changes). Address and
+# count come from the ONE value -- there is no count parameter -- and the
+# count is proven a size_t (an abi::Usize's value is an ffi::c::ULong on
+# macOS, LP64) with no run-time check. A path is a darwin::path::DarwinPath
+# (non-empty, no U+0000), given to open(2) as its UTF-8 bytes and a
+# terminating NUL, built for the call and exposed for it alone.
+#
+# open(2) is a genuine C variadic function, `int open(const char *, int,
+# ...)`, and is declared so (VARIADICS-VERTICAL-SLICE-1.md: on Apple arm64 a
+# variadic call's trailing arguments travel on the stack, so a fixed
+# three-parameter declaration would pass the mode where open never reads
+# it). The creation mode is its one trailing argument, an ffi::c::UShort --
+# macOS's mode_t is unsigned 16 bits -- which C's default argument promotion
+# passes as an int (what open's va_arg reads). Only create and create_new
+# pass it, and they always do: a creation (O_CREAT) can never omit its mode,
+# and open passes no flag that would need one. Every descriptor is opened
+# close-on-exec (O_CLOEXEC).
+#
+# Thin by design: ONE C call per operation, no loop, no retry (EINTR is a
+# failure like any other: io::IO's completion policy, darwin::io, decides),
+# no buffering, no descriptor ownership (closing is the caller's; nothing is
+# closed for it), no text. The standard streams as a context and the
+# portable io::IO implementation are darwin::io's.
+#
+# A direct module (DIRECT-MODULES.md): its operations take any descriptor
+# and any path -- raw process authority -- with no context, and errno()
+# makes a native view (binary::native, designated direct). Code that calls
+# them is calling into a direct module and either mediates them through a
+# context of its own (darwin::io's DarwinIO does) or is declared direct
+# itself. The constants below are the macOS SDK's (<fcntl.h>), never Linux's:
+# tests/darwin-io.test compares each with the host's headers on macOS.
+direct module
+
+import abi
+import abi::bytes
+import binary
+import binary::native
+import byte
+import darwin::path
+import ffi::c
+import list
+import str
+
+# int *__error(void): the address of the calling thread's errno.
+extern c fn c_errno_location named "__error"() -> ffi::c::Ptr[ffi::c::Int] independent
+
+# ssize_t write(int fd, const void *buf, size_t nbyte)
+extern c fn c_write named "write"(fd: ffi::c::Int, buf: ffi::c::Ptr[ffi::c::Void] read noescape, nbyte: ffi::c::ULong) -> ffi::c::Long
+
+# ssize_t read(int fd, void *buf, size_t nbyte)
+extern c fn c_read named "read"(fd: ffi::c::Int, buf: ffi::c::Ptr[ffi::c::Void] write noescape, nbyte: ffi::c::ULong) -> ffi::c::Long
+
+# int open(const char *path, int oflag, ...)
+extern c fn c_open named "open"(path: ffi::c::Ptr[ffi::c::Char] read noescape, oflag: ffi::c::Int, variadic) -> ffi::c::Int
+
+# int close(int fd)
+extern c fn c_close named "close"(fd: ffi::c::Int) -> ffi::c::Int
+
+# The int errno is: what __error() points to.
+layout ErrnoCell:
+    size 4
+    align 4
+    field value: ffi::c::Int at 0
+
+# <fcntl.h>'s open flags on macOS.
+o_rdonly = 0
+o_wronly = 1
+o_rdwr = 2
+o_creat = 512
+o_trunc = 1024
+o_excl = 2048
+o_cloexec = 16777216
+
+# The access bits of open(2)'s flags (O_ACCMODE's values).
+type AccessBits = Int in 0..2
+
+# How a descriptor open(2) makes may be used: O_RDONLY, O_WRONLY or O_RDWR.
+enum Access:
+    ReadOnly,
+    WriteOnly,
+    ReadWrite,
+
+# What one write(2) did: COUNT bytes written (>= 0; fewer than asked is a
+# short write, not an error), or COUNT -1 when it failed, ERRNO the errno it
+# left. ERRNO is 0 exactly when COUNT >= 0.
+struct WriteResult:
+    count: int
+    errno: int
+
+# What one read(2) did: COUNT bytes read (> 0), 0 at end of file, or -1 when
+# it failed (ERRNO the errno it left; 0 otherwise), and DATA, the buffer as C
+# left it: its first COUNT bytes read, the rest as they were.
+struct ReadResult:
+    count: int
+    errno: int
+    data: abi::bytes::MutableBytes
+
+# What one open(2) did: the new descriptor (>= 0), or -1 when it failed,
+# ERRNO the errno it left (0 otherwise).
+struct OpenResult:
+    fd: ffi::c::Int
+    errno: int
+
+# What one close(2) did: 0, or -1 when it failed, ERRNO the errno it left
+# (0 otherwise).
+struct CloseResult:
+    status: int
+    errno: int
+
+# The calling thread's errno, as it is now: the int *__error() points to.
+# Meaningful only right after a C call that reported a failure.
+fn errno() -> int:
+    location = c_errno_location()
+    cell = binary::native::view(ErrnoCell, location):
+        on NativeViewNull:
+            # __error() never returns null: no thread is without errno.
+            return 0
+    cell.value
+
+# write(2): DATA's bytes to descriptor FD, by one libSystem call.
+fn write(fd: ffi::c::Int, data: abi::bytes::Bytes) -> WriteResult:
+    n = fd.c_write(data, abi::bytes::length(data).value)
+    if n < 0:
+        failure = errno()
+        return WriteResult {count: n, errno: failure}
+    WriteResult {count: n, errno: 0}
+
+# read(2) from descriptor FD into a logical copy of DATA, by one libSystem
+# call: DATA itself never changes (MUTABLE-BYTES.md); the bytes read are in
+# the result's `data`, which keeps DATA's length. Take the bytes read with
+# abi::bytes::freeze_prefix(result.data, abi::usize(result.count)).
+fn read(fd: ffi::c::Int, data: abi::bytes::MutableBytes) -> ReadResult:
+    r = fd.c_read(data, abi::bytes::mutable_length(data).value)
+    if r.result < 0:
+        failure = errno()
+        return ReadResult {count: r.result, errno: failure, data: r.buf}
+    ReadResult {count: r.result, errno: 0, data: r.buf}
+
+# The byte that terminates a C string.
+fn terminator() -> byte::Byte:
+    0
+
+# PATH as the C string open(2) reads: its UTF-8 bytes and a terminating NUL
+# (PATH holds no U+0000, so the NUL is the only one and ends it).
+fn c_string(path: darwin::path::DarwinPath) -> abi::bytes::Bytes:
+    abi::bytes::from_list(str::encode_utf8(path).append(terminator()))
+
+# The O_RDONLY / O_WRONLY / O_RDWR bits of ACCESS.
+fn access_flags(access: Access) -> AccessBits:
+    if access == Access::ReadOnly:
+        return o_rdonly
+    if access == Access::WriteOnly:
+        return o_wronly
+    o_rdwr
+
+# One open(2) with OFLAG and no creation mode, read as an OpenResult.
+fn open_with(path: darwin::path::DarwinPath, oflag: ffi::c::Int) -> OpenResult:
+    fd = c_open(c_string(path), oflag)
+    if fd < 0:
+        failure = errno()
+        return OpenResult {fd: fd, errno: failure}
+    OpenResult {fd: fd, errno: 0}
+
+# One open(2) with OFLAG and the creation mode MODE, its variadic argument.
+fn open_mode(path: darwin::path::DarwinPath, oflag: ffi::c::Int, mode: ffi::c::UShort) -> OpenResult:
+    fd = c_open(c_string(path), oflag, mode)
+    if fd < 0:
+        failure = errno()
+        return OpenResult {fd: fd, errno: failure}
+    OpenResult {fd: fd, errno: 0}
+
+# open(2) of the existing file PATH for ACCESS: no O_CREAT, so no mode.
+fn open(path: darwin::path::DarwinPath, access: Access) -> OpenResult:
+    path.open_with(access_flags(access) + o_cloexec)
+
+# open(2) of PATH for ACCESS, creating it with permissions MODE (before the
+# process's umask) when it does not exist and truncating it when it does.
+fn create(path: darwin::path::DarwinPath, access: Access, mode: ffi::c::UShort) -> OpenResult:
+    path.open_mode(access_flags(access) + o_creat + o_trunc + o_cloexec, mode)
+
+# open(2) of PATH for ACCESS, creating it with permissions MODE; it fails
+# with EEXIST when PATH exists (O_EXCL).
+fn create_new(path: darwin::path::DarwinPath, access: Access, mode: ffi::c::UShort) -> OpenResult:
+    path.open_mode(access_flags(access) + o_creat + o_excl + o_cloexec, mode)
+
+# close(2) of descriptor FD.
+fn close(fd: ffi::c::Int) -> CloseResult:
+    status = c_close(fd)
+    if status < 0:
+        failure = errno()
+        return CloseResult {status: status, errno: failure}
+    CloseResult {status: status, errno: 0}

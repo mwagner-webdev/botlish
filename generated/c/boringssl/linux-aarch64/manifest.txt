@@ -134,7 +134,7 @@ file boringssl/cms.bot 65 15277d28
 file boringssl/conf.bot 79 5071c239
 file boringssl/crypto.bot 148 1e1121b5
 file boringssl/ctrdrbg.bot 67 d561d729
-file boringssl/ctypes.bot 803 76ccbc58
+file boringssl/ctypes.bot 803 6917f417
 file boringssl/curve25519.bot 120 cc705775
 file boringssl/des.bot 109 407a2371
 file boringssl/dh.bot 234 ef596fdf
@@ -154,7 +154,7 @@ file boringssl/hmac.bot 102 51b6c838
 file boringssl/hpke.bot 368 88e276e9
 file boringssl/hrss.bot 52 9f702ea6
 file boringssl/kdf.bot 45 c05c73e1
-file boringssl/layouts.bot 1000 eec78958
+file boringssl/layouts.bot 1011 bcef47d9
 file boringssl/md4.bot 42 a29c225f
 file boringssl/md5.bot 42 f1ec2b80
 file boringssl/mem.bot 202 13d976f2
@@ -167,7 +167,7 @@ file boringssl/pkcs7.bot 143 328f1338
 file boringssl/pkcs8.bot 166 b3f24869
 file boringssl/pool.bot 80 f15e1351
 file boringssl/posix_time.bot 26 39b19c80
-file boringssl/rand.bot 88 91092875
+file boringssl/rand.bot 95 a4ff0851
 file boringssl/rc4.bot 26 382ce556
 file boringssl/ripemd.bot 43 679adda5
 file boringssl/rsa.bot 615 b5130c9c
@@ -197,10 +197,10 @@ file boringssl/x509.bot 4004 93f9a416
 file boringssl/x509v3.bot 25 d6c6e883
 file boringssl/x509v3_errors.bot 70 2bf66f03
 file boringssl/xwing.bot 59 d07bcbdf
-file layouts-check.c 865 d111504f
-file layouts.tsv 656 c6b3775a
-file report.tsv 11390 d6b06f2f
-file report.txt 170 ec070564
+file layouts-check.c 878 120b7fb9
+file layouts.tsv 656 e28d6181
+file report.tsv 11390 555fa2ac
+file report.txt 162 08a91fd8
 file shim.c 3374 752c8e63
 libraries boringssl/aead.bot {crypto stdc++}
 libraries boringssl/aes.bot {crypto stdc++}
@@ -284,7 +284,7 @@ count complete 95
 count constants 3117
 count constantsSeen 4429
 count declared 3109
-count direct 3103
+count direct 3104
 count enumerators 95
 count excluded 0
 count fnmacros 185
@@ -293,30 +293,29 @@ count inline 817
 count manual 2
 count opaque 102
 count proven 123
-count ptrParams 6808
+count ptrParams 6809
 count ptrResults 1288
 count resultAlias 1
 count resultIndependent 0
 count resultUnknown 1287
 count tablestubs 0
 count thunk 817
-count unknownParams 6683
-count unknownRetention 3546
-count unsupported 136
+count unknownParams 6684
+count unknownRetention 3547
+count unsupported 135
 count views 1317
-blocked double 1
 blocked macro-needs-signature 66
 blocked unsupported-macro 64
 blocked unsupported-type 3
 blocked va-list 2
 layout_abi linux-aarch64 clang aarch64-linux-gnu {Ubuntu clang version 18.1.3 (1ubuntu1)}
 layout_count anonymous 28
-layout_count blocked 5
-layout_count blockedDirect 3
-layout_count blockedStructs 4
+layout_count blocked 4
+layout_count blockedDirect 2
+layout_count blockedStructs 3
 layout_count blockedTransitive 2
 layout_count blockedUnions 1
-layout_count emitted 118
+layout_count emitted 119
 layout_count emittedSynthetic 3
 layout_count emittedUnions 22
 layout_count incomplete 102
@@ -329,7 +328,6 @@ layout_count unheld 0
 layout_count unions 23
 layout_blocked bitfield 2
 layout_blocked nested-layout-blocked 2
-layout_blocked unsupported-pointer 1
 contract sk_void_call_free_func free_func {escape proven-noescape access read} compiler {nocapture readonly}
 contract sk_void_call_copy_func copy_func {escape proven-noescape access read} compiler {nocapture readonly}
 contract sk_void_call_cmp_func cmp_func {escape proven-noescape access read} compiler {nocapture readonly}

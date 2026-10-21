@@ -419,9 +419,12 @@ with the declared error NonFiniteFloat. There is no negative zero either:
   * 1.0 == 1 is false: values of different kinds are never equal.
   * A Float64 prints as the shortest decimal that reads back to the same
     number, always with a point (3.0, 0.1, 1.0e100).
-  * extern c fn declarations pass Float64 as C `double`
-    (ffi::c::Double); a NaN or an infinity coming back from C fails with
-    NonFiniteFloat.
+  * C's float and double are C representations of Float64 values,
+    ffi::c::Float (binary32) and ffi::c::Double (binary64): a Float64 a C
+    float receives is rounded to nearest, ties to even, and one too large
+    for it fails with NonFiniteFloat before C runs; a NaN or an infinity
+    coming back from C, or read from a layout's bytes, fails with
+    NonFiniteFloat (concept.c-floats).
 
 == WHY
 Finite values keep == an equivalence (no NaN that differs from itself)
@@ -3581,8 +3584,8 @@ summary: `extern c fn` declares a C function by its ABI signature and pointer co
 index: concepts
 alias: C FFI; extern c; foreign function interface; call C function
 keywords: extern, c, ffi, foreign, library, link, ffi::c, Ptr, Int, noescape, borrow, NATIVE-ONLY, bindgen
-related: concept.direct-modules concept.binary-layouts concept.c-bindgen-layouts backend.native-only backend.native-executable error.native-only
-docs: C-FFI.md C-ABI-TYPES.md C-POINTER-BORROWING.md C-BINDGEN.md
+related: concept.direct-modules concept.binary-layouts concept.c-bindgen-layouts concept.c-floats backend.native-only backend.native-executable error.native-only
+docs: C-FFI.md C-ABI-TYPES.md C-POINTER-BORROWING.md C-BINDGEN.md C-FLOAT-FFI-MILESTONE-1.md
 
 == WHAT IT IS
     import ffi::c
@@ -3591,10 +3594,11 @@ docs: C-FFI.md C-ABI-TYPES.md C-POINTER-BORROWING.md C-BINDGEN.md
 
 A truthful C declaration with no body. Types come from `ffi::c`: the C
 integer scalars (`ffi::c::Int`, `ffi::c::ULong`, ... -- integer domains
-whose ranges are the compilation target's), `ffi::c::Void`, pointers
-`ffi::c::Ptr[T]` and `ffi::c::FnPtr[...]`. A pointer parameter may borrow
-existing Bytes or MutableBytes storage for the one call when its contract
-says `read noescape` or `write noescape`.
+whose ranges are the compilation target's), C's float and double
+(`ffi::c::Float`, `ffi::c::Double`: Float64 values, concept.c-floats),
+`ffi::c::Void`, pointers `ffi::c::Ptr[T]` and `ffi::c::FnPtr[...]`. A
+pointer parameter may borrow existing Bytes or MutableBytes storage for
+the one call when its contract says `read noescape` or `write noescape`.
 
 == RULES
   * The Tcl backends refuse a C call at run time (NATIVE-ONLY): run with
@@ -3637,6 +3641,124 @@ abs(-5)
 
 == MORE
 C-FFI.md; C-ABI-TYPES.md; C-POINTER-BORROWING.md; C-BINDGEN.md.
+
+@topic concept.c-floats
+title: C float and C double: ffi::c::Float and ffi::c::Double
+summary: C's float (binary32) and double (binary64) are C representations of Float64 values, rounded to a float on the way out and never NaN or an infinity on the way in.
+index: concepts
+alias: C float; C double; ffi::c::Float; ffi::c::Double; float32; binary32; single precision
+keywords: float, double, ffi::c::Float, ffi::c::Double, binary32, binary64, NonFiniteFloat, round to nearest, ties to even, subnormal, negative zero, long double, layout, extern
+related: concept.floats concept.c-ffi concept.binary-layouts concept.c-bindgen-layouts error.known-error
+docs: C-FLOAT-FFI-MILESTONE-1.md C-FFI.md C-ABI-TYPES.md FLOAT64-MILESTONE-1.md
+
+== WHAT IT IS
+    import ffi::c
+    extern c fn scale(x: ffi::c::Float, k: ffi::c::Double) -> ffi::c::Float
+
+    layout Sample:
+        size 16
+        align 8
+        field f: ffi::c::Float at 0
+        field d: ffi::c::Double at 8
+
+ffi::c::Float is C's float and ffi::c::Double C's double, the IEEE 754
+binary32 and binary64 on every target. They are written only where a C
+type is: an extern c fn's parameters and result, a function pointer's
+signature, a pointee (ffi::c::Ptr[ffi::c::Float]) and a layout field or
+array element. Their values are Float64s: a float crosses as a Float64,
+and Botlish has no binary32 number of its own.
+
+== RULES
+  * Leaving Botlish for a float, a Float64 is rounded to nearest, ties to
+    even (a subnormal float stays one; a negative number too small for a
+    float is +0). One whose rounding is an infinity -- from 2^128 - 2^103
+    up -- fails with NonFiniteFloat of its sign before C runs (or before a
+    byte is written), never clamped to the largest float. A double
+    receives the Float64 exactly.
+  * Entering Botlish, a float or a double that is NaN (any payload) or an
+    infinity fails with NonFiniteFloat {result: NotANumber,
+    PositiveInfinity or NegativeInfinity}; negative zero becomes 0.0; every
+    finite float widens exactly.
+  * A call declares NonFiniteFloat only where it can fail through one: an
+    extern with a float parameter or a floating result, a layout read of a
+    float or a double, a write or emit of a float (never of a double, and
+    never an operation of a layout without floats). When the compiler
+    knows a float argument exactly it applies the same rule while
+    compiling: an overflow is KNOWN-ERROR, one that fits needs no handler.
+  * A field read through a view (v.f) cannot carry its own handler: read
+    a float field in a function that declares NonFiniteFloat, or copy the
+    record with binary::load, a call a handler may follow.
+  * ffi::c::Float and ffi::c::Double are distinct types, never Float64:
+    Ptr[ffi::c::Float] is not Ptr[ffi::c::Double], an array of floats
+    strides 4 bytes, and a value type (a parameter of a Botlish function)
+    is written Float64 (ffi::c::Double means Float64 there; ffi::c::Float
+    is a TYPE error). Nothing converts implicitly, and a DecimalRounded
+    value is never a C float or double (decay it with
+    float64::from_decimal_rounded).
+  * C long double and the other floating types (_Float16, __float128) have
+    no FFI type: tools/c-bindgen.tcl reports them unsupported. Botlish has
+    no indirect call, so a C callback of a float signature is a function
+    pointer C calls, never Botlish.
+
+== WHY
+A binary32 is a representation, not a number Botlish computes with: the
+one Float64 type keeps arithmetic, equality and proofs as they are, and
+the rounding and the finiteness rules apply exactly where C's bits cross,
+the same at compile time and at run time on every backend.
+
+== EXAMPLES
+@example accept
+import abi
+import abi::bytes
+import binary
+import ffi::c
+
+layout Sample:
+    size 16
+    align 8
+    field f: ffi::c::Float at 0
+    field d: ffi::c::Double at 8
+
+fn round_trip(x: Float64) -> list errors LayoutLengthMismatch, NonFiniteFloat:
+    m = binary::write(binary::write(abi::bytes::zeroed(abi::usize(16)), Sample.f, x), Sample.d, x)
+    s = binary::parse(Sample, abi::bytes::freeze(m))
+    [s.f, s.d]
+
+r = round_trip(0.1):
+    on LayoutLengthMismatch:
+        []
+    on NonFiniteFloat:
+        []
+r
+@caption 0.1 rounded to the nearest float, and kept exactly by a double
+@value [0.10000000149011612, 0.1]
+@end
+
+@example reject
+import ffi::c
+
+fn half(x: ffi::c::Float) -> Float64:
+    x / 2.0
+
+half(1.0)
+@caption A Botlish parameter holds a Float64: no value is a binary32
+@error CORE SEMANTIC TYPE
+@at 3:8
+@end
+
+@example reject
+import ffi::c
+
+extern c fn takes(x: ffi::c::Float) -> ffi::c::Int
+
+takes(1.0e39)
+@caption A known Float64 too large for a float: the call can never complete
+@error CORE SEMANTIC KNOWN-ERROR
+@at 5:1
+@end
+
+== MORE
+C-FLOAT-FFI-MILESTONE-1.md; C-FFI.md; FLOAT64-MILESTONE-1.md.
 
 @topic concept.c-bindgen-layouts
 title: Generated C record layouts: a target's and a toolchain's facts
@@ -3707,7 +3829,8 @@ layout FILETIME:
     field dwHighDateTime: ffi::c::ULong at 4
 
 binary::layout_length(FILETIME)
-@caption Win32's FILETIME, generated for windows-x86_64-gnu, compiled for this host (a 64-bit unsigned long)
+@caption Win32's FILETIME, generated for windows-x86_64-gnu, compiled for linux-x86_64 (a 64-bit unsigned long)
+@target linux-x86_64
 @error CORE SEMANTIC LAYOUT-FIELD-BOUNDS
 @at 8:44
 @end
@@ -3747,7 +3870,11 @@ be built directly: `LayoutStruct[Header] {magic: 7, count: -2}`.
     `Int in 0..65535`); nested layouts are allowed by value. Byte order is
     the target's (little-endian).
   * binary::parse fails with LayoutLengthMismatch unless the input has
-    exactly the layout's size; emit cannot fail.
+    exactly the layout's size. A field may be a C float or double
+    (ffi::c::Float, 4 bytes; ffi::c::Double, 8): its bytes holding a NaN
+    or an infinity fail a read with NonFiniteFloat, and a Float64 too
+    large for a float fails a write or an emit (concept.c-floats);
+    nothing else makes emit fail.
   * A layout is not a value or a type: it is named only as the static
     operand of the binary operations, in LayoutStruct[L], NativeView[L]
     and NativeEdit[L], and as the root of a field designator (L.field).

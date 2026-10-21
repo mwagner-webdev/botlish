@@ -330,6 +330,11 @@ proc hir::imprint::BindingProblem {sig name type} {
         if {$type eq "void"} {
             return "$name is imprinted as $shown, but values of $name exist here: [hir::cabi::VoidMessage]"
         }
+        if {[hir::cabi::IsFloating $type]} {
+            # (A C floating type is a representation: its values are its
+            # carrier's, C-FLOAT-FFI-MILESTONE-1.md.)
+            return "$name is imprinted as $shown, a C representation, but values of $name exist here: the values of $shown are [hir::types::show [hir::cabi::Carrier $type]]s (imprint [hir::types::show [hir::cabi::Carrier $type]])"
+        }
         if {[hir::types::IsAffine $type]} {
             return "$name is imprinted as $shown, an affine type, where values of $name exist: an imprinted function's body is checked for every $name and may copy its values, so $name is never an affine type there"
         }

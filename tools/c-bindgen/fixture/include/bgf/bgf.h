@@ -45,7 +45,7 @@ enum {
  * outside the C ABI universe. */
 typedef int (*bgf_visit)(void *userdata, bgf_handle *handle, int depth);
 typedef void (bgf_free_fn)(void *pointer);
-typedef double (*bgf_measure)(double x);
+typedef long double (*bgf_measure)(long double x);
 
 /* A complete struct, only ever behind a pointer, and one passed by value. */
 typedef struct bgf_point {
@@ -109,9 +109,9 @@ extern BGF_EXPORT int bgf_vshadow(int n, ...);
 extern BGF_EXPORT int bgf_vother(int n, ...);
 #define bgf_vshadow(n, ...) bgf_vother((n) + 1, __VA_ARGS__)
 
-/* Unsupported shapes: floating point, an aggregate by value, a callback
- * outside the ABI universe, an explicit calling convention, a 128-bit
- * typedef. */
+/* Shapes: C float and double (bound: C-FLOAT-FFI-MILESTONE-1.md); then
+ * unsupported: an aggregate by value, a callback outside the ABI universe,
+ * an explicit calling convention, a 128-bit typedef. */
 extern BGF_EXPORT double bgf_scale(double x, float y);
 extern BGF_EXPORT bgf_pair bgf_swap(bgf_pair p);
 extern BGF_EXPORT void bgf_set_measure(bgf_measure measure);
@@ -154,5 +154,19 @@ extern BGF_EXPORT int bgf_arm_only(void);
 /* The records (C-BINDGEN-LAYOUTS.md), in a header of their own: they use
  * the types above. */
 #include "bgf/bgf_records.h"
+
+/* C float and double (C-FLOAT-FFI-MILESTONE-1.md): their typedef chains
+ * (bgf_types.h), pointers, a callback of float signature and functions
+ * taking and returning one, the brief's dot product over two arrays; and C
+ * long double, which no FFI type represents (unsupported, its own
+ * blocker). */
+typedef float (*bgf_float_fn)(float x);
+extern BGF_EXPORT bgf_real32 bgf_scale32(bgf_scalar32 x, bgf_scalar64 k);
+extern BGF_EXPORT double bgf_dot(const float *xs, const double *ys, size_t n);
+extern BGF_EXPORT float bgf_apply_float(bgf_float_fn f, float x);
+extern BGF_EXPORT bgf_float_fn bgf_halver(void);
+extern BGF_EXPORT double bgf_sum_mixed(const bgf_mixed_floats *m);
+extern BGF_EXPORT long double bgf_long_scale(long double x);
+extern BGF_EXPORT double bgf_long_ptr(long double *x);
 
 #endif

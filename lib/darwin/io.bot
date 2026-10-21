@@ -1,0 +1,135 @@
+# io.bot -- the "darwin::io" namespace: the process's standard I/O on macOS
+# as one execution-environment context (CONTEXTS.md;
+# MACOS-AARCH64-MILESTONE-8.md).
+#
+#   with context darwin::io::create()       install it (entry program)
+#   darwin::io::write(data)                 write(2) to the context's stdout
+#   darwin::io::write_error(data)           write(2) to the context's stderr
+#   darwin::io::read(buffer)                read(2) from the context's stdin
+#
+# DarwinIO is linux::io::LinuxIO's macOS sibling: ONE context, the process I/O
+# environment, holding the three standard descriptors. A function that uses
+# it says so once (`context io: DarwinIO`) and is called with its ordinary
+# arguments; code between the entry program and it declares nothing (the
+# compiler derives the requirement), and a call before `with context
+# darwin::io::create()` is MISSING-CONTEXT at compile time.
+#
+# Capability boundary (DIRECT-MODULES.md). `darwin` is a direct module: its
+# write and read take any descriptor. This module is not: every function here
+# that calls into `darwin` requires DarwinIO, the context it defines itself,
+# so the raw authority reaches its callers only as that capability -- and
+# nothing above darwin::io is direct for using it. Every external effect
+# flows
+#
+#   darwin::io::write --> darwin::write --> libSystem's write(3)
+#
+# through ordinary C calls (C-FFI.md): no syscall, no compiler knowledge of
+# I/O. The low-level layer stays as it is: code that wants an explicit
+# descriptor calls darwin::write(fd, data) / darwin::read(fd, buffer).
+#
+# Representation authority. FileDescriptor and DarwinIO are opaque
+# (OPAQUE-STRUCTS.md): only this module may construct them or look inside;
+# a DarwinIO a function receives as its context can be held and passed but
+# not taken apart. The descriptor token is an ffi::c::Int, the C int every
+# libSystem descriptor is; create() mints the three standard ones, 0, 1 and
+# 2. The token does not claim the descriptor is open or stays open.
+#
+# DarwinIO implements the portable io::IO context trait (CONTEXT-TRAITS.md)
+# with write_text and write_error_text below: ordinary functions of this
+# module whose one context parameter is a DarwinIO and whose signatures match
+# io::IO's requirements. Nothing registers them: where a call needs io::IO
+# and DarwinIO is the one installed context that implements it, the compiler
+# binds `io.write_text(...)` to a direct call of darwin::io::write_text --
+# no dispatch, no hidden argument, no provider table at run time.
+#
+# The completion policy is LinuxIO's, so io::IO means the same on both
+# platforms: all of the text, or io::WriteFailed. A short positive write is
+# completed by writing the rest; a failed write (-1, whatever the errno --
+# EINTR and EAGAIN included: no retry) and a write that makes no progress are
+# io::WriteFailed; no count, descriptor or errno escapes.
+#
+# Not here (deliberately): errno mapping beyond io::WriteFailed (the raw
+# darwin::write/read keep it), buffering, text input, close/ownership (the
+# standard descriptors need no application cleanup), other descriptors.
+import abi
+import abi::bytes
+import darwin
+import ffi::c
+import io
+import list
+import str
+import type byte::Byte
+
+# A Darwin file-descriptor token minted by this module.
+opaque struct FileDescriptor:
+    raw: ffi::c::Int
+
+# The process I/O environment: the standard input, output and error
+# descriptors of the process. One context.
+opaque context struct DarwinIO:
+    stdin: FileDescriptor
+    stdout: FileDescriptor
+    stderr: FileDescriptor
+
+# The standard process I/O environment: descriptors 0, 1 and 2. An ordinary
+# constructor; `with context darwin::io::create()` installs its value.
+fn create() -> DarwinIO:
+    DarwinIO {
+        stdin: FileDescriptor {raw: 0},
+        stdout: FileDescriptor {raw: 1},
+        stderr: FileDescriptor {raw: 2},
+    }
+
+# write(2) of DATA to the context's standard output: ONE libSystem call,
+# darwin::write's result unchanged (lib/darwin.bot).
+fn write(data: abi::bytes::Bytes, context io: DarwinIO) -> darwin::WriteResult:
+    io.stdout.raw.write(data)
+
+# write(2) of DATA to the context's standard error.
+fn write_error(data: abi::bytes::Bytes, context io: DarwinIO) -> darwin::WriteResult:
+    io.stderr.raw.write(data)
+
+# read(2) from the context's standard input into a logical copy of DATA:
+# darwin::read's semantics exactly (one call; the caller's buffer is
+# unchanged; the count -- 0 at end of file, -1 on failure with its errno --
+# and the buffer as C left it come back in a darwin::ReadResult).
+fn read(data: abi::bytes::MutableBytes, context io: DarwinIO) -> darwin::ReadResult:
+    io.stdin.raw.read(data)
+
+# ---------------------------------------------------------------------------
+# io::IO (CONTEXT-TRAITS.md)
+
+# Writes every byte of BYTES to FD. One write(2) of the whole text in the
+# common case; a short write (fewer bytes than asked, but some) is completed
+# by writing the rest, again and again, so the caller only ever sees all or
+# io::WriteFailed. A failed write and one that makes no progress are
+# io::WriteFailed; no count or errno escapes.
+#
+# It requires DarwinIO although it reads only FD: it makes the direct call
+# (darwin::write, a callable of the direct module darwin), and a direct call
+# is mediated by a context of this module in the function that makes it
+# (DIRECT-MODULES.md), never by its callers' contexts. Its callers have it.
+fn write_all(fd: FileDescriptor, bytes: List[Byte], context io: DarwinIO) -> unit errors io::WriteFailed:
+    n = list::length(bytes)
+    if n == 0:
+        return unit
+    written = fd.raw.write(abi::bytes::from_list(bytes)).count
+    if written <= 0:
+        fail io::WriteFailed
+    if written < n:
+        # The unwritten suffix: indices WRITTEN..n-1, which the checks above
+        # prove are inside BYTES.
+        remaining = loop i from written to n:
+            bytes.at(i)
+        return fd.write_all(remaining)
+    unit
+
+# All of TEXT, UTF-8 encoded, on the context's standard output;
+# io::WriteFailed when libSystem reports an error or the write stops making
+# progress. Never a byte count.
+fn write_text(text: str, context io: DarwinIO) -> unit errors io::WriteFailed:
+    io.stdout.write_all(str::encode_utf8(text))
+
+# All of TEXT, UTF-8 encoded, on the context's standard error.
+fn write_error_text(text: str, context io: DarwinIO) -> unit errors io::WriteFailed:
+    io.stderr.write_all(str::encode_utf8(text))

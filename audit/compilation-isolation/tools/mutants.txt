@@ -91,10 +91,10 @@ proc hir::aot::analyze {hir} {
 @@ read-unstamped a HIR read back from text records no declarations: it cannot be activated after another compilation
 ## hir/read.tcl
 <<<<
-    Finish hir
+    hir::coroutines::analyze hir
     hir::declarations::stamp hir
 ====
-    Finish hir
+    hir::coroutines::analyze hir
 >>>>
 
 @@ build-not-invalidated a build does not forget the active state before rewriting the registries: after a compilation that fails half way, the earlier HIR's activation is a no-op over registries that compilation rewrote

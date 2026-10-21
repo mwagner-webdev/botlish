@@ -126,6 +126,10 @@ Tcl_Obj *botlish_tclstubs_Tcl_DbNewByteArrayObj(const unsigned char *botlish_byt
     return Tcl_DbNewByteArrayObj(botlish_bytes, botlish_numBytes, botlish_file, botlish_line);
 }
 
+Tcl_Obj *botlish_tclstubs_Tcl_DbNewDoubleObj(double botlish_doubleValue, const char *botlish_file, int botlish_line) {
+    return Tcl_DbNewDoubleObj(botlish_doubleValue, botlish_file, botlish_line);
+}
+
 Tcl_Obj *botlish_tclstubs_Tcl_DbNewListObj(Tcl_Size botlish_objc, Tcl_Obj *const *botlish_objv, const char *botlish_file, int botlish_line) {
     return Tcl_DbNewListObj(botlish_objc, botlish_objv, botlish_file, botlish_line);
 }
@@ -156,6 +160,14 @@ int botlish_tclstubs_Tcl_GetBooleanFromObj(Tcl_Interp *botlish_interp, Tcl_Obj *
 
 unsigned char *botlish_tclstubs_Tcl_GetByteArrayFromObj(Tcl_Obj *botlish_objPtr, Tcl_Size *botlish_numBytesPtr) {
     return Tcl_GetByteArrayFromObj(botlish_objPtr, botlish_numBytesPtr);
+}
+
+int botlish_tclstubs_Tcl_GetDouble(Tcl_Interp *botlish_interp, const char *botlish_src, double *botlish_doublePtr) {
+    return Tcl_GetDouble(botlish_interp, botlish_src, botlish_doublePtr);
+}
+
+int botlish_tclstubs_Tcl_GetDoubleFromObj(Tcl_Interp *botlish_interp, Tcl_Obj *botlish_objPtr, double *botlish_doublePtr) {
+    return Tcl_GetDoubleFromObj(botlish_interp, botlish_objPtr, botlish_doublePtr);
 }
 
 int botlish_tclstubs_Tcl_GetInt(Tcl_Interp *botlish_interp, const char *botlish_src, int *botlish_intPtr) {
@@ -198,6 +210,10 @@ Tcl_Obj *botlish_tclstubs_Tcl_NewByteArrayObj(const unsigned char *botlish_bytes
     return Tcl_NewByteArrayObj(botlish_bytes, botlish_numBytes);
 }
 
+Tcl_Obj *botlish_tclstubs_Tcl_NewDoubleObj(double botlish_doubleValue) {
+    return Tcl_NewDoubleObj(botlish_doubleValue);
+}
+
 Tcl_Obj *botlish_tclstubs_Tcl_NewListObj(Tcl_Size botlish_objc, Tcl_Obj *const botlish_objv[]) {
     return Tcl_NewListObj(botlish_objc, botlish_objv);
 }
@@ -216,6 +232,10 @@ unsigned char *botlish_tclstubs_Tcl_SetByteArrayLength(Tcl_Obj *botlish_objPtr, 
 
 void botlish_tclstubs_Tcl_SetByteArrayObj(Tcl_Obj *botlish_objPtr, const unsigned char *botlish_bytes, Tcl_Size botlish_numBytes) {
     Tcl_SetByteArrayObj(botlish_objPtr, botlish_bytes, botlish_numBytes);
+}
+
+void botlish_tclstubs_Tcl_SetDoubleObj(Tcl_Obj *botlish_objPtr, double botlish_doubleValue) {
+    Tcl_SetDoubleObj(botlish_objPtr, botlish_doubleValue);
 }
 
 void botlish_tclstubs_Tcl_SetListObj(Tcl_Obj *botlish_objPtr, Tcl_Size botlish_objc, Tcl_Obj *const botlish_objv[]) {
@@ -482,6 +502,14 @@ int botlish_tclstubs_Tcl_ExprBooleanObj(Tcl_Interp *botlish_interp, Tcl_Obj *bot
     return Tcl_ExprBooleanObj(botlish_interp, botlish_objPtr, botlish_ptr);
 }
 
+int botlish_tclstubs_Tcl_ExprDouble(Tcl_Interp *botlish_interp, const char *botlish_expr, double *botlish_ptr) {
+    return Tcl_ExprDouble(botlish_interp, botlish_expr, botlish_ptr);
+}
+
+int botlish_tclstubs_Tcl_ExprDoubleObj(Tcl_Interp *botlish_interp, Tcl_Obj *botlish_objPtr, double *botlish_ptr) {
+    return Tcl_ExprDoubleObj(botlish_interp, botlish_objPtr, botlish_ptr);
+}
+
 int botlish_tclstubs_Tcl_ExprLong(Tcl_Interp *botlish_interp, const char *botlish_expr, long *botlish_ptr) {
     return Tcl_ExprLong(botlish_interp, botlish_expr, botlish_ptr);
 }
@@ -692,6 +720,10 @@ Tcl_Channel botlish_tclstubs_Tcl_OpenTcpServer(Tcl_Interp *botlish_interp, int b
 
 void botlish_tclstubs_Tcl_Preserve(void *botlish_data) {
     Tcl_Preserve(botlish_data);
+}
+
+void botlish_tclstubs_Tcl_PrintDouble(Tcl_Interp *botlish_interp, double botlish_value, char *botlish_dst) {
+    Tcl_PrintDouble(botlish_interp, botlish_value, botlish_dst);
 }
 
 int botlish_tclstubs_Tcl_PutEnv(const char *botlish_assignment) {
@@ -1952,6 +1984,10 @@ void botlish_tclstubs_Tcl_SetChannelError(Tcl_Channel botlish_chan, Tcl_Obj *bot
 
 void botlish_tclstubs_Tcl_GetChannelError(Tcl_Channel botlish_chan, Tcl_Obj **botlish_msg) {
     Tcl_GetChannelError(botlish_chan, botlish_msg);
+}
+
+int botlish_tclstubs_Tcl_InitBignumFromDouble(Tcl_Interp *botlish_interp, double botlish_initval, void *botlish_toInit) {
+    return Tcl_InitBignumFromDouble(botlish_interp, botlish_initval, botlish_toInit);
 }
 
 Tcl_Obj *botlish_tclstubs_Tcl_GetNamespaceUnknownHandler(Tcl_Interp *botlish_interp, Tcl_Namespace *botlish_nsPtr) {

@@ -28,11 +28,9 @@ core::cabi::installTestFixture
 
 # Live arrays need only the native backend (the JIT): those tests run on
 # every host it is built for. Allocation counts and GC stress need the native
-# runtime on Linux (as in native-view.test), and a standalone executable a
-# host that links them (tests/helpers.tcl).
+# backend's whole runtime (nativeCoroutines, as in native-view.test), and a
+# standalone executable a host that links them (tests/helpers.tcl).
 testConstraint nativeBuilt [expr {![catch {native::binary}]}]
-testConstraint nativeLinux [expr {$::tcl_platform(os) eq "Linux" &&
-    $::tcl_platform(machine) in {x86_64 amd64 aarch64} && [testConstraint nativeBuilt]}]
 testConstraint executableAot [expr {[testConstraint executableAot] && [testConstraint nativeBuilt]}]
 testConstraint cCompiler [expr {[auto_execok cc] ne ""}]
 
@@ -899,7 +897,7 @@ test la-native-nir {native code of live arrays: an element read at a dynamic ind
         [laOpNames [laNir $program ld]] [laOpNames $bw] [regexp -all faildeclared $bw]
 } -cleanup {unset -nocomplain program whole checked bw} -result {{ige ilt nativeload risub runbox} {{%8 = op nativeload %0 %1 %7}} {imul iadd nativeload runbox} {imul iadd iadd nativeload runbox} {iadd nativestore} {iadd ilt imul listgetproven listnew nativestorearray} 0 1 2 1 nativeloadarray {mbyteslen ieq listlen ieq mbytesclone binstorearray} 2}
 
-test la-native-allocations {natively, element reads and stores allocate nothing (a row's element, a record element's field, a u32 store above i32 -- 1000 of each, the same as a loop doing nothing), a whole load allocates exactly the List it returns (one per row, one Struct per record: unrolled, no accumulator), and a whole store allocates nothing beyond its List operand} -constraints nativeLinux -body {
+test la-native-allocations {natively, element reads and stores allocate nothing (a row's element, a record element's field, a u32 store above i32 -- 1000 of each, the same as a loop doing nothing), a whole load allocates exactly the List it returns (one per row, one Struct per record: unrolled, no accumulator), and a whole store allocates nothing beyond its List operand} -constraints {nativeBuilt nativeCoroutines} -body {
     set loop "fn run(n: int) -> int errors NativeViewNull, NativeEditNull:\n    p = memory(ramp(48))\n    v = binary::native::view(SHAPES, p)\n    e = binary::native::edit(SHAPES, p)\n    k = loop i from 0 to n:\n        f(v, e)\n    0\nr = run(1000):\n    on NativeViewNull:\n        0\n    on NativeEditNull:\n        0\nr\n"
     set head "fn f(v: NativeView\[SHAPES\], e: NativeEdit\[SHAPES\]) -> int:\n"
     lmap body [list \
@@ -940,7 +938,7 @@ test la-unchecked-replay {a program compiled unchecked (-strict 0) whose array o
 # ---------------------------------------------------------------------------
 # HIR, interchange, isolation, cache, specialization
 
-test la-hir-text-roundtrip {HIR text carries array fields (a layout line's `rows: array 2 of array 2 of U16 at 4`) and live array types (NativeView[array 2 of array 2 of U16]): formatting, reading back and formatting again gives the same text, and the read HIR runs to the same outcome (a program that imports binary does not round trip as HIR text in general: the operations' HIR is carried by interchange, la-interchange)} -constraints nativeBuilt -body {
+test la-hir-text-roundtrip {HIR text carries array fields (a layout line's `rows: array 2 of array 2 of U16 at 4`) and live array types (NativeView[array 2 of array 2 of U16]): formatting, reading back and formatting again gives the same text, and the read HIR runs to the same outcome (the operations' HIR is carried by interchange too: la-interchange)} -constraints nativeBuilt -body {
     set source "direct module\n\nimport binary::native\nimport ffi::c\n\ntype U8 = Int in 0..255\ntype U16 = Int in 0..65535\n\nopaque struct Node:\n    tag: unit\n\nlayout P:\n    size 4\n    align 2\n    field x: U16 at 0\n    field y: U16 at 2\n\nlayout R:\n    size 24\n    align 2\n    field bytes: array 4 of U8 at 0\n    field rows: array 2 of array 2 of U16 at 4\n    field ps: array 3 of P at 12\n\nfn rows_of(r: NativeView\[R\]) -> NativeView\[array 2 of array 2 of U16\]:\n    r.rows\n\nfn ps_of(r: NativeView\[R\]) -> NativeView\[array 3 of P\]:\n    r.ps\n\nfn run() -> int errors NativeViewNull:\n    p = ffi::c::null\[Node\]()\n    v = binary::native::view(R, p)\n    a = rows_of(v)\n    b = ps_of(v)\n    0\n\nr = run():\n    on NativeViewNull:\n        -1\nr\n"
     set hir [surface::compile $source arrays.bot -warnings off]
     set text [hir::format $hir]
@@ -1022,7 +1020,7 @@ test la-registrations {the array operations are root natives whose -layout roles
         set meta [core::native::metadata $name]
         list $name [dict get $meta layout] [dict get $meta contextFree] [dict get $meta ownership] [dict get $meta resultShape] [dict get $meta errors] [dict get $meta bounds] [dict get $meta resultLength]
     }
-} -cleanup {unset -nocomplain name meta} -result {{binary::element {arrayed {0 binary#element} index 1 op element} 0 {observe observe} {native-element 0} IndexNotFound {index narray 0 1} {}} {binary#element {array 2 index 1 op element} 0 {observe observe observe} {native-element 0} IndexNotFound {index narray 0 1} {}} {binary::store_element {arrayed {0 binary#store_element} index 1 value 2 op store_element} 0 {observe observe observe} {} IndexNotFound {index narray 0 1} {}} {binary#store_element {array 3 index 1 value 2 op store_element} 0 {observe observe observe observe} {} IndexNotFound {index narray 0 1} {}} {binary::load {viewed {0 binary#load} arrayed {0 binary#load_array}} 0 observe {view-struct 0} {} {} {extent 0}} {binary#load_array {array 1 op load_array} 0 {observe observe} {view-struct 0} {} {} {extent 0}} {binary::store {edited 0 path 1 value 2 op store} 0 {observe observe observe} {} LayoutExtentMismatch {extents 2} {}}}
+} -cleanup {unset -nocomplain name meta} -result {{binary::element {arrayed {0 binary#element} index 1 op element} 0 {observe observe} {native-element 0} {IndexNotFound NonFiniteFloat} {index narray 0 1} {}} {binary#element {array 2 index 1 op element} 0 {observe observe observe} {native-element 0} {IndexNotFound NonFiniteFloat} {index narray 0 1} {}} {binary::store_element {arrayed {0 binary#store_element} index 1 value 2 op store_element} 0 {observe observe observe} {} {IndexNotFound NonFiniteFloat} {index narray 0 1} {}} {binary#store_element {array 3 index 1 value 2 op store_element} 0 {observe observe observe observe} {} {IndexNotFound NonFiniteFloat} {index narray 0 1} {}} {binary::load {viewed {0 binary#load} arrayed {0 binary#load_array}} 0 observe {view-struct 0} NonFiniteFloat {} {extent 0}} {binary#load_array {array 1 op load_array} 0 {observe observe} {view-struct 0} NonFiniteFloat {} {extent 0}} {binary::store {edited 0 path 1 value 2 op store} 0 {observe observe observe} {} {LayoutExtentMismatch NonFiniteFloat} {extents 2} {}}}
 
 # ---------------------------------------------------------------------------
 # Executables and GC stress
@@ -1038,7 +1036,7 @@ test la-executable {a standalone executable (whichever linker BOTLISH_NATIVE_LIN
     list [expr {"value {[exec $path]}" eq $direct}] [lindex $direct 0]
 } -cleanup {unset -nocomplain source hir path direct} -result {1 value}
 
-test la-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every allocation site) live arrays stay exact: whole loads building Lists of Lists and of LayoutStructs, 64-bit elements that are BigInts stored and loaded, whole stores from Lists made in the same iteration, byte writes of arrays each allocating a fresh storage -- every operand stays rooted while the next allocation runs} -constraints nativeLinux -body {
+test la-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every allocation site) live arrays stay exact: whole loads building Lists of Lists and of LayoutStructs, 64-bit elements that are BigInts stored and loaded, whole stores from Lists made in the same iteration, byte writes of arrays each allocating a fresh storage -- every operand stays rooted while the next allocation runs} -constraints {nativeBuilt nativeCoroutines} -body {
     set source [laProgram "fn many(k: int) -> List\[any\] errors NativeEditNull, NativeViewNull, LayoutLengthMismatch:\n    p = memory(fill(64, 0))\n    e = binary::native::edit(SCALARS, p)\n    v = binary::native::view(SCALARS, p)\n    q = memory(ramp(48))\n    w = binary::native::view(SHAPES, q)\n    rs = loop i from 0 to k:\n        binary::store_element(e.u64, 0, 18446744073709551615)\n        binary::store(e, SCALARS.i64, \[i64(-9223372036854775808), i64(9223372036854775807)\])\n        a = binary::write(mutable(fill(48, 0)), SHAPES.m, binary::load(w.m))\n        b = binary::write(a, SHAPES.tails, binary::load(w.tails))\n        \[binary::load(v), binary::load(w), frozen(b) == bytes_of(fill(48, 0)), binary::element(v.i64, 1)\]\n    list::at(rs, k - 1):\n        on IndexNotFound:\n            \[\]\nr = many(40):\n    on NativeEditNull:\n        \[\]\n    on NativeViewNull:\n        \[\]\n    on LayoutLengthMismatch:\n        \[\]\nr\n"]
     set hir [surface::compile $source arrays.bot -warnings off]
     set plain [laOutcome cranelift $hir]

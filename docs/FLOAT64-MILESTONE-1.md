@@ -1,5 +1,11 @@
 # Float64, milestone 1: completion report
 
+> Partially superseded by C-FLOAT-FFI-MILESTONE-1.md: `ffi::c::Double` is a
+> C representation (`{cfloat Double}`) wherever a C type is written -- an
+> extern's parameters and result, a pointee (`Ptr[ffi::c::Double]`, section
+> 7's "not yet"), a function pointer's signature, a layout field -- and still
+> `Float64` where a value type is; C `float` is `ffi::c::Float` beside it.
+
 Botlish has a primitive floating-point type, `Float64`: the finite IEEE 754
 binary64 numbers. This report says what a program can now write, how each
 layer implements it, how finiteness is enforced, what was tested where, and

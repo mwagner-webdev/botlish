@@ -236,7 +236,7 @@ resolver reads.
 **`hir/refcheck.tcl`.** The invariant gains one exception: a reference from
 inside a member's body to a member of the same group. `hir::format` prints
 the group. `hir::read` support can follow HIR text's support for module
-sections, which it does not carry today.
+sections, which it carries now (HIR-INTERCHANGE.md).
 
 **`hir/types.tcl` / `hir/semantic.tcl`.** On reaching a group in the section
 walk, before walking any member body:

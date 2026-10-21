@@ -17,23 +17,30 @@
 #
 #   * every declaration it drew as representable is bound, under its own
 #     name and its C link symbol (a `named` symbol for an asm label), and
-#     every one it drew as unrepresentable (float, double, a struct by value,
+#     every one it drew as unrepresentable (long double, a struct by value,
 #     a va_list, a variadic function only a thunk could reach) is reported
 #     unsupported with the expected blocker;
 #   * every variadic prototype (`T f(FIXED..., ...)`, VARIADICS-VERTICAL-
 #     SLICE-1.md) is bound directly as a variadic extern, and called once
 #     with trailing arguments of drawn C types (every integer scalar, _Bool,
-#     a handle pointer) that its genuine stdarg body reads back with
-#     va_arg of the type C's default argument promotions give;
+#     a handle pointer, a double from a Float64) that its genuine stdarg
+#     body reads back with va_arg of the type C's default argument
+#     promotions give;
 #   * every bound function's ABI classes (the HIR foreign table: what the
 #     generator's declaration means to the C FFI) are the model's for its C
 #     signature: typedefs through the stdint/stddef names, enums by their
-#     enumerators' signs, _Bool, pointers to opaque structs and bytes;
+#     enumerators' signs, _Bool, C float and double (f32 and f64, also
+#     through typedef chains; C-FLOAT-FFI-MILESTONE-1.md), pointers to opaque
+#     structs and bytes;
 #   * every constant (integer macros with every suffix and casts to the
 #     typedefs, enumerators) has the model's C type and value;
 #   * every call's result, and what C saw of every argument, equal the
 #     model's -- including static inline functions through their thunks and
-#     macro aliases through their symbols.
+#     macro aliases through their symbols. A C float or double is compared
+#     by its bits (C stores what it received; a floating result reaches C
+#     again, as a double, to be read back as bits): a float argument is the
+#     model's own rounding of the Float64 (an integer-arithmetic oracle, to
+#     nearest, ties to even), a float result widened exactly.
 #
 # The last line is "programs N declarations D variadic V trailing T
 # disagreements X" (V variadic prototypes called with T trailing arguments
@@ -72,6 +79,69 @@ set stdints [dict create \
     int8_t {signed char} uint8_t {unsigned char} int16_t short uint16_t {unsigned short} \
     int32_t int uint32_t {unsigned int} int64_t long uint64_t {unsigned long} \
     size_t {unsigned long} ptrdiff_t long intptr_t long uintptr_t {unsigned long}]
+
+# The C floating types: spelling -> {ABI class, bytes}.
+set floatings [dict create float {f32 4} double {f64 8}]
+
+# The bits of the binary32 nearest the finite double X, rounded to nearest,
+# ties to even, by integer arithmetic on X's bits alone (a zero of either
+# sign is +0); X must be below the binary32 overflow threshold.
+proc narrow32 {x} {
+    binary scan [binary format q $x] wu bits
+    set negative [expr {$bits >> 63}]
+    set e [expr {($bits >> 52) & 0x7ff}]
+    set f [expr {$bits & 0xfffffffffffff}]
+    if {$e == 0} {
+        set m $f
+        set exp -1074
+    } else {
+        set m [expr {$f | (1 << 52)}]
+        set exp [expr {$e - 1075}]
+    }
+    if {$m == 0} { return 0 }
+    set length 0
+    for {set t $m} {$t > 0} {set t [expr {$t >> 1}]} { set length [expr {$length + 1}] }
+    set q [expr {max($exp + $length - 1 - 23, -149)}]
+    set shift [expr {$q - $exp}]
+    if {$shift <= 0} {
+        set k [expr {$m << -$shift}]
+    } else {
+        set k [expr {$m >> $shift}]
+        set rest [expr {$m - ($k << $shift)}]
+        set half [expr {1 << ($shift - 1)}]
+        if {$rest > $half || ($rest == $half && ($k & 1))} { set k [expr {$k + 1}] }
+    }
+    if {$k == (1 << 24)} {
+        set k [expr {1 << 23}]
+        set q [expr {$q + 1}]
+    }
+    if {$k == 0} { return 0 }
+    set out [expr {$k < (1 << 23) ? $k : ((($q + 150) << 23) | ($k - (1 << 23)))}]
+    return [expr {($negative << 31) | $out}]
+}
+
+# The binary64 bits of the double X, and of the binary32 of bits B widened.
+proc bits64 {x} {
+    binary scan [binary format q $x] wu bits
+    return $bits
+}
+proc widened {b} {
+    binary scan [binary format iu $b] r x
+    return $x
+}
+
+# A finite double for a floating argument, below 1e30 in magnitude (so twice
+# it plus a half never overflows a float): ties of a binary32, subnormal
+# binary32s, values a float cannot hold exactly, tiny negative numbers (a
+# float's +0), arbitrary ones.
+proc floatingValue {} {
+    switch -- [between 0 5] {
+        0 { return [pick {0.1 0.3333333333333333 16777217.0 1.0000000596046448 1.0000001788139343 1.401298464324817e-45 2.1019476964872256e-45 1.0e-40 -1.0e-50 0.0 -2.5}] }
+        1 { return [expr {((1 << 23) | ([between 0 4194303] << 1) | 1) * 2.0 ** ([between -150 60]) * 0.5}] }
+        2 { return [expr {[between 0 63] * 2.0 ** -149 + [between -1 1] * 2.0 ** -170}] }
+        default { return [expr {(rand() - 0.5) * 2.0 ** [between -130 98]}] }
+    }
+}
 
 proc bounds {ctype} {
     lassign [dict get $::ctypes $ctype] class bits signed
@@ -120,23 +190,38 @@ proc drawProgram {p k} {
         }
         lappend enums [dict create name fz_e$i values $values]
     }
+    # Floating typedefs, possibly chained (fz_ft1 a typedef of fz_ft0).
+    set ftypedefs {}
+    set count [between 0 3]
+    for {set i 0} {$i < $count} {incr i} {
+        if {[llength $ftypedefs] && [chance 0.4]} {
+            set of [pick $ftypedefs]
+            lappend ftypedefs [dict create name fz_ft$i base [dict get $of name] ctype [dict get $of ctype]]
+        } else {
+            set ctype [pick {float double}]
+            lappend ftypedefs [dict create name fz_ft$i base $ctype ctype $ctype]
+        }
+    }
+    set ::ftypedefs $ftypedefs
     set decls {}
     for {set i 0} {$i < $k} {incr i} {
         set r [expr {rand()}]
         if {$r < 0.12} {
-            lappend decls [dict create kind unsupported name fz_u$i shape [pick {float double struct va-list variadic-thunk}]]
+            lappend decls [dict create kind unsupported name fz_u$i shape [pick {longdouble struct va-list variadic-thunk}]]
             continue
         }
         if {$r < 0.2} {
             # A variadic prototype: one to three fixed parameters, and the
             # trailing arguments its one call passes (at most 16 seen values).
             # The last fixed parameter is va_start's, whose type must be its
-            # own promoted type (C11 7.16.1.4): none narrower than int.
+            # own promoted type (C11 7.16.1.4): none narrower than int, and
+            # no float (a double's).
             set params {}
             set n [between 1 3]
             for {set j 0} {$j < $n} {incr j} {
                 set t [drawType $typedefs $enums 1]
                 while {$j == $n - 1 && ([dict get $t kind] eq "bool"
+                        || ([dict get $t kind] eq "floating" && [dict get $t ctype] eq "float")
                         || ([dict get $t kind] eq "scalar" && [lindex [dict get $::ctypes [dict get $t ctype]] 1] < 32))} {
                     set t [drawType $typedefs $enums 1]
                 }
@@ -154,7 +239,7 @@ proc drawProgram {p k} {
             continue
         }
         set params {}
-        set count [pick [list 0 1 2 3 [between 4 9]]]
+        set count [pick [list 0 1 2 3 [between 4 9] [between 9 12]]]
         for {set j 0} {$j < $count} {incr j} {
             lappend params [drawType $typedefs $enums 1]
         }
@@ -192,7 +277,7 @@ proc drawProgram {p k} {
         }
         lappend constants [dict create name FZ_C$i text $text ctype $ctype value $v]
     }
-    return [dict create typedefs $typedefs enums $enums decls $decls aliases $aliases constants $constants]
+    return [dict create typedefs $typedefs ftypedefs $ftypedefs enums $enums decls $decls aliases $aliases constants $constants]
 }
 
 proc TypedefC {t} {
@@ -201,7 +286,8 @@ proc TypedefC {t} {
 }
 
 # A drawn value type: a scalar (spelled one of several ways), _Bool, an
-# enum, or (a parameter) an opaque handle pointer or a read byte pointer.
+# enum, a C float or double (by its name or a typedef chain), or (a
+# parameter) an opaque handle pointer or a read byte pointer.
 proc drawType {typedefs enums param} {
     set r [expr {rand()}]
     if {$r < 0.1} { return [dict create kind bool spelled bool ctype _Bool] }
@@ -212,6 +298,14 @@ proc drawType {typedefs enums param} {
     }
     if {$param && $r < 0.26} { return [dict create kind handle spelled "fz_handle *"] }
     if {$param && $r < 0.32} { return [dict create kind bytes spelled "const unsigned char *"] }
+    if {$r < 0.42} {
+        if {[llength $::ftypedefs] && [chance 0.5]} {
+            set t [pick $::ftypedefs]
+            return [dict create kind floating spelled [dict get $t name] ctype [dict get $t ctype]]
+        }
+        set ctype [pick {float double}]
+        return [dict create kind floating spelled $ctype ctype $ctype]
+    }
     if {$r < 0.5 && [llength $typedefs]} {
         set t [pick $typedefs]
         return [dict create kind scalar spelled [dict get $t name] ctype [TypedefC $t]]
@@ -225,12 +319,14 @@ proc drawType {typedefs enums param} {
 }
 
 # A drawn trailing argument of a variadic call: an integer scalar of any C
-# type, a _Bool or a handle pointer. Its C type after the default argument
-# promotions (what the callee's va_arg names) is the model's (promotedC).
+# type, a _Bool, a handle pointer or a double (a Float64, which a variadic
+# call passes as one). Its C type after the default argument promotions
+# (what the callee's va_arg names) is the model's (promotedC).
 proc drawTrailing {} {
     set r [expr {rand()}]
     if {$r < 0.1} { return [dict create kind bool ctype _Bool] }
     if {$r < 0.2} { return [dict create kind handle] }
+    if {$r < 0.3} { return [dict create kind floating ctype double] }
     return [dict create kind scalar ctype [pick [dict keys $::ctypes]]]
 }
 
@@ -241,6 +337,7 @@ proc promotedC {t} {
     switch -- [dict get $t kind] {
         bool { return int }
         handle { return "fz_handle *" }
+        floating { return double }
     }
     set ctype [dict get $t ctype]
     if {[lindex [dict get $::ctypes $ctype] 1] < 32} { return int }
@@ -252,7 +349,9 @@ proc cFiles {prog} {
     set h "#ifndef FZ_H\n#define FZ_H\n#include <stdarg.h>\n#include <stdbool.h>\n#include <stddef.h>\n#include <stdint.h>\n\n"
     append h "typedef struct fz_handle fz_handle;\nunsigned long long fz_seen_at(int i);\nfz_handle *fz_cell(int k);\n"
     append h "unsigned long long fz_handle_index(fz_handle *h);\nextern unsigned long long fz_seen\[16\];\n"
+    append h "unsigned long long fz_dbits(double x);\n"
     foreach t [dict get $prog typedefs] { append h "typedef [dict get $t base] [dict get $t name];\n" }
+    foreach t [dict get $prog ftypedefs] { append h "typedef [dict get $t base] [dict get $t name];\n" }
     foreach e [dict get $prog enums] {
         set items {}
         set i 0
@@ -262,13 +361,13 @@ proc cFiles {prog} {
     foreach c [dict get $prog constants] { append h "#define [dict get $c name] [dict get $c text]\n" }
     set c "#include \"fz/fz.h\"\n\nstruct fz_handle { int id; };\nstatic struct fz_handle fz_cells\[8\];\nunsigned long long fz_seen\[16\];\n"
     append c "unsigned long long fz_seen_at(int i) { return fz_seen\[i\]; }\nfz_handle *fz_cell(int k) { return &fz_cells\[k\]; }\n"
-    append c "unsigned long long fz_handle_index(fz_handle *h) { return h ? (unsigned long long)(h - fz_cells) + 1 : 0; }\n\n"
+    append c "unsigned long long fz_handle_index(fz_handle *h) { return h ? (unsigned long long)(h - fz_cells) + 1 : 0; }\n"
+    append c "unsigned long long fz_dbits(double x) { union { double d; unsigned long long u; } q; q.d = x; return q.u; }\n\n"
     foreach d [dict get $prog decls] {
         set name [dict get $d name]
         if {[dict get $d kind] eq "unsupported"} {
             switch -- [dict get $d shape] {
-                float { append h "float ${name}(float x);\n"; append c "float ${name}(float x) { return x; }\n" }
-                double { append h "double ${name}(int x);\n"; append c "double ${name}(int x) { return x; }\n" }
+                longdouble { append h "long double ${name}(long double x);\n"; append c "long double ${name}(long double x) { return x; }\n" }
                 struct { append h "typedef struct ${name}_s { int a; } ${name}_s;\nint ${name}(${name}_s s);\n"; append c "int ${name}(${name}_s s) { return s.a; }\n" }
                 va-list { append h "int ${name}(int n, va_list ap);\n"; append c "int ${name}(int n, va_list ap) { (void)ap; return n; }\n" }
                 variadic-thunk { append h "static inline int ${name}(int n, ...) { return n; }\n" }
@@ -283,6 +382,13 @@ proc cFiles {prog} {
             switch -- [dict get $param kind] {
                 handle { append body "    fz_seen\[$j\] = fz_handle_index(a$j);\n" }
                 bytes { append body "    fz_seen\[$j\] = a$j\[0\] + 256ull * a$j\[1\];\n" }
+                floating {
+                    if {[dict get $param ctype] eq "float"} {
+                        append body "    { union { float f; unsigned int u; } q; q.f = a$j; fz_seen\[$j\] = q.u; }\n"
+                    } else {
+                        append body "    { union { double d; unsigned long long u; } q; q.d = a$j; fz_seen\[$j\] = q.u; }\n"
+                    }
+                }
                 default { append body "    fz_seen\[$j\] = (unsigned long long)a$j;\n" }
             }
             incr j
@@ -295,6 +401,8 @@ proc cFiles {prog} {
             foreach t [dict get $d trailing] {
                 if {[dict get $t kind] eq "handle"} {
                     append body "    fz_seen\[$j\] = fz_handle_index(va_arg(ap, fz_handle *));\n"
+                } elseif {[dict get $t kind] eq "floating"} {
+                    append body "    fz_seen\[$j\] = fz_dbits(va_arg(ap, double));\n"
                 } else {
                     append body "    fz_seen\[$j\] = (unsigned long long)va_arg(ap, [promotedC $t]);\n"
                 }
@@ -304,7 +412,17 @@ proc cFiles {prog} {
         }
         set result [dict get $d result]
         set rtype [expr {[dict get $result kind] eq "void" ? "void" : ([dict get $result kind] eq "handle" ? "fz_handle *" : [dict get $result spelled])}]
-        if {[dict get $result kind] ne "void"} {
+        if {[dict get $result kind] eq "floating"} {
+            # Twice a floating argument plus a half, in double (the doubling
+            # is exact, so a contraction to a fused multiply-add changes
+            # nothing), then converted to the result type; without one, the
+            # constant ADD + 0.5.
+            if {[FloatingSource $d] >= 0} {
+                append body "    return ($rtype)((double)a[FloatingSource $d] * 2.0 + 0.5);\n"
+            } else {
+                append body "    return ($rtype)[dict get $d add].5;\n"
+            }
+        } elseif {[dict get $result kind] ne "void"} {
             set base [expr {[dict get $d from] < 0 ? "0ull" : "fz_seen\[[dict get $d from]\]"}]
             append body "    return ($rtype)($base * 3ull + [dict get $d add]ull);\n"
         }
@@ -327,14 +445,37 @@ proc cFiles {prog} {
     return [list $h $c]
 }
 
+# The index of the floating parameter of D a floating result is computed
+# from: D's `from` when it names a fixed parameter that is floating, else
+# -1 (a variadic call's trailing double is never the source).
+proc FloatingSource {d} {
+    set from [dict get $d from]
+    if {$from >= 0 && $from < [llength [dict get $d params]]
+            && [dict get [lindex [dict get $d params] $from] kind] eq "floating"} {
+        return $from
+    }
+    return -1
+}
+
 # The model's ABI class of a drawn type.
 proc abiClass {t} {
     switch -- [dict get $t kind] {
         void { return void }
         bool { return bool }
         handle - bytes { return ptr }
+        floating { return [lindex [dict get $::floatings [dict get $t ctype]] 0] }
         default { return [lindex [dict get $::ctypes [dict get $t ctype]] 0] }
     }
+}
+
+# Whether a call of D declares NonFiniteFloat: a C float parameter or a C
+# floating result (C-FLOAT-FFI-MILESTONE-1.md).
+proc Fallible {d} {
+    if {[dict get $d result kind] eq "floating"} { return 1 }
+    foreach q [dict get $d params] {
+        if {[dict get $q kind] eq "floating" && [dict get $q ctype] eq "float"} { return 1 }
+    }
+    return 0
 }
 
 # The program calling every bound function of PROG, and the model's value
@@ -380,6 +521,7 @@ proc program {prog} {
         if {[dict get $d kind] eq "unsupported"} continue
         set args {}
         set seen {}
+        set values {}
         set j 0
         foreach param [dict get $d params] {
             switch -- [dict get $param kind] {
@@ -400,6 +542,12 @@ proc program {prog} {
                     append text "b${i}_$j = abi::bytes::from_list(\[byte_of($a), byte_of($b)\])\n"
                     lappend args b${i}_$j
                     lappend seen [expr {$a + 256 * $b}]
+                }
+                floating {
+                    set v [floatingValue]
+                    lappend args [format %.16e $v]
+                    lappend values $j $v
+                    lappend seen [expr {[dict get $param ctype] eq "float" ? [narrow32 $v] : [bits64 $v]}]
                 }
                 default {
                     set v [valueOf [dict get $param ctype]]
@@ -422,6 +570,11 @@ proc program {prog} {
                     lappend args h${i}_$j
                     lappend seen [expr {$cell + 1}]
                 }
+                floating {
+                    set v [floatingValue]
+                    lappend args [format %.16e $v]
+                    lappend seen [bits64 $v]
+                }
                 default {
                     set v [valueOf [dict get $t ctype]]
                     lappend args "c_[lindex [dict get $::ctypes [dict get $t ctype]] 3]($v)"
@@ -431,13 +584,44 @@ proc program {prog} {
             incr j
         }
         set module [expr {[dict get $d kind] eq "inline" ? "fz::thunks::fz" : "fz::fz"}]
-        append text "r$i = $module\::[dict get $d name]([join $args {, }])\n"
         set result [dict get $d result]
+        set call "$module\::[dict get $d name]([join $args {, }])"
+        if {[Fallible $d]} {
+            # A C float argument or a C floating result declares
+            # NonFiniteFloat (which no call here raises).
+            switch -- [dict get $result kind] {
+                void { set fallback unit }
+                bool { set fallback false }
+                floating { set fallback -7.0 }
+                default { set fallback 0 }
+            }
+            append text "r$i = $call:\n    on NonFiniteFloat:\n        $fallback\n"
+        } else {
+            append text "r$i = $call\n"
+        }
         set base [expr {[dict get $d from] < 0 ? 0 : [lindex $seen [dict get $d from]]}]
         set raw [expr {($base * 3 + [dict get $d add]) % (2 ** 64)}]
         switch -- [dict get $result kind] {
             void {}
             bool { lappend elements "bit(r$i)"; lappend model [convert $raw _Bool] }
+            floating {
+                # What C computed, in double, from what it received.
+                set source [FloatingSource $d]
+                if {$source >= 0} {
+                    set x [dict get $values $source]
+                    if {[dict get [lindex [dict get $d params] $source] ctype] eq "float"} {
+                        set x [widened [narrow32 $x]]
+                    }
+                    set y [expr {$x * 2.0 + 0.5}]
+                } else {
+                    set y [expr {[dict get $d add] + 0.5}]
+                }
+                if {[dict get $result ctype] eq "float"} {
+                    set y [widened [narrow32 $y]]
+                }
+                lappend elements "fz::fz::fz_dbits(r$i)"
+                lappend model [bits64 $y]
+            }
             default { lappend elements "r$i"; lappend model [convert $raw [dict get $result ctype]] }
         }
         # What C saw, read right after the call (the next call overwrites it).
@@ -480,7 +664,7 @@ proc checkGeneration {prog result hir} {
         }
         set row [dict get $rows "function $name"]
         if {[dict get $d kind] eq "unsupported"} {
-            set want [dict get {float float double double struct by-value-aggregate va-list va-list variadic-thunk variadic} [dict get $d shape]]
+            set want [dict get {longdouble long-double struct by-value-aggregate va-list va-list variadic-thunk variadic} [dict get $d shape]]
             if {[lindex $row 2] ne "unsupported" || $want ni [split [lindex $row 4] ,]} {
                 lappend problems "$name: expected unsupported $want, the report says [lrange $row 2 4]"
             }

@@ -15,10 +15,10 @@
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
 
-# The native runtime on Linux x86-64 or AArch64 (allocation counts, GC
-# stress); standalone executables are tests/helpers.tcl's executableAot.
-testConstraint nativeLinux [expr {$::tcl_platform(os) eq "Linux" &&
-    $::tcl_platform(machine) in {x86_64 amd64 aarch64}}]
+# Allocation counts and GC stress need the native backend's whole runtime
+# (nativeCoroutines: Linux x86-64 and AArch64, macOS AArch64;
+# MACOS-AARCH64-MILESTONE-7.md); standalone executables are
+# tests/helpers.tcl's executableAot.
 
 set blBackends {interp compile cranelift-generic cranelift}
 
@@ -524,7 +524,7 @@ test bl-nir-emit {native code of emit: one byteszeroed of the size (zero padding
         [blOps [blNir "fn g(x: binary::I16) -> abi::bytes::Bytes:\n    binary::emit(LayoutStruct\[Inner\] \{x: x, y: 1\})\ng(5)\n" g]]
 } -result {{int byteszeroed int int binstore int int binstore structnew ret} {int rawint int byteszeroed int int binstore int int binstore structnew ret} {int rawint int byteszeroed int int binstore int int binstore structnew ret}}
 
-test bl-allocations {natively, parse followed by field reads allocates nothing per record, and construct-then-emit allocates exactly the emitted storage and its abi::bytes::Bytes per record (1000 records each)} -constraints nativeLinux -body {
+test bl-allocations {natively, parse followed by field reads allocates nothing per record, and construct-then-emit allocates exactly the emitted storage and its abi::bytes::Bytes per record (1000 records each)} -constraints nativeCoroutines -body {
     set reports {}
     foreach program [list \
         "d = binary::emit(LayoutStruct\[Padded\] \{tag: 1, value: 2, flag: 3\})\nfn f() -> int errors LayoutLengthMismatch:\n    p = binary::parse(Padded, d)\n    p.tag + p.value + p.flag\nfn run(n: int) -> int errors LayoutLengthMismatch:\n    k = loop i from 0 to n:\n        f()\n    0\nr = run(1000):\n    on LayoutLengthMismatch:\n        0\nr\n" \
@@ -607,7 +607,7 @@ test bl-executable {a standalone executable (whichever linker BOTLISH_NATIVE_LIN
     list [exec $path] [blOutcome cranelift $hir]
 } -cleanup {unset -nocomplain source hir path} -result {{[true, true, 18446744073709551615, true]} {value {[true, true, 18446744073709551615, true]}}}
 
-test bl-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every allocation site) imprinting and emitting stay exact: 64-bit fields that become BigInts mid-parse, nested objects and many records} -constraints nativeLinux -body {
+test bl-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every allocation site) imprinting and emitting stay exact: 64-bit fields that become BigInts mid-parse, nested objects and many records} -constraints nativeCoroutines -body {
     set source "fn round(n: binary::U64) -> List\[any\] errors LayoutLengthMismatch:\n    w = LayoutStruct\[Wide\] \{u: n, i: -9223372036854775808\}\n    o = LayoutStruct\[Outer\] \{count: 1, inner: LayoutStruct\[Inner\] \{x: -2, y: 3\}, last: 4\}\n    back = binary::parse(Wide, binary::emit(w))\n    outer = binary::parse(Outer, binary::emit(o))\n    \[back == w, back.u, outer.inner, outer == o\]\nfn many(k: int) -> List\[any\] errors LayoutLengthMismatch:\n    rs = loop i from 0 to k:\n        round(18446744073709551615)\n    list::at(rs, 0):\n        on IndexNotFound:\n            \[\]\nr = many(50):\n    on LayoutLengthMismatch:\n        \[\]\nr\n"
     set hir [surface::compile "import list\n$::blPrelude$::blLayouts$source" layout.bot -warnings off]
     set plain [blOutcome cranelift $hir]

@@ -14,7 +14,9 @@
 #
 # Programs that run do so on all four executable paths (the interpreter,
 # the Tcl compiler, native code with and without specialization) and must
-# agree.
+# agree. The same contract through real C -- the host compiler's fixture and
+# the system C library, on every host that links C calls -- is
+# tests/c-byte-borrowing.test's.
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
@@ -24,10 +26,12 @@ core::cabi::installBorrowFixture
 set cbBackends {interp compile cranelift-generic cranelift}
 set cbNative {cranelift-generic cranelift}
 
-# Linux on x86-64 or AArch64: the native runtime (coroutines, stack maps)
-# without a syscall.
-testConstraint nativeLinux [expr {$::tcl_platform(os) eq "Linux" &&
-    $::tcl_platform(machine) in {x86_64 amd64 aarch64}}]
+# The native runtime's evidence -- coroutines, a collection at every
+# allocation (BOTLISH_NATIVE_GC_STRESS), allocation counts -- needs the
+# native backend's whole runtime (nativeCoroutines: Linux x86-64 and
+# AArch64, macOS AArch64), and a standalone executable a host that links
+# them (executableAot): capabilities, never an operating system
+# (MACOS-AARCH64-MILESTONE-7.md). Nothing here makes a syscall.
 
 set cbPrelude {import abi
 import abi::bytes
@@ -62,6 +66,18 @@ fn filled(n: int, seed: int):
         byte::from_int(mod(seed + 37 * i, 256))
 
 }
+# A storage length is a Usize, 64 bits; the fixture's count an ffi::c::ULong,
+# the target's unsigned long. On an LP64 target the length's range is the
+# count's; where unsigned long is 32 bits (Windows, LLP64) len and mlen prove
+# it with a mod -- a no-op for any storage a test makes -- on the same line,
+# so every location after the prelude stays where it is (cb-length-separate
+# states the rule).
+set cbULongBits [dict get [core::cabi::target [core::cabi::hostTarget]] long]
+if {$cbULongBits < 64} {
+    set cbPrelude [string map [list \
+        "    abi::bytes::length(data).value\n" "    mod(abi::bytes::length(data).value, [expr {2 ** $cbULongBits}])\n" \
+        "    abi::bytes::mutable_length(data).value\n" "    mod(abi::bytes::mutable_length(data).value, [expr {2 ** $cbULongBits}])\n"] $cbPrelude]
+}
 
 # The outcome of the program BODY (after the prelude) on every backend,
 # which must agree; a compile error is {error ERRORCODE MESSAGE}.
@@ -92,7 +108,7 @@ proc cbError {body args} {
     }
     set code [dict get $options -errorcode]
     set kind [expr {[lrange $code 0 1] eq {SURFACE SYNTAX} ? "SYNTAX" : [lindex $code 2]}]
-    regsub {^[^:]*:[0-9]+:[0-9]+: } $message {} message
+    regsub {^.*?:[0-9]+:[0-9]+: } $message {} message
     return [list $kind $message]
 }
 
@@ -483,7 +499,7 @@ test cb-length-separate {an exposure adds no length: the count is a separate ord
 # ---------------------------------------------------------------------------
 # Synchronous: the exposure lives for the call alone
 
-test cb-exposure-after-arguments {every argument is evaluated before any exposure is made -- here an argument that yields (deep, inside a coroutine) -- so no argument's code, no call, allocation or suspension, comes between an exposure and the call; the borrow is categorically synchronous, and works inside a coroutine} -constraints nativeLinux -body {
+test cb-exposure-after-arguments {every argument is evaluated before any exposure is made -- here an argument that yields (deep, inside a coroutine) -- so no argument's code, no call, allocation or suspension, comes between an exposure and the call; the borrow is categorically synchronous, and works inside a coroutine} -constraints nativeCoroutines -body {
     cbAgree "struct Count:\n    n: ffi::c::ULong\n\nfn ask(resume Count) -> ffi::c::ULong:\n    c = yield \[0\]\n    c.n\n\nfn worker(data: abi::bytes::Bytes, resume Count) -> List\[int\]:\n    ffi_fixture::read\[ffi::c::UChar\](data, ask())\n\nfn f() -> List\[int\]:\n    coroutine {step} = worker(mk(5, 21))\n    step(Count {n: 3})\n\nf()"
 } -result [list value [cbList [lrange [cbPattern 5 21] 0 2]]]
 
@@ -538,7 +554,7 @@ test cb-failure-publishes-nothing {an operation that writes part of its output a
     cbAgree "fn attempt(m: abi::bytes::MutableBytes, count: ffi::c::ULong) -> List\[int\]:\n    r = ffi_fixture::fill_checked(m, count, 2):\n        on UpperOverrun:\n            return \[-1\]\n    ffi_fixture::read\[ffi::c::UChar\](r.out, mlen(r.out))\n\nm = mmk(4, 1)\n\[attempt(m, 4), attempt(m, 2), ffi_fixture::read\[ffi::c::UChar\](m, 4)\]"
 } -result [list value "\[\[-1\], [cbList [concat {91 128} [lrange [cbPattern 4 1] 2 end]]], [cbList [cbPattern 4 1]]\]"]
 
-test cb-failure-gc-stress {the failing and the succeeding exposure under a collection at every allocation: the same results} -constraints nativeLinux -body {
+test cb-failure-gc-stress {the failing and the succeeding exposure under a collection at every allocation: the same results} -constraints nativeCoroutines -body {
     cbWithEnv BOTLISH_NATIVE_GC_STRESS 1 {
         cbAgreeHir [cbHir "fn attempt(m: abi::bytes::MutableBytes, count: ffi::c::ULong) -> List\[int\]:\n    r = ffi_fixture::fill_checked(m, count, 2):\n        on UpperOverrun:\n            return \[-1\]\n    ffi_fixture::read\[ffi::c::UChar\](r.out, mlen(r.out))\n\nm = mmk(4, 1)\nloop i from 0 to 30:\n    \[attempt(m, 4), attempt(m, 2)\]"] $::cbNative
     }
@@ -611,7 +627,7 @@ proc cbAllocationCost {without with} {
     lmap a [cbAllocations $without] b [cbAllocations $with] {expr {$b - $a}}
 }
 
-test cb-allocations {allocation evidence, natively -- what the exposure itself costs beside the same program without the call {Bytes MutableBytes Struct List}: a read exposure of a Bytes or of a MutableBytes held in a binding allocates nothing (the List is the operation's own result), while an owner written inline as the argument is built as its one-field wrapper first (1 Struct: the address bridge's StorageOf has the same frontier); a write exposure costs exactly the private copy of the storage (MutableBytes' eager detach, MUTABLE-BYTES.md) and, when the result is used, its write-back struct and the copy's MutableBytes wrapper; measured, none hidden} -constraints nativeLinux -body {
+test cb-allocations {allocation evidence, natively -- what the exposure itself costs beside the same program without the call {Bytes MutableBytes Struct List}: a read exposure of a Bytes or of a MutableBytes held in a binding allocates nothing (the List is the operation's own result), while an owner written inline as the argument is built as its one-field wrapper first (1 Struct: the address bridge's StorageOf has the same frontier); a write exposure costs exactly the private copy of the storage (MutableBytes' eager detach, MUTABLE-BYTES.md) and, when the result is used, its write-back struct and the copy's MutableBytes wrapper; measured, none hidden} -constraints nativeCoroutines -body {
     set fn "fn f(n: ffi::c::ULong) -> int:\n    m = abi::bytes::zeroed(abi::usize(n))\n"
     list [cbAllocationCost "${fn}    abi::bytes::mutable_length(m).value\n\nf(64)" \
             "${fn}    list::length(ffi_fixture::read\[ffi::c::UChar\](m, n))\n\nf(64)"] \
@@ -717,10 +733,10 @@ test cb-strict0-replay {an unchecked (-strict 0) program keeps a refused exposur
     }
 } -cleanup {unset -nocomplain body outcome} -result {{error {CORE SEMANTIC TYPE} 1} {error {CORE SEMANTIC TYPE} 1} {error {CORE SEMANTIC TYPE} 1}}
 
-test cb-executable {a standalone executable of a program with read and write exposures prints what every in-process backend computes} -constraints nativeLinux -body {
+test cb-executable {a standalone executable of a program with read and write exposures prints what every in-process backend computes} -constraints executableAot -body {
     set dir [makeDirectory cb-executables]
     set exe [file join $dir borrow]
-    native::executable [cbHir "m = abi::bytes::zeroed(abi::usize(4))\nr = ffi_fixture::fill\[ffi::c::UChar\](m, 4, 33)\n\[ffi_fixture::read\[ffi::c::UChar\](mk(3, 9), 3), ffi_fixture::read\[ffi::c::Void\](r.out, 4)\]"] $exe
+    set exe [native::executable [cbHir "m = abi::bytes::zeroed(abi::usize(4))\nr = ffi_fixture::fill\[ffi::c::UChar\](m, 4, 33)\n\[ffi_fixture::read\[ffi::c::UChar\](mk(3, 9), 3), ffi_fixture::read\[ffi::c::Void\](r.out, 4)\]"] $exe]
     set out [exec $exe]
     file delete -force $dir
     set out

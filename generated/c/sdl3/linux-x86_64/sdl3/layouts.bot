@@ -77,6 +77,15 @@ layout SDL_Color:
     field b: ffi::c::UChar at 2  # Uint8 b
     field a: ffi::c::UChar at 3  # Uint8 a
 
+# struct SDL_FColor, typedef SDL_FColor (include/SDL3/SDL_pixels.h:1126): sizeof 16, _Alignof 4
+layout SDL_FColor:
+    size 16
+    align 4
+    field r: ffi::c::Float at 0   # float r
+    field g: ffi::c::Float at 4   # float g
+    field b: ffi::c::Float at 8   # float b
+    field a: ffi::c::Float at 12  # float a
+
 # struct SDL_Palette, typedef SDL_Palette (include/SDL3/SDL_pixels.h:1141): sizeof 24, _Alignof 8
 layout SDL_Palette:
     size 24
@@ -114,6 +123,13 @@ layout SDL_Point:
     field x: ffi::c::Int at 0  # int x
     field y: ffi::c::Int at 4  # int y
 
+# struct SDL_FPoint, typedef SDL_FPoint (include/SDL3/SDL_rect.h:63): sizeof 8, _Alignof 4
+layout SDL_FPoint:
+    size 8
+    align 4
+    field x: ffi::c::Float at 0  # float x
+    field y: ffi::c::Float at 4  # float y
+
 # struct SDL_Rect, typedef SDL_Rect (include/SDL3/SDL_rect.h:83): sizeof 16, _Alignof 4
 layout SDL_Rect:
     size 16
@@ -122,6 +138,15 @@ layout SDL_Rect:
     field y: ffi::c::Int at 4   # int y
     field w: ffi::c::Int at 8   # int w
     field h: ffi::c::Int at 12  # int h
+
+# struct SDL_FRect, typedef SDL_FRect (include/SDL3/SDL_rect.h:109): sizeof 16, _Alignof 4
+layout SDL_FRect:
+    size 16
+    align 4
+    field x: ffi::c::Float at 0   # float x
+    field y: ffi::c::Float at 4   # float y
+    field w: ffi::c::Float at 8   # float w
+    field h: ffi::c::Float at 12  # float h
 
 # struct SDL_Surface, typedef SDL_Surface (include/SDL3/SDL_surface.h:138): sizeof 48, _Alignof 8
 layout SDL_Surface:
@@ -147,6 +172,20 @@ layout SDL_CameraSpec:
     field framerate_numerator: ffi::c::Int at 16    # int framerate_numerator
     field framerate_denominator: ffi::c::Int at 20  # int framerate_denominator
 
+# struct SDL_DisplayMode, typedef SDL_DisplayMode (include/SDL3/SDL_video.h:139): sizeof 40, _Alignof 8
+layout SDL_DisplayMode:
+    size 40
+    align 8
+    field displayID: ffi::c::UInt at 0                                    # SDL_DisplayID displayID
+    field format: ffi::c::UInt at 4                                       # SDL_PixelFormat format
+    field w: ffi::c::Int at 8                                             # int w
+    field h: ffi::c::Int at 12                                            # int h
+    field pixel_density: ffi::c::Float at 16                              # float pixel_density
+    field refresh_rate: ffi::c::Float at 20                               # float refresh_rate
+    field refresh_rate_numerator: ffi::c::Int at 24                       # int refresh_rate_numerator
+    field refresh_rate_denominator: ffi::c::Int at 28                     # int refresh_rate_denominator
+    field internal: ffi::c::Ptr[sdl3::ctypes::SDL_DisplayModeData] at 32  # SDL_DisplayModeData *internal
+
 # struct SDL_DialogFileFilter, typedef SDL_DialogFileFilter (include/SDL3/SDL_dialog.h:70): sizeof 16, _Alignof 8
 layout SDL_DialogFileFilter:
     size 16
@@ -166,6 +205,13 @@ layout SDL_VirtualJoystickTouchpadDesc:
     align 2
     field nfingers: ffi::c::UShort at 0            # Uint16 nfingers
     field padding: array 3 of ffi::c::UShort at 2  # Uint16 padding[3]
+
+# struct SDL_VirtualJoystickSensorDesc, typedef SDL_VirtualJoystickSensorDesc (include/SDL3/SDL_joystick.h:446): sizeof 8, _Alignof 4
+layout SDL_VirtualJoystickSensorDesc:
+    size 8
+    align 4
+    field type_: ffi::c::Int at 0   # SDL_SensorType type
+    field rate: ffi::c::Float at 4  # float rate
 
 # struct SDL_VirtualJoystickDesc, typedef SDL_VirtualJoystickDesc (include/SDL3/SDL_joystick.h:465): sizeof 136, _Alignof 8
 layout SDL_VirtualJoystickDesc:
@@ -252,6 +298,15 @@ layout SDL_CursorFrameInfo:
     field surface: ffi::c::Ptr[sdl3::ctypes::SDL_Surface] at 0  # SDL_Surface *surface
     field duration: ffi::c::UInt at 8                           # Uint32 duration
 
+# struct SDL_Finger, typedef SDL_Finger (include/SDL3/SDL_touch.h:102): sizeof 24, _Alignof 8
+layout SDL_Finger:
+    size 24
+    align 8
+    field id: ffi::c::ULong at 0         # SDL_FingerID id
+    field x: ffi::c::Float at 8          # float x
+    field y: ffi::c::Float at 12         # float y
+    field pressure: ffi::c::Float at 16  # float pressure
+
 # struct SDL_CommonEvent, typedef SDL_CommonEvent (include/SDL3/SDL_events.h:296): sizeof 16, _Alignof 8
 layout SDL_CommonEvent:
     size 16
@@ -321,6 +376,38 @@ layout SDL_MouseDeviceEvent:
     field reserved: ffi::c::UInt at 4    # Uint32 reserved
     field timestamp: ffi::c::ULong at 8  # Uint64 timestamp
     field which: ffi::c::UInt at 16      # SDL_MouseID which
+
+# struct SDL_MouseMotionEvent, typedef SDL_MouseMotionEvent (include/SDL3/SDL_events.h:453): sizeof 48, _Alignof 8
+layout SDL_MouseMotionEvent:
+    size 48
+    align 8
+    field type_: ffi::c::UInt at 0       # SDL_EventType type
+    field reserved: ffi::c::UInt at 4    # Uint32 reserved
+    field timestamp: ffi::c::ULong at 8  # Uint64 timestamp
+    field windowID: ffi::c::UInt at 16   # SDL_WindowID windowID
+    field which: ffi::c::UInt at 20      # SDL_MouseID which
+    field state: ffi::c::UInt at 24      # SDL_MouseButtonFlags state
+    field x: ffi::c::Float at 28         # float x
+    field y: ffi::c::Float at 32         # float y
+    field xrel: ffi::c::Float at 36      # float xrel
+    field yrel: ffi::c::Float at 40      # float yrel
+
+# struct SDL_MouseWheelEvent, typedef SDL_MouseWheelEvent (include/SDL3/SDL_events.h:492): sizeof 56, _Alignof 8
+layout SDL_MouseWheelEvent:
+    size 56
+    align 8
+    field type_: ffi::c::UInt at 0       # SDL_EventType type
+    field reserved: ffi::c::UInt at 4    # Uint32 reserved
+    field timestamp: ffi::c::ULong at 8  # Uint64 timestamp
+    field windowID: ffi::c::UInt at 16   # SDL_WindowID windowID
+    field which: ffi::c::UInt at 20      # SDL_MouseID which
+    field x: ffi::c::Float at 24         # float x
+    field y: ffi::c::Float at 28         # float y
+    field direction: ffi::c::UInt at 32  # SDL_MouseWheelDirection direction
+    field mouse_x: ffi::c::Float at 36   # float mouse_x
+    field mouse_y: ffi::c::Float at 40   # float mouse_y
+    field integer_x: ffi::c::Int at 44   # Sint32 integer_x
+    field integer_y: ffi::c::Int at 48   # Sint32 integer_y
 
 # struct SDL_JoyAxisEvent, typedef SDL_JoyAxisEvent (include/SDL3/SDL_events.h:513): sizeof 32, _Alignof 8
 layout SDL_JoyAxisEvent:
@@ -409,6 +496,32 @@ layout SDL_GamepadDeviceEvent:
     field timestamp: ffi::c::ULong at 8  # Uint64 timestamp
     field which: ffi::c::UInt at 16      # SDL_JoystickID which
 
+# struct SDL_GamepadTouchpadEvent, typedef SDL_GamepadTouchpadEvent (include/SDL3/SDL_events.h:684): sizeof 40, _Alignof 8
+layout SDL_GamepadTouchpadEvent:
+    size 40
+    align 8
+    field type_: ffi::c::UInt at 0       # SDL_EventType type
+    field reserved: ffi::c::UInt at 4    # Uint32 reserved
+    field timestamp: ffi::c::ULong at 8  # Uint64 timestamp
+    field which: ffi::c::UInt at 16      # SDL_JoystickID which
+    field touchpad: ffi::c::Int at 20    # Sint32 touchpad
+    field finger: ffi::c::Int at 24      # Sint32 finger
+    field x: ffi::c::Float at 28         # float x
+    field y: ffi::c::Float at 32         # float y
+    field pressure: ffi::c::Float at 36  # float pressure
+
+# struct SDL_GamepadSensorEvent, typedef SDL_GamepadSensorEvent (include/SDL3/SDL_events.h:702): sizeof 48, _Alignof 8
+layout SDL_GamepadSensorEvent:
+    size 48
+    align 8
+    field type_: ffi::c::UInt at 0               # SDL_EventType type
+    field reserved: ffi::c::UInt at 4            # Uint32 reserved
+    field timestamp: ffi::c::ULong at 8          # Uint64 timestamp
+    field which: ffi::c::UInt at 16              # SDL_JoystickID which
+    field sensor: ffi::c::Int at 20              # Sint32 sensor
+    field data: array 3 of ffi::c::Float at 24   # float data[3]
+    field sensor_timestamp: ffi::c::ULong at 40  # Uint64 sensor_timestamp
+
 # struct SDL_CameraDeviceEvent, typedef SDL_CameraDeviceEvent (include/SDL3/SDL_events.h:739): sizeof 24, _Alignof 8
 layout SDL_CameraDeviceEvent:
     size 24
@@ -427,6 +540,32 @@ layout SDL_RenderEvent:
     field timestamp: ffi::c::ULong at 8  # Uint64 timestamp
     field windowID: ffi::c::UInt at 16   # SDL_WindowID windowID
 
+# struct SDL_TouchFingerEvent, typedef SDL_TouchFingerEvent (include/SDL3/SDL_events.h:781): sizeof 56, _Alignof 8
+layout SDL_TouchFingerEvent:
+    size 56
+    align 8
+    field type_: ffi::c::UInt at 0       # SDL_EventType type
+    field reserved: ffi::c::UInt at 4    # Uint32 reserved
+    field timestamp: ffi::c::ULong at 8  # Uint64 timestamp
+    field touchID: ffi::c::ULong at 16   # SDL_TouchID touchID
+    field fingerID: ffi::c::ULong at 24  # SDL_FingerID fingerID
+    field x: ffi::c::Float at 32         # float x
+    field y: ffi::c::Float at 36         # float y
+    field dx: ffi::c::Float at 40        # float dx
+    field dy: ffi::c::Float at 44        # float dy
+    field pressure: ffi::c::Float at 48  # float pressure
+    field windowID: ffi::c::UInt at 52   # SDL_WindowID windowID
+
+# struct SDL_PinchFingerEvent, typedef SDL_PinchFingerEvent (include/SDL3/SDL_events.h:799): sizeof 24, _Alignof 8
+layout SDL_PinchFingerEvent:
+    size 24
+    align 8
+    field type_: ffi::c::UInt at 0       # SDL_EventType type
+    field reserved: ffi::c::UInt at 4    # Uint32 reserved
+    field timestamp: ffi::c::ULong at 8  # Uint64 timestamp
+    field scale: ffi::c::Float at 16     # float scale
+    field windowID: ffi::c::UInt at 20   # SDL_WindowID windowID
+
 # struct SDL_PenProximityEvent, typedef SDL_PenProximityEvent (include/SDL3/SDL_events.h:826): sizeof 32, _Alignof 8
 layout SDL_PenProximityEvent:
     size 32
@@ -438,6 +577,60 @@ layout SDL_PenProximityEvent:
     field which: ffi::c::UInt at 20       # SDL_PenID which
     field pen_state: ffi::c::UInt at 24   # SDL_PenInputFlags pen_state
     field device_type: ffi::c::Int at 28  # SDL_PenDeviceType device_type
+
+# struct SDL_PenMotionEvent, typedef SDL_PenMotionEvent (include/SDL3/SDL_events.h:848): sizeof 40, _Alignof 8
+layout SDL_PenMotionEvent:
+    size 40
+    align 8
+    field type_: ffi::c::UInt at 0        # SDL_EventType type
+    field reserved: ffi::c::UInt at 4     # Uint32 reserved
+    field timestamp: ffi::c::ULong at 8   # Uint64 timestamp
+    field windowID: ffi::c::UInt at 16    # SDL_WindowID windowID
+    field which: ffi::c::UInt at 20       # SDL_PenID which
+    field pen_state: ffi::c::UInt at 24   # SDL_PenInputFlags pen_state
+    field x: ffi::c::Float at 28          # float x
+    field y: ffi::c::Float at 32          # float y
+    field device_type: ffi::c::Int at 36  # SDL_PenDeviceType device_type
+
+# struct SDL_PenAxisEvent, typedef SDL_PenAxisEvent (include/SDL3/SDL_events.h:915): sizeof 48, _Alignof 8
+layout SDL_PenAxisEvent:
+    size 48
+    align 8
+    field type_: ffi::c::UInt at 0        # SDL_EventType type
+    field reserved: ffi::c::UInt at 4     # Uint32 reserved
+    field timestamp: ffi::c::ULong at 8   # Uint64 timestamp
+    field windowID: ffi::c::UInt at 16    # SDL_WindowID windowID
+    field which: ffi::c::UInt at 20       # SDL_PenID which
+    field pen_state: ffi::c::UInt at 24   # SDL_PenInputFlags pen_state
+    field x: ffi::c::Float at 28          # float x
+    field y: ffi::c::Float at 32          # float y
+    field axis: ffi::c::UInt at 36        # SDL_PenAxis axis
+    field value: ffi::c::Float at 40      # float value
+    field device_type: ffi::c::Int at 44  # SDL_PenDeviceType device_type
+
+# struct SDL_DropEvent, typedef SDL_DropEvent (include/SDL3/SDL_events.h:936): sizeof 48, _Alignof 8
+layout SDL_DropEvent:
+    size 48
+    align 8
+    field type_: ffi::c::UInt at 0                 # SDL_EventType type
+    field reserved: ffi::c::UInt at 4              # Uint32 reserved
+    field timestamp: ffi::c::ULong at 8            # Uint64 timestamp
+    field windowID: ffi::c::UInt at 16             # SDL_WindowID windowID
+    field x: ffi::c::Float at 20                   # float x
+    field y: ffi::c::Float at 24                   # float y
+    field source: ffi::c::Ptr[ffi::c::Char] at 32  # const char *source
+    field data: ffi::c::Ptr[ffi::c::Char] at 40    # const char *data
+
+# struct SDL_SensorEvent, typedef SDL_SensorEvent (include/SDL3/SDL_events.h:969): sizeof 56, _Alignof 8
+layout SDL_SensorEvent:
+    size 56
+    align 8
+    field type_: ffi::c::UInt at 0               # SDL_EventType type
+    field reserved: ffi::c::UInt at 4            # Uint32 reserved
+    field timestamp: ffi::c::ULong at 8          # Uint64 timestamp
+    field which: ffi::c::UInt at 16              # SDL_SensorID which
+    field data: array 6 of ffi::c::Float at 20   # float data[6]
+    field sensor_timestamp: ffi::c::ULong at 48  # Uint64 sensor_timestamp
 
 # struct SDL_QuitEvent, typedef SDL_QuitEvent (include/SDL3/SDL_events.h:984): sizeof 16, _Alignof 8
 layout SDL_QuitEvent:
@@ -468,6 +661,17 @@ layout SDL_PathInfo:
     field create_time: ffi::c::Long at 16  # SDL_Time create_time
     field modify_time: ffi::c::Long at 24  # SDL_Time modify_time
     field access_time: ffi::c::Long at 32  # SDL_Time access_time
+
+# struct SDL_GPUViewport, typedef SDL_GPUViewport (include/SDL3/SDL_gpu.h:1384): sizeof 24, _Alignof 4
+layout SDL_GPUViewport:
+    size 24
+    align 4
+    field x: ffi::c::Float at 0           # float x
+    field y: ffi::c::Float at 4           # float y
+    field w: ffi::c::Float at 8           # float w
+    field h: ffi::c::Float at 12          # float h
+    field min_depth: ffi::c::Float at 16  # float min_depth
+    field max_depth: ffi::c::Float at 20  # float max_depth
 
 # struct SDL_GPUTextureTransferInfo, typedef SDL_GPUTextureTransferInfo (include/SDL3/SDL_gpu.h:1416): sizeof 24, _Alignof 8
 layout SDL_GPUTextureTransferInfo:
@@ -866,6 +1070,14 @@ layout SDL_MessageBoxData:
     field numbuttons: ffi::c::Int at 32                                   # int numbuttons
     field buttons: ffi::c::Ptr[sdl3::ctypes::SDL_MessageBoxButtonData] at 40  # const SDL_MessageBoxButtonData *buttons
     field colorScheme: ffi::c::Ptr[sdl3::ctypes::SDL_MessageBoxColorScheme] at 48  # const SDL_MessageBoxColorScheme *colorScheme
+
+# struct SDL_Vertex, typedef SDL_Vertex (include/SDL3/SDL_render.h:89): sizeof 32, _Alignof 4
+layout SDL_Vertex:
+    size 32
+    align 4
+    field position: SDL_FPoint at 0    # SDL_FPoint position
+    field color: SDL_FColor at 8       # SDL_FColor color
+    field tex_coord: SDL_FPoint at 24  # SDL_FPoint tex_coord
 
 # struct SDL_Texture, typedef SDL_Texture (include/SDL3/SDL_render.h:160): sizeof 16, _Alignof 4
 layout SDL_Texture:

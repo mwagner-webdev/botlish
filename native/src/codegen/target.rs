@@ -97,12 +97,18 @@ fn os_family(os: OperatingSystem) -> String {
     }
 }
 
-/// Whether machine code for TARGET runs on HOST: the same architecture *and*
-/// the same operating system. A matching architecture (or pointer width) is
-/// not a matching target.
+/// Whether machine code for TARGET runs on HOST: the same architecture, the
+/// same operating system *and* the same environment -- the C toolchain's ABI
+/// family, which on Windows tells MSVC's `x86_64-pc-windows-msvc` from
+/// MinGW-w64's `x86_64-pc-windows-gnu` (core/cabi.tcl: windows-x86_64 and
+/// windows-x86_64-gnu are two targets, and this driver, built for one of
+/// them, links executables with that one's C runtime and linker only). A
+/// matching architecture (or pointer width) is not a matching target, and
+/// neither is a matching architecture and operating system.
 pub fn same_target(target: &Triple, host: &Triple) -> bool {
     target.architecture == host.architecture
         && os_family(target.operating_system) == os_family(host.operating_system)
+        && target.environment == host.environment
 }
 
 /// TEXT as a target triple, or why it is not one.
@@ -121,10 +127,18 @@ pub fn check_host(program: &crate::nir::Program) -> Result<(), String> {
     if same_target(&triple, &host) {
         return Ok(());
     }
-    let shared = if triple.architecture == host.architecture {
-        format!(" Both are {}, but a matching architecture is not a matching target.", host.architecture)
-    } else {
+    let shared = if triple.architecture != host.architecture {
         String::new()
+    } else if os_family(triple.operating_system) == os_family(host.operating_system) {
+        format!(
+            " Both are {} {}, but the C toolchain environment is part of the target: {} for this program, {} here.",
+            host.architecture,
+            os_family(host.operating_system),
+            triple.environment,
+            host.environment
+        )
+    } else {
+        format!(" Both are {}, but a matching architecture is not a matching target.", host.architecture)
     };
     Err(format!(
         "this program was built for target {} ({}), and native code runs only on its own target's host: \
@@ -198,6 +212,59 @@ mod tests {
         assert!(!same_target(&x86, &linux));
         assert!(same_target(&linux, &linux));
         assert!(same_target(&macos, &parse_triple("arm64-apple-darwin").unwrap()));
+    }
+
+    /// Windows x86-64 with MSVC's toolchain and with MinGW-w64's are two
+    /// targets: one architecture, one operating system, one C convention,
+    /// two environments. A driver built for one never runs or links code for
+    /// the other.
+    #[test]
+    fn the_windows_environments_are_two_targets() {
+        let msvc = parse_triple("x86_64-pc-windows-msvc").unwrap();
+        let gnu = parse_triple("x86_64-pc-windows-gnu").unwrap();
+        assert_eq!(c_call_conv(&msvc), c_call_conv(&gnu));
+        assert!(!same_target(&gnu, &msvc));
+        assert!(!same_target(&msvc, &gnu));
+        assert!(same_target(&msvc, &msvc));
+        assert!(same_target(&gnu, &gnu));
+        // Linux and macOS are unchanged: their triples' environments agree
+        // with this driver's own on those hosts.
+        assert!(same_target(&parse_triple("x86_64-unknown-linux-gnu").unwrap(), &parse_triple("x86_64-unknown-linux-gnu").unwrap()));
+        assert!(!same_target(&parse_triple("x86_64-unknown-linux-gnu").unwrap(), &msvc));
+    }
+
+    /// The table's target of this driver's own host runs here, and the other
+    /// Windows environment, on a Windows host, is refused with its reason.
+    #[test]
+    fn the_host_runs_its_own_target_only() {
+        let host = Triple::host();
+        assert!(same_target(&host, &host));
+        if host.operating_system == OperatingSystem::Windows {
+            let other = if host.environment.to_string() == "msvc" { "x86_64-pc-windows-gnu" } else { "x86_64-pc-windows-msvc" };
+            let d = describe(other).unwrap();
+            assert_eq!(d[d.iter().position(|x| x == "runs").unwrap() + 1], "0");
+        }
+    }
+
+    /// A program built for the other environment of this host's own
+    /// architecture and operating system (Windows: MinGW's for an MSVC
+    /// driver; Linux: musl's for a glibc one) is refused before any code is
+    /// made, and the refusal names the environments.
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[test]
+    fn another_environment_of_the_hosts_system_is_refused() {
+        let host = Triple::host().to_string();
+        let other = match host.as_str() {
+            "x86_64-pc-windows-msvc" => "x86_64-pc-windows-gnu".to_string(),
+            "x86_64-pc-windows-gnu" => "x86_64-pc-windows-msvc".to_string(),
+            linux => linux.replace("-gnu", "-musl"),
+        };
+        let body = "func 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0\n    %0 = int 7\n    ret %0\nend\n";
+        let program = crate::nir::parse(&format!("nir 1\ntarget \"other\" triple=\"{other}\"\n\n{body}")).unwrap();
+        let message = check_host(&program).unwrap_err();
+        assert!(message.contains("but the C toolchain environment is part of the target"), "{message}");
+        let own = crate::nir::parse(&format!("nir 1\ntarget \"own\" triple=\"{host}\"\n\n{body}")).unwrap();
+        assert!(check_host(&own).is_ok());
     }
 
     #[test]

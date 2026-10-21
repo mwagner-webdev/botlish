@@ -337,12 +337,12 @@ byte::set(['Ā'])} setfromlist-m4-byte-set-256.bot]
 # M3 regression control (spec item 39): this milestone must not move
 # SetContains's own equality-total classification.
 
-test setfromlist-m3-control-web-is-unreserved-still-total {web::is_unreserved's own SetContains call is unaffected by this milestone -- still setcontainstotal, still may_error=false} -body {
+test setfromlist-m3-control-web-is-unreserved-still-total {web::is_unreserved's own SetContains call is unaffected by this milestone -- still setcontainstotal, still may_error=false (true where the depth check makes its Botlish call fallible, nativeDepthChecked)} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
     set nirText [dict get [native::lower::program $hir -tiny-leaf-inline-opt 0] text]
     regexp {func \d+ "web::is_unreserved[^\n]*\n(?:.*\n)*?end} $nirText body
     list [regexp {op setcontainstotal} $body] \
         [string match {*may_error=false*} [calleeEffectLineIn $nirText web::is_unreserved]]
-} -result {1 1}
+} -result [list 1 [expr {![testConstraint nativeDepthChecked]}]]
 
 cleanupTests

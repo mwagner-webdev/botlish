@@ -16,6 +16,11 @@
     _Static_assert(sizeof(BOTLISH_M(T, m)) == (width), L ": width"); \
     _Static_assert((((__typeof__(BOTLISH_M(T, m)))-1) < 0) == (sign), L ": signedness"); \
     _Static_assert((__typeof__(BOTLISH_M(T, m)))2 == 2, L ": no _Bool")
+#define BOTLISH_FLOATING(T, m, offset, width, ctype, L) \
+    BOTLISH_OFFSET(T, m, offset, L); \
+    _Static_assert(__builtin_classify_type(BOTLISH_M(T, m)) == 8, L ": a floating type"); \
+    _Static_assert(sizeof(BOTLISH_M(T, m)) == (width), L ": width"); \
+    _Static_assert(__builtin_types_compatible_p(__typeof__(BOTLISH_M(T, m)), ctype), L ": the C type")
 #define BOTLISH_POINTER(T, m, offset, width, L) \
     BOTLISH_OFFSET(T, m, offset, L); \
     _Static_assert(__builtin_classify_type(BOTLISH_M(T, m)) == 5, L ": a pointer"); \
@@ -79,6 +84,12 @@ BOTLISH_SCALAR(struct SDL_Color, g, 1, 1, 0, "SDL_Color.g");
 BOTLISH_SCALAR(struct SDL_Color, b, 2, 1, 0, "SDL_Color.b");
 BOTLISH_SCALAR(struct SDL_Color, a, 3, 1, 0, "SDL_Color.a");
 
+BOTLISH_RECORD(struct SDL_FColor, 16, 4, "SDL_FColor");
+BOTLISH_FLOATING(struct SDL_FColor, r, 0, 4, float, "SDL_FColor.r");
+BOTLISH_FLOATING(struct SDL_FColor, g, 4, 4, float, "SDL_FColor.g");
+BOTLISH_FLOATING(struct SDL_FColor, b, 8, 4, float, "SDL_FColor.b");
+BOTLISH_FLOATING(struct SDL_FColor, a, 12, 4, float, "SDL_FColor.a");
+
 BOTLISH_RECORD(struct SDL_Palette, 24, 8, "SDL_Palette");
 BOTLISH_SCALAR(struct SDL_Palette, ncolors, 0, 4, 1, "SDL_Palette.ncolors");
 BOTLISH_POINTER(struct SDL_Palette, colors, 8, 8, "SDL_Palette.colors");
@@ -109,11 +120,21 @@ BOTLISH_RECORD(struct SDL_Point, 8, 4, "SDL_Point");
 BOTLISH_SCALAR(struct SDL_Point, x, 0, 4, 1, "SDL_Point.x");
 BOTLISH_SCALAR(struct SDL_Point, y, 4, 4, 1, "SDL_Point.y");
 
+BOTLISH_RECORD(struct SDL_FPoint, 8, 4, "SDL_FPoint");
+BOTLISH_FLOATING(struct SDL_FPoint, x, 0, 4, float, "SDL_FPoint.x");
+BOTLISH_FLOATING(struct SDL_FPoint, y, 4, 4, float, "SDL_FPoint.y");
+
 BOTLISH_RECORD(struct SDL_Rect, 16, 4, "SDL_Rect");
 BOTLISH_SCALAR(struct SDL_Rect, x, 0, 4, 1, "SDL_Rect.x");
 BOTLISH_SCALAR(struct SDL_Rect, y, 4, 4, 1, "SDL_Rect.y");
 BOTLISH_SCALAR(struct SDL_Rect, w, 8, 4, 1, "SDL_Rect.w");
 BOTLISH_SCALAR(struct SDL_Rect, h, 12, 4, 1, "SDL_Rect.h");
+
+BOTLISH_RECORD(struct SDL_FRect, 16, 4, "SDL_FRect");
+BOTLISH_FLOATING(struct SDL_FRect, x, 0, 4, float, "SDL_FRect.x");
+BOTLISH_FLOATING(struct SDL_FRect, y, 4, 4, float, "SDL_FRect.y");
+BOTLISH_FLOATING(struct SDL_FRect, w, 8, 4, float, "SDL_FRect.w");
+BOTLISH_FLOATING(struct SDL_FRect, h, 12, 4, float, "SDL_FRect.h");
 
 BOTLISH_RECORD(struct SDL_Surface, 48, 8, "SDL_Surface");
 BOTLISH_SCALAR(struct SDL_Surface, flags, 0, 4, 0, "SDL_Surface.flags");
@@ -133,6 +154,17 @@ BOTLISH_SCALAR(struct SDL_CameraSpec, height, 12, 4, 1, "SDL_CameraSpec.height")
 BOTLISH_SCALAR(struct SDL_CameraSpec, framerate_numerator, 16, 4, 1, "SDL_CameraSpec.framerate_numerator");
 BOTLISH_SCALAR(struct SDL_CameraSpec, framerate_denominator, 20, 4, 1, "SDL_CameraSpec.framerate_denominator");
 
+BOTLISH_RECORD(struct SDL_DisplayMode, 40, 8, "SDL_DisplayMode");
+BOTLISH_SCALAR(struct SDL_DisplayMode, displayID, 0, 4, 0, "SDL_DisplayMode.displayID");
+BOTLISH_SCALAR(struct SDL_DisplayMode, format, 4, 4, 0, "SDL_DisplayMode.format");
+BOTLISH_SCALAR(struct SDL_DisplayMode, w, 8, 4, 1, "SDL_DisplayMode.w");
+BOTLISH_SCALAR(struct SDL_DisplayMode, h, 12, 4, 1, "SDL_DisplayMode.h");
+BOTLISH_FLOATING(struct SDL_DisplayMode, pixel_density, 16, 4, float, "SDL_DisplayMode.pixel_density");
+BOTLISH_FLOATING(struct SDL_DisplayMode, refresh_rate, 20, 4, float, "SDL_DisplayMode.refresh_rate");
+BOTLISH_SCALAR(struct SDL_DisplayMode, refresh_rate_numerator, 24, 4, 1, "SDL_DisplayMode.refresh_rate_numerator");
+BOTLISH_SCALAR(struct SDL_DisplayMode, refresh_rate_denominator, 28, 4, 1, "SDL_DisplayMode.refresh_rate_denominator");
+BOTLISH_POINTER(struct SDL_DisplayMode, internal, 32, 8, "SDL_DisplayMode.internal");
+
 BOTLISH_RECORD(struct SDL_DialogFileFilter, 16, 8, "SDL_DialogFileFilter");
 BOTLISH_POINTER(struct SDL_DialogFileFilter, name, 0, 8, "SDL_DialogFileFilter.name");
 BOTLISH_POINTER(struct SDL_DialogFileFilter, pattern, 8, 8, "SDL_DialogFileFilter.pattern");
@@ -147,6 +179,10 @@ BOTLISH_SCALAR(struct SDL_VirtualJoystickTouchpadDesc, nfingers, 0, 2, 0, "SDL_V
 BOTLISH_ARRAY(struct SDL_VirtualJoystickTouchpadDesc, padding, 3, "SDL_VirtualJoystickTouchpadDesc.padding");
 BOTLISH_OFFSET(struct SDL_VirtualJoystickTouchpadDesc, padding[2], 6, "SDL_VirtualJoystickTouchpadDesc.padding, its last element");
 BOTLISH_SCALAR(struct SDL_VirtualJoystickTouchpadDesc, padding[0], 2, 2, 0, "SDL_VirtualJoystickTouchpadDesc.padding, its first element");
+
+BOTLISH_RECORD(struct SDL_VirtualJoystickSensorDesc, 8, 4, "SDL_VirtualJoystickSensorDesc");
+BOTLISH_SCALAR(struct SDL_VirtualJoystickSensorDesc, type, 0, 4, 1, "SDL_VirtualJoystickSensorDesc.type_");
+BOTLISH_FLOATING(struct SDL_VirtualJoystickSensorDesc, rate, 4, 4, float, "SDL_VirtualJoystickSensorDesc.rate");
 
 BOTLISH_RECORD(struct SDL_VirtualJoystickDesc, 136, 8, "SDL_VirtualJoystickDesc");
 BOTLISH_SCALAR(struct SDL_VirtualJoystickDesc, version, 0, 4, 0, "SDL_VirtualJoystickDesc.version");
@@ -211,6 +247,12 @@ BOTLISH_RECORD(struct SDL_CursorFrameInfo, 16, 8, "SDL_CursorFrameInfo");
 BOTLISH_POINTER(struct SDL_CursorFrameInfo, surface, 0, 8, "SDL_CursorFrameInfo.surface");
 BOTLISH_SCALAR(struct SDL_CursorFrameInfo, duration, 8, 4, 0, "SDL_CursorFrameInfo.duration");
 
+BOTLISH_RECORD(struct SDL_Finger, 24, 8, "SDL_Finger");
+BOTLISH_SCALAR(struct SDL_Finger, id, 0, 8, 0, "SDL_Finger.id");
+BOTLISH_FLOATING(struct SDL_Finger, x, 8, 4, float, "SDL_Finger.x");
+BOTLISH_FLOATING(struct SDL_Finger, y, 12, 4, float, "SDL_Finger.y");
+BOTLISH_FLOATING(struct SDL_Finger, pressure, 16, 4, float, "SDL_Finger.pressure");
+
 BOTLISH_RECORD(struct SDL_CommonEvent, 16, 8, "SDL_CommonEvent");
 BOTLISH_SCALAR(struct SDL_CommonEvent, type, 0, 4, 0, "SDL_CommonEvent.type_");
 BOTLISH_SCALAR(struct SDL_CommonEvent, reserved, 4, 4, 0, "SDL_CommonEvent.reserved");
@@ -259,6 +301,32 @@ BOTLISH_SCALAR(struct SDL_MouseDeviceEvent, type, 0, 4, 0, "SDL_MouseDeviceEvent
 BOTLISH_SCALAR(struct SDL_MouseDeviceEvent, reserved, 4, 4, 0, "SDL_MouseDeviceEvent.reserved");
 BOTLISH_SCALAR(struct SDL_MouseDeviceEvent, timestamp, 8, 8, 0, "SDL_MouseDeviceEvent.timestamp");
 BOTLISH_SCALAR(struct SDL_MouseDeviceEvent, which, 16, 4, 0, "SDL_MouseDeviceEvent.which");
+
+BOTLISH_RECORD(struct SDL_MouseMotionEvent, 48, 8, "SDL_MouseMotionEvent");
+BOTLISH_SCALAR(struct SDL_MouseMotionEvent, type, 0, 4, 0, "SDL_MouseMotionEvent.type_");
+BOTLISH_SCALAR(struct SDL_MouseMotionEvent, reserved, 4, 4, 0, "SDL_MouseMotionEvent.reserved");
+BOTLISH_SCALAR(struct SDL_MouseMotionEvent, timestamp, 8, 8, 0, "SDL_MouseMotionEvent.timestamp");
+BOTLISH_SCALAR(struct SDL_MouseMotionEvent, windowID, 16, 4, 0, "SDL_MouseMotionEvent.windowID");
+BOTLISH_SCALAR(struct SDL_MouseMotionEvent, which, 20, 4, 0, "SDL_MouseMotionEvent.which");
+BOTLISH_SCALAR(struct SDL_MouseMotionEvent, state, 24, 4, 0, "SDL_MouseMotionEvent.state");
+BOTLISH_FLOATING(struct SDL_MouseMotionEvent, x, 28, 4, float, "SDL_MouseMotionEvent.x");
+BOTLISH_FLOATING(struct SDL_MouseMotionEvent, y, 32, 4, float, "SDL_MouseMotionEvent.y");
+BOTLISH_FLOATING(struct SDL_MouseMotionEvent, xrel, 36, 4, float, "SDL_MouseMotionEvent.xrel");
+BOTLISH_FLOATING(struct SDL_MouseMotionEvent, yrel, 40, 4, float, "SDL_MouseMotionEvent.yrel");
+
+BOTLISH_RECORD(struct SDL_MouseWheelEvent, 56, 8, "SDL_MouseWheelEvent");
+BOTLISH_SCALAR(struct SDL_MouseWheelEvent, type, 0, 4, 0, "SDL_MouseWheelEvent.type_");
+BOTLISH_SCALAR(struct SDL_MouseWheelEvent, reserved, 4, 4, 0, "SDL_MouseWheelEvent.reserved");
+BOTLISH_SCALAR(struct SDL_MouseWheelEvent, timestamp, 8, 8, 0, "SDL_MouseWheelEvent.timestamp");
+BOTLISH_SCALAR(struct SDL_MouseWheelEvent, windowID, 16, 4, 0, "SDL_MouseWheelEvent.windowID");
+BOTLISH_SCALAR(struct SDL_MouseWheelEvent, which, 20, 4, 0, "SDL_MouseWheelEvent.which");
+BOTLISH_FLOATING(struct SDL_MouseWheelEvent, x, 24, 4, float, "SDL_MouseWheelEvent.x");
+BOTLISH_FLOATING(struct SDL_MouseWheelEvent, y, 28, 4, float, "SDL_MouseWheelEvent.y");
+BOTLISH_SCALAR(struct SDL_MouseWheelEvent, direction, 32, 4, 0, "SDL_MouseWheelEvent.direction");
+BOTLISH_FLOATING(struct SDL_MouseWheelEvent, mouse_x, 36, 4, float, "SDL_MouseWheelEvent.mouse_x");
+BOTLISH_FLOATING(struct SDL_MouseWheelEvent, mouse_y, 40, 4, float, "SDL_MouseWheelEvent.mouse_y");
+BOTLISH_SCALAR(struct SDL_MouseWheelEvent, integer_x, 44, 4, 1, "SDL_MouseWheelEvent.integer_x");
+BOTLISH_SCALAR(struct SDL_MouseWheelEvent, integer_y, 48, 4, 1, "SDL_MouseWheelEvent.integer_y");
 
 BOTLISH_RECORD(struct SDL_JoyAxisEvent, 32, 8, "SDL_JoyAxisEvent");
 BOTLISH_SCALAR(struct SDL_JoyAxisEvent, type, 0, 4, 0, "SDL_JoyAxisEvent.type_");
@@ -326,6 +394,28 @@ BOTLISH_SCALAR(struct SDL_GamepadDeviceEvent, reserved, 4, 4, 0, "SDL_GamepadDev
 BOTLISH_SCALAR(struct SDL_GamepadDeviceEvent, timestamp, 8, 8, 0, "SDL_GamepadDeviceEvent.timestamp");
 BOTLISH_SCALAR(struct SDL_GamepadDeviceEvent, which, 16, 4, 0, "SDL_GamepadDeviceEvent.which");
 
+BOTLISH_RECORD(struct SDL_GamepadTouchpadEvent, 40, 8, "SDL_GamepadTouchpadEvent");
+BOTLISH_SCALAR(struct SDL_GamepadTouchpadEvent, type, 0, 4, 0, "SDL_GamepadTouchpadEvent.type_");
+BOTLISH_SCALAR(struct SDL_GamepadTouchpadEvent, reserved, 4, 4, 0, "SDL_GamepadTouchpadEvent.reserved");
+BOTLISH_SCALAR(struct SDL_GamepadTouchpadEvent, timestamp, 8, 8, 0, "SDL_GamepadTouchpadEvent.timestamp");
+BOTLISH_SCALAR(struct SDL_GamepadTouchpadEvent, which, 16, 4, 0, "SDL_GamepadTouchpadEvent.which");
+BOTLISH_SCALAR(struct SDL_GamepadTouchpadEvent, touchpad, 20, 4, 1, "SDL_GamepadTouchpadEvent.touchpad");
+BOTLISH_SCALAR(struct SDL_GamepadTouchpadEvent, finger, 24, 4, 1, "SDL_GamepadTouchpadEvent.finger");
+BOTLISH_FLOATING(struct SDL_GamepadTouchpadEvent, x, 28, 4, float, "SDL_GamepadTouchpadEvent.x");
+BOTLISH_FLOATING(struct SDL_GamepadTouchpadEvent, y, 32, 4, float, "SDL_GamepadTouchpadEvent.y");
+BOTLISH_FLOATING(struct SDL_GamepadTouchpadEvent, pressure, 36, 4, float, "SDL_GamepadTouchpadEvent.pressure");
+
+BOTLISH_RECORD(struct SDL_GamepadSensorEvent, 48, 8, "SDL_GamepadSensorEvent");
+BOTLISH_SCALAR(struct SDL_GamepadSensorEvent, type, 0, 4, 0, "SDL_GamepadSensorEvent.type_");
+BOTLISH_SCALAR(struct SDL_GamepadSensorEvent, reserved, 4, 4, 0, "SDL_GamepadSensorEvent.reserved");
+BOTLISH_SCALAR(struct SDL_GamepadSensorEvent, timestamp, 8, 8, 0, "SDL_GamepadSensorEvent.timestamp");
+BOTLISH_SCALAR(struct SDL_GamepadSensorEvent, which, 16, 4, 0, "SDL_GamepadSensorEvent.which");
+BOTLISH_SCALAR(struct SDL_GamepadSensorEvent, sensor, 20, 4, 1, "SDL_GamepadSensorEvent.sensor");
+BOTLISH_ARRAY(struct SDL_GamepadSensorEvent, data, 3, "SDL_GamepadSensorEvent.data");
+BOTLISH_OFFSET(struct SDL_GamepadSensorEvent, data[2], 32, "SDL_GamepadSensorEvent.data, its last element");
+BOTLISH_FLOATING(struct SDL_GamepadSensorEvent, data[0], 24, 4, float, "SDL_GamepadSensorEvent.data, its first element");
+BOTLISH_SCALAR(struct SDL_GamepadSensorEvent, sensor_timestamp, 40, 8, 0, "SDL_GamepadSensorEvent.sensor_timestamp");
+
 BOTLISH_RECORD(struct SDL_CameraDeviceEvent, 24, 8, "SDL_CameraDeviceEvent");
 BOTLISH_SCALAR(struct SDL_CameraDeviceEvent, type, 0, 4, 0, "SDL_CameraDeviceEvent.type_");
 BOTLISH_SCALAR(struct SDL_CameraDeviceEvent, reserved, 4, 4, 0, "SDL_CameraDeviceEvent.reserved");
@@ -338,6 +428,26 @@ BOTLISH_SCALAR(struct SDL_RenderEvent, reserved, 4, 4, 0, "SDL_RenderEvent.reser
 BOTLISH_SCALAR(struct SDL_RenderEvent, timestamp, 8, 8, 0, "SDL_RenderEvent.timestamp");
 BOTLISH_SCALAR(struct SDL_RenderEvent, windowID, 16, 4, 0, "SDL_RenderEvent.windowID");
 
+BOTLISH_RECORD(struct SDL_TouchFingerEvent, 56, 8, "SDL_TouchFingerEvent");
+BOTLISH_SCALAR(struct SDL_TouchFingerEvent, type, 0, 4, 0, "SDL_TouchFingerEvent.type_");
+BOTLISH_SCALAR(struct SDL_TouchFingerEvent, reserved, 4, 4, 0, "SDL_TouchFingerEvent.reserved");
+BOTLISH_SCALAR(struct SDL_TouchFingerEvent, timestamp, 8, 8, 0, "SDL_TouchFingerEvent.timestamp");
+BOTLISH_SCALAR(struct SDL_TouchFingerEvent, touchID, 16, 8, 0, "SDL_TouchFingerEvent.touchID");
+BOTLISH_SCALAR(struct SDL_TouchFingerEvent, fingerID, 24, 8, 0, "SDL_TouchFingerEvent.fingerID");
+BOTLISH_FLOATING(struct SDL_TouchFingerEvent, x, 32, 4, float, "SDL_TouchFingerEvent.x");
+BOTLISH_FLOATING(struct SDL_TouchFingerEvent, y, 36, 4, float, "SDL_TouchFingerEvent.y");
+BOTLISH_FLOATING(struct SDL_TouchFingerEvent, dx, 40, 4, float, "SDL_TouchFingerEvent.dx");
+BOTLISH_FLOATING(struct SDL_TouchFingerEvent, dy, 44, 4, float, "SDL_TouchFingerEvent.dy");
+BOTLISH_FLOATING(struct SDL_TouchFingerEvent, pressure, 48, 4, float, "SDL_TouchFingerEvent.pressure");
+BOTLISH_SCALAR(struct SDL_TouchFingerEvent, windowID, 52, 4, 0, "SDL_TouchFingerEvent.windowID");
+
+BOTLISH_RECORD(struct SDL_PinchFingerEvent, 24, 8, "SDL_PinchFingerEvent");
+BOTLISH_SCALAR(struct SDL_PinchFingerEvent, type, 0, 4, 0, "SDL_PinchFingerEvent.type_");
+BOTLISH_SCALAR(struct SDL_PinchFingerEvent, reserved, 4, 4, 0, "SDL_PinchFingerEvent.reserved");
+BOTLISH_SCALAR(struct SDL_PinchFingerEvent, timestamp, 8, 8, 0, "SDL_PinchFingerEvent.timestamp");
+BOTLISH_FLOATING(struct SDL_PinchFingerEvent, scale, 16, 4, float, "SDL_PinchFingerEvent.scale");
+BOTLISH_SCALAR(struct SDL_PinchFingerEvent, windowID, 20, 4, 0, "SDL_PinchFingerEvent.windowID");
+
 BOTLISH_RECORD(struct SDL_PenProximityEvent, 32, 8, "SDL_PenProximityEvent");
 BOTLISH_SCALAR(struct SDL_PenProximityEvent, type, 0, 4, 0, "SDL_PenProximityEvent.type_");
 BOTLISH_SCALAR(struct SDL_PenProximityEvent, reserved, 4, 4, 0, "SDL_PenProximityEvent.reserved");
@@ -346,6 +456,50 @@ BOTLISH_SCALAR(struct SDL_PenProximityEvent, windowID, 16, 4, 0, "SDL_PenProximi
 BOTLISH_SCALAR(struct SDL_PenProximityEvent, which, 20, 4, 0, "SDL_PenProximityEvent.which");
 BOTLISH_SCALAR(struct SDL_PenProximityEvent, pen_state, 24, 4, 0, "SDL_PenProximityEvent.pen_state");
 BOTLISH_SCALAR(struct SDL_PenProximityEvent, device_type, 28, 4, 1, "SDL_PenProximityEvent.device_type");
+
+BOTLISH_RECORD(struct SDL_PenMotionEvent, 40, 8, "SDL_PenMotionEvent");
+BOTLISH_SCALAR(struct SDL_PenMotionEvent, type, 0, 4, 0, "SDL_PenMotionEvent.type_");
+BOTLISH_SCALAR(struct SDL_PenMotionEvent, reserved, 4, 4, 0, "SDL_PenMotionEvent.reserved");
+BOTLISH_SCALAR(struct SDL_PenMotionEvent, timestamp, 8, 8, 0, "SDL_PenMotionEvent.timestamp");
+BOTLISH_SCALAR(struct SDL_PenMotionEvent, windowID, 16, 4, 0, "SDL_PenMotionEvent.windowID");
+BOTLISH_SCALAR(struct SDL_PenMotionEvent, which, 20, 4, 0, "SDL_PenMotionEvent.which");
+BOTLISH_SCALAR(struct SDL_PenMotionEvent, pen_state, 24, 4, 0, "SDL_PenMotionEvent.pen_state");
+BOTLISH_FLOATING(struct SDL_PenMotionEvent, x, 28, 4, float, "SDL_PenMotionEvent.x");
+BOTLISH_FLOATING(struct SDL_PenMotionEvent, y, 32, 4, float, "SDL_PenMotionEvent.y");
+BOTLISH_SCALAR(struct SDL_PenMotionEvent, device_type, 36, 4, 1, "SDL_PenMotionEvent.device_type");
+
+BOTLISH_RECORD(struct SDL_PenAxisEvent, 48, 8, "SDL_PenAxisEvent");
+BOTLISH_SCALAR(struct SDL_PenAxisEvent, type, 0, 4, 0, "SDL_PenAxisEvent.type_");
+BOTLISH_SCALAR(struct SDL_PenAxisEvent, reserved, 4, 4, 0, "SDL_PenAxisEvent.reserved");
+BOTLISH_SCALAR(struct SDL_PenAxisEvent, timestamp, 8, 8, 0, "SDL_PenAxisEvent.timestamp");
+BOTLISH_SCALAR(struct SDL_PenAxisEvent, windowID, 16, 4, 0, "SDL_PenAxisEvent.windowID");
+BOTLISH_SCALAR(struct SDL_PenAxisEvent, which, 20, 4, 0, "SDL_PenAxisEvent.which");
+BOTLISH_SCALAR(struct SDL_PenAxisEvent, pen_state, 24, 4, 0, "SDL_PenAxisEvent.pen_state");
+BOTLISH_FLOATING(struct SDL_PenAxisEvent, x, 28, 4, float, "SDL_PenAxisEvent.x");
+BOTLISH_FLOATING(struct SDL_PenAxisEvent, y, 32, 4, float, "SDL_PenAxisEvent.y");
+BOTLISH_SCALAR(struct SDL_PenAxisEvent, axis, 36, 4, 0, "SDL_PenAxisEvent.axis");
+BOTLISH_FLOATING(struct SDL_PenAxisEvent, value, 40, 4, float, "SDL_PenAxisEvent.value");
+BOTLISH_SCALAR(struct SDL_PenAxisEvent, device_type, 44, 4, 1, "SDL_PenAxisEvent.device_type");
+
+BOTLISH_RECORD(struct SDL_DropEvent, 48, 8, "SDL_DropEvent");
+BOTLISH_SCALAR(struct SDL_DropEvent, type, 0, 4, 0, "SDL_DropEvent.type_");
+BOTLISH_SCALAR(struct SDL_DropEvent, reserved, 4, 4, 0, "SDL_DropEvent.reserved");
+BOTLISH_SCALAR(struct SDL_DropEvent, timestamp, 8, 8, 0, "SDL_DropEvent.timestamp");
+BOTLISH_SCALAR(struct SDL_DropEvent, windowID, 16, 4, 0, "SDL_DropEvent.windowID");
+BOTLISH_FLOATING(struct SDL_DropEvent, x, 20, 4, float, "SDL_DropEvent.x");
+BOTLISH_FLOATING(struct SDL_DropEvent, y, 24, 4, float, "SDL_DropEvent.y");
+BOTLISH_POINTER(struct SDL_DropEvent, source, 32, 8, "SDL_DropEvent.source");
+BOTLISH_POINTER(struct SDL_DropEvent, data, 40, 8, "SDL_DropEvent.data");
+
+BOTLISH_RECORD(struct SDL_SensorEvent, 56, 8, "SDL_SensorEvent");
+BOTLISH_SCALAR(struct SDL_SensorEvent, type, 0, 4, 0, "SDL_SensorEvent.type_");
+BOTLISH_SCALAR(struct SDL_SensorEvent, reserved, 4, 4, 0, "SDL_SensorEvent.reserved");
+BOTLISH_SCALAR(struct SDL_SensorEvent, timestamp, 8, 8, 0, "SDL_SensorEvent.timestamp");
+BOTLISH_SCALAR(struct SDL_SensorEvent, which, 16, 4, 0, "SDL_SensorEvent.which");
+BOTLISH_ARRAY(struct SDL_SensorEvent, data, 6, "SDL_SensorEvent.data");
+BOTLISH_OFFSET(struct SDL_SensorEvent, data[5], 40, "SDL_SensorEvent.data, its last element");
+BOTLISH_FLOATING(struct SDL_SensorEvent, data[0], 20, 4, float, "SDL_SensorEvent.data, its first element");
+BOTLISH_SCALAR(struct SDL_SensorEvent, sensor_timestamp, 48, 8, 0, "SDL_SensorEvent.sensor_timestamp");
 
 BOTLISH_RECORD(struct SDL_QuitEvent, 16, 8, "SDL_QuitEvent");
 BOTLISH_SCALAR(struct SDL_QuitEvent, type, 0, 4, 0, "SDL_QuitEvent.type_");
@@ -367,6 +521,14 @@ BOTLISH_SCALAR(struct SDL_PathInfo, size, 8, 8, 0, "SDL_PathInfo.size");
 BOTLISH_SCALAR(struct SDL_PathInfo, create_time, 16, 8, 1, "SDL_PathInfo.create_time");
 BOTLISH_SCALAR(struct SDL_PathInfo, modify_time, 24, 8, 1, "SDL_PathInfo.modify_time");
 BOTLISH_SCALAR(struct SDL_PathInfo, access_time, 32, 8, 1, "SDL_PathInfo.access_time");
+
+BOTLISH_RECORD(struct SDL_GPUViewport, 24, 4, "SDL_GPUViewport");
+BOTLISH_FLOATING(struct SDL_GPUViewport, x, 0, 4, float, "SDL_GPUViewport.x");
+BOTLISH_FLOATING(struct SDL_GPUViewport, y, 4, 4, float, "SDL_GPUViewport.y");
+BOTLISH_FLOATING(struct SDL_GPUViewport, w, 8, 4, float, "SDL_GPUViewport.w");
+BOTLISH_FLOATING(struct SDL_GPUViewport, h, 12, 4, float, "SDL_GPUViewport.h");
+BOTLISH_FLOATING(struct SDL_GPUViewport, min_depth, 16, 4, float, "SDL_GPUViewport.min_depth");
+BOTLISH_FLOATING(struct SDL_GPUViewport, max_depth, 20, 4, float, "SDL_GPUViewport.max_depth");
 
 BOTLISH_RECORD(struct SDL_GPUTextureTransferInfo, 24, 8, "SDL_GPUTextureTransferInfo");
 BOTLISH_POINTER(struct SDL_GPUTextureTransferInfo, transfer_buffer, 0, 8, "SDL_GPUTextureTransferInfo.transfer_buffer");
@@ -673,6 +835,11 @@ BOTLISH_POINTER(struct SDL_MessageBoxData, message, 24, 8, "SDL_MessageBoxData.m
 BOTLISH_SCALAR(struct SDL_MessageBoxData, numbuttons, 32, 4, 1, "SDL_MessageBoxData.numbuttons");
 BOTLISH_POINTER(struct SDL_MessageBoxData, buttons, 40, 8, "SDL_MessageBoxData.buttons");
 BOTLISH_POINTER(struct SDL_MessageBoxData, colorScheme, 48, 8, "SDL_MessageBoxData.colorScheme");
+
+BOTLISH_RECORD(struct SDL_Vertex, 32, 4, "SDL_Vertex");
+BOTLISH_NESTED(struct SDL_Vertex, position, 0, 8, "SDL_Vertex.position");
+BOTLISH_NESTED(struct SDL_Vertex, color, 8, 16, "SDL_Vertex.color");
+BOTLISH_NESTED(struct SDL_Vertex, tex_coord, 24, 8, "SDL_Vertex.tex_coord");
 
 BOTLISH_RECORD(struct SDL_Texture, 16, 4, "SDL_Texture");
 BOTLISH_SCALAR(struct SDL_Texture, format, 0, 4, 0, "SDL_Texture.format");

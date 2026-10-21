@@ -1,0 +1,258 @@
+# Mutants of C float and C double across the FFI (audit/c-float-ffi/tools/
+# mutate.tcl; C-FLOAT-FFI-MILESTONE-1.md): each a deliberate bug in the type
+# model, the boundary rules (core/cabi.tcl, native/src/runtime/value.rs, the
+# generated code of native/src/codegen/clif.rs), the layouts or the static
+# decisions. The brief's mutants first, then further ones. (The binding
+# generator's float/double swaps are audit/c-bindgen/tools/mutants.txt's:
+# bindgen-float-as-double, bindgen-double-as-float, bindgen-long-double-as-
+# double, bindgen-float-width-carrier, layout-float-as-integer.)
+#
+#   @@ NAME DESCRIPTION
+#   %% TARGET ...            (optional: the hosts the mutant runs on)
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# Lines starting with # outside an edit are comments.
+
+# --- the brief's mutants -----------------------------------------------------
+
+@@ f32-layout-width-as-f64 a C float is laid out as a binary64: 8 bytes wide in every layout (its offsets, bounds and size checked against the carrier's width)
+## core/cabi.tcl
+<<<<
+    binary32 {bytes 4 class f32 precision 24 maxExponent 127}
+====
+    binary32 {bytes 8 class f32 precision 24 maxExponent 127}
+>>>>
+
+@@ f32-load-without-widening a C float read from native memory or bytes natively is its four bytes taken as a binary64's bits, not the binary32 widened
+## native/src/runtime/value.rs
+<<<<
+        CFloatFormat::Binary32 => f32::from_bits(bits as u32) as f64,
+====
+        CFloatFormat::Binary32 => f64::from_bits(bits),
+>>>>
+
+@@ tcl-f32-load-without-widening a C float the Tcl backends read is its bits taken as a binary64's, not the binary32 widened
+## core/cabi.tcl
+<<<<
+            set nonFinite 0xff
+            binary scan [binary format iu $bits] r x
+====
+            set nonFinite 0xff
+            binary scan [binary format wu $bits] q x
+>>>>
+
+@@ narrowing-unchecked a Float64 past the binary32 range is passed to C unchecked: the argument becomes an infinity (the generated code's check against the largest float made vacuous)
+## native/src/codegen/clif.rs
+<<<<
+        let largest = self.b.ins().f32const(f32::MAX);
+====
+        let largest = self.b.ins().f32const(f32::INFINITY);
+>>>>
+
+@@ layout-narrowing-unchecked a Float64 past the binary32 range is stored natively as an infinity: the runtime's narrowing never fails
+## native/src/runtime/value.rs
+<<<<
+            if n.is_finite() { Ok(n.to_bits() as u64) } else { Err(super::ops::non_finite_code(n as f64)) }
+====
+            Ok(n.to_bits() as u64)
+>>>>
+
+@@ overflow-clamped a Float64 past the binary32 range is clamped to the largest float of its sign instead of failing (natively)
+## native/src/runtime/value.rs
+<<<<
+            if n.is_finite() { Ok(n.to_bits() as u64) } else { Err(super::ops::non_finite_code(n as f64)) }
+====
+            if n.is_finite() { Ok(n.to_bits() as u64) } else { Ok(f32::MAX.copysign(n).to_bits() as u64) }
+>>>>
+
+@@ tcl-overflow-clamped a Float64 past the binary32 range is clamped to the largest float (the Tcl backends: binary format r's own clamping, the threshold check gone)
+## core/cabi.tcl
+<<<<
+            if {abs($x) >= $binary32Overflow} {
+====
+            if {0} {
+>>>>
+
+@@ nonfinite-result-admitted a NaN or an infinity a C function returns becomes a Float64 (the generated code's finiteness check made vacuous for an infinity)
+## native/src/codegen/clif.rs
+<<<<
+            let r = self.b.ins().fadd(wide, zero);
+            let magnitude = self.b.ins().fabs(r);
+            let largest = self.b.ins().f64const(f64::MAX);
+====
+            let r = self.b.ins().fadd(wide, zero);
+            let magnitude = self.b.ins().fabs(r);
+            let largest = self.b.ins().f64const(f64::INFINITY);
+>>>>
+
+@@ nonfinite-memory-admitted a NaN or an infinity read from native memory or bytes natively becomes a Float64
+## native/src/runtime/value.rs
+<<<<
+    match FloatType::Float64.admit(x) {
+        Some(admitted) => Ok(admitted),
+        None => Err(super::ops::non_finite_code(x)),
+    }
+====
+    match FloatType::Float64.admit(x) {
+        Some(admitted) => Ok(admitted),
+        None => Ok(x.to_bits()),
+    }
+>>>>
+
+@@ tcl-nonfinite-admitted a NaN or an infinity the Tcl backends read from bytes is admitted (as whatever Tcl makes of it)
+## core/cabi.tcl
+<<<<
+    if {$top == $nonFinite} {
+        if {$fraction != 0} {
+====
+    if {0} {
+        if {$fraction != 0} {
+>>>>
+
+@@ negative-zero-preserved-result a negative zero a C function returns stays negative (the generated code's `r + 0.0` dropped)
+## native/src/codegen/clif.rs
+<<<<
+            let r = self.b.ins().fadd(wide, zero);
+====
+            let r = { let _ = zero; wide };
+>>>>
+
+@@ negative-zero-preserved-argument a tiny negative Float64 narrowed for a C float argument is C's negative zero (the generated code's `n + 0.0` dropped)
+## native/src/codegen/clif.rs
+<<<<
+        let n = self.b.ins().fadd(narrowed, zero);
+====
+        let n = { let _ = zero; narrowed };
+>>>>
+
+@@ negative-zero-preserved-store a tiny negative Float64 stored natively into a float field is negative zero
+## native/src/runtime/value.rs
+<<<<
+            let n = (x as f32) + 0.0;
+====
+            let n = x as f32;
+>>>>
+
+@@ tcl-negative-zero-preserved a negative zero the Tcl backends read stays negative
+## core/cabi.tcl
+<<<<
+    return [list ok [expr {$x + 0.0}]]
+}
+
+# Admit from the little-endian FORMAT value
+====
+    return [list ok $x]
+}
+
+# Admit from the little-endian FORMAT value
+>>>>
+
+@@ float-double-collapsed ffi::c::Float resolves to ffi::c::Double wherever a C type is named: one C type of both
+## hir/cabi.tcl
+<<<<
+proc hir::cabi::FloatingType {name} {
+    return [list cfloat $name]
+}
+====
+proc hir::cabi::FloatingType {name} {
+    return [list cfloat Double]
+}
+>>>>
+
+@@ stride-carrier-width an array of C floats strides the carrier's 8 bytes, not the C type's 4
+## hir/layouts.tcl
+<<<<
+        set stride [dict get $element width]
+        set width [expr {$extent * $stride}]
+        if {$width > $maxSize} {
+====
+        set stride [expr {[dict get $element kind] eq "float" ? 8 : [dict get $element width]}]
+        set width [expr {$extent * $stride}]
+        if {$width > $maxSize} {
+>>>>
+
+# --- further mutants ---------------------------------------------------------
+
+@@ extern-float-class-f64 an extern's C float parameter or result is passed in the ABI class of a double (f64): C reads a binary64 where it expects a binary32
+## hir/foreign.tcl
+<<<<
+        return [dict get [hir::cabi::FloatingInfo $type] class]
+====
+        return f64
+>>>>
+
+@@ extern-narrowing-undeclared a call with a C float parameter (and no floating result) declares no NonFiniteFloat: its overflow is an error no handler may name
+## hir/foreign.tcl
+<<<<
+        if {[hir::cabi::IsFloating $result] || [NarrowedParameters $abi] ne ""} {
+====
+        if {[hir::cabi::IsFloating $result]} {
+>>>>
+
+@@ static-narrowing-at-largest-float the compile-time decision rejects every literal above the largest float, also those that round down to it (a rule of its own, not the boundary's)
+## hir/completions.tcl
+<<<<
+        if {[lindex [core::cabi::Narrow binary32 [core::value::floatOf $v]] 0] ne "ok"} {
+            return out
+====
+        if {abs([core::value::floatOf $v]) > 3.4028234663852886e38} {
+            return out
+>>>>
+
+@@ layout-binary32-write-uncharged a write or emit of a C float field declares no NonFiniteFloat
+## hir/layouts.tcl
+<<<<
+            if {"binary32" in [WordsFormats $words]} {
+                return NonFiniteFloat
+            }
+====
+            if {0} {
+                return NonFiniteFloat
+            }
+>>>>
+
+@@ projection-read-infallible a C floating field read through a native view declares no NonFiniteFloat
+## hir/layouts.tcl
+<<<<
+    return [expr {$field ne "" && [lindex $field 2] eq "f"}]
+====
+    return 0
+>>>>
+
+@@ native-float-encoding-as-integer the native layout codec reads and writes a C floating field as an unsigned integer of its width
+## native/src/runtime/ops.rs
+<<<<
+    let float = if c & 64 != 0 {
+        if signed {
+            return None;
+        }
+        Some(CFloatFormat::of_width(width)?)
+    } else {
+        None
+    };
+====
+    let float: Option<CFloatFormat> = None;
+>>>>
+
+@@ tcl-float-piece-as-binary64 the Tcl codec writes every C floating field as a binary64, whatever its width
+## core/binary.tcl
+<<<<
+    set format [core::cabi::formatOfWidth $width]
+    set encoded [core::cabi::EncodeFloating $format [core::value::floatOf $value]]
+====
+    set format binary64
+    set encoded [core::cabi::EncodeFloating $format [core::value::floatOf $value]]
+>>>>
+
+@@ tcl-extern-narrowing-skipped the Tcl backends refuse a C call without first narrowing its C float arguments (an overflow becomes NATIVE-ONLY, not NonFiniteFloat)
+## core/cabi.tcl
+<<<<
+        if {$class eq "f32"} {
+====
+        if {0} {
+>>>>

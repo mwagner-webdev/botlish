@@ -184,11 +184,11 @@ fn describe(value: Named) -> str:
 describe(Person {value: "ada"})
 }
 
-test hx-program-runs {the test program runs on every backend (its outcome is the baseline of every round trip below)} -body {
+test hx-program-runs {the test program runs on every backend (its outcome is the baseline of every round trip below)} -constraints nativeCoroutines -body {
     hxOutcomes [hxCompile $::hxProgram]
 } -result {{ok {[34, 3, 10, 110, "worker"]}} {ok {[34, 3, 10, 110, "worker"]}} {ok {[34, 3, 10, 110, "worker"]}} {ok {[34, 3, 10, 110, "worker"]}}}
 
-test hx-roundtrip-in-process {a HIR encoded, then decoded after another program declaring the same names differently was compiled: the HIR read back is the HIR written (without its trait source), its declarations are the active ones (as after its build), and it lowers and runs exactly as it did} -body {
+test hx-roundtrip-in-process {a HIR encoded, then decoded after another program declaring the same names differently was compiled: the HIR read back is the HIR written (without its trait source), its declarations are the active ones (as after its build), and it lowers and runs exactly as it did} -constraints nativeCoroutines -body {
     set hir [hxCompile $::hxProgram]
     set before [hxOutcomes $hir]
     set artifacts [hxArtifacts $hir]
@@ -213,7 +213,7 @@ test hx-text-shape {the text: a header line naming the format and its version, t
 } -result {{botlish-hir-interchange 1} {compiler requires hir} 1 1 0 {
 }}
 
-test hx-fresh-process {a HIR written to a file and read by a fresh process, which runs no front end (no build): the same core IR, the same NIR and the same outcome on every backend} -setup {
+test hx-fresh-process {a HIR written to a file and read by a fresh process, which runs no front end (no build): the same core IR, the same NIR and the same outcome on every backend} -constraints nativeCoroutines -setup {
     set dir [makeDirectory hx-fresh]
 } -body {
     set hir [hxCompile $::hxProgram]
@@ -257,7 +257,7 @@ test hx-trait-source {a trait program's checked source build (traitSource) is le
         [expr {$full eq $hir}] [hxOutcomes $lean] [hxOutcomes $full]
 } -result {1 0 1 {{ok {"ada"}} {ok {"ada"}} {ok {"ada"}} {ok {"ada"}}} {{ok {"ada"}} {ok {"ada"}} {ok {"ada"}} {ok {"ada"}}}}
 
-test hx-decode-after-failed-compilation {decoding after a compilation that failed half way installs the text's declarations (the failure left the registries unknown, never the HIR's own)} -body {
+test hx-decode-after-failed-compilation {decoding after a compilation that failed half way installs the text's declarations (the failure left the registries unknown, never the HIR's own)} -constraints nativeCoroutines -body {
     set hir [hxCompile $::hxProgram]
     set text [hir::interchange::encode $hir]
     catch {hxCompile {type Small = Int in 5..1
@@ -318,7 +318,7 @@ test hx-fingerprint {the fingerprint is the front end's Tcl sources (core, hir, 
     removeDirectory hx-fingerprint
 } -result {1 1 1 1}
 
-test hx-main {main.tcl -emit-hir-interchange writes FILE.hirx beside FILE.bot without running it; main.tcl runs FILE.hirx on every backend with the value FILE.bot has} -setup {
+test hx-main {main.tcl -emit-hir-interchange writes FILE.hirx beside FILE.bot without running it; main.tcl runs FILE.hirx on every backend with the value FILE.bot has} -constraints nativeCoroutines -setup {
     set dir [makeDirectory hx-main]
 } -body {
     set path [hxWrite [file join $dir program.bot] $::hxProgram]

@@ -1,5 +1,12 @@
 # C-ABI-TYPES.md
 
+> Partially superseded by C-FLOAT-FFI-MILESTONE-1.md: `ffi::c::Float`
+> (C `float`, binary32) and `ffi::c::Double` (C `double`, binary64) are C
+> representations `{cfloat NAME}` whose values are Float64s, admitted as
+> pointees (`Ptr[ffi::c::Float]`, `Ptr[ffi::c::Double]`) and in function
+> pointer signatures; C `long double` still has no type ("No `size_t`; one
+> floating type").
+
 The smallest C ABI type universe the header archaeology justifies: C integer
 scalars by identity, `ffi::c::Void`, typed data pointers, function-pointer
 types, and the five pointer operations -- plus the general callable
@@ -738,8 +745,17 @@ killed by `ca-ptr-wide-address`, and the fuzzer now draws addresses up to
 (nesting, pointee categories, clone/erase/retype sequences, invalid pointees
 and retypes), scalar bound probes on random targets and imprinting calls,
 each with its outcome computed by an independent model in the fuzzer (its
-own copy of the data models), and runs every accepted program on all four
-backends: 0 disagreements in 40 programs each for seeds 1, 17 and 41.
+own copy of the data models), and runs every accepted program on every
+backend that runs its target here (`backendsFor`, keyed by the HIR's target:
+all four for the host's, the Tcl backends for another, whose program the
+native driver refuses: NATIVE TARGET): 0 disagreements in 40 programs each
+for seeds 1, 17 and 41. After the compilation-targets milestone it ran other
+targets' programs natively too and reported every refusal as a disagreement
+(seeds 1, 2 and 7: 3, 9 and 4; seed 7 is mutate.tcl's, so its fuzz verdict
+killed every mutant); since keying the backends by target (2026-10-21) it
+reports 0 for seeds 1-7, 17, 41 and 99 and in 300 programs each for seeds 11
+and 12, and at mutate.tcl's seed kills 15 of the 26 mutants by itself (the
+test file kills all 26).
 
 ## Compiler performance
 

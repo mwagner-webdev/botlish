@@ -162,3 +162,17 @@ int __attribute__((stdcall)) bgf_stdcall(int x) { return x + 1; }
 #if defined(__x86_64__)
 int bgf_take_ms(bgf_ms_callback cb) { return cb == 0; }
 #endif
+
+/* C float and double (bgf.h's last section, C-FLOAT-FFI-MILESTONE-1.md). */
+bgf_real32 bgf_scale32(bgf_scalar32 x, bgf_scalar64 k) { return (float)(x * k); }
+double bgf_dot(const float *xs, const double *ys, size_t n) {
+    double s = 0.0;
+    for (size_t i = 0; i < n; i++) s += (double)xs[i] * ys[i];
+    return s;
+}
+float bgf_apply_float(bgf_float_fn f, float x) { return f(x); }
+static float halve(float x) { return x / 2.0f; }
+bgf_float_fn bgf_halver(void) { return halve; }
+double bgf_sum_mixed(const bgf_mixed_floats *m) { return m->tag + m->a + m->b + m->c; }
+long double bgf_long_scale(long double x) { return x * 2; }
+double bgf_long_ptr(long double *x) { return (double)*x; }

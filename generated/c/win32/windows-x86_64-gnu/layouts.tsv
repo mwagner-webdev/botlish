@@ -3159,7 +3159,7 @@ record	struct HBRUSH__	-	HBRUSH__	layout-direct	-	4	4	struct HBRUSH__	-	identity
 field	struct HBRUSH__	0	unused	scalar	0	4	-	int unused	ffi::c::Int	c=unused
 record	struct HCOLORSPACE__	-	HCOLORSPACE__	layout-direct	-	4	4	struct HCOLORSPACE__	-	identity=win32::ctypes::HCOLORSPACE__; header=windef.h:46; pointed-by=9
 field	struct HCOLORSPACE__	0	unused	scalar	0	4	-	int unused	ffi::c::Int	c=unused
-record	struct HDC__	-	HDC__	layout-direct	-	4	4	struct HDC__	-	identity=win32::ctypes::HDC__; header=windef.h:47; pointed-by=322
+record	struct HDC__	-	HDC__	layout-direct	-	4	4	struct HDC__	-	identity=win32::ctypes::HDC__; header=windef.h:47; pointed-by=331
 field	struct HDC__	0	unused	scalar	0	4	-	int unused	ffi::c::Int	c=unused
 record	struct HGLRC__	-	HGLRC__	layout-direct	-	4	4	struct HGLRC__	-	identity=win32::ctypes::HGLRC__; header=windef.h:48; pointed-by=7
 field	struct HGLRC__	0	unused	scalar	0	4	-	int unused	ffi::c::Int	c=unused
@@ -3946,13 +3946,13 @@ field	struct _PSFEATURE_CUSTPAPER	1	lWidth	scalar	4	4	-	LONG lWidth	ffi::c::Long
 field	struct _PSFEATURE_CUSTPAPER	2	lHeight	scalar	8	4	-	LONG lHeight	ffi::c::Long	c=lHeight
 field	struct _PSFEATURE_CUSTPAPER	3	lWidthOffset	scalar	12	4	-	LONG lWidthOffset	ffi::c::Long	c=lWidthOffset
 field	struct _PSFEATURE_CUSTPAPER	4	lHeightOffset	scalar	16	4	-	LONG lHeightOffset	ffi::c::Long	c=lHeightOffset
-record	struct tagXFORM	-	-	layout-blocked	-	24	4	struct tagXFORM	-	typedefs=XFORM; identity=win32::ctypes::XFORM; header=wingdi.h:452; blockers=float: field eM11: float (FLOAT) | float: field eM12: float (FLOAT) | float: field eM21: float (FLOAT) | float: field eM22: float (FLOAT) | float: field eDx: float (FLOAT) | float: field eDy: float (FLOAT); roots=float; pointed-by=5
-field	struct tagXFORM	0	eM11	float	0	4	-	FLOAT eM11	-	c=eM11; blockers=float: float (FLOAT)
-field	struct tagXFORM	1	eM12	float	4	4	-	FLOAT eM12	-	c=eM12; blockers=float: float (FLOAT)
-field	struct tagXFORM	2	eM21	float	8	4	-	FLOAT eM21	-	c=eM21; blockers=float: float (FLOAT)
-field	struct tagXFORM	3	eM22	float	12	4	-	FLOAT eM22	-	c=eM22; blockers=float: float (FLOAT)
-field	struct tagXFORM	4	eDx	float	16	4	-	FLOAT eDx	-	c=eDx; blockers=float: float (FLOAT)
-field	struct tagXFORM	5	eDy	float	20	4	-	FLOAT eDy	-	c=eDy; blockers=float: float (FLOAT)
+record	struct tagXFORM	-	XFORM	layout-direct	-	24	4	struct tagXFORM	-	typedefs=XFORM; identity=win32::ctypes::XFORM; header=wingdi.h:452; pointed-by=5
+field	struct tagXFORM	0	eM11	scalar	0	4	-	FLOAT eM11	ffi::c::Float	c=eM11
+field	struct tagXFORM	1	eM12	scalar	4	4	-	FLOAT eM12	ffi::c::Float	c=eM12
+field	struct tagXFORM	2	eM21	scalar	8	4	-	FLOAT eM21	ffi::c::Float	c=eM21
+field	struct tagXFORM	3	eM22	scalar	12	4	-	FLOAT eM22	ffi::c::Float	c=eM22
+field	struct tagXFORM	4	eDx	scalar	16	4	-	FLOAT eDx	ffi::c::Float	c=eDx
+field	struct tagXFORM	5	eDy	scalar	20	4	-	FLOAT eDy	ffi::c::Float	c=eDy
 record	struct tagBITMAP	-	BITMAP	layout-direct	-	32	8	struct tagBITMAP	-	typedefs=BITMAP; identity=win32::ctypes::BITMAP; header=wingdi.h:461; pointed-by=1
 field	struct tagBITMAP	0	bmType	scalar	0	4	-	LONG bmType	ffi::c::Long	c=bmType
 field	struct tagBITMAP	1	bmWidth	scalar	4	4	-	LONG bmWidth	ffi::c::Long	c=bmWidth
@@ -4683,10 +4683,10 @@ record	struct _ABC	-	ABC	layout-direct	-	12	4	struct _ABC	-	typedefs=ABC; identi
 field	struct _ABC	0	abcA	scalar	0	4	-	int abcA	ffi::c::Int	c=abcA
 field	struct _ABC	1	abcB	scalar	4	4	-	UINT abcB	ffi::c::UInt	c=abcB
 field	struct _ABC	2	abcC	scalar	8	4	-	int abcC	ffi::c::Int	c=abcC
-record	struct _ABCFLOAT	-	-	layout-blocked	-	12	4	struct _ABCFLOAT	-	typedefs=ABCFLOAT; identity=win32::ctypes::ABCFLOAT; header=wingdi.h:2445; blockers=float: field abcfA: float (FLOAT) | float: field abcfB: float (FLOAT) | float: field abcfC: float (FLOAT); roots=float; pointed-by=3
-field	struct _ABCFLOAT	0	abcfA	float	0	4	-	FLOAT abcfA	-	c=abcfA; blockers=float: float (FLOAT)
-field	struct _ABCFLOAT	1	abcfB	float	4	4	-	FLOAT abcfB	-	c=abcfB; blockers=float: float (FLOAT)
-field	struct _ABCFLOAT	2	abcfC	float	8	4	-	FLOAT abcfC	-	c=abcfC; blockers=float: float (FLOAT)
+record	struct _ABCFLOAT	-	ABCFLOAT	layout-direct	-	12	4	struct _ABCFLOAT	-	typedefs=ABCFLOAT; identity=win32::ctypes::ABCFLOAT; header=wingdi.h:2445; pointed-by=3
+field	struct _ABCFLOAT	0	abcfA	scalar	0	4	-	FLOAT abcfA	ffi::c::Float	c=abcfA
+field	struct _ABCFLOAT	1	abcfB	scalar	4	4	-	FLOAT abcfB	ffi::c::Float	c=abcfB
+field	struct _ABCFLOAT	2	abcfC	scalar	8	4	-	FLOAT abcfC	ffi::c::Float	c=abcfC
 record	struct _OUTLINETEXTMETRICA	-	OUTLINETEXTMETRICA	layout-direct	-	232	8	struct _OUTLINETEXTMETRICA	-	typedefs=OUTLINETEXTMETRICA; identity=win32::ctypes::OUTLINETEXTMETRICA; header=wingdi.h:2455; deps=struct tagPANOSE,struct tagPOINT,struct tagRECT,struct tagTEXTMETRICA; pointed-by=1
 field	struct _OUTLINETEXTMETRICA	0	otmSize	scalar	0	4	-	UINT otmSize	ffi::c::UInt	c=otmSize
 field	struct _OUTLINETEXTMETRICA	1	otmTextMetrics	nested	4	56	-	TEXTMETRICA otmTextMetrics	TEXTMETRICA	c=otmTextMetrics
@@ -4955,9 +4955,9 @@ field	struct tagABORTPATH	0	emr	nested	0	8	-	EMR emr	EMR	c=emr
 record	struct tagEMRSELECTCLIPPATH	-	EMRSELECTCLIPPATH	layout-direct	-	12	4	struct tagEMRSELECTCLIPPATH	-	typedefs=EMRSELECTCLIPPATH,EMRSETBKMODE,EMRSETMAPMODE,EMRSETLAYOUT,EMRSETPOLYFILLMODE,EMRSETROP2,EMRSETSTRETCHBLTMODE,EMRSETICMMODE,EMRSETTEXTALIGN; identity=-; header=wingdi.h:3693; deps=struct tagEMR
 field	struct tagEMRSELECTCLIPPATH	0	emr	nested	0	8	-	EMR emr	EMR	c=emr
 field	struct tagEMRSELECTCLIPPATH	1	iMode	scalar	8	4	-	DWORD iMode	ffi::c::ULong	c=iMode
-record	struct tagEMRSETMITERLIMIT	-	-	layout-blocked	-	12	4	struct tagEMRSETMITERLIMIT	-	typedefs=EMRSETMITERLIMIT; identity=-; header=wingdi.h:3700; blockers=float: field eMiterLimit: float (FLOAT); roots=float; deps=struct tagEMR
+record	struct tagEMRSETMITERLIMIT	-	EMRSETMITERLIMIT	layout-direct	-	12	4	struct tagEMRSETMITERLIMIT	-	typedefs=EMRSETMITERLIMIT; identity=-; header=wingdi.h:3700; deps=struct tagEMR
 field	struct tagEMRSETMITERLIMIT	0	emr	nested	0	8	-	EMR emr	EMR	c=emr
-field	struct tagEMRSETMITERLIMIT	1	eMiterLimit	float	8	4	-	FLOAT eMiterLimit	-	c=eMiterLimit; blockers=float: float (FLOAT)
+field	struct tagEMRSETMITERLIMIT	1	eMiterLimit	scalar	8	4	-	FLOAT eMiterLimit	ffi::c::Float	c=eMiterLimit
 record	struct tagEMRRESTOREDC	-	EMRRESTOREDC	layout-direct	-	12	4	struct tagEMRRESTOREDC	-	typedefs=EMRRESTOREDC; identity=-; header=wingdi.h:3705; deps=struct tagEMR
 field	struct tagEMRRESTOREDC	0	emr	nested	0	8	-	EMR emr	EMR	c=emr
 field	struct tagEMRRESTOREDC	1	iRelative	scalar	8	4	-	LONG iRelative	ffi::c::Long	c=iRelative
@@ -5022,10 +5022,10 @@ field	struct tagEMRSCALEVIEWPORTEXTEX	1	xNum	scalar	8	4	-	LONG xNum	ffi::c::Long
 field	struct tagEMRSCALEVIEWPORTEXTEX	2	xDenom	scalar	12	4	-	LONG xDenom	ffi::c::Long	c=xDenom
 field	struct tagEMRSCALEVIEWPORTEXTEX	3	yNum	scalar	16	4	-	LONG yNum	ffi::c::Long	c=yNum
 field	struct tagEMRSCALEVIEWPORTEXTEX	4	yDenom	scalar	20	4	-	LONG yDenom	ffi::c::Long	c=yDenom
-record	struct tagEMRSETWORLDTRANSFORM	-	-	layout-blocked	-	32	4	struct tagEMRSETWORLDTRANSFORM	-	typedefs=EMRSETWORLDTRANSFORM; identity=-; header=wingdi.h:3806; nested=field xform (struct tagXFORM, field) -> float; roots=float; deps=struct tagEMR,struct tagXFORM
+record	struct tagEMRSETWORLDTRANSFORM	-	EMRSETWORLDTRANSFORM	layout-direct	-	32	4	struct tagEMRSETWORLDTRANSFORM	-	typedefs=EMRSETWORLDTRANSFORM; identity=-; header=wingdi.h:3806; deps=struct tagEMR,struct tagXFORM
 field	struct tagEMRSETWORLDTRANSFORM	0	emr	nested	0	8	-	EMR emr	EMR	c=emr
 field	struct tagEMRSETWORLDTRANSFORM	1	xform	nested	8	24	-	XFORM xform	XFORM	c=xform
-record	struct tagEMRMODIFYWORLDTRANSFORM	-	-	layout-blocked	-	36	4	struct tagEMRMODIFYWORLDTRANSFORM	-	typedefs=EMRMODIFYWORLDTRANSFORM; identity=-; header=wingdi.h:3811; nested=field xform (struct tagXFORM, field) -> float; roots=float; deps=struct tagEMR,struct tagXFORM
+record	struct tagEMRMODIFYWORLDTRANSFORM	-	EMRMODIFYWORLDTRANSFORM	layout-direct	-	36	4	struct tagEMRMODIFYWORLDTRANSFORM	-	typedefs=EMRMODIFYWORLDTRANSFORM; identity=-; header=wingdi.h:3811; deps=struct tagEMR,struct tagXFORM
 field	struct tagEMRMODIFYWORLDTRANSFORM	0	emr	nested	0	8	-	EMR emr	EMR	c=emr
 field	struct tagEMRMODIFYWORLDTRANSFORM	1	xform	nested	8	24	-	XFORM xform	XFORM	c=xform
 field	struct tagEMRMODIFYWORLDTRANSFORM	2	iMode	scalar	32	4	-	DWORD iMode	ffi::c::ULong	c=iMode
@@ -5050,12 +5050,12 @@ field	struct tagEMRARC	0	emr	nested	0	8	-	EMR emr	EMR	c=emr
 field	struct tagEMRARC	1	rclBox	nested	8	16	-	RECTL rclBox	RECTL	c=rclBox
 field	struct tagEMRARC	2	ptlStart	nested	24	8	-	POINTL ptlStart	POINTL	c=ptlStart
 field	struct tagEMRARC	3	ptlEnd	nested	32	8	-	POINTL ptlEnd	POINTL	c=ptlEnd
-record	struct tagEMRANGLEARC	-	-	layout-blocked	-	28	4	struct tagEMRANGLEARC	-	typedefs=EMRANGLEARC; identity=-; header=wingdi.h:3848; blockers=float: field eStartAngle: float (FLOAT) | float: field eSweepAngle: float (FLOAT); roots=float; deps=struct _POINTL,struct tagEMR
+record	struct tagEMRANGLEARC	-	EMRANGLEARC	layout-direct	-	28	4	struct tagEMRANGLEARC	-	typedefs=EMRANGLEARC; identity=-; header=wingdi.h:3848; deps=struct _POINTL,struct tagEMR
 field	struct tagEMRANGLEARC	0	emr	nested	0	8	-	EMR emr	EMR	c=emr
 field	struct tagEMRANGLEARC	1	ptlCenter	nested	8	8	-	POINTL ptlCenter	POINTL	c=ptlCenter
 field	struct tagEMRANGLEARC	2	nRadius	scalar	16	4	-	DWORD nRadius	ffi::c::ULong	c=nRadius
-field	struct tagEMRANGLEARC	3	eStartAngle	float	20	4	-	FLOAT eStartAngle	-	c=eStartAngle; blockers=float: float (FLOAT)
-field	struct tagEMRANGLEARC	4	eSweepAngle	float	24	4	-	FLOAT eSweepAngle	-	c=eSweepAngle; blockers=float: float (FLOAT)
+field	struct tagEMRANGLEARC	3	eStartAngle	scalar	20	4	-	FLOAT eStartAngle	ffi::c::Float	c=eStartAngle
+field	struct tagEMRANGLEARC	4	eSweepAngle	scalar	24	4	-	FLOAT eSweepAngle	ffi::c::Float	c=eSweepAngle
 record	struct tagEMRPOLYLINE	-	EMRPOLYLINE	layout-direct	-	36	4	struct tagEMRPOLYLINE	-	typedefs=EMRPOLYLINE,EMRPOLYBEZIER,EMRPOLYGON,EMRPOLYBEZIERTO,EMRPOLYLINETO; identity=-; header=wingdi.h:3856; deps=struct _POINTL,struct _RECTL,struct tagEMR
 field	struct tagEMRPOLYLINE	0	emr	nested	0	8	-	EMR emr	EMR	c=emr
 field	struct tagEMRPOLYLINE	1	rclBounds	nested	8	16	-	RECTL rclBounds	RECTL	c=rclBounds
@@ -5115,22 +5115,22 @@ field	struct tagEMREXTSELECTCLIPRGN	0	emr	nested	0	8	-	EMR emr	EMR	c=emr
 field	struct tagEMREXTSELECTCLIPRGN	1	cbRgnData	scalar	8	4	-	DWORD cbRgnData	ffi::c::ULong	c=cbRgnData
 field	struct tagEMREXTSELECTCLIPRGN	2	iMode	scalar	12	4	-	DWORD iMode	ffi::c::ULong	c=iMode
 field	struct tagEMREXTSELECTCLIPRGN	3	RgnData	array	16	1	-	BYTE RgnData[1]	array 1 of ffi::c::UChar	c=RgnData; element=char BYTE; bounds=1; extent=1
-record	struct tagEMREXTTEXTOUTA	-	-	layout-blocked	-	76	4	struct tagEMREXTTEXTOUTA	-	typedefs=EMREXTTEXTOUTA,EMREXTTEXTOUTW; identity=-; header=wingdi.h:3935; blockers=float: field exScale: float (FLOAT) | float: field eyScale: float (FLOAT); roots=float; deps=struct _RECTL,struct tagEMR,struct tagEMRTEXT
+record	struct tagEMREXTTEXTOUTA	-	EMREXTTEXTOUTA	layout-direct	-	76	4	struct tagEMREXTTEXTOUTA	-	typedefs=EMREXTTEXTOUTA,EMREXTTEXTOUTW; identity=-; header=wingdi.h:3935; deps=struct _RECTL,struct tagEMR,struct tagEMRTEXT
 field	struct tagEMREXTTEXTOUTA	0	emr	nested	0	8	-	EMR emr	EMR	c=emr
 field	struct tagEMREXTTEXTOUTA	1	rclBounds	nested	8	16	-	RECTL rclBounds	RECTL	c=rclBounds
 field	struct tagEMREXTTEXTOUTA	2	iGraphicsMode	scalar	24	4	-	DWORD iGraphicsMode	ffi::c::ULong	c=iGraphicsMode
-field	struct tagEMREXTTEXTOUTA	3	exScale	float	28	4	-	FLOAT exScale	-	c=exScale; blockers=float: float (FLOAT)
-field	struct tagEMREXTTEXTOUTA	4	eyScale	float	32	4	-	FLOAT eyScale	-	c=eyScale; blockers=float: float (FLOAT)
+field	struct tagEMREXTTEXTOUTA	3	exScale	scalar	28	4	-	FLOAT exScale	ffi::c::Float	c=exScale
+field	struct tagEMREXTTEXTOUTA	4	eyScale	scalar	32	4	-	FLOAT eyScale	ffi::c::Float	c=eyScale
 field	struct tagEMREXTTEXTOUTA	5	emrtext	nested	36	40	-	EMRTEXT emrtext	EMRTEXT	c=emrtext
-record	struct tagEMRPOLYTEXTOUTA	-	-	layout-blocked	-	80	4	struct tagEMRPOLYTEXTOUTA	-	typedefs=EMRPOLYTEXTOUTA,EMRPOLYTEXTOUTW; identity=-; header=wingdi.h:3944; blockers=float: field exScale: float (FLOAT) | float: field eyScale: float (FLOAT); roots=float; deps=struct _RECTL,struct tagEMR,struct tagEMRTEXT
+record	struct tagEMRPOLYTEXTOUTA	-	EMRPOLYTEXTOUTA	layout-direct	-	80	4	struct tagEMRPOLYTEXTOUTA	-	typedefs=EMRPOLYTEXTOUTA,EMRPOLYTEXTOUTW; identity=-; header=wingdi.h:3944; deps=struct _RECTL,struct tagEMR,struct tagEMRTEXT
 field	struct tagEMRPOLYTEXTOUTA	0	emr	nested	0	8	-	EMR emr	EMR	c=emr
 field	struct tagEMRPOLYTEXTOUTA	1	rclBounds	nested	8	16	-	RECTL rclBounds	RECTL	c=rclBounds
 field	struct tagEMRPOLYTEXTOUTA	2	iGraphicsMode	scalar	24	4	-	DWORD iGraphicsMode	ffi::c::ULong	c=iGraphicsMode
-field	struct tagEMRPOLYTEXTOUTA	3	exScale	float	28	4	-	FLOAT exScale	-	c=exScale; blockers=float: float (FLOAT)
-field	struct tagEMRPOLYTEXTOUTA	4	eyScale	float	32	4	-	FLOAT eyScale	-	c=eyScale; blockers=float: float (FLOAT)
+field	struct tagEMRPOLYTEXTOUTA	3	exScale	scalar	28	4	-	FLOAT exScale	ffi::c::Float	c=exScale
+field	struct tagEMRPOLYTEXTOUTA	4	eyScale	scalar	32	4	-	FLOAT eyScale	ffi::c::Float	c=eyScale
 field	struct tagEMRPOLYTEXTOUTA	5	cStrings	scalar	36	4	-	LONG cStrings	ffi::c::Long	c=cStrings
 field	struct tagEMRPOLYTEXTOUTA	6	aemrtext	array	40	40	-	EMRTEXT aemrtext[1]	array 1 of EMRTEXT	c=aemrtext; element=record EMRTEXT; bounds=1; extent=1
-record	struct tagEMRBITBLT	-	-	layout-blocked	-	100	4	struct tagEMRBITBLT	-	typedefs=EMRBITBLT; identity=-; header=wingdi.h:3954; nested=field xformSrc (struct tagXFORM, field) -> float; roots=float; deps=struct _RECTL,struct tagEMR,struct tagXFORM
+record	struct tagEMRBITBLT	-	EMRBITBLT	layout-direct	-	100	4	struct tagEMRBITBLT	-	typedefs=EMRBITBLT; identity=-; header=wingdi.h:3954; deps=struct _RECTL,struct tagEMR,struct tagXFORM
 field	struct tagEMRBITBLT	0	emr	nested	0	8	-	EMR emr	EMR	c=emr
 field	struct tagEMRBITBLT	1	rclBounds	nested	8	16	-	RECTL rclBounds	RECTL	c=rclBounds
 field	struct tagEMRBITBLT	2	xDest	scalar	24	4	-	LONG xDest	ffi::c::Long	c=xDest
@@ -5147,7 +5147,7 @@ field	struct tagEMRBITBLT	12	offBmiSrc	scalar	84	4	-	DWORD offBmiSrc	ffi::c::ULo
 field	struct tagEMRBITBLT	13	cbBmiSrc	scalar	88	4	-	DWORD cbBmiSrc	ffi::c::ULong	c=cbBmiSrc
 field	struct tagEMRBITBLT	14	offBitsSrc	scalar	92	4	-	DWORD offBitsSrc	ffi::c::ULong	c=offBitsSrc
 field	struct tagEMRBITBLT	15	cbBitsSrc	scalar	96	4	-	DWORD cbBitsSrc	ffi::c::ULong	c=cbBitsSrc
-record	struct tagEMRSTRETCHBLT	-	-	layout-blocked	-	108	4	struct tagEMRSTRETCHBLT	-	typedefs=EMRSTRETCHBLT; identity=-; header=wingdi.h:3973; nested=field xformSrc (struct tagXFORM, field) -> float; roots=float; deps=struct _RECTL,struct tagEMR,struct tagXFORM
+record	struct tagEMRSTRETCHBLT	-	EMRSTRETCHBLT	layout-direct	-	108	4	struct tagEMRSTRETCHBLT	-	typedefs=EMRSTRETCHBLT; identity=-; header=wingdi.h:3973; deps=struct _RECTL,struct tagEMR,struct tagXFORM
 field	struct tagEMRSTRETCHBLT	0	emr	nested	0	8	-	EMR emr	EMR	c=emr
 field	struct tagEMRSTRETCHBLT	1	rclBounds	nested	8	16	-	RECTL rclBounds	RECTL	c=rclBounds
 field	struct tagEMRSTRETCHBLT	2	xDest	scalar	24	4	-	LONG xDest	ffi::c::Long	c=xDest
@@ -5166,7 +5166,7 @@ field	struct tagEMRSTRETCHBLT	14	offBitsSrc	scalar	92	4	-	DWORD offBitsSrc	ffi::
 field	struct tagEMRSTRETCHBLT	15	cbBitsSrc	scalar	96	4	-	DWORD cbBitsSrc	ffi::c::ULong	c=cbBitsSrc
 field	struct tagEMRSTRETCHBLT	16	cxSrc	scalar	100	4	-	LONG cxSrc	ffi::c::Long	c=cxSrc
 field	struct tagEMRSTRETCHBLT	17	cySrc	scalar	104	4	-	LONG cySrc	ffi::c::Long	c=cySrc
-record	struct tagEMRMASKBLT	-	-	layout-blocked	-	128	4	struct tagEMRMASKBLT	-	typedefs=EMRMASKBLT; identity=-; header=wingdi.h:3994; nested=field xformSrc (struct tagXFORM, field) -> float; roots=float; deps=struct _RECTL,struct tagEMR,struct tagXFORM
+record	struct tagEMRMASKBLT	-	EMRMASKBLT	layout-direct	-	128	4	struct tagEMRMASKBLT	-	typedefs=EMRMASKBLT; identity=-; header=wingdi.h:3994; deps=struct _RECTL,struct tagEMR,struct tagXFORM
 field	struct tagEMRMASKBLT	0	emr	nested	0	8	-	EMR emr	EMR	c=emr
 field	struct tagEMRMASKBLT	1	rclBounds	nested	8	16	-	RECTL rclBounds	RECTL	c=rclBounds
 field	struct tagEMRMASKBLT	2	xDest	scalar	24	4	-	LONG xDest	ffi::c::Long	c=xDest
@@ -5190,7 +5190,7 @@ field	struct tagEMRMASKBLT	19	offBmiMask	scalar	112	4	-	DWORD offBmiMask	ffi::c:
 field	struct tagEMRMASKBLT	20	cbBmiMask	scalar	116	4	-	DWORD cbBmiMask	ffi::c::ULong	c=cbBmiMask
 field	struct tagEMRMASKBLT	21	offBitsMask	scalar	120	4	-	DWORD offBitsMask	ffi::c::ULong	c=offBitsMask
 field	struct tagEMRMASKBLT	22	cbBitsMask	scalar	124	4	-	DWORD cbBitsMask	ffi::c::ULong	c=cbBitsMask
-record	struct tagEMRPLGBLT	-	-	layout-blocked	-	140	4	struct tagEMRPLGBLT	-	typedefs=EMRPLGBLT; identity=-; header=wingdi.h:4020; nested=field xformSrc (struct tagXFORM, field) -> float; roots=float; deps=struct _POINTL,struct _RECTL,struct tagEMR,struct tagXFORM
+record	struct tagEMRPLGBLT	-	EMRPLGBLT	layout-direct	-	140	4	struct tagEMRPLGBLT	-	typedefs=EMRPLGBLT; identity=-; header=wingdi.h:4020; deps=struct _POINTL,struct _RECTL,struct tagEMR,struct tagXFORM
 field	struct tagEMRPLGBLT	0	emr	nested	0	8	-	EMR emr	EMR	c=emr
 field	struct tagEMRPLGBLT	1	rclBounds	nested	8	16	-	RECTL rclBounds	RECTL	c=rclBounds
 field	struct tagEMRPLGBLT	2	aptlDest	array	24	24	-	POINTL aptlDest[3]	array 3 of POINTL	c=aptlDest; element=record POINTL; bounds=3; extent=3
@@ -5346,7 +5346,7 @@ field	struct tagCOLORCORRECTPALETTE	1	ihPalette	scalar	8	4	-	DWORD ihPalette	ffi
 field	struct tagCOLORCORRECTPALETTE	2	nFirstEntry	scalar	12	4	-	DWORD nFirstEntry	ffi::c::ULong	c=nFirstEntry
 field	struct tagCOLORCORRECTPALETTE	3	nPalEntries	scalar	16	4	-	DWORD nPalEntries	ffi::c::ULong	c=nPalEntries
 field	struct tagCOLORCORRECTPALETTE	4	nReserved	scalar	20	4	-	DWORD nReserved	ffi::c::ULong	c=nReserved
-record	struct tagEMRALPHABLEND	-	-	layout-blocked	-	108	4	struct tagEMRALPHABLEND	-	typedefs=EMRALPHABLEND; identity=-; header=wingdi.h:4226; nested=field xformSrc (struct tagXFORM, field) -> float; roots=float; deps=struct _RECTL,struct tagEMR,struct tagXFORM
+record	struct tagEMRALPHABLEND	-	EMRALPHABLEND	layout-direct	-	108	4	struct tagEMRALPHABLEND	-	typedefs=EMRALPHABLEND; identity=-; header=wingdi.h:4226; deps=struct _RECTL,struct tagEMR,struct tagXFORM
 field	struct tagEMRALPHABLEND	0	emr	nested	0	8	-	EMR emr	EMR	c=emr
 field	struct tagEMRALPHABLEND	1	rclBounds	nested	8	16	-	RECTL rclBounds	RECTL	c=rclBounds
 field	struct tagEMRALPHABLEND	2	xDest	scalar	24	4	-	LONG xDest	ffi::c::Long	c=xDest
@@ -5372,7 +5372,7 @@ field	struct tagEMRGRADIENTFILL	2	nVer	scalar	24	4	-	DWORD nVer	ffi::c::ULong	c=
 field	struct tagEMRGRADIENTFILL	3	nTri	scalar	28	4	-	DWORD nTri	ffi::c::ULong	c=nTri
 field	struct tagEMRGRADIENTFILL	4	ulMode	scalar	32	4	-	ULONG ulMode	ffi::c::ULong	c=ulMode
 field	struct tagEMRGRADIENTFILL	5	Ver	array	36	16	-	TRIVERTEX Ver[1]	array 1 of TRIVERTEX	c=Ver; element=record TRIVERTEX; bounds=1; extent=1
-record	struct tagEMRTRANSPARENTBLT	-	-	layout-blocked	-	108	4	struct tagEMRTRANSPARENTBLT	-	typedefs=EMRTRANSPARENTBLT; identity=-; header=wingdi.h:4256; nested=field xformSrc (struct tagXFORM, field) -> float; roots=float; deps=struct _RECTL,struct tagEMR,struct tagXFORM
+record	struct tagEMRTRANSPARENTBLT	-	EMRTRANSPARENTBLT	layout-direct	-	108	4	struct tagEMRTRANSPARENTBLT	-	typedefs=EMRTRANSPARENTBLT; identity=-; header=wingdi.h:4256; deps=struct _RECTL,struct tagEMR,struct tagXFORM
 field	struct tagEMRTRANSPARENTBLT	0	emr	nested	0	8	-	EMR emr	EMR	c=emr
 field	struct tagEMRTRANSPARENTBLT	1	rclBounds	nested	8	16	-	RECTL rclBounds	RECTL	c=rclBounds
 field	struct tagEMRTRANSPARENTBLT	2	xDest	scalar	24	4	-	LONG xDest	ffi::c::Long	c=xDest
@@ -5391,15 +5391,15 @@ field	struct tagEMRTRANSPARENTBLT	14	offBitsSrc	scalar	92	4	-	DWORD offBitsSrc	f
 field	struct tagEMRTRANSPARENTBLT	15	cbBitsSrc	scalar	96	4	-	DWORD cbBitsSrc	ffi::c::ULong	c=cbBitsSrc
 field	struct tagEMRTRANSPARENTBLT	16	cxSrc	scalar	100	4	-	LONG cxSrc	ffi::c::Long	c=cxSrc
 field	struct tagEMRTRANSPARENTBLT	17	cySrc	scalar	104	4	-	LONG cySrc	ffi::c::Long	c=cySrc
-record	struct _POINTFLOAT	-	-	layout-blocked	-	8	4	struct _POINTFLOAT	-	typedefs=POINTFLOAT; identity=-; header=wingdi.h:4302; blockers=float: field x: float (FLOAT) | float: field y: float (FLOAT); roots=float
-field	struct _POINTFLOAT	0	x	float	0	4	-	FLOAT x	-	c=x; blockers=float: float (FLOAT)
-field	struct _POINTFLOAT	1	y	float	4	4	-	FLOAT y	-	c=y; blockers=float: float (FLOAT)
-record	struct _GLYPHMETRICSFLOAT	-	-	layout-blocked	-	24	4	struct _GLYPHMETRICSFLOAT	-	typedefs=GLYPHMETRICSFLOAT; identity=win32::ctypes::GLYPHMETRICSFLOAT; header=wingdi.h:4307; blockers=float: field gmfBlackBoxX: float (FLOAT) | float: field gmfBlackBoxY: float (FLOAT) | float: field gmfCellIncX: float (FLOAT) | float: field gmfCellIncY: float (FLOAT); nested=field gmfptGlyphOrigin (struct _POINTFLOAT, field) -> float; roots=float; deps=struct _POINTFLOAT
-field	struct _GLYPHMETRICSFLOAT	0	gmfBlackBoxX	float	0	4	-	FLOAT gmfBlackBoxX	-	c=gmfBlackBoxX; blockers=float: float (FLOAT)
-field	struct _GLYPHMETRICSFLOAT	1	gmfBlackBoxY	float	4	4	-	FLOAT gmfBlackBoxY	-	c=gmfBlackBoxY; blockers=float: float (FLOAT)
+record	struct _POINTFLOAT	-	POINTFLOAT	layout-direct	-	8	4	struct _POINTFLOAT	-	typedefs=POINTFLOAT; identity=-; header=wingdi.h:4302
+field	struct _POINTFLOAT	0	x	scalar	0	4	-	FLOAT x	ffi::c::Float	c=x
+field	struct _POINTFLOAT	1	y	scalar	4	4	-	FLOAT y	ffi::c::Float	c=y
+record	struct _GLYPHMETRICSFLOAT	-	GLYPHMETRICSFLOAT	layout-direct	-	24	4	struct _GLYPHMETRICSFLOAT	-	typedefs=GLYPHMETRICSFLOAT; identity=win32::ctypes::GLYPHMETRICSFLOAT; header=wingdi.h:4307; deps=struct _POINTFLOAT; pointed-by=3
+field	struct _GLYPHMETRICSFLOAT	0	gmfBlackBoxX	scalar	0	4	-	FLOAT gmfBlackBoxX	ffi::c::Float	c=gmfBlackBoxX
+field	struct _GLYPHMETRICSFLOAT	1	gmfBlackBoxY	scalar	4	4	-	FLOAT gmfBlackBoxY	ffi::c::Float	c=gmfBlackBoxY
 field	struct _GLYPHMETRICSFLOAT	2	gmfptGlyphOrigin	nested	8	8	-	POINTFLOAT gmfptGlyphOrigin	POINTFLOAT	c=gmfptGlyphOrigin
-field	struct _GLYPHMETRICSFLOAT	3	gmfCellIncX	float	16	4	-	FLOAT gmfCellIncX	-	c=gmfCellIncX; blockers=float: float (FLOAT)
-field	struct _GLYPHMETRICSFLOAT	4	gmfCellIncY	float	20	4	-	FLOAT gmfCellIncY	-	c=gmfCellIncY; blockers=float: float (FLOAT)
+field	struct _GLYPHMETRICSFLOAT	3	gmfCellIncX	scalar	16	4	-	FLOAT gmfCellIncX	ffi::c::Float	c=gmfCellIncX
+field	struct _GLYPHMETRICSFLOAT	4	gmfCellIncY	scalar	20	4	-	FLOAT gmfCellIncY	ffi::c::Float	c=gmfCellIncY
 record	struct tagLAYERPLANEDESCRIPTOR	-	LAYERPLANEDESCRIPTOR	layout-direct	-	32	4	struct tagLAYERPLANEDESCRIPTOR	-	typedefs=LAYERPLANEDESCRIPTOR; identity=win32::ctypes::LAYERPLANEDESCRIPTOR; header=wingdi.h:4323; pointed-by=1
 field	struct tagLAYERPLANEDESCRIPTOR	0	nSize	scalar	0	2	-	WORD nSize	ffi::c::UShort	c=nSize
 field	struct tagLAYERPLANEDESCRIPTOR	1	nVersion	scalar	2	2	-	WORD nVersion	ffi::c::UShort	c=nVersion
@@ -6374,45 +6374,45 @@ field	struct tagGESTURECONFIG	2	dwBlock	scalar	8	4	-	DWORD dwBlock	ffi::c::ULong
 record	struct tagINPUT_MESSAGE_SOURCE	-	INPUT_MESSAGE_SOURCE	layout-direct	-	8	4	struct tagINPUT_MESSAGE_SOURCE	-	typedefs=INPUT_MESSAGE_SOURCE; identity=win32::ctypes::INPUT_MESSAGE_SOURCE; header=winuser.h:6710; pointed-by=2
 field	struct tagINPUT_MESSAGE_SOURCE	0	deviceType	scalar	0	4	-	INPUT_MESSAGE_DEVICE_TYPE deviceType	ffi::c::UInt	c=deviceType
 field	struct tagINPUT_MESSAGE_SOURCE	1	originId	scalar	4	4	-	INPUT_MESSAGE_ORIGIN_ID originId	ffi::c::UInt	c=originId
-record	struct anon@winuser.h:6771	-	-	layout-blocked	-	64	4	-	-	identity=-; header=winuser.h:6771; blockers=float: field _11: float (float) | float: field _12: float (float) | float: field _13: float (float) | float: field _14: float (float) | float: field _21: float (float) | float: field _22: float (float) | float: field _23: float (float) | float: field _24: float (float) | float: field _31: float (float) | float: field _32: float (float) | float: field _33: float (float) | float: field _34: float (float) | float: field _41: float (float) | float: field _42: float (float) | float: field _43: float (float) | float: field _44: float (float); roots=float; owner=struct tagINPUT_TRANSFORM; place=INPUT_TRANSFORM.member1.member1; at=winuser.h:6771:20
-field	struct anon@winuser.h:6771	0	_11	float	0	4	-	float _11	-	c=_11; blockers=float: float (float)
-field	struct anon@winuser.h:6771	1	_12	float	4	4	-	float _12	-	c=_12; blockers=float: float (float)
-field	struct anon@winuser.h:6771	2	_13	float	8	4	-	float _13	-	c=_13; blockers=float: float (float)
-field	struct anon@winuser.h:6771	3	_14	float	12	4	-	float _14	-	c=_14; blockers=float: float (float)
-field	struct anon@winuser.h:6771	4	_21	float	16	4	-	float _21	-	c=_21; blockers=float: float (float)
-field	struct anon@winuser.h:6771	5	_22	float	20	4	-	float _22	-	c=_22; blockers=float: float (float)
-field	struct anon@winuser.h:6771	6	_23	float	24	4	-	float _23	-	c=_23; blockers=float: float (float)
-field	struct anon@winuser.h:6771	7	_24	float	28	4	-	float _24	-	c=_24; blockers=float: float (float)
-field	struct anon@winuser.h:6771	8	_31	float	32	4	-	float _31	-	c=_31; blockers=float: float (float)
-field	struct anon@winuser.h:6771	9	_32	float	36	4	-	float _32	-	c=_32; blockers=float: float (float)
-field	struct anon@winuser.h:6771	10	_33	float	40	4	-	float _33	-	c=_33; blockers=float: float (float)
-field	struct anon@winuser.h:6771	11	_34	float	44	4	-	float _34	-	c=_34; blockers=float: float (float)
-field	struct anon@winuser.h:6771	12	_41	float	48	4	-	float _41	-	c=_41; blockers=float: float (float)
-field	struct anon@winuser.h:6771	13	_42	float	52	4	-	float _42	-	c=_42; blockers=float: float (float)
-field	struct anon@winuser.h:6771	14	_43	float	56	4	-	float _43	-	c=_43; blockers=float: float (float)
-field	struct anon@winuser.h:6771	15	_44	float	60	4	-	float _44	-	c=_44; blockers=float: float (float)
-record	union anon@winuser.h:6770	-	-	layout-blocked	-	64	4	-	-	identity=-; header=winuser.h:6770; blockers=float: field m: array element: float (float); nested=member1 (struct anon@winuser.h:6771, anonymous-member) -> float; roots=float; deps=struct anon@winuser.h:6771; owner=struct tagINPUT_TRANSFORM; place=INPUT_TRANSFORM.member1; at=winuser.h:6770:18
+record	struct anon@winuser.h:6771	-	INPUT_TRANSFORM_member1_member1	layout-direct	-	64	4	-	-	identity=-; header=winuser.h:6771; owner=struct tagINPUT_TRANSFORM; place=INPUT_TRANSFORM.member1.member1; at=winuser.h:6771:20
+field	struct anon@winuser.h:6771	0	_11	scalar	0	4	-	float _11	ffi::c::Float	c=_11
+field	struct anon@winuser.h:6771	1	_12	scalar	4	4	-	float _12	ffi::c::Float	c=_12
+field	struct anon@winuser.h:6771	2	_13	scalar	8	4	-	float _13	ffi::c::Float	c=_13
+field	struct anon@winuser.h:6771	3	_14	scalar	12	4	-	float _14	ffi::c::Float	c=_14
+field	struct anon@winuser.h:6771	4	_21	scalar	16	4	-	float _21	ffi::c::Float	c=_21
+field	struct anon@winuser.h:6771	5	_22	scalar	20	4	-	float _22	ffi::c::Float	c=_22
+field	struct anon@winuser.h:6771	6	_23	scalar	24	4	-	float _23	ffi::c::Float	c=_23
+field	struct anon@winuser.h:6771	7	_24	scalar	28	4	-	float _24	ffi::c::Float	c=_24
+field	struct anon@winuser.h:6771	8	_31	scalar	32	4	-	float _31	ffi::c::Float	c=_31
+field	struct anon@winuser.h:6771	9	_32	scalar	36	4	-	float _32	ffi::c::Float	c=_32
+field	struct anon@winuser.h:6771	10	_33	scalar	40	4	-	float _33	ffi::c::Float	c=_33
+field	struct anon@winuser.h:6771	11	_34	scalar	44	4	-	float _34	ffi::c::Float	c=_34
+field	struct anon@winuser.h:6771	12	_41	scalar	48	4	-	float _41	ffi::c::Float	c=_41
+field	struct anon@winuser.h:6771	13	_42	scalar	52	4	-	float _42	ffi::c::Float	c=_42
+field	struct anon@winuser.h:6771	14	_43	scalar	56	4	-	float _43	ffi::c::Float	c=_43
+field	struct anon@winuser.h:6771	15	_44	scalar	60	4	-	float _44	ffi::c::Float	c=_44
+record	union anon@winuser.h:6770	-	INPUT_TRANSFORM_member1	layout-direct	-	64	4	-	-	identity=-; header=winuser.h:6770; deps=struct anon@winuser.h:6771; owner=struct tagINPUT_TRANSFORM; place=INPUT_TRANSFORM.member1; at=winuser.h:6770:18
 field	union anon@winuser.h:6770	0	member1	nested	0	-	-	struct anon@winuser.h:6771	INPUT_TRANSFORM_member1_member1	c=-
-field	union anon@winuser.h:6770	1	m	float	0	64	-	float m[4][4]	-	c=m; element=other float; bounds=4,4; extent=4; blockers=float: array element: float (float)
-record	struct tagINPUT_TRANSFORM	-	-	layout-blocked	-	64	4	struct tagINPUT_TRANSFORM	-	typedefs=INPUT_TRANSFORM; identity=-; header=winuser.h:6769; nested=member1 (union anon@winuser.h:6770, anonymous-member) -> float; roots=float; deps=union anon@winuser.h:6770
+field	union anon@winuser.h:6770	1	m	array	0	64	-	float m[4][4]	array 4 of array 4 of ffi::c::Float	c=m; element=scalar float; bounds=4,4; extent=4
+record	struct tagINPUT_TRANSFORM	-	INPUT_TRANSFORM	layout-direct	-	64	4	struct tagINPUT_TRANSFORM	-	typedefs=INPUT_TRANSFORM; identity=-; header=winuser.h:6769; deps=union anon@winuser.h:6770
 field	struct tagINPUT_TRANSFORM	0	member1	nested	0	-	-	union anon@winuser.h:6770	INPUT_TRANSFORM_member1	c=-
-promoted	struct tagINPUT_TRANSFORM	-	member1.m	-	0	64	-	m	-	via=union anon@winuser.h:6770
-promoted	struct tagINPUT_TRANSFORM	-	member1.member1._11	-	0	4	-	_11	-	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
-promoted	struct tagINPUT_TRANSFORM	-	member1.member1._12	-	4	4	-	_12	-	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
-promoted	struct tagINPUT_TRANSFORM	-	member1.member1._13	-	8	4	-	_13	-	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
-promoted	struct tagINPUT_TRANSFORM	-	member1.member1._14	-	12	4	-	_14	-	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
-promoted	struct tagINPUT_TRANSFORM	-	member1.member1._21	-	16	4	-	_21	-	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
-promoted	struct tagINPUT_TRANSFORM	-	member1.member1._22	-	20	4	-	_22	-	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
-promoted	struct tagINPUT_TRANSFORM	-	member1.member1._23	-	24	4	-	_23	-	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
-promoted	struct tagINPUT_TRANSFORM	-	member1.member1._24	-	28	4	-	_24	-	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
-promoted	struct tagINPUT_TRANSFORM	-	member1.member1._31	-	32	4	-	_31	-	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
-promoted	struct tagINPUT_TRANSFORM	-	member1.member1._32	-	36	4	-	_32	-	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
-promoted	struct tagINPUT_TRANSFORM	-	member1.member1._33	-	40	4	-	_33	-	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
-promoted	struct tagINPUT_TRANSFORM	-	member1.member1._34	-	44	4	-	_34	-	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
-promoted	struct tagINPUT_TRANSFORM	-	member1.member1._41	-	48	4	-	_41	-	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
-promoted	struct tagINPUT_TRANSFORM	-	member1.member1._42	-	52	4	-	_42	-	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
-promoted	struct tagINPUT_TRANSFORM	-	member1.member1._43	-	56	4	-	_43	-	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
-promoted	struct tagINPUT_TRANSFORM	-	member1.member1._44	-	60	4	-	_44	-	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
+promoted	struct tagINPUT_TRANSFORM	-	member1.m	-	0	64	-	m	array 4 of array 4 of ffi::c::Float	via=union anon@winuser.h:6770
+promoted	struct tagINPUT_TRANSFORM	-	member1.member1._11	-	0	4	-	_11	ffi::c::Float	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
+promoted	struct tagINPUT_TRANSFORM	-	member1.member1._12	-	4	4	-	_12	ffi::c::Float	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
+promoted	struct tagINPUT_TRANSFORM	-	member1.member1._13	-	8	4	-	_13	ffi::c::Float	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
+promoted	struct tagINPUT_TRANSFORM	-	member1.member1._14	-	12	4	-	_14	ffi::c::Float	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
+promoted	struct tagINPUT_TRANSFORM	-	member1.member1._21	-	16	4	-	_21	ffi::c::Float	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
+promoted	struct tagINPUT_TRANSFORM	-	member1.member1._22	-	20	4	-	_22	ffi::c::Float	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
+promoted	struct tagINPUT_TRANSFORM	-	member1.member1._23	-	24	4	-	_23	ffi::c::Float	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
+promoted	struct tagINPUT_TRANSFORM	-	member1.member1._24	-	28	4	-	_24	ffi::c::Float	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
+promoted	struct tagINPUT_TRANSFORM	-	member1.member1._31	-	32	4	-	_31	ffi::c::Float	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
+promoted	struct tagINPUT_TRANSFORM	-	member1.member1._32	-	36	4	-	_32	ffi::c::Float	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
+promoted	struct tagINPUT_TRANSFORM	-	member1.member1._33	-	40	4	-	_33	ffi::c::Float	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
+promoted	struct tagINPUT_TRANSFORM	-	member1.member1._34	-	44	4	-	_34	ffi::c::Float	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
+promoted	struct tagINPUT_TRANSFORM	-	member1.member1._41	-	48	4	-	_41	ffi::c::Float	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
+promoted	struct tagINPUT_TRANSFORM	-	member1.member1._42	-	52	4	-	_42	ffi::c::Float	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
+promoted	struct tagINPUT_TRANSFORM	-	member1.member1._43	-	56	4	-	_43	ffi::c::Float	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
+promoted	struct tagINPUT_TRANSFORM	-	member1.member1._44	-	60	4	-	_44	ffi::c::Float	via=union anon@winuser.h:6770,struct anon@winuser.h:6771
 record	struct _cpinfo	-	CPINFO	layout-direct	-	20	4	struct _cpinfo	-	typedefs=CPINFO; identity=win32::ctypes::CPINFO; header=winnls.h:673; pointed-by=1
 field	struct _cpinfo	0	MaxCharSize	scalar	0	4	-	UINT MaxCharSize	ffi::c::UInt	c=MaxCharSize
 field	struct _cpinfo	1	DefaultChar	array	4	2	-	BYTE DefaultChar[2]	array 2 of ffi::c::UChar	c=DefaultChar; element=char BYTE; bounds=2; extent=2

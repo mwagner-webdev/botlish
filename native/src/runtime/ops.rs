@@ -994,9 +994,12 @@ pub extern "C" fn rt_bytes_len(p: *mut Vm, v: Value) -> Value {
 /// (the object's address plus the constant payload offset; no read of the
 /// payload, no allocation). Valid only while V is live and unmoved -- the
 /// collector never moves objects, and native lowering keeps V live through the
-/// syscall that consumes the address (`op keepalive`). The address of a
-/// 47-bit Linux x86-64 user-space object is far below the small-Int
-/// ceiling; anything else is refused rather than truncated.
+/// syscall or C call that consumes the address (`op keepalive`). A heap
+/// object's address on every host the native backend runs on -- Linux
+/// x86-64 (47-bit user space), Linux AArch64 (48-bit, or 52 with large
+/// virtual addresses) and macOS AArch64 (47-bit; its heap is above 4 GiB,
+/// tests/c-byte-borrowing.test's bb-read-address-above-4gib) -- is below the
+/// small-Int ceiling (2^62); anything else is refused rather than truncated.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_bytes_addr(p: *mut Vm, v: Value) -> Value {
     if let Err(failed) = bytes_operand(p, v, "abi::x86_64::from_bytes") {
@@ -1049,36 +1052,60 @@ pub extern "C" fn rt_keepalive(_p: *mut Vm, v: Value) -> Value {
 // one length check (parse) or one `byteszeroed` (emit). Every byte order is
 // little-endian, the target's; the encoding word keeps room for big-endian.
 
+/// The scalar encoding of a fixed-layout op (`binload`'s word, native/
+/// lower.tcl's LayoutEncoding): its width in bytes, its byte order, and
+/// either an integer's signedness or, for a C float or double field, its
+/// IEEE 754 format (C-FLOAT-FFI-MILESTONE-1.md).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct BinEncoding {
+    pub width: usize,
+    pub signed: bool,
+    pub big: bool,
+    pub float: Option<CFloatFormat>,
+}
+
 /// The scalar encoding word of `binload`/`binstore`: width in bytes (1, 2, 4
-/// or 8), signedness, byte order -- or None for a malformed word.
-pub(super) fn bin_encoding(code: Value) -> Option<(usize, bool, bool)> {
+/// or 8, the low four bits), signed (16), big-endian (32), a C floating
+/// representation (64: the IEEE 754 format of 4 or 8 bytes, never signed)
+/// -- or None for a malformed word.
+pub(super) fn bin_encoding(code: Value) -> Option<BinEncoding> {
     let c = int_small(code)?;
     let width = (c & 15) as usize;
-    if !matches!(width, 1 | 2 | 4 | 8) || c & !63 != 0 {
+    if !matches!(width, 1 | 2 | 4 | 8) || c & !127 != 0 {
         return None;
     }
-    Some((width, c & 16 != 0, c & 32 != 0))
+    let signed = c & 16 != 0;
+    let float = if c & 64 != 0 {
+        if signed {
+            return None;
+        }
+        Some(CFloatFormat::of_width(width)?)
+    } else {
+        None
+    };
+    Some(BinEncoding { width, signed, big: c & 32 != 0, float })
 }
 
 /// The storage, offset and encoding operands of a fixed-layout op, checked:
-/// the storage is a byte storage and WIDTH bytes at OFFSET lie inside it.
-/// (offset, width, signed, big-endian).
-fn bin_operands(p: *mut Vm, storage: Value, offset: Value, code: Value, context: &str) -> Result<(usize, usize, bool, bool), Value> {
+/// the storage is a byte storage and the encoding's bytes at OFFSET lie
+/// inside it. (offset, encoding).
+fn bin_operands(p: *mut Vm, storage: Value, offset: Value, code: Value, context: &str) -> Result<(usize, BinEncoding), Value> {
     bytes_operand(p, storage, context)?;
     bin_extent(p, storage, offset, code, context)
 }
 
 /// bin_operands' offset and encoding checks, for a storage of either byte
 /// kind (its length is at the same place in both).
-fn bin_extent(p: *mut Vm, storage: Value, offset: Value, code: Value, context: &str) -> Result<(usize, usize, bool, bool), Value> {
-    let Some((width, signed, big)) = bin_encoding(code) else {
+fn bin_extent(p: *mut Vm, storage: Value, offset: Value, code: Value, context: &str) -> Result<(usize, BinEncoding), Value> {
+    let Some(encoding) = bin_encoding(code) else {
         let message = format!("{context}: malformed scalar encoding {}", super::show::int_text(code));
         return Err(vm(p).fail(RtError::Semantic { kind: "RANGE", message }));
     };
     // (Either byte kind: the payload is at the same place in both.)
     let len = unsafe { super::bytesobj::BytesObj::payload(storage) }.len();
+    let width = encoding.width;
     match int_small(offset) {
-        Some(o) if o >= 0 && (o as usize).checked_add(width).is_some_and(|end| end <= len) => Ok((o as usize, width, signed, big)),
+        Some(o) if o >= 0 && (o as usize).checked_add(width).is_some_and(|end| end <= len) => Ok((o as usize, encoding)),
         _ => {
             let message = format!("{context}: {width} bytes at offset {} lie outside a storage of {len} bytes", super::show::int_text(offset));
             Err(vm(p).fail(RtError::Semantic { kind: "RANGE", message }))
@@ -1097,28 +1124,38 @@ pub extern "C" fn rt_bytes_zeroed(p: *mut Vm, n: Value) -> Value {
     vm(p).new_bytes_with(count, |init| init.push_zeros(count))
 }
 
-/// `binload %s %o %c`: the Int at offset O of storage S in encoding C.
+/// `binload %s %o %c`: the value at offset O of storage S in encoding C.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_bin_load(p: *mut Vm, storage: Value, offset: Value, code: Value) -> Value {
-    let (at, width, signed, big) = match bin_operands(p, storage, offset, code, "binary::parse") {
+    let (at, encoding) = match bin_operands(p, storage, offset, code, "binary::parse") {
         Ok(operands) => operands,
         Err(failed) => return failed,
     };
-    bin_decode(p, &bytes_of(storage)[at..at + width], signed, big)
+    bin_decode(p, &bytes_of(storage)[at..at + encoding.width], encoding)
 }
 
-/// The Int the encoded scalar BYTES (1, 2, 4 or 8 of them) holds, SIGNED
-/// two's complement or unsigned, BIG-endian or little: `binload`'s decoding,
-/// shared with the native view's `nativeload` (runtime/nview.rs).
-pub(super) fn bin_decode(p: *mut Vm, bytes: &[u8], signed: bool, big: bool) -> Value {
+/// The value the encoded scalar BYTES (1, 2, 4 or 8 of them) holds in
+/// ENCODING: an integer's Int (two's complement or unsigned), or a C
+/// floating representation's Float64 -- admitted by the boundary's rule
+/// (value.rs's admit_c_float: NaN and the infinities are NonFiniteFloat,
+/// negative zero zero, a binary32 widened exactly). `binload`'s decoding,
+/// shared with the native view's `nativeload` and the row reads
+/// (runtime/nview.rs).
+pub(super) fn bin_decode(p: *mut Vm, bytes: &[u8], encoding: BinEncoding) -> Value {
     let width = bytes.len();
     let mut word = [0u8; 8];
     word[..width].copy_from_slice(bytes);
-    if big {
+    if encoding.big {
         word[..width].reverse();
     }
     let raw = u64::from_le_bytes(word);
-    if signed {
+    if let Some(format) = encoding.float {
+        return match admit_c_float(format, raw) {
+            Ok(bits) => vm(p).new_float(FloatType::Float64, bits),
+            Err(result) => rt_float_nonfinite(p, result),
+        };
+    }
+    if encoding.signed {
         let shift = 64 - 8 * width as u32;
         vm(p).new_int(((raw << shift) as i64) >> shift)
     } else if raw <= i64::MAX as u64 {
@@ -1140,11 +1177,12 @@ pub extern "C" fn rt_bin_store(p: *mut Vm, storage: Value, offset: Value, code: 
             return failed;
         }
     }
-    let (at, width, signed, big) = match bin_extent(p, storage, offset, code, "binary::emit") {
+    let (at, encoding) = match bin_extent(p, storage, offset, code, "binary::emit") {
         Ok(operands) => operands,
         Err(failed) => return failed,
     };
-    let bytes = match bin_encode(p, value, width, signed, big, "binary::emit") {
+    let width = encoding.width;
+    let bytes = match bin_encode(p, value, encoding, "binary::emit") {
         Ok(bytes) => bytes,
         Err(failed) => return failed,
     };
@@ -1155,15 +1193,29 @@ pub extern "C" fn rt_bin_store(p: *mut Vm, storage: Value, offset: Value, code: 
     UNIT
 }
 
-/// The WIDTH-byte encoding of the Int VALUE, SIGNED two's complement or
-/// unsigned, BIG-endian or little, in the first WIDTH bytes of the result:
-/// `binstore`'s encoding, shared with the layout writes of a native edit and
-/// of byte storage (runtime/nview.rs, NATIVE-LAYOUT-WRITES.md). A value
-/// outside the encoding is a RANGE error (CONTEXT names the operation),
-/// raised before the caller writes anything: never a truncation, a wrap or a
-/// reinterpretation.
-pub(super) fn bin_encode(p: *mut Vm, value: Value, width: usize, signed: bool, big: bool, context: &str) -> Result<[u8; 8], Value> {
+/// The ENCODING of VALUE in the first `width` bytes of the result: an Int
+/// two's complement or unsigned, or a Float64 as a C float or double --
+/// narrowed by the boundary's rule (value.rs's narrow_c_float: to nearest,
+/// ties to even; a binary32 overflow is NonFiniteFloat, never clamped) --
+/// BIG-endian or little. `binstore`'s encoding, shared with the layout writes
+/// of a native edit and of byte storage (runtime/nview.rs, NATIVE-LAYOUT-
+/// WRITES.md). A value outside an integer encoding is a RANGE error (CONTEXT
+/// names the operation); every failure is raised before the caller writes
+/// anything: never a truncation, a wrap or a reinterpretation.
+pub(super) fn bin_encode(p: *mut Vm, value: Value, encoding: BinEncoding, context: &str) -> Result<[u8; 8], Value> {
     use num_traits::ToPrimitive;
+    let BinEncoding { width, signed, big, float } = encoding;
+    if let Some(format) = float {
+        if heap_kind(value) != KIND_FLOAT {
+            return Err(vm(p).fail(RtError::Type { context: context.to_string(), expected: Kind::Float64, got: value }));
+        }
+        let bits = narrow_c_float(format, float64_of(value)).map_err(|result| rt_float_nonfinite(p, result))?;
+        let mut bytes = bits.to_le_bytes();
+        if big {
+            bytes[..width].reverse();
+        }
+        return Ok(bytes);
+    }
     if !is_small(value) && heap_kind(value) != KIND_BIGINT {
         return Err(vm(p).fail(RtError::Type { context: context.to_string(), expected: Kind::Int, got: value }));
     }
@@ -4027,6 +4079,44 @@ mod tests {
         assert_eq!(str_of(list_of(r).items()[4]).chars, 2);
         assert!(vm.error.is_none());
         assert_eq!(vm.declared_error, 0);
+    }
+
+    /// A Windows argument (runtime/aot.rs's `wtf8_from_utf16`): valid UTF-16
+    /// -- ASCII, a BMP scalar, a surrogate pair, the empty argument, spaces
+    /// and quotes, which are content once the command line is split -- is
+    /// exactly its UTF-8, so `argv()` reads it as on Linux.
+    #[test]
+    fn argv_windows_utf16_is_its_utf8() {
+        use crate::runtime::aot::wtf8_from_utf16;
+        for text in ["C:\\dir with space\\prog.exe", "", "a \"quoted\" b\\", "\u{e9}e\u{301}", "\u{1f600}\u{20ac}", "\u{ffff}\u{10ffff}"] {
+            assert_eq!(wtf8_from_utf16(text.encode_utf16()), text.as_bytes(), "{text:?}");
+        }
+        let mut vm = vm();
+        vm.set_argv(["prog", "", "\u{1f600}"].iter().map(|t| wtf8_from_utf16(t.encode_utf16())).collect());
+        assert_eq!(argv_strings(rt_argv(&mut *vm)), vec!["prog", "", "\u{1f600}"]);
+    }
+
+    /// An unpaired surrogate -- UTF-16 a Windows command line may hold, no
+    /// Unicode scalar -- is its code unit's three-byte form (never U+FFFD or
+    /// a dropped unit), lossless and distinct for every unit, which strict
+    /// UTF-8 rejects: `argv()` is the declared error, as for invalid UTF-8
+    /// on Linux. A surrogate pair split by another unit is two unpaired
+    /// surrogates.
+    #[test]
+    fn argv_windows_unpaired_surrogate_is_the_declared_error() {
+        use crate::runtime::aot::wtf8_from_utf16;
+        assert_eq!(wtf8_from_utf16([0xD800]), b"\xED\xA0\x80");
+        assert_eq!(wtf8_from_utf16([0xDFFF]), b"\xED\xBF\xBF");
+        assert_eq!(wtf8_from_utf16([0x61, 0xDC00, 0x62]), b"a\xED\xB0\x80b");
+        assert_eq!(wtf8_from_utf16([0xD83D, 0x20, 0xDE00]), b"\xED\xA0\xBD \xED\xB8\x80");
+        assert_eq!(wtf8_from_utf16([0xD83D, 0xDE00]), "\u{1f600}".as_bytes());
+        let lone: Vec<Vec<u8>> = (0xD800..=0xDFFFu16).map(|u| wtf8_from_utf16([u])).collect();
+        assert!(lone.iter().all(|b| std::str::from_utf8(b).is_err()));
+        assert_eq!(lone.iter().collect::<std::collections::HashSet<_>>().len(), lone.len());
+        let mut vm = vm();
+        vm.set_argv(vec![b"prog".to_vec(), wtf8_from_utf16([0x61, 0xD800])]);
+        assert_eq!(rt_argv(&mut *vm), NO_VALUE);
+        assert_eq!(vm.declared_error, crate::runtime::error::ERR_INVALID_ARGUMENT_ENCODING);
     }
 
     #[test]

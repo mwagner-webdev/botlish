@@ -325,11 +325,11 @@ test va-flags {a variadic function with flags: the flags are named, the trailing
     valueOf "${::sums}fn report(base: int, flags :loud, variadic xs: List\[int\]) -> int:\n    if loud:\n        base + sum_from(xs, 0, 0)\n    else:\n        base\n\[report(10), report(10, 1, 2), report(10, 1, 2, :loud), report(10, :loud)\]\n"
 } -result {[10, 10, 13, 10]}
 
-test va-coroutine {a variadic yielding function constructs a coroutine over its List} -body {
+test va-coroutine {a variadic yielding function constructs a coroutine over its List} -constraints nativeCoroutines -body {
     valueOf "struct Ev:\n    n: int\nfn gen(variadic xs: List\[int\]):\n    loop x in xs:\n        yield Ev {n: x}\n    Ev {n: -1}\nfn drive() -> List\[int\]:\n    coroutine {step, first} = gen(4, 5)\n    second = step()\n    third = step()\n    \[first.n, second.n, third.n\]\ndrive()\n"
 } -result {[4, 5, -1]}
 
-test va-coroutine-calls {variadic calls inside a coroutine body} -body {
+test va-coroutine-calls {variadic calls inside a coroutine body} -constraints nativeCoroutines -body {
     valueOf "${::sums}struct Ev:\n    n: int\nfn gen(a: int):\n    yield Ev {n: sum(a, a)}\n    Ev {n: sum(a, 1, 2, 3)}\nfn drive() -> List\[int\]:\n    coroutine {step, first} = gen(4)\n    second = step()\n    \[first.n, second.n\]\ndrive()\n"
 } -result {[8, 10]}
 

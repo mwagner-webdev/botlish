@@ -2415,8 +2415,18 @@ fixed array, `field name: array 16 of ffi::c::Char at 8`: N elements of
 any representation (a scalar, a pointer, a nested layout, another array),
 element i at the field's offset plus i times the element's width; its
 copied value is a List of exactly N elements (FIXED-LAYOUT-ARRAYS.md).
-There are no unions, bitfields, variable-length tails, zero-length arrays
-or floats in a layout.
+There are no bitfields, variable-length tails or zero-length arrays in a
+layout; overlapping interpretations are a union layout's (LAYOUT-UNIONS.md).
+
+A field may be C's float or double (ffi::c::Float, 4 bytes; ffi::c::Double,
+8), its value a Float64. A read of one -- binary::parse, binary::read,
+binary::load, binary::element, a view's field -- fails with the declared
+NonFiniteFloat when its bits are a NaN or an infinity (negative zero reads
+as 0.0); a write, store or emit of a float rounds the Float64 to nearest,
+ties to even, and fails with NonFiniteFloat when it overflows the float,
+before a byte is written. A call is charged NonFiniteFloat only when it
+reads a float or a double or writes a float: the errors listed below
+include it for those calls alone (concept.c-floats).
 
 A field may be a C pointer (ffi::c::Ptr[T] or ffi::c::FnPtr[F], of the
 target's pointer width). Such a layout is native-only: bytes never become

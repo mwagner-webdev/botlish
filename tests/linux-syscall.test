@@ -520,7 +520,7 @@ test linux-syscall-nir-generic-op {NIR: one generic op over seven register words
         [regexp -nocase {getpid} $nir] [llength [regexp -all -inline {= int 39\M} $nir]]
 } -result {{w39 w1 0 0 0 w8 0} {8 1 39} 0 1}
 
-test linux-syscall-clif-is-a-helper-call {CLIF: the op is a real call of the runtime helper rt_linux_x86_64_syscall (a GC safepoint with its result checked) -- never inline code Cranelift could merge, hoist or delete; two calls stay two calls, a discarded one stays} -body {
+test linux-syscall-clif-is-a-helper-call {CLIF: the op is a real call of the runtime helper rt_linux_x86_64_syscall (a GC safepoint with its result checked) -- never inline code Cranelift could merge, hoist or delete; two calls stay two calls, a discarded one stays; each call carries a stack map where native frames hold the roots (nativeFrameRoots)} -body {
     set clif [native::clif [syscallHir "direct module\nimport abi::x86_64\nimport linux::abi::x86_64\nfn f():\n    linux::abi::x86_64::syscall({rax: abi::x86_64::register64(39)})\n    linux::abi::x86_64::syscall({rax: abi::x86_64::register64(39)})\n    1\nf()"]]
     regexp {; (u0:[0-9]+) = rt_linux_x86_64_syscall} $clif -> helper
     regexp {; function [0-9]+ "f": botlish_fn_[0-9]+} $clif header
@@ -528,7 +528,7 @@ test linux-syscall-clif-is-a-helper-call {CLIF: the op is a real call of the run
     set block [string range $clif $start [string first "\n\}" $clif $start]]
     regexp "(fn\[0-9\]+) = $helper " $block -> ref
     list [regexp -all "call $ref\\(" $block] [regexp -all "call $ref\\(\[^\n\]*stack_map" $block]
-} -result {2 2}
+} -result [list 2 [expr {[testConstraint nativeFrameRoots] ? 2 : 0}]]
 
 # The kernel registers the boundary function botlish_linux_x86_64_syscall
 # (runtime/syscall.rs) holds when it executes `syscall`, by simulating its

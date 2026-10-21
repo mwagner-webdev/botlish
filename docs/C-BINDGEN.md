@@ -1,5 +1,13 @@
 # C-BINDGEN.md
 
+> Partially superseded by C-FLOAT-FFI-MILESTONE-1.md: C `float` and
+> `double` are bound (`ffi::c::Float`, `ffi::c::Double`) wherever a C scalar
+> is -- parameters, results, pointees, callbacks, typedef chains the compiler
+> confirms -- and `long double` (with the other non-IEEE-binary32/64 floating
+> types) is the remaining floating blocker, `long-double`; the `float` and
+> `double` blockers, counts and tables below are this milestone's (SDL3 binds
+> 1217 functions now, Tcl 829, BoringSSL 3978, Win32 3304).
+
 Automatic C binding generation: `tools/c-bindgen.tcl` turns real C headers
 into ordinary Botlish source -- `extern c library`, `extern c fn` with its
 link symbol and its explicit pointer contract, opaque pointee types, typed

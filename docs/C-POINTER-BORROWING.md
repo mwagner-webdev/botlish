@@ -97,6 +97,7 @@ argument transport and nothing else.
 * [21. Not here](#21-not-here)
 * [22. What to run when changing this](#22-what-to-run-when-changing-this)
 * [23. Files](#23-files)
+* [24. Hosts and real C](#24-hosts-and-real-c)
 
 ## 1. The audit of the Linux syscall byte machinery
 
@@ -861,10 +862,12 @@ the fixture (`core/cabi.tcl`), `-foreign` (`core/native.tcl`), the
 `ExposeStorage`, `KeepExposedAlive`, `BorrowCall`), the exposed-argument
 case of `hir/escape.tcl`, the `borrowRefused` replay (`hir/lower.tcl`,
 `compiler/compiler.tcl`) or `runtime/ffifixture.rs`, run
-`tests/c-pointer-borrowing.test` (also under `BOTLISH_NATIVE_GC_STRESS=1`),
+`tests/c-pointer-borrowing.test` and `tests/c-byte-borrowing.test` (both
+also under `BOTLISH_NATIVE_GC_STRESS=1`),
 `audit/c-pointer-borrowing/tools/fuzz.tcl` (several seeds, once with
 `-gc-stress 1`) and `audit/c-pointer-borrowing/tools/mutate.tcl` (every
-mutant in its `mutants.txt` must still apply and be killed), plus
+mutant in its `mutants.txt` that applies to the host must still apply and
+be killed; on macOS the tier item `c-borrow-mutants`), plus
 `tests/abi-bytes.test`, `tests/abi-mutable-bytes.test`,
 `tests/linux-syscall.test` and the abi-bytes and mutable-bytes mutation
 tools for a change to the shared mechanism, and `tests/c-abi-types.test` for
@@ -884,5 +887,39 @@ the performance table.
 | `native/lower.tcl` | `ExposeStorage`, `KeepExposedAlive`, `BorrowCall`, the fixture ops |
 | `native/src/runtime/ffifixture.rs`, `nir.rs`, `ops.rs`, `vm.rs`, `codegen/clif.rs` | the fixture's foreign operations, their ops and helpers, the on-demand collection |
 | `tests/c-pointer-borrowing.test` | the tests |
+| `tests/c-byte-borrowing.test`, `tests/cffi/fixture.c` | the exposures through real C: the host compiler's fixture and the system C library (section 24) |
 | `audit/c-pointer-borrowing/tools/` | the mutants and the fuzzer |
 | `bench/c-pointer-borrowing.tcl` | the performance table |
+
+## 24. Hosts and real C
+
+The exposure model is the same on every host that calls C: Linux x86-64 and
+AArch64 and macOS AArch64 (MACOS-AARCH64-MILESTONE-7.md, which accepted it
+on macOS with no change to this machinery). What a C function sees:
+
+* **read** (`read noescape`): the payload address of the owner's own storage
+  (`BytesObj` + 16, 16-byte aligned), every bit of it -- a heap address above
+  4 GiB on macOS, as on Linux -- for the duration of the call; no copy,
+  whether the owner is a Bytes or a MutableBytes.
+* **write** (`write noescape`): the payload address of a private copy of the
+  owner (the detach). After the call the copy is the write-back value's
+  field, `{result: R, NAME: MutableBytes}`, whatever C's result says: a
+  function that writes part of its output and then reports failure has its
+  partial write in the field (no rollback), and the caller's value is never
+  changed. Two write parameters are two copies, even of one owner.
+* **refused**, with the same diagnostic on every target: a parameter that may
+  retain the pointer (`captures`, or no escape fact), one whose access nobody
+  declared, an immutable Bytes for writing, a pointee that is not byte-sized,
+  a variadic call's trailing argument (it has no contract), and every way of
+  making byte storage a pointer value.
+
+`tests/c-byte-borrowing.test` checks this through real C -- the host
+compiler's fixture (`bcf_checksum`, `bcf_address_of`, `bcf_fill_range`,
+`bcf_split`, `bcf_fill_upto` in tests/cffi/fixture.c) and the system C
+library's `memcmp`, `memcpy`, `memmove` and `memset` -- against a Tcl
+oracle: sizes from 0 to 1 MiB, addresses, write shapes, failure sentinels,
+refusals for three targets, `-strict 0`, GC stress, coroutines, executables
+and, on macOS, Guard Malloc. c-pointer-borrowing.test's fixture is the
+runtime's own Rust code: evidence of the model, not of a C call. On macOS
+the tier items `c-borrow-fuzz`, `c-borrow-mutants` and `c-borrow-bench`
+(tests/platform/tier.tcl) run the tools.

@@ -11,6 +11,25 @@
 //!
 //! Prints one line per check (and the raw facts each one saw, for the CI
 //! log) and exits 1 if any check failed.
+//!
+//! Only on the hosts with the native stack guard (runtime::native_stack's
+//! `native_stack_overflow_supported`): Linux x86-64 and AArch64, macOS
+//! AArch64. Elsewhere -- Windows, whose guard is a later milestone
+//! (WINDOWS-X86-64-MILESTONE-1.md) -- it says so and checks nothing. The
+//! checks are the module `guarded`, which spans the rest of the file (not
+//! indented, to keep its history).
+#[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
+fn main() {
+    guarded::main()
+}
+
+#[cfg(not(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"))))]
+fn main() {
+    println!("native_stack: this host has no native stack guard (runtime::native_stack::native_stack_overflow_supported): nothing to check");
+}
+
+#[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
+mod guarded {
 use botlish_native::runtime::coroutine::{rt_co_create, rt_co_resume, rt_co_start, rt_co_yield, CoroutineObj};
 use botlish_native::runtime::metrics::AllocMode;
 use botlish_native::runtime::native_stack::NativeStack;
@@ -1000,7 +1019,7 @@ fn publication_check(report: &mut Report) {
     report.check("publication", outcome.status.success() && outcome.stdout.trim() == "publication ok", outcome.brief());
 }
 
-fn main() {
+pub fn main() {
     if let Ok(scenario) = std::env::var("BOTLISH_STACK_TEST_CHILD") {
         child(&scenario);
     }
@@ -1019,3 +1038,4 @@ fn main() {
     }
     println!("every native stack check passed");
 }
+} // mod guarded

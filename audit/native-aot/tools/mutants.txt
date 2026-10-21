@@ -33,15 +33,13 @@
 %% macos-aarch64
 ## native/src/codegen/aot.rs
 <<<<
-    all(target_os = "macos", target_arch = "aarch64")
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(target_os = "windows", target_env = "msvc", target_arch = "x86_64")
 ));
-
-/// Whether this host links a program that calls C
 ====
-    all(target_os = "macos", target_arch = "aarch64", target_env = "gnu")
+    all(target_os = "macos", target_arch = "aarch64", target_env = "gnu"),
+    all(target_os = "windows", target_env = "msvc", target_arch = "x86_64")
 ));
-
-/// Whether this host links a program that calls C
 >>>>
 
 @@ linux-aot-rejected Linux left out of the hosts that link executables
@@ -62,12 +60,12 @@ const EXECUTABLES: bool = cfg!(any(
     all(target_os = "macos", target_arch = "aarch64")
 ));
 
-pub fn emit_executable
+/// The file an executable emitted for DESTINATION is
 ====
     all(target_os = "macos", target_arch = "aarch64", target_env = "gnu")
 ));
 
-pub fn emit_executable
+/// The file an executable emitted for DESTINATION is
 >>>>
 
 @@ c-calls-refused-on-linux C calls refused on Linux, where they link
@@ -192,4 +190,34 @@ const C_CALLS: bool = cfg!(any(
     if !target.name.is_empty() {
         return Ok(());
     }
+>>>>
+
+# ---------------------------------------------------------------------------
+# Windows x86-64, MSVC (WINDOWS-X86-64-MILESTONE-1.md): the link plan and the
+# C runtime. Their unit tests kill them on every host.
+
+@@ msvc-link-plan-is-gnus link.exe gets GNU ld's spelling of the link plan (-LDIR, -lNAME, the archive group), which it does not take
+## native/src/codegen/aot.rs
+<<<<
+    if flavor == LinkerFlavor::Msvc {
+        for dir in link_dirs {
+====
+    if flavor == LinkerFlavor::Msvc && link_dirs.is_empty() && link_dirs.len() > 0 {
+        for dir in link_dirs {
+>>>>
+
+@@ msvc-crt-dynamic an MSVC executable links rustc's dynamic C runtime, which needs the Visual C++ redistributable's VCRUNTIME140.dll
+## native/src/codegen/aot.rs
+<<<<
+    if flavor == LinkerFlavor::Msvc && !calls_c(program) {
+====
+    if flavor == LinkerFlavor::Msvc && calls_c(program) && !calls_c(program) {
+>>>>
+
+@@ msvc-crt-imposed-on-c-programs the static C runtime is imposed on a program that calls C, whose C libraries chose their own
+## native/src/codegen/aot.rs
+<<<<
+    if flavor == LinkerFlavor::Msvc && !calls_c(program) {
+====
+    if flavor == LinkerFlavor::Msvc {
 >>>>

@@ -111,6 +111,14 @@ ordinary `cargo build --release --manifest-path native/Cargo.toml`):
   either: it links through Apple's ld with the C libraries it declares
   (static and dynamic, `-L` directories, libSystem) and calls them with
   Apple's arm64 C ABI, checked against Apple clang's own calls.
+- **Byte borrowing** (milestone 7, MACOS-AARCH64-MILESTONE-7.md): Bytes and
+  MutableBytes storage reaches C calls by the same exposures as on Linux --
+  the payload address for reading, a private copy for writing -- checked
+  through real C, libSystem's own byte functions and Guard Malloc.
+- **IO** (milestone 8, MACOS-AARCH64-MILESTONE-8.md): `darwin::io::DarwinIO`
+  implements the portable `io::IO` through libSystem's write(2); the portable
+  Hello World and the 2048 demo run as Mach-O executables with it. No
+  Darwin syscall is used anywhere.
 
 The census (section 15) has the rest: every test file and golden suite on
 this host.
@@ -280,9 +288,9 @@ FFI), behind the same portable `io::IO` context trait.
 | Where | Linux assumption | Class | macOS adaptation | Risk | M | Check |
 |---|---|---|---|---|---|---|
 | runtime/syscall.rs transports (:66-139), stubs (:242-270) | `syscall` (x86-64) and `svc #0` with x8 (AArch64) for Linux only; elsewhere `NATIVE UNSUPPORTED "linux::abi::aarch64::syscall needs a Linux AArch64 target"` | linux | none: never port raw Darwin syscalls (x16, `svc #0x80`). The refusal is the right macOS behavior (verified, section 15) | low | 9 | M (refusal verified) |
-| lib/linux.bot, lib/linux/sys.{x86_64,aarch64}.bot, lib/linux/io.bot, lib/linux/path.bot | the `linux` namespace and `linux::io::LinuxIO`, the only `io::IO` implementation | linux | a macOS IO context (a `darwin::io`-style module of `extern c fn` calls to libSystem `write`/`read`) implementing `io::IO`; `lib/io.bot` is already portable | medium | 9 | M |
+| lib/linux.bot, lib/linux/sys.{x86_64,aarch64}.bot, lib/linux/io.bot, lib/linux/path.bot | the `linux` namespace and `linux::io::LinuxIO`, the only `io::IO` implementation | linux | **done (milestone 8)**: lib/darwin.bot (libSystem's write, read, open, close, `__error` as `extern c fn`), lib/darwin/io.bot (`DarwinIO`, implementing `io::IO`), lib/darwin/path.bot; `darwin` designated the macOS platform's; `lib/io.bot` unchanged | medium | 9 (done) | M (done) |
 | hir/direct.tcl, core/native.tcl `declareDirectNamespace` (:319-332) | the transport namespaces are the designated direct intrinsics | posix | none: a libSystem module is direct because its retaining C calls are (C-FFI.md, section 9) | low | 9 | L |
-| ops.rs `rt_bytes_addr` (:846-856), `rt_mbytes_addr` (:1155-1166); comment :843 | payload addresses as small Ints; "47-bit Linux x86-64 user space" | posix | none (the check is portable); comment wording | low | 8 | M |
+| ops.rs `rt_bytes_addr`, `rt_mbytes_addr` and their comment | payload addresses as small Ints; "47-bit Linux x86-64 user space" | posix | **done (milestone 7)**: the check is portable (payload addresses above 4 GiB pass exactly, `bb-read-address-above-4gib`); the comment states every host's bound | low | 8 (done) | M (done) |
 
 ## 10. C FFI
 
@@ -292,7 +300,7 @@ FFI), behind the same portable `io::IO` context trait.
 | native/lower.tcl :1608-1619 (NIR `foreign N "symbol"`), clif.rs `foreign_call` | a bare C symbol name | owned | **verified (milestone 6)**: the object crate adds Mach-O's `_`; `named` symbols, libSystem's `labs` (imported "from libSystem", `nm -m`) and the fixture's resolve (`cf-named-symbol`, `cf-system-symbol-resolved`) | low | 7 (done) | M (done) |
 | value.rs :32-43, :430-452 (`cptr`), ffi.rs `rt_ffi_bad_address` | a C address is a sign-extended 60-bit word; a top-byte-tagged pointer fails `NATIVE ADDRESS` | arch | **verified (milestone 6)**: C's static addresses (above 4 GiB), the top of user space and an all-high-bits address round-trip; `0xf000000000000010` is `NATIVE ADDRESS` (`cf-pointer-width`, `cf-pointer-mix`, `cf-wild-address`) | medium | 7 (done) | M (done) |
 | codegen/clif.rs `c_signature`; nir.rs `ForeignDecl` (no parameter-count limit) | stack-passed C arguments follow the platform ABI | owned | **resolved (milestone 6)**: Cranelift packs Apple's stack arguments at their natural size, but 0.135.2 stores an *extended* narrow stack argument at register width, past its slot; `c_signature` declares Apple's stack-passed narrow parameters unextended (`target::c_extended_parameters`; fixed upstream in 0.136.0). Checked against Apple clang's own calls (`cf-abi-*`) | high | 7 (done) | M (done) |
-| native/lower.tcl `BorrowCall` (:4885-4960), `ExposeStorage`/`KeepExposedAlive` | byte exposure, private write copies, keepalive | posix | none | low | 8 | M |
+| native/lower.tcl `BorrowCall`, `ExposeStorage`/`KeepExposedAlive` | byte exposure, private write copies, keepalive | posix | **verified (milestone 7)**: no change; read and write exposures through Apple clang's fixture and libSystem, sizes to 1 MiB, GC stress, coroutines, Guard Malloc (tests/c-byte-borrowing.test) | low | 8 (done) | M (done) |
 | tests/cffi/fixture.c :124-154, :180-202 (`bcf_dirty_*` and the other assembly) | inline assembly with ELF directives and bare labels | elf + test | **resolved (milestone 6)**: one AArch64 text, `BCF_FUNCTION` spelling its header for ELF or Mach-O | low | 7 (done) | M (done) |
 | tests/c-ffi.test :25-26 `linuxNative`, :36-50 (fixture build: `cc -c -O2 -fPIC`, `ar rcs`) | the fixture is built on Linux only | test | **resolved (milestone 6)**: `nativeCCalls` (tests/helpers.tcl); the fixture builds with Apple clang (`cf-fixture-built`) | low | 7 (done) | M (done) |
 | tests/c-ffi.test `cf-scalar-transport`; audit/c-ffi/tools/fuzz.tcl | plain char unsigned when `tcl_platform(machine)` is `aarch64` *or* `arm64` | test | **resolved (milestone 2)**: unsigned on Linux AArch64 only, read from the OS and the architecture (the fuzzer keeps its own model, independent of the registry, as its design requires); both run on macOS since C calls do (milestone 6) | low | 2 (done) | L (done) |
@@ -417,6 +425,23 @@ on any host without it: the Tcl, BoringSSL, SDL3 and MinGW libraries and
 sources, the committed Linux bindings' checks, and x86-64's
 `cf-bool-register` (MACOS-AARCH64-MILESTONE-6.md, sections 21 and 30).
 native-status records the `c-call` probe as its value, `5`.
+
+**Update (milestone 7).** The 18 runtime tests of the borrowing and layout
+files whose `nativeLinux` predated the port (c-pointer-borrowing 4,
+native-view, native-edit, layout-arrays, layout-unions, binary-layout 2
+each, abi-mutable-bytes 4) carry the capability they need and run on macOS,
+and tests/c-byte-borrowing.test (20 tests: real C, libSystem's byte
+functions, Guard Malloc) runs there; abi-bytes' and abi-mutable-bytes'
+remaining 35 `nativeLinux` tests are Linux's syscall layer
+(MACOS-AARCH64-MILESTONE-7.md, section 1). native-status records
+`c-byte-borrow`.
+
+**Update (milestone 8).** tests/darwin-io.test (27 tests) runs on macOS:
+its 14 `darwinIO` tests are Darwin IO through libSystem, its other 13 run on
+every host. portable-io's and context-traits' `nativeLinux` tests stay
+Linux's (LinuxIO); their macOS counterparts are darwin-io's. native-status
+records `darwin-read-write`, `darwin-errno`, `darwin-io` and
+`darwin-executable` (MACOS-AARCH64-MILESTONE-8.md).
 
 **Update (milestone 4).** The native stack overflow rows below are history:
 since milestone 4 a native overflow of the worker thread's stack or of a
@@ -917,6 +942,17 @@ entry below is the plan it was carried out from; the report is numbered 6.
 
 ### 8. Bytes borrowing, FFI fuzzers and GC stress
 
+**Done (milestone 7, MACOS-AARCH64-MILESTONE-7.md)**: byte borrowing needed
+no change on macOS; tests/c-byte-borrowing.test accepts it through real C
+(the host compiler's fixture and libSystem's memcmp, memcpy, memmove and
+memset, under GC stress, in coroutines and executables, under Guard
+Malloc); c-pointer-borrowing.test and the borrowing-related runtime tests of
+the layout files and abi-mutable-bytes run there by capability; the
+borrowing mutation tool runs without `timeout(1)` with per-host mutants
+(tier items `c-borrow-fuzz`, `c-borrow-mutants`, `c-borrow-bench`).
+abi-bytes' and abi-mutable-bytes' syscall tests stay Linux's. The entry
+below is the plan it was carried out from; the report is numbered 7.
+
 - **Files:** native/lower.tcl's exposure code (unchanged, expected),
   audit/c-ffi/tools, audit/c-pointer-borrowing/tools (and `exec timeout`,
   which macOS lacks).
@@ -929,6 +965,15 @@ entry below is the plan it was carried out from; the report is numbered 6.
   bridges: abi-bytes and mutable-bytes mutation tools.
 
 ### 9. Darwin system APIs and contextual IO
+
+**Done (milestone 8, MACOS-AARCH64-MILESTONE-8.md)**: `darwin`, the macOS
+platform's namespace, calls libSystem's write, read, open (variadic), close
+and `__error` (errno through a native view) as ordinary C calls with
+byte-borrowing contracts; `darwin::io::DarwinIO` implements `io::IO`
+structurally with LinuxIO's completion policy; examples/io/hello-darwin.bot
+and the 2048 demo run as Mach-O executables; tests/darwin-io.test is the
+macOS counterpart of portable-io's Linux tests (which stay Linux's). The
+entry below is the plan it was carried out from; the report is numbered 8.
 
 - **Files:** a macOS IO module implementing `io::IO` over libSystem C
   calls (lib/), tests/portable-io.test, tests/golden/run.tcl's hosts.

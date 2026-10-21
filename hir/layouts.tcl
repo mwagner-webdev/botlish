@@ -43,6 +43,8 @@
 # FIELDS in declared order, each
 #
 #   {name F offset O kind scalar width W signed 0|1 endian little type T}
+#   {name F offset O kind float format FORMAT width W endian little
+#        ctype C type T}
 #   {name F offset O kind layout layout INNER width W type T}
 #   {name F offset O kind pointer width W endian little type T}
 #   {name F offset O kind array extent N stride S width W element E type T}
@@ -138,6 +140,24 @@
 # registry (StructNames, StructFieldTypes), so the field set is mechanically
 # L's and is recorded once. There is no `LayoutStruct Foo:`, no `struct
 # Foo[T]:` and no generic struct declaration of any kind.
+#
+# C floating fields (C-FLOAT-FFI-MILESTONE-1.md). A field of type
+# ffi::c::Float or ffi::c::Double holds C's float or double: its
+# representation is the C type's on the compilation's target (core/cabi.tcl's
+# floatingInfo: binary32 in 4 bytes, binary64 in 8 -- C is the C type,
+# {cfloat NAME}, and the width is never its carrier's), and its consumer
+# type T its carrier, Float64. Unlike an integer encoding, not every bit
+# pattern is a value: imprinting one (binary::parse, binary::read, a read
+# through a view or an edit, binary::load) admits it -- NaN and the
+# infinities are NonFiniteFloat, negative zero is zero -- and writing a
+# Float64 into a binary32 field narrows it (round to nearest, ties to even;
+# an overflow is NonFiniteFloat, never clamped). Those are the boundary's
+# rules (core::cabi::Narrow and AdmitBits), written once. So the operations
+# that read or write such a field may fail with NonFiniteFloat, and which do
+# is decided per call by the representation they read or write
+# (FloatErrors): a program whose layouts hold no float is charged nothing
+# new. An array of floats strides the C type's width (4 for a float), never
+# a Float64's.
 #
 # Compilation isolation: the registry is captured and installed with the
 # other declaration registries (hir/declarations.tcl); it is reset with the
@@ -299,8 +319,10 @@ proc hir::layouts::align {id} {
 #
 # STRUCTID the struct view's identity (the Tcl struct head is STRUCTID
 # followed by the field names), each FIELD {NAME OFFSET u|i WIDTH ENDIAN} for
-# a scalar, {NAME OFFSET layout DESCRIPTOR} for a nested layout or {NAME
-# OFFSET ptr WIDTH ENDIAN} for a pointer (read only through a native view),
+# a scalar, {NAME OFFSET f WIDTH ENDIAN} for a C floating field (the IEEE 754
+# format of WIDTH bytes), {NAME OFFSET layout DESCRIPTOR} for a nested layout
+# or {NAME OFFSET ptr WIDTH ENDIAN} for a pointer (read only through a native
+# view),
 # in declared order. It is the whole of what imprinting and emission need, so it is the
 # constant argument the binary operations carry (core/binary.tcl reads it at
 # run time on the interpreter; the Tcl compiler and native lowering read it
@@ -330,6 +352,11 @@ proc hir::layouts::descriptor {id} {
 # followed by these.
 proc hir::layouts::ReprDescriptor {repr} {
     switch -- [dict get $repr kind] {
+        float {
+            # A C floating field: {f WIDTH ENDIAN}, the IEEE 754 format of
+            # WIDTH bytes (core::cabi::formatOfWidth).
+            return [list f [dict get $repr width] [dict get $repr endian]]
+        }
         layout {
             return [list layout [descriptor [dict get $repr layout]]]
         }
@@ -357,6 +384,8 @@ proc hir::layouts::ReprDescriptor {repr} {
 # TERM the representation as a type-level term:
 #
 #   T                   a scalar element: its integer domain type
+#   {cfloat NAME}       a C floating element: its C type, never its carrier
+#                       (an array of floats and one of doubles differ)
 #   {cptr P}, {cfnptr F} a pointer element: its pointer type
 #   {layout ID}         a nested layout element
 #   {union ID}          a union element (LAYOUT-UNIONS.md)
@@ -382,6 +411,7 @@ proc hir::layouts::ArrayConsumerType {element} {
 # The type-level term of the representation REPR (above).
 proc hir::layouts::ReprTerm {repr} {
     switch -- [dict get $repr kind] {
+        float  { return [dict get $repr ctype] }
         layout { return [list layout [dict get $repr layout]] }
         union  { return [list union [dict get $repr layout]] }
         array  { return [list array [dict get $repr extent] [ReprTerm [dict get $repr element]]] }
@@ -447,6 +477,12 @@ proc hir::layouts::ReprOfTerm {term} {
         }
         return [dict create kind pointer width $width endian little type $term]
     }
+    if {[hir::cabi::IsFloating $term]} {
+        if {[hir::cabi::CompilationTarget] eq ""} {
+            return ""
+        }
+        return [FloatingRepr $term]
+    }
     set encoding [Encoding $term]
     if {$encoding eq ""} {
         return ""
@@ -477,7 +513,8 @@ proc hir::layouts::NativeTermType {term edit} {
     if {[IsNamedTerm $term]} {
         return [list $head [lindex $term 1]]
     }
-    return $term
+    # (A C floating leaf reads as its carrier's value: a Float64.)
+    return [hir::cabi::Carrier $term]
 }
 
 # The static type of one element of the live array type TYPE (a
@@ -571,6 +608,9 @@ proc hir::layouts::TermDescriptor {term} {
 # pointer's type, `array N of ...`): read back by hir::read::TypeDeclLine.
 proc hir::layouts::ReprText {repr} {
     switch -- [dict get $repr kind] {
+        float {
+            return [hir::types::show [dict get $repr ctype]]
+        }
         array {
             return "array [dict get $repr extent] of [ReprText [dict get $repr element]]"
         }
@@ -963,6 +1003,7 @@ proc hir::layouts::FieldPath {id names {indices {}} {records 0}} {
 # pointer", "a fixed array", "the nested layout L".
 proc hir::layouts::ReprWhat {repr} {
     switch -- [dict get $repr kind] {
+        float   { return "a C floating scalar ([hir::types::show [dict get $repr ctype]])" }
         pointer { return "a C pointer" }
         array   { return "a fixed array" }
         layout  { return "the nested layout [dict get $repr layout]" }
@@ -1092,6 +1133,11 @@ proc hir::layouts::NotScalarReason {type spelled} {
         }
         return "$spelled is Int in [dict get $facts min]..[dict get $facts max], which is not the range of a fixed-width encoding (8, 16, 32 or 64 bits, unsigned 0..2^n-1 or two's-complement -2^(n-1)..2^(n-1)-1), so its width is unknown or not every bit pattern would be a value of it"
     }
+    if {$type eq "Float64" || ([hir::refinements::IsRefined $type] && ![hir::types::IsRefinedApplied $type])} {
+        # (C-FLOAT-FFI-MILESTONE-1.md: a field names a representation. A
+        # refined List is a List, LIST-CARDINALITY-REFINEMENTS.md.)
+        return "[hir::types::show $type] is a type of Botlish values, not a binary representation: a floating field names the representation it holds, [hir::cabi::FloatName] (IEEE 754 binary32) or [hir::cabi::DoubleName] (binary64), whose values are Float64s"
+    }
     if {[hir::types::IsNamedStruct $type]} {
         return "[hir::types::show $type] is a struct type, not an integer domain or a layout (a nested layout field names the layout itself)"
     }
@@ -1207,14 +1253,16 @@ proc hir::layouts::apply {decls {structDecls {}}} {
 }
 
 # The `sourceTypes` fields of registered layout ID: {name F offset O type T}
-# each, and an array field's or a union field's representation as `repr`
-# (FIXED-LAYOUT-ARRAYS.md: its consumer type, a List, does not say the
-# extent HIR text prints; LAYOUT-UNIONS.md: a union has no consumer type).
+# each, and an array field's, a union field's or a C floating field's
+# representation as `repr` (FIXED-LAYOUT-ARRAYS.md: its consumer type, a
+# List, does not say the extent HIR text prints; LAYOUT-UNIONS.md: a union
+# has no consumer type; C-FLOAT-FFI-MILESTONE-1.md: a float's and a
+# double's consumer type is the same Float64).
 proc hir::layouts::SourceFields {id} {
     variable registry
     return [lmap f [dict get $registry $id fields] {
         set source [dict create name [dict get $f name] offset [dict get $f offset] type [dict get $f type]]
-        if {[dict get $f kind] in {array union}} {
+        if {[dict get $f kind] in {array union float}} {
             dict set source repr [dict remove $f name offset]
         }
         set source
@@ -1400,6 +1448,15 @@ proc hir::layouts::ResolveRepr {typeExpr pointerText ns byId doneVar stack id na
         # The bare pointer kind until then: affine, like every pointer.
         return [dict create kind pointer width $width endian little type cptr]
     }
+    set floating [hir::cabi::FloatingOfExpr $typeExpr]
+    if {$floating ne ""} {
+        # A C floating field (the file header's "C floating fields"): the C
+        # type's format and width on the compilation's target.
+        if {[hir::cabi::CompilationTarget] eq ""} {
+            Fail $typeSpan "$what is a C floating scalar ([hir::types::show $floating]), whose representation is the compilation's C target's: no file of this compilation imports ffi::c, so there is none" LAYOUT-FIELD-TYPE
+        }
+        return [FloatingRepr $floating]
+    }
     set spelled [ShowTypeExpr $typeExpr]
     if {[catch {hir::resolve::ResolveTypeExpr $typeExpr $ns} resolved]} {
         Fail $typeSpan [UnresolvedFieldType $typeExpr $ns $spelled $fieldName $name $resolved] LAYOUT-FIELD-TYPE
@@ -1410,6 +1467,16 @@ proc hir::layouts::ResolveRepr {typeExpr pointerText ns byId doneVar stack id na
     }
     lassign $encoding width signed
     return [dict create kind scalar width $width signed $signed endian little type $resolved]
+}
+
+# The representation of the C floating type CTYPE ({cfloat NAME}) on the
+# compilation's C target (the file header's "C floating fields"): its IEEE
+# 754 format and width -- the C type's, never its carrier's -- and its
+# carrier as the consumer type.
+proc hir::layouts::FloatingRepr {ctype} {
+    set info [hir::cabi::FloatingInfo $ctype]
+    return [dict create kind float format [dict get $info format] width [dict get $info bytes] endian little \
+        ctype $ctype type [hir::cabi::Carrier $ctype]]
 }
 
 # REPR (a representation) with the type of the leaf DEPTH arrays down set to
@@ -2180,6 +2247,200 @@ proc hir::layouts::ConstText {hir e} {
     return [lindex [hir::get $hir $e literal] end]
 }
 
+# ---------------------------------------------------------------------------
+# NonFiniteFloat of the layout operations (the file header's "C floating
+# fields")
+#
+# A layout operation fails with NonFiniteFloat only through a C floating
+# value: reading one that is NaN or an infinity, or writing a Float64 that a
+# binary32 cannot hold. Its registered -errors list NonFiniteFloat
+# wherever it can; CallErrors charges a call with it only when the
+# representation the call reads or writes holds such a value, so every
+# other layout program is charged exactly what it always was. Everything is
+# read from the call's static evidence -- its descriptor, designator or
+# element constant, or its operand's static type -- before and after
+# elaboration alike (the completion analysis runs on both).
+
+# The IEEE 754 formats (core/cabi.tcl's floatingFormats) of the C floating
+# values the representation words WORDS (a descriptor field entry's words
+# after its name and offset) hold, sorted, without repeats.
+proc hir::layouts::WordsFormats {words} {
+    switch -- [lindex $words 0] {
+        f {
+            return [list [core::cabi::formatOfWidth [lindex $words 1]]]
+        }
+        layout - union {
+            return [DescriptorFormats [lindex $words 1]]
+        }
+        array {
+            return [WordsFormats [lindex $words 3]]
+        }
+    }
+    return {}
+}
+
+# WordsFormats of every field of the descriptor DESCRIPTOR.
+proc hir::layouts::DescriptorFormats {descriptor} {
+    set formats {}
+    foreach field [lindex $descriptor 3] {
+        lappend formats {*}[WordsFormats [lrange $field 2 end]]
+    }
+    return [lsort -unique $formats]
+}
+
+# What call CALLARGS (their static types ARGTYPES) of the layout native NAME
+# reads or writes, as {HOW WORDS}: HOW `copy` (every value the
+# representation words WORDS hold is read: parse, read, load), `leaf` (a
+# field read or an element access, which reads a value only when WORDS are
+# a leaf's -- anything else is a window, nothing read) or `write` (every
+# value WORDS hold is written: emit, a write, a store) -- or "" when the call
+# reads and writes no layout value (a view's construction, a query, a
+# pointer write) or its static evidence is missing (diagnosed elsewhere).
+proc hir::layouts::CallWords {hir name callArgs argTypes} {
+    set role [Role $name]
+    set op [RoleOf $role op]
+    switch -- $op {
+        parse - load - emit {
+            set descriptor [ArgConst $hir $callArgs [RoleOf $role operand]]
+            if {[DescriptorLayout $descriptor] eq ""} {
+                return ""
+            }
+            return [list [expr {$op eq "emit" ? "write" : "copy"}] [list layout $descriptor]]
+        }
+        read - store - write {
+            set path [ArgConst $hir $callArgs [RoleOf $role path]]
+            if {[PathLayout $path] eq ""} {
+                return ""
+            }
+            return [list [expr {$op eq "read" ? "copy" : "write"}] [lrange [lindex $path 3] 2 end]]
+        }
+        field {
+            set field [ArgConst $hir $callArgs [RoleOf $role field]]
+            if {[llength $field] < 3} {
+                return ""
+            }
+            return [list leaf [lrange $field 2 end]]
+        }
+        element - store_element - load_array {
+            set how [dict get {element leaf store_element write load_array copy} $op]
+            set words [ArgConst $hir $callArgs [RoleOf $role array]]
+            if {$words eq ""} {
+                # Before elaboration: the live array's static type.
+                set arrayed [RoleOf $role arrayed]
+                if {$arrayed eq ""} {
+                    return ""
+                }
+                set term [OfArrayType [lindex $argTypes [lindex $arrayed 0]]]
+                if {$term eq "" || [ReprOfTerm $term] eq ""} {
+                    return ""
+                }
+                set words [TermDescriptor $term]
+            }
+            if {[lindex $words 0] ne "array"} {
+                return ""
+            }
+            if {$op eq "load_array"} {
+                return [list copy $words]
+            }
+            return [list $how [lindex $words 3]]
+        }
+    }
+    # Before elaboration: binary::emit's value, binary::load's view or array.
+    set typed [RoleOf $role typed]
+    if {$typed ne ""} {
+        set id [OfType [lindex $argTypes [lindex $typed 0]]]
+        if {$id eq ""} {
+            return ""
+        }
+        return [list write [list layout [descriptor $id]]]
+    }
+    set viewed [RoleOf $role viewed]
+    if {$viewed ne ""} {
+        set type [lindex $argTypes [lindex $viewed 0]]
+        set id [OfNativeType $type]
+        if {$id ne "" && ![HoldsUnion $id]} {
+            return [list copy [list layout [descriptor $id]]]
+        }
+        set term [OfArrayType $type]
+        if {$term ne "" && [ReprOfTerm $term] ne ""} {
+            return [list copy [TermDescriptor $term]]
+        }
+    }
+    return ""
+}
+
+# The constant text of argument AT ("" for none) of ARGS, or "".
+proc hir::layouts::ArgConst {hir callArgs at} {
+    if {$at eq ""} {
+        return ""
+    }
+    return [ConstText $hir [lindex $callArgs $at]]
+}
+
+# {NonFiniteFloat} when call CALLARGS (static types ARGTYPES) of the layout
+# native NAME can fail through a C floating value -- it reads one (any
+# format: NaN and the infinities are no Float64), or writes a Float64 into a
+# binary32, which may overflow -- else {}.
+proc hir::layouts::FloatErrors {hir name callArgs argTypes} {
+    lassign [CallWords $hir $name $callArgs $argTypes] how words
+    switch -- $how {
+        copy {
+            if {[WordsFormats $words] ne {}} {
+                return NonFiniteFloat
+            }
+        }
+        leaf {
+            if {[lindex $words 0] eq "f"} {
+                return NonFiniteFloat
+            }
+        }
+        write {
+            if {"binary32" in [WordsFormats $words]} {
+                return NonFiniteFloat
+            }
+        }
+    }
+    return {}
+}
+
+# ERRORS -- declared errors of native NAME -- as call CALLARGS (static types
+# ARGTYPES) charges them: a layout operation's NonFiniteFloat only when the
+# call can fail through a C floating value (FloatErrors). Every other
+# native's errors as they are.
+proc hir::layouts::CallErrors {hir name callArgs argTypes errors} {
+    if {"NonFiniteFloat" ni $errors || [Role $name] eq ""} {
+        return $errors
+    }
+    if {[FloatErrors $hir $name $callArgs $argTypes] ne {}} {
+        return $errors
+    }
+    return [lsearch -all -inline -not -exact $errors NonFiniteFloat]
+}
+
+# The C floating format of the leaf a write call CALLARGS of the layout native
+# NAME writes, when it writes exactly one C floating value (a float or
+# double field, or an element) -- binary32 or binary64 -- else "".
+proc hir::layouts::WrittenFloatFormat {hir name callArgs argTypes} {
+    lassign [CallWords $hir $name $callArgs $argTypes] how words
+    if {$how ne "write" || [lindex $words 0] ne "f"} {
+        return ""
+    }
+    return [core::cabi::formatOfWidth [lindex $words 1]]
+}
+
+# 1 if a projection of field NAME through a receiver of static type TYPE (a
+# NativeView[L] or NativeEdit[L]) reads a C floating value from native
+# memory: it may fail with NonFiniteFloat (the projection becomes
+# binary#view_field after the checks: Elaborate).
+proc hir::layouts::ProjectionReadsFloat {type name} {
+    set id [OfNativeType $type]
+    if {$id eq ""} {
+        return 0
+    }
+    set field [FieldDescriptor $id $name]
+    return [expr {$field ne "" && [lindex $field 2] eq "f"}]
+}
+
 # Holds the value a write (binary::store, binary::write,
 # binary::write_foreign: role `value K`) puts into its designated field to
 # the field's type, in call E (NODE) of native NAME (NATIVE-LAYOUT-WRITES.md):
@@ -2203,9 +2464,10 @@ proc hir::layouts::VerifyWriteValue {hirVar ranges e node name} {
         set arrayType [hir::typeOf $hir [lindex $args 0]]
         set term [OfArrayType $arrayType]
         if {$term eq "" || ![hir::types::IsNativeEdit $arrayType] || [ReprOfTerm [lindex $term 2]] eq ""
-                || [dict get [ReprOfTerm [lindex $term 2]] kind] ni {scalar pointer}} {
+                || [dict get [ReprOfTerm [lindex $term 2]] kind] ni {scalar float pointer}} {
             return
         }
+        # (A C floating element holds its carrier's values: a Float64.)
         set declared [lindex $term 2]
         set arg [lindex $args $at]
         set valueType [hir::typeOf $hir $arg]
@@ -2213,7 +2475,7 @@ proc hir::layouts::VerifyWriteValue {hirVar ranges e node name} {
             return
         }
         set range [dict getdef $ranges $arg [hir::range::unknown]]
-        if {[hir::range::ProvesValueAcceptedBy $valueType $range $declared]} {
+        if {[hir::range::ProvesValueAcceptedBy $valueType $range [hir::cabi::Carrier $declared]]} {
             return
         }
         hir::Diagnose hir TYPE [format {the value %s writes into an element of %s cannot be proven to satisfy the element's type %s (value type: %s%s)} \

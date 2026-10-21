@@ -36,7 +36,7 @@ function	Tcl_DbDecrRefCount	direct	tcl::decls	direct	symbol Tcl_DbDecrRefCount; 
 function	Tcl_DbIncrRefCount	direct	tcl::decls	direct	symbol Tcl_DbIncrRefCount; (ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Char], ffi::c::Int) -> unit
 function	Tcl_DbIsShared	direct	tcl::decls	direct	symbol Tcl_DbIsShared; (ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Char], ffi::c::Int) -> ffi::c::Int
 function	Tcl_DbNewByteArrayObj	direct	tcl::decls	direct	symbol Tcl_DbNewByteArrayObj; (ffi::c::Ptr[ffi::c::UChar], ffi::c::Long, ffi::c::Ptr[ffi::c::Char], ffi::c::Int) -> ffi::c::Ptr[Tcl_Obj]
-function	Tcl_DbNewDoubleObj	unsupported		double	parameter 1 (doubleValue): double
+function	Tcl_DbNewDoubleObj	direct	tcl::decls	direct	symbol Tcl_DbNewDoubleObj; (ffi::c::Double, ffi::c::Ptr[ffi::c::Char], ffi::c::Int) -> ffi::c::Ptr[Tcl_Obj]
 function	Tcl_DbNewListObj	direct	tcl::decls	direct	symbol Tcl_DbNewListObj; (ffi::c::Long, ffi::c::Ptr[ffi::c::Ptr[Tcl_Obj]], ffi::c::Ptr[ffi::c::Char], ffi::c::Int) -> ffi::c::Ptr[Tcl_Obj]
 function	Tcl_DbNewObj	direct	tcl::decls	direct	symbol Tcl_DbNewObj; (ffi::c::Ptr[ffi::c::Char], ffi::c::Int) -> ffi::c::Ptr[Tcl_Obj]
 function	Tcl_DbNewStringObj	direct	tcl::decls	direct	symbol Tcl_DbNewStringObj; (ffi::c::Ptr[ffi::c::Char], ffi::c::Long, ffi::c::Ptr[ffi::c::Char], ffi::c::Int) -> ffi::c::Ptr[Tcl_Obj]
@@ -45,8 +45,8 @@ function	TclFreeObj	direct	tcl::decls	direct	symbol TclFreeObj; (ffi::c::Ptr[Tcl
 function	Tcl_GetBoolean	thunk	tcl::thunks::decls	thunk (macro-shadow: expression: calls a function)	symbol botlish_tcl_Tcl_GetBoolean; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[ffi::c::Char], ffi::c::Ptr[ffi::c::Int]) -> ffi::c::Int
 function	Tcl_GetBooleanFromObj	thunk	tcl::thunks::decls	thunk (macro-shadow: expression: calls a function)	symbol botlish_tcl_Tcl_GetBooleanFromObj; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Int]) -> ffi::c::Int
 function	Tcl_GetByteArrayFromObj	thunk	tcl::thunks::decls	thunk (macro-shadow: call wrapper: computed arguments)	symbol botlish_tcl_Tcl_GetByteArrayFromObj; (ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Long]) -> ffi::c::Ptr[ffi::c::UChar]
-function	Tcl_GetDouble	unsupported		double	parameter 3 (doublePtr): a pointer to double
-function	Tcl_GetDoubleFromObj	unsupported		double	parameter 3 (doublePtr): a pointer to double
+function	Tcl_GetDouble	direct	tcl::decls	direct	symbol Tcl_GetDouble; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[ffi::c::Char], ffi::c::Ptr[ffi::c::Double]) -> ffi::c::Int
+function	Tcl_GetDoubleFromObj	direct	tcl::decls	direct	symbol Tcl_GetDoubleFromObj; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Double]) -> ffi::c::Int
 function	Tcl_GetInt	direct	tcl::decls	direct	symbol Tcl_GetInt; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[ffi::c::Char], ffi::c::Ptr[ffi::c::Int]) -> ffi::c::Int
 function	Tcl_GetIntFromObj	direct	tcl::decls	direct	symbol Tcl_GetIntFromObj; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Int]) -> ffi::c::Int
 function	Tcl_GetLongFromObj	direct	tcl::decls	direct	symbol Tcl_GetLongFromObj; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Long]) -> ffi::c::Int
@@ -60,13 +60,13 @@ function	Tcl_ListObjIndex	direct	tcl::decls	direct	symbol Tcl_ListObjIndex; (ffi
 function	TclListObjLength	direct	tcl::decls	direct	symbol TclListObjLength; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Void]) -> ffi::c::Int
 function	Tcl_ListObjReplace	direct	tcl::decls	direct	symbol Tcl_ListObjReplace; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[Tcl_Obj], ffi::c::Long, ffi::c::Long, ffi::c::Long, ffi::c::Ptr[ffi::c::Ptr[Tcl_Obj]]) -> ffi::c::Int
 function	Tcl_NewByteArrayObj	direct	tcl::decls	direct	symbol Tcl_NewByteArrayObj; (ffi::c::Ptr[ffi::c::UChar], ffi::c::Long) -> ffi::c::Ptr[Tcl_Obj]
-function	Tcl_NewDoubleObj	unsupported		double	parameter 1 (doubleValue): double
+function	Tcl_NewDoubleObj	direct	tcl::decls	direct	symbol Tcl_NewDoubleObj; (ffi::c::Double) -> ffi::c::Ptr[Tcl_Obj]
 function	Tcl_NewListObj	direct	tcl::decls	direct	symbol Tcl_NewListObj; (ffi::c::Long, ffi::c::Ptr[ffi::c::Ptr[Tcl_Obj]]) -> ffi::c::Ptr[Tcl_Obj]
 function	Tcl_NewObj	direct	tcl::decls	direct	symbol Tcl_NewObj; () -> ffi::c::Ptr[Tcl_Obj]
 function	Tcl_NewStringObj	direct	tcl::decls	direct	symbol Tcl_NewStringObj; (ffi::c::Ptr[ffi::c::Char], ffi::c::Long) -> ffi::c::Ptr[Tcl_Obj]
 function	Tcl_SetByteArrayLength	direct	tcl::decls	direct	symbol Tcl_SetByteArrayLength; (ffi::c::Ptr[Tcl_Obj], ffi::c::Long) -> ffi::c::Ptr[ffi::c::UChar]
 function	Tcl_SetByteArrayObj	direct	tcl::decls	direct	symbol Tcl_SetByteArrayObj; (ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::UChar], ffi::c::Long) -> unit
-function	Tcl_SetDoubleObj	unsupported		double	parameter 2 (doubleValue): double
+function	Tcl_SetDoubleObj	direct	tcl::decls	direct	symbol Tcl_SetDoubleObj; (ffi::c::Ptr[Tcl_Obj], ffi::c::Double) -> unit
 function	Tcl_SetListObj	direct	tcl::decls	direct	symbol Tcl_SetListObj; (ffi::c::Ptr[Tcl_Obj], ffi::c::Long, ffi::c::Ptr[ffi::c::Ptr[Tcl_Obj]]) -> unit
 function	Tcl_SetObjLength	direct	tcl::decls	direct	symbol Tcl_SetObjLength; (ffi::c::Ptr[Tcl_Obj], ffi::c::Long) -> unit
 function	Tcl_SetStringObj	direct	tcl::decls	direct	symbol Tcl_SetStringObj; (ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Char], ffi::c::Long) -> unit
@@ -134,8 +134,8 @@ function	Tcl_Exit	direct	tcl::decls	direct	symbol Tcl_Exit; (ffi::c::Int) -> uni
 function	Tcl_ExposeCommand	direct	tcl::decls	direct	symbol Tcl_ExposeCommand; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[ffi::c::Char], ffi::c::Ptr[ffi::c::Char]) -> ffi::c::Int
 function	Tcl_ExprBoolean	direct	tcl::decls	direct	symbol Tcl_ExprBoolean; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[ffi::c::Char], ffi::c::Ptr[ffi::c::Int]) -> ffi::c::Int
 function	Tcl_ExprBooleanObj	direct	tcl::decls	direct	symbol Tcl_ExprBooleanObj; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Int]) -> ffi::c::Int
-function	Tcl_ExprDouble	unsupported		double	parameter 3 (ptr): a pointer to double
-function	Tcl_ExprDoubleObj	unsupported		double	parameter 3 (ptr): a pointer to double
+function	Tcl_ExprDouble	direct	tcl::decls	direct	symbol Tcl_ExprDouble; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[ffi::c::Char], ffi::c::Ptr[ffi::c::Double]) -> ffi::c::Int
+function	Tcl_ExprDoubleObj	direct	tcl::decls	direct	symbol Tcl_ExprDoubleObj; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Double]) -> ffi::c::Int
 function	Tcl_ExprLong	direct	tcl::decls	direct	symbol Tcl_ExprLong; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[ffi::c::Char], ffi::c::Ptr[ffi::c::Long]) -> ffi::c::Int
 function	Tcl_ExprLongObj	direct	tcl::decls	direct	symbol Tcl_ExprLongObj; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Long]) -> ffi::c::Int
 function	Tcl_ExprObj	direct	tcl::decls	direct	symbol Tcl_ExprObj; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Ptr[Tcl_Obj]]) -> ffi::c::Int
@@ -190,7 +190,7 @@ function	Tcl_OpenFileChannel	direct	tcl::decls	direct	symbol Tcl_OpenFileChannel
 function	Tcl_OpenTcpClient	direct	tcl::decls	direct	symbol Tcl_OpenTcpClient; (ffi::c::Ptr[Tcl_Interp], ffi::c::Int, ffi::c::Ptr[ffi::c::Char], ffi::c::Ptr[ffi::c::Char], ffi::c::Int, ffi::c::Int) -> ffi::c::Ptr[Tcl_Channel_]
 function	Tcl_OpenTcpServer	direct	tcl::decls	direct	symbol Tcl_OpenTcpServer; (ffi::c::Ptr[Tcl_Interp], ffi::c::Int, ffi::c::Ptr[ffi::c::Char], ffi::c::FnPtr[Fn{args: [ffi::c::Ptr[ffi::c::Void], ffi::c::Ptr[Tcl_Channel_], ffi::c::Ptr[ffi::c::Char], ffi::c::Int], return: unit}], ffi::c::Ptr[ffi::c::Void]) -> ffi::c::Ptr[Tcl_Channel_]
 function	Tcl_Preserve	direct	tcl::decls	direct	symbol Tcl_Preserve; (ffi::c::Ptr[ffi::c::Void]) -> unit
-function	Tcl_PrintDouble	unsupported		double	parameter 2 (value): double
+function	Tcl_PrintDouble	direct	tcl::decls	direct	symbol Tcl_PrintDouble; (ffi::c::Ptr[Tcl_Interp], ffi::c::Double, ffi::c::Ptr[ffi::c::Char]) -> unit
 function	Tcl_PutEnv	direct	tcl::decls	direct	symbol Tcl_PutEnv; (ffi::c::Ptr[ffi::c::Char]) -> ffi::c::Int
 function	Tcl_PosixError	direct	tcl::decls	direct	symbol Tcl_PosixError; (ffi::c::Ptr[Tcl_Interp]) -> ffi::c::Ptr[ffi::c::Char]
 function	Tcl_QueueEvent	direct	tcl::decls	direct	symbol Tcl_QueueEvent; (ffi::c::Ptr[Tcl_Event], ffi::c::Int) -> unit
@@ -517,7 +517,7 @@ function	Tcl_SetChannelErrorInterp	direct	tcl::decls	direct	symbol Tcl_SetChanne
 function	Tcl_GetChannelErrorInterp	direct	tcl::decls	direct	symbol Tcl_GetChannelErrorInterp; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[ffi::c::Ptr[Tcl_Obj]]) -> unit
 function	Tcl_SetChannelError	direct	tcl::decls	direct	symbol Tcl_SetChannelError; (ffi::c::Ptr[Tcl_Channel_], ffi::c::Ptr[Tcl_Obj]) -> unit
 function	Tcl_GetChannelError	direct	tcl::decls	direct	symbol Tcl_GetChannelError; (ffi::c::Ptr[Tcl_Channel_], ffi::c::Ptr[ffi::c::Ptr[Tcl_Obj]]) -> unit
-function	Tcl_InitBignumFromDouble	unsupported		double	parameter 2 (initval): double
+function	Tcl_InitBignumFromDouble	direct	tcl::decls	direct	symbol Tcl_InitBignumFromDouble; (ffi::c::Ptr[Tcl_Interp], ffi::c::Double, ffi::c::Ptr[ffi::c::Void]) -> ffi::c::Int
 function	Tcl_GetNamespaceUnknownHandler	direct	tcl::decls	direct	symbol Tcl_GetNamespaceUnknownHandler; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[Tcl_Namespace]) -> ffi::c::Ptr[Tcl_Obj]
 function	Tcl_SetNamespaceUnknownHandler	direct	tcl::decls	direct	symbol Tcl_SetNamespaceUnknownHandler; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[Tcl_Namespace], ffi::c::Ptr[Tcl_Obj]) -> ffi::c::Int
 function	Tcl_GetEncodingFromObj	direct	tcl::decls	direct	symbol Tcl_GetEncodingFromObj; (ffi::c::Ptr[Tcl_Interp], ffi::c::Ptr[Tcl_Obj], ffi::c::Ptr[ffi::c::Ptr[Tcl_Encoding_]]) -> ffi::c::Int
@@ -1436,8 +1436,8 @@ record	struct Tcl_ObjType	layout-direct	tcl::layouts	Tcl_ObjType	sizeof 112, _Al
 record	struct anon@tcl.h:723	layout-direct	tcl::layouts	Tcl_ObjInternalRep_twoPtrValue	sizeof 16, _Alignof 8, 2 fields
 record	struct anon@tcl.h:727	layout-direct	tcl::layouts	Tcl_ObjInternalRep_ptrAndLongRep	sizeof 16, _Alignof 8, 2 fields
 record	struct anon@tcl.h:731	layout-direct	tcl::layouts	Tcl_ObjInternalRep_ptrAndSize	sizeof 16, _Alignof 8, 2 fields
-record	union Tcl_ObjInternalRep	layout-blocked		double	field doubleValue: double (double)
-record	struct Tcl_Obj	layout-blocked		nested-layout-blocked	field internalRep (union Tcl_ObjInternalRep, field) -> double
+record	union Tcl_ObjInternalRep	layout-direct	tcl::layouts	Tcl_ObjInternalRep	sizeof 16, _Alignof 8, 7 fields
+record	struct Tcl_Obj	layout-direct	tcl::layouts	Tcl_Obj	sizeof 48, _Alignof 8, 5 fields
 record	struct Tcl_Namespace	layout-direct	tcl::layouts	Tcl_Namespace	sizeof 40, _Alignof 8, 5 fields
 record	struct Tcl_CallFrame	layout-direct	tcl::layouts	Tcl_CallFrame	sizeof 112, _Alignof 8, 14 fields
 record	struct anon@tcl.h:846	layout-direct	tcl::layouts	Tcl_CmdInfo	sizeof 80, _Alignof 8, 10 fields
@@ -1460,7 +1460,7 @@ record	struct Tcl_EncodingType	layout-direct	tcl::layouts	Tcl_EncodingType	sizeo
 record	struct Tcl_Config	layout-direct	tcl::layouts	Tcl_Config	sizeof 16, _Alignof 8, 2 fields
 record	struct anon@tcl.h:2175	layout-direct	tcl::layouts	Tcl_ArgvInfo	sizeof 48, _Alignof 8, 6 fields
 record	struct anon@tclDecls.h:1879	layout-direct	tcl::layouts	TclStubHooks	sizeof 24, _Alignof 8, 3 fields
-record	struct TclStubs	layout-blocked		unsupported-pointer	field tcl_Panic: a variadic callback (void (const char *format, ...)) (unsupported-callback-signature); field tcl_AppendStringsToObj: a variadic callback (void (Tcl_Obj *objPtr, ...)) (unsupported-callback-signature); field tcl_DbNewDoubleObj: callback argument 1: double (double) (unsupported-callback-signature); field tcl_GetDouble: callback argument 3: a pointer to double (double) (unsupported-callback-signature); field tcl_GetDoubleFromObj: callback argument 3: a pointer to double (double) (unsupported-callback-signature); field tcl_NewDoubleObj: callback argument 1: double (double) (unsupported-callback-signature); field tcl_SetDoubleObj: callback argument 2: double (double) (unsupported-callback-signature); field tcl_AppendResult: a variadic callback (void (Tcl_Interp *interp, ...)) (unsupported-callback-signature); field tcl_ExprDouble: callback argument 3: a pointer to double (double) (unsupported-callback-signature); field tcl_ExprDoubleObj: callback argument 3: a pointer to double (double) (unsupported-callback-signature); field tcl_PrintDouble: callback argument 2: double (double) (unsupported-callback-signature); field tcl_SetErrorCode: a variadic callback (void (Tcl_Interp *interp, ...)) (unsupported-callback-signature); field tcl_VarEval: a variadic callback (int (Tcl_Interp *interp, ...)) (unsupported-callback-signature); field tcl_InitBignumFromDouble: callback argument 2: double (double) (unsupported-callback-signature); field tcl_ObjPrintf: a variadic callback (Tcl_Obj *(const char *format, ...)) (unsupported-callback-signature); field tcl_AppendPrintfToObj: a variadic callback (void (Tcl_Obj *objPtr, const char *format, ...)) (unsupported-callback-signature)
+record	struct TclStubs	layout-blocked		unsupported-pointer	field tcl_Panic: a variadic callback (void (const char *format, ...)) (unsupported-callback-signature); field tcl_AppendStringsToObj: a variadic callback (void (Tcl_Obj *objPtr, ...)) (unsupported-callback-signature); field tcl_AppendResult: a variadic callback (void (Tcl_Interp *interp, ...)) (unsupported-callback-signature); field tcl_SetErrorCode: a variadic callback (void (Tcl_Interp *interp, ...)) (unsupported-callback-signature); field tcl_VarEval: a variadic callback (int (Tcl_Interp *interp, ...)) (unsupported-callback-signature); field tcl_ObjPrintf: a variadic callback (Tcl_Obj *(const char *format, ...)) (unsupported-callback-signature); field tcl_AppendPrintfToObj: a variadic callback (void (Tcl_Obj *objPtr, const char *format, ...)) (unsupported-callback-signature)
 record	struct TclPlatStubs	layout-direct	tcl::layouts	TclPlatStubs	sizeof 48, _Alignof 8, 6 fields
 record	struct Tcl_MethodType	layout-direct	tcl::layouts	Tcl_MethodType	sizeof 40, _Alignof 8, 5 fields
 record	struct Tcl_MethodType2	layout-direct	tcl::layouts	Tcl_MethodType2	sizeof 40, _Alignof 8, 5 fields

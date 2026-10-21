@@ -30,6 +30,10 @@
 #   FIELD = {NAME OFFSET u|i WIDTH ENDIAN}  a scalar: WIDTH bytes, unsigned
 #                                           or two's-complement, ENDIAN
 #                                           little (the target's)
+#         | {NAME OFFSET f WIDTH ENDIAN}    a C floating scalar (C-FLOAT-FFI-
+#                                           MILESTONE-1.md): the IEEE 754
+#                                           format of WIDTH bytes (binary32,
+#                                           binary64), its value a Float64
 #         | {NAME OFFSET layout DESCRIPTOR} a nested layout, by value
 #         | {NAME OFFSET ptr WIDTH ENDIAN}  a C pointer (native memory only)
 #         | {NAME OFFSET array N STRIDE ELEMENT}
@@ -57,8 +61,11 @@
 #
 #   * parse requires exactly L's size: fewer or more bytes is the declared
 #     builtin error LayoutLengthMismatch (no prefix parse, no cursor). Every
-#     bit pattern of a scalar field is a value of its type (hir/layouts.tcl's
-#     "Scalar encodings"), so nothing else can fail. Padding bytes -- bytes no
+#     bit pattern of an integer field is a value of its type (hir/layouts.tcl's
+#     "Scalar encodings"); a C floating field's is one only when it is
+#     finite -- NaN and the infinities are the builtin NonFiniteFloat, a
+#     negative zero is zero (core::cabi's Admit rule) -- so nothing else can
+#     fail. Padding bytes -- bytes no
 #     field covers -- are read by no one: two inputs that differ only in
 #     padding imprint equal values. The value holds the fields only, never
 #     the input (no provenance, no borrowed buffer).
@@ -66,7 +73,9 @@
 #     into L's size zero bytes: padding is always zero, so equal values emit
 #     equal bytes. A field's value is already in its domain (its type says
 #     so), so nothing is truncated; the reference implementation checks it
-#     anyway (RANGE: a value no checked program can build).
+#     anyway (RANGE: a value no checked program can build). A Float64 written
+#     into a binary32 field is narrowed (core::cabi's Narrow rule: to nearest,
+#     ties to even), and one that overflows is NonFiniteFloat, never clamped.
 #   * parse(emit(v)) == v for every v: the fields are written and read at the
 #     same offsets with the same encodings.
 
@@ -155,6 +164,12 @@ proc core::binary::DecodeRepr {repr bytes at name structId} {
             }
             return [core::value::listOf $items]
         }
+        f {
+            # A C floating field: admitted, or NonFiniteFloat.
+            set format [core::cabi::formatOfWidth [lindex $repr 1]]
+            return [core::cabi::FloatingValue "field \"$name\" of $structId" \
+                [core::cabi::DecodeFloating $format $bytes $at]]
+        }
     }
     lassign $repr sign width endian
     binary scan $bytes @$at[Letter $width $sign $endian] n
@@ -204,6 +219,9 @@ proc core::binary::EncodeRepr {operation repr value bytes at what} {
             }
             return $bytes
         }
+        f {
+            return [string replace $bytes $at [expr {$at + [lindex $repr 1] - 1}] [FloatPiece $operation $repr $value $what]]
+        }
     }
     lassign $repr sign width endian
     set n [core::value::intOf $value]
@@ -213,6 +231,23 @@ proc core::binary::EncodeRepr {operation repr value bytes at what} {
         core::semanticError RANGE "$operation: $what holds $n, outside its $width-byte encoding $lo..$hi"
     }
     return [string replace $bytes $at [expr {$at + $width - 1}] $piece]
+}
+
+# The bytes of the Float64 VALUE written by OPERATION into the C floating
+# representation REPR ({f WIDTH ENDIAN}; WHAT names the place): narrowed by
+# the boundary's rule (core::cabi::Narrow), NonFiniteFloat when a binary32
+# cannot hold it.
+proc core::binary::FloatPiece {operation repr value what} {
+    lassign $repr - width endian
+    core::value::expect Float64 $value $operation
+    set format [core::cabi::formatOfWidth $width]
+    set encoded [core::cabi::EncodeFloating $format [core::value::floatOf $value]]
+    if {[lindex $encoded 0] ne "ok"} {
+        core::native::failDeclared NonFiniteFloat \
+            "$operation: $what is a C $format, which cannot hold [core::float::text $value] (it rounds to an infinity)" \
+            [core::float::Payload [lindex $encoded 2]]
+    }
+    return [lindex $encoded 1]
 }
 
 # The elements of VALUE, a List written by OPERATION into a fixed array of
@@ -579,6 +614,11 @@ proc core::binary::write {data path value} {
             $offset "field [PathText $path]"]]
     }
     set bytes [RecordBytes binary::write $data $path]
+    if {$sign eq "f"} {
+        # A C floating field: narrowed (C-FLOAT-FFI-MILESTONE-1.md).
+        set piece [FloatPiece binary::write [lrange [lindex $path 3] 2 end] $value "field [PathText $path]"]
+        return [MutableBytesValue [string replace $bytes $offset [expr {$offset + $width - 1}] $piece]]
+    }
     set n [core::value::intOf $value]
     set piece [ScalarPiece $n $sign $width $endian]
     if {$piece eq ""} {
@@ -699,15 +739,21 @@ core::native::declareError NativeViewNull
 core::native::declareError NativeEditNull
 core::native::declareError LayoutExtentMismatch
 
+# A layout operation reading a C floating field (a NaN or an infinity is no
+# Float64) or writing a binary32 one (a Float64 may overflow it) may fail
+# with the builtin NonFiniteFloat (C-FLOAT-FFI-MILESTONE-1.md): each one
+# that can lists it, and hir::layouts::CallErrors charges a call with it
+# only when the representation it reads or writes holds such a field.
+
 core::native::register binary::parse -arity 2 -impl core::binary::parse \
     -param-types {str struct} -result-type struct -result-shape {layout-struct 0} \
-    -errors {LayoutLengthMismatch} -layout {operand 0 input 1 op parse} -nomethod 1
+    -errors {LayoutLengthMismatch NonFiniteFloat} -layout {operand 0 input 1 op parse} -nomethod 1
 core::native::register binary::emit -arity 1 -impl {core::binary::Unelaborated binary::emit} \
     -param-types {struct} -result-type struct -result-shape [list named-struct [core::bytestore::bytesType]] \
-    -ownership {observe} -errors {LayoutExtentMismatch} -bounds {extents 0} -layout {typed {0 binary#emit}}
+    -ownership {observe} -errors {LayoutExtentMismatch NonFiniteFloat} -bounds {extents 0} -layout {typed {0 binary#emit}}
 core::native::register binary#emit -arity 2 -impl core::binary::emit \
     -param-types {struct str} -result-type struct -result-shape [list named-struct [core::bytestore::bytesType]] \
-    -runtime {bytestore-alloc} -ownership {observe observe} -errors {LayoutExtentMismatch} -bounds {extents 0} \
+    -runtime {bytestore-alloc} -ownership {observe observe} -errors {LayoutExtentMismatch NonFiniteFloat} -bounds {extents 0} \
     -layout {operand 1 op emit} -nomethod 1
 # binary::read(data, L.path) (LAYOUT-UNIONS.md): one designated
 # representation imprinted from bytes -- how a union's alternative is read
@@ -716,7 +762,7 @@ core::native::register binary#emit -arity 2 -impl core::binary::emit \
 # a List); `-result-length {path 1}` states an array's extent.
 core::native::register binary::read -arity 2 -impl core::binary::read \
     -param-types {struct str} -result-type any -result-shape {layout-read 1} -ownership {observe observe} \
-    -errors {LayoutLengthMismatch} -result-length {path 1} -layout {input 0 path 1 op read} -nomethod 1
+    -errors {LayoutLengthMismatch NonFiniteFloat} -result-length {path 1} -layout {input 0 path 1 op read} -nomethod 1
 core::native::register binary::layout_length -arity 1 -impl {core::binary::Unelaborated binary::layout_length} \
     -param-types {any} -result-type int -layout {operand 0 query length} -nomethod 1
 core::native::register binary::layout_alignment -arity 1 -impl {core::binary::Unelaborated binary::layout_alignment} \
@@ -726,22 +772,22 @@ core::native::register binary::native::view -arity 2 -impl core::binary::nativeV
     -errors {NativeViewNull} -layout {operand 0 pointer 1 op view} -nomethod 1
 core::native::register binary::load -arity 1 -impl {core::binary::Unelaborated binary::load} \
     -param-types {any} -result-type any -result-shape {view-struct 0} -ownership {observe} \
-    -result-length {extent 0} -layout {viewed {0 binary#load} arrayed {0 binary#load_array}}
+    -errors {NonFiniteFloat} -result-length {extent 0} -layout {viewed {0 binary#load} arrayed {0 binary#load_array}}
 core::native::register binary#load -arity 2 -impl core::binary::load \
     -param-types {any str} -result-type struct -result-shape {layout-struct 1} -ownership {observe observe} \
-    -layout {operand 1 op load} -nomethod 1
+    -errors {NonFiniteFloat} -layout {operand 1 op load} -nomethod 1
 core::native::register binary#view_field -arity 2 -impl core::binary::viewField \
     -param-types {any str} -result-type any -result-shape {view-field 0 1} -ownership {observe observe} \
-    -layout {field 1 op field} -nomethod 1
+    -errors {NonFiniteFloat} -layout {field 1 op field} -nomethod 1
 core::native::register binary::native::edit -arity 2 -impl core::binary::nativeEdit \
     -param-types {str any} -result-type any -result-shape {native-edit 0} -ownership {observe observe} \
     -errors {NativeEditNull} -layout {operand 0 pointer 1 op edit} -nomethod 1
 core::native::register binary::store -arity 3 -impl core::binary::store \
     -param-types {any str any} -result-type unit -ownership {observe observe observe} \
-    -errors {LayoutExtentMismatch} -bounds {extents 2} -layout {edited 0 path 1 value 2 op store} -nomethod 1
+    -errors {LayoutExtentMismatch NonFiniteFloat} -bounds {extents 2} -layout {edited 0 path 1 value 2 op store} -nomethod 1
 core::native::register binary::write -arity 3 -impl core::binary::write \
     -param-types {struct str any} -result-type struct -result-shape [list named-struct [core::bytestore::mutableBytesType]] \
-    -runtime {bytestore-alloc} -ownership {observe observe observe} -errors {LayoutExtentMismatch LayoutLengthMismatch} \
+    -runtime {bytestore-alloc} -ownership {observe observe observe} -errors {LayoutExtentMismatch LayoutLengthMismatch NonFiniteFloat} \
     -bounds {extents 2} -layout {output 0 path 1 value 2 op write} -nomethod 1
 core::native::register binary::write_foreign -arity 3 -impl core::binary::writeForeign \
     -param-types {struct str any} -result-type struct -result-shape [list named-struct [core::bytestore::mutableBytesType]] \
@@ -753,20 +799,20 @@ core::native::register binary::write_foreign -arity 3 -impl core::binary::writeF
 # states), and a whole array's copy.
 core::native::register binary::element -arity 2 -impl {core::binary::Unelaborated binary::element} \
     -param-types {any int} -result-type any -result-shape {native-element 0} -ownership {observe observe} \
-    -errors {IndexNotFound} -bounds {index narray 0 1} -layout {arrayed {0 binary#element} index 1 op element} -nomethod 1
+    -errors {IndexNotFound NonFiniteFloat} -bounds {index narray 0 1} -layout {arrayed {0 binary#element} index 1 op element} -nomethod 1
 core::native::register binary#element -arity 3 -impl core::binary::element \
     -param-types {any int str} -result-type any -result-shape {native-element 0} -ownership {observe observe observe} \
-    -errors {IndexNotFound} -bounds {index narray 0 1} -layout {array 2 index 1 op element} -nomethod 1
+    -errors {IndexNotFound NonFiniteFloat} -bounds {index narray 0 1} -layout {array 2 index 1 op element} -nomethod 1
 core::native::register binary::store_element -arity 3 -impl {core::binary::Unelaborated binary::store_element} \
     -param-types {any int any} -result-type unit -ownership {observe observe observe} \
-    -errors {IndexNotFound} -bounds {index narray 0 1} \
+    -errors {IndexNotFound NonFiniteFloat} -bounds {index narray 0 1} \
     -layout {arrayed {0 binary#store_element} index 1 value 2 op store_element} -nomethod 1
 core::native::register binary#store_element -arity 4 -impl core::binary::storeElement \
     -param-types {any int any str} -result-type unit -ownership {observe observe observe observe} \
-    -errors {IndexNotFound} -bounds {index narray 0 1} -layout {array 3 index 1 value 2 op store_element} -nomethod 1
+    -errors {IndexNotFound NonFiniteFloat} -bounds {index narray 0 1} -layout {array 3 index 1 value 2 op store_element} -nomethod 1
 core::native::register binary#load_array -arity 2 -impl core::binary::loadArray \
     -param-types {any str} -result-type any -result-shape {view-struct 0} -ownership {observe observe} \
-    -result-length {extent 0} -layout {array 1 op load_array} -nomethod 1
+    -errors {NonFiniteFloat} -result-length {extent 0} -layout {array 1 op load_array} -nomethod 1
 # Reading live process memory is raw authority (DIRECT-MODULES.md): every
 # call of binary::native::view is a direct edge of the module making it --
 # and so is every call of binary::native::edit, write authority over it

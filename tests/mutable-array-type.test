@@ -950,8 +950,8 @@ proc maAotParity {text} {
             lappend expected [lindex $outcome 1]
         }
         exec [info nameofexecutable] [file join $::projectRoot main.tcl] -emit-native-executable $path
-        lappend expected [exec env PATH= [file rootname $path]]
-        lappend expected [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 [file rootname $path]]
+        lappend expected [runStandalone [file rootname $path]]
+        lappend expected [runStandalone [file rootname $path] BOTLISH_NATIVE_GC_STRESS 1]
         if {[llength [lsort -unique $expected]] != 1} { error "values disagree: $expected" }
         return [lindex $expected 0]
     } finally {

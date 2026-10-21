@@ -144,6 +144,13 @@ extern c fn Tcl_DbNewByteArrayObj(
     line: ffi::c::Int
 ) -> ffi::c::Ptr[tcl::ctypes::Tcl_Obj]
 
+# C: Tcl_Obj *Tcl_DbNewDoubleObj(double doubleValue, const char *file, int line)
+extern c fn Tcl_DbNewDoubleObj(
+    doubleValue: ffi::c::Double,
+    file: ffi::c::Ptr[ffi::c::Char],
+    line: ffi::c::Int
+) -> ffi::c::Ptr[tcl::ctypes::Tcl_Obj]
+
 # C: Tcl_Obj *Tcl_DbNewListObj(Tcl_Size objc, Tcl_Obj *const *objv, const char *file, int line)
 extern c fn Tcl_DbNewListObj(
     objc: ffi::c::Long,
@@ -173,6 +180,20 @@ extern c fn Tcl_DuplicateObj(
 
 # C: void TclFreeObj(Tcl_Obj *objPtr)
 extern c fn TclFreeObj(objPtr: ffi::c::Ptr[tcl::ctypes::Tcl_Obj]) -> unit
+
+# C: int Tcl_GetDouble(Tcl_Interp *interp, const char *src, double *doublePtr)
+extern c fn Tcl_GetDouble(
+    interp: ffi::c::Ptr[tcl::ctypes::Tcl_Interp],
+    src: ffi::c::Ptr[ffi::c::Char],
+    doublePtr: ffi::c::Ptr[ffi::c::Double]
+) -> ffi::c::Int
+
+# C: int Tcl_GetDoubleFromObj(Tcl_Interp *interp, Tcl_Obj *objPtr, double *doublePtr)
+extern c fn Tcl_GetDoubleFromObj(
+    interp: ffi::c::Ptr[tcl::ctypes::Tcl_Interp],
+    objPtr: ffi::c::Ptr[tcl::ctypes::Tcl_Obj],
+    doublePtr: ffi::c::Ptr[ffi::c::Double]
+) -> ffi::c::Int
 
 # C: int Tcl_GetInt(Tcl_Interp *interp, const char *src, int *intPtr)
 extern c fn Tcl_GetInt(
@@ -262,6 +283,9 @@ extern c fn Tcl_NewByteArrayObj(
     numBytes: ffi::c::Long
 ) -> ffi::c::Ptr[tcl::ctypes::Tcl_Obj]
 
+# C: Tcl_Obj *Tcl_NewDoubleObj(double doubleValue)
+extern c fn Tcl_NewDoubleObj(doubleValue: ffi::c::Double) -> ffi::c::Ptr[tcl::ctypes::Tcl_Obj]
+
 # C: Tcl_Obj *Tcl_NewListObj(Tcl_Size objc, Tcl_Obj *const objv[])
 extern c fn Tcl_NewListObj(
     objc: ffi::c::Long,
@@ -288,6 +312,12 @@ extern c fn Tcl_SetByteArrayObj(
     objPtr: ffi::c::Ptr[tcl::ctypes::Tcl_Obj],
     bytes: ffi::c::Ptr[ffi::c::UChar],
     numBytes: ffi::c::Long
+) -> unit
+
+# C: void Tcl_SetDoubleObj(Tcl_Obj *objPtr, double doubleValue)
+extern c fn Tcl_SetDoubleObj(
+    objPtr: ffi::c::Ptr[tcl::ctypes::Tcl_Obj],
+    doubleValue: ffi::c::Double
 ) -> unit
 
 # C: void Tcl_SetListObj(Tcl_Obj *objPtr, Tcl_Size objc, Tcl_Obj *const objv[])
@@ -668,6 +698,20 @@ extern c fn Tcl_ExprBooleanObj(
     ptr: ffi::c::Ptr[ffi::c::Int]
 ) -> ffi::c::Int
 
+# C: int Tcl_ExprDouble(Tcl_Interp *interp, const char *expr, double *ptr)
+extern c fn Tcl_ExprDouble(
+    interp: ffi::c::Ptr[tcl::ctypes::Tcl_Interp],
+    expr: ffi::c::Ptr[ffi::c::Char],
+    ptr: ffi::c::Ptr[ffi::c::Double]
+) -> ffi::c::Int
+
+# C: int Tcl_ExprDoubleObj(Tcl_Interp *interp, Tcl_Obj *objPtr, double *ptr)
+extern c fn Tcl_ExprDoubleObj(
+    interp: ffi::c::Ptr[tcl::ctypes::Tcl_Interp],
+    objPtr: ffi::c::Ptr[tcl::ctypes::Tcl_Obj],
+    ptr: ffi::c::Ptr[ffi::c::Double]
+) -> ffi::c::Int
+
 # C: int Tcl_ExprLong(Tcl_Interp *interp, const char *expr, long *ptr)
 extern c fn Tcl_ExprLong(
     interp: ffi::c::Ptr[tcl::ctypes::Tcl_Interp],
@@ -976,6 +1020,13 @@ extern c fn Tcl_OpenTcpServer(
 
 # C: void Tcl_Preserve(void *data)
 extern c fn Tcl_Preserve(data: ffi::c::Ptr[ffi::c::Void]) -> unit
+
+# C: void Tcl_PrintDouble(Tcl_Interp *interp, double value, char *dst)
+extern c fn Tcl_PrintDouble(
+    interp: ffi::c::Ptr[tcl::ctypes::Tcl_Interp],
+    value: ffi::c::Double,
+    dst: ffi::c::Ptr[ffi::c::Char]
+) -> unit
 
 # C: int Tcl_PutEnv(const char *assignment)
 extern c fn Tcl_PutEnv(assignment: ffi::c::Ptr[ffi::c::Char]) -> ffi::c::Int
@@ -2859,6 +2910,13 @@ extern c fn Tcl_GetChannelError(
     chan: ffi::c::Ptr[tcl::ctypes::Tcl_Channel_],
     msg: ffi::c::Ptr[ffi::c::Ptr[tcl::ctypes::Tcl_Obj]]
 ) -> unit
+
+# C: int Tcl_InitBignumFromDouble(Tcl_Interp *interp, double initval, void *toInit)
+extern c fn Tcl_InitBignumFromDouble(
+    interp: ffi::c::Ptr[tcl::ctypes::Tcl_Interp],
+    initval: ffi::c::Double,
+    toInit: ffi::c::Ptr[ffi::c::Void]
+) -> ffi::c::Int
 
 # C: Tcl_Obj *Tcl_GetNamespaceUnknownHandler(Tcl_Interp *interp, Tcl_Namespace *nsPtr)
 extern c fn Tcl_GetNamespaceUnknownHandler(

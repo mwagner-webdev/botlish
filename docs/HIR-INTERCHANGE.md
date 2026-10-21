@@ -93,8 +93,20 @@ A backend reads three things for a HIR:
 isolation, or assembled by hand.
 
 `hir::format`'s text is not this format. It is a readable rendering for
-debugging and tests, and `hir::read` rebuilds a HIR from it. It carries no
-module sections and no side tables, so it is no substitute.
+debugging and tests, and `hir::read` rebuilds a HIR from it. It carries a
+program's module sections (a `module NAMESPACE SCOPE binds ...` line per
+module, its statements below it) and String constants of any characters,
+and reading infers the coroutine protocols again (`hir::coroutines::
+analyze`), but it is still no substitute:
+
+* It carries no other side table. A read HIR has no semantic instances
+  (`semantic`), which native specialization needs for some programs
+  (golden suite native-values.bot: `hir::specialize chose no instance`),
+  and no analysis of a read HIR reproduces them: checking it again, or
+  inferring its types again, loses facts its elaborated nodes hold
+  (DecimalRounded precisions, extent and index proofs, refinements).
+* It carries no `extern c fn` declarations (`foreign`, `links`): a program
+  that calls C does not read back.
 
 ## Validity
 

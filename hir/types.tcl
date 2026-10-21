@@ -143,6 +143,14 @@
 #   cptr                            the runtime kind of both (a pointer of
 #                                   unknown pointee, e.g. the join of two
 #                                   different pointer types); affine
+#   {cfloat NAME}                   a C floating type, ffi::c::Float or
+#                                   ffi::c::Double (hir/cabi.tcl, C-FLOAT-
+#                                   FFI-MILESTONE-1.md): a C representation
+#                                   named where a C type is (a C signature,
+#                                   a pointee, a layout field), never the
+#                                   type of a Botlish value: the values that
+#                                   cross the boundary are its carrier's,
+#                                   Float64 (hir::cabi::Carrier)
 #   {nview L}                       a read-only native view NativeView[L]
 #                                   (NATIVE-LAYOUT-VIEWS.md): live native
 #                                   memory read through layout L, whose
@@ -340,9 +348,15 @@ proc hir::types::resolveNamed {name {ns ""}} {
         return bool
     }
     if {$name eq [hir::cabi::DoubleName]} {
-        # C double (hir/cabi.tcl, FLOAT64-MILESTONE-1.md): Botlish's
-        # Float64, under its C ABI name.
+        # C double where a type of Botlish values is written: its values'
+        # type, Float64 (FLOAT64-MILESTONE-1.md). Where a C type is named it
+        # is the C representation {cfloat Double} instead (hir::cabi::
+        # ResolveCType, C-FLOAT-FFI-MILESTONE-1.md).
         return Float64
+    }
+    if {$name eq [hir::cabi::FloatName]} {
+        # C float names a C type only: no Botlish value is a binary32.
+        return -code error -errorcode {BOTLISH TYPE} [hir::cabi::FloatMessage]
     }
     if {$name eq [hir::cabi::VoidName]} {
         # The C void (C-ABI-TYPES.md): a pointee identity, never the type of
@@ -484,7 +498,7 @@ proc hir::types::resolveApplication {ctor argTypes} {
 
 proc hir::types::IsSpecific {type} {
     return [expr {$type eq "never"
-                  || ([llength $type] > 1 && [lindex $type 0] in {native block list immutableSet mutarray mutvec fn struct nstruct enum trait coroutine cptr cfnptr imprint nview nedit srefined})}]
+                  || ([llength $type] > 1 && [lindex $type 0] in {native block list immutableSet mutarray mutvec fn struct nstruct enum trait coroutine cptr cfnptr cfloat imprint nview nedit srefined})}]
 }
 
 # C ABI pointer forms (C-ABI-TYPES.md; the header's {cptr ...}/{cfnptr ...}).
@@ -2275,6 +2289,11 @@ proc hir::types::IsEqualityTotal {type} {
 
 # The runtime value kind every value of TYPE has, or "" if not fixed.
 proc hir::types::kindOf {type} {
+    if {[hir::cabi::IsFloating $type]} {
+        # (Never an expression's type: the values a C floating type
+        # describes are its carrier's, hir::cabi::Carrier.)
+        return [kindOf [hir::cabi::Carrier $type]]
+    }
     if {[IsCFnPtr $type] || [IsNativeMemory $type]} {
         # (A native view's or edit's value is the address word of its
         # pointer.)
@@ -2303,6 +2322,9 @@ proc hir::types::kindOf {type} {
 
 # The core type (core/type.tcl) a static type implies.
 proc hir::types::semantic {type} {
+    if {[hir::cabi::IsFloating $type]} {
+        return [semantic [hir::cabi::Carrier $type]]
+    }
     if {[IsCFnPtr $type] || [IsNativeMemory $type]} {
         return cptr
     }
@@ -2430,6 +2452,11 @@ proc hir::types::show {type} {
             }
             cfnptr {
                 return "[hir::cabi::FnPtrName]\[[hir::cabi::ShowSignature [lindex $type 1]]\]"
+            }
+            cfloat {
+                # A C floating type, by its source spelling
+                # (C-FLOAT-FFI-MILESTONE-1.md): ffi::c::Float, ffi::c::Double.
+                return [hir::cabi::ShowFloating $type]
             }
             nview {
                 # A native view, by its layout's identity
@@ -4206,8 +4233,12 @@ proc hir::types::Call {hirVar ctxVar e} {
         # (-errors: `argv`'s InvalidArgumentEncoding) -- except a coroutine
         # segment (start, resume: COROUTINES.md), which ends with whatever
         # declared error its body lets escape, as the handle's type says.
-        set meta [core::native::metadata [dict get [hir::symbol $hir [lindex $target 1]] name]]
-        set calleeErrors [dict get $meta errors]
+        set name [dict get [hir::symbol $hir [lindex $target 1]] name]
+        set meta [core::native::metadata $name]
+        # (A layout operation's NonFiniteFloat only where its layout holds a
+        # C floating field it reads, or a binary32 one it writes:
+        # C-FLOAT-FFI-MILESTONE-1.md.)
+        set calleeErrors [hir::layouts::CallErrors $hir $name $argExprs $argTypes [dict get $meta errors]]
         if {[dict get $meta completion] && [IsCoroutine [lindex $argTypes 0]]} {
             set calleeErrors [CoroutineErrors [lindex $argTypes 0]]
         }

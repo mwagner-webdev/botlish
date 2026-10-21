@@ -667,8 +667,14 @@ proc cpt::CheckExample {topic example backends scratch} {
     # platform (linux::io on a Mac) documents that system: it compiles for
     # its target, as the golden runner's suites do, and runs where a program
     # of that target runs here, on the Tcl backends.
-    set target [surface::modules::PlatformTarget [core::ReadFile $path]]
-    if {$target ne ""} {
+    # One that names its target (@target: a fact of that target, such as a
+    # C scalar's width) compiles for it and runs, on another host, the same
+    # way.
+    set target [dict get $example target]
+    if {$target eq ""} {
+        set target [surface::modules::PlatformTarget [core::ReadFile $path]]
+    }
+    if {$target ne "" && $target ne [core::cabi::hostTarget]} {
         set backends [lmap b $backends {expr {$b in {interp compile} ? $b : [continue]}}]
     }
     set failed [catch {surface::readProgramFile $path -warnings default -warning-channel "" -target $target} hir options]

@@ -1,5 +1,11 @@
 # Variadics, vertical slice 1
 
+> Partially superseded by C-FLOAT-FFI-MILESTONE-1.md: a fixed parameter may
+> also be a C float (`ffi::c::Float`, class `f32`), which takes a
+> floating-point register as a fixed double does: System V's `%al` and
+> Apple's v-register padding count it with the doubles (that report's
+> section 11). A trailing argument is still never a float.
+
 > A Botlish variadic parameter is a List the caller does not bracket. A C
 > variadic call is a call whose signature is its own.
 

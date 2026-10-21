@@ -30,11 +30,10 @@ core::cabi::installTestFixture
 
 # A native view needs only the native backend (the JIT): those tests run on
 # every host it is built for, macOS arm64 included. Allocation counts and GC
-# stress need the native runtime on Linux (as in binary-layout.test), and a
+# stress need the native backend's whole runtime (nativeCoroutines: Linux
+# x86-64 and AArch64, macOS AArch64; MACOS-AARCH64-MILESTONE-7.md), and a
 # standalone executable a host that links them (tests/helpers.tcl).
 testConstraint nativeBuilt [expr {![catch {native::binary}]}]
-testConstraint nativeLinux [expr {$::tcl_platform(os) eq "Linux" &&
-    $::tcl_platform(machine) in {x86_64 amd64 aarch64} && [testConstraint nativeBuilt]}]
 testConstraint executableAot [expr {[testConstraint executableAot] && [testConstraint nativeBuilt]}]
 testConstraint cCompiler [expr {[auto_execok cc] ne ""}]
 
@@ -534,7 +533,7 @@ test nv-nir {native code of a view: the constructor is one null test of the poin
         [nvRun $program]
 } -cleanup {unset -nocomplain program nir f g h i} -result {{{op nativeload %0 %1 %2} {op nativeload %0 %5 %6}} {{= int 8} {= int 18} {= int 23} {= int 17}} {nativeload runbox nativeload runbox riadd ret} {nativeloadptr cptrisnull ret} {{= int 8} {= int 8}} {cptrisnull br faildeclared ret} {cptroffset ret} {{= int 8}} {same: 41877}}
 
-test nv-allocations {natively, reading the fields of a view allocates nothing per read (an Int field is a tagged word: only a u64 above i64::MAX would be a BigInt), and binary::load allocates exactly its LayoutStruct (one per nested layout); no byte storage is ever made (1000 reads each)} -constraints nativeLinux -body {
+test nv-allocations {natively, reading the fields of a view allocates nothing per read (an Int field is a tagged word: only a u64 above i64::MAX would be a BigInt), and binary::load allocates exactly its LayoutStruct (one per nested layout); no byte storage is ever made (1000 reads each)} -constraints {nativeBuilt nativeCoroutines} -body {
     set reports {}
     foreach program [list \
         "fn f(v: NativeView\[Deep\]) -> int:\n    v.head + v.outer.count + v.outer.inner.x + v.tail\nfn run(n: int) -> int errors NativeViewNull:\n    p = memory($::nvDeep)\n    v = binary::native::view(Deep, p)\n    k = loop i from 0 to n:\n        f(v)\n    0\nr = run(1000):\n    on NativeViewNull:\n        0\nr\n" \
@@ -654,7 +653,7 @@ test nv-executable {a standalone executable (whichever linker BOTLISH_NATIVE_LIN
     list [exec $path] [nvOutcome cranelift $hir]
 } -cleanup {unset -nocomplain source hir path} -result {{[-1, 4242, 777, 4886718345, 18446744073709551615, -9223372036854775808]} {value {[-1, 4242, 777, 4886718345, 18446744073709551615, -9223372036854775808]}}}
 
-test nv-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every allocation site) view reads stay exact: 64-bit fields that become BigInts, LayoutStructs binary::load builds, many records -- a view is an immediate word, never a root to lose} -constraints nativeLinux -body {
+test nv-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every allocation site) view reads stay exact: 64-bit fields that become BigInts, LayoutStructs binary::load builds, many records -- a view is an immediate word, never a root to lose} -constraints {nativeBuilt nativeCoroutines} -body {
     set source [nvProgram "${::nvScalarsProgram}fn many(k: int) -> List\[any\] errors NativeViewNull:\n    p = memory($::nvScalarsA)\n    v = binary::native::view(Scalars, p)\n    rs = loop i from 0 to k:\n        \[v.u64, binary::load(v), v.i64\]\n    list::at(rs, k - 1):\n        on IndexNotFound:\n            \[\]\nr = many(50):\n    on NativeViewNull:\n        \[\]\n\[r, run($::nvScalarsA)\]\n"]
     set hir [surface::compile $source view.bot -warnings off]
     set plain [nvOutcome cranelift $hir]

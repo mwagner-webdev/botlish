@@ -121,7 +121,7 @@ proc scDifferential {text} {
         set hir [surface::compile $ordinary -strict 0 -warnings off]
     } trap {SURFACE MODULE} {message options} {
         # The loader raises (-strict 0 or not): its one diagnostic.
-        regexp {^[^:]*:([0-9]+):([0-9]+): (.*)$} $message -> line column text
+        regexp {^.*?:([0-9]+):([0-9]+): (.*)$} $message -> line column text
         return [list [list [lindex [dict get $options -errorcode] 2] $line $column {} $text] [scReified $source]]
     }
     foreach d [hir::diagnostics $hir] {
@@ -414,11 +414,11 @@ test sc-affine-use-after-move {item 57: a use after move in the body is code Use
     scAgree [scProbe "coroutine \{step\} = worker(10)\nconsume(step, 1)\nconsume(step, 2)" $scAffineDecls]
 } -result {value {[compiler::DiagnosticCode::UseAfterMove, 25, 17, [compiler::SourceLocation {line: 24, column: 17}], "`step` was used after its coroutine value was moved\n\nmoved here:\n    step passed to consume  (<input>:24:17)\n\nused here:\n    <input>:25:17"]}}
 
-test sc-affine-rollback {items 39, 57: a rejected block that moved an outer affine value leaves it unmoved: the code after it uses it, at compile time and at run time} -body {
+test sc-affine-rollback {items 39, 57: a rejected block that moved an outer affine value leaves it unmoved: the code after it uses it, at compile time and at run time} -constraints nativeCoroutines -body {
     scAgree "${scAffineDecls}fn probe(n: int) -> int errors compiler::CompilerError:\n    coroutine \{step\} = worker(10)\n    if flag(n):\n        static compile:\n            consume(step, 1)\n            consume(step, 2)\n    e = step(Message \{value: 5\})\n    e.value\n\nr = probe(1):\n    on compiler::CompilerError:\n        -1\nr2 = probe(500):\n    on compiler::CompilerError \{code\}:\n        if code == compiler::DiagnosticCode::UseAfterMove:\n            -2\n        else:\n            -3\n\[r, r2\]\n"
 } -result {value {[5, -2]}}
 
-test sc-affine-rollback-next-block {items 39, 88: a later block is judged after an earlier rejected block's move is gone: it uses the value and is accepted} -body {
+test sc-affine-rollback-next-block {items 39, 88: a later block is judged after an earlier rejected block's move is gone: it uses the value and is accepted} -constraints nativeCoroutines -body {
     set text "${scAffineDecls}fn probe(n: int) -> int errors compiler::CompilerError:\n    coroutine \{step\} = worker(10)\n    if flag(n):\n        static compile:\n            consume(step, 1)\n            consume(step, 2)\n    static compile:\n        consume(step, 7)\n\nr = probe(1):\n    on compiler::CompilerError:\n        -1\nr\n"
     list [scSites $text] [scAgree $text]
 } -cleanup {unset -nocomplain text} -result {{{rejected USE-AFTER-MOVE 26 21} accepted} {value 7}}

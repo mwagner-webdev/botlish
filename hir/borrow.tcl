@@ -220,6 +220,9 @@ proc hir::borrow::Type {hirVar e meta argTypes} {
     if {[hir::imprint::Mentions $result]} {
         return any
     }
+    # (A C floating result is its carrier's value, admitted at the boundary:
+    # a Float64, C-FLOAT-FFI-MILESTONE-1.md.)
+    set result [hir::cabi::Carrier $result]
     # A result that is exactly an exposed argument's pointer (provenance
     # {alias NAME}: SHA256's `out`) is that exposure's address, which no
     # Botlish value may hold: the call yields unit in its place, and records
@@ -355,12 +358,19 @@ proc hir::borrow::Problems {hir ranges e node name} {
         } else {
             set argRange [hir::range::unknown]
         }
-        if {[hir::range::ProvesValueAcceptedBy $argType $argRange $declared]} {
+        # (A C floating parameter admits its carrier's values: any Float64,
+        # narrowed at the boundary. C-FLOAT-FFI-MILESTONE-1.md.)
+        set carrier [hir::cabi::Carrier $declared]
+        if {[hir::range::ProvesValueAcceptedBy $argType $argRange $carrier]} {
             continue
         }
+        set shown [hir::types::show $declared]
+        if {$carrier ne $declared} {
+            append shown ", whose values are [hir::types::show $carrier]s"
+        }
         lappend problems [list TYPE [format {argument %d of %s cannot be proven to satisfy %s (argument type: %s)%s} \
-            $index $name [hir::types::show $declared] [hir::semantic::ShowType $hir [hir::range::ShownArgType $argType $declared]] \
-            [hir::range::MismatchClause $argType $declared]] $arg]
+            $index $name $shown [hir::semantic::ShowType $hir [hir::range::ShownArgType $argType $declared]] \
+            [hir::range::MismatchClause $argType $carrier]] $arg]
     }
     # A data pointer result of a call that exposes Botlish storage may point
     # into that storage (memchr's result is inside its argument) unless the

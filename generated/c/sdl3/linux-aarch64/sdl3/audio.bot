@@ -82,6 +82,15 @@ extern c fn SDL_ResumeAudioDevice(devid: ffi::c::UInt) -> ffi::c::Bool
 # C: _Bool SDL_AudioDevicePaused(SDL_AudioDeviceID devid)
 extern c fn SDL_AudioDevicePaused(devid: ffi::c::UInt) -> ffi::c::Bool
 
+# C: float SDL_GetAudioDeviceGain(SDL_AudioDeviceID devid)
+extern c fn SDL_GetAudioDeviceGain(devid: ffi::c::UInt) -> ffi::c::Float
+
+# C: _Bool SDL_SetAudioDeviceGain(SDL_AudioDeviceID devid, float gain)
+extern c fn SDL_SetAudioDeviceGain(
+    devid: ffi::c::UInt,
+    gain: ffi::c::Float
+) -> ffi::c::Bool
+
 # C: void SDL_CloseAudioDevice(SDL_AudioDeviceID devid)
 extern c fn SDL_CloseAudioDevice(devid: ffi::c::UInt) -> unit
 
@@ -135,6 +144,28 @@ extern c fn SDL_SetAudioStreamFormat(
     stream: ffi::c::Ptr[sdl3::ctypes::SDL_AudioStream],
     src_spec: ffi::c::Ptr[sdl3::ctypes::SDL_AudioSpec],
     dst_spec: ffi::c::Ptr[sdl3::ctypes::SDL_AudioSpec]
+) -> ffi::c::Bool
+
+# C: float SDL_GetAudioStreamFrequencyRatio(SDL_AudioStream *stream)
+extern c fn SDL_GetAudioStreamFrequencyRatio(
+    stream: ffi::c::Ptr[sdl3::ctypes::SDL_AudioStream]
+) -> ffi::c::Float
+
+# C: _Bool SDL_SetAudioStreamFrequencyRatio(SDL_AudioStream *stream, float ratio)
+extern c fn SDL_SetAudioStreamFrequencyRatio(
+    stream: ffi::c::Ptr[sdl3::ctypes::SDL_AudioStream],
+    ratio: ffi::c::Float
+) -> ffi::c::Bool
+
+# C: float SDL_GetAudioStreamGain(SDL_AudioStream *stream)
+extern c fn SDL_GetAudioStreamGain(
+    stream: ffi::c::Ptr[sdl3::ctypes::SDL_AudioStream]
+) -> ffi::c::Float
+
+# C: _Bool SDL_SetAudioStreamGain(SDL_AudioStream *stream, float gain)
+extern c fn SDL_SetAudioStreamGain(
+    stream: ffi::c::Ptr[sdl3::ctypes::SDL_AudioStream],
+    gain: ffi::c::Float
 ) -> ffi::c::Bool
 
 # C: int *SDL_GetAudioStreamInputChannelMap(SDL_AudioStream *stream, int *count)
@@ -264,6 +295,13 @@ extern c fn SDL_OpenAudioDeviceStream(
     userdata: ffi::c::Ptr[ffi::c::Void]
 ) -> ffi::c::Ptr[sdl3::ctypes::SDL_AudioStream]
 
+# C: _Bool SDL_SetAudioPostmixCallback(SDL_AudioDeviceID devid, SDL_AudioPostmixCallback callback, void *userdata)
+extern c fn SDL_SetAudioPostmixCallback(
+    devid: ffi::c::UInt,
+    callback: ffi::c::FnPtr[Fn{args: [ffi::c::Ptr[ffi::c::Void], ffi::c::Ptr[sdl3::ctypes::SDL_AudioSpec], ffi::c::Ptr[ffi::c::Float], ffi::c::Int], return: unit}],
+    userdata: ffi::c::Ptr[ffi::c::Void]
+) -> ffi::c::Bool
+
 # C: _Bool SDL_LoadWAV_IO(SDL_IOStream *src, _Bool closeio, SDL_AudioSpec *spec, Uint8 **audio_buf, Uint32 *audio_len)
 extern c fn SDL_LoadWAV_IO(
     src: ffi::c::Ptr[sdl3::ctypes::SDL_IOStream],
@@ -279,6 +317,15 @@ extern c fn SDL_LoadWAV(
     spec: ffi::c::Ptr[sdl3::ctypes::SDL_AudioSpec],
     audio_buf: ffi::c::Ptr[ffi::c::Ptr[ffi::c::UChar]],
     audio_len: ffi::c::Ptr[ffi::c::UInt]
+) -> ffi::c::Bool
+
+# C: _Bool SDL_MixAudio(Uint8 *dst, const Uint8 *src, SDL_AudioFormat format, Uint32 len, float volume)
+extern c fn SDL_MixAudio(
+    dst: ffi::c::Ptr[ffi::c::UChar],
+    src: ffi::c::Ptr[ffi::c::UChar],
+    format: ffi::c::UInt,
+    len: ffi::c::UInt,
+    volume: ffi::c::Float
 ) -> ffi::c::Bool
 
 # C: _Bool SDL_ConvertAudioSamples(const SDL_AudioSpec *src_spec, const Uint8 *src_data, int src_len, const SDL_AudioSpec *dst_spec, Uint8 **dst_data, int *dst_len)

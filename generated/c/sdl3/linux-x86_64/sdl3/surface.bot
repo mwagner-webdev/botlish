@@ -244,6 +244,12 @@ extern c fn SDL_FlipSurface(
     flip: ffi::c::UInt
 ) -> ffi::c::Bool
 
+# C: SDL_Surface *SDL_RotateSurface(SDL_Surface *surface, float angle)
+extern c fn SDL_RotateSurface(
+    surface: ffi::c::Ptr[sdl3::ctypes::SDL_Surface],
+    angle: ffi::c::Float
+) -> ffi::c::Ptr[sdl3::ctypes::SDL_Surface]
+
 # C: SDL_Surface *SDL_DuplicateSurface(SDL_Surface *surface)
 extern c fn SDL_DuplicateSurface(
     surface: ffi::c::Ptr[sdl3::ctypes::SDL_Surface]
@@ -319,6 +325,15 @@ extern c fn SDL_PremultiplySurfaceAlpha(
     linear: ffi::c::Bool
 ) -> ffi::c::Bool
 
+# C: _Bool SDL_ClearSurface(SDL_Surface *surface, float r, float g, float b, float a)
+extern c fn SDL_ClearSurface(
+    surface: ffi::c::Ptr[sdl3::ctypes::SDL_Surface],
+    r: ffi::c::Float,
+    g: ffi::c::Float,
+    b: ffi::c::Float,
+    a: ffi::c::Float
+) -> ffi::c::Bool
+
 # C: _Bool SDL_FillSurfaceRect(SDL_Surface *dst, const SDL_Rect *rect, Uint32 color)
 extern c fn SDL_FillSurfaceRect(
     dst: ffi::c::Ptr[sdl3::ctypes::SDL_Surface],
@@ -385,6 +400,30 @@ extern c fn SDL_BlitSurfaceTiled(
     dstrect: ffi::c::Ptr[sdl3::ctypes::SDL_Rect]
 ) -> ffi::c::Bool
 
+# C: _Bool SDL_BlitSurfaceTiledWithScale(SDL_Surface *src, const SDL_Rect *srcrect, float scale, SDL_ScaleMode scaleMode, SDL_Surface *dst, const SDL_Rect *dstrect)
+extern c fn SDL_BlitSurfaceTiledWithScale(
+    src: ffi::c::Ptr[sdl3::ctypes::SDL_Surface],
+    srcrect: ffi::c::Ptr[sdl3::ctypes::SDL_Rect],
+    scale: ffi::c::Float,
+    scaleMode: ffi::c::Int,
+    dst: ffi::c::Ptr[sdl3::ctypes::SDL_Surface],
+    dstrect: ffi::c::Ptr[sdl3::ctypes::SDL_Rect]
+) -> ffi::c::Bool
+
+# C: _Bool SDL_BlitSurface9Grid(SDL_Surface *src, const SDL_Rect *srcrect, int left_width, int right_width, int top_height, int bottom_height, float scale, SDL_ScaleMode scaleMode, SDL_Surface *dst, const SDL_Rect *dstrect)
+extern c fn SDL_BlitSurface9Grid(
+    src: ffi::c::Ptr[sdl3::ctypes::SDL_Surface],
+    srcrect: ffi::c::Ptr[sdl3::ctypes::SDL_Rect],
+    left_width: ffi::c::Int,
+    right_width: ffi::c::Int,
+    top_height: ffi::c::Int,
+    bottom_height: ffi::c::Int,
+    scale: ffi::c::Float,
+    scaleMode: ffi::c::Int,
+    dst: ffi::c::Ptr[sdl3::ctypes::SDL_Surface],
+    dstrect: ffi::c::Ptr[sdl3::ctypes::SDL_Rect]
+) -> ffi::c::Bool
+
 # C: Uint32 SDL_MapSurfaceRGB(SDL_Surface *surface, Uint8 r, Uint8 g, Uint8 b)
 extern c fn SDL_MapSurfaceRGB(
     surface: ffi::c::Ptr[sdl3::ctypes::SDL_Surface],
@@ -413,6 +452,17 @@ extern c fn SDL_ReadSurfacePixel(
     a: ffi::c::Ptr[ffi::c::UChar]
 ) -> ffi::c::Bool
 
+# C: _Bool SDL_ReadSurfacePixelFloat(SDL_Surface *surface, int x, int y, float *r, float *g, float *b, float *a)
+extern c fn SDL_ReadSurfacePixelFloat(
+    surface: ffi::c::Ptr[sdl3::ctypes::SDL_Surface],
+    x: ffi::c::Int,
+    y: ffi::c::Int,
+    r: ffi::c::Ptr[ffi::c::Float],
+    g: ffi::c::Ptr[ffi::c::Float],
+    b: ffi::c::Ptr[ffi::c::Float],
+    a: ffi::c::Ptr[ffi::c::Float]
+) -> ffi::c::Bool
+
 # C: _Bool SDL_WriteSurfacePixel(SDL_Surface *surface, int x, int y, Uint8 r, Uint8 g, Uint8 b, Uint8 a)
 extern c fn SDL_WriteSurfacePixel(
     surface: ffi::c::Ptr[sdl3::ctypes::SDL_Surface],
@@ -422,4 +472,15 @@ extern c fn SDL_WriteSurfacePixel(
     g: ffi::c::UChar,
     b: ffi::c::UChar,
     a: ffi::c::UChar
+) -> ffi::c::Bool
+
+# C: _Bool SDL_WriteSurfacePixelFloat(SDL_Surface *surface, int x, int y, float r, float g, float b, float a)
+extern c fn SDL_WriteSurfacePixelFloat(
+    surface: ffi::c::Ptr[sdl3::ctypes::SDL_Surface],
+    x: ffi::c::Int,
+    y: ffi::c::Int,
+    r: ffi::c::Float,
+    g: ffi::c::Float,
+    b: ffi::c::Float,
+    a: ffi::c::Float
 ) -> ffi::c::Bool

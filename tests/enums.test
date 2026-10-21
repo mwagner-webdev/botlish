@@ -568,7 +568,7 @@ test enum-context-field {an enum is an ordinary context member, an immediate nat
     list [enumOutcomes $hir] [regexp -inline {context 0 "Settings"[^\n]*} [dict get [native::lowered $hir] text]]
 } -result {{same: [VehicleType::Tank, true]} {{context 0 "Settings" offset=0 words=2 fields="mode verbose"}}}
 
-test enum-coroutine-events {a coroutine yields and returns cases; enums add nothing to coroutine semantics} -body {
+test enum-coroutine-events {a coroutine yields and returns cases; enums add nothing to coroutine semantics} -constraints nativeCoroutines -body {
     enumRun "import coroutine\nenum Event:\n    Start,\n    Tick,\n    Stop,\nfn events(n: int) -> Event:\n    yield Event::Start\n    loop i from 0 to n:\n        yield Event::Tick\n    Event::Stop\ncoroutine \{step: s, first: first\} = events(2)\nsecond = s()\nthird = s()\nfourth = s()\n\[first, second, third, fourth, coroutine::done?(s)\]\n"
 } -result {same: [Event::Start, Event::Tick, Event::Tick, Event::Stop, true]}
 
@@ -668,8 +668,8 @@ test enum-executable-parity {a standalone executable carries the enum table and 
         set hir [surface::readProgramFile $path]
         set expected [lindex [outcomeUnderHir interp $hir] 1]
         native::executable $hir [file rootname $path]
-        set plain [exec env PATH= [file rootname $path]]
-        set stressed [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 [file rootname $path]]
+        set plain [runStandalone [file rootname $path]]
+        set stressed [runStandalone [file rootname $path] BOTLISH_NATIVE_GC_STRESS 1]
         list [expr {$plain eq $stressed}] [expr {$plain eq $expected}] $plain
     }
 } -result {1 1 {[Local::B, geo::VehicleType::Car, true, false, 816411275445553281, {Local::A}]}}

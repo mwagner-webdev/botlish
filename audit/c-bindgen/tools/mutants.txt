@@ -132,11 +132,12 @@ $ctype eq "char"
 ## tools/c-bindgen/model.tcl
 <<<<
         float {
-            set sp [lindex $t 1]
+            return [Floating [lindex $t 1]]
+        }
 ====
         float {
             return [list ok ffi::c::Int {}]
-            set sp [lindex $t 1]
+        }
 >>>>
 
 @@ unsupported-omitted an unsupported API is left out of the report
@@ -508,12 +509,52 @@ _Static_assert(1, \"variadic prototype of $name\");
 @@ layout-float-as-integer a float or double field is mapped to the C integer of its width (its bits as an integer)
 ## tools/c-bindgen/records.tcl
 <<<<
-            if {[string match _Float* $sp] || [string match __float* $sp] || $sp in {__bf16 __ibm128}} { set reason float }
-            return [list no [concat $blockers [list [list $reason "$sp ([::cir::spell $type])"]]] {}]
+            if {$blockers ne ""} { return [list no $blockers {}] }
+            return [list ok scalar [lindex $m 1]]
+        }
+        complex {
 ====
-            if {$sp eq "float"} { return [list ok scalar ffi::c::UInt] }
-            if {$sp eq "double"} { return [list ok scalar ffi::c::ULongLong] }
-            return [list no [concat $blockers [list [list $reason "$sp ([::cir::spell $type])"]]] {}]
+            if {$blockers ne ""} { return [list no $blockers {}] }
+            return [list ok scalar [dict get {ffi::c::Float ffi::c::UInt ffi::c::Double ffi::c::ULongLong} [lindex $m 1]]]
+        }
+        complex {
+>>>>
+
+# --- C floating types (C-FLOAT-FFI-MILESTONE-1.md) ---------------------------
+
+@@ bindgen-float-as-double a C float is bound as ffi::c::Double (its value passed as a binary64, its field 8 bytes wide)
+## tools/c-bindgen/model.tcl
+<<<<
+        float { return [list ok ffi::c::Float {float}] }
+====
+        float { return [list ok ffi::c::Double {float}] }
+>>>>
+
+@@ bindgen-double-as-float a C double is bound as ffi::c::Float (its value narrowed to a binary32)
+## tools/c-bindgen/model.tcl
+<<<<
+        double { return [list ok ffi::c::Double {float}] }
+====
+        double { return [list ok ffi::c::Float {float}] }
+>>>>
+
+@@ bindgen-long-double-as-double a C long double is bound as ffi::c::Double instead of reported unsupported
+## tools/c-bindgen/model.tcl
+<<<<
+        {long double} {
+            return [Blocked long-double
+====
+        {long double} {
+            return [list ok ffi::c::Double {float}]
+            return [Blocked long-double
+>>>>
+
+@@ bindgen-float-width-carrier a float array element's width is taken as the carrier's 8 bytes, not the C type's 4
+## tools/c-bindgen/records.tcl
+<<<<
+        return [dict get [core::cabi::floatingInfo $name $::cbind::model::target] bytes]
+====
+        return 8
 >>>>
 
 @@ layout-bool-as-uchar a C _Bool field is mapped to ffi::c::UChar (one byte), not blocked
@@ -570,9 +611,9 @@ _Static_assert(1, \"variadic prototype of $name\");
 @@ layout-windows-gnu-as-msvc the Windows GNU target is labeled MSVC's (x86_64-pc-windows-msvc), so MinGW-w64 evidence compiles as the MSVC target's
 ## core/cabi.tcl
 <<<<
-        windows-x86_64-gnu {os windows arch x86_64 model LLP64 charSigned 1 triple x86_64-pc-windows-gnu} \
+        windows-x86_64-gnu {os windows arch x86_64 model LLP64 charSigned 1 triple x86_64-pc-windows-gnu floating IEEE} \
 ====
-        windows-x86_64-gnu {os windows arch x86_64 model LLP64 charSigned 1 triple x86_64-pc-windows-msvc} \
+        windows-x86_64-gnu {os windows arch x86_64 model LLP64 charSigned 1 triple x86_64-pc-windows-msvc floating IEEE} \
 >>>>
 
 # --- record layouts: further mutants ----------------------------------------

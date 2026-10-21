@@ -290,6 +290,20 @@ layout bgf_overlay:
     field kind: ffi::c::Int at 0             # int kind
     field member2: bgf_overlay_member2 at 8  # union {...}
 
+# struct bgf_real, typedef bgf_real (include/bgf/bgf_records.h:191): sizeof 16, _Alignof 8
+layout bgf_real:
+    size 16
+    align 8
+    field f: ffi::c::Float at 0   # float f
+    field d: ffi::c::Double at 8  # double d
+
+# struct bgf_float_ptr, typedef bgf_float_ptr (include/bgf/bgf_records.h:196): sizeof 16, _Alignof 8
+layout bgf_float_ptr:
+    size 16
+    align 8
+    field values: ffi::c::Ptr[ffi::c::Float] at 0  # float *values
+    field n: ffi::c::Int at 8                      # int n
+
 # struct bgf_ms_field, typedef bgf_ms_field (include/bgf/bgf_records.h:198): sizeof 16, _Alignof 8
 layout bgf_ms_field:
     size 16
@@ -507,3 +521,52 @@ layout bgf_two_anon:
     align 8
     field member1: bgf_two_anon_member1 at 0  # union {...}
     field member2: bgf_two_anon_member2 at 8  # union {...}
+
+# struct bgf_mixed_floats, typedef bgf_mixed_floats (include/bgf/bgf_records.h:297): sizeof 24, _Alignof 8
+layout bgf_mixed_floats:
+    size 24
+    align 8
+    field tag: ffi::c::UChar at 0  # uint8_t tag
+    field a: ffi::c::Float at 4    # float a
+    field b: ffi::c::Double at 8   # double b
+    field c: ffi::c::Float at 16   # float c
+
+# struct bgf_mixed_real, typedef bgf_mixed_real (include/bgf/bgf_records.h:298): sizeof 32, _Alignof 8
+layout bgf_mixed_real:
+    size 32
+    align 8
+    field x: ffi::c::Float at 0    # float x
+    field y: ffi::c::Double at 8   # double y
+    field z: ffi::c::Float at 16   # bgf_scalar32 z
+    field w: ffi::c::Float at 20   # bgf_real32 w
+    field v: ffi::c::Double at 24  # bgf_scalar64 v
+
+# struct bgf_samples, typedef bgf_samples (include/bgf/bgf_records.h:299): sizeof 56, _Alignof 8
+layout bgf_samples:
+    size 56
+    align 8
+    field xs: array 4 of ffi::c::Float at 0               # float xs[4]
+    field ys: array 2 of array 2 of ffi::c::Double at 16  # double ys[2][2]
+    field n: ffi::c::Int at 48                            # int n
+
+# union bgf_fnum, typedef bgf_fnum (include/bgf/bgf_records.h:300): sizeof 8, _Alignof 8
+union layout bgf_fnum:
+    size 8
+    align 8
+    alternative i: ffi::c::Int     # int i
+    alternative f: ffi::c::Float   # float f
+    alternative d: ffi::c::Double  # double d
+
+# the anonymous union member bgf_anon_fnum.member2 (struct bgf_anon_fnum) (include/bgf/bgf_records.h:301): sizeof 4, _Alignof 4
+union layout bgf_anon_fnum_member2:
+    size 4
+    align 4
+    alternative u: ffi::c::UInt   # unsigned int u
+    alternative f: ffi::c::Float  # float f
+
+# struct bgf_anon_fnum, typedef bgf_anon_fnum (include/bgf/bgf_records.h:301): sizeof 8, _Alignof 4
+layout bgf_anon_fnum:
+    size 8
+    align 4
+    field k: ffi::c::Int at 0                  # int k
+    field member2: bgf_anon_fnum_member2 at 4  # union {...}

@@ -133,6 +133,13 @@ extern c fn SDL_GetRendererFromTexture(
     texture: ffi::c::Ptr[sdl3::ctypes::SDL_Texture]
 ) -> ffi::c::Ptr[sdl3::ctypes::SDL_Renderer]
 
+# C: _Bool SDL_GetTextureSize(SDL_Texture *texture, float *w, float *h)
+extern c fn SDL_GetTextureSize(
+    texture: ffi::c::Ptr[sdl3::ctypes::SDL_Texture],
+    w: ffi::c::Ptr[ffi::c::Float],
+    h: ffi::c::Ptr[ffi::c::Float]
+) -> ffi::c::Bool
+
 # C: _Bool SDL_SetTexturePalette(SDL_Texture *texture, SDL_Palette *palette)
 extern c fn SDL_SetTexturePalette(
     texture: ffi::c::Ptr[sdl3::ctypes::SDL_Texture],
@@ -152,6 +159,14 @@ extern c fn SDL_SetTextureColorMod(
     b: ffi::c::UChar
 ) -> ffi::c::Bool
 
+# C: _Bool SDL_SetTextureColorModFloat(SDL_Texture *texture, float r, float g, float b)
+extern c fn SDL_SetTextureColorModFloat(
+    texture: ffi::c::Ptr[sdl3::ctypes::SDL_Texture],
+    r: ffi::c::Float,
+    g: ffi::c::Float,
+    b: ffi::c::Float
+) -> ffi::c::Bool
+
 # C: _Bool SDL_GetTextureColorMod(SDL_Texture *texture, Uint8 *r, Uint8 *g, Uint8 *b)
 extern c fn SDL_GetTextureColorMod(
     texture: ffi::c::Ptr[sdl3::ctypes::SDL_Texture],
@@ -160,16 +175,36 @@ extern c fn SDL_GetTextureColorMod(
     b: ffi::c::Ptr[ffi::c::UChar]
 ) -> ffi::c::Bool
 
+# C: _Bool SDL_GetTextureColorModFloat(SDL_Texture *texture, float *r, float *g, float *b)
+extern c fn SDL_GetTextureColorModFloat(
+    texture: ffi::c::Ptr[sdl3::ctypes::SDL_Texture],
+    r: ffi::c::Ptr[ffi::c::Float],
+    g: ffi::c::Ptr[ffi::c::Float],
+    b: ffi::c::Ptr[ffi::c::Float]
+) -> ffi::c::Bool
+
 # C: _Bool SDL_SetTextureAlphaMod(SDL_Texture *texture, Uint8 alpha)
 extern c fn SDL_SetTextureAlphaMod(
     texture: ffi::c::Ptr[sdl3::ctypes::SDL_Texture],
     alpha: ffi::c::UChar
 ) -> ffi::c::Bool
 
+# C: _Bool SDL_SetTextureAlphaModFloat(SDL_Texture *texture, float alpha)
+extern c fn SDL_SetTextureAlphaModFloat(
+    texture: ffi::c::Ptr[sdl3::ctypes::SDL_Texture],
+    alpha: ffi::c::Float
+) -> ffi::c::Bool
+
 # C: _Bool SDL_GetTextureAlphaMod(SDL_Texture *texture, Uint8 *alpha)
 extern c fn SDL_GetTextureAlphaMod(
     texture: ffi::c::Ptr[sdl3::ctypes::SDL_Texture],
     alpha: ffi::c::Ptr[ffi::c::UChar]
+) -> ffi::c::Bool
+
+# C: _Bool SDL_GetTextureAlphaModFloat(SDL_Texture *texture, float *alpha)
+extern c fn SDL_GetTextureAlphaModFloat(
+    texture: ffi::c::Ptr[sdl3::ctypes::SDL_Texture],
+    alpha: ffi::c::Ptr[ffi::c::Float]
 ) -> ffi::c::Bool
 
 # C: _Bool SDL_SetTextureBlendMode(SDL_Texture *texture, SDL_BlendMode blendMode)
@@ -277,6 +312,24 @@ extern c fn SDL_GetRenderLogicalPresentationRect(
     rect: ffi::c::Ptr[sdl3::ctypes::SDL_FRect]
 ) -> ffi::c::Bool
 
+# C: _Bool SDL_RenderCoordinatesFromWindow(SDL_Renderer *renderer, float window_x, float window_y, float *x, float *y)
+extern c fn SDL_RenderCoordinatesFromWindow(
+    renderer: ffi::c::Ptr[sdl3::ctypes::SDL_Renderer],
+    window_x: ffi::c::Float,
+    window_y: ffi::c::Float,
+    x: ffi::c::Ptr[ffi::c::Float],
+    y: ffi::c::Ptr[ffi::c::Float]
+) -> ffi::c::Bool
+
+# C: _Bool SDL_RenderCoordinatesToWindow(SDL_Renderer *renderer, float x, float y, float *window_x, float *window_y)
+extern c fn SDL_RenderCoordinatesToWindow(
+    renderer: ffi::c::Ptr[sdl3::ctypes::SDL_Renderer],
+    x: ffi::c::Float,
+    y: ffi::c::Float,
+    window_x: ffi::c::Ptr[ffi::c::Float],
+    window_y: ffi::c::Ptr[ffi::c::Float]
+) -> ffi::c::Bool
+
 # C: _Bool SDL_ConvertEventToRenderCoordinates(SDL_Renderer *renderer, SDL_Event *event)
 extern c fn SDL_ConvertEventToRenderCoordinates(
     renderer: ffi::c::Ptr[sdl3::ctypes::SDL_Renderer],
@@ -323,6 +376,20 @@ extern c fn SDL_RenderClipEnabled(
     renderer: ffi::c::Ptr[sdl3::ctypes::SDL_Renderer]
 ) -> ffi::c::Bool
 
+# C: _Bool SDL_SetRenderScale(SDL_Renderer *renderer, float scaleX, float scaleY)
+extern c fn SDL_SetRenderScale(
+    renderer: ffi::c::Ptr[sdl3::ctypes::SDL_Renderer],
+    scaleX: ffi::c::Float,
+    scaleY: ffi::c::Float
+) -> ffi::c::Bool
+
+# C: _Bool SDL_GetRenderScale(SDL_Renderer *renderer, float *scaleX, float *scaleY)
+extern c fn SDL_GetRenderScale(
+    renderer: ffi::c::Ptr[sdl3::ctypes::SDL_Renderer],
+    scaleX: ffi::c::Ptr[ffi::c::Float],
+    scaleY: ffi::c::Ptr[ffi::c::Float]
+) -> ffi::c::Bool
+
 # C: _Bool SDL_SetRenderDrawColor(SDL_Renderer *renderer, Uint8 r, Uint8 g, Uint8 b, Uint8 a)
 extern c fn SDL_SetRenderDrawColor(
     renderer: ffi::c::Ptr[sdl3::ctypes::SDL_Renderer],
@@ -332,6 +399,15 @@ extern c fn SDL_SetRenderDrawColor(
     a: ffi::c::UChar
 ) -> ffi::c::Bool
 
+# C: _Bool SDL_SetRenderDrawColorFloat(SDL_Renderer *renderer, float r, float g, float b, float a)
+extern c fn SDL_SetRenderDrawColorFloat(
+    renderer: ffi::c::Ptr[sdl3::ctypes::SDL_Renderer],
+    r: ffi::c::Float,
+    g: ffi::c::Float,
+    b: ffi::c::Float,
+    a: ffi::c::Float
+) -> ffi::c::Bool
+
 # C: _Bool SDL_GetRenderDrawColor(SDL_Renderer *renderer, Uint8 *r, Uint8 *g, Uint8 *b, Uint8 *a)
 extern c fn SDL_GetRenderDrawColor(
     renderer: ffi::c::Ptr[sdl3::ctypes::SDL_Renderer],
@@ -339,6 +415,27 @@ extern c fn SDL_GetRenderDrawColor(
     g: ffi::c::Ptr[ffi::c::UChar],
     b: ffi::c::Ptr[ffi::c::UChar],
     a: ffi::c::Ptr[ffi::c::UChar]
+) -> ffi::c::Bool
+
+# C: _Bool SDL_GetRenderDrawColorFloat(SDL_Renderer *renderer, float *r, float *g, float *b, float *a)
+extern c fn SDL_GetRenderDrawColorFloat(
+    renderer: ffi::c::Ptr[sdl3::ctypes::SDL_Renderer],
+    r: ffi::c::Ptr[ffi::c::Float],
+    g: ffi::c::Ptr[ffi::c::Float],
+    b: ffi::c::Ptr[ffi::c::Float],
+    a: ffi::c::Ptr[ffi::c::Float]
+) -> ffi::c::Bool
+
+# C: _Bool SDL_SetRenderColorScale(SDL_Renderer *renderer, float scale)
+extern c fn SDL_SetRenderColorScale(
+    renderer: ffi::c::Ptr[sdl3::ctypes::SDL_Renderer],
+    scale: ffi::c::Float
+) -> ffi::c::Bool
+
+# C: _Bool SDL_GetRenderColorScale(SDL_Renderer *renderer, float *scale)
+extern c fn SDL_GetRenderColorScale(
+    renderer: ffi::c::Ptr[sdl3::ctypes::SDL_Renderer],
+    scale: ffi::c::Ptr[ffi::c::Float]
 ) -> ffi::c::Bool
 
 # C: _Bool SDL_SetRenderDrawBlendMode(SDL_Renderer *renderer, SDL_BlendMode blendMode)
@@ -356,11 +453,27 @@ extern c fn SDL_GetRenderDrawBlendMode(
 # C: _Bool SDL_RenderClear(SDL_Renderer *renderer)
 extern c fn SDL_RenderClear(renderer: ffi::c::Ptr[sdl3::ctypes::SDL_Renderer]) -> ffi::c::Bool
 
+# C: _Bool SDL_RenderPoint(SDL_Renderer *renderer, float x, float y)
+extern c fn SDL_RenderPoint(
+    renderer: ffi::c::Ptr[sdl3::ctypes::SDL_Renderer],
+    x: ffi::c::Float,
+    y: ffi::c::Float
+) -> ffi::c::Bool
+
 # C: _Bool SDL_RenderPoints(SDL_Renderer *renderer, const SDL_FPoint *points, int count)
 extern c fn SDL_RenderPoints(
     renderer: ffi::c::Ptr[sdl3::ctypes::SDL_Renderer],
     points: ffi::c::Ptr[sdl3::ctypes::SDL_FPoint],
     count: ffi::c::Int
+) -> ffi::c::Bool
+
+# C: _Bool SDL_RenderLine(SDL_Renderer *renderer, float x1, float y1, float x2, float y2)
+extern c fn SDL_RenderLine(
+    renderer: ffi::c::Ptr[sdl3::ctypes::SDL_Renderer],
+    x1: ffi::c::Float,
+    y1: ffi::c::Float,
+    x2: ffi::c::Float,
+    y2: ffi::c::Float
 ) -> ffi::c::Bool
 
 # C: _Bool SDL_RenderLines(SDL_Renderer *renderer, const SDL_FPoint *points, int count)
@@ -404,6 +517,17 @@ extern c fn SDL_RenderTexture(
     dstrect: ffi::c::Ptr[sdl3::ctypes::SDL_FRect]
 ) -> ffi::c::Bool
 
+# C: _Bool SDL_RenderTextureRotated(SDL_Renderer *renderer, SDL_Texture *texture, const SDL_FRect *srcrect, const SDL_FRect *dstrect, double angle, const SDL_FPoint *center, SDL_FlipMode flip)
+extern c fn SDL_RenderTextureRotated(
+    renderer: ffi::c::Ptr[sdl3::ctypes::SDL_Renderer],
+    texture: ffi::c::Ptr[sdl3::ctypes::SDL_Texture],
+    srcrect: ffi::c::Ptr[sdl3::ctypes::SDL_FRect],
+    dstrect: ffi::c::Ptr[sdl3::ctypes::SDL_FRect],
+    angle: ffi::c::Double,
+    center: ffi::c::Ptr[sdl3::ctypes::SDL_FPoint],
+    flip: ffi::c::UInt
+) -> ffi::c::Bool
+
 # C: _Bool SDL_RenderTextureAffine(SDL_Renderer *renderer, SDL_Texture *texture, const SDL_FRect *srcrect, const SDL_FPoint *origin, const SDL_FPoint *right, const SDL_FPoint *down)
 extern c fn SDL_RenderTextureAffine(
     renderer: ffi::c::Ptr[sdl3::ctypes::SDL_Renderer],
@@ -414,6 +538,42 @@ extern c fn SDL_RenderTextureAffine(
     down: ffi::c::Ptr[sdl3::ctypes::SDL_FPoint]
 ) -> ffi::c::Bool
 
+# C: _Bool SDL_RenderTextureTiled(SDL_Renderer *renderer, SDL_Texture *texture, const SDL_FRect *srcrect, float scale, const SDL_FRect *dstrect)
+extern c fn SDL_RenderTextureTiled(
+    renderer: ffi::c::Ptr[sdl3::ctypes::SDL_Renderer],
+    texture: ffi::c::Ptr[sdl3::ctypes::SDL_Texture],
+    srcrect: ffi::c::Ptr[sdl3::ctypes::SDL_FRect],
+    scale: ffi::c::Float,
+    dstrect: ffi::c::Ptr[sdl3::ctypes::SDL_FRect]
+) -> ffi::c::Bool
+
+# C: _Bool SDL_RenderTexture9Grid(SDL_Renderer *renderer, SDL_Texture *texture, const SDL_FRect *srcrect, float left_width, float right_width, float top_height, float bottom_height, float scale, const SDL_FRect *dstrect)
+extern c fn SDL_RenderTexture9Grid(
+    renderer: ffi::c::Ptr[sdl3::ctypes::SDL_Renderer],
+    texture: ffi::c::Ptr[sdl3::ctypes::SDL_Texture],
+    srcrect: ffi::c::Ptr[sdl3::ctypes::SDL_FRect],
+    left_width: ffi::c::Float,
+    right_width: ffi::c::Float,
+    top_height: ffi::c::Float,
+    bottom_height: ffi::c::Float,
+    scale: ffi::c::Float,
+    dstrect: ffi::c::Ptr[sdl3::ctypes::SDL_FRect]
+) -> ffi::c::Bool
+
+# C: _Bool SDL_RenderTexture9GridTiled(SDL_Renderer *renderer, SDL_Texture *texture, const SDL_FRect *srcrect, float left_width, float right_width, float top_height, float bottom_height, float scale, const SDL_FRect *dstrect, float tileScale)
+extern c fn SDL_RenderTexture9GridTiled(
+    renderer: ffi::c::Ptr[sdl3::ctypes::SDL_Renderer],
+    texture: ffi::c::Ptr[sdl3::ctypes::SDL_Texture],
+    srcrect: ffi::c::Ptr[sdl3::ctypes::SDL_FRect],
+    left_width: ffi::c::Float,
+    right_width: ffi::c::Float,
+    top_height: ffi::c::Float,
+    bottom_height: ffi::c::Float,
+    scale: ffi::c::Float,
+    dstrect: ffi::c::Ptr[sdl3::ctypes::SDL_FRect],
+    tileScale: ffi::c::Float
+) -> ffi::c::Bool
+
 # C: _Bool SDL_RenderGeometry(SDL_Renderer *renderer, SDL_Texture *texture, const SDL_Vertex *vertices, int num_vertices, const int *indices, int num_indices)
 extern c fn SDL_RenderGeometry(
     renderer: ffi::c::Ptr[sdl3::ctypes::SDL_Renderer],
@@ -422,6 +582,22 @@ extern c fn SDL_RenderGeometry(
     num_vertices: ffi::c::Int,
     indices: ffi::c::Ptr[ffi::c::Int],
     num_indices: ffi::c::Int
+) -> ffi::c::Bool
+
+# C: _Bool SDL_RenderGeometryRaw(SDL_Renderer *renderer, SDL_Texture *texture, const float *xy, int xy_stride, const SDL_FColor *color, int color_stride, const float *uv, int uv_stride, int num_vertices, const void *indices, int num_indices, int size_indices)
+extern c fn SDL_RenderGeometryRaw(
+    renderer: ffi::c::Ptr[sdl3::ctypes::SDL_Renderer],
+    texture: ffi::c::Ptr[sdl3::ctypes::SDL_Texture],
+    xy: ffi::c::Ptr[ffi::c::Float],
+    xy_stride: ffi::c::Int,
+    color: ffi::c::Ptr[sdl3::ctypes::SDL_FColor],
+    color_stride: ffi::c::Int,
+    uv: ffi::c::Ptr[ffi::c::Float],
+    uv_stride: ffi::c::Int,
+    num_vertices: ffi::c::Int,
+    indices: ffi::c::Ptr[ffi::c::Void],
+    num_indices: ffi::c::Int,
+    size_indices: ffi::c::Int
 ) -> ffi::c::Bool
 
 # C: _Bool SDL_SetRenderTextureAddressMode(SDL_Renderer *renderer, SDL_TextureAddressMode u_mode, SDL_TextureAddressMode v_mode)
@@ -484,6 +660,23 @@ extern c fn SDL_SetRenderVSync(
 extern c fn SDL_GetRenderVSync(
     renderer: ffi::c::Ptr[sdl3::ctypes::SDL_Renderer],
     vsync: ffi::c::Ptr[ffi::c::Int]
+) -> ffi::c::Bool
+
+# C: _Bool SDL_RenderDebugText(SDL_Renderer *renderer, float x, float y, const char *str)
+extern c fn SDL_RenderDebugText(
+    renderer: ffi::c::Ptr[sdl3::ctypes::SDL_Renderer],
+    x: ffi::c::Float,
+    y: ffi::c::Float,
+    str: ffi::c::Ptr[ffi::c::Char]
+) -> ffi::c::Bool
+
+# C: _Bool SDL_RenderDebugTextFormat(SDL_Renderer *renderer, float x, float y, const char *fmt, ...)
+extern c fn SDL_RenderDebugTextFormat(
+    renderer: ffi::c::Ptr[sdl3::ctypes::SDL_Renderer],
+    x: ffi::c::Float,
+    y: ffi::c::Float,
+    fmt: ffi::c::Ptr[ffi::c::Char],
+    variadic
 ) -> ffi::c::Bool
 
 # C: _Bool SDL_SetDefaultTextureScaleMode(SDL_Renderer *renderer, SDL_ScaleMode scale_mode)

@@ -17,6 +17,11 @@
 #     a scalar field of ffi::c::X: the member is of integer class
 #       (__builtin_classify_type 1), of X's width and signedness on the
 #       target (core/cabi.tcl's table), and no _Bool ((T)2 == 2);
+#     a C floating field, ffi::c::Float or ffi::c::Double (C-FLOAT-FFI-
+#       MILESTONE-1.md): of real floating class (8), of the C type's width
+#       on the target, and exactly that C type
+#       (__builtin_types_compatible_p with float or double: never long
+#       double or an extended type of the same width);
 #     a pointer field: of pointer class (5) and the target's pointer width;
 #     a nested layout: of record class (12 a struct, 13 a union: the
 #       nested layout's own kind) and that layout's size;
@@ -146,6 +151,11 @@ proc ::cbind::verify::source {files profile target undefs} {
         "    _Static_assert(sizeof(BOTLISH_M(T, m)) == (width), L \": width\"); \\"
         "    _Static_assert((((__typeof__(BOTLISH_M(T, m)))-1) < 0) == (sign), L \": signedness\"); \\"
         "    _Static_assert((__typeof__(BOTLISH_M(T, m)))2 == 2, L \": no _Bool\")"
+        "#define BOTLISH_FLOATING(T, m, offset, width, ctype, L) \\"
+        "    BOTLISH_OFFSET(T, m, offset, L); \\"
+        "    _Static_assert(__builtin_classify_type(BOTLISH_M(T, m)) == 8, L \": a floating type\"); \\"
+        "    _Static_assert(sizeof(BOTLISH_M(T, m)) == (width), L \": width\"); \\"
+        "    _Static_assert(__builtin_types_compatible_p(__typeof__(BOTLISH_M(T, m)), ctype), L \": the C type\")"
         "#define BOTLISH_POINTER(T, m, offset, width, L) \\"
         "    BOTLISH_OFFSET(T, m, offset, L); \\"
         "    _Static_assert(__builtin_classify_type(BOTLISH_M(T, m)) == 5, L \": a pointer\"); \\"
@@ -220,6 +230,8 @@ proc ::cbind::verify::Fields {c name base byName records members sizes target po
             }
             if {[regexp {^ffi::c::(Ptr|FnPtr)\[} $type]} {
                 set width $pointerBytes
+            } elseif {[regexp {^ffi::c::([A-Za-z]+)$} $type -> scalar] && [core::cabi::isFloating $scalar]} {
+                set width [dict get [core::cabi::floatingInfo $scalar $target] bytes]
             } elseif {[regexp {^ffi::c::([A-Za-z]+)$} $type -> scalar]} {
                 set width [expr {[dict get [core::cabi::scalarInfo $scalar $target] bits] / 8}]
             } elseif {[dict exists $sizes $type]} {
@@ -233,6 +245,9 @@ proc ::cbind::verify::Fields {c name base byName records members sizes target po
         }
         if {[regexp {^ffi::c::(Ptr|FnPtr)\[} $type]} {
             append text "BOTLISH_POINTER($c, $m, $offset, $pointerBytes, $label);\n"
+        } elseif {[regexp {^ffi::c::([A-Za-z]+)$} $type -> scalar] && [core::cabi::isFloating $scalar]} {
+            set info [core::cabi::floatingInfo $scalar $target]
+            append text "BOTLISH_FLOATING($c, $m, $offset, [dict get $info bytes], [dict get $info c], $label);\n"
         } elseif {[regexp {^ffi::c::([A-Za-z]+)$} $type -> scalar]} {
             set info [core::cabi::scalarInfo $scalar $target]
             append text "BOTLISH_SCALAR($c, $m, $offset, [expr {[dict get $info bits] / 8}], [dict get $info signed], $label);\n"

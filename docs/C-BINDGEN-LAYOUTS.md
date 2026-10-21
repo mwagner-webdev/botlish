@@ -1,5 +1,11 @@
 # C-BINDGEN-LAYOUTS.md
 
+> Partially superseded by C-FLOAT-FFI-MILESTONE-1.md: `float` and `double`
+> fields are layout fields (`ffi::c::Float`, `ffi::c::Double`), verified by
+> layouts-check.c and the runtime oracle like any scalar; the `float` and
+> `double` blockers and pressure rows below are gone (SDL3 103 layouts now,
+> Tcl 36 with Tcl_Obj, BoringSSL 119, Win32 1015), `long double` remains.
+
 > Partially superseded by FIXED-LAYOUT-ARRAYS.md: a fixed array of
 > representable elements is a layout field now, its extents probed per
 > dimension. The blocked counts, pressure tables and sentinel statuses

@@ -312,11 +312,11 @@
 ## core/cabi.tcl
 <<<<
 proc core::cabi::ExternImpl {display args} {
-    core::semanticError NATIVE-ONLY \
+    set meta [core::native::metadata extern#$display]
 ====
 proc core::cabi::ExternImpl {display args} {
     return 0
-    core::semanticError NATIVE-ONLY \
+    set meta [core::native::metadata extern#$display]
 >>>>
 
 @@ unknown-provenance-exposed an exposure is admitted where the pointer result's provenance is unknown (it may point into the exposed storage)
@@ -348,9 +348,11 @@ proc core::cabi::ExternImpl {display args} {
 %% macos-aarch64
 ## native/src/codegen/aot.rs
 <<<<
-const LINKER: LinkerFlavor = if cfg!(target_vendor = "apple") { LinkerFlavor::Apple } else { LinkerFlavor::Gnu };
+const LINKER: LinkerFlavor = if cfg!(target_vendor = "apple") {
+    LinkerFlavor::Apple
 ====
-const LINKER: LinkerFlavor = LinkerFlavor::Gnu;
+const LINKER: LinkerFlavor = if cfg!(target_vendor = "apple") {
+    LinkerFlavor::Gnu
 >>>>
 
 @@ apple-plan-has-group Apple's link plan keeps GNU ld's archive group
@@ -497,9 +499,9 @@ pub fn c_call_conv(triple: &Triple) -> CallConv {
 %% macos-aarch64
 ## core/cabi.tcl
 <<<<
-        macos-aarch64   {os macos arch aarch64 model LP64 charSigned 1 triple aarch64-apple-darwin} \
+        macos-aarch64   {os macos arch aarch64 model LP64 charSigned 1 triple aarch64-apple-darwin floating IEEE} \
 ====
-        macos-aarch64   {os macos arch aarch64 model LP64 charSigned 0 triple aarch64-apple-darwin} \
+        macos-aarch64   {os macos arch aarch64 model LP64 charSigned 0 triple aarch64-apple-darwin floating IEEE} \
 >>>>
 
 @@ mach-o-symbol-double-prefixed on macOS a C function's link symbol is declared with Mach-O's `_` already on it, so the object crate's prefix makes it `__NAME`
@@ -659,7 +661,7 @@ pub fn c_call_conv(triple: &Triple) -> CallConv {
 %% linux-x86_64
 ## native/src/codegen/clif.rs
 <<<<
-    sig.params.iter().filter(|p| p.value_type == types::F64).count().min(8) as u32
+    sig.params.iter().filter(|p| p.value_type == types::F64 || p.value_type == types::F32).count().min(8) as u32
 ====
     0
 >>>>
@@ -758,7 +760,7 @@ pub fn c_call_conv(triple: &Triple) -> CallConv {
 %% macos-aarch64 linux-aarch64
 ## native/src/codegen/clif.rs
 <<<<
-        let fixed_integers = decl.params.len() - fixed_doubles;
+        let fixed_integers = decl.params.len() - fixed_floatings;
 ====
         let fixed_integers = decl.params.len();
 >>>>
@@ -767,7 +769,37 @@ pub fn c_call_conv(triple: &Triple) -> CallConv {
 %% macos-aarch64 linux-aarch64
 ## native/src/codegen/clif.rs
 <<<<
-            padding.extend((fixed_doubles..8).map(|_| types::F64));
+            padding.extend((fixed_floatings..8).map(|_| types::F64));
 ====
             padding.extend((0..8).map(|_| types::F64));
+>>>>
+
+@@ va-fixed-floats-not-vector-registers a System V variadic call's %al counts its double parameters only: a fixed C float, passed in an xmm register too, is left out of the bound
+%% linux-x86_64
+## native/src/codegen/clif.rs
+<<<<
+    sig.params.iter().filter(|p| p.value_type == types::F64 || p.value_type == types::F32).count().min(8) as u32
+====
+    sig.params.iter().filter(|p| p.value_type == types::F64).count().min(8) as u32
+>>>>
+
+@@ va-apple-fixed-floats-counted-as-integers Apple's padding counts a fixed C float as an integer register, not a v register: x registers go unpadded and v registers are padded twice, so trailing arguments leave the stack
+%% macos-aarch64 linux-aarch64
+## native/src/codegen/clif.rs
+<<<<
+        let fixed_floatings = decl.params.iter().filter(|c| c.floating()).count();
+====
+        let fixed_floatings = decl.params.iter().filter(|c| **c == nir::CAbi::F64).count();
+>>>>
+
+@@ va-float-vararg-parses NIR accepts a C float as a trailing argument's class (no Botlish value is one, and C promotes a float to a double)
+## native/src/nir.rs
+<<<<
+        let integer = |c: CAbi| !matches!(c, CAbi::Bool | CAbi::F32 | CAbi::F64 | CAbi::Ptr | CAbi::Void);
+        let valid = match class {
+            CAbi::Void | CAbi::F32 => false,
+====
+        let integer = |c: CAbi| !matches!(c, CAbi::Bool | CAbi::F64 | CAbi::Ptr | CAbi::Void);
+        let valid = match class {
+            CAbi::Void => false,
 >>>>

@@ -450,7 +450,7 @@ opaque struct X509V3_CTX:
 opaque struct X509_ALGOR:
     tag: unit
 
-# struct rand_meth_st (include/openssl/rand.h), a complete C type whose layout is blocked (layouts.tsv)
+# struct rand_meth_st (include/openssl/rand.h), a complete C type: its layout is boringssl::layouts::RAND_METHOD
 opaque struct RAND_METHOD:
     tag: unit
 

@@ -116,6 +116,11 @@
     _Static_assert(sizeof(BOTLISH_M(T, m)) == (width), L ": width"); \
     _Static_assert((((__typeof__(BOTLISH_M(T, m)))-1) < 0) == (sign), L ": signedness"); \
     _Static_assert((__typeof__(BOTLISH_M(T, m)))2 == 2, L ": no _Bool")
+#define BOTLISH_FLOATING(T, m, offset, width, ctype, L) \
+    BOTLISH_OFFSET(T, m, offset, L); \
+    _Static_assert(__builtin_classify_type(BOTLISH_M(T, m)) == 8, L ": a floating type"); \
+    _Static_assert(sizeof(BOTLISH_M(T, m)) == (width), L ": width"); \
+    _Static_assert(__builtin_types_compatible_p(__typeof__(BOTLISH_M(T, m)), ctype), L ": the C type")
 #define BOTLISH_POINTER(T, m, offset, width, L) \
     BOTLISH_OFFSET(T, m, offset, L); \
     _Static_assert(__builtin_classify_type(BOTLISH_M(T, m)) == 5, L ": a pointer"); \
@@ -788,6 +793,14 @@ BOTLISH_POINTER(struct v3_ext_ctx, db, 40, 8, "X509V3_CTX.db");
 BOTLISH_RECORD(struct X509_algor_st, 16, 8, "X509_ALGOR");
 BOTLISH_POINTER(struct X509_algor_st, algorithm, 0, 8, "X509_ALGOR.algorithm");
 BOTLISH_POINTER(struct X509_algor_st, parameter, 8, 8, "X509_ALGOR.parameter");
+
+BOTLISH_RECORD(struct rand_meth_st, 48, 8, "RAND_METHOD");
+BOTLISH_POINTER(struct rand_meth_st, seed, 0, 8, "RAND_METHOD.seed");
+BOTLISH_POINTER(struct rand_meth_st, bytes, 8, 8, "RAND_METHOD.bytes");
+BOTLISH_POINTER(struct rand_meth_st, cleanup, 16, 8, "RAND_METHOD.cleanup");
+BOTLISH_POINTER(struct rand_meth_st, add, 24, 8, "RAND_METHOD.add");
+BOTLISH_POINTER(struct rand_meth_st, pseudorand, 32, 8, "RAND_METHOD.pseudorand");
+BOTLISH_POINTER(struct rand_meth_st, status, 40, 8, "RAND_METHOD.status");
 
 BOTLISH_RECORD(struct rc4_key_st, 1032, 4, "RC4_KEY");
 BOTLISH_SCALAR(struct rc4_key_st, x, 0, 4, 0, "RC4_KEY.x");

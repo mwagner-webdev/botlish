@@ -1387,7 +1387,7 @@ test opaque-print-standalone-executable {a standalone executable prints the same
         set out [tcltest::makeDirectory opaque-exe-[pid]]
         try {
             set binary [native::executable $hir [file join $out program]]
-            exec env PATH= $binary
+            runStandalone $binary
         } finally {
             tcltest::removeDirectory [file tail $out]
         }

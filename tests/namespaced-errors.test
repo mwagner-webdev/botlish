@@ -112,7 +112,7 @@ proc nsCode {text} {
 # The message of compiling TEXT, without its location, or "ok".
 proc nsMessage {text} {
     if {[catch {surface::compile $text -warnings off} message]} {
-        regsub {^[^:]*:[0-9]+:[0-9]+: } $message {} message
+        regsub {^.*?:[0-9]+:[0-9]+: } $message {} message
         return $message
     }
     return ok
@@ -470,14 +470,14 @@ if {"test_ns_live" ni [core::native::names]} {
     core::registerNative test_ns_live -arity 0 -impl nsLiveCoroutines
 }
 
-test nerr-affine-payload {B22: an affine payload of a module's error moves, is destructured, ignored or bound whole exactly as before -- the namespace has no ownership effect: no coroutine left alive} -body {
+test nerr-affine-payload {B22: an affine payload of a module's error moves, is destructured, ignored or bound whole exactly as before -- the namespace has no ownership effect: no coroutine left alive} -constraints nativeCoroutines -body {
     nsWith $nsAffineLib {
         set text "import nsaf\nfn des(n: int) -> int:\n    nsaf::read(n):\n        on nsaf::ReadFailed {stream, bytesRead}:\n            nsaf::consume(stream) + bytesRead\nfn ign(n: int) -> int:\n    nsaf::read(n):\n        on nsaf::ReadFailed:\n            7\nfn whole(n: int) -> int:\n    nsaf::read(n):\n        on nsaf::ReadFailed d:\n            d.bytesRead\n\[des(3), ign(2), whole(4), des(0), test_ns_live()\]\n"
         list [sourceAgree $text {interp compile}] [sourceAgree [string map {test_ns_live() 0} $text]]
     }
 } -result {{value {[5, 7, 4, 0, 0]}} {value {[5, 7, 4, 0, 0]}}}
 
-test nerr-coroutine-cached-identity {B23: a coroutine that fails with a module's error raises the same canonical identity and payload again on a later resume -- never the entry program's same-short-name error} -body {
+test nerr-coroutine-cached-identity {B23: a coroutine that fails with a module's error raises the same canonical identity and payload again on a later resume -- never the entry program's same-short-name error} -constraints nativeCoroutines -body {
     nsWith [list nsco.bot {error Overflow:
     limit: int
     seen: int

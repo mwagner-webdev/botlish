@@ -677,8 +677,8 @@ test vt-executable-parity {frontier- and cut-sensitive programs run as real exec
         set hir [surface::readProgramFile $path]
         set expected [lindex [outcomeUnderHir interp $hir] 1]
         native::executable $hir [file rootname $path]
-        set plain [exec env PATH= [file rootname $path]]
-        set stressed [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 [file rootname $path]]
+        set plain [runStandalone [file rootname $path]]
+        set stressed [runStandalone [file rootname $path] BOTLISH_NATIVE_GC_STRESS 1]
         lappend results [expr {$plain eq $stressed && $plain eq $expected}]
     }
     tcltest::removeDirectory vt-exe

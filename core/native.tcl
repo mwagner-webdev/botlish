@@ -779,7 +779,10 @@ proc core::native::ValidBounds {bounds arity errors} {
     set arg [list {a} [list expr "\[string is digit -strict \$a\] && \$a < $arity"]]
     switch -- [lindex $bounds 0] {
         index {
-            if {[llength $bounds] != 4 || $errors ne {IndexNotFound}} {
+            # (A live fixed array's element access may also fail through a
+            # C floating element, NonFiniteFloat: the index check produces
+            # only its own IndexNotFound. C-FLOAT-FFI-MILESTONE-1.md.)
+            if {[llength $bounds] != 4 || $errors ni {IndexNotFound {IndexNotFound NonFiniteFloat}}} {
                 return 0
             }
             lassign $bounds _ family c i

@@ -13,12 +13,13 @@
 # row; C-HEADER-ARCHAEOLOGY.md, items 52-55).
 #
 #   targets   NAME -> {os OS arch ARCH model MODEL charSigned 0|1
-#             triple TRIPLE}
+#             triple TRIPLE floating FLOATING-MODEL}
 #   models    MODEL -> {char BITS short BITS int BITS long BITS longlong BITS
 #             pointer BITS}
 #   systems   OS -> its name in messages (Linux, macOS, Windows)
 #   platforms NAMESPACE-ROOT -> OS: the standard namespace trees that are an
-#             operating system's platform interface (linux -> linux)
+#             operating system's platform interface (linux -> linux,
+#             darwin -> macos)
 #
 # A target is an operating system *and* an architecture: linux-aarch64 and
 # macos-aarch64 share an instruction set, a pointer width and a data model,
@@ -48,8 +49,53 @@
 # A scalar's resolved metadata (scalarInfo) is the plain dict {c SPELLING
 # target TARGET bits N signed 0|1}: what a later C call lowering reads (width
 # and signedness), carried by the type's own registry entry, never recovered
-# from its name. Floating categories, _Bool, size_t and the other typedefs
-# are deliberately absent (C-ABI-TYPES.md, "What is not here").
+# from its name. _Bool, size_t and the other typedefs are deliberately
+# absent here (C-ABI-TYPES.md, "What is not here"; ffi::c::Bool is
+# Botlish's bool, hir/cabi.tcl).
+#
+# The C floating types (C-FLOAT-FFI-MILESTONE-1.md)
+# -------------------------------------------------
+# C `float` and `double` are foreign *representations*, not Botlish
+# numbers: ffi::c::Float and ffi::c::Double (hir/cabi.tcl's {cfloat NAME})
+# name the bits C reads and writes, and a Botlish program holds their values
+# as its *carrier*, Float64, on both sides of the boundary. Every fact below
+# is the C type's, never the carrier's: the two share a carrier and differ in
+# width, alignment, ABI class, element stride and outbound conversion.
+#
+#   floatings        NAME -> {c C-SPELLING carrier CARRIER}: the C floating
+#                    types, in declaration order (no `long double`: its
+#                    representation differs by target -- x87 extended,
+#                    binary128, binary64 -- and is a row of its own, with its
+#                    own model entry, when it comes)
+#   floatingModels   MODEL -> NAME -> {format FORMAT align BYTES}: what a
+#                    target's C compiler makes of each (a target row's
+#                    `floating`); every supported target is IEEE (C11 Annex
+#                    F: float is binary32, double binary64; the x86-64 and
+#                    AArch64 psABIs and the Microsoft x64 convention align
+#                    each to its size). A target whose layout differs --
+#                    i386's 4-byte double alignment inside a struct -- is a
+#                    model of its own, never a special case of this one
+#   floatingFormats  FORMAT -> {bytes N class ABI-CLASS precision P
+#                    maxExponent E}: the IEEE 754 interchange formats, the
+#                    ABI transport class each travels in (hir/foreign.tcl,
+#                    nir.rs's CAbi::F32/F64)
+#
+# The boundary rules are written once, here, for every place a C floating
+# value crosses (an extern call's arguments and result, a layout field read
+# from bytes or native memory, a layout field written), and the native
+# runtime implements the same three (runtime/value.rs's foreign float
+# helpers, codegen::clif's foreign call):
+#
+#   Admit   a C value (bits of FORMAT) enters Botlish: NaN and the
+#           infinities are NonFiniteFloat (the payload names which), negative
+#           zero is zero, and anything else is the carrier value it exactly is
+#           (every finite binary32 is a binary64: widening never rounds)
+#   Narrow  a carrier value leaves for FORMAT: binary64 exactly; binary32
+#           rounded to nearest, ties to even, the result NonFiniteFloat when
+#           it overflows to an infinity (never clamped to FLT_MAX), zero when
+#           it underflows to a zero of either sign (a finite result), and a
+#           subnormal when that is the nearest
+#   Encode/Decode   Narrow and Admit with the bytes of a little-endian FORMAT
 #
 # Values
 # ------
@@ -79,21 +125,22 @@ namespace eval core::cabi {
         LP64  {char 8 short 16 int 32 long 64 longlong 64 pointer 64} \
         LLP64 {char 8 short 16 int 32 long 32 longlong 64 pointer 64}]
     variable targets [dict create \
-        linux-x86_64    {os linux arch x86_64 model LP64 charSigned 1 triple x86_64-unknown-linux-gnu} \
-        linux-aarch64   {os linux arch aarch64 model LP64 charSigned 0 triple aarch64-unknown-linux-gnu} \
-        macos-x86_64    {os macos arch x86_64 model LP64 charSigned 1 triple x86_64-apple-darwin} \
-        macos-aarch64   {os macos arch aarch64 model LP64 charSigned 1 triple aarch64-apple-darwin} \
-        windows-x86_64  {os windows arch x86_64 model LLP64 charSigned 1 triple x86_64-pc-windows-msvc} \
-        windows-x86_64-gnu {os windows arch x86_64 model LLP64 charSigned 1 triple x86_64-pc-windows-gnu} \
-        windows-aarch64 {os windows arch aarch64 model LLP64 charSigned 1 triple aarch64-pc-windows-msvc}]
+        linux-x86_64    {os linux arch x86_64 model LP64 charSigned 1 triple x86_64-unknown-linux-gnu floating IEEE} \
+        linux-aarch64   {os linux arch aarch64 model LP64 charSigned 0 triple aarch64-unknown-linux-gnu floating IEEE} \
+        macos-x86_64    {os macos arch x86_64 model LP64 charSigned 1 triple x86_64-apple-darwin floating IEEE} \
+        macos-aarch64   {os macos arch aarch64 model LP64 charSigned 1 triple aarch64-apple-darwin floating IEEE} \
+        windows-x86_64  {os windows arch x86_64 model LLP64 charSigned 1 triple x86_64-pc-windows-msvc floating IEEE} \
+        windows-x86_64-gnu {os windows arch x86_64 model LLP64 charSigned 1 triple x86_64-pc-windows-gnu floating IEEE} \
+        windows-aarch64 {os windows arch aarch64 model LLP64 charSigned 1 triple aarch64-pc-windows-msvc floating IEEE}]
     variable systems [dict create linux Linux macos macOS windows Windows]
     # The standard namespace trees that are an operating system's platform
     # interface -- ROOT -> OS: the namespace ROOT and every namespace under
     # it are OS's, importable only for a target of OS (surface/modules.tcl's
     # PlatformCheck). Designated here, never inferred from a name: `linux`
-    # (lib/linux.bot, lib/linux/*, the syscall transports linux::abi::*). A
-    # macOS platform module tree is designated the same way when one exists.
-    variable platforms [dict create linux linux]
+    # (lib/linux.bot, lib/linux/*, the syscall transports linux::abi::*) and
+    # `darwin` (lib/darwin.bot, lib/darwin/*: macOS's libSystem interface,
+    # MACOS-AARCH64-MILESTONE-8.md).
+    variable platforms [dict create linux linux darwin macos]
     # In declaration (and HIR text) order.
     variable scalars [dict create \
         Char      {c char width char signed char} \
@@ -107,6 +154,21 @@ namespace eval core::cabi {
         ULong     {c {unsigned long} width long signed 0} \
         LongLong  {c {long long} width longlong signed 1} \
         ULongLong {c {unsigned long long} width longlong signed 0}]
+    # The C floating types (the file header's "The C floating types"), in
+    # declaration order, and what each target's C compiler makes of them.
+    variable floatings [dict create \
+        Float  {c float carrier Float64} \
+        Double {c double carrier Float64}]
+    variable floatingModels [dict create \
+        IEEE {Float {format binary32 align 4} Double {format binary64 align 8}}]
+    variable floatingFormats [dict create \
+        binary32 {bytes 4 class f32 precision 24 maxExponent 127} \
+        binary64 {bytes 8 class f64 precision 53 maxExponent 1023}]
+    # The smallest magnitude that rounds to binary32's infinity: 2^128 -
+    # 2^103, the midpoint between the largest finite binary32 (2^128 - 2^104)
+    # and 2^128, which ties-to-even rounds up (the largest finite one's
+    # significand is odd). A binary64 holds it exactly.
+    variable binary32Overflow 340282356779733661637539395458142568448.0
     # The namespace whose intrinsic types these are.
     variable namespace ffi::c
 }
@@ -274,6 +336,192 @@ proc core::cabi::validScalarInfo {info} {
         }
     }
     return 0
+}
+
+# ---------------------------------------------------------------------------
+# The C floating types (the file header's "The C floating types")
+
+# The C floating type names (ffi::c::NAME), in declaration order.
+proc core::cabi::floatingNames {} {
+    variable floatings
+    return [dict keys $floatings]
+}
+
+# 1 if NAME is the name of a C floating type (Float, Double).
+proc core::cabi::isFloating {name} {
+    variable floatings
+    return [dict exists $floatings $name]
+}
+
+# The metadata of C floating type NAME on TARGET: {c SPELLING carrier
+# CARRIER format FORMAT bytes N align A class CLASS target TARGET} -- its C
+# spelling, its Botlish carrier type, the IEEE 754 format the target's C
+# compiler gives it, its size and alignment there, and the ABI transport
+# class it travels in. Nothing here is derived from the carrier.
+proc core::cabi::floatingInfo {name target} {
+    variable floatings
+    variable floatingModels
+    variable floatingFormats
+    if {![dict exists $floatings $name]} {
+        error "core::cabi: unknown C floating type \"$name\""
+    }
+    set model [dict get [core::cabi::target $target] floating]
+    set entry [dict get $floatingModels $model $name]
+    set format [dict get $entry format]
+    set meta [dict get $floatings $name]
+    return [dict create c [dict get $meta c] carrier [dict get $meta carrier] format $format \
+        bytes [dict get $floatingFormats $format bytes] align [dict get $entry align] \
+        class [dict get $floatingFormats $format class] target $target]
+}
+
+# The facts of IEEE 754 interchange format FORMAT (binary32, binary64):
+# {bytes N class ABI-CLASS precision P maxExponent E}.
+proc core::cabi::formatInfo {format} {
+    variable floatingFormats
+    if {![dict exists $floatingFormats $format]} {
+        error "core::cabi: unknown floating format \"$format\""
+    }
+    return [dict get $floatingFormats $format]
+}
+
+# The IEEE 754 format of a WIDTH-byte floating representation (a layout
+# descriptor's `f WIDTH`), or "".
+proc core::cabi::formatOfWidth {width} {
+    variable floatingFormats
+    dict for {format info} $floatingFormats {
+        if {[dict get $info bytes] == $width} {
+            return $format
+        }
+    }
+    return ""
+}
+
+# Narrow: the carrier value X (a finite Tcl double, never negative zero)
+# leaving for FORMAT -- {ok Y}, Y the Tcl double FORMAT holds, or {error
+# NonFiniteFloat RESULT} when it has none. binary64 is exact. binary32 is
+# rounded to nearest, ties to even (Tcl's `binary format r` is C's (float)
+# conversion, IEEE's rounding: it clamps a magnitude beyond FLT_MAX to
+# FLT_MAX, which is the correctly rounded result below binary32Overflow and
+# never reached at or above it); a magnitude that rounds to an infinity is
+# NonFiniteFloat with the infinity's sign, never clamped or saturated; a
+# result that rounds to a zero of either sign is zero (a finite underflow,
+# no error), and a subnormal stays one.
+proc core::cabi::Narrow {format x} {
+    variable binary32Overflow
+    switch -- $format {
+        binary64 {
+            return [list ok $x]
+        }
+        binary32 {
+            if {abs($x) >= $binary32Overflow} {
+                if {$x > 0} {
+                    return {error NonFiniteFloat PositiveInfinity}
+                }
+                return {error NonFiniteFloat NegativeInfinity}
+            }
+            binary scan [binary format r $x] r y
+            return [list ok [expr {$y + 0.0}]]
+        }
+    }
+    error "core::cabi::Narrow: unknown floating format \"$format\""
+}
+
+# The little-endian bytes (a Tcl byte string) of the carrier value X in
+# FORMAT -- {ok BYTES} -- or Narrow's {error NonFiniteFloat RESULT}.
+proc core::cabi::EncodeFloating {format x} {
+    set narrowed [Narrow $format $x]
+    if {[lindex $narrowed 0] ne "ok"} {
+        return $narrowed
+    }
+    switch -- $format {
+        binary32 { return [list ok [binary format r [lindex $narrowed 1]]] }
+        binary64 { return [list ok [binary format q [lindex $narrowed 1]]] }
+    }
+}
+
+# Admit: the FORMAT value whose bits are the unsigned integer BITS entering
+# Botlish -- {ok X}, X the Tcl double it exactly is (negative zero made
+# zero), or {error NonFiniteFloat RESULT} for NaN (NotANumber) or an
+# infinity (of its sign). Every finite binary32 is a binary64, so X is
+# exact.
+proc core::cabi::AdmitBits {format bits} {
+    switch -- $format {
+        binary32 {
+            set top [expr {($bits >> 23) & 0xff}]
+            set fraction [expr {$bits & 0x7fffff}]
+            set negative [expr {($bits >> 31) & 1}]
+            set nonFinite 0xff
+            binary scan [binary format iu $bits] r x
+        }
+        binary64 {
+            set top [expr {($bits >> 52) & 0x7ff}]
+            set fraction [expr {$bits & 0xfffffffffffff}]
+            set negative [expr {($bits >> 63) & 1}]
+            set nonFinite 0x7ff
+            binary scan [binary format wu $bits] q x
+        }
+        default {
+            error "core::cabi::AdmitBits: unknown floating format \"$format\""
+        }
+    }
+    if {$top == $nonFinite} {
+        if {$fraction != 0} {
+            return {error NonFiniteFloat NotANumber}
+        }
+        if {$negative} {
+            return {error NonFiniteFloat NegativeInfinity}
+        }
+        return {error NonFiniteFloat PositiveInfinity}
+    }
+    return [list ok [expr {$x + 0.0}]]
+}
+
+# Admit from the little-endian FORMAT value at byte AT of BYTES (a Tcl byte
+# string holding it): AdmitBits's completion.
+proc core::cabi::DecodeFloating {format bytes at} {
+    switch -- $format {
+        binary32 { binary scan $bytes @${at}iu bits }
+        binary64 { binary scan $bytes @${at}wu bits }
+        default { error "core::cabi::DecodeFloating: unknown floating format \"$format\"" }
+    }
+    return [AdmitBits $format $bits]
+}
+
+# The unsigned bit pattern of the FORMAT value the carrier value X narrows
+# to, or "" when it narrows to no finite value (tests, the fuzz harness).
+proc core::cabi::NarrowBits {format x} {
+    set encoded [EncodeFloating $format $x]
+    if {[lindex $encoded 0] ne "ok"} {
+        return ""
+    }
+    switch -- $format {
+        binary32 { binary scan [lindex $encoded 1] iu bits }
+        binary64 { binary scan [lindex $encoded 1] wu bits }
+    }
+    return $bits
+}
+
+# The Botlish value of a completion COMPLETION of Narrow, AdmitBits or
+# DecodeFloating, for the native or operation WHAT -- the carrier Float64
+# value -- or WHAT's NonFiniteFloat (its payload naming the result).
+proc core::cabi::FloatingValue {what completion} {
+    if {[lindex $completion 0] eq "ok"} {
+        return [core::value::float Float64 [lindex $completion 1]]
+    }
+    set result [lindex $completion 2]
+    core::native::failDeclared NonFiniteFloat "$what: $result is not a finite number" [core::float::Payload $result]
+}
+
+# Narrows the carrier value V (a Float64) for FORMAT on behalf of WHAT:
+# the Tcl double FORMAT holds, or WHAT's NonFiniteFloat.
+proc core::cabi::NarrowValue {what format v} {
+    set completion [Narrow $format [core::value::floatOf $v]]
+    if {[lindex $completion 0] eq "ok"} {
+        return [lindex $completion 1]
+    }
+    set result [lindex $completion 2]
+    core::native::failDeclared NonFiniteFloat \
+        "$what: [core::float::text $v] has no finite $format value (it rounds to an infinity)" [core::float::Payload $result]
 }
 
 # ---------------------------------------------------------------------------
@@ -813,7 +1061,19 @@ proc core::cabi::StoreExposed {p offset bytes context} {
 # refused -- after core::cabi::ForeignBoundary opened (and then closes) its
 # exposures, so a refused call publishes nothing. Nothing fabricates an
 # address or imitates the C function.
+#
+# The boundary's own conversions come first, as on every backend: a Float64
+# argument of a C float parameter that rounds to no finite binary32 fails
+# the call with NonFiniteFloat before anything would call C (Narrow; the
+# conversion is the declaration's, not the machine's).
 proc core::cabi::ExternImpl {display args} {
+    set meta [core::native::metadata extern#$display]
+    set classes [dict get $meta extern abi params]
+    foreach v $args class $classes {
+        if {$class eq "f32"} {
+            NarrowValue $display binary32 $v
+        }
+    }
     core::semanticError NATIVE-ONLY \
         "$display is a C function (extern c fn): calling it runs only on the native backends (cranelift, cranelift-generic, a native executable), which link and call the C library; the Tcl backends have no machine to call it on"
 }

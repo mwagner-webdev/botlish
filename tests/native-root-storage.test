@@ -162,16 +162,20 @@ test storage-multi-root-2 {two simultaneously live NativeFrame roots never share
 # map.test covers that decoupling directly, including under real recursion
 # and GC stress).
 
-test storage-fib-1 {fib<int> (real cross-call roots) now uses NativeFrame storage} -body {
+# The storage of a function with a Botlish call: native frames where they
+# hold roots (nativeFrameRoots), the shadow stack elsewhere (Windows).
+set callerStorage [if {[testConstraint nativeFrameRoots]} {string cat "native frame"} else {string cat "runtime stack"}]
+
+test storage-fib-1 {fib<int> (real cross-call roots) uses NativeFrame storage where native frames hold roots (nativeFrameRoots), the shadow stack elsewhere} -body {
     set report [native::roots [sourceIrHir [file join $::projectRoot bench fib.ir]]]
     storageOf $report fib
-} -result {native frame}
+} -result $callerStorage
 
-test storage-call-crossing-1 {a value that must survive a Botlish call now uses NativeFrame storage too} -body {
+test storage-call-crossing-1 {a value that must survive a Botlish call uses the host's caller storage too, and survives GC stress} -body {
     set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=2 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"a\"\n    %1 = call 1 %0\n    ret %1\nend\nfunc 1 \"f\" params=1 env=0 regs=3 pnames=\"x\" captures=0 rawregs=\"\"\n    %1 = str \"b\"\n    %2 = op strcat %0 %1\n    ret %2\nend\n"
     set report [rootsOfNir $text]
     list [storageOf $report "<program>"] [underGcStress {runNir $text}]
-} -result {{native frame} {value {str ab}}}
+} -result [list $callerStorage {value {str ab}}]
 
 test storage-call-crossing-2 {call-crossing roots no longer force a depth helper where the native stack guard is (nativeStackGuard)} -body {
     set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=2 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"a\"\n    %1 = call 1 %0\n    ret %1\nend\nfunc 1 \"f\" params=1 env=0 regs=3 pnames=\"x\" captures=0 rawregs=\"\"\n    %1 = str \"b\"\n    %2 = op strcat %0 %1\n    ret %2\nend\n"

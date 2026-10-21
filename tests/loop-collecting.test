@@ -612,8 +612,8 @@ proc aotParity {text} {
             lappend values [lindex $outcome 1]
         }
         exec [info nameofexecutable] [file join $::projectRoot main.tcl] -emit-native-executable $path
-        lappend values [exec env PATH= [file rootname $path]]
-        lappend values [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 [file rootname $path]]
+        lappend values [runStandalone [file rootname $path]]
+        lappend values [runStandalone [file rootname $path] BOTLISH_NATIVE_GC_STRESS 1]
         if {[llength [lsort -unique $values]] != 1} { error "values disagree: $values" }
         return [lindex $values 0]
     } finally {

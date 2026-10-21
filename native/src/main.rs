@@ -17,7 +17,9 @@
 //!                                        without compiling
 //!   botlish-native object OUT FILE.nir   write a relocatable program object
 //!   botlish-native executable OUT FILE.nir  link a standalone executable
-//!                                        (Linux ELF, macOS AArch64 Mach-O;
+//!                                        (Linux ELF, macOS AArch64 Mach-O,
+//!                                        Windows x86-64 PE: OUT.exe for an
+//!                                        OUT without an extension;
 //!                                        BOTLISH_NATIVE_LINKER: rustc, the
 //!                                        default, or stub: codegen/aot.rs)
 //!   botlish-native check FILE.nir        parse and validate only
@@ -81,9 +83,11 @@
 //!                                                  runtime/metrics.rs's Tcl dict)
 //! ```
 //!
-//! Native code runs on a worker pthread with a large native stack. On
+//! Native code runs on a worker thread with a large native stack. On
 //! Linux (x86-64, AArch64) and macOS AArch64 the stack guard
-//! (runtime/platform/) supplies overflow protection.
+//! (runtime/platform/) supplies overflow protection; on Windows there is no
+//! guard yet, and a native stack exhausted past the shadow stack's depth
+//! check ends the process (WINDOWS-X86-64-MILESTONE-1.md).
 
 mod codegen;
 use botlish_native::{nir, runtime};
@@ -343,8 +347,11 @@ fn cli(args: &[String]) -> i32 {
             0
         }
         "executable" => {
-            match codegen::aot::emit_executable(&program, std::path::Path::new(&rest[0]), &link_dirs) {
-                Ok(()) => emit(&tcl_list(&["executable".to_string(), rest[0].clone()])),
+            // The file the executable is: OUT, or OUT.exe on Windows
+            // (codegen::aot::executable_path), as given.
+            let named = codegen::aot::executable_path(std::path::Path::new(&rest[0]));
+            match codegen::aot::emit_executable(&program, &named, &link_dirs) {
+                Ok(_) => emit(&tcl_list(&["executable".to_string(), named.to_string_lossy().into_owned()])),
                 Err(e) => {
                     let code = if codegen::aot::calls_c(&program) { "LINK" } else { "AOT" };
                     emit_error(&["NATIVE", code], &e);
@@ -423,11 +430,13 @@ fn run_linked(
         }
     }
     let _cleanup = Cleanup(work.clone());
-    let executable = work.join("program");
-    if let Err(e) = codegen::aot::emit_executable(program, &executable, link_dirs) {
-        emit_error(&["NATIVE", "LINK"], &e);
-        return 0;
-    }
+    let executable = match codegen::aot::emit_executable(program, &work.join("program"), link_dirs) {
+        Ok(executable) => executable,
+        Err(e) => {
+            emit_error(&["NATIVE", "LINK"], &e);
+            return 0;
+        }
+    };
     let argv: Vec<Vec<u8>> = snapshot
         .unwrap_or_else(|| runtime::vm::DEFAULT_ARGV.iter().map(|a| a.as_bytes().to_vec()).collect());
     let Some((first, rest)) = argv.split_first() else {
@@ -437,13 +446,15 @@ fn run_linked(
         );
         return 0;
     };
-    use std::os::unix::ffi::OsStrExt;
-    use std::os::unix::process::CommandExt;
     let result = work.join("result");
-    let mut child = std::process::Command::new(&executable);
+    let mut child = match linked_command(&executable, first, rest) {
+        Ok(child) => child,
+        Err(message) => {
+            emit_error(&["NATIVE", "UNSUPPORTED", "foreign"], &message);
+            return 0;
+        }
+    };
     child
-        .arg0(std::ffi::OsStr::from_bytes(first))
-        .args(rest.iter().map(|a| std::ffi::OsStr::from_bytes(a)))
         .env("BOTLISH_NATIVE_RESULT", &result)
         .env("BOTLISH_NATIVE_COMPILE_US", started.elapsed().as_micros().to_string());
     if command == "bench" {
@@ -470,6 +481,29 @@ fn run_linked(
         emit(line);
     }
     0
+}
+
+/// The command that runs the linked EXECUTABLE with the argument vector
+/// FIRST, REST... (argument zero first), byte for byte.
+#[cfg(unix)]
+fn linked_command(executable: &std::path::Path, first: &[u8], rest: &[Vec<u8>]) -> Result<std::process::Command, String> {
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::process::CommandExt;
+    let mut child = std::process::Command::new(executable);
+    child.arg0(std::ffi::OsStr::from_bytes(first)).args(rest.iter().map(|a| std::ffi::OsStr::from_bytes(a)));
+    Ok(child)
+}
+
+/// A Windows process has no argument vector of its own, only a command
+/// line, which std::process writes with the executable's path as argument
+/// zero: passing the snapshot's own argument zero (ARGV.md, "Windows") needs
+/// a CreateProcessW of a command line written here. No linked run reaches
+/// this yet -- a program that calls C does not link on Windows (codegen::
+/// aot's C_CALLS refuses it first) -- so it is refused rather than run with
+/// another argument zero.
+#[cfg(windows)]
+fn linked_command(_executable: &std::path::Path, _first: &[u8], _rest: &[Vec<u8>]) -> Result<std::process::Command, String> {
+    Err("a linked run on Windows cannot pass the argument snapshot's argument zero to the program yet (ARGV.md, \"Windows\")".to_string())
 }
 
 fn call_effect_report(program: &nir::Program) -> String {

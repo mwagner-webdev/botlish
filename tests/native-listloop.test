@@ -222,7 +222,7 @@ f()}]]
     list [regexp -all {unreachable} $text] [expr {[string first {"only_dead"} $text] >= 0}]
 } -result {1 0}
 
-test native-listloop-empty-domain-bodies-run {loops over an empty domain whose bodies call a function only they call, create and call a closure, and move a coroutine handle -- a list loop, and a lockstep loop in the empty caller's instance -- run on every backend} -body {
+test native-listloop-empty-domain-bodies-run {loops over an empty domain whose bodies call a function only they call, create and call a closure, and move a coroutine handle -- a list loop, and a lockstep loop in the empty caller's instance -- run on every backend} -constraints nativeCoroutines -body {
     sourceAgree {import coroutine
 import list
 

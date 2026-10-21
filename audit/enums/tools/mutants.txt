@@ -337,7 +337,7 @@ proc hir::enums::IsAffine {id {seen {}}} {
 ## hir/format.tcl
 <<<<
         const {
-            Line $hir $e "const [dict get $node literal]" $indent $origins lines
+            Line $hir $e "const [hir::format::Literal [dict get $node literal]]" $indent $origins lines
         }
 ====
         const {
@@ -345,6 +345,6 @@ proc hir::enums::IsAffine {id {seen {}}} {
             if {[lindex $literal 0] eq "enum"} {
                 set literal [list enum [list Lost [lindex $literal 1 1]]]
             }
-            Line $hir $e "const $literal" $indent $origins lines
+            Line $hir $e "const [hir::format::Literal $literal]" $indent $origins lines
         }
 >>>>

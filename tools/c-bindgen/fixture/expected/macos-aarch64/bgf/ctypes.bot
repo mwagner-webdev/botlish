@@ -34,6 +34,10 @@ opaque struct bgf_frame:
 opaque struct bgf_points4:
     tag: unit
 
+# struct bgf_mixed_floats (include/bgf/bgf_records.h), a complete C type: its layout is bgf::layouts::bgf_mixed_floats
+opaque struct bgf_mixed_floats:
+    tag: unit
+
 # struct bgf_handle
 opaque struct bgf_handle:
     tag: unit

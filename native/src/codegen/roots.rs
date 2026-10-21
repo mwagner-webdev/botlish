@@ -80,7 +80,7 @@ use std::fmt::Write as _;
 ///       no publish/restore of any kind is emitted for them.
 ///     - on the fallback path (NATIVE_FRAME_SUPPORTED false, e.g. a
 ///       non-x86-64 host where the frame-walker is not implemented): only
-///       a function with no Botlish call qualifies (`has_botlish_call`),
+///       a function with no Botlish call qualifies (`Function::has_botlish_call`),
 ///       exactly the original, narrower rule, published to the collector
 ///       through `Vm::native_roots_ptr`/`_len` (at most one such
 ///       registration can ever be active along any single call chain,
@@ -97,28 +97,6 @@ use std::fmt::Write as _;
 pub enum RootStorage {
     NativeFrame,
     RuntimeStack,
-}
-
-/// Whether F contains a Botlish call (`Call`/`CallEnv`/`CallMulti`/
-/// `CallEnvMulti`/`CallValue` -- a dynamically dispatched call is folded
-/// into `CallValue`, already covered). `Tail`/`TailEnv` (a self back-edge,
-/// codegen::clif's own doc) is deliberately not one of these: it is a CFG
-/// jump to this same frame's entry block, never a machine `call`, so it
-/// neither grows the native call stack nor creates a second frame.
-///
-/// This predicate determines fallback RuntimeStack storage and, on
-/// platforms without native guard handling, the depth reservation.
-fn has_botlish_call(f: &Function) -> bool {
-    f.body.iter().any(|inst| {
-        matches!(
-            inst,
-            Inst::Call { .. }
-                | Inst::CallEnv { .. }
-                | Inst::CallMulti { .. }
-                | Inst::CallEnvMulti { .. }
-                | Inst::CallValue { .. }
-        )
-    })
 }
 
 /// The result of root-liveness analysis for one function: which register
@@ -785,8 +763,8 @@ pub fn plan(f: &Function, native_frame_supported: bool) -> RootPlan {
     let liveness = analyze(f, &cfg);
     let (slot_of, colored_slots, root_candidates) = color(f.regs, &liveness.safepoint_roots, &liveness.def_edges);
     let max_live = liveness.safepoint_roots.iter().map(Vec::len).max().unwrap_or(0) as u32;
-    let has_call = has_botlish_call(f);
-    let depth_reservation = has_call && !(native_frame_supported && crate::runtime::native_stack::native_stack_overflow_supported());
+    let has_call = f.has_botlish_call();
+    let depth_reservation = has_call && crate::runtime::native_stack::depth_checked(native_frame_supported);
     // On the native-stack-map path every function qualifies for NativeFrame
     // (called or not: the frame-walker discovers roots across any number of
     // nested native frames, so a Botlish call no longer disqualifies it --
@@ -839,11 +817,10 @@ pub fn plan(f: &Function, native_frame_supported: bool) -> RootPlan {
 /// unaffected by this module's definite-initialization analysis, the
 /// second is entirely its output.
 pub fn report(program: &Program) -> String {
-    // Reflects what this host's actual JIT compile will decide
-    // (codegen::clif's `stack_maps`: an x64 or aarch64 ISA): this CLI
-    // parses and analyzes only, never compiles (main.rs's own doc), so
-    // there is no `Module`/ISA here to ask directly.
-    let native_frame_supported = cfg!(any(target_arch = "x86_64", target_arch = "aarch64"));
+    // What this host's actual JIT compile decides (codegen::clif's
+    // `stack_maps`): the same capability, runtime::framewalk's
+    // NATIVE_FRAME_ROOTS.
+    let native_frame_supported = crate::runtime::framewalk::NATIVE_FRAME_ROOTS;
     let mut out = String::new();
     for f in &program.functions {
         let plan = plan(f, native_frame_supported);

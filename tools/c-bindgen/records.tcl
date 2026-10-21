@@ -29,8 +29,9 @@
 #                    each at the offset the compiler gives (0, or the union
 #                    is blocked: union-member-offset).
 #   layout-blocked   complete, with every blocker found: a direct one (a
-#                    flexible array, a bitfield, a float, a double, a long
-#                    double, a C _Bool, volatile, _Atomic, a field type
+#                    flexible array, a bitfield, a long double (C float
+#                    and double are layout fields: C-FLOAT-FFI-
+#                    MILESTONE-1.md), a C _Bool, volatile, _Atomic, a field type
 #                    outside the ABI universe, ...) or a transitive one (a
 #                    record it contains by value is blocked:
 #                    nested-layout-blocked, with the chain to the first
@@ -356,10 +357,20 @@ proc ::cbind::records::FieldType {type} {
         }
         bool { return [list no [concat $blockers [list [list c-bool "C _Bool ([::cir::spell $type])"]]] {}] }
         float {
-            set sp [lindex $t 1]
-            set reason [dict get {float float double double {long double} long-double} $sp]
-            if {[string match _Float* $sp] || [string match __float* $sp] || $sp in {__bf16 __ibm128}} { set reason float }
-            return [list no [concat $blockers [list [list $reason "$sp ([::cir::spell $type])"]]] {}]
+            # A C float or double field (C-FLOAT-FFI-MILESTONE-1.md): the
+            # binding model's mapping, its typedef chain confirmed by the
+            # compiler as an integer's is; long double and the extended
+            # floating types stay blocked by their own reasons.
+            set m [::cbind::model::Floating [lindex $t 1]]
+            if {[lindex $m 0] ne "ok"} {
+                return [list no [concat $blockers [lindex $m 1]] {}]
+            }
+            if {$via ne ""} {
+                set problem [::cbind::model::TypedefAbiProblem $via [lindex $t 1]]
+                if {$problem ne ""} { lappend blockers [list typedef-abi-mismatch $problem] }
+            }
+            if {$blockers ne ""} { return [list no $blockers {}] }
+            return [list ok scalar [lindex $m 1]]
         }
         complex { return [list no [concat $blockers [list [list complex "_Complex [lindex $t 1]"]]] {}] }
         ptr {
@@ -415,6 +426,16 @@ proc ::cbind::records::FieldType {type} {
             return [list no [concat $blockers [list [list unsupported-field-type [::cir::spell $t]]]] {}]
         }
     }
+}
+
+# The width in bytes of the ffi::c scalar NAME (an integer scalar, or a C
+# floating type: C-FLOAT-FFI-MILESTONE-1.md) on the target being generated,
+# from core/cabi.tcl's table: the representation's, never a carrier's.
+proc ::cbind::records::ScalarWidth {name} {
+    if {[core::cabi::isFloating $name]} {
+        return [dict get [core::cabi::floatingInfo $name $::cbind::model::target] bytes]
+    }
+    return [expr {[dict get [core::cabi::scalarInfo $name $::cbind::model::target] bits] / 8}]
 }
 
 # The typedef of CHAIN that names an enum directly (its ABI probe), or "".
@@ -476,7 +497,7 @@ proc ::cbind::records::requests {model} {
                         lappend out $e
                     }
                     lassign [::cbind::model::Resolve [list typedef $name]] chain final
-                    if {[lindex $final 0] in {int bool enum} && ![dict exists $have td:$name]} {
+                    if {[lindex $final 0] in {int bool enum float} && ![dict exists $have td:$name]} {
                         dict set have td:$name 1
                         lappend out [list td:$name [list "sizeof($name)" [::cbind::probe::typeCodeOf $name]]]
                     }
@@ -934,7 +955,7 @@ proc ::cbind::records::ArrayField {recs key i f mapped fbVar depsVar} {
     switch -- $kind {
         scalar {
             if {[regexp {^ffi::c::([A-Za-z]+)$} $text -> scalar]} {
-                set width [expr {[dict get [core::cabi::scalarInfo $scalar $::cbind::model::target] bits] / 8}]
+                set width [::cbind::records::ScalarWidth $scalar]
             }
         }
         pointer {
