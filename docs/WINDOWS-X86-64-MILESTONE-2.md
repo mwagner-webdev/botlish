@@ -598,8 +598,67 @@ PENDING
 
 ## 8. Remaining limitations
 
-PENDING
+Refused on Windows, each with its own error:
+
+| Capability | Today on windows-x86_64 | Owner |
+|---|---|---|
+| variadic C calls | `NATIVE CODEGEN` ("no variadic call lowering for the windows_fastcall convention") | Win64 variadics (section 9) |
+| a static C library compiled for `/MD` | `NATIVE LINK`, link.exe's LNK2019 `__imp_NAME` with the driver's explanation | by policy (section 3.3); compile it `/MT` |
+| native coroutines | `NATIVE UNSUPPORTED value` | a coroutine milestone (milestone 1, section 8) |
+| stack guard | none (milestone 1) | the vectored-exception guard |
+| native-frame GC roots | the fallback plan (shadow stack) | unwind metadata |
+| a linked run of a snapshot no Windows process can receive | `NATIVE UNSUPPORTED foreign` (section 4) | by design |
+
+Known limits:
+
+* **The console.** WindowsIO writes UTF-8 bytes. Redirected to a file or a
+  pipe they are exact (section 5). A console window shows them through its
+  output code page: with the console's default OEM code page (437, 850)
+  text beyond ASCII is shown wrongly, with code page 65001 (`chcp 65001`)
+  correctly. Botlish neither switches the code page (a process-wide
+  setting the user chose) nor converts to UTF-16 for `WriteConsoleW`. A CI
+  runner's output is never a console, so nothing here observed a console
+  window: what one shows is stated from the documented behaviour, not
+  measured.
+* **Only output.** No standard input, files, process exit status,
+  overlapped I/O or console modes on Windows (the brief's exclusions).
+* **INVALID_HANDLE_VALUE** is not told apart before WriteFile: a C pointer
+  has no equality in Botlish, so WriteFile's ERROR_INVALID_HANDLE reports it
+  (`wi-real-failures`).
+* **The driver sets its own environment for a linked run** on Windows
+  (`set_var` before `CreateProcessW`), sound because the driver is
+  single-threaded there and exits after the run.
+* **C test fixtures need MSVC.** The tests build their C side with
+  vswhere's Visual Studio (tests/ctoolchain.tcl); without it the fixture
+  tests are skipped, never failed. The Tcl library and BoringSSL acceptance
+  tests are skipped on Windows (`tclLibrary`, `boringssl`: no Windows build
+  of either is set up), as are the generated-binding runs (the C binding
+  generator's fixture has no MSVC target: `fixtureHostBinding`).
+* **Windows I/O's `%% windows-x86_64` mutants** (six of the thirteen) are
+  killed only by Windows runs (section 7.5); the tier item
+  `windows-io-mutants` runs them on a Windows runner.
+* **The golden suites run on the Tcl backends only** on Windows, as in
+  milestone 1 (their runner is a coroutine).
+* **rustc must match** the driver's own, as on every host (milestone 1).
 
 ## 9. Next milestones
 
-PENDING
+Independent slices, in the order they make Windows programs more useful:
+
+1. **Win64 variadic C calls.** Win64 passes a variadic floating argument
+   in both its integer and its floating register (and the callee spills the
+   four registers to the shadow space). A per-call signature that states it
+   (`c_call_signature`), checked against MSVC's own calls of printf-shaped
+   fixtures the way `cf-va-*` checks System V and Apple, then
+   `nativeCVariadics` for windows-x86_64.
+2. **Windows input and files** behind portable contexts: ReadFile on the
+   standard input handle, then CreateFileW/ReadFile/WriteFile/CloseHandle
+   for files, whose handles a context *owns* (unlike the borrowed standard
+   handles here), with paths as UTF-16 (`windows::path`).
+3. **A console-aware text path**: WriteConsoleW for a handle that is a
+   console (GetConsoleMode), UTF-8 everywhere else, decided per handle.
+4. **Unwind metadata** (`.pdata`/`.xdata`, `RtlVirtualUnwind`): native-frame
+   GC roots on Windows, then the vectored-exception stack guard and Win64
+   coroutines (milestone 1, section 9).
+5. **MSVC bindings** from the C binding generator (the Windows SDK's
+   headers with clang's MSVC target), beside the committed MinGW one.
