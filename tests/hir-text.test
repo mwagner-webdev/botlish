@@ -183,7 +183,7 @@ fn top() -> int:
 top()
 }
 
-test ht-coroutine-protocols {the coroutine protocols are inferred again when the text is read, as a build infers them (the built HIR's, without the yield effect hir::coroutines::verify adds, which the text prints), so native lowering types a resume through a structural Coroutine contract (e.value) on the read HIR as on the built one} -constraints nativeBuilt -body {
+test ht-coroutine-protocols {the coroutine protocols are inferred again when the text is read, as a build infers them (the built HIR's, without the yield effect hir::coroutines::verify adds, which the text prints), so native lowering types a resume through a structural Coroutine contract (e.value) on the read HIR as on the built one} -constraints nativeBuilt -constraints nativeCoroutines -body {
     set hir [htHir $::htCoroutine]
     lassign [htRoundTrip $hir] text read
     list [expr {[dict get $read coroutines] eq [dict remove [dict get $hir coroutines] mayYield next]}] \
