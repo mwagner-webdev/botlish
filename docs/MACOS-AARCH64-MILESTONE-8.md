@@ -654,7 +654,17 @@ select their own context through the same `demo_play` functions;
 `workload-2048-demo-darwin-executable` (macOS) runs the macOS demo as a
 standalone executable and requires the Linux demo's exact output.
 
-PENDING-2048
+On macOS arm64, workload-2048.test ran and passed (main's run
+[39603310734](https://github.com/mwagner-webdev/botlish/actions/runs/39603310734),
+acceptance shard 2/2, and the dispatch
+[39603460215](https://github.com/mwagner-webdev/botlish/actions/runs/39603460215)):
+`workload-2048-demo-darwin-executable` -- demo-darwin.bot as a standalone
+Mach-O executable printing the whole game through libSystem, byte for byte
+the Linux demo's output, the same under GC stress --,
+`workload-2048-demo-two-platforms` and `workload-2048-bench-executable`
+among them. The two Linux-only tests (`workload-2048-demo-executable`,
+`workload-2048-demo-main-native`: `nativeLinux`) are skipped there, as
+before.
 
 ## 23. Mutation results
 
@@ -696,7 +706,41 @@ Two were first marked macOS-only (`darwin-errno-after-another-call`,
 calls and to read `open_mode` too made the NIR see both on any host, and
 they lost their marks.
 
-PENDING-MUTANTS-MACOS
+**On macOS arm64** (the tier item `darwin-io-mutants`, the dispatch
+[39603460215](https://github.com/mwagner-webdev/botlish/actions/runs/39603460215),
+Tier C shard 1/3: `audit/context-traits/tools/mutate.tcl -only darwin-*`,
+646 s): **19 mutants, 19 killed, 0 survived, 0 skipped**. Every Darwin
+mutant, the nine Linux cannot run among them, is killed by darwin-io.test
+(the context-trait fuzzer, which knows nothing of Darwin, survives every
+one, as expected):
+
+| mutant | killed by (failed tests) |
+|---|---|
+| `darwin-import-on-linux` | 2: di-platform-no-way-around, di-platform-rule |
+| `darwin-falls-back-to-linux` | 13: di-authority, di-c-declarations, di-c-string, di-errno-read-first, di-implements, di-path-validity, ... |
+| `darwin-write-unsigned-result` | 5: di-c-declarations, di-errno, di-errno-read-first, di-stderr-failure, di-write-failures |
+| `darwin-write-borrow-writable` | 26 |
+| `darwin-read-borrow-readable` | 26 |
+| `darwin-write-count-mismatch` | 6: di-errno, di-files, di-short-write-completed, di-stderr-failure, di-stdin, di-write-failures |
+| `darwin-read-returns-original` | 2: di-files, di-stdin |
+| `darwin-errno-on-success` | 1: di-errno |
+| `darwin-errno-after-another-call` | 3: di-errno, di-errno-read-first, di-file-errors |
+| `darwin-errno-constant` | 3: di-errno, di-errno-read-first, di-file-errors |
+| `darwin-linux-error-convention` | 1: di-errno |
+| `darwin-open-mode-omitted` | 3: di-c-declarations, di-errno-read-first, di-files |
+| `darwin-path-not-terminated` | 1: di-c-string |
+| `darwin-short-write-complete` | 3: di-short-write-completed, di-stderr-failure, di-write-failures |
+| `darwin-short-write-repeats-prefix` | 3: di-short-write-completed, di-stderr-failure, di-write-failures |
+| `darwin-zero-write-retried` | 1: di-write-failures |
+| `darwin-stdout-is-stdin` | 10: di-coroutines-gc-stress, di-deep-and-modules, di-hello-executable, di-native-backends, di-routing-utf8, di-short-write-completed, ... |
+| `darwin-stderr-is-stdout` | 6: di-coroutines-gc-stress, di-deep-and-modules, di-routing-utf8, di-stderr-failure, di-stdin, di-text-edges |
+| `darwin-io-direct` | 16: di-authority, di-coroutines-gc-stress, di-deep-and-modules, di-hello-executable, di-native-backends, di-platform-no-way-around, ... |
+
+Four mutants are killed by one test only (`darwin-errno-on-success`,
+`darwin-linux-error-convention`, `darwin-path-not-terminated`,
+`darwin-zero-write-retried`): each is the one behavior that test pins
+(di-errno's successes reporting 0 and its -1 results, di-c-string's
+terminator, di-write-failures' no-progress write).
 
 ## 24. Performance
 
