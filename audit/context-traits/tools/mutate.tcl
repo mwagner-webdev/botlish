@@ -131,10 +131,12 @@ foreach entry [glob -directory $root -types f *.tcl] {
 
 # {STATUS OUTPUT} of ARGS, its standard error merged into its output;
 # STATUS is "timeout" (the process killed) when it runs longer than TIMEOUT
-# seconds (audit/c-ffi/tools/mutate.tcl's run).
+# seconds (audit/c-ffi/tools/mutate.tcl's run). Its lines end in \n whatever
+# the process writes: a tclsh on Windows writes \r\n, and a line read as
+# "... FAILED\r" is no failed test to the patterns below.
 proc run {timeout args} {
     set pipe [open |[concat $args [list 2>@1]] r]
-    fconfigure $pipe -blocking 0 -translation lf -encoding utf-8
+    fconfigure $pipe -blocking 0 -translation auto -encoding utf-8
     set ::runOutput ""
     set ::runDone 0
     fileevent $pipe readable [list apply {{pipe} {

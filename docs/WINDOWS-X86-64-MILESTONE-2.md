@@ -690,7 +690,7 @@ Windows namespaces' refusals and the `c-variadic` convention probe.
 The six Windows-only I/O mutants (`windows-error-code-dropped`,
 `-short-write-complete`, `-short-write-repeats-prefix`,
 `-zero-write-retried`, `-error-to-stdout`, `-raw-write-to-stderr`) are
-killed by windows-io.test's execution tests; they run on Windows through
+written for windows-io.test's execution tests; they run on Windows through
 the tier item `windows-io-mutants` (section 7.6).
 
 ### 7.6 GC stress and the Windows-only mutants on Windows
@@ -718,11 +718,26 @@ The skips, by constraint (the same on both): `nativeCVariadics` 15,
 green too; its acceptance shards, a repeat of run 39636219872's on the same
 code, were cancelled by the next manual run (one run per branch at a time).
 
-**The Windows-only mutants**: run
+**The Windows I/O mutants, first run on Windows**: run
 [39659557932](https://github.com/mwagner-webdev/botlish/actions/runs/39659557932)
 (tier `full`, item `windows-io-mutants`: `audit/context-traits/tools/mutate.tcl
--only 'windows-*'`, every Windows I/O mutant, the six `%% windows-x86_64`
-ones applying on this host).
+-only 'windows-*'`, all 13 Windows I/O mutants applying on this host)
+reported 13 mutants, 2 killed, 11 survived -- among the survivors the seven
+front-end mutants Linux kills (section 7.5). Its verdicts are no evidence
+either way, because of a defect of the harness: mutate.tcl read a test
+file's output with `-translation lf`, a tclsh on Windows writes `\r\n`,
+and a line `==== NAME ... FAILED\r` does not match the pattern of a failed
+test, while the file's `Total` line still does, so every mutant whose
+tests failed read as surviving. The two
+"killed" (`windows-short-write-repeats-prefix`, `windows-zero-write-retried`)
+were killed by the harness's 30-minute timeout: both make write_all write
+again after a short or empty write, and windows-io.test did not finish
+(its last line: `wi-stderr-short-and-failed` FAILED). A controlled experiment
+on Linux reproduces the miss (a child writing `\r\n`: no failed test parsed
+with `lf`, the test parsed with `auto`); mutate.tcl's `run` now reads with
+`-translation auto`.
+
+**The Windows I/O mutants, with the fix**: RERUN_PENDING
 
 ## 8. Remaining limitations
 
