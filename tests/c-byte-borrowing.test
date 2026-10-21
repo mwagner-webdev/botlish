@@ -114,7 +114,15 @@ proc appValue {dir} {
 # `stderr`, never taken for a failure.
 proc appExecutable {dir {environment {}}} {
     set exe [native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $dir] [file join $dir program]}]
-    return [string trim [withEnvironment $environment {exec $exe 2> [file join $dir stderr]}]]
+    if {$::tcl_platform(platform) eq "windows"} {
+        # Windows has no env(1).
+        return [string trim [withEnvironment $environment {exec $exe 2> [file join $dir stderr]}]]
+    }
+    # env(1) gives the variables to the executable alone. With Guard
+    # Malloc's DYLD_INSERT_LIBRARIES set in this process's own environment
+    # instead, bb-guard-malloc's over-read did not fault on macOS (run
+    # 39620727912).
+    return [string trim [exec env {*}[lmap {k v} $environment {string cat $k=$v}] $exe 2> [file join $dir stderr]]]
 }
 
 # Runs SCRIPT in the caller with BOTLISH_NATIVE_GC_STRESS=1 (a collection

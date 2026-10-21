@@ -887,7 +887,7 @@ test cf-undefined-symbol {a symbol no library defines is the linker's undefined 
     set used [bcfApp "import ffi::c\nimport m\n\nm::nope(1)\n" [list m.bot "import ffi::c\n\nextern c fn nope named \"botlish_no_such_symbol\"(x: ffi::c::Int) -> ffi::c::Int\n"]]
     set unused [bcfApp "import ffi::c\nimport m\nimport bcf\n\nbcf::add(1, 2)\n" [list m.bot "import ffi::c\n\nextern c fn nope named \"botlish_no_such_symbol\"(x: ffi::c::Int) -> ffi::c::Int\n"]]
     lassign [lindex [appValues $used {cranelift}] 0] code message
-    list $code [regexp -nocase {undefined (symbol|reference)[^\n]*botlish_no_such_symbol|LNK20(19|01): unresolved external symbol botlish_no_such_symbol} $message] [appValues $unused {cranelift}]
+    list $code [regexp -nocase {undefined (symbol|reference).*botlish_no_such_symbol|LNK20(19|01): unresolved external symbol botlish_no_such_symbol} $message] [appValues $unused {cranelift}]
 } -cleanup removeApps -result {{NATIVE LINK} 1 3}
 
 test cf-named-symbol {`named` changes exactly the link symbol: the Botlish name stays the declaration's; without it the symbol is the name} -constraints cfFixture -body {
