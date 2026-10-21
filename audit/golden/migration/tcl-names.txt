@@ -795,6 +795,7 @@ tests/c-pointer-borrowing.test cb-write-owner-usable-again pass
 tests/c-pointer-borrowing.test cb-write-result-type pass
 tests/c-pointer-borrowing.test cb-write-sees-current-bytes pass
 tests/c-pointer-borrowing.test cb-write-value-semantics pass
+tests/c-pointer-borrowing.test cb-write-back-allocations pass
 tests/calls.test arith-1 pass
 tests/calls.test arith-2 pass
 tests/calls.test arith-3 pass
@@ -8246,6 +8247,7 @@ tests/c-ffi-error-capture.test ec-nir-windows pass
 tests/c-ffi-error-capture.test ec-real-read pass
 tests/c-ffi-error-capture.test ec-tcl-backends pass
 tests/c-ffi-error-capture.test ec-trace pass
+tests/c-ffi-error-capture.test ec-arguments-once pass
 tests/c-ffi.test cf-parse-forms pass
 tests/c-ffi.test cf-parse-errors pass
 tests/c-ffi.test cf-parse-messages pass

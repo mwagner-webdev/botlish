@@ -614,8 +614,8 @@ test cb-nir-write {NIR of a write exposure: a private copy of the owner's storag
         [expr {$kept eq $copy}] [expr {$owner ne $copy}]
 } -cleanup {unset -nocomplain fn copy owner address exposed operand kept} -result {{mbytesclone mbytesaddr ffifixturefill keepalive structnew} 1 1 1 1}
 
-proc cbAllocations {body} {
-    set report [native::allocationReport [cbHir $body] summary]
+proc cbAllocations {body args} {
+    set report [native::allocationReport [cbHir $body] summary 1 {*}$args]
     lmap kind {Bytes MutableBytes Struct List} {
         expr {[dict exists $report byKind $kind] ? [dict get $report byKind $kind allocations] : 0}
     }
@@ -640,6 +640,24 @@ test cb-allocations {allocation evidence, natively -- what the exposure itself c
         [cbAllocationCost "${fn}    abi::bytes::mutable_length(m).value\n\nf(64)" \
             "${fn}    ffi_fixture::fill\[ffi::c::UChar\](m, n, 1)\n    abi::bytes::mutable_length(m).value\n\nf(64)"]
 } -cleanup {unset -nocomplain fn} -result {{0 0 0 1} {0 0 0 1} {0 0 1 1} {0 1 1 0} {0 1 0 0}}
+
+test cb-write-back-allocations {the write-back value is fields (C-FFI-ERROR-CAPTURE-MILESTONE-1.md): beside the same program without the call, a write exposure whose value is bound but not read, or discarded, costs the private copy and nothing else; its buffer read whole costs the copy and one MutableBytes, built at that use -- once however often the scope reads it, once when a loop reads it (built at the call then: a use inside a loop deeper than the binding never builds it per iteration); the write-back struct itself is never built; with struct scalar replacement off (-struct-opt 0, the lowering before) both objects are built at every call, and each mutable_length's abi::Usize too {MutableBytes Struct}} -constraints nativeCoroutines -body {
+    set fn "fn f(n: ffi::c::ULong) -> int:\n    m = abi::bytes::zeroed(abi::usize(n))\n"
+    set base "${fn}    abi::bytes::mutable_length(m).value\n\nf(64)"
+    set shapes [list \
+        "${fn}    r = ffi_fixture::fill\[ffi::c::UChar\](m, n, 1)\n    abi::bytes::mutable_length(m).value\n\nf(64)" \
+        "${fn}    ffi_fixture::fill\[ffi::c::UChar\](m, n, 1)\n    abi::bytes::mutable_length(m).value\n\nf(64)" \
+        "${fn}    r = ffi_fixture::fill\[ffi::c::UChar\](m, n, 1)\n    abi::bytes::mutable_length(r.out).value\n\nf(64)" \
+        "${fn}    r = ffi_fixture::fill\[ffi::c::UChar\](m, n, 1)\n    abi::bytes::mutable_length(r.out).value + abi::bytes::mutable_length(r.out).value\n\nf(64)" \
+        "${fn}    r = ffi_fixture::fill\[ffi::c::UChar\](m, n, 1)\n    xs = loop i from 0 to 10:\n        abi::bytes::mutable_length(r.out).value\n    list::length(xs)\n\nf(64)"]
+    set result {}
+    foreach options {{} {-struct-opt 0}} {
+        lappend result [lmap shape $shapes {
+            lrange [lmap a [cbAllocations $base {*}$options] b [cbAllocations $shape {*}$options] {expr {$b - $a}}] 1 2
+        }]
+    }
+    set result
+} -cleanup {unset -nocomplain fn base shapes result} -result {{{1 0} {1 0} {1 1} {1 1} {1 1}} {{1 2} {1 2} {1 2} {1 3} {1 11}}}
 
 # ---------------------------------------------------------------------------
 # The Linux syscall machinery: shared, and unchanged

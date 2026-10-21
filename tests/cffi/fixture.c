@@ -148,6 +148,11 @@ long bcf_reverse_errno(const unsigned char *src, unsigned long count, unsigned c
     return (long)count;
 }
 
+/* A counter, 1, 2, 3, ... on successive calls: how often and in what order
+ * a call's arguments are evaluated. */
+static unsigned char bcf_ticks;
+unsigned char bcf_tick(void) { return ++bcf_ticks; }
+
 /* SHA256's shape: reads DATA, writes OUT, returns OUT. */
 unsigned char *bcf_reverse(const unsigned char *data, unsigned long count, unsigned char *out) {
     for (unsigned long i = 0; i < count; i++) {

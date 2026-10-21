@@ -328,6 +328,21 @@ by a `keepalive` of each exposed storage after the call (NIR in section 10);
 an unchecked (`-strict 0`) program's refused exposure replays the refusal at
 run time, the C call never made (`cf-strict0-replay`).
 
+**C error state** (C-FFI-ERROR-CAPTURE-MILESTONE-1.md). A C function that
+fails the POSIX way returns a sentinel and leaves the reason in errno; its
+binding reads errno right after the call (`darwin::errno()`: a C call of
+`__error()`, `__errno_location()` on glibc, and a native view). Nothing the
+compiler inserts runs in between: the keepalive is no machine code, and a
+write-back value is fields -- the C result and the private copies --
+built only where a use needs an object, so the comparison of the result
+and the errno read follow the call directly, with no allocation, safepoint
+or runtime call (on the path a small-Int result takes; a 64-bit result
+outside the small-Int range is boxed as a BigInt first). The compiler knows
+no error convention: it reads no errno, adds no field, translates nothing --
+it only adds nothing. `tests/c-ffi-error-capture.test` proves it in NIR, in
+the object file's machine code, by single-stepping the executable, and
+with an allocator that changes errno.
+
 ## 7. Pointer results
 
 A pointer result is truthful: SHA256 returns `uint8_t *`, so its
@@ -479,6 +494,13 @@ func 5 "digest" params=1 ...
     %14 = structnew 1 %13 %10 @e349                  # {out: ..., result: unit}
 ```
 
+(As it was when this milestone landed. Since C-FFI-ERROR-CAPTURE-
+MILESTONE-1.md the write-back value is fields wherever escape analysis keeps
+it virtual -- here `%7` and `%10` -- and a `structnew` is emitted only at a
+use that needs the object: `digest`'s `written.out`, handed to
+`abi::bytes::freeze`, builds the MutableBytes there (`structnew 0 %7` after
+the keepalives), and the struct is never built.)
+
 The header's `foreign N` entries are the program's foreign table, numbered
 on first use: the link symbol, each parameter's ABI class, the result's,
 the alias parameter, the Botlish name (for messages); `link` lines are the
@@ -501,7 +523,10 @@ pointers 64-bit words, the result at its width with no extension (the
 caller extends it, section 8).
 A `foreigncall` is one direct `call` of the import, with the transport
 inline around it (`cf-clif`). It is a safepoint of the native stack maps
-(conservatively: no C function can reach the collector today).
+(conservatively: no C function can reach the collector today; a 64-bit
+result outside the small-Int range is boxed, `rt_ffi_box_i64`). A
+`keepalive` after it emits nothing: its operand's liveness is the root
+plan's, from the NIR.
 
 ## 11. Linking
 
@@ -1238,8 +1263,10 @@ run (main.rs's `run_linked`, runtime/aot.rs's `driver_protocol`), run
 `audit/c-ffi/tools/mutate.tcl` (every mutant in its `mutants.txt` must
 still apply and be killed: update a mutant's text when you change the code
 it mutates, keeping it a mutant of the same rule), plus
-`tests/c-pointer-borrowing.test` and its mutants for a change to the shared
-exposure, `tests/direct-modules.test` and its mutants for a change to the
+`tests/c-pointer-borrowing.test`, `tests/c-ffi-error-capture.test` and the
+borrowing mutants for a change to the shared exposure or to what follows a
+C call (the write-back value, the keepalive, the result's conversion),
+`tests/direct-modules.test` and its mutants for a change to the
 direct edge, and the isolation and interchange audits for a change to the
 registry. Build BoringSSL once (`tclsh9.0 tests/cffi/boringssl.tcl`) so the
 acceptance tests run. `bench/c-ffi.tcl` regenerates section 21. A change to
