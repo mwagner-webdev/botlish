@@ -1,8 +1,34 @@
-<p align=center>
-    <img src="./robot.transparent.svg" style="width: 10vw;">
+<div align="center">
+
+<img src="./docs/assets/readme-banner.svg" alt="Botlish: a language for humans and agents alike" width="100%" />
+
+<img src="./robot.cyan.svg" alt="Botlish robot" width="96" />
+
+<br />
+
+<img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=600&size=20&pause=1400&color=0891b2&center=true&vCenter=true&width=900&lines=Reads+like+a+scripting+language.;Compiles+to+machine+code+through+Cranelift.;Every+error+a+call+can+raise+is+in+its+signature.;What+the+compiler+proves%2C+it+takes+off+your+hands." alt="Reads like a scripting language. Compiles to machine code through Cranelift." />
+
+<br />
+
+<p>
+  <a href="#why-botlish"><img src="https://img.shields.io/badge/why_botlish-0e7490?style=for-the-badge" alt="Why Botlish" /></a>
+  <a href="#a-tour"><img src="https://img.shields.io/badge/a_tour-0e7490?style=for-the-badge" alt="A tour" /></a>
+  <a href="#getting-started"><img src="https://img.shields.io/badge/getting_started-0e7490?style=for-the-badge" alt="Getting started" /></a>
+  <a href="#how-it-is-built"><img src="https://img.shields.io/badge/how_it_is_built-0e7490?style=for-the-badge" alt="How it is built" /></a>
+  <a href="docs/INDEX.md"><img src="https://img.shields.io/badge/docs-0e7490?style=for-the-badge" alt="Docs" /></a>
 </p>
 
-# Botlish
+<p>
+  <a href="https://github.com/mwagner-webdev/botlish/actions/workflows/tests.yml"><img src="https://img.shields.io/github/actions/workflow/status/mwagner-webdev/botlish/tests.yml?branch=main&style=flat-square&label=tests&labelColor=164e63&color=0e7490&logo=githubactions&logoColor=white" alt="tests" /></a>
+  <img src="https://img.shields.io/badge/Tcl-9.0-0e7490?style=flat-square&labelColor=164e63" alt="Tcl 9.0" />
+  <img src="https://img.shields.io/badge/Rust-1.95%2B-0e7490?style=flat-square&labelColor=164e63&logo=rust&logoColor=white" alt="Rust 1.95+" />
+  <img src="https://img.shields.io/badge/native-Cranelift-0e7490?style=flat-square&labelColor=164e63" alt="Cranelift" />
+  <img src="https://img.shields.io/badge/Linux-x86--64%20%C2%B7%20arm64-0e7490?style=flat-square&labelColor=164e63&logo=linux&logoColor=white" alt="Linux x86-64 and arm64" />
+  <img src="https://img.shields.io/badge/macOS-Apple%20Silicon-0e7490?style=flat-square&labelColor=164e63&logo=apple&logoColor=white" alt="macOS Apple Silicon" />
+  <img src="https://img.shields.io/badge/license-MIT-0e7490?style=flat-square&labelColor=164e63" alt="MIT" />
+</p>
+
+</div>
 
 **A high-level, native-capable, safe and friendly language for building
 applications, designed to be written and read by humans and agents alike.**
@@ -502,3 +528,9 @@ backends run wherever Tcl 9 does.
 ## License
 
 [MIT](LICENSE)
+
+<div align="center">
+
+<img src="./docs/assets/readme-footer.svg" alt="" width="100%" />
+
+</div>
