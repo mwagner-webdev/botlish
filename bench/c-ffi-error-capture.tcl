@@ -159,6 +159,10 @@ fn nul() -> byte::Byte:
 
 fn zero() -> ffi::c::Int:
     c_open(abi::bytes::from_list(str::encode_utf8(\"/dev/zero\").append(nul())), 0)
+
+# A descriptor no file has: read fails with EBADF.
+fn closed() -> ffi::c::Int:
+    99
 "
     set dir [file join [file normalize [pwd]] ec-bench-[pid]]
     file mkdir $dir
@@ -170,11 +174,11 @@ fn zero() -> ffi::c::Int:
     }
     write [file join $dir rb.bot] $binding
     # NAME -> {FD SIZE}
-    set rows [dict create {ok 64} {rb::zero() 64} {EBADF 64} {99 64} {ok 64K} {rb::zero() 65536}]
+    set rows [dict create {ok 64} {rb::zero() 64} {EBADF 64} {rb::closed() 64} {ok 64K} {rb::zero() 65536}]
     puts "\nread(2) per iteration, ns (an executable looping $readN times; best of $runs processes, minus the empty loop):"
     set counter 0
     proc exeOf {dir body iterations} {
-        set main "direct module\nimport abi\nimport abi::bytes\nimport ffi::c\nimport list\nimport rb\n\nfn f(fd: ffi::c::Int, size: int) -> int:\n    m = abi::bytes::zeroed(abi::usize(size)):\n        on abi::AbiIntegerAboveRange:\n            return 0\n        on abi::AbiIntegerBelowRange:\n            return 0\n    xs = loop i from 0 to $iterations:\n        $body\n    list::length(xs)\n\n"
+        set main "direct module\nimport abi\nimport abi::bytes\nimport ffi::c\nimport list\nimport rb\n\nfn f(fd: ffi::c::Int, size: int) -> int:\n    n = abi::usize(size):\n        on abi::AbiIntegerAboveRange:\n            return 0\n        on abi::AbiIntegerBelowRange:\n            return 0\n    m = abi::bytes::zeroed(n)\n    xs = loop i from 0 to $iterations:\n        $body\n    list::length(xs)\n\n"
         return $main
     }
     foreach {name spec} $rows {
