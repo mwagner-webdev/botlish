@@ -761,7 +761,18 @@ PENDING-RUNS
 
 ## 26. Linux x86-64 regression
 
-PENDING-LINUX
+`audit/context-traits/tools/fuzz.tcl` (generated context-trait programs
+against its own oracle; DarwinIO's satisfaction is the same structural rule
+the generated contexts exercise), three disjoint seed ranges of 20 programs
+on this milestone's tree:
+
+| seeds | accepted (selections) | rejected | disagreements |
+|---|---|---|---:|
+| 100-119 | 7 (15) | 13 (MISSING-CONTEXT 11, AMBIGUOUS-CONTEXT-IMPLEMENTATION 2) | 0 |
+| 200-219 | 9 (12) | 11 (MISSING-CONTEXT 11) | 0 |
+| 300-319 | 9 (15) | 11 (MISSING-CONTEXT 11) | 0 |
+
+PENDING-LINUX-CI
 
 ## 27. Linux AArch64 regression
 
