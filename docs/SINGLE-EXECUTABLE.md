@@ -24,7 +24,13 @@ recursion limit, core/core.tcl): main.tcl's own behavior, packed.
 
 CI builds it on every push to `main` (`.github/workflows/single-executable.yml`),
 smoke-tests it in stock `ubuntu:24.04` and `ubuntu:latest` containers, and
-uploads it as the run's `botlish-linux-x86_64` artifact.
+uploads it as the run's `botlish-linux-x86_64` artifact. A build that passes
+every smoke test is then published as the `botlish-linux-x86_64` asset (with
+its `.sha256`) of the `single-latest` prerelease, whose tag follows `main`:
+the README's download button links to
+`https://github.com/mwagner-webdev/botlish/releases/download/single-latest/botlish-linux-x86_64`.
+Builds can finish out of order; one never replaces the build of a later
+commit.
 
 Only the compiler and its CLI are packed. The tests, benchmarks and audit
 tools stay checkout-only, and the executables the compiler emits were
@@ -211,6 +217,10 @@ passing except the 10 that read rustc-linked symbols, which now skip.
   `-emit-native-executable`: the `stub` linker it relies on is x86-64 only.
   LINUX-SYSCALL-TRANSPORTS.md, "Single-file compiler on AArch64", lists what
   an AArch64 stub linker and build need.
+* No C calls yet. The stub linker links no C library, so the native link of
+  a program that calls C or declares a library is refused (`NATIVE LINK`;
+  C-FFI.md, section 11); the Tcl backends run such a program to its first C
+  call. Linking one needs a checkout's rustc linker.
 * The single executable runs the checkout's code as of its build. It reports
   library diagnostics at `//zipfs:/app/...` paths, and it has no tests or
   tools. Its standard library is the packed one: an application adds modules

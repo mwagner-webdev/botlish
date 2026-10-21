@@ -11,6 +11,7 @@
 <br />
 
 <p>
+  <a href="#download-the-single-file-compiler"><img src="https://img.shields.io/badge/download-0e7490?style=for-the-badge" alt="Download" /></a>
   <a href="#why-botlish"><img src="https://img.shields.io/badge/why_botlish-0e7490?style=for-the-badge" alt="Why Botlish" /></a>
   <a href="#a-tour"><img src="https://img.shields.io/badge/a_tour-0e7490?style=for-the-badge" alt="A tour" /></a>
   <a href="#getting-started"><img src="https://img.shields.io/badge/getting_started-0e7490?style=for-the-badge" alt="Getting started" /></a>
@@ -87,6 +88,37 @@ runs with `darwin::io::create()` installed instead, and the write is
 libSystem's `write(2)`, called through the C FFI
 ([examples/io/hello-darwin.bot](examples/io/hello-darwin.bot),
 [MACOS-AARCH64-MILESTONE-8.md](docs/MACOS-AARCH64-MILESTONE-8.md)).
+
+## Download the single-file compiler
+
+<p align="center">
+  <a href="https://github.com/mwagner-webdev/botlish/releases/download/single-latest/botlish-linux-x86_64"><img src="./docs/assets/download-linux.svg" alt="Download Botlish: the single-file compiler for Linux x86-64" width="460" /></a>
+</p>
+
+The whole compiler is one Linux x86-64 executable: the command line, the
+standard library, every backend and the native code generator, in a single
+file that needs nothing but glibc (2.39 or newer). There is no Tcl, Rust, C
+compiler or linker to install, and the standalone executables it builds need
+nothing else either. CI builds it from `main` on every push and publishes
+each build that passes its smoke tests, run in stock Ubuntu containers, as
+the [`single-latest` release](https://github.com/mwagner-webdev/botlish/releases/tag/single-latest),
+with its SHA-256 checksum. Save the program above as `hello.bot`, then:
+
+```sh
+curl -fLo botlish https://github.com/mwagner-webdev/botlish/releases/download/single-latest/botlish-linux-x86_64
+chmod +x botlish
+./botlish -backend cranelift hello.bot                   # run natively, just in time
+./botlish -emit-native-executable hello.bot && ./hello   # build a standalone executable
+./botlish -help                                          # Compilerpedia, the built-in reference
+```
+
+**No C calls yet.** A program that calls C (`extern c fn`,
+[C-FFI.md](docs/C-FFI.md)) compiles, but its native link is refused
+(`NATIVE LINK`): the single-file compiler links with its own stub linker,
+which links no C library. FFI support is coming to it soon; until then such a
+program needs a checkout with the native backend built
+([Getting started](#getting-started)). How the single file is built and what
+it runs: [SINGLE-EXECUTABLE.md](docs/SINGLE-EXECUTABLE.md).
 
 ## Botlish and Rust
 
@@ -475,8 +507,8 @@ tclsh9.0 tests/local.tcl                                      # the whole test s
 
 `single/build.sh` packs the compiler, both native executables and the
 standard library into one Linux x86-64 executable that needs nothing but
-glibc ([SINGLE-EXECUTABLE.md](docs/SINGLE-EXECUTABLE.md)); CI publishes it
-as the `botlish-linux-x86_64` artifact.
+glibc ([SINGLE-EXECUTABLE.md](docs/SINGLE-EXECUTABLE.md)), the one
+[the download button](#download-the-single-file-compiler) above fetches.
 
 ## How it is built
 

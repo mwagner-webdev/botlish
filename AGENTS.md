@@ -239,7 +239,10 @@ and benchmarks report `{error {NATIVE NOT-BUILT}}` instead of running.
 zipkit holding main.tcl, the compiler stack and both native executables,
 needing only glibc. The workflow `.github/workflows/single-executable.yml`
 builds it on every push to `main` and smoke-tests it in stock Ubuntu
-containers (`single/smoke-test.sh`). Its base kit is a static tclsh that the
+containers (`single/smoke-test.sh`), then publishes it as the
+`botlish-linux-x86_64` asset of the rolling `single-latest` prerelease. The
+README's download button links to that tag and asset name: rename either
+only together with the button. Its base kit is a static tclsh that the
 script builds once from the pinned Tcl 9.0.1 source release. That build is
 the one exception to "do not build Tcl 9 from source" above: no package ships
 a static zipfs tclsh. `--basekit PATH` uses a prebuilt zipkit instead. To run
