@@ -63,7 +63,7 @@ Botlish -> HIR -> NIR (windows-x86_64) -> Cranelift (windows_fastcall) -> COFF o
 | Windows `io::IO` through GetStdHandle/WriteFile/GetLastError | real Windows | windows-io.test (section 5) |
 | Real programs use it (2048 demo, examples) | real Windows | the workflow's Windows I/O step; workload-2048.test's `workload-2048-demo-windows-executable` |
 | GC across C calls under `BOTLISH_NATIVE_GC_STRESS=1` | real Windows | `cf-gc-calls`, byte-borrowing's stress tests, `wi-gc-stress`, `wi-short-write-completed` (section 6) |
-| Linux x86-64, Linux AArch64 and macOS unchanged | PENDING | section 7.4 |
+| Linux x86-64, Linux AArch64 and macOS unchanged | CI and locally | Linux x86-64 and AArch64 green; macOS green but for one test that fails on main too (section 7.4) |
 
 ## Contents
 
@@ -635,11 +635,59 @@ Windows I/O or C FFI test that could run.
 
 ### 7.4 Linux and macOS
 
-PENDING
+* **Linux x86-64, locally** (`tclsh9.0 tests/local.tcl`, the whole suite:
+  every Tcl test file on interp and compile, every golden suite on all four
+  backends): 515 files and suites ok; the one failure, `traits.test`'s
+  `windows` scratch module, fixed (`winpath`) and both backends rerun
+  clean. The native Rust tests: lib 278 + driver 64 passed.
+* **Linux x86-64, CI**: tests.yml run
+  [39620769797](https://github.com/mwagner-webdev/botlish/actions/runs/39620769797)
+  (b6f5e86): every job green -- the Tcl suite on interp and compile
+  (duplicates included), cranelift and cranelift-generic coverage, the
+  golden suites beside their Tcl originals (four shards), the native Rust
+  tests, the stub-linked executables, the warning gate, the method-call
+  filter audit.
+* **Linux AArch64, CI**: tests-arm64.yml run
+  [39620775207](https://github.com/mwagner-webdev/botlish/actions/runs/39620775207)
+  (b6f5e86): every job green.
+* **macOS arm64, CI**: run
+  [39620727912](https://github.com/mwagner-webdev/botlish/actions/runs/39620727912)
+  (b6f5e86) found two regressions of this milestone's test edits, both
+  fixed in 04e0136: `cf-undefined-symbol` (the undefined-symbol pattern had
+  been narrowed to one line; Apple ld names the symbol on the next) and
+  `bb-guard-malloc`'s environment (env(1) restored on Unix). Run
+  [39636219721](https://github.com/mwagner-webdev/botlish/actions/runs/39636219721)
+  (04e0136): the smoke tier, native status, aot-facts, the Rust tests and
+  acceptance shard 1/2 green; shard 2/2 fails `bb-guard-malloc` alone --
+  **pre-existing on main**: main's own run
+  [39628159929](https://github.com/mwagner-webdev/botlish/actions/runs/39628159929)
+  (9a5858c) fails the same test the same way, its only failure (the
+  over-read no longer faults under Guard Malloc), with this milestone's
+  files exactly main's in it (c-byte-borrowing.test's appExecutable is
+  main's again on Unix). It is left to its owner, MACOS-AARCH64-MILESTONE-7.md's
+  Guard Malloc check; nothing of this milestone is in its path on macOS.
+
+The changes outside Windows are: `C_CALLS` (a cfg list, unchanged for the
+other hosts), `crt_args` (MSVC only), `link_hint` (MSVC only), the
+linked run's Unix launcher (unchanged: `CommandExt::arg0`), the `windows`
+platform row, and tests made portable. The platform scripts record the
+other hosts unchanged: native-status's Linux and macOS rows gained only the
+Windows namespaces' refusals and the `c-variadic` convention probe.
 
 ### 7.5 Mutants
 
-PENDING
+| harness | where | result |
+|---|---|---|
+| `audit/native-aot/tools/mutate.tcl` | Linux x86-64 | 20 mutants: 16 killed, 4 skipped (another host's code), 0 survived; `msvc-link-hint-silent` (new) killed by the Rust unit test |
+| `audit/target-model/tools/mutate.tcl` | Linux x86-64 | 18 mutants, 18 killed |
+| `audit/c-ffi/tools/mutate.tcl` | Linux x86-64 | 71 mutants: 56 killed, 15 skipped (another host's code: Apple's and Linux AArch64's variadic placements, Mach-O, the macOS fixture), 0 survived (run in two parts: the first stopped at the 2-hour limit after 56) |
+| `audit/context-traits/tools/mutate.tcl -only 'windows-*,darwin-import-on-linux,darwin-falls-back-to-linux'` | Linux x86-64 | 15 mutants: 9 killed (the 7 front-end Windows I/O mutants and the 2 Darwin platform mutants whose text this milestone moved), 6 skipped (`%% windows-x86_64`), 0 survived |
+
+The six Windows-only I/O mutants (`windows-error-code-dropped`,
+`-short-write-complete`, `-short-write-repeats-prefix`,
+`-zero-write-retried`, `-error-to-stdout`, `-raw-write-to-stderr`) are
+killed by windows-io.test's execution tests; they run on Windows through
+the tier item `windows-io-mutants` (section 7.6).
 
 ## 8. Remaining limitations
 
