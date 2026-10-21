@@ -519,16 +519,40 @@ Linux's same column moved by 30 ns either way.
 
 ## 14. macOS GitHub Actions runs
 
-PENDING-RUNS
+Every macOS fact in this report is from these runs of
+`.github/workflows/macos-arm64.yml` on GitHub's `macos-15` arm64 runners
+(the shared development Mac was not used). A run on the branch was
+cancelled whenever a later push to the branch superseded it; its finished
+jobs' results stand.
+
+| run | commit | what it ran | result |
+|---|---|---|---|
+| [39574475382](https://github.com/mwagner-webdev/botlish/actions/runs/39574475382) | 6828d12 | the census baseline, before milestone 7 | the census of section 1 |
+| [39577805370](https://github.com/mwagner-webdev/botlish/actions/runs/39577805370) | 3587425 | milestone 7; Tier C under GC stress | smoke passed; acceptance 2/2 failed on c-byte-borrowing.test alone (bb-guard-malloc's banner defect); cancelled by the next push |
+| [39585147611](https://github.com/mwagner-webdev/botlish/actions/runs/39585147611) | b08ac4c | milestones 7 and 8; Tier C: fourteen files and the borrowing fuzzer under GC stress | smoke passed; Tier C: two test defects, bb-guard-malloc and di-stderr-failure, everything else passed under stress; cancelled by the next push |
+| [39593142355](https://github.com/mwagner-webdev/botlish/actions/runs/39593142355) | 7bdd5e2 | the fixes of those defects | smoke and acceptance 1/2 passed (darwin-io.test 27 of 27); cancelled at 12:54 by the branch push of the merge |
+| [39603310734](https://github.com/mwagner-webdev/botlish/actions/runs/39603310734) | d598dba (main) | the milestones merged into main | smoke and acceptance 1/2 passed, acceptance 2/2 failed on bb-guard-malloc alone (its 4080-byte control); workload-2048.test, context-traits.test passed |
+| [39603460215](https://github.com/mwagner-webdev/botlish/actions/runs/39603460215) | d598dba (dispatch) | Tier C: the mutants, the benchmarks, the fuzzers | 19 of 19 Darwin IO and 8 of 8 borrowing mutants killed; both fuzzers no disagreement; c-borrow-bench; darwin-io-bench's part 2 failed (the bench's `env` clash); acceptance as on main |
+| [39616115189](https://github.com/mwagner-webdev/botlish/actions/runs/39616115189) | 905cb6e (branch only) | the Guard Malloc diagnostic | its facts (section 8); the bench failed again (the interposer reached the linker); cancelled once Tier C had run |
+| [39624150692](https://github.com/mwagner-webdev/botlish/actions/runs/39624150692) | b5d07f5 | the reworked bb-guard-malloc, the bench's fix | **every job passed**: smoke, both acceptance shards, and Tier C (c-byte-borrowing.test 20 of 20 on interp and compile, darwin-io-bench all three parts) |
 
 ## 15. Linux regressions
 
 **Linux x86-64.** tests.yml on milestone 7's own commit (3587425,
-dispatched on the branch), run [39577813683](https://github.com/mwagner-webdev/botlish/actions/runs/39577813683): every job passed (its
-native GC-stress job runs on pushes to main only). tests.yml on main at d598dba, run [39603310748](https://github.com/mwagner-webdev/botlish/actions/runs/39603310748): PENDING-X86-D598DBA
+dispatched on the branch), run
+[39577813683](https://github.com/mwagner-webdev/botlish/actions/runs/39577813683): every job
+passed (its native GC-stress job runs on pushes to main only). tests.yml on
+main at d598dba, run
+[39603310748](https://github.com/mwagner-webdev/botlish/actions/runs/39603310748): all thirteen
+jobs passed: the Tcl suite on interp and on compile, cranelift and
+cranelift-generic coverage, the four golden shards (every suite beside its
+Tcl originals), the stub-linked executables, the warning gate, the
+method-call kind filter's audit, the native Rust unit tests, and the whole
+suite under GC stress.
 
-**Linux AArch64.** tests-arm64.yml at 3587425, run [39577817112](https://github.com/mwagner-webdev/botlish/actions/runs/39577817112): all
-ten jobs passed, the whole suite under GC stress among them (1 h 37 min).
+**Linux AArch64.** tests-arm64.yml at 3587425, run
+[39577817112](https://github.com/mwagner-webdev/botlish/actions/runs/39577817112): all ten
+jobs passed, the whole suite under GC stress among them (1 h 37 min).
 tests-arm64.yml on main at d598dba (milestones 7 and 8 merged), run
 [39603310756](https://github.com/mwagner-webdev/botlish/actions/runs/39603310756): all ten jobs passed -- the Tcl suite on interp (8747
 tests: 8637 passed, 110 skipped, 0 failed) and on compile (8632 passed, 115
