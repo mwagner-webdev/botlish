@@ -642,7 +642,7 @@ killed):
 | C ABI types: suite; mutants | 26/26 killed (the fuzzer: below) |
 | HIR interchange: `roundtrip.tcl -via interchange`, `-via cache`; mutants | 12 suites, 108 and 120 artifacts and outcomes, 0 differ; 27/27 killed |
 | compilation isolation: `interleave.tcl`; mutants | 12 suites, 96 artifacts and outcomes, 0 differ; 14/14 killed |
-| static decisions: fuzzer seeds 17, 41, 3; mutants | 0 failures (the layout pairs taking different rounds are the same as before the milestone: 0, 2, 2); STATIC-MUTANTS |
+| static decisions: fuzzer seeds 17, 41, 3; mutants | 0 failures (the layout pairs taking different rounds are the same as before the milestone: 0, 2, 2); 73/73 mutants killed (in two runs, mutants 1-48 and 45-73) |
 | FIXED-ARITY-LIST-RETURN: `tests/fixed-arity-list-return.test` | 144 tests pass, unchanged (section 12) |
 | C binding generator: `tests/c-bindgen.test`; `tools/c-bindgen.tcl check fixture -target committed` | passes; the fixture's four targets current (byte for byte). The real libraries' profiles need their pinned sources (not fetched here; the c-bindgen workflow runs them); the generator is unchanged |
 | Compilerpedia: `tools/compilerpedia.tcl check` | 697 topics, 569 examples, 0 problems |
