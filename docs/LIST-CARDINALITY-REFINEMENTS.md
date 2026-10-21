@@ -591,13 +591,150 @@ of behavior; none is killed by a pinned snapshot alone.
 
 ## 18. Regression
 
-REGRESSION-RESULTS
+Everything below ran on this branch in the development container (Linux
+x86-64), with the release native backend built from it.
+
+**The whole suite.** `tclsh9.0 tests/local.tcl` (every Tcl test file on
+interp and compile, every golden suite on all four backends): the
+failures were all of three kinds, each now fixed and rerun clean --
+
+* tests that show the inferred type of a List literal or collecting loop
+  (enums, float64, immutable sets, structs, structural Fn types,
+  MutableArray construction and types, virtual construction, exact-value
+  facts, variadics, UnicodeChar Lists, loops, HIR types, inference, the
+  HIR samples): the type now states the length, as designed; their
+  expectations, census descriptions and the three `examples/hir` samples
+  were updated;
+* inventories of natives, ownership roles and builtin errors
+  (stdlib-namespaces, mutable-array's roles audit): they list
+  `list::with_length`, `list#with_length` and LengthMismatch;
+* two diagnostics that showed a value's type in a message not about
+  lengths (a field projected from a List, `destructuring.bot`; a List as a
+  variadic C argument, `c-ffi.test`): `hir::types::showValue` (section 15)
+  shows them without the minted length again; and the new code's four
+  `expr {c ? a : b}` selections of possibly-string values
+  (`nl-no-string-ternary`), now `if` statements.
+
+The rerun of every file that had failed, narrowed through
+`tests/local.tcl`: 862 tests passed on interp and on compile, 0 failed;
+`destructuring.bot` 378/378 on all four backends.
+
+**Harnesses** (each with its own private tree; mutants must apply and be
+killed):
+
+| harness | result |
+|---|---|
+| `tests/list-length-refinement.test` | 38 tests on interp and compile; also under `BOTLISH_NATIVE_GC_STRESS=1` |
+| `cargo test --lib list_with_length` | passes |
+| List length fuzzer, mutants | section 16, section 17 |
+| DecimalRounded: `tests/decimal-rounded.test`, golden suite, fuzzer seeds 1-3, mutants | all pass; 24/24 mutants killed |
+| bounds proofs: fuzzer seeds 1-3 and 4 under GC stress; mutants | 0 failures; 57/57 killed |
+| fixed layout arrays, layout unions, binary layouts, native views, native edits: fuzzers seeds 1-3 and 4 under GC stress | 0 disagreements each |
+| binary-layout, native-view, native-edit mutants | 39/39, 29/29, 40/40 killed |
+| layout-arrays, layout-unions mutants | LAYOUT-MUTANTS |
+| MutableVector, MutableArray: suites; fuzzers seeds 1-2 and 3 under GC stress; MutableArray mutants | 0 disagreements; 36/36 killed |
+| affine values, coroutines: suites; affine fuzzer seeds 1-2; mutants | 0 disagreements; 29/29 and 52/52 killed |
+| refinement values, traits, structural contracts: fuzzers seeds 1-2 | 0 failures each; structural-contracts mutants 18/18 killed |
+| C ABI types: suite; mutants | 26/26 killed (the fuzzer: below) |
+| HIR interchange: `roundtrip.tcl -via interchange`, `-via cache`; mutants | 12 suites, 108 and 120 artifacts and outcomes, 0 differ; 27/27 killed |
+| compilation isolation: `interleave.tcl`; mutants | 12 suites, 96 artifacts and outcomes, 0 differ; 14/14 killed |
+| static decisions: fuzzer seeds 17, 41, 3; mutants | 0 failures (the layout pairs taking different rounds are the same as before the milestone: 0, 2, 2); STATIC-MUTANTS |
+| FIXED-ARITY-LIST-RETURN: `tests/fixed-arity-list-return.test` | 144 tests pass, unchanged (section 12) |
+| C binding generator: `tests/c-bindgen.test`; `tools/c-bindgen.tcl check fixture -target committed` | passes; the fixture's four targets current (byte for byte). The real libraries' profiles need their pinned sources (not fetched here; the c-bindgen workflow runs them); the generator is unchanged |
+| Compilerpedia: `tools/compilerpedia.tcl check` | 697 topics, 569 examples, 0 problems |
+| every mutant of every audit applies | 1295 edits checked statically; the one this milestone moved (`loaded-length-one-more`, layout arrays: the copy's length moved from `hir::cardinality::ListLength` into the type) retargeted and killed |
+
+Two findings outside this milestone, reproduced identically on the tree
+before it and left as they are: the C ABI types fuzzer reports
+disagreements on every seed, each a program compiled for another target
+run on the native backend, which refuses it (`NATIVE TARGET`) -- the
+fuzzer predates that refusal; and the static-decision fuzzer's seeds 41
+and 3 report two layout pairs taking different rounds (no failure).
+
+**CI.** The batched-against-sequential comparison of the golden suites'
+static decisions runs in CI only (`static-decisions.yml`, dispatched on
+this branch), as do the Linux arm64 workflow, the full Tcl and golden
+suites with duplicates (`tests.yml`) and the macOS tiers: CI-STATUS.
 
 ## 19. Performance
 
 `bench/list-length-refinement.tcl` regenerates these tables.
 
-PERFORMANCE-RESULTS
+Measured on the 4-core development container (2026-10-21) while two
+mutation harnesses ran beside it (load about 2): best of 5 in-process runs,
+compilation excluded; n = 20000 operations per Tcl program, 2000000 per
+Cranelift program. Each operation is measured through a parameter of type
+`List[T]` and through one of type `List[T]{length: 16}`, as time per
+operation over the program's own baseline, the whole program per operation
+in parentheses.
+
+| operation | Tcl interp | Tcl compile | Cranelift |
+|---|---:|---:|---:|
+| list::at(xs, 7), xs: List[int] | 67763.5 ns (102427.9 ns) | 19259.0 ns (21130.9 ns) | -7.5 ns (53.9 ns) |
+| list::at(xs, 7), xs: List[int]{length: 16} | 59736.2 ns (90005.6 ns) | 10588.0 ns (12668.9 ns) | 9.6 ns (71.3 ns) |
+| list::length(xs), xs: List[int] | 33739.4 ns (67063.9 ns) | 5048.2 ns (8253.9 ns) | -40.6 ns (55.3 ns) |
+| list::length(xs), xs: List[int]{length: 16} | 42164.6 ns (74876.4 ns) | 2908.5 ns (5250.4 ns) | 11.0 ns (82.7 ns) |
+| binary::write of a 16-element row, row: List[U16] | 227402.0 ns (259893.9 ns) | 118831.4 ns (121086.6 ns) | 356.4 ns (410.3 ns) |
+| binary::write of a 16-element row, row: List[U16]{length: 16} | 240700.4 ns (270151.4 ns) | 126700.3 ns (130136.6 ns) | 335.5 ns (388.7 ns) |
+| two reads of xs: List[int] (each may fail) | 166955.8 ns (197423.5 ns) | 35212.7 ns (37360.3 ns) | 0.9 ns (58.1 ns) |
+| two reads of ys, validated once by list::with_length | 181967.6 ns (215188.8 ns) | 9909.4 ns (12147.5 ns) | 4.1 ns (56.2 ns) |
+
+What it shows:
+
+* **Statically minted facts cost nothing at run time, and decay is free**:
+  a refined parameter and an unrefined one are the same List (the
+  allocation table: identical counts for every pair).
+* **The Tcl compiler** is where a removed check shows in time: a proven
+  `list::at` is a direct native call instead of the error-handling call
+  path, 19.3 against 10.6 microseconds, and two reads of a List validated
+  once by `list::with_length` cost 9.9 microseconds against 35.2 for two
+  reads that may each fail -- the validator's one length comparison is all
+  the run pays, and every downstream read loses its check. A
+  `list::length` whose value the type states is 2.9 against 5.0.
+* **Cranelift**: the removed IndexNotFound edge and LayoutExtentMismatch
+  branch are a compare and a branch each, below this method's resolution
+  (the deltas are within a few nanoseconds of zero, either sign); the NIR
+  tests (`llr-bounds`, `llr-array-writes`, `llr-validator-once`,
+  `llr-length-known`) are the evidence that they are gone.
+* **The interpreter** is the reference and checks every access whatever
+  the types say; its differences are noise.
+* **A whole fixed-array write** is dominated by building the fresh
+  MutableBytes it returns (one allocation per write on every backend);
+  the extent check a refined List removes is a length comparison, not
+  measurable beside it.
+
+Allocations of each whole Cranelift program:
+
+| program | allocations | Lists |
+|---|---:|---:|
+| base | 8 | 4 |
+| base-refined | 8 | 4 |
+| at | 8 | 4 |
+| at-refined | 8 | 4 |
+| write | 2000008 | 4 |
+| write-refined | 2000008 | 4 |
+| reads | 8 | 4 |
+| validated | 8 | 4 |
+
+**Front-end scaling and no refinement explosion.** A program declaring K
+distinct refined List types, lengths 0 to K-1 (each the parameter and
+result of a function, each minted by `list::with_length` under a handler),
+against the same program with `List[int]` and no validation:
+
+| K | refined | per type | List[int] | per type | ratio |
+|---:|---:|---:|---:|---:|---:|
+| 10 | 170 ms | 16.99 ms | 110 ms | 11.04 ms | 1.54 |
+| 100 | 1797 ms | 17.97 ms | 1082 ms | 10.82 ms | 1.66 |
+| 1000 | 36958 ms | 36.96 ms | 29633 ms | 29.63 ms | 1.25 |
+
+The refined program costs 1.25 to 1.66 times the unrefined one at every
+size -- it has a validator call and a handler per function more -- and the
+ratio does not grow with K: a length is a few integers in one canonical
+type, compared by value, with no per-length type object, registry entry or
+instance (`llr-no-monomorphization`: Lists of different lengths share one
+semantic and one codegen instance). The per-type cost of both programs
+rises at K = 1000 for the program's size (a thousand top-level functions),
+not for its refinements.
 
 ## 20. Future pressure
 
