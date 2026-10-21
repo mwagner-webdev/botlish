@@ -693,6 +693,37 @@ The six Windows-only I/O mutants (`windows-error-code-dropped`,
 killed by windows-io.test's execution tests; they run on Windows through
 the tier item `windows-io-mutants` (section 7.6).
 
+### 7.6 GC stress and the Windows-only mutants on Windows
+
+**GC stress**: run
+[39649135164](https://github.com/mwagner-webdev/botlish/actions/runs/39649135164)
+(a manual run of the full tier on 76e7618, whose code is 04e0136's: tier
+`full`, the items `windows-io.test c-ffi.test c-byte-borrowing.test
+c-float-ffi.test argv.test workload-2048.test`, `gc_stress` on). Every test
+of the six files ran with `BOTLISH_NATIVE_GC_STRESS=1` -- the C calls and
+their Win64 checks, the byte exposures, the C floating types, Windows I/O
+through WriteFile (the injector's short writes and failures included),
+linked-run argv, the 2048 demo's executable:
+
+| backend | tests | passed | skipped | failed |
+|---|---:|---:|---:|---:|
+| interp | 289 | 245 | 44 | 0 |
+| compile | 289 | 245 | 44 | 0 |
+
+The skips, by constraint (the same on both): `nativeCVariadics` 15,
+`bashLauncher` 13, `nativeCoroutines` 3, `boringssl` 2,
+`dynamicSystemCLibrary` 2, `nativeLinux` 2, and one each
+`appleAvailability`, `darwinIO`, `guardMalloc`, `linuxX86_64`,
+`nativeStackGuard`, `pythonLauncher`, `tclLibrary`. The run's smoke job was
+green too; its acceptance shards, a repeat of run 39636219872's on the same
+code, were cancelled by the next manual run (one run per branch at a time).
+
+**The Windows-only mutants**: run
+[39659557932](https://github.com/mwagner-webdev/botlish/actions/runs/39659557932)
+(tier `full`, item `windows-io-mutants`: `audit/context-traits/tools/mutate.tcl
+-only 'windows-*'`, every Windows I/O mutant, the six `%% windows-x86_64`
+ones applying on this host).
+
 ## 8. Remaining limitations
 
 Refused on Windows, each with its own error:
