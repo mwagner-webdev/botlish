@@ -1,0 +1,34 @@
+name: Annotate with a file
+description: >
+  Publishes a text file (a job's summary: failures and their own words) as
+  notice annotations, a part of at most 20000 characters each, at most ten:
+  annotations are readable through the checks API wherever a run's logs and
+  artifacts are not (WINDOWS-X86-64-MILESTONE-3.md, section 7).
+
+inputs:
+  file:
+    description: the file to publish
+    required: true
+  title:
+    description: the annotations' title
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        FILE: ${{ inputs.file }}
+        TITLE: ${{ inputs.title }}
+      run: |
+        [ -s "$FILE" ] || exit 0
+        size=$(wc -c < "$FILE")
+        part=0
+        for (( at = 0; at < size && part < 10; at += 20000 )); do
+          part=$((part + 1))
+          text=$(tail -c +$((at + 1)) "$FILE" | head -c 20000)
+          text=${text//'%'/'%25'}
+          text=${text//$'\r'/'%0D'}
+          text=${text//$'\n'/'%0A'}
+          echo "::notice title=$TITLE ($part)::$text"
+        done

@@ -326,6 +326,12 @@ jobs:
             [ -f gc-workloads-unwind.log ] && sed -n '1p;$p' gc-workloads-unwind.log
             awk '/^######## .*: (ok|FAILED)/ {print} /^######## [0-9]+ commands/ {tail = 1} tail {print}' tier.log 2>/dev/null | grep -a . || echo "the smoke tier did not run"
             echo '```'
+            if grep -aq '^==== .*FAILED' tier.log 2>/dev/null; then
+              echo '### Failed tests'
+              echo '```'
+              awk '/^==== [^ ]+ FAILED$/ {print; on = 0; next} /^==== .* FAILED$/ {on = 1} on {print}' tier.log | head -n 400
+              echo '```'
+            fi
             # A failure's own words, readable from the run's summary (the
             # check run's output) wherever its logs are not.
             if [ -f rust-tests.log ] && grep -aq 'test result: FAILED\|^error' rust-tests.log; then
@@ -351,7 +357,15 @@ jobs:
                 echo '```'
               fi
             done
-          } >> "$GITHUB_STEP_SUMMARY"
+          } > smoke-summary.md
+          cat smoke-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Annotate with the summary
+        if: always()
+        uses: ./.github/actions/annotate
+        with:
+          file: smoke-summary.md
+          title: smoke
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -443,7 +457,15 @@ jobs:
               awk '/^failures:$/ {on = 1} on {print} /^test result/ {on = 0}' fallback-rust-tests.log | head -n 200
               echo '```'
             fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          } > roots-summary.md
+          cat roots-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Annotate with the summary
+        if: always()
+        uses: ./.github/actions/annotate
+        with:
+          file: roots-summary.md
+          title: roots
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -493,7 +515,21 @@ jobs:
             echo '```'
             awk '/^######## .*: (ok|FAILED)/ {print} /^######## [0-9]+ commands/ {tail = 1} tail {print}' tier.log 2>/dev/null | grep -a . || echo "the acceptance tier did not run"
             echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+            if grep -aq '^==== .*FAILED' tier.log 2>/dev/null; then
+              echo '### Failed tests'
+              echo '```'
+              awk '/^==== [^ ]+ FAILED$/ {print; on = 0; next} /^==== .* FAILED$/ {on = 1} on {print}' tier.log | head -n 400
+              echo '```'
+            fi
+          } > acceptance-summary.md
+          cat acceptance-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Annotate with the summary
+        if: always()
+        uses: ./.github/actions/annotate
+        with:
+          file: acceptance-summary.md
+          title: acceptance ${{ matrix.shard }}/4
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -592,7 +628,15 @@ jobs:
             echo '```'
             awk '/^######## .*: (ok|FAILED)/ {print} /^######## [0-9]+ commands/ {tail = 1} tail {print}' tier.log 2>/dev/null | grep -a . || echo "the tier did not run"
             echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          } > full-summary.md
+          cat full-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Annotate with the summary
+        if: always() && steps.decide.outputs.work == 'true'
+        uses: ./.github/actions/annotate
+        with:
+          file: full-summary.md
+          title: full ${{ matrix.shard }}
 
       - uses: actions/upload-artifact@v4
         if: always() && steps.decide.outputs.work == 'true'
