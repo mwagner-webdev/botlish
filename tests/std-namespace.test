@@ -22,7 +22,13 @@ source [file join $::projectRoot native native.tcl]
 interp recursionlimit {} 100000
 
 testConstraint nativeBuilt [expr {![catch {native::binary}]}]
-testConstraint zipfs [expr {[info commands zipfs] ne ""}]
+# single/package.tcl packs a zipfs base kit with the native backend's
+# botlish-native and botlish-aot-stub, as named where the stub linker is
+# built (SINGLE-EXECUTABLE.md): a capability of the host's tclsh and native
+# build, not an operating system.
+testConstraint singlePackage [expr {[info commands zipfs] ne "" && [testConstraint nativeBuilt]
+    && [file isfile [file join [file dirname [native::binary]] botlish-native]]
+    && [file isfile [file join [file dirname [native::binary]] botlish-aot-stub]]}]
 
 set mainScript [file join $::projectRoot main.tcl]
 set ::appCounter 0
@@ -360,11 +366,22 @@ test std-missing-standard {a standard namespace that does not exist names the st
 # ---------------------------------------------------------------------------
 # 9. The working directory changes nothing
 
-# The output of `main.tcl ARGS` run as its own process from the working
-# directory CWD.
+# The output of COMMAND (a command line) run as its own process from the
+# working directory CWD: this process's own, restored (no shell, so on any
+# host).
+proc runIn {cwd args} {
+    set here [pwd]
+    cd $cwd
+    try {
+        return [exec {*}$args 2>@1]
+    } finally {
+        cd $here
+    }
+}
+
+# The output of `main.tcl ARGS` run from the working directory CWD.
 proc compilerIn {cwd args} {
-    set command [list [info nameofexecutable] $::mainScript {*}$args]
-    return [exec sh -c "cd [list $cwd] && exec $command 2>&1"]
+    return [runIn $cwd [info nameofexecutable] $::mainScript {*}$args]
 }
 
 test std-cwd-independence {main.tcl compiles the same program from any working directory, ignoring a decoy stdlib/, std/ and list.bot there} -body {
@@ -381,9 +398,8 @@ test std-cwd-independence {main.tcl compiles the same program from any working d
 } -cleanup removeApps -result {1 1}
 
 test std-library-dir-is-the-compilers {the standard library's root is stdlib/ beside the compiler's own core/, whatever the working directory} -body {
-    set dir [app {probe.tcl {puts $::core::libraryDir}}]
-    set probe [file join $dir probe.tcl]
-    set out [exec sh -c "cd / && exec [list [info nameofexecutable]] -encoding utf-8 /dev/stdin" << "source [list [file join $::projectRoot core core.tcl]]\nsource [list $probe]\n"]
+    set dir [app [list probe.tcl "source [list [file join $::projectRoot core core.tcl]]\nputs \$::core::libraryDir\n"]]
+    set out [runIn / [info nameofexecutable] [file join $dir probe.tcl]]
     list [expr {[file normalize $out] eq [file normalize [file join $::projectRoot stdlib]]}] [file isdirectory $out]
 } -cleanup removeApps -result {1 1}
 
@@ -403,20 +419,20 @@ proc bundledCompiler {} {
     return $::bundled
 }
 
-test std-bundled-standard-library {the bundled compiler reads std from its own archive, never the checkout or the working directory, and runs local beside standard modules} -constraints {zipfs nativeBuilt} -body {
+test std-bundled-standard-library {the bundled compiler reads std from its own archive, never the checkout or the working directory, and runs local beside standard modules} -constraints singlePackage -body {
     set exe [bundledCompiler]
     set dir [app [list main.bot "import list\nimport ::std::list\n\n\[list::shuffle(\[1, 2\]), ::std::list::length(\[1, 2, 3\])\]\n" list.bot $localList \
         missing.bot "import std::nosuch\n1\n"]]
-    set value [exec sh -c "cd / && exec [list $exe] -backend interp [list [file join $dir main.bot]] 2>&1"]
-    catch {exec sh -c "cd / && exec [list $exe] [list [file join $dir missing.bot]] 2>&1"} missing
+    set value [runIn / $exe -backend interp [file join $dir main.bot]]
+    catch {runIn / $exe [file join $dir missing.bot]} missing
     list [expr {[string first "value: \[\[1, 2\], 3\]" $value] >= 0}] \
         [regexp {no such module file //zipfs:/app/botlish/stdlib/nosuch\.bot} $missing]
 } -cleanup removeApps -result {1 1}
 
-test std-bundled-native {the bundled compiler's native backends run a program of local and standard modules} -constraints {zipfs nativeBuilt} -body {
+test std-bundled-native {the bundled compiler's native backends run a program of local and standard modules} -constraints singlePackage -body {
     set exe [bundledCompiler]
     set dir [app [list main.bot "import list\nimport std::list\n\n\[list::shuffle(\[3\]), std::list::length(\[1, 2\])\]\n" list.bot $localList]]
-    exec sh -c "cd / && exec [list $exe] -backend cranelift [list [file join $dir main.bot]] 2>&1"
+    runIn / $exe -backend cranelift [file join $dir main.bot]
 } -cleanup removeApps -match glob -result {*value: \[\[3\], 2\]*}
 
 # ---------------------------------------------------------------------------
@@ -425,8 +441,8 @@ test std-bundled-native {the bundled compiler's native backends run a program of
 test std-executable-needs-no-source {a natively compiled executable of local and standard modules runs with its source gone} -constraints {executableAot nativeBuilt} -body {
     set dir [app [list main.bot "import list\nimport std::list\nimport std::str\n\n\[list::shuffle(\[1\]), std::list::length(\[1, 2\]), std::str::length(\"abc\")\]\n" list.bot $localList]]
     exec [info nameofexecutable] $::mainScript -emit-native-executable [file join $dir main.bot] 2>@1
-    set exe [file join [makeDirectory stdns-exe-[pid]] main]
-    file rename [file join $dir main] $exe
+    set exe [native::executableFile [file join [makeDirectory stdns-exe-[pid]] main]]
+    file rename [native::executableFile [file join $dir main]] $exe
     file delete -force $dir
     exec $exe
 } -cleanup {removeApps; file delete -force [file join [temporaryDirectory] stdns-exe-[pid]]} -result {[[1], 2, 3]}

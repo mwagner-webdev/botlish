@@ -109,7 +109,7 @@ one. Its message names the root that carries the designation:
 
 ```text
 namespace "std::darwin::io" belongs to the macOS platform (the standard namespace
-darwin and every namespace under it), which is unavailable for target
+std::darwin and every namespace under it), which is unavailable for target
 linux-x86_64 (Linux on x86_64): a macOS module is never chosen for, mapped
 to or substituted on another operating system, whatever the architecture;
 compile for a macOS target (-target macos-x86_64) or import no macOS
@@ -117,7 +117,7 @@ namespace (SURFACE MODULE UNSUPPORTED-PLATFORM)
 ```
 
 (previously the parenthesis read "the standard namespace linux" for every
-platform; there was only one.) The namespaces: `darwin` (stdlib/darwin.bot),
+platform; there was only one.) The namespaces: `std::darwin` (stdlib/darwin.bot),
 `std::darwin::io` (stdlib/darwin/io.bot), `std::darwin::path` (stdlib/darwin/path.bot).
 None is architecture-specific: libSystem's prototypes are the same on arm64
 and x86-64 macOS, so there is no `darwin.ARCH.bot` and the loader's

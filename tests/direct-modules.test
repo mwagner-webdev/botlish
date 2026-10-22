@@ -175,7 +175,7 @@ test dm-no-call-or-function-syntax {there is no call-, function- or block-level 
 # Designation
 
 test dm-intrinsic-linux-abi {the syscall transports std::linux::abi::x86_64 and std::linux::abi::aarch64 -- the raw kernel transitions -- and std::binary::native, whose view reads live native memory (NATIVE-LAYOUT-VIEWS.md), are the intrinsic namespaces the compiler declares direct: registry metadata, not a name; linux (the source module) is direct by its own marker; std::abi::x86_64's address and register conversions are not direct} -body {
-    list [core::native::directNamespaces] [core::native::isDirectNamespace linux] \
+    list [core::native::directNamespaces] [core::native::isDirectNamespace std::linux] \
         [core::native::isDirectNamespace std::abi::x86_64] \
         [regexp {\ndirect module\n\nimport std::abi\n} [core::ReadFile [file join $::projectRoot stdlib linux.bot]]]
 } -result {{std::binary::native std::linux::abi::aarch64 std::linux::abi::x86_64} 0 0 1}

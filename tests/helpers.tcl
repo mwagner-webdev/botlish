@@ -252,22 +252,22 @@ testConstraint lp64Target [expr {[core::cabi::hostTarget] ne ""
 testConstraint dynamicSystemCLibrary [expr {$::tcl_platform(platform) ne "windows"}]
 
 # Darwin I/O (stdlib/darwin.bot, stdlib/darwin/io.bot, MACOS-AARCH64-MILESTONE-8.md):
-# the darwin namespace is this host's platform interface (core/cabi.tcl's
+# the std::darwin namespace is this host's platform interface (core/cabi.tcl's
 # platforms designates it macOS's) and the native backend links C calls here,
 # so libSystem's read and write run: macOS arm64 today. A capability read from
 # the target table, never from the operating system's name: a test that runs
-# a program importing darwin::* carries it.
+# a program importing std::darwin::* carries it.
 testConstraint darwinIO [expr {[core::cabi::hostTarget] ne "" && [testConstraint nativeCCalls]
-    && [core::cabi::platformOf darwin] eq [dict get [core::cabi::target [core::cabi::hostTarget]] os]}]
+    && [core::cabi::platformOf std::darwin] eq [dict get [core::cabi::target [core::cabi::hostTarget]] os]}]
 
 # Windows I/O (stdlib/windows.bot, stdlib/windows/io.bot, WINDOWS-X86-64-MILESTONE-2.md):
-# the windows namespace is this host's platform interface (core/cabi.tcl's
+# the std::windows namespace is this host's platform interface (core/cabi.tcl's
 # platforms designates it Windows') and the native backend links C calls
 # here, so kernel32's GetStdHandle and WriteFile run: Windows x86-64 today. A
 # capability read from the target table, never from the operating system's
-# name: a test that runs a program importing windows::* carries it.
+# name: a test that runs a program importing std::windows::* carries it.
 testConstraint windowsIO [expr {[core::cabi::hostTarget] ne "" && [testConstraint nativeCCalls]
-    && [core::cabi::platformOf windows] eq [dict get [core::cabi::target [core::cabi::hostTarget]] os]}]
+    && [core::cabi::platformOf std::windows] eq [dict get [core::cabi::target [core::cabi::hostTarget]] os]}]
 
 # binaryHeader PATH and hostBinaryHeader KIND: what a program object or an
 # executable is, and what this host's are.

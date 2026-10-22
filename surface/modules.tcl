@@ -74,11 +74,12 @@
 #
 # Platform namespaces. The target table designates the standard namespace
 # trees that are an operating system's platform interface
-# (core::cabi::platformOf): the `linux` namespace and every namespace under
-# it (std::linux::sys, std::linux::io, std::linux::path, the syscall transports
-# std::linux::abi::x86_64 and std::linux::abi::aarch64) are Linux's. Nothing is
+# (core::cabi::platformOf): `std::linux` and every namespace under it
+# (std::linux::sys, std::linux::io, std::linux::path, the syscall transports
+# std::linux::abi::x86_64 and std::linux::abi::aarch64) are Linux's,
+# `std::darwin`'s tree macOS's and `std::windows`'s Windows'. Nothing is
 # inferred from a spelling: a module that happens to be named like an
-# operating system (a private library's `windows`) is no platform's. Importing one is UNSUPPORTED-PLATFORM
+# operating system (an application's `windows`) is no platform's. Importing one is UNSUPPORTED-PLATFORM
 # when the compilation target's operating system is another one
 # (std::linux::sys for macos-aarch64 never becomes stdlib/linux/sys.aarch64.bot just
 # because both are AArch64), and UNKNOWN-TARGET on a host that is no known

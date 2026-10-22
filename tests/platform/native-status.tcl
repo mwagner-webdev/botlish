@@ -344,11 +344,11 @@ set linux [dict create \
     linux-syscall {value 0} \
     c-call {value 5} \
     c-byte-borrow {value {[true, true, 0, true, 0]}} \
-    darwin-read-write {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "std::darwin" belongs to the macOS platform (the standard namespace darwin*unavailable for target linux-*}} \
+    darwin-read-write {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "std::darwin" belongs to the macOS platform (the standard namespace std::darwin and every namespace under it)*unavailable for target linux-*}} \
     darwin-errno {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "std::darwin" belongs to the macOS platform*unavailable for target linux-*}} \
     darwin-io {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "std::darwin::io" belongs to the macOS platform*unavailable for target linux-*}} \
     darwin-executable {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "std::darwin::io" belongs to the macOS platform*unavailable for target linux-*}} \
-    windows-write {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "std::windows" belongs to the Windows platform (the standard namespace windows*unavailable for target linux-*}} \
+    windows-write {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "std::windows" belongs to the Windows platform (the standard namespace std::windows and every namespace under it)*unavailable for target linux-*}} \
     windows-io {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "std::windows::io" belongs to the Windows platform*unavailable for target linux-*}} \
     windows-executable {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "std::windows::io" belongs to the Windows platform*unavailable for target linux-*}} \
     target {value {format elf c-call-conv system_v runs 1}} \
