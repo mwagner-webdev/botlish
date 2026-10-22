@@ -237,18 +237,8 @@ proc service::Analyze {workspace path} {
     set mode [hir::warnings::Mode [dict get $workspace warnings]]
     set revision [dict create entry $path outcome ok hir "" errors {} warnings {} failure "" \
         config [Configuration $workspace $path]]
+    # (An entry with no source file raises here.)
     set text [surface::source::text $path]
-    set ast [surface::modules::Parse $path $text]
-    if {[dict get $ast diagnostics] ne ""} {
-        # What the command line reports: every syntax error of the entry
-        # file, and nothing is loaded.
-        dict set revision outcome syntax
-        dict set revision errors [lmap entry [surface::syntaxEntries [dict get $ast diagnostics]] {
-            Record error $entry
-        }]
-        dict set revision sources [surface::source::observed]
-        return $revision
-    }
     try {
         # The warning policy is applied here (below): its rejection must
         # not take the HIR with it.
@@ -260,6 +250,20 @@ proc service::Analyze {workspace path} {
             -warning-channel "" -target [dict get $workspace target] -cache [dict get $workspace cache]]
     } on error {message options} {
         set code [dict get $options -errorcode]
+        if {[lrange $code 0 1] ne {SURFACE SYNTAX}} {
+            # The command line parses the entry before it compiles, so
+            # every syntax error of the entry is what it reports, even when
+            # the compilation fails before parsing it (a library a
+            # `# requires:` line names). The compilation parses the entry
+            # itself (with every syntax error) unless the front-end cache
+            # has its HIR, so a hit parses nothing; here the parse cache
+            # usually has the AST already.
+            set ast [surface::modules::Parse $path $text]
+            if {[dict get $ast diagnostics] ne ""} {
+                set code {SURFACE SYNTAX}
+                set options [dict create -diagnostics [surface::syntaxEntries [dict get $ast diagnostics]]]
+            }
+        }
         if {[lrange $code 0 1] eq {SURFACE SYNTAX}} {
             dict set revision outcome syntax
         } elseif {[lrange $code 0 1] eq {SURFACE MODULE} || [lindex $code 0] eq "POSIX"} {

@@ -852,4 +852,40 @@ test cs-cache-lenient-entry {a lenient analysis served from the cache reports ex
     list [dict get [surface::cache::stats] hits] [expr {$built eq $read}] [llength $built]
 } -cleanup {service::closeWorkspace $ws; file delete -force $dir $cache; unset -nocomplain dir cache path ws built read} -result {1 1 2}
 
+test cs-cache-hit-parses-nothing {an analysis the front-end cache answers parses no file, the entry included: the cache is keyed by the text, and the entry's syntax errors are the compilation's own} -setup {
+    rename surface::parse surface::csParse
+    proc surface::parse {args} {
+        incr ::csParses
+        return [uplevel 1 [list surface::csParse {*}$args]]
+    }
+} -body {
+    set dir [cs::Dir hitparse]
+    set cache [cs::Dir hitparsecache]
+    cs::Put $dir/main.bot $::csMain
+    cs::Put $dir/util.bot $::csUtil
+    set ws [service::workspace -warnings off -cache $cache]
+    set built [service::diagnostics [service::analyze $ws $dir/main.bot]]
+    set ::surface::modules::parsed [dict create]
+    surface::cache::resetStats
+    set ::csParses 0
+    set rev [service::analyze $ws $dir/main.bot]
+    list [dict get [surface::cache::stats] hits] $::csParses [dict get [service::revision $rev] outcome] \
+        [expr {[service::diagnostics $rev] eq $built}]
+} -cleanup {
+    rename surface::parse {}
+    rename surface::csParse surface::parse
+    service::closeWorkspace $ws
+    file delete -force $dir $cache
+    unset -nocomplain dir cache ws built rev ::csParses
+} -result {1 0 ok 1}
+
+test cs-entry-syntax-first {the entry's syntax errors are what is reported even when the compilation fails before it parses the entry (a `# requires:` library that does not exist), as the command line reports them} -body {
+    set dir [cs::Dir requires]
+    cs::Put $dir/main.bot "# requires: csnosuchlibrary\nx = 1 +\n"
+    set ws [cs::Workspace]
+    set rev [service::analyze $ws $dir/main.bot]
+    list [dict get [service::revision $rev] outcome] [cs::Brief $rev] \
+        [catch {surface::readProgramFile $dir/main.bot -warnings off -cache ""} message] [string match "*no library*" $message]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws rev message} -result {syntax {{error {SURFACE SYNTAX} main.bot:2:8-2:9 {expected an expression, found end of line}}} 1 1}
+
 cleanupTests

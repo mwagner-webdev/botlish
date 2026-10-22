@@ -198,6 +198,25 @@
     set ws [dict get $revision workspace]
 >>>>
 
+@@ entry-syntax-not-first a compilation that fails before it parses the entry (a missing `# requires:` library) reports that failure, not the entry's syntax errors the command line reports
+## service/service.tcl
+<<<<
+        if {[lrange $code 0 1] ne {SURFACE SYNTAX}} {
+====
+        if {0} {
+>>>>
+
+@@ hit-parses-entry the entry is parsed before the compilation, so an analysis the front-end cache answers parses it anyway
+## service/service.tcl
+<<<<
+    set text [surface::source::text $path]
+    try {
+====
+    set text [surface::source::text $path]
+    surface::modules::Parse $path $text
+    try {
+>>>>
+
 @@ check-ignores-options -check silently ignores the options that run, build or inspect, instead of refusing them
 ## main.tcl
 <<<<

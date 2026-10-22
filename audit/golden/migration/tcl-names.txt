@@ -935,6 +935,7 @@ tests/compiler-opt.test opt-tail-7 pass
 tests/compiler-opt.test opt-tail-7-static pass
 tests/compiler-service.test cs-activation-control pass
 tests/compiler-service.test cs-activation-interleaved pass
+tests/compiler-service.test cs-cache-hit-parses-nothing pass
 tests/compiler-service.test cs-cache-lenient-entry pass
 tests/compiler-service.test cs-cache-not-from-buffers pass
 tests/compiler-service.test cs-compilerpedia-standalone pass
@@ -946,6 +947,7 @@ tests/compiler-service.test cs-deferred-references-located pass
 tests/compiler-service.test cs-definition-intrinsic pass
 tests/compiler-service.test cs-definition-names pass
 tests/compiler-service.test cs-dependent-diagnostics-suppressed pass
+tests/compiler-service.test cs-entry-syntax-first pass
 tests/compiler-service.test cs-facts-explicit pass
 tests/compiler-service.test cs-hover-no-internal-ids pass
 tests/compiler-service.test cs-hover-signatures pass
