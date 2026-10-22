@@ -1282,8 +1282,10 @@ mod c_word_tests {
 /// sums it afterwards. Under GC stress every allocation of `churn` (a list
 /// of eight 999s, the size of the caller's) collects first. A walk that
 /// missed the caller's frame -- below its callee's, or above a Rust frame --
-/// would free the list, and the allocator would hand its memory to
-/// `churn`'s next list: the sum would read 999s. Every host's root plan:
+/// would free the list, and the collector poisons what it frees
+/// (`Heap::set_poison_for_test`): the sum would read poison, however the
+/// allocator reuses the memory (Windows' heap may not reuse it at all
+/// before the sum). Every host's root plan:
 /// native frames (the frame walk; on Windows across Rust frames by Windows'
 /// unwinder) or the fallback plan's shadow stack (a `fallback-roots`
 /// build).
@@ -1334,6 +1336,7 @@ mod caller_root_tests {
             compiled.install_constants(&mut vm);
             vm.set_framemap(compiled.framemap.clone());
             vm.heap.set_stress_for_test(stress);
+            vm.heap.set_poison_for_test(stress);
             let result = (compiled.entry)(&mut *vm);
             assert_eq!(result, make_small(240 + 240 + 80), "stress {stress}: churn(30) twice, and the caller's list summed after the generate");
             assert_eq!(vm.heap.collections > 0, stress);
