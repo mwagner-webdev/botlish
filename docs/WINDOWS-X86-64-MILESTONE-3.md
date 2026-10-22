@@ -757,11 +757,14 @@ tests, which build Windows objects and unwind information on any x86-64
 host; the eleven Windows-only mutants (`%% windows-x86_64`) skipped. On
 an AArch64 host all twenty are skipped: its build has no x86-64 backend to
 make Windows code with, so the tests that detect the nine do not exist
-there. @@MACOS-MUTANTS
+there: macOS arm64's full tier ran the item on 76037d6 (run
+[39857360790](https://github.com/mwagner-webdev/botlish/actions/runs/39857360790)),
+twenty skipped, the tool's exit status 0.
 On Windows x86-64 (real Windows: run
 [39850963305](https://github.com/mwagner-webdev/botlish/actions/runs/39850963305),
-96e2296, the full tier's item `windows-unwind-mutants`): all twenty
-killed, each by the first detector, the Rust tests -- "the test process
+96e2296, the full tier's item `windows-unwind-mutants`; again on 76037d6,
+run [39857360805](https://github.com/mwagner-webdev/botlish/actions/runs/39857360805)):
+all twenty killed, each by the first detector, the Rust tests -- "the test process
 died" where the mutant crashed the test binary before it could report a
 test (an unwind Windows cannot do, a stack it overflows). The two runs
 before it left `walk-stops-at-rust` alive, which is what made the
@@ -769,9 +772,17 @@ caller-root test cross a Rust frame and poison what it frees (above).
 
 ### 7.4 Results on Windows
 
-The workflow's run on this milestone's final code: run
+The workflow's runs (`windows-2025`, MSVC, `x86_64-pc-windows-msvc`). The
+table is run
 [39823274563](https://github.com/mwagner-webdev/botlish/actions/runs/39823274563)
-(19a04b2; `windows-2025`, MSVC, `x86_64-pc-windows-msvc`).
+(19a04b2), every job green. The final code -- since then the caller-root
+test's `generate` and the heap's poison hook (section 7.3), and the
+mutants' host lists -- is green in run
+[39850963305](https://github.com/mwagner-webdev/botlish/actions/runs/39850963305)
+(96e2296: smoke, `roots`, the mutants, the four acceptance shards) and run
+[39857360805](https://github.com/mwagner-webdev/botlish/actions/runs/39857360805)
+(76037d6): every job green -- smoke, `roots`, the mutants, the four
+acceptance shards.
 
 | Job, step | Result |
 |---|---|
@@ -801,10 +812,11 @@ smoke, `roots` and acceptance jobs on the same commit: green.
 
 ### 7.5 Linux and macOS
 
-The commits after ac93df3 changed only Windows-only test code
-(`codegen::jitunwind`'s tests), the Windows workflow, a CI tool and this
-report, so the Linux runs on ac93df3 test the final code of every other
-host.
+The commits after ac93df3 changed Windows-only code, CI, tools and this
+report, and one thing every host compiles: the heap's poison hook (a test
+hook: a branch in the sweep, off unless a test turns it on) with the
+caller-root test that uses it. On Linux x86-64 the local runs on the
+rebased tree below cover them; tests.yml runs again on the push to main.
 
 * **Linux x86-64, CI**: tests.yml run
   [39820321497](https://github.com/mwagner-webdev/botlish/actions/runs/39820321497)
@@ -813,13 +825,16 @@ host.
   shards), the native Rust tests, the stub-linked executables, the warning
   gate, the method-call filter audit. (Its native GC-stress job runs on
   pushes to main only.)
-* **Linux x86-64, locally**: `tclsh9.0 tests/local.tcl -jobs 3` (e0b0cf0;
-  the later commits changed tests, tools and Windows-only code, which the
-  CI runs above cover): 212 Tcl test files on interp and
-  compile, 6673 and 6668 tests passed, 0 failed; 103 golden suites on all
+* **Linux x86-64, locally**: `tclsh9.0 tests/local.tcl -jobs 3` (e0b0cf0):
+  212 Tcl test files on interp and compile, 6673 and 6668 tests passed, 0
+  failed; 103 golden suites on all
   four backends, 0 failed (interp 4997, compile 4997, cranelift-generic
-  4905, cranelift 5007 tests). The Rust tests (19a04b2): lib 290, driver 73
-  passed; under `BOTLISH_NATIVE_GC_STRESS=1` the same. @@LINUX-STRESS
+  4905, cranelift 5007 tests). On this milestone rebased onto main
+  (bd1e310, main's d158d5c below it): the Rust tests, lib 290 and driver
+  73 passed, under `BOTLISH_NATIVE_GC_STRESS=1` the same; and
+  `tests/platform/tier.tcl -gc-stress 1 acceptance` in four parallel
+  shards, 213 Tcl test files on interp and compile and 103 golden suites
+  on interp, compile, cranelift-generic and cranelift, 0 failed.
 * **Linux AArch64, CI**: tests-arm64.yml run
   [39820325771](https://github.com/mwagner-webdev/botlish/actions/runs/39820325771)
   (ac93df3): every job green -- the Tcl suite on interp and compile,
@@ -829,7 +844,11 @@ host.
 * **macOS arm64, CI**: run
   [39823274470](https://github.com/mwagner-webdev/botlish/actions/runs/39823274470)
   (19a04b2): every job green -- smoke, the Linux control, both acceptance
-  shards.
+  shards; on the final code, run
+  [39857360790](https://github.com/mwagner-webdev/botlish/actions/runs/39857360790)
+  (76037d6): every job green, the full tier's mutant item included (its
+  first run, on 96e2296, found the mutants' host lists wrong: section
+  7.6).
 * **Cross builds**: `cargo check --target` for `x86_64-pc-windows-msvc`,
   `aarch64-apple-darwin` and `aarch64-unknown-linux-gnu` (library, driver and
   tests) before each push: evidence that they build, nothing more.
@@ -852,7 +871,7 @@ walk and stack guard are unchanged.
 | ac93df3's (both builds) | the single-step test: "every activation returned" | the test's own bookkeeping: its last trap, back in the test, returned before popping the program entry's activation; no instruction unwound wrongly | popped there too (19a04b2) |
 | the same | dumpbin's Botlish entries not found | dumpbin's listing of the image names no function | the entries are the one run matching the object's table: `audit/windows-unwind/tools/dumpbin-entries.tcl` (19a04b2) |
 | dbbbcdd's mutation run | `walk-stops-at-rust` survived every detector | no test collected with a Rust frame between Botlish frames: the caller-root test's function-value call goes through `rt_call_value`, which jumps to the closure (section 7.3) | the caller-root test calls `mutable_array::generate`, whose factory collects; the comments and AGENTS.md that named `rt_call_value` corrected (ee1559e) |
-| 96e2296's macOS run | the full tier's `windows-unwind-mutants` failed on macOS arm64 | the nine encoder and object mutants applied to every host, but the tests that kill them are x86-64 hosts' only (an AArch64 build has no x86-64 backend): on macOS they survive | they apply to x86-64 hosts only (@@HOSTCOMMIT) |
+| 96e2296's macOS run | the full tier's `windows-unwind-mutants` failed on macOS arm64 | the nine encoder and object mutants applied to every host, but the tests that kill them are x86-64 hosts' only (an AArch64 build has no x86-64 backend): on macOS they survive | they apply to x86-64 hosts only (76037d6) |
 | ee1559e's mutation run | `walk-stops-at-rust` survived again, killed on Linux by the same test | the list freed by the missed root was never reused before the program read it: the use after free read intact memory | the collector poisons what it frees in that test (`Heap::set_poison_for_test`, 96e2296) |
 
 ## 8. Performance
