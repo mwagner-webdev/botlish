@@ -1,9 +1,11 @@
 name: Annotate with a file
 description: >
   Publishes a text file (a job's summary: failures and their own words) as
-  notice annotations, a part of at most 20000 characters each, at most ten:
-  annotations are readable through the checks API wherever a run's logs and
-  artifacts are not (WINDOWS-X86-64-MILESTONE-3.md, section 7).
+  annotations, a part of at most 3900 characters each (GitHub keeps 4 KiB of
+  an annotation's message), parts 1-10 as notices and 11-20 as warnings (ten
+  of each kind a step): annotations are readable through the checks API
+  wherever a run's logs and artifacts are not (WINDOWS-X86-64-MILESTONE-3.md,
+  section 7).
 
 inputs:
   file:
@@ -24,11 +26,13 @@ runs:
         [ -s "$FILE" ] || exit 0
         size=$(wc -c < "$FILE")
         part=0
-        for (( at = 0; at < size && part < 10; at += 20000 )); do
+        for (( at = 0; at < size && part < 20; at += 3900 )); do
           part=$((part + 1))
-          text=$(tail -c +$((at + 1)) "$FILE" | head -c 20000)
+          kind=notice
+          (( part > 10 )) && kind=warning
+          text=$(tail -c +$((at + 1)) "$FILE" | head -c 3900)
           text=${text//'%'/'%25'}
           text=${text//$'\r'/'%0D'}
           text=${text//$'\n'/'%0A'}
-          echo "::notice title=$TITLE ($part)::$text"
+          echo "::$kind title=$TITLE ($part)::$text"
         done

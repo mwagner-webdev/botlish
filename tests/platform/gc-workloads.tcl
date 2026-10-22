@@ -102,6 +102,9 @@ proc runExecutable {executable} {
         if {![regexp {^native unwind check: (\d+) functions, (\d+) Botlish frames, every one as Windows unwinds it; \d+ walks unwound \d+ other frames$} $text - functions] || $functions == 0} {
             error "no unwind check's account: $text"
         }
+        # Its counts: what the walk crossed (WINDOWS-X86-64-MILESTONE-3.md,
+        # section 3), printed after the run's line.
+        set ::lastAccount $text
     } elseif {$text ne ""} {
         error $text
     }
@@ -157,8 +160,12 @@ try {
             for {set i 0} {$i <= $repeat} {incr i} {
                 set stress [expr {$i > 0}]
                 set started [clock milliseconds]
+                set ::lastAccount ""
                 set observed [outcome $stress {runExecutable $executable}]
                 record $name "executable[expr {$stress ? " gc-stress $i" : ""}]" $expected $observed [expr {([clock milliseconds] - $started) / 1000.0}]
+                if {$::lastAccount ne ""} {
+                    puts "     $::lastAccount"
+                }
             }
         }
     }

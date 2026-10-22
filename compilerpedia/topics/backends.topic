@@ -271,7 +271,7 @@ index: backends
 alias: platforms; operating systems; aarch64; arm64; x86-64; supported platforms
 keywords: Linux, x86-64, AArch64, arm64, macOS, Windows, MSVC, Tcl 9, coroutines, stub
 related: backend.targets backend.overview backend.native-executable backend.single-executable
-docs: README.md LINUX-SYSCALL-TRANSPORTS.md COROUTINES.md WINDOWS-X86-64-MILESTONE-1.md WINDOWS-X86-64-MILESTONE-2.md MACOS-AARCH64-MILESTONE-8.md
+docs: README.md LINUX-SYSCALL-TRANSPORTS.md COROUTINES.md WINDOWS-X86-64-MILESTONE-1.md WINDOWS-X86-64-MILESTONE-2.md WINDOWS-X86-64-MILESTONE-3.md MACOS-AARCH64-MILESTONE-8.md
 
 == WHAT IS TESTED
 The repository's continuous integration runs every test on Linux x86-64 and
@@ -280,9 +280,10 @@ and builds the single executable on Linux x86-64. A separate workflow runs
 the native JIT, native coroutines, the native stack guard, standalone
 executables, C calls and Darwin I/O on Apple Silicon macOS, and
 another the native JIT, standalone executables, C calls (against
-libraries MSVC's cl builds), Windows I/O and the collector under GC
-stress, and every Tcl test file and golden suite on the Tcl backends, on
-Windows x86-64 with MSVC's toolchain. Nothing here is a promise about
+libraries MSVC's cl builds), Windows I/O, the collector under GC stress
+(its roots found in native frames, checked against Windows' own
+unwinder), and every Tcl test file and golden suite on the Tcl backends,
+on Windows x86-64 with MSVC's toolchain. Nothing here is a promise about
 other platforms.
 
 == PER COMPONENT
@@ -299,9 +300,9 @@ other platforms.
     native stack overflow    NATIVE LIMIT STACK, for the thread's stack
                              and a coroutine's, on Linux x86-64 and
                              AArch64 and macOS AArch64; on Windows only
-                             for Botlish recursion the shadow stack's
-                             depth check stops, otherwise the process
-                             ends (error.native-limit-stack)
+                             for Botlish recursion the stack-limit check
+                             stops, otherwise the process ends
+                             (error.native-limit-stack)
     Linux system calls, io   Linux; x86-64 through linux::abi::x86_64,
                              AArch64 through linux::abi::aarch64 (one
                              portable surface: linux, linux::io, io);

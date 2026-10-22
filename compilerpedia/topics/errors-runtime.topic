@@ -1054,7 +1054,7 @@ index: errors backends
 alias: stack overflow; recursion too deep; deep recursion; native stack exhausted
 keywords: recursion, stack, depth, BOTLISH_NATIVE_STACK_BYTES, BOTLISH_NATIVE_COROUTINE_STACK_BYTES, coroutine, too many nested evaluations, limit, tail call
 related: backend.cranelift backend.interp backend.compile backend.performance concept.loops
-docs: NATIVE-STACK-OVERFLOW.md MACOS-AARCH64-MILESTONE-4.md WINDOWS-X86-64-MILESTONE-1.md COROUTINES.md README.md
+docs: NATIVE-STACK-OVERFLOW.md MACOS-AARCH64-MILESTONE-4.md WINDOWS-X86-64-MILESTONE-1.md WINDOWS-X86-64-MILESTONE-3.md COROUTINES.md README.md
 code: NATIVE LIMIT STACK
 code: TCL LIMIT STACK
 
@@ -1068,10 +1068,12 @@ backends stop at different depths:
     macOS AArch64. A standalone executable prints it on stderr as `error
     {NATIVE LIMIT STACK} {native stack exhausted: ...}` and exits 1. On
     Windows x86-64 there is no stack guard yet: Botlish recursion is
-    stopped with the same error by the shadow stack's depth check (about
-    four million nested calls), which the default 1 GiB stack outlasts;
-    a smaller stack (BOTLISH_NATIVE_STACK_BYTES), or deep recursion inside
-    the runtime, ends the process instead.
+    stopped with the same error by a check of the stack pointer in every
+    function that makes a Botlish call, against the thread's stack less a
+    margin (an eighth of it, between 64 KiB and 1 MiB), whatever the
+    stack's size (BOTLISH_NATIVE_STACK_BYTES); deep recursion inside the
+    runtime, or one frame larger than the margin, ends the process
+    instead.
   * interp and compile: Tcl's evaluation limit, raised by the compiler to
     about 14,000 nested Botlish calls on interp and 99,000 on compile,
     stops the run with "too many nested evaluations (infinite loop?)"
