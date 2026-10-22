@@ -673,8 +673,10 @@ proc ecTraceRuns {trace symbols errnoLib errnoOffset} {
 # starts at the instruction after the call of bcf_fill_errno: found in the
 # object file of the same lowering (its relocation names the C function),
 # at the same offset in the executable's ec::fill, whose code is checked to
-# be the object's.
-proc ecTraced {dir options} {
+# be the object's. With UNTILLIBRARY the trace ends at the first instruction
+# of a shared library (the allocator's entry, for the eager lowering: its
+# lock is not single-stepped, which on AArch64 would never end).
+proc ecTraced {dir options {untilLibrary 0}} {
     set exe [ecExecutable $dir $options]
     lassign [ecObject $dir $options] functions nir
     set fill botlish_fn_[window::nirId $nir ec::fill]
@@ -692,7 +694,7 @@ proc ecTraced {dir options} {
     }
     set start [format %x [expr {$linked + $offset}]]
     set stop [format %x [lindex [dict filter $symbols value rt_native_load] 0]]
-    set output [exec [ecTracer] $exe $start $stop]
+    set output [exec env WINDOW_TRACE_UNTIL_LIBRARY=[expr {$untilLibrary ? 1 : ""}] [ecTracer] $exe $start $stop]
     regexp -line {^errno (\S+) ([0-9a-f]+)$} $output -> lib at
     set runs [ecTraceRuns $output $symbols $lib [expr {"0x$at"}]]
     set errno botlish_fn_[window::nirId $nir ec::errno]
@@ -701,9 +703,9 @@ proc ecTraced {dir options} {
     }]
 }
 
-test ec-trace {the instructions actually executed (ptrace single-stepping the executable) from the return of ec::fill's failing C call to the load of errno: the wrapper's comparison and branch, errno()'s entry, the C library's __errno_location, errno() again up to the load -- no other function, no allocator; the -struct-opt 0 executable (the eager write-back value) runs rt_struct_new and the C library's allocator there} -constraints ecTrace -body {
+test ec-trace {the instructions actually executed (ptrace single-stepping the executable) from the return of ec::fill's failing C call to the load of errno: the wrapper's comparison and branch, errno()'s entry, the C library's __errno_location, errno() again up to the load -- no other function, no allocator; the -struct-opt 0 executable (the eager write-back value) runs rt_struct_new and enters the C library's allocator there (traced up to that entry)} -constraints ecTrace -body {
     set dir [ecApp "direct module\nimport abi\nimport abi::bytes\nimport ec\nr = ec::fill(abi::bytes::zeroed(abi::usize(4)), 1, 13, 0)\n\[r.result, r.errno\]\n"]
-    set eager [ecTraced $dir {-struct-opt 0}]
+    set eager [ecTraced $dir {-struct-opt 0} 1]
     list [ecTraced $dir {}] [expr {"rt_struct_new" in $eager}] [expr {[lsearch -glob $eager lib:*] >= 0}]
 } -result {{ec::fill ec::errno __errno_location ec::errno} 1 1}
 

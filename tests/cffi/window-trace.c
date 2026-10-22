@@ -20,6 +20,12 @@
  * STOP are hexadecimal link-time addresses of EXE. Then it lets EXE run to
  * its end and exits with EXE's status (or 125 when tracing failed).
  *
+ * With WINDOW_TRACE_UNTIL_LIBRARY set (non-empty) the window also ends after
+ * the first instruction executed in a shared library: enough to show that a
+ * window enters, say, the allocator, without single-stepping it. (On AArch64
+ * a single-step between a load-exclusive and its store-exclusive clears the
+ * exclusive monitor, so a lock's retry loop would never end.)
+ *
  * Nothing in Botlish knows it exists: it watches an ordinary executable. */
 #define _GNU_SOURCE
 #include <dlfcn.h>
@@ -57,7 +63,7 @@ static uint64_t pc_of(pid_t pid) {
     if (ptrace(PTRACE_GETREGS, pid, 0, &regs) != 0) fail("PTRACE_GETREGS");
     return regs.rip;
 #else
-    struct user_pt_regs regs;
+    struct user_regs_struct regs; /* glibc's <sys/user.h>: x0-x30, sp, pc, pstate */
     struct iovec io = {&regs, sizeof regs};
     if (ptrace(PTRACE_GETREGSET, pid, (void *)NT_PRSTATUS, &io) != 0) fail("PTRACE_GETREGSET");
     return regs.pc;
@@ -71,7 +77,7 @@ static void set_pc(pid_t pid, uint64_t pc) {
     regs.rip = pc;
     if (ptrace(PTRACE_SETREGS, pid, 0, &regs) != 0) fail("PTRACE_SETREGS");
 #else
-    struct user_pt_regs regs;
+    struct user_regs_struct regs; /* glibc's <sys/user.h>: x0-x30, sp, pc, pstate */
     struct iovec io = {&regs, sizeof regs};
     if (ptrace(PTRACE_GETREGSET, pid, (void *)NT_PRSTATUS, &io) != 0) fail("PTRACE_GETREGSET");
     regs.pc = pc;
@@ -186,6 +192,8 @@ int main(int argc, char **argv) {
     const char *exe = argv[1];
     uint64_t start = strtoull(argv[2], NULL, 16);
     uint64_t stop = strtoull(argv[3], NULL, 16);
+    const char *until = getenv("WINDOW_TRACE_UNTIL_LIBRARY");
+    int until_library = until != NULL && until[0] != '\0';
     Dl_info info;
     if (dladdr((void *)&__errno_location, &info) == 0) fail("dladdr __errno_location");
     char libc[PATH_MAX];
@@ -241,6 +249,7 @@ int main(int argc, char **argv) {
             printf("exe %llx\n", (unsigned long long)(pc - delta));
         } else {
             printf("lib %s %llx\n", path, (unsigned long long)(pc - base));
+            if (until_library) break;
         }
         if (ptrace(PTRACE_SINGLESTEP, tid, 0, 0) != 0) fail("PTRACE_SINGLESTEP");
         for (;;) {
