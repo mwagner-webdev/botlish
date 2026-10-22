@@ -59,8 +59,8 @@ test ht-module-sections {a program that loads a module prints the module's secti
     lassign [htRoundTrip $hir] text read
     set lines [split $text \n]
     set at [lsearch -regexp $lines {^module }]
-    set s [dict get $hir modules abi]
-    list [regexp "^module abi $s binds b\[0-9\]+ std::abi::i8, " [lindex $lines $at]] \
+    set s [dict get $hir modules std::abi]
+    list [regexp "^module std::abi $s binds b\[0-9\]+ std::abi::i8, " [lindex $lines $at]] \
         [regexp {^    e[0-9]+ bind b[0-9]+ std::abi::i8 } [lindex $lines $at+1]] \
         [regexp {^e[0-9]+ bind b[0-9]+ r } [lindex [lsearch -all -inline -regexp $lines {^e[0-9]+ }] 0]] \
         [expr {[dict get $read modules] eq [dict get $hir modules]}] \
@@ -75,11 +75,11 @@ test ht-module-sections-run {the read HIR of a program that loads a module runs 
     htOutcomes $hir $read {interp compile cranelift-generic cranelift}
 } -result {interp 1 6 compile 1 6 cranelift-generic 1 6 cranelift 1 6}
 
-test ht-module-section-order {module sections are printed in the order they run, a module before every module that imports it (binary after abi, which it imports), and the read HIR runs a binary layout program to the built one's outcome} -constraints nativeBuilt -body {
+test ht-module-section-order {module sections are printed in the order they run, a module before every module that imports it (std::binary after std::abi, which it imports), and the read HIR runs a binary layout program to the built one's outcome} -constraints nativeBuilt -body {
     set hir [htHir $::htBinary]
     lassign [htRoundTrip $hir] text read
     set modules [lmap line [lsearch -all -inline -regexp [split $text \n] {^module }] {lindex $line 1}]
-    list [expr {[lsearch -exact $modules abi] < [lsearch -exact $modules binary]}] \
+    list [expr {[lsearch -exact $modules std::abi] < [lsearch -exact $modules std::binary]}] \
         [expr {$modules eq [dict keys [dict get $hir modules]]}] \
         [htOutcomes $hir $read {interp compile cranelift-generic cranelift}]
 } -result {1 1 {interp 1 79 compile 1 79 cranelift-generic 1 79 cranelift 1 79}}

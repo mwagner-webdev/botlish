@@ -55,7 +55,9 @@ LIBRARY_ENTRIES = "abi|ascii|binary|byte|compiler|darwin|ffi|float64|io|linux|li
 ESCAPE = r"(?<=\\[nt])"
 # `import` is a word of its own (not the end of `ca-namespace-import`), and
 # an import's words are separated by spaces (a tab is a TSV column).
-IMPORT = re.compile(r"(?:(?<![A-Za-z0-9_-])|%s)(import(?: +type)? +)(?=(?:%s)(?![A-Za-z0-9_]))" % (ESCAPE, SEG))
+# Not a Tcl variable (`$import windows-x86_64`), and not a longer word after
+# the namespace (a target name: `windows-x86_64`).
+IMPORT = re.compile(r"(?:(?<![A-Za-z0-9_$-])|%s)(import(?: +type)? +)(?=(?:%s)(?![A-Za-z0-9_-]))" % (ESCAPE, SEG))
 # A member may be a Tcl substitution in a generated program (`abi::${ctor}`).
 QUALIFIED = re.compile(r"(?:(?<![A-Za-z0-9_:$])|%s)(?=(?:%s)::[A-Za-z_$])" % (ESCAPE, SEG))
 QUOTED = re.compile(r"((?:namespace|module) \\?\")(?=(?:%s)\\?\")" % SEG)
@@ -77,7 +79,7 @@ def compile_rules(segments):
     """The rules for the namespace first segments SEGMENTS."""
     seg = "|".join(sorted(segments, key=len, reverse=True))
     return (
-        re.compile(r"(?:(?<![A-Za-z0-9_-])|%s)(import(?: +type)? +)(?=(?:%s)(?![A-Za-z0-9_]))" % (ESCAPE, seg)),
+        re.compile(r"(?:(?<![A-Za-z0-9_$-])|%s)(import(?: +type)? +)(?=(?:%s)(?![A-Za-z0-9_-]))" % (ESCAPE, seg)),
         re.compile(r"(?:(?<![A-Za-z0-9_:$])|%s)(?=(?:%s)::[A-Za-z_$])" % (ESCAPE, seg)),
         re.compile(r"((?:namespace|module) \\?\")(?=(?:%s)\\?\")" % seg),
         re.compile(r"(\\?\")(?=(?:%s)\\?\" namespace)" % seg),

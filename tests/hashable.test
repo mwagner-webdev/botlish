@@ -165,7 +165,10 @@ fn twice(n: int) -> int:
 # ---------------------------------------------------------------------------
 # Public hash compatibility: the exact values the public hash had before this
 # milestone (taken on the tree it started from, every backend agreeing),
-# unchanged by the shared canonical walk.
+# unchanged by the shared canonical walk. The byte storage values (the last
+# group's first five) were pinned again when the standard library moved under
+# the root std (STD-NAMESPACE.md): a struct's hash covers its canonical name,
+# std::abi::bytes::Bytes and std::abi::bytes::MutableBytes since.
 
 set ::hbPinnedProgram {import std::abi
 import std::abi::bytes
@@ -210,7 +213,7 @@ stores = [mk(""), mk("AB"), mk("héllo"), std::abi::bytes::from_bytes(mk("k1")),
 [hashes(small), hashes(big), hashes(computed), hashes(chars), hashes(strs), hashes(others), hashes(floats), hashes(structs), hashes(stores)]
 }
 
-set ::hbPinnedValues {[[590701660006484765, 590700560494856554, 1841256570420575205, 590693963425087288, 590691764401830866, 1837464354815632366, 1232241922609654511, 1829856833861554257, 1071077706910118458, 937610149661694189, 1126012111659584930, 688401425616871681, 676432798871476410, 907240050157444141, 175261749706404696, 175265048241289329, 139588933943155570, 623792353967692727, 391732480576983117], [623789055432808094, 391731381065354906, 2225555181428685637, 2225556280940313848, 707785774613091011, 707784675101462800, 2298452577807004200, 2007587621811679870, 416805031419869078, 416803931908240867, 1994653631623632162, 427091923338802545, 999613055982882793, 502245503115030836, 502248801649915469, 1353579516241496858, 2030847885960056155, 877126669977568183], [175261749706404696, 623792353967692727, 623789055432808094, 391732480576983117, 391731381065354906, 2225556280940313848, 416805031419869078, 1806367023798207000, 502245503115030836, 502248801649915469, 188015491597053100], [520338485003615157, 520330788422217680, 532739876655747101, 529788787446196452, 2169672265349400239, 601159812241541785, 1062334392747540938, 1345164029743383199], [1108936970115069484, 589763776587810007, 589711000029655879, 1157781450803295718, 161697780529065798, 1807445379848190912, 750001533518624772], [592596118541513868, 592597218053142079, 1108939169138325906, 1755045699346780531, 209653597448554385, 911644047884110197, 1475817003125096609, 1913505980942695101, 1110203966925749856, 405226008021937533, 441613374959686544], [1418026610602017291, 1616938159710682290, 1624678721571773930, 1624819459060184938, 1421923279811640175, 1570175326880950354, 6271737828421670, 60061494136369881, 977552786646800065], [40759426256795460, 372398025987676, 1750116610682253287, 1979528161859881862, 1616162032485106622, 1616162032485106622, 96595561622788695, 264212334118064381, 1503248951382783807, 2244796678099108584, 190789444800304525, 729460995536187665, 1446266572572458142, 2100847374582763991, 385120668595605514], [1190028771226210786, 2248776705808866443, 405943855183386752, 56799662987439511, 2233955353718004115, 1057024671619750778, 1057024671619750778, 1137679504874620389, 104850625164932166]]}
+set ::hbPinnedValues {[[590701660006484765, 590700560494856554, 1841256570420575205, 590693963425087288, 590691764401830866, 1837464354815632366, 1232241922609654511, 1829856833861554257, 1071077706910118458, 937610149661694189, 1126012111659584930, 688401425616871681, 676432798871476410, 907240050157444141, 175261749706404696, 175265048241289329, 139588933943155570, 623792353967692727, 391732480576983117], [623789055432808094, 391731381065354906, 2225555181428685637, 2225556280940313848, 707785774613091011, 707784675101462800, 2298452577807004200, 2007587621811679870, 416805031419869078, 416803931908240867, 1994653631623632162, 427091923338802545, 999613055982882793, 502245503115030836, 502248801649915469, 1353579516241496858, 2030847885960056155, 877126669977568183], [175261749706404696, 623792353967692727, 623789055432808094, 391732480576983117, 391731381065354906, 2225556280940313848, 416805031419869078, 1806367023798207000, 502245503115030836, 502248801649915469, 188015491597053100], [520338485003615157, 520330788422217680, 532739876655747101, 529788787446196452, 2169672265349400239, 601159812241541785, 1062334392747540938, 1345164029743383199], [1108936970115069484, 589763776587810007, 589711000029655879, 1157781450803295718, 161697780529065798, 1807445379848190912, 750001533518624772], [592596118541513868, 592597218053142079, 1108939169138325906, 1755045699346780531, 209653597448554385, 911644047884110197, 1475817003125096609, 1913505980942695101, 1110203966925749856, 405226008021937533, 441613374959686544], [1418026610602017291, 1616938159710682290, 1624678721571773930, 1624819459060184938, 1421923279811640175, 1570175326880950354, 6271737828421670, 60061494136369881, 977552786646800065], [40759426256795460, 372398025987676, 1750116610682253287, 1979528161859881862, 1616162032485106622, 1616162032485106622, 96595561622788695, 264212334118064381, 1503248951382783807, 2244796678099108584, 190789444800304525, 729460995536187665, 1446266572572458142, 2100847374582763991, 385120668595605514], [143021005025162013, 1574712802181280928, 474976159608030643, 1445537933112513358, 1324377306295612266, 1057024671619750778, 1057024671619750778, 1137679504874620389, 104850625164932166]]}
 
 test hb-public-hash-pinned {the public hash of 107 values at every kind and representation edge is byte for byte the value it had before this milestone, on every backend} -body {
     sourceAgree $::hbPinnedProgram
@@ -310,7 +313,7 @@ test hb-trait-storage {Hashable is not storable, as no trait is: a List[Hashable
 test hb-trait-visible-everywhere {Hashable is named by its bare name in every module, with no import, like a built-in type} -body {
     withPrivateLibrary {
         hbWriteModules [list keys.bot "fn digest(x: Hashable) -> int:\n    hash(x)\n"]
-        set result [sourceAgree "import keys\n\nkeys::digest(\[1, 2\]) == hash(\[1, 2\])\n"]
+        set result [sourceAgree "import std::keys\n\nstd::keys::digest(\[1, 2\]) == hash(\[1, 2\])\n"]
     }
     set result
 } -result {value true}
@@ -479,8 +482,8 @@ test hb-witness-requires-total-equality {a witness needs total equality as well 
 test hb-witness-not-user-definable {no source declaration makes a type Hashable or takes it away: a module's own `hash` function implements nothing, and a struct with a function field stays outside however its module spells it} -body {
     withPrivateLibrary {
         hbWriteModules [list model.bot "struct Holder:\n    f: Fn{args: \[int\], return: int}\n\nfn hash(value: Holder) -> int:\n    1\n\nstruct Plain:\n    n: int\n"]
-        set rejected [hbRejection "import model\n\nfn fingerprint(x: Hashable) -> int:\n    hash(x)\n\nfn inc(n: int) -> int:\n    n + 1\n\nfingerprint(model::Holder {f: inc})\n"]
-        set accepted [sourceAgree "import model\n\nfn fingerprint(x: Hashable) -> int:\n    hash(x)\n\nfingerprint(model::Plain {n: 3}) == hash(model::Plain {n: 3})\n"]
+        set rejected [hbRejection "import std::model\n\nfn fingerprint(x: Hashable) -> int:\n    hash(x)\n\nfn inc(n: int) -> int:\n    n + 1\n\nfingerprint(std::model::Holder {f: inc})\n"]
+        set accepted [sourceAgree "import std::model\n\nfn fingerprint(x: Hashable) -> int:\n    hash(x)\n\nfingerprint(std::model::Plain {n: 3}) == hash(std::model::Plain {n: 3})\n"]
     }
     list [lindex $rejected 0] $accepted
 } -result {TRAIT-NOT-SATISFIED {value true}}
@@ -662,14 +665,14 @@ fn e6(a: P, b) -> bool:
 set ::hbSlotMayError [if {[testConstraint nativeDepthChecked]} {string cat true} else {string cat false}]
 
 test hb-nir-table-hash-total {the table hash of an admitted (Hashable) argument is tablehashtotal: no error edge, and the function making it is may_error=false and no safepoint (slot, which calls it, is may_error=true where the depth check makes its Botlish call fallible, nativeDepthChecked)} -body {
-    set nir [hbNir [string cat "import hashfix\n" $::hbPrelude {fn slot(p: P) -> int:
-    hashfix::keyed(p)
+    set nir [hbNir [string cat "import std::hashfix\n" $::hbPrelude {fn slot(p: P) -> int:
+    std::hashfix::keyed(p)
 
-[slot(P {x: 1, y: 2}), hashfix::keyed("s1"), hashfix::keyed(7)]
+[slot(P {x: 1, y: 2}), std::hashfix::keyed("s1"), std::hashfix::keyed(7)]
 }] -specialize 0]
     set calls [native::Driver calls $nir]
     list [regexp -all {op tablehashtotal} $nir] [regexp -all {op tablehash } $nir] \
-        [hbMayError $nir slot] [hbMayError $nir hashfix::keyed<P>] [hbMayError $nir hashfix::keyed<str>] \
+        [hbMayError $nir slot] [hbMayError $nir std::hashfix::keyed<P>] [hbMayError $nir std::hashfix::keyed<str>] \
         [lsort -unique [lmap line $calls {if {![string match *keyed* $line]} continue; lindex [regexp -inline {may_gc=(\w+)} $line] 1}]]
 } -result [list 3 0 $::hbSlotMayError false false false]
 
@@ -717,39 +720,39 @@ test hb-keyed-oracle {under a fixed test key, every backend computes exactly the
     set exprs {}
     set jsons {}
     foreach {e j} $cases {
-        lappend exprs "\[hash($e), hashfix::keyed($e)\]"
+        lappend exprs "\[hash($e), std::hashfix::keyed($e)\]"
         lappend jsons $j
     }
-    set outcome [keyedAgree "import hashfix\n$::hbPrelude\[[join $exprs {, }]\]\n" $::hbKey]
+    set outcome [keyedAgree "import std::hashfix\n$::hbPrelude\[[join $exprs {, }]\]\n" $::hbKey]
     set expected "\[[join [lmap line [hbOracle $jsons $::hbKey] {format {[%s, %s]} {*}$line}] {, }]\]"
     expr {$outcome eq [list value $expected] ? "agree" : "$outcome != $expected"}
 } -result agree
 
 test hb-keyed-coherence {equal values hash equally under the table hash however they were made: sets in any order, anonymous struct fields in any order, an Int computed or written, a String built or written} -body {
-    keyedAgree "import hashfix\nimport std::str\n$::hbPrelude\[
-    hashfix::keyed(std::immutable_set::from_list(\[1, 2, 3\])) == hashfix::keyed(std::immutable_set::from_list(\[3, 1, 2, 1\])),
-    hashfix::keyed({a: 1, b: \"x2\"}) == hashfix::keyed({b: \"x2\", a: 1}),
-    hashfix::keyed(shift_left(1, 62)) == hashfix::keyed(4611686018427387904),
-    hashfix::keyed(shift_left(1, 62) - shift_left(1, 62) + 5) == hashfix::keyed(5),
-    hashfix::keyed(std::str::concat(\"ab\", \"cd\")) == hashfix::keyed(\"abcd\"),
-    hashfix::keyed(\[P {x: 1, y: 2}\]) == hashfix::keyed(\[P {x: 1, y: 2}\]),
-    hashfix::keyed(1) != hashfix::keyed(\"1\")
+    keyedAgree "import std::hashfix\nimport std::str\n$::hbPrelude\[
+    std::hashfix::keyed(std::immutable_set::from_list(\[1, 2, 3\])) == std::hashfix::keyed(std::immutable_set::from_list(\[3, 1, 2, 1\])),
+    std::hashfix::keyed({a: 1, b: \"x2\"}) == std::hashfix::keyed({b: \"x2\", a: 1}),
+    std::hashfix::keyed(shift_left(1, 62)) == std::hashfix::keyed(4611686018427387904),
+    std::hashfix::keyed(shift_left(1, 62) - shift_left(1, 62) + 5) == std::hashfix::keyed(5),
+    std::hashfix::keyed(std::str::concat(\"ab\", \"cd\")) == std::hashfix::keyed(\"abcd\"),
+    std::hashfix::keyed(\[P {x: 1, y: 2}\]) == std::hashfix::keyed(\[P {x: 1, y: 2}\]),
+    std::hashfix::keyed(1) != std::hashfix::keyed(\"1\")
 \]\n" $::hbKey
 } -result {value {[true, true, true, true, true, true, true]}}
 
 test hb-keyed-process-key {with the production key (drawn once per process): one value hashes the same every time in a run, equal values equally, on every backend} -body {
-    keyedAgree "import hashfix\n$::hbPrelude
+    keyedAgree "import std::hashfix\n$::hbPrelude
 fn many(n: int) -> List\[int\]:
     loop i from 0 to n:
-        hashfix::keyed(P {x: 3, y: 4})
+        std::hashfix::keyed(P {x: 3, y: 4})
 
 xs = many(50)
-\[std::immutable_set::from_list(xs) == std::immutable_set::from_list(\[hashfix::keyed(P {x: 3, y: 4})\]), hashfix::keyed(\[1, 2\]) == hashfix::keyed(\[1, 2\])\]
+\[std::immutable_set::from_list(xs) == std::immutable_set::from_list(\[std::hashfix::keyed(P {x: 3, y: 4})\]), std::hashfix::keyed(\[1, 2\]) == std::hashfix::keyed(\[1, 2\])\]
 "
 } -result {value {[true, true]}}
 
 test hb-keyed-differs-across-processes {smoke test of the production key: two native runs (two processes, two drawn keys) of 64 values do not give all 64 table hashes equal (each value is free to collide; all 64 together only with probability 2^-3900)} -constraints nativeBuilt -body {
-    set source "import hashfix\nloop i from 0 to 64:\n    hashfix::keyed(i)\n"
+    set source "import std::hashfix\nloop i from 0 to 64:\n    std::hashfix::keyed(i)\n"
     withPrivateLibrary {
         hbWriteModules [list hashfix.bot $::hbFixture]
         set hir [surface::compile $source t.bot -warnings off]
@@ -760,17 +763,17 @@ test hb-keyed-differs-across-processes {smoke test of the production key: two na
 } -result {64 1}
 
 test hb-keyed-not-post-mixed {two Ints with one whole 64-bit public FNV state (audit/hashable/tools/collide.rs) collide under the public hash, also nested in a List or a struct field -- so they would under any function of the public hash and a key -- and not under the table hash} -body {
-    keyedAgree "import hashfix\n$::hbPrelude
+    keyedAgree "import std::hashfix\n$::hbPrelude
 a = 17384044247497657079
 b = 13834495523901255922
 \[a == b, hash(a) == hash(b), hash(\[a\]) == hash(\[b\]), hash(P {x: a, y: 0}) == hash(P {x: b, y: 0}),
- hashfix::keyed(a) == hashfix::keyed(b), hashfix::keyed(\[a\]) == hashfix::keyed(\[b\]), hashfix::keyed(P {x: a, y: 0}) == hashfix::keyed(P {x: b, y: 0})\]
+ std::hashfix::keyed(a) == std::hashfix::keyed(b), std::hashfix::keyed(\[a\]) == std::hashfix::keyed(\[b\]), std::hashfix::keyed(P {x: a, y: 0}) == std::hashfix::keyed(P {x: b, y: 0})\]
 " $::hbKey
 } -result {value {[false, true, true, true, false, false, false]}}
 
 test hb-keyed-collision-corpus {the hash-table experiment's int-collide keys (1024 Ints whose public hash is 0 mod 1024: one bucket of 1024) spread under the table hash like random keys (fixed test key; expected about 647 buckets, max load about 5)} -body {
     set keys [string trim [core::ReadFile [file join $::projectRoot audit hashable data int-collide-1024.txt]]]
-    set source "import hashfix\nkeys = \[[join $keys {, }]\]\npublic = loop k in keys:\n    mod(hash(k), 1024)\nkeyed = loop k in keys:\n    mod(hashfix::keyed(k), 1024)\n\[public, keyed\]\n"
+    set source "import std::hashfix\nkeys = \[[join $keys {, }]\]\npublic = loop k in keys:\n    mod(hash(k), 1024)\nkeyed = loop k in keys:\n    mod(std::hashfix::keyed(k), 1024)\n\[public, keyed\]\n"
     set outcome [keyedAgree $source $::hbKey {interp cranelift}]
     lassign [lindex [string map {, "" [ "{" ] "}"} [lindex $outcome 1]] 0] public keyed
     set loads [dict create]
@@ -814,12 +817,12 @@ test hb-internal-not-a-method {no method syntax reaches it: it is nomethod, and 
 
 test hb-internal-not-exported {it is no ordinary standard library export: no Compilerpedia reference topic names it, and help does not list it} -body {
     set generated [core::ReadFile [file join $::projectRoot compilerpedia generated stdlib.topic]]
-    list [regexp {table_hash} $generated] [core::native::isInternalNamespace table_hash] [core::native::isInternal std::table_hash::of] [core::native::isInternal hash]
+    list [regexp {table_hash} $generated] [core::native::isInternalNamespace std::table_hash] [core::native::isInternal std::table_hash::of] [core::native::isInternal hash]
 } -result {0 1 1 0}
 
 test hb-internal-standard-module-calls {a standard library module may import and call it (the privileged fixture), and only with a Hashable argument} -body {
-    list [keyedAgree "import hashfix\nhashfix::keyed(\[1, 2\]) == hashfix::keyed(\[1, 2\])\n" $::hbKey] \
-        [lindex [hbRejection "import loose\n\nloose::k(1)\n" [list loose.bot "import std::table_hash\n\nfn k(x):\n    std::table_hash::of(x)\n"]] 0]
+    list [keyedAgree "import std::hashfix\nstd::hashfix::keyed(\[1, 2\]) == std::hashfix::keyed(\[1, 2\])\n" $::hbKey] \
+        [lindex [hbRejection "import std::loose\n\nstd::loose::k(1)\n" [list loose.bot "import std::table_hash\n\nfn k(x):\n    std::table_hash::of(x)\n"]] 0]
 } -result {{value true} TRAIT-NOT-SATISFIED}
 
 test hb-internal-no-function-value {even in a standard library module it is only ever called: an alias, an argument or a result is INTERNAL-INTRINSIC-VALUE} -body {
@@ -828,7 +831,7 @@ test hb-internal-no-function-value {even in a standard library module it is only
         "fn apply(f, x):\n    f(x)\n\nfn k(x: int) -> int:\n    apply(std::table_hash::of, x)\n"
         "fn k():\n    std::table_hash::of\n"
     } {
-        lindex [hbRejection "import leak\n\n1\n" [list leak.bot "import std::table_hash\n\n$body"]] 0
+        lindex [hbRejection "import std::leak\n\n1\n" [list leak.bot "import std::table_hash\n\n$body"]] 0
     }
 } -result {INTERNAL-INTRINSIC-VALUE INTERNAL-INTRINSIC-VALUE INTERNAL-INTRINSIC-VALUE}
 
@@ -878,9 +881,9 @@ test hb-secret-not-a-value {the key is runtime state: no native returns it, and 
 test hb-allocation-free {the public and the table hash of an Int, a String, a struct and a nested struct allocate no heap object natively} -constraints nativeBuilt -body {
     # The same values made (and the same one result List) with and without
     # the eight hashes: what the hashes add.
-    set prefix [string cat "import hashfix\n" $::hbPrelude "s = \"session-key-0042\"\nq = Q {a: P {x: 1, y: 2}, b: s, c: Color::Red}\n"]
+    set prefix [string cat "import std::hashfix\n" $::hbPrelude "s = \"session-key-0042\"\nq = Q {a: P {x: 1, y: 2}, b: s, c: Color::Red}\n"]
     set base [hbHir [string cat $prefix "\[q, q.a, s, 7\]\n"]]
-    set hashed [hbHir [string cat $prefix "\[q, q.a, s, 7, hash(7), hashfix::keyed(7), hash(s), hashfix::keyed(s), hash(q.a), hashfix::keyed(q.a), hash(q), hashfix::keyed(q)\]\n"]]
+    set hashed [hbHir [string cat $prefix "\[q, q.a, s, 7, hash(7), std::hashfix::keyed(7), hash(s), std::hashfix::keyed(s), hash(q.a), std::hashfix::keyed(q.a), hash(q), std::hashfix::keyed(q)\]\n"]]
     set a [dict get [native::allocationReport $base summary] total allocations]
     set b [dict get [native::allocationReport $hashed summary] total allocations]
     list [expr {$b - $a}] [regexp -all {op (hashtotal|tablehashtotal)} [dict get [native::lower::program $hashed] text]]

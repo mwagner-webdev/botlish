@@ -198,19 +198,19 @@ hello():
 # The platform namespace (core/cabi.tcl's platforms, surface/modules.tcl's
 # PlatformCheck)
 
-test di-platform-rule {darwin and every namespace under it are the macOS platform's, by the target table's designation: they compile for macos-aarch64 (and macos-x86_64, a macOS target), and are UNSUPPORTED-PLATFORM for every Linux and Windows target, naming the namespace root; the Linux platform's namespaces stay refused for macOS, and a namespace only named like a system is no platform's} -body {
+test di-platform-rule {std::darwin and every namespace under it are the macOS platform's, by the target table's designation: they compile for macos-aarch64 (and macos-x86_64, a macOS target), and are UNSUPPORTED-PLATFORM for every Linux and Windows target, naming the namespace root; the Linux platform's namespaces stay refused for macOS, and a namespace only named like a system is no platform's} -body {
     set results {}
-    foreach import {darwin std::darwin::io std::darwin::path} {
+    foreach import {std::darwin std::darwin::io std::darwin::path} {
         foreach target {macos-aarch64 macos-x86_64 linux-x86_64 linux-aarch64 windows-x86_64} {
             lappend results $import $target [lindex [diRejection "import $import\n1\n" $target] 0]
         }
     }
-    foreach import {linux std::linux::io std::linux::path} {
+    foreach import {std::linux std::linux::io std::linux::path} {
         lappend results $import macos-aarch64 [lindex [diRejection "import $import\n1\n" macos-aarch64] 0]
     }
     list [core::cabi::platformOf std::darwin::io] [core::cabi::platformOf std::linux::io] [core::cabi::platformOf macos] $results \
         [lindex [diRejection "import std::darwin::io\n1\n" linux-x86_64] 1]
-} -result [list macos linux "" {darwin macos-aarch64 accepted darwin macos-x86_64 accepted darwin linux-x86_64 UNSUPPORTED-PLATFORM darwin linux-aarch64 UNSUPPORTED-PLATFORM darwin windows-x86_64 UNSUPPORTED-PLATFORM std::darwin::io macos-aarch64 accepted std::darwin::io macos-x86_64 accepted std::darwin::io linux-x86_64 UNSUPPORTED-PLATFORM std::darwin::io linux-aarch64 UNSUPPORTED-PLATFORM std::darwin::io windows-x86_64 UNSUPPORTED-PLATFORM std::darwin::path macos-aarch64 accepted std::darwin::path macos-x86_64 accepted std::darwin::path linux-x86_64 UNSUPPORTED-PLATFORM std::darwin::path linux-aarch64 UNSUPPORTED-PLATFORM std::darwin::path windows-x86_64 UNSUPPORTED-PLATFORM linux macos-aarch64 UNSUPPORTED-PLATFORM std::linux::io macos-aarch64 UNSUPPORTED-PLATFORM std::linux::path macos-aarch64 UNSUPPORTED-PLATFORM} {namespace "std::darwin::io" belongs to the macOS platform (the standard namespace darwin and every namespace under it), which is unavailable for target linux-x86_64 (Linux on x86_64): a macOS module is never chosen for, mapped to or substituted on another operating system, whatever the architecture; compile for a macOS target (-target macos-x86_64) or import no macOS namespace}]
+} -result [list macos linux "" {std::darwin macos-aarch64 accepted std::darwin macos-x86_64 accepted std::darwin linux-x86_64 UNSUPPORTED-PLATFORM std::darwin linux-aarch64 UNSUPPORTED-PLATFORM std::darwin windows-x86_64 UNSUPPORTED-PLATFORM std::darwin::io macos-aarch64 accepted std::darwin::io macos-x86_64 accepted std::darwin::io linux-x86_64 UNSUPPORTED-PLATFORM std::darwin::io linux-aarch64 UNSUPPORTED-PLATFORM std::darwin::io windows-x86_64 UNSUPPORTED-PLATFORM std::darwin::path macos-aarch64 accepted std::darwin::path macos-x86_64 accepted std::darwin::path linux-x86_64 UNSUPPORTED-PLATFORM std::darwin::path linux-aarch64 UNSUPPORTED-PLATFORM std::darwin::path windows-x86_64 UNSUPPORTED-PLATFORM std::linux macos-aarch64 UNSUPPORTED-PLATFORM std::linux::io macos-aarch64 UNSUPPORTED-PLATFORM std::linux::path macos-aarch64 UNSUPPORTED-PLATFORM} {namespace "std::darwin::io" belongs to the macOS platform (the standard namespace std::darwin and every namespace under it), which is unavailable for target linux-x86_64 (Linux on x86_64): a macOS module is never chosen for, mapped to or substituted on another operating system, whatever the architecture; compile for a macOS target (-target macos-x86_64) or import no macOS namespace}]
 
 test di-platform-no-way-around {a Darwin namespace reaches no other target by another route: a type import of it is refused like an import, the HIR of a Darwin program records its target and its interchange text is refused for any other (HIR INTERCHANGE TARGET), and a native backend refuses to run it on a host of another target (NATIVE TARGET) -- here, unless the host is macOS arm64} -body {
     set typeImport [lindex [diRejection "import type std::darwin::io::DarwinIO\n1\n" linux-x86_64] 0]
@@ -313,18 +313,18 @@ test di-selection-diagnostics {context selection stays static and exact with Dar
         [lindex [diRejection "import std::io\nimport std::str\ntype Tag = Int in 0..0\n[string map {{text: str} {text: int}} $::otherContext]\n${call}with context Other {tag: 0}\n$handled"] 0]
 } -result {MISSING-CONTEXT AMBIGUOUS-CONTEXT-IMPLEMENTATION MISSING-CONTEXT}
 
-test di-authority {the raw layer is direct, the context layer is not: stdlib/darwin.bot is a designated direct module, std::darwin::io is contextualized (each of its direct calls mediated by its own DarwinIO), io and a program using io and std::darwin::io ordinary; a program calling std::darwin::write itself must be marked direct (DIRECT), and is accepted marked; a module that only uses DarwinIO marked direct is STALE-DIRECT-MODULE} -body {
+test di-authority {the raw layer is direct, the context layer is not: stdlib/darwin.bot is a designated direct module, std::darwin::io is contextualized (each of its direct calls mediated by its own DarwinIO), std::io and a program using std::io and std::darwin::io ordinary; a program calling std::darwin::write itself must be marked direct (DIRECT), and is accepted marked; a module that only uses DarwinIO marked direct is STALE-DIRECT-MODULE} -body {
     set hir [diHir "import std::io\nimport std::darwin::io\nwith context std::darwin::io::create()\nstd::io::print(\"x\"):\n    on std::io::WriteFailed:\n        unit\n"]
     set statuses [dict create]
     dict for {unit u} [dict get $hir direct units] {
-        if {$unit in {darwin std::darwin::io io}} {
+        if {$unit in {std::darwin std::darwin::io std::io}} {
             dict set statuses $unit [dict get $u status]
         }
     }
     set raw "import std::abi\nimport std::abi::bytes\nimport std::darwin\nstd::darwin::write(1, std::abi::bytes::from_list(\[\])).count\n"
     list [lsort -stride 2 [dict get $statuses]] [lindex [diRejection $raw] 0] [diRejection "direct module\n$raw"] \
         [lindex [diRejection "direct module\nimport std::io\nimport std::darwin::io\nwith context std::darwin::io::create()\nstd::io::print(\"x\"):\n    on std::io::WriteFailed:\n        unit\n"] 0]
-} -result {{darwin direct std::darwin::io contextualized io ordinary} DIRECT accepted STALE-DIRECT-MODULE}
+} -result {{std::darwin direct std::darwin::io contextualized std::io ordinary} DIRECT accepted STALE-DIRECT-MODULE}
 
 test di-tcl-backends {the Tcl backends verify a Darwin program and run it up to its first C call, which they refuse (NATIVE-ONLY): no Tcl channel imitates libSystem} -body {
     set hir [diHir $::helloDarwin]

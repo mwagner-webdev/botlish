@@ -1245,7 +1245,7 @@ test me-nomethod-native-default-off {exactly the five natives the warning-driven
         }
     }
     lsort $marked
-} -result {binary#element binary#emit binary#load binary#load_array binary#store_element binary#view_field std::binary::element std::binary::layout_alignment std::binary::layout_length std::binary::native::edit std::binary::native::view std::binary::parse std::binary::read std::binary::store std::binary::store_element std::binary::write std::binary::write_foreign bit_and bit_or bit_xor std::mutable_array::copy std::mutable_array::create std::table_hash::of}
+} -result {binary#element binary#emit binary#load binary#load_array binary#store_element binary#view_field bit_and bit_or bit_xor std::binary::element std::binary::layout_alignment std::binary::layout_length std::binary::native::edit std::binary::native::view std::binary::parse std::binary::read std::binary::store std::binary::store_element std::binary::write std::binary::write_foreign std::mutable_array::copy std::mutable_array::create std::table_hash::of}
 
 # The shipped markings (REFACTOR-WARNINGS-CLEAN.md, P1), one test per marked
 # function: the receiver form is NOMETHOD-CALL with the pinned message, the

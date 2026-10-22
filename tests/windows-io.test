@@ -323,19 +323,19 @@ big():
 # The platform namespace (core/cabi.tcl's platforms, surface/modules.tcl's
 # PlatformCheck)
 
-test wi-platform-rule {windows and every namespace under it are the Windows platform's, by the target table's designation: they compile for windows-x86_64 and for windows-x86_64-gnu (MinGW's environment is a Windows target too), and are UNSUPPORTED-PLATFORM for every Linux and macOS target, naming the namespace root; the other platforms' namespaces stay refused for Windows} -body {
+test wi-platform-rule {std::windows and every namespace under it are the Windows platform's, by the target table's designation: they compile for windows-x86_64 and for windows-x86_64-gnu (MinGW's environment is a Windows target too), and are UNSUPPORTED-PLATFORM for every Linux and macOS target, naming the namespace root; the other platforms' namespaces stay refused for Windows} -body {
     set results {}
-    foreach import {windows std::windows::io} {
+    foreach import {std::windows std::windows::io} {
         foreach target {windows-x86_64 windows-x86_64-gnu linux-x86_64 linux-aarch64 macos-aarch64} {
             lappend results $import $target [lindex [wiRejection "import $import\n1\n" $target] 0]
         }
     }
-    foreach import {linux std::linux::io darwin std::darwin::io} {
-        lappend results $import std::windows-x86_64 [lindex [wiRejection "import $import\n1\n" windows-x86_64] 0]
+    foreach import {std::linux std::linux::io std::darwin std::darwin::io} {
+        lappend results $import windows-x86_64 [lindex [wiRejection "import $import\n1\n" windows-x86_64] 0]
     }
     list [core::cabi::platformOf std::windows::io] [core::cabi::platformOf win32] $results \
         [lindex [wiRejection "import std::windows::io\n1\n" linux-x86_64] 1]
-} -result [list windows "" {windows windows-x86_64 accepted windows windows-x86_64-gnu accepted windows linux-x86_64 UNSUPPORTED-PLATFORM windows linux-aarch64 UNSUPPORTED-PLATFORM windows macos-aarch64 UNSUPPORTED-PLATFORM std::windows::io windows-x86_64 accepted std::windows::io windows-x86_64-gnu accepted std::windows::io linux-x86_64 UNSUPPORTED-PLATFORM std::windows::io linux-aarch64 UNSUPPORTED-PLATFORM std::windows::io macos-aarch64 UNSUPPORTED-PLATFORM linux windows-x86_64 UNSUPPORTED-PLATFORM std::linux::io windows-x86_64 UNSUPPORTED-PLATFORM darwin windows-x86_64 UNSUPPORTED-PLATFORM std::darwin::io windows-x86_64 UNSUPPORTED-PLATFORM} {namespace "std::windows::io" belongs to the Windows platform (the standard namespace windows and every namespace under it), which is unavailable for target linux-x86_64 (Linux on x86_64): a Windows module is never chosen for, mapped to or substituted on another operating system, whatever the architecture; compile for a Windows target (-target windows-x86_64) or import no Windows namespace}]
+} -result [list windows "" {std::windows windows-x86_64 accepted std::windows windows-x86_64-gnu accepted std::windows linux-x86_64 UNSUPPORTED-PLATFORM std::windows linux-aarch64 UNSUPPORTED-PLATFORM std::windows macos-aarch64 UNSUPPORTED-PLATFORM std::windows::io windows-x86_64 accepted std::windows::io windows-x86_64-gnu accepted std::windows::io linux-x86_64 UNSUPPORTED-PLATFORM std::windows::io linux-aarch64 UNSUPPORTED-PLATFORM std::windows::io macos-aarch64 UNSUPPORTED-PLATFORM std::linux windows-x86_64 UNSUPPORTED-PLATFORM std::linux::io windows-x86_64 UNSUPPORTED-PLATFORM std::darwin windows-x86_64 UNSUPPORTED-PLATFORM std::darwin::io windows-x86_64 UNSUPPORTED-PLATFORM} {namespace "std::windows::io" belongs to the Windows platform (the standard namespace std::windows and every namespace under it), which is unavailable for target linux-x86_64 (Linux on x86_64): a Windows module is never chosen for, mapped to or substituted on another operating system, whatever the architecture; compile for a Windows target (-target windows-x86_64) or import no Windows namespace}]
 
 test wi-platform-no-way-around {a Windows program reaches no other target by another route: its HIR records windows-x86_64 and its interchange text is refused for any other target, the MinGW environment's included (HIR INTERCHANGE TARGET), and a native backend refuses to run it on a host of another target (NATIVE TARGET) -- here, unless the host is Windows x86-64} -body {
     set hir [wiHir $::helloWindows]
@@ -423,14 +423,14 @@ test wi-selection-diagnostics {the static selection stays exact: a portable call
     list [lindex $missing 0] [lindex [wiRejection $other] 0]
 } -result {MISSING-CONTEXT AMBIGUOUS-CONTEXT-IMPLEMENTATION}
 
-test wi-authority {no Windows module uses direct authority: every kernel32 call of stdlib/windows.bot retains nothing (each pointer parameter noescape), so windows, std::windows::io and a program using them are ordinary modules -- a program marked `direct module` for using them is STALE-DIRECT-MODULE} -body {
+test wi-authority {no Windows module uses direct authority: every kernel32 call of stdlib/windows.bot retains nothing (each pointer parameter noescape), so std::windows, std::windows::io and a program using them are ordinary modules -- a program marked `direct module` for using them is STALE-DIRECT-MODULE} -body {
     set hir [wiHir $::rawText]
     set statuses {}
     dict for {unit u} [dict get $hir direct units] {
-        if {$unit in {windows std::windows::io ""}} { lappend statuses $unit [dict get $u status] }
+        if {$unit in {std::windows std::windows::io ""}} { lappend statuses $unit [dict get $u status] }
     }
     list [lsort -stride 2 $statuses] [lindex [wiRejection "direct module\n\n$::statusText"] 0]
-} -result {{{} ordinary windows ordinary std::windows::io ordinary} STALE-DIRECT-MODULE}
+} -result {{{} ordinary std::windows ordinary std::windows::io ordinary} STALE-DIRECT-MODULE}
 
 test wi-tcl-backends {the Tcl backends have no kernel32 to call: a Windows program's first C call is NATIVE-ONLY on interp and compile, never imitated with a Tcl channel} -body {
     set hir [wiHir $::statusText]

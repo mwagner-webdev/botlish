@@ -3778,21 +3778,23 @@ copied value is a List of exactly N elements (FIXED-LAYOUT-ARRAYS.md).
 There are no bitfields, variable-length tails or zero-length arrays in a
 layout; overlapping interpretations are a union layout's (LAYOUT-UNIONS.md).
 
-A field may be C's float or double (std::ffi::c::Float, 4 bytes; std::ffi::c::Double,
-8), its value a Float64. A read of one -- std::binary::parse, std::binary::read,
-std::binary::load, std::binary::element, a view's field -- fails with the declared
+A field may be C's float or double (std::ffi::c::Float, 4 bytes;
+std::ffi::c::Double, 8), its value a Float64. A read of one --
+std::binary::parse, std::binary::read, std::binary::load,
+std::binary::element, a view's field -- fails with the declared
 NonFiniteFloat when its bits are a NaN or an infinity (negative zero reads
 as 0.0); a write, store or emit of a float rounds the Float64 to nearest,
 ties to even, and fails with NonFiniteFloat when it overflows the float,
 before a byte is written. A call is charged NonFiniteFloat only when it
-reads a float or a double or writes a float: the errors listed below
-include it for those calls alone (concept.c-floats).
+reads a float or a double or writes a float: the errors listed below include
+it for those calls alone (concept.c-floats).
 
-A field may be a C pointer (std::ffi::c::Ptr[T] or std::ffi::c::FnPtr[F], of the
-target's pointer width). Such a layout is native-only: bytes never become
-a pointer, so std::binary::parse and std::binary::emit of it are LAYOUT-NATIVE-ONLY,
-and it is read from live native memory through a NativeView[L]
-(std::binary::native::view, then its fields or std::binary::load).
+A field may be a C pointer (std::ffi::c::Ptr[T] or std::ffi::c::FnPtr[F], of
+the target's pointer width). Such a layout is native-only: bytes never
+become a pointer, so std::binary::parse and std::binary::emit of it are
+LAYOUT-NATIVE-ONLY, and it is read from live native memory through a
+NativeView[L] (std::binary::native::view, then its fields or
+std::binary::load).
 
 Writes name their field statically, LAYOUT.FIELD or a path through nested
 layouts (Header.origin.x). A record in byte storage the program owns is
@@ -6443,17 +6445,15 @@ stdlib/float64.bot (import std::float64).
 
 Each member is a topic: -help NAME (e.g. -help std::float64::abs).
 
-== NOTES
-The conversions are intrinsics and the bounds (min, max, abs, clamp) the
-ordinary Botlish of stdlib/float64.bot, all reached with `import std::float64`.
-The conversions are the only ones between Float64 and the other number
-types: Botlish never converts implicitly, so an expression mixing an Int
-and a Float64 is rejected until one side is converted (and so is one
-mixing a Float64 and a DecimalRounded value). The bounds never fail: they
-compare and at most negate, so no NonFiniteFloat can arise. There is no
+== NOTES The conversions are intrinsics and the bounds (min, max, abs,
+clamp) the ordinary Botlish of stdlib/float64.bot, all reached with `import
+std::float64`. The conversions are the only ones between Float64 and the
+other number types: Botlish never converts implicitly, so an expression
+mixing an Int and a Float64 is rejected until one side is converted (and so
+is one mixing a Float64 and a DecimalRounded value). The bounds never fail:
+they compare and at most negate, so no NonFiniteFloat can arise. There is no
 rounding mode, no Float64-to-String conversion beyond a program's printed
-result, no math library beyond these, and no bit-level access to a
-Float64.
+result, no math library beyond these, and no bit-level access to a Float64.
 
 @topic stdlib.std::immutable_set::contains
 title: std::immutable_set::contains -- intrinsic of namespace std::immutable_set
@@ -8162,13 +8162,13 @@ stdlib/list.bot (import std::list).
 
 Each member is a topic: -help NAME (e.g. -help std::list::NotFound).
 
-== NOTES
-Four intrinsics (std::list::length, std::list::at, std::list::append and the length
-validator std::list::with_length) and the ordinary Botlish functions of
-stdlib/list.bot built on them. `import std::list` makes both
-callable, qualified (std::list::at(xs, 0)) or as methods (xs.at(0)). A List
-is immutable: append returns a new List and nothing changes one in place
-(a MutableVector is the growable mutable alternative).
+== NOTES Four intrinsics (std::list::length, std::list::at,
+std::list::append and the length validator std::list::with_length) and the
+ordinary Botlish functions of stdlib/list.bot built on them. `import
+std::list` makes both callable, qualified (std::list::at(xs, 0)) or as
+methods (xs.at(0)). A List is immutable: append returns a new List and
+nothing changes one in place (a MutableVector is the growable mutable
+alternative).
 
 There is deliberately no map, filter, reduce, sum, reverse, sort, slice,
 concatenation of two Lists or index-of: a collecting loop
