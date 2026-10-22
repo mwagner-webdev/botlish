@@ -715,7 +715,7 @@ on Linux, the same mutation of the frame-pointer walk, applied by hand:
 the caller's list read as another list's 999s).
 
 The test has the `generate` and the poison since the Windows mutation runs
-(section 7.6). In the first, `walk-stops-at-rust` survived: the test's
+(section 7.7). In the first, `walk-stops-at-rust` survived: the test's
 function-value call was meant to put `rt_call_value`'s Rust frame between
 the two Botlish frames, and in the release build `rt_call_value` has none
 -- it jumps to the closure's code (`jmp *%rax`) -- and no other detector
@@ -742,7 +742,7 @@ check; on Windows aot-facts.
 | `pdata-missing` | no unwind sections: every Botlish frame a leaf to Windows | killed: rust (the object test) | killed: rust (`a_windows_object_has_an_unwind_entry_for_every_function`) |
 | `pdata-end-short` | every entry one byte short of its function | killed: rust | killed: rust (`a_windows_object_has_an_unwind_entry_for_every_function`) |
 | `pdata-unsorted` | the table in declaration order | killed: rust | killed: rust (`a_windows_object_has_an_unwind_entry_for_every_function`) |
-| `pdata-wrong-unwind-info` | every entry naming the first `UNWIND_INFO` | killed: rust, once the object test had frames of two shapes (section 7.6) | killed: rust (`a_windows_object_has_an_unwind_entry_for_every_function`) |
+| `pdata-wrong-unwind-info` | every entry naming the first `UNWIND_INFO` | killed: rust, once the object test had frames of two shapes (section 7.7) | killed: rust (`a_windows_object_has_an_unwind_entry_for_every_function`) |
 | `jit-unregistered` | the JIT's code never registered | skipped (Windows only) | killed: rust (the test process died) |
 | `jit-table-deleted-early` | the table deleted right after it is registered | skipped | killed: rust (the test process died) |
 | `jit-stale-registration` | the table never deleted: entries for released code | skipped | killed: rust (the test process died) |
@@ -852,7 +852,7 @@ rebased tree below cover them; tests.yml runs again on the push to main.
   [39857360790](https://github.com/mwagner-webdev/botlish/actions/runs/39857360790)
   (76037d6): every job green, the full tier's mutant item included (its
   first run, on 96e2296, found the mutants' host lists wrong: section
-  7.6).
+  7.7).
 * **Cross builds**: `cargo check --target` for `x86_64-pc-windows-msvc`,
   `aarch64-apple-darwin` and `aarch64-unknown-linux-gnu` (library, driver and
   tests) before each push: evidence that they build, nothing more.
@@ -863,7 +863,20 @@ roots (Linux and macOS included: they never used it), the frame walk's Unix
 half gated `not(windows)`, and test code; their root plans, call effects,
 walk and stack guard are unchanged.
 
-### 7.6 What the Windows runs found
+### 7.6 On main
+
+The milestone pushed to main (241f1d7, rebased onto d158d5c): every
+workflow green -- tests.yml run
+[39863095002](https://github.com/mwagner-webdev/botlish/actions/runs/39863095002)
+with its native GC-stress job (pushes to main only), tests-arm64.yml run
+[39863095045](https://github.com/mwagner-webdev/botlish/actions/runs/39863095045)
+with its own, the Windows workflow run
+[39863095092](https://github.com/mwagner-webdev/botlish/actions/runs/39863095092)
+(smoke, `roots`, acceptance), macOS run
+[39863095060](https://github.com/mwagner-webdev/botlish/actions/runs/39863095060),
+and bench, single executable, c-bindgen, icy-tower and scalar-asm-audit.
+
+### 7.7 What the Windows runs found
 
 | Run | Found | Cause | Fix |
 |---|---|---|---|
