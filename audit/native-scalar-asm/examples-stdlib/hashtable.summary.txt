@@ -2,7 +2,7 @@ source:  examples/stdlib/hashtable.bot
 backend: Cranelift (specialize=1)
 asm:     hashtable.asm
 vcode:   hashtable.vcode
-machine-code bytes: 12747 (per function: 45 489 446 70 103 105 44 255 243 692 1096 381 237 588 730 784 723 801 673 1304 780 1181 830 147)
+machine-code bytes: 12723 (per function: 45 489 446 70 103 105 44 231 243 692 1096 381 237 588 730 784 723 801 673 1304 780 1181 830 147)
 
 functions:
   0 <program entry>: nir-regs=1
