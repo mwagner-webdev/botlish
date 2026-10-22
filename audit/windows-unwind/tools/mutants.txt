@@ -170,7 +170,7 @@
                 }
 >>>>
 
-@@ walk-stops-at-rust the walk ends at the first Rust frame above a Botlish frame: never past rt_call_value
+@@ walk-stops-at-rust the walk ends at the first Rust frame above a Botlish frame: never past mutable_array::generate's
 %% windows-x86_64
 ## native/src/runtime/framewalk.rs
 <<<<

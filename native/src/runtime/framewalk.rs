@@ -190,7 +190,7 @@ fn root_address(_record: usize, caller_fp: usize, entry: u32) -> Option<usize> {
 ///
 /// GC only ever runs from inside `Vm::alloc` (runtime/vm.rs's own doc),
 /// reached only via a runtime-helper call a Botlish frame itself made
-/// (directly, or through further runtime-helper/`rt_call_value` nesting --
+/// (directly, or through further runtime-helper nesting --
 /// see this module's header) -- so "the current frame" at the moment this
 /// is called is always some number of this crate's own Rust frames deep
 /// inside a suspended Botlish call chain, never Botlish code itself. The
@@ -198,10 +198,12 @@ fn root_address(_record: usize, caller_fp: usize, entry: u32) -> Option<usize> {
 /// contributing no roots: `ProgramMap::roots_at` simply returns empty for
 /// a return address that is not Botlish code at all) until it reaches the
 /// first genuinely Botlish frame, then continues climbing *through*
-/// Botlish frames and any further non-Botlish frames alike (a `CallValue`
-/// dispatch nests `rt_call_value` -- non-Botlish -- between two Botlish
-/// frames, so stopping at the first non-Botlish return address would miss
-/// every Botlish frame beyond it), all the way to the outermost Botlish
+/// Botlish frames and any further non-Botlish frames alike (a runtime
+/// function that calls a closure -- `mutable_array::generate`'s, the affine
+/// and mutable-vector bodies -- stays between two Botlish frames, so
+/// stopping at the first non-Botlish return address would miss every
+/// Botlish frame beyond it; `rt_call_value` itself jumps to the closure's
+/// code in an optimized build), all the way to the outermost Botlish
 /// activation and, one level further, the non-Botlish driver that first
 /// called into it (main.rs's `(compiled.entry)(&mut *vm)`) -- where the
 /// walk naturally ends, bounded by `MAX_FRAMES` and the monotonicity check
@@ -269,8 +271,8 @@ pub fn walk_from(map: &ProgramMap, start: usize, stack: Option<&NativeStack>, mu
 ///     `[rbp]` the caller's RBP, `[rbp + 8]` the return address, `rbp + 16`
 ///     the caller's RSP (this module's header);
 ///   * any other frame -- the collector's own, a runtime helper, a Rust
-///     frame between two Botlish ones (`rt_call_value`), the driver below
-///     the program -- is unwound by Windows itself:
+///     frame between two Botlish ones (`mutable_array::generate`'s), the
+///     driver below the program -- is unwound by Windows itself:
 ///     `RtlLookupFunctionEntry` finds its `.pdata` entry and
 ///     `RtlVirtualUnwind` applies it (a function with none is a leaf: the
 ///     return address is at RSP).

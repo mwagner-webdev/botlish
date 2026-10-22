@@ -1096,8 +1096,9 @@ WINDOWS-TOOLCHAIN-CENSUS.md): the driver and runtime built for
   the shadow stack (`Vm::new`), the root report and the walk itself. It is
   true on Windows since WINDOWS-X86-64-MILESTONE-3.md: Botlish frames keep
   Cranelift's frame-pointer chain and stack maps, and the walk crosses
-  every other frame (the collector's, runtime helpers, `rt_call_value`, the
-  driver) with Windows' unwinder (`RtlLookupFunctionEntry`,
+  every other frame (the collector's, runtime helpers, a runtime function
+  that calls a closure such as `mutable_array::generate`, the driver) with
+  Windows' unwinder (`RtlLookupFunctionEntry`,
   `RtlVirtualUnwind`: framewalk's `windows`). LLVM's Win64 prologue puts
   the frame pointer inside the frame: never walk a Rust frame by its RBP on
   Windows, forced frame pointers or not, and never add a second, diverging
