@@ -498,7 +498,11 @@ errno 99); `ec::read(-1, m)` `{-1, EBADF, 00000000}`; then 4, 5, 6, 7, 8, 10,
 and the next `tick()` after the call 2 -- one evaluation, in order.
 `ec-fixture-executable`: the standalone executable prints the same, also
 under GC stress and with the errno-changing allocator, also both at once.
-«linux-arm64: CI»
+On Linux AArch64 (CI, section 26) the same tests run on the arm64 runner's
+own glibc, `__errno_location` and objects: every test of the file passed in
+run 39690213504's interp, compile and GC-stress jobs, `ec-trace` skipped
+there (the tracer did not build for AArch64 until 2d64ae6; section 13).
+«arm64 trace»
 
 ## 16. macOS C fixture results
 
@@ -528,7 +532,8 @@ there but `ec-trace` (ptrace: Linux only, constraint `ecTrace`):
 
 Run 39690463966 (87e5d87, Tier C under `BOTLISH_NATIVE_GC_STRESS=1`, the
 test file hosted by interp and by compile): 14 passed, 1 skipped
-(`ecTrace`), 0 failed, both times. «macOS acceptance»
+(`ecTrace`), 0 failed, both times; the acceptance tier of the same run
+(no GC stress) passed it too.
 
 ## 17. Darwin read errno results
 
@@ -556,7 +561,8 @@ called through libSystem's `read(2)` on macOS. darwin-io.test:
   never allocated there).
 
 Run 39690463966: darwin-io.test passed under GC stress on interp and
-compile (both its Tcl-hosted halves). «macOS acceptance darwin»
+compile (both its Tcl-hosted halves), and in the same run's acceptance
+tier.
 
 ## 18. Multiple writable parameters and aliasing
 
@@ -787,15 +793,33 @@ analysis adds one construction kind to escape analysis's existing classes.)
 
 ## 25. Linux x86-64 CI
 
-«tests.yml»
+Dispatched runs of `.github/workflows/tests.yml` on the branch (its GC-stress
+job runs only on pushes to main; sections 20 and 21 have the local GC-stress
+runs it stands for):
+
+| run | commit | result |
+|---|---|---|
+| [39690210610](https://github.com/mwagner-webdev/botlish/actions/runs/39690210610) | d152dfe (the compiler as merged) | every job passed: interp (8827 tests: 8759 passed, 68 skipped, 0 failed), compile (8754 passed, 73 skipped, 0 failed), cranelift and cranelift-generic coverage, the four golden shards beside their Tcl originals, the native Rust unit tests, the stub-linked executables, the warning gate, the method-call filter audit |
+| [39699274358](https://github.com/mwagner-webdev/botlish/actions/runs/39699274358) | 2d64ae6 (the tracer's AArch64 fix, test code only) | «x86 2d64ae6» |
 
 ## 26. Linux AArch64 CI
 
-«tests-arm64.yml»
+Dispatched runs of `.github/workflows/tests-arm64.yml` (ubuntu-24.04-arm):
+
+| run | commit | result |
+|---|---|---|
+| [39690213504](https://github.com/mwagner-webdev/botlish/actions/runs/39690213504) | d152dfe | every job passed: interp (8827 tests: 8705 passed, 122 skipped, 0 failed), compile (8700 passed, 127 skipped), the whole suite under `BOTLISH_NATIVE_GC_STRESS=1` (8698 passed, 129 skipped, 0 failed), cranelift and cranelift-generic coverage, the four golden shards, the native Rust unit tests also under GC stress. c-ffi-error-capture.test ran its NIR, object-file (AArch64 ELF: GOT loads and `blr`), fixture, executable and errno-changing-allocator tests; `ec-trace` was skipped (`ecTrace`: the tracer did not build) |
+| [39699271553](https://github.com/mwagner-webdev/botlish/actions/runs/39699271553) | 2d64ae6 | «arm64 2d64ae6» |
 
 ## 27. macOS AArch64 CI
 
-«macos-arm64.yml»
+`.github/workflows/macos-arm64.yml` on GitHub's macos-15 runners (Apple
+Silicon); the shared development Mac was not used:
+
+| run | commit | result |
+|---|---|---|
+| [39690463966](https://github.com/mwagner-webdev/botlish/actions/runs/39690463966) | 87e5d87 (dispatch, Tier C under GC stress) | every job passed: smoke (Tier A: the native build and its Rust unit tests, native-status, the Mach-O object and executable checks, the smoke tier), the acceptance tier in two shards (shard 1: 105 Tcl test files on interp and 51 golden suites on all four backends, 0 failed; shard 2 passed), the Linux control, and Tier C: c-ffi-error-capture, darwin-io, c-byte-borrowing, c-pointer-borrowing, c-ffi, coroutines, affine, abi-mutable-bytes and workload-2048 under GC stress, hosted by interp and by compile (452 tests each: 418 passed, 34 skipped, 0 failed) |
+| [39699340246](https://github.com/mwagner-webdev/botlish/actions/runs/39699340246) | 2d64ae6 (dispatch, Tier C: the macOS mutants and benchmarks) | «macOS 2d64ae6» |
 
 ## 28. Windows
 
