@@ -730,32 +730,39 @@ check; on Windows aot-facts.
 
 | Mutant | What it breaks | Linux x86-64 | Windows x86-64 |
 |---|---|---|---|
-| `unwind-frame-offset-zero` | Cranelift's own frame offset: the establisher frame at RBP | killed: rust (the encoder's tests) | @@W1 |
-| `unwind-save-scaled-by-16` | a general save's offset in sixteens, as Cranelift does | killed: rust | @@W2 |
-| `unwind-no-clobber-allocation` | no allocation code: the unwinder's RSP stays at the establisher frame | killed: rust | @@W3 |
-| `unwind-frame-pointer-at-definition` | `SET_FPREG` where Cranelift defines the frame, after the probes | killed: rust | @@W4 |
-| `unwind-no-prologue-check` | any prologue taken for Cranelift's | killed: rust | @@W5 |
-| `pdata-missing` | no unwind sections: every Botlish frame a leaf to Windows | killed: rust (the object test) | @@W6 |
-| `pdata-end-short` | every entry one byte short of its function | killed: rust | @@W7 |
-| `pdata-unsorted` | the table in declaration order | killed: rust | @@W8 |
-| `pdata-wrong-unwind-info` | every entry naming the first `UNWIND_INFO` | killed: rust, once the object test had frames of two shapes (section 7.6) | @@W9 |
-| `jit-unregistered` | the JIT's code never registered | skipped (Windows only) | @@W10 |
-| `jit-table-deleted-early` | the table deleted right after it is registered | skipped | @@W11 |
-| `jit-stale-registration` | the table never deleted: entries for released code | skipped | @@W12 |
-| `jit-end-short` | every JIT entry one byte short | skipped | @@W13 |
-| `walk-frame-pointers-through-rust` | the census's frame-pointer walk through Rust frames again | skipped | @@W14 |
-| `walk-stops-at-rust` | the walk ends at the first Rust frame above a Botlish frame | skipped | @@W15 |
-| `walk-roots-from-the-frame-pointer` | roots read at RBP plus the offset, not RSP | skipped | @@W16 |
-| `walk-first-botlish-frame-only` | only the innermost Botlish frame's roots | skipped | @@W17 |
-| `stack-limit-unchecked` | no stack-limit check in prologues | skipped | @@W18 |
-| `stack-limit-at-the-stacks-end` | the limit at the stack's low bound: no margin | skipped | @@W19 |
-| `effects-infallible` | a function with a Botlish call proven infallible: callers do not check | skipped | @@W20 |
+| `unwind-frame-offset-zero` | Cranelift's own frame offset: the establisher frame at RBP | killed: rust (the encoder's tests) | killed: rust (the test process died) |
+| `unwind-save-scaled-by-16` | a general save's offset in sixteens, as Cranelift does | killed: rust | killed: rust (`a_callers_root_survives_its_callees_collections`, `c_word_comparisons_and_boxing_run`, ...) |
+| `unwind-no-clobber-allocation` | no allocation code: the unwinder's RSP stays at the establisher frame | killed: rust | killed: rust (the test process died) |
+| `unwind-frame-pointer-at-definition` | `SET_FPREG` where Cranelift defines the frame, after the probes | killed: rust | killed: rust (`a_probed_frame_unwinds_from_its_frame_pointer`, `windows_unwinds_every_instruction_of_jit_code`) |
+| `unwind-no-prologue-check` | any prologue taken for Cranelift's | killed: rust | killed: rust (`other_prologues_are_refused`) |
+| `pdata-missing` | no unwind sections: every Botlish frame a leaf to Windows | killed: rust (the object test) | killed: rust (`a_windows_object_has_an_unwind_entry_for_every_function`) |
+| `pdata-end-short` | every entry one byte short of its function | killed: rust | killed: rust (`a_windows_object_has_an_unwind_entry_for_every_function`) |
+| `pdata-unsorted` | the table in declaration order | killed: rust | killed: rust (`a_windows_object_has_an_unwind_entry_for_every_function`) |
+| `pdata-wrong-unwind-info` | every entry naming the first `UNWIND_INFO` | killed: rust, once the object test had frames of two shapes (section 7.6) | killed: rust (`a_windows_object_has_an_unwind_entry_for_every_function`) |
+| `jit-unregistered` | the JIT's code never registered | skipped (Windows only) | killed: rust (the test process died) |
+| `jit-table-deleted-early` | the table deleted right after it is registered | skipped | killed: rust (the test process died) |
+| `jit-stale-registration` | the table never deleted: entries for released code | skipped | killed: rust (the test process died) |
+| `jit-end-short` | every JIT entry one byte short | skipped | killed: rust (the test process died) |
+| `walk-frame-pointers-through-rust` | the census's frame-pointer walk through Rust frames again | skipped | killed: rust (`a_callers_root_survives_its_callees_collections`, `the_collectors_walk_agrees_with_windows_on_jit_frames`) |
+| `walk-stops-at-rust` | the walk ends at the first Rust frame above a Botlish frame | skipped | killed: rust (`a_callers_root_survives_its_callees_collections`) |
+| `walk-roots-from-the-frame-pointer` | roots read at RBP plus the offset, not RSP | skipped | killed: rust (the test process died) |
+| `walk-first-botlish-frame-only` | only the innermost Botlish frame's roots | skipped | killed: rust (`a_callers_root_survives_its_callees_collections`) |
+| `stack-limit-unchecked` | no stack-limit check in prologues | skipped | killed: rust (the test process died) |
+| `stack-limit-at-the-stacks-end` | the limit at the stack's low bound: no margin | skipped | killed: rust (`the_stack_limit_keeps_a_margin_of_the_stacks_size`) |
+| `effects-infallible` | a function with a Botlish call proven infallible: callers do not check | skipped | killed: rust (`a_botlish_call_fails_exactly_where_depth_is_checked`, `call_effects_propagate_transitively_and_recursively`) |
 
 On Linux x86-64 (controlled experiment, this container): the nine
 host-independent mutants all killed, by the Rust tests, which build Windows
 objects and unwind information on any x86-64 host; the eleven Windows-only
 mutants (`%% windows-x86_64`) skipped.
-@@MUTANTS-WINDOWS
+On Windows x86-64 (real Windows: run
+[39850963305](https://github.com/mwagner-webdev/botlish/actions/runs/39850963305),
+96e2296, the full tier's item `windows-unwind-mutants`): all twenty
+killed, each by the first detector, the Rust tests -- "the test process
+died" where the mutant crashed the test binary before it could report a
+test (an unwind Windows cannot do, a stack it overflows). The two runs
+before it left `walk-stops-at-rust` alive, which is what made the
+caller-root test cross a Rust frame and poison what it frees (above).
 
 ### 7.4 Results on Windows
 
@@ -842,7 +849,7 @@ walk and stack guard are unchanged.
 | ac93df3's (both builds) | the single-step test: "every activation returned" | the test's own bookkeeping: its last trap, back in the test, returned before popping the program entry's activation; no instruction unwound wrongly | popped there too (19a04b2) |
 | the same | dumpbin's Botlish entries not found | dumpbin's listing of the image names no function | the entries are the one run matching the object's table: `audit/windows-unwind/tools/dumpbin-entries.tcl` (19a04b2) |
 | dbbbcdd's mutation run | `walk-stops-at-rust` survived every detector | no test collected with a Rust frame between Botlish frames: the caller-root test's function-value call goes through `rt_call_value`, which jumps to the closure (section 7.3) | the caller-root test calls `mutable_array::generate`, whose factory collects; the comments and AGENTS.md that named `rt_call_value` corrected (ee1559e) |
-| ee1559e's mutation run | `walk-stops-at-rust` survived again, killed on Linux by the same test | the list freed by the missed root was never reused before the program read it: the use after free read intact memory | the collector poisons what it frees in that test (`Heap::set_poison_for_test`, @@POISONCOMMIT) |
+| ee1559e's mutation run | `walk-stops-at-rust` survived again, killed on Linux by the same test | the list freed by the missed root was never reused before the program read it: the use after free read intact memory | the collector poisons what it frees in that test (`Heap::set_poison_for_test`, 96e2296) |
 
 ## 8. Performance
 
