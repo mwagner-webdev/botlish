@@ -793,11 +793,22 @@ Run on Linux x86-64 (4 cores) on the final tree.
     (`nativeDepthChecked`), such a function is `may_error=true`; the test
     now expects the host's value. A `fallback-roots` driver on Linux gives
     exactly Windows' answer.
-* **Not run here.** CI's Linux workflows (`tests.yml`, `tests-arm64.yml`)
-  run on pull requests and on main. The batched-against-sequential
-  comparison of static decisions (`static-decisions.yml`) is CI's alone
-  (AGENTS.md), and this change touches `hir/`. The macOS and Windows
-  workflows run on every push.
+* **CI on the branch.** Every job concluded green; the only failures were
+  the three Windows harness defects above.
+  * `tests.yml`, dispatched on the first commit: the Tcl suite on interp
+    (8858 tests, 0 failed) and compile, its cranelift and
+    cranelift-generic coverage, the golden shards, the native Rust tests,
+    the stub-linked executables, the warning gate and the method-call
+    filter audit. Its GC-stress job runs on pushes to main only.
+  * `tests-arm64.yml`, dispatched on the first commit: interp (8858 tests,
+    0 failed), compile, both coverage jobs (cranelift-generic: 0 failed),
+    the golden shards, the Rust tests (also under GC stress) and the whole
+    suite under GC stress (8858 tests, 0 failed).
+  * `static-decisions.yml`, dispatched on the first commit: all 103 golden
+    suites agree between the batched and the sequential scheduler, no
+    `DISAGREE` and no `DOES NOT COMPILE`. The two new suites take 2 rounds
+    and 3 builds batched, against 9/10 and 5/6 sequential.
+  * macOS arm64 and Windows x86-64, on the fix commit: every shard green.
 
 ## Limitations
 
