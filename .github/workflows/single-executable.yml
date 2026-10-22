@@ -12,6 +12,7 @@ name: single executable
 on:
   push:
     branches: [main]
+    paths-ignore: ["**.md", "docs/**"]
   workflow_dispatch:
 
 permissions:

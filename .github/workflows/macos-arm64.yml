@@ -39,9 +39,9 @@ name: tests (macos arm64)
 
 on:
   push:
-    paths-ignore: ["**.md"]
+    paths-ignore: ["**.md", "docs/**"]
   pull_request:
-    paths-ignore: ["**.md"]
+    paths-ignore: ["**.md", "docs/**"]
   workflow_dispatch:
     inputs:
       tier:
