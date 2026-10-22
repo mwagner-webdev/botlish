@@ -142,9 +142,14 @@ jobs:
       # The runtime's tests and the driver's own (--bins): the link plans
       # (MSVC's among them), targets, stack probes, the program object's
       # format, the argument encoding.
+      # Then the single-step unwind test again, for its own account (how many
+      # instructions it unwound, the frames it probed): a passing test's
+      # output is otherwise not shown.
       - name: Native Rust unit tests
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        run: cargo test --release --manifest-path native/Cargo.toml --lib --bins --no-fail-fast 2>&1 | tee rust-tests.log
+        run: |
+          cargo test --release --manifest-path native/Cargo.toml --lib --bins --no-fail-fast 2>&1 | tee rust-tests.log
+          cargo test --release --manifest-path native/Cargo.toml --bins windows_unwinds_every_instruction_of_jit_code -- --nocapture 2>&1 | grep -a '^windows_unwinds_every_instruction_of_jit_code:' | tee -a rust-tests.log
 
       # No stack guard on Windows yet: the test target says so and checks
       # nothing (it must still build and run).
@@ -388,6 +393,7 @@ jobs:
               echo '```'
               grep -a 'test result' rust-tests.log
               grep -aE '^test (codegen::jitunwind|codegen::unwind|codegen::caller_root|codegen::object_format|runtime::framewalk|runtime::native_stack)' rust-tests.log
+              grep -a '^windows_unwinds_every_instruction_of_jit_code:' rust-tests.log
               echo '```'
             fi
           } > smoke-summary.md
