@@ -48,6 +48,7 @@ dependencies = [
  "num-traits",
  "target-lexicon",
  "unicode-general-category",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
