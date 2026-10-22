@@ -54,6 +54,7 @@ pub struct Heap {
     min_threshold: usize,
     pub collections: usize,
     stress: bool,
+    poison: bool,
 }
 
 impl Heap {
@@ -65,7 +66,7 @@ impl Heap {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(MIN_THRESHOLD);
-        Heap { objects: Vec::new(), allocated: 0, threshold: min_threshold, min_threshold, collections: 0, stress }
+        Heap { objects: Vec::new(), allocated: 0, threshold: min_threshold, min_threshold, collections: 0, stress, poison: false }
     }
 
     /// Test hook: collect before every allocation, exactly as
@@ -75,6 +76,15 @@ impl Heap {
     /// built without cfg(test).
     pub fn set_stress_for_test(&mut self, on: bool) {
         self.stress = on;
+    }
+
+    /// Test hook: every List and Struct the collector frees has its elements
+    /// overwritten with `POISON` first, so a live one freed because a root
+    /// was missed reads as poison afterwards, whatever the allocator does
+    /// with its memory (Windows' heap may not reuse it for a long time):
+    /// codegen::caller_root_tests. Not test-only, like `set_stress_for_test`.
+    pub fn set_poison_for_test(&mut self, on: bool) {
+        self.poison = on;
     }
 
     /// Test hook: no allocation-triggered collection until the next explicit
@@ -187,6 +197,7 @@ impl Heap {
         let mut live = 0;
         let mut live_by_kind = [(0u64, 0u64); KIND_COUNT];
         let mut reclaimed_by_kind = [(0u64, 0u64); KIND_COUNT];
+        let poison = self.poison;
         self.objects.retain(|&object| {
             let header = unsafe { &mut *object };
             if header.marked != 0 {
@@ -209,6 +220,9 @@ impl Heap {
                         // Abandoned suspended, not released at its last use.
                         metrics.record_coroutine_swept();
                     }
+                }
+                if poison {
+                    unsafe { poison_object(object) };
                 }
                 unsafe { free_object(object) };
                 false
@@ -280,6 +294,22 @@ pub unsafe fn object_size(object: *mut Header) -> usize {
             KIND_FLOAT | KIND_DECIMAL => size_of::<FloatObj>(),
             kind => panic!("bad heap object kind {kind}"),
         }
+    }
+}
+
+/// What `Heap::set_poison_for_test` writes into a freed List's or Struct's
+/// elements: the Int 0x5ad.
+pub const POISON: Value = (0x5ad << 1) | 1;
+
+/// Overwrites OBJECT's elements with POISON, if it is a List or a Struct.
+unsafe fn poison_object(object: *mut Header) {
+    unsafe {
+        let (ptr, len) = match (*object).kind {
+            KIND_LIST => ((*(object as *mut ListObj)).ptr, (*(object as *mut ListObj)).len),
+            KIND_STRUCT => ((*(object as *mut StructObj)).ptr, (*(object as *mut StructObj)).len),
+            _ => return,
+        };
+        std::slice::from_raw_parts_mut(ptr, len).fill(POISON);
     }
 }
 

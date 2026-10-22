@@ -701,19 +701,26 @@ function that allocates and collects thirty times -- once through a
 function value, once directly, and three times from the factory of a
 `mutable_array::generate`, whose runtime frame stays between the factory's
 frames and the caller's -- and then reads the list: under GC stress its
-root is only in its own frame. A walk that stops at the first Botlish frame
-frees it (the `walk-first-botlish-frame-only` mutant, killed by it on Linux
-and on Windows), and so does a walk that stops at the first Rust frame
-above a Botlish frame (`walk-stops-at-rust`; on Linux, the same mutation of
-the frame-pointer walk, applied by hand: the caller's list read as 999s).
+root is only in its own frame, and the collector poisons every list it
+frees (`Heap::set_poison_for_test`), so a list freed by a missed root reads
+as poison whatever the allocator does with its memory. A walk that stops
+at the first Botlish frame frees it (the `walk-first-botlish-frame-only`
+mutant, killed by it on Linux and on Windows), and so does a walk that
+stops at the first Rust frame above a Botlish frame (`walk-stops-at-rust`;
+on Linux, the same mutation of the frame-pointer walk, applied by hand:
+the caller's list read as another list's 999s).
 
-The test did not have the `generate` until the first Windows mutation run:
-`walk-stops-at-rust` survived it, because its function-value call was
-meant to put `rt_call_value`'s Rust frame between the two Botlish frames,
-and in the release build `rt_call_value` has none -- it jumps to the
-closure's code (`jmp *%rax`). No other detector -- GC workloads, native
-status, aot-facts -- collects with a Rust frame between Botlish frames
-either; section 7.6.
+The test has the `generate` and the poison since the Windows mutation runs
+(section 7.6). In the first, `walk-stops-at-rust` survived: the test's
+function-value call was meant to put `rt_call_value`'s Rust frame between
+the two Botlish frames, and in the release build `rt_call_value` has none
+-- it jumps to the closure's code (`jmp *%rax`) -- and no other detector
+(GC workloads, native status, aot-facts) collects with a Rust frame
+between Botlish frames either. With the `generate` it survived again on
+Windows, where Linux killed the same mutation: the freed list's memory
+was still intact when the program summed it -- Windows' heap had not
+reused it -- so the dangling read gave the right sum. Poisoning what the
+collector frees makes the test independent of the allocator.
 
 `audit/windows-unwind/tools/mutate.tcl` (tier item `windows-unwind-mutants`)
 applies twenty deliberate bugs to a private copy of the checkout, rebuilds
@@ -834,7 +841,8 @@ walk and stack guard are unchanged.
 | Linux mutation run | `pdata-wrong-unwind-info` survived on Linux | the object test's functions all had the same frame, so another function's identical `UNWIND_INFO` was right by accident | functions of more than one frame shape (528d49a) |
 | ac93df3's (both builds) | the single-step test: "every activation returned" | the test's own bookkeeping: its last trap, back in the test, returned before popping the program entry's activation; no instruction unwound wrongly | popped there too (19a04b2) |
 | the same | dumpbin's Botlish entries not found | dumpbin's listing of the image names no function | the entries are the one run matching the object's table: `audit/windows-unwind/tools/dumpbin-entries.tcl` (19a04b2) |
-| dbbbcdd's mutation run | `walk-stops-at-rust` survived every detector | no test collected with a Rust frame between Botlish frames: the caller-root test's function-value call goes through `rt_call_value`, which jumps to the closure (section 7.3) | the caller-root test calls `mutable_array::generate`, whose factory collects; the comments and AGENTS.md that named `rt_call_value` corrected (@@FIXCOMMIT) |
+| dbbbcdd's mutation run | `walk-stops-at-rust` survived every detector | no test collected with a Rust frame between Botlish frames: the caller-root test's function-value call goes through `rt_call_value`, which jumps to the closure (section 7.3) | the caller-root test calls `mutable_array::generate`, whose factory collects; the comments and AGENTS.md that named `rt_call_value` corrected (ee1559e) |
+| ee1559e's mutation run | `walk-stops-at-rust` survived again, killed on Linux by the same test | the list freed by the missed root was never reused before the program read it: the use after free read intact memory | the collector poisons what it frees in that test (`Heap::set_poison_for_test`, @@POISONCOMMIT) |
 
 ## 8. Performance
 
