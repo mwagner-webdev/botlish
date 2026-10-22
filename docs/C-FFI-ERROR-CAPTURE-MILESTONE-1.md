@@ -424,8 +424,14 @@ The instructions executed after (section 4's trace, the new executable):
 
 57 instructions, no other function (`ec-trace` pins the sequence of
 functions: `ec::fill ec::errno __errno_location ec::errno`; its positive
-control, the `-struct-opt 0` executable, runs `rt_struct_new` and glibc's
-allocator there).
+control, the `-struct-opt 0` executable, runs `rt_struct_new` there and
+enters glibc's allocator, where its trace ends: `WINDOW_TRACE_UNTIL_LIBRARY`
+stops at the first instruction of a shared library, since single-stepping a
+lock's load- and store-exclusive pair on AArch64 clears the exclusive
+monitor and never ends). The tracer is x86-64's and AArch64's; on AArch64
+it reads the registers through glibc's `struct user_regs_struct` (until
+2d64ae6 it named the kernel's `user_pt_regs`, did not build there, and
+`ec-trace` was skipped on arm64 by its constraint).
 
 On AArch64 the same detector, run on objects from the aarch64 driver under
 qemu-user during development, reads the GOT-load-and-`blr` helper calls and
@@ -464,7 +470,7 @@ The evidence, at three levels, each with its positive control:
 |---|---|---|---|
 | NIR | `window::nirWindows`/`nirHazards` (`ec-nir-windows`, `ec-nir-no-hazard`, `ec-darwin-read-window`, `di-errno-read-first`) | `keepalive ilt`, no hazard | `structnew` found (`ec-nir-positive-control`) |
 | machine code | `window::machineWindow` on the object file (`ec-machine-window`) | at most the BigInt paths | `rt_struct_new` found on every shape (`ec-machine-positive-control`) |
-| execution | ptrace single-stepping (`ec-trace`, Linux) | wrapper, errno(), `__errno_location` only | `rt_struct_new` and libc's allocator executed |
+| execution | ptrace single-stepping (`ec-trace`, Linux) | wrapper, errno(), `__errno_location` only | `rt_struct_new` executed, the C library's allocator entered |
 | behavior | an allocator that sets errno on every allocation (`ec-fixture-executable`, `ec-real-read`, `di-errno-allocator`) | every errno right | errno 77 where the write-back was built (`ec-clobber-positive-control`, `di-errno-allocator`); a program that allocates there itself reads 77 too |
 
 The behavioral evidence alone would not prove the property (an allocator
