@@ -21,7 +21,7 @@
 
 <p>
   <a href="https://github.com/mwagner-webdev/botlish/actions/workflows/tests.yml"><img src="https://img.shields.io/github/actions/workflow/status/mwagner-webdev/botlish/tests.yml?branch=main&style=flat-square&label=tests&labelColor=164e63&color=0e7490&logo=githubactions&logoColor=white" alt="tests" /></a>
-  <img src="https://img.shields.io/badge/Tcl-9.0-0e7490?style=flat-square&labelColor=164e63" alt="Tcl 9.0" />
+  <a href="#why-tcl"><img src="https://img.shields.io/badge/Tcl-9.0-0e7490?style=flat-square&labelColor=164e63" alt="Tcl 9.0" /></a>
   <img src="https://img.shields.io/badge/Rust-1.95%2B-0e7490?style=flat-square&labelColor=164e63&logo=rust&logoColor=white" alt="Rust 1.95+" />
   <img src="https://img.shields.io/badge/native-Cranelift-0e7490?style=flat-square&labelColor=164e63" alt="Cranelift" />
   <img src="https://img.shields.io/badge/Linux-x86--64%20%C2%B7%20arm64-0e7490?style=flat-square&labelColor=164e63&logo=linux&logoColor=white" alt="Linux x86-64 and arm64" />
@@ -547,6 +547,48 @@ reference.
 
 Contributors, human or not, start with [AGENTS.md](AGENTS.md): how to run
 the tests, and what to re-run when you change a given part of the compiler.
+
+## Why Tcl
+
+The front end, the reference interpreter, the Tcl compiler, the lowering to
+NIR and the tools around them (the C binding generator, Compilerpedia, the
+test harness) are written in Tcl 9. This is a deliberate long-term choice.
+It is not a prototype waiting to be rewritten.
+
+* **Tcl is small enough to replace.** Its syntax is a dozen rules, and small
+  teams have reimplemented it several times: [Jim Tcl](https://jim.tcl-lang.org)
+  in C, [Eagle](https://eagle.to) for .NET, and TH1, a cut-down Tcl from the
+  SQLite project that now lives in Fossil. If Tcl ever died, or moved in a
+  direction Botlish cannot follow, the part of it the compiler uses could be
+  reimplemented in Botlish the same way. Botlish does not depend on Tcl's
+  upstream staying what it is.
+* **Tcl is the glue.** Compiler orchestration stays in Tcl, and so will
+  plugin orchestration: the coming plugin infrastructure is being built on
+  it. Tcl is not the only glue language, nor the most featureful, but it has
+  the best balance of size, features and development speed. The C binding
+  generator is an early sign that this works.
+  [`tools/c-bindgen.tcl`](tools/c-bindgen.tcl) drives a C toolchain, parses
+  real headers, probes the target's ABI, and emits Botlish source and C
+  thunks. It binds SDL3 (1217 functions), BoringSSL (3978), Win32 (3304) and
+  Tcl's own C API (829) ([C-BINDGEN.md](docs/C-BINDGEN.md)).
+* **Tcl is a good language to bootstrap a compiler in.** It is not very
+  opinionated and has the quality of a construction kit: lists, dicts,
+  namespaces, `uplevel`, `eval` and coroutines are general mechanisms that
+  combine well. It also fits Botlish's value orientation. Tcl's lists and
+  dicts are values, compared by content and copied on write; its integers
+  are arbitrary precision; Tcl 9's strings hold every Unicode character.
+  So HIR is a plain Tcl dict, which
+  [HIR interchange](docs/HIR-INTERCHANGE.md) writes as text and reads back
+  in another process. On the Tcl backends, each Botlish coroutine is one Tcl
+  coroutine ([COROUTINES.md](docs/COROUTINES.md)). The interpreter's and the
+  compiler's internals may be rewritten in Botlish one day, but only when
+  that is actually needed.
+* **Tcl core only.** The Tcl in Botlish's compiler infrastructure will only
+  ever depend on the Tcl core and on extensions written in Botlish itself:
+  no third-party extensions, not even Tcllib. Today that means `Tcl` and
+  `tcltest`, which ships with Tcl. The core is all there is to keep working,
+  so the code stays future-proof, and a Botlish reimplementation of Tcl
+  would only ever need to cover the core.
 
 ## Status
 
