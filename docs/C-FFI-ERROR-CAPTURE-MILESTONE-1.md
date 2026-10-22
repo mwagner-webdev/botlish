@@ -757,7 +757,7 @@ lowering built two objects whenever the value was used (`cb-allocations`:
 
 The milestone is about correctness; this is what the representation change
 costs or saves. `bench/c-ffi-error-capture.tcl` (tier item
-`c-capture-bench` on macOS), run on this tree (87e5d87) and, with `-root`,
+`c-capture-bench` on macOS, below), run on this tree (87e5d87) and, with `-root`,
 on a checkout of 8c29f7e (the commit before the milestone) with its own
 native build; the same programs, one after the other on an otherwise idle
 4-core Linux x86-64 container. Times are the best of 5 runs (in-process:
@@ -799,7 +799,49 @@ About 200 ns per call less wherever the value was used: two allocations
 `rt_keepalive` call. (Compile time was not measured separately; the
 analysis adds one construction kind to escape analysis's existing classes.)
 
-«macOS bench»
+**macOS arm64** (a GitHub `macos-15` runner; the tier item `c-capture-bench`
+of run [39711373979](https://github.com/mwagner-webdev/botlish/actions/runs/39711373979),
+1da422c: `-baseline-rev` builds 8c29f7e in a temporary worktree on the same
+runner and measures it first, then this tree; the same programs and
+options, read(2) libSystem's, errno through `__error()`):
+
+| shape | before, ns | after, ns | heap objects per call before {MutableBytes Struct} | after |
+|---|---:|---:|---|---|
+| discarded (a statement) | 41.5 | 54.4 | 1 0 | 1 0 |
+| the C result alone | 130.2 | 52.2 | 1 2 | 1 0 |
+| the result and the buffer read whole | 152.0 | 80.8 | 1 2 | 1 1 |
+| returned from a function, the buffer read by the caller | 137.9 | 86.7 | 1 2 | 1 1 |
+| detach of a 64 KiB buffer, discarded | 1853.5 | 2355.3 | 1 0 | 1 0 |
+
+| read(2) through libSystem | before, ns | after, ns |
+|---|---:|---:|
+| 64 bytes from /dev/zero | 974.4 | 555.7 |
+| EBADF, 64-byte buffer | 450.4 | 401.8 |
+| 64 KiB from /dev/zero | 9152.8 | 7394.9 |
+
+The allocation counts are Linux's, object for object: they are the
+lowering's, not the host's. The times are one shared runner's, and its
+spread is wide. Two rows whose lowering did not change moved (discarded by
+13 ns, the 64 KiB detach by 502 ns), and the same compiler measured on
+another runner earlier the same day (2d64ae6's Tier C, run
+[39699340246](https://github.com/mwagner-webdev/botlish/actions/runs/39699340246);
+no compiler or runtime change between the two commits) gave discarded
+39.3, result 33.4, both 90.4, returned 105.1 and detach 64 KiB 1869.3 ns,
+and for read(2) 575.4, 323.2 and 5419.2 ns. What holds across both runs:
+every shape that uses the value is cheaper than this run's before (by 33
+to 97 ns per call: two allocations and the `rt_keepalive` call gone, as on
+Linux), and
+the 64-byte read is about 400 ns faster. The EBADF difference here (49 ns)
+is inside the runner's spread (78 ns between the two runs of the same
+code), and the 64 KiB rows are the detach's copy and the runner's memory,
+as on Linux.
+
+The same 2d64ae6 run's `darwin-io-bench` measured `darwin::read` itself:
+read 64 578.8 ns per call against 883.2 in MACOS-AARCH64-MILESTONE-8.md's
+run 39624150692. That is another runner on another day, so it is
+consistent with the above and no more. Its rows this milestone cannot
+affect moved too (write EBADF 241.4 to 274.8), and its 4 KiB and 64 KiB
+read rows moved both ways by up to 364 ns.
 
 ## 25. Linux x86-64 CI
 
@@ -819,7 +861,7 @@ Dispatched runs of `.github/workflows/tests-arm64.yml` (ubuntu-24.04-arm):
 | run | commit | result |
 |---|---|---|
 | [39690213504](https://github.com/mwagner-webdev/botlish/actions/runs/39690213504) | d152dfe | every job passed: interp (8827 tests: 8705 passed, 122 skipped, 0 failed), compile (8700 passed, 127 skipped), the whole suite under `BOTLISH_NATIVE_GC_STRESS=1` (8698 passed, 129 skipped, 0 failed), cranelift and cranelift-generic coverage, the four golden shards, the native Rust unit tests also under GC stress. c-ffi-error-capture.test ran its NIR, object-file (AArch64 ELF: GOT loads and `blr`), fixture, executable and errno-changing-allocator tests; `ec-trace` was skipped (`ecTrace`: the tracer did not build) |
-| [39699271553](https://github.com/mwagner-webdev/botlish/actions/runs/39699271553) | 2d64ae6 | compile: 8827 tests, 8701 passed, 126 skipped, 0 failed -- `ec-trace` runs and passes on AArch64 (no `ecTrace` skip); the native Rust unit tests (also under GC stress) and golden shards 2 and 4 passed; interp (8706 passed, 121 skipped, 0 failed: `ec-trace` the one test more than d152dfe's), cranelift and cranelift-generic coverage and golden shards 1 and 3 passed; the GC-stress job was still running when this report was written |
+| [39699271553](https://github.com/mwagner-webdev/botlish/actions/runs/39699271553) | 2d64ae6 | compile: 8827 tests, 8701 passed, 126 skipped, 0 failed -- `ec-trace` runs and passes on AArch64 (no `ecTrace` skip); the native Rust unit tests (also under GC stress) and golden shards 2 and 4 passed; interp (8706 passed, 121 skipped, 0 failed: `ec-trace` the one test more than d152dfe's), cranelift and cranelift-generic coverage and golden shards 1 and 3 passed, and the whole suite under `BOTLISH_NATIVE_GC_STRESS=1` (8699 passed, 128 skipped, 0 failed: `ec-trace` again the one test more) |
 
 ## 27. macOS AArch64 CI
 
@@ -830,6 +872,7 @@ Silicon); the shared development Mac was not used:
 |---|---|---|
 | [39690463966](https://github.com/mwagner-webdev/botlish/actions/runs/39690463966) | 87e5d87 (dispatch, Tier C under GC stress) | every job passed: smoke (Tier A: the native build and its Rust unit tests, native-status, the Mach-O object and executable checks, the smoke tier), the acceptance tier in two shards (shard 1: 105 Tcl test files on interp and 51 golden suites on all four backends, 0 failed; shard 2 passed), the Linux control, and Tier C: c-ffi-error-capture, darwin-io, c-byte-borrowing, c-pointer-borrowing, c-ffi, coroutines, affine, abi-mutable-bytes and workload-2048 under GC stress, hosted by interp and by compile (452 tests each: 418 passed, 34 skipped, 0 failed) |
 | [39699340246](https://github.com/mwagner-webdev/botlish/actions/runs/39699340246) | 2d64ae6 (dispatch, Tier C: the macOS mutants and benchmarks) | every job passed: smoke, the Linux control, both acceptance shards (the tracer change runs nothing on macOS: `ec-trace` needs Linux's ptrace), and Tier C's `c-borrow-mutants=...` (14 of 14 killed), `darwin-io-mutants` (20 of 20 killed), `c-capture-bench` and `darwin-io-bench` (section 24) |
+| [39711373979](https://github.com/mwagner-webdev/botlish/actions/runs/39711373979) | 1da422c (dispatch, Tier C: `c-capture-bench` against 8c29f7e on the same runner) | every job passed: smoke, the Linux control, both acceptance shards, and the benchmark (section 24) |
 
 ## 28. Windows
 
