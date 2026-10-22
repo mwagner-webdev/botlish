@@ -13,8 +13,11 @@
 
 pub mod aot;
 pub mod clif;
+#[cfg(all(windows, target_arch = "x86_64"))]
+pub mod jitunwind;
 pub mod roots;
 pub mod target;
+pub mod unwind;
 
 use crate::nir::{FuncId, Program};
 use crate::runtime::framemap;
@@ -96,6 +99,10 @@ pub struct CompiledProgram {
     pub pool: ConstPool,
     /// Address of each function's generic entry.
     pub generic_entries: Vec<usize>,
+    /// Address of each function's direct function (`botlish_fn_N`), for
+    /// tests that follow its code.
+    #[cfg(test)]
+    pub direct_entries: Vec<usize>,
     pub clif: Option<String>,
     /// Pre-regalloc Cranelift VCode emitted by the lowering pipeline.
     pub vcode: Option<String>,
@@ -114,6 +121,10 @@ pub struct CompiledProgram {
     /// sizes the Vm's static storage to this, once, alongside the ordinary
     /// constant table.
     statics: u32,
+    /// The code's Windows function table (codegen::jitunwind): deleted
+    /// before the module below releases the code (fields drop in order).
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    _unwind: Option<jitunwind::FunctionTable>,
     /// Keeps the machine code alive.
     _module: JITModule,
 }
@@ -173,6 +184,22 @@ fn stack_probes() -> bool {
 }
 
 fn isa(pic: bool) -> Result<OwnedTargetIsa, BackendError> {
+    // Linked executables use the target's baseline ISA; only JIT code may
+    // assume CPU features detected on the compiler's own machine.
+    let isa = cranelift_native::builder_with_options(!pic).map_err(|e| BackendError::Codegen(e.to_string()))?;
+    isa.finish(isa_flags(pic)?).map_err(|e| BackendError::Codegen(e.to_string()))
+}
+
+/// The ISA of the target TRIPLE with the flags of `isa(true)`: for tests
+/// that read another target's object (only its code is made, never run).
+#[cfg(test)]
+fn isa_for(triple: &str) -> OwnedTargetIsa {
+    use std::str::FromStr;
+    let triple = target_lexicon::Triple::from_str(triple).unwrap();
+    cranelift_codegen::isa::lookup(triple).unwrap().finish(isa_flags(true).unwrap()).unwrap()
+}
+
+fn isa_flags(pic: bool) -> Result<settings::Flags, BackendError> {
     let mut flags = settings::builder();
     let set = |flags: &mut settings::Builder, k: &str, v: &str| {
         flags.set(k, v).map_err(|e| BackendError::Codegen(format!("setting {k}: {e}")))
@@ -185,10 +212,7 @@ fn isa(pic: bool) -> Result<OwnedTargetIsa, BackendError> {
         set(&mut flags, "enable_probestack", "true")?;
         set(&mut flags, "probestack_strategy", "inline")?;
     }
-    // Linked executables use the target's baseline ISA; only JIT code may
-    // assume CPU features detected on the compiler's own machine.
-    let isa = cranelift_native::builder_with_options(!pic).map_err(|e| BackendError::Codegen(e.to_string()))?;
-    isa.finish(settings::Flags::new(flags)).map_err(|e| BackendError::Codegen(e.to_string()))
+    Ok(settings::Flags::new(flags))
 }
 
 pub struct CraneliftJit;
@@ -196,6 +220,15 @@ pub struct CraneliftJit;
 impl CraneliftJit {
     fn compile_actual(&mut self, program: &Program, options: &CompileOptions) -> Result<CompiledProgram, BackendError> {
         let mut builder = JITBuilder::with_isa(isa(false)?, cranelift_module::default_libcall_names());
+        // On Windows the code, its data and its unwind information share one
+        // reserved range, the function table's base (codegen::jitunwind).
+        #[cfg(all(windows, target_arch = "x86_64"))]
+        let code_base = {
+            let memory = jitunwind::CodeMemory::reserve().map_err(|e| BackendError::Codegen(format!("the JIT's code range: {e}")))?;
+            let base = memory.base();
+            builder.memory_provider(Box::new(memory));
+            base
+        };
         for (name, _, address) in helpers() {
             builder.symbol(name, address);
         }
@@ -204,6 +237,11 @@ impl CraneliftJit {
         // size), its foreign symbols resolve to a stub that never runs --
         // never to whatever a library loaded into this process defines.
         for decl in &program.foreigns {
+            #[cfg(all(test, windows, target_arch = "x86_64"))]
+            if let Some(address) = jitunwind::tests::foreign(&decl.symbol) {
+                builder.symbol(&decl.symbol, address);
+                continue;
+            }
             builder.symbol(&decl.symbol, crate::runtime::ffi::rt_ffi_unlinked as *const u8);
         }
         let mut module = JITModule::new(builder);
@@ -223,10 +261,18 @@ impl CraneliftJit {
             }
             defines.push(result);
         }
+        #[cfg(all(windows, target_arch = "x86_64"))]
+        let unwind_data = jitunwind::define_unwind_data(&mut module, &defines)?;
         module.finalize_definitions().map_err(|e| BackendError::Codegen(format!("{e:?}")))?;
+        // Registered before any of the code can run: the code is reachable
+        // only through the CompiledProgram returned below.
+        #[cfg(all(windows, target_arch = "x86_64"))]
+        let unwind = jitunwind::register(&module, &symbols, &defines, code_base, unwind_data)?;
         let entry_ptr = module.get_finalized_function(symbols.direct[0]);
         let generic_entries: Vec<usize> =
             symbols.entry.iter().map(|id| module.get_finalized_function(*id) as usize).collect();
+        let direct_entries: Vec<usize> =
+            symbols.direct.iter().map(|id| module.get_finalized_function(*id) as usize).collect();
         let entry: ProgramEntry = unsafe { std::mem::transmute(entry_ptr) };
 
         // Absolute function addresses only exist after `finalize_definitions`
@@ -241,7 +287,7 @@ impl CraneliftJit {
         let mut framemap = framemap::ProgramMap::new();
         for f in &program.functions {
             let define = &defines[f.id as usize];
-            let direct_addr = module.get_finalized_function(symbols.direct[f.id as usize]) as usize;
+            let direct_addr = direct_entries[f.id as usize];
             let safepoints =
                 define.safepoints.iter().map(|&(pc, ref roots)| (pc, roots.clone())).collect();
             framemap.push(framemap::FunctionMap {
@@ -262,12 +308,16 @@ impl CraneliftJit {
             entry,
             pool,
             generic_entries,
+            #[cfg(test)]
+            direct_entries,
             clif: listing,
             vcode: None,
             code_sizes,
             sites,
             framemap: std::rc::Rc::new(framemap),
             statics: program.statics,
+            #[cfg(all(windows, target_arch = "x86_64"))]
+            _unwind: unwind,
             _module: module,
         })
     }
@@ -359,7 +409,11 @@ pub struct ObjectProgram {
 }
 
 pub fn emit_object(program: &Program) -> Result<ObjectProgram, BackendError> {
-    let builder = cranelift_object::ObjectBuilder::new(isa(true)?, "botlish", cranelift_module::default_libcall_names())
+    emit_object_with(program, isa(true)?)
+}
+
+fn emit_object_with(program: &Program, isa: OwnedTargetIsa) -> Result<ObjectProgram, BackendError> {
+    let builder = cranelift_object::ObjectBuilder::new(isa, "botlish", cranelift_module::default_libcall_names())
         .map_err(|e| BackendError::Codegen(format!("{e:?}")))?;
     let mut module = cranelift_object::ObjectModule::new(builder);
     let symbols = clif::declare(&mut module, program, true)?;
@@ -369,11 +423,69 @@ pub fn emit_object(program: &Program) -> Result<ObjectProgram, BackendError> {
     for f in &program.functions {
         functions.push(clif::define(&mut module, &symbols, f, &mut pool, &mut sites, false, false, false)?);
     }
-    let mut bytes = module.finish().emit().map_err(|e| BackendError::Codegen(e.to_string()))?;
+    let mut product = module.finish();
+    add_windows_unwind(&mut product, &symbols, &functions)?;
+    let mut bytes = product.emit().map_err(|e| BackendError::Codegen(e.to_string()))?;
     if program.context_bytes > 0 {
         relax_context_got(&mut bytes);
     }
     Ok(ObjectProgram { bytes, pool, functions })
+}
+
+/// Adds the Windows x64 unwind sections to PRODUCT when its functions have
+/// unwind information (`DefineResult::direct_unwind`/`entry_unwind`: Windows
+/// x86-64's COFF object, both Windows environments alike): every function's
+/// `UNWIND_INFO` in `.xdata`, and in `.pdata` one `RUNTIME_FUNCTION` per
+/// function -- its start, its end and its `UNWIND_INFO`, image-relative
+/// (`IMAGE_REL_AMD64_ADDR32NB`) -- in address order. The linker merges
+/// `.pdata` into the executable's exception directory, which Windows'
+/// unwinder searches (`RtlLookupFunctionEntry`) for every return address in
+/// Botlish code (WINDOWS-X86-64-MILESTONE-3.md). Nothing else in the object
+/// changes; other objects get no section.
+fn add_windows_unwind(
+    product: &mut cranelift_object::ObjectProduct,
+    symbols: &clif::Symbols,
+    functions: &[clif::DefineResult],
+) -> Result<(), BackendError> {
+    use cranelift_object::object::write::{Relocation, SymbolSection};
+    use cranelift_object::object::{RelocationEncoding, RelocationFlags, RelocationKind, SectionKind};
+    // (section, offset in it, symbol, size, UNWIND_INFO) of every function.
+    let mut entries = Vec::new();
+    for (i, f) in functions.iter().enumerate() {
+        for (id, size, info) in [(symbols.direct[i], f.direct_size, &f.direct_unwind), (symbols.entry[i], f.entry_size, &f.entry_unwind)] {
+            let Some(info) = info else { continue };
+            let symbol = product.function_symbol(id);
+            let defined = product.object.symbol(symbol);
+            let SymbolSection::Section(section) = defined.section else {
+                return Err(BackendError::Bug(format!("function symbol {:?} is not defined in a section", defined.name)));
+            };
+            entries.push((section, defined.value, symbol, size, info));
+        }
+    }
+    if entries.is_empty() {
+        return Ok(());
+    }
+    entries.sort_by_key(|e| (e.0, e.1));
+    let object = &mut product.object;
+    let xdata = object.add_section(Vec::new(), b".xdata".to_vec(), SectionKind::ReadOnlyData);
+    let pdata = object.add_section(Vec::new(), b".pdata".to_vec(), SectionKind::ReadOnlyData);
+    let mut infos = Vec::with_capacity(entries.len());
+    for entry in &entries {
+        infos.push(object.append_section_data(xdata, entry.4, 4));
+    }
+    object.set_section_data(pdata, vec![0u8; 12 * entries.len()], 4);
+    let xdata_symbol = object.section_symbol(xdata);
+    let image_offset = RelocationFlags::Generic { kind: RelocationKind::ImageOffset, encoding: RelocationEncoding::Generic, size: 32 };
+    for (j, (entry, info)) in entries.iter().zip(infos).enumerate() {
+        let fields = [(entry.2, 0), (entry.2, i64::from(entry.3)), (xdata_symbol, info as i64)];
+        for (k, (symbol, addend)) in fields.into_iter().enumerate() {
+            let offset = (12 * j + 4 * k) as u64;
+            object
+                .add_relocation(pdata, Relocation { offset, symbol, addend, flags: image_offset })
+                .map_err(|e| BackendError::Codegen(format!("the .pdata relocation: {e}")))?;
+        }
+    }
+    Ok(())
 }
 
 /// The context area's symbol (CONTEXTS.md, clif.rs's `declare`).
@@ -896,6 +1008,61 @@ mod object_format_tests {
         } else if cfg!(all(windows, target_arch = "x86_64")) {
             // An IMAGE_FILE_HEADER: Machine IMAGE_FILE_MACHINE_AMD64 first.
             assert_eq!(&bytes[..2], &0x8664_u16.to_le_bytes());
+        }
+    }
+
+    /// Windows x86-64's COFF object (made here on any host) describes every
+    /// function to Windows' unwinder: `.pdata` holds one RUNTIME_FUNCTION
+    /// per direct function and generic entry, in address order, each its
+    /// function's start and end (`IMAGE_REL_AMD64_ADDR32NB` against the
+    /// function's own symbol, the end's addend its size) and its
+    /// UNWIND_INFO in `.xdata` (against that section). WINDOWS-X86-64-
+    /// MILESTONE-3.md; aot-facts.tcl and dumpbin read the linked executable
+    /// on Windows.
+    #[test]
+    fn a_windows_object_has_an_unwind_entry_for_every_function() {
+        use cranelift_object::object::{Object, ObjectSection, ObjectSymbol, RelocationTarget};
+        let text = concat!(
+            "nir 1\n\n",
+            "func 0 \"<program>\" params=0 env=0 regs=2 pnames=\"\" captures=0\n",
+            "    %0 = int 7\n    %1 = call 1 %0\n    ret %1\nend\n\n",
+            "func 1 \"f\" params=1 env=0 regs=2 pnames=\"x\" captures=0\n",
+            "    %1 = op listnew %0 %0\n    ret %1\nend\n",
+        );
+        let program = crate::nir::parse(text).unwrap_or_else(|e| panic!("{}", e.message));
+        let object = emit_object_with(&program, isa_for("x86_64-pc-windows-msvc")).unwrap_or_else(|e| panic!("{}", e.message()));
+        let file = cranelift_object::object::File::parse(&*object.bytes).unwrap();
+        let pdata = file.section_by_name(".pdata").expect(".pdata");
+        let xdata = file.section_by_name(".xdata").expect(".xdata");
+        let text = file.section_by_name(".text").expect(".text");
+        let xbytes = xdata.data().unwrap();
+        let pbytes = pdata.data().unwrap();
+        let relocations: Vec<_> = pdata.relocations().collect();
+        let mut expected = Vec::new();
+        for (i, f) in object.functions.iter().enumerate() {
+            for (name, size, info) in [("botlish_fn", f.direct_size, &f.direct_unwind), ("botlish_entry", f.entry_size, &f.entry_unwind)] {
+                let symbol = file.symbol_by_name(&format!("{name}_{i}")).unwrap();
+                assert_eq!(symbol.section_index(), Some(text.index()));
+                expected.push((symbol.address(), symbol.index(), size, info.clone().expect("every function has a frame")));
+            }
+        }
+        expected.sort_by_key(|e| e.0);
+        assert_eq!(pbytes.len(), 12 * expected.len());
+        assert_eq!(relocations.len(), 3 * expected.len());
+        let xdata_symbol = file.symbols().find(|s| s.section_index() == Some(xdata.index()) && s.kind() == cranelift_object::object::SymbolKind::Section).unwrap();
+        for (j, (_, symbol, size, info)) in expected.iter().enumerate() {
+            let field = |k: usize| {
+                let (offset, relocation) = &relocations[3 * j + k];
+                assert_eq!(*offset, (12 * j + 4 * k) as u64);
+                assert_eq!(relocation.flags(), cranelift_object::object::RelocationFlags::Coff { typ: cranelift_object::object::pe::IMAGE_REL_AMD64_ADDR32NB });
+                let addend = u32::from_le_bytes(pbytes[12 * j + 4 * k..][..4].try_into().unwrap());
+                (relocation.target(), addend)
+            };
+            assert_eq!(field(0), (RelocationTarget::Symbol(*symbol), 0), "entry {j}: the start");
+            assert_eq!(field(1), (RelocationTarget::Symbol(*symbol), *size), "entry {j}: the end");
+            let (target, at) = field(2);
+            assert_eq!(target, RelocationTarget::Symbol(xdata_symbol.index()));
+            assert_eq!(&xbytes[at as usize..at as usize + info.len()], &info[..], "entry {j}: its UNWIND_INFO");
         }
     }
 }

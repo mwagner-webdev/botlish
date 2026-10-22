@@ -133,6 +133,13 @@ pub struct Vm {
     /// the same I64 op it already uses for `native_roots_ptr`, without a
     /// second width.
     pub native_roots_len: u64,
+    /// The lowest stack pointer a function that checks its stack may run at
+    /// (codegen::clif's `prologue_stack_limit`, where
+    /// `native_stack::stack_limit_checked`): `NativeStack::stack_limit` of
+    /// the thread the Vm was made on, which is the one its code runs on (0,
+    /// no bound, where nothing checks). Read by generated code at
+    /// VM_STACK_LIMIT_OFFSET.
+    pub stack_limit: usize,
     /// Module-static storage (MODULE-STATIC-RETAINED-VALUES.md): the base
     /// address of `statics_table` below, read by generated code
     /// (codegen::clif's StaticGet/StaticSet, at VM_STATICS_OFFSET) exactly
@@ -242,16 +249,24 @@ pub const VM_ALLOC_SITE_OFFSET: i32 = offset_of!(Vm, alloc_site) as i32;
 pub const VM_NATIVE_ROOTS_PTR_OFFSET: i32 = offset_of!(Vm, native_roots_ptr) as i32;
 pub const VM_NATIVE_ROOTS_LEN_OFFSET: i32 = offset_of!(Vm, native_roots_len) as i32;
 pub const VM_STATICS_OFFSET: i32 = offset_of!(Vm, statics_ptr) as i32;
+pub const VM_STACK_LIMIT_OFFSET: i32 = offset_of!(Vm, stack_limit) as i32;
 
 impl Vm {
     pub fn new(info: Rc<ProgramInfo>, alloc_mode: AllocMode) -> Box<Vm> {
         // The shadow stack holds the fallback plan's roots and bounds its
-        // recursion (codegen::roots's `depth_reservation`): needed unless
-        // both native-frame roots and the native stack guard replace it.
-        let mut shadow = if super::framewalk::NATIVE_FRAME_ROOTS && super::native_stack::native_stack_overflow_supported() {
-            Vec::new()
-        } else {
-            vec![0u64; SHADOW_STACK_SLOTS]
+        // recursion (codegen::roots's `depth_reservation`): not needed where
+        // native frames hold the roots (where no guard reports an exhausted
+        // stack, the stack pointer is checked instead: `stack_limit`).
+        let mut shadow = if super::framewalk::NATIVE_FRAME_ROOTS { Vec::new() } else { vec![0u64; SHADOW_STACK_SLOTS] };
+        let native_stack = {
+            #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64")))]
+            { Some(NativeStack::current().expect("the thread's stack bounds")) }
+            #[cfg(not(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64"))))]
+            { None }
+        };
+        let stack_limit = match native_stack {
+            Some(stack) if super::native_stack::stack_limit_checked(super::framewalk::NATIVE_FRAME_ROOTS) => stack.stack_limit(),
+            _ => 0,
         };
         let base = if shadow.is_empty() { std::ptr::null_mut() } else { shadow.as_mut_ptr() };
         let limit = if shadow.is_empty() { base } else { unsafe { base.add(SHADOW_STACK_SLOTS) } };
@@ -263,6 +278,7 @@ impl Vm {
             alloc_site: 0,
             native_roots_ptr: std::ptr::null_mut(),
             native_roots_len: 0,
+            stack_limit,
             statics_ptr: std::ptr::null_mut(),
             statics_table: Vec::new(),
             ss_base: base,
@@ -284,12 +300,7 @@ impl Vm {
             empty_bytes: BytesObj::new_static(&[]),
             empty_mutbytes: BytesObj::new_static_mutable_empty(),
             framemap: Rc::new(ProgramMap::new()),
-            native_stack: {
-                #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
-                { Some(NativeStack::current().expect("pthread stack bounds")) }
-                #[cfg(not(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"))))]
-                { None }
-            },
+            native_stack,
             co_current: std::ptr::null_mut(),
         })
     }
@@ -340,6 +351,10 @@ impl Vm {
 
     /// Installs this program's stack-map table (see `framemap`'s own doc).
     pub fn set_framemap(&mut self, framemap: Rc<ProgramMap>) {
+        #[cfg(all(windows, target_arch = "x86_64"))]
+        if super::framewalk::NATIVE_FRAME_ROOTS && super::framewalk::windows::unwind_check() {
+            super::framewalk::windows::check_map(&framemap);
+        }
         self.framemap = framemap;
     }
 

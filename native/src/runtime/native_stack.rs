@@ -27,6 +27,32 @@ impl NativeStack {
     /// confirmed below it (runtime::platform).
     #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
     pub fn current() -> std::io::Result<Self> { super::platform::current_stack() }
+
+    /// The calling thread's own stack on Windows: the range the system
+    /// reserved for it (`GetCurrentThreadStackLimits`), with no guard
+    /// confirmed (`guard_low == low_bound`): Windows has no stack guard of
+    /// Botlish's yet. Its bounds limit the frame walk and give the stack
+    /// limit (`stack_limit`).
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    pub fn current() -> std::io::Result<Self> {
+        let (mut low, mut high) = (0, 0);
+        // SAFETY: writes the two bounds.
+        unsafe { windows_sys::Win32::System::Threading::GetCurrentThreadStackLimits(&mut low, &mut high) };
+        Ok(NativeStack { low_bound: low, high_bound: high, guard_low: low, saved_sp: None, state: StackState::Active })
+    }
+
+    /// The lowest stack pointer a frame that checks its stack
+    /// (`stack_limit_checked`) may run at on this stack: its low bound plus
+    /// an eighth of its size, at least 64 KiB and at most 1 MiB. Below a
+    /// checked frame there may run one more Botlish frame (allocated and
+    /// probed before it checks), frames that make no Botlish call, the
+    /// runtime's helpers (the collector's marking is iterative) and what
+    /// Windows keeps for itself at a stack's end (its guard page and the
+    /// thread's stack guarantee, 20 KiB for a Rust thread).
+    pub fn stack_limit(&self) -> usize {
+        let size = self.high_bound.saturating_sub(self.low_bound);
+        self.low_bound + (size / 8).clamp(64 << 10, 1 << 20)
+    }
 }
 
 /// Linux x86-64 and AArch64, macOS AArch64 (MACOS-AARCH64-MILESTONE-4.md):
@@ -36,9 +62,9 @@ impl NativeStack {
 /// (runtime::framewalk's NATIVE_FRAME_ROOTS) together replace the shadow
 /// stack's depth check (codegen::roots's `depth_reservation` needs both).
 /// Not Windows yet: there generated code probes its stack (Windows commits
-/// it page by page) and the shadow stack's depth check bounds Botlish
-/// recursion, but nothing reports a native stack exhausted otherwise
-/// (WINDOWS-X86-64-MILESTONE-1.md).
+/// it page by page) and a check of the stack pointer bounds Botlish
+/// recursion (`stack_limit_checked`), but nothing reports a native stack
+/// exhausted otherwise (WINDOWS-X86-64-MILESTONE-1.md, -3.md).
 pub const fn native_stack_overflow_supported() -> bool {
     cfg!(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))
 }
@@ -51,6 +77,17 @@ pub const fn native_stack_overflow_supported() -> bool {
 /// NATIVE LIMIT STACK, an error its callers see (nir's call effects).
 pub const fn depth_checked(native_frame_roots: bool) -> bool {
     !(native_frame_roots && native_stack_overflow_supported())
+}
+
+/// Whether the depth check is a check of the stack pointer: where native
+/// frames hold the roots but no guard reports an exhausted stack (Windows
+/// x86-64, until its stack guard). There every function that makes a
+/// Botlish call compares its stack pointer with the Vm's stack limit
+/// (`NativeStack::stack_limit`) and fails with NATIVE LIMIT STACK below it
+/// (codegen::clif's `prologue_stack_limit`): no shadow stack exists. On the
+/// fallback plan the shadow stack holds the roots, and its end is the bound.
+pub const fn stack_limit_checked(native_frame_roots: bool) -> bool {
+    native_frame_roots && depth_checked(native_frame_roots)
 }
 
 #[cfg(test)]

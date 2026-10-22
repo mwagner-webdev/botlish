@@ -176,20 +176,32 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: tclsh9.0 tests/platform/gc-workloads.tcl -repeat 5 2>&1 | tee gc-workloads.log
 
+      # The same workloads with Windows' own unwinder checking the collector
+      # (WINDOWS-X86-64-MILESTONE-3.md): BOTLISH_NATIVE_UNWIND_CHECK=1 -- every
+      # Botlish function's unwind entry (the JIT's function table, the
+      # executable's .pdata) spans exactly its code, and every Botlish frame
+      # of every collection unwinds by it as by its frame record.
+      - name: GC workloads under Windows' unwind check
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: tclsh9.0 tests/platform/gc-workloads.tcl -repeat 2 -unwind-check 1 2>&1 | tee gc-workloads-unwind.log
+
       # The census's three programs (its pure program, the URI workload and
       # the 2048 benchmark) through main.tcl itself, on both Cranelift
-      # backends, as ordinary runs and under GC stress.
-      - name: The census's programs through main.tcl (cranelift, cranelift-generic; GC stress)
+      # backends, as ordinary runs, under GC stress, and under GC stress with
+      # Windows' unwind check.
+      - name: The census's programs through main.tcl (cranelift, cranelift-generic; GC stress, unwind check)
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           failed=0
           while IFS='|' read -r file expected; do
             for backend in cranelift cranelift-generic; do
-              for stress in 0 1; do
-                out=$(BOTLISH_NATIVE_GC_STRESS=$stress tclsh9.0 main.tcl -warnings off -backend $backend "$file" 2>&1 | tr -d '\r') || true
+              for mode in 0 1 check; do
+                stress=$([ "$mode" = 0 ] && echo 0 || echo 1)
+                check=$([ "$mode" = check ] && echo 1 || echo 0)
+                out=$(BOTLISH_NATIVE_GC_STRESS=$stress BOTLISH_NATIVE_UNWIND_CHECK=$check tclsh9.0 main.tcl -warnings off -backend $backend "$file" 2>&1 | tr -d '\r') || true
                 value=$(printf '%s\n' "$out" | sed -n 's/^   value: //p')
                 if [ "$value" = "$expected" ]; then verdict=ok; else verdict=FAIL; failed=1; fi
-                echo "$verdict $file -backend $backend, GC stress $stress: $value"
+                echo "$verdict $file -backend $backend, GC stress $stress, unwind check $check: $value"
                 [ "$verdict" = ok ] || printf '%s\n' "$out"
               done
             done
@@ -217,6 +229,10 @@ jobs:
           value=$(BOTLISH_NATIVE_GC_STRESS=1 artifacts/bench.exe)
           echo "bench.exe under GC stress: $value"
           test "$value" = 2002720
+          value=$(BOTLISH_NATIVE_GC_STRESS=1 BOTLISH_NATIVE_UNWIND_CHECK=1 artifacts/bench.exe 2> artifacts/unwind-check.txt)
+          echo "bench.exe under GC stress, unwind check: $value; $(cat artifacts/unwind-check.txt)"
+          test "$value" = 2002720
+          grep -qE '^native unwind check: [1-9][0-9]* functions, [1-9][0-9]* Botlish frames' artifacts/unwind-check.txt
 
       # Windows I/O as a user meets it (WINDOWS-X86-64-MILESTONE-2.md,
       # section 5): hello-windows.bot and the 2048 demo as executables,
@@ -265,6 +281,17 @@ jobs:
           dumpbin /nologo /dependents artifacts\bench.exe || exit /b 1
           dumpbin /nologo /dependents artifacts\bench.exe | findstr /i "vcruntime ucrtbase api-ms-win-crt" && (echo bench.exe imports the C runtime & exit /b 1)
           dumpbin /nologo /headers artifacts\bench.exe | findstr /i "subsystem machine" || exit /b 1
+          rem Windows unwind information (WINDOWS-X86-64-MILESTONE-3.md): the
+          rem object's function table, each Botlish function's prologue codes,
+          rem and the executable's exception directory.
+          dumpbin /nologo /unwindinfo artifacts\fib.obj > artifacts\fib-unwind.txt || exit /b 1
+          type artifacts\fib-unwind.txt
+          findstr /c:"botlish_fn_0" artifacts\fib-unwind.txt || exit /b 1
+          findstr /c:"botlish_entry_0" artifacts\fib-unwind.txt || exit /b 1
+          findstr /i /c:"SET_FPREG" artifacts\fib-unwind.txt || exit /b 1
+          dumpbin /nologo /headers artifacts\bench.exe | findstr /i /c:"Exception Directory" || exit /b 1
+          dumpbin /nologo /unwindinfo artifacts\bench.exe > artifacts\bench-unwind.txt || exit /b 1
+          findstr /i /c:"Function Table" artifacts\bench-unwind.txt || exit /b 1
           exit /b 0
 
       # The smoke tier (examples on all four backends, front-end files) and

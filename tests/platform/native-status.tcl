@@ -319,15 +319,18 @@ f(1)
 # printing through it) runs, refused everywhere else (`windows` is the
 # Windows platform's namespace: UNSUPPORTED-PLATFORM). A variadic C call is
 # still a codegen error on Windows (no Win64 variadic lowering), as are
-# coroutines (NATIVE UNSUPPORTED); there is no
-# stack guard: a native stack exhausted before the shadow stack's depth
-# check fires kills the driver (Rust's own stack overflow report, recorded
-# as the probe's NATIVE BUG), while the default 1 GiB stack outlasts the
-# depth check, whose NATIVE LIMIT STACK is the stack-depth-limit probe's.
-# The recursion-limit probe is the same limit reached by a compiled program
-# whose functions cannot otherwise fail: the depth check's failure is a
-# call's error there (nir's call effects), and until this milestone a
-# caller that did not check for it crashed in rt_int_add.
+# coroutines (NATIVE UNSUPPORTED); there is no stack guard. Since milestone 3
+# (WINDOWS-X86-64-MILESTONE-3.md) the collector finds the roots in native
+# frames (gc-frame-walk: Windows' unwinder across Rust frames), and a
+# function with a Botlish call checks its stack pointer against the thread's
+# stack instead of the shadow stack's depth: so the 4 MiB stack of the
+# stack-overflow probe ends in NATIVE LIMIT STACK too, where until then it
+# killed the driver before the shadow stack's depth check fired (Rust's own
+# stack overflow report, recorded as the probe's NATIVE BUG). The
+# recursion-limit probe is the same limit reached by a compiled program whose
+# functions cannot otherwise fail: the check's failure is a call's error
+# there (nir's call effects), and until milestone 1 a caller that did not
+# check for it crashed in rt_int_add.
 #
 # Since milestone 2 (MACOS-AARCH64-MILESTONE-2.md) a program importing a
 # Linux namespace does not compile for macos-aarch64 at all
@@ -391,7 +394,7 @@ unit}}} \
     windows-x86_64 [dict create \
         jit {value 6765} \
         gc-frame-walk [list value [list str [string repeat xy 400]]] \
-        stack-overflow {error {NATIVE BUG} {native backend failed:*has overflowed its stack*}} \
+        stack-overflow {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
         stack-depth-limit {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
         recursion-limit {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
         coroutine-stack-overflow {error {NATIVE UNSUPPORTED value} {native coroutines need stack switching, implemented for Linux x86-64 and AArch64 and macOS AArch64 only*}} \

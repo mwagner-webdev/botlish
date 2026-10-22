@@ -56,7 +56,7 @@ impl FunctionMap {
     /// e.g. a generic-entry trampoline, or -- impossible in practice, since
     /// every lookup PC is itself a real return address this same compiler
     /// emitted -- a PC that is not a call return address at all).
-    fn roots_at(&self, pc: usize) -> &[u32] {
+    pub(crate) fn roots_at(&self, pc: usize) -> &[u32] {
         let offset = match u32::try_from(pc - self.code_start) {
             Ok(o) => o,
             Err(_) => return &[],
@@ -107,6 +107,11 @@ impl ProgramMap {
         }
         let f = &self.functions[i - 1];
         (pc < f.code_end).then_some(f)
+    }
+
+    /// Every registered function, in address order once `finish`ed.
+    pub fn functions(&self) -> &[FunctionMap] {
+        &self.functions
     }
 
     /// The live-root byte offsets (from that safepoint's own SP) at PC, an

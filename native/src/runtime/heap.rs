@@ -70,8 +70,9 @@ impl Heap {
 
     /// Test hook: collect before every allocation, exactly as
     /// BOTLISH_NATIVE_GC_STRESS=1 does, for one test's Vm without touching
-    /// the process environment (other tests run concurrently).
-    #[cfg(test)]
+    /// the process environment (other tests run concurrently). Not test-only:
+    /// the driver's own tests (codegen::jitunwind) run against this library
+    /// built without cfg(test).
     pub fn set_stress_for_test(&mut self, on: bool) {
         self.stress = on;
     }

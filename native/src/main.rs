@@ -95,8 +95,10 @@
 //! Native code runs on a worker thread with a large native stack. On
 //! Linux (x86-64, AArch64) and macOS AArch64 the stack guard
 //! (runtime/platform/) supplies overflow protection; on Windows there is no
-//! guard yet, and a native stack exhausted past the shadow stack's depth
-//! check ends the process (WINDOWS-X86-64-MILESTONE-1.md).
+//! guard yet: a function with a Botlish call checks its stack pointer
+//! (NATIVE LIMIT STACK), and a native stack exhausted otherwise -- inside
+//! the runtime, or by one frame larger than the check's margin -- ends the
+//! process (WINDOWS-X86-64-MILESTONE-1.md, -3.md).
 
 mod codegen;
 mod launch;
@@ -142,6 +144,10 @@ fn main() {
             3
         }
     };
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    if let Some(summary) = runtime::framewalk::windows::summary() {
+        eprintln!("{summary}");
+    }
     std::process::exit(status);
 }
 
