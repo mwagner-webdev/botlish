@@ -1,0 +1,18 @@
+ok    disk baseline                                              ok METHOD-ELIGIBLE@main.bot:5 {[21, 0]}
+ok    memory-only workspace = disk                               ok METHOD-ELIGIBLE@main.bot:5 {[21, 0]}
+ok      ...and nothing was created on disk                       0
+ok      ...its files are the buffers' paths                      main.bot util.bot list.bot
+ok    disk entry with an error                                   TYPE@broken.bot:2
+ok    unsaved fix of that entry                                  ok {} 10
+ok    imported module's unsaved buffer changes its interface     TYPE@main.bot:4
+ok      ...disk unchanged afterwards                             ok METHOD-ELIGIBLE@main.bot:5 {[21, 0]}
+ok    version 1 of util                                          ok METHOD-ELIGIBLE@main.bot:5 {[21, 0]}
+ok    version 2 of util                                          ok METHOD-ELIGIBLE@main.bot:5 {[201, 0]}
+ok    version 1 again                                            ok METHOD-ELIGIBLE@main.bot:5 {[21, 0]}
+ok    module that exists only as a buffer                        ok {} 7
+ok      ...not on disk                                           0
+ok    module deleted in the editor                               UNKNOWN-NAMESPACE@main.bot:1
+ok    unsaved app file named like a standard namespace           MODULE-COLLISION@main.bot:2
+ok    stdlib module buffer                                       [21, 99]
+ok    syntax error inside an imported module's buffer            loader SYNTAX@util.bot:2
+overlay: 0 failures

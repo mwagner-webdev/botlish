@@ -1,0 +1,9 @@
+round 1: status ok, rss 68 MiB
+round 10: rss 115 MiB; grew since round 1: surface::modules::parsed 11->20, procs 105->1050
+round 20: rss 146 MiB; grew since round 1: surface::modules::parsed 11->30, procs 105->2100
+round 30: rss 176 MiB; grew since round 1: surface::modules::parsed 11->40, procs 105->3150
+round 40: rss 207 MiB; grew since round 1: surface::modules::parsed 11->50, procs 105->4200
+round 50: rss 237 MiB; grew since round 1: surface::modules::parsed 11->60, procs 105->5250
+round 60: rss 251 MiB; grew since round 1: surface::modules::parsed 11->16, procs 105->6300
+round 70: rss 251 MiB; grew since round 1: surface::modules::parsed 11->26, procs 105->7350
+round 80: rss 254 MiB; grew since round 1: surface::modules::parsed 11->36, procs 105->8400

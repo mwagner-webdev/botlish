@@ -1,0 +1,30 @@
+library: /tmp/tmp.SShSx1Qbj1/lib/libbj_botlish.a (4 exports)
+token_count(message): 49
+token_count([1, 2]): 5
+token_count([1, 2, 3, 4, 5, 6]): 13
+token_count("abcdefghij"): 1
+token_count([true, false, null]): 7
+token_count(malformed at 6): -7
+token_count(invalid UTF-8): 1 botlish status 3
+shout(café): café!
+checked(21): 42
+checked(-5): status 1, errorcode BOTLISH Rejected: uncaught propagated error: <error Rejected {code: -5}>
+churn(100000): 100000
+20000 x token_count(193 bytes): 35.8 us per call; rss 14 -> 19 MiB
+200 x churn(10000): rss 19 -> 19 MiB
+retained result after a collecting call: kept!
+--- under BOTLISH_NATIVE_GC_STRESS=1
+token_count(message): 49
+token_count([1, 2]): 5
+token_count([1, 2, 3, 4, 5, 6]): 13
+token_count("abcdefghij"): 1
+token_count([true, false, null]): 7
+token_count(malformed at 6): -7
+token_count(invalid UTF-8): 1 botlish status 3
+shout(café): café!
+checked(21): 42
+checked(-5): status 1, errorcode BOTLISH Rejected: uncaught propagated error: <error Rejected {code: -5}>
+churn(100000): 100000
+20000 x token_count(193 bytes): 111.3 us per call; rss 16 -> 13 MiB
+200 x churn(10000): rss 13 -> 13 MiB
+retained result after a collecting call: kept!

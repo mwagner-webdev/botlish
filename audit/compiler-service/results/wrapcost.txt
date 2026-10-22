@@ -1,0 +1,2 @@
+01-arithmetic.bot    build after a build: median     4.5 ms; after renaming `file`: median    36.1 ms
+demo.bot             build after a build: median  1039.3 ms; after renaming `file`: median  1202.6 ms

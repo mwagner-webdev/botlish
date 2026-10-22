@@ -1,0 +1,15 @@
+case       compiler offset   utf8-byte  utf16-unit scalar    
+ascii      col 12   32       col 12     col 12     col 12    
+bmp        col 12   32       col 14     col 12     col 12    
+astral     col 11   30       col 14     col 12     col 11    
+combining  col 12   32       col 13     col 12     col 12    
+crlf on disk : status ok, `target` at line 2 column 6 offset 16
+crlf buffer  : status ok, `target` at line 2 column 6 offset 17
+lone CR disk : status ok, `target` at line 2 column 6 offset 16
+lone CR buf  : status syntax
+   1:11 unexpected carriage return
+   1:24 unexpected carriage return
+   1:26 unexpected carriage return
+non-ASCII identifier: status syntax
+   1:4 unexpected character "é"
+   2:4 unexpected character "é"

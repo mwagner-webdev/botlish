@@ -1,0 +1,5 @@
+message: 525 characters
+interp   setup (lower/compile + run to the function value)      9.1 ms; per call  596.91 ms; 93 tokens
+         malformed input: completion kind propagate-error: <error json_tokens::Malformed {at: 6}>
+compile  setup (lower/compile + run to the function value)     33.1 ms; per call   15.19 ms; 93 tokens
+         malformed input: completion kind propagate-error: <error json_tokens::Malformed {at: 6}>

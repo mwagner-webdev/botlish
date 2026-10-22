@@ -1,0 +1,75 @@
+# exports.bot -- the Botlish side of the exported-function probe
+# (COMPILER-SERVICE-CENSUS.md, "FFI and JSON feasibility"; run.sh builds it).
+#
+# Botlish has no `exported c fn` (C-ABI-TYPES.md:42, :686-693). The audit
+# stand-in audit/react-native/tools/libmode.tcl exports top-level functions
+# whose parameters and results are declared int, str or bool, and which the
+# top level calls with exactly those types (native lowering compiles only
+# what the program reaches). This file is shaped for it.
+
+import json_tokens
+import list
+import str
+
+error Rejected:
+    code: int
+
+# The number of JSON tokens in TEXT, or -1 - OFFSET of the first malformed
+# character: the tokenizer's errors folded into an Int, because an export's
+# result can only be a scalar or a str.
+fn token_count(text: str) -> int:
+    r = json_tokens::tokenize(text, 1000000):
+        on json_tokens::Malformed details:
+            return -1 - details.at
+        on json_tokens::TooManyTokens:
+            return -2
+        on IndexNotFound:
+            return -3
+        on LowerUnderrun:
+            return -3
+        on UpperOverrun:
+            return -3
+    list::length(r)
+
+# A str result: TEXT with "!" appended (allocates on the Botlish heap).
+fn shout(text: str) -> str:
+    str::concat(text, "!")
+
+# A declared error crossing the boundary.
+fn checked(n: int) -> int errors Rejected:
+    if n < 0:
+        fail Rejected {code: n}
+    n * 2
+
+# Allocation pressure: N appends, so the collector runs while the caller's
+# (Tcl's) frames are below the export's on the stack.
+fn churn(n: int) -> int:
+    xs = loop i from 0 to n:
+        [i, i + 1]
+    list::length(xs)
+
+# The arguments the top level passes must be opaque to the analyses. The
+# stand-in exports the native instance compiled for these calls, and an
+# instance is specialized by its call sites' facts: with the constant calls
+# token_count("[1, 2]") and checked(1), the exported token_count miscounted
+# every input longer than its 6-character constant and checked(-5) returned
+# -10 instead of failing (its `n < 0` branch was proven dead).
+# COMPILER-SERVICE-CENSUS.md, section 8.2, records both. Here every argument
+# depends on argv(), so each instance assumes only its declared types.
+arguments = argv():
+    on InvalidArgumentEncoding:
+        []
+unknown = list::length(arguments)
+big = "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, true, false, null, \"abcdefghijklmnopqrstuvwxyz\"]"
+cut = str::substring(big, 0, str::length(big) - unknown + 1):
+    on LowerUnderrun:
+        ""
+    on UpperOverrun:
+        ""
+first = token_count(cut)
+second = shout(cut)
+third = checked(unknown - 5):
+    on Rejected:
+        0
+fourth = churn(unknown + 3)
+[first, str::length(second), third, fourth]

@@ -1,0 +1,61 @@
+baseline: status ok, value 36, cache warmed
+
+body edit, signature unchanged (a::fa)
+   status   ok   value 37
+   parsed   a.bot main.bot
+   cache    stale
+   changed  (nothing)
+   ids      main.bot: 20 of 20 surviving AST nodes keep their HIR expression id
+
+exported declaration's type (c::base takes str)
+   status   semantic   value -
+   parsed   c.bot main.bot
+   cache    stale
+   changed  a.bot b.bot c.bot
+   ids      main.bot: 0 of 20 surviving AST nodes keep their HIR expression id
+   diag     TYPE a.bot:4 argument for parameter "n" cannot be proven to satisfy str (argument type: int)
+   diag     TYPE b.bot:4 argument for parameter "n" cannot be proven to satisfy str (argument type: int)
+
+declaration used by several modules (c::base body)
+   status   ok   value 39
+   parsed   c.bot main.bot
+   cache    stale
+   changed  (nothing)
+   ids      main.bot: 20 of 20 surviving AST nodes keep their HIR expression id
+
+import statement removed (main drops b)
+   status   loader   value -
+   parsed   main.bot
+   cache    miss
+   changed  a.bot b.bot c.bot list.bot main.bot
+   ids      main.bot: 0 of 0 surviving AST nodes keep their HIR expression id
+   diag     MISSING-IMPORT main.bot:7 namespace "b" is not imported; add `import b` to use `b::fb`
+
+transitive dependency only (c gains a function)
+   status   ok   value 36
+   parsed   c.bot main.bot
+   cache    stale
+   changed  c.bot
+   ids      main.bot: 0 of 20 surviving AST nodes keep their HIR expression id
+
+standard-library module (lib/list.bot comment)
+   status   ok   value 36
+   parsed   list.bot main.bot
+   cache    stale
+   changed  (nothing)
+   ids      main.bot: 20 of 20 surviving AST nodes keep their HIR expression id
+
+syntax error in a module (a.bot)
+   status   loader   value -
+   parsed   a.bot main.bot
+   cache    stale
+   changed  a.bot b.bot c.bot list.bot main.bot
+   ids      main.bot: 0 of 0 surviving AST nodes keep their HIR expression id
+   diag     SYNTAX a.bot:4 expected an expression, found end of line
+
+entry-file edit that adds a line above everything
+   status   ok   value 36
+   parsed   main.bot
+   cache    miss
+   changed  (nothing)
+   ids      main.bot: 20 of 20 surviving AST nodes keep their HIR expression id

@@ -1,0 +1,14 @@
+case                     status    construct  resolve  type   definition  references  diagnostics  topic   detail
+valid                    ok        yes        yes      yes    yes         yes         0 here/0     -       ref name : int; all: 
+unfinished-expression    syntax    ast only   -        -      -           -           0 here/1     -       ; all: SYNTAX
+unfinished-declaration   syntax    ast only   -        -      -           -           0 here/1     -       ; all: SYNTAX
+unresolved-import        loader    ast only   -        -      -           -           0 here/1     -       ; all: UNKNOWN-NAMESPACE
+unknown-identifier       semantic  yes        yes      yes    yes         yes         0 here/1     -       ref name : int; all: UNBOUND
+type-mismatch            semantic  yes        -        yes    -           -           1 here/1     yes     const x=/value/arg2/arg1 : str; all: TYPE
+multiple-errors          semantic  yes        yes      yes    yes         yes         0 here/2     -       ref name : int; all: UNBOUND TYPE
+edited-declaration       semantic  yes        yes      yes    yes         yes         0 here/1     -       ref x=/value/arg2/callee : block(e2)/1 -> int; all: TYPE
+
+symbol keys: 10 keys for 10 source bindings; keys naming more than one binding: 0
+  same name f, different modules: 1 and 1 (1 and 1: two keys)
+  same name x, different functions: 1 and 1 (1 and 1: two keys)
+  after moving every declaration and adding one before them: 10 of 10 keys survive; 10 of them now name a different BindingId

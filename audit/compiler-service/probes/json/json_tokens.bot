@@ -1,0 +1,197 @@
+# json_tokens.bot -- can ordinary Botlish tokenize JSON today?
+# (COMPILER-SERVICE-CENSUS.md, "FFI and JSON feasibility")
+#
+# An audit probe, not a library: RFC 8259's lexical grammar over a str,
+# written with what the standard library has (str::char_at, str::length,
+# char::scalar_value, MutableVector), tokens as offsets into the input (no
+# token text is copied). It reports what it cannot do as errors, so the
+# census can cite the exact missing primitive:
+#
+#   * tokenizing: punctuation, literals, numbers (the full grammar: sign,
+#     no leading zero, fraction, exponent), strings (every escape, \uXXXX
+#     with four hex digits, no raw control character), whitespace; a
+#     malformed input fails Malformed {at: OFFSET}; MAX_TOKENS bounds the
+#     work (TooManyTokens).
+#   * decoding a string token into a str: every escape except \uXXXX, which
+#     needs an Int -> UnicodeChar conversion the language does not have
+#     (NoScalarConstructor {scalar: N}: the scalar was computed, it cannot be
+#     materialized).
+
+import str
+import char
+import mutable_vector
+
+struct Token:
+    kind: str
+    start: int
+    end: int
+
+error Malformed:
+    at: int
+
+error TooManyTokens:
+    limit: int
+
+error NoScalarConstructor:
+    scalar: int
+
+fn code(text: str, i: int) -> int errors IndexNotFound:
+    char::scalar_value(str::char_at(text, i))
+
+fn digit?(c: int) -> bool:
+    c >= 48 and c <= 57
+
+fn hex_value(c: int) -> int:
+    if c >= 48 and c <= 57:
+        return c - 48
+    if c >= 97 and c <= 102:
+        return c - 87
+    if c >= 65 and c <= 70:
+        return c - 55
+    -1
+
+fn space?(c: int) -> bool:
+    c == 32 or c == 9 or c == 10 or c == 13
+
+# The code at I, or -1 past the end.
+fn peek(text: str, i: int) -> int errors IndexNotFound:
+    if i >= str::length(text):
+        return -1
+    code(text, i)
+
+# The end of the digit run starting at I.
+fn digits_end(text: str, i: int) -> int errors IndexNotFound:
+    if digit?(peek(text, i)):
+        return digits_end(text, i + 1)
+    i
+
+# The end of the number starting at START (RFC 8259 section 6).
+fn number_end(text: str, start: int) -> int errors IndexNotFound, Malformed:
+    i = if peek(text, start) == 45:
+        start + 1
+    else:
+        start
+    first = peek(text, i)
+    if not digit?(first):
+        fail Malformed {at: i}
+    whole = if first == 48:
+        i + 1
+    else:
+        digits_end(text, i)
+    fraction = if peek(text, whole) == 46:
+        if not digit?(peek(text, whole + 1)):
+            fail Malformed {at: whole + 1}
+        digits_end(text, whole + 1)
+    else:
+        whole
+    if peek(text, fraction) == 101 or peek(text, fraction) == 69:
+        sign = peek(text, fraction + 1)
+        e = if sign == 43 or sign == 45:
+            fraction + 2
+        else:
+            fraction + 1
+        if not digit?(peek(text, e)):
+            fail Malformed {at: e}
+        return digits_end(text, e)
+    fraction
+
+# The end (just after the closing quote) of the string whose content starts
+# at I.
+fn string_end(text: str, i: int) -> int errors IndexNotFound, Malformed:
+    c = peek(text, i)
+    if c == -1 or c < 32:
+        fail Malformed {at: i}
+    if c == 34:
+        return i + 1
+    if c == 92:
+        e = peek(text, i + 1)
+        if e == 117:
+            if hex_value(peek(text, i + 2)) < 0 or hex_value(peek(text, i + 3)) < 0 or hex_value(peek(text, i + 4)) < 0 or hex_value(peek(text, i + 5)) < 0:
+                fail Malformed {at: i}
+            return string_end(text, i + 6)
+        if e == 34 or e == 92 or e == 47 or e == 98 or e == 102 or e == 110 or e == 114 or e == 116:
+            return string_end(text, i + 2)
+        fail Malformed {at: i}
+    string_end(text, i + 1)
+
+fn literal_end(text: str, start: int, word: str) -> int errors IndexNotFound, LowerUnderrun, UpperOverrun, Malformed:
+    end = start + str::length(word)
+    if end > str::length(text) or str::substring(text, start, end) != word:
+        fail Malformed {at: start}
+    end
+
+# OUT with the tokens of TEXT from I on pushed onto it. A MutableVector is a
+# value (MUTABLE-VECTOR.md: mutating one copy never changes another), so the
+# scan hands the vector back rather than filling the caller's.
+fn scan(text: str, i: int, out: MutableVector[Token], limit: int) -> MutableVector[Token] errors IndexNotFound, LowerUnderrun, UpperOverrun, Malformed, TooManyTokens:
+    c = peek(text, i)
+    if c == -1:
+        return out
+    if space?(c):
+        return scan(text, i + 1, out, limit)
+    if out.length() >= limit:
+        fail TooManyTokens {limit: limit}
+    if c == 123 or c == 125 or c == 91 or c == 93 or c == 58 or c == 44:
+        out.push(Token {kind: "punct", start: i, end: i + 1})
+        return scan(text, i + 1, out, limit)
+    if c == 34:
+        end = string_end(text, i + 1)
+        out.push(Token {kind: "string", start: i, end: end})
+        return scan(text, end, out, limit)
+    if c == 45 or digit?(c):
+        end = number_end(text, i)
+        out.push(Token {kind: "number", start: i, end: end})
+        return scan(text, end, out, limit)
+    if c == 116:
+        end = literal_end(text, i, "true")
+        out.push(Token {kind: "true", start: i, end: end})
+        return scan(text, end, out, limit)
+    if c == 102:
+        end = literal_end(text, i, "false")
+        out.push(Token {kind: "false", start: i, end: end})
+        return scan(text, end, out, limit)
+    if c == 110:
+        end = literal_end(text, i, "null")
+        out.push(Token {kind: "null", start: i, end: end})
+        return scan(text, end, out, limit)
+    fail Malformed {at: i}
+
+fn no_tokens() -> MutableVector[Token]:
+    mutable_vector::from_list([])
+
+fn tokenize(text: str, limit: int) -> List[Token] errors IndexNotFound, LowerUnderrun, UpperOverrun, Malformed, TooManyTokens:
+    out = scan(text, 0, no_tokens(), limit)
+    loop t in out:
+        t
+
+# The decoded content of the string token from I (inside the quotes) to the
+# closing quote at LAST, appended to SO_FAR.
+fn decode_from(text: str, i: int, last: int, so_far: str) -> str errors IndexNotFound, NoScalarConstructor:
+    if i >= last:
+        return so_far
+    c = str::char_at(text, i)
+    if char::scalar_value(c) != 92:
+        return decode_from(text, i + 1, last, str::append_char(so_far, c))
+    e = code(text, i + 1)
+    if e == 117:
+        scalar = hex_value(code(text, i + 2)) * 4096 + hex_value(code(text, i + 3)) * 256 + hex_value(code(text, i + 4)) * 16 + hex_value(code(text, i + 5))
+        fail NoScalarConstructor {scalar: scalar}
+    # \b and \f: U+0008 and U+000C have no char or string literal spelling
+    # (the lexer's escapes are \\ \' \" \n \r \t), so they need the same
+    # missing conversion.
+    if e == 98:
+        fail NoScalarConstructor {scalar: 8}
+    if e == 102:
+        fail NoScalarConstructor {scalar: 12}
+    decoded = if e == 110:
+        '\n'
+    elif e == 116:
+        '\t'
+    elif e == 114:
+        '\r'
+    else:
+        str::char_at(text, i + 1)
+    decode_from(text, i + 2, last, str::append_char(so_far, decoded))
+
+fn decode(text: str, t: Token) -> str errors IndexNotFound, NoScalarConstructor:
+    decode_from(text, t.start + 1, t.end - 1, "")
