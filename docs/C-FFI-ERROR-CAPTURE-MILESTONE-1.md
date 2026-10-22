@@ -502,7 +502,12 @@ On Linux AArch64 (CI, section 26) the same tests run on the arm64 runner's
 own glibc, `__errno_location` and objects: every test of the file passed in
 run 39690213504's interp, compile and GC-stress jobs, `ec-trace` skipped
 there (the tracer did not build for AArch64 until 2d64ae6; section 13).
-«arm64 trace»
+On 2d64ae6 (run 39699271553's compile job: 8827 tests, 8701 passed, 126
+skipped, `ecTrace` no longer among the constraints that skipped one, 0
+failed) `ec-trace` runs on AArch64 and passes: from the return of
+`bcf_fill_errno` to the load of errno the runner's single-step trace sees
+`ec::fill ec::errno __errno_location ec::errno`, as on x86-64, and the
+`-struct-opt 0` executable enters `rt_struct_new` and glibc's allocator.
 
 ## 16. macOS C fixture results
 
@@ -809,7 +814,7 @@ Dispatched runs of `.github/workflows/tests-arm64.yml` (ubuntu-24.04-arm):
 | run | commit | result |
 |---|---|---|
 | [39690213504](https://github.com/mwagner-webdev/botlish/actions/runs/39690213504) | d152dfe | every job passed: interp (8827 tests: 8705 passed, 122 skipped, 0 failed), compile (8700 passed, 127 skipped), the whole suite under `BOTLISH_NATIVE_GC_STRESS=1` (8698 passed, 129 skipped, 0 failed), cranelift and cranelift-generic coverage, the four golden shards, the native Rust unit tests also under GC stress. c-ffi-error-capture.test ran its NIR, object-file (AArch64 ELF: GOT loads and `blr`), fixture, executable and errno-changing-allocator tests; `ec-trace` was skipped (`ecTrace`: the tracer did not build) |
-| [39699271553](https://github.com/mwagner-webdev/botlish/actions/runs/39699271553) | 2d64ae6 | «arm64 2d64ae6» |
+| [39699271553](https://github.com/mwagner-webdev/botlish/actions/runs/39699271553) | 2d64ae6 | compile: 8827 tests, 8701 passed, 126 skipped, 0 failed -- `ec-trace` runs and passes on AArch64 (no `ecTrace` skip); the native Rust unit tests (also under GC stress) and golden shards 2 and 4 passed; «arm64 2d64ae6 rest» |
 
 ## 27. macOS AArch64 CI
 
