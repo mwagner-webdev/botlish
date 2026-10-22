@@ -737,6 +737,9 @@ pub(crate) mod tests {
             while self.activations.last().is_some_and(|a| a.ret == rip && a.entry_rsp + 8 == rsp) {
                 self.activations.pop();
             }
+            if rip as usize == LABEL.load(Ordering::Relaxed) {
+                return; // back in the test: the run is over
+            }
             let Some(&(start, _)) = self.functions.iter().find(|&&(s, e)| s <= rip as usize && (rip as usize) < e) else {
                 self.elsewhere += 1;
                 return;
@@ -790,8 +793,8 @@ pub(crate) mod tests {
         let Some(s) = stepping.as_mut().filter(|s| s.thread == thread) else {
             return EXCEPTION_CONTINUE_SEARCH;
         };
+        s.instruction(context);
         if context.Rip as usize != LABEL.load(Ordering::Relaxed) {
-            s.instruction(context);
             context.EFlags |= 0x100;
         }
         EXCEPTION_CONTINUE_EXECUTION
@@ -883,7 +886,7 @@ pub(crate) mod tests {
         let s = STEPPING.lock().unwrap().take().unwrap();
         assert_eq!(result, make_small(stepped_value(small as i64, large as i64)), "the program's value");
         assert!(s.failures.is_empty(), "{} of {} instructions unwound wrongly; the first: {:#?}", s.failures.len(), s.checked, &s.failures[..s.failures.len().min(6)]);
-        assert!(s.activations.is_empty(), "every activation returned");
+        assert!(s.activations.is_empty(), "every activation returned: {} left, the innermost at {:#x}", s.activations.len(), s.activations.last().map_or(0, |a| a.start));
         for (id, &start) in compiled.direct_entries.iter().enumerate() {
             for offset in [0, 1, 4] {
                 assert!(s.offsets.contains(&(start, offset)), "function {id}: offset {offset} not stepped");
