@@ -120,6 +120,37 @@ program needs a checkout with the native backend built
 ([Getting started](#getting-started)). How the single file is built and what
 it runs: [SINGLE-EXECUTABLE.md](docs/SINGLE-EXECUTABLE.md).
 
+## Icy Tower, a game in Botlish
+
+<p align="center">
+  <img src="./audit/icy-tower/screenshots/xvfb-x11.png" alt="Three frames of Icy Tower in an X11 window: the start, floor 26, and a restarted game" width="100%" />
+</p>
+
+[examples/games/icy-tower/](examples/games/icy-tower/) is a small real-time
+game in the style of Icy Tower: about 1,300 lines of ordinary Botlish over
+the [generated SDL3 binding](docs/C-BINDGEN.md). It opens a window, reads the
+keyboard, bounces the player off platforms under gravity, generates the
+tower forever, scrolls the camera up, keeps the score, and restarts. It
+compiles to one native Linux x86-64 executable of under 1 MB, with no assets
+beside it.
+
+<p align="center">
+  <a href="https://github.com/mwagner-webdev/botlish/raw/main/audit/icy-tower/artifacts/icy-tower"><img src="./docs/assets/download-icy-tower.svg" alt="Download Icy Tower: a game written in Botlish, for Linux x86-64" width="460" /></a>
+</p>
+
+```sh
+curl -fLo icy-tower https://github.com/mwagner-webdev/botlish/raw/main/audit/icy-tower/artifacts/icy-tower
+chmod +x icy-tower
+./icy-tower      # Left/A and Right/D move, R restarts, Escape quits
+```
+
+It needs SDL 3 (`libSDL3.so.0`, from your distribution's SDL 3 package) and
+glibc 2.34 or newer. The game calls C, so the single-file compiler cannot
+link it yet; `examples/games/icy-tower/build.sh` builds it from a checkout.
+Its rules run headless on all four backends, the executable agrees with an
+independent oracle, and valgrind finds no leaks
+([ICY-TOWER-VERTICAL-SLICE-1.md](docs/ICY-TOWER-VERTICAL-SLICE-1.md)).
+
 ## Botlish and Rust
 
 Botlish shares some of Rust's goals: native code, errors in a function's
